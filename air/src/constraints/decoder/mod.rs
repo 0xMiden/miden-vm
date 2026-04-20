@@ -440,8 +440,8 @@ pub fn enforce_main<AB>(
         let groups_1 = not_bc0 * bc1 * bc2;
 
         // Combined flags for the cascading lane-zeroing constraints.
-        let groups_1_or_2 = groups_1.clone() + groups_2.clone();
-        let groups_1_or_2_or_4 = groups_1_or_2.clone() + groups_4.clone();
+        let groups_1_or_2 = groups_1.clone() + groups_2;
+        let groups_1_or_2_or_4 = groups_1_or_2.clone() + groups_4;
 
         let span_or_respan = op_flags.span() + op_flags.respan();
 

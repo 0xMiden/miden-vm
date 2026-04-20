@@ -413,10 +413,14 @@ fn test_trace_generation_at_fragment_boundaries(
     let aux_from_fragments = trace_from_fragments.build_aux_trace(&rand_elements).unwrap();
     let aux_from_single_fragment =
         trace_from_single_fragment.build_aux_trace(&rand_elements).unwrap();
-    let aux_from_fragments =
-        aux_from_fragments.columns().map(|col| col.to_vec()).collect::<Vec<_>>();
-    let aux_from_single_fragment =
-        aux_from_single_fragment.columns().map(|col| col.to_vec()).collect::<Vec<_>>();
+    let aux_from_fragments = aux_from_fragments
+        .columns()
+        .map(<[miden_core::Felt]>::to_vec)
+        .collect::<Vec<_>>();
+    let aux_from_single_fragment = aux_from_single_fragment
+        .columns()
+        .map(<[miden_core::Felt]>::to_vec)
+        .collect::<Vec<_>>();
     assert_eq!(aux_from_fragments, aux_from_single_fragment,);
 
     // Compare deterministic traces as a compact sanity check and to keep the snapshot stable.

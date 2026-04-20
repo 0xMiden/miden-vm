@@ -511,7 +511,7 @@ fn test_external_node_decorator_sequencing() {
 
     // Add a decorator to the lib forest to track execution inside the external node
     let lib_decorator = Decorator::Trace(2);
-    let lib_decorator_id = lib_forest.add_decorator(lib_decorator.clone()).unwrap();
+    let lib_decorator_id = lib_forest.add_decorator(lib_decorator).unwrap();
 
     let lib_operations = [Operation::Push(Felt::from_u32(1)), Operation::Add];
     // Attach the decorator to the first operation (index 0)
@@ -524,8 +524,8 @@ fn test_external_node_decorator_sequencing() {
     let mut main_forest = MastForest::new();
     let before_decorator = Decorator::Trace(1);
     let after_decorator = Decorator::Trace(3);
-    let before_id = main_forest.add_decorator(before_decorator.clone()).unwrap();
-    let after_id = main_forest.add_decorator(after_decorator.clone()).unwrap();
+    let before_id = main_forest.add_decorator(before_decorator).unwrap();
+    let after_id = main_forest.add_decorator(after_decorator).unwrap();
 
     let external_id = ExternalNodeBuilder::new(lib_forest[lib_block_id].digest())
         .with_before_enter([before_id])
@@ -542,7 +542,7 @@ fn test_external_node_decorator_sequencing() {
         .with_tracing(true);
 
     let result = processor.execute_sync(&program, &mut host);
-    assert!(result.is_ok(), "Execution failed: {:?}", result);
+    assert!(result.is_ok(), "Execution failed: {result:?}");
 
     // Verify all decorators executed
     assert_eq!(host.get_trace_count(1), 1, "before_enter decorator should execute exactly once");

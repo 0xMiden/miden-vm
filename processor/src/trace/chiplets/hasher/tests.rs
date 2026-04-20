@@ -287,7 +287,7 @@ fn hash_memoization_control_blocks() {
     // Compute the expected hash
     let state = super::init_state_from_words_with_domain(&h1, &h2, domain);
     let permuted = apply_permutation(state);
-    let expected_hash: Digest = super::get_digest(&permuted);
+    let expected_hash: Digest = get_digest(&permuted);
 
     let mut hasher = Hasher::default();
 

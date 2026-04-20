@@ -187,7 +187,7 @@ impl VisitMut for VerifyInvokeTargets<'_> {
                 Span::new(symbol.span(), PathBuf::from(symbol.clone()).into())
             },
         };
-        let current = self.current_procedure.as_ref().map(|p| p.as_ident());
+        let current = self.current_procedure.as_ref().map(ProcedureName::as_ident);
         if let Some(name) = path.as_ident() {
             let name = name.with_span(span);
             if current.is_some_and(|curr| curr == name) {

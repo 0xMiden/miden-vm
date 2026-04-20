@@ -343,7 +343,7 @@ impl DefaultSourceManagerImpl {
         self.files
             .push(file_clone)
             .expect("system limit: source manager has exhausted its supply of source ids");
-        self.uris.insert(uri.clone(), id);
+        self.uris.insert(uri, id);
         file
     }
 
@@ -474,7 +474,7 @@ mod error_assertions {
     use super::*;
 
     /// Asserts at compile time that the passed error has Send + Sync + 'static bounds.
-    fn _assert_error_is_send_sync_static<E: core::error::Error + Send + Sync + 'static>(_: E) {}
+    fn _assert_error_is_send_sync_static<E: Error + Send + Sync + 'static>(_: E) {}
 
     fn _assert_source_manager_error_bounds(err: SourceManagerError) {
         _assert_error_is_send_sync_static(err);

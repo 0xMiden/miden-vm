@@ -44,7 +44,7 @@ impl<'a, R: PackageRegistry + ?Sized> PackageResolver<'a, R> {
         Self {
             index,
             context: ResolverContext::Workspace {
-                members: SmallVec::from_iter(members.into_iter().map(|member| member.into())),
+                members: SmallVec::from_iter(members.into_iter().map(Into::into)),
                 root: root.into(),
                 root_version: version,
             },
@@ -302,7 +302,7 @@ mod tests {
     use crate::{VersionReq, VersionRequirement};
 
     fn any() -> VersionRequirement {
-        VersionRequirement::from(VersionReq::STAR.clone())
+        VersionRequirement::from(VersionReq::STAR)
     }
 
     fn req(value: &str) -> VersionRequirement {
@@ -673,7 +673,7 @@ mod tests {
 
         assert!(matches!(
             error,
-            crate::resolver::index::InMemoryPackageStoreError::DuplicateSemanticVersion {
+            index::InMemoryPackageStoreError::DuplicateSemanticVersion {
                 package,
                 version,
             } if package == dep_id && version == "1.0.0".parse().unwrap()

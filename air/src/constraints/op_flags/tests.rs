@@ -187,33 +187,21 @@ fn degree_7_op_flags() {
         // Check degree 7 flags: exactly one should be ONE
         for (i, &flag) in op_flags.degree7_op_flags.iter().enumerate() {
             if i == expected_idx {
-                assert_eq!(flag, ONE, "Degree 7 flag {} should be ONE for opcode {}", i, opcode);
+                assert_eq!(flag, ONE, "Degree 7 flag {i} should be ONE for opcode {opcode}");
             } else {
-                assert_eq!(flag, ZERO, "Degree 7 flag {} should be ZERO for opcode {}", i, opcode);
+                assert_eq!(flag, ZERO, "Degree 7 flag {i} should be ZERO for opcode {opcode}");
             }
         }
 
         // All other degree flags should be ZERO
         for (i, &flag) in op_flags.degree6_op_flags.iter().enumerate() {
-            assert_eq!(
-                flag, ZERO,
-                "Degree 6 flag {} should be ZERO for degree 7 opcode {}",
-                i, opcode
-            );
+            assert_eq!(flag, ZERO, "Degree 6 flag {i} should be ZERO for degree 7 opcode {opcode}");
         }
         for (i, &flag) in op_flags.degree5_op_flags.iter().enumerate() {
-            assert_eq!(
-                flag, ZERO,
-                "Degree 5 flag {} should be ZERO for degree 7 opcode {}",
-                i, opcode
-            );
+            assert_eq!(flag, ZERO, "Degree 5 flag {i} should be ZERO for degree 7 opcode {opcode}");
         }
         for (i, &flag) in op_flags.degree4_op_flags.iter().enumerate() {
-            assert_eq!(
-                flag, ZERO,
-                "Degree 4 flag {} should be ZERO for degree 7 opcode {}",
-                i, opcode
-            );
+            assert_eq!(flag, ZERO, "Degree 4 flag {i} should be ZERO for degree 7 opcode {opcode}");
         }
     }
 }
@@ -233,33 +221,21 @@ fn degree_6_op_flags() {
         // Check degree 6 flags
         for (i, &flag) in op_flags.degree6_op_flags.iter().enumerate() {
             if i == expected_idx {
-                assert_eq!(flag, ONE, "Degree 6 flag {} should be ONE for opcode {}", i, opcode);
+                assert_eq!(flag, ONE, "Degree 6 flag {i} should be ONE for opcode {opcode}");
             } else {
-                assert_eq!(flag, ZERO, "Degree 6 flag {} should be ZERO for opcode {}", i, opcode);
+                assert_eq!(flag, ZERO, "Degree 6 flag {i} should be ZERO for opcode {opcode}");
             }
         }
 
         // All other degree flags should be ZERO
         for (i, &flag) in op_flags.degree7_op_flags.iter().enumerate() {
-            assert_eq!(
-                flag, ZERO,
-                "Degree 7 flag {} should be ZERO for degree 6 opcode {}",
-                i, opcode
-            );
+            assert_eq!(flag, ZERO, "Degree 7 flag {i} should be ZERO for degree 6 opcode {opcode}");
         }
         for (i, &flag) in op_flags.degree5_op_flags.iter().enumerate() {
-            assert_eq!(
-                flag, ZERO,
-                "Degree 5 flag {} should be ZERO for degree 6 opcode {}",
-                i, opcode
-            );
+            assert_eq!(flag, ZERO, "Degree 5 flag {i} should be ZERO for degree 6 opcode {opcode}");
         }
         for (i, &flag) in op_flags.degree4_op_flags.iter().enumerate() {
-            assert_eq!(
-                flag, ZERO,
-                "Degree 4 flag {} should be ZERO for degree 6 opcode {}",
-                i, opcode
-            );
+            assert_eq!(flag, ZERO, "Degree 4 flag {i} should be ZERO for degree 6 opcode {opcode}");
         }
     }
 }
@@ -278,33 +254,21 @@ fn degree_5_op_flags() {
         // Check degree 5 flags
         for (i, &flag) in op_flags.degree5_op_flags.iter().enumerate() {
             if i == expected_idx {
-                assert_eq!(flag, ONE, "Degree 5 flag {} should be ONE for opcode {}", i, opcode);
+                assert_eq!(flag, ONE, "Degree 5 flag {i} should be ONE for opcode {opcode}");
             } else {
-                assert_eq!(flag, ZERO, "Degree 5 flag {} should be ZERO for opcode {}", i, opcode);
+                assert_eq!(flag, ZERO, "Degree 5 flag {i} should be ZERO for opcode {opcode}");
             }
         }
 
         // All other degree flags should be ZERO
         for (i, &flag) in op_flags.degree7_op_flags.iter().enumerate() {
-            assert_eq!(
-                flag, ZERO,
-                "Degree 7 flag {} should be ZERO for degree 5 opcode {}",
-                i, opcode
-            );
+            assert_eq!(flag, ZERO, "Degree 7 flag {i} should be ZERO for degree 5 opcode {opcode}");
         }
         for (i, &flag) in op_flags.degree6_op_flags.iter().enumerate() {
-            assert_eq!(
-                flag, ZERO,
-                "Degree 6 flag {} should be ZERO for degree 5 opcode {}",
-                i, opcode
-            );
+            assert_eq!(flag, ZERO, "Degree 6 flag {i} should be ZERO for degree 5 opcode {opcode}");
         }
         for (i, &flag) in op_flags.degree4_op_flags.iter().enumerate() {
-            assert_eq!(
-                flag, ZERO,
-                "Degree 4 flag {} should be ZERO for degree 5 opcode {}",
-                i, opcode
-            );
+            assert_eq!(flag, ZERO, "Degree 4 flag {i} should be ZERO for degree 5 opcode {opcode}");
         }
     }
 }
@@ -321,16 +285,16 @@ fn optimized_flags_match_naive() {
         let op_flags = op_flags_for_opcode(opcode);
 
         for (i, &flag) in op_flags.degree7_op_flags.iter().enumerate() {
-            assert_eq!(flag, deg7[i], "degree7 flag mismatch at index {}", i);
+            assert_eq!(flag, deg7[i], "degree7 flag mismatch at index {i}");
         }
         for (i, &flag) in op_flags.degree6_op_flags.iter().enumerate() {
-            assert_eq!(flag, deg6[i], "degree6 flag mismatch at index {}", i);
+            assert_eq!(flag, deg6[i], "degree6 flag mismatch at index {i}");
         }
         for (i, &flag) in op_flags.degree5_op_flags.iter().enumerate() {
-            assert_eq!(flag, deg5[i], "degree5 flag mismatch at index {}", i);
+            assert_eq!(flag, deg5[i], "degree5 flag mismatch at index {i}");
         }
         for (i, &flag) in op_flags.degree4_op_flags.iter().enumerate() {
-            assert_eq!(flag, deg4[i], "degree4 flag mismatch at index {}", i);
+            assert_eq!(flag, deg4[i], "degree4 flag mismatch at index {i}");
         }
 
         let (left_shift_flag, right_shift_flag, control_flow) =
@@ -357,33 +321,21 @@ fn degree_4_op_flags() {
         // Check degree 4 flags
         for (i, &flag) in op_flags.degree4_op_flags.iter().enumerate() {
             if i == expected_idx {
-                assert_eq!(flag, ONE, "Degree 4 flag {} should be ONE for opcode {}", i, opcode);
+                assert_eq!(flag, ONE, "Degree 4 flag {i} should be ONE for opcode {opcode}");
             } else {
-                assert_eq!(flag, ZERO, "Degree 4 flag {} should be ZERO for opcode {}", i, opcode);
+                assert_eq!(flag, ZERO, "Degree 4 flag {i} should be ZERO for opcode {opcode}");
             }
         }
 
         // All other degree flags should be ZERO
         for (i, &flag) in op_flags.degree7_op_flags.iter().enumerate() {
-            assert_eq!(
-                flag, ZERO,
-                "Degree 7 flag {} should be ZERO for degree 4 opcode {}",
-                i, opcode
-            );
+            assert_eq!(flag, ZERO, "Degree 7 flag {i} should be ZERO for degree 4 opcode {opcode}");
         }
         for (i, &flag) in op_flags.degree6_op_flags.iter().enumerate() {
-            assert_eq!(
-                flag, ZERO,
-                "Degree 6 flag {} should be ZERO for degree 4 opcode {}",
-                i, opcode
-            );
+            assert_eq!(flag, ZERO, "Degree 6 flag {i} should be ZERO for degree 4 opcode {opcode}");
         }
         for (i, &flag) in op_flags.degree5_op_flags.iter().enumerate() {
-            assert_eq!(
-                flag, ZERO,
-                "Degree 5 flag {} should be ZERO for degree 4 opcode {}",
-                i, opcode
-            );
+            assert_eq!(flag, ZERO, "Degree 5 flag {i} should be ZERO for degree 4 opcode {opcode}");
         }
     }
 }
@@ -406,9 +358,7 @@ fn composite_no_shift_flags() {
             assert_eq!(
                 op_flags.no_shift_at(i),
                 ONE,
-                "no_shift_at({}) should be ONE for opcode {:?}",
-                i,
-                opcode
+                "no_shift_at({i}) should be ONE for opcode {opcode:?}"
             );
         }
 
@@ -426,7 +376,7 @@ fn composite_incr_flags() {
     // Position 0 changes, positions 1-15 don't
     assert_eq!(op_flags.no_shift_at(0), ZERO);
     for i in 1..16 {
-        assert_eq!(op_flags.no_shift_at(i), ONE, "no_shift_at({}) should be ONE for INCR", i);
+        assert_eq!(op_flags.no_shift_at(i), ONE, "no_shift_at({i}) should be ONE for INCR");
     }
 
     assert_eq!(op_flags.right_shift(), ZERO);
@@ -441,7 +391,7 @@ fn composite_swap_flags() {
     assert_eq!(op_flags.no_shift_at(0), ZERO);
     assert_eq!(op_flags.no_shift_at(1), ZERO);
     for i in 2..16 {
-        assert_eq!(op_flags.no_shift_at(i), ONE, "no_shift_at({}) should be ONE for SWAP", i);
+        assert_eq!(op_flags.no_shift_at(i), ONE, "no_shift_at({i}) should be ONE for SWAP");
     }
 
     assert_eq!(op_flags.right_shift(), ZERO);
@@ -454,10 +404,10 @@ fn composite_hperm_flags() {
     let op_flags = op_flags_for_opcode(opcodes::HPERM.into());
 
     for i in 0..12 {
-        assert_eq!(op_flags.no_shift_at(i), ZERO, "no_shift_at({}) should be ZERO for HPERM", i);
+        assert_eq!(op_flags.no_shift_at(i), ZERO, "no_shift_at({i}) should be ZERO for HPERM");
     }
     for i in 12..16 {
-        assert_eq!(op_flags.no_shift_at(i), ONE, "no_shift_at({}) should be ONE for HPERM", i);
+        assert_eq!(op_flags.no_shift_at(i), ONE, "no_shift_at({i}) should be ONE for HPERM");
     }
 
     assert_eq!(op_flags.right_shift(), ZERO);
@@ -472,7 +422,7 @@ fn composite_loop_left_shift() {
     assert_eq!(op_flags.left_shift_at(0), ZERO);
     // LOOP shifts the stack left
     for i in 1..16 {
-        assert_eq!(op_flags.left_shift_at(i), ONE, "left_shift_at({}) should be ONE for LOOP", i);
+        assert_eq!(op_flags.left_shift_at(i), ONE, "left_shift_at({i}) should be ONE for LOOP");
     }
     for i in 0..16 {
         assert_eq!(op_flags.no_shift_at(i), ZERO);
@@ -492,7 +442,7 @@ fn composite_and_left_shift() {
     assert_eq!(op_flags.left_shift_at(0), ZERO);
     assert_eq!(op_flags.left_shift_at(1), ZERO);
     for i in 2..16 {
-        assert_eq!(op_flags.left_shift_at(i), ONE, "left_shift_at({}) should be ONE for AND", i);
+        assert_eq!(op_flags.left_shift_at(i), ONE, "left_shift_at({i}) should be ONE for AND");
     }
 
     assert_eq!(op_flags.left_shift(), ONE);
@@ -506,7 +456,7 @@ fn composite_dup1_right_shift() {
 
     // DUP1 shifts the entire stack right
     for i in 0..=15 {
-        assert_eq!(op_flags.right_shift_at(i), ONE, "right_shift_at({}) should be ONE for DUP1", i);
+        assert_eq!(op_flags.right_shift_at(i), ONE, "right_shift_at({i}) should be ONE for DUP1");
     }
     for i in 0..16 {
         assert_eq!(op_flags.no_shift_at(i), ZERO);
@@ -523,7 +473,7 @@ fn composite_push_right_shift() {
 
     // PUSH shifts the entire stack right
     for i in 0..=15 {
-        assert_eq!(op_flags.right_shift_at(i), ONE, "right_shift_at({}) should be ONE for PUSH", i);
+        assert_eq!(op_flags.right_shift_at(i), ONE, "right_shift_at({i}) should be ONE for PUSH");
     }
 
     assert_eq!(op_flags.right_shift(), ONE);
@@ -540,8 +490,7 @@ fn composite_end_flags() {
         assert_eq!(
             op_flags.no_shift_at(i),
             ONE,
-            "no_shift_at({}) should be ONE for END (no loop)",
-            i
+            "no_shift_at({i}) should be ONE for END (no loop)"
         );
     }
     assert_eq!(op_flags.left_shift(), ZERO);
@@ -557,16 +506,14 @@ fn composite_end_flags() {
         assert_eq!(
             op_flags_loop.no_shift_at(i),
             ZERO,
-            "no_shift_at({}) should be ZERO for END (with loop)",
-            i
+            "no_shift_at({i}) should be ZERO for END (with loop)"
         );
     }
     for i in 1..16 {
         assert_eq!(
             op_flags_loop.left_shift_at(i),
             ONE,
-            "left_shift_at({}) should be ONE for END (with loop)",
-            i
+            "left_shift_at({i}) should be ONE for END (with loop)"
         );
     }
     assert_eq!(op_flags_loop.left_shift(), ONE);
@@ -580,10 +527,10 @@ fn composite_swapw2_flags() {
 
     // Positions 4-7 and 12-15 should be no_shift (words that stay in place)
     for i in [0, 1, 2, 3, 8, 9, 10, 11] {
-        assert_eq!(op_flags.no_shift_at(i), ZERO, "no_shift_at({}) should be ZERO for SWAPW2", i);
+        assert_eq!(op_flags.no_shift_at(i), ZERO, "no_shift_at({i}) should be ZERO for SWAPW2");
     }
     for i in [4, 5, 6, 7, 12, 13, 14, 15] {
-        assert_eq!(op_flags.no_shift_at(i), ONE, "no_shift_at({}) should be ONE for SWAPW2", i);
+        assert_eq!(op_flags.no_shift_at(i), ONE, "no_shift_at({i}) should be ONE for SWAPW2");
     }
 
     assert_eq!(op_flags.right_shift(), ZERO);
@@ -625,7 +572,7 @@ fn control_flow_flag() {
 
     for op in non_cf_ops {
         let op_flags = op_flags_for_opcode(op.op_code().into());
-        assert_eq!(op_flags.control_flow(), ZERO, "control_flow should be ZERO for {:?}", op);
+        assert_eq!(op_flags.control_flow(), ZERO, "control_flow should be ZERO for {op:?}");
     }
 }
 
@@ -669,7 +616,7 @@ fn u32_rc_op_flag() {
 
     for op in u32_ops {
         let op_flags = op_flags_for_opcode(op.op_code().into());
-        assert_eq!(op_flags.u32_rc_op, ONE, "u32_rc_op should be ONE for {:?}", op);
+        assert_eq!(op_flags.u32_rc_op, ONE, "u32_rc_op should be ONE for {op:?}");
     }
 
     // Non-u32 operations
@@ -681,6 +628,6 @@ fn u32_rc_op_flag() {
 
     for op in non_u32_ops {
         let op_flags = op_flags_for_opcode(op.op_code().into());
-        assert_eq!(op_flags.u32_rc_op, ZERO, "u32_rc_op should be ZERO for {:?}", op);
+        assert_eq!(op_flags.u32_rc_op, ZERO, "u32_rc_op should be ZERO for {op:?}");
     }
 }

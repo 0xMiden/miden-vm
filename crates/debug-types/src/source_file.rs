@@ -54,7 +54,7 @@ impl miette::SourceCode for SourceFile {
         span: &miette::SourceSpan,
         context_lines_before: usize,
         context_lines_after: usize,
-    ) -> Result<alloc::boxed::Box<dyn miette::SpanContents<'a> + 'a>, miette::MietteError> {
+    ) -> Result<Box<dyn miette::SpanContents<'a> + 'a>, miette::MietteError> {
         let mut start =
             u32::try_from(span.offset()).map_err(|_| miette::MietteError::OutOfBounds)?;
         let len = u32::try_from(span.len()).map_err(|_| miette::MietteError::OutOfBounds)?;
@@ -62,7 +62,7 @@ impl miette::SourceCode for SourceFile {
         if context_lines_before > 0 {
             let line_index = self.content.line_index(start.into());
             let start_line_index = line_index.saturating_sub(context_lines_before as u32);
-            start = self.content.line_start(start_line_index).map(|idx| idx.to_u32()).unwrap_or(0);
+            start = self.content.line_start(start_line_index).map(ByteIndex::to_u32).unwrap_or(0);
         }
         if context_lines_after > 0 {
             let line_index = self.content.line_index(end.into());
@@ -382,7 +382,7 @@ impl miette::SourceCode for SourceFileRef {
         span: &miette::SourceSpan,
         context_lines_before: usize,
         context_lines_after: usize,
-    ) -> Result<alloc::boxed::Box<dyn miette::SpanContents<'a> + 'a>, miette::MietteError> {
+    ) -> Result<Box<dyn miette::SpanContents<'a> + 'a>, miette::MietteError> {
         self.file.read_span(span, context_lines_before, context_lines_after)
     }
 }

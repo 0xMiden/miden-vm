@@ -144,8 +144,6 @@ fn reference_source(setup: &str) -> String {
         drop drop drop drop
     end
     "#,
-        RANDOM_COIN_OUTPUT_LEN_PTR = RANDOM_COIN_OUTPUT_LEN_PTR,
-        RANDOM_COIN_INPUT_LEN_PTR = RANDOM_COIN_INPUT_LEN_PTR,
     )
 }
 

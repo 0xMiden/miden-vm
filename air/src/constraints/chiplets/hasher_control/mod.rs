@@ -361,7 +361,7 @@ pub fn enforce_controller_constraints<AB>(
     // Intermediate SOUT rows (non-boundary) are unconstrained here.
     builder
         .when(chiplet.is_active.clone())
-        .when(rows.is_sout.clone())
+        .when(rows.is_sout)
         .when(cols.is_boundary)
         .assert_zero(cols.direction_bit);
 }

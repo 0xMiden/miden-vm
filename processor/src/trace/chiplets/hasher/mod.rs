@@ -543,7 +543,7 @@ enum MerklePathContext {
 
 impl MerklePathContext {
     /// Returns selector values for this context.
-    pub fn main_selectors(&self) -> Selectors {
+    pub fn main_selectors(self) -> Selectors {
         match self {
             Self::MpVerify => MP_VERIFY,
             Self::MrUpdateOld => MR_UPDATE_OLD,

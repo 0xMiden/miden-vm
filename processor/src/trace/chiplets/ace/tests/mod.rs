@@ -12,7 +12,7 @@ use miden_air::trace::{
 };
 use miden_core::{
     Felt, WORD_SIZE, Word, ZERO,
-    field::{BasedVectorSpace, PrimeCharacteristicRing, QuadFelt},
+    field::{PrimeCharacteristicRing, QuadFelt},
 };
 
 use crate::{
@@ -255,7 +255,11 @@ fn generate_memory(circuit: &EncodedCircuit, inputs: &[QuadFelt]) -> Vec<Word> {
     // Inputs are store two by two in the fest set of words, followed by the instructions.
     let mut mem = Vec::with_capacity(2 * inputs.len() + circuit.encoded_circuit().len());
     // Add inputs
-    mem.extend(inputs.iter().flat_map(|input| input.as_basis_coefficients_slice()));
+    mem.extend(
+        inputs
+            .iter()
+            .flat_map(miden_core::field::BasedVectorSpace::as_basis_coefficients_slice),
+    );
     // Add circuit
     mem.extend(circuit.encoded_circuit().iter());
 

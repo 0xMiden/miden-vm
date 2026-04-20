@@ -225,8 +225,7 @@ impl EventHandler for EddsaSignatureHandler {
         };
         assert_eq!(
             provided_pk_commitment, pk_commitment,
-            "public key commitment mismatch: expected {:?}, got {:?}",
-            pk_commitment, provided_pk_commitment
+            "public key commitment mismatch: expected {pk_commitment:?}, got {provided_pk_commitment:?}"
         );
 
         // Message starts at position 5 (after event_id + pk_commitment)

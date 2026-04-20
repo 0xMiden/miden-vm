@@ -56,7 +56,7 @@ fn test_before_enter_decorator_executed_once_fast() {
 
     // Execute the program
     let result = processor.execute_sync(&program, &mut host);
-    assert!(result.is_ok(), "Execution failed: {:?}", result);
+    assert!(result.is_ok(), "Execution failed: {result:?}");
 
     // Verify decorator execution counts
     assert_eq!(host.get_trace_count(1), 1, "before_enter decorator should execute exactly once");
@@ -86,7 +86,7 @@ fn test_multiple_before_enter_decorators_each_once_fast() {
 
     // Execute the program
     let result = processor.execute_sync(&program, &mut host);
-    assert!(result.is_ok(), "Execution failed: {:?}", result);
+    assert!(result.is_ok(), "Execution failed: {result:?}");
 
     // Verify decorator execution counts
     assert_eq!(
@@ -132,7 +132,7 @@ fn test_multiple_after_exit_decorators_each_once_fast() {
 
     // Execute the program
     let result = processor.execute_sync(&program, &mut host);
-    assert!(result.is_ok(), "Execution failed: {:?}", result);
+    assert!(result.is_ok(), "Execution failed: {result:?}");
 
     // Verify decorator execution counts
     assert_eq!(host.get_trace_count(1), 1, "before_enter decorator should execute exactly once");
@@ -184,7 +184,7 @@ fn test_decorator_execution_order_fast() {
 
     // Execute the program
     let result = processor.execute_sync(&program, &mut host);
-    assert!(result.is_ok(), "Execution failed: {:?}", result);
+    assert!(result.is_ok(), "Execution failed: {result:?}");
 
     // Verify decorator execution counts
     assert_eq!(
@@ -233,7 +233,7 @@ fn test_processor_decorator_execution() {
         .with_tracing(true);
 
     let execution_result = processor.execute_sync(&program, &mut host);
-    assert!(execution_result.is_ok(), "Execution failed: {:?}", execution_result);
+    assert!(execution_result.is_ok(), "Execution failed: {execution_result:?}");
 
     // Check decorator execution
     insta::assert_debug_snapshot!(
@@ -277,7 +277,7 @@ fn test_no_duplication_between_inner_and_before_exit_decorators_fast() {
 
     // Execute the program
     let result = processor.execute_sync(&program, &mut host);
-    assert!(result.is_ok(), "Execution failed: {:?}", result);
+    assert!(result.is_ok(), "Execution failed: {result:?}");
 
     // Verify each decorator executes exactly once (no duplication)
     assert_eq!(host.get_trace_count(1), 1, "before_enter decorator should execute exactly once");

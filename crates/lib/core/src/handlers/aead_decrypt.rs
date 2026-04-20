@@ -95,8 +95,7 @@ pub fn handle_aead_decrypt(process: &ProcessorState) -> Result<Vec<AdviceMutatio
     let auth_tag = AuthTag::new(tag_elements);
 
     // Construct EncryptedData
-    let encrypted_data =
-        EncryptedData::from_parts(DataType::Elements, ciphertext, auth_tag, nonce.clone());
+    let encrypted_data = EncryptedData::from_parts(DataType::Elements, ciphertext, auth_tag, nonce);
 
     // Decrypt using the standard reference implementation
     // This performs tag verification internally

@@ -276,13 +276,12 @@ impl MastNodeExt for CallNode {
             let forest_node = &forest.nodes[id];
             let forest_node_ptr = match forest_node {
                 MastNode::Call(call_node) => call_node as *const CallNode as *const (),
-                _ => panic!("Node type mismatch at {:?}", id),
+                _ => panic!("Node type mismatch at {id:?}"),
             };
             let self_as_void = self_ptr as *const ();
             debug_assert_eq!(
                 self_as_void, forest_node_ptr,
-                "Node pointer mismatch: expected node at {:?} to be self",
-                id
+                "Node pointer mismatch: expected node at {id:?} to be self"
             );
         }
     }
@@ -453,10 +452,7 @@ impl MastForestContributor for CallNodeBuilder {
                     CallNode::CALL_DOMAIN
                 };
 
-                crate::chiplets::hasher::merge_in_domain(
-                    &[callee_digest, miden_crypto::Word::default()],
-                    domain,
-                )
+                hasher::merge_in_domain(&[callee_digest, Word::default()], domain)
             },
         )
     }
@@ -489,7 +485,7 @@ impl MastForestContributor for CallNodeBuilder {
         self.after_exit.extend(decorators);
     }
 
-    fn with_digest(mut self, digest: crate::Word) -> Self {
+    fn with_digest(mut self, digest: Word) -> Self {
         self.digest = Some(digest);
         self
     }

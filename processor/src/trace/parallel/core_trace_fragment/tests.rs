@@ -882,7 +882,7 @@ fn test_call_decoding() {
     let program_root_node = mast_forest[program_root_node_id].clone();
     mast_forest.make_root(program_root_node_id);
 
-    let program = Program::with_kernel(mast_forest.into(), program_root_node_id, kernel.clone());
+    let program = Program::with_kernel(mast_forest.into(), program_root_node_id, kernel);
 
     let (sys_trace, dec_trace, trace_len) =
         build_call_trace_helper(&program);
@@ -1183,7 +1183,7 @@ fn test_syscall_decoding() {
     let program_root_node = mast_forest[program_root_node_id].clone();
     mast_forest.make_root(program_root_node_id);
 
-    let program = Program::with_kernel(mast_forest.into(), program_root_node_id, kernel.clone());
+    let program = Program::with_kernel(mast_forest.into(), program_root_node_id, kernel);
 
     let (sys_trace, dec_trace, trace_len) =
         build_call_trace_helper(&program);
@@ -1696,7 +1696,7 @@ fn check_op_decoding(
         };
 
     for (i, flag_value) in OP_BATCH_FLAGS_RANGE.zip(expected_batch_flags) {
-        assert_eq!(trace[i][row_idx], flag_value, "op batch flag mismatch at column {}", i);
+        assert_eq!(trace[i][row_idx], flag_value, "op batch flag mismatch at column {i}");
     }
 
     // make sure the op bit extra columns for degree reduction are set correctly
@@ -1776,7 +1776,7 @@ fn build_op_batch_flags(num_groups: usize) -> [Felt; NUM_OP_BATCH_FLAGS] {
 
 use miden_air::trace::FN_HASH_RANGE;
 
-fn get_fn_hash(trace: &SystemTrace, row_idx: usize) -> miden_core::Word {
+fn get_fn_hash(trace: &SystemTrace, row_idx: usize) -> Word {
     let mut result = [ZERO; WORD_SIZE];
     // FN_HASH_RANGE is relative to the full trace, but SystemTrace only has system columns
     // System trace columns are indexed 0..SYS_TRACE_WIDTH, and FN_HASH is columns 2-5
@@ -1804,7 +1804,7 @@ fn get_hasher_state(trace: &DecoderTrace, row_idx: usize) -> [Felt; NUM_HASHER_C
     result
 }
 
-fn get_hasher_state1(trace: &DecoderTrace, row_idx: usize) -> miden_core::Word {
+fn get_hasher_state1(trace: &DecoderTrace, row_idx: usize) -> Word {
     let mut result = [ZERO; WORD_SIZE];
     for (result, column) in result.iter_mut().zip(trace[HASHER_STATE_RANGE].iter()) {
         *result = column[row_idx];
@@ -1812,7 +1812,7 @@ fn get_hasher_state1(trace: &DecoderTrace, row_idx: usize) -> miden_core::Word {
     result.into()
 }
 
-fn get_hasher_state2(trace: &DecoderTrace, row_idx: usize) -> miden_core::Word {
+fn get_hasher_state2(trace: &DecoderTrace, row_idx: usize) -> Word {
     let mut result = [ZERO; WORD_SIZE];
     for (result, column) in result.iter_mut().zip(trace[HASHER_STATE_RANGE].iter().skip(4)) {
         *result = column[row_idx];

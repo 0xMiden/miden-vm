@@ -812,8 +812,7 @@ impl Assembler {
         self.apply_debug_options(&mut mast_forest);
 
         let mast = Arc::new(mast_forest);
-        let entry: Arc<Path> =
-            ast::Path::exec_path().join(ast::ProcedureName::MAIN_PROC_NAME).into();
+        let entry: Arc<Path> = Path::exec_path().join(ast::ProcedureName::MAIN_PROC_NAME).into();
         let entrypoint = LibraryExport::Procedure(ProcedureExport {
             node: entrypoint,
             path: entry.clone(),
@@ -981,7 +980,7 @@ impl Assembler {
                         procedure_gid,
                         is_program_entrypoint,
                         path,
-                        ast::Visibility::Public,
+                        Visibility::Public,
                         None,
                         module_kind.is_kernel(),
                         self.source_manager.clone(),

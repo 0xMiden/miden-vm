@@ -432,7 +432,7 @@ impl Module {
     /// Returns true if this module has an entrypoint procedure defined,
     /// i.e. a `begin`..`end` block.
     pub fn has_entrypoint(&self) -> bool {
-        self.index_of(|p| p.is_main()).is_some()
+        self.index_of(Export::is_main).is_some()
     }
 
     /// Returns a reference to the advice map derived from this module
@@ -726,16 +726,16 @@ impl TypeResolver<SymbolResolutionError> for ModuleTypeResolver<'_> {
         &mut self,
         context: SourceSpan,
         _gid: GlobalItemIndex,
-    ) -> Result<ast::types::Type, SymbolResolutionError> {
+    ) -> Result<types::Type, SymbolResolutionError> {
         Err(SymbolResolutionError::undefined(context, &self.resolver.source_manager()))
     }
     fn get_local_type(
         &mut self,
         context: SourceSpan,
         id: ItemIndex,
-    ) -> Result<Option<ast::types::Type>, SymbolResolutionError> {
+    ) -> Result<Option<types::Type>, SymbolResolutionError> {
         match &self.module[id] {
-            super::Export::Type(ty) => match ty {
+            Export::Type(ty) => match ty {
                 TypeDecl::Alias(ty) => self.resolve(&ty.ty),
                 TypeDecl::Enum(ty) => Ok(Some(ty.ty().clone())),
             },

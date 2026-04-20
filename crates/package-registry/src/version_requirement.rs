@@ -123,10 +123,10 @@ impl<'de> Deserialize<'de> for VersionRequirement {
     {
         use core::str::FromStr;
 
-        let value = <alloc::string::String as Deserialize>::deserialize(deserializer)?;
+        let value = <String as Deserialize>::deserialize(deserializer)?;
 
         if value == "*" {
-            return Ok(Self::from(VersionReq::STAR.clone()));
+            return Ok(Self::from(VersionReq::STAR));
         }
 
         if let Some((version, digest)) = value.split_once('#') {
