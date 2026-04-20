@@ -39,7 +39,7 @@ fn assert_prove_verify(
 
     println!("Proof generated successfully!");
     if print_stack_outputs {
-        println!("Stack outputs: {:?}", stack_outputs);
+        println!("Stack outputs: {stack_outputs:?}");
     }
 
     if verify_recursively {
@@ -56,7 +56,7 @@ fn assert_prove_verify(
     let security_level =
         verify(program.into(), stack_inputs, stack_outputs, proof).expect("Verification failed");
 
-    println!("Verification successful! Security level: {}", security_level);
+    println!("Verification successful! Security level: {security_level}");
 }
 
 fn assert_recursive_verify(
@@ -281,7 +281,7 @@ mod recursive_verifier {
 
         let final_poly = &pcs.fri_transcript.final_poly;
         let remainder_base: Vec<Felt> = QuadFelt::flatten_to_base(final_poly.to_vec());
-        advice_stack.extend(remainder_base.iter().map(|felt| felt.as_canonical_u64()));
+        advice_stack.extend(remainder_base.iter().map(Felt::as_canonical_u64));
         advice_stack.push(pcs.query_pow_witness.as_canonical_u64());
 
         let (store, advice_map) = build_merkle_data(config, stark, log_trace_height);
@@ -413,7 +413,7 @@ mod recursive_verifier {
             .openings
             .values()
             .next()
-            .map(|opening| opening.rows.iter_rows().map(|row| row.len()).collect())
+            .map(|opening| opening.rows.iter_rows().map(<[F]>::len).collect())
             .unwrap_or_default()
     }
 
@@ -421,7 +421,7 @@ mod recursive_verifier {
         let mut result = Vec::with_capacity(kernel_digests.len() * 8);
         for digest in kernel_digests {
             let mut padded: Vec<u64> =
-                digest.as_elements().iter().map(|felt| felt.as_canonical_u64()).collect();
+                digest.as_elements().iter().map(Felt::as_canonical_u64).collect();
             padded.resize(8, 0);
             padded.reverse();
             result.extend_from_slice(&padded);
@@ -436,19 +436,19 @@ mod recursive_verifier {
         felts.extend_from_slice(pub_inputs.stack_outputs().as_ref());
         felts.extend_from_slice(pub_inputs.pc_transcript_state().as_ref());
 
-        let mut fixed_len: Vec<u64> = felts.iter().map(|felt| felt.as_canonical_u64()).collect();
+        let mut fixed_len: Vec<u64> = felts.iter().map(Felt::as_canonical_u64).collect();
         fixed_len.resize(fixed_len.len().next_multiple_of(8), 0);
         fixed_len
     }
 
     fn commitment_to_u64s<C: Copy + Into<[Felt; 4]>>(commitment: C) -> Vec<u64> {
         let felts: [Felt; 4] = commitment.into();
-        felts.iter().map(|felt| felt.as_canonical_u64()).collect()
+        felts.iter().map(Felt::as_canonical_u64).collect()
     }
 
     fn challenges_to_u64s(challenges: &[Challenge]) -> Vec<u64> {
         let base: Vec<Felt> = QuadFelt::flatten_to_base(challenges.to_vec());
-        base.iter().map(|felt| felt.as_canonical_u64()).collect()
+        base.iter().map(Felt::as_canonical_u64).collect()
     }
 }
 
@@ -528,7 +528,7 @@ mod fast_parallel {
         let advice_inputs = AdviceInputs::default();
         let mut host = default_source_manager_host();
         let trace_inputs =
-            execute_parallel_trace_inputs(&program, stack_inputs, advice_inputs.clone(), &mut host);
+            execute_parallel_trace_inputs(&program, stack_inputs, advice_inputs, &mut host);
 
         let fast_stack_outputs = *trace_inputs.stack_outputs();
 

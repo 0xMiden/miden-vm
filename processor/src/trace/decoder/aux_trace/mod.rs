@@ -28,7 +28,7 @@ impl AuxTraceBuilder {
     /// Builds and returns decoder auxiliary trace columns p1, p2, and p3 describing states of block
     /// stack, block hash, and op group tables respectively.
     pub fn build_aux_columns<E: ExtensionField<Felt>>(
-        &self,
+        self,
         main_trace: &MainTrace,
         challenges: &Challenges<E>,
     ) -> Vec<Vec<E>> {

@@ -396,7 +396,7 @@ impl ExecutionTrace {
             self.main_trace.read_row_into(i, &mut row);
             std::println!(
                 "{:?}",
-                row.iter().take(TRACE_WIDTH).map(|v| v.as_canonical_u64()).collect::<Vec<_>>()
+                row.iter().take(TRACE_WIDTH).map(Felt::as_canonical_u64).collect::<Vec<_>>()
             );
         }
     }

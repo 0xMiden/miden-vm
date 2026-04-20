@@ -220,13 +220,12 @@ impl MastNodeExt for SplitNode {
             let forest_node = &forest.nodes[id];
             let forest_node_ptr = match forest_node {
                 MastNode::Split(split_node) => split_node as *const SplitNode as *const (),
-                _ => panic!("Node type mismatch at {:?}", id),
+                _ => panic!("Node type mismatch at {id:?}"),
             };
             let self_as_void = self_ptr as *const ();
             debug_assert_eq!(
                 self_as_void, forest_node_ptr,
-                "Node pointer mismatch: expected node at {:?} to be self",
-                id
+                "Node pointer mismatch: expected node at {id:?} to be self"
             );
         }
     }
@@ -376,10 +375,7 @@ impl MastForestContributor for SplitNodeBuilder {
                 let if_branch_hash = forest[self.branches[0]].digest();
                 let else_branch_hash = forest[self.branches[1]].digest();
 
-                crate::chiplets::hasher::merge_in_domain(
-                    &[if_branch_hash, else_branch_hash],
-                    SplitNode::DOMAIN,
-                )
+                hasher::merge_in_domain(&[if_branch_hash, else_branch_hash], SplitNode::DOMAIN)
             },
         )
     }
@@ -414,7 +410,7 @@ impl MastForestContributor for SplitNodeBuilder {
         self.after_exit.extend(decorators);
     }
 
-    fn with_digest(mut self, digest: crate::Word) -> Self {
+    fn with_digest(mut self, digest: Word) -> Self {
         self.digest = Some(digest);
         self
     }

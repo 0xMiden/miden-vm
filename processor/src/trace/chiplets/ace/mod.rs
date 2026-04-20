@@ -33,7 +33,7 @@ pub struct Ace {
 impl Ace {
     /// Gets the total trace length of the ACE chiplet.
     pub(crate) fn trace_len(&self) -> usize {
-        self.circuit_evaluations.values().map(|eval_ctx| eval_ctx.num_rows()).sum()
+        self.circuit_evaluations.values().map(CircuitEvaluation::num_rows).sum()
     }
 
     /// Fills the portion of the main trace allocated to the ACE chiplet.

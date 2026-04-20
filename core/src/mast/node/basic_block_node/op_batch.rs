@@ -53,7 +53,7 @@ impl OpBatch {
     /// of operations in the batch may be larger than the number of operations reported by this
     /// method.
     pub fn raw_ops(&self) -> impl Iterator<Item = &Operation> {
-        debug_assert!(self.num_groups == 0 || self.indptr[self.num_groups] != 0, "{:?}", self);
+        debug_assert!(self.num_groups == 0 || self.indptr[self.num_groups] != 0, "{self:?}");
         (0..self.num_groups).flat_map(|group_idx| {
             let padded = self.padding[group_idx];
             let start_idx = self.indptr[group_idx];
@@ -131,7 +131,7 @@ impl OpBatch {
             let is_padded = *self
                 .padding
                 .get(group_idx)
-                .ok_or_else(|| format!("group {}: missing padding metadata", group_idx))?;
+                .ok_or_else(|| format!("group {group_idx}: missing padding metadata"))?;
             if !is_padded {
                 continue;
             }
@@ -139,27 +139,27 @@ impl OpBatch {
             let group_start = *self
                 .indptr
                 .get(group_idx)
-                .ok_or_else(|| format!("group {}: missing indptr start", group_idx))?;
+                .ok_or_else(|| format!("group {group_idx}: missing indptr start"))?;
             let group_end = *self
                 .indptr
                 .get(group_idx + 1)
-                .ok_or_else(|| format!("group {}: missing indptr end", group_idx))?;
+                .ok_or_else(|| format!("group {group_idx}: missing indptr end"))?;
 
             if group_start == group_end {
-                return Err(format!("group {}: empty group cannot be marked as padded", group_idx));
+                return Err(format!("group {group_idx}: empty group cannot be marked as padded"));
             }
             if group_start > group_end {
-                return Err(format!("group {}: invalid group bounds", group_idx));
+                return Err(format!("group {group_idx}: invalid group bounds"));
             }
 
             let last_op_idx = group_end - 1;
             let last_op = self
                 .ops
                 .get(last_op_idx)
-                .ok_or_else(|| format!("group {}: invalid group bounds", group_idx))?;
+                .ok_or_else(|| format!("group {group_idx}: invalid group bounds"))?;
 
             if *last_op != Operation::Noop {
-                return Err(format!("group {}: padded group must end with NOOP", group_idx));
+                return Err(format!("group {group_idx}: padded group must end with NOOP"));
             }
         }
 
@@ -336,14 +336,12 @@ pub(crate) fn collect_immediate_placements(
                 && next_group_idx >= num_groups
             {
                 return Err(format!(
-                    "push immediate index {} exceeds num_groups {}",
-                    next_group_idx, num_groups
+                    "push immediate index {next_group_idx} exceeds num_groups {num_groups}"
                 ));
             }
             if indptr[next_group_idx] != indptr[next_group_idx + 1] {
                 return Err(format!(
-                    "push immediate overlaps operation group at index {}",
-                    next_group_idx
+                    "push immediate overlaps operation group at index {next_group_idx}"
                 ));
             }
             placements.push((next_group_idx, imm));

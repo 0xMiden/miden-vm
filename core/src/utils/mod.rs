@@ -110,7 +110,7 @@ where
 /// Number of bytes packed into each u32 field element.
 ///
 /// Used for converting between byte arrays and u32-packed field elements in memory.
-const BYTES_PER_U32: usize = core::mem::size_of::<u32>();
+const BYTES_PER_U32: usize = size_of::<u32>();
 
 /// Converts bytes to field elements using u32 packing in little-endian format.
 ///

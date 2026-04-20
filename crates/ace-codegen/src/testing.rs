@@ -46,7 +46,7 @@ where
     if periodic_columns.is_empty() {
         return Vec::new();
     }
-    let max_len = periodic_columns.iter().map(|col| col.len()).max().unwrap_or(0);
+    let max_len = periodic_columns.iter().map(Vec::len).max().unwrap_or(0);
     let dft = Radix2DitParallel::<F>::default();
 
     periodic_columns

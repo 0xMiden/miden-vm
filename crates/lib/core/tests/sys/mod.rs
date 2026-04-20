@@ -153,7 +153,7 @@ fn log_precompile_request_procedure() {
     let mut host = DefaultHost::default();
     let core_lib = CoreLibrary::default();
     host.load_library(&core_lib).expect("failed to load core library into host");
-    host.register_handler(EVENT_NAME, Arc::new(handler.clone()))
+    host.register_handler(EVENT_NAME, Arc::new(handler))
         .expect("failed to register dummy handler");
 
     let options = ProvingOptions::with_96_bit_security(HashFunction::Blake3_256);

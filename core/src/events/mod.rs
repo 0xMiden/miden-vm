@@ -80,7 +80,7 @@ impl EventId {
 
 impl Display for EventId {
     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
-        core::fmt::Display::fmt(&self.0, f)
+        Display::fmt(&self.0, f)
     }
 }
 
@@ -206,7 +206,7 @@ impl proptest::prelude::Arbitrary for EventName {
             Just(EventName::new("user::custom::event")),
             // Dynamic strings (Cow::Owned)
             any::<(u32, u32)>()
-                .prop_map(|(a, b)| EventName::from_string(format!("dynamic::event::{}::{}", a, b))),
+                .prop_map(|(a, b)| EventName::from_string(format!("dynamic::event::{a}::{b}"))),
         ]
         .boxed()
     }
@@ -241,7 +241,7 @@ mod tests {
         // EventName constructors and conversions
         let name1 = EventName::new("static::event");
         assert_eq!(name1.as_str(), "static::event");
-        assert_eq!(format!("{}", name1), "static::event");
+        assert_eq!(format!("{name1}"), "static::event");
 
         let name2 = EventName::from_string("dynamic::event".to_string());
         assert_eq!(name2.as_str(), "dynamic::event");

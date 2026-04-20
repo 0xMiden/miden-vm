@@ -1095,8 +1095,7 @@ impl DecoratorId {
             Ok(Self(value))
         } else {
             Err(DeserializationError::InvalidValue(format!(
-                "Invalid deserialized MAST decorator id '{}', but allows only {} decorators",
-                value, bound,
+                "Invalid deserialized MAST decorator id '{value}', but allows only {bound} decorators",
             )))
         }
     }
@@ -1245,7 +1244,7 @@ pub enum MastForestError {
 // by delegating to the existing miden-crypto serialization which already handles
 // the conversion between linked and owned decorator formats.
 #[cfg(feature = "serde")]
-impl serde::Serialize for MastForest {
+impl Serialize for MastForest {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -1257,7 +1256,7 @@ impl serde::Serialize for MastForest {
 }
 
 #[cfg(feature = "serde")]
-impl<'de> serde::Deserialize<'de> for MastForest {
+impl<'de> Deserialize<'de> for MastForest {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,

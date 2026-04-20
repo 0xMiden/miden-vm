@@ -203,7 +203,7 @@ fn generate_method_impl_for_trait_method(
         "to_builder" => {
             generate_to_builder_method(enum_name, variant_names, variant_fields, builder_type)
         },
-        _ => panic!("Unknown method: {}", method_name),
+        _ => panic!("Unknown method: {method_name}"),
     }
 }
 

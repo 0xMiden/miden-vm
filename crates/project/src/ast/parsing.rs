@@ -36,9 +36,9 @@ mod maybe_inherit {
 
     use super::MaybeInherit;
 
-    impl<'de, T> serde::Deserialize<'de> for MaybeInherit<T>
+    impl<'de, T> Deserialize<'de> for MaybeInherit<T>
     where
-        T: serde::Deserialize<'de>,
+        T: Deserialize<'de>,
     {
         fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
         where

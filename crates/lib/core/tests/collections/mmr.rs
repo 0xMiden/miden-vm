@@ -475,7 +475,7 @@ fn test_mmr_pack_roundtrip() {
     ";
     let test = build_test!(source, &stack, advice_stack, store, advice_map.iter().cloned());
     // Expected stack after pack: [HASH, ...], then swapw dropw leaves [h0, h1, h2, h3]
-    let expected_stack: Vec<u64> = hash.iter().map(|e| e.as_canonical_u64()).collect();
+    let expected_stack: Vec<u64> = hash.iter().map(Felt::as_canonical_u64).collect();
 
     let mut expect_memory: Vec<u64> = Vec::new();
 
@@ -823,5 +823,5 @@ fn digests_to_ints(digests: &[Word]) -> Vec<u64> {
 
 fn word_to_ints(word: &Word) -> Vec<u64> {
     let arr: [Felt; WORD_SIZE] = (*word).into();
-    arr.iter().map(|v| v.as_canonical_u64()).collect()
+    arr.iter().map(Felt::as_canonical_u64).collect()
 }

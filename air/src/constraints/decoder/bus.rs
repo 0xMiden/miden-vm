@@ -277,7 +277,7 @@ pub fn enforce_block_stack_table_constraint<AB>(
     let v_join = msg_simple.clone() * is_join.clone();
     let v_split = msg_simple.clone() * is_split.clone();
     let v_span = msg_simple.clone() * is_span.clone();
-    let v_dyn = msg_simple.clone() * is_dyn.clone();
+    let v_dyn = msg_simple * is_dyn.clone();
 
     // LOOP: insert(addr', addr, s0, 0, 0, 0, 0, 0, 0, 0)
     let msg_loop = encoders.simple(&addr_next, &addr_local, &s0);
@@ -313,15 +313,15 @@ pub fn enforce_block_stack_table_constraint<AB>(
     let v_dyncall = msg_dyncall * is_dyncall.clone();
 
     // Sum of insertion flags
-    let insert_flag_sum = is_join.clone()
-        + is_split.clone()
-        + is_span.clone()
-        + is_dyn.clone()
-        + is_loop.clone()
+    let insert_flag_sum = is_join
+        + is_split
+        + is_span
+        + is_dyn
+        + is_loop
         + is_respan.clone()
-        + is_call.clone()
-        + is_syscall.clone()
-        + is_dyncall.clone();
+        + is_call
+        + is_syscall
+        + is_dyncall;
 
     // Total insertion contribution
     let insertion_sum =
@@ -364,7 +364,7 @@ pub fn enforce_block_stack_table_constraint<AB>(
     let u_end = u_end_simple + u_end_call;
 
     // Sum of removal flags
-    let remove_flag_sum = is_end.clone() + is_respan.clone();
+    let remove_flag_sum = is_end + is_respan;
 
     // Total removal contribution
     let removal_sum = u_end + u_respan;
@@ -525,10 +525,10 @@ pub fn enforce_block_hash_table_constraint<AB>(
     // SPLIT: Insert selected child based on s0
     // If s0=1: left child (h0-h3), else right child (h4-h7)
     let not_s0 = s0.not();
-    let split_h0 = s0.clone() * h0.clone() + not_s0.clone() * h4.clone();
-    let split_h1 = s0.clone() * h1.clone() + not_s0.clone() * h5.clone();
-    let split_h2 = s0.clone() * h2.clone() + not_s0.clone() * h6.clone();
-    let split_h3 = s0.clone() * h3.clone() + not_s0 * h7.clone();
+    let split_h0 = s0.clone() * h0.clone() + not_s0.clone() * h4;
+    let split_h1 = s0.clone() * h1.clone() + not_s0.clone() * h5;
+    let split_h2 = s0.clone() * h2.clone() + not_s0.clone() * h6;
+    let split_h3 = s0.clone() * h3.clone() + not_s0 * h7;
     let msg_split = encoder.encode(
         &parent_id,
         [&split_h0, &split_h1, &split_h2, &split_h3],
@@ -541,7 +541,7 @@ pub fn enforce_block_hash_table_constraint<AB>(
     let msg_loop =
         encoder.encode(&parent_id, [&h0, &h1, &h2, &h3], &AB::Expr::ZERO, &AB::Expr::ONE);
     // When s0=1: insert msg_loop; when s0=0: multiply by 1 (no insertion)
-    let v_loop = (msg_loop * s0.clone() + (AB::ExprEF::ONE - s0.clone())) * is_loop.clone();
+    let v_loop = (msg_loop * s0.clone() + (AB::ExprEF::ONE - s0)) * is_loop.clone();
 
     // REPEAT: Insert loop body
     let msg_repeat =
@@ -557,14 +557,8 @@ pub fn enforce_block_hash_table_constraint<AB>(
     let v_syscall = msg_call_like * is_syscall.clone();
 
     // Sum of insertion flags
-    let insert_flag_sum = is_join.clone()
-        + is_split.clone()
-        + is_loop.clone()
-        + is_repeat.clone()
-        + is_dyn.clone()
-        + is_dyncall.clone()
-        + is_call.clone()
-        + is_syscall.clone();
+    let insert_flag_sum =
+        is_join + is_split + is_loop + is_repeat + is_dyn + is_dyncall + is_call + is_syscall;
 
     // Response side
     let response = v_join
@@ -731,7 +725,7 @@ pub fn enforce_op_group_table_constraint<AB>(
     let f_g8 = c0.clone();
     let not_c0 = c0.not();
     let f_g4 = not_c0.clone() * c1.clone() * c2.not();
-    let f_g2 = not_c0 * c1.not() * c2.clone();
+    let f_g2 = not_c0 * c1.not() * c2;
 
     // =========================================================================
     // RESPONSE (insertions during SPAN/RESPAN)
@@ -757,7 +751,7 @@ pub fn enforce_op_group_table_constraint<AB>(
     // decoder constraints enforce (1 - f_span_respan) * (c0 + c1 + c2) = 0, so all batch
     // flags are zero outside SPAN/RESPAN rows. This keeps the max degree at 9 and matches
     // the sum-form bus expansion used in air-script.
-    let response = (v_1.clone() * f_g2.clone())
+    let response = (v_1 * f_g2.clone())
         + (prod_3 * f_g4.clone())
         + (prod_7 * f_g8.clone())
         + (AB::ExprEF::ONE - (f_g2 + f_g4 + f_g8));

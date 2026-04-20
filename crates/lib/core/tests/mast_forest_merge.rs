@@ -75,7 +75,7 @@ fn test_core_lib_serialization_roundtrip() {
     for (idx, (orig_node, deser_node)) in
         original_forest.nodes().iter().zip(deserialized_forest.nodes()).enumerate()
     {
-        assert_eq!(orig_node.digest(), deser_node.digest(), "Node {} digest mismatch", idx);
+        assert_eq!(orig_node.digest(), deser_node.digest(), "Node {idx} digest mismatch");
 
         // For basic blocks, verify OpBatch structure is preserved
         if let (MastNode::Block(orig_block), MastNode::Block(deser_block)) = (orig_node, deser_node)
@@ -83,8 +83,7 @@ fn test_core_lib_serialization_roundtrip() {
             assert_eq!(
                 orig_block.op_batches(),
                 deser_block.op_batches(),
-                "Node {} OpBatch structure mismatch",
-                idx
+                "Node {idx} OpBatch structure mismatch"
             );
         }
     }
