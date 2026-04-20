@@ -42,8 +42,8 @@ pub enum ExecutionError {
     #[error("exceeded the allowed number of max cycles {0}")]
     CycleLimitExceeded(u32),
     #[error("error during processing of event {}", match event_name {
-        Some(name) => format!("'{}' (ID: {})", name, event_id),
-        None => format!("with ID: {}", event_id),
+        Some(name) => format!("'{name}' (ID: {event_id})"),
+        None => format!("with ID: {event_id}"),
     })]
     #[diagnostic()]
     EventError {

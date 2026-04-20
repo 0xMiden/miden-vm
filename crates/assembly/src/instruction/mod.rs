@@ -594,16 +594,12 @@ impl Assembler {
             // ----- emit instruction -------------------------------------------------------------
             // emit: reads event ID from top of stack and execute the corresponding handler.
             Instruction::Emit => {
-                block_builder.push_ops([Operation::Emit]);
+                block_builder.push_ops([Emit]);
             },
             // emit.<id>: expands to `push.<id>, emit, drop` sequence leaving the stack unchanged.
             Instruction::EmitImm(event_id) => {
                 let event_id_value = event_id.expect_value();
-                block_builder.push_ops([
-                    Operation::Push(event_id_value),
-                    Operation::Emit,
-                    Operation::Drop,
-                ]);
+                block_builder.push_ops([Push(event_id_value), Emit, Drop]);
             },
 
             // ----- trace instruction ------------------------------------------------------------

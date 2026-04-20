@@ -698,7 +698,7 @@ fn ensure_div_doesnt_crash() {
                 }
             );
         },
-        Err(err) => panic!("Unexpected error type: {:?}", err),
+        Err(err) => panic!("Unexpected error type: {err:?}"),
     }
 
     // 2. dividend limbs not u32
@@ -720,7 +720,7 @@ fn ensure_div_doesnt_crash() {
                 }
             );
         },
-        Err(err) => panic!("Unexpected error type: {:?}", err),
+        Err(err) => panic!("Unexpected error type: {err:?}"),
     }
 }
 

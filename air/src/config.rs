@@ -330,8 +330,7 @@ mod tests {
             .chain(circuit_commitment.iter().copied())
             .collect();
         let digest = Poseidon2::hash_elements(&input);
-        let expected: Vec<u64> =
-            digest.as_elements().iter().map(|f| f.as_canonical_u64()).collect();
+        let expected: Vec<u64> = digest.as_elements().iter().map(Felt::as_canonical_u64).collect();
 
         let snapshot = format!(
             "num_inputs: {}\nnum_eval_gates: {}\nrelation_digest: {:?}",
@@ -341,8 +340,7 @@ mod tests {
         );
         insta::assert_snapshot!(snapshot);
 
-        let actual: Vec<u64> =
-            super::RELATION_DIGEST.iter().map(|f| f.as_canonical_u64()).collect();
+        let actual: Vec<u64> = super::RELATION_DIGEST.iter().map(Felt::as_canonical_u64).collect();
         assert_eq!(
             actual, expected,
             "RELATION_DIGEST in config.rs is stale. Regenerate with: {REGEN_HINT}"

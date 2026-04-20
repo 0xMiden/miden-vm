@@ -106,10 +106,10 @@ pub fn enforce_hash_kernel_constraint<AB>(
     // f_mu = s0 * s1 * s2
     let f_mu: AB::Expr = controller_flag.clone() * ctrl.f_mu();
     // f_mv = s0 * s1 * !s2
-    let f_mv: AB::Expr = controller_flag.clone() * ctrl.f_mv();
+    let f_mv: AB::Expr = controller_flag * ctrl.f_mv();
 
     // Direction bit b = input_node_index - 2 * output_node_index (next row is the paired output).
-    let b: AB::Expr = node_index.clone() - node_index_next.clone().double();
+    let b: AB::Expr = node_index.clone() - node_index_next.double();
     let is_b_zero = one.clone() - b.clone();
     let is_b_one = b;
 
@@ -156,7 +156,7 @@ pub fn enforce_hash_kernel_constraint<AB>(
 
         let offset1: AB::Expr = AB::Expr::from(ACE_INSTRUCTION_ID1_OFFSET);
         let offset2: AB::Expr = AB::Expr::from(ACE_INSTRUCTION_ID2_OFFSET);
-        let element = id_1 + id_2 * offset1 + (eval_op + one.clone()) * offset2;
+        let element = id_1 + id_2 * offset1 + (eval_op + one) * offset2;
         let label: AB::Expr = AB::Expr::from(Felt::from_u8(MEMORY_READ_ELEMENT_LABEL));
 
         challenges.encode(bus_types::CHIPLETS_BUS, [label, ace_ctx, ace_ptr, ace_clk, element])

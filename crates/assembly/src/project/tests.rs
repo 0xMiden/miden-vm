@@ -1436,7 +1436,7 @@ end
     context.assemble_library_package(&root_manifest, None).expect(
         "source dependency should rebuild from source when the canonical artifact is unreadable",
     );
-    assert_eq!(context.registry().loaded_packages(), vec![format!("dep@{}", dep_version)]);
+    assert_eq!(context.registry().loaded_packages(), vec![format!("dep@{dep_version}")]);
 }
 
 #[test]
@@ -2031,7 +2031,7 @@ fn preassembled_libraries_fall_back_to_embedded_kernel_when_store_artifact_is_un
     assert_eq!(embedded_kernel_package.digest(), kernel_package.digest());
     assert_eq!(
         context.registry().loaded_packages(),
-        vec![format!("kernelpkg@{}", kernel_version)]
+        vec![format!("kernelpkg@{kernel_version}")]
     );
 
     let round_tripped_program = MastPackage::read_from_bytes(&package.to_bytes())

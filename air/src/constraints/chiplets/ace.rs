@@ -92,7 +92,7 @@ pub fn enforce_ace_constraints_all_rows<AB>(
     // ==========================================================================
     {
         // Last row of ACE chiplet cannot be section start
-        builder.when(ace_last.clone()).assert_zero(s_start);
+        builder.when(ace_last).assert_zero(s_start);
 
         // Prevent consecutive section starts within ACE chiplet
         builder.when(ace_transition.clone()).when(s_start).assert_zero(s_start_next);
@@ -146,7 +146,7 @@ pub fn enforce_ace_constraints_all_rows<AB>(
     // Enforce: f_read * (f_read' * n_eval' + f_eval' * id0' - n_eval) = 0
     let selected: AB::Expr = f_read_next * next.read().num_eval + f_eval_next * next.id_0;
     builder
-        .when(ace_transition.clone())
+        .when(ace_transition)
         .when(f_read.clone())
         .assert_eq(selected, local.read().num_eval);
 
@@ -156,7 +156,7 @@ pub fn enforce_ace_constraints_all_rows<AB>(
 
     // EVAL block: op ternary validity and arithmetic operation result.
     {
-        let builder = &mut builder.when(ace_flag.clone() * f_eval);
+        let builder = &mut builder.when(ace_flag * f_eval);
         let op: AB::Expr = local.eval_op.into();
 
         let op_square = op.square();

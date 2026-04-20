@@ -37,11 +37,9 @@ impl Pattern {
         if !self.is_match(input) {
             panic!(
                 r"expected string was not found in emitted diagnostics:
-expected input to {expected}
-matched against: `{actual}`
-",
-                expected = self,
-                actual = input
+expected input to {self}
+matched against: `{input}`
+"
             );
         }
     }
@@ -55,12 +53,10 @@ matched against: `{actual}`
         if !self.is_match(input) {
             panic!(
                 r"expected string was not found in emitted diagnostics:
-expected input to {expected}
-matched against: `{actual}`
+expected input to {self}
+matched against: `{input}`
 full output: `{context}`
-",
-                expected = self,
-                actual = input
+"
             );
         }
     }

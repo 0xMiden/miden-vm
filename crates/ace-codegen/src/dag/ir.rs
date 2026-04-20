@@ -97,7 +97,7 @@ impl<EF> PeriodicColumnData<EF> {
 
     /// Maximum periodic column length (used to align powers).
     pub fn max_period(&self) -> usize {
-        self.coeffs.iter().map(|c| c.len()).max().unwrap_or(0)
+        self.coeffs.iter().map(Vec::len).max().unwrap_or(0)
     }
 
     /// Iterate over the per-column coefficient vectors.

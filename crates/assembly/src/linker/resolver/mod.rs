@@ -36,7 +36,7 @@ pub struct Resolver<'a, 'b: 'a> {
 /// avoid recomputing the same information over and over again.
 #[derive(Default)]
 pub struct ResolverCache {
-    pub types: BTreeMap<GlobalItemIndex, ast::types::Type>,
+    pub types: BTreeMap<GlobalItemIndex, types::Type>,
     pub constants: BTreeMap<GlobalItemIndex, ast::ConstantValue>,
     pub evaluating_constants: BTreeMap<GlobalItemIndex, SourceSpan>,
 }

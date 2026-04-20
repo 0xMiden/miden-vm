@@ -95,9 +95,8 @@ impl ConstantExpr {
     /// value, otherwise a bug occurred.
     #[track_caller]
     pub fn expect_value(&self) -> ConstantValue {
-        self.as_value().unwrap_or_else(|| {
-            panic!("expected constant expression to be a value, got {:#?}", self)
-        })
+        self.as_value()
+            .unwrap_or_else(|| panic!("expected constant expression to be a value, got {self:#?}"))
     }
 
     /// Try to convert this expression into a [ConstantValue], if the expression is a value.
@@ -417,7 +416,7 @@ pub enum ConstantOp {
 }
 
 impl ConstantOp {
-    const fn name(&self) -> &'static str {
+    const fn name(self) -> &'static str {
         match self {
             Self::Add => "Add",
             Self::Sub => "Sub",

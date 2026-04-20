@@ -260,13 +260,12 @@ impl MastNodeExt for JoinNode {
             let forest_node = &forest.nodes[id];
             let forest_node_ptr = match forest_node {
                 MastNode::Join(join_node) => join_node as *const JoinNode as *const (),
-                _ => panic!("Node type mismatch at {:?}", id),
+                _ => panic!("Node type mismatch at {id:?}"),
             };
             let self_as_void = self_ptr as *const ();
             debug_assert_eq!(
                 self_as_void, forest_node_ptr,
-                "Node pointer mismatch: expected node at {:?} to be self",
-                id
+                "Node pointer mismatch: expected node at {id:?} to be self"
             );
         }
     }
@@ -416,10 +415,7 @@ impl MastForestContributor for JoinNodeBuilder {
                 let left_child_hash = forest[self.children[0]].digest();
                 let right_child_hash = forest[self.children[1]].digest();
 
-                crate::chiplets::hasher::merge_in_domain(
-                    &[left_child_hash, right_child_hash],
-                    JoinNode::DOMAIN,
-                )
+                hasher::merge_in_domain(&[left_child_hash, right_child_hash], JoinNode::DOMAIN)
             },
         )
     }
@@ -454,7 +450,7 @@ impl MastForestContributor for JoinNodeBuilder {
         self.after_exit.extend(decorators);
     }
 
-    fn with_digest(mut self, digest: crate::Word) -> Self {
+    fn with_digest(mut self, digest: Word) -> Self {
         self.digest = Some(digest);
         self
     }
