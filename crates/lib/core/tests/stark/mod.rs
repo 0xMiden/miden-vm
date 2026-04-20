@@ -308,8 +308,8 @@ fn reduce_kernel_procedures_digests(
     alpha: QuadFelt,
     beta: QuadFelt,
 ) -> QuadFelt {
-    // LogUp kernel ROM boundary correction: kernel_corr = -Σ_i 1 / term_i
-    -kernel_procedures_digests
+    // kernel_corr = Σ_i 1 / term_i  (MASM: chiplet removes, boundary adds — no negation).
+    kernel_procedures_digests
         .chunks(2 * WORD_SIZE)
         .map(|digest| reduce_digest(digest, alpha, beta))
         .fold(QuadFelt::ZERO, |acc, term| {
@@ -318,17 +318,15 @@ fn reduce_kernel_procedures_digests(
 }
 
 fn reduce_digest(digest: &[u64], alpha: QuadFelt, beta: QuadFelt) -> QuadFelt {
-    const KERNEL_OP_LABEL: Felt = Felt::new(48);
     // gamma = beta^MAX_MESSAGE_WIDTH = beta^16
     let gamma = (0..16).fold(QuadFelt::ONE, |acc, _| acc * beta);
-    // CHIPLETS_BUS = 0, so bus_prefix = alpha + (0+1) * gamma = alpha + gamma
+    // KERNEL_ROM_INIT = 0, so bus_prefix = alpha + (0+1) * gamma = alpha + gamma
     let bus_prefix = alpha + gamma;
+    // Horner evaluation matches MASM `horner_eval_base` over the 8-element reversed digest.
     bus_prefix
-        + QuadFelt::from(KERNEL_OP_LABEL)
-        + beta
-            * digest
-                .iter()
-                .fold(QuadFelt::ZERO, |acc, coef| acc * beta + QuadFelt::from(Felt::new(*coef)))
+        + digest
+            .iter()
+            .fold(QuadFelt::ZERO, |acc, coef| acc * beta + QuadFelt::from(Felt::new(*coef)))
 }
 
 // CONSTANTS

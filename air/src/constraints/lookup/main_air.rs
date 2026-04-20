@@ -23,7 +23,7 @@ use core::borrow::Borrow;
 use miden_crypto::stark::air::WindowAccess;
 
 use super::{
-    bus_id::NUM_BUS_IDS,
+    BusId,
     buses::{
         block_hash_and_op_group::{self as block_hash_and_op_group, emit_block_hash_and_op_group},
         block_stack_and_range_logcap::{self, emit_block_stack_and_range_logcap},
@@ -152,8 +152,8 @@ where
         // Main-trace emitters touch BUS_BLOCK_STACK_TABLE, BUS_BLOCK_HASH_TABLE,
         // BUS_OP_GROUP_TABLE, BUS_RANGE_CHECK, BUS_LOG_PRECOMPILE_TRANSCRIPT, and BUS_CHIPLETS.
         // The adapter's bus-prefix table is shared across every LookupAir it runs, so returning
-        // `NUM_BUS_IDS` (the total bus-type count) is the safe upper bound.
-        NUM_BUS_IDS
+        // `BusId::COUNT` (the total bus-type count) is the safe upper bound.
+        BusId::COUNT
     }
 
     fn eval(&self, builder: &mut LB) {

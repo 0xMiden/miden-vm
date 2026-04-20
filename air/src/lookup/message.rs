@@ -14,13 +14,11 @@
 //! ```
 //!
 //! where `bus_prefix[i] = α + (i + 1) · β^W` is precomputed at builder construction time
-//! and `W = MAX_MESSAGE_WIDTH`. Messages on the shared chiplet bus place their operation
-//! label at `β⁰` of the payload; messages on a dedicated bus (range check, ACE wiring, …)
-//! whose prefix already identifies them start the payload at `β⁰` directly.
+//! and `W = MAX_MESSAGE_WIDTH`. Interaction-specific bus prefixes provide domain separation;
+//! payloads then begin directly at `β⁰`.
 //!
-//! The bus identifier is a coarse 9-entry enumeration defined in
-//! [`crate::trace::bus_types`]. The compatibility shim [`super::bus_id`] re-exports the
-//! same constants under the legacy `BUS_*` names.
+//! The bus identifier is the [`crate::constraints::logup_msg::BusId`] enum — each variant
+//! maps to a distinct `bus_prefix[bus as usize]` additive base.
 
 use miden_core::field::{Algebra, PrimeCharacteristicRing};
 
@@ -37,10 +35,9 @@ use crate::lookup::Challenges;
 /// (`AB::ExprEF` / `EF` respectively). The [`Algebra<E>`] bound on `EF` lets each message
 /// multiply a base-field payload by an `EF`-typed β-power without manually lifting.
 ///
-/// Implementors look up their bus identifier (a `BUS_*` constant or a `bus_types` constant
-/// from the lookup module's `bus_id` submodule), start the accumulator from
-/// `challenges.bus_prefix[bus_id]`, and fold each payload value against
-/// `challenges.beta_powers[k]` with straight-line arithmetic.
+/// Implementors look up their [`BusId`](crate::constraints::logup_msg::BusId), start the
+/// accumulator from `challenges.bus_prefix[bus as usize]`, and fold each payload value
+/// against `challenges.beta_powers[k]` with straight-line arithmetic.
 pub trait LookupMessage<E, EF>: core::fmt::Debug
 where
     E: PrimeCharacteristicRing + Clone,

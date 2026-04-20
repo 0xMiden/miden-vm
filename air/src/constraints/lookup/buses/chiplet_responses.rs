@@ -20,27 +20,14 @@ use miden_core::field::PrimeCharacteristicRing;
 use crate::{
     constraints::{
         chiplets::columns::PeriodicCols,
-        logup_msg::{AceInitMsg, BitwiseResponseMsg, HasherMsg, KernelRomMsg, MemoryResponseMsg},
+        logup_msg::{
+            AceInitMsg, BitwiseResponseMsg, BusId, HasherMsg, KernelRomMsg, MemoryResponseMsg,
+        },
         lookup::chiplet_air::{ChipletBusContext, ChipletLookupBuilder},
         utils::BoolNot,
     },
-    lookup::{Deg, LookupColumn, LookupGroup},
-    trace::chiplets::{
-        bitwise::{BITWISE_AND_LABEL, BITWISE_XOR_LABEL},
-        hasher::{
-            LINEAR_HASH_LABEL, MP_VERIFY_LABEL, MR_UPDATE_NEW_LABEL, MR_UPDATE_OLD_LABEL,
-            RETURN_HASH_LABEL, RETURN_STATE_LABEL,
-        },
-        memory::{
-            MEMORY_READ_ELEMENT_LABEL, MEMORY_READ_WORD_LABEL, MEMORY_WRITE_ELEMENT_LABEL,
-            MEMORY_WRITE_WORD_LABEL,
-        },
-    },
+    lookup::{Deg, LookupBatch, LookupColumn, LookupGroup},
 };
-
-// Label offsets matching 2856's running product.
-const INPUT_LABEL_OFFSET: u16 = 16;
-const OUTPUT_LABEL_OFFSET: u16 = 32;
 
 /// Upper bound on fractions this emitter pushes into its column per row.
 ///
@@ -161,7 +148,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
                                 }
                             });
                             HasherMsg::State {
-                                label_value: LINEAR_HASH_LABEL as u16 + INPUT_LABEL_OFFSET,
+                                kind: BusId::HasherLinearHashInit,
                                 addr,
                                 node_index: LB::Expr::ZERO,
                                 state,
@@ -180,7 +167,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
                                 if i < 4 { rate_0[i].into() } else { rate_1[i - 4].into() }
                             });
                             HasherMsg::Rate {
-                                label_value: LINEAR_HASH_LABEL as u16 + OUTPUT_LABEL_OFFSET,
+                                kind: BusId::HasherAbsorption,
                                 addr,
                                 node_index: LB::Expr::ZERO,
                                 rate,
@@ -205,7 +192,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
                                     + bit.clone() * rate_1[i].into()
                             });
                             HasherMsg::Word {
-                                label_value: MP_VERIFY_LABEL as u16 + INPUT_LABEL_OFFSET,
+                                kind: BusId::HasherMerkleVerifyInit,
                                 addr,
                                 node_index,
                                 word,
@@ -229,7 +216,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
                                     + bit.clone() * rate_1[i].into()
                             });
                             HasherMsg::Word {
-                                label_value: MR_UPDATE_OLD_LABEL as u16 + INPUT_LABEL_OFFSET,
+                                kind: BusId::HasherMerkleOldInit,
                                 addr,
                                 node_index,
                                 word,
@@ -253,7 +240,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
                                     + bit.clone() * rate_1[i].into()
                             });
                             HasherMsg::Word {
-                                label_value: MR_UPDATE_NEW_LABEL as u16 + INPUT_LABEL_OFFSET,
+                                kind: BusId::HasherMerkleNewInit,
                                 addr,
                                 node_index,
                                 word,
@@ -271,7 +258,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
                             let node_index: LB::Expr = ctrl.node_index.into();
                             let word: [LB::Expr; 4] = rate_0.map(LB::Expr::from);
                             HasherMsg::Word {
-                                label_value: RETURN_HASH_LABEL as u16 + OUTPUT_LABEL_OFFSET,
+                                kind: BusId::HasherReturnHash,
                                 addr,
                                 node_index,
                                 word,
@@ -296,7 +283,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
                                 }
                             });
                             HasherMsg::State {
-                                label_value: RETURN_STATE_LABEL as u16 + OUTPUT_LABEL_OFFSET,
+                                kind: BusId::HasherReturnState,
                                 addr,
                                 node_index: LB::Expr::ZERO,
                                 state,
@@ -305,16 +292,14 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
                         Deg::NONE,
                     );
 
-                    // Bitwise: runtime-muxed label `(1-op)·AND + op·XOR`.
+                    // Bitwise: runtime op selector bit.
                     g.add(
                         "bitwise",
                         is_bitwise_responding,
                         || {
                             let bw_op: LB::Expr = bw.op_flag.into();
-                            let label = bw_op.not() * LB::Expr::from(BITWISE_AND_LABEL)
-                                + bw_op * LB::Expr::from(BITWISE_XOR_LABEL);
                             BitwiseResponseMsg {
-                                label,
+                                op: bw_op,
                                 a: bw.a.into(),
                                 b: bw.b.into(),
                                 z: bw.output.into(),
@@ -323,7 +308,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
                         Deg::NONE,
                     );
 
-                    // Memory: runtime-muxed label + is_word mux keeps C1 transition at 8.
+                    // Memory response: runtime (is_read, is_word) mux keeps C1 transition at 8.
                     g.add(
                         "memory",
                         ctx.chiplet_active.memory.clone(),
@@ -332,19 +317,6 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
                             let is_word: LB::Expr = mem.is_word.into();
                             let mem_idx0: LB::Expr = mem.idx0.into();
                             let mem_idx1: LB::Expr = mem.idx1.into();
-
-                            // Runtime label: `(1-is_read)*write_label + is_read*read_label`, each
-                            // itself `(1-is_word)*_ELEMENT +
-                            // is_word*_WORD`.
-                            let write_label = is_word.not()
-                                * LB::Expr::from_u16(MEMORY_WRITE_ELEMENT_LABEL as u16)
-                                + is_word.clone()
-                                    * LB::Expr::from_u16(MEMORY_WRITE_WORD_LABEL as u16);
-                            let read_label = is_word.not()
-                                * LB::Expr::from_u16(MEMORY_READ_ELEMENT_LABEL as u16)
-                                + is_word.clone()
-                                    * LB::Expr::from_u16(MEMORY_READ_WORD_LABEL as u16);
-                            let label = mem_is_read.not() * write_label + mem_is_read * read_label;
 
                             let addr = mem.word_addr.into()
                                 + mem_idx1.clone() * LB::Expr::from_u16(2)
@@ -357,7 +329,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
                                 + word[3].clone() * mem_idx0 * mem_idx1;
 
                             MemoryResponseMsg {
-                                label,
+                                is_read: mem_is_read,
                                 ctx: mem.ctx.into(),
                                 addr,
                                 clk: mem.clk.into(),
@@ -387,28 +359,28 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
                         Deg::NONE,
                     );
 
-                    // Kernel ROM: one row per declared procedure, two fractions per active row.
-                    // INIT-labeled remove (multiplicity 1) is balanced by the boundary correction
-                    // which adds once per declared procedure. CALL-labeled add carries the syscall
-                    // multiplicity from column 0.
+                    // Kernel ROM: two fractions per active row.
+                    // INIT remove (multiplicity 1) is balanced by the boundary correction.
+                    // CALL add carries the syscall multiplicity.
                     let kernel_gate = ctx.chiplet_active.kernel_rom.clone();
-                    let krom_mult: LB::Expr = krom.multiplicity.into();
-                    g.remove(
-                        "kernel_rom_init",
+                    g.batch(
+                        "kernel_rom",
                         kernel_gate.clone(),
-                        || {
+                        |b| {
+                            let krom_mult: LB::Expr = krom.multiplicity.into();
                             let digest: [LB::Expr; 4] = krom.root.map(LB::Expr::from);
-                            KernelRomMsg::init(digest)
-                        },
-                        Deg::NONE,
-                    );
-                    g.insert(
-                        "kernel_rom_call",
-                        kernel_gate,
-                        krom_mult,
-                        || {
-                            let digest: [LB::Expr; 4] = krom.root.map(LB::Expr::from);
-                            KernelRomMsg::call(digest)
+
+                            b.remove(
+                                "kernel_rom_init",
+                                KernelRomMsg::init(digest.clone()),
+                                Deg::NONE,
+                            );
+                            b.insert(
+                                "kernel_rom_call",
+                                krom_mult,
+                                KernelRomMsg::call(digest),
+                                Deg::NONE,
+                            );
                         },
                         Deg::NONE,
                     );
