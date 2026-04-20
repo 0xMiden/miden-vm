@@ -30,7 +30,7 @@ pub const MIDEN_MAX_MESSAGE_WIDTH: usize = 16;
 ///
 /// Each variant identifies a distinct bus interaction type. When encoding a message,
 /// the bus is cast to `usize` and indexes into
-/// [`Challenges::bus_prefix`](crate::trace::Challenges) to obtain the additive base
+/// [`Challenges::bus_prefix`](crate::lookup::Challenges) to obtain the additive base
 /// `bus_prefix[bus] = alpha + (bus + 1) * gamma`.
 #[repr(usize)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]

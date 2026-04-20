@@ -6,7 +6,7 @@
 //! - [`LookupBuilder`] — the top-level handle mirroring the subset of `LiftedAirBuilder` a lookup
 //!   author actually needs (trace access plus per-column scoping). It hides `assert_*` / `when_*` /
 //!   permutation plumbing and does not expose the verifier challenges.
-//! - [`LookupColumn`] — per-column handle returned by [`LookupBuilder::column`]. It owns the
+//! - [`LookupColumn`] — per-column handle returned by [`LookupBuilder::next_column`]. It owns the
 //!   boundary between groups; its only job is to open a group (either the simple path or the
 //!   cached-encoding dual path).
 //! - [`LookupGroup`] — the simple, challenge-free interaction API used by bus authors. Every method
@@ -61,9 +61,9 @@ pub struct Deg {
 /// permutation column plumbing stay hidden, which keeps the simple lookup
 /// path free of challenge access.
 ///
-/// Implementors must not shortcut the per-column scoping: a [`LookupAir`]
+/// Implementors must not shortcut the per-column scoping: a [`super::LookupAir`]
 /// author that opens `n` columns must issue exactly `n` calls to
-/// [`LookupBuilder::column`], matching [`super::LookupAir::num_columns`].
+/// [`LookupBuilder::next_column`], matching [`super::LookupAir::num_columns`].
 ///
 /// ## Associated-type layout
 ///
@@ -134,7 +134,7 @@ pub trait LookupBuilder: Sized {
 
     // --- per-column handle (GAT, borrows from self) ---
 
-    /// Per-column handle opened by [`column`](Self::column). The GAT lets
+    /// Per-column handle opened by [`column`](Self::next_column). The GAT lets
     /// the adapter stash a mutable borrow of its internal state (running
     /// `(U, V)` on the constraint path, fraction collector on the prover
     /// path) for the duration of a single column's closure.
@@ -175,7 +175,7 @@ pub trait LookupBuilder: Sized {
 // LOOKUP COLUMN
 // ================================================================================================
 
-/// Per-column handle returned by [`LookupBuilder::column`].
+/// Per-column handle returned by [`LookupBuilder::next_column`].
 ///
 /// The only decision a column makes is how to open a group: either the
 /// simple path via [`group`](Self::group) or the dual cached-encoding path
@@ -216,7 +216,7 @@ pub trait LookupColumn {
     ///
     /// The `'a` lifetime on the group handle is tied to the `&'a mut
     /// self` borrow of the column for the same reason as
-    /// [`LookupBuilder::column`].
+    /// [`LookupBuilder::next_column`].
     fn group<'a>(&'a mut self, name: &'static str, f: impl FnOnce(&mut Self::Group<'a>), deg: Deg);
 
     /// Open a group with two sibling descriptions for the same

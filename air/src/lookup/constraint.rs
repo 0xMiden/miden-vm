@@ -1,9 +1,9 @@
 //! Constraint-path adapter for the new closure-based lookup API.
 //!
 //! Implements [`LookupBuilder`] over any `LiftedAirBuilder`. The adapter
-//! mirrors the column-accumulator algebra in [`crate::constraints::logup`]
-//! (`Batch` / `RationalSet` / `Column`) but wraps it in the closure-based
-//! surface described by [`super::builder`].
+//! mirrors the column-accumulator algebra in the per-group `(U, V)` / per-batch `(N, D)`
+//! running pairs and wraps it in the closure-based surface described by
+//! [`super::builder`].
 //!
 //! ## Algebra location
 //!
@@ -33,7 +33,7 @@
 //! without reconstructing them.
 //!
 //! The permutation column slices are *not* cached — each
-//! [`LookupBuilder::column`] call re-queries `ab.permutation()` to pick
+//! [`LookupBuilder::next_column`] call re-queries `ab.permutation()` to pick
 //! up the current-row / next-row `VarEF` values. `ab.permutation()` is
 //! cheap (it builds a window over references) and not caching keeps the
 //! builder a four-field struct.
@@ -57,7 +57,7 @@ use super::{
 /// precomputed challenges ([`Challenges`] sized from the
 /// [`LookupAir`]) and a small column-index counter; the permutation row
 /// slices are re-queried from the wrapped `&mut AB` on every
-/// [`LookupBuilder::column`] call.
+/// [`LookupBuilder::next_column`] call.
 pub struct ConstraintLookupBuilder<'ab, AB>
 where
     AB: LiftedAirBuilder + 'ab,
@@ -192,7 +192,7 @@ where
 // CONSTRAINT COLUMN
 // ================================================================================================
 
-/// Per-column handle returned by [`ConstraintLookupBuilder::column`].
+/// Per-column handle returned by [`ConstraintLookupBuilder::next_column`].
 ///
 /// Holds only the running `(U, V)` accumulator and a shared borrow of
 /// the precomputed [`Challenges`]. The wrapped `&mut AB` and the
@@ -285,7 +285,7 @@ where
 ///
 /// Accumulates an internal `(U_g, V_g)` pair as the author calls
 /// `add` / `remove` / `insert` / `batch`. The column consumes the pair
-/// via [`ConstraintColumn::fold_group`] once the group closure returns.
+/// via `ConstraintColumn::fold_group` once the group closure returns.
 ///
 /// Each per-interaction `add` / `remove` / `insert` body calls
 /// `msg.encode(self.challenges)` directly and folds the resulting

@@ -162,7 +162,7 @@ where
     public_values: &'a [F],
     challenges: &'a Challenges<EF>,
     /// Dense per-column fraction buffers shared across all rows. Each
-    /// [`LookupBuilder::column`] call appends the current row's fractions to the end of
+    /// [`LookupBuilder::next_column`] call appends the current row's fractions to the end of
     /// `fractions.fractions[column_idx]` and pushes the row's interaction count into
     /// `fractions.counts_per_row[column_idx]`. The outer Vecs never move or re-allocate
     /// as long as each row stays within the declared [`LookupAir::column_shape`] bound.
@@ -400,7 +400,7 @@ where
 // PROVER COLUMN
 // ================================================================================================
 
-/// Per-column handle returned by [`ProverLookupBuilder::column`].
+/// Per-column handle returned by [`ProverLookupBuilder::next_column`].
 ///
 /// Holds a mutable borrow of the column's per-row fraction `Vec`. Each
 /// group opened inside the column reborrows the same `Vec` and pushes

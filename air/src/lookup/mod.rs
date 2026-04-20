@@ -9,10 +9,10 @@
 //! drivers.
 //!
 //! The Miden-specific wiring — `MidenLookupAir`, the `buses/*` emitters, the
-//! [`MidenLookupAuxBuilder`](crate::constraints::lookup::MidenLookupAuxBuilder)
-//! [`AuxBuilder`] wrapper, and the degree-budget / bus-id constants — lives in
-//! [`crate::constraints::lookup`]. The split keeps this module free of Miden-specific
-//! types so it can eventually become its own crate without further disentangling.
+//! [`MidenLookupAuxBuilder`] `AuxBuilder` wrapper, and the degree-budget / bus-id
+//! constants — lives in `crate::constraints::lookup`. The split keeps this module free
+//! of Miden-specific types so it can eventually become its own crate without further
+//! disentangling.
 
 #![allow(dead_code, unused_imports)]
 
@@ -90,7 +90,7 @@ pub trait LookupAir<LB: LookupBuilder> {
     fn max_message_width(&self) -> usize;
 
     /// Upper bound on any bus ID this AIR emits through
-    /// [`LookupMessage::encode`](message::LookupMessage::encode),
+    /// [`LookupMessage::encode`],
     /// plus one. The adapter pre-computes that many bus prefixes at
     /// construction time and indexes into the table with
     /// `bus_id as usize`.

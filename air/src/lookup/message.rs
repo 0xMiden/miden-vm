@@ -2,7 +2,7 @@
 //! `LookupAir` / `LookupBuilder` API.
 //!
 //! Each message owns its full encoding loop against a borrowed
-//! [`Challenges`](crate::lookup::Challenges).
+//! [`Challenges`].
 //!
 //! ## Encoding contract
 //!

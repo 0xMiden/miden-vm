@@ -10,7 +10,7 @@
 //! - **Processor aux trace builders** (concrete field elements): `Challenges<E>`
 //! - **Verifier** (`reduced_aux_values`): `Challenges<EF>`
 //!
-//! See [`super::bus_message`] for the standard coefficient index layout.
+//! See [`super::message`] for the standard coefficient index layout.
 
 use alloc::{boxed::Box, vec::Vec};
 use core::ops::{AddAssign, Mul};
@@ -33,7 +33,7 @@ use miden_core::field::PrimeCharacteristicRing;
 /// once and read-only thereafter — `Box<[EF]>` over `Vec<EF>` drops the unused
 /// capacity word and signals fixed length.
 ///
-/// [`LookupAir`]: crate::constraints::lookup::LookupAir
+/// [`LookupAir`]: crate::lookup::LookupAir
 pub struct Challenges<EF: PrimeCharacteristicRing> {
     pub alpha: EF,
     pub beta_powers: Box<[EF]>,
@@ -50,7 +50,7 @@ impl<EF: PrimeCharacteristicRing> Challenges<EF> {
     /// `bus_prefix` holds `num_bus_ids` entries.
     /// `gamma = beta^max_message_width` (one power beyond the highest `beta_powers` index).
     ///
-    /// [`LookupAir`]: crate::constraints::lookup::LookupAir
+    /// [`LookupAir`]: crate::lookup::LookupAir
     pub fn new(alpha: EF, beta: EF, max_message_width: usize, num_bus_ids: usize) -> Self {
         assert!(max_message_width > 0, "max_message_width must be non-zero");
 
