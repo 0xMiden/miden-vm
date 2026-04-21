@@ -422,12 +422,6 @@ const _: () = {
 // ================================================================================================
 
 /// Kernel ROM chiplet columns (5 columns), viewed from `chiplets[5..10]`.
-///
-/// Under the all-LogUp layout, each declared kernel procedure occupies exactly one row.
-/// The chiplet emits two bus fractions per row: an INIT-labeled remove (multiplicity 1, one
-/// per declared proc) and a CALL-labeled add with multiplicity `m` (number of SYSCALLs to
-/// that proc). No shape constraints are needed — multiset equality under LogUp ensures
-/// soundness.
 #[repr(C)]
 pub struct KernelRomCols<T> {
     /// Number of SYSCALLs to this procedure (CALL-label multiplicity).

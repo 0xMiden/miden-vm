@@ -8,11 +8,6 @@
 //! - memory chiplet main-trace constraints
 //! - ACE chiplet main-trace constraints
 //!
-//! The kernel ROM chiplet has no main-trace shape constraints under the all-LogUp layout:
-//! each declared kernel procedure occupies exactly one row, and soundness follows from the
-//! LogUp multiset equality on the chiplets bus (INIT-labeled remove balanced by public-input
-//! boundary adds, CALL-labeled add carrying the syscall multiplicity).
-//!
 //! Chiplet LogUp lookup-argument constraints are emitted by
 //! [`crate::constraints::lookup::ChipletLookupAir`] and wired through
 //! `MidenLookupAir` from `ProcessorAir::eval`.

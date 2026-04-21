@@ -78,11 +78,6 @@ pub struct ChipletFlags<E> {
 }
 
 /// Precomputed flags for all chiplets.
-///
-/// The kernel ROM chiplet has no entry here under the all-LogUp layout: it has no
-/// main-trace shape constraints, so per-region `is_transition` / `is_last` /
-/// `next_is_first` flags are unused. Its bus gate (`chiplet_active.kernel_rom`) is
-/// computed separately via [`ChipletActiveFlags`].
 #[derive(Clone)]
 pub struct ChipletSelectors<E> {
     pub controller: ChipletFlags<E>,
@@ -258,8 +253,6 @@ where
     let is_bitwise = s0.clone() - s01.clone();
     let is_memory = s01.clone() - s012.clone();
     let is_ace = s012.clone() - s0123;
-    // Kernel ROM active flag (`s0123 - s01234`) is not needed here: nothing consumes
-    // `ChipletSelectors::kernel_rom`. The bus gate comes from `ChipletActiveFlags`.
 
     // --- Remaining chiplet last-row flags: is_active * s_n' ---
     let is_bitwise_last = is_bitwise.clone() * s1_next;
