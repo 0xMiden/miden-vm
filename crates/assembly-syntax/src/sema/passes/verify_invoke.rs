@@ -247,6 +247,11 @@ impl VerifyInvokeTargets<'_> {
         }
     }
     fn track_used_alias(&mut self, name: &Ident) {
+        // A locally-defined constant with the same name shadows any import of that name,
+        // so the import should not be credited as used in that case.
+        if self.analyzer.get_constant(name).is_ok() {
+            return;
+        }
         self.track_used_alias_name(name.as_str());
     }
 }
@@ -419,9 +424,11 @@ impl VisitMut for VerifyInvokeTargets<'_> {
     fn visit_mut_constant_ref(&mut self, path: &mut Span<Arc<Path>>) -> ControlFlow<()> {
         if let Some(name) = path.as_ident() {
             if let Some(ref const_name) = self.current_constant {
-                // Defer: record the edge so we only credit the alias when this
-                // constant is proven live.
-                self.analyzer.record_constant_import_ref(const_name, name.as_str().into());
+                // Only defer as an import ref if this identifier is not a local constant.
+                // A local constant shadows any same-named import, so the import gets no credit.
+                if self.analyzer.get_constant(&name).is_err() {
+                    self.analyzer.record_constant_import_ref(const_name, name.as_str().into());
+                }
             } else {
                 self.track_used_alias(&name);
             }
