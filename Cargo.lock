@@ -1594,6 +1594,7 @@ dependencies = [
  "miden-mast-package",
  "miden-package-registry",
  "serde",
+ "serde_json",
  "tempfile",
  "thiserror",
  "toml",

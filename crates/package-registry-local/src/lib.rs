@@ -78,7 +78,7 @@ pub struct LocalPackageRegistry {
 }
 
 /// The metadata about a package produced when listing or describing a package in the index
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct PackageSummary {
     /// The package identifier/name
     pub name: PackageId,
@@ -87,7 +87,7 @@ pub struct PackageSummary {
     /// The package description
     pub description: Option<Arc<str>>,
     /// The version requirements for dependencies of this package
-    pub dependencies: Vec<(PackageId, VersionRequirement)>,
+    pub dependencies: BTreeMap<PackageId, VersionRequirement>,
     /// The location of the assembled artifact on disk.
     ///
     /// If `None`, the package has been registered virtually, and so has no location on disk.
@@ -444,8 +444,11 @@ mod tests {
         let shown = reloaded.show(&PackageId::from("pkg"), None).expect("missing package");
         assert_eq!(shown.version.version, "2.0.0".parse().unwrap());
         assert_eq!(shown.dependencies.len(), 1);
-        assert_eq!(shown.dependencies[0].0, PackageId::from("dep"));
-        assert_eq!(shown.dependencies[0].1.to_string(), format!("1.0.0#{}", dep.digest()));
+        assert_eq!(shown.dependencies.keys().next().unwrap(), &PackageId::from("dep"));
+        assert_eq!(
+            shown.dependencies.values().next().unwrap().to_string(),
+            format!("1.0.0#{}", dep.digest())
+        );
     }
 
     #[test]
