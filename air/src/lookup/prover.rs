@@ -77,7 +77,6 @@ where
 {
     main: RowWindow<'a, F>,
     periodic_values: &'a [F],
-    public_values: &'a [F],
     challenges: &'a Challenges<EF>,
     /// Dense per-column fraction buffers shared across all rows. Each
     /// [`LookupBuilder::next_column`] call appends the current row's fractions to the end of
@@ -97,7 +96,6 @@ where
     ///
     /// - `main`: two-row window over the current and next base-field rows.
     /// - `periodic_values`: periodic columns at the current row.
-    /// - `public_values`: public inputs.
     /// - `challenges`: precomputed LogUp challenges (shared across every row — the caller builds
     ///   this once outside the row loop and passes a shared reference here).
     /// - `air`: the lookup shape (used only for a debug assertion that `fractions.num_columns() ==
@@ -111,7 +109,6 @@ where
     pub fn new<A>(
         main: RowWindow<'a, F>,
         periodic_values: &'a [F],
-        public_values: &'a [F],
         challenges: &'a Challenges<EF>,
         air: &A,
         fractions: &'a mut LookupFractions<F, EF>,
@@ -127,7 +124,6 @@ where
         Self {
             main,
             periodic_values,
-            public_values,
             challenges,
             fractions,
             column_idx: 0,
@@ -152,7 +148,6 @@ where
 /// - `main_trace`: row-major main execution trace. Row access is zero-copy via
 ///   `main_trace.values.borrow()`.
 /// - `periodic_columns`: one `Vec<F>` per periodic column, each with its own period.
-/// - `public_values`: row-invariant public input slice.
 /// - `challenges`: precomputed LogUp challenges (shared across every row).
 ///
 /// # Panics
@@ -164,7 +159,6 @@ pub fn build_lookup_fractions<A, F, EF>(
     air: &A,
     main_trace: &RowMajorMatrix<F>,
     periodic_columns: &[Vec<F>],
-    public_values: &[F],
     challenges: &Challenges<EF>,
 ) -> LookupFractions<F, EF>
 where
@@ -194,7 +188,6 @@ where
         let mut lb = ProverLookupBuilder::new(
             window,
             &periodic_row,
-            public_values,
             challenges,
             air,
             &mut fractions,
@@ -224,7 +217,6 @@ where
     type VarEF = EF;
 
     type PeriodicVar = F;
-    type PublicVar = F;
 
     type MainWindow = RowWindow<'a, F>;
 
@@ -239,10 +231,6 @@ where
 
     fn periodic_values(&self) -> &[Self::PeriodicVar] {
         self.periodic_values
-    }
-
-    fn public_values(&self) -> &[Self::PublicVar] {
-        self.public_values
     }
 
     fn next_column<'c, R>(
@@ -612,7 +600,6 @@ mod tests {
         // values — pass dummy zero-length slices.
         let empty_row: Vec<Felt> = vec![];
         let periodic_values: Vec<Felt> = vec![];
-        let public_values: Vec<Felt> = vec![];
 
         let mut fractions = LookupFractions::<Felt, QuadFelt>::new::<
             _,
@@ -624,7 +611,6 @@ mod tests {
             let mut lb = ProverLookupBuilder::new(
                 window,
                 &periodic_values,
-                &public_values,
                 &challenges,
                 &air,
                 &mut fractions,

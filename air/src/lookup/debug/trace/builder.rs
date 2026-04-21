@@ -26,7 +26,6 @@ use crate::Felt;
 pub struct DebugTraceBuilder<'a> {
     main: RowWindow<'a, Felt>,
     periodic_values: &'a [Felt],
-    public_values: &'a [Felt],
     challenges: &'a Challenges<QuadFelt>,
     state: &'a mut DebugTraceState,
     row_idx: usize,
@@ -37,7 +36,6 @@ impl<'a> DebugTraceBuilder<'a> {
     pub fn new(
         main: RowWindow<'a, Felt>,
         periodic_values: &'a [Felt],
-        public_values: &'a [Felt],
         challenges: &'a Challenges<QuadFelt>,
         state: &'a mut DebugTraceState,
         row_idx: usize,
@@ -45,7 +43,6 @@ impl<'a> DebugTraceBuilder<'a> {
         Self {
             main,
             periodic_values,
-            public_values,
             challenges,
             state,
             row_idx,
@@ -64,7 +61,6 @@ impl<'a> LookupBuilder for DebugTraceBuilder<'a> {
     type VarEF = QuadFelt;
 
     type PeriodicVar = Felt;
-    type PublicVar = Felt;
 
     type MainWindow = RowWindow<'a, Felt>;
 
@@ -79,10 +75,6 @@ impl<'a> LookupBuilder for DebugTraceBuilder<'a> {
 
     fn periodic_values(&self) -> &[Self::PeriodicVar] {
         self.periodic_values
-    }
-
-    fn public_values(&self) -> &[Self::PublicVar] {
-        self.public_values
     }
 
     fn next_column<'c, R>(

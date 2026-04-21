@@ -55,8 +55,8 @@ pub struct Deg {
 /// The trace-reading handle handed to a [`super::LookupAir`] implementation.
 ///
 /// `LookupBuilder` deliberately mirrors the subset of `LiftedAirBuilder`'s
-/// associated types needed to read `main`, `periodic_values`, and
-/// `public_values`. It is **not** a sub-trait of `AirBuilder`: the constraint
+/// associated types needed to read `main` and `periodic_values`. It is
+/// **not** a sub-trait of `AirBuilder`: the constraint
 /// emission surface (`assert_zero` / `when_first_row` / …) and the
 /// permutation column plumbing stay hidden, which keeps the simple lookup
 /// path free of challenge access.
@@ -71,9 +71,9 @@ pub struct Deg {
 /// (`EF`, `ExprEF`, `VarEF`) mirror the upstream `AirBuilder` /
 /// `ExtensionBuilder` split one-for-one; `Algebra<Var>` on `Expr` lets the
 /// lookup author multiply main-trace variables with arbitrary expressions
-/// without crossing trait boundaries. `PeriodicVar` / `PublicVar` /
-/// `MainWindow` come from `PeriodicAirBuilder` / `AirBuilder` respectively
-/// and are passed through the adapter unchanged.
+/// without crossing trait boundaries. `PeriodicVar` / `MainWindow` come
+/// from `PeriodicAirBuilder` / `AirBuilder` respectively and are passed
+/// through the adapter unchanged.
 ///
 /// The per-column handle is a generic associated type
 /// ([`Self::Column`](Self::Column)) so that each `column(...)` call can
@@ -122,9 +122,6 @@ pub trait LookupBuilder: Sized {
     /// `PeriodicAirBuilder::PeriodicVar`).
     type PeriodicVar: Into<Self::Expr> + Copy;
 
-    /// Public-input variable (copied from `AirBuilder::PublicVar`).
-    type PublicVar: Into<Self::Expr> + Copy;
-
     /// Two-row window over the main trace, returned as-is from the
     /// underlying builder. Pinned to [`WindowAccess`] + `Clone` so a
     /// lookup author can split it into `current_slice()` / `next_slice()`
@@ -149,9 +146,6 @@ pub trait LookupBuilder: Sized {
 
     /// Periodic column values at the current row.
     fn periodic_values(&self) -> &[Self::PeriodicVar];
-
-    /// Public inputs.
-    fn public_values(&self) -> &[Self::PublicVar];
 
     // ---- per-column scoping ----
 

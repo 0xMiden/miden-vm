@@ -262,7 +262,6 @@ where
             let mut lb = DebugTraceBuilder::new(
                 window,
                 &periodic_row,
-                public_values,
                 challenges,
                 &mut state,
                 r,

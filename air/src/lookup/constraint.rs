@@ -114,7 +114,6 @@ where
     type VarEF = AB::VarEF;
 
     type PeriodicVar = AB::PeriodicVar;
-    type PublicVar = AB::PublicVar;
 
     type MainWindow = AB::MainWindow;
 
@@ -130,10 +129,6 @@ where
 
     fn periodic_values(&self) -> &[Self::PeriodicVar] {
         self.ab.periodic_values()
-    }
-
-    fn public_values(&self) -> &[Self::PublicVar] {
-        self.ab.public_values()
     }
 
     fn next_column<'a, R>(

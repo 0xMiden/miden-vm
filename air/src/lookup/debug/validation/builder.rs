@@ -30,7 +30,6 @@ use crate::Felt;
 pub struct EncodingCheckBuilder<'a> {
     main: RowWindow<'a, Felt>,
     periodic_values: &'a [Felt],
-    public_values: &'a [Felt],
     challenges: &'a Challenges<QuadFelt>,
     column_idx: usize,
     /// First problem observed across the whole walk; later ones are ignored.
@@ -41,13 +40,11 @@ impl<'a> EncodingCheckBuilder<'a> {
     pub fn new(
         main: RowWindow<'a, Felt>,
         periodic_values: &'a [Felt],
-        public_values: &'a [Felt],
         challenges: &'a Challenges<QuadFelt>,
     ) -> Self {
         Self {
             main,
             periodic_values,
-            public_values,
             challenges,
             column_idx: 0,
             error: None,
@@ -69,7 +66,6 @@ impl<'a> LookupBuilder for EncodingCheckBuilder<'a> {
     type VarEF = QuadFelt;
 
     type PeriodicVar = Felt;
-    type PublicVar = Felt;
 
     type MainWindow = RowWindow<'a, Felt>;
 
@@ -84,10 +80,6 @@ impl<'a> LookupBuilder for EncodingCheckBuilder<'a> {
 
     fn periodic_values(&self) -> &[Self::PeriodicVar] {
         self.periodic_values
-    }
-
-    fn public_values(&self) -> &[Self::PublicVar] {
-        self.public_values
     }
 
     fn next_column<'c, R>(

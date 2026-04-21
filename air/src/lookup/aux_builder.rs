@@ -45,7 +45,6 @@ pub fn build_logup_aux<A, F, EF>(
     air: &A,
     main: &RowMajorMatrix<F>,
     periodic_columns: &[Vec<F>],
-    public_values: &[F],
     challenges: &Challenges<EF>,
 ) -> (RowMajorMatrix<EF>, Vec<EF>)
 where
@@ -53,7 +52,7 @@ where
     EF: ExtensionField<F>,
     for<'a> A: LookupAir<ProverLookupBuilder<'a, F, EF>>,
 {
-    let fractions = build_lookup_fractions(air, main, periodic_columns, public_values, challenges);
+    let fractions = build_lookup_fractions(air, main, periodic_columns, challenges);
 
     let full = accumulate(&fractions);
     let num_cols = full.width;

@@ -15,7 +15,7 @@
 
 use alloc::vec::Vec;
 
-use miden_core::WORD_SIZE;
+use miden_core::{WORD_SIZE, field::PrimeCharacteristicRing};
 
 use super::{
     BusId, MIDEN_MAX_MESSAGE_WIDTH,

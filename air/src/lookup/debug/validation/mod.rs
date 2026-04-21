@@ -184,7 +184,6 @@ where
         let current: Vec<Felt> = (0..layout.trace_width).map(|_| random_felt()).collect();
         let next: Vec<Felt> = (0..layout.trace_width).map(|_| random_felt()).collect();
         let periodic: Vec<Felt> = (0..layout.num_periodic_columns).map(|_| random_felt()).collect();
-        let publics: Vec<Felt> = (0..layout.num_public_values).map(|_| random_felt()).collect();
         let alpha = QuadFelt::new([random_felt(), random_felt()]);
         let beta = QuadFelt::new([random_felt(), random_felt()]);
         let challenges = Challenges::<QuadFelt>::new(
@@ -195,7 +194,7 @@ where
         );
 
         let main = RowWindow::from_two_rows(&current, &next);
-        let mut builder = EncodingCheckBuilder::new(main, &periodic, &publics, &challenges);
+        let mut builder = EncodingCheckBuilder::new(main, &periodic, &challenges);
         air.eval(&mut builder);
         if let Some(err) = builder.take_error() {
             return Err(err);

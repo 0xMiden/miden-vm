@@ -93,7 +93,6 @@ impl<'ab> LookupBuilder for DegreeCheckBuilder<'ab> {
     type VarEF = SymbolicVariableExt<Felt, QuadFelt>;
 
     type PeriodicVar = SymbolicVariable<Felt>;
-    type PublicVar = SymbolicVariable<Felt>;
 
     type MainWindow = <Inner as AirBuilder>::MainWindow;
 
@@ -108,10 +107,6 @@ impl<'ab> LookupBuilder for DegreeCheckBuilder<'ab> {
 
     fn periodic_values(&self) -> &[Self::PeriodicVar] {
         self.ab.periodic_values()
-    }
-
-    fn public_values(&self) -> &[Self::PublicVar] {
-        self.ab.public_values()
     }
 
     fn next_column<'c, R>(&'c mut self, f: impl FnOnce(&mut Self::Column<'c>) -> R, deg: Deg) -> R {

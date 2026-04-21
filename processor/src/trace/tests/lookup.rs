@@ -53,7 +53,6 @@ fn build_lookup_fractions_on_tiny_span() {
     let trace = build_trace_from_ops(ops, &[]);
 
     let main_trace = trace.main_trace().to_row_major();
-    let public_vals = trace.to_public_values();
     let periodic = LiftedAir::<Felt, QuadFelt>::periodic_columns(&ProcessorAir);
 
     // QuadFelt challenges for LogUp, built from 4 random Felts (QuadFelt itself doesn't
@@ -66,7 +65,7 @@ fn build_lookup_fractions_on_tiny_span() {
     let challenges =
         Challenges::<QuadFelt>::new(alpha, beta, MIDEN_MAX_MESSAGE_WIDTH, BusId::COUNT);
 
-    let fractions = build_lookup_fractions(&air, &main_trace, &periodic, &public_vals, &challenges);
+    let fractions = build_lookup_fractions(&air, &main_trace, &periodic, &challenges);
 
     // --- Shape bookkeeping ---
     let num_rows = trace.main_trace().num_rows();
@@ -130,7 +129,7 @@ fn build_lookup_fractions_matches_constraint_path_oracle() {
     let air = MidenLookupAir;
     let challenges =
         Challenges::<QuadFelt>::new(alpha, beta, MIDEN_MAX_MESSAGE_WIDTH, BusId::COUNT);
-    let fractions = build_lookup_fractions(&air, &main_trace, &periodic, &public_vals, &challenges);
+    let fractions = build_lookup_fractions(&air, &main_trace, &periodic, &challenges);
     // `accumulate` returns a row-major matrix with `num_rows + 1` rows and `num_cols`
     // columns. Col 0 is the running-sum accumulator; cols 1+ hold per-row fraction values.
     let aux = accumulate(&fractions);

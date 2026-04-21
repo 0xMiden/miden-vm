@@ -6,14 +6,6 @@
 //! Miden's periodic-column layout via [`PeriodicCols::periodic_columns`] and
 //! delegates collection + accumulation to the generic [`build_logup_aux`] in
 //! `crate::lookup::aux_builder`.
-//!
-//! ## Public values
-//!
-//! The [`AuxBuilder`] trait does not thread `public_values` through to
-//! `build_aux_trace`, so `build_logup_aux` is invoked with `&[]`. This is
-//! sound for the current LogUp setup because the prover-path bus emitters
-//! at `air/src/constraints/lookup/buses/*.rs` do not read
-//! `builder.public_values()`.
 
 use alloc::vec::Vec;
 
@@ -60,6 +52,6 @@ where
         // stateless, matching `ProcessorAir::periodic_columns`.
         let periodic = PeriodicCols::periodic_columns();
 
-        build_logup_aux(&MidenLookupAir, main, &periodic, &[], &lookup_challenges)
+        build_logup_aux(&MidenLookupAir, main, &periodic, &lookup_challenges)
     }
 }

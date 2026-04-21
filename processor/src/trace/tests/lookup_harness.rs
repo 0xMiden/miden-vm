@@ -50,7 +50,6 @@ impl InteractionLog {
     /// resulting [`LookupFractions`] buffer into per-row bags.
     pub fn new(trace: &ExecutionTrace) -> Self {
         let main_trace = trace.main_trace().to_row_major();
-        let public_vals = trace.to_public_values();
         let periodic = LiftedAir::<Felt, QuadFelt>::periodic_columns(&ProcessorAir);
 
         // `QuadFelt` itself isn't `Randomizable`, so draw 4 base-field elements and pair them.
@@ -64,7 +63,6 @@ impl InteractionLog {
             &MidenLookupAir,
             &main_trace,
             &periodic,
-            &public_vals,
             &challenges,
         );
 
