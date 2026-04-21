@@ -72,7 +72,7 @@ miden-verifier          = { path = "./verifier", version = "0.23.0", default-fea
 miden-crypto     = { version = "0.24", default-features = false }
 miden-formatting = { version = "0.1", default-features = false }
 miden-lifted-stark = { version = "0.24", default-features = false }
-midenc-hir-type  = { version = "0.5", default-features = false }
+midenc-hir-type  = { version = "0.5.4", default-features = false }
 
 # Serialization
 bincode = "1.3"
@@ -111,9 +111,6 @@ quote = "1.0"
 rand_chacha = { version = "0.9", default-features = false }
 rstest = "0.26"
 toml = { version = "1.0", default-features = false }
-
-[patch.crates-io]
-midenc-hir-type = { git = "https://github.com/0xMiden/midenc-hir-type", branch = "port-miden-serde-utils-0.24" }
 
 [workspace.lints.rust]
 unexpected_cfgs = { check-cfg = ['cfg(fuzzing)'], level = "warn" }
