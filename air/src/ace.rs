@@ -30,7 +30,7 @@ use miden_crypto::{
     stark::air::{LiftedAir, symbolic::SymbolicExpressionExt},
 };
 
-use crate::{PV_PROGRAM_HASH, PV_TRANSCRIPT_STATE, trace};
+use crate::{PV_PROGRAM_HASH, PV_TRANSCRIPT_STATE};
 
 // BATCHING TYPES
 // ================================================================================================
@@ -205,9 +205,9 @@ where
 /// whose denominators are rebuilt from public inputs inside the DAG.
 ///
 /// The three fractions are:
-///   1. `c_bh  = +1 / encode(BLOCK_HASH_TABLE, [0, ph[0..4], 0, 0])`
-///   2. `c_lp_init  = +1 / encode(LOG_PRECOMPILE, [LABEL, 0, 0, 0, 0])`
-///   3. `c_lp_final = −1 / encode(LOG_PRECOMPILE, [LABEL, ts[0..4]])`
+///   1. `c_bh  = +1 / encode(BLOCK_HASH_TABLE, [ph[0..4], 0, 0, 0])`
+///   2. `c_lp_init  = +1 / encode(LOG_PRECOMPILE, [0, 0, 0, 0])`
+///   3. `c_lp_final = −1 / encode(LOG_PRECOMPILE, ts[0..4])`
 ///
 /// `c_lp_init − c_lp_final` matches `transcript_messages` in `lib.rs` (initial
 /// minus final contribution). Splitting it into two rationals keeps the code
@@ -217,34 +217,30 @@ pub fn logup_boundary_config() -> LogUpBoundaryConfig {
 
     use crate::constraints::logup_msg::BusId;
 
-    let log_precompile_label = Felt::from_u8(trace::LOG_PRECOMPILE_LABEL);
-
-    // ph_msg = encode([0, ph[0], ph[1], ph[2], ph[3], 0, 0])
+    // ph_msg = encode([ph[0], ph[1], ph[2], ph[3], 0, 0, 0])
     // Matches `program_hash_message` in lib.rs.
     let ph_msg = vec![
-        Constant(Felt::ZERO), // parent_id = 0 (root block)
         PublicInput(PV_PROGRAM_HASH),
         PublicInput(PV_PROGRAM_HASH + 1),
         PublicInput(PV_PROGRAM_HASH + 2),
         PublicInput(PV_PROGRAM_HASH + 3),
+        Constant(Felt::ZERO), // parent_id = 0 (root block)
         Constant(Felt::ZERO), // is_first_child = false
         Constant(Felt::ZERO), // is_loop_body = false
     ];
 
-    // default_lp_msg = encode([LABEL, 0, 0, 0, 0])
+    // default_lp_msg = encode([0, 0, 0, 0])
     // Matches `transcript_messages(..).0` (initial default state).
     let default_lp_msg = vec![
-        Constant(log_precompile_label),
         Constant(Felt::ZERO),
         Constant(Felt::ZERO),
         Constant(Felt::ZERO),
         Constant(Felt::ZERO),
     ];
 
-    // final_lp_msg = encode([LABEL, ts[0..4]])
+    // final_lp_msg = encode(ts[0..4])
     // Matches `transcript_messages(..).1` (final public-input state).
     let final_lp_msg = vec![
-        Constant(log_precompile_label),
         PublicInput(PV_TRANSCRIPT_STATE),
         PublicInput(PV_TRANSCRIPT_STATE + 1),
         PublicInput(PV_TRANSCRIPT_STATE + 2),

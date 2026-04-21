@@ -1,12 +1,12 @@
-//! `v_wiring` shared bus column (C3 / `BUS_ACE_WIRING` + `BUS_HASHER_PERM_LINK`).
+//! `v_wiring` shared bus column (C3 / `BUS_ACE_WIRING` + `BUS_HASHER_PERM_LINK_{INPUT,OUTPUT}`).
 //!
-//! Both buses live inside **one** [`super::super::LookupColumn::group`] call. The chiplet
+//! All three buses live inside **one** [`super::super::LookupColumn::group`] call. The chiplet
 //! tri-state (`s_ctrl + s_perm + s0_virtual = 1`) makes ACE rows, hasher controller rows,
 //! and hasher permutation rows pairwise mutually exclusive, so the simple-group
 //! composition `U_g += (d_i − 1)·f_i`, `V_g += m_i·f_i` is sound: at most one of the five
 //! interactions fires per row, and the column's running `(U, V)` takes MAX over per-
 //! interaction degrees rather than summing them (which a sibling-group split would do).
-//! The two buses' denominators use distinct `bus_prefix[bus]` additive bases, so even
+//! Each bus's denominator uses a distinct `bus_prefix[bus]` additive base, so even
 //! though they share the same accumulator their contributions are linearly independent in
 //! the extension field and cannot cancel across buses.
 //!
@@ -35,21 +35,24 @@
 //! `wire_2` interaction is fully suppressed via the `−sblock` multiplicity, so the
 //! interpretation collapses to the READ-mode one.
 //!
-//! ## Hasher perm-link (`BUS_HASHER_PERM_LINK`)
+//! ## Hasher perm-link (`BUS_HASHER_PERM_LINK_{INPUT,OUTPUT}`)
 //!
 //! Binds hasher controller rows to permutation sub-chiplet rows. Without this bus the
 //! permutation segment is structurally independent from the controller, and a malicious
 //! prover could pair any controller `(state_in, state_out)` with any perm-cycle execution
-//! (or skip the cycle entirely). Four mutually exclusive interactions:
+//! (or skip the cycle entirely). Four mutually exclusive interactions split across two
+//! domain-separated buses:
 //!
-//! - **Controller input** (`s_ctrl · is_input`, multiplicity `+1`, `label = 0`) — controller side
-//!   of a (state_in, state_out) pair.
-//! - **Controller output** (`s_ctrl · is_output`, multiplicity `+1`, `label = 1`).
-//! - **Permutation row 0** (`s_perm · is_init_ext`, multiplicity `−m`, `label = 0`) — input
-//!   boundary of a Poseidon2 cycle. `m` is read from `PermutationCols.multiplicity` and is constant
-//!   within the cycle by [`crate::constraints::chiplets::permutation`].
-//! - **Permutation row 15** (`s_perm · (1 − periodic_sum)`, multiplicity `−m`, `label = 1`) —
-//!   output boundary of the same cycle.
+//! - **Controller input** (`s_ctrl · is_input`, multiplicity `+1`) — controller side of a
+//!   (state_in, state_out) pair. Routed to `BusId::HasherPermLinkInput`.
+//! - **Controller output** (`s_ctrl · is_output`, multiplicity `+1`). Routed to
+//!   `BusId::HasherPermLinkOutput`.
+//! - **Permutation row 0** (`s_perm · is_init_ext`, multiplicity `−m`) — input boundary of a
+//!   Poseidon2 cycle. `m` is read from `PermutationCols.multiplicity` and is constant within the
+//!   cycle by [`crate::constraints::chiplets::permutation`]. Routed to
+//!   `BusId::HasherPermLinkInput`.
+//! - **Permutation row 15** (`s_perm · (1 − periodic_sum)`, multiplicity `−m`) — output boundary of
+//!   the same cycle. Routed to `BusId::HasherPermLinkOutput`.
 //!
 //! The widest perm-link contribution is `f_ctrl_output` with gate degree 3 — strictly below
 //! the ACE batch's `(7, 8)` — so merging into the same group leaves the column's transition
@@ -215,32 +218,32 @@ pub(in crate::constraints::lookup) fn emit_v_wiring<LB>(
                         Deg { n: 4, d: 3 },
                     );
 
-                    // ---- Hasher perm-link (BUS_HASHER_PERM_LINK) ----
+                    // ---- Hasher perm-link (BUS_HASHER_PERM_LINK_{INPUT,OUTPUT}) ----
 
-                    // Controller input: +1 / encode(label=0, ctrl.state).
+                    // Controller input: +1 / encode(ctrl.state) on HasherPermLinkInput.
                     g.add(
                         "perm_ctrl_input",
                         f_ctrl_input,
                         move || {
                             let state: [LB::Expr; 12] = ctrl_state.map(Into::into);
-                            HasherPermLinkMsg { label: LB::Expr::ZERO, state }
+                            HasherPermLinkMsg::Input { state }
                         },
                         Deg { n: 2, d: 3 },
                     );
 
-                    // Controller output: +1 / encode(label=1, ctrl.state).
+                    // Controller output: +1 / encode(ctrl.state) on HasherPermLinkOutput.
                     g.add(
                         "perm_ctrl_output",
                         f_ctrl_output,
                         move || {
                             let state: [LB::Expr; 12] = ctrl_state.map(Into::into);
-                            HasherPermLinkMsg { label: LB::Expr::ONE, state }
+                            HasherPermLinkMsg::Output { state }
                         },
                         Deg { n: 3, d: 4 },
                     );
 
-                    // Perm row 0: -m / encode(label=0, perm.state). Multiplicity is `0 - m` so the
-                    // LogUp accumulator subtracts the fraction.
+                    // Perm row 0: -m / encode(perm.state) on HasherPermLinkInput. Multiplicity is
+                    // `0 - m` so the LogUp accumulator subtracts the fraction.
                     let perm_mult_input: LB::Expr = LB::Expr::ZERO - perm_mult.into();
                     g.insert(
                         "perm_row0",
@@ -248,12 +251,12 @@ pub(in crate::constraints::lookup) fn emit_v_wiring<LB>(
                         perm_mult_input,
                         move || {
                             let state: [LB::Expr; 12] = perm_state.map(Into::into);
-                            HasherPermLinkMsg { label: LB::Expr::ZERO, state }
+                            HasherPermLinkMsg::Input { state }
                         },
                         Deg { n: 3, d: 3 },
                     );
 
-                    // Perm row 15: -m / encode(label=1, perm.state).
+                    // Perm row 15: -m / encode(perm.state) on HasherPermLinkOutput.
                     let perm_mult_output: LB::Expr = LB::Expr::ZERO - perm_mult.into();
                     g.insert(
                         "perm_row15",
@@ -261,7 +264,7 @@ pub(in crate::constraints::lookup) fn emit_v_wiring<LB>(
                         perm_mult_output,
                         move || {
                             let state: [LB::Expr; 12] = perm_state.map(Into::into);
-                            HasherPermLinkMsg { label: LB::Expr::ONE, state }
+                            HasherPermLinkMsg::Output { state }
                         },
                         Deg { n: 3, d: 3 },
                     );

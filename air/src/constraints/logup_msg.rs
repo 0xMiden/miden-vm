@@ -70,12 +70,14 @@ pub enum BusId {
     RangeCheck = 21,
     /// ACE wiring bus (LogUp).
     AceWiring = 22,
-    /// Hasher perm-link bus.
-    HasherPermLink = 23,
+    /// Hasher perm-link input bus: pairs controller-input rows with perm-cycle row 0.
+    HasherPermLinkInput = 23,
+    /// Hasher perm-link output bus: pairs controller-output rows with perm-cycle row 15.
+    HasherPermLinkOutput = 24,
 }
 
 impl BusId {
-    pub const COUNT: usize = 24;
+    pub const COUNT: usize = 25;
 }
 
 // HASHER MESSAGES
@@ -364,7 +366,7 @@ pub enum BlockStackMsg<E> {
 }
 
 /// Block hash queue message (7 elements):
-/// `[parent, child_hash[4], is_first_child, is_loop_body]`.
+/// `[child_hash[4], parent, is_first_child, is_loop_body]`.
 ///
 /// `FirstChild` — first child of a JOIN (is_first_child = 1, is_loop_body = 0).
 /// `Child` — non-first, non-loop child (is_first_child = 0, is_loop_body = 0).
@@ -431,16 +433,16 @@ pub struct StackOverflowMsg<E> {
 // HASHER PERM-LINK MESSAGE
 // ================================================================================================
 
-/// Hasher perm-link message (13 elements): `[label, state[0..12]]`.
+/// Hasher perm-link message (12 elements): `state[0..12]`.
 ///
-/// Binds hasher controller rows to permutation sub-chiplet rows on `BUS_HASHER_PERM_LINK`.
-/// `label = 0` on input pairings (controller-input row ↔ perm-cycle row 0); `label = 1` on
-/// output pairings (controller-output row ↔ perm-cycle row 15). `state` carries all 12 sponge
-/// lanes (rate_0, rate_1, capacity).
+/// Binds hasher controller rows to permutation sub-chiplet rows. The `Input` variant pairs a
+/// controller-input row with perm-cycle row 0 on `BusId::HasherPermLinkInput`; the `Output`
+/// variant pairs a controller-output row with perm-cycle row 15 on
+/// `BusId::HasherPermLinkOutput`. `state` carries all 12 sponge lanes (rate_0, rate_1, capacity).
 #[derive(Clone, Debug)]
-pub struct HasherPermLinkMsg<E> {
-    pub label: E,
-    pub state: [E; 12],
+pub enum HasherPermLinkMsg<E> {
+    Input { state: [E; 12] },
+    Output { state: [E; 12] },
 }
 
 // KERNEL ROM MESSAGE
@@ -496,15 +498,10 @@ pub struct RangeMsg<E> {
 // LOG-PRECOMPILE CAPACITY MESSAGE
 // ================================================================================================
 
-/// Log-precompile capacity state message (5 elements): `[label, cap[4]]`.
+/// Log-precompile capacity state message (4 elements): `cap[4]`.
 #[derive(Clone, Debug)]
 pub struct LogCapacityMsg<E> {
     pub capacity: [E; 4],
-}
-
-impl<E: PrimeCharacteristicRing + Clone> LogCapacityMsg<E> {
-    /// LOG_PRECOMPILE_LABEL = 14.
-    const LABEL: u16 = crate::trace::LOG_PRECOMPILE_LABEL as u16;
 }
 
 // SIBLING TABLE MESSAGE
@@ -708,7 +705,8 @@ where
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
         let bp = &challenges.beta_powers;
         // Per-variant fan-in: produce the (parent, child_hash, is_first_child, is_loop_body)
-        // tuple, then emit a flat 7-slot payload. Mirrors the legacy `encode` ordering.
+        // tuple, then emit a flat 7-slot payload laid out as
+        // `[child_hash[4], parent, is_first_child, is_loop_body]`.
         let (parent, child_hash, is_first_child, is_loop_body) = match self {
             Self::FirstChild { parent, child_hash } => (parent, child_hash, E::ONE, E::ZERO),
             Self::Child { parent, child_hash } => (parent, child_hash, E::ZERO, E::ZERO),
@@ -721,11 +719,11 @@ where
             } => (parent, child_hash, is_first_child.clone(), is_loop_body.clone()),
         };
         let mut acc = challenges.bus_prefix[BusId::BlockHashTable as usize].clone();
-        acc += bp[0].clone() * parent.clone();
-        acc += bp[1].clone() * child_hash[0].clone();
-        acc += bp[2].clone() * child_hash[1].clone();
-        acc += bp[3].clone() * child_hash[2].clone();
-        acc += bp[4].clone() * child_hash[3].clone();
+        acc += bp[0].clone() * child_hash[0].clone();
+        acc += bp[1].clone() * child_hash[1].clone();
+        acc += bp[2].clone() * child_hash[2].clone();
+        acc += bp[3].clone() * child_hash[3].clone();
+        acc += bp[4].clone() * parent.clone();
         acc += bp[5].clone() * is_first_child;
         acc += bp[6].clone() * is_loop_body;
         acc
@@ -819,7 +817,7 @@ where
     }
 }
 
-// --- LogCapacityMsg (BusId::LogPrecompileTranscript; payload label at β⁰) ----------------------
+// --- LogCapacityMsg (BusId::LogPrecompileTranscript; capacity at β⁰..β³) ----------------------
 
 impl<E, EF> LookupMessage<E, EF> for LogCapacityMsg<E>
 where
@@ -829,15 +827,14 @@ where
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
         let bp = &challenges.beta_powers;
         let mut acc = challenges.bus_prefix[BusId::LogPrecompileTranscript as usize].clone();
-        acc += bp[0].clone() * E::from_u16(Self::LABEL);
         for i in 0..4 {
-            acc += bp[i + 1].clone() * self.capacity[i].clone();
+            acc += bp[i].clone() * self.capacity[i].clone();
         }
         acc
     }
 }
 
-// --- HasherPermLinkMsg (BusId::HasherPermLink; payload label at β⁰)
+// --- HasherPermLinkMsg (BusId::HasherPermLinkInput / HasherPermLinkOutput)
 // -------------------------------------
 
 impl<E, EF> LookupMessage<E, EF> for HasherPermLinkMsg<E>
@@ -847,10 +844,13 @@ where
 {
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
         let bp = &challenges.beta_powers;
-        let mut acc = challenges.bus_prefix[BusId::HasherPermLink as usize].clone();
-        acc += bp[0].clone() * self.label.clone();
+        let (bus, state) = match self {
+            Self::Input { state } => (BusId::HasherPermLinkInput, state),
+            Self::Output { state } => (BusId::HasherPermLinkOutput, state),
+        };
+        let mut acc = challenges.bus_prefix[bus as usize].clone();
         for i in 0..12 {
-            acc += bp[i + 1].clone() * self.state[i].clone();
+            acc += bp[i].clone() * state[i].clone();
         }
         acc
     }

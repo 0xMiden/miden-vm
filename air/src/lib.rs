@@ -389,7 +389,7 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ProcessorAir {
 /// Builds the program-hash bus message for the block-hash table boundary term.
 ///
 /// Must match `BlockHashTableRow::from_end().collapse()` on the prover side for the
-/// root block, which encodes `[parent_id=0, hash[0..4], is_first_child=0, is_loop_body=0]`.
+/// root block, which encodes `[hash[0..4], parent_id=0, is_first_child=0, is_loop_body=0]`.
 fn program_hash_message<EF: ExtensionField<Felt>>(
     challenges: &lookup::Challenges<EF>,
     program_hash: &Word,
@@ -397,11 +397,11 @@ fn program_hash_message<EF: ExtensionField<Felt>>(
     challenges.encode(
         BusId::BlockHashTable as usize,
         [
-            Felt::ZERO, // parent_id = 0 (root block)
             program_hash[0],
             program_hash[1],
             program_hash[2],
             program_hash[3],
+            Felt::ZERO, // parent_id = 0 (root block)
             Felt::ZERO, // is_first_child = false
             Felt::ZERO, // is_loop_body = false
         ],
@@ -419,10 +419,7 @@ fn transcript_messages<EF: ExtensionField<Felt>>(
 ) -> (EF, EF) {
     let encode = |state: PrecompileTranscriptState| {
         let cap: &[Felt] = state.as_ref();
-        challenges.encode(
-            BusId::LogPrecompileTranscript as usize,
-            [Felt::from_u8(trace::LOG_PRECOMPILE_LABEL), cap[0], cap[1], cap[2], cap[3]],
-        )
+        challenges.encode(BusId::LogPrecompileTranscript as usize, [cap[0], cap[1], cap[2], cap[3]])
     };
     (encode(PrecompileTranscriptState::default()), encode(final_state))
 }
