@@ -1,7 +1,7 @@
-use std::path::PathBuf;
+use std::{path::PathBuf, process::ExitCode};
 
 use clap::{Parser, Subcommand};
-use miden_package_registry::{PackageId, Version};
+use miden_package_registry::{PackageId, PackageRegistry, Version};
 use miden_package_registry_local::LocalPackageRegistry;
 
 #[derive(Debug, Parser)]
@@ -32,17 +32,13 @@ enum Command {
         /// If not specified, the latest version of the package is shown.
         #[arg(long)]
         version: Option<String>,
+        /// If an error occurs, do not emit any output, just exit with a non-zero code
+        #[arg(long)]
+        quiet: bool,
     },
 }
 
-fn main() {
-    if let Err(error) = run() {
-        eprintln!("{error}");
-        std::process::exit(1);
-    }
-}
-
-fn run() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<ExitCode, Box<dyn std::error::Error>> {
     let cli = Cli::parse();
     let mut registry = LocalPackageRegistry::load_from_env()?;
 
@@ -61,7 +57,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 println!("{} {}", package.name, package.version);
             }
         },
-        Command::Show { package, version } => {
+        Command::Show { package, version, quiet } => {
             let package_id = PackageId::from(package);
             let version = version.map(|version| version.parse::<Version>()).transpose()?;
             if let Some(summary) = registry.show(&package_id, version.as_ref()) {
@@ -81,9 +77,24 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         println!("  {dependency} {requirement}");
                     }
                 }
+            } else {
+                if !quiet {
+                    if registry.is_available(&package_id) {
+                        if let Some(version) = version {
+                            eprintln!(
+                                "Version '{version}' does not exist for package '{package_id}'"
+                            );
+                        } else {
+                            eprintln!("No available versions for package '{package_id}'");
+                        }
+                    } else {
+                        eprintln!("'{package_id}' is not a registered package");
+                    }
+                }
+                return Ok(ExitCode::from(2));
             }
         },
     }
 
-    Ok(())
+    Ok(ExitCode::SUCCESS)
 }
