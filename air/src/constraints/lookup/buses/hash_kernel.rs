@@ -33,8 +33,10 @@ use miden_core::field::PrimeCharacteristicRing;
 
 use crate::{
     constraints::{
-        logup_msg::{MemoryHeader, MemoryMsg, RangeMsg, SiblingMsgBitOne, SiblingMsgBitZero},
-        lookup::chiplet_air::{ChipletBusContext, ChipletLookupBuilder},
+        lookup::{
+            chiplet_air::{ChipletBusContext, ChipletLookupBuilder},
+            messages::{MemoryHeader, MemoryMsg, RangeMsg, SiblingMsgBitOne, SiblingMsgBitZero},
+        },
         utils::BoolNot,
     },
     lookup::{Deg, LookupBatch, LookupColumn, LookupGroup},

@@ -21,10 +21,10 @@ use super::{
     BusId, MIDEN_MAX_MESSAGE_WIDTH,
     chiplet_air::{CHIPLET_COLUMN_SHAPE, ChipletLookupAir, ChipletLookupBuilder},
     main_air::{MAIN_COLUMN_SHAPE, MainLookupAir, MainLookupBuilder},
+    messages::{BlockHashMsg, KernelRomMsg, LogCapacityMsg},
 };
 use crate::{
     PV_PROGRAM_HASH, PV_TRANSCRIPT_STATE,
-    constraints::logup_msg::{BlockHashMsg, KernelRomMsg, LogCapacityMsg},
     lookup::{BoundaryBuilder, LookupAir},
 };
 
@@ -79,7 +79,7 @@ where
         // `HasherMsg::State` is the widest live payload at 15 slots (label@β⁰, addr@β¹,
         // node_index@β², state[0..12]@β³..β¹⁴); the 16th slot is unused slack kept for
         // MASM transcript alignment.
-        crate::constraints::logup_msg::MIDEN_MAX_MESSAGE_WIDTH
+        MIDEN_MAX_MESSAGE_WIDTH
     }
 
     fn num_bus_ids(&self) -> usize {

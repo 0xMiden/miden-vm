@@ -16,7 +16,7 @@
 
 use alloc::vec::Vec;
 
-use miden_air::logup_msg::{BlockHashMsg, BlockStackMsg, OpGroupMsg};
+use miden_air::logup::{BlockHashMsg, BlockStackMsg, OpGroupMsg};
 use miden_core::{
     Felt, ONE, ZERO,
     mast::{

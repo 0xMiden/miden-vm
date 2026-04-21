@@ -11,7 +11,7 @@
 
 use alloc::vec::Vec;
 
-use miden_air::logup_msg::StackOverflowMsg;
+use miden_air::logup::StackOverflowMsg;
 use miden_core::{
     Felt,
     operations::{Operation, opcodes},

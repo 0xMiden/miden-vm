@@ -18,10 +18,8 @@ use alloc::vec::Vec;
 
 use miden_air::{
     LiftedAir, ProcessorAir,
-    lookup::{
-        BusId, Challenges, LookupFractions, LookupMessage, MIDEN_MAX_MESSAGE_WIDTH, MidenLookupAir,
-        build_lookup_fractions,
-    },
+    logup::{BusId, MIDEN_MAX_MESSAGE_WIDTH, MidenLookupAir},
+    lookup::{Challenges, LookupFractions, LookupMessage, build_lookup_fractions},
 };
 use miden_core::field::QuadFelt;
 use miden_utils_testing::rand::rand_array;

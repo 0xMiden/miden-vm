@@ -17,7 +17,7 @@
 
 use alloc::vec::Vec;
 
-use miden_air::logup_msg::{SiblingMsgBitOne, SiblingMsgBitZero};
+use miden_air::logup::{SiblingMsgBitOne, SiblingMsgBitZero};
 use miden_core::{
     Felt, ONE, Word, ZERO,
     crypto::merkle::{MerkleStore, MerkleTree, NodeIndex},

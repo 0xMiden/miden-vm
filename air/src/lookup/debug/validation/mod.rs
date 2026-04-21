@@ -14,12 +14,10 @@
 //! | [`structure`] | [`validate_structure_only`] + [`StructureReport`] — bundles the three structural `inspect` checks plus a `num_columns` consistency check into one pass. |
 //! | [`mod@validate`] | [`validate()`](validate::validate) + [`ValidationReport`] — composes the structural pass and the symbolic degree-budget pass into a single entry point. |
 //!
-//! ## Miden-free by construction
+//! ## AIR-free by construction
 //!
 //! The AIR layout and degree budget are caller-supplied, so this entire subtree is free of
-//! Miden-specific constants. Miden-side callers (e.g. the tests in
-//! `crate::constraints::lookup::miden_air`) pin the layout to
-//! [`ProcessorAir`](crate::ProcessorAir) and the budget to `9`.
+//! AIR-specific constants. Callers pin the layout and degree budget at their call site.
 
 pub mod builder;
 pub mod inspect;

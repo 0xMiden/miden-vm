@@ -34,8 +34,10 @@ use miden_core::field::PrimeCharacteristicRing;
 
 use crate::{
     constraints::{
-        logup_msg::{BlockHashMsg, OpGroupMsg},
-        lookup::main_air::{MainBusContext, MainLookupBuilder},
+        lookup::{
+            main_air::{MainBusContext, MainLookupBuilder},
+            messages::{BlockHashMsg, OpGroupMsg},
+        },
         utils::{BoolNot, horner_eval_bits},
     },
     lookup::{Deg, LookupBatch, LookupColumn, LookupGroup},

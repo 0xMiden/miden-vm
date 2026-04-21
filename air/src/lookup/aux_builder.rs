@@ -1,10 +1,9 @@
 //! Generic LogUp aux-trace helper.
 //!
 //! Composes the field-polymorphic [`build_lookup_fractions`] collection phase with
-//! [`accumulate`] and splits the result into `(aux_trace, committed_finals)`. The
-//! Miden-side [`MidenLookupAuxBuilder`](crate::constraints::lookup::MidenLookupAuxBuilder)
-//! wraps this helper by sourcing the periodic columns + challenges shape from Miden's
-//! static layout.
+//! [`accumulate`] and splits the result into `(aux_trace, committed_finals)`. Miden-side
+//! callers wrap this helper by sourcing the periodic columns + challenges shape from their
+//! own static layout.
 //!
 //! ## Aux trace shape
 //!

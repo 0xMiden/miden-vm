@@ -143,14 +143,12 @@ where
 ///
 /// Generic over the base field `F` and extension field `EF`. The caller supplies the
 /// main trace and periodic columns — this function does row slicing, periodic-column
-/// indexing, and fraction collection. The Miden-side
-/// [`MidenLookupAuxBuilder`](crate::constraints::lookup::MidenLookupAuxBuilder) wraps
-/// this with the Miden-specific periodic-column layout.
+/// indexing, and fraction collection. Concrete AIRs wrap this with their own
+/// periodic-column layout.
 ///
 /// # Arguments
 ///
-/// - `air`: the [`LookupAir`] to evaluate (typically
-///   [`MidenLookupAir`](crate::constraints::lookup::MidenLookupAir)).
+/// - `air`: the [`LookupAir`] to evaluate.
 /// - `main_trace`: row-major main execution trace. Row access is zero-copy via
 ///   `main_trace.values.borrow()`.
 /// - `periodic_columns`: one `Vec<F>` per periodic column, each with its own period.

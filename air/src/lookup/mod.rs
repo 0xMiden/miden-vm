@@ -8,11 +8,10 @@
 //! [`LookupFractions`] accumulator, and the [`build_logup_aux`] / [`build_lookup_fractions`]
 //! drivers.
 //!
-//! The Miden-specific wiring — `MidenLookupAir`, the `buses/*` emitters, the
-//! [`MidenLookupAuxBuilder`] `AuxBuilder` wrapper, and the degree-budget / bus-id
-//! constants — lives in `crate::constraints::lookup`. The split keeps this module free
-//! of Miden-specific types so it can eventually become its own crate without further
-//! disentangling.
+//! This module is deliberately free of Miden-specific types so it can be extracted into
+//! its own crate without further disentangling. The Miden-side wiring (aggregator AIR,
+//! bus message structs, aux-trace builder, bus identifiers) is surfaced separately
+//! through [`crate::logup`].
 
 #![allow(dead_code, unused_imports)]
 
@@ -34,12 +33,6 @@ pub use fractions::{LookupFractions, accumulate, accumulate_slow};
 pub use message::LookupMessage;
 pub use prover::{ProverLookupBuilder, build_lookup_fractions};
 
-// Miden-side re-exports for ergonomic access via `miden_air::lookup::*`. The canonical
-// definitions live in [`crate::constraints::lookup`] and [`crate::constraints::logup_msg`].
-pub use crate::constraints::logup_msg::{BusId, MIDEN_MAX_MESSAGE_WIDTH};
-pub use crate::constraints::lookup::{
-    MidenLookupAir, MidenLookupAuxBuilder, miden_air::NUM_LOGUP_COMMITTED_FINALS,
-};
 // LOOKUP AIR
 // ================================================================================================
 

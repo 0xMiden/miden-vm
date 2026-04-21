@@ -23,17 +23,23 @@ pub mod ace;
 pub mod config;
 mod constraints;
 pub mod lookup;
+pub mod trace;
 
-/// Re-exports the bus-message structs from the internal `constraints::logup_msg` module so
-/// the processor's trace tests can hand-construct expected `LookupMessage` instances and
-/// encode them via `LookupMessage::encode`. Only used by tests; the structs themselves carry
-/// no data the rest of the public API does not already surface through the aux trace.
-pub mod logup_msg {
-    pub use crate::constraints::logup_msg::*;
+/// Miden VM-specific LogUp lookup argument: bus identifiers, bus message types, the
+/// aggregator [`logup::MidenLookupAir`], and the [`logup::MidenLookupAuxBuilder`].
+///
+/// The generic LogUp framework this builds on lives in [`crate::lookup`] and is free of
+/// Miden-specific types so it can be extracted into its own crate.
+pub mod logup {
+    pub use crate::constraints::lookup::{
+        BusId, MIDEN_MAX_MESSAGE_WIDTH, MidenLookupAir, MidenLookupAuxBuilder, messages::*,
+        miden_air::NUM_LOGUP_COMMITTED_FINALS,
+    };
 }
 
-pub mod trace;
-use constraints::{columns::MainCols, logup_msg::BusId};
+use constraints::columns::MainCols;
+use logup::{BusId, MIDEN_MAX_MESSAGE_WIDTH, NUM_LOGUP_COMMITTED_FINALS};
+use lookup::Challenges;
 use trace::TRACE_WIDTH;
 
 // RE-EXPORTS
@@ -55,7 +61,6 @@ mod export {
 
 pub use export::*;
 
-use crate::lookup::NUM_LOGUP_COMMITTED_FINALS;
 // MIDEN AIR BUILDER
 // ================================================================================================
 
@@ -231,8 +236,7 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ProcessorAir {
     }
 
     fn aux_width(&self) -> usize {
-        // The LogUp lookup argument occupies 7 columns — 4 main-trace columns
-        // (M1, M_2+5, M3, M4) + 3 chiplet-trace columns (C1, C2, C3). Matches
+        // 4 main-trace + 3 chiplet-trace = 7 LogUp columns. Matches
         // `MidenLookupAir::num_columns()` and the per-row shape returned by
         // `MidenLookupAuxBuilder::build_aux_trace`.
         LOGUP_AUX_TRACE_WIDTH
@@ -297,31 +301,70 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ProcessorAir {
             .try_into()
             .map_err(|_| -> ReductionError { "invalid transcript state slice".into() })?;
 
-        let challenges = {
-            use crate::constraints::logup_msg::{BusId, MIDEN_MAX_MESSAGE_WIDTH};
-            lookup::Challenges::<EF>::new(
-                challenges[0],
-                challenges[1],
-                MIDEN_MAX_MESSAGE_WIDTH,
-                BusId::COUNT,
-            )
-        };
+        let challenges = Challenges::<EF>::new(
+            challenges[0],
+            challenges[1],
+            MIDEN_MAX_MESSAGE_WIDTH,
+            BusId::COUNT,
+        );
 
         let invert = |x: EF| -> Result<EF, ReductionError> {
             x.try_inverse()
                 .ok_or_else(|| -> ReductionError { "zero LogUp denominator".into() })
         };
 
-        // c_block_hash = +1 / encode(BLOCK_HASH_TABLE, [0, ph[0..4], 0, 0])
-        let c_block_hash = invert(program_hash_message(&challenges, &program_hash))?;
+        // c_block_hash = +1 / encode(BLOCK_HASH_TABLE, [ph[0..4], 0, 0, 0])
+        // Must match `BlockHashTableRow::from_end().collapse()` on the prover side for
+        // the root block (parent_id = is_first_child = is_loop_body = 0).
+        let c_block_hash = invert(challenges.encode(
+            BusId::BlockHashTable as usize,
+            [
+                program_hash[0],
+                program_hash[1],
+                program_hash[2],
+                program_hash[3],
+                Felt::ZERO,
+                Felt::ZERO,
+                Felt::ZERO,
+            ],
+        ))?;
 
-        // c_log_precompile = 1 / d_initial − 1 / d_final
-        let (initial_msg, final_msg) = transcript_messages(&challenges, pc_transcript_state);
-        let c_log_precompile = invert(initial_msg)? - invert(final_msg)?;
+        // c_log_precompile = 1 / d_initial − 1 / d_final, where d_* encode the
+        // transcript capacity state (initial = default zero state, final = public input).
+        let encode_transcript = |state: PrecompileTranscriptState| {
+            let cap: &[Felt] = state.as_ref();
+            challenges
+                .encode(BusId::LogPrecompileTranscript as usize, [cap[0], cap[1], cap[2], cap[3]])
+        };
+        let c_log_precompile = invert(encode_transcript(PrecompileTranscriptState::default()))?
+            - invert(encode_transcript(pc_transcript_state))?;
 
-        // c_kernel_rom = −Σ 1 / d_kernel_proc_msg_i over VLPI[0]
-        let c_kernel_rom =
-            kernel_logup_correction_from_var_len(&challenges, var_len_public_inputs)?;
+        // c_kernel_rom = +Σ 1 / encode(KERNEL_ROM_INIT, digest) over VLPI[0].
+        // Cancels the unmatched chiplet-side `remove` emitted for each declared kernel
+        // procedure INIT. VLPI[0] carries all kernel digests as concatenated felts.
+        if var_len_public_inputs.len() != 1 {
+            return Err(format!(
+                "expected 1 var-len public input slice, got {}",
+                var_len_public_inputs.len()
+            )
+            .into());
+        }
+        let kernel_felts = var_len_public_inputs[0];
+        if !kernel_felts.len().is_multiple_of(WORD_SIZE) {
+            return Err(format!(
+                "kernel digest felts length {} is not a multiple of {}",
+                kernel_felts.len(),
+                WORD_SIZE
+            )
+            .into());
+        }
+        let mut c_kernel_rom = EF::ZERO;
+        for digest in kernel_felts.chunks_exact(WORD_SIZE) {
+            c_kernel_rom += invert(challenges.encode(
+                BusId::KernelRomInit as usize,
+                [digest[0], digest[1], digest[2], digest[3]],
+            ))?;
+        }
 
         let total_correction = c_block_hash + c_log_precompile + c_kernel_rom;
 
@@ -376,103 +419,4 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ProcessorAir {
         // Public inputs boundary constraints.
         constraints::public_inputs::enforce_main(builder, local);
     }
-}
-
-// REDUCED AUX VALUES HELPERS
-// ================================================================================================
-//
-// These helpers compute the LogUp boundary correction terms used by
-// `ProcessorAir::reduced_aux_values` to cancel the unmatched-fraction contributions
-// from the three open buses (block_hash root program hash, log_precompile transcript
-// chain, kernel ROM init messages from VLPI[0]).
-
-/// Builds the program-hash bus message for the block-hash table boundary term.
-///
-/// Must match `BlockHashTableRow::from_end().collapse()` on the prover side for the
-/// root block, which encodes `[hash[0..4], parent_id=0, is_first_child=0, is_loop_body=0]`.
-fn program_hash_message<EF: ExtensionField<Felt>>(
-    challenges: &lookup::Challenges<EF>,
-    program_hash: &Word,
-) -> EF {
-    challenges.encode(
-        BusId::BlockHashTable as usize,
-        [
-            program_hash[0],
-            program_hash[1],
-            program_hash[2],
-            program_hash[3],
-            Felt::ZERO, // parent_id = 0 (root block)
-            Felt::ZERO, // is_first_child = false
-            Felt::ZERO, // is_loop_body = false
-        ],
-    )
-}
-
-/// Returns the pair of (initial, final) log-precompile transcript messages for the
-/// virtual-table bus boundary term.
-///
-/// The initial message uses the default (zero) capacity state; the final message uses
-/// the public-input transcript state.
-fn transcript_messages<EF: ExtensionField<Felt>>(
-    challenges: &lookup::Challenges<EF>,
-    final_state: PrecompileTranscriptState,
-) -> (EF, EF) {
-    let encode = |state: PrecompileTranscriptState| {
-        let cap: &[Felt] = state.as_ref();
-        challenges.encode(BusId::LogPrecompileTranscript as usize, [cap[0], cap[1], cap[2], cap[3]])
-    };
-    (encode(PrecompileTranscriptState::default()), encode(final_state))
-}
-
-/// Builds the kernel procedure init message for the kernel ROM bus.
-///
-/// Encodes `bus_prefix[KERNEL_ROM_INIT] + [digest[0..4]]` — must match the chiplet-side
-/// INIT remove (one per declared procedure). The boundary correction adds this once per
-/// kernel procedure so the INIT removes balance.
-fn kernel_proc_message<EF: ExtensionField<Felt>>(
-    challenges: &lookup::Challenges<EF>,
-    digest: &Word,
-) -> EF {
-    challenges.encode(BusId::KernelRomInit as usize, [digest[0], digest[1], digest[2], digest[3]])
-}
-
-/// Reduces kernel procedure digests from var-len public inputs into the LogUp boundary
-/// correction term for the chiplets bus.
-///
-/// Returns `+Σ 1/d_kernel_proc_msg_i` where `d_kernel_proc_msg_i` is the encoded bus
-/// message for the i-th kernel procedure digest. This cancels the unmatched chiplet-side
-/// `remove` contributions in columns M3 and C1.
-///
-/// Expects exactly one variable-length public input slice containing all kernel digests
-/// as concatenated `Felt`s (i.e. `len % WORD_SIZE == 0`).
-fn kernel_logup_correction_from_var_len<EF: ExtensionField<Felt>>(
-    challenges: &lookup::Challenges<EF>,
-    var_len_public_inputs: VarLenPublicInputs<'_, Felt>,
-) -> Result<EF, ReductionError> {
-    if var_len_public_inputs.len() != 1 {
-        return Err(format!(
-            "expected 1 var-len public input slice, got {}",
-            var_len_public_inputs.len()
-        )
-        .into());
-    }
-    let kernel_felts = var_len_public_inputs[0];
-    if !kernel_felts.len().is_multiple_of(WORD_SIZE) {
-        return Err(format!(
-            "kernel digest felts length {} is not a multiple of {}",
-            kernel_felts.len(),
-            WORD_SIZE
-        )
-        .into());
-    }
-    let mut sum = EF::ZERO;
-    for digest in kernel_felts.chunks_exact(WORD_SIZE) {
-        let word: Word = [digest[0], digest[1], digest[2], digest[3]].into();
-        let d = kernel_proc_message(challenges, &word);
-        let d_inv = d
-            .try_inverse()
-            .ok_or_else(|| -> ReductionError { "zero kernel ROM denominator".into() })?;
-        sum += d_inv;
-    }
-    Ok(sum)
 }

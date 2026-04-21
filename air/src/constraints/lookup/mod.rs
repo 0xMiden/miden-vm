@@ -18,9 +18,9 @@ pub(crate) mod buses;
 pub mod chiplet_air;
 mod extension_impls;
 pub mod main_air;
+pub mod messages;
 pub mod miden_air;
 
 pub use aux_builder::MidenLookupAuxBuilder;
+pub use messages::{BusId, MIDEN_MAX_MESSAGE_WIDTH};
 pub use miden_air::MidenLookupAir;
-
-pub use super::logup_msg::{BusId, MIDEN_MAX_MESSAGE_WIDTH};

@@ -4,7 +4,7 @@ use core::ops::Range;
 
 use miden_air::{
     AirWitness, ProcessorAir, PublicInputs, debug,
-    lookup::MidenLookupAuxBuilder,
+    logup::MidenLookupAuxBuilder,
     trace::{
         DECODER_TRACE_OFFSET, MainTrace, PADDED_TRACE_WIDTH, TRACE_WIDTH,
         decoder::{NUM_USER_OP_HELPERS, USER_OP_HELPERS_OFFSET},
@@ -177,7 +177,7 @@ impl TraceBuildInputs {
 /// - Summary of trace lengths of the main trace components.
 ///
 /// The auxiliary (LogUp) trace is no longer pre-built here — it is produced on demand by the
-/// stateless [`miden_air::lookup::MidenLookupAuxBuilder`] from the main trace and the
+/// stateless [`miden_air::logup::MidenLookupAuxBuilder`] from the main trace and the
 /// per-proof challenges, see `prover::prove_stark`.
 #[derive(Debug)]
 pub struct ExecutionTrace {

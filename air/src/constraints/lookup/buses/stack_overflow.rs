@@ -11,9 +11,9 @@
 //!   DYNCALL is staged in the decoder hasher state, not in `b1'` (which is reset).
 
 use crate::{
-    constraints::{
-        logup_msg::StackOverflowMsg,
-        lookup::main_air::{MainBusContext, MainLookupBuilder},
+    constraints::lookup::{
+        main_air::{MainBusContext, MainLookupBuilder},
+        messages::StackOverflowMsg,
     },
     lookup::{Deg, LookupColumn, LookupGroup},
 };

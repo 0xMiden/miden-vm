@@ -14,9 +14,9 @@ use core::array;
 use miden_core::{FMP_ADDR, FMP_INIT_VALUE, field::PrimeCharacteristicRing, operations::opcodes};
 
 use crate::{
-    constraints::{
-        logup_msg::{AceInitMsg, BitwiseMsg, HasherMsg, KernelRomMsg, MemoryHeader},
-        lookup::main_air::{MainBusContext, MainLookupBuilder},
+    constraints::lookup::{
+        main_air::{MainBusContext, MainLookupBuilder},
+        messages::{AceInitMsg, BitwiseMsg, HasherMsg, KernelRomMsg, MemoryHeader},
     },
     lookup::{Deg, LookupBatch, LookupColumn, LookupGroup},
     trace::{

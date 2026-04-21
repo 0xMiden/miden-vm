@@ -10,7 +10,7 @@
 
 use miden_air::{
     LiftedAir, NUM_PUBLIC_VALUES, ProcessorAir,
-    lookup::NUM_LOGUP_COMMITTED_FINALS,
+    logup::NUM_LOGUP_COMMITTED_FINALS,
     trace::{AUX_TRACE_RAND_CHALLENGES, AUX_TRACE_WIDTH, TRACE_WIDTH},
 };
 use miden_core::{Felt, field::QuadFelt};

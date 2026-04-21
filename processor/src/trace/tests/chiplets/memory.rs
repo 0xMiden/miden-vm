@@ -23,7 +23,7 @@
 //! mismatches stack-side `ctx` vs chiplet-side `mem_ctx` is not caught here.
 
 use miden_air::{
-    logup_msg::{MemoryHeader, MemoryResponseMsg},
+    logup::{MemoryHeader, MemoryResponseMsg},
     trace::chiplets::{MEMORY_IS_READ_COL_IDX, MEMORY_IS_WORD_ACCESS_COL_IDX},
 };
 use miden_core::{

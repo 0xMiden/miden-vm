@@ -27,7 +27,7 @@ mod proving_options;
 // EXPORTS
 // ================================================================================================
 pub use miden_air::{
-    DeserializationError, ProcessorAir, PublicInputs, config, lookup::MidenLookupAuxBuilder,
+    DeserializationError, ProcessorAir, PublicInputs, config, logup::MidenLookupAuxBuilder,
 };
 pub use miden_core::proof::{ExecutionProof, HashFunction};
 pub use miden_processor::{

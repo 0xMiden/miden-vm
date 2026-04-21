@@ -65,8 +65,10 @@ use miden_core::field::PrimeCharacteristicRing;
 use crate::{
     constraints::{
         chiplets::columns::PeriodicCols,
-        logup_msg::{AceWireMsg, HasherPermLinkMsg},
-        lookup::chiplet_air::{ChipletBusContext, ChipletLookupBuilder},
+        lookup::{
+            chiplet_air::{ChipletBusContext, ChipletLookupBuilder},
+            messages::{AceWireMsg, HasherPermLinkMsg},
+        },
         utils::BoolNot,
     },
     lookup::{Deg, LookupBatch, LookupColumn, LookupGroup},

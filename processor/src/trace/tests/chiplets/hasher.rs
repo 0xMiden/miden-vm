@@ -19,7 +19,7 @@
 use alloc::vec::Vec;
 
 use miden_air::{
-    logup_msg::HasherMsg,
+    logup::HasherMsg,
     trace::{
         chiplets::hasher::CONTROLLER_ROWS_PER_PERM_FELT,
         log_precompile::{

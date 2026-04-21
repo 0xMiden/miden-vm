@@ -126,7 +126,7 @@ pub const PADDED_TRACE_WIDTH: usize = TRACE_WIDTH.next_multiple_of(RATE_LEN);
 // ------------------------------------------------------------------------------------------------
 //
 // The auxiliary trace is the LogUp lookup-argument segment built by
-// [`crate::lookup::MidenLookupAuxBuilder`]. It has 7 columns: 4 main-trace LogUp
+// [`crate::logup::MidenLookupAuxBuilder`]. It has 7 columns: 4 main-trace LogUp
 // columns (M1, M_2+5, M3, M4) followed by 3 chiplet-trace LogUp columns (C1, C2, C3).
 // The legacy multiset offsets (decoder p1/p2/p3, stack s_aux, range b_range, hash kernel
 // b_hk, chiplets bus b_ch, ACE wiring v_wiring) were removed in Milestone B alongside
@@ -143,7 +143,7 @@ pub const AUX_TRACE_RAND_CHALLENGES: usize = 2;
 /// These define the standard positions for encoding bus messages using the pattern:
 /// `bus_prefix[bus] + sum(beta_powers\[i\] * elem\[i\])` where:
 /// - `bus_prefix[bus]` is the per-bus domain-separated base (see `BusId` in
-///   `constraints::logup_msg`)
+///   `constraints::lookup::logup_msg`)
 /// - `beta_powers\[i\] = beta^i` are the powers of beta
 ///
 /// These indices refer to positions in the `beta_powers` array, not including the bus prefix.

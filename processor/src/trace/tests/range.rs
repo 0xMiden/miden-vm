@@ -15,7 +15,7 @@
 use alloc::vec::Vec;
 
 use miden_air::{
-    logup_msg::RangeMsg,
+    logup::RangeMsg,
     trace::{
         MainTrace,
         chiplets::{MEMORY_D0_COL_IDX, MEMORY_D1_COL_IDX},

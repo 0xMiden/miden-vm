@@ -20,9 +20,10 @@ use alloc::vec::Vec;
 
 use miden_air::{
     LOGUP_AUX_TRACE_WIDTH, LiftedAir, ProcessorAir,
+    logup::{BusId, MIDEN_MAX_MESSAGE_WIDTH, MidenLookupAir},
     lookup::{
-        BusId, Challenges, MIDEN_MAX_MESSAGE_WIDTH, MidenLookupAir, accumulate, accumulate_slow,
-        build_lookup_fractions, debug::collect_column_oracle_folds,
+        Challenges, accumulate, accumulate_slow, build_lookup_fractions,
+        debug::collect_column_oracle_folds,
     },
 };
 use miden_core::{

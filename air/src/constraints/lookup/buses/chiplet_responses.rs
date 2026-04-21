@@ -20,10 +20,12 @@ use miden_core::field::PrimeCharacteristicRing;
 use crate::{
     constraints::{
         chiplets::columns::PeriodicCols,
-        logup_msg::{
-            AceInitMsg, BitwiseResponseMsg, BusId, HasherMsg, KernelRomMsg, MemoryResponseMsg,
+        lookup::{
+            chiplet_air::{ChipletBusContext, ChipletLookupBuilder},
+            messages::{
+                AceInitMsg, BitwiseResponseMsg, BusId, HasherMsg, KernelRomMsg, MemoryResponseMsg,
+            },
         },
-        lookup::chiplet_air::{ChipletBusContext, ChipletLookupBuilder},
         utils::BoolNot,
     },
     lookup::{Deg, LookupBatch, LookupColumn, LookupGroup},
@@ -107,12 +109,10 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
         controller_flag.clone() * hs0.clone() * not_hs1.clone() * hs2.clone() * is_boundary.clone();
     let f_mv: LB::Expr =
         controller_flag.clone() * hs0.clone() * hs1.clone() * not_hs2.clone() * is_boundary.clone();
-    let f_mu: LB::Expr =
-        controller_flag.clone() * hs0 * hs1 * hs2.clone() * is_boundary.clone();
+    let f_mu: LB::Expr = controller_flag.clone() * hs0 * hs1 * hs2.clone() * is_boundary.clone();
 
     // HOUT output: hs0=hs1=hs2=0 (always responds on digest). Degree 4 (no is_boundary).
-    let f_hout: LB::Expr =
-        controller_flag.clone() * not_hs0.clone() * not_hs1.clone() * not_hs2;
+    let f_hout: LB::Expr = controller_flag.clone() * not_hs0.clone() * not_hs1.clone() * not_hs2;
 
     // SOUT output with is_boundary=1 only (HPERM return).
     let f_sout: LB::Expr = controller_flag * not_hs0 * not_hs1 * hs2 * is_boundary;

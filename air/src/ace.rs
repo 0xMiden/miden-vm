@@ -158,7 +158,7 @@ fn encode_bus_message<EF>(
 where
     EF: ExtensionField<Felt>,
 {
-    use crate::constraints::logup_msg::MIDEN_MAX_MESSAGE_WIDTH;
+    use crate::constraints::lookup::messages::MIDEN_MAX_MESSAGE_WIDTH;
 
     let alpha = builder.input(InputKey::AuxRandAlpha);
     let beta = builder.input(InputKey::AuxRandBeta);
@@ -215,7 +215,7 @@ where
 pub fn logup_boundary_config() -> LogUpBoundaryConfig {
     use MessageElement::{Constant, PublicInput};
 
-    use crate::constraints::logup_msg::BusId;
+    use crate::constraints::lookup::messages::BusId;
 
     // ph_msg = encode([ph[0], ph[1], ph[2], ph[3], 0, 0, 0])
     // Matches `program_hash_message` in lib.rs.

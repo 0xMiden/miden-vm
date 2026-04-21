@@ -149,7 +149,7 @@ pub const MAIN_COL_MAP: MainCols<usize> = {
 // ================================================================================================
 //
 // The auxiliary trace is now the LogUp lookup-argument segment built by
-// [`crate::lookup::MidenLookupAuxBuilder`] (see `air/src/constraints/lookup/`).
+// [`crate::logup::MidenLookupAuxBuilder`] (see `air/src/constraints/lookup/`).
 // Its 7-column layout is described entirely by `MidenLookupAir::column_shape`; the
 // legacy `AuxCols<T>` struct (which mirrored the multiset bus offsets) was removed in
 // Milestone B alongside the multiset bus deletion.
