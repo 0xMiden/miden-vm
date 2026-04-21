@@ -1549,6 +1549,7 @@ dependencies = [
  "miden-package-registry",
  "proptest",
  "serde",
+ "serde_json",
  "tempfile",
  "thiserror",
  "toml",

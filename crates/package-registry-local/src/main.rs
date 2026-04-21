@@ -1,4 +1,4 @@
-use std::{path::PathBuf, process::ExitCode};
+use std::{io::Write, path::PathBuf, process::ExitCode};
 
 use clap::{Parser, Subcommand};
 use miden_package_registry::{PackageId, PackageRegistry, Version};
@@ -22,7 +22,11 @@ enum Command {
     /// Publish `package` to the local package registry
     Publish { package: PathBuf },
     /// List all available packages known to the local registry
-    List,
+    List {
+        /// Emit package list in JSON format, rather than the default human-readable format
+        #[arg(long)]
+        json: bool,
+    },
     /// Query for information about a package in the registry
     Show {
         /// The package identifier/name
@@ -35,6 +39,9 @@ enum Command {
         /// If an error occurs, do not emit any output, just exit with a non-zero code
         #[arg(long)]
         quiet: bool,
+        /// Emit package information in JSON format, rather than the default human-readable format
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -52,29 +59,42 @@ fn main() -> Result<ExitCode, Box<dyn std::error::Error>> {
                 published.artifact_path.display()
             );
         },
-        Command::List => {
-            for package in registry.list() {
-                println!("{} {}", package.name, package.version);
+        Command::List { json } => {
+            let summaries = registry.list();
+            if json {
+                let mut stdout = std::io::stdout();
+                serde_json::to_writer_pretty(&mut stdout, &summaries)?;
+                writeln!(&mut stdout)?;
+            } else {
+                for package in registry.list() {
+                    println!("{} {}", package.name, package.version);
+                }
             }
         },
-        Command::Show { package, version, quiet } => {
+        Command::Show { package, version, quiet, json } => {
             let package_id = PackageId::from(package);
             let version = version.map(|version| version.parse::<Version>()).transpose()?;
             if let Some(summary) = registry.show(&package_id, version.as_ref()) {
-                println!("package: {}", summary.name);
-                println!("version: {}", summary.version);
-                if let Some(description) = summary.description {
-                    println!("description: {description}");
-                }
-                if let Some(path) = summary.artifact_path {
-                    println!("artifact: {}", path.display());
-                }
-                if summary.dependencies.is_empty() {
-                    println!("dependencies: none");
+                if json {
+                    let mut stdout = std::io::stdout();
+                    serde_json::to_writer_pretty(&mut stdout, &summary)?;
+                    writeln!(&mut stdout)?;
                 } else {
-                    println!("dependencies:");
-                    for (dependency, requirement) in summary.dependencies {
-                        println!("  {dependency} {requirement}");
+                    println!("package: {}", summary.name);
+                    println!("version: {}", summary.version);
+                    if let Some(description) = summary.description {
+                        println!("description: {description}");
+                    }
+                    if let Some(path) = summary.artifact_path {
+                        println!("artifact: {}", path.display());
+                    }
+                    if summary.dependencies.is_empty() {
+                        println!("dependencies: none");
+                    } else {
+                        println!("dependencies:");
+                        for (dependency, requirement) in summary.dependencies {
+                            println!("  {dependency} {requirement}");
+                        }
                     }
                 }
             } else {
