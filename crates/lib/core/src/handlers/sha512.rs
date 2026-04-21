@@ -141,7 +141,7 @@ impl Sha512Preimage {
     fn precompile_tag(&self) -> Word {
         [
             SHA512_HASH_BYTES_EVENT_NAME.to_event_id().as_felt(),
-            Felt::new(self.as_ref().len() as u64),
+            Felt::new_unchecked(self.as_ref().len() as u64),
             ZERO,
             ZERO,
         ]

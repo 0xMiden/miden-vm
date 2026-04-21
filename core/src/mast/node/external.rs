@@ -234,7 +234,7 @@ impl proptest::prelude::Arbitrary for ExternalNode {
         // Generate a random Word to use as the procedure hash/digest
         any::<[u64; 4]>()
             .prop_map(|[a, b, c, d]| {
-                let word = Word::from([Felt::new(a), Felt::new(b), Felt::new(c), Felt::new(d)]);
+                let word = Word::from([Felt::new_unchecked(a), Felt::new_unchecked(b), Felt::new_unchecked(c), Felt::new_unchecked(d)]);
                 ExternalNodeBuilder::new(word).build()
             })
             .no_shrink()  // Pure random values, no meaningful shrinking pattern
@@ -389,7 +389,12 @@ impl proptest::prelude::Arbitrary for ExternalNodeBuilder {
 
         (
             any::<[u64; 4]>().prop_map(|[a, b, c, d]| {
-                Word::new([Felt::new(a), Felt::new(b), Felt::new(c), Felt::new(d)])
+                Word::new([
+                    Felt::new_unchecked(a),
+                    Felt::new_unchecked(b),
+                    Felt::new_unchecked(c),
+                    Felt::new_unchecked(d),
+                ])
             }),
             proptest::collection::vec(
                 super::arbitrary::decorator_id_strategy(params.max_decorator_id_u32),

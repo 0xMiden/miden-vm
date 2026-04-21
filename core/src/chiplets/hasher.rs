@@ -136,7 +136,8 @@ mod tests {
         assert_eq!(state_stepwise, state_permutation, "mismatch with zero state");
 
         // Test with sequential values
-        let mut state_stepwise: [Felt; STATE_WIDTH] = core::array::from_fn(|i| Felt::new(i as u64));
+        let mut state_stepwise: [Felt; STATE_WIDTH] =
+            core::array::from_fn(|i| Felt::new_unchecked(i as u64));
         let mut state_permutation = state_stepwise;
 
         for i in 0..NUM_ROUNDS {
@@ -148,18 +149,18 @@ mod tests {
 
         // Test with arbitrary values
         let mut state_stepwise: [Felt; STATE_WIDTH] = [
-            Felt::new(0x123456789abcdef0_u64),
-            Felt::new(0xfedcba9876543210_u64),
-            Felt::new(0x0011223344556677_u64),
-            Felt::new(0x8899aabbccddeeff_u64),
-            Felt::new(0xdeadbeefcafebabe_u64),
-            Felt::new(0x1234567890abcdef_u64),
-            Felt::new(0x1234567890abcdef_u64),
-            Felt::new(0x0badc0debadf00d0_u64),
-            Felt::new(0x1111111111111111_u64),
-            Felt::new(0x2222222222222222_u64),
-            Felt::new(0x3333333333333333_u64),
-            Felt::new(0x4444444444444444_u64),
+            Felt::new_unchecked(0x123456789abcdef0_u64),
+            Felt::new_unchecked(0xfedcba9876543210_u64),
+            Felt::new_unchecked(0x0011223344556677_u64),
+            Felt::new_unchecked(0x8899aabbccddeeff_u64),
+            Felt::new_unchecked(0xdeadbeefcafebabe_u64),
+            Felt::new_unchecked(0x1234567890abcdef_u64),
+            Felt::new_unchecked(0x1234567890abcdef_u64),
+            Felt::new_unchecked(0x0badc0debadf00d0_u64),
+            Felt::new_unchecked(0x1111111111111111_u64),
+            Felt::new_unchecked(0x2222222222222222_u64),
+            Felt::new_unchecked(0x3333333333333333_u64),
+            Felt::new_unchecked(0x4444444444444444_u64),
         ];
         let mut state_permutation = state_stepwise;
 
@@ -175,7 +176,8 @@ mod tests {
     /// half-permutations produce the same result as a full permutation.
     #[test]
     fn apply_round_intermediate_states() {
-        let init_state: [Felt; STATE_WIDTH] = core::array::from_fn(|i| Felt::new((i + 1) as u64));
+        let init_state: [Felt; STATE_WIDTH] =
+            core::array::from_fn(|i| Felt::new_unchecked((i + 1) as u64));
 
         // Apply first half of rounds
         let mut state_half1 = init_state;
@@ -209,20 +211,20 @@ mod tests {
     fn packed_16row_matches_permutation() {
         let test_states: [_; 3] = [
             [Felt::ZERO; STATE_WIDTH],
-            core::array::from_fn(|i| Felt::new(i as u64)),
+            core::array::from_fn(|i| Felt::new_unchecked(i as u64)),
             [
-                Felt::new(0x123456789abcdef0),
-                Felt::new(0xfedcba9876543210),
-                Felt::new(0x0011223344556677),
-                Felt::new(0x8899aabbccddeeff),
-                Felt::new(0xdeadbeefcafebabe),
-                Felt::new(0x1234567890abcdef),
-                Felt::new(0x1234567890abcdef),
-                Felt::new(0x0badc0debadf00d0),
-                Felt::new(0x1111111111111111),
-                Felt::new(0x2222222222222222),
-                Felt::new(0x3333333333333333),
-                Felt::new(0x4444444444444444),
+                Felt::new_unchecked(0x123456789abcdef0),
+                Felt::new_unchecked(0xfedcba9876543210),
+                Felt::new_unchecked(0x0011223344556677),
+                Felt::new_unchecked(0x8899aabbccddeeff),
+                Felt::new_unchecked(0xdeadbeefcafebabe),
+                Felt::new_unchecked(0x1234567890abcdef),
+                Felt::new_unchecked(0x1234567890abcdef),
+                Felt::new_unchecked(0x0badc0debadf00d0),
+                Felt::new_unchecked(0x1111111111111111),
+                Felt::new_unchecked(0x2222222222222222),
+                Felt::new_unchecked(0x3333333333333333),
+                Felt::new_unchecked(0x4444444444444444),
             ],
         ];
 

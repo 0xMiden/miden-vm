@@ -4,16 +4,16 @@ use crate::trace::chiplets::Felt;
 
 /// Unique label ACE operation, computed as the chiplet selector with the bits reversed, plus one.
 /// `selector = [1, 1, 1, 0]`, `flag = rev(selector) + 1 = [0, 1, 1, 1] + 1 = 8`
-pub const ACE_INIT_LABEL: Felt = Felt::new(0b0111 + 1);
+pub const ACE_INIT_LABEL: Felt = Felt::new_unchecked(0b0111 + 1);
 
 /// Total number of columns making up the ACE chiplet.
 pub const ACE_CHIPLET_NUM_COLS: usize = 16;
 
 /// Offset of the `ID1` wire used when encoding an ACE instruction.
-pub const ACE_INSTRUCTION_ID1_OFFSET: Felt = Felt::new(1 << 30);
+pub const ACE_INSTRUCTION_ID1_OFFSET: Felt = Felt::new_unchecked(1 << 30);
 
 /// Offset of the `ID2` wire used when encoding an ACE instruction.
-pub const ACE_INSTRUCTION_ID2_OFFSET: Felt = Felt::new(1 << 60);
+pub const ACE_INSTRUCTION_ID2_OFFSET: Felt = Felt::new_unchecked(1 << 60);
 
 // --- OPERATION SELECTORS ------------------------------------------------------------------------
 

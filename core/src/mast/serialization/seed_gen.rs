@@ -101,7 +101,13 @@ fn generate_fuzz_seeds() {
             .unwrap();
         forest.make_root(block_id);
 
-        let a: Word = [Felt::new(9), Felt::new(10), Felt::new(11), Felt::new(12)].into();
+        let a: Word = [
+            Felt::new_unchecked(9),
+            Felt::new_unchecked(10),
+            Felt::new_unchecked(11),
+            Felt::new_unchecked(12),
+        ]
+        .into();
         let kernel = Kernel::from_hashes_unchecked(vec![a, a]);
         let program = Program::with_kernel(Arc::new(forest), block_id, kernel);
 
@@ -113,14 +119,34 @@ fn generate_fuzz_seeds() {
         let kernel = Kernel::default();
         write_seed("kernel_deserialize", "empty_kernel.bin", &kernel.to_bytes());
 
-        let a: Word = [Felt::new(1), Felt::new(2), Felt::new(3), Felt::new(4)].into();
-        let b: Word = [Felt::new(5), Felt::new(6), Felt::new(7), Felt::new(8)].into();
+        let a: Word = [
+            Felt::new_unchecked(1),
+            Felt::new_unchecked(2),
+            Felt::new_unchecked(3),
+            Felt::new_unchecked(4),
+        ]
+        .into();
+        let b: Word = [
+            Felt::new_unchecked(5),
+            Felt::new_unchecked(6),
+            Felt::new_unchecked(7),
+            Felt::new_unchecked(8),
+        ]
+        .into();
 
         let non_empty = Kernel::new(&[a]).expect("failed to build non-empty kernel");
         write_seed("kernel_deserialize", "single_kernel.bin", &non_empty.to_bytes());
 
         let max_kernel: Vec<Word> = (0u64..=254)
-            .map(|n| [Felt::new(n), Felt::new(n + 1), Felt::new(n + 2), Felt::new(n + 3)].into())
+            .map(|n| {
+                [
+                    Felt::new_unchecked(n),
+                    Felt::new_unchecked(n + 1),
+                    Felt::new_unchecked(n + 2),
+                    Felt::new_unchecked(n + 3),
+                ]
+                .into()
+            })
             .collect();
         let max_kernel = Kernel::new(&max_kernel).expect("failed to build max-size kernel");
         write_seed("kernel_deserialize", "max_kernel_255.bin", &max_kernel.to_bytes());
@@ -141,8 +167,8 @@ fn generate_fuzz_seeds() {
 
     // Stack IO seeds
     {
-        let inputs = StackInputs::new(&[Felt::new(1), Felt::new(2)]).unwrap();
-        let outputs = StackOutputs::new(&[Felt::new(3), Felt::new(4)]).unwrap();
+        let inputs = StackInputs::new(&[Felt::new_unchecked(1), Felt::new_unchecked(2)]).unwrap();
+        let outputs = StackOutputs::new(&[Felt::new_unchecked(3), Felt::new_unchecked(4)]).unwrap();
         write_seed("stack_io_deserialize", "stack_inputs.bin", &inputs.to_bytes());
         write_seed("stack_io_deserialize", "stack_outputs.bin", &outputs.to_bytes());
     }

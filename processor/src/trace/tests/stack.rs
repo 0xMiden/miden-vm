@@ -9,7 +9,7 @@ use super::{super::stack::OverflowTableRow, Felt, build_trace_from_ops, rand_arr
 // ================================================================================================
 
 const P1_COL_IDX: usize = STACK_AUX_TRACE_OFFSET;
-const TWO: Felt = Felt::new(2);
+const TWO: Felt = Felt::new_unchecked(2);
 
 // OVERFLOW TABLE TESTS
 // ================================================================================================
@@ -37,10 +37,10 @@ fn p1_trace() {
 
     let challenges: Challenges<Felt> = Challenges::<Felt>::new(challenges[0], challenges[1]);
     let row_values = [
-        OverflowTableRow::new(Felt::new(2), ONE, ZERO).to_value(&challenges),
-        OverflowTableRow::new(Felt::new(3), TWO, TWO).to_value(&challenges),
-        OverflowTableRow::new(Felt::new(6), TWO, TWO).to_value(&challenges),
-        OverflowTableRow::new(Felt::new(10), ZERO, ZERO).to_value(&challenges),
+        OverflowTableRow::new(Felt::new_unchecked(2), ONE, ZERO).to_value(&challenges),
+        OverflowTableRow::new(Felt::new_unchecked(3), TWO, TWO).to_value(&challenges),
+        OverflowTableRow::new(Felt::new_unchecked(6), TWO, TWO).to_value(&challenges),
+        OverflowTableRow::new(Felt::new_unchecked(10), ZERO, ZERO).to_value(&challenges),
     ];
 
     // make sure the first entry is ONE

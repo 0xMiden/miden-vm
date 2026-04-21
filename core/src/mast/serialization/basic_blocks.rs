@@ -232,7 +232,7 @@ impl BasicBlockDataDecoder<'_> {
 
             // Reconstruct the groups array and calculate num_groups
             // num_groups is the next available slot after all operation groups and immediate values
-            let mut groups = [Felt::new(0); 8];
+            let mut groups = [Felt::new_unchecked(0); 8];
             let mut next_group_idx = 0;
 
             for array_idx in 0..highest_op_group {
@@ -246,7 +246,7 @@ impl BasicBlockDataDecoder<'_> {
                         let opcode = op.op_code() as u64;
                         group_value |= opcode << (Operation::OP_BITS * local_op_idx);
                     }
-                    groups[array_idx] = Felt::new(group_value);
+                    groups[array_idx] = Felt::new_unchecked(group_value);
 
                     let (placements, next_group_idx_after) = collect_immediate_placements(
                         &batch_ops,
@@ -375,7 +375,7 @@ mod tests {
 
     #[test]
     fn test_decode_operations_rejects_push_immediate_group_overflow() {
-        let operations = vec![Operation::Push(Felt::new(1))];
+        let operations = vec![Operation::Push(Felt::new_unchecked(1))];
 
         let mut bytes = Vec::new();
         operations.write_into(&mut bytes);

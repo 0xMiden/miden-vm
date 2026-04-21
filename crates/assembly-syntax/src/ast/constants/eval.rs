@@ -394,8 +394,8 @@ where
                                     }
                                     .into());
                                 }
-                                let lhs = Felt::new(lhs.as_int());
-                                let rhs = Felt::new(rhs.as_int());
+                                let lhs = Felt::new_unchecked(lhs.as_int());
+                                let rhs = Felt::new_unchecked(rhs.as_int());
                                 IntValue::from(lhs / rhs)
                             },
                         };

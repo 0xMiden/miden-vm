@@ -137,7 +137,7 @@ fn mem_write() {
 
     // write a value into address 2; clk = 2
     let addr2 = 2_u32;
-    let value5 = Felt::new(5);
+    let value5 = Felt::new_unchecked(5);
     mem.write(ContextId::root(), Felt::from_u32(addr2), 2.into(), value5).unwrap();
     assert_eq!(value5, mem.get_value(ContextId::root(), addr2).unwrap());
     assert_eq!(1, mem.num_accessed_words());
@@ -145,7 +145,7 @@ fn mem_write() {
 
     // write a value into address 1; clk = 3
     let addr1 = 1_u32;
-    let value7 = Felt::new(7);
+    let value7 = Felt::new_unchecked(7);
     mem.write(ContextId::root(), Felt::from_u32(addr1), 3.into(), value7).unwrap();
     assert_eq!(value7, mem.get_value(ContextId::root(), addr1).unwrap());
     assert_eq!(1, mem.num_accessed_words());
@@ -153,7 +153,7 @@ fn mem_write() {
 
     // write a value into address 3; clk = 4
     let addr3 = 3_u32;
-    let value9 = Felt::new(9);
+    let value9 = Felt::new_unchecked(9);
     mem.write(ContextId::root(), Felt::from_u32(addr3), 4.into(), value9).unwrap();
     assert_eq!(value9, mem.get_value(ContextId::root(), addr3).unwrap());
     assert_eq!(1, mem.num_accessed_words());

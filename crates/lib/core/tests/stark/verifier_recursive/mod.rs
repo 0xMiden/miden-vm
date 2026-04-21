@@ -24,14 +24,14 @@ use miden_crypto::{
     field::BasedVectorSpace,
     stark::{
         StarkConfig,
-        air::AirInstance,
         challenger::CanObserve,
         fri::PcsTranscript,
-        lmcs::{BatchProof, Lmcs},
+        lmcs::{Lmcs, proof::BatchProofView},
         proof::StarkTranscript,
         verifier::VerifierError as CryptoVerifierError,
     },
 };
+use miden_lifted_stark::AirInstance;
 use miden_utils_testing::crypto::{MerklePath, MerkleStore, PartialMerkleTree};
 
 // TYPES
@@ -76,15 +76,14 @@ pub fn generate_advice_inputs(
     let params = config::pcs_params();
     let config = config::poseidon2_config(params);
 
-    // 1. Deserialize (log_trace_height, transcript_data) from proof bytes.
-    let (log_trace_height, transcript_data): (u8, _) = bincode::deserialize(proof_bytes)
+    // 1. Deserialize STARK proof bytes.
+    let transcript_data = bincode::deserialize(proof_bytes)
         .map_err(|e| VerifierError::ProofDeserializationError(e.to_string()))?;
-    let log_trace_height = log_trace_height as usize;
 
     // 2. Build domain-separated challenger, then observe public values.
     let (public_values, kernel_felts) = pub_inputs.to_air_inputs();
     let mut challenger = config.challenger();
-    config::observe_protocol_params(&mut challenger, log_trace_height as u64);
+    config::observe_protocol_params(&mut challenger);
     challenger.observe_slice(&public_values);
     let var_len_public_inputs: &[&[Felt]] = &[&kernel_felts];
     config::observe_var_len_public_inputs(&mut challenger, var_len_public_inputs, &[WORD_SIZE]);
@@ -92,7 +91,6 @@ pub fn generate_advice_inputs(
     // 3. Build AIR instance.
     let air = ProcessorAir;
     let instance = AirInstance {
-        log_trace_height: log_trace_height as u8,
         public_values: &public_values,
         var_len_public_inputs,
     };
@@ -100,6 +98,7 @@ pub fn generate_advice_inputs(
     // 4. Parse STARK transcript (mirrors Fiat-Shamir protocol).
     let (stark, _digest) =
         StarkTranscript::from_proof(&config, &[(&air, instance)], &transcript_data, challenger)?;
+    let log_trace_height = stark.instance_shapes.log_trace_heights()[0] as usize;
 
     // 5. Reconstruct kernel digests as Words for advice building.
     let kernel_digests: Vec<Word> = kernel_felts
@@ -277,33 +276,24 @@ where
 fn build_merkle_data(
     config: &P2Config,
     stark: &StarkTranscript<Challenge, P2Lmcs>,
-    log_trace_height: usize,
+    _log_trace_height: usize,
 ) -> Result<MerkleAdvice, VerifierError> {
     let pcs = &stark.pcs_transcript;
     let lmcs = config.lmcs();
-    let log_blowup = config::pcs_params().log_blowup() as usize;
-    let log_lde_height = log_trace_height + log_blowup;
 
     let mut partial_trees = Vec::new();
     let mut advice_map = Vec::new();
 
     // DEEP openings -- one BatchProof per commitment (main, aux, quotient).
-    for batch_proof in pcs.deep_openings.iter() {
-        let (trees, advs) =
-            batch_proof_to_merkle(lmcs, batch_proof, log_lde_height, &pcs.tree_indices)?;
+    for batch_proof in pcs.deep_witnesses.iter() {
+        let (trees, advs) = batch_proof_to_merkle(lmcs, batch_proof)?;
         partial_trees.extend(trees);
         advice_map.extend(advs);
     }
 
     // FRI openings -- one BatchProof per FRI round.
-    let log_arity = config::LOG_FOLDING_ARITY as usize;
-    for (round_idx, batch_proof) in pcs.fri_openings.iter().enumerate() {
-        let log_folded = log_arity * (round_idx + 1);
-        let round_indices: Vec<usize> =
-            pcs.tree_indices.iter().map(|&idx| idx >> log_folded).collect();
-        let fri_log_height = log_lde_height - log_folded;
-        let (trees, advs) =
-            batch_proof_to_merkle(lmcs, batch_proof, fri_log_height, &round_indices)?;
+    for batch_proof in pcs.fri_witnesses.iter() {
+        let (trees, advs) = batch_proof_to_merkle(lmcs, batch_proof)?;
         partial_trees.extend(trees);
         advice_map.extend(advs);
     }
@@ -325,35 +315,29 @@ fn build_merkle_data(
 fn batch_proof_to_merkle<L>(
     lmcs: &L,
     batch_proof: &L::BatchProof,
-    log_height: usize,
-    query_indices: &[usize],
 ) -> Result<BatchMerkleResult, VerifierError>
 where
     L: Lmcs<F = Felt>,
     L::Commitment: Copy + Into<[Felt; 4]>,
-    L::BatchProof: AsLmcsBatchProof<Felt, L::Commitment>,
+    L::BatchProof: BatchProofView<Felt, L::Commitment>,
     L::Commitment: PartialEq,
 {
-    let batch = batch_proof.as_batch_proof();
-
-    let widths = infer_widths(batch);
-    let single_proofs = batch
-        .single_proofs(lmcs, &widths, log_height as u8)
-        .ok_or(VerifierError::InvalidProofShape("failed to reconstruct merkle paths"))?;
-
     let mut paths = Vec::new();
     let mut advice_entries = Vec::new();
 
-    for &index in query_indices {
-        let proof = single_proofs
-            .get(&index)
+    for index in batch_proof.indices() {
+        let rows = batch_proof
+            .opening(index)
             .ok_or(VerifierError::InvalidProofShape("missing opening for query index"))?;
+        let siblings = batch_proof
+            .path(index)
+            .ok_or(VerifierError::InvalidProofShape("missing Merkle path for query index"))?;
 
-        let leaf_data: Vec<Felt> = proof.rows.as_slice().to_vec();
-        let leaf_hash = lmcs.hash(proof.rows.iter_rows());
+        let leaf_data: Vec<Felt> = rows.as_slice().to_vec();
+        let leaf_hash = lmcs.hash(rows.iter_rows());
         let leaf_word: Word = Word::new(leaf_hash.into());
         let merkle_path =
-            MerklePath::new(proof.siblings.iter().map(|c| Word::new((*c).into())).collect());
+            MerklePath::new(siblings.into_iter().map(|c| Word::new(c.into())).collect());
 
         paths.push((index as u64, leaf_word, merkle_path));
         advice_entries.push((leaf_word, leaf_data));
@@ -363,32 +347,6 @@ where
         .map_err(|_| VerifierError::InvalidProofShape("invalid merkle paths"))?;
 
     Ok((vec![tree], advice_entries))
-}
-
-// BATCH PROOF TRAIT
-// ================================================================================================
-
-/// Trait to access `BatchProof` fields generically through the `Lmcs::BatchProof` associated type.
-pub trait AsLmcsBatchProof<F, C> {
-    fn as_batch_proof(&self) -> &BatchProof<F, C>;
-}
-
-impl<F, C> AsLmcsBatchProof<F, C> for BatchProof<F, C> {
-    fn as_batch_proof(&self) -> &BatchProof<F, C> {
-        self
-    }
-}
-
-// HELPERS
-// ================================================================================================
-
-fn infer_widths<F, C>(batch: &BatchProof<F, C>) -> Vec<usize> {
-    batch
-        .openings
-        .values()
-        .next()
-        .map(|opening| opening.rows.iter_rows().map(<[F]>::len).collect())
-        .unwrap_or_default()
 }
 
 /// Build kernel digest advice data.

@@ -118,10 +118,10 @@ impl PeriodicAirBuilder for ConstraintEvalBuilder {
 
 /// Sets the u32 helper registers (hasher_state[2..7]) in the decoder.
 fn set_u32_helpers(row: &mut MainCols<Felt>, lo: u32, hi: u32) {
-    row.decoder.hasher_state[2] = Felt::new(lo as u64 & 0xffff);
-    row.decoder.hasher_state[3] = Felt::new((lo as u64) >> 16);
-    row.decoder.hasher_state[4] = Felt::new(hi as u64 & 0xffff);
-    row.decoder.hasher_state[5] = Felt::new((hi as u64) >> 16);
+    row.decoder.hasher_state[2] = Felt::new_unchecked(lo as u64 & 0xffff);
+    row.decoder.hasher_state[3] = Felt::new_unchecked((lo as u64) >> 16);
+    row.decoder.hasher_state[4] = Felt::new_unchecked(hi as u64 & 0xffff);
+    row.decoder.hasher_state[5] = Felt::new_unchecked((hi as u64) >> 16);
     row.decoder.hasher_state[6] = Felt::ZERO;
 }
 
@@ -134,7 +134,7 @@ fn eval_stack_arith(local: &MainCols<Felt>, next: &MainCols<Felt>) -> Vec<QuadFe
 
 #[test]
 fn stack_arith_u32add_constraints_allow_non_u32_operands() {
-    let non_u32 = Felt::new(Felt::ORDER_U64 - 1);
+    let non_u32 = Felt::new_unchecked(Felt::ORDER_U64 - 1);
     assert!(non_u32.as_canonical_u64() > u32::MAX as u64);
 
     let mut local = generate_test_row(opcodes::U32ADD as usize);
@@ -157,18 +157,18 @@ fn stack_arith_u32add_constraints_allow_non_u32_operands() {
 
 #[test]
 fn stack_arith_u32sub_constraints_allow_non_u32_operands() {
-    let non_u32 = Felt::new(Felt::ORDER_U64 - 1);
+    let non_u32 = Felt::new_unchecked(Felt::ORDER_U64 - 1);
     let diff = ((1u64 << 32) - 12_290) as u32;
     assert!(non_u32.as_canonical_u64() > u32::MAX as u64);
 
     let mut local = generate_test_row(opcodes::U32SUB as usize);
-    local.stack.top[0] = Felt::new(12_289);
+    local.stack.top[0] = Felt::new_unchecked(12_289);
     local.stack.top[1] = non_u32;
     set_u32_helpers(&mut local, diff, 0);
 
     let mut next = generate_test_row(0);
     next.stack.top[0] = Felt::ONE;
-    next.stack.top[1] = Felt::new(diff as u64);
+    next.stack.top[1] = Felt::new_unchecked(diff as u64);
 
     let op_flags: OpFlags<Felt> = OpFlags::new(&local.decoder, &local.stack, &next.decoder);
     assert_eq!(op_flags.u32sub(), Felt::ONE);

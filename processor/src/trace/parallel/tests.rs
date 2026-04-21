@@ -27,12 +27,13 @@ use crate::{
     trace::trace_state::MemoryReadsReplay,
 };
 
-const DEFAULT_STACK: &[Felt] = &[Felt::new(1), Felt::new(2), Felt::new(3)];
+const DEFAULT_STACK: &[Felt] =
+    &[Felt::new_unchecked(1), Felt::new_unchecked(2), Felt::new_unchecked(3)];
 
 /// A sentinel value mainly used to catch when a ZERO is dropped from the stack but shouldn't have
 /// been. That is, if the stack is only ZEROs, we can't tell if a ZERO was dropped or not. Using a
 /// sentinel value makes it obvious when an unexpected ZERO is dropped.
-const SENTINEL_VALUE: Felt = Felt::new(9999);
+const SENTINEL_VALUE: Felt = Felt::new_unchecked(9999);
 
 /// Returns the procedure hash that DYN and DYNCALL will call.
 /// The digest is computed dynamically from the target basic block (single SWAP operation).
@@ -802,7 +803,7 @@ fn basic_block_program_multiple_batches() -> Program {
 ///     (dyn)
 /// )
 fn dyn_program() -> Program {
-    const HASH_ADDR: Felt = Felt::new(40);
+    const HASH_ADDR: Felt = Felt::new_unchecked(40);
 
     let mut program = MastForest::new();
 
@@ -844,7 +845,7 @@ fn dyn_program() -> Program {
 ///     (dyncall)
 /// )
 fn dyncall_program() -> Program {
-    const HASH_ADDR: Felt = Felt::new(40);
+    const HASH_ADDR: Felt = Felt::new_unchecked(40);
 
     let mut program = MastForest::new();
 

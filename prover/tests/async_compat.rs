@@ -66,7 +66,7 @@ fn simple_program() -> miden_processor::Program {
 #[tokio::test(flavor = "current_thread")]
 async fn prove_async_matches_prove() {
     let program = simple_program();
-    let stack_inputs = StackInputs::new(&[Felt::new(0), Felt::new(1)]).unwrap();
+    let stack_inputs = StackInputs::new(&[Felt::new_unchecked(0), Felt::new_unchecked(1)]).unwrap();
     let advice_inputs = AdviceInputs::default();
     let execution_options = ExecutionOptions::default();
     let options = ProvingOptions::default();
