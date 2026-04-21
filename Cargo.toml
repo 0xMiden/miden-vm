@@ -80,6 +80,7 @@ midenc-hir-type  = { version = "0.6.0", default-features = false }
 bincode = "1.3"
 
 # Third-party crates
+clap            = { version = "4.5", features = ["derive"] }
 criterion       = { version = "0.7" }
 derive_more     = { version = "2.0", features = ["from"] }
 env_logger      = { version = "0.11" }
