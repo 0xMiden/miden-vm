@@ -152,33 +152,7 @@ where
         node_map[idx] = Some(ace_node);
     }
 
-    let dag_root = lookup_node(&node_map, dag.root());
-
-    // Ensure the circuit's root is the last operation. The ACE chiplet reads its
-    // output from the last wire inserted (`CircuitEvaluation::output_value` returns
-    // `wires.last()`), not from a logical root pointer. `DagBuilder` constant-folding
-    // can leave the logical root pointing at an earlier node (for example when a
-    // terminal `add(x, 0)` or `mul(x, 1)` short-circuits) while later ops in the DAG
-    // still appear in the emitted wire bus. Those later ops then leak into the
-    // chiplet output. Appending a trailing `add(dag_root, 0)` forces the root to be
-    // the last inserted wire without changing its value.
-    let root = match dag_root {
-        AceNode::Operation(idx) if idx + 1 == operations.len() => dag_root,
-        _ => {
-            let zero_idx = *constant_map.entry(EF::ZERO).or_insert_with(|| {
-                constants.push(EF::ZERO);
-                constants.len() - 1
-            });
-            let op_idx = operations.len();
-            operations.push(AceOpNode {
-                op: AceOp::Add,
-                lhs: dag_root,
-                rhs: AceNode::Constant(zero_idx),
-            });
-            AceNode::Operation(op_idx)
-        },
-    };
-
+    let root = lookup_node(&node_map, dag.root());
     Ok(AceCircuit { layout, constants, operations, root })
 }
 

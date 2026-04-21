@@ -149,7 +149,6 @@ impl RangeChecker {
         let [t0, t1] = trace;
         let trace = unsafe { [assume_init_vec(t0), assume_init_vec(t1)] };
 
-        let _ = num_padding_rows;
         RangeCheckTrace { trace }
     }
 

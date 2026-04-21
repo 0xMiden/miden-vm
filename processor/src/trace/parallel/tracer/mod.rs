@@ -5,7 +5,7 @@ use miden_core::program::MIN_STACK_DEPTH;
 
 use super::{
     super::{
-        decoder::block_stack::ExecutionContextInfo,
+        block_stack::ExecutionContextInfo,
         trace_state::{
             BlockAddressReplay, BlockStackReplay, DecoderState, StackState, SystemState,
         },

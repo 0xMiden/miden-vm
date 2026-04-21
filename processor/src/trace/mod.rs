@@ -26,7 +26,7 @@ use utils::TraceFragment;
 pub mod chiplets;
 pub(crate) mod execution_tracer;
 
-mod decoder;
+mod block_stack;
 mod parallel;
 mod range;
 mod stack;
