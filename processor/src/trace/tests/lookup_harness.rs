@@ -59,12 +59,8 @@ impl InteractionLog {
         let challenges =
             Challenges::<QuadFelt>::new(alpha, beta, MIDEN_MAX_MESSAGE_WIDTH, BusId::COUNT);
 
-        let fractions = build_lookup_fractions(
-            &MidenLookupAir,
-            &main_trace,
-            &periodic,
-            &challenges,
-        );
+        let fractions =
+            build_lookup_fractions(&MidenLookupAir, &main_trace, &periodic, &challenges);
 
         Self { challenges, rows: split_rows(&fractions) }
     }

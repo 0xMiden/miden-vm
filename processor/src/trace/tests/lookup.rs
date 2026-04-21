@@ -183,4 +183,3 @@ fn build_lookup_fractions_matches_constraint_path_oracle() {
         }
     }
 }
-

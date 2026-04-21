@@ -19,14 +19,10 @@
 use miden_core::field::ExtensionField;
 use miden_crypto::stark::air::LiftedAirBuilder;
 
-use super::{
-    buses::LookupOpFlags,
-    chiplet_air::ChipletLookupBuilder,
-    main_air::MainLookupBuilder,
-};
+use super::{buses::LookupOpFlags, chiplet_air::ChipletLookupBuilder, main_air::MainLookupBuilder};
 use crate::{
     Felt, MainCols,
-    lookup::{ConstraintLookupBuilder, LookupBuilder, ProverLookupBuilder},
+    lookup::{ConstraintLookupBuilder, ProverLookupBuilder},
 };
 
 // CONSTRAINT PATH

@@ -7,14 +7,13 @@
 //!
 //! The two construction paths live side by side:
 //!
-//! - [`from_main_cols`](LookupOpFlags::from_main_cols) — polynomial, shared by the
-//!   constraint-path adapter and the debug builders. Mirrors the relevant parts of
-//!   [`OpFlags::new`](crate::constraints::op_flags::OpFlags::new) but skips every prefix
-//!   product that would feed only unused flags.
+//! - [`from_main_cols`](LookupOpFlags::from_main_cols) — polynomial, shared by the constraint-path
+//!   adapter and the debug builders. Mirrors the relevant parts of
+//!   [`OpFlags::new`](crate::constraints::op_flags::OpFlags::new) but skips every prefix product
+//!   that would feed only unused flags.
 //! - [`from_boolean_row`](LookupOpFlags::from_boolean_row) (added in a follow-up commit) —
-//!   prover-path override that decodes the 7-bit opcode as a `u8` and flips exactly one
-//!   flag per row. Saves a further factor by sidestepping Felt arithmetic altogether on
-//!   the discrete flags.
+//!   prover-path override that decodes the 7-bit opcode as a `u8` and flips exactly one flag per
+//!   row. Saves a further factor by sidestepping Felt arithmetic altogether on the discrete flags.
 //!
 //! The method-accessor shape intentionally mirrors `OpFlags` so the bus emitters read
 //! `op_flags.join()` / `op_flags.overflow()` etc. without caring which constructor ran.
@@ -28,9 +27,7 @@ use miden_core::{
 };
 
 use crate::constraints::{
-    decoder::columns::DecoderCols,
-    op_flags::get_op_index,
-    stack::columns::StackCols,
+    decoder::columns::DecoderCols, op_flags::get_op_index, stack::columns::StackCols,
 };
 
 // LOOKUP OP FLAGS
@@ -115,14 +112,10 @@ where
         });
 
         // -- Shared prefix product tables (same shape as OpFlags::new) ----------------------
-        let b32: [E; 4] =
-            array::from_fn(|i| bits[3][i >> 1].clone() * bits[2][i & 1].clone());
-        let b321: [E; 8] =
-            array::from_fn(|i| b32[i >> 1].clone() * bits[1][i & 1].clone());
-        let b3210: [E; 16] =
-            array::from_fn(|i| b321[i >> 1].clone() * bits[0][i & 1].clone());
-        let b432: [E; 8] =
-            array::from_fn(|i| bits[4][i >> 2].clone() * b32[i & 3].clone());
+        let b32: [E; 4] = array::from_fn(|i| bits[3][i >> 1].clone() * bits[2][i & 1].clone());
+        let b321: [E; 8] = array::from_fn(|i| b32[i >> 1].clone() * bits[1][i & 1].clone());
+        let b3210: [E; 16] = array::from_fn(|i| b321[i >> 1].clone() * bits[0][i & 1].clone());
+        let b432: [E; 8] = array::from_fn(|i| bits[4][i >> 2].clone() * b32[i & 3].clone());
 
         // -- Degree-7 subset --------------------------------------------------------------
         // deg-7 flag(op) = b654[op >> 4] * b321[(op >> 1) & 7] * bits[0][op & 1].
@@ -143,9 +136,7 @@ where
 
         // -- Degree-5 subset --------------------------------------------------------------
         let deg5_extra: E = decoder.extra[0].into();
-        let deg5 = |op: u8| -> E {
-            deg5_extra.clone() * b3210[get_op_index(op)].clone()
-        };
+        let deg5 = |op: u8| -> E { deg5_extra.clone() * b3210[get_op_index(op)].clone() };
         let hperm = deg5(opcodes::HPERM);
         let mpverify = deg5(opcodes::MPVERIFY);
         let pipe = deg5(opcodes::PIPE);
@@ -162,9 +153,7 @@ where
 
         // -- Degree-4 subset --------------------------------------------------------------
         let deg4_extra: E = decoder.extra[1].into();
-        let deg4 = |op: u8| -> E {
-            b432[get_op_index(op)].clone() * deg4_extra.clone()
-        };
+        let deg4 = |op: u8| -> E { b432[get_op_index(op)].clone() * deg4_extra.clone() };
         let end = deg4(opcodes::END);
         let repeat = deg4(opcodes::REPEAT);
         let respan = deg4(opcodes::RESPAN);
@@ -183,9 +172,9 @@ where
             let nb3n = E::ONE - b3n.clone();
             let nb2n = E::ONE - b2n.clone();
             (
-                prefix.clone() * nb3n.clone() * nb2n,   // END:    nb3' * nb2'
-                prefix.clone() * nb3n * b2n.clone(),    // REPEAT: nb3' * b2'
-                prefix * b3n * b2n,                     // HALT:   b3'  * b2'
+                prefix.clone() * nb3n.clone() * nb2n, // END:    nb3' * nb2'
+                prefix.clone() * nb3n * b2n.clone(),  // REPEAT: nb3' * b2'
+                prefix * b3n * b2n,                   // HALT:   b3'  * b2'
             )
         };
 
@@ -323,14 +312,11 @@ impl LookupOpFlags<Felt> {
         f.u32_rc_op = bool_to_felt((64..80).contains(&opcode));
         // right_shift_scalar: prefix_011 (opcodes 48..64) + PUSH + U32SPLIT.
         f.right_shift = bool_to_felt(
-            (48..64).contains(&opcode)
-                || opcode == opcodes::PUSH
-                || opcode == opcodes::U32SPLIT,
+            (48..64).contains(&opcode) || opcode == opcodes::PUSH || opcode == opcodes::U32SPLIT,
         );
         // left_shift_scalar: prefix_010 (opcodes 32..48) + U32ADD3/U32MADD + SPLIT/LOOP/
         // REPEAT/DYN + END*is_loop. DYNCALL intentionally excluded — see OpFlags::left_shift.
-        let is_end_loop =
-            opcode == opcodes::END && decoder.end_block_flags().is_loop == Felt::ONE;
+        let is_end_loop = opcode == opcodes::END && decoder.end_block_flags().is_loop == Felt::ONE;
         f.left_shift = bool_to_felt(
             (32..48).contains(&opcode)
                 || matches!(
@@ -421,12 +407,38 @@ impl LookupOpFlags<Felt> {
             };
         }
         check!(
-            end, repeat, respan, call, syscall, mrupdate,
-            join, split, span, loop_op, dyn_op, dyncall, push,
-            hperm, mpverify, mstream, pipe, evalcircuit, log_precompile,
-            mload, mstore, mloadw, mstorew, u32and, u32xor,
-            end_next, repeat_next, halt_next,
-            left_shift, right_shift, overflow, u32_rc_op,
+            end,
+            repeat,
+            respan,
+            call,
+            syscall,
+            mrupdate,
+            join,
+            split,
+            span,
+            loop_op,
+            dyn_op,
+            dyncall,
+            push,
+            hperm,
+            mpverify,
+            mstream,
+            pipe,
+            evalcircuit,
+            log_precompile,
+            mload,
+            mstore,
+            mloadw,
+            mstorew,
+            u32and,
+            u32xor,
+            end_next,
+            repeat_next,
+            halt_next,
+            left_shift,
+            right_shift,
+            overflow,
+            u32_rc_op,
         );
     }
 }
@@ -467,14 +479,40 @@ macro_rules! accessors {
 
 accessors!(
     // Degree-4 individual ops
-    end, repeat, respan, call, syscall, mrupdate,
+    end,
+    repeat,
+    respan,
+    call,
+    syscall,
+    mrupdate,
     // Degree-5 individual ops
-    join, split, span, loop_op, dyn_op, dyncall, push,
-    hperm, mpverify, mstream, pipe, evalcircuit, log_precompile,
+    join,
+    split,
+    span,
+    loop_op,
+    dyn_op,
+    dyncall,
+    push,
+    hperm,
+    mpverify,
+    mstream,
+    pipe,
+    evalcircuit,
+    log_precompile,
     // Degree-7 individual ops
-    mload, mstore, mloadw, mstorew, u32and, u32xor,
+    mload,
+    mstore,
+    mloadw,
+    mstorew,
+    u32and,
+    u32xor,
     // Next-row control flow
-    end_next, repeat_next, halt_next,
+    end_next,
+    repeat_next,
+    halt_next,
     // Composite flags
-    left_shift, right_shift, overflow, u32_rc_op,
+    left_shift,
+    right_shift,
+    overflow,
+    u32_rc_op,
 );

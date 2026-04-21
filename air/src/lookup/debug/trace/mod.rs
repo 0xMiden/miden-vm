@@ -259,13 +259,7 @@ where
         }
 
         {
-            let mut lb = DebugTraceBuilder::new(
-                window,
-                &periodic_row,
-                challenges,
-                &mut state,
-                r,
-            );
+            let mut lb = DebugTraceBuilder::new(window, &periodic_row, challenges, &mut state, r);
             air.eval(&mut lb);
         }
 

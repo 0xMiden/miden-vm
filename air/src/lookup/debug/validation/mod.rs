@@ -1,7 +1,7 @@
 //! Single AIR self-validation entry point.
 //!
 //! Exposes one free function, [`validate`], and one extension trait,
-//! [`ValidateLookupAir`], so any qualifying [`LookupAir`](super::super::LookupAir)
+//! [`ValidateLookupAir`], so any qualifying [`LookupAir`]
 //! can be checked with `air.validate(layout)`. Collapses what was previously a
 //! six-file surface (per-pass inventory walk, structure report, symbolic degree
 //! budget, …) into one short-circuit [`Result<(), ValidationError>`] that covers:
@@ -208,7 +208,7 @@ where
 // ================================================================================================
 
 /// Extension trait that adapts [`validate`] into a method on any qualifying
-/// [`LookupAir`](super::super::LookupAir). Call sites write
+/// [`LookupAir`]. Call sites write
 /// `MyLookupAir.validate(layout)` instead of `validate(&MyLookupAir, layout)`.
 pub trait ValidateLookupAir {
     fn validate(&self, layout: ValidateLayout) -> Result<(), ValidationError>;

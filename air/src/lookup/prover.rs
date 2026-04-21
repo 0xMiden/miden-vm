@@ -185,13 +185,8 @@ where
             periodic_row[i] = col[r % col.len()];
         }
 
-        let mut lb = ProverLookupBuilder::new(
-            window,
-            &periodic_row,
-            challenges,
-            air,
-            &mut fractions,
-        );
+        let mut lb =
+            ProverLookupBuilder::new(window, &periodic_row, challenges, air, &mut fractions);
         air.eval(&mut lb);
     }
 

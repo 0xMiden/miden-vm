@@ -104,8 +104,8 @@ where
 ///
 /// Single source of truth shared between:
 /// - [`MidenLookupAir`]'s `LookupAir::eval_boundary` (consumed by the debug walker), and
-/// - [`crate::ProcessorAir::reduced_aux_values`] (verifier scalar check; drives the
-///   emissions through a reducer that sums `Σ multiplicity / encode(msg)`).
+/// - [`crate::ProcessorAir::reduced_aux_values`] (verifier scalar check; drives the emissions
+///   through a reducer that sums `Σ multiplicity / encode(msg)`).
 ///
 /// See `program_hash_message`, `transcript_messages`, and `kernel_proc_message` in
 /// `air/src/lib.rs` for the canonical formulas this mirrors.
