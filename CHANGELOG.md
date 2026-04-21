@@ -1,5 +1,7 @@
 ## 0.25.0 (TBD)
 
+- Added `Signature::from_der()` for EdDSA signatures ([#979](https://github.com/0xMiden/crypto/pull/979)).
+
 ## 0.24.0 (2026-04-19)
 
 - [BREAKING] Removed `AlgebraicSponge::merge_with_int()` method ([#894](https://github.com/0xMiden/crypto/pull/894)).

@@ -63,6 +63,7 @@ blake3           = { default-features = false, version = "1.8" }
 cc               = "1.2"
 chacha20poly1305 = "0.10"
 curve25519-dalek = { default-features = false, version = "4" }
+der              = { default-features = false, version = "0.7" }
 ed25519-dalek    = "2"
 flume            = "0.11.1"
 hex              = { default-features = false, version = "0.4" }

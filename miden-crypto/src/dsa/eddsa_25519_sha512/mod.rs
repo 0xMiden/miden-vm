@@ -3,6 +3,7 @@
 
 use alloc::{string::ToString, vec::Vec};
 
+use der::{Decode, asn1::BitStringRef};
 use ed25519_dalek::{Signer, Verifier};
 use miden_crypto_derive::{SilentDebug, SilentDisplay};
 use rand::{CryptoRng, RngCore};
@@ -467,6 +468,38 @@ impl Signature {
     /// Verify against (message, public key).
     pub fn verify(&self, message: Word, pub_key: &PublicKey) -> bool {
         pub_key.verify(message, self)
+    }
+
+    /// Creates a signature from a DER-encoded BIT STRING (RFC 8410 §6) or raw bytes.
+    ///
+    /// Accepts either:
+    /// - A raw 64-byte Ed25519 signature.
+    /// - A DER BIT STRING wrapping a 64-byte Ed25519 signature.
+    pub fn from_der(bytes: &[u8]) -> Result<Self, DeserializationError> {
+        if bytes.len() == SIGNATURE_BYTES {
+            let inner = ed25519_dalek::Signature::from_bytes(
+                bytes.try_into().expect("length verified above"),
+            );
+            return Ok(Self { inner });
+        }
+
+        let bit_string = BitStringRef::from_der(bytes)
+            .map_err(|e| DeserializationError::InvalidValue(e.to_string()))?;
+
+        let raw = bit_string.as_bytes().ok_or_else(|| {
+            DeserializationError::InvalidValue("BIT STRING has non-zero unused bits".into())
+        })?;
+
+        let sig_bytes: &[u8; SIGNATURE_BYTES] = raw.try_into().map_err(|e| {
+            DeserializationError::InvalidValue(alloc::format!(
+                "expected {SIGNATURE_BYTES} signature bytes, got {}: {e}",
+                raw.len()
+            ))
+        })?;
+
+        Ok(Self {
+            inner: ed25519_dalek::Signature::from_bytes(sig_bytes),
+        })
     }
 }
 
