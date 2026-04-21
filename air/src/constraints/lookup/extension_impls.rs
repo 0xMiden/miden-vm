@@ -53,10 +53,11 @@ impl<'a, EF> ChipletLookupBuilder for ProverLookupBuilder<'a, Felt, EF> where
 // ================================================================================================
 //
 // Empty impls for the Felt/QuadFelt-pinned debug builders. They pick up the default
-// polynomial bodies of `build_op_flags` / `build_chiplet_active`; the builders only run in
-// test / bus-debug contexts so there's no need for a boolean fast-path override.
+// polynomial bodies of `build_op_flags` / `build_chiplet_active`; the builders only
+// compile when the `debug` module is available (gated on `std`), so there's no need
+// for a boolean fast-path override.
 
-#[cfg(any(test, feature = "bus-debug"))]
+#[cfg(feature = "std")]
 mod debug_impls {
     use super::{ChipletLookupBuilder, MainLookupBuilder};
     use crate::lookup::debug::{DebugStructureBuilder, DebugTraceBuilder};

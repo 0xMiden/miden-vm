@@ -14,8 +14,7 @@
 //! interactions to cancel silently. Subset semantics over raw `(mult, denom)` tuples keeps every
 //! expected interaction independently observable.
 
-use alloc::{format, string::String, vec::Vec};
-use std::collections::HashMap;
+use alloc::vec::Vec;
 
 use miden_air::{
     LiftedAir, ProcessorAir,
@@ -77,44 +76,21 @@ impl InteractionLog {
     /// Verify that each row's expected bag is a multiset-subset of that row's actual bag of
     /// prover pushes.
     ///
-    /// For every `(row, mult, denom)` in `expected`, there must be a matching unclaimed push at
-    /// that row with identical `(mult, denom)`. Two expected entries with the same triple
-    /// require two matching pushes. Actual pushes that no expected entry claims are ignored —
-    /// this is the whole point of subset semantics, so partial tests can focus on one bus or
-    /// one instruction without enumerating every other interaction that happens to fire.
-    ///
-    /// Panics on the first mismatch with a message listing the unmatched expected entry and
-    /// the full actual row bag.
+    /// For every `(row, mult, denom)` in `expected`, there must be at least as many matching
+    /// pushes at that row. Unclaimed actual pushes are ignored — this is the whole point of
+    /// subset semantics, so partial tests can focus on one bus or one instruction without
+    /// enumerating every other interaction that happens to fire.
     pub fn assert_contains(&self, expected: &Expectations) {
-        // Group expected entries by row: rows_expected[r] = count of each (mult, denom) key.
-        let mut rows_expected: HashMap<usize, HashMap<FracKey, usize>> = HashMap::new();
-        for &(row, mult, denom) in &expected.entries {
-            *rows_expected.entry(row).or_default().entry(frac_key(mult, denom)).or_default() += 1;
-        }
-
-        for (row, want) in rows_expected {
+        for &entry in &expected.entries {
+            let (row, mult, denom) = entry;
+            let want = expected.entries.iter().filter(|&&e| e == entry).count();
+            let have = self.rows[row].iter().filter(|&&(m, d)| m == mult && d == denom).count();
             assert!(
-                row < self.rows.len(),
-                "expected row {row} but trace has only {} rows",
-                self.rows.len(),
+                have >= want,
+                "row {row}: expected at least {want}× (mult={mult:?}, denom={denom:?}), saw {have}.\n\
+                 actual row bag: {:?}",
+                self.rows[row],
             );
-            let mut have: HashMap<FracKey, usize> = HashMap::new();
-            for &(m, d) in &self.rows[row] {
-                *have.entry(frac_key(m, d)).or_default() += 1;
-            }
-
-            for (&(mult, denom), want_count) in &want {
-                let have_count = have.get(&(mult, denom)).copied().unwrap_or(0);
-                if have_count < *want_count {
-                    panic!(
-                        "row {row}: expected {want_count} push(es) of (mult={}, denom={:?}) but \
-                         only {have_count} such push(es) fired.\n  actual row bag: {}",
-                        display_mult(mult),
-                        denom,
-                        format_row(&self.rows[row]),
-                    );
-                }
-            }
         }
     }
 }
@@ -173,41 +149,6 @@ impl<'a> Expectations<'a> {
 
 // HELPERS
 // ================================================================================================
-
-/// `(mult, denom)` — a direct `HashMap` key using the `Hash + Eq` impls both `Felt` and
-/// `QuadFelt` already provide (`BinomialExtensionField` derives `Hash` in p3-field).
-type FracKey = (Felt, QuadFelt);
-
-fn frac_key(mult: Felt, denom: QuadFelt) -> FracKey {
-    (mult, denom)
-}
-
-/// Render a `Felt` multiplicity as its signed integer form when it's close to `0` (i.e.
-/// `p - k` for small `k`), otherwise as the raw canonical value. Makes failure messages
-/// readable when the multiplicity is `±1` or another small signed integer.
-fn display_mult(m: Felt) -> String {
-    const P: u64 = 0xffff_ffff_0000_0001; // Goldilocks modulus
-    let v = m.as_canonical_u64();
-    if v <= 16 {
-        format!("{v}")
-    } else if v >= P - 16 {
-        format!("-{}", P - v)
-    } else {
-        format!("{v}")
-    }
-}
-
-fn format_row(bag: &[(Felt, QuadFelt)]) -> String {
-    let mut s = String::from("[");
-    for (i, &(m, d)) in bag.iter().enumerate() {
-        if i > 0 {
-            s.push_str(", ");
-        }
-        s.push_str(&format!("(mult={}, denom={:?})", display_mult(m), d));
-    }
-    s.push(']');
-    s
-}
 
 /// Slice the flat `LookupFractions` buffer into per-row bags using the row-major `counts`
 /// layout (see `air/src/lookup/fractions.rs` for the ordering spec).

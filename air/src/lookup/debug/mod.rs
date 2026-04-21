@@ -14,18 +14,9 @@
 pub mod trace;
 pub mod validation;
 
-// Preserve the `debug::equivalence::...` and `debug::oracle::...` paths that the staged
-// `lookup/mod.rs` re-exports from. Aliases point at the consolidated builders.
-pub mod equivalence {
-    pub use super::validation::{DebugStructureBuilder as EquivalenceChecker, GroupMismatch};
-}
-pub mod oracle {
-    pub use super::trace::{DebugTraceBuilder as ColumnOracleBuilder, collect_column_oracle_folds};
-}
-
 pub use trace::{
-    BalanceReport, DebugTraceBuilder, MutualExclusionViolation, Unmatched, check_trace_balance,
-    collect_column_oracle_folds,
+    BalanceReport, DebugBoundaryEmitter, DebugTraceBuilder, MutualExclusionViolation, Unmatched,
+    check_trace_balance, collect_column_oracle_folds,
 };
 pub use validation::{
     ColumnRecord, DebugStructure, DebugStructureBuilder, DegreeMismatch, DegreeReport,

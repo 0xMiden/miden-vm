@@ -1,10 +1,14 @@
 //! Combined real-trace balance + per-column `(U, V)` oracle debug surface.
 //!
-//! One walk over a concrete main trace, row by row, produces two outputs projected out of
-//! the shared `run_trace_walk` driver:
+//! One walk over a concrete main trace, row by row, produces three outputs projected
+//! out of the shared `run_trace_walk` driver:
 //!
 //! - **Balance** — signed multiplicities keyed by encoded denominator. Any residual at the end of
 //!   the walk is an unmatched interaction.
+//! - **Push log** — a [`PushRecord`] per interaction emission, capturing pre-encoding payload,
+//!   encoded denominator, signed multiplicity, and `(row, column, group)` source coordinates.
+//!   Joined back against the balance map at finalize time so each unmatched denominator lists the
+//!   exact pushes that summed to it.
 //! - **Column oracle folds** — per-row per-column `(U_col, V_col)` pairs computed via the
 //!   constraint-path cross-multiplication rule, used by the processor's LogUp cross-check.
 //!
@@ -12,20 +16,15 @@
 //!
 //! - [`builder`] — the `DebugTraceBuilder` (plus column / group / batch handles) that drives each
 //!   per-row walk.
-//! - This file — the report types ([`BalanceReport`], [`Unmatched`], …), the row-by-row
-//!   `run_trace_walk` driver, and the two public entry points.
+//! - This file — the report types ([`BalanceReport`], [`Unmatched`], [`PushRecord`], …), the
+//!   row-by-row `run_trace_walk` driver, and the two public entry points.
 
-use alloc::{
-    collections::BTreeMap,
-    format,
-    string::{String, ToString},
-    vec,
-    vec::Vec,
-};
+use alloc::{string::String, vec, vec::Vec};
 use core::{borrow::Borrow, fmt};
+use std::collections::HashMap;
 
 use miden_core::{
-    field::{BasedVectorSpace, Field, PrimeCharacteristicRing, QuadFelt},
+    field::{Field, PrimeCharacteristicRing, QuadFelt},
     utils::{Matrix, RowMajorMatrix},
 };
 use miden_crypto::stark::air::RowWindow;
@@ -35,7 +34,9 @@ use crate::Felt;
 
 pub mod builder;
 
-pub use builder::{DebugTraceBatch, DebugTraceBuilder, DebugTraceColumn, DebugTraceGroup};
+pub use builder::{
+    DebugBoundaryEmitter, DebugTraceBatch, DebugTraceBuilder, DebugTraceColumn, DebugTraceGroup,
+};
 
 // REPORT TYPES
 // ================================================================================================
@@ -44,12 +45,31 @@ pub use builder::{DebugTraceBatch, DebugTraceBuilder, DebugTraceColumn, DebugTra
 /// the full trace.
 #[derive(Debug, Clone)]
 pub struct Unmatched {
-    /// Encoded denominator represented as its basis-coefficient tuple `[u64; 2]`.
-    pub denom_basis: [u64; 2],
+    pub denom: QuadFelt,
     /// Net signed multiplicity modulo the field prime.
     pub net_multiplicity: Felt,
-    /// Free-text summary suitable for inclusion in an assertion message.
-    pub summary: String,
+    /// Every push that landed on this encoded denominator during the walk, in emission
+    /// order. The caller can bucket these by `msg_repr` / column / row to isolate the
+    /// specific emit that left the denom unbalanced.
+    pub contributions: Vec<PushRecord>,
+}
+
+/// One interaction emission captured during a trace walk.
+///
+/// Populated for every push that passes its flag check, regardless of whether the
+/// interaction eventually balances. When a denom lands in [`BalanceReport::unmatched`],
+/// the join against the push log shows exactly which emits (row, column, group,
+/// payload) summed to the residual multiplicity.
+#[derive(Debug, Clone)]
+pub struct PushRecord {
+    pub row: usize,
+    pub column_idx: usize,
+    pub group_idx: usize,
+    /// `format!("{:?}", msg)` of the `LookupMessage` instance. `"<encoded>"` for
+    /// `insert_encoded` sites, where only the pre-computed denominator is known.
+    pub msg_repr: String,
+    pub denom: QuadFelt,
+    pub multiplicity: Felt,
 }
 
 /// Per-row mutual-exclusion violation inside a cached-encoding group.
@@ -76,6 +96,9 @@ impl BalanceReport {
 
 impl fmt::Display for BalanceReport {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        /// How many contributing pushes to print per unmatched denom before truncating.
+        const MAX_CONTRIB_LINES: usize = 4;
+
         if self.is_ok() {
             return writeln!(f, "BalanceReport: OK");
         }
@@ -86,7 +109,21 @@ impl fmt::Display for BalanceReport {
             self.mutex_violations.len(),
         )?;
         for u in &self.unmatched {
-            writeln!(f, "  {}", u.summary)?;
+            writeln!(f, "  denom {:?} net multiplicity {:?}", u.denom, u.net_multiplicity)?;
+            for r in u.contributions.iter().take(MAX_CONTRIB_LINES) {
+                writeln!(
+                    f,
+                    "    row={} col={} group={} mult={:?} msg={}",
+                    r.row, r.column_idx, r.group_idx, r.multiplicity, r.msg_repr,
+                )?;
+            }
+            if u.contributions.len() > MAX_CONTRIB_LINES {
+                writeln!(
+                    f,
+                    "    … {} more contributions",
+                    u.contributions.len() - MAX_CONTRIB_LINES,
+                )?;
+            }
         }
         for m in &self.mutex_violations {
             writeln!(
@@ -104,39 +141,19 @@ impl fmt::Display for BalanceReport {
 
 /// Scratch state threaded through [`DebugTraceBuilder`] for every row in the walk. The
 /// driver creates one instance per walk; it resets `column_folds` at the start of each
-/// row and keeps `balances` / `mutex_violations` accumulating across rows.
+/// row and keeps `balances` / `push_log` / `mutex_violations` accumulating across rows.
 pub struct DebugTraceState {
-    /// Signed-multiplicity accumulator keyed by encoded-denominator basis coefficients.
-    /// `BTreeMap` for `no_std` friendliness + deterministic iteration.
-    pub(super) balances: BTreeMap<[u64; 2], Felt>,
+    /// Signed-multiplicity accumulator keyed by encoded denominator. Sorted at
+    /// finalize time for deterministic output.
+    pub(super) balances: HashMap<QuadFelt, Felt>,
+    /// Per-push record of every interaction emission — the structured equivalent of the
+    /// legacy `busdbg_log` stderr hook. Joined against `balances` in [`finalize`] so
+    /// each unmatched denom carries its source pushes.
+    pub(super) push_log: Vec<PushRecord>,
     pub(super) mutex_violations: Vec<MutualExclusionViolation>,
     /// Per-column `(U_col, V_col)`. Reset to `(ONE, ZERO)` at the start of each row by
     /// [`run_trace_walk`].
     pub(super) column_folds: Vec<(QuadFelt, QuadFelt)>,
-}
-
-pub(super) fn denom_key(v: QuadFelt) -> [u64; 2] {
-    let slice: &[Felt] = v.as_basis_coefficients_slice();
-    [slice[0].as_canonical_u64(), slice[1].as_canonical_u64()]
-}
-
-pub(super) fn accumulate_balance(state: &mut DebugTraceState, v: QuadFelt, mult: Felt) {
-    let key = denom_key(v);
-    let entry = state.balances.entry(key).or_insert(Felt::ZERO);
-    *entry += mult;
-}
-
-impl DebugTraceState {
-    /// Fold a group's `(U_g, V_g)` into the column's `(U_col, V_col)` slot using the
-    /// constraint-path cross-multiplication rule `(U, V) ← (U·U_g, V·U_g + V_g·U)`.
-    ///
-    /// Free function on the state (not on the column handle) so it can be called from
-    /// inside a live `DebugTraceGroup` scope via `group.state.fold_group(...)` — the
-    /// column's `&mut self` is still borrowed through the group at that point.
-    pub(super) fn fold_group(&mut self, column_idx: usize, u_g: QuadFelt, v_g: QuadFelt) {
-        let (u_col, v_col) = self.column_folds[column_idx];
-        self.column_folds[column_idx] = (u_col * u_g, v_col * u_g + v_g * u_col);
-    }
 }
 
 // ENTRY POINTS
@@ -144,21 +161,39 @@ impl DebugTraceState {
 
 /// Walk a complete main trace and return the balance report (unmatched interactions +
 /// mutex violations).
+///
+/// Includes boundary contributions from [`LookupAir::eval_boundary`], so a fully
+/// closed AIR produces `BalanceReport::is_ok() == true`. `var_len_public_inputs` is
+/// the same shape the prover hands to `miden_crypto::stark::prover::prove_single`
+/// (e.g. `&[&kernel_felts]`); pass `&[]` if the AIR has no variable-length public
+/// inputs or no boundary contributions that consume them.
 pub fn check_trace_balance<A>(
     air: &A,
     main_trace: &RowMajorMatrix<Felt>,
     periodic_columns: &[Vec<Felt>],
     public_values: &[Felt],
+    var_len_public_inputs: &[&[Felt]],
     challenges: &Challenges<QuadFelt>,
 ) -> BalanceReport
 where
     for<'a> A: LookupAir<DebugTraceBuilder<'a>>,
 {
-    run_trace_walk(air, main_trace, periodic_columns, public_values, challenges).balance
+    run_trace_walk(
+        air,
+        main_trace,
+        periodic_columns,
+        public_values,
+        var_len_public_inputs,
+        challenges,
+    )
+    .balance
 }
 
 /// Walk a complete main trace and return the per-row constraint-path `(U_col, V_col)`
 /// folds. `folds[r][col]` is the fold for column `col` at row `r`.
+///
+/// Does not incorporate boundary contributions — the folds are a per-row property of
+/// the main trace, independent of once-per-proof outer emissions.
 pub fn collect_column_oracle_folds<A>(
     air: &A,
     main_trace: &RowMajorMatrix<Felt>,
@@ -169,7 +204,7 @@ pub fn collect_column_oracle_folds<A>(
 where
     for<'a> A: LookupAir<DebugTraceBuilder<'a>>,
 {
-    run_trace_walk(air, main_trace, periodic_columns, public_values, challenges).folds_per_row
+    run_trace_walk(air, main_trace, periodic_columns, public_values, &[], challenges).folds_per_row
 }
 
 // SHARED DRIVER
@@ -188,6 +223,7 @@ fn run_trace_walk<A>(
     main_trace: &RowMajorMatrix<Felt>,
     periodic_columns: &[Vec<Felt>],
     public_values: &[Felt],
+    var_len_public_inputs: &[&[Felt]],
     challenges: &Challenges<QuadFelt>,
 ) -> TraceWalkOutput
 where
@@ -199,7 +235,8 @@ where
     let num_cols = air.num_columns();
 
     let mut state = DebugTraceState {
-        balances: BTreeMap::new(),
+        balances: HashMap::new(),
+        push_log: Vec::new(),
         mutex_violations: Vec::new(),
         column_folds: vec![(QuadFelt::ONE, QuadFelt::ZERO); num_cols],
     };
@@ -236,30 +273,45 @@ where
         folds_per_row.push(state.column_folds.clone());
     }
 
+    // Boundary / outer interactions (once per proof, no row): kernel init, block
+    // hash, log-precompile terminals, …. Accumulates into the same balance map as
+    // the per-row trace emissions — a fully closed AIR produces `is_ok() == true`.
+    {
+        let mut boundary = DebugBoundaryEmitter {
+            challenges,
+            state: &mut state,
+            public_values,
+            var_len_public_inputs,
+        };
+        air.eval_boundary(&mut boundary);
+    }
+
     TraceWalkOutput { balance: finalize(state), folds_per_row }
 }
 
 fn finalize(state: DebugTraceState) -> BalanceReport {
-    let DebugTraceState { balances, mutex_violations, .. } = state;
-    let mut unmatched = Vec::new();
-    for (denom_basis, net) in balances {
-        if net != Felt::ZERO {
-            let summary = format!(
-                "denom [{:?}, {:?}] net multiplicity {:?}",
-                denom_basis[0], denom_basis[1], net,
-            );
-            unmatched.push(Unmatched {
-                denom_basis,
-                net_multiplicity: net,
-                summary,
-            });
-        }
-    }
-    BalanceReport { unmatched, mutex_violations }
-}
+    let DebugTraceState { balances, push_log, mutex_violations, .. } = state;
 
-// Keep `ToString` live on `no_std` paths where `format!` uses it indirectly.
-#[allow(dead_code)]
-fn _keep_to_string<T: ToString>(t: T) -> String {
-    t.to_string()
+    // Group every push by its encoded denom so each unmatched denom can pull its
+    // contributing records in O(1). Preserves emission order within each bucket.
+    let mut contrib_by_denom: HashMap<QuadFelt, Vec<PushRecord>> = HashMap::new();
+    for record in push_log {
+        contrib_by_denom.entry(record.denom).or_default().push(record);
+    }
+
+    let mut unmatched = Vec::new();
+    for (denom, net) in balances {
+        if net == Felt::ZERO {
+            continue;
+        }
+        let contributions = contrib_by_denom.remove(&denom).unwrap_or_default();
+        unmatched.push(Unmatched {
+            denom,
+            net_multiplicity: net,
+            contributions,
+        });
+    }
+    // Sort for deterministic output — `HashMap` iteration order is arbitrary.
+    unmatched.sort_by_key(|u| u.denom);
+    BalanceReport { unmatched, mutex_violations }
 }

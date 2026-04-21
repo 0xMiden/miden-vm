@@ -13,12 +13,20 @@
 //! an enum-dispatch wrapper) is also supported and does not require going through the
 //! aggregator.
 
+use alloc::vec::Vec;
+
+use miden_core::{WORD_SIZE, field::PrimeCharacteristicRing};
+
 use super::{
     BusId, MIDEN_MAX_MESSAGE_WIDTH,
     chiplet_air::{CHIPLET_COLUMN_SHAPE, ChipletLookupAir, ChipletLookupBuilder},
     main_air::{MAIN_COLUMN_SHAPE, MainLookupAir, MainLookupBuilder},
 };
-use crate::lookup::LookupAir;
+use crate::{
+    PV_PROGRAM_HASH, PV_TRANSCRIPT_STATE,
+    constraints::logup_msg::{BlockHashMsg, KernelRomMsg, LogCapacityMsg},
+    lookup::{BoundaryBuilder, LookupAir},
+};
 
 // MIDEN LOOKUP AIR
 // ================================================================================================
@@ -82,12 +90,69 @@ where
         MainLookupAir.eval(builder);
         ChipletLookupAir.eval(builder);
     }
+
+    fn eval_boundary<B>(&self, boundary: &mut B)
+    where
+        B: BoundaryBuilder<F = LB::F, EF = LB::EF>,
+    {
+        // The emissions below mirror the three correction terms that
+        // `ProcessorAir::reduced_aux_values` sums into `total_correction` —
+        // `c_block_hash`, `c_log_precompile`, and `c_kernel_rom` — rephrased as
+        // structured boundary interactions so the debug walker sees a closed
+        // system. See `program_hash_message`, `transcript_messages`, and
+        // `kernel_proc_message` in `air/src/lib.rs` for the canonical formulas.
+
+        // Snapshot the needed public-input data up front so the mutable
+        // `boundary.add/remove` calls below don't conflict with the immutable
+        // borrows taken by `public_values()` / `var_len_public_inputs()`.
+        let (program_hash, final_state, kernel_digests): ([B::F; 4], [B::F; 4], Vec<[B::F; 4]>) = {
+            let pv = boundary.public_values();
+            let program_hash = [
+                pv[PV_PROGRAM_HASH],
+                pv[PV_PROGRAM_HASH + 1],
+                pv[PV_PROGRAM_HASH + 2],
+                pv[PV_PROGRAM_HASH + 3],
+            ];
+            let final_state = [
+                pv[PV_TRANSCRIPT_STATE],
+                pv[PV_TRANSCRIPT_STATE + 1],
+                pv[PV_TRANSCRIPT_STATE + 2],
+                pv[PV_TRANSCRIPT_STATE + 3],
+            ];
+            let kernel_digests = boundary
+                .var_len_public_inputs()
+                .first()
+                .map(|felts| {
+                    felts.chunks_exact(WORD_SIZE).map(|d| [d[0], d[1], d[2], d[3]]).collect()
+                })
+                .unwrap_or_default();
+            (program_hash, final_state, kernel_digests)
+        };
+
+        // Block-hash seed: +1 / encode(BLOCK_HASH_TABLE, [ph, 0, 0, 0]).
+        boundary.add(
+            "block_hash_seed",
+            BlockHashMsg::Child {
+                parent: B::F::ZERO,
+                child_hash: program_hash,
+            },
+        );
+
+        // Log-precompile transcript terminals: +1 / d_initial − 1 / d_final.
+        boundary.add("log_precompile_initial", LogCapacityMsg { capacity: [B::F::ZERO; 4] });
+        boundary.remove("log_precompile_final", LogCapacityMsg { capacity: final_state });
+
+        // Kernel ROM init: +Σ 1 / d_kernel_proc_msg_i over VLPI[0].
+        for digest in kernel_digests {
+            boundary.add("kernel_rom_init", KernelRomMsg::init(digest));
+        }
+    }
 }
 
 // TESTS
 // ================================================================================================
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 mod tests {
     extern crate std;
 
@@ -257,6 +322,13 @@ mod tests {
             BusId::COUNT,
         );
 
-        let _ = check_trace_balance(&MidenLookupAir, &main_trace, &periodic, &publics, &challenges);
+        let _ = check_trace_balance(
+            &MidenLookupAir,
+            &main_trace,
+            &periodic,
+            &publics,
+            &[],
+            &challenges,
+        );
     }
 }

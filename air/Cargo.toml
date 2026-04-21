@@ -21,12 +21,7 @@ doctest = false
 default = ["std"]
 std = ["miden-core/std", "thiserror/std"]
 concurrent = ["std"]
-# Lookup-argument debugging surface: inventory collection, symbolic degree checking, scope
-# enforcement, canonical-vs-encoded equivalence, real-trace balance, per-row oracle. Lives
-# under `constraints::lookup::debug` and is re-exported via `miden_air::lookup::debug`.
-# Implies `std` because the runtime hooks and pretty printers rely on `std::fmt`.
-bus-debug = ["std"]
-testing = ["bus-debug"]
+testing = []
 
 [dependencies]
 # Miden dependencies

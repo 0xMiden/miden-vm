@@ -473,3 +473,58 @@ pub trait LookupBatch {
         deg: Deg,
     );
 }
+
+// BOUNDARY BUILDER
+// ================================================================================================
+
+/// Handle for emitting **once-per-proof** "outer" interactions — contributions to the
+/// LogUp sum that are not tied to any main-trace row.
+///
+/// Typical sources are committed-final boundary terminals (kernel ROM init, block hash
+/// seed, log-precompile terminals, public-input bus seeds). Each emission contributes
+/// one signed fraction to the overall balance; no column / row / group scoping, no
+/// flag gating, no `Deg` (boundary terms are plain field elements, not polynomials).
+///
+/// Used by [`super::LookupAir::eval_boundary`]. Default implementations on the trait
+/// are a no-op, so AIRs with no boundary contributions don't need to override it.
+pub trait BoundaryBuilder {
+    /// Base field for boundary-interaction multiplicities and encoded message slots.
+    type F: Field;
+
+    /// Extension field used by [`LookupMessage::encode`] — matches the enclosing
+    /// `LookupAir`'s `LB::EF`.
+    type EF: ExtensionField<Self::F>;
+
+    /// Public values passed to the proof (the `public_values` slice threaded through
+    /// `prove_stark`).
+    fn public_values(&self) -> &[Self::F];
+
+    /// Variable-length public inputs (e.g. kernel felts). Matches the layout the
+    /// prover hands to `miden_crypto::stark::prover::prove_single`.
+    fn var_len_public_inputs(&self) -> &[&[Self::F]];
+
+    /// Emit a boundary interaction with multiplicity `+1`.
+    ///
+    /// The default delegates to [`insert`](Self::insert) with multiplicity `ONE`.
+    fn add<M>(&mut self, name: &'static str, msg: M)
+    where
+        M: LookupMessage<Self::F, Self::EF>,
+    {
+        self.insert(name, Self::F::ONE, msg);
+    }
+
+    /// Emit a boundary interaction with multiplicity `-1`.
+    ///
+    /// The default delegates to [`insert`](Self::insert) with multiplicity `NEG_ONE`.
+    fn remove<M>(&mut self, name: &'static str, msg: M)
+    where
+        M: LookupMessage<Self::F, Self::EF>,
+    {
+        self.insert(name, Self::F::NEG_ONE, msg);
+    }
+
+    /// Emit a boundary interaction with an arbitrary signed multiplicity.
+    fn insert<M>(&mut self, name: &'static str, multiplicity: Self::F, msg: M)
+    where
+        M: LookupMessage<Self::F, Self::EF>;
+}

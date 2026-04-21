@@ -5,16 +5,17 @@
 //! `super::run_trace_walk`. The builder, column, group, and batch handles all collapse
 //! their associated types to `Felt` / `QuadFelt`.
 
-use core::marker::PhantomData;
+use alloc::{format, string::ToString};
 
 use miden_core::field::{PrimeCharacteristicRing, QuadFelt};
 use miden_crypto::stark::air::RowWindow;
 
 use super::{
     super::super::{
-        Challenges, Deg, LookupBatch, LookupBuilder, LookupColumn, LookupGroup, LookupMessage,
+        BoundaryBuilder, Challenges, Deg, LookupBatch, LookupBuilder, LookupColumn, LookupGroup,
+        LookupMessage,
     },
-    DebugTraceState, MutualExclusionViolation, accumulate_balance,
+    DebugTraceState, MutualExclusionViolation, PushRecord,
 };
 use crate::Felt;
 
@@ -89,12 +90,11 @@ impl<'a> LookupBuilder for DebugTraceBuilder<'a> {
         f: impl FnOnce(&mut Self::Column<'c>) -> R,
         _deg: Deg,
     ) -> R {
-        let col_idx = self.column_idx;
         let mut col = DebugTraceColumn {
             challenges: self.challenges,
             state: &mut *self.state,
             row_idx: self.row_idx,
-            column_idx: col_idx,
+            column_idx: self.column_idx,
             next_group_idx: 0,
         };
         let result = f(&mut col);
@@ -114,6 +114,49 @@ pub struct DebugTraceColumn<'c> {
     next_group_idx: usize,
 }
 
+impl<'c> DebugTraceColumn<'c> {
+    /// Common path shared by `group` and `group_with_cached_encoding`. Opens a group,
+    /// drives the caller's closure, folds the group's `(U_g, V_g)` into the column's
+    /// running `(U_col, V_col)`, and (for cached-encoding groups) records any mutex
+    /// violation.
+    fn open_group<'g>(
+        &'g mut self,
+        is_cached_encoding: bool,
+        f: impl FnOnce(&mut DebugTraceGroup<'g>),
+    ) {
+        let group_idx = self.next_group_idx;
+        let column_idx = self.column_idx;
+        let row_idx = self.row_idx;
+
+        let mut group = DebugTraceGroup {
+            challenges: self.challenges,
+            state: &mut *self.state,
+            u: QuadFelt::ONE,
+            v: QuadFelt::ZERO,
+            row_idx,
+            column_idx,
+            group_idx,
+            check_mutex: is_cached_encoding,
+            active_flag_count: 0,
+        };
+        f(&mut group);
+
+        if group.check_mutex && group.active_flag_count > 1 {
+            group.state.mutex_violations.push(MutualExclusionViolation {
+                row: row_idx,
+                column_idx,
+                group_idx,
+                active_flags: group.active_flag_count,
+            });
+        }
+        // Fold `(U_g, V_g)` into `(U_col, V_col)`:  (U, V) ← (U·U_g, V·U_g + V_g·U)
+        let (u_col, v_col) = group.state.column_folds[column_idx];
+        group.state.column_folds[column_idx] = (u_col * group.u, v_col * group.u + group.v * u_col);
+
+        self.next_group_idx += 1;
+    }
+}
+
 impl<'c> LookupColumn for DebugTraceColumn<'c> {
     type Expr = Felt;
     type ExprEF = QuadFelt;
@@ -129,28 +172,7 @@ impl<'c> LookupColumn for DebugTraceColumn<'c> {
         f: impl FnOnce(&mut Self::Group<'g>),
         _deg: Deg,
     ) {
-        let group_idx = self.next_group_idx;
-        let column_idx = self.column_idx;
-        // The fold write and any mutex logging happen via `group.state` while the group is
-        // still live — the column's `&mut self.state` reborrow is pinned to the GAT
-        // lifetime `'g`, so `self.state` is unreachable outside this block.
-        {
-            let mut group = DebugTraceGroup {
-                challenges: self.challenges,
-                state: &mut *self.state,
-                u: QuadFelt::ONE,
-                v: QuadFelt::ZERO,
-                row_idx: self.row_idx,
-                column_idx,
-                group_idx,
-                check_mutex: false,
-                active_flag_count: 0,
-            };
-            f(&mut group);
-            let (u, v) = (group.u, group.v);
-            group.state.fold_group(column_idx, u, v);
-        }
-        self.next_group_idx += 1;
+        self.open_group(false, f);
     }
 
     fn group_with_cached_encoding<'g>(
@@ -160,39 +182,11 @@ impl<'c> LookupColumn for DebugTraceColumn<'c> {
         _encoded: impl FnOnce(&mut Self::Group<'g>),
         _deg: Deg,
     ) {
-        // Run only the canonical closure on the real trace side — both closures describe
-        // the same interaction set by contract, and `DebugStructureBuilder` already
-        // verifies their `(U_g, V_g)` folds agree on sampled rows. Running both here
-        // would double-count balance multiplicities.
-        let group_idx = self.next_group_idx;
-        let column_idx = self.column_idx;
-        let row_idx = self.row_idx;
-        {
-            let mut group = DebugTraceGroup {
-                challenges: self.challenges,
-                state: &mut *self.state,
-                u: QuadFelt::ONE,
-                v: QuadFelt::ZERO,
-                row_idx,
-                column_idx,
-                group_idx,
-                check_mutex: true,
-                active_flag_count: 0,
-            };
-            canonical(&mut group);
-            let (u, v) = (group.u, group.v);
-            if group.check_mutex && group.active_flag_count > 1 {
-                let active_flags = group.active_flag_count;
-                group.state.mutex_violations.push(MutualExclusionViolation {
-                    row: row_idx,
-                    column_idx,
-                    group_idx,
-                    active_flags,
-                });
-            }
-            group.state.fold_group(column_idx, u, v);
-        }
-        self.next_group_idx += 1;
+        // Run only the canonical closure: both closures must describe the same
+        // interaction set by contract (`DebugStructureBuilder` verifies their folds
+        // agree on sampled rows), and running both here would double-count balance
+        // multiplicities.
+        self.open_group(true, canonical);
     }
 }
 
@@ -207,18 +201,32 @@ pub struct DebugTraceGroup<'g> {
     row_idx: usize,
     column_idx: usize,
     group_idx: usize,
-    /// Whether this group is a `group_with_cached_encoding` and should count active flags.
+    /// `true` for `group_with_cached_encoding` — triggers the mutex check at group close.
     check_mutex: bool,
     active_flag_count: usize,
 }
 
 impl<'g> DebugTraceGroup<'g> {
+    /// Count active flags for mutex checks. Only meaningful when `check_mutex == true`,
+    /// but cheap enough to run unconditionally.
     fn track_mutex(&mut self, flag: Felt) {
         if self.check_mutex && flag != Felt::ZERO {
             self.active_flag_count += 1;
         }
-        // Keep context fields live so a future mutex-violation log site has them available.
-        let _ = (self.row_idx, self.column_idx, self.group_idx);
+    }
+
+    /// Push one `(multiplicity, denom)` into both the balance map and the push log,
+    /// with the group's current `(row, col, group)` source coordinates.
+    fn record(&mut self, msg_repr: alloc::string::String, denom: QuadFelt, multiplicity: Felt) {
+        *self.state.balances.entry(denom).or_insert(Felt::ZERO) += multiplicity;
+        self.state.push_log.push(PushRecord {
+            row: self.row_idx,
+            column_idx: self.column_idx,
+            group_idx: self.group_idx,
+            msg_repr,
+            denom,
+            multiplicity,
+        });
     }
 }
 
@@ -230,34 +238,6 @@ impl<'g> LookupGroup for DebugTraceGroup<'g> {
         = DebugTraceBatch<'b>
     where
         Self: 'b;
-
-    fn add<M>(&mut self, _name: &'static str, flag: Felt, msg: impl FnOnce() -> M, _deg: Deg)
-    where
-        M: LookupMessage<Felt, QuadFelt>,
-    {
-        self.track_mutex(flag);
-        if flag == Felt::ZERO {
-            return;
-        }
-        let v_msg = msg().encode(self.challenges);
-        accumulate_balance(self.state, v_msg, Felt::ONE);
-        self.u += (v_msg - QuadFelt::ONE) * flag;
-        self.v += flag;
-    }
-
-    fn remove<M>(&mut self, _name: &'static str, flag: Felt, msg: impl FnOnce() -> M, _deg: Deg)
-    where
-        M: LookupMessage<Felt, QuadFelt>,
-    {
-        self.track_mutex(flag);
-        if flag == Felt::ZERO {
-            return;
-        }
-        let v_msg = msg().encode(self.challenges);
-        accumulate_balance(self.state, v_msg, Felt::NEG_ONE);
-        self.u += (v_msg - QuadFelt::ONE) * flag;
-        self.v -= flag;
-    }
 
     fn insert<M>(
         &mut self,
@@ -273,8 +253,9 @@ impl<'g> LookupGroup for DebugTraceGroup<'g> {
         if flag == Felt::ZERO {
             return;
         }
-        let v_msg = msg().encode(self.challenges);
-        accumulate_balance(self.state, v_msg, multiplicity);
+        let built = msg();
+        let v_msg = built.encode(self.challenges);
+        self.record(format!("{:?}", built), v_msg, multiplicity);
         self.u += (v_msg - QuadFelt::ONE) * flag;
         self.v += flag * multiplicity;
     }
@@ -295,7 +276,9 @@ impl<'g> LookupGroup for DebugTraceGroup<'g> {
                 active,
                 n: QuadFelt::ZERO,
                 d: QuadFelt::ONE,
-                _phantom: PhantomData,
+                row_idx: self.row_idx,
+                column_idx: self.column_idx,
+                group_idx: self.group_idx,
             };
             build(&mut batch);
             (batch.n, batch.d)
@@ -325,7 +308,7 @@ impl<'g> LookupGroup for DebugTraceGroup<'g> {
             return;
         }
         let v_msg = encoded();
-        accumulate_balance(self.state, v_msg, multiplicity);
+        self.record("<encoded>".to_string(), v_msg, multiplicity);
         self.u += (v_msg - QuadFelt::ONE) * flag;
         self.v += flag * multiplicity;
     }
@@ -343,7 +326,24 @@ pub struct DebugTraceBatch<'b> {
     active: bool,
     n: QuadFelt,
     d: QuadFelt,
-    _phantom: PhantomData<&'b ()>,
+    /// Source coordinates inherited from the enclosing group for push-log records.
+    row_idx: usize,
+    column_idx: usize,
+    group_idx: usize,
+}
+
+impl<'b> DebugTraceBatch<'b> {
+    fn record(&mut self, msg_repr: alloc::string::String, denom: QuadFelt, multiplicity: Felt) {
+        *self.state.balances.entry(denom).or_insert(Felt::ZERO) += multiplicity;
+        self.state.push_log.push(PushRecord {
+            row: self.row_idx,
+            column_idx: self.column_idx,
+            group_idx: self.group_idx,
+            msg_repr,
+            denom,
+            multiplicity,
+        });
+    }
 }
 
 impl<'b> LookupBatch for DebugTraceBatch<'b> {
@@ -356,7 +356,7 @@ impl<'b> LookupBatch for DebugTraceBatch<'b> {
     {
         let v_msg = msg.encode(self.challenges);
         if self.active {
-            accumulate_balance(self.state, v_msg, multiplicity);
+            self.record(format!("{:?}", msg), v_msg, multiplicity);
         }
         let d_prev = self.d;
         self.n = self.n * v_msg + d_prev * multiplicity;
@@ -372,10 +372,53 @@ impl<'b> LookupBatch for DebugTraceBatch<'b> {
     ) {
         let v_msg = encoded();
         if self.active {
-            accumulate_balance(self.state, v_msg, multiplicity);
+            self.record("<encoded>".to_string(), v_msg, multiplicity);
         }
         let d_prev = self.d;
         self.n = self.n * v_msg + d_prev * multiplicity;
         self.d *= v_msg;
+    }
+}
+
+// BOUNDARY EMITTER
+// ================================================================================================
+
+/// `BoundaryBuilder` impl that writes once-per-proof emissions into the same
+/// [`DebugTraceState`] as the per-row `DebugTraceBuilder`. Emissions are tagged with
+/// `row: usize::MAX` and `msg_repr` prefixed `[boundary:<name>]` so they're visible
+/// in the report as originating outside the trace.
+pub struct DebugBoundaryEmitter<'a> {
+    pub(super) challenges: &'a Challenges<QuadFelt>,
+    pub(super) state: &'a mut DebugTraceState,
+    pub(super) public_values: &'a [Felt],
+    pub(super) var_len_public_inputs: &'a [&'a [Felt]],
+}
+
+impl<'a> BoundaryBuilder for DebugBoundaryEmitter<'a> {
+    type F = Felt;
+    type EF = QuadFelt;
+
+    fn public_values(&self) -> &[Felt] {
+        self.public_values
+    }
+
+    fn var_len_public_inputs(&self) -> &[&[Felt]] {
+        self.var_len_public_inputs
+    }
+
+    fn insert<M>(&mut self, name: &'static str, multiplicity: Felt, msg: M)
+    where
+        M: LookupMessage<Felt, QuadFelt>,
+    {
+        let denom = msg.encode(self.challenges);
+        *self.state.balances.entry(denom).or_insert(Felt::ZERO) += multiplicity;
+        self.state.push_log.push(PushRecord {
+            row: usize::MAX,
+            column_idx: usize::MAX,
+            group_idx: usize::MAX,
+            msg_repr: format!("[boundary:{name}] {:?}", msg),
+            denom,
+            multiplicity,
+        });
     }
 }

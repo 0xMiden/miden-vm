@@ -24,11 +24,6 @@
 //!    pushed into `LookupFractions::counts_per_row[col]`, so the downstream accumulator can later
 //!    slice each row's contribution out via a running cursor without a separate offsets array.
 //!
-//! No `FractionCollector`-style cross-denominator clearing inside the
-//! adapter — LogUp's aux-trace builder consumes individual `(m, v)`
-//! pairs directly, so we hand them over as-is and let the downstream
-//! code compute the per-row running sum.
-//!
 //! ## Flag-zero skip
 //!
 //! `add` / `remove` / `insert` short-circuit on `flag == F::ZERO`,
@@ -48,7 +43,7 @@
 //! is always the cheapest path for concrete rows).
 
 use alloc::{vec, vec::Vec};
-use core::{borrow::Borrow, marker::PhantomData};
+use core::borrow::Borrow;
 
 use miden_core::{
     field::{ExtensionField, Field, PrimeCharacteristicRing},
@@ -60,83 +55,6 @@ use super::{
     Challenges, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn, LookupGroup,
     LookupMessage, fractions::LookupFractions,
 };
-
-// BUS DEBUG HOOK
-// ================================================================================================
-//
-// One-shot instrumentation for chasing bus-closure regressions: every fraction pushed into
-// the prover's flat buffer gets logged to stderr with `(row, col, mult, type, msg, d)` where
-// `msg` is the message's `Debug` representation *before* encoding and `d` is the resulting
-// encoded denominator. Parseable line format so a downstream Python script can group by
-// message content and surface unmatched emits.
-//
-// Gated on `cfg(feature = "std")` because the air crate is no_std by default and
-// `std::eprintln!` isn't available otherwise. The miden-processor tests enable std
-// transitively, so the hook fires automatically when running those tests.
-#[cfg(feature = "std")]
-fn busdbg_log<F, EF, M>(row: usize, col: usize, mult_sign: i64, msg: &M, d: &EF)
-where
-    F: Field,
-    EF: ExtensionField<F>,
-    M: core::fmt::Debug + ?Sized,
-{
-    // Format:
-    //   BUSDBG row=<r> col=<c> mult=<±1 or explicit> type=<module::path::Name> msg=<debug>
-    // d=<base-coeffs>
-    //
-    // `type` lets the Python parser quickly bucket by Rust type without parsing `msg`;
-    // `msg` carries the pre-encoding payload so add/remove matchers can compare structural
-    // equality; `d` is the post-encoding denominator as a flat base-coefficient slice
-    // (`[v0, v1, …]` for `BinomialExtensionField<F, 2>` — two `u64`s for `QuadFelt`). Two
-    // messages with the same `d` but different `msg` immediately reveal an encoding collision
-    // bug, and the compact slice form is trivially parseable from Python.
-    std::eprintln!(
-        "BUSDBG row={} col={} mult={} type={} msg={:?} d={:?}",
-        row,
-        col,
-        mult_sign,
-        core::any::type_name::<M>(),
-        msg,
-        d.as_basis_coefficients_slice(),
-    );
-}
-
-#[cfg(not(feature = "std"))]
-#[inline]
-fn busdbg_log<F, EF, M>(_row: usize, _col: usize, _mult_sign: i64, _msg: &M, _d: &EF)
-where
-    F: Field,
-    EF: ExtensionField<F>,
-    M: core::fmt::Debug + ?Sized,
-{
-}
-
-// Variant of `busdbg_log` for `insert_encoded` sites where no `LookupMessage` instance
-// exists (the caller hands us a pre-computed `EF` denominator directly). We still log the
-// call so the unmatched-message analysis sees every push, but there's no type to stamp.
-#[cfg(feature = "std")]
-fn busdbg_log_encoded<F, EF>(row: usize, col: usize, mult_sign: i64, d: &EF)
-where
-    F: Field,
-    EF: ExtensionField<F>,
-{
-    std::eprintln!(
-        "BUSDBG row={} col={} mult={} type=<encoded> msg=<encoded> d={:?}",
-        row,
-        col,
-        mult_sign,
-        d.as_basis_coefficients_slice(),
-    );
-}
-
-#[cfg(not(feature = "std"))]
-#[inline]
-fn busdbg_log_encoded<F, EF>(_row: usize, _col: usize, _mult_sign: i64, _d: &EF)
-where
-    F: Field,
-    EF: ExtensionField<F>,
-{
-}
 
 // PROVER LOOKUP BUILDER
 // ================================================================================================
@@ -168,15 +86,6 @@ where
     /// as long as each row stays within the declared [`LookupAir::column_shape`] bound.
     fractions: &'a mut LookupFractions<F, EF>,
     column_idx: usize,
-    /// Debug-only: current main-trace row index, threaded into every child handle so
-    /// the `busdbg_log` hook at each push site can print row + col metadata alongside
-    /// the emitted fraction. Set by [`build_lookup_fractions`] once per row.
-    ///
-    /// Under `no_std` (where `busdbg_log` is a no-op) the compiler eliminates all
-    /// loads/stores of this field, so it has zero runtime cost. The field itself remains
-    /// unconditionally to avoid cfg noise on every constructor and child-handle creation;
-    /// a future `BusDebugger` refactor may consolidate this into a single gated type.
-    row_idx: usize,
 }
 
 impl<'a, F, EF> ProverLookupBuilder<'a, F, EF>
@@ -210,24 +119,6 @@ where
     where
         A: LookupAir<Self>,
     {
-        Self::new_at_row(main, periodic_values, public_values, challenges, air, fractions, 0)
-    }
-
-    /// Same as [`ProverLookupBuilder::new`] but also stamps the current main-trace row
-    /// index onto the builder. The row index is threaded into every child handle so the
-    /// debug hook can label each emitted fraction with its origin row.
-    pub fn new_at_row<A>(
-        main: RowWindow<'a, F>,
-        periodic_values: &'a [F],
-        public_values: &'a [F],
-        challenges: &'a Challenges<EF>,
-        air: &A,
-        fractions: &'a mut LookupFractions<F, EF>,
-        row_idx: usize,
-    ) -> Self
-    where
-        A: LookupAir<Self>,
-    {
         debug_assert_eq!(
             fractions.num_columns(),
             air.num_columns(),
@@ -240,7 +131,6 @@ where
             challenges,
             fractions,
             column_idx: 0,
-            row_idx,
         }
     }
 }
@@ -303,14 +193,13 @@ where
             periodic_row[i] = col[r % col.len()];
         }
 
-        let mut lb = ProverLookupBuilder::new_at_row(
+        let mut lb = ProverLookupBuilder::new(
             window,
             &periodic_row,
             public_values,
             challenges,
             air,
             &mut fractions,
-            r,
         );
         air.eval(&mut lb);
     }
@@ -364,32 +253,25 @@ where
         _deg: Deg,
     ) -> R {
         let idx = self.column_idx;
-        let row_idx = self.row_idx;
-        // Split-borrow `fractions.fractions` and `fractions.counts` as disjoint
-        // fields — going through a single `&mut LookupFractions` method would lock
-        // all of `self.fractions` under the GAT lifetime `'c` and block the
-        // post-closure `counts.push(...)` re-borrow.
+        // Split-borrow disjoint fields of `LookupFractions` so the post-closure
+        // `counts.push(...)` isn't blocked by the GAT-lifetime borrow on `fractions`.
         let vec = &mut self.fractions.fractions;
         let counts = &mut self.fractions.counts;
         let shape_col = self.fractions.shape[idx];
         let start_len = vec.len();
 
-        let mut col = ProverColumn {
-            challenges: self.challenges,
-            fractions: vec,
-            row_idx,
-            col_idx: idx,
-            _phantom: PhantomData,
+        // Scope the `ProverColumn` so its borrow on `vec` ends before `counts.push`.
+        let (result, pushed) = {
+            let mut col = ProverColumn {
+                challenges: self.challenges,
+                fractions: vec,
+            };
+            let result = f(&mut col);
+            (result, col.fractions.len() - start_len)
         };
-        let result = f(&mut col);
-        // Snapshot the end length from `col.fractions` while `col` is still alive;
-        // NLL ends the borrow on `vec` at `col`'s last use below.
-        let end_len = col.fractions.len();
-        let _ = col;
-        let pushed = end_len - start_len;
         debug_assert!(
             pushed <= shape_col,
-            "column {idx} stride exceeded: pushed {pushed}, shape says {shape_col}",
+            "column {idx} exceeded its shape bound: pushed {pushed}, shape says {shape_col}",
         );
         counts.push(pushed);
         self.column_idx += 1;
@@ -413,11 +295,6 @@ where
 {
     challenges: &'c Challenges<EF>,
     fractions: &'c mut Vec<(F, EF)>,
-    /// Debug-only: current main-trace row index (see [`ProverLookupBuilder::row_idx`]).
-    row_idx: usize,
-    /// Debug-only: current LogUp column index (0..num_cols). Only consumed by `busdbg_log`.
-    col_idx: usize,
-    _phantom: PhantomData<F>,
 }
 
 impl<'c, F, EF> LookupColumn for ProverColumn<'c, F, EF>
@@ -442,32 +319,21 @@ where
         let mut group = ProverGroup {
             challenges: self.challenges,
             fractions: &mut *self.fractions,
-            row_idx: self.row_idx,
-            col_idx: self.col_idx,
-            _phantom: PhantomData,
         };
         f(&mut group)
     }
 
     fn group_with_cached_encoding<'g>(
         &'g mut self,
-        _name: &'static str,
+        name: &'static str,
         canonical: impl FnOnce(&mut Self::Group<'g>),
         _encoded: impl FnOnce(&mut Self::Group<'g>),
-        _deg: Deg,
+        deg: Deg,
     ) {
-        // Prover path: only the `canonical` closure runs; the `encoded`
-        // closure is dropped unused. Both closures must describe
-        // mathematically identical interaction sets, so picking the
-        // simpler one is a pure optimisation on concrete rows.
-        let mut group = ProverGroup {
-            challenges: self.challenges,
-            fractions: &mut *self.fractions,
-            row_idx: self.row_idx,
-            col_idx: self.col_idx,
-            _phantom: PhantomData,
-        };
-        canonical(&mut group)
+        // Prover path runs only the `canonical` closure; both closures must describe
+        // identical interaction sets, so the `encoded` fast path has no advantage on
+        // concrete rows and is discarded.
+        self.group(name, canonical, deg);
     }
 }
 
@@ -505,11 +371,6 @@ where
 {
     challenges: &'g Challenges<EF>,
     fractions: &'g mut Vec<(F, EF)>,
-    /// Debug-only: current main-trace row index (see [`ProverLookupBuilder::row_idx`]).
-    row_idx: usize,
-    /// Debug-only: current LogUp column index. Only consumed by `busdbg_log`.
-    col_idx: usize,
-    _phantom: PhantomData<F>,
 }
 
 impl<'g, F, EF> LookupGroup for ProverGroup<'g, F, EF>
@@ -525,32 +386,6 @@ where
     where
         Self: 'b;
 
-    fn add<M>(&mut self, _name: &'static str, flag: F, msg: impl FnOnce() -> M, _deg: Deg)
-    where
-        M: LookupMessage<F, EF>,
-    {
-        if flag == F::ZERO {
-            return;
-        }
-        let built = msg();
-        let v = built.encode(self.challenges);
-        busdbg_log::<F, EF, M>(self.row_idx, self.col_idx, 1, &built, &v);
-        self.fractions.push((F::ONE, v));
-    }
-
-    fn remove<M>(&mut self, _name: &'static str, flag: F, msg: impl FnOnce() -> M, _deg: Deg)
-    where
-        M: LookupMessage<F, EF>,
-    {
-        if flag == F::ZERO {
-            return;
-        }
-        let built = msg();
-        let v = built.encode(self.challenges);
-        busdbg_log::<F, EF, M>(self.row_idx, self.col_idx, -1, &built, &v);
-        self.fractions.push((F::NEG_ONE, v));
-    }
-
     fn insert<M>(
         &mut self,
         _name: &'static str,
@@ -564,12 +399,7 @@ where
         if flag == F::ZERO {
             return;
         }
-        let built = msg();
-        let v = built.encode(self.challenges);
-        // Signed multiplicity: best-effort conversion for the debug log — the actual
-        // multiplicity stored in the fraction buffer is still the raw `F` value.
-        let mult_sign = felt_to_i64(multiplicity);
-        busdbg_log::<F, EF, M>(self.row_idx, self.col_idx, mult_sign, &built, &v);
+        let v = msg().encode(self.challenges);
         self.fractions.push((multiplicity, v));
     }
 
@@ -580,49 +410,16 @@ where
         build: impl FnOnce(&mut Self::Batch<'b>),
         _deg: Deg,
     ) {
-        // `active = false` turns every push inside the batch into a
-        // no-op, which saves both the `msg.encode()` call and the `Vec`
-        // push when the outer batch flag is zero. The `build` closure
-        // still runs unconditionally so it can produce its `R` return
-        // value without requiring `R: Default`.
+        // When `active == false` every push inside the batch is a no-op — the
+        // `msg.encode()` call is skipped too. The `build` closure still runs so
+        // it can produce its `R` return value without requiring `R: Default`.
         let active = flag != F::ZERO;
         let mut batch = ProverBatch {
             challenges: self.challenges,
             fractions: &mut *self.fractions,
             active,
-            row_idx: self.row_idx,
-            col_idx: self.col_idx,
-            _phantom: PhantomData,
         };
         build(&mut batch)
-    }
-}
-
-/// Best-effort signed-integer view of a `Field` multiplicity for the debug log.
-/// Canonical `0` / `1` / `p - 1` map to `0` / `1` / `-1`. Larger values round-trip
-/// as an unsigned integer cast (which is fine for the multiset-diff analysis — the
-/// Python post-processor groups by `(col, d)` and sums signed multiplicities, and
-/// large multiplicities like range-table insertions are handled correctly modulo `p`
-/// even without a signed reinterpretation).
-fn felt_to_i64<F: Field>(m: F) -> i64 {
-    // `F::NEG_ONE` equals `p - 1` in canonical form. If the multiplicity matches it
-    // exactly we round it to `-1` so the debug log reads naturally on remove-style
-    // inserts; anything else is cast as an unsigned integer truncated to i64.
-    if m == F::NEG_ONE {
-        -1
-    } else if m == F::ZERO {
-        0
-    } else if m == F::ONE {
-        1
-    } else {
-        // Pull the canonical base-field representation out through the first basis
-        // coefficient. `Field` doesn't expose a direct `as_canonical_u64`, but the
-        // `Into<u64>` conversion via the canonical byte representation is stable
-        // enough for a debug log. If this conversion isn't available for `F` the
-        // log will still compile because we wrap in a const-boolean path.
-        let _ = m;
-        // Fall back to an arbitrary sentinel the Python parser will treat as "other".
-        i64::MAX
     }
 }
 
@@ -637,9 +434,8 @@ fn felt_to_i64<F: Field>(m: F) -> i64 {
 /// no-op — the `msg.encode()` call is skipped too, so inactive batches
 /// do essentially no work.
 ///
-/// Each `add` / `remove` / `insert` / `insert_encoded` pushes one
-/// fraction entry when active. There's no `(N, D)` state inside the
-/// batch — LogUp's aux-trace builder handles the combination downstream.
+/// Each push appends one fraction entry when active. There's no `(N, D)` state
+/// inside the batch — LogUp's aux-trace builder handles the combination downstream.
 pub struct ProverBatch<'b, F, EF>
 where
     F: Field,
@@ -648,11 +444,6 @@ where
     challenges: &'b Challenges<EF>,
     fractions: &'b mut Vec<(F, EF)>,
     active: bool,
-    /// Debug-only: current main-trace row index (see [`ProverLookupBuilder::row_idx`]).
-    row_idx: usize,
-    /// Debug-only: current LogUp column index. Only consumed by `busdbg_log`.
-    col_idx: usize,
-    _phantom: PhantomData<F>,
 }
 
 impl<'b, F, EF> LookupBatch for ProverBatch<'b, F, EF>
@@ -663,30 +454,6 @@ where
     type Expr = F;
     type ExprEF = EF;
 
-    fn add<M>(&mut self, _name: &'static str, msg: M, _deg: Deg)
-    where
-        M: LookupMessage<F, EF>,
-    {
-        if !self.active {
-            return;
-        }
-        let v = msg.encode(self.challenges);
-        busdbg_log::<F, EF, M>(self.row_idx, self.col_idx, 1, &msg, &v);
-        self.fractions.push((F::ONE, v));
-    }
-
-    fn remove<M>(&mut self, _name: &'static str, msg: M, _deg: Deg)
-    where
-        M: LookupMessage<F, EF>,
-    {
-        if !self.active {
-            return;
-        }
-        let v = msg.encode(self.challenges);
-        busdbg_log::<F, EF, M>(self.row_idx, self.col_idx, -1, &msg, &v);
-        self.fractions.push((F::NEG_ONE, v));
-    }
-
     fn insert<M>(&mut self, _name: &'static str, multiplicity: F, msg: M, _deg: Deg)
     where
         M: LookupMessage<F, EF>,
@@ -695,8 +462,6 @@ where
             return;
         }
         let v = msg.encode(self.challenges);
-        let mult_sign = felt_to_i64(multiplicity);
-        busdbg_log::<F, EF, M>(self.row_idx, self.col_idx, mult_sign, &msg, &v);
         self.fractions.push((multiplicity, v));
     }
 
@@ -711,8 +476,6 @@ where
             return;
         }
         let v = encoded();
-        let mult_sign = felt_to_i64(multiplicity);
-        busdbg_log_encoded::<F, EF>(self.row_idx, self.col_idx, mult_sign, &v);
         self.fractions.push((multiplicity, v));
     }
 }

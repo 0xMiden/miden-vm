@@ -28,8 +28,10 @@ std = [
     "thiserror/std",
 ]
 testing = ["miden-air/testing"]
-# Like `testing`, but slows down the processor speed to make it easier to debug.
-bus-debugger = ["testing", "miden-air/testing"]
+# Enables the LogUp bus-debugger surface. Compiles the debug oracles in miden-air (which
+# live under `#[cfg(feature = "std")]`) and activates bus-check assertions in processor
+# tests. Slows down the processor considerably.
+bus-debugger = ["miden-air/std"]
 
 [dependencies]
 # Miden dependencies
