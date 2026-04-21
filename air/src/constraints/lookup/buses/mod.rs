@@ -67,7 +67,7 @@ pub(in crate::constraints::lookup) mod wiring;
 pub struct ChipletActiveFlags<E> {
     /// `is_active` for the hasher controller sub-chiplet (= `s_ctrl`).
     pub controller: E,
-    /// `is_active` for the hasher permutation sub-chiplet (= `s_perm = perm_seg`).
+    /// `is_active` for the hasher permutation sub-chiplet (= `s_perm`).
     pub permutation: E,
     /// `is_active` for the bitwise chiplet (= `s0 - s01`).
     pub bitwise: E,
@@ -87,7 +87,7 @@ where
     ///
     /// Mirrors the active-flag block of
     /// [`build_chiplet_selectors`](super::super::chiplets::selectors::build_chiplet_selectors):
-    /// - `s_ctrl = chiplets[0]`, `s_perm = perm_seg`
+    /// - `s_ctrl = chiplets[0]`, `s_perm`
     /// - virtual `s0 = 1 - s_ctrl - s_perm`
     /// - prefix chain `s01 / s012 / s0123 / s01234`
     /// - `is_bitwise = s0 - s01`, `is_memory = s01 - s012`, `is_ace = s012 - s0123`, `is_kernel_rom
@@ -98,7 +98,7 @@ where
         E: Algebra<V>,
     {
         let s_ctrl: E = local.chiplets[0].into();
-        let s_perm: E = local.perm_seg.into();
+        let s_perm: E = local.s_perm.into();
         let s1: E = local.chiplets[1].into();
         let s2: E = local.chiplets[2].into();
         let s3: E = local.chiplets[3].into();

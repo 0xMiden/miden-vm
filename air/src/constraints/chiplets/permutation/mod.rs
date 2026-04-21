@@ -81,12 +81,7 @@ pub fn enforce_permutation_constraints<AB>(
     // --- Structural confinement on perm rows ---
     // is_boundary, direction_bit, and mrupdate_id are unused on permutation rows
     // and must be zero to avoid accidental coupling with controller-side logic.
-    {
-        let builder = &mut builder.when(flags.is_active.clone());
-        builder.assert_zero(cols._is_boundary);
-        builder.assert_zero(cols._direction_bit);
-        builder.assert_zero(cols._mrupdate_id);
-    }
+    builder.when(flags.is_active.clone()).assert_zeros(cols.unused_padding());
 
     // --- Multiplicity constancy within perm cycles ---
     // On perm rows that are NOT the cycle boundary (row 15), multiplicity must stay

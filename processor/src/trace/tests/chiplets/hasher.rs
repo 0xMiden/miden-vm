@@ -599,7 +599,7 @@ fn rate_from_hasher_state(main: &miden_air::trace::MainTrace, row: RowIndex) -> 
 }
 
 fn is_hasher_controller_row(main: &miden_air::trace::MainTrace, row: RowIndex) -> bool {
-    main.chiplet_selector_0(row) == ONE && main.chiplet_perm_seg(row) == ZERO
+    main.chiplet_selector_0(row) == ONE && main.chiplet_s_perm(row) == ZERO
 }
 
 /// Recompute the Merkle direction bit the emitter uses: `bit = node_index - 2·node_index_next`

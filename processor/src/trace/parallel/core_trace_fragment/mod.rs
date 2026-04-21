@@ -39,7 +39,7 @@ impl BasicBlockContext {
                     .op_batches()
                     .iter()
                     .skip(batch_index)
-                    .map(|batch| batch.num_groups())
+                    .map(miden_core::mast::OpBatch::num_groups)
                     .sum::<usize>() as u64,
             ),
         })

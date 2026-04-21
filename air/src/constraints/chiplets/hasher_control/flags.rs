@@ -101,14 +101,14 @@ impl<E: PrimeCharacteristicRing + Clone> ControllerFlags<E> {
         let s0: E = cols.s0.into();
         let s1: E = cols.s1.into();
         let s2: E = cols.s2.into();
-        let not_s0 = s0.clone().not();
-        let not_s1 = s1.clone().not();
-        let not_s2 = s2.clone().not();
+        let not_s0 = s0.not();
+        let not_s1 = s1.not();
+        let not_s2 = s2.not();
 
         let is_input = s0.clone();
         let is_output = not_s0.clone() * not_s1.clone();
         let is_padding = not_s0 * s1.clone();
-        let is_sponge_input = s0.clone() * not_s1.clone() * not_s2.clone();
+        let is_sponge_input = s0.clone() * not_s1 * not_s2.clone();
         let is_merkle_input = s0 * (s1.clone() + s2.clone() - s1 * s2.clone());
         let is_hout = is_output.clone() * not_s2;
         let is_sout = is_output.clone() * s2;
@@ -117,15 +117,14 @@ impl<E: PrimeCharacteristicRing + Clone> ControllerFlags<E> {
         let s0n: E = cols_next.s0.into();
         let s1n: E = cols_next.s1.into();
         let s2n: E = cols_next.s2.into();
-        let not_s0n = s0n.clone().not();
-        let not_s1n = s1n.clone().not();
-        let not_s2n = s2n.clone().not();
+        let not_s0n = s0n.not();
+        let not_s1n = s1n.not();
+        let not_s2n = s2n.not();
 
         let is_output_next = not_s0n.clone() * not_s1n.clone();
         let is_padding_next = not_s0n * s1n.clone();
         let is_sponge_input_next = s0n.clone() * not_s1n * not_s2n.clone();
-        let is_merkle_input_next =
-            s0n.clone() * (s1n.clone() + s2n.clone() - s1n.clone() * s2n.clone());
+        let is_merkle_input_next = s0n.clone() * (s1n.clone() + s2n.clone() - s1n.clone() * s2n);
         let is_mv_input_next = s0n * s1n * not_s2n;
 
         Self {

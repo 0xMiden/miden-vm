@@ -64,7 +64,7 @@ fn mrupdate_emits_sibling_add_and_remove_per_level(#[case] index: u64) {
     let mut mu_rows: Vec<RowIndex> = Vec::new();
     for row in 0..main.num_rows() {
         let idx = RowIndex::from(row);
-        if main.chiplet_selector_0(idx) != ONE || main.chiplet_perm_seg(idx) != ZERO {
+        if main.chiplet_selector_0(idx) != ONE || main.chiplet_s_perm(idx) != ZERO {
             continue;
         }
         let hs0 = main.chiplet_selector_1(idx);

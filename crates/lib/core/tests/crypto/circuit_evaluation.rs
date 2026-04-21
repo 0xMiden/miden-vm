@@ -85,7 +85,7 @@ fn circuit_evaluation_prove_verify() {
 
     // finalize the advice stack
     let adv_stack = data.repeat(num_repetitions);
-    let adv_stack: Vec<u64> = adv_stack.iter().map(|a| a.as_canonical_u64()).collect();
+    let adv_stack: Vec<u64> = adv_stack.iter().map(Felt::as_canonical_u64).collect();
 
     let test = miden_utils_testing::build_test!(source, &[], &adv_stack);
     test.expect_stack(&[]);
@@ -171,7 +171,7 @@ fn fill_inputs(layout: &miden_ace_codegen::InputLayout) -> Vec<QuadFelt> {
 }
 
 fn adjust_quotient_to_zero(
-    circuit: &miden_ace_codegen::AceCircuit<QuadFelt>,
+    circuit: &AceCircuit<QuadFelt>,
     layout: &miden_ace_codegen::InputLayout,
     inputs: &mut [QuadFelt],
 ) {
@@ -188,7 +188,7 @@ fn adjust_quotient_to_zero(
 }
 
 fn find_nonzero_quotient_slope(
-    circuit: &miden_ace_codegen::AceCircuit<QuadFelt>,
+    circuit: &AceCircuit<QuadFelt>,
     layout: &miden_ace_codegen::InputLayout,
     inputs: &mut [QuadFelt],
     root: QuadFelt,

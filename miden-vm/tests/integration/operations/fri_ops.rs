@@ -6,10 +6,8 @@ use miden_utils_testing::{Felt, TRUNCATE_STACK_PROC, build_test, push_inputs, ra
 #[test]
 fn fri_ext2fold4() {
     // create a set of random inputs
-    let mut inputs = rand_array::<Felt, 17>()
-        .iter()
-        .map(|v| v.as_canonical_u64())
-        .collect::<Vec<_>>();
+    let mut inputs =
+        rand_array::<Felt, 17>().iter().map(Felt::as_canonical_u64).collect::<Vec<_>>();
     // inputs[7] -> stack[9] = p (bit-reversed tree index).
     // The instruction computes d_seg = p & 3 and f_pos = p >> 2.
     // We want d_seg=2, f_pos=inputs[8], so p = 4*f_pos + 2.

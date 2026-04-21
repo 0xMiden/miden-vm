@@ -40,4 +40,4 @@ pub use self::{
 pub const MAX_REPEAT_COUNT: u32 = 1_000_000;
 
 /// The modulus of the Miden field as a raw u64 integer
-pub(crate) const FIELD_MODULUS: u64 = miden_core::Felt::ORDER_U64;
+pub(crate) const FIELD_MODULUS: u64 = Felt::ORDER_U64;

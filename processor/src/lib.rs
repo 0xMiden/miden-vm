@@ -280,7 +280,7 @@ pub trait Stopper {
         &self,
         processor: &Self::Processor,
         continuation_stack: &ContinuationStack,
-        continuation_after_stop: impl FnOnce() -> Option<continuation_stack::Continuation>,
+        continuation_after_stop: impl FnOnce() -> Option<Continuation>,
     ) -> ControlFlow<BreakReason>;
 }
 
@@ -358,13 +358,13 @@ impl From<MemoryAddress> for u32 {
 }
 
 impl Display for MemoryAddress {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         Display::fmt(&self.0, f)
     }
 }
 
 impl LowerHex for MemoryAddress {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         LowerHex::fmt(&self.0, f)
     }
 }

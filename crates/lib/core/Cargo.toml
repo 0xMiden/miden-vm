@@ -28,7 +28,7 @@ path = "tests/main.rs"
 [features]
 default = ["std"]
 std = ["miden-assembly/std", "miden-utils-sync/std"]
-constraints-tools = ["std", "dep:miden-air", "dep:miden-ace-codegen", "dep:miden-utils-testing"]
+constraints-tools = ["std", "dep:miden-air", "dep:miden-ace-codegen"]
 
 [dependencies]
 # Miden dependencies
@@ -39,25 +39,24 @@ miden-processor.workspace = true
 miden-utils-sync.workspace = true
 miden-air = { workspace = true, optional = true }
 miden-ace-codegen = { workspace = true, optional = true }
-miden-utils-testing = { workspace = true, optional = true }
 
 # External dependencies
 thiserror.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true
-miden-ace-codegen = { path = "../../ace-codegen" }
+miden-ace-codegen.workspace = true
 miden-air.workspace = true
 miden-processor = { workspace = true, features = ["testing"] }
 miden-prover.workspace = true
 miden-utils-testing.workspace = true
 miden-verifier.workspace = true
 num = { version = "0.4" }
-num-bigint = { version = "0.4" }
-pretty_assertions = { version = "1.4" }
+num-bigint = { workspace = true }
+pretty_assertions = { workspace = true, features = ["std"] }
 rand = { version = "0.9", default-features = false }
-rand_chacha = { version = "0.9", default-features = false }
-rstest = { version = "0.26" }
+rand_chacha = { workspace = true }
+rstest = { workspace = true }
 bincode.workspace = true
 serde.workspace = true
 serde_json.workspace = true

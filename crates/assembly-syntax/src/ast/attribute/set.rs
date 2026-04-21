@@ -44,7 +44,7 @@ impl AttributeSet {
         I: IntoIterator<Item = Attribute>,
     {
         let mut this = Self { attrs: attrs.into_iter().collect() };
-        this.attrs.sort_by_key(|attr| attr.id());
+        this.attrs.sort_by_key(Attribute::id);
         this.attrs.dedup_by_key(|attr| attr.id());
         this
     }

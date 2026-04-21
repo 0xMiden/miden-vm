@@ -9,12 +9,12 @@
 //! Each opcode is 7 bits `[b0, b1, b2, b3, b4, b5, b6]` (b0 = LSB):
 //!
 //! ```text
-//!   b6 b5 b4 | Degree | Opcodes  | Description
-//!   ---------+--------+----------+---------------------------
-//!    0  *  *  |   7    |  0 - 63  | All 7 bits discriminate
-//!    1  0  0  |   6    | 64 - 79  | u32 ops (b0 unused)
-//!    1  0  1  |   5    | 80 - 95  | Uses extra[0] column
-//!    1  1  *  |   4    | 96 - 127 | Uses extra[1] column
+//! b6 b5 b4 | Degree | Opcodes  | Description
+//! ---------+--------+----------+---------------------------
+//!  0  *  * |   7    |  0 - 63  | All 7 bits discriminate
+//!  1  0  0 |   6    | 64 - 79  | u32 ops (b0 unused)
+//!  1  0  1 |   5    | 80 - 95  | Uses extra[0] column
+//!  1  1  * |   4    | 96 - 127 | Uses extra[1] column
 //! ```
 //!
 //! ## Composite Flags
@@ -362,7 +362,7 @@ where
             // +MOVUP3|MOVDN3  — permute s0..s3
             movup_or_movdn[1].clone(),
             // +ADVPOPW|EXPACC — overwrite s0..s3 in place
-            advpopw_or_expacc.clone(),
+            advpopw_or_expacc,
             // +SWAPW2|SWAPW3  — swap s0..s3 with s8+ (leaves at depth 8)
             swapw2_or_swapw3.clone(),
             // +EXT2MUL        — ext field multiply on s0..s3
@@ -387,7 +387,7 @@ where
 
         let no_shift_depth12
             // +SWAPW2|SWAPW3 — pair re-enters (both leave depths 12+ untouched)
-            = swapw2_or_swapw3.clone()
+            = swapw2_or_swapw3
             // +HPERM         — Poseidon2 permutation on s0..s11
             + op5(opcodes::HPERM)
             // –SWAPW3        — SWAPW3 swaps s0..s3 with s12..s15, so s12+ still changes

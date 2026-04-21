@@ -38,8 +38,7 @@ impl DebugVarId {
             Ok(Self(value))
         } else {
             Err(DeserializationError::InvalidValue(format!(
-                "DebugVarId {} exceeds bound {}",
-                value, bound
+                "DebugVarId {value} exceeds bound {bound}"
             )))
         }
     }

@@ -44,7 +44,7 @@ impl<'de> serde::Deserialize<'de> for &'de Path {
         impl<'de> Visitor<'de> for PathVisitor {
             type Value = &'de Path;
 
-            fn expecting(&self, formatter: &mut core::fmt::Formatter) -> core::fmt::Result {
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
                 formatter.write_str("a borrowed Path")
             }
 
@@ -200,7 +200,7 @@ impl Path {
     ///
     /// Returns `None` if the path cannot be losslessly represented as a single component.
     pub fn as_ident(&self) -> Option<Ident> {
-        let mut components = self.components().filter_map(|c| c.ok());
+        let mut components = self.components().filter_map(Result::ok);
         match components.next()? {
             component @ PathComponent::Normal(_) => {
                 if components.next().is_none() {
@@ -322,7 +322,7 @@ impl Path {
         let mut components = self.components();
         match components.next()?.ok()? {
             PathComponent::Root => {
-                let first = components.next().and_then(|c| c.ok()).map(|c| c.as_str())?;
+                let first = components.next().and_then(Result::ok).map(|c| c.as_str())?;
                 Some((first, components.as_path()))
             },
             first @ PathComponent::Normal(_) => Some((first.as_str(), components.as_path())),
@@ -594,8 +594,8 @@ impl PartialEq<alloc::sync::Arc<Path>> for Path {
     }
 }
 
-impl PartialEq<alloc::borrow::Cow<'_, Path>> for Path {
-    fn eq(&self, other: &alloc::borrow::Cow<'_, Path>) -> bool {
+impl PartialEq<Cow<'_, Path>> for Path {
+    fn eq(&self, other: &Cow<'_, Path>) -> bool {
         self.inner == other.as_ref().inner
     }
 }

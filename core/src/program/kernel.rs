@@ -53,7 +53,7 @@ impl Kernel {
 
         // Canonical ordering is a separate kernel invariant (not just a dedup side effect), so
         // we sort first and then validate uniqueness over the canonical representation.
-        hashes.sort_by_key(|v| v.as_bytes()); // ensure consistent order
+        hashes.sort_by_key(Word::as_bytes); // ensure consistent order
         let duplicated = hashes.windows(2).any(|data| data[0] == data[1]);
 
         if duplicated {

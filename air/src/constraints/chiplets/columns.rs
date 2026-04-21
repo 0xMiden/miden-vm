@@ -3,7 +3,7 @@
 use alloc::{vec, vec::Vec};
 use core::{borrow::Borrow, mem::size_of};
 
-use miden_core::{Felt, WORD_SIZE, chiplets::hasher::Hasher};
+use miden_core::{Felt, WORD_SIZE, chiplets::hasher::Hasher, field::PrimeCharacteristicRing};
 
 use super::super::{columns::indices_arr, ext_field::QuadFeltExpr};
 use crate::trace::chiplets::{
@@ -30,7 +30,7 @@ pub fn borrow_chiplet<T, S>(slice: &[T]) -> &S {
 /// `w0..w2` share the same physical columns as the controller's `s0/s1/s2` selectors,
 /// and `multiplicity` shares the same physical column as the controller's `node_index`.
 ///
-/// `s_ctrl` (= `chiplets[0]`) and `s_perm` (= `perm_seg`) are consumed by the chiplet
+/// `s_ctrl` (= `chiplets[0]`) and `s_perm` (= `MainCols::s_perm`) are consumed by the chiplet
 /// selector system and are NOT part of this overlay.
 ///
 /// The state holds a Poseidon2 sponge in `[RATE0, RATE1, CAPACITY]` layout.
@@ -40,9 +40,9 @@ pub fn borrow_chiplet<T, S>(slice: &[T]) -> &S {
 /// ## Layout
 ///
 /// ```text
-/// | witnesses[3] |     state[12]                                   | extra cols  |
-/// |              | rate0[4] (= digest) | rate1[4]   | capacity[4]  |             |
-/// | w0, w1, w2   | h0..h3             | h4..h7     | h8..h11      | m  --  --  -- |
+/// | witnesses[3] | state[12]                                    | extra cols      |
+/// |              | rate0[4] (= digest) | rate1[4] | capacity[4] |                 |
+/// | w0, w1, w2   | h0..h3              | h4..h7   | h8..h11     | m  --  --  --   |
 /// ```
 #[repr(C)]
 pub struct PermutationCols<T> {
@@ -52,12 +52,9 @@ pub struct PermutationCols<T> {
     pub state: [T; STATE_WIDTH],
     /// Request multiplicity (same physical column as node_index).
     pub multiplicity: T,
-    /// Zero on perm rows (same physical column as mrupdate_id).
-    pub _mrupdate_id: T,
-    /// Zero on perm rows (same physical column as is_boundary).
-    pub _is_boundary: T,
-    /// Zero on perm rows (same physical column as direction_bit).
-    pub _direction_bit: T,
+    /// Physical slots for controller columns mrupdate_id, is_boundary, and direction_bit.
+    /// These must be zero on permutation rows; access via [`Self::unused_padding()`] only.
+    _unused: [T; 3],
 }
 
 impl<T: Copy> PermutationCols<T> {
@@ -94,6 +91,12 @@ impl<T: Copy> PermutationCols<T> {
     pub fn rate1(&self) -> [T; DIGEST_LEN] {
         [self.state[4], self.state[5], self.state[6], self.state[7]]
     }
+
+    /// Returns the 3 padding columns (mrupdate_id, is_boundary, direction_bit) that must
+    /// be zero on permutation rows.
+    pub fn unused_padding(&self) -> [T; 3] {
+        self._unused
+    }
 }
 
 // CONTROLLER COLUMNS
@@ -105,7 +108,7 @@ impl<T: Copy> PermutationCols<T> {
 /// (`s0 = 1`) from output/padding rows (`s0 = 0`). The physical layout mirrors
 /// [`PermutationCols`], but column names reflect the controller/permutation split.
 ///
-/// `s_ctrl` (= `chiplets[0]`) and `s_perm` (= `perm_seg`) are consumed by the chiplet
+/// `s_ctrl` (= `chiplets[0]`) and `s_perm` (= `MainCols::s_perm`) are consumed by the chiplet
 /// selector system and are NOT part of this overlay. Because the chiplet-level
 /// non-hasher selector is only ever a virtual expression (`1 - s_ctrl - s_perm`) and is
 /// never a named column or struct field, there is no name collision with the
@@ -118,9 +121,9 @@ impl<T: Copy> PermutationCols<T> {
 /// ## Layout
 ///
 /// ```text
-/// | s0 s1 s2 |     state[12]                                   | extra cols      |
-/// |          | rate0[4] (= digest) | rate1[4]   | capacity[4]  |                 |
-/// |          | h0..h3             | h4..h7     | h8..h11      | i  mr  bnd  dir |
+/// | s0 s1 s2 | state[12]                                    | extra cols      |
+/// |          | rate0[4] (= digest) | rate1[4] | capacity[4] |                 |
+/// |          | h0..h3              | h4..h7   | h8..h11     | i  mr  bnd  dir |
 /// ```
 #[repr(C)]
 pub struct ControllerCols<T> {
@@ -176,6 +179,28 @@ impl<T: Copy> ControllerCols<T> {
     pub fn rate1(&self) -> [T; DIGEST_LEN] {
         [self.state[4], self.state[5], self.state[6], self.state[7]]
     }
+
+    /// Merkle-update new-path flag: `s0 * s1 * s2`.
+    ///
+    /// Active on controller input rows that insert the new Merkle path into the sibling
+    /// table (request/remove side of the running product).
+    pub fn f_mu<E: PrimeCharacteristicRing>(&self) -> E
+    where
+        T: Into<E>,
+    {
+        self.s0.into() * self.s1.into() * self.s2.into()
+    }
+
+    /// Merkle-verify / old-path flag: `s0 * s1 * (1 - s2)`.
+    ///
+    /// Active on controller input rows that extract the old Merkle path from the sibling
+    /// table (response/add side of the running product).
+    pub fn f_mv<E: PrimeCharacteristicRing>(&self) -> E
+    where
+        T: Into<E>,
+    {
+        self.s0.into() * self.s1.into() * (E::ONE - self.s2.into())
+    }
 }
 
 // BITWISE COLUMNS
@@ -208,8 +233,8 @@ pub struct BitwiseCols<T> {
 
 /// Memory chiplet columns (15 columns), viewed from `chiplets[3..18]`.
 ///
-/// When reading from a new word (first access to a context/word pair), the `values`
-/// are initialized to zero.
+/// When reading from a new word address (first access to a context/addr pair), the
+/// `values` are initialized to zero.
 #[repr(C)]
 pub struct MemoryCols<T> {
     /// Read/write flag (0 = write, 1 = read).
@@ -234,8 +259,8 @@ pub struct MemoryCols<T> {
     pub d1: T,
     /// Inverse of delta.
     pub d_inv: T,
-    /// Flag: same context and same word as previous operation.
-    pub is_same_ctx_and_word: T,
+    /// Flag: same context and same word address as previous operation (docs: `f_sca`).
+    pub is_same_ctx_and_addr: T,
 }
 
 // ACE COLUMNS
@@ -243,8 +268,14 @@ pub struct MemoryCols<T> {
 
 /// ACE chiplet columns (16 columns), viewed from `chiplets[4..20]`.
 ///
-/// Common fields are stored directly. The `mode` array holds 4 columns whose
-/// interpretation depends on `s_block`:
+/// The ACE (Arithmetic Circuit Evaluator) chiplet evaluates arithmetic circuits over
+/// quadratic extension field elements. Each circuit evaluation consists of two phases:
+///
+/// 1. **READ** (`s_block=0`): loads wire values from memory into the chiplet.
+/// 2. **EVAL** (`s_block=1`): evaluates arithmetic gates on loaded wire values.
+///
+/// The first 12 columns are common to both modes. The last 4 (`mode`) are overlaid
+/// and reinterpreted depending on `s_block`:
 ///
 /// ```text
 /// mode idx | READ (s_block=0)       | EVAL (s_block=1)
@@ -258,27 +289,27 @@ pub struct MemoryCols<T> {
 /// Use `ace.read()` / `ace.eval()` for typed overlays of the mode columns.
 #[repr(C)]
 pub struct AceCols<T> {
-    /// Start-of-circuit flag.
+    /// Start-of-circuit flag (1 on the first row of a new circuit evaluation).
     pub s_start: T,
-    /// Block selector: 0 = READ, 1 = EVAL.
+    /// Block selector: 0 = READ (memory loads), 1 = EVAL (gate evaluation).
     pub s_block: T,
-    /// Memory context.
+    /// Memory context for the current circuit evaluation.
     pub ctx: T,
-    /// Pointer for memory read.
+    /// Memory pointer from which to read the next two wire values or instruction.
     pub ptr: T,
-    /// Clock cycle.
+    /// Clock cycle at which the memory read is performed.
     pub clk: T,
-    /// Evaluation operation selector.
+    /// Arithmetic operation selector (determines which gate to evaluate in EVAL mode).
     pub eval_op: T,
-    /// ID of the first wire (output wire).
+    /// ID of the first wire (output wire / left operand).
     pub id_0: T,
-    /// Value of the first wire (QuadFelt).
+    /// Value of the first wire (quadratic extension field element).
     pub v_0: QuadFeltExpr<T>,
     /// ID of the second wire (first input / left operand).
     pub id_1: T,
-    /// Value of the second wire (QuadFelt).
+    /// Value of the second wire (quadratic extension field element).
     pub v_1: QuadFeltExpr<T>,
-    /// Mode-dependent columns (interpretation depends on s_block).
+    /// Mode-dependent columns (interpretation depends on `s_block`; see table above).
     mode: [T; 4],
 }
 
@@ -294,27 +325,57 @@ impl<T> AceCols<T> {
     }
 }
 
+impl<T: Copy> AceCols<T> {
+    /// ACE read flag: `1 - s_block`.
+    ///
+    /// Active on ACE rows in READ mode (memory word reads for circuit inputs).
+    pub fn f_read<E: PrimeCharacteristicRing>(&self) -> E
+    where
+        T: Into<E>,
+    {
+        E::ONE - self.s_block.into()
+    }
+
+    /// ACE eval flag: `s_block`.
+    ///
+    /// Active on ACE rows in EVAL mode (circuit gate evaluation).
+    pub fn f_eval<E: PrimeCharacteristicRing>(&self) -> E
+    where
+        T: Into<E>,
+    {
+        self.s_block.into()
+    }
+}
+
 /// READ mode overlay for ACE mode-dependent columns (4 columns).
+///
+/// In READ mode, the chiplet loads wire values from memory. The multiplicity columns
+/// (`m_0`, `m_1`) track how many times each wire participates in circuit gates, used
+/// by the wiring bus to verify correct wire connections.
 #[repr(C)]
 pub struct AceReadCols<T> {
-    /// Number of eval rows.
+    /// Number of EVAL rows that follow this READ block.
     pub num_eval: T,
-    /// Unused column.
+    /// Unused column (padding for layout alignment with EVAL overlay).
     pub unused: T,
-    /// Multiplicity of the second wire.
+    /// Multiplicity of the second wire (wire 1).
     pub m_1: T,
-    /// Multiplicity of the first wire.
+    /// Multiplicity of the first wire (wire 0).
     pub m_0: T,
 }
 
 /// EVAL mode overlay for ACE mode-dependent columns (4 columns).
+///
+/// In EVAL mode, the chiplet evaluates an arithmetic gate on three wires: two inputs
+/// (`id_1`, `id_2`) and one output (`id_0`). The third wire's ID and value occupy the
+/// same physical columns as `num_eval`/`unused`/`m_1` in READ mode.
 #[repr(C)]
 pub struct AceEvalCols<T> {
     /// ID of the third wire (second input / right operand).
     pub id_2: T,
-    /// Value of the third wire (QuadFelt).
+    /// Value of the third wire.
     pub v_2: QuadFeltExpr<T>,
-    /// Multiplicity of the first wire.
+    /// Multiplicity of the first wire (wire 0).
     pub m_0: T,
 }
 
@@ -610,7 +671,7 @@ const _: () = {
     assert!(size_of::<BitwisePeriodicCols<u8>>() == 2);
 
     // PermutationCols and ControllerCols overlay chiplets[1..20] (19 columns,
-    // excluding perm_seg which is consumed by the chiplet selector system).
+    // excluding s_perm which is consumed by the chiplet selector system).
     assert!(size_of::<PermutationCols<u8>>() == 19);
     assert!(size_of::<ControllerCols<u8>>() == 19);
 };

@@ -104,8 +104,8 @@ impl ExternalNodePrettyPrint<'_> {
     }
 }
 
-impl crate::prettier::PrettyPrint for ExternalNodePrettyPrint<'_> {
-    fn render(&self) -> crate::prettier::Document {
+impl PrettyPrint for ExternalNodePrettyPrint<'_> {
+    fn render(&self) -> Document {
         let external = const_text("external")
             + const_text(".")
             + text(self.node.digest.as_bytes().to_hex_with_prefix());
@@ -208,13 +208,12 @@ impl MastNodeExt for ExternalNode {
                 crate::mast::MastNode::External(external) => {
                     external as *const ExternalNode as *const ()
                 },
-                _ => panic!("Node type mismatch at {:?}", id),
+                _ => panic!("Node type mismatch at {id:?}"),
             };
             let self_as_void = self_ptr as *const ();
             debug_assert_eq!(
                 self_as_void, forest_node_ptr,
-                "Node pointer mismatch: expected node at {:?} to be self",
-                id
+                "Node pointer mismatch: expected node at {id:?} to be self"
             );
         }
     }
@@ -340,7 +339,7 @@ impl MastForestContributor for ExternalNodeBuilder {
         self.after_exit.extend(decorators);
     }
 
-    fn with_digest(mut self, digest: crate::Word) -> Self {
+    fn with_digest(mut self, digest: Word) -> Self {
         self.digest = digest;
         self
     }
@@ -390,12 +389,7 @@ impl proptest::prelude::Arbitrary for ExternalNodeBuilder {
 
         (
             any::<[u64; 4]>().prop_map(|[a, b, c, d]| {
-                miden_crypto::Word::new([
-                    miden_crypto::Felt::new(a),
-                    miden_crypto::Felt::new(b),
-                    miden_crypto::Felt::new(c),
-                    miden_crypto::Felt::new(d),
-                ])
+                Word::new([Felt::new(a), Felt::new(b), Felt::new(c), Felt::new(d)])
             }),
             proptest::collection::vec(
                 super::arbitrary::decorator_id_strategy(params.max_decorator_id_u32),

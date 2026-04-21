@@ -2,9 +2,9 @@
 //!
 //! This module enforces the non-bus stack constraints for four crypto-related operations:
 //!
-//! - **CRYPTOSTREAM**: Encrypts memory words via XOR with the Poseidon2 sponge rate. Constraints
-//!   here enforce pointer advancement and state stability; the actual memory I/O and XOR happen via
-//!   the chiplet bus (constrained elsewhere).
+//! - **CRYPTOSTREAM**: Encrypts memory words via XOR (i.e. addition in the prime field) with the
+//!   Poseidon2 sponge rate. Constraints here enforce pointer advancement and state stability; the
+//!   actual memory I/O and XOR happen via the chiplet bus (constrained elsewhere).
 //!
 //! - **HORNERBASE**: Evaluates a polynomial with base-field coefficients at an extension-field
 //!   point, processing 8 coefficients per row via Horner's method. Used during STARK verification
@@ -109,15 +109,15 @@ fn enforce_cryptostream_constraints<AB>(
 /// separate validation of the helpers is needed.
 ///
 /// Stack layout:
-///   s[0..8]    c0..c7         base-field coefficients (c0 = α⁷ term, c7 = constant)
-///   s[8..13]   (unused)       not affected by this operation
-///   s[13]      alpha_ptr      memory address of α
-///   s[14..16]  acc (re, im)   accumulator (quadratic extension element)
+///   s[0..8]    c0..c7       base-field coefficients (c0 = α⁷ term, c7 = constant)
+///   s[8..13]   (unused)     not affected by this operation
+///   s[13]      alpha_ptr    memory address of α
+///   s[14..16]  (acc₀, acc₁) accumulator (quadratic extension element)
 ///
 /// Helper registers:
-///   h[0..2]    α (re, im)     evaluation point (read from alpha_ptr)
-///   h[2..4]    tmp1 (re, im)  second intermediate result
-///   h[4..6]    tmp0 (re, im)  first intermediate result
+///   h[0..2]    (α₀, α₁)       evaluation point (read from alpha_ptr)
+///   h[4..6]    (tmp0₀, tmp0₁) first intermediate result
+///   h[2..4]    (tmp1₀, tmp1₁) second intermediate result
 ///
 /// Horner steps (expanded form; equivalent to (acc·α + c0)·α + c1, etc.):
 ///   tmp0 = acc  · α² + (c0·α + c1)
@@ -184,18 +184,18 @@ fn enforce_hornerbase_constraints<AB>(
 /// so only α² is needed (not α³).
 ///
 /// Stack layout:
-///   s[0..2]    c0 (re, im)    highest-degree coefficient (α³ term)
-///   s[2..4]    c1 (re, im)    α² term
-///   s[4..6]    c2 (re, im)    α¹ term
-///   s[6..8]    c3 (re, im)    constant term
+///   s[0..2]    (c₀,₀, c₀,₁)  highest-degree coefficient (α³ term)
+///   s[2..4]    (c₁,₀, c₁,₁)  α² term
+///   s[4..6]    (c₂,₀, c₂,₁)  α¹ term
+///   s[6..8]    (c₃,₀, c₃,₁)  constant term
 ///   s[8..13]   (unused)       not affected by this operation
-///   s[13]      alpha_ptr      memory address of α (word: [α0, α1, k0, k1])
-///   s[14..16]  acc (re, im)   accumulator (quadratic extension element)
+///   s[13]      alpha_ptr      memory address of α (word: [α₀, α₁, k0, k1])
+///   s[14..16]  (acc₀, acc₁)   accumulator (quadratic extension element)
 ///
 /// Helper registers:
-///   h[0..2]    α (re, im)     evaluation point
+///   h[0..2]    (α₀, α₁)      evaluation point
 ///   h[2..4]    k0, k1         padding from the α memory word (unused by constraints)
-///   h[4..6]    tmp (re, im)   intermediate result
+///   h[4..6]    (tmp₀, tmp₁)   intermediate result
 ///
 /// Horner steps:
 ///   tmp  = acc · α² + (c0·α + c1)
@@ -271,16 +271,16 @@ fn enforce_hornerext_constraints<AB>(
 /// ## Register map
 ///
 /// Input stack (current row):
-///   s[0..2]    q0 (re, im)     query eval 0 ─┐ 4 extension-field evaluations
-///   s[2..4]    q2 (re, im)     query eval 2  │ (bit-reversed stack order;
-///   s[4..6]    q1 (re, im)     query eval 1  │  see "Bit-reversal" below)
-///   s[6..8]    q3 (re, im)     query eval 3 ─┘
-///   s[8]       folded_pos      query position in the folded domain
-///   s[9]       tree_index      bit-reversed index: tree_index = 4·folded_pos + segment
-///   s[10]      poe             power of initial domain generator
-///   s[11..13]  prev_eval       previous layer's folded value (for consistency check)
-///   s[13..15]  α (re, im)      verifier challenge for this FRI layer
-///   s[15]      layer_ptr       memory address of current FRI layer data
+///   s[0..2]    (q₀,₀, q₀,₁)  query eval 0 ─┐ 4 extension-field evaluations
+///   s[2..4]    (q₂,₀, q₂,₁)  query eval 2  │ (bit-reversed stack order;
+///   s[4..6]    (q₁,₀, q₁,₁)  query eval 1  │  see "Bit-reversal" below)
+///   s[6..8]    (q₃,₀, q₃,₁)  query eval 3 ─┘
+///   s[8]       folded_pos    query position in the folded domain
+///   s[9]       tree_index    bit-reversed index: tree_index = 4·folded_pos + segment
+///   s[10]      poe           power of initial domain generator
+///   s[11..13]  prev_eval     previous layer's folded value (for consistency check)
+///   s[13..15]  (α₀, α₁)      verifier challenge for this FRI layer
+///   s[15]      layer_ptr     memory address of current FRI layer data
 ///
 /// Output stack (next row — first 10 positions are degree-reduction intermediates):
 ///   s'[0..2]   fold_mid0       first fold2 intermediate result
@@ -294,9 +294,9 @@ fn enforce_hornerext_constraints<AB>(
 ///   s'[13..15] fold_result     final fold4 output
 ///
 /// Helper registers (nondeterministic, provided by prover):
-///   h[0..2]    eval_point      folding parameter = α / domain_point
-///   h[2..4]    eval_point_sq   eval_point² (for the final fold2 round)
-///   h[4]       domain_point    x = poe · tau_factor
+///   h[0..2]    eval_point        folding parameter = α / domain_point
+///   h[2..4]    eval_point_sq     eval_point² (for the final fold2 round)
+///   h[4]       domain_point      x = poe · tau_factor
 ///   h[5]       domain_point_inv  1/x
 ///
 /// ## Bit-reversal

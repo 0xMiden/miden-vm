@@ -277,7 +277,7 @@ pub(super) fn op_mrupdate<P: Processor, T: Tracer>(
 pub(super) fn op_horner_eval_base<P: Processor, T: Tracer>(
     processor: &mut P,
     tracer: &mut T,
-) -> Result<OperationHelperRegisters, crate::MemoryError> {
+) -> Result<OperationHelperRegisters, MemoryError> {
     // Stack positions: low coefficient closer to top (lower index)
     const ALPHA_ADDR_INDEX: usize = 13;
     const ACC_LOW_INDEX: usize = 14;
@@ -387,7 +387,7 @@ pub(super) fn op_horner_eval_base<P: Processor, T: Tracer>(
 pub(super) fn op_horner_eval_ext<P: Processor, T: Tracer>(
     processor: &mut P,
     tracer: &mut T,
-) -> Result<OperationHelperRegisters, crate::MemoryError> {
+) -> Result<OperationHelperRegisters, MemoryError> {
     // Stack positions: low coefficient closer to top (lower index)
     const ALPHA_ADDR_INDEX: usize = 13;
     const ACC_LOW_INDEX: usize = 14;
@@ -527,7 +527,7 @@ pub(super) fn op_log_precompile<P: Processor, T: Tracer>(
 pub(super) fn op_crypto_stream<P: Processor, T: Tracer>(
     processor: &mut P,
     tracer: &mut T,
-) -> Result<OperationHelperRegisters, crate::MemoryError> {
+) -> Result<OperationHelperRegisters, MemoryError> {
     // Stack layout: [rate(8), capacity(4), src_ptr, dst_ptr, ...]
     const SRC_PTR_IDX: usize = 12;
     const DST_PTR_IDX: usize = 13;

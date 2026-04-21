@@ -59,8 +59,8 @@ pub const HASHER_MRUPDATE_ID_COL_IDX: usize = HASHER_TRACE_OFFSET + hasher::MRUP
 pub const HASHER_IS_BOUNDARY_COL_IDX: usize = HASHER_TRACE_OFFSET + hasher::IS_BOUNDARY_COL_IDX;
 /// The index of the hasher's direction_bit column in the execution trace.
 pub const HASHER_DIRECTION_BIT_COL_IDX: usize = HASHER_TRACE_OFFSET + hasher::DIRECTION_BIT_COL_IDX;
-/// The index of the hasher's perm_seg column in the execution trace.
-pub const HASHER_PERM_SEG_COL_IDX: usize = HASHER_TRACE_OFFSET + hasher::PERM_SEG_COL_IDX;
+/// The index of the hasher's s_perm column in the execution trace.
+pub const HASHER_S_PERM_COL_IDX: usize = HASHER_TRACE_OFFSET + hasher::S_PERM_COL_IDX;
 
 // --- GLOBALLY-INDEXED CHIPLET COLUMN ACCESSORS: BITWISE -----------------------------------------
 

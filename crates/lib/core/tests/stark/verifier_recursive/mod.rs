@@ -214,7 +214,7 @@ fn build_advice(
     //     the order observed into the Fiat-Shamir transcript).
     let final_poly = &pcs.fri_transcript.final_poly;
     let remainder_base: Vec<Felt> = QuadFelt::flatten_to_base(final_poly.to_vec());
-    let remainder_u64s: Vec<u64> = remainder_base.iter().map(|f| f.as_canonical_u64()).collect();
+    let remainder_u64s: Vec<u64> = remainder_base.iter().map(Felt::as_canonical_u64).collect();
     advice_stack.extend_from_slice(&remainder_u64s);
 
     // 14. Query PoW witness.
@@ -387,7 +387,7 @@ fn infer_widths<F, C>(batch: &BatchProof<F, C>) -> Vec<usize> {
         .openings
         .values()
         .next()
-        .map(|opening| opening.rows.iter_rows().map(|row| row.len()).collect())
+        .map(|opening| opening.rows.iter_rows().map(<[F]>::len).collect())
         .unwrap_or_default()
 }
 
@@ -400,7 +400,7 @@ fn build_kernel_digest_advice(kernel_digests: &[Word]) -> Vec<u64> {
     let mut result = Vec::with_capacity(kernel_digests.len() * 8);
     for digest in kernel_digests {
         let mut padded: Vec<u64> =
-            digest.as_elements().iter().map(|f| f.as_canonical_u64()).collect();
+            digest.as_elements().iter().map(Felt::as_canonical_u64).collect();
         padded.resize(8, 0);
         padded.reverse();
         result.extend_from_slice(&padded);
@@ -417,17 +417,17 @@ fn build_fixed_len_inputs(pub_inputs: &PublicInputs) -> Vec<u64> {
     felts.extend_from_slice(pub_inputs.stack_inputs().as_ref());
     felts.extend_from_slice(pub_inputs.stack_outputs().as_ref());
     felts.extend_from_slice(pub_inputs.pc_transcript_state().as_ref());
-    let mut fixed_len: Vec<u64> = felts.iter().map(|f| f.as_canonical_u64()).collect();
+    let mut fixed_len: Vec<u64> = felts.iter().map(Felt::as_canonical_u64).collect();
     fixed_len.resize(fixed_len.len().next_multiple_of(8), 0);
     fixed_len
 }
 
 fn commitment_to_u64s<C: Copy + Into<[Felt; 4]>>(commitment: C) -> Vec<u64> {
     let felts: [Felt; 4] = commitment.into();
-    felts.iter().map(|f| f.as_canonical_u64()).collect()
+    felts.iter().map(Felt::as_canonical_u64).collect()
 }
 
 fn challenges_to_u64s(challenges: &[Challenge]) -> Vec<u64> {
     let base: Vec<Felt> = QuadFelt::flatten_to_base(challenges.to_vec());
-    base.iter().map(|f| f.as_canonical_u64()).collect()
+    base.iter().map(Felt::as_canonical_u64).collect()
 }

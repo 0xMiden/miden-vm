@@ -19,8 +19,8 @@ state is requested multiple times, the controller records multiple requests but
 the permutation segment executes the permutation only once and carries the
 request count as a multiplicity.
 
-The two physical selectors `s_ctrl` (= `chiplets[0]`) and `s_perm` (= `perm_seg`,
-the last chiplets column) partition hasher rows. The virtual selector
+The two physical selectors `s_ctrl` (= `chiplets[0]`) and `s_perm`
+(the last chiplets column) partition hasher rows. The virtual selector
 `s0 = 1 - s_ctrl - s_perm` covers all non-hasher rows and is subdivided by
 `s1..s4` into the remaining chiplets (bitwise, memory, ACE, kernel ROM). The
 transition rules `ctrl → ctrl | perm`, `perm → perm | s0`, `s0 → s0` enforce
@@ -59,14 +59,14 @@ reused as witness columns `(w0, w1, w2)` for the packed internal rounds.
 
 Within the chiplets segment, the hasher occupies **20 columns** split between the
 two sub-chiplets. The chiplet-level selectors `s_ctrl` (= `chiplets[0]`) and
-`s_perm` (= `perm_seg`, the separate 20th column) select which sub-chiplet owns
+`s_perm` (the separate 20th column) select which sub-chiplet owns
 the current row. The remaining 19 columns (`chiplets[1..20]`) are a **union**
 whose interpretation depends on which sub-chiplet is active.
 
 | Physical column(s) | Controller (`s_ctrl = 1`) | Permutation (`s_perm = 1`) |
 |-------------------|---------------------------|----------------------------|
 | `chiplets[0]`     | `s_ctrl = 1` (controller gate)   | `s_ctrl = 0` |
-| `perm_seg`        | `s_perm = 0`                     | `s_perm = 1` (perm gate) |
+| `s_perm`          | `s_perm = 0`                     | `s_perm = 1` (perm gate) |
 | `chiplets[1]`     | `s0` (input / output-or-pad)    | `w0` (S-box witness) |
 | `chiplets[2]`     | `s1` (operation sub-selector)    | `w1` (S-box witness) |
 | `chiplets[3]`     | `s2` (operation sub-selector)    | `w2` (S-box witness) |
@@ -251,8 +251,8 @@ within the degree-9 budget.
 The chiplet-level selectors `s_ctrl` and `s_perm` are the authoritative
 sub-chiplet discriminators: any consumer that needs to interpret the shared
 columns as controller sub-selectors must first gate on `s_ctrl = 1`. The
-constraint code does this via the precomputed `ControllerFlags::is_active`
-(= `s_ctrl`) and `PermutationCols::witnesses` accessors.
+constraint code does this by gating on `s_ctrl = 1` via the precomputed chiplet
+selectors, while permutation rows access the same physical columns as witnesses.
 
 ## Buses
 
@@ -474,8 +474,7 @@ slots to zero:
 - row `11`: `w1 = w2 = 0`.
 
 Similarly, `mrupdate_id`, `is_boundary`, and `direction_bit` are forced to
-zero on all permutation rows (see `PermutationCols::_mrupdate_id`,
-`_is_boundary`, `_direction_bit`).
+zero on all permutation rows (see `PermutationCols::unused_padding()`).
 
 These constraints are primarily defensive: they make permutation rows inert
 with respect to any constraint that might read the shared columns as if they

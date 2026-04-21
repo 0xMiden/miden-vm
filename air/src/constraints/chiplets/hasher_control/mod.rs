@@ -96,7 +96,6 @@ pub fn enforce_controller_constraints<AB>(
     // NOTE: these are the only direct references to the raw `s0/s1/s2` columns
     // in the controller constraint body — booleanity is inherent to the columns
     // themselves and cannot be expressed through a composed row-kind flag.
-
     builder
         .when(chiplet.is_active.clone())
         .assert_bools([cols.s0, cols.s1, cols.s2]);
@@ -157,6 +156,17 @@ pub fn enforce_controller_constraints<AB>(
     // binary on the next row) would have a hole at the ctrl→perm transition.
     // `chiplet.is_last = s_ctrl * (1 - s_ctrl')` fires exactly on that boundary.
     builder.when(chiplet.is_last.clone()).assert_zero(rows.is_input.clone());
+
+    // --- No non-final output at the ctrl→perm boundary ---
+    // Defensive: an output row at the ctrl→perm boundary must be final
+    // (is_boundary = 1). Without this, a non-final output (is_boundary = 0)
+    // would expect a continuation input that never comes, since the next row
+    // belongs to the permutation segment.
+    // Degree: is_last(2) * is_output(2) * inner(1) = 5.
+    builder
+        .when(chiplet.is_last.clone())
+        .when(rows.is_output.clone())
+        .assert_one(cols.is_boundary);
 
     // --- Input→output adjacency on ctrl→ctrl transitions ---
     // On a ctrl→ctrl transition from an input row, the next row must be an
@@ -351,7 +361,7 @@ pub fn enforce_controller_constraints<AB>(
     // Intermediate SOUT rows (non-boundary) are unconstrained here.
     builder
         .when(chiplet.is_active.clone())
-        .when(rows.is_sout.clone())
+        .when(rows.is_sout)
         .when(cols.is_boundary)
         .assert_zero(cols.direction_bit);
 }

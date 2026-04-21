@@ -296,7 +296,7 @@ fn library_exports() -> Result<(), Report> {
     // make sure the library exports all exported procedures
     let expected_exports: BTreeSet<Arc<Path>> =
         [foo2.into(), foo3.into(), bar1.into(), bar2.into(), bar3.into(), bar5.into()].into();
-    let actual_exports: BTreeSet<_> = lib2.exports().map(|export| export.path()).collect();
+    let actual_exports: BTreeSet<_> = lib2.exports().map(LibraryExport::path).collect();
     assert_eq!(expected_exports, actual_exports);
 
     // make sure foo2, bar2, and bar3 map to the same MastNode
@@ -826,7 +826,7 @@ end
 #[test]
 fn enum_felt_discriminant_too_large_is_rejected() -> TestResult {
     let context = TestContext::default();
-    let modulus = miden_core::Felt::ORDER_U64;
+    let modulus = Felt::ORDER_U64;
     let source = source_file!(
         &context,
         format!(
@@ -851,7 +851,7 @@ end
 #[test]
 fn constant_expression_overflow_is_rejected() -> TestResult {
     let context = TestContext::default();
-    let modulus_minus_one = miden_core::Felt::ORDER_U64 - 1;
+    let modulus_minus_one = Felt::ORDER_U64 - 1;
     let source = source_file!(
         &context,
         format!(
@@ -4924,9 +4924,9 @@ fn issue_1644_single_forest_merge_identity() -> TestResult {
         new_merged_forest.nodes().iter().zip(merged_forest.nodes().iter()).enumerate()
     {
         if orig_node.digest() != merged_node.digest() {
-            eprintln!("Node {} digest violation:", i);
-            eprintln!("   Original: {:?}", orig_node);
-            eprintln!("   Merged:   {:?}", merged_node);
+            eprintln!("Node {i} digest violation:");
+            eprintln!("   Original: {orig_node:?}");
+            eprintln!("   Merged:   {merged_node:?}");
             eprintln!("   Original digest: {:?}", orig_node.digest());
             eprintln!("   Merged digest:   {:?}", merged_node.digest());
 
@@ -4942,7 +4942,7 @@ fn issue_1644_single_forest_merge_identity() -> TestResult {
         .enumerate()
     {
         if new_merged_forest[*orig_root].digest() != merged_forest[*merged_root].digest() {
-            eprintln!("Root {} digest violation:", i);
+            eprintln!("Root {i} digest violation:");
             eprintln!("   Original: {:?}", original_forest[*orig_root].digest());
             eprintln!("   Merged:   {:?}", merged_forest[*merged_root].digest());
             should_panic = true;
@@ -4972,7 +4972,7 @@ fn overlong_total_path_is_rejected_without_panic() {
     // but the total byte length exceeds u16::MAX (the binary serialization length prefix).
     let component = "a".repeat(255);
     let num_components: usize = 300;
-    let mut path_str = alloc::string::String::with_capacity(num_components * (component.len() + 2));
+    let mut path_str = String::with_capacity(num_components * (component.len() + 2));
     for i in 0..num_components {
         if i > 0 {
             path_str.push_str("::");

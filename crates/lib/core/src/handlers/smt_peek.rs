@@ -51,7 +51,7 @@ pub fn handle_smt_peek(process: &ProcessorState) -> Result<Vec<AdviceMutation>, 
         .advice_provider()
         .get_tree_node(root, Felt::new(SMT_DEPTH as u64), key[3])
         .map_err(|err| SmtPeekError::AdviceProviderError {
-            message: format!("Failed to get tree node: {}", err),
+            message: format!("Failed to get tree node: {err}"),
         })?;
 
     if node == *empty_leaf {

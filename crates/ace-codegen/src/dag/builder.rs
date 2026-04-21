@@ -405,7 +405,7 @@ mod tests {
         let root = source_builder.add(a, b);
         let dag = source_builder.build(root);
 
-        let rebuilt = DagBuilder::from_nodes(dag.nodes.clone());
+        let rebuilt = DagBuilder::from_nodes(dag.nodes);
         let mut foreign_builder = DagBuilder::<QuadFelt>::new();
         let foreign = foreign_builder.constant(felt(3));
 

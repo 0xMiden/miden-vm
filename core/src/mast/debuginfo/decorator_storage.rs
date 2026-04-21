@@ -468,7 +468,7 @@ impl OpToDecoratorIds {
         node: MastNodeId,
         operation: usize,
     ) -> Result<usize, DecoratorIndexError> {
-        self.decorator_ids_for_operation(node, operation).map(|slice| slice.len())
+        self.decorator_ids_for_operation(node, operation).map(<[DecoratorId]>::len)
     }
 
     /// Get all decorator IDs for a specific operation within a node.

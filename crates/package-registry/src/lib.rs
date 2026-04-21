@@ -82,7 +82,7 @@ impl PackageRecord {
 
     /// The digest of the MAST forest contained in this package
     pub fn digest(&self) -> Option<&Word> {
-        self.version.digest.as_ref().map(|word| word.inner())
+        self.version.digest.as_ref().map(LexicographicWord::inner)
     }
 
     /// Returns the package description, if known.

@@ -5,7 +5,7 @@ use miden_air::trace::{
     chiplets::{
         NUM_BITWISE_SELECTORS, NUM_KERNEL_ROM_SELECTORS, NUM_MEMORY_SELECTORS,
         bitwise::{self, BITWISE_XOR, OP_CYCLE_LEN},
-        hasher::{CONTROLLER_ROWS_PER_PERMUTATION, HASH_CYCLE_LEN, LINEAR_HASH, PERM_SEG_COL_IDX},
+        hasher::{CONTROLLER_ROWS_PER_PERMUTATION, HASH_CYCLE_LEN, LINEAR_HASH, S_PERM_COL_IDX},
         kernel_rom, memory,
     },
 };
@@ -214,9 +214,9 @@ fn build_trace(
 /// Checks:
 /// - s_ctrl (column 0) = 1 on controller rows, 0 on permutation rows
 /// - s_perm (column 20) = 0 on controller rows, 1 on permutation rows
-/// - Controller rows (perm_seg=0): correct selectors for operation type, is_start/is_final flags
+/// - Controller rows (s_perm=0): correct selectors for operation type, is_start/is_final flags
 /// - Padding rows: selectors [0, 1, 0], non-selector columns are zero
-/// - Perm segment rows (perm_seg=1): selectors are zero (don't-care), perm_seg=1
+/// - Perm segment rows (s_perm=1): selectors are zero (don't-care), s_perm=1
 fn validate_hasher_trace(
     trace: &ChipletsTrace,
     expected_len: usize,
@@ -228,7 +228,7 @@ fn validate_hasher_trace(
     let s0_col = 1; // hasher selector s0
     let s1_col = 2; // hasher selector s1
     let s2_col = 3; // hasher selector s2
-    let perm_seg_col = 1 + PERM_SEG_COL_IDX; // perm_seg in chiplets trace (= column 20 = s_perm)
+    let s_perm_col = 1 + S_PERM_COL_IDX; // s_perm in chiplets trace (= column 20)
 
     let controller_padded = controller_rows.next_multiple_of(HASH_CYCLE_LEN);
     let perm_segment_start = controller_padded;
@@ -240,15 +240,15 @@ fn validate_hasher_trace(
     // Controller rows (including padding): s_ctrl=1, s_perm=0
     for row in 0..controller_padded {
         assert_eq!(trace[0][row], ONE, "s_ctrl should be 1 for controller row {row}");
-        assert_eq!(trace[perm_seg_col][row], ZERO, "s_perm should be 0 for controller row {row}");
+        assert_eq!(trace[s_perm_col][row], ZERO, "s_perm should be 0 for controller row {row}");
     }
     // Permutation rows: s_ctrl=0, s_perm=1
     for row in perm_segment_start..expected_len {
         assert_eq!(trace[0][row], ZERO, "s_ctrl should be 0 for perm row {row}");
-        assert_eq!(trace[perm_seg_col][row], ONE, "s_perm should be 1 for perm row {row}");
+        assert_eq!(trace[s_perm_col][row], ONE, "s_perm should be 1 for perm row {row}");
     }
 
-    // --- Check controller rows (perm_seg = 0) ---
+    // --- Check controller rows (s_perm = 0) ---
     // Controller rows come in pairs: input row (is_start varies) + output row (is_final varies).
     // For a span hash: input has LINEAR_HASH selectors, output has RETURN_HASH selectors.
     // For HPerm: input has LINEAR_HASH selectors, output has RETURN_STATE selectors.
@@ -287,7 +287,7 @@ fn validate_hasher_trace(
         }
     }
 
-    // --- Check perm segment rows (perm_seg = 1) ---
+    // --- Check perm segment rows (s_perm = 1) ---
     for row in perm_segment_start..expected_len {
         // On perm rows, s0/s1/s2 serve as witness columns for packed internal rounds.
         // They are zero on external/boundary rows (offsets 0-3, 12-15 within each cycle),

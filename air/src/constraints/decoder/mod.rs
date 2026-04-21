@@ -44,11 +44,11 @@
 //!
 //! The 8 hasher-state columns serve different roles depending on the current operation:
 //!
-//! | Context              | h0           | h1..h3              | h4             | h5       | h6      | h7        |
-//! |----------------------|--------------|---------------------|----------------|----------|---------|-----------|
-//! | SPAN/RESPAN          | packed ops   | op groups from batch| op group       | op group | op group| op group  |
-//! | END                  | block hash₀  | block hash₁..₃     | is_loop_body    | is_loop  | is_call | is_syscall|
-//! | User ops (in_span=1) | packed ops   | op groups from batch| user_op_helper | ...      | ...     | ...       |
+//! | Context     | h0         | h1..h3    | h4             | h5      | h6      | h7         |
+//! |-------------|------------|-----------|----------------|---------|---------|------------|
+//! | SPAN/RESPAN | packed ops | op groups | op group       | op group| op group| op group   |
+//! | END         | block hash₀| hash₁..₃ | is_loop_body   | is_loop | is_call | is_syscall |
+//! | User ops    | packed ops | op groups | user_op_helper | ...     | ...     | ...        |
 //!
 //! ## Operation Flag Degrees
 //!
@@ -195,7 +195,7 @@ pub fn enforce_main<AB>(
     // Opcode-bit group constraints
     // =============================================
     // Certain opcode prefixes have unused bit positions that must be zero to prevent
-    // invalid opcodes from being encoded. Both gates use e0/e1 for degree reduction:
+    // invalid opcodes from being encoded. Both opcode groups use e0/e1 for degree reduction:
     //
     //   Prefix  | b6 b5 b4 | Meaning    | Constraint
     //   --------+----------+------------+------------
@@ -438,8 +438,8 @@ pub fn enforce_main<AB>(
         let groups_1 = not_bc0 * bc1 * bc2;
 
         // Combined flags for the cascading lane-zeroing constraints.
-        let groups_1_or_2 = groups_1.clone() + groups_2.clone();
-        let groups_1_or_2_or_4 = groups_1_or_2.clone() + groups_4.clone();
+        let groups_1_or_2 = groups_1.clone() + groups_2;
+        let groups_1_or_2_or_4 = groups_1_or_2.clone() + groups_4;
 
         let span_or_respan = op_flags.span() + op_flags.respan();
 
@@ -505,13 +505,11 @@ pub fn enforce_main<AB>(
     // control-flow rows and 1 otherwise (given that in_span is binary, enforced above).
     builder.assert_one(in_span + op_flags.control_flow());
 
-    // TODO: add a last-row boundary constraint enforcing that the final row is HALT.
-    // Currently the processor pads the trace with HALT rows and the absorbing transition
-    // constraint keeps them there, but no AIR constraint explicitly checks the last row.
-    // Adding `builder.when_last_row().assert_one(op_flags.halt())` would:
-    //   1. Make it explicit that no other operation flag can be active on the last row.
-    //   2. Potentially allow removing `when_transition()` guards throughout this module, since HALT
-    //      on the last row guarantees that transition constraints which fire on HALT are vacuously
-    //      satisfied (HALT is absorbing and addr = 0). Investigate which `when_transition()` calls
-    //      become redundant under this assumption.
+    // Last-row boundary: the final row must be HALT. The processor pads the trace with
+    // HALT rows and the absorbing transition constraint keeps them there; this constraint
+    // makes it explicit in the AIR.
+    //
+    // TODO: with HALT guaranteed on the last row, some `when_transition()` guards in this
+    // module may be redundant (HALT is absorbing and addr = 0). Audit which can be removed.
+    builder.when_last_row().assert_one(op_flags.halt());
 }

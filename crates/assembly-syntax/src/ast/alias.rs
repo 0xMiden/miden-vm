@@ -119,11 +119,7 @@ impl crate::prettier::PrettyPrint for Alias {
     fn render(&self) -> crate::prettier::Document {
         use crate::prettier::*;
 
-        let mut doc = self
-            .docs
-            .as_ref()
-            .map(|docstring| docstring.render())
-            .unwrap_or(Document::Empty);
+        let mut doc = self.docs.as_ref().map(PrettyPrint::render).unwrap_or(Document::Empty);
 
         if self.visibility.is_public() {
             doc += display(self.visibility) + const_text(" ");

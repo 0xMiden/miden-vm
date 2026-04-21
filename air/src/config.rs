@@ -85,10 +85,10 @@ pub fn pcs_params() -> PcsParams {
 /// Compile-time constant binding the Fiat-Shamir transcript to the Miden VM AIR.
 /// Must match the constants in `crates/lib/core/asm/sys/vm/mod.masm`.
 pub const RELATION_DIGEST: [Felt; 4] = [
-    Felt::new(8969377816508210195),
-    Felt::new(7745170912542413967),
-    Felt::new(9101264487199878466),
-    Felt::new(5216361493316699406),
+    Felt::new(7722062128011732815),
+    Felt::new(4308752729588498152),
+    Felt::new(1799063282724926959),
+    Felt::new(16916869956111654902),
 ];
 
 /// Observes PCS protocol parameters and per-proof trace height into the challenger.
@@ -330,8 +330,7 @@ mod tests {
             .chain(circuit_commitment.iter().copied())
             .collect();
         let digest = Poseidon2::hash_elements(&input);
-        let expected: Vec<u64> =
-            digest.as_elements().iter().map(|f| f.as_canonical_u64()).collect();
+        let expected: Vec<u64> = digest.as_elements().iter().map(Felt::as_canonical_u64).collect();
 
         let snapshot = format!(
             "num_inputs: {}\nnum_eval_gates: {}\nrelation_digest: {:?}",
@@ -341,8 +340,7 @@ mod tests {
         );
         insta::assert_snapshot!(snapshot);
 
-        let actual: Vec<u64> =
-            super::RELATION_DIGEST.iter().map(|f| f.as_canonical_u64()).collect();
+        let actual: Vec<u64> = super::RELATION_DIGEST.iter().map(Felt::as_canonical_u64).collect();
         assert_eq!(
             actual, expected,
             "RELATION_DIGEST in config.rs is stale. Regenerate with: {REGEN_HINT}"

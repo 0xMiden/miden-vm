@@ -301,7 +301,7 @@ impl AdviceProvider {
 
     /// Returns a reference to the value(s) associated with the specified key in the advice map.
     pub fn get_mapped_values(&self, key: &Word) -> Option<&[Felt]> {
-        self.map.get(key).map(|value| value.as_ref())
+        self.map.get(key).map(AsRef::as_ref)
     }
 
     /// Inserts the provided value into the advice map under the specified key.
