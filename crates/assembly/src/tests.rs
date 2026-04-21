@@ -6031,3 +6031,43 @@ fn pub_constant_import_not_unused() -> TestResult {
     let _library = context.assemble_library([module])?;
     Ok(())
 }
+
+#[test]
+fn local_constant_shadowing_import_warns_unused_import() {
+    let context = TestContext::default();
+    let a = "pub const FOO = 99\n\npub proc noop\n    push.1 drop\nend\n";
+    let a = parse_module!(&context, "lib::a", a);
+    let lib = Assembler::new(context.source_manager()).assemble_library([a]).unwrap();
+
+    let mut context = TestContext::default();
+    context.add_library(&lib).unwrap();
+
+    // `use lib::a::FOO` imports FOO, but a local `const FOO = 1` shadows it.
+    // The import should be reported as unused because the local constant takes precedence.
+    let source = source_file!(
+        &context,
+        "
+        use lib::a::FOO
+
+        const FOO = 1
+
+        begin
+            push.FOO
+        end"
+    );
+
+    assert_assembler_diagnostic!(
+        context,
+        source,
+        "syntax error",
+        "help: see emitted diagnostics for details",
+        "unused import",
+        regex!(r#",-\[test[\d]+:2:13\]"#),
+        "1 |",
+        "2 |         use lib::a::FOO",
+        "  :             ^^^^^^^^^^^",
+        "3 |",
+        "  `----",
+        " help: this import is never used and can be safely removed"
+    );
+}
