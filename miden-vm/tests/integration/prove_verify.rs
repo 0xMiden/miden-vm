@@ -150,7 +150,7 @@ fn test_poseidon2_prove_verify() {
     // legacy multiset boundary terms (program hash, transcript state, kernel digests),
     // which the LogUp aux builder no longer produces. Restoring recursive verification is
     // the follow-up milestone, alongside the LogUp boundary constraints.
-    assert_prove_verify(source, HashFunction::Poseidon2, "Poseidon2", true, false);
+    assert_prove_verify(source, HashFunction::Poseidon2, "Poseidon2", true, true);
 }
 
 /// Test end-to-end proving and verification with RPX
@@ -619,11 +619,6 @@ mod fast_parallel {
     }
 
     #[test]
-    #[ignore = "Milestone B: recursive verifier disabled while the LogUp aux builder \
-                 integration lands. Restoring this test depends on rebuilding the ACE mirror \
-                 circuit (`air/src/ace.rs::logup_boundary_config`) and the recursive \
-                 verifier MASM (`crates/lib/core/asm/sys/vm/public_inputs.masm`) on top of \
-                 the new LogUp boundary terms — both are deferred to a follow-up milestone."]
     fn test_poseidon2_recursive_verify_with_precompile_requests() {
         let LoggedPrecompileProofFixture {
             program,
