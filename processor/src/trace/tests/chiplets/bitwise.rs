@@ -1,107 +1,138 @@
 //! Bitwise chiplet bus test.
 //!
-//! Runs a tiny program with `U32and` + `U32xor` operations and verifies that:
+//! Runs a program with `U32and` + `U32xor` operations and verifies that every bitwise request
+//! row emits the expected `BitwiseMsg` on the chiplet-requests side AND that every bitwise
+//! chiplet cycle-end row emits the matching `BitwiseResponseMsg` on the chiplet-responses side.
 //!
-//! 1. **Main trace** (Layer 1): every bitwise op lands at the expected cycle — the test scans the
-//!    main trace by opcode and asserts the expected count per op.
-//! 2. **Per-row aux delta** (Layer 2): the delta on the M3 `CHIPLET_REQUESTS` column at each
-//!    bitwise request row equals `-1 / BitwiseMsg::{and,xor}(s0, s1, result).encode(&challenges)`,
-//!    where `s0` / `s1` are the top two stack elements at the request row and `result` is the top
-//!    of the next row. This is the strictly-stronger successor to the old `b_chip[r]` step-by-step
-//!    running-product walk — instead of pinning every intermediate row, we pin the delta at each
-//!    *request* row, which is where the algebraic invariant actually lives.
-//!
-//! **Layer 3 (column closure) is intentionally omitted.** The LogUp boundary constraints in
-//! `air/src/constraints/lookup/constraint.rs` are disabled pending a follow-up milestone, so
-//! columns M3 (`CHIPLET_REQUESTS`), M_2+5 (`BLOCK_HASH_AND_OP_GROUP`), and C1
-//! (`CHIPLET_RESPONSES`) carry unaccounted public-values / boundary contributions at program
-//! end. See the `diagnostic_multi_batch_terminals` test in `tests/lookup.rs` for the
-//! documented baseline. Restore closure assertions once the boundary wiring lands.
-//!
-//! Replaces the pre-deletion `b_chip_trace_bitwise` test that walked the legacy multiset
-//! `b_chip` running product row-by-row.
+//! Column-blind by design: the subset matcher in `lookup_harness` compares `(mult, denom)`
+//! pairs regardless of which aux column the framework routes them onto.
 
 use alloc::vec::Vec;
 
-use miden_air::logup_msg::BitwiseMsg;
-use miden_core::{Felt, operations::Operation};
+use miden_air::{
+    logup_msg::{BitwiseMsg, BitwiseResponseMsg},
+    trace::chiplets::BITWISE_SELECTOR_COL_IDX,
+};
+use miden_core::{
+    Felt,
+    operations::{Operation, opcodes},
+};
 
 use super::super::{
     build_trace_from_ops,
-    lookup_harness::{LookupHarness, aux_col},
+    lookup_harness::{Expectations, InteractionLog},
 };
 use crate::RowIndex;
 
-#[test]
-fn bitwise_chiplet_bus_delta_and_closure() {
-    let a: u32 = 0xdead_beef;
-    let b: u32 = 0x1234_5678;
+/// Period of the bitwise chiplet cycle. The response fires on the last row of each cycle.
+const BITWISE_CYCLE_LEN: usize = 8;
 
-    // Three bitwise requests: U32and, U32and, U32xor. Each request consumes its two operands
-    // from the top of the stack and leaves the result on top. `Drop` immediately removes each
-    // result so the stack overflow table stays untouched (independent of the deferred
-    // stack-overflow bus).
+#[test]
+fn bitwise_chiplet_bus_emits_per_request_row() {
+    // Two distinct operand pairs for the two AND requests so per-row denominators differ:
+    // a copy-paste bug attaching an expectation to the wrong row can't pass the subset check.
+    let a1: u32 = 0x1111_2222;
+    let b1: u32 = 0x3333_4444;
+    let a2: u32 = 0x5555_6666;
+    let b2: u32 = 0x7777_8888;
+    let a3: u32 = 0xdead_beef;
+    let b3: u32 = 0x1234_5678;
+
+    // `Drop` between ops isn't strictly required under subset semantics (extra pushes are
+    // ignored), but it keeps the stack overflow table from growing and matches sibling tests.
     let ops = vec![
-        Operation::Push(Felt::from_u32(a)),
-        Operation::Push(Felt::from_u32(b)),
+        Operation::Push(Felt::from_u32(a1)),
+        Operation::Push(Felt::from_u32(b1)),
         Operation::U32and,
         Operation::Drop,
-        Operation::Push(Felt::from_u32(a)),
-        Operation::Push(Felt::from_u32(b)),
+        Operation::Push(Felt::from_u32(a2)),
+        Operation::Push(Felt::from_u32(b2)),
         Operation::U32and,
         Operation::Drop,
-        Operation::Push(Felt::from_u32(a)),
-        Operation::Push(Felt::from_u32(b)),
+        Operation::Push(Felt::from_u32(a3)),
+        Operation::Push(Felt::from_u32(b3)),
         Operation::U32xor,
         Operation::Drop,
     ];
     let trace = build_trace_from_ops(ops, &[]);
-    let harness = LookupHarness::new(&trace);
+    let log = InteractionLog::new(&trace);
     let main = trace.main_trace();
 
-    // --- Layer 1: Main-trace structural checks ---------------------------------------------
+    let mut exp = Expectations::new(&log);
+
+    // ---- Request side: decoder emits a `-1` push of `BitwiseMsg` at each U32AND/U32XOR row.
+    //
+    // Operands are hardcoded (not read back from the trace) so a bug that swaps `s0`/`s1` in
+    // the request emitter would produce a message with the `a`/`b` fields flipped and fail
+    // the subset check. The stack pushes `a` then `b`, so `b` ends up on top (`s0`) and `a`
+    // sits at slot 1 (`s1`); `BitwiseMsg::and(s0, s1, c)` = `BitwiseMsg::and(b, a, a & b)`.
+    let and_expected = [(a1, b1, a1 & b1), (a2, b2, a2 & b2)];
+    let xor_expected = [(a3, b3, a3 ^ b3)];
+
     let mut and_rows: Vec<RowIndex> = Vec::new();
     let mut xor_rows: Vec<RowIndex> = Vec::new();
     for row in 0..main.num_rows() {
         let idx = RowIndex::from(row);
-        let op = main.get_op_code(idx);
-        if op == Felt::from_u8(miden_core::operations::opcodes::U32AND) {
+        let op = main.get_op_code(idx).as_canonical_u64();
+        if op == opcodes::U32AND as u64 {
             and_rows.push(idx);
-        } else if op == Felt::from_u8(miden_core::operations::opcodes::U32XOR) {
+        } else if op == opcodes::U32XOR as u64 {
             xor_rows.push(idx);
         }
     }
-    assert_eq!(and_rows.len(), 2, "expected exactly two U32and rows");
-    assert_eq!(xor_rows.len(), 1, "expected exactly one U32xor row");
+    assert_eq!(
+        and_rows.len(),
+        and_expected.len(),
+        "request cardinality guardrail: expected {} U32AND rows, found {}",
+        and_expected.len(),
+        and_rows.len(),
+    );
+    assert_eq!(
+        xor_rows.len(),
+        xor_expected.len(),
+        "request cardinality guardrail: expected {} U32XOR rows, found {}",
+        xor_expected.len(),
+        xor_rows.len(),
+    );
 
-    // --- Layer 2: Per-row request-side delta check -----------------------------------------
-    //
-    // The `emit_chiplet_requests` bus reads `a = s0`, `b = s1`, `c = stk_next.get(0)` at the
-    // request row (see `air/src/constraints/lookup/buses/chiplet_requests.rs`). The stack
-    // side pushes `a` then `b`, so at the U32and row `s0 = b` and `s1 = a`. Read the values
-    // back out of the main trace rather than hard-coding them to stay robust against any
-    // future stack-layout change.
-    for &row in and_rows.iter().chain(xor_rows.iter()) {
-        let s0 = main.stack_element(0, row);
-        let s1 = main.stack_element(1, row);
-        let next = RowIndex::from(usize::from(row) + 1);
-        let result = main.stack_element(0, next);
-
-        let op = main.get_op_code(row);
-        let msg = if op == Felt::from_u8(miden_core::operations::opcodes::U32AND) {
-            BitwiseMsg::and(s0, s1, result)
-        } else {
-            BitwiseMsg::xor(s0, s1, result)
-        };
-        let expected = -harness.fraction(&msg);
-
-        assert_eq!(
-            harness.delta(aux_col::CHIPLET_REQUESTS, usize::from(row)),
-            expected,
-            "bitwise request delta mismatch at row {row}",
-        );
+    for (&row, &(a, b, c)) in and_rows.iter().zip(and_expected.iter()) {
+        let msg = BitwiseMsg::and(Felt::from_u32(b), Felt::from_u32(a), Felt::from_u32(c));
+        exp.remove(usize::from(row), &msg);
+    }
+    for (&row, &(a, b, c)) in xor_rows.iter().zip(xor_expected.iter()) {
+        let msg = BitwiseMsg::xor(Felt::from_u32(b), Felt::from_u32(a), Felt::from_u32(c));
+        exp.remove(usize::from(row), &msg);
     }
 
-    // NOTE: Layer 3 (column terminal closure) is intentionally omitted — see the module
-    // doc-comment above for the reason (LogUp boundary constraints currently disabled).
+    // ---- Response side: each bitwise-chiplet cycle-end row emits `+1 × BitwiseResponseMsg`.
+    //
+    // Cycle-end = `row % BITWISE_CYCLE_LEN == BITWISE_CYCLE_LEN - 1` (the periodic `k_transition`
+    // column is `0` on the last row of every 8-row cycle, starting from trace row 0). The bitwise
+    // chiplet segment starts at a multiple of `HASH_CYCLE_LEN = 16`, which is a multiple of 8,
+    // so this alignment condition holds across the whole trace.
+    let mut response_rows_seen = 0usize;
+    for row in 0..main.num_rows() {
+        let idx = RowIndex::from(row);
+        if !main.is_bitwise_row(idx) {
+            continue;
+        }
+        if row % BITWISE_CYCLE_LEN != BITWISE_CYCLE_LEN - 1 {
+            continue;
+        }
+        response_rows_seen += 1;
+
+        let op = main.get(idx, BITWISE_SELECTOR_COL_IDX);
+        let a = main.chiplet_bitwise_a(idx);
+        let b = main.chiplet_bitwise_b(idx);
+        let z = main.chiplet_bitwise_z(idx);
+        exp.add(row, &BitwiseResponseMsg { op, a, b, z });
+    }
+    let expected_responses = and_expected.len() + xor_expected.len();
+    assert_eq!(
+        response_rows_seen, expected_responses,
+        "response cardinality guardrail: expected {expected_responses} cycle-end bitwise rows, \
+         found {response_rows_seen}",
+    );
+
+    log.assert_contains(&exp);
 }

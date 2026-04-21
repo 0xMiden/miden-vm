@@ -344,11 +344,6 @@ impl ExecutionTrace {
         let (public_values, kernel_felts) = public_inputs.to_air_inputs();
         let var_len_public_inputs: &[&[Felt]] = &[&kernel_felts];
 
-        // Milestone B: drive the constraint debug checker through the new stateless
-        // LogUp aux builder. The legacy `aux_trace_builders()` getter still exists for
-        // now (its sub-builders are deleted in the next commit) but the constraint
-        // system has already been rewired through `MidenLookupAir`, so feeding it the
-        // legacy 8-column aux trace would mismatch `ProcessorAir::aux_width() == 7`.
         let aux_builder = MidenLookupAuxBuilder;
 
         // Derive deterministic challenges by hashing public values with Poseidon2.

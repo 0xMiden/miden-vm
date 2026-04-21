@@ -250,14 +250,26 @@ pub(in crate::constraints::lookup) fn emit_hash_kernel_table<LB>(
                         "memory_range_checks",
                         mem_active,
                         move |b| {
-                            b.remove("mem_d0", RangeMsg { value: mem_d0.into() }, Deg { n: 3, d: 4 });
-                            b.remove("mem_d1", RangeMsg { value: mem_d1.into() }, Deg { n: 3, d: 4 });
+                            b.remove(
+                                "mem_d0",
+                                RangeMsg { value: mem_d0.into() },
+                                Deg { n: 3, d: 4 },
+                            );
+                            b.remove(
+                                "mem_d1",
+                                RangeMsg { value: mem_d1.into() },
+                                Deg { n: 3, d: 4 },
+                            );
                             let w0: LB::Expr = mem_w0.into();
                             let w1: LB::Expr = mem_w1.into();
                             let w1_mul4 = w1.clone() * LB::Expr::from_u16(4);
                             b.remove("mem_w0", RangeMsg { value: w0 }, Deg { n: 3, d: 4 });
                             b.remove("mem_w1", RangeMsg { value: w1 }, Deg { n: 3, d: 4 });
-                            b.remove("mem_w1_mul4", RangeMsg { value: w1_mul4 }, Deg { n: 3, d: 4 });
+                            b.remove(
+                                "mem_w1_mul4",
+                                RangeMsg { value: w1_mul4 },
+                                Deg { n: 3, d: 4 },
+                            );
                         },
                         Deg { n: 4, d: 5 },
                     );
