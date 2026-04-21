@@ -35,7 +35,7 @@ use crate::{
     constraints::{
         lookup::{
             chiplet_air::{ChipletBusContext, ChipletLookupBuilder},
-            messages::{MemoryHeader, MemoryMsg, RangeMsg, SiblingMsgBitOne, SiblingMsgBitZero},
+            messages::{MemoryHeader, RangeMsg, SiblingMsgBitOne, SiblingMsgBitZero},
         },
         utils::BoolNot,
     },

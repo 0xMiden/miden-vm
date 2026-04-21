@@ -11,8 +11,6 @@
 //! The field-polymorphic core (traits, adapters, accumulators, debug walkers) lives in
 //! [`crate::lookup`].
 
-#![allow(dead_code, unused_imports)]
-
 pub mod aux_builder;
 pub(crate) mod buses;
 pub mod chiplet_air;

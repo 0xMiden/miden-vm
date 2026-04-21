@@ -13,8 +13,6 @@
 //! bus message structs, aux-trace builder, bus identifiers) is surfaced separately
 //! through [`crate::logup`].
 
-#![allow(dead_code, unused_imports)]
-
 pub mod aux_builder;
 pub mod builder;
 pub mod challenges;

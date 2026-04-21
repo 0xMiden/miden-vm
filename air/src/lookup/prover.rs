@@ -46,7 +46,7 @@ use alloc::{vec, vec::Vec};
 use core::borrow::Borrow;
 
 use miden_core::{
-    field::{ExtensionField, Field, PrimeCharacteristicRing},
+    field::{ExtensionField, Field},
     utils::{Matrix, RowMajorMatrix},
 };
 use miden_crypto::stark::air::RowWindow;

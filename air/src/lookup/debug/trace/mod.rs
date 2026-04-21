@@ -24,7 +24,7 @@ use core::{borrow::Borrow, fmt};
 use std::collections::HashMap;
 
 use miden_core::{
-    field::{Field, PrimeCharacteristicRing, QuadFelt},
+    field::{PrimeCharacteristicRing, QuadFelt},
     utils::{Matrix, RowMajorMatrix},
 };
 use miden_crypto::stark::air::RowWindow;
