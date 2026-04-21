@@ -290,21 +290,31 @@ end
 #! Output: [...]
 pub proc observe_trace_height_and_discard_instance_challenge
     exec.constants::random_coin_input_len_ptr mem_load
+    # => [input_len, ...]
     assertz.err="observe_trace_height_and_discard_instance_challenge: input buffer must be empty"
+    # => [...]
 
-    # Observing clears the output buffer.
+    # observing clears the output buffer.
     push.0 exec.constants::random_coin_output_len_ptr mem_store
+    # => [...]
 
-    # Observe log(trace_length) into rate[0], leaving rate[1..7] and capacity unchanged.
+    # observe log(trace_length) into rate[0], leaving rate[1..7] and capacity unchanged.
     exec.constants::get_trace_length_log
+    # => [log(trace_length), ...]
     exec.constants::r1_ptr mem_store
+    # => [...]
 
     exec.load_random_coin_state
+    # => [R1, R2, C, ...]
     exec.poseidon2::permute
+    # => [R1', R2', C', ...]
     exec.store_random_coin_state
+    # => [...]
 
     push.0 exec.constants::random_coin_input_len_ptr mem_store
+    # => [...]
     push.6 exec.constants::random_coin_output_len_ptr mem_store
+    # => [...]
 end
 
 #! Reseed with a commitment word and absorb an additional single felt, then permute.
@@ -650,7 +660,7 @@ pub proc generate_list_indices
         push.0 movdn.3
         #=> [natural_index, depth, natural_index, 0, idx, query_ptr, num_queries, mask, depth, pow2_shift, ...]
         dup.5
-        #=> [query_ptr, rev_index, depth, natural_index, 0, idx, query_ptr, num_queries, mask, depth, pow2_shift, ...]
+        #=> [query_ptr, natural_index, depth, natural_index, 0, idx, query_ptr, num_queries, mask, depth, pow2_shift, ...]
         mem_storew_le
         dropw
         #=> [idx, query_ptr, num_queries, mask, depth, pow2_shift, ...]

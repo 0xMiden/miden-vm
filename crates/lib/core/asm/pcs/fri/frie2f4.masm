@@ -127,6 +127,7 @@ pub proc verify_query_layer
     dup.1
     u32and              # [f_pos, p, poe, e0, e1, t_depth, a0, a1, C, layer_ptr, rem_ptr, ...]
     dup.5 loc_store.0
+    # => [f_pos, p, poe, e0, e1, t_depth, a0, a1, C, layer_ptr, rem_ptr, ...]
     movup.5
     movupw.2
     dup.5
@@ -168,16 +169,23 @@ pub proc verify_query_layer
     mem_loadw_le
     # => [v0, ..., v7, f_pos, p, poe, e0, e1, a0, a1, layer_ptr, rem_ptr, ...]
 
-    # The FRI proof is queried in domain order, but fri_ext2fold4 expects an index whose low
+    # the FRI proof is queried in domain order, but fri_ext2fold4 expects an index whose low
     # two bits select the bit-reversed position inside the four-element folded row. Build that
     # synthetic index as (4 * f_pos) + rev_2(p >> t_depth).
     dup.9 loc_load.0 u32shr
+    # => [p >> t_depth, v0, ..., v7, f_pos, p, poe, e0, e1, a0, a1, layer_ptr, rem_ptr, ...]
     dup push.1 u32and u32shl.1
+    # => [2 * bit0, p >> t_depth, v0, ..., v7, f_pos, p, poe, e0, e1, a0, a1, layer_ptr, rem_ptr, ...]
     swap push.2 u32and u32shr.1
+    # => [bit1, 2 * bit0, v0, ..., v7, f_pos, p, poe, e0, e1, a0, a1, layer_ptr, rem_ptr, ...]
     add
+    # => [rev_2(p >> t_depth), v0, ..., v7, f_pos, p, poe, e0, e1, a0, a1, layer_ptr, rem_ptr, ...]
     dup.9 mul.4 add
+    # => [p_for_fold, v0, ..., v7, f_pos, p, poe, e0, e1, a0, a1, layer_ptr, rem_ptr, ...]
     movdn.9
+    # => [v0, ..., v7, f_pos, p_for_fold, p, poe, e0, e1, a0, a1, layer_ptr, rem_ptr, ...]
     movup.10
+    # => [p, v0, ..., v7, f_pos, p_for_fold, poe, e0, e1, a0, a1, layer_ptr, rem_ptr, ...]
     drop
     # => [v0, ..., v7, f_pos, p_for_fold, poe, e0, e1, a0, a1, layer_ptr, rem_ptr, ...]
 
