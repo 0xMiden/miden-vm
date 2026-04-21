@@ -382,7 +382,6 @@ impl Assembler {
             Instruction::Clk => block_builder.push_op(Clk),
             Instruction::AdvPipe => block_builder.push_op(Pipe),
             Instruction::AdvPush => block_builder.push_op(AdvPop),
-            Instruction::AdvPushPair => block_builder.push_op_many(AdvPop, 2),
             Instruction::AdvPushW => {
                 block_builder.push_ops([Pad; 4]);
                 block_builder.push_op(AdvPopW);

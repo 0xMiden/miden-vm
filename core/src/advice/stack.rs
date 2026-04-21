@@ -88,27 +88,6 @@ impl AdviceStackBuilder {
         self
     }
 
-    /// Adds a pair of elements for consumption by `adv_push_pair`.
-    ///
-    /// After `adv_push_pair`, the operand stack will have `a0` on top and `a1` at position 1:
-    /// `[a0, a1, ...]`.
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// builder.push_for_adv_push_pair(a0, a1);
-    /// // MASM: adv_push_pair
-    /// // Result: operand stack = [a0, a1, ...] with a0 on top
-    /// ```
-    pub fn push_for_adv_push_pair(&mut self, a0: Felt, a1: Felt) -> &mut Self {
-        // adv_push_pair does 2 AdvPop operations which reverse the order.
-        // First popped element ends up deeper, second popped element ends up on top.
-        // We want a0 on top, so a0 must be popped second (consumed later).
-        self.stack.push_back(a1);
-        self.stack.push_back(a0);
-        self
-    }
-
     /// Adds a word for consumption by `adv_loadw` or `adv_pushw`.
     ///
     /// After `adv_loadw` (or `adv_pushw`), the operand stack will have the structural word

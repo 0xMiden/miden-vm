@@ -39,10 +39,10 @@ const RELATION_DIGEST_3 = 1332031755710493241
 #! Input:  [...]
 #! Output: [...]
 proc load_security_params
-    adv_push.1 exec.constants::set_number_queries
-    adv_push.1 exec.constants::set_query_pow_bits
-    adv_push.1 exec.constants::set_deep_pow_bits
-    adv_push.1 exec.constants::set_folding_pow_bits
+    adv_push exec.constants::set_number_queries
+    adv_push exec.constants::set_query_pow_bits
+    adv_push exec.constants::set_deep_pow_bits
+    adv_push exec.constants::set_folding_pow_bits
 end
 
 #! Asserts that the security parameters in memory meet the Miden VM security policy.

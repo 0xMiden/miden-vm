@@ -258,7 +258,6 @@ impl PrettyPrint for Instruction {
             Self::AdvPipe => const_text("adv_pipe"),
 
             Self::AdvPush => const_text("adv_push"),
-            Self::AdvPushPair => const_text("adv_push_pair"),
             Self::AdvPushW => const_text("adv_pushw"),
             Self::AdvLoadW => const_text("adv_loadw"),
 

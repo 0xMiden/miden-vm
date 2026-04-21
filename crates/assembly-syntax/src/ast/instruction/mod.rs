@@ -243,7 +243,6 @@ pub enum Instruction {
     AdvPipe,
 
     AdvPush,
-    AdvPushPair,
     AdvPushW,
     AdvLoadW,
 

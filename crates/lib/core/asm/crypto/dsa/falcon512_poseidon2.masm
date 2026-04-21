@@ -36,7 +36,7 @@ pub proc mod_12289
     # the advice stack contains now [qhi, qlo, r, ...] where q = qhi * 2^32 + qlo is quotient
     # and r is remainder
 
-    repeat.2 adv_push end
+    adv_push adv_push
     u32assert2
     # => [qlo, qhi, a_hi, a_lo, ...]
 
@@ -193,7 +193,7 @@ pub proc load_h_s2_and_product
     ## which simplifies to
     ##
     ## pi(tau_inv) * tau == h(tau_inv) * s2(tau_inv)
-    adv_push_pair
+    adv_push adv_push
     # => [tau0, tau1, ...]
     dup.1 dup.1 ext2inv         # duplicate tau, compute inverse → [tau_inv0, tau_inv1, tau0, tau1, ...]
     loc_storew_le.4             # store [tau_inv0, tau_inv1, tau0, tau1] - tau_inv first for Horner

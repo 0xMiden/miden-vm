@@ -99,8 +99,8 @@ pub fn handle_u64_div(process: &ProcessorState) -> Result<Vec<AdviceMutation>, E
     // Create mutations to extend the advice stack with the result.
     // extend_stack([a,b,c,d]) puts 'a' on top due to reverse iteration + push_front
     // So [q_hi, q_lo, r_hi, r_lo] puts q_hi on top
-    // After repeat.2 adv_push end: pops q_hi then q_lo → operand stack [q_lo, q_hi, ...] (LE)
-    // After repeat.2 adv_push end: pops r_hi then r_lo → operand stack [r_lo, r_hi, ...] (LE)
+    // After `adv_push adv_push`: pops q_hi then q_lo → operand stack [q_lo, q_hi, ...] (LE)
+    // After `adv_push adv_push`: pops r_hi then r_lo → operand stack [r_lo, r_hi, ...] (LE)
     let mutation = AdviceMutation::extend_stack([q_hi, q_lo, r_hi, r_lo]);
     Ok(vec![mutation])
 }

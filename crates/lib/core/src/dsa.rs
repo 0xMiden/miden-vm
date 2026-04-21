@@ -172,7 +172,7 @@ pub mod falcon512_poseidon2 {
         let digest_polynomials = Poseidon2::hash_elements(&polynomials);
         let challenge = (digest_polynomials[0], digest_polynomials[1]);
 
-        // Push [tau1, tau0] so that after extend_stack reversal + adv_push_pair,
+        // Push [tau1, tau0] so that after extend_stack reversal + two `adv_push` ops,
         // operand stack is [tau0, tau1, ...]
         let mut result: Vec<Felt> = vec![challenge.1, challenge.0];
         result.extend_from_slice(&polynomials);

@@ -631,9 +631,8 @@ fn test_ast_parsing_module() -> Result<(), Report> {
 #[test]
 fn test_ast_parsing_adv_ops() -> Result<(), Report> {
     let context = SyntaxTestContext::new();
-    let source = source_file!(&context, "begin adv_push adv_push_pair adv_pushw adv_loadw end");
-    let forms =
-        module!(begin!(inst!(AdvPush), inst!(AdvPushPair), inst!(AdvPushW), inst!(AdvLoadW)));
+    let source = source_file!(&context, "begin adv_push adv_pushw adv_loadw end");
+    let forms = module!(begin!(inst!(AdvPush), inst!(AdvPushW), inst!(AdvLoadW)));
     assert_eq!(context.parse_forms(source)?, forms);
     Ok(())
 }

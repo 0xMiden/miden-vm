@@ -17,16 +17,6 @@ fn adv_push() {
 }
 
 #[test]
-fn adv_push_pair() {
-    // AdviceStackBuilder handles the reversal required by adv_push_pair.
-    let mut builder = AdviceStackBuilder::new();
-    builder.push_for_adv_push_pair(Felt::new(1), Felt::new(2));
-    let advice_stack = builder.build_vec_u64();
-    let test = build_op_test!("adv_push_pair", &[], &advice_stack);
-    test.expect_stack(&[1, 2]);
-}
-
-#[test]
 fn adv_push_repeat() {
     // AdviceStackBuilder handles the reversal required by sequential adv_push.
     let mut builder = AdviceStackBuilder::new();
@@ -73,15 +63,6 @@ fn adv_loadw() {
 fn adv_loadw_invalid() {
     // attempting to read from empty advice stack should throw an error
     let test = build_op_test!("adv_loadw", &[0, 0, 0, 0]);
-    expect_exec_error_matches!(
-        test,
-        ExecutionError::AdviceError { err: AdviceError::StackReadFailed, .. }
-    );
-}
-
-#[test]
-fn adv_push_pair_invalid() {
-    let test = build_op_test!("adv_push_pair", &[], &[1]);
     expect_exec_error_matches!(
         test,
         ExecutionError::AdviceError { err: AdviceError::StackReadFailed, .. }

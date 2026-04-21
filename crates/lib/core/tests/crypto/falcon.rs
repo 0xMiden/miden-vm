@@ -601,12 +601,12 @@ fn generate_data_probabilistic_product_test(
     polynomials.extend(pi.iter().map(|a| Felt::new(*a)));
 
     // get the challenge point and push it to the advice stack
-    // adv_push_pair will place tau0 on top, tau1 at position 1
+    // Two sequential `adv_push` ops will place tau0 on top, tau1 at position 1.
     let digest_polynomials = Poseidon2::hash_elements(&polynomials[..]);
     let tau0 = digest_polynomials[0];
     let tau1 = digest_polynomials[1];
     let mut builder = AdviceStackBuilder::new();
-    builder.push_for_adv_push_pair(tau0, tau1);
+    builder.push_for_adv_push(&[tau0, tau1]);
     builder.push_elements(polynomials.iter().copied());
     let advice_stack = builder.build_vec_u64();
 

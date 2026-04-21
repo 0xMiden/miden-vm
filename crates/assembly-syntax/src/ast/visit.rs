@@ -503,7 +503,7 @@ where
         | MovDn10 | MovDn11 | MovDn12 | MovDn13 | MovDn14 | MovDn15 | MovDnW2 | MovDnW3
         | Reversew | Reversedw | CSwap | CSwapW | CDrop | CDropW | PushFeltList(_) | Sdepth
         | Caller | Clk | MemLoad | MemLoadWBe | MemLoadWLe | MemStore | MemStoreWBe
-        | MemStoreWLe | MemStream | AdvPipe | AdvPush | AdvPushPair | AdvPushW | AdvLoadW
+        | MemStoreWLe | MemStream | AdvPipe | AdvPush | AdvPushW | AdvLoadW
         | Hash | HMerge | HPerm | MTreeGet | MTreeSet | MTreeMerge | MTreeVerify | FriExt2Fold4
         | DynExec | DynCall | DebugVar(_) | HornerBase | HornerExt | CryptoStream | EvalCircuit
         | LogPrecompile | Emit => ControlFlow::Continue(()),
@@ -1098,7 +1098,7 @@ where
         | MovDn10 | MovDn11 | MovDn12 | MovDn13 | MovDn14 | MovDn15 | MovDnW2 | MovDnW3
         | Reversew | Reversedw | CSwap | CSwapW | CDrop | CDropW | PushFeltList(_) | Sdepth
         | Caller | Clk | MemLoad | MemLoadWBe | MemLoadWLe | MemStore | MemStoreWBe
-        | MemStoreWLe | MemStream | AdvPipe | AdvPush | AdvPushPair | AdvPushW | AdvLoadW
+        | MemStoreWLe | MemStream | AdvPipe | AdvPush | AdvPushW | AdvLoadW
         | Hash | HMerge | HPerm | MTreeGet | MTreeSet | MTreeMerge | MTreeVerify | FriExt2Fold4
         | DynExec | DynCall | DebugVar(_) | HornerBase | HornerExt | EvalCircuit | CryptoStream
         | LogPrecompile | Emit => ControlFlow::Continue(()),
