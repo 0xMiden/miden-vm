@@ -10,6 +10,7 @@
 
 use miden_air::{
     LiftedAir, NUM_PUBLIC_VALUES, ProcessorAir,
+    lookup::NUM_LOGUP_COMMITTED_FINALS,
     trace::{AUX_TRACE_RAND_CHALLENGES, AUX_TRACE_WIDTH, TRACE_WIDTH},
 };
 use miden_core::{Felt, field::QuadFelt};
@@ -17,7 +18,6 @@ use miden_crypto::stark::air::{
     AirBuilder, ExtensionBuilder, PeriodicAirBuilder, PermutationAirBuilder,
     symbolic::{AirLayout, SymbolicAirBuilder},
 };
-
 // ================================================================================================
 // DEGREE-LOGGING BUILDER
 // ================================================================================================
@@ -190,7 +190,7 @@ fn make_builder() -> DegreeLog {
         num_public_values: NUM_PUBLIC_VALUES,
         permutation_width: AUX_TRACE_WIDTH,
         num_permutation_challenges: AUX_TRACE_RAND_CHALLENGES,
-        num_permutation_values: AUX_TRACE_WIDTH,
+        num_permutation_values: NUM_LOGUP_COMMITTED_FINALS,
         num_periodic_columns: num_periodic,
     };
     DegreeLog::new(SymbolicAirBuilder::<Felt, QuadFelt>::new(layout))

@@ -18,7 +18,7 @@ use super::{
     chiplet_air::{CHIPLET_COLUMN_SHAPE, ChipletLookupAir, ChipletLookupBuilder},
     main_air::{MAIN_COLUMN_SHAPE, MainLookupAir, MainLookupBuilder},
 };
-use crate::lookup::{Deg, LookupAir};
+use crate::lookup::LookupAir;
 
 // MIDEN LOOKUP AIR
 // ================================================================================================
@@ -36,11 +36,8 @@ use crate::lookup::{Deg, LookupAir};
 #[derive(Copy, Clone, Debug, Default)]
 pub struct MidenLookupAir;
 
-/// Full 8-column fraction stride: 4 main + 3 chiplet + 1 padding, in `eval` order.
-/// The 8th column has no interactions and stays zero; it exists so that the aux trace
-/// width is word-aligned (8 EF elements = 4 words), keeping the MASM recursive
-/// verifier's Fiat-Shamir absorption aligned with the prover.
-pub(crate) const MIDEN_COLUMN_SHAPE: [usize; 8] = [
+/// Full 7-column fraction stride: 4 main + 3 chiplet, in `eval` order.
+pub(crate) const MIDEN_COLUMN_SHAPE: [usize; 7] = [
     MAIN_COLUMN_SHAPE[0],
     MAIN_COLUMN_SHAPE[1],
     MAIN_COLUMN_SHAPE[2],
@@ -48,16 +45,19 @@ pub(crate) const MIDEN_COLUMN_SHAPE: [usize; 8] = [
     CHIPLET_COLUMN_SHAPE[0],
     CHIPLET_COLUMN_SHAPE[1],
     CHIPLET_COLUMN_SHAPE[2],
-    0, // padding column — no interactions
 ];
+
+// TODO(#3032): The real committed final count is 1 (col 0 only), but we keep 2 for
+// forward-compatibility with the MASM recursive verifier which absorbs 2 boundary
+// values. The second value is always ZERO. Reduce to 1 once trace splitting lands.
+pub const NUM_LOGUP_COMMITTED_FINALS: usize = 2;
 
 impl<LB> LookupAir<LB> for MidenLookupAir
 where
     LB: MainLookupBuilder + ChipletLookupBuilder,
 {
     fn num_columns(&self) -> usize {
-        // 4 main-trace + 3 chiplet-trace + 1 padding = 8.
-        8
+        7
     }
 
     fn column_shape(&self) -> &[usize] {
@@ -81,9 +81,6 @@ where
     fn eval(&self, builder: &mut LB) {
         MainLookupAir.eval(builder);
         ChipletLookupAir.eval(builder);
-        // Padding column — no interactions, stays zero. Keeps the aux trace width at 8
-        // (word-aligned) for MASM Fiat-Shamir transcript compatibility.
-        builder.next_column(|_| {}, Deg { n: 0, d: 0 });
     }
 }
 
@@ -105,7 +102,7 @@ mod tests {
         stark::air::{LiftedAir, symbolic::AirLayout},
     };
 
-    use super::MidenLookupAir;
+    use super::{MidenLookupAir, NUM_LOGUP_COMMITTED_FINALS};
     use crate::{
         Felt, NUM_PUBLIC_VALUES, ProcessorAir,
         constraints::lookup::{BusId, MIDEN_MAX_MESSAGE_WIDTH},
@@ -133,7 +130,7 @@ mod tests {
             num_public_values: NUM_PUBLIC_VALUES,
             permutation_width: AUX_TRACE_WIDTH,
             num_permutation_challenges: AUX_TRACE_RAND_CHALLENGES,
-            num_permutation_values: AUX_TRACE_WIDTH,
+            num_permutation_values: NUM_LOGUP_COMMITTED_FINALS,
             num_periodic_columns: num_periodic(),
         }
     }
@@ -203,12 +200,11 @@ mod tests {
             NUM_PUBLIC_VALUES,
         );
         assert_eq!(inv.air_name, "MidenLookupAir");
-        // MidenLookupAir::num_columns() == 8 (4 main + 3 chiplet + 1 padding).
-        assert_eq!(inv.columns.len(), 8);
+        assert_eq!(inv.columns.len(), 7);
         let groupy = inv.columns.iter().filter(|c| !c.groups.is_empty()).count();
         assert!(
-            groupy >= 7,
-            "expected ≥7 non-empty columns, got {groupy}: {:#?}",
+            groupy == 7,
+            "expected 7 non-empty columns, got {groupy}: {:#?}",
             inv.columns.iter().map(|c| c.groups.len()).collect::<Vec<_>>(),
         );
         let total = inv.total_interactions();

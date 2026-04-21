@@ -20,8 +20,10 @@
 //! - `aux_trace` is the first `num_rows` rows of the accumulator — it starts at `ZERO` and ends at
 //!   the running sum **before** the last row's contribution. The last row's fraction contribution
 //!   does **not** appear in the aux trace.
-//! - `committed_finals` is the `num_rows`-th row of the accumulator (one `EF` per column) — the
-//!   full running sum across the entire trace, observed by the Fiat-Shamir challenger.
+//! - `committed_finals` is `[acc_final, ZERO]`: the accumulator's terminal value from the
+//!   `num_rows`-th row, padded with a zero element for the MASM recursive verifier which absorbs
+//!   exactly 2 boundary values. TODO(#3032): remove the zero padding once trace splitting lands and
+//!   each sub-trace has its own accumulator.
 
 use alloc::vec::Vec;
 
@@ -64,8 +66,13 @@ where
     );
 
     let mut data = full.values;
-    let committed: Vec<EF> = data.split_off(num_rows * num_cols);
-    debug_assert_eq!(committed.len(), num_cols);
+    let last_row: Vec<EF> = data.split_off(num_rows * num_cols);
+    debug_assert_eq!(last_row.len(), num_cols);
+
+    // TODO(#3032): Only col 0 is a real committed final. Pad with ZERO for the MASM
+    // recursive verifier which absorbs 2 boundary values. Remove padding once trace
+    // splitting lands and each trace has its own accumulator.
+    let committed: Vec<EF> = vec![last_row[0], EF::ZERO];
 
     let aux_trace = RowMajorMatrix::new(data, num_cols);
     (aux_trace, committed)

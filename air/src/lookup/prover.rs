@@ -896,24 +896,25 @@ mod tests {
             assert_eq!(*m, expected_m);
         }
 
-        // Accumulator produces num_rows+1 entries per column, and the running sum for
-        // each column advances by a deterministic per-row delta.
         let aux = accumulate_slow(&fractions);
         assert_eq!(aux.len(), 2);
         for col_aux in &aux {
             assert_eq!(col_aux.len(), NUM_ROWS + 1);
-            assert_eq!(col_aux[0], QuadFelt::ZERO);
         }
+        assert_eq!(aux[0][0], QuadFelt::ZERO, "accumulator initial must be zero");
 
-        // Column 0 row delta = 1/d(ONE) - 1/d(TWO); column 1 row delta = 1/d(THREE).
         let d1 = SmokeMsg { value: Felt::ONE }.encode(&challenges);
         let d2 = SmokeMsg { value: Felt::new(2) }.encode(&challenges);
         let d3 = SmokeMsg { value: Felt::new(3) }.encode(&challenges);
         let delta0 = d1.try_inverse().unwrap() - d2.try_inverse().unwrap();
         let delta1 = d3.try_inverse().unwrap();
+        // Column 0 (accumulator): each row delta = own fraction + col 1's fraction.
         for r in 0..NUM_ROWS {
-            assert_eq!(aux[0][r + 1] - aux[0][r], delta0);
-            assert_eq!(aux[1][r + 1] - aux[1][r], delta1);
+            assert_eq!(aux[0][r + 1] - aux[0][r], delta0 + delta1);
+        }
+        // Column 1 (fraction, aux_curr): value at row r is the per-row fraction.
+        for r in 0..NUM_ROWS {
+            assert_eq!(aux[1][r], delta1);
         }
     }
 }

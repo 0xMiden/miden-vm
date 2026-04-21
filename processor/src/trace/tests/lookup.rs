@@ -16,6 +16,8 @@
 //! or terminal closure — those checks need the follow-up constraint-path round-trip
 //! oracle. Column terminals are printed to stderr for manual inspection.
 
+use alloc::vec::Vec;
+
 use miden_air::{
     LOGUP_AUX_TRACE_WIDTH, LiftedAir, ProcessorAir,
     lookup::{
@@ -85,8 +87,8 @@ fn build_lookup_fractions_on_tiny_span() {
     assert_eq!(aux.len(), LOGUP_AUX_TRACE_WIDTH);
     for col_aux in &aux {
         assert_eq!(col_aux.len(), num_rows + 1);
-        assert_eq!(col_aux[0], QuadFelt::ZERO);
     }
+    assert_eq!(aux[0][0], QuadFelt::ZERO);
 
     // --- Informational: per-column terminals. A follow-up commit hardens these into
     //     concrete assertions once we know the expected boundary value for each column
@@ -136,8 +138,7 @@ fn build_lookup_fractions_matches_constraint_path_oracle() {
         Challenges::<QuadFelt>::new(alpha, beta, MIDEN_MAX_MESSAGE_WIDTH, BusId::COUNT);
     let fractions = build_lookup_fractions(&air, &main_trace, &periodic, &public_vals, &challenges);
     // `accumulate` returns a row-major matrix with `num_rows + 1` rows and `num_cols`
-    // columns; row 0 is the zero initial condition and row `r + 1` column `c` holds the
-    // running sum of `m_i · d_i⁻¹` through main-trace row `r`.
+    // columns. Col 0 is the running-sum accumulator; cols 1+ hold per-row fraction values.
     let aux = accumulate(&fractions);
     let aux_width = aux.width();
     let aux_values = &aux.values;
@@ -152,25 +153,39 @@ fn build_lookup_fractions_matches_constraint_path_oracle() {
         collect_column_oracle_folds(&air, &main_trace, &periodic, &public_vals, &challenges);
     assert_eq!(oracle_folds.len(), num_rows);
 
-    // --- Per-(row, col) delta check. ---
+    // --- Per-(row, col) value check. ---
+    // Col 0 (accumulator): aux[r+1][0] - aux[r][0] == Σ_col per_row_value[col].
+    // Cols 1+ (fraction): aux[r][col] == V/U per-row value.
     for (r, row_folds) in oracle_folds.iter().enumerate() {
         assert_eq!(row_folds.len(), LOGUP_AUX_TRACE_WIDTH);
-        for (col, &(u_col, v_col)) in row_folds.iter().enumerate() {
-            let u_inv = u_col.try_inverse().unwrap_or_else(|| {
-                panic!(
-                    "row {r} col {col}: oracle U_col is zero — bus has a zero-denominator \
-                     product, indicating a bug in the emitter or message encoding",
-                )
-            });
-            let expected_delta = v_col * u_inv;
-            let actual_delta =
-                aux_values[(r + 1) * aux_width + col] - aux_values[r * aux_width + col];
+        let per_row_values: Vec<QuadFelt> = row_folds
+            .iter()
+            .enumerate()
+            .map(|(col, &(u_col, v_col))| {
+                let u_inv = u_col.try_inverse().unwrap_or_else(|| {
+                    panic!(
+                        "row {r} col {col}: oracle U_col is zero — bus has a zero-denominator \
+                         product, indicating a bug in the emitter or message encoding",
+                    )
+                });
+                v_col * u_inv
+            })
+            .collect();
+
+        // Accumulator (col 0): delta == sum of all columns' per-row values.
+        let expected_delta: QuadFelt = per_row_values.iter().copied().sum();
+        let actual_delta = aux_values[(r + 1) * aux_width] - aux_values[r * aux_width];
+        assert_eq!(
+            actual_delta, expected_delta,
+            "row {r} col 0 (accumulator): prover vs constraint path mismatch",
+        );
+
+        // Fraction columns (cols 1+): aux[r][col] == per-row V/U.
+        for col in 1..LOGUP_AUX_TRACE_WIDTH {
+            let actual_value = aux_values[r * aux_width + col];
             assert_eq!(
-                actual_delta, expected_delta,
-                "row {r} col {col}: prover path vs constraint path mismatch\n  \
-                 prover delta = {actual_delta:?}\n  \
-                 oracle (U, V) = ({u_col:?}, {v_col:?})\n  \
-                 oracle delta  = {expected_delta:?}",
+                actual_value, per_row_values[col],
+                "row {r} col {col} (fraction): prover vs constraint path mismatch",
             );
         }
     }
@@ -212,14 +227,14 @@ fn diagnostic_assembler_path_terminals() {
 
     std::eprintln!("assembler-path trace: {} rows", num_rows);
     let labels = [
-        "M1 block_stack+range_table",
-        "M_2+5 block_hash+op_group",
-        "M3 chiplet_requests",
-        "M4 range_logcap",
-        "M5 stack_overflow",
-        "C1 chiplet_responses",
-        "C2 hash_kernel+sibling",
-        "C3 ace_wiring",
+        "M1 block_stack+range_table (RS)",
+        "M_2+5 block_hash+op_group (frac)",
+        "M3 chiplet_requests (frac)",
+        "M4 range_logcap (frac)",
+        "C1 chiplet_responses (RS)",
+        "C2 hash_kernel+sibling (frac)",
+        "C3 ace_wiring (frac)",
+        "padding",
     ];
     for (col, col_aux) in aux.iter().enumerate() {
         let terminal = col_aux[num_rows];

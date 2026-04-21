@@ -1,9 +1,27 @@
-//! Constraint-path adapter for the new closure-based lookup API.
+//! Constraint-path adapter for the closure-based lookup API.
 //!
-//! Implements [`LookupBuilder`] over any `LiftedAirBuilder`. The adapter
-//! mirrors the column-accumulator algebra in the per-group `(U, V)` / per-batch `(N, D)`
-//! running pairs and wraps it in the closure-based surface described by
-//! [`super::builder`].
+//! Implements [`LookupBuilder`] over any `LiftedAirBuilder`. Each column's
+//! constraints are emitted inline during [`LookupBuilder::next_column`].
+//!
+//! ## LogUp constraint structure
+//!
+//! The aux trace has one **accumulator** (col 0) and several **fraction columns** (cols 1+).
+//! Each bus interaction on row `r` contributes a rational term `mᵢ / dᵢ` to one of the
+//! columns. Because the verifier cannot check rational equations directly, each column
+//! stores the *numerator–denominator pair* `(Nᵢ, Dᵢ)` — the cross-multiplied sum of all
+//! interactions assigned to that column on row `r`. The constraints then check:
+//!
+//! - **Fraction columns** (i > 0): `Dᵢ · acc[i] - Nᵢ = 0` on transition rows. This asserts that the
+//!   prover-supplied value `acc[i]` equals `Nᵢ/Dᵢ`, the sum of fractions for column `i` on that
+//!   row.
+//!
+//! - **Accumulator** (col 0): the single running sum across the entire trace.
+//!   - `when_first:      acc[0] = 0` — starts at zero.
+//!   - `when_transition: D₀ · (acc_next[0] - Σᵢ acc[i]) - N₀ = 0` — the next accumulator value
+//!     equals the current value plus every column's per-row contribution (including col 0's own
+//!     interactions folded via `N₀/D₀`).
+//!   - `when_last:       acc[0] = committed_final` — binds the final sum to the value committed
+//!     during the Fiat-Shamir transcript, ensuring the global LogUp sum is correct.
 //!
 //! ## Algebra location
 //!
@@ -36,7 +54,7 @@
 //! [`LookupBuilder::next_column`] call re-queries `ab.permutation()` to pick
 //! up the current-row / next-row `VarEF` values. `ab.permutation()` is
 //! cheap (it builds a window over references) and not caching keeps the
-//! builder a four-field struct.
+//! builder small.
 
 use core::marker::PhantomData;
 
@@ -53,11 +71,8 @@ use super::{
 
 /// Constraint-path [`LookupBuilder`] over a wrapped [`LiftedAirBuilder`].
 ///
-/// Construct via [`ConstraintLookupBuilder::new`]. The adapter caches the
-/// precomputed challenges ([`Challenges`] sized from the
-/// [`LookupAir`]) and a small column-index counter; the permutation row
-/// slices are re-queried from the wrapped `&mut AB` on every
-/// [`LookupBuilder::next_column`] call.
+/// Column 0 is the sole running-sum accumulator; columns 1+ are fraction columns.
+/// All constraints are emitted inline during [`LookupBuilder::next_column`].
 pub struct ConstraintLookupBuilder<'ab, AB>
 where
     AB: LiftedAirBuilder + 'ab,
@@ -71,17 +86,6 @@ impl<'ab, AB> ConstraintLookupBuilder<'ab, AB>
 where
     AB: LiftedAirBuilder,
 {
-    /// Create a new adapter wrapping `ab`, sized from `air`.
-    ///
-    /// The `air` parameter is bound as `LookupAir<Self>`, which pins the
-    /// `LB` type parameter of [`LookupAir`] to this concrete adapter. The
-    /// canonical usage is a blanket `impl<LB: LookupBuilder> LookupAir<LB>
-    /// for MyAir`, which automatically satisfies the bound here and lets
-    /// us read the shape without any turbofishing at the call site.
-    ///
-    /// Reads `ab.permutation_randomness()` to extract α = `r[0]` and β = `r[1]`, then builds
-    /// a [`Challenges<AB::ExprEF>`] (= `crate::lookup::Challenges`) sized from
-    /// `air.max_message_width()` / `air.num_bus_ids()`.
     pub fn new<A>(ab: &'ab mut AB, air: &A) -> Self
     where
         A: LookupAir<Self>,
@@ -140,8 +144,8 @@ where
         // Open the column with an empty `(U, V) = (1, 0)` accumulator.
         // The column only holds a shared borrow of the challenges and
         // the two running-pair slots — the `&mut AB` stays on the
-        // builder and is only reached back into for the finalize step
-        // below.
+        // builder and is only reached back into for the constraint
+        // emission below.
         let mut col = ConstraintColumn {
             challenges: &self.challenges,
             u: AB::ExprEF::ONE,
@@ -151,40 +155,52 @@ where
         let result = f(&mut col);
         let ConstraintColumn { u, v, .. } = col;
 
-        // Pick up `acc` / `acc_next` from `ab.permutation()` and the committed
-        // final from `ab.permutation_values()` now that the column borrow is released.
-        let (acc, acc_next, committed_final) = {
-            let mp = self.ab.permutation();
-            let acc: AB::ExprEF = mp.current_slice()[self.column_idx].into();
-            let acc_next: AB::ExprEF = mp.next_slice()[self.column_idx].into();
-            let committed_final: AB::ExprEF =
-                self.ab.permutation_values()[self.column_idx].clone().into();
-            (acc, acc_next, committed_final)
-        };
-
-        // LogUp boundary + transition + last-row constraints.
-        //
-        //   when_first_row:  acc[0] == 0
-        //   when_transition: (acc_next - acc) · U − V == 0          (rows 0..N-2)
-        //   when_last_row:   acc == committed_final
-        //
-        // ## Last-row binding
-        //
-        // The natural closing check is `when_last_row: (committed_final − acc) · U − V`,
-        // but `when_last_row`'s selector multiplies the expression by an extra polynomial
-        // factor that pushes M_2+5 to degree 10, exceeding the degree-9 budget.
-        //
-        // Our model assumes the last row of the AIR never fires any interactions: on the
-        // last row `U = 1, V = 0` for every column. This allows a lower-degree closing
-        // constraint — simply binding the accumulator to the committed final value:
-        //
-        //   `when_last_row: acc − committed_final == 0`    (degree 1 + selector)
-        let delta_transition = acc_next - acc.clone();
-        self.ab.when_first_row().assert_zero_ext(acc.clone());
-        self.ab.when_transition().assert_zero_ext(delta_transition * u - v);
-        self.ab.when_last_row().assert_eq_ext(acc, committed_final);
-
+        // Pick up permutation column values now that the column borrow is released.
+        let col_idx = self.column_idx;
         self.column_idx += 1;
+
+        if col_idx == 0 {
+            let (acc, acc_next, committed_final) = {
+                let mp = self.ab.permutation();
+                let acc: AB::ExprEF = mp.current_slice()[0].into();
+                let acc_next: AB::ExprEF = mp.next_slice()[0].into();
+                let committed_final: AB::ExprEF = self.ab.permutation_values()[0].clone().into();
+                (acc, acc_next, committed_final)
+            };
+
+            // Σ_i acc[i] across all permutation columns.
+            let all_curr_sum = {
+                let mp = self.ab.permutation();
+                let current = mp.current_slice();
+                let mut sum: AB::ExprEF = current[0].into();
+                for i in 1..current.len() {
+                    let aux_i: AB::ExprEF = current[i].into();
+                    sum += aux_i;
+                }
+                sum
+            };
+
+            //   when_first:      acc[0] = 0
+            //   when_transition: D₀ · (acc_next[0] - Σᵢ acc[i]) - N₀ = 0
+            //   when_last:       acc[0] = committed_final
+            //
+            // The natural closing check would fold the last row's interactions into the
+            // boundary constraint, but `when_last_row`'s selector adds a polynomial
+            // factor that would push some columns past the degree budget. Our model
+            // assumes the last row never fires any interactions (U = 1, V = 0), so we
+            // use the lower-degree form: `acc − committed_final = 0`.
+            self.ab.when_first_row().assert_zero_ext(acc.clone());
+            self.ab.when_transition().assert_zero_ext(u * (acc_next - all_curr_sum) - v);
+            self.ab.when_last_row().assert_eq_ext(acc, committed_final);
+        } else {
+            //   when_transition: Dᵢ · acc[i] - Nᵢ = 0
+            let acc_curr: AB::ExprEF = {
+                let mp = self.ab.permutation();
+                mp.current_slice()[col_idx].into()
+            };
+            self.ab.when_transition().assert_zero_ext(u * acc_curr - v);
+        }
+
         result
     }
 }
@@ -197,7 +213,7 @@ where
 /// Holds only the running `(U, V)` accumulator and a shared borrow of
 /// the precomputed [`Challenges`]. The wrapped `&mut AB` and the
 /// permutation `acc` / `acc_next` values do **not** live on the column
-/// any more — the enclosing `column` method handles finalization
+/// — the enclosing `next_column` method handles finalization
 /// directly after the closure returns.
 pub struct ConstraintColumn<'a, AB>
 where
@@ -407,8 +423,7 @@ where
 // CONSTRAINT BATCH
 // ================================================================================================
 
-/// Batch handle returned by [`LookupGroup::batch`] (and the delegated
-/// encoded-group path).
+/// Batch handle returned by [`LookupGroup::batch`].
 ///
 /// Wraps an internal `(N, D)` pair and absorbs each interaction via the
 /// cross-multiplication rule `N' = N·v + m·D`, `D' = D·v`. The

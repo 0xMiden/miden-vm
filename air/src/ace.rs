@@ -4,7 +4,7 @@
 //! `build_ace_dag_for_air` with the LogUp auxiliary-trace boundary check:
 //!
 //! ```text
-//! 0  =  Σ aux_bound[0..LOGUP_AUX_TRACE_WIDTH]
+//! 0  =  Σ aux_bound[0..NUM_LOGUP_COMMITTED_FINALS]
 //!         + c_block_hash
 //!         + c_log_precompile
 //!         + c_kernel_rom
@@ -30,7 +30,7 @@ use miden_crypto::{
     stark::air::{LiftedAir, symbolic::SymbolicExpressionExt},
 };
 
-use crate::{LOGUP_AUX_TRACE_WIDTH, PV_PROGRAM_HASH, PV_TRANSCRIPT_STATE, trace};
+use crate::{PV_PROGRAM_HASH, PV_TRANSCRIPT_STATE, trace};
 
 // BATCHING TYPES
 // ================================================================================================
@@ -199,7 +199,7 @@ where
 /// Build the [`LogUpBoundaryConfig`] for the Miden VM ProcessorAir.
 ///
 /// This mirrors `ProcessorAir::reduced_aux_values` in `air/src/lib.rs`: it sums
-/// all `LOGUP_AUX_TRACE_WIDTH` aux boundary columns, adds the scalar kernel-ROM
+/// the sole accumulator column's committed final value, adds the scalar kernel-ROM
 /// correction supplied by MASM via `VlpiReduction(0)`, and folds the two open-
 /// bus corrections `c_block_hash` and `c_log_precompile` as rational fractions
 /// whose denominators are rebuilt from public inputs inside the DAG.
@@ -251,8 +251,10 @@ pub fn logup_boundary_config() -> LogUpBoundaryConfig {
         PublicInput(PV_TRANSCRIPT_STATE + 3),
     ];
 
+    // TODO(#3032): Only col 0 is a real committed final. The second aux value is always
+    // ZERO and is not summed. Expand to [0, 1] once trace splitting lands.
     LogUpBoundaryConfig {
-        sum_columns: (0..LOGUP_AUX_TRACE_WIDTH).collect(),
+        sum_columns: vec![0],
         fractions: vec![
             BusFraction {
                 sign: Sign::Plus,
