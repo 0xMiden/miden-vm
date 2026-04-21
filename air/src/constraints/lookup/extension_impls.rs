@@ -6,24 +6,27 @@
 //! (Miden-side) rather than alongside the adapters — the generic adapter
 //! code itself is field-polymorphic.
 //!
-//! Every impl is empty and picks up the default polynomial body of
-//! `build_op_flags` / `build_chiplet_active`. The planned prover-side
-//! optimization will override these hooks on the prover adapter with a
-//! boolean fast path: on the prover side the decoder bits in each row
-//! are already concrete 0/1, so `OpFlags` / `ChipletActiveFlags` can be
-//! evaluated via boolean algebra (bitwise AND/OR on the known-boolean
-//! columns) instead of the polynomial products the constraint path
-//! needs. This avoids multiplying through dead-flag products that are
-//! guaranteed zero and cuts the per-row fraction-collection cost
-//! significantly.
+//! The constraint-path adapter and the two debug builders pick up the default
+//! polynomial bodies of [`MainLookupBuilder::build_op_flags`] and
+//! [`ChipletLookupBuilder::build_chiplet_active`]. The prover-path adapter
+//! overrides `build_op_flags` with
+//! [`LookupOpFlags::from_boolean_row`](super::buses::LookupOpFlags::from_boolean_row),
+//! which decodes the 7-bit opcode as a `u8` and flips exactly one flag per row
+//! instead of materialising the polynomial products the symbolic path needs.
+//! `build_chiplet_active` stays on the default — the chiplet selectors produce
+//! only six outputs via four subtractions, so the boolean shortcut is noise.
 
 use miden_core::field::ExtensionField;
 use miden_crypto::stark::air::LiftedAirBuilder;
 
-use super::{chiplet_air::ChipletLookupBuilder, main_air::MainLookupBuilder};
+use super::{
+    buses::LookupOpFlags,
+    chiplet_air::ChipletLookupBuilder,
+    main_air::MainLookupBuilder,
+};
 use crate::{
-    Felt,
-    lookup::{ConstraintLookupBuilder, ProverLookupBuilder},
+    Felt, MainCols,
+    lookup::{ConstraintLookupBuilder, LookupBuilder, ProverLookupBuilder},
 };
 
 // CONSTRAINT PATH
@@ -42,7 +45,25 @@ impl<'ab, AB> ChipletLookupBuilder for ConstraintLookupBuilder<'ab, AB> where
 // PROVER PATH
 // ================================================================================================
 
-impl<'a, EF> MainLookupBuilder for ProverLookupBuilder<'a, Felt, EF> where EF: ExtensionField<Felt> {}
+impl<'a, EF> MainLookupBuilder for ProverLookupBuilder<'a, Felt, EF>
+where
+    EF: ExtensionField<Felt>,
+{
+    /// Override: use the boolean fast path instead of the default polynomial body.
+    ///
+    /// On the prover side `decoder.op_bits` are concrete 0/1 Felt values (enforced by the
+    /// decoder's boolean constraint), so a `u8` opcode decode + single-field write replaces
+    /// ~100 Felt multiplications in the shared prefix tree. Semantics match the default body
+    /// on any valid trace — a `debug_assertions` parity check inside `from_boolean_row`
+    /// surfaces divergences immediately.
+    fn build_op_flags(
+        &self,
+        local: &MainCols<Self::Var>,
+        next: &MainCols<Self::Var>,
+    ) -> LookupOpFlags<Self::Expr> {
+        LookupOpFlags::from_boolean_row(&local.decoder, &local.stack, &next.decoder)
+    }
+}
 
 impl<'a, EF> ChipletLookupBuilder for ProverLookupBuilder<'a, Felt, EF> where
     EF: ExtensionField<Felt>
