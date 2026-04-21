@@ -419,4 +419,12 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ProcessorAir {
         // Public inputs boundary constraints.
         constraints::public_inputs::enforce_main(builder, local);
     }
+
+    fn log_quotient_degree(&self) -> usize
+    where
+        Self: Sized,
+    {
+        // override to avoid recomputing through the SymbolicAir
+        3
+    }
 }
