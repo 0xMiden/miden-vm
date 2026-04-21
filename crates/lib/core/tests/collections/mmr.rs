@@ -70,7 +70,7 @@ fn test_mmr_get_single_peak() -> Result<(), MerkleError> {
     let merkle_root = merkle_tree.root();
     let merkle_store = MerkleStore::from(&merkle_tree);
     let mut builder = AdviceStackBuilder::new();
-    builder.push_for_adv_loadw(merkle_root);
+    builder.push_word(merkle_root);
     let advice_stack = builder.build_vec_u64();
 
     for pos in 0..(leaves.len() as u64) {
@@ -117,8 +117,8 @@ fn test_mmr_get_two_peaks() -> Result<(), MerkleError> {
     merkle_store.extend(merkle_tree2.inner_nodes());
 
     let mut builder = AdviceStackBuilder::new();
-    builder.push_for_adv_loadw(merkle_root1);
-    builder.push_for_adv_loadw(merkle_root2);
+    builder.push_word(merkle_root1);
+    builder.push_word(merkle_root2);
     let advice_stack = builder.build_vec_u64();
 
     let examples = [
@@ -182,7 +182,7 @@ fn test_mmr_tree_with_one_element() -> Result<(), MerkleError> {
 
     // Test case for single element MMR
     let mut builder = AdviceStackBuilder::new();
-    builder.push_for_adv_loadw(merkle_root3);
+    builder.push_word(merkle_root3);
     let advice_stack = builder.build_vec_u64();
     let source = format!(
         "
@@ -204,9 +204,9 @@ fn test_mmr_tree_with_one_element() -> Result<(), MerkleError> {
 
     // Test case for the single element tree in a MMR with multiple trees
     let mut builder = AdviceStackBuilder::new();
-    builder.push_for_adv_loadw(merkle_root1);
-    builder.push_for_adv_loadw(merkle_root2);
-    builder.push_for_adv_loadw(merkle_root3);
+    builder.push_word(merkle_root1);
+    builder.push_word(merkle_root2);
+    builder.push_word(merkle_root3);
     let advice_stack = builder.build_vec_u64();
     let num_leaves = leaves1.len() + leaves2.len() + leaves3.len();
     let source = format!(

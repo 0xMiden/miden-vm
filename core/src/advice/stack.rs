@@ -21,8 +21,8 @@ use crate::{Felt, Word, crypto::merkle::MerkleStore};
 ///
 /// ```ignore
 /// let advice = AdviceStackBuilder::new()
-///     .push_for_adv_push(&[a, b, c])  // Consumed first by repeat.3 adv_push end
-///     .push_for_adv_loadw(word)       // Consumed second by adv_loadw
+///     .push_for_adv_push(&[a, b, c])  // Consumed first by adv_push adv_push adv_push
+///     .push_word(word)                // Consumed second by adv_loadw (or adv_pushw)
 ///     .build();
 /// ```
 #[derive(Clone, Debug, Default)]
@@ -76,7 +76,7 @@ impl AdviceStackBuilder {
     ///
     /// ```ignore
     /// builder.push_for_adv_push(&[a, b, c]);
-    /// // MASM: repeat.3 adv_push end
+    /// // MASM: adv_push adv_push adv_push
     /// // Result: operand stack = [a, b, c, ...] with a on top
     /// ```
     pub fn push_for_adv_push(&mut self, slice: &[Felt]) -> &mut Self {
@@ -90,17 +90,18 @@ impl AdviceStackBuilder {
 
     /// Adds a word for consumption by `adv_loadw` or `adv_pushw`.
     ///
-    /// After `adv_loadw` (or `adv_pushw`), the operand stack will have the structural word
-    /// loaded directly with `word[0]` on top.
+    /// Both instructions consume the same 4 elements from the advice stack and place them on
+    /// the operand stack with `word[0]` on top; they differ only in whether the top operand
+    /// word is overwritten (`adv_loadw`) or the stack grows by 4 (`adv_pushw`).
     ///
     /// # Example
     ///
     /// ```ignore
-    /// builder.push_for_adv_loadw([w0, w1, w2, w3].into());
-    /// // MASM: adv_pushw (or padw adv_loadw)
+    /// builder.push_word([w0, w1, w2, w3].into());
+    /// // MASM: adv_loadw (or adv_pushw)
     /// // Result: operand stack = [w0, w1, w2, w3, ...] with w0 on top
     /// ```
-    pub fn push_for_adv_loadw(&mut self, word: Word) -> &mut Self {
+    pub fn push_word(&mut self, word: Word) -> &mut Self {
         for elem in word.iter() {
             self.stack.push_back(*elem);
         }

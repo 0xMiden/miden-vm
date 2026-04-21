@@ -290,7 +290,7 @@ fn test_malicious_advice_invalid_pointer() {
 
             # Pop the malicious values from advice stack (initialized at test start)
             # was_key_found, maybe_key_ptr
-            repeat.2 adv_push end
+            adv_push adv_push
             # => [maybe_key_ptr, was_key_found, KEY, start_ptr, end_ptr, ...]
 
             # Now validate the pointer is within bounds
@@ -305,7 +305,7 @@ fn test_malicious_advice_invalid_pointer() {
     );
 
     // Initialize advice stack with malicious values: [maybe_key_ptr=200, was_key_found=1]
-    // `repeat.2 adv_push end` pops values and pushes them, resulting in [maybe_key_ptr,
+    // `adv_push adv_push` pops values and pushes them, resulting in [maybe_key_ptr,
     // was_key_found, ...].
     // The valid range is [100, 112], so 200 is clearly out of bounds
     let test = build_test!(source, &[], &[200, 1]);
@@ -335,7 +335,7 @@ fn test_malicious_advice_misaligned_pointer() {
             push.104 push.100 push.[8456,415,4922,593]
 
             # Pop the malicious values from advice stack
-            repeat.2 adv_push end
+            adv_push adv_push
             # => [maybe_key_ptr, was_key_found, ...]
 
             # Validate alignment: pointer must be divisible by 4
@@ -351,7 +351,7 @@ fn test_malicious_advice_misaligned_pointer() {
     );
 
     // Initialize advice stack with malicious values: [maybe_key_ptr=101, was_key_found=1]
-    // repeat.2 adv_push end pops values and pushes them, resulting in [maybe_key_ptr,
+    // adv_push adv_push pops values and pushes them, resulting in [maybe_key_ptr,
     // was_key_found, ...] 101 is not divisible by 4, so it's misaligned
     let test = build_test!(source, &[], &[101, 1]);
 
@@ -381,7 +381,7 @@ fn test_malicious_advice_wrong_key_found_flag() {
             push.104 push.100 push.[9999,9999,9999,9999]
 
             # Pop the malicious values from advice stack
-            repeat.2 adv_push end
+            adv_push adv_push
             # => [maybe_key_ptr=100, was_key_found=1, KEY_search, start_ptr, end_ptr]
 
             # If was_key_found is true, verify the key at the pointer matches
@@ -411,7 +411,7 @@ fn test_malicious_advice_wrong_key_found_flag() {
     );
 
     // Initialize advice stack with malicious values: [maybe_key_ptr=100, was_key_found=1]
-    // repeat.2 adv_push end pops values and pushes them, resulting in [maybe_key_ptr,
+    // adv_push adv_push pops values and pushes them, resulting in [maybe_key_ptr,
     // was_key_found, ...] Claiming the key was found at ptr=100, but we're searching for a
     // different key
     let test = build_test!(source, &[], &[100, 1]);

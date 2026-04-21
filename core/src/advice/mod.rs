@@ -163,11 +163,11 @@ mod tests {
     }
 
     #[test]
-    fn test_builder_push_for_adv_loadw() {
+    fn test_builder_push_word() {
         let word: Word = [Felt::new(1), Felt::new(2), Felt::new(3), Felt::new(4)].into();
 
         let mut builder = AdviceStackBuilder::new();
-        builder.push_for_adv_loadw(word);
+        builder.push_word(word);
         let advice = builder.build();
 
         // Builder stack is [w0, w1, w2, w3] with w0 on top
@@ -216,7 +216,7 @@ mod tests {
 
         let mut builder = AdviceStackBuilder::new();
         builder.push_for_adv_push(&[a, b, c]); // Consumed first
-        builder.push_for_adv_loadw(word); // Consumed second
+        builder.push_word(word); // Consumed second
         let advice = builder.build();
 
         // Builder stack: [c, b, a, w0, w1, w2, w3]

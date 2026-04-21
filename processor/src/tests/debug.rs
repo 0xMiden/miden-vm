@@ -334,7 +334,7 @@ fn test_debug_adv_stack() {
             # => [3, 2, 1, 0]
 
             # Pops the remaining elements one-by-one
-            repeat.3 adv_push end
+            adv_push adv_push adv_push
             # => [1, 2, 3, 3, 2, 1, 0]
             debug.stack.7
 
