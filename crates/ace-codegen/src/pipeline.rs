@@ -151,6 +151,7 @@ where
     InputCounts {
         width: air.width(),
         aux_width: air.aux_width(),
+        num_aux_boundary: air.num_aux_values(),
         num_public: air.num_public_values(),
         num_vlpi,
         num_randomness,

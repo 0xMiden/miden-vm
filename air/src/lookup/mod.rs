@@ -37,7 +37,9 @@ pub use prover::{ProverLookupBuilder, build_lookup_fractions};
 // Miden-side re-exports for ergonomic access via `miden_air::lookup::*`. The canonical
 // definitions live in [`crate::constraints::lookup`] and [`crate::constraints::logup_msg`].
 pub use crate::constraints::logup_msg::{BusId, MIDEN_MAX_MESSAGE_WIDTH};
-pub use crate::constraints::lookup::{MidenLookupAir, MidenLookupAuxBuilder};
+pub use crate::constraints::lookup::{
+    MidenLookupAir, MidenLookupAuxBuilder, miden_air::NUM_LOGUP_COMMITTED_FINALS,
+};
 #[cfg(feature = "bus-debug")]
 pub use crate::lookup::debug::oracle::{ColumnOracleBuilder, collect_column_oracle_folds};
 

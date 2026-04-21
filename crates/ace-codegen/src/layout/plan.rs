@@ -22,6 +22,8 @@ pub struct InputCounts {
     pub width: usize,
     /// Width of the aux trace.
     pub aux_width: usize,
+    /// Number of committed boundary values (accumulator column finals).
+    pub num_aux_boundary: usize,
     /// Number of public inputs.
     pub num_public: usize,
     /// Number of variable-length public input (VLPI) reduction slots (in EF elements).
@@ -166,7 +168,7 @@ impl InputLayout {
             "quotient_next width mismatch"
         );
         assert_eq!(
-            self.regions.aux_bus_boundary.width, self.counts.aux_width,
+            self.regions.aux_bus_boundary.width, self.counts.num_aux_boundary,
             "aux bus boundary width mismatch"
         );
 

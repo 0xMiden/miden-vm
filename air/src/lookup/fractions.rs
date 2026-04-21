@@ -149,20 +149,14 @@ where
 // ================================================================================================
 
 /// Naive per-fraction partial-sum accumulator, used as the correctness oracle for the
-/// eventual fused batch-inversion + partial-sum pass.
+/// fused batch-inversion + partial-sum pass.
 ///
-/// Returns `aux[col]` of length `num_rows + 1`, with:
+/// Column 0 is the sole running-sum accumulator; columns 1+ are fraction columns that
+/// store per-row values directly.
 ///
-/// ```text
-///   aux[col][0]   = EF::ZERO
-///   aux[col][r+1] = aux[col][r]
-///                 + Σ_{i=0..counts[r * num_cols + col]} m_i · d_i.try_inverse().unwrap()
-/// ```
-///
-/// Walks the flat `fractions` / `counts` buffers in lockstep with one cursor, maintaining
-/// a `[EF; num_cols]` per-column running-sum register. Matches the memory-access pattern
-/// the fused fast path will use, just with one `try_inverse()` per fraction instead of a
-/// batched Montgomery inversion.
+/// Returns `aux[col]` of length `num_rows + 1`:
+/// - `aux[0][0] = ZERO`, `aux[0][r+1] = aux[0][r] + Σ_col per_row_value[col]`
+/// - `aux[i>0][r] = per_row_value[i]` for main row `r`
 pub fn accumulate_slow<F, EF>(fractions: &LookupFractions<F, EF>) -> Vec<Vec<EF>>
 where
     F: Field,
@@ -171,7 +165,6 @@ where
     let num_cols = fractions.num_columns();
     let num_rows = fractions.num_rows();
     let mut aux: Vec<Vec<EF>> = (0..num_cols).map(|_| vec![EF::ZERO; num_rows + 1]).collect();
-    let mut running = vec![EF::ZERO; num_cols];
 
     let flat_fractions = fractions.fractions();
     let flat_counts = fractions.counts();
@@ -183,18 +176,32 @@ where
         num_rows * num_cols,
     );
 
+    let mut per_row_value = vec![EF::ZERO; num_cols];
+    let mut running_sum = EF::ZERO;
+
     let mut cursor = 0usize;
     for (row, row_counts) in flat_counts.chunks(num_cols).enumerate() {
         for (col, &count) in row_counts.iter().enumerate() {
+            let mut sum = EF::ZERO;
             for &(m, d) in &flat_fractions[cursor..cursor + count] {
                 let d_inv = d
                     .try_inverse()
                     .expect("LogUp denominator must be non-zero (bus_prefix is never zero)");
-                running[col] += d_inv * m;
+                sum += d_inv * m;
             }
-            aux[col][row + 1] = running[col];
+            per_row_value[col] = sum;
             cursor += count;
         }
+
+        // Fraction columns: store per-row value at aux[col][row] (aux_curr convention).
+        for col in 1..num_cols {
+            aux[col][row] = per_row_value[col];
+        }
+
+        // Accumulator (col 0): running sum of ALL columns' per-row values.
+        let row_total: EF = per_row_value.iter().copied().sum();
+        running_sum += row_total;
+        aux[0][row + 1] = running_sum;
     }
     debug_assert_eq!(
         cursor,
@@ -209,58 +216,32 @@ where
 // FUSED ACCUMULATOR (FAST PATH)
 // ================================================================================================
 
-/// Fused batch-inversion + per-column partial-sum accumulator, chunked and (with
-/// `concurrent`) parallelized by row.
+/// Materialise the LogUp auxiliary trace from collected fractions.
 ///
-/// Returns a [`RowMajorMatrix<EF>`] with `num_rows + 1` rows and `num_cols` columns. Row `0`
-/// is the zero initial condition; row `r + 1` column `c` holds the running sum
+/// Takes the flat `(multiplicity, denominator)` buffer produced by the prover collection
+/// phase and returns the complete aux trace as a row-major matrix. Column 0 is the
+/// running-sum accumulator; columns 1+ store per-row fraction sums directly.
 ///
-/// ```text
-///   aux[r + 1][c] = Σ_{r' ≤ r} Σ_{i ∈ row r' col c fractions} m_i · d_i⁻¹
-/// ```
+/// ## Output layout
 ///
-/// and for every row `aux[r + 1][c] - aux[r][c]` is the per-row delta the constraint system
-/// uses (matching [`accumulate_slow`] exactly).
+/// Returns a [`RowMajorMatrix<EF>`] with `num_rows + 1` rows and `num_cols` columns.
+/// Let `fᵢ(r) = Σⱼ mⱼ · dⱼ⁻¹` be the sum of fractions assigned to column `i` on row `r`:
 ///
-/// ## Why a matrix and not per-column `Vec`s
-///
-/// One contiguous heap allocation of size `(num_rows + 1) * num_cols`, row-major: within a
-/// row all columns live in adjacent memory, so the per-row inner loop is a tight sequential
-/// write. The previous `Vec<Vec<EF>>` layout scattered each column on the heap and forced
-/// `num_cols` independent pointer chases per row.
+/// - Fraction columns (i > 0): `output[r][i] = fᵢ(r)`
+/// - Accumulator (col 0): `output[0][0] = 0`, `output[r+1][0] = output[r][0] + Σᵢ fᵢ(r)`
 ///
 /// ## Algorithm
 ///
-/// **Prepass.** Build `row_frac_offsets: Vec<usize>` of length `num_rows + 1` so any row
-/// range `[lo, hi)` can look up its flat-fraction slice in O(1). Sequential, O(num_rows ·
-/// num_cols) `usize` adds.
+/// **Prepass.** Build `row_frac_offsets` for O(1) row-range lookup into the flat buffer.
 ///
-/// **Phase 1 — chunked fused walk.** Split rows into groups of `ACCUMULATE_ROWS_PER_CHUNK`
-/// and process each chunk independently (serial or rayon-parallel depending on the
-/// `concurrent` feature):
+/// **Phase 1 (parallel).** Split rows into fixed-size chunks.
+/// Each chunk independently: batch-inverts its denominators (Montgomery trick), computes
+/// `fᵢ(r)` for every `(row, col)`, writes fraction columns into the output matrix, and
+/// records the row total `t(r) = Σᵢ fᵢ(r)` into a side buffer.
 ///
-/// 1. Montgomery inversion of the chunk's denominators into a chunk-local `scratch` buffer via
-///    `invert_denoms_in_place`: one forward prefix-product pass, one `try_inverse`, one backward
-///    sweep. Scratch fits in L1/L2 at the 512-row tuning.
-/// 2. Forward walk by row over the chunk's counts slice. The `running: Vec<EF>` register starts at
-///    `EF::ZERO` (every chunk computes a **local** prefix, ignoring earlier chunks). Each `(row,
-///    col)` writes `running[col]` directly into the chunk's output row slice.
-/// 3. Final `running` is copied into the chunk's slot in a shared `chunk_totals: Vec<EF>` (flat,
-///    length `num_chunks · num_cols`, non-overlapping writes, no locking).
-///
-/// **Phase 2 — sequential scan.** Exclusive prefix scan over `chunk_totals` produces
-/// `chunk_offsets`: the per-column global offset each chunk's local prefix needs to be
-/// shifted by. O(`num_chunks · num_cols`) adds — negligible, because `num_chunks` is
-/// typically in the tens or hundreds.
-///
-/// **Phase 3 — parallel offset add.** Second pass over the same row-chunked output slices,
-/// in lockstep with `chunk_offsets`, adding the per-column offset into every row of the
-/// chunk. Memory-bandwidth limited, trivially parallel, no inversion, no allocation.
-///
-/// ## Panics
-///
-/// Panics if any stored denominator is zero (would indicate an upstream bug — real bus
-/// encodings never produce zero because of the non-zero `bus_prefix[bus]` term).
+/// **Phase 2 (sequential).** Prefix-sum over `t(r)` to fill the accumulator column:
+/// `acc(r+1) = acc(r) + t(r)`. This step is inherently sequential (cross-row dependency)
+/// but touches only one scalar per row.
 pub fn accumulate<F, EF>(fractions: &LookupFractions<F, EF>) -> RowMajorMatrix<EF>
 where
     F: Field,
@@ -270,7 +251,6 @@ where
     let num_rows = fractions.num_rows();
     let out_rows = num_rows + 1;
 
-    // Single contiguous row-major allocation: row 0 stays at ZERO, chunks write rows 1..=num_rows.
     let mut output_data = vec![EF::ZERO; out_rows * num_cols];
 
     let flat_fractions = fractions.fractions();
@@ -283,8 +263,6 @@ where
         num_rows * num_cols,
     );
 
-    // Early-out: empty trace (no rows, or rows with zero shape) — return the zero-initialized
-    // matrix without touching anything. Row 0 is the only row and it's already ZERO.
     if num_rows == 0 || flat_fractions.is_empty() {
         return RowMajorMatrix::new(output_data, num_cols);
     }
@@ -295,19 +273,15 @@ where
     debug_assert_eq!(row_frac_offsets.len(), num_rows + 1);
     debug_assert_eq!(row_frac_offsets[num_rows], flat_fractions.len());
 
-    // Split row 0 off the front of the output — it stays ZERO. Chunks operate on `output_tail`,
-    // which holds rows 1..=num_rows packed as `num_rows * num_cols` elements, and the row
-    // `r` of `output` corresponds to index `(r - 1) * num_cols` of `output_tail`.
-    let (row_zero, output_tail) = output_data.split_at_mut(num_cols);
-    debug_assert!(row_zero.iter().all(|v| *v == EF::ZERO));
+    // Phase 1 operates on rows 0..num_rows of the output buffer. It writes fraction
+    // columns (i > 0) and leaves col 0 untouched (still zero). The side buffer
+    // row_totals collects t(r) = Σᵢ fᵢ(r) for phase 2's prefix sum.
+    let frac_region = &mut output_data[..num_rows * num_cols];
+    let mut row_totals: Vec<EF> = vec![EF::ZERO; num_rows];
 
     let rows_per_chunk = ACCUMULATE_ROWS_PER_CHUNK;
-    let num_chunks = num_rows.div_ceil(rows_per_chunk);
-    let mut chunk_totals: Vec<EF> = vec![EF::ZERO; num_chunks * num_cols];
 
-    // Phase 1: fused per-chunk inversion + local-prefix walk. Each closure invocation owns a
-    // disjoint output slice + chunk_totals slot; rayon parallelizes when `concurrent` is on.
-    let phase1 = |(chunk_idx, (chunk_out, totals_slot)): (usize, (&mut [EF], &mut [EF]))| {
+    let phase1 = |(chunk_idx, (chunk_out, totals_slice)): (usize, (&mut [EF], &mut [EF]))| {
         let row_lo = chunk_idx * rows_per_chunk;
         let row_hi = (row_lo + rows_per_chunk).min(num_rows);
         let chunk_rows = row_hi - row_lo;
@@ -316,108 +290,68 @@ where
         let chunk_fracs = &flat_fractions[frac_lo..frac_hi];
         let chunk_counts = &flat_counts[row_lo * num_cols..row_hi * num_cols];
         debug_assert_eq!(chunk_out.len(), chunk_rows * num_cols);
-        debug_assert_eq!(totals_slot.len(), num_cols);
+        debug_assert_eq!(totals_slice.len(), chunk_rows);
 
         if chunk_fracs.is_empty() {
-            // Chunk has no fractions — its local prefix is identically ZERO for every row,
-            // the output slice is already zero from the initial allocation, and the totals
-            // slot stays at ZERO. Nothing to do.
-            debug_assert!(chunk_out.iter().all(|v| *v == EF::ZERO));
             return;
         }
 
-        // Chunk-local scratch for d_i⁻¹. Allocated once per chunk; reused across the
-        // forward + backward + walk passes below. Typical size at the default tuning:
-        // ~1.5 K EF elements ≈ 24 KiB, comfortably L1-resident.
+        // Batch-invert and scale: scratch[j] = mⱼ · dⱼ⁻¹ (ready to sum).
+        // Allocated once per chunk (~1.5 K elements ≈ 24 KiB, L1-resident).
         let mut scratch: Vec<EF> = vec![EF::ZERO; chunk_fracs.len()];
-        invert_denoms_in_place(chunk_fracs, &mut scratch);
+        invert_and_scale(chunk_fracs, &mut scratch);
 
-        // Per-column running-sum register, starting from ZERO — this is a LOCAL prefix
-        // (the global offset from earlier chunks is added in phase 3).
-        let mut running: Vec<EF> = vec![EF::ZERO; num_cols];
+        let mut per_row_value: Vec<EF> = vec![EF::ZERO; num_cols];
         let mut cursor = 0usize;
         for row_in_chunk in 0..chunk_rows {
             let row_counts = &chunk_counts[row_in_chunk * num_cols..(row_in_chunk + 1) * num_cols];
             let out_row_base = row_in_chunk * num_cols;
+
+            // fᵢ(r) = Σⱼ scratch[j]  (scratch already holds mⱼ · dⱼ⁻¹).
             for (col, &count) in row_counts.iter().enumerate() {
-                let mut sum = running[col];
+                let mut sum = EF::ZERO;
                 for i in 0..count {
-                    let (m, _) = chunk_fracs[cursor + i];
-                    sum += scratch[cursor + i] * m;
+                    sum += scratch[cursor + i];
                 }
-                running[col] = sum;
-                chunk_out[out_row_base + col] = sum;
+                per_row_value[col] = sum;
                 cursor += count;
             }
+
+            // output[r][i] = fᵢ(r) for fraction columns i > 0.
+            for col in 1..num_cols {
+                chunk_out[out_row_base + col] = per_row_value[col];
+            }
+
+            // t(r) = Σᵢ fᵢ(r), consumed by phase 2.
+            totals_slice[row_in_chunk] = per_row_value.iter().copied().sum();
         }
         debug_assert_eq!(cursor, chunk_fracs.len());
-
-        totals_slot.copy_from_slice(&running);
     };
 
     #[cfg(not(feature = "concurrent"))]
     {
-        output_tail
+        frac_region
             .chunks_mut(rows_per_chunk * num_cols)
-            .zip(chunk_totals.chunks_mut(num_cols))
+            .zip(row_totals.chunks_mut(rows_per_chunk))
             .enumerate()
             .for_each(phase1);
     }
     #[cfg(feature = "concurrent")]
     {
         use miden_crypto::parallel::*;
-        output_tail
+        frac_region
             .par_chunks_mut(rows_per_chunk * num_cols)
-            .zip(chunk_totals.par_chunks_mut(num_cols))
+            .zip(row_totals.par_chunks_mut(rows_per_chunk))
             .enumerate()
             .for_each(phase1);
     }
 
-    // Phase 2: sequential exclusive prefix scan over chunk totals → chunk offsets. Operates
-    // on the (small) summary data: num_chunks · num_cols adds. Single serial-dependency
-    // point in the whole algorithm, and it's cheap enough that parallelizing it would cost
-    // more than it saves.
-    let mut chunk_offsets: Vec<EF> = vec![EF::ZERO; num_chunks * num_cols];
-    {
-        let mut running = vec![EF::ZERO; num_cols];
-        for c in 0..num_chunks {
-            chunk_offsets[c * num_cols..(c + 1) * num_cols].copy_from_slice(&running);
-            let totals = &chunk_totals[c * num_cols..(c + 1) * num_cols];
-            for col in 0..num_cols {
-                running[col] += totals[col];
-            }
-        }
-    }
-
-    // Phase 3: add each chunk's global offset into every row of its local-prefix slice.
-    // Pure memory-bandwidth work — one EF read + one EF write per element — and trivially
-    // parallel because chunks own disjoint output slices.
-    let phase3 = |(chunk_out, offset): (&mut [EF], &[EF])| {
-        // Chunk 0 has a ZERO offset, so its add is a no-op; skip it to save one streaming pass.
-        if offset.iter().all(|v| *v == EF::ZERO) {
-            return;
-        }
-        for row_slice in chunk_out.chunks_exact_mut(num_cols) {
-            for col in 0..num_cols {
-                row_slice[col] += offset[col];
-            }
-        }
-    };
-
-    #[cfg(not(feature = "concurrent"))]
-    {
-        output_tail
-            .chunks_mut(rows_per_chunk * num_cols)
-            .zip(chunk_offsets.chunks(num_cols))
-            .for_each(phase3);
-    }
-    #[cfg(feature = "concurrent")]
-    {
-        use miden_crypto::parallel::*;
-        output_tail
-            .par_chunks_mut(rows_per_chunk * num_cols)
-            .zip(chunk_offsets.par_chunks(num_cols))
-            .for_each(phase3);
+    // Phase 2: acc(0) = 0, acc(r+1) = acc(r) + t(r).
+    // Writes col 0 of rows 1..=num_rows; row 0 col 0 stays at zero from the allocation.
+    let mut acc = EF::ZERO;
+    for r in 0..num_rows {
+        acc += row_totals[r];
+        output_data[(r + 1) * num_cols] = acc;
     }
 
     RowMajorMatrix::new(output_data, num_cols)
@@ -442,28 +376,17 @@ fn compute_row_frac_offsets(flat_counts: &[usize], num_rows: usize, num_cols: us
     offsets
 }
 
-/// Montgomery's trick in place: overwrite `scratch` with the per-element inverses of
-/// `chunk_fracs[i].1` using one real field inversion + O(N) multiplications.
+/// Montgomery batch inversion fused with multiplicity scaling: writes `scratch[j] = mⱼ · dⱼ⁻¹`
+/// using one field inversion + O(N) multiplications.
 ///
-/// Algorithm (classic Montgomery batch inversion):
-///
-/// 1. **Forward pass** — `scratch[i] = d_0 · d_1 · ... · d_i` (prefix products).
-/// 2. **One inversion** — invert `scratch[last]` to obtain the running inverse of the whole
-///    product.
-/// 3. **Backward sweep** — walk i from `last` down to `1`, compute `scratch[i] = scratch[i-1] ·
-///    running_inv` (which equals `d_i⁻¹`), then fold `d_i` back into `running_inv` so the next
-///    iteration sees the inverse of `d_0 · ... · d_{i-1}`. At the end of the sweep `running_inv =
-///    d_0⁻¹`, which we write into `scratch[0]`.
-///
-/// `scratch` must be sized to `chunk_fracs.len()` on entry; contents on entry are ignored
-/// (fully overwritten).
+/// The backward sweep multiplies each inverse by `mⱼ` (an `EF × F` mul, cheaper than
+/// `EF × EF`) so the caller gets ready-to-sum fraction values without a second pass.
 ///
 /// # Panics
 ///
-/// Panics if the product `d_0 · d_1 · ... · d_{last}` is zero. For LogUp denominators this
-/// would indicate an upstream bug (individual `d_i` are never zero because of the nonzero
-/// `bus_prefix[bus]` term, and the product of nonzero field elements is nonzero).
-fn invert_denoms_in_place<F, EF>(chunk_fracs: &[(F, EF)], scratch: &mut [EF])
+/// Panics if the denominator product is zero (would indicate an upstream bug — individual
+/// `dⱼ` are never zero because of the nonzero `bus_prefix[bus]` term).
+fn invert_and_scale<F, EF>(chunk_fracs: &[(F, EF)], scratch: &mut [EF])
 where
     F: Field,
     EF: ExtensionField<F>,
@@ -471,7 +394,7 @@ where
     debug_assert_eq!(scratch.len(), chunk_fracs.len());
     debug_assert!(!chunk_fracs.is_empty());
 
-    // Forward pass: prefix products.
+    // Forward pass: scratch[i] = d₀ · d₁ · … · dᵢ (prefix products of denominators).
     let mut acc = chunk_fracs[0].1;
     scratch[0] = acc;
     for i in 1..chunk_fracs.len() {
@@ -479,18 +402,22 @@ where
         scratch[i] = acc;
     }
 
-    // One field inversion — amortized over the whole chunk.
+    // One field inversion — amortised over the whole chunk.
     let mut running_inv = scratch[scratch.len() - 1]
         .try_inverse()
         .expect("LogUp denominator product must be non-zero (bus_prefix is never zero)");
 
-    // Backward sweep: in-place fill with individual inverses.
+    // Backward sweep: scratch[i] = mᵢ · dᵢ⁻¹.
+    // At each step, running_inv = (dᵢ · dᵢ₊₁ · … · dₙ₋₁)⁻¹.
+    // dᵢ⁻¹ = scratch[i-1] · running_inv (prefix product up to i-1 cancels all but dᵢ),
+    // then we scale by mᵢ (EF × F) and fold dᵢ back into running_inv.
     for i in (1..chunk_fracs.len()).rev() {
-        let d_i = chunk_fracs[i].1;
-        scratch[i] = scratch[i - 1] * running_inv;
+        let (m_i, d_i) = chunk_fracs[i];
+        scratch[i] = scratch[i - 1] * running_inv * m_i;
         running_inv *= d_i;
     }
-    scratch[0] = running_inv;
+    // i = 0: running_inv = d₀⁻¹.
+    scratch[0] = running_inv * chunk_fracs[0].0;
 }
 
 // TESTS
@@ -621,8 +548,9 @@ mod tests {
         }
     }
 
-    /// `accumulate_slow` returns `num_rows + 1` entries per column, starting at ZERO and
-    /// reflecting the running sum of `m · d⁻¹` over each row's slice.
+    /// `accumulate_slow` returns `num_rows + 1` entries per column. Column 0 is a running
+    /// sum that also folds in column 1's per-row values. Column 1 is a fraction column
+    /// storing only per-row values (no cross-row accumulation).
     ///
     /// Layout fed in:
     ///
@@ -660,15 +588,23 @@ mod tests {
         let d1_inv = d1.try_inverse().unwrap();
         let d2_inv = d2.try_inverse().unwrap();
 
-        // Column 0: [0, 1/d1 + 2/d2, (1/d1 + 2/d2) + 1/d1] = [0, 1/d1 + 2/d2, 2/d1 + 2/d2]
-        assert_eq!(aux[0][0], QuadFelt::ZERO);
-        assert_eq!(aux[0][1], d1_inv + d2_inv.double());
-        assert_eq!(aux[0][2], d1_inv.double() + d2_inv.double());
+        // Row 0: col 0 own = 1/d1 + 2/d2, col 1 own = 0
+        // Row 1: col 0 own = 1/d1,         col 1 own = 2/d2
+        let row0_col0 = d1_inv + d2_inv.double();
+        let row1_col0 = d1_inv;
+        let row1_col1 = d2_inv.double();
 
-        // Column 1: [0, 0, 2/d2]
+        // Column 0 (accumulator): [0, row0_col0+0, prev + row1_col0 + row1_col1]
+        assert_eq!(aux[0][0], QuadFelt::ZERO);
+        assert_eq!(aux[0][1], row0_col0);
+        assert_eq!(aux[0][2], row0_col0 + row1_col0 + row1_col1);
+
+        // Column 1 (fraction, aux_curr): [0, 2/d2, 0]
+        // Row 0: col 1 has no fractions → aux[1][0] = 0
+        // Row 1: col 1 has 2/d2 → aux[1][1] = 2/d2
+        // Row 2 (extra row): don't care (committed final)
         assert_eq!(aux[1][0], QuadFelt::ZERO);
-        assert_eq!(aux[1][1], QuadFelt::ZERO);
-        assert_eq!(aux[1][2], d2_inv.double());
+        assert_eq!(aux[1][1], row1_col1);
     }
 
     /// `LookupFractions::new` sizes the flat `fractions` Vec with `num_rows * Σ shape`
@@ -710,8 +646,7 @@ mod tests {
 
     /// Multi-chunk regression test: a fixture spanning multiple
     /// [`ACCUMULATE_ROWS_PER_CHUNK`]-row chunks (with a deliberately short trailing chunk)
-    /// exercises phase 2's exclusive prefix scan and phase 3's per-chunk offset add — the
-    /// code paths the single-chunk test can't hit. The trailing `+ 7` rows ensure the last
+    /// exercises phase 2's prefix-sum path. The trailing `+ 7` rows ensure the last
     /// chunk is smaller than the others and that `num_rows % rows_per_chunk != 0`, catching
     /// any off-by-one in the last-chunk bounds.
     #[test]

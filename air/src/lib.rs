@@ -55,6 +55,7 @@ mod export {
 
 pub use export::*;
 
+use crate::lookup::NUM_LOGUP_COMMITTED_FINALS;
 // MIDEN AIR BUILDER
 // ================================================================================================
 
@@ -188,12 +189,8 @@ impl Deserializable for PublicInputs {
 ///   [36..40] precompile transcript state
 pub const NUM_PUBLIC_VALUES: usize = WORD_SIZE + MIN_STACK_DEPTH + MIN_STACK_DEPTH + WORD_SIZE;
 
-/// LogUp aux trace width reported to the framework. The LogUp argument uses 7 real
-/// columns (4 main-trace + 3 chiplet-trace); we pad to 8 so the MASM recursive
-/// verifier's Fiat-Shamir transcript (which absorbs aux boundary values as 4 words =
-/// 8 EF elements) stays aligned with the prover. The 8th column is always zero and
-/// unconstrained.
-pub const LOGUP_AUX_TRACE_WIDTH: usize = 8;
+/// LogUp aux trace width: 4 main-trace columns + 3 chiplet-trace columns.
+pub const LOGUP_AUX_TRACE_WIDTH: usize = 7;
 
 // Public values layout offsets.
 const PV_PROGRAM_HASH: usize = 0;
@@ -242,7 +239,7 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ProcessorAir {
     }
 
     fn num_aux_values(&self) -> usize {
-        LOGUP_AUX_TRACE_WIDTH
+        NUM_LOGUP_COMMITTED_FINALS
     }
 
     /// Returns the number of variable-length public input slices.
@@ -328,7 +325,9 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ProcessorAir {
 
         let total_correction = c_block_hash + c_log_precompile + c_kernel_rom;
 
-        // Sum across all 8 LogUp columns (`LOGUP_AUX_TRACE_WIDTH == 8`).
+        // TODO(#3032): aux_values[1] is always ZERO (placeholder for second trace's
+        // accumulator). The sum still works since 0 + x = x. Remove padding once trace
+        // splitting lands.
         let aux_sum: EF = aux_values.iter().copied().sum();
 
         Ok(ReducedAuxValues {
