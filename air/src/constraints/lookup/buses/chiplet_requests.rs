@@ -169,7 +169,11 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
                                 HasherMsg::control_block(parent, &h, opcodes::SYSCALL),
                                 Deg { n: 4, d: 5 },
                             );
-                            b.remove("syscall_kernel_rom", KernelRomMsg::call(digest), Deg { n: 4, d: 5 });
+                            b.remove(
+                                "syscall_kernel_rom",
+                                KernelRomMsg::call(digest),
+                                Deg { n: 4, d: 5 },
+                            );
                         },
                         Deg { n: 1, d: 2 },
                     );
@@ -220,7 +224,11 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
                                     Deg { n: 5, d: 6 },
                                 );
                                 let word = array::from_fn(|i| h[i].into());
-                                b.remove("dyn_mem_read", mem_header.read_word(word), Deg { n: 5, d: 6 });
+                                b.remove(
+                                    "dyn_mem_read",
+                                    mem_header.read_word(word),
+                                    Deg { n: 5, d: 6 },
+                                );
                             },
                             Deg { n: 1, d: 2 },
                         );
@@ -241,7 +249,11 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
                                     Deg { n: 5, d: 6 },
                                 );
                                 let word = array::from_fn(|i| h[i].into());
-                                b.remove("dyncall_mem_read", mem_header.read_word(word), Deg { n: 5, d: 6 });
+                                b.remove(
+                                    "dyncall_mem_read",
+                                    mem_header.read_word(word),
+                                    Deg { n: 5, d: 6 },
+                                );
                                 let fmp_header = MemoryHeader {
                                     ctx: sys_ctx_next.into(),
                                     addr: FMP_ADDR.into(),

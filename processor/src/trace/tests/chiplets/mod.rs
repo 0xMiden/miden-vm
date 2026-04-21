@@ -10,3 +10,5 @@
 //! Shared harness + column constants live in [`super::lookup_harness`].
 
 mod bitwise;
+mod hasher;
+mod memory;

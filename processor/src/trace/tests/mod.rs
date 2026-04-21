@@ -13,12 +13,12 @@ use crate::{
 };
 
 mod chiplets;
+mod decoder;
+mod hasher;
 mod lookup;
 mod lookup_harness;
-
-// TODO(logup-overflow): restore the stack-overflow-table test once
-// `BUS_STACK_OVERFLOW_TABLE` is wired into `MidenLookupAir`. The pre-deletion blob lives at
-// `git show 974cde516^:processor/src/trace/tests/stack.rs`.
+mod range;
+mod stack;
 
 /// Size of trace fragments used in tests.
 ///
@@ -62,7 +62,6 @@ pub fn build_trace_from_ops(operations: Vec<Operation>, stack: &[u64]) -> Execut
 /// [`build_trace_from_ops`], this variant accepts the full [`AdviceInputs`] object, so the
 /// program can run against an initialised advice provider (e.g. to seed a Merkle tree for the
 /// sibling-table tests).
-#[allow(dead_code)]
 pub fn build_trace_from_ops_with_inputs(
     operations: Vec<Operation>,
     stack_inputs: StackInputs,
