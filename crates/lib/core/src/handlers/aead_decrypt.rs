@@ -32,6 +32,8 @@ pub const AEAD_DECRYPT_EVENT_NAME: EventName = EventName::new("miden::core::cryp
 /// 4. Extracts only the data blocks (first num_blocks * 8 elements) from plaintext
 /// 5. Pushes the data blocks (WITHOUT padding) onto the advice stack in reverse order
 ///
+/// Expected event payload order (excluding event id): `(key, nonce, src_ptr, dst_ptr, num_blocks)`.
+///
 /// Memory layout at src_ptr:
 /// - [ciphertext_blocks(num_blocks * 8), encrypted_padding(8), tag(4)]
 /// - This handler reads ALL elements: data blocks + padding + tag
