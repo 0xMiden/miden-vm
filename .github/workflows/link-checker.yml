@@ -40,7 +40,6 @@ jobs:
           fail: ${{ steps.flags.outputs.fail_fast }}
           args: |
             --verbose
-            --exclude-mail
             --exclude "localhost"
             --exclude "127.0.0.1"
             --exclude "^file://"
@@ -51,8 +50,16 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Fail if lychee did not produce a link report
+        if: steps.lychee.outputs.exit_code != '0'
+        run: |
+          if [ ! -s ./lychee/out.md ] || ! grep -q '^# Summary' ./lychee/out.md; then
+            echo "::error::lychee exited before producing a link-check summary. Check the Link Checker step for a workflow or tool configuration error."
+            exit 1
+          fi
+
       - name: Open issue on failure (only if fail-fast is false)
-        if: steps.lychee.outputs.exit_code != 0 && steps.flags.outputs.fail_fast != 'true'
+        if: steps.lychee.outputs.exit_code != '0' && steps.flags.outputs.fail_fast != 'true'
         uses: peter-evans/create-issue-from-file@e8ef132d6df98ed982188e460ebb3b5d4ef3a9cd # v5.0.1
         with:
           title: Link Checker Report
