@@ -4990,6 +4990,33 @@ fn regression_empty_kernel_library_is_rejected() {
     assert_diagnostic_lines!(err, "library must contain at least one exported procedure");
 }
 
+/// Reproduces issue #3035: a compiler-generated wallet MAST grows when debug info is cleared and
+/// the forest is compacted via self-merge.
+#[test]
+#[ignore = "reproduces issue #3035; run explicitly when debugging MastForest::compact"]
+fn issue_3035_compact_after_clear_debug_info_does_not_grow_mast() -> TestResult {
+    // The compiler-emitted MASM source is checked in next to this package for provenance. The
+    // package is used here because it is the artifact referenced by the issue repro steps.
+    let _generated_masm = include_str!("../tests/fixtures/issue_3035_basic_wallet.masm");
+    let package =
+        Package::read_from_bytes(include_bytes!("../tests/fixtures/issue_3035_basic_wallet.masp"))
+            .into_diagnostic()?;
+
+    let mut forest = package.mast.mast_forest().as_ref().clone();
+    forest.clear_debug_info();
+    let stripped_size = forest.to_bytes().len();
+    let (compacted, _) = forest.compact();
+    let compacted_size = compacted.to_bytes().len();
+
+    assert!(
+        compacted_size <= stripped_size,
+        "MastForest::compact increased serialized size after clear_debug_info(): \
+         stripped={stripped_size}, compacted={compacted_size}"
+    );
+
+    Ok(())
+}
+
 /// Test for issue #1644: verify that single-forest merge doesn't preserves node digests
 #[test]
 fn issue_1644_single_forest_merge_identity() -> TestResult {
