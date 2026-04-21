@@ -37,9 +37,9 @@ pub mod logup {
     };
 }
 
-use constraints::columns::MainCols;
+use constraints::{columns::MainCols, lookup::miden_air::emit_miden_boundary};
 use logup::{BusId, MIDEN_MAX_MESSAGE_WIDTH, NUM_LOGUP_COMMITTED_FINALS};
-use lookup::Challenges;
+use lookup::{BoundaryBuilder, Challenges, LookupMessage};
 use trace::TRACE_WIDTH;
 
 // RE-EXPORTS
@@ -273,18 +273,12 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ProcessorAir {
         //
         //   sum = Σ aux_finals[col]  +  total_correction
         //
-        // where `total_correction` cancels the unmatched-fraction contributions from
-        // the three open buses:
-        //
-        //   c_block_hash      (M_2+5)       root program hash — the decoder's END
-        //                                   emits an unmatched remove for the root.
-        //   c_log_precompile  (M4)          transcript chain telescopes to one
-        //                                   unmatched remove of the initial-capacity
-        //                                   state and one unmatched add of the
-        //                                   final-capacity state.
-        //   c_kernel_rom      (M3 + C1)     the kernel ROM chiplet emits responses
-        //                                   for each kernel procedure init; the
-        //                                   verifier supplies the matches via VLPI[0].
+        // `total_correction` cancels the unmatched-fraction contributions from the
+        // three open buses (block hash, log precompile, kernel ROM init). Rather
+        // than spelling those out here, we drive the shared
+        // `emit_miden_boundary` emitter — the same source `MidenLookupAir`
+        // uses for the debug walker — through a reducer that accumulates
+        // `Σ multiplicity · encode(msg)⁻¹` into an `EF`.
         if public_values.len() != NUM_PUBLIC_VALUES {
             return Err(format!(
                 "expected {} public values, got {}",
@@ -293,13 +287,21 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ProcessorAir {
             )
             .into());
         }
-        let program_hash: Word = public_values[PV_PROGRAM_HASH..PV_PROGRAM_HASH + WORD_SIZE]
-            .try_into()
-            .map_err(|_| -> ReductionError { "invalid program hash slice".into() })?;
-        let pc_transcript_state: PrecompileTranscriptState = public_values
-            [PV_TRANSCRIPT_STATE..PV_TRANSCRIPT_STATE + WORD_SIZE]
-            .try_into()
-            .map_err(|_| -> ReductionError { "invalid transcript state slice".into() })?;
+        if var_len_public_inputs.len() != 1 {
+            return Err(format!(
+                "expected 1 var-len public input slice, got {}",
+                var_len_public_inputs.len()
+            )
+            .into());
+        }
+        if !var_len_public_inputs[0].len().is_multiple_of(WORD_SIZE) {
+            return Err(format!(
+                "kernel digest felts length {} is not a multiple of {}",
+                var_len_public_inputs[0].len(),
+                WORD_SIZE
+            )
+            .into());
+        }
 
         let challenges = Challenges::<EF>::new(
             challenges[0],
@@ -308,65 +310,15 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ProcessorAir {
             BusId::COUNT,
         );
 
-        let invert = |x: EF| -> Result<EF, ReductionError> {
-            x.try_inverse()
-                .ok_or_else(|| -> ReductionError { "zero LogUp denominator".into() })
+        let mut reducer = ReduceBoundaryBuilder {
+            challenges: &challenges,
+            public_values,
+            var_len_public_inputs,
+            sum: EF::ZERO,
+            error: None,
         };
-
-        // c_block_hash = +1 / encode(BLOCK_HASH_TABLE, [ph[0..4], 0, 0, 0])
-        // Must match `BlockHashTableRow::from_end().collapse()` on the prover side for
-        // the root block (parent_id = is_first_child = is_loop_body = 0).
-        let c_block_hash = invert(challenges.encode(
-            BusId::BlockHashTable as usize,
-            [
-                program_hash[0],
-                program_hash[1],
-                program_hash[2],
-                program_hash[3],
-                Felt::ZERO,
-                Felt::ZERO,
-                Felt::ZERO,
-            ],
-        ))?;
-
-        // c_log_precompile = 1 / d_initial − 1 / d_final, where d_* encode the
-        // transcript capacity state (initial = default zero state, final = public input).
-        let encode_transcript = |state: PrecompileTranscriptState| {
-            let cap: &[Felt] = state.as_ref();
-            challenges
-                .encode(BusId::LogPrecompileTranscript as usize, [cap[0], cap[1], cap[2], cap[3]])
-        };
-        let c_log_precompile = invert(encode_transcript(PrecompileTranscriptState::default()))?
-            - invert(encode_transcript(pc_transcript_state))?;
-
-        // c_kernel_rom = +Σ 1 / encode(KERNEL_ROM_INIT, digest) over VLPI[0].
-        // Cancels the unmatched chiplet-side `remove` emitted for each declared kernel
-        // procedure INIT. VLPI[0] carries all kernel digests as concatenated felts.
-        if var_len_public_inputs.len() != 1 {
-            return Err(format!(
-                "expected 1 var-len public input slice, got {}",
-                var_len_public_inputs.len()
-            )
-            .into());
-        }
-        let kernel_felts = var_len_public_inputs[0];
-        if !kernel_felts.len().is_multiple_of(WORD_SIZE) {
-            return Err(format!(
-                "kernel digest felts length {} is not a multiple of {}",
-                kernel_felts.len(),
-                WORD_SIZE
-            )
-            .into());
-        }
-        let mut c_kernel_rom = EF::ZERO;
-        for digest in kernel_felts.chunks_exact(WORD_SIZE) {
-            c_kernel_rom += invert(challenges.encode(
-                BusId::KernelRomInit as usize,
-                [digest[0], digest[1], digest[2], digest[3]],
-            ))?;
-        }
-
-        let total_correction = c_block_hash + c_log_precompile + c_kernel_rom;
+        emit_miden_boundary(&mut reducer);
+        let total_correction = reducer.finalize()?;
 
         // TODO(#3032): aux_values[1] is always ZERO (placeholder for second trace's
         // accumulator). The sum still works since 0 + x = x. Remove padding once trace
@@ -426,5 +378,64 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ProcessorAir {
     {
         // override to avoid recomputing through the SymbolicAir
         3
+    }
+}
+
+// REDUCED-AUX BOUNDARY BUILDER
+// ================================================================================================
+
+/// `BoundaryBuilder` impl that reduces each emitted interaction to its LogUp
+/// denominator contribution `multiplicity · encode(msg)⁻¹` and sums them into a
+/// running `EF` accumulator.
+///
+/// Lets `reduced_aux_values` reuse the structured boundary emissions from
+/// [`emit_miden_boundary`] — the same source consumed by the debug walker —
+/// instead of open-coding the three corrections a second time.
+///
+/// A zero denominator (malformed proof / adversarial public input) is stashed in
+/// `error` and surfaced by [`Self::finalize`]; subsequent `insert` calls are no-ops
+/// so we don't compound garbage into `sum`.
+struct ReduceBoundaryBuilder<'a, EF: ExtensionField<Felt>> {
+    challenges: &'a Challenges<EF>,
+    public_values: &'a [Felt],
+    var_len_public_inputs: VarLenPublicInputs<'a, Felt>,
+    sum: EF,
+    error: Option<ReductionError>,
+}
+
+impl<'a, EF: ExtensionField<Felt>> ReduceBoundaryBuilder<'a, EF> {
+    fn finalize(self) -> Result<EF, ReductionError> {
+        match self.error {
+            Some(e) => Err(e),
+            None => Ok(self.sum),
+        }
+    }
+}
+
+impl<'a, EF: ExtensionField<Felt>> BoundaryBuilder for ReduceBoundaryBuilder<'a, EF> {
+    type F = Felt;
+    type EF = EF;
+
+    fn public_values(&self) -> &[Felt] {
+        self.public_values
+    }
+
+    fn var_len_public_inputs(&self) -> &[&[Felt]] {
+        self.var_len_public_inputs
+    }
+
+    fn insert<M>(&mut self, _name: &'static str, multiplicity: Felt, msg: M)
+    where
+        M: LookupMessage<Felt, EF>,
+    {
+        if self.error.is_some() {
+            return;
+        }
+        match msg.encode(self.challenges).try_inverse() {
+            Some(inv) => self.sum += inv * multiplicity,
+            None => {
+                self.error = Some("zero LogUp denominator".into());
+            },
+        }
     }
 }

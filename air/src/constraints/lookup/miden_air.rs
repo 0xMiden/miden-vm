@@ -95,52 +95,59 @@ where
     where
         B: BoundaryBuilder<F = LB::F, EF = LB::EF>,
     {
-        // The emissions below mirror the three correction terms that
-        // `ProcessorAir::reduced_aux_values` sums into `total_correction` —
-        // `c_block_hash`, `c_log_precompile`, and `c_kernel_rom` — rephrased as
-        // structured boundary interactions so the debug walker sees a closed
-        // system. See `program_hash_message`, `transcript_messages`, and
-        // `kernel_proc_message` in `air/src/lib.rs` for the canonical formulas.
+        emit_miden_boundary(boundary);
+    }
+}
 
-        // Snapshot the needed public-input data up front so the mutable
-        // `boundary.add/remove` calls below don't conflict with the immutable
-        // borrows taken by `public_values()` / `var_len_public_inputs()`.
-        let pv = boundary.public_values();
-        let program_hash: [B::F; 4] = [
-            pv[PV_PROGRAM_HASH],
-            pv[PV_PROGRAM_HASH + 1],
-            pv[PV_PROGRAM_HASH + 2],
-            pv[PV_PROGRAM_HASH + 3],
-        ];
-        let final_state: [B::F; 4] = [
-            pv[PV_TRANSCRIPT_STATE],
-            pv[PV_TRANSCRIPT_STATE + 1],
-            pv[PV_TRANSCRIPT_STATE + 2],
-            pv[PV_TRANSCRIPT_STATE + 3],
-        ];
-        let kernel_digests: Vec<[B::F; 4]> = boundary
-            .var_len_public_inputs()
-            .first()
-            .map(|felts| felts.chunks_exact(WORD_SIZE).map(|d| [d[0], d[1], d[2], d[3]]).collect())
-            .unwrap_or_default();
+/// Emits the three Miden-AIR boundary correction terms (`c_block_hash`,
+/// `c_log_precompile`, `c_kernel_rom`) into any [`BoundaryBuilder`].
+///
+/// Single source of truth shared between:
+/// - [`MidenLookupAir`]'s `LookupAir::eval_boundary` (consumed by the debug walker), and
+/// - [`crate::ProcessorAir::reduced_aux_values`] (verifier scalar check; drives the
+///   emissions through a reducer that sums `Σ multiplicity / encode(msg)`).
+///
+/// See `program_hash_message`, `transcript_messages`, and `kernel_proc_message` in
+/// `air/src/lib.rs` for the canonical formulas this mirrors.
+pub(crate) fn emit_miden_boundary<B: BoundaryBuilder>(boundary: &mut B) {
+    // Snapshot the needed public-input data up front so the mutable
+    // `boundary.add/remove` calls below don't conflict with the immutable
+    // borrows taken by `public_values()` / `var_len_public_inputs()`.
+    let pv = boundary.public_values();
+    let program_hash: [B::F; 4] = [
+        pv[PV_PROGRAM_HASH],
+        pv[PV_PROGRAM_HASH + 1],
+        pv[PV_PROGRAM_HASH + 2],
+        pv[PV_PROGRAM_HASH + 3],
+    ];
+    let final_state: [B::F; 4] = [
+        pv[PV_TRANSCRIPT_STATE],
+        pv[PV_TRANSCRIPT_STATE + 1],
+        pv[PV_TRANSCRIPT_STATE + 2],
+        pv[PV_TRANSCRIPT_STATE + 3],
+    ];
+    let kernel_digests: Vec<[B::F; 4]> = boundary
+        .var_len_public_inputs()
+        .first()
+        .map(|felts| felts.chunks_exact(WORD_SIZE).map(|d| [d[0], d[1], d[2], d[3]]).collect())
+        .unwrap_or_default();
 
-        // Block-hash seed: +1 / encode(BLOCK_HASH_TABLE, [ph, 0, 0, 0]).
-        boundary.add(
-            "block_hash_seed",
-            BlockHashMsg::Child {
-                parent: B::F::ZERO,
-                child_hash: program_hash,
-            },
-        );
+    // Block-hash seed: +1 / encode(BLOCK_HASH_TABLE, [ph, 0, 0, 0]).
+    boundary.add(
+        "block_hash_seed",
+        BlockHashMsg::Child {
+            parent: B::F::ZERO,
+            child_hash: program_hash,
+        },
+    );
 
-        // Log-precompile transcript terminals: +1 / d_initial − 1 / d_final.
-        boundary.add("log_precompile_initial", LogCapacityMsg { capacity: [B::F::ZERO; 4] });
-        boundary.remove("log_precompile_final", LogCapacityMsg { capacity: final_state });
+    // Log-precompile transcript terminals: +1 / d_initial − 1 / d_final.
+    boundary.add("log_precompile_initial", LogCapacityMsg { capacity: [B::F::ZERO; 4] });
+    boundary.remove("log_precompile_final", LogCapacityMsg { capacity: final_state });
 
-        // Kernel ROM init: +Σ 1 / d_kernel_proc_msg_i over VLPI[0].
-        for digest in kernel_digests {
-            boundary.add("kernel_rom_init", KernelRomMsg::init(digest));
-        }
+    // Kernel ROM init: +Σ 1 / d_kernel_proc_msg_i over VLPI[0].
+    for digest in kernel_digests {
+        boundary.add("kernel_rom_init", KernelRomMsg::init(digest));
     }
 }
 
