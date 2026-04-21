@@ -60,7 +60,7 @@ impl<E: Clone + Copy> ColMatrix<E> {
 
     /// Returns an iterator over all columns in this matrix.
     pub fn columns(&self) -> impl Iterator<Item = &[E]> {
-        self.columns.iter().map(|col| col.as_slice())
+        self.columns.iter().map(Vec::as_slice)
     }
 
     /// Copies values of all columns at the specified row into the specified row slice.

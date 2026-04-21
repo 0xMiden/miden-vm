@@ -89,9 +89,9 @@ pub fn fingerprint_from_parts(
     } else {
         let decorator_bytes_iter = pre_decorator_hash_bytes
             .iter()
-            .map(|bytes| bytes.as_slice())
-            .chain(post_decorator_hash_bytes.iter().map(|bytes| bytes.as_slice()))
-            .chain(children_decorator_roots.iter().map(|bytes| bytes.as_slice()));
+            .map(<[u8; 32]>::as_slice)
+            .chain(post_decorator_hash_bytes.iter().map(<[u8; 32]>::as_slice))
+            .chain(children_decorator_roots.iter().map(<[u8; 32]>::as_slice));
 
         let decorator_root = Blake3_256::hash_iter(decorator_bytes_iter);
         Ok(MastNodeFingerprint::with_decorator_root(node_digest, decorator_root))

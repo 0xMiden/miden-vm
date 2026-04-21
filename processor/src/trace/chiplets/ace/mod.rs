@@ -1,6 +1,8 @@
 use alloc::{collections::BTreeMap, vec::Vec};
 
-use miden_air::trace::{Challenges, MainTrace, RowIndex, chiplets::ace::ACE_CHIPLET_NUM_COLS};
+use miden_air::trace::{
+    Challenges, MainTrace, RowIndex, bus_types::ACE_WIRING_BUS, chiplets::ace::ACE_CHIPLET_NUM_COLS,
+};
 use miden_core::{Felt, ZERO, field::ExtensionField};
 
 use crate::trace::TraceFragment;
@@ -31,7 +33,7 @@ pub struct Ace {
 impl Ace {
     /// Gets the total trace length of the ACE chiplet.
     pub(crate) fn trace_len(&self) -> usize {
-        self.circuit_evaluations.values().map(|eval_ctx| eval_ctx.num_rows()).sum()
+        self.circuit_evaluations.values().map(CircuitEvaluation::num_rows).sum()
     }
 
     /// Fills the portion of the main trace allocated to the ACE chiplet.
@@ -147,7 +149,10 @@ impl AceHints {
         ctx: u32,
         wire: [Felt; 3],
     ) -> E {
-        challenges.encode([Felt::from_u32(clk), Felt::from_u32(ctx), wire[0], wire[1], wire[2]])
+        challenges.encode(
+            ACE_WIRING_BUS,
+            [Felt::from_u32(clk), Felt::from_u32(ctx), wire[0], wire[1], wire[2]],
+        )
     }
 
     pub(crate) fn build_divisors<E: ExtensionField<Felt>>(

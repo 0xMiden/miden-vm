@@ -112,13 +112,13 @@ impl fmt::Display for DebugVarInfo {
         write!(f, "var.{}", self.name)?;
 
         if let Some(arg_index) = self.arg_index {
-            write!(f, "[arg{}]", arg_index)?;
+            write!(f, "[arg{arg_index}]")?;
         }
 
         write!(f, " = {}", self.value_location)?;
 
         if let Some(loc) = &self.location {
-            write!(f, " {}", loc)?;
+            write!(f, " {loc}")?;
         }
 
         Ok(())
@@ -157,17 +157,17 @@ pub enum DebugVarLocation {
 impl fmt::Display for DebugVarLocation {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Stack(pos) => write!(f, "stack[{}]", pos),
-            Self::Memory(addr) => write!(f, "mem[{}]", addr),
+            Self::Stack(pos) => write!(f, "stack[{pos}]"),
+            Self::Memory(addr) => write!(f, "mem[{addr}]"),
             Self::Const(val) => write!(f, "const({})", val.as_canonical_u64()),
-            Self::Local(offset) => write!(f, "FMP{:+}", offset),
+            Self::Local(offset) => write!(f, "FMP{offset:+}"),
             Self::Expression(bytes) => {
                 write!(f, "expr(")?;
                 for (i, byte) in bytes.iter().enumerate() {
                     if i > 0 {
                         write!(f, " ")?;
                     }
-                    write!(f, "{:02x}", byte)?;
+                    write!(f, "{byte:02x}")?;
                 }
                 write!(f, ")")
             },
@@ -235,7 +235,7 @@ impl Serializable for DebugVarInfo {
         (*self.name).write_into(target);
         self.value_location.write_into(target);
         self.type_id.write_into(target);
-        self.arg_index.map(|n| n.get()).write_into(target);
+        self.arg_index.map(core::num::NonZero::get).write_into(target);
         self.location.write_into(target);
     }
 }

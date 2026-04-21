@@ -441,7 +441,7 @@ mod tests {
         csr.push_empty_row().unwrap();
         csr.push_row([3]).unwrap();
 
-        let items: alloc::vec::Vec<_> = csr.iter().collect();
+        let items: Vec<_> = csr.iter().collect();
         assert_eq!(items.len(), 3);
         assert_eq!(items[0], (TestRowId::from(0), &[1, 2][..]));
         assert_eq!(items[1], (TestRowId::from(1), &[][..]));
@@ -454,7 +454,7 @@ mod tests {
         csr.push_row([10, 20]).unwrap();
         csr.push_row([30]).unwrap();
 
-        let items: alloc::vec::Vec<_> = csr.iter_enumerated().collect();
+        let items: Vec<_> = csr.iter_enumerated().collect();
         assert_eq!(items.len(), 3);
         assert_eq!(items[0], (TestRowId::from(0), 0, &10));
         assert_eq!(items[1], (TestRowId::from(0), 1, &20));

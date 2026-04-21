@@ -1,18 +1,14 @@
-#[cfg(feature = "resolver")]
-mod resolver;
-mod version;
-mod version_requirement;
+#[cfg(all(feature = "std", feature = "serde"))]
+mod graph;
 
 use alloc::{format, sync::Arc, vec};
+use core::fmt;
 
 use miden_assembly_syntax::debuginfo::Spanned;
+pub use miden_package_registry::{SemVer, Version, VersionReq, VersionRequirement};
 
-#[cfg(feature = "resolver")]
-pub use self::resolver::*;
-pub use self::{
-    version::{SemVer, Version, VersionReq},
-    version_requirement::VersionRequirement,
-};
+#[cfg(all(feature = "std", feature = "serde"))]
+pub use self::graph::*;
 use crate::{Diagnostic, Linkage, SourceSpan, Span, Uri, miette};
 
 /// Represents a project/package dependency declaration
@@ -52,15 +48,17 @@ impl Dependency {
     }
 
     /// Get the version requirement for this dependency, if one was given
-    pub fn required_version(&self) -> Option<VersionRequirement> {
-        match &self.version {
-            DependencyVersionScheme::Registry(version) => Some(version.clone()),
-            DependencyVersionScheme::Workspace { .. } => None,
+    pub fn required_version(&self) -> VersionRequirement {
+        let req = match &self.version {
+            DependencyVersionScheme::Registry(version) => return version.clone(),
+            DependencyVersionScheme::Workspace { version, .. } => version.clone(),
+            DependencyVersionScheme::WorkspacePath { version, .. } => version.clone(),
             DependencyVersionScheme::Path { version, .. } => version.clone(),
             DependencyVersionScheme::Git { version, .. } => {
                 version.as_ref().map(|spanned| VersionRequirement::Semantic(spanned.clone()))
             },
-        }
+        };
+        req.unwrap_or_else(|| VersionRequirement::from(VersionReq::STAR))
     }
 }
 
@@ -79,8 +77,23 @@ pub enum DependencyVersionScheme {
     /// Resolution of packages using this scheme relies on the specific implementation of the
     /// package registry in use, which can vary depending on context.
     Registry(VersionRequirement),
-    /// Resolve the given path to a member of the current workspace.
-    Workspace { member: Span<Uri> },
+    /// Resolve the given workspace-relative path to a declared member of the current workspace.
+    Workspace {
+        /// The workspace-relative member path.
+        member: Span<Uri>,
+        /// If specified on the corresponding `[workspace.dependencies]` entry, the version of the
+        /// referenced project/package must satisfy this requirement.
+        version: Option<VersionRequirement>,
+    },
+    /// Resolve the given path inherited from `[workspace.dependencies]`, relative to the
+    /// workspace root, to either a Miden project/workspace or an assembled package artifact.
+    WorkspacePath {
+        /// The path as declared in `[workspace.dependencies]`.
+        path: Span<Uri>,
+        /// If specified, the version of the referenced project/package _must_ match this version
+        /// requirement.
+        version: Option<VersionRequirement>,
+    },
     /// Resolve the given path to a Miden project/workspace, or assembled Miden package artifact.
     Path {
         /// The path to a Miden project directory containing a `miden-project.toml` OR a Miden
@@ -89,8 +102,8 @@ pub enum DependencyVersionScheme {
         /// If specified, the version of the referenced project/package _must_ match this version
         /// requirement.
         ///
-        /// If unspecified, the version requirement is presumed to be an exact match for the
-        /// version found in the package/project at the given path.
+        /// If unspecified, no additional version validation is performed; the current version
+        /// declared by the referenced source/package is used as-is.
         version: Option<VersionRequirement>,
     },
     /// Resolve the given Git repository to a Miden project/workspace.
@@ -104,8 +117,8 @@ pub enum DependencyVersionScheme {
         /// If specified, the version declared in the manifest found in the cloned repository
         /// _must_ match this version requirement.
         ///
-        /// If unspecified, the version requirement is presumed to be an exact match for the
-        /// version found in the project manifest of the cloned repo.
+        /// If unspecified, no additional version validation is performed; the current version
+        /// declared by the checked out sources is used as-is.
         version: Option<Span<VersionReq>>,
     },
 }
@@ -117,6 +130,15 @@ pub enum GitRevision {
     Branch(Arc<str>),
     /// A reference to a specific revision with the given hash identifier
     Commit(Arc<str>),
+}
+
+impl fmt::Display for GitRevision {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Branch(name) => f.write_str(name.as_ref()),
+            Self::Commit(rev) => write!(f, "sha256:{rev}"),
+        }
+    }
 }
 
 #[derive(Debug, thiserror::Error, Diagnostic)]
@@ -173,6 +195,9 @@ impl TryFrom<Span<&crate::ast::DependencySpec>> for DependencyVersionScheme {
             let version = match ast.version() {
                 Some(VersionRequirement::Digest(digest)) => {
                     return Err(InvalidDependencySpecError::GitWithDigest { span: digest.span() });
+                },
+                Some(VersionRequirement::Exact(_)) => {
+                    return Err(InvalidDependencySpecError::GitWithDigest { span: ast.span() });
                 },
                 Some(VersionRequirement::Semantic(v)) => Some(v.clone()),
                 None => None,
@@ -237,9 +262,23 @@ impl DependencyVersionScheme {
                     && let Some(workspace_path) = workspace_path.and_then(|p| p.canonicalize().ok())
                     && let Some(workspace_root) = workspace_path.parent()
                     && let Ok(resolved_uri) = absolutize_path(Path::new(uri.path()), workspace_root)
-                    && resolved_uri.strip_prefix(workspace_root).is_ok()
                 {
-                    Ok(Self::Workspace { member: uri.clone() })
+                    let is_member = workspace.workspace.members.iter().any(|member| {
+                        let member_path = member.path();
+                        uri.path() == member_path
+                            || uri.path() == format!("{member_path}/miden-project.toml")
+                            || absolutize_path(Path::new(member_path), workspace_root)
+                                .ok()
+                                .is_some_and(|member_dir| {
+                                    resolved_uri == member_dir
+                                        || resolved_uri == member_dir.join("miden-project.toml")
+                                })
+                    });
+                    if is_member {
+                        Ok(Self::Workspace { member: uri.clone(), version })
+                    } else {
+                        Ok(Self::WorkspacePath { path: uri.clone(), version })
+                    }
                 } else {
                     Ok(Self::Path { path: uri, version })
                 }
@@ -253,17 +292,27 @@ impl DependencyVersionScheme {
         spec: Span<&crate::ast::DependencySpec>,
         workspace: &crate::ast::WorkspaceFile,
     ) -> Result<Self, InvalidDependencySpecError> {
+        use alloc::format;
+
         match Self::try_from(spec)? {
             Self::Path { path: uri, version } => {
                 let workspace_path =
                     workspace.source_file.as_ref().map(|file| file.content().uri().path());
                 if uri.scheme().is_none_or(|scheme| scheme == "file") &&
                     let Some(workspace_root) = workspace_path.and_then(|p| p.strip_suffix("miden-project.toml")) &&
-                    uri.path().strip_prefix(workspace_root).is_some() &&
                     // Make sure the uri is relative to workspace root
                     (!workspace_root.is_empty() && !(uri.path().starts_with('/') || uri.path().starts_with("..")))
                 {
-                    Ok(Self::Workspace { member: uri.clone() })
+                    let is_member = workspace.workspace.members.iter().any(|member| {
+                        let member_path = member.path();
+                        uri.path() == member_path
+                            || uri.path() == format!("{member_path}/miden-project.toml")
+                    });
+                    if is_member {
+                        Ok(Self::Workspace { member: uri.clone(), version })
+                    } else {
+                        Ok(Self::WorkspacePath { path: uri.clone(), version })
+                    }
                 } else {
                     Ok(Self::Path { path: uri, version })
                 }

@@ -34,11 +34,11 @@ miden-verifier.workspace = true
 test-case = "3.2"
 
 [target.'cfg(target_family = "wasm")'.dependencies]
-pretty_assertions = { version = "1.4", default-features = false, features = [
+pretty_assertions = { workspace = true, default-features = false, features = [
     "alloc",
 ] }
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 env_logger.workspace = true
-pretty_assertions = "1.4"
+pretty_assertions = { workspace = true, features = ["std"] }
 proptest.workspace = true

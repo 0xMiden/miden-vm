@@ -2,8 +2,8 @@
 
 use miden_air::trace::{
     CLK_COL_IDX, CTX_COL_IDX, DECODER_TRACE_OFFSET, FN_HASH_OFFSET, STACK_TRACE_OFFSET,
-    SYS_TRACE_WIDTH,
-    chiplets::hasher::HASH_CYCLE_LEN_FELT,
+    STACK_TRACE_WIDTH, SYS_TRACE_WIDTH,
+    chiplets::hasher::CONTROLLER_ROWS_PER_PERM_FELT,
     decoder::{
         ADDR_COL_IDX, GROUP_COUNT_COL_IDX, HASHER_STATE_OFFSET, IN_SPAN_COL_IDX,
         NUM_OP_BATCH_FLAGS, NUM_OP_BITS, NUM_USER_OP_HELPERS, OP_BATCH_FLAGS_OFFSET,
@@ -22,7 +22,9 @@ use miden_core::{
 use super::{ExecutionContextInfo, StackState, SystemState, get_node_in_forest};
 use crate::{
     ExecutionError,
-    trace::parallel::{core_trace_fragment::BasicBlockContext, tracer::CoreTraceGenerationTracer},
+    trace::parallel::{
+        CORE_TRACE_WIDTH, core_trace_fragment::BasicBlockContext, tracer::CoreTraceGenerationTracer,
+    },
 };
 
 // DECODER ROW
@@ -217,7 +219,7 @@ impl<'a> CoreTraceGenerationTracer<'a> {
         }
 
         // Update block address for the upcoming block
-        self.decoder_state.current_addr += HASH_CYCLE_LEN_FELT;
+        self.decoder_state.current_addr += CONTROLLER_ROWS_PER_PERM_FELT;
 
         // Update basic block context
         basic_block_context.group_count_in_block -= ONE;
@@ -479,124 +481,96 @@ impl<'a> CoreTraceGenerationTracer<'a> {
         stack: &StackState,
         decoder_row: DecoderRow,
     ) {
+        let mut row = [ZERO; CORE_TRACE_WIDTH];
+
         // System trace columns (identical for all control flow operations)
-        self.populate_system_trace_columns(system, self.row_write_index);
+        if let Some(ref system_cols) = self.system_cols {
+            row[..SYS_TRACE_WIDTH].copy_from_slice(system_cols);
+        }
 
         // Decoder trace columns
-        self.populate_decoder_trace_columns(self.row_write_index, &decoder_row);
+        Self::write_decoder_to_row(&mut row, &decoder_row);
 
         // Stack trace columns (identical for all control flow operations)
-        self.populate_stack_trace_columns(stack, self.row_write_index);
+        if let Some(ref stack_cols) = self.stack_cols {
+            row[STACK_TRACE_OFFSET..STACK_TRACE_OFFSET + STACK_TRACE_WIDTH]
+                .copy_from_slice(stack_cols);
+        }
+
+        self.writer.write_row(self.row_write_index, &row);
+
+        // Store the buffer for the next call
+        self.system_cols = Some(Self::build_system_buffer(system));
+        self.stack_cols = Some(Self::build_stack_buffer(stack));
 
         // Increment the row write index
         self.row_write_index += 1;
     }
 
-    /// Populates the system trace columns
-    fn populate_system_trace_columns(&mut self, system: &SystemState, row_idx: usize) {
-        // If we have buffered system rows from the previous call, write them to the trace
-        if let Some(system_rows) = self.system_cols {
-            // Write buffered system rows to the trace at current row
-            for (i, &value) in system_rows.iter().enumerate() {
-                self.fragment.columns[i][row_idx] = value;
-            }
-        }
-
-        // Now populate the buffer with current system state for the next row
-        let mut new_system_rows = [ZERO; SYS_TRACE_WIDTH];
-
-        new_system_rows[CLK_COL_IDX] = (system.clk + 1).into();
-        new_system_rows[CTX_COL_IDX] = system.ctx.into();
-        new_system_rows[FN_HASH_OFFSET] = system.fn_hash[0];
-        new_system_rows[FN_HASH_OFFSET + 1] = system.fn_hash[1];
-        new_system_rows[FN_HASH_OFFSET + 2] = system.fn_hash[2];
-        new_system_rows[FN_HASH_OFFSET + 3] = system.fn_hash[3];
-
-        // Store the buffer for the next call
-        self.system_cols = Some(new_system_rows);
-    }
-
-    /// Populates the decoder trace columns with operation-specific data
-    fn populate_decoder_trace_columns(&mut self, row_idx: usize, row: &DecoderRow) {
+    fn write_decoder_to_row(row: &mut [Felt; CORE_TRACE_WIDTH], decoder_row: &DecoderRow) {
         // Block address
-        self.fragment.columns[DECODER_TRACE_OFFSET + ADDR_COL_IDX][row_idx] = row.addr;
+        row[DECODER_TRACE_OFFSET + ADDR_COL_IDX] = decoder_row.addr;
 
         // Decompose operation into bits
-        let opcode = row.opcode;
+        let opcode = decoder_row.opcode;
         for i in 0..NUM_OP_BITS {
             let bit = Felt::from_u8((opcode >> i) & 1);
-            self.fragment.columns[DECODER_TRACE_OFFSET + OP_BITS_OFFSET + i][row_idx] = bit;
+            row[DECODER_TRACE_OFFSET + OP_BITS_OFFSET + i] = bit;
         }
 
         // Hasher state
-        let (first_hash, second_hash) = row.hasher_state;
-        self.fragment.columns[DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET][row_idx] = first_hash[0]; // hasher[0]
-        self.fragment.columns[DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + 1][row_idx] =
-            first_hash[1]; // hasher[1]
-        self.fragment.columns[DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + 2][row_idx] =
-            first_hash[2]; // hasher[2]
-        self.fragment.columns[DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + 3][row_idx] =
-            first_hash[3]; // hasher[3]
-        self.fragment.columns[DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + 4][row_idx] =
-            second_hash[0]; // hasher[4]
-        self.fragment.columns[DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + 5][row_idx] =
-            second_hash[1]; // hasher[5]
-        self.fragment.columns[DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + 6][row_idx] =
-            second_hash[2]; // hasher[6]
-        self.fragment.columns[DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + 7][row_idx] =
-            second_hash[3]; // hasher[7]
+        let (first_hash, second_hash) = decoder_row.hasher_state;
+        row[DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET] = first_hash[0];
+        row[DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + 1] = first_hash[1];
+        row[DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + 2] = first_hash[2];
+        row[DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + 3] = first_hash[3];
+        row[DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + 4] = second_hash[0];
+        row[DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + 5] = second_hash[1];
+        row[DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + 6] = second_hash[2];
+        row[DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + 7] = second_hash[3];
 
         // Remaining decoder trace columns (identical for all control flow operations)
-        self.fragment.columns[DECODER_TRACE_OFFSET + OP_INDEX_COL_IDX][row_idx] = row.op_index;
-        self.fragment.columns[DECODER_TRACE_OFFSET + GROUP_COUNT_COL_IDX][row_idx] =
-            row.group_count;
-        self.fragment.columns[DECODER_TRACE_OFFSET + IN_SPAN_COL_IDX][row_idx] =
-            if row.in_basic_block { ONE } else { ZERO };
+        row[DECODER_TRACE_OFFSET + OP_INDEX_COL_IDX] = decoder_row.op_index;
+        row[DECODER_TRACE_OFFSET + GROUP_COUNT_COL_IDX] = decoder_row.group_count;
+        row[DECODER_TRACE_OFFSET + IN_SPAN_COL_IDX] =
+            if decoder_row.in_basic_block { ONE } else { ZERO };
 
         // Batch flag columns - all 0 for control flow operations
         for i in 0..NUM_OP_BATCH_FLAGS {
-            self.fragment.columns[DECODER_TRACE_OFFSET + OP_BATCH_FLAGS_OFFSET + i][row_idx] =
-                row.op_batch_flags[i];
+            row[DECODER_TRACE_OFFSET + OP_BATCH_FLAGS_OFFSET + i] = decoder_row.op_batch_flags[i];
         }
 
         // Extra bit columns
-        let bit6 = self.fragment.columns[DECODER_TRACE_OFFSET + OP_BITS_OFFSET + 6][row_idx];
-        let bit5 = self.fragment.columns[DECODER_TRACE_OFFSET + OP_BITS_OFFSET + 5][row_idx];
-        let bit4 = self.fragment.columns[DECODER_TRACE_OFFSET + OP_BITS_OFFSET + 4][row_idx];
-        self.fragment.columns[DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET][row_idx] =
-            bit6 * (ONE - bit5) * bit4;
-        self.fragment.columns[DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET + 1][row_idx] =
-            bit6 * bit5;
+        let bit6 = Felt::from_u8((opcode >> 6) & 1);
+        let bit5 = Felt::from_u8((opcode >> 5) & 1);
+        let bit4 = Felt::from_u8((opcode >> 4) & 1);
+        row[DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET] = bit6 * (ONE - bit5) * bit4;
+        row[DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET + 1] = bit6 * bit5;
     }
 
-    /// Populates the stack trace columns
-    fn populate_stack_trace_columns(&mut self, stack: &StackState, row_idx: usize) {
-        use miden_air::trace::STACK_TRACE_WIDTH;
+    fn build_system_buffer(system: &SystemState) -> [Felt; SYS_TRACE_WIDTH] {
+        let mut buf = [ZERO; SYS_TRACE_WIDTH];
+        buf[CLK_COL_IDX] = (system.clk + 1).into();
+        buf[CTX_COL_IDX] = system.ctx.into();
+        buf[FN_HASH_OFFSET] = system.fn_hash[0];
+        buf[FN_HASH_OFFSET + 1] = system.fn_hash[1];
+        buf[FN_HASH_OFFSET + 2] = system.fn_hash[2];
+        buf[FN_HASH_OFFSET + 3] = system.fn_hash[3];
+        buf
+    }
 
-        // If we have buffered stack rows from the previous call, write them to the trace
-        if let Some(stack_rows) = self.stack_cols {
-            // Write buffered stack rows to the trace at current row
-            for (i, &value) in stack_rows.iter().enumerate() {
-                self.fragment.columns[STACK_TRACE_OFFSET + i][row_idx] = value;
-            }
-        }
-
-        // Now populate the buffer with current stack state for the next row
-        let mut new_stack_rows = [ZERO; STACK_TRACE_WIDTH];
-
-        // Stack top (16 elements)
+    fn build_stack_buffer(stack: &StackState) -> [Felt; STACK_TRACE_WIDTH] {
+        let mut buf = [ZERO; STACK_TRACE_WIDTH];
         for i in STACK_TOP_RANGE {
-            new_stack_rows[STACK_TOP_OFFSET + i] = stack.get(i);
+            buf[STACK_TOP_OFFSET + i] = stack.get(i);
         }
 
         // Stack helpers (b0, b1, h0)
         // Note: H0 will be inverted using batch inversion later
-        new_stack_rows[B0_COL_IDX] = Felt::new(stack.stack_depth() as u64); // b0
-        new_stack_rows[B1_COL_IDX] = stack.overflow_addr(); // b1
-        new_stack_rows[H0_COL_IDX] = stack.overflow_helper(); // h0
-
-        // Store the buffer for the next call
-        self.stack_cols = Some(new_stack_rows);
+        buf[B0_COL_IDX] = Felt::new(stack.stack_depth() as u64);
+        buf[B1_COL_IDX] = stack.overflow_addr();
+        buf[H0_COL_IDX] = stack.overflow_helper();
+        buf
     }
 }
 

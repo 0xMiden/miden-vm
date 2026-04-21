@@ -80,7 +80,7 @@ fn hperm() {
     let expected_stack_slice = stack_inputs.iter().map(|&v| Felt::new(v)).collect::<Vec<Felt>>();
 
     let values_to_hash: Vec<u64> = vec![1, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0];
-    let mut full_inputs = values_to_hash.clone();
+    let mut full_inputs = values_to_hash;
     full_inputs.extend_from_slice(&stack_inputs);
 
     let test = build_op_test!(asm_op, &full_inputs);
@@ -107,7 +107,7 @@ fn hmerge() {
     let expected_stack_slice = stack_inputs.iter().map(|&v| Felt::new(v)).collect::<Vec<Felt>>();
 
     let values_to_hash: Vec<u64> = vec![1, 1, 0, 0, 0, 0, 0, 0];
-    let mut full_inputs = values_to_hash.clone();
+    let mut full_inputs = values_to_hash;
     full_inputs.extend_from_slice(&stack_inputs);
 
     let test = build_op_test!(asm_op, &full_inputs);
@@ -244,7 +244,7 @@ fn mtree_update() {
     let tree = MerkleTree::new(leaves.clone()).unwrap();
 
     let new_node = init_merkle_leaf(9);
-    let mut new_leaves = leaves.clone();
+    let mut new_leaves = leaves;
     new_leaves[index] = new_node;
     let new_tree = MerkleTree::new(new_leaves).unwrap();
 
@@ -282,7 +282,7 @@ fn mtree_update() {
         new_tree.root()[3].as_canonical_u64(),
     ];
 
-    let test = build_op_test!(asm_op, &stack_inputs, &[], store.clone());
+    let test = build_op_test!(asm_op, &stack_inputs, &[], store);
     test.expect_stack(&final_stack);
 }
 

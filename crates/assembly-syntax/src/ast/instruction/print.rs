@@ -392,7 +392,11 @@ mod tests {
     use miden_core::crypto::hash::Poseidon2;
     use miden_debug_types::Span;
 
-    use crate::{Felt, ast::*};
+    use crate::{
+        Felt,
+        ast::*,
+        parser::{IntValue, PushValue},
+    };
 
     #[test]
     fn test_instruction_display() {
@@ -415,9 +419,7 @@ mod tests {
         assert_eq!("push.3.4.8.9", instruction);
         let instruction = format!(
             "{}",
-            Instruction::Push(Immediate::Value(miden_debug_types::Span::unknown(
-                crate::parser::PushValue::Int(crate::parser::IntValue::U8(3))
-            )))
+            Instruction::Push(Immediate::Value(Span::unknown(PushValue::Int(IntValue::U8(3)))))
         );
         assert_eq!("push.3", instruction);
 

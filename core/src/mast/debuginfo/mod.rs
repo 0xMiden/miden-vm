@@ -46,6 +46,7 @@ use alloc::{
     vec::Vec,
 };
 
+use miden_debug_types::{FileLineCol, Location};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -321,7 +322,7 @@ impl DebugInfo {
         &mut self,
         node_id: MastNodeId,
         decorators_info: Vec<(usize, DecoratorId)>,
-    ) -> Result<(), crate::mast::debuginfo::decorator_storage::DecoratorIndexError> {
+    ) -> Result<(), DecoratorIndexError> {
         self.op_decorator_storage.add_decorator_info_for_node(node_id, decorators_info)
     }
 
@@ -371,6 +372,25 @@ impl DebugInfo {
         self.asm_ops.push(asm_op).map_err(|_| MastForestError::TooManyDecorators)
     }
 
+    /// Rewrites the source-backed locations stored in this debug info.
+    pub fn rewrite_source_locations(
+        &mut self,
+        mut rewrite_location: impl FnMut(Location) -> Location,
+        mut rewrite_file_line_col: impl FnMut(FileLineCol) -> FileLineCol,
+    ) {
+        for asm_op in self.asm_ops.iter_mut() {
+            if let Some(location) = asm_op.location().cloned() {
+                asm_op.set_location(rewrite_location(location));
+            }
+        }
+
+        for debug_var in self.debug_vars.iter_mut() {
+            if let Some(location) = debug_var.location().cloned() {
+                debug_var.set_location(rewrite_file_line_col(location));
+            }
+        }
+    }
+
     /// Registers operation-indexed AssemblyOps for a node.
     ///
     /// The `num_operations` parameter must be the total number of operations in the node. This is
@@ -411,7 +431,7 @@ impl DebugInfo {
         &mut self,
         node_id: MastNodeId,
         debug_vars_info: Vec<(usize, DebugVarId)>,
-    ) -> Result<(), crate::mast::debuginfo::decorator_storage::DecoratorIndexError> {
+    ) -> Result<(), DecoratorIndexError> {
         self.op_debug_var_storage.add_debug_var_info_for_node(node_id, debug_vars_info)
     }
 
@@ -455,7 +475,7 @@ impl DebugInfo {
 
     /// Returns the procedure name for the given MAST root digest, if present.
     pub fn procedure_name(&self, digest: &Word) -> Option<&str> {
-        self.procedure_names.get(&LexicographicWord::from(*digest)).map(|s| s.as_ref())
+        self.procedure_names.get(&LexicographicWord::from(*digest)).map(AsRef::as_ref)
     }
 
     /// Returns an iterator over all (digest, name) pairs.
@@ -661,7 +681,7 @@ impl Deserializable for DebugInfo {
         };
 
         debug_info.validate().map_err(|e| {
-            DeserializationError::InvalidValue(format!("DebugInfo validation failed: {}", e))
+            DeserializationError::InvalidValue(format!("DebugInfo validation failed: {e}"))
         })?;
 
         Ok(debug_info)

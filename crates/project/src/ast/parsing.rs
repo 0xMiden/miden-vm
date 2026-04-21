@@ -26,30 +26,91 @@ impl<T> MaybeInherit<T> {
 
 #[cfg(feature = "serde")]
 mod maybe_inherit {
+    use alloc::string::String;
+    use core::{fmt, marker::PhantomData};
+
+    use serde::{
+        Deserialize,
+        de::{self, IntoDeserializer, MapAccess, Visitor},
+    };
+
     use super::MaybeInherit;
 
-    impl<'de, T> serde::Deserialize<'de> for MaybeInherit<T>
+    impl<'de, T> Deserialize<'de> for MaybeInherit<T>
     where
-        T: serde::Deserialize<'de>,
+        T: Deserialize<'de>,
     {
         fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
         where
             D: serde::Deserializer<'de>,
         {
-            use serde::de::IntoDeserializer;
+            struct MaybeInheritVisitor<T>(PhantomData<T>);
 
-            serde_untagged::UntaggedEnumVisitor::new()
-                .bool(|workspace| {
-                    if !workspace {
-                        Err(serde::de::Error::custom(
-                            "the 'workspace' field may only be set to 'true'",
-                        ))
+            impl<'de, T> Visitor<'de> for MaybeInheritVisitor<T>
+            where
+                T: Deserialize<'de>,
+            {
+                type Value = MaybeInherit<T>;
+
+                fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    formatter.write_str(
+                        "a string value, a boolean, or a map of the form { workspace = true }",
+                    )
+                }
+
+                fn visit_bool<E>(self, workspace: bool) -> Result<Self::Value, E>
+                where
+                    E: de::Error,
+                {
+                    if workspace {
+                        Ok(MaybeInherit::Inherit)
                     } else {
-                        Ok(Self::Inherit)
+                        Err(E::custom("the 'workspace' field may only be set to 'true'"))
                     }
-                })
-                .string(|s| T::deserialize(s.into_deserializer()).map(Self::Value))
-                .deserialize(deserializer)
+                }
+
+                fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+                where
+                    E: de::Error,
+                {
+                    T::deserialize(value.into_deserializer()).map(MaybeInherit::Value)
+                }
+
+                fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
+                where
+                    E: de::Error,
+                {
+                    T::deserialize(value.into_deserializer()).map(MaybeInherit::Value)
+                }
+
+                fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+                where
+                    A: MapAccess<'de>,
+                {
+                    let mut workspace = None;
+                    while let Some(key) = map.next_key::<String>()? {
+                        match key.as_str() {
+                            "workspace" => {
+                                if workspace.is_some() {
+                                    return Err(de::Error::duplicate_field("workspace"));
+                                }
+                                workspace = Some(map.next_value::<bool>()?);
+                            },
+                            _ => return Err(de::Error::unknown_field(&key, &["workspace"])),
+                        }
+                    }
+
+                    match workspace {
+                        Some(true) => Ok(MaybeInherit::Inherit),
+                        Some(false) => Err(de::Error::custom(
+                            "the 'workspace' field may only be set to 'true'",
+                        )),
+                        None => Err(de::Error::missing_field("workspace")),
+                    }
+                }
+            }
+
+            deserializer.deserialize_any(MaybeInheritVisitor(PhantomData))
         }
     }
 
@@ -111,6 +172,16 @@ impl SetSourceId for toml::Value {
 impl SetSourceId for crate::SemVer {
     #[inline(always)]
     fn set_source_id(&mut self, _source_id: SourceId) {}
+}
+
+impl SetSourceId for crate::VersionRequirement {
+    fn set_source_id(&mut self, source_id: SourceId) {
+        match self {
+            crate::VersionRequirement::Semantic(version) => version.set_source_id(source_id),
+            crate::VersionRequirement::Digest(digest) => digest.set_source_id(source_id),
+            crate::VersionRequirement::Exact(_) => {},
+        }
+    }
 }
 
 impl SetSourceId for Uri {

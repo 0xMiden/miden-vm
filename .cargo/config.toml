@@ -40,9 +40,12 @@ xclippy = [
     "-Wclippy::mut_mut",
     "-Wclippy::mutex_integer",
     "-Wclippy::needless_borrow",
+    "-Wclippy::needless_collect",
     "-Wclippy::needless_continue",
     "-Wclippy::path_buf_push_overwrite",
     "-Wclippy::rc_mutex",
+    "-Wclippy::redundant_clone",
+    "-Wclippy::redundant_closure_for_method_calls",
     "-Wclippy::ref_option_ref",
     "-Wclippy::rest_pat_in_fully_bound_structs",
     "-Wclippy::same_functions_in_if_condition",
@@ -50,6 +53,8 @@ xclippy = [
     "-Wclippy::string_add_assign",
     "-Wclippy::todo",
     "-Wclippy::trait_duplication_in_bounds",
+    "-Wclippy::trivially_copy_pass_by_ref",
+    "-Wclippy::uninlined_format_args",
     "-Wclippy::unnested_or_patterns",
     "-Wclippy::useless_transmute",
     "-Wclippy::verbose_file_reads",
@@ -59,6 +64,7 @@ xclippy = [
     "-Wtrivial_numeric_casts",
     "-Wunexpected_cfgs",
     "-Wunused_lifetimes",
+    "-Wunused_qualifications",
     # The following lints are disabled because they trigger warnings:
     # -Wclippy::checked_conversions        (12 warnings)
     # -Wclippy::debug_assert_with_mut_call (3 warnings)
@@ -125,9 +131,12 @@ xclippy-fix = [
     "-Wclippy::mut_mut",
     "-Wclippy::mutex_integer",
     "-Wclippy::needless_borrow",
+    "-Wclippy::needless_collect",
     "-Wclippy::needless_continue",
     "-Wclippy::path_buf_push_overwrite",
     "-Wclippy::rc_mutex",
+    "-Wclippy::redundant_clone",
+    "-Wclippy::redundant_closure_for_method_calls",
     "-Wclippy::ref_option_ref",
     "-Wclippy::rest_pat_in_fully_bound_structs",
     "-Wclippy::same_functions_in_if_condition",
@@ -135,6 +144,8 @@ xclippy-fix = [
     "-Wclippy::string_add_assign",
     "-Wclippy::todo",
     "-Wclippy::trait_duplication_in_bounds",
+    "-Wclippy::trivially_copy_pass_by_ref",
+    "-Wclippy::uninlined_format_args",
     "-Wclippy::unnested_or_patterns",
     "-Wclippy::useless_transmute",
     "-Wclippy::verbose_file_reads",
@@ -144,4 +155,8 @@ xclippy-fix = [
     "-Wtrivial_numeric_casts",
     "-Wunexpected_cfgs",
     "-Wunused_lifetimes",
+    "-Wunused_qualifications",
 ]
+
+[target.wasm32-unknown-unknown]
+rustflags = ['--cfg', 'getrandom_backend="unsupported"']

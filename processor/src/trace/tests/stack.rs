@@ -15,7 +15,6 @@ const TWO: Felt = Felt::new(2);
 // ================================================================================================
 
 #[test]
-#[expect(clippy::needless_range_loop)]
 fn p1_trace() {
     let ops = vec![
         Operation::U32add, // no shift, clk 1

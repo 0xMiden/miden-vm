@@ -1,48 +1,25 @@
-#! Disclaimer: most of the procedures in this file assume that the input pointers are word-aligned.
+#! Random coin for the STARK verifier, built on a Poseidon2 sponge.
+#!
+#! The sponge state is stored in memory as three words: rate R1 (r1_ptr), rate R2 (r2_ptr),
+#! and capacity C (c_ptr). R1 and R2 are contiguous (r2_ptr = r1_ptr + 4), so rate elements
+#! 0..7 can be addressed as r1_ptr + index.
+#!
+#! Sampling uses an output_len counter that tracks how many rate elements remain. Each
+#! permutation sets output_len=8; each sample_felt decrements it by 1 and reads
+#! rate[output_len - 1]. Absorption (reseed_direct, reseed_with_felt, etc.) writes directly
+#! to rate memory and permutes, bypassing any input buffer.
 
 use miden::core::crypto::hashes::poseidon2
 use miden::core::stark::constants
 use miden::core::stark::utils
 
-
-#! Helper procedure to compute addition of two words component-wise.
-#! Input: [b3, b2, b1, b0, a3, a2, a1, a0]
-#! Output: [c3, c2, c1, c0]
-#!
-#! Cycles: 16
-proc add_two_words
-    movup.3
-    movup.7
-    add
-    #=> [c0, b3, b2, b1, a3, a2, a1]
-
-    movup.3
-    movup.6
-    add
-    #=> [c1, c0, b3, b2, a3, a2]
-
-    movup.3
-    movup.5
-    add
-    #=> [c2, c1, c0, b3, a3]
-
-    movup.3
-    movup.4
-    add
-    #=> [c3, c2, c1, c0]
-end
-
-#! Return the first half of the rate portion of the random coin state
-#!
-#! The random coin uses Poseidon2 to generate data. The Poseidon2 state is composed of 3
-#! words, 2 words for the rate, and 1 word for the capacity. This procedure
-#! returns the first word of the Poseidon2 state.
+#! Return the first half of the rate portion of the random coin state.
 #!
 #! Input: [...]
 #! Output: [R1, ...]
 #! Cycles: 6
 pub proc get_rate_1
-    padw exec.constants::r1_ptr mem_loadw_be
+    padw exec.constants::r1_ptr mem_loadw_le
 end
 
 #! Store the first half of the rate portion of the random coin state.
@@ -51,20 +28,16 @@ end
 #! Output: [...]
 #! Cycles: 6
 pub proc set_rate_1
-    exec.constants::r1_ptr mem_storew_be dropw
+    exec.constants::r1_ptr mem_storew_le dropw
 end
 
-#! Return the second half of the rate portion of the random coin state
-#!
-#! The random coin uses Poseidon2 to generate data. The Poseidon2 state is composed of 3
-#! words, 2 words for the rate, and 1 word for the capacity. This procedure
-#! returns the first word of the Poseidon2 state.
+#! Return the second half of the rate portion of the random coin state.
 #!
 #! Input: [...]
 #! Output: [R2, ...]
 #! Cycles: 6
 pub proc get_rate_2
-    padw exec.constants::r2_ptr mem_loadw_be
+    padw exec.constants::r2_ptr mem_loadw_le
 end
 
 #! Store the second half of the rate portion of the random coin state.
@@ -73,20 +46,16 @@ end
 #! Output: [...]
 #! Cycles: 6
 pub proc set_rate_2
-    exec.constants::r2_ptr mem_storew_be dropw
+    exec.constants::r2_ptr mem_storew_le dropw
 end
 
-#! Return the capacity portion of the random coin state
-#!
-#! The random coin uses Poseidon2 to generate data. The Poseidon2 state is composed of 3
-#! words, 2 words for the rate, and 1 word for the capacity. This procedure
-#! returns the first word of the Poseidon2 state.
+#! Return the capacity portion of the random coin state.
 #!
 #! Input: [...]
 #! Output: [C, ...]
 #! Cycles: 6
 pub proc get_capacity
-    padw exec.constants::c_ptr mem_loadw_be
+    padw exec.constants::c_ptr mem_loadw_le
 end
 
 #! Set the capacity portion of the random coin state.
@@ -95,205 +64,368 @@ end
 #! Output: [...]
 #! Cycles: 6
 pub proc set_capacity
-    exec.constants::c_ptr mem_storew_be dropw
+    exec.constants::c_ptr mem_storew_le dropw
 end
 
 #! Load the random coin state on the stack.
 #!
 #! Input: [...]
-#! Output: [R2, R1, C, ...]
+#! Output: [R0, R1, C, ...]
 #! Cycles: 18
 pub proc load_random_coin_state
     exec.get_capacity
-    exec.get_rate_1
     exec.get_rate_2
+    exec.get_rate_1
 end
 
 #! Store the random coin state to memory.
 #!
-#! Input: [R2, R1, C, ...]
+#! Input: [R0, R1, C, ...]
 #! Output: [...]
 #! Cycles: 18
 pub proc store_random_coin_state
-    exec.set_rate_2
     exec.set_rate_1
+    exec.set_rate_2
     exec.set_capacity
 end
 
-#! Initializes the seed for randomness generation by computing the hash of the proof context using
-#! the trace length, number of queries, the number of bits of grinding.
-#! Currently, this part, as well as the rest of the STARK verifier assumes a blowup factor
-#! equal to 8.
-#! The ouput of this procedure is the capacity portion of the state after applying `poseidon2::permute`.
+#! Sample a single base field element from the transcript.
 #!
-#! Input: [log(trace_length), num_queries, grinding, num_constraints, trace_info, num_fixed_len_pi, ...]
-#! Output: [C, ...]
-#! Cycles: 210
-pub proc init_seed
+#! SAFETY: Requires output_len > 0. All call sites in the recursive verifier guarantee this
+#! invariant because every sponge permutation sets output_len=8 and at most 8 elements are
+#! consumed before the next permutation. An assertion guards against caller bugs.
+#!
+#! Input: [...]
+#! Output: [x, ...]
+pub proc sample_felt
+    exec.constants::random_coin_output_len_ptr mem_load
+    dup push.0 neq assert.err="sample_felt: output buffer is empty"
+    sub.1
+    dup exec.constants::random_coin_output_len_ptr mem_store
 
-    # Save the parameters in memory for later use
-    dup exec.constants::set_trace_length_log
-    dup.1 exec.constants::set_number_queries
-    dup.2 exec.constants::set_grinding_factor
+    exec.constants::r1_ptr add mem_load
+end
 
-    # Pre-load constants used by poseidon2::permute into memory and initialize the state of the random coin to zeros.
-    # Since memory beyond 3 * 2^30 does not have any special meaning, we can use the memory region
-    # starting from address 2^32 - 1 in decreasing order to hold constants that are used throughout
-    # the `verify` procedure.
-    padw
-    exec.constants::zero_word_ptr mem_storew_be
-    exec.constants::c_ptr mem_storew_be
-    exec.constants::r1_ptr mem_storew_be
-    exec.constants::r2_ptr mem_storew_be
-    dropw
-    #=> [log(trace_length), num_queries, grinding, num_constraints, trace_info, num_fixed_len_pi, ...]
+#! Sample a quadratic extension field element from the transcript.
+#!
+#! Input: [...]
+#! Output: [x0, x1, ...]
+pub proc sample_ext
+    exec.sample_felt
+    exec.sample_felt
+    swap
+end
 
-    # Create the initial seed for randomness generation from proof context
-
-    ## Compute trace_length
+#! Sample a number of bits from the transcript.
+#!
+#! Input: [bits, ...]
+#! Output: [value, ...]
+pub proc sample_bits
     dup
     pow2
-    dup
-    u32test
-    assert.err="range check failed: trace length"
-    #=> [trace_length, log(trace_length), num_queries, grinding, num_constraints, trace_info, num_fixed_len_pi, ...]
+    u32assert u32overflowing_sub.1 assertz
+    # => [mask, bits, ...]
 
-    ## Save the trace length and its log to memory
-    dup.0 exec.constants::set_trace_length
-    #=> [trace_length, log(trace_length), num_queries, grinding, num_constraints, trace_info, num_fixed_len_pi, ...]
+    exec.sample_felt
+    u32split
+    swap
+    drop
+    # => [lo, mask, bits, ...]
+    u32and
+    swap
+    drop
+end
+
+#! Initializes the random coin state with domain-separated Fiat-Shamir (DSFS) seeding,
+#! then derives trace domain parameters.
+#!
+#! Implements a two-phase transcript initialization:
+#!
+#!   Phase 1 (INSTANCE_SEED -- compile-time constant per AIR):
+#!           Use the caller-supplied RELATION_DIGEST as initial sponge capacity,
+#!           absorb PCS parameters into the rate, and permute.
+#!           Rate layout: R1 = [nq, query_pow_bits, deep_pow_bits, folding_pow_bits]
+#!                        R2 = [log_blowup, log_final_degree, fold_arity, 0]
+#!           The resulting capacity is the INSTANCE_SEED.
+#!
+#!   Phase 2 (PROOF_SEED -- per-proof):
+#!           Use INSTANCE_SEED as capacity, absorb log(trace_length) into rate[0]
+#!           (with rate[1..7] = 0), and permute.
+#!           The resulting capacity is the PROOF_SEED.
+#!
+#!   The challenger starts with capacity = PROOF_SEED, rate zeroed.
+#!
+#! RELATION_DIGEST = hash(PROTOCOL_ID, CIRCUIT_COMMITMENT) is a compile-time constant
+#! computed once per AIR and pushed by the caller (the specific verifier).
+#!
+#! Currently assumes a blowup factor equal to 8.
+#!
+#! Precondition: num_queries, query_pow_bits, deep_pow_bits, and folding_pow_bits must
+#! already be stored in memory before calling this procedure.
+#!
+#! Input: [log(trace_length), rd0, rd1, rd2, rd3, ...]
+#! Output: [...]
+pub proc init_seed
+
+    # Save log(trace_length) in memory for later use.
+    dup exec.constants::set_trace_length_log
+
+    # Initialize the zero word and buffers to zero.
+    padw
+    exec.constants::zero_word_ptr mem_storew_le
+    dropw
+    push.0 exec.constants::random_coin_input_len_ptr mem_store
+    push.0 exec.constants::random_coin_output_len_ptr mem_store
+    #=> [log(tl), rd0, rd1, rd2, rd3, ...]
+
+    # ---- Phase 1: RELATION_DIGEST + PCS_PARAMS -> INSTANCE_SEED ----
+
+    # Build the sponge state [R1, R2, C] for hperm:
+    #   R1 = [nq, query_pow_bits, deep_pow_bits, folding_pow_bits]
+    #   R2 = [log_blowup, log_final_degree, fold_arity, 0]
+    #   C  = [rd0, rd1, rd2, rd3]   (RELATION_DIGEST)
+    #
+    # Drop log(tl) from the stack (saved in memory, not part of Phase 1 rate).
+
+    drop
+    #=> [rd0, rd1, rd2, rd3, ...]
+
+    # Build R1 from security parameters stored in memory.
+    exec.constants::get_folding_pow_bits
+    exec.constants::get_deep_pow_bits
+    exec.constants::get_query_pow_bits
+    exec.constants::get_number_queries
+    #=> [nq, query_pow, deep_pow, folding_pow, rd0, rd1, rd2, rd3, ...]
+    #    ^-- R1                                 ^-- C (digest)
+
+    # Build R2 = [log_blowup, log_final_degree, fold_arity, 0]
+    push.0
+    exec.constants::get_fri_fold_arity
+    exec.constants::get_log_final_degree
+    exec.constants::get_blowup_factor_log
+    #=> [log_blowup, log_final_deg, fold_arity, 0, nq, query_pow, deep_pow, folding_pow, rd0, rd1, rd2, rd3, ...]
+    #    ^-- R2                                     ^-- R1                                 ^-- C
+
+    swapw
+    #=> [nq, query_pow, deep_pow, folding_pow, log_blowup, log_final_deg, fold_arity, 0, rd0, rd1, rd2, rd3, ...]
+    #    ^-- R1                                ^-- R2                                     ^-- C
+
+    # Permute: capacity now holds INSTANCE_SEED.
+    exec.poseidon2::permute
+    #=> [R1', R2', C', ...]
+
+    # Discard the permuted rate words, keep INSTANCE_SEED (capacity) on the stack.
+    dropw dropw
+    #=> [C0, C1, C2, C3, ...]   (INSTANCE_SEED)
+
+    # ---- Phase 2: INSTANCE_SEED + log(tl) -> PROOF_SEED ----
+
+    # Build R2 = [0, 0, 0, 0] on top of capacity.
+    padw
+    #=> [0, 0, 0, 0, C0, C1, C2, C3, ...]
+    #    ^-- R2       ^-- C (INSTANCE_SEED)
+
+    # Build R1 = [lth, 0, 0, 0] on top.
+    push.0.0.0
+    exec.constants::get_trace_length_log
+    #=> [lth, 0, 0, 0, 0, 0, 0, 0, C0, C1, C2, C3, ...]
+    #    ^-- R1          ^-- R2     ^-- C (INSTANCE_SEED)
+
+    exec.poseidon2::permute
+    #=> [R1', R2', C', ...]
+
+    # Store PROOF_SEED state to memory (capacity = PROOF_SEED, rate = permuted).
+    exec.store_random_coin_state
+    #=> [...]
+
+    # Zero the rate in memory. Capacity = PROOF_SEED is now stored.
+    padw
+    exec.constants::r1_ptr mem_storew_le
+    exec.constants::r2_ptr mem_storew_le
+    dropw
+    #=> [...]
+
+    # ---- Derive trace domain parameters ----
+    #
+    # Reload log(trace_length) from memory (it was saved earlier) and derive
+    # trace_length, LDE domain size, LDE generator, and trace generator.
+
+    exec.constants::get_trace_length_log
+    #=> [log(trace_length), ...]
+
+    ## Compute trace_length = 2^log(trace_length)
+    dup
+    pow2
+    u32test assert.err="trace length overflows u32"
+    #=> [trace_length, log(trace_length), ...]
+
+    ## Save the trace length to memory
+    dup exec.constants::set_trace_length
+    #=> [trace_length, log(trace_length), ...]
 
     ## Compute log size of LDE domain
     swap
     exec.constants::get_blowup_factor_log
     add
-    #=> [log(lde_size), trace_length, num_queries, grinding, num_constraints, trace_info, num_fixed_len_pi, ...]
+    #=> [log(lde_size), trace_length, ...]
 
     ## Compute size of LDE domain
     dup
     pow2
-    #=> [lde_size, log(lde_size), trace_length, num_queries, grinding, num_constraints, trace_info, num_fixed_len_pi, ...]
+    #=> [lde_size, log(lde_size), trace_length, ...]
 
     # Compute lde_domain generator
     dup.1
     exec.utils::compute_lde_generator
     movdn.2
-    #=> [lde_size, log(lde_size), lde_g, trace_length, num_queries, grinding, num_constraints, trace_info, num_fixed_len_pi, ...]
+    #=> [lde_size, log(lde_size), lde_g, trace_length, ...]
 
     push.0
     movdn.3
-    #=> [lde_size, log(lde_size), lde_g, 0, trace_length, num_queries, grinding, num_constraints, trace_info, num_fixed_len_pi, ...]
+    #=> [lde_size, log(lde_size), lde_g, 0, trace_length, ...]
 
     # Save `[0, lde_g, log(lde_size), lde_size]`
     exec.constants::set_lde_domain_info_word
-    #=> [lde_size, log(lde_size), lde_g, 0, trace_length, num_queries, grinding, num_constraints, trace_info, num_fixed_len_pi, ...]
+    #=> [lde_size, log(lde_size), lde_g, 0, trace_length, ...]
 
     # clean stack
     drop drop
-    #=> [lde_g, 0, trace_length, num_queries, grinding, num_constraints, trace_info, num_fixed_len_pi, ...]
+    #=> [lde_g, 0, trace_length, ...]
 
     # Compute trace generator `trace_g` = `lde_g^blowup_factor`
     repeat.3
         dup mul
     end
-    #=> [trace_g, 0, trace_length, num_queries, grinding, num_constraints, trace_info, num_fixed_len_pi, ...]
+    #=> [trace_g, 0, trace_length, ...]
 
     # Save `trace_g` to memory
     exec.constants::set_trace_domain_generator
-    #=> [0, trace_length, num_queries, grinding, num_constraints, trace_info, num_fixed_len_pi, ...]
+    #=> [0, trace_length, ...]
 
-    # clean stack
-    drop
-    #=> [trace_length, num_queries, grinding, num_constraints, trace_info, num_fixed_len_pi, ...]
-
-    # Construct the proof context
-    exec.build_proof_context
-    # => [num_queries, grinding, proof_options, num_constraints, modulus1, modulus0, trace_length, trace_info, num_fixed_len_pi, ...]
-
-    # We get the number of the variable length public inputs section non-deterministically so that
-    # we can initialize the capacity portion of the sponge state. The total number of public inputs
-    # is easily derived using an addition.
-    movup.8
-    # => [num_fixed_len_pi, num_queries, grinding, proof_options, num_constraints, modulus1, modulus0, trace_length, trace_info, ...]
-    adv_push add
-    dup exec.constants::num_public_inputs_ptr mem_store
-    u32divmod.8
-    # => [rem, quo, num_queries, grinding, proof_options, num_constraints, modulus1, modulus0, trace_length, trace_info, ...]
-
-    # Hash proof context
-    swap drop
-    push.0.0.0
-    movdnw.2
-    # => [B, A, 0, 0, 0, c, ...]
-
-    exec.poseidon2::permute
-    dropw
-    dropw
-    # => [C, ...]
+    # Clean up the stack.
+    drop drop
 end
 
-#! Builds the proof context.
+#! Reseed with a commitment word and absorb an additional single felt, then permute.
 #!
-#! Input: [trace_length, num_queries, grinding, num_constraints, trace_info, ...]
-#! Output:  [num_queries, grinding, proof_options, num_constraints, modulus1, modulus0, trace_length, trace_info, ...]
-proc build_proof_context
-    ## trace layout info, which is the concatenation as u8-s of:
-    ## 1. main segment width
-    ## 2. num auxiliary segments, which always 1
-    ## 3. auxiliary segment width
-    ## 4. number of auxiliary random values
-    ## 5. trace length (this is already on the stack)
-
-    movup.4
-    swap
-    ## field modulus bytes (2 field elements)
-    push.0x01 # lower half of the modulus
-    push.0xffffffff # upper half of the modulus
-    ## field extension and FRI parameters
-    ## field extension degree || FRI folding factor || FRI remainder polynomial max degree || blowup factor
-    push.0x02047f08
-    # => [proof_options, modulus1, modulus0, trace_length, trace_info, num_queries, grinding, num_constraints, ...]
-    movup.6
-    movup.6
-    # => [num_queries, grinding, proof_options, modulus1, modulus0, trace_length, trace_info, num_constraints, ...]
-
-    movup.7
-    movdn.3
-    # => [num_queries, grinding, proof_options, num_constraints, modulus1, modulus0, trace_length, trace_info, ...]
-end
-
-#! Reseed the random coin with `DATA`
+#! Writes the commitment word to rate[0..3] and the felt to rate[4], leaving rate[5..7]
+#! unchanged from the previous permutation, then permutes. Used in the FRI layer loop
+#! where each round absorbs a layer commitment plus a PoW nonce felt.
 #!
-#! Input: [DATA, ...]
-#! Ouput: [...]
-#! Cycles: 54
-pub proc reseed
-    # Load previous state and update it
-    # --------------------------------------------------------------------------------------------
-    exec.get_rate_1
-    # => [R1, DATA, ...] (6 cycles)
+#! SAFETY:
+#!   1. input_len=0 (asserted).
+#!   2. On exit: input_len=0, output_len=8 (fresh permutation output).
+#!
+#! Input: [felt, w0, w1, w2, w3, ...]
+#! Output: [...]
+pub proc reseed_with_felt
+    # Assert input buffer is empty.
+    exec.constants::random_coin_input_len_ptr mem_load
+    assertz.err="reseed_with_felt: input buffer must be empty"
 
-    exec.add_two_words
-    # => [R1, ...] (16 cycles)
+    # Write the felt to rate[4] (= r2_ptr position 0), since we can only modify one
+    # element of R2 and need the rest from memory.
+    exec.constants::r2_ptr mem_store
+    # => [w0, w1, w2, w3, ...]
 
+    # Build sponge state [R1, R2, C] on the stack directly.
+    # R1 = commitment word (already on the stack).
+    # R2 and C are loaded from memory.
     exec.get_capacity
-    swapw
     exec.get_rate_2
-    # => [R2, R1, C, ...] (13 cycles)
+    # => [R2, C, R1, ...]
+    movupw.2
+    # => [R1, R2, C, ...]
 
     exec.poseidon2::permute
-    # => [R2', R1', C`, ...] (1 cycles)
+    exec.store_random_coin_state
 
-    # Save the new state to memory
-    # --------------------------------------------------------------------------------------------
-    exec.constants::r2_ptr mem_storew_be
-    dropw
-    exec.constants::r1_ptr mem_storew_be
-    dropw
-    exec.constants::c_ptr mem_storew_be
-    dropw
-    # => [...] (18 cycles)
+    # Mark output buffer as full.
+    push.8 exec.constants::random_coin_output_len_ptr mem_store
 end
 
+#! Reseed by writing a word directly to rate[0..3] and permuting.
+#!
+#! Overwrites rate[0..3] with the given word, leaves rate[4..7] unchanged from the
+#! previous permutation, then permutes. This is the standard overwrite-and-permute
+#! absorption pattern for a single word.
+#!
+#! SAFETY:
+#!   1. input_len=0 (asserted).
+#!   2. The word to absorb is on top of the stack.
+#!   3. On exit: input_len=0, output_len=8 (fresh permutation output).
+#!
+#! Input: [w0, w1, w2, w3, ...]
+#! Output: [...]
+pub proc reseed_direct
+    # Assert input buffer is empty.
+    exec.constants::random_coin_input_len_ptr mem_load
+    assertz.err="reseed_direct: input buffer must be empty"
+
+    # Write the word to rate[0..3] and consume it from the stack.
+    exec.set_rate_1
+
+    # Permute (rate[4..7] and capacity from memory are unchanged).
+    exec.load_random_coin_state
+    exec.poseidon2::permute
+    exec.store_random_coin_state
+
+    # Fresh output available.
+    push.8 exec.constants::random_coin_output_len_ptr mem_store
+end
+
+#! Verify per-round FRI folding proof-of-work and sample one extension field element,
+#! reading rate elements directly instead of going through `sample_felt`.
+#!
+#! Reads rate[7] (grinding), rate[6] and rate[5] (ext element) from r2_ptr memory,
+#! matching what `sample_felt` would return at output_len=8,7,6.
+#!
+#! The folding PoW bit count is read from memory (set by load_security_params).
+#! When folding_pow_bits=0 the check is trivially satisfied (mask=0).
+#!
+#! Equivalent to: `get_folding_pow_bits sample_bits assertz; sample_ext`
+#!
+#! SAFETY:
+#!   1. MUST be called immediately after `reseed_with_felt` with no intervening
+#!      random coin operations (output_len=8, input_len=0 guaranteed).
+#!   2. Sets output_len=5 on exit (3 elements consumed), input_len=0 unchanged.
+#!   3. folding_pow_bits must already be stored in memory.
+#!
+#! Input: [...]
+#! Output: [a0, a1, ...]
+pub proc sample_folding_pow_and_ext
+    # Assert precondition: input buffer must be empty.
+    exec.constants::random_coin_input_len_ptr mem_load
+    assertz.err="sample_folding_pow_and_ext: input buffer must be empty"
+
+    exec.constants::r2_ptr
+    # => [r2, ...]
+
+    # Grinding check: read rate[7], extract low 32 bits, mask with 2^folding_pow_bits - 1.
+    dup add.3 mem_load
+    u32split swap drop
+    # => [lo, r2, ...]
+
+    exec.constants::get_folding_pow_bits
+    pow2
+    u32assert u32overflowing_sub.1 assertz
+    # => [mask, lo, r2, ...]
+
+    u32and
+    assertz.err="per-round FRI folding grinding check failed"
+    # => [r2, ...]
+
+    # Ext element: read rate[6] (first sampled) and rate[5] (second sampled)
+    # sample_ext does: sample_felt -> rate[6], sample_felt -> rate[5], swap -> [rate[6], rate[5]]
+    dup add.2 mem_load
+    swap add.1 mem_load
+    # => [rate[5], rate[6], ...] -- but sample_ext swaps, so final is [rate[6], rate[5]]
+    swap
+    # => [rate[6], rate[5], ...] = [a0, a1, ...]
+
+    # Update output_len to 5 (consumed rate[7], rate[6], rate[5])
+    push.5 exec.constants::random_coin_output_len_ptr mem_store
+end
 
 # COEFFICIENT GENERATION
 # =============================================================================================
@@ -305,39 +437,53 @@ end
 #! has the form `h(m) = alpha + \sum_{i=0}^{|m| - 1} m_i * beta^i` for a message `m`.
 #!
 #! As these random challenges have already been used non-deterministically in prior computations, we
-#! also check that the generated challenges matche the non-deterministically provided one.
+#! also check that the generated challenges match the non-deterministically provided one.
 #!
 #! Input: [...]
 #! Output: [...]
 #! Cycles: 20
 pub proc generate_aux_randomness
-    padw exec.constants::r1_ptr mem_loadw_be
-    exec.constants::aux_rand_elem_ptr mem_storew_be
-    #=> [beta1, beta0, alpha1, alpha0, ...]
 
-    padw exec.constants::aux_rand_nd_ptr mem_loadw_be
-    # => [alpha1, alpha0, beta1, beta0, beta1, beta0, alpha1, alpha0, ...]
+    exec.sample_ext
+    exec.sample_ext
+    # => [beta0, beta1, alpha0, alpha1, ...]
 
-    movup.6 assert_eq.err="comparison failed: aux randomness"
-    movup.5 assert_eq.err="comparison failed: aux randomness"
-    # => [beta1, beta0, beta1, beta0, ...]
+    exec.constants::aux_rand_elem_ptr mem_storew_le
+    # => [beta0, beta1, alpha0, alpha1, ...]
 
-    movup.2 assert_eq.err="comparison failed: aux randomness"
-    assert_eq.err="comparison failed: aux randomness"
+    # Pad with zeros, load with mem_loadw_le overwriting the padding so that we can compare
+    padw
+    # => [0, 0, 0, 0, beta0, beta1, alpha0, alpha1, ...]
+    exec.constants::aux_rand_nd_ptr mem_loadw_le
+    # => [nd_beta0, nd_beta1, nd_alpha0, nd_alpha1, beta0, beta1, alpha0, alpha1, ...]
+
+    # Assert sampled values match the non-deterministically provided ones.
+    # Comparison order: beta0, beta1, alpha0, alpha1 (memory offset 0, 1, 2, 3).
+    movup.4 assert_eq.err="aux randomness mismatch at element 0 (beta0)"
+    movup.3 assert_eq.err="aux randomness mismatch at element 1 (beta1)"
+    movup.2 assert_eq.err="aux randomness mismatch at element 2 (alpha0)"
+    assert_eq.err="aux randomness mismatch at element 3 (alpha1)"
     #=> [...]
 end
 
-#! Draw constraint composition random coefficient and save  it at `compos_coef_ptr`.
+#! Draw constraint composition random coefficient and save it at `compos_coef_ptr`.
 #!
 #! Input: [...]
 #! Output: [...]
 #! Cycles: 13
 pub proc generate_constraint_composition_coefficients
+    # Sample alpha (constraint folding challenge).
+    exec.sample_ext
+    push.0.0
+    movup.3
+    movup.3
     exec.constants::composition_coef_ptr
-    padw exec.constants::r1_ptr mem_loadw_be
-    # => [y, y, alpha1, alpha0, compos_coef_ptr, ...] where y is a "garbage" value
-    movup.4 mem_storew_be dropw
-    #=> [...]
+    mem_storew_le dropw
+
+    # Sample beta (multi-AIR accumulation challenge) to keep transcript in sync.
+    # For a single AIR, beta is unused but must be sampled from the random coin.
+    exec.sample_ext
+    drop drop
 end
 
 #! Draw deep composition polynomial random coefficient and save it at `deep_rand_coef_ptr`.
@@ -349,19 +495,28 @@ end
 #! Output: [...]
 #! Cycles: 22
 pub proc generate_deep_composition_random_coefficients
-    padw exec.constants::r1_ptr mem_loadw_be
-    # => [y, y, alpha1, alpha0, ...] where y is a "garbage" value
-    push.0.0
-    exec.constants::deep_rand_alpha_nd_ptr mem_loadw_be
-    drop drop
-    # => [alpha1_nd, alpha0_nd, alpha1, alpha0, ...] where y is a "garbage" value
+    # Sample challenge_columns (deep alpha) for batching columns.
+    exec.sample_ext
+    padw
+    exec.constants::deep_rand_alpha_nd_ptr mem_loadw_le
+    # => [alpha0_nd, alpha1_nd, 0, 0, alpha0, alpha1, ...]
 
-    dup.2 assert_eq
-    dup.2 assert_eq
-    push.0.0
+    dup.4 assert_eq
+    dup.4 assert_eq
     exec.constants::deep_rand_coef_ptr
-    mem_storew_be
+    mem_storew_le
     dropw
+
+    # Sample challenge_points (deep beta) for batching evaluation points.
+    # p3-miden's DEEP formula weights the gz term by beta:
+    #   Q(X) = [f(z)-f(X)]/(z-X) + beta * [f(gz)-f(X)]/(gz-X)
+    exec.sample_ext
+    # => [beta0, beta1, ...]
+
+    # Store [beta0, beta1, alpha0, alpha1] at deep_rand_coef_ptr.
+    # (alpha was already stored at positions 2,3 by the mem_storew_le above)
+    exec.constants::deep_rand_coef_ptr mem_store
+    exec.constants::deep_rand_coef_ptr add.1 mem_store
     #=> [...]
 end
 
@@ -370,7 +525,7 @@ end
 # =============================================================================================
 
 #! Generate the OOD challenge point `z = (z0, z1)` and compute `z^N` where N is
-#! the trace length. The resulting word `[(z_1, z_0)^N, z1, z0]` is stored in the
+#! the trace length. The resulting word `[(z_0, z_1)^N, z0, z1]` is stored in the
 #! global memory address `exec.z_ptr` reserved for it.
 #!
 #! Input: [X, ...]
@@ -378,31 +533,30 @@ end
 #! Note: The top word on the stack is consumed by this procedure.
 #! Cycles: 21 + 10 * log(N)
 pub proc generate_z_zN
-    # Load z (first two felts of the random coin state) and log trace length N
-    exec.constants::r1_ptr mem_loadw_be
-    drop drop
+    # Sample z and load log trace length N
+    exec.sample_ext
     exec.constants::get_trace_length_log
-    # => [log(trace_len), z_1, z_0, ...]
+    # => [log(trace_len), z_0, z_1, ...]
 
     dup.2 dup.2
-    # => [z_1, z_0, log(trace_len), z_1, z_0, ...]
+    # => [z_0, z_1, log(trace_len), z_0, z_1, ...]
 
     # Compute z^N using the fact that z^N = z^(2^log(N))
     # Loop starts with `i=log(trace_len)`
     push.1
     while.true
         dup.1 dup.1 ext2mul
-        # => [(z_1, z_0)^n, i, z_1, z_0, ...]
+        # => [(z_0, z_1)^n, i, z_0, z_1, ...]
 
         dup.2 sub.1 swap.3 push.1 neq
-        # => [b, (z_1, z_0)^n, i-1, z_1, z_0, ...]
+        # => [b, (z_0, z_1)^n, i-1, z_0, z_1, ...]
     end
 
     movup.2 drop
-    # => [(z_1, z_0)^n, z_1, z_0, ...]
+    # => [(z_0, z_1)^n, z_0, z_1, ...]
 
     # Store z and z^N
-    exec.constants::z_ptr mem_storew_be
+    exec.constants::z_ptr mem_storew_le
     dropw
 end
 
@@ -410,330 +564,185 @@ end
 # INDEX GENERATION
 # =============================================================================================
 
-# Helper function for generating a list of indices that takes a word of random felts and saves
-# to memory region (referenced by `ptr`) 4 random integers in the range 0..=(mask+1).
-# `depth` is saved next to each of the 4 integers for use in subsequent steps.
-#
-# Input: [R, ptr, mask, depth, ...]
-# Output:[R, ptr+16, mask, depth, ...]
-#
-# Cycles: 100
-proc generate_four_integers
-    # Get the first random felt
-    dup.3               # [r0, R1, ptr, mask, depth, ...]
-    u32split swap       # [r0_lo, r0_hi, R1, ptr, mask, depth, ...]
-    dup.7               # [mask, r0_lo, r0_hi, R1, ptr, mask, depth, ...]
-    u32and              # [r, r0_hi, R1, ptr, mask, depth, ...]
-    dup.8 swap          # [r, depth, r0_hi, R1, ptr, mask, depth, ...]
-    push.0 movdn.3      # [r, depth, r0_hi, 0, R1, ptr, mask, depth, ...]
-
-    # Store and update pointer
-    dup.8 add.4 swap.9  # [ptr, r, depth, r0_hi, 0, R1, ptr + 4, mask, depth, ...]
-    mem_storew_be
-    dropw               # [R1, ptr + 4, mask, depth, ...]
-
-    # Get the second random felt
-    dup.2               # [r1, R1, ptr+4, mask, depth, ...]
-    u32split swap       # [r1_lo, r1_hi, R1, ptr+4, mask, depth, ...]
-    dup.7               # [mask, r1_lo, r1_hi, R1, ptr+4, mask, depth, ...]
-    u32and              # [r, r1_hi, R1, ptr+4, mask, depth, ...]
-    dup.8 swap          # [r, depth, r1_hi, R1, ptr+4, mask, depth, ...]
-    push.0 movdn.3      # [r, depth, r1_hi, 0, R1, ptr+4, mask, depth, ...]
-
-    # Store and update pointer
-    dup.8 add.4 swap.9  # [ptr, r, depth, r1_hi, 0, R1, ptr+8, mask, depth, ...]
-    mem_storew_be
-    dropw               # [R1, ptr + 8, mask, depth, ...]
-
-    # Get the third random felt
-    dup.1
-    u32split swap
-    dup.7
-    u32and
-    dup.8 swap
-    push.0 movdn.3
-
-    # Store and update pointer
-    dup.8 add.4 swap.9
-    mem_storew_be
-    dropw
-
-    # Get the fourth random felt
-    dup
-    u32split swap
-    dup.7
-    u32and
-    dup.8 swap
-    push.0 movdn.3
-
-    # Store and update pointer
-    dup.8 add.4 swap.9
-    mem_storew_be
-    dropw
-end
-
-# Helper function for generating a list of indices. It takes a word of random felts and saves
-# to a memory region, referenced by `ptr`, 3 random integers in the range 0..=(mask+1). This procedure
-# is used to generate a list of random indices that are used in FRI. Moreover, this procedure
-# is called first, and right after the PoW check, thus the first element in the rate portion of
-# the state is discarded.
-# `depth` is saved next to each of the 3 integers for use in subsequent steps.
-#
-# Input: [R, ptr, mask, depth, ...]
-# Output:[R, ptr + 12, mask, depth, ...]
-#
-# Cycles: 75
-proc generate_three_integers
-    # Get the second random felt
-    dup.2               # [r0, R1, ptr, mask, depth, ...]
-    u32split swap       # [r0_lo, r0_hi, R1, ptr, mask, depth, ...]
-    dup.7               # [mask, r0_lo, r0_hi, R1, ptr, mask, depth, ...]
-    u32and              # [r, r0_hi, R1, ptr, mask, depth, ...]
-    dup.8 swap          # [r, depth, r0_hi, R1, ptr, mask, depth, ...]
-    push.0 movdn.3      # [r, depth, r0_hi, 0, R1, ptr, mask, depth, ...]
-
-    # Store and update pointer
-    dup.8 add.4 swap.9  # [ptr, r, depth, r0_hi, 0, R1, ptr + 4, mask, depth, ...]
-    mem_storew_be
-    dropw               # [R1, ptr + 4, mask, depth, ...]
-
-    # Get the second random felt
-    dup.1               # [r1, R1, ptr, mask, depth, ...]
-    u32split swap       # [r1_lo, r1_hi, R1, ptr, mask, depth, ...]
-    dup.7               # [mask, r1_lo, r1_hi, R1, ptr, mask, depth, ...]
-    u32and              # [r, r1_hi, R1, ptr, mask, depth, ...]
-    dup.8 swap          # [r, depth, r1_hi, R1, ptr, mask, depth, ...]
-    push.0 movdn.3      # [r, depth, r1_hi, 0, R1, ptr, mask, depth, ...]
-
-    # Store and update pointer
-    dup.8 add.4 swap.9  # [ptr, r, depth, r1_hi, 0, R1, ptr + 4, mask, depth, ...]
-    mem_storew_be
-    dropw               # [R1, ptr + 4, mask, depth, ...]
-
-    # Get the third random felt
-    dup.0
-    u32split swap
-    dup.7
-    u32and
-    dup.8 swap
-    push.0 movdn.3
-
-    # Store and update pointer
-    dup.8 add.4 swap.9
-    mem_storew_be
-    dropw
-end
-
 #! Generate a list of `num_queries` number of random indices in the range
 #! [0, lde_size] and store it in memory starting from `query_ptr`.
-#! The list is stored as `(r, depth, y, y)` where `depth` is `log(lde_domain_size)`.
-#!`depth` is needed when computing the deep queries.
+#! The list is stored as `(rev_index, depth, natural_index, 0)` where
+#! `depth` is `log(lde_domain_size)` which is needed when computing the DEEP queries.
 #!
-#! Input: [query_ptr, num_queries, ...]
+#! Reads rate elements directly from memory (decrementing from output_len-1 down to 0),
+#! permuting when the rate is exhausted, rather than calling sample_felt per query.
+#!
+#! Input: [...]
 #! Output: [...]
 #!
-#! Cycles: 267 + q * 236 + r * 29 where q = num_queries / 8 and r = num_queries % 8
-#!
-#! NOTE: This procedure is called first, and right after the PoW check, thus the first element
-#! in the rate portion of the state is discarded.
-#! NOTE: The cycles count can be estimated, using the fact that r < 8, via the more compact formula
-#!  470 + 236 * (num_queries / 8)
+#! NOTE: This procedure is called right after the PoW check. The PoW check consumes one
+#! rate element via sample_bits, leaving output_len = 7.
 pub proc generate_list_indices
-    # Get the number of query indices we need to generate and the address to where we need
-    # to store them at.
     exec.constants::get_number_queries
     exec.constants::get_fri_queries_address
     #=> [query_ptr, num_queries, ...]
 
-    # Create mask
-    exec.constants::get_lde_domain_log_size
-    exec.constants::get_lde_domain_size
-    sub.1
-    #=> [mask, depth, query_ptr, num_queries, ...] where depth = log(lde_size)
+    exec.constants::get_lde_domain_depth
+    #=> [depth, query_ptr, num_queries, ...]
 
-    # Get address holding the integers (this will later hold the FRI queries)
-    movup.2
-    #=> [query_ptr, mask, depth, num_queries, ...]
+    # Pre-compute pow2_shift = 2^(32 - depth) and mask = 2^depth - 1.
+    # Keep both on the stack to avoid per-element procedure call overhead for memory loads.
+    dup push.32 swap u32wrapping_sub pow2
+    #=> [pow2_shift, depth, query_ptr, num_queries, ...]
+    swap dup pow2 u32assert u32overflowing_sub.1 assertz
+    #=> [mask, depth, pow2_shift, query_ptr, num_queries, ...]
 
-    # Load the first half of the rate portion of the state of the random coin. We discard the first
-    # element as it is used for PoW and use the remaining the 3.
-    exec.get_rate_1
-    #=> [R1, query_ptr, mask, depth, num_queries, ...]
-    exec.generate_three_integers
-    #=> [R1, query_ptr+12, mask, depth, num_queries, ...]
+    # Rearrange to loop layout: [query_ptr, num_queries, mask, depth, pow2_shift, ...]
+    movup.3 movup.4 swap
+    #=> [query_ptr, num_queries, mask, depth, pow2_shift, ...]
 
+    # Load current output_len from random coin state (7 after PoW).
+    # Assert it is nonzero: this procedure expects a freshly permuted sponge with at least
+    # one element already consumed (by the PoW check). A zero output_len would mean the
+    # sponge was never permuted or was fully drained, which is a caller bug.
+    exec.constants::random_coin_output_len_ptr mem_load
+    dup push.0 neq assert.err="generate_list_indices: output_len must be nonzero"
+    #=> [output_len, query_ptr, num_queries, mask, depth, pow2_shift, ...]
 
-    # Load the second half of the rate portion of the state of the random coin.
-    exec.constants::r2_ptr mem_loadw_be
-    #=> [R2, query_ptr+12, mask, depth, num_queries, ...]
-    exec.generate_four_integers
-    #=> [R2, query_ptr+26, mask, depth, num_queries, ..., ...]
+    # Stack layout during loop:
+    # pos 0: output_len (rate elements remaining before next permute)
+    # pos 1: query_ptr (advances by 4 each iteration)
+    # pos 2: num_queries (decrements to 0)
+    # pos 3: mask (constant)
+    # pos 4: depth (constant, needed for inclusion in the stored word)
+    # pos 5: pow2_shift (constant, needed for bit_reverse)
 
-    # Squeeze
-    exec.constants::c_ptr mem_loadw_be
-    exec.get_rate_1
-    exec.get_rate_2
-    exec.poseidon2::permute
-    #=> [R2', R1, C, query_ptr+26, mask, depth, num_queries, ...]
-
-    # Save the new state
-    exec.constants::r2_ptr mem_storew_be
-    dropw
-    # => [R1, C]
-    exec.constants::r1_ptr mem_storew_be
-    swapw
-    # => [C, R1]
-    exec.constants::c_ptr mem_storew_be
-    dropw
-    #=> [R1, query_ptr+26, mask, depth, num_queries, ...]
-
-
-    # Use `num_queries` to iterate.
-
-    ## Subtract the 7 elements we have already generated above.
-    movup.7
-    push.7 sub
-    #=> [num_queries-7, R1, query_ptr+26, mask, depth, ...]
-
-    ## Divide by 8 to get the number of iterations
-    u32assert u32divmod.8
-    #=> [num_queries_remainder, num_queries_quotient, X, query_ptr+26, mask, depth, ...]
-
-    ## Save remainder for later use
-    movdn.8
-    #=> [num_queries_quotient, X, query_ptr+26, mask, depth, num_queries_remainder, ...]
-
-    ## Use `quotient` to iterate
-    dup movdn.8
-    #=> [num_queries_quotient, X, query_ptr+26, mask, depth, num_queries_quotient, num_queries_remainder, ...]
-
-    push.0 neq
+    dup.2 push.0 neq
     while.true
-        #=> [X, query_ptr', mask, depth, num_remaining_iterations, remainder, ...]
+        # --- Ensure rate has an element; permute if exhausted ---
+        dup push.0 eq
+        if.true
+            drop
+            exec.load_random_coin_state
+            exec.poseidon2::permute
+            exec.store_random_coin_state
+            push.8
+        end
+        #=> [output_len, query_ptr, num_queries, mask, depth, pow2_shift, ...]
 
-        exec.generate_four_integers
-        #=> [X, query_ptr'+16, mask, depth, num_remaining_iterations, remainder, ...]
+        # --- Read rate element at index (output_len - 1) ---
+        sub.1
+        #=> [idx, query_ptr, num_queries, mask, depth, pow2_shift, ...]
+        # R1 and R2 are contiguous in memory (R1_PTR, R1_PTR+4 = R2_PTR), so
+        # rate[idx] is simply at R1_PTR + idx.
+        dup exec.constants::r1_ptr add mem_load
+        #=> [felt, idx, query_ptr, num_queries, mask, depth, pow2_shift, ...]
 
-        exec.constants::r2_ptr mem_loadw_be
-        exec.generate_four_integers
-        #=> [R2, query_ptr'+32, mask, depth, num_remaining_iterations, remainder, ...]
+        # --- Extract masked index: lo 32 bits AND mask ---
+        u32split swap drop
+        #=> [lo, idx, query_ptr, num_queries, mask, depth, pow2_shift, ...]
+        dup.4 u32and
+        #=> [natural_index, idx, query_ptr, num_queries, mask, depth, pow2_shift, ...]
 
-        # Squeeze
-        exec.constants::c_ptr mem_loadw_be
-        exec.get_rate_1
-        exec.get_rate_2
-        exec.poseidon2::permute
-        #=> [R2, R1, C, query_ptr'+32, mask, depth, num_remaining_iterations, remainder, ...]
+        # --- Bit-reverse ---
+        # Set up [natural_index, pow2_shift, depth, natural_index, idx, query_ptr, ...]
+        # so bit_reverse_len_parallel consumes [natural_index, pow2_shift] and leaves
+        # [rev_index, depth, natural_index, idx, query_ptr, ...].
+        dup.5 dup.7 dup.2
+        #=> [natural_index, pow2_shift, depth, natural_index, idx, query_ptr, num_queries, mask, depth, pow2_shift, ...]
+        exec.utils::bit_reverse_len_parallel
+        #=> [rev_index, depth, natural_index, idx, query_ptr, num_queries, mask, depth, pow2_shift, ...]
 
-        # Save the new state
-        exec.constants::r2_ptr mem_storew_be
+        # --- Store [rev_index, depth, natural_index, 0] at query_ptr ---
+        push.0 movdn.3
+        #=> [rev_index, depth, natural_index, 0, idx, query_ptr, num_queries, mask, depth, pow2_shift, ...]
+        dup.5
+        #=> [query_ptr, rev_index, depth, natural_index, 0, idx, query_ptr, num_queries, mask, depth, pow2_shift, ...]
+        mem_storew_le
         dropw
-        #=> [R1, C, query_ptr'+32, mask, depth, num_remaining_iterations, remainder, ...]
-        exec.constants::r1_ptr mem_storew_be
-        swapw
-        #=> [C, R1, query_ptr'+32, mask, depth, num_remaining_iterations, remainder, ...]
-        exec.constants::c_ptr mem_storew_be
-        dropw
-        #=> [R1, query_ptr'+32, mask, depth, num_remaining_iterations, remainder, ...]
+        #=> [idx, query_ptr, num_queries, mask, depth, pow2_shift, ...]
 
-        movup.7 sub.1 dup movdn.8
-        #=> [num_remaining_iterations-1, R1, query_ptr'+32, mask, depth, num_remaining_iterations-1, remainder, ...]
+        # --- Advance query_ptr, decrement num_queries ---
+        swap add.4 swap
+        #=> [idx, query_ptr', num_queries, mask, depth, pow2_shift, ...]
+        movup.2 sub.1 movdn.2
+        #=> [idx, query_ptr', num_queries-1, mask, depth, pow2_shift, ...]
 
-        push.0 neq
+        # --- Check loop condition ---
+        # idx is our output_len for next iteration (already decremented).
+        dup.2 push.0 neq
     end
-    #=> [R1, query_ptr', mask, depth, 0, remainder, ...]
 
-    ## Use remainder
-    ## Note: we rename the `remainder` variable to `num_queries`, as it now indicates the number of
-    ## queries left.
+    # --- Restore random coin output_len so subsequent operations see correct state ---
+    # pos 0 = output_len (remaining), store it back.
+    exec.constants::random_coin_output_len_ptr mem_store
+    #=> [query_ptr, num_queries, mask, depth, pow2_shift, ...]
 
-    ### Put the remaining number of queries to generate in the appropriate stack position
-    movup.8 movdn.7
-    #=> [R1, query_ptr', mask, depth, num_queries, ...]
+    # Also clear the input_len to 0 (should already be 0, but it is better to be safe).
+    push.0 exec.constants::random_coin_input_len_ptr mem_store
 
-    ### Load the second half of the rate portion of the state of the random coin.
-    padw exec.constants::r2_ptr mem_loadw_be
-    #=> [R2, R1, query_ptr, mask, depth, num_queries, ...]
-
-    ### Iterate over remainder
-    dup.11 sub.1 swap.12
-    #=> [num_queries, R2, R1, query_ptr, mask, depth, num_queries-1, ...]
-
-    neq.0
-    while.true
-    #=> [R2, R1, query_ptr, mask, depth, num_queries, ...]
-        movup.7
-        u32split swap       # [r0_lo, r0_hi, R2, r3, r2, r1, ptr, mask, depth, num_queries, ...]
-        dup.10              # [mask, r0_lo, r0_hi, R2, r3, r2, r1, ptr, mask, depth, num_queries, ...]
-        u32and              # [r, r0_hi, R2, r3, r2, r1, ptr, mask, depth, num_queries, ...]
-        dup.11 swap         # [r, depth, r0_hi, R2, r3, r2, r1, ptr, mask, depth, num_queries, ...]
-        push.0 movdn.3      # [r, depth, r0_hi, 0, R2, r3, r2, r1, ptr, mask, depth, num_queries, ...]
-
-        # Store and update pointer
-        dup.11 add.4 swap.12  # [ptr, r, depth, r0_hi, 0, R2, r3, r2, r1, ptr + 4, mask, depth, num_queries, ...]
-        mem_storew_be
-        drop drop drop               # [x, R2, r3, r2, r1, ptr + 1, mask, depth, num_queries, ...]
-        dup.11 sub.1 swap.12
-        #=> [num_queries, x, R2, r3, r2, r1, ptr + 1, mask, depth, num_queries-1, ...]
-        push.0 neq
-    end
-    #=> [R2, R1, query_ptr, mask, depth, 0, ...]
-
-    dropw dropw  dropw drop
+    dropw drop
 end
 
 
 # PROOF-OF-WORK CHECK
 # =============================================================================================
 
-#! Check that the Proof-of-Work contained in the nonce is equal to the required number
-#! of bits prescribed by grinding bits. The grinding factor is assumed to be less than 32.
+#! Verify a proof-of-work witness given pow_bits on the stack.
+#!
+#! When pow_bits != 0, reads the nonce from advice, writes it to rate[0], permutes,
+#! and checks that the low pow_bits of the output are zero.
+#! When pow_bits == 0, consumes the witness (must be zero) without affecting the transcript.
+#!
+#! Used by check_query_pow (query phase) and check_deep_pow (DEEP phase).
+#! FRI folding PoW uses a separate path (sample_folding_pow_and_ext) because the
+#! witness is bundled with the commitment reseed.
+#!
+#! SAFETY: Requires input_len=0.
+#!
+#! Input: [pow_bits, ...]
+#! Output: [...]
+proc check_pow
+    dup
+    push.0 neq
+    if.true
+        adv_push
+        # Assert input buffer is empty, then write nonce directly to rate[0] and permute.
+        exec.constants::random_coin_input_len_ptr mem_load
+        assertz.err="check_pow: input buffer must be empty"
+        exec.constants::r1_ptr mem_store
+        exec.load_random_coin_state
+        exec.poseidon2::permute
+        exec.store_random_coin_state
+        push.8 exec.constants::random_coin_output_len_ptr mem_store
+        # sample_bits reads from fresh output (no duplex triggered).
+        exec.sample_bits
+        assertz.err="proof-of-work check failed"
+    else
+        # Consume witness to keep advice layout, but do not affect transcript.
+        adv_push
+        assertz.err="proof-of-work nonce must be zero when grinding factor is zero"
+        drop
+    end
+end
+
+#! Check the DEEP proof-of-work.
+#!
+#! Called before sampling DEEP composition polynomial challenges.
+#!
+#! SAFETY: Requires input_len=0.
 #!
 #! Input: [...]
 #! Output: [...]
-#! Cycles: 73
-pub proc check_pow
-    # Load the grinding factor
-    exec.constants::get_grinding_factor
+pub proc check_deep_pow
+    exec.constants::get_deep_pow_bits
+    exec.check_pow
+end
 
-    # Compute the mask.
-    pow2
-    u32assert u32overflowing_sub.1 assertz.err="range check failed: pow"
-    #=> [mask, ...]
-
-    # Load Capacity portion
-    exec.get_capacity
-    #=> [C, mask, ...]
-
-    # Load first half of rate portion and add pow witness to first element of rate
-    exec.get_rate_1
-    adv_push
-    dup.4
-    add
-    swap.4
-    drop
-
-    # Load the second half of rate portion and apply the permutation
-    padw
-    exec.constants::r2_ptr mem_loadw_be
-    exec.poseidon2::permute
-    #=> [R2, R1, C, mask, ...]
-
-    # Save the new random coin state
-    exec.constants::r2_ptr mem_storew_be
-    dropw
-    exec.constants::r1_ptr mem_storew_be
-    swapw
-    exec.constants::c_ptr mem_storew_be
-    dropw
-    drop drop drop
-    #=> [R10, mask]
-
-    # Make sure the PoW is valid
-    u32split
-    drop
-    u32and
-    assertz.err="range check failed: pow"
-    drop
-    #=> [...]
+#! Check the query proof-of-work.
+#!
+#! Called after loading the FRI remainder, before sampling query indices.
+#!
+#! SAFETY: Requires input_len=0 (guaranteed after load_and_verify_remainder).
+#!
+#! Input: [...]
+#! Output: [...]
+pub proc check_query_pow
+    exec.constants::get_query_pow_bits
+    exec.check_pow
 end

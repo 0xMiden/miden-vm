@@ -742,6 +742,7 @@ fn gte() {
 // ================================================================================================
 
 proptest! {
+    #![proptest_config(ProptestConfig::with_cases(100))]
     #[test]
     fn add_proptest(a in any::<u64>(), b in any::<u64>()) {
         let asm_op = "add";

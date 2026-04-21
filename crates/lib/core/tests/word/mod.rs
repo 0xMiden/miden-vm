@@ -56,7 +56,7 @@ fn test_reverse() {
         prepend_word(&mut operand_stack, word);
 
         // reversew reverses [w0, w1, w2, w3] → [w3, w2, w1, w0]
-        let expected: Vec<u64> = word.iter().rev().map(|f| f.as_canonical_u64()).collect();
+        let expected: Vec<u64> = word.iter().rev().map(Felt::as_canonical_u64).collect();
         build_test!(SOURCE, &operand_stack).expect_stack(&expected);
     }
 }
@@ -142,19 +142,14 @@ fn store_word_u32s_le_stores_limbs() {
         use miden::core::word
 
         begin
-            push.{ptr}
-            push.{w3}
-            push.{w2}
-            push.{w1}
-            push.{w0}
+            push.{PTR}
+            push.{W3}
+            push.{W2}
+            push.{W1}
+            push.{W0}
             exec.word::store_word_u32s_le
         end
     ",
-        ptr = PTR,
-        w0 = W0,
-        w1 = W1,
-        w2 = W2,
-        w3 = W3,
     );
 
     let expected_mem = [w0_lo, w0_hi, w1_lo, w1_hi, w2_lo, w2_hi, w3_lo, w3_hi];

@@ -36,14 +36,20 @@ Miden crate exposes several functions which can be used to execute programs, gen
 
 ### Executing programs
 
-To execute a program on Miden VM, you can use `execute()` which takes the following arguments:
+To execute a program on Miden VM, you can use `execute()`. The sync `execute_sync()` variant is
+also available for sync callers. These functions take the following arguments:
 
 - `program: &Program` - a reference to a Miden program to be executed.
 - `stack_inputs: StackInputs` - a set of public inputs with which to execute the program.
-- `host: Host` - an instance of a `Host` which can be used to supply non-deterministic inputs to the VM and receive messages from the VM.
+- `advice_inputs: AdviceInputs` - the private inputs used to build the advice provider; use `AdviceInputs::default()` when no private inputs are needed.
+- `host` - an instance of `Host` for `execute()` or `SyncHost` for `execute_sync()`, used to supply non-deterministic inputs to the VM and receive messages from the VM.
 - `options: ExecutionOptions` - a set of options for executing the specified program (e.g., max allowed number of cycles).
 
-The function returns a `Result<ExecutionTrace, ExecutionError>` which will contain the execution trace of the program if the execution was successful, or an error, if the execution failed. Internally, the VM then passes this execution trace to the prover to generate a proof of a correct execution of the program.
+The function returns a `Result<ExecutionOutput, ExecutionError>` which will contain the final stack
+state and other execution outputs if the execution was successful, or an error if the execution
+failed. If you need an execution trace, use `FastProcessor::execute_trace_inputs()` /
+`FastProcessor::execute_trace_inputs_sync()` and pass the returned `TraceBuildInputs` bundle to
+`trace::build_trace()`.
 
 For example:
 
@@ -74,17 +80,22 @@ let mut host = DefaultHost::default();
 let exec_options = ExecutionOptions::default();
 
 // execute the program with no inputs
-let trace = execute_sync(&program, stack_inputs, advice_inputs.clone(), &mut host, exec_options).unwrap();
+let output =
+    execute_sync(&program, stack_inputs, advice_inputs.clone(), &mut host, exec_options).unwrap();
 ```
 
 ### Proving program execution
 
-To execute a program on Miden VM and generate a proof that the program was executed correctly, you can use the `prove()` function. This function takes the following arguments:
+To execute a program on Miden VM and generate a proof that the program was executed correctly, you
+can use the `prove_sync()` function. The async `prove()` variant is also available for async
+callers. `prove_sync()` takes the following arguments:
 
 - `program: &Program` - a reference to a Miden program to be executed.
 - `stack_inputs: StackInputs` - a set of public inputs with which to execute the program.
+- `advice_inputs: AdviceInputs` - the initial nondeterministic inputs available to the VM.
 - `host: Host` - an instance of a `Host` which can be used to supply non-deterministic inputs to the VM and receive messages from the VM.
-- `options: ProvingOptions` - config parameters for proof generation. The default options target 96-bit security level.
+- `execution_options: ExecutionOptions` - VM execution parameters such as cycle limits and trace fragmentation.
+- `options: ProvingOptions` - proof-generation parameters. The default options target 96-bit security level.
 
 If the program is executed successfully, the function returns a tuple with 2 elements:
 
@@ -101,7 +112,7 @@ use miden_vm::{
     advice::AdviceInputs,
     assembly::DefaultSourceManager,
     field::PrimeField64,
-    Assembler, DefaultHost, ProvingOptions, Program, prove_sync, StackInputs
+    Assembler, DefaultHost, ExecutionOptions, ProvingOptions, Program, prove_sync, StackInputs
 };
 
 // instantiate the assembler
@@ -116,6 +127,7 @@ let (outputs, proof) = prove_sync(
     StackInputs::default(),       // we won't provide any inputs
     AdviceInputs::default(),      // we don't need any initial advice inputs
     &mut DefaultHost::default(),  // we'll be using a default host
+    ExecutionOptions::default(),  // we'll use default VM execution options
     ProvingOptions::default(),    // we'll be using default options
 )
 .unwrap();
@@ -217,6 +229,7 @@ let (outputs, proof) = miden_vm::prove_sync(
     stack_inputs,
     AdviceInputs::default(), // without initial advice inputs
     &mut host,
+    miden_vm::ExecutionOptions::default(), // use default VM execution options
     ProvingOptions::default(), // use default proving options
 )
 .unwrap();

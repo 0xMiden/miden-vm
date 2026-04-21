@@ -115,7 +115,7 @@ pub struct ProjectFile {
         serde(
             default,
             rename = "profile",
-            deserialize_with = "super::profile::deserialize_profiles_table",
+            with = "super::profile::serialization",
             skip_serializing_if = "Vec::is_empty"
         )
     )]
@@ -434,13 +434,23 @@ impl Validate for ProjectFile {
 
             // 2a. Check for conflicting paths
             let span = target.span();
+            if target.path.is_none() {
+                invalid_config.push(RelatedError::wrap(
+                    RelatedLabel::error("missing binary target path")
+                        .with_labeled_span(
+                            span,
+                            "binary targets must specify the path to their entrypoint module",
+                        )
+                        .with_source_file(Some(source.clone())),
+                ));
+            }
             if let Some(path) = target.path.clone() {
                 match target_paths.entry(path) {
                     Entry::Vacant(entry) => {
                         entry.insert(None);
                     },
                     Entry::Occupied(mut entry) => {
-                        let path_span = target.path.as_ref().map(|p| p.span()).unwrap_or(span);
+                        let path_span = target.path.as_ref().map(Span::span).unwrap_or(span);
                         let conflict_label = Label::new(path_span, "conflict occurs here");
                         let path = entry.key().clone();
                         match entry.get_mut() {
@@ -472,7 +482,7 @@ impl Validate for ProjectFile {
                     entry.insert(None);
                 },
                 Entry::Occupied(mut entry) => {
-                    let ns_span = target.name.as_ref().map(|ns| ns.span()).unwrap_or(span);
+                    let ns_span = target.name.as_ref().map(Span::span).unwrap_or(span);
                     let conflict_label = Label::new(ns_span, "conflict occurs here");
                     let ns = entry.key().clone();
                     match entry.get_mut() {
@@ -499,7 +509,7 @@ impl Validate for ProjectFile {
 
         if !invalid_config.is_empty() {
             return Err(ProjectFileError::InvalidBuildTargets {
-                source_file: source.clone(),
+                source_file: source,
                 related: invalid_config,
             }
             .into());

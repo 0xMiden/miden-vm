@@ -372,7 +372,7 @@ impl<'de> serde::Deserialize<'de> for PathBuf {
         impl<'de> Visitor<'de> for PathVisitor {
             type Value = PathBuf;
 
-            fn expecting(&self, formatter: &mut core::fmt::Formatter) -> core::fmt::Result {
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
                 formatter.write_str("a valid Path/PathBuf")
             }
 
@@ -448,7 +448,7 @@ mod tests {
         assert_eq!(path.components().count(), 3);
         assert_eq!(path.last(), Some("baz"));
         assert_eq!(path.first(), Some("foo"));
-        assert_eq!(path.parent().map(|p| p.as_str()), Some("foo::bar"));
+        assert_eq!(path.parent().map(Path::as_str), Some("foo::bar"));
     }
 
     #[test]
@@ -476,7 +476,7 @@ mod tests {
         assert_eq!(path.components().count(), 3);
         assert_eq!(path.last(), Some("item"));
         assert_eq!(path.first(), Some("foo"));
-        assert_eq!(path.parent().map(|p| p.as_str()), Some("foo::\"miden::base/account@0.1.0\""));
+        assert_eq!(path.parent().map(Path::as_str), Some("foo::\"miden::base/account@0.1.0\""));
     }
 
     #[test]
@@ -560,7 +560,7 @@ mod tests {
             parent.as_str(),
             "::\"root_ns:root@1.0.0\"::abi_transform_tx_kernel_get_inputs_4"
         );
-        assert_eq!(parent.parent().map(|p| p.as_str()), Some("::\"root_ns:root@1.0.0\""));
+        assert_eq!(parent.parent().map(Path::as_str), Some("::\"root_ns:root@1.0.0\""));
 
         assert!(p2.is_absolute());
         assert_eq!(p2.components().count(), 4);
@@ -571,7 +571,7 @@ mod tests {
             parent.as_str(),
             "::\"root_ns:root@1.0.0\"::abi_transform_tx_kernel_get_inputs_4"
         );
-        assert_eq!(parent.parent().map(|p| p.as_str()), Some("::\"root_ns:root@1.0.0\""));
+        assert_eq!(parent.parent().map(Path::as_str), Some("::\"root_ns:root@1.0.0\""));
     }
 
     #[test]

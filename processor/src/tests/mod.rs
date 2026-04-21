@@ -59,11 +59,15 @@ fn test_diagnostic_advice_map_key_already_present() {
     let (lib_1, lib_2) = {
         let dummy_library_source = source_file!(&test_context, "pub proc foo add end");
         let module = test_context.parse_module_with_path("foo::bar", dummy_library_source).unwrap();
-        let lib = test_context.assemble_library(std::iter::once(module)).unwrap();
-        let lib_1 = lib
-            .clone()
-            .with_advice_map(AdviceMap::from_iter([(Word::default(), vec![ZERO])]));
-        let lib_2 = lib.with_advice_map(AdviceMap::from_iter([(Word::default(), vec![ONE])]));
+        let mut lib_2 = test_context.assemble_library(std::iter::once(module)).unwrap();
+        let lib_1 = Arc::new(
+            lib_2
+                .as_ref()
+                .clone()
+                .with_advice_map(AdviceMap::from_iter([(Word::default(), vec![ZERO])])),
+        );
+        Arc::make_mut(&mut lib_2)
+            .extend_advice_map(AdviceMap::from_iter([(Word::default(), vec![ONE])]));
 
         (lib_1, lib_2)
     };
@@ -712,7 +716,7 @@ fn test_diagnostic_procedure_not_found_call() {
     ";
         let uri = Uri::from("src.masm");
         let content = SourceContent::new(SourceLanguage::Masm, uri.clone(), src);
-        let source_file = source_manager.load_from_raw_parts(uri.clone(), content);
+        let source_file = source_manager.load_from_raw_parts(uri, content);
         Module::parse(
             PathBuf::new(module_name).unwrap(),
             miden_assembly::ast::ModuleKind::Library,
@@ -770,7 +774,7 @@ fn test_diagnostic_procedure_not_found_join() {
     ";
         let uri = Uri::from("src.masm");
         let content = SourceContent::new(SourceLanguage::Masm, uri.clone(), src);
-        let source_file = source_manager.load_from_raw_parts(uri.clone(), content);
+        let source_file = source_manager.load_from_raw_parts(uri, content);
         Module::parse(
             PathBuf::new(module_name).unwrap(),
             miden_assembly::ast::ModuleKind::Library,
@@ -831,7 +835,7 @@ fn test_diagnostic_procedure_not_found_loop() {
     ";
         let uri = Uri::from("src.masm");
         let content = SourceContent::new(SourceLanguage::Masm, uri.clone(), src);
-        let source_file = source_manager.load_from_raw_parts(uri.clone(), content);
+        let source_file = source_manager.load_from_raw_parts(uri, content);
         Module::parse(
             PathBuf::new(module_name).unwrap(),
             miden_assembly::ast::ModuleKind::Library,
@@ -893,7 +897,7 @@ fn test_diagnostic_procedure_not_found_split() {
     ";
         let uri = Uri::from("src.masm");
         let content = SourceContent::new(SourceLanguage::Masm, uri.clone(), src);
-        let source_file = source_manager.load_from_raw_parts(uri.clone(), content);
+        let source_file = source_manager.load_from_raw_parts(uri, content);
         Module::parse(
             PathBuf::new(module_name).unwrap(),
             miden_assembly::ast::ModuleKind::Library,

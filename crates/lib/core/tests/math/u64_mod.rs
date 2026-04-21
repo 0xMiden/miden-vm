@@ -4,7 +4,8 @@ use miden_core::assert_matches;
 use miden_core_lib::handlers::u64_div::{U64_DIV_EVENT_NAME, U64DivError};
 use miden_processor::{ExecutionError, operation::OperationError};
 use miden_utils_testing::{
-    Felt, U32_BOUND, expect_exec_error_matches, proptest::prelude::*, rand::rand_value, stack,
+    Felt, PrimeField64, U32_BOUND, expect_exec_error_matches, proptest::prelude::*,
+    rand::rand_value, stack,
 };
 
 #[test]
@@ -697,7 +698,7 @@ fn ensure_div_doesnt_crash() {
                 }
             );
         },
-        Err(err) => panic!("Unexpected error type: {:?}", err),
+        Err(err) => panic!("Unexpected error type: {err:?}"),
     }
 
     // 2. dividend limbs not u32
@@ -719,7 +720,7 @@ fn ensure_div_doesnt_crash() {
                 }
             );
         },
-        Err(err) => panic!("Unexpected error type: {:?}", err),
+        Err(err) => panic!("Unexpected error type: {err:?}"),
     }
 }
 
@@ -1201,6 +1202,66 @@ fn unchecked_rotr() {
     let (c1, c0) = split_u64(c);
 
     build_test!(source, &stack![b as u64, a0, a1, 5]).expect_stack(&[c0, c1, 5]);
+}
+
+#[test]
+fn unchecked_rotr_large_value_by_0() {
+    let source = "
+        use miden::core::math::u64
+        begin
+            exec.u64::rotr
+        end";
+
+    let a = Felt::ORDER_U64 + 1;
+    let (a1, a0) = split_u64(a);
+
+    build_test!(source, &stack![0_u64, a0, a1, 5]).expect_stack(&[a0, a1, 5]);
+}
+
+#[test]
+fn unchecked_rotr_large_value_by_32() {
+    let source = "
+        use miden::core::math::u64
+        begin
+            exec.u64::rotr
+        end";
+
+    let a = Felt::ORDER_U64 + 1;
+    let (a1, a0) = split_u64(a);
+    let c = a.rotate_right(32);
+    let (c1, c0) = split_u64(c);
+
+    build_test!(source, &stack![32_u64, a0, a1, 5]).expect_stack(&[c0, c1, 5]);
+}
+
+#[test]
+fn unchecked_rotl_large_value_by_0() {
+    let source = "
+        use miden::core::math::u64
+        begin
+            exec.u64::rotl
+        end";
+
+    let a = Felt::ORDER_U64 + 1;
+    let (a1, a0) = split_u64(a);
+
+    build_test!(source, &stack![0_u64, a0, a1, 5]).expect_stack(&[a0, a1, 5]);
+}
+
+#[test]
+fn unchecked_rotl_large_value_by_32() {
+    let source = "
+        use miden::core::math::u64
+        begin
+            exec.u64::rotl
+        end";
+
+    let a = Felt::ORDER_U64 + 1;
+    let (a1, a0) = split_u64(a);
+    let c = a.rotate_left(32);
+    let (c1, c0) = split_u64(c);
+
+    build_test!(source, &stack![32_u64, a0, a1, 5]).expect_stack(&[c0, c1, 5]);
 }
 
 #[test]

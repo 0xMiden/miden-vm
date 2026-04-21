@@ -1,8 +1,6 @@
 use miden::core::crypto::hashes::poseidon2
 use miden::core::collections::sorted_array
-use miden::core::math::u64
 use miden::core::mem
-use miden::core::sys
 use miden::core::word
 
 # CONSTANTS
@@ -635,8 +633,8 @@ proc remove_single_leaf
 
         # Confirm that hmerge([K, V_in_leaf]) = NV_old
         # (33 cycles)
-        movupw.2 dupw.3 
-        swapw hmerge 
+        movupw.2 dupw.3
+        swapw hmerge
         assert_eqw
         # => [R_new, V_in_leaf, ...]
 

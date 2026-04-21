@@ -1,11 +1,11 @@
-use std::{fs, path::PathBuf, sync::Arc, time::Instant};
+use std::{fs, path::PathBuf, time::Instant};
 
 use clap::Parser;
 use miden_assembly::{
-    Assembler, KernelLibrary,
+    Assembler,
     diagnostics::{IntoDiagnostic, Report, Result, WrapErr},
 };
-use miden_mast_package::{MastArtifact, Package};
+use miden_mast_package::Package;
 use miden_prover::serde::Deserializable;
 use miden_vm::{Kernel, ProgramInfo, internal::InputFile};
 
@@ -118,23 +118,7 @@ fn load_kernel(kernel_path: &PathBuf) -> Result<Kernel, Report> {
                     format!("Failed to deserialize kernel package `{}`", kernel_path.display())
                 })?;
 
-            match package.into_mast_artifact() {
-                MastArtifact::Library(lib) => {
-                    let library = Arc::try_unwrap(lib).unwrap_or_else(|arc| (*arc).clone());
-                    KernelLibrary::try_from(library).wrap_err_with(|| {
-                        format!(
-                            "The package `{}` is not a valid kernel package",
-                            kernel_path.display()
-                        )
-                    })?
-                },
-                MastArtifact::Executable(_) => {
-                    return Err(Report::msg(format!(
-                        "Kernel package `{}` contains a program, not a kernel library",
-                        kernel_path.display()
-                    )));
-                },
-            }
+            package.try_into_kernel_library()?
         },
         "masm" => {
             // Compile kernel from assembly source

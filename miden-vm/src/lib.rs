@@ -10,16 +10,17 @@ pub use miden_assembly::{
     diagnostics,
 };
 pub use miden_core::proof::{ExecutionProof, HashFunction};
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(target_family = "wasm"))]
 pub use miden_processor::execute_sync;
 pub use miden_processor::{
-    DefaultHost, ExecutionError, ExecutionOptions, Host, Kernel, Program, ProgramInfo, StackInputs,
-    ZERO, advice, crypto, execute, field, operation::Operation, serde, trace::ExecutionTrace,
-    utils,
+    BaseHost, DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput, FastProcessor,
+    FutureMaybeSend, Host, Kernel, Program, ProgramInfo, StackInputs, SyncHost, TraceBuildInputs,
+    TraceGenerationContext, ZERO, advice, crypto, execute, field, operation::Operation, serde,
+    trace, trace::ExecutionTrace, utils,
 };
-#[cfg(not(target_arch = "wasm32"))]
-pub use miden_prover::prove_sync;
-pub use miden_prover::{InputError, ProvingOptions, StackOutputs, Word, prove};
+pub use miden_prover::{InputError, ProvingOptions, StackOutputs, TraceProvingInputs, Word, prove};
+#[cfg(not(target_family = "wasm"))]
+pub use miden_prover::{prove_from_trace_sync, prove_sync};
 pub use miden_verifier::VerificationError;
 
 // (private) exports

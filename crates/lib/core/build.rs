@@ -28,14 +28,14 @@ pub struct MarkdownRenderer {}
 impl MarkdownRenderer {
     fn write_docs_header(mut writer: &fs::File, ns: &str) {
         let header =
-            format!("\n## {}\n| Procedure | Description |\n| ----------- | ------------- |\n", ns);
+            format!("\n## {ns}\n| Procedure | Description |\n| ----------- | ------------- |\n");
         writer.write_all(header.as_bytes()).expect("unable to write header to writer");
     }
 
     fn write_docs_procedure(mut writer: &fs::File, name: &str, docs: Option<&str>) {
         if let Some(docs) = docs {
             let escaped = docs.replace('|', "\\|").replace('\n', "<br />");
-            let line = format!("| {} | {} |\n", name, escaped);
+            let line = format!("| {name} | {escaped} |\n");
             writer.write_all(line.as_bytes()).expect("unable to write func to writer");
         }
     }
@@ -137,7 +137,7 @@ fn find_masm_modules(base_dir: &Path, current_dir: &Path) -> io::Result<Vec<(Str
                     .collect::<Vec<_>>()
                     .join("::");
 
-                let label = format!("miden::core::{}", module_path);
+                let label = format!("miden::core::{module_path}");
 
                 modules.push((label, path));
             }
@@ -220,22 +220,32 @@ fn main() -> Result<(), Report> {
     let asm_dir = Path::new(manifest_dir).join(ASM_DIR_PATH);
 
     let assembler = Assembler::default();
-    let namespace = "::miden::core".parse::<masm::PathBuf>().expect("invalid base namespace");
-    let core_lib = assembler.assemble_library_from_dir(&asm_dir, namespace)?;
+    let mut registry = miden_package_registry::InMemoryPackageRegistry::default();
+    let mut project_assembler =
+        assembler.for_project_at_path(asm_dir.join("miden-project.toml"), &mut registry)?;
+
+    let package =
+        project_assembler.assemble(miden_assembly::ProjectTargetSelector::Library, "release")?;
+
+    let build_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
+
+    // write the masp output
+    package.write_masp_file(build_dir.join(ASL_DIR_PATH)).into_diagnostic()?;
+
     // write the masl output
-    let build_dir = env::var("OUT_DIR").unwrap();
-    let build_dir = Path::new(&build_dir);
-    let output_file = build_dir
-        .join(ASL_DIR_PATH)
-        .join("core")
-        .with_extension(Library::LIBRARY_EXTENSION);
-    core_lib
-        .write_to_file(output_file)
+    package
+        .mast
+        .write_to_file(
+            build_dir
+                .join(ASL_DIR_PATH)
+                .join("core")
+                .with_extension(Library::LIBRARY_EXTENSION),
+        )
         .map_err(|e| io::Error::other(e.to_string()))
         .into_diagnostic()?;
 
     // Generate documentation
-    if std::env::var("MIDEN_BUILD_LIB_DOCS").is_ok() {
+    if env::var("MIDEN_BUILD_LIB_DOCS").is_ok() {
         build_core_lib_docs(&asm_dir, DOC_DIR_PATH).into_diagnostic()?;
     }
 

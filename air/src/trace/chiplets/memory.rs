@@ -6,7 +6,7 @@ use super::{Felt, ONE, Range, ZERO, create_range};
 // ================================================================================================
 
 /// Number of columns needed to record an execution trace of the memory chiplet.
-pub const TRACE_WIDTH: usize = 15;
+pub const TRACE_WIDTH: usize = 17;
 
 // --- OPERATION SELECTORS ------------------------------------------------------------------------
 
@@ -78,3 +78,11 @@ pub const D_INV_COL_IDX: usize = D1_COL_IDX + 1;
 /// Column to hold the flag indicating whether the current memory operation is in the same word and
 /// same context as the previous operation.
 pub const FLAG_SAME_CONTEXT_AND_WORD: usize = D_INV_COL_IDX + 1;
+
+/// Column for the lower 16 bits of the word index (word_addr / 4).
+/// Used for range-checking that memory addresses are valid 32-bit values.
+pub const WORD_ADDR_LO_COL_IDX: usize = FLAG_SAME_CONTEXT_AND_WORD + 1;
+
+/// Column for the upper 16 bits of the word index (word_addr / 4).
+/// Used for range-checking that memory addresses are valid 32-bit values.
+pub const WORD_ADDR_HI_COL_IDX: usize = WORD_ADDR_LO_COL_IDX + 1;

@@ -19,6 +19,8 @@ help:
 	@printf "  make test-prover                 # Test prover crate\n"
 	@printf "  make test-core-lib               # Test core-lib crate\n"
 	@printf "  make test-verifier               # Test verifier crate\n"
+	@printf "  make check-constraints          # Check core-lib constraint artifacts\n"
+	@printf "  make regenerate-constraints      # Regenerate core-lib constraint artifacts\n"
 	@printf "\nExamples:\n"
 	@printf "  make test-air test=\"some_test\" # Test specific function\n"
 	@printf "  make test-fast                   # Fast tests (no proptests/CLI)\n"
@@ -51,6 +53,7 @@ FEATURES_core            :=
 FEATURES_vm              := concurrent,executable,internal
 FEATURES_processor       := concurrent,testing,bus-debugger
 FEATURES_project         := resolver
+FEATURES_package-registry:= resolver
 FEATURES_prover          := concurrent
 FEATURES_core-lib        :=
 FEATURES_verifier        :=
@@ -218,6 +221,14 @@ exec-avx2: ## Builds an executable with AVX2 acceleration enabled
 .PHONY: exec-sve
 exec-sve: ## Builds an executable with SVE acceleration enabled
 	RUSTFLAGS="-C target-feature=+sve" cargo build --profile optimized $(FEATURES_CONCURRENT_EXEC)
+
+.PHONY: regenerate-constraints
+regenerate-constraints: ## Regenerate core-lib constraint artifacts
+	cargo run --package miden-core-lib --features constraints-tools --bin regenerate-constraints -- --write
+
+.PHONY: check-constraints
+check-constraints: ## Check core-lib constraint artifacts for drift
+	cargo run --package miden-core-lib --features constraints-tools --bin regenerate-constraints -- --check
 
 .PHONY: exec-info
 exec-info: ## Builds an executable with log tree enabled

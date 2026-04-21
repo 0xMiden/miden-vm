@@ -56,7 +56,7 @@ pub(crate) fn read_memory_region(
     process: &ProcessorState,
     start_ptr: u64,
     len: u64,
-) -> Option<alloc::vec::Vec<Felt>> {
+) -> Option<Vec<Felt>> {
     // Validate inputs fit in u32
     let start_addr: u32 = start_ptr.try_into().ok()?;
     let len_u32: u32 = len.try_into().ok()?;

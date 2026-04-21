@@ -64,3 +64,5 @@ $$
 
 The effect on the rest of the stack is:
 * **Right shift** starting from position $0$.
+
+**WARNING:** This is a best effort instruction, since given the same program, changes in NOOP padding (which do not change the program commitment) will change the number of rows in the trace (and hence the value of `clk` at various points in the program). Hence, the value returned by `CLK` should be treated as non-deterministic and attacker-controlled (up to the amount of padding allowed by the padding-related constraints).

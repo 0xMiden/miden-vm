@@ -45,7 +45,7 @@ pub struct WorkspaceFile {
         serde(
             default,
             rename = "profile",
-            deserialize_with = "profile::deserialize_profiles_table",
+            with = "profile::serialization",
             skip_serializing_if = "Vec::is_empty"
         )
     )]
@@ -135,7 +135,7 @@ impl Validate for WorkspaceFile {
                     "cannot use the 'workspace' option in a workspace-level dependency spec"
                 };
                 return Err(Report::from(ProjectFileError::InvalidWorkspaceDependency {
-                    source_file: source.clone(),
+                    source_file: source,
                     label: Label::new(dependency.span(), label),
                 }));
             }

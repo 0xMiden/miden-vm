@@ -22,7 +22,8 @@ use miden_core::{
     serde::{Deserializable, Serializable},
 };
 use miden_mast_package::{
-    MastArtifact, MastForest, Package, PackageExport, PackageKind, PackageManifest,
+    ConstantExport, MastForest, Package, PackageExport, PackageId, PackageManifest,
+    ProcedureExport, TargetType, TypeExport,
 };
 use proptest::{
     prelude::*,
@@ -30,7 +31,7 @@ use proptest::{
 };
 
 use crate::{
-    Assembler, Library, ModuleParser, PathBuf,
+    Assembler, Library, ModuleParser, PathBuf, ProjectSourceInputs, ProjectTargetSelector,
     assembler::MAX_CONTROL_FLOW_NESTING,
     ast::{Module, ModuleKind, ProcedureName, QualifiedProcedureName},
     diagnostics::{IntoDiagnostic, Report},
@@ -295,7 +296,7 @@ fn library_exports() -> Result<(), Report> {
     // make sure the library exports all exported procedures
     let expected_exports: BTreeSet<Arc<Path>> =
         [foo2.into(), foo3.into(), bar1.into(), bar2.into(), bar3.into(), bar5.into()].into();
-    let actual_exports: BTreeSet<_> = lib2.exports().map(|export| export.path()).collect();
+    let actual_exports: BTreeSet<_> = lib2.exports().map(LibraryExport::path).collect();
     assert_eq!(expected_exports, actual_exports);
 
     // make sure foo2, bar2, and bar3 map to the same MastNode
@@ -403,7 +404,7 @@ fn library_serialization() -> Result<(), Report> {
 
     let bytes = bundle.to_bytes();
     let deserialized = Library::read_from_bytes(&bytes).unwrap();
-    assert_eq!(bundle, deserialized);
+    assert_eq!(bundle.as_ref(), &deserialized);
 
     Ok(())
 }
@@ -539,52 +540,40 @@ fn simple_main_call() -> TestResult {
     Ok(())
 }
 
-// TODO: Fix test after we implement the new `Assembler::add_library()`
-#[ignore]
 #[test]
 fn call_without_path() -> TestResult {
-    let context = TestContext::default();
+    let mut context = TestContext::default();
 
-    // compile first module
-    context.assemble_module(
-        "account_code1",
-        source_file!(
-            &context,
-            "\
-    pub proc account_method_1
-        push.2.1 add
-    end
+    let project =
+        miden_project::Package::new("call_without_path", miden_project::Target::executable("main"));
 
-    pub proc account_method_2
-        push.3.1 sub
-    end
-    "
-        ),
-    )?;
+    let account_code1_src = source_file!(
+        &context,
+        "\
+pub proc account_method_1
+    push.2.1 add
+end
 
-    //---------------------------------------------------------------------------------------------
+pub proc account_method_2
+    push.3.1 sub
+end
+"
+    );
+    let account_code2_src = source_file!(
+        &context,
+        "\
+pub proc account_method_1
+    push.2.2 add
+end
 
-    // compile second module
-    context.assemble_module(
-        "account_code2",
-        source_file!(
-            &context,
-            "\
-    pub proc account_method_1
-        push.2.2 add
-    end
-
-    pub proc account_method_2
-        push.4.1 sub
-    end
-    "
-        ),
-    )?;
-
-    //---------------------------------------------------------------------------------------------
+pub proc account_method_2
+    push.4.1 sub
+end
+"
+    );
 
     // compile program in which functions from different modules but with equal names are called
-    context.assemble(source_file!(
+    let main_src = source_file!(
         &context,
         "
         begin
@@ -601,7 +590,37 @@ fn call_without_path() -> TestResult {
             call.0x1976bf72d457bd567036d3648b7e3f3c22eca4096936931e59796ec05c0ecb10
         end
         "
-    ))?;
+    );
+
+    let account_code1 = Module::parse(
+        "account_code1",
+        ModuleKind::Library,
+        account_code1_src,
+        context.source_manager(),
+    )?;
+    let account_code2 = Module::parse(
+        "account_code2",
+        ModuleKind::Library,
+        account_code2_src,
+        context.source_manager(),
+    )?;
+    let main = Module::parse(
+        Path::exec_path(),
+        ModuleKind::Executable,
+        main_src,
+        context.source_manager(),
+    )?;
+
+    let mut project_assembler = context.project_assembler(project.into())?;
+    project_assembler.assemble_with_sources(
+        ProjectTargetSelector::Executable("main"),
+        "dev",
+        ProjectSourceInputs {
+            root: main,
+            support: vec![account_code1, account_code2],
+        },
+    )?;
+
     Ok(())
 }
 
@@ -807,7 +826,7 @@ end
 #[test]
 fn enum_felt_discriminant_too_large_is_rejected() -> TestResult {
     let context = TestContext::default();
-    let modulus = miden_core::Felt::ORDER_U64;
+    let modulus = Felt::ORDER_U64;
     let source = source_file!(
         &context,
         format!(
@@ -832,7 +851,7 @@ end
 #[test]
 fn constant_expression_overflow_is_rejected() -> TestResult {
     let context = TestContext::default();
-    let modulus_minus_one = miden_core::Felt::ORDER_U64 - 1;
+    let modulus_minus_one = Felt::ORDER_U64 - 1;
     let source = source_file!(
         &context,
         format!(
@@ -4219,85 +4238,85 @@ fn test_assert_diagnostic_lines() {
 // ================================================================================================
 
 prop_compose! {
-    fn any_package()(name in ".*", mast in any::<ArbitraryMastArtifact>(), manifest in any::<PackageManifest>()) -> Package {
-        use miden_mast_package::{ConstantExport, TypeExport, ProcedureExport};
-
-        let mast = mast.0;
+    fn any_package()(name in ".*", artifact in any::<ArbitraryMastArtifact>(), manifest in any::<PackageManifest>()) -> Package {
+        let ArbitraryMastArtifact { ty, lib } = artifact;
 
         // Ensure the manifest reflects exports of the actual MAST artifact
         let mut exports = Vec::default();
-        match &mast {
-            MastArtifact::Library(lib) => {
-                for export in lib.exports() {
-                    match export {
-                        LibraryExport::Procedure(export) => {
-                            let digest = lib.mast_forest()[export.node].digest();
-                            exports.push(PackageExport::Procedure(ProcedureExport {
-                                path: export.path.clone(),
-                                digest,
-                                signature: export.signature.clone(),
-                                attributes: export.attributes.clone(),
-                            }));
-                        }
-                        LibraryExport::Constant(export) => {
-                            exports.push(PackageExport::Constant(ConstantExport {
-                                path: export.path.clone(),
-                                value: export.value.clone(),
-                            }));
-                        }
-                        LibraryExport::Type(export) => {
-                                                    exports.push(PackageExport::Type(TypeExport {
-                                                        path: export.path.clone(),
-                                                        ty: export.ty.clone(),
-                                                    }))
-                                                }
-                    }
+        for export in lib.exports() {
+            match export {
+                LibraryExport::Procedure(export) => {
+                    let digest = lib.mast_forest()[export.node].digest();
+                    exports.push(PackageExport::Procedure(ProcedureExport {
+                        path: export.path.clone(),digest,
+                        signature: export.signature.clone(),
+                        attributes: export.attributes.clone(),
+                    }));
                 }
-            }
-            MastArtifact::Executable(prog) => {
-                let path = Path::exec_path().join(ProcedureName::MAIN_PROC_NAME).into();
-                let digest = prog.mast_forest()[prog.entrypoint()].digest();
-                exports.push(PackageExport::Procedure(ProcedureExport {
-                    path,
-                    digest,
-                    signature: None,
-                    attributes: Default::default(),
-                }));
+                LibraryExport::Constant(export) => {
+                    exports.push(PackageExport::Constant(ConstantExport {
+                        path: export.path.clone(),
+                        value: export.value.clone(),
+                    }));
+                }
+                LibraryExport::Type(export) => {
+                    exports.push(PackageExport::Type(TypeExport {
+                        path: export.path.clone(),
+                        ty: export.ty.clone(),
+                    }));
+                }
             }
         }
 
-        let manifest = PackageManifest::new(exports).with_dependencies(manifest.dependencies().cloned());
+        let manifest = PackageManifest::new(exports)
+            .and_then(|package_manifest| {
+                package_manifest.with_dependencies(manifest.dependencies().cloned())
+            })
+            .expect("test package manifest should be valid");
 
-        let kind = match &mast {
-            MastArtifact::Executable(_) => PackageKind::Executable,
-            MastArtifact::Library(_) => PackageKind::Library,
-        };
-
-        Package { name, version: None, description: None, kind, mast, manifest, sections: Default::default() }
+        let name = PackageId::from(name);
+        let version = miden_assembly_syntax::Version::new(0, 0, 0);
+        Package { name, version, description: None, kind: ty, mast: lib, manifest, sections: Default::default() }
     }
 }
 
 #[derive(Debug, Clone)]
-struct ArbitraryMastArtifact(MastArtifact);
+struct ArbitraryMastArtifact {
+    ty: TargetType,
+    lib: Arc<Library>,
+}
+
+impl ArbitraryMastArtifact {
+    fn library(lib: Arc<Library>) -> Self {
+        Self { ty: TargetType::Library, lib }
+    }
+
+    fn executable(lib: Arc<Library>) -> Self {
+        Self { ty: TargetType::Executable, lib }
+    }
+}
 
 impl Arbitrary for ArbitraryMastArtifact {
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        prop_oneof![Just(Self(LIB_EXAMPLE.clone().into())), Just(Self(PRG_EXAMPLE.clone().into()))]
-            .boxed()
+        prop_oneof![
+            Just(Self::library(LIB_EXAMPLE.clone())),
+            Just(Self::executable(PRG_EXAMPLE.clone()))
+        ]
+        .boxed()
     }
 
     type Strategy = BoxedStrategy<Self>;
 }
 
 static LIB_EXAMPLE: LazyLock<Arc<Library>> = LazyLock::new(build_library_example);
-static PRG_EXAMPLE: LazyLock<Arc<Program>> = LazyLock::new(build_program_example);
+static PRG_EXAMPLE: LazyLock<Arc<Library>> = LazyLock::new(build_program_example);
 
 fn build_library_example() -> Arc<Library> {
     let context = TestContext::new();
     // declare foo module
-    let foo = r#"
+    let foo_src = r#"
         pub proc foo(a: felt, b: felt) -> felt
             add
         end
@@ -4305,10 +4324,10 @@ fn build_library_example() -> Arc<Library> {
             mul
         end
     "#;
-    let foo = parse_module!(&context, "test::foo", foo);
+    let foo_module = parse_module!(&context, "test::foo", foo_src);
 
     // declare bar module
-    let bar = r#"
+    let bar_src = r#"
         pub proc bar
             mtree_get
         end
@@ -4316,17 +4335,17 @@ fn build_library_example() -> Arc<Library> {
             mul
         end
     "#;
-    let bar = parse_module!(&context, "test::bar", bar);
-    let modules = [foo, bar];
+    let bar_module = parse_module!(&context, "test::bar", bar_src);
+    let modules = [foo_module, bar_module];
 
     // serialize/deserialize the bundle with locations
     Assembler::new(context.source_manager())
         .assemble_library(modules.iter().cloned())
         .expect("failed to assemble library")
-        .into()
 }
 
-fn build_program_example() -> Arc<Program> {
+fn build_program_example() -> Arc<Library> {
+    use crate::{Parse, ParseOptions};
     let source = "
     begin
         push.1.2
@@ -4335,7 +4354,15 @@ fn build_program_example() -> Arc<Program> {
     end
     ";
     let assembler = Assembler::default();
-    assembler.assemble_program(source).unwrap().into()
+
+    let options = ParseOptions {
+        kind: ModuleKind::Executable,
+        warnings_as_errors: assembler.warnings_as_errors(),
+        path: Some(Path::exec_path().into()),
+    };
+
+    let program = source.parse_with_options(assembler.source_manager(), options).unwrap();
+    assembler.assemble_executable_modules(program, []).unwrap().into_artifact()
 }
 
 #[test]
@@ -4897,9 +4924,9 @@ fn issue_1644_single_forest_merge_identity() -> TestResult {
         new_merged_forest.nodes().iter().zip(merged_forest.nodes().iter()).enumerate()
     {
         if orig_node.digest() != merged_node.digest() {
-            eprintln!("Node {} digest violation:", i);
-            eprintln!("   Original: {:?}", orig_node);
-            eprintln!("   Merged:   {:?}", merged_node);
+            eprintln!("Node {i} digest violation:");
+            eprintln!("   Original: {orig_node:?}");
+            eprintln!("   Merged:   {merged_node:?}");
             eprintln!("   Original digest: {:?}", orig_node.digest());
             eprintln!("   Merged digest:   {:?}", merged_node.digest());
 
@@ -4915,7 +4942,7 @@ fn issue_1644_single_forest_merge_identity() -> TestResult {
         .enumerate()
     {
         if new_merged_forest[*orig_root].digest() != merged_forest[*merged_root].digest() {
-            eprintln!("Root {} digest violation:", i);
+            eprintln!("Root {i} digest violation:");
             eprintln!("   Original: {:?}", original_forest[*orig_root].digest());
             eprintln!("   Merged:   {:?}", merged_forest[*merged_root].digest());
             should_panic = true;
@@ -4945,7 +4972,7 @@ fn overlong_total_path_is_rejected_without_panic() {
     // but the total byte length exceeds u16::MAX (the binary serialization length prefix).
     let component = "a".repeat(255);
     let num_components: usize = 300;
-    let mut path_str = alloc::string::String::with_capacity(num_components * (component.len() + 2));
+    let mut path_str = String::with_capacity(num_components * (component.len() + 2));
     for i in 0..num_components {
         if i > 0 {
             path_str.push_str("::");
@@ -5642,6 +5669,45 @@ end
         .assemble_program(program_src)
         .expect_err("expected syscall without kernel to be rejected");
     assert_diagnostic!(err, "invalid syscall");
+}
+
+#[test]
+fn regression_kernel_exports_are_syscall_only_for_all_non_syscall_entrypoints() {
+    let context = TestContext::default();
+    let source_manager = context.source_manager();
+
+    let kernel_src = r#"
+pub proc k1
+    push.1
+end
+"#;
+
+    let kernel = Assembler::new(source_manager.clone())
+        .assemble_kernel(kernel_src)
+        .expect("kernel assembly must succeed");
+
+    let cases = vec![
+        (
+            "exec",
+            "proc user\n    exec.::$kernel::k1\nend\n\nbegin\n    call.user\nend\n".to_string(),
+        ),
+        (
+            "call",
+            "proc user\n    call.::$kernel::k1\nend\n\nbegin\n    call.user\nend\n".to_string(),
+        ),
+        (
+            "procref",
+            "proc user\n    procref.::$kernel::k1\n    dropw\nend\n\nbegin\n    call.user\nend\n"
+                .to_string(),
+        ),
+    ];
+
+    for (kind, program_src) in cases {
+        let err = Assembler::with_kernel(source_manager.clone(), kernel.clone())
+            .assemble_program(program_src)
+            .expect_err(&format!("kernel exports should be syscall-only, but {kind} succeeded"));
+        assert_diagnostic!(err, "syscall");
+    }
 }
 
 #[test]
