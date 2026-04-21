@@ -4993,7 +4993,6 @@ fn regression_empty_kernel_library_is_rejected() {
 /// Reproduces issue #3035: a compiler-generated wallet MAST grows when debug info is cleared and
 /// the forest is compacted via self-merge.
 #[test]
-#[ignore = "reproduces issue #3035; run explicitly when debugging MastForest::compact"]
 fn issue_3035_compact_after_clear_debug_info_does_not_grow_mast() -> TestResult {
     // The compiler-emitted MASM source is checked in next to this package for provenance. The
     // package is used here because it is the artifact referenced by the issue repro steps.
@@ -5005,13 +5004,28 @@ fn issue_3035_compact_after_clear_debug_info_does_not_grow_mast() -> TestResult 
     let mut forest = package.mast.mast_forest().as_ref().clone();
     forest.clear_debug_info();
     let stripped_size = forest.to_bytes().len();
+    let stripped_without_debug_info_size = {
+        let mut bytes = Vec::new();
+        forest.write_stripped(&mut bytes);
+        bytes.len()
+    };
+    let stripped_nodes = forest.nodes().len();
     let (compacted, _) = forest.compact();
     let compacted_size = compacted.to_bytes().len();
+    let compacted_without_debug_info_size = {
+        let mut bytes = Vec::new();
+        compacted.write_stripped(&mut bytes);
+        bytes.len()
+    };
+    let compacted_nodes = compacted.nodes().len();
 
     assert!(
         compacted_size <= stripped_size,
         "MastForest::compact increased serialized size after clear_debug_info(): \
-         stripped={stripped_size}, compacted={compacted_size}"
+         stripped={stripped_size}, compacted={compacted_size}, \
+         stripped_without_debug_info={stripped_without_debug_info_size}, \
+         compacted_without_debug_info={compacted_without_debug_info_size}, \
+         stripped_nodes={stripped_nodes}, compacted_nodes={compacted_nodes}"
     );
 
     Ok(())
