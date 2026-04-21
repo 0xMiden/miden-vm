@@ -3,10 +3,11 @@ use alloc::vec::Vec;
 use miden_air::trace::{
     CHIPLETS_RANGE, CHIPLETS_WIDTH,
     chiplets::{
-        NUM_BITWISE_SELECTORS, NUM_KERNEL_ROM_SELECTORS, NUM_MEMORY_SELECTORS,
+        KERNEL_ROM_TRACE_WIDTH, NUM_BITWISE_SELECTORS, NUM_KERNEL_ROM_SELECTORS,
+        NUM_MEMORY_SELECTORS,
         bitwise::{self, BITWISE_XOR, OP_CYCLE_LEN},
         hasher::{CONTROLLER_ROWS_PER_PERMUTATION, HASH_CYCLE_LEN, LINEAR_HASH, S_PERM_COL_IDX},
-        kernel_rom, memory,
+        memory,
     },
 };
 use miden_core::{
@@ -375,8 +376,8 @@ fn validate_memory_trace(trace: &ChipletsTrace, start: usize, end: usize) {
 /// - Columns beyond kernel ROM trace width + selectors are zero
 fn validate_kernel_rom_trace(trace: &ChipletsTrace, start: usize, end: usize) {
     // Kernel ROM uses NUM_KERNEL_ROM_SELECTORS (5) chiplet selector columns +
-    // kernel_rom::TRACE_WIDTH (5) internal columns = 10 columns total.
-    let kernel_rom_used_cols = NUM_KERNEL_ROM_SELECTORS + kernel_rom::TRACE_WIDTH;
+    // KERNEL_ROM_TRACE_WIDTH (5) internal columns = 10 columns total.
+    let kernel_rom_used_cols = NUM_KERNEL_ROM_SELECTORS + KERNEL_ROM_TRACE_WIDTH;
 
     for row in start..end {
         // Chiplet selectors: s_ctrl=0, s1=1, s2=1, s3=1, s4=0

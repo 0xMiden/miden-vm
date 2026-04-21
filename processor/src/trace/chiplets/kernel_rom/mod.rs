@@ -1,6 +1,6 @@
 use alloc::collections::BTreeMap;
 
-use miden_air::trace::{RowIndex, chiplets::kernel_rom::TRACE_WIDTH};
+use miden_air::trace::{RowIndex, chiplets::KERNEL_ROM_TRACE_WIDTH};
 use miden_core::field::PrimeCharacteristicRing;
 
 use super::{Felt, Kernel, TraceFragment, Word as Digest};
@@ -89,7 +89,7 @@ impl KernelRom {
     /// Emits one row per declared kernel procedure: column 0 is the CALL-label multiplicity
     /// (= number of SYSCALLs to this proc), columns 1..5 are the procedure digest.
     pub fn fill_trace(self, trace: &mut TraceFragment) {
-        debug_assert_eq!(TRACE_WIDTH, trace.width(), "inconsistent trace fragment width");
+        debug_assert_eq!(KERNEL_ROM_TRACE_WIDTH, trace.width(), "inconsistent trace fragment width");
         let mut row = RowIndex::from(0);
         for access_info in self.access_map.values() {
             let multiplicity = Felt::from_u64(access_info.num_accesses as u64);
