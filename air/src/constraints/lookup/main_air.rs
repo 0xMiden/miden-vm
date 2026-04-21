@@ -25,6 +25,7 @@ use miden_crypto::stark::air::WindowAccess;
 use super::{
     BusId,
     buses::{
+        LookupOpFlags,
         block_hash_and_op_group::{self as block_hash_and_op_group, emit_block_hash_and_op_group},
         block_stack_and_range_logcap::{self, emit_block_stack_and_range_logcap},
         chiplet_requests::{self, emit_chiplet_requests},
@@ -33,7 +34,6 @@ use super::{
 };
 use crate::{
     Felt, MainCols,
-    constraints::op_flags::OpFlags,
     lookup::{LookupAir, LookupBuilder},
 };
 
@@ -43,9 +43,9 @@ use crate::{
 /// Extension trait the main-trace [`LookupAir`] requires from its [`LookupBuilder`].
 ///
 /// Carries a single hook, [`build_op_flags`](Self::build_op_flags), for constructing the
-/// shared [`OpFlags`] instance that the four main-trace bus emitters consume. The default
-/// body uses the polynomial path (today's behavior for both the constraint-path and the
-/// prover-path adapters). A future prover-side optimization will override this method on
+/// shared [`LookupOpFlags`] instance that the four main-trace bus emitters consume. The
+/// default body uses the polynomial path (today's behavior for both the constraint-path and
+/// the prover-path adapters). A future prover-side optimization will override this method on
 /// the prover adapter to skip the dead polynomial products that come from decoder bits
 /// already being concrete 0/1 values; no other code moves.
 ///
@@ -54,17 +54,17 @@ use crate::{
 /// Each adapter implements this trait explicitly with an empty `impl` block that picks up
 /// the default.
 pub(crate) trait MainLookupBuilder: LookupBuilder<F = Felt> {
-    /// Build the shared [`OpFlags`] instance for one `eval` call.
+    /// Build the shared [`LookupOpFlags`] instance for one `eval` call.
     ///
-    /// Default body calls [`OpFlags::new`], matching the pre-split behavior of
-    /// `MainTraceContext::new`. Adapters override this when a cheaper construction path is
-    /// available (e.g. the prover path, where decoder bits are concrete 0/1).
+    /// Default body calls [`LookupOpFlags::from_main_cols`], the polynomial path. Adapters
+    /// override this when a cheaper construction path is available (e.g. the prover path,
+    /// where decoder bits are concrete 0/1).
     fn build_op_flags(
         &self,
         local: &MainCols<Self::Var>,
         next: &MainCols<Self::Var>,
-    ) -> OpFlags<Self::Expr> {
-        OpFlags::new(&local.decoder, &local.stack, &next.decoder)
+    ) -> LookupOpFlags<Self::Expr> {
+        LookupOpFlags::from_main_cols(&local.decoder, &local.stack, &next.decoder)
     }
 }
 
@@ -73,9 +73,10 @@ pub(crate) trait MainLookupBuilder: LookupBuilder<F = Felt> {
 
 /// Shared context for the four main-trace bus emitters.
 ///
-/// Holds the two-row window plus a single [`OpFlags`] instance built once per `eval`
+/// Holds the two-row window plus a single [`LookupOpFlags`] instance built once per `eval`
 /// through [`MainLookupBuilder::build_op_flags`]. Every emitter reads `ctx.local`,
-/// `ctx.next`, and `ctx.op_flags.f_*` directly — field access, no method indirection.
+/// `ctx.next`, and `ctx.op_flags.<accessor>()` directly — no method indirection beyond the
+/// single clone each accessor performs.
 pub(crate) struct MainBusContext<'a, LB>
 where
     LB: LookupBuilder<F = Felt>,
@@ -86,7 +87,7 @@ where
     pub next: &'a MainCols<LB::Var>,
     /// Operation flags computed from `(local.decoder, local.stack, next.decoder)` via the
     /// builder-provided hook.
-    pub op_flags: OpFlags<LB::Expr>,
+    pub op_flags: LookupOpFlags<LB::Expr>,
 }
 
 impl<'a, LB> MainBusContext<'a, LB>
@@ -95,7 +96,7 @@ where
 {
     /// Build the shared main-trace context for one `eval` call.
     ///
-    /// Delegates the `OpFlags` construction to the builder's
+    /// Delegates the `LookupOpFlags` construction to the builder's
     /// [`MainLookupBuilder::build_op_flags`] hook so the constraint-path and prover-path
     /// adapters can diverge on construction cost without the emitters noticing.
     pub fn new(builder: &LB, local: &'a MainCols<LB::Var>, next: &'a MainCols<LB::Var>) -> Self {

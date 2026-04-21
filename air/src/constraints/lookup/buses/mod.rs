@@ -48,8 +48,11 @@ pub(in crate::constraints::lookup) mod block_stack_and_range_logcap;
 pub(in crate::constraints::lookup) mod chiplet_requests;
 pub(in crate::constraints::lookup) mod chiplet_responses;
 pub(in crate::constraints::lookup) mod hash_kernel;
+pub(in crate::constraints::lookup) mod lookup_op_flags;
 pub(in crate::constraints::lookup) mod stack_overflow;
 pub(in crate::constraints::lookup) mod wiring;
+
+pub(in crate::constraints::lookup) use lookup_op_flags::LookupOpFlags;
 
 // CHIPLET ACTIVE FLAGS
 // ================================================================================================
