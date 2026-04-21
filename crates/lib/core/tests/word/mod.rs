@@ -1,6 +1,6 @@
 use core::cmp::Ordering;
 
-use miden_core::{Felt, LexicographicWord, Word};
+use miden_core::{Felt, Word};
 use miden_utils_testing::rand;
 use num::Integer;
 use rstest::rstest;
@@ -28,7 +28,7 @@ fn test_word_comparison(#[case] proc_name: &str, #[case] valid_ords: &[Ordering]
         let lhs = rand::seeded_word(&mut seed);
         let rhs = if i.is_even() { rand::seeded_word(&mut seed) } else { lhs };
 
-        let expected_cmp = LexicographicWord::cmp(&lhs.into(), &rhs.into());
+        let expected_cmp = lhs.cmp(&rhs);
 
         let mut operand_stack: Vec<u64> = Default::default();
         prepend_word(&mut operand_stack, lhs);

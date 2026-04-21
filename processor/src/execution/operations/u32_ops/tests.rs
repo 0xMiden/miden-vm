@@ -3,7 +3,7 @@ use alloc::{sync::Arc, vec::Vec};
 use miden_assembly::{Assembler, DefaultSourceManager};
 use miden_core::{
     Felt, ZERO,
-    mast::{MastForest, MastNodeId},
+    mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor},
     program::{MIN_STACK_DEPTH, StackInputs},
 };
 use proptest::prelude::*;
@@ -523,10 +523,7 @@ fn run_verify_clz_gadget(n: u32, clz: u32) -> Result<FastProcessor, ExecutionErr
     let mut tracer = NoopTracer;
     let mut host = DefaultHost::default();
 
-    let forest = MastForest::new();
-    let node_id = MastNodeId::new_unchecked(0);
-
-    let ops: &[Operation] = &[
+    let ops = vec![
         // Group 1 from `verify_clz`
         Push(Felt::from_u8(32)),
         Dup1,
@@ -579,6 +576,11 @@ fn run_verify_clz_gadget(n: u32, clz: u32) -> Result<FastProcessor, ExecutionErr
         Or,
         Assert(ZERO),
     ];
+
+    let mut forest = MastForest::new();
+    let node_id = BasicBlockNodeBuilder::new(ops.clone(), Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
 
     for (op_idx, op) in ops.iter().enumerate() {
         let _ = execute_op(&mut processor, op, op_idx, &forest, node_id, &mut host, &mut tracer)?;

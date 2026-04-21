@@ -20,7 +20,7 @@ pub use miden_assembly_syntax::{
     semver,
     semver::{Version as SemVer, VersionReq},
 };
-pub use miden_core::{LexicographicWord, Word};
+pub use miden_core::Word;
 use miden_mast_package::Package as MastPackage;
 pub use miden_mast_package::PackageId;
 #[cfg(feature = "serde")]
@@ -82,7 +82,7 @@ impl PackageRecord {
 
     /// The digest of the MAST forest contained in this package
     pub fn digest(&self) -> Option<&Word> {
-        self.version.digest.as_ref().map(LexicographicWord::inner)
+        self.version.digest.as_ref()
     }
 
     /// Returns the package description, if known.
@@ -147,12 +147,11 @@ pub trait PackageRegistry {
 
     /// Return the metadata for `package` with `digest`, if present.
     fn get_by_digest(&self, package: &PackageId, digest: &Word) -> Option<&PackageRecord> {
-        let digest = LexicographicWord::new(*digest);
         self.available_versions(package).and_then(|versions| {
             versions
                 .values()
                 .rev()
-                .find(|record| record.version().digest.is_some_and(|d| d == digest))
+                .find(|record| record.version().digest.as_ref() == Some(digest))
         })
     }
 
