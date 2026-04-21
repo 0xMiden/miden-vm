@@ -14,7 +14,7 @@
 //!
 //! The test does **not** assert algebraic correctness of individual aux-column values
 //! or terminal closure — those checks need the follow-up constraint-path round-trip
-//! oracle. Column terminals are printed to stderr for manual inspection.
+//! oracle.
 
 use alloc::vec::Vec;
 
@@ -90,13 +90,6 @@ fn build_lookup_fractions_on_tiny_span() {
         assert_eq!(col_aux.len(), num_rows + 1);
     }
     assert_eq!(aux[0][0], QuadFelt::ZERO);
-
-    // --- Informational: per-column terminals. A follow-up commit hardens these into
-    //     concrete assertions once we know the expected boundary value for each column
-    //     (some close to zero, log_precompile transcript has a non-zero boundary). ---
-    for (col, col_aux) in aux.iter().enumerate() {
-        std::eprintln!("lookup column {col} terminal = {:?}", col_aux[num_rows]);
-    }
 }
 
 /// Cross-check: the fused `accumulate` prover path must agree with the constraint-path
@@ -192,54 +185,3 @@ fn build_lookup_fractions_matches_constraint_path_oracle() {
     }
 }
 
-/// Diagnostic: compute per-column terminals for the same Fibonacci MASM program that
-/// `test_blake3_256_prove_verify` uses, built via the `Assembler` so HALT padding rows
-/// are present. Used to isolate which columns close in-trace and which carry open
-/// boundary contributions that need to appear in `reduced_aux_values`.
-#[test]
-fn diagnostic_assembler_path_terminals() {
-    use miden_assembly::Assembler;
-
-    use super::build_trace_from_program;
-
-    let source = "
-        begin
-            repeat.149
-                swap dup.1 add
-            end
-        end
-    ";
-    let program = Assembler::default().assemble_program(source).unwrap();
-    let trace = build_trace_from_program(&program, &[0, 1]);
-
-    let main_trace = trace.main_trace().to_row_major();
-    let public_vals = trace.to_public_values();
-    let periodic = LiftedAir::<Felt, QuadFelt>::periodic_columns(&ProcessorAir);
-
-    let raw = rand_array::<Felt, 4>();
-    let alpha = QuadFelt::new([raw[0], raw[1]]);
-    let beta = QuadFelt::new([raw[2], raw[3]]);
-    let air = MidenLookupAir;
-    let challenges =
-        Challenges::<QuadFelt>::new(alpha, beta, MIDEN_MAX_MESSAGE_WIDTH, BusId::COUNT);
-    let fractions = build_lookup_fractions(&air, &main_trace, &periodic, &public_vals, &challenges);
-    let aux = accumulate_slow(&fractions);
-    let num_rows = trace.main_trace().num_rows();
-
-    std::eprintln!("assembler-path trace: {num_rows} rows");
-    let labels = [
-        "M1 block_stack+range_table (RS)",
-        "M_2+5 block_hash+op_group (frac)",
-        "M3 chiplet_requests (frac)",
-        "M4 range_logcap (frac)",
-        "C1 chiplet_responses (RS)",
-        "C2 hash_kernel+sibling (frac)",
-        "C3 ace_wiring (frac)",
-        "padding",
-    ];
-    for (col, col_aux) in aux.iter().enumerate() {
-        let terminal = col_aux[num_rows];
-        let label = if terminal == QuadFelt::ZERO { " (CLOSED)" } else { "" };
-        std::eprintln!("col {col} ({}) terminal = {terminal:?}{label}", labels[col]);
-    }
-}
