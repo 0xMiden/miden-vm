@@ -1,6 +1,7 @@
 use std::{
     collections::BTreeMap,
     env, fs,
+    io::{Read, Write},
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -24,8 +25,12 @@ pub enum LocalRegistryError {
     MissingEnv { var: &'static str },
     #[error("failed to read registry index: {0}")]
     IndexRead(#[source] std::io::Error),
+    #[error("failed to lock registry index for reading: {0}")]
+    IndexReadLock(#[source] fs::TryLockError),
     #[error("failed to write registry index: {0}")]
     IndexWrite(#[source] std::io::Error),
+    #[error("failed to lock registry index for writing: {0}")]
+    IndexWriteLock(#[source] fs::TryLockError),
     #[error("failed to parse registry index: {0}")]
     IndexParse(#[from] toml::de::Error),
     #[error("failed to serialize registry index: {0}")]
@@ -147,8 +152,22 @@ impl LocalPackageRegistry {
         fs::create_dir_all(&artifact_dir).map_err(LocalRegistryError::IndexWrite)?;
 
         let index = if index_path.exists() {
-            let contents =
-                fs::read_to_string(&index_path).map_err(LocalRegistryError::IndexRead)?;
+            let mut contents = String::with_capacity(4 * 1024);
+            #[allow(clippy::verbose_file_reads)]
+            {
+                let mut file =
+                    fs::File::open(&index_path).map_err(LocalRegistryError::IndexRead)?;
+                // Acquire a non-exclusive lock on the file for reading, but return an error if
+                // there is an outstanding exclusive lock on the file already.
+                //
+                // This will fail if a handle to the index file has an exclusive lock on it for
+                // writing, see `save` for details.
+                //
+                // Multiple readers can hold this type of lock simultaneously, but a shared lock
+                // cannot be acquired in the presence of an exclusive lock, and vice versa.
+                file.try_lock_shared().map_err(LocalRegistryError::IndexReadLock)?;
+                file.read_to_string(&mut contents).map_err(LocalRegistryError::IndexRead)?;
+            }
             if contents.trim().is_empty() {
                 InMemoryPackageRegistry::default()
             } else {
@@ -271,7 +290,21 @@ impl LocalPackageRegistry {
     fn save(&self) -> Result<(), LocalRegistryError> {
         let persisted = PersistedIndex { packages: self.index.packages().clone() };
         let contents = toml::to_string_pretty(&persisted)?;
-        fs::write(&self.index_path, contents).map_err(LocalRegistryError::IndexWrite)
+        let mut file = fs::File::options()
+            .write(true)
+            .truncate(false)
+            .create(true)
+            .open(&self.index_path)
+            .map_err(LocalRegistryError::IndexWrite)?;
+        // Acquire an exclusive lock for writing the index file, and return an error if we cannot
+        // obtain one due to any other outstanding lock on the file.
+        //
+        // This will fail if another write is being performed on the same file, or if the index is
+        // currently being loaded by another process.
+        //
+        // See `load` for the non-exclusive lock obtained for reads
+        file.try_lock().map_err(LocalRegistryError::IndexWriteLock)?;
+        file.write_all(contents.as_bytes()).map_err(LocalRegistryError::IndexWrite)
     }
 
     /// Derive the path in the artifact store for a package with `digest`
@@ -336,10 +369,15 @@ impl LocalPackageRegistry {
             },
             None => PackageRecord::new(version.clone(), dependencies),
         };
-        self.register(package.name.clone(), record)?;
 
+        // Write the package artifact to the registry
         let artifact_path = self.artifact_path_for_digest(digest);
         fs::write(&artifact_path, bytes).map_err(LocalRegistryError::IndexWrite)?;
+
+        // Record the new package to the in-memory registry index
+        self.register(package.name.clone(), record)?;
+
+        // Persist the updated registry index
         self.save()?;
 
         Ok(PublishedPackage {
