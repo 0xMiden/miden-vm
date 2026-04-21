@@ -151,16 +151,13 @@ where
 mod tests {
     extern crate std;
 
-    use std::{fmt::Write as _, println, string::String, vec, vec::Vec};
+    use std::{vec, vec::Vec};
 
     use miden_core::{
         field::{PrimeCharacteristicRing, QuadFelt},
         utils::RowMajorMatrix,
     };
-    use miden_crypto::{
-        rand::random_felt,
-        stark::air::{LiftedAir, symbolic::AirLayout},
-    };
+    use miden_crypto::stark::air::LiftedAir;
 
     use super::{MidenLookupAir, NUM_LOGUP_COMMITTED_FINALS};
     use crate::{
@@ -168,134 +165,34 @@ mod tests {
         constraints::lookup::{BusId, MIDEN_MAX_MESSAGE_WIDTH},
         lookup::{
             Challenges,
-            debug::{
-                check_challenge_scoping, check_encoding_equivalence, check_symbolic_degrees,
-                check_trace_balance, collect_inventory,
-            },
+            debug::{ValidateLayout, ValidateLookupAir, check_trace_balance},
         },
         trace::{AUX_TRACE_RAND_CHALLENGES, AUX_TRACE_WIDTH, TRACE_WIDTH},
     };
-
-    /// Transition-constraint degree budget enforced on the Miden AIR.
-    const DEGREE_BUDGET: usize = 9;
 
     fn num_periodic() -> usize {
         LiftedAir::<Felt, QuadFelt>::periodic_columns(&ProcessorAir).len()
     }
 
-    fn miden_air_layout() -> AirLayout {
-        AirLayout {
-            preprocessed_width: 0,
-            main_width: TRACE_WIDTH,
+    fn validate_layout() -> ValidateLayout {
+        ValidateLayout {
+            trace_width: TRACE_WIDTH,
             num_public_values: NUM_PUBLIC_VALUES,
+            num_periodic_columns: num_periodic(),
             permutation_width: AUX_TRACE_WIDTH,
             num_permutation_challenges: AUX_TRACE_RAND_CHALLENGES,
             num_permutation_values: NUM_LOGUP_COMMITTED_FINALS,
-            num_periodic_columns: num_periodic(),
         }
     }
 
-    /// Exercises every one of the 9 buses `MidenLookupAir::eval` wires up and asserts each
-    /// emitted constraint stays within the transition degree budget.
+    /// One self-check that covers num_columns consistency, per-group / per-column
+    /// declared-vs-observed degree, cached-encoding canonical/encoded equivalence,
+    /// and simple-group scope (no `insert_encoded` outside cached-encoding groups).
     #[test]
-    #[allow(clippy::print_stdout)]
-    fn miden_lookup_air_degree_within_budget() {
-        let report = check_symbolic_degrees(&MidenLookupAir, miden_air_layout(), DEGREE_BUDGET)
-            .unwrap_or_else(|r| {
-                panic!(
-                    "symbolic degree pass failed: {} mismatches\n{:#?}",
-                    r.mismatches.len(),
-                    r.mismatches,
-                )
-            });
-        // Both constraint families should have at least one constraint each.
-        assert!(report.info.iter().any(|i: &String| i.contains("extension constraints")));
-        assert!(report.info.iter().any(|i: &String| i.contains("base constraints")));
-        for line in &report.info {
-            println!("{line}");
-        }
-    }
-
-    /// Cached-encoding equivalence check: subsumed by
-    /// [`check_encoding_equivalence`](crate::lookup::debug::check_encoding_equivalence).
-    /// Runs `MidenLookupAir::eval` through the canonical-vs-encoded equivalence checker on
-    /// a batch of random row pairs.
-    #[test]
-    fn miden_lookup_air_cached_encoding_equivalence() {
-        const NUM_SAMPLES: usize = 100;
-        for _ in 0..NUM_SAMPLES {
-            let current_row: Vec<Felt> = (0..TRACE_WIDTH).map(|_| random_felt()).collect();
-            let next_row: Vec<Felt> = (0..TRACE_WIDTH).map(|_| random_felt()).collect();
-            let periodic_values: Vec<Felt> = (0..num_periodic()).map(|_| random_felt()).collect();
-            let public_values: Vec<Felt> = (0..NUM_PUBLIC_VALUES).map(|_| random_felt()).collect();
-            let challenges = Challenges::<QuadFelt>::new(
-                QuadFelt::new([random_felt(), random_felt()]),
-                QuadFelt::new([random_felt(), random_felt()]),
-                MIDEN_MAX_MESSAGE_WIDTH,
-                BusId::COUNT,
-            );
-
-            let mismatches = check_encoding_equivalence(
-                &MidenLookupAir,
-                &current_row,
-                &next_row,
-                &periodic_values,
-                &public_values,
-                &challenges,
-            );
-            assert!(mismatches.is_empty(), "cached-encoding equivalence failed: {mismatches:#?}",);
-        }
-    }
-
-    /// Inventory walk should cover every declared column with at least one group and
-    /// report a floor of interactions. Exact counts are brittle (depend on every bus's
-    /// structure) so we only assert generous lower bounds.
-    #[test]
-    fn inventory_is_non_empty() {
-        let inv = collect_inventory(
-            &MidenLookupAir,
-            "MidenLookupAir",
-            TRACE_WIDTH,
-            num_periodic(),
-            NUM_PUBLIC_VALUES,
-        );
-        assert_eq!(inv.air_name, "MidenLookupAir");
-        assert_eq!(inv.columns.len(), 7);
-        let groupy = inv.columns.iter().filter(|c| !c.groups.is_empty()).count();
-        assert!(
-            groupy == 7,
-            "expected 7 non-empty columns, got {groupy}: {:#?}",
-            inv.columns.iter().map(|c| c.groups.len()).collect::<Vec<_>>(),
-        );
-        let total = inv.total_interactions();
-        assert!(total >= 20, "expected ≥20 interactions, got {total}");
-    }
-
-    #[test]
-    fn inventory_display_prints_columns() {
-        let inv = collect_inventory(
-            &MidenLookupAir,
-            "MidenLookupAir",
-            TRACE_WIDTH,
-            num_periodic(),
-            NUM_PUBLIC_VALUES,
-        );
-        let mut out = String::new();
-        write!(&mut out, "{inv}").unwrap();
-        assert!(out.contains("MidenLookupAir"), "display should contain air name");
-        assert!(out.contains("column["), "display should enumerate columns");
-    }
-
-    #[test]
-    fn scope_check_accepts_current_air() {
-        check_challenge_scoping(
-            &MidenLookupAir,
-            "MidenLookupAir",
-            TRACE_WIDTH,
-            num_periodic(),
-            NUM_PUBLIC_VALUES,
-        )
-        .expect("MidenLookupAir must not leak manual challenges into simple groups");
+    fn miden_lookup_air_validates() {
+        MidenLookupAir
+            .validate(validate_layout())
+            .unwrap_or_else(|err| panic!("MidenLookupAir validation failed: {err}"));
     }
 
     /// Smoke test: the trace-balance checker runs to completion on a tiny zero-valued trace

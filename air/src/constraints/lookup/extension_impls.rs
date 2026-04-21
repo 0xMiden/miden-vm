@@ -60,10 +60,13 @@ impl<'a, EF> ChipletLookupBuilder for ProverLookupBuilder<'a, Felt, EF> where
 #[cfg(feature = "std")]
 mod debug_impls {
     use super::{ChipletLookupBuilder, MainLookupBuilder};
-    use crate::lookup::debug::{DebugStructureBuilder, DebugTraceBuilder};
+    use crate::lookup::debug::{DebugTraceBuilder, DegreeCheckBuilder, EncodingCheckBuilder};
 
-    impl<'a> MainLookupBuilder for DebugStructureBuilder<'a> {}
-    impl<'a> ChipletLookupBuilder for DebugStructureBuilder<'a> {}
+    impl<'a> MainLookupBuilder for EncodingCheckBuilder<'a> {}
+    impl<'a> ChipletLookupBuilder for EncodingCheckBuilder<'a> {}
+
+    impl<'ab> MainLookupBuilder for DegreeCheckBuilder<'ab> {}
+    impl<'ab> ChipletLookupBuilder for DegreeCheckBuilder<'ab> {}
 
     impl<'a> MainLookupBuilder for DebugTraceBuilder<'a> {}
     impl<'a> ChipletLookupBuilder for DebugTraceBuilder<'a> {}

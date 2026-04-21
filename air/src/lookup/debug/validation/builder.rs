@@ -1,11 +1,15 @@
-//! `DebugStructureBuilder` — the `LookupBuilder` adapter that records inventory +
-//! per-group `(U, V)` folds into a [`super::DebugStructure`].
+//! Concrete `(U, V)` fold walker used for the cached-encoding equivalence and
+//! simple-group scope checks in [`validate`](super::validate).
 //!
-//! Pure implementation detail: instantiation happens inside
-//! [`super::inspect_structure`]. The builder, column, group, and batch handles all
-//! collapse their associated types to `Felt` / `QuadFelt`.
-
-use alloc::vec::Vec;
+//! Operates on `Felt` / `QuadFelt` values over a single random row pair. For each
+//! cached-encoding group it runs both the canonical and encoded closures and
+//! compares their resulting `(U, V)` pairs; a disagreement yields an
+//! [`EncodingMismatch`](super::ValidationError::EncodingMismatch). For each simple
+//! group it records whether the canonical closure called `insert_encoded`; if it
+//! did, a [`ScopeViolation`](super::ValidationError::ScopeViolation) is emitted.
+//!
+//! Short-circuits via an [`Option<ValidationError>`] slot on the outer builder; the
+//! first problem observed is retained and later emits are ignored.
 
 use miden_core::field::{PrimeCharacteristicRing, QuadFelt};
 use miden_crypto::stark::air::RowWindow;
@@ -14,45 +18,48 @@ use super::{
     super::super::{
         Challenges, Deg, LookupBatch, LookupBuilder, LookupColumn, LookupGroup, LookupMessage,
     },
-    ColumnRecord, DebugStructure, EncodingMode, GroupRecord, InteractionRecord, MultSign,
-    PassRecord,
+    ValidationError,
 };
 use crate::Felt;
 
 // BUILDER
 // ================================================================================================
 
-/// `LookupBuilder` that records inventory + per-group `(U, V)` folds into a
-/// [`super::DebugStructure`].
-pub struct DebugStructureBuilder<'a> {
+/// Concrete-row walker that verifies the canonical / encoded equivalence contract of
+/// every cached-encoding group and the simple-group scope contract.
+pub struct EncodingCheckBuilder<'a> {
     main: RowWindow<'a, Felt>,
     periodic_values: &'a [Felt],
     public_values: &'a [Felt],
     challenges: &'a Challenges<QuadFelt>,
-    out: &'a mut DebugStructure,
     column_idx: usize,
+    /// First problem observed across the whole walk; later ones are ignored.
+    error: Option<ValidationError>,
 }
 
-impl<'a> DebugStructureBuilder<'a> {
+impl<'a> EncodingCheckBuilder<'a> {
     pub fn new(
         main: RowWindow<'a, Felt>,
         periodic_values: &'a [Felt],
         public_values: &'a [Felt],
         challenges: &'a Challenges<QuadFelt>,
-        out: &'a mut DebugStructure,
     ) -> Self {
         Self {
             main,
             periodic_values,
             public_values,
             challenges,
-            out,
             column_idx: 0,
+            error: None,
         }
+    }
+
+    pub fn take_error(self) -> Option<ValidationError> {
+        self.error
     }
 }
 
-impl<'a> LookupBuilder for DebugStructureBuilder<'a> {
+impl<'a> LookupBuilder for EncodingCheckBuilder<'a> {
     type F = Felt;
     type Expr = Felt;
     type Var = Felt;
@@ -67,7 +74,7 @@ impl<'a> LookupBuilder for DebugStructureBuilder<'a> {
     type MainWindow = RowWindow<'a, Felt>;
 
     type Column<'c>
-        = DebugStructureColumn<'c>
+        = EncodingCheckColumn<'c>
     where
         Self: 'c;
 
@@ -83,21 +90,21 @@ impl<'a> LookupBuilder for DebugStructureBuilder<'a> {
         self.public_values
     }
 
-    fn next_column<'c, R>(&'c mut self, f: impl FnOnce(&mut Self::Column<'c>) -> R, deg: Deg) -> R {
+    fn next_column<'c, R>(
+        &'c mut self,
+        f: impl FnOnce(&mut Self::Column<'c>) -> R,
+        _deg: Deg,
+    ) -> R {
         let column_idx = self.column_idx;
-        self.out.columns.push(ColumnRecord {
-            column_idx,
-            claimed_column_degree: deg,
-            groups: Vec::new(),
-        });
-        let col_slot = self.out.columns.last_mut().expect("just pushed");
-        let mut col = DebugStructureColumn {
+        self.column_idx += 1;
+        let mut col = EncodingCheckColumn {
             challenges: self.challenges,
-            column: col_slot,
+            column_idx,
             next_group_idx: 0,
+            error: self.error.take(),
         };
         let result = f(&mut col);
-        self.column_idx += 1;
+        self.error = col.error;
         result
     }
 }
@@ -105,45 +112,46 @@ impl<'a> LookupBuilder for DebugStructureBuilder<'a> {
 // COLUMN
 // ================================================================================================
 
-pub struct DebugStructureColumn<'c> {
+pub struct EncodingCheckColumn<'c> {
     challenges: &'c Challenges<QuadFelt>,
-    column: &'c mut ColumnRecord,
+    column_idx: usize,
     next_group_idx: usize,
+    error: Option<ValidationError>,
 }
 
-impl<'c> LookupColumn for DebugStructureColumn<'c> {
+impl<'c> LookupColumn for EncodingCheckColumn<'c> {
     type Expr = Felt;
     type ExprEF = QuadFelt;
 
     type Group<'g>
-        = DebugStructureGroup<'g>
+        = EncodingCheckGroup<'g>
     where
         Self: 'g;
 
-    fn group<'g>(&'g mut self, name: &'static str, f: impl FnOnce(&mut Self::Group<'g>), deg: Deg) {
-        let idx = self.next_group_idx;
-        self.column.groups.push(GroupRecord {
-            name,
-            column_idx: self.column.column_idx,
-            group_idx: idx,
-            encoding_mode: EncodingMode::Simple,
-            claimed_degree: deg,
-            canonical: PassRecord::default(),
-            encoded: PassRecord::default(),
-        });
-        let rec = self.column.groups.last_mut().expect("just pushed");
-        {
-            let mut g = DebugStructureGroup {
-                pass_rec: &mut rec.canonical,
-                u: QuadFelt::ONE,
-                v: QuadFelt::ZERO,
-                challenges: self.challenges,
-            };
-            f(&mut g);
-            let pair = (g.u, g.v);
-            g.pass_rec.fold = Some(pair);
-        }
+    fn group<'g>(
+        &'g mut self,
+        name: &'static str,
+        f: impl FnOnce(&mut Self::Group<'g>),
+        _deg: Deg,
+    ) {
+        let group_idx = self.next_group_idx;
         self.next_group_idx += 1;
+
+        let mut group = EncodingCheckGroup {
+            challenges: self.challenges,
+            u: QuadFelt::ONE,
+            v: QuadFelt::ZERO,
+            inside_encoded_closure: false,
+            used_insert_encoded: false,
+        };
+        f(&mut group);
+        if self.error.is_none() && group.used_insert_encoded {
+            self.error = Some(ValidationError::ScopeViolation {
+                column_idx: self.column_idx,
+                group_idx,
+                name,
+            });
+        }
     }
 
     fn group_with_cached_encoding<'g>(
@@ -151,123 +159,99 @@ impl<'c> LookupColumn for DebugStructureColumn<'c> {
         name: &'static str,
         canonical: impl FnOnce(&mut Self::Group<'g>),
         encoded: impl FnOnce(&mut Self::Group<'g>),
-        deg: Deg,
+        _deg: Deg,
     ) {
-        let idx = self.next_group_idx;
-        self.column.groups.push(GroupRecord {
-            name,
-            column_idx: self.column.column_idx,
-            group_idx: idx,
-            encoding_mode: EncodingMode::CachedEncoding,
-            claimed_degree: deg,
-            canonical: PassRecord::default(),
-            encoded: PassRecord::default(),
-        });
-        let rec = self.column.groups.last_mut().expect("just pushed");
-
-        // Canonical pass — mutable borrow of the disjoint `rec.canonical` field only, so
-        // the subsequent `&mut rec.encoded` in the next block is allowed under Rust's
-        // split-field borrow rule even with the GAT's `'g`-pinned lifetime.
-        {
-            let mut g = DebugStructureGroup {
-                pass_rec: &mut rec.canonical,
-                u: QuadFelt::ONE,
-                v: QuadFelt::ZERO,
-                challenges: self.challenges,
-            };
-            canonical(&mut g);
-            let pair = (g.u, g.v);
-            g.pass_rec.fold = Some(pair);
-        }
-
-        // Encoded pass — disjoint field, independent borrow.
-        {
-            let mut g = DebugStructureGroup {
-                pass_rec: &mut rec.encoded,
-                u: QuadFelt::ONE,
-                v: QuadFelt::ZERO,
-                challenges: self.challenges,
-            };
-            encoded(&mut g);
-            let pair = (g.u, g.v);
-            g.pass_rec.fold = Some(pair);
-        }
-
+        let group_idx = self.next_group_idx;
         self.next_group_idx += 1;
+
+        let mut canon = EncodingCheckGroup {
+            challenges: self.challenges,
+            u: QuadFelt::ONE,
+            v: QuadFelt::ZERO,
+            inside_encoded_closure: false,
+            used_insert_encoded: false,
+        };
+        canonical(&mut canon);
+
+        let mut enc = EncodingCheckGroup {
+            challenges: self.challenges,
+            u: QuadFelt::ONE,
+            v: QuadFelt::ZERO,
+            inside_encoded_closure: true,
+            used_insert_encoded: false,
+        };
+        encoded(&mut enc);
+
+        if self.error.is_none() && (canon.u != enc.u || canon.v != enc.v) {
+            self.error = Some(ValidationError::EncodingMismatch {
+                column_idx: self.column_idx,
+                group_idx,
+                name,
+                u_canonical: canon.u,
+                v_canonical: canon.v,
+                u_encoded: enc.u,
+                v_encoded: enc.v,
+            });
+        }
     }
 }
 
 // GROUP
 // ================================================================================================
 
-pub struct DebugStructureGroup<'g> {
-    pass_rec: &'g mut PassRecord,
+pub struct EncodingCheckGroup<'g> {
+    challenges: &'g Challenges<QuadFelt>,
     u: QuadFelt,
     v: QuadFelt,
-    challenges: &'g Challenges<QuadFelt>,
+    /// Set when this group was opened via the `encoded` closure of
+    /// `group_with_cached_encoding`; toggles the legal use of `insert_encoded`.
+    inside_encoded_closure: bool,
+    /// `true` if this group called `insert_encoded` at least once. The column
+    /// inspects this flag at close time and raises `ScopeViolation` if the group
+    /// was simple.
+    used_insert_encoded: bool,
 }
 
-impl<'g> LookupGroup for DebugStructureGroup<'g> {
+impl<'g> LookupGroup for EncodingCheckGroup<'g> {
     type Expr = Felt;
     type ExprEF = QuadFelt;
 
     type Batch<'b>
-        = DebugStructureBatch<'b>
+        = EncodingCheckBatch<'b>
     where
         Self: 'b;
 
-    fn add<M>(&mut self, name: &'static str, flag: Felt, msg: impl FnOnce() -> M, deg: Deg)
+    fn add<M>(&mut self, _name: &'static str, flag: Felt, msg: impl FnOnce() -> M, _deg: Deg)
     where
         M: LookupMessage<Felt, QuadFelt>,
     {
         let v_msg = msg().encode(self.challenges);
         self.u += (v_msg - QuadFelt::ONE) * flag;
         self.v += flag;
-        self.pass_rec.interactions.push(InteractionRecord {
-            name,
-            kind: Some(core::any::type_name::<M>()),
-            sign: MultSign::Add,
-            claimed_degree: deg,
-            inside_batch: false,
-        });
     }
 
-    fn remove<M>(&mut self, name: &'static str, flag: Felt, msg: impl FnOnce() -> M, deg: Deg)
+    fn remove<M>(&mut self, _name: &'static str, flag: Felt, msg: impl FnOnce() -> M, _deg: Deg)
     where
         M: LookupMessage<Felt, QuadFelt>,
     {
         let v_msg = msg().encode(self.challenges);
         self.u += (v_msg - QuadFelt::ONE) * flag;
         self.v -= flag;
-        self.pass_rec.interactions.push(InteractionRecord {
-            name,
-            kind: Some(core::any::type_name::<M>()),
-            sign: MultSign::Remove,
-            claimed_degree: deg,
-            inside_batch: false,
-        });
     }
 
     fn insert<M>(
         &mut self,
-        name: &'static str,
+        _name: &'static str,
         flag: Felt,
         multiplicity: Felt,
         msg: impl FnOnce() -> M,
-        deg: Deg,
+        _deg: Deg,
     ) where
         M: LookupMessage<Felt, QuadFelt>,
     {
         let v_msg = msg().encode(self.challenges);
         self.u += (v_msg - QuadFelt::ONE) * flag;
         self.v += flag * multiplicity;
-        self.pass_rec.interactions.push(InteractionRecord {
-            name,
-            kind: Some(core::any::type_name::<M>()),
-            sign: MultSign::Insert,
-            claimed_degree: deg,
-            inside_batch: false,
-        });
     }
 
     fn batch<'b>(
@@ -278,8 +262,7 @@ impl<'g> LookupGroup for DebugStructureGroup<'g> {
         _deg: Deg,
     ) {
         let (n, d) = {
-            let mut batch = DebugStructureBatch {
-                pass_rec: &mut *self.pass_rec,
+            let mut batch = EncodingCheckBatch {
                 challenges: self.challenges,
                 n: QuadFelt::ZERO,
                 d: QuadFelt::ONE,
@@ -301,40 +284,36 @@ impl<'g> LookupGroup for DebugStructureGroup<'g> {
 
     fn insert_encoded(
         &mut self,
-        name: &'static str,
+        _name: &'static str,
         flag: Felt,
         multiplicity: Felt,
         encoded: impl FnOnce() -> QuadFelt,
-        deg: Deg,
+        _deg: Deg,
     ) {
+        // Flag the misuse; the column turns it into a `ScopeViolation` on close.
+        if !self.inside_encoded_closure {
+            self.used_insert_encoded = true;
+        }
         let v_msg = encoded();
         self.u += (v_msg - QuadFelt::ONE) * flag;
         self.v += flag * multiplicity;
-        self.pass_rec.interactions.push(InteractionRecord {
-            name,
-            kind: None,
-            sign: MultSign::InsertEncoded,
-            claimed_degree: deg,
-            inside_batch: false,
-        });
     }
 }
 
 // BATCH
 // ================================================================================================
 
-pub struct DebugStructureBatch<'b> {
-    pass_rec: &'b mut PassRecord,
+pub struct EncodingCheckBatch<'b> {
     challenges: &'b Challenges<QuadFelt>,
     n: QuadFelt,
     d: QuadFelt,
 }
 
-impl<'b> LookupBatch for DebugStructureBatch<'b> {
+impl<'b> LookupBatch for EncodingCheckBatch<'b> {
     type Expr = Felt;
     type ExprEF = QuadFelt;
 
-    fn insert<M>(&mut self, name: &'static str, multiplicity: Felt, msg: M, deg: Deg)
+    fn insert<M>(&mut self, _name: &'static str, multiplicity: Felt, msg: M, _deg: Deg)
     where
         M: LookupMessage<Felt, QuadFelt>,
     {
@@ -342,32 +321,18 @@ impl<'b> LookupBatch for DebugStructureBatch<'b> {
         let d_prev = self.d;
         self.n = self.n * v_msg + d_prev * multiplicity;
         self.d *= v_msg;
-        self.pass_rec.interactions.push(InteractionRecord {
-            name,
-            kind: Some(core::any::type_name::<M>()),
-            sign: MultSign::Insert,
-            claimed_degree: deg,
-            inside_batch: true,
-        });
     }
 
     fn insert_encoded(
         &mut self,
-        name: &'static str,
+        _name: &'static str,
         multiplicity: Felt,
         encoded: impl FnOnce() -> QuadFelt,
-        deg: Deg,
+        _deg: Deg,
     ) {
         let v_msg = encoded();
         let d_prev = self.d;
         self.n = self.n * v_msg + d_prev * multiplicity;
         self.d *= v_msg;
-        self.pass_rec.interactions.push(InteractionRecord {
-            name,
-            kind: None,
-            sign: MultSign::InsertEncoded,
-            claimed_degree: deg,
-            inside_batch: true,
-        });
     }
 }

@@ -4,11 +4,8 @@
 //!
 //! | Module | Regime |
 //! |--------|--------|
-//! | [`validation`] | AIR self-checks — run against the `LookupAir` itself, no execution trace needed. Bundles encoding equivalence, scope, constants consistency, and the symbolic degree-budget pass via [`validation::validate()`]. |
+//! | [`validation`] | AIR self-checks — run against the `LookupAir` itself, no execution trace needed. One entry point, [`validation::validate`] / `.validate()`. |
 //! | [`trace`] | Concrete-trace debugging — balance accumulator + per-column `(U, V)` oracle folds + mutex checks over a real main trace. |
-//!
-//! `validation::validate` takes a caller-supplied `AirLayout` and degree budget, so
-//! AIR-specific constants stay on the caller side.
 
 pub mod trace;
 pub mod validation;
@@ -18,9 +15,6 @@ pub use trace::{
     check_trace_balance, collect_column_oracle_folds,
 };
 pub use validation::{
-    ColumnRecord, DebugStructure, DebugStructureBuilder, DegreeMismatch, DegreeReport,
-    EncodingMode, GroupMismatch, GroupRecord, InteractionRecord, Inventory, MultSign,
-    NumColumnsCheck, ScopeReport, StructureReport, ValidationReport, check_challenge_scoping,
-    check_encoding_equivalence, check_symbolic_degrees, collect_inventory, inspect_structure,
-    validate, validate_structure_only,
+    DegreeCheckBuilder, EncodingCheckBuilder, ValidateLayout, ValidateLookupAir, ValidationError,
+    validate,
 };
