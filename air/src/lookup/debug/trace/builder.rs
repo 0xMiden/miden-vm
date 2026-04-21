@@ -255,7 +255,7 @@ impl<'g> LookupGroup for DebugTraceGroup<'g> {
         }
         let built = msg();
         let v_msg = built.encode(self.challenges);
-        self.record(format!("{:?}", built), v_msg, multiplicity);
+        self.record(format!("{built:?}"), v_msg, multiplicity);
         self.u += (v_msg - QuadFelt::ONE) * flag;
         self.v += flag * multiplicity;
     }
@@ -356,7 +356,7 @@ impl<'b> LookupBatch for DebugTraceBatch<'b> {
     {
         let v_msg = msg.encode(self.challenges);
         if self.active {
-            self.record(format!("{:?}", msg), v_msg, multiplicity);
+            self.record(format!("{msg:?}"), v_msg, multiplicity);
         }
         let d_prev = self.d;
         self.n = self.n * v_msg + d_prev * multiplicity;
@@ -416,7 +416,7 @@ impl<'a> BoundaryBuilder for DebugBoundaryEmitter<'a> {
             row: usize::MAX,
             column_idx: usize::MAX,
             group_idx: usize::MAX,
-            msg_repr: format!("[boundary:{name}] {:?}", msg),
+            msg_repr: format!("[boundary:{name}] {msg:?}"),
             denom,
             multiplicity,
         });

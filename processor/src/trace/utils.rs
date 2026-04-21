@@ -279,7 +279,7 @@ pub(crate) fn split_u32_into_u16(value: u64) -> (u16, u16) {
 /// SPAN execution.
 #[cfg(test)]
 #[allow(dead_code)]
-pub fn build_span_with_respan_ops() -> (alloc::vec::Vec<Operation>, alloc::vec::Vec<Felt>) {
+pub fn build_span_with_respan_ops() -> (Vec<Operation>, Vec<Felt>) {
     let iv = [1, 3, 5, 7, 9, 11, 13, 15, 17].to_elements();
     let ops = alloc::vec![
         Operation::Push(iv[0]),

@@ -192,7 +192,7 @@ fn write_pass(
     if interactions.is_empty() {
         return Ok(());
     }
-    writeln!(f, "      [{}]", label)?;
+    writeln!(f, "      [{label}]")?;
     for ix in interactions {
         writeln!(
             f,

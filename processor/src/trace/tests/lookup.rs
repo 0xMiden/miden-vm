@@ -225,7 +225,7 @@ fn diagnostic_assembler_path_terminals() {
     let aux = accumulate_slow(&fractions);
     let num_rows = trace.main_trace().num_rows();
 
-    std::eprintln!("assembler-path trace: {} rows", num_rows);
+    std::eprintln!("assembler-path trace: {num_rows} rows");
     let labels = [
         "M1 block_stack+range_table (RS)",
         "M_2+5 block_hash+op_group (frac)",

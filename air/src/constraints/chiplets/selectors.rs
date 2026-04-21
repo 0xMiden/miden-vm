@@ -146,7 +146,7 @@ where
 
     // Virtual s0 = 1 - (s_ctrl + s_perm): same semantics as old chiplets[0].
     // 0 on controller and perm rows, 1 on non-hasher rows.
-    let s0: AB::Expr = s_ctrl_or_s_perm.clone().not();
+    let s0: AB::Expr = s_ctrl_or_s_perm.not();
 
     // =========================================================================
     // TRI-STATE SELECTOR CONSTRAINTS
@@ -156,7 +156,7 @@ where
     // sum is also boolean, so they cannot both be 1 simultaneously).
     builder.assert_bool(s_ctrl.clone());
     builder.assert_bool(s_perm.clone());
-    builder.assert_bool(s_ctrl_or_s_perm.clone());
+    builder.assert_bool(s_ctrl_or_s_perm);
 
     // Transition rules: enforce the trace ordering ctrl...ctrl, perm...perm, s0...s0.
     {
@@ -164,7 +164,7 @@ where
 
         // A controller row must be followed by another controller or permutation row.
         // s_ctrl * (1 - (s_ctrl' + s_perm')) = 0.
-        builder.when(s_ctrl.clone()).assert_one(s_ctrl_or_s_perm_next.clone());
+        builder.when(s_ctrl.clone()).assert_one(s_ctrl_or_s_perm_next);
 
         // A permutation row cannot be followed by a controller row.
         // s_perm * s_ctrl' = 0.
@@ -204,7 +204,7 @@ where
         builder.when(s01.clone()).assert_eq(s1_next.clone(), s1.clone());
         builder.when(s012.clone()).assert_eq(s2_next.clone(), s2.clone());
         builder.when(s0123.clone()).assert_eq(s3_next.clone(), s3.clone());
-        builder.when(s01234.clone()).assert_eq(s4_next.clone(), s4.clone());
+        builder.when(s01234).assert_eq(s4_next, s4.clone());
     }
 
     // =========================================================================
@@ -219,10 +219,10 @@ where
         let builder = &mut builder.when_last_row();
         builder.assert_zero(s_ctrl.clone());
         builder.assert_zero(s_perm.clone());
-        builder.assert_one(s1.clone());
-        builder.assert_one(s2.clone());
-        builder.assert_one(s3.clone());
-        builder.assert_one(s4.clone());
+        builder.assert_one(s1);
+        builder.assert_one(s2);
+        builder.assert_one(s3);
+        builder.assert_one(s4);
     }
 
     // =========================================================================
@@ -241,7 +241,7 @@ where
     // is_last = s_ctrl * (1 - s_ctrl') (deg 2)
     let ctrl_is_active = s_ctrl.clone();
     let ctrl_is_transition = is_transition_flag.clone() * s_ctrl.clone() * s_ctrl_next.clone();
-    let ctrl_is_last = s_ctrl.clone() * s_ctrl_next.clone().not();
+    let ctrl_is_last = s_ctrl * s_ctrl_next.not();
     let ctrl_next_is_first = AB::Expr::ZERO; // controller is first section
 
     // --- Permutation flags (direct physical selector s_perm) ---
@@ -251,8 +251,8 @@ where
     // next_is_first = ctrl_is_last * s_perm' (deg 3)
     let perm_is_active = s_perm.clone();
     let perm_is_transition = is_transition_flag.clone() * s_perm.clone() * s_perm_next.clone();
-    let perm_is_last = s_perm.clone() * s_perm_next.clone().not();
-    let perm_next_is_first = ctrl_is_last.clone() * s_perm_next.clone();
+    let perm_is_last = s_perm * s_perm_next.not();
+    let perm_next_is_first = ctrl_is_last.clone() * s_perm_next;
 
     // --- Remaining chiplet active flags (subtraction trick: prefix - prefix * s_n) ---
     let is_bitwise = s0.clone() - s01.clone();
@@ -278,8 +278,8 @@ where
     // s_perm')` factor because the tri-state transition rule already enforces
     // `s0 = 1 → s_ctrl' = 0 ∧ s_perm' = 0`, so on valid traces that factor is
     // always 1 whenever the prefix is active.
-    let bitwise_transition = is_transition_flag.clone() * s0.clone() * not_s1_next;
-    let memory_transition = is_transition_flag.clone() * s01.clone() * not_s2_next;
+    let bitwise_transition = is_transition_flag.clone() * s0 * not_s1_next;
+    let memory_transition = is_transition_flag.clone() * s01 * not_s2_next;
     let ace_transition = is_transition_flag * s012 * not_s3_next;
 
     ChipletSelectors {

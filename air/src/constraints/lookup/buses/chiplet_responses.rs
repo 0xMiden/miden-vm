@@ -108,11 +108,11 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
     let f_mv: LB::Expr =
         controller_flag.clone() * hs0.clone() * hs1.clone() * not_hs2.clone() * is_boundary.clone();
     let f_mu: LB::Expr =
-        controller_flag.clone() * hs0 * hs1.clone() * hs2.clone() * is_boundary.clone();
+        controller_flag.clone() * hs0 * hs1 * hs2.clone() * is_boundary.clone();
 
     // HOUT output: hs0=hs1=hs2=0 (always responds on digest). Degree 4 (no is_boundary).
     let f_hout: LB::Expr =
-        controller_flag.clone() * not_hs0.clone() * not_hs1.clone() * not_hs2.clone();
+        controller_flag.clone() * not_hs0.clone() * not_hs1.clone() * not_hs2;
 
     // SOUT output with is_boundary=1 only (HPERM return).
     let f_sout: LB::Expr = controller_flag * not_hs0 * not_hs1 * hs2 * is_boundary;
@@ -365,7 +365,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
                     let kernel_gate = ctx.chiplet_active.kernel_rom.clone();
                     g.batch(
                         "kernel_rom",
-                        kernel_gate.clone(),
+                        kernel_gate,
                         |b| {
                             let krom_mult: LB::Expr = krom.multiplicity.into();
                             let digest: [LB::Expr; 4] = krom.root.map(LB::Expr::from);

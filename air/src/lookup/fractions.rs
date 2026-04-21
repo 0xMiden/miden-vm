@@ -318,9 +318,8 @@ where
             }
 
             // output[r][i] = fᵢ(r) for fraction columns i > 0.
-            for col in 1..num_cols {
-                chunk_out[out_row_base + col] = per_row_value[col];
-            }
+            let out_row = &mut chunk_out[out_row_base..out_row_base + num_cols];
+            out_row[1..].copy_from_slice(&per_row_value[1..]);
 
             // t(r) = Σᵢ fᵢ(r), consumed by phase 2.
             totals_slice[row_in_chunk] = per_row_value.iter().copied().sum();

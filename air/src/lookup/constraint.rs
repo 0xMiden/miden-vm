@@ -173,9 +173,8 @@ where
                 let mp = self.ab.permutation();
                 let current = mp.current_slice();
                 let mut sum: AB::ExprEF = current[0].into();
-                for i in 1..current.len() {
-                    let aux_i: AB::ExprEF = current[i].into();
-                    sum += aux_i;
+                for &aux_i in &current[1..] {
+                    sum += aux_i.into();
                 }
                 sum
             };

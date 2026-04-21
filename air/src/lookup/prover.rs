@@ -676,8 +676,8 @@ mod tests {
             assert_eq!(aux[0][r + 1] - aux[0][r], delta0 + delta1);
         }
         // Column 1 (fraction, aux_curr): value at row r is the per-row fraction.
-        for r in 0..NUM_ROWS {
-            assert_eq!(aux[1][r], delta1);
+        for &entry in aux[1].iter().take(NUM_ROWS) {
+            assert_eq!(entry, delta1);
         }
     }
 }

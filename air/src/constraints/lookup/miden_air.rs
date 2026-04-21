@@ -105,29 +105,24 @@ where
         // Snapshot the needed public-input data up front so the mutable
         // `boundary.add/remove` calls below don't conflict with the immutable
         // borrows taken by `public_values()` / `var_len_public_inputs()`.
-        let (program_hash, final_state, kernel_digests): ([B::F; 4], [B::F; 4], Vec<[B::F; 4]>) = {
-            let pv = boundary.public_values();
-            let program_hash = [
-                pv[PV_PROGRAM_HASH],
-                pv[PV_PROGRAM_HASH + 1],
-                pv[PV_PROGRAM_HASH + 2],
-                pv[PV_PROGRAM_HASH + 3],
-            ];
-            let final_state = [
-                pv[PV_TRANSCRIPT_STATE],
-                pv[PV_TRANSCRIPT_STATE + 1],
-                pv[PV_TRANSCRIPT_STATE + 2],
-                pv[PV_TRANSCRIPT_STATE + 3],
-            ];
-            let kernel_digests = boundary
-                .var_len_public_inputs()
-                .first()
-                .map(|felts| {
-                    felts.chunks_exact(WORD_SIZE).map(|d| [d[0], d[1], d[2], d[3]]).collect()
-                })
-                .unwrap_or_default();
-            (program_hash, final_state, kernel_digests)
-        };
+        let pv = boundary.public_values();
+        let program_hash: [B::F; 4] = [
+            pv[PV_PROGRAM_HASH],
+            pv[PV_PROGRAM_HASH + 1],
+            pv[PV_PROGRAM_HASH + 2],
+            pv[PV_PROGRAM_HASH + 3],
+        ];
+        let final_state: [B::F; 4] = [
+            pv[PV_TRANSCRIPT_STATE],
+            pv[PV_TRANSCRIPT_STATE + 1],
+            pv[PV_TRANSCRIPT_STATE + 2],
+            pv[PV_TRANSCRIPT_STATE + 3],
+        ];
+        let kernel_digests: Vec<[B::F; 4]> = boundary
+            .var_len_public_inputs()
+            .first()
+            .map(|felts| felts.chunks_exact(WORD_SIZE).map(|d| [d[0], d[1], d[2], d[3]]).collect())
+            .unwrap_or_default();
 
         // Block-hash seed: +1 / encode(BLOCK_HASH_TABLE, [ph, 0, 0, 0]).
         boundary.add(
