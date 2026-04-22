@@ -53,9 +53,7 @@ use miden_core::{
 };
 use miden_crypto::stark::air::LiftedAir;
 
-use super::{
-    Challenges, LookupAir, ProverLookupBuilder, prover::build_lookup_fractions,
-};
+use super::{Challenges, LookupAir, ProverLookupBuilder, prover::build_lookup_fractions};
 
 /// Row-chunk granularity for the fused accumulator. Matches
 /// [`crate::trace::main_trace::ROW_MAJOR_CHUNK_SIZE`] so we stay consistent with the

@@ -244,30 +244,66 @@ impl<E: PrimeCharacteristicRing + Clone> HasherMsg<E> {
 #[derive(Clone, Debug)]
 pub enum MemoryMsg<E> {
     /// 5-element message: `[ctx, addr, clk, element]`.
-    Element { bus: BusId, ctx: E, addr: E, clk: E, element: E },
+    Element {
+        bus: BusId,
+        ctx: E,
+        addr: E,
+        clk: E,
+        element: E,
+    },
     /// 8-element message: `[ctx, addr, clk, word[0..4]]`.
-    Word { bus: BusId, ctx: E, addr: E, clk: E, word: [E; 4] },
+    Word {
+        bus: BusId,
+        ctx: E,
+        addr: E,
+        clk: E,
+        word: [E; 4],
+    },
 }
 
 impl<E> MemoryMsg<E> {
     /// Read a single element from memory.
     pub fn read_element(ctx: E, addr: E, clk: E, element: E) -> Self {
-        Self::Element { bus: BusId::MemoryReadElement, ctx, addr, clk, element }
+        Self::Element {
+            bus: BusId::MemoryReadElement,
+            ctx,
+            addr,
+            clk,
+            element,
+        }
     }
 
     /// Write a single element to memory.
     pub fn write_element(ctx: E, addr: E, clk: E, element: E) -> Self {
-        Self::Element { bus: BusId::MemoryWriteElement, ctx, addr, clk, element }
+        Self::Element {
+            bus: BusId::MemoryWriteElement,
+            ctx,
+            addr,
+            clk,
+            element,
+        }
     }
 
     /// Read a 4-element word from memory.
     pub fn read_word(ctx: E, addr: E, clk: E, word: [E; 4]) -> Self {
-        Self::Word { bus: BusId::MemoryReadWord, ctx, addr, clk, word }
+        Self::Word {
+            bus: BusId::MemoryReadWord,
+            ctx,
+            addr,
+            clk,
+            word,
+        }
     }
 
     /// Write a 4-element word to memory.
     pub fn write_word(ctx: E, addr: E, clk: E, word: [E; 4]) -> Self {
-        Self::Word { bus: BusId::MemoryWriteWord, ctx, addr, clk, word }
+        Self::Word {
+            bus: BusId::MemoryWriteWord,
+            ctx,
+            addr,
+            clk,
+            word,
+        }
     }
 }
 

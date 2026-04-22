@@ -100,8 +100,8 @@ where
     ///   this once outside the row loop and passes a shared reference here).
     /// - `air`: the lookup shape (used only for a debug assertion that `fractions.num_columns() ==
     ///   air.num_columns()`; the builder never calls `air.eval` itself — that's the caller's job).
-    /// - `fractions`: dense per-column fraction buffers, sized once via [`LookupFractions::from_shape`]
-    ///   and re-used across every row of the same trace.
+    /// - `fractions`: dense per-column fraction buffers, sized once via
+    ///   [`LookupFractions::from_shape`] and re-used across every row of the same trace.
     ///
     /// # Panics
     ///

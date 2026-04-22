@@ -281,7 +281,10 @@ fn block_stack_loop_is_loop_flag(#[case] cond: u64, #[case] expected_is_loop: Fe
     });
 
     assert_eq!(loop_pushes, 1, "expected one LOOP push");
-    assert_eq!(loop_pops, 1, "expected one matching LOOP END pop (is_loop={expected_is_loop:?})");
+    assert_eq!(
+        loop_pops, 1,
+        "expected one matching LOOP END pop (is_loop={expected_is_loop:?})"
+    );
     log.assert_contains(&exp);
 }
 
@@ -539,9 +542,21 @@ fn block_hash_split_enqueue_dequeue(#[case] cond: u64) {
             let is_loop_body = main.is_loop_body_flag(idx);
             let h0: [Felt; 4] = [first[0], first[1], first[2], first[3]];
             let op_next = main.get_op_code(next);
-            let next_end = if op_next == Felt::from_u8(opcodes::END) { ONE } else { ZERO };
-            let next_repeat = if op_next == Felt::from_u8(opcodes::REPEAT) { ONE } else { ZERO };
-            let next_halt = if op_next == Felt::from_u8(opcodes::HALT) { ONE } else { ZERO };
+            let next_end = if op_next == Felt::from_u8(opcodes::END) {
+                ONE
+            } else {
+                ZERO
+            };
+            let next_repeat = if op_next == Felt::from_u8(opcodes::REPEAT) {
+                ONE
+            } else {
+                ZERO
+            };
+            let next_halt = if op_next == Felt::from_u8(opcodes::HALT) {
+                ONE
+            } else {
+                ZERO
+            };
             let is_first_child = ONE - next_end - next_repeat - next_halt;
             exp.remove(
                 row,
@@ -691,8 +706,8 @@ fn op_group_span_removal_covers_decode_rows() {
 /// op counts that force each non-g8 batch variant in the second batch to catch off-by-one /
 /// batch-flag muxing bugs at the transition:
 ///
-/// - 80 Noops: first batch g8 (7 adds) + RESPAN + g1 second batch (0 adds — single group
-///   consumed inline; emitter has no branch for `(c0, c1, c2) = (0, 1, 1)`).
+/// - 80 Noops: first batch g8 (7 adds) + RESPAN + g1 second batch (0 adds — single group consumed
+///   inline; emitter has no branch for `(c0, c1, c2) = (0, 1, 1)`).
 /// - 100 Noops: first batch g8 + RESPAN + g4 second batch (3 adds for positions 1..=3).
 ///
 /// The batch-flag dispatch below mirrors the emitter exactly: `c0` is the g8 selector,

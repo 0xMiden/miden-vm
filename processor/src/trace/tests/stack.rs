@@ -28,9 +28,9 @@ fn stack_overflow_bus_emits_per_interaction_row() {
     // Mix of right-shifts (PAD) and left-shifts (DROP) around a couple of U32add no-shift ops,
     // ending with the overflow table empty.
     // Overflow depth before each op (determines whether DROP emits):
-    //   U32add:0 Pad:0→1 Pad:1→2 U32add:2 Drop:2→1 Pad:1→2 Drop:2→1 Drop:1→0 Drop:0 Pad:0→1 Drop:1→0
-    // Four of the five DROPs run against a non-empty table and emit; the fourth DROP sees
-    // overflow=0 and is a no-op. All four PADs emit.
+    //   U32add:0 Pad:0→1 Pad:1→2 U32add:2 Drop:2→1 Pad:1→2 Drop:2→1 Drop:1→0 Drop:0 Pad:0→1
+    // Drop:1→0 Four of the five DROPs run against a non-empty table and emit; the fourth DROP
+    // sees overflow=0 and is a no-op. All four PADs emit.
     let ops = vec![
         Operation::U32add, // no shift
         Operation::Pad,    // right shift

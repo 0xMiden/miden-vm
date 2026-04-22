@@ -8,14 +8,12 @@
 //!    enough to accommodate real trace data (the `debug_assert!` inside
 //!    `ProverLookupBuilder::column` panics on overflow).
 //! 2. **Zero-denominator bugs**: every encoded `LookupMessage` evaluates to a non-zero
-//!    extension-field element, so per-fraction `try_inverse` inside the accumulator does
-//!    not panic.
-//! 3. **Pipeline plumbing**: row slicing with wraparound, per-row periodic composition,
-//!    `RowWindow` construction over a real matrix, and the dense `LookupFractions` buffer
-//!    all line up.
-//! 4. **Prover/constraint agreement**: the fused `accumulate` prover path must agree with
-//!    the constraint-path `(U_col, V_col)` oracle bit-exactly on every `(row, col)` delta.
-//!    If any pair disagrees, either the prover path or the oracle has a bug.
+//!    extension-field element, so per-fraction `try_inverse` inside the accumulator does not panic.
+//! 3. **Pipeline plumbing**: row slicing with wraparound, per-row periodic composition, `RowWindow`
+//!    construction over a real matrix, and the dense `LookupFractions` buffer all line up.
+//! 4. **Prover/constraint agreement**: the fused `accumulate` prover path must agree with the
+//!    constraint-path `(U_col, V_col)` oracle bit-exactly on every `(row, col)` delta. If any pair
+//!    disagrees, either the prover path or the oracle has a bug.
 //!
 //! The oracle cross-check in (4) subsumes the "does it run to completion?" shape of a
 //! separate plumbing test, so both live in one function below.
@@ -51,12 +49,12 @@ fn tiny_span() -> Vec<Operation> {
 /// Cross-check: the fused `accumulate` prover path must agree with the constraint-path
 /// `(U_col, V_col)` oracle bit-exactly on every `(row, col)` delta.
 ///
-/// - **Prover path**: collect `(m_i, d_i)` fractions via `ProverLookupBuilder` on each row,
-///   then `accumulate` runs batched Montgomery inversion + per-column partial sums to
-///   produce `aux[col][r+1] - aux[col][r] = Σ m_i · d_i^{-1}`.
-/// - **Constraint path**: `ColumnOracleBuilder` evaluates `ProcessorAir` row-by-row using
-///   the same `(U_g, V_g)` algebra the constraint system uses, folded per column via
-///   cross-multiplication, producing `expected_delta = V_col · U_col^{-1}`.
+/// - **Prover path**: collect `(m_i, d_i)` fractions via `ProverLookupBuilder` on each row, then
+///   `accumulate` runs batched Montgomery inversion + per-column partial sums to produce
+///   `aux[col][r+1] - aux[col][r] = Σ m_i · d_i^{-1}`.
+/// - **Constraint path**: `ColumnOracleBuilder` evaluates `ProcessorAir` row-by-row using the same
+///   `(U_g, V_g)` algebra the constraint system uses, folded per column via cross-multiplication,
+///   producing `expected_delta = V_col · U_col^{-1}`.
 ///
 /// A divergence means either the prover path or the oracle has a bug — fix the root cause.
 #[test]

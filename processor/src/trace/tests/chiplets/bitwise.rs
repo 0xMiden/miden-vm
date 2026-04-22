@@ -9,10 +9,7 @@
 
 use alloc::vec::Vec;
 
-use miden_air::{
-    logup::BitwiseMsg,
-    trace::chiplets::BITWISE_SELECTOR_COL_IDX,
-};
+use miden_air::{logup::BitwiseMsg, trace::chiplets::BITWISE_SELECTOR_COL_IDX};
 use miden_core::{
     Felt,
     operations::{Operation, opcodes},

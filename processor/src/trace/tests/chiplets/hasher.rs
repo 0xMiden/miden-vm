@@ -738,4 +738,3 @@ fn word_to_ints(word: Word) -> [u64; 4] {
         word[3].as_canonical_u64(),
     ]
 }
-

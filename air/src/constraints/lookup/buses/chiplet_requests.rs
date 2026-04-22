@@ -516,12 +516,22 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
                             );
                             b.remove(
                                 "cryptostream_write0",
-                                MemoryMsg::write_word(sys_ctx.into(), dst0, clk.into(), cipher_word0),
+                                MemoryMsg::write_word(
+                                    sys_ctx.into(),
+                                    dst0,
+                                    clk.into(),
+                                    cipher_word0,
+                                ),
                                 Deg { n: 4, d: 5 },
                             );
                             b.remove(
                                 "cryptostream_write1",
-                                MemoryMsg::write_word(sys_ctx.into(), dst1, clk.into(), cipher_word1),
+                                MemoryMsg::write_word(
+                                    sys_ctx.into(),
+                                    dst1,
+                                    clk.into(),
+                                    cipher_word1,
+                                ),
                                 Deg { n: 4, d: 5 },
                             );
                         },
