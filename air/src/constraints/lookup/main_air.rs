@@ -142,11 +142,11 @@ where
     }
 
     fn max_message_width(&self) -> usize {
-        // The main-trace M3 column emits `HasherMsg::State` variants (linear_hash_init /
-        // return_state) in the HPERM and LOGPRECOMPILE paths. That's the widest payload any
-        // main-trace message carries: label@β⁰, addr@β¹, node_index@β², state[0..12]@β³..β¹⁴
-        // — 15 slots total. Matches `ProcessorAir::max_message_width` (LookupAir impl).
-        15
+        // Must match `ProcessorAir::max_message_width` since this sub-AIR shares the
+        // aggregator's bus-prefix table. The widest main-trace payload is
+        // `HasherMsg::State` (linear_hash_init / return_state) at 15 slots, but the
+        // aggregator's `MIDEN_MAX_MESSAGE_WIDTH = 16` is kept for MASM transcript alignment.
+        super::messages::MIDEN_MAX_MESSAGE_WIDTH
     }
 
     fn num_bus_ids(&self) -> usize {

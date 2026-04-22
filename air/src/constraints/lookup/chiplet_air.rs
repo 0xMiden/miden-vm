@@ -116,10 +116,11 @@ where
     }
 
     fn max_message_width(&self) -> usize {
-        // `HasherMsg::State` on the C1 chiplet-responses column carries the widest payload:
-        // label@β⁰, addr@β¹, node_index@β², state[0..12]@β³..β¹⁴ — 15 slots total. Matches
-        // `ProcessorAir::max_message_width` (LookupAir impl).
-        15
+        // Must match `ProcessorAir::max_message_width` since this sub-AIR shares the
+        // aggregator's bus-prefix table. The widest chiplet-trace payload is
+        // `HasherMsg::State` on the responses column at 15 slots, but the aggregator's
+        // `MIDEN_MAX_MESSAGE_WIDTH = 16` is kept for MASM transcript alignment.
+        super::messages::MIDEN_MAX_MESSAGE_WIDTH
     }
 
     fn num_bus_ids(&self) -> usize {
