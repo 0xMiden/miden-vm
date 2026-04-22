@@ -83,33 +83,27 @@ impl BusId {
 // HASHER MESSAGES
 // ================================================================================================
 
-/// Hasher chiplet message. Variants differ by payload size.
+/// Hasher chiplet message: a [`BusId`] tag plus a variable-width payload.
 ///
-/// Constructed via associated functions — the interaction kind is baked in by each constructor.
-/// Encodes as `bus_prefix[kind] + [addr, node_index, ...payload]`.
+/// All hasher messages encode as `bus_prefix[kind] + [addr, node_index, ...payload]`; only
+/// the payload width differs between variants.
 #[derive(Clone, Debug)]
-pub enum HasherMsg<E> {
-    /// 15-element message: addr + node_index + 12-lane sponge state.
-    State {
-        kind: BusId,
-        addr: E,
-        node_index: E,
-        state: [E; 12],
-    },
-    /// 11-element message: addr + node_index + 8-lane rate.
-    Rate {
-        kind: BusId,
-        addr: E,
-        node_index: E,
-        rate: [E; 8],
-    },
-    /// 7-element message: addr + node_index + 4-element word/digest.
-    Word {
-        kind: BusId,
-        addr: E,
-        node_index: E,
-        word: [E; 4],
-    },
+pub struct HasherMsg<E> {
+    pub kind: BusId,
+    pub addr: E,
+    pub node_index: E,
+    pub payload: HasherPayload<E>,
+}
+
+/// Payload for a [`HasherMsg`]; width varies per interaction kind.
+#[derive(Clone, Debug)]
+pub enum HasherPayload<E> {
+    /// 12-lane sponge state.
+    State([E; 12]),
+    /// 8-lane rate.
+    Rate([E; 8]),
+    /// 4-element word/digest.
+    Word([E; 4]),
 }
 
 impl<E: PrimeCharacteristicRing + Clone> HasherMsg<E> {
@@ -119,11 +113,11 @@ impl<E: PrimeCharacteristicRing + Clone> HasherMsg<E> {
     ///
     /// Used by: HPERM input, LOGPRECOMPILE input.
     pub fn linear_hash_init(addr: E, state: [E; 12]) -> Self {
-        Self::State {
+        Self {
             kind: BusId::HasherLinearHashInit,
             addr,
             node_index: E::ZERO,
-            state,
+            payload: HasherPayload::State(state),
         }
     }
 
@@ -131,24 +125,25 @@ impl<E: PrimeCharacteristicRing + Clone> HasherMsg<E> {
     ///
     /// Used by: JOIN, SPLIT, LOOP, SPAN, CALL, SYSCALL, DYN, DYNCALL.
     pub fn control_block(addr: E, rate: &[E; 8], opcode: u8) -> Self {
-        Self::State {
+        let state = [
+            rate[0].clone(),
+            rate[1].clone(),
+            rate[2].clone(),
+            rate[3].clone(),
+            rate[4].clone(),
+            rate[5].clone(),
+            rate[6].clone(),
+            rate[7].clone(),
+            E::ZERO,
+            E::from_u16(opcode as u16),
+            E::ZERO,
+            E::ZERO,
+        ];
+        Self {
             kind: BusId::HasherLinearHashInit,
             addr,
             node_index: E::ZERO,
-            state: [
-                rate[0].clone(),
-                rate[1].clone(),
-                rate[2].clone(),
-                rate[3].clone(),
-                rate[4].clone(),
-                rate[5].clone(),
-                rate[6].clone(),
-                rate[7].clone(),
-                E::ZERO,
-                E::from_u16(opcode as u16),
-                E::ZERO,
-                E::ZERO,
-            ],
+            payload: HasherPayload::State(state),
         }
     }
 
@@ -156,11 +151,11 @@ impl<E: PrimeCharacteristicRing + Clone> HasherMsg<E> {
     ///
     /// Used by: HPERM output, LOGPRECOMPILE output.
     pub fn return_state(addr: E, state: [E; 12]) -> Self {
-        Self::State {
+        Self {
             kind: BusId::HasherReturnState,
             addr,
             node_index: E::ZERO,
-            state,
+            payload: HasherPayload::State(state),
         }
     }
 
@@ -170,11 +165,11 @@ impl<E: PrimeCharacteristicRing + Clone> HasherMsg<E> {
     ///
     /// Used by: RESPAN.
     pub fn absorption(addr: E, rate: [E; 8]) -> Self {
-        Self::Rate {
+        Self {
             kind: BusId::HasherAbsorption,
             addr,
             node_index: E::ZERO,
-            rate,
+            payload: HasherPayload::Rate(rate),
         }
     }
 
@@ -184,11 +179,11 @@ impl<E: PrimeCharacteristicRing + Clone> HasherMsg<E> {
     ///
     /// Used by: END, MPVERIFY output, MRUPDATE output.
     pub fn return_hash(addr: E, word: [E; 4]) -> Self {
-        Self::Word {
+        Self {
             kind: BusId::HasherReturnHash,
             addr,
             node_index: E::ZERO,
-            word,
+            payload: HasherPayload::Word(word),
         }
     }
 
@@ -196,11 +191,11 @@ impl<E: PrimeCharacteristicRing + Clone> HasherMsg<E> {
     ///
     /// Used by: MPVERIFY input.
     pub fn merkle_verify_init(addr: E, node_index: E, word: [E; 4]) -> Self {
-        Self::Word {
+        Self {
             kind: BusId::HasherMerkleVerifyInit,
             addr,
             node_index,
-            word,
+            payload: HasherPayload::Word(word),
         }
     }
 
@@ -208,11 +203,11 @@ impl<E: PrimeCharacteristicRing + Clone> HasherMsg<E> {
     ///
     /// Used by: MRUPDATE old input.
     pub fn merkle_old_init(addr: E, node_index: E, word: [E; 4]) -> Self {
-        Self::Word {
+        Self {
             kind: BusId::HasherMerkleOldInit,
             addr,
             node_index,
-            word,
+            payload: HasherPayload::Word(word),
         }
     }
 
@@ -220,11 +215,11 @@ impl<E: PrimeCharacteristicRing + Clone> HasherMsg<E> {
     ///
     /// Used by: MRUPDATE new input.
     pub fn merkle_new_init(addr: E, node_index: E, word: [E; 4]) -> Self {
-        Self::Word {
+        Self {
             kind: BusId::HasherMerkleNewInit,
             addr,
             node_index,
-            word,
+            payload: HasherPayload::Word(word),
         }
     }
 }
@@ -558,30 +553,21 @@ where
 {
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
         let bp = &challenges.beta_powers;
-        let bus = match self {
-            Self::State { kind, .. } | Self::Rate { kind, .. } | Self::Word { kind, .. } => {
-                *kind as usize
-            },
-        };
-        let mut acc = challenges.bus_prefix[bus].clone();
-        match self {
-            Self::State { addr, node_index, state, .. } => {
-                acc += bp[0].clone() * addr.clone();
-                acc += bp[1].clone() * node_index.clone();
+        let mut acc = challenges.bus_prefix[self.kind as usize].clone();
+        acc += bp[0].clone() * self.addr.clone();
+        acc += bp[1].clone() * self.node_index.clone();
+        match &self.payload {
+            HasherPayload::State(state) => {
                 for i in 0..12 {
                     acc += bp[i + 2].clone() * state[i].clone();
                 }
             },
-            Self::Rate { addr, node_index, rate, .. } => {
-                acc += bp[0].clone() * addr.clone();
-                acc += bp[1].clone() * node_index.clone();
+            HasherPayload::Rate(rate) => {
                 for i in 0..8 {
                     acc += bp[i + 2].clone() * rate[i].clone();
                 }
             },
-            Self::Word { addr, node_index, word, .. } => {
-                acc += bp[0].clone() * addr.clone();
-                acc += bp[1].clone() * node_index.clone();
+            HasherPayload::Word(word) => {
                 for i in 0..4 {
                     acc += bp[i + 2].clone() * word[i].clone();
                 }

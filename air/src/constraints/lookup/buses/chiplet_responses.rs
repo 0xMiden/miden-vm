@@ -22,7 +22,8 @@ use crate::{
         lookup::{
             chiplet_air::{ChipletBusContext, ChipletLookupBuilder},
             messages::{
-                AceInitMsg, BitwiseMsg, BusId, HasherMsg, KernelRomMsg, MemoryResponseMsg,
+                AceInitMsg, BitwiseMsg, BusId, HasherMsg, HasherPayload, KernelRomMsg,
+                MemoryResponseMsg,
             },
         },
         utils::BoolNot,
@@ -150,11 +151,11 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
                                     cap[i - 8].into()
                                 }
                             });
-                            HasherMsg::State {
+                            HasherMsg {
                                 kind: BusId::HasherLinearHashInit,
                                 addr,
                                 node_index: LB::Expr::ZERO,
-                                state,
+                                payload: HasherPayload::State(state),
                             }
                         },
                         Deg { n: 5, d: 6 },
@@ -169,11 +170,11 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
                             let rate: [LB::Expr; 8] = array::from_fn(|i| {
                                 if i < 4 { rate_0[i].into() } else { rate_1[i - 4].into() }
                             });
-                            HasherMsg::Rate {
+                            HasherMsg {
                                 kind: BusId::HasherAbsorption,
                                 addr,
                                 node_index: LB::Expr::ZERO,
-                                rate,
+                                payload: HasherPayload::Rate(rate),
                             }
                         },
                         Deg { n: 5, d: 6 },
@@ -201,7 +202,12 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
                                     one_minus_bit.clone() * rate_0[i].into()
                                         + bit.clone() * rate_1[i].into()
                                 });
-                                HasherMsg::Word { kind, addr, node_index, word }
+                                HasherMsg {
+                                    kind,
+                                    addr,
+                                    node_index,
+                                    payload: HasherPayload::Word(word),
+                                }
                             },
                             Deg { n: 5, d: 7 },
                         );
@@ -215,11 +221,11 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
                             let addr = clk_plus_one.clone();
                             let node_index: LB::Expr = ctrl.node_index.into();
                             let word: [LB::Expr; 4] = rate_0.map(LB::Expr::from);
-                            HasherMsg::Word {
+                            HasherMsg {
                                 kind: BusId::HasherReturnHash,
                                 addr,
                                 node_index,
-                                word,
+                                payload: HasherPayload::Word(word),
                             }
                         },
                         Deg { n: 4, d: 5 },
@@ -240,11 +246,11 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
                                     cap[i - 8].into()
                                 }
                             });
-                            HasherMsg::State {
+                            HasherMsg {
                                 kind: BusId::HasherReturnState,
                                 addr,
                                 node_index: LB::Expr::ZERO,
-                                state,
+                                payload: HasherPayload::State(state),
                             }
                         },
                         Deg { n: 5, d: 6 },
