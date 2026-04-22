@@ -179,78 +179,33 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
                         Deg { n: 5, d: 6 },
                     );
 
-                    // MP_VERIFY input: leaf word. `leaf = (1-bit)·rate_0 + bit·rate_1` where
-                    // `bit = node_index - 2·node_index_next` is the current Merkle direction bit.
-                    g.add(
-                        "mp_verify_input",
-                        f_mp,
-                        || {
-                            let addr = clk_plus_one.clone();
-                            let node_index: LB::Expr = ctrl.node_index.into();
-                            let bit: LB::Expr =
-                                node_index.clone() - ctrl_next.node_index.into().double();
-                            let one_minus_bit = bit.not();
-                            let word: [LB::Expr; 4] = array::from_fn(|i| {
-                                one_minus_bit.clone() * rate_0[i].into()
-                                    + bit.clone() * rate_1[i].into()
-                            });
-                            HasherMsg::Word {
-                                kind: BusId::HasherMerkleVerifyInit,
-                                addr,
-                                node_index,
-                                word,
-                            }
-                        },
-                        Deg { n: 5, d: 7 },
-                    );
-
-                    // MR_UPDATE_OLD input: leaf word.
-                    g.add(
-                        "mr_update_old_input",
-                        f_mv,
-                        || {
-                            let addr = clk_plus_one.clone();
-                            let node_index: LB::Expr = ctrl.node_index.into();
-                            let bit: LB::Expr =
-                                node_index.clone() - ctrl_next.node_index.into().double();
-                            let one_minus_bit = bit.not();
-                            let word: [LB::Expr; 4] = array::from_fn(|i| {
-                                one_minus_bit.clone() * rate_0[i].into()
-                                    + bit.clone() * rate_1[i].into()
-                            });
-                            HasherMsg::Word {
-                                kind: BusId::HasherMerkleOldInit,
-                                addr,
-                                node_index,
-                                word,
-                            }
-                        },
-                        Deg { n: 5, d: 7 },
-                    );
-
-                    // MR_UPDATE_NEW input: leaf word.
-                    g.add(
-                        "mr_update_new_input",
-                        f_mu,
-                        || {
-                            let addr = clk_plus_one.clone();
-                            let node_index: LB::Expr = ctrl.node_index.into();
-                            let bit: LB::Expr =
-                                node_index.clone() - ctrl_next.node_index.into().double();
-                            let one_minus_bit = bit.not();
-                            let word: [LB::Expr; 4] = array::from_fn(|i| {
-                                one_minus_bit.clone() * rate_0[i].into()
-                                    + bit.clone() * rate_1[i].into()
-                            });
-                            HasherMsg::Word {
-                                kind: BusId::HasherMerkleNewInit,
-                                addr,
-                                node_index,
-                                word,
-                            }
-                        },
-                        Deg { n: 5, d: 7 },
-                    );
+                    // Merkle leaf-word inputs for MP_VERIFY / MR_UPDATE_OLD / MR_UPDATE_NEW.
+                    // Each fires on its own controller flag; all three encode
+                    // `leaf = (1-bit)·rate_0 + bit·rate_1` with `bit = node_index -
+                    // 2·node_index_next` (the current Merkle direction bit).
+                    for (name, flag, kind) in [
+                        ("mp_verify_input", f_mp, BusId::HasherMerkleVerifyInit),
+                        ("mr_update_old_input", f_mv, BusId::HasherMerkleOldInit),
+                        ("mr_update_new_input", f_mu, BusId::HasherMerkleNewInit),
+                    ] {
+                        g.add(
+                            name,
+                            flag,
+                            || {
+                                let addr = clk_plus_one.clone();
+                                let node_index: LB::Expr = ctrl.node_index.into();
+                                let bit: LB::Expr =
+                                    node_index.clone() - ctrl_next.node_index.into().double();
+                                let one_minus_bit = bit.not();
+                                let word: [LB::Expr; 4] = array::from_fn(|i| {
+                                    one_minus_bit.clone() * rate_0[i].into()
+                                        + bit.clone() * rate_1[i].into()
+                                });
+                                HasherMsg::Word { kind, addr, node_index, word }
+                            },
+                            Deg { n: 5, d: 7 },
+                        );
+                    }
 
                     // HOUT: digest = rate_0.
                     g.add(
