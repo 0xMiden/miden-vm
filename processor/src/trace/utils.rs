@@ -278,7 +278,6 @@ pub(crate) fn split_u32_into_u16(value: u64) -> (u16, u16) {
 /// values its `Push` ops emit. Consumed by decoder / hasher tests that exercise multi-batch
 /// SPAN execution.
 #[cfg(test)]
-#[allow(dead_code)]
 pub fn build_span_with_respan_ops() -> (Vec<Operation>, Vec<Felt>) {
     let iv = [1, 3, 5, 7, 9, 11, 13, 15, 17].to_elements();
     let ops = alloc::vec![
