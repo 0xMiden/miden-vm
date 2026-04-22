@@ -28,11 +28,11 @@ use miden_crypto::{
 use super::super::{Challenges, Deg, LookupAir};
 use crate::Felt;
 
-pub mod builder;
 pub mod degree;
+pub mod encoding;
 
-pub use builder::EncodingCheckBuilder;
 pub use degree::DegreeCheckBuilder;
+pub use encoding::EncodingCheckBuilder;
 
 // VALIDATION ERROR
 // ================================================================================================
