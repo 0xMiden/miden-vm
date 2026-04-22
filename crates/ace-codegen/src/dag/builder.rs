@@ -256,7 +256,7 @@ mod tests {
     use crate::layout::InputKey;
 
     fn felt(value: u64) -> QuadFelt {
-        QuadFelt::from(Felt::new(value))
+        QuadFelt::from(Felt::new_unchecked(value))
     }
 
     #[test]

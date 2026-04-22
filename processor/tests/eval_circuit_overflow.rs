@@ -9,9 +9,9 @@ use miden_processor::{
 
 #[test]
 fn eval_circuit_overflow_panic_check() {
-    let ptr = Felt::new(0);
-    let n_read = Felt::new(Felt::ORDER_U64 - 3); // = 2^64 - 2^32 - 2
-    let n_eval = Felt::new((1u64 << 32) + 4); // = 2^32 + 4
+    let ptr = Felt::new_unchecked(0);
+    let n_read = Felt::new_unchecked(Felt::ORDER_U64 - 3); // = 2^64 - 2^32 - 2
+    let n_eval = Felt::new_unchecked((1u64 << 32) + 4); // = 2^32 + 4
 
     let stack_inputs = StackInputs::new(&[ptr, n_read, n_eval]).unwrap();
 

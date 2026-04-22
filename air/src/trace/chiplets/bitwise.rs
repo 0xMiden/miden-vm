@@ -18,13 +18,13 @@ pub const OP_CYCLE_LEN: usize = 8;
 pub const BITWISE_AND: Felt = ZERO;
 /// Unique label computed as 1 plus the full chiplet selector with the bits reversed.
 /// `selector = [1, 0 | 0]`, `flag = rev(selector) + 1 = [0 | 0, 1] + 1 = 2`
-pub const BITWISE_AND_LABEL: Felt = Felt::new(0b001 + 1);
+pub const BITWISE_AND_LABEL: Felt = Felt::new_unchecked(0b001 + 1);
 
 /// Specifies a bitwise XOR operation.
 pub const BITWISE_XOR: Felt = ONE;
 /// Unique label computed as 1 plus the full chiplet selector with the bits reversed.
 /// `selector = [1, 0 | 1]`, `flag = rev(selector) + 1 = [1 | 0, 1] + 1 = 6`
-pub const BITWISE_XOR_LABEL: Felt = Felt::new(0b101 + 1);
+pub const BITWISE_XOR_LABEL: Felt = Felt::new_unchecked(0b101 + 1);
 
 // --- INPUT DECOMPOSITION ------------------------------------------------------------------------
 

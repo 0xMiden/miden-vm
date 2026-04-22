@@ -1,38 +1,59 @@
 begin
     # push the root of the Partial Merkle Tree on the stack
-    push.[16822663461127792392, 13353258177390434098, 2416982434710942653, 7676447709976871076]
+    push.[12598010592505582824, 868370131607961867, 13428921982874124294, 13514551084444143236]
+    # => [PMT_ROOT]
 
     # get value at depth = 2, index = 0 from the Partial Merkle Tree; this value should be 20
     push.0.2
+    # => [2, 0, PMT_ROOT]
     mtree_get
+    # => [PMT_VALUE, PMT_ROOT]
+
     # check that returned value is equal to 20
     push.[20,0,0,0]
+    # => [EXPECTED_VALUE, PMT_VALUE, PMT_ROOT]
     assert_eqw
+    # => [PMT_ROOT]
 
     dropw
+    # => []
 
     # push the root of the Sparse Merkle Tree on the stack
-    push.[11789474913582628944, 10542203670838121629, 14970381554615752019, 10887162719400902293]
+    push.[7504381463224585554, 3191971290185126131, 213169417210918065, 17616398227807096838]
+    # => [SMT_ROOT]
 
     # get value at depth = 64, index = 1 from the Sparse Merkle Tree; this value should be 21
     push.1.64
+    # => [64, 1, SMT_ROOT]
     mtree_get
+    # => [SMT_VALUE, SMT_ROOT]
+
     # check that returned value is equal to 21
     push.[21,0,0,0]
+    # => [EXPECTED_VALUE, SMT_VALUE, SMT_ROOT]
     assert_eqw
+    # => [SMT_ROOT]
 
     dropw
+    # => []
 
     # push the root of the Merkle Tree on the stack
-    push.[937566728702260333, 10423322521195732810, 16243291006317403500, 12736773875258955401]
+    push.[6611496865107420098, 2171421300812663290, 5052678114877406371, 9772299691978421006]
+    # => [MT_ROOT]
 
     # get value at depth = 2, index = 2 from the Merkle Tree; this value should be 22
     push.2.2
+    # => [2, 2, MT_ROOT]
     mtree_get
+    # => [MT_VALUE, MT_ROOT]
+
     # check that returned value is equal to 22
     push.[22,0,0,0]
+    # => [EXPECTED_VALUE, MT_VALUE, MT_ROOT]
     assert_eqw
+    # => [MT_ROOT]
 
     dropw
+    # => []
 
 end

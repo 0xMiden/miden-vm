@@ -213,7 +213,7 @@ impl Deserializable for DebugVarLocation {
             1 => Ok(Self::Memory(source.read_u32()?)),
             2 => {
                 let value = source.read_u64()?;
-                Ok(Self::Const(Felt::new(value)))
+                Ok(Self::Const(Felt::new_unchecked(value)))
             },
             3 => {
                 let bytes = source.read_array::<2>()?;
@@ -301,7 +301,7 @@ mod tests {
     fn debug_var_location_display() {
         assert_eq!(DebugVarLocation::Stack(0).to_string(), "stack[0]");
         assert_eq!(DebugVarLocation::Memory(256).to_string(), "mem[256]");
-        assert_eq!(DebugVarLocation::Const(Felt::new(42)).to_string(), "const(42)");
+        assert_eq!(DebugVarLocation::Const(Felt::new_unchecked(42)).to_string(), "const(42)");
         assert_eq!(DebugVarLocation::Local(-3).to_string(), "FMP-3");
         assert_eq!(
             DebugVarLocation::Expression(vec![0x10, 0x20, 0x30]).to_string(),
@@ -314,7 +314,7 @@ mod tests {
         let locations = [
             DebugVarLocation::Stack(7),
             DebugVarLocation::Memory(0xdead_beef),
-            DebugVarLocation::Const(Felt::new(999)),
+            DebugVarLocation::Const(Felt::new_unchecked(999)),
             DebugVarLocation::Local(-3),
             DebugVarLocation::Expression(vec![0x10, 0x20, 0x30]),
         ];

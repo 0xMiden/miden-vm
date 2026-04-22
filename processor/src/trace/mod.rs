@@ -492,7 +492,7 @@ impl<EF: ExtensionField<Felt>> AuxBuilder<Felt, EF> for AuxTraceBuilders {
             let last_program_row = if num_rows <= 1 {
                 0
             } else if main.get(num_rows - 1, 0).expect("valid indices")
-                == clk0 + Felt::new((num_rows - 1) as u64)
+                == clk0 + Felt::new_unchecked((num_rows - 1) as u64)
             {
                 num_rows - 1
             } else {
@@ -500,7 +500,7 @@ impl<EF: ExtensionField<Felt>> AuxBuilder<Felt, EF> for AuxTraceBuilders {
                 let mut hi = num_rows - 1;
                 while lo < hi {
                     let mid = lo + (hi - lo) / 2;
-                    let expected = clk0 + Felt::new(mid as u64);
+                    let expected = clk0 + Felt::new_unchecked(mid as u64);
                     if main.get(mid, 0).expect("valid indices") == expected {
                         lo = mid + 1;
                     } else {

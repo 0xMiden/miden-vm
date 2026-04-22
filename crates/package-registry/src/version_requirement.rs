@@ -5,7 +5,7 @@ use miden_assembly_syntax::debuginfo::Span;
 use serde::{Deserialize, Serialize};
 
 use super::*;
-use crate::{LexicographicWord, Word};
+use crate::Word;
 
 /// Represents a requirement on a specific version (or versions) of a dependency.
 #[derive(Debug, Clone)]
@@ -54,9 +54,7 @@ impl PartialEq for VersionRequirement {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::Exact(l), Self::Exact(r)) => l == r,
-            (Self::Digest(l), Self::Digest(r)) => {
-                LexicographicWord::new(l.into_inner()) == LexicographicWord::new(r.into_inner())
-            },
+            (Self::Digest(l), Self::Digest(r)) => l.into_inner() == r.into_inner(),
             (Self::Semantic(l), Self::Semantic(r)) => l == r,
             (Self::Semantic(_) | Self::Exact(_), Self::Digest(_))
             | (Self::Semantic(_), Self::Exact(_))

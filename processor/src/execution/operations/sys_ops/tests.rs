@@ -94,7 +94,7 @@ fn build_expected(values: &[u64]) -> vec::Vec<Felt> {
     let mut expected = vec![ZERO; 16];
     for (i, &value) in values.iter().enumerate() {
         // In the result, top of stack is at index 15, second at 14, etc.
-        expected[15 - i] = Felt::new(value);
+        expected[15 - i] = Felt::new_unchecked(value);
     }
     expected
 }

@@ -50,10 +50,10 @@ impl ToElements for Vec<u64> {
 pub fn hash_string_to_word<'a>(value: impl Into<&'a str>) -> Word {
     let digest_bytes: [u8; 32] = Blake3_256::hash(value.into().as_bytes()).into();
     [
-        Felt::new(u64::from_le_bytes(digest_bytes[0..8].try_into().unwrap())),
-        Felt::new(u64::from_le_bytes(digest_bytes[8..16].try_into().unwrap())),
-        Felt::new(u64::from_le_bytes(digest_bytes[16..24].try_into().unwrap())),
-        Felt::new(u64::from_le_bytes(digest_bytes[24..32].try_into().unwrap())),
+        Felt::new_unchecked(u64::from_le_bytes(digest_bytes[0..8].try_into().unwrap())),
+        Felt::new_unchecked(u64::from_le_bytes(digest_bytes[8..16].try_into().unwrap())),
+        Felt::new_unchecked(u64::from_le_bytes(digest_bytes[16..24].try_into().unwrap())),
+        Felt::new_unchecked(u64::from_le_bytes(digest_bytes[24..32].try_into().unwrap())),
     ]
     .into()
 }

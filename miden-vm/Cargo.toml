@@ -93,6 +93,7 @@ bincode = { workspace = true }
 criterion = { workspace = true, features = ["async_tokio"] }
 escargot = { version = "0.5" }
 miden-processor = { workspace = true, features = ["testing"] }
+miden-lifted-stark.workspace = true
 miden-utils-testing.workspace = true
 num-bigint = { workspace = true }
 predicates = { version = "3.1" }

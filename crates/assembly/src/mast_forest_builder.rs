@@ -1003,15 +1003,15 @@ mod tests {
         // This will result in padding after Push(2) because Push operations get padded
         // Note: the following unpadded operations are 9 in number, indexed 0 to 8
         let block1_ops = vec![
-            Operation::Push(Felt::new(1)),
+            Operation::Push(Felt::new_unchecked(1)),
             Operation::Drop,
             Operation::Drop,
             Operation::Drop,
             Operation::Drop,
             Operation::Drop,
             Operation::Drop,
-            Operation::Push(Felt::new(2)),
-            Operation::Push(Felt::new(3)),
+            Operation::Push(Felt::new_unchecked(2)),
+            Operation::Push(Felt::new_unchecked(3)),
         ]; // [push drop drop drop drop drop drop push noop] [1] [2] [push noop] [3] [noop] [noop] [noop]
         let block1_raw_ops_len = block1_ops.len();
 
@@ -1036,7 +1036,7 @@ mod tests {
 
         // Create second block with operations
         // Block2: [Push(4), Mul]
-        let block2_ops = vec![Operation::Push(Felt::new(4)), Operation::Mul];
+        let block2_ops = vec![Operation::Push(Felt::new_unchecked(4)), Operation::Mul];
 
         // Add decorators for each operation in block2
         let block2_decorator1 = builder.ensure_decorator(Decorator::Trace(4)).unwrap();
@@ -1095,7 +1095,7 @@ mod tests {
                             0 => {
                                 // Should be Push(1) from block1
                                 match &merged_ops[op_idx] {
-                                    Operation::Push(x) if *x == Felt::new(1) => {
+                                    Operation::Push(x) if *x == Felt::new_unchecked(1) => {
                                         assert_eq!(
                                             *trace_value, 1,
                                             "Decorator for Push(1) should have trace value 1"
@@ -1107,7 +1107,7 @@ mod tests {
                             7 => {
                                 // Should be Push(2) from block1
                                 match &merged_ops[op_idx] {
-                                    Operation::Push(x) if *x == Felt::new(2) => {
+                                    Operation::Push(x) if *x == Felt::new_unchecked(2) => {
                                         assert_eq!(
                                             *trace_value, 2,
                                             "Decorator for Push(2) should have trace value 2"
@@ -1119,7 +1119,7 @@ mod tests {
                             9 => {
                                 // Should be Push(3) from block1
                                 match &merged_ops[op_idx] {
-                                    Operation::Push(x) if *x == Felt::new(3) => {
+                                    Operation::Push(x) if *x == Felt::new_unchecked(3) => {
                                         assert_eq!(
                                             *trace_value, 3,
                                             "Decorator for Push(3) should have trace value 3"
@@ -1131,7 +1131,7 @@ mod tests {
                             10 => {
                                 // Should be Push(4) from block2
                                 match &merged_ops[op_idx] {
-                                    Operation::Push(x) if *x == Felt::new(4) => {
+                                    Operation::Push(x) if *x == Felt::new_unchecked(4) => {
                                         assert_eq!(
                                             *trace_value, 4,
                                             "Decorator for Push(4) should have trace value 4"

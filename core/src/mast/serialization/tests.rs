@@ -186,7 +186,7 @@ fn serialize_deserialize_all_nodes() {
             Operation::MovDn8,
             Operation::CSwap,
             Operation::CSwapW,
-            Operation::Push(Felt::new(45)),
+            Operation::Push(Felt::new_unchecked(45)),
             Operation::AdvPop,
             Operation::AdvPopW,
             Operation::MLoadW,
@@ -624,8 +624,8 @@ fn test_opbatch_roundtrip_preservation() {
 
     let operations = vec![
         Operation::Add,
-        Operation::Push(Felt::new(100)),
-        Operation::Push(Felt::new(200)),
+        Operation::Push(Felt::new_unchecked(100)),
+        Operation::Push(Felt::new_unchecked(200)),
         Operation::Mul,
     ];
 
@@ -644,7 +644,7 @@ fn test_opbatch_roundtrip_preservation() {
 #[test]
 fn test_multi_batch_roundtrip() {
     let mut forest = MastForest::new();
-    let operations: Vec<_> = (0..80).map(|i| Operation::Push(Felt::new(i))).collect();
+    let operations: Vec<_> = (0..80).map(|i| Operation::Push(Felt::new_unchecked(i))).collect();
 
     let block_id = BasicBlockNodeBuilder::new(operations, Vec::new())
         .add_to_forest(&mut forest)
@@ -669,7 +669,7 @@ fn test_decorator_indices_preserved_with_padding() {
     let operations = vec![
         Operation::Add,
         Operation::Mul,
-        Operation::Push(Felt::new(100)), // Will cause padding
+        Operation::Push(Felt::new_unchecked(100)), // Will cause padding
         Operation::Drop,
     ];
 
@@ -724,8 +724,12 @@ fn test_raw_vs_batched_construction_equivalence() {
     let decorator_id1 = forest1.add_decorator(Decorator::Trace(1)).unwrap();
     let _decorator_id2 = forest2.add_decorator(Decorator::Trace(1)).unwrap();
 
-    let operations =
-        vec![Operation::Add, Operation::Mul, Operation::Push(Felt::new(100)), Operation::Drop];
+    let operations = vec![
+        Operation::Add,
+        Operation::Mul,
+        Operation::Push(Felt::new_unchecked(100)),
+        Operation::Drop,
+    ];
 
     // Path 1: Raw construction
     let block_id1 = BasicBlockNodeBuilder::new(operations, vec![(2, decorator_id1)])
@@ -773,7 +777,7 @@ fn test_raw_batched_digest_equivalence() {
     let operations = vec![
         Operation::Add,
         Operation::Mul,
-        Operation::Push(Felt::new(42)),
+        Operation::Push(Felt::new_unchecked(42)),
         Operation::Drop,
         Operation::Dup0,
     ];
@@ -803,8 +807,8 @@ fn test_batched_construction_preserves_structure() {
     let operations = vec![
         Operation::Add,
         Operation::Mul,
-        Operation::Push(Felt::new(100)),
-        Operation::Push(Felt::new(200)),
+        Operation::Push(Felt::new_unchecked(100)),
+        Operation::Push(Felt::new_unchecked(200)),
     ];
 
     let block_id = BasicBlockNodeBuilder::new(operations, Vec::new())
@@ -1089,7 +1093,7 @@ mod proptests {
                 prop::sample::select(vec![
                     Operation::Add,
                     Operation::Mul,
-                    Operation::Push(Felt::new(42)),
+                    Operation::Push(Felt::new_unchecked(42)),
                     Operation::Drop,
                     Operation::Dup0,
                     Operation::Swap,
@@ -1165,7 +1169,7 @@ mod proptests {
                     prop::sample::select(vec![
                         Operation::Add,
                         Operation::Mul,
-                        Operation::Push(Felt::new(99)),
+                        Operation::Push(Felt::new_unchecked(99)),
                         Operation::Drop,
                         Operation::Dup0,
                     ]),
@@ -1511,7 +1515,7 @@ fn build_group(ops: &[Operation]) -> Felt {
     for (i, op) in ops.iter().enumerate() {
         group |= (op.op_code() as u64) << (Operation::OP_BITS * i);
     }
-    Felt::new(group)
+    Felt::new_unchecked(group)
 }
 
 fn make_batch(num_groups: usize, op: Operation) -> OpBatch {
@@ -1530,7 +1534,7 @@ fn make_batch(num_groups: usize, op: Operation) -> OpBatch {
     for pad in padding.iter_mut().skip(num_groups) {
         *pad = true;
     }
-    let mut groups = [Felt::new(0); OP_BATCH_SIZE];
+    let mut groups = [Felt::new_unchecked(0); OP_BATCH_SIZE];
     for group in groups.iter_mut().take(num_groups) {
         *group = build_group(&[op]);
     }
@@ -1744,8 +1748,8 @@ fn test_untrusted_forest_accepts_full_prefix_batch() {
 fn test_untrusted_forest_rejects_basic_block_indptr_that_breaks_push_immediate_commitment() {
     // Two distinct immediates. Using large values reduces the chance of accidental equality with a
     // packed opcode group value.
-    let imm_a = Felt::new(0xdead_beef_dead_beef);
-    let imm_b = Felt::new(0xfeed_face_feed_face);
+    let imm_a = Felt::new_unchecked(0xdead_beef_dead_beef);
+    let imm_b = Felt::new_unchecked(0xfeed_face_feed_face);
 
     let bytes_a = build_malicious_single_block_forest_bytes(imm_a);
     let bytes_b = build_malicious_single_block_forest_bytes(imm_b);

@@ -52,7 +52,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{AsmOpId, Decorator, DecoratorId, MastForestError, MastNodeId};
 use crate::{
-    LexicographicWord, Word,
+    Word,
     mast::serialization::{
         StringTable,
         asm_op::{AsmOpDataBuilder, AsmOpInfo},
@@ -110,7 +110,7 @@ pub struct DebugInfo {
 
     /// Maps MAST root digests to procedure names for debugging purposes.
     #[cfg_attr(feature = "serde", serde(skip))]
-    procedure_names: BTreeMap<LexicographicWord, Arc<str>>,
+    procedure_names: BTreeMap<Word, Arc<str>>,
 }
 
 impl DebugInfo {
@@ -475,12 +475,12 @@ impl DebugInfo {
 
     /// Returns the procedure name for the given MAST root digest, if present.
     pub fn procedure_name(&self, digest: &Word) -> Option<&str> {
-        self.procedure_names.get(&LexicographicWord::from(*digest)).map(AsRef::as_ref)
+        self.procedure_names.get(digest).map(AsRef::as_ref)
     }
 
     /// Returns an iterator over all (digest, name) pairs.
     pub fn procedure_names(&self) -> impl Iterator<Item = (Word, &Arc<str>)> {
-        self.procedure_names.iter().map(|(key, name)| (key.into_inner(), name))
+        self.procedure_names.iter().map(|(key, name)| (*key, name))
     }
 
     /// Returns the number of procedure names.
@@ -490,7 +490,7 @@ impl DebugInfo {
 
     /// Inserts a procedure name for the given MAST root digest.
     pub fn insert_procedure_name(&mut self, digest: Word, name: Arc<str>) {
-        self.procedure_names.insert(LexicographicWord::from(digest), name);
+        self.procedure_names.insert(digest, name);
     }
 
     /// Inserts multiple procedure names at once.
@@ -498,8 +498,7 @@ impl DebugInfo {
     where
         I: IntoIterator<Item = (Word, Arc<str>)>,
     {
-        self.procedure_names
-            .extend(names.into_iter().map(|(d, n)| (LexicographicWord::from(d), n)));
+        self.procedure_names.extend(names);
     }
 
     /// Clears all procedure names.
@@ -637,9 +636,9 @@ impl Deserializable for DebugInfo {
         // Note: Procedure name digests are validated at the MastForest level (in
         // MastForest::validate) to ensure they reference actual procedures in the forest.
         let procedure_names_raw: BTreeMap<Word, String> = Deserializable::read_from(source)?;
-        let procedure_names: BTreeMap<LexicographicWord, Arc<str>> = procedure_names_raw
+        let procedure_names: BTreeMap<Word, Arc<str>> = procedure_names_raw
             .into_iter()
-            .map(|(k, v)| (LexicographicWord::from(k), Arc::from(v.as_str())))
+            .map(|(k, v)| (k, Arc::from(v.as_str())))
             .collect();
 
         // 7. Read AssemblyOps (data, string table, infos)

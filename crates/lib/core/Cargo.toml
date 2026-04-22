@@ -47,6 +47,7 @@ thiserror.workspace = true
 criterion.workspace = true
 miden-ace-codegen.workspace = true
 miden-air.workspace = true
+miden-lifted-stark.workspace = true
 miden-processor = { workspace = true, features = ["testing"] }
 miden-prover.workspace = true
 miden-utils-testing.workspace = true

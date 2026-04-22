@@ -1909,7 +1909,7 @@ IntValue: IntValue = {
         } else if n <= (u32::MAX as u64) {
             Ok(IntValue::U32(n as u32))
         } else {
-            Ok(IntValue::Felt(Felt::new(n)))
+            Ok(IntValue::Felt(Felt::new_unchecked(n)))
         }
     },
 
@@ -1936,7 +1936,7 @@ WordValue: WordValue = {
 
 #[inline]
 Felt: Felt = {
-    <l:@L> <value:IntValue> <r:@R> => Felt::new(value.as_int()),
+    <l:@L> <value:IntValue> <r:@R> => Felt::new_unchecked(value.as_int()),
 }
 
 // SYMBOLS

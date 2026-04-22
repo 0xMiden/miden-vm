@@ -31,7 +31,6 @@ use miden_assembly_syntax::{
     debuginfo::{SourceSpan, Span},
     diagnostics::{Diagnostic, miette},
 };
-pub use miden_core::LexicographicWord;
 pub use miden_mast_package::TargetType;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};

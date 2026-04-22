@@ -863,7 +863,12 @@ fn mast_forest_merge_advice_maps_merged() {
     let id_foo = block_foo().add_to_forest(&mut forest_a).unwrap();
     let id_call_a = CallNodeBuilder::new(id_foo).add_to_forest(&mut forest_a).unwrap();
     forest_a.make_root(id_call_a);
-    let key_a = Word::new([Felt::new(1), Felt::new(2), Felt::new(3), Felt::new(4)]);
+    let key_a = Word::new([
+        Felt::new_unchecked(1),
+        Felt::new_unchecked(2),
+        Felt::new_unchecked(3),
+        Felt::new_unchecked(4),
+    ]);
     let value_a = vec![ONE, ONE];
     forest_a.advice_map_mut().insert(key_a, value_a.clone());
 
@@ -871,8 +876,13 @@ fn mast_forest_merge_advice_maps_merged() {
     let id_bar = block_bar().add_to_forest(&mut forest_b).unwrap();
     let id_call_b = CallNodeBuilder::new(id_bar).add_to_forest(&mut forest_b).unwrap();
     forest_b.make_root(id_call_b);
-    let key_b = Word::new([Felt::new(1), Felt::new(3), Felt::new(2), Felt::new(1)]);
-    let value_b = vec![Felt::new(2), Felt::new(2)];
+    let key_b = Word::new([
+        Felt::new_unchecked(1),
+        Felt::new_unchecked(3),
+        Felt::new_unchecked(2),
+        Felt::new_unchecked(1),
+    ]);
+    let value_b = vec![Felt::new_unchecked(2), Felt::new_unchecked(2)];
     forest_b.advice_map_mut().insert(key_b, value_b.clone());
 
     let (merged, _root_maps) = MastForest::merge([&forest_a, &forest_b]).unwrap();
@@ -890,7 +900,12 @@ fn mast_forest_merge_advice_maps_collision() {
     let id_foo = block_foo().add_to_forest(&mut forest_a).unwrap();
     let id_call_a = CallNodeBuilder::new(id_foo).add_to_forest(&mut forest_a).unwrap();
     forest_a.make_root(id_call_a);
-    let key_a = Word::new([Felt::new(1), Felt::new(2), Felt::new(3), Felt::new(4)]);
+    let key_a = Word::new([
+        Felt::new_unchecked(1),
+        Felt::new_unchecked(2),
+        Felt::new_unchecked(3),
+        Felt::new_unchecked(4),
+    ]);
     let value_a = vec![ONE, ONE];
     forest_a.advice_map_mut().insert(key_a, value_a);
 
@@ -900,7 +915,7 @@ fn mast_forest_merge_advice_maps_collision() {
     forest_b.make_root(id_call_b);
     // The key collides with key_a in the forest_a.
     let key_b = key_a;
-    let value_b = vec![Felt::new(2), Felt::new(2)];
+    let value_b = vec![Felt::new_unchecked(2), Felt::new_unchecked(2)];
     forest_b.advice_map_mut().insert(key_b, value_b);
 
     let err = MastForest::merge([&forest_a, &forest_b]).unwrap_err();

@@ -567,7 +567,7 @@ impl<'a> CoreTraceGenerationTracer<'a> {
 
         // Stack helpers (b0, b1, h0)
         // Note: H0 will be inverted using batch inversion later
-        buf[B0_COL_IDX] = Felt::new(stack.stack_depth() as u64);
+        buf[B0_COL_IDX] = Felt::new_unchecked(stack.stack_depth() as u64);
         buf[B1_COL_IDX] = stack.overflow_addr();
         buf[H0_COL_IDX] = stack.overflow_helper();
         buf
