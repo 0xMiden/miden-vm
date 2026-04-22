@@ -26,7 +26,7 @@ use super::{
     BusId,
     buses::{
         LookupOpFlags,
-        block_hash_and_op_group::{self as block_hash_and_op_group, emit_block_hash_and_op_group},
+        block_hash_and_op_group::{self, emit_block_hash_and_op_group},
         block_stack_and_range_logcap::{self, emit_block_stack_and_range_logcap},
         chiplet_requests::{self, emit_chiplet_requests},
         stack_overflow::{self, emit_stack_overflow},
