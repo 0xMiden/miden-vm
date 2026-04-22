@@ -145,7 +145,7 @@ where
         // The main-trace M3 column emits `HasherMsg::State` variants (linear_hash_init /
         // return_state) in the HPERM and LOGPRECOMPILE paths. That's the widest payload any
         // main-trace message carries: label@β⁰, addr@β¹, node_index@β², state[0..12]@β³..β¹⁴
-        // — 15 slots total. Matches the aggregator's `MidenLookupAir::max_message_width`.
+        // — 15 slots total. Matches `ProcessorAir::max_message_width` (LookupAir impl).
         15
     }
 
@@ -159,8 +159,7 @@ where
 
     fn eval(&self, builder: &mut LB) {
         // Hold the `MainWindow` as an owned value so its borrow on the underlying builder is
-        // released by the time we grab the `&mut builder` for the per-column emitters. Same
-        // pattern as the pre-split `MidenLookupAir::eval`.
+        // released by the time we grab the `&mut builder` for the per-column emitters.
         let main = builder.main();
         let local: &MainCols<_> = main.current_slice().borrow();
         let next: &MainCols<_> = main.next_slice().borrow();

@@ -11,7 +11,7 @@
 //! - [`super::main_air::MainLookupAir`] for the main-trace columns (M1, M_2+5, M3, M4).
 //! - [`super::chiplet_air::ChipletLookupAir`] for the chiplet-trace columns (C1, C2, C3).
 //!
-//! [`super::miden_air::MidenLookupAir`] is a thin aggregator that calls both in sequence,
+//! [`crate::ProcessorAir`]'s `LookupAir` impl is a thin aggregator that calls both in sequence,
 //! preserving the legacy `enforce_main` / `enforce_chiplet` column order for downstream
 //! consumers that want the full 7-column picture in a single `eval` call.
 //!

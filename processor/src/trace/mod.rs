@@ -4,7 +4,6 @@ use core::ops::Range;
 
 use miden_air::{
     AirWitness, ProcessorAir, PublicInputs, debug,
-    logup::MidenLookupAuxBuilder,
     trace::{
         DECODER_TRACE_OFFSET, MainTrace, PADDED_TRACE_WIDTH, TRACE_WIDTH,
         decoder::{NUM_USER_OP_HELPERS, USER_OP_HELPERS_OFFSET},
@@ -176,8 +175,8 @@ impl TraceBuildInputs {
 ///   precompile transcript).
 /// - Summary of trace lengths of the main trace components.
 ///
-/// The auxiliary (LogUp) trace is no longer pre-built here — it is produced on demand by the
-/// stateless [`miden_air::logup::MidenLookupAuxBuilder`] from the main trace and the
+/// The auxiliary (LogUp) trace is no longer pre-built here — it is produced on demand by
+/// [`miden_air::ProcessorAir`]'s stateless `AuxBuilder` impl from the main trace and the
 /// per-proof challenges, see `prover::prove_stark`.
 #[derive(Debug)]
 pub struct ExecutionTrace {
@@ -344,8 +343,6 @@ impl ExecutionTrace {
         let (public_values, kernel_felts) = public_inputs.to_air_inputs();
         let var_len_public_inputs: &[&[Felt]] = &[&kernel_felts];
 
-        let aux_builder = MidenLookupAuxBuilder;
-
         // Derive deterministic challenges by hashing public values with Poseidon2.
         // The 4-element digest maps directly to 2 QuadFelt challenges.
         let digest = crate::crypto::hash::Poseidon2::hash_elements(&public_values);
@@ -353,7 +350,7 @@ impl ExecutionTrace {
             [QuadFelt::new([digest[0], digest[1]]), QuadFelt::new([digest[2], digest[3]])];
 
         let witness = AirWitness::new(&trace_matrix, &public_values, var_len_public_inputs);
-        debug::check_constraints(&ProcessorAir, witness, &aux_builder, &challenges);
+        debug::check_constraints(&ProcessorAir, witness, &ProcessorAir, &challenges);
     }
 
     /// Returns the main trace as a row-major matrix for proving.

@@ -1,50 +1,27 @@
-//! Aggregator `LookupAir` for the Miden VM processor.
+//! Miden-specific LogUp pieces consumed by `ProcessorAir`'s trait impls: the combined
+//! 7-column fraction stride, the committed-finals count, and the
+//! [`emit_miden_boundary`] helper.
 //!
-//! [`MidenLookupAir`] is a thin sequencer over [`super::main_air::MainLookupAir`] (four
-//! main-trace columns in the order M1, M_2+5, M3, M4) and
-//! [`super::chiplet_air::ChipletLookupAir`] (three chiplet-trace columns in the order
-//! C1, C2, C3). The aggregated `eval` preserves the legacy `enforce_main` /
-//! `enforce_chiplet` column order so downstream consumers can grab the full 7-column
-//! picture in a single call.
-//!
-//! Task #8 will wire `ProcessorAir::eval` into this `eval` via a
-//! `ConstraintLookupBuilder::new(builder, &MidenLookupAir)` call. An alternative
-//! future path reaching for `MainLookupAir` and `ChipletLookupAir` independently (e.g. for
-//! an enum-dispatch wrapper) is also supported and does not require going through the
-//! aggregator.
+//! The `LookupAir` and `AuxBuilder` trait impls themselves live on [`crate::ProcessorAir`]
+//! in `air/src/lib.rs`; this module just supplies the constants and the boundary emitter
+//! they share.
 
 use alloc::vec::Vec;
 
 use miden_core::{WORD_SIZE, field::PrimeCharacteristicRing};
 
 use super::{
-    BusId, MIDEN_MAX_MESSAGE_WIDTH,
-    chiplet_air::{CHIPLET_COLUMN_SHAPE, ChipletLookupAir, ChipletLookupBuilder},
-    main_air::{MAIN_COLUMN_SHAPE, MainLookupAir, MainLookupBuilder},
+    chiplet_air::CHIPLET_COLUMN_SHAPE,
+    main_air::MAIN_COLUMN_SHAPE,
     messages::{BlockHashMsg, KernelRomMsg, LogCapacityMsg},
 };
-use crate::{
-    PV_PROGRAM_HASH, PV_TRANSCRIPT_STATE,
-    lookup::{BoundaryBuilder, LookupAir},
-};
+use crate::{PV_PROGRAM_HASH, PV_TRANSCRIPT_STATE, lookup::BoundaryBuilder};
 
-// MIDEN LOOKUP AIR
+// COLUMN SHAPE AND COMMITTED-FINALS COUNT
 // ================================================================================================
 
-/// Aggregator [`LookupAir`] for the Miden VM's 7-column LogUp argument.
-///
-/// Zero-sized; `eval` delegates to `MainLookupAir` and `ChipletLookupAir` in sequence.
-/// Consumers that want the full 7-column picture in one `eval` call reach for this type;
-/// consumers that want to address the main and chiplet halves independently (e.g. a future
-/// enum-dispatch wrapper) reach directly for the two sub-AIRs instead.
-///
-/// Until Task #8 calls `MidenLookupAir::eval` from `ProcessorAir::eval`, the only live
-/// consumers are the degree-budget and cached-encoding equivalence tests at the bottom of
-/// this file.
-#[derive(Copy, Clone, Debug, Default)]
-pub struct MidenLookupAir;
-
-/// Full 7-column fraction stride: 4 main + 3 chiplet, in `eval` order.
+/// Full 7-column fraction stride: 4 main + 3 chiplet, in `ProcessorAir::eval` order
+/// (M1, M_2+5, M3, M4, C1, C2, C3).
 pub(crate) const MIDEN_COLUMN_SHAPE: [usize; 7] = [
     MAIN_COLUMN_SHAPE[0],
     MAIN_COLUMN_SHAPE[1],
@@ -60,50 +37,14 @@ pub(crate) const MIDEN_COLUMN_SHAPE: [usize; 7] = [
 // values. The second value is always ZERO. Reduce to 1 once trace splitting lands.
 pub const NUM_LOGUP_COMMITTED_FINALS: usize = 2;
 
-impl<LB> LookupAir<LB> for MidenLookupAir
-where
-    LB: MainLookupBuilder + ChipletLookupBuilder,
-{
-    fn num_columns(&self) -> usize {
-        7
-    }
-
-    fn column_shape(&self) -> &[usize] {
-        &MIDEN_COLUMN_SHAPE
-    }
-
-    fn max_message_width(&self) -> usize {
-        // Width of the `beta_powers` table precomputed by `Challenges::new`, also equal
-        // to the exponent of `gamma = beta^MIDEN_MAX_MESSAGE_WIDTH` used in the per-bus
-        // prefix. Must match the MASM recursive verifier's Poseidon2 absorption loop.
-        // `HasherMsg::State` is the widest live payload at 15 slots (label@β⁰, addr@β¹,
-        // node_index@β², state[0..12]@β³..β¹⁴); the 16th slot is unused slack kept for
-        // MASM transcript alignment.
-        MIDEN_MAX_MESSAGE_WIDTH
-    }
-
-    fn num_bus_ids(&self) -> usize {
-        BusId::COUNT
-    }
-
-    fn eval(&self, builder: &mut LB) {
-        MainLookupAir.eval(builder);
-        ChipletLookupAir.eval(builder);
-    }
-
-    fn eval_boundary<B>(&self, boundary: &mut B)
-    where
-        B: BoundaryBuilder<F = LB::F, EF = LB::EF>,
-    {
-        emit_miden_boundary(boundary);
-    }
-}
+// BOUNDARY EMITTER
+// ================================================================================================
 
 /// Emits the three Miden-AIR boundary correction terms (`c_block_hash`,
 /// `c_log_precompile`, `c_kernel_rom`) into any [`BoundaryBuilder`].
 ///
 /// Single source of truth shared between:
-/// - [`MidenLookupAir`]'s `LookupAir::eval_boundary` (consumed by the debug walker), and
+/// - [`crate::ProcessorAir`]'s `LookupAir::eval_boundary` (consumed by the debug walker), and
 /// - [`crate::ProcessorAir::reduced_aux_values`] (verifier scalar check; drives the emissions
 ///   through a reducer that sums `Σ multiplicity / encode(msg)`).
 ///
@@ -166,7 +107,7 @@ mod tests {
     };
     use miden_crypto::stark::air::LiftedAir;
 
-    use super::{MidenLookupAir, NUM_LOGUP_COMMITTED_FINALS};
+    use super::NUM_LOGUP_COMMITTED_FINALS;
     use crate::{
         Felt, NUM_PUBLIC_VALUES, ProcessorAir,
         constraints::lookup::{BusId, MIDEN_MAX_MESSAGE_WIDTH},
@@ -196,14 +137,13 @@ mod tests {
     /// declared-vs-observed degree, cached-encoding canonical/encoded equivalence,
     /// and simple-group scope (no `insert_encoded` outside cached-encoding groups).
     #[test]
-    fn miden_lookup_air_validates() {
-        MidenLookupAir
-            .validate(validate_layout())
-            .unwrap_or_else(|err| panic!("MidenLookupAir validation failed: {err}"));
+    fn processor_air_lookup_validates() {
+        ValidateLookupAir::validate(&ProcessorAir, validate_layout())
+            .unwrap_or_else(|err| panic!("ProcessorAir LookupAir validation failed: {err}"));
     }
 
     /// Smoke test: the trace-balance checker runs to completion on a tiny zero-valued trace
-    /// against `MidenLookupAir` without panicking. A zero-valued trace is not a valid program
+    /// against `ProcessorAir` without panicking. A zero-valued trace is not a valid program
     /// execution so the report is expected to contain unmatched entries; this test only
     /// asserts that the checker produces a report (instead of crashing).
     #[test]
@@ -221,13 +161,7 @@ mod tests {
             BusId::COUNT,
         );
 
-        let _ = check_trace_balance(
-            &MidenLookupAir,
-            &main_trace,
-            &periodic,
-            &publics,
-            &[],
-            &challenges,
-        );
+        let _ =
+            check_trace_balance(&ProcessorAir, &main_trace, &periodic, &publics, &[], &challenges);
     }
 }

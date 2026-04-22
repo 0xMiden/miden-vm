@@ -126,11 +126,11 @@ pub const PADDED_TRACE_WIDTH: usize = TRACE_WIDTH.next_multiple_of(RATE_LEN);
 // ------------------------------------------------------------------------------------------------
 //
 // The auxiliary trace is the LogUp lookup-argument segment built by
-// [`crate::logup::MidenLookupAuxBuilder`]. It has 7 columns: 4 main-trace LogUp
+// [`crate::ProcessorAir`]'s `AuxBuilder` impl. It has 7 columns: 4 main-trace LogUp
 // columns (M1, M_2+5, M3, M4) followed by 3 chiplet-trace LogUp columns (C1, C2, C3).
 // The legacy multiset offsets (decoder p1/p2/p3, stack s_aux, range b_range, hash kernel
 // b_hk, chiplets bus b_ch, ACE wiring v_wiring) were removed in Milestone B alongside
-// the stateless `MidenLookupAuxBuilder` integration.
+// the stateless `ProcessorAir::build_aux_trace` integration.
 
 /// Auxiliary trace segment width — see the LogUp aux trace layout above.
 pub const AUX_TRACE_WIDTH: usize = crate::LOGUP_AUX_TRACE_WIDTH;

@@ -52,8 +52,8 @@ use miden_core::{
 use miden_crypto::stark::air::RowWindow;
 
 use super::{
-    Challenges, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn, LookupGroup,
-    LookupMessage, fractions::LookupFractions,
+    Challenges, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn, LookupFractions,
+    LookupGroup, LookupMessage,
 };
 
 // PROVER LOOKUP BUILDER
@@ -476,7 +476,7 @@ mod tests {
     use super::*;
     use crate::{
         Felt,
-        lookup::{Deg, LookupAir, fractions::accumulate_slow, message::LookupMessage},
+        lookup::{Deg, LookupAir, accumulate_slow, message::LookupMessage},
     };
 
     /// Minimal `LookupMessage` used by [`SmokeAir`] to drive a `Vec::push` into the

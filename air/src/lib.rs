@@ -25,21 +25,31 @@ mod constraints;
 pub mod lookup;
 pub mod trace;
 
-/// Miden VM-specific LogUp lookup argument: bus identifiers, bus message types, the
-/// aggregator [`logup::MidenLookupAir`], and the [`logup::MidenLookupAuxBuilder`].
+/// Miden VM-specific LogUp lookup argument: bus identifiers and bus message types.
 ///
+/// The `LookupAir` and `AuxBuilder` trait impls live directly on [`crate::ProcessorAir`].
 /// The generic LogUp framework this builds on lives in [`crate::lookup`] and is free of
 /// Miden-specific types so it can be extracted into its own crate.
 pub mod logup {
     pub use crate::constraints::lookup::{
-        BusId, MIDEN_MAX_MESSAGE_WIDTH, MidenLookupAir, MidenLookupAuxBuilder, messages::*,
-        miden_air::NUM_LOGUP_COMMITTED_FINALS,
+        BusId, MIDEN_MAX_MESSAGE_WIDTH, messages::*, miden_air::NUM_LOGUP_COMMITTED_FINALS,
     };
 }
 
-use constraints::{columns::MainCols, lookup::miden_air::emit_miden_boundary};
+use constraints::{
+    columns::MainCols,
+    lookup::{
+        chiplet_air::{ChipletLookupAir, ChipletLookupBuilder},
+        main_air::{MainLookupAir, MainLookupBuilder},
+        miden_air::{MIDEN_COLUMN_SHAPE, emit_miden_boundary},
+    },
+};
 use logup::{BusId, MIDEN_MAX_MESSAGE_WIDTH, NUM_LOGUP_COMMITTED_FINALS};
-use lookup::{BoundaryBuilder, Challenges, LookupMessage};
+use lookup::{
+    BoundaryBuilder, Challenges, ConstraintLookupBuilder, LookupAir, LookupMessage,
+    build_logup_aux_trace,
+};
+use miden_core::utils::RowMajorMatrix;
 use trace::TRACE_WIDTH;
 
 // RE-EXPORTS
@@ -237,8 +247,8 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ProcessorAir {
 
     fn aux_width(&self) -> usize {
         // 4 main-trace + 3 chiplet-trace = 7 LogUp columns. Matches
-        // `MidenLookupAir::num_columns()` and the per-row shape returned by
-        // `MidenLookupAuxBuilder::build_aux_trace`.
+        // `ProcessorAir::num_columns()` (LookupAir impl) and the per-row shape returned by
+        // `ProcessorAir::build_aux_trace` (AuxBuilder impl).
         LOGUP_AUX_TRACE_WIDTH
     }
 
@@ -276,7 +286,7 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ProcessorAir {
         // `total_correction` cancels the unmatched-fraction contributions from the
         // three open buses (block hash, log precompile, kernel ROM init). Rather
         // than spelling those out here, we drive the shared
-        // `emit_miden_boundary` emitter — the same source `MidenLookupAir`
+        // `emit_miden_boundary` emitter — the same source `LookupAir::eval_boundary`
         // uses for the debug walker — through a reducer that accumulates
         // `Σ multiplicity · encode(msg)⁻¹` into an `EF`.
         if public_values.len() != NUM_PUBLIC_VALUES {
@@ -332,11 +342,6 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ProcessorAir {
     }
 
     fn eval<AB: MidenAirBuilder>(&self, builder: &mut AB) {
-        use crate::{
-            constraints::{self, lookup::MidenLookupAir},
-            lookup::{ConstraintLookupBuilder, LookupAir},
-        };
-
         let main = builder.main();
 
         // Access the two rows: current (local) and next
@@ -356,16 +361,9 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ProcessorAir {
         // Main trace constraints.
         constraints::enforce_main(builder, local, next, &selectors, &op_flags);
 
-        // LogUp lookup-argument constraints (Milestone B). The closure-based
-        // `MidenLookupAir` aggregates the four main-trace columns and three chiplet-trace
-        // columns; `ConstraintLookupBuilder::new` reads α/β out of `permutation_randomness()`
-        // and precomputes the bus prefix table from the AIR's `column_shape`. Boundary /
-        // first-row / last-row checks inside `ConstraintColumn::column` are commented out
-        // for this milestone — see the `TODO(milestone-B-followup)` block in
-        // `air/src/constraints/lookup/constraint.rs`.
         {
-            let mut lb = ConstraintLookupBuilder::new(builder, &MidenLookupAir);
-            MidenLookupAir.eval(&mut lb);
+            let mut lb = ConstraintLookupBuilder::new(builder, self);
+            <Self as LookupAir<_>>::eval(self, &mut lb);
         }
 
         // Public inputs boundary constraints.
@@ -378,6 +376,67 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ProcessorAir {
     {
         // override to avoid recomputing through the SymbolicAir
         3
+    }
+}
+
+// --- LookupAir impl (7-column aggregator over main + chiplet sub-AIRs) ---
+
+impl<LB> LookupAir<LB> for ProcessorAir
+where
+    LB: MainLookupBuilder + ChipletLookupBuilder,
+{
+    fn num_columns(&self) -> usize {
+        7
+    }
+
+    fn column_shape(&self) -> &[usize] {
+        &MIDEN_COLUMN_SHAPE
+    }
+
+    fn max_message_width(&self) -> usize {
+        // Width of the `beta_powers` table precomputed by `Challenges::new`, also equal
+        // to the exponent of `gamma = beta^MIDEN_MAX_MESSAGE_WIDTH` used in the per-bus
+        // prefix. Must match the MASM recursive verifier's Poseidon2 absorption loop.
+        // `HasherMsg::State` is the widest live payload at 15 slots (label@β⁰, addr@β¹,
+        // node_index@β², state[0..12]@β³..β¹⁴); the 16th slot is unused slack kept for
+        // MASM transcript alignment.
+        MIDEN_MAX_MESSAGE_WIDTH
+    }
+
+    fn num_bus_ids(&self) -> usize {
+        BusId::COUNT
+    }
+
+    fn eval(&self, builder: &mut LB) {
+        <MainLookupAir as LookupAir<LB>>::eval(&MainLookupAir, builder);
+        <ChipletLookupAir as LookupAir<LB>>::eval(&ChipletLookupAir, builder);
+    }
+
+    fn eval_boundary<B>(&self, boundary: &mut B)
+    where
+        B: BoundaryBuilder<F = LB::F, EF = LB::EF>,
+    {
+        emit_miden_boundary(boundary);
+    }
+}
+
+// --- AuxBuilder impl (stateless LogUp aux-trace construction) ---
+
+impl<EF> AuxBuilder<Felt, EF> for ProcessorAir
+where
+    EF: ExtensionField<Felt>,
+{
+    fn build_aux_trace(
+        &self,
+        main: &RowMajorMatrix<Felt>,
+        challenges: &[EF],
+    ) -> (RowMajorMatrix<EF>, Vec<EF>) {
+        let (aux_trace, mut committed) = build_logup_aux_trace(self, main, challenges);
+        // TODO(#3032): the generic driver returns the one real committed final; pad with
+        // ZERO for the MASM recursive verifier which absorbs 2 boundary values. Remove the
+        // pad once trace splitting lands and each sub-trace has its own accumulator.
+        committed.push(EF::ZERO);
+        (aux_trace, committed)
     }
 }
 

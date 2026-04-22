@@ -19,15 +19,13 @@ pub mod challenges;
 pub mod constraint;
 #[cfg(feature = "std")]
 pub mod debug;
-pub mod fractions;
 pub mod message;
 pub mod prover;
 
-pub use aux_builder::build_logup_aux;
+pub use aux_builder::{LookupFractions, accumulate, accumulate_slow, build_logup_aux_trace};
 pub use builder::{BoundaryBuilder, Deg, LookupBatch, LookupBuilder, LookupColumn, LookupGroup};
 pub use challenges::Challenges;
 pub use constraint::ConstraintLookupBuilder;
-pub use fractions::{LookupFractions, accumulate, accumulate_slow};
 pub use message::LookupMessage;
 pub use prover::{ProverLookupBuilder, build_lookup_fractions};
 

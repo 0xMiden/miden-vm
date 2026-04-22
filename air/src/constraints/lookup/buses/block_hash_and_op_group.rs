@@ -18,7 +18,7 @@
 //!
 //! This folds the original M2 (transition 9) and M5 (transition 9) into a
 //! single M_2+5 column at transition 9, saving one accumulator column in
-//! `MidenLookupAir::num_columns`.
+//! `ProcessorAir::num_columns` (LookupAir impl).
 //!
 //! Implementation note: the emitter uses the plain `col.group` path (no cached
 //! encoding) for both buses. G_block_hash's original `emit_block_hash_queue` used

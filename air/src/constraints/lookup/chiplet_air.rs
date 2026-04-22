@@ -89,9 +89,9 @@ where
 /// LogUp lookup argument over the chiplet trace.
 ///
 /// Zero-sized. Emits three permutation columns in the order C1, C2, C3 — matching the
-/// layout the legacy `enforce_chiplet` held and the aggregator
-/// [`super::miden_air::MidenLookupAir`] still holds. The main-trace half of the argument
-/// lives in [`super::main_air::MainLookupAir`].
+/// layout the legacy `enforce_chiplet` held and the aggregated `LookupAir` impl on
+/// [`crate::ProcessorAir`]. The main-trace half of the argument lives in
+/// [`super::main_air::MainLookupAir`].
 #[derive(Copy, Clone, Debug, Default)]
 pub(crate) struct ChipletLookupAir;
 
@@ -119,7 +119,7 @@ where
     fn max_message_width(&self) -> usize {
         // `HasherMsg::State` on the C1 chiplet-responses column carries the widest payload:
         // label@β⁰, addr@β¹, node_index@β², state[0..12]@β³..β¹⁴ — 15 slots total. Matches
-        // the aggregator's `MidenLookupAir::max_message_width`.
+        // `ProcessorAir::max_message_width` (LookupAir impl).
         15
     }
 

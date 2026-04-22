@@ -7,12 +7,12 @@
 //! - **Main trace constraints** are evaluated by [`enforce_main`] and cover system / range / stack
 //!   / decoder / chiplets transitions.
 //! - **LogUp lookup-argument constraints** are evaluated separately through the closure-based
-//!   [`crate::logup::MidenLookupAir`], wired in from `ProcessorAir::eval` via
+//!   `LookupAir` impl on [`crate::ProcessorAir`], wired in from `ProcessorAir::eval` via
 //!   [`crate::lookup::ConstraintLookupBuilder`].
 //!
 //! The legacy multiset bus subtree (`bus.rs`, `decoder/bus.rs`, `stack/bus.rs`,
 //! `range/bus.rs`, `chiplets/bus/`) was removed in Milestone B alongside the
-//! stateless `MidenLookupAuxBuilder` integration.
+//! stateless `ProcessorAir::build_aux_trace` integration.
 
 use chiplets::selectors::ChipletSelectors;
 
@@ -22,7 +22,6 @@ pub mod chiplets;
 pub mod columns;
 pub mod constants;
 pub mod decoder;
-mod degree_audit;
 pub mod ext_field;
 pub mod lookup;
 pub(crate) mod op_flags;

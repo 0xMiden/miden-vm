@@ -20,7 +20,7 @@ use alloc::vec::Vec;
 
 use miden_air::{
     LOGUP_AUX_TRACE_WIDTH, LiftedAir, ProcessorAir,
-    logup::{BusId, MIDEN_MAX_MESSAGE_WIDTH, MidenLookupAir},
+    logup::{BusId, MIDEN_MAX_MESSAGE_WIDTH},
     lookup::{
         Challenges, accumulate, accumulate_slow, build_lookup_fractions,
         debug::collect_column_oracle_folds,
@@ -61,7 +61,7 @@ fn build_lookup_fractions_on_tiny_span() {
     let raw = rand_array::<Felt, 4>();
     let alpha = QuadFelt::new([raw[0], raw[1]]);
     let beta = QuadFelt::new([raw[2], raw[3]]);
-    let air = MidenLookupAir;
+    let air = ProcessorAir;
     let challenges =
         Challenges::<QuadFelt>::new(alpha, beta, MIDEN_MAX_MESSAGE_WIDTH, BusId::COUNT);
 
@@ -98,7 +98,7 @@ fn build_lookup_fractions_on_tiny_span() {
 /// - **Prover path**: collect `(m_i, d_i)` fractions via `ProverLookupBuilder` on each row, then
 ///   `accumulate` runs batched Montgomery inversion + per-column partial sums to produce
 ///   `aux[col][r+1] - aux[col][r] = Σ m_i · d_i^{-1}`.
-/// - **Constraint path**: `ColumnOracleBuilder` evaluates `MidenLookupAir` row-by-row using the
+/// - **Constraint path**: `ColumnOracleBuilder` evaluates `ProcessorAir` row-by-row using the
 ///   same `(U_g, V_g)` algebra the constraint system uses, folded per column via
 ///   cross-multiplication, producing `expected_delta = V_col · U_col^{-1}`.
 ///
@@ -126,7 +126,7 @@ fn build_lookup_fractions_matches_constraint_path_oracle() {
     let alpha = QuadFelt::new([raw[0], raw[1]]);
     let beta = QuadFelt::new([raw[2], raw[3]]);
     // --- Prover path: collect fractions and run the fused accumulator. ---
-    let air = MidenLookupAir;
+    let air = ProcessorAir;
     let challenges =
         Challenges::<QuadFelt>::new(alpha, beta, MIDEN_MAX_MESSAGE_WIDTH, BusId::COUNT);
     let fractions = build_lookup_fractions(&air, &main_trace, &periodic, &challenges);

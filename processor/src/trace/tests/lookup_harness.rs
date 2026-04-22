@@ -18,7 +18,7 @@ use alloc::vec::Vec;
 
 use miden_air::{
     LiftedAir, ProcessorAir,
-    logup::{BusId, MIDEN_MAX_MESSAGE_WIDTH, MidenLookupAir},
+    logup::{BusId, MIDEN_MAX_MESSAGE_WIDTH},
     lookup::{Challenges, LookupFractions, LookupMessage, build_lookup_fractions},
 };
 use miden_core::field::QuadFelt;
@@ -59,8 +59,7 @@ impl InteractionLog {
         let challenges =
             Challenges::<QuadFelt>::new(alpha, beta, MIDEN_MAX_MESSAGE_WIDTH, BusId::COUNT);
 
-        let fractions =
-            build_lookup_fractions(&MidenLookupAir, &main_trace, &periodic, &challenges);
+        let fractions = build_lookup_fractions(&ProcessorAir, &main_trace, &periodic, &challenges);
 
         Self { challenges, rows: split_rows(&fractions) }
     }
