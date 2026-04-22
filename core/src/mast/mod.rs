@@ -72,7 +72,7 @@ pub use debuginfo::{
 };
 
 mod serialization;
-pub use serialization::{MastNodeInfo, SerializedMastForest};
+pub use serialization::{MastNodeEntry, MastNodeInfo, SerializedMastForest};
 
 mod merger;
 pub(crate) use merger::MastForestMerger;
@@ -517,8 +517,6 @@ impl MastForest {
     }
 
     /// Returns the exact size of stripped serialization in bytes.
-    ///
-    /// Hashless serialization has the same size as stripped serialization.
     pub fn stripped_size_hint(&self) -> usize {
         serialization::stripped_size_hint(self)
     }
@@ -533,8 +531,19 @@ pub trait MastForestView {
     /// Returns the number of nodes in the forest.
     fn node_count(&self) -> usize;
 
+    /// Returns fixed-width structural metadata for a node at the specified index.
+    fn node_entry_at(&self, index: usize) -> Result<MastNodeEntry, DeserializationError>;
+
+    /// Returns the digest of the node at the specified index.
+    fn node_digest_at(&self, index: usize) -> Result<Word, DeserializationError>;
+
     /// Returns serialized-equivalent metadata for a node at the specified index.
-    fn node_info_at(&self, index: usize) -> Result<MastNodeInfo, DeserializationError>;
+    fn node_info_at(&self, index: usize) -> Result<MastNodeInfo, DeserializationError> {
+        Ok(MastNodeInfo::from_entry(
+            self.node_entry_at(index)?,
+            self.node_digest_at(index)?,
+        ))
+    }
 
     /// Returns the number of procedure roots in the forest.
     fn procedure_root_count(&self) -> usize;
@@ -550,11 +559,6 @@ pub trait MastForestView {
     /// Returns true when `index` is a valid node index.
     fn has_node(&self, index: usize) -> bool {
         index < self.node_count()
-    }
-
-    /// Returns the digest of the node at the specified index.
-    fn node_digest_at(&self, index: usize) -> Result<Word, DeserializationError> {
-        Ok(self.node_info_at(index)?.digest())
     }
 
     /// Returns all node infos in index order.
@@ -701,6 +705,58 @@ impl MastForest {
 // ------------------------------------------------------------------------------------------------
 /// Validation methods
 impl MastForest {
+    fn validate_basic_block_invariants(&self) -> Result<(), MastForestError> {
+        for (node_id_idx, node) in self.nodes.iter().enumerate() {
+            let node_id =
+                MastNodeId::new_unchecked(node_id_idx.try_into().expect("too many nodes"));
+            if let MastNode::Block(basic_block) = node {
+                basic_block.validate_batch_invariants().map_err(|error_msg| {
+                    MastForestError::InvalidBatchPadding(node_id, error_msg)
+                })?;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn validate_procedure_name_digests(&self) -> Result<(), MastForestError> {
+        for (digest, _) in self.debug_info.procedure_names() {
+            if self.find_procedure_root(digest).is_none() {
+                return Err(MastForestError::InvalidProcedureNameDigest(digest));
+            }
+        }
+
+        Ok(())
+    }
+
+    fn procedure_name_bindings(&self) -> Vec<(Word, Arc<str>, Option<MastNodeId>)> {
+        self.debug_info
+            .procedure_names()
+            .map(|(digest, name)| (digest, Arc::clone(name), self.find_procedure_root(digest)))
+            .collect()
+    }
+
+    fn remap_procedure_name_bindings(
+        &mut self,
+        bindings: &[(Word, Arc<str>, Option<MastNodeId>)],
+    ) -> Result<(), MastForestError> {
+        self.debug_info.clear_procedure_names();
+        for (digest, name, incoming_root_id) in bindings {
+            let resolved_digest = if let Some(root_id) = incoming_root_id {
+                self.get_node_by_id(*root_id)
+                    .ok_or(MastForestError::NodeIdOverflow(*root_id, self.nodes.len()))?
+                    .digest()
+            } else if self.find_procedure_root(*digest).is_some() {
+                *digest
+            } else {
+                return Err(MastForestError::InvalidProcedureNameDigest(*digest));
+            };
+            self.debug_info.insert_procedure_name(resolved_digest, Arc::clone(name));
+        }
+
+        Ok(())
+    }
+
     /// Validates that all BasicBlockNodes in this forest satisfy the core invariants:
     /// 1. Power-of-two number of groups in each batch
     /// 2. No operation group ends with an operation requiring an immediate value
@@ -712,60 +768,8 @@ impl MastForest {
     /// at assembly time rather than dynamically during execution, and adds comprehensive
     /// structural validation to prevent deserialization-time panics.
     pub fn validate(&self) -> Result<(), MastForestError> {
-        // Validate basic block batch invariants
-        for (node_id_idx, node) in self.nodes.iter().enumerate() {
-            let node_id =
-                MastNodeId::new_unchecked(node_id_idx.try_into().expect("too many nodes"));
-            if let MastNode::Block(basic_block) = node {
-                basic_block.validate_batch_invariants().map_err(|error_msg| {
-                    MastForestError::InvalidBatchPadding(node_id, error_msg)
-                })?;
-            }
-        }
-
-        // Validate that all procedure name digests correspond to procedure roots in the forest
-        for (digest, _) in self.debug_info.procedure_names() {
-            if self.find_procedure_root(digest).is_none() {
-                return Err(MastForestError::InvalidProcedureNameDigest(digest));
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Validates topological ordering of nodes and checks all node hashes.
-    ///
-    /// This method iterates through all nodes in index order, verifying:
-    /// 1. All child references point to nodes with smaller indices (topological order)
-    /// 2. Each node's recomputed digest matches its stored digest
-    ///
-    /// # Errors
-    ///
-    /// Returns `MastForestError::ForwardReference` if any node references a child that
-    /// appears later in the forest.
-    ///
-    /// Returns `MastForestError::HashMismatch` if any node's recomputed digest doesn't
-    /// match its stored digest.
-    fn validate_node_hashes(&self) -> Result<(), MastForestError> {
-        let computed_hashes = self.compute_node_hashes()?;
-        for (node_idx, node) in self.nodes.iter().enumerate() {
-            if node.is_external() {
-                continue;
-            }
-
-            let node_id = MastNodeId::new_unchecked(node_idx as u32);
-            let stored_digest = node.digest();
-            let computed_digest = computed_hashes[node_idx];
-            if computed_digest != stored_digest {
-                return Err(MastForestError::HashMismatch {
-                    node_id,
-                    expected: stored_digest,
-                    computed: computed_digest,
-                });
-            }
-        }
-
-        Ok(())
+        self.validate_basic_block_invariants()?;
+        self.validate_procedure_name_digests()
     }
 
     /// Recomputes node hashes in topological order and overwrites node digests.
@@ -773,20 +777,24 @@ impl MastForest {
     /// For `External` nodes the digest is kept as-is because it is externally provided and cannot
     /// be reconstructed from local structure alone.
     fn recompute_node_hashes_in_place(&mut self) -> Result<(), MastForestError> {
+        let procedure_name_bindings = self.procedure_name_bindings();
         let computed_hashes = self.compute_node_hashes()?;
         let source_forest = self.clone();
 
-        let mut rebuilt_nodes = IndexVec::new();
+        let mut rebuilt_forest = MastForest::new();
+        rebuilt_forest.debug_info = source_forest.debug_info.clone();
+        rebuilt_forest.advice_map = source_forest.advice_map.clone();
+
         for (idx, node) in source_forest.nodes.iter().cloned().enumerate() {
-            let rebuilt_node = node
-                .to_builder(&source_forest)
+            node.to_builder(&source_forest)
                 .with_digest(computed_hashes[idx])
-                .build(&source_forest)?;
-            let _ = rebuilt_nodes.push(rebuilt_node);
+                .add_to_forest_relaxed(&mut rebuilt_forest)?;
         }
 
-        self.nodes = rebuilt_nodes;
-        self.commitment_cache = OnceLockCompat::new();
+        rebuilt_forest.roots = source_forest.roots.clone();
+        rebuilt_forest.remap_procedure_name_bindings(&procedure_name_bindings)?;
+        rebuilt_forest.commitment_cache = OnceLockCompat::new();
+        *self = rebuilt_forest;
 
         Ok(())
     }
@@ -1421,10 +1429,10 @@ impl UntrustedMastForest {
     ///
     /// This method performs a complete validation of the deserialized forest:
     ///
-    /// 1. Validates structural invariants (batch padding, procedure names)
-    /// 2. Validates topological ordering (no forward references)
-    /// 3. If `HASHLESS` is set, recomputes all non-external node hashes and overwrites stored
-    ///    digests. Otherwise recomputes and verifies against stored digests.
+    /// 1. Resolves procedure-name bindings against the incoming root set.
+    /// 2. Recomputes all non-external node hashes and overwrites stored digests.
+    /// 3. Rebinds procedure names to the recomputed root digests.
+    /// 4. Validates structural invariants and topological ordering against the recomputed forest.
     ///
     /// # Returns
     ///
@@ -1440,28 +1448,22 @@ impl UntrustedMastForest {
     ///   ([`MastForestError::InvalidProcedureNameDigest`])
     /// - Any node references a child that appears later in the forest
     ///   ([`MastForestError::ForwardReference`])
-    /// - Any node's recomputed hash doesn't match its stored digest
-    ///   ([`MastForestError::HashMismatch`])
+    /// - Any node's digest cannot be recomputed because structural validation fails first
     ///
     /// Security convention:
-    /// - In hashless mode, this validator does not trust serialized digest bytes for non-external
-    ///   nodes.
+    /// - This validator never trusts serialized digest bytes for non-external nodes.
     /// - External node digests are marshaled as opaque values and are not semantically resolved
     ///   here.
     pub fn validate(self) -> Result<MastForest, MastForestError> {
-        let hashless = self.decoded.is_hashless();
         let mut forest =
             self.decoded.into_mast_forest().map_err(MastForestError::Deserialization)?;
 
-        // Step 1: Validate structural invariants.
-        forest.validate()?;
+        // Step 1: Recompute all non-external hashes. Untrusted validation never trusts
+        // serialized digests; overspecified trusted payload is accepted but ignored.
+        forest.recompute_node_hashes_in_place()?;
 
-        // Step 2: Hash handling policy.
-        if hashless {
-            forest.recompute_node_hashes_in_place()?;
-        } else {
-            forest.validate_node_hashes()?;
-        }
+        // Step 2: Validate the recomputed forest.
+        forest.validate()?;
 
         Ok(forest)
     }

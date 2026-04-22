@@ -12,19 +12,17 @@ use crate::{
 // MAST NODE INFO
 // ================================================================================================
 
-/// Represents a serialized [`MastNode`], with some data inlined in its node type metadata.
+/// Fixed-width structural metadata for a serialized [`MastNode`].
 ///
-/// The serialized representation of [`MastNodeInfo`] is guaranteed to be fixed width, so that the
-/// nodes stored in the `nodes` table of the serialized [`crate::mast::MastForest`] can be
-/// accessed quickly by index.
-#[derive(Debug)]
-pub struct MastNodeInfo {
+/// This is the random-access portion of the node table. Digests are intentionally modeled
+/// separately so the wire format can move them into dedicated sections.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MastNodeEntry {
     ty: MastNodeType,
-    digest: Word,
 }
 
-impl MastNodeInfo {
-    /// Constructs a new [`MastNodeInfo`] from a [`MastNode`], along with an `ops_offset`
+impl MastNodeEntry {
+    /// Constructs a new [`MastNodeEntry`] from a [`MastNode`], along with an `ops_offset`
     ///
     /// For non-basic block nodes, `ops_offset` is ignored, and should be set to 0.
     pub fn new(mast_node: &MastNode, ops_offset: NodeDataOffset) -> Self {
@@ -33,11 +31,10 @@ impl MastNodeInfo {
         }
 
         let ty = MastNodeType::new(mast_node, ops_offset);
-
-        Self { ty, digest: mast_node.digest() }
+        Self { ty }
     }
 
-    /// Attempts to convert this [`MastNodeInfo`] into a [`MastNodeBuilder`].
+    /// Attempts to convert this [`MastNodeEntry`] into a [`MastNodeBuilder`].
     ///
     /// The `node_count` is the total expected number of nodes in the
     /// [`crate::mast::MastForest`] **after deserialization**.
@@ -45,6 +42,7 @@ impl MastNodeInfo {
         self,
         node_count: usize,
         basic_block_data_decoder: &BasicBlockDataDecoder,
+        digest: Word,
     ) -> Result<MastNodeBuilder, DeserializationError> {
         match self.ty {
             MastNodeType::Block { ops_offset } => {
@@ -52,7 +50,7 @@ impl MastNodeInfo {
                 let builder = crate::mast::node::BasicBlockNodeBuilder::from_op_batches(
                     op_batches,
                     Vec::new(), // decorators set later
-                    self.digest,
+                    digest,
                 );
                 Ok(MastNodeBuilder::BasicBlock(builder))
             },
@@ -60,46 +58,41 @@ impl MastNodeInfo {
                 let left_child = MastNodeId::from_u32_with_node_count(left_child_id, node_count)?;
                 let right_child = MastNodeId::from_u32_with_node_count(right_child_id, node_count)?;
                 let builder = crate::mast::node::JoinNodeBuilder::new([left_child, right_child])
-                    .with_digest(self.digest);
+                    .with_digest(digest);
                 Ok(MastNodeBuilder::Join(builder))
             },
             MastNodeType::Split { if_branch_id, else_branch_id } => {
                 let if_branch = MastNodeId::from_u32_with_node_count(if_branch_id, node_count)?;
                 let else_branch = MastNodeId::from_u32_with_node_count(else_branch_id, node_count)?;
                 let builder = crate::mast::node::SplitNodeBuilder::new([if_branch, else_branch])
-                    .with_digest(self.digest);
+                    .with_digest(digest);
                 Ok(MastNodeBuilder::Split(builder))
             },
             MastNodeType::Loop { body_id } => {
                 let body_id = MastNodeId::from_u32_with_node_count(body_id, node_count)?;
-                let builder =
-                    crate::mast::node::LoopNodeBuilder::new(body_id).with_digest(self.digest);
+                let builder = crate::mast::node::LoopNodeBuilder::new(body_id).with_digest(digest);
                 Ok(MastNodeBuilder::Loop(builder))
             },
             MastNodeType::Call { callee_id } => {
                 let callee_id = MastNodeId::from_u32_with_node_count(callee_id, node_count)?;
                 let builder =
-                    crate::mast::node::CallNodeBuilder::new(callee_id).with_digest(self.digest);
+                    crate::mast::node::CallNodeBuilder::new(callee_id).with_digest(digest);
                 Ok(MastNodeBuilder::Call(builder))
             },
             MastNodeType::SysCall { callee_id } => {
                 let callee_id = MastNodeId::from_u32_with_node_count(callee_id, node_count)?;
-                let builder = crate::mast::node::CallNodeBuilder::new_syscall(callee_id)
-                    .with_digest(self.digest);
+                let builder =
+                    crate::mast::node::CallNodeBuilder::new_syscall(callee_id).with_digest(digest);
                 Ok(MastNodeBuilder::Call(builder))
             },
-            MastNodeType::Dyn => {
-                let builder = crate::mast::node::DynNodeBuilder::new_dyn().with_digest(self.digest);
-                Ok(MastNodeBuilder::Dyn(builder))
-            },
-            MastNodeType::Dyncall => {
-                let builder =
-                    crate::mast::node::DynNodeBuilder::new_dyncall().with_digest(self.digest);
-                Ok(MastNodeBuilder::Dyn(builder))
-            },
+            MastNodeType::Dyn => Ok(MastNodeBuilder::Dyn(
+                crate::mast::node::DynNodeBuilder::new_dyn().with_digest(digest),
+            )),
+            MastNodeType::Dyncall => Ok(MastNodeBuilder::Dyn(
+                crate::mast::node::DynNodeBuilder::new_dyncall().with_digest(digest),
+            )),
             MastNodeType::External => {
-                let builder = crate::mast::node::ExternalNodeBuilder::new(self.digest);
-                Ok(MastNodeBuilder::External(builder))
+                Ok(MastNodeBuilder::External(crate::mast::node::ExternalNodeBuilder::new(digest)))
             },
         }
     }
@@ -108,6 +101,62 @@ impl MastNodeInfo {
     pub fn node_type(&self) -> MastNodeType {
         self.ty
     }
+}
+
+impl Serializable for MastNodeEntry {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        self.ty.write_into(target);
+    }
+}
+
+impl Deserializable for MastNodeEntry {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let ty = Deserializable::read_from(source)?;
+        Ok(Self { ty })
+    }
+
+    fn min_serialized_size() -> usize {
+        MastNodeType::min_serialized_size()
+    }
+}
+
+/// Logical node metadata combining fixed-width structure and the node digest.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MastNodeInfo {
+    entry: MastNodeEntry,
+    digest: Word,
+}
+
+impl MastNodeInfo {
+    /// Constructs a new [`MastNodeInfo`] from a [`MastNode`], along with an `ops_offset`
+    ///
+    /// For non-basic block nodes, `ops_offset` is ignored, and should be set to 0.
+    pub fn new(mast_node: &MastNode, ops_offset: NodeDataOffset) -> Self {
+        Self {
+            entry: MastNodeEntry::new(mast_node, ops_offset),
+            digest: mast_node.digest(),
+        }
+    }
+
+    /// Attempts to convert this [`MastNodeInfo`] into a [`MastNodeBuilder`].
+    pub fn try_into_mast_node_builder(
+        self,
+        node_count: usize,
+        basic_block_data_decoder: &BasicBlockDataDecoder,
+    ) -> Result<MastNodeBuilder, DeserializationError> {
+        self.entry
+            .try_into_mast_node_builder(node_count, basic_block_data_decoder, self.digest)
+    }
+
+    /// Returns the fixed-width structural node entry.
+    pub fn node_entry(&self) -> MastNodeEntry {
+        self.entry
+    }
+
+    /// Returns the serialized node type metadata.
+    pub fn node_type(&self) -> MastNodeType {
+        self.entry.node_type()
+    }
 
     /// Returns the stored node digest.
     pub fn digest(&self) -> Word {
@@ -115,31 +164,28 @@ impl MastNodeInfo {
     }
 
     /// Builds node metadata directly from serialized components.
-    pub(super) fn from_parts(ty: MastNodeType, digest: Word) -> Self {
-        Self { ty, digest }
+    pub(crate) fn from_entry(entry: MastNodeEntry, digest: Word) -> Self {
+        Self { entry, digest }
     }
 }
 
 impl Serializable for MastNodeInfo {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        let Self { ty, digest } = self;
-
-        ty.write_into(target);
-        digest.write_into(target);
+        self.entry.write_into(target);
+        self.digest.write_into(target);
     }
 }
 
 impl Deserializable for MastNodeInfo {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let ty = Deserializable::read_from(source)?;
+        let entry = MastNodeEntry::read_from(source)?;
         let digest = Word::read_from(source)?;
-
-        Ok(Self { ty, digest })
+        Ok(Self { entry, digest })
     }
 
     /// Returns the minimum serialized size: 8 bytes for MastNodeType + 32 bytes for Word digest.
     fn min_serialized_size() -> usize {
-        40
+        MastNodeEntry::min_serialized_size() + Word::min_serialized_size()
     }
 }
 

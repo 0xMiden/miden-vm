@@ -13,8 +13,14 @@
 //! (Basic block data section)
 //! - basic block data (padded operations + batch metadata)
 //!
-//! (Node info section)
-//! - MAST node infos (`Vec<MastNodeInfo>`)
+//! (Node entries section)
+//! - fixed-width structural node entries (`Vec<MastNodeEntry>`)
+//!
+//! (External digest section)
+//! - digests for `External` nodes only (`Vec<Word>`, ordered by node index)
+//!
+//! (Node hash section - omitted if FLAGS bit 1 is set)
+//! - digests for all non-external nodes (`Vec<Word>`, ordered by node index)
 //!
 //! (Advice map section)
 //! - Advice map (`AdviceMap`)
@@ -37,9 +43,9 @@
 //! # Hashless Format
 //!
 //! When serializing with [`MastForest::write_hashless`], the FLAGS byte has bit 1 set, and
-//! bit 0 is also set (hashless implies stripped). This does not change the wire format.
-//! It is a declaration of intent that stored digests must be recomputed during validation.
-//! The trusted deserializer rejects hashless inputs; use [`UntrustedMastForest`] instead.
+//! bit 0 is also set (hashless implies stripped). In this format, the general node-hash section
+//! is omitted entirely. Trusted deserialization rejects hashless inputs; use
+//! [`UntrustedMastForest`] instead.
 
 use alloc::{string::ToString, vec::Vec};
 
@@ -48,6 +54,7 @@ use crate::{
     Felt,
     advice::AdviceMap,
     chiplets::hasher,
+    mast::node::MastNodeExt,
     serde::{
         ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable, SliceReader,
     },
@@ -57,8 +64,8 @@ pub(crate) mod asm_op;
 pub(crate) mod decorator;
 
 mod info;
-pub use info::MastNodeInfo;
 use info::MastNodeType;
+pub use info::{MastNodeEntry, MastNodeInfo};
 
 mod basic_blocks;
 use basic_blocks::{BasicBlockDataBuilder, BasicBlockDataDecoder, basic_block_data_len};
@@ -109,9 +116,9 @@ const FLAG_STRIPPED: u8 = 0x01;
 
 /// Flag indicating the serialized MastForest should be treated as hashless.
 ///
-/// This flag does not affect the wire format; digests are still serialized. It declares that
-/// digests must be recomputed during validation, so trusted deserialization rejects it.
-/// This flag implies [`FLAG_STRIPPED`].
+/// When this bit is set, the general node-hash section is omitted. External digests remain
+/// serialized in their dedicated section because they cannot be reconstructed locally.
+/// Trusted deserialization rejects this format. This flag implies [`FLAG_STRIPPED`].
 pub(super) const FLAG_HASHLESS: u8 = 0x02;
 
 /// Mask for reserved flag bits that must be zero.
@@ -136,7 +143,9 @@ const FLAGS_RESERVED_MASK: u8 = 0xfc;
 ///   Removed `breakpoint` instruction (#2655).
 /// - [0, 0, 3]: Added HASHLESS flag (bit 1). HASHLESS implies STRIPPED. Trusted deserialization
 ///   rejects HASHLESS.
-const VERSION: [u8; 3] = [0, 0, 3];
+/// - [0, 0, 4]: Split fixed-width node entries from digest storage. External digests moved to a
+///   dedicated section. Hashless serialization omits the general node-hash section entirely.
+const VERSION: [u8; 3] = [0, 0, 4];
 
 // MAST FOREST SERIALIZATION/DESERIALIZATION
 // ================================================================================================
@@ -177,28 +186,40 @@ impl MastForest {
         let roots: Vec<u32> = self.roots.iter().copied().map(u32::from).collect();
         roots.write_into(target);
 
-        // Prepare MAST node infos, but don't store them yet. We store them at the end to make
-        // deserialization more efficient.
-        let mast_node_infos: Vec<MastNodeInfo> = self
-            .nodes
-            .iter()
-            .map(|mast_node| {
-                let ops_offset = if let MastNode::Block(basic_block) = mast_node {
-                    basic_block_data_builder.encode_basic_block(basic_block)
-                } else {
-                    0
-                };
+        let mut mast_node_entries = Vec::with_capacity(self.nodes.len());
+        let mut external_digests = Vec::new();
+        let mut node_hashes = Vec::new();
 
-                MastNodeInfo::new(mast_node, ops_offset)
-            })
-            .collect();
+        for mast_node in self.nodes.iter() {
+            let ops_offset = if let MastNode::Block(basic_block) = mast_node {
+                basic_block_data_builder.encode_basic_block(basic_block)
+            } else {
+                0
+            };
+
+            mast_node_entries.push(MastNodeEntry::new(mast_node, ops_offset));
+            if mast_node.is_external() {
+                external_digests.push(mast_node.digest());
+            } else if !hashless {
+                node_hashes.push(mast_node.digest());
+            }
+        }
 
         let basic_block_data = basic_block_data_builder.finalize();
         basic_block_data.write_into(target);
 
-        // Write node infos
-        for mast_node_info in mast_node_infos {
-            mast_node_info.write_into(target);
+        for mast_node_entry in mast_node_entries {
+            mast_node_entry.write_into(target);
+        }
+
+        for digest in external_digests {
+            digest.write_into(target);
+        }
+
+        if !hashless {
+            for digest in node_hashes {
+                digest.write_into(target);
+            }
         }
 
         self.advice_map.write_into(target);
@@ -211,11 +232,26 @@ impl MastForest {
 }
 
 pub(super) fn stripped_size_hint(forest: &MastForest) -> usize {
+    serialized_size_hint(forest, true, false)
+}
+
+fn hashless_size_hint(forest: &MastForest) -> usize {
+    serialized_size_hint(forest, true, true)
+}
+
+fn serialized_size_hint(forest: &MastForest, stripped: bool, hashless: bool) -> usize {
     let node_count = forest.nodes.len();
+    let external_count = forest.nodes.iter().filter(|node| node.is_external()).count();
+    let non_external_count = node_count - external_count;
 
     let mut size = MAGIC.len() + 1 + VERSION.len();
     size += node_count.get_size_hint();
-    size += 0usize.get_size_hint(); // decorator count (always 0 in stripped)
+    size += if stripped {
+        0usize
+    } else {
+        forest.debug_info.num_decorators()
+    }
+    .get_size_hint();
 
     let roots_len = forest.roots.len();
     size += roots_len.get_size_hint();
@@ -229,9 +265,15 @@ pub(super) fn stripped_size_hint(forest: &MastForest) -> usize {
     }
     size += basic_block_len.get_size_hint() + basic_block_len;
 
-    let node_info_size = MastNodeInfo::min_serialized_size();
-    size += node_count * node_info_size;
+    size += node_count * MastNodeEntry::min_serialized_size();
+    size += external_count * crate::Word::min_serialized_size();
+    if !hashless {
+        size += non_external_count * crate::Word::min_serialized_size();
+    }
     size += forest.advice_map.serialized_size_hint();
+    if !stripped {
+        size += forest.debug_info.get_size_hint();
+    }
 
     size
 }
@@ -268,13 +310,20 @@ pub struct SerializedMastForest<'a> {
     is_stripped: bool,
     is_hashless: bool,
     hash_table: Option<Vec<crate::Word>>,
+    digest_slot_by_node: Vec<u32>,
     node_count: usize,
     roots_count: usize,
     roots_offset: usize,
     basic_block_offset: usize,
     basic_block_len: usize,
-    node_info_offset: usize,
-    node_info_size: usize,
+    node_entry_offset: usize,
+    node_entry_size: usize,
+    external_digest_offset: usize,
+    #[cfg(test)]
+    external_digest_count: usize,
+    node_hash_offset: Option<usize>,
+    #[cfg(test)]
+    node_hash_count: usize,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -284,8 +333,14 @@ struct ScannedForestLayout {
     roots_offset: usize,
     basic_block_offset: usize,
     basic_block_len: usize,
-    node_info_offset: usize,
-    node_info_size: usize,
+    node_entry_offset: usize,
+    node_entry_size: usize,
+    external_digest_offset: usize,
+    #[cfg(test)]
+    external_digest_count: usize,
+    node_hash_offset: Option<usize>,
+    #[cfg(test)]
+    node_hash_count: usize,
 }
 
 /// Canonical decoded representation for reader-based deserialization paths.
@@ -304,10 +359,6 @@ pub(super) struct DecodedSerializedForest {
 impl DecodedSerializedForest {
     pub(super) fn flags(&self) -> u8 {
         self.flags
-    }
-
-    pub(super) fn is_hashless(&self) -> bool {
-        self.flags & FLAG_HASHLESS != 0
     }
 
     pub(super) fn into_mast_forest(self) -> Result<MastForest, DeserializationError> {
@@ -361,14 +412,15 @@ impl<'a> SerializedMastForest<'a> {
         let mut reader = SliceReader::new(bytes);
         let (flags, _version) = read_and_validate_header(&mut reader)?;
         let is_stripped = flags & FLAG_STRIPPED != 0;
-        if flags & FLAG_HASHLESS != 0 && !is_stripped {
+        let is_hashless = flags & FLAG_HASHLESS != 0;
+        if is_hashless && !is_stripped {
             return Err(DeserializationError::InvalidValue(
                 "HASHLESS flag requires STRIPPED flag to be set".to_string(),
             ));
         }
 
         let mut scanner = CountingReader::new(&mut reader);
-        let layout = scan_layout_sections(&mut scanner)?;
+        let layout = scan_layout_sections(&mut scanner, is_hashless)?;
 
         Self::from_scanned_parts(bytes, flags, layout)
     }
@@ -394,18 +446,37 @@ impl<'a> SerializedMastForest<'a> {
             header_len.checked_add(layout.basic_block_offset).ok_or_else(|| {
                 DeserializationError::InvalidValue("basic-block offset overflow".to_string())
             })?;
-        let node_info_offset =
-            header_len.checked_add(layout.node_info_offset).ok_or_else(|| {
-                DeserializationError::InvalidValue("node info offset overflow".to_string())
+        let node_entry_offset =
+            header_len.checked_add(layout.node_entry_offset).ok_or_else(|| {
+                DeserializationError::InvalidValue("node entry offset overflow".to_string())
             })?;
+        let external_digest_offset =
+            header_len.checked_add(layout.external_digest_offset).ok_or_else(|| {
+                DeserializationError::InvalidValue("external digest offset overflow".to_string())
+            })?;
+        let node_hash_offset = layout
+            .node_hash_offset
+            .map(|offset| {
+                header_len.checked_add(offset).ok_or_else(|| {
+                    DeserializationError::InvalidValue("node hash offset overflow".to_string())
+                })
+            })
+            .transpose()?;
+        let digest_slot_by_node = build_digest_slot_by_node(
+            bytes,
+            node_entry_offset,
+            layout.node_entry_size,
+            layout.node_count,
+        )?;
         let hash_table = if is_hashless {
             Some(recompute_hash_table(
                 bytes,
                 layout.node_count,
-                node_info_offset,
-                layout.node_info_size,
+                node_entry_offset,
+                layout.node_entry_size,
                 basic_block_offset,
                 layout.basic_block_len,
+                external_digest_offset,
             )?)
         } else {
             None
@@ -416,13 +487,20 @@ impl<'a> SerializedMastForest<'a> {
             is_stripped,
             is_hashless,
             hash_table,
+            digest_slot_by_node,
             node_count: layout.node_count,
             roots_count: layout.roots_count,
             roots_offset,
             basic_block_offset,
             basic_block_len: layout.basic_block_len,
-            node_info_offset,
-            node_info_size: layout.node_info_size,
+            node_entry_offset,
+            node_entry_size: layout.node_entry_size,
+            external_digest_offset,
+            #[cfg(test)]
+            external_digest_count: layout.external_digest_count,
+            node_hash_offset,
+            #[cfg(test)]
+            node_hash_count: layout.node_hash_count,
         })
     }
 
@@ -496,6 +574,14 @@ impl<'a> SerializedMastForest<'a> {
     /// assert!(view.node_info_at(0).is_ok());
     /// ```
     pub fn node_info_at(&self, index: usize) -> Result<MastNodeInfo, DeserializationError> {
+        Ok(MastNodeInfo::from_entry(
+            self.node_entry_at(index)?,
+            self.node_digest_at(index)?,
+        ))
+    }
+
+    /// Returns the fixed-width structural node entry at the specified index.
+    pub fn node_entry_at(&self, index: usize) -> Result<MastNodeEntry, DeserializationError> {
         if index >= self.node_count {
             return Err(DeserializationError::InvalidValue(format!(
                 "node index {} out of bounds for {} nodes",
@@ -503,14 +589,28 @@ impl<'a> SerializedMastForest<'a> {
             )));
         }
 
-        let info =
-            read_node_info_entry(self.bytes, self.node_info_offset, self.node_info_size, index)?;
-        if let Some(hash_table) = &self.hash_table {
-            let digest = hash_table[index];
-            Ok(MastNodeInfo::from_parts(info.node_type(), digest))
-        } else {
-            Ok(info)
+        read_node_entry(self.bytes, self.node_entry_offset, self.node_entry_size, index)
+    }
+
+    /// Returns the digest for the node at the specified index.
+    pub fn node_digest_at(&self, index: usize) -> Result<crate::Word, DeserializationError> {
+        let entry = self.node_entry_at(index)?;
+        let digest_slot = self.digest_slot_by_node[index] as usize;
+
+        if matches!(entry.node_type(), MastNodeType::External) {
+            return read_digest_entry(self.bytes, self.external_digest_offset, digest_slot);
         }
+
+        if let Some(hash_table) = &self.hash_table {
+            return Ok(hash_table[index]);
+        }
+
+        let node_hash_offset = self.node_hash_offset.ok_or_else(|| {
+            DeserializationError::InvalidValue(
+                "hash-backed digest lookup requested but node hash section is absent".to_string(),
+            )
+        })?;
+        read_digest_entry(self.bytes, node_hash_offset, digest_slot)
     }
 
     fn basic_block_data(&self) -> Result<&[u8], DeserializationError> {
@@ -533,9 +633,11 @@ impl<'a> SerializedMastForest<'a> {
         mast_forest.debug_info = debug_info;
 
         for index in 0..self.node_count {
-            let node_info = self.node_info_at(index)?;
-            let mast_node_builder =
-                node_info.try_into_mast_node_builder(self.node_count, &basic_block_data_decoder)?;
+            let mast_node_builder = self.node_entry_at(index)?.try_into_mast_node_builder(
+                self.node_count,
+                &basic_block_data_decoder,
+                self.node_digest_at(index)?,
+            )?;
 
             mast_node_builder.add_to_forest_relaxed(&mut mast_forest).map_err(|e| {
                 DeserializationError::InvalidValue(format!(
@@ -551,38 +653,113 @@ impl<'a> SerializedMastForest<'a> {
         mast_forest.advice_map = advice_map;
         Ok(mast_forest)
     }
+
+    #[cfg(test)]
+    fn advice_map_offset(&self) -> Result<usize, DeserializationError> {
+        let digest_section_end = if let Some(node_hash_offset) = self.node_hash_offset {
+            node_hash_offset
+                .checked_add(self.node_hash_count * crate::Word::min_serialized_size())
+                .ok_or_else(|| {
+                    DeserializationError::InvalidValue("node hash section overflow".to_string())
+                })?
+        } else {
+            self.external_digest_offset
+                .checked_add(self.external_digest_count * crate::Word::min_serialized_size())
+                .ok_or_else(|| {
+                    DeserializationError::InvalidValue(
+                        "external digest section overflow".to_string(),
+                    )
+                })?
+        };
+
+        if digest_section_end > self.bytes.len() {
+            return Err(DeserializationError::UnexpectedEOF);
+        }
+
+        Ok(digest_section_end)
+    }
 }
 
-fn read_node_info_entry(
+fn read_node_entry(
     bytes: &[u8],
-    node_info_offset: usize,
-    node_info_size: usize,
+    node_entry_offset: usize,
+    node_entry_size: usize,
     index: usize,
-) -> Result<MastNodeInfo, DeserializationError> {
+) -> Result<MastNodeEntry, DeserializationError> {
     let entry_offset = index
-        .checked_mul(node_info_size)
-        .and_then(|delta| node_info_offset.checked_add(delta))
+        .checked_mul(node_entry_size)
+        .and_then(|delta| node_entry_offset.checked_add(delta))
         .ok_or_else(|| {
-            DeserializationError::InvalidValue("node info offset overflow".to_string())
+            DeserializationError::InvalidValue("node entry offset overflow".to_string())
         })?;
-    let entry_end = entry_offset.checked_add(node_info_size).ok_or_else(|| {
-        DeserializationError::InvalidValue("node info length overflow".to_string())
+    let entry_end = entry_offset.checked_add(node_entry_size).ok_or_else(|| {
+        DeserializationError::InvalidValue("node entry length overflow".to_string())
     })?;
     if entry_end > bytes.len() {
         return Err(DeserializationError::UnexpectedEOF);
     }
 
     let mut reader = SliceReader::new(&bytes[entry_offset..entry_end]);
-    MastNodeInfo::read_from(&mut reader)
+    MastNodeEntry::read_from(&mut reader)
+}
+
+fn read_digest_entry(
+    bytes: &[u8],
+    digest_section_offset: usize,
+    index: usize,
+) -> Result<crate::Word, DeserializationError> {
+    let digest_size = crate::Word::min_serialized_size();
+    let entry_offset = index
+        .checked_mul(digest_size)
+        .and_then(|delta| digest_section_offset.checked_add(delta))
+        .ok_or_else(|| DeserializationError::InvalidValue("digest offset overflow".to_string()))?;
+    let entry_end = entry_offset
+        .checked_add(digest_size)
+        .ok_or_else(|| DeserializationError::InvalidValue("digest length overflow".to_string()))?;
+    if entry_end > bytes.len() {
+        return Err(DeserializationError::UnexpectedEOF);
+    }
+
+    let mut reader = SliceReader::new(&bytes[entry_offset..entry_end]);
+    crate::Word::read_from(&mut reader)
+}
+
+fn build_digest_slot_by_node(
+    bytes: &[u8],
+    node_entry_offset: usize,
+    node_entry_size: usize,
+    node_count: usize,
+) -> Result<Vec<u32>, DeserializationError> {
+    let mut slots = Vec::with_capacity(node_count);
+    let mut external_slot = 0u32;
+    let mut node_hash_slot = 0u32;
+
+    for index in 0..node_count {
+        let entry = read_node_entry(bytes, node_entry_offset, node_entry_size, index)?;
+        if matches!(entry.node_type(), MastNodeType::External) {
+            slots.push(external_slot);
+            external_slot = external_slot.checked_add(1).ok_or_else(|| {
+                DeserializationError::InvalidValue("external digest slot overflow".to_string())
+            })?;
+        } else {
+            slots.push(node_hash_slot);
+            node_hash_slot = node_hash_slot.checked_add(1).ok_or_else(|| {
+                DeserializationError::InvalidValue("node hash slot overflow".to_string())
+            })?;
+        }
+    }
+
+    Ok(slots)
 }
 
 fn recompute_hash_table(
     bytes: &[u8],
     node_count: usize,
-    node_info_offset: usize,
-    node_info_size: usize,
+    node_entry_offset: usize,
+    node_entry_size: usize,
     basic_block_offset: usize,
     basic_block_len: usize,
+    external_digest_offset: usize,
 ) -> Result<Vec<crate::Word>, DeserializationError> {
     let basic_block_end = basic_block_offset.checked_add(basic_block_len).ok_or_else(|| {
         DeserializationError::InvalidValue("basic-block data overflow".to_string())
@@ -594,10 +771,11 @@ fn recompute_hash_table(
         BasicBlockDataDecoder::new(&bytes[basic_block_offset..basic_block_end]);
 
     let mut digests = Vec::with_capacity(node_count);
+    let mut external_digest_index = 0usize;
 
     for index in 0..node_count {
-        let info = read_node_info_entry(bytes, node_info_offset, node_info_size, index)?;
-        let computed = match info.node_type() {
+        let entry = read_node_entry(bytes, node_entry_offset, node_entry_size, index)?;
+        let computed = match entry.node_type() {
             MastNodeType::Block { ops_offset } => {
                 let op_batches = basic_block_data_decoder.decode_operations(ops_offset)?;
                 let op_groups: Vec<Felt> =
@@ -635,10 +813,12 @@ fn recompute_hash_table(
             MastNodeType::Dyn => DynNode::DYN_DEFAULT_DIGEST,
             MastNodeType::Dyncall => DynNode::DYNCALL_DEFAULT_DIGEST,
             MastNodeType::External => {
-                // External digests cannot be reconstructed from local structure alone.
-                // In HASHLESS mode we treat them as opaque payload to be resolved by later
-                // semantic checks in higher layers.
-                info.digest()
+                let digest =
+                    read_digest_entry(bytes, external_digest_offset, external_digest_index)?;
+                external_digest_index = external_digest_index.checked_add(1).ok_or_else(|| {
+                    DeserializationError::InvalidValue("external digest index overflow".to_string())
+                })?;
+                digest
             },
         };
 
@@ -674,8 +854,12 @@ impl super::MastForestView for SerializedMastForest<'_> {
         SerializedMastForest::node_count(self)
     }
 
-    fn node_info_at(&self, index: usize) -> Result<MastNodeInfo, DeserializationError> {
-        SerializedMastForest::node_info_at(self, index)
+    fn node_entry_at(&self, index: usize) -> Result<MastNodeEntry, DeserializationError> {
+        SerializedMastForest::node_entry_at(self, index)
+    }
+
+    fn node_digest_at(&self, index: usize) -> Result<crate::Word, DeserializationError> {
+        SerializedMastForest::node_digest_at(self, index)
     }
 
     fn procedure_root_count(&self) -> usize {
@@ -692,7 +876,7 @@ impl super::MastForestView for MastForest {
         self.nodes.len()
     }
 
-    fn node_info_at(&self, index: usize) -> Result<MastNodeInfo, DeserializationError> {
+    fn node_entry_at(&self, index: usize) -> Result<MastNodeEntry, DeserializationError> {
         let node = self.nodes.as_slice().get(index).ok_or_else(|| {
             DeserializationError::InvalidValue(format!("node index {index} out of bounds"))
         })?;
@@ -702,38 +886,13 @@ impl super::MastForestView for MastForest {
             0
         };
 
-        Ok(MastNodeInfo::new(node, ops_offset))
+        Ok(MastNodeEntry::new(node, ops_offset))
     }
 
-    fn all_node_infos(&self) -> Result<Vec<MastNodeInfo>, DeserializationError> {
-        let mut node_infos = Vec::with_capacity(self.nodes.len());
-        let mut basic_block_data_offset = 0usize;
-
-        for node in self.nodes.iter() {
-            let ops_offset = if matches!(node, MastNode::Block(_)) {
-                basic_block_data_offset.try_into().map_err(|_| {
-                    DeserializationError::InvalidValue(
-                        "basic-block data offset does not fit in u32".to_string(),
-                    )
-                })?
-            } else {
-                0
-            };
-
-            node_infos.push(MastNodeInfo::new(node, ops_offset));
-
-            if let MastNode::Block(block) = node {
-                basic_block_data_offset = basic_block_data_offset
-                    .checked_add(basic_block_data_len(block))
-                    .ok_or_else(|| {
-                        DeserializationError::InvalidValue(
-                            "basic-block data offset overflow".to_string(),
-                        )
-                    })?;
-            }
-        }
-
-        Ok(node_infos)
+    fn node_digest_at(&self, index: usize) -> Result<crate::Word, DeserializationError> {
+        self.nodes.as_slice().get(index).map(MastNode::digest).ok_or_else(|| {
+            DeserializationError::InvalidValue(format!("node index {index} out of bounds"))
+        })
     }
 
     fn procedure_root_count(&self) -> usize {
@@ -854,6 +1013,23 @@ enum ReaderDecodeMode {
     Untrusted,
 }
 
+fn log_untrusted_overspecification(flags: u8) {
+    let is_stripped = flags & FLAG_STRIPPED != 0;
+    let is_hashless = flags & FLAG_HASHLESS != 0;
+
+    if !is_hashless {
+        log::error!(
+            "UntrustedMastForest expected HASHLESS input; supplied artifact includes wire node hashes that will be ignored and recomputed during validation"
+        );
+    }
+
+    if !is_stripped {
+        log::error!(
+            "UntrustedMastForest expected STRIPPED input; supplied artifact includes DebugInfo and other optional payloads over the wire"
+        );
+    }
+}
+
 fn decode_from_reader<R: ByteReader>(
     source: &mut R,
     mode: ReaderDecodeMode,
@@ -871,8 +1047,11 @@ fn decode_from_reader<R: ByteReader>(
             "HASHLESS flag is set; use UntrustedMastForest for untrusted input".to_string(),
         ));
     }
+    if matches!(mode, ReaderDecodeMode::Untrusted) {
+        log_untrusted_overspecification(flags);
+    }
 
-    let layout = scan_layout_sections(&mut recording)?;
+    let layout = scan_layout_sections(&mut recording, flags & FLAG_HASHLESS != 0)?;
     let advice_map = AdviceMap::read_from(&mut recording)?;
     let debug_info = if is_stripped {
         super::DebugInfo::empty_for_nodes(layout.node_count)
@@ -895,6 +1074,7 @@ fn decode_from_reader<R: ByteReader>(
 /// reader-based deserialization and [`SerializedMastForest::new`].
 fn scan_layout_sections<R: OffsetTrackingReader>(
     source: &mut R,
+    is_hashless: bool,
 ) -> Result<ScannedForestLayout, DeserializationError> {
     let body_start = source.offset();
 
@@ -924,14 +1104,46 @@ fn scan_layout_sections<R: OffsetTrackingReader>(
     })?;
     let _basic_block_data = source.read_slice(basic_block_len)?;
 
-    let node_info_size = MastNodeInfo::min_serialized_size();
-    let node_info_offset = source.offset().checked_sub(body_start).ok_or_else(|| {
-        DeserializationError::InvalidValue("node info offset underflow".to_string())
+    let node_entry_size = MastNodeEntry::min_serialized_size();
+    let node_entry_offset = source.offset().checked_sub(body_start).ok_or_else(|| {
+        DeserializationError::InvalidValue("node entry offset underflow".to_string())
     })?;
-    let node_infos_len = node_count.checked_mul(node_info_size).ok_or_else(|| {
-        DeserializationError::InvalidValue("node info length overflow".to_string())
+    let mut external_digest_count = 0usize;
+    for _ in 0..node_count {
+        let node_entry = MastNodeEntry::read_from(source)?;
+        if matches!(node_entry.node_type(), MastNodeType::External) {
+            external_digest_count = external_digest_count.checked_add(1).ok_or_else(|| {
+                DeserializationError::InvalidValue("external digest count overflow".to_string())
+            })?;
+        }
+    }
+
+    let external_digest_offset = source.offset().checked_sub(body_start).ok_or_else(|| {
+        DeserializationError::InvalidValue("external digest offset underflow".to_string())
     })?;
-    let _node_infos = source.read_slice(node_infos_len)?;
+    let external_digests_len = external_digest_count
+        .checked_mul(crate::Word::min_serialized_size())
+        .ok_or_else(|| {
+            DeserializationError::InvalidValue("external digest length overflow".to_string())
+        })?;
+    let _external_digests = source.read_slice(external_digests_len)?;
+
+    let node_hash_count = node_count.checked_sub(external_digest_count).ok_or_else(|| {
+        DeserializationError::InvalidValue("node hash count underflow".to_string())
+    })?;
+    let node_hash_offset = if is_hashless {
+        None
+    } else {
+        let offset = source.offset().checked_sub(body_start).ok_or_else(|| {
+            DeserializationError::InvalidValue("node hash offset underflow".to_string())
+        })?;
+        let node_hash_len =
+            node_hash_count.checked_mul(crate::Word::min_serialized_size()).ok_or_else(|| {
+                DeserializationError::InvalidValue("node hash length overflow".to_string())
+            })?;
+        let _node_hashes = source.read_slice(node_hash_len)?;
+        Some(offset)
+    };
 
     Ok(ScannedForestLayout {
         node_count,
@@ -939,8 +1151,14 @@ fn scan_layout_sections<R: OffsetTrackingReader>(
         roots_offset,
         basic_block_offset,
         basic_block_len,
-        node_info_offset,
-        node_info_size,
+        node_entry_offset,
+        node_entry_size,
+        external_digest_offset,
+        #[cfg(test)]
+        external_digest_count,
+        node_hash_offset,
+        #[cfg(test)]
+        node_hash_count,
     })
 }
 
@@ -1165,6 +1383,6 @@ impl Serializable for HashlessMastForest<'_> {
     }
 
     fn get_size_hint(&self) -> usize {
-        stripped_size_hint(self.0)
+        hashless_size_hint(self.0)
     }
 }
