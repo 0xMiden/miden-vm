@@ -220,7 +220,7 @@ fn build_advice(
     advice_stack.push(pcs.query_pow_witness.as_canonical_u64());
 
     // --- Merkle data ---
-    let (store, advice_map) = build_merkle_data(config, stark, log_trace_height)?;
+    let (store, advice_map) = build_merkle_data(config, stark)?;
 
     Ok(VerifierData {
         initial_stack,
@@ -276,7 +276,6 @@ where
 fn build_merkle_data(
     config: &P2Config,
     stark: &StarkTranscript<Challenge, P2Lmcs>,
-    _log_trace_height: usize,
 ) -> Result<MerkleAdvice, VerifierError> {
     let pcs = &stark.pcs_transcript;
     let lmcs = config.lmcs();
