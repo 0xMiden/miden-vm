@@ -326,10 +326,9 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ProcessorAir {
             public_values,
             var_len_public_inputs,
             sum: EF::ZERO,
-            error: None,
         };
         emit_miden_boundary(&mut reducer);
-        let total_correction = reducer.finalize()?;
+        let total_correction = reducer.finalize();
 
         // TODO(#3032): aux_values[1..] are the placeholder slots from
         // NUM_LOGUP_COMMITTED_FINALS (see `constraints::lookup::miden_air`); enforce the
@@ -392,7 +391,7 @@ where
     LB: MainLookupBuilder + ChipletLookupBuilder,
 {
     fn num_columns(&self) -> usize {
-        7
+        MIDEN_COLUMN_SHAPE.len()
     }
 
     fn column_shape(&self) -> &[usize] {
@@ -440,6 +439,11 @@ where
         let (aux_trace, mut committed) = build_logup_aux_trace(self, main, challenges);
         // TODO(#3032): pad the placeholder slot — see `NUM_LOGUP_COMMITTED_FINALS`. Remove
         // the pad once trace splitting lands.
+        debug_assert_eq!(
+            committed.len(),
+            1,
+            "build_logup_aux_trace should return exactly one real committed final"
+        );
         committed.push(EF::ZERO);
         (aux_trace, committed)
     }
@@ -456,23 +460,20 @@ where
 /// [`emit_miden_boundary`] — the same source consumed by the debug walker —
 /// instead of open-coding the three corrections a second time.
 ///
-/// A zero denominator (malformed proof / adversarial public input) is stashed in
-/// `error` and surfaced by [`Self::finalize`]; subsequent `insert` calls are no-ops
-/// so we don't compound garbage into `sum`.
+/// Denominators are `α + Σ βⁱ · field_i` with random `α, β`; on any legitimate proof they
+/// are non-zero with overwhelming probability, and the outer quotient check already rejects
+/// the degenerate case, so `insert` panics rather than threading an error through the
+/// reducer.
 struct ReduceBoundaryBuilder<'a, EF: ExtensionField<Felt>> {
     challenges: &'a Challenges<EF>,
     public_values: &'a [Felt],
     var_len_public_inputs: VarLenPublicInputs<'a, Felt>,
     sum: EF,
-    error: Option<ReductionError>,
 }
 
 impl<'a, EF: ExtensionField<Felt>> ReduceBoundaryBuilder<'a, EF> {
-    fn finalize(self) -> Result<EF, ReductionError> {
-        match self.error {
-            Some(e) => Err(e),
-            None => Ok(self.sum),
-        }
+    fn finalize(self) -> EF {
+        self.sum
     }
 }
 
@@ -492,14 +493,10 @@ impl<'a, EF: ExtensionField<Felt>> BoundaryBuilder for ReduceBoundaryBuilder<'a,
     where
         M: LookupMessage<Felt, EF>,
     {
-        if self.error.is_some() {
-            return;
-        }
-        match msg.encode(self.challenges).try_inverse() {
-            Some(inv) => self.sum += inv * multiplicity,
-            None => {
-                self.error = Some("zero LogUp denominator".into());
-            },
-        }
+        let inv = msg
+            .encode(self.challenges)
+            .try_inverse()
+            .expect("LogUp denominator must be non-zero under random challenges");
+        self.sum += inv * multiplicity;
     }
 }
