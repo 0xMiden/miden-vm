@@ -66,6 +66,7 @@
 - Optimized call graph topological sort from O(V\*E) to O(V + E) by pre-computing in-degrees ([#2830](https://github.com/0xMiden/miden-vm/pull/2830)).
 - Removed AIR constraint tagging instrumentation, applied a uniform constraint description style across components, and optimized constraint evaluation ([#2856](https://github.com/0xMiden/miden-vm/pull/2856)).
 - Made all internal `core::math` procedures natively little-endian ([#3084](https://github.com/0xMiden/miden-vm/pull/3084)).
+- [BREAKING] Updated the Miden crypto stack to `miden-crypto` 0.25, and switched SMT leaf hashing to use Poseidon2 domain separation so masm-side leaf digests match `SmtLeaf::hash()` ([#3045](https://github.com/0xMiden/miden-vm/pull/3045)).
 
 ## 0.22.1
 
