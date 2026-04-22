@@ -22,7 +22,7 @@ use core::array;
 
 use miden_core::{
     Felt,
-    field::{Algebra, PrimeCharacteristicRing, PrimeField64},
+    field::{Algebra, PrimeCharacteristicRing},
     operations::opcodes,
 };
 
@@ -516,3 +516,53 @@ accessors!(
     overflow,
     u32_rc_op,
 );
+
+// TESTS
+// ================================================================================================
+
+#[cfg(test)]
+mod tests {
+    use miden_core::{ONE, ZERO, operations::Operation};
+
+    use super::LookupOpFlags;
+    use crate::constraints::op_flags::generate_test_row;
+
+    /// Tests `u32_rc_op` flag for u32 operations.
+    #[test]
+    fn u32_rc_op_flag() {
+        // U32 operations that require range checks (degree 6).
+        let u32_ops = [
+            Operation::U32add,
+            Operation::U32sub,
+            Operation::U32mul,
+            Operation::U32div,
+            Operation::U32split,
+            Operation::U32assert2(ZERO),
+            Operation::U32add3,
+            Operation::U32madd,
+        ];
+
+        for op in u32_ops {
+            let flags = flags_for_opcode(op.op_code().into());
+            assert_eq!(flags.u32_rc_op(), ONE, "u32_rc_op should be ONE for {op:?}");
+        }
+
+        // Non-u32 operations.
+        let non_u32_ops = [
+            Operation::Add,
+            Operation::Mul,
+            Operation::And, // Bitwise AND is degree 7, not u32.
+        ];
+
+        for op in non_u32_ops {
+            let flags = flags_for_opcode(op.op_code().into());
+            assert_eq!(flags.u32_rc_op(), ZERO, "u32_rc_op should be ZERO for {op:?}");
+        }
+    }
+
+    fn flags_for_opcode(opcode: usize) -> LookupOpFlags<miden_core::Felt> {
+        let row = generate_test_row(opcode);
+        let row_next = generate_test_row(0);
+        LookupOpFlags::from_main_cols(&row.decoder, &row.stack, &row_next.decoder)
+    }
+}

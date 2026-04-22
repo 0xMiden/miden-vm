@@ -9,6 +9,7 @@
 //! ```sh
 //! cargo test -p miden-air --test bus_degree_inventory
 //! ```
+#![cfg(feature = "std")]
 
 use miden_air::{
     LiftedAir, NUM_PUBLIC_VALUES, ProcessorAir,
