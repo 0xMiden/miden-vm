@@ -1,13 +1,25 @@
 use alloc::vec::Vec;
 
 use super::{NodeDataOffset, basic_blocks::BasicBlockDataDecoder};
+#[cfg(test)]
+use crate::mast::node::MastNodeExt;
 use crate::{
-    mast::{
-        MastForestContributor, MastNode, MastNodeId, Word,
-        node::{MastNodeBuilder, MastNodeExt},
-    },
+    mast::{MastForestContributor, MastNode, MastNodeId, Word, node::MastNodeBuilder},
     serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
+
+// CONSTANTS
+// ================================================================================================
+
+const JOIN: u8 = 0;
+const SPLIT: u8 = 1;
+const LOOP: u8 = 2;
+const BLOCK: u8 = 3;
+const CALL: u8 = 4;
+const SYSCALL: u8 = 5;
+const DYN: u8 = 6;
+const DYNCALL: u8 = 7;
+const EXTERNAL: u8 = 8;
 
 // MAST NODE ENTRIES
 // ================================================================================================
@@ -53,6 +65,9 @@ pub enum MastNodeEntry {
 
 /// Constructors
 impl MastNodeEntry {
+    /// Serialized byte size of one fixed-width MAST node entry.
+    pub const SERIALIZED_SIZE: usize = 8;
+
     /// Constructs a new [`MastNodeEntry`] from a [`MastNode`].
     pub fn new(mast_node: &MastNode, ops_offset: NodeDataOffset) -> Self {
         use MastNode::*;
@@ -227,7 +242,7 @@ impl Deserializable for MastNodeEntry {
 
     /// Returns the fixed serialized size: always 8 bytes (u64).
     fn min_serialized_size() -> usize {
-        8
+        Self::SERIALIZED_SIZE
     }
 }
 
@@ -286,6 +301,9 @@ impl MastNodeEntry {
     }
 }
 
+// MAST NODE INFO
+// ================================================================================================
+
 /// Logical node metadata combining fixed-width structure and a digest value.
 ///
 /// This is a convenience type for APIs that want both pieces together. The wire format does not
@@ -300,6 +318,7 @@ impl MastNodeInfo {
     /// Constructs a new [`MastNodeInfo`] from a [`MastNode`], along with an `ops_offset`
     ///
     /// For non-basic block nodes, `ops_offset` is ignored, and should be set to 0.
+    #[cfg(test)]
     pub fn new(mast_node: &MastNode, ops_offset: NodeDataOffset) -> Self {
         Self {
             entry: MastNodeEntry::new(mast_node, ops_offset),
@@ -308,6 +327,7 @@ impl MastNodeInfo {
     }
 
     /// Attempts to convert this [`MastNodeInfo`] into a [`MastNodeBuilder`].
+    #[cfg(test)]
     pub fn try_into_mast_node_builder(
         self,
         node_count: usize,
@@ -333,6 +353,7 @@ impl MastNodeInfo {
     }
 }
 
+#[cfg(test)]
 impl Serializable for MastNodeInfo {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         self.entry.write_into(target);
@@ -340,6 +361,7 @@ impl Serializable for MastNodeInfo {
     }
 }
 
+#[cfg(test)]
 impl Deserializable for MastNodeInfo {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let entry = MastNodeEntry::read_from(source)?;
@@ -353,15 +375,8 @@ impl Deserializable for MastNodeInfo {
     }
 }
 
-const JOIN: u8 = 0;
-const SPLIT: u8 = 1;
-const LOOP: u8 = 2;
-const BLOCK: u8 = 3;
-const CALL: u8 = 4;
-const SYSCALL: u8 = 5;
-const DYN: u8 = 6;
-const DYNCALL: u8 = 7;
-const EXTERNAL: u8 = 8;
+// TESTS
+// ================================================================================================
 
 #[cfg(test)]
 mod tests {

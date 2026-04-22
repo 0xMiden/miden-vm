@@ -8,6 +8,9 @@ use crate::{
     serde::{ByteReader, Deserializable, DeserializationError, SliceReader},
 };
 
+// FOREST LAYOUT
+// ================================================================================================
+
 /// Fixed offsets and counts for the structural sections of a serialized MAST forest.
 ///
 /// This is the shared substrate used by both serialized random-access views and the reader-based
@@ -28,7 +31,6 @@ pub(crate) struct ForestLayout {
     pub(super) basic_block_offset: usize,
     pub(super) basic_block_len: usize,
     pub(super) node_entry_offset: usize,
-    pub(super) node_entry_size: usize,
     pub(super) external_digest_offset: usize,
     #[cfg(test)]
     pub(super) external_digest_count: usize,
@@ -87,7 +89,7 @@ impl ForestLayout {
         let mut reader = SliceReader::new(read_fixed_section_entry(
             bytes,
             self.node_entry_offset,
-            self.node_entry_size,
+            MastNodeEntry::SERIALIZED_SIZE,
             index,
             "node entry",
         )?);
@@ -123,6 +125,9 @@ impl ForestLayout {
     }
 }
 
+// WIRE FLAGS
+// ================================================================================================
+
 impl WireFlags {
     pub(super) fn new(bits: u8) -> Result<Self, DeserializationError> {
         let flags = Self(bits);
@@ -147,6 +152,9 @@ impl WireFlags {
         self.0 & FLAG_HASHLESS != 0
     }
 }
+
+// LAYOUT SCANNING
+// ================================================================================================
 
 pub(super) fn read_header_and_scan_layout<R: OffsetTrackingReader>(
     source: &mut R,
@@ -271,12 +279,7 @@ fn scan_layout_sections<R: OffsetTrackingReader>(
             MastForest::MAX_NODES
         )));
     }
-    validate_budgeted_count(
-        source,
-        node_count,
-        MastNodeEntry::min_serialized_size(),
-        "node count",
-    )?;
+    validate_budgeted_count(source, node_count, MastNodeEntry::SERIALIZED_SIZE, "node count")?;
 
     let roots_count = source.read_usize()?;
     validate_budgeted_count(source, roots_count, core::mem::size_of::<u32>(), "root count")?;
@@ -290,7 +293,6 @@ fn scan_layout_sections<R: OffsetTrackingReader>(
     let basic_block_offset = source.offset();
     let _basic_block_data = source.read_slice(basic_block_len)?;
 
-    let node_entry_size = MastNodeEntry::min_serialized_size();
     let node_entry_offset = source.offset();
     let mut external_digest_count = 0usize;
     for _ in 0..node_count {
@@ -332,7 +334,6 @@ fn scan_layout_sections<R: OffsetTrackingReader>(
         basic_block_offset,
         basic_block_len,
         node_entry_offset,
-        node_entry_size,
         external_digest_offset,
         #[cfg(test)]
         external_digest_count,
@@ -387,6 +388,9 @@ fn read_and_validate_header<R: ByteReader>(
 
     Ok((flags, version))
 }
+
+// HELPERS
+// ================================================================================================
 
 pub(super) fn read_fixed_section_entry<'a>(
     bytes: &'a [u8],

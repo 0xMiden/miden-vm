@@ -15,6 +15,9 @@
 //! [`UntrustedMastForest::read_from_bytes`] applies default parsing and validation budgets derived
 //! from the input size. Use [`UntrustedMastForest::read_from_bytes_with_budget`] to tune only the
 //! wire-parsing budget, or [`UntrustedMastForest::read_from_bytes_with_budgets`] to tune both:
+//! the parsing budget limits allocations driven directly by wire counts while reading the payload,
+//! and the validation budget limits later helper allocations needed to materialize and check
+//! stripped or hashless payloads.
 //!
 //! ```ignore
 //! use miden_core::mast::UntrustedMastForest;
@@ -696,6 +699,9 @@ impl MastForest {
     /// 3. The last operation group in a batch cannot contain operations requiring immediate values
     /// 4. OpBatch structural consistency (num_groups <= BATCH_SIZE, group size <= GROUP_SIZE,
     ///    indptr integrity, bounds checking)
+    ///
+    /// This also validates that each stored procedure-name digest resolves to a procedure root in
+    /// the forest.
     ///
     /// This addresses the gap created by PR 2094, where padding NOOPs are now inserted
     /// at assembly time rather than dynamically during execution, and adds comprehensive

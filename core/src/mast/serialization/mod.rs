@@ -14,8 +14,8 @@
 //! [`ByteReader::max_alloc`]. Callers that opt into validation budgeting also get a second check:
 //! - later stripped/hashless helper allocations are charged against an explicit validation budget
 //!   before the corresponding `Vec` or CSR scaffolding is created
-//! - the default convenience path uses a coarse validation budget derived from the input size;
-//!   this is intentionally a simple bound for common callers, not an exact peak-memory formula
+//! - the default convenience path uses a coarse validation budget derived from the input size; this
+//!   is intentionally a simple bound for common callers, not an exact peak-memory formula
 //!
 //! The main layers fit together like this:
 //!
@@ -336,7 +336,7 @@ fn serialized_size_hint(forest: &MastForest, stripped: bool, hashless: bool) -> 
     }
     size += basic_block_len.get_size_hint() + basic_block_len;
 
-    size += node_count * MastNodeEntry::min_serialized_size();
+    size += node_count * MastNodeEntry::SERIALIZED_SIZE;
     size += external_count * crate::Word::min_serialized_size();
     if !hashless {
         size += non_external_count * crate::Word::min_serialized_size();
@@ -541,28 +541,6 @@ impl<'a> SerializedMastForest<'a> {
         self.resolved()?.node_digest_at(index)
     }
 
-    #[cfg(test)]
-    fn advice_map_offset(&self) -> Result<usize, DeserializationError> {
-        self.layout.advice_map_offset(self.bytes.len())
-    }
-
-    #[cfg(test)]
-    fn node_entry_offset(&self) -> usize {
-        self.layout.node_entry_offset
-    }
-
-    #[cfg(test)]
-    fn node_hash_offset(&self) -> Option<usize> {
-        self.layout.node_hash_offset
-    }
-
-    #[cfg(test)]
-    fn digest_slot_at(&self, index: usize) -> usize {
-        self.resolved()
-            .expect("digest slots should be readable for a valid serialized view")
-            .digest_slot_at(index)
-    }
-
     fn resolved(&self) -> Result<&ResolvedSerializedForest<'a>, DeserializationError> {
         self.resolved
             .get_or_init(|| ResolvedSerializedForest::new(self.bytes, self.layout))
@@ -629,6 +607,30 @@ impl MastForestView for MastForest {
                 self.roots.len()
             ))
         })
+    }
+}
+
+// TEST HELPERS
+// ================================================================================================
+
+#[cfg(test)]
+impl SerializedMastForest<'_> {
+    fn advice_map_offset(&self) -> Result<usize, DeserializationError> {
+        self.layout.advice_map_offset(self.bytes.len())
+    }
+
+    fn node_entry_offset(&self) -> usize {
+        self.layout.node_entry_offset
+    }
+
+    fn node_hash_offset(&self) -> Option<usize> {
+        self.layout.node_hash_offset
+    }
+
+    fn digest_slot_at(&self, index: usize) -> usize {
+        self.resolved()
+            .expect("digest slots should be readable for a valid serialized view")
+            .digest_slot_at(index)
     }
 }
 
