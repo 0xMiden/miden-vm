@@ -183,7 +183,7 @@ impl<T: Copy> ControllerCols<T> {
     /// Merkle-update new-path flag: `s0 * s1 * s2`.
     ///
     /// Active on controller input rows that insert the new Merkle path into the sibling
-    /// table (request/remove side of the running product).
+    /// table (request/remove side of the sibling bus).
     pub fn f_mu<E: PrimeCharacteristicRing>(&self) -> E
     where
         T: Into<E>,
@@ -194,7 +194,7 @@ impl<T: Copy> ControllerCols<T> {
     /// Merkle-verify / old-path flag: `s0 * s1 * (1 - s2)`.
     ///
     /// Active on controller input rows that extract the old Merkle path from the sibling
-    /// table (response/add side of the running product).
+    /// table (response/add side of the sibling bus).
     pub fn f_mv<E: PrimeCharacteristicRing>(&self) -> E
     where
         T: Into<E>,

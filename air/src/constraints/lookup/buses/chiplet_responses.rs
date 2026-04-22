@@ -1,17 +1,16 @@
-//! Chiplet responses bus (C1 / `BUS_CHIPLETS`).
+//! Chiplet responses bus ([`BusId::Chiplets`]).
 //!
 //! Chiplet-side responses from the hasher, bitwise, memory, ACE, and kernel ROM chiplets,
 //! all sharing one LogUp column.
 //!
 //! The 7 hasher response variants are gated on hasher controller rows
 //! (`chiplet_active.controller = 1`) via the per-variant `(s0, s1, s2, is_boundary)`
-//! combinations that mirror 2856's running product `compute_hasher_response`. Non-hasher
-//! variants (bitwise / memory / ACE init / kernel ROM) are gated by the matching
-//! `chiplet_active.{bitwise, memory, ace, kernel_rom}` flag.
+//! combinations. Non-hasher variants (bitwise / memory / ACE init / kernel ROM) are gated
+//! by the matching `chiplet_active.{bitwise, memory, ace, kernel_rom}` flag.
 //!
 //! Memory uses the runtime-muxed [`MemoryResponseMsg`] encoding (label + is_word mux)
-//! instead of splitting into 4 per-label variants — this keeps the C1 transition degree
-//! at 8 (a per-variant split would bump it to 9), matching the 2856 running-product shape.
+//! rather than splitting into 4 per-label variants — this keeps the response-column
+//! transition degree at 8 (a per-variant split would bump it to 9).
 
 use core::{array, borrow::Borrow};
 
@@ -84,7 +83,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
 
     // --- Hasher response flags ---
     // All gated by `chiplet_active.controller`; composed with the per-row-type
-    // `(s0, s1, s2, is_boundary)` combinations from 2856's `compute_hasher_response`.
+    // `(s0, s1, s2, is_boundary)` combinations.
     let controller_flag = ctx.chiplet_active.controller.clone();
 
     // Sponge start: input (hs0=1), hs1=hs2=0, is_boundary=1. Full 12-lane state.

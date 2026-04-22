@@ -18,12 +18,10 @@
 //!   `insert_encoded`) for the cached-encoding path. Default implementations panic; only the
 //!   constraint-path adapter overrides them with real bodies.
 //!
-//! No adapter impls live in this file — they arrive in Task #3 (constraint
-//! path) and Task #4 (prover path). The bounds here are therefore chosen
-//! so that both adapters can satisfy them: the constraint-path adapter
-//! forwards to an inner `LiftedAirBuilder` (so the associated types ride
-//! on `AB::Expr` / `AB::ExprEF` / etc.), while the prover-path adapter
-//! instantiates them with the concrete `F` / `EF` field types directly.
+//! No adapter impls live in this file; the bounds here are chosen so that both the
+//! constraint-path adapter (which forwards to an inner `LiftedAirBuilder`, carrying
+//! symbolic `AB::Expr` / `AB::ExprEF` associated types) and the prover-path adapter
+//! (instantiated with the concrete `F` / `EF` field types) can satisfy them.
 
 use miden_core::field::{Algebra, ExtensionField, Field, PrimeCharacteristicRing};
 use miden_crypto::stark::air::WindowAccess;

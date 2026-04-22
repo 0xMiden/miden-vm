@@ -1,13 +1,10 @@
-//! Chiplet requests bus (M3 / `BUS_CHIPLETS`).
+//! Chiplet requests bus ([`BusId::Chiplets`]).
 //!
 //! Decoder-side requests into the hasher, bitwise, memory, ACE init, and kernel ROM chiplets.
 //!
-//! Every interaction is folded into a single
-//! [`super::super::LookupColumn::group`] call. The cached-encoding variant was dropped in
-//! the Task #7 cleanup in favor of a flat inline body matching the `block_hash_and_op_group`
-//! pattern ("dropping the cached path is the simpler option" — see that bus's module doc
-//! for the rationale). The cached-encoding optimization can be reintroduced later if
-//! symbolic expression growth becomes a bottleneck.
+//! Every interaction is folded into a single [`super::super::LookupColumn::group`] call.
+//! The cached-encoding optimization can be reintroduced later if symbolic expression growth
+//! becomes a bottleneck.
 
 use core::array;
 
@@ -67,8 +64,8 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
 
     // Constants reused across HPERM / MPVERIFY / MRUPDATE / END / LOGPRECOMPILE.
     // Strides are measured in controller-trace rows (2 per permutation), not physical
-    // hasher sub-chiplet rows — matches the legacy chiplets-bus request addresses, which
-    // must cancel against `clk + 1` on the hasher controller output row.
+    // hasher sub-chiplet rows — the address must cancel against `clk + 1` on the hasher
+    // controller output row.
     let last_off: LB::Expr = LB::Expr::from_u16((CONTROLLER_ROWS_PER_PERMUTATION - 1) as u16);
     let cycle_len: LB::Expr = LB::Expr::from_u16(CONTROLLER_ROWS_PER_PERMUTATION as u16);
 
@@ -435,9 +432,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
 
                     // --- MSTREAM / PIPE ---
                     // Two-word memory ops. Address `stack[12]` holds the word-addressable target;
-                    // the two words live at `addr` and `addr + 4`. Matches legacy
-                    // `cfe62ef4f:air/src/constraints/chiplets/bus/chiplets.
-                    // rs::compute_mstream_request` and `compute_pipe_request`.
+                    // the two words live at `addr` and `addr + 4`.
                     //
                     // MSTREAM reads 8 elements from memory into `next.stack[0..8]`
                     // (MEMORY_READ_WORD). PIPE writes 8 elements from
@@ -494,11 +489,9 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
 
                     // --- CRYPTOSTREAM ---
                     // Two word reads (plaintext from src_ptr, src_ptr + 4) followed by two word
-                    // writes (ciphertext to dst_ptr, dst_ptr + 4). The rate lives on `local.stack
-                    // [0..8]`, and the ciphertext on `next.stack[0..8]`; the plaintext is
-                    // recovered algebraically as `cipher - rate`. Matches legacy
-                    // `cfe62ef4f:air/src/constraints/chiplets/bus/chiplets.rs::
-                    // compute_cryptostream_request`.
+                    // writes (ciphertext to dst_ptr, dst_ptr + 4). The rate lives on
+                    // `local.stack[0..8]`, and the ciphertext on `next.stack[0..8]`; the
+                    // plaintext is recovered algebraically as `cipher - rate`.
                     let src_ptr = stk.get(12);
                     let dst_ptr = stk.get(13);
                     g.batch(

@@ -663,8 +663,8 @@ where
         let bp = &challenges.beta_powers;
         let mut acc = challenges.bus_prefix[BusId::BlockStackTable as usize].clone();
         match self {
-            // `Simple` zero-pads to 10 slots in the legacy encoding. Slots `3..10`
-            // contribute `β^k · 0 = 0` so they are elided from the loop.
+            // `Simple` zero-pads to 10 slots; slots `3..10` contribute `β^k · 0 = 0` so
+            // they are elided from the loop.
             Self::Simple { block_id, parent_id, is_loop } => {
                 acc += bp[0].clone() * block_id.clone();
                 acc += bp[1].clone() * parent_id.clone();
@@ -878,9 +878,9 @@ where
 // LookupMessage impls for the response + sibling structs
 // ================================================================================================
 //
-// The `*ResponseMsg` structs below carry `LookupMessage<E, EF>` impls used by the
-// `lookup/buses/chiplet_responses.rs` port. The runtime-muxed encoding (bus prefix
-// muxed by is_read/is_word flags) keeps the C1 transition at degree 8.
+// The `*ResponseMsg` structs below carry `LookupMessage<E, EF>` impls consumed by
+// `lookup/buses/chiplet_responses.rs`. The runtime-muxed encoding (bus prefix muxed
+// by `is_read`/`is_word` flags) keeps the response-column transition at degree 8.
 
 impl<E, EF> LookupMessage<E, EF> for MemoryResponseMsg<E>
 where
@@ -942,14 +942,14 @@ where
 // ================================================================================================
 //
 // `SiblingMsg` is split into `SiblingMsgBitZero<E>` / `SiblingMsgBitOne<E>`, each carrying
-// the relevant hasher half, and encodes against the **sparse β layouts** (`[2, 7, 8, 9, 10]`
-// and `[2, 3, 4, 5, 6]`) that the responder-side hasher chiplet algebra requires. The trait
-// is permissive about *which* β positions an `encode` body touches; only the contiguous
-// convention is a suggestion, not a requirement.
+// the relevant hasher half, and encodes against sparse β layouts (`[2, 7, 8, 9, 10]` and
+// `[2, 3, 4, 5, 6]`) dictated by the responder-side hasher chiplet algebra. The trait is
+// permissive about which β positions an `encode` body touches; contiguity is a convention,
+// not a requirement.
 
 /// Sibling-table message when `bit = 0` — sibling lives at h[4..8] and the payload goes into
-/// β positions `[1, 2, 7, 8, 9, 10]`, matching the 2856 running-product layout
-/// (mrupdate_id at β¹, node_index at β², sibling rate1 at β⁷..β¹⁰).
+/// β positions `[1, 2, 7, 8, 9, 10]` (mrupdate_id at β¹, node_index at β², sibling rate1 at
+/// β⁷..β¹⁰).
 #[derive(Clone, Debug)]
 pub struct SiblingMsgBitZero<E> {
     pub mrupdate_id: E,
