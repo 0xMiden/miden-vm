@@ -492,6 +492,77 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
                         Deg { n: 1, d: 2 },
                     );
 
+                    // --- CRYPTOSTREAM ---
+                    // Two word reads (plaintext from src_ptr, src_ptr + 4) followed by two word
+                    // writes (ciphertext to dst_ptr, dst_ptr + 4). The rate lives on `local.stack
+                    // [0..8]`, and the ciphertext on `next.stack[0..8]`; the plaintext is
+                    // recovered algebraically as `cipher - rate`. Matches legacy
+                    // `cfe62ef4f:air/src/constraints/chiplets/bus/chiplets.rs::
+                    // compute_cryptostream_request`.
+                    let src_ptr = stk.get(12);
+                    let dst_ptr = stk.get(13);
+                    g.batch(
+                        "cryptostream",
+                        op_flags.cryptostream(),
+                        move |b| {
+                            let src0: LB::Expr = src_ptr.into();
+                            let src1: LB::Expr = src0.clone() + LB::Expr::from_u16(4);
+                            let dst0: LB::Expr = dst_ptr.into();
+                            let dst1: LB::Expr = dst0.clone() + LB::Expr::from_u16(4);
+                            let rate: [LB::Expr; 8] = array::from_fn(|i| stk.get(i).into());
+                            let cipher: [LB::Expr; 8] = array::from_fn(|i| stk_next.get(i).into());
+                            let plain: [LB::Expr; 8] =
+                                array::from_fn(|i| cipher[i].clone() - rate[i].clone());
+                            let plain_word0: [LB::Expr; 4] = array::from_fn(|i| plain[i].clone());
+                            let plain_word1: [LB::Expr; 4] =
+                                array::from_fn(|i| plain[4 + i].clone());
+                            let cipher_word0: [LB::Expr; 4] = array::from_fn(|i| cipher[i].clone());
+                            let cipher_word1: [LB::Expr; 4] =
+                                array::from_fn(|i| cipher[4 + i].clone());
+                            let read_header0 = MemoryHeader {
+                                ctx: sys_ctx.into(),
+                                addr: src0,
+                                clk: clk.into(),
+                            };
+                            let read_header1 = MemoryHeader {
+                                ctx: sys_ctx.into(),
+                                addr: src1,
+                                clk: clk.into(),
+                            };
+                            let write_header0 = MemoryHeader {
+                                ctx: sys_ctx.into(),
+                                addr: dst0,
+                                clk: clk.into(),
+                            };
+                            let write_header1 = MemoryHeader {
+                                ctx: sys_ctx.into(),
+                                addr: dst1,
+                                clk: clk.into(),
+                            };
+                            b.remove(
+                                "cryptostream_read0",
+                                read_header0.read_word(plain_word0),
+                                Deg { n: 4, d: 5 },
+                            );
+                            b.remove(
+                                "cryptostream_read1",
+                                read_header1.read_word(plain_word1),
+                                Deg { n: 4, d: 5 },
+                            );
+                            b.remove(
+                                "cryptostream_write0",
+                                write_header0.write_word(cipher_word0),
+                                Deg { n: 4, d: 5 },
+                            );
+                            b.remove(
+                                "cryptostream_write1",
+                                write_header1.write_word(cipher_word1),
+                                Deg { n: 4, d: 5 },
+                            );
+                        },
+                        Deg { n: 3, d: 4 },
+                    );
+
                     // --- U32AND / U32XOR ---
                     g.remove(
                         "u32and",

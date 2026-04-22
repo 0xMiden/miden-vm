@@ -176,13 +176,7 @@ fn memory_chiplet_bus_request_response_pairs() {
 /// pattern using hand-coded expected values (ciphertext = plaintext + rate), not values
 /// read back from the trace — a missing emission, a wrong opcode label, or a swapped
 /// addr/clk would all fail the subset match.
-///
-/// Currently ignored: `air/src/constraints/lookup/buses/chiplet_requests.rs` has no
-/// CryptoStream branch on this branch (the emission was lost during the LogUp port). Remove
-/// the `#[ignore]` once the wiring is restored — the test will then guard against future
-/// regressions.
 #[test]
-#[ignore = "CryptoStream memory requests not yet wired into LogUp chiplet_requests bus"]
 fn cryptostream_emits_four_memory_requests() {
     // `crypto_stream` stack layout: [rate(8), cap(4), src_ptr, dst_ptr, pad, pad]
     let stack = [

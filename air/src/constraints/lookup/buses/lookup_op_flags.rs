@@ -47,6 +47,7 @@ pub struct LookupOpFlags<E> {
     call: E,
     syscall: E,
     mrupdate: E,
+    cryptostream: E,
 
     // -- Degree-5 individual ops ----------------------------------------------------------------
     join: E,
@@ -160,6 +161,7 @@ where
         let call = deg4(opcodes::CALL);
         let syscall = deg4(opcodes::SYSCALL);
         let mrupdate = deg4(opcodes::MRUPDATE);
+        let cryptostream = deg4(opcodes::CRYPTOSTREAM);
 
         // -- Next-row control flow (END / REPEAT / HALT only) ------------------------------
         // prefix = extra[1]' * b4' = b6'*b5'*b4'. Distinguishes among the four deg-4 ops
@@ -215,6 +217,7 @@ where
             call,
             syscall,
             mrupdate,
+            cryptostream,
             join,
             split,
             span,
@@ -292,6 +295,7 @@ impl LookupOpFlags<Felt> {
             opcodes::CALL => f.call = Felt::ONE,
             opcodes::SYSCALL => f.syscall = Felt::ONE,
             opcodes::MRUPDATE => f.mrupdate = Felt::ONE,
+            opcodes::CRYPTOSTREAM => f.cryptostream = Felt::ONE,
             opcodes::MLOAD => f.mload = Felt::ONE,
             opcodes::MSTORE => f.mstore = Felt::ONE,
             opcodes::MLOADW => f.mloadw = Felt::ONE,
@@ -353,6 +357,7 @@ impl LookupOpFlags<Felt> {
             call: Felt::ZERO,
             syscall: Felt::ZERO,
             mrupdate: Felt::ZERO,
+            cryptostream: Felt::ZERO,
             join: Felt::ZERO,
             split: Felt::ZERO,
             span: Felt::ZERO,
@@ -413,6 +418,7 @@ impl LookupOpFlags<Felt> {
             call,
             syscall,
             mrupdate,
+            cryptostream,
             join,
             split,
             span,
@@ -485,6 +491,7 @@ accessors!(
     call,
     syscall,
     mrupdate,
+    cryptostream,
     // Degree-5 individual ops
     join,
     split,

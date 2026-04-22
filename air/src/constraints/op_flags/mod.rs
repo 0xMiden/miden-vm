@@ -582,7 +582,7 @@ where
         // DYNCALL is intentionally excluded — it left-shifts the stack but uses
         // decoder hasher state (h5) for overflow constraints, not the generic path.
         let prefix_010 = prefix_01 * bits[4][0].clone();
-        let u32_add3_madd_group = prefix_100.clone() * bits[3][1].clone() * bits[2][1].clone();
+        let u32_add3_madd_group = prefix_100 * bits[3][1].clone() * bits[2][1].clone();
         let left_shift_scalar = E::sum_array::<7>(&[
             // +prefix_010          — ASSERT, EQ, ADD, MUL, AND, OR, U32AND, U32XOR, DROP,
             //                        CSWAP, CSWAPW, MLOADW, MSTORE, MSTOREW, (op46), (op47)
@@ -741,7 +741,6 @@ where
     pub fn halt_next(&self) -> E {
         self.halt_next.clone()
     }
-
 }
 
 macro_rules! op_flag_getters {
