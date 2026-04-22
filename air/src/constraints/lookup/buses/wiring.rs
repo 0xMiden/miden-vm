@@ -1,4 +1,5 @@
-//! `v_wiring` shared bus column (C3 / `BUS_ACE_WIRING` + `BUS_HASHER_PERM_LINK_{INPUT,OUTPUT}`).
+//! `v_wiring` shared bus column (C3, `BusId::{AceWiring, HasherPermLinkInput,
+//! HasherPermLinkOutput}`).
 //!
 //! All three buses live inside **one** [`super::super::LookupColumn::group`] call. The chiplet
 //! tri-state (`s_ctrl + s_perm + s0_virtual = 1`) makes ACE rows, hasher controller rows,
@@ -10,7 +11,7 @@
 //! though they share the same accumulator their contributions are linearly independent in
 //! the extension field and cannot cancel across buses.
 //!
-//! ## ACE wiring (`BUS_ACE_WIRING`)
+//! ## ACE wiring (`BusId::AceWiring`)
 //!
 //! Two READ/EVAL wire interactions gated by the ACE chiplet selector + its per-row block
 //! selector, folded into a single `ace_flag`-gated batch with `sblock`-muxed multiplicities:
@@ -35,7 +36,7 @@
 //! `wire_2` interaction is fully suppressed via the `−sblock` multiplicity, so the
 //! interpretation collapses to the READ-mode one.
 //!
-//! ## Hasher perm-link (`BUS_HASHER_PERM_LINK_{INPUT,OUTPUT}`)
+//! ## Hasher perm-link (`BusId::HasherPermLink{Input,Output}`)
 //!
 //! Binds hasher controller rows to permutation sub-chiplet rows. Without this bus the
 //! permutation segment is structurally independent from the controller, and a malicious
@@ -176,7 +177,7 @@ pub(in crate::constraints::lookup) fn emit_v_wiring<LB>(
             col.group(
                 "ace_perm_link",
                 |g| {
-                    // ---- ACE wiring (BUS_ACE_WIRING) ----
+                    // ---- ACE wiring (BusId::AceWiring) ----
                     //
                     // Single `ace_flag`-gated batch with `sblock`-muxed multiplicities for wire_1
                     // and wire_2. `wire_0`'s `m_0` is invariant across the READ/EVAL split, so it
@@ -220,7 +221,7 @@ pub(in crate::constraints::lookup) fn emit_v_wiring<LB>(
                         Deg { n: 4, d: 3 },
                     );
 
-                    // ---- Hasher perm-link (BUS_HASHER_PERM_LINK_{INPUT,OUTPUT}) ----
+                    // ---- Hasher perm-link (BusId::HasherPermLink{Input,Output}) ----
 
                     // Controller input: +1 / encode(ctrl.state) on HasherPermLinkInput.
                     g.add(

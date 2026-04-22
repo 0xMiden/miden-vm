@@ -1,4 +1,4 @@
-//! Stack overflow table bus (M4 / `BUS_STACK_OVERFLOW_TABLE`).
+//! Stack overflow table bus (M4, `BusId::StackOverflowTable`).
 //!
 //! Three mutually exclusive interactions:
 //!

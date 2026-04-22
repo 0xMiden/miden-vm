@@ -150,10 +150,10 @@ where
     }
 
     fn num_bus_ids(&self) -> usize {
-        // Main-trace emitters touch BUS_BLOCK_STACK_TABLE, BUS_BLOCK_HASH_TABLE,
-        // BUS_OP_GROUP_TABLE, BUS_RANGE_CHECK, BUS_LOG_PRECOMPILE_TRANSCRIPT, and BUS_CHIPLETS.
-        // The adapter's bus-prefix table is shared across every LookupAir it runs, so returning
-        // `BusId::COUNT` (the total bus-type count) is the safe upper bound.
+        // Main-trace emitters touch `BusId::{BlockStackTable, BlockHashTable, OpGroupTable,
+        // RangeCheck, LogPrecompileTranscript}` plus the shared chiplet-requests column.
+        // The adapter's bus-prefix table is shared across every LookupAir it runs, so
+        // returning `BusId::COUNT` (the total bus-type count) is the safe upper bound.
         BusId::COUNT
     }
 

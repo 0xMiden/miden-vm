@@ -1,17 +1,17 @@
-//! Hash-kernel virtual table bus (C2 / `BUS_SIBLING_TABLE` + `BUS_CHIPLETS` +
-//! `BUS_RANGE_CHECK`).
+//! Hash-kernel virtual table bus (C2). Shares one column across
+//! `BusId::{SiblingTable, RangeCheck}` plus the shared chiplets column for ACE reads.
 //!
 //! Combines three tables on a single LogUp column:
 //!
-//! 1. **Sibling table** (`BUS_SIBLING_TABLE`) — Merkle update siblings. On hasher controller input
-//!    rows with `s0·s1 = 1`, `s2` distinguishes MU (new path, removes siblings) from MV (old path,
-//!    adds siblings). The direction bit `b = node_index − 2·node_index_next` selects which half of
-//!    `rate = [rate_0, rate_1]` holds the sibling, giving four gated interactions (two add, two
-//!    remove).
-//! 2. **ACE memory reads** (`BUS_CHIPLETS`) — on ACE chiplet rows, the block selector distinguishes
-//!    word reads (`f_ace_read`) from element reads used by EVAL rows (`f_ace_eval`). Both are
-//!    removed from the chiplets bus.
-//! 3. **Memory-side range checks** (`BUS_RANGE_CHECK`) — on memory chiplet rows, a five-remove
+//! 1. **Sibling table** (`BusId::SiblingTable`) — Merkle update siblings. On hasher controller
+//!    input rows with `s0·s1 = 1`, `s2` distinguishes MU (new path, removes siblings) from MV
+//!    (old path, adds siblings). The direction bit `b = node_index − 2·node_index_next` selects
+//!    which half of `rate = [rate_0, rate_1]` holds the sibling, giving four gated interactions
+//!    (two add, two remove).
+//! 2. **ACE memory reads** (chiplet-responses column) — on ACE chiplet rows, the block selector
+//!    distinguishes word reads (`f_ace_read`) from element reads used by EVAL rows
+//!    (`f_ace_eval`). Both are removed from the chiplets bus.
+//! 3. **Memory-side range checks** (`BusId::RangeCheck`) — on memory chiplet rows, a five-remove
 //!    batch consumes the two delta limbs `d0`/`d1` and the three word-address decomposition values
 //!    `w0`, `w1`, and `4·w1`. Together these enforce `d0, d1, w0, w1 ∈ [0, 2^16)` plus `w1 ∈ [0,
 //!    2^14)` (via the `4·w1` check), which bounds `word_addr = 4·(w0 + 2^16·w1)` to the 32-bit
@@ -201,7 +201,7 @@ pub(in crate::constraints::lookup) fn emit_hash_kernel_table<LB>(
                         Deg { n: 5, d: 6 },
                     );
 
-                    // --- ACE MEMORY READS (BUS_CHIPLETS) ---
+                    // --- ACE MEMORY READS (chiplet-responses column) ---
                     // Word read on READ rows.
                     g.remove(
                         "ace_mem_read_word",
@@ -241,7 +241,7 @@ pub(in crate::constraints::lookup) fn emit_hash_kernel_table<LB>(
                         Deg { n: 5, d: 6 },
                     );
 
-                    // --- MEMORY-SIDE RANGE CHECKS (BUS_RANGE_CHECK) ---
+                    // --- MEMORY-SIDE RANGE CHECKS (BusId::RangeCheck) ---
                     // Five removes per memory-active row:
                     // - `d0`, `d1` — the two 16-bit delta limbs used by the memory chiplet's
                     //   sorted-access constraints.

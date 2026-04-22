@@ -123,8 +123,9 @@ where
     }
 
     fn num_bus_ids(&self) -> usize {
-        // Chiplet-trace emitters touch BUS_CHIPLETS, BUS_SIBLING_TABLE, BUS_RANGE_CHECK,
-        // BUS_ACE_WIRING, and BUS_HASHER_PERM_LINK. The adapter's bus-prefix table is shared
+        // Chiplet-trace emitters touch the shared chiplet responses column plus
+        // `BusId::{SiblingTable, RangeCheck, AceWiring, HasherPermLinkInput,
+        // HasherPermLinkOutput}`. The adapter's bus-prefix table is shared
         // across every LookupAir it runs, so returning `BusId::COUNT` (the total bus-type
         // count) is the safe upper bound.
         BusId::COUNT

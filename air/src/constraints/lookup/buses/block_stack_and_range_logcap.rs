@@ -1,6 +1,6 @@
 //! Merged M1 column: block-stack table, u32 range checks, log-precompile capacity, and
-//! range-table response (`BUS_BLOCK_STACK_TABLE` + `BUS_RANGE_CHECK` +
-//! `BUS_LOG_PRECOMPILE_TRANSCRIPT` on one column).
+//! range-table response (`BusId::BlockStackTable` + `BusId::RangeCheck` +
+//! `BusId::LogPrecompileTranscript` on one column).
 //!
 //! Packs what used to be two separate columns (M1 block-stack and M4 range_logcap) into
 //! one, saving an aux column. Soundness of the merge relies on the three buses using
@@ -155,7 +155,7 @@ pub(in crate::constraints::lookup) fn emit_block_stack_and_range_logcap<LB>(
             col.group(
                 "main_interactions",
                 |g| {
-                    // ---- Block-stack table (BUS_BLOCK_STACK_TABLE) ----
+                    // ---- Block-stack table (BusId::BlockStackTable) ----
 
                     // JOIN/SPLIT/SPAN/DYN: simple push with `is_loop = 0`.
                     let f =
@@ -311,7 +311,7 @@ pub(in crate::constraints::lookup) fn emit_block_stack_and_range_logcap<LB>(
                         Deg { n: 1, d: 2 },
                     );
 
-                    // ---- u32 range-check removes (BUS_RANGE_CHECK) ----
+                    // ---- u32 range-check removes (BusId::RangeCheck) ----
                     // Four simultaneous range-check removals under the u32rc flag. Mutually
                     // exclusive with all block-stack branches (u32 ops are disjoint from
                     // control-flow ops) and with logpre (disjoint from LOGPRECOMPILE).
@@ -327,7 +327,7 @@ pub(in crate::constraints::lookup) fn emit_block_stack_and_range_logcap<LB>(
                         Deg { n: 3, d: 4 },
                     );
 
-                    // ---- Log-precompile capacity update (BUS_LOG_PRECOMPILE_TRANSCRIPT) ----
+                    // ---- Log-precompile capacity update (BusId::LogPrecompileTranscript) ----
                     // Remove the previous capacity, add the next. Mutually exclusive with all
                     // block-stack branches and with u32rc.
                     g.batch(
@@ -353,7 +353,7 @@ pub(in crate::constraints::lookup) fn emit_block_stack_and_range_logcap<LB>(
                 Deg { n: 6, d: 7 },
             );
 
-            // ──────────── Sibling group: range-table response (BUS_RANGE_CHECK) ────────────
+            // ──────────── Sibling group: range-table response (BusId::RangeCheck) ────────────
             //
             // Always-active insertion with multiplicity `range_m`. Lives in its own group
             // because its gate (`ONE`) makes it fire on every row, overlapping with every
