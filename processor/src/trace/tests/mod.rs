@@ -14,7 +14,6 @@ use crate::{
 
 mod chiplets;
 mod decoder;
-mod hasher;
 mod lookup;
 mod lookup_harness;
 mod range;
