@@ -55,7 +55,7 @@ pub use node::{
 };
 
 use crate::{
-    Felt, LexicographicWord, Word,
+    Felt, Word,
     advice::AdviceMap,
     operations::{AssemblyOp, DebugVarInfo, Decorator},
     serde::{
@@ -435,7 +435,7 @@ impl MastForest {
         node_ids: impl IntoIterator<Item = &'a MastNodeId>,
     ) -> Word {
         let mut digests: Vec<Word> = node_ids.into_iter().map(|&id| self[id].digest()).collect();
-        digests.sort_unstable_by_key(|word| LexicographicWord::from(*word));
+        digests.sort_unstable();
         miden_crypto::hash::poseidon2::Poseidon2::merge_many(&digests)
     }
 

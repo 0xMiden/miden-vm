@@ -69,9 +69,10 @@ miden-utils-testing     = { path = "./crates/test-utils", package = "miden-test-
 miden-verifier          = { path = "./verifier", version = "0.23.0", default-features = false }
 
 # Miden crates
-miden-crypto     = { version = "0.23", default-features = false }
+miden-crypto     = { version = "0.24", default-features = false }
 miden-formatting = { version = "0.1", default-features = false }
-midenc-hir-type  = { version = "0.5", default-features = false }
+miden-lifted-stark = { version = "0.24", default-features = false }
+midenc-hir-type  = { version = "0.5.4", default-features = false }
 
 # Serialization
 bincode = "1.3"

@@ -376,7 +376,7 @@ fn op_group_span_removal_covers_decode_rows() {
     // and the PUSH pulls its immediate from a dedicated group (exercising the `stk_next[0]`
     // branch).
     let mut ops: Vec<Operation> = (0..9).map(|_| Operation::Noop).collect();
-    ops.push(Operation::Push(Felt::new(42)));
+    ops.push(Operation::Push(Felt::new_unchecked(42)));
     ops.extend(vec![Operation::Add, Operation::Mul, Operation::Drop]);
     let trace = build_trace_from_ops(ops, &[]);
     let log = InteractionLog::new(&trace);

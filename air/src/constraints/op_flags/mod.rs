@@ -1087,7 +1087,7 @@ pub fn get_op_bits(opcode: usize) -> [miden_core::Felt; NUM_OP_BITS] {
     let mut bit_array = [ZERO; NUM_OP_BITS];
 
     for bit in bit_array.iter_mut() {
-        *bit = Felt::new((opcode_copy & 1) as u64);
+        *bit = Felt::new_unchecked((opcode_copy & 1) as u64);
         opcode_copy >>= 1;
     }
 

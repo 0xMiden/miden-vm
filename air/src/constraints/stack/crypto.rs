@@ -30,9 +30,9 @@ use crate::{
 
 // Fourth root of unity inverses (for FRI ext2fold4).
 // tau = g^((p-1)/4) where p is the Goldilocks prime.
-const TAU_INV: Felt = Felt::new(18446462594437873665);
-const TAU2_INV: Felt = Felt::new(18446744069414584320);
-const TAU3_INV: Felt = Felt::new(281474976710656);
+const TAU_INV: Felt = Felt::new_unchecked(18446462594437873665);
+const TAU2_INV: Felt = Felt::new_unchecked(18446744069414584320);
+const TAU3_INV: Felt = Felt::new_unchecked(281474976710656);
 
 // ENTRY POINTS
 // ================================================================================================

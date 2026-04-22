@@ -48,8 +48,8 @@ fn ace_simple_circuit_matches_hand_eval() {
 
     let circuit: AceCircuit<QuadFelt> = emit_circuit(&dag, layout.clone()).expect("emit circuit");
 
-    let a_val = QuadFelt::from(Felt::new(3));
-    let b_val = QuadFelt::from(Felt::new(5));
+    let a_val = QuadFelt::from(Felt::new_unchecked(3));
+    let b_val = QuadFelt::from(Felt::new_unchecked(5));
     let c_val = (a_val + b_val) * a_val; // satisfies equation
 
     let inputs = build_inputs(
@@ -86,9 +86,9 @@ fn ace_simple_circuit_with_shared_terms() {
 
     let circuit: AceCircuit<QuadFelt> = emit_circuit(&dag, layout.clone()).expect("emit circuit");
 
-    let a_val = QuadFelt::from(Felt::new(7));
-    let b_val = QuadFelt::from(Felt::new(2));
-    let c_val = QuadFelt::from(Felt::new(11));
+    let a_val = QuadFelt::from(Felt::new_unchecked(7));
+    let b_val = QuadFelt::from(Felt::new_unchecked(2));
+    let c_val = QuadFelt::from(Felt::new_unchecked(11));
 
     let inputs = build_inputs(
         &layout,

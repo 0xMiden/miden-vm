@@ -84,7 +84,7 @@ fn stack_get_word_safe_partial_read() {
     // elements at indices 15, 16, 17, 18. Only index 15 is valid; the rest should be ZERO.
     let word = processor.stack_get_word_safe(15);
     // Index 15 is the bottom of the stack (value 16, since inputs are in stack order: top first).
-    assert_eq!(word, [Felt::new(16), ZERO, ZERO, ZERO].into());
+    assert_eq!(word, [Felt::new_unchecked(16), ZERO, ZERO, ZERO].into());
 }
 
 #[test]
@@ -383,8 +383,10 @@ fn test_frie2f4() {
     ])
     .unwrap();
 
-    let program =
-        simple_program_with_ops(vec![Operation::Push(Felt::new(42_u64)), Operation::FriE2F4]);
+    let program = simple_program_with_ops(vec![
+        Operation::Push(Felt::new_unchecked(42_u64)),
+        Operation::FriE2F4,
+    ]);
 
     // fast processor
     let fast_processor = FastProcessor::new(stack_inputs);

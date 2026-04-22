@@ -21,7 +21,7 @@ use miden_crypto::{
         dft::Radix2DitParallel,
         fri::PcsParams,
         hasher::{ChainingHasher, SerializingStatefulSponge, StatefulSponge},
-        lmcs::LmcsConfig,
+        lmcs::config::LmcsConfig,
         symmetric::{
             CompressionFunctionFromHasher, CryptographicPermutation, PaddingFreeSponge,
             TruncatedPermutation,
@@ -85,34 +85,28 @@ pub fn pcs_params() -> PcsParams {
 /// Compile-time constant binding the Fiat-Shamir transcript to the Miden VM AIR.
 /// Must match the constants in `crates/lib/core/asm/sys/vm/mod.masm`.
 pub const RELATION_DIGEST: [Felt; 4] = [
-    Felt::new(11400994995531246300),
-    Felt::new(12622446492093309147),
-    Felt::new(16035268542292027941),
-    Felt::new(13878384499402141948),
+    Felt::new_unchecked(4584305506215415307),
+    Felt::new_unchecked(12510585458842841220),
+    Felt::new_unchecked(18386200305161118797),
+    Felt::new_unchecked(4176350117731665459),
 ];
 
-/// Observes PCS protocol parameters and per-proof trace height into the challenger.
+/// Observes PCS protocol parameters into the challenger.
 ///
 /// Call on a challenger obtained from `config.challenger()` to complete the
 /// domain-separated transcript initialization. The config factories already bind
 /// RELATION_DIGEST into the prototype challenger; this function adds the remaining
-/// protocol parameters and per-proof trace height.
-pub fn observe_protocol_params(challenger: &mut impl CanObserve<Felt>, log_trace_height: u64) {
+/// protocol parameters.
+pub fn observe_protocol_params(challenger: &mut impl CanObserve<Felt>) {
     // Batch 1: PCS parameters, zero-padded to SPONGE_RATE.
-    challenger.observe(Felt::new(NUM_QUERIES as u64));
-    challenger.observe(Felt::new(QUERY_POW_BITS as u64));
-    challenger.observe(Felt::new(DEEP_POW_BITS as u64));
-    challenger.observe(Felt::new(FOLDING_POW_BITS as u64));
-    challenger.observe(Felt::new(LOG_BLOWUP as u64));
-    challenger.observe(Felt::new(LOG_FINAL_DEGREE as u64));
-    challenger.observe(Felt::new(1_u64 << LOG_FOLDING_ARITY));
+    challenger.observe(Felt::new_unchecked(NUM_QUERIES as u64));
+    challenger.observe(Felt::new_unchecked(QUERY_POW_BITS as u64));
+    challenger.observe(Felt::new_unchecked(DEEP_POW_BITS as u64));
+    challenger.observe(Felt::new_unchecked(FOLDING_POW_BITS as u64));
+    challenger.observe(Felt::new_unchecked(LOG_BLOWUP as u64));
+    challenger.observe(Felt::new_unchecked(LOG_FINAL_DEGREE as u64));
+    challenger.observe(Felt::new_unchecked(1_u64 << LOG_FOLDING_ARITY));
     challenger.observe(Felt::ZERO);
-
-    // Batch 2: per-proof trace height, zero-padded to SPONGE_RATE.
-    challenger.observe(Felt::new(log_trace_height));
-    for _ in 1..SPONGE_RATE {
-        challenger.observe(Felt::ZERO);
-    }
 }
 
 /// Absorbs variable-length public inputs into the challenger.
@@ -326,7 +320,7 @@ mod tests {
         let encoded = circuit.to_ace().unwrap();
         let circuit_commitment: [Felt; 4] = encoded.circuit_hash().into();
 
-        let input: Vec<Felt> = core::iter::once(Felt::new(PROTOCOL_ID))
+        let input: Vec<Felt> = core::iter::once(Felt::new_unchecked(PROTOCOL_ID))
             .chain(circuit_commitment.iter().copied())
             .collect();
         let digest = Poseidon2::hash_elements(&input);

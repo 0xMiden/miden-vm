@@ -711,7 +711,7 @@ pub fn build_expected_perm(values: &[u64]) -> [Felt; STATE_WIDTH] {
     // => state[0..12] = stack[0..12] in [RATE0,RATE1,CAPACITY] layout.
     let mut state = [ZERO; STATE_WIDTH];
     for i in 0..STATE_WIDTH {
-        state[i] = Felt::new(values[i]);
+        state[i] = Felt::new_unchecked(values[i]);
     }
 
     // Apply the permutation
@@ -725,7 +725,7 @@ pub fn build_expected_perm(values: &[u64]) -> [Felt; STATE_WIDTH] {
 }
 
 pub fn build_expected_hash(values: &[u64]) -> [Felt; 4] {
-    let digest = hash_elements(&values.iter().map(|&v| Felt::new(v)).collect::<Vec<_>>());
+    let digest = hash_elements(&values.iter().map(|&v| Felt::new_unchecked(v)).collect::<Vec<_>>());
     digest.into()
 }
 

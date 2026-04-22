@@ -470,7 +470,7 @@ impl OpBatchAccumulator {
         // make sure the last group gets added to the group array; we also check the op_idx to
         // handle the case when a group contains a single NOOP operation.
         if self.group != 0 || self.op_idx != 0 {
-            self.groups[self.group_idx] = Felt::new(self.group);
+            self.groups[self.group_idx] = Felt::new_unchecked(self.group);
         }
         self.pad_if_needed();
         self.finalize_indptr();
@@ -506,7 +506,7 @@ impl OpBatchAccumulator {
         // we pad if we are looking at an empty group, or one finishing in an op carrying an
         // immediate
         self.pad_if_needed();
-        self.groups[self.group_idx] = Felt::new(self.group);
+        self.groups[self.group_idx] = Felt::new_unchecked(self.group);
         self.finalize_indptr();
 
         self.group_idx = self.next_group_idx;
@@ -636,9 +636,9 @@ mod op_batch_tests {
         let batch = {
             let mut acc = OpBatchAccumulator::new();
             // group 0
-            acc.add_op(Operation::Push(Felt::new(2)));
-            acc.add_op(Operation::Push(Felt::new(3)));
-            acc.add_op(Operation::Push(Felt::new(4)));
+            acc.add_op(Operation::Push(Felt::new_unchecked(2)));
+            acc.add_op(Operation::Push(Felt::new_unchecked(3)));
+            acc.add_op(Operation::Push(Felt::new_unchecked(4)));
             acc.add_op(Operation::Swap);
             acc.add_op(Operation::Swap);
             acc.add_op(Operation::Swap);
@@ -657,7 +657,7 @@ mod op_batch_tests {
             acc.add_op(Operation::Swap);
 
             // group 5
-            acc.add_op(Operation::Push(Felt::new(5)));
+            acc.add_op(Operation::Push(Felt::new_unchecked(5)));
             acc.add_op(Operation::Swap);
             acc.add_op(Operation::Swap);
             acc.add_op(Operation::Swap);
@@ -694,9 +694,9 @@ mod op_batch_tests {
         let batch = {
             let mut acc = OpBatchAccumulator::new();
             // group 0
-            acc.add_op(Operation::Push(Felt::new(2)));
-            acc.add_op(Operation::Push(Felt::new(3)));
-            acc.add_op(Operation::Push(Felt::new(4)));
+            acc.add_op(Operation::Push(Felt::new_unchecked(2)));
+            acc.add_op(Operation::Push(Felt::new_unchecked(3)));
+            acc.add_op(Operation::Push(Felt::new_unchecked(4)));
             acc.add_op(Operation::Swap);
             acc.add_op(Operation::Swap);
             acc.add_op(Operation::Swap);
@@ -715,7 +715,7 @@ mod op_batch_tests {
             acc.add_op(Operation::Swap);
 
             // group 5
-            acc.add_op(Operation::Push(Felt::new(5)));
+            acc.add_op(Operation::Push(Felt::new_unchecked(5)));
             acc.add_op(Operation::Swap);
             acc.add_op(Operation::Swap);
             acc.add_op(Operation::Swap);

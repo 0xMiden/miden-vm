@@ -37,7 +37,7 @@ use super::super::{
 };
 use crate::RowIndex;
 
-const FOUR: Felt = Felt::new(4);
+const FOUR: Felt = Felt::new_unchecked(4);
 
 /// Covers `MStoreW`, `MLoad`, `MLoadW`, `MStore`, `MStream` — every memory opcode issuable
 /// directly from the stack — asserting the chiplet-bus request/response pair fires at every
@@ -197,17 +197,17 @@ fn cryptostream_emits_four_memory_requests() {
     const ROW: usize = 1;
     let header = |addr| MemoryHeader { ctx: ZERO, addr, clk: ONE };
     let zero_word = [ZERO, ZERO, ZERO, ZERO];
-    let cipher1 = [Felt::new(1), Felt::new(2), Felt::new(3), Felt::new(4)];
-    let cipher2 = [Felt::new(5), Felt::new(6), Felt::new(7), Felt::new(8)];
+    let cipher1 = [Felt::new_unchecked(1), Felt::new_unchecked(2), Felt::new_unchecked(3), Felt::new_unchecked(4)];
+    let cipher2 = [Felt::new_unchecked(5), Felt::new_unchecked(6), Felt::new_unchecked(7), Felt::new_unchecked(8)];
 
     let mut request_exps_added = 0usize;
     exp.remove(ROW, &header(ZERO).read_word(zero_word)); // read src_ptr
     request_exps_added += 1;
     exp.remove(ROW, &header(FOUR).read_word(zero_word)); // read src_ptr + 4
     request_exps_added += 1;
-    exp.remove(ROW, &header(Felt::new(8)).write_word(cipher1)); // write dst_ptr
+    exp.remove(ROW, &header(Felt::new_unchecked(8)).write_word(cipher1)); // write dst_ptr
     request_exps_added += 1;
-    exp.remove(ROW, &header(Felt::new(12)).write_word(cipher2)); // write dst_ptr + 4
+    exp.remove(ROW, &header(Felt::new_unchecked(12)).write_word(cipher2)); // write dst_ptr + 4
     request_exps_added += 1;
 
     assert_eq!(request_exps_added, 4, "expected 4 CryptoStream request expectations");

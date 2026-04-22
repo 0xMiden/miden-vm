@@ -535,7 +535,7 @@ mod tests {
                             g.remove(
                                 "smoke_remove",
                                 Felt::ONE,
-                                || SmokeMsg { value: Felt::new(2) },
+                                || SmokeMsg { value: Felt::new_unchecked(2) },
                                 Deg { n: 0, d: 0 },
                             );
                         },
@@ -556,7 +556,7 @@ mod tests {
                                     b.insert(
                                         "smoke_batch_insert",
                                         Felt::ONE,
-                                        SmokeMsg { value: Felt::new(3) },
+                                        SmokeMsg { value: Felt::new_unchecked(3) },
                                         Deg { n: 0, d: 0 },
                                     );
                                 },
@@ -584,8 +584,8 @@ mod tests {
 
         // Any reasonable non-zero challenges — SmokeMsg encodes to `bus_prefix[0] + v`
         // which is non-zero as long as the challenges are.
-        let alpha = QuadFelt::new([Felt::new(7), Felt::new(11)]);
-        let beta = QuadFelt::new([Felt::new(13), Felt::new(17)]);
+        let alpha = QuadFelt::new([Felt::new_unchecked(7), Felt::new_unchecked(11)]);
+        let beta = QuadFelt::new([Felt::new_unchecked(13), Felt::new_unchecked(17)]);
         // SmokeAir hard-codes `max_message_width = 1` / `num_bus_ids = 1` in its
         // `LookupAir` impl — the trait-method path can't be called directly because
         // `LookupAir<LB>` is generic over `LB` and disambiguation fails at a value call.
@@ -646,8 +646,8 @@ mod tests {
         assert_eq!(aux[0][0], QuadFelt::ZERO, "accumulator initial must be zero");
 
         let d1 = SmokeMsg { value: Felt::ONE }.encode(&challenges);
-        let d2 = SmokeMsg { value: Felt::new(2) }.encode(&challenges);
-        let d3 = SmokeMsg { value: Felt::new(3) }.encode(&challenges);
+        let d2 = SmokeMsg { value: Felt::new_unchecked(2) }.encode(&challenges);
+        let d3 = SmokeMsg { value: Felt::new_unchecked(3) }.encode(&challenges);
         let delta0 = d1.try_inverse().unwrap() - d2.try_inverse().unwrap();
         let delta1 = d3.try_inverse().unwrap();
         // Column 0 (accumulator): each row delta = own fraction + col 1's fraction.

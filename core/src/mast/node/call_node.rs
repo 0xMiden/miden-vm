@@ -44,9 +44,9 @@ pub struct CallNode {
 /// Constants
 impl CallNode {
     /// The domain of the call block (used for control block hashing).
-    pub const CALL_DOMAIN: Felt = Felt::new(opcodes::CALL as u64);
+    pub const CALL_DOMAIN: Felt = Felt::new_unchecked(opcodes::CALL as u64);
     /// The domain of the syscall block (used for control block hashing).
-    pub const SYSCALL_DOMAIN: Felt = Felt::new(opcodes::SYSCALL as u64);
+    pub const SYSCALL_DOMAIN: Felt = Felt::new_unchecked(opcodes::SYSCALL as u64);
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -303,7 +303,7 @@ impl proptest::prelude::Arbitrary for CallNode {
         (any::<MastNodeId>(), any::<[u64; 4]>(), any::<bool>())
             .prop_map(|(callee, digest_array, is_syscall)| {
                 // Generate a random digest
-                let digest = Word::from(digest_array.map(Felt::new));
+                let digest = Word::from(digest_array.map(Felt::new_unchecked));
                 // Construct directly to avoid MastForest validation for arbitrary data
                 CallNode {
                     callee,

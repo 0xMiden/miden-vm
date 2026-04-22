@@ -37,7 +37,7 @@ pub fn build_batched_circuit(config: AceConfig) -> AceCircuit<QuadFelt> {
 
 /// Computes the relation digest used by recursive verification.
 pub fn compute_relation_digest(circuit_commitment: &[Felt; 4]) -> [Felt; 4] {
-    let input: Vec<Felt> = core::iter::once(Felt::new(PROTOCOL_ID))
+    let input: Vec<Felt> = core::iter::once(Felt::new_unchecked(PROTOCOL_ID))
         .chain(circuit_commitment.iter().copied())
         .collect();
     let digest = Poseidon2::hash_elements(&input);
@@ -162,7 +162,7 @@ fn compute_artifacts() -> io::Result<ComputedArtifacts> {
             })?;
     let mut new_block: String = relation_digest
         .iter()
-        .map(|f| format!("\n    Felt::new({}),", f.as_canonical_u64()))
+        .map(|f| format!("\n    Felt::new_unchecked({}),", f.as_canonical_u64()))
         .collect();
     new_block.push('\n');
     air_config.replace_range(block_start..block_end, &new_block);
@@ -224,7 +224,7 @@ pub fn constraints_eval_masm_matches_air() -> Result<(), String> {
         .filter(|s| !s.is_empty())
         .map(|s| {
             s.parse::<u64>()
-                .map(Felt::new)
+                .map(Felt::new_unchecked)
                 .map_err(|_| "invalid u64 in adv_map".to_string())
         })
         .collect::<Result<_, _>>()?;
@@ -272,7 +272,8 @@ pub fn relation_digest_matches_air() -> Result<(), String> {
     let mut masm_digest: [Felt; 4] = [Felt::ZERO; 4];
     for (i, slot) in masm_digest.iter_mut().enumerate() {
         let name = format!("RELATION_DIGEST_{i}");
-        *slot = parse_masm_const::<u64>(&masm, &name, "sys/vm/mod.masm").map(Felt::new)?;
+        *slot =
+            parse_masm_const::<u64>(&masm, &name, "sys/vm/mod.masm").map(Felt::new_unchecked)?;
     }
 
     if masm_digest != expected {

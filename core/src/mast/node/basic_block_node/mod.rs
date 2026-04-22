@@ -632,7 +632,7 @@ impl BasicBlockNode {
                     let opcode = op.op_code() as u64;
                     group_value |= opcode << (Operation::OP_BITS * local_op_idx);
                 }
-                if groups[group_idx] != Felt::new(group_value) {
+                if groups[group_idx] != Felt::new_unchecked(group_value) {
                     return Err(format!(
                         "Batch {batch_idx}, group {group_idx}: committed opcode group does not match operations"
                     ));

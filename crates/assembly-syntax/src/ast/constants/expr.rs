@@ -72,7 +72,7 @@ impl ConstantExpr {
     #[track_caller]
     pub fn expect_felt(&self) -> Felt {
         match self {
-            Self::Int(spanned) => Felt::new(spanned.inner().as_int()),
+            Self::Int(spanned) => Felt::new_unchecked(spanned.inner().as_int()),
             other => panic!("expected constant expression to be a literal, got {other:#?}"),
         }
     }
@@ -197,8 +197,8 @@ impl ConstantExpr {
                                             Some(Self::Int(Span::new(span, value)))
                                         },
                                         ConstantOp::Div => {
-                                            let lhs = Felt::new(lhs.as_int());
-                                            let rhs = Felt::new(rhs.as_int());
+                                            let lhs = Felt::new_unchecked(lhs.as_int());
+                                            let rhs = Felt::new_unchecked(rhs.as_int());
                                             let value = IntValue::from(lhs / rhs);
                                             Some(Self::Int(Span::new(span, value)))
                                         },

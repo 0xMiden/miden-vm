@@ -82,7 +82,7 @@ pub const NUM_ROUNDS: usize = miden_core::chiplets::hasher::NUM_ROUNDS;
 
 /// Index of the last row in a permutation cycle (0-based).
 pub const LAST_CYCLE_ROW: usize = HASH_CYCLE_LEN - 1;
-pub const LAST_CYCLE_ROW_FELT: Felt = Felt::new(LAST_CYCLE_ROW as u64);
+pub const LAST_CYCLE_ROW_FELT: Felt = Felt::new_unchecked(LAST_CYCLE_ROW as u64);
 
 /// Number of selector columns in the trace.
 pub const NUM_SELECTORS: usize = 3;
@@ -94,7 +94,7 @@ pub const NUM_SELECTORS: usize = 3;
 /// - Packing 3 internal rounds per row (7 rows for 21 rounds)
 /// - Merging int22 + ext5 into one row Result: 1 + 3 + 7 + 1 + 3 + 1 = 16 rows.
 pub const HASH_CYCLE_LEN: usize = 16;
-pub const HASH_CYCLE_LEN_FELT: Felt = Felt::new(HASH_CYCLE_LEN as u64);
+pub const HASH_CYCLE_LEN_FELT: Felt = Felt::new_unchecked(HASH_CYCLE_LEN as u64);
 
 /// Index of the node_index column. Holds the Merkle tree node index on controller rows.
 /// This column is reused to hold the permutation request multiplicity on perm segment rows.
@@ -122,7 +122,8 @@ pub const TRACE_WIDTH: usize = S_PERM_COL_IDX + 1;
 pub const CONTROLLER_ROWS_PER_PERMUTATION: usize = 2;
 
 /// Felt version of [CONTROLLER_ROWS_PER_PERMUTATION] for address arithmetic.
-pub const CONTROLLER_ROWS_PER_PERM_FELT: Felt = Felt::new(CONTROLLER_ROWS_PER_PERMUTATION as u64);
+pub const CONTROLLER_ROWS_PER_PERM_FELT: Felt =
+    Felt::new_unchecked(CONTROLLER_ROWS_PER_PERMUTATION as u64);
 
 // --- Transition selectors -----------------------------------------------------------------------
 

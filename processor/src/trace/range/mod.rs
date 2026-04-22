@@ -254,7 +254,7 @@ fn write_trace_row(
     num_lookups: usize,
     value: u64,
 ) {
-    trace[0][*step].write(Felt::new(num_lookups as u64));
-    trace[1][*step].write(Felt::new(value));
+    trace[0][*step].write(Felt::new_unchecked(num_lookups as u64));
+    trace[1][*step].write(Felt::new_unchecked(value));
     *step += 1;
 }

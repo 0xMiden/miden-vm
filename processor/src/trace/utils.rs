@@ -254,7 +254,7 @@ impl ChipletsLengths {
 /// valid 32-bit integer value.
 pub(crate) fn split_element_u32_into_u16(value: Felt) -> (Felt, Felt) {
     let (hi, lo) = split_u32_into_u16(value.as_canonical_u64());
-    (Felt::new(hi as u64), Felt::new(lo as u64))
+    (Felt::new_unchecked(hi as u64), Felt::new_unchecked(lo as u64))
 }
 
 /// Splits a u64 integer assumed to contain a 32-bit value into two u16 integers.

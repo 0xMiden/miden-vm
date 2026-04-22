@@ -62,11 +62,12 @@ mod export {
     };
     pub use miden_crypto::stark::{
         air::{
-            AirBuilder, AirWitness, AuxBuilder, BaseAir, ExtensionBuilder, LiftedAir,
-            LiftedAirBuilder, PermutationAirBuilder,
+            AirBuilder, AuxBuilder, BaseAir, ExtensionBuilder, LiftedAir, LiftedAirBuilder,
+            PermutationAirBuilder,
         },
         debug,
     };
+    pub use miden_lifted_stark::AirWitness;
 }
 
 pub use export::*;

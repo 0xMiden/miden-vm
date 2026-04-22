@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 
 use miden_air::trace::{CHIPLETS_WIDTH, chiplets::hasher::HasherState};
-use miden_core::{mast::OpBatch, program::Kernel, utils::RowMajorMatrix};
+use miden_core::{mast::OpBatch, program::Kernel};
 
 use crate::{
     Felt, ONE, Word, ZERO,
@@ -210,14 +210,12 @@ impl Chiplets {
             .expect("failed to convert vector to array");
         self.fill_trace(&mut trace);
 
-        let mut col_flat = Vec::with_capacity(CHIPLETS_WIDTH * trace_len);
-        for col in &trace {
-            col_flat.extend_from_slice(col);
+        let mut row_flat = Vec::with_capacity(CHIPLETS_WIDTH * trace_len);
+        for row_idx in 0..trace_len {
+            row_flat.extend(trace.iter().map(|column| column[row_idx]));
         }
-        let col_mat = RowMajorMatrix::new(col_flat, trace_len);
-        let row_mat = col_mat.transpose();
 
-        ChipletsTrace { trace: row_mat.values }
+        ChipletsTrace { trace: row_flat }
     }
 
     // HELPER METHODS

@@ -30,7 +30,7 @@ const TEST_TRACE_FRAGMENT_SIZE: usize = 1 << 10;
 
 /// Builds a sample trace by executing the provided code block against the provided stack inputs.
 pub fn build_trace_from_program(program: &Program, stack_inputs: &[u64]) -> ExecutionTrace {
-    let stack_inputs = stack_inputs.iter().map(|&v| Felt::new(v)).collect::<Vec<Felt>>();
+    let stack_inputs = stack_inputs.iter().map(|&v| Felt::new_unchecked(v)).collect::<Vec<Felt>>();
     let mut host = DefaultHost::default();
     let processor = FastProcessor::new_with_options(
         StackInputs::new(&stack_inputs).unwrap(),

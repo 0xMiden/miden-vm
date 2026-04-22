@@ -522,7 +522,7 @@ mod tests {
         }
         fn felt(&mut self) -> Felt {
             // Take the high 32 bits to avoid the near-zero-biasing of low bits.
-            Felt::new(self.next() >> 32)
+            Felt::new_unchecked(self.next() >> 32)
         }
         fn quad(&mut self) -> QuadFelt {
             QuadFelt::new([self.felt(), self.felt()])
@@ -639,10 +639,10 @@ mod tests {
     /// ```
     #[test]
     fn accumulate_slow_hand_crafted() {
-        let one = Felt::new(1);
-        let two = Felt::new(2);
-        let d1 = QuadFelt::new([Felt::new(3), Felt::new(0)]);
-        let d2 = QuadFelt::new([Felt::new(5), Felt::new(0)]);
+        let one = Felt::new_unchecked(1);
+        let two = Felt::new_unchecked(2);
+        let d1 = QuadFelt::new([Felt::new_unchecked(3), Felt::new_unchecked(0)]);
+        let d2 = QuadFelt::new([Felt::new_unchecked(5), Felt::new_unchecked(0)]);
 
         let mut fx = fixture([2, 1], 2);
         // Row 0

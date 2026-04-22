@@ -615,7 +615,7 @@ fn init_leaves(values: &[u64]) -> Vec<Word> {
 }
 
 fn init_leaf(value: u64) -> Word {
-    [Felt::new(value), ZERO, ZERO, ZERO].into()
+    [Felt::new_unchecked(value), ZERO, ZERO, ZERO].into()
 }
 
 fn word_to_ints(word: Word) -> [u64; 4] {

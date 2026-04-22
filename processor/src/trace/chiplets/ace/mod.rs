@@ -13,7 +13,7 @@ mod instruction;
 mod tests;
 
 pub const PTR_OFFSET_ELEM: Felt = Felt::ONE;
-pub const PTR_OFFSET_WORD: Felt = Felt::new(4);
+pub const PTR_OFFSET_WORD: Felt = Felt::new_unchecked(4);
 pub const MAX_NUM_ACE_WIRES: u32 = instruction::MAX_ID;
 
 /// Arithmetic circuit evaluation (ACE) chiplet.

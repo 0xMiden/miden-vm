@@ -3687,7 +3687,7 @@ end
     let assembled = Assembler::default().assemble_program(program_src);
     assert!(
         assembled.is_err(),
-        "expected out-of-range constant results to be rejected (must not silently alias via `Felt::new`)"
+        "expected out-of-range constant results to be rejected (must not silently alias via `Felt::new_unchecked`)"
     );
 }
 

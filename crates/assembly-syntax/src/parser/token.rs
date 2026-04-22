@@ -174,7 +174,7 @@ impl proptest::arbitrary::Arbitrary for WordValue {
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
         use proptest::{array::uniform4, strategy::Strategy};
-        uniform4((0..crate::FIELD_MODULUS).prop_map(Felt::new))
+        uniform4((0..crate::FIELD_MODULUS).prop_map(Felt::new_unchecked))
             .prop_map(WordValue)
             .no_shrink()  // Pure random values, no meaningful shrinking pattern
             .boxed()
@@ -437,7 +437,7 @@ impl proptest::arbitrary::Arbitrary for IntValue {
             (num::u64::ANY)
                 .prop_filter_map("valid felt value", |n| {
                     if n > u32::MAX as u64 && n < crate::FIELD_MODULUS {
-                        Some(IntValue::Felt(Felt::new(n)))
+                        Some(IntValue::Felt(Felt::new_unchecked(n)))
                     } else {
                         None
                     }

@@ -8,11 +8,7 @@ extern crate std;
 use alloc::{string::ToString, vec::Vec};
 
 use ::serde::Serialize;
-use miden_core::{
-    Felt, WORD_SIZE,
-    field::QuadFelt,
-    utils::{Matrix, RowMajorMatrix},
-};
+use miden_core::{Felt, WORD_SIZE, field::QuadFelt, utils::RowMajorMatrix};
 use miden_crypto::stark::{
     StarkConfig, air::VarLenPublicInputs, challenger::CanObserve, lmcs::Lmcs, proof::StarkOutput,
 };
@@ -184,10 +180,8 @@ where
     SC: StarkConfig<Felt, QuadFelt>,
     <SC::Lmcs as Lmcs>::Commitment: Serialize,
 {
-    let log_trace_height = trace.height().ilog2() as u8;
-
     let mut challenger = config.challenger();
-    config::observe_protocol_params(&mut challenger, log_trace_height as u64);
+    config::observe_protocol_params(&mut challenger);
     challenger.observe_slice(public_values);
     config::observe_var_len_public_inputs(&mut challenger, var_len_public_inputs, &[WORD_SIZE]);
     let output: StarkOutput<Felt, QuadFelt, SC> = miden_crypto::stark::prover::prove_single(
@@ -200,10 +194,8 @@ where
         challenger,
     )
     .map_err(|e| ExecutionError::ProvingError(e.to_string()))?;
-    // Proof serialization via bincode; see https://github.com/0xMiden/miden-vm/issues/2550
-    // We serialize `(log_trace_height, proof)` as a tuple; this is a temporary approach until
-    // the lifted STARK integrates trace height on its side.
-    let proof_bytes = bincode::serialize(&(log_trace_height, &output.proof))
+    // Proof serialization via bincode; see https://github.com/0xMiden/miden-vm/issues/2550.
+    let proof_bytes = bincode::serialize(&output.proof)
         .map_err(|e| ExecutionError::ProvingError(e.to_string()))?;
     Ok(proof_bytes)
 }
