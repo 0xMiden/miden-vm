@@ -23,6 +23,11 @@ name = "mast_forest_merge"
 required-features = ["arbitrary"]
 harness = false
 
+[[bench]]
+name = "mast_serialization_size"
+required-features = ["arbitrary"]
+harness = false
+
 [features]
 default = ["std"]
 std = [

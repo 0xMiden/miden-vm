@@ -12,11 +12,11 @@ use crate::{
 // MAST NODE INFO
 // ================================================================================================
 
-/// Represents a serialized [`MastNode`], with some data inlined in its [`MastNodeType`].
+/// Represents a serialized [`MastNode`], with some data inlined in its node type metadata.
 ///
 /// The serialized representation of [`MastNodeInfo`] is guaranteed to be fixed width, so that the
-/// nodes stored in the `nodes` table of the serialized [`MastForest`] can be accessed quickly by
-/// index.
+/// nodes stored in the `nodes` table of the serialized [`crate::mast::MastForest`] can be
+/// accessed quickly by index.
 #[derive(Debug)]
 pub struct MastNodeInfo {
     ty: MastNodeType,
@@ -39,8 +39,8 @@ impl MastNodeInfo {
 
     /// Attempts to convert this [`MastNodeInfo`] into a [`MastNodeBuilder`].
     ///
-    /// The `node_count` is the total expected number of nodes in the [`MastForest`] **after
-    /// deserialization**.
+    /// The `node_count` is the total expected number of nodes in the
+    /// [`crate::mast::MastForest`] **after deserialization**.
     pub fn try_into_mast_node_builder(
         self,
         node_count: usize,
@@ -102,6 +102,21 @@ impl MastNodeInfo {
                 Ok(MastNodeBuilder::External(builder))
             },
         }
+    }
+
+    /// Returns the serialized node type metadata.
+    pub fn node_type(&self) -> MastNodeType {
+        self.ty
+    }
+
+    /// Returns the stored node digest.
+    pub fn digest(&self) -> Word {
+        self.digest
+    }
+
+    /// Builds node metadata directly from serialized components.
+    pub(super) fn from_parts(ty: MastNodeType, digest: Word) -> Self {
+        Self { ty, digest }
     }
 }
 

@@ -34,6 +34,22 @@ impl BasicBlockDataBuilder {
     }
 }
 
+/// Returns the serialized size of a basic block in the node data section.
+pub(super) fn basic_block_data_len(basic_block: &BasicBlockNode) -> usize {
+    let mut op_count = 0usize;
+    let mut ops_size = 0usize;
+    for op in basic_block.operations() {
+        op_count += 1;
+        ops_size += op.encoded_size();
+    }
+
+    let num_batches = basic_block.num_op_batches();
+    let mut size = op_count.get_size_hint() + ops_size;
+    size += core::mem::size_of::<u32>();
+    size += 5 * num_batches;
+    size
+}
+
 /// Mutators
 impl BasicBlockDataBuilder {
     /// Encodes a [`BasicBlockNode`]'s operations into the serialized [`crate::mast::MastForest`]
