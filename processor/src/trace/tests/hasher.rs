@@ -81,10 +81,10 @@ fn mrupdate_emits_sibling_add_and_remove_per_level(#[case] index: u64) {
 
     let mut exp = Expectations::new(&log);
     for &row in &mv_rows {
-        push_sibling(&mut exp, &trace, row, main, SiblingSide::Add);
+        push_sibling(&mut exp, row, main, SiblingSide::Add);
     }
     for &row in &mu_rows {
-        push_sibling(&mut exp, &trace, row, main, SiblingSide::Remove);
+        push_sibling(&mut exp, row, main, SiblingSide::Remove);
     }
 
     log.assert_contains(&exp);
@@ -100,7 +100,6 @@ enum SiblingSide {
 
 fn push_sibling(
     exp: &mut Expectations<'_>,
-    _trace: &super::ExecutionTrace,
     row: RowIndex,
     main: &miden_air::trace::MainTrace,
     side: SiblingSide,
