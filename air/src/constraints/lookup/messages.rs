@@ -227,72 +227,39 @@ impl<E: PrimeCharacteristicRing + Clone> HasherMsg<E> {
 // MEMORY MESSAGES
 // ================================================================================================
 
-/// Common header for all memory messages: `[ctx, addr, clk]`.
+/// Memory chiplet message. Variants differ by payload size.
 ///
-/// Call a named method to produce a [`MemoryMsg`] with the correct interaction kind.
+/// Encodes as `bus_prefix[bus] + [ctx, addr, clk, ...payload]`. Use the [`MemoryMsg`]
+/// associated functions (`read_element`, `write_element`, `read_word`, `write_word`) to
+/// build messages with the correct interaction kind.
 #[derive(Clone, Debug)]
-pub struct MemoryHeader<E> {
-    pub ctx: E,
-    pub addr: E,
-    pub clk: E,
+pub enum MemoryMsg<E> {
+    /// 5-element message: `[ctx, addr, clk, element]`.
+    Element { bus: BusId, ctx: E, addr: E, clk: E, element: E },
+    /// 8-element message: `[ctx, addr, clk, word[0..4]]`.
+    Word { bus: BusId, ctx: E, addr: E, clk: E, word: [E; 4] },
 }
 
-impl<E: PrimeCharacteristicRing + Clone> MemoryHeader<E> {
+impl<E> MemoryMsg<E> {
     /// Read a single element from memory.
-    pub fn read_element(&self, element: E) -> MemoryMsg<E> {
-        MemoryMsg::Element {
-            bus: BusId::MemoryReadElement,
-            header: self.clone(),
-            element,
-        }
+    pub fn read_element(ctx: E, addr: E, clk: E, element: E) -> Self {
+        Self::Element { bus: BusId::MemoryReadElement, ctx, addr, clk, element }
     }
 
     /// Write a single element to memory.
-    pub fn write_element(&self, element: E) -> MemoryMsg<E> {
-        MemoryMsg::Element {
-            bus: BusId::MemoryWriteElement,
-            header: self.clone(),
-            element,
-        }
+    pub fn write_element(ctx: E, addr: E, clk: E, element: E) -> Self {
+        Self::Element { bus: BusId::MemoryWriteElement, ctx, addr, clk, element }
     }
 
     /// Read a 4-element word from memory.
-    pub fn read_word(&self, word: [E; 4]) -> MemoryMsg<E> {
-        MemoryMsg::Word {
-            bus: BusId::MemoryReadWord,
-            header: self.clone(),
-            word,
-        }
+    pub fn read_word(ctx: E, addr: E, clk: E, word: [E; 4]) -> Self {
+        Self::Word { bus: BusId::MemoryReadWord, ctx, addr, clk, word }
     }
 
     /// Write a 4-element word to memory.
-    pub fn write_word(&self, word: [E; 4]) -> MemoryMsg<E> {
-        MemoryMsg::Word {
-            bus: BusId::MemoryWriteWord,
-            header: self.clone(),
-            word,
-        }
+    pub fn write_word(ctx: E, addr: E, clk: E, word: [E; 4]) -> Self {
+        Self::Word { bus: BusId::MemoryWriteWord, ctx, addr, clk, word }
     }
-}
-
-/// Memory chiplet message. Variants differ by payload size.
-///
-/// Constructed via methods on [`MemoryHeader`] — the bus domain is baked in.
-/// Encodes as `bus_prefix[bus] + [ctx, addr, clk, ...payload]`.
-#[derive(Clone, Debug)]
-pub enum MemoryMsg<E> {
-    /// 5-element message: header + one field element.
-    Element {
-        bus: BusId,
-        header: MemoryHeader<E>,
-        element: E,
-    },
-    /// 8-element message: header + 4-element word.
-    Word {
-        bus: BusId,
-        header: MemoryHeader<E>,
-        word: [E; 4],
-    },
 }
 
 // BITWISE MESSAGE
@@ -591,16 +558,16 @@ where
         };
         let mut acc = challenges.bus_prefix[bus].clone();
         match self {
-            Self::Element { header, element, .. } => {
-                acc += bp[0].clone() * header.ctx.clone();
-                acc += bp[1].clone() * header.addr.clone();
-                acc += bp[2].clone() * header.clk.clone();
+            Self::Element { ctx, addr, clk, element, .. } => {
+                acc += bp[0].clone() * ctx.clone();
+                acc += bp[1].clone() * addr.clone();
+                acc += bp[2].clone() * clk.clone();
                 acc += bp[3].clone() * element.clone();
             },
-            Self::Word { header, word, .. } => {
-                acc += bp[0].clone() * header.ctx.clone();
-                acc += bp[1].clone() * header.addr.clone();
-                acc += bp[2].clone() * header.clk.clone();
+            Self::Word { ctx, addr, clk, word, .. } => {
+                acc += bp[0].clone() * ctx.clone();
+                acc += bp[1].clone() * addr.clone();
+                acc += bp[2].clone() * clk.clone();
                 for i in 0..4 {
                     acc += bp[i + 3].clone() * word[i].clone();
                 }

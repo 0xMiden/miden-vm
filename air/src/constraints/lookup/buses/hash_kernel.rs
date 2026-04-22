@@ -35,7 +35,7 @@ use crate::{
     constraints::{
         lookup::{
             chiplet_air::{ChipletBusContext, ChipletLookupBuilder},
-            messages::{MemoryHeader, RangeMsg, SiblingBit, SiblingMsg},
+            messages::{MemoryMsg, RangeMsg, SiblingBit, SiblingMsg},
         },
         utils::BoolNot,
     },
@@ -188,7 +188,7 @@ pub(in crate::constraints::lookup) fn emit_hash_kernel_table<LB>(
                                 ace_v1.0.into(),
                                 ace_v1.1.into(),
                             ];
-                            MemoryHeader { ctx, addr, clk }.read_word(word)
+                            MemoryMsg::read_word(ctx, addr, clk, word)
                         },
                         Deg { n: 5, d: 6 },
                     );
@@ -208,7 +208,7 @@ pub(in crate::constraints::lookup) fn emit_hash_kernel_table<LB>(
                                 + id_2 * LB::Expr::from(ACE_INSTRUCTION_ID1_OFFSET)
                                 + (eval_op + LB::Expr::ONE)
                                     * LB::Expr::from(ACE_INSTRUCTION_ID2_OFFSET);
-                            MemoryHeader { ctx, addr, clk }.read_element(element)
+                            MemoryMsg::read_element(ctx, addr, clk, element)
                         },
                         Deg { n: 5, d: 6 },
                     );

@@ -13,7 +13,7 @@ use miden_core::{FMP_ADDR, FMP_INIT_VALUE, field::PrimeCharacteristicRing, opera
 use crate::{
     constraints::lookup::{
         main_air::{MainBusContext, MainLookupBuilder},
-        messages::{AceInitMsg, BitwiseMsg, HasherMsg, KernelRomMsg, MemoryHeader},
+        messages::{AceInitMsg, BitwiseMsg, HasherMsg, KernelRomMsg, MemoryMsg},
     },
     lookup::{Deg, LookupBatch, LookupColumn, LookupGroup},
     trace::{
@@ -69,12 +69,11 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
     let last_off: LB::Expr = LB::Expr::from_u16((CONTROLLER_ROWS_PER_PERMUTATION - 1) as u16);
     let cycle_len: LB::Expr = LB::Expr::from_u16(CONTROLLER_ROWS_PER_PERMUTATION as u16);
 
-    // Shared memory header for MLOAD / MSTORE / MLOADW / MSTOREW (ctx / s0 / clk).
-    let mem_header = MemoryHeader {
-        ctx: sys_ctx.into(),
-        addr: s0.into(),
-        clk: clk.into(),
-    };
+    // Shared (ctx, addr, clk) triple for MLOAD / MSTORE / MLOADW / MSTOREW: all read from
+    // `s0` with the current system context and clock.
+    let mem_ctx: LB::Expr = sys_ctx.into();
+    let mem_clk: LB::Expr = clk.into();
+    let mem_addr: LB::Expr = s0.into();
 
     builder.next_column(
         |col| {
@@ -139,14 +138,14 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
                                 HasherMsg::control_block(parent, &h, opcodes::CALL),
                                 Deg { n: 4, d: 5 },
                             );
-                            let fmp_header = MemoryHeader {
-                                ctx: sys_ctx_next.into(),
-                                addr: FMP_ADDR.into(),
-                                clk: clk.into(),
-                            };
                             b.remove(
                                 "call_fmp_write",
-                                fmp_header.write_element(FMP_INIT_VALUE.into()),
+                                MemoryMsg::write_element(
+                                    sys_ctx_next.into(),
+                                    FMP_ADDR.into(),
+                                    clk.into(),
+                                    FMP_INIT_VALUE.into(),
+                                ),
                                 Deg { n: 4, d: 5 },
                             );
                         },
@@ -208,7 +207,9 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
 
                     // --- DYN ---
                     {
-                        let mem_header = mem_header.clone();
+                        let mem_ctx = mem_ctx.clone();
+                        let mem_clk = mem_clk.clone();
+                        let mem_addr = mem_addr.clone();
                         g.batch(
                             "dyn",
                             op_flags.dyn_op(),
@@ -223,7 +224,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
                                 let word = array::from_fn(|i| h[i].into());
                                 b.remove(
                                     "dyn_mem_read",
-                                    mem_header.read_word(word),
+                                    MemoryMsg::read_word(mem_ctx, mem_addr, mem_clk, word),
                                     Deg { n: 5, d: 6 },
                                 );
                             },
@@ -233,7 +234,9 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
 
                     // --- DYNCALL ---
                     {
-                        let mem_header = mem_header.clone();
+                        let mem_ctx = mem_ctx.clone();
+                        let mem_clk = mem_clk.clone();
+                        let mem_addr = mem_addr.clone();
                         g.batch(
                             "dyncall",
                             op_flags.dyncall(),
@@ -248,17 +251,17 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
                                 let word = array::from_fn(|i| h[i].into());
                                 b.remove(
                                     "dyncall_mem_read",
-                                    mem_header.read_word(word),
+                                    MemoryMsg::read_word(mem_ctx, mem_addr, mem_clk.clone(), word),
                                     Deg { n: 5, d: 6 },
                                 );
-                                let fmp_header = MemoryHeader {
-                                    ctx: sys_ctx_next.into(),
-                                    addr: FMP_ADDR.into(),
-                                    clk: clk.into(),
-                                };
                                 b.remove(
                                     "dyncall_fmp_write",
-                                    fmp_header.write_element(FMP_INIT_VALUE.into()),
+                                    MemoryMsg::write_element(
+                                        sys_ctx_next.into(),
+                                        FMP_ADDR.into(),
+                                        mem_clk,
+                                        FMP_INIT_VALUE.into(),
+                                    ),
                                     Deg { n: 5, d: 6 },
                                 );
                             },
@@ -375,60 +378,53 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
                         );
                     }
 
-                    // --- MLOAD / MSTORE / MLOADW / MSTOREW (shared mem_header) ---
+                    // --- MLOAD / MSTORE / MLOADW / MSTOREW ---
+                    // Shared (ctx, addr, clk) triple: reads the current system context, s0,
+                    // and clk.
                     {
-                        let mem_header = mem_header.clone();
+                        let (c, a, k) = (mem_ctx.clone(), mem_addr.clone(), mem_clk.clone());
                         g.remove(
                             "mload",
                             op_flags.mload(),
-                            move || {
-                                let value = stk_next_0.into();
-                                mem_header.read_element(value)
-                            },
+                            move || MemoryMsg::read_element(c, a, k, stk_next_0.into()),
                             Deg { n: 7, d: 8 },
                         );
                     }
                     {
-                        let mem_header = mem_header.clone();
+                        let (c, a, k) = (mem_ctx.clone(), mem_addr.clone(), mem_clk.clone());
                         g.remove(
                             "mstore",
                             op_flags.mstore(),
-                            move || {
-                                let value = s1.into();
-                                mem_header.write_element(value)
-                            },
+                            move || MemoryMsg::write_element(c, a, k, s1.into()),
                             Deg { n: 7, d: 8 },
                         );
                     }
                     {
-                        let mem_header = mem_header.clone();
+                        let (c, a, k) = (mem_ctx.clone(), mem_addr.clone(), mem_clk.clone());
                         g.remove(
                             "mloadw",
                             op_flags.mloadw(),
                             move || {
                                 let word = array::from_fn(|i| stk_next.get(i).into());
-                                mem_header.read_word(word)
+                                MemoryMsg::read_word(c, a, k, word)
                             },
                             Deg { n: 7, d: 8 },
                         );
                     }
-                    {
-                        let mem_header = mem_header;
-                        g.remove(
-                            "mstorew",
-                            op_flags.mstorew(),
-                            move || {
-                                let word = [
-                                    s1.into(),
-                                    stk.get(2).into(),
-                                    stk.get(3).into(),
-                                    stk.get(4).into(),
-                                ];
-                                mem_header.write_word(word)
-                            },
-                            Deg { n: 7, d: 8 },
-                        );
-                    }
+                    g.remove(
+                        "mstorew",
+                        op_flags.mstorew(),
+                        move || {
+                            let word = [
+                                s1.into(),
+                                stk.get(2).into(),
+                                stk.get(3).into(),
+                                stk.get(4).into(),
+                            ];
+                            MemoryMsg::write_word(mem_ctx, mem_addr, mem_clk, word)
+                        },
+                        Deg { n: 7, d: 8 },
+                    );
 
                     // --- MSTREAM / PIPE ---
                     // Two-word memory ops. Address `stack[12]` holds the word-addressable target;
@@ -447,18 +443,16 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
                             let word0: [LB::Expr; 4] = array::from_fn(|i| stk_next.get(i).into());
                             let word1: [LB::Expr; 4] =
                                 array::from_fn(|i| stk_next.get(4 + i).into());
-                            let header0 = MemoryHeader {
-                                ctx: sys_ctx.into(),
-                                addr: addr0,
-                                clk: clk.into(),
-                            };
-                            let header1 = MemoryHeader {
-                                ctx: sys_ctx.into(),
-                                addr: addr1,
-                                clk: clk.into(),
-                            };
-                            b.remove("mstream_word0", header0.read_word(word0), Deg { n: 5, d: 6 });
-                            b.remove("mstream_word1", header1.read_word(word1), Deg { n: 5, d: 6 });
+                            b.remove(
+                                "mstream_word0",
+                                MemoryMsg::read_word(sys_ctx.into(), addr0, clk.into(), word0),
+                                Deg { n: 5, d: 6 },
+                            );
+                            b.remove(
+                                "mstream_word1",
+                                MemoryMsg::read_word(sys_ctx.into(), addr1, clk.into(), word1),
+                                Deg { n: 5, d: 6 },
+                            );
                         },
                         Deg { n: 1, d: 2 },
                     );
@@ -471,18 +465,16 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
                             let word0: [LB::Expr; 4] = array::from_fn(|i| stk_next.get(i).into());
                             let word1: [LB::Expr; 4] =
                                 array::from_fn(|i| stk_next.get(4 + i).into());
-                            let header0 = MemoryHeader {
-                                ctx: sys_ctx.into(),
-                                addr: addr0,
-                                clk: clk.into(),
-                            };
-                            let header1 = MemoryHeader {
-                                ctx: sys_ctx.into(),
-                                addr: addr1,
-                                clk: clk.into(),
-                            };
-                            b.remove("pipe_word0", header0.write_word(word0), Deg { n: 5, d: 6 });
-                            b.remove("pipe_word1", header1.write_word(word1), Deg { n: 5, d: 6 });
+                            b.remove(
+                                "pipe_word0",
+                                MemoryMsg::write_word(sys_ctx.into(), addr0, clk.into(), word0),
+                                Deg { n: 5, d: 6 },
+                            );
+                            b.remove(
+                                "pipe_word1",
+                                MemoryMsg::write_word(sys_ctx.into(), addr1, clk.into(), word1),
+                                Deg { n: 5, d: 6 },
+                            );
                         },
                         Deg { n: 1, d: 2 },
                     );
@@ -512,44 +504,24 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
                             let cipher_word0: [LB::Expr; 4] = array::from_fn(|i| cipher[i].clone());
                             let cipher_word1: [LB::Expr; 4] =
                                 array::from_fn(|i| cipher[4 + i].clone());
-                            let read_header0 = MemoryHeader {
-                                ctx: sys_ctx.into(),
-                                addr: src0,
-                                clk: clk.into(),
-                            };
-                            let read_header1 = MemoryHeader {
-                                ctx: sys_ctx.into(),
-                                addr: src1,
-                                clk: clk.into(),
-                            };
-                            let write_header0 = MemoryHeader {
-                                ctx: sys_ctx.into(),
-                                addr: dst0,
-                                clk: clk.into(),
-                            };
-                            let write_header1 = MemoryHeader {
-                                ctx: sys_ctx.into(),
-                                addr: dst1,
-                                clk: clk.into(),
-                            };
                             b.remove(
                                 "cryptostream_read0",
-                                read_header0.read_word(plain_word0),
+                                MemoryMsg::read_word(sys_ctx.into(), src0, clk.into(), plain_word0),
                                 Deg { n: 4, d: 5 },
                             );
                             b.remove(
                                 "cryptostream_read1",
-                                read_header1.read_word(plain_word1),
+                                MemoryMsg::read_word(sys_ctx.into(), src1, clk.into(), plain_word1),
                                 Deg { n: 4, d: 5 },
                             );
                             b.remove(
                                 "cryptostream_write0",
-                                write_header0.write_word(cipher_word0),
+                                MemoryMsg::write_word(sys_ctx.into(), dst0, clk.into(), cipher_word0),
                                 Deg { n: 4, d: 5 },
                             );
                             b.remove(
                                 "cryptostream_write1",
-                                write_header1.write_word(cipher_word1),
+                                MemoryMsg::write_word(sys_ctx.into(), dst1, clk.into(), cipher_word1),
                                 Deg { n: 4, d: 5 },
                             );
                         },

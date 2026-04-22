@@ -23,7 +23,7 @@
 //! mismatches stack-side `ctx` vs chiplet-side `mem_ctx` is not caught here.
 
 use miden_air::{
-    logup::{MemoryHeader, MemoryResponseMsg},
+    logup::{MemoryMsg, MemoryResponseMsg},
     trace::chiplets::{MEMORY_IS_READ_COL_IDX, MEMORY_IS_WORD_ACCESS_COL_IDX},
 };
 use miden_core::{
@@ -79,22 +79,20 @@ fn memory_chiplet_bus_request_response_pairs() {
         let clk = main.clk(idx);
         let next = RowIndex::from(row + 1);
         let op = main.get_op_code(idx).as_canonical_u64();
-        let header = |addr| MemoryHeader { ctx, addr, clk };
-
         if op == opcodes::MLOAD as u64 {
             let addr = main.stack_element(0, idx);
             let value = main.stack_element(0, next);
-            exp.remove(row, &header(addr).read_element(value));
+            exp.remove(row, &MemoryMsg::read_element(ctx, addr, clk, value));
             request_exps_added += 1;
         } else if op == opcodes::MSTORE as u64 {
             let addr = main.stack_element(0, idx);
             let value = main.stack_element(1, idx);
-            exp.remove(row, &header(addr).write_element(value));
+            exp.remove(row, &MemoryMsg::write_element(ctx, addr, clk, value));
             request_exps_added += 1;
         } else if op == opcodes::MLOADW as u64 {
             let addr = main.stack_element(0, idx);
             let word = next_word(main, next, 0);
-            exp.remove(row, &header(addr).read_word(word));
+            exp.remove(row, &MemoryMsg::read_word(ctx, addr, clk, word));
             request_exps_added += 1;
         } else if op == opcodes::MSTOREW as u64 {
             let addr = main.stack_element(0, idx);
@@ -104,14 +102,14 @@ fn memory_chiplet_bus_request_response_pairs() {
                 main.stack_element(3, idx),
                 main.stack_element(4, idx),
             ];
-            exp.remove(row, &header(addr).write_word(word));
+            exp.remove(row, &MemoryMsg::write_word(ctx, addr, clk, word));
             request_exps_added += 1;
         } else if op == opcodes::MSTREAM as u64 {
             let base = main.stack_element(12, idx);
             let word0 = next_word(main, next, 0);
             let word1 = next_word(main, next, 4);
-            exp.remove(row, &header(base).read_word(word0));
-            exp.remove(row, &header(base + FOUR).read_word(word1));
+            exp.remove(row, &MemoryMsg::read_word(ctx, base, clk, word0));
+            exp.remove(row, &MemoryMsg::read_word(ctx, base + FOUR, clk, word1));
             request_exps_added += 2;
         }
     }
@@ -195,7 +193,6 @@ fn cryptostream_emits_four_memory_requests() {
     // CryptoStream runs at cycle 1 (cycle 0 is SPAN), ctx = 0, uninitialized source memory
     // (reads return zeros). Ciphertext = plaintext + rate = rate in this case.
     const ROW: usize = 1;
-    let header = |addr| MemoryHeader { ctx: ZERO, addr, clk: ONE };
     let zero_word = [ZERO, ZERO, ZERO, ZERO];
     let cipher1 = [
         Felt::new_unchecked(1),
@@ -211,13 +208,15 @@ fn cryptostream_emits_four_memory_requests() {
     ];
 
     let mut request_exps_added = 0usize;
-    exp.remove(ROW, &header(ZERO).read_word(zero_word)); // read src_ptr
+    // read src_ptr, read src_ptr + 4
+    exp.remove(ROW, &MemoryMsg::read_word(ZERO, ZERO, ONE, zero_word));
     request_exps_added += 1;
-    exp.remove(ROW, &header(FOUR).read_word(zero_word)); // read src_ptr + 4
+    exp.remove(ROW, &MemoryMsg::read_word(ZERO, FOUR, ONE, zero_word));
     request_exps_added += 1;
-    exp.remove(ROW, &header(Felt::new_unchecked(8)).write_word(cipher1)); // write dst_ptr
+    // write dst_ptr, write dst_ptr + 4
+    exp.remove(ROW, &MemoryMsg::write_word(ZERO, Felt::new_unchecked(8), ONE, cipher1));
     request_exps_added += 1;
-    exp.remove(ROW, &header(Felt::new_unchecked(12)).write_word(cipher2)); // write dst_ptr + 4
+    exp.remove(ROW, &MemoryMsg::write_word(ZERO, Felt::new_unchecked(12), ONE, cipher2));
     request_exps_added += 1;
 
     assert_eq!(request_exps_added, 4, "expected 4 CryptoStream request expectations");
