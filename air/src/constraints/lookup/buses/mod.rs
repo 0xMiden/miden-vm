@@ -30,14 +30,6 @@
 //! path without touching any emitter code. [`ChipletActiveFlags`] itself lives in this
 //! module because it's the pure-compute helper both the default chiplet hook and any
 //! future override want to reach for; it does not depend on either `MainCols` context type.
-//!
-//! ## Dead-code suppression
-//!
-//! Until Task #8 wires `ProcessorAir::eval` into the new `LookupAir` pipeline, the only
-//! live consumer of these emitters is the `miden_lookup_air_degree_within_budget` test in
-//! [`super::miden_air`]. The per-bus `emit_*` functions are kept discoverable from the
-//! aggregator's `eval` so they are reached transitively from that test even in lib-only
-//! builds.
 
 use miden_core::field::{Algebra, PrimeCharacteristicRing};
 
