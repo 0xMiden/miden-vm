@@ -414,8 +414,8 @@ where
     }
 
     fn eval(&self, builder: &mut LB) {
-        <MainLookupAir as LookupAir<LB>>::eval(&MainLookupAir, builder);
-        <ChipletLookupAir as LookupAir<LB>>::eval(&ChipletLookupAir, builder);
+        MainLookupAir.eval(builder);
+        ChipletLookupAir.eval(builder);
     }
 
     fn eval_boundary<B>(&self, boundary: &mut B)
