@@ -190,8 +190,9 @@ impl MastForest {
         self.remap_and_add_nodes(retained_nodes, &id_remappings);
         self.remap_and_add_roots(old_root_ids, &id_remappings);
 
-        // Remap the asm_op_storage to use the new node IDs
+        // Remap the asm_op_storage and debug_var_storage to use the new node IDs
         self.debug_info.remap_asm_op_storage(&id_remappings);
+        self.debug_info.remap_debug_var_storage(&id_remappings);
 
         // Invalidate the cached commitment since we modified the forest structure
         self.commitment_cache.take();
