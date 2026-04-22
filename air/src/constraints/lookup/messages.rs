@@ -521,7 +521,7 @@ pub struct LogCapacityMsg<E> {
 
 /// ACE wiring bus message (5 elements): `[clk, ctx, id, v0, v1]`.
 ///
-/// Encodes a single wire entry for the ACE wiring bus (C3). Each wire carries
+/// Encodes a single wire entry for the ACE wiring bus. Each wire carries
 /// an identifier and a two-coefficient extension-field value.
 #[derive(Clone, Debug)]
 pub struct AceWireMsg<E> {

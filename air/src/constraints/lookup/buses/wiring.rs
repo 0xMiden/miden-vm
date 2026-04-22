@@ -1,4 +1,4 @@
-//! `v_wiring` shared bus column (C3, `BusId::{AceWiring, HasherPermLinkInput,
+//! `v_wiring` shared bus column (`BusId::{AceWiring, HasherPermLinkInput,
 //! HasherPermLinkOutput}`).
 //!
 //! All three buses live inside **one** [`super::super::LookupColumn::group`] call. The chiplet
@@ -89,7 +89,7 @@ use crate::{
 /// Per-row max is therefore `max(3, 1, 1) = 3`.
 pub(in crate::constraints::lookup) const MAX_INTERACTIONS_PER_ROW: usize = 3;
 
-/// Emit the `v_wiring` shared column (C3): ACE wiring + hasher perm-link.
+/// Emit the `v_wiring` shared column: ACE wiring + hasher perm-link.
 pub(in crate::constraints::lookup) fn emit_v_wiring<LB>(
     builder: &mut LB,
     ctx: &ChipletBusContext<LB>,

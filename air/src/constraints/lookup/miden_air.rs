@@ -20,8 +20,9 @@ use crate::{PV_PROGRAM_HASH, PV_TRANSCRIPT_STATE, lookup::BoundaryBuilder};
 // COLUMN SHAPE AND COMMITTED-FINALS COUNT
 // ================================================================================================
 
-/// Full 7-column fraction stride: 4 main + 3 chiplet, in `ProcessorAir::eval` order
-/// (M1, M_2+5, M3, M4, C1, C2, C3).
+/// Full 7-column fraction stride: 4 main + 3 chiplet, in `ProcessorAir::eval` order (main
+/// columns first, then chiplet columns — see the per-half docs in
+/// [`super::main_air::MainLookupAir`] and [`super::chiplet_air::ChipletLookupAir`]).
 pub(crate) const MIDEN_COLUMN_SHAPE: [usize; 7] = [
     MAIN_COLUMN_SHAPE[0],
     MAIN_COLUMN_SHAPE[1],

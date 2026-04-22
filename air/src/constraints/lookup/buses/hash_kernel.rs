@@ -1,4 +1,4 @@
-//! Hash-kernel virtual table bus (C2). Shares one column across
+//! Hash-kernel virtual table bus. Shares one column across
 //! `BusId::{SiblingTable, RangeCheck}` plus the shared chiplets column for ACE reads.
 //!
 //! Combines three tables on a single LogUp column:
@@ -65,7 +65,7 @@ use crate::{
 /// `max(1, 1, 5) = 5`.
 pub(in crate::constraints::lookup) const MAX_INTERACTIONS_PER_ROW: usize = 5;
 
-/// Emit the hash-kernel virtual table bus (C2).
+/// Emit the hash-kernel virtual table bus.
 #[allow(clippy::too_many_lines)]
 pub(in crate::constraints::lookup) fn emit_hash_kernel_table<LB>(
     builder: &mut LB,

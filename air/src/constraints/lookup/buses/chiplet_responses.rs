@@ -41,7 +41,7 @@ use crate::{
 /// other chiplet emits exactly one fraction when active. Per-row max: 2.
 pub(in crate::constraints::lookup) const MAX_INTERACTIONS_PER_ROW: usize = 2;
 
-/// Emit the chiplet responses bus (C1).
+/// Emit the chiplet responses bus.
 #[allow(clippy::too_many_lines)]
 pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
     builder: &mut LB,
@@ -272,7 +272,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
                         Deg { n: 3, d: 4 },
                     );
 
-                    // Memory response: runtime (is_read, is_word) mux keeps C1 transition at 8.
+                    // Memory response: runtime (is_read, is_word) mux keeps column transition at 8.
                     g.add(
                         "memory",
                         ctx.chiplet_active.memory.clone(),

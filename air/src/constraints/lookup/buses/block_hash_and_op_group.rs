@@ -1,8 +1,8 @@
-//! Merged M_2+5 column: block-hash queue (G_block_hash) + op-group table (G_op_group) as one ME
-//! group.
+//! Merged block-hash + op-group column: block-hash queue (G_block_hash) + op-group table
+//! (G_op_group) as one mutually-exclusive group.
 //!
-//! Combines what were previously two separate columns (M2 and M5) into a single
-//! column by recognizing that G_block_hash and G_op_group are mutually exclusive:
+//! Combines what were previously two separate columns into a single column by recognizing
+//! that G_block_hash and G_op_group are mutually exclusive:
 //!
 //! - **G_block_hash** (block-hash queue) fires only on control-flow opcodes: JOIN, SPLIT,
 //!   LOOP/REPEAT, DYN/DYNCALL/CALL/SYSCALL, END.
@@ -14,10 +14,7 @@
 //! `(deg(U_g), deg(V_g))` is the elementwise max of the two individual buses:
 //! `(max(8, 8), max(6, 7)) = (8, 7)`, giving a column transition of
 //! `max(1 + 8, 7) = 9` — the same saturated cost the two original columns had
-//! individually, but using **one** column instead of two.
-//!
-//! This folds the original M2 (transition 9) and M5 (transition 9) into a
-//! single M_2+5 column at transition 9, saving one accumulator column in
+//! individually, but using **one** column instead of two, saving one accumulator column in
 //! `ProcessorAir::num_columns` (LookupAir impl).
 //!
 //! The emitter uses the plain `col.group` path (no cached encoding) for both buses; the
@@ -50,8 +47,8 @@ use crate::{
 /// `max(2, 7) = 7`.
 pub(in crate::constraints::lookup) const MAX_INTERACTIONS_PER_ROW: usize = 7;
 
-/// Emit the merged M_2+5 column: block-hash queue (G_block_hash) + op-group table (G_op_group)
-/// as a single ME group on one column.
+/// Emit the merged block-hash queue (G_block_hash) + op-group table (G_op_group) column as a
+/// single mutually-exclusive group.
 #[allow(clippy::too_many_lines)]
 pub(in crate::constraints::lookup) fn emit_block_hash_and_op_group<LB>(
     builder: &mut LB,

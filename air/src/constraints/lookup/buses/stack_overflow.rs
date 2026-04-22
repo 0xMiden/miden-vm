@@ -1,4 +1,4 @@
-//! Stack overflow table bus (M4, `BusId::StackOverflowTable`).
+//! Stack overflow table bus (`BusId::StackOverflowTable`).
 //!
 //! Three mutually exclusive interactions:
 //!
@@ -25,7 +25,7 @@ use crate::{
 /// most one fires per row.
 pub(in crate::constraints::lookup) const MAX_INTERACTIONS_PER_ROW: usize = 1;
 
-/// Emit the stack overflow table bus (M4).
+/// Emit the stack overflow table bus.
 pub(in crate::constraints::lookup) fn emit_stack_overflow<LB>(
     builder: &mut LB,
     ctx: &MainBusContext<LB>,

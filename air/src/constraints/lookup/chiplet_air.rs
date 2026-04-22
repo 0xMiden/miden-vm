@@ -1,9 +1,14 @@
 //! Chiplet-trace LogUp lookup AIR.
 //!
-//! Owns the chiplet-trace side of the Miden VM's LogUp argument: the three permutation
-//! columns C1, C2, C3. Each column is described by one of the `emit_*` functions in
-//! [`super::buses`]; this module wires them together via a single [`ChipletBusContext`]
-//! that carries the two-row window plus a shared [`ChipletActiveFlags`] snapshot.
+//! Owns the chiplet-trace side of the Miden VM's LogUp argument: three permutation
+//! columns, one per `emit_*` function in [`super::buses`]. This module wires them together
+//! via a single [`ChipletBusContext`] that carries the two-row window plus a shared
+//! [`ChipletActiveFlags`] snapshot.
+//!
+//! Columns (in emission order):
+//! - chiplet responses (memory / bitwise / hasher replies).
+//! - hash-kernel virtual table.
+//! - shared wiring column: ACE wiring + hasher perm-link (the legacy `v_wiring`).
 //!
 //! The [`ChipletLookupBuilder`] extension trait mirrors [`super::main_air::MainLookupBuilder`]:
 //! it exposes a single construction hook so the prover path can eventually skip the dead
@@ -88,13 +93,13 @@ where
 
 /// LogUp lookup argument over the chiplet trace.
 ///
-/// Zero-sized. Emits three permutation columns in the order C1, C2, C3, matching the
-/// aggregated `LookupAir` impl on [`crate::ProcessorAir`]. The main-trace half of the
-/// argument lives in [`super::main_air::MainLookupAir`].
+/// Zero-sized. Emits three permutation columns (see module docs for per-column contents),
+/// matching the aggregated `LookupAir` impl on [`crate::ProcessorAir`]. The main-trace half
+/// of the argument lives in [`super::main_air::MainLookupAir`].
 #[derive(Copy, Clone, Debug, Default)]
 pub(crate) struct ChipletLookupAir;
 
-/// Per-column fraction stride: [C1, C2, C3].
+/// Per-column fraction stride, in emission order (see [`ChipletLookupAir`] docs).
 pub(crate) const CHIPLET_COLUMN_SHAPE: [usize; 3] = [
     chiplet_responses::MAX_INTERACTIONS_PER_ROW,
     hash_kernel::MAX_INTERACTIONS_PER_ROW,
@@ -106,9 +111,7 @@ where
     LB: ChipletLookupBuilder,
 {
     fn num_columns(&self) -> usize {
-        // C1 (chiplet responses), C2 (hash-kernel virtual table),
-        // C3 (`v_wiring`: ACE wiring + hasher perm-link).
-        3
+        CHIPLET_COLUMN_SHAPE.len()
     }
 
     fn column_shape(&self) -> &[usize] {

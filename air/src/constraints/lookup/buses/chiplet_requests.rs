@@ -32,7 +32,7 @@ use crate::{
 /// merkle_new_init + return_hash). No other single branch exceeds 4.
 pub(in crate::constraints::lookup) const MAX_INTERACTIONS_PER_ROW: usize = 4;
 
-/// Emit the chiplet requests bus (M3).
+/// Emit the chiplet requests bus.
 #[allow(clippy::too_many_lines)]
 pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
     builder: &mut LB,

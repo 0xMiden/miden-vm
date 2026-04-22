@@ -1,12 +1,12 @@
-//! Merged M1 column: block-stack table, u32 range checks, log-precompile capacity, and
-//! range-table response (`BusId::BlockStackTable` + `BusId::RangeCheck` +
+//! Merged main-trace column: block-stack table, u32 range checks, log-precompile capacity,
+//! and range-table response (`BusId::BlockStackTable` + `BusId::RangeCheck` +
 //! `BusId::LogPrecompileTranscript` on one column).
 //!
-//! Packs what used to be two separate columns (M1 block-stack and M4 range_logcap) into
-//! one, saving an aux column. Soundness of the merge relies on the three buses using
-//! distinct `bus_prefix[bus]` bases (so their rationals remain linearly independent in
-//! the extension field) and on all opcode-gated interactions being mutually exclusive
-//! in the main group.
+//! Packs what used to be two separate columns (block-stack and range_logcap) into one,
+//! saving an aux column. Soundness of the merge relies on the three buses using distinct
+//! `bus_prefix[bus]` bases (so their rationals remain linearly independent in the
+//! extension field) and on all opcode-gated interactions being mutually exclusive in the
+//! main group.
 //!
 //! # Structure
 //!
@@ -88,7 +88,7 @@ use crate::{
 /// the sum: `4 + 1 = 5`.
 pub(in crate::constraints::lookup) const MAX_INTERACTIONS_PER_ROW: usize = 5;
 
-/// Emit the merged M1 column (block-stack + u32rc + logpre + range-table).
+/// Emit the merged block-stack + u32rc + logpre + range-table column.
 #[allow(clippy::too_many_lines)]
 pub(in crate::constraints::lookup) fn emit_block_stack_and_range_logcap<LB>(
     builder: &mut LB,

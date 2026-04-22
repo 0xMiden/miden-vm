@@ -1,15 +1,16 @@
 //! Per-bus emitters for the Miden VM's LogUp argument.
 //!
-//! The Miden VM's 9 LogUp buses are emitted across 7 columns — most columns host a single
-//! bus, but a few (M1, M_2+5, C2, C3) host two or more linearly-independent buses sharing
-//! one running accumulator via distinct `bus_prefix[bus]` additive bases. Each emitter is
-//! a crate-private `pub(in crate::constraints::lookup) fn emit_*` that opens a single
-//! [`super::LookupBuilder::column`] closure and describes the bus's interactions via
-//! [`super::LookupColumn::group`] or [`super::LookupColumn::group_with_cached_encoding`].
+//! The Miden VM's LogUp buses are emitted across 7 columns — most host a single bus, but
+//! several host two or more linearly-independent buses sharing one running accumulator via
+//! distinct `bus_prefix[bus]` additive bases (see per-bus module docs for the merges).
+//! Each emitter is a crate-private `pub(in crate::constraints::lookup) fn emit_*` that
+//! opens a single [`super::LookupBuilder::column`] closure and describes the bus's
+//! interactions via [`super::LookupColumn::group`] or
+//! [`super::LookupColumn::group_with_cached_encoding`].
 //!
 //! The emitters are routed through two separate [`super::LookupAir`] implementors:
-//! - [`super::main_air::MainLookupAir`] for the main-trace columns (M1, M_2+5, M3, M4).
-//! - [`super::chiplet_air::ChipletLookupAir`] for the chiplet-trace columns (C1, C2, C3).
+//! - [`super::main_air::MainLookupAir`] for the main-trace columns.
+//! - [`super::chiplet_air::ChipletLookupAir`] for the chiplet-trace columns.
 //!
 //! [`crate::ProcessorAir`]'s `LookupAir` impl is a thin aggregator that calls both in sequence,
 //! preserving the legacy `enforce_main` / `enforce_chiplet` column order for downstream

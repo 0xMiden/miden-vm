@@ -1,16 +1,15 @@
 //! Main-trace LogUp lookup AIR.
 //!
-//! Owns the main-trace side of the Miden VM's LogUp argument: the four permutation columns
-//! M1, M_2+5, M3, M4. Each column is described by one of the `emit_*` functions in
-//! [`super::buses`]; this module wires them together via a single [`MainBusContext`] that
-//! carries the two-row window plus a shared [`OpFlags`] instance.
+//! Owns the main-trace side of the Miden VM's LogUp argument: four permutation columns, one
+//! per `emit_*` function in [`super::buses`]. This module wires them together via a single
+//! [`MainBusContext`] that carries the two-row window plus a shared [`OpFlags`] instance.
 //!
-//! Column layout:
-//! - **M1**: block-stack table + u32 range checks + log-precompile capacity + range-table response
+//! Columns (in emission order):
+//! - block-stack table + u32 range checks + log-precompile capacity + range-table response
 //!   (merged — see [`super::buses::block_stack_and_range_logcap`]).
-//! - **M_2+5**: block-hash queue + op-group table.
-//! - **M3**: chiplet requests from the decoder.
-//! - **M4**: stack overflow table.
+//! - block-hash queue + op-group table.
+//! - chiplet requests from the decoder.
+//! - stack overflow table.
 //!
 //! The [`MainLookupBuilder`] extension trait exists so the `OpFlags` construction can diverge
 //! between the constraint path (polynomial, today's default) and the prover path (boolean
@@ -110,14 +109,15 @@ where
 
 /// LogUp lookup argument over the main trace.
 ///
-/// Zero-sized. Emits four permutation columns in the order M1, M_2+5, M3, M4. M1 packs
-/// block-stack + u32 range checks + log-precompile capacity + range-table response into
-/// one column; M4 hosts the stack overflow table. The chiplet-trace half of the argument
-/// lives in [`super::chiplet_air::ChipletLookupAir`].
+/// Zero-sized. Emits four permutation columns: the first packs block-stack + u32 range
+/// checks + log-precompile capacity + range-table response; the second unions block-hash
+/// queue and op-group table; the third hosts the decoder's chiplet requests; the fourth
+/// hosts the stack overflow table. The chiplet-trace half of the argument lives in
+/// [`super::chiplet_air::ChipletLookupAir`].
 #[derive(Copy, Clone, Debug, Default)]
 pub(crate) struct MainLookupAir;
 
-/// Per-column fraction stride: [M1, M_2+5, M3, M4].
+/// Per-column fraction stride, in emission order (see [`MainLookupAir`] docs).
 pub(crate) const MAIN_COLUMN_SHAPE: [usize; 4] = [
     block_stack_and_range_logcap::MAX_INTERACTIONS_PER_ROW,
     block_hash_and_op_group::MAX_INTERACTIONS_PER_ROW,
@@ -130,11 +130,7 @@ where
     LB: MainLookupBuilder,
 {
     fn num_columns(&self) -> usize {
-        // M1 (block-stack + u32rc + logpre + range-table response),
-        // M_2+5 (block-hash queue ∪ op-group table),
-        // M3 (chiplet requests),
-        // M4 (stack overflow table).
-        4
+        MAIN_COLUMN_SHAPE.len()
     }
 
     fn column_shape(&self) -> &[usize] {
