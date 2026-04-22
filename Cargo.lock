@@ -1373,7 +1373,7 @@ dependencies = [
  "miden-verifier",
  "num",
  "num-bigint",
- "rand 0.9.4",
+ "rand 0.9.3",
  "rand_chacha",
  "rstest",
  "thiserror",
@@ -1381,14 +1381,14 @@ dependencies = [
 
 [[package]]
 name = "miden-crypto"
-version = "0.24.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3b65e72c0e79847da910d263cfaa38572a21a381b58a06666cedb01bbe2ac353"
+version = "0.25.0"
+source = "git+https://github.com/0xMiden/crypto?branch=next#68ac2cf0b8473a63998b38149f8d599ffe3179b8"
 dependencies = [
  "blake3",
  "cc",
  "chacha20poly1305",
  "curve25519-dalek",
+ "der",
  "ed25519-dalek",
  "flume",
  "hkdf",
@@ -1409,7 +1409,7 @@ dependencies = [
  "p3-maybe-rayon",
  "p3-symmetric",
  "p3-util",
- "rand 0.9.4",
+ "rand 0.9.3",
  "rand_chacha",
  "rand_core 0.9.5",
  "rand_hc",
@@ -1424,9 +1424,8 @@ dependencies = [
 
 [[package]]
 name = "miden-crypto-derive"
-version = "0.24.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "99b940316a090de8f2db8825b75ffd7975445478639f4befc0471a62f45b2f66"
+version = "0.25.0"
+source = "git+https://github.com/0xMiden/crypto?branch=next#68ac2cf0b8473a63998b38149f8d599ffe3179b8"
 dependencies = [
  "quote",
  "syn 2.0.117",
@@ -1450,9 +1449,8 @@ dependencies = [
 
 [[package]]
 name = "miden-field"
-version = "0.24.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3ea5945a9bc14419b1b4cafc9762217c3f553330aa770af65c61c37268725d2e"
+version = "0.25.0"
+source = "git+https://github.com/0xMiden/crypto?branch=next#68ac2cf0b8473a63998b38149f8d599ffe3179b8"
 dependencies = [
  "miden-serde-utils",
  "num-bigint",
@@ -1478,9 +1476,8 @@ dependencies = [
 
 [[package]]
 name = "miden-lifted-air"
-version = "0.24.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6f14ed14fb4cb057fc3fc97a73c4467f6fbb0feefd588f1e4eff765513388f61"
+version = "0.25.0"
+source = "git+https://github.com/0xMiden/crypto?branch=next#68ac2cf0b8473a63998b38149f8d599ffe3179b8"
 dependencies = [
  "p3-air",
  "p3-field",
@@ -1491,9 +1488,8 @@ dependencies = [
 
 [[package]]
 name = "miden-lifted-stark"
-version = "0.24.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "200188ccdf7cdf4d0b2a4ea81bcb698280b9218704ff92196de322c2114eb924"
+version = "0.25.0"
+source = "git+https://github.com/0xMiden/crypto?branch=next#68ac2cf0b8473a63998b38149f8d599ffe3179b8"
 dependencies = [
  "miden-lifted-air",
  "miden-stark-transcript",
@@ -1632,9 +1628,8 @@ dependencies = [
 
 [[package]]
 name = "miden-serde-utils"
-version = "0.24.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "94c2ae629849e1e6d851fa6ba85f9fb9715a10d6b9a8bed29a5a5403164c7595"
+version = "0.25.0"
+source = "git+https://github.com/0xMiden/crypto?branch=next#68ac2cf0b8473a63998b38149f8d599ffe3179b8"
 dependencies = [
  "p3-field",
  "p3-goldilocks",
@@ -1642,9 +1637,8 @@ dependencies = [
 
 [[package]]
 name = "miden-stark-transcript"
-version = "0.24.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "40178330e5bbf29715fbf9d53fda8b6fb72d7b98e56958acc46f33545dbbacc3"
+version = "0.25.0"
+source = "git+https://github.com/0xMiden/crypto?branch=next#68ac2cf0b8473a63998b38149f8d599ffe3179b8"
 dependencies = [
  "p3-challenger",
  "p3-field",
@@ -1654,9 +1648,8 @@ dependencies = [
 
 [[package]]
 name = "miden-stateful-hasher"
-version = "0.24.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "614a10d9dbba4d5984cb6ff3a30f0060660cfe3804f56c1191040584ccd638ea"
+version = "0.25.0"
+source = "git+https://github.com/0xMiden/crypto?branch=next#68ac2cf0b8473a63998b38149f8d599ffe3179b8"
 dependencies = [
  "p3-field",
  "p3-symmetric",
@@ -1775,9 +1768,8 @@ dependencies = [
 
 [[package]]
 name = "midenc-hir-type"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8a9cecc109a7be41d364710d92d43c2912ef4620c8d243a2399e596f90594036"
+version = "0.5.4"
+source = "git+https://github.com/reilabs/midenc-hir-type?branch=crypto-0.25#1a88c86921483231242b547e5926d283a6374b11"
 dependencies = [
  "miden-formatting",
  "miden-serde-utils",
@@ -2362,7 +2354,7 @@ checksum = "37566cb3fdacef14c0737f9546df7cfeadbfbc9fef10991038bf5015d0c80532"
 dependencies = [
  "bitflags",
  "num-traits",
- "rand 0.9.4",
+ "rand 0.9.3",
  "rand_chacha",
  "rand_xorshift",
  "regex-syntax",
@@ -2417,9 +2409,9 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
 name = "rand"
-version = "0.9.4"
+version = "0.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "44c5af06bb1b7d3216d91932aed5265164bf384dc89cd6ba05cf59a35f5f76ea"
+checksum = "7ec095654a25171c2124e9e3393a930bddbffdc939556c914957a4c3e0a87166"
 dependencies = [
  "rand_chacha",
  "rand_core 0.9.5",
