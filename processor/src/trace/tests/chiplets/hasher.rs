@@ -482,7 +482,8 @@ fn mpverify_hasher_bus() {
 
     assert_eq!(request_count, 2, "MPVERIFY: expected 2 removes (init + return)");
     assert_eq!(mp_input_count, 1, "MPVERIFY: expected 1 mp_verify_input add");
-    assert!(hout_count >= 1, "MPVERIFY: expected at least 1 HOUT add");
+    // Depth-3 MPVERIFY emits HOUT on every merkle-verify sub-cycle return (one per level).
+    assert_eq!(hout_count, 2, "MPVERIFY: expected exactly 2 HOUT adds");
     log.assert_contains(&exp);
 }
 
@@ -574,7 +575,8 @@ fn mrupdate_hasher_bus() {
     );
     assert_eq!(mv_count, 1, "MRUPDATE: expected 1 mr_update_old_input add");
     assert_eq!(mu_count, 1, "MRUPDATE: expected 1 mr_update_new_input add");
-    assert!(hout_count >= 2, "MRUPDATE: expected at least 2 HOUT adds (old + new)");
+    // Depth-3 MRUPDATE emits HOUT on each old-path and new-path sub-cycle return.
+    assert_eq!(hout_count, 3, "MRUPDATE: expected exactly 3 HOUT adds");
     log.assert_contains(&exp);
 }
 
