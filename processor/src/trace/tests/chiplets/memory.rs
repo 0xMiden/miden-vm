@@ -197,8 +197,18 @@ fn cryptostream_emits_four_memory_requests() {
     const ROW: usize = 1;
     let header = |addr| MemoryHeader { ctx: ZERO, addr, clk: ONE };
     let zero_word = [ZERO, ZERO, ZERO, ZERO];
-    let cipher1 = [Felt::new_unchecked(1), Felt::new_unchecked(2), Felt::new_unchecked(3), Felt::new_unchecked(4)];
-    let cipher2 = [Felt::new_unchecked(5), Felt::new_unchecked(6), Felt::new_unchecked(7), Felt::new_unchecked(8)];
+    let cipher1 = [
+        Felt::new_unchecked(1),
+        Felt::new_unchecked(2),
+        Felt::new_unchecked(3),
+        Felt::new_unchecked(4),
+    ];
+    let cipher2 = [
+        Felt::new_unchecked(5),
+        Felt::new_unchecked(6),
+        Felt::new_unchecked(7),
+        Felt::new_unchecked(8),
+    ];
 
     let mut request_exps_added = 0usize;
     exp.remove(ROW, &header(ZERO).read_word(zero_word)); // read src_ptr

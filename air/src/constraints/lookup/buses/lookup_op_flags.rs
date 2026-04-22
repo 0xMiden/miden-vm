@@ -455,8 +455,8 @@ impl LookupOpFlags<Felt> {
 #[inline]
 fn decode_opcode_u8(op_bits: &[Felt; 7]) -> u8 {
     let mut out = 0u8;
-    for k in 0..7 {
-        out |= ((op_bits[k].as_canonical_u64() & 1) as u8) << k;
+    for (k, bit) in op_bits.iter().enumerate() {
+        out |= ((bit.as_canonical_u64() & 1) as u8) << k;
     }
     out
 }
