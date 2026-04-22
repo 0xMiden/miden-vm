@@ -5,8 +5,8 @@
 //! [`LookupBatch`] surface, the [`Challenges`] struct, the [`LookupMessage`] encode trait,
 //! the two-path adapters ([`ConstraintLookupBuilder`] for symbolic constraint
 //! evaluation, [`ProverLookupBuilder`] for concrete-row fraction collection), the
-//! [`LookupFractions`] accumulator, and the [`build_logup_aux`] / [`build_lookup_fractions`]
-//! drivers.
+//! [`LookupFractions`] accumulator, and the [`build_logup_aux_trace`] /
+//! [`build_lookup_fractions`] drivers.
 //!
 //! This module is deliberately free of Miden-specific types so it can be extracted into
 //! its own crate without further disentangling. The Miden-side wiring (aggregator AIR,
