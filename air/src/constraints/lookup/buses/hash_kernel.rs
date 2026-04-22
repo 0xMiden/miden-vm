@@ -35,7 +35,7 @@ use crate::{
     constraints::{
         lookup::{
             chiplet_air::{ChipletBusContext, ChipletLookupBuilder},
-            messages::{MemoryHeader, RangeMsg, SiblingMsgBitOne, SiblingMsgBitZero},
+            messages::{MemoryHeader, RangeMsg, SiblingBit, SiblingMsg},
         },
         utils::BoolNot,
     },
@@ -147,59 +147,31 @@ pub(in crate::constraints::lookup) fn emit_hash_kernel_table<LB>(
                 "sibling_ace_memory",
                 |g| {
                     // --- SIBLING TABLE ---
-                    // MV adds (old path), MU removes (new path). Each splits on bit into the
-                    // BitZero (sibling at rate_1) and BitOne (sibling at rate_0) variants.
-                    let gate = f_mv_all.clone() * one_minus_bit.clone();
-                    g.add(
-                        "sibling_mv_b0",
-                        gate,
-                        move || {
+                    // MV adds (old path), MU removes (new path); each splits on the Merkle
+                    // direction bit into a BitZero (sibling at rate_1) and BitOne (sibling
+                    // at rate_0) branch. Four mutually exclusive interactions total.
+                    for (op_name, is_add, f_all, bit_tag, bit_gate) in [
+                        ("sibling_mv_b0", true,  f_mv_all.clone(), SiblingBit::Zero, one_minus_bit.clone()),
+                        ("sibling_mv_b1", true,  f_mv_all,          SiblingBit::One,  bit.clone()),
+                        ("sibling_mu_b0", false, f_mu_all.clone(), SiblingBit::Zero, one_minus_bit),
+                        ("sibling_mu_b1", false, f_mu_all,          SiblingBit::One,  bit),
+                    ] {
+                        let gate = f_all * bit_gate;
+                        let build = move || {
                             let mrupdate_id: LB::Expr = mrupdate_id.into();
                             let node_index: LB::Expr = node_index.into();
-                            let h_hi = array::from_fn(|i| rate_1[i].into());
-                            SiblingMsgBitZero { mrupdate_id, node_index, h_hi }
-                        },
-                        Deg { n: 5, d: 6 },
-                    );
-
-                    let gate = f_mv_all * bit.clone();
-                    g.add(
-                        "sibling_mv_b1",
-                        gate,
-                        move || {
-                            let mrupdate_id: LB::Expr = mrupdate_id.into();
-                            let node_index: LB::Expr = node_index.into();
-                            let h_lo = array::from_fn(|i| rate_0[i].into());
-                            SiblingMsgBitOne { mrupdate_id, node_index, h_lo }
-                        },
-                        Deg { n: 5, d: 6 },
-                    );
-
-                    let gate = f_mu_all.clone() * one_minus_bit;
-                    g.remove(
-                        "sibling_mu_b0",
-                        gate,
-                        move || {
-                            let mrupdate_id: LB::Expr = mrupdate_id.into();
-                            let node_index: LB::Expr = node_index.into();
-                            let h_hi = array::from_fn(|i| rate_1[i].into());
-                            SiblingMsgBitZero { mrupdate_id, node_index, h_hi }
-                        },
-                        Deg { n: 5, d: 6 },
-                    );
-
-                    let gate = f_mu_all * bit;
-                    g.remove(
-                        "sibling_mu_b1",
-                        gate,
-                        move || {
-                            let mrupdate_id: LB::Expr = mrupdate_id.into();
-                            let node_index: LB::Expr = node_index.into();
-                            let h_lo = array::from_fn(|i| rate_0[i].into());
-                            SiblingMsgBitOne { mrupdate_id, node_index, h_lo }
-                        },
-                        Deg { n: 5, d: 6 },
-                    );
+                            let h = match bit_tag {
+                                SiblingBit::Zero => array::from_fn(|i| rate_1[i].into()),
+                                SiblingBit::One => array::from_fn(|i| rate_0[i].into()),
+                            };
+                            SiblingMsg { bit: bit_tag, mrupdate_id, node_index, h }
+                        };
+                        if is_add {
+                            g.add(op_name, gate, build, Deg { n: 5, d: 6 });
+                        } else {
+                            g.remove(op_name, gate, build, Deg { n: 5, d: 6 });
+                        }
+                    }
 
                     // --- ACE MEMORY READS (chiplet-responses column) ---
                     // Word read on READ rows.

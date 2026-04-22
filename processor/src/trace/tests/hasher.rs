@@ -6,9 +6,9 @@
 //! node_index, sibling_word)`.
 //!
 //! The test iterates every hasher controller row, picks out the MV/MU sibling-emitting rows
-//! via the `(s0, s1, s2)` sub-selectors, and attaches the corresponding `SiblingMsgBitZero` /
-//! `SiblingMsgBitOne` expectation depending on the direction bit. Column-blind — the subset
-//! matcher finds each message regardless of where the M4/C2 packing puts it.
+//! via the `(s0, s1, s2)` sub-selectors, and attaches a `SiblingMsg` expectation tagged with
+//! the direction bit. Column-blind — the subset matcher finds each message regardless of
+//! where the M4/C2 packing puts it.
 //!
 //! The old `hasher_p1_mp_verify` null-check (MPVERIFY emits no sibling messages) does not
 //! translate to subset semantics and is intentionally dropped; the balanced MRUPDATE test
@@ -17,7 +17,7 @@
 
 use alloc::vec::Vec;
 
-use miden_air::logup::{SiblingMsgBitOne, SiblingMsgBitZero};
+use miden_air::logup::{SiblingBit, SiblingMsg};
 use miden_core::{
     Felt, ONE, Word, ZERO,
     crypto::merkle::{MerkleStore, MerkleTree, NodeIndex},
@@ -111,24 +111,20 @@ fn push_sibling(
     let rate_0: [Felt; 4] = [state[0], state[1], state[2], state[3]];
     let rate_1: [Felt; 4] = [state[4], state[5], state[6], state[7]];
 
-    // Direction bit drives which rate half the sibling lives in. On bit=0 the sibling is at
-    // `rate_1` → `SiblingMsgBitZero`; on bit=1 at `rate_0` → `SiblingMsgBitOne`. The trace's
+    // Direction bit drives which rate half the sibling lives in. The trace's
     // `chiplet_direction_bit` column carries the extracted bit on Merkle controller rows.
     let bit = main.chiplet_direction_bit(row);
     let row_usize = usize::from(row);
-    if bit == ZERO {
-        let msg = SiblingMsgBitZero { mrupdate_id, node_index, h_hi: rate_1 };
-        match side {
-            SiblingSide::Add => exp.add(row_usize, &msg),
-            SiblingSide::Remove => exp.remove(row_usize, &msg),
-        };
+    let (bit_tag, h) = if bit == ZERO {
+        (SiblingBit::Zero, rate_1)
     } else {
-        let msg = SiblingMsgBitOne { mrupdate_id, node_index, h_lo: rate_0 };
-        match side {
-            SiblingSide::Add => exp.add(row_usize, &msg),
-            SiblingSide::Remove => exp.remove(row_usize, &msg),
-        };
-    }
+        (SiblingBit::One, rate_0)
+    };
+    let msg = SiblingMsg { bit: bit_tag, mrupdate_id, node_index, h };
+    match side {
+        SiblingSide::Add => exp.add(row_usize, &msg),
+        SiblingSide::Remove => exp.remove(row_usize, &msg),
+    };
 }
 
 fn build_merkle_tree() -> (MerkleTree, Vec<Word>) {

@@ -941,32 +941,35 @@ where
 // SIBLING MESSAGES
 // ================================================================================================
 //
-// `SiblingMsg` is split into `SiblingMsgBitZero<E>` / `SiblingMsgBitOne<E>`, each carrying
-// the relevant hasher half, and encodes against sparse β layouts (`[2, 7, 8, 9, 10]` and
-// `[2, 3, 4, 5, 6]`) dictated by the responder-side hasher chiplet algebra. The trait is
-// permissive about which β positions an `encode` body touches; contiguity is a convention,
-// not a requirement.
+// [`SiblingMsg<E>`] carries the relevant hasher half alongside a [`SiblingBit`] tag and
+// encodes against sparse β layouts (`[2, 7, 8, 9, 10]` and `[2, 3, 4, 5, 6]`) dictated by
+// the responder-side hasher chiplet algebra. The trait is permissive about which β
+// positions an `encode` body touches; contiguity is a convention, not a requirement.
 
-/// Sibling-table message when `bit = 0` — sibling lives at h[4..8] and the payload goes into
-/// β positions `[1, 2, 7, 8, 9, 10]` (mrupdate_id at β¹, node_index at β², sibling rate1 at
-/// β⁷..β¹⁰).
+/// Sibling-table message for the Merkle sibling bus.
+///
+/// The Merkle direction bit picks which half of the hasher rate block holds the sibling:
+/// `bit = 0` → sibling at `h[4..8]`, payload lands in β positions `[1, 2, 7, 8, 9, 10]`
+/// (mrupdate_id at β¹, node_index at β², rate1 at β⁷..β¹⁰); `bit = 1` → sibling at
+/// `h[0..4]`, payload lands in β positions `[1, 2, 3, 4, 5, 6]`.
 #[derive(Clone, Debug)]
-pub struct SiblingMsgBitZero<E> {
+pub struct SiblingMsg<E> {
+    pub bit: SiblingBit,
     pub mrupdate_id: E,
     pub node_index: E,
-    pub h_hi: [E; 4],
+    pub h: [E; 4],
 }
 
-/// Sibling-table message when `bit = 1` — sibling lives at h[0..4] and the payload goes into
-/// β positions `[1, 2, 3, 4, 5, 6]`.
-#[derive(Clone, Debug)]
-pub struct SiblingMsgBitOne<E> {
-    pub mrupdate_id: E,
-    pub node_index: E,
-    pub h_lo: [E; 4],
+/// Which half of the hasher rate block holds the sibling word for this row.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum SiblingBit {
+    /// `bit = 0` — sibling lives in the high rate half (`h[4..8]`).
+    Zero,
+    /// `bit = 1` — sibling lives in the low rate half (`h[0..4]`).
+    One,
 }
 
-impl<E, EF> LookupMessage<E, EF> for SiblingMsgBitZero<E>
+impl<E, EF> LookupMessage<E, EF> for SiblingMsg<E>
 where
     E: PrimeCharacteristicRing + Clone,
     EF: PrimeCharacteristicRing + Clone + Algebra<E>,
@@ -976,28 +979,14 @@ where
         let mut acc = challenges.bus_prefix[BusId::SiblingTable as usize].clone();
         acc += bp[1].clone() * self.mrupdate_id.clone();
         acc += bp[2].clone() * self.node_index.clone();
-        acc += bp[7].clone() * self.h_hi[0].clone();
-        acc += bp[8].clone() * self.h_hi[1].clone();
-        acc += bp[9].clone() * self.h_hi[2].clone();
-        acc += bp[10].clone() * self.h_hi[3].clone();
-        acc
-    }
-}
-
-impl<E, EF> LookupMessage<E, EF> for SiblingMsgBitOne<E>
-where
-    E: PrimeCharacteristicRing + Clone,
-    EF: PrimeCharacteristicRing + Clone + Algebra<E>,
-{
-    fn encode(&self, challenges: &Challenges<EF>) -> EF {
-        let bp = &challenges.beta_powers;
-        let mut acc = challenges.bus_prefix[BusId::SiblingTable as usize].clone();
-        acc += bp[1].clone() * self.mrupdate_id.clone();
-        acc += bp[2].clone() * self.node_index.clone();
-        acc += bp[3].clone() * self.h_lo[0].clone();
-        acc += bp[4].clone() * self.h_lo[1].clone();
-        acc += bp[5].clone() * self.h_lo[2].clone();
-        acc += bp[6].clone() * self.h_lo[3].clone();
+        let base = match self.bit {
+            SiblingBit::Zero => 7,
+            SiblingBit::One => 3,
+        };
+        acc += bp[base].clone() * self.h[0].clone();
+        acc += bp[base + 1].clone() * self.h[1].clone();
+        acc += bp[base + 2].clone() * self.h[2].clone();
+        acc += bp[base + 3].clone() * self.h[3].clone();
         acc
     }
 }
