@@ -49,6 +49,7 @@
 
 - Implemented project assembly ([#2877](https://github.com/0xMiden/miden-vm/pull/2877)).
 - Added `FastProcessor::into_parts()` to extract advice provider, memory, and precompile transcript after step-based execution ([#2901](https://github.com/0xMiden/miden-vm/pull/2901)).
+- Added `FrameBase` variant to `DebugVarLocation` and `set_value_location` to `DebugVarInfo` for frame-pointer-relative debug variable locations ([#2955](https://github.com/0xMiden/miden-vm/pull/2955)).
 
 ## 0.22.0 (2026-03-18)
 
