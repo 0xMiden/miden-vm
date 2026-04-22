@@ -107,12 +107,14 @@ where
         "accumulate output buffer is sized for num_rows + 1 rows",
     );
 
+    // `accumulate` emits `num_rows + 1` rows; take the committed final from col 0 of the
+    // trailing row and truncate in place to avoid allocating a throwaway last-row Vec.
     let mut data = full.values;
-    let last_row: Vec<EF> = data.split_off(num_rows * num_cols);
-    debug_assert_eq!(last_row.len(), num_cols);
+    let committed_final = data[num_rows * num_cols];
+    data.truncate(num_rows * num_cols);
 
     let aux_trace = RowMajorMatrix::new(data, num_cols);
-    (aux_trace, vec![last_row[0]])
+    (aux_trace, vec![committed_final])
 }
 
 // LOOKUP FRACTIONS
