@@ -59,7 +59,7 @@ pub(in crate::constraints::lookup) use lookup_op_flags::LookupOpFlags;
 /// The constructor is a pure compute function: it builds the same algebra as
 /// `build_chiplet_selectors` but does NOT emit any `when` / `assert_*` calls, so it is
 /// safe to run in parallel with the constraint-path chiplet selector pass.
-pub struct ChipletActiveFlags<E> {
+pub(crate) struct ChipletActiveFlags<E> {
     /// `is_active` for the hasher controller sub-chiplet (= `s_ctrl`).
     pub controller: E,
     /// `is_active` for the hasher permutation sub-chiplet (= `s_perm`).
