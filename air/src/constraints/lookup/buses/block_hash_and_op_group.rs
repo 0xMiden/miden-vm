@@ -20,13 +20,9 @@
 //! single M_2+5 column at transition 9, saving one accumulator column in
 //! `ProcessorAir::num_columns` (LookupAir impl).
 //!
-//! Implementation note: the emitter uses the plain `col.group` path (no cached
-//! encoding) for both buses. G_block_hash's original `emit_block_hash_queue` used
-//! cached encoding as an expression-size optimization; since G_op_group has no
-//! cached path and the merged ME group's final degree is identical under
-//! either mode, dropping the cached path is the simpler option. The
-//! cached-encoding optimization can be reintroduced later if symbolic
-//! expression growth becomes a bottleneck.
+//! The emitter uses the plain `col.group` path (no cached encoding) for both buses; the
+//! merged group's degree is unchanged under either mode. The cached-encoding optimization
+//! can be reintroduced later if symbolic expression growth becomes a bottleneck.
 
 use core::array;
 

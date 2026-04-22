@@ -88,10 +88,9 @@ where
 
 /// LogUp lookup argument over the chiplet trace.
 ///
-/// Zero-sized. Emits three permutation columns in the order C1, C2, C3 — matching the
-/// layout the legacy `enforce_chiplet` held and the aggregated `LookupAir` impl on
-/// [`crate::ProcessorAir`]. The main-trace half of the argument lives in
-/// [`super::main_air::MainLookupAir`].
+/// Zero-sized. Emits three permutation columns in the order C1, C2, C3, matching the
+/// aggregated `LookupAir` impl on [`crate::ProcessorAir`]. The main-trace half of the
+/// argument lives in [`super::main_air::MainLookupAir`].
 #[derive(Copy, Clone, Debug, Default)]
 pub(crate) struct ChipletLookupAir;
 

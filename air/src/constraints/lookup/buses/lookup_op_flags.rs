@@ -11,9 +11,9 @@
 //!   adapter and the debug builders. Mirrors the relevant parts of
 //!   [`OpFlags::new`](crate::constraints::op_flags::OpFlags::new) but skips every prefix product
 //!   that would feed only unused flags.
-//! - [`from_boolean_row`](LookupOpFlags::from_boolean_row) (added in a follow-up commit) —
-//!   prover-path override that decodes the 7-bit opcode as a `u8` and flips exactly one flag per
-//!   row. Saves a further factor by sidestepping Felt arithmetic altogether on the discrete flags.
+//! - [`from_boolean_row`](LookupOpFlags::from_boolean_row) — prover-path override that
+//!   decodes the 7-bit opcode as a `u8` and flips exactly one flag per row. Saves a further
+//!   factor by sidestepping Felt arithmetic altogether on the discrete flags.
 //!
 //! The method-accessor shape intentionally mirrors `OpFlags` so the bus emitters read
 //! `op_flags.join()` / `op_flags.overflow()` etc. without caring which constructor ran.
