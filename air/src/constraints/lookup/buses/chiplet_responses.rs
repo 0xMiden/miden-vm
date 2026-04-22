@@ -126,6 +126,10 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
 
     // --- Emit everything into a single LogUp column ---
 
+    // All hasher response variants encode their row at `clk + 1` (so they cancel against
+    // the matching request at `clk`).
+    let clk_plus_one: LB::Expr = local.system.clk.into() + LB::Expr::ONE;
+
     builder.next_column(
         |col| {
             col.group(
@@ -136,7 +140,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
                         "sponge_start",
                         f_sponge_start,
                         || {
-                            let addr = local.system.clk.into() + LB::Expr::ONE;
+                            let addr = clk_plus_one.clone();
                             let state: [LB::Expr; 12] = array::from_fn(|i| {
                                 if i < 4 {
                                     rate_0[i].into()
@@ -161,7 +165,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
                         "sponge_respan",
                         f_sponge_respan,
                         || {
-                            let addr = local.system.clk.into() + LB::Expr::ONE;
+                            let addr = clk_plus_one.clone();
                             let rate: [LB::Expr; 8] = array::from_fn(|i| {
                                 if i < 4 { rate_0[i].into() } else { rate_1[i - 4].into() }
                             });
@@ -181,7 +185,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
                         "mp_verify_input",
                         f_mp,
                         || {
-                            let addr = local.system.clk.into() + LB::Expr::ONE;
+                            let addr = clk_plus_one.clone();
                             let node_index: LB::Expr = ctrl.node_index.into();
                             let bit: LB::Expr =
                                 node_index.clone() - ctrl_next.node_index.into().double();
@@ -205,7 +209,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
                         "mr_update_old_input",
                         f_mv,
                         || {
-                            let addr = local.system.clk.into() + LB::Expr::ONE;
+                            let addr = clk_plus_one.clone();
                             let node_index: LB::Expr = ctrl.node_index.into();
                             let bit: LB::Expr =
                                 node_index.clone() - ctrl_next.node_index.into().double();
@@ -229,7 +233,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
                         "mr_update_new_input",
                         f_mu,
                         || {
-                            let addr = local.system.clk.into() + LB::Expr::ONE;
+                            let addr = clk_plus_one.clone();
                             let node_index: LB::Expr = ctrl.node_index.into();
                             let bit: LB::Expr =
                                 node_index.clone() - ctrl_next.node_index.into().double();
@@ -253,7 +257,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
                         "hout",
                         f_hout,
                         || {
-                            let addr = local.system.clk.into() + LB::Expr::ONE;
+                            let addr = clk_plus_one.clone();
                             let node_index: LB::Expr = ctrl.node_index.into();
                             let word: [LB::Expr; 4] = rate_0.map(LB::Expr::from);
                             HasherMsg::Word {
@@ -271,7 +275,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
                         "sout",
                         f_sout,
                         || {
-                            let addr = local.system.clk.into() + LB::Expr::ONE;
+                            let addr = clk_plus_one.clone();
                             let state: [LB::Expr; 12] = array::from_fn(|i| {
                                 if i < 4 {
                                     rate_0[i].into()
