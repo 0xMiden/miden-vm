@@ -22,7 +22,7 @@ use crate::{
         lookup::{
             chiplet_air::{ChipletBusContext, ChipletLookupBuilder},
             messages::{
-                AceInitMsg, BitwiseResponseMsg, BusId, HasherMsg, KernelRomMsg, MemoryResponseMsg,
+                AceInitMsg, BitwiseMsg, BusId, HasherMsg, KernelRomMsg, MemoryResponseMsg,
             },
         },
         utils::BoolNot,
@@ -256,11 +256,11 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
                         is_bitwise_responding,
                         || {
                             let bw_op: LB::Expr = bw.op_flag.into();
-                            BitwiseResponseMsg {
+                            BitwiseMsg {
                                 op: bw_op,
                                 a: bw.a.into(),
                                 b: bw.b.into(),
-                                z: bw.output.into(),
+                                result: bw.output.into(),
                             }
                         },
                         Deg { n: 3, d: 4 },

@@ -2,7 +2,7 @@
 //!
 //! Runs a program with `U32and` + `U32xor` operations and verifies that every bitwise request
 //! row emits the expected `BitwiseMsg` on the chiplet-requests side AND that every bitwise
-//! chiplet cycle-end row emits the matching `BitwiseResponseMsg` on the chiplet-responses side.
+//! chiplet cycle-end row emits the matching response on the chiplet-responses side.
 //!
 //! Column-blind by design: the subset matcher in `lookup_harness` compares `(mult, denom)`
 //! pairs regardless of which aux column the framework routes them onto.
@@ -10,7 +10,7 @@
 use alloc::vec::Vec;
 
 use miden_air::{
-    logup::{BitwiseMsg, BitwiseResponseMsg},
+    logup::BitwiseMsg,
     trace::chiplets::BITWISE_SELECTOR_COL_IDX,
 };
 use miden_core::{
@@ -104,7 +104,7 @@ fn bitwise_chiplet_bus_emits_per_request_row() {
         exp.remove(usize::from(row), &msg);
     }
 
-    // ---- Response side: each bitwise-chiplet cycle-end row emits `+1 × BitwiseResponseMsg`.
+    // ---- Response side: each bitwise-chiplet cycle-end row emits `+1 × BitwiseMsg`.
     //
     // Cycle-end = `row % BITWISE_CYCLE_LEN == BITWISE_CYCLE_LEN - 1` (the periodic `k_transition`
     // column is `0` on the last row of every 8-row cycle, starting from trace row 0). The bitwise
@@ -125,7 +125,7 @@ fn bitwise_chiplet_bus_emits_per_request_row() {
         let a = main.chiplet_bitwise_a(idx);
         let b = main.chiplet_bitwise_b(idx);
         let z = main.chiplet_bitwise_z(idx);
-        exp.add(row, &BitwiseResponseMsg { op, a, b, z });
+        exp.add(row, &BitwiseMsg { op, a, b, result: z });
     }
     let expected_responses = and_expected.len() + xor_expected.len();
     assert_eq!(

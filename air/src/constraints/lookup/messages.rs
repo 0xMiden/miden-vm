@@ -544,15 +544,6 @@ pub struct MemoryResponseMsg<E> {
     pub word: [E; 4],
 }
 
-/// Bitwise chiplet response message with a runtime op-selector expression.
-#[derive(Clone, Debug)]
-pub struct BitwiseResponseMsg<E> {
-    pub op: E,
-    pub a: E,
-    pub b: E,
-    pub z: E,
-}
-
 // LOOKUP MESSAGE IMPLEMENTATIONS
 // ================================================================================================
 
@@ -918,22 +909,6 @@ where
         for i in 0..4 {
             acc += bp[i + 3].clone() * self.word[i].clone() * is_word.clone();
         }
-        acc
-    }
-}
-
-impl<E, EF> LookupMessage<E, EF> for BitwiseResponseMsg<E>
-where
-    E: PrimeCharacteristicRing + Clone,
-    EF: PrimeCharacteristicRing + Clone + Algebra<E>,
-{
-    fn encode(&self, challenges: &Challenges<EF>) -> EF {
-        let bp = &challenges.beta_powers;
-        let mut acc = challenges.bus_prefix[BusId::Bitwise as usize].clone();
-        acc += bp[0].clone() * self.op.clone();
-        acc += bp[1].clone() * self.a.clone();
-        acc += bp[2].clone() * self.b.clone();
-        acc += bp[3].clone() * self.z.clone();
         acc
     }
 }
