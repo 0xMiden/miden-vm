@@ -594,7 +594,7 @@ mod tests {
         }
     }
 
-    /// Minimal `LookupAir` used to drive `LookupFractions::new` without pulling in the
+    /// Minimal `LookupAir` used to drive `LookupFractions::from_shape` without pulling in the
     /// real Miden air. Only `num_columns()` and `column_shape()` are exercised; the
     /// other methods return sentinel values and `eval` is a no-op.
     struct FakeAir {
@@ -680,7 +680,7 @@ mod tests {
         assert_eq!(aux[1][1], row1_col1);
     }
 
-    /// `LookupFractions::new` sizes the flat `fractions` Vec with `num_rows * Σ shape`
+    /// `LookupFractions::from_shape` sizes the flat `fractions` Vec with `num_rows * Σ shape`
     /// capacity and the flat `counts` Vec with `num_rows * num_cols` capacity (so neither
     /// reallocates in the hot loop). Both start empty.
     #[test]

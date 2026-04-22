@@ -16,7 +16,7 @@
 //! The caller:
 //!
 //! 1. Builds one [`Challenges<EF>`] once, outside the per-row loop.
-//! 2. Allocates one [`LookupFractions`] once via [`LookupFractions::new`], sized from
+//! 2. Allocates one [`LookupFractions`] once via [`LookupFractions::from_shape`], sized from
 //!    [`LookupAir::column_shape`]. Each column's internal Vec is `Vec::with_capacity(num_rows *
 //!    shape[col])` so pushes in the row loop never re-allocate.
 //! 3. For each row pair, constructs a `ProverLookupBuilder` (cheap — just stores pointers), calls
@@ -100,7 +100,7 @@ where
     ///   this once outside the row loop and passes a shared reference here).
     /// - `air`: the lookup shape (used only for a debug assertion that `fractions.num_columns() ==
     ///   air.num_columns()`; the builder never calls `air.eval` itself — that's the caller's job).
-    /// - `fractions`: dense per-column fraction buffers, sized once via [`LookupFractions::new`]
+    /// - `fractions`: dense per-column fraction buffers, sized once via [`LookupFractions::from_shape`]
     ///   and re-used across every row of the same trace.
     ///
     /// # Panics
