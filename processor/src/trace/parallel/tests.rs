@@ -1,13 +1,18 @@
 use alloc::{string::String, sync::Arc};
 
-use miden_air::trace::{
-    DECODER_TRACE_OFFSET,
-    chiplets::hasher::HASH_CYCLE_LEN,
-    decoder::{HASHER_STATE_OFFSET, NUM_OP_BITS, OP_BITS_OFFSET},
+use miden_air::{
+    ProcessorAir,
+    lookup::build_logup_aux_trace,
+    trace::{
+        DECODER_TRACE_OFFSET,
+        chiplets::hasher::HASH_CYCLE_LEN,
+        decoder::{HASHER_STATE_OFFSET, NUM_OP_BITS, OP_BITS_OFFSET},
+    },
 };
 use miden_core::{
     Felt, Word,
     events::EventId,
+    field::QuadFelt,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, DynNodeBuilder, ExternalNodeBuilder,
         JoinNodeBuilder, LoopNodeBuilder, MastForest, MastForestContributor, MastNodeExt,
@@ -17,7 +22,7 @@ use miden_core::{
     precompile::PrecompileRequest,
     program::{Kernel, Program, StackInputs},
 };
-use miden_utils_testing::get_column_name;
+use miden_utils_testing::{get_column_name, rand::rand_array};
 use pretty_assertions::assert_eq;
 use rstest::{fixture, rstest};
 
@@ -414,6 +419,26 @@ fn test_trace_generation_at_fragment_boundaries(
         format!("{:?}", DeterministicTrace(&trace_from_fragments)),
         format!("{:?}", DeterministicTrace(&trace_from_single_fragment)),
         "Deterministic trace mismatch between fragments and single fragment"
+    );
+
+    // Build the LogUp aux trace from each main trace under identical random challenges and
+    // verify every column matches row-for-row. Catches fragment-boundary nondeterminism in
+    // lookup collection that `DeterministicTrace` (main-trace only) would miss.
+    let raw = rand_array::<Felt, 4>();
+    let challenges = [QuadFelt::new([raw[0], raw[1]]), QuadFelt::new([raw[2], raw[3]])];
+    let main_from_fragments = trace_from_fragments.main_trace().to_row_major();
+    let main_from_single = trace_from_single_fragment.main_trace().to_row_major();
+    let (aux_from_fragments, committed_from_fragments) =
+        build_logup_aux_trace(&ProcessorAir, &main_from_fragments, &challenges);
+    let (aux_from_single, committed_from_single) =
+        build_logup_aux_trace(&ProcessorAir, &main_from_single, &challenges);
+    assert_eq!(
+        aux_from_fragments.values, aux_from_single.values,
+        "LogUp aux trace mismatch between fragments and single fragment"
+    );
+    assert_eq!(
+        committed_from_fragments, committed_from_single,
+        "LogUp committed finals mismatch between fragments and single fragment"
     );
 
     // Snapshot testing to ensure that future changes don't unexpectedly change the trace.

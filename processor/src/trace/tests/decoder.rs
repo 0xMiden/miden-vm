@@ -21,7 +21,7 @@ use miden_core::{
     Felt, ONE, ZERO,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, JoinNodeBuilder, LoopNodeBuilder, MastForest,
-        MastForestContributor,
+        MastForestContributor, SplitNodeBuilder,
     },
     operations::{Operation, opcodes},
     program::Program,
@@ -90,6 +90,8 @@ fn block_stack_span_push_pop() {
         }
     });
 
+    assert_eq!(exp.count_adds(), 1, "expected exactly one SPAN push");
+    assert_eq!(exp.count_removes(), 1, "expected exactly one matching END pop");
     log.assert_contains(&exp);
 }
 
@@ -150,6 +152,186 @@ fn block_stack_call_full_push_pop() {
         }
     });
 
+    assert_eq!(exp.count_adds(), 1, "expected exactly one CALL push");
+    assert_eq!(exp.count_removes(), 1, "expected exactly one matching END pop");
+    log.assert_contains(&exp);
+}
+
+/// SPLIT pushes a `Simple { is_loop: 0 }` entry (parent = current block, block = addr_next) and
+/// the matching END pops it. Runs twice — once with `s0 = 1` (TRUE branch), once with `s0 = 0`
+/// (FALSE branch) — since the block-stack emission is identical either way but the END reached
+/// for the matching pop differs between branches.
+#[rstest::rstest]
+#[case::taken(1)]
+#[case::not_taken(0)]
+fn block_stack_split_push_pop(#[case] cond: u64) {
+    let program = {
+        let mut f = MastForest::new();
+        let t = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+            .add_to_forest(&mut f)
+            .unwrap();
+        let e = BasicBlockNodeBuilder::new(vec![Operation::Mul], Vec::new())
+            .add_to_forest(&mut f)
+            .unwrap();
+        let s = SplitNodeBuilder::new([t, e]).add_to_forest(&mut f).unwrap();
+        f.make_root(s);
+        Program::new(f.into(), s)
+    };
+    let trace = build_trace_from_program(&program, &[cond]);
+    let log = InteractionLog::new(&trace);
+    let main = trace.main_trace();
+
+    let mut split_adds = 0usize;
+    let mut exp = Expectations::new(&log);
+    for_each_op(&trace, |row, op| {
+        let idx = RowIndex::from(row);
+        let addr = main.addr(idx);
+        let addr_next = main.addr(RowIndex::from(row + 1));
+
+        if op == Felt::from_u8(opcodes::SPLIT) {
+            exp.add(
+                row,
+                &BlockStackMsg::Simple {
+                    block_id: addr_next,
+                    parent_id: addr,
+                    is_loop: ZERO,
+                },
+            );
+            split_adds += 1;
+        } else if op == Felt::from_u8(opcodes::END) && main.is_call_flag(idx) == ZERO {
+            // is_loop on the END overlay comes from the typed END flags; for non-loop ENDs it
+            // is zero. We can read it back from the trace to stay agnostic about which END row
+            // matches which push.
+            let is_loop = main.is_loop_flag(idx);
+            exp.remove(
+                row,
+                &BlockStackMsg::Simple {
+                    block_id: addr,
+                    parent_id: addr_next,
+                    is_loop,
+                },
+            );
+        }
+    });
+
+    assert_eq!(split_adds, 1, "expected exactly one SPLIT push");
+    // One END for the taken inner branch, one for the SPLIT itself (parent). Both pop Simple.
+    assert_eq!(exp.count_removes(), 2, "expected two Simple pops (child END + SPLIT END)");
+    log.assert_contains(&exp);
+}
+
+/// LOOP with `s0 = 1` pushes a `Simple { is_loop: 1 }` entry and the matching END pops it.
+/// LOOP with `s0 = 0` also pushes (emitter is unconditional on LOOP), but with `is_loop = 0`
+/// and no body executes — the END on the very next row pops immediately. This test runs both
+/// variants via `rstest`.
+#[rstest::rstest]
+#[case::enters(1, ONE)]
+#[case::skips(0, ZERO)]
+fn block_stack_loop_is_loop_flag(#[case] cond: u64, #[case] expected_is_loop: Felt) {
+    let program = {
+        let mut f = MastForest::new();
+        let body = BasicBlockNodeBuilder::new(vec![Operation::Pad, Operation::Drop], Vec::new())
+            .add_to_forest(&mut f)
+            .unwrap();
+        let loop_id = LoopNodeBuilder::new(body).add_to_forest(&mut f).unwrap();
+        f.make_root(loop_id);
+        Program::new(f.into(), loop_id)
+    };
+    // Stack is laid out top-first: `cond` on top (drives LOOP), trailing zero drives the
+    // single REPEAT/exit read when `cond == 1`.
+    let trace = build_trace_from_program(&program, &[cond, 0]);
+    let log = InteractionLog::new(&trace);
+    let main = trace.main_trace();
+
+    let mut loop_pushes = 0usize;
+    let mut loop_pops = 0usize;
+    let mut exp = Expectations::new(&log);
+    for_each_op(&trace, |row, op| {
+        let idx = RowIndex::from(row);
+        let addr = main.addr(idx);
+        let addr_next = main.addr(RowIndex::from(row + 1));
+
+        if op == Felt::from_u8(opcodes::LOOP) {
+            let is_loop = main.stack_element(0, idx);
+            assert_eq!(is_loop, expected_is_loop, "s0 sanity at LOOP row");
+            exp.add(
+                row,
+                &BlockStackMsg::Simple {
+                    block_id: addr_next,
+                    parent_id: addr,
+                    is_loop,
+                },
+            );
+            loop_pushes += 1;
+        } else if op == Felt::from_u8(opcodes::END)
+            && main.is_call_flag(idx) == ZERO
+            && main.is_loop_flag(idx) == expected_is_loop
+            && main.is_loop_body_flag(idx) == ZERO
+        {
+            exp.remove(
+                row,
+                &BlockStackMsg::Simple {
+                    block_id: addr,
+                    parent_id: addr_next,
+                    is_loop: expected_is_loop,
+                },
+            );
+            loop_pops += 1;
+        }
+    });
+
+    assert_eq!(loop_pushes, 1, "expected one LOOP push");
+    assert_eq!(loop_pops, 1, "expected one matching LOOP END pop (is_loop={expected_is_loop:?})");
+    log.assert_contains(&exp);
+}
+
+/// RESPAN fires a simultaneous push + pop on the block-stack bus (batch addition is recorded
+/// as an Add, and the prior batch's entry is simultaneously Removed). Uses a SPAN long enough
+/// to require two batches so at least one RESPAN row exists.
+#[test]
+fn block_stack_respan_add_and_remove() {
+    // 80 Noops require two batches (each batch holds up to 72 ops), so the SPAN decomposes
+    // into SPAN + 64 ops + RESPAN + remaining ops + END.
+    let ops: Vec<Operation> = (0..80).map(|_| Operation::Noop).collect();
+    let trace = build_trace_from_ops(ops, &[]);
+    let log = InteractionLog::new(&trace);
+    let main = trace.main_trace();
+
+    let mut respan_rows = 0usize;
+    let mut exp = Expectations::new(&log);
+    for_each_op(&trace, |row, op| {
+        if op != Felt::from_u8(opcodes::RESPAN) {
+            return;
+        }
+        let idx = RowIndex::from(row);
+        let next = RowIndex::from(row + 1);
+        let addr = main.addr(idx);
+        let addr_next = main.addr(next);
+        // The RESPAN emitter uses `h1_next` as the parent link for both the add and remove.
+        let parent = main.decoder_hasher_state_element(1, next);
+
+        exp.add(
+            row,
+            &BlockStackMsg::Simple {
+                block_id: addr_next,
+                parent_id: parent,
+                is_loop: ZERO,
+            },
+        );
+        exp.remove(
+            row,
+            &BlockStackMsg::Simple {
+                block_id: addr,
+                parent_id: parent,
+                is_loop: ZERO,
+            },
+        );
+        respan_rows += 1;
+    });
+
+    assert!(respan_rows >= 1, "program did not produce a RESPAN row");
+    assert_eq!(exp.count_adds(), respan_rows);
+    assert_eq!(exp.count_removes(), respan_rows);
     log.assert_contains(&exp);
 }
 
@@ -224,6 +406,9 @@ fn block_hash_join_enqueue_dequeue() {
         }
     });
 
+    // JOIN enqueues 2 children; ENDs fire for bb1, bb2, and the JOIN itself (3 total).
+    assert_eq!(exp.count_adds(), 2, "expected JOIN to enqueue FirstChild + Child");
+    assert_eq!(exp.count_removes(), 3, "expected an END dequeue for bb1, bb2, and JOIN");
     log.assert_contains(&exp);
 }
 
@@ -310,6 +495,72 @@ fn block_hash_loop_body_with_repeat() {
     log.assert_contains(&exp);
 }
 
+/// SPLIT enqueues exactly one `Child` entry carrying the `s0`-muxed child hash
+/// (`s0 * h_0 + (1 - s0) * h_1`); the matching END on the taken branch dequeues it.
+#[rstest::rstest]
+#[case::taken(1)]
+#[case::not_taken(0)]
+fn block_hash_split_enqueue_dequeue(#[case] cond: u64) {
+    let program = {
+        let mut f = MastForest::new();
+        let t = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+            .add_to_forest(&mut f)
+            .unwrap();
+        let e = BasicBlockNodeBuilder::new(vec![Operation::Mul], Vec::new())
+            .add_to_forest(&mut f)
+            .unwrap();
+        let s = SplitNodeBuilder::new([t, e]).add_to_forest(&mut f).unwrap();
+        f.make_root(s);
+        Program::new(f.into(), s)
+    };
+    let trace = build_trace_from_program(&program, &[cond]);
+    let log = InteractionLog::new(&trace);
+    let main = trace.main_trace();
+
+    let mut split_rows = 0usize;
+    let mut exp = Expectations::new(&log);
+    for_each_op(&trace, |row, op| {
+        let idx = RowIndex::from(row);
+        let next = RowIndex::from(row + 1);
+        let addr_next = main.addr(next);
+        let first = main.decoder_hasher_state_first_half(idx);
+        let second = main.decoder_hasher_state_second_half(idx);
+
+        if op == Felt::from_u8(opcodes::SPLIT) {
+            let s0 = main.stack_element(0, idx);
+            let one_minus_s0 = ONE - s0;
+            let child_hash: [Felt; 4] =
+                std::array::from_fn(|i| s0 * first[i] + one_minus_s0 * second[i]);
+            exp.add(row, &BlockHashMsg::Child { parent: addr_next, child_hash });
+            split_rows += 1;
+        }
+
+        if op == Felt::from_u8(opcodes::END) {
+            let is_loop_body = main.is_loop_body_flag(idx);
+            let h0: [Felt; 4] = [first[0], first[1], first[2], first[3]];
+            let op_next = main.get_op_code(next);
+            let next_end = if op_next == Felt::from_u8(opcodes::END) { ONE } else { ZERO };
+            let next_repeat = if op_next == Felt::from_u8(opcodes::REPEAT) { ONE } else { ZERO };
+            let next_halt = if op_next == Felt::from_u8(opcodes::HALT) { ONE } else { ZERO };
+            let is_first_child = ONE - next_end - next_repeat - next_halt;
+            exp.remove(
+                row,
+                &BlockHashMsg::End {
+                    parent: addr_next,
+                    child_hash: h0,
+                    is_first_child,
+                    is_loop_body,
+                },
+            );
+        }
+    });
+
+    assert_eq!(split_rows, 1, "expected exactly one SPLIT enqueue");
+    // END fires for: taken branch's child, the SPLIT itself. Two removes total.
+    assert_eq!(exp.count_removes(), 2, "expected END pops for child + SPLIT: cond={cond}");
+    log.assert_contains(&exp);
+}
+
 // OP GROUP TABLE (M_2+5) TESTS
 // ================================================================================================
 
@@ -356,6 +607,12 @@ fn op_group_span_8_groups_inserts() {
     });
 
     assert!(g8_rows_seen > 0, "program did not produce a g8 SPAN/RESPAN batch");
+    assert_eq!(
+        exp.count_adds(),
+        7 * g8_rows_seen,
+        "expected 7 g8 inserts per SPAN/RESPAN row (positions 1..=7)"
+    );
+    assert_eq!(exp.count_removes(), 0, "op_group_span_8_groups_inserts only checks inserts");
 
     log.assert_contains(&exp);
 }
@@ -426,6 +683,87 @@ fn op_group_span_removal_covers_decode_rows() {
         fired_nonpush_branch,
         "test did not cover the non-PUSH branch of the op-group remove"
     );
+
+    log.assert_contains(&exp);
+}
+
+/// A SPAN that spans two batches exercises the RESPAN-boundary op-group dispatch. Runs with
+/// op counts that force each non-g8 batch variant in the second batch to catch off-by-one /
+/// batch-flag muxing bugs at the transition:
+///
+/// - 80 Noops: first batch g8 (7 adds) + RESPAN + g1 second batch (0 adds — single group
+///   consumed inline; emitter has no branch for `(c0, c1, c2) = (0, 1, 1)`).
+/// - 100 Noops: first batch g8 + RESPAN + g4 second batch (3 adds for positions 1..=3).
+///
+/// The batch-flag dispatch below mirrors the emitter exactly: `c0` is the g8 selector,
+/// `(1-c0)·c1·(1-c2)` is g4, `(1-c0)·(1-c1)·c2` is g2, and `(1-c0)·c1·c2` is g1.
+#[rstest::rstest]
+#[case::g8_plus_g1(80, 1, 0, 0, 1)]
+#[case::g8_plus_g4(100, 1, 1, 0, 0)]
+fn op_group_span_two_batch_transition_inserts(
+    #[case] noop_count: usize,
+    #[case] expected_g8_rows: usize,
+    #[case] expected_g4_rows: usize,
+    #[case] expected_g2_rows: usize,
+    #[case] expected_g1_rows: usize,
+) {
+    let ops: Vec<Operation> = (0..noop_count).map(|_| Operation::Noop).collect();
+    let trace = build_trace_from_ops(ops, &[]);
+    let log = InteractionLog::new(&trace);
+    let main = trace.main_trace();
+
+    let mut g8_rows = 0usize;
+    let mut g4_rows = 0usize;
+    let mut g2_rows = 0usize;
+    let mut g1_rows = 0usize;
+    let mut respan_observed = false;
+    let mut exp = Expectations::new(&log);
+    for_each_op(&trace, |row, op| {
+        let idx = RowIndex::from(row);
+        if op != Felt::from_u8(opcodes::SPAN) && op != Felt::from_u8(opcodes::RESPAN) {
+            return;
+        }
+        if op == Felt::from_u8(opcodes::RESPAN) {
+            respan_observed = true;
+        }
+        let batch_flags = main.op_batch_flag(idx);
+        let (c0, c1, c2) = (batch_flags[0], batch_flags[1], batch_flags[2]);
+        let addr_next = main.addr(RowIndex::from(row + 1));
+        let gc = main.group_count(idx);
+        let first = main.decoder_hasher_state_first_half(idx);
+        let second = main.decoder_hasher_state_second_half(idx);
+
+        if c0 == ONE && c1 == ZERO && c2 == ZERO {
+            g8_rows += 1;
+            for i in 1u16..=3 {
+                exp.add(row, &OpGroupMsg::new(&addr_next, gc, i, first[i as usize]));
+            }
+            for i in 4u16..=7 {
+                exp.add(row, &OpGroupMsg::new(&addr_next, gc, i, second[(i - 4) as usize]));
+            }
+        } else if c0 == ZERO && c1 == ONE && c2 == ZERO {
+            g4_rows += 1;
+            for i in 1u16..=3 {
+                exp.add(row, &OpGroupMsg::new(&addr_next, gc, i, first[i as usize]));
+            }
+        } else if c0 == ZERO && c1 == ZERO && c2 == ONE {
+            g2_rows += 1;
+            exp.add(row, &OpGroupMsg::new(&addr_next, gc, 1, first[1]));
+        } else if c0 == ZERO && c1 == ONE && c2 == ONE {
+            // g1 batch: single group consumed inline by the RESPAN decode row; no inserts.
+            g1_rows += 1;
+        } else {
+            panic!("unexpected batch_flags on SPAN/RESPAN row: ({c0:?}, {c1:?}, {c2:?})");
+        }
+    });
+
+    assert!(respan_observed, "program did not produce a RESPAN row");
+    assert_eq!(g8_rows, expected_g8_rows);
+    assert_eq!(g4_rows, expected_g4_rows);
+    assert_eq!(g2_rows, expected_g2_rows);
+    assert_eq!(g1_rows, expected_g1_rows);
+    assert_eq!(exp.count_adds(), 7 * g8_rows + 3 * g4_rows + g2_rows);
+    assert_eq!(exp.count_removes(), 0);
 
     log.assert_contains(&exp);
 }

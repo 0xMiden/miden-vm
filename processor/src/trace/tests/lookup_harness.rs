@@ -128,13 +128,23 @@ impl<'a> Expectations<'a> {
 
     /// Add an expected `mult · 1 / encode(msg)` interaction at `row` with arbitrary
     /// multiplicity. Use for range-check table lookups and kernel-ROM table multiplicities.
-    fn push<M>(&mut self, row: usize, mult: Felt, msg: &M) -> &mut Self
+    pub fn push<M>(&mut self, row: usize, mult: Felt, msg: &M) -> &mut Self
     where
         M: LookupMessage<Felt, QuadFelt>,
     {
         let denom = msg.encode(self.challenges);
         self.entries.push((row, mult, denom));
         self
+    }
+
+    /// Number of expected entries registered via `add` (multiplicity = +1).
+    pub fn count_adds(&self) -> usize {
+        self.entries.iter().filter(|(_, m, _)| *m == Felt::ONE).count()
+    }
+
+    /// Number of expected entries registered via `remove` (multiplicity = -1).
+    pub fn count_removes(&self) -> usize {
+        self.entries.iter().filter(|(_, m, _)| *m == -Felt::ONE).count()
     }
 }
 

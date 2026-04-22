@@ -27,18 +27,22 @@ use crate::RowIndex;
 fn stack_overflow_bus_emits_per_interaction_row() {
     // Mix of right-shifts (PAD) and left-shifts (DROP) around a couple of U32add no-shift ops,
     // ending with the overflow table empty.
+    // Overflow depth before each op (determines whether DROP emits):
+    //   U32add:0 Pad:0→1 Pad:1→2 U32add:2 Drop:2→1 Pad:1→2 Drop:2→1 Drop:1→0 Drop:0 Pad:0→1 Drop:1→0
+    // Four of the five DROPs run against a non-empty table and emit; the fourth DROP sees
+    // overflow=0 and is a no-op. All four PADs emit.
     let ops = vec![
         Operation::U32add, // no shift
         Operation::Pad,    // right shift
         Operation::Pad,    // right shift
         Operation::U32add, // no shift
-        Operation::Drop,   // left shift
+        Operation::Drop,   // left shift (overflow=2 → remove)
         Operation::Pad,    // right shift
-        Operation::Drop,   // left shift
-        Operation::Drop,   // left shift (overflow empty → no interaction)
-        Operation::Drop,   // left shift (overflow empty → no interaction)
+        Operation::Drop,   // left shift (overflow=2 → remove)
+        Operation::Drop,   // left shift (overflow=1 → remove)
+        Operation::Drop,   // left shift (overflow=0 → no interaction)
         Operation::Pad,    // right shift
-        Operation::Drop,   // left shift
+        Operation::Drop,   // left shift (overflow=1 → remove)
     ];
     let init_stack = (1..17).rev().collect::<Vec<u64>>();
     let trace = build_trace_from_ops(ops, &init_stack);
@@ -74,5 +78,9 @@ fn stack_overflow_bus_emits_per_interaction_row() {
         }
     }
 
+    // 4 PADs and 4 DROPs-with-non-empty-overflow (only the lone DROP on an empty overflow
+    // table emits nothing).
+    assert_eq!(exp.count_adds(), 4, "expected one add per PAD");
+    assert_eq!(exp.count_removes(), 4, "expected one remove per DROP with non-empty overflow");
     log.assert_contains(&exp);
 }

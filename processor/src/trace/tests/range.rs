@@ -17,7 +17,7 @@ use alloc::vec::Vec;
 use miden_air::{
     logup::RangeMsg,
     trace::{
-        MainTrace,
+        MainTrace, RANGE_CHECK_TRACE_OFFSET,
         chiplets::{MEMORY_D0_COL_IDX, MEMORY_D1_COL_IDX},
     },
 };
@@ -49,6 +49,8 @@ fn u32_stack_op_emits_range_check_removes() {
         exp.remove(usize::from(u32add_row), &RangeMsg { value });
     }
 
+    assert_eq!(exp.count_removes(), 4, "expected 4 helper-register range-check removes");
+    assert_eq!(exp.count_adds(), 0);
     log.assert_contains(&exp);
 }
 
@@ -103,6 +105,47 @@ fn memory_chiplet_row_emits_range_check_removes() {
         }
     }
 
+    assert_eq!(exp.count_removes(), 5 * mem_rows.len(), "expected 5 RC removes per memory row");
+    assert_eq!(exp.count_adds(), 0);
+    log.assert_contains(&exp);
+}
+
+/// Every trace row carries the range-checker table's response: a `RangeMsg { value: v }` add
+/// with runtime multiplicity `m`. This test verifies the per-row add side of the bus using
+/// hardcoded request demand: a `U32add` requests 4 values (helper columns) and each chiplet
+/// row with a range-check demand adds its `m` copies of that value to the bus.
+///
+/// Catches regressions where the range-checker add-back emitter misreads the multiplicity
+/// column, the value column, or drops the always-active gate — bugs that the per-request
+/// removes-only tests above cannot detect.
+#[test]
+fn range_checker_table_emits_per_row_adds() {
+    // U32add issues 4 range-check requests for values {0, 256, 0, 0} on 1 + 255 = 256. The
+    // range-checker chiplet will then add back four multiplicities of those values distributed
+    // across its trace rows. We don't need to predict where — subset semantics lets us verify
+    // that *every* row's add matches its `(m, v)` columns.
+    let stack = [1, 255];
+    let operations = vec![Operation::U32add];
+    let trace = build_trace_from_ops(operations, &stack);
+    let log = InteractionLog::new(&trace);
+    let main = trace.main_trace();
+
+    const M_COL_IDX: usize = RANGE_CHECK_TRACE_OFFSET;
+    const V_COL_IDX: usize = RANGE_CHECK_TRACE_OFFSET + 1;
+
+    let mut nonzero_mult_rows = 0usize;
+    let mut exp = Expectations::new(&log);
+    for row in 0..main.num_rows() {
+        let idx = RowIndex::from(row);
+        let m = main.get(idx, M_COL_IDX);
+        let v = main.get(idx, V_COL_IDX);
+        exp.push(row, m, &RangeMsg { value: v });
+        if m != Felt::from_u8(0) {
+            nonzero_mult_rows += 1;
+        }
+    }
+
+    assert!(nonzero_mult_rows > 0, "range checker table is empty — test is vacuous");
     log.assert_contains(&exp);
 }
 
