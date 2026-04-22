@@ -144,12 +144,6 @@ fn test_poseidon2_prove_verify() {
         end
     ";
 
-    // Milestone B: recursive verification is temporarily disabled here. The recursive
-    // verifier MASM in `crates/lib/core/asm/sys/vm/public_inputs.masm` and the ACE mirror
-    // circuit in `air/src/ace.rs::logup_boundary_config` were both built around the
-    // legacy multiset boundary terms (program hash, transcript state, kernel digests),
-    // which the LogUp aux builder no longer produces. Restoring recursive verification is
-    // the follow-up milestone, alongside the LogUp boundary constraints.
     assert_prove_verify(source, HashFunction::Poseidon2, "Poseidon2", true, true);
 }
 

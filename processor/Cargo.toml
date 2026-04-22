@@ -28,9 +28,9 @@ std = [
     "thiserror/std",
 ]
 testing = ["miden-air/testing"]
-# Enables the LogUp bus-debugger surface. Compiles the debug oracles in miden-air (which
-# live under `#[cfg(feature = "std")]`) and activates bus-check assertions in processor
-# tests. Slows down the processor considerably.
+# Pulls in the LogUp debug surface from miden-air (under `#[cfg(feature = "std")]`).
+# NOTE: the real-trace bus debugger is not yet wired into the prover/processor paths,
+# so today this feature only compiles in the LookupAir shape-validation walker.
 bus-debugger = ["miden-air/std"]
 
 [dependencies]

@@ -234,7 +234,6 @@ impl Chiplets {
         let ace_start: usize = self.ace_start().into();
         let kernel_rom_start: usize = self.kernel_rom_start().into();
         let padding_start: usize = self.padding_start().into();
-        let _ = ace_start;
 
         let Chiplets { hasher, bitwise, memory, kernel_rom, ace } = self;
 

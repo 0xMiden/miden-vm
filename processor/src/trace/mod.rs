@@ -174,10 +174,6 @@ impl TraceBuildInputs {
 /// - Information about execution outputs (stack state, deferred precompile requests, and the final
 ///   precompile transcript).
 /// - Summary of trace lengths of the main trace components.
-///
-/// The auxiliary (LogUp) trace is no longer pre-built here — it is produced on demand by
-/// [`miden_air::ProcessorAir`]'s stateless `AuxBuilder` impl from the main trace and the
-/// per-proof challenges, see `prover::prove_stark`.
 #[derive(Debug)]
 pub struct ExecutionTrace {
     main_trace: MainTrace,
