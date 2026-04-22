@@ -77,8 +77,17 @@ pub enum BusId {
 }
 
 impl BusId {
-    pub const COUNT: usize = 25;
+    /// Last variant discriminant. Paired with the static assertion below, `COUNT` stays
+    /// in lockstep with the enum: adding a new variant with a higher discriminant bumps
+    /// `COUNT` automatically (and the assertion flags a missed update if the new variant's
+    /// discriminant isn't contiguous).
+    pub const COUNT: usize = Self::HasherPermLinkOutput as usize + 1;
 }
+
+// Guard against an enum-update that skips a discriminant: any gap would inflate `COUNT`
+// relative to the real variant count and silently resize the bus-prefix table. If this
+// fires, either fill the gap or extend the check.
+const _: () = assert!(BusId::HasherPermLinkOutput as usize == 24);
 
 // HASHER MESSAGES
 // ================================================================================================
