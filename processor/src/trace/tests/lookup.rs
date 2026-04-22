@@ -98,9 +98,9 @@ fn build_lookup_fractions_on_tiny_span() {
 /// - **Prover path**: collect `(m_i, d_i)` fractions via `ProverLookupBuilder` on each row, then
 ///   `accumulate` runs batched Montgomery inversion + per-column partial sums to produce
 ///   `aux[col][r+1] - aux[col][r] = Σ m_i · d_i^{-1}`.
-/// - **Constraint path**: `ColumnOracleBuilder` evaluates `ProcessorAir` row-by-row using the
-///   same `(U_g, V_g)` algebra the constraint system uses, folded per column via
-///   cross-multiplication, producing `expected_delta = V_col · U_col^{-1}`.
+/// - **Constraint path**: `ColumnOracleBuilder` evaluates `ProcessorAir` row-by-row using the same
+///   `(U_g, V_g)` algebra the constraint system uses, folded per column via cross-multiplication,
+///   producing `expected_delta = V_col · U_col^{-1}`.
 ///
 /// If any `(row, col)` pair disagrees, either the prover path or the oracle has a bug
 /// (and we must fix the root cause — do not paper over with tolerance).

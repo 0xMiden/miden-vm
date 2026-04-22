@@ -331,8 +331,12 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ProcessorAir {
         let total_correction = reducer.finalize()?;
 
         // TODO(#3032): aux_values[1] is always ZERO (placeholder for second trace's
-        // accumulator). The sum still works since 0 + x = x. Remove padding once trace
-        // splitting lands.
+        // accumulator).
+        for unused_aux in aux_values.iter().skip(1) {
+            if !unused_aux.is_zero() {
+                return Err("padding aux value is non-zero".into());
+            }
+        }
         let aux_sum: EF = aux_values.iter().copied().sum();
 
         Ok(ReducedAuxValues {

@@ -30,8 +30,8 @@
 //!   the running sum **before** the last row's contribution. The last row's fraction contribution
 //!   does **not** appear in the aux trace.
 //! - `committed_finals` is `[acc_final]`: the single accumulator terminal read out of row
-//!   `num_rows`. Verifiers that want a wider absorbed-values vector (e.g. the Miden MASM
-//!   verifier, which absorbs two, the second always `ZERO`) pad this themselves.
+//!   `num_rows`. Verifiers that want a wider absorbed-values vector (e.g. the Miden MASM verifier,
+//!   which absorbs two, the second always `ZERO`) pad this themselves.
 //!
 //! ## Fraction buffer layout
 //!
@@ -689,7 +689,7 @@ mod tests {
     #[test]
     fn new_reserves_capacity() {
         let air = FakeAir { shape: [3, 5] };
-        type LB<'a> = crate::lookup::ProverLookupBuilder<'a, Felt, QuadFelt>;
+        type LB<'a> = ProverLookupBuilder<'a, Felt, QuadFelt>;
         let fx: LookupFractions<Felt, QuadFelt> = LookupFractions::new::<_, LB<'_>>(&air, 10);
 
         assert_eq!(fx.num_columns(), 2);
