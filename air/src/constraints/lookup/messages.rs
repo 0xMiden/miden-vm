@@ -5,9 +5,9 @@
 //! (implemented further down in this file) provides the `encode` method that
 //! produces the extension-field value.
 //!
-//! Chiplet messages use interaction-specific bus domains instead of legacy selector-derived
-//! labels. Constructors select the interaction domain; payloads then start directly with
-//! semantic fields (addr/ctx/etc.).
+//! Chiplet messages are addressed by interaction-specific bus domains (one [`BusId`]
+//! variant per semantic message kind). Constructors pick the interaction domain; payloads
+//! start directly with the semantic fields (addr, ctx, etc.).
 //!
 //! All structs are generic over `E` (base-field expression type, typically `AB::Expr`).
 
