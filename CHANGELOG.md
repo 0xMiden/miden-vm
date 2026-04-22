@@ -1,6 +1,8 @@
 ## 0.25.0 (TBD)
 
 - Added `Signature::from_der()` for EdDSA signatures ([#979](https://github.com/0xMiden/crypto/pull/979)).
+- Added domain-separated hashing support for elements to `AlgebraicSpoonge` as `hash_elements_in_domain(...)`.
+- [BREAKING] Changed the serialization format of `PartialSmt` to be more compact on the wire. If you depended on the serialization format directly (or if it is stored), this will be breaking. This ser/de is now covered by fuzz tests.
 
 ## 0.24.0 (2026-04-19)
 
@@ -20,7 +22,6 @@
 - [BREAKING] `prove_multi` / `verify_multi` no longer require instances in ascending trace-height order; the prover sorts internally and the proof carries an `air_order` permutation ([#941](https://github.com/0xMiden/crypto/issues/941)). `InstanceShapes::from_trace_heights` now sorts internally and embeds the AIR ordering. `InstanceShapes::observe` renamed to `observe_heights`. The `NotAscending` error variant is removed; `InvalidAirOrder` and `AirOrderLengthMismatch` are added. `AirWitness` now derives `Clone + Copy`. Callers must bind AIR configurations and `air_order` into the Fiat-Shamir challenger — see the prover module-level docs.
 - [BREAKING] Split the `SecretKey` type for both ECDSA-k256 and EdDSA-25519 into `SigningKey` and `KeyExchangeKey` to help enforce better practices around key reuse. `SecretKey` is no longer available in the public API; all usages should be moved to one of the new key types ([#965](https://github.com/0xMiden/crypto/pull/965)).
 - Reduce repeated history scans in historical `LargeSmtForest::open()` queries ([#971](https://github.com/0xMiden/crypto/pull/971)).
-- Added domain-separated hashing support for elements to `AlgebraicSpoonge` as `hash_elements_in_domain(...)`.
 
 ## 0.23.0 (2026-03-11)
 
