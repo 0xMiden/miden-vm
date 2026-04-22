@@ -24,7 +24,10 @@
 
 use miden_air::{
     logup::{MemoryMsg, MemoryResponseMsg},
-    trace::chiplets::{MEMORY_IS_READ_COL_IDX, MEMORY_IS_WORD_ACCESS_COL_IDX},
+    trace::{
+        MainTrace,
+        chiplets::{MEMORY_IS_READ_COL_IDX, MEMORY_IS_WORD_ACCESS_COL_IDX},
+    },
 };
 use miden_core::{
     Felt, ONE, ZERO,
@@ -224,7 +227,7 @@ fn cryptostream_emits_four_memory_requests() {
     log.assert_contains(&exp);
 }
 
-fn next_word(main: &miden_air::trace::MainTrace, next: RowIndex, start: usize) -> [Felt; 4] {
+fn next_word(main: &MainTrace, next: RowIndex, start: usize) -> [Felt; 4] {
     [
         main.stack_element(start, next),
         main.stack_element(start + 1, next),

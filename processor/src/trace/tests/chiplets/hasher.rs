@@ -21,6 +21,7 @@ use alloc::vec::Vec;
 use miden_air::{
     logup::HasherMsg,
     trace::{
+        MainTrace,
         chiplets::hasher::CONTROLLER_ROWS_PER_PERM_FELT,
         log_precompile::{
             HELPER_ADDR_IDX, HELPER_CAP_PREV_RANGE, STACK_CAP_NEXT_RANGE, STACK_COMM_RANGE,
@@ -68,7 +69,7 @@ enum HasherResponseKind {
 /// Controller rows where no response fires (e.g. Merkle tree continuation rows where
 /// `is_boundary = 0`) are skipped.
 fn hasher_response_rows(
-    main: &miden_air::trace::MainTrace,
+    main: &MainTrace,
 ) -> impl Iterator<Item = (RowIndex, HasherResponseKind)> + '_ {
     (0..main.num_rows()).filter_map(move |row| {
         let idx = RowIndex::from(row);
@@ -592,7 +593,7 @@ fn single_block_program(ops: Vec<Operation>) -> Program {
     Program::new(mast_forest.into(), id)
 }
 
-fn rate_from_hasher_state(main: &miden_air::trace::MainTrace, row: RowIndex) -> [Felt; 8] {
+fn rate_from_hasher_state(main: &MainTrace, row: RowIndex) -> [Felt; 8] {
     let first = main.decoder_hasher_state_first_half(row);
     let second = main.decoder_hasher_state_second_half(row);
     [
@@ -600,14 +601,14 @@ fn rate_from_hasher_state(main: &miden_air::trace::MainTrace, row: RowIndex) -> 
     ]
 }
 
-fn is_hasher_controller_row(main: &miden_air::trace::MainTrace, row: RowIndex) -> bool {
+fn is_hasher_controller_row(main: &MainTrace, row: RowIndex) -> bool {
     main.chiplet_selector_0(row) == ONE && main.chiplet_s_perm(row) == ZERO
 }
 
 /// Recompute the Merkle direction bit the emitter uses: `bit = node_index - 2·node_index_next`
 /// (see `chiplet_responses.rs::mp_verify_input`). Independent of the `chiplet_direction_bit`
 /// column, so bugs in that column don't make the assertion vacuously pass.
-fn merkle_direction_bit(main: &miden_air::trace::MainTrace, row: RowIndex) -> Felt {
+fn merkle_direction_bit(main: &MainTrace, row: RowIndex) -> Felt {
     let next = RowIndex::from(usize::from(row) + 1);
     main.chiplet_node_index(row) - main.chiplet_node_index(next).double()
 }

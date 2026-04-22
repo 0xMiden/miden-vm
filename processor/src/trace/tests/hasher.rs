@@ -17,7 +17,10 @@
 
 use alloc::vec::Vec;
 
-use miden_air::logup::{SiblingBit, SiblingMsg};
+use miden_air::{
+    logup::{SiblingBit, SiblingMsg},
+    trace::MainTrace,
+};
 use miden_core::{
     Felt, ONE, Word, ZERO,
     crypto::merkle::{MerkleStore, MerkleTree, NodeIndex},
@@ -101,7 +104,7 @@ enum SiblingSide {
 fn push_sibling(
     exp: &mut Expectations<'_>,
     row: RowIndex,
-    main: &miden_air::trace::MainTrace,
+    main: &MainTrace,
     side: SiblingSide,
 ) {
     let mrupdate_id = main.chiplet_mrupdate_id(row);
