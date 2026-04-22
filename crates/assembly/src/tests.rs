@@ -4990,18 +4990,35 @@ fn regression_empty_kernel_library_is_rejected() {
     assert_diagnostic_lines!(err, "library must contain at least one exported procedure");
 }
 
-/// Reproduces issue #3035: a compiler-generated wallet MAST grows when debug info is cleared and
-/// the forest is compacted via self-merge.
+/// Reproduces issue #3035: a MAST with padded basic blocks grows when debug info is cleared and the
+/// forest is compacted via self-merge.
 #[test]
 fn issue_3035_compact_after_clear_debug_info_does_not_grow_mast() -> TestResult {
-    // The compiler-emitted MASM source is checked in next to this package for provenance. The
-    // package is used here because it is the artifact referenced by the issue repro steps.
-    let _generated_masm = include_str!("../tests/fixtures/issue_3035_basic_wallet.masm");
-    let package =
-        Package::read_from_bytes(include_bytes!("../tests/fixtures/issue_3035_basic_wallet.masp"))
-            .into_diagnostic()?;
+    let context = TestContext::default();
+    let module = context.parse_module_with_path(
+        "issue_3035::repro",
+        source_file!(
+            &context,
+            "
+            pub proc repro
+                add
+                push.100
+            end
+            "
+        ),
+    )?;
 
-    let mut forest = package.mast.mast_forest().as_ref().clone();
+    let library = Assembler::new(context.source_manager()).assemble_library([module])?;
+    let mut forest = library.mast_forest().as_ref().clone();
+    assert!(
+        forest
+            .nodes()
+            .iter()
+            .filter_map(|node| node.get_basic_block())
+            .any(|block| { block.operations().count() > block.raw_operations().count() }),
+        "test input must create at least one padded basic block"
+    );
+
     forest.clear_debug_info();
     let stripped_size = forest.to_bytes().len();
     let stripped_without_debug_info_size = {
