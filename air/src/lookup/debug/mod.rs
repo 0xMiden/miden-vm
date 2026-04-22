@@ -15,6 +15,5 @@ pub use trace::{
     check_trace_balance, collect_column_oracle_folds,
 };
 pub use validation::{
-    DegreeCheckBuilder, EncodingCheckBuilder, ValidateLayout, ValidateLookupAir, ValidationError,
-    validate,
+    ValidateLayout, ValidateLookupAir, ValidationBuilder, ValidationError, validate,
 };

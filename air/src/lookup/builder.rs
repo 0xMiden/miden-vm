@@ -43,7 +43,7 @@ use super::message::LookupMessage;
 ///
 /// - `n`: degree of the numerator polynomial (the `V` contribution).
 /// - `d`: degree of the denominator polynomial (the `U` contribution).
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct Deg {
     pub n: usize,
     pub d: usize,
