@@ -483,9 +483,17 @@ where
         .expect("LogUp denominator product must be non-zero (bus_prefix is never zero)");
 
     // Backward sweep: scratch[i] = mᵢ · dᵢ⁻¹.
-    // At each step, running_inv = (dᵢ · dᵢ₊₁ · … · dₙ₋₁)⁻¹.
-    // dᵢ⁻¹ = scratch[i-1] · running_inv (prefix product up to i-1 cancels all but dᵢ),
-    // then we scale by mᵢ (EF × F) and fold dᵢ back into running_inv.
+    //
+    // Loop invariant (entering iteration i, for i = n-1 down to 1):
+    //     running_inv = (dᵢ · dᵢ₊₁ · … · dₙ₋₁)⁻¹
+    //     scratch[i-1] = d₀ · d₁ · … · dᵢ₋₁  (left over from the forward pass)
+    //
+    // Then:
+    //     dᵢ⁻¹ = scratch[i-1] · running_inv
+    //     (prefix-product cancels every factor except dᵢ⁻¹ inside running_inv).
+    // We scale by mᵢ (EF × F, cheaper than EF × EF) to yield the fraction directly, then
+    // fold dᵢ into running_inv so the invariant holds for iteration i-1.
+    // After the loop: running_inv = d₀⁻¹, ready for the i = 0 case below.
     for i in (1..chunk_fracs.len()).rev() {
         let (m_i, d_i) = chunk_fracs[i];
         scratch[i] = scratch[i - 1] * running_inv * m_i;

@@ -179,20 +179,25 @@ where
             //   when_last:       acc[0] = committed_final
             //
             // The natural closing check would fold the last row's interactions into the
-            // boundary constraint, but `when_last_row`'s selector adds a polynomial
-            // factor that would push some columns past the degree budget. Our model
-            // assumes the last row never fires any interactions (U = 1, V = 0), so we
-            // use the lower-degree form: `acc − committed_final = 0`.
+            // boundary constraint, but `when_last_row`'s selector adds a polynomial factor
+            // that would push some columns past the degree budget. Our model assumes the
+            // last row never fires any interactions (U = 1, V = 0), so we use the
+            // lower-degree form: `acc − committed_final = 0`. The fraction columns below
+            // enforce this algebraically via `when_last_row acc[i] = 0`.
             self.ab.when_first_row().assert_zero_ext(acc.clone());
             self.ab.when_transition().assert_zero_ext(u * (acc_next - all_curr_sum) - v);
             self.ab.when_last_row().assert_eq_ext(acc, committed_final);
         } else {
             //   when_transition: Dᵢ · acc[i] - Nᵢ = 0
+            //   when_last:       acc[i] = 0  — no bus may fire on the padding row; this
+            //                                  is the invariant col 0's closing check
+            //                                  assumes.
             let acc_curr: AB::ExprEF = {
                 let mp = self.ab.permutation();
                 mp.current_slice()[col_idx].into()
             };
-            self.ab.when_transition().assert_zero_ext(u * acc_curr - v);
+            self.ab.when_transition().assert_zero_ext(u * acc_curr.clone() - v);
+            self.ab.when_last_row().assert_zero_ext(acc_curr);
         }
 
         result
