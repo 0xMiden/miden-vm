@@ -72,7 +72,7 @@ miden-verifier          = { path = "./verifier", version = "0.23.0", default-fea
 miden-crypto     = { version = "0.24", default-features = false }
 miden-formatting = { version = "0.1", default-features = false }
 miden-lifted-stark = { version = "0.24", default-features = false }
-midenc-hir-type  = { version = "0.5.4", default-features = false }
+midenc-hir-type  = { version = "0.6.0", default-features = false }
 
 # Serialization
 bincode = "1.3"
