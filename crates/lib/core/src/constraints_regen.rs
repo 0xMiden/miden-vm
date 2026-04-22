@@ -31,9 +31,8 @@ const RELATION_DIGEST_PATH: &str = RELATION_DIGEST_PATHS.0;
 /// Builds the batched ACE circuit used by the Miden VM recursive verifier.
 pub fn build_batched_circuit(config: AceConfig) -> AceCircuit<QuadFelt> {
     let air = ProcessorAir;
-    let boundary_config = miden_air::ace::logup_boundary_config();
-    miden_air::ace::build_batched_ace_circuit::<_, QuadFelt>(&air, config, &boundary_config)
-        .unwrap()
+    let batch_config = miden_air::ace::logup_boundary_config();
+    miden_air::ace::build_batched_ace_circuit::<_, QuadFelt>(&air, config, &batch_config).unwrap()
 }
 
 /// Computes the relation digest used by recursive verification.
