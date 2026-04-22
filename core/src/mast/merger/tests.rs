@@ -6,7 +6,7 @@ use crate::{
         LoopNodeBuilder,
         node::{MastForestContributor, MastNodeExt},
     },
-    operations::{DebugOptions, Decorator, Operation},
+    operations::{AssemblyOp, DebugOptions, Decorator, Operation},
     utils::Idx,
 };
 
@@ -781,6 +781,46 @@ fn mast_forest_merge_multiple_external_nodes_with_decorator() {
     }
 }
 
+#[test]
+fn mast_forest_merge_preserves_asm_op_mappings_from_external_replacement() {
+    let mut forest_with_external = MastForest::new();
+    let foo_digest = block_foo().build().unwrap().digest();
+    let external_id = ExternalNodeBuilder::new(foo_digest)
+        .add_to_forest(&mut forest_with_external)
+        .unwrap();
+    forest_with_external.make_root(external_id);
+
+    let external_asm_op = AssemblyOp::new(None, "proc::caller".into(), 1, "call.foo".into());
+    let external_asm_op_id = forest_with_external
+        .debug_info_mut()
+        .add_asm_op(external_asm_op.clone())
+        .unwrap();
+    forest_with_external
+        .debug_info_mut()
+        .register_asm_ops(external_id, 1, vec![(0, external_asm_op_id)])
+        .unwrap();
+
+    let mut forest_with_block = MastForest::new();
+    let block_id = block_foo().add_to_forest(&mut forest_with_block).unwrap();
+    forest_with_block.make_root(block_id);
+
+    let (merged_ext_then_block, root_maps_ext_then_block) =
+        MastForest::merge([&forest_with_external, &forest_with_block]).unwrap();
+    let mapped_external_root = root_maps_ext_then_block.map_root(0, &external_id).unwrap();
+    assert_eq!(
+        merged_ext_then_block.get_assembly_op(mapped_external_root, None),
+        Some(&external_asm_op),
+    );
+
+    let (merged_block_then_ext, root_maps_block_then_ext) =
+        MastForest::merge([&forest_with_block, &forest_with_external]).unwrap();
+    let mapped_external_root = root_maps_block_then_ext.map_root(1, &external_id).unwrap();
+    assert_eq!(
+        merged_block_then_ext.get_assembly_op(mapped_external_root, None),
+        Some(&external_asm_op),
+    );
+}
+
 /// Tests that dependencies between External nodes are correctly resolved.
 ///
 /// [External(foo), Call(0) = qux]
@@ -1142,5 +1182,202 @@ fn mast_forest_merge_op_indexed_decorators_preservation() {
         decorator_ref_counts.len(),
         merged.decorators().len(),
         "Every decorator in merged forest should be referenced at least once (no orphans)"
+    );
+}
+
+#[test]
+fn mast_forest_merge_preserves_asm_op_mappings_for_deduplicated_nodes() {
+    let mut forest_without_asm = MastForest::new();
+    let without_asm_block_id = block_foo().add_to_forest(&mut forest_without_asm).unwrap();
+    forest_without_asm.make_root(without_asm_block_id);
+
+    let mut forest_with_asm = MastForest::new();
+    let with_asm_block_id = block_foo().add_to_forest(&mut forest_with_asm).unwrap();
+    forest_with_asm.make_root(with_asm_block_id);
+
+    let asm_op = AssemblyOp::new(None, "proc::foo".into(), 1, "mul".into());
+    let asm_op_id = forest_with_asm.debug_info_mut().add_asm_op(asm_op.clone()).unwrap();
+    forest_with_asm
+        .debug_info_mut()
+        .register_asm_ops(with_asm_block_id, 2, vec![(0, asm_op_id)])
+        .unwrap();
+
+    // Mapping from the second forest must be preserved even when the node was already deduped
+    // after merging the first forest.
+    let (merged_without_then_with, root_maps_without_then_with) =
+        MastForest::merge([&forest_without_asm, &forest_with_asm]).unwrap();
+    let mapped_with_asm_root = root_maps_without_then_with.map_root(1, &with_asm_block_id).unwrap();
+
+    assert_eq!(
+        merged_without_then_with.get_assembly_op(mapped_with_asm_root, Some(0)),
+        Some(&asm_op),
+    );
+
+    // Reverse order should behave identically.
+    let (merged_with_then_without, root_maps_with_then_without) =
+        MastForest::merge([&forest_with_asm, &forest_without_asm]).unwrap();
+    let mapped_with_asm_root = root_maps_with_then_without.map_root(0, &with_asm_block_id).unwrap();
+
+    assert_eq!(
+        merged_with_then_without.get_assembly_op(mapped_with_asm_root, Some(0)),
+        Some(&asm_op),
+    );
+}
+
+#[test]
+fn mast_forest_merge_prefers_richer_asm_op_mappings_for_deduplicated_nodes() {
+    let mut forest_coarse = MastForest::new();
+    let coarse_block_id = block_foo().add_to_forest(&mut forest_coarse).unwrap();
+    forest_coarse.make_root(coarse_block_id);
+
+    let mut forest_rich = MastForest::new();
+    let rich_block_id = block_foo().add_to_forest(&mut forest_rich).unwrap();
+    forest_rich.make_root(rich_block_id);
+
+    let asm_mul = AssemblyOp::new(None, "proc::foo".into(), 1, "mul".into());
+    let asm_add = AssemblyOp::new(None, "proc::foo".into(), 1, "add".into());
+
+    let coarse_mul_id = forest_coarse.debug_info_mut().add_asm_op(asm_mul.clone()).unwrap();
+    forest_coarse
+        .debug_info_mut()
+        .register_asm_ops(coarse_block_id, 2, vec![(0, coarse_mul_id)])
+        .unwrap();
+
+    let rich_mul_id = forest_rich.debug_info_mut().add_asm_op(asm_mul.clone()).unwrap();
+    let rich_add_id = forest_rich.debug_info_mut().add_asm_op(asm_add.clone()).unwrap();
+    forest_rich
+        .debug_info_mut()
+        .register_asm_ops(rich_block_id, 2, vec![(0, rich_mul_id), (1, rich_add_id)])
+        .unwrap();
+
+    // Coarse + rich should keep the richer mapping at op 1.
+    let (merged_coarse_then_rich, root_maps_coarse_then_rich) =
+        MastForest::merge([&forest_coarse, &forest_rich]).unwrap();
+    let mapped_rich_root = root_maps_coarse_then_rich.map_root(1, &rich_block_id).unwrap();
+    assert_eq!(
+        merged_coarse_then_rich.get_assembly_op(mapped_rich_root, Some(0)),
+        Some(&asm_mul)
+    );
+    assert_eq!(
+        merged_coarse_then_rich.get_assembly_op(mapped_rich_root, Some(1)),
+        Some(&asm_add)
+    );
+
+    // Rich + coarse should be identical.
+    let (merged_rich_then_coarse, root_maps_rich_then_coarse) =
+        MastForest::merge([&forest_rich, &forest_coarse]).unwrap();
+    let mapped_rich_root = root_maps_rich_then_coarse.map_root(0, &rich_block_id).unwrap();
+    assert_eq!(
+        merged_rich_then_coarse.get_assembly_op(mapped_rich_root, Some(0)),
+        Some(&asm_mul)
+    );
+    assert_eq!(
+        merged_rich_then_coarse.get_assembly_op(mapped_rich_root, Some(1)),
+        Some(&asm_add)
+    );
+}
+
+#[test]
+fn mast_forest_merge_preserves_sparse_non_block_asm_op_mappings() {
+    let mut forest_without_asm = MastForest::new();
+    let without_asm_callee_id = block_foo().add_to_forest(&mut forest_without_asm).unwrap();
+    let without_asm_call_id = CallNodeBuilder::new(without_asm_callee_id)
+        .add_to_forest(&mut forest_without_asm)
+        .unwrap();
+    forest_without_asm.make_root(without_asm_call_id);
+
+    let mut forest_with_asm = MastForest::new();
+    let with_asm_callee_id = block_foo().add_to_forest(&mut forest_with_asm).unwrap();
+    let with_asm_call_id = CallNodeBuilder::new(with_asm_callee_id)
+        .add_to_forest(&mut forest_with_asm)
+        .unwrap();
+    forest_with_asm.make_root(with_asm_call_id);
+
+    let asm_enter = AssemblyOp::new(None, "proc::caller".into(), 1, "call.enter".into());
+    let asm_exit = AssemblyOp::new(None, "proc::caller".into(), 1, "call.exit".into());
+    let asm_enter_id = forest_with_asm.debug_info_mut().add_asm_op(asm_enter.clone()).unwrap();
+    let asm_exit_id = forest_with_asm.debug_info_mut().add_asm_op(asm_exit.clone()).unwrap();
+    forest_with_asm
+        .debug_info_mut()
+        .register_asm_ops(with_asm_call_id, 4, vec![(1, asm_enter_id), (3, asm_exit_id)])
+        .unwrap();
+
+    let (merged_without_then_with, root_maps_without_then_with) =
+        MastForest::merge([&forest_without_asm, &forest_with_asm]).unwrap();
+    let mapped_call = root_maps_without_then_with.map_root(1, &with_asm_call_id).unwrap();
+    assert_eq!(merged_without_then_with.get_assembly_op(mapped_call, Some(0)), None);
+    assert_eq!(merged_without_then_with.get_assembly_op(mapped_call, Some(1)), Some(&asm_enter));
+    assert_eq!(merged_without_then_with.get_assembly_op(mapped_call, Some(2)), Some(&asm_enter));
+    assert_eq!(merged_without_then_with.get_assembly_op(mapped_call, Some(3)), Some(&asm_exit));
+
+    let (merged_with_then_without, root_maps_with_then_without) =
+        MastForest::merge([&forest_with_asm, &forest_without_asm]).unwrap();
+    let mapped_call = root_maps_with_then_without.map_root(0, &with_asm_call_id).unwrap();
+    assert_eq!(merged_with_then_without.get_assembly_op(mapped_call, Some(0)), None);
+    assert_eq!(merged_with_then_without.get_assembly_op(mapped_call, Some(1)), Some(&asm_enter));
+    assert_eq!(merged_with_then_without.get_assembly_op(mapped_call, Some(2)), Some(&asm_enter));
+    assert_eq!(merged_with_then_without.get_assembly_op(mapped_call, Some(3)), Some(&asm_exit));
+}
+
+#[test]
+fn mast_forest_merge_equal_richness_asm_op_conflicts_choose_whole_mapping() {
+    let mut forest_lhs = MastForest::new();
+    let lhs_block_id = block_foo().add_to_forest(&mut forest_lhs).unwrap();
+    forest_lhs.make_root(lhs_block_id);
+
+    let mut forest_rhs = MastForest::new();
+    let rhs_block_id = block_foo().add_to_forest(&mut forest_rhs).unwrap();
+    forest_rhs.make_root(rhs_block_id);
+
+    let asm_shared = AssemblyOp::new(None, "proc::foo".into(), 1, "shared".into());
+    let asm_lhs_only = AssemblyOp::new(None, "proc::foo".into(), 1, "lhs-only".into());
+    let asm_rhs_only = AssemblyOp::new(None, "proc::foo".into(), 1, "rhs-only".into());
+
+    let lhs_shared_id = forest_lhs.debug_info_mut().add_asm_op(asm_shared.clone()).unwrap();
+    let lhs_only_id = forest_lhs.debug_info_mut().add_asm_op(asm_lhs_only.clone()).unwrap();
+    forest_lhs
+        .debug_info_mut()
+        .register_asm_ops(lhs_block_id, 2, vec![(0, lhs_shared_id), (1, lhs_only_id)])
+        .unwrap();
+
+    let rhs_only_id = forest_rhs.debug_info_mut().add_asm_op(asm_rhs_only.clone()).unwrap();
+    let rhs_shared_id = forest_rhs.debug_info_mut().add_asm_op(asm_shared.clone()).unwrap();
+    forest_rhs
+        .debug_info_mut()
+        .register_asm_ops(rhs_block_id, 2, vec![(0, rhs_only_id), (1, rhs_shared_id)])
+        .unwrap();
+
+    let selected_mapping = |forest: &MastForest, node_id| {
+        (
+            forest.get_assembly_op(node_id, Some(0)).map(|asm_op| String::from(asm_op.op())),
+            forest.get_assembly_op(node_id, Some(1)).map(|asm_op| String::from(asm_op.op())),
+        )
+    };
+
+    let (merged_lhs_then_rhs, root_maps_lhs_then_rhs) =
+        MastForest::merge([&forest_lhs, &forest_rhs]).unwrap();
+    let mapped_lhs_block = root_maps_lhs_then_rhs.map_root(0, &lhs_block_id).unwrap();
+    let mapping_lhs_then_rhs = selected_mapping(&merged_lhs_then_rhs, mapped_lhs_block);
+
+    let (merged_rhs_then_lhs, root_maps_rhs_then_lhs) =
+        MastForest::merge([&forest_rhs, &forest_lhs]).unwrap();
+    let mapped_lhs_block = root_maps_rhs_then_lhs.map_root(1, &lhs_block_id).unwrap();
+    let mapping_rhs_then_lhs = selected_mapping(&merged_rhs_then_lhs, mapped_lhs_block);
+
+    assert_eq!(
+        mapping_lhs_then_rhs, mapping_rhs_then_lhs,
+        "equal-richness conflicts should resolve deterministically independent of merge order"
+    );
+
+    let lhs_mapping = (Some(String::from("shared")), Some(String::from("lhs-only")));
+    let rhs_mapping = (Some(String::from("rhs-only")), Some(String::from("shared")));
+    assert!(
+        mapping_lhs_then_rhs == lhs_mapping || mapping_lhs_then_rhs == rhs_mapping,
+        "merged mapping should match one full input mapping"
+    );
+    assert_ne!(
+        mapping_lhs_then_rhs,
+        (Some(String::from("shared")), Some(String::from("shared"))),
+        "merged mapping should not synthesize a mixed mapping"
     );
 }
