@@ -331,8 +331,9 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ProcessorAir {
         emit_miden_boundary(&mut reducer);
         let total_correction = reducer.finalize()?;
 
-        // TODO(#3032): aux_values[1] is always ZERO (placeholder for second trace's
-        // accumulator).
+        // TODO(#3032): aux_values[1..] are the placeholder slots from
+        // NUM_LOGUP_COMMITTED_FINALS (see `constraints::lookup::miden_air`); enforce the
+        // zero invariant until trace splitting lands.
         for unused_aux in aux_values.iter().skip(1) {
             if !unused_aux.is_zero() {
                 return Err("padding aux value is non-zero".into());
@@ -437,9 +438,8 @@ where
         challenges: &[EF],
     ) -> (RowMajorMatrix<EF>, Vec<EF>) {
         let (aux_trace, mut committed) = build_logup_aux_trace(self, main, challenges);
-        // TODO(#3032): the generic driver returns the one real committed final; pad with
-        // ZERO for the MASM recursive verifier which absorbs 2 boundary values. Remove the
-        // pad once trace splitting lands and each sub-trace has its own accumulator.
+        // TODO(#3032): pad the placeholder slot — see `NUM_LOGUP_COMMITTED_FINALS`. Remove
+        // the pad once trace splitting lands.
         committed.push(EF::ZERO);
         (aux_trace, committed)
     }

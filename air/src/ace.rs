@@ -247,8 +247,8 @@ pub fn logup_boundary_config() -> LogUpBoundaryConfig {
         PublicInput(PV_TRANSCRIPT_STATE + 3),
     ];
 
-    // TODO(#3032): Only col 0 is a real committed final. The second aux value is always
-    // ZERO and is not summed. Expand to [0, 1] once trace splitting lands.
+    // TODO(#3032): only col 0 is summed; slot 1 is the placeholder — see
+    // `NUM_LOGUP_COMMITTED_FINALS`. Expand to [0, 1] once trace splitting lands.
     LogUpBoundaryConfig {
         sum_columns: vec![0],
         fractions: vec![

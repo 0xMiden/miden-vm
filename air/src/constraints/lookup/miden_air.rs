@@ -32,9 +32,14 @@ pub(crate) const MIDEN_COLUMN_SHAPE: [usize; 7] = [
     CHIPLET_COLUMN_SHAPE[2],
 ];
 
-// TODO(#3032): The real committed final count is 1 (col 0 only), but we keep 2 for
-// forward-compatibility with the MASM recursive verifier which absorbs 2 boundary
-// values. The second value is always ZERO. Reduce to 1 once trace splitting lands.
+/// Number of committed final aux values published with a proof.
+///
+/// Only col 0 is a real committed final; slot 1 is a placeholder forced to zero, kept for
+/// forward-compatibility with the MASM recursive verifier (which absorbs 2 boundary
+/// values). All paths that emit or consume the pair must preserve the zero in slot 1.
+///
+/// TODO(#3032): reduce to 1 once trace splitting lands and each sub-trace has its own
+/// accumulator.
 pub const NUM_LOGUP_COMMITTED_FINALS: usize = 2;
 
 // BOUNDARY EMITTER
