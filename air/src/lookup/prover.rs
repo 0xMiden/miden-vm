@@ -170,7 +170,8 @@ where
     let width = main_trace.width();
     let flat: &[F] = main_trace.values.borrow();
 
-    let mut fractions = LookupFractions::new::<A, ProverLookupBuilder<'_, F, EF>>(air, num_rows);
+    let shape = air.column_shape().to_vec();
+    let mut fractions = LookupFractions::from_shape(shape, num_rows);
 
     // Per-row periodic slice, filled in place each row — no per-iteration allocation.
     let mut periodic_row: Vec<F> = vec![F::ZERO; periodic_columns.len()];
@@ -596,10 +597,10 @@ mod tests {
         let empty_row: Vec<Felt> = vec![];
         let periodic_values: Vec<Felt> = vec![];
 
-        let mut fractions = LookupFractions::<Felt, QuadFelt>::new::<
-            _,
-            ProverLookupBuilder<'_, Felt, QuadFelt>,
-        >(&air, NUM_ROWS);
+        let shape =
+            <SmokeAir as LookupAir<ProverLookupBuilder<'_, Felt, QuadFelt>>>::column_shape(&air)
+                .to_vec();
+        let mut fractions = LookupFractions::<Felt, QuadFelt>::from_shape(shape, NUM_ROWS);
 
         for _row in 0..NUM_ROWS {
             let window = RowWindow::from_two_rows(&empty_row, &empty_row);

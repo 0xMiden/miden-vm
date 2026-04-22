@@ -54,7 +54,7 @@ use miden_core::{
 use miden_crypto::stark::air::LiftedAir;
 
 use super::{
-    Challenges, LookupAir, LookupBuilder, ProverLookupBuilder, prover::build_lookup_fractions,
+    Challenges, LookupAir, ProverLookupBuilder, prover::build_lookup_fractions,
 };
 
 /// Row-chunk granularity for the fused accumulator. Matches
@@ -170,17 +170,14 @@ where
     EF: ExtensionField<F>,
 {
     /// Allocate a fresh buffer sized to hold every fraction an AIR can emit across
-    /// `num_rows` rows. The flat fraction capacity is `num_rows * Σ shape`, so the row
-    /// loop does not re-allocate as long as each row stays within its declared
-    /// [`LookupAir::column_shape`] bound. The flat count capacity is `num_rows * num_cols`.
-    pub fn new<A, LB>(air: &A, num_rows: usize) -> Self
-    where
-        A: LookupAir<LB>,
-        LB: LookupBuilder<F = F, EF = EF>,
-    {
-        let shape: Vec<usize> = air.column_shape().to_vec();
-        let num_cols = air.num_columns();
-        debug_assert_eq!(shape.len(), num_cols, "column_shape length must equal num_columns",);
+    /// `num_rows` rows. The flat fraction capacity is `num_rows * Σ shape`, so the row loop
+    /// does not re-allocate as long as each row stays within its declared bound. The flat
+    /// count capacity is `num_rows * shape.len()`.
+    ///
+    /// Takes `shape` by value so the caller owns the allocation (typically
+    /// `air.column_shape().to_vec()`).
+    pub fn from_shape(shape: Vec<usize>, num_rows: usize) -> Self {
+        let num_cols = shape.len();
         let total_fraction_capacity: usize = num_rows * shape.iter().sum::<usize>();
         let fractions = Vec::with_capacity(total_fraction_capacity);
         let counts = Vec::with_capacity(num_rows * num_cols);
@@ -610,18 +607,8 @@ mod tests {
         fn eval(&self, _builder: &mut LB) {}
     }
 
-    /// Bypass `LookupFractions::new` so we can build a fixture against `FakeAir` without
-    /// having a real `LookupBuilder` impl on hand — `new` needs `LookupBuilder<F = …, EF = …>`
-    /// in its bounds and the only concrete impl today is `ProverLookupBuilder`.
     fn fixture(shape: [usize; 2], num_rows: usize) -> LookupFractions<Felt, QuadFelt> {
-        let total_fraction_capacity: usize = num_rows * shape.iter().sum::<usize>();
-        LookupFractions {
-            fractions: Vec::with_capacity(total_fraction_capacity),
-            counts: Vec::with_capacity(num_rows * shape.len()),
-            shape: shape.to_vec(),
-            num_rows,
-            num_cols: shape.len(),
-        }
+        LookupFractions::from_shape(shape.to_vec(), num_rows)
     }
 
     /// `accumulate_slow` returns `num_rows + 1` entries per column. Column 0 is a running
@@ -689,8 +676,8 @@ mod tests {
     #[test]
     fn new_reserves_capacity() {
         let air = FakeAir { shape: [3, 5] };
-        type LB<'a> = ProverLookupBuilder<'a, Felt, QuadFelt>;
-        let fx: LookupFractions<Felt, QuadFelt> = LookupFractions::new::<_, LB<'_>>(&air, 10);
+        let fx: LookupFractions<Felt, QuadFelt> =
+            LookupFractions::from_shape(air.shape.to_vec(), 10);
 
         assert_eq!(fx.num_columns(), 2);
         assert_eq!(fx.num_rows(), 10);
