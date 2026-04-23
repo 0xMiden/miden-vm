@@ -123,6 +123,13 @@ pub enum ParsingError {
         #[label("occurs here")]
         span: SourceSpan,
     },
+    #[error("invalid syntax: {message}")]
+    #[diagnostic()]
+    InvalidSyntax {
+        #[label("{message}")]
+        span: SourceSpan,
+        message: String,
+    },
     #[error("invalid syntax")]
     #[diagnostic(help("expected {}", expected.as_slice().join(", or ")))]
     UnrecognizedToken {
@@ -378,6 +385,9 @@ impl PartialEq for ParsingError {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::Failed, Self::Failed) => true,
+            (Self::InvalidSyntax { message: l, .. }, Self::InvalidSyntax { message: r, .. }) => {
+                l == r
+            },
             (Self::InvalidLiteral { kind: l, .. }, Self::InvalidLiteral { kind: r, .. }) => l == r,
             (Self::InvalidHexLiteral { kind: l, .. }, Self::InvalidHexLiteral { kind: r, .. }) => {
                 l == r

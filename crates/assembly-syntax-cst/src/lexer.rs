@@ -2,6 +2,10 @@ use miden_debug_types::{SourceFile, SourceId, SourceSpan};
 
 use crate::syntax::SyntaxKind;
 
+/// A single lossless token produced by the MASM lexer.
+///
+/// Tokens retain their original text and source span so callers can reconstruct exact source
+/// layout, including trivia.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Token<'input> {
     kind: SyntaxKind,
@@ -10,31 +14,44 @@ pub struct Token<'input> {
 }
 
 impl<'input> Token<'input> {
+    /// Constructs a token from already-classified source text.
     pub fn new(kind: SyntaxKind, span: SourceSpan, text: &'input str) -> Self {
         Self { kind, span, text }
     }
 
+    /// Returns the token kind assigned by the lexer.
     pub fn kind(&self) -> SyntaxKind {
         self.kind
     }
 
+    /// Returns the source span covered by this token.
     pub fn span(&self) -> SourceSpan {
         self.span
     }
 
+    /// Returns the exact source text covered by this token.
     pub fn text(&self) -> &'input str {
         self.text
     }
 }
 
+/// Tokenizes a source-managed MASM file into a lossless token stream.
 pub fn tokenize(source: &SourceFile) -> Vec<Token<'_>> {
     Lexer::new(source).collect()
 }
 
+/// Tokenizes a raw string using [`SourceId::UNKNOWN`] spans.
+///
+/// This is primarily useful in tests and standalone helpers. Production callers should prefer
+/// [`tokenize`] so spans remain attached to a real [`SourceFile`].
 pub fn tokenize_text(input: &str) -> Vec<Token<'_>> {
     Lexer::from_raw_parts(SourceId::UNKNOWN, input).collect()
 }
 
+/// An iterator over lossless MASM tokens.
+///
+/// The lexer preserves comments, whitespace, and newlines as ordinary tokens rather than skipping
+/// them, which allows the CST and formatter to reason about original layout.
 pub struct Lexer<'input> {
     input: &'input str,
     source_id: SourceId,
@@ -42,10 +59,14 @@ pub struct Lexer<'input> {
 }
 
 impl<'input> Lexer<'input> {
+    /// Creates a lexer over a source-managed MASM file.
     pub fn new(source: &'input SourceFile) -> Self {
         Self::from_raw_parts(source.id(), source.as_str())
     }
 
+    /// Creates a lexer from raw text and an explicit source id.
+    ///
+    /// This is the lowest-level constructor used by [`tokenize_text`] and parser test helpers.
     pub fn from_raw_parts(source_id: SourceId, input: &'input str) -> Self {
         Self { input, source_id, offset: 0 }
     }

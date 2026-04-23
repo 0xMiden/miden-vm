@@ -76,8 +76,19 @@ impl SyntaxTestContext {
     /// forms, and is largely intended for low-level testing of the parser.
     #[track_caller]
     pub fn parse_forms(&self, source: Arc<SourceFile>) -> Result<Vec<Form>, Report> {
-        crate::parser::parse_forms(source.clone())
-            .map_err(|err| Report::new(err).with_source_code(source))
+        crate::parser::parse_forms(source)
+    }
+
+    /// Parse the given source file into a vector of top-level [Form]s using a specific parser
+    /// backend.
+    #[cfg(any(test, feature = "testing"))]
+    #[track_caller]
+    pub fn parse_forms_with_backend(
+        &self,
+        source: Arc<SourceFile>,
+        backend: crate::parser::ParserBackend,
+    ) -> Result<Vec<Form>, Report> {
+        crate::parser::parse_forms_with_backend(source, backend)
     }
 
     /// Parse the given source file into an executable [Module].

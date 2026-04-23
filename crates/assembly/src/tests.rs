@@ -114,13 +114,12 @@ fn empty_if() -> TestResult {
     assert_assembler_diagnostic!(
         context,
         source,
-        "invalid syntax",
+        "invalid syntax: expected a non-empty `if` block",
         regex!(r#",-\[test[\d]+:1:15\]"#),
         "1 | begin if.true end end",
-        "  :               ^|^",
-        "  :                `-- found a end here",
-        "  `----",
-        " help: expected primitive opcode (e.g. \"add\"), or \"else\", or control flow opcode (e.g. \"if.true\")"
+        "  :               ^",
+        "  :               `-- expected a non-empty `if` block",
+        "  `----"
     );
     Ok(())
 }
@@ -1099,13 +1098,13 @@ fn constants_must_be_uppercase() -> TestResult {
     assert_assembler_diagnostic!(
         context,
         source,
-        "invalid syntax",
+        "invalid identifier: only uppercase characters or underscores are allowed, and must start with an alphabetic character",
+        "invalid identifier: only uppercase characters or underscores are allowed, and must start with an alphabetic character",
         regex!(r#",-\[test[\d]+:1:7\]"#),
         "1 | const constant_1 = 12 begin push.constant_1 end",
-        "  :       ^^^^^|^^^^",
-        "  :            `-- found a identifier here",
+        "  :       ^^^^^^^^^^",
         "  `----",
-        "        help: expected constant identifier"
+        "help: bare identifiers must be lowercase alphanumeric with '_', quoted identifiers can include any graphical character"
     );
 
     Ok(())
@@ -1131,9 +1130,9 @@ fn duplicate_constant_name() -> TestResult {
         "symbol conflict: found duplicate definitions of the same name",
         regex!(r#",-\[test[\d]+:1:1\]"#),
         "1 | const CONSTANT = 12 const CONSTANT = 14 begin push.CONSTANT end",
-        "  : ^^^^^^^^^|^^^^^^^^^ ^^^^^^^^^|^^^^^^^^^",
-        "  :          |                   `-- conflict occurs here",
-        "  :          `-- previously defined here",
+        "  : ^^^^^^^^^^|^^^^^^^^^^^^^^^^^^^|^^^^^^^^^",
+        "  :           |                   `-- conflict occurs here",
+        "  :           `-- previously defined here",
         "  `----"
     );
     Ok(())
@@ -1153,14 +1152,12 @@ fn constant_must_be_valid_felt() -> TestResult {
     assert_assembler_diagnostic!(
         context,
         source,
-        "invalid syntax",
+        "invalid syntax: unexpected trailing tokens in constant expression",
         regex!(r#",-\[test[\d]+:1:22\]"#),
         "1 | const CONSTANT = 1122INVALID begin push.CONSTANT end",
         "  :                      ^^^|^^^",
-        "  :                         `-- found a constant identifier here",
-        "  `----",
-        " help: expected \"*\", or \"+\", or \"-\", or \"/\", or \"//\", or \"@\", or \"adv_map\", or \"begin\", or \"const\", or \"enum\", \
-or \"proc\", or \"pub\", or \"type\", or \"use\", or end of file, or doc comment"
+        "  :                         `-- unexpected trailing tokens in constant expression",
+        "  `----"
     );
     Ok(())
 }
@@ -1244,15 +1241,14 @@ fn constants_defined_in_global_scope() -> TestResult {
     assert_assembler_diagnostic!(
         context,
         source,
-        "invalid syntax",
+        "syntax error",
         regex!(r#",-\[test[\d]+:2:11\]"#),
         "1 |",
         "2 |     begin const CONSTANT = 12",
         "  :           ^^|^^",
-        "  :             `-- found a const here",
+        "  :             `-- expected `end` to close `begin` block before top-level item",
         "3 |     push.CONSTANT end",
-        "  `----",
-        r#" help: expected primitive opcode (e.g. "add"), or control flow opcode (e.g. "if.true")"#
+        "  `----"
     );
     Ok(())
 }
@@ -1818,15 +1814,15 @@ fn link_time_const_evaluation_invalid_constant() -> TestResult {
 
     assert_diagnostic_lines!(
         error,
-        "invalid syntax",
+        "invalid identifier: only uppercase characters or underscores are allowed, and must start with an alphabetic character",
+        "invalid identifier: only uppercase characters or underscores are allowed, and must start with an alphabetic character",
         regex!(r#",-\[test[\d]+:3:14\]"#),
         "2 |     begin",
         "3 |         push.f",
-        "  :              |",
-        "  :              `-- found a identifier here",
+        "  :              ^",
         "4 |     end",
         "  `----",
-        "help: expected \"[\", or constant identifier, or hex-encoded literal, or hex_word, or integer literal"
+        "help: bare identifiers must be lowercase alphanumeric with '_', quoted identifiers can include any graphical character"
     );
 
     Ok(())
@@ -2974,15 +2970,14 @@ fn module_alias() -> TestResult {
     assert_assembler_diagnostic!(
         context,
         source,
-        "invalid syntax",
+        "syntax error",
         regex!(r#",-\[test[\d]+:2:37\]"#),
         "1 |",
         "2 |         use dummy::math::u64->bigint->invalidname",
         "  :                                     ^|",
-        "  :                                      `-- found a -> here",
+        "  :                                      `-- unexpected top-level token",
         "3 |",
-        "  `----",
-        r#" help: expected "@", or "adv_map", or "begin", or "const", or "enum", or "proc", or "pub", or "type", or "use", or end of file, or doc comment"#
+        "  `----"
     );
 
     Ok(())
@@ -3040,7 +3035,7 @@ fn module_alias_unused_import() -> TestResult {
         "  :             ^^^^^^^^^^^^^^^^",
         "3 |         use dummy::math::u64->bigint",
         "  `----",
-        " help: this import is never used and can be safely removed"
+        "help: this import is never used and can be safely removed"
     );
 
     // --- duplicate module imports with different aliases --------------------
@@ -3242,19 +3237,19 @@ fn invalid_empty_program() {
     assert_assembler_diagnostic!(
         context,
         source_file!(&context, ""),
-        "unexpected end of file",
-        regex!(r#",-\[test[\d]+:1:1\]"#),
-        "`----",
-        r#" help: expected "@", or "adv_map", or "begin", or "const", or "enum", or "proc", or "pub", or "type", or "use", or doc comment"#
+        "syntax error",
+        "help: see emitted diagnostics for details",
+        "invalid program: no entrypoint defined",
+        "help: ensure you define an entrypoint somewhere in the body with `begin`..`end`"
     );
 
     assert_assembler_diagnostic!(
         context,
         source_file!(&context, ""),
-        "unexpected end of file",
-        regex!(r#",-\[test[\d]+:1:1\]"#),
-        "  `----",
-        r#" help: expected "@", or "adv_map", or "begin", or "const", or "enum", or "proc", or "pub", or "type", or "use", or doc comment"#
+        "syntax error",
+        "help: see emitted diagnostics for details",
+        "invalid program: no entrypoint defined",
+        "help: ensure you define an entrypoint somewhere in the body with `begin`..`end`"
     );
 }
 
@@ -3264,13 +3259,12 @@ fn invalid_program_unrecognized_token() {
     assert_assembler_diagnostic!(
         context,
         source_file!(&context, "none"),
-        "invalid syntax",
+        "syntax error",
         regex!(r#",-\[test[\d]+:1:1\]"#),
         "1 | none",
         "  : ^^|^",
-        "  :   `-- found a identifier here",
-        "  `----",
-        r#" help: expected "@", or "adv_map", or "begin", or "const", or "enum", or "proc", or "pub", or "type", or "use", or doc comment"#
+        "  :   `-- unexpected top-level token",
+        "  `----"
     );
 }
 
@@ -3280,11 +3274,12 @@ fn invalid_program_unmatched_begin() {
     assert_assembler_diagnostic!(
         context,
         source_file!(&context, "begin add"),
-        "unexpected end of file",
-        regex!(r#",-\[test[\d]+:1:10\]"#),
+        "syntax error",
+        regex!(r#",-\[test[\d]+:1:9\]"#),
         "1 | begin add",
-        "  `----",
-        r#" help: expected ".", or primitive opcode (e.g. "add"), or "end", or control flow opcode (e.g. "if.true")"#
+        "  :         ^",
+        "  :         `-- expected `end` to close `begin` block",
+        "  `----"
     );
 }
 
@@ -3294,13 +3289,12 @@ fn invalid_program_invalid_top_level_token() {
     assert_assembler_diagnostic!(
         context,
         source_file!(&context, "begin add end mul"),
-        "invalid syntax",
+        "syntax error",
         regex!(r#",-\[test[\d]+:1:15\]"#),
         "1 | begin add end mul",
         "  :               ^|^",
-        "  :                `-- found a mul here",
-        "  `----",
-        r#" help: expected "@", or "adv_map", or "begin", or "const", or "enum", or "proc", or "pub", or "type", or "use", or end of file, or doc comment"#
+        "  :                `-- unexpected top-level token",
+        "  `----"
     );
 }
 
@@ -3311,13 +3305,12 @@ fn invalid_proc_missing_end_unexpected_begin() {
     assert_assembler_diagnostic!(
         context,
         source,
-        "invalid syntax",
+        "syntax error",
         regex!(r#",-\[test[\d]+:1:18\]"#),
         "1 | proc foo add mul begin push.1 end",
         "  :                  ^^|^^",
-        "  :                    `-- found a begin here",
-        "  `----",
-        r#" help: expected ".", or primitive opcode (e.g. "add"), or "end", or control flow opcode (e.g. "if.true")"#
+        "  :                    `-- expected `end` to close procedure before top-level item",
+        "  `----"
     );
 }
 
@@ -3328,13 +3321,12 @@ fn invalid_proc_missing_end_unexpected_proc() {
     assert_assembler_diagnostic!(
         context,
         source,
-        "invalid syntax",
+        "syntax error",
         regex!(r#",-\[test[\d]+:1:18\]"#),
         "1 | proc foo add mul proc bar push.3 end begin push.1 end",
         "  :                  ^^|^",
-        "  :                    `-- found a proc here",
-        "  `----",
-        r#" help: expected ".", or primitive opcode (e.g. "add"), or "end", or control flow opcode (e.g. "if.true")"#
+        "  :                    `-- expected `end` to close procedure before top-level item",
+        "  `----"
     );
 }
 
@@ -3390,14 +3382,12 @@ fn invalid_proc_invalid_numeric_name() {
     assert_assembler_diagnostic!(
         context,
         source,
-        "invalid syntax",
+        "syntax error",
         regex!(r#",-\[test[\d]+:1:6\]"#),
         "1 | proc 123 add mul end begin push.1 exec.123 end",
         "  :      ^|^",
-        "  :       `-- found a integer here",
-        "  `----",
-        " help: expected primitive opcode",
-        "      identifier"
+        "  :       `-- expected a procedure name",
+        "  `----"
     );
 }
 
@@ -3428,11 +3418,12 @@ fn invalid_if_missing_end_no_else() {
     assert_assembler_diagnostic!(
         context,
         source,
-        "unexpected end of file",
-        regex!(r#",-\[test[\d]+:1:29\]"#),
+        "syntax error",
+        regex!(r#",-\[test[\d]+:1:28\]"#),
         "1 | begin push.1 add if.true mul",
-        "  `----",
-        r#" help: expected ".", or primitive opcode (e.g. "add"), or "else", or "end", or control flow opcode (e.g. "if.true")"#
+        "  :                            ^",
+        "  :                            `-- expected `end` to close `if`",
+        "  `----"
     );
 }
 
@@ -3443,26 +3434,24 @@ fn invalid_else_with_no_if() {
     assert_assembler_diagnostic!(
         context,
         source,
-        "invalid syntax",
+        "syntax error",
         regex!(r#",-\[test[\d]+:1:18\]"#),
         "1 | begin push.1 add else mul end",
         "  :                  ^^|^",
-        "  :                    `-- found a else here",
-        "  `----",
-        r#" help: expected primitive opcode (e.g. "add"), or "end", or control flow opcode (e.g. "if.true")"#
+        "  :                    `-- expected `end` to close `begin` block before `else`",
+        "  `----"
     );
 
     let source = source_file!(&context, "begin push.1 while.true add else mul end end");
     assert_assembler_diagnostic!(
         context,
         source,
-        "invalid syntax",
+        "syntax error",
         regex!(r#",-\[test[\d]+:1:29\]"#),
         "1 | begin push.1 while.true add else mul end end",
         "  :                             ^^|^",
-        "  :                               `-- found a else here",
-        "  `----",
-        r#" help: expected "end""#
+        "  :                               `-- expected `end` to close `while` before `else`",
+        "  `----"
     );
 }
 
@@ -3475,13 +3464,12 @@ fn invalid_unmatched_else_within_if_else() {
     assert_assembler_diagnostic!(
         context,
         source,
-        "invalid syntax",
+        "syntax error",
         regex!(r#",-\[test[\d]+:1:35\]"#),
         "1 | begin push.1 if.true add else mul else push.1 end end end",
         "  :                                   ^^|^",
-        "  :                                     `-- found a else here",
-        "  `----",
-        r#" help: expected "end""#
+        "  :                                     `-- expected `end` to close `if` before `else`",
+        "  `----"
     );
 }
 
@@ -3493,11 +3481,12 @@ fn invalid_if_else_no_matching_end() {
     assert_assembler_diagnostic!(
         context,
         source,
-        "unexpected end of file",
-        regex!(r#",-\[test[\d]+:1:38\]"#),
+        "syntax error",
+        regex!(r#",-\[test[\d]+:1:37\]"#),
         "1 | begin push.1 add if.true mul else add",
-        "  `----",
-        r#" help: expected ".", or primitive opcode (e.g. "add"), or "end", or control flow opcode (e.g. "if.true")"#
+        "  :                                     ^",
+        "  :                                     `-- expected `end` to close `if`",
+        "  `----"
     );
 }
 
@@ -3510,11 +3499,12 @@ fn invalid_repeat() -> TestResult {
     assert_assembler_diagnostic!(
         context,
         source,
-        "unexpected end of file",
-        regex!(r#",-\[test[\d]+:1:31\]"#),
+        "syntax error",
+        regex!(r#",-\[test[\d]+:1:30\]"#),
         "1 | begin push.1 add repeat.10 mul",
-        "  `----",
-        r#" help: expected ".", or primitive opcode (e.g. "add"), or "end", or control flow opcode (e.g. "if.true")"#
+        "  :                              ^",
+        "  :                              `-- expected `end` to close `repeat`",
+        "  `----"
     );
 
     // invalid iter count
@@ -3522,13 +3512,12 @@ fn invalid_repeat() -> TestResult {
     assert_assembler_diagnostic!(
         context,
         source,
-        "invalid syntax",
+        "invalid syntax: invalid instruction `x3` or malformed operands",
         regex!(r#",-\[test[\d]+:1:27\]"#),
         "1 | begin push.1 add repeat.23x3 mul end end",
         "  :                           ^|",
-        "  :                            `-- found a identifier here",
-        "  `----",
-        r#" help: expected primitive opcode (e.g. "add"), or control flow opcode (e.g. "if.true")"#
+        "  :                            `-- invalid instruction `x3` or malformed operands",
+        "  `----"
     );
 
     // Overflow iter count
@@ -3874,37 +3863,36 @@ fn invalid_while() -> TestResult {
     assert_assembler_diagnostic!(
         context,
         source,
-        "invalid syntax",
-        regex!(r#",-\[test[\d]+:1:24\]"#),
+        "invalid syntax: expected `while.true`",
+        regex!(r#",-\[test[\d]+:1:18\]"#),
         "1 | begin push.1 add while mul end end",
-        "  :                        ^|^",
-        "  :                         `-- found a mul here",
-        "  `----",
-        r#" help: expected ".""#
+        "  :                  ^^^^^^|^^^^^^",
+        "  :                        `-- expected `while.true`",
+        "  `----"
     );
 
     let source = source_file!(&context, "begin push.1 add while.abc mul end end");
     assert_assembler_diagnostic!(
         context,
         source,
-        "invalid syntax",
-        regex!(r#",-\[test[\d]+:1:24\]"#),
+        "invalid syntax: expected `while.true`",
+        regex!(r#",-\[test[\d]+:1:18\]"#),
         "1 | begin push.1 add while.abc mul end end",
-        "  :                        ^|^",
-        "  :                         `-- found a identifier here",
-        "  `----",
-        r#" help: expected "true""#
+        "  :                  ^^^^^^^^|^^^^^^^^",
+        "  :                          `-- expected `while.true`",
+        "  `----"
     );
 
     let source = source_file!(&context, "begin push.1 add while.true mul");
     assert_assembler_diagnostic!(
         context,
         source,
-        "unexpected end of file",
-        regex!(r#",-\[test[\d]+:1:32\]"#),
+        "syntax error",
+        regex!(r#",-\[test[\d]+:1:31\]"#),
         "1 | begin push.1 add while.true mul",
-        "  `----",
-        r#" help: expected ".", or primitive opcode (e.g. "add"), or "end", or control flow opcode (e.g. "if.true")"#
+        "  :                               ^",
+        "  :                               `-- expected `end` to close `while`",
+        "  `----"
     );
     Ok(())
 }

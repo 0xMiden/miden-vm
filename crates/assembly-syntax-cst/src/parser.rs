@@ -4,11 +4,16 @@ use miden_debug_types::{SourceFile, SourceId, SourceLanguage, SourceSpan, Uri};
 use rowan::{GreenNodeBuilder, NodeOrToken, TextRange};
 
 use crate::{
+    ast::AstNode,
     diagnostics::{LabeledSpan, Severity, diagnostic, miette::MietteDiagnostic as Diagnostic},
     lexer::{Token, tokenize},
     syntax::{SyntaxElement, SyntaxKind, SyntaxNode, SyntaxToken},
 };
 
+/// The result of parsing a MASM source file into a lossless CST.
+///
+/// This type owns the green tree, retains the originating [`SourceFile`], and exposes both
+/// diagnostics and span helpers for later lowering.
 #[derive(Debug, Clone)]
 pub struct Parse {
     source: Arc<SourceFile>,
@@ -17,34 +22,53 @@ pub struct Parse {
 }
 
 impl Parse {
+    /// Returns the raw rowan syntax tree rooted at [`SyntaxKind::SourceFile`].
     pub fn syntax(&self) -> SyntaxNode {
         SyntaxNode::new_root(self.green_node.clone())
     }
 
+    /// Returns the typed root node for this parse.
+    pub fn root(&self) -> crate::ast::SourceFile {
+        crate::ast::SourceFile::cast(self.syntax())
+            .expect("parse root kind should always be SourceFile")
+    }
+
+    /// Returns any syntax diagnostics emitted while building the CST.
     pub fn diagnostics(&self) -> &[Diagnostic] {
         &self.diagnostics
     }
 
+    /// Removes and returns any syntax diagnostics emitted while building the CST.
     pub fn take_diagnostics(&mut self) -> Vec<Diagnostic> {
         core::mem::take(&mut self.diagnostics)
     }
 
+    /// Returns the source file used to produce this parse result.
     pub fn source_file(&self) -> Arc<SourceFile> {
         Arc::clone(&self.source)
     }
 
+    /// Returns the source file used to produce this parse result by shared reference.
+    pub fn source(&self) -> &SourceFile {
+        self.source.as_ref()
+    }
+
+    /// Returns `true` when the parse emitted at least one syntax diagnostic.
     pub fn has_errors(&self) -> bool {
         !self.diagnostics.is_empty()
     }
 
+    /// Maps a rowan node back to a [`SourceSpan`] in the originating source file.
     pub fn span_for_node(&self, node: &SyntaxNode) -> SourceSpan {
         self.span_for_range(node.text_range())
     }
 
+    /// Maps a rowan token back to a [`SourceSpan`] in the originating source file.
     pub fn span_for_token(&self, token: &SyntaxToken) -> SourceSpan {
         self.span_for_range(token.text_range())
     }
 
+    /// Maps a rowan element back to a [`SourceSpan`] in the originating source file.
     pub fn span_for_element(&self, element: &SyntaxElement) -> SourceSpan {
         match element {
             NodeOrToken::Node(node) => self.span_for_node(node),
@@ -52,16 +76,22 @@ impl Parse {
         }
     }
 
+    /// Converts a rowan [`TextRange`] to a [`SourceSpan`] in the originating source file.
     pub fn span_for_range(&self, range: TextRange) -> SourceSpan {
         source_span_from_text_range(self.source.id(), range)
     }
 }
 
+/// Parses a source-managed MASM file into a lossless CST.
 pub fn parse_source_file(source: Arc<SourceFile>) -> Parse {
     let parser_source = Arc::clone(&source);
     Parser::new(parser_source.as_ref()).parse(source)
 }
 
+/// Parses raw MASM text into a detached CST with [`SourceId::UNKNOWN`] spans.
+///
+/// This is primarily intended for tests and ad hoc helpers. Production callers should prefer
+/// [`parse_source_file`] so diagnostics and spans remain attached to a real [`SourceFile`].
 pub fn parse_text(input: &str) -> Parse {
     parse_source_file(detached_source_file(input))
 }
@@ -72,8 +102,6 @@ struct Parser<'input> {
     builder: GreenNodeBuilder<'static>,
     diagnostics: Vec<Diagnostic>,
     eof_span: SourceSpan,
-    module_doc_emitted: bool,
-    seen_non_doc_form: bool,
 }
 
 #[derive(Default, Debug, Clone, Copy)]
@@ -103,18 +131,60 @@ impl Nesting {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BlockOwner {
+    Begin,
+    Procedure,
+    If,
+    While,
+    Repeat,
+}
+
+impl BlockOwner {
+    fn missing_end_message(self) -> &'static str {
+        match self {
+            Self::Begin => "expected `end` to close `begin` block",
+            Self::Procedure => "expected `end` to close procedure",
+            Self::If => "expected `end` to close `if`",
+            Self::While => "expected `end` to close `while`",
+            Self::Repeat => "expected `end` to close `repeat`",
+        }
+    }
+
+    fn recovery_message(self, boundary: BlockRecoveryBoundary) -> String {
+        match boundary {
+            BlockRecoveryBoundary::Else => {
+                format!("{} before `else`", self.missing_end_message())
+            },
+            BlockRecoveryBoundary::TopLevelItem => {
+                format!("{} before top-level item", self.missing_end_message())
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BlockRecoveryBoundary {
+    Else,
+    TopLevelItem,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BlockParseOutcome {
+    FoundTerminator,
+    RecoveredImplicitEnd,
+    ReachedEof,
+}
+
 impl<'input> Parser<'input> {
     fn new(source: &'input SourceFile) -> Self {
-        let eof_span = SourceSpan::try_from_range(source.id(), source.len()..source.len())
-            .expect("source files larger than 4GiB are not supported");
+        let eof_span = eof_anchor_span(source);
         Self {
             tokens: tokenize(source),
             pos: 0,
             builder: GreenNodeBuilder::new(),
             diagnostics: Vec::new(),
             eof_span,
-            module_doc_emitted: false,
-            seen_non_doc_form: false,
         }
     }
 
@@ -147,25 +217,21 @@ impl<'input> Parser<'input> {
             || self.at_keyword("proc")
             || self.at_prefixed_keyword("pub", "proc")
         {
-            self.seen_non_doc_form = true;
             self.parse_procedure();
             return;
         }
 
         if self.at_keyword("begin") {
-            self.seen_non_doc_form = true;
             self.parse_begin_block();
             return;
         }
 
         if self.at_keyword("use") || self.at_prefixed_keyword("pub", "use") {
-            self.seen_non_doc_form = true;
             self.parse_import();
             return;
         }
 
         if self.at_keyword("const") || self.at_prefixed_keyword("pub", "const") {
-            self.seen_non_doc_form = true;
             self.parse_constant();
             return;
         }
@@ -175,13 +241,11 @@ impl<'input> Parser<'input> {
             || self.at_prefixed_keyword("pub", "type")
             || self.at_prefixed_keyword("pub", "enum")
         {
-            self.seen_non_doc_form = true;
             self.parse_type_decl();
             return;
         }
 
         if self.at_keyword("adv_map") {
-            self.seen_non_doc_form = true;
             self.parse_advice_map();
             return;
         }
@@ -193,14 +257,7 @@ impl<'input> Parser<'input> {
     }
 
     fn parse_doc_form(&mut self) {
-        let kind = if !self.module_doc_emitted && !self.seen_non_doc_form {
-            self.module_doc_emitted = true;
-            SyntaxKind::ModuleDoc
-        } else {
-            SyntaxKind::Doc
-        };
-
-        self.start_node(kind);
+        self.start_node(SyntaxKind::Doc);
         self.bump();
         self.finish_node();
     }
@@ -216,8 +273,8 @@ impl<'input> Parser<'input> {
         self.bump_regular_trivia();
         self.parse_import_target();
 
-        self.bump_non_comment_trivia();
-        if self.at_kind(SyntaxKind::RArrow) {
+        if self.peek_after_non_comment_trivia() == Some(SyntaxKind::RArrow) {
+            self.bump_non_comment_trivia();
             self.bump();
             self.bump_non_comment_trivia();
             if self.at_name_like() || self.at_keyword_like() {
@@ -336,11 +393,11 @@ impl<'input> Parser<'input> {
         }
 
         loop {
-            self.bump_non_comment_trivia();
-            if !self.at_kind(SyntaxKind::ColonColon) {
+            if self.peek_after_non_comment_trivia() != Some(SyntaxKind::ColonColon) {
                 break;
             }
 
+            self.bump_non_comment_trivia();
             self.bump();
             self.bump_non_comment_trivia();
             if self.at_name_like() || self.at_keyword_like() {
@@ -359,6 +416,7 @@ impl<'input> Parser<'input> {
         self.start_node(SyntaxKind::Expr);
 
         let mut nesting = Nesting::default();
+        let mut saw_significant = false;
         while !self.eof() {
             let kind = self.current_kind().expect("not eof");
             if nesting.is_root() && matches!(kind, SyntaxKind::Comment | SyntaxKind::DocComment) {
@@ -367,7 +425,17 @@ impl<'input> Parser<'input> {
             if nesting.is_root() && kind == SyntaxKind::Newline {
                 break;
             }
+            if nesting.is_root()
+                && saw_significant
+                && kind == SyntaxKind::Whitespace
+                && self
+                    .next_relevant_top_level_token(self.pos + 1)
+                    .is_some_and(|index| self.is_top_level_starter(index))
+            {
+                break;
+            }
 
+            saw_significant |= !kind.is_trivia();
             nesting = nesting.bump(kind);
             self.bump();
         }
@@ -399,7 +467,7 @@ impl<'input> Parser<'input> {
         loop {
             match self.current_kind() {
                 Some(SyntaxKind::Whitespace) => self.bump(),
-                Some(SyntaxKind::Comment | SyntaxKind::DocComment) => {
+                Some(SyntaxKind::Comment) => {
                     self.bump();
                     break;
                 },
@@ -412,8 +480,9 @@ impl<'input> Parser<'input> {
         self.start_node(SyntaxKind::BeginBlock);
         self.expect_keyword("begin", "expected `begin`");
         self.parse_line_tail();
-        self.parse_block(&["end"]);
-        self.expect_keyword("end", "expected `end` to close `begin` block");
+        if self.parse_block(BlockOwner::Begin, &["end"]) == BlockParseOutcome::FoundTerminator {
+            self.expect_keyword("end", BlockOwner::Begin.missing_end_message());
+        }
         self.finish_node();
     }
 
@@ -452,8 +521,9 @@ impl<'input> Parser<'input> {
         }
 
         self.parse_line_tail();
-        self.parse_block(&["end"]);
-        self.expect_keyword("end", "expected `end` to close procedure");
+        if self.parse_block(BlockOwner::Procedure, &["end"]) == BlockParseOutcome::FoundTerminator {
+            self.expect_keyword("end", BlockOwner::Procedure.missing_end_message());
+        }
         self.finish_node();
     }
 
@@ -530,24 +600,47 @@ impl<'input> Parser<'input> {
         }
     }
 
-    fn parse_block(&mut self, terminators: &[&str]) {
+    fn parse_block(&mut self, owner: BlockOwner, terminators: &[&str]) -> BlockParseOutcome {
         self.start_node(SyntaxKind::Block);
         while !self.eof() {
             if self.at_terminator(terminators) {
-                break;
+                self.finish_node();
+                return BlockParseOutcome::FoundTerminator;
             }
 
-            if self.at_kind(SyntaxKind::DocComment) || self.at_regular_trivia() {
+            if self.doc_comment_looks_like_regular_comment_in_block() {
                 self.bump();
                 continue;
             }
 
+            if self.at_regular_trivia() {
+                self.bump();
+                continue;
+            }
+
+            if let Some(boundary) = self.block_recovery_boundary(terminators) {
+                self.start_node(SyntaxKind::Error);
+                self.error_here(owner.recovery_message(boundary));
+                self.finish_node();
+                self.finish_node();
+                return BlockParseOutcome::RecoveredImplicitEnd;
+            }
+
             if self.at_keyword("if") {
-                self.parse_if();
+                if self.parse_if() {
+                    self.finish_node();
+                    return BlockParseOutcome::ReachedEof;
+                }
             } else if self.at_keyword("while") {
-                self.parse_while();
+                if self.parse_while() {
+                    self.finish_node();
+                    return BlockParseOutcome::ReachedEof;
+                }
             } else if self.at_keyword("repeat") {
-                self.parse_repeat();
+                if self.parse_repeat() {
+                    self.finish_node();
+                    return BlockParseOutcome::ReachedEof;
+                }
             } else if self.can_start_instruction() {
                 self.parse_instruction();
             } else {
@@ -557,42 +650,72 @@ impl<'input> Parser<'input> {
                 self.finish_node();
             }
         }
+
+        self.error_at_eof(owner.missing_end_message());
         self.finish_node();
+        BlockParseOutcome::ReachedEof
     }
 
-    fn parse_if(&mut self) {
+    fn parse_if(&mut self) -> bool {
         self.start_node(SyntaxKind::IfOp);
         self.expect_keyword("if", "expected `if`");
         self.parse_structured_header_suffixes();
         self.parse_line_tail();
-        self.parse_block(&["else", "end"]);
+        let then_outcome = self.parse_block(BlockOwner::If, &["else", "end"]);
+        if then_outcome == BlockParseOutcome::ReachedEof {
+            self.finish_node();
+            return true;
+        }
+        let mut needs_end = then_outcome == BlockParseOutcome::FoundTerminator;
         if self.at_keyword("else") {
             self.bump();
             self.parse_line_tail();
-            self.parse_block(&["end"]);
+            let else_outcome = self.parse_block(BlockOwner::If, &["end"]);
+            if else_outcome == BlockParseOutcome::ReachedEof {
+                self.finish_node();
+                return true;
+            }
+            needs_end = else_outcome == BlockParseOutcome::FoundTerminator;
         }
-        self.expect_keyword("end", "expected `end` to close `if`");
+        if needs_end {
+            self.expect_keyword("end", BlockOwner::If.missing_end_message());
+        }
         self.finish_node();
+        false
     }
 
-    fn parse_while(&mut self) {
+    fn parse_while(&mut self) -> bool {
         self.start_node(SyntaxKind::WhileOp);
         self.expect_keyword("while", "expected `while`");
         self.parse_structured_header_suffixes();
         self.parse_line_tail();
-        self.parse_block(&["end"]);
-        self.expect_keyword("end", "expected `end` to close `while`");
+        let outcome = self.parse_block(BlockOwner::While, &["end"]);
+        if outcome == BlockParseOutcome::ReachedEof {
+            self.finish_node();
+            return true;
+        }
+        if outcome == BlockParseOutcome::FoundTerminator {
+            self.expect_keyword("end", BlockOwner::While.missing_end_message());
+        }
         self.finish_node();
+        false
     }
 
-    fn parse_repeat(&mut self) {
+    fn parse_repeat(&mut self) -> bool {
         self.start_node(SyntaxKind::RepeatOp);
         self.expect_keyword("repeat", "expected `repeat`");
         self.parse_structured_header_suffixes();
         self.parse_line_tail();
-        self.parse_block(&["end"]);
-        self.expect_keyword("end", "expected `end` to close `repeat`");
+        let outcome = self.parse_block(BlockOwner::Repeat, &["end"]);
+        if outcome == BlockParseOutcome::ReachedEof {
+            self.finish_node();
+            return true;
+        }
+        if outcome == BlockParseOutcome::FoundTerminator {
+            self.expect_keyword("end", BlockOwner::Repeat.missing_end_message());
+        }
         self.finish_node();
+        false
     }
 
     fn parse_structured_header_suffixes(&mut self) {
@@ -747,7 +870,9 @@ impl<'input> Parser<'input> {
             return false;
         }
 
-        self.at_terminator(&["else", "end"]) || self.can_start_operation()
+        self.at_terminator(&["else", "end"])
+            || self.can_start_operation()
+            || self.at_block_recovery_boundary()
     }
 
     fn line_break_starts_new_top_level_item(&self) -> bool {
@@ -767,12 +892,36 @@ impl<'input> Parser<'input> {
         None
     }
 
+    fn next_relevant_block_token(&self, mut index: usize) -> Option<usize> {
+        while let Some(token) = self.tokens.get(index) {
+            match token.kind() {
+                SyntaxKind::Whitespace
+                | SyntaxKind::Newline
+                | SyntaxKind::Comment
+                | SyntaxKind::DocComment => index += 1,
+                _ => return Some(index),
+            }
+        }
+        None
+    }
+
     fn peek_after_inline_whitespace(&self) -> Option<SyntaxKind> {
         let mut index = self.pos;
         while let Some(token) = self.tokens.get(index) {
             match token.kind() {
                 SyntaxKind::Whitespace => index += 1,
                 SyntaxKind::Newline | SyntaxKind::Comment | SyntaxKind::DocComment => return None,
+                kind => return Some(kind),
+            }
+        }
+        None
+    }
+
+    fn peek_after_non_comment_trivia(&self) -> Option<SyntaxKind> {
+        let mut index = self.pos;
+        while let Some(token) = self.tokens.get(index) {
+            match token.kind() {
+                SyntaxKind::Whitespace | SyntaxKind::Newline => index += 1,
                 kind => return Some(kind),
             }
         }
@@ -787,10 +936,17 @@ impl<'input> Parser<'input> {
         token.kind() == SyntaxKind::DocComment
             || token.kind() == SyntaxKind::At
             || (token.kind() == SyntaxKind::Ident
-                && matches!(
-                    token.text(),
-                    "adv_map" | "begin" | "const" | "enum" | "proc" | "pub" | "type" | "use"
-                ))
+                && match token.text() {
+                    "adv_map" | "begin" | "const" | "enum" | "proc" | "type" | "use" => true,
+                    "pub" => matches!(
+                        self.next_relevant_top_level_token(index + 1)
+                            .and_then(|next| self.tokens.get(next)),
+                        Some(next)
+                            if next.kind() == SyntaxKind::Ident
+                                && matches!(next.text(), "const" | "enum" | "proc" | "type" | "use")
+                    ),
+                    _ => false,
+                })
     }
 
     fn can_start_operation(&self) -> bool {
@@ -801,7 +957,58 @@ impl<'input> Parser<'input> {
     }
 
     fn can_start_instruction(&self) -> bool {
-        self.at_name_like() || self.at_keyword_like()
+        matches!(
+            self.current(),
+            Some(token)
+                if matches!(
+                    token.kind(),
+                    SyntaxKind::Ident | SyntaxKind::SpecialIdent | SyntaxKind::QuotedIdent
+                ) && (token.kind() != SyntaxKind::Ident
+                    || !is_reserved_block_keyword(token.text()))
+        )
+    }
+
+    fn block_recovery_boundary(&self, terminators: &[&str]) -> Option<BlockRecoveryBoundary> {
+        if self.at_keyword("else") && !terminators.contains(&"else") {
+            return Some(BlockRecoveryBoundary::Else);
+        }
+
+        if self.at_top_level_form_starter_in_block() {
+            return Some(BlockRecoveryBoundary::TopLevelItem);
+        }
+
+        None
+    }
+
+    fn at_block_recovery_boundary(&self) -> bool {
+        self.at_keyword("else") || self.at_top_level_form_starter_in_block()
+    }
+
+    fn at_top_level_form_starter(&self) -> bool {
+        self.is_top_level_starter(self.pos)
+    }
+
+    fn at_top_level_form_starter_in_block(&self) -> bool {
+        match self.current() {
+            Some(token) if token.kind() == SyntaxKind::DocComment => self
+                .next_relevant_block_token(self.pos + 1)
+                .is_some_and(|index| self.is_top_level_starter(index)),
+            _ => self.at_top_level_form_starter(),
+        }
+    }
+
+    fn doc_comment_looks_like_regular_comment_in_block(&self) -> bool {
+        if !self.at_kind(SyntaxKind::DocComment) {
+            return false;
+        }
+
+        self.next_relevant_block_token(self.pos + 1)
+            .and_then(|index| self.tokens.get(index).map(|token| (index, token)))
+            .is_some_and(|(index, token)| {
+                token.kind() == SyntaxKind::Ident
+                    && !self.is_top_level_starter(index)
+                    && is_non_top_level_block_keyword(token.text())
+            })
     }
 
     fn at_terminator(&self, terminators: &[&str]) -> bool {
@@ -923,7 +1130,7 @@ impl<'input> Parser<'input> {
     }
 
     fn error_here(&mut self, message: impl Into<String>) {
-        let span = self.current().map(|token| token.span()).unwrap_or(self.eof_span);
+        let span = self.current().map(Token::span).unwrap_or(self.eof_span);
         self.diagnostics.push(diagnostic!(
             severity = Severity::Error,
             labels = vec![LabeledSpan::at(span, message.into())],
@@ -947,6 +1154,23 @@ fn detached_source_file(input: &str) -> Arc<SourceFile> {
         Uri::new("memory:///inline.masm"),
         input.to_owned().into_boxed_str(),
     ))
+}
+
+fn eof_anchor_span(source: &SourceFile) -> SourceSpan {
+    source
+        .as_str()
+        .char_indices()
+        .last()
+        .map(|(offset, _)| {
+            SourceSpan::at(
+                source.id(),
+                u32::try_from(offset).expect("source files larger than 4GiB are not supported"),
+            )
+        })
+        .unwrap_or_else(|| {
+            SourceSpan::try_from_range(source.id(), 0..0)
+                .expect("source files larger than 4GiB are not supported")
+        })
 }
 
 fn source_span_from_text_range(source_id: SourceId, range: TextRange) -> SourceSpan {
@@ -993,6 +1217,29 @@ fn punctuation_continues_instruction(kind: SyntaxKind) -> bool {
             | SyntaxKind::RParen
             | SyntaxKind::RBrace
     )
+}
+
+fn is_reserved_block_keyword(text: &str) -> bool {
+    matches!(
+        text,
+        "adv_map"
+            | "begin"
+            | "const"
+            | "else"
+            | "end"
+            | "enum"
+            | "if"
+            | "proc"
+            | "pub"
+            | "repeat"
+            | "type"
+            | "use"
+            | "while"
+    )
+}
+
+fn is_non_top_level_block_keyword(text: &str) -> bool {
+    matches!(text, "else" | "end" | "if" | "repeat" | "while")
 }
 
 #[cfg(test)]
@@ -1042,7 +1289,7 @@ end
         assert_eq!(
             child_kinds,
             vec![
-                SyntaxKind::ModuleDoc,
+                SyntaxKind::Doc,
                 SyntaxKind::Import,
                 SyntaxKind::Constant,
                 SyntaxKind::TypeDecl,
@@ -1201,7 +1448,7 @@ end
         assert!(
             procedure
                 .children_with_tokens()
-                .filter_map(|element| element.into_token())
+                .filter_map(rowan::NodeOrToken::into_token)
                 .any(|token| token.kind() == SyntaxKind::Comment && token.text().contains("proc"))
         );
 
@@ -1211,7 +1458,7 @@ end
             .expect("if node");
         let if_comments = if_node
             .children_with_tokens()
-            .filter_map(|element| element.into_token())
+            .filter_map(rowan::NodeOrToken::into_token)
             .filter(|token| token.kind() == SyntaxKind::Comment)
             .map(|token| token.text().to_string())
             .collect::<Vec<_>>();
@@ -1226,23 +1473,183 @@ end
     }
 
     #[test]
-    fn recovers_from_missing_end_tokens() {
-        let parse = parse_text("begin\n    if.true\n        add\n");
+    fn treats_block_local_doc_comments_as_regular_comments_before_block_keywords() {
+        let source = "\
+proc foo
+    #! mistaken doc comment before if
+    if.true
+        nop
+        #! mistaken doc comment before else
+    else
+        #! mistaken doc comment before while
+        while.true
+            add
+        end
+    end
+end
+";
+
+        let parse = parse_text(source);
+        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+
+        let root = parse.syntax();
+        assert!(root.descendants().any(|node| node.kind() == SyntaxKind::Procedure));
+        assert!(root.descendants().any(|node| node.kind() == SyntaxKind::IfOp));
+        assert!(
+            root.descendants().filter(|node| node.kind() == SyntaxKind::Instruction).count() >= 2
+        );
+    }
+
+    #[test]
+    fn block_local_doc_comments_before_instructions_still_error() {
+        let source = "\
+proc foo
+    #! malformed doc comment before instruction
+    loc_load.0
+end
+";
+
+        let parse = parse_text(source);
         assert!(parse.has_errors());
         assert!(
             parse
                 .diagnostics()
                 .iter()
-                .any(|diag| diag.labels.as_ref().is_some_and(|labels| labels
-                    .iter()
-                    .any(|l| l.label().is_some_and(|label| label.contains("expected `end`"))))),
-            "expected an `end`-related diagnostic, got {:?}",
+                .flat_map(|diag| diag.labels.as_deref().unwrap_or(&[]).iter())
+                .filter_map(|label| label.label())
+                .any(|label| label.contains("unexpected token in block")),
+            "expected block-local doc comments before instructions to remain invalid, got {:?}",
             parse.diagnostics()
+        );
+    }
+
+    #[test]
+    fn block_local_doc_comments_still_recover_before_true_top_level_items() {
+        let source = "\
+proc foo
+    #! actual misplaced doc comment
+    pub const X = 1
+";
+
+        let parse = parse_text(source);
+        assert!(parse.has_errors());
+        assert!(
+            parse
+                .diagnostics()
+                .iter()
+                .flat_map(|diag| diag.labels.as_deref().unwrap_or(&[]).iter())
+                .filter_map(|label| label.label())
+                .any(|label| label.contains("before top-level item")),
+            "expected block recovery before a top-level item, got {:?}",
+            parse.diagnostics()
+        );
+
+        let root = parse.syntax();
+        assert!(root.descendants().any(|node| node.kind() == SyntaxKind::Doc));
+
+        let source_file = AstSourceFile::cast(root).expect("source file");
+        let items = source_file.items().collect::<Vec<_>>();
+        assert_eq!(
+            items.len(),
+            3,
+            "expected recovery to preserve the recovered doc comment and top-level constant"
+        );
+        assert!(matches!(items[0], Item::Procedure(_)));
+        assert!(matches!(items[1], Item::Doc(_)));
+        assert!(matches!(items[2], Item::Constant(_)));
+    }
+
+    #[test]
+    fn recovers_from_missing_end_tokens() {
+        let parse = parse_text("begin\n    if.true\n        add\n");
+        assert!(parse.has_errors());
+        let end_labels = parse
+            .diagnostics()
+            .iter()
+            .flat_map(|diag| diag.labels.as_deref().unwrap_or(&[]).iter())
+            .filter_map(|label| label.label())
+            .filter(|label| label.contains("expected `end`"))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            end_labels.len(),
+            1,
+            "expected exactly one missing-`end` diagnostic, got {:?}",
+            parse.diagnostics()
+        );
+        assert!(
+            end_labels[0].contains("`if`"),
+            "expected the innermost unterminated block to own the diagnostic, got {end_labels:?}"
         );
 
         let root = parse.syntax();
         assert!(root.descendants().any(|node| node.kind() == SyntaxKind::BeginBlock));
         assert!(root.descendants().any(|node| node.kind() == SyntaxKind::IfOp));
+    }
+
+    #[test]
+    fn recovers_before_top_level_items_inside_blocks() {
+        let source = "\
+proc foo
+    if.true
+        add
+pub const X = 1
+";
+        let parse = parse_text(source);
+        assert!(parse.has_errors());
+        assert!(
+            parse
+                .diagnostics()
+                .iter()
+                .flat_map(|diag| diag.labels.as_deref().unwrap_or(&[]).iter())
+                .filter_map(|label| label.label())
+                .any(|label| label.contains("before top-level item")),
+            "expected block recovery before a top-level item, got {:?}",
+            parse.diagnostics()
+        );
+
+        let source_file = AstSourceFile::cast(parse.syntax()).expect("source file");
+        let items = source_file.items().collect::<Vec<_>>();
+        assert_eq!(items.len(), 2, "expected recovery to preserve the top-level constant");
+        assert!(matches!(items[0], Item::Procedure(_)));
+        assert!(matches!(items[1], Item::Constant(_)));
+        assert!(parse.syntax().descendants().any(|node| node.kind() == SyntaxKind::Error));
+    }
+
+    #[test]
+    fn else_synchronizes_unterminated_nested_blocks() {
+        let source = "\
+proc foo
+    if.true
+        while.true
+            nop
+    else
+        nop
+    end
+end
+";
+        let parse = parse_text(source);
+        assert!(parse.has_errors());
+        assert!(
+            parse
+                .diagnostics()
+                .iter()
+                .flat_map(|diag| diag.labels.as_deref().unwrap_or(&[]).iter())
+                .filter_map(|label| label.label())
+                .any(|label| label.contains("close `while` before `else`")),
+            "expected the nested `while` to recover before `else`, got {:?}",
+            parse.diagnostics()
+        );
+
+        let if_node = parse
+            .syntax()
+            .descendants()
+            .find(|node| node.kind() == SyntaxKind::IfOp)
+            .expect("if node");
+        assert_eq!(
+            if_node.children().filter(|child| child.kind() == SyntaxKind::Block).count(),
+            2,
+            "expected `else` to remain attached to the enclosing `if` after recovery"
+        );
     }
 
     #[test]
@@ -1253,7 +1660,7 @@ end
             |labels| {
                 labels
                     .iter()
-                    .any(|l| l.label().is_some_and(|label| label.contains("unrecognized")))
+                    .any(|l| l.label().is_some_and(|label| label.contains("unrecognized token")))
             }
         )));
     }
@@ -1274,7 +1681,7 @@ end
         let nop = parse
             .syntax()
             .descendants_with_tokens()
-            .filter_map(|element| element.into_token())
+            .filter_map(rowan::NodeOrToken::into_token)
             .find(|token| token.text() == "nop")
             .expect("nop token");
         let offset = source.as_str().find("nop").expect("nop offset");
@@ -1299,9 +1706,9 @@ end
             .iter()
             .find(|diag| {
                 diag.labels.as_ref().is_some_and(|labels| {
-                    labels
-                        .iter()
-                        .any(|l| l.label().is_some_and(|label| label.contains("unrecognized")))
+                    labels.iter().any(|l| {
+                        l.label().is_some_and(|label| label.contains("unrecognized token"))
+                    })
                 })
             })
             .expect("invalid-token diagnostic");
@@ -1314,5 +1721,56 @@ end
             (label_span.offset() as u32)..((label_span.offset() + label_span.len()) as u32),
         );
         assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn eof_diagnostics_anchor_to_the_last_character_offset() {
+        let source = Arc::new(ManagedSourceFile::new(
+            SourceId::new(13),
+            SourceLanguage::Masm,
+            Uri::new("memory:///parser-eof-span-test.masm"),
+            "begin\n    if.true\n        add\n".to_string().into_boxed_str(),
+        ));
+
+        let parse = parse_source_file(source.clone());
+        assert!(parse.has_errors());
+
+        let diagnostic = parse
+            .diagnostics()
+            .iter()
+            .find(|diag| {
+                diag.labels
+                    .as_deref()
+                    .unwrap_or(&[])
+                    .iter()
+                    .filter_map(|label| label.label())
+                    .any(|label| label.contains("expected `end`"))
+            })
+            .expect("missing-end diagnostic");
+
+        let last_char_offset = source
+            .as_str()
+            .char_indices()
+            .last()
+            .map(|(offset, _)| offset)
+            .expect("source should be non-empty");
+        let label_span = diagnostic.labels.as_deref().unwrap()[0].inner();
+        assert_eq!(label_span.offset(), last_char_offset);
+        assert_eq!(label_span.len(), 0);
+    }
+
+    #[test]
+    fn import_path_spans_do_not_consume_trailing_newlines() {
+        let source = "use lib::a::FOO\nbegin end\n";
+        let parse = parse_text(source);
+        let source_file = AstSourceFile::cast(parse.syntax()).expect("source file");
+        let Item::Import(import) = source_file.items().next().expect("import item") else {
+            panic!("expected first item to be an import");
+        };
+        let path = import.path().expect("import path");
+        let start = source.find("lib::a::FOO").expect("path start") as u32;
+        let end = start + "lib::a::FOO".len() as u32;
+        let expected = SourceSpan::new(parse.source().id(), start..end);
+        assert_eq!(parse.span_for_node(path.syntax()), expected);
     }
 }
