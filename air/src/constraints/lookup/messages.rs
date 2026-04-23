@@ -116,7 +116,7 @@ pub enum HasherPayload<E> {
 }
 
 impl<E: PrimeCharacteristicRing + Clone> HasherMsg<E> {
-    // --- State messages (15 elements) ---
+    // --- State messages (14 payload elements: [addr, node_index, state[12]]) ---
 
     /// Linear hash / control block init: full 12-lane sponge state.
     ///
@@ -168,7 +168,7 @@ impl<E: PrimeCharacteristicRing + Clone> HasherMsg<E> {
         }
     }
 
-    // --- Rate messages (11 elements) ---
+    // --- Rate messages (10 payload elements: [addr, node_index, rate[8]]) ---
 
     /// Absorb new rate into running hash.
     ///
@@ -182,7 +182,7 @@ impl<E: PrimeCharacteristicRing + Clone> HasherMsg<E> {
         }
     }
 
-    // --- Word messages (7 elements) ---
+    // --- Word messages (6 payload elements: [addr, node_index, word[4]]) ---
 
     /// Return digest only (node_index = 0).
     ///
@@ -537,9 +537,10 @@ pub struct AceWireMsg<E> {
 
 /// Memory chiplet response message with conditional element/word encoding.
 ///
-/// The chiplet-side memory response must select between element access (5 fields) and
-/// word access (8 fields) based on `is_word`. The label, address, and element are all
-/// pre-computed from the chiplet columns (including the idx0/idx1 element mux).
+/// The chiplet-side memory response must select between element access (4 payload
+/// elements: `[ctx, addr, clk, element]`) and word access (7 payload elements:
+/// `[ctx, addr, clk, word[4]]`) based on `is_word`. The label, address, and element are
+/// all pre-computed from the chiplet columns (including the idx0/idx1 element mux).
 #[derive(Clone, Debug)]
 pub struct MemoryResponseMsg<E> {
     pub is_read: E,
@@ -631,13 +632,10 @@ where
     EF: PrimeCharacteristicRing + Clone + Algebra<E>,
 {
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
-        let bp = &challenges.beta_powers;
-        let mut acc = challenges.bus_prefix[BusId::Bitwise as usize].clone();
-        acc += bp[0].clone() * self.op.clone();
-        acc += bp[1].clone() * self.a.clone();
-        acc += bp[2].clone() * self.b.clone();
-        acc += bp[3].clone() * self.result.clone();
-        acc
+        challenges.encode(
+            BusId::Bitwise as usize,
+            [self.op.clone(), self.a.clone(), self.b.clone(), self.result.clone()],
+        )
     }
 }
 
@@ -692,7 +690,6 @@ where
     EF: PrimeCharacteristicRing + Clone + Algebra<E>,
 {
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
-        let bp = &challenges.beta_powers;
         // Per-variant fan-in: produce the (parent, child_hash, is_first_child, is_loop_body)
         // tuple, then emit a flat 7-slot payload laid out as
         // `[child_hash[4], parent, is_first_child, is_loop_body]`.
@@ -707,15 +704,18 @@ where
                 is_loop_body,
             } => (parent, child_hash, is_first_child.clone(), is_loop_body.clone()),
         };
-        let mut acc = challenges.bus_prefix[BusId::BlockHashTable as usize].clone();
-        acc += bp[0].clone() * child_hash[0].clone();
-        acc += bp[1].clone() * child_hash[1].clone();
-        acc += bp[2].clone() * child_hash[2].clone();
-        acc += bp[3].clone() * child_hash[3].clone();
-        acc += bp[4].clone() * parent.clone();
-        acc += bp[5].clone() * is_first_child;
-        acc += bp[6].clone() * is_loop_body;
-        acc
+        challenges.encode(
+            BusId::BlockHashTable as usize,
+            [
+                child_hash[0].clone(),
+                child_hash[1].clone(),
+                child_hash[2].clone(),
+                child_hash[3].clone(),
+                parent.clone(),
+                is_first_child,
+                is_loop_body,
+            ],
+        )
     }
 }
 
@@ -727,12 +727,10 @@ where
     EF: PrimeCharacteristicRing + Clone + Algebra<E>,
 {
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
-        let bp = &challenges.beta_powers;
-        let mut acc = challenges.bus_prefix[BusId::OpGroupTable as usize].clone();
-        acc += bp[0].clone() * self.batch_id.clone();
-        acc += bp[1].clone() * self.group_pos.clone();
-        acc += bp[2].clone() * self.group_value.clone();
-        acc
+        challenges.encode(
+            BusId::OpGroupTable as usize,
+            [self.batch_id.clone(), self.group_pos.clone(), self.group_value.clone()],
+        )
     }
 }
 
@@ -744,12 +742,10 @@ where
     EF: PrimeCharacteristicRing + Clone + Algebra<E>,
 {
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
-        let bp = &challenges.beta_powers;
-        let mut acc = challenges.bus_prefix[BusId::StackOverflowTable as usize].clone();
-        acc += bp[0].clone() * self.clk.clone();
-        acc += bp[1].clone() * self.val.clone();
-        acc += bp[2].clone() * self.prev.clone();
-        acc
+        challenges.encode(
+            BusId::StackOverflowTable as usize,
+            [self.clk.clone(), self.val.clone(), self.prev.clone()],
+        )
     }
 }
 
@@ -762,12 +758,7 @@ where
     EF: PrimeCharacteristicRing + Clone + Algebra<E>,
 {
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
-        let bp = &challenges.beta_powers;
-        let mut acc = challenges.bus_prefix[self.bus as usize].clone();
-        for i in 0..4 {
-            acc += bp[i].clone() * self.digest[i].clone();
-        }
-        acc
+        challenges.encode(self.bus as usize, self.digest.clone())
     }
 }
 
@@ -780,14 +771,16 @@ where
     EF: PrimeCharacteristicRing + Clone + Algebra<E>,
 {
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
-        let bp = &challenges.beta_powers;
-        let mut acc = challenges.bus_prefix[BusId::AceInit as usize].clone();
-        acc += bp[0].clone() * self.clk.clone();
-        acc += bp[1].clone() * self.ctx.clone();
-        acc += bp[2].clone() * self.ptr.clone();
-        acc += bp[3].clone() * self.num_read.clone();
-        acc += bp[4].clone() * self.num_eval.clone();
-        acc
+        challenges.encode(
+            BusId::AceInit as usize,
+            [
+                self.clk.clone(),
+                self.ctx.clone(),
+                self.ptr.clone(),
+                self.num_read.clone(),
+                self.num_eval.clone(),
+            ],
+        )
     }
 }
 
@@ -799,10 +792,7 @@ where
     EF: PrimeCharacteristicRing + Clone + Algebra<E>,
 {
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
-        let bp = &challenges.beta_powers;
-        let mut acc = challenges.bus_prefix[BusId::RangeCheck as usize].clone();
-        acc += bp[0].clone() * self.value.clone();
-        acc
+        challenges.encode(BusId::RangeCheck as usize, [self.value.clone()])
     }
 }
 
@@ -814,12 +804,7 @@ where
     EF: PrimeCharacteristicRing + Clone + Algebra<E>,
 {
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
-        let bp = &challenges.beta_powers;
-        let mut acc = challenges.bus_prefix[BusId::LogPrecompileTranscript as usize].clone();
-        for i in 0..4 {
-            acc += bp[i].clone() * self.capacity[i].clone();
-        }
-        acc
+        challenges.encode(BusId::LogPrecompileTranscript as usize, self.capacity.clone())
     }
 }
 
@@ -832,16 +817,11 @@ where
     EF: PrimeCharacteristicRing + Clone + Algebra<E>,
 {
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
-        let bp = &challenges.beta_powers;
         let (bus, state) = match self {
             Self::Input { state } => (BusId::HasherPermLinkInput, state),
             Self::Output { state } => (BusId::HasherPermLinkOutput, state),
         };
-        let mut acc = challenges.bus_prefix[bus as usize].clone();
-        for i in 0..12 {
-            acc += bp[i].clone() * state[i].clone();
-        }
-        acc
+        challenges.encode(bus as usize, state.clone())
     }
 }
 
@@ -853,14 +833,16 @@ where
     EF: PrimeCharacteristicRing + Clone + Algebra<E>,
 {
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
-        let bp = &challenges.beta_powers;
-        let mut acc = challenges.bus_prefix[BusId::AceWiring as usize].clone();
-        acc += bp[0].clone() * self.clk.clone();
-        acc += bp[1].clone() * self.ctx.clone();
-        acc += bp[2].clone() * self.id.clone();
-        acc += bp[3].clone() * self.v0.clone();
-        acc += bp[4].clone() * self.v1.clone();
-        acc
+        challenges.encode(
+            BusId::AceWiring as usize,
+            [
+                self.clk.clone(),
+                self.ctx.clone(),
+                self.id.clone(),
+                self.v0.clone(),
+                self.v1.clone(),
+            ],
+        )
     }
 }
 
@@ -883,19 +865,15 @@ where
         let is_word = self.is_word.clone();
         let is_element: E = E::ONE - is_word.clone();
 
-        // Mux only the bus prefix; the payload (ctx, addr, clk, ...) is shared.
-        let prefix = challenges.bus_prefix[BusId::MemoryReadElement as usize].clone()
+        // Mux only the bus prefix; the payload (ctx, addr, clk, ...) is shared. Factored
+        // as a read/write select per access width so the four (read/write × element/word)
+        // cases stay audit-visible without blowing the polynomial degree.
+        let prefix_element = challenges.bus_prefix[BusId::MemoryReadElement as usize].clone()
             * is_read.clone()
-            * is_element.clone()
-            + challenges.bus_prefix[BusId::MemoryWriteElement as usize].clone()
-                * is_write.clone()
-                * is_element.clone()
-            + challenges.bus_prefix[BusId::MemoryReadWord as usize].clone()
-                * is_read
-                * is_word.clone()
-            + challenges.bus_prefix[BusId::MemoryWriteWord as usize].clone()
-                * is_write
-                * is_word.clone();
+            + challenges.bus_prefix[BusId::MemoryWriteElement as usize].clone() * is_write.clone();
+        let prefix_word = challenges.bus_prefix[BusId::MemoryReadWord as usize].clone() * is_read
+            + challenges.bus_prefix[BusId::MemoryWriteWord as usize].clone() * is_write;
+        let prefix = prefix_element * is_element.clone() + prefix_word * is_word.clone();
 
         let mut acc = prefix;
         acc += bp[0].clone() * self.ctx.clone();

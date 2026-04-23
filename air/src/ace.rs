@@ -74,6 +74,11 @@ pub struct BusFraction {
 pub struct LogUpBoundaryConfig {
     /// Aux-bus-boundary column indices summed as `Σ aux_bound[col]`.
     pub sum_columns: Vec<usize>,
+    /// Aux-bus-boundary columns that must individually equal zero. Absorbed at
+    /// an independent γ power from the accumulator sum so a malicious prover
+    /// cannot cancel them against `sum_columns` or the rational corrections.
+    /// Mirrors the native runtime check in `ProcessorAir::reduced_aux_values`.
+    pub zero_columns: Vec<usize>,
     /// Rational `(±1, d_i)` fractions folded into the running rational `(N, D)`.
     pub fractions: Vec<BusFraction>,
     /// Scalar EF inputs added directly to the aux-boundary sum. Trusted from
@@ -92,9 +97,12 @@ pub struct LogUpBoundaryConfig {
 ///   `sum_aux   = Σ AuxBusBoundary(col)  +  Σ scalar_corrections`
 ///   `(N, D)    = fold((0, 1), fractions)` via `(N', D') = (N·d_i + D·n_i, D·d_i)`
 ///   `boundary  = sum_aux · D  +  N`
-///   `root      = constraint_check  +  γ · boundary`
+///   `zero_sum  = Σ AuxBusBoundary(col)` for `col` in `zero_columns`
+///   `root      = constraint_check  +  γ · boundary  +  γ² · zero_sum`
 ///
-/// Returns the new DAG with the batched root.
+/// Returns the new DAG with the batched root. The zero-columns identity lives at
+/// γ² so a nonzero padding slot cannot cancel against the γ¹-batched boundary
+/// accumulator.
 pub fn batch_logup_boundary<EF>(
     constraint_dag: AceDag<EF>,
     config: &LogUpBoundaryConfig,
@@ -138,10 +146,25 @@ where
     let sum_times_den = builder.mul(sum_aux, den);
     let boundary = builder.add(sum_times_den, num);
 
+    // zero_sum = Σ aux_bound[col]  for col in zero_columns. Each column's identity
+    // `aux_bound[col] = 0` is batched at γ² so it cannot cancel against boundary
+    // terms at γ¹ or against other zero columns in the same sum (the whole sum is
+    // the coefficient of a single γ power, which forces the sum to zero — and since
+    // the boundary check is linear in each slot, each slot is independently zero with
+    // high probability over γ).
+    let mut zero_sum = builder.constant(EF::ZERO);
+    for &col in &config.zero_columns {
+        let node = builder.input(InputKey::AuxBusBoundary(col));
+        zero_sum = builder.add(zero_sum, node);
+    }
+
     // Batch with the constraint root using gamma.
     let gamma = builder.input(InputKey::Gamma);
-    let term = builder.mul(gamma, boundary);
-    let root = builder.add(constraint_root, term);
+    let gamma_boundary = builder.mul(gamma, boundary);
+    let constraint_plus_boundary = builder.add(constraint_root, gamma_boundary);
+    let gamma_sq = builder.mul(gamma, gamma);
+    let gamma_sq_zero = builder.mul(gamma_sq, zero_sum);
+    let root = builder.add(constraint_plus_boundary, gamma_sq_zero);
 
     builder.build(root)
 }
@@ -247,10 +270,16 @@ pub fn logup_boundary_config() -> LogUpBoundaryConfig {
         PublicInput(PV_TRANSCRIPT_STATE + 3),
     ];
 
-    // TODO(#3032): only col 0 is summed; slot 1 is the placeholder — see
-    // `NUM_LOGUP_COMMITTED_FINALS`. Expand to [0, 1] once trace splitting lands.
+    // TODO(#3032): only col 0 carries a real final accumulator; slot 1 is the
+    // placeholder — see `NUM_LOGUP_COMMITTED_FINALS`. Once trace splitting lands,
+    // move slot 1 from `zero_columns` to `sum_columns`.
+    //
+    // Slot 1 is in `zero_columns` so the recursive verifier independently rejects
+    // any nonzero padding value. The native verifier applies the matching runtime
+    // check in `ProcessorAir::reduced_aux_values` (see `lib.rs`).
     LogUpBoundaryConfig {
         sum_columns: vec![0],
+        zero_columns: vec![1],
         fractions: vec![
             BusFraction {
                 sign: Sign::Plus,

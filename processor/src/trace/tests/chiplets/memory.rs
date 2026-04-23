@@ -227,6 +227,61 @@ fn cryptostream_emits_four_memory_requests() {
     log.assert_contains(&exp);
 }
 
+/// Regression test for a previously unwired path where `HornerBase`'s two element-reads
+/// weren't emitted onto the chiplet-requests bus. HornerBase reads α = (α₀, α₁) from
+/// memory at (`alpha_ptr`, `alpha_ptr + 1`) — uninitialized memory returns zeros, and
+/// the trace stores those same zeros into helpers[0..2], so a missing request or a
+/// swapped addr/clk would fail the subset match.
+#[test]
+fn hornerbase_emits_two_memory_requests() {
+    // HornerBase stack layout: [c0..c7, _, _, _, _, _, alpha_ptr, acc_low, acc_high]
+    let stack = [
+        1, 2, 3, 4, 5, 6, 7, 8, // coeffs[0..8]
+        0, 0, 0, 0, 0, // pad (5 slots)
+        0, // alpha_ptr (stack[13])
+        0, 0, // acc_low, acc_high
+    ];
+
+    let trace = build_trace_from_ops(vec![Operation::HornerBase], &stack);
+    let log = InteractionLog::new(&trace);
+
+    let mut exp = Expectations::new(&log);
+
+    // HornerBase runs at cycle 1 (cycle 0 is SPAN), ctx = 0, uninitialized memory returns zeros.
+    const ROW: usize = 1;
+    exp.remove(ROW, &MemoryMsg::read_element(ZERO, ZERO, ONE, ZERO));
+    exp.remove(ROW, &MemoryMsg::read_element(ZERO, ONE, ONE, ZERO));
+
+    log.assert_contains(&exp);
+}
+
+/// Regression test for a previously unwired path where `HornerExt`'s single word-read
+/// wasn't emitted onto the chiplet-requests bus. HornerExt reads `[α₀, α₁, k₀, k₁]` as a
+/// single word from `alpha_ptr`; uninitialized memory returns the zero word, which the
+/// trace parks in helpers[0..4].
+#[test]
+fn hornerext_emits_one_memory_request() {
+    // HornerExt stack layout: [s0_lo, s0_hi, ..., s3_lo, s3_hi, _, _, _, _, _, alpha_ptr,
+    // acc_low, acc_high]
+    let stack = [
+        1, 2, 3, 4, 5, 6, 7, 8, // 4 extension coeffs (s0..s3)
+        0, 0, 0, 0, 0, // pad (5 slots)
+        0, // alpha_ptr (stack[13])
+        0, 0, // acc_low, acc_high
+    ];
+
+    let trace = build_trace_from_ops(vec![Operation::HornerExt], &stack);
+    let log = InteractionLog::new(&trace);
+
+    let mut exp = Expectations::new(&log);
+
+    const ROW: usize = 1;
+    let zero_word = [ZERO, ZERO, ZERO, ZERO];
+    exp.remove(ROW, &MemoryMsg::read_word(ZERO, ZERO, ONE, zero_word));
+
+    log.assert_contains(&exp);
+}
+
 fn next_word(main: &MainTrace, next: RowIndex, start: usize) -> [Felt; 4] {
     [
         main.stack_element(start, next),

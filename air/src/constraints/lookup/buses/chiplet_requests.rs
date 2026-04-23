@@ -538,6 +538,49 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
                         Deg { n: 3, d: 4 },
                     );
 
+                    // --- HORNERBASE / HORNEREXT ---
+                    // Both ops read the evaluation point α from memory at `stack[13]`. HORNERBASE
+                    // reads two base-field elements (α₀ at `addr`, α₁ at `addr + 1`); HORNEREXT
+                    // reads a single word `[α₀, α₁, k₀, k₁]` at `addr`. α is held in helpers[0..2]
+                    // for both ops (HORNEREXT additionally parks k₀, k₁ in helpers[2..4]).
+                    let alpha_ptr = stk.get(13);
+                    g.batch(
+                        "hornerbase",
+                        op_flags.hornerbase(),
+                        move |b| {
+                            let addr0: LB::Expr = alpha_ptr.into();
+                            let addr1: LB::Expr = addr0.clone() + LB::Expr::from_u16(1);
+                            let eval0: LB::Expr = user_helpers[0].into();
+                            let eval1: LB::Expr = user_helpers[1].into();
+                            b.remove(
+                                "hornerbase_alpha0",
+                                MemoryMsg::read_element(sys_ctx.into(), addr0, clk.into(), eval0),
+                                Deg { n: 5, d: 6 },
+                            );
+                            b.remove(
+                                "hornerbase_alpha1",
+                                MemoryMsg::read_element(sys_ctx.into(), addr1, clk.into(), eval1),
+                                Deg { n: 5, d: 6 },
+                            );
+                        },
+                        Deg { n: 1, d: 2 },
+                    );
+                    g.remove(
+                        "hornerext",
+                        op_flags.hornerext(),
+                        move || {
+                            let addr: LB::Expr = alpha_ptr.into();
+                            let word: [LB::Expr; 4] = [
+                                user_helpers[0].into(),
+                                user_helpers[1].into(),
+                                user_helpers[2].into(),
+                                user_helpers[3].into(),
+                            ];
+                            MemoryMsg::read_word(sys_ctx.into(), addr, clk.into(), word)
+                        },
+                        Deg { n: 5, d: 6 },
+                    );
+
                     // --- U32AND / U32XOR ---
                     g.remove(
                         "u32and",

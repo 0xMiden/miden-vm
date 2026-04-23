@@ -63,6 +63,8 @@ pub struct LookupOpFlags<E> {
     pipe: E,
     evalcircuit: E,
     log_precompile: E,
+    hornerbase: E,
+    hornerext: E,
 
     // -- Degree-7 individual ops ----------------------------------------------------------------
     mload: E,
@@ -151,6 +153,8 @@ where
         let dyncall = deg5(opcodes::DYNCALL);
         let evalcircuit = deg5(opcodes::EVALCIRCUIT);
         let log_precompile = deg5(opcodes::LOGPRECOMPILE);
+        let hornerbase = deg5(opcodes::HORNERBASE);
+        let hornerext = deg5(opcodes::HORNEREXT);
 
         // -- Degree-4 subset --------------------------------------------------------------
         let deg4_extra: E = decoder.extra[1].into();
@@ -231,6 +235,8 @@ where
             pipe,
             evalcircuit,
             log_precompile,
+            hornerbase,
+            hornerext,
             mload,
             mstore,
             mloadw,
@@ -289,6 +295,8 @@ impl LookupOpFlags<Felt> {
             opcodes::PIPE => f.pipe = Felt::ONE,
             opcodes::EVALCIRCUIT => f.evalcircuit = Felt::ONE,
             opcodes::LOGPRECOMPILE => f.log_precompile = Felt::ONE,
+            opcodes::HORNERBASE => f.hornerbase = Felt::ONE,
+            opcodes::HORNEREXT => f.hornerext = Felt::ONE,
             opcodes::END => f.end = Felt::ONE,
             opcodes::REPEAT => f.repeat = Felt::ONE,
             opcodes::RESPAN => f.respan = Felt::ONE,
@@ -371,6 +379,8 @@ impl LookupOpFlags<Felt> {
             pipe: Felt::ZERO,
             evalcircuit: Felt::ZERO,
             log_precompile: Felt::ZERO,
+            hornerbase: Felt::ZERO,
+            hornerext: Felt::ZERO,
             mload: Felt::ZERO,
             mstore: Felt::ZERO,
             mloadw: Felt::ZERO,
@@ -432,6 +442,8 @@ impl LookupOpFlags<Felt> {
             pipe,
             evalcircuit,
             log_precompile,
+            hornerbase,
+            hornerext,
             mload,
             mstore,
             mloadw,
@@ -506,6 +518,8 @@ accessors!(
     pipe,
     evalcircuit,
     log_precompile,
+    hornerbase,
+    hornerext,
     // Degree-7 individual ops
     mload,
     mstore,

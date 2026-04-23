@@ -332,7 +332,9 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ProcessorAir {
 
         // TODO(#3032): aux_values[1..] are the placeholder slots from
         // NUM_LOGUP_COMMITTED_FINALS (see `constraints::lookup::miden_air`); enforce the
-        // zero invariant until trace splitting lands.
+        // zero invariant until trace splitting lands. The recursive verifier gets the
+        // matching `AuxBusBoundary(col) = 0` identity via `LogUpBoundaryConfig::zero_columns`
+        // (see `ace.rs`), so both paths reject a nonzero padding slot.
         for unused_aux in aux_values.iter().skip(1) {
             if !unused_aux.is_zero() {
                 return Err("padding aux value is non-zero".into());
