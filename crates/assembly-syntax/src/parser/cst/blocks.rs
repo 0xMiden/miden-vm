@@ -6,6 +6,7 @@ use miden_assembly_syntax_cst::{
         AstNode, Block as CstBlock, IfOp as CstIfOp, Instruction as CstInstruction,
         Operation as CstOperation, RepeatOp as CstRepeatOp, WhileOp as CstWhileOp,
     },
+    rowan,
 };
 use miden_debug_types::{SourceSpan, Span};
 
@@ -253,7 +254,7 @@ fn header_tokens_before_first_block(
         .take_while(|element| {
             !matches!(element, SyntaxElement::Node(child) if child.kind() == SyntaxKind::Block)
         })
-        .filter_map(|element| element.into_token())
+        .filter_map(rowan::NodeOrToken::into_token)
         .filter(|token| !token.kind().is_trivia())
         .collect()
 }
@@ -272,7 +273,7 @@ fn invalid_instruction_error(
     let message = instruction
         .syntax()
         .children_with_tokens()
-        .filter_map(|element| element.into_token())
+        .filter_map(rowan::NodeOrToken::into_token)
         .find(|token| !token.kind().is_trivia())
         .and_then(|token| (token.kind() == SyntaxKind::Ident).then(|| token.text().to_string()))
         .map(|name| format!("invalid instruction `{name}` or malformed operands"))

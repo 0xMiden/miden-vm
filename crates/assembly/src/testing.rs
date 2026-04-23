@@ -98,7 +98,7 @@ impl TestContext {
     #[cfg(feature = "testing")]
     #[track_caller]
     pub fn parse_forms(&self, source: Arc<SourceFile>) -> Result<Vec<Form>, Report> {
-        parser::parse_forms(source.clone())
+        parser::parse_forms(source)
     }
 
     /// Parse the given source file into an executable [Module].

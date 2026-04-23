@@ -7,6 +7,7 @@ use alloc::{
 use miden_assembly_syntax_cst::{
     SyntaxKind, SyntaxToken,
     ast::{AstNode, Instruction as CstInstruction},
+    rowan,
 };
 use miden_core::events::EventId;
 use miden_debug_types::{SourceSpan, Span};
@@ -67,7 +68,7 @@ impl CompactInstruction {
         for token in instruction
             .syntax()
             .children_with_tokens()
-            .filter_map(|element| element.into_token())
+            .filter_map(rowan::NodeOrToken::into_token)
         {
             if token.kind().is_trivia() {
                 continue;
@@ -89,7 +90,7 @@ impl CompactInstruction {
 
     /// Returns the non-dot compact segments as borrowed text slices.
     fn texts(&self) -> Vec<&str> {
-        self.segments.iter().map(|token| token.text()).collect()
+        self.segments.iter().map(rowan::SyntaxToken::text).collect()
     }
 
     /// Returns the `index`th non-dot segment token.
@@ -130,7 +131,7 @@ fn unexpected_primitive_suffix_error(
     let dot = instruction
         .syntax()
         .children_with_tokens()
-        .filter_map(|element| element.into_token())
+        .filter_map(rowan::NodeOrToken::into_token)
         .find(|token| token.kind() == SyntaxKind::Dot)?;
     Some(ParsingError::UnrecognizedToken {
         span: context.parse().span_for_token(&dot),
@@ -1031,7 +1032,12 @@ fn lower_word_literal(
         }
         let span = context.parse().span_for_token(token);
         match parse_numeric_token(span, token.text())? {
-            ParsedNumeric::Int(value) => *element = Felt::new(value.as_int()),
+            ParsedNumeric::Int(value) => {
+                *element = Felt::new(value.as_int()).map_err(|_| ParsingError::InvalidLiteral {
+                    span,
+                    kind: LiteralErrorKind::FeltOverflow,
+                })?
+            },
             ParsedNumeric::Word(_) => {
                 return Err(ParsingError::InvalidSyntax {
                     span,
@@ -1149,7 +1155,7 @@ fn significant_tokens(instruction: &CstInstruction) -> Vec<SyntaxToken> {
     instruction
         .syntax()
         .children_with_tokens()
-        .filter_map(|element| element.into_token())
+        .filter_map(rowan::NodeOrToken::into_token)
         .filter(|token| !token.kind().is_trivia())
         .collect()
 }
@@ -1690,7 +1696,7 @@ fn lower_felt_immediate(
     let span = context.parse().span_for_token(token);
     match token.kind() {
         SyntaxKind::Ident => {
-            Ok(Some(ast::Immediate::Constant(context.lower_constant_ident_token(token)?)))
+            Ok(Some(Immediate::Constant(context.lower_constant_ident_token(token)?)))
         },
         SyntaxKind::Number => {
             if token.text().starts_with("0b") || token.text().starts_with("0B") {
@@ -1699,7 +1705,12 @@ fn lower_felt_immediate(
 
             match parse_numeric_token(span, token.text())? {
                 ParsedNumeric::Int(value) => {
-                    Ok(Some(ast::Immediate::Value(Span::new(span, Felt::new(value.as_int())))))
+                    let value =
+                        Felt::new(value.as_int()).map_err(|_| ParsingError::InvalidLiteral {
+                            span,
+                            kind: LiteralErrorKind::FeltOverflow,
+                        })?;
+                    Ok(Some(Immediate::Value(Span::new(span, value))))
                 },
                 ParsedNumeric::Word(_) => Ok(None),
             }
@@ -1715,7 +1726,7 @@ fn lower_int_immediate(
     let span = context.parse().span_for_token(token);
     match token.kind() {
         SyntaxKind::Ident => {
-            Ok(Some(ast::Immediate::Constant(context.lower_constant_ident_token(token)?)))
+            Ok(Some(Immediate::Constant(context.lower_constant_ident_token(token)?)))
         },
         SyntaxKind::Number => {
             if token.text().starts_with("0b") || token.text().starts_with("0B") {
@@ -1723,9 +1734,7 @@ fn lower_int_immediate(
             }
 
             match parse_numeric_token(span, token.text())? {
-                ParsedNumeric::Int(value) => {
-                    Ok(Some(ast::Immediate::Value(Span::new(span, value))))
-                },
+                ParsedNumeric::Int(value) => Ok(Some(Immediate::Value(Span::new(span, value)))),
                 ParsedNumeric::Word(_) => Ok(None),
             }
         },
@@ -1752,7 +1761,7 @@ fn lower_u16_immediate(
     let span = context.parse().span_for_token(token);
     match token.kind() {
         SyntaxKind::Ident => {
-            Ok(Some(ast::Immediate::Constant(context.lower_constant_ident_token(token)?)))
+            Ok(Some(Immediate::Constant(context.lower_constant_ident_token(token)?)))
         },
         SyntaxKind::Number => {
             let Some(value) = lower_decimal_u64_literal(token)? else {
@@ -1764,7 +1773,7 @@ fn lower_u16_immediate(
                     range: 0..(u16::MAX as usize + 1),
                 });
             };
-            Ok(Some(ast::Immediate::Value(Span::new(span, value))))
+            Ok(Some(Immediate::Value(Span::new(span, value))))
         },
         _ => Ok(None),
     }
@@ -1777,7 +1786,7 @@ fn lower_shift32_immediate(
     let span = context.parse().span_for_token(token);
     match token.kind() {
         SyntaxKind::Ident => {
-            Ok(Some(ast::Immediate::Constant(context.lower_constant_ident_token(token)?)))
+            Ok(Some(Immediate::Constant(context.lower_constant_ident_token(token)?)))
         },
         SyntaxKind::Number => {
             let Some(value) = lower_decimal_u64_literal(token)? else {
@@ -1789,7 +1798,7 @@ fn lower_shift32_immediate(
             if value > 31 {
                 return Err(ParsingError::ImmediateOutOfRange { span, range: 0..32 });
             }
-            Ok(Some(ast::Immediate::Value(Span::new(span, value))))
+            Ok(Some(Immediate::Value(Span::new(span, value))))
         },
         _ => Ok(None),
     }

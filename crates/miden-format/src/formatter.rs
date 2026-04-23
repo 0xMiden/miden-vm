@@ -322,7 +322,7 @@ fn render_type_body(body: &TypeBody, indent: usize, prefix_width: usize) -> Stri
     let has_comment = body
         .syntax()
         .descendants_with_tokens()
-        .filter_map(|element| element.into_token())
+        .filter_map(NodeOrToken::into_token)
         .any(|token| matches!(token.kind(), SyntaxKind::Comment | SyntaxKind::DocComment));
 
     let compact_body = render_compact_tokens(body.syntax());
@@ -1056,9 +1056,7 @@ fn render_path_lines(header: &str, path_tokens: &[SyntaxToken], indent: usize) -
 }
 
 fn all_tokens(node: &SyntaxNode) -> Vec<SyntaxToken> {
-    node.descendants_with_tokens()
-        .filter_map(|element| element.into_token())
-        .collect()
+    node.descendants_with_tokens().filter_map(NodeOrToken::into_token).collect()
 }
 
 fn has_comment_tokens(tokens: &[SyntaxToken]) -> bool {
@@ -1069,13 +1067,13 @@ fn has_comment_tokens(tokens: &[SyntaxToken]) -> bool {
 
 fn has_comment_token(node: &SyntaxNode) -> bool {
     node.descendants_with_tokens()
-        .filter_map(|element| element.into_token())
+        .filter_map(NodeOrToken::into_token)
         .any(|token| matches!(token.kind(), SyntaxKind::Comment | SyntaxKind::DocComment))
 }
 
 fn significant_tokens(node: &SyntaxNode) -> Vec<SyntaxToken> {
     node.descendants_with_tokens()
-        .filter_map(|element| element.into_token())
+        .filter_map(NodeOrToken::into_token)
         .filter(|token| {
             !token.kind().is_trivia()
                 && !matches!(token.kind(), SyntaxKind::Comment | SyntaxKind::DocComment)
@@ -1283,7 +1281,7 @@ fn split_top_level_items(tokens: &[SyntaxToken]) -> Vec<Vec<SyntaxToken>> {
 
 fn direct_comment_token(node: &SyntaxNode) -> Option<String> {
     node.children_with_tokens()
-        .filter_map(|element| element.into_token())
+        .filter_map(NodeOrToken::into_token)
         .find(|token| matches!(token.kind(), SyntaxKind::Comment | SyntaxKind::DocComment))
         .map(|token| trimmed_comment(&token))
 }
@@ -1361,10 +1359,8 @@ fn standalone_comments_before_child_of_kind(
                     pending_same_line = true;
                 },
                 SyntaxKind::Whitespace => (),
-                SyntaxKind::Newline => {
-                    if pending_comment.is_some() {
-                        pending_same_line = false;
-                    }
+                SyntaxKind::Newline if pending_comment.is_some() => {
+                    pending_same_line = false;
                 },
                 _ => (),
             },

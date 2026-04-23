@@ -116,7 +116,7 @@ fn run() -> Result<(), CliError> {
             eprintln!("would reformat {path}");
         }
 
-        return Err(CliError::CheckFailed(mismatches.iter().map(|uri| uri.to_string()).fold(
+        return Err(CliError::CheckFailed(mismatches.iter().map(ToString::to_string).fold(
             String::new(),
             |mut acc, item| {
                 acc.push('\n');

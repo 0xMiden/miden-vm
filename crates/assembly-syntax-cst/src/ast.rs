@@ -227,7 +227,7 @@ impl TypeDecl {
     pub fn keyword_token(&self) -> Option<SyntaxToken> {
         self.syntax
             .children_with_tokens()
-            .filter_map(|element| element.into_token())
+            .filter_map(rowan::NodeOrToken::into_token)
             .find(|token| {
                 token.kind() == SyntaxKind::Ident && matches!(token.text(), "type" | "enum")
             })
@@ -329,7 +329,7 @@ impl Path {
     pub fn segments(&self) -> impl Iterator<Item = SyntaxToken> + '_ {
         self.syntax
             .children_with_tokens()
-            .filter_map(|element| element.into_token())
+            .filter_map(rowan::NodeOrToken::into_token)
             .filter(|token| {
                 matches!(
                     token.kind(),
@@ -344,7 +344,7 @@ impl Expr {
     pub fn significant_tokens(&self) -> impl Iterator<Item = SyntaxToken> + '_ {
         self.syntax
             .children_with_tokens()
-            .filter_map(|element| element.into_token())
+            .filter_map(rowan::NodeOrToken::into_token)
             .filter(|token| !token.kind().is_trivia())
     }
 }
@@ -352,7 +352,7 @@ impl Expr {
 fn token_after_keyword(node: &SyntaxNode, keyword: &str) -> Option<SyntaxToken> {
     let keyword_token = node
         .children_with_tokens()
-        .filter_map(|element| element.into_token())
+        .filter_map(rowan::NodeOrToken::into_token)
         .find(|token| token.kind() == SyntaxKind::Ident && token.text() == keyword)?;
     next_significant_token(node, &keyword_token)
 }
@@ -360,14 +360,14 @@ fn token_after_keyword(node: &SyntaxNode, keyword: &str) -> Option<SyntaxToken> 
 fn token_after_punctuation(node: &SyntaxNode, punctuation: SyntaxKind) -> Option<SyntaxToken> {
     let punctuation_token = node
         .children_with_tokens()
-        .filter_map(|element| element.into_token())
+        .filter_map(rowan::NodeOrToken::into_token)
         .find(|token| token.kind() == punctuation)?;
     next_significant_token(node, &punctuation_token)
 }
 
 fn next_significant_token(node: &SyntaxNode, token: &SyntaxToken) -> Option<SyntaxToken> {
     let mut seen = false;
-    for candidate in node.children_with_tokens().filter_map(|element| element.into_token()) {
+    for candidate in node.children_with_tokens().filter_map(rowan::NodeOrToken::into_token) {
         if !seen {
             seen = candidate == *token;
             continue;

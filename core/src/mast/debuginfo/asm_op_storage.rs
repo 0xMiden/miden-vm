@@ -186,7 +186,7 @@ impl OpToAsmOpId {
     /// Returns all `(op_idx, AsmOpId)` pairs for the given node, or an empty vec if the
     /// node has no asm ops.
     pub fn asm_ops_for_node(&self, node_id: MastNodeId) -> Vec<(usize, AsmOpId)> {
-        self.inner.row(node_id).map(|r| r.to_vec()).unwrap_or_default()
+        self.inner.row(node_id).map(<[(usize, AsmOpId)]>::to_vec).unwrap_or_default()
     }
 
     /// Validates the CSR structure integrity.

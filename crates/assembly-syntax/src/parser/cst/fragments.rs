@@ -13,6 +13,7 @@ use miden_assembly_syntax_cst::{
         AdviceMap as CstAdviceMap, AstNode, Attribute as CstAttribute, Expr as CstExpr,
         Signature as CstSignature, TypeBody as CstTypeBody,
     },
+    rowan,
 };
 use miden_core::{Felt, field::PrimeField64};
 use miden_debug_types::{SourceSpan, Span, Spanned};
@@ -132,7 +133,7 @@ pub(super) fn lower_advice_map_decl(
 /// Collects the direct, non-trivia tokens under `node`.
 fn significant_tokens(node: &miden_assembly_syntax_cst::syntax::SyntaxNode) -> Vec<SyntaxToken> {
     node.children_with_tokens()
-        .filter_map(|element| element.into_token())
+        .filter_map(rowan::NodeOrToken::into_token)
         .filter(|token| !token.kind().is_trivia())
         .collect()
 }
@@ -145,7 +146,7 @@ fn significant_tokens_recursive(
     node: &miden_assembly_syntax_cst::syntax::SyntaxNode,
 ) -> Vec<SyntaxToken> {
     node.descendants_with_tokens()
-        .filter_map(|element| element.into_token())
+        .filter_map(rowan::NodeOrToken::into_token)
         .filter(|token| !token.kind().is_trivia())
         .collect()
 }
@@ -355,8 +356,7 @@ impl<'a, 'b> FragmentParser<'a, 'b> {
         let lbracket = self.expect_kind(SyntaxKind::LBracket, "expected `[` to start word")?;
         let mut elements = [Felt::ZERO; 4];
         for (index, element) in elements.iter_mut().enumerate() {
-            let value = self.parse_felt_literal()?;
-            *element = Felt::new(value.as_int());
+            *element = self.parse_felt()?;
             if index < 3 {
                 self.expect_kind(SyntaxKind::Comma, "expected `,` between word elements")?;
             }
@@ -366,7 +366,7 @@ impl<'a, 'b> FragmentParser<'a, 'b> {
         Ok(ast::ConstantExpr::Word(Span::new(span, WordValue(elements))))
     }
 
-    fn parse_felt_literal(&mut self) -> Result<IntValue, ParsingError> {
+    fn parse_felt_literal(&mut self) -> Result<Span<IntValue>, ParsingError> {
         let Some(token) = self.current() else {
             return Err(self.invalid_syntax("expected an integer literal"));
         };
@@ -374,10 +374,11 @@ impl<'a, 'b> FragmentParser<'a, 'b> {
             return Err(self.invalid_syntax("expected an integer literal"));
         }
 
-        match parse_numeric_token(self.token_span(&token), token.text())? {
+        let span = self.token_span(&token);
+        match parse_numeric_token(span, token.text())? {
             ParsedNumeric::Int(value) => {
                 self.bump();
-                Ok(value)
+                Ok(Span::new(span, value))
             },
             ParsedNumeric::Word(_) => Err(ParsingError::InvalidSyntax {
                 span: self.token_span(&token),
@@ -614,8 +615,11 @@ impl<'a, 'b> FragmentParser<'a, 'b> {
     }
 
     fn parse_felt(&mut self) -> Result<Felt, ParsingError> {
-        let value = self.parse_felt_literal()?;
-        Ok(Felt::new(value.as_int()))
+        let (span, value) = self.parse_felt_literal()?.into_parts();
+        Felt::new(value.as_int()).map_err(|_| ParsingError::InvalidLiteral {
+            span,
+            kind: LiteralErrorKind::FeltOverflow,
+        })
     }
 
     /// Parses an enum declaration body after the `= :repr { ... }` portion begins.
@@ -903,7 +907,7 @@ impl<'a, 'b> FragmentParser<'a, 'b> {
         };
 
         let first = self.expect_path_component("expected a path component")?;
-        let mut last = first.clone();
+        let mut last = first;
         let mut segments = 1usize;
         while self.at_kind(SyntaxKind::ColonColon) {
             self.bump();
@@ -927,7 +931,7 @@ impl<'a, 'b> FragmentParser<'a, 'b> {
 
         let raw = self.tokens[start_pos..self.pos]
             .iter()
-            .map(|token| token.text())
+            .map(rowan::SyntaxToken::text)
             .collect::<String>();
         self.context.lower_raw_path(span, &raw)
     }
@@ -1233,7 +1237,7 @@ pub(super) fn parse_numeric_token(
 
     let value = text.parse::<u64>().map_err(|error| ParsingError::InvalidLiteral {
         span,
-        kind: literal_error_from_int_error(error.kind(), LiteralErrorKind::FeltOverflow),
+        kind: literal_error_from_int_error(*error.kind(), LiteralErrorKind::FeltOverflow),
     })?;
     if value >= Felt::ORDER_U64 {
         return Err(ParsingError::InvalidLiteral {
@@ -1254,7 +1258,7 @@ fn parse_hex_literal(span: SourceSpan, hex_digits: &str) -> Result<ParsedNumeric
                 ParsingError::InvalidLiteral {
                     span,
                     kind: literal_error_from_int_error(
-                        error.kind(),
+                        *error.kind(),
                         LiteralErrorKind::FeltOverflow,
                     ),
                 }
@@ -1279,20 +1283,17 @@ fn parse_hex_literal(span: SourceSpan, hex_digits: &str) -> Result<ParsedNumeric
                         ParsingError::InvalidLiteral {
                             span,
                             kind: literal_error_from_int_error(
-                                error.kind(),
+                                *error.kind(),
                                 LiteralErrorKind::FeltOverflow,
                             ),
                         }
                     })?;
                 }
                 let value = u64::from_le_bytes(felt_bytes);
-                if value >= Felt::ORDER_U64 {
-                    return Err(ParsingError::InvalidLiteral {
-                        span,
-                        kind: LiteralErrorKind::FeltOverflow,
-                    });
-                }
-                *element = Felt::new(value);
+                *element = Felt::new(value).map_err(|_| ParsingError::InvalidHexLiteral {
+                    span,
+                    kind: HexErrorKind::Overflow,
+                })?;
             }
 
             Ok(ParsedNumeric::Word(WordValue(word)))
@@ -1342,7 +1343,7 @@ pub(super) fn parse_decimal_u64(text: &str) -> Option<u64> {
 
 /// Converts integer parsing failures into the legacy literal error categories.
 fn literal_error_from_int_error(
-    kind: &core::num::IntErrorKind,
+    kind: core::num::IntErrorKind,
     overflow: LiteralErrorKind,
 ) -> LiteralErrorKind {
     match kind {
@@ -1364,7 +1365,7 @@ fn parse_u32_literal(span: SourceSpan, text: &str) -> Result<u32, ParsingError> 
         let value =
             u32::from_str_radix(bin_digits, 2).map_err(|error| ParsingError::InvalidLiteral {
                 span,
-                kind: literal_error_from_int_error(error.kind(), LiteralErrorKind::U32Overflow),
+                kind: literal_error_from_int_error(*error.kind(), LiteralErrorKind::U32Overflow),
             })?;
         return Ok(value);
     }
@@ -1428,7 +1429,7 @@ pub proc foo(a: felt, b: ptr<u8, addrspace(byte)>) -> (ok: i1, value: [u32; 4])
 end
 ",
         );
-        let parse = parse_source_file(source.clone());
+        let parse = parse_source_file(source);
         assert!(parse.diagnostics().is_empty(), "unexpected CST diagnostics");
 
         let source_file = CstSourceFile::cast(parse.syntax()).expect("source file");
@@ -1480,7 +1481,7 @@ end
     fn lowers_named_type_alias_bodies_from_cst_tokens() {
         let source =
             test_source_file("type Point = struct { x: u32, y: ptr<u8, addrspace(byte)> }\n");
-        let parse = parse_source_file(source.clone());
+        let parse = parse_source_file(source);
         assert!(parse.diagnostics().is_empty(), "unexpected CST diagnostics");
 
         let source_file = CstSourceFile::cast(parse.syntax()).expect("source file");
@@ -1535,7 +1536,7 @@ proc foo
 end
 ",
         );
-        let parse = parse_source_file(source.clone());
+        let parse = parse_source_file(source);
         assert!(parse.diagnostics().is_empty(), "unexpected CST diagnostics");
 
         let source_file = CstSourceFile::cast(parse.syntax()).expect("source file");
@@ -1577,9 +1578,9 @@ end
                 if *value.inner()
                     == crate::parser::WordValue([
                 miden_core::Felt::ZERO,
-                miden_core::Felt::new(1),
-                miden_core::Felt::new(2),
-                miden_core::Felt::new(3),
+                miden_core::Felt::new(1).unwrap(),
+                miden_core::Felt::new(2).unwrap(),
+                miden_core::Felt::new(3).unwrap(),
             ])
         ));
     }
@@ -1587,7 +1588,7 @@ end
     #[test]
     fn lowers_advice_map_decls_from_cst_tokens() {
         let source = test_source_file("adv_map TABLE([1, 2, 3, 4]) = [5, 6, 7]\n");
-        let parse = parse_source_file(source.clone());
+        let parse = parse_source_file(source);
         assert!(parse.diagnostics().is_empty(), "unexpected CST diagnostics");
 
         let source_file = CstSourceFile::cast(parse.syntax()).expect("source file");
@@ -1608,15 +1609,19 @@ end
         assert_eq!(
             entry.key.as_ref().map(|word| *word.inner()),
             Some(crate::parser::WordValue([
-                miden_core::Felt::new(1),
-                miden_core::Felt::new(2),
-                miden_core::Felt::new(3),
-                miden_core::Felt::new(4),
+                miden_core::Felt::new(1).unwrap(),
+                miden_core::Felt::new(2).unwrap(),
+                miden_core::Felt::new(3).unwrap(),
+                miden_core::Felt::new(4).unwrap(),
             ]))
         );
         assert_eq!(
             entry.value,
-            vec![miden_core::Felt::new(5), miden_core::Felt::new(6), miden_core::Felt::new(7),]
+            vec![
+                miden_core::Felt::new(5).unwrap(),
+                miden_core::Felt::new(6).unwrap(),
+                miden_core::Felt::new(7).unwrap(),
+            ]
         );
     }
 

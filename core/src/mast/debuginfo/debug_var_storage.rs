@@ -460,7 +460,7 @@ impl OpToDebugVarIds {
         };
 
         let mut result = Vec::new();
-        for (op_offset, op_idx) in op_range.clone().enumerate() {
+        for (op_offset, op_idx) in op_range.enumerate() {
             if op_idx + 1 >= self.op_indptr_for_var_ids.len() {
                 break;
             }
