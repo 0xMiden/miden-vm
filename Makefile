@@ -88,6 +88,9 @@ format: ## Runs Format using nightly toolchain
 format-check: ## Runs Format using nightly toolchain but only in check mode
 	cargo +nightly fmt --all --check
 
+.PHONY: shear
+shear: ## Runs cargo-shear to find unused or misplaced dependencies
+	cargo shear
 
 .PHONY: lint
 lint: xclippy xclippy-fix format ## Runs all linting tasks: check with xclippy, fix issues, then format

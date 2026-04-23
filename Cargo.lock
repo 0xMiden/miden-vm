@@ -1279,7 +1279,6 @@ dependencies = [
  "miden-utils-indexing",
  "proptest",
  "thiserror",
- "tracing",
 ]
 
 [[package]]
@@ -1334,7 +1333,6 @@ dependencies = [
  "criterion",
  "derive_more",
  "insta",
- "itertools 0.14.0",
  "miden-crypto",
  "miden-debug-types",
  "miden-formatting",
@@ -1375,12 +1373,9 @@ dependencies = [
  "miden-verifier",
  "num",
  "num-bigint",
- "pretty_assertions",
  "rand 0.9.4",
  "rand_chacha",
  "rstest",
- "serde",
- "serde_json",
  "thiserror",
 ]
 
@@ -1521,7 +1516,6 @@ dependencies = [
 name = "miden-mast-package"
 version = "0.23.0"
 dependencies = [
- "derive_more",
  "miden-assembly-syntax",
  "miden-core",
  "miden-debug-types",
@@ -1578,7 +1572,6 @@ dependencies = [
  "miden-mast-package",
  "pubgrub",
  "serde",
- "serde_json",
  "smallvec",
  "thiserror",
 ]
@@ -1614,12 +1607,8 @@ dependencies = [
  "miden-core",
  "miden-mast-package",
  "miden-package-registry",
- "miden-test-serde-macros",
- "proptest",
- "proptest-derive",
  "serde",
  "serde-untagged",
- "serde_json",
  "tempfile",
  "thiserror",
  "toml",
@@ -1637,7 +1626,6 @@ dependencies = [
  "miden-debug-types",
  "miden-processor",
  "serde",
- "thiserror",
  "tokio",
  "tracing",
 ]
@@ -1719,7 +1707,6 @@ dependencies = [
  "miden-crypto",
  "miden-debug-types",
  "miden-miette",
- "paste",
  "tracing",
 ]
 
@@ -1740,7 +1727,6 @@ dependencies = [
  "loom",
  "once_cell",
  "parking_lot",
- "proptest",
 ]
 
 [[package]]
@@ -1777,10 +1763,7 @@ dependencies = [
  "miden-prover",
  "miden-test-utils",
  "miden-verifier",
- "num-bigint",
  "predicates",
- "pretty_assertions",
- "rand_chacha",
  "serde",
  "serde_json",
  "tokio",

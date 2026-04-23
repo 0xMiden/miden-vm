@@ -70,7 +70,6 @@ internal = ["dep:hex", "serde", "std"]
 # Miden dependencies
 miden-assembly.workspace = true
 miden-core.workspace = true
-miden-crypto.workspace = true
 miden-debug-types.workspace = true
 miden-processor.workspace = true
 miden-prover.workspace = true
@@ -92,12 +91,10 @@ assert_cmd = { version = "2.1" }
 bincode = { workspace = true }
 criterion = { workspace = true, features = ["async_tokio"] }
 escargot = { version = "0.5" }
+miden-crypto.workspace = true
 miden-processor = { workspace = true, features = ["testing"] }
 miden-lifted-stark.workspace = true
 miden-utils-testing.workspace = true
-num-bigint = { workspace = true }
 predicates = { version = "3.1" }
-pretty_assertions = { workspace = true, features = ["std"] }
 tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
-rand_chacha = { workspace = true }
 walkdir = { version = "2.5" }
