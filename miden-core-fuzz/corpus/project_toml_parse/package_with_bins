@@ -1,0 +1,11 @@
+[package]
+name = "myapp"
+version = "0.1.0"
+
+[[bin]]
+name = "main"
+path = "bin/main.masm"
+
+[[bin]]
+name = "helper"
+path = "bin/helper.masm"
