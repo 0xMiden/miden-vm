@@ -1,9 +1,25 @@
 use miden_air::Serializable;
 use miden_crypto::hash::sha2::Sha256;
+use miden_processor::{ExecutionError, operation::OperationError};
 use miden_utils_testing::{
-    Felt, IntoBytes, group_slice_elements, push_inputs,
+    Felt, IntoBytes, Test, group_slice_elements, push_inputs,
     rand::{rand_array, rand_value, rand_vector},
 };
+
+const NON_U32_WORD: u64 = u32::MAX as u64 + 2;
+const INVALID_SHA256_MESSAGE_WORD: &str = "invalid sha256 message word";
+const SHA256_HASH_SOURCE: &str = "
+    use miden::core::crypto::hashes::sha256
+
+    begin
+        exec.sha256::hash
+    end";
+const SHA256_MERGE_SOURCE: &str = "
+    use miden::core::crypto::hashes::sha256
+
+    begin
+        exec.sha256::merge
+    end";
 
 #[test]
 fn sha256_hash_bytes() {
@@ -73,13 +89,6 @@ fn sha256_hash_bytes() {
 
 #[test]
 fn sha256_2_to_1_hash() {
-    let source = "
-    use miden::core::crypto::hashes::sha256
-
-    begin
-        exec.sha256::merge
-    end";
-
     let input0 = rand_array::<Felt, 4>().into_bytes();
     let input1 = rand_array::<Felt, 4>().into_bytes();
 
@@ -98,18 +107,11 @@ fn sha256_2_to_1_hash() {
         .map(|&bytes| u32::from_be_bytes(bytes) as u64)
         .collect();
 
-    build_test!(source, &ifelts).expect_stack(&ofelts);
+    build_test!(SHA256_MERGE_SOURCE, &ifelts).expect_stack(&ofelts);
 }
 
 #[test]
 fn sha256_1_to_1_hash() {
-    let source = "
-    use miden::core::crypto::hashes::sha256
-
-    begin
-        exec.sha256::hash
-    end";
-
     let ibytes = rand_array::<Felt, 4>().into_bytes();
     let ifelts: Vec<u64> = group_slice_elements::<u8, 4>(&ibytes)
         .iter()
@@ -122,5 +124,53 @@ fn sha256_1_to_1_hash() {
         .map(|&bytes| u32::from_be_bytes(bytes) as u64)
         .collect();
 
-    build_test!(source, &ifelts).expect_stack(&ofelts);
+    build_test!(SHA256_HASH_SOURCE, &ifelts).expect_stack(&ofelts);
+}
+
+#[test]
+fn sha256_hash_rejects_non_u32_message_word() {
+    let mut input_words = vec![0; 8];
+    input_words[1] = NON_U32_WORD;
+
+    expect_non_u32_execution_error(build_test!(SHA256_HASH_SOURCE, &input_words));
+}
+
+#[test]
+fn sha256_merge_rejects_non_u32_message_word() {
+    let mut input_words = vec![0; 16];
+    input_words[1] = NON_U32_WORD;
+
+    expect_non_u32_execution_error(build_test!(SHA256_MERGE_SOURCE, &input_words));
+}
+
+#[test]
+fn sha256_hash_bytes_rejects_non_u32_memory_word() {
+    let source = format!(
+        "
+    use miden::core::crypto::hashes::sha256
+
+    begin
+        push.0.0.{NON_U32_WORD}.0 mem_storew_be.10000 dropw
+
+        push.32.10000
+        exec.sha256::hash_bytes
+    end"
+    );
+
+    expect_non_u32_execution_error(build_test!(source, &[]));
+}
+
+fn expect_non_u32_execution_error(test: Test) {
+    let err = test.execute().expect_err("expected non-u32 SHA256 input to fail");
+    match err {
+        ExecutionError::OperationError {
+            err: OperationError::U32AssertionFailed { err_msg, invalid_values, .. },
+            ..
+        } => assert!(
+            err_msg.as_deref() == Some(INVALID_SHA256_MESSAGE_WORD)
+                && invalid_values.iter().any(|value| value.as_canonical_u64() == NON_U32_WORD),
+            "expected SHA256 message word assertion for {NON_U32_WORD}, got message {err_msg:?} and values {invalid_values:?}"
+        ),
+        err => panic!("expected SHA256 message word assertion, got {err:?}"),
+    }
 }

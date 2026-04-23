@@ -22,16 +22,15 @@ std = ["miden-air/std", "miden-debug-types/std", "miden-processor/std"]
 # Miden dependencies
 miden-air.workspace = true
 miden-core.workspace = true
-miden-debug-types.workspace = true
 miden-processor.workspace = true
 miden-crypto.workspace = true
 
 # External dependencies
 bincode.workspace = true
 serde.workspace = true
-thiserror.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
 miden-assembly.workspace = true
+miden-debug-types.workspace = true
 tokio = { workspace = true, features = ["macros", "rt"] }

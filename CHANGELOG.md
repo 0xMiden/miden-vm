@@ -6,6 +6,7 @@
 - Rejected non-syscall references to exported kernel procedures in the linker ([#2902](https://github.com/0xMiden/miden-vm/issues/2902)).
 - Reverted the `MainTrace` typed row storage change that caused a large `blake3_1to1` trace-building regression ([#2949](https://github.com/0xMiden/miden-vm/pull/2949)).
 - Fixed Falcon `mod_12289` remainder validation and `u64::rotr` overflow handling for rotations by `0` and `32` ([#2968](https://github.com/0xMiden/miden-vm/pull/2968)).
+- Hardened SHA256 message word range checks and U32ADD/U32ADD3 carry constraints, updating recursive verifier relation digest artifacts ([#3021](https://github.com/0xMiden/miden-vm/pull/3021)).
 
 #### Bug Fixes
 
@@ -32,6 +33,7 @@
 - Refactor trace generation to row-major format ([#2937](https://github.com/0xMiden/miden-vm/pull/2937)).
 - Documented non-overlap requirement for `memcopy_words`, `memcopy_elements`, and AEAD encrypt/decrypt procedures ([#2941](https://github.com/0xMiden/miden-vm/pull/2941)).
 - Added chainable `Test` builders for common test setup in `miden-utils-testing` ([#2957](https://github.com/0xMiden/miden-vm/pull/2957)).
+- Added fuzz coverage for package semantic deserialization and project parsing, loading, and assembly ([#3015](https://github.com/0xMiden/miden-vm/pull/3015)).
 - Speed-up AUX range check trace generation by changing divisors to a flat Vec layout ([#2966](https://github.com/0xMiden/miden-vm/pull/2966)).
 - Removed AIR constraint tagging instrumentation, applied a uniform constraint description style across components, and optimized constraint evaluation ([#2856](https://github.com/0xMiden/miden-vm/pull/2856)).
 

@@ -48,7 +48,7 @@ fn build_library(signature: Option<FunctionType>) -> Arc<Library> {
     Arc::new(Library::new(Arc::new(forest), exports).expect("failed to build library"))
 }
 
-fn build_package(library: Arc<Library>, signature: FunctionType) -> Package {
+fn build_package(library: Arc<Library>, signature: Option<FunctionType>) -> Package {
     let path = absolute_path("test::proc");
     let node_id = library.get_export_node_id(path.as_ref());
     let digest = library.mast_forest()[node_id].digest();
@@ -56,7 +56,7 @@ fn build_package(library: Arc<Library>, signature: FunctionType) -> Package {
     let export = PackageExport::Procedure(PackageProcedureExport {
         path: Arc::clone(&path),
         digest,
-        signature: Some(signature),
+        signature,
         attributes: AttributeSet::default(),
     });
 
@@ -96,8 +96,16 @@ fn generate_fuzz_seeds() {
         &library_with_signature.to_bytes(),
     );
 
-    let package = build_package(library_with_signature, signature);
+    let package = build_package(Arc::clone(&library), None);
     write_seed("package_deserialize", "minimal_package.bin", &package.to_bytes());
+    write_seed("package_semantic_deserialize", "minimal_package.bin", &package.to_bytes());
+
+    let package_with_signature = build_package(library_with_signature, Some(signature));
+    write_seed(
+        "package_deserialize",
+        "package_with_signature.bin",
+        &package_with_signature.to_bytes(),
+    );
 
     println!("\nSeed corpus generated in ../../miden-core-fuzz/corpus");
 }

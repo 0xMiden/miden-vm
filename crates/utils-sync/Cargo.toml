@@ -25,7 +25,6 @@ parking_lot = { version = "0.12", optional = true }
 
 [dev-dependencies]
 loom = { workspace = true }
-proptest.workspace = true
 
 [target.'cfg(loom)'.dependencies]
 loom.workspace = true
