@@ -93,7 +93,7 @@ shear: ## Runs cargo-shear to find unused or misplaced dependencies
 	cargo shear
 
 .PHONY: lint
-lint: xclippy xclippy-fix format shear ## Runs all linting tasks: check with xclippy, fix issues, format, then cargo-shear
+lint: xclippy xclippy-fix format ## Runs all linting tasks: check with xclippy, fix issues, then format
 
 # --- docs ----------------------------------------------------------------------------------------
 
