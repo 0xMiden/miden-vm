@@ -16,7 +16,6 @@ use core::{
 };
 
 mod continuation_stack;
-mod debug;
 mod errors;
 mod execution;
 mod execution_options;

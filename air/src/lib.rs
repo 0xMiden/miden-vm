@@ -22,10 +22,35 @@ use miden_crypto::stark::air::{
 pub mod ace;
 pub mod config;
 mod constraints;
-
+pub mod lookup;
 pub mod trace;
-use constraints::columns::MainCols;
-use trace::{AUX_TRACE_WIDTH, TRACE_WIDTH, bus_types};
+
+/// Miden VM-specific LogUp lookup argument: bus identifiers and bus message types.
+///
+/// The `LookupAir` and `AuxBuilder` trait impls live directly on [`crate::ProcessorAir`].
+/// The generic LogUp framework this builds on lives in [`crate::lookup`] and is free of
+/// Miden-specific types so it can be extracted into its own crate.
+pub mod logup {
+    pub use crate::constraints::lookup::{
+        BusId, MIDEN_MAX_MESSAGE_WIDTH, messages::*, miden_air::NUM_LOGUP_COMMITTED_FINALS,
+    };
+}
+
+use constraints::{
+    columns::MainCols,
+    lookup::{
+        chiplet_air::{ChipletLookupAir, ChipletLookupBuilder},
+        main_air::{MainLookupAir, MainLookupBuilder},
+        miden_air::{MIDEN_COLUMN_SHAPE, emit_miden_boundary},
+    },
+};
+use logup::{BusId, MIDEN_MAX_MESSAGE_WIDTH, NUM_LOGUP_COMMITTED_FINALS};
+use lookup::{
+    BoundaryBuilder, Challenges, ConstraintLookupBuilder, LookupAir, LookupMessage,
+    build_logup_aux_trace,
+};
+use miden_core::utils::RowMajorMatrix;
+use trace::TRACE_WIDTH;
 
 // RE-EXPORTS
 // ================================================================================================
@@ -180,6 +205,9 @@ impl Deserializable for PublicInputs {
 ///   [36..40] precompile transcript state
 pub const NUM_PUBLIC_VALUES: usize = WORD_SIZE + MIN_STACK_DEPTH + MIN_STACK_DEPTH + WORD_SIZE;
 
+/// LogUp aux trace width: 4 main-trace columns + 3 chiplet-trace columns.
+pub const LOGUP_AUX_TRACE_WIDTH: usize = 7;
+
 // Public values layout offsets.
 const PV_PROGRAM_HASH: usize = 0;
 const PV_TRANSCRIPT_STATE: usize = NUM_PUBLIC_VALUES - WORD_SIZE;
@@ -219,11 +247,14 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ProcessorAir {
     }
 
     fn aux_width(&self) -> usize {
-        AUX_TRACE_WIDTH
+        // 4 main-trace + 3 chiplet-trace = 7 LogUp columns. Matches
+        // `ProcessorAir::num_columns()` (LookupAir impl) and the per-row shape returned by
+        // `ProcessorAir::build_aux_trace` (AuxBuilder impl).
+        LOGUP_AUX_TRACE_WIDTH
     }
 
     fn num_aux_values(&self) -> usize {
-        AUX_TRACE_WIDTH
+        NUM_LOGUP_COMMITTED_FINALS
     }
 
     /// Returns the number of variable-length public input slices.
@@ -246,17 +277,19 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ProcessorAir {
     where
         EF: ExtensionField<Felt>,
     {
-        // Extract final aux column values.
-        let p1 = aux_values[trace::DECODER_AUX_TRACE_OFFSET];
-        let p2 = aux_values[trace::DECODER_AUX_TRACE_OFFSET + 1];
-        let p3 = aux_values[trace::DECODER_AUX_TRACE_OFFSET + 2];
-        let s_aux = aux_values[trace::STACK_AUX_TRACE_OFFSET];
-        let b_range = aux_values[trace::RANGE_CHECK_AUX_TRACE_OFFSET];
-        let b_hash_kernel = aux_values[trace::HASH_KERNEL_VTABLE_AUX_TRACE_OFFSET];
-        let b_chiplets = aux_values[trace::CHIPLETS_BUS_AUX_TRACE_OFFSET];
-        let v_wiring = aux_values[trace::ACE_CHIPLET_WIRING_BUS_OFFSET];
-
-        // Parse fixed-length public values (see `NUM_PUBLIC_VALUES` for layout).
+        // LogUp boundary identity. The verifier checks `is_identity()` — i.e.
+        // `prod == ONE && sum == ZERO` — on the accumulated `ReducedAuxValues`
+        // across every AIR. There are no multiplicative bus checks under LogUp, so
+        // `prod = ONE`. The boundary equation lives in `sum`:
+        //
+        //   sum = Σ aux_finals[col]  +  total_correction
+        //
+        // `total_correction` cancels the unmatched-fraction contributions from the
+        // three open buses (block hash, log precompile, kernel ROM init). Rather
+        // than spelling those out here, we drive the shared
+        // `emit_miden_boundary` emitter — the same source `LookupAir::eval_boundary`
+        // uses for the debug walker — through a reducer that accumulates
+        // `Σ multiplicity · encode(msg)⁻¹` into an `EF`.
         if public_values.len() != NUM_PUBLIC_VALUES {
             return Err(format!(
                 "expected {} public values, got {}",
@@ -265,84 +298,57 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ProcessorAir {
             )
             .into());
         }
-        let program_hash: Word = public_values[PV_PROGRAM_HASH..PV_PROGRAM_HASH + WORD_SIZE]
-            .try_into()
-            .map_err(|_| -> ReductionError { "invalid program hash slice".into() })?;
-        let pc_transcript_state: PrecompileTranscriptState = public_values
-            [PV_TRANSCRIPT_STATE..PV_TRANSCRIPT_STATE + WORD_SIZE]
-            .try_into()
-            .map_err(|_| -> ReductionError { "invalid transcript state slice".into() })?;
+        if var_len_public_inputs.len() != 1 {
+            return Err(format!(
+                "expected 1 var-len public input slice, got {}",
+                var_len_public_inputs.len()
+            )
+            .into());
+        }
+        if !var_len_public_inputs[0].len().is_multiple_of(WORD_SIZE) {
+            return Err(format!(
+                "kernel digest felts length {} is not a multiple of {}",
+                var_len_public_inputs[0].len(),
+                WORD_SIZE
+            )
+            .into());
+        }
 
-        // Precompute challenge powers once for all bus message encodings.
-        let challenges = trace::Challenges::<EF>::new(challenges[0], challenges[1]);
+        let challenges = Challenges::<EF>::new(
+            challenges[0],
+            challenges[1],
+            MIDEN_MAX_MESSAGE_WIDTH,
+            BusId::COUNT,
+        );
 
-        // Compute expected bus messages from public inputs and derived challenges.
-        let ph_msg = program_hash_message(&challenges, &program_hash);
+        let mut reducer = ReduceBoundaryBuilder {
+            challenges: &challenges,
+            public_values,
+            var_len_public_inputs,
+            sum: EF::ZERO,
+        };
+        emit_miden_boundary(&mut reducer);
+        let total_correction = reducer.finalize();
 
-        let (default_transcript_msg, final_transcript_msg) =
-            transcript_messages(&challenges, pc_transcript_state);
+        // TODO(#3032): aux_values[1..] are the placeholder slots from
+        // NUM_LOGUP_COMMITTED_FINALS (see `constraints::lookup::miden_air`); enforce the
+        // zero invariant until trace splitting lands. The recursive verifier gets the
+        // matching `AuxBusBoundary(col) = 0` identity via `LogUpBoundaryConfig::zero_columns`
+        // (see `ace.rs`), so both paths reject a nonzero padding slot.
+        for unused_aux in aux_values.iter().skip(1) {
+            if !unused_aux.is_zero() {
+                return Err("padding aux value is non-zero".into());
+            }
+        }
+        let aux_sum: EF = aux_values.iter().copied().sum();
 
-        let kernel_reduced = kernel_reduced_from_var_len(&challenges, var_len_public_inputs)?;
-
-        // Combine all multiset column finals with reduced variable length public-inputs.
-        //
-        // Running-product columns accumulate `responses / requests` at each row, so
-        // their final value is product(responses) / product(requests) over the entire trace.
-        //
-        // Columns whose requests and responses fully cancel end at 1:
-        //   p1  (block stack table) -- every block pushed is later popped
-        //   p3  (op group table)    -- every op group pushed is later consumed
-        //   s_aux (stack overflow)  -- every overflow push has a matching pop
-        //
-        // Columns with public-input-dependent boundary terms end at non-unity values:
-        //
-        //   p2 (block hash table):
-        //     The root block's hash is removed from the table at END, but was never
-        //     added (the root has no parent that would add it). This leaves one
-        //     unmatched removal: p2_final = 1 / ph_msg.
-        //
-        //   b_hash_kernel (chiplets virtual table: sibling table + transcript state):
-        //     The log_precompile transcript tracking chain starts by removing
-        //     default_transcript_msg (initial capacity state) and ends by inserting
-        //     final_transcript_msg (final capacity state). On the other hand, sibling table
-        //     entries cancel out. Net: b_hk_final = final_transcript_msg / default_transcript_msg.
-        //
-        //   b_chiplets (chiplets bus):
-        //     Each unique kernel procedure produces a KernelRomInitMessage response
-        //     from the kernel ROM chiplet These init messages are matched by the verifier
-        //     via public inputs. Net: b_ch_final = product(kernel_init_msgs) = kernel_reduced.
-        //
-        // Multiplying all finals with correction terms:
-        //   prod = (p1 * p3 * s_aux)                               -- each is 1
-        //        * (p2 * ph_msg)                                   -- (1/ph_msg) * ph_msg = 1
-        //        * (b_hk * default_msg / final_msg)                -- cancels to 1
-        //        * (b_ch / kernel_reduced)                         -- cancels to 1
-        //
-        // Rearranged: prod = all_finals * ph_msg * default_msg / (final_msg * kernel_reduced) (= 1)
-        let expected_denom = final_transcript_msg * kernel_reduced;
-        let expected_denom_inv = expected_denom
-            .try_inverse()
-            .ok_or_else(|| -> ReductionError { "zero denominator in reduced_aux_values".into() })?;
-
-        let prod = p1
-            * p2
-            * p3
-            * s_aux
-            * b_hash_kernel
-            * b_chiplets
-            * ph_msg
-            * default_transcript_msg
-            * expected_denom_inv;
-
-        // LogUp: all columns should end at 0.
-        let sum = b_range + v_wiring;
-
-        Ok(ReducedAuxValues { prod, sum })
+        Ok(ReducedAuxValues {
+            prod: EF::ONE,
+            sum: aux_sum + total_correction,
+        })
     }
 
     fn eval<AB: MidenAirBuilder>(&self, builder: &mut AB) {
-        use crate::constraints;
-
         let main = builder.main();
 
         // Access the two rows: current (local) and next
@@ -362,106 +368,137 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ProcessorAir {
         // Main trace constraints.
         constraints::enforce_main(builder, local, next, &selectors, &op_flags);
 
-        // Auxiliary (bus) constraints.
-        constraints::enforce_bus(builder, local, next, &selectors, &op_flags);
+        {
+            let mut lb = ConstraintLookupBuilder::new(builder, self);
+            <Self as LookupAir<_>>::eval(self, &mut lb);
+        }
 
         // Public inputs boundary constraints.
         constraints::public_inputs::enforce_main(builder, local);
     }
+
+    fn log_quotient_degree(&self) -> usize
+    where
+        Self: Sized,
+    {
+        // override to avoid recomputing through the SymbolicAir
+        3
+    }
 }
 
-// REDUCED AUX VALUES HELPERS
+// --- LookupAir impl (7-column aggregator over main + chiplet sub-AIRs) ---
+
+impl<LB> LookupAir<LB> for ProcessorAir
+where
+    LB: MainLookupBuilder + ChipletLookupBuilder,
+{
+    fn num_columns(&self) -> usize {
+        MIDEN_COLUMN_SHAPE.len()
+    }
+
+    fn column_shape(&self) -> &[usize] {
+        &MIDEN_COLUMN_SHAPE
+    }
+
+    fn max_message_width(&self) -> usize {
+        // Width of the `beta_powers` table precomputed by `Challenges::new`, also equal
+        // to the exponent of `gamma = beta^MIDEN_MAX_MESSAGE_WIDTH` used in the per-bus
+        // prefix. Must match the MASM recursive verifier's Poseidon2 absorption loop.
+        // `HasherMsg::State` is the widest live payload at 15 slots (label@β⁰, addr@β¹,
+        // node_index@β², state[0..12]@β³..β¹⁴); the 16th slot is unused slack kept for
+        // MASM transcript alignment.
+        MIDEN_MAX_MESSAGE_WIDTH
+    }
+
+    fn num_bus_ids(&self) -> usize {
+        BusId::COUNT
+    }
+
+    fn eval(&self, builder: &mut LB) {
+        MainLookupAir.eval(builder);
+        ChipletLookupAir.eval(builder);
+    }
+
+    fn eval_boundary<B>(&self, boundary: &mut B)
+    where
+        B: BoundaryBuilder<F = LB::F, EF = LB::EF>,
+    {
+        emit_miden_boundary(boundary);
+    }
+}
+
+// --- AuxBuilder impl (stateless LogUp aux-trace construction) ---
+
+impl<EF> AuxBuilder<Felt, EF> for ProcessorAir
+where
+    EF: ExtensionField<Felt>,
+{
+    fn build_aux_trace(
+        &self,
+        main: &RowMajorMatrix<Felt>,
+        challenges: &[EF],
+    ) -> (RowMajorMatrix<EF>, Vec<EF>) {
+        let (aux_trace, mut committed) = build_logup_aux_trace(self, main, challenges);
+        // TODO(#3032): pad the placeholder slot — see `NUM_LOGUP_COMMITTED_FINALS`. Remove
+        // the pad once trace splitting lands.
+        debug_assert_eq!(
+            committed.len(),
+            1,
+            "build_logup_aux_trace should return exactly one real committed final"
+        );
+        committed.push(EF::ZERO);
+        (aux_trace, committed)
+    }
+}
+
+// REDUCED-AUX BOUNDARY BUILDER
 // ================================================================================================
 
-/// Builds the program-hash bus message for the block-hash table boundary term.
+/// `BoundaryBuilder` impl that reduces each emitted interaction to its LogUp
+/// denominator contribution `multiplicity · encode(msg)⁻¹` and sums them into a
+/// running `EF` accumulator.
 ///
-/// Must match `BlockHashTableRow::from_end().collapse()` on the prover side for the
-/// root block, which encodes `[parent_id=0, hash[0..4], is_first_child=0, is_loop_body=0]`.
-fn program_hash_message<EF: ExtensionField<Felt>>(
-    challenges: &trace::Challenges<EF>,
-    program_hash: &Word,
-) -> EF {
-    challenges.encode(
-        bus_types::BLOCK_HASH_TABLE,
-        [
-            Felt::ZERO, // parent_id = 0 (root block)
-            program_hash[0],
-            program_hash[1],
-            program_hash[2],
-            program_hash[3],
-            Felt::ZERO, // is_first_child = false
-            Felt::ZERO, // is_loop_body = false
-        ],
-    )
+/// Lets `reduced_aux_values` reuse the structured boundary emissions from
+/// [`emit_miden_boundary`] — the same source consumed by the debug walker —
+/// instead of open-coding the three corrections a second time.
+///
+/// Denominators are `α + Σ βⁱ · field_i` with random `α, β`; on any legitimate proof they
+/// are non-zero with overwhelming probability, and the outer quotient check already rejects
+/// the degenerate case, so `insert` panics rather than threading an error through the
+/// reducer.
+struct ReduceBoundaryBuilder<'a, EF: ExtensionField<Felt>> {
+    challenges: &'a Challenges<EF>,
+    public_values: &'a [Felt],
+    var_len_public_inputs: VarLenPublicInputs<'a, Felt>,
+    sum: EF,
 }
 
-/// Returns the pair of (initial, final) log-precompile transcript messages for the
-/// virtual-table bus boundary term.
-///
-/// The initial message uses the default (zero) capacity state; the final message uses
-/// the public-input transcript state.
-fn transcript_messages<EF: ExtensionField<Felt>>(
-    challenges: &trace::Challenges<EF>,
-    final_state: PrecompileTranscriptState,
-) -> (EF, EF) {
-    let encode = |state: PrecompileTranscriptState| {
-        let cap: &[Felt] = state.as_ref();
-        challenges.encode(
-            bus_types::LOG_PRECOMPILE_TRANSCRIPT,
-            [Felt::from_u8(trace::LOG_PRECOMPILE_LABEL), cap[0], cap[1], cap[2], cap[3]],
-        )
-    };
-    (encode(PrecompileTranscriptState::default()), encode(final_state))
+impl<'a, EF: ExtensionField<Felt>> ReduceBoundaryBuilder<'a, EF> {
+    fn finalize(self) -> EF {
+        self.sum
+    }
 }
 
-/// Builds the kernel procedure init message for the kernel ROM bus.
-///
-/// Must match `KernelRomInitMessage::value()` on the prover side, which encodes
-/// `[KERNEL_PROC_INIT_LABEL, digest[0..4]]`.
-fn kernel_proc_message<EF: ExtensionField<Felt>>(
-    challenges: &trace::Challenges<EF>,
-    digest: &Word,
-) -> EF {
-    challenges.encode(
-        bus_types::CHIPLETS_BUS,
-        [
-            trace::chiplets::kernel_rom::KERNEL_PROC_INIT_LABEL,
-            digest[0],
-            digest[1],
-            digest[2],
-            digest[3],
-        ],
-    )
-}
+impl<'a, EF: ExtensionField<Felt>> BoundaryBuilder for ReduceBoundaryBuilder<'a, EF> {
+    type F = Felt;
+    type EF = EF;
 
-/// Reduces kernel procedure digests from var-len public inputs into a multiset product.
-///
-/// Expects exactly one variable-length public input slice containing all kernel digests
-/// as concatenated `Felt`s (i.e. `len % WORD_SIZE == 0`).
-fn kernel_reduced_from_var_len<EF: ExtensionField<Felt>>(
-    challenges: &trace::Challenges<EF>,
-    var_len_public_inputs: VarLenPublicInputs<'_, Felt>,
-) -> Result<EF, ReductionError> {
-    if var_len_public_inputs.len() != 1 {
-        return Err(format!(
-            "expected 1 var-len public input slice, got {}",
-            var_len_public_inputs.len()
-        )
-        .into());
+    fn public_values(&self) -> &[Felt] {
+        self.public_values
     }
-    let kernel_felts = var_len_public_inputs[0];
-    if !kernel_felts.len().is_multiple_of(WORD_SIZE) {
-        return Err(format!(
-            "kernel digest felts length {} is not a multiple of {}",
-            kernel_felts.len(),
-            WORD_SIZE
-        )
-        .into());
+
+    fn var_len_public_inputs(&self) -> &[&[Felt]] {
+        self.var_len_public_inputs
     }
-    let mut acc = EF::ONE;
-    for digest in kernel_felts.chunks_exact(WORD_SIZE) {
-        let word: Word = [digest[0], digest[1], digest[2], digest[3]].into();
-        acc *= kernel_proc_message(challenges, &word);
+
+    fn insert<M>(&mut self, _name: &'static str, multiplicity: Felt, msg: M)
+    where
+        M: LookupMessage<Felt, EF>,
+    {
+        let inv = msg
+            .encode(self.challenges)
+            .try_inverse()
+            .expect("LogUp denominator must be non-zero under random challenges");
+        self.sum += inv * multiplicity;
     }
-    Ok(acc)
 }

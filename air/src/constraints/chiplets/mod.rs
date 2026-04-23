@@ -7,16 +7,15 @@
 //! - bitwise chiplet main-trace constraints
 //! - memory chiplet main-trace constraints
 //! - ACE chiplet main-trace constraints
-//! - kernel ROM chiplet main-trace constraints
 //!
-//! Chiplet bus constraints are enforced in the `chiplets::bus` module.
+//! Chiplet LogUp lookup-argument constraints are emitted by
+//! [`crate::constraints::lookup::chiplet_air::ChipletLookupAir`] and wired through
+//! `ProcessorAir`'s `LookupAir` impl from `ProcessorAir::eval`.
 
 pub mod ace;
 pub mod bitwise;
-pub mod bus;
 pub mod columns;
 pub mod hasher_control;
-pub mod kernel_rom;
 pub mod memory;
 pub mod permutation;
 pub mod selectors;
@@ -47,5 +46,4 @@ pub fn enforce_main<AB>(
     bitwise::enforce_bitwise_constraints(builder, local, next, &selectors.bitwise);
     memory::enforce_memory_constraints(builder, local, next, &selectors.memory);
     ace::enforce_ace_constraints_all_rows(builder, local, next, &selectors.ace);
-    kernel_rom::enforce_kernel_rom_constraints(builder, local, next, &selectors.kernel_rom);
 }

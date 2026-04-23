@@ -1,96 +1,86 @@
+//! Stack overflow table bus test.
+//!
+//! Runs a PAD/DROP sequence and verifies that every interaction the stack-overflow bus emitter
+//! fires at a right-shift (`PAD`) or left-shift-with-non-empty-overflow (`DROP`) row appears
+//! somewhere in that row's bag of prover pushes. The test is column-blind — see
+//! `processor/src/trace/tests/lookup_harness.rs` for the subset matcher.
+//!
+//! The DYNCALL branch of the bus is intentionally not exercised here; constructing a DYNCALL
+//! with a non-empty overflow requires a full program around a host and fits better in an
+//! integration test.
+
 use alloc::vec::Vec;
 
-use miden_air::trace::{AUX_TRACE_RAND_CHALLENGES, Challenges, STACK_AUX_TRACE_OFFSET};
-use miden_core::{ONE, ZERO, field::Field, operations::Operation};
+use miden_air::logup::StackOverflowMsg;
+use miden_core::{
+    Felt,
+    operations::{Operation, opcodes},
+};
 
-use super::{super::stack::OverflowTableRow, Felt, build_trace_from_ops, rand_array};
-
-// CONSTANTS
-// ================================================================================================
-
-const P1_COL_IDX: usize = STACK_AUX_TRACE_OFFSET;
-const TWO: Felt = Felt::new_unchecked(2);
-
-// OVERFLOW TABLE TESTS
-// ================================================================================================
+use super::{
+    build_trace_from_ops,
+    lookup_harness::{Expectations, InteractionLog},
+};
+use crate::RowIndex;
 
 #[test]
-fn p1_trace() {
+fn stack_overflow_bus_emits_per_interaction_row() {
+    // Mix of right-shifts (PAD) and left-shifts (DROP) around a couple of U32add no-shift ops,
+    // ending with the overflow table empty.
+    // Overflow depth before each op (determines whether DROP emits):
+    //   U32add:0 Pad:0→1 Pad:1→2 U32add:2 Drop:2→1 Pad:1→2 Drop:2→1 Drop:1→0 Drop:0 Pad:0→1
+    // Drop:1→0 Four of the five DROPs run against a non-empty table and emit; the fourth DROP
+    // sees overflow=0 and is a no-op. All four PADs emit.
     let ops = vec![
-        Operation::U32add, // no shift, clk 1
-        Operation::Pad,    // right shift, clk 2
-        Operation::Pad,    // right shift, clk 3
-        Operation::U32add, // no shift, clk 4
-        Operation::Drop,   // left shift, clk 5
-        Operation::Pad,    // right shift, clk 6
-        Operation::Drop,   // left shift, clk 7
-        Operation::Drop,   // left shift, clk 8
-        Operation::Drop,   // left shift, clk 9
-        Operation::Pad,    // right shift, clk 10
-        Operation::Drop,   // left shift, clk 11
+        Operation::U32add, // no shift
+        Operation::Pad,    // right shift
+        Operation::Pad,    // right shift
+        Operation::U32add, // no shift
+        Operation::Drop,   // left shift (overflow=2 → remove)
+        Operation::Pad,    // right shift
+        Operation::Drop,   // left shift (overflow=2 → remove)
+        Operation::Drop,   // left shift (overflow=1 → remove)
+        Operation::Drop,   // left shift (overflow=0 → no interaction)
+        Operation::Pad,    // right shift
+        Operation::Drop,   // left shift (overflow=1 → remove)
     ];
-    let init_stack = (1..17).rev().collect::<Vec<_>>();
+    let init_stack = (1..17).rev().collect::<Vec<u64>>();
     let trace = build_trace_from_ops(ops, &init_stack);
-    let challenges = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
-    let aux_columns = trace.build_aux_trace(&challenges).unwrap();
-    let p1 = aux_columns.get_column(P1_COL_IDX);
+    let log = InteractionLog::new(&trace);
+    let main = trace.main_trace();
 
-    let challenges: Challenges<Felt> = Challenges::<Felt>::new(challenges[0], challenges[1]);
-    let row_values = [
-        OverflowTableRow::new(Felt::new_unchecked(2), ONE, ZERO).to_value(&challenges),
-        OverflowTableRow::new(Felt::new_unchecked(3), TWO, TWO).to_value(&challenges),
-        OverflowTableRow::new(Felt::new_unchecked(6), TWO, TWO).to_value(&challenges),
-        OverflowTableRow::new(Felt::new_unchecked(10), ZERO, ZERO).to_value(&challenges),
-    ];
+    let mut exp = Expectations::new(&log);
+    for row in 0..main.num_rows() {
+        let idx = RowIndex::from(row);
+        let next = RowIndex::from(row + 1);
+        let op = main.get_op_code(idx);
 
-    // make sure the first entry is ONE
-    let mut expected_value = ONE;
-    assert_eq!(expected_value, p1[0]);
-
-    // SPAN and U32ADD do not affect the overflow table
-    assert_eq!(expected_value, p1[1]);
-    assert_eq!(expected_value, p1[2]);
-
-    // two PADs push values 1 and 2 onto the overflow table
-    expected_value *= row_values[0];
-    assert_eq!(expected_value, p1[3]);
-    expected_value *= row_values[1];
-    assert_eq!(expected_value, p1[4]);
-
-    // U32ADD does not affect the overflow table
-    assert_eq!(expected_value, p1[5]);
-
-    // DROP removes a row from the overflow table
-    expected_value *= row_values[1].inverse();
-    assert_eq!(expected_value, p1[6]);
-
-    // PAD pushes the value onto the overflow table again
-    expected_value *= row_values[2];
-    assert_eq!(expected_value, p1[7]);
-
-    // two DROPs remove both values from the overflow table
-    expected_value *= row_values[2].inverse();
-    assert_eq!(expected_value, p1[8]);
-    expected_value *= row_values[0].inverse();
-    assert_eq!(expected_value, p1[9]);
-
-    // at this point the table should be empty
-    assert_eq!(expected_value, ONE);
-
-    // the 3rd DROP should not affect the overflow table as it is already empty
-    assert_eq!(expected_value, p1[10]);
-
-    // PAD pushes the value (ZERO) onto the overflow table again
-    expected_value *= row_values[3];
-    assert_eq!(expected_value, p1[11]);
-
-    // and then the last DROP removes it from the overflow table
-    expected_value *= row_values[3].inverse();
-    assert_eq!(expected_value, p1[12]);
-
-    // at this point the table should be empty again, and it should stay empty until the end
-    assert_eq!(expected_value, ONE);
-    for i in 13..(p1.len()) {
-        assert_eq!(ONE, p1[i]);
+        if op == Felt::from_u8(opcodes::PAD) {
+            // Right shift: `add (clk, s15, b1)`.
+            exp.add(
+                row,
+                &StackOverflowMsg {
+                    clk: main.clk(idx),
+                    val: main.stack_element(15, idx),
+                    prev: main.parent_overflow_address(idx),
+                },
+            );
+        } else if op == Felt::from_u8(opcodes::DROP) && main.is_non_empty_overflow(idx) {
+            // Left shift with non-empty overflow: `remove (b1, s15', b1')`.
+            exp.remove(
+                row,
+                &StackOverflowMsg {
+                    clk: main.parent_overflow_address(idx),
+                    val: main.stack_element(15, next),
+                    prev: main.parent_overflow_address(next),
+                },
+            );
+        }
     }
+
+    // 4 PADs and 4 DROPs-with-non-empty-overflow (only the lone DROP on an empty overflow
+    // table emits nothing).
+    assert_eq!(exp.count_adds(), 4, "expected one add per PAD");
+    assert_eq!(exp.count_removes(), 4, "expected one remove per DROP with non-empty overflow");
+    log.assert_contains(&exp);
 }

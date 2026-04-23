@@ -1,372 +1,292 @@
-use miden_air::trace::{
-    Challenges, RowIndex,
-    chiplets::{
-        MEMORY_CLK_COL_IDX, MEMORY_CTX_COL_IDX, MEMORY_IDX0_COL_IDX, MEMORY_IDX1_COL_IDX,
-        MEMORY_IS_READ_COL_IDX, MEMORY_IS_WORD_ACCESS_COL_IDX, MEMORY_V_COL_RANGE,
-        MEMORY_WORD_COL_IDX,
-        memory::{
-            MEMORY_ACCESS_ELEMENT, MEMORY_ACCESS_WORD, MEMORY_READ, MEMORY_READ_ELEMENT_LABEL,
-            MEMORY_READ_WORD_LABEL, MEMORY_WRITE, MEMORY_WRITE_ELEMENT_LABEL,
-            MEMORY_WRITE_WORD_LABEL,
-        },
+//! Memory-chiplet bus tests.
+//!
+//! Exercises stack-issued memory opcodes (`MStoreW`, `MLoadW`, `MLoad`, `MStore`, `MStream`)
+//! plus the `CryptoStream` double-word read+write pair, and verifies the chiplet-requests /
+//! chiplet-responses bus pair.
+//!
+//! For each stack-level memory op the test registers an expected `-1` push of a
+//! [`MemoryMsg`] (the "request" side). For each memory chiplet row the test registers an
+//! expected `+1` push of a [`MemoryResponseMsg`] (the "response" side). The subset matcher in
+//! `lookup_harness` is column-blind, so a `(mult, denom)` pair on the response side pairs up
+//! with a matching `(-mult, denom)` on the request side regardless of which aux column the
+//! framework routes them onto.
+//!
+//! # Scope
+//!
+//! Coverage is limited to the stack-only memory ops above plus `CryptoStream`. The DYN,
+//! DYNCALL, CALL-FMP-write, and PIPE memory-request paths in
+//! `air/src/constraints/lookup/buses/chiplet_requests.rs` are deferred to integration tests —
+//! each is heavyweight to set up and small in algebraic surface. A bug in those paths would
+//! escape this module.
+//!
+//! The programs run at ctx = 0 throughout (no CALL/SYSCALL), so a request/response bug that
+//! mismatches stack-side `ctx` vs chiplet-side `mem_ctx` is not caught here.
+
+use miden_air::{
+    logup::{MemoryMsg, MemoryResponseMsg},
+    trace::{
+        MainTrace,
+        chiplets::{MEMORY_IS_READ_COL_IDX, MEMORY_IS_WORD_ACCESS_COL_IDX},
     },
 };
-use miden_core::{WORD_SIZE, field::Field};
-
-use super::{
-    AUX_TRACE_RAND_CHALLENGES, CHIPLETS_BUS_AUX_TRACE_OFFSET, ExecutionTrace, Felt, HASH_CYCLE_LEN,
-    ONE, Operation, Word, ZERO, build_trace_from_ops, rand_array,
+use miden_core::{
+    Felt, ONE, ZERO,
+    operations::{Operation, opcodes},
 };
 
-/// Tests the generation of the `b_chip` bus column when only memory lookups are included. It
-/// ensures that trace generation is correct when all of the following are true.
-///
-/// - All possible memory operations are called by the stack.
-/// - Some requests from the Stack and responses from Memory occur at the same cycle.
-/// - Multiple memory addresses are used.
-///
-/// Note: Communication with the Hash chiplet is also required, due to the span block decoding, but
-/// for this test we set those values explicitly, enforcing only that the same initial and final
-/// values are requested & provided.
-#[test]
-fn b_chip_trace_mem() {
-    const FOUR: Felt = Felt::new_unchecked(4);
+use super::super::{
+    build_trace_from_ops,
+    lookup_harness::{Expectations, InteractionLog},
+};
+use crate::RowIndex;
 
+const FOUR: Felt = Felt::new_unchecked(4);
+
+/// Covers `MStoreW`, `MLoad`, `MLoadW`, `MStore`, `MStream` — every memory opcode issuable
+/// directly from the stack — asserting the chiplet-bus request/response pair fires at every
+/// memory row.
+#[test]
+fn memory_chiplet_bus_request_response_pairs() {
     let stack = [0, 1, 2, 3, 4];
-    let word = [ONE, Felt::new_unchecked(2), Felt::new_unchecked(3), Felt::new_unchecked(4)];
     let operations = vec![
-        Operation::MStoreW, // store [1, 2, 3, 4]
-        Operation::Drop,    // clear the stack
+        Operation::MStoreW, // store [1, 2, 3, 4] at addr 0
         Operation::Drop,
         Operation::Drop,
         Operation::Drop,
-        Operation::MLoad,      // read the first value of the word
-        Operation::MovDn5,     // put address 0 and space for a full word at top of stack
-        Operation::MLoadW,     // load word from address 0 to stack
-        Operation::Push(ONE),  // push a new value onto the stack
-        Operation::Push(FOUR), // push a new address on to the stack
-        Operation::MStore,     // store 1 at address 4
-        Operation::Drop,       // ensure the stack overflow table is empty
-        Operation::MStream,    // read 2 words starting at address 0
+        Operation::Drop,
+        Operation::MLoad,      // read first element at addr 0
+        Operation::MovDn5,     // reshape stack
+        Operation::MLoadW,     // load word from addr 0
+        Operation::Push(ONE),  // value = 1
+        Operation::Push(FOUR), // addr = 4
+        Operation::MStore,     // store 1 at addr 4
+        Operation::Drop,
+        Operation::MStream, // two-word read starting at stack[12]
     ];
     let trace = build_trace_from_ops(operations, &stack);
+    let log = InteractionLog::new(&trace);
+    let main = trace.main_trace();
 
-    let challenges = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
-    let aux_columns = trace.build_aux_trace(&challenges).unwrap();
-    let b_chip = aux_columns.get_column(CHIPLETS_BUS_AUX_TRACE_OFFSET);
-    let challenges = Challenges::<Felt>::new(challenges[0], challenges[1]);
-    assert_eq!(trace.length(), b_chip.len());
-    assert_eq!(ONE, b_chip[0]);
+    let mut exp = Expectations::new(&log);
 
-    // At cycle 0 the span hash initialization is requested from the decoder and provided by the
-    // hash chiplet, so the trace should still equal one.
-    assert_eq!(ONE, b_chip[1]);
-
-    // At row 1, two things happen simultaneously:
-    // - The hasher provides the HOUT response (span hash result) at controller output row 1
-    // - The stack sends the MStoreW memory write request (user op at cycle 1)
-    // Extract the HOUT response as a black box.
-    let mstore_value = build_expected_bus_word_msg(
-        &challenges,
-        MEMORY_WRITE_WORD_LABEL,
-        ZERO,
-        ZERO,
-        ONE,
-        word.into(),
-    );
-    // b_chip[2] = ONE * hout_response * mstore_value.inverse()
-    let hout_response = b_chip[2] * mstore_value;
-    let mut expected = hout_response * mstore_value.inverse();
-    assert_eq!(expected, b_chip[2]);
-
-    // Nothing changes after user operations that don't make requests to the Chiplets.
-    for row in 3..7 {
-        assert_eq!(expected, b_chip[row]);
+    // ---- Request side: stack rows emit `-1 × MemoryMsg` when their opcode is a memory op.
+    //
+    // We also count the number of `remove` calls and assert it matches the expected total at
+    // the end. Without this, a bug that stopped the emitter entirely would pass vacuously:
+    // the request-opcode loop iterates the trace, so no memory rows → no expectations →
+    // trivial subset match.
+    let mut request_exps_added = 0usize;
+    for row in 0..main.num_rows() {
+        let idx = RowIndex::from(row);
+        let ctx = main.ctx(idx);
+        let clk = main.clk(idx);
+        let next = RowIndex::from(row + 1);
+        let op = main.get_op_code(idx).as_canonical_u64();
+        if op == opcodes::MLOAD as u64 {
+            let addr = main.stack_element(0, idx);
+            let value = main.stack_element(0, next);
+            exp.remove(row, &MemoryMsg::read_element(ctx, addr, clk, value));
+            request_exps_added += 1;
+        } else if op == opcodes::MSTORE as u64 {
+            let addr = main.stack_element(0, idx);
+            let value = main.stack_element(1, idx);
+            exp.remove(row, &MemoryMsg::write_element(ctx, addr, clk, value));
+            request_exps_added += 1;
+        } else if op == opcodes::MLOADW as u64 {
+            let addr = main.stack_element(0, idx);
+            let word = next_word(main, next, 0);
+            exp.remove(row, &MemoryMsg::read_word(ctx, addr, clk, word));
+            request_exps_added += 1;
+        } else if op == opcodes::MSTOREW as u64 {
+            let addr = main.stack_element(0, idx);
+            let word = [
+                main.stack_element(1, idx),
+                main.stack_element(2, idx),
+                main.stack_element(3, idx),
+                main.stack_element(4, idx),
+            ];
+            exp.remove(row, &MemoryMsg::write_word(ctx, addr, clk, word));
+            request_exps_added += 1;
+        } else if op == opcodes::MSTREAM as u64 {
+            let base = main.stack_element(12, idx);
+            let word0 = next_word(main, next, 0);
+            let word1 = next_word(main, next, 4);
+            exp.remove(row, &MemoryMsg::read_word(ctx, base, clk, word0));
+            exp.remove(row, &MemoryMsg::read_word(ctx, base + FOUR, clk, word1));
+            request_exps_added += 2;
+        }
     }
+    // 5 stack opcodes (MStoreW, MLoad, MLoadW, MStore, MStream) + 1 extra for MStream's 2nd read.
+    assert_eq!(request_exps_added, 6, "expected 6 memory request expectations");
 
-    // The next memory request from the stack is sent when `MLoad` is executed at cycle 6 and
-    // included at row 7
-    let value = build_expected_bus_element_msg(
-        &challenges,
-        MEMORY_READ_ELEMENT_LABEL,
-        ZERO,
-        ZERO,
-        Felt::new_unchecked(6),
-        word[0],
-    );
-    expected *= value.inverse();
-    assert_eq!(expected, b_chip[7]);
+    // ---- Response side: every memory chiplet row emits `+1 × MemoryResponseMsg`.
+    let mut mem_rows_seen = 0usize;
+    for row in 0..main.num_rows() {
+        let idx = RowIndex::from(row);
+        if !main.is_memory_row(idx) {
+            continue;
+        }
+        mem_rows_seen += 1;
 
-    // Nothing changes until the next memory request from the stack: `MLoadW` executed at cycle 8
-    // and included at row 9.
-    let value = build_expected_bus_word_msg(
-        &challenges,
-        MEMORY_READ_WORD_LABEL,
-        ZERO,
-        ZERO,
-        Felt::new_unchecked(8),
-        word.into(),
-    );
-    expected *= value.inverse();
-    assert_eq!(expected, b_chip[9]);
+        let is_read = main.get(idx, MEMORY_IS_READ_COL_IDX);
+        let is_word = main.get(idx, MEMORY_IS_WORD_ACCESS_COL_IDX);
+        let mem_ctx = main.chiplet_memory_ctx(idx);
+        let word_addr = main.chiplet_memory_word(idx);
+        let idx0 = main.chiplet_memory_idx0(idx);
+        let idx1 = main.chiplet_memory_idx1(idx);
+        let addr = word_addr + idx1.double() + idx0;
+        let mem_clk = main.chiplet_memory_clk(idx);
+        let word = [
+            main.chiplet_memory_value_0(idx),
+            main.chiplet_memory_value_1(idx),
+            main.chiplet_memory_value_2(idx),
+            main.chiplet_memory_value_3(idx),
+        ];
+        // `element` is ignored by `MemoryResponseMsg::encode` when `is_word = 1`, so on
+        // word-access rows the fallback `ZERO` is harmless. `element_idx` uses `u64`
+        // arithmetic (native `usize` indexing) while `addr` above uses felt arithmetic —
+        // same math, different domain required by the consumer.
+        let element = if is_word == ZERO {
+            let element_idx = (idx1.as_canonical_u64() * 2 + idx0.as_canonical_u64()) as usize;
+            word[element_idx]
+        } else {
+            ZERO
+        };
 
-    // Nothing changes until the next memory request from the stack.
-    assert_eq!(expected, b_chip[10]);
-
-    // At cycle 11, `MStore` is requested by the stack and included at row 12.
-    let value = build_expected_bus_element_msg(
-        &challenges,
-        MEMORY_WRITE_ELEMENT_LABEL,
-        ZERO,
-        FOUR,
-        Felt::new_unchecked(11),
-        ONE,
-    );
-    expected *= value.inverse();
-    assert_eq!(expected, b_chip[12]);
-
-    // Nothing changes until the next memory request from the stack.
-    assert_eq!(expected, b_chip[13]);
-
-    // At cycle 13, `MStream` is requested by the stack, and the second read of `MStream` is
-    // requested for inclusion at row 14.
-    let value1 = build_expected_bus_word_msg(
-        &challenges,
-        MEMORY_READ_WORD_LABEL,
-        ZERO,
-        ZERO,
-        Felt::new_unchecked(13),
-        word.into(),
-    );
-    let value2 = build_expected_bus_word_msg(
-        &challenges,
-        MEMORY_READ_WORD_LABEL,
-        ZERO,
-        Felt::new_unchecked(4),
-        Felt::new_unchecked(13),
-        [ONE, ZERO, ZERO, ZERO].into(),
-    );
-    expected *= (value1 * value2).inverse();
-    assert_eq!(expected, b_chip[14]);
-
-    // At cycle 14 the decoder requests the span hash result (END). In the controller/perm split,
-    // the hasher already provided the HOUT response at row 1. The END request should cancel with
-    // it. We capture the multiplicand as a black box.
-    assert_ne!(expected, b_chip[15]);
-    let span_end_mult = b_chip[15] * expected.inverse();
-    expected = b_chip[15];
-
-    // Verify the HOUT response and END request cancel.
-    assert_eq!(hout_response * span_end_mult, ONE);
-
-    // Nothing changes until the memory segment starts. The hasher contributes 32 total rows:
-    // 16 rows for the padded controller region (2 controller rows + 14 padding) and 16 rows for
-    // the packed permutation segment. No bitwise ops, so memory starts at row 32.
-    let memory_start = 2 * HASH_CYCLE_LEN; // controller(16 padded) + perm(16)
-    for row in 16..memory_start {
-        assert_eq!(expected, b_chip[row]);
+        exp.add(
+            row,
+            &MemoryResponseMsg {
+                is_read,
+                ctx: mem_ctx,
+                addr,
+                clk: mem_clk,
+                is_word,
+                element,
+                word,
+            },
+        );
     }
+    // 6 memory operations: MStoreW, MLoad, MLoadW, MStore, MStream (2 rows).
+    assert_eq!(mem_rows_seen, 6, "expected 6 memory chiplet rows");
 
-    // Memory responses are provided during the memory segment after the hash cycle. There will be 6
-    // rows, corresponding to the 5 memory operations (MStream requires 2 rows).
-
-    // At cycle 8 `MLoadW` was requested by the stack; `MStoreW` is provided by memory here.
-    expected *= build_expected_bus_msg_from_trace(&trace, &challenges, memory_start.into());
-    assert_eq!(expected, b_chip[memory_start + 1]);
-
-    // At cycle 9, `MLoad` is provided by memory.
-    expected *= build_expected_bus_msg_from_trace(&trace, &challenges, (memory_start + 1).into());
-    assert_eq!(expected, b_chip[memory_start + 2]);
-
-    // At cycle 10,  `MLoadW` is provided by memory.
-    expected *= build_expected_bus_msg_from_trace(&trace, &challenges, (memory_start + 2).into());
-    assert_eq!(expected, b_chip[memory_start + 3]);
-
-    // At cycle 11, `MStore` is provided by the memory.
-    expected *= build_expected_bus_msg_from_trace(&trace, &challenges, (memory_start + 3).into());
-    assert_eq!(expected, b_chip[memory_start + 4]);
-
-    // At cycle 12, the first read of `MStream` is provided by the memory.
-    expected *= build_expected_bus_msg_from_trace(&trace, &challenges, (memory_start + 4).into());
-    assert_eq!(expected, b_chip[memory_start + 5]);
-
-    // At cycle 13, the second read of `MStream` is provided by the memory.
-    expected *= build_expected_bus_msg_from_trace(&trace, &challenges, (memory_start + 5).into());
-    assert_eq!(expected, b_chip[memory_start + 6]);
-
-    // The value in b_chip should be ONE now and for the rest of the trace.
-    for row in (memory_start + 6)..trace.length() {
-        assert_eq!(ONE, b_chip[row]);
-    }
+    log.assert_contains(&exp);
 }
 
+/// Regression test for a production bug where `CryptoStream`'s four memory requests weren't
+/// being emitted onto the chiplet-requests bus. Verifies the exact read+read+write+write
+/// pattern using hand-coded expected values (ciphertext = plaintext + rate), not values
+/// read back from the trace — a missing emission, a wrong opcode label, or a swapped
+/// addr/clk would all fail the subset match.
 #[test]
-fn crypto_stream_missing_chiplets_bus_requests() {
-    // `crypto_stream` stack layout: [rate(8), cap(4), src_ptr, dst_ptr, ...]
+fn cryptostream_emits_four_memory_requests() {
+    // `crypto_stream` stack layout: [rate(8), cap(4), src_ptr, dst_ptr, pad, pad]
     let stack = [
         1, 2, 3, 4, 5, 6, 7, 8, // rate(8)
         0, 0, 0, 0, // cap(4)
         0, // src_ptr
         8, // dst_ptr
-        0, 0, // unused
+        0, 0, // pad
     ];
 
     let trace = build_trace_from_ops(vec![Operation::CryptoStream], &stack);
-    let rand_challenges = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
-    let aux_columns = trace.build_aux_trace(&rand_challenges).unwrap();
-    let b_chip = aux_columns.get_column(CHIPLETS_BUS_AUX_TRACE_OFFSET);
-    let challenges = Challenges::<Felt>::new(rand_challenges[0], rand_challenges[1]);
+    let log = InteractionLog::new(&trace);
 
-    // --- Assert exact bus requests for the four CryptoStream memory operations. ---
+    let mut exp = Expectations::new(&log);
 
-    // CryptoStream with src_ptr=0, dst_ptr=8, rate=[1..8], and uninitialized (zero) memory:
-    //   - reads  word at addr 0: plaintext = [0, 0, 0, 0]
-    //   - reads  word at addr 4: plaintext = [0, 0, 0, 0]
-    //   - writes word at addr 8: ciphertext = plaintext + rate = [1, 2, 3, 4]
-    //   - writes word at addr 12: ciphertext = [5, 6, 7, 8]
-    let ctx = ZERO;
-    let clk = ONE; // CryptoStream executes at cycle 1 (cycle 0 is SPAN)
+    // CryptoStream runs at cycle 1 (cycle 0 is SPAN), ctx = 0, uninitialized source memory
+    // (reads return zeros). Ciphertext = plaintext + rate = rate in this case.
+    const ROW: usize = 1;
+    let zero_word = [ZERO, ZERO, ZERO, ZERO];
+    let cipher1 = [
+        Felt::new_unchecked(1),
+        Felt::new_unchecked(2),
+        Felt::new_unchecked(3),
+        Felt::new_unchecked(4),
+    ];
+    let cipher2 = [
+        Felt::new_unchecked(5),
+        Felt::new_unchecked(6),
+        Felt::new_unchecked(7),
+        Felt::new_unchecked(8),
+    ];
 
-    let read1 = build_expected_bus_word_msg(
-        &challenges,
-        MEMORY_READ_WORD_LABEL,
-        ctx,
-        ZERO, // src_ptr = 0
-        clk,
-        [ZERO, ZERO, ZERO, ZERO].into(),
-    );
-    let read2 = build_expected_bus_word_msg(
-        &challenges,
-        MEMORY_READ_WORD_LABEL,
-        ctx,
-        Felt::new_unchecked(4), // src_ptr + 4
-        clk,
-        [ZERO, ZERO, ZERO, ZERO].into(),
-    );
-    let write1 = build_expected_bus_word_msg(
-        &challenges,
-        MEMORY_WRITE_WORD_LABEL,
-        ctx,
-        Felt::new_unchecked(8), // dst_ptr = 8
-        clk,
-        [ONE, Felt::new_unchecked(2), Felt::new_unchecked(3), Felt::new_unchecked(4)].into(),
-    );
-    let write2 = build_expected_bus_word_msg(
-        &challenges,
-        MEMORY_WRITE_WORD_LABEL,
-        ctx,
-        Felt::new_unchecked(12), // dst_ptr + 4
-        clk,
-        [
-            Felt::new_unchecked(5),
-            Felt::new_unchecked(6),
-            Felt::new_unchecked(7),
-            Felt::new_unchecked(8),
-        ]
-        .into(),
-    );
+    let mut request_exps_added = 0usize;
+    // read src_ptr, read src_ptr + 4
+    exp.remove(ROW, &MemoryMsg::read_word(ZERO, ZERO, ONE, zero_word));
+    request_exps_added += 1;
+    exp.remove(ROW, &MemoryMsg::read_word(ZERO, FOUR, ONE, zero_word));
+    request_exps_added += 1;
+    // write dst_ptr, write dst_ptr + 4
+    exp.remove(ROW, &MemoryMsg::write_word(ZERO, Felt::new_unchecked(8), ONE, cipher1));
+    request_exps_added += 1;
+    exp.remove(ROW, &MemoryMsg::write_word(ZERO, Felt::new_unchecked(12), ONE, cipher2));
+    request_exps_added += 1;
 
-    // All four requests are emitted at the same cycle, so they multiply together.
-    let combined_request = (read1 * read2 * write1 * write2).inverse();
+    assert_eq!(request_exps_added, 4, "expected 4 CryptoStream request expectations");
 
-    // b_chip[0] should be ONE. At cycle 0, span hash init request and response cancel.
-    assert_eq!(ONE, b_chip[0]);
-    assert_eq!(ONE, b_chip[1]);
-
-    // At row 1, the hasher's HOUT response and the CryptoStream's 4 memory requests all occur.
-    // Extract the HOUT response as a black box.
-    let hout_response = b_chip[2] * combined_request.inverse();
-    assert_eq!(hout_response * combined_request, b_chip[2]);
-
-    // The chiplets bus should be balanced: final value must be ONE.
-    assert_eq!(*b_chip.last().unwrap(), ONE);
+    log.assert_contains(&exp);
 }
 
-// TEST HELPERS
-// ================================================================================================
+/// Regression test for a previously unwired path where `HornerBase`'s two element-reads
+/// weren't emitted onto the chiplet-requests bus. HornerBase reads α = (α₀, α₁) from
+/// memory at (`alpha_ptr`, `alpha_ptr + 1`) — uninitialized memory returns zeros, and
+/// the trace stores those same zeros into helpers[0..2], so a missing request or a
+/// swapped addr/clk would fail the subset match.
+#[test]
+fn hornerbase_emits_two_memory_requests() {
+    // HornerBase stack layout: [c0..c7, _, _, _, _, _, alpha_ptr, acc_low, acc_high]
+    let stack = [
+        1, 2, 3, 4, 5, 6, 7, 8, // coeffs[0..8]
+        0, 0, 0, 0, 0, // pad (5 slots)
+        0, // alpha_ptr (stack[13])
+        0, 0, // acc_low, acc_high
+    ];
 
-fn build_expected_bus_element_msg(
-    challenges: &Challenges<Felt>,
-    op_label: u8,
-    ctx: Felt,
-    addr: Felt,
-    clk: Felt,
-    value: Felt,
-) -> Felt {
-    assert!(op_label == MEMORY_READ_ELEMENT_LABEL || op_label == MEMORY_WRITE_ELEMENT_LABEL);
+    let trace = build_trace_from_ops(vec![Operation::HornerBase], &stack);
+    let log = InteractionLog::new(&trace);
 
-    challenges.encode(
-        miden_air::trace::bus_types::CHIPLETS_BUS,
-        [Felt::from_u8(op_label), ctx, addr, clk, value],
-    )
+    let mut exp = Expectations::new(&log);
+
+    // HornerBase runs at cycle 1 (cycle 0 is SPAN), ctx = 0, uninitialized memory returns zeros.
+    const ROW: usize = 1;
+    exp.remove(ROW, &MemoryMsg::read_element(ZERO, ZERO, ONE, ZERO));
+    exp.remove(ROW, &MemoryMsg::read_element(ZERO, ONE, ONE, ZERO));
+
+    log.assert_contains(&exp);
 }
 
-fn build_expected_bus_word_msg(
-    challenges: &Challenges<Felt>,
-    op_label: u8,
-    ctx: Felt,
-    addr: Felt,
-    clk: Felt,
-    word: Word,
-) -> Felt {
-    assert!(op_label == MEMORY_READ_WORD_LABEL || op_label == MEMORY_WRITE_WORD_LABEL);
+/// Regression test for a previously unwired path where `HornerExt`'s single word-read
+/// wasn't emitted onto the chiplet-requests bus. HornerExt reads `[α₀, α₁, k₀, k₁]` as a
+/// single word from `alpha_ptr`; uninitialized memory returns the zero word, which the
+/// trace parks in helpers[0..4].
+#[test]
+fn hornerext_emits_one_memory_request() {
+    // HornerExt stack layout: [s0_lo, s0_hi, ..., s3_lo, s3_hi, _, _, _, _, _, alpha_ptr,
+    // acc_low, acc_high]
+    let stack = [
+        1, 2, 3, 4, 5, 6, 7, 8, // 4 extension coeffs (s0..s3)
+        0, 0, 0, 0, 0, // pad (5 slots)
+        0, // alpha_ptr (stack[13])
+        0, 0, // acc_low, acc_high
+    ];
 
-    challenges.encode(
-        miden_air::trace::bus_types::CHIPLETS_BUS,
-        [Felt::from_u8(op_label), ctx, addr, clk, word[0], word[1], word[2], word[3]],
-    )
+    let trace = build_trace_from_ops(vec![Operation::HornerExt], &stack);
+    let log = InteractionLog::new(&trace);
+
+    let mut exp = Expectations::new(&log);
+
+    const ROW: usize = 1;
+    let zero_word = [ZERO, ZERO, ZERO, ZERO];
+    exp.remove(ROW, &MemoryMsg::read_word(ZERO, ZERO, ONE, zero_word));
+
+    log.assert_contains(&exp);
 }
 
-fn build_expected_bus_msg_from_trace(
-    trace: &ExecutionTrace,
-    challenges: &Challenges<Felt>,
-    row: RowIndex,
-) -> Felt {
-    // get the memory access operation
-    let read_write = trace.main_trace.get_column(MEMORY_IS_READ_COL_IDX)[row];
-    let element_or_word = trace.main_trace.get_column(MEMORY_IS_WORD_ACCESS_COL_IDX)[row];
-    let op_label = if read_write == MEMORY_WRITE {
-        if element_or_word == MEMORY_ACCESS_ELEMENT {
-            MEMORY_WRITE_ELEMENT_LABEL
-        } else {
-            MEMORY_WRITE_WORD_LABEL
-        }
-    } else if read_write == MEMORY_READ {
-        if element_or_word == MEMORY_ACCESS_ELEMENT {
-            MEMORY_READ_ELEMENT_LABEL
-        } else {
-            MEMORY_READ_WORD_LABEL
-        }
-    } else {
-        panic!("invalid read_write value: {read_write}");
-    };
-
-    // get the memory access data
-    let ctx = trace.main_trace.get_column(MEMORY_CTX_COL_IDX)[row];
-    let addr = {
-        let word = trace.main_trace.get_column(MEMORY_WORD_COL_IDX)[row];
-        let idx1 = trace.main_trace.get_column(MEMORY_IDX1_COL_IDX)[row];
-        let idx0 = trace.main_trace.get_column(MEMORY_IDX0_COL_IDX)[row];
-
-        word + idx1.double() + idx0
-    };
-    let clk = trace.main_trace.get_column(MEMORY_CLK_COL_IDX)[row];
-
-    // get the memory value
-    let mut word = [ZERO; WORD_SIZE];
-    for (i, element) in word.iter_mut().enumerate() {
-        *element = trace.main_trace.get_column(MEMORY_V_COL_RANGE.start + i)[row];
-    }
-
-    if element_or_word == MEMORY_ACCESS_ELEMENT {
-        let idx1 = trace.main_trace.get_column(MEMORY_IDX1_COL_IDX)[row].as_canonical_u64();
-        let idx0 = trace.main_trace.get_column(MEMORY_IDX0_COL_IDX)[row].as_canonical_u64();
-        let idx = idx1 * 2 + idx0;
-
-        build_expected_bus_element_msg(challenges, op_label, ctx, addr, clk, word[idx as usize])
-    } else if element_or_word == MEMORY_ACCESS_WORD {
-        build_expected_bus_word_msg(challenges, op_label, ctx, addr, clk, word.into())
-    } else {
-        panic!("invalid element_or_word value: {element_or_word}");
-    }
+fn next_word(main: &MainTrace, next: RowIndex, start: usize) -> [Felt; 4] {
+    [
+        main.stack_element(start, next),
+        main.stack_element(start + 1, next),
+        main.stack_element(start + 2, next),
+        main.stack_element(start + 3, next),
+    ]
 }

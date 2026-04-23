@@ -501,18 +501,11 @@ mod fast_parallel {
         let (public_values, kernel_felts) = trace.public_inputs().to_air_inputs();
         let var_len_public_inputs: &[&[Felt]] = &[&kernel_felts];
 
-        let aux_builder = trace.aux_trace_builders();
-
         // Generate proof using Blake3_256
         let blake3_config = config::blake3_256_config(config::pcs_params());
-        let proof_bytes = prove_stark(
-            &blake3_config,
-            &trace_matrix,
-            &public_values,
-            var_len_public_inputs,
-            &aux_builder,
-        )
-        .expect("Proving failed");
+        let proof_bytes =
+            prove_stark(&blake3_config, &trace_matrix, &public_values, var_len_public_inputs)
+                .expect("Proving failed");
 
         let precompile_requests = trace.precompile_requests().to_vec();
 

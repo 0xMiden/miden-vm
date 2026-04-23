@@ -9,7 +9,7 @@ use miden_utils_testing::rand::rand_quad_felt;
 /// Build the batched ACE circuit for the Miden VM ProcessorAir.
 fn build_batched_circuit(config: AceConfig) -> AceCircuit<QuadFelt> {
     let air = miden_air::ProcessorAir;
-    let batch_config = miden_air::ace::reduced_aux_batch_config();
+    let batch_config = miden_air::ace::logup_boundary_config();
     miden_air::ace::build_batched_ace_circuit::<_, QuadFelt>(&air, config, &batch_config).unwrap()
 }
 

@@ -14,7 +14,7 @@ use miden_crypto::stark::{
 };
 use miden_processor::{
     FastProcessor, Program,
-    trace::{AuxTraceBuilders, ExecutionTrace, build_trace},
+    trace::{ExecutionTrace, build_trace},
 };
 use tracing::instrument;
 
@@ -134,29 +134,28 @@ fn prove_execution_trace(
 
     let (public_values, kernel_felts) = trace.public_inputs().to_air_inputs();
     let var_len_public_inputs: &[&[Felt]] = &[&kernel_felts];
-    let aux_builder = trace.aux_trace_builders();
 
     let params = config::pcs_params();
     let proof_bytes = match hash_fn {
         HashFunction::Blake3_256 => {
             let config = config::blake3_256_config(params);
-            prove_stark(&config, &trace_matrix, &public_values, var_len_public_inputs, &aux_builder)
+            prove_stark(&config, &trace_matrix, &public_values, var_len_public_inputs)
         },
         HashFunction::Keccak => {
             let config = config::keccak_config(params);
-            prove_stark(&config, &trace_matrix, &public_values, var_len_public_inputs, &aux_builder)
+            prove_stark(&config, &trace_matrix, &public_values, var_len_public_inputs)
         },
         HashFunction::Rpo256 => {
             let config = config::rpo_config(params);
-            prove_stark(&config, &trace_matrix, &public_values, var_len_public_inputs, &aux_builder)
+            prove_stark(&config, &trace_matrix, &public_values, var_len_public_inputs)
         },
         HashFunction::Poseidon2 => {
             let config = config::poseidon2_config(params);
-            prove_stark(&config, &trace_matrix, &public_values, var_len_public_inputs, &aux_builder)
+            prove_stark(&config, &trace_matrix, &public_values, var_len_public_inputs)
         },
         HashFunction::Rpx256 => {
             let config = config::rpx_config(params);
-            prove_stark(&config, &trace_matrix, &public_values, var_len_public_inputs, &aux_builder)
+            prove_stark(&config, &trace_matrix, &public_values, var_len_public_inputs)
         },
     }?;
 
@@ -176,7 +175,6 @@ pub fn prove_stark<SC>(
     trace: &RowMajorMatrix<Felt>,
     public_values: &[Felt],
     var_len_public_inputs: VarLenPublicInputs<'_, Felt>,
-    aux_builder: &AuxTraceBuilders,
 ) -> Result<Vec<u8>, ExecutionError>
 where
     SC: StarkConfig<Felt, QuadFelt>,
@@ -192,7 +190,7 @@ where
         trace,
         public_values,
         var_len_public_inputs,
-        aux_builder,
+        &ProcessorAir,
         challenger,
     )
     .map_err(|e| ExecutionError::ProvingError(e.to_string()))?;
