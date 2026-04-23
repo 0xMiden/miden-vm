@@ -56,7 +56,8 @@ pub struct TraceBreakdown {
     /// Kernel ROM rows. Not drivable from plain MASM; folded into memory.
     #[serde(default)]
     pub kernel_rom_rows: u64,
-    /// ACE chiplet rows. Not drivable from plain MASM; folded into memory.
+    /// ACE chiplet rows. Not drivable from plain MASM; folded into memory. Some producer versions
+    /// may report this as zero until their processor dependency exposes the ACE trace accessor.
     #[serde(default)]
     pub ace_rows: u64,
 }
@@ -188,6 +189,34 @@ pub enum SnapshotError {
 mod tests {
     use super::*;
 
+    struct CommittedSnapshotExpectation {
+        file_stem: &'static str,
+        source: &'static str,
+        padded_core_side: u64,
+        padded_chiplets: u64,
+    }
+
+    const COMMITTED_SNAPSHOT_EXPECTATIONS: &[CommittedSnapshotExpectation] = &[
+        CommittedSnapshotExpectation {
+            file_stem: "consume-single-p2id",
+            source: "protocol/bench-transaction:consume-single-p2id",
+            padded_core_side: 131_072,
+            padded_chiplets: 131_072,
+        },
+        CommittedSnapshotExpectation {
+            file_stem: "consume-two-p2id",
+            source: "protocol/bench-transaction:consume-two-p2id",
+            padded_core_side: 131_072,
+            padded_chiplets: 262_144,
+        },
+    ];
+
+    fn expectation_for(file_stem: &str) -> Option<&'static CommittedSnapshotExpectation> {
+        COMMITTED_SNAPSHOT_EXPECTATIONS
+            .iter()
+            .find(|expected| expected.file_stem == file_stem)
+    }
+
     fn sample_shape() -> (TraceTotals, TraceBreakdown) {
         let breakdown = TraceBreakdown {
             hasher_rows: 200,
@@ -254,29 +283,42 @@ mod tests {
 
     #[test]
     fn committed_snapshots_roundtrip() {
-        let snapshots_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/snapshots");
-        let entries = std::fs::read_dir(snapshots_dir).expect("read snapshots dir");
-        let mut checked = 0;
+        let snapshots_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("snapshots");
+        let entries = std::fs::read_dir(&snapshots_dir)
+            .unwrap_or_else(|e| panic!("read {}: {e}", snapshots_dir.display()));
+        let mut discovered = Vec::new();
         for entry in entries {
             let path = entry.expect("dir entry").path();
             if path.extension().and_then(|e| e.to_str()) != Some("json") {
                 continue;
             }
+            let file_stem = path.file_stem().and_then(|s| s.to_str()).expect("snapshot stem");
+            let expected = expectation_for(file_stem)
+                .unwrap_or_else(|| panic!("unexpected committed snapshot: {}", path.display()));
             let snap = TraceSnapshot::load(&path)
                 .unwrap_or_else(|e| panic!("load {}: {e}", path.display()));
             assert_eq!(snap.schema_version, CURRENT_SCHEMA_VERSION);
+            assert_eq!(snap.source, expected.source);
             assert!(snap.trace.core_rows > 0);
             assert!(snap.trace.chiplets_rows > 0);
             assert_eq!(snap.trace.chiplets_rows, snap.shape.chiplets_sum());
+            assert_eq!(snap.trace.padded_core_side(), expected.padded_core_side);
+            assert_eq!(snap.trace.padded_chiplets(), expected.padded_chiplets);
 
             let reserialized = serde_json::to_string(&snap).expect("reserialize");
             let roundtripped: TraceSnapshot =
                 serde_json::from_str(&reserialized).expect("deserialize reserialized");
             assert_eq!(snap.trace, roundtripped.trace);
             assert_eq!(snap.shape, roundtripped.shape);
-            checked += 1;
+            discovered.push(file_stem.to_string());
         }
-        assert!(checked > 0, "no committed snapshots found under {snapshots_dir}");
+        discovered.sort();
+        let mut expected: Vec<_> = COMMITTED_SNAPSHOT_EXPECTATIONS
+            .iter()
+            .map(|expected| expected.file_stem)
+            .collect();
+        expected.sort();
+        assert_eq!(discovered, expected);
     }
 
     #[test]

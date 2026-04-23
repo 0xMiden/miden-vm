@@ -4,7 +4,7 @@ Criterion benchmark that reproduces the **proving-cost brackets** of a real
 Miden transaction workload from a small JSON snapshot -- without pulling in
 any protocol-level code.
 
-## Approach 
+## Approach
 
 STARK proving cost is dominated by the padded power-of-two lengths of the
 execution trace's segments. Everything else -- per-chiplet row counts,
@@ -87,6 +87,12 @@ The solver has no snippets targeting the ACE or kernel-ROM chiplets.
 Since snapshots still carry row counts for both, they're **folded into
 the memory target** -- growing memory ops preserves the overall
 chiplet-trace length and therefore the chiplet bracket.
+
+One producer-side caveat: the consumer can measure `ace_chiplet_len()`
+when it runs synthetic programs, but protocol snapshots may report
+`ace_rows: 0` until the protocol-side `miden-processor` dependency
+exposes that accessor. Treat zero ACE rows in a snapshot as a producer
+visibility limitation, not as proof that the VM emitted no ACE rows.
 
 ## Snapshot format
 
@@ -187,9 +193,11 @@ JSON per scenario under `bin/bench-transaction/snapshots/`. Flow:
    tables.
 
 Snapshots travel by hand so that the two repos can evolve independently. The
-loader rejects unknown `schema_version` values, and the bench prints a warning when
-`miden_vm_version` diverges from the consumer's local version
-(expected on miden-vm `next`, since `protocol` pins one release behind).
+loader rejects unknown `schema_version` values. A `miden_vm_version` major/minor
+mismatch is intentionally a loud warning, not a hard failure, because protocol
+often pins one miden-vm release behind `next`. Read bracket matches across a
+version mismatch as useful regression signals, then refresh the snapshots when
+the protocol-side pin catches up.
 
 ## Running
 

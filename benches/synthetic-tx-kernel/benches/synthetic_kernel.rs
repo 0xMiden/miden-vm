@@ -71,7 +71,8 @@ fn bench_one_snapshot(c: &mut Criterion, calibration: &Calibration, snapshot_pat
     let local_vm_version = env!("CARGO_PKG_VERSION");
     if !versions_align(&snapshot.miden_vm_version, local_vm_version) {
         println!(
-            "    warning: snapshot captured against miden-vm {}, consumer is running {}",
+            "    WARNING: snapshot captured against miden-vm {}, consumer is running {}; \
+             continuing because version skew is expected when protocol lags miden-vm",
             snapshot.miden_vm_version, local_vm_version,
         );
     }

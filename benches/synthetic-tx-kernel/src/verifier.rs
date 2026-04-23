@@ -209,7 +209,7 @@ fn write_bracket_row(
     actual: u64,
 ) -> fmt::Result {
     let ok = if target == actual { "==" } else { "MISS" };
-    writeln!(f, "{:<16} {:>12} {:>12} {:>10}", name, target, actual, ok)
+    writeln!(f, "{name:<16} {target:>12} {actual:>12} {ok:>10}")
 }
 
 #[cfg(test)]
