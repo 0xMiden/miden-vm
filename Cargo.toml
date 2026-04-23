@@ -72,13 +72,10 @@ miden-verifier          = { path = "./verifier", version = "0.23.0", default-fea
 miden-crypto     = { version = "0.24", default-features = false }
 miden-formatting = { version = "0.1", default-features = false }
 miden-lifted-stark = { version = "0.24", default-features = false }
-midenc-hir-type  = { version = "0.5.4", default-features = false }
+midenc-hir-type  = { version = "0.6.0", default-features = false }
 
 # Serialization
 bincode = "1.3"
-
-# Constraints to resolve duplicates
-windows-sys = "0.61"
 
 # Third-party crates
 criterion       = { version = "0.7" }
@@ -100,8 +97,6 @@ thiserror       = { version = "2.0", default-features = false }
 tokio           = { version = "1.48", default-features = false }
 tracing         = { version = "0.1", default-features = false, features = ["attributes"] }
 
-# WASM support
-getrandom = { version = "0.2", default-features = false, features = ["js"] }
 loom = "0.7"
 miette = { package = "miden-miette", version = "8.0", default-features = false }
 num-bigint = "0.4"
