@@ -10,6 +10,7 @@ use miden_assembly_syntax_cst::{
         AdviceMap as CstAdviceMap, AstNode, BeginBlock as CstBeginBlock, Constant as CstConstant,
         Import as CstImport, Item as CstItem, Procedure as CstProcedure, TypeDecl as CstTypeDecl,
     },
+    rowan,
 };
 use miden_debug_types::{SourceSpan, Span, Spanned};
 
@@ -573,7 +574,7 @@ fn import_target_token(import: &CstImport) -> Option<SyntaxToken> {
     for token in import
         .syntax()
         .children_with_tokens()
-        .filter_map(|element| element.into_token())
+        .filter_map(rowan::NodeOrToken::into_token)
     {
         if token.kind().is_trivia() {
             continue;

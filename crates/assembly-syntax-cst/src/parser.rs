@@ -1130,7 +1130,7 @@ impl<'input> Parser<'input> {
     }
 
     fn error_here(&mut self, message: impl Into<String>) {
-        let span = self.current().map(|token| token.span()).unwrap_or(self.eof_span);
+        let span = self.current().map(Token::span).unwrap_or(self.eof_span);
         self.diagnostics.push(diagnostic!(
             severity = Severity::Error,
             labels = vec![LabeledSpan::at(span, message.into())],
@@ -1448,7 +1448,7 @@ end
         assert!(
             procedure
                 .children_with_tokens()
-                .filter_map(|element| element.into_token())
+                .filter_map(rowan::NodeOrToken::into_token)
                 .any(|token| token.kind() == SyntaxKind::Comment && token.text().contains("proc"))
         );
 
@@ -1458,7 +1458,7 @@ end
             .expect("if node");
         let if_comments = if_node
             .children_with_tokens()
-            .filter_map(|element| element.into_token())
+            .filter_map(rowan::NodeOrToken::into_token)
             .filter(|token| token.kind() == SyntaxKind::Comment)
             .map(|token| token.text().to_string())
             .collect::<Vec<_>>();
@@ -1681,7 +1681,7 @@ end
         let nop = parse
             .syntax()
             .descendants_with_tokens()
-            .filter_map(|element| element.into_token())
+            .filter_map(rowan::NodeOrToken::into_token)
             .find(|token| token.text() == "nop")
             .expect("nop token");
         let offset = source.as_str().find("nop").expect("nop offset");

@@ -7,6 +7,7 @@ use alloc::{
 use miden_assembly_syntax_cst::{
     Parse as CstParse, SyntaxKind, SyntaxToken,
     ast::{AstNode, Path as CstPath, Visibility as CstVisibility},
+    rowan,
 };
 use miden_debug_types::{SourceFile, SourceSpan, Span};
 
@@ -138,7 +139,7 @@ impl<'a> LoweringContext<'a> {
     pub(super) fn lower_path(&mut self, path: &CstPath) -> Result<Span<Arc<Path>>, ParsingError> {
         let span = self.parse.span_for_node(path.syntax());
         let mut raw = String::new();
-        for token in path.syntax().children_with_tokens().filter_map(|element| element.into_token())
+        for token in path.syntax().children_with_tokens().filter_map(rowan::NodeOrToken::into_token)
         {
             if !token.kind().is_trivia() {
                 raw.push_str(token.text());
@@ -157,8 +158,9 @@ impl<'a> LoweringContext<'a> {
         span: SourceSpan,
         raw: &str,
     ) -> Result<Span<Arc<Path>>, ParsingError> {
-        let path = crate::ast::PathBuf::new(&raw).map_err(|error| {
-            ParsingError::InvalidLibraryPath { span, message: error.to_string() }
+        let path = ast::PathBuf::new(&raw).map_err(|error| ParsingError::InvalidLibraryPath {
+            span,
+            message: error.to_string(),
         })?;
         Ok(Span::new(span, Arc::<Path>::from(path)))
     }
