@@ -33,7 +33,6 @@ miden-utils-indexing.workspace = true
 
 # External dependencies
 thiserror.workspace = true
-tracing.workspace = true
 
 [dev-dependencies]
 insta.workspace = true

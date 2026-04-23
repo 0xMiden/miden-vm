@@ -30,7 +30,6 @@ thiserror.workspace = true
 
 [dev-dependencies]
 miden-core.workspace = true
-serde_json.workspace = true
 
 [lints.rust]
 unused_assignments = "allow"
