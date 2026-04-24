@@ -18,6 +18,7 @@ bench = false
 doctest = false
 
 [features]
+arbitrary = ["std", "dep:proptest"]
 default = ["std"]
 std = [
     "dep:miden-package-registry",
@@ -25,6 +26,7 @@ std = [
     "miden-core/std",
     "miden-mast-package/std",
     "miden-project/std",
+    "proptest/std",
     "tempfile/getrandom",
     "thiserror/std",
 ]
@@ -42,6 +44,7 @@ miden-project = { workspace = true, features = ["serde"] }
 # External dependencies
 env_logger = { workspace = true, optional = true }
 log.workspace = true
+proptest = { workspace = true, optional = true }
 smallvec.workspace = true
 thiserror.workspace = true
 
@@ -53,5 +56,6 @@ thiserror.workspace = true
 miden-assembly = { path = ".", default-features = false, features = ["testing"] }
 miden-mast-package = { workspace = true, features = ["arbitrary"] }
 insta = { workspace = true }
+miden-test-serde-macros.workspace = true
 proptest = { workspace = true, features = ["std"] }
 tempfile.workspace = true

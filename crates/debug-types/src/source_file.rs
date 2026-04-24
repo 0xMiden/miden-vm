@@ -6,6 +6,8 @@ use alloc::{
 };
 use core::{fmt, num::NonZeroU32, ops::Range};
 
+#[cfg(feature = "arbitrary")]
+use proptest::prelude::*;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -771,6 +773,7 @@ fn compute_line_starts(text: &str, text_offset: Option<u32>) -> Vec<ByteIndex> {
 #[derive(Default, Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
 #[cfg_attr(feature = "serde", serde(transparent))]
+#[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
 pub struct ByteIndex(pub u32);
 
 impl ByteIndex {
@@ -863,6 +866,16 @@ impl From<ByteIndex> for u32 {
 impl fmt::Display for ByteIndex {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Display::fmt(&self.0, f)
+    }
+}
+
+#[cfg(feature = "arbitrary")]
+impl Arbitrary for ByteIndex {
+    type Parameters = ();
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        any::<u32>().prop_map(Self).boxed()
     }
 }
 
@@ -1051,6 +1064,10 @@ macro_rules! declare_dual_number_and_index_type {
         #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
         #[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
         #[cfg_attr(feature = "serde", serde(transparent))]
+        #[cfg_attr(
+            all(feature = "arbitrary", test),
+            miden_test_serde_macros::serde_test(binary_serde(true))
+        )]
         pub struct $number_name(NonZeroU32);
 
         impl Default for $number_name {
@@ -1227,6 +1244,30 @@ impl Deserializable for ColumnNumber {
         Self::new(value).ok_or_else(|| {
             DeserializationError::InvalidValue("column number cannot be zero".into())
         })
+    }
+}
+
+#[cfg(feature = "arbitrary")]
+impl Arbitrary for LineNumber {
+    type Parameters = ();
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        (1..=u32::MAX)
+            .prop_map(|value| Self::new(value).expect("non-zero value"))
+            .boxed()
+    }
+}
+
+#[cfg(feature = "arbitrary")]
+impl Arbitrary for ColumnNumber {
+    type Parameters = ();
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        (1..=u32::MAX)
+            .prop_map(|value| Self::new(value).expect("non-zero value"))
+            .boxed()
     }
 }
 
