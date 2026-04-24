@@ -440,7 +440,7 @@ fn serialize_deserialize_all_nodes() {
     let serialized_mast_forest = mast_forest.to_bytes();
     let deserialized_mast_forest = MastForest::read_from_bytes(&serialized_mast_forest).unwrap();
 
-    assert_roundtrip_matches_serialized_view(&serialized_mast_forest, &deserialized_mast_forest);
+    assert_eq!(mast_forest, deserialized_mast_forest);
 }
 
 #[test]
@@ -477,57 +477,17 @@ fn assert_serialized_view_matches_forest(forest: &MastForest) {
     let view = SerializedMastForest::new(&bytes).unwrap();
     assert_eq!(view.node_count(), forest.nodes().len());
 
-    let mut serialized_order = forest
-        .nodes()
-        .iter()
-        .enumerate()
-        .filter(|(_, node)| node.is_external())
-        .map(|(index, node)| (index, node.digest()))
-        .collect::<Vec<_>>();
-    serialized_order.sort_by_key(|(index, digest)| (*digest, *index));
-    let mut forest_to_serialized = vec![0u32; forest.nodes().len()];
-    let mut ordered_indices = Vec::with_capacity(forest.nodes().len());
-    for (serialized_index, (forest_index, _)) in serialized_order.into_iter().enumerate() {
-        ordered_indices.push(forest_index);
-        forest_to_serialized[forest_index] = serialized_index as u32;
-    }
-    for (forest_index, node) in forest.nodes().iter().enumerate() {
-        if node.is_external() {
-            continue;
-        }
-        let serialized_index = ordered_indices.len();
-        ordered_indices.push(forest_index);
-        forest_to_serialized[forest_index] = serialized_index as u32;
-    }
-
     let mut bb_builder = BasicBlockDataBuilder::new();
-    for (idx, forest_index) in ordered_indices.into_iter().enumerate() {
-        let node = &forest.nodes()[forest_index];
+    for (idx, node) in forest.nodes().iter().enumerate() {
         let ops_offset = if let MastNode::Block(block) = node {
             bb_builder.encode_basic_block(block)
         } else {
             0
         };
-        let expected =
-            MastNodeInfo::new_with_id_remap(node, ops_offset, Some(&forest_to_serialized));
+        let expected = MastNodeInfo::new(node, ops_offset);
         let actual = view.node_info_at(idx).unwrap();
         assert_eq!(expected.to_bytes(), actual.to_bytes());
     }
-}
-
-fn assert_roundtrip_matches_serialized_view(bytes: &[u8], forest: &MastForest) {
-    let view = SerializedMastForest::new(bytes).unwrap();
-
-    assert_eq!(forest.node_count(), view.node_count());
-    for index in 0..view.node_count() {
-        assert_eq!(
-            forest.node_info_at(index).unwrap().to_bytes(),
-            view.node_info_at(index).unwrap().to_bytes()
-        );
-        assert_eq!(forest.node_digest_at(index).unwrap(), view.node_digest_at(index).unwrap());
-    }
-
-    assert_eq!(forest.procedure_roots().to_vec(), view.procedure_roots().unwrap());
 }
 
 #[test]
@@ -1347,7 +1307,7 @@ fn test_deserialization_rejects_mismatched_header_counts() {
     assert_matches!(
         result,
         Err(DeserializationError::InvalidValue(msg))
-            if msg.contains("must be External because the header reserves the first 1 nodes for externals")
+            if msg.contains("header external node count 1 does not match 0 external node entries")
     );
 }
 
@@ -1692,7 +1652,7 @@ mod proptests {
 
     use super::*;
     use crate::{
-        mast::{BasicBlockNodeBuilder, MastForest, arbitrary::MastForestParams},
+        mast::{BasicBlockNodeBuilder, MastForest, MastNode, arbitrary::MastForestParams},
         operations::Decorator,
     };
 
@@ -1712,32 +1672,65 @@ mod proptests {
                 max_dyns: 1,
             })
         ) {
+            // Serialize
             let serialized = forest.to_bytes();
+
+            // Deserialize
             let deserialized = MastForest::read_from_bytes(&serialized)
                 .expect("Deserialization should succeed");
-            let view = SerializedMastForest::new(&serialized).expect("Serialized view should parse");
 
-            prop_assert_eq!(deserialized.node_count(), view.node_count(), "Node count should match");
-            for index in 0..view.node_count() {
-                prop_assert_eq!(
-                    deserialized.node_info_at(index).unwrap().to_bytes(),
-                    view.node_info_at(index).unwrap().to_bytes(),
-                    "Node {}: serialized node info should match validated forest",
-                    index
-                );
-                prop_assert_eq!(
-                    deserialized.node_digest_at(index).unwrap(),
-                    view.node_digest_at(index).unwrap(),
-                    "Node {}: digest should match serialized view",
-                    index
-                );
-            }
-
+            // Verify node count
             prop_assert_eq!(
-                deserialized.procedure_roots().to_vec(),
-                view.procedure_roots().unwrap(),
-                "Procedure roots should match serialized view"
+                forest.num_nodes(),
+                deserialized.num_nodes(),
+                "Node count should match"
             );
+
+            // Verify all nodes match
+            for (idx, original) in forest.nodes().iter().enumerate() {
+                let node_id = MastNodeId::new_unchecked(idx as u32);
+                let deserialized_node = &deserialized[node_id];
+
+                // Check digests match
+                prop_assert_eq!(
+                    original.digest(),
+                    deserialized_node.digest(),
+                    "Node {:?} digest mismatch", node_id
+                );
+
+                // For basic blocks, verify OpBatch structure and decorators are preserved
+                if let MastNode::Block(original_block) = original
+                    && let MastNode::Block(deserialized_block) = deserialized_node
+                {
+                    prop_assert_eq!(
+                        original_block.op_batches(),
+                        deserialized_block.op_batches(),
+                        "Node {:?}: OpBatch mismatch", node_id
+                    );
+
+                    let orig_decorators: Vec<_> =
+                        original_block.indexed_decorator_iter(&forest).collect();
+                    let deser_decorators: Vec<_> =
+                        deserialized_block.indexed_decorator_iter(&deserialized).collect();
+
+                    prop_assert_eq!(
+                        orig_decorators.len(),
+                        deser_decorators.len(),
+                        "Node {:?}: Decorator count mismatch", node_id
+                    );
+
+                    for ((orig_idx, orig_dec_id), (deser_idx, deser_dec_id)) in
+                        orig_decorators.iter().zip(&deser_decorators)
+                    {
+                        prop_assert_eq!(orig_idx, deser_idx, "Node {:?}: Decorator index mismatch", node_id);
+                        prop_assert_eq!(
+                            forest.decorator_by_id(*orig_dec_id),
+                            deserialized.decorator_by_id(*deser_dec_id),
+                            "Node {:?}: Decorator content mismatch", node_id
+                        );
+                    }
+                }
+            }
         }
 
         /// Property test: multi-batch basic blocks should preserve exact structure
@@ -1911,34 +1904,32 @@ mod proptests {
                 max_dyns: 1,
             })
         ) {
+            // Stripped serialization
             let mut stripped_bytes = Vec::new();
             forest.write_stripped(&mut stripped_bytes);
+
+            // Deserialize
             let restored = MastForest::read_from_bytes(&stripped_bytes)
                 .expect("Stripped deserialization should succeed");
-            let view =
-                SerializedMastForest::new(&stripped_bytes).expect("Serialized view should parse");
 
-            prop_assert_eq!(restored.node_count(), view.node_count(), "Node count should match");
-            for index in 0..view.node_count() {
+            // Verify node count matches
+            prop_assert_eq!(
+                forest.num_nodes(),
+                restored.num_nodes(),
+                "Node count should match"
+            );
+
+            // Verify all node digests match
+            for (idx, original) in forest.nodes().iter().enumerate() {
+                let node_id = MastNodeId::new_unchecked(idx as u32);
+                let restored_node = &restored[node_id];
+
                 prop_assert_eq!(
-                    restored.node_info_at(index).unwrap().to_bytes(),
-                    view.node_info_at(index).unwrap().to_bytes(),
-                    "Node {}: serialized node info should match restored forest",
-                    index
-                );
-                prop_assert_eq!(
-                    restored.node_digest_at(index).unwrap(),
-                    view.node_digest_at(index).unwrap(),
-                    "Node {}: digest should match serialized view",
-                    index
+                    original.digest(),
+                    restored_node.digest(),
+                    "Node {:?} digest mismatch", node_id
                 );
             }
-
-            prop_assert_eq!(
-                restored.procedure_roots().to_vec(),
-                view.procedure_roots().unwrap(),
-                "Procedure roots should match serialized view"
-            );
 
             prop_assert!(
                 restored.debug_info.is_empty(),
@@ -2583,7 +2574,7 @@ fn test_untrusted_forest_validates_all_node_types() {
     let untrusted = UntrustedMastForest::read_from_bytes(&bytes).unwrap();
     let validated = untrusted.validate().unwrap();
 
-    assert_roundtrip_matches_serialized_view(&bytes, &validated);
+    assert_eq!(forest, validated);
 }
 
 /// Test that UntrustedMastForest::validate works with stripped serialization.
