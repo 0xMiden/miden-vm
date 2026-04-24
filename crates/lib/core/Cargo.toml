@@ -53,7 +53,6 @@ miden-prover.workspace = true
 miden-utils-testing.workspace = true
 miden-verifier.workspace = true
 num = { version = "0.4" }
-pretty_assertions = { workspace = true, features = ["std"] }
 rand = { version = "0.9", default-features = false }
 rand_chacha = { workspace = true }
 rstest = { workspace = true }
