@@ -1,5 +1,7 @@
-use miden_core::events::EventName;
-use miden_core_lib::CoreLibrary;
+use miden_core_lib::{
+    CoreLibrary,
+    handlers::sorted_array::{LOWERBOUND_ARRAY_EVENT_NAME, LOWERBOUND_KEY_VALUE_EVENT_NAME},
+};
 use miden_processor::{ProcessorState, advice::AdviceMutation, event::EventError};
 
 use super::*;
@@ -423,50 +425,6 @@ fn test_malicious_advice_wrong_key_found_flag() {
     assert!(result.is_err(), "Expected validation to fail for wrong key_found flag");
 }
 
-// REGRESSION TESTS FOR LOWERBOUND ADVICE-PROVIDER ATTACKS
-// ================================================================================================
-// The procedures `find_word` and `find_partial_key_value` consume `(was_found, ptr)` from a
-// non-deterministic advice handler. A malicious prover could previously claim
-// `was_found = false` while pointing `ptr` outside the array. The "not found" branch then read
-// adjacent memory under attacker control, which could let the prover craft data so that the
-// expected ordering invariants held vacuously and the lookup falsely returned "not found".
-//
-// These tests register a bogus handler for the lowerbound events and confirm the bounds checks
-// added to the FALSE branch of each procedure now reject the attack.
-
-const LOWERBOUND_ARRAY_EVENT: EventName =
-    EventName::new("miden::core::collections::sorted_array::lowerbound_array");
-const LOWERBOUND_KEY_VALUE_EVENT: EventName =
-    EventName::new("miden::core::collections::sorted_array::lowerbound_key_value");
-
-/// Registers a custom event handler in place of the production lowerbound handler.
-fn build_test_with_handler(
-    source: &str,
-    op_stack: &[u64],
-    event: EventName,
-    handler: fn(&ProcessorState) -> Result<Vec<AdviceMutation>, EventError>,
-) -> miden_utils_testing::Test {
-    let core_lib = CoreLibrary::default();
-    miden_utils_testing::build_test_by_mode!(false, source, op_stack)
-        .with_library(core_lib.library().clone())
-        .with_event_handler(event, handler)
-}
-
-/// Returns `(was_found = false, maybe_value_ptr = 204)` regardless of the actual array. 204 is
-/// past the array's `end_ptr = 112`, so the bounds check must fire.
-fn malicious_lowerbound_oob_above(
-    _process: &ProcessorState,
-) -> Result<Vec<AdviceMutation>, EventError> {
-    Ok(vec![AdviceMutation::extend_stack(vec![Felt::new_unchecked(204), Felt::ZERO])])
-}
-
-/// Returns `(was_found = false, maybe_value_ptr = 40)` which is below `start_ptr = 100`.
-fn malicious_lowerbound_oob_below(
-    _process: &ProcessorState,
-) -> Result<Vec<AdviceMutation>, EventError> {
-    Ok(vec![AdviceMutation::extend_stack(vec![Felt::new_unchecked(40), Felt::ZERO])])
-}
-
 #[test]
 fn test_find_word_rejects_oob_pointer_above_end() {
     let source = format!(
@@ -487,12 +445,9 @@ fn test_find_word_rejects_oob_pointer_above_end() {
         end
     "
     );
-    let test = build_test_with_handler(
-        &source,
-        &[],
-        LOWERBOUND_ARRAY_EVENT,
-        malicious_lowerbound_oob_above,
-    );
+    let test = build_lib_test(&source, &[])
+        .with_event_handler(LOWERBOUND_ARRAY_EVENT_NAME, malicious_lowerbound_oob_above);
+
     assert!(
         test.execute().is_err(),
         "find_word must reject maybe_value_ptr above end_ptr in the not-found branch",
@@ -519,12 +474,8 @@ fn test_find_word_rejects_oob_pointer_below_start() {
         end
     "
     );
-    let test = build_test_with_handler(
-        &source,
-        &[],
-        LOWERBOUND_ARRAY_EVENT,
-        malicious_lowerbound_oob_below,
-    );
+    let test = build_lib_test(&source, &[])
+        .with_event_handler(LOWERBOUND_ARRAY_EVENT_NAME, malicious_lowerbound_oob_below);
 
     assert!(
         test.execute().is_err(),
@@ -558,16 +509,37 @@ fn test_find_partial_key_value_rejects_oob_pointer_above_end() {
         end
     "
     );
-    // 200 > end_ptr = 124. The fix's `maybe_key_ptr < end_ptr` check must reject this.
-    let test = build_test_with_handler(
-        &source,
-        &[],
-        LOWERBOUND_KEY_VALUE_EVENT,
-        malicious_lowerbound_oob_above,
-    );
+    // 204 > end_ptr = 124. The fix's `maybe_key_ptr < end_ptr` check must reject this.
+    let test = build_lib_test(&source, &[])
+        .with_event_handler(LOWERBOUND_KEY_VALUE_EVENT_NAME, malicious_lowerbound_oob_above);
 
     assert!(
         test.execute().is_err(),
         "find_partial_key_value must reject maybe_key_ptr above end_ptr in the not-found branch",
     );
+}
+
+// MALICIOUS ADVICE PROVIDERS
+// ================================================================================================
+
+/// Builds a test with the core library and no event handlers.
+fn build_lib_test(source: &str, op_stack: &[u64]) -> miden_utils_testing::Test {
+    let core_lib = CoreLibrary::default();
+    miden_utils_testing::build_test_by_mode!(false, source, op_stack)
+        .with_library(core_lib.library().clone())
+}
+
+/// Returns `(was_found = false, maybe_value_ptr = 204)` regardless of the actual array. 204 is
+/// past the array's `end_ptr = 112`, so the bounds check must fire.
+fn malicious_lowerbound_oob_above(
+    _process: &ProcessorState,
+) -> Result<Vec<AdviceMutation>, EventError> {
+    Ok(vec![AdviceMutation::extend_stack(vec![Felt::new_unchecked(204), Felt::ZERO])])
+}
+
+/// Returns `(was_found = false, maybe_value_ptr = 40)` which is below `start_ptr = 100`.
+fn malicious_lowerbound_oob_below(
+    _process: &ProcessorState,
+) -> Result<Vec<AdviceMutation>, EventError> {
+    Ok(vec![AdviceMutation::extend_stack(vec![Felt::new_unchecked(40), Felt::ZERO])])
 }
