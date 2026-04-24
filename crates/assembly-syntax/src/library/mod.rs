@@ -648,23 +648,8 @@ impl Deserializable for Library {
             exports.insert(path, export);
         }
 
-        for export in exports.values() {
-            if let LibraryExport::Procedure(ProcedureExport { node, path, .. }) = export
-                && !mast_forest.is_procedure_root(*node)
-            {
-                return Err(DeserializationError::InvalidValue(format!(
-                    "invalid export: no procedure root for {path} procedure"
-                )));
-            }
-        }
-
-        let digest =
-            mast_forest.compute_nodes_commitment(exports.values().filter_map(|e| match e {
-                LibraryExport::Procedure(e) => Some(&e.node),
-                LibraryExport::Constant(_) | LibraryExport::Type(_) => None,
-            }));
-
-        Ok(Self { digest, exports, mast_forest })
+        Self::new(mast_forest, exports)
+            .map_err(|err| DeserializationError::InvalidValue(format!("{err}")))
     }
 }
 
