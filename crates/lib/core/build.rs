@@ -204,7 +204,9 @@ fn main() -> Result<(), Report> {
     // or its builder changed:
     println!("cargo:rerun-if-changed=asm");
     println!("cargo:rerun-if-env-changed=MIDEN_BUILD_LIB_DOCS");
-    println!("cargo:rerun-if-changed=../assembly/src");
+    // NOTE: path is relative to the package root (crates/lib/core/), so we need
+    // ../../ to reach crates/assembly/src.
+    println!("cargo:rerun-if-changed=../../assembly/src");
 
     miden_assembly::diagnostics::reporting::set_hook(Box::new(|_| {
         Box::new(ReportHandlerOpts::new().build())
