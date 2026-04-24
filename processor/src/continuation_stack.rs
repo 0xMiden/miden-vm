@@ -239,8 +239,7 @@ mod tests {
     #[test]
     fn get_next_clock_cycle_increment_empty_stack() {
         let stack = ContinuationStack::default();
-        let result: Vec<_> = stack.iter_continuations_for_next_clock().collect();
-        assert!(result.is_empty());
+        assert!(stack.iter_continuations_for_next_clock().next().is_none());
     }
 
     #[test]

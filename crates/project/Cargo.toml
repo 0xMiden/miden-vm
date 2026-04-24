@@ -15,7 +15,7 @@ edition.workspace = true
 
 [features]
 default = ["std", "serde"]
-arbitrary = ["std", "dep:proptest-derive", "dep:proptest", "miden-assembly-syntax/arbitrary"]
+arbitrary = ["std", "miden-assembly-syntax/arbitrary"]
 resolver = ["std", "miden-package-registry/resolver"]
 std = ["miden-assembly-syntax/std", "serde/std", "thiserror/std", "toml/std", "miden-package-registry/std", "miden-package-registry/resolver", "tempfile/getrandom"]
 serde = ["dep:serde", "dep:serde-untagged", "miden-assembly-syntax/serde", "miden-core/serde", "miden-package-registry/serde", "toml/serde", "toml/parse", "toml/display"]
@@ -25,20 +25,16 @@ miden-assembly-syntax.workspace = true
 miden-core.workspace = true
 miden-mast-package.workspace = true
 miden-package-registry.workspace = true
-proptest = { workspace = true, optional = true }
-proptest-derive = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
 serde-untagged = { workspace = true, optional = true }
 thiserror.workspace = true
-toml = { version = "1.0", default-features = false }
+toml = { workspace = true }
 
 [dev-dependencies]
 miden-core.workspace = true
 miden-mast-package = { workspace = true, features = ["arbitrary"] }
-miden-test-serde-macros.workspace = true
-serde_json.workspace = true
 tempfile.workspace = true
-toml = { version = "1.0", default-features = false, features = ["std", "serde", "parse"] }
+toml = { workspace = true, features = ["std", "serde", "parse"] }
 
 [lints.rust]
 # This is needed until this warning appears in stable when this is commented out. Currently, it

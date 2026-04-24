@@ -96,7 +96,7 @@ fn pack_indptr_deltas(indptr: &[usize; 9]) -> [u8; 4] {
     let mut packed = [0u8; 4];
     for i in 0..8 {
         let delta = indptr[i + 1] - indptr[i];
-        debug_assert!(delta <= 9, "delta {} exceeds maximum of 9", delta);
+        debug_assert!(delta <= 9, "delta {delta} exceeds maximum of 9");
 
         let byte_idx = i / 2;
         let nibble_shift = (i % 2) * 4;
@@ -113,7 +113,7 @@ fn pack_indptr_deltas(indptr: &[usize; 9]) -> [u8; 4] {
 /// # Errors
 ///
 /// Returns `DeserializationError::InvalidValue` if any delta exceeds GROUP_SIZE.
-fn unpack_indptr_deltas(packed: &[u8; 4]) -> Result<[usize; 9], DeserializationError> {
+fn unpack_indptr_deltas(packed: [u8; 4]) -> Result<[usize; 9], DeserializationError> {
     let mut indptr = [0usize; 9];
 
     for i in 0..8 {
@@ -123,8 +123,7 @@ fn unpack_indptr_deltas(packed: &[u8; 4]) -> Result<[usize; 9], DeserializationE
 
         if delta > OP_GROUP_SIZE {
             return Err(DeserializationError::InvalidValue(format!(
-                "indptr delta {} exceeds maximum of {} at position {} (operation groups comprise at most {} ops)",
-                delta, OP_GROUP_SIZE, i, OP_GROUP_SIZE
+                "indptr delta {delta} exceeds maximum of {OP_GROUP_SIZE} at position {i} (operation groups comprise at most {OP_GROUP_SIZE} ops)"
             )));
         }
 
@@ -185,8 +184,7 @@ impl BasicBlockDataDecoder<'_> {
         let max_batches = ops_data_reader.max_alloc(BATCH_METADATA_BYTES_PER_BATCH);
         if num_batches > max_batches {
             return Err(DeserializationError::InvalidValue(format!(
-                "batch count {} exceeds remaining data capacity {}",
-                num_batches, max_batches
+                "batch count {num_batches} exceeds remaining data capacity {max_batches}"
             )));
         }
 
@@ -194,7 +192,7 @@ impl BasicBlockDataDecoder<'_> {
         let mut batch_indptrs: Vec<[usize; 9]> = Vec::with_capacity(num_batches);
         for _ in 0..num_batches {
             let packed: [u8; 4] = ops_data_reader.read()?;
-            let indptr = unpack_indptr_deltas(&packed)?;
+            let indptr = unpack_indptr_deltas(packed)?;
             batch_indptrs.push(indptr);
         }
 
@@ -234,7 +232,7 @@ impl BasicBlockDataDecoder<'_> {
 
             // Reconstruct the groups array and calculate num_groups
             // num_groups is the next available slot after all operation groups and immediate values
-            let mut groups = [Felt::new(0); 8];
+            let mut groups = [Felt::new_unchecked(0); 8];
             let mut next_group_idx = 0;
 
             for array_idx in 0..highest_op_group {
@@ -248,7 +246,7 @@ impl BasicBlockDataDecoder<'_> {
                         let opcode = op.op_code() as u64;
                         group_value |= opcode << (Operation::OP_BITS * local_op_idx);
                     }
-                    groups[array_idx] = Felt::new(group_value);
+                    groups[array_idx] = Felt::new_unchecked(group_value);
 
                     let (placements, next_group_idx_after) = collect_immediate_placements(
                         &batch_ops,
@@ -274,7 +272,7 @@ impl BasicBlockDataDecoder<'_> {
                 batch_ops, *indptr, padding, groups, num_groups,
             );
             op_batch.validate_padding_semantics().map_err(|err| {
-                DeserializationError::InvalidValue(format!("batch {}: {}", batch_idx, err))
+                DeserializationError::InvalidValue(format!("batch {batch_idx}: {err}"))
             })?;
 
             op_batches.push(op_batch);
@@ -306,7 +304,7 @@ mod tests {
     #[case::some_zero_deltas([0, 0, 5, 5, 10, 10, 15, 15, 20])]
     fn test_pack_unpack_indptr_roundtrip(#[case] indptr: [usize; 9]) {
         let packed = pack_indptr_deltas(&indptr);
-        let unpacked = unpack_indptr_deltas(&packed).unwrap();
+        let unpacked = unpack_indptr_deltas(packed).unwrap();
         assert_eq!(indptr, unpacked);
     }
 
@@ -317,7 +315,7 @@ mod tests {
     #[case::delta_11_position_3([0x00, 0xb0, 0x00, 0x00], "delta 11 exceeds maximum of 9")]
     #[case::delta_14_position_7([0x00, 0x00, 0x00, 0x0e], "delta 14 exceeds maximum of 9")]
     fn test_unpack_invalid_delta(#[case] packed: [u8; 4], #[case] expected_msg: &str) {
-        let result = unpack_indptr_deltas(&packed);
+        let result = unpack_indptr_deltas(packed);
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
         assert!(err_msg.contains(expected_msg));
@@ -377,7 +375,7 @@ mod tests {
 
     #[test]
     fn test_decode_operations_rejects_push_immediate_group_overflow() {
-        let operations = vec![Operation::Push(Felt::new(1))];
+        let operations = vec![Operation::Push(Felt::new_unchecked(1))];
 
         let mut bytes = Vec::new();
         operations.write_into(&mut bytes);

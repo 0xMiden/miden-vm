@@ -55,7 +55,7 @@ pub use node::{
 };
 
 use crate::{
-    Felt, LexicographicWord, Word,
+    Felt, Word,
     advice::AdviceMap,
     operations::{AssemblyOp, DebugVarInfo, Decorator},
     serde::{
@@ -190,8 +190,9 @@ impl MastForest {
         self.remap_and_add_nodes(retained_nodes, &id_remappings);
         self.remap_and_add_roots(old_root_ids, &id_remappings);
 
-        // Remap the asm_op_storage to use the new node IDs
+        // Remap the asm_op_storage and debug_var_storage to use the new node IDs
         self.debug_info.remap_asm_op_storage(&id_remappings);
+        self.debug_info.remap_debug_var_storage(&id_remappings);
 
         // Invalidate the cached commitment since we modified the forest structure
         self.commitment_cache.take();
@@ -435,7 +436,7 @@ impl MastForest {
         node_ids: impl IntoIterator<Item = &'a MastNodeId>,
     ) -> Word {
         let mut digests: Vec<Word> = node_ids.into_iter().map(|&id| self[id].digest()).collect();
-        digests.sort_unstable_by_key(|word| LexicographicWord::from(*word));
+        digests.sort_unstable();
         miden_crypto::hash::poseidon2::Poseidon2::merge_many(&digests)
     }
 
@@ -1095,8 +1096,7 @@ impl DecoratorId {
             Ok(Self(value))
         } else {
             Err(DeserializationError::InvalidValue(format!(
-                "Invalid deserialized MAST decorator id '{}', but allows only {} decorators",
-                value, bound,
+                "Invalid deserialized MAST decorator id '{value}', but allows only {bound} decorators",
             )))
         }
     }
@@ -1245,7 +1245,7 @@ pub enum MastForestError {
 // by delegating to the existing miden-crypto serialization which already handles
 // the conversion between linked and owned decorator formats.
 #[cfg(feature = "serde")]
-impl serde::Serialize for MastForest {
+impl Serialize for MastForest {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -1257,7 +1257,7 @@ impl serde::Serialize for MastForest {
 }
 
 #[cfg(feature = "serde")]
-impl<'de> serde::Deserialize<'de> for MastForest {
+impl<'de> Deserialize<'de> for MastForest {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,

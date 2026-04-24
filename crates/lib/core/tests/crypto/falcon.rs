@@ -82,7 +82,7 @@ pub fn push_falcon_signature(process: &ProcessorState) -> Result<Vec<AdviceMutat
     let sk_bytes: Vec<u8> = pk_sk_felts.iter().map(|f| f.as_canonical_u64() as u8).collect();
 
     // Reconstruct SecretKey from bytes
-    let sk = falcon512_poseidon2::SecretKey::read_from_bytes(&sk_bytes)
+    let sk = SecretKey::read_from_bytes(&sk_bytes)
         .map_err(|_| FalconError::MalformedSignatureKey { key_type: "Poseidon2 Falcon512" })?;
 
     let signature_result = falcon512_poseidon2::sign(&sk, msg)
@@ -113,11 +113,11 @@ fn test_falcon512_norm_sq() {
     ";
 
     // normalize(e) = e^2 - phi * (2*M*e - M^2) where phi := (e > (M - 1)/2)
-    let upper = rand::rng().random_range(Q + 1..M);
+    let upper = rng().random_range(Q + 1..M);
     let test_upper = build_test!(source, &[upper]);
     test_upper.expect_stack(&[(M - upper) * (M - upper)]);
 
-    let lower = rand::rng().random_range(0..=Q);
+    let lower = rng().random_range(0..=Q);
     let test_lower = build_test!(source, &[lower]);
     test_lower.expect_stack(&[lower * lower])
 }
@@ -201,8 +201,8 @@ fn test_falcon512_probabilistic_product_deterministic() {
     let mut h_coeffs = Vec::new();
     let mut s2_coeffs = Vec::new();
     for _i in 0..N {
-        h_coeffs.push(Felt::new(rng.random_range(0..M)));
-        s2_coeffs.push(Felt::new(rng.random_range(0..M)));
+        h_coeffs.push(Felt::new_unchecked(rng.random_range(0..M)));
+        s2_coeffs.push(Felt::new_unchecked(rng.random_range(0..M)));
     }
 
     let h: Polynomial<Felt> = Polynomial::new(h_coeffs);
@@ -362,8 +362,8 @@ fn test_mod_12289_rejects_forged_remainder_zero(#[case] a_hi: u64, #[case] a_lo:
         let a = (a_hi << 32) | a_lo;
 
         let q = a.wrapping_mul(M_INV);
-        let q_hi = Felt::new(q >> 32);
-        let q_lo = Felt::new(q & 0xffff_ffff);
+        let q_hi = Felt::new_unchecked(q >> 32);
+        let q_lo = Felt::new_unchecked(q & 0xffff_ffff);
 
         let remainder = AdviceMutation::extend_stack([ZERO]);
         let quotient = AdviceMutation::extend_stack([q_hi, q_lo]);
@@ -386,7 +386,7 @@ fn test_mod_12289_rejects_forged_remainder_zero(#[case] a_hi: u64, #[case] a_lo:
 
     // Use the upstream test builder directly so we do not auto-register the honest
     // falcon_div handler from CoreLibrary.
-    let core_lib = miden_core_lib::CoreLibrary::default();
+    let core_lib = CoreLibrary::default();
     let test = miden_utils_testing::build_test_by_mode!(false, source, &op_stack, &adv_stack)
         .with_library(core_lib.library().clone())
         .with_event_handler(FALCON_DIV, malicious_falcon_div);
@@ -413,10 +413,10 @@ fn test_mod_12289_rejects_forged_addition_overflow() {
 
     // Malicious event handler that forges q/r to trigger the addition-overflow assertion.
     fn malicious_falcon_div(_process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
-        let q_hi = Felt::new(FORGED_Q >> 32);
-        let q_lo = Felt::new(FORGED_Q & 0xffff_ffff);
+        let q_hi = Felt::new_unchecked(FORGED_Q >> 32);
+        let q_lo = Felt::new_unchecked(FORGED_Q & 0xffff_ffff);
 
-        let remainder = AdviceMutation::extend_stack([Felt::new(FORGED_R)]);
+        let remainder = AdviceMutation::extend_stack([Felt::new_unchecked(FORGED_R)]);
         let quotient = AdviceMutation::extend_stack([q_hi, q_lo]);
         Ok(vec![remainder, quotient])
     }
@@ -433,7 +433,7 @@ fn test_mod_12289_rejects_forged_addition_overflow() {
     let op_stack = vec![a >> 32, a & 0xffff_ffff];
     let adv_stack: Vec<u64> = vec![];
 
-    let core_lib = miden_core_lib::CoreLibrary::default();
+    let core_lib = CoreLibrary::default();
     let test = miden_utils_testing::build_test_by_mode!(false, source, &op_stack, &adv_stack)
         .with_library(core_lib.library().clone())
         .with_event_handler(FALCON_DIV, malicious_falcon_div);
@@ -458,9 +458,9 @@ fn test_mod_12289_rejects_non_u32_remainder_advice() {
         let dividend = (a_hi << 32) | a_lo;
         let quotient = dividend / M;
 
-        let q_hi = Felt::new(quotient >> 32);
-        let q_lo = Felt::new(quotient & 0xffff_ffff);
-        let forged_remainder = Felt::new(Felt::ORDER_U64 - 1);
+        let q_hi = Felt::new_unchecked(quotient >> 32);
+        let q_lo = Felt::new_unchecked(quotient & 0xffff_ffff);
+        let forged_remainder = Felt::new_unchecked(Felt::ORDER_U64 - 1);
 
         let remainder = AdviceMutation::extend_stack([forged_remainder]);
         let quotient = AdviceMutation::extend_stack([q_hi, q_lo]);
@@ -477,7 +477,7 @@ fn test_mod_12289_rejects_non_u32_remainder_advice() {
     let op_stack = vec![0, 100_000];
     let adv_stack: Vec<u64> = vec![];
 
-    let core_lib = miden_core_lib::CoreLibrary::default();
+    let core_lib = CoreLibrary::default();
     let mut test = miden_utils_testing::build_test_by_mode!(false, source, &op_stack, &adv_stack);
     test.libraries.push(core_lib.library().clone());
     test.add_event_handler(FALCON_DIV, malicious_falcon_div);
@@ -537,7 +537,7 @@ fn generate_test(
     let pk: Word = sk.public_key().to_commitment();
     let sk_bytes = sk.to_bytes();
 
-    let to_adv_map = sk_bytes.iter().map(|a| Felt::new(*a as u64)).collect::<Vec<Felt>>();
+    let to_adv_map = sk_bytes.iter().map(|a| Felt::new_unchecked(*a as u64)).collect::<Vec<Felt>>();
 
     let advice_map: Vec<(Word, Vec<Felt>)> = vec![(pk, to_adv_map)];
 
@@ -552,10 +552,10 @@ fn generate_test(
 // ================================================================================================
 
 /// Creates random coefficients of a polynomial in the range (0..M) using the given RNG.
-fn random_coefficients_with_rng<R: rand::Rng>(rng: &mut R) -> Vec<Felt> {
+fn random_coefficients_with_rng<R: Rng>(rng: &mut R) -> Vec<Felt> {
     let mut res = Vec::new();
     for _i in 0..N {
-        res.push(Felt::new(rng.random_range(0..M)))
+        res.push(Felt::new_unchecked(rng.random_range(0..M)))
     }
     res
 }
@@ -597,8 +597,8 @@ fn generate_data_probabilistic_product_test(
         to_elements(h.clone())
     };
 
-    polynomials.extend(to_elements(s2.clone()));
-    polynomials.extend(pi.iter().map(|a| Felt::new(*a)));
+    polynomials.extend(to_elements(s2));
+    polynomials.extend(pi.iter().map(|a| Felt::new_unchecked(*a)));
 
     // get the challenge point and push it to the advice stack
     // Push tau1 first, then tau0, so adv_push.2 produces _le format [tau0, tau1, ...] directly
@@ -611,7 +611,7 @@ fn generate_data_probabilistic_product_test(
     let advice_stack = builder.build_vec_u64();
 
     // compute hash of h and place it on the stack.
-    let h_hash = Poseidon2::hash_elements(&to_elements(h.clone()));
+    let h_hash = Poseidon2::hash_elements(&to_elements(h));
     let operand_stack = stack_from_words(&[h_hash]);
 
     (operand_stack, advice_stack)
@@ -622,5 +622,5 @@ fn generate_data_probabilistic_product_test(
 /// This matches `stack![]` semantics: `stack_from_words(&[A, B])` results in stack `[A, B, ...]`
 /// with A at position 0 (top).
 fn stack_from_words(words: &[Word]) -> Vec<u64> {
-    words.iter().flat_map(|w| w.iter().map(|f| f.as_canonical_u64())).collect()
+    words.iter().flat_map(|w| w.iter().map(Felt::as_canonical_u64)).collect()
 }

@@ -49,6 +49,32 @@ impl MastNodeFingerprint {
     }
 }
 
+// ------------------------------------------------------------------------------------------------
+/// Augmentation
+impl MastNodeFingerprint {
+    /// Returns a new fingerprint that incorporates the given additional data into the
+    /// decorator root hash.
+    ///
+    /// This is used by the assembler to make the dedup key sensitive to external metadata
+    /// without storing that metadata on the node builder.
+    /// If `data` is empty, the fingerprint is returned unchanged.
+    pub fn augment_with_data(self, data: &[u8]) -> Self {
+        if data.is_empty() {
+            return self;
+        }
+
+        let existing: &[u8] = match &self.decorator_root {
+            Some(root) => root.as_bytes(),
+            None => &[],
+        };
+        let new_root = Blake3_256::hash_iter([existing, data].into_iter());
+        Self {
+            mast_root: self.mast_root,
+            decorator_root: Some(new_root),
+        }
+    }
+}
+
 pub fn fingerprint_from_parts(
     forest: &MastForest,
     hash_by_node_id: &impl LookupByIdx<MastNodeId, MastNodeFingerprint>,
@@ -89,9 +115,9 @@ pub fn fingerprint_from_parts(
     } else {
         let decorator_bytes_iter = pre_decorator_hash_bytes
             .iter()
-            .map(|bytes| bytes.as_slice())
-            .chain(post_decorator_hash_bytes.iter().map(|bytes| bytes.as_slice()))
-            .chain(children_decorator_roots.iter().map(|bytes| bytes.as_slice()));
+            .map(<[u8; 32]>::as_slice)
+            .chain(post_decorator_hash_bytes.iter().map(<[u8; 32]>::as_slice))
+            .chain(children_decorator_roots.iter().map(<[u8; 32]>::as_slice));
 
         let decorator_root = Blake3_256::hash_iter(decorator_bytes_iter);
         Ok(MastNodeFingerprint::with_decorator_root(node_digest, decorator_root))

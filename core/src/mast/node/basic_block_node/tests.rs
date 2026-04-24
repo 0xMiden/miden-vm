@@ -14,7 +14,7 @@ use crate::{
 fn batch_ops_1() {
     // --- one operation ----------------------------------------------------------------------
     let ops = vec![Operation::Add];
-    let (batches, hash) = super::batch_and_hash_ops(ops.clone());
+    let (batches, hash) = batch_and_hash_ops(&ops);
     insta::assert_debug_snapshot!(batches);
     insta::assert_debug_snapshot!(build_group_chunks(&batches).collect::<Vec<_>>());
 
@@ -28,7 +28,7 @@ fn batch_ops_1() {
 fn batch_ops_2() {
     // --- two operations ---------------------------------------------------------------------
     let ops = vec![Operation::Add, Operation::Mul];
-    let (batches, hash) = super::batch_and_hash_ops(ops.clone());
+    let (batches, hash) = batch_and_hash_ops(&ops);
     insta::assert_debug_snapshot!(batches);
     insta::assert_debug_snapshot!(build_group_chunks(&batches).collect::<Vec<_>>());
 
@@ -41,14 +41,14 @@ fn batch_ops_2() {
 #[test]
 fn batch_ops_3() {
     // --- one group with one immediate value -------------------------------------------------
-    let ops = vec![Operation::Add, Operation::Push(Felt::new(12345678))];
-    let (batches, hash) = super::batch_and_hash_ops(ops.clone());
+    let ops = vec![Operation::Add, Operation::Push(Felt::new_unchecked(12345678))];
+    let (batches, hash) = batch_and_hash_ops(&ops);
     insta::assert_debug_snapshot!(batches);
     insta::assert_debug_snapshot!(build_group_chunks(&batches).collect::<Vec<_>>());
 
     let mut batch_groups = [ZERO; BATCH_SIZE];
     batch_groups[0] = build_group(&ops);
-    batch_groups[1] = Felt::new(12345678);
+    batch_groups[1] = Felt::new_unchecked(12345678);
 
     assert_eq!(hasher::hash_elements(&batch_groups), hash);
 }
@@ -58,27 +58,27 @@ fn batch_ops_4() {
     // --- one group with 7 immediate values --------------------------------------------------
     let ops = vec![
         Operation::Push(ONE),
-        Operation::Push(Felt::new(2)),
-        Operation::Push(Felt::new(3)),
-        Operation::Push(Felt::new(4)),
-        Operation::Push(Felt::new(5)),
-        Operation::Push(Felt::new(6)),
-        Operation::Push(Felt::new(7)),
+        Operation::Push(Felt::new_unchecked(2)),
+        Operation::Push(Felt::new_unchecked(3)),
+        Operation::Push(Felt::new_unchecked(4)),
+        Operation::Push(Felt::new_unchecked(5)),
+        Operation::Push(Felt::new_unchecked(6)),
+        Operation::Push(Felt::new_unchecked(7)),
         Operation::Add,
     ];
-    let (batches, hash) = super::batch_and_hash_ops(ops.clone());
+    let (batches, hash) = batch_and_hash_ops(&ops);
     insta::assert_debug_snapshot!(batches);
     insta::assert_debug_snapshot!(build_group_chunks(&batches).collect::<Vec<_>>());
 
     let batch_groups = [
         build_group(&ops),
         ONE,
-        Felt::new(2),
-        Felt::new(3),
-        Felt::new(4),
-        Felt::new(5),
-        Felt::new(6),
-        Felt::new(7),
+        Felt::new_unchecked(2),
+        Felt::new_unchecked(3),
+        Felt::new_unchecked(4),
+        Felt::new_unchecked(5),
+        Felt::new_unchecked(6),
+        Felt::new_unchecked(7),
     ];
 
     assert_eq!(hasher::hash_elements(&batch_groups), hash);
@@ -91,31 +91,31 @@ fn batch_ops_5() {
         Operation::Add,
         Operation::Mul,
         Operation::Push(ONE),
-        Operation::Push(Felt::new(2)),
-        Operation::Push(Felt::new(3)),
-        Operation::Push(Felt::new(4)),
-        Operation::Push(Felt::new(5)),
-        Operation::Push(Felt::new(6)),
+        Operation::Push(Felt::new_unchecked(2)),
+        Operation::Push(Felt::new_unchecked(3)),
+        Operation::Push(Felt::new_unchecked(4)),
+        Operation::Push(Felt::new_unchecked(5)),
+        Operation::Push(Felt::new_unchecked(6)),
         Operation::Add,
-        Operation::Push(Felt::new(7)),
+        Operation::Push(Felt::new_unchecked(7)),
     ];
-    let (batches, hash) = super::batch_and_hash_ops(ops.clone());
+    let (batches, hash) = batch_and_hash_ops(&ops);
     insta::assert_debug_snapshot!(batches);
     insta::assert_debug_snapshot!(build_group_chunks(&batches).collect::<Vec<_>>());
 
     let batch0_groups = [
         build_group(&ops[..9]),
         ONE,
-        Felt::new(2),
-        Felt::new(3),
-        Felt::new(4),
-        Felt::new(5),
-        Felt::new(6),
+        Felt::new_unchecked(2),
+        Felt::new_unchecked(3),
+        Felt::new_unchecked(4),
+        Felt::new_unchecked(5),
+        Felt::new_unchecked(6),
         ZERO,
     ];
     let mut batch1_groups = [ZERO; BATCH_SIZE];
     batch1_groups[0] = build_group(&[ops[9]]);
-    batch1_groups[1] = Felt::new(7);
+    batch1_groups[1] = Felt::new_unchecked(7);
 
     let all_groups = [batch0_groups, batch1_groups].concat();
     assert_eq!(hasher::hash_elements(&all_groups), hash);
@@ -128,23 +128,23 @@ fn batch_ops_6() {
         Operation::Add,
         Operation::Mul,
         Operation::Add,
-        Operation::Push(Felt::new(7)),
+        Operation::Push(Felt::new_unchecked(7)),
         Operation::Add,
         Operation::Add,
-        Operation::Push(Felt::new(11)),
+        Operation::Push(Felt::new_unchecked(11)),
         Operation::Mul,
         Operation::Mul,
         Operation::Add,
     ];
 
-    let (batches, hash) = super::batch_and_hash_ops(ops.clone());
+    let (batches, hash) = batch_and_hash_ops(&ops);
     insta::assert_debug_snapshot!(batches);
     insta::assert_debug_snapshot!(build_group_chunks(&batches).collect::<Vec<_>>());
 
     let batch_groups = [
         build_group(&ops[..9]),
-        Felt::new(7),
-        Felt::new(11),
+        Felt::new_unchecked(7),
+        Felt::new_unchecked(11),
         build_group(&ops[9..]),
         ZERO,
         ZERO,
@@ -167,16 +167,16 @@ fn batch_ops_7() {
         Operation::Mul,
         Operation::Mul,
         Operation::Add,
-        Operation::Push(Felt::new(11)),
+        Operation::Push(Felt::new_unchecked(11)),
     ];
-    let (batches, hash) = super::batch_and_hash_ops(ops.clone());
+    let (batches, hash) = batch_and_hash_ops(&ops);
     insta::assert_debug_snapshot!(batches);
     insta::assert_debug_snapshot!(build_group_chunks(&batches).collect::<Vec<_>>());
 
     let batch_groups = [
         build_group(&ops[..8]),
         build_group(&[ops[8]]),
-        Felt::new(11),
+        Felt::new_unchecked(11),
         ZERO,
         ZERO,
         ZERO,
@@ -199,9 +199,9 @@ fn batch_ops_8() {
         Operation::Mul,
         Operation::Mul,
         Operation::Push(ONE),
-        Operation::Push(Felt::new(2)),
+        Operation::Push(Felt::new_unchecked(2)),
     ];
-    let (batches, hash) = super::batch_and_hash_ops(ops.clone());
+    let (batches, hash) = batch_and_hash_ops(&ops);
     insta::assert_debug_snapshot!(batches);
     insta::assert_debug_snapshot!(build_group_chunks(&batches).collect::<Vec<_>>());
 
@@ -209,7 +209,7 @@ fn batch_ops_8() {
         build_group(&ops[..8]),
         ONE,
         build_group(&[ops[8]]),
-        Felt::new(2),
+        Felt::new_unchecked(2),
         ZERO,
         ZERO,
         ZERO,
@@ -226,10 +226,10 @@ fn batch_ops_9() {
         Operation::Add,
         Operation::Mul,
         Operation::Push(ONE),
-        Operation::Push(Felt::new(2)),
-        Operation::Push(Felt::new(3)),
-        Operation::Push(Felt::new(4)),
-        Operation::Push(Felt::new(5)),
+        Operation::Push(Felt::new_unchecked(2)),
+        Operation::Push(Felt::new_unchecked(3)),
+        Operation::Push(Felt::new_unchecked(4)),
+        Operation::Push(Felt::new_unchecked(5)),
         Operation::Add,
         Operation::Mul,
         Operation::Add,
@@ -240,26 +240,35 @@ fn batch_ops_9() {
         Operation::Mul,
         Operation::Add,
         Operation::Mul,
-        Operation::Push(Felt::new(6)),
+        Operation::Push(Felt::new_unchecked(6)),
         Operation::Pad,
     ];
 
-    let (batches, hash) = super::batch_and_hash_ops(ops.clone());
+    let (batches, hash) = batch_and_hash_ops(&ops);
     insta::assert_debug_snapshot!(batches);
     insta::assert_debug_snapshot!(build_group_chunks(&batches).collect::<Vec<_>>());
 
     let batch0_groups = [
         build_group(&ops[..9]),
         ONE,
-        Felt::new(2),
-        Felt::new(3),
-        Felt::new(4),
-        Felt::new(5),
+        Felt::new_unchecked(2),
+        Felt::new_unchecked(3),
+        Felt::new_unchecked(4),
+        Felt::new_unchecked(5),
         build_group(&ops[9..17]),
         ZERO,
     ];
 
-    let batch1_groups = [build_group(&ops[17..]), Felt::new(6), ZERO, ZERO, ZERO, ZERO, ZERO, ZERO];
+    let batch1_groups = [
+        build_group(&ops[17..]),
+        Felt::new_unchecked(6),
+        ZERO,
+        ZERO,
+        ZERO,
+        ZERO,
+        ZERO,
+        ZERO,
+    ];
 
     let all_groups = [batch0_groups, batch1_groups].concat();
     assert_eq!(hasher::hash_elements(&all_groups), hash);
@@ -280,13 +289,14 @@ fn operation_or_decorator_iterator() {
     ];
 
     // Convert raw decorators to decorator list by adding them to the forest first
-    let decorator_list: Vec<(usize, crate::mast::DecoratorId)> = decorators
+    let decorator_list: Vec<(usize, DecoratorId)> = decorators
         .into_iter()
-        .map(|(idx, decorator)| -> Result<(usize, crate::mast::DecoratorId), crate::mast::MastForestError> {
+        .map(|(idx, decorator)| -> Result<(usize, DecoratorId), MastForestError> {
             let decorator_id = mast_forest.add_decorator(decorator)?;
             Ok((idx, decorator_id))
         })
-        .collect::<Result<Vec<_>, _>>().unwrap();
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
 
     let node_id = BasicBlockNodeBuilder::new(operations, decorator_list)
         .add_to_forest(&mut mast_forest)
@@ -322,11 +332,11 @@ fn build_group(ops: &[Operation]) -> Felt {
     for (i, op) in ops.iter().enumerate() {
         group |= (op.op_code() as u64) << (Operation::OP_BITS * i);
     }
-    Felt::new(group)
+    Felt::new_unchecked(group)
 }
 
 fn build_group_chunks(batches: &[OpBatch]) -> impl Iterator<Item = &[Operation]> {
-    batches.iter().flat_map(|opbatch| opbatch.group_chunks())
+    batches.iter().flat_map(OpBatch::group_chunks)
 }
 
 fn basic_block_from_batch(batch: OpBatch) -> BasicBlockNode {
@@ -359,7 +369,7 @@ proptest! {
     /// - Operations are correctly distributed across batches and groups.
     #[test]
     fn test_batch_creation_invariants(ops in op_non_control_sequence_strategy(50)) {
-        let (batches, _) = super::batch_and_hash_ops(ops.clone());
+        let (batches, _) = batch_and_hash_ops(&ops);
 
         // A basic block contains one or more batches
         assert!(!batches.is_empty(), "There should be at least one batch");
@@ -387,8 +397,7 @@ proptest! {
             for chunk in batch.group_chunks() {
                     let count = chunk.len();
                     assert!(chunk.len() <= GROUP_SIZE,
-                        "Group {:?} in batch has {} operations, which exceeds the maximum of {}",
-                        chunk, count, GROUP_SIZE);
+                        "Group {chunk:?} in batch has {count} operations, which exceeds the maximum of {GROUP_SIZE}");
             }
         }
     }
@@ -399,7 +408,7 @@ proptest! {
     /// - If no groups available, both operation and immediate move to next batch
     #[test]
     fn test_immediate_value_placement(ops in op_non_control_sequence_strategy(50)) {
-        let (batches, _) = super::batch_and_hash_ops(ops.clone());
+        let (batches, _) = batch_and_hash_ops(&ops);
 
         for batch in batches {
             let mut op_idx_in_group = 0;
@@ -451,12 +460,12 @@ fn test_validate_immediate_commitment_rejects_opcode_group_mismatch() {
 
 #[test]
 fn test_validate_immediate_commitment_rejects_immediate_value_mismatch() {
-    let imm = Felt::new(1);
+    let imm = Felt::new_unchecked(1);
     let ops = vec![Operation::Push(imm), Operation::Add];
     let indptr = [0usize, 2, 2, 2, 2, 2, 2, 2, 2];
     let mut groups = [ZERO; BATCH_SIZE];
     groups[0] = build_group(&ops);
-    groups[1] = Felt::new(2);
+    groups[1] = Felt::new_unchecked(2);
     let batch = OpBatch::new_from_parts(ops, indptr, [false; BATCH_SIZE], groups, 2);
 
     let node = basic_block_from_batch(batch);
@@ -484,7 +493,7 @@ fn test_validate_immediate_commitment_rejects_nonzero_empty_group() {
     let indptr = [0usize, 1, 1, 1, 1, 1, 1, 1, 1];
     let mut groups = [ZERO; BATCH_SIZE];
     groups[0] = build_group(&ops);
-    groups[1] = Felt::new(9);
+    groups[1] = Felt::new_unchecked(9);
     let batch = OpBatch::new_from_parts(ops, indptr, [false; BATCH_SIZE], groups, 2);
 
     let node = basic_block_from_batch(batch);
@@ -629,12 +638,12 @@ proptest! {
         let mut dummy_forest = MastForest::new();
 
         // Convert decorators to use forest's decorator IDs
-        let forest_decorators: Vec<(usize, crate::mast::DecoratorId)> = decs
+        let forest_decorators: Vec<(usize, DecoratorId)> = decs
             .iter()
             .map(|(idx, decorator_id)| (*idx, *decorator_id))
             .collect();
 
-        let node_id = BasicBlockNodeBuilder::new(ops.clone(), forest_decorators)
+        let node_id = BasicBlockNodeBuilder::new(ops, forest_decorators)
             .add_to_forest(&mut dummy_forest)
             .unwrap();
         let block = dummy_forest.get_node_by_id(node_id).unwrap().unwrap_basic_block();
@@ -661,9 +670,9 @@ fn test_mast_node_error_context_decorators_iterates_all_decorators() {
     let op_deco = Decorator::Trace(2);
     let after_exit_deco = Decorator::Trace(3);
 
-    let before_enter_id = forest.add_decorator(before_enter_deco.clone()).unwrap();
-    let op_id = forest.add_decorator(op_deco.clone()).unwrap();
-    let after_exit_id = forest.add_decorator(after_exit_deco.clone()).unwrap();
+    let before_enter_id = forest.add_decorator(before_enter_deco).unwrap();
+    let op_id = forest.add_decorator(op_deco).unwrap();
+    let after_exit_id = forest.add_decorator(after_exit_deco).unwrap();
 
     // Create a basic block with all types of decorators using add_to_forest
     let node_id = BasicBlockNodeBuilder::new(operations, vec![(1, op_id)])
@@ -700,10 +709,10 @@ fn test_indexed_decorator_iter_excludes_before_enter_after_exit() {
     let op_deco2 = Decorator::Trace(3);
     let after_exit_deco = Decorator::Trace(4);
 
-    let before_enter_id = forest.add_decorator(before_enter_deco.clone()).unwrap();
-    let op_id1 = forest.add_decorator(op_deco1.clone()).unwrap();
-    let op_id2 = forest.add_decorator(op_deco2.clone()).unwrap();
-    let after_exit_id = forest.add_decorator(after_exit_deco.clone()).unwrap();
+    let before_enter_id = forest.add_decorator(before_enter_deco).unwrap();
+    let op_id1 = forest.add_decorator(op_deco1).unwrap();
+    let op_id2 = forest.add_decorator(op_deco2).unwrap();
+    let after_exit_id = forest.add_decorator(after_exit_deco).unwrap();
 
     // Create a basic block with all types of decorators using add_to_forest
     let node_id = BasicBlockNodeBuilder::new(operations, vec![(0, op_id1), (1, op_id2)])
@@ -743,25 +752,24 @@ fn test_decorator_positions() {
     let trace_deco = Decorator::Trace(42);
     let debug_deco = Decorator::Trace(999);
 
-    let trace_id = forest.add_decorator(trace_deco.clone()).unwrap();
-    let debug_id = forest.add_decorator(debug_deco.clone()).unwrap();
+    let trace_id = forest.add_decorator(trace_deco).unwrap();
+    let debug_id = forest.add_decorator(debug_deco).unwrap();
 
     // Create a basic block with complex operations
     let operations = vec![
-        Operation::Push(Felt::new(1)),
-        Operation::Push(Felt::new(2)),
+        Operation::Push(Felt::new_unchecked(1)),
+        Operation::Push(Felt::new_unchecked(2)),
         Operation::Add,
-        Operation::Push(Felt::new(3)),
+        Operation::Push(Felt::new_unchecked(3)),
         Operation::Mul,
     ];
 
     // Create a basic block with complex operations using add_to_forest
-    let node_id =
-        BasicBlockNodeBuilder::new(operations.clone(), vec![(2, trace_id), (4, debug_id)])
-            .with_before_enter(vec![trace_id, debug_id])
-            .with_after_exit(vec![trace_id])
-            .add_to_forest(&mut forest)
-            .unwrap();
+    let node_id = BasicBlockNodeBuilder::new(operations, vec![(2, trace_id), (4, debug_id)])
+        .with_before_enter(vec![trace_id, debug_id])
+        .with_after_exit(vec![trace_id])
+        .add_to_forest(&mut forest)
+        .unwrap();
 
     let block = forest.get_node_by_id(node_id).unwrap().unwrap_basic_block();
 
@@ -807,7 +815,7 @@ proptest! {
         // Build BasicBlockNode using linked storage (this applies padding)
         let mut forest = MastForest::new();
         // Convert decorators to use forest's decorator IDs
-        let forest_decorators: Vec<(usize, crate::mast::DecoratorId)> = decorators
+        let forest_decorators: Vec<(usize, DecoratorId)> = decorators
             .iter()
             .map(|(idx, decorator_id)| (*idx, *decorator_id))
             .collect();
@@ -815,7 +823,7 @@ proptest! {
             .add_to_forest(&mut forest)
             .unwrap();
         let block = forest.get_node_by_id(node_id).unwrap().unwrap_basic_block();
-        let padded_ops = block.op_batches().iter().flat_map(|batch| batch.ops()).collect::<Vec<_>>();
+        let padded_ops = block.op_batches().iter().flat_map(OpBatch::ops).collect::<Vec<_>>();
 
         // Build both prefix arrays
         let raw2pad = RawToPaddedPrefix::new(block.op_batches());
@@ -874,7 +882,7 @@ proptest! {
         // Build BasicBlockNode using linked storage
         let mut forest = MastForest::new();
         // Convert decorators to use forest's decorator IDs
-        let forest_decorators: Vec<(usize, crate::mast::DecoratorId)> = decorators
+        let forest_decorators: Vec<(usize, DecoratorId)> = decorators
             .iter()
             .map(|(idx, decorator_id)| (*idx, *decorator_id))
             .collect();
@@ -917,7 +925,12 @@ fn test_basic_block_node_digest_forcing() {
     let normal_digest = node1.digest();
 
     // Build with forced digest
-    let forced_digest = Word::new([Felt::new(1), Felt::new(2), Felt::new(3), Felt::new(4)]);
+    let forced_digest = Word::new([
+        Felt::new_unchecked(1),
+        Felt::new_unchecked(2),
+        Felt::new_unchecked(3),
+        Felt::new_unchecked(4),
+    ]);
     let builder2 = BasicBlockNodeBuilder::new(operations, vec![]).with_digest(forced_digest);
     let node_id2 = builder2
         .add_to_forest(&mut forest)
@@ -934,7 +947,12 @@ fn test_basic_block_digest_forcing_with_decorators() {
     let decorator_id = forest.add_decorator(Decorator::Trace(42)).expect("Failed to add decorator");
 
     let operations = vec![Operation::Add];
-    let forced_digest = Word::new([Felt::new(13), Felt::new(14), Felt::new(15), Felt::new(16)]);
+    let forced_digest = Word::new([
+        Felt::new_unchecked(13),
+        Felt::new_unchecked(14),
+        Felt::new_unchecked(15),
+        Felt::new_unchecked(16),
+    ]);
 
     let node_id = BasicBlockNodeBuilder::new(operations, vec![])
         .with_before_enter(vec![decorator_id])
@@ -964,7 +982,12 @@ fn test_basic_block_fingerprint_uses_forced_digest() {
     let decorator_id = forest.add_decorator(Decorator::Trace(99)).expect("Failed to add decorator");
 
     let operations = vec![Operation::Mul];
-    let forced_digest = Word::new([Felt::new(17), Felt::new(18), Felt::new(19), Felt::new(20)]);
+    let forced_digest = Word::new([
+        Felt::new_unchecked(17),
+        Felt::new_unchecked(18),
+        Felt::new_unchecked(19),
+        Felt::new_unchecked(20),
+    ]);
 
     let builder1 = BasicBlockNodeBuilder::new(operations.clone(), vec![])
         .with_before_enter(vec![decorator_id]);
@@ -989,8 +1012,8 @@ fn test_basic_block_fingerprint_uses_forced_digest() {
 #[test]
 fn test_to_builder_identity() {
     let ops = vec![
-        Operation::Push(Felt::new(1)),
-        Operation::Push(Felt::new(2)),
+        Operation::Push(Felt::new_unchecked(1)),
+        Operation::Push(Felt::new_unchecked(2)),
         Operation::Add,
         Operation::Mul,
     ];

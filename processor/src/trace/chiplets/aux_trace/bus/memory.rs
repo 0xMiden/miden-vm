@@ -2,6 +2,7 @@ use core::fmt::{Display, Formatter, Result as FmtResult};
 
 use miden_air::trace::{
     Challenges, MainTrace, RowIndex,
+    bus_types::CHIPLETS_BUS,
     chiplets::{
         ace::{ACE_INSTRUCTION_ID1_OFFSET, ACE_INSTRUCTION_ID2_OFFSET},
         memory::{
@@ -19,7 +20,7 @@ use crate::debug::{BusDebugger, BusMessage};
 // CONSTANTS
 // ================================================================================================
 
-const FOUR: Felt = Felt::new(4);
+const FOUR: Felt = Felt::new_unchecked(4);
 
 // REQUESTS
 // ================================================================================================
@@ -601,16 +602,19 @@ where
     E: ExtensionField<Felt>,
 {
     fn value(&self, challenges: &Challenges<E>) -> E {
-        challenges.encode([
-            self.op_label,
-            self.ctx,
-            self.addr,
-            self.clk,
-            self.word[0],
-            self.word[1],
-            self.word[2],
-            self.word[3],
-        ])
+        challenges.encode(
+            CHIPLETS_BUS,
+            [
+                self.op_label,
+                self.ctx,
+                self.addr,
+                self.clk,
+                self.word[0],
+                self.word[1],
+                self.word[2],
+                self.word[3],
+            ],
+        )
     }
 
     fn source(&self) -> &str {
@@ -641,7 +645,8 @@ where
     E: ExtensionField<Felt>,
 {
     fn value(&self, challenges: &Challenges<E>) -> E {
-        challenges.encode([self.op_label, self.ctx, self.addr, self.clk, self.element])
+        challenges
+            .encode(CHIPLETS_BUS, [self.op_label, self.ctx, self.addr, self.clk, self.element])
     }
 
     fn source(&self) -> &str {

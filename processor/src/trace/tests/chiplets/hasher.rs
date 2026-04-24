@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 
 use miden_air::trace::{
-    Challenges, RowIndex, bus_message,
+    Challenges, RowIndex, bus_message, bus_types,
     chiplets::hasher::{
         CONTROLLER_ROWS_PER_PERM_FELT, DIGEST_RANGE, HasherState, LINEAR_HASH_LABEL,
         MP_VERIFY_LABEL, MR_UPDATE_NEW_LABEL, MR_UPDATE_OLD_LABEL, RATE_LEN, RETURN_HASH_LABEL,
@@ -281,7 +281,7 @@ const LABEL_OFFSET_OUTPUT: u8 = 32;
 
 /// Sponge start message: full 12-element state (matches SPAN / control block request).
 fn sponge_start_msg(challenges: &Challenges<Felt>, addr: Felt, state: &HasherState) -> Felt {
-    let header = challenges.alpha
+    let header = challenges.bus_prefix[bus_types::CHIPLETS_BUS]
         + challenges.beta_powers[0] * Felt::from_u8(LINEAR_HASH_LABEL + LABEL_OFFSET_INPUT)
         + challenges.beta_powers[1] * addr;
     header + build_value(&challenges.beta_powers[3..15], state)
@@ -291,7 +291,7 @@ fn sponge_start_msg(challenges: &Challenges<Felt>, addr: Felt, state: &HasherSta
 /// Both the RESPAN request and the hasher continuation response use LABEL_OFFSET_OUTPUT (= 32).
 fn sponge_continuation_msg(challenges: &Challenges<Felt>, addr: Felt, rate: &[Felt]) -> Felt {
     assert_eq!(rate.len(), RATE_LEN);
-    let header = challenges.alpha
+    let header = challenges.bus_prefix[bus_types::CHIPLETS_BUS]
         + challenges.beta_powers[0] * Felt::from_u8(LINEAR_HASH_LABEL + LABEL_OFFSET_OUTPUT)
         + challenges.beta_powers[1] * addr;
     header + build_value(&challenges.beta_powers[3..11], rate)
@@ -300,7 +300,7 @@ fn sponge_continuation_msg(challenges: &Challenges<Felt>, addr: Felt, rate: &[Fe
 /// Digest return message: 4-element digest (matches END / MPVERIFY output / MRUPDATE output).
 fn digest_return_msg(challenges: &Challenges<Felt>, addr: Felt, digest: &[Felt]) -> Felt {
     assert_eq!(digest.len(), 4);
-    let header = challenges.alpha
+    let header = challenges.bus_prefix[bus_types::CHIPLETS_BUS]
         + challenges.beta_powers[0] * Felt::from_u8(RETURN_HASH_LABEL + LABEL_OFFSET_OUTPUT)
         + challenges.beta_powers[1] * addr;
     header + build_value(&challenges.beta_powers[3..7], digest)
@@ -308,7 +308,7 @@ fn digest_return_msg(challenges: &Challenges<Felt>, addr: Felt, digest: &[Felt])
 
 /// Full state return message: 12-element state (matches HPERM output).
 fn full_state_return_msg(challenges: &Challenges<Felt>, addr: Felt, state: &HasherState) -> Felt {
-    let header = challenges.alpha
+    let header = challenges.bus_prefix[bus_types::CHIPLETS_BUS]
         + challenges.beta_powers[0] * Felt::from_u8(RETURN_STATE_LABEL + LABEL_OFFSET_OUTPUT)
         + challenges.beta_powers[1] * addr;
     header + build_value(&challenges.beta_powers[3..15], state)
@@ -322,7 +322,7 @@ fn tree_input_msg(
     index: Felt,
     leaf_word: &[Felt; 4],
 ) -> Felt {
-    let header = challenges.alpha
+    let header = challenges.bus_prefix[bus_types::CHIPLETS_BUS]
         + challenges.beta_powers[0] * Felt::from_u8(label + LABEL_OFFSET_INPUT)
         + challenges.beta_powers[1] * addr
         + challenges.beta_powers[2] * index;
@@ -338,8 +338,8 @@ fn hasher_response_at(
     challenges: &Challenges<Felt>,
     row: RowIndex,
 ) -> Felt {
-    let perm_seg = trace.main_trace.chiplet_perm_seg(row);
-    if perm_seg == ONE {
+    let s_perm = trace.main_trace.chiplet_s_perm(row);
+    if s_perm == ONE {
         return ONE; // perm segment: no response
     }
 
@@ -434,7 +434,7 @@ fn decoder_request_at(
             // SPAN request: rate-only message (LINEAR_HASH_LABEL + 16) at addr(row+1).
             let addr_next = trace.main_trace.addr(row + 1);
             let state = trace.main_trace.decoder_hasher_state(row);
-            let header = challenges.alpha
+            let header = challenges.bus_prefix[bus_types::CHIPLETS_BUS]
                 + challenges.beta_powers[bus_message::LABEL_IDX]
                     * Felt::from_u8(LINEAR_HASH_LABEL + LABEL_OFFSET_INPUT)
                 + challenges.beta_powers[bus_message::ADDR_IDX] * addr_next;
@@ -448,7 +448,7 @@ fn decoder_request_at(
             // RESPAN request: rate-only message (LINEAR_HASH_LABEL + 32) at addr(row+1).
             let addr_next = trace.main_trace.addr(row + 1);
             let state = trace.main_trace.decoder_hasher_state(row);
-            let header = challenges.alpha
+            let header = challenges.bus_prefix[bus_types::CHIPLETS_BUS]
                 + challenges.beta_powers[bus_message::LABEL_IDX]
                     * Felt::from_u8(LINEAR_HASH_LABEL + LABEL_OFFSET_OUTPUT)
                 + challenges.beta_powers[bus_message::ADDR_IDX] * addr_next;
@@ -463,7 +463,7 @@ fn decoder_request_at(
             let addr = trace.main_trace.addr(row) + ONE;
             let state = trace.main_trace.decoder_hasher_state(row);
             let digest = &state[..4];
-            let header = challenges.alpha
+            let header = challenges.bus_prefix[bus_types::CHIPLETS_BUS]
                 + challenges.beta_powers[bus_message::LABEL_IDX]
                     * Felt::from_u8(RETURN_HASH_LABEL + LABEL_OFFSET_OUTPUT)
                 + challenges.beta_powers[bus_message::ADDR_IDX] * addr;
@@ -478,7 +478,7 @@ fn decoder_request_at(
             let addr_next = trace.main_trace.addr(row + 1);
             let state = trace.main_trace.decoder_hasher_state(row);
             let op_code_felt = trace.main_trace.get_op_code(row);
-            let header = challenges.alpha
+            let header = challenges.bus_prefix[bus_types::CHIPLETS_BUS]
                 + challenges.beta_powers[bus_message::LABEL_IDX]
                     * Felt::from_u8(LINEAR_HASH_LABEL + LABEL_OFFSET_INPUT)
                 + challenges.beta_powers[bus_message::ADDR_IDX] * addr_next;
@@ -499,7 +499,7 @@ fn decoder_request_at(
                 core::array::from_fn(|i| trace.main_trace.stack_element(i, row + 1));
 
             let input_value = {
-                let mut acc = challenges.alpha
+                let mut acc = challenges.bus_prefix[bus_types::CHIPLETS_BUS]
                     + challenges.beta_powers[bus_message::LABEL_IDX]
                         * Felt::from_u8(LINEAR_HASH_LABEL + LABEL_OFFSET_INPUT)
                     + challenges.beta_powers[bus_message::ADDR_IDX] * helper_0;
@@ -509,7 +509,7 @@ fn decoder_request_at(
                 acc
             };
             let output_value = {
-                let mut acc = challenges.alpha
+                let mut acc = challenges.bus_prefix[bus_types::CHIPLETS_BUS]
                     + challenges.beta_powers[bus_message::LABEL_IDX]
                         * Felt::from_u8(RETURN_STATE_LABEL + LABEL_OFFSET_OUTPUT)
                     + challenges.beta_powers[bus_message::ADDR_IDX] * (helper_0 + ONE);
@@ -549,7 +549,7 @@ fn decoder_request_at(
                 .collect();
 
             let input_value = {
-                let mut acc = challenges.alpha
+                let mut acc = challenges.bus_prefix[bus_types::CHIPLETS_BUS]
                     + challenges.beta_powers[bus_message::LABEL_IDX]
                         * Felt::from_u8(LINEAR_HASH_LABEL + LABEL_OFFSET_INPUT)
                     + challenges.beta_powers[bus_message::ADDR_IDX] * addr;
@@ -559,7 +559,7 @@ fn decoder_request_at(
                 acc
             };
             let output_value = {
-                let mut acc = challenges.alpha
+                let mut acc = challenges.bus_prefix[bus_types::CHIPLETS_BUS]
                     + challenges.beta_powers[bus_message::LABEL_IDX]
                         * Felt::from_u8(RETURN_STATE_LABEL + LABEL_OFFSET_OUTPUT)
                     + challenges.beta_powers[bus_message::ADDR_IDX] * (addr + ONE);
@@ -587,7 +587,7 @@ fn decoder_request_at(
                 merkle_root.as_elements().try_into().expect("word must be 4 field elements");
 
             let input_value = {
-                let mut acc = challenges.alpha
+                let mut acc = challenges.bus_prefix[bus_types::CHIPLETS_BUS]
                     + challenges.beta_powers[bus_message::LABEL_IDX]
                         * Felt::from_u8(MP_VERIFY_LABEL + LABEL_OFFSET_INPUT)
                     + challenges.beta_powers[bus_message::ADDR_IDX] * helper_0
@@ -599,7 +599,7 @@ fn decoder_request_at(
             };
             let output_addr = helper_0 + node_depth * rows_per_perm - ONE;
             let output_value = {
-                let mut acc = challenges.alpha
+                let mut acc = challenges.bus_prefix[bus_types::CHIPLETS_BUS]
                     + challenges.beta_powers[bus_message::LABEL_IDX]
                         * Felt::from_u8(RETURN_HASH_LABEL + LABEL_OFFSET_OUTPUT)
                     + challenges.beta_powers[bus_message::ADDR_IDX] * output_addr;
@@ -634,7 +634,7 @@ fn decoder_request_at(
                 new_root.as_elements().try_into().expect("word must be 4 field elements");
 
             let input_old = {
-                let mut acc = challenges.alpha
+                let mut acc = challenges.bus_prefix[bus_types::CHIPLETS_BUS]
                     + challenges.beta_powers[bus_message::LABEL_IDX]
                         * Felt::from_u8(MR_UPDATE_OLD_LABEL + LABEL_OFFSET_INPUT)
                     + challenges.beta_powers[bus_message::ADDR_IDX] * helper_0
@@ -646,7 +646,7 @@ fn decoder_request_at(
             };
             let output_old = {
                 let output_addr = helper_0 + merkle_path_depth * rows_per_perm - ONE;
-                let mut acc = challenges.alpha
+                let mut acc = challenges.bus_prefix[bus_types::CHIPLETS_BUS]
                     + challenges.beta_powers[bus_message::LABEL_IDX]
                         * Felt::from_u8(RETURN_HASH_LABEL + LABEL_OFFSET_OUTPUT)
                     + challenges.beta_powers[bus_message::ADDR_IDX] * output_addr;
@@ -657,7 +657,7 @@ fn decoder_request_at(
             };
             let input_new = {
                 let new_input_addr = helper_0 + merkle_path_depth * rows_per_perm;
-                let mut acc = challenges.alpha
+                let mut acc = challenges.bus_prefix[bus_types::CHIPLETS_BUS]
                     + challenges.beta_powers[bus_message::LABEL_IDX]
                         * Felt::from_u8(MR_UPDATE_NEW_LABEL + LABEL_OFFSET_INPUT)
                     + challenges.beta_powers[bus_message::ADDR_IDX] * new_input_addr
@@ -669,7 +669,7 @@ fn decoder_request_at(
             };
             let output_new = {
                 let new_output_addr = helper_0 + merkle_path_depth * two_legs_rows - ONE;
-                let mut acc = challenges.alpha
+                let mut acc = challenges.bus_prefix[bus_types::CHIPLETS_BUS]
                     + challenges.beta_powers[bus_message::LABEL_IDX]
                         * Felt::from_u8(RETURN_HASH_LABEL + LABEL_OFFSET_OUTPUT)
                     + challenges.beta_powers[bus_message::ADDR_IDX] * new_output_addr;
@@ -743,7 +743,7 @@ fn init_leaves(values: &[u64]) -> Vec<Word> {
 
 /// Initializes a Merkle tree leaf with the specified value.
 fn init_leaf(value: u64) -> Word {
-    [Felt::new(value), ZERO, ZERO, ZERO].into()
+    [Felt::new_unchecked(value), ZERO, ZERO, ZERO].into()
 }
 
 /// Converts a Word to stack input values (u64 array) in element order.

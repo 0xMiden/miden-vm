@@ -84,7 +84,7 @@ fn stack_get_word_safe_partial_read() {
     // elements at indices 15, 16, 17, 18. Only index 15 is valid; the rest should be ZERO.
     let word = processor.stack_get_word_safe(15);
     // Index 15 is the bottom of the stack (value 16, since inputs are in stack order: top first).
-    assert_eq!(word, [Felt::new(16), ZERO, ZERO, ZERO].into());
+    assert_eq!(word, [Felt::new_unchecked(16), ZERO, ZERO, ZERO].into());
 }
 
 #[test]
@@ -383,8 +383,10 @@ fn test_frie2f4() {
     ])
     .unwrap();
 
-    let program =
-        simple_program_with_ops(vec![Operation::Push(Felt::new(42_u64)), Operation::FriE2F4]);
+    let program = simple_program_with_ops(vec![
+        Operation::Push(Felt::new_unchecked(42_u64)),
+        Operation::FriE2F4,
+    ]);
 
     // fast processor
     let fast_processor = FastProcessor::new(stack_inputs);
@@ -511,7 +513,7 @@ fn test_external_node_decorator_sequencing() {
 
     // Add a decorator to the lib forest to track execution inside the external node
     let lib_decorator = Decorator::Trace(2);
-    let lib_decorator_id = lib_forest.add_decorator(lib_decorator.clone()).unwrap();
+    let lib_decorator_id = lib_forest.add_decorator(lib_decorator).unwrap();
 
     let lib_operations = [Operation::Push(Felt::from_u32(1)), Operation::Add];
     // Attach the decorator to the first operation (index 0)
@@ -524,8 +526,8 @@ fn test_external_node_decorator_sequencing() {
     let mut main_forest = MastForest::new();
     let before_decorator = Decorator::Trace(1);
     let after_decorator = Decorator::Trace(3);
-    let before_id = main_forest.add_decorator(before_decorator.clone()).unwrap();
-    let after_id = main_forest.add_decorator(after_decorator.clone()).unwrap();
+    let before_id = main_forest.add_decorator(before_decorator).unwrap();
+    let after_id = main_forest.add_decorator(after_decorator).unwrap();
 
     let external_id = ExternalNodeBuilder::new(lib_forest[lib_block_id].digest())
         .with_before_enter([before_id])
@@ -542,7 +544,7 @@ fn test_external_node_decorator_sequencing() {
         .with_tracing(true);
 
     let result = processor.execute_sync(&program, &mut host);
-    assert!(result.is_ok(), "Execution failed: {:?}", result);
+    assert!(result.is_ok(), "Execution failed: {result:?}");
 
     // Verify all decorators executed
     assert_eq!(host.get_trace_count(1), 1, "before_enter decorator should execute exactly once");

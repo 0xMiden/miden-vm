@@ -507,21 +507,41 @@ fn test_ast_parsing_program_push() -> Result<(), Report> {
         inst!(Push(Immediate::Value(Span::unknown(10u8.into())))),
         inst!(Push(Immediate::Value(Span::unknown(500u16.into())))),
         inst!(Push(Immediate::Value(Span::unknown(70000u32.into())))),
-        inst!(Push(Immediate::Value(Span::unknown(Felt::new(5000000000_u64).into())))),
-        inst!(Push(Immediate::Value(Span::unknown(Felt::new(5000000000_u64).into())))),
-        inst!(Push(Immediate::Value(Span::unknown(Felt::new(7000000000_u64).into())))),
-        inst!(Push(Immediate::Value(Span::unknown(Felt::new(9000000000_u64).into())))),
-        inst!(Push(Immediate::Value(Span::unknown(Felt::new(11000000000_u64).into())))),
+        inst!(Push(Immediate::Value(Span::unknown(
+            Felt::new_unchecked(5000000000_u64).into()
+        )))),
+        inst!(Push(Immediate::Value(Span::unknown(
+            Felt::new_unchecked(5000000000_u64).into()
+        )))),
+        inst!(Push(Immediate::Value(Span::unknown(
+            Felt::new_unchecked(7000000000_u64).into()
+        )))),
+        inst!(Push(Immediate::Value(Span::unknown(
+            Felt::new_unchecked(9000000000_u64).into()
+        )))),
+        inst!(Push(Immediate::Value(Span::unknown(
+            Felt::new_unchecked(11000000000_u64).into()
+        )))),
         inst!(Push(Immediate::Value(Span::unknown(5u8.into())))),
         inst!(Push(Immediate::Value(Span::unknown(7u8.into())))),
         inst!(Push(Immediate::Value(Span::unknown(500u16.into())))),
         inst!(Push(Immediate::Value(Span::unknown(700u16.into())))),
         inst!(Push(Immediate::Value(Span::unknown(70000u32.into())))),
         inst!(Push(Immediate::Value(Span::unknown(90000u32.into())))),
-        inst!(Push(Immediate::Value(Span::unknown(Felt::new(5000000000_u64).into())))),
-        inst!(Push(Immediate::Value(Span::unknown(Felt::new(7000000000_u64).into())))),
         inst!(Push(Immediate::Value(Span::unknown(
-            WordValue([Felt::new(0), Felt::new(1), Felt::new(2), Felt::new(3)]).into()
+            Felt::new_unchecked(5000000000_u64).into()
+        )))),
+        inst!(Push(Immediate::Value(Span::unknown(
+            Felt::new_unchecked(7000000000_u64).into()
+        )))),
+        inst!(Push(Immediate::Value(Span::unknown(
+            WordValue([
+                Felt::new_unchecked(0),
+                Felt::new_unchecked(1),
+                Felt::new_unchecked(2),
+                Felt::new_unchecked(3)
+            ])
+            .into()
         ))))
     ));
 

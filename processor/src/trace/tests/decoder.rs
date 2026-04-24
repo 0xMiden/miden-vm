@@ -594,7 +594,7 @@ fn decoder_p2_loop_with_repeat() {
     let challenges = Challenges::<Felt>::new(challenges[0], challenges[1]);
     // The loop node consumes the first hasher cycle; join/span addresses follow sequentially.
     let a_3 = ONE + CONTROLLER_ROWS_PER_PERM_FELT; // address of the JOIN block in the first iteration
-    let a_9 = a_3 + CONTROLLER_ROWS_PER_PERM_FELT * Felt::new(3); // address of the JOIN block in the second iteration
+    let a_9 = a_3 + CONTROLLER_ROWS_PER_PERM_FELT * Felt::new_unchecked(3); // address of the JOIN block in the second iteration
     let program_hash_msg =
         BlockHashTableRow::new_test(ZERO, program.hash(), false, false).collapse(&challenges);
     let loop_body_msg =
@@ -713,7 +713,7 @@ fn decoder_p3_trace_one_batch() {
         Operation::Add,
         Operation::Mul,
         Operation::Add,
-        Operation::Push(Felt::new(2)),
+        Operation::Push(Felt::new_unchecked(2)),
         Operation::Add,
         Operation::Swap,
         Operation::Mul,
@@ -731,8 +731,9 @@ fn decoder_p3_trace_one_batch() {
 
     // make sure 3 groups were inserted at clock cycle 1; these entries are for the two immediate
     // values and the second operation group consisting of [SWAP, MUL, ADD]
-    let g1_value = OpGroupTableRow::new(ONE, Felt::new(3), ONE).to_value(&challenges);
-    let g2_value = OpGroupTableRow::new(ONE, Felt::new(2), Felt::new(2)).to_value(&challenges);
+    let g1_value = OpGroupTableRow::new(ONE, Felt::new_unchecked(3), ONE).to_value(&challenges);
+    let g2_value = OpGroupTableRow::new(ONE, Felt::new_unchecked(2), Felt::new_unchecked(2))
+        .to_value(&challenges);
     let g3_value = OpGroupTableRow::new(ONE, ONE, build_op_group(&ops[9..])).to_value(&challenges);
     let expected_value = g1_value * g2_value * g3_value;
     assert_eq!(expected_value, p3[1]);
@@ -785,13 +786,13 @@ fn decoder_p3_trace_two_batches() {
     // --- first batch ----------------------------------------------------------------------------
     // make sure entries for 7 groups were inserted at clock cycle 1
     let b0_values = [
-        OpGroupTableRow::new(ONE, Felt::new(11), iv[0]).to_value(&challenges),
-        OpGroupTableRow::new(ONE, Felt::new(10), iv[1]).to_value(&challenges),
-        OpGroupTableRow::new(ONE, Felt::new(9), iv[2]).to_value(&challenges),
-        OpGroupTableRow::new(ONE, Felt::new(8), iv[3]).to_value(&challenges),
-        OpGroupTableRow::new(ONE, Felt::new(7), iv[4]).to_value(&challenges),
-        OpGroupTableRow::new(ONE, Felt::new(6), iv[5]).to_value(&challenges),
-        OpGroupTableRow::new(ONE, Felt::new(5), iv[6]).to_value(&challenges),
+        OpGroupTableRow::new(ONE, Felt::new_unchecked(11), iv[0]).to_value(&challenges),
+        OpGroupTableRow::new(ONE, Felt::new_unchecked(10), iv[1]).to_value(&challenges),
+        OpGroupTableRow::new(ONE, Felt::new_unchecked(9), iv[2]).to_value(&challenges),
+        OpGroupTableRow::new(ONE, Felt::new_unchecked(8), iv[3]).to_value(&challenges),
+        OpGroupTableRow::new(ONE, Felt::new_unchecked(7), iv[4]).to_value(&challenges),
+        OpGroupTableRow::new(ONE, Felt::new_unchecked(6), iv[5]).to_value(&challenges),
+        OpGroupTableRow::new(ONE, Felt::new_unchecked(5), iv[6]).to_value(&challenges),
     ];
     let mut expected_value: Felt = b0_values.iter().fold(ONE, |acc, &val| acc * val);
     assert_eq!(expected_value, p3[1]);
@@ -814,8 +815,8 @@ fn decoder_p3_trace_two_batches() {
     let batch1_addr = ONE + CONTROLLER_ROWS_PER_PERM_FELT;
     let op_group3 = build_op_group(&[Operation::Drop; 2]);
     let b1_values = [
-        OpGroupTableRow::new(batch1_addr, Felt::new(3), iv[7]).to_value(&challenges),
-        OpGroupTableRow::new(batch1_addr, Felt::new(2), iv[8]).to_value(&challenges),
+        OpGroupTableRow::new(batch1_addr, Felt::new_unchecked(3), iv[7]).to_value(&challenges),
+        OpGroupTableRow::new(batch1_addr, Felt::new_unchecked(2), iv[8]).to_value(&challenges),
         OpGroupTableRow::new(batch1_addr, ONE, op_group3).to_value(&challenges),
     ];
     let mut expected_value: Felt = b1_values.iter().fold(ONE, |acc, &val| acc * val);
@@ -883,7 +884,7 @@ impl BlockStackTableRow {
     /// at least 12 coefficients.
     pub fn to_value<E: ExtensionField<Felt>>(&self, challenges: &Challenges<E>) -> E {
         let is_loop = if self.is_loop { ONE } else { ZERO };
-        challenges.alpha
+        challenges.bus_prefix[miden_air::trace::bus_types::BLOCK_STACK_TABLE]
             + challenges.beta_powers[0] * self.block_id
             + challenges.beta_powers[1] * self.parent_id
             + challenges.beta_powers[2] * is_loop
@@ -918,7 +919,7 @@ impl OpGroupTableRow {
     /// Reduces this row to a single field element in the field specified by E. This requires
     /// at least 4 coefficients.
     pub fn to_value<E: ExtensionField<Felt>>(&self, challenges: &Challenges<E>) -> E {
-        challenges.alpha
+        challenges.bus_prefix[miden_air::trace::bus_types::OP_GROUP_TABLE]
             + challenges.beta_powers[0] * self.batch_id
             + challenges.beta_powers[1] * self.group_pos
             + challenges.beta_powers[2] * self.group_value

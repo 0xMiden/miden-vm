@@ -19,6 +19,8 @@ help:
 	@printf "  make test-prover                 # Test prover crate\n"
 	@printf "  make test-core-lib               # Test core-lib crate\n"
 	@printf "  make test-verifier               # Test verifier crate\n"
+	@printf "  make check-constraints          # Check core-lib constraint artifacts\n"
+	@printf "  make regenerate-constraints      # Regenerate core-lib constraint artifacts\n"
 	@printf "\nExamples:\n"
 	@printf "  make test-air test=\"some_test\" # Test specific function\n"
 	@printf "  make test-fast                   # Fast tests (no proptests/CLI)\n"
@@ -86,6 +88,9 @@ format: ## Runs Format using nightly toolchain
 format-check: ## Runs Format using nightly toolchain but only in check mode
 	cargo +nightly fmt --all --check
 
+.PHONY: shear
+shear: ## Runs cargo-shear to find unused or misplaced dependencies
+	cargo shear
 
 .PHONY: lint
 lint: xclippy xclippy-fix format ## Runs all linting tasks: check with xclippy, fix issues, then format
@@ -220,6 +225,14 @@ exec-avx2: ## Builds an executable with AVX2 acceleration enabled
 exec-sve: ## Builds an executable with SVE acceleration enabled
 	RUSTFLAGS="-C target-feature=+sve" cargo build --profile optimized $(FEATURES_CONCURRENT_EXEC)
 
+.PHONY: regenerate-constraints
+regenerate-constraints: ## Regenerate core-lib constraint artifacts
+	cargo run --package miden-core-lib --features constraints-tools --bin regenerate-constraints -- --write
+
+.PHONY: check-constraints
+check-constraints: ## Check core-lib constraint artifacts for drift
+	cargo run --package miden-core-lib --features constraints-tools --bin regenerate-constraints -- --check
+
 .PHONY: exec-info
 exec-info: ## Builds an executable with log tree enabled
 	cargo build --profile optimized $(FEATURES_LOG_TREE)
@@ -287,7 +300,11 @@ fuzz-all: fuzz-seeds ## Run all fuzz targets (in sequence)
 	-@cargo +nightly fuzz run library_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
 	-@cargo +nightly fuzz run library_serde_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
 	-@cargo +nightly fuzz run package_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
+	-@cargo +nightly fuzz run package_semantic_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
 	-@cargo +nightly fuzz run package_serde_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
+	-@cargo +nightly fuzz run project_toml_parse --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
+	-@cargo +nightly fuzz run project_load --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
+	-@cargo +nightly fuzz run project_assemble --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
 
 .PHONY: fuzz-list
 fuzz-list: ## List available fuzz targets

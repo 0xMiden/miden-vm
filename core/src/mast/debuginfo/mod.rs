@@ -52,7 +52,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{AsmOpId, Decorator, DecoratorId, MastForestError, MastNodeId};
 use crate::{
-    LexicographicWord, Word,
+    Word,
     mast::serialization::{
         StringTable,
         asm_op::{AsmOpDataBuilder, AsmOpInfo},
@@ -110,7 +110,7 @@ pub struct DebugInfo {
 
     /// Maps MAST root digests to procedure names for debugging purposes.
     #[cfg_attr(feature = "serde", serde(skip))]
-    procedure_names: BTreeMap<LexicographicWord, Arc<str>>,
+    procedure_names: BTreeMap<Word, Arc<str>>,
 }
 
 impl DebugInfo {
@@ -272,6 +272,12 @@ impl DebugInfo {
         self.debug_vars.get(debug_var_id)
     }
 
+    /// Returns all `(op_idx, DebugVarId)` pairs for the given node, or an empty vec if the
+    /// node has no debug vars.
+    pub fn debug_vars_for_node(&self, node_id: MastNodeId) -> Vec<(usize, DebugVarId)> {
+        self.op_debug_var_storage.debug_vars_for_node(node_id)
+    }
+
     /// Returns debug variable IDs for a specific operation within a node.
     pub fn debug_vars_for_operation(
         &self,
@@ -322,7 +328,7 @@ impl DebugInfo {
         &mut self,
         node_id: MastNodeId,
         decorators_info: Vec<(usize, DecoratorId)>,
-    ) -> Result<(), crate::mast::debuginfo::decorator_storage::DecoratorIndexError> {
+    ) -> Result<(), DecoratorIndexError> {
         self.op_decorator_storage.add_decorator_info_for_node(node_id, decorators_info)
     }
 
@@ -362,6 +368,11 @@ impl DebugInfo {
     pub fn first_asm_op_for_node(&self, node_id: MastNodeId) -> Option<&AssemblyOp> {
         let asm_op_id = self.asm_op_storage.first_asm_op_for_node(node_id)?;
         self.asm_ops.get(asm_op_id)
+    }
+
+    /// Returns all `(op_idx, AsmOpId)` pairs for the given node.
+    pub fn asm_ops_for_node(&self, node_id: MastNodeId) -> Vec<(usize, AsmOpId)> {
+        self.asm_op_storage.asm_ops_for_node(node_id)
     }
 
     // ASSEMBLY OP MUTATORS
@@ -413,6 +424,14 @@ impl DebugInfo {
         self.asm_op_storage = self.asm_op_storage.remap_nodes(remapping);
     }
 
+    /// Remaps the debug var storage to use new node IDs after nodes have been removed/reordered.
+    ///
+    /// This should be called after nodes are removed from the MastForest to ensure the debug
+    /// var storage still references valid node IDs.
+    pub(super) fn remap_debug_var_storage(&mut self, remapping: &BTreeMap<MastNodeId, MastNodeId>) {
+        self.op_debug_var_storage = self.op_debug_var_storage.remap_nodes(remapping);
+    }
+
     // DEBUG VARIABLE MUTATORS
     // --------------------------------------------------------------------------------------------
 
@@ -431,7 +450,7 @@ impl DebugInfo {
         &mut self,
         node_id: MastNodeId,
         debug_vars_info: Vec<(usize, DebugVarId)>,
-    ) -> Result<(), crate::mast::debuginfo::decorator_storage::DecoratorIndexError> {
+    ) -> Result<(), DecoratorIndexError> {
         self.op_debug_var_storage.add_debug_var_info_for_node(node_id, debug_vars_info)
     }
 
@@ -475,12 +494,12 @@ impl DebugInfo {
 
     /// Returns the procedure name for the given MAST root digest, if present.
     pub fn procedure_name(&self, digest: &Word) -> Option<&str> {
-        self.procedure_names.get(&LexicographicWord::from(*digest)).map(|s| s.as_ref())
+        self.procedure_names.get(digest).map(AsRef::as_ref)
     }
 
     /// Returns an iterator over all (digest, name) pairs.
     pub fn procedure_names(&self) -> impl Iterator<Item = (Word, &Arc<str>)> {
-        self.procedure_names.iter().map(|(key, name)| (key.into_inner(), name))
+        self.procedure_names.iter().map(|(key, name)| (*key, name))
     }
 
     /// Returns the number of procedure names.
@@ -490,7 +509,7 @@ impl DebugInfo {
 
     /// Inserts a procedure name for the given MAST root digest.
     pub fn insert_procedure_name(&mut self, digest: Word, name: Arc<str>) {
-        self.procedure_names.insert(LexicographicWord::from(digest), name);
+        self.procedure_names.insert(digest, name);
     }
 
     /// Inserts multiple procedure names at once.
@@ -498,8 +517,7 @@ impl DebugInfo {
     where
         I: IntoIterator<Item = (Word, Arc<str>)>,
     {
-        self.procedure_names
-            .extend(names.into_iter().map(|(d, n)| (LexicographicWord::from(d), n)));
+        self.procedure_names.extend(names);
     }
 
     /// Clears all procedure names.
@@ -637,9 +655,9 @@ impl Deserializable for DebugInfo {
         // Note: Procedure name digests are validated at the MastForest level (in
         // MastForest::validate) to ensure they reference actual procedures in the forest.
         let procedure_names_raw: BTreeMap<Word, String> = Deserializable::read_from(source)?;
-        let procedure_names: BTreeMap<LexicographicWord, Arc<str>> = procedure_names_raw
+        let procedure_names: BTreeMap<Word, Arc<str>> = procedure_names_raw
             .into_iter()
-            .map(|(k, v)| (LexicographicWord::from(k), Arc::from(v.as_str())))
+            .map(|(k, v)| (k, Arc::from(v.as_str())))
             .collect();
 
         // 7. Read AssemblyOps (data, string table, infos)
@@ -681,7 +699,7 @@ impl Deserializable for DebugInfo {
         };
 
         debug_info.validate().map_err(|e| {
-            DeserializationError::InvalidValue(format!("DebugInfo validation failed: {}", e))
+            DeserializationError::InvalidValue(format!("DebugInfo validation failed: {e}"))
         })?;
 
         Ok(debug_info)

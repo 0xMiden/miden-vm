@@ -85,7 +85,7 @@ pub(super) fn op_u32add<P: Processor, T: Tracer>(
     let (carry, sum) = {
         let (a, b) = require_u32_operands!(processor, [0, 1]);
 
-        let result = Felt::new(a.as_canonical_u64() + b.as_canonical_u64());
+        let result = Felt::new_unchecked(a.as_canonical_u64() + b.as_canonical_u64());
         split_element(result)
     };
     tracer.record_u32_range_checks(processor.system().clock(), sum, carry);
@@ -115,7 +115,8 @@ where
     let (carry, sum) = {
         let (a, b, c) = require_u32_operands!(processor, [0, 1, 2]);
 
-        let result = Felt::new(a.as_canonical_u64() + b.as_canonical_u64() + c.as_canonical_u64());
+        let result =
+            Felt::new_unchecked(a.as_canonical_u64() + b.as_canonical_u64() + c.as_canonical_u64());
         split_element(result)
     };
     tracer.record_u32_range_checks(processor.system().clock(), sum, carry);
@@ -142,8 +143,8 @@ pub(super) fn op_u32sub<P: Processor, T: Tracer>(
     let (b, a) = require_u32_operands!(processor, [0, 1]);
 
     let result = a.as_canonical_u64().wrapping_sub(b.as_canonical_u64());
-    let borrow = Felt::new(result >> 63);
-    let diff = Felt::new(result & u32::MAX as u64);
+    let borrow = Felt::new_unchecked(result >> 63);
+    let diff = Felt::new_unchecked(result & u32::MAX as u64);
 
     tracer.record_u32_range_checks(processor.system().clock(), diff, ZERO);
 
@@ -165,7 +166,7 @@ pub(super) fn op_u32mul<P: Processor, T: Tracer>(
 ) -> Result<OperationHelperRegisters, OperationError> {
     let (a, b) = require_u32_operands!(processor, [0, 1]);
 
-    let result = Felt::new(a.as_canonical_u64() * b.as_canonical_u64());
+    let result = Felt::new_unchecked(a.as_canonical_u64() * b.as_canonical_u64());
     let (hi, lo) = split_element(result);
     tracer.record_u32_range_checks(processor.system().clock(), lo, hi);
 
@@ -192,7 +193,8 @@ where
 {
     let (a, b, c) = require_u32_operands!(processor, [0, 1, 2]);
 
-    let result = Felt::new(a.as_canonical_u64() * b.as_canonical_u64() + c.as_canonical_u64());
+    let result =
+        Felt::new_unchecked(a.as_canonical_u64() * b.as_canonical_u64() + c.as_canonical_u64());
     let (hi, lo) = split_element(result);
     tracer.record_u32_range_checks(processor.system().clock(), lo, hi);
 
@@ -233,13 +235,13 @@ pub(super) fn op_u32div<P: Processor, T: Tracer>(
     let remainder = numerator - quotient * denominator;
 
     // remainder is placed on top of the stack, followed by quotient
-    processor.stack_mut().set(0, Felt::new(remainder));
-    processor.stack_mut().set(1, Felt::new(quotient));
+    processor.stack_mut().set(0, Felt::new_unchecked(remainder));
+    processor.stack_mut().set(1, Felt::new_unchecked(quotient));
 
     // These range checks help enforce that quotient <= numerator.
-    let lo = Felt::new(numerator - quotient);
+    let lo = Felt::new_unchecked(numerator - quotient);
     // These range checks help enforce that remainder < denominator.
-    let hi = Felt::new(denominator - remainder - 1);
+    let hi = Felt::new_unchecked(denominator - remainder - 1);
 
     tracer.record_u32_range_checks(processor.system().clock(), lo, hi);
     Ok(OperationHelperRegisters::U32Div { lo, hi })
@@ -266,7 +268,7 @@ where
 
     // Update stack
     processor.stack_mut().decrement_size()?;
-    processor.stack_mut().set(0, Felt::new(result));
+    processor.stack_mut().set(0, Felt::new_unchecked(result));
     Ok(OperationHelperRegisters::Empty)
 }
 
@@ -291,7 +293,7 @@ where
 
     // Update stack
     processor.stack_mut().decrement_size()?;
-    processor.stack_mut().set(0, Felt::new(result));
+    processor.stack_mut().set(0, Felt::new_unchecked(result));
     Ok(OperationHelperRegisters::Empty)
 }
 
@@ -351,5 +353,5 @@ fn split_element(value: Felt) -> (Felt, Felt) {
     let value = value.as_canonical_u64();
     let lo = (value as u32) as u64;
     let hi = value >> 32;
-    (Felt::new(hi), Felt::new(lo))
+    (Felt::new_unchecked(hi), Felt::new_unchecked(lo))
 }

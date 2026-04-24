@@ -390,7 +390,11 @@ mod tests {
     use miden_core::crypto::hash::Poseidon2;
     use miden_debug_types::Span;
 
-    use crate::{Felt, ast::*};
+    use crate::{
+        Felt,
+        ast::*,
+        parser::{IntValue, PushValue},
+    };
 
     #[test]
     fn test_instruction_display() {
@@ -400,7 +404,7 @@ mod tests {
         let instruction = format!("{}", Instruction::Add);
         assert_eq!("add", instruction);
 
-        let instruction = format!("{}", Instruction::AddImm(Felt::new(5).into()));
+        let instruction = format!("{}", Instruction::AddImm(Felt::new_unchecked(5).into()));
         assert_eq!("add.5", instruction);
 
         let instruction = format!("{}", Instruction::ExpBitLength(32));
@@ -408,14 +412,17 @@ mod tests {
 
         let instruction = format!(
             "{}",
-            Instruction::PushFeltList(vec![Felt::new(3), Felt::new(4), Felt::new(8), Felt::new(9)])
+            Instruction::PushFeltList(vec![
+                Felt::new_unchecked(3),
+                Felt::new_unchecked(4),
+                Felt::new_unchecked(8),
+                Felt::new_unchecked(9)
+            ])
         );
         assert_eq!("push.3.4.8.9", instruction);
         let instruction = format!(
             "{}",
-            Instruction::Push(Immediate::Value(miden_debug_types::Span::unknown(
-                crate::parser::PushValue::Int(crate::parser::IntValue::U8(3))
-            )))
+            Instruction::Push(Immediate::Value(Span::unknown(PushValue::Int(IntValue::U8(3)))))
         );
         assert_eq!("push.3", instruction);
 
@@ -423,7 +430,7 @@ mod tests {
         let target = InvocationTarget::MastRoot(Span::unknown(digest));
         let instruction = format!("{}", Instruction::Exec(target));
         assert_eq!(
-            "exec.0x065c394c00227acff3545da5493cf1b79d9a9f5628db553d240edf8ef0cca04a",
+            "exec.0x23796e2a4ee91a63c116e11dbbc2ea599461766d1fb7b6599ca387cab2c3e64c",
             instruction
         );
     }

@@ -60,7 +60,7 @@ pub(crate) struct InputKeyMapper<'a> {
 
 impl InputKeyMapper<'_> {
     /// Return the input index for a key, if it exists in the layout.
-    pub(crate) fn index_of(&self, key: InputKey) -> Option<usize> {
+    pub(crate) fn index_of(self, key: InputKey) -> Option<usize> {
         let layout = self.layout;
         match key {
             InputKey::Public(i) => layout.regions.public_values.index(i),

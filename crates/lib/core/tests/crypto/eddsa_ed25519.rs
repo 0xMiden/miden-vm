@@ -21,7 +21,7 @@ use miden_core_lib::{
     handlers::eddsa_ed25519::{EddsaPrecompile, EddsaRequest},
 };
 use miden_crypto::{
-    dsa::eddsa_25519_sha512::{PublicKey, SecretKey, Signature},
+    dsa::eddsa_25519_sha512::{PublicKey, Signature, SigningKey as SecretKey},
     hash::{poseidon2::Poseidon2, sha2::Sha512},
 };
 use miden_processor::{
@@ -161,7 +161,7 @@ fn test_eddsa_verify_prehash_impl_commitment() {
 
 #[test]
 fn test_eddsa_verify_with_message() {
-    let message = Word::new([1, 2, 3, 4].map(Felt::new));
+    let message = Word::new([1, 2, 3, 4].map(Felt::new_unchecked));
 
     let mut rng = StdRng::seed_from_u64(42);
     let secret_key = SecretKey::with_rng(&mut rng);
@@ -225,8 +225,7 @@ impl EventHandler for EddsaSignatureHandler {
         };
         assert_eq!(
             provided_pk_commitment, pk_commitment,
-            "public key commitment mismatch: expected {:?}, got {:?}",
-            pk_commitment, provided_pk_commitment
+            "public key commitment mismatch: expected {pk_commitment:?}, got {provided_pk_commitment:?}"
         );
 
         // Message starts at position 5 (after event_id + pk_commitment)
@@ -243,7 +242,12 @@ fn test_eddsa_verify_high_level_wrapper() {
     let mut rng = StdRng::seed_from_u64(19260817);
     let secret_key = SecretKey::with_rng(&mut rng);
     let public_key = secret_key.public_key();
-    let message = Word::from([Felt::new(11), Felt::new(22), Felt::new(33), Felt::new(44)]);
+    let message = Word::from([
+        Felt::new_unchecked(11),
+        Felt::new_unchecked(22),
+        Felt::new_unchecked(33),
+        Felt::new_unchecked(44),
+    ]);
 
     let pk_commitment = {
         let pk_felts = bytes_to_packed_u32_elements(&public_key.to_bytes());
@@ -293,7 +297,7 @@ fn generate_valid_data() -> EddsaTestData {
     let mut rng = StdRng::seed_from_u64(42);
     let secret_key = SecretKey::with_rng(&mut rng);
     let pk = secret_key.public_key();
-    let message = Word::new([1, 2, 3, 4].map(Felt::new));
+    let message = Word::new([1, 2, 3, 4].map(Felt::new_unchecked));
     let sig = secret_key.sign(message);
     let message_bytes: Vec<_> = message
         .into_iter()

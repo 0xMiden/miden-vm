@@ -54,7 +54,6 @@ miden-utils-sync.workspace = true
 
 # External dependencies
 derive_more.workspace = true
-itertools.workspace = true
 num-derive = { version = "0.4", default-features = false }
 num-traits = { version = "0.2", default-features = false }
 proptest = { workspace = true, optional = true }
@@ -67,6 +66,6 @@ criterion = { workspace = true }
 insta.workspace = true
 miden-test-serde-macros.workspace = true
 proptest.workspace = true
-rstest = { version = "0.26" }
+rstest = { workspace = true }
 serde_json = { workspace = true }
 miden-utils-testing.workspace = true

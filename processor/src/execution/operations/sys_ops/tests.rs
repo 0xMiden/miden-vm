@@ -90,11 +90,11 @@ fn test_op_clk() {
 /// The values are provided in "stack order" (top of stack first), and the result is a Vec<Felt>
 /// that can be compared with `processor.stack_top()`, where the top of the stack is at the
 /// **last** index.
-fn build_expected(values: &[u64]) -> alloc::vec::Vec<Felt> {
+fn build_expected(values: &[u64]) -> vec::Vec<Felt> {
     let mut expected = vec![ZERO; 16];
     for (i, &value) in values.iter().enumerate() {
         // In the result, top of stack is at index 15, second at 14, etc.
-        expected[15 - i] = Felt::new(value);
+        expected[15 - i] = Felt::new_unchecked(value);
     }
     expected
 }

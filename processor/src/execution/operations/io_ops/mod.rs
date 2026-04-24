@@ -278,9 +278,9 @@ pub(super) fn op_pipe<P: Processor, T: Tracer>(
     tracer: &mut T,
 ) -> Result<OperationHelperRegisters, IoError> {
     /// WORD_SIZE, but as a `Felt`.
-    const WORD_SIZE_FELT: Felt = Felt::new(4);
+    const WORD_SIZE_FELT: Felt = Felt::new_unchecked(4);
     /// The size of a double-word.
-    const DOUBLE_WORD_SIZE: Felt = Felt::new(8);
+    const DOUBLE_WORD_SIZE: Felt = Felt::new_unchecked(8);
 
     // The stack index where the memory address to load the words from is stored.
     const MEM_ADDR_STACK_IDX: usize = 12;

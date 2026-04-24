@@ -18,7 +18,7 @@ pub struct StdoutWriter;
 impl fmt::Write for StdoutWriter {
     fn write_str(&mut self, _s: &str) -> fmt::Result {
         #[cfg(feature = "std")]
-        std::print!("{}", _s);
+        std::print!("{_s}");
         Ok(())
     }
 }
@@ -262,7 +262,7 @@ impl<W: fmt::Write + Sync> DefaultDebugHandler<W> {
             .into_iter()
             .map(|(addr, value_opt)| {
                 let value_string = format_value(value_opt);
-                format!("{addr:>width$}: {value_string}", width = max_addr_width)
+                format!("{addr:>max_addr_width$}: {value_string}")
             })
             .collect();
 

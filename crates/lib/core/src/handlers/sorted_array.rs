@@ -1,8 +1,6 @@
 use alloc::{vec, vec::Vec};
 
-use miden_core::{
-    Felt, LexicographicWord, Word, events::EventName, field::PrimeCharacteristicRing,
-};
+use miden_core::{Felt, Word, events::EventName, field::PrimeCharacteristicRing};
 use miden_processor::{MemoryError, ProcessorState, advice::AdviceMutation, event::EventError};
 
 /// Event name for the lowerbound_array operation.
@@ -122,7 +120,7 @@ fn push_lowerbound_result(
         ])]);
     }
 
-    // Helper function to get a word from memory and convert it to a LexicographicWord
+    // Helper function to get a word from memory and normalize it to the requested key size.
     let get_word = {
         |addr: u32| {
             process
@@ -147,8 +145,8 @@ fn push_lowerbound_result(
         if word < previous_word {
             return Err(SortedArrayError::NotAscendingOrder {
                 index: addr,
-                value: word.into(),
-                predecessor: previous_word.into(),
+                value: word,
+                predecessor: previous_word,
             }
             .into());
         }
@@ -171,14 +169,14 @@ fn push_lowerbound_result(
 /// - If the `key_size` is [`KeySize::Half`], the word is returned with the two least significant
 ///   elements (word[0] and word[1]) zeroized, keeping only the most significant half (word[2] and
 ///   word[3]) for comparison. (In BE ordering, word[3] is most significant.)
-fn word_to_search_key(mut word: Word, key_size: KeySize) -> LexicographicWord {
+fn word_to_search_key(mut word: Word, key_size: KeySize) -> Word {
     match key_size {
-        KeySize::Full => LexicographicWord::new(word),
+        KeySize::Full => word,
         KeySize::Half => {
             word[0] = Felt::ZERO;
             word[1] = Felt::ZERO;
 
-            LexicographicWord::new(word)
+            word
         },
     }
 }

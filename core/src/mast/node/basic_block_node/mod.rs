@@ -115,7 +115,7 @@ impl BasicBlockNode {
         #[cfg(debug_assertions)]
         validate_decorators(operations.len(), &decorators);
 
-        let (op_batches, digest) = batch_and_hash_ops(operations);
+        let (op_batches, digest) = batch_and_hash_ops(&operations);
         // the prior line may have inserted some padding Noops in the op_batches
         // the decorator mapping should still point to the correct operation when that happens
         let reflowed_decorators = BasicBlockNode::adjust_decorators(decorators, &op_batches);
@@ -159,6 +159,21 @@ impl BasicBlockNode {
             .map(|(raw_idx, id)| {
                 let padded = raw_idx + raw2pad[raw_idx];
                 (padded, id)
+            })
+            .collect()
+    }
+
+    /// Adjusts padded operation indices back to raw indices for AssemblyOp mappings.
+    pub fn unadjust_asm_op_indices<T: Copy>(
+        asm_ops: Vec<(usize, T)>,
+        op_batches: &[OpBatch],
+    ) -> Vec<(usize, T)> {
+        let pad2raw = PaddedToRawPrefix::new(op_batches);
+        asm_ops
+            .into_iter()
+            .map(|(padded_idx, id)| {
+                let raw = padded_idx - pad2raw[padded_idx];
+                (raw, id)
             })
             .collect()
     }
@@ -349,13 +364,13 @@ impl BasicBlockNode {
 
     /// Returns an iterator over the operations in the order in which they appear in the program.
     pub fn operations(&self) -> impl Iterator<Item = &Operation> {
-        self.op_batches.iter().flat_map(|batch| batch.ops())
+        self.op_batches.iter().flat_map(OpBatch::ops)
     }
 
     /// Returns an iterator over the un-padded operations in the order in which they
     /// appear in the program.
     pub fn raw_operations(&self) -> impl Iterator<Item = &Operation> {
-        self.op_batches.iter().flat_map(|batch| batch.raw_ops())
+        self.op_batches.iter().flat_map(OpBatch::raw_ops)
     }
 
     /// Returns the total number of operations and decorators in this basic block.
@@ -483,15 +498,11 @@ impl BasicBlockNode {
             if batch_idx + 1 < self.op_batches.len() {
                 if num_groups != BATCH_SIZE {
                     return Err(format!(
-                        "Batch {}: {} groups is not full batch size {}",
-                        batch_idx, num_groups, BATCH_SIZE
+                        "Batch {batch_idx}: {num_groups} groups is not full batch size {BATCH_SIZE}"
                     ));
                 }
             } else if !num_groups.is_power_of_two() {
-                return Err(format!(
-                    "Batch {}: {} groups is not power of two",
-                    batch_idx, num_groups
-                ));
+                return Err(format!("Batch {batch_idx}: {num_groups} groups is not power of two"));
             }
         }
         Ok(())
@@ -527,8 +538,7 @@ impl BasicBlockNode {
                     for (op_idx, op) in group_ops.iter().enumerate() {
                         if op.imm_value().is_some() {
                             return Err(format!(
-                                "Batch {}, group {}: operation at index {} requires immediate value, but this is the last group in batch",
-                                batch_idx, group_idx, op_idx
+                                "Batch {batch_idx}, group {group_idx}: operation at index {op_idx} requires immediate value, but this is the last group in batch"
                             ));
                         }
                     }
@@ -538,8 +548,7 @@ impl BasicBlockNode {
                         && last_op.imm_value().is_some()
                     {
                         return Err(format!(
-                            "Batch {}, group {}: ends with operation requiring immediate value",
-                            batch_idx, group_idx
+                            "Batch {batch_idx}, group {group_idx}: ends with operation requiring immediate value"
                         ));
                     }
                 }
@@ -602,8 +611,7 @@ impl BasicBlockNode {
 
                 if group_size > GROUP_SIZE {
                     return Err(format!(
-                        "Batch {}, group {}: contains {} operations, exceeds maximum {}",
-                        batch_idx, group_idx, group_size, GROUP_SIZE
+                        "Batch {batch_idx}, group {group_idx}: contains {group_size} operations, exceeds maximum {GROUP_SIZE}"
                     ));
                 }
             }
@@ -639,10 +647,9 @@ impl BasicBlockNode {
                     let opcode = op.op_code() as u64;
                     group_value |= opcode << (Operation::OP_BITS * local_op_idx);
                 }
-                if groups[group_idx] != Felt::new(group_value) {
+                if groups[group_idx] != Felt::new_unchecked(group_value) {
                     return Err(format!(
-                        "Batch {}, group {}: committed opcode group does not match operations",
-                        batch_idx, group_idx
+                        "Batch {batch_idx}, group {group_idx}: committed opcode group does not match operations"
                     ));
                 }
 
@@ -653,13 +660,12 @@ impl BasicBlockNode {
                     BATCH_SIZE,
                     Some(num_groups),
                 )
-                .map_err(|err| format!("Batch {}: {}", batch_idx, err))?;
+                .map_err(|err| format!("Batch {batch_idx}: {err}"))?;
 
                 for (imm_group_idx, imm_value) in placements {
                     if groups[imm_group_idx] != imm_value {
                         return Err(format!(
-                            "Batch {}: push immediate value mismatch at index {}",
-                            batch_idx, imm_group_idx
+                            "Batch {batch_idx}: push immediate value mismatch at index {imm_group_idx}"
                         ));
                     }
                     immediate_slots[imm_group_idx] = true;
@@ -672,8 +678,7 @@ impl BasicBlockNode {
                     && groups[group_idx] != ZERO
                 {
                     return Err(format!(
-                        "Batch {}, group {}: empty group must be zero",
-                        batch_idx, group_idx
+                        "Batch {batch_idx}, group {group_idx}: empty group must be zero"
                     ));
                 }
             }
@@ -689,7 +694,7 @@ impl BasicBlockNode {
         for (batch_idx, batch) in self.op_batches.iter().enumerate() {
             batch
                 .validate_padding_semantics()
-                .map_err(|err| format!("Batch {}: {}", batch_idx, err))?;
+                .map_err(|err| format!("Batch {batch_idx}: {err}"))?;
         }
 
         Ok(())
@@ -810,13 +815,12 @@ impl MastNodeExt for BasicBlockNode {
             let forest_node = &forest.nodes[*id];
             let forest_node_ptr = match forest_node {
                 MastNode::Block(block_node) => block_node as *const BasicBlockNode as *const (),
-                _ => panic!("Node type mismatch at {:?}", id),
+                _ => panic!("Node type mismatch at {id:?}"),
             };
             let self_as_void = self_ptr as *const ();
             debug_assert_eq!(
                 self_as_void, forest_node_ptr,
-                "Node pointer mismatch: expected node at {:?} to be self",
-                id
+                "Node pointer mismatch: expected node at {id:?} to be self"
             );
         }
     }
@@ -842,7 +846,7 @@ impl PrettyPrint for BasicBlockNodePrettyPrint<'_> {
                     OperationOrDecorator::Operation(op) => op.render(),
                     OperationOrDecorator::Decorator(decorator_id) => {
                         self.mast_forest.decorator_by_id(decorator_id)
-                            .map(|decorator| decorator.render())
+                            .map(PrettyPrint::render)
                             .unwrap_or_else(|| const_text("<invalid_decorator_id>"))
                     },
                 })
@@ -870,7 +874,7 @@ impl PrettyPrint for BasicBlockNodePrettyPrint<'_> {
                         OperationOrDecorator::Operation(op) => op.render(),
                         OperationOrDecorator::Decorator(decorator_id) => {
                             self.mast_forest.decorator_by_id(decorator_id)
-                                .map(|decorator| decorator.render())
+                                .map(PrettyPrint::render)
                                 .unwrap_or_else(|| const_text("<invalid_decorator_id>"))
                         },
                     })
@@ -1345,7 +1349,7 @@ impl core::ops::Index<usize> for PaddedToRawPrefix {
 }
 
 /// Groups the provided operations into batches and computes the hash of the block.
-fn batch_and_hash_ops(ops: Vec<Operation>) -> (Vec<OpBatch>, Word) {
+fn batch_and_hash_ops(ops: &[Operation]) -> (Vec<OpBatch>, Word) {
     // Group the operations into batches.
     let batches = batch_ops(ops);
 
@@ -1358,11 +1362,11 @@ fn batch_and_hash_ops(ops: Vec<Operation>) -> (Vec<OpBatch>, Word) {
 
 /// Groups the provided operations into batches as described in the docs for this module (i.e., up
 /// to 9 operations per group, and 8 groups per batch).
-fn batch_ops(ops: Vec<Operation>) -> Vec<OpBatch> {
+fn batch_ops(ops: &[Operation]) -> Vec<OpBatch> {
     let mut batches = Vec::<OpBatch>::new();
     let mut batch_acc = OpBatchAccumulator::new();
 
-    for op in ops {
+    for op in ops.iter().copied() {
         // If the operation cannot be accepted into the current accumulator, add the contents of
         // the accumulator to the list of batches and start a new accumulator.
         if !batch_acc.can_accept_op(op) {
@@ -1459,7 +1463,7 @@ impl BasicBlockNodeBuilder {
                 #[cfg(debug_assertions)]
                 validate_decorators(operations.len(), &decorators);
 
-                let (op_batches, computed_digest) = batch_and_hash_ops(operations);
+                let (op_batches, computed_digest) = batch_and_hash_ops(&operations);
                 // Batch operations (adds padding NOOPs)
                 // Adjust decorators from raw to padded indices
                 let padded_decorators = BasicBlockNode::adjust_decorators(decorators, &op_batches);
@@ -1521,7 +1525,7 @@ impl BasicBlockNodeBuilder {
                 }
 
                 // Batch operations (adds padding NOOPs)
-                let (op_batches, computed_digest) = batch_and_hash_ops(operations);
+                let (op_batches, computed_digest) = batch_and_hash_ops(&operations);
 
                 // Use the forced digest if provided, otherwise use the computed digest
                 let digest = self.digest.unwrap_or(computed_digest);
@@ -1572,7 +1576,7 @@ impl MastForestContributor for BasicBlockNodeBuilder {
                 validate_decorators(operations.len(), &decorators);
 
                 // Batch operations (adds padding NOOPs)
-                let (op_batches, computed_digest) = batch_and_hash_ops(operations);
+                let (op_batches, computed_digest) = batch_and_hash_ops(&operations);
 
                 // Use the forced digest if provided, otherwise use the computed digest
                 let digest = self.digest.unwrap_or(computed_digest);
@@ -1628,7 +1632,7 @@ impl MastForestContributor for BasicBlockNodeBuilder {
         let (op_batches, digest, raw_decorators) = match &self.operation_data {
             OperationData::Raw { operations, decorators } => {
                 // Compute digest - use forced digest if available, otherwise compute normally
-                let (op_batches, computed_digest) = batch_and_hash_ops(operations.clone());
+                let (op_batches, computed_digest) = batch_and_hash_ops(operations);
                 let digest = self.digest.unwrap_or(computed_digest);
 
                 // Decorators are already in raw form - no conversion needed
@@ -1679,7 +1683,7 @@ impl MastForestContributor for BasicBlockNodeBuilder {
 
         // Collect assert operation data
         let mut assert_data = Vec::new();
-        for (op_idx, op) in op_batches.iter().flat_map(|batch| batch.ops()).enumerate() {
+        for (op_idx, op) in op_batches.iter().flat_map(OpBatch::ops).enumerate() {
             if let Operation::U32assert2(inner_value)
             | Operation::Assert(inner_value)
             | Operation::MpVerify(inner_value) = op
@@ -1701,9 +1705,9 @@ impl MastForestContributor for BasicBlockNodeBuilder {
         // Create iterator of slices from all collected data
         let decorator_bytes_iter = before_enter_bytes
             .iter()
-            .map(|bytes| bytes.as_slice())
+            .map(<[u8; 32]>::as_slice)
             .chain(core::iter::once(op_decorator_data.as_slice()))
-            .chain(after_exit_bytes.iter().map(|bytes| bytes.as_slice()))
+            .chain(after_exit_bytes.iter().map(<[u8; 32]>::as_slice))
             .chain(core::iter::once(assert_data.as_slice()));
 
         if self.before_enter.is_empty()
@@ -1749,7 +1753,7 @@ impl MastForestContributor for BasicBlockNodeBuilder {
 
 #[cfg(any(test, feature = "arbitrary"))]
 impl proptest::prelude::Arbitrary for BasicBlockNodeBuilder {
-    type Parameters = super::arbitrary::BasicBlockNodeParams;
+    type Parameters = arbitrary::BasicBlockNodeParams;
     type Strategy = proptest::strategy::BoxedStrategy<Self>;
 
     fn arbitrary_with(params: Self::Parameters) -> Self::Strategy {

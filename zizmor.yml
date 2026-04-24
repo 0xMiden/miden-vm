@@ -1,0 +1,8 @@
+rules:
+  dangerous-triggers:
+    ignore:
+      - contribution-quality.yml
+      - signed-commits.yml
+  secrets-outside-env:
+    ignore:
+      - trigger-deploy-docs.yml

@@ -186,7 +186,7 @@ fn serialize_deserialize_all_nodes() {
             Operation::MovDn8,
             Operation::CSwap,
             Operation::CSwapW,
-            Operation::Push(Felt::new(45)),
+            Operation::Push(Felt::new_unchecked(45)),
             Operation::AdvPop,
             Operation::AdvPopW,
             Operation::MLoadW,
@@ -480,12 +480,11 @@ fn mast_forest_basic_block_serialization_no_decorator_duplication() {
 
     // Get the deserialized block
     let deserialized_root_id = deserialized.procedure_roots()[0];
-    let deserialized_block =
-        if let crate::mast::MastNode::Block(block) = &deserialized[deserialized_root_id] {
-            block
-        } else {
-            panic!("Expected a block node");
-        };
+    let deserialized_block = if let MastNode::Block(block) = &deserialized[deserialized_root_id] {
+        block
+    } else {
+        panic!("Expected a block node");
+    };
 
     // Verify that each decorator appears exactly once in the deserialized structure
     assert_eq!(
@@ -625,8 +624,8 @@ fn test_opbatch_roundtrip_preservation() {
 
     let operations = vec![
         Operation::Add,
-        Operation::Push(Felt::new(100)),
-        Operation::Push(Felt::new(200)),
+        Operation::Push(Felt::new_unchecked(100)),
+        Operation::Push(Felt::new_unchecked(200)),
         Operation::Mul,
     ];
 
@@ -645,7 +644,7 @@ fn test_opbatch_roundtrip_preservation() {
 #[test]
 fn test_multi_batch_roundtrip() {
     let mut forest = MastForest::new();
-    let operations: Vec<_> = (0..80).map(|i| Operation::Push(Felt::new(i))).collect();
+    let operations: Vec<_> = (0..80).map(|i| Operation::Push(Felt::new_unchecked(i))).collect();
 
     let block_id = BasicBlockNodeBuilder::new(operations, Vec::new())
         .add_to_forest(&mut forest)
@@ -670,14 +669,14 @@ fn test_decorator_indices_preserved_with_padding() {
     let operations = vec![
         Operation::Add,
         Operation::Mul,
-        Operation::Push(Felt::new(100)), // Will cause padding
+        Operation::Push(Felt::new_unchecked(100)), // Will cause padding
         Operation::Drop,
     ];
 
     // Add decorator at operation index 2 (the PUSH)
     let decorators = vec![(2, decorator_id)];
 
-    let block_id = BasicBlockNodeBuilder::new(operations.clone(), decorators)
+    let block_id = BasicBlockNodeBuilder::new(operations, decorators)
         .add_to_forest(&mut forest)
         .unwrap();
 
@@ -725,11 +724,15 @@ fn test_raw_vs_batched_construction_equivalence() {
     let decorator_id1 = forest1.add_decorator(Decorator::Trace(1)).unwrap();
     let _decorator_id2 = forest2.add_decorator(Decorator::Trace(1)).unwrap();
 
-    let operations =
-        vec![Operation::Add, Operation::Mul, Operation::Push(Felt::new(100)), Operation::Drop];
+    let operations = vec![
+        Operation::Add,
+        Operation::Mul,
+        Operation::Push(Felt::new_unchecked(100)),
+        Operation::Drop,
+    ];
 
     // Path 1: Raw construction
-    let block_id1 = BasicBlockNodeBuilder::new(operations.clone(), vec![(2, decorator_id1)])
+    let block_id1 = BasicBlockNodeBuilder::new(operations, vec![(2, decorator_id1)])
         .add_to_forest(&mut forest1)
         .unwrap();
 
@@ -774,14 +777,14 @@ fn test_raw_batched_digest_equivalence() {
     let operations = vec![
         Operation::Add,
         Operation::Mul,
-        Operation::Push(Felt::new(42)),
+        Operation::Push(Felt::new_unchecked(42)),
         Operation::Drop,
         Operation::Dup0,
     ];
 
     // Construct via Raw path
     let mut forest1 = MastForest::new();
-    let block_id1 = BasicBlockNodeBuilder::new(operations.clone(), Vec::new())
+    let block_id1 = BasicBlockNodeBuilder::new(operations, Vec::new())
         .add_to_forest(&mut forest1)
         .unwrap();
     let digest1 = forest1[block_id1].unwrap_basic_block().digest();
@@ -804,8 +807,8 @@ fn test_batched_construction_preserves_structure() {
     let operations = vec![
         Operation::Add,
         Operation::Mul,
-        Operation::Push(Felt::new(100)),
-        Operation::Push(Felt::new(200)),
+        Operation::Push(Felt::new_unchecked(100)),
+        Operation::Push(Felt::new_unchecked(200)),
     ];
 
     let block_id = BasicBlockNodeBuilder::new(operations, Vec::new())
@@ -963,7 +966,7 @@ fn test_stripped_preserves_digests() {
     forest.make_root(join_id);
 
     // Capture original digests
-    let original_digests: Vec<_> = forest.nodes().iter().map(|n| n.digest()).collect();
+    let original_digests: Vec<_> = forest.nodes().iter().map(MastNodeExt::digest).collect();
 
     // Stripped roundtrip
     let mut stripped_bytes = Vec::new();
@@ -971,7 +974,7 @@ fn test_stripped_preserves_digests() {
     let restored = MastForest::read_from_bytes(&stripped_bytes).unwrap();
 
     // Verify digests match
-    let restored_digests: Vec<_> = restored.nodes().iter().map(|n| n.digest()).collect();
+    let restored_digests: Vec<_> = restored.nodes().iter().map(MastNodeExt::digest).collect();
     assert_eq!(original_digests, restored_digests, "Node digests should be preserved");
 }
 
@@ -1037,7 +1040,7 @@ mod proptests {
 
             // Verify all nodes match
             for (idx, original) in forest.nodes().iter().enumerate() {
-                let node_id = crate::mast::MastNodeId::new_unchecked(idx as u32);
+                let node_id = MastNodeId::new_unchecked(idx as u32);
                 let deserialized_node = &deserialized[node_id];
 
                 // Check digests match
@@ -1090,7 +1093,7 @@ mod proptests {
                 prop::sample::select(vec![
                     Operation::Add,
                     Operation::Mul,
-                    Operation::Push(crate::Felt::new(42)),
+                    Operation::Push(Felt::new_unchecked(42)),
                     Operation::Drop,
                     Operation::Dup0,
                     Operation::Swap,
@@ -1166,7 +1169,7 @@ mod proptests {
                     prop::sample::select(vec![
                         Operation::Add,
                         Operation::Mul,
-                        Operation::Push(Felt::new(99)),
+                        Operation::Push(Felt::new_unchecked(99)),
                         Operation::Drop,
                         Operation::Dup0,
                     ]),
@@ -1271,7 +1274,7 @@ mod proptests {
 
             // Verify all node digests match
             for (idx, original) in forest.nodes().iter().enumerate() {
-                let node_id = crate::mast::MastNodeId::new_unchecked(idx as u32);
+                let node_id = MastNodeId::new_unchecked(idx as u32);
                 let restored_node = &restored[node_id];
 
                 prop_assert_eq!(
@@ -1344,11 +1347,11 @@ fn test_debuginfo_serialization_sparse() {
 
     // Verify decorators are at correct nodes
     for i in 0..10 {
-        let node_id = crate::mast::MastNodeId::new_unchecked(i);
+        let node_id = MastNodeId::new_unchecked(i);
         let orig_decorators = forest.decorator_indices_for_op(node_id, 0);
         let deser_decorators = deserialized.decorator_indices_for_op(node_id, 0);
 
-        assert_eq!(orig_decorators, deser_decorators, "Decorators at node {} should match", i);
+        assert_eq!(orig_decorators, deser_decorators, "Decorators at node {i} should match");
     }
 }
 
@@ -1382,28 +1385,26 @@ fn test_debuginfo_serialization_dense() {
 
     // Verify decorators are at correct nodes
     for i in 0..10 {
-        let node_id = crate::mast::MastNodeId::new_unchecked(i);
+        let node_id = MastNodeId::new_unchecked(i);
         let orig_decorators = forest.decorator_indices_for_op(node_id, 0);
         let deser_decorators = deserialized.decorator_indices_for_op(node_id, 0);
 
-        assert_eq!(orig_decorators, deser_decorators, "Decorators at node {} should match", i);
+        assert_eq!(orig_decorators, deser_decorators, "Decorators at node {i} should match");
 
         // Verify expected decorator presence
         if i < 8 {
-            assert_eq!(orig_decorators.len(), 1, "Node {} should have 1 decorator", i);
+            assert_eq!(orig_decorators.len(), 1, "Node {i} should have 1 decorator");
             assert_eq!(
                 deser_decorators.len(),
                 1,
-                "Node {} should have 1 decorator after deserialization",
-                i
+                "Node {i} should have 1 decorator after deserialization"
             );
         } else {
-            assert_eq!(orig_decorators.len(), 0, "Node {} should have no decorators", i);
+            assert_eq!(orig_decorators.len(), 0, "Node {i} should have no decorators");
             assert_eq!(
                 deser_decorators.len(),
                 0,
-                "Node {} should have no decorators after deserialization",
-                i
+                "Node {i} should have no decorators after deserialization"
             );
         }
     }
@@ -1514,7 +1515,7 @@ fn build_group(ops: &[Operation]) -> Felt {
     for (i, op) in ops.iter().enumerate() {
         group |= (op.op_code() as u64) << (Operation::OP_BITS * i);
     }
-    Felt::new(group)
+    Felt::new_unchecked(group)
 }
 
 fn make_batch(num_groups: usize, op: Operation) -> OpBatch {
@@ -1533,7 +1534,7 @@ fn make_batch(num_groups: usize, op: Operation) -> OpBatch {
     for pad in padding.iter_mut().skip(num_groups) {
         *pad = true;
     }
-    let mut groups = [Felt::new(0); OP_BATCH_SIZE];
+    let mut groups = [Felt::new_unchecked(0); OP_BATCH_SIZE];
     for group in groups.iter_mut().take(num_groups) {
         *group = build_group(&[op]);
     }
@@ -1706,8 +1707,7 @@ fn compute_single_block_digest_from_decoded_groups(bytes: &[u8]) -> Option<Word>
 fn test_untrusted_forest_rejects_non_full_prefix_batch() {
     let op_batches = vec![make_batch(4, Operation::Add), make_batch(2, Operation::Mul)];
 
-    let op_groups: Vec<Felt> =
-        op_batches.iter().flat_map(|batch| batch.groups()).copied().collect();
+    let op_groups: Vec<Felt> = op_batches.iter().flat_map(OpBatch::groups).copied().collect();
     let digest = hasher::hash_elements(&op_groups);
 
     let mut forest = MastForest::new();
@@ -1728,8 +1728,7 @@ fn test_untrusted_forest_rejects_non_full_prefix_batch() {
 fn test_untrusted_forest_accepts_full_prefix_batch() {
     let op_batches = vec![make_batch(OP_BATCH_SIZE, Operation::Add), make_batch(4, Operation::Mul)];
 
-    let op_groups: Vec<Felt> =
-        op_batches.iter().flat_map(|batch| batch.groups()).copied().collect();
+    let op_groups: Vec<Felt> = op_batches.iter().flat_map(OpBatch::groups).copied().collect();
     let digest = hasher::hash_elements(&op_groups);
 
     let mut forest = MastForest::new();
@@ -1749,8 +1748,8 @@ fn test_untrusted_forest_accepts_full_prefix_batch() {
 fn test_untrusted_forest_rejects_basic_block_indptr_that_breaks_push_immediate_commitment() {
     // Two distinct immediates. Using large values reduces the chance of accidental equality with a
     // packed opcode group value.
-    let imm_a = Felt::new(0xdead_beef_dead_beef);
-    let imm_b = Felt::new(0xfeed_face_feed_face);
+    let imm_a = Felt::new_unchecked(0xdead_beef_dead_beef);
+    let imm_b = Felt::new_unchecked(0xfeed_face_feed_face);
 
     let bytes_a = build_malicious_single_block_forest_bytes(imm_a);
     let bytes_b = build_malicious_single_block_forest_bytes(imm_b);
@@ -1919,9 +1918,9 @@ fn test_deserialization_rejects_excessive_node_count() {
     let mut bytes = Vec::new();
 
     // Write valid header
-    super::MAGIC.write_into(&mut bytes);
+    MAGIC.write_into(&mut bytes);
     bytes.write_u8(0); // flags
-    super::VERSION.write_into(&mut bytes);
+    VERSION.write_into(&mut bytes);
 
     // Write excessive node count (MAX_NODES + 1)
     let excessive_count: usize = MastForest::MAX_NODES + 1;

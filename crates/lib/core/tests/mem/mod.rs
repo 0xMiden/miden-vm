@@ -202,8 +202,7 @@ fn test_memcopy_elements() {
                 .read_element(ContextId::root(), Felt::from_u32(addr))
                 .unwrap(),
             Felt::from_u32(addr - 2000),
-            "Address {}",
-            addr
+            "Address {addr}"
         );
     }
 }

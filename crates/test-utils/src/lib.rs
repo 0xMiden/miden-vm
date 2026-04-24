@@ -507,7 +507,7 @@ impl Test {
             Err(err) => {
                 // If we get an error, we print the output as an error
                 #[cfg(feature = "std")]
-                std::eprintln!("{}", debug_output);
+                std::eprintln!("{debug_output}");
                 Err(err)
             },
         }
@@ -524,7 +524,7 @@ impl Test {
     pub fn prove_and_verify(&self, pub_inputs: Vec<u64>, test_fail: bool) {
         let (program, mut host) = self.get_program_and_host();
         let stack_inputs = StackInputs::try_from_ints(pub_inputs).unwrap();
-        let (mut stack_outputs, proof) = miden_prover::prove_sync(
+        let (mut stack_outputs, proof) = prove_sync(
             &program,
             stack_inputs,
             self.advice_inputs.clone(),
@@ -537,11 +537,9 @@ impl Test {
         let program_info = ProgramInfo::from(program);
         if test_fail {
             stack_outputs.as_mut()[0] += ONE;
-            assert!(
-                miden_verifier::verify(program_info, stack_inputs, stack_outputs, proof).is_err()
-            );
+            assert!(verify(program_info, stack_inputs, stack_outputs, proof).is_err());
         } else {
-            let result = miden_verifier::verify(program_info, stack_inputs, stack_outputs, proof);
+            let result = verify(program_info, stack_inputs, stack_outputs, proof);
             assert!(result.is_ok(), "error: {result:?}");
         }
     }
@@ -713,7 +711,7 @@ pub fn build_expected_perm(values: &[u64]) -> [Felt; STATE_WIDTH] {
     // => state[0..12] = stack[0..12] in [RATE0,RATE1,CAPACITY] layout.
     let mut state = [ZERO; STATE_WIDTH];
     for i in 0..STATE_WIDTH {
-        state[i] = Felt::new(values[i]);
+        state[i] = Felt::new_unchecked(values[i]);
     }
 
     // Apply the permutation
@@ -727,7 +725,7 @@ pub fn build_expected_perm(values: &[u64]) -> [Felt; STATE_WIDTH] {
 }
 
 pub fn build_expected_hash(values: &[u64]) -> [Felt; 4] {
-    let digest = hash_elements(&values.iter().map(|&v| Felt::new(v)).collect::<Vec<_>>());
+    let digest = hash_elements(&values.iter().map(|&v| Felt::new_unchecked(v)).collect::<Vec<_>>());
     digest.into()
 }
 
@@ -814,6 +812,6 @@ pub fn get_column_name(col_idx: usize) -> String {
         },
 
         // Default case
-        _ => format!("unknown_col[{}]", col_idx),
+        _ => format!("unknown_col[{col_idx}]"),
     }
 }
