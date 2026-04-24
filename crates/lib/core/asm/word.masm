@@ -76,10 +76,8 @@ end
 #!
 #! Cycles: 11
 pub proc testz(input: word) -> (i1, word)
-    repeat.4
-        dup.3 eq.0
-    end
-    and and and
+    dupw
+    exec.eqz
 end
 # -------------------------------------------------------------------------------------------------
 
@@ -266,10 +264,9 @@ end
 #!
 #! Cycles: 15
 pub proc test_eq(rhs: word, lhs: word) -> (i1, word, word)
-    dup.7 dup.4 eq
-    dup.7 dup.4 eq and
-    dup.6 dup.3 eq and
-    dup.5 dup.2 eq and
+    dupw.1
+    dupw.1
+    exec.eq
 end
 
 # HELPER PROCEDURES

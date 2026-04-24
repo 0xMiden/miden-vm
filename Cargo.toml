@@ -17,6 +17,9 @@ members = [
     "crates/lib/core",
     "crates/lifted-air",
     "crates/lifted-stark",
+    "crates/masm-analysis",
+    "crates/masm-decompiler",
+    "crates/masm-lint",
     "crates/mast-package",
     "crates/midenc-hir-type",
     "crates/package-registry",
@@ -189,6 +192,7 @@ p3-poseidon2-air = { version = "0.6", default-features = false }
 p3-symmetric     = { version = "0.6", default-features = false }
 p3-uni-stark     = { version = "0.6", default-features = false }
 p3-util          = { version = "0.6", default-features = false }
+yansi           = { version = "1.0" }
 
 loom = "0.7"
 miette = { package = "miden-miette", version = "8.0", default-features = false }
