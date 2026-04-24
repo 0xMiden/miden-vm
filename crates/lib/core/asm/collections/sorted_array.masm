@@ -349,9 +349,10 @@ proc find_partial_key_value
                 # - `the key at maybe_key_ptr > KEY`
                 #=> [maybe_key_ptr, KEY, start_ptr, end_ptr]
 
-                # assert `maybe_key_ptr < end_ptr` (the lower bound is enforced below by
-                # the u32assert2 on `maybe_key_ptr - start_ptr`, since underflow makes that value
-                # exceed u32::MAX)
+                # `maybe_value_ptr` bounds check
+                dup dup.6 u32assert2.err="maybe_value_ptr is not u32"
+                u32gte assert.err="lowerbound_key_value invariant: maybe_value_ptr < start_ptr"
+
                 dup dup.7 u32assert2.err="maybe_key_ptr is not u32"
                 u32lt assert.err="lowerbound_key_value invariant: maybe_key_ptr >= end_ptr"
 
