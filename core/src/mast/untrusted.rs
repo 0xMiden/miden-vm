@@ -185,8 +185,8 @@ impl UntrustedMastForest {
     /// budgets.
     ///
     /// `parsing_budget` limits wire-driven parsing and collection pre-sizing. `validation_budget`
-    /// additionally caps tracked stripped/hashless helper allocations such as empty debug-info
-    /// scaffolding and rebuilt digest tables.
+    /// additionally caps tracked stripped/hashless helper allocations such as digest slot tables,
+    /// empty debug-info scaffolding, and rebuilt digest tables.
     pub fn read_from_bytes_with_budgets(
         bytes: &[u8],
         parsing_budget: usize,
