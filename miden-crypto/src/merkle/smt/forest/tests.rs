@@ -35,10 +35,10 @@ fn test_insert_root_empty() -> Result<(), MerkleError> {
     assert_eq!(
         forest.insert(empty_tree_root, key, value)?,
         Word::new([
-            Felt::new_unchecked(14568730562832515847),
-            Felt::new_unchecked(18252916646450022498),
-            Felt::new_unchecked(41434158889285279),
-            Felt::new_unchecked(9206344219167471937),
+            Felt::new_unchecked(16906950376809463586),
+            Felt::new_unchecked(12041256092349224868),
+            Felt::new_unchecked(1176700509486931830),
+            Felt::new_unchecked(7542611981105929079),
         ]),
     );
     Ok(())
@@ -55,10 +55,10 @@ fn test_insert_multiple_values() -> Result<(), MerkleError> {
     assert_eq!(
         new_root,
         Word::new([
-            Felt::new_unchecked(14568730562832515847),
-            Felt::new_unchecked(18252916646450022498),
-            Felt::new_unchecked(41434158889285279),
-            Felt::new_unchecked(9206344219167471937),
+            Felt::new_unchecked(16906950376809463586),
+            Felt::new_unchecked(12041256092349224868),
+            Felt::new_unchecked(1176700509486931830),
+            Felt::new_unchecked(7542611981105929079),
         ]),
     );
 
@@ -66,10 +66,10 @@ fn test_insert_multiple_values() -> Result<(), MerkleError> {
     assert_eq!(
         new_root,
         Word::new([
-            Felt::new_unchecked(14568730562832515847),
-            Felt::new_unchecked(18252916646450022498),
-            Felt::new_unchecked(41434158889285279),
-            Felt::new_unchecked(9206344219167471937),
+            Felt::new_unchecked(16906950376809463586),
+            Felt::new_unchecked(12041256092349224868),
+            Felt::new_unchecked(1176700509486931830),
+            Felt::new_unchecked(7542611981105929079),
         ]),
     );
 
@@ -82,10 +82,10 @@ fn test_insert_multiple_values() -> Result<(), MerkleError> {
     assert_eq!(
         new_root,
         Word::new([
-            Felt::new_unchecked(8331046026464464586),
-            Felt::new_unchecked(2235589849047307808),
-            Felt::new_unchecked(16989070170732558432),
-            Felt::new_unchecked(14827437307365892589),
+            Felt::new_unchecked(16815662437327551981),
+            Felt::new_unchecked(5197991956083107546),
+            Felt::new_unchecked(1939115207259100000),
+            Felt::new_unchecked(6159513656306598644),
         ])
     );
 
@@ -111,10 +111,10 @@ fn test_batch_insert() -> Result<(), MerkleError> {
         assert_eq!(
             new_root,
             Word::new([
-                Felt::new_unchecked(10190519849202762248),
-                Felt::new_unchecked(435931819697066051),
-                Felt::new_unchecked(16151289788138594836),
-                Felt::new_unchecked(9391498722098326251),
+                Felt::new_unchecked(5427929042044360539),
+                Felt::new_unchecked(6118532261391705453),
+                Felt::new_unchecked(5681692130190572868),
+                Felt::new_unchecked(8495277686282924792),
             ])
         );
 

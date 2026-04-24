@@ -9,8 +9,8 @@ use crate::{
     merkle::{
         EmptySubtreeRoots,
         smt::{
-            Map, MutationSet, NodeMutation, SmtLeafError, SmtProofError, SparseMerkleTree,
-            full::MAX_LEAF_ENTRIES,
+            LEAF_DOMAIN, Map, MutationSet, NodeMutation, SmtLeafError, SmtProofError,
+            SparseMerkleTree, full::MAX_LEAF_ENTRIES,
         },
         store::MerkleStore,
     },
@@ -1228,7 +1228,7 @@ fn build_multiple_leaf_node(kv_pairs: &[(Word, Word)]) -> Word {
         })
         .collect();
 
-    Poseidon2::hash_elements(&elements)
+    Poseidon2::hash_elements_in_domain(&elements, LEAF_DOMAIN)
 }
 
 /// Applies mutations with and without reversion to the given SMT, comparing resulting SMTs,
