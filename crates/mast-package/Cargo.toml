@@ -20,7 +20,7 @@ doctest = false
 [features]
 default = ["std"]
 arbitrary = ["std", "dep:proptest-derive", "dep:proptest", "miden-assembly-syntax/arbitrary"]
-std = ["miden-assembly-syntax/std", "miden-core/std", "serde/std", "thiserror/std"]
+std = ["miden-assembly-syntax/std", "miden-core/std", "serde?/std", "thiserror/std"]
 serde = ["dep:serde", "miden-assembly-syntax/serde", "miden-core/serde"]
 
 [dependencies]

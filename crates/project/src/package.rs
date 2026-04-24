@@ -2,11 +2,11 @@ use alloc::boxed::Box;
 #[cfg(feature = "std")]
 use std::path::Path;
 
-#[cfg(feature = "std")]
+#[cfg(all(feature = "std", feature = "serde"))]
 use miden_assembly_syntax::debuginfo::Spanned;
 use miden_mast_package::PackageId;
 
-#[cfg(feature = "std")]
+#[cfg(all(feature = "std", feature = "serde"))]
 use crate::ast::{ProjectFileError, WorkspaceFile};
 use crate::*;
 

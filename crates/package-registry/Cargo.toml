@@ -16,7 +16,7 @@ edition.workspace = true
 [features]
 default = ["std"]
 resolver = ["std", "dep:pubgrub", "dep:smallvec"]
-std = ["miden-assembly-syntax/std", "miden-core/std", "serde/std"]
+std = ["miden-assembly-syntax/std", "miden-core/std", "serde?/std"]
 serde = ["dep:serde", "miden-assembly-syntax/serde", "miden-core/serde", "miden-mast-package/serde"]
 
 [dependencies]
