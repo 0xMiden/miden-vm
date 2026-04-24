@@ -6,6 +6,7 @@ use crate::mast::node::MastNodeExt;
 use crate::{
     mast::{MastForestContributor, MastNode, MastNodeId, Word, node::MastNodeBuilder},
     serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+    utils::Idx,
 };
 
 // CONSTANTS
@@ -70,28 +71,50 @@ impl MastNodeEntry {
 
     /// Constructs a new [`MastNodeEntry`] from a [`MastNode`].
     pub fn new(mast_node: &MastNode, ops_offset: NodeDataOffset) -> Self {
+        Self::new_inner(mast_node, ops_offset, None)
+    }
+
+    /// Constructs a new [`MastNodeEntry`] from a [`MastNode`], remapping child IDs when needed.
+    #[deprecated(note = "use MastNodeEntry::new(); remapped wire ordering has been removed")]
+    pub fn new_with_id_remap(
+        mast_node: &MastNode,
+        ops_offset: NodeDataOffset,
+        id_remap: Option<&[u32]>,
+    ) -> Self {
+        Self::new_inner(mast_node, ops_offset, id_remap)
+    }
+
+    fn new_inner(
+        mast_node: &MastNode,
+        ops_offset: NodeDataOffset,
+        id_remap: Option<&[u32]>,
+    ) -> Self {
         use MastNode::*;
 
         if !matches!(mast_node, &Block(_)) {
             debug_assert_eq!(ops_offset, 0);
         }
 
+        let remap_id = |id: MastNodeId| -> u32 {
+            id_remap.and_then(|remap| remap.get(id.to_usize()).copied()).unwrap_or(id.0)
+        };
+
         match mast_node {
             Block(_) => Self::Block { ops_offset },
             Join(join_node) => Self::Join {
-                left_child_id: join_node.first().0,
-                right_child_id: join_node.second().0,
+                left_child_id: remap_id(join_node.first()),
+                right_child_id: remap_id(join_node.second()),
             },
             Split(split_node) => Self::Split {
-                if_branch_id: split_node.on_true().0,
-                else_branch_id: split_node.on_false().0,
+                if_branch_id: remap_id(split_node.on_true()),
+                else_branch_id: remap_id(split_node.on_false()),
             },
-            Loop(loop_node) => Self::Loop { body_id: loop_node.body().0 },
+            Loop(loop_node) => Self::Loop { body_id: remap_id(loop_node.body()) },
             Call(call_node) => {
                 if call_node.is_syscall() {
-                    Self::SysCall { callee_id: call_node.callee().0 }
+                    Self::SysCall { callee_id: remap_id(call_node.callee()) }
                 } else {
-                    Self::Call { callee_id: call_node.callee().0 }
+                    Self::Call { callee_id: remap_id(call_node.callee()) }
                 }
             },
             Dyn(dyn_node) => {
