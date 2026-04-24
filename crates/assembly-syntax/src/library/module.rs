@@ -1,6 +1,7 @@
 use alloc::{sync::Arc, vec::Vec};
 use core::ops::Index;
 
+use miden_core::mast::MastNodeId;
 use midenc_hir_type::FunctionType;
 
 use crate::{
@@ -41,9 +42,17 @@ impl ModuleInfo {
         digest: Word,
         signature: Option<Arc<FunctionType>>,
         attributes: AttributeSet,
+        source_root_id: Option<MastNodeId>,
+        source_library_commitment: Option<Word>,
     ) {
-        self.items
-            .push(ItemInfo::Procedure(ProcedureInfo { name, digest, signature, attributes }));
+        self.items.push(ItemInfo::Procedure(ProcedureInfo {
+            name,
+            digest,
+            signature,
+            attributes,
+            source_root_id,
+            source_library_commitment,
+        }));
     }
 
     /// Adds a constant to the module.
@@ -177,6 +186,23 @@ pub struct ProcedureInfo {
     pub digest: Word,
     pub signature: Option<Arc<FunctionType>>,
     pub attributes: AttributeSet,
+    /// The exact procedure root in the source library, if known.
+    ///
+    /// This is needed when multiple exported procedures share the same digest but carry different
+    /// diagnostics metadata.
+    pub source_root_id: Option<MastNodeId>,
+    /// The commitment of the source library forest that `source_root_id` belongs to, if known.
+    pub source_library_commitment: Option<Word>,
+}
+
+impl ProcedureInfo {
+    pub fn source_root_id(&self) -> Option<MastNodeId> {
+        self.source_root_id
+    }
+
+    pub fn source_library_commitment(&self) -> Option<Word> {
+        self.source_library_commitment
+    }
 }
 
 /// Stores the name and value of a constant

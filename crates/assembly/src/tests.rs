@@ -17,8 +17,8 @@ use miden_core::{
     events::EventId,
     field::PrimeField64,
     mast::{
-        CallNodeBuilder, JoinNodeBuilder, LoopNodeBuilder, MastForestContributor, MastNodeExt,
-        MastNodeId, SplitNodeBuilder,
+        CallNodeBuilder, JoinNodeBuilder, LoopNodeBuilder, MastForestContributor, MastNode,
+        MastNodeExt, MastNodeId, SplitNodeBuilder,
     },
     operations::Operation,
     program::Program,
@@ -370,6 +370,59 @@ fn library_procedure_collision() -> Result<(), Report> {
 
     // Keeping those procedures distinct adds one more node to the library forest.
     assert_eq!(lib2.mast_forest().num_nodes(), 6);
+
+    Ok(())
+}
+
+#[test]
+fn static_library_same_digest_procedure_uses_exact_root_metadata() -> Result<(), Report> {
+    let context = TestContext::new();
+
+    let aliases = r#"
+        pub proc alias_a
+            add
+        end
+
+        pub proc alias_b
+            add
+        end
+    "#;
+    let aliases = parse_module!(&context, "lib::aliases", aliases);
+    let library = Assembler::new(context.source_manager()).assemble_library([aliases])?;
+
+    let program_source = source_file!(
+        &context,
+        r#"
+        use lib::aliases
+
+        begin
+            exec.aliases::alias_b
+        end
+        "#
+    );
+
+    let program = Assembler::new(context.source_manager())
+        .with_static_library(library)?
+        .assemble_program(program_source)?;
+
+    let body_node_id = {
+        let root = program.entrypoint();
+        match &program.mast_forest()[root] {
+            MastNode::Join(join_node) => join_node.second(),
+            _ => root,
+        }
+    };
+    let context_name = program
+        .mast_forest()
+        .debug_info()
+        .first_asm_op_for_node(body_node_id)
+        .expect("statically linked procedure should preserve asm-op metadata")
+        .context_name();
+
+    assert!(
+        context_name.ends_with("alias_b"),
+        "expected alias_b metadata, got {context_name}"
+    );
 
     Ok(())
 }

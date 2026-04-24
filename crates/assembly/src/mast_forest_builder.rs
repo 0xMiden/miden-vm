@@ -11,8 +11,8 @@ use miden_core::{
     mast::{
         AsmOpId, BasicBlockNode, BasicBlockNodeBuilder, DecoratorFingerprint, DecoratorId,
         ExternalNodeBuilder, JoinNodeBuilder, MastForest, MastForestContributor, MastForestError,
-        MastNode, MastNodeBuilder, MastNodeExt, MastNodeFingerprint, MastNodeId, Remapping,
-        SubtreeIterator,
+        MastForestRootMap, MastNode, MastNodeBuilder, MastNodeExt, MastNodeFingerprint, MastNodeId,
+        Remapping, SubtreeIterator,
     },
     operations::{AssemblyOp, Decorator, DecoratorList, Operation},
     serde::Serializable,
@@ -71,6 +71,12 @@ pub struct MastForestBuilder {
     /// A MastForest that contains the MAST of all statically-linked libraries, it's used to find
     /// precompiled procedures and copy their subtrees instead of inserting external nodes.
     statically_linked_mast: Arc<MastForest>,
+    /// Maps each statically linked source forest commitment to its position in the merged forest
+    /// root map.
+    statically_linked_forest_indices_by_commitment: BTreeMap<Word, usize>,
+    /// Maps procedure roots from each source static library to their new root ID in the merged
+    /// static forest.
+    statically_linked_root_map: MastForestRootMap,
     /// Keeps track of the new ids assigned to nodes that are copied from the MAST of
     /// statically-linked libraries.
     statically_linked_mast_remapping: Remapping,
@@ -108,8 +114,14 @@ impl MastForestBuilder {
         static_libraries: impl IntoIterator<Item = &'a MastForest>,
     ) -> Result<Self, Report> {
         // All statically-linked libraries are merged into a single MastForest.
-        let forests = static_libraries.into_iter();
-        let (statically_linked_mast, _remapping) = MastForest::merge(forests).into_diagnostic()?;
+        let forests = static_libraries.into_iter().collect::<Vec<_>>();
+        let statically_linked_forest_indices_by_commitment = forests
+            .iter()
+            .enumerate()
+            .map(|(idx, forest)| (forest.commitment(), idx))
+            .collect();
+        let (statically_linked_mast, statically_linked_root_map) =
+            MastForest::merge(forests.iter().copied()).into_diagnostic()?;
         // The AdviceMap of the statically-linked forest is copied to the forest being built.
         //
         // This might include excess advice map data in the built MastForest, but we currently do
@@ -120,6 +132,8 @@ impl MastForestBuilder {
         Ok(MastForestBuilder {
             mast_forest,
             statically_linked_mast: Arc::new(statically_linked_mast),
+            statically_linked_forest_indices_by_commitment,
+            statically_linked_root_map,
             emit_debug_info: true,
             ..Self::default()
         })
@@ -1157,14 +1171,43 @@ impl MastForestBuilder {
     ///   the inserted subtree is returned.
     /// * If dynamically-linked, then an external node is inserted, and its MastNodeId is returned
     ///
-    /// TODO(#2990): when multiple roots share the same digest but carry
-    /// different metadata, this always picks the first match. Needs a source
-    /// MastNodeId threaded from ProcedureInfo through the linker.
-    pub fn ensure_external_link(&mut self, mast_root: Word) -> Result<MastNodeId, Report> {
+    /// Adds a node corresponding to the given MAST root, preferring an exact source root when
+    /// provenance from a statically-linked library is available.
+    pub fn ensure_external_link_with_source(
+        &mut self,
+        mast_root: Word,
+        source_library_commitment: Option<Word>,
+        source_root_id: Option<MastNodeId>,
+    ) -> Result<MastNodeId, Report> {
+        if let Some(root_id) =
+            self.find_statically_linked_root(source_library_commitment, source_root_id, mast_root)
+        {
+            return self.copy_statically_linked_subtree(root_id);
+        }
+
         if let Some(root_id) = self.statically_linked_mast.find_procedure_root(mast_root) {
             self.copy_statically_linked_subtree(root_id)
         } else {
             self.ensure_node(ExternalNodeBuilder::new(mast_root))
+        }
+    }
+
+    fn find_statically_linked_root(
+        &self,
+        source_library_commitment: Option<Word>,
+        source_root_id: Option<MastNodeId>,
+        mast_root: Word,
+    ) -> Option<MastNodeId> {
+        let forest_idx = self
+            .statically_linked_forest_indices_by_commitment
+            .get(&source_library_commitment?)?;
+        let merged_root =
+            self.statically_linked_root_map.map_root(*forest_idx, &source_root_id?)?;
+
+        if self.statically_linked_mast[merged_root].digest() == mast_root {
+            Some(merged_root)
+        } else {
+            None
         }
     }
 
@@ -1843,8 +1886,9 @@ mod tests {
         static_forest.make_root(static_block_id);
 
         let mut builder = MastForestBuilder::new([&static_forest]).unwrap();
-        let copied_block_id =
-            builder.ensure_external_link(static_forest[static_block_id].digest()).unwrap();
+        let copied_block_id = builder
+            .ensure_external_link_with_source(static_forest[static_block_id].digest(), None, None)
+            .unwrap();
 
         let local_var_id = builder
             .add_debug_var(DebugVarInfo::new("y", DebugVarLocation::Stack(1)))
@@ -1921,8 +1965,9 @@ mod tests {
         let expected_padded_idx = static_forest.debug_info().asm_ops_for_node(static_block)[0].0;
 
         let mut builder = MastForestBuilder::new([&static_forest]).unwrap();
-        let copied_block_id =
-            builder.ensure_external_link(static_forest[static_block].digest()).unwrap();
+        let copied_block_id = builder
+            .ensure_external_link_with_source(static_forest[static_block].digest(), None, None)
+            .unwrap();
         let local_block_id = builder
             .ensure_block(ops, Vec::new(), vec![(8, asm_op)], vec![], vec![], vec![])
             .unwrap();
@@ -2090,7 +2135,9 @@ mod tests {
         let (static_forest, _) = source_builder.build();
 
         let mut builder = MastForestBuilder::new([&static_forest]).unwrap();
-        let linked = builder.ensure_external_link(static_forest[alias_a].digest()).unwrap();
+        let linked = builder
+            .ensure_external_link_with_source(static_forest[alias_a].digest(), None, None)
+            .unwrap();
         builder.mast_forest.make_root(linked);
         let (forest, _) = builder.build();
 
@@ -2102,11 +2149,10 @@ mod tests {
         );
     }
 
-    /// Digest-based linking picks the first root, so the second alias gets
-    /// the wrong metadata. Fixing this needs #2990.
+    /// Provenance-aware static linking can select the exact same-digest root instead of falling
+    /// back to the first digest match.
     #[test]
-    #[ignore = "requires #2990: source MastNodeId in ProcedureInfo"]
-    fn repro_statically_linked_same_digest_root_uses_first_alias_metadata() {
+    fn test_static_link_with_source_root_preserves_selected_alias_metadata() {
         let mut source_builder = MastForestBuilder::new(&[]).unwrap();
 
         let alias_a = source_builder
@@ -2145,10 +2191,15 @@ mod tests {
         };
         let (exact_forest, _) = exact_builder.build();
 
-        let mut digest_builder = MastForestBuilder::new([&static_forest]).unwrap();
-        let linked_alias_b =
-            digest_builder.ensure_external_link(static_forest[alias_b].digest()).unwrap();
-        let (linked_forest, _) = digest_builder.build();
+        let mut provenance_builder = MastForestBuilder::new([&static_forest]).unwrap();
+        let linked_alias_b = provenance_builder
+            .ensure_external_link_with_source(
+                static_forest[alias_b].digest(),
+                Some(static_forest.commitment()),
+                Some(alias_b),
+            )
+            .unwrap();
+        let (linked_forest, _) = provenance_builder.build();
 
         assert_eq!(
             exact_forest
@@ -2165,7 +2216,7 @@ mod tests {
                 .unwrap()
                 .context_name(),
             "alias_b",
-            "linking the second same-digest root by digest should preserve that root's metadata",
+            "provenance-aware linking should preserve the selected same-digest root metadata",
         );
     }
 }
