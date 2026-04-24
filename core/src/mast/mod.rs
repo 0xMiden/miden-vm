@@ -116,6 +116,10 @@ mod tests;
 /// A [`MastForest`] does not have an entrypoint, and hence is not executable. A
 /// [`crate::program::Program`] can be built from a [`MastForest`] to specify an entrypoint.
 #[derive(Clone, Debug, Default)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true))
+)]
 pub struct MastForest {
     /// All of the nodes local to the trees comprising the MAST forest.
     nodes: IndexVec<MastNodeId, MastNode>,
