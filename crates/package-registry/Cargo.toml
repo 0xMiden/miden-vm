@@ -14,7 +14,7 @@ rust-version.workspace = true
 edition.workspace = true
 
 [features]
-default = ["std", "serde"]
+default = ["std"]
 resolver = ["std", "dep:pubgrub", "dep:smallvec"]
 std = ["miden-assembly-syntax/std", "miden-core/std", "serde/std"]
 serde = ["dep:serde", "miden-assembly-syntax/serde", "miden-core/serde", "miden-mast-package/serde"]

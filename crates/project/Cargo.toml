@@ -14,7 +14,7 @@ rust-version.workspace = true
 edition.workspace = true
 
 [features]
-default = ["std", "serde"]
+default = ["std"]
 arbitrary = ["std", "miden-assembly-syntax/arbitrary"]
 resolver = ["std", "miden-package-registry/resolver"]
 std = ["miden-assembly-syntax/std", "serde/std", "thiserror/std", "toml/std", "miden-package-registry/std", "miden-package-registry/resolver", "tempfile/getrandom"]
