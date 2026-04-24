@@ -1293,6 +1293,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "masm-analysis"
+version = "0.1.0"
+dependencies = [
+ "masm-decompiler",
+ "miden-assembly-syntax",
+ "miden-debug-types",
+]
+
+[[package]]
+name = "masm-decompiler"
+version = "0.8.1"
+dependencies = [
+ "log",
+ "miden-assembly-syntax",
+]
+
+[[package]]
+name = "masm-lint"
+version = "0.3.0"
+dependencies = [
+ "clap",
+ "masm-analysis",
+ "masm-decompiler",
+ "miden-debug-types",
+ "yansi",
+]
+
+[[package]]
 name = "matchers"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
