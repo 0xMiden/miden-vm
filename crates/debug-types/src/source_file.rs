@@ -23,6 +23,22 @@ pub enum SourceLanguage {
     Other(&'static str),
 }
 
+#[cfg(feature = "arbitrary")]
+impl Arbitrary for SourceLanguage {
+    type Parameters = ();
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        prop_oneof![
+            Just(Self::Masm),
+            Just(Self::Rust),
+            Just(Self::Other("other")),
+            Just(Self::Other("unknown")),
+        ]
+        .boxed()
+    }
+}
+
 impl AsRef<str> for SourceLanguage {
     fn as_ref(&self) -> &str {
         match self {
@@ -941,6 +957,7 @@ macro_rules! declare_dual_number_and_index_type {
         #[derive(Default, Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
         #[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
         #[cfg_attr(feature = "serde", serde(transparent))]
+        #[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
         pub struct $index_name(pub u32);
 
         impl $index_name {
@@ -1057,6 +1074,16 @@ macro_rules! declare_dual_number_and_index_type {
         impl fmt::Display for $index_name {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 fmt::Display::fmt(&self.0, f)
+            }
+        }
+
+        #[cfg(feature = "arbitrary")]
+        impl Arbitrary for $index_name {
+            type Parameters = ();
+            type Strategy = BoxedStrategy<Self>;
+
+            fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+                any::<u32>().prop_map(Self).boxed()
             }
         }
 

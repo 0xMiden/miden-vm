@@ -13,8 +13,9 @@ homepage.workspace = true
 repository.workspace = true
 
 [features]
+arbitrary = ["std", "dep:proptest"]
 default = ["std"]
-std = []
+std = ["proptest?/std"]
 serde = ["dep:serde"]
 
 [dependencies]
@@ -23,6 +24,7 @@ miden-crypto.workspace = true
 thiserror.workspace = true
 
 # Optional dependencies
+proptest = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
 
 [dev-dependencies]

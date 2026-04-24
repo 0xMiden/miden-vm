@@ -57,7 +57,7 @@ use core::{
 };
 
 use miden_utils_sync::OnceLockCompat;
-#[cfg(feature = "arbitrary")]
+#[cfg(any(test, feature = "arbitrary"))]
 use proptest::prelude::*;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};

@@ -20,7 +20,7 @@ std = [
     "memchr/std",
     "miden-formatting/std",
     "miden-utils-sync/std",
-    "proptest/std",
+    "proptest?/std",
     "serde/std",
     "serde_spanned?/std",
     "thiserror/std",

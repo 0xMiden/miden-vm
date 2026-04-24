@@ -12,6 +12,8 @@ use alloc::{collections::BTreeMap, vec, vec::Vec};
 use core::{fmt::Debug, marker::PhantomData, ops};
 
 pub use csr::{CsrMatrix, CsrValidationError};
+#[cfg(feature = "arbitrary")]
+use proptest::prelude::*;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -22,6 +24,16 @@ pub enum IndexedVecError {
     /// The number of items exceeds the maximum supported by ID type.
     #[error("IndexedVec contains maximum number of items")]
     TooManyItems,
+}
+
+#[cfg(feature = "arbitrary")]
+impl Arbitrary for IndexedVecError {
+    type Parameters = ();
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        Just(Self::TooManyItems).boxed()
+    }
 }
 
 /// A trait for u32-backed, 0-based IDs.

@@ -20,6 +20,24 @@ pub enum InvalidVersionError {
     Version(SemVerError),
 }
 
+#[cfg(feature = "arbitrary")]
+impl Arbitrary for InvalidVersionError {
+    type Parameters = ();
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        any::<bool>()
+            .prop_map(|use_digest| {
+                if use_digest {
+                    Self::Digest("invalid digest")
+                } else {
+                    Self::Version("not-a-version".parse::<SemVer>().unwrap_err())
+                }
+            })
+            .boxed()
+    }
+}
+
 /// The representation of versioning information associated with packages in the package index.
 ///
 /// This type provides the means by which dependency resolution can satisfy versioning constraints
