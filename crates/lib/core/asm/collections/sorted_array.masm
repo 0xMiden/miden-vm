@@ -114,9 +114,9 @@ pub proc find_word
                 # The value was not found, and the maybe_value_ptr is neither the start nor the end
                 # of the list. Make sure that:
                 # - `start_ptr <= maybe_value_ptr < end_ptr`, and
-                # - `maybe_value_ptr` is word alignend with `start_ptr`, and
                 # - `the value at maybe_value_ptr-1 < VALUE`, and
-                # - `the value at maybe_value_ptr > VALUE`
+                # - `the value at maybe_value_ptr > VALUE`.
+                # `maybe_value_ptr` must already be word aligned to allow reading values.
                 #=> [maybe_value_ptr, VALUE, start_ptr, end_ptr]
 
                 # `maybe_value_ptr` bounds check
@@ -125,9 +125,6 @@ pub proc find_word
 
                 dup dup.7 u32assert2.err="maybe_value_ptr is not u32"
                 u32lt assert.err="lowerbound_array invariant: maybe_value_ptr >= end_ptr"
-                
-                # `maybe_value_ptr` alignment check
-                dup dup.6 sub u32mod.4 assertz.err="lowerbound_array invariant: maybe_value_ptr must be word-aligned with start_ptr"
 
                 # Duplicate VALUE word (5 cycles)
                 movdn.4 dupw

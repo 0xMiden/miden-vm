@@ -457,26 +457,19 @@ fn build_test_with_handler(
 fn malicious_lowerbound_oob_above(
     _process: &ProcessorState,
 ) -> Result<Vec<AdviceMutation>, EventError> {
-    Ok(vec![AdviceMutation::extend_stack(vec![
-        Felt::new_unchecked(204),
-        Felt::ZERO,
-    ])])
+    Ok(vec![AdviceMutation::extend_stack(vec![Felt::new_unchecked(204), Felt::ZERO])])
 }
 
 /// Returns `(was_found = false, maybe_value_ptr = 40)` which is below `start_ptr = 100`.
 fn malicious_lowerbound_oob_below(
     _process: &ProcessorState,
 ) -> Result<Vec<AdviceMutation>, EventError> {
-    Ok(vec![AdviceMutation::extend_stack(vec![
-        Felt::new_unchecked(40),
-        Felt::ZERO,
-    ])])
+    Ok(vec![AdviceMutation::extend_stack(vec![Felt::new_unchecked(40), Felt::ZERO])])
 }
 
 #[test]
 fn test_find_word_rejects_oob_pointer_above_end() {
-    let source =
-    format!(
+    let source = format!(
         "
         use miden::core::collections::sorted_array
         {TRUNCATE_STACK_PROC}
@@ -492,7 +485,8 @@ fn test_find_word_rejects_oob_pointer_above_end() {
             
             exec.truncate_stack
         end
-    ");
+    "
+    );
     let test = build_test_with_handler(
         &source,
         &[],
@@ -523,7 +517,8 @@ fn test_find_word_rejects_oob_pointer_below_start() {
 
             exec.truncate_stack
         end
-    ");
+    "
+    );
     let test = build_test_with_handler(
         &source,
         &[],
@@ -561,7 +556,8 @@ fn test_find_partial_key_value_rejects_oob_pointer_above_end() {
 
             exec.truncate_stack
         end
-    ");
+    "
+    );
     // 200 > end_ptr = 124. The fix's `maybe_key_ptr < end_ptr` check must reject this.
     let test = build_test_with_handler(
         &source,
