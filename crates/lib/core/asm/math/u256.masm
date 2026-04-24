@@ -295,7 +295,7 @@ end
 #! Returns 1 if the top u256 value is zero; lower stack values are preserved.
 #! Stack transition looks as follows:
 #! [a0, a1, a2, a3, a4, a5, a6, a7, ...] -> [is_zero, ...].
-pub proc eqz(rhs: u256, lhs: u256) -> i1
+pub proc eqz(a: u256) -> i1
     eq.0
     repeat.7
         swap

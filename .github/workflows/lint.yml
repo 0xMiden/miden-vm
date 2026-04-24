@@ -55,6 +55,58 @@ jobs:
       - name: Check workspace inheritance
         run: cargo workspace-inheritance-check --promotion-threshold 2 --promotion-failure
 
+  masm-lint:
+    name: masm-lint on ubuntu-latest
+    runs-on: ubuntu-latest
+    env:
+      MASM_LSP_REF: f14529ff6c32fa34ab296c8cb03fb1b229c2c767
+      MASM_DECOMPILER_REF: c1bb0f69ba4bebf03d1b8f1cf5fe25329349e6a3
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - name: Cleanup large tools for build space
+        uses: ./.github/actions/cleanup-runner
+      - name: Install rust
+        run: rustup update --no-self-update
+      - name: Checkout masm-lsp sources
+        run: |
+          git init --quiet .tmp/masm-lsp
+          git -C .tmp/masm-lsp remote add origin https://github.com/trailofbits/masm-lsp
+          git -C .tmp/masm-lsp fetch --depth=1 origin "$MASM_LSP_REF"
+          git -C .tmp/masm-lsp checkout --detach FETCH_HEAD
+      - name: Checkout masm-decompiler sources
+        run: |
+          git init --quiet .tmp/masm-decompiler
+          git -C .tmp/masm-decompiler remote add origin https://github.com/trailofbits/masm-decompiler
+          git -C .tmp/masm-decompiler fetch --depth=1 origin "$MASM_DECOMPILER_REF"
+          git -C .tmp/masm-decompiler checkout --detach FETCH_HEAD
+      - name: Patch masm-lsp analysis
+        run: >
+          git -C .tmp/masm-lsp apply
+          "$GITHUB_WORKSPACE/.github/patches/masm-lsp-public-inputs.patch"
+      - name: Use checked out masm-decompiler
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          cargo_toml = Path(".tmp/masm-lsp/Cargo.toml")
+          old = 'masm-decompiler = { version = "=0.6.1", git = "https://github.com/trailofbits/masm-decompiler", rev = "dac04e17dea54e7e025c48745705f4dc0433bc91" }'
+          new = 'masm-decompiler = { path = "../masm-decompiler" }'
+          text = cargo_toml.read_text()
+          if old not in text:
+              raise SystemExit("expected masm-decompiler workspace dependency not found")
+          cargo_toml.write_text(text.replace(old, new))
+          PY
+      - name: Install masm-lint
+        run: >
+          cargo install
+          --path .tmp/masm-lsp/crates/masm-lint
+      - name: Lint MASM core library
+        run: >
+          masm-lint --no-color
+          --library miden::core=crates/lib/core/asm
+          crates/lib/core/asm
+
   clippy:
     name: clippy nightly on ubuntu-latest
     runs-on: ubuntu-latest

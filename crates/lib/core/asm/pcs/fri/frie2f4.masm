@@ -14,6 +14,7 @@ use miden::core::pcs::fri::helper
 @locals(16)
 pub proc preprocess
     adv_push
+    u32assert
     # => [num_queries, g, ...]
     exec.constants::fri_com_ptr
     # => [layer_ptr, num_queries, g, ...]
@@ -45,6 +46,7 @@ pub proc preprocess
     #=> [X, layer_ptr, layer_ptr, g]
 
     adv_push
+    u32assert
     mul.2
     sub.1
     movdn.4
@@ -72,6 +74,7 @@ pub proc preprocess
     #=> [X, remainder_poly_ptr, remainder_poly_ptr, layer_ptr, g]
 
     adv_push
+    u32assert
     dup mul.2 exec.constants::set_remainder_poly_size
 
     sub.1
