@@ -360,20 +360,21 @@ fn validate_node_entries(
     external_node_count: usize,
 ) -> Result<(), DeserializationError> {
     let mut reader = SliceReader::new(node_entries);
+    let mut counted_externals = 0usize;
 
-    for index in 0..node_count {
+    for _ in 0..node_count {
         let node_entry = MastNodeEntry::read_from(&mut reader)?;
-        if index < external_node_count {
-            if !matches!(node_entry, MastNodeEntry::External) {
-                return Err(DeserializationError::InvalidValue(format!(
-                    "node entry {index} must be External because the header reserves the first {external_node_count} nodes for externals"
-                )));
-            }
-        } else if matches!(node_entry, MastNodeEntry::External) {
-            return Err(DeserializationError::InvalidValue(format!(
-                "node entry {index} must not be External because only the first {external_node_count} nodes may be externals"
-            )));
+        if matches!(node_entry, MastNodeEntry::External) {
+            counted_externals = counted_externals.checked_add(1).ok_or_else(|| {
+                DeserializationError::InvalidValue("external node count overflow".to_string())
+            })?;
         }
+    }
+
+    if counted_externals != external_node_count {
+        return Err(DeserializationError::InvalidValue(format!(
+            "header external node count {external_node_count} does not match {counted_externals} external node entries"
+        )));
     }
 
     Ok(())
