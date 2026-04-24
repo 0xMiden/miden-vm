@@ -17,14 +17,9 @@ use crate::{
 /// Digest sources for a parsed serialized forest.
 ///
 /// Non-external nodes either read from the internal-hash section or from a rebuilt in-memory hash
-/// table. External nodes always read from the external-digest section.
+/// table. External nodes always read from the external-digest prefix section.
 #[derive(Debug, Clone)]
 struct ForestDigests {
-    /// Dense slot index for each node within its digest section.
-    ///
-    /// External nodes index into the external-digest section. All other nodes index into the
-    /// general node-hash section or the rebuilt hash table.
-    slot_by_node: Vec<u32>,
     /// Source of non-external digests.
     ///
     /// `None` means the serialized bytes still contain the internal node-hash section, so
@@ -50,15 +45,13 @@ impl ForestDigests {
     ///
     /// `bytes` and `layout` provide the already-scanned structural wire view. When
     /// `remaining_allocation_budget` is `Some`, helper allocations needed for untrusted validation
-    /// such as the slot table and rebuilt hash table are charged against that budget. Trusted
+    /// such as the rebuilt hash table are charged against that budget. Trusted
     /// structural views pass `None` here, which keeps the previous unbudgeted inspection behavior.
     fn new(
         bytes: &[u8],
         layout: &ForestLayout,
-        mut remaining_allocation_budget: Option<&mut usize>,
+        remaining_allocation_budget: Option<&mut usize>,
     ) -> Result<Self, DeserializationError> {
-        let slot_by_node =
-            build_digest_slot_by_node(bytes, layout, remaining_allocation_budget.as_deref_mut())?;
         // If the internal-hash section is absent, rebuild all non-external digests once and cache
         // them for later lookups.
         let hash_table = if layout.node_hash_offset.is_none() {
@@ -67,7 +60,7 @@ impl ForestDigests {
             None
         };
 
-        Ok(Self { slot_by_node, hash_table })
+        Ok(Self { hash_table })
     }
 
     fn digest_at(
@@ -77,16 +70,14 @@ impl ForestDigests {
         index: usize,
         entry: MastNodeEntry,
     ) -> Result<crate::Word, DeserializationError> {
-        let digest_slot = self.slot_by_node.get(index).copied().ok_or_else(|| {
-            DeserializationError::InvalidValue(format!(
-                "node index {} out of bounds for {} digest slots",
-                index,
-                self.slot_by_node.len()
-            ))
-        })? as usize;
-
         if matches!(entry, MastNodeEntry::External) {
-            return read_digest_entry(bytes, layout.external_digest_offset, digest_slot);
+            if index >= layout.external_node_count {
+                return Err(DeserializationError::InvalidValue(format!(
+                    "external node index {} out of bounds for {} external digests",
+                    index, layout.external_node_count
+                )));
+            }
+            return read_digest_entry(bytes, layout.external_digest_offset, index);
         }
 
         if let Some(hash_table) = &self.hash_table {
@@ -104,6 +95,18 @@ impl ForestDigests {
                 "hash-backed digest lookup requested but node hash section is absent".to_string(),
             )
         })?;
+        let digest_slot = index.checked_sub(layout.external_node_count).ok_or_else(|| {
+            DeserializationError::InvalidValue(format!(
+                "internal node index {} must be at least {}",
+                index, layout.external_node_count
+            ))
+        })?;
+        if digest_slot >= layout.internal_node_count {
+            return Err(DeserializationError::InvalidValue(format!(
+                "internal digest slot {} out of bounds for {} internal digests",
+                digest_slot, layout.internal_node_count
+            )));
+        }
         read_digest_entry(bytes, node_hash_offset, digest_slot)
     }
 }
@@ -189,7 +192,7 @@ impl<'a> ResolvedSerializedForest<'a> {
     /// Returns the digest for the node at `index`.
     ///
     /// The caller-supplied index is checked via [`Self::node_entry_at`] before the digest lookup
-    /// reaches the internal slot table.
+    /// reaches the digest source selected for that node kind.
     pub(super) fn node_digest_at(&self, index: usize) -> Result<crate::Word, DeserializationError> {
         let entry = self.node_entry_at(index)?;
         self.node_digest_for_entry(index, entry)
@@ -206,7 +209,11 @@ impl<'a> ResolvedSerializedForest<'a> {
 
     #[cfg(test)]
     pub(super) fn digest_slot_at(&self, index: usize) -> usize {
-        self.digests.slot_by_node[index] as usize
+        if index < self.layout.external_node_count {
+            index
+        } else {
+            index - self.layout.external_node_count
+        }
     }
 }
 
@@ -241,42 +248,6 @@ fn basic_block_data(
     Ok(&bytes[basic_block_offset..end])
 }
 
-fn build_digest_slot_by_node(
-    bytes: &[u8],
-    layout: &ForestLayout,
-    remaining_allocation_budget: Option<&mut usize>,
-) -> Result<Vec<u32>, DeserializationError> {
-    // Digest sections are packed densely by node kind rather than by absolute node index.
-    // This scan records, for each node index, which slot to read from in the corresponding digest
-    // source.
-    let mut slots = Vec::new();
-    reserve_node_capacity(
-        &mut slots,
-        layout.node_count,
-        "digest slot table",
-        remaining_allocation_budget,
-    )?;
-    let mut external_slot = 0u32;
-    let mut node_hash_slot = 0u32;
-
-    for index in 0..layout.node_count {
-        let entry = layout.read_node_entry_at(bytes, index)?;
-        if matches!(entry, MastNodeEntry::External) {
-            slots.push(external_slot);
-            external_slot = external_slot.checked_add(1).ok_or_else(|| {
-                DeserializationError::InvalidValue("external digest slot overflow".to_string())
-            })?;
-        } else {
-            slots.push(node_hash_slot);
-            node_hash_slot = node_hash_slot.checked_add(1).ok_or_else(|| {
-                DeserializationError::InvalidValue("node hash slot overflow".to_string())
-            })?;
-        }
-    }
-
-    Ok(slots)
-}
-
 fn recompute_hash_table(
     bytes: &[u8],
     layout: &ForestLayout,
@@ -295,8 +266,6 @@ fn recompute_hash_table(
         "hash table",
         remaining_allocation_budget,
     )?;
-    let mut external_digest_index = 0usize;
-
     for index in 0..layout.node_count {
         let entry = layout.read_node_entry_at(bytes, index)?;
         let computed = match entry {
@@ -337,12 +306,7 @@ fn recompute_hash_table(
             MastNodeEntry::Dyn => DynNode::DYN_DEFAULT_DIGEST,
             MastNodeEntry::Dyncall => DynNode::DYNCALL_DEFAULT_DIGEST,
             MastNodeEntry::External => {
-                let digest =
-                    read_digest_entry(bytes, layout.external_digest_offset, external_digest_index)?;
-                external_digest_index = external_digest_index.checked_add(1).ok_or_else(|| {
-                    DeserializationError::InvalidValue("external digest index overflow".to_string())
-                })?;
-                digest
+                read_digest_entry(bytes, layout.external_digest_offset, index)?
             },
         };
 
@@ -376,14 +340,12 @@ fn checked_child_index(
     let child_index = child_id as usize;
     if child_index >= node_count {
         return Err(DeserializationError::InvalidValue(format!(
-            "child id {} out of bounds for {} nodes",
-            child_id, node_count
+            "child id {child_id} out of bounds for {node_count} nodes"
         )));
     }
     if child_index >= parent_index {
         return Err(DeserializationError::InvalidValue(format!(
-            "forward reference from node {} to {} (child index must be less than parent)",
-            parent_index, child_id
+            "forward reference from node {parent_index} to {child_id} (child index must be less than parent)"
         )));
     }
     Ok(child_index)

@@ -39,6 +39,8 @@
 //!
 //! (Counts)
 //! - nodes count (`usize`)
+//! - internal nodes count (`usize`)
+//! - external nodes count (`usize`)
 //!
 //! (Procedure roots section)
 //! - procedure roots (`Vec<u32>` as MastNodeId values)
@@ -80,9 +82,10 @@
 //! use, so supporting a separate "hashless but with debug info" mode would add another wire mode
 //! without changing the validation semantics.
 //!
-//! Readers recover per-node digest lookup by scanning node entries once and building a compact
-//! "slot by node index" table. This preserves random access without forcing all digests into the
-//! same contiguous array on the wire.
+//! External nodes are serialized first, sorted lexicographically by digest (breaking ties by
+//! original node index). This makes both digest sections dense by prefix/suffix: external digests
+//! occupy the first `external_node_count` slots, and internal digests occupy the remaining
+//! `internal_node_count` slots when present.
 //!
 //! Public entry points adopt these policies:
 //! - [`MastForest::read_from_bytes`]: trusted full payload, no hashless support.
@@ -105,6 +108,7 @@ use crate::{
     serde::{
         ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable, SliceReader,
     },
+    utils::Idx,
 };
 
 pub(crate) mod asm_op;
@@ -118,7 +122,7 @@ pub use view::MastForestView;
 
 mod layout;
 pub(super) use layout::ForestLayout;
-use layout::{TrackingReader, WireFlags, read_header_and_scan_layout};
+use layout::{OffsetTrackingReader, TrackingReader, WireFlags, read_header_and_scan_layout};
 
 mod resolved;
 use resolved::{ResolvedSerializedForest, basic_block_offset_for_node_index};
@@ -153,8 +157,8 @@ type StringIndex = usize;
 /// Default multiplier for the untrusted validation allocation budget.
 ///
 /// The budgeted byte reader limits wire-driven parsing. Hashless and stripped validation also
-/// needs transient per-node allocations for the slot table, empty debug-info scaffolding, and
-/// rebuilt digest table. The generic untrusted path also retains a recorded copy of the consumed
+/// needs transient per-node allocations for empty debug-info scaffolding and rebuilt digest data.
+/// The generic untrusted path also retains a recorded copy of the consumed
 /// serialized payload for deferred validation.
 ///
 /// This convenience multiplier is therefore a coarse "wire bytes plus worst-case helper
@@ -218,7 +222,8 @@ const FLAGS_RESERVED_MASK: u8 = 0xfc;
 ///   rejects HASHLESS. Split fixed-width node entries from digest storage. External digests moved
 ///   to a dedicated section. Hashless serialization omits the general node-hash section entirely.
 ///   Dropped the serialized decorator-count field because it was not used by the wire layout or
-///   deserializers.
+///   deserializers. Before any public release on this branch, the same unreleased wire version also
+///   grew explicit internal/external node counts in the header.
 const VERSION: [u8; 3] = [0, 0, 3];
 
 // MAST FOREST SERIALIZATION/DESERIALIZATION
@@ -231,6 +236,37 @@ impl Serializable for MastForest {
 }
 
 impl MastForest {
+    fn serialization_order(&self) -> (Vec<usize>, Vec<u32>) {
+        let mut ordered_indices = Vec::with_capacity(self.nodes.len());
+        let mut forest_to_serialized = vec![0u32; self.nodes.len()];
+
+        let mut external_indices = self
+            .nodes
+            .iter()
+            .enumerate()
+            .filter(|(_, node)| node.is_external())
+            .map(|(index, node)| (index, node.digest()))
+            .collect::<Vec<_>>();
+        external_indices.sort_by_key(|(index, digest)| (*digest, *index));
+
+        for (serialized_index, (forest_index, _)) in external_indices.into_iter().enumerate() {
+            ordered_indices.push(forest_index);
+            forest_to_serialized[forest_index] = serialized_index as u32;
+        }
+
+        for (forest_index, node) in self.nodes.iter().enumerate() {
+            if node.is_external() {
+                continue;
+            }
+
+            let serialized_index = ordered_indices.len();
+            ordered_indices.push(forest_index);
+            forest_to_serialized[forest_index] = serialized_index as u32;
+        }
+
+        (ordered_indices, forest_to_serialized)
+    }
+
     /// Internal serialization with options.
     ///
     /// When `stripped` is true, the DebugInfo section is omitted and the FLAGS byte
@@ -252,25 +288,40 @@ impl MastForest {
         // version
         target.write_bytes(&VERSION);
 
-        // node count
-        target.write_usize(self.nodes.len());
+        // header counts
+        let node_count = self.nodes.len();
+        let external_node_count = self.nodes.iter().filter(|node| node.is_external()).count();
+        let internal_node_count = node_count - external_node_count;
+        let (serialization_order, forest_to_serialized) = self.serialization_order();
+        target.write_usize(node_count);
+        target.write_usize(internal_node_count);
+        target.write_usize(external_node_count);
 
         // roots
-        let roots: Vec<u32> = self.roots.iter().copied().map(u32::from).collect();
+        let roots: Vec<u32> = self
+            .roots
+            .iter()
+            .map(|root_id| forest_to_serialized[root_id.to_usize()])
+            .collect();
         roots.write_into(target);
 
         let mut mast_node_entries = Vec::with_capacity(self.nodes.len());
         let mut external_digests = Vec::new();
         let mut node_hashes = Vec::new();
 
-        for mast_node in self.nodes.iter() {
+        for forest_index in serialization_order {
+            let mast_node = &self.nodes.as_slice()[forest_index];
             let ops_offset = if let MastNode::Block(basic_block) = mast_node {
                 basic_block_data_builder.encode_basic_block(basic_block)
             } else {
                 0
             };
 
-            mast_node_entries.push(MastNodeEntry::new(mast_node, ops_offset));
+            mast_node_entries.push(MastNodeEntry::new_with_id_remap(
+                mast_node,
+                ops_offset,
+                Some(&forest_to_serialized),
+            ));
             if mast_node.is_external() {
                 external_digests.push(mast_node.digest());
             } else if !hashless {
@@ -323,10 +374,12 @@ fn serialized_size_hint(forest: &MastForest, stripped: bool, hashless: bool) -> 
 
     let mut size = MAGIC.len() + 1 + VERSION.len();
     size += node_count.get_size_hint();
+    size += non_external_count.get_size_hint();
+    size += external_count.get_size_hint();
 
     let roots_len = forest.roots.len();
     size += roots_len.get_size_hint();
-    size += roots_len * core::mem::size_of::<u32>();
+    size += roots_len * size_of::<u32>();
 
     let mut basic_block_len = 0usize;
     for node in forest.nodes.iter() {
@@ -616,7 +669,7 @@ impl MastForestView for MastForest {
 #[cfg(test)]
 impl SerializedMastForest<'_> {
     fn advice_map_offset(&self) -> Result<usize, DeserializationError> {
-        self.layout.advice_map_offset(self.bytes.len())
+        self.layout.advice_map_offset()
     }
 
     fn node_entry_offset(&self) -> usize {
@@ -766,6 +819,7 @@ fn decode_from_reader_inner<R: ByteReader>(
 ) -> Result<(WireFlags, super::UntrustedMastForest), DeserializationError> {
     let mut recording = TrackingReader::new_recording(source);
     let (flags, layout) = read_header_and_scan_layout(&mut recording, allow_hashless)?;
+    debug_assert_eq!(recording.offset(), layout.advice_map_offset);
 
     let advice_map = AdviceMap::read_from(&mut recording)?;
     let debug_info = if flags.is_stripped() {
@@ -801,7 +855,7 @@ pub(super) fn reserve_allocation<T>(
     label: &str,
 ) -> Result<(), DeserializationError> {
     let bytes_needed = count
-        .checked_mul(core::mem::size_of::<T>())
+        .checked_mul(size_of::<T>())
         .ok_or_else(|| DeserializationError::InvalidValue(format!("{label} size overflow")))?;
     if bytes_needed > *remaining_budget {
         return Err(DeserializationError::InvalidValue(format!(
