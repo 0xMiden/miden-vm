@@ -397,6 +397,8 @@ impl Library {
                         proc_digest,
                         signature.clone().map(Arc::new),
                         attributes.clone(),
+                        Some(*node),
+                        Some(self.mast_forest.commitment()),
                     );
                 },
                 LibraryExport::Constant(ConstantExport { path, value }) => {
@@ -544,6 +546,8 @@ impl TryFrom<Arc<Library>> for KernelLibrary {
                         proc_digest,
                         export.signature.clone().map(Arc::new),
                         export.attributes.clone(),
+                        Some(export.node),
+                        Some(library.mast_forest.commitment()),
                     );
                 },
                 LibraryExport::Constant(export) => {

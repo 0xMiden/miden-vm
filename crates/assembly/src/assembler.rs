@@ -624,6 +624,8 @@ impl Assembler {
                             InvokeKind::ProcRef,
                             SourceSpan::UNKNOWN,
                             item.digest,
+                            item.source_library_commitment(),
+                            item.source_root_id(),
                             mast_forest_builder,
                         )?;
                         ResolvedProcedure { node, signature: item.signature.clone() }
@@ -1359,6 +1361,8 @@ impl Assembler {
                     kind,
                     target.span(),
                     mast_root.into_inner(),
+                    None,
+                    None,
                     mast_forest_builder,
                 )?;
                 Ok(Some(ResolvedProcedure { node, signature: None }))
@@ -1377,6 +1381,8 @@ impl Assembler {
                                 kind,
                                 target.span(),
                                 p.digest,
+                                p.source_library_commitment(),
+                                p.source_root_id(),
                                 mast_forest_builder,
                             )?;
                             Ok(Some(ResolvedProcedure { node, signature: p.signature.clone() }))
@@ -1408,6 +1414,8 @@ impl Assembler {
         kind: InvokeKind,
         span: SourceSpan,
         mast_root: Word,
+        source_library_commitment: Option<Word>,
+        source_root_id: Option<MastNodeId>,
         mast_forest_builder: &mut MastForestBuilder,
     ) -> Result<MastNodeId, Report> {
         // Get the procedure from the assembler
@@ -1433,7 +1441,11 @@ impl Assembler {
             }
         }
 
-        mast_forest_builder.ensure_external_link(mast_root)
+        mast_forest_builder.ensure_external_link_with_source(
+            mast_root,
+            source_library_commitment,
+            source_root_id,
+        )
     }
 }
 
