@@ -75,7 +75,6 @@ impl MastNodeEntry {
     }
 
     /// Constructs a new [`MastNodeEntry`] from a [`MastNode`], remapping child IDs when needed.
-    #[deprecated(note = "use MastNodeEntry::new(); remapped wire ordering has been removed")]
     pub fn new_with_id_remap(
         mast_node: &MastNode,
         ops_offset: NodeDataOffset,
