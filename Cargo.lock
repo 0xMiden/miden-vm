@@ -1768,8 +1768,8 @@ dependencies = [
 
 [[package]]
 name = "midenc-hir-type"
-version = "0.5.4"
-source = "git+https://github.com/reilabs/midenc-hir-type?branch=crypto-0.25#1a88c86921483231242b547e5926d283a6374b11"
+version = "0.6.0"
+source = "git+https://github.com/reilabs/midenc-hir-type?branch=crypto-0.25#55d9858be2d5ed9f5935fbc031a2f06784bd7d52"
 dependencies = [
  "miden-formatting",
  "miden-serde-utils",
