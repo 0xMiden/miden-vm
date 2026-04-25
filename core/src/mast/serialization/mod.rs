@@ -3,8 +3,9 @@
 //!
 //! The main goal is to keep random access cheap in stripped and hashless modes. Node structure
 //! stays in one fixed-width section. Variable-size data lives in separate sections. Internal node
-//! digests also live in a separate section so hashless payloads can omit them without changing the
-//! structural layout.
+//! digests live in the internal suffix of the node-digest section so hashless payloads can omit
+//! them without changing the structural layout. External digests remain in the prefix because they
+//! cannot be rebuilt from local structure.
 //!
 //! Wire flags describe serializer intent, not reader trust policy. Trusted [`MastForest`] reads
 //! reject hashless payloads. [`crate::mast::UntrustedMastForest`] accepts them and rebuilds
@@ -48,17 +49,15 @@
 //! (Basic block data section)
 //! - basic block data (padded operations + batch metadata)
 //!
+//! (Node digest section)
+//! - sorted external-node digest prefix (`Vec<Word>`, sorted lexicographically by wire bytes)
+//! - internal-node digest suffix (`Vec<Word>`, ordered by node index; omitted if FLAGS bit 1 is
+//!   set)
+//!
 //! (Node entries section)
 //! - fixed-width structural node entries (`Vec<MastNodeEntry>`)
 //! - `Block` entries store offsets into the basic-block section above
-//!
-//! (External digest section)
-//! - digests for `External` nodes only (`Vec<Word>`, ordered by node index)
-//! - lookup is dense-by-kind: the Nth external node uses slot N in this section
-//!
-//! (Node hash section - omitted if FLAGS bit 1 is set)
-//! - digests for all non-external nodes (`Vec<Word>`, ordered by node index)
-//! - lookup is also dense-by-kind: the Nth non-external node uses slot N in this section
+//! - serialized `External` entries store a digest slot into the sorted external prefix above
 //!
 //! (Advice map section)
 //! - Advice map (`AdviceMap`)
@@ -83,8 +82,8 @@
 //! without changing the validation semantics.
 //!
 //! Readers recover per-node digest lookup by scanning node entries once and building a compact
-//! "slot by node index" table. This preserves random access without forcing all digests into the
-//! same contiguous array on the wire.
+//! "slot by node index" table. This preserves random access while keeping external digest lookup
+//! explicit and independent from in-memory node order.
 //!
 //! Public entry points adopt these policies:
 //! - [`MastForest::read_from_bytes`]: trusted full payload, no hashless support.
@@ -113,6 +112,7 @@ pub(crate) mod asm_op;
 pub(crate) mod decorator;
 
 mod info;
+use info::MastNodeWireEntry;
 pub use info::{MastNodeEntry, MastNodeInfo};
 
 mod view;
@@ -123,7 +123,10 @@ pub(super) use layout::ForestLayout;
 use layout::{OffsetTrackingReader, TrackingReader, WireFlags, read_header_and_scan_layout};
 
 mod resolved;
-use resolved::{ResolvedSerializedForest, basic_block_offset_for_node_index};
+pub(super) use resolved::external_digest_order_violation;
+use resolved::{
+    ResolvedSerializedForest, basic_block_offset_for_node_index, compare_words_by_wire,
+};
 
 mod basic_blocks;
 use basic_blocks::{BasicBlockDataBuilder, basic_block_data_len};
@@ -190,11 +193,11 @@ const FLAG_STRIPPED: u8 = 0x01;
 
 /// Flag indicating that the internal node-hash section is omitted from the wire payload.
 ///
-/// External digests still remain serialized in their own section because they cannot be rebuilt
-/// from local structure. This flag implies [`FLAG_STRIPPED`] because no supported consumer treats
-/// wire `DebugInfo` as trusted in hashless mode: [`crate::mast::MastForest`] rejects `HASHLESS`,
-/// [`SerializedMastForest::new`] accepts it only for structural inspection, and the untrusted path
-/// rebuilds the data it actually trusts before use.
+/// External digests still remain serialized in the node-digest prefix because they cannot be
+/// rebuilt from local structure. This flag implies [`FLAG_STRIPPED`] because no supported consumer
+/// treats wire `DebugInfo` as trusted in hashless mode: [`crate::mast::MastForest`] rejects
+/// `HASHLESS`, [`SerializedMastForest::new`] accepts it only for structural inspection, and the
+/// untrusted path rebuilds the data it actually trusts before use.
 pub(super) const FLAG_HASHLESS: u8 = 0x02;
 
 /// Mask for reserved flag bits that must be zero.
@@ -219,10 +222,11 @@ const FLAGS_RESERVED_MASK: u8 = 0xfc;
 ///   Removed `breakpoint` instruction (#2655).
 /// - [0, 0, 3]: Added HASHLESS flag (bit 1). HASHLESS implies STRIPPED. Trusted deserialization
 ///   rejects HASHLESS. Split fixed-width node entries from digest storage. External digests moved
-///   to a dedicated section. Hashless serialization omits the general node-hash section entirely.
-///   Dropped the serialized decorator-count field because it was not used by the wire layout or
-///   deserializers. Before any public release on this branch, the same unreleased wire version also
-///   grew explicit internal/external node counts in the header.
+///   to a sorted node-digest prefix and serialized `External` entries now carry a digest slot.
+///   Hashless serialization omits the internal node-digest suffix entirely. Dropped the serialized
+///   decorator-count field because it was not used by the wire layout or deserializers. Before any
+///   public release on this branch, the same unreleased wire version also grew explicit
+///   internal/external node counts in the header.
 const VERSION: [u8; 3] = [0, 0, 3];
 
 // MAST FOREST SERIALIZATION/DESERIALIZATION
@@ -268,33 +272,55 @@ impl MastForest {
         let roots: Vec<u32> = self.roots.iter().copied().map(u32::from).collect();
         roots.write_into(target);
 
+        let mut sorted_external_digests = Vec::with_capacity(external_node_count);
+        for (node_index, mast_node) in self.nodes.iter().enumerate() {
+            if mast_node.is_external() {
+                sorted_external_digests.push((mast_node.digest(), node_index));
+            }
+        }
+        sorted_external_digests.sort_unstable_by(
+            |(left_digest, left_index), (right_digest, right_index)| {
+                compare_words_by_wire(left_digest, right_digest)
+                    .then_with(|| left_index.cmp(right_index))
+            },
+        );
+
+        let mut external_digest_slot_by_node = Vec::new();
+        external_digest_slot_by_node.resize(node_count, None);
+        for (slot, (_, node_index)) in sorted_external_digests.iter().enumerate() {
+            let slot = u32::try_from(slot)
+                .expect("external digest slot should fit in u32 because MastForest node ids do");
+            external_digest_slot_by_node[*node_index] = Some(slot);
+        }
+
         let mut mast_node_entries = Vec::with_capacity(self.nodes.len());
-        let mut external_digests = Vec::new();
         let mut node_hashes = Vec::new();
 
-        for mast_node in self.nodes.iter() {
+        for (node_index, mast_node) in self.nodes.iter().enumerate() {
             let ops_offset = if let MastNode::Block(basic_block) = mast_node {
                 basic_block_data_builder.encode_basic_block(basic_block)
             } else {
                 0
             };
 
-            mast_node_entries.push(MastNodeEntry::new(mast_node, ops_offset));
-            if mast_node.is_external() {
-                external_digests.push(mast_node.digest());
+            let mast_node_entry = MastNodeEntry::new(mast_node, ops_offset);
+            let external_digest_slot = if mast_node.is_external() {
+                let digest_slot = external_digest_slot_by_node[node_index]
+                    .expect("external node should have a digest slot");
+                Some(digest_slot)
             } else if !hashless {
                 node_hashes.push(mast_node.digest());
-            }
+                None
+            } else {
+                None
+            };
+            mast_node_entries.push(MastNodeWireEntry::new(mast_node_entry, external_digest_slot));
         }
 
         let basic_block_data = basic_block_data_builder.finalize();
         basic_block_data.write_into(target);
 
-        for mast_node_entry in mast_node_entries {
-            mast_node_entry.write_into(target);
-        }
-
-        for digest in external_digests {
+        for (digest, _) in sorted_external_digests {
             digest.write_into(target);
         }
 
@@ -302,6 +328,10 @@ impl MastForest {
             for digest in node_hashes {
                 digest.write_into(target);
             }
+        }
+
+        for mast_node_entry in mast_node_entries {
+            mast_node_entry.write_into(target);
         }
 
         self.advice_map.write_into(target);
@@ -433,7 +463,7 @@ impl<'a> SerializedMastForest<'a> {
     /// - If the internal-hash section is present, non-external node digests are read from it.
     /// - If the internal-hash section is absent, the first digest-backed access rebuilds all
     ///   non-external node digests from structure and caches them.
-    /// - External node digests are always read from the external-digest section.
+    /// - External node digests are always read from the sorted external prefix.
     ///
     /// # Examples
     ///
@@ -632,6 +662,10 @@ impl SerializedMastForest<'_> {
 
     fn node_entry_offset(&self) -> usize {
         self.layout.node_entry_offset
+    }
+
+    fn node_digest_offset(&self) -> usize {
+        self.layout.node_digest_offset
     }
 
     fn node_hash_offset(&self) -> Option<usize> {

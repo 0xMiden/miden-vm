@@ -1295,6 +1295,15 @@ pub enum MastForestError {
         expected: Word,
         computed: Word,
     },
+    #[error(
+        "external digests are not sorted: slot {previous_slot} ({previous:?}) is greater than slot {slot} ({current:?})"
+    )]
+    ExternalDigestsNotSorted {
+        previous_slot: usize,
+        slot: usize,
+        previous: Word,
+        current: Word,
+    },
     #[error("deserialization failed: {0}")]
     Deserialization(DeserializationError),
 }
