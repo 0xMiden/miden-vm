@@ -470,6 +470,17 @@ fn test_operation_encoded_size_push_varint_boundaries() {
     }
 }
 
+#[test]
+fn mast_node_entry_external_rejects_oversized_payload() {
+    let oversized_payload = u32::MAX as u64 + 1;
+    let raw_external_entry = (8u64 << 60) | oversized_payload;
+    let mut bytes = Vec::new();
+    raw_external_entry.write_into(&mut bytes);
+
+    let result = MastNodeEntry::read_from(&mut SliceReader::new(&bytes));
+    assert_matches!(result, Err(DeserializationError::InvalidValue(_)));
+}
+
 fn assert_serialized_view_matches_forest(forest: &MastForest) {
     let mut bytes = Vec::new();
     forest.write_stripped(&mut bytes);
@@ -607,6 +618,16 @@ fn node_hash_digest_offset(view: &SerializedMastForest<'_>, node_index: usize) -
     view.node_hash_offset().unwrap() + digest_slot * Word::min_serialized_size()
 }
 
+fn external_digest_offset(view: &SerializedMastForest<'_>, node_index: usize) -> usize {
+    let digest_slot = view.digest_slot_at(node_index);
+    view.node_digest_offset() + digest_slot * Word::min_serialized_size()
+}
+
+fn read_word_at(bytes: &[u8], offset: usize) -> Word {
+    let mut reader = SliceReader::new(&bytes[offset..offset + Word::min_serialized_size()]);
+    Word::read_from(&mut reader).unwrap()
+}
+
 fn rewrite_debug_info_procedure_name_digest(
     bytes: &[u8],
     from_digest: Word,
@@ -671,6 +692,146 @@ fn test_serialized_mast_forest_hashless_accepts_external_nodes_parse_only() {
     assert_eq!(view.node_count(), 1);
     assert!(view.node_info_at(0).is_ok());
     assert_eq!(view.node_digest_at(0).unwrap(), external_digest);
+}
+
+#[test]
+fn test_serialized_mast_forest_external_digests_are_sorted_on_wire() {
+    let mut forest = MastForest::new();
+    let largest = Word::new([
+        Felt::new_unchecked(30),
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(0),
+    ]);
+    let smallest = Word::new([
+        Felt::new_unchecked(10),
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(0),
+    ]);
+    let middle = Word::new([
+        Felt::new_unchecked(20),
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(0),
+    ]);
+
+    let largest_id = ExternalNodeBuilder::new(largest).add_to_forest(&mut forest).unwrap();
+    let smallest_id = ExternalNodeBuilder::new(smallest).add_to_forest(&mut forest).unwrap();
+    let middle_id = ExternalNodeBuilder::new(middle).add_to_forest(&mut forest).unwrap();
+    forest.make_root(largest_id);
+    forest.make_root(smallest_id);
+    forest.make_root(middle_id);
+
+    let bytes = forest.to_bytes();
+    let view = SerializedMastForest::new(&bytes).unwrap();
+
+    assert_eq!(read_word_at(&bytes, view.node_digest_offset()), smallest);
+    assert_eq!(
+        read_word_at(&bytes, view.node_digest_offset() + Word::min_serialized_size()),
+        middle
+    );
+    assert_eq!(
+        read_word_at(&bytes, view.node_digest_offset() + 2 * Word::min_serialized_size()),
+        largest
+    );
+    assert_eq!(view.node_digest_at(largest_id.to_usize()).unwrap(), largest);
+    assert_eq!(view.node_digest_at(smallest_id.to_usize()).unwrap(), smallest);
+    assert_eq!(view.node_digest_at(middle_id.to_usize()).unwrap(), middle);
+    assert_eq!(
+        read_word_at(&bytes, external_digest_offset(&view, largest_id.to_usize())),
+        largest
+    );
+    assert_eq!(
+        read_word_at(&bytes, external_digest_offset(&view, smallest_id.to_usize())),
+        smallest
+    );
+    assert_eq!(
+        read_word_at(&bytes, external_digest_offset(&view, middle_id.to_usize())),
+        middle
+    );
+}
+
+#[test]
+fn test_serialized_mast_forest_hashless_keeps_sorted_external_prefix() {
+    let mut forest = MastForest::new();
+    let external_high = Word::new([
+        Felt::new_unchecked(9),
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(0),
+    ]);
+    let external_low = Word::new([
+        Felt::new_unchecked(3),
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(0),
+    ]);
+
+    let _block = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let high_id = ExternalNodeBuilder::new(external_high).add_to_forest(&mut forest).unwrap();
+    let low_id = ExternalNodeBuilder::new(external_low).add_to_forest(&mut forest).unwrap();
+    forest.make_root(high_id);
+    forest.make_root(low_id);
+
+    let mut bytes = Vec::new();
+    forest.write_hashless(&mut bytes);
+    let view = SerializedMastForest::new(&bytes).unwrap();
+
+    assert!(view.node_hash_offset().is_none());
+    assert_eq!(read_word_at(&bytes, view.node_digest_offset()), external_low);
+    assert_eq!(
+        read_word_at(&bytes, view.node_digest_offset() + Word::min_serialized_size()),
+        external_high
+    );
+    assert_eq!(view.node_digest_at(high_id.to_usize()).unwrap(), external_high);
+    assert_eq!(view.node_digest_at(low_id.to_usize()).unwrap(), external_low);
+}
+
+#[test]
+fn test_untrusted_forest_rejects_unsorted_external_digest_prefix() {
+    let mut forest = MastForest::new();
+    let external_high = Word::new([
+        Felt::new_unchecked(9),
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(0),
+    ]);
+    let external_low = Word::new([
+        Felt::new_unchecked(3),
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(0),
+    ]);
+
+    let high_id = ExternalNodeBuilder::new(external_high).add_to_forest(&mut forest).unwrap();
+    let low_id = ExternalNodeBuilder::new(external_low).add_to_forest(&mut forest).unwrap();
+    forest.make_root(high_id);
+    forest.make_root(low_id);
+
+    let mut corrupted = forest.to_bytes();
+    let view = SerializedMastForest::new(&corrupted).unwrap();
+    let first_digest = view.node_digest_offset();
+    let second_digest = first_digest + Word::min_serialized_size();
+    for index in 0..Word::min_serialized_size() {
+        corrupted.swap(first_digest + index, second_digest + index);
+    }
+
+    assert!(MastForest::read_from_bytes(&corrupted).is_ok());
+
+    let untrusted = UntrustedMastForest::read_from_bytes(&corrupted).unwrap();
+    let result = untrusted.validate();
+    assert_matches!(
+        result,
+        Err(MastForestError::ExternalDigestsNotSorted {
+            previous_slot: 0,
+            slot: 1,
+            previous,
+            current,
+        }) if previous == external_high && current == external_low
+    );
 }
 
 /// Test that a forest with a node whose child ids are larger than its own id serializes and

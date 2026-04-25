@@ -68,6 +68,8 @@ impl UntrustedMastForest {
     ///   ([`MastForestError::ForwardReference`])
     /// - Any non-external wire digest does not match the recomputed digest
     ///   ([`MastForestError::HashMismatch`])
+    /// - External digest slots are not sorted lexicographically on the wire
+    ///   ([`MastForestError::ExternalDigestsNotSorted`])
     /// - Any node's digest cannot be recomputed because structural validation fails first
     ///
     /// Security convention:
@@ -77,6 +79,18 @@ impl UntrustedMastForest {
     ///   here.
     pub fn validate(self) -> Result<MastForest, MastForestError> {
         let is_hashless = self.layout.is_hashless();
+        if let Some(violation) =
+            serialization::external_digest_order_violation(&self.bytes, &self.layout)
+                .map_err(MastForestError::Deserialization)?
+        {
+            return Err(MastForestError::ExternalDigestsNotSorted {
+                previous_slot: violation.previous_slot,
+                slot: violation.slot,
+                previous: violation.previous,
+                current: violation.current,
+            });
+        }
+
         let forest = self.into_materialized().map_err(MastForestError::Deserialization)?;
 
         // Step 1: Validate over-specified wire hashes instead of silently rewriting them.

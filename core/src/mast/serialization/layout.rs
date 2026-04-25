@@ -1,7 +1,8 @@
 use alloc::{format, string::ToString, vec::Vec};
 
 use super::{
-    FLAG_HASHLESS, FLAG_STRIPPED, FLAGS_RESERVED_MASK, MAGIC, MastForest, MastNodeEntry, VERSION,
+    FLAG_HASHLESS, FLAG_STRIPPED, FLAGS_RESERVED_MASK, MAGIC, MastForest, MastNodeEntry,
+    MastNodeWireEntry, VERSION,
 };
 use crate::{
     mast::MastNodeId,
@@ -33,7 +34,7 @@ pub(crate) struct ForestLayout {
     pub(super) basic_block_offset: usize,
     pub(super) basic_block_len: usize,
     pub(super) node_entry_offset: usize,
-    pub(super) external_digest_offset: usize,
+    pub(super) node_digest_offset: usize,
     pub(super) node_hash_offset: Option<usize>,
     pub(super) advice_map_offset: usize,
 }
@@ -78,6 +79,14 @@ impl ForestLayout {
         bytes: &[u8],
         index: usize,
     ) -> Result<MastNodeEntry, DeserializationError> {
+        self.read_node_wire_entry_at(bytes, index).map(MastNodeWireEntry::entry)
+    }
+
+    pub(super) fn read_node_wire_entry_at(
+        &self,
+        bytes: &[u8],
+        index: usize,
+    ) -> Result<MastNodeWireEntry, DeserializationError> {
         if index >= self.node_count {
             return Err(DeserializationError::InvalidValue(format!(
                 "node index {} out of bounds for {} nodes",
@@ -92,7 +101,7 @@ impl ForestLayout {
             index,
             "node entry",
         )?);
-        MastNodeEntry::read_from(&mut reader)
+        MastNodeWireEntry::read_from(&mut reader)
     }
 
     #[cfg(test)]
@@ -309,34 +318,38 @@ fn scan_layout_sections<R: OffsetTrackingReader>(
                 || DeserializationError::InvalidValue("node hash length overflow".to_string()),
             )?
         };
+    let node_digest_len = external_digests_len.checked_add(node_hash_len).ok_or_else(|| {
+        DeserializationError::InvalidValue("node digest length overflow".to_string())
+    })?;
     let core_tail_len = basic_block_len
-        .checked_add(node_entries_len)
-        .and_then(|len| len.checked_add(external_digests_len))
-        .and_then(|len| len.checked_add(node_hash_len))
+        .checked_add(node_digest_len)
+        .and_then(|len| len.checked_add(node_entries_len))
         .ok_or_else(|| {
             DeserializationError::InvalidValue("core payload length overflow".to_string())
         })?;
     let core_tail = source.read_slice(core_tail_len)?;
 
-    let node_entry_offset = basic_block_offset.checked_add(basic_block_len).ok_or_else(|| {
-        DeserializationError::InvalidValue("node entry offset overflow".to_string())
+    let node_digest_offset = basic_block_offset.checked_add(basic_block_len).ok_or_else(|| {
+        DeserializationError::InvalidValue("node digest offset overflow".to_string())
     })?;
-    let external_digest_offset =
-        node_entry_offset.checked_add(node_entries_len).ok_or_else(|| {
-            DeserializationError::InvalidValue("external digest offset overflow".to_string())
-        })?;
     let node_hash_offset = if is_hashless {
         None
     } else {
-        Some(external_digest_offset.checked_add(external_digests_len).ok_or_else(|| {
+        Some(node_digest_offset.checked_add(external_digests_len).ok_or_else(|| {
             DeserializationError::InvalidValue("node hash offset overflow".to_string())
         })?)
     };
+    let node_entry_offset = node_digest_offset.checked_add(node_digest_len).ok_or_else(|| {
+        DeserializationError::InvalidValue("node entry offset overflow".to_string())
+    })?;
     let advice_map_offset = basic_block_offset.checked_add(core_tail_len).ok_or_else(|| {
         DeserializationError::InvalidValue("advice map offset overflow".to_string())
     })?;
 
-    let node_entries_slice = &core_tail[basic_block_len..basic_block_len + node_entries_len];
+    let node_entries_start = basic_block_len.checked_add(node_digest_len).ok_or_else(|| {
+        DeserializationError::InvalidValue("node entries slice offset overflow".to_string())
+    })?;
+    let node_entries_slice = &core_tail[node_entries_start..node_entries_start + node_entries_len];
     validate_node_entries(node_entries_slice, node_count, external_node_count)?;
 
     Ok(ForestLayout {
@@ -348,7 +361,7 @@ fn scan_layout_sections<R: OffsetTrackingReader>(
         basic_block_offset,
         basic_block_len,
         node_entry_offset,
-        external_digest_offset,
+        node_digest_offset,
         node_hash_offset,
         advice_map_offset,
     })
@@ -361,10 +374,29 @@ fn validate_node_entries(
 ) -> Result<(), DeserializationError> {
     let mut reader = SliceReader::new(node_entries);
     let mut counted_externals = 0usize;
+    let mut seen_external_slots = Vec::new();
+    seen_external_slots.try_reserve_exact(external_node_count).map_err(|err| {
+        DeserializationError::InvalidValue(format!(
+            "failed to reserve external digest slot tracking for {external_node_count} nodes: {err}",
+        ))
+    })?;
+    seen_external_slots.resize(external_node_count, false);
 
     for _ in 0..node_count {
-        let node_entry = MastNodeEntry::read_from(&mut reader)?;
-        if matches!(node_entry, MastNodeEntry::External) {
+        let wire_entry = MastNodeWireEntry::read_from(&mut reader)?;
+        if let Some(digest_slot) = wire_entry.external_digest_slot() {
+            let digest_slot = digest_slot as usize;
+            if digest_slot >= external_node_count {
+                return Err(DeserializationError::InvalidValue(format!(
+                    "external digest slot {digest_slot} out of bounds for {external_node_count} external digests"
+                )));
+            }
+            if seen_external_slots[digest_slot] {
+                return Err(DeserializationError::InvalidValue(format!(
+                    "external digest slot {digest_slot} is referenced by more than one node entry"
+                )));
+            }
+            seen_external_slots[digest_slot] = true;
             counted_externals = counted_externals.checked_add(1).ok_or_else(|| {
                 DeserializationError::InvalidValue("external node count overflow".to_string())
             })?;
@@ -374,6 +406,11 @@ fn validate_node_entries(
     if counted_externals != external_node_count {
         return Err(DeserializationError::InvalidValue(format!(
             "header external node count {external_node_count} does not match {counted_externals} external node entries"
+        )));
+    }
+    if let Some(missing_slot) = seen_external_slots.iter().position(|seen| !seen) {
+        return Err(DeserializationError::InvalidValue(format!(
+            "external digest slot {missing_slot} is not referenced by any node entry"
         )));
     }
 
