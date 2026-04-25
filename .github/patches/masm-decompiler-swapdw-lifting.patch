@@ -1,0 +1,59 @@
+From 7737e6745219ba541f1e98ae2917838e71ec2401 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Fran=C3=A7ois=20Garillot?= <francois@garillot.net>
+Date: Sat, 25 Apr 2026 03:42:15 -0400
+Subject: [PATCH] Fix swapdw lifting depth
+
+---
+ src/lift/stack.rs | 18 +++++++++---------
+ 1 file changed, 9 insertions(+), 9 deletions(-)
+
+diff --git a/src/lift/stack.rs b/src/lift/stack.rs
+index eaf0b80..b0b21c4 100644
+--- a/src/lift/stack.rs
++++ b/src/lift/stack.rs
+@@ -526,13 +526,13 @@ impl SymbolicStack {
+     /// This models `swapdw`, which transforms `[D, C, B, A, ...]` into
+     /// `[B, A, D, C, ...]`.
+     pub fn swapdw(&mut self, span: SourceSpan, operation: impl Into<String>) -> LiftingResult<()> {
+-        self.require_depth(16, span, operation)?;
++        self.require_depth(8, span, operation)?;
+         let len = self.stack.len();
+-        if len < 16 {
++        if len < 8 {
+             return Ok(());
+         }
+-        for i in 0..8 {
+-            self.stack.swap(len - 16 + i, len - 8 + i);
++        for i in 0..4 {
++            self.stack.swap(len - 8 + i, len - 4 + i);
+         }
+         Ok(())
+     }
+@@ -729,19 +729,19 @@ mod tests {
+     #[test]
+     fn test_swapdw() {
+         let mut stack = SymbolicStack::new();
+-        stack.ensure_depth(16);
++        stack.ensure_depth(8);
+ 
+-        let before_top = stack.top_n(16);
++        let before_top = stack.top_n(8);
+         stack
+             .swapdw(SourceSpan::UNKNOWN, "swapdw")
+             .expect("swapdw should succeed");
+-        let after_top = stack.top_n(16);
++        let after_top = stack.top_n(8);
+ 
+         let expected = before_top
+             .iter()
+-            .skip(8)
++            .skip(4)
+             .cloned()
+-            .chain(before_top.iter().take(8).cloned())
++            .chain(before_top.iter().take(4).cloned())
+             .collect::<Vec<_>>();
+         assert_eq!(after_top, expected);
+     }
+-- 
+2.50.1 (Apple Git-155)
+

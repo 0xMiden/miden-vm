@@ -81,6 +81,10 @@ jobs:
           git -C .tmp/masm-decompiler remote add origin https://github.com/trailofbits/masm-decompiler
           git -C .tmp/masm-decompiler fetch --depth=1 origin "$MASM_DECOMPILER_REF"
           git -C .tmp/masm-decompiler checkout --detach FETCH_HEAD
+      - name: Patch masm-decompiler lifting
+        run: >
+          git -C .tmp/masm-decompiler apply
+          "$GITHUB_WORKSPACE/.github/patches/masm-decompiler-swapdw-lifting.patch"
       - name: Patch masm-lsp analysis
         run: >
           git -C .tmp/masm-lsp apply
