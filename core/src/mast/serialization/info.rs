@@ -255,7 +255,10 @@ impl Deserializable for MastNodeEntry {
             },
             DYN => Ok(Self::Dyn),
             DYNCALL => Ok(Self::Dyncall),
-            EXTERNAL => Ok(Self::External),
+            EXTERNAL => {
+                let _digest_slot = Self::decode_u32_payload(payload)?;
+                Ok(Self::External)
+            },
             _ => Err(DeserializationError::InvalidValue(format!(
                 "Invalid tag for MAST node: {discriminant}"
             ))),
@@ -265,6 +268,114 @@ impl Deserializable for MastNodeEntry {
     /// Returns the fixed serialized size: always 8 bytes (u64).
     fn min_serialized_size() -> usize {
         Self::SERIALIZED_SIZE
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct MastNodeWireEntry {
+    entry: MastNodeEntry,
+    external_digest_slot: Option<u32>,
+}
+
+impl MastNodeWireEntry {
+    pub(super) fn new(entry: MastNodeEntry, external_digest_slot: Option<u32>) -> Self {
+        debug_assert_eq!(matches!(entry, MastNodeEntry::External), external_digest_slot.is_some());
+        Self { entry, external_digest_slot }
+    }
+
+    pub(super) fn entry(self) -> MastNodeEntry {
+        self.entry
+    }
+
+    pub(super) fn external_digest_slot(self) -> Option<u32> {
+        self.external_digest_slot
+    }
+}
+
+impl Serializable for MastNodeWireEntry {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        let discriminant = self.entry.discriminant() as u64;
+        assert!(discriminant <= 0b1111);
+
+        let payload = match self.entry {
+            MastNodeEntry::Join {
+                left_child_id: left,
+                right_child_id: right,
+            } => MastNodeEntry::encode_u32_pair(left, right),
+            MastNodeEntry::Split {
+                if_branch_id: if_branch,
+                else_branch_id: else_branch,
+            } => MastNodeEntry::encode_u32_pair(if_branch, else_branch),
+            MastNodeEntry::Loop { body_id: body } => MastNodeEntry::encode_u32_payload(body),
+            MastNodeEntry::Block { ops_offset } => MastNodeEntry::encode_u32_payload(ops_offset),
+            MastNodeEntry::Call { callee_id } => MastNodeEntry::encode_u32_payload(callee_id),
+            MastNodeEntry::SysCall { callee_id } => MastNodeEntry::encode_u32_payload(callee_id),
+            MastNodeEntry::Dyn | MastNodeEntry::Dyncall => 0,
+            MastNodeEntry::External => MastNodeEntry::encode_u32_payload(
+                self.external_digest_slot
+                    .expect("external wire entries must carry a digest slot"),
+            ),
+        };
+
+        let value = (discriminant << 60) | payload;
+        target.write_u64(value);
+    }
+}
+
+impl Deserializable for MastNodeWireEntry {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let (discriminant, payload) = {
+            let value = source.read_u64()?;
+
+            let discriminant = (value >> 60) as u8;
+            let payload = value & 0x0f_ff_ff_ff_ff_ff_ff_ff;
+
+            (discriminant, payload)
+        };
+
+        let (entry, external_digest_slot) = match discriminant {
+            JOIN => {
+                let (left_child_id, right_child_id) = MastNodeEntry::decode_u32_pair(payload);
+                (MastNodeEntry::Join { left_child_id, right_child_id }, None)
+            },
+            SPLIT => {
+                let (if_branch_id, else_branch_id) = MastNodeEntry::decode_u32_pair(payload);
+                (MastNodeEntry::Split { if_branch_id, else_branch_id }, None)
+            },
+            LOOP => {
+                let body_id = MastNodeEntry::decode_u32_payload(payload)?;
+                (MastNodeEntry::Loop { body_id }, None)
+            },
+            BLOCK => {
+                let ops_offset = MastNodeEntry::decode_u32_payload(payload)?;
+                (MastNodeEntry::Block { ops_offset }, None)
+            },
+            CALL => {
+                let callee_id = MastNodeEntry::decode_u32_payload(payload)?;
+                (MastNodeEntry::Call { callee_id }, None)
+            },
+            SYSCALL => {
+                let callee_id = MastNodeEntry::decode_u32_payload(payload)?;
+                (MastNodeEntry::SysCall { callee_id }, None)
+            },
+            DYN => (MastNodeEntry::Dyn, None),
+            DYNCALL => (MastNodeEntry::Dyncall, None),
+            EXTERNAL => {
+                let digest_slot = MastNodeEntry::decode_u32_payload(payload)?;
+                (MastNodeEntry::External, Some(digest_slot))
+            },
+            _ => {
+                return Err(DeserializationError::InvalidValue(format!(
+                    "Invalid tag for MAST node: {discriminant}"
+                )));
+            },
+        };
+
+        Ok(Self { entry, external_digest_slot })
+    }
+
+    fn min_serialized_size() -> usize {
+        MastNodeEntry::SERIALIZED_SIZE
     }
 }
 
