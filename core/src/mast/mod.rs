@@ -259,12 +259,28 @@ impl MastForest {
     /// // compacted_forest is now compacted with duplicate nodes merged
     /// ```
     pub fn compact(self) -> (MastForest, MastForestRootMap) {
-        // Merge with itself to deduplicate nodes
+        // Track whether debug info was stripped before compaction. The merge process rebuilds
+        // internal CSR (Compressed Sparse Row) indptr structures for each added node, which
+        // introduces per-node overhead in the DebugInfo even when all debug data is empty.
+        // By re-clearing after merge, we ensure the compacted output is never larger (in
+        // serialized form) than the already-stripped input.
+        let debug_info_was_empty = self.debug_info.is_empty();
+
+        // Merge with itself to deduplicate nodes.
         // Note: This cannot fail for a self-merge under normal conditions.
         // The only possible failures (TooManyNodes, TooManyDecorators) would require the
         // original forest to be at capacity limits, at which point compaction wouldn't help.
-        MastForest::merge([&self])
-            .expect("Failed to compact MastForest: this should never happen during self-merge")
+        let (mut forest, root_map) = MastForest::merge([&self])
+            .expect("Failed to compact MastForest: this should never happen during self-merge");
+
+        // If the source had no debug info, propagate that property to the compacted result.
+        // This prevents the merge from silently inflating the DebugInfo section of an already-
+        // stripped forest due to CSR indptr overhead introduced during node processing.
+        if debug_info_was_empty {
+            forest.clear_debug_info();
+        }
+
+        (forest, root_map)
     }
 
     /// Merges all `forests` into a new [`MastForest`].
