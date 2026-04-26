@@ -88,3 +88,15 @@ fn test_core_lib_serialization_roundtrip() {
         }
     }
 }
+
+/// Tests that stripped size hint matches the serialized length for the core library.
+#[test]
+fn test_core_lib_stripped_size_hint() {
+    let std_lib = miden_core_lib::CoreLibrary::default();
+    let forest = std_lib.mast_forest().as_ref();
+
+    let mut stripped_bytes = Vec::new();
+    forest.write_stripped(&mut stripped_bytes);
+
+    assert_eq!(forest.stripped_size_hint(), stripped_bytes.len());
+}
