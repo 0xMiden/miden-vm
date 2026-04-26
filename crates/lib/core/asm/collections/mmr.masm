@@ -6,6 +6,10 @@ use miden::core::math::u64
 #!
 #! This MMR implementation supports only u32 positions.
 #!
+#! The position must refer to an existing leaf: `pos < num_leaves`, where `num_leaves` is stored
+#! at `mmr_ptr[0]`. The procedure fails instead of returning an empty or sentinel word when `pos`
+#! is outside the current MMR.
+#!
 #! Stack transition:
 #! Input: [pos, mmr_ptr, ...]
 #! Output: [N, ...] where `N` is the leaf and `R` is the MMR peak that owns the leaf.
