@@ -59,7 +59,7 @@ jobs:
     name: masm-lint on ubuntu-latest
     runs-on: ubuntu-latest
     env:
-      MASM_LSP_REF: f14529ff6c32fa34ab296c8cb03fb1b229c2c767
+      MASM_LSP_REF: 0f7f54fed90aae59aaef241325e8f0d108b2d971
       MASM_DECOMPILER_REF: a3d7aff5426e5e11556c73504782004de9edce07
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
@@ -85,10 +85,6 @@ jobs:
         run: >
           git -C .tmp/masm-decompiler apply
           "$GITHUB_WORKSPACE/.github/patches/masm-decompiler-swapdw-stack-effect.patch"
-      - name: Patch masm-lsp analysis
-        run: >
-          git -C .tmp/masm-lsp apply
-          "$GITHUB_WORKSPACE/.github/patches/masm-lsp-public-inputs.patch"
       - name: Use checked out masm-decompiler
         run: |
           python - <<'PY'
