@@ -1276,6 +1276,7 @@ dependencies = [
  "miden-core",
  "miden-crypto",
  "miden-lifted-stark",
+ "miden-test-serde-macros",
  "miden-utils-indexing",
  "proptest",
  "thiserror",
@@ -1727,8 +1728,10 @@ name = "miden-utils-indexing"
 version = "0.23.0"
 dependencies = [
  "miden-crypto",
+ "miden-test-serde-macros",
  "proptest",
  "serde",
+ "serde_json",
  "thiserror",
 ]
 
