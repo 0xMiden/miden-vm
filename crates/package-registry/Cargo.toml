@@ -13,6 +13,9 @@ repository.workspace = true
 rust-version.workspace = true
 edition.workspace = true
 
+[package.metadata.cargo-shear]
+ignored = ["serde_json"]
+
 [features]
 default = ["std"]
 arbitrary = ["std", "dep:proptest", "miden-mast-package/arbitrary"]
