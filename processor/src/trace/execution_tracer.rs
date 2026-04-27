@@ -319,15 +319,11 @@ impl ExecutionTracer {
 
                 if dyn_node.is_dyncall() {
                     let overflow_addr = self.overflow_table.last_update_clk_in_current_ctx();
-                    // Note: the stack depth to record is the `current_stack_depth - 1` due to
-                    // the semantics of DYNCALL. That is, the top of the
-                    // stack contains the memory address to where the
-                    // address to dynamically call is located. Then, the
-                    // DYNCALL operation performs a drop, and
-                    // records the stack depth after the drop as the beginning of
-                    // the new context. For more information, look at the docs for how the
-                    // constraints are designed; it's a bit tricky but it works.
-                    let stack_depth_after_drop = processor.stack().depth() - 1;
+                    // Note: the stack depth to record is after the DYNCALL drop. DYNCALL pops
+                    // the top element (the memory address of the callee hash) before entering
+                    // the new context. The depth cannot go below MIN_STACK_DEPTH.
+                    let stack_depth_after_drop =
+                        (processor.stack().depth() - 1).max(MIN_STACK_DEPTH as u32);
                     Some(ExecutionContextInfo::new(
                         processor.system().ctx(),
                         processor.system().caller_hash(),
