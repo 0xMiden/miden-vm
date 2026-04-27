@@ -82,7 +82,7 @@ const INIT_MEM_VALUE: Word = EMPTY_WORD;
 ///   - When the context remains the same but the word changes, these columns contain (`new_word`
 ///     - `old_word`).
 ///   - When both the context and the word remain the same, these columns contain (`new_clk` -
-///     `old_clk` - 1).
+///     `old_clk`).
 /// - `d_inv` contains the inverse of the delta between two consecutive context IDs, words, or clock
 ///   cycles computed as described above. It is the field inverse of `(d_1 * 2^16) + d_0`
 /// - `f_scw` is a flag indicating whether the context and the word of the current row are the same
@@ -92,7 +92,8 @@ const INIT_MEM_VALUE: Word = EMPTY_WORD;
 ///   checks on `w0`, `w1`, and `4 * w1`, these columns prove that memory addresses are valid 32-bit
 ///   values.
 ///
-/// For the first row of the trace, values in `d0`, `d1`, and `d_inv` are set to zeros.
+/// For the first row of the trace, `prev_clk` is initialized to `first_clk - 1`, so the delta is
+/// `1`. As a result, `d0` is set to `1`, `d1` to `0`, and `d_inv` to `1`.
 #[derive(Debug, Default)]
 pub struct Memory {
     /// Memory segment traces sorted by their execution context ID.
