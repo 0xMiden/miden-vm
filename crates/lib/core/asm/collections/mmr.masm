@@ -10,6 +10,9 @@ use miden::core::math::u64
 #! Input: [pos, mmr_ptr, ...]
 #! Output: [N, ...] where `N` is the leaf and `R` is the MMR peak that owns the leaf.
 #!
+#! Panics if `pos >= num_leaves`, i.e. the requested leaf is absent from the MMR.
+#! Callers must verify that `pos` is within bounds before invoking this procedure.
+#!
 #! Cycles: 118
 pub proc get
   # load the num_leaves of the MMR (2 cycles)
