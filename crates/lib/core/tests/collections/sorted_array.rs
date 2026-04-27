@@ -509,13 +509,49 @@ fn test_find_partial_key_value_rejects_oob_pointer_above_end() {
         end
     "
     );
-    // 204 > end_ptr = 124. The fix's `maybe_key_ptr < end_ptr` check must reject this.
+
     let test = build_lib_test(&source, &[])
         .with_event_handler(LOWERBOUND_KEY_VALUE_EVENT_NAME, malicious_lowerbound_oob_above);
 
     assert!(
         test.execute().is_err(),
         "find_partial_key_value must reject maybe_key_ptr above end_ptr in the not-found branch",
+    );
+}
+
+#[test]
+fn test_find_partial_key_value_rejects_oob_pointer_below_start() {
+    let source = format!(
+        "
+        use miden::core::collections::sorted_array
+        {TRUNCATE_STACK_PROC}
+        begin
+            push.[9000,9000,9000,9000] mem_storew_le.40 dropw
+            push.[9000,9000,9000,9000] mem_storew_le.44 dropw
+
+            push.[8456,415,4922,593] mem_storew_le.100 dropw
+            push.[8595,8794,8303,7256] mem_storew_le.104 dropw
+
+            push.[3348,6058,5470,2813] mem_storew_le.108 dropw
+            push.[3015,7211,2002,5143] mem_storew_le.112 dropw
+
+            push.[7513,7106,9944,7176] mem_storew_le.116 dropw
+            push.[4942,5573,1077,1968] mem_storew_le.120 dropw
+
+            push.124 push.100 push.[3348,6058,5470,2813]
+            exec.sorted_array::find_key_value
+
+            exec.truncate_stack
+        end
+    "
+    );
+
+    let test = build_lib_test(&source, &[])
+        .with_event_handler(LOWERBOUND_KEY_VALUE_EVENT_NAME, malicious_lowerbound_oob_below);
+
+    assert!(
+        test.execute().is_err(),
+        "find_partial_key_value must reject maybe_key_ptr below start_ptr in the not-found branch",
     );
 }
 
