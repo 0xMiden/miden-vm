@@ -1,4 +1,4 @@
-//! Synthetic transaction-kernel benchmark.
+//! Synthetic VM benchmark driven by row-count snapshots.
 //!
 //! Pipeline each bench run:
 //!   1. Calibrate each snippet's per-iteration cost against the current VM (shared across all
@@ -11,9 +11,11 @@
 //! Env vars:
 //! - `SYNTH_SNAPSHOT`: path to a single producer JSON; if set, only this file is benched. Otherwise
 //!   every `snapshots/*.json` in the manifest dir is used.
-//! - `SYNTH_SCENARIO`: if set, only scenarios whose key contains this substring are benched.
+//! - `SYNTH_SCENARIO`: if set, restrict to scenarios whose slugified key contains this slugified
+//!   substring (case- and separator-insensitive; `"P2ID"`, `"p2id"`, `"P2ID note"`, and
+//!   `"p2id-note"` all match `"consume single P2ID note"`).
 //! - `SYNTH_MASM_WRITE`: if set, write the emitted MASM to
-//!   `target/synthetic_kernel_<producer-stem>__<scenario-slug>.masm`.
+//!   `target/synthetic_bench_<producer-stem>__<scenario-slug>.masm`.
 
 use std::{hint::black_box, path::PathBuf, time::Duration};
 
@@ -21,7 +23,7 @@ use criterion::{BatchSize, Criterion, SamplingMode, criterion_group, criterion_m
 use miden_processor::{
     DefaultHost, ExecutionOptions, FastProcessor, StackInputs, advice::AdviceInputs,
 };
-use miden_synthetic_tx_kernel::{
+use miden_vm_synthetic_bench::{
     calibrator::{Calibration, calibrate, measure_program},
     snapshot::{TraceShape, TraceSnapshot},
     snippets::{SNIPPETS, memory_max_iters, u32arith_max_iters},
@@ -64,7 +66,7 @@ fn slugify(s: &str) -> String {
     out
 }
 
-fn synthetic_transaction_kernel(c: &mut Criterion) {
+fn synthetic_bench(c: &mut Criterion) {
     let calibration = calibrate().expect("failed to calibrate snippets");
     println!("\n=== calibration (rows/iter)");
     for snippet in SNIPPETS {
@@ -75,7 +77,9 @@ fn synthetic_transaction_kernel(c: &mut Criterion) {
         );
     }
 
-    let scenario_filter = std::env::var("SYNTH_SCENARIO").ok();
+    // Slugify the filter so substring-matching is case- and separator-insensitive
+    // (`SYNTH_SCENARIO=P2ID` matches `consume-single-p2id-note` etc.).
+    let scenario_filter = std::env::var("SYNTH_SCENARIO").ok().map(|s| slugify(&s));
     let mut benched_anything = false;
     for path in resolve_snapshot_paths() {
         let producer_stem =
@@ -83,16 +87,24 @@ fn synthetic_transaction_kernel(c: &mut Criterion) {
         let scenarios = TraceSnapshot::load_all(&path)
             .unwrap_or_else(|e| panic!("failed to load snapshot at {}: {e}", path.display()));
         for (scenario_key, snapshot) in scenarios {
+            let scenario_slug = slugify(&scenario_key);
             if let Some(filter) = &scenario_filter
-                && !scenario_key.contains(filter.as_str())
+                && !scenario_slug.contains(filter.as_str())
             {
                 continue;
             }
-            bench_one_scenario(c, &calibration, &producer_stem, &scenario_key, &snapshot);
+            bench_one_scenario(
+                c,
+                &calibration,
+                &producer_stem,
+                &scenario_key,
+                &scenario_slug,
+                &snapshot,
+            );
             benched_anything = true;
         }
     }
-    assert!(benched_anything, "no scenarios matched (filter: {scenario_filter:?})",);
+    assert!(benched_anything, "no scenarios matched (filter: {scenario_filter:?})");
 }
 
 fn bench_one_scenario(
@@ -100,6 +112,7 @@ fn bench_one_scenario(
     calibration: &Calibration,
     producer_stem: &str,
     scenario_key: &str,
+    scenario_slug: &str,
     snapshot: &TraceSnapshot,
 ) {
     println!("\n=== scenario: {producer_stem} / {scenario_key}");
@@ -137,13 +150,11 @@ fn bench_one_scenario(
         println!("    {:<14} iters={}", snippet.name, plan.iters(snippet.name),);
     }
 
-    let scenario_slug = slugify(scenario_key);
-
     let source = emit(&plan);
     if std::env::var("SYNTH_MASM_WRITE").is_ok() {
         let out = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("target")
-            .join(format!("synthetic_kernel_{producer_stem}__{scenario_slug}.masm"));
+            .join(format!("synthetic_bench_{producer_stem}__{scenario_slug}.masm"));
         std::fs::create_dir_all(out.parent().expect("parent"))
             .expect("create target dir for MASM dump");
         std::fs::write(&out, &source).expect("write MASM dump");
@@ -162,8 +173,7 @@ fn bench_one_scenario(
         .assemble_program(&source)
         .expect("assemble emitted program");
 
-    let mut group =
-        c.benchmark_group(format!("synthetic_transaction_kernel/{producer_stem}/{scenario_slug}"));
+    let mut group = c.benchmark_group(format!("{producer_stem}/{scenario_slug}"));
     group
         .sampling_mode(SamplingMode::Flat)
         .sample_size(10)
@@ -362,5 +372,5 @@ fn range_correction_pass(plan: &mut Plan, target: &TraceShape) {
     }
 }
 
-criterion_group!(benches, synthetic_transaction_kernel);
+criterion_group!(benches, synthetic_bench);
 criterion_main!(benches);

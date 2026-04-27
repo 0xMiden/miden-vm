@@ -1,7 +1,7 @@
 [workspace]
 members = [
     "air",
-    "benches/synthetic-tx-kernel",
+    "benches/synthetic-bench",
     "core",
     "crates/ace-codegen",
     "crates/assembly",

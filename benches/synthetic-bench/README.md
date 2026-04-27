@@ -1,8 +1,8 @@
-# miden-synthetic-tx-kernel
+# miden-vm-synthetic-bench
 
 Criterion benchmark that reproduces the **proving-cost brackets** of a real
-Miden transaction workload from a small JSON snapshot -- without pulling in
-any protocol-level code.
+workload from a small JSON snapshot, without depending on any
+producer-side runtime code.
 
 ## Approach
 
@@ -11,13 +11,13 @@ execution trace's segments. Everything else -- per-chiplet row counts,
 instruction mix, which procedures get called -- is second-order once the
 brackets are known.
 
-This crate takes a snapshot of per-segment trace-row counts captured from
-a real transaction in the `protocol` repo, generates a tiny MASM program
-whose execution reproduces those brackets, and runs `execute` +
-`execute_and_prove` Criterion groups against it. The result is a
-VM-level regression detector that isolates *prover* changes from
-*workload* changes without depending on protocol's transaction
-machinery.
+This crate takes a snapshot of per-segment trace-row counts captured by
+an external producer (e.g. `protocol/bin/bench-transaction/`'s
+`bench-tx.json`), generates a tiny MASM program whose execution
+reproduces those brackets, and runs `execute` + `execute_and_prove`
+Criterion groups against it. The result is a VM-level regression detector
+that isolates *prover* changes from *workload* changes without depending
+on the producer's machinery.
 
 ## Pipeline (per bench run)
 
@@ -33,14 +33,13 @@ stale calibration constants checked into the repo.
    tomorrow's iteration count grows to compensate, and the target
    bracket is still hit.
 
-For each snapshot under `snapshots/` (or the single path in
-`SYNTH_SNAPSHOT`):
+For each scenario in every producer file under `snapshots/` (or the
+single file in `SYNTH_SNAPSHOT`):
 
-2. **Load snapshot** -- read the target row counts; this is the shape
-   we want the emitted program to reproduce. See
-   [Snapshot format](#snapshot-format).
+2. **Load scenario** -- read the target row counts from the producer's
+   `trace` section. See [Snapshot format](#snapshot-format).
 3. **Solve** -- pick an iteration count for each snippet so that their
-   combined row contributions add up to the snapshot's target. We do
+   combined row contributions add up to the scenario's target. We do
    this by fixed-point refinement: start from zero, and on each pass
    update every snippet's count from the current guesses of the others,
    clamping negatives to zero. A handful of passes is enough because
@@ -53,7 +52,7 @@ For each snapshot under `snapshots/` (or the single path in
    program that Criterion actually runs.
 5. **Verify** -- execute the emitted program, measure its real row
    counts, and assert that `padded_core_side` and `padded_chiplets`
-   match the snapshot's. A bracket miss fails the bench; smaller drift
+   match the scenario's. A bracket miss fails the bench; smaller drift
    inside the same bracket is reported but tolerated, because proving
    cost is driven by the padded length, not the raw count.
 
@@ -89,48 +88,53 @@ the memory target** -- growing memory ops preserves the overall
 chiplet-trace length and therefore the chiplet bracket.
 
 One producer-side caveat: the consumer can measure `ace_chiplet_len()`
-when it runs synthetic programs, but protocol snapshots may report
-`ace_rows: 0` until the protocol-side `miden-processor` dependency
-exposes that accessor. Treat zero ACE rows in a snapshot as a producer
+when it runs synthetic programs, but a producer pinned to an older
+`miden-processor` may report `ace_rows: 0` until that dependency
+exposes the accessor. Treat zero ACE rows in a snapshot as a producer
 visibility limitation, not as proof that the VM emitted no ACE rows.
 
 ## Snapshot format
 
-Two-tier: **hard-contract totals** in `trace`, **advisory breakdown** in
-`shape`. The loader validates `trace.chiplets_rows == sum(shape) + 1`.
-Schema version is currently `"0"`.
+A producer JSON file is a map of scenario keys to entries. Each entry
+must carry a `trace` section; any sibling fields (cycle counts,
+metadata, ...) are silently ignored. Inside `trace`, the AIR-side
+totals (`core_rows`, `chiplets_rows`, `range_rows`) are the verifier's
+hard contract; nested `shape` is an advisory per-chiplet breakdown.
+The loader checks `trace.chiplets_rows == sum(trace.shape) + 1`.
 
 ```json
 {
-  "schema_version": "0",
-  "source": "protocol/bench-transaction:consume-single-p2id",
-  "timestamp": "unix-1776428820",
-  "miden_vm_version": "0.22",
-  "trace": {
-    "core_rows":     77699,
-    "chiplets_rows": 123129,
-    "range_rows":    20203
-  },
-  "shape": {
-    "hasher_rows":     120352,
-    "bitwise_rows":       416,
-    "memory_rows":       2297,
-    "kernel_rom_rows":     63,
-    "ace_rows":             0
+  "consume single P2ID note": {
+    "trace": {
+      "core_rows": 77699,
+      "chiplets_rows": 123129,
+      "range_rows": 20203,
+      "shape": {
+        "hasher_rows": 120352,
+        "bitwise_rows": 416,
+        "memory_rows": 2297,
+        "kernel_rom_rows": 63,
+        "ace_rows": 0
+      }
+    }
   }
 }
 ```
 
 Snapshots live in `snapshots/`. The bench loads every `*.json` file in
-that directory and runs one Criterion group per snapshot, named
-`synthetic_transaction_kernel/<file-stem>`. Set
-`SYNTH_SNAPSHOT=/path/to/file.json` to bench a single snapshot
-instead.
+that directory and runs one Criterion group per `(producer_file,
+scenario_key)` pair, named `<producer-stem>/<scenario-slug>`. See the
+[Running](#running) section below for `SYNTH_SNAPSHOT` /
+`SYNTH_SCENARIO` filters.
+
+There is no schema-version field; the on-disk shape is the contract.
+If the producer changes that shape, the loader fails loudly (serde
+error or chiplet-sum mismatch). Update both repos together.
 
 ## Verifier contract
 
 Once the emitted program has run, the verifier compares its actual
-row counts against the snapshot's targets and decides whether the
+row counts against the scenario's targets and decides whether the
 bench passed. The checks come in three tiers -- **hard**, **soft**,
 and **info** -- graded by how directly each number maps to proving
 cost. There's also one free-standing **warning** for snippet-balance
@@ -147,10 +151,10 @@ can fail the bench are on two padded proxies:
 - `padded_chiplets   = next_pow2(chiplets_rows)`.
 
 These two can land in *different* brackets on the same workload --
-`consume-two-p2id`, for example, has `padded_core_side = 131072` but
-`padded_chiplets = 262144`. Checking them independently catches a
-bracket miss on either side that a single global `padded_total`
-check would hide.
+`consume two P2ID notes`, for example, has `padded_core_side = 131072`
+but `padded_chiplets = 262144`. Checking them independently catches a
+bracket miss on either side that a single global `padded_total` check
+would hide.
 
 ### Soft checks -- report, don't fail
 
@@ -179,35 +183,37 @@ The solver treats range as a derived quantity driven mostly by u32
 arithmetic; if it starts setting the bracket, snippet balance has
 drifted and should be revisited.
 
-## Refreshing snapshots from protocol
+## Refreshing snapshots from a producer
 
-The producer lives in the `protocol` repo as
-`bin/bench-transaction/src/bin/tx-trace-snapshot.rs` and emits one
-JSON per scenario under `bin/bench-transaction/snapshots/`. Flow:
+Snapshots travel by hand so that producer and consumer can evolve
+independently. For the `protocol/bin/bench-transaction/` producer:
 
-1. In `protocol`: `cargo run --release -p bench-transaction --bin tx-trace-snapshot`
-2. Copy the regenerated JSONs over the same-named files in
-   `miden-vm/benches/synthetic-tx-kernel/snapshots/`.
-3. Run `cargo bench -p miden-synthetic-tx-kernel` and verify
-   `=> BRACKET MATCH` for every snapshot in the printed verifier
+1. In `protocol`: `cargo run --release --bin bench-transaction --features concurrent`.
+2. Copy `bin/bench-transaction/bench-tx.json` over
+   `miden-vm/benches/synthetic-bench/snapshots/bench-tx.json`.
+3. Run `cargo bench -p miden-vm-synthetic-bench` and verify
+   `=> BRACKET MATCH` for every scenario in the printed verifier
    tables.
 
-Snapshots travel by hand so that the two repos can evolve independently. The
-loader rejects unknown `schema_version` values. A `miden_vm_version` major/minor
-mismatch is intentionally a loud warning, not a hard failure, because protocol
-often pins one miden-vm release behind `next`. Read bracket matches across a
-version mismatch as useful regression signals, then refresh the snapshots when
-the protocol-side pin catches up.
+If a kernel change moves a scenario into a different padded bucket,
+the `committed_snapshots_load` test in `src/snapshot.rs` fails with
+the producer/scenario pair and the new bracket -- update
+`COMMITTED_SCENARIO_EXPECTATIONS` accordingly.
 
 ## Running
 
 ```sh
-cargo bench -p miden-synthetic-tx-kernel
+cargo bench -p miden-vm-synthetic-bench
 ```
 
 Env vars:
 
-- `SYNTH_SNAPSHOT=<path>` -- bench only the specified snapshot file
+- `SYNTH_SNAPSHOT=<path>` -- bench only the specified producer JSON
   (instead of iterating over every `snapshots/*.json`).
+- `SYNTH_SCENARIO=<substr>` -- restrict to scenarios whose slugified
+  key contains this slugified substring. Both sides are slugified
+  before comparison, so `"P2ID"`, `"p2id"`, `"P2ID note"`, and
+  `"p2id-note"` all match `"consume single P2ID note"`.
 - `SYNTH_MASM_WRITE=1` -- dump each emitted MASM program to
-  `target/synthetic_kernel_<snapshot-stem>.masm` for inspection.
+  `target/synthetic_bench_<producer-stem>__<scenario-slug>.masm` for
+  inspection.

@@ -1,5 +1,5 @@
 [package]
-name = "miden-synthetic-tx-kernel"
+name = "miden-vm-synthetic-bench"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -23,5 +23,5 @@ thiserror       = { workspace = true, features = ["std"] }
 criterion = { workspace = true }
 
 [[bench]]
-name = "synthetic_kernel"
+name = "synthetic_bench"
 harness = false
