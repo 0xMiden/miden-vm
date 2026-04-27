@@ -69,7 +69,7 @@ impl EventId {
 
     /// Converts this event ID to a [`Felt`].
     pub const fn as_felt(&self) -> Felt {
-        Felt::new(self.0)
+        Felt::new_unchecked(self.0)
     }
 
     /// Returns the inner `u64` representation.
@@ -228,9 +228,9 @@ mod tests {
         // EventId constructors and conversions
         let id1 = EventId::from_u64(100);
         assert_eq!(id1.as_u64(), 100);
-        assert_eq!(id1.as_felt(), Felt::new(100));
+        assert_eq!(id1.as_felt(), Felt::new_unchecked(100));
 
-        let id2 = EventId::from_felt(Felt::new(200));
+        let id2 = EventId::from_felt(Felt::new_unchecked(200));
         assert_eq!(id2.as_u64(), 200);
 
         // EventId from name hashes consistently

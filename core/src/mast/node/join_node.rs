@@ -35,7 +35,7 @@ pub struct JoinNode {
 /// Constants
 impl JoinNode {
     /// The domain of the join block (used for control block hashing).
-    pub const DOMAIN: Felt = Felt::new(opcodes::JOIN as u64);
+    pub const DOMAIN: Felt = Felt::new_unchecked(opcodes::JOIN as u64);
 }
 
 /// Public accessors
@@ -287,7 +287,7 @@ impl proptest::prelude::Arbitrary for JoinNode {
         (any::<MastNodeId>(), any::<MastNodeId>(), any::<[u64; 4]>())
             .prop_map(|(first_child, second_child, digest_array)| {
                 // Generate a random digest
-                let digest = Word::from(digest_array.map(Felt::new));
+                let digest = Word::from(digest_array.map(Felt::new_unchecked));
                 // Construct directly to avoid MastForest validation for arbitrary data
                 JoinNode {
                     children: [first_child, second_child],

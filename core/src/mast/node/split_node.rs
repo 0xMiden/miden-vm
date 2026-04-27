@@ -39,7 +39,7 @@ pub struct SplitNode {
 /// Constants
 impl SplitNode {
     /// The domain of the split node (used for control block hashing).
-    pub const DOMAIN: Felt = Felt::new(opcodes::SPLIT as u64);
+    pub const DOMAIN: Felt = Felt::new_unchecked(opcodes::SPLIT as u64);
 }
 
 /// Public accessors
@@ -247,7 +247,7 @@ impl proptest::prelude::Arbitrary for SplitNode {
         (any::<MastNodeId>(), any::<MastNodeId>(), any::<[u64; 4]>())
             .prop_map(|(true_branch, false_branch, digest_array)| {
                 // Generate a random digest
-                let digest = Word::from(digest_array.map(Felt::new));
+                let digest = Word::from(digest_array.map(Felt::new_unchecked));
                 // Construct directly to avoid MastForest validation for arbitrary data
                 SplitNode {
                     branches: [true_branch, false_branch],

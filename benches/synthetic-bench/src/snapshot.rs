@@ -237,6 +237,24 @@ mod tests {
             padded_core_side: 131_072,
             padded_chiplets: 131_072,
         },
+        CommittedScenarioExpectation {
+            producer_stem: "bench-tx",
+            scenario_key: "consume CLAIM note (L1 to Miden)",
+            padded_core_side: 65_536,
+            padded_chiplets: 262_144,
+        },
+        CommittedScenarioExpectation {
+            producer_stem: "bench-tx",
+            scenario_key: "consume CLAIM note (L2 to Miden)",
+            padded_core_side: 65_536,
+            padded_chiplets: 262_144,
+        },
+        CommittedScenarioExpectation {
+            producer_stem: "bench-tx",
+            scenario_key: "consume B2AGG note (bridge-out)",
+            padded_core_side: 262_144,
+            padded_chiplets: 1_048_576,
+        },
     ];
 
     fn expectation_for(

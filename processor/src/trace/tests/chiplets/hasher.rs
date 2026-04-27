@@ -743,7 +743,7 @@ fn init_leaves(values: &[u64]) -> Vec<Word> {
 
 /// Initializes a Merkle tree leaf with the specified value.
 fn init_leaf(value: u64) -> Word {
-    [Felt::new(value), ZERO, ZERO, ZERO].into()
+    [Felt::new_unchecked(value), ZERO, ZERO, ZERO].into()
 }
 
 /// Converts a Word to stack input values (u64 array) in element order.

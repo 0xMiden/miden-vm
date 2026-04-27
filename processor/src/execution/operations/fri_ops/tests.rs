@@ -27,7 +27,7 @@ fn test_constants() {
     assert_eq!(TAU2_INV, tau.square().inverse());
     assert_eq!(TAU3_INV, tau.cube().inverse());
 
-    assert_eq!(Felt::new(2).inverse(), TWO_INV);
+    assert_eq!(Felt::new_unchecked(2).inverse(), TWO_INV);
 }
 
 // FRI OPERATION TESTS
@@ -65,23 +65,23 @@ proptest! {
     ) {
         // Query values
         let query_values = [
-            QuadFelt::new([Felt::new(v0_0), Felt::new(v0_1)]),
-            QuadFelt::new([Felt::new(v1_0), Felt::new(v1_1)]),
-            QuadFelt::new([Felt::new(v2_0), Felt::new(v2_1)]),
-            QuadFelt::new([Felt::new(v3_0), Felt::new(v3_1)]),
+            QuadFelt::new([Felt::new_unchecked(v0_0), Felt::new_unchecked(v0_1)]),
+            QuadFelt::new([Felt::new_unchecked(v1_0), Felt::new_unchecked(v1_1)]),
+            QuadFelt::new([Felt::new_unchecked(v2_0), Felt::new_unchecked(v2_1)]),
+            QuadFelt::new([Felt::new_unchecked(v3_0), Felt::new_unchecked(v3_1)]),
         ];
 
         // The previous value must match query_values[d_seg] for the operation to succeed
         let prev_value = query_values[d_seg as usize];
         let prev_value_base = prev_value.as_basis_coefficients_slice();
 
-        let alpha = QuadFelt::new([Felt::new(alpha_0), Felt::new(alpha_1)]);
-        let poe = Felt::new(poe);
-        let f_pos_felt = Felt::new(f_pos);
+        let alpha = QuadFelt::new([Felt::new_unchecked(alpha_0), Felt::new_unchecked(alpha_1)]);
+        let poe = Felt::new_unchecked(poe);
+        let f_pos_felt = Felt::new_unchecked(f_pos);
         // p = f_pos * 4 + d_seg
-        let p = Felt::new(f_pos * 4 + d_seg);
-        let layer_ptr = Felt::new(layer_ptr);
-        let end_ptr = Felt::new(end_ptr);
+        let p = Felt::new_unchecked(f_pos * 4 + d_seg);
+        let layer_ptr = Felt::new_unchecked(layer_ptr);
+        let end_ptr = Felt::new_unchecked(end_ptr);
 
         // Build the stack inputs (only 16 elements for initial stack)
         // The operation expects the following layout after pushing v0 (17 elements):
@@ -100,8 +100,8 @@ proptest! {
             poe,                                  // position 9 -> 10
             prev_value_base[0],                   // position 10 -> 11 (pe0)
             prev_value_base[1],                   // position 11 -> 12 (pe1)
-            Felt::new(alpha_0),                   // position 12 -> 13 (a0)
-            Felt::new(alpha_1),                   // position 13 -> 14 (a1)
+            Felt::new_unchecked(alpha_0),                   // position 12 -> 13 (a0)
+            Felt::new_unchecked(alpha_1),                   // position 13 -> 14 (a1)
             layer_ptr,                            // position 14 -> 15 after push (cptr)
             end_ptr,                              // position 15 (will be pushed to overflow)
         ];

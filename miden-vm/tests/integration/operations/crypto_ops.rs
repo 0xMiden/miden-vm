@@ -77,7 +77,8 @@ fn hperm() {
 
     // --- test that the rest of the stack isn't affected -----------------------------------------
     let stack_inputs: Vec<u64> = vec![1, 2, 3, 4];
-    let expected_stack_slice = stack_inputs.iter().map(|&v| Felt::new(v)).collect::<Vec<Felt>>();
+    let expected_stack_slice =
+        stack_inputs.iter().map(|&v| Felt::new_unchecked(v)).collect::<Vec<Felt>>();
 
     let values_to_hash: Vec<u64> = vec![1, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0];
     let mut full_inputs = values_to_hash;
@@ -104,7 +105,8 @@ fn hmerge() {
 
     // --- test that the rest of the stack isn't affected -----------------------------------------
     let stack_inputs: Vec<u64> = vec![1, 2, 3, 4];
-    let expected_stack_slice = stack_inputs.iter().map(|&v| Felt::new(v)).collect::<Vec<Felt>>();
+    let expected_stack_slice =
+        stack_inputs.iter().map(|&v| Felt::new_unchecked(v)).collect::<Vec<Felt>>();
 
     let values_to_hash: Vec<u64> = vec![1, 1, 0, 0, 0, 0, 0, 0];
     let mut full_inputs = values_to_hash;
@@ -321,8 +323,24 @@ fn crypto_stream_basic() {
     let c2 = [stack[3], stack[2], stack[1], stack[0]];
     let c1 = [stack[7], stack[6], stack[5], stack[4]];
 
-    assert_eq!(c2, [Felt::new(9), Felt::new(9), Felt::new(9), Felt::new(9)]);
-    assert_eq!(c1, [Felt::new(9), Felt::new(9), Felt::new(9), Felt::new(9)]);
+    assert_eq!(
+        c2,
+        [
+            Felt::new_unchecked(9),
+            Felt::new_unchecked(9),
+            Felt::new_unchecked(9),
+            Felt::new_unchecked(9)
+        ]
+    );
+    assert_eq!(
+        c1,
+        [
+            Felt::new_unchecked(9),
+            Felt::new_unchecked(9),
+            Felt::new_unchecked(9),
+            Felt::new_unchecked(9)
+        ]
+    );
 }
 
 #[test]
@@ -633,13 +651,13 @@ proptest! {
         // Compute expected result using Horner's method
         // P(α) = c0*α^7 + c1*α^6 + c2*α^5 + c3*α^4 + c4*α^3 + c5*α^2 + c6*α + c7
         // Horner form: (...((c0*α + c1)*α + c2)*α + ...)*α + c7
-        let alpha = QuadFelt::new([Felt::new(alpha_0), Felt::new(alpha_1)]);
-        let acc_old = QuadFelt::new([Felt::new(acc_0), Felt::new(acc_1)]);
+        let alpha = QuadFelt::new([Felt::new_unchecked(alpha_0), Felt::new_unchecked(alpha_1)]);
+        let acc_old = QuadFelt::new([Felt::new_unchecked(acc_0), Felt::new_unchecked(acc_1)]);
 
         // Fold from c0 to c7: acc = acc_old, then acc = c0 + α*acc, acc = c1 + α*acc, etc.
         let acc_new = inputs[0..8]
             .iter()
-            .fold(acc_old, |acc, &coef| QuadFelt::from(Felt::new(coef)) + alpha * acc);
+            .fold(acc_old, |acc, &coef| QuadFelt::from(Felt::new_unchecked(coef)) + alpha * acc);
 
         // Prepare the advice stack with alpha values: [alpha_0, alpha_1, 0, 0]
         let adv_stack: Vec<u64> = vec![alpha_0, alpha_1, 0, 0];
@@ -718,15 +736,15 @@ proptest! {
         inputs[ACC_LOW_INDEX] = acc_0;
 
         // Compute expected result
-        let alpha = QuadFelt::new([Felt::new(alpha_0), Felt::new(alpha_1)]);
-        let acc_old = QuadFelt::new([Felt::new(acc_0), Felt::new(acc_1)]);
+        let alpha = QuadFelt::new([Felt::new_unchecked(alpha_0), Felt::new_unchecked(alpha_1)]);
+        let acc_old = QuadFelt::new([Felt::new_unchecked(acc_0), Felt::new_unchecked(acc_1)]);
 
         // Build extension field coefficients: chunks of 2 [low, high]
         // Horner: P(α) = c0*α^3 + c1*α^2 + c2*α + c3
         let acc_new = inputs[0..8]
             .chunks(2)
             .map(|chunk| {
-                QuadFelt::new([Felt::new(chunk[0]), Felt::new(chunk[1])])
+                QuadFelt::new([Felt::new_unchecked(chunk[0]), Felt::new_unchecked(chunk[1])])
             })
             .fold(acc_old, |acc, coef| coef + alpha * acc);
 

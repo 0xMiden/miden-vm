@@ -22,6 +22,12 @@ use crate::{
 #[test]
 #[ignore = "run manually to generate fuzz seeds"]
 fn generate_fuzz_seeds() {
+    fn write_mast_seed(targets: &[&str], name: &str, bytes: &[u8]) {
+        for target in targets {
+            write_seed(target, name, bytes);
+        }
+    }
+
     fn write_seed(target: &str, name: &str, bytes: &[u8]) {
         let corpus_dir = std::path::Path::new("../miden-core-fuzz/corpus").join(target);
         std::fs::create_dir_all(&corpus_dir).expect("Failed to create corpus directory");
@@ -38,7 +44,18 @@ fn generate_fuzz_seeds() {
         forest.make_root(block_id);
 
         let bytes = forest.to_bytes();
-        write_seed("mast_forest_deserialize", "minimal_block.bin", &bytes);
+        write_mast_seed(
+            &[
+                "mast_forest_deserialize",
+                "mast_forest_validate",
+                "mast_node_info",
+                "serialized_mast_forest_new",
+                "basic_block_data",
+                "debug_info",
+            ],
+            "minimal_block.bin",
+            &bytes,
+        );
     }
 
     // Seed 2: Forest with join node
@@ -54,7 +71,18 @@ fn generate_fuzz_seeds() {
         forest.make_root(join);
 
         let bytes = forest.to_bytes();
-        write_seed("mast_forest_deserialize", "join_node.bin", &bytes);
+        write_mast_seed(
+            &[
+                "mast_forest_deserialize",
+                "mast_forest_validate",
+                "mast_node_info",
+                "serialized_mast_forest_new",
+                "basic_block_data",
+                "debug_info",
+            ],
+            "join_node.bin",
+            &bytes,
+        );
     }
 
     // Seed 3: Stripped forest (no debug info)
@@ -67,19 +95,64 @@ fn generate_fuzz_seeds() {
 
         let mut bytes = Vec::new();
         forest.write_stripped(&mut bytes);
-        write_seed("mast_forest_deserialize", "stripped.bin", &bytes);
+        write_mast_seed(
+            &[
+                "mast_forest_deserialize",
+                "mast_forest_validate",
+                "mast_node_info",
+                "serialized_mast_forest_new",
+                "basic_block_data",
+            ],
+            "stripped.bin",
+            &bytes,
+        );
     }
 
-    // Seed 4: Empty header (just magic + flags + version + minimal counts)
+    // Seed 4: Hashless forest (no internal hash section, no debug info)
+    {
+        let mut forest = MastForest::new();
+        let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+            .add_to_forest(&mut forest)
+            .unwrap();
+        forest.make_root(block_id);
+
+        let mut bytes = Vec::new();
+        forest.write_hashless(&mut bytes);
+        write_mast_seed(
+            &["mast_forest_validate", "mast_node_info", "serialized_mast_forest_new"],
+            "hashless.bin",
+            &bytes,
+        );
+    }
+
+    // Seed 5: Empty header (just magic + flags + version + minimal counts)
     {
         let bytes: &[u8] = b"MAST\x00\x00\x00\x01";
-        write_seed("mast_forest_deserialize", "header_only.bin", bytes);
+        write_mast_seed(
+            &[
+                "mast_forest_deserialize",
+                "mast_forest_validate",
+                "mast_node_info",
+                "serialized_mast_forest_new",
+            ],
+            "header_only.bin",
+            bytes,
+        );
     }
 
-    // Seed 5: Invalid magic
+    // Seed 6: Invalid magic
     {
         let bytes: &[u8] = b"XXXX\x00\x00\x00\x01";
-        write_seed("mast_forest_deserialize", "invalid_magic.bin", bytes);
+        write_mast_seed(
+            &[
+                "mast_forest_deserialize",
+                "mast_forest_validate",
+                "mast_node_info",
+                "serialized_mast_forest_new",
+            ],
+            "invalid_magic.bin",
+            bytes,
+        );
     }
 
     // Program seed
@@ -101,7 +174,13 @@ fn generate_fuzz_seeds() {
             .unwrap();
         forest.make_root(block_id);
 
-        let a: Word = [Felt::new(9), Felt::new(10), Felt::new(11), Felt::new(12)].into();
+        let a: Word = [
+            Felt::new_unchecked(9),
+            Felt::new_unchecked(10),
+            Felt::new_unchecked(11),
+            Felt::new_unchecked(12),
+        ]
+        .into();
         let kernel = Kernel::from_hashes_unchecked(vec![a, a]);
         let program = Program::with_kernel(Arc::new(forest), block_id, kernel);
 
@@ -113,14 +192,34 @@ fn generate_fuzz_seeds() {
         let kernel = Kernel::default();
         write_seed("kernel_deserialize", "empty_kernel.bin", &kernel.to_bytes());
 
-        let a: Word = [Felt::new(1), Felt::new(2), Felt::new(3), Felt::new(4)].into();
-        let b: Word = [Felt::new(5), Felt::new(6), Felt::new(7), Felt::new(8)].into();
+        let a: Word = [
+            Felt::new_unchecked(1),
+            Felt::new_unchecked(2),
+            Felt::new_unchecked(3),
+            Felt::new_unchecked(4),
+        ]
+        .into();
+        let b: Word = [
+            Felt::new_unchecked(5),
+            Felt::new_unchecked(6),
+            Felt::new_unchecked(7),
+            Felt::new_unchecked(8),
+        ]
+        .into();
 
         let non_empty = Kernel::new(&[a]).expect("failed to build non-empty kernel");
         write_seed("kernel_deserialize", "single_kernel.bin", &non_empty.to_bytes());
 
         let max_kernel: Vec<Word> = (0u64..=254)
-            .map(|n| [Felt::new(n), Felt::new(n + 1), Felt::new(n + 2), Felt::new(n + 3)].into())
+            .map(|n| {
+                [
+                    Felt::new_unchecked(n),
+                    Felt::new_unchecked(n + 1),
+                    Felt::new_unchecked(n + 2),
+                    Felt::new_unchecked(n + 3),
+                ]
+                .into()
+            })
             .collect();
         let max_kernel = Kernel::new(&max_kernel).expect("failed to build max-size kernel");
         write_seed("kernel_deserialize", "max_kernel_255.bin", &max_kernel.to_bytes());
@@ -141,8 +240,8 @@ fn generate_fuzz_seeds() {
 
     // Stack IO seeds
     {
-        let inputs = StackInputs::new(&[Felt::new(1), Felt::new(2)]).unwrap();
-        let outputs = StackOutputs::new(&[Felt::new(3), Felt::new(4)]).unwrap();
+        let inputs = StackInputs::new(&[Felt::new_unchecked(1), Felt::new_unchecked(2)]).unwrap();
+        let outputs = StackOutputs::new(&[Felt::new_unchecked(3), Felt::new_unchecked(4)]).unwrap();
         write_seed("stack_io_deserialize", "stack_inputs.bin", &inputs.to_bytes());
         write_seed("stack_io_deserialize", "stack_outputs.bin", &outputs.to_bytes());
     }

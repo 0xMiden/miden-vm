@@ -87,7 +87,6 @@ fn reference_source(setup: &str) -> String {
     format!(
         r#"
     use miden::core::stark::random_coin
-    use miden::core::stark::utils
     use miden::core::stark::constants
     use miden::core::crypto::hashes::poseidon2
 
@@ -130,8 +129,7 @@ fn reference_source(setup: &str) -> String {
         while.true
             dup.1
             exec.sample_bits_safe
-            dup.2 dup.4 dup.2
-            exec.utils::bit_reverse_len_parallel
+            dup.2 swap dup movdn.2
             push.0 movdn.3
             dup.4
             mem_storew_le

@@ -162,6 +162,21 @@ impl BasicBlockNode {
             })
             .collect()
     }
+
+    /// Adjusts padded operation indices back to raw indices for AssemblyOp mappings.
+    pub fn unadjust_asm_op_indices<T: Copy>(
+        asm_ops: Vec<(usize, T)>,
+        op_batches: &[OpBatch],
+    ) -> Vec<(usize, T)> {
+        let pad2raw = PaddedToRawPrefix::new(op_batches);
+        asm_ops
+            .into_iter()
+            .map(|(padded_idx, id)| {
+                let raw = padded_idx - pad2raw[padded_idx];
+                (raw, id)
+            })
+            .collect()
+    }
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -632,7 +647,7 @@ impl BasicBlockNode {
                     let opcode = op.op_code() as u64;
                     group_value |= opcode << (Operation::OP_BITS * local_op_idx);
                 }
-                if groups[group_idx] != Felt::new(group_value) {
+                if groups[group_idx] != Felt::new_unchecked(group_value) {
                     return Err(format!(
                         "Batch {batch_idx}, group {group_idx}: committed opcode group does not match operations"
                     ));

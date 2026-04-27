@@ -51,15 +51,15 @@ use crate::{
 // HASHER MESSAGE CONSTANTS AND HELPERS
 // ================================================================================================
 
-const LABEL_OFFSET_START: Felt = Felt::new(16);
-const LABEL_OFFSET_END: Felt = Felt::new(32);
-const LINEAR_HASH_LABEL_START: Felt = Felt::new((LINEAR_HASH_LABEL + 16) as u64);
-const LINEAR_HASH_LABEL_RESPAN: Felt = Felt::new((LINEAR_HASH_LABEL + 32) as u64);
-const RETURN_HASH_LABEL_END: Felt = Felt::new((RETURN_HASH_LABEL + 32) as u64);
-const RETURN_STATE_LABEL_END: Felt = Felt::new((RETURN_STATE_LABEL + 32) as u64);
-const MP_VERIFY_LABEL_START: Felt = Felt::new((MP_VERIFY_LABEL + 16) as u64);
-const MR_UPDATE_OLD_LABEL_START: Felt = Felt::new((MR_UPDATE_OLD_LABEL + 16) as u64);
-const MR_UPDATE_NEW_LABEL_START: Felt = Felt::new((MR_UPDATE_NEW_LABEL + 16) as u64);
+const LABEL_OFFSET_START: Felt = Felt::new_unchecked(16);
+const LABEL_OFFSET_END: Felt = Felt::new_unchecked(32);
+const LINEAR_HASH_LABEL_START: Felt = Felt::new_unchecked((LINEAR_HASH_LABEL + 16) as u64);
+const LINEAR_HASH_LABEL_RESPAN: Felt = Felt::new_unchecked((LINEAR_HASH_LABEL + 32) as u64);
+const RETURN_HASH_LABEL_END: Felt = Felt::new_unchecked((RETURN_HASH_LABEL + 32) as u64);
+const RETURN_STATE_LABEL_END: Felt = Felt::new_unchecked((RETURN_STATE_LABEL + 32) as u64);
+const MP_VERIFY_LABEL_START: Felt = Felt::new_unchecked((MP_VERIFY_LABEL + 16) as u64);
+const MR_UPDATE_OLD_LABEL_START: Felt = Felt::new_unchecked((MR_UPDATE_OLD_LABEL + 16) as u64);
+const MR_UPDATE_NEW_LABEL_START: Felt = Felt::new_unchecked((MR_UPDATE_NEW_LABEL + 16) as u64);
 
 /// Creates a full hasher state with a word in the first 4 elements and zeros elsewhere.
 /// Used by the bus debugger to construct HasherMessage structs for Merkle operations

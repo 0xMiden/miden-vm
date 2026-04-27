@@ -78,11 +78,11 @@ fn hasher_p1_mr_update(#[case] index: u64) {
     // mrupdate_id = 1 for the first (and only) MR_UPDATE operation.
     let mrupdate_id = ONE;
     let row_values = [
-        SiblingTableRow::new(Felt::new(index), path[0], mrupdate_id)
+        SiblingTableRow::new(Felt::new_unchecked(index), path[0], mrupdate_id)
             .to_value(&trace.main_trace, &challenges),
-        SiblingTableRow::new(Felt::new(index >> 1), path[1], mrupdate_id)
+        SiblingTableRow::new(Felt::new_unchecked(index >> 1), path[1], mrupdate_id)
             .to_value(&trace.main_trace, &challenges),
-        SiblingTableRow::new(Felt::new(index >> 2), path[2], mrupdate_id)
+        SiblingTableRow::new(Felt::new_unchecked(index >> 2), path[2], mrupdate_id)
             .to_value(&trace.main_trace, &challenges),
     ];
 
@@ -177,7 +177,7 @@ fn init_leaves(values: &[u64]) -> Vec<Word> {
 }
 
 fn init_leaf(value: u64) -> Word {
-    [Felt::new(value), ZERO, ZERO, ZERO].into()
+    [Felt::new_unchecked(value), ZERO, ZERO, ZERO].into()
 }
 
 fn append_word(target: &mut Vec<u64>, word: Word) {

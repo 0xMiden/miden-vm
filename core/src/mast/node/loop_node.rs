@@ -39,7 +39,7 @@ pub struct LoopNode {
 /// Constants
 impl LoopNode {
     /// The domain of the loop node (used for control block hashing).
-    pub const DOMAIN: Felt = Felt::new(opcodes::LOOP as u64);
+    pub const DOMAIN: Felt = Felt::new_unchecked(opcodes::LOOP as u64);
 }
 
 impl LoopNode {
@@ -236,7 +236,7 @@ impl proptest::prelude::Arbitrary for LoopNode {
         (any::<MastNodeId>(), any::<[u64; 4]>())
             .prop_map(|(body, digest_array)| {
                 // Generate a random digest
-                let digest = Word::from(digest_array.map(Felt::new));
+                let digest = Word::from(digest_array.map(Felt::new_unchecked));
                 // Construct directly to avoid MastForest validation for arbitrary data
                 LoopNode {
                     body,

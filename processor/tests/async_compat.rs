@@ -65,7 +65,7 @@ fn simple_program() -> miden_processor::Program {
 #[tokio::test(flavor = "current_thread")]
 async fn execute_async_matches_execute() {
     let program = simple_program();
-    let stack_inputs = StackInputs::new(&[Felt::new(3)]).unwrap();
+    let stack_inputs = StackInputs::new(&[Felt::new_unchecked(3)]).unwrap();
     let advice_inputs = AdviceInputs::default();
 
     let mut sync_host = DefaultHost::default();
@@ -95,7 +95,7 @@ async fn execute_async_matches_execute() {
 #[tokio::test(flavor = "current_thread")]
 async fn fast_processor_execute_for_trace_async_matches_sync() {
     let program = simple_program();
-    let stack_inputs = StackInputs::new(&[Felt::new(3)]).unwrap();
+    let stack_inputs = StackInputs::new(&[Felt::new_unchecked(3)]).unwrap();
 
     let mut sync_host = DefaultHost::default();
     let sync_trace_inputs = FastProcessor::new(stack_inputs)

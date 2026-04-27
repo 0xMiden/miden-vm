@@ -240,7 +240,7 @@ impl StackState {
     /// It is expected that this values gets later inverted via batch inversion.
     pub fn overflow_helper(&self) -> Felt {
         let denominator = self.stack_depth() - MIN_STACK_DEPTH;
-        Felt::new(denominator as u64)
+        Felt::new_unchecked(denominator as u64)
     }
 
     /// Starts a new execution context for this stack, resetting the stack depth to its minimum
