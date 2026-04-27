@@ -113,9 +113,18 @@ pub proc find_word
             else
                 # The value was not found, and the maybe_value_ptr is neither the start nor the end
                 # of the list. Make sure that:
+                # - `start_ptr <= maybe_value_ptr < end_ptr`, and
                 # - `the value at maybe_value_ptr-1 < VALUE`, and
-                # - `the value at maybe_value_ptr > VALUE`
+                # - `the value at maybe_value_ptr > VALUE`.
+                # `maybe_value_ptr` must already be word aligned to allow reading values.
                 #=> [maybe_value_ptr, VALUE, start_ptr, end_ptr]
+
+                # `maybe_value_ptr` bounds check
+                dup dup.6 u32assert2.err="maybe_value_ptr is not u32"
+                u32gte assert.err="lowerbound_array invariant: maybe_value_ptr < start_ptr"
+
+                dup dup.7 u32assert2.err="maybe_value_ptr is not u32"
+                u32lt assert.err="lowerbound_array invariant: maybe_value_ptr >= end_ptr"
 
                 # Duplicate VALUE word (5 cycles)
                 movdn.4 dupw
@@ -334,9 +343,18 @@ proc find_partial_key_value
             else
                 # The key was not found, and the maybe_key_ptr is neither the start nor the end
                 # of the list. Make sure that:
+                # - `start_ptr <= maybe_value_ptr < end_ptr`, and
+                # - `maybe_value_ptr` is word alignend with `start_ptr`, and
                 # - `the key at maybe_key_ptr-1 < KEY`, and
                 # - `the key at maybe_key_ptr > KEY`
                 #=> [maybe_key_ptr, KEY, start_ptr, end_ptr]
+
+                # `maybe_value_ptr` bounds check
+                dup dup.6 u32assert2.err="maybe_value_ptr is not u32"
+                u32gte assert.err="lowerbound_key_value invariant: maybe_value_ptr < start_ptr"
+
+                dup dup.7 u32assert2.err="maybe_key_ptr is not u32"
+                u32lt assert.err="lowerbound_key_value invariant: maybe_key_ptr >= end_ptr"
 
                 # make sure maybe_key_ptr is pointing to a key, not value (10 cycles)
                 dup dup.6 sub u32assert2.err="maybe_key_ptr is not u32"
