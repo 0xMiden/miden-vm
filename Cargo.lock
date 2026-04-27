@@ -1779,7 +1779,6 @@ name = "miden-vm-synthetic-bench"
 version = "0.23.0"
 dependencies = [
  "criterion",
- "miden-core",
  "miden-processor",
  "miden-vm",
  "serde",
