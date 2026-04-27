@@ -1359,6 +1359,10 @@ impl Assembler {
         let resolved = self.linker.resolve_invoke_target(&caller, target)?;
         match resolved {
             SymbolResolution::MastRoot(mast_root) => {
+                // Literal MAST-root references in MASM do not carry any source-level provenance,
+                // so there is no exact source root or source package commitment to thread through
+                // here. We could try to guess based on linked libraries, but any such heuristic
+                // would be ambiguous when multiple procedures share the same digest.
                 let node = self.ensure_valid_procedure_mast_root(
                     kind,
                     target.span(),

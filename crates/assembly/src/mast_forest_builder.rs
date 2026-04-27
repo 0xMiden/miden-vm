@@ -1185,11 +1185,7 @@ impl MastForestBuilder {
             return self.copy_statically_linked_subtree(root_id);
         }
 
-        if let Some(root_id) = self.statically_linked_mast.find_procedure_root(mast_root) {
-            self.copy_statically_linked_subtree(root_id)
-        } else {
-            self.ensure_node(ExternalNodeBuilder::new(mast_root))
-        }
+        self.ensure_node(ExternalNodeBuilder::new(mast_root))
     }
 
     fn find_statically_linked_root(
@@ -1198,17 +1194,24 @@ impl MastForestBuilder {
         source_root_id: Option<MastNodeId>,
         mast_root: Word,
     ) -> Option<MastNodeId> {
-        let forest_idx = self
-            .statically_linked_forest_indices_by_commitment
-            .get(&source_library_commitment?)?;
-        let merged_root =
-            self.statically_linked_root_map.map_root(*forest_idx, &source_root_id?)?;
+        if let (Some(source_library_commitment), Some(source_root_id)) =
+            (source_library_commitment, source_root_id)
+        {
+            let exact_root = self
+                .statically_linked_forest_indices_by_commitment
+                .get(&source_library_commitment)
+                .and_then(|forest_idx| {
+                    self.statically_linked_root_map.map_root(*forest_idx, &source_root_id)
+                });
 
-        if self.statically_linked_mast[merged_root].digest() == mast_root {
-            Some(merged_root)
-        } else {
-            None
+            if let Some(exact_root) = exact_root
+                .filter(|root_id| self.statically_linked_mast[*root_id].digest() == mast_root)
+            {
+                return Some(exact_root);
+            }
         }
+
+        self.statically_linked_mast.find_procedure_root(mast_root)
     }
 
     /// Copies a subtree from the statically linked forest into the builder's forest.
