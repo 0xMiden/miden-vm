@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.22.2
+
+- Fixed static linking of same-digest library procedures to preserve the selected procedure's debug metadata and source mappings ([#3054](https://github.com/0xMiden/miden-vm/pull/3054)).
+
 ## 0.22.1 (2026-04-07)
 
 - Implemented project assembly ([#2877](https://github.com/0xMiden/miden-vm/pull/2877)).
