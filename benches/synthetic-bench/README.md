@@ -99,8 +99,9 @@ A producer JSON file is a map of scenario keys to entries. Each entry
 must carry a `trace` section; any sibling fields (cycle counts,
 metadata, ...) are silently ignored. Inside `trace`, the AIR-side
 totals (`core_rows`, `chiplets_rows`, `range_rows`) are the verifier's
-hard contract; nested `shape` is an advisory per-chiplet breakdown.
-The loader checks `trace.chiplets_rows == sum(trace.shape) + 1`.
+hard contract; nested `chiplets_shape` is an advisory per-chiplet
+breakdown. The loader checks
+`trace.chiplets_rows == sum(trace.chiplets_shape) + 1`.
 
 ```json
 {
@@ -109,7 +110,7 @@ The loader checks `trace.chiplets_rows == sum(trace.shape) + 1`.
       "core_rows": 77699,
       "chiplets_rows": 123129,
       "range_rows": 20203,
-      "shape": {
+      "chiplets_shape": {
         "hasher_rows": 120352,
         "bitwise_rows": 416,
         "memory_rows": 2297,

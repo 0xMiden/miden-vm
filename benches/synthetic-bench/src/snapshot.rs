@@ -17,10 +17,11 @@ const MIN_TRACE_LEN: u64 = 64;
 
 /// A single scenario's trace snapshot, extracted from a producer JSON file.
 ///
-/// On disk, `shape` is nested under `trace` (`{ "trace": { "core_rows": ..., "shape": ... } }`).
-/// Here `shape` is a sibling of `trace` so callers can write `snap.shape.hasher_rows` instead of
-/// `snap.trace.shape.hasher_rows`; `RawScenarioEntry` / `RawTrace` below bridge the layouts at
-/// deserialization time.
+/// On disk, the chiplet breakdown is nested under `trace` as `chiplets_shape`
+/// (`{ "trace": { "core_rows": ..., "chiplets_shape": ... } }`). Here it's hoisted to a sibling
+/// of `trace` and renamed `shape` so callers can write `snap.shape.hasher_rows` instead of
+/// `snap.trace.chiplets_shape.hasher_rows`; `RawScenarioEntry` / `RawTrace` below bridge the
+/// layouts at deserialization time.
 #[derive(Debug, Clone)]
 pub struct TraceSnapshot {
     /// Hard-target totals. The verifier's bracket check operates on these.
@@ -146,7 +147,7 @@ impl TraceSnapshot {
                 chiplets_rows: entry.trace.chiplets_rows,
                 range_rows: entry.trace.range_rows,
             };
-            let shape = entry.trace.shape;
+            let shape = entry.trace.chiplets_shape;
             let expected = shape.chiplets_sum();
             if trace.chiplets_rows != expected {
                 return Err(SnapshotError::InconsistentChipletsTotal {
@@ -178,7 +179,7 @@ struct RawTrace {
     core_rows: u64,
     chiplets_rows: u64,
     range_rows: u64,
-    shape: TraceBreakdown,
+    chiplets_shape: TraceBreakdown,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -405,7 +406,7 @@ mod tests {
                     "core_rows": 100,
                     "chiplets_rows": 11,
                     "range_rows": 50,
-                    "shape": { "hasher_rows": 10, "bitwise_rows": 0, "memory_rows": 0 }
+                    "chiplets_shape": { "hasher_rows": 10, "bitwise_rows": 0, "memory_rows": 0 }
                 }
             }
         }"#;
@@ -427,7 +428,7 @@ mod tests {
                     "core_rows": 100,
                     "chiplets_rows": 500,
                     "range_rows": 0,
-                    "shape": { "hasher_rows": 10, "bitwise_rows": 0, "memory_rows": 0 }
+                    "chiplets_shape": { "hasher_rows": 10, "bitwise_rows": 0, "memory_rows": 0 }
                 }
             }
         }"#;
@@ -451,7 +452,7 @@ mod tests {
                     "core_rows": 77699,
                     "chiplets_rows": 123129,
                     "range_rows": 20203,
-                    "shape": {
+                    "chiplets_shape": {
                         "hasher_rows": 120352,
                         "bitwise_rows": 416,
                         "memory_rows": 2297,

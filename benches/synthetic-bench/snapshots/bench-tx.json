@@ -15,7 +15,7 @@
       "core_rows": 77683,
       "chiplets_rows": 123159,
       "range_rows": 20179,
-      "shape": {
+      "chiplets_shape": {
         "hasher_rows": 120384,
         "bitwise_rows": 416,
         "memory_rows": 2294,
@@ -41,7 +41,7 @@
       "core_rows": 80506,
       "chiplets_rows": 141290,
       "range_rows": 20129,
-      "shape": {
+      "chiplets_shape": {
         "hasher_rows": 138240,
         "bitwise_rows": 592,
         "memory_rows": 2389,
@@ -64,7 +64,7 @@
       "core_rows": 76728,
       "chiplets_rows": 118595,
       "range_rows": 20011,
-      "shape": {
+      "chiplets_shape": {
         "hasher_rows": 115968,
         "bitwise_rows": 328,
         "memory_rows": 2235,
@@ -89,7 +89,7 @@
       "core_rows": 35617,
       "chiplets_rows": 147222,
       "range_rows": 2407,
-      "shape": {
+      "chiplets_shape": {
         "hasher_rows": 141248,
         "bitwise_rows": 2624,
         "memory_rows": 3277,
@@ -114,7 +114,7 @@
       "core_rows": 47867,
       "chiplets_rows": 189924,
       "range_rows": 2649,
-      "shape": {
+      "chiplets_shape": {
         "hasher_rows": 182464,
         "bitwise_rows": 2880,
         "memory_rows": 4507,
@@ -139,7 +139,7 @@
       "core_rows": 163016,
       "chiplets_rows": 911692,
       "range_rows": 4111,
-      "shape": {
+      "chiplets_shape": {
         "hasher_rows": 896832,
         "bitwise_rows": 2608,
         "memory_rows": 12042,
