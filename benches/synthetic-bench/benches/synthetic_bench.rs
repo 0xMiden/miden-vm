@@ -95,8 +95,9 @@ fn synthetic_bench(c: &mut Criterion) {
     for path in resolve_snapshot_paths() {
         let producer_stem =
             path.file_stem().and_then(|s| s.to_str()).unwrap_or("unknown").to_string();
-        let scenarios = TraceSnapshot::load_all(&path)
+        let mut scenarios = TraceSnapshot::load_all(&path)
             .unwrap_or_else(|e| panic!("failed to load snapshot at {}: {e}", path.display()));
+        scenarios.sort_by_key(|(_, snap)| snap.trace.chiplets_rows);
         for (scenario_key, snapshot) in scenarios {
             let scenario_slug = slugify(&scenario_key);
             if let Some(filter) = &scenario_filter
@@ -187,9 +188,9 @@ fn bench_one_scenario(
     let mut group = c.benchmark_group(format!("{producer_stem}/{scenario_slug}"));
     group
         .sampling_mode(SamplingMode::Flat)
-        .sample_size(10)
-        .warm_up_time(Duration::from_millis(500))
-        .measurement_time(Duration::from_secs(10));
+        .sample_size(30)
+        .warm_up_time(Duration::from_millis(1000))
+        .measurement_time(Duration::from_secs(30));
 
     // Four axes per scenario:
     //   exec       -- FastProcessor::execute_sync (no trace data)
