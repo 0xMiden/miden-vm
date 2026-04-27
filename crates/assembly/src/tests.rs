@@ -411,6 +411,66 @@ fn library_serialization() -> Result<(), Report> {
     Ok(())
 }
 
+/// Verifies that deserializing a library rejects procedure exports whose `MastNodeId` is not a
+/// procedure root in the underlying MAST forest (issue #2831).
+#[test]
+fn library_deserialization_rejects_non_root_export() {
+    use miden_core::{
+        mast::{BasicBlockNodeBuilder, MastForestContributor},
+        serde::ByteWriter,
+    };
+
+    let context = TestContext::new();
+    let source = r#"
+        pub proc foo
+            add
+        end
+    "#;
+    let module = parse_module!(&context, "test::foo", source);
+
+    // Build a valid library.
+    let lib = Assembler::new(context.source_manager()).assemble_library([module]).unwrap();
+
+    // Clone the forest and add a non-root node.
+    let mut forest: MastForest = (**lib.mast_forest()).clone();
+    let builder = BasicBlockNodeBuilder::new(vec![Operation::Add], vec![]);
+    let non_root_id = builder.add_to_forest(&mut forest).unwrap();
+    assert!(
+        !forest.is_procedure_root(non_root_id),
+        "sanity check: new node should not be a root"
+    );
+
+    // Manually serialize a tampered library: forest + one export referencing the non-root node.
+    let mut tampered_bytes = Vec::new();
+    forest.write_into(&mut tampered_bytes);
+
+    // Number of exports.
+    1usize.write_into(&mut tampered_bytes);
+    // Tag: 0 = Procedure export.
+    0u8.write_into(&mut tampered_bytes);
+    // Fully qualified procedure path.
+    let path = PathBuf::new("::test::foo::foo").unwrap();
+    path.write_into(&mut tampered_bytes);
+    // MastNodeId of the non-root node.
+    u32::from(non_root_id).write_into(&mut tampered_bytes);
+    // No function signature.
+    tampered_bytes.write_bool(false);
+    // Empty attribute set.
+    miden_assembly_syntax::ast::AttributeSet::default().write_into(&mut tampered_bytes);
+
+    // Deserializing should fail because the export references a non-root node.
+    let result = Library::read_from_bytes(&tampered_bytes);
+    assert!(
+        result.is_err(),
+        "deserialization should reject exports referencing non-root nodes"
+    );
+    let err_msg = result.unwrap_err().to_string();
+    assert!(
+        err_msg.contains("no procedure root"),
+        "error should mention missing procedure root, got: {err_msg}"
+    );
+}
+
 #[test]
 fn get_module_by_path() -> Result<(), Report> {
     let context = TestContext::new();

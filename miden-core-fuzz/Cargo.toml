@@ -66,6 +66,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "serialized_mast_forest_new"
+path = "fuzz_targets/serialized_mast_forest_new.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "basic_block_data"
 path = "fuzz_targets/basic_block_data.rs"
 test = false

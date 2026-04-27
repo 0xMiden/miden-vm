@@ -1333,6 +1333,7 @@ dependencies = [
  "criterion",
  "derive_more",
  "insta",
+ "log",
  "miden-crypto",
  "miden-debug-types",
  "miden-formatting",
