@@ -164,7 +164,7 @@ impl Display for VerificationReport {
         if self.range_dominates() {
             writeln!(
                 f,
-                "!! WARNING: range_rows dominates — \"ignore range\" assumption is breaking"
+                "!! WARNING: range_rows dominates -- \"ignore range\" assumption is breaking"
             )?;
         }
         Ok(())

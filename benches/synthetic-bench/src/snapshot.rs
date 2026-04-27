@@ -208,6 +208,9 @@ mod tests {
     /// Expected padded brackets for each committed scenario. Keyed by `(producer_stem,
     /// scenario_key)` since each producer file holds many scenarios. A mismatch means refresh
     /// the snapshot from the producer before updating these numbers.
+    ///
+    /// Mirrors `COMMITTED_SCENARIO_EXPECTATIONS` in `protocol/bin/bench-transaction/`'s test
+    /// module; refresh both together when a kernel change moves a bracket.
     struct CommittedScenarioExpectation {
         producer_stem: &'static str,
         scenario_key: &'static str,
@@ -419,8 +422,8 @@ mod tests {
 
     #[test]
     fn ignores_extra_fields_per_scenario() {
-        // Real bench-tx.json has cycle-count siblings (prologue, epilogue, ...) we don't care
-        // about; the loader must tolerate them.
+        // Real bench-tx.json has cycle-count siblings (prologue, epilogue, ...) the loader must
+        // tolerate.
         let realistic = r#"{
             "consume single P2ID note": {
                 "prologue": 3501,

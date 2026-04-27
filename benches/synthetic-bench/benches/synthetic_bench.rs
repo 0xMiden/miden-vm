@@ -5,8 +5,8 @@
 //!      snapshots in this run).
 //!   2. For each producer JSON (every `snapshots/*.json`, or the single file in `SYNTH_SNAPSHOT`),
 //!      load every scenario it contains and: solve for per-snippet iteration counts, emit the
-//!      resulting MASM program, verify it lands in the scenario's padded-trace bracket, and run
-//!      `execute` + `execute_and_prove` Criterion benches.
+//!      resulting MASM program, check it lands in the scenario's padded-trace bracket, and run four
+//!      Criterion benches per scenario -- `exec`, `trace_prep`, `prove`, `verify`.
 //!
 //! Env vars:
 //! - `SYNTH_SNAPSHOT`: path to a single producer JSON; if set, only this file is benched. Otherwise
@@ -23,6 +23,7 @@ use criterion::{BatchSize, Criterion, SamplingMode, criterion_group, criterion_m
 use miden_processor::{
     DefaultHost, ExecutionOptions, FastProcessor, StackInputs, advice::AdviceInputs,
 };
+use miden_vm::{Assembler, Program, ProgramInfo, ProvingOptions, prove_sync};
 use miden_vm_synthetic_bench::{
     calibrator::{Calibration, calibrate, measure_program},
     snapshot::{TraceShape, TraceSnapshot},
@@ -30,7 +31,17 @@ use miden_vm_synthetic_bench::{
     solver::{Plan, emit, solve},
     verifier::VerificationReport,
 };
-use miden_vm::{Assembler, ProvingOptions, prove_sync};
+
+/// Builds the per-iteration inputs shared by the `exec` and `trace_prep` axes.
+fn processor_inputs(program: &Program) -> (DefaultHost, Program, FastProcessor) {
+    let host = DefaultHost::default();
+    let processor = FastProcessor::new_with_options(
+        StackInputs::default(),
+        AdviceInputs::default(),
+        ExecutionOptions::default(),
+    );
+    (host, program.clone(), processor)
+}
 
 fn resolve_snapshot_paths() -> Vec<PathBuf> {
     if let Ok(explicit) = std::env::var("SYNTH_SNAPSHOT") {
@@ -180,25 +191,34 @@ fn bench_one_scenario(
         .warm_up_time(Duration::from_millis(500))
         .measurement_time(Duration::from_secs(10));
 
-    group.bench_function("execute", |b| {
+    // Four axes per scenario:
+    //   exec       -- FastProcessor::execute_sync (no trace data)
+    //   trace_prep -- FastProcessor::execute_trace_inputs_sync (the input to prove_from_trace_sync)
+    //   prove      -- prove_sync (= trace_prep + STARK prove)
+    //   verify     -- miden_vm::verify against a proof generated once outside the timed loop
+    group.bench_function("exec", |b| {
         b.iter_batched(
-            || {
-                let host = DefaultHost::default();
-                let processor = FastProcessor::new_with_options(
-                    StackInputs::default(),
-                    AdviceInputs::default(),
-                    ExecutionOptions::default(),
-                );
-                (host, program.clone(), processor)
-            },
+            || processor_inputs(&program),
             |(mut host, program, processor)| {
-                black_box(processor.execute_sync(&program, &mut host).expect("execute"));
+                black_box(processor.execute_sync(&program, &mut host).expect("exec"));
             },
             BatchSize::SmallInput,
         );
     });
 
-    group.bench_function("execute_and_prove", |b| {
+    group.bench_function("trace_prep", |b| {
+        b.iter_batched(
+            || processor_inputs(&program),
+            |(mut host, program, processor)| {
+                black_box(
+                    processor.execute_trace_inputs_sync(&program, &mut host).expect("trace_prep"),
+                );
+            },
+            BatchSize::SmallInput,
+        );
+    });
+
+    group.bench_function("prove", |b| {
         b.iter_batched(
             || {
                 let host = DefaultHost::default();
@@ -217,6 +237,33 @@ fn bench_one_scenario(
                         ProvingOptions::default(),
                     )
                     .expect("prove"),
+                );
+            },
+            BatchSize::SmallInput,
+        );
+    });
+
+    // Generate one proof outside the timed loop so prove_sync time isn't counted toward verify.
+    let program_info = ProgramInfo::from(program.clone());
+    let (stack_outputs, proof) = {
+        let mut host = DefaultHost::default();
+        prove_sync(
+            &program,
+            StackInputs::default(),
+            AdviceInputs::default(),
+            &mut host,
+            ExecutionOptions::default(),
+            ProvingOptions::default(),
+        )
+        .expect("prove for verify setup")
+    };
+    group.bench_function("verify", |b| {
+        b.iter_batched(
+            || (program_info.clone(), StackInputs::default(), stack_outputs, proof.clone()),
+            |(program_info, stack_inputs, stack_outputs, proof)| {
+                black_box(
+                    miden_vm::verify(program_info, stack_inputs, stack_outputs, proof)
+                        .expect("verify"),
                 );
             },
             BatchSize::SmallInput,

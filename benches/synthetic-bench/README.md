@@ -146,9 +146,9 @@ Proving cost is dominated by the padded (power-of-two) length of each
 trace segment, not by the raw row count. So the only assertions that
 can fail the bench are on two padded proxies:
 
-- `padded_core_side = next_pow2(max(core_rows, range_rows))` -- the
-  non-chiplets side of the AIR.
-- `padded_chiplets   = next_pow2(chiplets_rows)`.
+- `padded_core_side = max(64, next_pow2(max(core_rows, range_rows)))`
+  -- the non-chiplets side of the AIR.
+- `padded_chiplets   = max(64, next_pow2(chiplets_rows))`.
 
 These two can land in *different* brackets on the same workload --
 `consume two P2ID notes`, for example, has `padded_core_side = 131072`
