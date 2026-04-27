@@ -1,31 +1,28 @@
-//! Snapshot schema shared by the protocol-side producer and the VM-side synthetic benchmark.
+//! Snapshot schema for the VM-side synthetic benchmark.
 //!
-//! `trace` contains the hard-target totals used by the verifier:
-//! - `core_rows`
-//! - `chiplets_rows`
-//! - `range_rows`
+//! A producer JSON file (e.g. `bench-tx.json` from `protocol/bin/bench-transaction/`) maps
+//! scenario keys to entries; only the `trace` section of each entry is consumed.
 //!
-//! `shape` contains an advisory per-chiplet breakdown used by the solver to keep the synthetic
-//! workload representative. The loader validates `trace.chiplets_rows == shape.chiplets_sum()`.
+//! `trace` carries the AIR-side row totals used by the verifier (`core_rows`, `chiplets_rows`,
+//! `range_rows`). `shape` (nested under `trace`) is an advisory per-chiplet breakdown used by the
+//! solver. The loader checks `trace.chiplets_rows == shape.chiplets_sum()`.
 
-use std::path::Path;
+use std::{collections::BTreeMap, path::Path};
 
-use serde::{Deserialize, Serialize};
-
-/// Schema version this crate understands.
-pub const CURRENT_SCHEMA_VERSION: &str = "0";
+use serde::Deserialize;
 
 /// Mirrors `miden_air::trace::MIN_TRACE_LEN`. Keep in sync when the processor's minimum padded
 /// length changes.
 const MIN_TRACE_LEN: u64 = 64;
 
-/// A snapshot captured from a representative transaction execution.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// A single scenario's trace snapshot, extracted from a producer JSON file.
+///
+/// On disk, `shape` is nested under `trace` (`{ "trace": { "core_rows": ..., "shape": ... } }`).
+/// Here `shape` is a sibling of `trace` so callers can write `snap.shape.hasher_rows` instead of
+/// `snap.trace.shape.hasher_rows`; `RawScenarioEntry` / `RawTrace` below bridge the layouts at
+/// deserialization time.
+#[derive(Debug, Clone)]
 pub struct TraceSnapshot {
-    pub schema_version: String,
-    pub source: String,
-    pub timestamp: String,
-    pub miden_vm_version: String,
     /// Hard-target totals. The verifier's bracket check operates on these.
     pub trace: TraceTotals,
     /// Advisory per-chiplet breakdown used by the solver for shaping.
@@ -33,7 +30,7 @@ pub struct TraceSnapshot {
 }
 
 /// Hard-target aggregates -- the verifier's primary contract.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TraceTotals {
     /// System + decoder + stack trace length.
     pub core_rows: u64,
@@ -48,7 +45,7 @@ pub struct TraceTotals {
 /// Per-chiplet row counts. Advisory only -- the solver uses these to size individual snippets so
 /// the synthetic program stays representative (hasher work looks like hasher work, not a pile of
 /// decoder-pad), but the verifier does not treat individual values as hard targets.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
 pub struct TraceBreakdown {
     pub hasher_rows: u64,
     pub bitwise_rows: u64,
@@ -132,37 +129,56 @@ impl TraceShape {
 }
 
 impl TraceSnapshot {
-    /// Load a snapshot from disk, validate its schema version, and cross-check the internal
-    /// consistency of the two tiers.
-    pub fn load(path: impl AsRef<Path>) -> Result<Self, SnapshotError> {
-        let bytes = std::fs::read(path.as_ref()).map_err(|source| SnapshotError::Io {
-            path: path.as_ref().display().to_string(),
-            source,
-        })?;
-        let snap: Self = serde_json::from_slice(&bytes).map_err(SnapshotError::Parse)?;
+    /// Load every scenario in a producer JSON file, returning `(scenario_key, snapshot)` pairs in
+    /// alphabetical order. Each scenario's trace section is extracted; cycle counts and other
+    /// per-scenario fields are ignored.
+    pub fn load_all(path: impl AsRef<Path>) -> Result<Vec<(String, Self)>, SnapshotError> {
+        let path_str = path.as_ref().display().to_string();
+        let bytes = std::fs::read(path.as_ref())
+            .map_err(|source| SnapshotError::Io { path: path_str, source })?;
+        let raw: BTreeMap<String, RawScenarioEntry> =
+            serde_json::from_slice(&bytes).map_err(SnapshotError::Parse)?;
 
-        if snap.schema_version != CURRENT_SCHEMA_VERSION {
-            return Err(SnapshotError::SchemaVersion {
-                file: snap.schema_version,
-                supported: CURRENT_SCHEMA_VERSION,
-            });
+        let mut out = Vec::with_capacity(raw.len());
+        for (key, entry) in raw {
+            let trace = TraceTotals {
+                core_rows: entry.trace.core_rows,
+                chiplets_rows: entry.trace.chiplets_rows,
+                range_rows: entry.trace.range_rows,
+            };
+            let shape = entry.trace.shape;
+            let expected = shape.chiplets_sum();
+            if trace.chiplets_rows != expected {
+                return Err(SnapshotError::InconsistentChipletsTotal {
+                    scenario: key,
+                    from_trace: trace.chiplets_rows,
+                    from_shape: expected,
+                });
+            }
+            out.push((key, TraceSnapshot { trace, shape }));
         }
-
-        let expected = snap.shape.chiplets_sum();
-        if snap.trace.chiplets_rows != expected {
-            return Err(SnapshotError::InconsistentChipletsTotal {
-                from_trace: snap.trace.chiplets_rows,
-                from_shape: expected,
-            });
-        }
-
-        Ok(snap)
+        Ok(out)
     }
 
     /// Combined target shape that the solver and verifier consume.
     pub fn shape(&self) -> TraceShape {
         TraceShape::new(self.trace, self.shape)
     }
+}
+
+/// Each scenario entry in a producer JSON. The producer also writes cycle counts at the top level
+/// (`prologue`, `epilogue`, ...), but the consumer ignores everything except `trace`.
+#[derive(Deserialize)]
+struct RawScenarioEntry {
+    trace: RawTrace,
+}
+
+#[derive(Deserialize)]
+struct RawTrace {
+    core_rows: u64,
+    chiplets_rows: u64,
+    range_rows: u64,
+    shape: TraceBreakdown,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -176,45 +192,57 @@ pub enum SnapshotError {
     #[error("failed to parse snapshot JSON: {0}")]
     Parse(#[source] serde_json::Error),
     #[error(
-        "unsupported snapshot schema version {file:?}; this crate understands version {supported:?}"
+        "snapshot inconsistency in scenario {scenario:?}: trace.chiplets_rows = {from_trace} but shape sums to {from_shape}"
     )]
-    SchemaVersion { file: String, supported: &'static str },
-    #[error(
-        "snapshot inconsistency: trace.chiplets_rows = {from_trace} but shape sums to {from_shape}"
-    )]
-    InconsistentChipletsTotal { from_trace: u64, from_shape: u64 },
+    InconsistentChipletsTotal {
+        scenario: String,
+        from_trace: u64,
+        from_shape: u64,
+    },
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    struct CommittedSnapshotExpectation {
-        file_stem: &'static str,
-        source: &'static str,
+    /// Expected padded brackets for each committed scenario. Keyed by `(producer_stem,
+    /// scenario_key)` since each producer file holds many scenarios. A mismatch means refresh
+    /// the snapshot from the producer before updating these numbers.
+    struct CommittedScenarioExpectation {
+        producer_stem: &'static str,
+        scenario_key: &'static str,
         padded_core_side: u64,
         padded_chiplets: u64,
     }
 
-    const COMMITTED_SNAPSHOT_EXPECTATIONS: &[CommittedSnapshotExpectation] = &[
-        CommittedSnapshotExpectation {
-            file_stem: "consume-single-p2id",
-            source: "protocol/bench-transaction:consume-single-p2id",
+    const COMMITTED_SCENARIO_EXPECTATIONS: &[CommittedScenarioExpectation] = &[
+        CommittedScenarioExpectation {
+            producer_stem: "bench-tx",
+            scenario_key: "consume single P2ID note",
             padded_core_side: 131_072,
             padded_chiplets: 131_072,
         },
-        CommittedSnapshotExpectation {
-            file_stem: "consume-two-p2id",
-            source: "protocol/bench-transaction:consume-two-p2id",
+        CommittedScenarioExpectation {
+            producer_stem: "bench-tx",
+            scenario_key: "consume two P2ID notes",
             padded_core_side: 131_072,
             padded_chiplets: 262_144,
         },
+        CommittedScenarioExpectation {
+            producer_stem: "bench-tx",
+            scenario_key: "create single P2ID note",
+            padded_core_side: 131_072,
+            padded_chiplets: 131_072,
+        },
     ];
 
-    fn expectation_for(file_stem: &str) -> Option<&'static CommittedSnapshotExpectation> {
-        COMMITTED_SNAPSHOT_EXPECTATIONS
-            .iter()
-            .find(|expected| expected.file_stem == file_stem)
+    fn expectation_for(
+        producer_stem: &str,
+        scenario_key: &str,
+    ) -> Option<&'static CommittedScenarioExpectation> {
+        COMMITTED_SCENARIO_EXPECTATIONS.iter().find(|expected| {
+            expected.producer_stem == producer_stem && expected.scenario_key == scenario_key
+        })
     }
 
     fn sample_shape() -> (TraceTotals, TraceBreakdown) {
@@ -282,92 +310,144 @@ mod tests {
     }
 
     #[test]
-    fn committed_snapshots_roundtrip() {
+    fn committed_snapshots_load() {
+        use std::collections::BTreeSet;
+
         let snapshots_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("snapshots");
         let entries = std::fs::read_dir(&snapshots_dir)
             .unwrap_or_else(|e| panic!("read {}: {e}", snapshots_dir.display()));
-        let mut discovered = Vec::new();
+
+        // Defer the table-vs-files check to the end so a single test run reports all drift,
+        // not just the first mismatch.
+        let mut discovered: BTreeSet<(String, String)> = BTreeSet::new();
+        let mut unexpected: BTreeSet<(String, String)> = BTreeSet::new();
         for entry in entries {
             let path = entry.expect("dir entry").path();
             if path.extension().and_then(|e| e.to_str()) != Some("json") {
                 continue;
             }
-            let file_stem = path.file_stem().and_then(|s| s.to_str()).expect("snapshot stem");
-            let expected = expectation_for(file_stem)
-                .unwrap_or_else(|| panic!("unexpected committed snapshot: {}", path.display()));
-            let snap = TraceSnapshot::load(&path)
+            let producer_stem =
+                path.file_stem().and_then(|s| s.to_str()).expect("producer stem").to_string();
+            let scenarios = TraceSnapshot::load_all(&path)
                 .unwrap_or_else(|e| panic!("load {}: {e}", path.display()));
-            assert_eq!(snap.schema_version, CURRENT_SCHEMA_VERSION);
-            assert_eq!(snap.source, expected.source);
-            assert!(snap.trace.core_rows > 0);
-            assert!(snap.trace.chiplets_rows > 0);
-            assert_eq!(snap.trace.chiplets_rows, snap.shape.chiplets_sum());
-            assert_eq!(snap.trace.padded_core_side(), expected.padded_core_side);
-            assert_eq!(snap.trace.padded_chiplets(), expected.padded_chiplets);
+            assert!(!scenarios.is_empty(), "{} contained no scenarios", path.display());
+            for (key, snap) in &scenarios {
+                assert!(snap.trace.core_rows > 0, "{key}: core_rows must be > 0");
+                assert!(snap.trace.chiplets_rows > 0, "{key}: chiplets_rows must be > 0");
+                assert_eq!(
+                    snap.trace.chiplets_rows,
+                    snap.shape.chiplets_sum(),
+                    "{key}: chiplets_rows must equal sum(shape) + 1",
+                );
 
-            let reserialized = serde_json::to_string(&snap).expect("reserialize");
-            let roundtripped: TraceSnapshot =
-                serde_json::from_str(&reserialized).expect("deserialize reserialized");
-            assert_eq!(snap.trace, roundtripped.trace);
-            assert_eq!(snap.shape, roundtripped.shape);
-            discovered.push(file_stem.to_string());
+                match expectation_for(&producer_stem, key) {
+                    Some(expected) => {
+                        assert_eq!(
+                            snap.trace.padded_core_side(),
+                            expected.padded_core_side,
+                            "{producer_stem}/{key}: padded_core_side moved to a different bracket; \
+                             refresh the snapshot and update COMMITTED_SCENARIO_EXPECTATIONS",
+                        );
+                        assert_eq!(
+                            snap.trace.padded_chiplets(),
+                            expected.padded_chiplets,
+                            "{producer_stem}/{key}: padded_chiplets moved to a different bracket; \
+                             refresh the snapshot and update COMMITTED_SCENARIO_EXPECTATIONS",
+                        );
+                        discovered.insert((producer_stem.clone(), key.clone()));
+                    },
+                    None => {
+                        unexpected.insert((producer_stem.clone(), key.clone()));
+                    },
+                }
+            }
         }
-        discovered.sort();
-        let mut expected: Vec<_> = COMMITTED_SNAPSHOT_EXPECTATIONS
+
+        let expected: BTreeSet<(String, String)> = COMMITTED_SCENARIO_EXPECTATIONS
             .iter()
-            .map(|expected| expected.file_stem)
+            .map(|e| (e.producer_stem.to_string(), e.scenario_key.to_string()))
             .collect();
-        expected.sort();
-        assert_eq!(discovered, expected);
+        let missing: BTreeSet<_> = expected.difference(&discovered).cloned().collect();
+        assert!(
+            unexpected.is_empty() && missing.is_empty(),
+            "committed scenarios drifted from COMMITTED_SCENARIO_EXPECTATIONS in snapshot.rs:\n  \
+             unexpected (in snapshots/ but not in the table -- add an entry): {unexpected:?}\n  \
+             missing    (in the table but not in any snapshots/*.json -- refresh the snapshot or remove the entry): {missing:?}",
+        );
     }
 
     #[test]
     fn missing_optional_fields_default_to_zero() {
         let minimal = r#"{
-            "schema_version": "0",
-            "source": "test",
-            "timestamp": "t",
-            "miden_vm_version": "x",
-            "trace": { "core_rows": 100, "chiplets_rows": 11, "range_rows": 50 },
-            "shape": { "hasher_rows": 10, "bitwise_rows": 0, "memory_rows": 0 }
+            "consume single P2ID note": {
+                "trace": {
+                    "core_rows": 100,
+                    "chiplets_rows": 11,
+                    "range_rows": 50,
+                    "shape": { "hasher_rows": 10, "bitwise_rows": 0, "memory_rows": 0 }
+                }
+            }
         }"#;
-        let snap: TraceSnapshot = serde_json::from_str(minimal).expect("parse minimal");
+        let tmp = std::env::temp_dir().join("synthetic-bench-defaults.json");
+        std::fs::write(&tmp, minimal).unwrap();
+        let scenarios = TraceSnapshot::load_all(&tmp).expect("load defaults snapshot");
+        let _ = std::fs::remove_file(&tmp);
+        let (_, snap) = &scenarios[0];
         assert_eq!(snap.shape.kernel_rom_rows, 0);
         assert_eq!(snap.shape.ace_rows, 0);
     }
 
     #[test]
-    fn rejects_unsupported_schema_version() {
-        let wrong = r#"{
-            "schema_version": "9999",
-            "source": "test",
-            "timestamp": "t",
-            "miden_vm_version": "x",
-            "trace": { "core_rows": 100, "chiplets_rows": 11, "range_rows": 0 },
-            "shape": { "hasher_rows": 10, "bitwise_rows": 0, "memory_rows": 0 }
+    fn rejects_inconsistent_chiplets_total() {
+        // chiplets_rows says 500 but the breakdown sums to 11 (10 + 0 + 0 + 0 + 0 + 1).
+        let mismatched = r#"{
+            "broken": {
+                "trace": {
+                    "core_rows": 100,
+                    "chiplets_rows": 500,
+                    "range_rows": 0,
+                    "shape": { "hasher_rows": 10, "bitwise_rows": 0, "memory_rows": 0 }
+                }
+            }
         }"#;
-        let tmp = std::env::temp_dir().join("synthetic-tx-kernel-schema-wrong-version.json");
-        std::fs::write(&tmp, wrong).unwrap();
-        let err = TraceSnapshot::load(&tmp).expect_err("expected schema version rejection");
-        assert!(matches!(err, SnapshotError::SchemaVersion { .. }));
+        let tmp = std::env::temp_dir().join("synthetic-bench-chiplets-mismatch.json");
+        std::fs::write(&tmp, mismatched).unwrap();
+        let err = TraceSnapshot::load_all(&tmp).expect_err("expected inconsistency rejection");
         let _ = std::fs::remove_file(&tmp);
+        assert!(matches!(err, SnapshotError::InconsistentChipletsTotal { .. }));
     }
 
     #[test]
-    fn rejects_inconsistent_chiplets_total() {
-        // chiplets_rows says 500 but the breakdown sums to 11 (10 + 0 + 0 + 1).
-        let mismatched = r#"{
-            "schema_version": "0",
-            "source": "test",
-            "timestamp": "t",
-            "miden_vm_version": "x",
-            "trace": { "core_rows": 100, "chiplets_rows": 500, "range_rows": 0 },
-            "shape": { "hasher_rows": 10, "bitwise_rows": 0, "memory_rows": 0 }
+    fn ignores_extra_fields_per_scenario() {
+        // Real bench-tx.json has cycle-count siblings (prologue, epilogue, ...) we don't care
+        // about; the loader must tolerate them.
+        let realistic = r#"{
+            "consume single P2ID note": {
+                "prologue": 3501,
+                "notes_processing": 1761,
+                "epilogue": { "total": 72351 },
+                "trace": {
+                    "core_rows": 77699,
+                    "chiplets_rows": 123129,
+                    "range_rows": 20203,
+                    "shape": {
+                        "hasher_rows": 120352,
+                        "bitwise_rows": 416,
+                        "memory_rows": 2297,
+                        "kernel_rom_rows": 63,
+                        "ace_rows": 0
+                    }
+                }
+            }
         }"#;
-        let tmp = std::env::temp_dir().join("synthetic-tx-kernel-chiplets-mismatch.json");
-        std::fs::write(&tmp, mismatched).unwrap();
-        let err = TraceSnapshot::load(&tmp).expect_err("expected inconsistency rejection");
-        assert!(matches!(err, SnapshotError::InconsistentChipletsTotal { .. }));
+        let tmp = std::env::temp_dir().join("synthetic-bench-realistic.json");
+        std::fs::write(&tmp, realistic).unwrap();
+        let scenarios = TraceSnapshot::load_all(&tmp).expect("load realistic snapshot");
         let _ = std::fs::remove_file(&tmp);
+        assert_eq!(scenarios.len(), 1);
+        let (key, snap) = &scenarios[0];
+        assert_eq!(key, "consume single P2ID note");
+        assert_eq!(snap.trace.core_rows, 77_699);
+        assert_eq!(snap.shape.hasher_rows, 120_352);
     }
 }

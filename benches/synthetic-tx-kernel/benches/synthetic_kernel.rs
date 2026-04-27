@@ -3,16 +3,17 @@
 //! Pipeline each bench run:
 //!   1. Calibrate each snippet's per-iteration cost against the current VM (shared across all
 //!      snapshots in this run).
-//!   2. For each snapshot JSON (every `snapshots/*.json`, or the single file in `SYNTH_SNAPSHOT`):
-//!      solve for per-snippet iteration counts, emit the resulting MASM program, verify it lands in
-//!      the snapshot's padded-trace bracket, and run `execute` + `execute_and_prove` Criterion
-//!      benches.
+//!   2. For each producer JSON (every `snapshots/*.json`, or the single file in `SYNTH_SNAPSHOT`),
+//!      load every scenario it contains and: solve for per-snippet iteration counts, emit the
+//!      resulting MASM program, verify it lands in the scenario's padded-trace bracket, and run
+//!      `execute` + `execute_and_prove` Criterion benches.
 //!
 //! Env vars:
-//! - `SYNTH_SNAPSHOT`: path to a single snapshot JSON; if set, only this snapshot is benched.
-//!   Otherwise every `snapshots/*.json` in the manifest dir is used.
+//! - `SYNTH_SNAPSHOT`: path to a single producer JSON; if set, only this file is benched. Otherwise
+//!   every `snapshots/*.json` in the manifest dir is used.
+//! - `SYNTH_SCENARIO`: if set, only scenarios whose key contains this substring are benched.
 //! - `SYNTH_MASM_WRITE`: if set, write the emitted MASM to
-//!   `target/synthetic_kernel_<snapshot-stem>.masm`.
+//!   `target/synthetic_kernel_<producer-stem>__<scenario-slug>.masm`.
 
 use std::{hint::black_box, path::PathBuf, time::Duration};
 
@@ -44,6 +45,25 @@ fn resolve_snapshot_paths() -> Vec<PathBuf> {
     paths
 }
 
+/// Lower-case ASCII slug; non-alphanumerics collapse to single `-` separators.
+fn slugify(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut last_was_dash = true;
+    for ch in s.chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch.to_ascii_lowercase());
+            last_was_dash = false;
+        } else if !last_was_dash {
+            out.push('-');
+            last_was_dash = true;
+        }
+    }
+    while out.ends_with('-') {
+        out.pop();
+    }
+    out
+}
+
 fn synthetic_transaction_kernel(c: &mut Criterion) {
     let calibration = calibrate().expect("failed to calibrate snippets");
     println!("\n=== calibration (rows/iter)");
@@ -55,27 +75,34 @@ fn synthetic_transaction_kernel(c: &mut Criterion) {
         );
     }
 
+    let scenario_filter = std::env::var("SYNTH_SCENARIO").ok();
+    let mut benched_anything = false;
     for path in resolve_snapshot_paths() {
-        bench_one_snapshot(c, &calibration, &path);
+        let producer_stem =
+            path.file_stem().and_then(|s| s.to_str()).unwrap_or("unknown").to_string();
+        let scenarios = TraceSnapshot::load_all(&path)
+            .unwrap_or_else(|e| panic!("failed to load snapshot at {}: {e}", path.display()));
+        for (scenario_key, snapshot) in scenarios {
+            if let Some(filter) = &scenario_filter
+                && !scenario_key.contains(filter.as_str())
+            {
+                continue;
+            }
+            bench_one_scenario(c, &calibration, &producer_stem, &scenario_key, &snapshot);
+            benched_anything = true;
+        }
     }
+    assert!(benched_anything, "no scenarios matched (filter: {scenario_filter:?})",);
 }
 
-fn bench_one_snapshot(c: &mut Criterion, calibration: &Calibration, snapshot_path: &PathBuf) {
-    let snapshot = TraceSnapshot::load(snapshot_path)
-        .unwrap_or_else(|e| panic!("failed to load snapshot at {}: {e}", snapshot_path.display()));
-
-    println!("\n=== snapshot: {}", snapshot_path.display());
-    println!("    source:  {}", snapshot.source);
-    println!("    vm_ver:  {}", snapshot.miden_vm_version);
-
-    let local_vm_version = env!("CARGO_PKG_VERSION");
-    if !versions_align(&snapshot.miden_vm_version, local_vm_version) {
-        println!(
-            "    WARNING: snapshot captured against miden-vm {}, consumer is running {}; \
-             continuing because version skew is expected when protocol lags miden-vm",
-            snapshot.miden_vm_version, local_vm_version,
-        );
-    }
+fn bench_one_scenario(
+    c: &mut Criterion,
+    calibration: &Calibration,
+    producer_stem: &str,
+    scenario_key: &str,
+    snapshot: &TraceSnapshot,
+) {
+    println!("\n=== scenario: {producer_stem} / {scenario_key}");
     println!(
         "    trace:   core={} chiplets={} range={} (padded_total={})",
         snapshot.trace.core_rows,
@@ -110,13 +137,13 @@ fn bench_one_snapshot(c: &mut Criterion, calibration: &Calibration, snapshot_pat
         println!("    {:<14} iters={}", snippet.name, plan.iters(snippet.name),);
     }
 
-    let snapshot_stem = snapshot_path.file_stem().and_then(|s| s.to_str()).unwrap_or("unknown");
+    let scenario_slug = slugify(scenario_key);
 
     let source = emit(&plan);
     if std::env::var("SYNTH_MASM_WRITE").is_ok() {
         let out = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("target")
-            .join(format!("synthetic_kernel_{snapshot_stem}.masm"));
+            .join(format!("synthetic_kernel_{producer_stem}__{scenario_slug}.masm"));
         std::fs::create_dir_all(out.parent().expect("parent"))
             .expect("create target dir for MASM dump");
         std::fs::write(&out, &source).expect("write MASM dump");
@@ -128,14 +155,15 @@ fn bench_one_snapshot(c: &mut Criterion, calibration: &Calibration, snapshot_pat
     println!("\n=== verification\n{report}");
     assert!(
         report.brackets_match(),
-        "emitted program lands in a different padded-trace bracket than the snapshot",
+        "emitted program lands in a different padded-trace bracket than the scenario target",
     );
 
     let program = Assembler::default()
         .assemble_program(&source)
         .expect("assemble emitted program");
 
-    let mut group = c.benchmark_group(format!("synthetic_transaction_kernel/{snapshot_stem}"));
+    let mut group =
+        c.benchmark_group(format!("synthetic_transaction_kernel/{producer_stem}/{scenario_slug}"));
     group
         .sampling_mode(SamplingMode::Flat)
         .sample_size(10)
@@ -186,14 +214,6 @@ fn bench_one_snapshot(c: &mut Criterion, calibration: &Calibration, snapshot_pat
     });
 
     group.finish();
-}
-
-/// Returns true when snapshot and local versions agree on `major.minor`. Patch differences are
-/// ignored.
-fn versions_align(snapshot: &str, local: &str) -> bool {
-    let mut s = snapshot.split('.');
-    let mut l = local.split('.');
-    (s.next(), s.next()) == (l.next(), l.next())
 }
 
 /// Panic if any snippet's plan iteration count would overflow its counter beyond `u32::MAX` (which
