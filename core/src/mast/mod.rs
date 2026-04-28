@@ -647,6 +647,10 @@ impl MastForest {
         before_enter: &[DecoratorId],
         after_exit: &[DecoratorId],
     ) {
+        if before_enter.is_empty() && after_exit.is_empty() {
+            return;
+        }
+
         self.debug_info.register_node_decorators(node_id, before_enter, after_exit);
     }
 
