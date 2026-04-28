@@ -97,11 +97,25 @@ jobs:
         run: >
           cargo install
           --path .tmp/masm-lsp/crates/masm-lint
+      - name: Prepare MASM sources for masm-lint
+        run: |
+          cp -R crates/lib/core/asm .tmp/masm-core-asm
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          # The current upstream masm-lint parser still expects the pre-0.23
+          # immediate form for adv_push. Lint a temporary syntax-normalized copy
+          # until masm-lint moves to the 0.23 Miden parser.
+          pattern = re.compile(r"(?<![\w.])adv_push(?![\w.])")
+          for path in Path(".tmp/masm-core-asm").rglob("*.masm"):
+              path.write_text(pattern.sub("adv_push.1", path.read_text()))
+          PY
       - name: Lint MASM core library
         run: >
           masm-lint --no-color
-          --library miden::core=crates/lib/core/asm
-          crates/lib/core/asm
+          --library miden::core=.tmp/masm-core-asm
+          .tmp/masm-core-asm
 
   clippy:
     name: clippy nightly on ubuntu-latest
