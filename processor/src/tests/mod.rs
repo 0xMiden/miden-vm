@@ -17,13 +17,37 @@ use miden_utils_testing::{
 
 /// Tests in this file make sure that diagnostics presented to the user are as expected.
 use crate::{
-    DefaultHost, FastProcessor, Kernel, ONE, Program, StackInputs, Word, ZERO,
-    advice::{AdviceInputs, AdviceMap},
+    DefaultHost, FastProcessor, Kernel, ONE, ProcessorState, Program, StackInputs, Word, ZERO,
+    advice::{AdviceInputs, AdviceMap, AdviceMutation},
+    event::{EventError, EventHandler, EventName},
     operation::Operation,
 };
 
 mod debug;
 mod debug_mode_decorator_tests;
+
+#[derive(Debug, thiserror::Error)]
+#[error("dummy host event failure")]
+struct DummyHostEventError;
+
+struct AlwaysFailEventHandler;
+
+impl EventHandler for AlwaysFailEventHandler {
+    fn on_event(&self, _process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
+        Err(DummyHostEventError.into())
+    }
+}
+
+struct DuplicateMapMutationHandler;
+
+impl EventHandler for DuplicateMapMutationHandler {
+    fn on_event(&self, _process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
+        Ok(vec![AdviceMutation::extend_map(AdviceMap::from_iter([(
+            Word::default(),
+            vec![ONE],
+        )]))])
+    }
+}
 
 // AdviceMap inlined in the script
 // ------------------------------------------------------------------------------------------------
@@ -37,7 +61,7 @@ begin
   push.A
   adv.push_mapval
   dropw
-  adv_push.1
+  adv_push
   push.1
   assert_eq
 end";
@@ -140,6 +164,76 @@ fn test_diagnostic_advice_map_key_not_found_2() {
     );
 }
 
+// Host event diagnostics
+// ------------------------------------------------------------------------------------------------
+
+#[test]
+fn test_diagnostic_host_event_error_uses_emit_location() {
+    let event = EventName::new("test::host_event_error");
+    let source_manager = Arc::new(DefaultSourceManager::default());
+    let source = format!(
+        "
+        begin
+            push.1 emit.event(\"{event}\")
+        end"
+    );
+    let program = Assembler::new(source_manager.clone()).assemble_program(source).unwrap();
+    let mut host = DefaultHost::default().with_source_manager(source_manager);
+    host.register_handler(event.clone(), Arc::new(AlwaysFailEventHandler)).unwrap();
+
+    let processor = FastProcessor::new(StackInputs::default())
+        .with_advice(AdviceInputs::default())
+        .with_debugging(true)
+        .with_tracing(true);
+    let err = processor.execute_sync(&program, &mut host).expect_err("expected error");
+    #[rustfmt::skip]
+    assert_diagnostic_lines!(
+        err,
+        format!("  x error during processing of event '{event}' (ID: {})", event.to_event_id()),
+        "  `-> dummy host event failure",
+        regex!(r#",-\[::\$exec:3:20\]"#),
+        " 2 |         begin",
+      r#" 3 |             push.1 emit.event("test::host_event_error")"#,
+        "   :                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^",
+        " 4 |         end",
+        "   `----"
+    );
+}
+
+#[test]
+fn test_diagnostic_host_event_advice_error_uses_emit_location() {
+    let event = EventName::new("test::host_event_advice_error");
+    let source_manager = Arc::new(DefaultSourceManager::default());
+    let source = format!(
+        "
+        begin
+            push.1 emit.event(\"{event}\")
+        end"
+    );
+    let program = Assembler::new(source_manager.clone()).assemble_program(source).unwrap();
+    let mut host = DefaultHost::default().with_source_manager(source_manager);
+    host.register_handler(event.clone(), Arc::new(DuplicateMapMutationHandler))
+        .unwrap();
+
+    let processor = FastProcessor::new(StackInputs::default())
+        .with_advice(AdviceInputs::default().with_map([(Word::default(), vec![ZERO])]))
+        .with_debugging(true)
+        .with_tracing(true);
+    let err = processor.execute_sync(&program, &mut host).expect_err("expected error");
+    #[rustfmt::skip]
+    assert_diagnostic_lines!(
+        err,
+        "  x value for key 0x0000000000000000000000000000000000000000000000000000000000000000 already present in the advice map",
+        regex!(r#",-\[::\$exec:3:20\]"#),
+        " 2 |         begin",
+      r#" 3 |             push.1 emit.event("test::host_event_advice_error")"#,
+        "   :                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^",
+        " 4 |         end",
+        "   `----",
+        "help: previous values at key were '[0]'. Operation would have replaced them with '[1]'"
+    );
+}
+
 // AdviceStackReadFailed
 // ------------------------------------------------------------------------------------------------
 
@@ -147,7 +241,7 @@ fn test_diagnostic_advice_map_key_not_found_2() {
 fn test_diagnostic_advice_stack_read_failed() {
     let source = "
         begin
-            swap adv_push.1 trace.2
+            swap adv_push trace.2
         end";
 
     let build_test = build_test_by_mode!(true, source, &[1, 2]);
@@ -157,8 +251,8 @@ fn test_diagnostic_advice_stack_read_failed() {
         "  x advice stack read failed",
         regex!(r#",-\[test[\d]+:3:18\]"#),
         " 2 |         begin",
-        " 3 |             swap adv_push.1 trace.2",
-        "   :                  ^^^^^^^^^^",
+        " 3 |             swap adv_push trace.2",
+        "   :                  ^^^^^^^^",
         " 4 |         end",
         "   `----"
     );

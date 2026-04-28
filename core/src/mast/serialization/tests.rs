@@ -477,7 +477,7 @@ fn assert_serialized_view_matches_forest(forest: &MastForest) {
     let view = SerializedMastForest::new(&bytes).unwrap();
     assert_eq!(view.node_count(), forest.nodes().len());
 
-    let mut bb_builder = super::basic_blocks::BasicBlockDataBuilder::new();
+    let mut bb_builder = BasicBlockDataBuilder::new();
     for (idx, node) in forest.nodes().iter().enumerate() {
         let ops_offset = if let MastNode::Block(block) = node {
             bb_builder.encode_basic_block(block)
@@ -1492,7 +1492,7 @@ fn assert_untrusted_overspec_logging(
     let (budgeted, budgeted_flags) = UntrustedMastForest::read_from_bytes_with_budgets_and_flags(
         bytes,
         bytes.len(),
-        super::default_untrusted_allocation_budget(bytes.len()),
+        default_untrusted_allocation_budget(bytes.len()),
     )
     .unwrap();
     assert_eq!(budgeted_flags, expected_flags);
@@ -1544,7 +1544,8 @@ fn test_untrusted_hashless_validate_recomputes_without_wire_hash_section() {
     let join = JoinNodeBuilder::new([block1, block2]).add_to_forest(&mut forest).unwrap();
     forest.make_root(join);
 
-    let expected_digests: Vec<_> = forest.nodes().iter().map(|node| node.digest()).collect();
+    let expected_digests: Vec<_> =
+        forest.nodes().iter().map(super::super::node::MastNodeExt::digest).collect();
 
     let mut hashless_bytes = Vec::new();
     forest.write_hashless(&mut hashless_bytes);
@@ -1554,7 +1555,8 @@ fn test_untrusted_hashless_validate_recomputes_without_wire_hash_section() {
     assert_eq!(flags, 0x03);
 
     let validated = untrusted.validate().unwrap();
-    let validated_digests: Vec<_> = validated.nodes().iter().map(|node| node.digest()).collect();
+    let validated_digests: Vec<_> =
+        validated.nodes().iter().map(super::super::node::MastNodeExt::digest).collect();
     assert_eq!(validated_digests, expected_digests);
 }
 
@@ -2564,9 +2566,9 @@ fn test_deserialization_rejects_excessive_node_count() {
 fn test_untrusted_deserialization_rejects_node_count_above_budget_bound() {
     let mut bytes = Vec::new();
 
-    super::MAGIC.write_into(&mut bytes);
+    MAGIC.write_into(&mut bytes);
     bytes.write_u8(FLAG_STRIPPED | FLAG_HASHLESS);
-    super::VERSION.write_into(&mut bytes);
+    VERSION.write_into(&mut bytes);
 
     2usize.write_into(&mut bytes);
 
@@ -2625,7 +2627,7 @@ fn test_untrusted_stripped_debug_info_budget_uses_usize_slots() {
     forest.write_stripped(&mut bytes);
 
     let validation_budget =
-        (usize::try_from(forest.num_nodes()).unwrap() + 1) * core::mem::size_of::<usize>() - 1;
+        (usize::try_from(forest.num_nodes()).unwrap() + 1) * size_of::<usize>() - 1;
     let result =
         UntrustedMastForest::read_from_bytes_with_budgets(&bytes, bytes.len(), validation_budget);
     assert!(result.is_err());

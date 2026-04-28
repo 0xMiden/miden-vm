@@ -56,7 +56,7 @@ const SIG_LEN_FELTS = 16      # 64.div_ceil(4)
 @locals(72)
 pub proc verify
     # Load the public key (8 felts = 32 bytes) from advice into locaddr[0..8]
-    padw adv_loadw loc_storew_le.0
+    adv_pushw loc_storew_le.0
     adv_loadw loc_storew_le.4 dropw
     # => [PK_COMM, MSG, ...]
 
@@ -70,7 +70,7 @@ pub proc verify
     # => [...]
 
     # Load the signature (16 felts = 64 bytes) from advice into locaddr[16..32]
-    padw adv_loadw loc_storew_le.16
+    adv_pushw loc_storew_le.16
     adv_loadw loc_storew_le.20
     adv_loadw loc_storew_le.24
     adv_loadw loc_storew_le.28 dropw
@@ -221,12 +221,12 @@ end
 #! - `COMM`: `Poseidon2(Poseidon2(Poseidon2(pk) || Poseidon2(k_digest)) || Poseidon2(sig))`
 #! - `TAG`:  `[EDDSA_VERIFY_EVENT, result, 0, 0]`
 #! - `result`: host verification result (1 or 0)
-pub proc verify_prehash_impl
+proc verify_prehash_impl
     emit.EDDSA_VERIFY_EVENT
     # => [pk_ptr, k_digest_ptr, sig_ptr, ...]
 
     # Read verification result from advice stack (provided by the host).
-    adv_push.1
+    adv_push
     # => [result, pk_ptr, k_digest_ptr, sig_ptr, ...]
 
     # Compute COMM_PK = poseidon2::hash_memory(pk_ptr, PK_LEN_FELTS)

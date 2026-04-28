@@ -14,7 +14,7 @@ use crate::{
     precompile::PrecompileRequest,
     program::{Kernel, Program, StackInputs, StackOutputs},
     proof::{ExecutionProof, HashFunction},
-    serde::Serializable,
+    serde::{ByteWriter, Serializable},
 };
 
 /// Generates seed corpus files for fuzzing.
@@ -271,6 +271,36 @@ fn generate_fuzz_seeds() {
         let request = PrecompileRequest::new(EventId::from_u64(1), vec![1, 2, 3, 4]);
         let proof = ExecutionProof::new(Vec::new(), HashFunction::Rpo256, vec![request]);
         write_seed("execution_proof_deserialize", "minimal_proof.bin", &proof.to_bytes());
+    }
+
+    // Execution proof seeds for malicious length-prefix deserialization.
+    {
+        let mut oversized_proof_len = Vec::new();
+        oversized_proof_len.write_usize(usize::MAX);
+        write_seed("execution_proof_deserialize", "oversized_proof_len.bin", &oversized_proof_len);
+
+        let mut oversized_pc_requests_len = Vec::new();
+        oversized_pc_requests_len.write_usize(0);
+        oversized_pc_requests_len.write_u8(HashFunction::Blake3_256 as u8);
+        oversized_pc_requests_len.write_usize(usize::MAX);
+        write_seed(
+            "execution_proof_deserialize",
+            "oversized_pc_requests_len.bin",
+            &oversized_pc_requests_len,
+        );
+    }
+
+    // Execution proof seed with many small precompile requests.
+    {
+        let pc_requests = (0..64)
+            .map(|event_id| PrecompileRequest::new(EventId::from_u64(event_id), Vec::new()))
+            .collect();
+        let proof = ExecutionProof::new(vec![1, 2, 3], HashFunction::Blake3_256, pc_requests);
+        write_seed(
+            "execution_proof_deserialize",
+            "many_minimal_precompile_requests.bin",
+            &proof.to_bytes(),
+        );
     }
 
     println!("\nSeed corpus generated in ../miden-core-fuzz/corpus");
