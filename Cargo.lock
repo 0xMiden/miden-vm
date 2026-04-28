@@ -1774,6 +1774,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "miden-vm-synthetic-bench"
+version = "0.23.0"
+dependencies = [
+ "criterion",
+ "miden-processor",
+ "miden-vm",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "midenc-hir-type"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
