@@ -110,6 +110,19 @@ impl OverflowTable {
             .map_or(ZERO, |entry| Felt::from(entry.clk))
     }
 
+    /// Returns the clock cycle that `last_update_clk_in_current_ctx` would return after one pop
+    /// — i.e., the clock of the second-to-last overflow entry in the current context.
+    ///
+    /// Returns `ZERO` if fewer than two entries exist.
+    pub fn clk_after_pop_in_current_ctx(&self) -> Felt {
+        let slice = self.get_current_overflow_stack().overflow.as_slice();
+        if slice.len() >= 2 {
+            Felt::from(slice[slice.len() - 2].clk)
+        } else {
+            ZERO
+        }
+    }
+
     /// Returns the number of elements in the overflow stack for the current context.
     pub fn num_elements_in_current_ctx(&self) -> usize {
         self.get_current_overflow_stack().num_elements()

@@ -318,12 +318,21 @@ impl ExecutionTracer {
                 );
 
                 if dyn_node.is_dyncall() {
-                    let overflow_addr = self.overflow_table.last_update_clk_in_current_ctx();
                     // Note: the stack depth to record is after the DYNCALL drop. DYNCALL pops
                     // the top element (the memory address of the callee hash) before entering
                     // the new context. The depth cannot go below MIN_STACK_DEPTH.
-                    let stack_depth_after_drop =
-                        (processor.stack().depth() - 1).max(MIN_STACK_DEPTH as u32);
+                    let depth = processor.stack().depth();
+                    let (stack_depth_after_drop, overflow_addr) =
+                        if depth > MIN_STACK_DEPTH as u32 {
+                            // The pop shifts an overflow entry into the main stack, so the
+                            // recorded overflow address is the one that remains after the shift.
+                            (depth - 1, self.overflow_table.clk_after_pop_in_current_ctx())
+                        } else {
+                            (
+                                MIN_STACK_DEPTH as u32,
+                                self.overflow_table.last_update_clk_in_current_ctx(),
+                            )
+                        };
                     Some(ExecutionContextInfo::new(
                         processor.system().ctx(),
                         processor.system().caller_hash(),
@@ -978,6 +987,42 @@ mod tests {
             ctx_info.parent_stack_depth,
             expected_depth - 1,
             "parent_stack_depth must be depth - 1 when stack is above MIN_STACK_DEPTH"
+        );
+    }
+
+    /// Regression test for the bug where `parent_next_overflow_addr` was set to the pre-pop
+    /// overflow address even when the caller had multiple overflow entries.
+    ///
+    /// When DYNCALL pops with depth > MIN_STACK_DEPTH, an overflow entry shifts into the main
+    /// stack. The recorded `parent_next_overflow_addr` must reflect the state *after* that
+    /// shift — i.e., the second-to-last overflow entry's clock, not the last.
+    #[test]
+    fn start_clock_cycle_dyncall_with_multiple_overflow_entries_records_correct_overflow_addr() {
+        let (forest, dyncall_id) = dyncall_forest();
+        // depth = MIN_STACK_DEPTH + 2 so two overflow entries are present.
+        let processor = FastProcessor::new(StackInputs::default()).with_extra_stack_depth(2);
+
+        let mut tracer = ExecutionTracer::new(1);
+        // Manually populate the tracer's overflow table with two entries at known clocks.
+        // clk=1 is the second-to-last; clk=2 is the last (will be consumed by the DYNCALL pop).
+        tracer.overflow_table.push(ZERO, RowIndex::from(1u32));
+        tracer.overflow_table.push(ZERO, RowIndex::from(2u32));
+
+        tracer.start_clock_cycle(
+            &processor,
+            Continuation::StartNode(dyncall_id),
+            &ContinuationStack::default(),
+            &forest,
+        );
+
+        let ctx_info =
+            tracer.block_stack.peek().ctx_info.expect(
+                "DYNCALL start_clock_cycle must push ExecutionContextInfo onto block_stack",
+            );
+        assert_eq!(
+            ctx_info.parent_next_overflow_addr,
+            Felt::from(RowIndex::from(1u32)),
+            "parent_next_overflow_addr must be the second-to-last overflow clock after the pop"
         );
     }
 }
