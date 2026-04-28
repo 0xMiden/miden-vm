@@ -11,19 +11,19 @@ use crate::{
         CallNode, DebugInfo, DynNode, JoinNode, LoopNode, SplitNode,
         serialization::{basic_blocks::BasicBlockDataDecoder, layout::read_fixed_section_entry},
     },
-    serde::{Deserializable, DeserializationError, SliceReader},
+    serde::{Deserializable, DeserializationError, Serializable, SliceReader},
 };
 
 /// Digest sources for a parsed serialized forest.
 ///
-/// Non-external nodes either read from the internal-hash section or from a rebuilt in-memory hash
-/// table. External nodes always read from the external-digest section.
+/// Non-external nodes either read from the internal-hash suffix or from a rebuilt in-memory hash
+/// table. External nodes always read from the external-digest prefix.
 #[derive(Debug, Clone)]
 struct ForestDigests {
     /// Dense slot index for each node within its digest section.
     ///
-    /// External nodes index into the external-digest section. All other nodes index into the
-    /// general node-hash section or the rebuilt hash table.
+    /// External nodes index into the external prefix of the node-digest section. All other nodes
+    /// index into the internal suffix or the rebuilt hash table.
     slot_by_node: Vec<u32>,
     /// Source of non-external digests.
     ///
@@ -50,7 +50,7 @@ impl ForestDigests {
     ///
     /// `bytes` and `layout` provide the already-scanned structural wire view. When
     /// `remaining_allocation_budget` is `Some`, helper allocations needed for untrusted validation
-    /// such as the slot table and rebuilt hash table are charged against that budget. Trusted
+    /// such as the rebuilt hash table are charged against that budget. Trusted
     /// structural views pass `None` here, which keeps the previous unbudgeted inspection behavior.
     fn new(
         bytes: &[u8],
@@ -86,7 +86,7 @@ impl ForestDigests {
         })? as usize;
 
         if matches!(entry, MastNodeEntry::External) {
-            return read_digest_entry(bytes, layout.external_digest_offset, digest_slot);
+            return read_digest_entry(bytes, layout.node_digest_offset, digest_slot);
         }
 
         if let Some(hash_table) = &self.hash_table {
@@ -246,9 +246,6 @@ fn build_digest_slot_by_node(
     layout: &ForestLayout,
     remaining_allocation_budget: Option<&mut usize>,
 ) -> Result<Vec<u32>, DeserializationError> {
-    // Digest sections are packed densely by node kind rather than by absolute node index.
-    // This scan records, for each node index, which slot to read from in the corresponding digest
-    // source.
     let mut slots = Vec::new();
     reserve_node_capacity(
         &mut slots,
@@ -256,23 +253,23 @@ fn build_digest_slot_by_node(
         "digest slot table",
         remaining_allocation_budget,
     )?;
-    let mut external_slot = 0u32;
     let mut node_hash_slot = 0u32;
 
     for index in 0..layout.node_count {
-        let entry = layout.read_node_entry_at(bytes, index)?;
-        if matches!(entry, MastNodeEntry::External) {
-            slots.push(external_slot);
-            external_slot = external_slot.checked_add(1).ok_or_else(|| {
-                DeserializationError::InvalidValue("external digest slot overflow".to_string())
-            })?;
+        let wire_entry = layout.read_node_wire_entry_at(bytes, index)?;
+        let slot = if let Some(digest_slot) = wire_entry.external_digest_slot() {
+            digest_slot
         } else {
-            slots.push(node_hash_slot);
+            let slot = node_hash_slot;
             node_hash_slot = node_hash_slot.checked_add(1).ok_or_else(|| {
                 DeserializationError::InvalidValue("node hash slot overflow".to_string())
             })?;
-        }
+            slot
+        };
+        slots.push(slot);
     }
+
+    debug_assert_eq!(node_hash_slot as usize, layout.internal_node_count);
 
     Ok(slots)
 }
@@ -295,10 +292,9 @@ fn recompute_hash_table(
         "hash table",
         remaining_allocation_budget,
     )?;
-    let mut external_digest_index = 0usize;
-
     for index in 0..layout.node_count {
-        let entry = layout.read_node_entry_at(bytes, index)?;
+        let wire_entry = layout.read_node_wire_entry_at(bytes, index)?;
+        let entry = wire_entry.entry();
         let computed = match entry {
             MastNodeEntry::Block { ops_offset } => {
                 let op_batches = basic_block_data_decoder.decode_operations(ops_offset)?;
@@ -337,12 +333,12 @@ fn recompute_hash_table(
             MastNodeEntry::Dyn => DynNode::DYN_DEFAULT_DIGEST,
             MastNodeEntry::Dyncall => DynNode::DYNCALL_DEFAULT_DIGEST,
             MastNodeEntry::External => {
-                let digest =
-                    read_digest_entry(bytes, layout.external_digest_offset, external_digest_index)?;
-                external_digest_index = external_digest_index.checked_add(1).ok_or_else(|| {
-                    DeserializationError::InvalidValue("external digest index overflow".to_string())
+                let digest_slot = wire_entry.external_digest_slot().ok_or_else(|| {
+                    DeserializationError::InvalidValue(
+                        "external node entry missing digest slot".to_string(),
+                    )
                 })?;
-                digest
+                read_digest_entry(bytes, layout.node_digest_offset, digest_slot as usize)?
             },
         };
 
@@ -350,6 +346,50 @@ fn recompute_hash_table(
     }
 
     Ok(digests)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::mast) struct ExternalDigestOrderViolation {
+    pub(in crate::mast) previous_slot: usize,
+    pub(in crate::mast) slot: usize,
+    pub(in crate::mast) previous: crate::Word,
+    pub(in crate::mast) current: crate::Word,
+}
+
+pub(in crate::mast) fn external_digest_order_violation(
+    bytes: &[u8],
+    layout: &ForestLayout,
+) -> Result<Option<ExternalDigestOrderViolation>, DeserializationError> {
+    let mut previous = None;
+    for slot in 0..layout.external_node_count {
+        let current = read_digest_entry(bytes, layout.node_digest_offset, slot)?;
+        if let Some(previous_digest) = previous
+            && compare_words_by_wire(&previous_digest, &current).is_gt()
+        {
+            return Ok(Some(ExternalDigestOrderViolation {
+                previous_slot: slot - 1,
+                slot,
+                previous: previous_digest,
+                current,
+            }));
+        }
+        previous = Some(current);
+    }
+
+    Ok(None)
+}
+
+pub(super) fn compare_words_by_wire(
+    left: &crate::Word,
+    right: &crate::Word,
+) -> core::cmp::Ordering {
+    serialized_word_bytes(left).cmp(&serialized_word_bytes(right))
+}
+
+fn serialized_word_bytes(word: &crate::Word) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(crate::Word::min_serialized_size());
+    word.write_into(&mut bytes);
+    bytes
 }
 
 fn reserve_node_capacity<T>(
