@@ -898,3 +898,91 @@ impl Default for HasherChipletShim {
         Self::new()
     }
 }
+
+// TESTS
+// ================================================================================================
+
+#[cfg(test)]
+mod tests {
+    use alloc::sync::Arc;
+
+    use miden_core::mast::{DynNodeBuilder, MastForest, MastForestContributor};
+
+    use super::*;
+    use crate::{
+        FastProcessor, StackInputs,
+        continuation_stack::ContinuationStack,
+        tracer::Tracer,
+    };
+
+    /// Builds a [`MastForest`] containing a single DYNCALL node and returns the forest together
+    /// with the node's [`MastNodeId`].
+    fn dyncall_forest() -> (Arc<MastForest>, MastNodeId) {
+        let mut forest = MastForest::new();
+        let node_id = DynNodeBuilder::new_dyncall().add_to_forest(&mut forest).unwrap();
+        (Arc::new(forest), node_id)
+    }
+
+    /// Verifies that when DYNCALL is started with the stack at exactly `MIN_STACK_DEPTH`,
+    /// `start_clock_cycle` pushes an [`ExecutionContextInfo`] onto `block_stack` whose
+    /// `parent_stack_depth` equals `MIN_STACK_DEPTH` — not `MIN_STACK_DEPTH - 1`.
+    ///
+    /// This is the regression test for the bug where the depth was unconditionally decremented by
+    /// one even when already at the minimum, violating the tracer contract that "popping at minimum
+    /// stack depth does not decrement depth".
+    #[test]
+    fn start_clock_cycle_dyncall_records_min_depth_when_stack_at_min() {
+        let (forest, dyncall_id) = dyncall_forest();
+        let processor = FastProcessor::new(StackInputs::default());
+
+        let mut tracer = ExecutionTracer::new(1);
+        tracer.start_clock_cycle(
+            &processor,
+            Continuation::StartNode(dyncall_id),
+            &ContinuationStack::default(),
+            &forest,
+        );
+
+        let ctx_info = tracer
+            .block_stack
+            .peek()
+            .ctx_info
+            .expect("DYNCALL start_clock_cycle must push ExecutionContextInfo onto block_stack");
+        assert_eq!(
+            ctx_info.parent_stack_depth,
+            MIN_STACK_DEPTH as u32,
+            "parent_stack_depth must not go below MIN_STACK_DEPTH when stack is at minimum"
+        );
+    }
+
+    /// Verifies that when DYNCALL is started with the stack above `MIN_STACK_DEPTH`, the recorded
+    /// `parent_stack_depth` is `depth - 1` (the stack depth after the DYNCALL pops the callee
+    /// address).
+    #[test]
+    fn start_clock_cycle_dyncall_records_depth_minus_one_when_stack_above_min() {
+        let (forest, dyncall_id) = dyncall_forest();
+        // Push one extra element so depth = MIN_STACK_DEPTH + 1.
+        let processor = FastProcessor::new(StackInputs::default()).with_extra_stack_depth(1);
+        let expected_depth = MIN_STACK_DEPTH as u32 + 1;
+        assert_eq!(processor.stack_depth(), expected_depth);
+
+        let mut tracer = ExecutionTracer::new(1);
+        tracer.start_clock_cycle(
+            &processor,
+            Continuation::StartNode(dyncall_id),
+            &ContinuationStack::default(),
+            &forest,
+        );
+
+        let ctx_info = tracer
+            .block_stack
+            .peek()
+            .ctx_info
+            .expect("DYNCALL start_clock_cycle must push ExecutionContextInfo onto block_stack");
+        assert_eq!(
+            ctx_info.parent_stack_depth,
+            expected_depth - 1,
+            "parent_stack_depth must be depth - 1 when stack is above MIN_STACK_DEPTH"
+        );
+    }
+}

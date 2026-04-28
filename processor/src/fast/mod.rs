@@ -587,6 +587,15 @@ impl FastProcessor {
         self.stack_top_idx += 1;
     }
 
+    /// Grows the stack depth by `n` for unit testing purposes.
+    #[cfg(test)]
+    pub fn with_extra_stack_depth(mut self, n: usize) -> Self {
+        for _ in 0..n {
+            self.increment_stack_size();
+        }
+        self
+    }
+
     /// Decrements the stack top pointer by 1.
     ///
     /// The bottom of the stack is only decremented in cases where the stack depth would become less
