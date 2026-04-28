@@ -45,6 +45,7 @@ impl FastProcessor {
         current_forest: &MastForest,
         node_id: MastNodeId,
         host: &impl BaseHost,
+        op_idx: usize,
         event_id: EventId,
         mutations: Result<Vec<AdviceMutation>, EventError>,
     ) -> ControlFlow<BreakReason> {
@@ -57,6 +58,7 @@ impl FastProcessor {
                     current_forest,
                     node_id,
                     host,
+                    Some(op_idx),
                     event_id,
                     event_name,
                 )));
@@ -70,6 +72,7 @@ impl FastProcessor {
                 current_forest,
                 node_id,
                 host,
+                Some(op_idx),
             ))),
         }
     }
@@ -115,7 +118,7 @@ impl FastProcessor {
 
         let processor_state = self.state();
         let mutations = host.on_event(&processor_state);
-        self.apply_host_event_mutations(current_forest, node_id, host, event_id, mutations)
+        self.apply_host_event_mutations(current_forest, node_id, host, op_idx, event_id, mutations)
     }
 
     #[inline(always)]
@@ -134,6 +137,6 @@ impl FastProcessor {
 
         let processor_state = self.state();
         let mutations = host.on_event(&processor_state).await;
-        self.apply_host_event_mutations(current_forest, node_id, host, event_id, mutations)
+        self.apply_host_event_mutations(current_forest, node_id, host, op_idx, event_id, mutations)
     }
 }
