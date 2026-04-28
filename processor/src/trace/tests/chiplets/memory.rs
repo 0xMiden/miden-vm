@@ -30,10 +30,10 @@ use super::{
 /// values are requested & provided.
 #[test]
 fn b_chip_trace_mem() {
-    const FOUR: Felt = Felt::new(4);
+    const FOUR: Felt = Felt::new_unchecked(4);
 
     let stack = [0, 1, 2, 3, 4];
-    let word = [ONE, Felt::new(2), Felt::new(3), Felt::new(4)];
+    let word = [ONE, Felt::new_unchecked(2), Felt::new_unchecked(3), Felt::new_unchecked(4)];
     let operations = vec![
         Operation::MStoreW, // store [1, 2, 3, 4]
         Operation::Drop,    // clear the stack
@@ -91,7 +91,7 @@ fn b_chip_trace_mem() {
         MEMORY_READ_ELEMENT_LABEL,
         ZERO,
         ZERO,
-        Felt::new(6),
+        Felt::new_unchecked(6),
         word[0],
     );
     expected *= value.inverse();
@@ -104,7 +104,7 @@ fn b_chip_trace_mem() {
         MEMORY_READ_WORD_LABEL,
         ZERO,
         ZERO,
-        Felt::new(8),
+        Felt::new_unchecked(8),
         word.into(),
     );
     expected *= value.inverse();
@@ -119,7 +119,7 @@ fn b_chip_trace_mem() {
         MEMORY_WRITE_ELEMENT_LABEL,
         ZERO,
         FOUR,
-        Felt::new(11),
+        Felt::new_unchecked(11),
         ONE,
     );
     expected *= value.inverse();
@@ -135,15 +135,15 @@ fn b_chip_trace_mem() {
         MEMORY_READ_WORD_LABEL,
         ZERO,
         ZERO,
-        Felt::new(13),
+        Felt::new_unchecked(13),
         word.into(),
     );
     let value2 = build_expected_bus_word_msg(
         &challenges,
         MEMORY_READ_WORD_LABEL,
         ZERO,
-        Felt::new(4),
-        Felt::new(13),
+        Felt::new_unchecked(4),
+        Felt::new_unchecked(13),
         [ONE, ZERO, ZERO, ZERO].into(),
     );
     expected *= (value1 * value2).inverse();
@@ -239,7 +239,7 @@ fn crypto_stream_missing_chiplets_bus_requests() {
         &challenges,
         MEMORY_READ_WORD_LABEL,
         ctx,
-        Felt::new(4), // src_ptr + 4
+        Felt::new_unchecked(4), // src_ptr + 4
         clk,
         [ZERO, ZERO, ZERO, ZERO].into(),
     );
@@ -247,17 +247,23 @@ fn crypto_stream_missing_chiplets_bus_requests() {
         &challenges,
         MEMORY_WRITE_WORD_LABEL,
         ctx,
-        Felt::new(8), // dst_ptr = 8
+        Felt::new_unchecked(8), // dst_ptr = 8
         clk,
-        [ONE, Felt::new(2), Felt::new(3), Felt::new(4)].into(),
+        [ONE, Felt::new_unchecked(2), Felt::new_unchecked(3), Felt::new_unchecked(4)].into(),
     );
     let write2 = build_expected_bus_word_msg(
         &challenges,
         MEMORY_WRITE_WORD_LABEL,
         ctx,
-        Felt::new(12), // dst_ptr + 4
+        Felt::new_unchecked(12), // dst_ptr + 4
         clk,
-        [Felt::new(5), Felt::new(6), Felt::new(7), Felt::new(8)].into(),
+        [
+            Felt::new_unchecked(5),
+            Felt::new_unchecked(6),
+            Felt::new_unchecked(7),
+            Felt::new_unchecked(8),
+        ]
+        .into(),
     );
 
     // All four requests are emitted at the same cycle, so they multiply together.

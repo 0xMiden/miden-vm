@@ -71,6 +71,19 @@ impl AdviceMap {
         self.0.is_empty()
     }
 
+    /// Returns the exact serialized size of this AdviceMap in bytes.
+    pub(crate) fn serialized_size_hint(&self) -> usize {
+        let mut size = self.0.len().get_size_hint();
+        for (key, values) in self.0.iter() {
+            size += key.get_size_hint();
+            size += values.len().get_size_hint();
+            for value in values.iter() {
+                size += value.get_size_hint();
+            }
+        }
+        size
+    }
+
     /// Gets the given key's corresponding entry in the map for in-place manipulation.
     pub fn entry(&mut self, key: Word) -> Entry<'_, Word, Arc<[Felt]>> {
         self.0.entry(key)

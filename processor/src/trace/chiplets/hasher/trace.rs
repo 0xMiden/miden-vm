@@ -50,7 +50,7 @@ impl HasherTrace {
     /// ONE at every row. Starting at ONE is needed for the decoder so that the address of the
     /// first code block is a non-zero value.
     pub fn next_row_addr(&self) -> Felt {
-        Felt::new(self.trace_len() as u64 + 1)
+        Felt::new_unchecked(self.trace_len() as u64 + 1)
     }
 
     // CONTROLLER ROW METHODS

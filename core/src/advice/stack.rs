@@ -149,7 +149,7 @@ impl AdviceStackBuilder {
     /// // Elements consumed in order: 1, 2, 3, 4, 5, 6, 7, 8
     /// ```
     pub fn push_u64_slice(&mut self, values: &[u64]) -> &mut Self {
-        self.stack.extend(values.iter().map(|&v| Felt::new(v)));
+        self.stack.extend(values.iter().map(|&v| Felt::new_unchecked(v)));
         self
     }
 

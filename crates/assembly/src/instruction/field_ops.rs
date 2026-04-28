@@ -9,7 +9,7 @@ use super::BasicBlockBuilder;
 use crate::{MAX_EXP_BITS, ONE, ProcedureContext, ZERO};
 
 /// Field element representing TWO in the base field of the VM.
-const TWO: Felt = Felt::new(2);
+const TWO: Felt = Felt::new_unchecked(2);
 
 // ASSERTIONS
 // ================================================================================================

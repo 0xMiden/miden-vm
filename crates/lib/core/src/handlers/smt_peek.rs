@@ -49,7 +49,7 @@ pub fn handle_smt_peek(process: &ProcessorState) -> Result<Vec<AdviceMutation>, 
     // K[3] is used as the leaf index (most significant in BE ordering)
     let node = process
         .advice_provider()
-        .get_tree_node(root, Felt::new(SMT_DEPTH as u64), key[3])
+        .get_tree_node(root, Felt::new_unchecked(SMT_DEPTH as u64), key[3])
         .map_err(|err| SmtPeekError::AdviceProviderError {
             message: format!("Failed to get tree node: {err}"),
         })?;

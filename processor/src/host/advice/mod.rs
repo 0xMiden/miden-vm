@@ -268,7 +268,7 @@ impl AdviceProvider {
             self.stack.push_front(value);
         }
         if include_len {
-            self.stack.push_front(Felt::new(values.len() as u64));
+            self.stack.push_front(Felt::new_unchecked(values.len() as u64));
         }
         Ok(())
     }
@@ -560,7 +560,13 @@ mod tests {
     };
 
     fn make_leaf(seed: u64) -> Word {
-        [Felt::new(seed), Felt::new(seed + 1), Felt::new(seed + 2), Felt::new(seed + 3)].into()
+        [
+            Felt::new_unchecked(seed),
+            Felt::new_unchecked(seed + 1),
+            Felt::new_unchecked(seed + 2),
+            Felt::new_unchecked(seed + 3),
+        ]
+        .into()
     }
 
     #[test]

@@ -451,6 +451,71 @@ impl OpToDebugVarIds {
         Ok(result)
     }
 
+    /// Returns all `(op_idx, DebugVarId)` pairs for the given node, or an empty vec if the
+    /// node has no debug vars.
+    pub fn debug_vars_for_node(&self, node: MastNodeId) -> Vec<(usize, DebugVarId)> {
+        let op_range = match self.operation_range_for_node(node) {
+            Ok(range) => range,
+            Err(_) => return Vec::new(),
+        };
+
+        let mut result = Vec::new();
+        for (op_offset, op_idx) in op_range.enumerate() {
+            if op_idx + 1 >= self.op_indptr_for_var_ids.len() {
+                break;
+            }
+            let var_start = self.op_indptr_for_var_ids[op_idx];
+            let var_end = self.op_indptr_for_var_ids[op_idx + 1];
+            for &var_id in &self.debug_var_ids[var_start..var_end] {
+                result.push((op_offset, var_id));
+            }
+        }
+        result
+    }
+
+    /// Creates a new [`OpToDebugVarIds`] with remapped node IDs.
+    ///
+    /// This is used when nodes are removed from a MastForest and the remaining nodes are
+    /// renumbered. The remapping maps old node IDs to new node IDs.
+    ///
+    /// Nodes that are not in the remapping are considered removed and their debug var data
+    /// is discarded.
+    pub fn remap_nodes(
+        &self,
+        remapping: &alloc::collections::BTreeMap<MastNodeId, MastNodeId>,
+    ) -> Self {
+        if self.is_empty() {
+            return Self::new();
+        }
+        if remapping.is_empty() {
+            return self.clone();
+        }
+
+        let max_new_id = remapping.values().map(|id| id.to_usize()).max().unwrap_or(0);
+        let num_new_nodes = max_new_id + 1;
+
+        let mut new_node_data: alloc::collections::BTreeMap<usize, Vec<(usize, DebugVarId)>> =
+            alloc::collections::BTreeMap::new();
+
+        for (old_id, new_id) in remapping {
+            let vars = self.debug_vars_for_node(*old_id);
+            if !vars.is_empty() {
+                new_node_data.insert(new_id.to_usize(), vars);
+            }
+        }
+
+        let mut new_storage = Self::new();
+        for idx in 0..num_new_nodes {
+            let node_id = MastNodeId::new_unchecked(idx as u32);
+            let vars = new_node_data.remove(&idx).unwrap_or_default();
+            new_storage
+                .add_debug_var_info_for_node(node_id, vars)
+                .expect("failed to remap debug var storage");
+        }
+
+        new_storage
+    }
+
     /// Clears this storage.
     pub fn clear(&mut self) {
         self.debug_var_ids.clear();

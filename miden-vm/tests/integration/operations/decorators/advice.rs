@@ -81,7 +81,12 @@ fn advice_push_mapval() {
     let stack_key: [u64; 4] = [1, 2, 3, 4];
     let adv_map = [(
         Word::try_from(stack_key).unwrap(),
-        vec![Felt::new(5), Felt::new(6), Felt::new(7), Felt::new(8)],
+        vec![
+            Felt::new_unchecked(5),
+            Felt::new_unchecked(6),
+            Felt::new_unchecked(7),
+            Felt::new_unchecked(8),
+        ],
     )];
 
     let test = build_test!(source, &stack_inputs, [], MerkleStore::default(), adv_map);
@@ -105,7 +110,13 @@ fn advice_push_mapval() {
     let stack_key: [u64; 4] = [1, 2, 3, 4];
     let adv_map = [(
         Word::try_from(stack_key).unwrap(),
-        vec![Felt::new(9), Felt::new(8), Felt::new(7), Felt::new(6), Felt::new(5)],
+        vec![
+            Felt::new_unchecked(9),
+            Felt::new_unchecked(8),
+            Felt::new_unchecked(7),
+            Felt::new_unchecked(6),
+            Felt::new_unchecked(5),
+        ],
     )];
 
     let test = build_test!(source, &stack_inputs, [], MerkleStore::default(), adv_map);
@@ -133,7 +144,13 @@ fn adv_push_mapvaln() {
     let stack_key: [u64; 4] = [1, 2, 3, 4];
     let adv_map = [(
         Word::try_from(stack_key).unwrap(),
-        vec![Felt::new(11), Felt::new(12), Felt::new(13), Felt::new(14), Felt::new(15)],
+        vec![
+            Felt::new_unchecked(11),
+            Felt::new_unchecked(12),
+            Felt::new_unchecked(13),
+            Felt::new_unchecked(14),
+            Felt::new_unchecked(15),
+        ],
     )];
 
     let test = build_test!(source, &stack_inputs, [], MerkleStore::default(), adv_map);
@@ -162,7 +179,13 @@ fn adv_push_mapvaln_padding() {
     let stack_key: [u64; 4] = [1, 2, 3, 4];
     let adv_map = [(
         Word::try_from(stack_key).unwrap(),
-        vec![Felt::new(11), Felt::new(12), Felt::new(13), Felt::new(14), Felt::new(15)],
+        vec![
+            Felt::new_unchecked(11),
+            Felt::new_unchecked(12),
+            Felt::new_unchecked(13),
+            Felt::new_unchecked(14),
+            Felt::new_unchecked(15),
+        ],
     )];
 
     let test = build_test!(source, &stack_inputs, [], MerkleStore::default(), adv_map);
@@ -189,7 +212,7 @@ fn adv_push_mapvaln_padding() {
     let stack_key: [u64; 4] = [1, 2, 3, 4];
     let adv_map = [(
         Word::try_from(stack_key).unwrap(),
-        vec![Felt::new(11), Felt::new(12), Felt::new(13)],
+        vec![Felt::new_unchecked(11), Felt::new_unchecked(12), Felt::new_unchecked(13)],
     )];
 
     let test = build_test!(source, &stack_inputs, [], MerkleStore::default(), adv_map);
@@ -217,12 +240,12 @@ fn adv_push_mapvaln_padding() {
     let adv_map = [(
         Word::try_from(stack_key).unwrap(),
         vec![
-            Felt::new(11),
-            Felt::new(12),
-            Felt::new(13),
-            Felt::new(14),
-            Felt::new(15),
-            Felt::new(16),
+            Felt::new_unchecked(11),
+            Felt::new_unchecked(12),
+            Felt::new_unchecked(13),
+            Felt::new_unchecked(14),
+            Felt::new_unchecked(15),
+            Felt::new_unchecked(16),
         ],
     )];
 
@@ -254,7 +277,12 @@ fn advice_has_mapkey() {
     let stack_key: [u64; 4] = [1, 2, 3, 4];
     let adv_map = [(
         Word::try_from(stack_key).unwrap(),
-        vec![Felt::new(8), Felt::new(7), Felt::new(6), Felt::new(5)],
+        vec![
+            Felt::new_unchecked(8),
+            Felt::new_unchecked(7),
+            Felt::new_unchecked(6),
+            Felt::new_unchecked(5),
+        ],
     )];
 
     let test = build_test!(source, &stack_inputs, [], MerkleStore::default(), adv_map);
@@ -282,7 +310,12 @@ fn advice_has_mapkey() {
     let map_key = [5u64, 6, 7, 8];
     let adv_map = [(
         Word::try_from(map_key).unwrap(),
-        vec![Felt::new(9), Felt::new(10), Felt::new(11), Felt::new(12)],
+        vec![
+            Felt::new_unchecked(9),
+            Felt::new_unchecked(10),
+            Felt::new_unchecked(11),
+            Felt::new_unchecked(12),
+        ],
     )];
 
     let test = build_test!(source, &stack_inputs, [], MerkleStore::default(), adv_map);

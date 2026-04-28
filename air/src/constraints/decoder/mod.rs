@@ -403,7 +403,7 @@ pub fn enforce_main<AB>(
         // op_index must be in [0, 8] — 9 ops per group max.
         let mut range_check: AB::Expr = op_index.into();
         for i in 1..=8u64 {
-            range_check *= op_index - Felt::new(i);
+            range_check *= op_index - Felt::new_unchecked(i);
         }
         builder.assert_zero(range_check);
     }

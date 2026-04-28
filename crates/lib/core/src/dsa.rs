@@ -21,14 +21,14 @@ pub mod ecdsa_k256_keccak {
     use alloc::vec::Vec;
 
     use miden_core::{Felt, Word, serde::Serializable, utils::bytes_to_packed_u32_elements};
-    use miden_crypto::dsa::ecdsa_k256_keccak::{PublicKey, SecretKey, Signature};
+    use miden_crypto::dsa::ecdsa_k256_keccak::{PublicKey, Signature, SigningKey};
 
     /// Signs the provided message with the supplied secret key and encodes this signature and the
     /// associated public key into a vector of field elements in the format expected by
     /// `miden::core::crypto::dsa::ecdsa_k256_keccak::verify` procedure.
     ///
     /// See [`encode_signature()`] for more info.
-    pub fn sign(sk: &SecretKey, msg: Word) -> Vec<Felt> {
+    pub fn sign(sk: &SigningKey, msg: Word) -> Vec<Felt> {
         let pk = sk.public_key();
         let sig = sk.sign(msg);
         encode_signature(&pk, &sig)
@@ -65,14 +65,14 @@ pub mod eddsa_ed25519 {
     use alloc::vec::Vec;
 
     use miden_core::{Felt, Word, serde::Serializable, utils::bytes_to_packed_u32_elements};
-    use miden_crypto::dsa::eddsa_25519_sha512::{PublicKey, SecretKey, Signature};
+    use miden_crypto::dsa::eddsa_25519_sha512::{PublicKey, Signature, SigningKey};
 
     /// Signs the provided message with the supplied secret key and encodes this signature and the
     /// associated public key into a vector of field elements in the format expected by
     /// `miden::core::crypto::dsa::eddsa_ed25519::verify` procedure.
     ///
     /// See [`encode_signature()`] for more info.
-    pub fn sign(sk: &SecretKey, msg: Word) -> Vec<Felt> {
+    pub fn sign(sk: &SigningKey, msg: Word) -> Vec<Felt> {
         let pk = sk.public_key();
         let sig = sk.sign(msg);
         encode_signature(&pk, &sig)
@@ -167,7 +167,7 @@ pub mod falcon512_poseidon2 {
 
         let mut polynomials = pk.to_elements();
         polynomials.extend(s2.to_elements());
-        polynomials.extend(pi.iter().map(|a| Felt::new(*a)));
+        polynomials.extend(pi.iter().map(|a| Felt::new_unchecked(*a)));
 
         let digest_polynomials = Poseidon2::hash_elements(&polynomials);
         let challenge = (digest_polynomials[0], digest_polynomials[1]);

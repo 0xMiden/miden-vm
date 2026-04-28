@@ -31,10 +31,10 @@ use crate::{
 // CONSTANTS
 // ================================================================================================
 
-const TWO: Felt = Felt::new(2);
-const EIGHT: Felt = Felt::new(8);
-const NINE: Felt = Felt::new(9);
-const FOURTEEN: Felt = Felt::new(14);
+const TWO: Felt = Felt::new_unchecked(2);
+const EIGHT: Felt = Felt::new_unchecked(8);
+const NINE: Felt = Felt::new_unchecked(9);
+const FOURTEEN: Felt = Felt::new_unchecked(14);
 
 const INIT_ADDR: Felt = ONE;
 const EMIT_EVENT: EventName = EventName::new("test::emit::event");
@@ -223,7 +223,7 @@ fn test_basic_block_small_with_emit_decoding() {
 
 #[test]
 fn test_basic_block_decoding() {
-    let iv = [ONE, TWO, Felt::new(3), Felt::new(4), Felt::new(5)];
+    let iv = [ONE, TWO, Felt::new_unchecked(3), Felt::new_unchecked(4), Felt::new_unchecked(5)];
     let ops = vec![
         Operation::Push(iv[0]),
         Operation::Push(iv[1]),
@@ -318,13 +318,13 @@ fn test_basic_block_with_respan_decoding() {
     let iv = [
         ONE,
         TWO,
-        Felt::new(3),
-        Felt::new(4),
-        Felt::new(5),
-        Felt::new(6),
-        Felt::new(7),
+        Felt::new_unchecked(3),
+        Felt::new_unchecked(4),
+        Felt::new_unchecked(5),
+        Felt::new_unchecked(6),
+        Felt::new_unchecked(7),
         EIGHT,
-        Felt::new(9),
+        Felt::new_unchecked(9),
     ];
 
     let ops = vec![
@@ -1412,7 +1412,7 @@ fn test_dyn_node_decoding() {
     // end
 
     const FOO_ROOT_NODE_ADDR: u64 = 40;
-    const PUSH_40_OP: Operation = Operation::Push(Felt::new(FOO_ROOT_NODE_ADDR));
+    const PUSH_40_OP: Operation = Operation::Push(Felt::new_unchecked(FOO_ROOT_NODE_ADDR));
 
     let mut mast_forest = MastForest::new();
 
@@ -1575,10 +1575,10 @@ fn set_user_op_helpers_many() {
     let expected = build_expected_hasher_state(&[
         ZERO,
         ZERO,
-        Felt::new((check_1 as u16).into()),
-        Felt::new(((check_1 >> 16) as u16).into()),
-        Felt::new((check_2 as u16).into()),
-        Felt::new(((check_2 >> 16) as u16).into()),
+        Felt::new_unchecked((check_1 as u16).into()),
+        Felt::new_unchecked(((check_1 >> 16) as u16).into()),
+        Felt::new_unchecked((check_2 as u16).into()),
+        Felt::new_unchecked(((check_2 >> 16) as u16).into()),
     ]);
 
     assert_eq!(expected, hasher_state);
@@ -1594,7 +1594,7 @@ const MAX_FRAGMENT_SIZE: usize = 1 << 20;
 /// Builds the trace using FastProcessor and parallel::build_trace, returning the decoder trace
 /// portion.
 fn build_trace_helper(stack_inputs: &[u64], program: &Program) -> (DecoderTrace, usize) {
-    let stack_inputs: Vec<Felt> = stack_inputs.iter().map(|&v| Felt::new(v)).collect();
+    let stack_inputs: Vec<Felt> = stack_inputs.iter().map(|&v| Felt::new_unchecked(v)).collect();
     let processor = FastProcessor::new_with_options(
         StackInputs::new(&stack_inputs).unwrap(),
         AdviceInputs::default(),
@@ -1679,13 +1679,21 @@ fn check_op_decoding(
 
     assert_eq!(trace[ADDR_COL_IDX][row_idx], addr, "address mismatch");
     assert_eq!(expected_opcode, opcode, "opcode mismatch");
-    assert_eq!(trace[IN_SPAN_COL_IDX][row_idx], Felt::new(in_span), "in_span mismatch");
+    assert_eq!(
+        trace[IN_SPAN_COL_IDX][row_idx],
+        Felt::new_unchecked(in_span),
+        "in_span mismatch"
+    );
     assert_eq!(
         trace[GROUP_COUNT_COL_IDX][row_idx],
-        Felt::new(group_count),
+        Felt::new_unchecked(group_count),
         "group count mismatch"
     );
-    assert_eq!(trace[OP_INDEX_COL_IDX][row_idx], Felt::new(op_idx), "op index mismatch");
+    assert_eq!(
+        trace[OP_INDEX_COL_IDX][row_idx],
+        Felt::new_unchecked(op_idx),
+        "op index mismatch"
+    );
 
     let expected_batch_flags =
         if expected_opcode == opcodes::SPAN || expected_opcode == opcodes::RESPAN {
@@ -1843,5 +1851,5 @@ pub fn build_op_group(ops: &[Operation]) -> Felt {
         i += 1;
     }
     assert!(i <= OP_GROUP_SIZE, "too many ops");
-    Felt::new(group)
+    Felt::new_unchecked(group)
 }

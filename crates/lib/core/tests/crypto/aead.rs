@@ -58,7 +58,7 @@ fn test_encrypt_documented_stack_contract() {
     let output = build_test!(source, &sentinels).execute().expect("encryption must succeed");
     let stack = output.stack_outputs();
     for (idx, sentinel) in sentinels.iter().enumerate() {
-        assert_eq!(stack.get_element(idx), Some(Felt::new(*sentinel)));
+        assert_eq!(stack.get_element(idx), Some(Felt::new_unchecked(*sentinel)));
     }
 }
 
@@ -71,14 +71,14 @@ fn test_decrypt_documented_stack_contract() {
     let key = SecretKey::with_rng(&mut rng);
     let nonce = Nonce::with_rng(&mut rng);
     let plaintext = vec![
-        Felt::new(10),
-        Felt::new(11),
-        Felt::new(12),
-        Felt::new(13),
-        Felt::new(14),
-        Felt::new(15),
-        Felt::new(16),
-        Felt::new(17),
+        Felt::new_unchecked(10),
+        Felt::new_unchecked(11),
+        Felt::new_unchecked(12),
+        Felt::new_unchecked(13),
+        Felt::new_unchecked(14),
+        Felt::new_unchecked(15),
+        Felt::new_unchecked(16),
+        Felt::new_unchecked(17),
     ];
     let encrypted = key
         .encrypt_elements_with_nonce(&plaintext, &[], nonce)
@@ -126,14 +126,14 @@ fn test_encrypt_with_known_values() {
     let nonce = Nonce::with_rng(&mut rng);
 
     let plaintext = vec![
-        Felt::new(10),
-        Felt::new(11),
-        Felt::new(12),
-        Felt::new(13),
-        Felt::new(14),
-        Felt::new(15),
-        Felt::new(16),
-        Felt::new(17),
+        Felt::new_unchecked(10),
+        Felt::new_unchecked(11),
+        Felt::new_unchecked(12),
+        Felt::new_unchecked(13),
+        Felt::new_unchecked(14),
+        Felt::new_unchecked(15),
+        Felt::new_unchecked(16),
+        Felt::new_unchecked(17),
     ];
 
     let encrypted = key
@@ -210,14 +210,14 @@ fn test_decrypt_with_known_values() {
     let nonce = Nonce::with_rng(&mut rng);
 
     let plaintext = vec![
-        Felt::new(10),
-        Felt::new(11),
-        Felt::new(12),
-        Felt::new(13),
-        Felt::new(14),
-        Felt::new(15),
-        Felt::new(16),
-        Felt::new(17),
+        Felt::new_unchecked(10),
+        Felt::new_unchecked(11),
+        Felt::new_unchecked(12),
+        Felt::new_unchecked(13),
+        Felt::new_unchecked(14),
+        Felt::new_unchecked(15),
+        Felt::new_unchecked(16),
+        Felt::new_unchecked(17),
     ];
 
     // Encrypt to get ciphertext and tag
@@ -295,14 +295,14 @@ fn test_decrypt_with_wrong_key() {
     let nonce = Nonce::with_rng(&mut rng);
 
     let plaintext = vec![
-        Felt::new(10),
-        Felt::new(11),
-        Felt::new(12),
-        Felt::new(13),
-        Felt::new(14),
-        Felt::new(15),
-        Felt::new(16),
-        Felt::new(17),
+        Felt::new_unchecked(10),
+        Felt::new_unchecked(11),
+        Felt::new_unchecked(12),
+        Felt::new_unchecked(13),
+        Felt::new_unchecked(14),
+        Felt::new_unchecked(15),
+        Felt::new_unchecked(16),
+        Felt::new_unchecked(17),
     ];
 
     // Encrypt with correct key

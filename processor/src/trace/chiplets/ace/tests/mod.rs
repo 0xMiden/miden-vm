@@ -30,7 +30,7 @@ mod circuit;
 mod encoder;
 
 const PTR_OFFSET_ELEM: Felt = Felt::ONE;
-const PTR_OFFSET_WORD: Felt = Felt::new(4);
+const PTR_OFFSET_WORD: Felt = Felt::new_unchecked(4);
 
 #[test]
 fn test_var_plus_one() {
@@ -164,10 +164,10 @@ fn test_circuit_encoding() {
             ZERO,
             ZERO,
             ZERO,
-            Felt::new(7 + (5 << 30) + (2 << 60)), // id_l = 7; id_r = 5; op = ADD
-            Felt::new(7 + (3 << 30) + (1 << 60)), // id_l = 7; id_r = 3; op = MUL
-            Felt::new(2 + (6 << 30)),             // id_l = 2; id_r = 6; op = SUB
-            Felt::new(1 + (1 << 30) + (1 << 60)), // id_l = 1; id_r = 1; op = MUL
+            Felt::new_unchecked(7 + (5 << 30) + (2 << 60)), // id_l = 7; id_r = 5; op = ADD
+            Felt::new_unchecked(7 + (3 << 30) + (1 << 60)), // id_l = 7; id_r = 3; op = MUL
+            Felt::new_unchecked(2 + (6 << 30)),             // id_l = 2; id_r = 6; op = SUB
+            Felt::new_unchecked(1 + (1 << 30) + (1 << 60)), // id_l = 1; id_r = 1; op = MUL
         ]
     )
 }

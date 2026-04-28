@@ -1754,8 +1754,8 @@ mod tests {
     #[test]
     fn test_operation_labels() {
         // Verify operation labels match expected values
-        assert_eq!(BITWISE_AND_LABEL, Felt::new(2));
-        assert_eq!(BITWISE_XOR_LABEL, Felt::new(6));
+        assert_eq!(BITWISE_AND_LABEL, Felt::new_unchecked(2));
+        assert_eq!(BITWISE_XOR_LABEL, Felt::new_unchecked(6));
         assert_eq!(MEMORY_WRITE_ELEMENT_LABEL, 4);
         assert_eq!(MEMORY_READ_ELEMENT_LABEL, 12);
         assert_eq!(MEMORY_WRITE_WORD_LABEL, 20);
@@ -1778,17 +1778,17 @@ mod tests {
     #[test]
     fn test_ace_label() {
         // ACE label: selector = [1, 1, 1, 0], reversed = [0, 1, 1, 1] = 7, +1 = 8
-        assert_eq!(ACE_INIT_LABEL, Felt::new(8));
+        assert_eq!(ACE_INIT_LABEL, Felt::new_unchecked(8));
     }
 
     #[test]
     fn test_kernel_rom_labels() {
         // Kernel ROM call label: selector = [1, 1, 1, 1, 0 | 0], reversed = [0, 0, 1, 1, 1, 1] =
         // 15, +1 = 16
-        assert_eq!(KERNEL_PROC_CALL_LABEL, Felt::new(16));
+        assert_eq!(KERNEL_PROC_CALL_LABEL, Felt::new_unchecked(16));
 
         // Kernel ROM init label: selector = [1, 1, 1, 1, 0 | 1], reversed = [1, 0, 1, 1, 1, 1] =
         // 47, +1 = 48
-        assert_eq!(KERNEL_PROC_INIT_LABEL, Felt::new(48));
+        assert_eq!(KERNEL_PROC_INIT_LABEL, Felt::new_unchecked(48));
     }
 }

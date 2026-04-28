@@ -142,8 +142,20 @@ mod tests {
 
     #[test]
     fn kernel_read_from_rejects_duplicate_procedure_hashes() {
-        let a: Word = [Felt::new(1), Felt::new(2), Felt::new(3), Felt::new(4)].into();
-        let b: Word = [Felt::new(5), Felt::new(6), Felt::new(7), Felt::new(8)].into();
+        let a: Word = [
+            Felt::new_unchecked(1),
+            Felt::new_unchecked(2),
+            Felt::new_unchecked(3),
+            Felt::new_unchecked(4),
+        ]
+        .into();
+        let b: Word = [
+            Felt::new_unchecked(5),
+            Felt::new_unchecked(6),
+            Felt::new_unchecked(7),
+            Felt::new_unchecked(8),
+        ]
+        .into();
 
         assert!(
             Kernel::new(&[a, a]).is_err(),
@@ -170,7 +182,13 @@ mod tests {
     #[cfg(feature = "serde")]
     #[test]
     fn kernel_serde_deserialisation_rejects_duplicate_procedure_hashes() {
-        let a: Word = [Felt::new(1), Felt::new(2), Felt::new(3), Felt::new(4)].into();
+        let a: Word = [
+            Felt::new_unchecked(1),
+            Felt::new_unchecked(2),
+            Felt::new_unchecked(3),
+            Felt::new_unchecked(4),
+        ]
+        .into();
 
         assert!(
             Kernel::new(&[a, a]).is_err(),
@@ -190,7 +208,15 @@ mod tests {
     #[test]
     fn kernel_serde_deserialisation_rejects_too_many_procedure_hashes() {
         let proc_hashes: Vec<Word> = (0u64..=255)
-            .map(|n| [Felt::new(n), Felt::new(n + 1), Felt::new(n + 2), Felt::new(n + 3)].into())
+            .map(|n| {
+                [
+                    Felt::new_unchecked(n),
+                    Felt::new_unchecked(n + 1),
+                    Felt::new_unchecked(n + 2),
+                    Felt::new_unchecked(n + 3),
+                ]
+                .into()
+            })
             .collect();
 
         let json = serde_json::to_string(&proc_hashes).unwrap();

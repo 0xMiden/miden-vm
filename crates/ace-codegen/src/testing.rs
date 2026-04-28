@@ -28,9 +28,9 @@ pub fn fill_inputs(layout: &InputLayout) -> Vec<QuadFelt> {
     let mut state = 0x9e37_79b9_7f4a_7c15u64;
     for _ in 0..layout.total_inputs {
         state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
-        let lo = Felt::new(state);
+        let lo = Felt::new_unchecked(state);
         state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
-        let hi = Felt::new(state);
+        let hi = Felt::new_unchecked(state);
         values.push(QuadFelt::new([lo, hi]));
     }
     values

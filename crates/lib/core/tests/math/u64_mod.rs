@@ -830,8 +830,8 @@ fn checked_and_fail() {
         test,
         ExecutionError::OperationError{ err: OperationError::NotU32Values{ values }, .. } if
             values.len() == 2 &&
-            values.contains(&Felt::new(a0)) &&
-            values.contains(&Felt::new(b0))
+            values.contains(&Felt::new_unchecked(a0)) &&
+            values.contains(&Felt::new_unchecked(b0))
     );
 }
 
@@ -878,8 +878,8 @@ fn checked_or_fail() {
         test,
         ExecutionError::OperationError{ err: OperationError::NotU32Values{ values }, .. } if
             values.len() == 2 &&
-            values.contains(&Felt::new(a0)) &&
-            values.contains(&Felt::new(b0))
+            values.contains(&Felt::new_unchecked(a0)) &&
+            values.contains(&Felt::new_unchecked(b0))
     );
 }
 
@@ -926,8 +926,8 @@ fn checked_xor_fail() {
         test,
         ExecutionError::OperationError{ err: OperationError::NotU32Values{ values }, .. } if
             values.len() == 2 &&
-            values.contains(&Felt::new(a0)) &&
-            values.contains(&Felt::new(b0))
+            values.contains(&Felt::new_unchecked(a0)) &&
+            values.contains(&Felt::new_unchecked(b0))
     );
 }
 

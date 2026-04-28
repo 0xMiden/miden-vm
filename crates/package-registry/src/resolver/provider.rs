@@ -329,7 +329,7 @@ mod tests {
                     Some((version, hex)) => {
                         let version = version.parse::<SemVer>().unwrap();
                         let word = Word::parse(hex).unwrap();
-                        Version { version, digest: Some(word.into()) }
+                        Version { version, digest: Some(word) }
                     },
                     None => Version {
                         version: version.parse::<SemVer>().unwrap(),

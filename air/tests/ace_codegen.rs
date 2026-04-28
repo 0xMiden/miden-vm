@@ -176,7 +176,7 @@ fn quotient_next_inputs_do_not_affect_eval() {
                 .layout
                 .index(InputKey::QuotientChunkCoord { offset: 1, chunk, coord })
                 .unwrap();
-            inputs[idx] += QuadFelt::from(Felt::new(123 + (chunk * 7 + coord) as u64));
+            inputs[idx] += QuadFelt::from(Felt::new_unchecked(123 + (chunk * 7 + coord) as u64));
         }
     }
 

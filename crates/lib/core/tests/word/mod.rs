@@ -1,6 +1,6 @@
 use core::cmp::Ordering;
 
-use miden_core::{Felt, LexicographicWord, Word};
+use miden_core::{Felt, Word};
 use miden_utils_testing::rand;
 use num::Integer;
 use rstest::rstest;
@@ -12,7 +12,7 @@ use rstest::rstest;
 #[case::lt("lt", &[Ordering::Less])]
 #[case::lte("lte", &[Ordering::Less, Ordering::Equal])]
 fn test_word_comparison(#[case] proc_name: &str, #[case] valid_ords: &[Ordering]) {
-    let source = &format!(
+    let source = format!(
         "
         use miden::core::word
 
@@ -22,13 +22,14 @@ fn test_word_comparison(#[case] proc_name: &str, #[case] valid_ords: &[Ordering]
     "
     );
 
+    let test = build_test!(&source);
     let mut seed = 0xfacade;
 
     for i in 0..1000 {
         let lhs = rand::seeded_word(&mut seed);
         let rhs = if i.is_even() { rand::seeded_word(&mut seed) } else { lhs };
 
-        let expected_cmp = LexicographicWord::cmp(&lhs.into(), &rhs.into());
+        let expected_cmp = lhs.cmp(&rhs);
 
         let mut operand_stack: Vec<u64> = Default::default();
         prepend_word(&mut operand_stack, lhs);
@@ -37,7 +38,7 @@ fn test_word_comparison(#[case] proc_name: &str, #[case] valid_ords: &[Ordering]
 
         let expected = u64::from(valid_ords.contains(&expected_cmp));
 
-        build_test!(source, &operand_stack).expect_stack(&[expected]);
+        test.expect_stack_with_inputs(&operand_stack, &[expected]);
     }
 }
 
@@ -49,6 +50,7 @@ fn test_reverse() {
         end
     ";
 
+    let test = build_test!(SOURCE);
     let mut seed = 0xfacade;
     for _ in 0..1000 {
         let word = rand::seeded_word(&mut seed);
@@ -57,7 +59,7 @@ fn test_reverse() {
 
         // reversew reverses [w0, w1, w2, w3] → [w3, w2, w1, w0]
         let expected: Vec<u64> = word.iter().rev().map(Felt::as_canonical_u64).collect();
-        build_test!(SOURCE, &operand_stack).expect_stack(&expected);
+        test.expect_stack_with_inputs(&operand_stack, &expected);
     }
 }
 
@@ -103,6 +105,7 @@ fn test_preserving_eq() {
         end
     ";
 
+    let test = build_test!(SOURCE);
     let mut seed = 0xfacade;
     for i in 0..1000 {
         let lhs = rand::seeded_word(&mut seed);
@@ -116,7 +119,7 @@ fn test_preserving_eq() {
         let mut expected: Vec<u64> = vec![is_equal.into()];
         expected.extend(operand_stack.iter());
 
-        build_test!(SOURCE, &operand_stack).expect_stack(&expected);
+        test.expect_stack_with_inputs(&operand_stack, &expected);
     }
 }
 

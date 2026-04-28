@@ -59,7 +59,7 @@ where
     // p is the bit-reversed tree index; compute f_pos and d_seg from it
     let p = processor.stack().get(9).as_canonical_u64();
     let domain_segment = p & 3;
-    let folded_pos = Felt::new(p >> 2);
+    let folded_pos = Felt::new_unchecked(p >> 2);
     // the power of the domain generator which can be used to determine current domain value x
     let poe = processor.stack().get(10);
     if poe.is_zero() {
@@ -185,15 +185,15 @@ fn reorder_bitrev4(values: [QuadFelt; 4]) -> [QuadFelt; 4] {
 // HELPER FUNCTIONS
 // ================================================================================================
 
-const EIGHT: Felt = Felt::new(8);
-const TWO_INV: Felt = Felt::new(9223372034707292161);
+const EIGHT: Felt = Felt::new_unchecked(8);
+const TWO_INV: Felt = Felt::new_unchecked(9223372034707292161);
 
 // Pre-computed powers of 1/tau, where tau is the generator of multiplicative subgroup of size 4
 // (i.e., tau is the 4th root of unity). Correctness of these constants is checked in the test at
 // the end of this module.
-const TAU_INV: Felt = Felt::new(18446462594437873665); // tau^{-1}
-const TAU2_INV: Felt = Felt::new(18446744069414584320); // tau^{-2}
-const TAU3_INV: Felt = Felt::new(281474976710656); // tau^{-3}
+const TAU_INV: Felt = Felt::new_unchecked(18446462594437873665); // tau^{-1}
+const TAU2_INV: Felt = Felt::new_unchecked(18446744069414584320); // tau^{-2}
+const TAU3_INV: Felt = Felt::new_unchecked(281474976710656); // tau^{-3}
 
 /// Determines tau factor (needed to compute x value) for the specified domain segment.
 fn get_tau_factor(domain_segment: usize) -> Felt {
