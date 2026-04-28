@@ -186,13 +186,14 @@ fn test_diagnostic_host_event_error_uses_emit_location() {
         .with_debugging(true)
         .with_tracing(true);
     let err = processor.execute_sync(&program, &mut host).expect_err("expected error");
+    #[rustfmt::skip]
     assert_diagnostic_lines!(
         err,
         format!("  x error during processing of event '{event}' (ID: {})", event.to_event_id()),
         "  `-> dummy host event failure",
         regex!(r#",-\[::\$exec:3:20\]"#),
         " 2 |         begin",
-        format!(" 3 |             push.1 emit.event(\"{event}\")"),
+      r#" 3 |             push.1 emit.event("test::host_event_error")"#,
         "   :                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^",
         " 4 |         end",
         "   `----"
@@ -219,12 +220,13 @@ fn test_diagnostic_host_event_advice_error_uses_emit_location() {
         .with_debugging(true)
         .with_tracing(true);
     let err = processor.execute_sync(&program, &mut host).expect_err("expected error");
+    #[rustfmt::skip]
     assert_diagnostic_lines!(
         err,
         "  x value for key 0x0000000000000000000000000000000000000000000000000000000000000000 already present in the advice map",
         regex!(r#",-\[::\$exec:3:20\]"#),
         " 2 |         begin",
-        format!(" 3 |             push.1 emit.event(\"{event}\")"),
+      r#" 3 |             push.1 emit.event("test::host_event_advice_error")"#,
         "   :                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^",
         " 4 |         end",
         "   `----",
