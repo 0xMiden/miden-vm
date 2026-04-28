@@ -2,7 +2,8 @@
 //!
 //! Validates that:
 //! - Raw event handlers correctly compute SHA512 and populate advice provider
-//! - MASM wrapper returns commitment, tag, and digest on the stack
+//! - Public MASM wrapper returns the digest and logs deferred requests
+//! - Private implementation helper returns the expected commitment and tag
 //! - Various input lengths (including empty) are handled correctly
 
 use miden_core::{
@@ -73,20 +74,18 @@ fn test_sha512_hash_memory_impl(bytes: &[u8]) {
     let input_felts = preimage.as_felts();
     let memory_stores = masm_store_felts(&input_felts, INPUT_MEMORY_ADDR);
 
-    let source = format!(
-        r#"
-            use miden::core::sys
-            use miden::core::crypto::hashes::sha512
-
-            begin
+    let source = private_proc_harness(
+        include_str!("../../asm/crypto/hashes/sha512.masm"),
+        format!(
+            r#"
                 {memory_stores}
 
                 push.{len_bytes}.{INPUT_MEMORY_ADDR}
-                exec.sha512::hash_bytes_impl
+                exec.hash_bytes_impl
 
                 exec.sys::truncate_stack
-            end
-        "#
+            "#
+        ),
     );
 
     let test = build_debug_test!(source, &[]);
@@ -238,4 +237,8 @@ fn run_sha512_with_max_hash_len(
 
     processor.execute_sync(&program, &mut host)?;
     Ok(())
+}
+
+fn private_proc_harness(module_source: &str, body: impl AsRef<str>) -> String {
+    format!("{}\n\nbegin\n{}\nend", module_source.replace("pub proc", "proc"), body.as_ref())
 }

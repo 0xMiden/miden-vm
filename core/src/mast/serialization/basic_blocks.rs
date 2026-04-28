@@ -51,7 +51,7 @@ pub(super) fn basic_block_data_len(basic_block: &BasicBlockNode) -> usize {
 
     let num_batches = basic_block.num_op_batches();
     let mut size = op_count.get_size_hint() + ops_size;
-    size += core::mem::size_of::<u32>();
+    size += size_of::<u32>();
     size += 5 * num_batches;
     size
 }
