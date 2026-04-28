@@ -18,6 +18,10 @@ pub struct ModuleInfo {
 }
 
 impl ModuleInfo {
+    pub(crate) fn raw_items(&self) -> &[ItemInfo] {
+        &self.items
+    }
+
     /// Returns a new [`ModuleInfo`] instantiated library path.
     pub fn new(path: Arc<Path>) -> Self {
         Self { path, items: Vec::new() }

@@ -11,6 +11,10 @@ use crate::GlobalItemIndex;
 pub struct CycleError(BTreeSet<GlobalItemIndex>);
 
 impl CycleError {
+    pub fn new(nodes: impl IntoIterator<Item = GlobalItemIndex>) -> Self {
+        Self(nodes.into_iter().collect())
+    }
+
     pub fn into_node_ids(self) -> impl ExactSizeIterator<Item = GlobalItemIndex> {
         self.0.into_iter()
     }
@@ -60,11 +64,15 @@ impl CallGraph {
     /// introduce a cycle, or that [Self::toposort] is run once the graph is built, in order to
     /// verify that the graph is valid and has no cycles.
     ///
-    /// NOTE: This function will panic if you attempt to add an edge from a function to itself,
-    /// which trivially introduces a cycle. All other cycle-inducing edges must be caught by a
-    /// call to [Self::toposort].
-    pub fn add_edge(&mut self, caller: GlobalItemIndex, callee: GlobalItemIndex) {
-        assert_ne!(caller, callee, "a procedure cannot call itself");
+    /// Returns an error if adding the edge would introduce a trivial self-cycle.
+    pub fn add_edge(
+        &mut self,
+        caller: GlobalItemIndex,
+        callee: GlobalItemIndex,
+    ) -> Result<(), CycleError> {
+        if caller == callee {
+            return Err(CycleError::new([caller]));
+        }
 
         // Make sure the callee is in the graph
         self.get_or_insert_node(callee);
@@ -72,10 +80,11 @@ impl CallGraph {
         let callees = self.get_or_insert_node(caller);
         // If the caller already references the callee, we're done
         if callees.contains(&callee) {
-            return;
+            return Ok(());
         }
 
         callees.push(callee);
+        Ok(())
     }
 
     /// Removes the edge between `caller` and `callee` from the graph
@@ -113,15 +122,6 @@ impl CallGraph {
         let mut roots =
             VecDeque::from_iter(graph.nodes.keys().copied().filter(|n| !has_preds.contains(n)));
 
-        // If all nodes have predecessors, there must be a cycle, so just pick a node and let the
-        // algorithm find the cycle for that node so we have a useful error. Set a flag so that we
-        // can assert that the cycle was actually found as a sanity check
-        let mut expect_cycle = false;
-        if roots.is_empty() {
-            expect_cycle = true;
-            roots.extend(graph.nodes.keys().next());
-        }
-
         let mut successors = Vec::with_capacity(4);
         while let Some(id) = roots.pop_front() {
             output.push(id);
@@ -150,7 +150,6 @@ impl CallGraph {
             }
             Err(CycleError(in_cycle))
         } else {
-            assert!(!expect_cycle, "we expected a cycle to be found, but one was not identified");
             Ok(output)
         }
     }
@@ -326,6 +325,24 @@ mod tests {
         assert_eq!(err.0.into_iter().collect::<Vec<_>>(), &[A2, A3, B2, B3]);
     }
 
+    #[test]
+    fn callgraph_add_edge_with_self_cycle_is_error() {
+        let mut graph = CallGraph::default();
+
+        let err = graph.add_edge(A1, A1).expect_err("expected self-edge to be rejected");
+        assert_eq!(err.0.into_iter().collect::<Vec<_>>(), &[A1]);
+    }
+
+    #[test]
+    fn callgraph_rootless_cycle_toposort_is_error() {
+        let mut graph = CallGraph::default();
+        graph.add_edge(A1, B1).expect("A1 -> B1 must be accepted");
+        graph.add_edge(B1, A1).expect("B1 -> A1 must be accepted");
+
+        let err = graph.toposort().expect_err("expected topological sort to fail with cycle");
+        assert_eq!(err.0.into_iter().collect::<Vec<_>>(), &[A1, B1]);
+    }
+
     /// a::a1 -> a::a2 -> a::a3
     ///            |        ^
     ///            v        |
@@ -333,12 +350,12 @@ mod tests {
     fn callgraph_simple() -> CallGraph {
         // Construct the graph
         let mut graph = CallGraph::default();
-        graph.add_edge(A1, A2);
-        graph.add_edge(B1, B2);
-        graph.add_edge(A2, B2);
-        graph.add_edge(A2, A3);
-        graph.add_edge(B2, B3);
-        graph.add_edge(B3, A3);
+        graph.add_edge(A1, A2).expect("A1 -> A2 must be accepted");
+        graph.add_edge(B1, B2).expect("B1 -> B2 must be accepted");
+        graph.add_edge(A2, B2).expect("A2 -> B2 must be accepted");
+        graph.add_edge(A2, A3).expect("A2 -> A3 must be accepted");
+        graph.add_edge(B2, B3).expect("B2 -> B3 must be accepted");
+        graph.add_edge(B3, A3).expect("B3 -> A3 must be accepted");
 
         graph
     }
@@ -350,12 +367,12 @@ mod tests {
     fn callgraph_cycle() -> CallGraph {
         // Construct the graph
         let mut graph = CallGraph::default();
-        graph.add_edge(A1, A2);
-        graph.add_edge(B1, B2);
-        graph.add_edge(A2, B2);
-        graph.add_edge(B2, B3);
-        graph.add_edge(B3, A3);
-        graph.add_edge(A3, A2);
+        graph.add_edge(A1, A2).expect("A1 -> A2 must be accepted");
+        graph.add_edge(B1, B2).expect("B1 -> B2 must be accepted");
+        graph.add_edge(A2, B2).expect("A2 -> B2 must be accepted");
+        graph.add_edge(B2, B3).expect("B2 -> B3 must be accepted");
+        graph.add_edge(B3, A3).expect("B3 -> A3 must be accepted");
+        graph.add_edge(A3, A2).expect("A3 -> A2 must be accepted");
 
         graph
     }

@@ -5435,6 +5435,97 @@ fn test_issue_2696_imported_constant_with_private_dependency() -> TestResult {
 }
 
 #[test]
+fn imported_main_alias_self_call_is_structured_error() {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    let context = TestContext::new();
+    let program = r#"
+        use ::$exec::"$main"->alias_main
+
+        begin
+            call.alias_main
+        end
+    "#;
+
+    let assembled = catch_unwind(AssertUnwindSafe(|| {
+        Assembler::new(context.source_manager()).assemble_program(program)
+    }));
+
+    assert!(assembled.is_ok(), "assembler panicked during assembly");
+    let err = assembled
+        .unwrap()
+        .expect_err("expected self-referential alias call to be rejected");
+    assert_diagnostic!(&err, "invalid recursive procedure call");
+    assert_diagnostic!(&err, "this call is self-recursive");
+}
+
+#[test]
+fn rootless_call_cycle_is_structured_error() {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    let context = TestContext::new();
+    let program = r#"
+        begin
+            call.b
+        end
+
+        proc b
+            call."$main"
+        end
+    "#;
+
+    let assembled = catch_unwind(AssertUnwindSafe(|| {
+        Assembler::new(context.source_manager()).assemble_program(program)
+    }));
+
+    assert!(assembled.is_ok(), "assembler panicked during assembly");
+    let err = assembled.unwrap().expect_err("expected cyclic program to be rejected");
+    assert_diagnostic!(&err, "found a cycle in the call graph");
+    assert_diagnostic!(&err, "::$exec::$main");
+    assert_diagnostic!(&err, "b");
+}
+
+#[test]
+fn cyclic_link_retry_is_structured_error_without_panicking() {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    use crate::linker::Linker;
+
+    let context = TestContext::new();
+    let module = context
+        .parse_program(source_file!(
+            &context,
+            r#"
+                begin
+                    call.b
+                end
+
+                proc b
+                    call."$main"
+                end
+            "#
+        ))
+        .expect("program parsing must succeed");
+    let source_manager = context.source_manager();
+
+    let first_attempt = catch_unwind(AssertUnwindSafe(|| {
+        let mut linker = Linker::new(source_manager.clone());
+        let first_err = linker
+            .link([module.clone()])
+            .expect_err("expected cyclic program to be rejected on first link");
+        let second_err = linker
+            .link(core::iter::empty())
+            .expect_err("expected cyclic program to be rejected on second link");
+        (first_err, second_err)
+    }));
+
+    assert!(first_attempt.is_ok(), "linker panicked while retrying a cyclic link");
+    let (first_err, second_err) = first_attempt.unwrap();
+    assert!(first_err.to_string().contains("found a cycle in the call graph"));
+    assert!(second_err.to_string().contains("found a cycle in the call graph"));
+}
+
+#[test]
 fn test_cross_module_constant_cycle_in_procedure_scope_is_structured_error() {
     use std::panic::{AssertUnwindSafe, catch_unwind};
 
@@ -5515,6 +5606,269 @@ fn imported_error_message_cycle_is_rejected_without_panicking() {
     assert_diagnostic!(&err, "constant evaluation terminated due to infinite recursion");
     assert_diagnostic!(&err, "pub const ERR_A = b::ERR_B");
     assert_diagnostic!(&err, "pub const ERR_B = a::ERR_A");
+}
+
+#[test]
+fn exporting_unresolved_digest_alias_preserves_digest_without_panicking() {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    let context = TestContext::new();
+    let digest = Word::default();
+    let module = context
+        .parse_module_with_path(
+            "m::n",
+            source_file!(
+                &context,
+                "pub use 0x0000000000000000000000000000000000000000000000000000000000000000 -> foo\n"
+            ),
+        )
+        .expect("module parsing must succeed");
+
+    let assembled = catch_unwind(AssertUnwindSafe(|| {
+        Assembler::new(context.source_manager()).assemble_library([module])
+    }));
+
+    assert!(assembled.is_ok(), "assembly panicked, expected library assembly to succeed");
+    let library = assembled
+        .unwrap()
+        .expect("expected digest alias export to assemble successfully");
+    assert_eq!(library.get_procedure_root_by_path("m::n::foo"), Some(digest));
+}
+
+#[test]
+fn path_alias_chain_to_digest_assembles_without_panicking() {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    let context = TestContext::new();
+    let digest = Word::default();
+    let module = context
+        .parse_module_with_path(
+            "m::n",
+            source_file!(
+                &context,
+                r#"
+                    pub use 0x0000000000000000000000000000000000000000000000000000000000000000 -> foo
+                    pub use m::n::foo->bar
+
+                    pub proc calls_bar
+                        call.bar
+                    end
+                "#
+            ),
+        )
+        .expect("module parsing must succeed");
+
+    let assembled = catch_unwind(AssertUnwindSafe(|| {
+        Assembler::new(context.source_manager()).assemble_library([module])
+    }));
+
+    assert!(assembled.is_ok(), "assembly panicked, expected library assembly to succeed");
+    let library = assembled
+        .unwrap()
+        .expect("expected digest alias chain to assemble successfully");
+    assert_eq!(library.get_procedure_root_by_path("m::n::bar"), Some(digest));
+    assert!(library.get_procedure_root_by_path("m::n::calls_bar").is_some());
+}
+
+#[test]
+fn imported_digest_alias_invoke_assembles_without_panicking() {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    let program = r#"
+        use 0x0000000000000000000000000000000000000000000000000000000000000000 -> foo
+
+        begin
+            exec.foo
+        end
+    "#;
+
+    let assembled =
+        catch_unwind(AssertUnwindSafe(|| Assembler::default().assemble_program(program)));
+
+    assert!(
+        assembled.is_ok(),
+        "assembly panicked, expected opaque digest invoke to be allowed"
+    );
+    assembled
+        .unwrap()
+        .expect("expected digest-backed invoke alias to assemble successfully");
+}
+
+#[test]
+fn imported_digest_alias_invoke_is_not_reported_unused_when_warnings_are_errors() {
+    use std::sync::Arc;
+
+    use crate::{DefaultSourceManager, Parse, ParseOptions, ast::ModuleKind};
+
+    let source_manager: Arc<dyn crate::SourceManager> = Arc::new(DefaultSourceManager::default());
+    let program = r#"
+        use 0x0000000000000000000000000000000000000000000000000000000000000000 -> foo
+
+        begin
+            exec.foo
+        end
+    "#;
+
+    let mut options = ParseOptions::new(ModuleKind::Executable, "main");
+    options.warnings_as_errors = true;
+
+    <&str as Parse>::parse_with_options(program, source_manager, options)
+        .expect("expected digest-backed invoke alias to count as used");
+}
+
+#[test]
+fn imported_digest_alias_forward_decl_is_not_reported_unused_when_warnings_are_errors() {
+    use std::sync::Arc;
+
+    use crate::{DefaultSourceManager, Parse, ParseOptions, ast::ModuleKind};
+
+    let source_manager: Arc<dyn crate::SourceManager> = Arc::new(DefaultSourceManager::default());
+    let program = r#"
+        proc helper
+            exec.foo
+        end
+
+        use 0x0000000000000000000000000000000000000000000000000000000000000000 -> foo
+
+        begin
+            call.helper
+        end
+    "#;
+
+    let mut options = ParseOptions::new(ModuleKind::Executable, "main");
+    options.warnings_as_errors = true;
+
+    <&str as Parse>::parse_with_options(program, source_manager, options)
+        .expect("expected forward-declared digest alias to count as used");
+}
+
+#[test]
+fn forward_declared_import_used_by_alias_target_is_not_reported_unused_when_warnings_are_errors() {
+    use std::sync::Arc;
+
+    use crate::{DefaultSourceManager, Parse, ParseOptions, ast::ModuleKind};
+
+    let source_manager: Arc<dyn crate::SourceManager> = Arc::new(DefaultSourceManager::default());
+    let module = r#"
+        pub use foo::bar -> baz
+        use external::module -> foo
+    "#;
+
+    let mut options = ParseOptions::new(ModuleKind::Library, "m");
+    options.warnings_as_errors = true;
+
+    <&str as Parse>::parse_with_options(module, source_manager, options)
+        .expect("expected forward-declared import used by alias target to count as used");
+}
+
+#[test]
+fn forward_declared_import_used_by_type_ref_is_not_reported_unused_when_warnings_are_errors() {
+    use std::sync::Arc;
+
+    use crate::{DefaultSourceManager, Parse, ParseOptions, ast::ModuleKind};
+
+    let source_manager: Arc<dyn crate::SourceManager> = Arc::new(DefaultSourceManager::default());
+    let module = r#"
+        type Local = foo::Type
+        use external::module -> foo
+    "#;
+
+    let mut options = ParseOptions::new(ModuleKind::Library, "m");
+    options.warnings_as_errors = true;
+
+    <&str as Parse>::parse_with_options(module, source_manager, options)
+        .expect("expected forward-declared import used by type ref to count as used");
+}
+
+#[test]
+fn forward_declared_import_used_by_constant_ref_is_not_reported_unused_when_warnings_are_errors() {
+    use std::sync::Arc;
+
+    use crate::{DefaultSourceManager, Parse, ParseOptions, ast::ModuleKind};
+
+    let source_manager: Arc<dyn crate::SourceManager> = Arc::new(DefaultSourceManager::default());
+    let module = r#"
+        const LOCAL = foo::BAR
+        use external::module -> foo
+    "#;
+
+    let mut options = ParseOptions::new(ModuleKind::Library, "m");
+    options.warnings_as_errors = true;
+
+    <&str as Parse>::parse_with_options(module, source_manager, options)
+        .expect("expected forward-declared import used by constant ref to count as used");
+}
+
+#[test]
+fn imported_digest_alias_subpath_is_rejected_without_panicking() {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    let program = r#"
+        use 0x0000000000000000000000000000000000000000000000000000000000000000 -> foo
+
+        begin
+            exec.foo::bar
+        end
+    "#;
+
+    let assembled =
+        catch_unwind(AssertUnwindSafe(|| Assembler::default().assemble_program(program)));
+
+    assert!(assembled.is_ok(), "assembly panicked, expected a structured error");
+    let err = assembled
+        .unwrap()
+        .expect_err("expected digest-backed invoke subpath to be rejected");
+    assert_diagnostic!(&err, "invalid procedure path: not an item");
+}
+
+#[test]
+fn invoking_local_type_alias_returns_error_instead_of_panicking() {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    let masm = "type foo = u32\nbegin\n    exec.foo\nend\n";
+
+    let result = catch_unwind(AssertUnwindSafe(|| Assembler::default().assemble_program(masm)));
+
+    let result = result.expect("assembly panicked, expected a structured error");
+    let err = result.expect_err("assembly unexpectedly succeeded");
+    assert_diagnostic!(&err, "invalid symbol reference: wrong type");
+    assert_diagnostic!(&err, "expected this symbol to reference a procedure item");
+}
+
+#[test]
+fn invoking_local_type_alias_is_rejected_during_semantic_analysis() {
+    let context = TestContext::new();
+    let masm = source_file!(&context, "type foo = u32\nbegin\n    exec.foo\nend\n");
+
+    let err = context
+        .parse_program(masm)
+        .expect_err("semantic analysis unexpectedly accepted invoking a local type alias");
+    assert_diagnostic!(&err, "invalid symbol reference: wrong type");
+    assert_diagnostic!(&err, "expected this symbol to reference a procedure item");
+}
+
+#[test]
+fn invoking_imported_type_alias_returns_error_instead_of_panicking() {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    let context = TestContext::new();
+    let lib = context
+        .parse_module_with_path("test::types", source_file!(&context, "pub type foo = u32\n"))
+        .expect("library module parsing must succeed");
+    let library = Assembler::new(context.source_manager())
+        .assemble_library([lib])
+        .expect("library assembly must succeed");
+
+    let mut assembler = Assembler::new(context.source_manager());
+    assembler.link_dynamic_library(library).expect("library linking must succeed");
+
+    let program = "use test::types\nbegin\n    exec.types::foo\nend\n";
+    let result = catch_unwind(AssertUnwindSafe(|| assembler.assemble_program(program)));
+
+    let result = result.expect("assembly panicked, expected a structured error");
+    let err = result.expect_err("assembly unexpectedly succeeded");
+    assert_diagnostic!(&err, "invalid procedure reference: path refers to a non-procedure item");
+    assert_diagnostic!(&err, "test::types::foo");
 }
 
 #[test]

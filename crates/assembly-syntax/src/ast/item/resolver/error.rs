@@ -5,7 +5,10 @@ use alloc::sync::Arc;
 
 use miden_debug_types::{SourceFile, SourceManager, SourceSpan};
 
-use crate::diagnostics::{Diagnostic, RelatedLabel, miette};
+use crate::{
+    ast::ItemIndex,
+    diagnostics::{Diagnostic, RelatedLabel, miette},
+};
 
 /// Represents an error that occurs during symbol resolution
 #[derive(Debug, Clone, thiserror::Error, Diagnostic)]
@@ -76,6 +79,15 @@ pub enum SymbolResolutionError {
         #[source_code]
         source_file: Option<Arc<SourceFile>>,
         max_depth: usize,
+    },
+    #[error("too many items in module")]
+    #[diagnostic(help("break this module up into smaller modules"))]
+    TooManyItemsInModule {
+        #[label("module item count exceeds the supported limit of {max_items}")]
+        span: SourceSpan,
+        #[source_code]
+        source_file: Option<Arc<SourceFile>>,
+        max_items: usize,
     },
 }
 
@@ -174,6 +186,14 @@ impl SymbolResolutionError {
             span,
             source_file: source_manager.get(span.source_id()).ok(),
             max_depth,
+        }
+    }
+
+    pub fn too_many_items_in_module(span: SourceSpan, source_manager: &dyn SourceManager) -> Self {
+        Self::TooManyItemsInModule {
+            span,
+            source_file: source_manager.get(span.source_id()).ok(),
+            max_items: ItemIndex::MAX_ITEMS,
         }
     }
 }
