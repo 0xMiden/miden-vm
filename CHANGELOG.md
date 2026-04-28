@@ -2,6 +2,10 @@
 
 ## v0.23.0 (TBD)
 
+#### Enhancements
+
+- Implemented the `miden-registry` tool for managing a local filesystem-based package registry. This is intended to help us explore what package management in Miden projects might look like with a central registry for sharing packages, without needing to go all-in on implementing one. [#2881](https://github.com/0xMiden/miden-vm/pull/2881).
+
 #### Fixes
 - Rejected non-syscall references to exported kernel procedures in the linker ([#2902](https://github.com/0xMiden/miden-vm/issues/2902)).
 - Reverted the `MainTrace` typed row storage change that caused a large `blake3_1to1` trace-building regression ([#2949](https://github.com/0xMiden/miden-vm/pull/2949)).

@@ -1,0 +1,34 @@
+[package]
+name = "miden-package-registry-local"
+version.workspace = true
+description = "Filesystem-backed local package registry for Miden packages"
+documentation = "https://docs.rs/miden-package-registry-local"
+readme = "README.md"
+categories = ["compilers", "command-line-utilities"]
+keywords = ["miden", "package", "registry"]
+license.workspace = true
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "miden-registry"
+path = "src/main.rs"
+
+[dependencies]
+clap.workspace = true
+miden-assembly-syntax.workspace = true
+miden-core.workspace = true
+miden-mast-package.workspace = true
+miden-package-registry = { workspace = true, features = ["resolver", "serde"] }
+serde.workspace = true
+serde_json = { workspace = true, features = ["std"] }
+thiserror.workspace = true
+toml = { workspace = true, features = ["display", "parse", "serde", "std"] }
+
+[dev-dependencies]
+miden-mast-package = { workspace = true, features = ["arbitrary"] }
+proptest.workspace = true
+tempfile = { workspace = true, features = ["getrandom"] }
