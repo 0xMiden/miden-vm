@@ -53,7 +53,7 @@ end
 #! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
 #! Stack transition looks as follows:
 #! [b_lo, b_hi, a_lo, a_hi, ...] -> [c_lo, c_hi, ...], where c = (a - b) % 2^64
-#! This takes 11 cycles.
+#! This takes 12 cycles.
 pub proc wrapping_sub(b: u64, a: u64) -> u64
     movup.3 movup.3     # => [a_lo, a_hi, b_lo, b_hi]
     movup.2             # => [b_lo, a_lo, a_hi, b_hi]
@@ -72,7 +72,7 @@ end
 #! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
 #! Stack transition looks as follows:
 #! [b_lo, b_hi, a_lo, a_hi, ...] -> [underflow, c_lo, c_hi, ...], where c = (a - b) % 2^64
-#! This takes 15 cycles.
+#! This takes 14 cycles.
 pub proc overflowing_sub(b: u64, a: u64) -> (i1, u64)
     movup.3 movup.3     # => [a_lo, a_hi, b_lo, b_hi]
     movup.2             # => [b_lo, a_lo, a_hi, b_hi]
@@ -119,7 +119,7 @@ end
 #! Stack transition looks as follows:
 #! [b_lo, b_hi, a_lo, a_hi, ...] -> [c_lo, c_mid_lo, c_mid_hi, c_hi, ...], where
 #! c = a * b is represented as a 128-bit value split into 4 32-bit limbs.
-#! This takes 22 cycles.
+#! This takes 26 cycles.
 pub proc widening_mul(b: u64, a: u64) -> u128
     # => [b_lo, b_hi, a_lo, a_hi, ...]
     reversew
@@ -175,7 +175,7 @@ end
 #! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
 #! Stack transition looks as follows:
 #! [b_lo, b_hi, a_lo, a_hi, ...] -> [c, ...], where c = 1 when a < b, and 0 otherwise.
-#! This takes 12 cycles.
+#! This takes 13 cycles.
 pub proc lt(b: u64, a: u64) -> i1
     movup.3 movup.3
     # => [a_lo, a_hi, b_lo, b_hi, ...]
@@ -265,7 +265,7 @@ end
 #! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
 #! Stack transition looks as follows:
 #! [b_lo, b_hi, a_lo, a_hi, ...] -> [c, ...], where c = 1 when a == b, and 0 otherwise.
-#! This takes 5 cycles.
+#! This takes 6 cycles.
 pub proc eq(b: u64, a: u64) -> i1
     movup.2     # => [a_lo, b_lo, b_hi, a_hi]
     eq          # => [a_lo==b_lo, b_hi, a_hi]
@@ -278,7 +278,7 @@ end
 #! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
 #! Stack transition looks as follows:
 #! [b_lo, b_hi, a_lo, a_hi, ...] -> [c, ...], where c = 1 when a != b, and 0 otherwise.
-#! This takes 5 cycles.
+#! This takes 8 cycles.
 pub proc neq(b: u64, a: u64) -> i1
     movup.2     # => [a_lo, b_lo, b_hi, a_hi]
     neq         # => [a_lo!=b_lo, b_hi, a_hi]
@@ -303,7 +303,7 @@ end
 #! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
 #! Stack transition looks as follows:
 #! [b_lo, b_hi, a_lo, a_hi, ...] -> [c_lo, c_hi, ...], where c = min(a, b).
-#! This takes 23 cycles.
+#! This takes 27 cycles.
 pub proc min(b: u64, a: u64) -> u64
     movup.3 movup.3
     # => [a_lo, a_hi, b_lo, b_hi, ...]
@@ -321,7 +321,7 @@ end
 #! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
 #! Stack transition looks as follows:
 #! [b_lo, b_hi, a_lo, a_hi, ...] -> [c_lo, c_hi, ...], where c = max(a, b).
-#! This takes 24 cycles.
+#! This takes 27 cycles.
 pub proc max(b: u64, a: u64) -> u64
     movup.3 movup.3
     # => [a_lo, a_hi, b_lo, b_hi, ...]
