@@ -18,6 +18,7 @@
 - [BREAKING] Reject oversized modules at resolver construction instead of building partial resolver state or panicking ([#2899](https://github.com/0xMiden/miden-vm/pull/2899)).
 - Return a normal assembly error when `pub use <digest> -> <name>` does not resolve to an exported procedure ([#2899](https://github.com/0xMiden/miden-vm/pull/2899)).
 - [BREAKING] Reject non-procedure invoke targets during semantic analysis, and return an assembly error instead of panicking if one still reaches assembly ([#2899](https://github.com/0xMiden/miden-vm/pull/2899)).
+- Added `Package::content_digest()` to identify package contents without changing the MAST digest, including manifest data and semantic package metadata ([#2909](https://github.com/0xMiden/miden-vm/pull/2909)).
 
 ## 0.22.0 (TBD)
 
