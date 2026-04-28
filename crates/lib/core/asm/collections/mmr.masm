@@ -18,6 +18,10 @@ pub proc get
   dup.1 mem_load
   # stack: [num_leaves, pos, mmr_ptr, ...]
 
+  # assert `pos < num_leaves`
+  dup.1 dup.1 u32assert2 u32lt assert.err="position is not an existing MMR leaf"
+  # stack: [num_leaves, pos, mmr_ptr, ...]
+
   # compute `num_leaves & pos`, this contains all peaks before `pos` (and maybe some after the owning peak) (3 cycles)
   dup.1 dup.1 u32and
   # stack: [before_candidates, num_leaves, pos, mmr_ptr, ...]
