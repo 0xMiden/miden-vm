@@ -326,7 +326,7 @@ fn serialized_size_hint(forest: &MastForest, stripped: bool, hashless: bool) -> 
 
     let roots_len = forest.roots.len();
     size += roots_len.get_size_hint();
-    size += roots_len * core::mem::size_of::<u32>();
+    size += roots_len * size_of::<u32>();
 
     let mut basic_block_len = 0usize;
     for node in forest.nodes.iter() {
@@ -801,7 +801,7 @@ pub(super) fn reserve_allocation<T>(
     label: &str,
 ) -> Result<(), DeserializationError> {
     let bytes_needed = count
-        .checked_mul(core::mem::size_of::<T>())
+        .checked_mul(size_of::<T>())
         .ok_or_else(|| DeserializationError::InvalidValue(format!("{label} size overflow")))?;
     if bytes_needed > *remaining_budget {
         return Err(DeserializationError::InvalidValue(format!(

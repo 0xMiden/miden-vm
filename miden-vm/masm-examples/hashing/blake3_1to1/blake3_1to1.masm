@@ -3,7 +3,7 @@ use miden::core::sys
 
 begin
     # Push the number of iterations on the stack, and assess if we should loop
-    adv_push.1 dup neq.0
+    adv_push dup neq.0
     # => [0 or 1, num_iters_left, HASH_INPUTS_1, HASH_INPUTS_2]
 
     while.true

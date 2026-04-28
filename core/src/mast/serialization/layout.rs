@@ -63,11 +63,11 @@ impl ForestLayout {
             )));
         }
 
-        let mut raw = [0u8; core::mem::size_of::<u32>()];
+        let mut raw = [0u8; size_of::<u32>()];
         raw.copy_from_slice(read_fixed_section_entry(
             bytes,
             self.roots_offset,
-            core::mem::size_of::<u32>(),
+            size_of::<u32>(),
             index,
             "root",
         )?);
@@ -282,10 +282,10 @@ fn scan_layout_sections<R: OffsetTrackingReader>(
     validate_budgeted_count(source, node_count, MastNodeEntry::SERIALIZED_SIZE, "node count")?;
 
     let roots_count = source.read_usize()?;
-    validate_budgeted_count(source, roots_count, core::mem::size_of::<u32>(), "root count")?;
+    validate_budgeted_count(source, roots_count, size_of::<u32>(), "root count")?;
     let roots_offset = source.offset();
     let roots_len_bytes = roots_count
-        .checked_mul(core::mem::size_of::<u32>())
+        .checked_mul(size_of::<u32>())
         .ok_or_else(|| DeserializationError::InvalidValue("roots length overflow".to_string()))?;
     let _roots_data = source.read_slice(roots_len_bytes)?;
 

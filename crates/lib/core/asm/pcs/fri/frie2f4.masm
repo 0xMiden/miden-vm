@@ -13,7 +13,7 @@ use miden::core::pcs::fri::helper
 #! starting from the original domain size.
 @locals(16)
 pub proc preprocess
-    adv_push.1
+    adv_push
     # => [num_queries, g, ...]
     exec.constants::fri_com_ptr
     # => [layer_ptr, num_queries, g, ...]
@@ -44,7 +44,7 @@ pub proc preprocess
     movdn.5
     #=> [X, layer_ptr, layer_ptr, g]
 
-    adv_push.1
+    adv_push
     mul.2
     sub.1
     movdn.4
@@ -71,7 +71,7 @@ pub proc preprocess
     movdn.5
     #=> [X, remainder_poly_ptr, remainder_poly_ptr, layer_ptr, g]
 
-    adv_push.1
+    adv_push
     dup mul.2 exec.constants::set_remainder_poly_size
 
     sub.1
