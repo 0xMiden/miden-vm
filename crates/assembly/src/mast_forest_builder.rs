@@ -1370,7 +1370,7 @@ mod tests {
         ];
 
         let block1_id = builder
-            .ensure_block(block1_ops, block1_decorators, vec![], vec![], vec![], vec![])
+            .ensure_block(block1_ops.clone(), block1_decorators, vec![], vec![], vec![], vec![])
             .unwrap();
 
         // Sanity check the test itself makes sense
@@ -1391,7 +1391,7 @@ mod tests {
         ]; // [push mul] [3]
 
         let block2_id = builder
-            .ensure_block(block2_ops, block2_decorators, vec![], vec![], vec![], vec![])
+            .ensure_block(block2_ops.clone(), block2_decorators, vec![], vec![], vec![], vec![])
             .unwrap();
 
         // Merge the blocks
