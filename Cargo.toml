@@ -69,9 +69,9 @@ miden-utils-testing     = { path = "./crates/test-utils", package = "miden-test-
 miden-verifier          = { path = "./verifier", version = "0.23.0", default-features = false }
 
 # Miden crates
-miden-crypto     = { version = "0.24", default-features = false }
+miden-crypto     = { version = "0.25", default-features = false }
 miden-formatting = { version = "0.1", default-features = false }
-miden-lifted-stark = { version = "0.24", default-features = false }
+miden-lifted-stark = { version = "0.25", default-features = false }
 midenc-hir-type  = { version = "0.6.0", default-features = false }
 
 # Serialization
@@ -109,3 +109,14 @@ toml = { version = "1.0", default-features = false }
 
 [workspace.lints.rust]
 unexpected_cfgs = { check-cfg = ['cfg(fuzzing)'], level = "warn" }
+
+[patch.crates-io]
+miden-crypto           = { git = "https://github.com/0xMiden/crypto", branch = "next" }
+miden-crypto-derive    = { git = "https://github.com/0xMiden/crypto", branch = "next" }
+miden-field            = { git = "https://github.com/0xMiden/crypto", branch = "next" }
+miden-serde-utils      = { git = "https://github.com/0xMiden/crypto", branch = "next" }
+miden-lifted-air       = { git = "https://github.com/0xMiden/crypto", branch = "next" }
+miden-lifted-stark     = { git = "https://github.com/0xMiden/crypto", branch = "next" }
+miden-stark-transcript = { git = "https://github.com/0xMiden/crypto", branch = "next" }
+miden-stateful-hasher  = { git = "https://github.com/0xMiden/crypto", branch = "next" }
+midenc-hir-type        = { git = "https://github.com/reilabs/midenc-hir-type", branch = "crypto-0.25" }

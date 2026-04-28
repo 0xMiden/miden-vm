@@ -14,6 +14,11 @@ const LEAF_DEPTH = 64
 # Each key-value pair is two words, and a leaf can hold up to 1024 pairs.
 const MAX_LEAF_SIZE = 8192
 
+# Domain identifier used when hashing SMT leaves. Matches `SmtLeaf::LEAF_DOMAIN` in miden-crypto
+# and is mixed into the Poseidon2 capacity word to domain-separate leaf hashes from ordinary
+# inner Merkle nodes.
+const LEAF_DOMAIN = 0x13af
+
 # EXPORTS
 # =================================================================================================
 
@@ -100,9 +105,9 @@ pub proc get
             dupw.1 movdnw.3
             # => [V, K, NV, V, R]
 
-            # Hash leaf preimage and ensure that it equals node value
-            # (27 cycles)
-            hmerge assert_eqw
+            # Hash leaf preimage with domain separation and ensure that it equals node value
+            # (28 cycles)
+            push.LEAF_DOMAIN exec.poseidon2::merge_in_domain assert_eqw
             # => [V, R]
         else
             # => [leaf_size, NV, K, R]
@@ -268,8 +273,10 @@ proc get_multi_leaf_value
     locaddr.0 swap
     # => [num_words, ptr, COM, K, R]
 
-    # Cycles: 56 + 3 * num_words / 2
-    exec.mem::pipe_double_words_preimage_to_memory
+    # Push the leaf domain so the preimage check uses the same capacity word as the Rust-side
+    # `SmtLeaf::hash()` for `Multiple` leaves.
+    # Cycles: 58 + 3 * num_words / 2
+    push.LEAF_DOMAIN exec.mem::pipe_double_words_preimage_to_memory_with_domain
     # => [ptr_end, K, R]
 
     # (4 cycles)
@@ -353,13 +360,14 @@ proc set_empty_leaf
         dropw
         #=> [V, K, R, ...]
 
-        # Update advice map (swap to put K on top for key = hash(K || V))
-        swapw adv.insert_hdword swapw
+        # Update advice map with domain separation (swap to put K on top for the leaf-domain
+        # hash key hash_in_domain(K || V, LEAF_DOMAIN)).
+        swapw push.LEAF_DOMAIN movdn.8 adv.insert_hdword_d movup.8 drop swapw
         #=> [V, K, R, ...]
 
-        # Compute hash([K, V]); the new node value (NV)
-        # (20 cycles)
-        dupw.1 hmerge
+        # Compute hash_in_domain([K, V], LEAF_DOMAIN); the new node value (NV)
+        # (21 cycles)
+        dupw.1 push.LEAF_DOMAIN exec.poseidon2::merge_in_domain
         # => [NV, K, R]
 
         # Prepare stack for `mtree_set` (5 cycles)
@@ -453,13 +461,14 @@ proc insert_single_leaf
         dropw
         # => [K, V_in_leaf, V, R]
 
-        # Update advice map (5 cycles, swap to put K on top for key = hash(K || V))
-        movupw.2 swapw adv.insert_hdword swapw
+        # Update advice map with domain separation (swap to put K on top for the leaf-domain
+        # hash key hash_in_domain(K || V, LEAF_DOMAIN)).
+        movupw.2 swapw push.LEAF_DOMAIN movdn.8 adv.insert_hdword_d movup.8 drop swapw
         # => [V, K, V_in_leaf, R]
 
-        # Compute hash([K, V]); the new node value (NV)
+        # Compute hash_in_domain([K, V], LEAF_DOMAIN); the new node value (NV)
         # (X cycles)
-        dupw.1 hmerge
+        dupw.1 push.LEAF_DOMAIN exec.poseidon2::merge_in_domain
         # => [NV, K, V_in_leaf, R]
 
         # Prepare stack to update Merkle store
@@ -472,9 +481,9 @@ proc insert_single_leaf
         # => [NV_old, R_new, K, V_in_leaf]
 
         # Confirm that claimed `V_in_leaf` from advice provider is correct by checking if
-        # `[K, V_in_leaf]` hashes to `NV_old`
-        # (33 cycles)
-        movupw.2 dupw.3 swapw hmerge assert_eqw
+        # `[K, V_in_leaf]` hashes (with LEAF_DOMAIN) to `NV_old`
+        # (34 cycles)
+        movupw.2 dupw.3 swapw push.LEAF_DOMAIN exec.poseidon2::merge_in_domain assert_eqw
         # => [R_new, V_in_leaf]
 
         # Clean up stack for return
@@ -616,8 +625,9 @@ proc remove_single_leaf
         dropw
         # => [K, V_in_leaf, V, R]
 
-        # Update advice map (5 cycles, swap to put K on top for key = hash(K || V))
-        movupw.2 swapw adv.insert_hdword swapw
+        # Update advice map with domain separation (swap to put K on top for the leaf-domain
+        # hash key hash_in_domain(K || V, LEAF_DOMAIN)).
+        movupw.2 swapw push.LEAF_DOMAIN movdn.8 adv.insert_hdword_d movup.8 drop swapw
         # => [V, K, V_in_leaf, R]
 
         # Prepare the stack for `mtree_set`
@@ -631,10 +641,10 @@ proc remove_single_leaf
         mtree_set
         # => [NV_old, R_new, K, V_in_leaf, ...]
 
-        # Confirm that hmerge([K, V_in_leaf]) = NV_old
-        # (33 cycles)
+        # Confirm that hash_in_domain([K, V_in_leaf], LEAF_DOMAIN) = NV_old
+        # (34 cycles)
         movupw.2 dupw.3
-        swapw hmerge
+        swapw push.LEAF_DOMAIN exec.poseidon2::merge_in_domain
         assert_eqw
         # => [R_new, V_in_leaf, ...]
 
@@ -665,8 +675,8 @@ proc remove_single_leaf
         movupw.3 dropw
         # => [NV, R, K_in_leaf, V_in_leaf]
 
-        # Ensure that hash([K_in_leaf, V_in_leaf]) == NV
-        movupw.2 movupw.3 swapw hmerge assert_eqw
+        # Ensure that hash_in_domain([K_in_leaf, V_in_leaf], LEAF_DOMAIN) == NV
+        movupw.2 movupw.3 swapw push.LEAF_DOMAIN exec.poseidon2::merge_in_domain assert_eqw
         # => [R]
 
         # Prepare stack for return
@@ -692,7 +702,7 @@ end
 @locals(8192)
 proc set_multi_leaf
     # We'll have to pipe all the pairs from the advice stack. Let's get the
-    # stack ready for pipe_double_words_preimage_to_memory.
+    # stack ready for pipe_double_words_preimage_to_memory_with_domain.
 
     movdn.12
     # => [NV, V, K, leaf_size, R]
@@ -713,7 +723,7 @@ proc set_multi_leaf
     locaddr.0 swap
     # => [num_words, ptr, COM; NV, K, V, leaf_size, R]
 
-    exec.mem::pipe_double_words_preimage_to_memory
+    push.LEAF_DOMAIN exec.mem::pipe_double_words_preimage_to_memory_with_domain
     # => [end_ptr; NV, K, V, leaf_size, R]
 
     movdn.12
@@ -1122,7 +1132,7 @@ proc hash_and_insert_mem
     dup.1 dup.1
     # => [start_addr, end_addr, start_addr, end_addr, leaf_index, R, ...]
 
-    exec.poseidon2::hash_words
+    push.LEAF_DOMAIN exec.poseidon2::hash_words_with_domain
     # => [NV, start_addr, end_addr, leaf_index, R, ...]
 
     adv.insert_mem
