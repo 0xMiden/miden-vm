@@ -293,8 +293,7 @@ impl OpToDebugVarIds {
             .ok_or_else(|| "node_indptr_for_op_idx is unexpectedly empty".to_string())?;
         if last_node_ptr > max_node_ptr {
             return Err(format!(
-                "node_indptr_for_op_idx end {} exceeds op_indptr bounds {}",
-                last_node_ptr, max_node_ptr
+                "node_indptr_for_op_idx end {last_node_ptr} exceeds op_indptr bounds {max_node_ptr}"
             ));
         }
 
