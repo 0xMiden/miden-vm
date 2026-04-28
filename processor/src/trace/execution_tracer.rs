@@ -318,16 +318,21 @@ impl ExecutionTracer {
                 );
 
                 if dyn_node.is_dyncall() {
-                    let overflow_addr = self.overflow_table.last_update_clk_in_current_ctx();
-                    // Note: the stack depth to record is the `current_stack_depth - 1` due to
-                    // the semantics of DYNCALL. That is, the top of the
-                    // stack contains the memory address to where the
-                    // address to dynamically call is located. Then, the
-                    // DYNCALL operation performs a drop, and
-                    // records the stack depth after the drop as the beginning of
-                    // the new context. For more information, look at the docs for how the
-                    // constraints are designed; it's a bit tricky but it works.
-                    let stack_depth_after_drop = processor.stack().depth() - 1;
+                    // Note: the stack depth to record is after the DYNCALL drop. DYNCALL pops
+                    // the top element (the memory address of the callee hash) before entering
+                    // the new context. The depth cannot go below MIN_STACK_DEPTH.
+                    let depth = processor.stack().depth();
+                    let (stack_depth_after_drop, overflow_addr) =
+                        if depth > MIN_STACK_DEPTH as u32 {
+                            // The pop shifts an overflow entry into the main stack, so the
+                            // recorded overflow address is the one that remains after the shift.
+                            (depth - 1, self.overflow_table.clk_after_pop_in_current_ctx())
+                        } else {
+                            (
+                                MIN_STACK_DEPTH as u32,
+                                self.overflow_table.last_update_clk_in_current_ctx(),
+                            )
+                        };
                     Some(ExecutionContextInfo::new(
                         processor.system().ctx(),
                         processor.system().caller_hash(),
@@ -900,5 +905,124 @@ impl HasherChipletShim {
 impl Default for HasherChipletShim {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+// TESTS
+// ================================================================================================
+
+#[cfg(test)]
+mod tests {
+    use alloc::sync::Arc;
+
+    use miden_core::mast::{DynNodeBuilder, MastForest, MastForestContributor};
+
+    use super::*;
+    use crate::{
+        FastProcessor, StackInputs, continuation_stack::ContinuationStack, tracer::Tracer,
+    };
+
+    /// Builds a [`MastForest`] containing a single DYNCALL node and returns the forest together
+    /// with the node's [`MastNodeId`].
+    fn dyncall_forest() -> (Arc<MastForest>, MastNodeId) {
+        let mut forest = MastForest::new();
+        let node_id = DynNodeBuilder::new_dyncall().add_to_forest(&mut forest).unwrap();
+        (Arc::new(forest), node_id)
+    }
+
+    /// Verifies that when DYNCALL is started with the stack at exactly `MIN_STACK_DEPTH`,
+    /// `start_clock_cycle` pushes an [`ExecutionContextInfo`] onto `block_stack` whose
+    /// `parent_stack_depth` equals `MIN_STACK_DEPTH` — not `MIN_STACK_DEPTH - 1`.
+    ///
+    /// This is the regression test for the bug where the depth was unconditionally decremented by
+    /// one even when already at the minimum, violating the tracer contract that "popping at minimum
+    /// stack depth does not decrement depth".
+    #[test]
+    fn start_clock_cycle_dyncall_records_min_depth_when_stack_at_min() {
+        let (forest, dyncall_id) = dyncall_forest();
+        let processor = FastProcessor::new(StackInputs::default());
+
+        let mut tracer = ExecutionTracer::new(1);
+        tracer.start_clock_cycle(
+            &processor,
+            Continuation::StartNode(dyncall_id),
+            &ContinuationStack::default(),
+            &forest,
+        );
+
+        let ctx_info =
+            tracer.block_stack.peek().ctx_info.expect(
+                "DYNCALL start_clock_cycle must push ExecutionContextInfo onto block_stack",
+            );
+        assert_eq!(
+            ctx_info.parent_stack_depth, MIN_STACK_DEPTH as u32,
+            "parent_stack_depth must not go below MIN_STACK_DEPTH when stack is at minimum"
+        );
+    }
+
+    /// Verifies that when DYNCALL is started with the stack above `MIN_STACK_DEPTH`, the recorded
+    /// `parent_stack_depth` is `depth - 1` (the stack depth after the DYNCALL pops the callee
+    /// address).
+    #[test]
+    fn start_clock_cycle_dyncall_records_depth_minus_one_when_stack_above_min() {
+        let (forest, dyncall_id) = dyncall_forest();
+        // Push one extra element so depth = MIN_STACK_DEPTH + 1.
+        let processor = FastProcessor::new(StackInputs::default()).with_extra_stack_depth(1);
+        let expected_depth = MIN_STACK_DEPTH as u32 + 1;
+        assert_eq!(processor.stack_depth(), expected_depth);
+
+        let mut tracer = ExecutionTracer::new(1);
+        tracer.start_clock_cycle(
+            &processor,
+            Continuation::StartNode(dyncall_id),
+            &ContinuationStack::default(),
+            &forest,
+        );
+
+        let ctx_info =
+            tracer.block_stack.peek().ctx_info.expect(
+                "DYNCALL start_clock_cycle must push ExecutionContextInfo onto block_stack",
+            );
+        assert_eq!(
+            ctx_info.parent_stack_depth,
+            expected_depth - 1,
+            "parent_stack_depth must be depth - 1 when stack is above MIN_STACK_DEPTH"
+        );
+    }
+
+    /// Regression test for the bug where `parent_next_overflow_addr` was set to the pre-pop
+    /// overflow address even when the caller had multiple overflow entries.
+    ///
+    /// When DYNCALL pops with depth > MIN_STACK_DEPTH, an overflow entry shifts into the main
+    /// stack. The recorded `parent_next_overflow_addr` must reflect the state *after* that
+    /// shift — i.e., the second-to-last overflow entry's clock, not the last.
+    #[test]
+    fn start_clock_cycle_dyncall_with_multiple_overflow_entries_records_correct_overflow_addr() {
+        let (forest, dyncall_id) = dyncall_forest();
+        // depth = MIN_STACK_DEPTH + 2 so two overflow entries are present.
+        let processor = FastProcessor::new(StackInputs::default()).with_extra_stack_depth(2);
+
+        let mut tracer = ExecutionTracer::new(1);
+        // Manually populate the tracer's overflow table with two entries at known clocks.
+        // clk=1 is the second-to-last; clk=2 is the last (will be consumed by the DYNCALL pop).
+        tracer.overflow_table.push(ZERO, RowIndex::from(1u32));
+        tracer.overflow_table.push(ZERO, RowIndex::from(2u32));
+
+        tracer.start_clock_cycle(
+            &processor,
+            Continuation::StartNode(dyncall_id),
+            &ContinuationStack::default(),
+            &forest,
+        );
+
+        let ctx_info =
+            tracer.block_stack.peek().ctx_info.expect(
+                "DYNCALL start_clock_cycle must push ExecutionContextInfo onto block_stack",
+            );
+        assert_eq!(
+            ctx_info.parent_next_overflow_addr,
+            Felt::from(RowIndex::from(1u32)),
+            "parent_next_overflow_addr must be the second-to-last overflow clock after the pop"
+        );
     }
 }
