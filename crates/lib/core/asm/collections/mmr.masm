@@ -14,10 +14,14 @@ use miden::core::math::u64
 #! Input: [pos, mmr_ptr, ...]
 #! Output: [N, ...] where `N` is the leaf and `R` is the MMR peak that owns the leaf.
 #!
-#! Cycles: 118
+#! Cycles: 125
 pub proc get
   # load the num_leaves of the MMR (2 cycles)
   dup.1 mem_load
+  # stack: [num_leaves, pos, mmr_ptr, ...]
+
+  # assert `pos < num_leaves`
+  dup.1 dup.1 u32assert2 u32lt assert.err="position is not an existing MMR leaf"
   # stack: [num_leaves, pos, mmr_ptr, ...]
 
   # compute `num_leaves & pos`, this contains all peaks before `pos` (and maybe some after the owning peak) (3 cycles)
