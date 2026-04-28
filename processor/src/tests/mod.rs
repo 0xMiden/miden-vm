@@ -37,7 +37,7 @@ begin
   push.A
   adv.push_mapval
   dropw
-  adv_push.1
+  adv_push
   push.1
   assert_eq
 end";
@@ -147,7 +147,7 @@ fn test_diagnostic_advice_map_key_not_found_2() {
 fn test_diagnostic_advice_stack_read_failed() {
     let source = "
         begin
-            swap adv_push.1 trace.2
+            swap adv_push trace.2
         end";
 
     let build_test = build_test_by_mode!(true, source, &[1, 2]);
@@ -157,8 +157,8 @@ fn test_diagnostic_advice_stack_read_failed() {
         "  x advice stack read failed",
         regex!(r#",-\[test[\d]+:3:18\]"#),
         " 2 |         begin",
-        " 3 |             swap adv_push.1 trace.2",
-        "   :                  ^^^^^^^^^^",
+        " 3 |             swap adv_push trace.2",
+        "   :                  ^^^^^^^^",
         " 4 |         end",
         "   `----"
     );
