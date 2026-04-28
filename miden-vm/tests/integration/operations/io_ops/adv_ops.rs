@@ -20,7 +20,12 @@ fn adv_push() {
 fn adv_push_repeat() {
     // AdviceStackBuilder handles the reversal required by sequential adv_push.
     let mut builder = AdviceStackBuilder::new();
-    builder.push_for_adv_push(&[Felt::new(1), Felt::new(2), Felt::new(3), Felt::new(4)]);
+    builder.push_for_adv_push(&[
+        Felt::new_unchecked(1),
+        Felt::new_unchecked(2),
+        Felt::new_unchecked(3),
+        Felt::new_unchecked(4),
+    ]);
     let advice_stack = builder.build_vec_u64();
     let test = build_op_test!("repeat.4 adv_push end", &[], &advice_stack);
     test.expect_stack(&[1, 2, 3, 4]);
