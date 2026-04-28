@@ -307,7 +307,7 @@ impl<const DEPTH: u8> SimpleSmt<DEPTH> {
         let subtree_root_index =
             NodeIndex::new(subtree_root_insertion_depth, subtree_insertion_index)?;
 
-        // add leaves
+        // remove leaves and inner nodes under the insertion root
         // --------------
 
         // The subtree's leaf indices live in their own context - i.e. a subtree of depth `d`. If we
@@ -317,10 +317,28 @@ impl<const DEPTH: u8> SimpleSmt<DEPTH> {
         // you can see it as there's a full subtree sitting on its left. In general, for
         // `subtree_insertion_index = i`, there are `i` subtrees sitting before the subtree we want
         // to insert, so we need to adjust all its leaves by `i * 2^d`.
-        let leaf_index_shift: u64 = subtree_insertion_index * 2_u64.pow(SUBTREE_DEPTH.into());
+        let leaf_index_shift: u64 = if SUBTREE_DEPTH == SMT_MAX_DEPTH {
+            0
+        } else {
+            subtree_insertion_index << u32::from(SUBTREE_DEPTH)
+        };
+
+        self.leaves.retain(|leaf_idx, _| {
+            !Self::leaf_is_in_subtree::<SUBTREE_DEPTH>(*leaf_idx, subtree_insertion_index)
+        });
+        self.inner_nodes.retain(|node_idx, _| {
+            !Self::node_is_in_subtree(
+                *node_idx,
+                subtree_root_insertion_depth,
+                subtree_insertion_index,
+            )
+        });
+
+        // add leaves
+        // --------------
         for (subtree_leaf_idx, leaf_value) in subtree.leaves() {
             let new_leaf_idx = leaf_index_shift + subtree_leaf_idx;
-            debug_assert!(new_leaf_idx < 2_u64.pow(DEPTH.into()));
+            debug_assert!(DEPTH == SMT_MAX_DEPTH || new_leaf_idx < 2_u64.pow(DEPTH.into()));
 
             self.leaves.insert(new_leaf_idx, *leaf_value);
         }
@@ -344,6 +362,34 @@ impl<const DEPTH: u8> SimpleSmt<DEPTH> {
         self.recompute_nodes_from_index_to_root(subtree_root_index, subtree.root);
 
         Ok(self.root)
+    }
+
+    fn leaf_is_in_subtree<const SUBTREE_DEPTH: u8>(
+        leaf_idx: u64,
+        subtree_insertion_index: u64,
+    ) -> bool {
+        if SUBTREE_DEPTH == SMT_MAX_DEPTH {
+            true
+        } else {
+            (leaf_idx >> u32::from(SUBTREE_DEPTH)) == subtree_insertion_index
+        }
+    }
+
+    fn node_is_in_subtree(
+        node_idx: NodeIndex,
+        subtree_root_depth: u8,
+        subtree_insertion_index: u64,
+    ) -> bool {
+        if node_idx.depth() < subtree_root_depth {
+            return false;
+        }
+
+        let depth_offset = node_idx.depth() - subtree_root_depth;
+        if depth_offset == SMT_MAX_DEPTH {
+            subtree_insertion_index == 0
+        } else {
+            (node_idx.position() >> u32::from(depth_offset)) == subtree_insertion_index
+        }
     }
 }
 

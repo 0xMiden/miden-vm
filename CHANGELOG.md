@@ -4,6 +4,7 @@
 - Added domain-separated hashing support for elements to `AlgebraicSpoonge` as `hash_elements_in_domain(...)`.
 - [BREAKING] Changed the serialization format of `PartialSmt` to be more compact on the wire. If you depended on the serialization format directly (or if it is stored), this will be breaking. This ser/de is now covered by fuzz tests.
 - [BREAKING] Changed `SmtLeaf::hash` to perform domain-separated hashing, reducing the risk of a collision with the hash of an inner node. Miden VM **must** be updated to comply with this.
+- Fixed `SimpleSmt::set_subtree()` to clear stale leaves and inner nodes in the replaced subtree region ([#981](https://github.com/0xMiden/crypto/pull/981)).
 
 ## 0.24.0 (2026-04-19)
 
