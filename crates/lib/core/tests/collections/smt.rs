@@ -373,6 +373,137 @@ fn test_smt_set_single_to_multi() {
     }
 }
 
+/// Regression test: inserting into a single-leaf with a forged (attacker-controlled) advice
+/// preimage must be rejected. Without preimage validation in `insert_single_to_multi_leaf`,
+/// an attacker who controls the SMT `set` advice provider could replace the existing
+/// single-leaf entry with arbitrary contents when the leaf is converted to a multi-leaf.
+#[test]
+fn test_smt_set_single_to_multi_rejects_forged_preimage() {
+    const SOURCE: &str = "
+        use miden::core::collections::smt
+        use miden::core::sys
+
+        begin
+            # => [V, K, R]
+            exec.smt::set
+            # => [V_old, R_new]
+            exec.sys::truncate_stack
+        end
+    ";
+
+    let k_real = word(101, 102, 103, 69420);
+    let v_real = word(1, 2, 3, 4);
+    let k_new = word(201, 202, 203, 69420);
+    let v_new = word(5, 6, 7, 8);
+
+    // attacker-chosen preimage that shares the leaf index but is otherwise arbitrary
+    let k_fake = word(301, 302, 303, 69420);
+    let v_fake = EMPTY_WORD;
+
+    let smt = build_smt_from_pairs(&[(k_real, v_real)]);
+    let root = smt.root();
+
+    // substitute a forged preimage for the real leaf hash in the advice map
+    let real_leaf_hash = smt.leaves().next().unwrap().1.hash();
+    let forged_preimage = build_leaf_advice_value(&[(k_fake, v_fake)]);
+    let store = MerkleStore::from(&smt);
+    let advice_map = vec![(real_leaf_hash, forged_preimage)];
+
+    let mut initial_stack: Vec<u64> = Vec::new();
+    push_word(&mut initial_stack, &root);
+    push_word(&mut initial_stack, &k_new);
+    push_word(&mut initial_stack, &v_new);
+
+    let test = build_test!(SOURCE, &initial_stack, &[], store, advice_map);
+    crate::expect_assert_error_message!(test, contains "invalid single-leaf preimage");
+}
+
+/// Regression test for the multi-leaf no-op deletion bypass.
+///
+/// Previously, `smt::set` loaded the leaf's node value (NV) via `adv.push_mtnode`, which
+/// reads from the advice provider's Merkle store without verifying the path to the root.
+/// A malicious prover could populate the store so traversal from root `R` lands on a
+/// leaf value from a different tree — one whose preimage does not contain the target key.
+/// When setting `V = ZERO` for that key, `set_multi_leaf` would then take the no-op branch
+/// (key not found + empty V) and return an unchanged root, silently skipping the deletion.
+///
+/// The fix replaces the unverified `adv.push_mtnode` at the top of `set` with `mtree_get`,
+/// which fetches and verifies the Merkle path in a single step. The forged path no longer
+/// hashes to `R`, so execution aborts with a `MerklePathVerificationFailed` error.
+#[test]
+fn test_smt_set_rejects_forged_merkle_path_on_noop_delete() {
+    use miden_utils_testing::crypto::InnerNodeInfo;
+
+    // All keys share K[3] so they collide into the same leaf bucket, giving us a multi-leaf.
+    const K_TARGET: Word = word(777, 102, 103, 42);
+    const V_TARGET: Word = word(1, 2, 3, 4);
+    const K_SHARED: Word = word(778, 202, 203, 42);
+    const V_SHARED: Word = word(5, 6, 7, 8);
+
+    // Real tree: contains K_TARGET. This is the tree the caller thinks they're updating.
+    let smt_real = build_smt_from_pairs(&[(K_TARGET, V_TARGET), (K_SHARED, V_SHARED)]);
+    let root_real = smt_real.root();
+
+    // Attacker's alternate tree: different multi-leaf at the same leaf index, NOT containing
+    // K_TARGET. Its preimage hashes to a different leaf value than smt_real's.
+    const K_FAKE_A: Word = word(888, 302, 303, 42);
+    const V_FAKE_A: Word = word(9, 10, 11, 12);
+    const K_FAKE_B: Word = word(889, 402, 403, 42);
+    const V_FAKE_B: Word = word(13, 14, 15, 16);
+    let smt_fake = build_smt_from_pairs(&[(K_FAKE_A, V_FAKE_A), (K_FAKE_B, V_FAKE_B)]);
+    let root_fake = smt_fake.root();
+    assert_ne!(root_real, root_fake);
+
+    // Merge both trees' inner nodes into a single store, then overwrite the entry for
+    // `root_real` to point at `root_fake`'s children. Traversal from `root_real` now
+    // follows `smt_fake`'s internal structure and terminates at `smt_fake`'s leaf value.
+    let mut store = MerkleStore::from(&smt_real);
+    store.extend(smt_fake.inner_nodes());
+    let fake_root_entry = store
+        .inner_nodes()
+        .find(|n| n.value == root_fake)
+        .expect("root_fake should be present after extend");
+    store.extend(core::iter::once(InnerNodeInfo {
+        value: root_real,
+        left: fake_root_entry.left,
+        right: fake_root_entry.right,
+    }));
+
+    // Advice map serves smt_fake's leaf preimage under smt_fake's leaf hash, which is what
+    // the poisoned store's traversal will surface as NV. With this pairing,
+    // `pipe_double_words_preimage_to_memory`'s hash-vs-commitment check passes, so (without
+    // the fix) the code would proceed to find_key_value, miss K_TARGET, and no-op.
+    let advice_map: Vec<(Word, Vec<Felt>)> = smt_fake
+        .leaves()
+        .map(|(_, leaf)| (leaf.hash(), build_leaf_advice_value(leaf.entries())))
+        .collect();
+
+    const SOURCE: &str = "
+        use miden::core::collections::smt
+        use miden::core::sys
+
+        begin
+            exec.smt::set
+            exec.sys::truncate_stack
+        end
+    ";
+
+    let mut initial_stack: Vec<u64> = Vec::new();
+    push_word(&mut initial_stack, &root_real);
+    push_word(&mut initial_stack, &K_TARGET);
+    push_word(&mut initial_stack, &EMPTY_WORD);
+
+    let test = build_test!(SOURCE, &initial_stack, &[], store, advice_map);
+
+    miden_utils_testing::expect_exec_error_matches!(
+        test,
+        miden_processor::ExecutionError::OperationError {
+            err: miden_processor::operation::OperationError::MerklePathVerificationFailed { .. },
+            ..
+        }
+    );
+}
+
 #[test]
 fn test_smt_set_in_multi() {
     const SOURCE: &str = "
