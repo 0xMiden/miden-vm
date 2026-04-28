@@ -40,7 +40,7 @@ _Note: Assertions can be parameterized with an error message (e.g., assert.err="
 | `add` <br /> `add.b`     | `[b, a, ...]` | `[c, ...]`   | 1 <br /> 1-2          | $c = (a + b) \bmod p$                                                          |
 | `sub` <br /> `sub.b`     | `[b, a, ...]` | `[c, ...]`   | 2 <br /> 2            | $c = (a - b) \bmod p$                                                          |
 | `mul` <br /> `mul.b`     | `[b, a, ...]` | `[c, ...]`   | 1 <br /> 2            | $c = (a \cdot b) \bmod p$                                                      |
-| `div` <br /> `div.b`     | `[b, a, ...]` | `[c, ...]`   | 2 <br /> 2            | $c = (a \cdot b^{-1}) \bmod p$. Fails if $b = 0$.                              |
+| `div` <br /> `div.b`     | `[b, a, ...]` | `[c, ...]`   | 2 <br /> 2            | $c = (a \cdot b^{-1}) \bmod p$. Fails if $b = 0$. **Field division** — not integer floor division. Use `u32div` for floor division. |
 | `neg`                    | `[a, ...]`    | `[b, ...]`   | 1                     | $b = -a \bmod p$                                                               |
 | `inv`                    | `[a, ...]`    | `[b, ...]`   | 1                     | $b = a^{-1} \bmod p$. Fails if $a = 0$.                                        |
 | `pow2`                   | `[a, ...]`    | `[b, ...]`   | 16                    | $b = 2^a$. Fails if $a > 63$.                                                  |
