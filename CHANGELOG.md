@@ -8,6 +8,7 @@
 - Fixed Falcon `mod_12289` remainder validation and `u64::rotr` overflow handling for rotations by `0` and `32` ([#2968](https://github.com/0xMiden/miden-vm/pull/2968)).
 - Hardened SHA256 message word range checks and U32ADD/U32ADD3 carry constraints, updating recursive verifier relation digest artifacts ([#3021](https://github.com/0xMiden/miden-vm/pull/3021)).
 - [BREAKING] Removed internal `_impl` precompile helpers from the core-lib API, hardened proof deserialization and debug storage errors, and added u256 regression vectors ([#3026](https://github.com/0xMiden/miden-vm/pull/3026)).
+- Fixed `u256::wrapping_mul` so it preserves caller stack values below its operands ([#3071](https://github.com/0xMiden/miden-vm/pull/3071)).
 
 #### Bug Fixes
 
