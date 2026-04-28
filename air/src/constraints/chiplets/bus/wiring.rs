@@ -187,9 +187,8 @@ where
     // EVAL: m0 * w1 * w2 - w0 * w2 - w0 * w1
     let read_terms =
         wire_1.clone() * wire_2.clone() * m0.clone() + wire_0.clone() * wire_2.clone() * m1;
-    let eval_terms = wire_1.clone() * wire_2.clone() * m0
-        - wire_0.clone() * wire_2.clone()
-        - wire_0.clone() * wire_1.clone();
+    let eval_terms =
+        wire_1.clone() * wire_2.clone() * m0 - wire_0.clone() * wire_2 - wire_0 * wire_1;
 
     let n_ace = read_terms * is_read + eval_terms * is_eval;
 

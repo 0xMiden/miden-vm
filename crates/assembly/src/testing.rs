@@ -260,8 +260,7 @@ mod package_features {
 
     impl TestRegistry {
         pub fn add_package(&mut self, package: Arc<Package>) -> Version {
-            let version =
-                miden_package_registry::Version::new(package.version.clone(), package.digest());
+            let version = Version::new(package.version.clone(), package.digest());
             self.publish_package(package).expect("failed to add test package");
             version
         }
@@ -302,8 +301,7 @@ mod package_features {
                     Ok(())
                 },
                 Entry::Occupied(_) => Err(Report::msg(format!(
-                    "package '{}' version '{}' is already registered",
-                    name, semver
+                    "package '{name}' version '{semver}' is already registered"
                 ))),
             }
         }
@@ -326,8 +324,7 @@ mod package_features {
         type Error = Report;
 
         fn publish_package(&mut self, package: Arc<Package>) -> Result<Version, Self::Error> {
-            let version =
-                miden_package_registry::Version::new(package.version.clone(), package.digest());
+            let version = Version::new(package.version.clone(), package.digest());
             let dependencies = package
                 .manifest
                 .dependencies()
@@ -430,7 +427,7 @@ mod package_features {
             version: &str,
             export: &str,
             dependencies: impl IntoIterator<Item = (&'static str, &'a str, TargetType, Word)>,
-        ) -> Box<miden_mast_package::Package> {
+        ) -> Box<Package> {
             use alloc::string::ToString;
 
             use miden_assembly_syntax::source_file;

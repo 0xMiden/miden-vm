@@ -70,13 +70,13 @@ fn circuit_evaluation_prove_verify() {
     // eval gates
     data.extend_from_slice(&[
         // id = 3, v = rand + -1
-        Felt::new(7 + (5 << 30) + (2 << 60)), // id_l = 7; id_r = 5; op = ADD
+        Felt::new_unchecked(7 + (5 << 30) + (2 << 60)), // id_l = 7; id_r = 5; op = ADD
         // id = 2, v = rand * (rand - 1)
-        Felt::new(7 + (3 << 30) + (1 << 60)), // id_l = 7; id_r = 3; op = MUL
+        Felt::new_unchecked(7 + (3 << 30) + (1 << 60)), // id_l = 7; id_r = 3; op = MUL
         // id = 1, v = rand * (rand - 1) - result = zero
-        Felt::new(2 + (6 << 30)), // id_l = 2; id_r = 6; op = SUB
+        Felt::new_unchecked(2 + (6 << 30)), // id_l = 2; id_r = 6; op = SUB
         // id = 0, v = zero * zero
-        Felt::new(1 + (1 << 30) + (1 << 60)), // id_l = 1; id_r = 1; op = MUL
+        Felt::new_unchecked(1 + (1 << 30) + (1 << 60)), // id_l = 1; id_r = 1; op = MUL
     ]);
 
     // padding related only to the use of "adv_pipe" in the MASM example
@@ -84,7 +84,7 @@ fn circuit_evaluation_prove_verify() {
 
     // finalize the advice stack
     let adv_stack = data.repeat(num_repetitions);
-    let adv_stack: Vec<u64> = adv_stack.iter().map(|a| a.as_canonical_u64()).collect();
+    let adv_stack: Vec<u64> = adv_stack.iter().map(Felt::as_canonical_u64).collect();
 
     let test = miden_utils_testing::build_test!(source, &[], &adv_stack);
     test.expect_stack(&[]);
@@ -161,16 +161,16 @@ fn fill_inputs(layout: &miden_ace_codegen::InputLayout) -> Vec<QuadFelt> {
     let mut state = 0x9e37_79b9_7f4a_7c15u64;
     for _ in 0..layout.total_inputs {
         state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
-        let lo = Felt::new(state);
+        let lo = Felt::new_unchecked(state);
         state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
-        let hi = Felt::new(state);
+        let hi = Felt::new_unchecked(state);
         values.push(QuadFelt::new([lo, hi]));
     }
     values
 }
 
 fn adjust_quotient_to_zero(
-    circuit: &miden_ace_codegen::AceCircuit<QuadFelt>,
+    circuit: &AceCircuit<QuadFelt>,
     layout: &miden_ace_codegen::InputLayout,
     inputs: &mut [QuadFelt],
 ) {
@@ -187,7 +187,7 @@ fn adjust_quotient_to_zero(
 }
 
 fn find_nonzero_quotient_slope(
-    circuit: &miden_ace_codegen::AceCircuit<QuadFelt>,
+    circuit: &AceCircuit<QuadFelt>,
     layout: &miden_ace_codegen::InputLayout,
     inputs: &mut [QuadFelt],
     root: QuadFelt,

@@ -92,7 +92,7 @@ impl Bitwise {
         // the most significant limb.
         for bit_offset in (0..32).step_by(4).rev() {
             // append the previous row's result to the column for previous output values
-            self.trace[PREV_OUTPUT_COL_IDX].push(Felt::new(result));
+            self.trace[PREV_OUTPUT_COL_IDX].push(Felt::new_unchecked(result));
             // shift a and b so that the next 4-bit limb is in the least significant position
             let a = a >> bit_offset;
             let b = b >> bit_offset;
@@ -107,10 +107,10 @@ impl Bitwise {
             // append the 4 bit result to the result accumulator, and save the current result into
             // the output column in the trace.
             result = (result << 4) | result_4_bit;
-            self.trace[OUTPUT_COL_IDX].push(Felt::new(result));
+            self.trace[OUTPUT_COL_IDX].push(Felt::new_unchecked(result));
         }
 
-        Ok(Felt::new(result))
+        Ok(Felt::new_unchecked(result))
     }
 
     /// Computes a bitwise XOR of `a` and `b` and returns the result. We assume that `a` and `b`
@@ -127,7 +127,7 @@ impl Bitwise {
         // the most significant limb.
         for bit_offset in (0..32).step_by(4).rev() {
             // append the previous row's result to the column for previous output values
-            self.trace[PREV_OUTPUT_COL_IDX].push(Felt::new(result));
+            self.trace[PREV_OUTPUT_COL_IDX].push(Felt::new_unchecked(result));
             // shift a and b so that the next 4-bit limb is in the least significant position
             let a = a >> bit_offset;
             let b = b >> bit_offset;
@@ -142,10 +142,10 @@ impl Bitwise {
             // append the 4 bit result to the result accumulator, and save the current result into
             // the output column in the trace.
             result = (result << 4) | result_4_bit;
-            self.trace[OUTPUT_COL_IDX].push(Felt::new(result));
+            self.trace[OUTPUT_COL_IDX].push(Felt::new_unchecked(result));
         }
 
-        Ok(Felt::new(result))
+        Ok(Felt::new_unchecked(result))
     }
 
     // EXECUTION TRACE GENERATION
@@ -177,18 +177,18 @@ impl Bitwise {
     ///   set elsewhere.
     fn add_bitwise_trace_row(&mut self, selector: Felt, a: u64, b: u64) {
         self.trace[0].push(selector);
-        self.trace[A_COL_IDX].push(Felt::new(a));
-        self.trace[B_COL_IDX].push(Felt::new(b));
+        self.trace[A_COL_IDX].push(Felt::new_unchecked(a));
+        self.trace[B_COL_IDX].push(Felt::new_unchecked(b));
 
-        self.trace[A_COL_RANGE.start].push(Felt::new(a & 1));
-        self.trace[A_COL_RANGE.start + 1].push(Felt::new((a >> 1) & 1));
-        self.trace[A_COL_RANGE.start + 2].push(Felt::new((a >> 2) & 1));
-        self.trace[A_COL_RANGE.start + 3].push(Felt::new((a >> 3) & 1));
+        self.trace[A_COL_RANGE.start].push(Felt::new_unchecked(a & 1));
+        self.trace[A_COL_RANGE.start + 1].push(Felt::new_unchecked((a >> 1) & 1));
+        self.trace[A_COL_RANGE.start + 2].push(Felt::new_unchecked((a >> 2) & 1));
+        self.trace[A_COL_RANGE.start + 3].push(Felt::new_unchecked((a >> 3) & 1));
 
-        self.trace[B_COL_RANGE.start].push(Felt::new(b & 1));
-        self.trace[B_COL_RANGE.start + 1].push(Felt::new((b >> 1) & 1));
-        self.trace[B_COL_RANGE.start + 2].push(Felt::new((b >> 2) & 1));
-        self.trace[B_COL_RANGE.start + 3].push(Felt::new((b >> 3) & 1));
+        self.trace[B_COL_RANGE.start].push(Felt::new_unchecked(b & 1));
+        self.trace[B_COL_RANGE.start + 1].push(Felt::new_unchecked((b >> 1) & 1));
+        self.trace[B_COL_RANGE.start + 2].push(Felt::new_unchecked((b >> 2) & 1));
+        self.trace[B_COL_RANGE.start + 3].push(Felt::new_unchecked((b >> 3) & 1));
     }
 }
 

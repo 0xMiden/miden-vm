@@ -38,8 +38,7 @@ impl DebugVarId {
             Ok(Self(value))
         } else {
             Err(DeserializationError::InvalidValue(format!(
-                "DebugVarId {} exceeds bound {}",
-                value, bound
+                "DebugVarId {value} exceeds bound {bound}"
             )))
         }
     }
@@ -257,10 +256,14 @@ impl OpToDebugVarIds {
             }
         }
 
-        if *self.op_indptr_for_var_ids.last().unwrap() != self.debug_var_ids.len() {
+        let &last_op_ptr = self
+            .op_indptr_for_var_ids
+            .last()
+            .ok_or_else(|| "op_indptr_for_var_ids is unexpectedly empty".to_string())?;
+        if last_op_ptr != self.debug_var_ids.len() {
             return Err(format!(
                 "op_indptr_for_var_ids end {} doesn't match debug_var_ids length {}",
-                self.op_indptr_for_var_ids.last().unwrap(),
+                last_op_ptr,
                 self.debug_var_ids.len()
             ));
         }
@@ -285,11 +288,12 @@ impl OpToDebugVarIds {
         }
 
         let max_node_ptr = self.op_indptr_for_var_ids.len() - 1;
-        if *node_slice.last().unwrap() > max_node_ptr {
+        let &last_node_ptr = node_slice
+            .last()
+            .ok_or_else(|| "node_indptr_for_op_idx is unexpectedly empty".to_string())?;
+        if last_node_ptr > max_node_ptr {
             return Err(format!(
-                "node_indptr_for_op_idx end {} exceeds op_indptr bounds {}",
-                node_slice.last().unwrap(),
-                max_node_ptr
+                "node_indptr_for_op_idx end {last_node_ptr} exceeds op_indptr bounds {max_node_ptr}"
             ));
         }
 
@@ -356,13 +360,15 @@ impl OpToDebugVarIds {
                 .push(op_start)
                 .map_err(|_| DecoratorIndexError::OperationIndex { node, operation: op_start })?;
         } else {
-            let max_op_idx = debug_vars_info.last().unwrap().0;
+            let max_op_idx =
+                debug_vars_info.last().ok_or(DecoratorIndexError::InternalStructure)?.0;
             let mut it = debug_vars_info.into_iter().peekable();
 
             for op in 0..=max_op_idx {
                 self.op_indptr_for_var_ids.push(self.debug_var_ids.len());
                 while it.peek().is_some_and(|(i, _)| *i == op) {
-                    self.debug_var_ids.push(it.next().unwrap().1);
+                    self.debug_var_ids
+                        .push(it.next().ok_or(DecoratorIndexError::InternalStructure)?.1);
                 }
             }
             self.op_indptr_for_var_ids.push(self.debug_var_ids.len());
@@ -450,6 +456,71 @@ impl OpToDebugVarIds {
         })?;
 
         Ok(result)
+    }
+
+    /// Returns all `(op_idx, DebugVarId)` pairs for the given node, or an empty vec if the
+    /// node has no debug vars.
+    pub fn debug_vars_for_node(&self, node: MastNodeId) -> Vec<(usize, DebugVarId)> {
+        let op_range = match self.operation_range_for_node(node) {
+            Ok(range) => range,
+            Err(_) => return Vec::new(),
+        };
+
+        let mut result = Vec::new();
+        for (op_offset, op_idx) in op_range.enumerate() {
+            if op_idx + 1 >= self.op_indptr_for_var_ids.len() {
+                break;
+            }
+            let var_start = self.op_indptr_for_var_ids[op_idx];
+            let var_end = self.op_indptr_for_var_ids[op_idx + 1];
+            for &var_id in &self.debug_var_ids[var_start..var_end] {
+                result.push((op_offset, var_id));
+            }
+        }
+        result
+    }
+
+    /// Creates a new [`OpToDebugVarIds`] with remapped node IDs.
+    ///
+    /// This is used when nodes are removed from a MastForest and the remaining nodes are
+    /// renumbered. The remapping maps old node IDs to new node IDs.
+    ///
+    /// Nodes that are not in the remapping are considered removed and their debug var data
+    /// is discarded.
+    pub fn remap_nodes(
+        &self,
+        remapping: &alloc::collections::BTreeMap<MastNodeId, MastNodeId>,
+    ) -> Self {
+        if self.is_empty() {
+            return Self::new();
+        }
+        if remapping.is_empty() {
+            return self.clone();
+        }
+
+        let max_new_id = remapping.values().map(|id| id.to_usize()).max().unwrap_or(0);
+        let num_new_nodes = max_new_id + 1;
+
+        let mut new_node_data: alloc::collections::BTreeMap<usize, Vec<(usize, DebugVarId)>> =
+            alloc::collections::BTreeMap::new();
+
+        for (old_id, new_id) in remapping {
+            let vars = self.debug_vars_for_node(*old_id);
+            if !vars.is_empty() {
+                new_node_data.insert(new_id.to_usize(), vars);
+            }
+        }
+
+        let mut new_storage = Self::new();
+        for idx in 0..num_new_nodes {
+            let node_id = MastNodeId::new_unchecked(idx as u32);
+            let vars = new_node_data.remove(&idx).unwrap_or_default();
+            new_storage
+                .add_debug_var_info_for_node(node_id, vars)
+                .expect("failed to remap debug var storage");
+        }
+
+        new_storage
     }
 
     /// Clears this storage.

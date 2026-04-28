@@ -52,7 +52,10 @@ fn range_checks() {
 fn range_checks_rand() {
     let mut checker = RangeChecker::new();
     let values = rand_array::<u64, 300>();
-    let values = values.into_iter().map(|v| Felt::new(v as u16 as u64)).collect::<Vec<_>>();
+    let values = values
+        .into_iter()
+        .map(|v| Felt::new_unchecked(v as u16 as u64))
+        .collect::<Vec<_>>();
     for &value in values.iter() {
         checker.add_value(value.as_canonical_u64() as u16);
     }
@@ -77,8 +80,8 @@ fn into_trace_with_table_panics_on_mismatched_len() {
 // ================================================================================================
 
 fn validate_row(trace: &[Vec<Felt>], row_idx: &mut usize, value: u64, num_lookups: u64) {
-    assert_eq!(trace[0][*row_idx], Felt::new(num_lookups));
-    assert_eq!(trace[1][*row_idx], Felt::new(value));
+    assert_eq!(trace[0][*row_idx], Felt::new_unchecked(num_lookups));
+    assert_eq!(trace[1][*row_idx], Felt::new_unchecked(value));
     *row_idx += 1;
 }
 

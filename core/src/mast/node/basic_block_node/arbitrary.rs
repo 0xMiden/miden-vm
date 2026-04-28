@@ -93,7 +93,7 @@ pub fn op_no_imm_strategy() -> impl Strategy<Value = Operation> {
 
 // Strategy for operations with immediate values
 pub fn op_with_imm_strategy() -> impl Strategy<Value = Operation> {
-    prop_oneof![any::<u64>().prop_map(Felt::new).prop_map(Operation::Push)]
+    prop_oneof![any::<u64>().prop_map(Felt::new_unchecked).prop_map(Operation::Push)]
 }
 
 // Strategy for all non-control flow operations
@@ -318,10 +318,7 @@ impl Arbitrary for MastForest {
         // Generate nodes in a way that respects topological ordering
         (
             // Generate basic blocks first (they have no dependencies)
-            prop::collection::vec(
-                any_with::<BasicBlockNode>(bb_params.clone()),
-                1..=*params.blocks.end(),
-            ),
+            prop::collection::vec(any_with::<BasicBlockNode>(bb_params), 1..=*params.blocks.end()),
             // Generate decorators
             prop::collection::vec(
                 any::<Decorator>(),
@@ -431,10 +428,10 @@ impl Arbitrary for MastForest {
                                     .into_iter()
                                     .map(|[a, b, c, d]| {
                                         Word::from([
-                                            Felt::new(a),
-                                            Felt::new(b),
-                                            Felt::new(c),
-                                            Felt::new(d),
+                                            Felt::new_unchecked(a),
+                                            Felt::new_unchecked(b),
+                                            Felt::new_unchecked(c),
+                                            Felt::new_unchecked(d),
                                         ])
                                     })
                                     .collect::<Vec<_>>()
@@ -650,16 +647,16 @@ impl Arbitrary for AdviceMap {
         let word_strategy = prop_oneof![
             Just(Word::default()),
             any::<[u64; 4]>().prop_map(|[a, b, c, d]| Word::new([
-                Felt::new(a),
-                Felt::new(b),
-                Felt::new(c),
-                Felt::new(d)
+                Felt::new_unchecked(a),
+                Felt::new_unchecked(b),
+                Felt::new_unchecked(c),
+                Felt::new_unchecked(d)
             ])),
         ];
 
         // Strategy for generating Arc<[Felt]> values
         let felt_array_strategy = prop::collection::vec(any::<u64>(), 1..=4).prop_map(|vals| {
-            let felts: Arc<[Felt]> = vals.into_iter().map(Felt::new).collect();
+            let felts: Arc<[Felt]> = vals.into_iter().map(Felt::new_unchecked).collect();
             felts
         });
 
@@ -735,7 +732,12 @@ impl Arbitrary for Kernel {
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
         // Strategy for generating Word vectors
         let word_strategy = any::<[u64; 4]>().prop_map(|[a, b, c, d]| {
-            Word::new([Felt::new(a), Felt::new(b), Felt::new(c), Felt::new(d)])
+            Word::new([
+                Felt::new_unchecked(a),
+                Felt::new_unchecked(b),
+                Felt::new_unchecked(c),
+                Felt::new_unchecked(d),
+            ])
         });
 
         // Strategy for generating kernel (0 to 3 words to avoid hitting MAX_NUM_PROCEDURES limit)

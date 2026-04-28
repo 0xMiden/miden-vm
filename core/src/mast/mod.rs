@@ -12,20 +12,38 @@
 //!     .validate()?;
 //! ```
 //!
-//! For maximum protection against denial-of-service attacks from malicious input, use
-//! [`UntrustedMastForest::read_from_bytes_with_budget`] which limits memory consumption:
+//! [`UntrustedMastForest::read_from_bytes`] applies default parsing and validation budgets derived
+//! from the input size. Use [`UntrustedMastForest::read_from_bytes_with_budget`] to tune only the
+//! wire-parsing budget, or [`UntrustedMastForest::read_from_bytes_with_budgets`] to tune both:
+//! the parsing budget limits allocations driven directly by wire counts while reading the payload,
+//! and the validation budget limits later helper allocations needed to materialize and check
+//! stripped or hashless payloads.
 //!
 //! ```ignore
 //! use miden_core::mast::UntrustedMastForest;
 //!
-//! // Budget limits pre-allocation sizes and total bytes consumed
+//! // Parsing budget only
 //! let forest = UntrustedMastForest::read_from_bytes_with_budget(&bytes, bytes.len())?
+//!     .validate()?;
+//!
+//! // Parsing budget plus explicit validation-allocation budget
+//! let forest = UntrustedMastForest::read_from_bytes_with_budgets(&bytes, bytes.len(), bytes.len() * 7)?
 //!     .validate()?;
 //! ```
 //!
 //! This recomputes all node hashes and checks structural invariants before returning a usable
 //! `MastForest`. Direct deserialization via `MastForest::read_from_bytes` trusts the serialized
 //! hashes and should only be used for data from trusted sources (e.g. compiled locally).
+//!
+//! In practice, the public entry points split into three policies:
+//! - [`MastForest::read_from_bytes`]: trusted full deserialization; rejects hashless payloads and
+//!   trusts serialized non-external digests.
+//! - [`SerializedMastForest::new`]: structural inspection path for local tooling; scans only the
+//!   layout needed for random access and may accept full, stripped, or hashless payloads, but it is
+//!   not an untrusted-validation entry point.
+//! - [`UntrustedMastForest::read_from_bytes`] and
+//!   [`UntrustedMastForest::read_from_bytes_with_budgets`]: untrusted paths; parse with bounded
+//!   readers and require [`UntrustedMastForest::validate`] before use.
 
 use alloc::{
     collections::{BTreeMap, BTreeSet},
@@ -55,7 +73,7 @@ pub use node::{
 };
 
 use crate::{
-    Felt, LexicographicWord, Word,
+    Felt, Word,
     advice::AdviceMap,
     operations::{AssemblyOp, DebugVarInfo, Decorator},
     serde::{
@@ -72,6 +90,7 @@ pub use debuginfo::{
 };
 
 mod serialization;
+pub use serialization::{MastForestView, MastNodeEntry, MastNodeInfo, SerializedMastForest};
 
 mod merger;
 pub(crate) use merger::MastForestMerger;
@@ -190,8 +209,9 @@ impl MastForest {
         self.remap_and_add_nodes(retained_nodes, &id_remappings);
         self.remap_and_add_roots(old_root_ids, &id_remappings);
 
-        // Remap the asm_op_storage to use the new node IDs
+        // Remap the asm_op_storage and debug_var_storage to use the new node IDs
         self.debug_info.remap_asm_op_storage(&id_remappings);
+        self.debug_info.remap_debug_var_storage(&id_remappings);
 
         // Invalidate the cached commitment since we modified the forest structure
         self.commitment_cache.take();
@@ -435,7 +455,7 @@ impl MastForest {
         node_ids: impl IntoIterator<Item = &'a MastNodeId>,
     ) -> Word {
         let mut digests: Vec<Word> = node_ids.into_iter().map(|&id| self[id].digest()).collect();
-        digests.sort_unstable_by_key(|word| LexicographicWord::from(*word));
+        digests.sort_unstable();
         miden_crypto::hash::poseidon2::Poseidon2::merge_many(&digests)
     }
 
@@ -499,8 +519,22 @@ impl MastForest {
     /// // let restored = MastForest::read_from_bytes(&stripped_bytes).unwrap();
     /// ```
     pub fn write_stripped<W: ByteWriter>(&self, target: &mut W) {
-        use serialization::StrippedMastForest;
-        StrippedMastForest(self).write_into(target);
+        serialization::write_stripped_into(self, target);
+    }
+
+    /// Serializes this MastForest with the HASHLESS flag set.
+    ///
+    /// Hashless implies stripped: debug info is omitted, and digests must be recomputed during
+    /// validation. Trusted deserialization rejects this flag.
+    ///
+    /// Use this when producing data for untrusted validation.
+    pub fn write_hashless<W: ByteWriter>(&self, target: &mut W) {
+        serialization::write_hashless_into(self, target);
+    }
+
+    /// Returns the exact size of stripped serialization in bytes.
+    pub fn stripped_size_hint(&self) -> usize {
+        serialization::stripped_size_hint(self)
     }
 }
 
@@ -635,18 +669,7 @@ impl MastForest {
 // ------------------------------------------------------------------------------------------------
 /// Validation methods
 impl MastForest {
-    /// Validates that all BasicBlockNodes in this forest satisfy the core invariants:
-    /// 1. Power-of-two number of groups in each batch
-    /// 2. No operation group ends with an operation requiring an immediate value
-    /// 3. The last operation group in a batch cannot contain operations requiring immediate values
-    /// 4. OpBatch structural consistency (num_groups <= BATCH_SIZE, group size <= GROUP_SIZE,
-    ///    indptr integrity, bounds checking)
-    ///
-    /// This addresses the gap created by PR 2094, where padding NOOPs are now inserted
-    /// at assembly time rather than dynamically during execution, and adds comprehensive
-    /// structural validation to prevent deserialization-time panics.
-    pub fn validate(&self) -> Result<(), MastForestError> {
-        // Validate basic block batch invariants
+    fn validate_basic_block_invariants(&self) -> Result<(), MastForestError> {
         for (node_id_idx, node) in self.nodes.iter().enumerate() {
             let node_id =
                 MastNodeId::new_unchecked(node_id_idx.try_into().expect("too many nodes"));
@@ -657,7 +680,10 @@ impl MastForest {
             }
         }
 
-        // Validate that all procedure name digests correspond to procedure roots in the forest
+        Ok(())
+    }
+
+    fn validate_procedure_name_digests(&self) -> Result<(), MastForestError> {
         for (digest, _) in self.debug_info.procedure_names() {
             if self.find_procedure_root(digest).is_none() {
                 return Err(MastForestError::InvalidProcedureNameDigest(digest));
@@ -667,20 +693,55 @@ impl MastForest {
         Ok(())
     }
 
-    /// Validates topological ordering of nodes and recomputes all node hashes.
+    /// Validates that all BasicBlockNodes in this forest satisfy the core invariants:
+    /// 1. Power-of-two number of groups in each batch
+    /// 2. No operation group ends with an operation requiring an immediate value
+    /// 3. The last operation group in a batch cannot contain operations requiring immediate values
+    /// 4. OpBatch structural consistency (num_groups <= BATCH_SIZE, group size <= GROUP_SIZE,
+    ///    indptr integrity, bounds checking)
     ///
-    /// This method iterates through all nodes in index order, verifying:
-    /// 1. All child references point to nodes with smaller indices (topological order)
-    /// 2. Each node's recomputed digest matches its stored digest
+    /// This also validates that each stored procedure-name digest resolves to a procedure root in
+    /// the forest.
     ///
-    /// # Errors
+    /// This addresses the gap created by PR 2094, where padding NOOPs are now inserted
+    /// at assembly time rather than dynamically during execution, and adds comprehensive
+    /// structural validation to prevent deserialization-time panics.
+    pub fn validate(&self) -> Result<(), MastForestError> {
+        self.validate_basic_block_invariants()?;
+        self.validate_procedure_name_digests()
+    }
+
+    /// Validates that stored node digests match the hashes implied by local structure.
     ///
-    /// Returns `MastForestError::ForwardReference` if any node references a child that
-    /// appears later in the forest.
-    ///
-    /// Returns `MastForestError::HashMismatch` if any node's recomputed digest doesn't
-    /// match its stored digest.
+    /// For `External` nodes the digest is accepted as-is because it is externally provided and
+    /// cannot be reconstructed from local structure alone.
     fn validate_node_hashes(&self) -> Result<(), MastForestError> {
+        let computed_hashes = self.compute_node_hashes()?;
+        for (node_idx, (node, computed_digest)) in
+            self.nodes.iter().zip(computed_hashes).enumerate()
+        {
+            let expected_digest = node.digest();
+            if expected_digest != computed_digest {
+                return Err(MastForestError::HashMismatch {
+                    node_id: MastNodeId::new_unchecked(node_idx as u32),
+                    expected: expected_digest,
+                    computed: computed_digest,
+                });
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Computes node hashes in topological order.
+    ///
+    /// The returned vector is aligned with node indices, so `digests[node_id as usize]` is the
+    /// digest of that node.
+    ///
+    /// For `External` nodes, the existing digest is returned unchanged.
+    ///
+    /// Returns [`MastForestError::ForwardReference`] if nodes are not in topological order.
+    fn compute_node_hashes(&self) -> Result<Vec<Word>, MastForestError> {
         use crate::chiplets::hasher;
 
         /// Checks that child_id references a node that appears before node_id in topological order.
@@ -694,10 +755,11 @@ impl MastForest {
             Ok(())
         }
 
+        let mut computed_hashes = Vec::with_capacity(self.nodes.len());
         for (node_idx, node) in self.nodes.iter().enumerate() {
             let node_id = MastNodeId::new_unchecked(node_idx as u32);
 
-            // Check topological ordering and compute expected digest
+            // Check topological ordering and compute digest.
             let computed_digest = match node {
                 MastNode::Block(block) => {
                     let op_groups: Vec<Felt> =
@@ -710,8 +772,8 @@ impl MastForest {
                     check_no_forward_ref(node_id, left_id)?;
                     check_no_forward_ref(node_id, right_id)?;
 
-                    let left_digest = self.nodes[left_id].digest();
-                    let right_digest = self.nodes[right_id].digest();
+                    let left_digest = computed_hashes[left_id.0 as usize];
+                    let right_digest = computed_hashes[right_id.0 as usize];
                     hasher::merge_in_domain(&[left_digest, right_digest], JoinNode::DOMAIN)
                 },
                 MastNode::Split(split) => {
@@ -720,22 +782,22 @@ impl MastForest {
                     check_no_forward_ref(node_id, true_id)?;
                     check_no_forward_ref(node_id, false_id)?;
 
-                    let true_digest = self.nodes[true_id].digest();
-                    let false_digest = self.nodes[false_id].digest();
+                    let true_digest = computed_hashes[true_id.0 as usize];
+                    let false_digest = computed_hashes[false_id.0 as usize];
                     hasher::merge_in_domain(&[true_digest, false_digest], SplitNode::DOMAIN)
                 },
                 MastNode::Loop(loop_node) => {
                     let body_id = loop_node.body();
                     check_no_forward_ref(node_id, body_id)?;
 
-                    let body_digest = self.nodes[body_id].digest();
+                    let body_digest = computed_hashes[body_id.0 as usize];
                     hasher::merge_in_domain(&[body_digest, Word::default()], LoopNode::DOMAIN)
                 },
                 MastNode::Call(call) => {
                     let callee_id = call.callee();
                     check_no_forward_ref(node_id, callee_id)?;
 
-                    let callee_digest = self.nodes[callee_id].digest();
+                    let callee_digest = computed_hashes[callee_id.0 as usize];
                     let domain = if call.is_syscall() {
                         CallNode::SYSCALL_DOMAIN
                     } else {
@@ -751,22 +813,15 @@ impl MastForest {
                     }
                 },
                 MastNode::External(_) => {
-                    // External nodes have externally-provided digests that cannot be recomputed
-                    continue;
+                    // External nodes have externally-provided digests that cannot be recomputed.
+                    node.digest()
                 },
             };
 
-            let stored_digest = node.digest();
-            if computed_digest != stored_digest {
-                return Err(MastForestError::HashMismatch {
-                    node_id,
-                    expected: stored_digest,
-                    computed: computed_digest,
-                });
-            }
+            computed_hashes.push(computed_digest);
         }
 
-        Ok(())
+        Ok(computed_hashes)
     }
 }
 
@@ -1095,8 +1150,7 @@ impl DecoratorId {
             Ok(Self(value))
         } else {
             Err(DeserializationError::InvalidValue(format!(
-                "Invalid deserialized MAST decorator id '{}', but allows only {} decorators",
-                value, bound,
+                "Invalid deserialized MAST decorator id '{value}', but allows only {bound} decorators",
             )))
         }
     }
@@ -1239,13 +1293,15 @@ pub enum MastForestError {
         expected: Word,
         computed: Word,
     },
+    #[error("deserialization failed: {0}")]
+    Deserialization(DeserializationError),
 }
 
 // Custom serde implementations for MastForest that handle linked decorators properly
 // by delegating to the existing miden-crypto serialization which already handles
 // the conversion between linked and owned decorator formats.
 #[cfg(feature = "serde")]
-impl serde::Serialize for MastForest {
+impl Serialize for MastForest {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -1257,7 +1313,7 @@ impl serde::Serialize for MastForest {
 }
 
 #[cfg(feature = "serde")]
-impl<'de> serde::Deserialize<'de> for MastForest {
+impl<'de> Deserialize<'de> for MastForest {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
@@ -1274,9 +1330,9 @@ impl<'de> serde::Deserialize<'de> for MastForest {
 
 /// A [`MastForest`] deserialized from untrusted input that has not yet been validated.
 ///
-/// This type wraps a `MastForest` that was deserialized from bytes but has not had its
-/// node hashes verified. Before using the forest, callers must call [`validate()`](Self::validate)
-/// to verify structural integrity and recompute all node hashes.
+/// This type wraps a serialized-backed, decoded MAST representation that has not had its node
+/// hashes verified. Before using the forest, callers must call [`validate()`](Self::validate) to
+/// materialize and verify structural integrity and node hashes.
 ///
 /// # Usage
 ///
@@ -1303,16 +1359,23 @@ impl<'de> serde::Deserialize<'de> for MastForest {
 /// 3. **Hash recomputation**: Recomputes the digest for every node and verifies it matches the
 ///    stored digest.
 #[derive(Debug, Clone)]
-pub struct UntrustedMastForest(MastForest);
+pub struct UntrustedMastForest {
+    bytes: Vec<u8>,
+    layout: serialization::ForestLayout,
+    advice_map: AdviceMap,
+    debug_info: DebugInfo,
+    remaining_allocation_budget: Option<usize>,
+}
 
 impl UntrustedMastForest {
     /// Validates the forest by checking structural invariants and recomputing all node hashes.
     ///
     /// This method performs a complete validation of the deserialized forest:
     ///
-    /// 1. Validates structural invariants (batch padding, procedure names)
-    /// 2. Validates topological ordering (no forward references)
-    /// 3. Recomputes all node hashes and compares against stored digests
+    /// 1. If wire node hashes are present, recomputes all non-external node hashes and requires
+    ///    them to match the serialized digests.
+    /// 2. If the payload is hashless, uses the digests rebuilt during materialization.
+    /// 3. Validates structural invariants, topological ordering, and procedure-name roots.
     ///
     /// # Returns
     ///
@@ -1322,32 +1385,47 @@ impl UntrustedMastForest {
     /// # Errors
     ///
     /// Returns an error if:
+    /// - Deferred materialization from serialized form fails ([`MastForestError::Deserialization`])
     /// - Any basic block has invalid batch structure ([`MastForestError::InvalidBatchPadding`])
     /// - Any procedure name references a non-root digest
     ///   ([`MastForestError::InvalidProcedureNameDigest`])
     /// - Any node references a child that appears later in the forest
     ///   ([`MastForestError::ForwardReference`])
-    /// - Any node's recomputed hash doesn't match its stored digest
+    /// - Any non-external wire digest does not match the recomputed digest
     ///   ([`MastForestError::HashMismatch`])
+    /// - Any node's digest cannot be recomputed because structural validation fails first
+    ///
+    /// Security convention:
+    /// - Hashless payloads rebuild non-external digests from structure during materialization.
+    /// - If wire node hashes are present, validation recomputes them and requires them to match.
+    /// - External node digests are marshaled as opaque values and are not semantically resolved
+    ///   here.
     pub fn validate(self) -> Result<MastForest, MastForestError> {
-        let forest = self.0;
+        let is_hashless = self.layout.is_hashless();
+        let forest = self.into_materialized().map_err(MastForestError::Deserialization)?;
 
-        // Step 1: Validate structural invariants (existing validate() checks)
+        // Step 1: Validate over-specified wire hashes instead of silently rewriting them.
+        if !is_hashless {
+            forest.validate_node_hashes()?;
+        }
+
+        // Step 2: Validate the recomputed forest.
         forest.validate()?;
-
-        // Step 2: Validate topological ordering and recompute hashes
-        forest.validate_node_hashes()?;
 
         Ok(forest)
     }
 
     /// Deserializes an [`UntrustedMastForest`] from bytes.
     ///
-    /// This method uses a [`BudgetedReader`] with a budget equal to the input size to protect
-    /// against denial-of-service attacks from malicious input.
+    /// This method uses a [`BudgetedReader`] plus a bounded validation-allocation budget derived
+    /// from the input size to protect against denial-of-service attacks from malicious input.
+    /// The default validation budget includes room for the retained serialized copy used by the
+    /// deferred-validation path, in addition to stripped/hashless helper allocations. Concretely,
+    /// the default is `bytes.len()` for parsing and `bytes.len() * 7` for validation allocations.
+    /// That `* 7` factor is a coarse convenience bound, not an exact peak-memory formula.
     ///
-    /// For stricter limits, use
-    /// [`read_from_bytes_with_budget`](Self::read_from_bytes_with_budget) with a custom budget.
+    /// For explicit parsing and validation limits, use
+    /// [`read_from_bytes_with_budgets`](Self::read_from_bytes_with_budgets).
     ///
     /// # Example
     ///
@@ -1359,7 +1437,23 @@ impl UntrustedMastForest {
     /// let forest = untrusted.validate()?;
     /// ```
     pub fn read_from_bytes(bytes: &[u8]) -> Result<Self, DeserializationError> {
-        Self::read_from_bytes_with_budget(bytes, bytes.len())
+        Self::read_from_bytes_with_budgets(
+            bytes,
+            bytes.len(),
+            serialization::default_untrusted_allocation_budget(bytes.len()),
+        )
+    }
+
+    /// Deserializes an [`UntrustedMastForest`] from bytes and returns the raw wire flags.
+    ///
+    /// This enables callers to inspect serializer intent flags (e.g., HASHLESS) without affecting
+    /// the untrusted deserialization path.
+    pub fn read_from_bytes_with_flags(bytes: &[u8]) -> Result<(Self, u8), DeserializationError> {
+        Self::read_from_bytes_with_budgets_and_flags(
+            bytes,
+            bytes.len(),
+            serialization::default_untrusted_allocation_budget(bytes.len()),
+        )
     }
 
     /// Deserializes an [`UntrustedMastForest`] from bytes with a byte budget.
@@ -1371,13 +1465,13 @@ impl UntrustedMastForest {
     /// # Arguments
     ///
     /// * `bytes` - The serialized forest bytes
-    /// * `budget` - Maximum bytes to consume during deserialization. Set this to `bytes.len()` for
-    ///   typical use cases, or lower to enforce stricter limits.
+    /// * `budget` - Maximum bytes to consume while parsing the wire payload and pre-sizing
+    ///   wire-driven collections via [`BudgetedReader`]
     ///
     /// # Example
     ///
     /// ```ignore
-    /// // Read from untrusted source with budget equal to input size
+    /// // Read from untrusted source with an explicit parsing budget
     /// let untrusted = UntrustedMastForest::read_from_bytes_with_budget(&bytes, bytes.len())?;
     ///
     /// // Validate before use
@@ -1392,11 +1486,56 @@ impl UntrustedMastForest {
     ///
     /// This prevents attacks where malicious input claims an unrealistic number of elements
     /// (e.g., `len = 2^60`), causing excessive memory allocation before any data is read.
+    ///
+    /// To also cap stripped/hashless validation helper allocations, use
+    /// [`read_from_bytes_with_budgets`](Self::read_from_bytes_with_budgets).
     pub fn read_from_bytes_with_budget(
         bytes: &[u8],
         budget: usize,
     ) -> Result<Self, DeserializationError> {
         let mut reader = BudgetedReader::new(SliceReader::new(bytes), budget);
-        Self::read_from(&mut reader)
+        serialization::read_untrusted_with_flags(&mut reader).map(|(forest, _flags)| forest)
+    }
+
+    /// Deserializes an [`UntrustedMastForest`] from bytes with a byte budget and returns flags.
+    pub fn read_from_bytes_with_budget_and_flags(
+        bytes: &[u8],
+        budget: usize,
+    ) -> Result<(Self, u8), DeserializationError> {
+        let mut reader = BudgetedReader::new(SliceReader::new(bytes), budget);
+        serialization::read_untrusted_with_flags(&mut reader)
+    }
+
+    /// Deserializes an [`UntrustedMastForest`] from bytes with separate parsing and validation
+    /// budgets.
+    ///
+    /// `parsing_budget` limits wire-driven parsing and collection pre-sizing. `validation_budget`
+    /// additionally caps tracked stripped/hashless helper allocations such as empty debug-info
+    /// scaffolding, digest slot tables, and rebuilt digest tables.
+    pub fn read_from_bytes_with_budgets(
+        bytes: &[u8],
+        parsing_budget: usize,
+        validation_budget: usize,
+    ) -> Result<Self, DeserializationError> {
+        let mut reader = BudgetedReader::new(SliceReader::new(bytes), parsing_budget);
+        serialization::read_untrusted_with_flags_and_allocation_budget(
+            &mut reader,
+            validation_budget,
+        )
+        .map(|(forest, _flags)| forest)
+    }
+
+    /// Deserializes an [`UntrustedMastForest`] from bytes with separate parsing and validation
+    /// budgets and returns flags.
+    pub fn read_from_bytes_with_budgets_and_flags(
+        bytes: &[u8],
+        parsing_budget: usize,
+        validation_budget: usize,
+    ) -> Result<(Self, u8), DeserializationError> {
+        let mut reader = BudgetedReader::new(SliceReader::new(bytes), parsing_budget);
+        serialization::read_untrusted_with_flags_and_allocation_budget(
+            &mut reader,
+            validation_budget,
+        )
     }
 }

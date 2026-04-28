@@ -44,9 +44,9 @@ pub struct CallNode {
 /// Constants
 impl CallNode {
     /// The domain of the call block (used for control block hashing).
-    pub const CALL_DOMAIN: Felt = Felt::new(opcodes::CALL as u64);
+    pub const CALL_DOMAIN: Felt = Felt::new_unchecked(opcodes::CALL as u64);
     /// The domain of the syscall block (used for control block hashing).
-    pub const SYSCALL_DOMAIN: Felt = Felt::new(opcodes::SYSCALL as u64);
+    pub const SYSCALL_DOMAIN: Felt = Felt::new_unchecked(opcodes::SYSCALL as u64);
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -276,13 +276,12 @@ impl MastNodeExt for CallNode {
             let forest_node = &forest.nodes[id];
             let forest_node_ptr = match forest_node {
                 MastNode::Call(call_node) => call_node as *const CallNode as *const (),
-                _ => panic!("Node type mismatch at {:?}", id),
+                _ => panic!("Node type mismatch at {id:?}"),
             };
             let self_as_void = self_ptr as *const ();
             debug_assert_eq!(
                 self_as_void, forest_node_ptr,
-                "Node pointer mismatch: expected node at {:?} to be self",
-                id
+                "Node pointer mismatch: expected node at {id:?} to be self"
             );
         }
     }
@@ -304,7 +303,7 @@ impl proptest::prelude::Arbitrary for CallNode {
         (any::<MastNodeId>(), any::<[u64; 4]>(), any::<bool>())
             .prop_map(|(callee, digest_array, is_syscall)| {
                 // Generate a random digest
-                let digest = Word::from(digest_array.map(Felt::new));
+                let digest = Word::from(digest_array.map(Felt::new_unchecked));
                 // Construct directly to avoid MastForest validation for arbitrary data
                 CallNode {
                     callee,
@@ -453,10 +452,7 @@ impl MastForestContributor for CallNodeBuilder {
                     CallNode::CALL_DOMAIN
                 };
 
-                crate::chiplets::hasher::merge_in_domain(
-                    &[callee_digest, miden_crypto::Word::default()],
-                    domain,
-                )
+                hasher::merge_in_domain(&[callee_digest, Word::default()], domain)
             },
         )
     }
@@ -489,7 +485,7 @@ impl MastForestContributor for CallNodeBuilder {
         self.after_exit.extend(decorators);
     }
 
-    fn with_digest(mut self, digest: crate::Word) -> Self {
+    fn with_digest(mut self, digest: Word) -> Self {
         self.digest = Some(digest);
         self
     }

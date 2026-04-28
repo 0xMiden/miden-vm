@@ -215,33 +215,33 @@ pub fn enforce_chiplets_bus_constraint<AB>(
     let one_ef = AB::ExprEF::ONE;
 
     // Request multiplier = sum(flag * value) + (1 - sum(flags))
-    let requests: AB::ExprEF = v_hperm * f_hperm.clone()
-        + v_mpverify * f_mpverify.clone()
-        + v_mrupdate * f_mrupdate.clone()
-        + v_join * f_join.clone()
-        + v_split * f_split.clone()
-        + v_loop * f_loop.clone()
-        + v_call * f_call.clone()
-        + v_dyn * f_dyn.clone()
-        + v_dyncall * f_dyncall.clone()
-        + v_syscall * f_syscall.clone()
-        + v_span * f_span.clone()
-        + v_respan * f_respan.clone()
-        + v_end * f_end.clone()
-        + v_mload * f_mload.clone()
-        + v_mstore * f_mstore.clone()
-        + v_mloadw * f_mloadw.clone()
-        + v_mstorew * f_mstorew.clone()
-        + v_hornerbase * f_hornerbase.clone()
-        + v_hornerext * f_hornerext.clone()
-        + v_mstream * f_mstream.clone()
-        + v_pipe * f_pipe.clone()
-        + v_cryptostream * f_cryptostream.clone()
-        + v_u32and * f_u32and.clone()
-        + v_u32xor * f_u32xor.clone()
-        + v_evalcircuit * f_evalcircuit.clone()
-        + v_logprecompile * f_logprecompile.clone()
-        + (one_ef.clone() - request_flag_sum);
+    let requests: AB::ExprEF = v_hperm * f_hperm
+        + v_mpverify * f_mpverify
+        + v_mrupdate * f_mrupdate
+        + v_join * f_join
+        + v_split * f_split
+        + v_loop * f_loop
+        + v_call * f_call
+        + v_dyn * f_dyn
+        + v_dyncall * f_dyncall
+        + v_syscall * f_syscall
+        + v_span * f_span
+        + v_respan * f_respan
+        + v_end * f_end
+        + v_mload * f_mload
+        + v_mstore * f_mstore
+        + v_mloadw * f_mloadw
+        + v_mstorew * f_mstorew
+        + v_hornerbase * f_hornerbase
+        + v_hornerext * f_hornerext
+        + v_mstream * f_mstream
+        + v_pipe * f_pipe
+        + v_cryptostream * f_cryptostream
+        + v_u32and * f_u32and
+        + v_u32xor * f_u32xor
+        + v_evalcircuit * f_evalcircuit
+        + v_logprecompile * f_logprecompile
+        + (one_ef - request_flag_sum);
 
     // =========================================================================
     // COMPUTE RESPONSE MULTIPLIER
@@ -352,8 +352,8 @@ fn compute_bitwise_response<AB: MidenAirBuilder>(
     // label = (1 - sel) * AND_LABEL + sel * XOR_LABEL
     let sel: AB::Expr = local.chiplets[bw_offset].into();
     let one_minus_sel = AB::Expr::ONE - sel.clone();
-    let label = one_minus_sel * AB::Expr::from(BITWISE_AND_LABEL)
-        + sel.clone() * AB::Expr::from(BITWISE_XOR_LABEL);
+    let label =
+        one_minus_sel * AB::Expr::from(BITWISE_AND_LABEL) + sel * AB::Expr::from(BITWISE_XOR_LABEL);
 
     // Bitwise chiplet data columns (offset by bw_offset + bitwise internal indices)
     let a: AB::Expr = local.chiplets[bw_offset + bitwise::A_COL_IDX].into();
@@ -498,7 +498,7 @@ fn compute_mstream_request<AB: MidenAirBuilder>(
         [
             label,
             ctx,
-            addr + four.clone(),
+            addr + four,
             clk,
             word2[0].clone(),
             word2[1].clone(),
@@ -557,7 +557,7 @@ fn compute_pipe_request<AB: MidenAirBuilder>(
         [
             label,
             ctx,
-            addr + four.clone(),
+            addr + four,
             clk,
             word2[0].clone(),
             word2[1].clone(),
@@ -739,7 +739,7 @@ fn compute_memory_response<AB: MidenAirBuilder>(
         (one.clone() - is_word.clone()) * write_element_label + is_word.clone() * write_word_label;
     let read_label =
         (one.clone() - is_word.clone()) * read_element_label + is_word.clone() * read_word_label;
-    let label = (one.clone() - is_read.clone()) * write_label + is_read.clone() * read_label;
+    let label = (one.clone() - is_read.clone()) * write_label + is_read * read_label;
 
     // Get value columns (v0, v1, v2, v3)
     let v0: AB::Expr = local.chiplets[mem_offset + memory::V_COL_RANGE.start].into();
@@ -754,10 +754,10 @@ fn compute_memory_response<AB: MidenAirBuilder>(
         v0.clone() * (one.clone() - idx0.clone()) * (one.clone() - idx1.clone())
             + v1.clone() * idx0.clone() * (one.clone() - idx1.clone())
             + v2.clone() * (one.clone() - idx0.clone()) * idx1.clone()
-            + v3.clone() * idx0.clone() * idx1.clone();
+            + v3.clone() * idx0 * idx1;
 
     // For word access, all v0..v3 are used
-    let is_element = one.clone() - is_word.clone();
+    let is_element = one - is_word.clone();
 
     // Element access: include the selected element in the last slot.
     let element_msg = challenges.encode(
@@ -853,8 +853,7 @@ fn compute_hasher_response<AB: MidenAirBuilder>(
         (one.clone() - s0.clone()) * (one.clone() - s1.clone()) * (one.clone() - s2.clone());
 
     // SOUT output with is_boundary=1 only (HPERM return)
-    let f_sout_final =
-        (one.clone() - s0.clone()) * (one.clone() - s1.clone()) * s2.clone() * is_boundary;
+    let f_sout_final = (one.clone() - s0) * (one.clone() - s1) * s2 * is_boundary;
 
     // --- Message values ---
 
@@ -894,7 +893,7 @@ fn compute_hasher_response<AB: MidenAirBuilder>(
         (one.clone() - bit.clone()) * state[0].clone() + bit.clone() * state[4].clone(),
         (one.clone() - bit.clone()) * state[1].clone() + bit.clone() * state[5].clone(),
         (one.clone() - bit.clone()) * state[2].clone() + bit.clone() * state[6].clone(),
-        (one.clone() - bit.clone()) * state[3].clone() + bit.clone() * state[7].clone(),
+        (one - bit.clone()) * state[3].clone() + bit * state[7].clone(),
     ];
     let v_mp = compute_hasher_word_message::<AB>(
         challenges,
@@ -924,7 +923,7 @@ fn compute_hasher_response<AB: MidenAirBuilder>(
         challenges,
         label_hout,
         addr_next.clone(),
-        node_index.clone(),
+        node_index,
         &digest,
     );
 
@@ -1301,7 +1300,7 @@ enum ControlBlockOp {
 
 impl ControlBlockOp {
     /// Returns the opcode value for this control block operation.
-    fn opcode(&self) -> u8 {
+    fn opcode(self) -> u8 {
         match self {
             ControlBlockOp::Join => opcodes::JOIN,
             ControlBlockOp::Split => opcodes::SPLIT,
@@ -1647,7 +1646,7 @@ fn compute_mpverify_request<AB: MidenAirBuilder>(
         challenges,
         input_label,
         helper_0.clone(),
-        node_index.clone(),
+        node_index,
         &node_value,
     );
 
@@ -1755,8 +1754,8 @@ mod tests {
     #[test]
     fn test_operation_labels() {
         // Verify operation labels match expected values
-        assert_eq!(BITWISE_AND_LABEL, Felt::new(2));
-        assert_eq!(BITWISE_XOR_LABEL, Felt::new(6));
+        assert_eq!(BITWISE_AND_LABEL, Felt::new_unchecked(2));
+        assert_eq!(BITWISE_XOR_LABEL, Felt::new_unchecked(6));
         assert_eq!(MEMORY_WRITE_ELEMENT_LABEL, 4);
         assert_eq!(MEMORY_READ_ELEMENT_LABEL, 12);
         assert_eq!(MEMORY_WRITE_WORD_LABEL, 20);
@@ -1779,17 +1778,17 @@ mod tests {
     #[test]
     fn test_ace_label() {
         // ACE label: selector = [1, 1, 1, 0], reversed = [0, 1, 1, 1] = 7, +1 = 8
-        assert_eq!(ACE_INIT_LABEL, Felt::new(8));
+        assert_eq!(ACE_INIT_LABEL, Felt::new_unchecked(8));
     }
 
     #[test]
     fn test_kernel_rom_labels() {
         // Kernel ROM call label: selector = [1, 1, 1, 1, 0 | 0], reversed = [0, 0, 1, 1, 1, 1] =
         // 15, +1 = 16
-        assert_eq!(KERNEL_PROC_CALL_LABEL, Felt::new(16));
+        assert_eq!(KERNEL_PROC_CALL_LABEL, Felt::new_unchecked(16));
 
         // Kernel ROM init label: selector = [1, 1, 1, 1, 0 | 1], reversed = [1, 0, 1, 1, 1, 1] =
         // 47, +1 = 48
-        assert_eq!(KERNEL_PROC_INIT_LABEL, Felt::new(48));
+        assert_eq!(KERNEL_PROC_INIT_LABEL, Felt::new_unchecked(48));
     }
 }

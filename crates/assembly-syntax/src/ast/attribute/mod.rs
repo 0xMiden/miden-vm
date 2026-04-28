@@ -178,7 +178,7 @@ impl prettier::PrettyPrint for Attribute {
                 let singleline_items = meta
                     .items
                     .iter()
-                    .map(|item| item.render())
+                    .map(PrettyPrint::render)
                     .reduce(|acc, item| acc + const_text(", ") + item)
                     .unwrap_or(Document::Empty);
                 let multiline_items = indent(
@@ -186,7 +186,7 @@ impl prettier::PrettyPrint for Attribute {
                     nl() + meta
                         .items
                         .iter()
-                        .map(|item| item.render())
+                        .map(PrettyPrint::render)
                         .reduce(|acc, item| acc + nl() + item)
                         .unwrap_or(Document::Empty),
                 ) + nl();

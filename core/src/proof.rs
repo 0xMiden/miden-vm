@@ -10,7 +10,8 @@ use crate::{
     crypto::hash::{Blake3_256, Poseidon2, Rpo256, Rpx256},
     precompile::PrecompileRequest,
     serde::{
-        ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable, SliceReader,
+        BudgetedReader, ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
+        SliceReader,
     },
 };
 
@@ -87,8 +88,7 @@ impl ExecutionProof {
     ///
     /// The serialization layout matches the [`Serializable`] implementation of [`ExecutionProof`].
     pub fn from_bytes(source: &[u8]) -> Result<Self, DeserializationError> {
-        let mut reader = SliceReader::new(source);
-        Self::read_from(&mut reader)
+        <Self as Deserializable>::read_from_bytes(source)
     }
 
     // DESTRUCTOR
@@ -196,6 +196,11 @@ impl Deserializable for ExecutionProof {
 
         Ok(ExecutionProof { proof, hash_fn, pc_requests })
     }
+
+    fn read_from_bytes(bytes: &[u8]) -> Result<Self, DeserializationError> {
+        let mut reader = BudgetedReader::new(SliceReader::new(bytes), bytes.len());
+        Self::read_from(&mut reader)
+    }
 }
 
 // HASH FUNCTION ERROR
@@ -230,7 +235,48 @@ impl ExecutionProof {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::serde::{BudgetedReader, ByteWriter, DeserializationError, SliceReader};
+    use crate::{
+        events::EventId,
+        serde::{BudgetedReader, ByteWriter, DeserializationError, SliceReader},
+    };
+
+    #[test]
+    fn execution_proof_from_bytes_rejects_unbounded_proof_len() {
+        let mut bytes = Vec::new();
+        bytes.write_usize(usize::MAX);
+
+        let err = ExecutionProof::from_bytes(&bytes).unwrap_err();
+        let DeserializationError::InvalidValue(message) = err else {
+            panic!("expected InvalidValue error");
+        };
+        assert!(message.contains("requested"));
+        assert!(message.contains("reader can provide at most"));
+    }
+
+    #[test]
+    fn execution_proof_read_from_bytes_rejects_unbounded_proof_len() {
+        let mut bytes = Vec::new();
+        bytes.write_usize(usize::MAX);
+
+        let err = ExecutionProof::read_from_bytes(&bytes).unwrap_err();
+        let DeserializationError::InvalidValue(message) = err else {
+            panic!("expected InvalidValue error");
+        };
+        assert!(message.contains("requested"));
+        assert!(message.contains("reader can provide at most"));
+    }
+
+    #[test]
+    fn execution_proof_from_bytes_accepts_many_minimal_precompile_requests() {
+        let pc_requests = (0..64)
+            .map(|event_id| PrecompileRequest::new(EventId::from_u64(event_id), Vec::new()))
+            .collect();
+        let proof = ExecutionProof::new(vec![1, 2, 3], HashFunction::Blake3_256, pc_requests);
+
+        let decoded = ExecutionProof::from_bytes(&proof.to_bytes()).unwrap();
+
+        assert_eq!(decoded, proof);
+    }
 
     #[test]
     fn execution_proof_rejects_over_budget_proof_len() {

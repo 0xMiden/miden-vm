@@ -6,14 +6,14 @@ use miden::core::pcs::fri::helper
 #! 1) d_size is the domain size divided by 4 of the domain corresponding to C.
 #! 2) t_depth is the tree depth of the Merkle tree with commitment C.
 #! 3) (a0, a1) is the folding challenge to create the next layer.
-#! 4) p is the query index and (e0, e1) is the evaluation at the first layer and poe is
-#!  g^rev(p) with g being the initial domain generator and rev(.) the bit-reversal over the LDE
-#!  domain.
+#! 4) p is the domain-order query index and (e0, e1) is the evaluation at the first layer and
+#!  poe is g^rev(p) with g being the initial domain generator and rev(.) the bit-reversal over
+#!  the LDE domain.
 #! TODO: This pre-processing function should in fact compute d_size and t_depth for each C
 #! starting from the original domain size.
 @locals(16)
 pub proc preprocess
-    adv_push.1
+    adv_push
     # => [num_queries, g, ...]
     exec.constants::fri_com_ptr
     # => [layer_ptr, num_queries, g, ...]
@@ -44,7 +44,7 @@ pub proc preprocess
     movdn.5
     #=> [X, layer_ptr, layer_ptr, g]
 
-    adv_push.1
+    adv_push
     mul.2
     sub.1
     movdn.4
@@ -71,7 +71,7 @@ pub proc preprocess
     movdn.5
     #=> [X, remainder_poly_ptr, remainder_poly_ptr, layer_ptr, g]
 
-    adv_push.1
+    adv_push
     dup mul.2 exec.constants::set_remainder_poly_size
 
     sub.1
@@ -104,7 +104,7 @@ end
 #! Input:  [layer_ptr, layer_ptr, poe, p, e0, e1, layer_ptr, rem_ptr, x, x, x, x, x, x, x, x, ...]
 #! Output: [is_not_last_layer, layer_ptr+8, layer_ptr+8, poe^4, f_pos, ne0, ne1, layer_ptr+8, rem_ptr, x, x, x, x, x, x, x, x, ...]
 #!
-#! Cycles: 80
+#! Cycles: 99
 @locals(12)
 pub proc verify_query_layer
 
@@ -123,9 +123,11 @@ pub proc verify_query_layer
     swap                # [p, poe, e0, e1, d_size, t_depth, a0, a1, C, layer_ptr, rem_ptr, ...]
     movup.4             # [d_size, p, poe, e0, e1, t_depth, a0, a1, C, layer_ptr, rem_ptr, ...]
     
-    drop                # drop d_size
-    dup
-    u32shr.2            # [f_pos, p, poe, e0, e1, t_depth, a0, a1, C, layer_ptr, rem_ptr, ...]
+    sub.1               # mask = d_size - 1
+    dup.1
+    u32and              # [f_pos, p, poe, e0, e1, t_depth, a0, a1, C, layer_ptr, rem_ptr, ...]
+    dup.5 loc_store.0
+    # => [f_pos, p, poe, e0, e1, t_depth, a0, a1, C, layer_ptr, rem_ptr, ...]
     movup.5
     movupw.2
     dup.5
@@ -166,6 +168,26 @@ pub proc verify_query_layer
     exec.constants::tmp3
     mem_loadw_le
     # => [v0, ..., v7, f_pos, p, poe, e0, e1, a0, a1, layer_ptr, rem_ptr, ...]
+
+    # the FRI proof is queried in domain order, but fri_ext2fold4 expects an index whose low
+    # two bits select the bit-reversed position inside the four-element folded row. Build that
+    # synthetic index as (4 * f_pos) + rev_2(p >> t_depth).
+    dup.9 loc_load.0 u32shr
+    # => [p >> t_depth, v0, ..., v7, f_pos, p, poe, e0, e1, a0, a1, layer_ptr, rem_ptr, ...]
+    dup push.1 u32and u32shl.1
+    # => [2 * bit0, p >> t_depth, v0, ..., v7, f_pos, p, poe, e0, e1, a0, a1, layer_ptr, rem_ptr, ...]
+    swap push.2 u32and u32shr.1
+    # => [bit1, 2 * bit0, v0, ..., v7, f_pos, p, poe, e0, e1, a0, a1, layer_ptr, rem_ptr, ...]
+    add
+    # => [rev_2(p >> t_depth), v0, ..., v7, f_pos, p, poe, e0, e1, a0, a1, layer_ptr, rem_ptr, ...]
+    dup.9 mul.4 add
+    # => [p_for_fold, v0, ..., v7, f_pos, p, poe, e0, e1, a0, a1, layer_ptr, rem_ptr, ...]
+    movdn.9
+    # => [v0, ..., v7, f_pos, p_for_fold, p, poe, e0, e1, a0, a1, layer_ptr, rem_ptr, ...]
+    movup.10
+    # => [p, v0, ..., v7, f_pos, p_for_fold, poe, e0, e1, a0, a1, layer_ptr, rem_ptr, ...]
+    drop
+    # => [v0, ..., v7, f_pos, p_for_fold, poe, e0, e1, a0, a1, layer_ptr, rem_ptr, ...]
 
     # fold by 4 (1 cycle)
     fri_ext2fold4

@@ -116,9 +116,8 @@ pub fn enforce_bus<AB>(
     let request_flag_sum: AB::Expr = left_flag.clone() + dyncall_flag.clone();
 
     // Request: left_flag * left_value + dyncall_flag * dyncall_value + (1 - sum(flags))
-    let request: AB::ExprEF = request_row_left * left_flag.clone()
-        + request_row_dyncall * dyncall_flag.clone()
-        + request_flag_sum.not();
+    let request: AB::ExprEF =
+        request_row_left * left_flag + request_row_dyncall * dyncall_flag + request_flag_sum.not();
 
     // -------------------------------------------------------------------------
     // Main running product constraint

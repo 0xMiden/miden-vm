@@ -177,8 +177,12 @@ fn hasher_update_merkle_root() {
     let path = tree.get_path(NodeIndex::new(2, index).unwrap()).unwrap();
     let new_leaf: Digest = [Felt::from_u8(100), ZERO, ZERO, ZERO].into();
 
-    let update =
-        hasher.update_merkle_root(leaves[index as usize], new_leaf, &path, Felt::new(index));
+    let update = hasher.update_merkle_root(
+        leaves[index as usize],
+        new_leaf,
+        &path,
+        Felt::new_unchecked(index),
+    );
 
     assert_eq!(update.get_old_root(), tree.root());
 
@@ -287,7 +291,7 @@ fn hash_memoization_control_blocks() {
     // Compute the expected hash
     let state = super::init_state_from_words_with_domain(&h1, &h2, domain);
     let permuted = apply_permutation(state);
-    let expected_hash: Digest = super::get_digest(&permuted);
+    let expected_hash: Digest = get_digest(&permuted);
 
     let mut hasher = Hasher::default();
 
@@ -619,7 +623,7 @@ fn check_merkle_controller_pair(
     assert_eq!(trace[2][input_row], input_selectors[2], "s2 at input row {input_row}");
     assert_eq!(
         trace[NODE_INDEX_COL_IDX][input_row],
-        Felt::new(node_index),
+        Felt::new_unchecked(node_index),
         "node_index at input row {input_row}"
     );
     assert_eq!(
@@ -639,7 +643,7 @@ fn check_merkle_controller_pair(
     // Output row: node_index >> 1, is_boundary, direction_bit, s_perm=0
     assert_eq!(
         trace[NODE_INDEX_COL_IDX][output_row],
-        Felt::new(node_index >> 1),
+        Felt::new_unchecked(node_index >> 1),
         "node_index at output row {output_row}"
     );
     assert_eq!(
@@ -761,7 +765,7 @@ fn init_leaves(values: &[u64]) -> Vec<Digest> {
 }
 
 fn init_leaf(value: u64) -> Digest {
-    [Felt::new(value), ZERO, ZERO, ZERO].into()
+    [Felt::new_unchecked(value), ZERO, ZERO, ZERO].into()
 }
 
 /// Verifies that a memoized (copied) range of controller rows matches the original range.

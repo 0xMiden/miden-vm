@@ -138,7 +138,7 @@ impl Diagnostic for RelatedLabel {
         if self.labels.is_empty() {
             None
         } else {
-            Some(Box::new(self.labels.iter().cloned().map(|l| l.into())))
+            Some(Box::new(self.labels.iter().cloned().map(Into::into)))
         }
     }
     fn related<'a>(&'a self) -> Option<Box<dyn Iterator<Item = &'a dyn Diagnostic> + 'a>> {

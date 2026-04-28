@@ -47,10 +47,10 @@ impl Export {
     /// Returns the documentation for this item.
     pub fn docs(&self) -> Option<&str> {
         match self {
-            Self::Procedure(item) => item.docs().map(|spanned| spanned.into_inner()),
-            Self::Constant(item) => item.docs().map(|spanned| spanned.into_inner()),
-            Self::Type(item) => item.docs().map(|spanned| spanned.into_inner()),
-            Self::Alias(item) => item.docs().map(|spanned| spanned.into_inner()),
+            Self::Procedure(item) => item.docs().map(Span::into_inner),
+            Self::Constant(item) => item.docs().map(Span::into_inner),
+            Self::Type(item) => item.docs().map(Span::into_inner),
+            Self::Alias(item) => item.docs().map(Span::into_inner),
         }
     }
 

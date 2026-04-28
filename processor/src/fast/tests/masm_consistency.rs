@@ -363,9 +363,9 @@ fn test_log_precompile_correctness() {
 
     // Stack inputs: [1,2,3,4,5,6,7,8] with 1 at top
     // The stack represents [COMM, TAG] where COMM=[1,2,3,4] and TAG=[5,6,7,8]
-    let stack_inputs = [1, 2, 3, 4, 5, 6, 7, 8].map(Felt::new);
-    let comm_calldata: Word = [1, 2, 3, 4].map(Felt::new).into();
-    let tag: Word = [5, 6, 7, 8].map(Felt::new).into();
+    let stack_inputs = [1, 2, 3, 4, 5, 6, 7, 8].map(Felt::new_unchecked);
+    let comm_calldata: Word = [1, 2, 3, 4].map(Felt::new_unchecked).into();
+    let tag: Word = [5, 6, 7, 8].map(Felt::new_unchecked).into();
     let cap_prev = Word::empty();
 
     // Compute expected output using Poseidon2 permutation

@@ -103,8 +103,18 @@ fn log_precompile_request_procedure() {
     let event_id = EventId::from_name(EVENT_NAME);
     let calldata = vec![1u8, 2, 3, 4];
 
-    let tag = Word::from([event_id.as_felt(), Felt::new(1), Felt::new(0), Felt::new(7)]);
-    let comm = Word::from([Felt::new(43), Felt::new(62), Felt::new(24), Felt::new(1)]);
+    let tag = Word::from([
+        event_id.as_felt(),
+        Felt::new_unchecked(1),
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(7),
+    ]);
+    let comm = Word::from([
+        Felt::new_unchecked(43),
+        Felt::new_unchecked(62),
+        Felt::new_unchecked(24),
+        Felt::new_unchecked(1),
+    ]);
     let commitment = PrecompileCommitment::new(tag, comm);
 
     let source = format!(
@@ -153,7 +163,7 @@ fn log_precompile_request_procedure() {
     let mut host = DefaultHost::default();
     let core_lib = CoreLibrary::default();
     host.load_library(&core_lib).expect("failed to load core library into host");
-    host.register_handler(EVENT_NAME, Arc::new(handler.clone()))
+    host.register_handler(EVENT_NAME, Arc::new(handler))
         .expect("failed to register dummy handler");
 
     let options = ProvingOptions::with_96_bit_security(HashFunction::Blake3_256);

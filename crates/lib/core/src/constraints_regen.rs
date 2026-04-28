@@ -37,7 +37,7 @@ pub fn build_batched_circuit(config: AceConfig) -> AceCircuit<QuadFelt> {
 
 /// Computes the relation digest used by recursive verification.
 pub fn compute_relation_digest(circuit_commitment: &[Felt; 4]) -> [Felt; 4] {
-    let input: Vec<Felt> = core::iter::once(Felt::new(PROTOCOL_ID))
+    let input: Vec<Felt> = core::iter::once(Felt::new_unchecked(PROTOCOL_ID))
         .chain(circuit_commitment.iter().copied())
         .collect();
     let digest = Poseidon2::hash_elements(&input);
@@ -162,7 +162,7 @@ fn compute_artifacts() -> io::Result<ComputedArtifacts> {
             })?;
     let mut new_block: String = relation_digest
         .iter()
-        .map(|f| format!("\n    Felt::new({}),", f.as_canonical_u64()))
+        .map(|f| format!("\n    Felt::new_unchecked({}),", f.as_canonical_u64()))
         .collect();
     new_block.push('\n');
     air_config.replace_range(block_start..block_end, &new_block);
@@ -198,11 +198,9 @@ pub fn constraints_eval_masm_matches_air() -> Result<(), String> {
     let artifact = compute_artifacts().map_err(|e| e.to_string())?;
     let masm = read_file(RELATION_DIGEST_PATHS.1);
     let actual_num_inputs: usize =
-        parse_masm_const(&masm, "NUM_INPUTS_CIRCUIT", "constraints_eval.masm")
-            .map_err(|e| e.to_string())?;
+        parse_masm_const(&masm, "NUM_INPUTS_CIRCUIT", "constraints_eval.masm")?;
     let actual_num_eval: usize =
-        parse_masm_const(&masm, "NUM_EVAL_GATES_CIRCUIT", "constraints_eval.masm")
-            .map_err(|e| e.to_string())?;
+        parse_masm_const(&masm, "NUM_EVAL_GATES_CIRCUIT", "constraints_eval.masm")?;
 
     let proc_start = masm
         .find("proc load_ace_circuit_description")
@@ -222,20 +220,20 @@ pub fn constraints_eval_masm_matches_air() -> Result<(), String> {
     let data_str = &masm[masm[..adv_start].len() + "adv_map CIRCUIT_COMMITMENT = [".len()..adv_end];
     let actual_data: Vec<Felt> = data_str
         .split(',')
-        .map(|s| s.trim())
+        .map(str::trim)
         .filter(|s| !s.is_empty())
         .map(|s| {
             s.parse::<u64>()
-                .map(Felt::new)
+                .map(Felt::new_unchecked)
                 .map_err(|_| "invalid u64 in adv_map".to_string())
         })
         .collect::<Result<_, _>>()?;
     let actual_hash = Poseidon2::hash_elements(&actual_data);
 
     let actual_hash_u64: Vec<u64> =
-        actual_hash.as_elements().iter().map(|f| f.as_canonical_u64()).collect();
+        actual_hash.as_elements().iter().map(Felt::as_canonical_u64).collect();
     let expected_hash_u64: Vec<u64> =
-        artifact.circuit_commitment.iter().map(|f| f.as_canonical_u64()).collect();
+        artifact.circuit_commitment.iter().map(Felt::as_canonical_u64).collect();
 
     if actual_num_inputs != artifact.num_inputs {
         return Err(format!(
@@ -274,9 +272,8 @@ pub fn relation_digest_matches_air() -> Result<(), String> {
     let mut masm_digest: [Felt; 4] = [Felt::ZERO; 4];
     for (i, slot) in masm_digest.iter_mut().enumerate() {
         let name = format!("RELATION_DIGEST_{i}");
-        *slot = parse_masm_const::<u64>(&masm, &name, "sys/vm/mod.masm")
-            .map(Felt::new)
-            .map_err(|e| e.to_string())?;
+        *slot =
+            parse_masm_const::<u64>(&masm, &name, "sys/vm/mod.masm").map(Felt::new_unchecked)?;
     }
 
     if masm_digest != expected {

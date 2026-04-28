@@ -15,7 +15,7 @@ mod instruction;
 mod tests;
 
 pub const PTR_OFFSET_ELEM: Felt = Felt::ONE;
-pub const PTR_OFFSET_WORD: Felt = Felt::new(4);
+pub const PTR_OFFSET_WORD: Felt = Felt::new_unchecked(4);
 pub const MAX_NUM_ACE_WIRES: u32 = instruction::MAX_ID;
 
 /// Arithmetic circuit evaluation (ACE) chiplet.
@@ -33,7 +33,7 @@ pub struct Ace {
 impl Ace {
     /// Gets the total trace length of the ACE chiplet.
     pub(crate) fn trace_len(&self) -> usize {
-        self.circuit_evaluations.values().map(|eval_ctx| eval_ctx.num_rows()).sum()
+        self.circuit_evaluations.values().map(CircuitEvaluation::num_rows).sum()
     }
 
     /// Fills the portion of the main trace allocated to the ACE chiplet.

@@ -6,10 +6,8 @@ use miden_utils_testing::{Felt, TRUNCATE_STACK_PROC, build_test, push_inputs, ra
 #[test]
 fn fri_ext2fold4() {
     // create a set of random inputs
-    let mut inputs = rand_array::<Felt, 17>()
-        .iter()
-        .map(|v| v.as_canonical_u64())
-        .collect::<Vec<_>>();
+    let mut inputs =
+        rand_array::<Felt, 17>().iter().map(Felt::as_canonical_u64).collect::<Vec<_>>();
     // inputs[7] -> stack[9] = p (bit-reversed tree index).
     // The instruction computes d_seg = p & 3 and f_pos = p >> 2.
     // We want d_seg=2, f_pos=inputs[8], so p = 4*f_pos + 2.
@@ -49,11 +47,11 @@ fn fri_ext2fold4() {
     // check some items in the state transition; full state transition is checked in the
     // processor tests
     let stack_state = test.get_last_stack_state();
-    assert_eq!(stack_state[8], Felt::new(poe).square());
-    assert_eq!(stack_state[10], Felt::new(layer_ptr + 8));
-    assert_eq!(stack_state[11], Felt::new(poe).exp_u64(4));
-    assert_eq!(stack_state[12], Felt::new(f_pos));
-    assert_eq!(stack_state[15], Felt::new(end_ptr));
+    assert_eq!(stack_state[8], Felt::new_unchecked(poe).square());
+    assert_eq!(stack_state[10], Felt::new_unchecked(layer_ptr + 8));
+    assert_eq!(stack_state[11], Felt::new_unchecked(poe).exp_u64(4));
+    assert_eq!(stack_state[12], Felt::new_unchecked(f_pos));
+    assert_eq!(stack_state[15], Felt::new_unchecked(end_ptr));
 
     // make sure STARK proof can be generated and verified
     test.check_constraints();

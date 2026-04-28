@@ -368,7 +368,7 @@ fn copy_map_value_length_to_adv_stack(
     // Note: we assume values_len fits within the field modulus. This is always true
     // in practice since the field modulus (2^64 - 2^32 + 1) is much larger than any
     // practical vector length that could fit in memory.
-    processor.advice.push_stack(Felt::new(values_len as u64))?;
+    processor.advice.push_stack(Felt::new_unchecked(values_len as u64))?;
 
     Ok(())
 }
@@ -548,7 +548,7 @@ mod tests {
     #[test]
     fn insert_hperm_into_adv_map_consistent_with_permutation() {
         // Build a 12-element state with distinct values.
-        let state_felts: [Felt; 12] = core::array::from_fn(|i| Felt::new((i + 1) as u64));
+        let state_felts: [Felt; 12] = core::array::from_fn(|i| Felt::new_unchecked((i + 1) as u64));
 
         // The stack for the system event has event_id at position 0, then state[0..12] at
         // positions 1..13. StackInputs takes elements top-first, so position 0 is the first
@@ -564,9 +564,8 @@ mod tests {
         // Compute expected key by applying the permutation to the same state.
         let mut expected_state_after_perm = state_felts;
         Poseidon2::apply_permutation(&mut expected_state_after_perm);
-        let expected_key = miden_core::Word::new(
-            expected_state_after_perm[Poseidon2::DIGEST_RANGE].try_into().unwrap(),
-        );
+        let expected_key =
+            Word::new(expected_state_after_perm[Poseidon2::DIGEST_RANGE].try_into().unwrap());
 
         // The expected values are the rate portion (first 8 elements) of the *input* state.
         let expected_values = state_felts[Poseidon2::RATE_RANGE].to_vec();

@@ -13,7 +13,11 @@ use proptest::prelude::*;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::ast::{AttributeSet, Ident, Path, PathBuf, ProcedureName};
+#[cfg(feature = "arbitrary")]
+use crate::ast::QualifiedProcedureName;
+#[cfg(feature = "serde")]
+use crate::ast::path;
+use crate::ast::{AttributeSet, ConstantValue, Ident, Path, PathBuf, ProcedureName};
 
 mod error;
 mod module;
@@ -103,7 +107,7 @@ pub struct ProcedureExport {
     /// The id of the MAST root node of the exported procedure
     pub node: MastNodeId,
     /// The fully-qualified path of the exported procedure
-    #[cfg_attr(feature = "serde", serde(with = "crate::ast::path"))]
+    #[cfg_attr(feature = "serde", serde(with = "path"))]
     pub path: Arc<Path>,
     /// The type signature of the exported procedure, if known
     #[cfg_attr(feature = "serde", serde(default))]
@@ -163,7 +167,7 @@ impl Arbitrary for ProcedureExport {
             }));
 
         let nid = any::<MastNodeId>();
-        let name = any::<crate::ast::QualifiedProcedureName>();
+        let name = any::<QualifiedProcedureName>();
         (nid, name, signature)
             .prop_map(|(nodeid, procname, signature)| Self {
                 node: nodeid,
@@ -179,18 +183,27 @@ impl Arbitrary for ProcedureExport {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "arbitrary", derive(proptest_derive::Arbitrary))]
 #[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
 pub struct ConstantExport {
     /// The fully-qualified path of the exported constant
-    #[cfg_attr(feature = "serde", serde(with = "crate::ast::path"))]
-    #[cfg_attr(
-        feature = "arbitrary",
-        proptest(strategy = "crate::arbitrary::path::constant_path_random_length(1)")
-    )]
+    #[cfg_attr(feature = "serde", serde(with = "path"))]
     pub path: Arc<Path>,
     /// The constant-folded AST representing the value of this constant
-    pub value: crate::ast::ConstantValue,
+    pub value: ConstantValue,
+}
+
+#[cfg(feature = "arbitrary")]
+impl Arbitrary for ConstantExport {
+    type Parameters = ();
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        let path = crate::arbitrary::path::constant_path_random_length(1);
+        let value = any::<ConstantValue>();
+
+        (path, value).prop_map(|(path, value)| Self { path, value }).boxed()
+    }
+
+    type Strategy = BoxedStrategy<Self>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -198,10 +211,10 @@ pub struct ConstantExport {
 #[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
 pub struct TypeExport {
     /// The fully-qualified path of the exported type declaration
-    #[cfg_attr(feature = "serde", serde(with = "crate::ast::path"))]
+    #[cfg_attr(feature = "serde", serde(with = "path"))]
     pub path: Arc<Path>,
     /// The type bound to `name`
-    pub ty: crate::ast::types::Type,
+    pub ty: Type,
 }
 
 #[cfg(feature = "arbitrary")]
@@ -211,7 +224,7 @@ impl Arbitrary for TypeExport {
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
         use proptest::strategy::{Just, Strategy};
         let path = crate::arbitrary::path::user_defined_type_path_random_length(1);
-        let ty = Just(crate::ast::types::Type::Felt);
+        let ty = Just(Type::Felt);
 
         (path, ty).prop_map(|(path, ty)| Self { path, ty }).boxed()
     }
@@ -468,7 +481,7 @@ pub struct KernelLibrary {
 }
 
 #[cfg(feature = "serde")]
-impl serde::Serialize for KernelLibrary {
+impl Serialize for KernelLibrary {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -619,7 +632,7 @@ impl Deserializable for Library {
                     })
                 },
                 1 => {
-                    let value = crate::ast::ConstantValue::read_from(source)?;
+                    let value = ConstantValue::read_from(source)?;
                     LibraryExport::Constant(ConstantExport { path: path.clone(), value })
                 },
                 2 => {
@@ -635,18 +648,13 @@ impl Deserializable for Library {
             exports.insert(path, export);
         }
 
-        let digest =
-            mast_forest.compute_nodes_commitment(exports.values().filter_map(|e| match e {
-                LibraryExport::Procedure(e) => Some(&e.node),
-                LibraryExport::Constant(_) | LibraryExport::Type(_) => None,
-            }));
-
-        Ok(Self { digest, exports, mast_forest })
+        Self::new(mast_forest, exports)
+            .map_err(|err| DeserializationError::InvalidValue(format!("{err}")))
     }
 }
 
 #[cfg(feature = "serde")]
-impl serde::Serialize for Library {
+impl Serialize for Library {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -654,7 +662,7 @@ impl serde::Serialize for Library {
         use serde::ser::SerializeStruct;
 
         struct LibraryExports<'a>(&'a BTreeMap<Arc<Path>, LibraryExport>);
-        impl serde::Serialize for LibraryExports<'_> {
+        impl Serialize for LibraryExports<'_> {
             fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
             where
                 S: serde::Serializer,
@@ -678,7 +686,7 @@ impl serde::Serialize for Library {
 }
 
 #[cfg(feature = "serde")]
-impl<'de> serde::Deserialize<'de> for Library {
+impl<'de> Deserialize<'de> for Library {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
@@ -809,7 +817,7 @@ impl Serializable for LibraryExport {
 }
 
 #[cfg(feature = "arbitrary")]
-impl proptest::prelude::Arbitrary for Library {
+impl Arbitrary for Library {
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
@@ -885,5 +893,5 @@ impl proptest::prelude::Arbitrary for Library {
             .boxed()
     }
 
-    type Strategy = proptest::prelude::BoxedStrategy<Self>;
+    type Strategy = BoxedStrategy<Self>;
 }

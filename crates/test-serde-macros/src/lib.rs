@@ -155,7 +155,7 @@ pub fn serde_test(args: TokenStream, input: TokenStream) -> TokenStream {
     for (i, ty) in types.into_iter().enumerate() {
         let serde_test = if serde_test {
             let test_name =
-                Ident::new(&format!("test_serde_roundtrip_{}_{}", name, i), Span::mixed_site());
+                Ident::new(&format!("test_serde_roundtrip_{name}_{i}"), Span::mixed_site());
             quote! {
                 #[cfg(all(feature = "arbitrary", feature = "serde", test))]
                 proptest::proptest!{

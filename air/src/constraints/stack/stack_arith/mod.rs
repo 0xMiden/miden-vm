@@ -169,10 +169,10 @@ pub fn enforce_main<AB>(
     let ext_b0 = s0.clone();
     let ext_b1 = s1.clone();
     let ext_a0 = s2.clone();
-    let ext_a1 = s3.clone();
+    let ext_a1 = s3;
     let ext_d0 = s0_next.clone();
     let ext_d1 = s1_next.clone();
-    let ext_c0 = s2_next.clone();
+    let ext_c0 = s2_next;
     let ext_c1 = s3_next;
     let ext_a0_b0 = ext_a0.clone() * ext_b0.clone();
     let ext_a1_b1 = ext_a1.clone() * ext_b1.clone();
@@ -191,10 +191,10 @@ pub fn enforce_main<AB>(
     // U32 ops
     // -------------------------------------------------------------------------
     // U32 limbs: v_lo = h1*2^16 + h0, v_hi = h3*2^16 + h2.
-    let u32_v_lo = uop_h1 * TWO_POW_16 + uop_h0.clone();
+    let u32_v_lo = uop_h1 * TWO_POW_16 + uop_h0;
     let u32_v_hi = uop_h3.clone() * TWO_POW_16 + uop_h2.clone();
     let u32_v48 = uop_h2 * TWO_POW_32 + u32_v_lo.clone();
-    let u32_v64 = uop_h3 * TWO_POW_48 + u32_v48.clone();
+    let u32_v64 = uop_h3.clone() * TWO_POW_48 + u32_v48.clone();
 
     // Element validity check for u32split/u32mul/u32madd.
     // u32_v_hi_comp * u32_v_lo is intrinsic (symmetry test: setting either factor to 0 hides a
@@ -218,10 +218,13 @@ pub fn enforce_main<AB>(
     }
 
     builder.when(is_u32split).assert_eq(s0.clone(), u32_v64.clone());
-    builder.when(is_u32add).assert_eq(s0.clone() + s1.clone(), u32_v48.clone());
     builder
-        .when(is_u32add3)
+        .when(is_u32add.clone())
+        .assert_eq(s0.clone() + s1.clone(), u32_v48.clone());
+    builder
+        .when(is_u32add3.clone())
         .assert_eq(s0.clone() + s1.clone() + s2.clone(), u32_v48);
+    builder.when(is_u32add + is_u32add3).assert_zero(uop_h3);
 
     // U32SUB: s1 = s0 + s1' - s0' * 2^32, s0' is boolean (borrow), s1' = v_lo.
     {

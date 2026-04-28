@@ -32,6 +32,9 @@ pub const AEAD_DECRYPT_EVENT_NAME: EventName = EventName::new("miden::core::cryp
 /// 4. Extracts only the data blocks (first num_blocks * 8 elements) from plaintext
 /// 5. Pushes the data blocks (WITHOUT padding) onto the advice stack in reverse order
 ///
+/// Expected event payload order (excluding event id):
+/// `(key: Word, nonce: Word, src_ptr, dst_ptr, num_blocks)`.
+///
 /// Memory layout at src_ptr:
 /// - [ciphertext_blocks(num_blocks * 8), encrypted_padding(8), tag(4)]
 /// - This handler reads ALL elements: data blocks + padding + tag
@@ -48,7 +51,7 @@ pub const AEAD_DECRYPT_EVENT_NAME: EventName = EventName::new("miden::core::cryp
 /// 2. The deterministic encryption creates a bijection between plaintext and ciphertext
 /// 3. A malicious prover cannot provide incorrect plaintext without causing tag mismatch
 pub fn handle_aead_decrypt(process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
-    // Stack: [event_id, key(4), nonce(4), src_ptr, dst_ptr, num_blocks, ...]
+    // Stack: [event_id, key:Word(4), nonce:Word(4), src_ptr, dst_ptr, num_blocks, ...]
     // where:
     //   src_ptr = ciphertext + encrypted_padding + tag location (input)
     //   dst_ptr = plaintext destination (output)
@@ -95,8 +98,7 @@ pub fn handle_aead_decrypt(process: &ProcessorState) -> Result<Vec<AdviceMutatio
     let auth_tag = AuthTag::new(tag_elements);
 
     // Construct EncryptedData
-    let encrypted_data =
-        EncryptedData::from_parts(DataType::Elements, ciphertext, auth_tag, nonce.clone());
+    let encrypted_data = EncryptedData::from_parts(DataType::Elements, ciphertext, auth_tag, nonce);
 
     // Decrypt using the standard reference implementation
     // This performs tag verification internally

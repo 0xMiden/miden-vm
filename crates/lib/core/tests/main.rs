@@ -69,6 +69,41 @@ macro_rules! expect_assert_error_message {
     };
 }
 
+#[test]
+fn core_library_does_not_export_precompile_impl_helpers() {
+    use miden_assembly::Path;
+    use miden_core_lib::CoreLibrary;
+
+    let core_lib = CoreLibrary::default();
+    let library = core_lib.library();
+
+    let public_paths = [
+        "::miden::core::crypto::hashes::keccak256::hash_bytes",
+        "::miden::core::crypto::hashes::sha512::hash_bytes",
+        "::miden::core::crypto::dsa::ecdsa_k256_keccak::verify_prehash",
+        "::miden::core::crypto::dsa::eddsa_ed25519::verify_prehash",
+    ];
+    for path in public_paths {
+        assert!(
+            library.get_procedure_root_by_path(Path::new(path)).is_some(),
+            "expected public wrapper to be exported: {path}",
+        );
+    }
+
+    let internal_paths = [
+        "::miden::core::crypto::hashes::keccak256::hash_bytes_impl",
+        "::miden::core::crypto::hashes::sha512::hash_bytes_impl",
+        "::miden::core::crypto::dsa::ecdsa_k256_keccak::verify_prehash_impl",
+        "::miden::core::crypto::dsa::eddsa_ed25519::verify_prehash_impl",
+    ];
+    for path in internal_paths {
+        assert!(
+            library.get_procedure_root_by_path(Path::new(path)).is_none(),
+            "internal precompile helper must not be exported: {path}",
+        );
+    }
+}
+
 mod collections;
 mod crypto;
 mod helpers;

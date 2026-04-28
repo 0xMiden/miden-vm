@@ -14,6 +14,9 @@ homepage.workspace = true
 repository.workspace = true
 exclude.workspace = true
 
+[package.metadata.cargo-shear]
+ignored = ["serde_json"]
+
 [features]
 default = ["std"]
 std = [

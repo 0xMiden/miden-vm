@@ -362,7 +362,7 @@ where
             // +MOVUP3|MOVDN3  — permute s0..s3
             movup_or_movdn[1].clone(),
             // +ADVPOPW|EXPACC — overwrite s0..s3 in place
-            advpopw_or_expacc.clone(),
+            advpopw_or_expacc,
             // +SWAPW2|SWAPW3  — swap s0..s3 with s8+ (leaves at depth 8)
             swapw2_or_swapw3.clone(),
             // +EXT2MUL        — ext field multiply on s0..s3
@@ -387,7 +387,7 @@ where
 
         let no_shift_depth12
             // +SWAPW2|SWAPW3 — pair re-enters (both leave depths 12+ untouched)
-            = swapw2_or_swapw3.clone()
+            = swapw2_or_swapw3
             // +HPERM         — Poseidon2 permutation on s0..s11
             + op5(opcodes::HPERM)
             // –SWAPW3        — SWAPW3 swaps s0..s3 with s12..s15, so s12+ still changes
@@ -1086,7 +1086,7 @@ pub fn get_op_bits(opcode: usize) -> [miden_core::Felt; NUM_OP_BITS] {
     let mut bit_array = [ZERO; NUM_OP_BITS];
 
     for bit in bit_array.iter_mut() {
-        *bit = Felt::new((opcode_copy & 1) as u64);
+        *bit = Felt::new_unchecked((opcode_copy & 1) as u64);
         opcode_copy >>= 1;
     }
 
