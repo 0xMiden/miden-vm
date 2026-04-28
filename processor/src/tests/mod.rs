@@ -212,8 +212,7 @@ fn test_diagnostic_host_event_advice_error_uses_emit_location() {
     );
     let program = Assembler::new(source_manager.clone()).assemble_program(source).unwrap();
     let mut host = DefaultHost::default().with_source_manager(source_manager);
-    host.register_handler(event.clone(), Arc::new(DuplicateMapMutationHandler))
-        .unwrap();
+    host.register_handler(event, Arc::new(DuplicateMapMutationHandler)).unwrap();
 
     let processor = FastProcessor::new(StackInputs::default())
         .with_advice(AdviceInputs::default().with_map([(Word::default(), vec![ZERO])]))
