@@ -443,7 +443,7 @@ where
     use Instruction::*;
     let span = inst.span();
     match &**inst {
-        U32ShrImm(imm) | U32ShlImm(imm) | U32RotrImm(imm) | U32RotlImm(imm) | AdvPush(imm) => {
+        U32ShrImm(imm) | U32ShlImm(imm) | U32RotrImm(imm) | U32RotlImm(imm) => {
             visitor.visit_immediate_u8(imm)
         },
         Locaddr(imm) | LocLoad(imm) | LocLoadWBe(imm) | LocLoadWLe(imm) | LocStore(imm)
@@ -503,11 +503,10 @@ where
         | MovDn10 | MovDn11 | MovDn12 | MovDn13 | MovDn14 | MovDn15 | MovDnW2 | MovDnW3
         | Reversew | Reversedw | CSwap | CSwapW | CDrop | CDropW | PushFeltList(_) | Sdepth
         | Caller | Clk | MemLoad | MemLoadWBe | MemLoadWLe | MemStore | MemStoreWBe
-        | MemStoreWLe | MemStream | AdvPipe | AdvLoadW | Hash | HMerge | HPerm | MTreeGet
-        | MTreeSet | MTreeMerge | MTreeVerify | FriExt2Fold4 | DynExec | DynCall | DebugVar(_)
-        | HornerBase | HornerExt | CryptoStream | EvalCircuit | LogPrecompile | Emit => {
-            ControlFlow::Continue(())
-        },
+        | MemStoreWLe | MemStream | AdvPipe | AdvPush | AdvPushW | AdvLoadW | Hash | HMerge
+        | HPerm | MTreeGet | MTreeSet | MTreeMerge | MTreeVerify | FriExt2Fold4 | DynExec
+        | DynCall | DebugVar(_) | HornerBase | HornerExt | CryptoStream | EvalCircuit
+        | LogPrecompile | Emit => ControlFlow::Continue(()),
     }
 }
 
@@ -1039,7 +1038,7 @@ where
     use Instruction::*;
     let span = inst.span();
     match &mut **inst {
-        U32ShrImm(imm) | U32ShlImm(imm) | U32RotrImm(imm) | U32RotlImm(imm) | AdvPush(imm) => {
+        U32ShrImm(imm) | U32ShlImm(imm) | U32RotrImm(imm) | U32RotlImm(imm) => {
             visitor.visit_mut_immediate_u8(imm)
         },
         Locaddr(imm) | LocLoad(imm) | LocLoadWBe(imm) | LocLoadWLe(imm) | LocStore(imm)
@@ -1099,11 +1098,10 @@ where
         | MovDn10 | MovDn11 | MovDn12 | MovDn13 | MovDn14 | MovDn15 | MovDnW2 | MovDnW3
         | Reversew | Reversedw | CSwap | CSwapW | CDrop | CDropW | PushFeltList(_) | Sdepth
         | Caller | Clk | MemLoad | MemLoadWBe | MemLoadWLe | MemStore | MemStoreWBe
-        | MemStoreWLe | MemStream | AdvPipe | AdvLoadW | Hash | HMerge | HPerm | MTreeGet
-        | MTreeSet | MTreeMerge | MTreeVerify | FriExt2Fold4 | DynExec | DynCall | DebugVar(_)
-        | HornerBase | HornerExt | EvalCircuit | CryptoStream | LogPrecompile | Emit => {
-            ControlFlow::Continue(())
-        },
+        | MemStoreWLe | MemStream | AdvPipe | AdvPush | AdvPushW | AdvLoadW | Hash | HMerge
+        | HPerm | MTreeGet | MTreeSet | MTreeMerge | MTreeVerify | FriExt2Fold4 | DynExec
+        | DynCall | DebugVar(_) | HornerBase | HornerExt | EvalCircuit | CryptoStream
+        | LogPrecompile | Emit => ControlFlow::Continue(()),
     }
 }
 

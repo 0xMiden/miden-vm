@@ -1373,7 +1373,6 @@ dependencies = [
  "miden-utils-sync",
  "miden-verifier",
  "num",
- "num-bigint",
  "rand 0.9.4",
  "rand_chacha",
  "rstest",

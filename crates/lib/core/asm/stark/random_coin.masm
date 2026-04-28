@@ -709,7 +709,7 @@ proc check_pow
     dup
     push.0 neq
     if.true
-        adv_push.1
+        adv_push
         # Assert input buffer is empty, then write nonce directly to rate[0] and permute.
         exec.constants::random_coin_input_len_ptr mem_load
         assertz.err="check_pow: input buffer must be empty"
@@ -723,7 +723,7 @@ proc check_pow
         assertz.err="proof-of-work check failed"
     else
         # Consume witness to keep advice layout, but do not affect transcript.
-        adv_push.1
+        adv_push
         assertz.err="proof-of-work nonce must be zero when grinding factor is zero"
         drop
     end

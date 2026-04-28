@@ -2,7 +2,8 @@
 //!
 //! Verifies that:
 //! - Raw event handlers correctly compute Keccak256 and populate advice provider
-//! - MASM wrappers correctly return commitment and digest on stack
+//! - Public MASM wrappers correctly return the digest and log deferred requests
+//! - Private implementation helpers return the expected commitment and tag
 //! - Both memory and digest merge operations work correctly
 //! - Various input sizes and edge cases are handled properly
 
@@ -98,12 +99,10 @@ fn test_keccak_hash_bytes_impl(input_u8: &[u8]) {
     let input_felts = preimage.as_felts();
     let memory_stores_source = masm_store_felts(&input_felts, INPUT_MEMORY_ADDR);
 
-    let source = format!(
-        r#"
-            use miden::core::sys
-            use miden::core::crypto::hashes::keccak256
-
-            begin
+    let source = private_proc_harness(
+        include_str!("../../asm/crypto/hashes/keccak256.masm"),
+        format!(
+            r#"
                 # Store packed u32 values in memory
                 {memory_stores_source}
 
@@ -111,12 +110,12 @@ fn test_keccak_hash_bytes_impl(input_u8: &[u8]) {
                 push.{len_bytes}.{INPUT_MEMORY_ADDR}
                 # => [ptr, len_bytes]
 
-                exec.keccak256::hash_bytes_impl
+                exec.hash_bytes_impl
                 # => [COMM, TAG, DIGEST_U32[8]]
 
                 exec.sys::truncate_stack
-            end
             "#,
+        ),
     );
 
     let test = build_debug_test!(source, &[]);
@@ -354,4 +353,8 @@ fn run_keccak_with_max_hash_len(
 
     processor.execute_sync(&program, &mut host)?;
     Ok(())
+}
+
+fn private_proc_harness(module_source: &str, body: impl AsRef<str>) -> String {
+    format!("{}\n\nbegin\n{}\nend", module_source.replace("pub proc", "proc"), body.as_ref())
 }
