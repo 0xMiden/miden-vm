@@ -184,10 +184,12 @@ impl Assembler {
         };
 
         let path = match self.linker.resolve_invoke_target(&context, callee) {
-            Ok(SymbolResolution::Exact { path, .. })
-            | Ok(SymbolResolution::Module { path, .. })
-            | Ok(SymbolResolution::External(path)) => Some(path.into_inner()),
-            Ok(SymbolResolution::Local(_)) | Ok(SymbolResolution::MastRoot(_)) => None,
+            Ok(
+                SymbolResolution::Exact { path, .. }
+                | SymbolResolution::Module { path, .. }
+                | SymbolResolution::External(path),
+            ) => Some(path.into_inner()),
+            Ok(SymbolResolution::Local(_) | SymbolResolution::MastRoot(_)) => None,
             Err(err) => return Report::new(err),
         }
         .or_else(|| match callee {

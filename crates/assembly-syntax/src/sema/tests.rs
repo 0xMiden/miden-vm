@@ -36,9 +36,7 @@ fn assert_symbol_conflict(error: &miden_utils_diagnostics::Report, symbol: &str)
         .errors
         .iter()
         .find_map(|err| match err {
-            crate::sema::SemanticAnalysisError::SymbolConflict { span, prev_span } => {
-                Some((span, prev_span))
-            },
+            SemanticAnalysisError::SymbolConflict { span, prev_span } => Some((span, prev_span)),
             _ => None,
         })
         .expect("expected at least one SymbolConflict error");

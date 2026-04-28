@@ -513,7 +513,7 @@ mod tests {
         let package = build_package();
         let digest = package.content_digest();
 
-        let mut with_dependency = package.clone();
+        let mut with_dependency = package;
         with_dependency
             .manifest
             .add_dependency(Dependency {

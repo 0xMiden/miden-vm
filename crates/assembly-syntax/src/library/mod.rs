@@ -743,15 +743,21 @@ fn normalize_export_for_deserialization(
     mut export: LibraryExport,
 ) -> Result<(Arc<Path>, LibraryExport), String> {
     let canonical_path = canonicalize_export_path(export.path().as_ref())?;
+    let leaf = export_raw_leaf(canonical_path.as_ref())?;
 
-    if matches!(export, LibraryExport::Procedure(_)) {
-        let leaf = export_raw_leaf(canonical_path.as_ref())?;
-        ProcedureName::new(leaf).map_err(|err| {
-            format!(
-                "invalid procedure export leaf name '{leaf}' in path '{}': {err}",
-                canonical_path
-            )
-        })?;
+    match &export {
+        LibraryExport::Procedure(_) => {
+            ProcedureName::new(leaf).map_err(|err| {
+                format!(
+                    "invalid procedure export leaf name '{leaf}' in path '{canonical_path}': {err}"
+                )
+            })?;
+        },
+        LibraryExport::Constant(_) | LibraryExport::Type(_) => {
+            Ident::new(leaf).map_err(|err| {
+                format!("invalid export leaf name '{leaf}' in path '{canonical_path}': {err}")
+            })?;
+        },
     }
 
     match &mut export {
@@ -1040,7 +1046,7 @@ impl Arbitrary for Library {
             .boxed()
     }
 
-    type Strategy = proptest::prelude::BoxedStrategy<Self>;
+    type Strategy = BoxedStrategy<Self>;
 }
 
 #[cfg(test)]
@@ -1105,5 +1111,47 @@ mod tests {
             message.contains("invalid procedure export leaf name"),
             "unexpected error: {err}"
         );
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn serde_library_deserialization_rejects_malformed_quoted_constant_leaf() {
+        let bad = Arc::<Path>::from(Path::validate(r#"::foo::"bad name""#).unwrap());
+        let mut exports = BTreeMap::new();
+        exports.insert(
+            bad.clone(),
+            LibraryExport::Constant(ConstantExport {
+                path: bad,
+                value: ConstantValue::Int(miden_debug_types::Span::unknown(
+                    crate::parser::IntValue::from(1u8),
+                )),
+            }),
+        );
+
+        let lib =
+            Library::new(Arc::new(MastForest::new()), exports).expect("library must validate");
+        let json = serde_json::to_string(&lib).expect("library serialization must succeed");
+
+        let err = serde_json::from_str::<Library>(&json)
+            .expect_err("expected malformed constant export leaf name rejection during serde");
+        let message = alloc::format!("{err}");
+        assert!(message.contains("invalid export leaf name"), "unexpected error: {err}");
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn serde_library_deserialization_rejects_malformed_quoted_type_leaf() {
+        let bad = Arc::<Path>::from(Path::validate(r#"::foo::"bad name""#).unwrap());
+        let mut exports = BTreeMap::new();
+        exports.insert(bad.clone(), LibraryExport::Type(TypeExport { path: bad, ty: Type::Felt }));
+
+        let lib =
+            Library::new(Arc::new(MastForest::new()), exports).expect("library must validate");
+        let json = serde_json::to_string(&lib).expect("library serialization must succeed");
+
+        let err = serde_json::from_str::<Library>(&json)
+            .expect_err("expected malformed type export leaf name rejection during serde");
+        let message = alloc::format!("{err}");
+        assert!(message.contains("invalid export leaf name"), "unexpected error: {err}");
     }
 }

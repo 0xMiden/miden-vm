@@ -287,7 +287,7 @@ mod tests {
 
         fn get_source_file_for(
             &self,
-            span: crate::debuginfo::SourceSpan,
+            span: SourceSpan,
         ) -> Option<Arc<crate::debuginfo::SourceFile>> {
             <AnalysisContext as constants::ConstEnvironment>::get_source_file_for(self.inner, span)
         }
@@ -376,7 +376,7 @@ mod tests {
         let root_name = make_name(0);
         let mut env = CountingEnv::new(&mut context);
         let root = make_ref(root_name);
-        let result = crate::ast::constants::eval::expr(&root, &mut env)
+        let result = constants::eval::expr(&root, &mut env)
             .expect("shared-subexpression constant graph should evaluate");
 
         assert!(

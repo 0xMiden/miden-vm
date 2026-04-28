@@ -538,13 +538,13 @@ mod tests {
     fn checked_symbols_rejects_oversized_module() {
         let source_manager: Arc<dyn SourceManager> = Arc::new(DefaultSourceManager::default());
         let mut module =
-            crate::ast::Module::new(crate::ast::ModuleKind::Library, crate::Path::new("::m::huge"));
+            crate::ast::Module::new(crate::ast::ModuleKind::Library, Path::new("::m::huge"));
 
         for i in 0..=ItemIndex::MAX_ITEMS {
             module.items.push(crate::ast::Export::Constant(crate::ast::Constant::new(
                 SourceSpan::UNKNOWN,
                 crate::ast::Visibility::Private,
-                crate::ast::Ident::new(format!("A{i}")).expect("valid identifier"),
+                Ident::new(format!("A{i}")).expect("valid identifier"),
                 crate::ast::ConstantExpr::Int(Span::unknown(crate::parser::IntValue::from(0u8))),
             )));
         }
@@ -591,11 +591,11 @@ mod tests {
 
         fn symbols(&self, _source_manager: Arc<dyn SourceManager>) -> Self::SymbolIter {
             let first = LocalSymbol::Item {
-                name: crate::ast::Ident::new("dup").expect("valid identifier"),
+                name: Ident::new("dup").expect("valid identifier"),
                 resolved: SymbolResolution::Local(Span::unknown(ItemIndex::new(0))),
             };
             let second = LocalSymbol::Item {
-                name: crate::ast::Ident::new("dup").expect("valid identifier"),
+                name: Ident::new("dup").expect("valid identifier"),
                 resolved: SymbolResolution::Local(Span::unknown(ItemIndex::new(1))),
             };
             alloc::vec![first, second].into_iter()
