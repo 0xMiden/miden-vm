@@ -910,9 +910,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        FastProcessor, StackInputs,
-        continuation_stack::ContinuationStack,
-        tracer::Tracer,
+        FastProcessor, StackInputs, continuation_stack::ContinuationStack, tracer::Tracer,
     };
 
     /// Builds a [`MastForest`] containing a single DYNCALL node and returns the forest together
@@ -943,14 +941,12 @@ mod tests {
             &forest,
         );
 
-        let ctx_info = tracer
-            .block_stack
-            .peek()
-            .ctx_info
-            .expect("DYNCALL start_clock_cycle must push ExecutionContextInfo onto block_stack");
+        let ctx_info =
+            tracer.block_stack.peek().ctx_info.expect(
+                "DYNCALL start_clock_cycle must push ExecutionContextInfo onto block_stack",
+            );
         assert_eq!(
-            ctx_info.parent_stack_depth,
-            MIN_STACK_DEPTH as u32,
+            ctx_info.parent_stack_depth, MIN_STACK_DEPTH as u32,
             "parent_stack_depth must not go below MIN_STACK_DEPTH when stack is at minimum"
         );
     }
@@ -974,11 +970,10 @@ mod tests {
             &forest,
         );
 
-        let ctx_info = tracer
-            .block_stack
-            .peek()
-            .ctx_info
-            .expect("DYNCALL start_clock_cycle must push ExecutionContextInfo onto block_stack");
+        let ctx_info =
+            tracer.block_stack.peek().ctx_info.expect(
+                "DYNCALL start_clock_cycle must push ExecutionContextInfo onto block_stack",
+            );
         assert_eq!(
             ctx_info.parent_stack_depth,
             expected_depth - 1,

@@ -17,6 +17,7 @@
 - Fixed the release dry-run publish cycle between `miden-air` and `miden-ace-codegen`, and preserved leaf-only DAG imports with explicit snapshots ([#2931](https://github.com/0xMiden/miden-vm/pull/2931)).
 - Added regression coverage for the exact `max_num_continuations` continuation-stack boundary ([#2995](https://github.com/0xMiden/miden-vm/pull/2995)).
 - Fixed AEAD padding handling so encrypt does not overwrite memory next to the plaintext buffer and decrypt leaves the plaintext output tail untouched ([#3008](https://github.com/0xMiden/miden-vm/pull/3008)).
+- Fixed `DYNCALL` execution tracing to clamp `parent_stack_depth` in `ExecutionContextInfo` to `MIN_STACK_DEPTH`, preventing an underflow when the stack is at minimum depth ([#2813](https://github.com/0xMiden/miden-vm/pull/2813)).
 
 #### Changes
 
