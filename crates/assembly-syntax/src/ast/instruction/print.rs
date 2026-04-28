@@ -257,7 +257,8 @@ impl PrettyPrint for Instruction {
             Self::MemStream => const_text("mem_stream"),
             Self::AdvPipe => const_text("adv_pipe"),
 
-            Self::AdvPush(value) => inst_with_imm("adv_push", value),
+            Self::AdvPush => const_text("adv_push"),
+            Self::AdvPushW => const_text("adv_pushw"),
             Self::AdvLoadW => const_text("adv_loadw"),
 
             Self::SysEvent(sys_event) => inst_with_imm("adv", sys_event),

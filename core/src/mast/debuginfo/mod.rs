@@ -272,6 +272,12 @@ impl DebugInfo {
         self.debug_vars.get(debug_var_id)
     }
 
+    /// Returns all `(op_idx, DebugVarId)` pairs for the given node, or an empty vec if the
+    /// node has no debug vars.
+    pub fn debug_vars_for_node(&self, node_id: MastNodeId) -> Vec<(usize, DebugVarId)> {
+        self.op_debug_var_storage.debug_vars_for_node(node_id)
+    }
+
     /// Returns debug variable IDs for a specific operation within a node.
     pub fn debug_vars_for_operation(
         &self,
@@ -364,6 +370,11 @@ impl DebugInfo {
         self.asm_ops.get(asm_op_id)
     }
 
+    /// Returns all `(op_idx, AsmOpId)` pairs for the given node.
+    pub fn asm_ops_for_node(&self, node_id: MastNodeId) -> Vec<(usize, AsmOpId)> {
+        self.asm_op_storage.asm_ops_for_node(node_id)
+    }
+
     // ASSEMBLY OP MUTATORS
     // --------------------------------------------------------------------------------------------
 
@@ -411,6 +422,14 @@ impl DebugInfo {
     /// storage still references valid node IDs.
     pub(super) fn remap_asm_op_storage(&mut self, remapping: &BTreeMap<MastNodeId, MastNodeId>) {
         self.asm_op_storage = self.asm_op_storage.remap_nodes(remapping);
+    }
+
+    /// Remaps the debug var storage to use new node IDs after nodes have been removed/reordered.
+    ///
+    /// This should be called after nodes are removed from the MastForest to ensure the debug
+    /// var storage still references valid node IDs.
+    pub(super) fn remap_debug_var_storage(&mut self, remapping: &BTreeMap<MastNodeId, MastNodeId>) {
+        self.op_debug_var_storage = self.op_debug_var_storage.remap_nodes(remapping);
     }
 
     // DEBUG VARIABLE MUTATORS

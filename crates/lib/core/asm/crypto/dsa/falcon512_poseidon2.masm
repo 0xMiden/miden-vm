@@ -36,7 +36,7 @@ pub proc mod_12289
     # the advice stack contains now [qhi, qlo, r, ...] where q = qhi * 2^32 + qlo is quotient
     # and r is remainder
 
-    adv_push.2
+    adv_push adv_push
     u32assert2
     # => [qlo, qhi, a_hi, a_lo, ...]
 
@@ -54,7 +54,7 @@ pub proc mod_12289
     # => [M * q / 2^32, (M * q) % 2^32, a_hi, a_lo, ...]
     # => [res_hi, res_lo, a_hi, a_lo, ...]
 
-    adv_push.1
+    adv_push
     # Advice values are untrusted. U32SUB/U32ADD only constrain their output limbs in the AIR,
     # so we must validate the remainder before feeding it into u32 arithmetic.
     dup u32assert2
@@ -193,11 +193,10 @@ pub proc load_h_s2_and_product
     ## which simplifies to
     ##
     ## pi(tau_inv) * tau == h(tau_inv) * s2(tau_inv)
-    adv_push.2
-    # advice stack has [tau0, tau1, ...] with tau0 on top (ready to pop first)
-    # adv_push.2: pops tau0 first, then tau1 → stack is [tau0, tau1, ...] (_le format)
+    adv_push adv_push
+    # => [tau0, tau1, ...]
     dup.1 dup.1 ext2inv         # duplicate tau, compute inverse → [tau_inv0, tau_inv1, tau0, tau1, ...]
-    loc_storew_le.4             # store [tau_inv0, tau_inv1, tau0, tau1] - tau_inv first for horner
+    loc_storew_le.4             # store [tau_inv0, tau_inv1, tau0, tau1] - tau_inv first for Horner
     # => [tau_inv0, tau_inv1, tau0, tau1, Y, 0, 0, 0, 0, ptr, tau_inv_ptr, acc0, acc1, ...]
 
     # 2) Load the coefficients of the h polynomial and evaluate it at tau_inv
@@ -637,8 +636,8 @@ pub proc verify
 
     # 2) Load the NONCE from the advice provider. This is encoded as 8 field elements
 
-    padw adv_loadw
-    padw adv_loadw
+    adv_pushw
+    adv_pushw
     #=> [NONCE1, NONCE0, MSG, ...]
     swapw
     #=> [NONCE0, NONCE1, MSG, ...]

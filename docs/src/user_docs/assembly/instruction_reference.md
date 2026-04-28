@@ -186,9 +186,10 @@ Instructions for moving data between the stack and other sources like program co
 
 | Instruction  | Stack Input      | Stack Output     | Cycles | Notes                                                                                                                                                                           |
 | ------------ | ---------------- | ---------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `adv_push.n` | `[ ... ]`        | `[a, ...]`       | n      | Pops `n` values from advice stack to operand stack (1st popped is deepest). Valid `n` in `1..=16`. Fails if advice stack has `< n` values.                                      |
+| `adv_push` | `[ ... ]`        | `[a, ...]`       | 1      | Pops 1 value from advice stack and pushes onto operand stack. Fails if advice stack is empty.                                      |
+| `adv_pushw` | `[ ... ]`        | `[A, ...]`       | 5      | Equivalent to `padw adv_loadw`. Pushes a word from advice onto the stack (grows by 4). Fails if advice stack has `< 4` values.                                      |
 | `adv_loadw`  | `[0,0,0,0, ...]` | `[A, ...]`       | 1      | Pops word `A` (4 elements) from advice stack, overwrites top word of operand stack. Fails if advice stack has `< 4` values.                                                     |
-| `adv_pipe`   | `[C,B,A,a,...]`  | `[E,D,A,a',...]` | 1      | Pops 2 words `[D,E]` from advice stack. Overwrites top 2 words of operand stack. Writes `[D,E]` to memory at `a` and `a+1`. `a' ← a+2`. Fails if advice stack has `< 8` values. |
+| `adv_pipe`   | `[A,B,C,a,...]`  | `[A',B',C,a+8,...]` | 1      | Pops 2 words from advice stack, overwrites top 2 words (positions 0-7). C (positions 8-11) unchanged. Writes both words to memory at `a` and `a+4`. `a' = a+8`. Fails if advice stack has `< 8` values. |
 
 #### Injecting into Advice Provider (System Events - 3 cycles)
 
