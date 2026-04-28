@@ -60,7 +60,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       MASM_LSP_REF: 0f7f54fed90aae59aaef241325e8f0d108b2d971
-      MASM_DECOMPILER_REF: a3d7aff5426e5e11556c73504782004de9edce07
+      MASM_DECOMPILER_REF: 60d5f613a039423fd38ae4295c2a3de4a8b10440
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
@@ -81,10 +81,6 @@ jobs:
           git -C .tmp/masm-decompiler remote add origin https://github.com/trailofbits/masm-decompiler
           git -C .tmp/masm-decompiler fetch --depth=1 origin "$MASM_DECOMPILER_REF"
           git -C .tmp/masm-decompiler checkout --detach FETCH_HEAD
-      - name: Patch masm-decompiler stack effects
-        run: >
-          git -C .tmp/masm-decompiler apply
-          "$GITHUB_WORKSPACE/.github/patches/masm-decompiler-swapdw-stack-effect.patch"
       - name: Use checked out masm-decompiler
         run: |
           python - <<'PY'
