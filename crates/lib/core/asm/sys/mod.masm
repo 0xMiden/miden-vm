@@ -31,7 +31,7 @@ pub proc truncate_stack()
 end
 
 #! Drop 16 values from the stack.
-pub proc drop_stack_top()
+pub proc drop_stack_top(top: word, upper_mid: word, lower_mid: word, bottom: word)
     dropw dropw dropw dropw
 end
 
