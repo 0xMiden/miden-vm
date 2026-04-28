@@ -4,9 +4,7 @@ use miden_core::{Felt, field::QuadFelt};
 use miden_crypto::field::{Field, PrimeCharacteristicRing};
 
 use crate::{
-    AceCircuit, InputCounts, InputKey, InputLayout,
-    circuit::emit_circuit,
-    dag::{AceDag, DagBuilder},
+    AceCircuit, InputCounts, InputKey, InputLayout, circuit::emit_circuit, dag::DagBuilder,
 };
 
 /// Minimal layout with only public inputs populated.
@@ -15,9 +13,9 @@ fn minimal_layout(num_public: usize) -> InputLayout {
         width: 0,
         aux_width: 0,
         num_public,
+        num_vlpi: 0,
         num_randomness: 2,
         num_periodic: 0,
-        num_aux_inputs: 14,
         num_quotient_chunks: 1,
     };
     InputLayout::new(counts)
@@ -45,12 +43,12 @@ fn ace_simple_circuit_matches_hand_eval() {
     let prod = builder.mul(sum, a);
     let root = builder.sub(prod, c);
 
-    let dag = AceDag { nodes: builder.into_nodes(), root };
+    let dag = builder.build(root);
 
     let circuit: AceCircuit<QuadFelt> = emit_circuit(&dag, layout.clone()).expect("emit circuit");
 
-    let a_val = QuadFelt::from(Felt::new(3));
-    let b_val = QuadFelt::from(Felt::new(5));
+    let a_val = QuadFelt::from(Felt::new_unchecked(3));
+    let b_val = QuadFelt::from(Felt::new_unchecked(5));
     let c_val = (a_val + b_val) * a_val; // satisfies equation
 
     let inputs = build_inputs(
@@ -83,13 +81,13 @@ fn ace_simple_circuit_with_shared_terms() {
     let rhs = builder.add(ac, bc);
     let root = builder.sub(lhs, rhs);
 
-    let dag = AceDag { nodes: builder.into_nodes(), root };
+    let dag = builder.build(root);
 
     let circuit: AceCircuit<QuadFelt> = emit_circuit(&dag, layout.clone()).expect("emit circuit");
 
-    let a_val = QuadFelt::from(Felt::new(7));
-    let b_val = QuadFelt::from(Felt::new(2));
-    let c_val = QuadFelt::from(Felt::new(11));
+    let a_val = QuadFelt::from(Felt::new_unchecked(7));
+    let b_val = QuadFelt::from(Felt::new_unchecked(2));
+    let c_val = QuadFelt::from(Felt::new_unchecked(11));
 
     let inputs = build_inputs(
         &layout,

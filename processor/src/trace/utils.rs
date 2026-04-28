@@ -13,6 +13,31 @@ use crate::{
 #[cfg(test)]
 use crate::{operation::Operation, utils::ToElements};
 
+// ROW-MAJOR TRACE WRITER
+// ================================================================================================
+
+/// Row-major flat buffer writer (`write_row` is a single `copy_from_slice`).
+#[derive(Debug)]
+pub struct RowMajorTraceWriter<'a, E> {
+    data: &'a mut [E],
+    width: usize,
+}
+
+impl<'a, E: Copy> RowMajorTraceWriter<'a, E> {
+    pub fn new(data: &'a mut [E], width: usize) -> Self {
+        debug_assert_eq!(data.len() % width, 0, "buffer length must be a multiple of width");
+        Self { data, width }
+    }
+
+    /// Writes one row; `values.len()` must equal `width`.
+    #[inline(always)]
+    pub fn write_row(&mut self, row: usize, values: &[E]) {
+        debug_assert_eq!(values.len(), self.width);
+        let start = row * self.width;
+        self.data[start..start + self.width].copy_from_slice(values);
+    }
+}
+
 // TRACE FRAGMENT
 // ================================================================================================
 
@@ -152,13 +177,13 @@ impl TraceLenSummary {
 // CHIPLET LENGTHS
 // ================================================================================================
 
-/// Contains trace lengths of all chilplets: hash, bitwise, memory and kernel ROM trace
-/// lengths.
+/// Contains trace lengths of all chiplets: hash, bitwise, memory, ACE, and kernel ROM.
 #[derive(Default, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ChipletsLengths {
     hash_chiplet_len: usize,
     bitwise_chiplet_len: usize,
     memory_chiplet_len: usize,
+    ace_chiplet_len: usize,
     kernel_rom_len: usize,
 }
 
@@ -167,7 +192,8 @@ impl ChipletsLengths {
         ChipletsLengths {
             hash_chiplet_len: chiplets.bitwise_start().into(),
             bitwise_chiplet_len: chiplets.memory_start() - chiplets.bitwise_start(),
-            memory_chiplet_len: chiplets.kernel_rom_start() - chiplets.memory_start(),
+            memory_chiplet_len: chiplets.ace_start() - chiplets.memory_start(),
+            ace_chiplet_len: chiplets.kernel_rom_start() - chiplets.ace_start(),
             kernel_rom_len: chiplets.padding_start() - chiplets.kernel_rom_start(),
         }
     }
@@ -176,32 +202,39 @@ impl ChipletsLengths {
         hash_len: usize,
         bitwise_len: usize,
         memory_len: usize,
+        ace_len: usize,
         kernel_len: usize,
     ) -> Self {
         ChipletsLengths {
             hash_chiplet_len: hash_len,
             bitwise_chiplet_len: bitwise_len,
             memory_chiplet_len: memory_len,
+            ace_chiplet_len: ace_len,
             kernel_rom_len: kernel_len,
         }
     }
 
-    /// Returns the length of the hash chiplet trace
+    /// Returns the length of the hash chiplet trace.
     pub fn hash_chiplet_len(&self) -> usize {
         self.hash_chiplet_len
     }
 
-    /// Returns the length of the bitwise trace
+    /// Returns the length of the bitwise trace.
     pub fn bitwise_chiplet_len(&self) -> usize {
         self.bitwise_chiplet_len
     }
 
-    /// Returns the length of the memory trace
+    /// Returns the length of the memory trace.
     pub fn memory_chiplet_len(&self) -> usize {
         self.memory_chiplet_len
     }
 
-    /// Returns the length of the kernel ROM trace
+    /// Returns the length of the ACE chiplet trace.
+    pub fn ace_chiplet_len(&self) -> usize {
+        self.ace_chiplet_len
+    }
+
+    /// Returns the length of the kernel ROM trace.
     pub fn kernel_rom_len(&self) -> usize {
         self.kernel_rom_len
     }
@@ -213,6 +246,7 @@ impl ChipletsLengths {
         self.hash_chiplet_len()
             + self.bitwise_chiplet_len()
             + self.memory_chiplet_len()
+            + self.ace_chiplet_len()
             + self.kernel_rom_len()
             + 1
     }
@@ -313,7 +347,7 @@ pub(crate) trait AuxColumnBuilder<E: ExtensionField<Felt>> {
 /// valid 32-bit integer value.
 pub(crate) fn split_element_u32_into_u16(value: Felt) -> (Felt, Felt) {
     let (hi, lo) = split_u32_into_u16(value.as_canonical_u64());
-    (Felt::new(hi as u64), Felt::new(lo as u64))
+    (Felt::new_unchecked(hi as u64), Felt::new_unchecked(lo as u64))
 }
 
 /// Splits a u64 integer assumed to contain a 32-bit value into two u16 integers.

@@ -339,7 +339,7 @@ impl From<ProcedureName> for miette::SourceSpan {
     }
 }
 
-impl core::ops::Deref for ProcedureName {
+impl Deref for ProcedureName {
     type Target = str;
 
     #[inline(always)]

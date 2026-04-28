@@ -38,8 +38,7 @@ impl DebugVarId {
             Ok(Self(value))
         } else {
             Err(DeserializationError::InvalidValue(format!(
-                "DebugVarId {} exceeds bound {}",
-                value, bound
+                "DebugVarId {value} exceeds bound {bound}"
             )))
         }
     }
@@ -257,10 +256,14 @@ impl OpToDebugVarIds {
             }
         }
 
-        if *self.op_indptr_for_var_ids.last().unwrap() != self.debug_var_ids.len() {
+        let &last_op_ptr = self
+            .op_indptr_for_var_ids
+            .last()
+            .ok_or_else(|| "op_indptr_for_var_ids is unexpectedly empty".to_string())?;
+        if last_op_ptr != self.debug_var_ids.len() {
             return Err(format!(
                 "op_indptr_for_var_ids end {} doesn't match debug_var_ids length {}",
-                self.op_indptr_for_var_ids.last().unwrap(),
+                last_op_ptr,
                 self.debug_var_ids.len()
             ));
         }
@@ -285,11 +288,12 @@ impl OpToDebugVarIds {
         }
 
         let max_node_ptr = self.op_indptr_for_var_ids.len() - 1;
-        if *node_slice.last().unwrap() > max_node_ptr {
+        let &last_node_ptr = node_slice
+            .last()
+            .ok_or_else(|| "node_indptr_for_op_idx is unexpectedly empty".to_string())?;
+        if last_node_ptr > max_node_ptr {
             return Err(format!(
-                "node_indptr_for_op_idx end {} exceeds op_indptr bounds {}",
-                node_slice.last().unwrap(),
-                max_node_ptr
+                "node_indptr_for_op_idx end {last_node_ptr} exceeds op_indptr bounds {max_node_ptr}"
             ));
         }
 
@@ -356,13 +360,15 @@ impl OpToDebugVarIds {
                 .push(op_start)
                 .map_err(|_| DecoratorIndexError::OperationIndex { node, operation: op_start })?;
         } else {
-            let max_op_idx = debug_vars_info.last().unwrap().0;
+            let max_op_idx =
+                debug_vars_info.last().ok_or(DecoratorIndexError::InternalStructure)?.0;
             let mut it = debug_vars_info.into_iter().peekable();
 
             for op in 0..=max_op_idx {
                 self.op_indptr_for_var_ids.push(self.debug_var_ids.len());
                 while it.peek().is_some_and(|(i, _)| *i == op) {
-                    self.debug_var_ids.push(it.next().unwrap().1);
+                    self.debug_var_ids
+                        .push(it.next().ok_or(DecoratorIndexError::InternalStructure)?.1);
                 }
             }
             self.op_indptr_for_var_ids.push(self.debug_var_ids.len());
@@ -461,7 +467,7 @@ impl OpToDebugVarIds {
         };
 
         let mut result = Vec::new();
-        for (op_offset, op_idx) in op_range.clone().enumerate() {
+        for (op_offset, op_idx) in op_range.enumerate() {
             if op_idx + 1 >= self.op_indptr_for_var_ids.len() {
                 break;
             }

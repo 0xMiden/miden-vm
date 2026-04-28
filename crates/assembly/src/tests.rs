@@ -299,7 +299,7 @@ fn library_exports() -> Result<(), Report> {
     // make sure the library exports all exported procedures
     let expected_exports: BTreeSet<Arc<Path>> =
         [foo2.into(), foo3.into(), bar1.into(), bar2.into(), bar3.into(), bar5.into()].into();
-    let actual_exports: BTreeSet<_> = lib2.exports().map(|export| export.path()).collect();
+    let actual_exports: BTreeSet<_> = lib2.exports().map(LibraryExport::path).collect();
     assert_eq!(expected_exports, actual_exports);
 
     // make sure foo2, bar2, and bar3 map to the same MastNode
@@ -409,6 +409,66 @@ fn library_serialization() -> Result<(), Report> {
     assert_eq!(bundle.as_ref(), &deserialized);
 
     Ok(())
+}
+
+/// Verifies that deserializing a library rejects procedure exports whose `MastNodeId` is not a
+/// procedure root in the underlying MAST forest (issue #2831).
+#[test]
+fn library_deserialization_rejects_non_root_export() {
+    use miden_core::{
+        mast::{BasicBlockNodeBuilder, MastForestContributor},
+        serde::ByteWriter,
+    };
+
+    let context = TestContext::new();
+    let source = r#"
+        pub proc foo
+            add
+        end
+    "#;
+    let module = parse_module!(&context, "test::foo", source);
+
+    // Build a valid library.
+    let lib = Assembler::new(context.source_manager()).assemble_library([module]).unwrap();
+
+    // Clone the forest and add a non-root node.
+    let mut forest: MastForest = (**lib.mast_forest()).clone();
+    let builder = BasicBlockNodeBuilder::new(vec![Operation::Add], vec![]);
+    let non_root_id = builder.add_to_forest(&mut forest).unwrap();
+    assert!(
+        !forest.is_procedure_root(non_root_id),
+        "sanity check: new node should not be a root"
+    );
+
+    // Manually serialize a tampered library: forest + one export referencing the non-root node.
+    let mut tampered_bytes = Vec::new();
+    forest.write_into(&mut tampered_bytes);
+
+    // Number of exports.
+    1usize.write_into(&mut tampered_bytes);
+    // Tag: 0 = Procedure export.
+    0u8.write_into(&mut tampered_bytes);
+    // Fully qualified procedure path.
+    let path = PathBuf::new("::test::foo::foo").unwrap();
+    path.write_into(&mut tampered_bytes);
+    // MastNodeId of the non-root node.
+    u32::from(non_root_id).write_into(&mut tampered_bytes);
+    // No function signature.
+    tampered_bytes.write_bool(false);
+    // Empty attribute set.
+    miden_assembly_syntax::ast::AttributeSet::default().write_into(&mut tampered_bytes);
+
+    // Deserializing should fail because the export references a non-root node.
+    let result = Library::read_from_bytes(&tampered_bytes);
+    assert!(
+        result.is_err(),
+        "deserialization should reject exports referencing non-root nodes"
+    );
+    let err_msg = result.unwrap_err().to_string();
+    assert!(
+        err_msg.contains("no procedure root"),
+        "error should mention missing procedure root, got: {err_msg}"
+    );
 }
 
 #[test]
@@ -828,7 +888,7 @@ end
 #[test]
 fn enum_felt_discriminant_too_large_is_rejected() -> TestResult {
     let context = TestContext::default();
-    let modulus = miden_core::Felt::ORDER_U64;
+    let modulus = Felt::ORDER_U64;
     let source = source_file!(
         &context,
         format!(
@@ -853,7 +913,7 @@ end
 #[test]
 fn constant_expression_overflow_is_rejected() -> TestResult {
     let context = TestContext::default();
-    let modulus_minus_one = miden_core::Felt::ORDER_U64 - 1;
+    let modulus_minus_one = Felt::ORDER_U64 - 1;
     let source = source_file!(
         &context,
         format!(
@@ -3689,7 +3749,7 @@ end
     let assembled = Assembler::default().assemble_program(program_src);
     assert!(
         assembled.is_err(),
-        "expected out-of-range constant results to be rejected (must not silently alias via `Felt::new`)"
+        "expected out-of-range constant results to be rejected (must not silently alias via `Felt::new_unchecked`)"
     );
 }
 
@@ -5001,9 +5061,9 @@ fn issue_1644_single_forest_merge_identity() -> TestResult {
         new_merged_forest.nodes().iter().zip(merged_forest.nodes().iter()).enumerate()
     {
         if orig_node.digest() != merged_node.digest() {
-            eprintln!("Node {} digest violation:", i);
-            eprintln!("   Original: {:?}", orig_node);
-            eprintln!("   Merged:   {:?}", merged_node);
+            eprintln!("Node {i} digest violation:");
+            eprintln!("   Original: {orig_node:?}");
+            eprintln!("   Merged:   {merged_node:?}");
             eprintln!("   Original digest: {:?}", orig_node.digest());
             eprintln!("   Merged digest:   {:?}", merged_node.digest());
 
@@ -5019,7 +5079,7 @@ fn issue_1644_single_forest_merge_identity() -> TestResult {
         .enumerate()
     {
         if new_merged_forest[*orig_root].digest() != merged_forest[*merged_root].digest() {
-            eprintln!("Root {} digest violation:", i);
+            eprintln!("Root {i} digest violation:");
             eprintln!("   Original: {:?}", original_forest[*orig_root].digest());
             eprintln!("   Merged:   {:?}", merged_forest[*merged_root].digest());
             should_panic = true;
@@ -5049,7 +5109,7 @@ fn overlong_total_path_is_rejected_without_panic() {
     // but the total byte length exceeds u16::MAX (the binary serialization length prefix).
     let component = "a".repeat(255);
     let num_components: usize = 300;
-    let mut path_str = alloc::string::String::with_capacity(num_components * (component.len() + 2));
+    let mut path_str = String::with_capacity(num_components * (component.len() + 2));
     for i in 0..num_components {
         if i > 0 {
             path_str.push_str("::");
@@ -5746,6 +5806,45 @@ end
         .assemble_program(program_src)
         .expect_err("expected syscall without kernel to be rejected");
     assert_diagnostic!(err, "invalid syscall");
+}
+
+#[test]
+fn regression_kernel_exports_are_syscall_only_for_all_non_syscall_entrypoints() {
+    let context = TestContext::default();
+    let source_manager = context.source_manager();
+
+    let kernel_src = r#"
+pub proc k1
+    push.1
+end
+"#;
+
+    let kernel = Assembler::new(source_manager.clone())
+        .assemble_kernel(kernel_src)
+        .expect("kernel assembly must succeed");
+
+    let cases = vec![
+        (
+            "exec",
+            "proc user\n    exec.::$kernel::k1\nend\n\nbegin\n    call.user\nend\n".to_string(),
+        ),
+        (
+            "call",
+            "proc user\n    call.::$kernel::k1\nend\n\nbegin\n    call.user\nend\n".to_string(),
+        ),
+        (
+            "procref",
+            "proc user\n    procref.::$kernel::k1\n    dropw\nend\n\nbegin\n    call.user\nend\n"
+                .to_string(),
+        ),
+    ];
+
+    for (kind, program_src) in cases {
+        let err = Assembler::with_kernel(source_manager.clone(), kernel.clone())
+            .assemble_program(program_src)
+            .expect_err(&format!("kernel exports should be syscall-only, but {kind} succeeded"));
+        assert_diagnostic!(err, "syscall");
+    }
 }
 
 #[test]

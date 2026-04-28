@@ -17,26 +17,13 @@
 //! Each row in the overflow table is encoded as:
 //! `alpha + beta^0 * clk + beta^1 * val + beta^2 * prev`
 
-use miden_core::field::PrimeCharacteristicRing;
-use miden_crypto::stark::air::{ExtensionBuilder, LiftedAirBuilder, WindowAccess};
+use miden_crypto::stark::air::{ExtensionBuilder, WindowAccess};
 
 use crate::{
-    MainTraceRow,
-    constraints::{
-        bus::indices::P1_STACK,
-        op_flags::OpFlags,
-        tagging::{TaggingAirBuilderExt, ids::TAG_STACK_OVERFLOW_BUS_BASE},
-    },
-    trace::{
-        Challenges,
-        decoder::HASHER_STATE_RANGE,
-        stack::{B0_COL_IDX, B1_COL_IDX, H0_COL_IDX},
-    },
+    MainCols, MidenAirBuilder,
+    constraints::{bus::indices::P1_STACK, constants::F_16, op_flags::OpFlags, utils::BoolNot},
+    trace::{Challenges, bus_types::STACK_OVERFLOW_TABLE},
 };
-
-/// Tag ID and namespace for the stack overflow bus transition constraint.
-const STACK_OVERFLOW_BUS_ID: usize = TAG_STACK_OVERFLOW_BUS_BASE;
-const STACK_OVERFLOW_BUS_NAME: &str = "stack.overflow.bus.transition";
 
 // ENTRY POINTS
 // ================================================================================================
@@ -48,12 +35,12 @@ const STACK_OVERFLOW_BUS_NAME: &str = "stack.overflow.bus.transition";
 /// - Removing rows when (left_shift OR dyncall) AND overflow is non-empty
 pub fn enforce_bus<AB>(
     builder: &mut AB,
-    local: &MainTraceRow<AB::Var>,
-    next: &MainTraceRow<AB::Var>,
+    local: &MainCols<AB::Var>,
+    next: &MainCols<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
     challenges: &Challenges<AB::ExprEF>,
 ) where
-    AB: LiftedAirBuilder,
+    AB: MidenAirBuilder,
 {
     // Auxiliary trace must be present.
 
@@ -65,8 +52,6 @@ pub fn enforce_bus<AB>(
         (aux_local[P1_STACK], aux_next[P1_STACK])
     };
 
-    let one_ef = AB::ExprEF::ONE;
-
     // ============================================================================================
     // TRANSITION CONSTRAINT
     // ============================================================================================
@@ -76,25 +61,24 @@ pub fn enforce_bus<AB>(
     // -------------------------------------------------------------------------
 
     // Current row values
-    let clk: AB::Expr = local.clk.clone().into();
-    let s15: AB::Expr = local.stack[15].clone().into();
-    let b0: AB::Expr = local.stack[B0_COL_IDX].clone().into();
-    let b1: AB::Expr = local.stack[B1_COL_IDX].clone().into();
-    let h0: AB::Expr = local.stack[H0_COL_IDX].clone().into();
+    let clk = local.system.clk;
+    let s15 = local.stack.get(15);
+    let b0 = local.stack.b0;
+    let b1 = local.stack.b1;
+    let h0 = local.stack.h0;
 
     // Next row values (needed for removal)
-    let s15_next: AB::Expr = next.stack[15].clone().into();
-    let b1_next: AB::Expr = next.stack[B1_COL_IDX].clone().into();
+    let s15_next = next.stack.get(15);
+    let b1_next = next.stack.b1;
 
     // Hasher state element 5, used by DYNCALL to store the new overflow table pointer.
-    let hasher_state_5: AB::Expr = local.decoder[HASHER_STATE_RANGE.start + 5].clone().into();
+    let hasher_state_5 = local.decoder.hasher_state[5];
 
     // -------------------------------------------------------------------------
     // Overflow condition: (b0 - 16) * h0 = 1 when overflow is non-empty
     // -------------------------------------------------------------------------
 
-    let sixteen = AB::Expr::from_u16(16);
-    let is_non_empty_overflow: AB::Expr = (b0 - sixteen) * h0;
+    let is_non_empty_overflow: AB::Expr = (b0 - F_16) * h0;
 
     // -------------------------------------------------------------------------
     // Operation flags
@@ -109,21 +93,22 @@ pub fn enforce_bus<AB>(
     // -------------------------------------------------------------------------
 
     // Response row value (adding to table during right_shift):
-    let response_row = challenges.encode([clk.clone(), s15.clone(), b1.clone()]);
+    let response_row = challenges.encode(STACK_OVERFLOW_TABLE, [clk.into(), s15.into(), b1.into()]);
 
     // Request row value for left_shift (removing from table):
-    let request_row_left = challenges.encode([b1.clone(), s15_next.clone(), b1_next.clone()]);
+    let request_row_left =
+        challenges.encode(STACK_OVERFLOW_TABLE, [b1.into(), s15_next.into(), b1_next.into()]);
 
     // Request row value for dyncall (removing from table):
-    let request_row_dyncall =
-        challenges.encode([b1.clone(), s15_next.clone(), hasher_state_5.clone()]);
+    let request_row_dyncall = challenges
+        .encode(STACK_OVERFLOW_TABLE, [b1.into(), s15_next.into(), hasher_state_5.into()]);
 
     // -------------------------------------------------------------------------
     // Compute response and request terms
     // -------------------------------------------------------------------------
 
     // Response: right_shift * response_row + (1 - right_shift)
-    let response: AB::ExprEF = response_row * right_shift.clone() + (one_ef.clone() - right_shift);
+    let response: AB::ExprEF = response_row * right_shift.clone() + right_shift.not();
 
     // Request flags
     let left_flag: AB::Expr = left_shift * is_non_empty_overflow.clone();
@@ -131,9 +116,8 @@ pub fn enforce_bus<AB>(
     let request_flag_sum: AB::Expr = left_flag.clone() + dyncall_flag.clone();
 
     // Request: left_flag * left_value + dyncall_flag * dyncall_value + (1 - sum(flags))
-    let request: AB::ExprEF = request_row_left * left_flag.clone()
-        + request_row_dyncall * dyncall_flag.clone()
-        + (one_ef.clone() - request_flag_sum);
+    let request: AB::ExprEF =
+        request_row_left * left_flag + request_row_dyncall * dyncall_flag + request_flag_sum.not();
 
     // -------------------------------------------------------------------------
     // Main running product constraint
@@ -142,7 +126,5 @@ pub fn enforce_bus<AB>(
     let lhs = p1_next.into() * request;
     let rhs = p1_local.into() * response;
 
-    builder.tagged(STACK_OVERFLOW_BUS_ID, STACK_OVERFLOW_BUS_NAME, |builder| {
-        builder.when_transition().assert_zero_ext(lhs - rhs);
-    });
+    builder.when_transition().assert_eq_ext(lhs, rhs);
 }

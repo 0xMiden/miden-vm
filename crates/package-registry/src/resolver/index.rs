@@ -44,7 +44,7 @@ impl InMemoryPackageRegistry {
         P: Into<PackageId>,
         V: Into<VersionRequirement>,
     {
-        let record_version = version.clone();
+        let record_version = version;
         let record = PackageRecord::new(
             record_version,
             dependencies

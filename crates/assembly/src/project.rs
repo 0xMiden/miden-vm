@@ -6,15 +6,15 @@ use std::{
 
 use miden_assembly_syntax::{
     ModuleParser,
-    ast::{self, ModuleKind, Path as MasmPath},
+    ast::{ModuleKind, Path as MasmPath},
     diagnostics::Report,
 };
 use miden_core::serde::{Deserializable, Serializable};
 use miden_mast_package::{Package as MastPackage, Section, SectionId, TargetType};
 use miden_package_registry::{PackageId, PackageStore, Version as PackageVersion};
 use miden_project::{
-    Linkage, Package as ProjectPackage, Profile, ProjectDependencyNodeProvenance, ProjectSource,
-    ProjectSourceOrigin, Target,
+    Linkage, Package as ProjectPackage, PreassembledDependencyMetadata, Profile,
+    ProjectDependencyNodeProvenance, ProjectSource, ProjectSourceOrigin, Target,
 };
 
 use crate::{Assembler, assembler::debuginfo::DebugInfoSections, ast::Module};
@@ -340,8 +340,7 @@ where
                     .map(|target| target.inner().clone())
                     .ok_or_else(|| {
                         Report::msg(format!(
-                            "dependency '{}' does not define a library target",
-                            package_id
+                            "dependency '{package_id}' does not define a library target"
                         ))
                     })?;
                 match self.try_reuse_registered_source_package(
@@ -380,8 +379,7 @@ where
                                 );
                                 if actual != expected {
                                     return Err(Report::msg(format!(
-                                        "package '{}' version '{}' is already registered as '{}', but the canonical artifact could not be loaded and rebuilding from source produced '{}'; bump the semantic version or repair the package store",
-                                        package_id, node_version, expected, actual
+                                        "package '{package_id}' version '{node_version}' is already registered as '{expected}', but the canonical artifact could not be loaded and rebuilding from source produced '{actual}'; bump the semantic version or repair the package store"
                                     )));
                                 }
                             },
@@ -395,8 +393,7 @@ where
                 let package =
                     self.load_canonical_package(package_id, &node_version)?.ok_or_else(|| {
                         Report::msg(format!(
-                            "dependency '{}' version '{}' was not found in the package registry",
-                            package_id, node_version
+                            "dependency '{package_id}' version '{node_version}' was not found in the package registry"
                         ))
                     })?;
                 ResolvedPackage {
@@ -411,8 +408,19 @@ where
                     package,
                 }
             },
-            ProjectDependencyNodeProvenance::Preassembled { path, selected } => {
-                let package = load_selected_preassembled_package(path, package_id, selected)?;
+            ProjectDependencyNodeProvenance::Preassembled {
+                path,
+                selected,
+                kind,
+                requirements,
+            } => {
+                let package = load_selected_preassembled_package(
+                    path,
+                    package_id,
+                    selected,
+                    *kind,
+                    requirements,
+                )?;
                 ResolvedPackage {
                     linked_kernel_package: self.resolve_linked_kernel_package(package.clone())?,
                     package,
@@ -521,8 +529,7 @@ where
                 actual.describe(),
             ))),
             None => Err(Report::msg(format!(
-                "package '{}' version '{}' is already registered, but the canonical artifact is missing source provenance; bump the semantic version",
-                package_id, version
+                "package '{package_id}' version '{version}' is already registered, but the canonical artifact is missing source provenance; bump the semantic version"
             ))),
         }?;
 
@@ -678,7 +685,7 @@ fn module_path_from_relative(
         })
         .collect::<Result<Vec<_>, Report>>()?;
 
-    if components.last().is_some_and(|component| *component == ast::Module::ROOT) {
+    if components.last().is_some_and(|component| *component == Module::ROOT) {
         components.pop();
     }
 
@@ -694,6 +701,8 @@ fn load_selected_preassembled_package(
     path: &FsPath,
     expected_name: &PackageId,
     selected: &PackageVersion,
+    expected_kind: TargetType,
+    expected_requirements: &BTreeMap<PackageId, PreassembledDependencyMetadata>,
 ) -> Result<Arc<MastPackage>, Report> {
     let package = load_package_from_path(path)?;
     if &package.name != expected_name {
@@ -716,6 +725,26 @@ fn load_selected_preassembled_package(
         )));
     }
 
+    if package.kind != expected_kind {
+        return Err(Report::msg(format!(
+            "preassembled dependency '{}@{}' at '{}' no longer matches the dependency graph target kind '{}'",
+            expected_name,
+            actual,
+            path.display(),
+            expected_kind
+        )));
+    }
+
+    let actual_requirements = package_requirements(&package);
+    if &actual_requirements != expected_requirements {
+        return Err(Report::msg(format!(
+            "preassembled dependency '{}@{}' at '{}' no longer matches the dependency graph dependency requirements",
+            expected_name,
+            actual,
+            path.display()
+        )));
+    }
+
     Ok(package)
 }
 
@@ -726,4 +755,22 @@ fn load_package_from_path(path: &FsPath) -> Result<Arc<MastPackage>, Report> {
         Report::msg(format!("failed to decode package '{}': {error}", path.display()))
     })?;
     Ok(Arc::new(package))
+}
+
+fn package_requirements(
+    package: &MastPackage,
+) -> BTreeMap<PackageId, PreassembledDependencyMetadata> {
+    package
+        .manifest
+        .dependencies()
+        .map(|dependency| {
+            (
+                dependency.name.clone(),
+                PreassembledDependencyMetadata {
+                    version: PackageVersion::new(dependency.version.clone(), dependency.digest),
+                    kind: dependency.kind,
+                },
+            )
+        })
+        .collect()
 }

@@ -8,10 +8,7 @@ extern crate std;
 use alloc::{boxed::Box, vec::Vec};
 
 use miden_air::{ProcessorAir, PublicInputs, config};
-use miden_core::{
-    Felt,
-    field::{QuadFelt, TwoAdicField},
-};
+use miden_core::{Felt, WORD_SIZE, field::QuadFelt};
 use miden_crypto::stark::{
     StarkConfig, air::VarLenPublicInputs, challenger::CanObserve, lmcs::Lmcs, proof::StarkProof,
 };
@@ -212,28 +209,16 @@ where
     SC: StarkConfig<Felt, QuadFelt>,
     <SC::Lmcs as Lmcs>::Commitment: DeserializeOwned,
 {
-    // Proof deserialization via bincode; see https://github.com/0xMiden/miden-vm/issues/2550
-    // The proof is serialized as a `(log_trace_height, stark_proof)` tuple; this is a temporary
-    // approach until the lifted STARK integrates trace height on its side.
-    let (log_trace_height, proof): (u8, StarkProof<Felt, QuadFelt, SC>) =
-        bincode::deserialize(proof_bytes)?;
-
-    if log_trace_height as usize > Felt::TWO_ADICITY {
-        return Err(StarkVerificationError::InvalidTraceHeight(log_trace_height));
-    }
+    // Proof deserialization via bincode; see https://github.com/0xMiden/miden-vm/issues/2550.
+    let proof: StarkProof<Felt, QuadFelt, SC> = bincode::deserialize(proof_bytes)?;
 
     let mut challenger = config.challenger();
+    config::observe_protocol_params(&mut challenger);
     challenger.observe_slice(public_values);
-    // TODO: observe log_trace_height in the transcript for Fiat-Shamir binding.
-    // TODO: observe var_len_public_inputs in the transcript for Fiat-Shamir binding.
-    //   This also requires updating the recursive verifier to absorb both fixed and
-    //   variable-length public inputs.
-    // TODO: observe ACE commitment once ACE verification is integrated.
-    // See https://github.com/0xMiden/miden-vm/issues/2822
+    config::observe_var_len_public_inputs(&mut challenger, var_len_public_inputs, &[WORD_SIZE]);
     miden_crypto::stark::verifier::verify_single(
         config,
         &ProcessorAir,
-        log_trace_height,
         public_values,
         var_len_public_inputs,
         &proof,

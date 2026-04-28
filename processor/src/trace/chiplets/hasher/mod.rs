@@ -1,9 +1,10 @@
 use alloc::collections::BTreeMap;
 
 use miden_air::trace::chiplets::hasher::{
-    DIGEST_RANGE, LINEAR_HASH, MP_VERIFY, MR_UPDATE_NEW, MR_UPDATE_OLD, RATE_LEN, RETURN_HASH,
-    RETURN_STATE, STATE_WIDTH, Selectors, TRACE_WIDTH,
+    DIGEST_RANGE, HASH_CYCLE_LEN, LINEAR_HASH, MP_VERIFY, MR_UPDATE_NEW, MR_UPDATE_OLD, RATE_LEN,
+    RETURN_HASH, RETURN_STATE, STATE_WIDTH, Selectors,
 };
+use miden_core::chiplets::hasher::apply_permutation;
 
 use super::{
     Felt, HasherState, MerklePath, MerkleRootUpdate, ONE, OpBatch, TraceFragment, Word as Digest,
@@ -14,60 +15,104 @@ mod trace;
 use trace::HasherTrace;
 
 #[cfg(test)]
+#[allow(clippy::needless_range_loop)]
 mod tests;
 
 // HASH PROCESSOR
 // ================================================================================================
 
+/// Key type for digest-based lookups.
+type DigestKey = [u64; 4];
+
+/// Key type for full-state lookups.
+type StateKey = [u64; STATE_WIDTH];
+
+/// Converts a Digest to a DigestKey for BTreeMap lookup.
+fn digest_to_key(digest: Digest) -> DigestKey {
+    let elems = digest.as_elements();
+    core::array::from_fn(|i| elems[i].as_canonical_u64())
+}
+
+/// Converts a HasherState to a StateKey for BTreeMap lookup.
+fn state_to_key(state: &HasherState) -> StateKey {
+    core::array::from_fn(|i| state[i].as_canonical_u64())
+}
+
+/// Reconstructs a HasherState from a StateKey.
+fn key_to_state(key: &StateKey) -> HasherState {
+    core::array::from_fn(|i| Felt::new_unchecked(key[i]))
+}
+
 /// Hash chiplet for the VM.
 ///
-/// This component is responsible for performing all hash-related computations for the VM, as well
-/// as building an execution trace for these computations. These computations include:
-/// * Linear hashes, including simple 2-to-1 hashes, single and multiple permutations.
-/// * Merkle path verification.
-/// * Merkle root updates.
+/// This component uses a controller/permutation split architecture:
 ///
-/// ## Execution trace
-/// Hasher execution trace consists of 16 columns as illustrated below:
+/// - **Controller region** (s_perm=0): pairs of (input, output) rows for each permutation request.
+///   Input rows (s0=1) capture the operation type and pre-permutation state. Output rows (s0=0,
+///   s1=0) capture the post-permutation state.
 ///
-///   s0   s1   s2   h0   h1   h2   h3   h4   h5   h6   h7   h8   h9   h10   h11   idx
-/// ├────┴────┴────┴────┴────┴────┴────┴────┴────┴────┴────┴────┴────┴─────┴─────┴─────┤
+/// - **Permutation segment** (s_perm=1): one 16-row Poseidon2 cycle per unique input state.
+///   Multiplicity is stored in the node_index column. Linked to controller rows via the hasher_perm
+///   LogUp bus.
 ///
-/// In the above, the meaning of the columns is as follows:
-/// * Selector columns s0, s1, and s2 used to help select transition function for a given row.
-/// * Hasher state columns h0 through h11 used to hold the hasher state for each round of hash
-///   computation. The state is laid out as `[RATE0, RATE1, CAPACITY]`:
-///   - The first eight columns (h0-h7) represent the rate elements of the state. These are used to
-///     absorb the values to be hashed. Once a permutation is complete, hash output is located in
-///     the first four rate columns (h0, h1, h2, h3).
-///   - The last four columns (h8-h11) represent the capacity state of the sponge function.
-/// * Node index column idx used to help with Merkle path verification and Merkle root update
-///   computations. For all other computations the values in this column are set to 0s.
+/// This architecture enables permutation deduplication: N requests with the same input state
+/// produce N controller pairs but only one permutation cycle (with multiplicity N).
 ///
-/// Each permutation of the hash function adds 8 rows to the execution trace. Thus, for Merkle
-/// path verification, number of rows added to the trace is 8 * path.len(), and for Merkle root
-/// update it is 16 * path.len(), since we need to perform two path verifications for each update.
+/// ## Trace layout (20 columns)
 ///
-/// In addition to the execution trace, the hash chiplet also maintains:
-/// - an auxiliary trace builder, which can be used to construct a running product column describing
-///   the state of the sibling table (used in Merkle root update operations).
-/// - a map of memoized execution trace, which keeps track of start and end rows of the sections of
-///   the trace of a control or span block that can be copied to be used later for program blocks
-///   encountered with the same digest instead of building it from scratch everytime. The hash of
-///   the block is used as the key here after converting it to a bytes array.
+///   s0  s1  s2  h0..h11  idx  mrupdate_id  is_boundary  direction_bit  s_perm
+/// ├────┴───┴───┴────────┴────┴────────────┴─────────┴─────────┴────────┤
 #[derive(Debug, Default)]
 pub struct Hasher {
     trace: HasherTrace,
-    memoized_trace_map: BTreeMap<[u8; 32], (usize, usize)>,
+    /// Maps block digest -> (start_row, end_row) for memoized controller traces.
+    memoized_trace_map: BTreeMap<DigestKey, (usize, usize)>,
+    /// Maps input state -> multiplicity for permutation deduplication.
+    /// During finalize_trace(), one 16-row perm cycle is emitted per entry.
+    perm_request_map: BTreeMap<StateKey, u64>,
+    /// Monotonically increasing counter for MRUPDATE domain separation.
+    mrupdate_id: Felt,
+    /// Whether the permutation segment has been finalized.
+    finalized: bool,
 }
 
 impl Hasher {
     // STATE ACCESSORS
     // --------------------------------------------------------------------------------------------
 
-    /// Returns current length of the execution trace stored in this hasher.
+    /// Returns the length of the execution trace.
+    ///
+    /// Before finalization, this returns an estimate based on the controller region length
+    /// plus the expected permutation segment size. The estimate is verified against the
+    /// actual length during `fill_trace()` via a debug assertion.
     pub(super) fn trace_len(&self) -> usize {
-        self.trace.trace_len()
+        if self.finalized {
+            self.trace.trace_len()
+        } else {
+            self.estimate_trace_len()
+        }
+    }
+
+    /// Returns the layout of the hasher region as `(controller_len, perm_len)`, both exact
+    /// multiples of `HASH_CYCLE_LEN`. Must be called before `fill_trace()` consumes the hasher.
+    ///
+    /// `controller_len` includes the padding rows that `finalize_trace()` will later append to
+    /// round the raw controller count up to a cycle boundary; `perm_len` is the total span of
+    /// the permutation cycles that `finalize_trace()` will emit, one per unique input state.
+    pub(super) fn region_lengths(&self) -> (usize, usize) {
+        debug_assert!(!self.finalized, "region_lengths must be called before finalization");
+        let controller_len = self.trace.trace_len().next_multiple_of(HASH_CYCLE_LEN);
+        let perm_len = self.perm_request_map.len() * HASH_CYCLE_LEN;
+        (controller_len, perm_len)
+    }
+
+    /// Estimates the total trace length before finalization.
+    ///
+    /// This must match the actual length produced by `finalize_trace()`. The invariant is
+    /// verified by a debug assertion in `fill_trace()`.
+    fn estimate_trace_len(&self) -> usize {
+        let (controller_len, perm_len) = self.region_lengths();
+        controller_len + perm_len
     }
 
     // HASHING METHODS
@@ -76,22 +121,28 @@ impl Hasher {
     /// Applies a single permutation of the hash function to the provided state and records the
     /// execution trace of this computation.
     ///
-    /// The returned tuple contains the hasher state after the permutation and the row address of
-    /// the execution trace at which the permutation started.
-    pub fn permute(&mut self, mut state: HasherState) -> (Felt, HasherState) {
+    /// Returns (addr, permuted_state).
+    pub fn permute(&mut self, state: HasherState) -> (Felt, HasherState) {
         let addr = self.trace.next_row_addr();
 
-        // perform the hash.
-        self.trace.append_permutation(&mut state, LINEAR_HASH, RETURN_STATE);
+        let permuted = self.append_controller_permutation(
+            LINEAR_HASH,
+            RETURN_STATE,
+            state,
+            ZERO, // input_node_index
+            ZERO, // output_node_index
+            ONE,  // is_boundary_input = 1 (first input)
+            ONE,  // is_boundary_output = 1 (final output)
+            ZERO, // input_direction_bit (non-Merkle)
+            ZERO, // output_direction_bit (non-Merkle)
+        );
 
-        (addr, state)
+        (addr, permuted)
     }
 
-    /// Computes the hash of the control block by computing hash(h1, h2) and returns the result.
-    /// It also records the execution trace of this computation.
+    /// Computes hash(h1, h2) for a control block and returns the result.
     ///
-    /// The returned tuple also contains the row address of the execution trace at which the hash
-    /// computation started.
+    /// Returns (addr, digest).
     pub fn hash_control_block(
         &mut self,
         h1: Digest,
@@ -99,110 +150,118 @@ impl Hasher {
         domain: Felt,
         expected_hash: Digest,
     ) -> (Felt, Digest) {
+        if let Some(memoized) = self.replay_memoized_trace(expected_hash) {
+            return memoized;
+        }
+
         let addr = self.trace.next_row_addr();
-        let mut state = init_state_from_words_with_domain(&h1, &h2, domain);
+        let init_state = init_state_from_words_with_domain(&h1, &h2, domain);
+        // Single permutation: boundary on both input and output
+        let permuted = self.append_controller_permutation(
+            LINEAR_HASH,
+            RETURN_HASH,
+            init_state,
+            ZERO,
+            ZERO, // node_index: input, output
+            ONE,
+            ONE, // is_boundary: input=1, output=1
+            ZERO,
+            ZERO, // direction_bit: non-Merkle
+        );
 
-        if let Some((start_row, end_row)) = self.get_memoized_trace(expected_hash) {
-            // copy the trace of a block with same hash instead of building it again.
-            self.trace.copy_trace(&mut state, *start_row..*end_row);
-        } else {
-            // perform the hash.
-            self.trace.append_permutation(&mut state, LINEAR_HASH, RETURN_HASH);
-
-            self.insert_to_memoized_trace_map(addr, expected_hash);
-        };
-
-        let result = get_digest(&state);
-
+        self.insert_to_memoized_trace_map(addr, expected_hash);
+        let result = get_digest(&permuted);
         (addr, result)
     }
 
-    /// Computes a sequential hash of all operation batches in the list and returns the result. It
-    /// also records the execution trace of this computation.
+    /// Computes a sequential hash of all operation batches and returns the result.
     ///
-    /// The returned tuple also contains the row address of the execution trace at which the hash
-    /// computation started.
+    /// Returns (addr, digest).
     pub fn hash_basic_block(
         &mut self,
         op_batches: &[OpBatch],
         expected_hash: Digest,
     ) -> (Felt, Digest) {
-        const START: Selectors = LINEAR_HASH;
-        const RETURN: Selectors = RETURN_HASH;
-        // absorb selectors are the same as linear hash selectors, but absorb selectors are
-        // applied on the last row of a permutation cycle, while linear hash selectors are
-        // applied on the first row of a permutation cycle.
-        const ABSORB: Selectors = LINEAR_HASH;
-        // to continue linear hash we need retain the 2nd and 3rd selector flags and set the
-        // 1st flag to ZERO.
-        const CONTINUE: Selectors = [ZERO, LINEAR_HASH[1], LINEAR_HASH[2]];
+        // Check memoization
+        if let Some(memoized) = self.replay_memoized_trace(expected_hash) {
+            return memoized;
+        }
 
         let addr = self.trace.next_row_addr();
-
-        // initialize the state and absorb the first operation batch into it
-        let mut state = init_state(op_batches[0].groups(), ZERO);
-
-        // check if a span block with same hash has been encountered before in which case we can
-        // directly copy it's trace.
-        let (start_row, end_row, is_memoized) =
-            if let Some((start_row, end_row)) = self.get_memoized_trace(expected_hash) {
-                (*start_row, *end_row, true)
-            } else {
-                (0, 0, false)
-            };
+        let init_state = init_state(op_batches[0].groups(), ZERO);
 
         let num_batches = op_batches.len();
 
-        // if the span block is encountered for the first time and it's trace is not memoized,
-        // we need to build the trace from scratch.
-        if !is_memoized {
-            if num_batches == 1 {
-                // if there is only one batch to hash, we need only one permutation
-                self.trace.append_permutation(&mut state, START, RETURN);
-            } else {
-                // if there is more than one batch, we need to process the first, the last, and the
-                // middle permutations a bit differently. Specifically, selector flags for the
-                // permutations need to be set as follows:
-                // - first permutation: init linear hash on the first row, and absorb the next
-                //   operation batch on the last row.
-                // - middle permutations: continue hashing on the first row, and absorb the next
-                //   operation batch on the last row.
-                // - last permutation: continue hashing on the first row, and return the result on
-                //   the last row.
-                self.trace.append_permutation(&mut state, START, ABSORB);
-
-                for batch in op_batches.iter().take(num_batches - 1).skip(1) {
-                    absorb_into_state(&mut state, batch.groups());
-
-                    self.trace.append_permutation(&mut state, CONTINUE, ABSORB);
-                }
-
-                absorb_into_state(&mut state, op_batches[num_batches - 1].groups());
-
-                self.trace.append_permutation(&mut state, CONTINUE, RETURN);
-            }
+        if num_batches == 1 {
+            // Single batch: boundary on both input and output
+            let permuted = self.append_controller_permutation(
+                LINEAR_HASH,
+                RETURN_HASH,
+                init_state,
+                ZERO,
+                ZERO,
+                ONE,
+                ONE,
+                ZERO,
+                ZERO,
+            );
             self.insert_to_memoized_trace_map(addr, expected_hash);
-        } else {
-            self.trace.copy_trace(&mut state, start_row..end_row);
+            let result = get_digest(&permuted);
+            return (addr, result);
         }
 
-        let result = get_digest(&state);
+        // Multiple batches:
+        // First batch: boundary input only
+        let mut state = self.append_controller_permutation(
+            LINEAR_HASH,
+            RETURN_STATE,
+            init_state,
+            ZERO,
+            ZERO,
+            ONE,
+            ZERO,
+            ZERO,
+            ZERO,
+        );
 
+        // Middle batches: no boundary flags
+        for batch in op_batches.iter().take(num_batches - 1).skip(1) {
+            absorb_into_state(&mut state, batch.groups());
+            state = self.append_controller_permutation(
+                LINEAR_HASH,
+                RETURN_STATE,
+                state,
+                ZERO,
+                ZERO,
+                ZERO,
+                ZERO,
+                ZERO,
+                ZERO,
+            );
+        }
+
+        // Last batch: boundary output only
+        absorb_into_state(&mut state, op_batches[num_batches - 1].groups());
+        let permuted = self.append_controller_permutation(
+            LINEAR_HASH,
+            RETURN_HASH,
+            state,
+            ZERO,
+            ZERO,
+            ZERO,
+            ONE,
+            ZERO,
+            ZERO,
+        );
+
+        self.insert_to_memoized_trace_map(addr, expected_hash);
+        let result = get_digest(&permuted);
         (addr, result)
     }
 
     /// Performs Merkle path verification computation and records its execution trace.
     ///
-    /// The computation consists of computing a Merkle root of the specified path for a node with
-    /// the specified value, located at the specified index.
-    ///
-    /// The returned tuple contains the root of the Merkle path and the row address of the
-    /// execution trace at which the computation started.
-    ///
-    /// # Panics
-    /// Panics if:
-    /// - The provided path does not contain any nodes.
-    /// - The provided index is out of range for the specified path.
+    /// Returns (addr, root).
     pub fn build_merkle_root(
         &mut self,
         value: Digest,
@@ -210,26 +269,18 @@ impl Hasher {
         index: Felt,
     ) -> (Felt, Digest) {
         let addr = self.trace.next_row_addr();
-
         let root = self.verify_merkle_path(
             value,
             path,
             index.as_canonical_u64(),
             MerklePathContext::MpVerify,
         );
-
         (addr, root)
     }
 
     /// Performs Merkle root update computation and records its execution trace.
     ///
-    /// The computation consists of two Merkle path verifications, one for the old value of the
-    /// node (value before the update), and another for the new value (value after the update).
-    ///
-    /// # Panics
-    /// Panics if:
-    /// - The provided path does not contain any nodes.
-    /// - The provided index is out of range for the specified path.
+    /// Increments the mrupdate_id counter. Both MV and MU legs share the same id.
     pub fn update_merkle_root(
         &mut self,
         old_value: Digest,
@@ -237,6 +288,9 @@ impl Hasher {
         path: &MerklePath,
         index: Felt,
     ) -> MerkleRootUpdate {
+        // Increment the mrupdate_id for this update operation
+        self.mrupdate_id += ONE;
+
         let address = self.trace.next_row_addr();
         let index = index.as_canonical_u64();
 
@@ -251,24 +305,110 @@ impl Hasher {
     // TRACE GENERATION
     // --------------------------------------------------------------------------------------------
 
-    /// Fills the provided trace fragment with trace data from this hasher trace instance. This
-    /// also returns the trace builder for hasher-related auxiliary trace columns.
-    pub(super) fn fill_trace(self, trace: &mut TraceFragment) {
-        self.trace.fill_trace(trace)
+    /// Finalizes and fills the provided trace fragment with data from this hasher trace.
+    ///
+    /// Finalization pads the controller region and appends one 16-row permutation cycle
+    /// per unique input state. This is the only place where the perm segment is materialized.
+    pub(super) fn fill_trace(mut self, trace: &mut TraceFragment) {
+        if !self.finalized {
+            let estimated_len = self.estimate_trace_len();
+            self.finalize_trace();
+            debug_assert_eq!(
+                estimated_len,
+                self.trace.trace_len(),
+                "hasher trace length estimate ({}) diverged from actual ({})",
+                estimated_len,
+                self.trace.trace_len(),
+            );
+        }
+        self.trace.fill_trace(trace);
     }
 
-    // HELPER METHODS
+    /// Finalizes the trace by padding the controller region and appending the permutation segment.
+    fn finalize_trace(&mut self) {
+        if self.finalized {
+            return;
+        }
+
+        // Pad controller region to a multiple of HASH_CYCLE_LEN.
+        // Padding rows must carry the current mrupdate_id to satisfy the AIR progression
+        // constraint (mrupdate_id is constant on non-MV-start transitions).
+        self.trace.pad_to_cycle_boundary(self.mrupdate_id);
+
+        // Append one 16-row permutation cycle per unique input state
+        for (key, multiplicity) in core::mem::take(&mut self.perm_request_map) {
+            let state = key_to_state(&key);
+            self.trace.append_permutation_cycle(&state, Felt::new_unchecked(multiplicity));
+        }
+
+        self.finalized = true;
+    }
+
+    // CORE HELPER: CONTROLLER PERMUTATION
     // --------------------------------------------------------------------------------------------
 
-    /// Computes a root of the provided Merkle path in the specified context. The path is assumed
-    /// to be for a node with the specified value at the specified index.
+    /// Appends a controller (input, output) pair and records the permutation request.
     ///
-    /// This also records the execution trace of the Merkle path computation.
+    /// Writes two rows to the controller region:
+    /// - Input row: `init_selectors` (s0=1), pre-permutation `state`, `input_node_index`,
+    ///   `is_boundary_input`, `input_direction_bit`.
+    /// - Output row: `final_selectors` (s0=0), post-permutation state, `output_node_index`,
+    ///   `is_boundary_output`, `output_direction_bit`.
     ///
-    /// # Panics
-    /// Panics if:
-    /// - The provided path does not contain any nodes.
-    /// - The provided index is out of range for the specified path.
+    /// Both rows carry the current `mrupdate_id` for sibling table domain separation.
+    /// The pre-permutation state is also recorded in `perm_request_map` for deduplication.
+    ///
+    /// For Merkle operations, `input_node_index` is the full tree index and
+    /// `output_node_index` is the shifted index (input >> 1). For non-Merkle operations,
+    /// both should be ZERO.
+    ///
+    /// Returns the post-permutation state.
+    fn append_controller_permutation(
+        &mut self,
+        init_selectors: Selectors,
+        final_selectors: Selectors,
+        state: HasherState,
+        input_node_index: Felt,
+        output_node_index: Felt,
+        is_boundary_input: Felt,
+        is_boundary_output: Felt,
+        input_direction_bit: Felt,
+        output_direction_bit: Felt,
+    ) -> HasherState {
+        // Append input controller row
+        self.trace.append_controller_row(
+            init_selectors,
+            &state,
+            input_node_index,
+            self.mrupdate_id,
+            is_boundary_input,
+            input_direction_bit,
+        );
+
+        // Apply the permutation
+        let mut permuted = state;
+        apply_permutation(&mut permuted);
+
+        // Append output controller row
+        self.trace.append_controller_row(
+            final_selectors,
+            &permuted,
+            output_node_index,
+            self.mrupdate_id,
+            is_boundary_output,
+            output_direction_bit,
+        );
+
+        // Record this permutation request for deduplication
+        self.record_perm_request(&state);
+
+        permuted
+    }
+
+    // MERKLE PATH HELPERS
+    // --------------------------------------------------------------------------------------------
+
+    /// Computes a root of the provided Merkle path in the specified context.
     fn verify_merkle_path(
         &mut self,
         value: Digest,
@@ -281,91 +421,107 @@ impl Hasher {
             index.checked_shr(path.len() as u32).unwrap_or(0) == 0,
             "invalid index for the path"
         );
+
+        let main_selectors = context.main_selectors();
+        let depth = path.len();
+
         let mut root = value;
 
-        // determine selectors for the specified context
-        let main_selectors = context.main_selectors();
-        let part_selectors = context.part_selectors();
+        for (i, &sibling) in path.iter().enumerate() {
+            let is_first = i == 0;
+            let is_last = i == depth - 1;
 
-        if path.len() == 1 {
-            // handle path of length 1 separately because pattern for init and final selectors
-            // is different from other cases
-            self.verify_mp_leg(root, path[0], &mut index, main_selectors, RETURN_HASH)
-        } else {
-            // process the first node of the path; for this node, init and final selectors are
-            // the same
-            let sibling = path[0];
-            root = self.verify_mp_leg(root, sibling, &mut index, main_selectors, main_selectors);
+            // Determine boundary flags
+            let is_boundary_input = if is_first { ONE } else { ZERO };
+            let is_boundary_output = if is_last { ONE } else { ZERO };
 
-            // process all other nodes, except for the last one
-            for &sibling in &path[1..path.len() - 1] {
-                root =
-                    self.verify_mp_leg(root, sibling, &mut index, part_selectors, main_selectors);
-            }
+            // Direction bit for this step: LSB of the current index
+            let b_i = index & 1;
+            let state = build_merge_state(&root, &sibling, b_i);
 
-            // process the last node
-            let sibling = path[path.len() - 1];
-            self.verify_mp_leg(root, sibling, &mut index, part_selectors, RETURN_HASH)
+            // Input row carries the full index; output row carries the shifted index.
+            let input_node_idx = Felt::new_unchecked(index);
+            let output_node_idx = Felt::new_unchecked(index >> 1);
+
+            // Direction bit for the NEXT step (forward propagation for routing constraint).
+            // On the last step there is no next step, so direction_bit = 0.
+            let b_next = if is_last { 0 } else { (index >> 1) & 1 };
+
+            let final_selectors = if is_last { RETURN_HASH } else { RETURN_STATE };
+
+            // Append controller pair with direction bits
+            let permuted = self.append_controller_permutation(
+                main_selectors,
+                final_selectors,
+                state,
+                input_node_idx,
+                output_node_idx,
+                is_boundary_input,
+                is_boundary_output,
+                Felt::new_unchecked(b_i), // input direction_bit: current step's bit
+                Felt::new_unchecked(b_next), // output direction_bit: next step's bit (propagated)
+            );
+
+            root = get_digest(&permuted);
+            index >>= 1;
         }
+
+        root
     }
 
-    /// Verifies a single leg of a Merkle path.
-    ///
-    /// This function does the following:
-    /// - Builds the initial hasher state based on the least significant bit of the index.
-    /// - Applies a permutation to this state and records the resulting trace.
-    /// - Returns the result of the permutation and updates the index by removing its least
-    ///   significant bit.
-    fn verify_mp_leg(
-        &mut self,
-        root: Digest,
-        sibling: Digest,
-        index: &mut u64,
-        init_selectors: Selectors,
-        final_selectors: Selectors,
-    ) -> Digest {
-        // build the hasher state based on the value of the least significant bit of the index
-        let index_bit = *index & 1;
-        let mut state = build_merge_state(&root, &sibling, index_bit);
+    // PERMUTATION DEDUPLICATION
+    // --------------------------------------------------------------------------------------------
 
-        // determine values for the node index column for this permutation. if the first selector
-        // of init_selectors is not ZERO (i.e., we are processing the first leg of the Merkle
-        // path), the index for the first row is different from the index for the other rows;
-        // otherwise, indexes are the same.
-        let (init_index, rest_index) = if init_selectors[0] == ZERO {
-            (Felt::new(*index >> 1), Felt::new(*index >> 1))
-        } else {
-            (Felt::new(*index), Felt::new(*index >> 1))
+    /// Records a permutation request for the given input state. If the same state was already
+    /// seen, increments the multiplicity counter.
+    fn record_perm_request(&mut self, state: &HasherState) {
+        let key = state_to_key(state);
+        *self.perm_request_map.entry(key).or_insert(0) += 1;
+    }
+
+    // MEMOIZATION
+    // --------------------------------------------------------------------------------------------
+
+    /// Attempts to replay a memoized controller trace for the given expected hash.
+    ///
+    /// If a memoized trace exists, copies it, re-registers permutation requests from copied
+    /// input rows, and returns `Some((addr, digest))`. Otherwise returns `None`.
+    fn replay_memoized_trace(&mut self, expected_hash: Digest) -> Option<(Felt, Digest)> {
+        let (start_row, end_row) = match self.get_memoized_trace(expected_hash) {
+            Some(&(s, e)) => (s, e),
+            None => return None,
         };
 
-        // apply the permutation to the state and record its trace
-        self.trace.append_permutation_with_index(
-            &mut state,
-            init_selectors,
-            final_selectors,
-            init_index,
-            rest_index,
-        );
+        let addr = self.trace.next_row_addr();
+        let mut state = [ZERO; STATE_WIDTH];
+        let append_start = self.trace.trace_len();
+        self.trace.copy_trace(&mut state, start_row..end_row);
+        let append_end = self.trace.trace_len();
 
-        // remove the least significant bit from the index and return hash result
-        *index >>= 1;
+        // Ensure mrupdate_id is consistent with the current counter for all copied rows.
+        self.trace
+            .overwrite_mrupdate_id_in_range(append_start..append_end, self.mrupdate_id);
 
-        get_digest(&state)
+        // Re-register permutation requests from copied input rows
+        let input_states = self.trace.input_states_in_range(append_start..append_end);
+        for input_state in input_states {
+            self.record_perm_request(&input_state);
+        }
+
+        let result = get_digest(&state);
+        Some((addr, result))
     }
 
-    /// Checks if a trace for a program block already exists and returns the start and end rows
-    /// of the memoized trace. Returns None otherwise.
+    /// Returns the start and end rows of a memoized block trace, if it exists.
     fn get_memoized_trace(&self, hash: Digest) -> Option<&(usize, usize)> {
-        let key: [u8; 32] = hash.into();
-        self.memoized_trace_map.get(&key)
+        self.memoized_trace_map.get(&digest_to_key(hash))
     }
 
-    /// Inserts start and end rows of trace for a program block to the memoized_trace_map.
+    /// Records the start and end rows of a block's controller trace for memoization.
     fn insert_to_memoized_trace_map(&mut self, addr: Felt, hash: Digest) {
-        let key: [u8; 32] = hash.into();
         let start_row = addr.as_canonical_u64() as usize - 1;
         let end_row = self.trace.next_row_addr().as_canonical_u64() as usize - 1;
-        self.memoized_trace_map.insert(key, (start_row, end_row));
+        self.memoized_trace_map.insert(digest_to_key(hash), (start_row, end_row));
     }
 }
 
@@ -387,19 +543,12 @@ enum MerklePathContext {
 
 impl MerklePathContext {
     /// Returns selector values for this context.
-    pub fn main_selectors(&self) -> Selectors {
+    pub fn main_selectors(self) -> Selectors {
         match self {
             Self::MpVerify => MP_VERIFY,
             Self::MrUpdateOld => MR_UPDATE_OLD,
             Self::MrUpdateNew => MR_UPDATE_NEW,
         }
-    }
-
-    /// Returns partial selector values for this context. Partial selector values are derived
-    /// from selector values by replacing the first selector with ZERO.
-    pub fn part_selectors(&self) -> Selectors {
-        let selectors = self.main_selectors();
-        [ZERO, selectors[1], selectors[2]]
     }
 }
 
@@ -407,9 +556,6 @@ impl MerklePathContext {
 // ================================================================================================
 
 /// Combines two words into a hasher state for Merkle path computation.
-///
-/// If index_bit = 0, the words are combined in the order (a, b), if index_bit = 1, the words are
-/// combined in the order (b, a), otherwise, the function panics.
 #[inline(always)]
 fn build_merge_state(a: &Digest, b: &Digest, index_bit: u64) -> HasherState {
     match index_bit {
@@ -419,18 +565,12 @@ fn build_merge_state(a: &Digest, b: &Digest, index_bit: u64) -> HasherState {
     }
 }
 
-// TODO: Move these to another file.
-
 // HASHER STATE MUTATORS
 // ================================================================================================
 
-/// Initializes hasher state with the first 8 elements to be absorbed. In accordance with the
-/// Poseidon2 padding rule, the first capacity element is set with the provided padding flag, which
-/// is assumed to be ZERO or ONE, depending on whether the number of elements to be absorbed is a
-/// multiple of the rate or not. The remaining elements in the capacity portion of the state are set
-/// to ZERO.
+/// Initializes hasher state with the first 8 elements to be absorbed.
 ///
-/// State layout: [R1, R2, CAP] where:
+/// State layout: [RATE0, RATE1, CAP] where:
 /// - state[0..8] = init_values (rate)
 /// - state[8..12] = [padding_flag, ZERO, ZERO, ZERO] (capacity)
 #[inline(always)]
@@ -439,43 +579,19 @@ pub fn init_state(init_values: &[Felt; RATE_LEN], padding_flag: Felt) -> [Felt; 
         padding_flag == ZERO || padding_flag == ONE,
         "first capacity element must be 0 or 1"
     );
-    [
-        init_values[0],
-        init_values[1],
-        init_values[2],
-        init_values[3],
-        init_values[4],
-        init_values[5],
-        init_values[6],
-        init_values[7],
-        padding_flag,
-        ZERO,
-        ZERO,
-        ZERO,
-    ]
+    let mut state = [ZERO; STATE_WIDTH];
+    state[..RATE_LEN].copy_from_slice(init_values);
+    state[RATE_LEN] = padding_flag;
+    state
 }
 
-/// Initializes hasher state with the elements from the provided words. Because the length of the
-/// input is a multiple of the rate, all capacity elements are initialized to zero, as specified by
-/// the Poseidon2 padding rule.
-///
-/// State layout: [RATE0, RATE1, CAP] where:
-/// - state[0..4] = w1 (first rate word, also digest location)
-/// - state[4..8] = w2 (second rate word)
-/// - state[8..12] = capacity
+/// Initializes hasher state from two words with zero capacity.
 #[inline(always)]
 pub fn init_state_from_words(w1: &Digest, w2: &Digest) -> [Felt; STATE_WIDTH] {
     init_state_from_words_with_domain(w1, w2, ZERO)
 }
 
-/// Initializes hasher state with elements from the provided words. Sets the second element of the
-/// capacity register to the provided domain. All other elements of the capacity register are set
-/// to 0.
-///
-/// State layout: [RATE0, RATE1, CAP] where:
-/// - state[0..4] = w1 (first rate word, also digest location)
-/// - state[4..8] = w2 (second rate word)
-/// - state[8..12] = [ZERO, domain, ZERO, ZERO] (capacity)
+/// Initializes hasher state from two words with a domain value in capacity[1].
 #[inline(always)]
 pub fn init_state_from_words_with_domain(
     w1: &Digest,
@@ -485,23 +601,13 @@ pub fn init_state_from_words_with_domain(
     [w1[0], w1[1], w1[2], w1[3], w2[0], w2[1], w2[2], w2[3], ZERO, domain, ZERO, ZERO]
 }
 
-/// Absorbs the specified values into the provided state by overwriting the corresponding elements
-/// in the rate portion of the state.
-///
-/// State layout: rate is at state[0..8]
+/// Absorbs values into the rate portion of the state.
 #[inline(always)]
 pub fn absorb_into_state(state: &mut [Felt; STATE_WIDTH], values: &[Felt; RATE_LEN]) {
-    state[0] = values[0];
-    state[1] = values[1];
-    state[2] = values[2];
-    state[3] = values[3];
-    state[4] = values[4];
-    state[5] = values[5];
-    state[6] = values[6];
-    state[7] = values[7];
+    state[..RATE_LEN].copy_from_slice(values);
 }
 
-/// Returns elements representing the digest portion of the provided hasher's state.
+/// Returns the digest portion of the hasher state.
 pub fn get_digest(state: &[Felt; STATE_WIDTH]) -> Digest {
     state[DIGEST_RANGE].try_into().expect("failed to get digest from hasher state")
 }

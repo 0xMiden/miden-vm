@@ -85,7 +85,7 @@ impl<'a> SymbolResolver<'a> {
         context: &SymbolResolutionContext,
         target: &InvocationTarget,
     ) -> Result<SymbolResolution, LinkerError> {
-        match target {
+        let resolution = match target {
             InvocationTarget::MastRoot(mast_root) => {
                 log::debug!(target: "name-resolver::invoke", "resolving {target}");
                 self.validate_syscall_digest(context, *mast_root)?;
@@ -195,7 +195,38 @@ impl<'a> SymbolResolver<'a> {
                 // will be checked
                 resolution => Ok(resolution),
             },
+        }?;
+        self.enforce_kernel_export_syscall_only(context, target, resolution)
+    }
+
+    fn enforce_kernel_export_syscall_only(
+        &self,
+        context: &SymbolResolutionContext,
+        target: &InvocationTarget,
+        resolution: SymbolResolution,
+    ) -> Result<SymbolResolution, LinkerError> {
+        if matches!(target, InvocationTarget::MastRoot(_)) {
+            return Ok(resolution);
         }
+        if let SymbolResolution::Exact { gid, ref path } = resolution
+            && context.kind.is_some()
+            && !context.in_syscall()
+        {
+            // Root kernel attached via `with_kernel` is stored as ModuleKind::Library (MAST);
+            // `kernel_index` identifies it. AST kernel modules use ModuleKind::Kernel.
+            let target_is_kernel = self.graph.kernel_index.is_some_and(|ki| ki == gid.module)
+                || self.graph[gid.module].kind().is_kernel();
+            let caller_is_kernel = self.graph.kernel_index.is_some_and(|ki| ki == context.module)
+                || self.graph[context.module].kind().is_kernel();
+            if target_is_kernel && !caller_is_kernel {
+                return Err(LinkerError::KernelProcNotSyscall {
+                    span: context.span,
+                    source_file: self.graph.source_manager.get(context.span.source_id()).ok(),
+                    callee: path.clone().into_inner(),
+                });
+            }
+        }
+        Ok(resolution)
     }
 
     fn validate_syscall_digest(

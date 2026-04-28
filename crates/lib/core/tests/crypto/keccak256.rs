@@ -2,7 +2,8 @@
 //!
 //! Verifies that:
 //! - Raw event handlers correctly compute Keccak256 and populate advice provider
-//! - MASM wrappers correctly return commitment and digest on stack
+//! - Public MASM wrappers correctly return the digest and log deferred requests
+//! - Private implementation helpers return the expected commitment and tag
 //! - Both memory and digest merge operations work correctly
 //! - Various input sizes and edge cases are handled properly
 
@@ -74,12 +75,12 @@ fn test_keccak_handler(input_u8: &[u8]) {
 
     let test = build_debug_test!(source, &[]);
 
-    let output = test.execute().unwrap();
+    let (output, _) = test.execute_for_output().unwrap();
 
-    let advice_stack = output.advice_provider().stack();
+    let advice_stack = output.advice.stack();
     assert_eq!(advice_stack, preimage.digest().as_ref());
 
-    let deferred = output.advice_provider().precompile_requests().to_vec();
+    let deferred = output.advice.precompile_requests().to_vec();
     assert_eq!(deferred.len(), 1, "advice deferred must contain one entry");
     let precompile_data = &deferred[0];
 
@@ -98,12 +99,10 @@ fn test_keccak_hash_bytes_impl(input_u8: &[u8]) {
     let input_felts = preimage.as_felts();
     let memory_stores_source = masm_store_felts(&input_felts, INPUT_MEMORY_ADDR);
 
-    let source = format!(
-        r#"
-            use miden::core::sys
-            use miden::core::crypto::hashes::keccak256
-
-            begin
+    let source = private_proc_harness(
+        include_str!("../../asm/crypto/hashes/keccak256.masm"),
+        format!(
+            r#"
                 # Store packed u32 values in memory
                 {memory_stores_source}
 
@@ -111,19 +110,19 @@ fn test_keccak_hash_bytes_impl(input_u8: &[u8]) {
                 push.{len_bytes}.{INPUT_MEMORY_ADDR}
                 # => [ptr, len_bytes]
 
-                exec.keccak256::hash_bytes_impl
+                exec.hash_bytes_impl
                 # => [COMM, TAG, DIGEST_U32[8]]
 
                 exec.sys::truncate_stack
-            end
             "#,
+        ),
     );
 
     let test = build_debug_test!(source, &[]);
 
-    let output = test.execute().unwrap();
+    let (output, _) = test.execute_for_output().unwrap();
 
-    let stack = output.stack_outputs();
+    let stack = output.stack;
     let commitment = stack.get_word(0).unwrap();
     let tag = stack.get_word(4).unwrap();
     let precompile_commitment = PrecompileCommitment::new(tag, commitment);
@@ -134,13 +133,13 @@ fn test_keccak_hash_bytes_impl(input_u8: &[u8]) {
     let digest: [Felt; 8] = array::from_fn(|i| stack.get_element(8 + i).unwrap());
     assert_eq!(&digest, preimage.digest().as_ref(), "output digest does not match");
 
-    let deferred = output.advice_provider().precompile_requests().to_vec();
+    let deferred = output.advice.precompile_requests().to_vec();
     assert_eq!(deferred.len(), 1, "expected a single deferred request");
     assert_eq!(deferred[0].event_id(), KECCAK_HASH_BYTES_EVENT_NAME.to_event_id());
     assert_eq!(deferred[0].calldata(), preimage.as_ref());
     assert_eq!(deferred[0], preimage.into());
 
-    let advice_stack = output.advice_provider().stack();
+    let advice_stack = output.advice.stack();
     assert!(advice_stack.is_empty(), "advice stack should be empty after hash_bytes_impl");
 }
 
@@ -354,4 +353,8 @@ fn run_keccak_with_max_hash_len(
 
     processor.execute_sync(&program, &mut host)?;
     Ok(())
+}
+
+fn private_proc_harness(module_source: &str, body: impl AsRef<str>) -> String {
+    format!("{}\n\nbegin\n{}\nend", module_source.replace("pub proc", "proc"), body.as_ref())
 }

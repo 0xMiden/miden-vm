@@ -1,16 +1,18 @@
 use alloc::{sync::Arc, vec::Vec};
 
-use miden_air::trace::chiplets::hasher::{HASH_CYCLE_LEN, HASH_CYCLE_LEN_FELT, STATE_WIDTH};
+use miden_air::trace::chiplets::hasher::{
+    CONTROLLER_ROWS_PER_PERM_FELT, CONTROLLER_ROWS_PER_PERMUTATION, STATE_WIDTH,
+};
 use miden_core::{FMP_ADDR, FMP_INIT_VALUE, operations::Operation};
 
 use super::{
-    decoder::block_stack::{BlockInfo, BlockStack, BlockType, ExecutionContextInfo},
+    decoder::block_stack::{BlockInfo, BlockStack, ExecutionContextInfo},
     stack::OverflowTable,
     trace_state::{
         AceReplay, AdviceReplay, BitwiseReplay, BlockAddressReplay, BlockStackReplay,
         CoreTraceFragmentContext, CoreTraceState, DecoderState, ExecutionContextReplay,
         ExecutionContextSystemInfo, ExecutionReplay, HasherRequestReplay, HasherResponseReplay,
-        KernelReplay, MastForestResolutionReplay, MemoryReadsReplay, MemoryWritesReplay, NodeFlags,
+        KernelReplay, MastForestResolutionReplay, MemoryReadsReplay, MemoryWritesReplay,
         RangeCheckerReplay, StackOverflowReplay, StackState, SystemState,
     },
     utils::split_u32_into_u16,
@@ -42,6 +44,7 @@ struct StateSnapshot {
 // TRACE GENERATION CONTEXT
 // ================================================================================================
 
+#[derive(Debug)]
 pub struct TraceGenerationContext {
     /// The list of trace fragment contexts built during execution.
     pub core_trace_contexts: Vec<CoreTraceFragmentContext>,
@@ -233,7 +236,7 @@ impl ExecutionTracer {
         processor: &P,
         current_forest: &MastForest,
     ) {
-        let (ctx_info, block_type) = match node {
+        let ctx_info = match node {
             MastNode::Join(node) => {
                 let child1_hash = current_forest
                     .get_node_by_id(node.first())
@@ -250,7 +253,7 @@ impl ExecutionTracer {
                     node.digest(),
                 );
 
-                (None, BlockType::Join(false))
+                None
             },
             MastNode::Split(node) => {
                 let child1_hash = current_forest
@@ -268,7 +271,7 @@ impl ExecutionTracer {
                     node.digest(),
                 );
 
-                (None, BlockType::Split)
+                None
             },
             MastNode::Loop(node) => {
                 let body_hash = current_forest
@@ -283,12 +286,7 @@ impl ExecutionTracer {
                     node.digest(),
                 );
 
-                let loop_entered = {
-                    let condition = processor.stack().get(0);
-                    condition == ONE
-                };
-
-                (None, BlockType::Loop(loop_entered))
+                None
             },
             MastNode::Call(node) => {
                 let callee_hash = current_forest
@@ -303,22 +301,13 @@ impl ExecutionTracer {
                     node.digest(),
                 );
 
-                let exec_ctx = {
-                    let overflow_addr = self.overflow_table.last_update_clk_in_current_ctx();
-                    ExecutionContextInfo::new(
-                        processor.system().ctx(),
-                        processor.system().caller_hash(),
-                        processor.stack().depth(),
-                        overflow_addr,
-                    )
-                };
-                let block_type = if node.is_syscall() {
-                    BlockType::SysCall
-                } else {
-                    BlockType::Call
-                };
-
-                (Some(exec_ctx), block_type)
+                let overflow_addr = self.overflow_table.last_update_clk_in_current_ctx();
+                Some(ExecutionContextInfo::new(
+                    processor.system().ctx(),
+                    processor.system().caller_hash(),
+                    processor.stack().depth(),
+                    overflow_addr,
+                ))
             },
             MastNode::Dyn(dyn_node) => {
                 self.hasher_for_chiplet.record_hash_control_block(
@@ -329,27 +318,24 @@ impl ExecutionTracer {
                 );
 
                 if dyn_node.is_dyncall() {
-                    let exec_ctx = {
-                        let overflow_addr = self.overflow_table.last_update_clk_in_current_ctx();
-                        // Note: the stack depth to record is the `current_stack_depth - 1` due to
-                        // the semantics of DYNCALL. That is, the top of the
-                        // stack contains the memory address to where the
-                        // address to dynamically call is located. Then, the
-                        // DYNCALL operation performs a drop, and
-                        // records the stack depth after the drop as the beginning of
-                        // the new context. For more information, look at the docs for how the
-                        // constraints are designed; it's a bit tricky but it works.
-                        let stack_depth_after_drop = processor.stack().depth() - 1;
-                        ExecutionContextInfo::new(
-                            processor.system().ctx(),
-                            processor.system().caller_hash(),
-                            stack_depth_after_drop,
-                            overflow_addr,
-                        )
-                    };
-                    (Some(exec_ctx), BlockType::Dyncall)
+                    let overflow_addr = self.overflow_table.last_update_clk_in_current_ctx();
+                    // Note: the stack depth to record is the `current_stack_depth - 1` due to
+                    // the semantics of DYNCALL. That is, the top of the
+                    // stack contains the memory address to where the
+                    // address to dynamically call is located. Then, the
+                    // DYNCALL operation performs a drop, and
+                    // records the stack depth after the drop as the beginning of
+                    // the new context. For more information, look at the docs for how the
+                    // constraints are designed; it's a bit tricky but it works.
+                    let stack_depth_after_drop = processor.stack().depth() - 1;
+                    Some(ExecutionContextInfo::new(
+                        processor.system().ctx(),
+                        processor.system().caller_hash(),
+                        stack_depth_after_drop,
+                        overflow_addr,
+                    ))
                 } else {
-                    (None, BlockType::Dyn)
+                    None
                 }
             },
             MastNode::Block(_) => panic!(
@@ -361,31 +347,21 @@ impl ExecutionTracer {
         };
 
         let block_addr = self.hasher_chiplet_shim.record_hash_control_block();
-        let parent_addr = self.block_stack.push(block_addr, block_type, ctx_info);
+        let parent_addr = self.block_stack.push(block_addr, ctx_info);
         self.block_stack_replay.record_node_start_parent_addr(parent_addr);
     }
 
-    /// Records the block address and flags for an END operation based on the block being popped.
+    /// Records the block address for an END operation based on the block being popped.
     #[inline(always)]
     fn record_node_end(&mut self, block_info: &BlockInfo) {
-        let flags = NodeFlags::new(
-            block_info.is_loop_body() == ONE,
-            block_info.is_entered_loop() == ONE,
-            block_info.is_call() == ONE,
-            block_info.is_syscall() == ONE,
-        );
         let (prev_addr, prev_parent_addr) = if self.block_stack.is_empty() {
             (ZERO, ZERO)
         } else {
             let prev_block = self.block_stack.peek();
             (prev_block.addr, prev_block.parent_addr)
         };
-        self.block_stack_replay.record_node_end(
-            block_info.addr,
-            flags,
-            prev_addr,
-            prev_parent_addr,
-        );
+        self.block_stack_replay
+            .record_node_end(block_info.addr, prev_addr, prev_parent_addr);
     }
 
     /// Records the execution context system info for CALL/SYSCALL/DYNCALL operations.
@@ -546,7 +522,7 @@ impl Tracer for ExecutionTracer {
                     let block_addr =
                         self.hasher_chiplet_shim.record_hash_basic_block(basic_block_node);
                     let parent_addr =
-                        self.block_stack.push(block_addr, BlockType::BasicBlock, None);
+                        self.block_stack.push(block_addr, None);
                     self.block_stack_replay.record_node_start_parent_addr(parent_addr);
                 },
                 MastNode::External(_) => unreachable!(
@@ -554,7 +530,7 @@ impl Tracer for ExecutionTracer {
                 ),
             },
             Continuation::Respan { node_id: _, batch_index: _ } => {
-                self.block_stack.peek_mut().addr += HASH_CYCLE_LEN_FELT;
+                self.block_stack.peek_mut().addr += CONTROLLER_ROWS_PER_PERM_FELT;
             },
             Continuation::FinishLoop { node_id: _, was_entered }
                 if was_entered && processor.stack_get(0) == ONE =>
@@ -703,7 +679,7 @@ impl Tracer for ExecutionTracer {
         clk: RowIndex,
     ) {
         self.memory_reads.record_read_word(words[0], addr, ctx, clk);
-        self.memory_reads.record_read_word(words[1], addr + Felt::new(4), ctx, clk);
+        self.memory_reads.record_read_word(words[1], addr + PTR_OFFSET_WORD, ctx, clk);
     }
 
     #[inline(always)]
@@ -731,17 +707,17 @@ impl Tracer for ExecutionTracer {
     ) {
         self.memory_reads.record_read_word(plaintext[0], src_addr, ctx, clk);
         self.memory_reads
-            .record_read_word(plaintext[1], src_addr + Felt::new(4), ctx, clk);
+            .record_read_word(plaintext[1], src_addr + PTR_OFFSET_WORD, ctx, clk);
         self.memory_writes.record_write_word(ciphertext[0], dst_addr, ctx, clk);
         self.memory_writes
-            .record_write_word(ciphertext[1], dst_addr + Felt::new(4), ctx, clk);
+            .record_write_word(ciphertext[1], dst_addr + PTR_OFFSET_WORD, ctx, clk);
     }
 
     #[inline(always)]
     fn record_pipe(&mut self, words: [Word; 2], addr: Felt, ctx: ContextId, clk: RowIndex) {
         self.advice.record_pop_stack_dword(words);
         self.memory_writes.record_write_word(words[0], addr, ctx, clk);
-        self.memory_writes.record_write_word(words[1], addr + Felt::new(4), ctx, clk);
+        self.memory_writes.record_write_word(words[1], addr + PTR_OFFSET_WORD, ctx, clk);
     }
 
     #[inline(always)]
@@ -842,9 +818,8 @@ impl Tracer for ExecutionTracer {
 // HASHER CHIPLET SHIM
 // ================================================================================================
 
-/// The number of hasher rows per permutation operation. This is used to compute the address for
-/// the next operation in the hasher chiplet.
-const NUM_HASHER_ROWS_PER_PERMUTATION: u32 = HASH_CYCLE_LEN as u32;
+/// The number of controller rows per permutation request (input + output = 2), as u32.
+const NUM_HASHER_ROWS_PER_PERMUTATION: u32 = CONTROLLER_ROWS_PER_PERMUTATION as u32;
 
 /// Implements a shim for the hasher chiplet, where the responses of the hasher chiplet are emulated
 /// and recorded for later replay.

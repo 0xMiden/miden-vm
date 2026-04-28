@@ -28,7 +28,7 @@ pub const MIN_TRACE_LEN: usize = 64;
 // ------------------------------------------------------------------------------------------------
 
 //      system          decoder           stack      range checks       chiplets
-//    (6 columns)     (24 columns)    (19 columns)    (2 columns)     (20 columns)
+//    (6 columns)     (24 columns)    (19 columns)    (2 columns)     (21 columns)
 // ├───────────────┴───────────────┴───────────────┴───────────────┴─────────────────┤
 
 pub const SYS_TRACE_OFFSET: usize = 0;
@@ -114,7 +114,7 @@ pub const RANGE_CHECK_TRACE_RANGE: Range<usize> =
 
 // Chiplets trace
 pub const CHIPLETS_OFFSET: usize = RANGE_CHECK_TRACE_RANGE.end;
-pub const CHIPLETS_WIDTH: usize = 20;
+pub const CHIPLETS_WIDTH: usize = 21;
 pub const CHIPLETS_RANGE: Range<usize> = range(CHIPLETS_OFFSET, CHIPLETS_WIDTH);
 
 /// Shared chiplet selector columns at the start of the chiplets segment.
@@ -188,11 +188,11 @@ pub const MAX_MESSAGE_WIDTH: usize = 16;
 /// Bus message coefficient indices.
 ///
 /// These define the standard positions for encoding bus messages using the pattern:
-/// `alpha + sum(beta_powers\[i\] * elem\[i\])` where:
-/// - `alpha` is the randomness base (accessed directly as `.alpha`)
+/// `bus_prefix[bus] + sum(beta_powers\[i\] * elem\[i\])` where:
+/// - `bus_prefix[bus]` is the per-bus domain-separated base (see [`bus_types`])
 /// - `beta_powers\[i\] = beta^i` are the powers of beta
 ///
-/// These indices refer to positions in the `beta_powers` array, not including alpha.
+/// These indices refer to positions in the `beta_powers` array, not including the bus prefix.
 ///
 /// This layout is shared between:
 /// - AIR constraint builders (symbolic expressions): `Challenges<AB::ExprEF>`
@@ -231,4 +231,38 @@ pub mod bus_message {
     /// Second capacity element. Used for encoding operation-specific data (e.g., op_code in control
     /// block messages).
     pub const CAPACITY_DOMAIN_IDX: usize = CAPACITY_START_IDX + 1;
+}
+
+/// Bus interaction type constants for domain separation.
+///
+/// Each constant identifies a distinct bus interaction type. When encoding a message,
+/// the bus index is passed to [`Challenges::encode`] or [`Challenges::encode_sparse`],
+/// which uses `bus_prefix[bus]` as the additive base instead of bare `alpha`.
+///
+/// This ensures messages from different buses are always distinct, even if they share
+/// the same coefficient layout and labels. This is a prerequisite for a future unified bus.
+pub mod bus_types {
+    /// All chiplet interactions: hasher, bitwise, memory, ACE, kernel ROM.
+    pub const CHIPLETS_BUS: usize = 0;
+    /// Block stack table (decoder p1): tracks control flow block nesting.
+    pub const BLOCK_STACK_TABLE: usize = 1;
+    /// Block hash table (decoder p2): tracks block digest computation.
+    pub const BLOCK_HASH_TABLE: usize = 2;
+    /// Op group table (decoder p3): tracks operation batch consumption.
+    pub const OP_GROUP_TABLE: usize = 3;
+    /// Stack overflow table.
+    pub const STACK_OVERFLOW_TABLE: usize = 4;
+    /// Sibling table: shares Merkle tree sibling nodes between old/new root computations.
+    pub const SIBLING_TABLE: usize = 5;
+    /// Log-precompile transcript: tracks capacity state transitions for LOGPRECOMPILE.
+    pub const LOG_PRECOMPILE_TRANSCRIPT: usize = 6;
+    /// Range checker bus (LogUp): verifies values are in the valid range.
+    pub const RANGE_CHECK_BUS: usize = 7;
+    /// ACE wiring bus (LogUp): verifies arithmetic circuit wire connections.
+    pub const ACE_WIRING_BUS: usize = 8;
+    /// Hasher perm-link bus: links hasher controller rows to permutation segment rows on
+    /// `v_wiring`.
+    pub const HASHER_PERM_LINK: usize = 9;
+    /// Total number of distinct bus interaction types.
+    pub const NUM_BUS_TYPES: usize = 10;
 }

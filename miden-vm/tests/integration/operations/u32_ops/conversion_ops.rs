@@ -105,7 +105,7 @@ fn u32assert_fail() {
         test,
         ExecutionError::OperationError{ err: OperationError::NotU32Values{ values }, .. } if
             values.len() == 1 &&
-            values[0] == Felt::new(equal)
+            values[0] == Felt::new_unchecked(equal)
     );
 
     // --- test when a > 2^32 ---------------------------------------------------------------------
@@ -115,7 +115,7 @@ fn u32assert_fail() {
         test,
         ExecutionError::OperationError{ err: OperationError::NotU32Values{ values }, .. } if
             values.len() == 1 &&
-            values[0] == Felt::new(larger)
+            values[0] == Felt::new_unchecked(larger)
     );
 }
 
@@ -148,8 +148,8 @@ fn u32assert2_fail() {
         test,
         ExecutionError::OperationError{ err: OperationError::NotU32Values{ values }, .. } if
             values.len() == 2 &&
-            values[0] == Felt::new(value_a) &&
-            values[1] == Felt::new(value_b)
+            values[0] == Felt::new_unchecked(value_a) &&
+            values[1] == Felt::new_unchecked(value_b)
     );
 
     // -------- Case 2: a > 2^32 and b < 2^32 ---------------------------------------------------
@@ -161,7 +161,7 @@ fn u32assert2_fail() {
         test,
         ExecutionError::OperationError{ err: OperationError::NotU32Values{ values }, .. } if
             values.len() == 1 &&
-            values[0] == Felt::new(value_a)
+            values[0] == Felt::new_unchecked(value_a)
     );
 
     // --------- Case 3: a < 2^32 and b > 2^32 --------------------------------------------------
@@ -173,7 +173,7 @@ fn u32assert2_fail() {
         test,
         ExecutionError::OperationError{ err: OperationError::NotU32Values{ values }, .. } if
             values.len() == 1 &&
-            values[0] == Felt::new(value_b)
+            values[0] == Felt::new_unchecked(value_b)
     );
 }
 
@@ -203,7 +203,7 @@ fn u32assertw_fail() {
         test,
         ExecutionError::OperationError{ err: OperationError::NotU32Values{ values }, .. } if
             values.len() == 2 &&
-            values.iter().all(|v| *v == Felt::new(U32_BOUND))
+            values.iter().all(|v| *v == Felt::new_unchecked(U32_BOUND))
     );
 }
 

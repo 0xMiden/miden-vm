@@ -4,94 +4,15 @@
 //! (ADD/NEG/MUL/INV/INCR/NOT/AND/OR/EQ/EQZ/EXPACC/EXT2MUL) and u32 arithmetic ops
 //! (U32SPLIT/U32ADD/U32ADD3/U32SUB/U32MUL/U32MADD/U32DIV/U32ASSERT2).
 
+#[cfg(test)]
+mod tests;
+
 use miden_core::field::PrimeCharacteristicRing;
-use miden_crypto::stark::air::LiftedAirBuilder;
+use miden_crypto::stark::air::AirBuilder;
 
 use crate::{
-    MainTraceRow,
-    constraints::{
-        op_flags::OpFlags,
-        tagging::{
-            TagGroup, TaggingAirBuilderExt, ids::TAG_STACK_ARITH_BASE, tagged_assert_zero,
-            tagged_assert_zero_integrity,
-        },
-    },
-    trace::decoder::USER_OP_HELPERS_OFFSET,
-};
-
-// CONSTANTS
-// ================================================================================================
-
-/// Number of stack arith/u32 constraints.
-#[allow(dead_code)]
-pub const NUM_CONSTRAINTS: usize = 42;
-
-/// Base tag ID for stack arith/u32 constraints.
-const STACK_ARITH_BASE_ID: usize = TAG_STACK_ARITH_BASE;
-
-/// Tag namespaces for stack arith/u32 constraints.
-const STACK_ARITH_NAMES: [&str; NUM_CONSTRAINTS] = [
-    // ADD/NEG/MUL/INV/INCR
-    "stack.arith.add",
-    "stack.arith.neg",
-    "stack.arith.mul",
-    "stack.arith.inv",
-    "stack.arith.incr",
-    // NOT
-    "stack.arith.not",
-    "stack.arith.not",
-    // AND
-    "stack.arith.and",
-    "stack.arith.and",
-    "stack.arith.and",
-    // OR
-    "stack.arith.or",
-    "stack.arith.or",
-    "stack.arith.or",
-    // EQ
-    "stack.arith.eq",
-    "stack.arith.eq",
-    // EQZ
-    "stack.arith.eqz",
-    "stack.arith.eqz",
-    // EXPACC
-    "stack.arith.expacc",
-    "stack.arith.expacc",
-    "stack.arith.expacc",
-    "stack.arith.expacc",
-    "stack.arith.expacc",
-    // EXT2MUL
-    "stack.arith.ext2mul",
-    "stack.arith.ext2mul",
-    "stack.arith.ext2mul",
-    "stack.arith.ext2mul",
-    // U32 shared/output
-    "stack.arith.u32.shared",
-    "stack.arith.u32.output",
-    "stack.arith.u32.output",
-    // U32SPLIT/U32ADD/U32ADD3
-    "stack.arith.u32.split",
-    "stack.arith.u32.add",
-    "stack.arith.u32.add3",
-    // U32SUB
-    "stack.arith.u32.sub",
-    "stack.arith.u32.sub",
-    "stack.arith.u32.sub",
-    // U32MUL/U32MADD
-    "stack.arith.u32.mul",
-    "stack.arith.u32.madd",
-    // U32DIV
-    "stack.arith.u32.div",
-    "stack.arith.u32.div",
-    "stack.arith.u32.div",
-    // U32ASSERT2
-    "stack.arith.u32.assert2",
-    "stack.arith.u32.assert2",
-];
-
-const STACK_ARITH_TAGS: TagGroup = TagGroup {
-    base: STACK_ARITH_BASE_ID,
-    names: &STACK_ARITH_NAMES,
+    MainCols, MidenAirBuilder,
+    constraints::{constants::*, op_flags::OpFlags},
 };
 
 // ENTRY POINTS
@@ -100,35 +21,32 @@ const STACK_ARITH_TAGS: TagGroup = TagGroup {
 /// Enforces stack arith/u32 constraints.
 pub fn enforce_main<AB>(
     builder: &mut AB,
-    local: &MainTraceRow<AB::Var>,
-    next: &MainTraceRow<AB::Var>,
+    local: &MainCols<AB::Var>,
+    next: &MainCols<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
 ) where
-    AB: LiftedAirBuilder,
+    AB: MidenAirBuilder,
 {
-    let mut idx = 0usize;
+    let s0: AB::Expr = local.stack.get(0).into();
+    let s1: AB::Expr = local.stack.get(1).into();
+    let s2: AB::Expr = local.stack.get(2).into();
+    let s3: AB::Expr = local.stack.get(3).into();
 
-    let s0: AB::Expr = local.stack[0].clone().into();
-    let s1: AB::Expr = local.stack[1].clone().into();
-    let s2: AB::Expr = local.stack[2].clone().into();
-    let s3: AB::Expr = local.stack[3].clone().into();
+    let s0_next: AB::Expr = next.stack.get(0).into();
+    let s1_next: AB::Expr = next.stack.get(1).into();
+    let s2_next: AB::Expr = next.stack.get(2).into();
+    let s3_next: AB::Expr = next.stack.get(3).into();
 
-    let s0_next: AB::Expr = next.stack[0].clone().into();
-    let s1_next: AB::Expr = next.stack[1].clone().into();
-    let s2_next: AB::Expr = next.stack[2].clone().into();
-    let s3_next: AB::Expr = next.stack[3].clone().into();
-
-    // Decoder helper columns: h0..h5 are stored starting at USER_OP_HELPERS_OFFSET.
-    // These helpers are op-specific and are validated by the constraints below.
+    // Decoder helper columns: hasher_state[2..8] are user-op helpers.
     // - h0 is used as an inverse witness (EQ/EQZ) or exp_val (EXPACC).
     // - h1..h4 hold u32 limbs / range-check witnesses for u32 ops.
     // - h5 is currently unused in this module.
-    let base = USER_OP_HELPERS_OFFSET;
-    let uop_h0: AB::Expr = local.decoder[base].clone().into();
-    let uop_h1: AB::Expr = local.decoder[base + 1].clone().into();
-    let uop_h2: AB::Expr = local.decoder[base + 2].clone().into();
-    let uop_h3: AB::Expr = local.decoder[base + 3].clone().into();
-    let uop_h4: AB::Expr = local.decoder[base + 4].clone().into();
+    let [uop_h0, uop_h1, uop_h2, uop_h3, uop_h4, _] = local.decoder.user_op_helpers();
+    let uop_h0: AB::Expr = uop_h0.into();
+    let uop_h1: AB::Expr = uop_h1.into();
+    let uop_h2: AB::Expr = uop_h2.into();
+    let uop_h3: AB::Expr = uop_h3.into();
+    let uop_h4: AB::Expr = uop_h4.into();
 
     // Field ops.
     let is_add = op_flags.add();
@@ -157,63 +75,74 @@ pub fn enforce_main<AB>(
     // -------------------------------------------------------------------------
     // Field ops
     // -------------------------------------------------------------------------
-    assert_zero(builder, &mut idx, is_add * (s0_next.clone() - (s0.clone() + s1.clone())));
-    assert_zero(builder, &mut idx, is_neg * (s0_next.clone() + s0.clone()));
-    assert_zero(builder, &mut idx, is_mul * (s0_next.clone() - s0.clone() * s1.clone()));
-    assert_zero(builder, &mut idx, is_inv * (s0_next.clone() * s0.clone() - AB::Expr::ONE));
-    assert_zero(builder, &mut idx, is_incr * (s0_next.clone() - s0.clone() - AB::Expr::ONE));
 
-    assert_zero_integrity(
-        builder,
-        &mut idx,
-        is_not.clone() * (s0.clone() * (s0.clone() - AB::Expr::ONE)),
-    );
-    assert_zero(builder, &mut idx, is_not * (s0.clone() + s0_next.clone() - AB::Expr::ONE));
+    // ADD: s0' = s0 + s1
+    builder
+        .when_transition()
+        .when(is_add)
+        .assert_eq(s0_next.clone(), s0.clone() + s1.clone());
 
-    assert_zero_integrity(
-        builder,
-        &mut idx,
-        is_and.clone() * (s0.clone() * (s0.clone() - AB::Expr::ONE)),
-    );
-    assert_zero_integrity(
-        builder,
-        &mut idx,
-        is_and.clone() * (s1.clone() * (s1.clone() - AB::Expr::ONE)),
-    );
-    assert_zero(builder, &mut idx, is_and * (s0_next.clone() - s0.clone() * s1.clone()));
+    // NEG: s0' = -s0
+    builder.when_transition().when(is_neg).assert_zero(s0_next.clone() + s0.clone());
 
-    assert_zero_integrity(
-        builder,
-        &mut idx,
-        is_or.clone() * (s0.clone() * (s0.clone() - AB::Expr::ONE)),
-    );
-    assert_zero_integrity(
-        builder,
-        &mut idx,
-        is_or.clone() * (s1.clone() * (s1.clone() - AB::Expr::ONE)),
-    );
-    assert_zero(
-        builder,
-        &mut idx,
-        is_or * (s0_next.clone() - (s0.clone() + s1.clone() - s0.clone() * s1.clone())),
-    );
+    // MUL: s0' = s0 * s1
+    builder
+        .when_transition()
+        .when(is_mul)
+        .assert_eq(s0_next.clone(), s0.clone() * s1.clone());
+
+    // INV: s0' * s0 = 1
+    builder.when_transition().when(is_inv).assert_one(s0_next.clone() * s0.clone());
+
+    // INCR: s0' = s0 + 1
+    builder
+        .when_transition()
+        .when(is_incr)
+        .assert_eq(s0_next.clone(), s0.clone() + F_1);
+
+    // NOT: s0 is boolean, s0 + s0' = 1.
+    {
+        let builder = &mut builder.when(is_not);
+        builder.assert_bool(s0.clone());
+        builder.when_transition().assert_eq(s0.clone() + s0_next.clone(), F_1);
+    }
+
+    // AND: s0, s1 are boolean, s0' = s0 * s1.
+    {
+        let builder = &mut builder.when(is_and);
+        builder.assert_bool(s0.clone());
+        builder.assert_bool(s1.clone());
+        builder.when_transition().assert_eq(s0_next.clone(), s0.clone() * s1.clone());
+    }
+
+    // OR: s0, s1 are boolean, s0' = s0 + s1 - s0 * s1.
+    {
+        let builder = &mut builder.when(is_or);
+        builder.assert_bool(s0.clone());
+        builder.assert_bool(s1.clone());
+        builder
+            .when_transition()
+            .assert_eq(s0_next.clone(), s0.clone() + s1.clone() - s0.clone() * s1.clone());
+    }
 
     // EQ: if s0 != s1, h0 acts as 1/(s0 - s1) and forces s0' = 0; if equal, s0' = 1.
-    let eq_diff = s0.clone() - s1.clone();
-    assert_zero(builder, &mut idx, is_eq.clone() * (eq_diff.clone() * s0_next.clone()));
-    assert_zero(
-        builder,
-        &mut idx,
-        is_eq * (s0_next.clone() - (AB::Expr::ONE - eq_diff * uop_h0.clone())),
-    );
+    // eq_diff * s0_next and the inverse witness constraint are intrinsic (conditional inverse).
+    let eq_diff: AB::Expr = s0.clone() - s1.clone();
+    {
+        let gate = builder.is_transition() * is_eq;
+        let builder = &mut builder.when(gate);
+        builder.assert_zero(eq_diff.clone() * s0_next.clone());
+        builder.assert_eq(s0_next.clone(), AB::Expr::ONE - eq_diff * uop_h0.clone());
+    }
 
     // EQZ: if s0 != 0, h0 acts as 1/s0 and forces s0' = 0; if zero, s0' = 1.
-    assert_zero(builder, &mut idx, is_eqz.clone() * (s0.clone() * s0_next.clone()));
-    assert_zero(
-        builder,
-        &mut idx,
-        is_eqz * (s0_next.clone() - (AB::Expr::ONE - s0.clone() * uop_h0.clone())),
-    );
+    // s0 * s0_next and the inverse witness constraint are intrinsic (conditional inverse).
+    {
+        let gate = builder.is_transition() * is_eqz;
+        let builder = &mut builder.when(gate);
+        builder.assert_zero(s0.clone() * s0_next.clone());
+        builder.assert_eq(s0_next.clone(), AB::Expr::ONE - s0.clone() * uop_h0.clone());
+    }
 
     // EXPACC: exp_next = exp^2, exp_val = 1 + (exp - 1) * exp_bit, acc_next = acc * exp_val.
     let exp = s1.clone();
@@ -224,150 +153,105 @@ pub fn enforce_main<AB>(
     let exp_b = s3.clone();
     let exp_b_next = s3_next.clone();
     let exp_val = uop_h0.clone();
-    let two: AB::Expr = AB::Expr::from_u16(2);
+    // EXPACC transition: squaring, exp_val witness, accumulation, bit decomposition, and boolean
+    // check.
+    {
+        let gate = builder.is_transition() * is_expacc;
+        let builder = &mut builder.when(gate);
+        builder.assert_eq(exp_next, exp.clone() * exp.clone());
+        builder.assert_eq(exp_val.clone(), (exp - F_1) * exp_bit.clone() + F_1);
+        builder.assert_eq(acc_next, acc * exp_val);
+        builder.assert_eq(exp_b, exp_b_next * F_2 + exp_bit.clone());
+        builder.assert_bool(exp_bit);
+    }
 
-    assert_zero(builder, &mut idx, is_expacc.clone() * (exp_next - exp.clone() * exp.clone()));
-    assert_zero(
-        builder,
-        &mut idx,
-        is_expacc.clone()
-            * (exp_val.clone() - AB::Expr::ONE - (exp - AB::Expr::ONE) * exp_bit.clone()),
-    );
-    assert_zero(builder, &mut idx, is_expacc.clone() * (acc_next - acc * exp_val));
-    assert_zero(
-        builder,
-        &mut idx,
-        is_expacc.clone() * (exp_b - exp_b_next * two - exp_bit.clone()),
-    );
-    assert_zero(builder, &mut idx, is_expacc * (exp_bit.clone() * (exp_bit - AB::Expr::ONE)));
-
+    // EXT2MUL
     let ext_b0 = s0.clone();
     let ext_b1 = s1.clone();
     let ext_a0 = s2.clone();
-    let ext_a1 = s3.clone();
+    let ext_a1 = s3;
     let ext_d0 = s0_next.clone();
     let ext_d1 = s1_next.clone();
-    let ext_c0 = s2_next.clone();
-    let ext_c1 = s3_next.clone();
+    let ext_c0 = s2_next;
+    let ext_c1 = s3_next;
     let ext_a0_b0 = ext_a0.clone() * ext_b0.clone();
     let ext_a1_b1 = ext_a1.clone() * ext_b1.clone();
 
-    let seven: AB::Expr = AB::Expr::from_u16(7);
-    assert_zero(builder, &mut idx, is_ext2mul.clone() * (ext_d0 - ext_b0.clone()));
-    assert_zero(builder, &mut idx, is_ext2mul.clone() * (ext_d1 - ext_b1.clone()));
-    assert_zero(
-        builder,
-        &mut idx,
-        is_ext2mul.clone() * (ext_c0 - (ext_a0_b0.clone() + seven.clone() * ext_a1_b1.clone())),
-    );
-    assert_zero(
-        builder,
-        &mut idx,
-        is_ext2mul * (ext_c1 - ((ext_a0 + ext_a1) * (ext_b0 + ext_b1) - ext_a0_b0 - ext_a1_b1)),
-    );
+    // EXT2MUL transition: quadratic extension multiplication producing (c0, c1) from (a, b).
+    {
+        let gate = builder.is_transition() * is_ext2mul;
+        let builder = &mut builder.when(gate);
+        builder.assert_eq(ext_d0, ext_b0.clone());
+        builder.assert_eq(ext_d1, ext_b1.clone());
+        builder.assert_eq(ext_c0, ext_a0_b0.clone() + ext_a1_b1.clone() * F_7);
+        builder.assert_eq(ext_c1, (ext_a0 + ext_a1) * (ext_b0 + ext_b1) - ext_a0_b0 - ext_a1_b1);
+    }
 
     // -------------------------------------------------------------------------
     // U32 ops
     // -------------------------------------------------------------------------
-    let two_pow_16: AB::Expr = AB::Expr::from_u64(1u64 << 16);
-    let two_pow_32: AB::Expr = AB::Expr::from_u64(1u64 << 32);
-    let two_pow_48: AB::Expr = AB::Expr::from_u64(1u64 << 48);
-    let two_pow_32_minus_one: AB::Expr = AB::Expr::from_u64((1u64 << 32) - 1);
-
     // U32 limbs: v_lo = h1*2^16 + h0, v_hi = h3*2^16 + h2.
-    let u32_v_lo = uop_h1.clone() * two_pow_16.clone() + uop_h0.clone();
-    let u32_v_hi = uop_h3.clone() * two_pow_16 + uop_h2.clone();
-    let u32_v48 = uop_h2.clone() * two_pow_32.clone() + u32_v_lo.clone();
-    let u32_v64 = uop_h3.clone() * two_pow_48 + u32_v48.clone();
+    let u32_v_lo = uop_h1 * TWO_POW_16 + uop_h0;
+    let u32_v_hi = uop_h3.clone() * TWO_POW_16 + uop_h2.clone();
+    let u32_v48 = uop_h2 * TWO_POW_32 + u32_v_lo.clone();
+    let u32_v64 = uop_h3.clone() * TWO_POW_48 + u32_v48.clone();
 
     // Element validity check for u32split/u32mul/u32madd.
+    // u32_v_hi_comp * u32_v_lo is intrinsic (symmetry test: setting either factor to 0 hides a
+    // case).
     let u32_split_mul_madd = is_u32split.clone() + is_u32mul.clone() + is_u32madd.clone();
-    let u32_v_hi_comp = AB::Expr::ONE - uop_h4.clone() * (two_pow_32_minus_one - u32_v_hi.clone());
-    assert_zero_integrity(
-        builder,
-        &mut idx,
-        u32_split_mul_madd * (u32_v_hi_comp * u32_v_lo.clone()),
-    );
+    let u32_v_hi_comp =
+        AB::Expr::ONE - uop_h4 * (AB::Expr::from(TWO_POW_32_MINUS_1) - u32_v_hi.clone());
+    builder.when(u32_split_mul_madd).assert_zero(u32_v_hi_comp * u32_v_lo.clone());
 
+    // U32 ops with two outputs: s0' = v_lo, s1' = v_hi.
     let u32_two_outputs = is_u32split.clone()
         + is_u32add.clone()
         + is_u32add3.clone()
         + is_u32mul.clone()
         + is_u32madd.clone();
-    assert_zero(
-        builder,
-        &mut idx,
-        u32_two_outputs.clone() * (s0_next.clone() - u32_v_lo.clone()),
-    );
-    assert_zero(builder, &mut idx, u32_two_outputs * (s1_next.clone() - u32_v_hi.clone()));
+    {
+        let gate = builder.is_transition() * u32_two_outputs;
+        let builder = &mut builder.when(gate);
+        builder.assert_eq(s0_next.clone(), u32_v_lo.clone());
+        builder.assert_eq(s1_next.clone(), u32_v_hi.clone());
+    }
 
-    assert_zero_integrity(builder, &mut idx, is_u32split * (s0.clone() - u32_v64.clone()));
-    assert_zero_integrity(
-        builder,
-        &mut idx,
-        is_u32add * (s0.clone() + s1.clone() - u32_v48.clone()),
-    );
-    assert_zero_integrity(
-        builder,
-        &mut idx,
-        is_u32add3 * (s0.clone() + s1.clone() + s2.clone() - u32_v48.clone()),
-    );
+    builder.when(is_u32split).assert_eq(s0.clone(), u32_v64.clone());
+    builder
+        .when(is_u32add.clone())
+        .assert_eq(s0.clone() + s1.clone(), u32_v48.clone());
+    builder
+        .when(is_u32add3.clone())
+        .assert_eq(s0.clone() + s1.clone() + s2.clone(), u32_v48);
+    builder.when(is_u32add + is_u32add3).assert_zero(uop_h3);
 
-    assert_zero(
-        builder,
-        &mut idx,
-        is_u32sub.clone()
-            * (s1.clone() - (s0.clone() + s1_next.clone() - s0_next.clone() * two_pow_32.clone())),
-    );
-    assert_zero(
-        builder,
-        &mut idx,
-        is_u32sub.clone() * (s0_next.clone() * (s0_next.clone() - AB::Expr::ONE)),
-    );
-    assert_zero(builder, &mut idx, is_u32sub * (s1_next.clone() - u32_v_lo.clone()));
+    // U32SUB: s1 = s0 + s1' - s0' * 2^32, s0' is boolean (borrow), s1' = v_lo.
+    {
+        let gate = builder.is_transition() * is_u32sub;
+        let builder = &mut builder.when(gate);
+        builder.assert_eq(s1.clone(), s0.clone() + s1_next.clone() - s0_next.clone() * TWO_POW_32);
+        builder.assert_bool(s0_next.clone());
+        builder.assert_eq(s1_next.clone(), u32_v_lo.clone());
+    }
 
-    assert_zero_integrity(
-        builder,
-        &mut idx,
-        is_u32mul * (s0.clone() * s1.clone() - u32_v64.clone()),
-    );
-    assert_zero_integrity(
-        builder,
-        &mut idx,
-        is_u32madd * (s0.clone() * s1.clone() + s2 - u32_v64.clone()),
-    );
+    builder.when(is_u32mul).assert_eq(s0.clone() * s1.clone(), u32_v64.clone());
+    builder.when(is_u32madd).assert_eq(s0.clone() * s1.clone() + s2, u32_v64);
 
-    assert_zero(
-        builder,
-        &mut idx,
-        is_u32div.clone() * (s1.clone() - (s0.clone() * s1_next.clone() + s0_next.clone())),
-    );
-    assert_zero(
-        builder,
-        &mut idx,
-        is_u32div.clone() * (s1.clone() - s1_next.clone() - u32_v_lo.clone()),
-    );
-    assert_zero(
-        builder,
-        &mut idx,
-        is_u32div * (s0.clone() - s0_next.clone() - (u32_v_hi.clone() + AB::Expr::ONE)),
-    );
+    // U32DIV: s1 = s0 * s1' + s0', range checks on remainder and quotient bounds.
+    {
+        let gate = builder.is_transition() * is_u32div;
+        let builder = &mut builder.when(gate);
+        builder.assert_eq(s1.clone(), s0.clone() * s1_next.clone() + s0_next.clone());
+        builder.assert_eq(s1 - s1_next.clone(), u32_v_lo.clone());
+        builder.assert_eq(s0 - s0_next.clone(), u32_v_hi.clone() + F_1);
+    }
 
-    assert_zero(builder, &mut idx, is_u32assert2.clone() * (s0_next - u32_v_hi.clone()));
-    assert_zero(builder, &mut idx, is_u32assert2 * (s1_next - u32_v_lo));
-}
-
-// CONSTRAINT HELPERS
-// ================================================================================================
-
-fn assert_zero<AB: TaggingAirBuilderExt>(builder: &mut AB, idx: &mut usize, expr: AB::Expr) {
-    tagged_assert_zero(builder, &STACK_ARITH_TAGS, idx, expr);
-}
-
-fn assert_zero_integrity<AB: TaggingAirBuilderExt>(
-    builder: &mut AB,
-    idx: &mut usize,
-    expr: AB::Expr,
-) {
-    tagged_assert_zero_integrity(builder, &STACK_ARITH_TAGS, idx, expr);
+    // U32ASSERT2: verifies both stack elements are valid u32 values.
+    {
+        let gate = builder.is_transition() * is_u32assert2;
+        let builder = &mut builder.when(gate);
+        builder.assert_eq(s0_next, u32_v_hi);
+        builder.assert_eq(s1_next, u32_v_lo);
+    }
 }

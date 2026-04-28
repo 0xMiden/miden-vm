@@ -15,7 +15,7 @@ use miden_core::{WORD_SIZE, field::Field};
 
 use super::{
     AUX_TRACE_RAND_CHALLENGES, CHIPLETS_BUS_AUX_TRACE_OFFSET, ExecutionTrace, Felt, HASH_CYCLE_LEN,
-    LAST_CYCLE_ROW, ONE, Operation, Word, ZERO, build_trace_from_ops, rand_array,
+    ONE, Operation, Word, ZERO, build_trace_from_ops, rand_array,
 };
 
 /// Tests the generation of the `b_chip` bus column when only memory lookups are included. It
@@ -29,12 +29,11 @@ use super::{
 /// for this test we set those values explicitly, enforcing only that the same initial and final
 /// values are requested & provided.
 #[test]
-#[expect(clippy::needless_range_loop)]
 fn b_chip_trace_mem() {
-    const FOUR: Felt = Felt::new(4);
+    const FOUR: Felt = Felt::new_unchecked(4);
 
     let stack = [0, 1, 2, 3, 4];
-    let word = [ONE, Felt::new(2), Felt::new(3), Felt::new(4)];
+    let word = [ONE, Felt::new_unchecked(2), Felt::new_unchecked(3), Felt::new_unchecked(4)];
     let operations = vec![
         Operation::MStoreW, // store [1, 2, 3, 4]
         Operation::Drop,    // clear the stack
@@ -63,9 +62,11 @@ fn b_chip_trace_mem() {
     // hash chiplet, so the trace should still equal one.
     assert_eq!(ONE, b_chip[1]);
 
-    // The first memory request from the stack is sent when the `MStoreW` operation is executed, at
-    // cycle 1, so the request is included in the next row. (The trace begins by executing `span`).
-    let value = build_expected_bus_word_msg(
+    // At row 1, two things happen simultaneously:
+    // - The hasher provides the HOUT response (span hash result) at controller output row 1
+    // - The stack sends the MStoreW memory write request (user op at cycle 1)
+    // Extract the HOUT response as a black box.
+    let mstore_value = build_expected_bus_word_msg(
         &challenges,
         MEMORY_WRITE_WORD_LABEL,
         ZERO,
@@ -73,7 +74,9 @@ fn b_chip_trace_mem() {
         ONE,
         word.into(),
     );
-    let mut expected = value.inverse();
+    // b_chip[2] = ONE * hout_response * mstore_value.inverse()
+    let hout_response = b_chip[2] * mstore_value;
+    let mut expected = hout_response * mstore_value.inverse();
     assert_eq!(expected, b_chip[2]);
 
     // Nothing changes after user operations that don't make requests to the Chiplets.
@@ -88,7 +91,7 @@ fn b_chip_trace_mem() {
         MEMORY_READ_ELEMENT_LABEL,
         ZERO,
         ZERO,
-        Felt::new(6),
+        Felt::new_unchecked(6),
         word[0],
     );
     expected *= value.inverse();
@@ -101,7 +104,7 @@ fn b_chip_trace_mem() {
         MEMORY_READ_WORD_LABEL,
         ZERO,
         ZERO,
-        Felt::new(8),
+        Felt::new_unchecked(8),
         word.into(),
     );
     expected *= value.inverse();
@@ -116,7 +119,7 @@ fn b_chip_trace_mem() {
         MEMORY_WRITE_ELEMENT_LABEL,
         ZERO,
         FOUR,
-        Felt::new(11),
+        Felt::new_unchecked(11),
         ONE,
     );
     expected *= value.inverse();
@@ -132,37 +135,37 @@ fn b_chip_trace_mem() {
         MEMORY_READ_WORD_LABEL,
         ZERO,
         ZERO,
-        Felt::new(13),
+        Felt::new_unchecked(13),
         word.into(),
     );
     let value2 = build_expected_bus_word_msg(
         &challenges,
         MEMORY_READ_WORD_LABEL,
         ZERO,
-        Felt::new(4),
-        Felt::new(13),
+        Felt::new_unchecked(4),
+        Felt::new_unchecked(13),
         [ONE, ZERO, ZERO, ZERO].into(),
     );
     expected *= (value1 * value2).inverse();
     assert_eq!(expected, b_chip[14]);
 
-    // At cycle 14 the decoder requests the span hash. Capture the multiplicand; the hasher responds
-    // at the end of its cycle (row HASH_CYCLE_LEN).
+    // At cycle 14 the decoder requests the span hash result (END). In the controller/perm split,
+    // the hasher already provided the HOUT response at row 1. The END request should cancel with
+    // it. We capture the multiplicand as a black box.
     assert_ne!(expected, b_chip[15]);
-    let span_request_mult = b_chip[15] * expected.inverse();
+    let span_end_mult = b_chip[15] * expected.inverse();
     expected = b_chip[15];
 
-    // Nothing changes until the hasher provides the span hash result at the end of the hash cycle.
-    for row in 16..HASH_CYCLE_LEN {
+    // Verify the HOUT response and END request cancel.
+    assert_eq!(hout_response * span_end_mult, ONE);
+
+    // Nothing changes until the memory segment starts. The hasher contributes 32 total rows:
+    // 16 rows for the padded controller region (2 controller rows + 14 padding) and 16 rows for
+    // the packed permutation segment. No bitwise ops, so memory starts at row 32.
+    let memory_start = 2 * HASH_CYCLE_LEN; // controller(16 padded) + perm(16)
+    for row in 16..memory_start {
         assert_eq!(expected, b_chip[row]);
     }
-
-    let memory_start = HASH_CYCLE_LEN;
-    assert_ne!(expected, b_chip[memory_start]);
-    let span_response_mult = b_chip[memory_start] * b_chip[LAST_CYCLE_ROW].inverse();
-    assert_eq!(span_request_mult * span_response_mult, ONE);
-    expected *= span_response_mult;
-    assert_eq!(expected, b_chip[memory_start]);
 
     // Memory responses are provided during the memory segment after the hash cycle. There will be 6
     // rows, corresponding to the 5 memory operations (MStream requires 2 rows).
@@ -236,7 +239,7 @@ fn crypto_stream_missing_chiplets_bus_requests() {
         &challenges,
         MEMORY_READ_WORD_LABEL,
         ctx,
-        Felt::new(4), // src_ptr + 4
+        Felt::new_unchecked(4), // src_ptr + 4
         clk,
         [ZERO, ZERO, ZERO, ZERO].into(),
     );
@@ -244,28 +247,36 @@ fn crypto_stream_missing_chiplets_bus_requests() {
         &challenges,
         MEMORY_WRITE_WORD_LABEL,
         ctx,
-        Felt::new(8), // dst_ptr = 8
+        Felt::new_unchecked(8), // dst_ptr = 8
         clk,
-        [ONE, Felt::new(2), Felt::new(3), Felt::new(4)].into(),
+        [ONE, Felt::new_unchecked(2), Felt::new_unchecked(3), Felt::new_unchecked(4)].into(),
     );
     let write2 = build_expected_bus_word_msg(
         &challenges,
         MEMORY_WRITE_WORD_LABEL,
         ctx,
-        Felt::new(12), // dst_ptr + 4
+        Felt::new_unchecked(12), // dst_ptr + 4
         clk,
-        [Felt::new(5), Felt::new(6), Felt::new(7), Felt::new(8)].into(),
+        [
+            Felt::new_unchecked(5),
+            Felt::new_unchecked(6),
+            Felt::new_unchecked(7),
+            Felt::new_unchecked(8),
+        ]
+        .into(),
     );
 
     // All four requests are emitted at the same cycle, so they multiply together.
     let combined_request = (read1 * read2 * write1 * write2).inverse();
 
-    // b_chip[0] and b_chip[1] should be ONE (span hash init at cycle 0).
+    // b_chip[0] should be ONE. At cycle 0, span hash init request and response cancel.
     assert_eq!(ONE, b_chip[0]);
     assert_eq!(ONE, b_chip[1]);
 
-    // At cycle 1, CryptoStream issues 4 memory requests; included at row 2.
-    assert_eq!(combined_request, b_chip[2]);
+    // At row 1, the hasher's HOUT response and the CryptoStream's 4 memory requests all occur.
+    // Extract the HOUT response as a black box.
+    let hout_response = b_chip[2] * combined_request.inverse();
+    assert_eq!(hout_response * combined_request, b_chip[2]);
 
     // The chiplets bus should be balanced: final value must be ONE.
     assert_eq!(*b_chip.last().unwrap(), ONE);
@@ -284,7 +295,10 @@ fn build_expected_bus_element_msg(
 ) -> Felt {
     assert!(op_label == MEMORY_READ_ELEMENT_LABEL || op_label == MEMORY_WRITE_ELEMENT_LABEL);
 
-    challenges.encode([Felt::from_u8(op_label), ctx, addr, clk, value])
+    challenges.encode(
+        miden_air::trace::bus_types::CHIPLETS_BUS,
+        [Felt::from_u8(op_label), ctx, addr, clk, value],
+    )
 }
 
 fn build_expected_bus_word_msg(
@@ -297,7 +311,10 @@ fn build_expected_bus_word_msg(
 ) -> Felt {
     assert!(op_label == MEMORY_READ_WORD_LABEL || op_label == MEMORY_WRITE_WORD_LABEL);
 
-    challenges.encode([Felt::from_u8(op_label), ctx, addr, clk, word[0], word[1], word[2], word[3]])
+    challenges.encode(
+        miden_air::trace::bus_types::CHIPLETS_BUS,
+        [Felt::from_u8(op_label), ctx, addr, clk, word[0], word[1], word[2], word[3]],
+    )
 }
 
 fn build_expected_bus_msg_from_trace(

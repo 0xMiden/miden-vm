@@ -1,4 +1,4 @@
-use alloc::sync::Arc;
+use alloc::{sync::Arc, vec::Vec};
 use core::ops::ControlFlow;
 
 use miden_core::{
@@ -7,8 +7,10 @@ use miden_core::{
 };
 
 use crate::{
-    Host,
+    BaseHost, Host, SyncHost,
+    advice::AdviceMutation,
     errors::{MapExecErrWithOpIdx, advice_error_with_context, event_error_with_context},
+    event::EventError,
     fast::{BreakReason, FastProcessor},
 };
 
@@ -17,6 +19,64 @@ pub use sys_event_handlers::SystemEventError;
 use sys_event_handlers::handle_system_event;
 
 impl FastProcessor {
+    #[inline(always)]
+    fn handle_system_event(
+        &mut self,
+        system_event: SystemEvent,
+        current_forest: &MastForest,
+        node_id: MastNodeId,
+        host: &impl BaseHost,
+        op_idx: usize,
+    ) -> ControlFlow<BreakReason> {
+        match handle_system_event(self, system_event).map_exec_err_with_op_idx(
+            current_forest,
+            node_id,
+            host,
+            op_idx,
+        ) {
+            Ok(()) => ControlFlow::Continue(()),
+            Err(err) => ControlFlow::Break(BreakReason::Err(err)),
+        }
+    }
+
+    #[inline(always)]
+    fn apply_host_event_mutations(
+        &mut self,
+        current_forest: &MastForest,
+        node_id: MastNodeId,
+        host: &impl BaseHost,
+        op_idx: usize,
+        event_id: EventId,
+        mutations: Result<Vec<AdviceMutation>, EventError>,
+    ) -> ControlFlow<BreakReason> {
+        let mutations = match mutations {
+            Ok(mutations) => mutations,
+            Err(err) => {
+                let event_name = host.resolve_event(event_id).cloned();
+                return ControlFlow::Break(BreakReason::Err(event_error_with_context(
+                    err,
+                    current_forest,
+                    node_id,
+                    host,
+                    Some(op_idx),
+                    event_id,
+                    event_name,
+                )));
+            },
+        };
+
+        match self.advice.apply_mutations(mutations) {
+            Ok(()) => ControlFlow::Continue(()),
+            Err(err) => ControlFlow::Break(BreakReason::Err(advice_error_with_context(
+                err,
+                current_forest,
+                node_id,
+                host,
+                Some(op_idx),
+            ))),
+        }
+    }
+
     /// Executes any decorator in a basic block that is to be executed after all operations in the
     /// block. This only differs from [`Self::execute_after_exit_decorators`] in that these
     /// decorators are stored in the basic block node itself.
@@ -26,7 +86,7 @@ impl FastProcessor {
         basic_block_node: &BasicBlockNode,
         node_id: MastNodeId,
         current_forest: &Arc<MastForest>,
-        host: &mut impl Host,
+        host: &mut impl BaseHost,
     ) -> ControlFlow<BreakReason> {
         if self.should_execute_decorators() {
             #[cfg(test)]
@@ -42,6 +102,26 @@ impl FastProcessor {
     }
 
     #[inline(always)]
+    pub(super) fn op_emit_sync(
+        &mut self,
+        host: &mut impl SyncHost,
+        current_forest: &MastForest,
+        node_id: MastNodeId,
+        op_idx: usize,
+    ) -> ControlFlow<BreakReason> {
+        let event_id = EventId::from_felt(self.stack_get(0));
+
+        // If it's a system event, handle it directly. Otherwise, forward it to the host.
+        if let Some(system_event) = SystemEvent::from_event_id(event_id) {
+            return self.handle_system_event(system_event, current_forest, node_id, host, op_idx);
+        }
+
+        let processor_state = self.state();
+        let mutations = host.on_event(&processor_state);
+        self.apply_host_event_mutations(current_forest, node_id, host, op_idx, event_id, mutations)
+    }
+
+    #[inline(always)]
     pub(super) async fn op_emit(
         &mut self,
         host: &mut impl Host,
@@ -51,41 +131,12 @@ impl FastProcessor {
     ) -> ControlFlow<BreakReason> {
         let event_id = EventId::from_felt(self.stack_get(0));
 
-        // If it's a system event, handle it directly. Otherwise, forward it to the host.
         if let Some(system_event) = SystemEvent::from_event_id(event_id) {
-            if let Err(err) = handle_system_event(self, system_event).map_exec_err_with_op_idx(
-                current_forest,
-                node_id,
-                host,
-                op_idx,
-            ) {
-                return ControlFlow::Break(BreakReason::Err(err));
-            }
-        } else {
-            let processor_state = self.state();
-            let mutations = match host.on_event(&processor_state).await {
-                Ok(m) => m,
-                Err(err) => {
-                    let event_name = host.resolve_event(event_id).cloned();
-                    return ControlFlow::Break(BreakReason::Err(event_error_with_context(
-                        err,
-                        current_forest,
-                        node_id,
-                        host,
-                        event_id,
-                        event_name,
-                    )));
-                },
-            };
-            if let Err(err) = self.advice.apply_mutations(mutations) {
-                return ControlFlow::Break(BreakReason::Err(advice_error_with_context(
-                    err,
-                    current_forest,
-                    node_id,
-                    host,
-                )));
-            }
+            return self.handle_system_event(system_event, current_forest, node_id, host, op_idx);
         }
-        ControlFlow::Continue(())
+
+        let processor_state = self.state();
+        let mutations = host.on_event(&processor_state).await;
+        self.apply_host_event_mutations(current_forest, node_id, host, op_idx, event_id, mutations)
     }
 }

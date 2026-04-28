@@ -9,8 +9,9 @@ use super::{
         trace_state::{
             BlockAddressReplay, BlockStackReplay, DecoderState, StackState, SystemState,
         },
+        utils::RowMajorTraceWriter,
     },
-    core_trace_fragment::{BasicBlockContext, CoreTraceFragment},
+    core_trace_fragment::BasicBlockContext,
     processor::ReplayProcessor,
 };
 use crate::{
@@ -18,6 +19,7 @@ use crate::{
     continuation_stack::{Continuation, ContinuationStack},
     errors::MapExecErrNoCtx,
     mast::{MastForest, MastNode, MastNodeExt, MastNodeId},
+    trace::trace_state::NodeFlags,
     tracer::{OperationHelperRegisters, Tracer},
 };
 
@@ -52,8 +54,8 @@ pub(crate) struct TracerFinalState {
 /// final state of the tracer (or the error, if one was encountered).
 #[derive(Debug)]
 pub(crate) struct CoreTraceGenerationTracer<'a> {
-    /// The trace fragment being populated with rows by this tracer.
-    fragment: &'a mut CoreTraceFragment<'a>,
+    /// The writer for the core trace fragment.
+    writer: RowMajorTraceWriter<'a, Felt>,
     /// The index of the next row to write in the trace fragment.
     row_write_index: usize,
 
@@ -91,6 +93,13 @@ pub(crate) struct CoreTraceGenerationTracer<'a> {
     /// this cycle.
     continuation: Option<Continuation>,
 
+    /// Whether the node ending in this clock cycle is a body of a LOOP node. This is determined
+    /// by peeking at the continuation stack in [`start_clock_cycle`](Tracer::start_clock_cycle)
+    /// to check if the next clock-incrementing continuation is a `FinishLoop`.
+    ///
+    /// This is only relevant for END operations (Finish* continuations).
+    is_loop_body: bool,
+
     /// If an error is encountered during trace generation, it is stored here. Once set, all
     /// subsequent `start_clock_cycle` and `finalize_clock_cycle` calls become no-ops, and the
     /// error is returned by [`into_parts`](Self::into_parts).
@@ -99,13 +108,13 @@ pub(crate) struct CoreTraceGenerationTracer<'a> {
 
 impl<'a> CoreTraceGenerationTracer<'a> {
     pub fn new(
-        fragment: &'a mut CoreTraceFragment<'a>,
+        writer: RowMajorTraceWriter<'a, Felt>,
         decoder_state: DecoderState,
         block_address_replay: BlockAddressReplay,
         block_stack_replay: BlockStackReplay,
     ) -> Self {
         Self {
-            fragment,
+            writer,
             row_write_index: 0,
             decoder_state,
             block_address_replay,
@@ -116,6 +125,7 @@ impl<'a> CoreTraceGenerationTracer<'a> {
             finish_loop_condition: None,
             dyn_callee_hash: None,
             continuation: None,
+            is_loop_body: false,
             error_encountered: None,
         }
     }
@@ -288,6 +298,52 @@ impl<'a> CoreTraceGenerationTracer<'a> {
         None
     }
 
+    /// Returns the `NodeFlags` for an END operation based on the continuation type and state
+    /// captured in `start_clock_cycle`.
+    fn compute_node_flags(
+        &self,
+        continuation: &Continuation,
+        current_forest: &MastForest,
+    ) -> Result<NodeFlags, ExecutionError> {
+        let is_loop_body = self.is_loop_body;
+
+        match continuation {
+            Continuation::FinishLoop { was_entered, .. } => {
+                // The Loop node itself is ending. `loop_entered` = `was_entered`.
+                Ok(NodeFlags::new(is_loop_body, *was_entered, false, false))
+            },
+            Continuation::FinishCall(node_id) => {
+                let node = get_node_in_forest(current_forest, *node_id)?;
+                let MastNode::Call(call_node) = node else {
+                    return Err(ExecutionError::Internal(
+                        "expected call node in FinishCall continuation",
+                    ));
+                };
+                let is_syscall = call_node.is_syscall();
+                let is_call = !is_syscall;
+                Ok(NodeFlags::new(is_loop_body, false, is_call, is_syscall))
+            },
+            Continuation::FinishDyn(node_id) => {
+                let node = get_node_in_forest(current_forest, *node_id)?;
+                let MastNode::Dyn(dyn_node) = node else {
+                    return Err(ExecutionError::Internal(
+                        "expected dyn node in FinishDyn continuation",
+                    ));
+                };
+                let is_call = dyn_node.is_dyncall();
+                Ok(NodeFlags::new(is_loop_body, false, is_call, false))
+            },
+            Continuation::FinishJoin(_)
+            | Continuation::FinishSplit(_)
+            | Continuation::FinishBasicBlock(_) => {
+                Ok(NodeFlags::new(is_loop_body, false, false, false))
+            },
+            _ => {
+                Err(ExecutionError::Internal("compute_node_flags called for non-END continuation"))
+            },
+        }
+    }
+
     /// Returns the callee hash for a `Dyn` node, or `None` if the continuation is not a
     /// `StartNode` for a `Dyn` node.
     ///
@@ -329,7 +385,7 @@ impl Tracer for CoreTraceGenerationTracer<'_> {
         &mut self,
         processor: &ReplayProcessor,
         continuation: Continuation,
-        _continuation_stack: &ContinuationStack,
+        continuation_stack: &ContinuationStack,
         current_forest: &Arc<MastForest>,
     ) {
         if self.error_encountered.is_some() {
@@ -344,6 +400,13 @@ impl Tracer for CoreTraceGenerationTracer<'_> {
             self.finish_loop_condition = self.get_finish_loop_condition(&continuation, processor);
             self.dyn_callee_hash =
                 self.get_dyn_callee_hash(&continuation, processor, current_forest)?;
+
+            // For END operations, determine if the ending node is a body of a LOOP by checking
+            // whether the next clock-incrementing continuation is a FinishLoop.
+            self.is_loop_body = matches!(
+                continuation_stack.iter_continuations_for_next_clock().last(),
+                Some(Continuation::FinishLoop { was_entered: true, .. })
+            );
 
             // Store state for finalizing the clock cycle later.
             self.continuation = Some(continuation);
@@ -384,11 +447,23 @@ impl Tracer for CoreTraceGenerationTracer<'_> {
                 },
                 FinishJoin(node_id) => {
                     let node = get_node_in_forest(current_forest, *node_id)?;
-                    self.fill_end_trace_row(&processor.system, &processor.stack, node.digest())?;
+                    let flags = self.compute_node_flags(continuation, current_forest)?;
+                    self.fill_end_trace_row(
+                        &processor.system,
+                        &processor.stack,
+                        node.digest(),
+                        flags.to_hasher_state_second_word(),
+                    )?;
                 },
                 FinishSplit(node_id) => {
                     let node = get_node_in_forest(current_forest, *node_id)?;
-                    self.fill_end_trace_row(&processor.system, &processor.stack, node.digest())?;
+                    let flags = self.compute_node_flags(continuation, current_forest)?;
+                    self.fill_end_trace_row(
+                        &processor.system,
+                        &processor.stack,
+                        node.digest(),
+                        flags.to_hasher_state_second_word(),
+                    )?;
                 },
                 FinishLoop { node_id, was_entered: _ } => {
                     let loop_condition = self.finish_loop_condition.take().ok_or(
@@ -418,20 +493,34 @@ impl Tracer for CoreTraceGenerationTracer<'_> {
                     } else {
                         // Loop is finished, so fill in an END row.
                         let node = get_node_in_forest(current_forest, *node_id)?;
+                        let flags = self.compute_node_flags(continuation, current_forest)?;
                         self.fill_end_trace_row(
                             &processor.system,
                             &processor.stack,
                             node.digest(),
+                            flags.to_hasher_state_second_word(),
                         )?;
                     }
                 },
                 FinishCall(node_id) => {
                     let node = get_node_in_forest(current_forest, *node_id)?;
-                    self.fill_end_trace_row(&processor.system, &processor.stack, node.digest())?;
+                    let flags = self.compute_node_flags(continuation, current_forest)?;
+                    self.fill_end_trace_row(
+                        &processor.system,
+                        &processor.stack,
+                        node.digest(),
+                        flags.to_hasher_state_second_word(),
+                    )?;
                 },
                 FinishDyn(node_id) => {
                     let node = get_node_in_forest(current_forest, *node_id)?;
-                    self.fill_end_trace_row(&processor.system, &processor.stack, node.digest())?;
+                    let flags = self.compute_node_flags(continuation, current_forest)?;
+                    self.fill_end_trace_row(
+                        &processor.system,
+                        &processor.stack,
+                        node.digest(),
+                        flags.to_hasher_state_second_word(),
+                    )?;
                 },
                 ResumeBasicBlock { node_id, batch_index, op_idx_in_batch } => {
                     let MastNode::Block(basic_block_node) =
@@ -502,10 +591,12 @@ impl Tracer for CoreTraceGenerationTracer<'_> {
                         ));
                     };
 
+                    let flags = self.compute_node_flags(continuation, current_forest)?;
                     self.fill_basic_block_end_trace_row(
                         &processor.system,
                         &processor.stack,
                         basic_block_node,
+                        flags.to_hasher_state_second_word(),
                     )?;
                 },
                 FinishExternal(_)
@@ -545,7 +636,7 @@ fn get_node_in_forest(
 
 #[cfg(test)]
 mod tests {
-    use alloc::{vec, vec::Vec};
+    use alloc::vec;
 
     use miden_core::mast::{DynNodeBuilder, MastForestContributor};
 
@@ -559,6 +650,7 @@ mod tests {
                 MastForestResolutionReplay, MemoryReadsReplay, StackOverflowReplay, StackState,
                 SystemState,
             },
+            utils::RowMajorTraceWriter,
         },
     };
 
@@ -591,9 +683,10 @@ mod tests {
 
         // Place an entry in the overflow replay queue that corresponds to a future pop (once the
         // stack will have grown beyond the minimum depth).
-        let overflow_addr_of_future_pop = Felt::new(42);
+        let overflow_addr_of_future_pop = Felt::new_unchecked(42);
         let mut stack_overflow_replay = StackOverflowReplay::new();
-        stack_overflow_replay.record_pop_overflow(Felt::new(99), overflow_addr_of_future_pop);
+        stack_overflow_replay
+            .record_pop_overflow(Felt::new_unchecked(99), overflow_addr_of_future_pop);
 
         let system = SystemState {
             clk: 0u32.into(),
@@ -614,18 +707,11 @@ mod tests {
             1u32.into(),
         );
 
-        // Create a minimal CoreTraceFragment — its contents are unused by the method under
-        // test.
-        let mut columns_data: Vec<Vec<Felt>> =
-            (0..CORE_TRACE_WIDTH).map(|_| vec![ZERO; 1]).collect();
-        let column_slices: Vec<&mut [Felt]> =
-            columns_data.iter_mut().map(|v| v.as_mut_slice()).collect();
-        let mut fragment = CoreTraceFragment {
-            columns: column_slices.try_into().expect("CORE_TRACE_WIDTH columns"),
-        };
+        let mut buffer = vec![ZERO; CORE_TRACE_WIDTH];
+        let writer = RowMajorTraceWriter::new(&mut buffer, CORE_TRACE_WIDTH);
 
         let tracer = CoreTraceGenerationTracer::new(
-            &mut fragment,
+            writer,
             DecoderState { current_addr: ZERO, parent_addr: ZERO },
             BlockAddressReplay::default(),
             BlockStackReplay::default(),

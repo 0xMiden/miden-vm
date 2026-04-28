@@ -9,6 +9,8 @@ use miden_core::{
     crypto::merkle::{InnerNodeInfo, MerklePath, MerkleStore, NodeIndex},
     precompile::PrecompileRequest,
 };
+#[cfg(test)]
+use miden_core::{crypto::hash::Blake3_256, serde::Serializable};
 
 mod errors;
 pub use errors::AdviceError;
@@ -46,7 +48,7 @@ const MAX_ADVICE_STACK_SIZE: usize = 1 << 17;
 ///      or,
 ///    - used to produce a STARK proof using a precompile VM, which can be verified in the epilog of
 ///      the program.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct AdviceProvider {
     stack: VecDeque<Felt>,
     map: AdviceMap,
@@ -56,6 +58,7 @@ pub struct AdviceProvider {
 
 impl AdviceProvider {
     #[cfg(test)]
+    #[expect(dead_code)]
     pub(crate) fn merkle_store(&self) -> &MerkleStore {
         &self.store
     }
@@ -84,6 +87,44 @@ impl AdviceProvider {
             },
         }
         Ok(())
+    }
+
+    /// Returns a stable fingerprint of the advice state.
+    ///
+    /// The fingerprint is insensitive to advice-map insertion order and Merkle-store insertion
+    /// order, but it still reflects advice-stack order and precompile-request order.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn fingerprint(&self) -> [u8; 32] {
+        let stack = self.stack.iter().copied().collect::<Vec<_>>().to_bytes();
+        let map = self.map.to_bytes();
+        let mut store_nodes = self
+            .store
+            .inner_nodes()
+            .map(|info| (info.value, info.left, info.right))
+            .collect::<Vec<_>>();
+        store_nodes.sort_unstable_by(|lhs, rhs| {
+            lhs.0
+                .cmp(&rhs.0)
+                .then_with(|| lhs.1.cmp(&rhs.1))
+                .then_with(|| lhs.2.cmp(&rhs.2))
+        });
+        let store = store_nodes
+            .into_iter()
+            .flat_map(|(value, left, right)| [value, left, right])
+            .collect::<Vec<_>>()
+            .to_bytes();
+        let precompile_requests = self.pc_requests.to_bytes();
+        Blake3_256::hash_iter(
+            [
+                stack.as_slice(),
+                map.as_slice(),
+                store.as_slice(),
+                precompile_requests.as_slice(),
+            ]
+            .into_iter(),
+        )
+        .into()
     }
 
     // ADVICE STACK
@@ -222,12 +263,12 @@ impl AdviceProvider {
 
         // Treat map values as already canonical sequences of FELTs.
         // The advice stack is LIFO; extend in reverse so that the first element of `values`
-        // becomes the first element returned by a subsequent `adv_push.*`.
+        // becomes the first element returned by a subsequent `adv_push`.
         for &value in values.iter().rev() {
             self.stack.push_front(value);
         }
         if include_len {
-            self.stack.push_front(Felt::new(values.len() as u64));
+            self.stack.push_front(Felt::new_unchecked(values.len() as u64));
         }
         Ok(())
     }
@@ -260,7 +301,7 @@ impl AdviceProvider {
 
     /// Returns a reference to the value(s) associated with the specified key in the advice map.
     pub fn get_mapped_values(&self, key: &Word) -> Option<&[Felt]> {
-        self.map.get(key).map(|value| value.as_ref())
+        self.map.get(key).map(AsRef::as_ref)
     }
 
     /// Inserts the provided value into the advice map under the specified key.
@@ -507,5 +548,48 @@ impl AdviceProviderInterface for AdviceProvider {
         value: Word,
     ) -> Result<Option<MerklePath>, AdviceError> {
         self.update_merkle_node(root, depth, index, value).map(|(path, _)| Some(path))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AdviceProvider;
+    use crate::{
+        AdviceInputs, Felt, Word,
+        crypto::merkle::{MerkleStore, MerkleTree},
+    };
+
+    fn make_leaf(seed: u64) -> Word {
+        [
+            Felt::new_unchecked(seed),
+            Felt::new_unchecked(seed + 1),
+            Felt::new_unchecked(seed + 2),
+            Felt::new_unchecked(seed + 3),
+        ]
+        .into()
+    }
+
+    #[test]
+    fn fingerprint_is_stable_across_merkle_store_insertion_order() {
+        let tree_a =
+            MerkleTree::new([make_leaf(1), make_leaf(5), make_leaf(9), make_leaf(13)]).unwrap();
+        let tree_b =
+            MerkleTree::new([make_leaf(17), make_leaf(21), make_leaf(25), make_leaf(29)]).unwrap();
+
+        let mut store_a = MerkleStore::default();
+        store_a.extend(tree_a.inner_nodes());
+        store_a.extend(tree_b.inner_nodes());
+
+        let mut store_b = MerkleStore::default();
+        store_b.extend(tree_b.inner_nodes());
+        store_b.extend(tree_a.inner_nodes());
+
+        assert_eq!(store_a, store_b);
+
+        let provider_a = AdviceProvider::from(AdviceInputs::default().with_merkle_store(store_a));
+        let provider_b = AdviceProvider::from(AdviceInputs::default().with_merkle_store(store_b));
+
+        assert_eq!(provider_a, provider_b);
+        assert_eq!(provider_a.fingerprint(), provider_b.fingerprint());
     }
 }

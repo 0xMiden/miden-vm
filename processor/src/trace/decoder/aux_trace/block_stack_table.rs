@@ -1,4 +1,4 @@
-use miden_air::trace::{Challenges, RowIndex};
+use miden_air::trace::{Challenges, RowIndex, bus_types::BLOCK_STACK_TABLE};
 use miden_core::{field::ExtensionField, operations::opcodes};
 
 use super::{AuxColumnBuilder, Felt, MainTrace, ONE, ZERO};
@@ -78,7 +78,7 @@ fn get_block_stack_table_respan_multiplicand<E: ExtensionField<Felt>>(
     let parent_id = main_trace.decoder_hasher_state_element(1, i + 1);
     let is_loop = ZERO;
 
-    challenges.encode([block_id, parent_id, is_loop])
+    challenges.encode(BLOCK_STACK_TABLE, [block_id, parent_id, is_loop])
 }
 
 /// Computes the multiplicand representing the removal of a row from the block stack table when
@@ -98,20 +98,23 @@ fn get_block_stack_table_end_multiplicand<E: ExtensionField<Felt>>(
         let parent_next_overflow_addr = main_trace.parent_overflow_address(i + 1);
         let parent_fn_hash = main_trace.fn_hash(i + 1);
 
-        challenges.encode([
-            block_id,
-            parent_id,
-            is_loop,
-            parent_ctx,
-            parent_stack_depth,
-            parent_next_overflow_addr,
-            parent_fn_hash[0],
-            parent_fn_hash[1],
-            parent_fn_hash[2],
-            parent_fn_hash[3],
-        ])
+        challenges.encode(
+            BLOCK_STACK_TABLE,
+            [
+                block_id,
+                parent_id,
+                is_loop,
+                parent_ctx,
+                parent_stack_depth,
+                parent_next_overflow_addr,
+                parent_fn_hash[0],
+                parent_fn_hash[1],
+                parent_fn_hash[2],
+                parent_fn_hash[3],
+            ],
+        )
     } else {
-        challenges.encode([block_id, parent_id, is_loop])
+        challenges.encode(BLOCK_STACK_TABLE, [block_id, parent_id, is_loop])
     }
 }
 
@@ -139,36 +142,42 @@ fn get_block_stack_table_inclusion_multiplicand<E: ExtensionField<Felt>>(
         let parent_stack_depth = main_trace.stack_depth(i);
         let parent_next_overflow_addr = main_trace.parent_overflow_address(i);
         let parent_fn_hash = main_trace.fn_hash(i);
-        challenges.encode([
-            block_id,
-            parent_id,
-            is_loop,
-            parent_ctx,
-            parent_stack_depth,
-            parent_next_overflow_addr,
-            parent_fn_hash[0],
-            parent_fn_hash[1],
-            parent_fn_hash[2],
-            parent_fn_hash[3],
-        ])
+        challenges.encode(
+            BLOCK_STACK_TABLE,
+            [
+                block_id,
+                parent_id,
+                is_loop,
+                parent_ctx,
+                parent_stack_depth,
+                parent_next_overflow_addr,
+                parent_fn_hash[0],
+                parent_fn_hash[1],
+                parent_fn_hash[2],
+                parent_fn_hash[3],
+            ],
+        )
     } else if op_code == opcodes::DYNCALL {
         let parent_ctx = main_trace.ctx(i);
         let parent_stack_depth = main_trace.decoder_hasher_state_element(4, i);
         let parent_next_overflow_addr = main_trace.decoder_hasher_state_element(5, i);
         let parent_fn_hash = main_trace.fn_hash(i);
-        challenges.encode([
-            block_id,
-            parent_id,
-            is_loop,
-            parent_ctx,
-            parent_stack_depth,
-            parent_next_overflow_addr,
-            parent_fn_hash[0],
-            parent_fn_hash[1],
-            parent_fn_hash[2],
-            parent_fn_hash[3],
-        ])
+        challenges.encode(
+            BLOCK_STACK_TABLE,
+            [
+                block_id,
+                parent_id,
+                is_loop,
+                parent_ctx,
+                parent_stack_depth,
+                parent_next_overflow_addr,
+                parent_fn_hash[0],
+                parent_fn_hash[1],
+                parent_fn_hash[2],
+                parent_fn_hash[3],
+            ],
+        )
     } else {
-        challenges.encode([block_id, parent_id, is_loop])
+        challenges.encode(BLOCK_STACK_TABLE, [block_id, parent_id, is_loop])
     }
 }

@@ -2,7 +2,7 @@ use alloc::{sync::Arc, vec::Vec};
 
 use miden_air::trace::{
     CTX_COL_IDX,
-    chiplets::hasher::HASH_CYCLE_LEN_FELT,
+    chiplets::hasher::CONTROLLER_ROWS_PER_PERM_FELT,
     decoder::{
         ADDR_COL_IDX, GROUP_COUNT_COL_IDX, HASHER_STATE_RANGE, IN_SPAN_COL_IDX, NUM_HASHER_COLUMNS,
         NUM_OP_BATCH_FLAGS, NUM_OP_BITS, OP_BATCH_1_GROUPS, OP_BATCH_2_GROUPS, OP_BATCH_4_GROUPS,
@@ -23,17 +23,18 @@ use miden_core::{
 use miden_utils_testing::rand::rand_value;
 
 use crate::{
-    AdviceInputs, DefaultHost, ExecutionOptions, ExecutionTrace, FastProcessor,
-    event::NoopEventHandler, trace::build_trace,
+    AdviceInputs, DefaultHost, ExecutionOptions, FastProcessor,
+    event::NoopEventHandler,
+    trace::{ExecutionTrace, build_trace},
 };
 
 // CONSTANTS
 // ================================================================================================
 
-const TWO: Felt = Felt::new(2);
-const EIGHT: Felt = Felt::new(8);
-const NINE: Felt = Felt::new(9);
-const FOURTEEN: Felt = Felt::new(14);
+const TWO: Felt = Felt::new_unchecked(2);
+const EIGHT: Felt = Felt::new_unchecked(8);
+const NINE: Felt = Felt::new_unchecked(9);
+const FOURTEEN: Felt = Felt::new_unchecked(14);
 
 const INIT_ADDR: Felt = ONE;
 const EMIT_EVENT: EventName = EventName::new("test::emit::event");
@@ -222,7 +223,7 @@ fn test_basic_block_small_with_emit_decoding() {
 
 #[test]
 fn test_basic_block_decoding() {
-    let iv = [ONE, TWO, Felt::new(3), Felt::new(4), Felt::new(5)];
+    let iv = [ONE, TWO, Felt::new_unchecked(3), Felt::new_unchecked(4), Felt::new_unchecked(5)];
     let ops = vec![
         Operation::Push(iv[0]),
         Operation::Push(iv[1]),
@@ -317,13 +318,13 @@ fn test_basic_block_with_respan_decoding() {
     let iv = [
         ONE,
         TWO,
-        Felt::new(3),
-        Felt::new(4),
-        Felt::new(5),
-        Felt::new(6),
-        Felt::new(7),
+        Felt::new_unchecked(3),
+        Felt::new_unchecked(4),
+        Felt::new_unchecked(5),
+        Felt::new_unchecked(6),
+        Felt::new_unchecked(7),
         EIGHT,
-        Felt::new(9),
+        Felt::new_unchecked(9),
     ];
 
     let ops = vec![
@@ -372,7 +373,7 @@ fn test_basic_block_with_respan_decoding() {
     // NOOP inserted by the processor to make sure the group doesn't end with a PUSH
     check_op_decoding(&trace, 8, INIT_ADDR, opcodes::NOOP, 4, 7, 1);
     // RESPAN since the previous batch is full
-    let batch1_addr = INIT_ADDR + HASH_CYCLE_LEN_FELT;
+    let batch1_addr = INIT_ADDR + CONTROLLER_ROWS_PER_PERM_FELT;
     check_op_decoding(&trace, 9, INIT_ADDR, opcodes::RESPAN, 4, 0, 0);
     check_op_decoding_with_imm(&trace, 10, batch1_addr, iv[7], 1, 3, 0, 1);
     check_op_decoding(&trace, 11, batch1_addr, opcodes::ADD, 2, 1, 1);
@@ -462,12 +463,12 @@ fn test_join_node_decoding() {
     // --- check block address, op_bits, group count, op_index, and in_span columns ---------------
     check_op_decoding(&trace, 0, ZERO, opcodes::JOIN, 0, 0, 0);
     // starting first span
-    let span1_addr = INIT_ADDR + HASH_CYCLE_LEN_FELT;
+    let span1_addr = INIT_ADDR + CONTROLLER_ROWS_PER_PERM_FELT;
     check_op_decoding(&trace, 1, INIT_ADDR, opcodes::SPAN, 1, 0, 0);
     check_op_decoding(&trace, 2, span1_addr, opcodes::MUL, 0, 0, 1);
     check_op_decoding(&trace, 3, span1_addr, opcodes::END, 0, 0, 0);
     // starting second span
-    let span2_addr = span1_addr + HASH_CYCLE_LEN_FELT;
+    let span2_addr = span1_addr + CONTROLLER_ROWS_PER_PERM_FELT;
     check_op_decoding(&trace, 4, INIT_ADDR, opcodes::SPAN, 1, 0, 0);
     check_op_decoding(&trace, 5, span2_addr, opcodes::ADD, 0, 0, 1);
     check_op_decoding(&trace, 6, span2_addr, opcodes::END, 0, 0, 0);
@@ -532,7 +533,7 @@ fn test_split_node_true_decoding() {
     let (trace, trace_len) = build_trace_helper(&[1], &program);
 
     // --- check block address, op_bits, group count, op_index, and in_span columns ---------------
-    let basic_block_addr = INIT_ADDR + HASH_CYCLE_LEN_FELT;
+    let basic_block_addr = INIT_ADDR + CONTROLLER_ROWS_PER_PERM_FELT;
     check_op_decoding(&trace, 0, ZERO, opcodes::SPLIT, 0, 0, 0);
     check_op_decoding(&trace, 1, INIT_ADDR, opcodes::SPAN, 1, 0, 0);
     check_op_decoding(&trace, 2, basic_block_addr, opcodes::MUL, 0, 0, 1);
@@ -591,7 +592,7 @@ fn test_split_node_false_decoding() {
     let (trace, trace_len) = build_trace_helper(&[0], &program);
 
     // --- check block address, op_bits, group count, op_index, and in_span columns ---------------
-    let basic_block_addr = INIT_ADDR + HASH_CYCLE_LEN_FELT;
+    let basic_block_addr = INIT_ADDR + CONTROLLER_ROWS_PER_PERM_FELT;
     check_op_decoding(&trace, 0, ZERO, opcodes::SPLIT, 0, 0, 0);
     check_op_decoding(&trace, 1, INIT_ADDR, opcodes::SPAN, 1, 0, 0);
     check_op_decoding(&trace, 2, basic_block_addr, opcodes::ADD, 0, 0, 1);
@@ -649,7 +650,7 @@ fn test_loop_node_decoding() {
     let (trace, trace_len) = build_trace_helper(&[1, 0], &program);
 
     // --- check block address, op_bits, group count, op_index, and in_span columns ---------------
-    let body_addr = INIT_ADDR + HASH_CYCLE_LEN_FELT;
+    let body_addr = INIT_ADDR + CONTROLLER_ROWS_PER_PERM_FELT;
     check_op_decoding(&trace, 0, ZERO, opcodes::LOOP, 0, 0, 0);
     check_op_decoding(&trace, 1, INIT_ADDR, opcodes::SPAN, 1, 0, 0);
     check_op_decoding(&trace, 2, body_addr, opcodes::PAD, 0, 0, 1);
@@ -754,8 +755,8 @@ fn test_loop_node_repeat_decoding() {
     let (trace, trace_len) = build_trace_helper(&[1, 1, 0], &program);
 
     // --- check block address, op_bits, group count, op_index, and in_span columns ---------------
-    let iter1_addr = INIT_ADDR + HASH_CYCLE_LEN_FELT;
-    let iter2_addr = iter1_addr + HASH_CYCLE_LEN_FELT;
+    let iter1_addr = INIT_ADDR + CONTROLLER_ROWS_PER_PERM_FELT;
+    let iter2_addr = iter1_addr + CONTROLLER_ROWS_PER_PERM_FELT;
 
     check_op_decoding(&trace, 0, ZERO, opcodes::LOOP, 0, 0, 0);
     check_op_decoding(&trace, 1, INIT_ADDR, opcodes::SPAN, 1, 0, 0);
@@ -812,7 +813,6 @@ fn test_loop_node_repeat_decoding() {
 
 #[test]
 #[rustfmt::skip]
-#[expect(clippy::needless_range_loop)]
 fn test_call_decoding() {
     
     // build a program which looks like this:
@@ -882,7 +882,7 @@ fn test_call_decoding() {
     let program_root_node = mast_forest[program_root_node_id].clone();
     mast_forest.make_root(program_root_node_id);
 
-    let program = Program::with_kernel(mast_forest.into(), program_root_node_id, kernel.clone());
+    let program = Program::with_kernel(mast_forest.into(), program_root_node_id, kernel);
 
     let (sys_trace, dec_trace, trace_len) =
         build_call_trace_helper(&program);
@@ -892,11 +892,11 @@ fn test_call_decoding() {
     check_op_decoding(&dec_trace, row_idx, ZERO, opcodes::JOIN, 0, 0, 0);
     row_idx += 1;
     // starting the internal JOIN block
-    let inner_join_addr = INIT_ADDR + HASH_CYCLE_LEN_FELT;
+    let inner_join_addr = INIT_ADDR + CONTROLLER_ROWS_PER_PERM_FELT;
     check_op_decoding(&dec_trace, row_idx, INIT_ADDR, opcodes::JOIN, 0, 0, 0);
     row_idx += 1;
     // starting first SPAN block
-    let first_basic_block_addr = inner_join_addr + HASH_CYCLE_LEN_FELT;
+    let first_basic_block_addr = inner_join_addr + CONTROLLER_ROWS_PER_PERM_FELT;
     check_op_decoding(&dec_trace, row_idx, inner_join_addr, opcodes::SPAN, 4, 0, 0);
     row_idx += 1;
     check_op_decoding_with_imm(&dec_trace, row_idx, first_basic_block_addr, ONE, 1, 3, 0, 1);
@@ -911,15 +911,15 @@ fn test_call_decoding() {
     row_idx += 1;
 
     // starting CALL block for bar
-    let call_addr = first_basic_block_addr + HASH_CYCLE_LEN_FELT;
+    let call_addr = first_basic_block_addr + CONTROLLER_ROWS_PER_PERM_FELT;
     check_op_decoding(&dec_trace, row_idx, inner_join_addr, opcodes::CALL, 0, 0, 0);
     row_idx += 1;
     // starting JOIN block inside bar
-    let bar_join_addr = call_addr + HASH_CYCLE_LEN_FELT;
+    let bar_join_addr = call_addr + CONTROLLER_ROWS_PER_PERM_FELT;
     check_op_decoding(&dec_trace, row_idx, call_addr, opcodes::JOIN, 0, 0, 0);
     row_idx += 1;
     // starting SPAN block inside bar
-    let bar_basic_block_addr = bar_join_addr + HASH_CYCLE_LEN_FELT;
+    let bar_basic_block_addr = bar_join_addr + CONTROLLER_ROWS_PER_PERM_FELT;
     check_op_decoding(&dec_trace, row_idx, bar_join_addr, opcodes::SPAN, 1, 0, 0);
     row_idx += 1;
     check_op_decoding(&dec_trace, row_idx, bar_basic_block_addr, opcodes::MUL, 0, 0, 1);
@@ -928,11 +928,11 @@ fn test_call_decoding() {
     row_idx += 1;
 
     // starting CALL to foo
-    let syscall_addr = bar_basic_block_addr + HASH_CYCLE_LEN_FELT;
+    let syscall_addr = bar_basic_block_addr + CONTROLLER_ROWS_PER_PERM_FELT;
     check_op_decoding(&dec_trace, row_idx, bar_join_addr, opcodes::CALL, 0, 0, 0);
     row_idx += 1;
     // starting SPAN block within syscall
-    let syscall_basic_block_addr = syscall_addr + HASH_CYCLE_LEN_FELT;
+    let syscall_basic_block_addr = syscall_addr + CONTROLLER_ROWS_PER_PERM_FELT;
     check_op_decoding(&dec_trace, row_idx, syscall_addr, opcodes::SPAN, 1, 0, 0);
     row_idx += 1;
     check_op_decoding(&dec_trace, row_idx, syscall_basic_block_addr, opcodes::ADD, 0, 0, 1);
@@ -954,7 +954,7 @@ fn test_call_decoding() {
     row_idx += 1;
 
     // starting the last SPAN block
-    let last_basic_block_addr = syscall_basic_block_addr + HASH_CYCLE_LEN_FELT;
+    let last_basic_block_addr = syscall_basic_block_addr + CONTROLLER_ROWS_PER_PERM_FELT;
     check_op_decoding(&dec_trace, row_idx, INIT_ADDR, opcodes::SPAN, 1, 0, 0);
     row_idx += 1;
     check_op_decoding(&dec_trace, row_idx, last_basic_block_addr, opcodes::DROP, 0, 0, 1);
@@ -1106,7 +1106,6 @@ fn test_call_decoding() {
 
 #[test]
 #[rustfmt::skip]
-#[expect(clippy::needless_range_loop)]
 fn test_syscall_decoding() {
 
     // build a program which looks like this:
@@ -1184,7 +1183,7 @@ fn test_syscall_decoding() {
     let program_root_node = mast_forest[program_root_node_id].clone();
     mast_forest.make_root(program_root_node_id);
 
-    let program = Program::with_kernel(mast_forest.into(), program_root_node_id, kernel.clone());
+    let program = Program::with_kernel(mast_forest.into(), program_root_node_id, kernel);
 
     let (sys_trace, dec_trace, trace_len) =
         build_call_trace_helper(&program);
@@ -1194,11 +1193,11 @@ fn test_syscall_decoding() {
     check_op_decoding(&dec_trace, row_idx, ZERO, opcodes::JOIN, 0, 0, 0);
     row_idx += 1;
     // starting the internal JOIN block
-    let inner_join_addr = INIT_ADDR + HASH_CYCLE_LEN_FELT;
+    let inner_join_addr = INIT_ADDR + CONTROLLER_ROWS_PER_PERM_FELT;
     check_op_decoding(&dec_trace, row_idx, INIT_ADDR, opcodes::JOIN, 0, 0, 0);
     row_idx += 1;
     // starting first SPAN block
-    let first_basic_block_addr = inner_join_addr + HASH_CYCLE_LEN_FELT;
+    let first_basic_block_addr = inner_join_addr + CONTROLLER_ROWS_PER_PERM_FELT;
     check_op_decoding(&dec_trace, row_idx, inner_join_addr, opcodes::SPAN, 4, 0, 0);
     row_idx += 1;
     check_op_decoding_with_imm(&dec_trace, row_idx, first_basic_block_addr, ONE, 1, 3, 0, 1);
@@ -1213,15 +1212,15 @@ fn test_syscall_decoding() {
     row_idx += 1;
 
     // starting CALL block for bar
-    let call_addr = first_basic_block_addr + HASH_CYCLE_LEN_FELT;
+    let call_addr = first_basic_block_addr + CONTROLLER_ROWS_PER_PERM_FELT;
     check_op_decoding(&dec_trace, row_idx, inner_join_addr, opcodes::CALL, 0, 0, 0);
     row_idx += 1;
     // starting JOIN block inside bar
-    let bar_join_addr = call_addr + HASH_CYCLE_LEN_FELT;
+    let bar_join_addr = call_addr + CONTROLLER_ROWS_PER_PERM_FELT;
     check_op_decoding(&dec_trace, row_idx, call_addr, opcodes::JOIN, 0, 0, 0);
     row_idx += 1;
     // starting SPAN block inside bar
-    let bar_basic_block_addr = bar_join_addr + HASH_CYCLE_LEN_FELT;
+    let bar_basic_block_addr = bar_join_addr + CONTROLLER_ROWS_PER_PERM_FELT;
     check_op_decoding(&dec_trace, row_idx, bar_join_addr, opcodes::SPAN, 1, 0, 0);
     row_idx += 1;
     check_op_decoding(&dec_trace, row_idx, bar_basic_block_addr, opcodes::MUL, 0, 0, 1);
@@ -1230,11 +1229,11 @@ fn test_syscall_decoding() {
     row_idx += 1;
 
     // starting SYSCALL block for bar
-    let syscall_addr = bar_basic_block_addr + HASH_CYCLE_LEN_FELT;
+    let syscall_addr = bar_basic_block_addr + CONTROLLER_ROWS_PER_PERM_FELT;
     check_op_decoding(&dec_trace, row_idx, bar_join_addr, opcodes::SYSCALL, 0, 0, 0);
     row_idx += 1;
     // starting SPAN block within syscall
-    let syscall_basic_block_addr = syscall_addr + HASH_CYCLE_LEN_FELT;
+    let syscall_basic_block_addr = syscall_addr + CONTROLLER_ROWS_PER_PERM_FELT;
     check_op_decoding(&dec_trace, row_idx, syscall_addr, opcodes::SPAN, 1, 0, 0);
     row_idx += 1;
     check_op_decoding(&dec_trace, row_idx, syscall_basic_block_addr, opcodes::ADD, 0, 0, 1);
@@ -1256,7 +1255,7 @@ fn test_syscall_decoding() {
     row_idx += 1;
 
     // starting the last SPAN block
-    let last_basic_block_addr = syscall_basic_block_addr + HASH_CYCLE_LEN_FELT;
+    let last_basic_block_addr = syscall_basic_block_addr + CONTROLLER_ROWS_PER_PERM_FELT;
     check_op_decoding(&dec_trace, row_idx, INIT_ADDR, opcodes::SPAN, 1, 0, 0);
     row_idx += 1;
     check_op_decoding(&dec_trace, row_idx, last_basic_block_addr, opcodes::DROP, 0, 0, 1);
@@ -1413,7 +1412,7 @@ fn test_dyn_node_decoding() {
     // end
 
     const FOO_ROOT_NODE_ADDR: u64 = 40;
-    const PUSH_40_OP: Operation = Operation::Push(Felt::new(FOO_ROOT_NODE_ADDR));
+    const PUSH_40_OP: Operation = Operation::Push(Felt::new_unchecked(FOO_ROOT_NODE_ADDR));
 
     let mut mast_forest = MastForest::new();
 
@@ -1465,15 +1464,15 @@ fn test_dyn_node_decoding() {
     // --- check block address, op_bits, group count, op_index, and in_span columns ---------------
     check_op_decoding(&trace, 0, ZERO, opcodes::JOIN, 0, 0, 0);
     // starting inner join
-    let join_addr = INIT_ADDR + HASH_CYCLE_LEN_FELT;
+    let join_addr = INIT_ADDR + CONTROLLER_ROWS_PER_PERM_FELT;
     check_op_decoding(&trace, 1, INIT_ADDR, opcodes::JOIN, 0, 0, 0);
     // starting first span
-    let mstorew_basic_block_addr = join_addr + HASH_CYCLE_LEN_FELT;
+    let mstorew_basic_block_addr = join_addr + CONTROLLER_ROWS_PER_PERM_FELT;
     check_op_decoding(&trace, 2, join_addr, opcodes::SPAN, 1, 0, 0);
     check_op_decoding(&trace, 3, mstorew_basic_block_addr, opcodes::MSTOREW, 0, 0, 1);
     check_op_decoding(&trace, 4, mstorew_basic_block_addr, opcodes::END, 0, 0, 0);
     // starting second span
-    let push_basic_block_addr = mstorew_basic_block_addr + HASH_CYCLE_LEN_FELT;
+    let push_basic_block_addr = mstorew_basic_block_addr + CONTROLLER_ROWS_PER_PERM_FELT;
     check_op_decoding(&trace, 5, join_addr, opcodes::SPAN, 2, 0, 0);
     check_op_decoding(&trace, 6, push_basic_block_addr, PUSH_40_OP.op_code(), 1, 0, 1);
     check_op_decoding(&trace, 7, push_basic_block_addr, opcodes::NOOP, 0, 1, 1);
@@ -1483,8 +1482,8 @@ fn test_dyn_node_decoding() {
     // dyn
     check_op_decoding(&trace, 10, INIT_ADDR, opcodes::DYN, 0, 0, 0);
     // starting foo span
-    let dyn_addr = push_basic_block_addr + HASH_CYCLE_LEN_FELT;
-    let add_basic_block_addr = dyn_addr + HASH_CYCLE_LEN_FELT;
+    let dyn_addr = push_basic_block_addr + CONTROLLER_ROWS_PER_PERM_FELT;
+    let add_basic_block_addr = dyn_addr + CONTROLLER_ROWS_PER_PERM_FELT;
     check_op_decoding(&trace, 11, dyn_addr, opcodes::SPAN, 2, 0, 0);
     check_op_decoding_with_imm(&trace, 12, add_basic_block_addr, ONE, 1, 1, 0, 1);
     check_op_decoding(&trace, 13, add_basic_block_addr, opcodes::ADD, 0, 1, 1);
@@ -1576,10 +1575,10 @@ fn set_user_op_helpers_many() {
     let expected = build_expected_hasher_state(&[
         ZERO,
         ZERO,
-        Felt::new((check_1 as u16).into()),
-        Felt::new(((check_1 >> 16) as u16).into()),
-        Felt::new((check_2 as u16).into()),
-        Felt::new(((check_2 >> 16) as u16).into()),
+        Felt::new_unchecked((check_1 as u16).into()),
+        Felt::new_unchecked(((check_1 >> 16) as u16).into()),
+        Felt::new_unchecked((check_2 as u16).into()),
+        Felt::new_unchecked(((check_2 >> 16) as u16).into()),
     ]);
 
     assert_eq!(expected, hasher_state);
@@ -1595,7 +1594,7 @@ const MAX_FRAGMENT_SIZE: usize = 1 << 20;
 /// Builds the trace using FastProcessor and parallel::build_trace, returning the decoder trace
 /// portion.
 fn build_trace_helper(stack_inputs: &[u64], program: &Program) -> (DecoderTrace, usize) {
-    let stack_inputs: Vec<Felt> = stack_inputs.iter().map(|&v| Felt::new(v)).collect();
+    let stack_inputs: Vec<Felt> = stack_inputs.iter().map(|&v| Felt::new_unchecked(v)).collect();
     let processor = FastProcessor::new_with_options(
         StackInputs::new(&stack_inputs).unwrap(),
         AdviceInputs::default(),
@@ -1606,10 +1605,8 @@ fn build_trace_helper(stack_inputs: &[u64], program: &Program) -> (DecoderTrace,
     let mut host = DefaultHost::default();
     host.register_handler(EMIT_EVENT, Arc::new(NoopEventHandler)).unwrap();
 
-    let (execution_output, trace_generation_context) =
-        processor.execute_for_trace_sync(program, &mut host).unwrap();
-
-    let trace = build_trace(execution_output, trace_generation_context, program.to_info()).unwrap();
+    let trace_inputs = processor.execute_trace_inputs_sync(program, &mut host).unwrap();
+    let trace = build_trace(trace_inputs).unwrap();
 
     // The trace_len_summary().main_trace_len() is the actual program row count (before padding)
     let trace_len = trace.trace_len_summary().main_trace_len();
@@ -1637,10 +1634,8 @@ fn build_call_trace_helper(program: &Program) -> (SystemTrace, DecoderTrace, usi
     );
     let mut host = DefaultHost::default();
 
-    let (execution_output, trace_generation_context) =
-        processor.execute_for_trace_sync(program, &mut host).unwrap();
-
-    let trace = build_trace(execution_output, trace_generation_context, program.to_info()).unwrap();
+    let trace_inputs = processor.execute_trace_inputs_sync(program, &mut host).unwrap();
+    let trace = build_trace(trace_inputs).unwrap();
 
     // The trace_len_summary().main_trace_len() is the actual program row count (before padding)
     let trace_len = trace.trace_len_summary().main_trace_len();
@@ -1684,13 +1679,21 @@ fn check_op_decoding(
 
     assert_eq!(trace[ADDR_COL_IDX][row_idx], addr, "address mismatch");
     assert_eq!(expected_opcode, opcode, "opcode mismatch");
-    assert_eq!(trace[IN_SPAN_COL_IDX][row_idx], Felt::new(in_span), "in_span mismatch");
+    assert_eq!(
+        trace[IN_SPAN_COL_IDX][row_idx],
+        Felt::new_unchecked(in_span),
+        "in_span mismatch"
+    );
     assert_eq!(
         trace[GROUP_COUNT_COL_IDX][row_idx],
-        Felt::new(group_count),
+        Felt::new_unchecked(group_count),
         "group count mismatch"
     );
-    assert_eq!(trace[OP_INDEX_COL_IDX][row_idx], Felt::new(op_idx), "op index mismatch");
+    assert_eq!(
+        trace[OP_INDEX_COL_IDX][row_idx],
+        Felt::new_unchecked(op_idx),
+        "op index mismatch"
+    );
 
     let expected_batch_flags =
         if expected_opcode == opcodes::SPAN || expected_opcode == opcodes::RESPAN {
@@ -1701,7 +1704,7 @@ fn check_op_decoding(
         };
 
     for (i, flag_value) in OP_BATCH_FLAGS_RANGE.zip(expected_batch_flags) {
-        assert_eq!(trace[i][row_idx], flag_value, "op batch flag mismatch at column {}", i);
+        assert_eq!(trace[i][row_idx], flag_value, "op batch flag mismatch at column {i}");
     }
 
     // make sure the op bit extra columns for degree reduction are set correctly
@@ -1781,7 +1784,7 @@ fn build_op_batch_flags(num_groups: usize) -> [Felt; NUM_OP_BATCH_FLAGS] {
 
 use miden_air::trace::FN_HASH_RANGE;
 
-fn get_fn_hash(trace: &SystemTrace, row_idx: usize) -> miden_core::Word {
+fn get_fn_hash(trace: &SystemTrace, row_idx: usize) -> Word {
     let mut result = [ZERO; WORD_SIZE];
     // FN_HASH_RANGE is relative to the full trace, but SystemTrace only has system columns
     // System trace columns are indexed 0..SYS_TRACE_WIDTH, and FN_HASH is columns 2-5
@@ -1809,7 +1812,7 @@ fn get_hasher_state(trace: &DecoderTrace, row_idx: usize) -> [Felt; NUM_HASHER_C
     result
 }
 
-fn get_hasher_state1(trace: &DecoderTrace, row_idx: usize) -> miden_core::Word {
+fn get_hasher_state1(trace: &DecoderTrace, row_idx: usize) -> Word {
     let mut result = [ZERO; WORD_SIZE];
     for (result, column) in result.iter_mut().zip(trace[HASHER_STATE_RANGE].iter()) {
         *result = column[row_idx];
@@ -1817,7 +1820,7 @@ fn get_hasher_state1(trace: &DecoderTrace, row_idx: usize) -> miden_core::Word {
     result.into()
 }
 
-fn get_hasher_state2(trace: &DecoderTrace, row_idx: usize) -> miden_core::Word {
+fn get_hasher_state2(trace: &DecoderTrace, row_idx: usize) -> Word {
     let mut result = [ZERO; WORD_SIZE];
     for (result, column) in result.iter_mut().zip(trace[HASHER_STATE_RANGE].iter().skip(4)) {
         *result = column[row_idx];
@@ -1848,5 +1851,5 @@ pub fn build_op_group(ops: &[Operation]) -> Felt {
         i += 1;
     }
     assert!(i <= OP_GROUP_SIZE, "too many ops");
-    Felt::new(group)
+    Felt::new_unchecked(group)
 }

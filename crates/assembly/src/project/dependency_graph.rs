@@ -52,7 +52,7 @@ impl DependencyGraph {
         let dependency_graph = if let Some(manifest_path) = project.manifest_path() {
             dependency_graph_builder.build_from_path(manifest_path)?
         } else {
-            dependency_graph_builder.build(project.clone())?
+            dependency_graph_builder.build(project)?
         };
 
         Ok(Self { dependency_graph, source_manager })
@@ -264,8 +264,7 @@ impl DependencyGraph {
                     .map(|target| target.inner().clone())
                     .ok_or_else(|| {
                         Report::msg(format!(
-                            "dependency '{}' does not define a library target",
-                            package_id
+                            "dependency '{package_id}' does not define a library target"
                         ))
                     })?;
                 let provenance = self.expected_source_provenance_with_visited(

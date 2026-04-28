@@ -117,13 +117,13 @@ impl fmt::Display for DebugVarInfo {
         write!(f, "var.{}", self.name)?;
 
         if let Some(arg_index) = self.arg_index {
-            write!(f, "[arg{}]", arg_index)?;
+            write!(f, "[arg{arg_index}]")?;
         }
 
         write!(f, " = {}", self.value_location)?;
 
         if let Some(loc) = &self.location {
-            write!(f, " {}", loc)?;
+            write!(f, " {loc}")?;
         }
 
         Ok(())
@@ -174,12 +174,12 @@ pub enum DebugVarLocation {
 impl fmt::Display for DebugVarLocation {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Stack(pos) => write!(f, "stack[{}]", pos),
-            Self::Memory(addr) => write!(f, "mem[{}]", addr),
+            Self::Stack(pos) => write!(f, "stack[{pos}]"),
+            Self::Memory(addr) => write!(f, "mem[{addr}]"),
             Self::Const(val) => write!(f, "const({})", val.as_canonical_u64()),
-            Self::Local(offset) => write!(f, "FMP{:+}", offset),
+            Self::Local(offset) => write!(f, "FMP{offset:+}"),
             Self::FrameBase { global_index, byte_offset } => {
-                write!(f, "global[{}]{:+}", global_index, byte_offset)
+                write!(f, "global[{global_index}]{byte_offset:+}")
             },
             Self::Expression(bytes) => {
                 write!(f, "expr(")?;
@@ -187,7 +187,7 @@ impl fmt::Display for DebugVarLocation {
                     if i > 0 {
                         write!(f, " ")?;
                     }
-                    write!(f, "{:02x}", byte)?;
+                    write!(f, "{byte:02x}")?;
                 }
                 write!(f, ")")
             },
@@ -238,7 +238,7 @@ impl Deserializable for DebugVarLocation {
             1 => Ok(Self::Memory(source.read_u32()?)),
             2 => {
                 let value = source.read_u64()?;
-                Ok(Self::Const(Felt::new(value)))
+                Ok(Self::Const(Felt::new_unchecked(value)))
             },
             3 => {
                 let bytes = source.read_array::<2>()?;
@@ -266,7 +266,7 @@ impl Serializable for DebugVarInfo {
         (*self.name).write_into(target);
         self.value_location.write_into(target);
         self.type_id.write_into(target);
-        self.arg_index.map(|n| n.get()).write_into(target);
+        self.arg_index.map(core::num::NonZero::get).write_into(target);
         self.location.write_into(target);
     }
 }
@@ -332,7 +332,7 @@ mod tests {
     fn debug_var_location_display() {
         assert_eq!(DebugVarLocation::Stack(0).to_string(), "stack[0]");
         assert_eq!(DebugVarLocation::Memory(256).to_string(), "mem[256]");
-        assert_eq!(DebugVarLocation::Const(Felt::new(42)).to_string(), "const(42)");
+        assert_eq!(DebugVarLocation::Const(Felt::new_unchecked(42)).to_string(), "const(42)");
         assert_eq!(DebugVarLocation::Local(-3).to_string(), "FMP-3");
         assert_eq!(
             DebugVarLocation::Expression(vec![0x10, 0x20, 0x30]).to_string(),
@@ -345,7 +345,7 @@ mod tests {
         let locations = [
             DebugVarLocation::Stack(7),
             DebugVarLocation::Memory(0xdead_beef),
-            DebugVarLocation::Const(Felt::new(999)),
+            DebugVarLocation::Const(Felt::new_unchecked(999)),
             DebugVarLocation::Local(-3),
             DebugVarLocation::FrameBase { global_index: 20, byte_offset: -12 },
             DebugVarLocation::Expression(vec![0x10, 0x20, 0x30]),
