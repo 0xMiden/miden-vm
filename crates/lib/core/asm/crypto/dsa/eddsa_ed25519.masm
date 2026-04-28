@@ -221,7 +221,7 @@ end
 #! - `COMM`: `Poseidon2(Poseidon2(Poseidon2(pk) || Poseidon2(k_digest)) || Poseidon2(sig))`
 #! - `TAG`:  `[EDDSA_VERIFY_EVENT, result, 0, 0]`
 #! - `result`: host verification result (1 or 0)
-pub proc verify_prehash_impl
+proc verify_prehash_impl
     emit.EDDSA_VERIFY_EVENT
     # => [pk_ptr, k_digest_ptr, sig_ptr, ...]
 

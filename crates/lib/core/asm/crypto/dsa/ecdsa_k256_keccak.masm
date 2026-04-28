@@ -154,7 +154,7 @@ end
 #!       `Poseidon2(Poseidon2(Poseidon2(pk) || Poseidon2(digest)) || Poseidon2(sig))`
 #! - `TAG`: `[ECDSA_VERIFY_EVENT, result, 0, 0]`
 #! - `result`: 1 if signature is valid, 0 if invalid
-pub proc verify_prehash_impl
+proc verify_prehash_impl
     emit.ECDSA_VERIFY_EVENT
     # => [pk_ptr, digest_ptr, sig_ptr, ...]
 
