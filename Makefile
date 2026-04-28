@@ -45,6 +45,9 @@ FEATURES_CONCURRENT_EXEC := --features concurrent,executable
 FEATURES_METAL_EXEC      := --features concurrent,executable,tracing-forest
 FEATURES_LOG_TREE        := --features concurrent,executable,tracing-forest
 
+# Target triple used when producing release artifacts. Defaults to the host's triple.
+BUILD_TARGET             ?= $(shell rustc -vV | grep host | awk '{print $$2}')
+
 # Per-crate default features
 FEATURES_air             := testing
 FEATURES_assembly        := testing
@@ -236,6 +239,10 @@ check-constraints: ## Check core-lib constraint artifacts for drift
 .PHONY: exec-info
 exec-info: ## Builds an executable with log tree enabled
 	cargo build --profile optimized $(FEATURES_LOG_TREE)
+
+.PHONY: exec-dist
+exec-dist: ## Builds the CLI for $(BUILD_TARGET) with --locked (for release artifact uploads)
+	cargo build --profile optimized $(FEATURES_CONCURRENT_EXEC) --target $(BUILD_TARGET) --locked
 
 # --- examples ------------------------------------------------------------------------------------
 
