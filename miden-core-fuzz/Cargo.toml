@@ -66,8 +66,8 @@ doc = false
 bench = false
 
 [[bin]]
-name = "serialized_mast_forest_new"
-path = "fuzz_targets/serialized_mast_forest_new.rs"
+name = "mast_forest_wire_view_new"
+path = "fuzz_targets/mast_forest_wire_view_new.rs"
 test = false
 doc = false
 bench = false

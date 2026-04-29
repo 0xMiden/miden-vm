@@ -1,4 +1,4 @@
-use alloc::{collections::BTreeMap, vec::Vec};
+use alloc::{borrow::Cow, collections::BTreeMap, vec::Vec};
 use core::mem::size_of;
 
 use super::{
@@ -17,34 +17,21 @@ const FELT_SERIALIZED_SIZE: usize = size_of::<u64>();
 /// Read-only view over a value from forest advice.
 #[derive(Debug)]
 pub struct AdviceValueView<'a> {
-    inner: AdviceValueViewInner<'a>,
-}
-
-#[derive(Debug)]
-enum AdviceValueViewInner<'a> {
-    Borrowed(&'a [Felt]),
-    Owned(Vec<Felt>),
+    inner: Cow<'a, [Felt]>,
 }
 
 impl<'a> AdviceValueView<'a> {
     pub(crate) fn borrowed(values: &'a [Felt]) -> Self {
-        Self {
-            inner: AdviceValueViewInner::Borrowed(values),
-        }
+        Self { inner: Cow::Borrowed(values) }
     }
 
     fn owned(values: Vec<Felt>) -> Self {
-        Self {
-            inner: AdviceValueViewInner::Owned(values),
-        }
+        Self { inner: Cow::Owned(values) }
     }
 
     /// Returns the advice values as a slice.
     pub fn as_slice(&self) -> &[Felt] {
-        match &self.inner {
-            AdviceValueViewInner::Borrowed(values) => values,
-            AdviceValueViewInner::Owned(values) => values.as_slice(),
-        }
+        self.inner.as_ref()
     }
 
     /// Returns the number of field elements in this advice value.
