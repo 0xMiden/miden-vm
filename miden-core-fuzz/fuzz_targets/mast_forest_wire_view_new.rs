@@ -1,22 +1,21 @@
-//! Fuzz target for SerializedMastForest structural inspection.
+//! Fuzz target for MastForestWireView trusted wire-backed access.
 //!
 //! This target focuses on the trusted inspection path exposed by
-//! `SerializedMastForest::new()`. It exercises layout scanning and cheap random-access helpers
+//! `MastForestWireView::new()`. It exercises layout scanning and cheap random-access helpers
 //! without going through full trusted or untrusted materialization.
 //!
-//! Run with: cargo +nightly fuzz run serialized_mast_forest_new --fuzz-dir miden-core-fuzz
+//! Run with: cargo +nightly fuzz run mast_forest_wire_view_new --fuzz-dir miden-core-fuzz
 
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use miden_core::mast::SerializedMastForest;
+use miden_core::mast::MastForestWireView;
 
 fuzz_target!(|data: &[u8]| {
-    let Ok(view) = SerializedMastForest::new(data) else {
+    let Ok(view) = MastForestWireView::new(data) else {
         return;
     };
 
-    let _ = view.is_hashless();
     let _ = view.is_stripped();
     let root_count = view.procedure_root_count();
     let node_count = view.node_count();

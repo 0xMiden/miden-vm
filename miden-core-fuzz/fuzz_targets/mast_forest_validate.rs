@@ -12,10 +12,13 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use miden_core::mast::{UntrustedMastForest, UntrustedMastForestReadOptions};
+use miden_core::{
+    mast::{UntrustedMastForest, UntrustedMastForestReadOptions},
+    serde::DeserializationError,
+};
 
 fuzz_target!(|data: &[u8]| {
-    let validate_untrusted = |result| {
+    let validate_untrusted = |result: Result<UntrustedMastForest, DeserializationError>| {
         if let Ok(untrusted) = result {
             let _ = untrusted.validate();
         }
@@ -26,22 +29,8 @@ fuzz_target!(|data: &[u8]| {
         .with_wire_byte_budget(data.len())
         .with_validation_allocation_budget(data.len());
 
-    // Test the full untrusted deserialization + validation pipeline
-    let Ok(untrusted) = UntrustedMastForest::read_from_bytes(data) else {
-        // Even if the default path rejects early, exercise the explicit-budget variants too.
-        validate_untrusted(UntrustedMastForest::read_from_bytes_with_options(
-            data,
-            small_budget_options,
-        ));
-        validate_untrusted(UntrustedMastForest::read_from_bytes_with_options(
-            data,
-            explicit_budget_options,
-        ));
-        return;
-    };
-
-    // Validation should never panic, even on malformed forests
-    let _ = untrusted.validate();
+    // Test the full untrusted deserialization + validation pipeline.
+    validate_untrusted(UntrustedMastForest::read_from_bytes(data));
 
     // Test budgeted deserialization with a very small budget
     // This should reject most inputs early without panicking
