@@ -51,6 +51,9 @@
 - Speed-up AUX range check trace generation by changing divisors to a flat Vec layout ([#2966](https://github.com/0xMiden/miden-vm/pull/2966)).
 - Removed AIR constraint tagging instrumentation, applied a uniform constraint description style across components, and optimized constraint evaluation ([#2856](https://github.com/0xMiden/miden-vm/pull/2856)).
 
+#### Enhancements
+- Added binary artifact compilation to CI to aid `midenup`'s installation spped (#3029).
+
 ## 0.22.1
 
 #### Enhancements
