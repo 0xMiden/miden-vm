@@ -9,6 +9,8 @@ use alloc::vec::Vec;
 use miden_crypto::utils::{
     ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
 };
+#[cfg(feature = "arbitrary")]
+use proptest::prelude::*;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -45,11 +47,40 @@ use crate::{Idx, IndexVec, IndexedVecError};
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true), types(crate::SerdeTestId, u32))
+)]
 pub struct CsrMatrix<I: Idx, D> {
     /// Flat storage of all data values.
     data: Vec<D>,
     /// Row pointers: row i's data is at `data[indptr[i]..indptr[i+1]]`.
     indptr: IndexVec<I, usize>,
+}
+
+#[cfg(feature = "arbitrary")]
+impl<I, D> Arbitrary for CsrMatrix<I, D>
+where
+    I: Idx + 'static,
+    D: Arbitrary + 'static,
+    D::Strategy: 'static,
+{
+    type Parameters = D::Parameters;
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(args: Self::Parameters) -> Self::Strategy {
+        let row = proptest::collection::vec(any_with::<D>(args), 0..8);
+
+        proptest::collection::vec(row, 0..16)
+            .prop_map(|rows| {
+                let mut matrix = Self::new();
+                for row in rows {
+                    matrix.push_row(row).expect("generated row count fits in u32");
+                }
+                matrix
+            })
+            .boxed()
+    }
 }
 
 impl<I: Idx, D> Default for CsrMatrix<I, D> {

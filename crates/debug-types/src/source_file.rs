@@ -6,6 +6,8 @@ use alloc::{
 };
 use core::{fmt, num::NonZeroU32, ops::Range};
 
+#[cfg(feature = "arbitrary")]
+use proptest::prelude::*;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -19,6 +21,22 @@ pub enum SourceLanguage {
     Masm,
     Rust,
     Other(&'static str),
+}
+
+#[cfg(feature = "arbitrary")]
+impl Arbitrary for SourceLanguage {
+    type Parameters = ();
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        prop_oneof![
+            Just(Self::Masm),
+            Just(Self::Rust),
+            Just(Self::Other("other")),
+            Just(Self::Other("unknown")),
+        ]
+        .boxed()
+    }
 }
 
 impl AsRef<str> for SourceLanguage {
@@ -771,6 +789,7 @@ fn compute_line_starts(text: &str, text_offset: Option<u32>) -> Vec<ByteIndex> {
 #[derive(Default, Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
 #[cfg_attr(feature = "serde", serde(transparent))]
+#[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
 pub struct ByteIndex(pub u32);
 
 impl ByteIndex {
@@ -866,6 +885,16 @@ impl fmt::Display for ByteIndex {
     }
 }
 
+#[cfg(feature = "arbitrary")]
+impl Arbitrary for ByteIndex {
+    type Parameters = ();
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        any::<u32>().prop_map(Self).boxed()
+    }
+}
+
 /// An offset in bytes relative to some [ByteIndex]
 #[derive(Default, Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ByteOffset(i64);
@@ -928,6 +957,7 @@ macro_rules! declare_dual_number_and_index_type {
         #[derive(Default, Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
         #[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
         #[cfg_attr(feature = "serde", serde(transparent))]
+        #[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
         pub struct $index_name(pub u32);
 
         impl $index_name {
@@ -1047,10 +1077,24 @@ macro_rules! declare_dual_number_and_index_type {
             }
         }
 
+        #[cfg(feature = "arbitrary")]
+        impl Arbitrary for $index_name {
+            type Parameters = ();
+            type Strategy = BoxedStrategy<Self>;
+
+            fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+                any::<u32>().prop_map(Self).boxed()
+            }
+        }
+
         #[doc = concat!("A one-indexed ", $description, " number")]
         #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
         #[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
         #[cfg_attr(feature = "serde", serde(transparent))]
+        #[cfg_attr(
+            all(feature = "arbitrary", test),
+            miden_test_serde_macros::serde_test(binary_serde(true))
+        )]
         pub struct $number_name(NonZeroU32);
 
         impl Default for $number_name {
@@ -1227,6 +1271,30 @@ impl Deserializable for ColumnNumber {
         Self::new(value).ok_or_else(|| {
             DeserializationError::InvalidValue("column number cannot be zero".into())
         })
+    }
+}
+
+#[cfg(feature = "arbitrary")]
+impl Arbitrary for LineNumber {
+    type Parameters = ();
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        (1..=u32::MAX)
+            .prop_map(|value| Self::new(value).expect("non-zero value"))
+            .boxed()
+    }
+}
+
+#[cfg(feature = "arbitrary")]
+impl Arbitrary for ColumnNumber {
+    type Parameters = ();
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        (1..=u32::MAX)
+            .prop_map(|value| Self::new(value).expect("non-zero value"))
+            .boxed()
     }
 }
 

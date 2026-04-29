@@ -57,6 +57,8 @@ use core::{
 };
 
 use miden_utils_sync::OnceLockCompat;
+#[cfg(any(test, feature = "arbitrary"))]
+use proptest::prelude::*;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -116,6 +118,10 @@ mod tests;
 /// A [`MastForest`] does not have an entrypoint, and hence is not executable. A
 /// [`crate::program::Program`] can be built from a [`MastForest`] to specify an entrypoint.
 #[derive(Clone, Debug, Default)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true))
+)]
 pub struct MastForest {
     /// All of the nodes local to the trees comprising the MAST forest.
     nodes: IndexVec<MastNodeId, MastNode>,
@@ -647,6 +653,10 @@ impl MastForest {
         before_enter: &[DecoratorId],
         after_exit: &[DecoratorId],
     ) {
+        if before_enter.is_empty() && after_exit.is_empty() {
+            return;
+        }
+
         self.debug_info.register_node_decorators(node_id, before_enter, after_exit);
     }
 
@@ -1076,7 +1086,7 @@ impl fmt::Display for MastNodeId {
 }
 
 #[cfg(any(test, feature = "arbitrary"))]
-impl proptest::prelude::Arbitrary for MastNodeId {
+impl Arbitrary for MastNodeId {
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
@@ -1084,7 +1094,7 @@ impl proptest::prelude::Arbitrary for MastNodeId {
         any::<u32>().prop_map(MastNodeId).boxed()
     }
 
-    type Strategy = proptest::prelude::BoxedStrategy<Self>;
+    type Strategy = BoxedStrategy<Self>;
 }
 
 // ITERATOR
@@ -1127,6 +1137,10 @@ impl Iterator for SubtreeIterator<'_> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(transparent))]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true))
+)]
 pub struct DecoratorId(u32);
 
 impl DecoratorId {
@@ -1181,6 +1195,16 @@ impl fmt::Display for DecoratorId {
     }
 }
 
+#[cfg(feature = "arbitrary")]
+impl Arbitrary for DecoratorId {
+    type Parameters = ();
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        any::<u32>().prop_map(Self::from).boxed()
+    }
+}
+
 impl Serializable for DecoratorId {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         self.0.write_into(target)
@@ -1204,6 +1228,10 @@ impl Deserializable for DecoratorId {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(transparent))]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true))
+)]
 pub struct AsmOpId(u32);
 
 impl AsmOpId {
@@ -1230,6 +1258,16 @@ impl From<AsmOpId> for u32 {
 impl fmt::Display for AsmOpId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "AsmOpId({})", self.0)
+    }
+}
+
+#[cfg(feature = "arbitrary")]
+impl Arbitrary for AsmOpId {
+    type Parameters = ();
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        any::<u32>().prop_map(Self::from).boxed()
     }
 }
 

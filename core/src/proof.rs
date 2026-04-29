@@ -3,6 +3,8 @@ use alloc::{
     vec::Vec,
 };
 
+#[cfg(feature = "arbitrary")]
+use proptest::prelude::*;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -106,6 +108,10 @@ impl ExecutionProof {
 /// A hash function used during STARK proof generation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true))
+)]
 #[repr(u8)]
 pub enum HashFunction {
     /// BLAKE3 hash function with 256-bit output.
@@ -162,6 +168,24 @@ impl TryFrom<&str> for HashFunction {
             "keccak" => Ok(Self::Keccak),
             _ => Err(InvalidHashFunctionError { hash_function: hash_fn_str.to_string() }),
         }
+    }
+}
+
+#[cfg(feature = "arbitrary")]
+impl Arbitrary for HashFunction {
+    type Parameters = ();
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        any::<u8>()
+            .prop_map(|tag| match tag % 5 {
+                0 => Self::Blake3_256,
+                1 => Self::Rpo256,
+                2 => Self::Rpx256,
+                3 => Self::Poseidon2,
+                _ => Self::Keccak,
+            })
+            .boxed()
     }
 }
 

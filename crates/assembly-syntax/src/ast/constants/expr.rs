@@ -407,6 +407,10 @@ impl proptest::arbitrary::Arbitrary for ConstantExpr {
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 #[repr(u8)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true))
+)]
 pub enum ConstantOp {
     Add,
     Sub,
@@ -508,6 +512,10 @@ impl proptest::arbitrary::Arbitrary for ConstantOp {
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 #[repr(u8)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true))
+)]
 pub enum HashKind {
     /// Reduce a string to a word using Blake3 hash function
     Word,

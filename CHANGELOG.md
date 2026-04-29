@@ -8,6 +8,7 @@
 - Fixed Falcon `mod_12289` remainder validation and `u64::rotr` overflow handling for rotations by `0` and `32` ([#2968](https://github.com/0xMiden/miden-vm/pull/2968)).
 - Hardened SHA256 message word range checks and U32ADD/U32ADD3 carry constraints, updating recursive verifier relation digest artifacts ([#3021](https://github.com/0xMiden/miden-vm/pull/3021)).
 - [BREAKING] Removed internal `_impl` precompile helpers from the core-lib API, hardened proof deserialization and debug storage errors, and added u256 regression vectors ([#3026](https://github.com/0xMiden/miden-vm/pull/3026)).
+- Fixed `u256::wrapping_mul` so it preserves caller stack values below its operands ([#3071](https://github.com/0xMiden/miden-vm/pull/3071)).
 
 #### Bug Fixes
 
@@ -19,6 +20,7 @@
 - Fixed the release dry-run publish cycle between `miden-air` and `miden-ace-codegen`, and preserved leaf-only DAG imports with explicit snapshots ([#2931](https://github.com/0xMiden/miden-vm/pull/2931)).
 - Added regression coverage for the exact `max_num_continuations` continuation-stack boundary ([#2995](https://github.com/0xMiden/miden-vm/pull/2995)).
 - Fixed AEAD padding handling so encrypt does not overwrite memory next to the plaintext buffer and decrypt leaves the plaintext output tail untouched ([#3008](https://github.com/0xMiden/miden-vm/pull/3008)).
+- Fixed MAST compaction after debug info is cleared so compiler-generated packages do not grow ([#3044](https://github.com/0xMiden/miden-vm/pull/3044)).
 
 #### Changes
 
@@ -40,8 +42,10 @@
 - Refactor trace generation to row-major format ([#2937](https://github.com/0xMiden/miden-vm/pull/2937)).
 - Documented non-overlap requirement for `memcopy_words`, `memcopy_elements`, and AEAD encrypt/decrypt procedures ([#2941](https://github.com/0xMiden/miden-vm/pull/2941)).
 - Aligned AEAD key/nonce stack-order documentation and handler comments with the runtime contract ([#3036](https://github.com/0xMiden/miden-vm/pull/3036)).
+- Aligned `core_lib::math::u256` user docs with unified LE stack limb ordering (`a0/b0` on top), removing conflicting `[b7..b0, a7..a0]` notation ([#3066](https://github.com/0xMiden/miden-vm/pull/3066)).
 - Added chainable `Test` builders for common test setup in `miden-utils-testing` ([#2957](https://github.com/0xMiden/miden-vm/pull/2957)).
 - Added fuzz coverage for package semantic deserialization and project parsing, loading, and assembly ([#3015](https://github.com/0xMiden/miden-vm/pull/3015)).
+- Made serde opt-in for package crates, and added macro-based binary and serde roundtrip tests for Arbitrary serialization types ([#3058](https://github.com/0xMiden/miden-vm/pull/3058)).
 - Speed-up AUX range check trace generation by changing divisors to a flat Vec layout ([#2966](https://github.com/0xMiden/miden-vm/pull/2966)).
 - Removed AIR constraint tagging instrumentation, applied a uniform constraint description style across components, and optimized constraint evaluation ([#2856](https://github.com/0xMiden/miden-vm/pull/2856)).
 
