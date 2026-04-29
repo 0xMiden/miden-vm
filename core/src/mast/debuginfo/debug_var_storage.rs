@@ -10,6 +10,8 @@ use alloc::{
 };
 
 use miden_utils_indexing::{Idx, IndexVec};
+#[cfg(feature = "arbitrary")]
+use proptest::prelude::*;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -28,6 +30,10 @@ use crate::{
 /// variable information.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true))
+)]
 pub struct DebugVarId(u32);
 
 impl DebugVarId {
@@ -65,6 +71,16 @@ impl From<u32> for DebugVarId {
 impl From<DebugVarId> for u32 {
     fn from(value: DebugVarId) -> Self {
         value.0
+    }
+}
+
+#[cfg(feature = "arbitrary")]
+impl Arbitrary for DebugVarId {
+    type Parameters = ();
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        any::<u32>().prop_map(Self::from).boxed()
     }
 }
 

@@ -240,7 +240,10 @@ impl Arbitrary for TypeExport {
 /// A library exports a set of one or more procedures. Currently, all exported procedures belong
 /// to the same top-level namespace.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true))
+)]
 pub struct Library {
     /// The content hash of this library, formed by hashing the roots of all exports in
     /// lexicographical order (by digest, not procedure name)

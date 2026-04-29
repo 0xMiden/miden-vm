@@ -13,16 +13,21 @@ repository.workspace = true
 rust-version.workspace = true
 edition.workspace = true
 
+[package.metadata.cargo-shear]
+ignored = ["serde_json"]
+
 [features]
-default = ["std", "serde"]
+default = ["std"]
+arbitrary = ["std", "dep:proptest", "miden-mast-package/arbitrary"]
 resolver = ["std", "dep:pubgrub", "dep:smallvec"]
-std = ["miden-assembly-syntax/std", "miden-core/std", "serde/std"]
+std = ["miden-assembly-syntax/std", "miden-core/std", "proptest?/std", "serde?/std"]
 serde = ["dep:serde", "miden-assembly-syntax/serde", "miden-core/serde", "miden-mast-package/serde"]
 
 [dependencies]
 miden-assembly-syntax.workspace = true
 miden-core.workspace = true
 miden-mast-package.workspace = true
+proptest = { workspace = true, optional = true }
 pubgrub = { version = "0.3", optional = true }
 serde = { workspace = true, optional = true }
 smallvec = { workspace = true, optional = true }
@@ -30,6 +35,9 @@ thiserror.workspace = true
 
 [dev-dependencies]
 miden-core.workspace = true
+miden-test-serde-macros.workspace = true
+proptest.workspace = true
+serde_json.workspace = true
 
 [lints.rust]
 unused_assignments = "allow"

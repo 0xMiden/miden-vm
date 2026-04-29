@@ -1,9 +1,7 @@
+#[cfg(all(feature = "std", feature = "serde"))]
+use std::string::{String, ToString};
 #[cfg(feature = "std")]
-use std::{
-    boxed::Box,
-    path::Path,
-    string::{String, ToString},
-};
+use std::{boxed::Box, path::Path};
 
 #[cfg(all(feature = "std", feature = "serde"))]
 use miden_assembly_syntax::debuginfo::SourceManager;
