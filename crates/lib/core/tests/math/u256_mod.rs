@@ -96,6 +96,62 @@ fn bitwise_and_comparison_regression_vectors() {
     }
 }
 
+// ADDITION
+// ================================================================================================
+
+#[test]
+fn overflowing_add_edge_cases() {
+    // Carry-propagation cases that the regression-vector pairs do not cover, exercising single-
+    // limb carries, cross-word carries, and the 2^256 wrap point.
+    let source = "
+        use miden::core::math::u256
+        begin
+            exec.u256::overflowing_add
+        end";
+
+    let max = U256::from_le_u32_limbs([u32::MAX; 8]);
+    let one = U256::from_le_u32_limbs([1, 0, 0, 0, 0, 0, 0, 0]);
+    let one_in_limb1 = U256::from_le_u32_limbs([0, 1, 0, 0, 0, 0, 0, 0]);
+    let high_limb_max = U256::from_le_u32_limbs([u32::MAX, 0, 0, 0, 0, 0, 0, 0]);
+    let lo_word_max = U256::from_le_u32_limbs([u32::MAX, u32::MAX, u32::MAX, u32::MAX, 0, 0, 0, 0]);
+
+    let cases = [
+        // a + b with no overflow
+        (U256::ZERO, U256::ZERO),
+        (U256::ZERO, one),
+        // single-limb carry into limb 1
+        (high_limb_max, one),
+        // carry propagating through several limbs
+        (
+            U256::from_le_u32_limbs([u32::MAX, u32::MAX, u32::MAX, 0, 0, 0, 0, 0]),
+            one,
+        ),
+        // carry crossing the lo/hi 128-bit boundary
+        (lo_word_max, one),
+        // carry propagates through the bottom 7 limbs and is absorbed by the top limb (no overflow)
+        (
+            U256::from_le_u32_limbs([u32::MAX, u32::MAX, u32::MAX, u32::MAX, u32::MAX, u32::MAX, u32::MAX, 0]),
+            one,
+        ),
+        // overflow at the top: max + 1 = 0 with overflow=1
+        (max, one),
+        // overflow at the top via limb 1 increment
+        (max, one_in_limb1),
+        // saturated max + max = max-1 with overflow=1
+        (max, max),
+        // commutativity sanity: pseudo-random pair both orderings
+        pseudo_random_pair(),
+    ];
+
+    for (a, b) in cases {
+        let (overflow, sum) = a.overflowing_add(b);
+        let operands = [b.to_le_limbs(), a.to_le_limbs()].concat();
+        let mut expected = vec![overflow];
+        expected.extend(sum.to_le_limbs());
+        build_test!(source, &operands).expect_stack(&expected);
+    }
+}
+
 // SUBTRACTION
 // ================================================================================================
 
@@ -150,9 +206,117 @@ fn wrapping_sub_underflow() {
     build_test!(source, &operands).expect_stack(&result);
 }
 
+// EQUALITY
+// ================================================================================================
+
+#[test]
+fn eq_edge_cases() {
+    // Cases beyond the regression-pair coverage: equality at zero/max, and inequality isolated to
+    // a single limb at each position (lo word and hi word, plus the 32-bit boundary).
+    let source = "
+        use miden::core::math::u256
+        begin
+            exec.u256::eq
+        end";
+
+    let max = U256::from_le_u32_limbs([u32::MAX; 8]);
+
+    // (a, b, expected_eq)
+    let cases: [(U256, U256, u64); 11] = [
+        (U256::ZERO, U256::ZERO, 1),
+        (max, max, 1),
+        (U256::from_bit(0), U256::from_bit(0), 1),
+        (U256::from_bit(255), U256::from_bit(255), 1),
+        // differ in exactly one limb, varying the position to exercise both eqw comparisons
+        (U256::ZERO, U256::from_le_u32_limbs([1, 0, 0, 0, 0, 0, 0, 0]), 0),
+        (U256::ZERO, U256::from_le_u32_limbs([0, 1, 0, 0, 0, 0, 0, 0]), 0),
+        (U256::ZERO, U256::from_le_u32_limbs([0, 0, 0, 1, 0, 0, 0, 0]), 0),
+        (U256::ZERO, U256::from_le_u32_limbs([0, 0, 0, 0, 1, 0, 0, 0]), 0),
+        (U256::ZERO, U256::from_le_u32_limbs([0, 0, 0, 0, 0, 0, 0, 1]), 0),
+        // full match in lo word, mismatch in hi word
+        (
+            U256::from_le_u32_limbs([1, 2, 3, 4, 5, 6, 7, 8]),
+            U256::from_le_u32_limbs([1, 2, 3, 4, 5, 6, 7, 9]),
+            0,
+        ),
+        // full match in hi word, mismatch in lo word
+        (
+            U256::from_le_u32_limbs([1, 2, 3, 4, 5, 6, 7, 8]),
+            U256::from_le_u32_limbs([1, 2, 3, 5, 5, 6, 7, 8]),
+            0,
+        ),
+    ];
+
+    for (a, b, expected_eq) in cases {
+        let operands = [b.to_le_limbs(), a.to_le_limbs()].concat();
+        build_test!(source, &operands).expect_stack(&[expected_eq]);
+    }
+}
+
 proptest! {
     #[test]
-    fn overflowing_sub_proptest(a in prop::array::uniform8(any::<u32>()), b in prop::array::uniform8(any::<u32>())) {
+    fn overflowing_add_proptest(
+        a in prop::array::uniform8(boundary_biased_u32()),
+        b in prop::array::uniform8(boundary_biased_u32()),
+    ) {
+        let source = "
+            use miden::core::math::u256
+            begin
+                exec.u256::overflowing_add
+            end";
+
+        let a = U256::from_le_u32_limbs(a);
+        let b = U256::from_le_u32_limbs(b);
+        let (overflow, sum) = a.overflowing_add(b);
+        let operands = [b.to_le_limbs(), a.to_le_limbs()].concat();
+        let mut expected = vec![overflow];
+        expected.extend(sum.to_le_limbs());
+        build_test!(source, &operands).prop_expect_stack(&expected)?;
+    }
+
+    #[test]
+    fn wrapping_add_proptest(
+        a in prop::array::uniform8(boundary_biased_u32()),
+        b in prop::array::uniform8(boundary_biased_u32()),
+    ) {
+        let source = "
+            use miden::core::math::u256
+            begin
+                exec.u256::wrapping_add
+            end";
+
+        let a = U256::from_le_u32_limbs(a);
+        let b = U256::from_le_u32_limbs(b);
+        let result = a.wrapping_add(b);
+        let operands = [b.to_le_limbs(), a.to_le_limbs()].concat();
+        build_test!(source, &operands).prop_expect_stack(&result.to_le_limbs())?;
+    }
+
+    #[test]
+    fn widening_add_proptest(
+        a in prop::array::uniform8(boundary_biased_u32()),
+        b in prop::array::uniform8(boundary_biased_u32()),
+    ) {
+        let source = "
+            use miden::core::math::u256
+            begin
+                exec.u256::widening_add
+            end";
+
+        let a = U256::from_le_u32_limbs(a);
+        let b = U256::from_le_u32_limbs(b);
+        let (sum, overflow) = a.widening_add(b);
+        let operands = [b.to_le_limbs(), a.to_le_limbs()].concat();
+        let mut expected = sum.to_le_limbs();
+        expected.push(overflow);
+        build_test!(source, &operands).prop_expect_stack(&expected)?;
+    }
+
+    #[test]
+    fn overflowing_sub_proptest(
+        a in prop::array::uniform8(boundary_biased_u32()),
+        b in prop::array::uniform8(boundary_biased_u32()),
+    ) {
         let source = "
             use miden::core::math::u256
             begin
@@ -165,11 +329,14 @@ proptest! {
         let operands = [b.to_le_limbs(), a.to_le_limbs()].concat();
         let mut expected = vec![underflow];
         expected.extend(result);
-        build_test!(source, &operands).expect_stack(&expected);
+        build_test!(source, &operands).prop_expect_stack(&expected)?;
     }
 
     #[test]
-    fn wrapping_sub_proptest(a in prop::array::uniform8(any::<u32>()), b in prop::array::uniform8(any::<u32>())) {
+    fn wrapping_sub_proptest(
+        a in prop::array::uniform8(boundary_biased_u32()),
+        b in prop::array::uniform8(boundary_biased_u32()),
+    ) {
         let source = "
             use miden::core::math::u256
             begin
@@ -180,7 +347,38 @@ proptest! {
         let b = U256::from_le_u32_limbs(b);
         let (_, result) = expected_sub(&a, &b);
         let operands = [b.to_le_limbs(), a.to_le_limbs()].concat();
-        build_test!(source, &operands).expect_stack(&result);
+        build_test!(source, &operands).prop_expect_stack(&result)?;
+    }
+
+    #[test]
+    fn eq_proptest(
+        a in prop::array::uniform8(boundary_biased_u32()),
+        b in prop::array::uniform8(boundary_biased_u32()),
+    ) {
+        let source = "
+            use miden::core::math::u256
+            begin
+                exec.u256::eq
+            end";
+
+        let a = U256::from_le_u32_limbs(a);
+        let b = U256::from_le_u32_limbs(b);
+        let operands = [b.to_le_limbs(), a.to_le_limbs()].concat();
+        build_test!(source, &operands).prop_expect_stack(&[a.eq_u64(b)])?;
+    }
+
+    #[test]
+    fn eq_proptest_self(a in prop::array::uniform8(boundary_biased_u32())) {
+        // Self-equality must always hold.
+        let source = "
+            use miden::core::math::u256
+            begin
+                exec.u256::eq
+            end";
+
+        let a = U256::from_le_u32_limbs(a);
+        let operands = [a.to_le_limbs(), a.to_le_limbs()].concat();
+        build_test!(source, &operands).prop_expect_stack(&[1])?;
     }
 }
 
@@ -347,6 +545,21 @@ fn regression_pairs() -> Vec<(U256, U256)> {
         (U256::from_bit(64), U256::from_bit(128)),
         (U256::from_bit(127), U256::from_bit(127)),
         (rand_a, rand_b),
+    ]
+}
+
+/// Strategy that mixes 32-bit boundary values with uniformly random ones. Each variant has equal
+/// probability of being sampled; the boundary cases stress carry/borrow handling and the sign-bit
+/// position within a limb.
+fn boundary_biased_u32() -> impl Strategy<Value = u32> {
+    prop_oneof![
+        Just(0u32),
+        Just(1u32),
+        Just(u32::MAX),
+        Just(u32::MAX - 1),
+        Just(0x7FFFFFFF),
+        Just(0x80000000),
+        any::<u32>(),
     ]
 }
 
