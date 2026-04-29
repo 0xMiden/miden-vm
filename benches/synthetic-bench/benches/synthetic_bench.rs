@@ -23,7 +23,7 @@ use criterion::{BatchSize, Criterion, SamplingMode, criterion_group, criterion_m
 use miden_processor::{
     DefaultHost, ExecutionOptions, FastProcessor, StackInputs, advice::AdviceInputs,
 };
-use miden_vm::{Assembler, Program, ProgramInfo, ProvingOptions, prove_sync};
+use miden_vm::{Assembler, HashFunction, Program, ProgramInfo, ProvingOptions, prove_sync};
 use miden_vm_synthetic_bench::{
     calibrator::{Calibration, calibrate, measure_program},
     snapshot::{TraceShape, TraceSnapshot},
@@ -31,6 +31,9 @@ use miden_vm_synthetic_bench::{
     solver::{Plan, emit, solve},
     verifier::VerificationReport,
 };
+
+/// Hash function used for STARK `prove` and `verify` axes.
+const BENCH_HASH: HashFunction = HashFunction::Poseidon2;
 
 /// Builds the per-iteration inputs shared by the `exec` and `trace_prep` axes.
 fn processor_inputs(program: &Program) -> (DefaultHost, Program, FastProcessor) {
@@ -235,7 +238,7 @@ fn bench_one_scenario(
                         advice,
                         &mut host,
                         ExecutionOptions::default(),
-                        ProvingOptions::default(),
+                        ProvingOptions::new(BENCH_HASH),
                     )
                     .expect("prove"),
                 );
@@ -254,7 +257,7 @@ fn bench_one_scenario(
             AdviceInputs::default(),
             &mut host,
             ExecutionOptions::default(),
-            ProvingOptions::default(),
+            ProvingOptions::new(BENCH_HASH),
         )
         .expect("prove for verify setup")
     };

@@ -218,3 +218,10 @@ Env vars:
 - `SYNTH_MASM_WRITE=1` -- dump each emitted MASM program to
   `target/synthetic_bench_<producer-stem>__<scenario-slug>.masm` for
   inspection.
+
+The `prove` and `verify` axes use `HashFunction::Poseidon2` for STARK
+proof generation (see the `BENCH_HASH` constant in `benches/synthetic_bench.rs`).
+
+## License
+
+This project is dual-licensed under the [MIT](http://opensource.org/licenses/MIT) and [Apache 2.0](https://opensource.org/license/apache-2-0) licenses.
