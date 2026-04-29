@@ -1,3 +1,5 @@
+#[cfg(feature = "arbitrary")]
+use alloc::vec;
 use alloc::{
     borrow::{Cow, ToOwned},
     format,
@@ -9,6 +11,8 @@ use miden_assembly_syntax::DisplayHex;
 use miden_core::serde::{
     ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
 };
+#[cfg(feature = "arbitrary")]
+use proptest::prelude::*;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -16,6 +20,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(transparent))]
+#[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
 #[repr(transparent)]
 pub struct SectionId(Cow<'static, str>);
 
@@ -155,5 +160,51 @@ impl Deserializable for Section {
         let len = source.read_usize()?;
         let bytes = source.read_slice(len)?;
         Ok(Section { id, data: Cow::Owned(bytes.to_owned()) })
+    }
+}
+
+#[cfg(feature = "arbitrary")]
+impl Arbitrary for SectionId {
+    type Parameters = ();
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        use alloc::string::String;
+
+        let builtins = proptest::sample::select(vec![
+            Self::DEBUG_TYPES,
+            Self::DEBUG_SOURCES,
+            Self::DEBUG_FUNCTIONS,
+            Self::ACCOUNT_COMPONENT_METADATA,
+            Self::PROJECT_SOURCE_PROVENANCE,
+            Self::KERNEL,
+        ]);
+
+        let custom = (
+            proptest::prop_oneof![
+                proptest::char::range('a', 'z'),
+                proptest::char::range('A', 'Z'),
+                Just('_'),
+            ],
+            proptest::collection::vec(
+                proptest::prop_oneof![
+                    proptest::char::range('a', 'z'),
+                    proptest::char::range('A', 'Z'),
+                    proptest::char::range('0', '9'),
+                    Just('.'),
+                    Just('_'),
+                    Just('-'),
+                ],
+                0..31,
+            ),
+        )
+            .prop_map(|(first, rest)| {
+                let mut name = String::with_capacity(rest.len() + 1);
+                name.push(first);
+                name.extend(rest);
+                Self::custom(name).expect("generated custom section ids are valid")
+            });
+
+        proptest::prop_oneof![builtins, custom].boxed()
     }
 }
