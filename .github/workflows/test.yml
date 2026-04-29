@@ -1,5 +1,10 @@
 name: test
 
+env:
+  # Use Github Action's cache as a backend store for sccache.
+  SCCACHE_GHA_ENABLED: "true"
+  RUSTC_WRAPPER: "sccache"
+
 on:
   push:
     branches: [main, next]
@@ -19,6 +24,8 @@ jobs:
           persist-credentials: false
       - name: Cleanup large tools for build space
         uses: ./.github/actions/cleanup-runner
+      - name: Install rust
+        run: rustup toolchain install --no-self-update
       # Do not pin taiki-e's moving tool shortcut tags by hash. Pin a released
       # install-action commit and set tool explicitly, or zizmor's
       # impostor-commit audit can flag stale shortcut-tag hashes.
@@ -29,8 +36,8 @@ jobs:
       - uses: WarpBuilds/rust-cache@9d0cc3090d9c87de74ea67617b246e978735b1a1 # v2.9.1
         with:
           save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/next' }}
-      - name: Install rust
-        run: rustup update --no-self-update
+      - name: Run sccache-cache
+        uses: mozilla-actions/sccache-action@v0.0.10
       - name: Build tests
         run: make test-build
       - name: test
