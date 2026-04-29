@@ -1260,6 +1260,42 @@ fn mast_forest_merge_preserves_asm_op_mappings_for_deduplicated_nodes() {
 }
 
 #[test]
+fn mast_forest_merge_keeps_same_blocks_with_different_asm_ops_distinct() {
+    let mut forest_lhs = MastForest::new();
+    let lhs_block_id = block_foo().add_to_forest(&mut forest_lhs).unwrap();
+    forest_lhs.make_root(lhs_block_id);
+
+    let lhs_asm_op = AssemblyOp::new(None, "proc::foo".into(), 1, "lhs-op".into());
+    let lhs_asm_op_id = forest_lhs.debug_info_mut().add_asm_op(lhs_asm_op.clone()).unwrap();
+    forest_lhs
+        .debug_info_mut()
+        .register_asm_ops(lhs_block_id, 2, vec![(0, lhs_asm_op_id)])
+        .unwrap();
+
+    let mut forest_rhs = MastForest::new();
+    let rhs_block_id = block_foo().add_to_forest(&mut forest_rhs).unwrap();
+    forest_rhs.make_root(rhs_block_id);
+
+    let rhs_asm_op = AssemblyOp::new(None, "proc::foo".into(), 1, "rhs-op".into());
+    let rhs_asm_op_id = forest_rhs.debug_info_mut().add_asm_op(rhs_asm_op.clone()).unwrap();
+    forest_rhs
+        .debug_info_mut()
+        .register_asm_ops(rhs_block_id, 2, vec![(0, rhs_asm_op_id)])
+        .unwrap();
+
+    let (merged, root_maps) = MastForest::merge([&forest_lhs, &forest_rhs]).unwrap();
+    let mapped_lhs_block = root_maps.map_root(0, &lhs_block_id).unwrap();
+    let mapped_rhs_block = root_maps.map_root(1, &rhs_block_id).unwrap();
+
+    assert_ne!(
+        mapped_lhs_block, mapped_rhs_block,
+        "identical blocks with different asm-op content must not collapse"
+    );
+    assert_eq!(merged.get_assembly_op(mapped_lhs_block, Some(0)), Some(&lhs_asm_op));
+    assert_eq!(merged.get_assembly_op(mapped_rhs_block, Some(0)), Some(&rhs_asm_op));
+}
+
+#[test]
 fn mast_forest_merge_prefers_richer_asm_op_mappings_for_deduplicated_nodes() {
     let mut forest_coarse = MastForest::new();
     let coarse_block_id = block_foo().add_to_forest(&mut forest_coarse).unwrap();
@@ -1369,14 +1405,14 @@ fn mast_forest_merge_equal_richness_asm_op_conflicts_choose_whole_mapping() {
     let asm_rhs_only = AssemblyOp::new(None, "proc::foo".into(), 1, "rhs-only".into());
 
     let lhs_shared_id = forest_lhs.debug_info_mut().add_asm_op(asm_shared.clone()).unwrap();
-    let lhs_only_id = forest_lhs.debug_info_mut().add_asm_op(asm_lhs_only.clone()).unwrap();
+    let lhs_only_id = forest_lhs.debug_info_mut().add_asm_op(asm_lhs_only).unwrap();
     forest_lhs
         .debug_info_mut()
         .register_asm_ops(lhs_block_id, 2, vec![(0, lhs_shared_id), (1, lhs_only_id)])
         .unwrap();
 
-    let rhs_only_id = forest_rhs.debug_info_mut().add_asm_op(asm_rhs_only.clone()).unwrap();
-    let rhs_shared_id = forest_rhs.debug_info_mut().add_asm_op(asm_shared.clone()).unwrap();
+    let rhs_only_id = forest_rhs.debug_info_mut().add_asm_op(asm_rhs_only).unwrap();
+    let rhs_shared_id = forest_rhs.debug_info_mut().add_asm_op(asm_shared).unwrap();
     forest_rhs
         .debug_info_mut()
         .register_asm_ops(rhs_block_id, 2, vec![(0, rhs_only_id), (1, rhs_shared_id)])
