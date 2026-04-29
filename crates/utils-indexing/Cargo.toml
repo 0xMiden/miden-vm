@@ -12,9 +12,13 @@ authors.workspace = true
 homepage.workspace = true
 repository.workspace = true
 
+[package.metadata.cargo-shear]
+ignored = ["serde_json"]
+
 [features]
+arbitrary = ["std", "dep:proptest"]
 default = ["std"]
-std = []
+std = ["proptest?/std"]
 serde = ["dep:serde"]
 
 [dependencies]
@@ -23,6 +27,10 @@ miden-crypto.workspace = true
 thiserror.workspace = true
 
 # Optional dependencies
+proptest = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
 
 [dev-dependencies]
+miden-test-serde-macros.workspace = true
+proptest.workspace = true
+serde_json.workspace = true

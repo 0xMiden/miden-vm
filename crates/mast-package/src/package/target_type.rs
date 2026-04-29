@@ -3,6 +3,8 @@ use alloc::string::String;
 use alloc::{boxed::Box, string::ToString};
 use core::fmt;
 
+#[cfg(all(feature = "arbitrary", test))]
+use miden_core::serde::{Deserializable, Serializable};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as DeError};
 
@@ -15,7 +17,10 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as DeErr
 /// component, a note script, etc.).
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(proptest_derive::Arbitrary))]
-#[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true))
+)]
 #[non_exhaustive]
 #[repr(u8)]
 pub enum TargetType {

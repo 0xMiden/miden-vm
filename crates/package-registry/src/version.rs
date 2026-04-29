@@ -2,6 +2,10 @@ use core::{borrow::Borrow, fmt, str::FromStr};
 
 pub use miden_assembly_syntax::semver::{Error as SemVerError, Version as SemVer};
 use miden_core::Word;
+#[cfg(feature = "arbitrary")]
+use miden_core::utils::hash_string_to_word;
+#[cfg(feature = "arbitrary")]
+use proptest::prelude::*;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -14,6 +18,24 @@ pub enum InvalidVersionError {
     Digest(&'static str),
     #[error("invalid semantic version: {0}")]
     Version(SemVerError),
+}
+
+#[cfg(feature = "arbitrary")]
+impl Arbitrary for InvalidVersionError {
+    type Parameters = ();
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        any::<bool>()
+            .prop_map(|use_digest| {
+                if use_digest {
+                    Self::Digest("invalid digest")
+                } else {
+                    Self::Version("not-a-version".parse::<SemVer>().unwrap_err())
+                }
+            })
+            .boxed()
+    }
 }
 
 /// The representation of versioning information associated with packages in the package index.
@@ -32,6 +54,7 @@ pub enum InvalidVersionError {
 /// * Record the exact published identity of a canonical package artifact as `semver#digest`
 /// * Provide a total ordering for package versions that may or may not include a specific digest
 #[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
 pub struct Version {
     /// The semantic version information
     ///
@@ -175,5 +198,27 @@ impl Ord for Version {
                 (Some(_), None) => Ordering::Greater,
             }
         })
+    }
+}
+
+#[cfg(feature = "arbitrary")]
+impl Arbitrary for Version {
+    type Parameters = ();
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        let semver = (0u64..=5, 0u64..=15, 0u64..=31).prop_map(|(major, minor, patch)| {
+            format!("{major}.{minor}.{patch}")
+                .parse::<SemVer>()
+                .expect("generated semantic versions are valid")
+        });
+        let digest = proptest::option::of(
+            proptest::collection::vec(proptest::char::range('a', 'z'), 1..16).prop_map(|chars| {
+                let material = chars.into_iter().collect::<alloc::string::String>();
+                hash_string_to_word(material.as_str())
+            }),
+        );
+
+        (semver, digest).prop_map(|(version, digest)| Self { version, digest }).boxed()
     }
 }

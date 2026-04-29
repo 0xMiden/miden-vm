@@ -44,6 +44,7 @@
 - Aligned `core_lib::math::u256` user docs with unified LE stack limb ordering (`a0/b0` on top), removing conflicting `[b7..b0, a7..a0]` notation ([#3066](https://github.com/0xMiden/miden-vm/pull/3066)).
 - Added chainable `Test` builders for common test setup in `miden-utils-testing` ([#2957](https://github.com/0xMiden/miden-vm/pull/2957)).
 - Added fuzz coverage for package semantic deserialization and project parsing, loading, and assembly ([#3015](https://github.com/0xMiden/miden-vm/pull/3015)).
+- Made serde opt-in for package crates, and added macro-based binary and serde roundtrip tests for Arbitrary serialization types ([#3058](https://github.com/0xMiden/miden-vm/pull/3058)).
 - Speed-up AUX range check trace generation by changing divisors to a flat Vec layout ([#2966](https://github.com/0xMiden/miden-vm/pull/2966)).
 - Removed AIR constraint tagging instrumentation, applied a uniform constraint description style across components, and optimized constraint evaluation ([#2856](https://github.com/0xMiden/miden-vm/pull/2856)).
 
