@@ -22,6 +22,7 @@
 - Added regression coverage for the exact `max_num_continuations` continuation-stack boundary ([#2995](https://github.com/0xMiden/miden-vm/pull/2995)).
 - Fixed AEAD padding handling so encrypt does not overwrite memory next to the plaintext buffer and decrypt leaves the plaintext output tail untouched ([#3008](https://github.com/0xMiden/miden-vm/pull/3008)).
 - Fixed MAST compaction after debug info is cleared so compiler-generated packages do not grow ([#3044](https://github.com/0xMiden/miden-vm/pull/3044)).
+- Canonicalized `PathBuf::try_from(String)` to match `TryFrom<&str>`/`FromStr`, so semantically equivalent quoted path components compare and hash consistently.
 
 #### Changes
 
