@@ -39,7 +39,7 @@ end
 #! Input:  [ptr, len_bytes, ...]
 #! Output: [COMM, TAG, DIGEST_U32[16], ...]
 @locals(24)
-pub proc hash_bytes_impl
+proc hash_bytes_impl
     emit.SHA512_HASH_BYTES_EVENT
     # => [ptr, len_bytes, ...]
 

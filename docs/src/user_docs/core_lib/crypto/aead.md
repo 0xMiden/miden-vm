@@ -29,14 +29,14 @@ Associated data (AD) is currently **not supported**. Only empty AD is handled, w
 Encrypts plaintext data from memory using the `crypto_stream` instruction. This procedure encrypts plaintext and automatically adds a padding block at the end.
 
 **Inputs:**
-- Operand stack: `[nonce(4), key(4), src_ptr, dst_ptr, num_blocks, ...]`
+- Operand stack: `[key(4), nonce(4), src_ptr, dst_ptr, num_blocks, ...]`
 
 **Outputs:**
 - Operand stack: `[tag(4), ...]`
 
 Where:
-- `nonce` is the initialization vector (4 elements / 1 word)
 - `key` is the encryption key (4 elements / 1 word)
+- `nonce` is the initialization vector (4 elements / 1 word)
 - `src_ptr` points to plaintext in memory (must be word-aligned)
 - `dst_ptr` points to where ciphertext will be written (must be word-aligned)
 - `num_blocks` is the number of 8-element plaintext data blocks (padding is NOT included)
@@ -71,14 +71,14 @@ The padding block is automatically added and encrypted. The tag is stored right 
 Decrypts and authenticates ciphertext using non-deterministic advice. This procedure implements AEAD decryption with automatic tag verification and automatic padding handling.
 
 **Inputs:**
-- Operand stack: `[nonce(4), key(4), src_ptr, dst_ptr, num_blocks, ...]`
+- Operand stack: `[key(4), nonce(4), src_ptr, dst_ptr, num_blocks, ...]`
 
 **Outputs:**
 - Operand stack: `[]` (empty stack on success, halts on failure)
 
 Where:
-- `nonce` is the initialization vector (4 elements)
 - `key` is the decryption key (4 elements)
+- `nonce` is the initialization vector (4 elements)
 - `src_ptr` points to ciphertext + encrypted_padding + tag in memory (word-aligned)
 - `dst_ptr` points to where plaintext will be written (word-aligned)
 - `num_blocks` is the number of 8-element plaintext data blocks (padding is NOT included)
