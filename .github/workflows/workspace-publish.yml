@@ -6,13 +6,15 @@ on:
 
 permissions:
   contents: read
-  id-token: write  # Required for OIDC token exchange
 
 jobs:
   publish:
     if: ${{ github.repository_owner == '0xMiden' }}
     runs-on: warp-ubuntu-latest-x64-8x
     environment: release  # Optional: for enhanced security
+    permissions:
+      contents: read
+      id-token: write  # Required for OIDC token exchange with crates.io
 
     steps:
       - name: Checkout repository
@@ -56,7 +58,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
           ref: ${{ github.event.release.tag_name }}
@@ -76,7 +78,7 @@ jobs:
         run: |
           mv target/${{ matrix.target }}/optimized/miden-vm miden-vm-${{ matrix.target }}
       - name: Attest miden-vm
-        uses: actions/attest-build-provenance@3
+        uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
         with:
           subject-path: miden-vm-${{ matrix.target }}
       - name: Upload
@@ -97,7 +99,7 @@ jobs:
           mv target/packages/miden-core.masp miden-core.masp
       - name: Attest miden-core.masp
         if: matrix.os == 'ubuntu-latest' && matrix.target == 'x86_64-unknown-linux-gnu'
-        uses: actions/attest-build-provenance@3
+        uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
         with:
           subject-path: miden-core.masp
       - name: Upload miden-core.masp
