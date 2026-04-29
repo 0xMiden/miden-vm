@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 
 use miden_air::trace::{
-    AUX_TRACE_RAND_CHALLENGES, Challenges, MainTrace, chiplets::hasher::P1_COL_IDX,
+    AUX_TRACE_RAND_CHALLENGES, Challenges, MainTrace, bus_types, chiplets::hasher::P1_COL_IDX,
 };
 use miden_core::{
     ONE, Word, ZERO,
@@ -78,11 +78,11 @@ fn hasher_p1_mr_update(#[case] index: u64) {
     // mrupdate_id = 1 for the first (and only) MR_UPDATE operation.
     let mrupdate_id = ONE;
     let row_values = [
-        SiblingTableRow::new(Felt::new(index), path[0], mrupdate_id)
+        SiblingTableRow::new(Felt::new_unchecked(index), path[0], mrupdate_id)
             .to_value(&trace.main_trace, &challenges),
-        SiblingTableRow::new(Felt::new(index >> 1), path[1], mrupdate_id)
+        SiblingTableRow::new(Felt::new_unchecked(index >> 1), path[1], mrupdate_id)
             .to_value(&trace.main_trace, &challenges),
-        SiblingTableRow::new(Felt::new(index >> 2), path[2], mrupdate_id)
+        SiblingTableRow::new(Felt::new_unchecked(index >> 2), path[2], mrupdate_id)
             .to_value(&trace.main_trace, &challenges),
     ];
 
@@ -177,7 +177,7 @@ fn init_leaves(values: &[u64]) -> Vec<Word> {
 }
 
 fn init_leaf(value: u64) -> Word {
-    [Felt::new(value), ZERO, ZERO, ZERO].into()
+    [Felt::new_unchecked(value), ZERO, ZERO, ZERO].into()
 }
 
 fn append_word(target: &mut Vec<u64>, word: Word) {
@@ -217,7 +217,7 @@ impl SiblingTableRow {
         let lsb = self.index.as_canonical_u64() & 1;
         if lsb == 0 {
             // Sibling at rate1 (positions 7-10)
-            challenges.alpha
+            challenges.bus_prefix[bus_types::SIBLING_TABLE]
                 + challenges.beta_powers[1] * self.mrupdate_id
                 + challenges.beta_powers[2] * self.index
                 + challenges.beta_powers[7] * self.sibling[0]
@@ -226,7 +226,7 @@ impl SiblingTableRow {
                 + challenges.beta_powers[10] * self.sibling[3]
         } else {
             // Sibling at rate0 (positions 3-6)
-            challenges.alpha
+            challenges.bus_prefix[bus_types::SIBLING_TABLE]
                 + challenges.beta_powers[1] * self.mrupdate_id
                 + challenges.beta_powers[2] * self.index
                 + challenges.beta_powers[3] * self.sibling[0]

@@ -28,14 +28,14 @@ pub struct MarkdownRenderer {}
 impl MarkdownRenderer {
     fn write_docs_header(mut writer: &fs::File, ns: &str) {
         let header =
-            format!("\n## {}\n| Procedure | Description |\n| ----------- | ------------- |\n", ns);
+            format!("\n## {ns}\n| Procedure | Description |\n| ----------- | ------------- |\n");
         writer.write_all(header.as_bytes()).expect("unable to write header to writer");
     }
 
     fn write_docs_procedure(mut writer: &fs::File, name: &str, docs: Option<&str>) {
         if let Some(docs) = docs {
             let escaped = docs.replace('|', "\\|").replace('\n', "<br />");
-            let line = format!("| {} | {} |\n", name, escaped);
+            let line = format!("| {name} | {escaped} |\n");
             writer.write_all(line.as_bytes()).expect("unable to write func to writer");
         }
     }
@@ -137,7 +137,7 @@ fn find_masm_modules(base_dir: &Path, current_dir: &Path) -> io::Result<Vec<(Str
                     .collect::<Vec<_>>()
                     .join("::");
 
-                let label = format!("miden::core::{}", module_path);
+                let label = format!("miden::core::{module_path}");
 
                 modules.push((label, path));
             }
@@ -204,7 +204,9 @@ fn main() -> Result<(), Report> {
     // or its builder changed:
     println!("cargo:rerun-if-changed=asm");
     println!("cargo:rerun-if-env-changed=MIDEN_BUILD_LIB_DOCS");
-    println!("cargo:rerun-if-changed=../assembly/src");
+    // NOTE: path is relative to the package root (crates/lib/core/), so we need
+    // ../../ to reach crates/assembly/src.
+    println!("cargo:rerun-if-changed=../../assembly/src");
 
     miden_assembly::diagnostics::reporting::set_hook(Box::new(|_| {
         Box::new(ReportHandlerOpts::new().build())
@@ -245,7 +247,7 @@ fn main() -> Result<(), Report> {
         .into_diagnostic()?;
 
     // Generate documentation
-    if std::env::var("MIDEN_BUILD_LIB_DOCS").is_ok() {
+    if env::var("MIDEN_BUILD_LIB_DOCS").is_ok() {
         build_core_lib_docs(&asm_dir, DOC_DIR_PATH).into_diagnostic()?;
     }
 

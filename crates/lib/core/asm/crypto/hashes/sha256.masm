@@ -1508,6 +1508,27 @@ proc consume_padding_message_schedule
     movdn.7
 end
 
+#! Asserts that all words in a 512-bit SHA256 message block are valid u32 values.
+#!
+#! Input: [m0, m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, ...]
+#! Output: [m0, m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, ...]
+#!
+#! Where:
+#! - m0 through m15 are the 32-bit words of the SHA256 message block.
+#!
+#! Panics if:
+#! - any message word is not a valid 32-bit unsigned integer.
+proc assert_message_block_u32
+    u32assertw.err="invalid sha256 message word"
+    movupw.3
+    u32assertw.err="invalid sha256 message word"
+    movupw.3
+    u32assertw.err="invalid sha256 message word"
+    movupw.3
+    u32assertw.err="invalid sha256 message word"
+    movupw.3
+end
+
 #! SHA256 2-to-1 hash (merge): Given 64 -bytes input, computes 32 -bytes SHA256 digest
 #!
 #! Input: [m0, m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, ...]
@@ -1520,7 +1541,14 @@ end
 #! maintaining big endian byte order.
 #!
 #! SHA256 digest is represented in terms of eight 32 -bit words ( big endian byte order ).
+#!
+#! Panics if:
+#! - any input message word is not a valid 32-bit unsigned integer.
+#!
+#! Invocation: exec
 pub proc merge
+    exec.assert_message_block_u32
+
     push.0x5be0cd19.0x1f83d9ab.0x9b05688c.0x510e527f
     push.0xa54ff53a.0x3c6ef372.0xbb67ae85.0x6a09e667
 
@@ -1542,11 +1570,17 @@ end
 #! maintaining big endian byte order.
 #!
 #! SHA256 digest is represented in terms of eight 32 -bit words ( big endian byte order ).
+#!
+#! Panics if:
+#! - any input message word is not a valid 32-bit unsigned integer.
+#!
+#! Invocation: exec
 pub proc hash
     # apply padding, see padding rule in section 5.1.1 of
     # https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.180-4.pdf
     push.256.0.0.0.0.0.0.2147483648
     swapdw
+    exec.assert_message_block_u32
 
     push.0x5be0cd19.0x1f83d9ab.0x9b05688c.0x510e527f
     push.0xa54ff53a.0x3c6ef372.0xbb67ae85.0x6a09e667
@@ -1561,6 +1595,12 @@ end
 #!
 #! Input:  [addr, len, ...]
 #! Output: [dig0, dig1, dig2, dig3, dig4, dig5, dig6, dig7, ...]
+#!
+#! Panics if:
+#! - any loaded message word is not a valid 32-bit unsigned integer.
+#! - padding range checks fail.
+#!
+#! Invocation: exec
 @locals(48)
 pub proc hash_bytes
     # loc.0 (input address)
@@ -1611,10 +1651,10 @@ pub proc hash_bytes
     # Consume sha256 blocks
     loc_load.28 u32assert neq.0
     while.true
-        padw loc_load.0 u32assert u32overflowing_add.12 assertz.err="range check failed: padding" mem_loadw_be movdnw.2
-        padw loc_load.0 u32assert u32overflowing_add.8 assertz.err="range check failed: padding" mem_loadw_be movdnw.2
-        padw loc_load.0 u32assert u32overflowing_add.4 assertz.err="range check failed: padding" mem_loadw_be movdnw.2
-        padw loc_load.0 u32assert u32overflowing_add.0 assertz.err="range check failed: padding" mem_loadw_be movdnw.2
+        padw loc_load.0 u32assert u32overflowing_add.12 assertz.err="range check failed: padding" mem_loadw_be u32assertw.err="invalid sha256 message word" movdnw.2
+        padw loc_load.0 u32assert u32overflowing_add.8 assertz.err="range check failed: padding" mem_loadw_be u32assertw.err="invalid sha256 message word" movdnw.2
+        padw loc_load.0 u32assert u32overflowing_add.4 assertz.err="range check failed: padding" mem_loadw_be u32assertw.err="invalid sha256 message word" movdnw.2
+        padw loc_load.0 u32assert u32overflowing_add.0 assertz.err="range check failed: padding" mem_loadw_be u32assertw.err="invalid sha256 message word" movdnw.2
         exec.prepare_message_schedule_and_consume
 
         loc_load.0 u32assert u32overflowing_add.16 assertz.err="range check failed: padding" loc_store.0

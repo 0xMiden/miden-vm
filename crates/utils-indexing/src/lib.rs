@@ -12,6 +12,8 @@ use alloc::{collections::BTreeMap, vec, vec::Vec};
 use core::{fmt::Debug, marker::PhantomData, ops};
 
 pub use csr::{CsrMatrix, CsrValidationError};
+#[cfg(feature = "arbitrary")]
+use proptest::prelude::*;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -22,6 +24,16 @@ pub enum IndexedVecError {
     /// The number of items exceeds the maximum supported by ID type.
     #[error("IndexedVec contains maximum number of items")]
     TooManyItems,
+}
+
+#[cfg(feature = "arbitrary")]
+impl Arbitrary for IndexedVecError {
+    type Parameters = ();
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        Just(Self::TooManyItems).boxed()
+    }
 }
 
 /// A trait for u32-backed, 0-based IDs.
@@ -60,14 +72,58 @@ macro_rules! newtype_id {
     };
 }
 
+#[cfg(test)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[repr(transparent)]
+pub struct SerdeTestId(u32);
+
+#[cfg(test)]
+impl From<u32> for SerdeTestId {
+    fn from(v: u32) -> Self {
+        Self(v)
+    }
+}
+
+#[cfg(test)]
+impl From<SerdeTestId> for u32 {
+    fn from(v: SerdeTestId) -> Self {
+        v.0
+    }
+}
+
+#[cfg(test)]
+impl Idx for SerdeTestId {}
+
 /// A dense vector indexed by ID types.
 ///
 /// This provides O(1) access and storage for dense ID-indexed data.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true), types(SerdeTestId, u32))
+)]
 pub struct IndexVec<I: Idx, T> {
     raw: Vec<T>,
     _m: PhantomData<I>,
+}
+
+#[cfg(feature = "arbitrary")]
+impl<I, T> Arbitrary for IndexVec<I, T>
+where
+    I: Idx + 'static,
+    T: Arbitrary + 'static,
+    T::Strategy: 'static,
+{
+    type Parameters = T::Parameters;
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(args: Self::Parameters) -> Self::Strategy {
+        proptest::collection::vec(any_with::<T>(args), 0..32)
+            .prop_map(|raw| Self::try_from(raw).expect("generated vector length fits in u32"))
+            .boxed()
+    }
 }
 
 impl<I: Idx, T> Default for IndexVec<I, T> {
@@ -293,7 +349,7 @@ where
 
 impl<I: Idx, T> IntoIterator for IndexVec<I, T> {
     type Item = T;
-    type IntoIter = alloc::vec::IntoIter<T>;
+    type IntoIter = vec::IntoIter<T>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.raw.into_iter()

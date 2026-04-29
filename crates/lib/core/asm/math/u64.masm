@@ -378,7 +378,7 @@ pub proc divmod(b: u64, a: u64) -> (remainder: u64, quotient: u64)
     # Advice stack now has [q_hi, q_lo, r_hi, r_lo]
     # => [b_lo, b_hi, a_lo, a_hi, ...]
 
-    adv_push.2
+    adv_push adv_push
     # Pops from advice: first q_hi, then q_lo, pushes them
     # => [q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
     u32assert2
@@ -434,7 +434,7 @@ pub proc divmod(b: u64, a: u64) -> (remainder: u64, quotient: u64)
     #==========================================================================
     # REMAINDER BLOCK: Get remainder and verify b > r
     #==========================================================================
-    adv_push.2
+    adv_push adv_push
     # Pops from advice: first r_hi, then r_lo
     # => [r_lo, r_hi, prod_hi, prod_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
     u32assert2
@@ -692,6 +692,8 @@ pub proc shr(n: u32, a: u64) -> u64
     add
     # [c_lo, quot1, !borrow, ...]
     # c_lo = rem1 * multiplier + quot2
+    # This add is safe: when !borrow=1, multiplier = 2^32 / pow_lo and rem1 < pow_lo, so
+    # rem1 * multiplier <= 2^32 - multiplier and adding quot2 < multiplier stays below 2^32.
 
     # --- STEP 9: Conditional swap to get final result ---
     dup.2
@@ -826,7 +828,7 @@ end
 #! The rotation amount n should be in the range [0, 64), otherwise it will result in an error.
 #! Stack transition looks as follows:
 #! [n, a_lo, a_hi, ...] -> [c_lo, c_hi, ...], where c = a >>> n (rotate right).
-#! This takes 44 cycles.
+#! This takes 48 cycles.
 pub proc rotr(n: u32, a: u64) -> u64
     # ==========================================================================
     # RIGHT ROTATION: Computes a >>> n (rotate right by n bits)
@@ -834,107 +836,125 @@ pub proc rotr(n: u32, a: u64) -> u64
     # Output: [c_lo, c_hi, ...] where c = a >>> n
     #
     # Strategy: Rotate right by n = left rotate by (64 - n)
-    #           For n in [0,64), we compute left shift by (32 - (n&31))
-    #           and conditionally swap limbs based on n < 32
+    #           For n in [0,64), we compute left shift by ((32 - (n&31)) & 31)
+    #           and conditionally swap limbs when the rotation crosses the 32-bit boundary
     # ==========================================================================
 
     # Convert LE to internal BE format: [n, a_lo, a_hi] -> [n, a_hi, a_lo]
     movup.2     # [a_hi, n, a_lo]
     swap        # [n, a_hi, a_lo]
 
-    # --- STEP 1: Compute swap_flag = (n < 32) ---
+    # --- STEP 1: Compute is_upper_half = (n > 31) ---
     push.31
     # [31, b, a_hi, a_lo, ...]
 
     dup.1
     # [b, 31, b, a_hi, a_lo, ...]
 
-    u32lt
-    # [b<32, b, a_hi, a_lo, ...]
-    # flag = 1 if b < 32, else 0
-
-    movdn.3
-    # [b, a_hi, a_lo, flag, ...]
-
-    # --- STEP 2: Compute complement shift amount = 32 - (b & 31) ---
-    push.31
-    # [31, b, a_hi, a_lo, flag, ...]
-
-    u32and
-    # [b&31, a_hi, a_lo, flag, ...]
-    # shift_amt = b mod 32
-
-    push.32
-    # [32, b&31, a_hi, a_lo, flag, ...]
+    u32overflowing_sub
+    # [borrow, diff, b, a_hi, a_lo, ...]
+    # borrow = 1 if b > 31, else 0
 
     swap
-    # [b&31, 32, a_hi, a_lo, flag, ...]
-    u32wrapping_sub
-    # [32-(b&31), a_hi, a_lo, flag, ...]
-    # complement_shift = 32 - (b mod 32)
+    # [diff, borrow, b, a_hi, a_lo, ...]
 
-    pow2
-    # [2^complement_shift, a_hi, a_lo, flag, ...]
+    drop
+    # [borrow, b, a_hi, a_lo, ...]
+    # borrow indicates whether n is in the upper half [32, 63]
+
+    movdn.3
+    # [b, a_hi, a_lo, borrow, ...]
+
+    # --- STEP 2: Compute complement shift amount = (32 - (b & 31)) & 31 ---
+    push.31
+    # [31, b, a_hi, a_lo, borrow, ...]
+
+    u32and
+    # [b&31, a_hi, a_lo, borrow, ...]
+    # shift_amt = b mod 32
 
     dup
-    # [2^complement_shift, 2^complement_shift, a_hi, a_lo, flag, ...]
+    # [shift_amt, shift_amt, a_hi, a_lo, borrow, ...]
+    neq.0
+    not
+    # [shift_amt == 0, shift_amt, a_hi, a_lo, borrow, ...]
+
+    movdn.4
+    # [shift_amt, a_hi, a_lo, borrow, shift_amt == 0, ...]
+
+    push.32
+    # [32, shift_amt, a_hi, a_lo, borrow, shift_amt == 0, ...]
+
+    swap
+    # [shift_amt, 32, a_hi, a_lo, borrow, shift_amt == 0, ...]
+    u32wrapping_sub
+    # [32-shift_amt, a_hi, a_lo, borrow, shift_amt == 0, ...]
+
+    push.31
+    # [31, 32-shift_amt, a_hi, a_lo, borrow, shift_amt == 0, ...]
+    u32and
+    # [(32-shift_amt)&31, a_hi, a_lo, borrow, shift_amt == 0, ...]
+    # complement_shift = (32 - (b mod 32)) mod 32
+
+    pow2
+    # [2^complement_shift, a_hi, a_lo, borrow, shift_amt == 0, ...]
+
+    dup
+    # [2^complement_shift, 2^complement_shift, a_hi, a_lo, borrow, shift_amt == 0, ...]
 
     movup.3
-    # [a_lo, 2^complement_shift, 2^complement_shift, a_hi, flag, ...]
+    # [a_lo, 2^complement_shift, 2^complement_shift, a_hi, borrow, shift_amt == 0, ...]
 
     # --- STEP 3: Left shift low limb by complement amount ---
-    mul
-    # [a_lo * 2^complement_shift, 2^complement_shift, a_hi, flag, ...]
-    # This is a full field multiplication
-
-    u32split swap
-    # [hi1, lo1, 2^complement_shift, a_hi, flag, ...]
+    u32widening_mul
+    # [lo1, hi1, 2^complement_shift, a_hi, borrow, shift_amt == 0, ...]
+    # lo1 = (a_lo * 2^complement_shift) mod 2^32
     # hi1 = overflow bits (shift into high)
-    # lo1 = remaining bits
+
+    swap
+    # [hi1, lo1, 2^complement_shift, a_hi, borrow, shift_amt == 0, ...]
 
     # --- STEP 4: Left shift high limb by complement amount and add overflow ---
     movup.3
-    # [a_hi, hi1, lo1, 2^complement_shift, flag, ...]
+    # [a_hi, hi1, lo1, 2^complement_shift, borrow, shift_amt == 0, ...]
 
     movup.3
-    # [2^complement_shift, a_hi, hi1, lo1, flag, ...]
+    # [2^complement_shift, a_hi, hi1, lo1, borrow, shift_amt == 0, ...]
 
-    mul
-    # [a_hi * 2^complement_shift, hi1, lo1, flag, ...]
-
-    add
-    # [(a_hi * 2^complement_shift) + hi1, lo1, flag, ...]
-    # This combines the shifted high limb with overflow from low
-
-    u32split swap
-    # [hi2, lo2, lo1, flag, ...]
+    u32widening_madd
+    # [lo2, hi2, lo1, borrow, shift_amt == 0, ...]
+    # lo2 = (a_hi * 2^complement_shift + hi1) mod 2^32
     # hi2 = overflow bits (wrap around to low)
-    # lo2 = new high limb value
+
+    swap
+    # [hi2, lo2, lo1, borrow, shift_amt == 0, ...]
 
     # --- STEP 5: Carry the overflow to the low bits ---
     movup.2
-    # [lo1, hi2, lo2, flag, ...]
+    # [lo1, hi2, lo2, borrow, shift_amt == 0, ...]
 
     add
-    # [lo1 + hi2, lo2, flag, ...]
+    # [lo1 + hi2, lo2, borrow, shift_amt == 0, ...]
     # c_lo = lo1 + hi2 (overflow wraps to low bits)
+    # This add is safe: hi2 is the high limb of a_hi * 2^complement_shift + hi1, so
+    # hi2 < 2^complement_shift, while lo1 = (a_lo * 2^complement_shift) mod 2^32 is a multiple
+    # of 2^complement_shift. Thus lo1 <= 2^32 - 2^complement_shift, and lo1 + hi2 < 2^32.
 
     swap
-    # [lo2, c_lo, flag, ...]
+    # [lo2, c_lo, borrow, shift_amt == 0, ...]
     # lo2 = c_hi
 
-    # --- STEP 6: Conditionally swap based on b < 32 ---
+    # --- STEP 6: Conditionally swap based on (n > 31) == (n mod 32 == 0) ---
     movup.2
-    # [flag, lo2, c_lo, ...]
-    # flag = 1 if b < 32
+    # [borrow, lo2, c_lo, shift_amt == 0, ...]
 
-    not
-    # [!flag, lo2, c_lo, ...]
-    # !flag = 1 if b >= 32
+    movup.3
+    # [shift_amt == 0, borrow, lo2, c_lo, ...]
+    eq
+    # [swap_flag, lo2, c_lo, ...]
+    # swap_flag = 1 for n in [1, 32] and 0 for n in {0} ∪ [33, 63]
 
     cswap
-    # If !flag=1 (b>=32): swap -> [c_lo, lo2, ...]
-    # If !flag=0 (b<32): no swap -> [lo2, c_lo, ...]
     # Result in BE format: [c_hi, c_lo, ...]
 
     # Convert BE output to LE: [c_hi, c_lo] -> [c_lo, c_hi]

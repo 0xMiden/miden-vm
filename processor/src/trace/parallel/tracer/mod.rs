@@ -683,9 +683,10 @@ mod tests {
 
         // Place an entry in the overflow replay queue that corresponds to a future pop (once the
         // stack will have grown beyond the minimum depth).
-        let overflow_addr_of_future_pop = Felt::new(42);
+        let overflow_addr_of_future_pop = Felt::new_unchecked(42);
         let mut stack_overflow_replay = StackOverflowReplay::new();
-        stack_overflow_replay.record_pop_overflow(Felt::new(99), overflow_addr_of_future_pop);
+        stack_overflow_replay
+            .record_pop_overflow(Felt::new_unchecked(99), overflow_addr_of_future_pop);
 
         let system = SystemState {
             clk: 0u32.into(),

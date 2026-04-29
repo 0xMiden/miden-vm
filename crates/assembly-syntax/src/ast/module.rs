@@ -7,6 +7,8 @@ use miden_core::{
 };
 use miden_debug_types::{SourceFile, SourceManager, SourceSpan, Span, Spanned};
 use miden_utils_diagnostics::Report;
+#[cfg(feature = "arbitrary")]
+use proptest::prelude::*;
 use smallvec::SmallVec;
 
 use super::{
@@ -30,6 +32,10 @@ use crate::{
 /// what operations can be performed in the body of procedures defined in the module. See the
 /// documentation for each variant for a summary of these differences.
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
+)]
 #[repr(u8)]
 pub enum ModuleKind {
     /// A library is a simple container of code that must be included into an executable module to
@@ -81,6 +87,22 @@ impl fmt::Display for ModuleKind {
             Self::Executable => f.write_str("executable"),
             Self::Kernel => f.write_str("kernel"),
         }
+    }
+}
+
+#[cfg(feature = "arbitrary")]
+impl Arbitrary for ModuleKind {
+    type Parameters = ();
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        any::<u8>()
+            .prop_map(|tag| match tag % 3 {
+                0 => Self::Library,
+                1 => Self::Executable,
+                _ => Self::Kernel,
+            })
+            .boxed()
     }
 }
 
@@ -432,7 +454,7 @@ impl Module {
     /// Returns true if this module has an entrypoint procedure defined,
     /// i.e. a `begin`..`end` block.
     pub fn has_entrypoint(&self) -> bool {
-        self.index_of(|p| p.is_main()).is_some()
+        self.index_of(Export::is_main).is_some()
     }
 
     /// Returns a reference to the advice map derived from this module
@@ -726,16 +748,16 @@ impl TypeResolver<SymbolResolutionError> for ModuleTypeResolver<'_> {
         &mut self,
         context: SourceSpan,
         _gid: GlobalItemIndex,
-    ) -> Result<ast::types::Type, SymbolResolutionError> {
+    ) -> Result<types::Type, SymbolResolutionError> {
         Err(SymbolResolutionError::undefined(context, &self.resolver.source_manager()))
     }
     fn get_local_type(
         &mut self,
         context: SourceSpan,
         id: ItemIndex,
-    ) -> Result<Option<ast::types::Type>, SymbolResolutionError> {
+    ) -> Result<Option<types::Type>, SymbolResolutionError> {
         match &self.module[id] {
-            super::Export::Type(ty) => match ty {
+            Export::Type(ty) => match ty {
                 TypeDecl::Alias(ty) => self.resolve(&ty.ty),
                 TypeDecl::Enum(ty) => Ok(Some(ty.ty().clone())),
             },

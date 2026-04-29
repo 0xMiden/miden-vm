@@ -16,7 +16,10 @@ use miden_core::{
     Felt, Word, assert_matches,
     events::EventId,
     field::PrimeField64,
-    mast::{MastNodeExt, MastNodeId},
+    mast::{
+        CallNodeBuilder, JoinNodeBuilder, LoopNodeBuilder, MastForestContributor, MastNodeExt,
+        MastNodeId, SplitNodeBuilder,
+    },
     operations::Operation,
     program::Program,
     serde::{Deserializable, Serializable},
@@ -296,7 +299,7 @@ fn library_exports() -> Result<(), Report> {
     // make sure the library exports all exported procedures
     let expected_exports: BTreeSet<Arc<Path>> =
         [foo2.into(), foo3.into(), bar1.into(), bar2.into(), bar3.into(), bar5.into()].into();
-    let actual_exports: BTreeSet<_> = lib2.exports().map(|export| export.path()).collect();
+    let actual_exports: BTreeSet<_> = lib2.exports().map(LibraryExport::path).collect();
     assert_eq!(expected_exports, actual_exports);
 
     // make sure foo2, bar2, and bar3 map to the same MastNode
@@ -358,16 +361,15 @@ fn library_procedure_collision() -> Result<(), Report> {
     // make sure lib2 has the expected exports (i.e., bar1 and bar2)
     assert_eq!(lib2.num_exports(), 2);
 
-    // Now that AssemblyOps are stored separately in DebugInfo (not as Decorator::AsmOp),
-    // identical procedures ARE deduplicated because their MAST fingerprints are the same.
-    // The debug info (AssemblyOps) is stored separately and doesn't affect deduplication.
+    // AssemblyOp metadata now participates in assembler-side deduplication, so a re-exported
+    // procedure and a locally defined procedure with the same operations remain distinct when
+    // their source mappings differ.
     let lib2_bar_bar1 = QualifiedProcedureName::from_str("lib2::bar::bar1").unwrap();
     let lib2_bar_bar2 = QualifiedProcedureName::from_str("lib2::bar::bar2").unwrap();
-    assert_eq!(lib2.get_export_node_id(&lib2_bar_bar1), lib2.get_export_node_id(&lib2_bar_bar2));
+    assert_ne!(lib2.get_export_node_id(&lib2_bar_bar1), lib2.get_export_node_id(&lib2_bar_bar2));
 
-    // With deduplication restored, we expect fewer nodes than before when debug decorators
-    // prevented deduplication. The identical procedures now share the same node.
-    assert_eq!(lib2.mast_forest().num_nodes(), 5);
+    // Keeping those procedures distinct adds one more node to the library forest.
+    assert_eq!(lib2.mast_forest().num_nodes(), 6);
 
     Ok(())
 }
@@ -407,6 +409,66 @@ fn library_serialization() -> Result<(), Report> {
     assert_eq!(bundle.as_ref(), &deserialized);
 
     Ok(())
+}
+
+/// Verifies that deserializing a library rejects procedure exports whose `MastNodeId` is not a
+/// procedure root in the underlying MAST forest (issue #2831).
+#[test]
+fn library_deserialization_rejects_non_root_export() {
+    use miden_core::{
+        mast::{BasicBlockNodeBuilder, MastForestContributor},
+        serde::ByteWriter,
+    };
+
+    let context = TestContext::new();
+    let source = r#"
+        pub proc foo
+            add
+        end
+    "#;
+    let module = parse_module!(&context, "test::foo", source);
+
+    // Build a valid library.
+    let lib = Assembler::new(context.source_manager()).assemble_library([module]).unwrap();
+
+    // Clone the forest and add a non-root node.
+    let mut forest: MastForest = (**lib.mast_forest()).clone();
+    let builder = BasicBlockNodeBuilder::new(vec![Operation::Add], vec![]);
+    let non_root_id = builder.add_to_forest(&mut forest).unwrap();
+    assert!(
+        !forest.is_procedure_root(non_root_id),
+        "sanity check: new node should not be a root"
+    );
+
+    // Manually serialize a tampered library: forest + one export referencing the non-root node.
+    let mut tampered_bytes = Vec::new();
+    forest.write_into(&mut tampered_bytes);
+
+    // Number of exports.
+    1usize.write_into(&mut tampered_bytes);
+    // Tag: 0 = Procedure export.
+    0u8.write_into(&mut tampered_bytes);
+    // Fully qualified procedure path.
+    let path = PathBuf::new("::test::foo::foo").unwrap();
+    path.write_into(&mut tampered_bytes);
+    // MastNodeId of the non-root node.
+    u32::from(non_root_id).write_into(&mut tampered_bytes);
+    // No function signature.
+    tampered_bytes.write_bool(false);
+    // Empty attribute set.
+    miden_assembly_syntax::ast::AttributeSet::default().write_into(&mut tampered_bytes);
+
+    // Deserializing should fail because the export references a non-root node.
+    let result = Library::read_from_bytes(&tampered_bytes);
+    assert!(
+        result.is_err(),
+        "deserialization should reject exports referencing non-root nodes"
+    );
+    let err_msg = result.unwrap_err().to_string();
+    assert!(
+        err_msg.contains("no procedure root"),
+        "error should mention missing procedure root, got: {err_msg}"
+    );
 }
 
 #[test]
@@ -826,7 +888,7 @@ end
 #[test]
 fn enum_felt_discriminant_too_large_is_rejected() -> TestResult {
     let context = TestContext::default();
-    let modulus = miden_core::Felt::ORDER_U64;
+    let modulus = Felt::ORDER_U64;
     let source = source_file!(
         &context,
         format!(
@@ -851,7 +913,7 @@ end
 #[test]
 fn constant_expression_overflow_is_rejected() -> TestResult {
     let context = TestContext::default();
-    let modulus_minus_one = miden_core::Felt::ORDER_U64 - 1;
+    let modulus_minus_one = Felt::ORDER_U64 - 1;
     let source = source_file!(
         &context,
         format!(
@@ -3687,7 +3749,7 @@ end
     let assembled = Assembler::default().assemble_program(program_src);
     assert!(
         assembled.is_err(),
-        "expected out-of-range constant results to be rejected (must not silently alias via `Felt::new`)"
+        "expected out-of-range constant results to be rejected (must not silently alias via `Felt::new_unchecked`)"
     );
 }
 
@@ -4422,11 +4484,15 @@ fn nested_blocks() -> Result<(), Report> {
     // `Assembler::with_kernel_from_module()`.
     let syscall_foo_node_id = {
         let kernel_foo_node_id = expected_mast_forest_builder
-            .ensure_block(vec![Operation::Add], Vec::new(), vec![], vec![], vec![])
+            .ensure_block(vec![Operation::Add], Vec::new(), vec![], vec![], vec![], vec![])
             .unwrap();
 
         expected_mast_forest_builder
-            .ensure_syscall(kernel_foo_node_id, vec![], vec![])
+            .ensure_node(
+                CallNodeBuilder::new_syscall(kernel_foo_node_id)
+                    .with_before_enter(vec![])
+                    .with_after_exit(vec![]),
+            )
             .unwrap()
     };
 
@@ -4470,35 +4536,85 @@ fn nested_blocks() -> Result<(), Report> {
 
     // basic block representing foo::bar.baz procedure
     let exec_foo_bar_baz_node_id = expected_mast_forest_builder
-        .ensure_block(vec![Operation::Push(Felt::from_u32(29))], Vec::new(), vec![], vec![], vec![])
+        .ensure_block(
+            vec![Operation::Push(Felt::from_u32(29))],
+            Vec::new(),
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+        )
         .unwrap();
 
     let fmp_initialization = expected_mast_forest_builder
-        .ensure_block(fmp_initialization_sequence(), Vec::new(), vec![], vec![], vec![])
+        .ensure_block(fmp_initialization_sequence(), Vec::new(), vec![], vec![], vec![], vec![])
         .unwrap();
 
     let before = expected_mast_forest_builder
-        .ensure_block(vec![Operation::Push(Felt::from_u32(2))], Vec::new(), vec![], vec![], vec![])
+        .ensure_block(
+            vec![Operation::Push(Felt::from_u32(2))],
+            Vec::new(),
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+        )
         .unwrap();
 
     let r#true1 = expected_mast_forest_builder
-        .ensure_block(vec![Operation::Push(Felt::from_u32(3))], Vec::new(), vec![], vec![], vec![])
+        .ensure_block(
+            vec![Operation::Push(Felt::from_u32(3))],
+            Vec::new(),
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+        )
         .unwrap();
     let r#false1 = expected_mast_forest_builder
-        .ensure_block(vec![Operation::Push(Felt::from_u32(5))], Vec::new(), vec![], vec![], vec![])
+        .ensure_block(
+            vec![Operation::Push(Felt::from_u32(5))],
+            Vec::new(),
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+        )
         .unwrap();
     let r#if1 = expected_mast_forest_builder
-        .ensure_split(r#true1, r#false1, vec![], vec![])
+        .ensure_node(
+            SplitNodeBuilder::new([r#true1, r#false1])
+                .with_before_enter(vec![])
+                .with_after_exit(vec![]),
+        )
         .unwrap();
 
     let r#true3 = expected_mast_forest_builder
-        .ensure_block(vec![Operation::Push(Felt::from_u32(7))], Vec::new(), vec![], vec![], vec![])
+        .ensure_block(
+            vec![Operation::Push(Felt::from_u32(7))],
+            Vec::new(),
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+        )
         .unwrap();
     let r#false3 = expected_mast_forest_builder
-        .ensure_block(vec![Operation::Push(Felt::from_u32(11))], Vec::new(), vec![], vec![], vec![])
+        .ensure_block(
+            vec![Operation::Push(Felt::from_u32(11))],
+            Vec::new(),
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+        )
         .unwrap();
     let r#true2 = expected_mast_forest_builder
-        .ensure_split(r#true3, r#false3, vec![], vec![])
+        .ensure_node(
+            SplitNodeBuilder::new([r#true3, r#false3])
+                .with_before_enter(vec![])
+                .with_after_exit(vec![]),
+        )
         .unwrap();
 
     let r#while = {
@@ -4513,20 +4629,42 @@ fn nested_blocks() -> Result<(), Report> {
                 vec![],
                 vec![],
                 vec![],
+                vec![],
             )
             .unwrap();
 
-        expected_mast_forest_builder.ensure_loop(body_node_id, vec![], vec![]).unwrap()
+        expected_mast_forest_builder
+            .ensure_node(
+                LoopNodeBuilder::new(body_node_id)
+                    .with_before_enter(vec![])
+                    .with_after_exit(vec![]),
+            )
+            .unwrap()
     };
     let push_13_basic_block_id = expected_mast_forest_builder
-        .ensure_block(vec![Operation::Push(Felt::from_u32(13))], Vec::new(), vec![], vec![], vec![])
+        .ensure_block(
+            vec![Operation::Push(Felt::from_u32(13))],
+            Vec::new(),
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+        )
         .unwrap();
 
     let r#false2 = expected_mast_forest_builder
-        .ensure_join(push_13_basic_block_id, r#while, vec![], vec![])
+        .ensure_node(
+            JoinNodeBuilder::new([push_13_basic_block_id, r#while])
+                .with_before_enter(vec![])
+                .with_after_exit(vec![]),
+        )
         .unwrap();
     let nested = expected_mast_forest_builder
-        .ensure_split(r#true2, r#false2, vec![], vec![])
+        .ensure_node(
+            SplitNodeBuilder::new([r#true2, r#false2])
+                .with_before_enter(vec![])
+                .with_after_exit(vec![]),
+        )
         .unwrap();
 
     let combined_node_id = expected_mast_forest_builder
@@ -4667,11 +4805,10 @@ fn duplicate_procedure() {
     "#;
 
     let program = context.assemble(program_source).unwrap();
-    // Now that AssemblyOps are stored separately in DebugInfo (not as Decorator::AsmOp),
-    // identical procedures ARE deduplicated because their MAST fingerprints are the same.
-    // foo and bar have identical code, so they share the same MAST node. The entrypoint
-    // is a separate procedure, so we have 2 procedures total.
-    assert_eq!(program.num_procedures(), 2);
+    // AssemblyOp metadata now participates in assembler-side deduplication. Even though
+    // `foo` and `bar` have the same operations, they carry different source mappings and
+    // therefore must remain distinct procedures. The entrypoint is a third procedure.
+    assert_eq!(program.num_procedures(), 3);
 }
 
 #[test]
@@ -4853,6 +4990,64 @@ fn regression_empty_kernel_library_is_rejected() {
     assert_diagnostic_lines!(err, "library must contain at least one exported procedure");
 }
 
+/// Reproduces issue #3035: a MAST with padded basic blocks grows when debug info is cleared and the
+/// forest is compacted via self-merge.
+#[test]
+fn issue_3035_compact_after_clear_debug_info_does_not_grow_mast() -> TestResult {
+    let context = TestContext::default();
+    let module = context.parse_module_with_path(
+        "issue_3035::repro",
+        source_file!(
+            &context,
+            "
+            pub proc repro
+                add
+                push.100
+            end
+            "
+        ),
+    )?;
+
+    let library = Assembler::new(context.source_manager()).assemble_library([module])?;
+    let mut forest = library.mast_forest().as_ref().clone();
+    assert!(
+        forest
+            .nodes()
+            .iter()
+            .filter_map(|node| node.get_basic_block())
+            .any(|block| { block.operations().count() > block.raw_operations().count() }),
+        "test input must create at least one padded basic block"
+    );
+
+    forest.clear_debug_info();
+    let stripped_size = forest.to_bytes().len();
+    let stripped_without_debug_info_size = {
+        let mut bytes = Vec::new();
+        forest.write_stripped(&mut bytes);
+        bytes.len()
+    };
+    let stripped_nodes = forest.nodes().len();
+    let (compacted, _) = forest.compact();
+    let compacted_size = compacted.to_bytes().len();
+    let compacted_without_debug_info_size = {
+        let mut bytes = Vec::new();
+        compacted.write_stripped(&mut bytes);
+        bytes.len()
+    };
+    let compacted_nodes = compacted.nodes().len();
+
+    assert!(
+        compacted_size <= stripped_size,
+        "MastForest::compact increased serialized size after clear_debug_info(): \
+         stripped={stripped_size}, compacted={compacted_size}, \
+         stripped_without_debug_info={stripped_without_debug_info_size}, \
+         compacted_without_debug_info={compacted_without_debug_info_size}, \
+         stripped_nodes={stripped_nodes}, compacted_nodes={compacted_nodes}"
+    );
+
+    Ok(())
+}
+
 /// Test for issue #1644: verify that single-forest merge doesn't preserves node digests
 #[test]
 fn issue_1644_single_forest_merge_identity() -> TestResult {
@@ -4924,9 +5119,9 @@ fn issue_1644_single_forest_merge_identity() -> TestResult {
         new_merged_forest.nodes().iter().zip(merged_forest.nodes().iter()).enumerate()
     {
         if orig_node.digest() != merged_node.digest() {
-            eprintln!("Node {} digest violation:", i);
-            eprintln!("   Original: {:?}", orig_node);
-            eprintln!("   Merged:   {:?}", merged_node);
+            eprintln!("Node {i} digest violation:");
+            eprintln!("   Original: {orig_node:?}");
+            eprintln!("   Merged:   {merged_node:?}");
             eprintln!("   Original digest: {:?}", orig_node.digest());
             eprintln!("   Merged digest:   {:?}", merged_node.digest());
 
@@ -4942,7 +5137,7 @@ fn issue_1644_single_forest_merge_identity() -> TestResult {
         .enumerate()
     {
         if new_merged_forest[*orig_root].digest() != merged_forest[*merged_root].digest() {
-            eprintln!("Root {} digest violation:", i);
+            eprintln!("Root {i} digest violation:");
             eprintln!("   Original: {:?}", original_forest[*orig_root].digest());
             eprintln!("   Merged:   {:?}", merged_forest[*merged_root].digest());
             should_panic = true;
@@ -4972,7 +5167,7 @@ fn overlong_total_path_is_rejected_without_panic() {
     // but the total byte length exceeds u16::MAX (the binary serialization length prefix).
     let component = "a".repeat(255);
     let num_components: usize = 300;
-    let mut path_str = alloc::string::String::with_capacity(num_components * (component.len() + 2));
+    let mut path_str = String::with_capacity(num_components * (component.len() + 2));
     for i in 0..num_components {
         if i > 0 {
             path_str.push_str("::");

@@ -21,7 +21,7 @@ use miden_crypto::{
         dft::Radix2DitParallel,
         fri::PcsParams,
         hasher::{ChainingHasher, SerializingStatefulSponge, StatefulSponge},
-        lmcs::LmcsConfig,
+        lmcs::config::LmcsConfig,
         symmetric::{
             CompressionFunctionFromHasher, CryptographicPermutation, PaddingFreeSponge,
             TruncatedPermutation,
@@ -85,34 +85,28 @@ pub fn pcs_params() -> PcsParams {
 /// Compile-time constant binding the Fiat-Shamir transcript to the Miden VM AIR.
 /// Must match the constants in `crates/lib/core/asm/sys/vm/mod.masm`.
 pub const RELATION_DIGEST: [Felt; 4] = [
-    Felt::new(14932224741264950205),
-    Felt::new(13231194489255299102),
-    Felt::new(9539190039789656767),
-    Felt::new(16072183680659208914),
+    Felt::new_unchecked(9959184209071024919),
+    Felt::new_unchecked(8083906424746801292),
+    Felt::new_unchecked(2491326376870921885),
+    Felt::new_unchecked(2800937775438555033),
 ];
 
-/// Observes PCS protocol parameters and per-proof trace height into the challenger.
+/// Observes PCS protocol parameters into the challenger.
 ///
 /// Call on a challenger obtained from `config.challenger()` to complete the
 /// domain-separated transcript initialization. The config factories already bind
 /// RELATION_DIGEST into the prototype challenger; this function adds the remaining
-/// protocol parameters and per-proof trace height.
-pub fn observe_protocol_params(challenger: &mut impl CanObserve<Felt>, log_trace_height: u64) {
+/// protocol parameters.
+pub fn observe_protocol_params(challenger: &mut impl CanObserve<Felt>) {
     // Batch 1: PCS parameters, zero-padded to SPONGE_RATE.
-    challenger.observe(Felt::new(NUM_QUERIES as u64));
-    challenger.observe(Felt::new(QUERY_POW_BITS as u64));
-    challenger.observe(Felt::new(DEEP_POW_BITS as u64));
-    challenger.observe(Felt::new(FOLDING_POW_BITS as u64));
-    challenger.observe(Felt::new(LOG_BLOWUP as u64));
-    challenger.observe(Felt::new(LOG_FINAL_DEGREE as u64));
-    challenger.observe(Felt::new(1_u64 << LOG_FOLDING_ARITY));
+    challenger.observe(Felt::new_unchecked(NUM_QUERIES as u64));
+    challenger.observe(Felt::new_unchecked(QUERY_POW_BITS as u64));
+    challenger.observe(Felt::new_unchecked(DEEP_POW_BITS as u64));
+    challenger.observe(Felt::new_unchecked(FOLDING_POW_BITS as u64));
+    challenger.observe(Felt::new_unchecked(LOG_BLOWUP as u64));
+    challenger.observe(Felt::new_unchecked(LOG_FINAL_DEGREE as u64));
+    challenger.observe(Felt::new_unchecked(1_u64 << LOG_FOLDING_ARITY));
     challenger.observe(Felt::ZERO);
-
-    // Batch 2: per-proof trace height, zero-padded to SPONGE_RATE.
-    challenger.observe(Felt::new(log_trace_height));
-    for _ in 1..SPONGE_RATE {
-        challenger.observe(Felt::ZERO);
-    }
 }
 
 /// Absorbs variable-length public inputs into the challenger.
@@ -292,4 +286,58 @@ pub fn keccak_config(params: PcsParams) -> MidenStarkConfig<KeccakLmcs, KeccakCh
     let mut challenger = SerializingChallenger64::from_hasher(vec![], Keccak256Hash {});
     challenger.observe_slice(&RELATION_DIGEST);
     GenericStarkConfig::new(params, lmcs, Radix2DitParallel::default(), challenger)
+}
+
+#[cfg(test)]
+mod tests {
+    extern crate alloc;
+    use alloc::vec::Vec;
+
+    use miden_ace_codegen::{AceConfig, LayoutKind};
+    use miden_core::{Felt, crypto::hash::Poseidon2, field::QuadFelt};
+
+    use crate::{ProcessorAir, ace};
+
+    const PROTOCOL_ID: u64 = 0;
+    const REGEN_HINT: &str = "cargo run -p miden-core-lib --features constraints-tools --bin regenerate-constraints -- --write";
+
+    /// Snapshot test: catches any AIR change that alters the constraint circuit.
+    ///
+    /// If this test fails, regenerate with:
+    ///   cargo run -p miden-core-lib --features constraints-tools --bin regenerate-constraints --
+    /// --write
+    #[test]
+    fn relation_digest_matches_current_air() {
+        let config = AceConfig {
+            num_quotient_chunks: 8,
+            num_vlpi_groups: 1,
+            layout: LayoutKind::Masm,
+        };
+        let air = ProcessorAir;
+        let batch_config = ace::reduced_aux_batch_config();
+        let circuit =
+            ace::build_batched_ace_circuit::<_, QuadFelt>(&air, config, &batch_config).unwrap();
+        let encoded = circuit.to_ace().unwrap();
+        let circuit_commitment: [Felt; 4] = encoded.circuit_hash().into();
+
+        let input: Vec<Felt> = core::iter::once(Felt::new_unchecked(PROTOCOL_ID))
+            .chain(circuit_commitment.iter().copied())
+            .collect();
+        let digest = Poseidon2::hash_elements(&input);
+        let expected: Vec<u64> = digest.as_elements().iter().map(Felt::as_canonical_u64).collect();
+
+        let snapshot = format!(
+            "num_inputs: {}\nnum_eval_gates: {}\nrelation_digest: {:?}",
+            encoded.num_vars(),
+            encoded.num_eval_rows(),
+            expected,
+        );
+        insta::assert_snapshot!(snapshot);
+
+        let actual: Vec<u64> = super::RELATION_DIGEST.iter().map(Felt::as_canonical_u64).collect();
+        assert_eq!(
+            actual, expected,
+            "RELATION_DIGEST in config.rs is stale. Regenerate with: {REGEN_HINT}"
+        );
+    }
 }

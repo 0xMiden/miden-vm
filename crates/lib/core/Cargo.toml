@@ -28,6 +28,7 @@ path = "tests/main.rs"
 [features]
 default = ["std"]
 std = ["miden-assembly/std", "miden-utils-sync/std"]
+constraints-tools = ["std", "dep:miden-air", "dep:miden-ace-codegen"]
 
 [dependencies]
 # Miden dependencies
@@ -36,30 +37,34 @@ miden-core.workspace = true
 miden-crypto.workspace = true
 miden-processor.workspace = true
 miden-utils-sync.workspace = true
+miden-air = { workspace = true, optional = true }
+miden-ace-codegen = { workspace = true, optional = true }
 
 # External dependencies
 thiserror.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true
-miden-ace-codegen = { path = "../../ace-codegen" }
+miden-ace-codegen.workspace = true
 miden-air.workspace = true
+miden-lifted-stark.workspace = true
 miden-processor = { workspace = true, features = ["testing"] }
 miden-prover.workspace = true
 miden-utils-testing.workspace = true
 miden-verifier.workspace = true
 num = { version = "0.4" }
-num-bigint = { version = "0.4" }
-pretty_assertions = { version = "1.4" }
 rand = { version = "0.9", default-features = false }
-rand_chacha = { version = "0.9", default-features = false }
-rstest = { version = "0.26" }
+rand_chacha = { workspace = true }
+rstest = { workspace = true }
 bincode.workspace = true
-serde.workspace = true
-serde_json.workspace = true
 
 [build-dependencies]
 env_logger.workspace = true
 fs-err = { version = "3.1" }
 miden-assembly = { workspace = true, features = ["std"] }
 miden-package-registry = { workspace = true, features = ["resolver"] }
+
+[[bin]]
+name = "regenerate-constraints"
+path = "src/bin/regenerate-constraints.rs"
+required-features = ["constraints-tools"]

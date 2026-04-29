@@ -99,7 +99,7 @@ end
 #! - TAG = [KECCAK_HASH_BYTES_EVENT, len_bytes, 0, 0] encodes the precompile identifier and the byte length as metadata
 #! - DIGEST_U32[8] = [d_0, ..., d_7] = Keccak256(INPUT_U8[len_bytes])
 @locals(8)
-pub proc hash_bytes_impl
+proc hash_bytes_impl
     emit.KECCAK_HASH_BYTES_EVENT
     # => [ptr, len_bytes, ...]
 

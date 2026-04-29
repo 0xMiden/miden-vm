@@ -162,8 +162,8 @@ fn div() {
 
     // --- test remainder -------------------------------------------------------------------------
     let test = build_op_test!(asm_op, &[2, 5]);
-    let expected =
-        (Felt::new(2).inverse().as_canonical_u64() as u128 * 5_u128) % Felt::ORDER_U64 as u128;
+    let expected = (Felt::new_unchecked(2).inverse().as_canonical_u64() as u128 * 5_u128)
+        % Felt::ORDER_U64 as u128;
     test.expect_stack(&[expected as u64]);
 
     // --- test that the rest of the stack isn't affected -----------------------------------------
@@ -200,8 +200,8 @@ fn div_b() {
 
     // --- test remainder -------------------------------------------------------------------------
     let test = build_op_test!(build_asm_op(2), &[5]);
-    let expected =
-        (Felt::new(2).inverse().as_canonical_u64() as u128 * 5_u128) % Felt::ORDER_U64 as u128;
+    let expected = (Felt::new_unchecked(2).inverse().as_canonical_u64() as u128 * 5_u128)
+        % Felt::ORDER_U64 as u128;
     test.expect_stack(&[expected as u64]);
 
     // --- test that the rest of the stack isn't affected -----------------------------------------
@@ -271,12 +271,12 @@ fn inv() {
     test.expect_stack(&[ONE.inverse().as_canonical_u64()]);
 
     let test = build_op_test!(asm_op, &[64]);
-    test.expect_stack(&[Felt::new(64).inverse().as_canonical_u64()]);
+    test.expect_stack(&[Felt::new_unchecked(64).inverse().as_canonical_u64()]);
 
     // --- test that the rest of the stack isn't affected -----------------------------------------
     let c = rand_value::<u64>();
     let test = build_op_test!(asm_op, &[5, c]);
-    test.expect_stack(&[Felt::new(5).inverse().as_canonical_u64(), c]);
+    test.expect_stack(&[Felt::new_unchecked(5).inverse().as_canonical_u64(), c]);
 }
 
 #[test]
@@ -339,7 +339,7 @@ fn exp_bits_length() {
 
     let base = 9;
     let pow = 1021;
-    let expected = Felt::new(base).exp_u64(pow);
+    let expected = Felt::new_unchecked(base).exp_u64(pow);
 
     let test = build_op_test!(build_asm_op(10), &[pow, base]);
     test.expect_stack(&[expected.as_canonical_u64()]);
@@ -387,7 +387,7 @@ fn exp_small_pow() {
 
     let base = rand_value::<u64>();
     let pow = 7;
-    let expected = Felt::new(base).exp_u64(pow);
+    let expected = Felt::new_unchecked(base).exp_u64(pow);
 
     let test = build_op_test!(build_asm_op(pow), &[base]);
     test.expect_stack(&[expected.as_canonical_u64()]);
@@ -427,7 +427,7 @@ fn ilog2_ignores_prefilled_advice_in_real_opcode_path() {
 fn ilog2_bound_verification_source() -> &'static str {
     "begin
         # Pop claimed ilog2 from advice stack: [claimed_ilog2, n, ...]
-        adv_push.1
+        adv_push
 
         # Compute pow2 = 2^claimed_ilog2.
         dup.0
@@ -536,7 +536,7 @@ fn not_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError { err: OperationError::NotBinaryValue { value }, .. } if value == Felt::new(2_u64)
+        ExecutionError::OperationError { err: OperationError::NotBinaryValue { value }, .. } if value == Felt::new_unchecked(2_u64)
     );
 }
 
@@ -564,19 +564,19 @@ fn and_fail() {
     let test = build_op_test!(asm_op, &[2, 3]);
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError { err: OperationError::NotBinaryValue { value }, .. } if value == Felt::new(2_u64)
+        ExecutionError::OperationError { err: OperationError::NotBinaryValue { value }, .. } if value == Felt::new_unchecked(2_u64)
     );
 
     let test = build_op_test!(asm_op, &[0, 2]);
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError { err: OperationError::NotBinaryValue { value }, .. } if value == Felt::new(2_u64)
+        ExecutionError::OperationError { err: OperationError::NotBinaryValue { value }, .. } if value == Felt::new_unchecked(2_u64)
     );
 
     let test = build_op_test!(asm_op, &[2, 0]);
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError { err: OperationError::NotBinaryValue { value }, .. } if value == Felt::new(2_u64)
+        ExecutionError::OperationError { err: OperationError::NotBinaryValue { value }, .. } if value == Felt::new_unchecked(2_u64)
     );
 }
 
@@ -601,7 +601,7 @@ fn or() {
 fn or_fail() {
     let asm_op = "or";
 
-    let expected_value = Felt::new(2);
+    let expected_value = Felt::new_unchecked(2);
     let test = build_op_test!(asm_op, &[2, 3]);
     expect_exec_error_matches!(
         test,
@@ -642,7 +642,7 @@ fn xor() {
 fn xor_fail() {
     let asm_op = "xor";
 
-    let expected_value = Felt::new(2);
+    let expected_value = Felt::new_unchecked(2);
     // --- test value > 1 --------------------------------------------------------------------
     // Stack [3, 2] - VM checks position 1 first, so error for value 2
     let test = build_op_test!(asm_op, &[3, 2]);
@@ -814,7 +814,7 @@ proptest! {
         let asm_op = "div";
 
         // allow a possible overflow then mod by the Felt Modulus
-        let expected = (Felt::new(b).inverse().as_canonical_u64() as u128 * a as u128) % Felt::ORDER_U64 as u128;
+        let expected = (Felt::new_unchecked(b).inverse().as_canonical_u64() as u128 * a as u128) % Felt::ORDER_U64 as u128;
 
         // b provided via the stack: stack [b, a] computes a / b
         let test = build_op_test!(asm_op, &[b, a]);
@@ -844,7 +844,7 @@ proptest! {
     fn inv_proptest(a in 1..u64::MAX) {
         let asm_op = "inv";
 
-        let expected = Felt::new(a).inverse().as_canonical_u64();
+        let expected = Felt::new_unchecked(a).inverse().as_canonical_u64();
 
         let test = build_op_test!(asm_op, &[a]);
         test.prop_expect_stack(&[expected])?;
@@ -865,7 +865,7 @@ proptest! {
         let asm_op = "exp";
         let base = a;
         let pow = b;
-        let expected = Felt::new(base).exp_u64(pow);
+        let expected = Felt::new_unchecked(base).exp_u64(pow);
 
         let test = build_op_test!(asm_op, &[pow, base]);
         test.prop_expect_stack(&[expected.as_canonical_u64()])?;
@@ -874,7 +874,7 @@ proptest! {
         let build_asm_op = |param: u64| format!("exp.{param}");
         let base = a;
         let pow = b;
-        let expected = Felt::new(base).exp_u64(pow);
+        let expected = Felt::new_unchecked(base).exp_u64(pow);
 
         let test = build_op_test!(build_asm_op(pow), &[base]);
         test.prop_expect_stack(&[expected.as_canonical_u64()])?;

@@ -53,7 +53,7 @@ impl OpBatch {
     /// of operations in the batch may be larger than the number of operations reported by this
     /// method.
     pub fn raw_ops(&self) -> impl Iterator<Item = &Operation> {
-        debug_assert!(self.num_groups == 0 || self.indptr[self.num_groups] != 0, "{:?}", self);
+        debug_assert!(self.num_groups == 0 || self.indptr[self.num_groups] != 0, "{self:?}");
         (0..self.num_groups).flat_map(|group_idx| {
             let padded = self.padding[group_idx];
             let start_idx = self.indptr[group_idx];
@@ -131,7 +131,7 @@ impl OpBatch {
             let is_padded = *self
                 .padding
                 .get(group_idx)
-                .ok_or_else(|| format!("group {}: missing padding metadata", group_idx))?;
+                .ok_or_else(|| format!("group {group_idx}: missing padding metadata"))?;
             if !is_padded {
                 continue;
             }
@@ -139,27 +139,27 @@ impl OpBatch {
             let group_start = *self
                 .indptr
                 .get(group_idx)
-                .ok_or_else(|| format!("group {}: missing indptr start", group_idx))?;
+                .ok_or_else(|| format!("group {group_idx}: missing indptr start"))?;
             let group_end = *self
                 .indptr
                 .get(group_idx + 1)
-                .ok_or_else(|| format!("group {}: missing indptr end", group_idx))?;
+                .ok_or_else(|| format!("group {group_idx}: missing indptr end"))?;
 
             if group_start == group_end {
-                return Err(format!("group {}: empty group cannot be marked as padded", group_idx));
+                return Err(format!("group {group_idx}: empty group cannot be marked as padded"));
             }
             if group_start > group_end {
-                return Err(format!("group {}: invalid group bounds", group_idx));
+                return Err(format!("group {group_idx}: invalid group bounds"));
             }
 
             let last_op_idx = group_end - 1;
             let last_op = self
                 .ops
                 .get(last_op_idx)
-                .ok_or_else(|| format!("group {}: invalid group bounds", group_idx))?;
+                .ok_or_else(|| format!("group {group_idx}: invalid group bounds"))?;
 
             if *last_op != Operation::Noop {
-                return Err(format!("group {}: padded group must end with NOOP", group_idx));
+                return Err(format!("group {group_idx}: padded group must end with NOOP"));
             }
         }
 
@@ -336,14 +336,12 @@ pub(crate) fn collect_immediate_placements(
                 && next_group_idx >= num_groups
             {
                 return Err(format!(
-                    "push immediate index {} exceeds num_groups {}",
-                    next_group_idx, num_groups
+                    "push immediate index {next_group_idx} exceeds num_groups {num_groups}"
                 ));
             }
             if indptr[next_group_idx] != indptr[next_group_idx + 1] {
                 return Err(format!(
-                    "push immediate overlaps operation group at index {}",
-                    next_group_idx
+                    "push immediate overlaps operation group at index {next_group_idx}"
                 ));
             }
             placements.push((next_group_idx, imm));
@@ -472,7 +470,7 @@ impl OpBatchAccumulator {
         // make sure the last group gets added to the group array; we also check the op_idx to
         // handle the case when a group contains a single NOOP operation.
         if self.group != 0 || self.op_idx != 0 {
-            self.groups[self.group_idx] = Felt::new(self.group);
+            self.groups[self.group_idx] = Felt::new_unchecked(self.group);
         }
         self.pad_if_needed();
         self.finalize_indptr();
@@ -508,7 +506,7 @@ impl OpBatchAccumulator {
         // we pad if we are looking at an empty group, or one finishing in an op carrying an
         // immediate
         self.pad_if_needed();
-        self.groups[self.group_idx] = Felt::new(self.group);
+        self.groups[self.group_idx] = Felt::new_unchecked(self.group);
         self.finalize_indptr();
 
         self.group_idx = self.next_group_idx;
@@ -638,9 +636,9 @@ mod op_batch_tests {
         let batch = {
             let mut acc = OpBatchAccumulator::new();
             // group 0
-            acc.add_op(Operation::Push(Felt::new(2)));
-            acc.add_op(Operation::Push(Felt::new(3)));
-            acc.add_op(Operation::Push(Felt::new(4)));
+            acc.add_op(Operation::Push(Felt::new_unchecked(2)));
+            acc.add_op(Operation::Push(Felt::new_unchecked(3)));
+            acc.add_op(Operation::Push(Felt::new_unchecked(4)));
             acc.add_op(Operation::Swap);
             acc.add_op(Operation::Swap);
             acc.add_op(Operation::Swap);
@@ -659,7 +657,7 @@ mod op_batch_tests {
             acc.add_op(Operation::Swap);
 
             // group 5
-            acc.add_op(Operation::Push(Felt::new(5)));
+            acc.add_op(Operation::Push(Felt::new_unchecked(5)));
             acc.add_op(Operation::Swap);
             acc.add_op(Operation::Swap);
             acc.add_op(Operation::Swap);
@@ -696,9 +694,9 @@ mod op_batch_tests {
         let batch = {
             let mut acc = OpBatchAccumulator::new();
             // group 0
-            acc.add_op(Operation::Push(Felt::new(2)));
-            acc.add_op(Operation::Push(Felt::new(3)));
-            acc.add_op(Operation::Push(Felt::new(4)));
+            acc.add_op(Operation::Push(Felt::new_unchecked(2)));
+            acc.add_op(Operation::Push(Felt::new_unchecked(3)));
+            acc.add_op(Operation::Push(Felt::new_unchecked(4)));
             acc.add_op(Operation::Swap);
             acc.add_op(Operation::Swap);
             acc.add_op(Operation::Swap);
@@ -717,7 +715,7 @@ mod op_batch_tests {
             acc.add_op(Operation::Swap);
 
             // group 5
-            acc.add_op(Operation::Push(Felt::new(5)));
+            acc.add_op(Operation::Push(Felt::new_unchecked(5)));
             acc.add_op(Operation::Swap);
             acc.add_op(Operation::Swap);
             acc.add_op(Operation::Swap);

@@ -19,7 +19,8 @@ doctest = false
 
 [features]
 default = ["std"]
-std = ["miden-core/std", "thiserror/std"]
+arbitrary = ["std", "dep:proptest"]
+std = ["miden-core/std", "proptest?/std", "thiserror/std"]
 concurrent = ["std"]
 testing = []
 
@@ -28,12 +29,15 @@ testing = []
 miden-ace-codegen.workspace = true
 miden-core.workspace = true
 miden-crypto.workspace = true
+miden-lifted-stark.workspace = true
 miden-utils-indexing.workspace = true
 
 # External dependencies
+proptest = { workspace = true, optional = true }
 thiserror.workspace = true
-tracing.workspace = true
 
 [dev-dependencies]
+insta.workspace = true
 miden-ace-codegen = { workspace = true, features = ["testing"] }
+miden-test-serde-macros.workspace = true
 proptest.workspace = true

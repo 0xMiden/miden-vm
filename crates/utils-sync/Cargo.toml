@@ -24,11 +24,10 @@ once_cell = { version = "1.21", default-features = false, features = ["alloc", "
 parking_lot = { version = "0.12", optional = true }
 
 [dev-dependencies]
-loom = "0.7"
-proptest.workspace = true
+loom = { workspace = true }
 
 [target.'cfg(loom)'.dependencies]
-loom = "0.7"
+loom.workspace = true
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(loom)'] }

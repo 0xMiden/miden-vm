@@ -20,9 +20,11 @@ pub use miden_assembly_syntax::{
     semver,
     semver::{Version as SemVer, VersionReq},
 };
-pub use miden_core::{LexicographicWord, Word};
+pub use miden_core::Word;
 use miden_mast_package::Package as MastPackage;
 pub use miden_mast_package::PackageId;
+#[cfg(feature = "arbitrary")]
+use proptest::prelude::*;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -42,6 +44,7 @@ pub type PackageRequirements = BTreeMap<PackageId, VersionRequirement>;
 /// Metadata tracked for a specific canonical package version.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
 pub struct PackageRecord {
     /// The exact published version associated with this package
     version: Version,
@@ -82,7 +85,7 @@ impl PackageRecord {
 
     /// The digest of the MAST forest contained in this package
     pub fn digest(&self) -> Option<&Word> {
-        self.version.digest.as_ref().map(|word| word.inner())
+        self.version.digest.as_ref()
     }
 
     /// Returns the package description, if known.
@@ -93,6 +96,32 @@ impl PackageRecord {
     /// Returns the dependency metadata for this package.
     pub fn dependencies(&self) -> &PackageRequirements {
         &self.dependencies
+    }
+}
+
+#[cfg(feature = "arbitrary")]
+impl Arbitrary for PackageRecord {
+    type Parameters = ();
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        let description = proptest::option::of(
+            proptest::collection::vec(proptest::char::range('a', 'z'), 1..32)
+                .prop_map(|chars| Arc::<str>::from(chars.into_iter().collect::<String>())),
+        );
+        let dependencies =
+            proptest::collection::vec((any::<PackageId>(), any::<VersionRequirement>()), 0..4)
+                .prop_map(|entries| entries.into_iter().collect::<BTreeMap<_, _>>());
+
+        (any::<Version>(), description, dependencies)
+            .prop_map(|(version, description, dependencies)| {
+                let mut record = Self::new(version, dependencies);
+                if let Some(description) = description {
+                    record = record.with_description(description);
+                }
+                record
+            })
+            .boxed()
     }
 }
 
@@ -147,12 +176,11 @@ pub trait PackageRegistry {
 
     /// Return the metadata for `package` with `digest`, if present.
     fn get_by_digest(&self, package: &PackageId, digest: &Word) -> Option<&PackageRecord> {
-        let digest = LexicographicWord::new(*digest);
         self.available_versions(package).and_then(|versions| {
             versions
                 .values()
                 .rev()
-                .find(|record| record.version().digest.is_some_and(|d| d == digest))
+                .find(|record| record.version().digest.as_ref() == Some(digest))
         })
     }
 

@@ -8,6 +8,8 @@ use miden_assembly_syntax::{
     },
     library::Library,
 };
+#[cfg(all(feature = "arbitrary", test))]
+use miden_core::serde::{Deserializable, Serializable};
 use miden_core::{Word, utils::DisplayHex};
 #[cfg(feature = "arbitrary")]
 use proptest::prelude::{Strategy, any};
@@ -24,6 +26,10 @@ use crate::{Dependency, PackageId};
 /// and exported items (procedures, constants, types), if known.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(proptest_derive::Arbitrary))]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
+)]
 pub struct PackageManifest {
     /// The set of exports in this package.
     #[cfg_attr(
@@ -168,7 +174,10 @@ impl PackageManifest {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[repr(u8)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true))
+)]
 pub enum PackageExport {
     /// A procedure definition or alias with 'pub' visibility
     Procedure(ProcedureExport) = 1,
@@ -261,7 +270,10 @@ impl proptest::arbitrary::Arbitrary for PackageExport {
 #[derive(Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(proptest_derive::Arbitrary))]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true))
+)]
 pub struct ProcedureExport {
     /// The fully-qualified path of the procedure exported by this package.
     #[cfg_attr(feature = "serde", serde(with = "miden_assembly_syntax::ast::path"))]
@@ -299,7 +311,10 @@ impl fmt::Debug for ProcedureExport {
 #[derive(Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(proptest_derive::Arbitrary))]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true))
+)]
 pub struct ConstantExport {
     /// The fully-qualified path of the constant exported by this package.
     #[cfg_attr(feature = "serde", serde(with = "miden_assembly_syntax::ast::path"))]
@@ -333,7 +348,10 @@ impl fmt::Debug for ConstantExport {
 #[derive(Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(proptest_derive::Arbitrary))]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true))
+)]
 pub struct TypeExport {
     /// The fully-qualified path of the type exported by this package.
     #[cfg_attr(feature = "serde", serde(with = "miden_assembly_syntax::ast::path"))]

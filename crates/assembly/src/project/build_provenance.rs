@@ -7,6 +7,8 @@ use miden_core::{
     utils::hash_string_to_word,
 };
 use miden_mast_package::{Package as MastPackage, Section, SectionId};
+#[cfg(feature = "arbitrary")]
+use proptest::prelude::*;
 
 use super::PackageBuildSettings;
 
@@ -37,6 +39,10 @@ use super::PackageBuildSettings;
 /// for parent packages and is used in semver-bump diagnostics to explain why an existing canonical
 /// artifact no longer matches the current sources.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
+)]
 pub(super) enum PackageBuildProvenance {
     /// Provenance for a package assembled from sources addressed by a local filesystem path.
     Path {
@@ -284,5 +290,63 @@ impl Deserializable for PackageBuildProvenance {
                 "invalid project source provenance tag '{invalid}'"
             ))),
         }
+    }
+}
+
+#[cfg(feature = "arbitrary")]
+impl Arbitrary for PackageBuildSettings {
+    type Parameters = ();
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        (any::<bool>(), any::<bool>())
+            .prop_map(|(emit_debug_info, trim_paths)| Self { emit_debug_info, trim_paths })
+            .boxed()
+    }
+}
+
+#[cfg(feature = "arbitrary")]
+impl Arbitrary for PackageBuildProvenance {
+    type Parameters = ();
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        let word =
+            proptest::collection::vec(proptest::char::range('a', 'z'), 1..16).prop_map(|chars| {
+                let material = chars.into_iter().collect::<String>();
+                hash_string_to_word(material.as_str())
+            });
+        let text = proptest::collection::vec(
+            proptest::prop_oneof![
+                proptest::char::range('a', 'z'),
+                proptest::char::range('0', '9'),
+                Just('/'),
+                Just('-'),
+                Just('_'),
+                Just('.'),
+                Just(':'),
+            ],
+            1..40,
+        )
+        .prop_map(|chars| chars.into_iter().collect::<String>());
+
+        proptest::prop_oneof![
+            (word.clone(), word.clone(), any::<PackageBuildSettings>()).prop_map(
+                |(source_hash, dependency_hash, build_settings)| Self::Path {
+                    source_hash,
+                    dependency_hash,
+                    build_settings,
+                }
+            ),
+            (text.clone(), text, word, any::<PackageBuildSettings>()).prop_map(
+                |(repo, resolved_revision, dependency_hash, build_settings)| Self::Git {
+                    repo,
+                    resolved_revision,
+                    dependency_hash,
+                    build_settings,
+                }
+            ),
+        ]
+        .boxed()
     }
 }

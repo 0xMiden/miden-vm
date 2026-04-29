@@ -40,18 +40,18 @@ fn state_to_key(state: &HasherState) -> StateKey {
 
 /// Reconstructs a HasherState from a StateKey.
 fn key_to_state(key: &StateKey) -> HasherState {
-    core::array::from_fn(|i| Felt::new(key[i]))
+    core::array::from_fn(|i| Felt::new_unchecked(key[i]))
 }
 
 /// Hash chiplet for the VM.
 ///
 /// This component uses a controller/permutation split architecture:
 ///
-/// - **Controller region** (perm_seg=0): pairs of (input, output) rows for each permutation
-///   request. Input rows (s0=1) capture the operation type and pre-permutation state. Output rows
-///   (s0=0, s1=0) capture the post-permutation state.
+/// - **Controller region** (s_perm=0): pairs of (input, output) rows for each permutation request.
+///   Input rows (s0=1) capture the operation type and pre-permutation state. Output rows (s0=0,
+///   s1=0) capture the post-permutation state.
 ///
-/// - **Permutation segment** (perm_seg=1): one 16-row Poseidon2 cycle per unique input state.
+/// - **Permutation segment** (s_perm=1): one 16-row Poseidon2 cycle per unique input state.
 ///   Multiplicity is stored in the node_index column. Linked to controller rows via the hasher_perm
 ///   LogUp bus.
 ///
@@ -60,7 +60,7 @@ fn key_to_state(key: &StateKey) -> HasherState {
 ///
 /// ## Trace layout (20 columns)
 ///
-///   s0  s1  s2  h0..h11  idx  mrupdate_id  is_boundary  direction_bit  perm_seg
+///   s0  s1  s2  h0..h11  idx  mrupdate_id  is_boundary  direction_bit  s_perm
 /// ├────┴───┴───┴────────┴────┴────────────┴─────────┴─────────┴────────┤
 #[derive(Debug, Default)]
 pub struct Hasher {
@@ -93,18 +93,26 @@ impl Hasher {
         }
     }
 
+    /// Returns the layout of the hasher region as `(controller_len, perm_len)`, both exact
+    /// multiples of `HASH_CYCLE_LEN`. Must be called before `fill_trace()` consumes the hasher.
+    ///
+    /// `controller_len` includes the padding rows that `finalize_trace()` will later append to
+    /// round the raw controller count up to a cycle boundary; `perm_len` is the total span of
+    /// the permutation cycles that `finalize_trace()` will emit, one per unique input state.
+    pub(super) fn region_lengths(&self) -> (usize, usize) {
+        debug_assert!(!self.finalized, "region_lengths must be called before finalization");
+        let controller_len = self.trace.trace_len().next_multiple_of(HASH_CYCLE_LEN);
+        let perm_len = self.perm_request_map.len() * HASH_CYCLE_LEN;
+        (controller_len, perm_len)
+    }
+
     /// Estimates the total trace length before finalization.
     ///
     /// This must match the actual length produced by `finalize_trace()`. The invariant is
     /// verified by a debug assertion in `fill_trace()`.
     fn estimate_trace_len(&self) -> usize {
-        let controller_len = self.trace.trace_len();
-        let padding = {
-            let remainder = controller_len % HASH_CYCLE_LEN;
-            if remainder == 0 { 0 } else { HASH_CYCLE_LEN - remainder }
-        };
-        let perm_len = self.perm_request_map.len() * HASH_CYCLE_LEN;
-        controller_len + padding + perm_len
+        let (controller_len, perm_len) = self.region_lengths();
+        controller_len + perm_len
     }
 
     // HASHING METHODS
@@ -330,7 +338,7 @@ impl Hasher {
         // Append one 16-row permutation cycle per unique input state
         for (key, multiplicity) in core::mem::take(&mut self.perm_request_map) {
             let state = key_to_state(&key);
-            self.trace.append_permutation_cycle(&state, Felt::new(multiplicity));
+            self.trace.append_permutation_cycle(&state, Felt::new_unchecked(multiplicity));
         }
 
         self.finalized = true;
@@ -432,8 +440,8 @@ impl Hasher {
             let state = build_merge_state(&root, &sibling, b_i);
 
             // Input row carries the full index; output row carries the shifted index.
-            let input_node_idx = Felt::new(index);
-            let output_node_idx = Felt::new(index >> 1);
+            let input_node_idx = Felt::new_unchecked(index);
+            let output_node_idx = Felt::new_unchecked(index >> 1);
 
             // Direction bit for the NEXT step (forward propagation for routing constraint).
             // On the last step there is no next step, so direction_bit = 0.
@@ -450,8 +458,8 @@ impl Hasher {
                 output_node_idx,
                 is_boundary_input,
                 is_boundary_output,
-                Felt::new(b_i),    // input direction_bit: current step's bit
-                Felt::new(b_next), // output direction_bit: next step's bit (propagated)
+                Felt::new_unchecked(b_i), // input direction_bit: current step's bit
+                Felt::new_unchecked(b_next), // output direction_bit: next step's bit (propagated)
             );
 
             root = get_digest(&permuted);
@@ -535,7 +543,7 @@ enum MerklePathContext {
 
 impl MerklePathContext {
     /// Returns selector values for this context.
-    pub fn main_selectors(&self) -> Selectors {
+    pub fn main_selectors(self) -> Selectors {
         match self {
             Self::MpVerify => MP_VERIFY,
             Self::MrUpdateOld => MR_UPDATE_OLD,

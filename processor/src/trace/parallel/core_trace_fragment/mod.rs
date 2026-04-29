@@ -34,12 +34,12 @@ impl BasicBlockContext {
 
         Ok(Self {
             current_op_group: current_batch.groups()[0],
-            group_count_in_block: Felt::new(
+            group_count_in_block: Felt::new_unchecked(
                 basic_block_node
                     .op_batches()
                     .iter()
                     .skip(batch_index)
-                    .map(|batch| batch.num_groups())
+                    .map(miden_core::mast::OpBatch::num_groups)
                     .sum::<usize>() as u64,
             ),
         })
@@ -86,7 +86,9 @@ impl BasicBlockContext {
             // the current one, and so we would expect to shift `NUM_OP_BITS` by
             // `op_idx_in_group + 1`. However, we will apply that shift right before
             // writing to the trace, so we only shift by `op_idx_in_group` here.
-            Felt::new(current_op_group.as_canonical_u64() >> (NUM_OP_BITS * op_idx_in_group))
+            Felt::new_unchecked(
+                current_op_group.as_canonical_u64() >> (NUM_OP_BITS * op_idx_in_group),
+            )
         };
 
         let group_count_in_block = {
@@ -135,7 +137,7 @@ impl BasicBlockContext {
     /// Removes the operation that was just executed from the current operation group.
     pub(crate) fn remove_operation_from_current_op_group(&mut self) {
         let prev_op_group = self.current_op_group.as_canonical_u64();
-        self.current_op_group = Felt::new(prev_op_group >> NUM_OP_BITS);
+        self.current_op_group = Felt::new_unchecked(prev_op_group >> NUM_OP_BITS);
 
         debug_assert!(
             prev_op_group >= self.current_op_group.as_canonical_u64(),

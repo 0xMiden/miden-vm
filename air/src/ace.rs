@@ -49,8 +49,9 @@ pub enum MessageElement {
 pub enum ProductFactor {
     /// Claimed final value of an auxiliary trace column, by column index.
     BusBoundary(usize),
-    /// A bus message computed from its elements as `alpha + sum(beta^i * elements[i])`.
-    Message(Vec<MessageElement>),
+    /// A bus message computed from its elements as `bus_prefix[bus] + sum(beta^i * elements[i])`.
+    /// The first field is the bus type index (see `trace::bus_types`).
+    Message(usize, Vec<MessageElement>),
     /// Multiset product reduced from variable-length public inputs, by group index.
     Vlpi(usize),
 }
@@ -131,7 +132,7 @@ where
     for factor in factors {
         let node = match factor {
             ProductFactor::BusBoundary(idx) => builder.input(InputKey::AuxBusBoundary(*idx)),
-            ProductFactor::Message(elements) => encode_bus_message(builder, elements),
+            ProductFactor::Message(bus, elements) => encode_bus_message(builder, *bus, elements),
             ProductFactor::Vlpi(idx) => builder.input(InputKey::VlpiReduction(*idx)),
         };
         acc = builder.mul(acc, node);
@@ -154,20 +155,38 @@ where
     sum
 }
 
-/// Encode a bus message as `alpha + sum(beta^i * elements[i])`.
-fn encode_bus_message<EF>(builder: &mut DagBuilder<EF>, elements: &[MessageElement]) -> NodeId
+/// Encode a bus message as `bus_prefix[bus] + sum(beta^i * elements[i])`.
+///
+/// The bus prefix provides domain separation: `bus_prefix[bus] = alpha + (bus+1) * gamma`
+/// where `gamma = beta^MAX_MESSAGE_WIDTH`. This matches [`trace::Challenges::encode`].
+fn encode_bus_message<EF>(
+    builder: &mut DagBuilder<EF>,
+    bus: usize,
+    elements: &[MessageElement],
+) -> NodeId
 where
     EF: ExtensionField<Felt>,
 {
     let alpha = builder.input(InputKey::AuxRandAlpha);
     let beta = builder.input(InputKey::AuxRandBeta);
 
-    // acc = alpha + sum(beta^i * elem_i)
+    // Compute gamma = beta^MAX_MESSAGE_WIDTH.
+    let mut gamma = builder.constant(EF::ONE);
+    for _ in 0..trace::MAX_MESSAGE_WIDTH {
+        gamma = builder.mul(gamma, beta);
+    }
+
+    // bus_prefix = alpha + (bus + 1) * gamma
+    let scale = builder.constant(EF::from(Felt::from_u32((bus as u32) + 1)));
+    let offset = builder.mul(gamma, scale);
+    let bus_prefix = builder.add(alpha, offset);
+
+    // acc = bus_prefix + sum(beta^i * elem_i)
     //
     // Beta powers are built incrementally. The DagBuilder is hash-consed, so
     // identical beta^i nodes across multiple message encodings are shared
     // automatically.
-    let mut acc = alpha;
+    let mut acc = bus_prefix;
     let mut beta_power = builder.constant(EF::ONE);
     for elem in elements {
         let node = match elem {
@@ -190,6 +209,7 @@ where
 pub fn reduced_aux_batch_config() -> ReducedAuxBatchConfig {
     use MessageElement::{Constant, PublicInput};
     use ProductFactor::{BusBoundary, Message, Vlpi};
+    use trace::bus_types;
 
     // Aux boundary column indices.
     let p1 = trace::DECODER_AUX_TRACE_OFFSET;
@@ -251,10 +271,10 @@ pub fn reduced_aux_batch_config() -> ReducedAuxBatchConfig {
             BusBoundary(s_aux),
             BusBoundary(b_hash_kernel),
             BusBoundary(b_chiplets),
-            Message(ph_msg),
-            Message(default_msg),
+            Message(bus_types::BLOCK_HASH_TABLE, ph_msg),
+            Message(bus_types::LOG_PRECOMPILE_TRANSCRIPT, default_msg),
         ],
-        denominator: vec![Message(final_msg), Vlpi(0)],
+        denominator: vec![Message(bus_types::LOG_PRECOMPILE_TRANSCRIPT, final_msg), Vlpi(0)],
         sum_columns: vec![b_range, v_wiring],
     }
 }

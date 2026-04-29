@@ -2,11 +2,11 @@ use alloc::boxed::Box;
 #[cfg(feature = "std")]
 use std::path::Path;
 
-#[cfg(feature = "std")]
+#[cfg(all(feature = "std", feature = "serde"))]
 use miden_assembly_syntax::debuginfo::Spanned;
 use miden_mast_package::PackageId;
 
-#[cfg(feature = "std")]
+#[cfg(all(feature = "std", feature = "serde"))]
 use crate::ast::{ProjectFileError, WorkspaceFile};
 use crate::*;
 
@@ -307,7 +307,7 @@ impl Package {
 
         Ok(Box::new(Self {
             manifest_path,
-            name: package_ast.package.name.clone().map(|id| id.into()),
+            name: package_ast.package.name.map(Into::into),
             version,
             description,
             dependencies,
@@ -331,7 +331,7 @@ impl Package {
         let manifest_ast = ast::ProjectFile {
             source_file: None,
             package: ast::PackageTable {
-                name: self.name().map(|id| id.into_inner()),
+                name: self.name().map(PackageId::into_inner),
                 detail: ast::PackageDetail {
                     version: Some(
                         self.version().map(|v| ast::parsing::MaybeInherit::Value(v.clone())),

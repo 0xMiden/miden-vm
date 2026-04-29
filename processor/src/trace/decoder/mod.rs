@@ -21,5 +21,5 @@ pub fn build_op_group(ops: &[Operation]) -> Felt {
         i += 1;
     }
     assert!(i <= OP_GROUP_SIZE, "too many ops");
-    Felt::new(group)
+    Felt::new_unchecked(group)
 }

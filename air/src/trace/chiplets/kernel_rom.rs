@@ -20,7 +20,7 @@ pub const TRACE_WIDTH: usize = 5;
 /// - s_first value: 0
 /// - Combined selector: [1, 1, 1, 1, 0 | 0]
 /// - Reverse bits and add 1 to get final label value: [0 | 0, 1, 1, 1, 1] + 1 = 16
-pub const KERNEL_PROC_CALL_LABEL: Felt = Felt::new(0b001111 + 1);
+pub const KERNEL_PROC_CALL_LABEL: Felt = Felt::new_unchecked(0b001111 + 1);
 
 /// Specified the label of the kernel ROM initialization request by the verifier.
 ///
@@ -29,4 +29,4 @@ pub const KERNEL_PROC_CALL_LABEL: Felt = Felt::new(0b001111 + 1);
 /// - s_first value: 1
 /// - Combined selector: [1, 1, 1, 1, 0 | 1]
 /// - Reverse bits and add 1 to get final label value: [1 | 0, 1, 1, 1, 1] + 1 = 48
-pub const KERNEL_PROC_INIT_LABEL: Felt = Felt::new(0b101111 + 1);
+pub const KERNEL_PROC_INIT_LABEL: Felt = Felt::new_unchecked(0b101111 + 1);

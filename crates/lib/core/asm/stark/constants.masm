@@ -91,6 +91,11 @@ const TMP2 = 3223322684
 const TMP3 = 3223322688
 const TMP4 = 3223322692
 
+### gamma = beta^MAX_MESSAGE_WIDTH for per-bus domain separation.
+### Stored as [gamma0, gamma1, 0, 0] (one extension field element, word-aligned).
+### Computed once in generate_aux_randomness, read by reduce_kernel_digests.
+const BUS_GAMMA_PTR = 3223322696
+
 ### Address to the word holding the non-deterministically loaded 2 random challenges, which will be
 ### checked for correctness once we receive the commitment to the auxiliary trace and are able to
 ### generate the auxiliary randomness
@@ -455,6 +460,10 @@ end
 
 pub proc random_coin_output_len_ptr
     push.RANDOM_COIN_OUTPUT_LEN_PTR
+end
+
+pub proc bus_gamma_ptr
+    push.BUS_GAMMA_PTR
 end
 
 pub proc aux_rand_nd_ptr

@@ -242,7 +242,8 @@ pub enum Instruction {
     MemStream,
     AdvPipe,
 
-    AdvPush(ImmU8),
+    AdvPush,
+    AdvPushW,
     AdvLoadW,
 
     SysEvent(SystemEventNode),

@@ -183,6 +183,12 @@ impl OpToAsmOpId {
         entries.first().map(|(_, id)| *id)
     }
 
+    /// Returns all `(op_idx, AsmOpId)` pairs for the given node, or an empty vec if the
+    /// node has no asm ops.
+    pub fn asm_ops_for_node(&self, node_id: MastNodeId) -> Vec<(usize, AsmOpId)> {
+        self.inner.row(node_id).unwrap_or_default().to_vec()
+    }
+
     /// Validates the CSR structure integrity.
     ///
     /// # Arguments
@@ -260,7 +266,7 @@ impl OpToAsmOpId {
         let result = Self { inner };
 
         result.validate_csr(asm_op_count).map_err(|e| {
-            DeserializationError::InvalidValue(format!("OpToAsmOpId validation failed: {}", e))
+            DeserializationError::InvalidValue(format!("OpToAsmOpId validation failed: {e}"))
         })?;
 
         Ok(result)
@@ -666,7 +672,7 @@ mod tests {
     fn test_serialization_roundtrip_empty() {
         let storage = OpToAsmOpId::new();
 
-        let mut bytes = alloc::vec::Vec::new();
+        let mut bytes = Vec::new();
         storage.write_into(&mut bytes);
 
         let mut reader = SliceReader::new(&bytes);
@@ -693,7 +699,7 @@ mod tests {
             .add_asm_ops_for_node(test_node_id(2), 2, vec![(1, test_asm_op_id(2))])
             .unwrap();
 
-        let mut bytes = alloc::vec::Vec::new();
+        let mut bytes = Vec::new();
         storage.write_into(&mut bytes);
 
         let mut reader = SliceReader::new(&bytes);
@@ -727,7 +733,7 @@ mod tests {
     #[test]
     fn test_debug_impl() {
         let storage = OpToAsmOpId::new();
-        let debug_str = alloc::format!("{:?}", storage);
+        let debug_str = alloc::format!("{storage:?}");
         assert!(debug_str.contains("OpToAsmOpId"));
     }
 }

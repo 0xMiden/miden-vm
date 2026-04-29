@@ -21,8 +21,8 @@ use crate::{Felt, Word, crypto::merkle::MerkleStore};
 ///
 /// ```ignore
 /// let advice = AdviceStackBuilder::new()
-///     .push_for_adv_push(&[a, b, c])  // Consumed first by adv_push.3
-///     .push_for_adv_loadw(word)       // Consumed second by adv_loadw
+///     .push_for_adv_push(&[a, b, c])  // Consumed first by adv_push adv_push adv_push
+///     .push_word(word)                // Consumed second by adv_loadw (or adv_pushw)
 ///     .build();
 /// ```
 #[derive(Clone, Debug, Default)]
@@ -59,14 +59,13 @@ impl AdviceStackBuilder {
         self
     }
 
-    /// Adds elements for consumption by `adv_push.n` instructions.
+    /// Adds elements for consumption by multiple sequential `adv_push` instructions.
     ///
-    /// After `adv_push.n`, the operand stack will have `slice[0]` on top.
-    /// The slice length determines n (e.g., 4-element slice → `adv_push.4`).
+    /// After `repeat.n adv_push end`, the operand stack will have `slice[0]` on top.
     ///
     /// # How it works
     ///
-    /// `adv_push.n` pops elements one-by-one from the advice stack and pushes each to the operand
+    /// Each `adv_push` pops one element from the advice stack and pushes it to the operand
     /// stack. Since each push goes to the top, the first-popped element ends up at the bottom
     /// of the n elements, and the last-popped element ends up on top.
     ///
@@ -77,7 +76,7 @@ impl AdviceStackBuilder {
     ///
     /// ```ignore
     /// builder.push_for_adv_push(&[a, b, c]);
-    /// // MASM: adv_push.3
+    /// // MASM: adv_push adv_push adv_push
     /// // Result: operand stack = [a, b, c, ...] with a on top
     /// ```
     pub fn push_for_adv_push(&mut self, slice: &[Felt]) -> &mut Self {
@@ -89,31 +88,20 @@ impl AdviceStackBuilder {
         self
     }
 
-    /// Adds a word for consumption by `padw adv_loadw`.
+    /// Adds a word for consumption by `adv_loadw` or `adv_pushw`.
     ///
-    /// After `adv_loadw`, the operand stack will have the structural word loaded directly.
-    /// Use `reversew` afterward to convert to canonical (little-endian) order.
-    ///
-    /// # How it works
-    ///
-    /// The `adv_loadw` instruction:
-    /// 1. Calls `pop_stack_word()` which pops 4 elements from front and creates
-    ///    `Word::new(\[e0,e1,e2,e3\])`
-    /// 2. Places the word on the operand stack with `word\[0\]` on top, `word\[1\]` at position 1,
-    ///    etc.
-    ///
-    /// Elements are pushed without reversal since `adv_loadw` loads the structural word directly.
+    /// Both instructions consume the same 4 elements from the advice stack and place them on
+    /// the operand stack with `word[0]` on top; they differ only in whether the top operand
+    /// word is overwritten (`adv_loadw`) or the stack grows by 4 (`adv_pushw`).
     ///
     /// # Example
     ///
     /// ```ignore
-    /// builder.push_for_adv_loadw([w0, w1, w2, w3].into());
-    /// // MASM: padw adv_loadw
+    /// builder.push_word([w0, w1, w2, w3].into());
+    /// // MASM: adv_loadw (or adv_pushw)
     /// // Result: operand stack = [w0, w1, w2, w3, ...] with w0 on top
     /// ```
-    pub fn push_for_adv_loadw(&mut self, word: Word) -> &mut Self {
-        // Push elements without reversal. adv_loadw loads the structural word directly,
-        // so a `reversew` is needed afterward to get canonical order on the operand stack.
+    pub fn push_word(&mut self, word: Word) -> &mut Self {
         for elem in word.iter() {
             self.stack.push_back(*elem);
         }
@@ -161,7 +149,7 @@ impl AdviceStackBuilder {
     /// // Elements consumed in order: 1, 2, 3, 4, 5, 6, 7, 8
     /// ```
     pub fn push_u64_slice(&mut self, values: &[u64]) -> &mut Self {
-        self.stack.extend(values.iter().map(|&v| Felt::new(v)));
+        self.stack.extend(values.iter().map(|&v| Felt::new_unchecked(v)));
         self
     }
 

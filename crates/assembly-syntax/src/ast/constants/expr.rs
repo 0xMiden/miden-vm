@@ -72,7 +72,7 @@ impl ConstantExpr {
     #[track_caller]
     pub fn expect_felt(&self) -> Felt {
         match self {
-            Self::Int(spanned) => Felt::new(spanned.inner().as_int()),
+            Self::Int(spanned) => Felt::new_unchecked(spanned.inner().as_int()),
             other => panic!("expected constant expression to be a literal, got {other:#?}"),
         }
     }
@@ -95,9 +95,8 @@ impl ConstantExpr {
     /// value, otherwise a bug occurred.
     #[track_caller]
     pub fn expect_value(&self) -> ConstantValue {
-        self.as_value().unwrap_or_else(|| {
-            panic!("expected constant expression to be a value, got {:#?}", self)
-        })
+        self.as_value()
+            .unwrap_or_else(|| panic!("expected constant expression to be a value, got {self:#?}"))
     }
 
     /// Try to convert this expression into a [ConstantValue], if the expression is a value.
@@ -198,8 +197,8 @@ impl ConstantExpr {
                                             Some(Self::Int(Span::new(span, value)))
                                         },
                                         ConstantOp::Div => {
-                                            let lhs = Felt::new(lhs.as_int());
-                                            let rhs = Felt::new(rhs.as_int());
+                                            let lhs = Felt::new_unchecked(lhs.as_int());
+                                            let rhs = Felt::new_unchecked(rhs.as_int());
                                             let value = IntValue::from(lhs / rhs);
                                             Some(Self::Int(Span::new(span, value)))
                                         },
@@ -408,6 +407,10 @@ impl proptest::arbitrary::Arbitrary for ConstantExpr {
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 #[repr(u8)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true))
+)]
 pub enum ConstantOp {
     Add,
     Sub,
@@ -417,7 +420,7 @@ pub enum ConstantOp {
 }
 
 impl ConstantOp {
-    const fn name(&self) -> &'static str {
+    const fn name(self) -> &'static str {
         match self {
             Self::Add => "Add",
             Self::Sub => "Sub",
@@ -509,6 +512,10 @@ impl proptest::arbitrary::Arbitrary for ConstantOp {
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 #[repr(u8)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true))
+)]
 pub enum HashKind {
     /// Reduce a string to a word using Blake3 hash function
     Word,

@@ -2,7 +2,7 @@ use alloc::vec::Vec;
 
 use miden_air::trace::chiplets::hasher::{
     DIRECTION_BIT_COL_IDX, HASH_CYCLE_LEN, IS_BOUNDARY_COL_IDX, MRUPDATE_ID_COL_IDX,
-    NODE_INDEX_COL_IDX, PERM_SEG_COL_IDX, STATE_COL_RANGE, TRACE_WIDTH,
+    NODE_INDEX_COL_IDX, S_PERM_COL_IDX, STATE_COL_RANGE, TRACE_WIDTH,
 };
 use miden_core::{
     ONE, ZERO,
@@ -40,9 +40,9 @@ fn hasher_permute() {
     // Total hasher rows: 32.
     assert_eq!(trace[0].len(), 2 * HASH_CYCLE_LEN);
 
-    // Row 0: input (LINEAR_HASH, is_boundary=1, perm_seg=0)
+    // Row 0: input (LINEAR_HASH, is_boundary=1, s_perm=0)
     check_controller_input(&trace, 0, LINEAR_HASH, &init_state, ZERO, ONE, ZERO, ZERO);
-    // Row 1: output (RETURN_STATE, is_boundary=1, perm_seg=0)
+    // Row 1: output (RETURN_STATE, is_boundary=1, s_perm=0)
     check_controller_output(&trace, 1, RETURN_STATE, &expected_state, ZERO, ONE, ZERO);
 
     // Perm segment starts at row 16 (after padding)
@@ -177,8 +177,12 @@ fn hasher_update_merkle_root() {
     let path = tree.get_path(NodeIndex::new(2, index).unwrap()).unwrap();
     let new_leaf: Digest = [Felt::from_u8(100), ZERO, ZERO, ZERO].into();
 
-    let update =
-        hasher.update_merkle_root(leaves[index as usize], new_leaf, &path, Felt::new(index));
+    let update = hasher.update_merkle_root(
+        leaves[index as usize],
+        new_leaf,
+        &path,
+        Felt::new_unchecked(index),
+    );
 
     assert_eq!(update.get_old_root(), tree.root());
 
@@ -221,9 +225,9 @@ fn perm_segment_structure() {
     // Perm segment starts at HASH_CYCLE_LEN (after padding)
     let perm_start = HASH_CYCLE_LEN;
 
-    // All perm rows have perm_seg=1
+    // All perm rows have s_perm=1
     for row in perm_start..perm_start + HASH_CYCLE_LEN {
-        assert_eq!(trace[PERM_SEG_COL_IDX][row], ONE, "perm_seg should be 1 at row {row}");
+        assert_eq!(trace[S_PERM_COL_IDX][row], ONE, "s_perm should be 1 at row {row}");
     }
 
     // On perm rows, s0/s1/s2 serve as witness columns for packed internal rounds.
@@ -287,7 +291,7 @@ fn hash_memoization_control_blocks() {
     // Compute the expected hash
     let state = super::init_state_from_words_with_domain(&h1, &h2, domain);
     let permuted = apply_permutation(state);
-    let expected_hash: Digest = super::get_digest(&permuted);
+    let expected_hash: Digest = get_digest(&permuted);
 
     let mut hasher = Hasher::default();
 
@@ -563,10 +567,7 @@ fn check_controller_input(
     assert_eq!(trace[NODE_INDEX_COL_IDX][row], node_index, "node_index at row {row}");
     assert_eq!(trace[IS_BOUNDARY_COL_IDX][row], is_boundary, "is_boundary at row {row}");
     assert_eq!(trace[DIRECTION_BIT_COL_IDX][row], direction_bit, "direction_bit at row {row}");
-    assert_eq!(
-        trace[PERM_SEG_COL_IDX][row], ZERO,
-        "perm_seg should be 0 on controller row {row}"
-    );
+    assert_eq!(trace[S_PERM_COL_IDX][row], ZERO, "s_perm should be 0 on controller row {row}");
     assert_eq!(trace[MRUPDATE_ID_COL_IDX][row], mrupdate_id, "mrupdate_id at row {row}");
 }
 
@@ -591,10 +592,7 @@ fn check_controller_output(
     assert_eq!(trace[NODE_INDEX_COL_IDX][row], node_index, "node_index at row {row}");
     assert_eq!(trace[IS_BOUNDARY_COL_IDX][row], is_boundary, "is_boundary at row {row}");
     assert_eq!(trace[DIRECTION_BIT_COL_IDX][row], direction_bit, "direction_bit at row {row}");
-    assert_eq!(
-        trace[PERM_SEG_COL_IDX][row], ZERO,
-        "perm_seg should be 0 on controller row {row}"
-    );
+    assert_eq!(trace[S_PERM_COL_IDX][row], ZERO, "s_perm should be 0 on controller row {row}");
 }
 
 /// Checks both the input and output rows of a Merkle controller pair.
@@ -603,7 +601,7 @@ fn check_controller_output(
 /// - Input row (`input_row`): has `input_selectors`, `node_index`, `is_boundary_input` flag.
 /// - Output row (`input_row + 1`): has `node_index >> 1`, `is_boundary_output` flag.
 ///
-/// Both rows must have `perm_seg=0` and the given `mrupdate_id`.
+/// Both rows must have `s_perm=0` and the given `mrupdate_id`.
 fn check_merkle_controller_pair(
     trace: &[Vec<Felt>],
     input_row: usize,
@@ -619,13 +617,13 @@ fn check_merkle_controller_pair(
     let is_boundary_input_felt = if is_boundary_input { ONE } else { ZERO };
     let is_boundary_output_felt = if is_boundary_output { ONE } else { ZERO };
 
-    // Input row: selectors, node_index, is_boundary, direction_bit, perm_seg=0
+    // Input row: selectors, node_index, is_boundary, direction_bit, s_perm=0
     assert_eq!(trace[0][input_row], input_selectors[0], "s0 at input row {input_row}");
     assert_eq!(trace[1][input_row], input_selectors[1], "s1 at input row {input_row}");
     assert_eq!(trace[2][input_row], input_selectors[2], "s2 at input row {input_row}");
     assert_eq!(
         trace[NODE_INDEX_COL_IDX][input_row],
-        Felt::new(node_index),
+        Felt::new_unchecked(node_index),
         "node_index at input row {input_row}"
     );
     assert_eq!(
@@ -636,16 +634,16 @@ fn check_merkle_controller_pair(
         trace[DIRECTION_BIT_COL_IDX][input_row], input_direction_bit,
         "direction_bit at input row {input_row}"
     );
-    assert_eq!(trace[PERM_SEG_COL_IDX][input_row], ZERO, "perm_seg at input row {input_row}");
+    assert_eq!(trace[S_PERM_COL_IDX][input_row], ZERO, "s_perm at input row {input_row}");
     assert_eq!(
         trace[MRUPDATE_ID_COL_IDX][input_row], mrupdate_id,
         "mrupdate_id at input row {input_row}"
     );
 
-    // Output row: node_index >> 1, is_boundary, direction_bit, perm_seg=0
+    // Output row: node_index >> 1, is_boundary, direction_bit, s_perm=0
     assert_eq!(
         trace[NODE_INDEX_COL_IDX][output_row],
-        Felt::new(node_index >> 1),
+        Felt::new_unchecked(node_index >> 1),
         "node_index at output row {output_row}"
     );
     assert_eq!(
@@ -656,7 +654,7 @@ fn check_merkle_controller_pair(
         trace[DIRECTION_BIT_COL_IDX][output_row], output_direction_bit,
         "direction_bit at output row {output_row}"
     );
-    assert_eq!(trace[PERM_SEG_COL_IDX][output_row], ZERO, "perm_seg at output row {output_row}");
+    assert_eq!(trace[S_PERM_COL_IDX][output_row], ZERO, "s_perm at output row {output_row}");
     assert_eq!(
         trace[MRUPDATE_ID_COL_IDX][output_row], mrupdate_id,
         "mrupdate_id at output row {output_row}"
@@ -694,7 +692,7 @@ fn check_perm_segment(
         );
     }
     assert_eq!(trace[NODE_INDEX_COL_IDX][start_row], expected_multiplicity);
-    assert_eq!(trace[PERM_SEG_COL_IDX][start_row], ONE);
+    assert_eq!(trace[S_PERM_COL_IDX][start_row], ONE);
 
     // Apply init+ext1, check row 1
     Hasher::apply_matmul_external(&mut state);
@@ -767,7 +765,7 @@ fn init_leaves(values: &[u64]) -> Vec<Digest> {
 }
 
 fn init_leaf(value: u64) -> Digest {
-    [Felt::new(value), ZERO, ZERO, ZERO].into()
+    [Felt::new_unchecked(value), ZERO, ZERO, ZERO].into()
 }
 
 /// Verifies that a memoized (copied) range of controller rows matches the original range.
@@ -818,10 +816,10 @@ fn check_memoized_trace(
             "direction_bit mismatch: original row {orig_row} vs copied row {copy_row}"
         );
 
-        // perm_seg should be 0 on all controller rows
+        // s_perm should be 0 on all controller rows
         assert_eq!(
-            trace[PERM_SEG_COL_IDX][copy_row], ZERO,
-            "perm_seg should be 0 on copied controller row {copy_row}"
+            trace[S_PERM_COL_IDX][copy_row], ZERO,
+            "s_perm should be 0 on copied controller row {copy_row}"
         );
     }
 }

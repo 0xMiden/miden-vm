@@ -339,7 +339,7 @@ impl<'a, R: PackageRegistry + ?Sized> ProjectDependencyGraphBuilder<'a, R> {
     ) -> Result<CollectedDependencyGraph, Report> {
         let root = loaded.package.name().into_inner();
         let mut graph = CollectedDependencyGraph {
-            root: root.clone(),
+            root,
             nodes: BTreeMap::new(),
             registry_requirements: BTreeMap::new(),
         };
@@ -529,10 +529,7 @@ impl<'a, R: PackageRegistry + ?Sized> ProjectDependencyGraphBuilder<'a, R> {
     ) -> Result<ProjectDependencyGraph, Report> {
         let CollectedDependencyGraph { root, nodes, registry_requirements } = collected;
         let local_packages = nodes.keys().cloned().collect::<BTreeSet<_>>();
-        let mut graph = ProjectDependencyGraph {
-            root: root.clone(),
-            nodes: BTreeMap::new(),
-        };
+        let mut graph = ProjectDependencyGraph { root, nodes: BTreeMap::new() };
 
         let direct_registry_dependencies = nodes
             .values()
@@ -720,7 +717,7 @@ impl<'a, R: PackageRegistry + ?Sized> ProjectDependencyGraphBuilder<'a, R> {
         match project {
             crate::Project::Package(package) => self.loaded_package_from_arc(package, None),
             crate::Project::WorkspacePackage { package, workspace } => {
-                let workspace_root = workspace.workspace_root().map(|path| path.to_path_buf());
+                let workspace_root = workspace.workspace_root().map(Path::to_path_buf);
                 self.loaded_package_from_arc(package, workspace_root)
             },
         }
@@ -735,7 +732,7 @@ impl<'a, R: PackageRegistry + ?Sized> ProjectDependencyGraphBuilder<'a, R> {
         match project {
             crate::Project::Package(package) => self.loaded_package_from_arc(package, None),
             crate::Project::WorkspacePackage { package, workspace } => {
-                let workspace_root = workspace.workspace_root().map(|path| path.to_path_buf());
+                let workspace_root = workspace.workspace_root().map(Path::to_path_buf);
                 self.loaded_package_from_arc(package, workspace_root)
             },
         }
@@ -746,7 +743,7 @@ impl<'a, R: PackageRegistry + ?Sized> ProjectDependencyGraphBuilder<'a, R> {
         package: Arc<Package>,
         workspace_root: Option<PathBuf>,
     ) -> Result<LoadedSourcePackage, Report> {
-        let manifest_path = package.manifest_path().map(|path| path.to_path_buf());
+        let manifest_path = package.manifest_path().map(Path::to_path_buf);
         let project_root = match manifest_path.as_ref() {
             Some(manifest_path) => Some(
                 manifest_path
@@ -817,7 +814,7 @@ impl<'a, R: PackageRegistry + ?Sized> ProjectDependencyGraphBuilder<'a, R> {
                     kind: package.kind,
                     requirements,
                 },
-                version: selected.version.clone(),
+                version: selected.version,
             },
             solver_dependencies,
         })
@@ -878,8 +875,7 @@ impl<'a, R: PackageRegistry + ?Sized> ProjectDependencyGraphBuilder<'a, R> {
             )))
         } else {
             Err(Report::msg(format!(
-                "dependency '{}' resolved to package '{}'",
-                expected_name, actual_name,
+                "dependency '{expected_name}' resolved to package '{actual_name}'",
             )))
         }
     }
@@ -1118,7 +1114,7 @@ mod tests {
 
     impl TestRegistry {
         fn insert(&mut self, name: &str, version: Version) {
-            let record_version = version.clone();
+            let record_version = version;
             self.insert_record(
                 PackageId::from(name),
                 PackageRecord::new(record_version, std::iter::empty()),
@@ -1136,8 +1132,7 @@ mod tests {
                     Ok(())
                 },
                 Entry::Occupied(_) => Err(Report::msg(format!(
-                    "package '{}' version '{}' is already registered",
-                    id, semver
+                    "package '{id}' version '{semver}' is already registered"
                 ))),
             }
         }
@@ -2050,10 +2045,10 @@ mod tests {
 
         let mut registry = TestRegistry::default();
         let dep_id = PackageId::from("dep");
-        let version010 = "0.1.0".parse::<miden_package_registry::SemVer>().unwrap();
-        let version999 = "9.9.9".parse::<miden_package_registry::SemVer>().unwrap();
-        registry.insert(&dep_id, Version::from(version010.clone()));
-        registry.insert(&dep_id, Version::from(version999.clone()));
+        let version010 = "0.1.0".parse::<SemVer>().unwrap();
+        let version999 = "9.9.9".parse::<SemVer>().unwrap();
+        registry.insert(&dep_id, Version::from(version010));
+        registry.insert(&dep_id, Version::from(version999));
         let graph = builder(&registry, &tempdir.path().join("git-cache"))
             .build_from_path(&app_manifest)
             .unwrap();

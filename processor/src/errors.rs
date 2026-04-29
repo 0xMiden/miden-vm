@@ -42,8 +42,8 @@ pub enum ExecutionError {
     #[error("exceeded the allowed number of max cycles {0}")]
     CycleLimitExceeded(u32),
     #[error("error during processing of event {}", match event_name {
-        Some(name) => format!("'{}' (ID: {})", name, event_id),
-        None => format!("with ID: {}", event_id),
+        Some(name) => format!("'{name}' (ID: {event_id})"),
+        None => format!("with ID: {event_id}"),
     })]
     #[diagnostic()]
     EventError {
@@ -413,8 +413,9 @@ pub fn advice_error_with_context(
     mast_forest: &MastForest,
     node_id: MastNodeId,
     host: &impl BaseHost,
+    op_idx: Option<usize>,
 ) -> ExecutionError {
-    let (label, source_file) = get_label_and_source_file(None, mast_forest, node_id, host);
+    let (label, source_file) = get_label_and_source_file(op_idx, mast_forest, node_id, host);
     ExecutionError::AdviceError { label, source_file, err }
 }
 
@@ -427,10 +428,11 @@ pub fn event_error_with_context(
     mast_forest: &MastForest,
     node_id: MastNodeId,
     host: &impl BaseHost,
+    op_idx: Option<usize>,
     event_id: EventId,
     event_name: Option<EventName>,
 ) -> ExecutionError {
-    let (label, source_file) = get_label_and_source_file(None, mast_forest, node_id, host);
+    let (label, source_file) = get_label_and_source_file(op_idx, mast_forest, node_id, host);
     ExecutionError::EventError {
         label,
         source_file,
@@ -559,7 +561,7 @@ impl<T> MapExecErr<T> for Result<T, AdviceError> {
     ) -> Result<T, ExecutionError> {
         match self {
             Ok(v) => Ok(v),
-            Err(err) => Err(advice_error_with_context(err, mast_forest, node_id, host)),
+            Err(err) => Err(advice_error_with_context(err, mast_forest, node_id, host, None)),
         }
     }
 }

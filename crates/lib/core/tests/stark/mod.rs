@@ -229,10 +229,14 @@ fn variable_length_public_inputs(#[case] num_kernel_proc_digests: usize) {
     advice_stack.extend_from_slice(&auxiliary_rand_values);
 
     // 5) Compute the expected reduced value
-    let beta =
-        QuadFelt::new([Felt::new(auxiliary_rand_values[0]), Felt::new(auxiliary_rand_values[1])]);
-    let alpha =
-        QuadFelt::new([Felt::new(auxiliary_rand_values[2]), Felt::new(auxiliary_rand_values[3])]);
+    let beta = QuadFelt::new([
+        Felt::new_unchecked(auxiliary_rand_values[0]),
+        Felt::new_unchecked(auxiliary_rand_values[1]),
+    ]);
+    let alpha = QuadFelt::new([
+        Felt::new_unchecked(auxiliary_rand_values[2]),
+        Felt::new_unchecked(auxiliary_rand_values[3]),
+    ]);
 
     let reduced_value = reduce_kernel_procedures_digests(&kernel_procedures_digests, alpha, beta);
     let coeffs: &[Felt] = reduced_value.as_basis_coefficients_slice();
@@ -315,13 +319,17 @@ fn reduce_kernel_procedures_digests(
 }
 
 fn reduce_digest(digest: &[u64], alpha: QuadFelt, beta: QuadFelt) -> QuadFelt {
-    const KERNEL_OP_LABEL: Felt = Felt::new(48);
-    alpha
+    const KERNEL_OP_LABEL: Felt = Felt::new_unchecked(48);
+    // gamma = beta^MAX_MESSAGE_WIDTH = beta^16
+    let gamma = (0..16).fold(QuadFelt::ONE, |acc, _| acc * beta);
+    // CHIPLETS_BUS = 0, so bus_prefix = alpha + (0+1) * gamma = alpha + gamma
+    let bus_prefix = alpha + gamma;
+    bus_prefix
         + QuadFelt::from(KERNEL_OP_LABEL)
         + beta
-            * digest
-                .iter()
-                .fold(QuadFelt::ZERO, |acc, coef| acc * beta + QuadFelt::from(Felt::new(*coef)))
+            * digest.iter().fold(QuadFelt::ZERO, |acc, coef| {
+                acc * beta + QuadFelt::from(Felt::new_unchecked(*coef))
+            })
 }
 
 // CONSTANTS

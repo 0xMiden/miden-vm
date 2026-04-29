@@ -19,11 +19,11 @@ use super::{Felt, HasherState, ONE, STATE_WIDTH, Selectors, TraceFragment, ZERO}
 /// - 1 mrupdate_id column (domain separator for sibling table).
 /// - 1 is_boundary column (1 on boundary rows: first input or last output, 0 otherwise).
 /// - 1 direction_bit column (Merkle direction bit on controller rows, 0 elsewhere).
-/// - 1 perm_seg column (0 = controller region, 1 = permutation segment).
+/// - 1 s_perm column (0 = controller region, 1 = permutation segment).
 ///
 /// The trace is divided into two regions:
-/// - Controller region (perm_seg=0): pairs of (input, output) rows per permutation request.
-/// - Permutation segment (perm_seg=1): one 16-row cycle per unique input state.
+/// - Controller region (s_perm=0): pairs of (input, output) rows per permutation request.
+/// - Permutation segment (s_perm=1): one 16-row cycle per unique input state.
 #[derive(Debug, Default)]
 pub struct HasherTrace {
     selectors: [Vec<Felt>; 3],
@@ -32,7 +32,7 @@ pub struct HasherTrace {
     mrupdate_id: Vec<Felt>,
     is_boundary: Vec<Felt>,
     direction_bit: Vec<Felt>,
-    perm_seg: Vec<Felt>,
+    s_perm: Vec<Felt>,
 }
 
 impl HasherTrace {
@@ -50,7 +50,7 @@ impl HasherTrace {
     /// ONE at every row. Starting at ONE is needed for the decoder so that the address of the
     /// first code block is a non-zero value.
     pub fn next_row_addr(&self) -> Felt {
-        Felt::new(self.trace_len() as u64 + 1)
+        Felt::new_unchecked(self.trace_len() as u64 + 1)
     }
 
     // CONTROLLER ROW METHODS
@@ -76,7 +76,7 @@ impl HasherTrace {
         self.mrupdate_id.push(mrupdate_id);
         self.is_boundary.push(is_boundary);
         self.direction_bit.push(direction_bit);
-        self.perm_seg.push(ZERO);
+        self.s_perm.push(ZERO);
     }
 
     // PERMUTATION SEGMENT METHODS
@@ -151,7 +151,7 @@ impl HasherTrace {
         self.append_perm_row_with_witnesses(&state, multiplicity, [ZERO; 3]);
     }
 
-    /// Appends a single permutation segment row (perm_seg = 1).
+    /// Appends a single permutation segment row (s_perm = 1).
     ///
     /// On permutation rows, `s0, s1, s2` serve as witness columns for packed internal
     /// rounds. The `witnesses` array provides values to write into these columns.
@@ -172,7 +172,7 @@ impl HasherTrace {
         self.mrupdate_id.push(ZERO);
         self.is_boundary.push(ZERO);
         self.direction_bit.push(ZERO);
-        self.perm_seg.push(ONE);
+        self.s_perm.push(ONE);
     }
 
     /// Appends padding rows to fill the controller region to a multiple of HASH_CYCLE_LEN.
@@ -182,7 +182,7 @@ impl HasherTrace {
     /// non-MV-start transitions).
     pub fn pad_to_cycle_boundary(&mut self, mrupdate_id: Felt) {
         // Padding selectors: [0, 1, 0]. This combination is unused in the controller region
-        // (s0=0, s1=1 only appears in perm segment rows which have perm_seg=1). Using it
+        // (s0=0, s1=1 only appears in perm segment rows which have s_perm=1). Using it
         // prevents padding rows from being mistaken for HOUT output rows ([0,0,0]) by the
         // bus response builder.
         let padding_selectors = [ZERO, ONE, ZERO];
@@ -208,13 +208,13 @@ impl HasherTrace {
 
     /// Collects input states from controller input rows in the given range.
     ///
-    /// A controller input row is identified by s0 == ONE and perm_seg == ZERO.
+    /// A controller input row is identified by s0 == ONE and s_perm == ZERO.
     /// Returns the hasher state for each such row.
     pub fn input_states_in_range(&self, range: Range<usize>) -> Vec<HasherState> {
         let mut states = Vec::new();
         for row in range {
-            // Controller input row: s0 = ONE and perm_seg = ZERO
-            if self.selectors[0][row] == ONE && self.perm_seg[row] == ZERO {
+            // Controller input row: s0 = ONE and s_perm = ZERO
+            if self.selectors[0][row] == ONE && self.s_perm[row] == ZERO {
                 let mut state = [ZERO; STATE_WIDTH];
                 for (col, hasher) in self.hasher_state.iter().enumerate() {
                     state[col] = hasher[row];
@@ -238,7 +238,7 @@ impl HasherTrace {
         self.mrupdate_id.extend_from_within(range.clone());
         self.is_boundary.extend_from_within(range.clone());
         self.direction_bit.extend_from_within(range.clone());
-        self.perm_seg.extend_from_within(range.clone());
+        self.s_perm.extend_from_within(range.clone());
 
         // copy the latest hasher state to the provided state slice
         for (col, hasher) in self.hasher_state.iter().enumerate() {
@@ -268,7 +268,7 @@ impl HasherTrace {
         columns.push(self.mrupdate_id);
         columns.push(self.is_boundary);
         columns.push(self.direction_bit);
-        columns.push(self.perm_seg);
+        columns.push(self.s_perm);
 
         for (out_column, column) in trace.columns().zip(columns) {
             out_column.copy_from_slice(&column);

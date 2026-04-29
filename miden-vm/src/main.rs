@@ -1,3 +1,5 @@
+extern crate alloc;
+
 use std::ffi::{OsStr, OsString};
 
 use clap::{FromArgMatches, Parser, Subcommand};

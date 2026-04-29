@@ -23,10 +23,10 @@ const ACCEPTABLE_FOLDING_POW_BITS = 4
 # protocol choice: hash function, field, blowup factor, FRI folding factor, coset
 # offset, max remainder degree, etc. It must be bumped when any of these change.
 # CIRCUIT_COMMITMENT covers the AIR constraints (via the encoded ACE circuit hash).
-const RELATION_DIGEST_0 = 14932224741264950205
-const RELATION_DIGEST_1 = 13231194489255299102
-const RELATION_DIGEST_2 = 9539190039789656767
-const RELATION_DIGEST_3 = 16072183680659208914
+const RELATION_DIGEST_0 = 9959184209071024919
+const RELATION_DIGEST_1 = 8083906424746801292
+const RELATION_DIGEST_2 = 2491326376870921885
+const RELATION_DIGEST_3 = 2800937775438555033
 
 #! Loads security parameters from the advice stack and stores them in memory.
 #!
@@ -39,10 +39,10 @@ const RELATION_DIGEST_3 = 16072183680659208914
 #! Input:  [...]
 #! Output: [...]
 proc load_security_params
-    adv_push.1 exec.constants::set_number_queries
-    adv_push.1 exec.constants::set_query_pow_bits
-    adv_push.1 exec.constants::set_deep_pow_bits
-    adv_push.1 exec.constants::set_folding_pow_bits
+    adv_push exec.constants::set_number_queries
+    adv_push exec.constants::set_query_pow_bits
+    adv_push exec.constants::set_deep_pow_bits
+    adv_push exec.constants::set_folding_pow_bits
 end
 
 #! Asserts that the security parameters in memory meet the Miden VM security policy.

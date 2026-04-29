@@ -28,5 +28,5 @@ pub fn init_merkle_leaves(values: &[u64]) -> Vec<Word> {
 }
 
 pub fn init_merkle_leaf(value: u64) -> Word {
-    [Felt::new(value), ZERO, ZERO, ZERO].into()
+    [Felt::new_unchecked(value), ZERO, ZERO, ZERO].into()
 }

@@ -12,7 +12,7 @@ use miden_air::trace::{
 };
 use miden_core::{
     Felt, WORD_SIZE, Word, ZERO,
-    field::{BasedVectorSpace, PrimeCharacteristicRing, QuadFelt},
+    field::{PrimeCharacteristicRing, QuadFelt},
 };
 
 use crate::{
@@ -30,7 +30,7 @@ mod circuit;
 mod encoder;
 
 const PTR_OFFSET_ELEM: Felt = Felt::ONE;
-const PTR_OFFSET_WORD: Felt = Felt::new(4);
+const PTR_OFFSET_WORD: Felt = Felt::new_unchecked(4);
 
 #[test]
 fn test_var_plus_one() {
@@ -164,10 +164,10 @@ fn test_circuit_encoding() {
             ZERO,
             ZERO,
             ZERO,
-            Felt::new(7 + (5 << 30) + (2 << 60)), // id_l = 7; id_r = 5; op = ADD
-            Felt::new(7 + (3 << 30) + (1 << 60)), // id_l = 7; id_r = 3; op = MUL
-            Felt::new(2 + (6 << 30)),             // id_l = 2; id_r = 6; op = SUB
-            Felt::new(1 + (1 << 30) + (1 << 60)), // id_l = 1; id_r = 1; op = MUL
+            Felt::new_unchecked(7 + (5 << 30) + (2 << 60)), // id_l = 7; id_r = 5; op = ADD
+            Felt::new_unchecked(7 + (3 << 30) + (1 << 60)), // id_l = 7; id_r = 3; op = MUL
+            Felt::new_unchecked(2 + (6 << 30)),             // id_l = 2; id_r = 6; op = SUB
+            Felt::new_unchecked(1 + (1 << 30) + (1 << 60)), // id_l = 1; id_r = 1; op = MUL
         ]
     )
 }
@@ -255,7 +255,11 @@ fn generate_memory(circuit: &EncodedCircuit, inputs: &[QuadFelt]) -> Vec<Word> {
     // Inputs are store two by two in the fest set of words, followed by the instructions.
     let mut mem = Vec::with_capacity(2 * inputs.len() + circuit.encoded_circuit().len());
     // Add inputs
-    mem.extend(inputs.iter().flat_map(|input| input.as_basis_coefficients_slice()));
+    mem.extend(
+        inputs
+            .iter()
+            .flat_map(miden_core::field::BasedVectorSpace::as_basis_coefficients_slice),
+    );
     // Add circuit
     mem.extend(circuit.encoded_circuit().iter());
 

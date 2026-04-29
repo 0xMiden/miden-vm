@@ -26,7 +26,7 @@ fn test_op_advpop() {
     let mut processor = FastProcessor::new(StackInputs::default()).with_advice(advice_inputs);
     let mut tracer = NoopTracer;
 
-    op_push(&mut processor, Felt::new(1)).unwrap();
+    op_push(&mut processor, Felt::new_unchecked(1)).unwrap();
     processor.system_mut().increment_clock();
     op_advpop(&mut processor, &mut tracer).unwrap();
     processor.system_mut().increment_clock();
@@ -49,7 +49,7 @@ fn test_op_advpopw() {
     let mut processor = FastProcessor::new(StackInputs::default()).with_advice(advice_inputs);
     let mut tracer = NoopTracer;
 
-    op_push(&mut processor, Felt::new(1)).unwrap();
+    op_push(&mut processor, Felt::new_unchecked(1)).unwrap();
     processor.system_mut().increment_clock();
     for _ in 0..4 {
         op_pad(&mut processor).unwrap();
@@ -74,7 +74,13 @@ fn test_op_mloadw() {
     assert_eq!(0, processor.memory().num_accessed_words());
 
     // store a word at address 4
-    let word: Word = [Felt::new(1), Felt::new(3), Felt::new(5), Felt::new(7)].into();
+    let word: Word = [
+        Felt::new_unchecked(1),
+        Felt::new_unchecked(3),
+        Felt::new_unchecked(5),
+        Felt::new_unchecked(7),
+    ]
+    .into();
     store_word(&mut processor, 4, word, &mut tracer);
 
     // push four zeros onto the stack (padding)
@@ -84,7 +90,7 @@ fn test_op_mloadw() {
     }
 
     // push the address onto the stack and load the word
-    op_push(&mut processor, Felt::new(4)).unwrap();
+    op_push(&mut processor, Felt::new_unchecked(4)).unwrap();
     processor.system_mut().increment_clock();
     op_mloadw(&mut processor, &mut tracer).unwrap();
     processor.system_mut().increment_clock();
@@ -98,12 +104,14 @@ fn test_op_mloadw() {
     // check memory state
     assert_eq!(1, processor.memory().num_accessed_words());
     let clk = processor.clock();
-    let stored_word =
-        processor.memory_mut().read_word(ContextId::root(), Felt::new(4), clk).unwrap();
+    let stored_word = processor
+        .memory_mut()
+        .read_word(ContextId::root(), Felt::new_unchecked(4), clk)
+        .unwrap();
     assert_eq!(word, stored_word);
 
     // --- calling MLOADW with address greater than u32::MAX leads to an error ----------------
-    op_push(&mut processor, Felt::new(u64::MAX / 2)).unwrap();
+    op_push(&mut processor, Felt::new_unchecked(u64::MAX / 2)).unwrap();
     processor.system_mut().increment_clock();
     assert!(op_mloadw(&mut processor, &mut tracer).is_err());
 
@@ -120,11 +128,17 @@ fn test_op_mload() {
     assert_eq!(0, processor.memory().num_accessed_words());
 
     // store a word at address 4
-    let word: Word = [Felt::new(1), Felt::new(3), Felt::new(5), Felt::new(7)].into();
+    let word: Word = [
+        Felt::new_unchecked(1),
+        Felt::new_unchecked(3),
+        Felt::new_unchecked(5),
+        Felt::new_unchecked(7),
+    ]
+    .into();
     store_word(&mut processor, 4, word, &mut tracer);
 
     // push the address onto the stack and load the element
-    op_push(&mut processor, Felt::new(4)).unwrap();
+    op_push(&mut processor, Felt::new_unchecked(4)).unwrap();
     processor.system_mut().increment_clock();
     op_mload(&mut processor, &mut tracer).unwrap();
     processor.system_mut().increment_clock();
@@ -138,12 +152,14 @@ fn test_op_mload() {
     // check memory state
     assert_eq!(1, processor.memory().num_accessed_words());
     let clk = processor.clock();
-    let stored_word =
-        processor.memory_mut().read_word(ContextId::root(), Felt::new(4), clk).unwrap();
+    let stored_word = processor
+        .memory_mut()
+        .read_word(ContextId::root(), Felt::new_unchecked(4), clk)
+        .unwrap();
     assert_eq!(word, stored_word);
 
     // --- calling MLOAD with address greater than u32::MAX leads to an error -----------------
-    op_push(&mut processor, Felt::new(u64::MAX / 2)).unwrap();
+    op_push(&mut processor, Felt::new_unchecked(u64::MAX / 2)).unwrap();
     processor.system_mut().increment_clock();
     assert!(op_mload(&mut processor, &mut tracer).is_err());
 
@@ -158,19 +174,35 @@ fn test_op_mstream() {
     let mut tracer = NoopTracer;
 
     // save two words into memory addresses 4 and 8
-    let word1: Word = [Felt::new(30), Felt::new(29), Felt::new(28), Felt::new(27)].into();
-    let word2: Word = [Felt::new(26), Felt::new(25), Felt::new(24), Felt::new(23)].into();
+    let word1: Word = [
+        Felt::new_unchecked(30),
+        Felt::new_unchecked(29),
+        Felt::new_unchecked(28),
+        Felt::new_unchecked(27),
+    ]
+    .into();
+    let word2: Word = [
+        Felt::new_unchecked(26),
+        Felt::new_unchecked(25),
+        Felt::new_unchecked(24),
+        Felt::new_unchecked(23),
+    ]
+    .into();
     store_word(&mut processor, 4, word1, &mut tracer);
     store_word(&mut processor, 8, word2, &mut tracer);
 
     // check memory state
     assert_eq!(2, processor.memory().num_accessed_words());
     let clk = processor.clock();
-    let stored_word1 =
-        processor.memory_mut().read_word(ContextId::root(), Felt::new(4), clk).unwrap();
+    let stored_word1 = processor
+        .memory_mut()
+        .read_word(ContextId::root(), Felt::new_unchecked(4), clk)
+        .unwrap();
     assert_eq!(word1, stored_word1);
-    let stored_word2 =
-        processor.memory_mut().read_word(ContextId::root(), Felt::new(8), clk).unwrap();
+    let stored_word2 = processor
+        .memory_mut()
+        .read_word(ContextId::root(), Felt::new_unchecked(8), clk)
+        .unwrap();
     assert_eq!(word2, stored_word2);
 
     // clear the stack (drop the 8 elements we pushed while storing)
@@ -183,12 +215,12 @@ fn test_op_mstream() {
     // - 101 is at position 13 (to make sure it is not overwritten)
     // - 4 (the address) is at position 12
     // - values 1 - 12 are at positions 0 - 11
-    op_push(&mut processor, Felt::new(101)).unwrap();
+    op_push(&mut processor, Felt::new_unchecked(101)).unwrap();
     processor.system_mut().increment_clock();
-    op_push(&mut processor, Felt::new(4)).unwrap();
+    op_push(&mut processor, Felt::new_unchecked(4)).unwrap();
     processor.system_mut().increment_clock();
     for i in 1..13 {
-        op_push(&mut processor, Felt::new(i)).unwrap();
+        op_push(&mut processor, Felt::new_unchecked(i)).unwrap();
         processor.system_mut().increment_clock();
     }
 
@@ -225,7 +257,13 @@ fn test_op_mstorew() {
     assert_eq!(0, processor.memory().num_accessed_words());
 
     // push the first word onto the stack and save it at address 0
-    let word1: Word = [Felt::new(1), Felt::new(3), Felt::new(5), Felt::new(7)].into();
+    let word1: Word = [
+        Felt::new_unchecked(1),
+        Felt::new_unchecked(3),
+        Felt::new_unchecked(5),
+        Felt::new_unchecked(7),
+    ]
+    .into();
     store_word(&mut processor, 0, word1, &mut tracer);
 
     // After store, word remains on stack with word[0] at top: [1, 3, 5, 7]
@@ -235,12 +273,20 @@ fn test_op_mstorew() {
     // check memory state
     assert_eq!(1, processor.memory().num_accessed_words());
     let clk = processor.clock();
-    let stored_word =
-        processor.memory_mut().read_word(ContextId::root(), Felt::new(0), clk).unwrap();
+    let stored_word = processor
+        .memory_mut()
+        .read_word(ContextId::root(), Felt::new_unchecked(0), clk)
+        .unwrap();
     assert_eq!(word1, stored_word);
 
     // push the second word onto the stack and save it at address 4
-    let word2: Word = [Felt::new(2), Felt::new(4), Felt::new(6), Felt::new(8)].into();
+    let word2: Word = [
+        Felt::new_unchecked(2),
+        Felt::new_unchecked(4),
+        Felt::new_unchecked(6),
+        Felt::new_unchecked(8),
+    ]
+    .into();
     store_word(&mut processor, 4, word2, &mut tracer);
 
     // word2 on top of word1: [2, 4, 6, 8, 1, 3, 5, 7]
@@ -250,15 +296,19 @@ fn test_op_mstorew() {
     // check memory state
     assert_eq!(2, processor.memory().num_accessed_words());
     let clk = processor.clock();
-    let stored_word1 =
-        processor.memory_mut().read_word(ContextId::root(), Felt::new(0), clk).unwrap();
+    let stored_word1 = processor
+        .memory_mut()
+        .read_word(ContextId::root(), Felt::new_unchecked(0), clk)
+        .unwrap();
     assert_eq!(word1, stored_word1);
-    let stored_word2 =
-        processor.memory_mut().read_word(ContextId::root(), Felt::new(4), clk).unwrap();
+    let stored_word2 = processor
+        .memory_mut()
+        .read_word(ContextId::root(), Felt::new_unchecked(4), clk)
+        .unwrap();
     assert_eq!(word2, stored_word2);
 
     // --- calling MSTOREW with address greater than u32::MAX leads to an error ----------------
-    op_push(&mut processor, Felt::new(u64::MAX / 2)).unwrap();
+    op_push(&mut processor, Felt::new_unchecked(u64::MAX / 2)).unwrap();
     processor.system_mut().increment_clock();
     assert!(op_mstorew(&mut processor, &mut tracer).is_err());
 
@@ -276,7 +326,7 @@ fn test_op_mstore() {
 
     // push new element onto the stack and save it as first element of the word on
     // uninitialized memory at address 0
-    let element = Felt::new(10);
+    let element = Felt::new_unchecked(10);
     store_element(&mut processor, 0, element, &mut tracer);
 
     // check stack state
@@ -287,16 +337,24 @@ fn test_op_mstore() {
     let expected_word: Word = [element, ZERO, ZERO, ZERO].into();
     assert_eq!(1, processor.memory().num_accessed_words());
     let clk = processor.clock();
-    let stored_word =
-        processor.memory_mut().read_word(ContextId::root(), Felt::new(0), clk).unwrap();
+    let stored_word = processor
+        .memory_mut()
+        .read_word(ContextId::root(), Felt::new_unchecked(0), clk)
+        .unwrap();
     assert_eq!(expected_word, stored_word);
 
     // push a word onto the stack and save it at address 4
-    let word2: Word = [Felt::new(1), Felt::new(3), Felt::new(5), Felt::new(7)].into();
+    let word2: Word = [
+        Felt::new_unchecked(1),
+        Felt::new_unchecked(3),
+        Felt::new_unchecked(5),
+        Felt::new_unchecked(7),
+    ]
+    .into();
     store_word(&mut processor, 4, word2, &mut tracer);
 
     // push new element onto the stack and save it as first element of the word at address 4
-    let element2 = Felt::new(12);
+    let element2 = Felt::new_unchecked(12);
     store_element(&mut processor, 4, element2, &mut tracer);
 
     // After store_word, stack is [1, 3, 5, 7, 10]
@@ -305,15 +363,18 @@ fn test_op_mstore() {
     assert_eq!(expected, processor.stack_top());
 
     // check memory state to make sure the other 3 elements were not affected
-    let expected_word2: Word = [element2, Felt::new(3), Felt::new(5), Felt::new(7)].into();
+    let expected_word2: Word =
+        [element2, Felt::new_unchecked(3), Felt::new_unchecked(5), Felt::new_unchecked(7)].into();
     assert_eq!(2, processor.memory().num_accessed_words());
     let clk = processor.clock();
-    let stored_word2 =
-        processor.memory_mut().read_word(ContextId::root(), Felt::new(4), clk).unwrap();
+    let stored_word2 = processor
+        .memory_mut()
+        .read_word(ContextId::root(), Felt::new_unchecked(4), clk)
+        .unwrap();
     assert_eq!(expected_word2, stored_word2);
 
     // --- calling MSTORE with address greater than u32::MAX leads to an error ----------------
-    op_push(&mut processor, Felt::new(u64::MAX / 2)).unwrap();
+    op_push(&mut processor, Felt::new_unchecked(u64::MAX / 2)).unwrap();
     processor.system_mut().increment_clock();
     assert!(op_mstore(&mut processor, &mut tracer).is_err());
 
@@ -336,12 +397,12 @@ fn test_op_pipe() {
     // - 101 is at position 13 (to make sure it is not overwritten)
     // - 4 (the address) is at position 12
     // - values 1 - 12 are at positions 0 - 11
-    op_push(&mut processor, Felt::new(101)).unwrap();
+    op_push(&mut processor, Felt::new_unchecked(101)).unwrap();
     processor.system_mut().increment_clock();
-    op_push(&mut processor, Felt::new(4)).unwrap();
+    op_push(&mut processor, Felt::new_unchecked(4)).unwrap();
     processor.system_mut().increment_clock();
     for i in 1..13 {
-        op_push(&mut processor, Felt::new(i)).unwrap();
+        op_push(&mut processor, Felt::new_unchecked(i)).unwrap();
         processor.system_mut().increment_clock();
     }
 
@@ -354,10 +415,14 @@ fn test_op_pipe() {
     // words[0] stored at addr 4, words[1] at addr 8
     assert_eq!(2, processor.memory().num_accessed_words());
     let clk = processor.clock();
-    let stored_word1 =
-        processor.memory_mut().read_word(ContextId::root(), Felt::new(4), clk).unwrap();
-    let stored_word2 =
-        processor.memory_mut().read_word(ContextId::root(), Felt::new(8), clk).unwrap();
+    let stored_word1 = processor
+        .memory_mut()
+        .read_word(ContextId::root(), Felt::new_unchecked(4), clk)
+        .unwrap();
+    let stored_word2 = processor
+        .memory_mut()
+        .read_word(ContextId::root(), Felt::new_unchecked(8), clk)
+        .unwrap();
 
     let word1 = stored_word1;
     let word2 = stored_word2;
@@ -395,7 +460,7 @@ fn store_word(processor: &mut FastProcessor, addr: u64, word: Word, tracer: &mut
         processor.system_mut().increment_clock();
     }
     // Push address
-    op_push(processor, Felt::new(addr)).unwrap();
+    op_push(processor, Felt::new_unchecked(addr)).unwrap();
     processor.system_mut().increment_clock();
     // Store the word (LE: stack pos 1-4 -> word[0-3])
     op_mstorew(processor, tracer).unwrap();
@@ -407,7 +472,7 @@ fn store_element(processor: &mut FastProcessor, addr: u64, value: Felt, tracer: 
     op_push(processor, value).unwrap();
     processor.system_mut().increment_clock();
     // Push address
-    op_push(processor, Felt::new(addr)).unwrap();
+    op_push(processor, Felt::new_unchecked(addr)).unwrap();
     processor.system_mut().increment_clock();
     // Store the element
     op_mstore(processor, tracer).unwrap();
@@ -423,7 +488,7 @@ fn build_expected(values: &[u64]) -> Vec<Felt> {
     let mut expected = vec![ZERO; MIN_STACK_DEPTH];
     for (i, &value) in values.iter().enumerate() {
         // In the result, top of stack is at index 15, second at 14, etc.
-        expected[15 - i] = Felt::new(value);
+        expected[15 - i] = Felt::new_unchecked(value);
     }
     expected
 }

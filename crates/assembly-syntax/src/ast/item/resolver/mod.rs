@@ -114,7 +114,7 @@ impl LocalSymbolResolver {
         path: Span<&Path>,
     ) -> Result<SymbolResolution, SymbolResolutionError> {
         if path.is_absolute() {
-            return Ok(SymbolResolution::External(path.map(|p| p.into())));
+            return Ok(SymbolResolution::External(path.map(Into::into)));
         }
         log::debug!(target: "local-symbol-resolver", "resolving path '{path}'");
         let (ns, subpath) = path.split_first().expect("invalid item path");

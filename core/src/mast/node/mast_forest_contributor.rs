@@ -201,7 +201,7 @@ mod fingerprint_invariant_tests {
     #[test]
     fn basic_block_fingerprint_different_assert_opcodes_no_decorators() {
         let forest = MastForest::new();
-        let error_code = Felt::new(42);
+        let error_code = Felt::new_unchecked(42);
 
         // Create three basic blocks with different assert opcodes but no decorators using builders
         let builder_assert =
@@ -235,8 +235,8 @@ mod fingerprint_invariant_tests {
     #[test]
     fn basic_block_fingerprint_different_assert_values_no_decorators() {
         let forest = MastForest::new();
-        let error_code_1 = Felt::new(42);
-        let error_code_2 = Felt::new(123);
+        let error_code_1 = Felt::new_unchecked(42);
+        let error_code_2 = Felt::new_unchecked(123);
 
         // Create basic blocks with same assert opcode but different inner values, no decorators
         let builder_assert_1 =
@@ -340,8 +340,8 @@ mod fingerprint_invariant_tests {
             prop_assume!(error_code_1 != error_code_2); // Ensure different error codes
 
             let forest = MastForest::new();
-            let felt_1 = Felt::new(error_code_1);
-            let felt_2 = Felt::new(error_code_2);
+            let felt_1 = Felt::new_unchecked(error_code_1);
+            let felt_2 = Felt::new_unchecked(error_code_2);
 
             let builder_assert_1 = BasicBlockNodeBuilder::new(vec![Operation::Assert(felt_1)], Vec::new());
             let builder_assert_2 = BasicBlockNodeBuilder::new(vec![Operation::Assert(felt_2)], Vec::new());
@@ -395,8 +395,12 @@ mod round_trip_tests {
         }
 
         // Test digest forcing
-        let forced_join_digest =
-            Word::new([Felt::new(5), Felt::new(6), Felt::new(7), Felt::new(8)]);
+        let forced_join_digest = Word::new([
+            Felt::new_unchecked(5),
+            Felt::new_unchecked(6),
+            Felt::new_unchecked(7),
+            Felt::new_unchecked(8),
+        ]);
         let join_builder2 = JoinNodeBuilder::new([child1, child2]).with_digest(forced_join_digest);
         let join_node_id2 = join_builder2
             .add_to_forest(&mut forest)
@@ -415,7 +419,7 @@ mod round_trip_tests {
         let mut forest = MastForest::new();
 
         let mast_builder1 = MastNodeBuilder::BasicBlock(BasicBlockNodeBuilder::new(
-            vec![Operation::Push(Felt::new(10))],
+            vec![Operation::Push(Felt::new_unchecked(10))],
             vec![],
         ));
         let mast_node_id1 = mast_builder1
@@ -424,10 +428,14 @@ mod round_trip_tests {
         let mast_node1 = forest.get_node_by_id(mast_node_id1).unwrap().unwrap_basic_block();
         let mast_normal_digest = mast_node1.digest();
 
-        let forced_mast_digest =
-            Word::new([Felt::new(9), Felt::new(10), Felt::new(11), Felt::new(12)]);
+        let forced_mast_digest = Word::new([
+            Felt::new_unchecked(9),
+            Felt::new_unchecked(10),
+            Felt::new_unchecked(11),
+            Felt::new_unchecked(12),
+        ]);
         let mast_builder2 = MastNodeBuilder::BasicBlock(
-            BasicBlockNodeBuilder::new(vec![Operation::Push(Felt::new(10))], vec![])
+            BasicBlockNodeBuilder::new(vec![Operation::Push(Felt::new_unchecked(10))], vec![])
                 .with_digest(forced_mast_digest),
         );
         let mast_node_id2 = mast_builder2

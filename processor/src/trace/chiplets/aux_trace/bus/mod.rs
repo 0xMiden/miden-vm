@@ -15,6 +15,7 @@ use memory::{
 };
 use miden_air::trace::{
     Challenges, MainTrace, RowIndex,
+    bus_types::CHIPLETS_BUS,
     chiplets::{
         hasher::LINEAR_HASH_LABEL,
         memory::{
@@ -184,7 +185,7 @@ where
 {
     use miden_air::trace::bus_message;
 
-    challenges.alpha
+    challenges.bus_prefix[CHIPLETS_BUS]
         + challenges.beta_powers[bus_message::LABEL_IDX] * Felt::from_u8(LINEAR_HASH_LABEL + 16)
         + challenges.beta_powers[bus_message::ADDR_IDX] * addr
         + challenges.beta_powers[bus_message::CAPACITY_DOMAIN_IDX] * op_code

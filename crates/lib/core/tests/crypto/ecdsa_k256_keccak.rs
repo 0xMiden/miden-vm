@@ -2,7 +2,7 @@
 //!
 //! Validates that:
 //! - Raw event handlers correctly perform ECDSA verification and populate advice provider
-//! - MASM wrapper correctly returns commitment, tag, and result on stack
+//! - Private implementation helper returns the expected commitment, tag, and result on stack
 //! - Both valid and invalid signatures are handled correctly
 
 use miden_core::{
@@ -17,7 +17,7 @@ use miden_core_lib::{
     dsa::ecdsa_k256_keccak::sign as ecdsa_sign,
     handlers::ecdsa::{EcdsaPrecompile, EcdsaRequest},
 };
-use miden_crypto::{dsa::ecdsa_k256_keccak::SecretKey, hash::poseidon2::Poseidon2};
+use miden_crypto::{dsa::ecdsa_k256_keccak::SigningKey as SecretKey, hash::poseidon2::Poseidon2};
 use miden_processor::{
     ProcessorState,
     advice::AdviceMutation,
@@ -92,23 +92,21 @@ fn test_ecdsa_verify_impl_commitment() {
         // Verify tag/commitment once on a valid request
         let memory_stores = generate_memory_store_masm(&request);
 
-        let source = format!(
-            "
-            use miden::core::crypto::dsa::ecdsa_k256_keccak
-            use miden::core::sys
+        let source = private_proc_harness(
+            include_str!("../../asm/crypto/dsa/ecdsa_k256_keccak.masm"),
+            format!(
+                "
+                    # Store test data in memory
+                    {memory_stores}
 
-            begin
-                # Store test data in memory
-                {memory_stores}
+                    # Call verify_impl: [ptr_pk, ptr_digest, ptr_sig]
+                    push.{SIG_ADDR}.{DIGEST_ADDR}.{PK_ADDR}
+                    exec.verify_prehash_impl
+                    # => [COMM, TAG, result, ...]
 
-                # Call verify_impl: [ptr_pk, ptr_digest, ptr_sig]
-                push.{SIG_ADDR}.{DIGEST_ADDR}.{PK_ADDR}
-                exec.ecdsa_k256_keccak::verify_prehash_impl
-                # => [COMM, TAG, result, ...]
-
-                exec.sys::truncate_stack
-            end
-        ",
+                    exec.sys::truncate_stack
+                ",
+            ),
         );
 
         let test = build_debug_test!(source, &[]);
@@ -175,8 +173,7 @@ impl EventHandler for EcdsaSignatureHandler {
         };
         assert_eq!(
             provided_pk_commitment, pk_commitment,
-            "public key commitment mismatch: expected {:?}, got {:?}",
-            pk_commitment, provided_pk_commitment
+            "public key commitment mismatch: expected {pk_commitment:?}, got {provided_pk_commitment:?}"
         );
 
         // Message starts at position 5 (after event_id + pk_commitment)
@@ -193,7 +190,12 @@ fn test_ecdsa_verify_bis_wrapper() {
     let mut rng = StdRng::seed_from_u64(19260817);
     let secret_key = SecretKey::with_rng(&mut rng);
     let public_key = secret_key.public_key();
-    let message = Word::from([Felt::new(11), Felt::new(22), Felt::new(33), Felt::new(44)]);
+    let message = Word::from([
+        Felt::new_unchecked(11),
+        Felt::new_unchecked(22),
+        Felt::new_unchecked(33),
+        Felt::new_unchecked(44),
+    ]);
 
     let pk_commitment = {
         let pk_felts = bytes_to_packed_u32_elements(&public_key.to_bytes());
@@ -271,4 +273,8 @@ fn generate_memory_store_masm(request: &EcdsaRequest) -> String {
         masm_store_felts(&sig_words, SIG_ADDR),
     ]
     .join(" ")
+}
+
+fn private_proc_harness(module_source: &str, body: impl AsRef<str>) -> String {
+    format!("{}\n\nbegin\n{}\nend", module_source.replace("pub proc", "proc"), body.as_ref())
 }
