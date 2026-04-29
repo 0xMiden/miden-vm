@@ -1,35 +1,13 @@
 pub type u256 = struct { lo: u128, hi: u128 }
 
-# ===== LIMB ORDER HELPERS ========================================================================
-
-#! Reorders the top u256 value between LE and BE limb order. This is an involution.
-#! Input/Output (LE <-> BE):
-#! [x0, x1, x2, x3, x4, x5, x6, x7, ...] <-> [x7, x6, x5, x4, x3, x2, x1, x0, ...]
-#!
-#! Used by procs that have not yet been rewritten LE-internal (eq, wrapping_mul). Once those move
-#! to LE-direct algorithms, this helper and `u256_le_to_be_pair` should be removed.
-proc u256_le_to_be
-    reversew
-    swapw
-    reversew
-end
-
-#! Reorders two u256 values between LE and BE limb order.
-proc u256_le_to_be_pair
-    exec.u256_le_to_be
-    swapdw
-    exec.u256_le_to_be
-    swapdw
-end
-
 # ===== ADDITION ==================================================================================
 
-#! Adds rhs (b) to lhs (a) in LE limb order and returns (overflow, sum).
+#! Adds rhs (b) to lhs (a) and returns (overflow, sum).
 #! Input stack: [b0, b1, b2, b3, b4, b5, b6, b7, a0, a1, a2, a3, a4, a5, a6, a7, ...]
 #! Output stack: [overflow, c0, c1, c2, c3, c4, c5, c6, c7, ...], where c = (a + b) % 2^256.
 #!
-#! Computes c = a + b limb-by-limb in LE order. The result accumulates as
-#! [overflow, c7, c6, ..., c0]; the tail flips the c-block to LE.
+#! Processes limbs in LE order; the c-block accumulates top-down on the stack and is
+#! reversed back to LE before returning.
 proc add_with_carry_le(rhs: u256, lhs: u256) -> (i1, u256)
     # Setup: [b0..b7, a0..a7] -> [a0..a3, b0..b3, b4..b7, a4..a7]
     swapw
@@ -77,9 +55,9 @@ proc add_with_carry_le(rhs: u256, lhs: u256) -> (i1, u256)
     movup.5
     u32overflowing_add3
 
-    # Stack now: [overflow, c7, c6, c5, c4, c3, c2, c1, c0]. Flip the c-block to LE.
+    # Stack now: [overflow, c7, c6, c5, c4, c3, c2, c1, c0]. Reverse the c-block to LE.
     movdn.8
-    exec.u256_le_to_be
+    reversew swapw reversew
     movup.8
 end
 
@@ -111,13 +89,13 @@ end
 
 # ===== SUBTRACTION ===============================================================================
 
-#! Subtracts rhs (b) from lhs (a) in LE limb order and returns (underflow, diff).
+#! Subtracts rhs (b) from lhs (a) and returns (underflow, diff).
 #! Input stack: [b0, b1, b2, b3, b4, b5, b6, b7, a0, a1, a2, a3, a4, a5, a6, a7, ...]
 #! Output stack: [underflow, c0, c1, c2, c3, c4, c5, c6, c7, ...], where c = (a - b) % 2^256.
 #!
-#! Computes c = a - b limb-by-limb in LE order. Per limb: sum = b_i + borrow,
-#! diff = a_i - sum, borrow = borrow_sub + carry_sum. The result accumulates as
-#! [underflow, c7, c6, ..., c0]; the tail flips the c-block to LE.
+#! Processes limbs in LE order. Per limb: sum = b_i + borrow, diff = a_i - sum,
+#! borrow = borrow_sub + carry_sum. The c-block accumulates top-down on the stack
+#! and is reversed back to LE before returning.
 proc sub_with_borrow_le(rhs: u256, lhs: u256) -> (i1, u256)
     # Setup: [b0..b7, a0..a7] -> [a0..a3, b0..b3, b4..b7, a4..a7]
     swapw
@@ -196,9 +174,9 @@ proc sub_with_borrow_le(rhs: u256, lhs: u256) -> (i1, u256)
     movup.2
     add
 
-    # Stack now: [underflow, c7, c6, c5, c4, c3, c2, c1, c0]. Flip the c-block to LE.
+    # Stack now: [underflow, c7, c6, c5, c4, c3, c2, c1, c0]. Reverse the c-block to LE.
     movdn.8
-    exec.u256_le_to_be
+    reversew swapw reversew
     movup.8
 end
 
@@ -382,395 +360,111 @@ end
 
 # ===== MULTIPLICATION ============================================================================
 
-#! Multiplies and accumulates one 32-bit limb with carry (internal helper).
-#! Input: [k, c, b, a, ...] -> Output: [new_k, result, ...].
+#! Computes (a + c*b + k) on 32-bit limbs and splits the 64-bit result into low and high
+#! halves. result is the low 32 bits; new_k is the high 32 bits, used as the carry into
+#! the next limb.
+#! Input: [b, c, k, a, ...] -> Output: [new_k, result, ...].
 proc mulstep
-    # Input: [k, c, b, a, ...]
-    #   k = carry from previous step
-    #   c = partial sum to accumulate into
-    #   b = multiplier limb
-    #   a = multiplicand limb
-    # Output: [new_k, result, ...]
-
-    movdn.2                    # [c, b, k, a, ...]
-    u32widening_madd           # [lo, hi, a, ...]  (computes c*b+k)
+    u32widening_madd           # [lo, hi, a, ...]   (lo + hi*2^32 = c*b + k)
     movup.2                    # [a, lo, hi, ...]
-    u32overflowing_add         # [carry, result, hi, ...]  (computes a+lo)
+    u32overflowing_add         # [carry, result, hi, ...]   (result = (a+lo) mod 2^32)
     movup.2                    # [hi, carry, result, ...]
-    add                        # [new_k, result, ...]  (computes hi+carry)
-end
-
-#! Multiplies four limbs using mulstep (internal helper).
-#! Expects stack layout prepared by wrapping_mul.
-proc mulstep4
-    movup.12
-    dup.1
-    movup.10
-    push.0 # start k at 0
-    exec.mulstep
-    swap
-    movdn.9
-    dup.1
-    movup.9
-    movup.13
-    swap.3
-    exec.mulstep
-    swap
-    movdn.8
-    dup.1
-    movup.8
-    movup.12
-    swap.3
-    exec.mulstep
-    swap
-    movdn.7
-    dup.1
-    movup.7
-    movup.11
-    swap.3
-    exec.mulstep
-    swap
-    movdn.6
+    add                        # [new_k, result, ...]   (new_k = hi + carry)
 end
 
 #! Performs multiplication of two unsigned 256 bit integers discarding the overflow.
 #! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
-#! Stack transition looks as follows:
-#! [b0, b1, b2, b3, b4, b5, b6, b7, a0, a1, a2, a3, a4, a5, a6, a7, ...] -> [c0, c1, c2, c3, c4, c5, c6, c7, ...]
-#! where c = (a * b) % 2^256, and a0, b0, and c0 are least significant 32-bit limbs of a, b, and c respectively.
-@locals(24)
+#! Stack transition is as follows:
+#! [b0, b1, b2, b3, b4, b5, b6, b7, a0, a1, a2, a3, a4, a5, a6, a7, ...]
+#!   -> [c0, c1, c2, c3, c4, c5, c6, c7, ...], where c = (a * b) % 2^256.
+@locals(16)
 pub proc wrapping_mul(rhs: u256, lhs: u256) -> u256
-    exec.u256_le_to_be_pair
-    # Memory storing setup
-    loc_storew_le.0
-    dropw
-    # b[5-8] at 0
-    loc_storew_le.4
-    # b[0-4] at 1
-    push.0 dropw
-    # b[0] at top of stack, followed by a[0-7]
-    movdn.8
-    loc_storew_le.8
-    # a[0-4] at 2
-    swapw
-    loc_storew_le.12
-    # a[5-8] at 3
-    padw
-    loc_storew_le.16
-    loc_storew_le.20
-    # p at 4 and 5
+    # Schoolbook row-by-row in LE limb order: for row i in 0..8 and j in 0..7-i,
+    #   p[i+j] += a[j] * b[i] + carry
+    # Carry chains across the j-iteration; mulstep fuses the per-limb multiply-and-add.
+    #
+    # a[0..7] stays on stack throughout (deepest 8 cells); each row caches b[i] one slot
+    # above the a's, with the running carry k on top. Per-j reads a[j] via dup.{j+2} and
+    # b[i] via dup.2. Only p lives in local memory.
+    #
+    # Memory layout (16 local cells):
+    #   mem[0..7]   = b[0..7]
+    #   mem[8..15]  = p[0..7]   (running partial result)
+    loc_storew_le.0 dropw            # b0..b3 -> mem[0..3]
+    loc_storew_le.4 dropw            # b4..b7 -> mem[4..7]
+    padw loc_storew_le.8             # p0..p3 = 0 -> mem[8..11]
+    loc_storew_le.12 dropw           # p4..p7 = 0 -> mem[12..15]
 
-    # b[0]
-    dropw
-    swapw
-    padw
-    loc_loadw_le.16
-    movdnw.2
-    movup.12
-
-    exec.mulstep4
-
-    movdn.9
-    movdn.9
-    swapw
-    loc_storew_le.16
-    dropw
-    padw
-    loc_loadw_le.20
-    swapw
-    movup.9
-    movup.9
-
-    dup.1
-    movup.6
-    movup.10
-    swap.3
-    exec.mulstep
-    swap
-    movdn.5
-    dup.1
-    movup.5
-    movup.9
-    swap.3
-    exec.mulstep
-    swap
-    movdn.4
-    dup.1
-    movup.4
-    movup.8
-    swap.3
-    exec.mulstep
-    swap
-    movdn.3
-    swap
-    movup.2
-    movup.6
-    swap.3
-    exec.mulstep
-
-    drop
-    loc_storew_le.20
-    dropw
-
-    # b[1]
-    padw
-    loc_loadw_le.16
-    padw
-    loc_loadw_le.20
-    movup.7
-    dropw
-    padw
-    loc_loadw_le.12 padw
-    loc_loadw_le.8 # load the xs
-    padw
-    loc_loadw_le.4
-    movup.2
-    movdn.3
-    push.0 dropw # only need b[1]
-
-    exec.mulstep4
-
-    movdn.9
-    movdn.9
-    swapw
-    movdn.3
-    padw
-    loc_loadw_le.16
-    push.0 dropw # only need p[0]
-    movdn.3
-    # save p[0-3] to memory, not needed any more
-    loc_storew_le.16
-    dropw
-
-    padw
-    loc_loadw_le.20
-    movup.3
-    drop
-    swapw
-    movup.9
-    movup.9
-
-    dup.1
-    movup.6
-    movup.9
-    swap.3
-    exec.mulstep
-    swap
-    movdn.7
-    dup.1
-    movup.5
-    movup.7
-    swap.3
-    exec.mulstep
-    swap
-    movdn.5
-    swap
-    movup.3
-    movup.4
-    swap.3
-    exec.mulstep
-
-    drop
-    swap
-    drop
-    loc_storew_le.20
-    dropw
-
-    # b[2]
-    padw
-    loc_loadw_le.16
-    padw
-    loc_loadw_le.20
-    movup.7
-    movup.7
-    dropw
-    padw
-    loc_loadw_le.12 padw
-    loc_loadw_le.8 # load the xs
-    padw
-    loc_loadw_le.4
-    swap
-    movdn.3
-    push.0 dropw # only need b[1]
-
-    exec.mulstep4
-
-    movdn.9
-    movdn.9
-    swapw
-    movdn.3
-    movdn.3
-    padw
-    loc_loadw_le.16
-    drop drop
-    movdn.3
-    movdn.3
-    loc_storew_le.16
-    dropw
-
-    padw
-    loc_loadw_le.20
-    movup.3
-    movup.3
-    drop
-    drop
-    swapw
-    movup.9
-    movup.9
-
-    dup.1
-    movup.6
-    movup.8
-    swap.3
-    exec.mulstep
-    swap
-    movdn.6
-    dup.1
-    movup.5
-    movup.6
-    swap.3
-    exec.mulstep
-    swap
-    swap drop
-    movdn.3
-    drop drop drop
-    loc_storew_le.20
-    dropw
-
-    # b[3]
-    padw
-    loc_loadw_le.16
-    padw
-    loc_loadw_le.20
-
-    movup.7 movup.7 movup.7
-    dropw
-    padw
-    loc_loadw_le.12 padw
-    loc_loadw_le.8
-
-    padw
-    loc_loadw_le.4
-    movdn.3
-    push.0 dropw
-
-    exec.mulstep4
-
-    movdn.9
-    movdn.9
-
-    swapw
-    movup.3
-    padw
-    loc_loadw_le.16
-    drop
-    movup.3
-
-    loc_storew_le.16
-    dropw
-    padw
-    loc_loadw_le.20
-    movdn.3
-    push.0 dropw
-    swapw
-    movup.9
-    movup.9
-
-    swap
-    movup.5
-    movup.6
-    swap.3
-    exec.mulstep
-
-    drop
-    movdn.3
-    push.0 dropw
-
-    # b[4]
-    padw
-    loc_loadw_le.12 padw
-    loc_loadw_le.8 # load the xs
-    # OPTIM: don't need a[4-7], but can't use mulstep4 if we don't load
-
-    padw
-    loc_loadw_le.0
-    push.0 dropw # b[4]
-
-    exec.mulstep4
-    dropw drop drop # OPTIM: don't need a[4-7], but can't use mulstep4 if we don't load
-
-    # b[5]
-    padw
-    loc_loadw_le.12
-    padw
-    loc_loadw_le.0
-    movup.2 movdn.3
-    push.0 dropw
-    movup.7
-    dup.1
-    movup.6
-    push.0
-    exec.mulstep
-    swap
-    movdn.7
-    movup.4
-    dup.2
-    movup.7
-    swap.3
-    exec.mulstep
-    swap
-    movdn.5
-    swap
-    movup.3
-    movup.4
-    swap.3
-    exec.mulstep
-    drop
-    swap
-    drop
-
-    # b[6]
-    padw
-    loc_loadw_le.12
-    padw
-    loc_loadw_le.0
-    swap
-    movdn.3
-    push.0 dropw
-    movup.6
-    dup.1
-    movup.6
-    push.0
-    exec.mulstep
-    swap
-    movdn.6
-    swap
-    movup.4
-    movup.5
-    swap.3
-    exec.mulstep
-    drop
-    movdn.2
+    # ----- row 0: b[0] * a[0..7] (p starts at 0, so madd alone suffices) -----
+    loc_load.0 push.0
+    dup.2 dup.2 u32widening_madd loc_store.8
+    dup.3 dup.2 u32widening_madd loc_store.9
+    dup.4 dup.2 u32widening_madd loc_store.10
+    dup.5 dup.2 u32widening_madd loc_store.11
+    dup.6 dup.2 u32widening_madd loc_store.12
+    dup.7 dup.2 u32widening_madd loc_store.13
+    dup.8 dup.2 u32widening_madd loc_store.14
+    dup.9 dup.2 u32widening_madd loc_store.15
     drop drop
 
-    # b[7]
-    padw
-    loc_loadw_le.12
-    padw
-    loc_loadw_le.0
+    # ----- row 1: b[1] * a[0..6] -----
+    loc_load.1 push.0
+    dup.2 dup.2 loc_load.9  movdn.3 exec.mulstep swap loc_store.9
+    dup.3 dup.2 loc_load.10 movdn.3 exec.mulstep swap loc_store.10
+    dup.4 dup.2 loc_load.11 movdn.3 exec.mulstep swap loc_store.11
+    dup.5 dup.2 loc_load.12 movdn.3 exec.mulstep swap loc_store.12
+    dup.6 dup.2 loc_load.13 movdn.3 exec.mulstep swap loc_store.13
+    dup.7 dup.2 loc_load.14 movdn.3 exec.mulstep swap loc_store.14
+    dup.8 dup.2 loc_load.15 movdn.3 exec.mulstep swap loc_store.15
+    drop drop
 
-    movdn.3 push.0 dropw
-    movup.4
-    movup.5
-    movdn.2
-    push.0
-    exec.mulstep
-    drop
-    movdn.3
-    drop drop drop
+    # ----- row 2: b[2] * a[0..5] -----
+    loc_load.2 push.0
+    dup.2 dup.2 loc_load.10 movdn.3 exec.mulstep swap loc_store.10
+    dup.3 dup.2 loc_load.11 movdn.3 exec.mulstep swap loc_store.11
+    dup.4 dup.2 loc_load.12 movdn.3 exec.mulstep swap loc_store.12
+    dup.5 dup.2 loc_load.13 movdn.3 exec.mulstep swap loc_store.13
+    dup.6 dup.2 loc_load.14 movdn.3 exec.mulstep swap loc_store.14
+    dup.7 dup.2 loc_load.15 movdn.3 exec.mulstep swap loc_store.15
+    drop drop
 
-    padw
-    loc_loadw_le.16
-    swapw
-    exec.u256_le_to_be
+    # ----- row 3: b[3] * a[0..4] -----
+    loc_load.3 push.0
+    dup.2 dup.2 loc_load.11 movdn.3 exec.mulstep swap loc_store.11
+    dup.3 dup.2 loc_load.12 movdn.3 exec.mulstep swap loc_store.12
+    dup.4 dup.2 loc_load.13 movdn.3 exec.mulstep swap loc_store.13
+    dup.5 dup.2 loc_load.14 movdn.3 exec.mulstep swap loc_store.14
+    dup.6 dup.2 loc_load.15 movdn.3 exec.mulstep swap loc_store.15
+    drop drop
+
+    # ----- row 4: b[4] * a[0..3] -----
+    loc_load.4 push.0
+    dup.2 dup.2 loc_load.12 movdn.3 exec.mulstep swap loc_store.12
+    dup.3 dup.2 loc_load.13 movdn.3 exec.mulstep swap loc_store.13
+    dup.4 dup.2 loc_load.14 movdn.3 exec.mulstep swap loc_store.14
+    dup.5 dup.2 loc_load.15 movdn.3 exec.mulstep swap loc_store.15
+    drop drop
+
+    # ----- row 5: b[5] * a[0..2] -----
+    loc_load.5 push.0
+    dup.2 dup.2 loc_load.13 movdn.3 exec.mulstep swap loc_store.13
+    dup.3 dup.2 loc_load.14 movdn.3 exec.mulstep swap loc_store.14
+    dup.4 dup.2 loc_load.15 movdn.3 exec.mulstep swap loc_store.15
+    drop drop
+
+    # ----- row 6: b[6] * a[0..1] -----
+    loc_load.6 push.0
+    dup.2 dup.2 loc_load.14 movdn.3 exec.mulstep swap loc_store.14
+    dup.3 dup.2 loc_load.15 movdn.3 exec.mulstep swap loc_store.15
+    drop drop
+
+    # ----- row 7: b[7] * a[0] -----
+    loc_load.7 push.0
+    dup.2 dup.2 loc_load.15 movdn.3 exec.mulstep swap loc_store.15
+    drop drop
+
+    # Drop a[0..7] from stack and load c[0..7] from memory.
+    dropw dropw
+    padw loc_loadw_le.12             # [c4, c5, c6, c7, ...]
+    padw loc_loadw_le.8              # [c0, c1, c2, c3, c4, c5, c6, c7, ...]
 end

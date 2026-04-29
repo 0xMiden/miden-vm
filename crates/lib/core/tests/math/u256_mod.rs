@@ -255,6 +255,17 @@ fn eq_edge_cases() {
 
 proptest! {
     #[test]
+    fn wrapping_mul_proptest(
+        a in prop::array::uniform8(boundary_biased_u32()),
+        b in prop::array::uniform8(boundary_biased_u32()),
+    ) {
+        // Uses assert_wrapping_mul which embeds assert_stack_words inside the program;
+        // wrapping_mul preserves caller inputs on the stack (per #3071), so we cannot
+        // use prop_expect_stack with a 16-element limit and must assert inside MASM.
+        assert_wrapping_mul(U256::from_le_u32_limbs(a), U256::from_le_u32_limbs(b));
+    }
+
+    #[test]
     fn overflowing_add_proptest(
         a in prop::array::uniform8(boundary_biased_u32()),
         b in prop::array::uniform8(boundary_biased_u32()),
