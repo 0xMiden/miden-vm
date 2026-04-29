@@ -213,17 +213,16 @@ fn apply_matmul_external<E: PrimeCharacteristicRing>(state: &[E; STATE_WIDTH]) -
 fn matmul_m4<E: PrimeCharacteristicRing>(input: [E; 4]) -> [E; 4] {
     let [a, b, c, d] = input;
 
-    let t0 = a + b.clone();
-    let t1 = c + d.clone();
-    let t2 = b.double() + t1.clone(); // 2b + t1
-    let t3 = d.double() + t0.clone(); // 2d + t0
-    let t4 = t1.double().double() + t3.clone(); // 4*t1 + t3
-    let t5 = t0.double().double() + t2.clone(); // 4*t0 + t2
+    let t01 = a.clone() + b.clone();
+    let t23 = c.clone() + d.clone();
+    let t0123 = t01.clone() + t23.clone();
+    let t01123 = t0123.clone() + b;
+    let t01233 = t0123 + d;
 
-    let out0 = t3 + t5.clone();
-    let out1 = t5;
-    let out2 = t2 + t4.clone();
-    let out3 = t4;
+    let out0 = t01123.clone() + t01;
+    let out1 = t01123 + c.double();
+    let out2 = t01233.clone() + t23;
+    let out3 = t01233 + a.double();
 
     [out0, out1, out2, out3]
 }

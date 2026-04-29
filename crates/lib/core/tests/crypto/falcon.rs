@@ -201,8 +201,8 @@ fn test_falcon512_probabilistic_product_deterministic() {
     let mut h_coeffs = Vec::new();
     let mut s2_coeffs = Vec::new();
     for _i in 0..N {
-        h_coeffs.push(Felt::new(rng.random_range(0..M)));
-        s2_coeffs.push(Felt::new(rng.random_range(0..M)));
+        h_coeffs.push(Felt::new_unchecked(rng.random_range(0..M)));
+        s2_coeffs.push(Felt::new_unchecked(rng.random_range(0..M)));
     }
 
     let h: Polynomial<Felt> = Polynomial::new(h_coeffs);
@@ -362,8 +362,8 @@ fn test_mod_12289_rejects_forged_remainder_zero(#[case] a_hi: u64, #[case] a_lo:
         let a = (a_hi << 32) | a_lo;
 
         let q = a.wrapping_mul(M_INV);
-        let q_hi = Felt::new(q >> 32);
-        let q_lo = Felt::new(q & 0xffff_ffff);
+        let q_hi = Felt::new_unchecked(q >> 32);
+        let q_lo = Felt::new_unchecked(q & 0xffff_ffff);
 
         let remainder = AdviceMutation::extend_stack([ZERO]);
         let quotient = AdviceMutation::extend_stack([q_hi, q_lo]);
@@ -413,10 +413,10 @@ fn test_mod_12289_rejects_forged_addition_overflow() {
 
     // Malicious event handler that forges q/r to trigger the addition-overflow assertion.
     fn malicious_falcon_div(_process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
-        let q_hi = Felt::new(FORGED_Q >> 32);
-        let q_lo = Felt::new(FORGED_Q & 0xffff_ffff);
+        let q_hi = Felt::new_unchecked(FORGED_Q >> 32);
+        let q_lo = Felt::new_unchecked(FORGED_Q & 0xffff_ffff);
 
-        let remainder = AdviceMutation::extend_stack([Felt::new(FORGED_R)]);
+        let remainder = AdviceMutation::extend_stack([Felt::new_unchecked(FORGED_R)]);
         let quotient = AdviceMutation::extend_stack([q_hi, q_lo]);
         Ok(vec![remainder, quotient])
     }
@@ -458,9 +458,9 @@ fn test_mod_12289_rejects_non_u32_remainder_advice() {
         let dividend = (a_hi << 32) | a_lo;
         let quotient = dividend / M;
 
-        let q_hi = Felt::new(quotient >> 32);
-        let q_lo = Felt::new(quotient & 0xffff_ffff);
-        let forged_remainder = Felt::new(Felt::ORDER_U64 - 1);
+        let q_hi = Felt::new_unchecked(quotient >> 32);
+        let q_lo = Felt::new_unchecked(quotient & 0xffff_ffff);
+        let forged_remainder = Felt::new_unchecked(Felt::ORDER_U64 - 1);
 
         let remainder = AdviceMutation::extend_stack([forged_remainder]);
         let quotient = AdviceMutation::extend_stack([q_hi, q_lo]);
@@ -537,7 +537,7 @@ fn generate_test(
     let pk: Word = sk.public_key().to_commitment();
     let sk_bytes = sk.to_bytes();
 
-    let to_adv_map = sk_bytes.iter().map(|a| Felt::new(*a as u64)).collect::<Vec<Felt>>();
+    let to_adv_map = sk_bytes.iter().map(|a| Felt::new_unchecked(*a as u64)).collect::<Vec<Felt>>();
 
     let advice_map: Vec<(Word, Vec<Felt>)> = vec![(pk, to_adv_map)];
 
@@ -555,7 +555,7 @@ fn generate_test(
 fn random_coefficients_with_rng<R: Rng>(rng: &mut R) -> Vec<Felt> {
     let mut res = Vec::new();
     for _i in 0..N {
-        res.push(Felt::new(rng.random_range(0..M)))
+        res.push(Felt::new_unchecked(rng.random_range(0..M)))
     }
     res
 }
@@ -598,15 +598,15 @@ fn generate_data_probabilistic_product_test(
     };
 
     polynomials.extend(to_elements(s2));
-    polynomials.extend(pi.iter().map(|a| Felt::new(*a)));
+    polynomials.extend(pi.iter().map(|a| Felt::new_unchecked(*a)));
 
     // get the challenge point and push it to the advice stack
-    // Push tau1 first, then tau0, so adv_push.2 produces _le format [tau0, tau1, ...] directly
+    // Two sequential `adv_push` ops will place tau0 on top, tau1 at position 1.
     let digest_polynomials = Poseidon2::hash_elements(&polynomials[..]);
-    let challenge = (digest_polynomials[0], digest_polynomials[1]);
+    let tau0 = digest_polynomials[0];
+    let tau1 = digest_polynomials[1];
     let mut builder = AdviceStackBuilder::new();
-    builder.push_element(challenge.1);
-    builder.push_element(challenge.0);
+    builder.push_for_adv_push(&[tau0, tau1]);
     builder.push_elements(polynomials.iter().copied());
     let advice_stack = builder.build_vec_u64();
 

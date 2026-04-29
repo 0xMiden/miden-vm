@@ -6,7 +6,12 @@ use super::*;
 // ================================================================================================
 
 const fn word(e0: u64, e1: u64, e2: u64, e3: u64) -> Word {
-    Word::new([Felt::new(e0), Felt::new(e1), Felt::new(e2), Felt::new(e3)])
+    Word::new([
+        Felt::new_unchecked(e0),
+        Felt::new_unchecked(e1),
+        Felt::new_unchecked(e2),
+        Felt::new_unchecked(e3),
+    ])
 }
 
 /// Note: We never insert at the same key twice. This is so that the `smt::get` test can loop over
@@ -285,18 +290,33 @@ fn test_set_advice_map_single_key() {
 /// (i.e. removing a value that's already empty)
 #[test]
 fn test_set_empty_key_in_non_empty_leaf() {
-    let leaf_idx = Felt::new(42);
+    let leaf_idx = Felt::new_unchecked(42);
 
     let leaves: [(Word, Word); 1] = [(
-        Word::new([leaf_idx, Felt::new(102), Felt::new(103), Felt::new(104)]),
-        Word::new([Felt::new(1_u64), Felt::new(2_u64), Felt::new(3_u64), Felt::new(4_u64)]),
+        Word::new([
+            leaf_idx,
+            Felt::new_unchecked(102),
+            Felt::new_unchecked(103),
+            Felt::new_unchecked(104),
+        ]),
+        Word::new([
+            Felt::new_unchecked(1_u64),
+            Felt::new_unchecked(2_u64),
+            Felt::new_unchecked(3_u64),
+            Felt::new_unchecked(4_u64),
+        ]),
     )];
 
     let mut smt = build_smt_from_pairs(&leaves);
 
     // This key has same K[0] (leaf index element) as key in the existing leaf, so will map to
     // the same leaf
-    let new_key = Word::new([leaf_idx, Felt::new(12), Felt::new(3), Felt::new(4)]);
+    let new_key = Word::new([
+        leaf_idx,
+        Felt::new_unchecked(12),
+        Felt::new_unchecked(3),
+        Felt::new_unchecked(4),
+    ]);
 
     let source = "
     use miden::core::collections::smt
@@ -751,13 +771,13 @@ fn test_smt_randomized_round_trip() {
 /// multi-leaf functionality in the SMT. We constrain word[0] because it is the most
 /// significant element for lexicographic comparison.
 fn random_word(seed: &mut u64, buckets: usize) -> Word {
-    let mut word = [Felt::new(0); 4];
+    let mut word = [Felt::new_unchecked(0); 4];
     for element in word.iter_mut() {
-        *element = Felt::new(random_u64(seed));
+        *element = Felt::new_unchecked(random_u64(seed));
     }
     // Constrain word[0] to be one of buckets values (most significant in LE comparison)
     let bucket_value = random_u64(seed) % (buckets as u64);
-    word[0] = Felt::new(bucket_value);
+    word[0] = Felt::new_unchecked(bucket_value);
     Word::new(word)
 }
 
@@ -794,8 +814,8 @@ fn build_leaf_advice_value(entries: &[(Word, Word)]) -> Vec<Felt> {
 
     let mut builder = AdviceStackBuilder::new();
     for (key, value) in entries {
-        builder.push_for_adv_loadw(*key);
-        builder.push_for_adv_loadw(*value);
+        builder.push_word(*key);
+        builder.push_word(*value);
     }
     builder.into_elements()
 }

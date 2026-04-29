@@ -25,5 +25,4 @@ miette = { workspace = true, features = [
     "derive",
 ] }
 miden-crypto.workspace = true
-paste.workspace = true
 tracing.workspace = true

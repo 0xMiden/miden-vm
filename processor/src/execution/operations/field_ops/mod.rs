@@ -195,7 +195,7 @@ pub(super) fn op_expacc<P: Processor>(processor: &mut P) -> OperationHelperRegis
     let old_exp_int = processor.stack().get(3).as_canonical_u64();
 
     // Compute new exponent.
-    let new_exp = Felt::new(old_exp_int >> 1);
+    let new_exp = Felt::new_unchecked(old_exp_int >> 1);
 
     // Compute new accumulator. We update the accumulator only when the least significant bit of
     // the exponent is 1.
@@ -206,7 +206,7 @@ pub(super) fn op_expacc<P: Processor>(processor: &mut P) -> OperationHelperRegis
     // Compute the new base.
     let new_base = old_base * old_base;
 
-    processor.stack_mut().set(0, Felt::new(exp_lsb));
+    processor.stack_mut().set(0, Felt::new_unchecked(exp_lsb));
     processor.stack_mut().set(1, new_base);
     processor.stack_mut().set(2, new_acc);
     processor.stack_mut().set(3, new_exp);
@@ -222,7 +222,7 @@ pub(super) fn op_expacc<P: Processor>(processor: &mut P) -> OperationHelperRegis
 /// to the third and fourth positions, and leaves the rest of the stack unchanged.
 #[inline(always)]
 pub(super) fn op_ext2mul<P: Processor>(processor: &mut P) -> OperationHelperRegisters {
-    const SEVEN: Felt = Felt::new(7);
+    const SEVEN: Felt = Felt::new_unchecked(7);
     // get_word returns [s0, s1, s2, s3] where s0 is top of stack
     // Stack layout: s0=b0, s1=b1, s2=a0, s3=a1
     let [b0, b1, a0, a1]: [Felt; 4] = processor.stack().get_word(0).into();

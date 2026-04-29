@@ -49,6 +49,7 @@ name = "miden-cli"
 path = "tests/integration/main.rs"
 
 [features]
+arbitrary = ["std", "dep:proptest"]
 concurrent = ["miden-prover/concurrent", "std"]
 default = ["std"]
 executable = ["dep:hex", "dep:clap", "dep:tracing-subscriber", "internal", "serde", "std"]
@@ -60,6 +61,7 @@ std = [
     "miden-processor/std",
     "miden-prover/std",
     "miden-verifier/std",
+    "proptest?/std",
     "serde?/std",
     "serde_json?/std",
 ]
@@ -70,7 +72,6 @@ internal = ["dep:hex", "serde", "std"]
 # Miden dependencies
 miden-assembly.workspace = true
 miden-core.workspace = true
-miden-crypto.workspace = true
 miden-debug-types.workspace = true
 miden-processor.workspace = true
 miden-prover.workspace = true
@@ -83,6 +84,7 @@ clap = { version = "4.5", features = ["derive"], optional = true }
 hex = { version = "0.4", optional = true }
 serde = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
+proptest = { workspace = true, optional = true }
 tracing.workspace = true
 tracing-subscriber = { version = "0.3", optional = true, features = ["std", "env-filter"] }
 tracing-forest = { version = "0.2", optional = true, features = ["ansi", "smallvec"] }
@@ -92,11 +94,12 @@ assert_cmd = { version = "2.1" }
 bincode = { workspace = true }
 criterion = { workspace = true, features = ["async_tokio"] }
 escargot = { version = "0.5" }
+miden-crypto.workspace = true
 miden-processor = { workspace = true, features = ["testing"] }
+miden-lifted-stark.workspace = true
+miden-test-serde-macros.workspace = true
 miden-utils-testing.workspace = true
-num-bigint = { workspace = true }
 predicates = { version = "3.1" }
-pretty_assertions = { workspace = true, features = ["std"] }
+proptest.workspace = true
 tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
-rand_chacha = { workspace = true }
 walkdir = { version = "2.5" }

@@ -246,7 +246,10 @@ where
                         CachedConstantValue::Miss(ConstantExpr::Int(value))
                         | CachedConstantValue::Hit(ConstantValue::Int(value)),
                     )) => {
-                        *imm = Immediate::Value(Span::new(span, Felt::new(value.inner().as_int())));
+                        *imm = Immediate::Value(Span::new(
+                            span,
+                            Felt::new_unchecked(value.inner().as_int()),
+                        ));
                     },
                     Ok(Some(
                         CachedConstantValue::Miss(ConstantExpr::Hash(HashKind::Event, string))
@@ -268,7 +271,7 @@ where
                             Ok(ConstantExpr::Int(value)) => {
                                 *imm = Immediate::Value(Span::new(
                                     span,
-                                    Felt::new(value.inner().as_int()),
+                                    Felt::new_unchecked(value.inner().as_int()),
                                 ));
                             },
                             Ok(ConstantExpr::Hash(HashKind::Event, value)) => {

@@ -337,7 +337,7 @@ fn fixup_stack_and_system_rows(
     system_rows: &[[Felt; SYS_TRACE_WIDTH]],
     first_stack_top: &[Felt],
 ) {
-    const MIN_STACK_DEPTH_FELT: Felt = Felt::new(MIN_STACK_DEPTH as u64);
+    const MIN_STACK_DEPTH_FELT: Felt = Felt::new_unchecked(MIN_STACK_DEPTH as u64);
     let w = CORE_TRACE_WIDTH;
 
     {

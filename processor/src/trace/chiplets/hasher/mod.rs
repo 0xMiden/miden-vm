@@ -40,7 +40,7 @@ fn state_to_key(state: &HasherState) -> StateKey {
 
 /// Reconstructs a HasherState from a StateKey.
 fn key_to_state(key: &StateKey) -> HasherState {
-    core::array::from_fn(|i| Felt::new(key[i]))
+    core::array::from_fn(|i| Felt::new_unchecked(key[i]))
 }
 
 /// Hash chiplet for the VM.
@@ -338,7 +338,7 @@ impl Hasher {
         // Append one 16-row permutation cycle per unique input state
         for (key, multiplicity) in core::mem::take(&mut self.perm_request_map) {
             let state = key_to_state(&key);
-            self.trace.append_permutation_cycle(&state, Felt::new(multiplicity));
+            self.trace.append_permutation_cycle(&state, Felt::new_unchecked(multiplicity));
         }
 
         self.finalized = true;
@@ -440,8 +440,8 @@ impl Hasher {
             let state = build_merge_state(&root, &sibling, b_i);
 
             // Input row carries the full index; output row carries the shifted index.
-            let input_node_idx = Felt::new(index);
-            let output_node_idx = Felt::new(index >> 1);
+            let input_node_idx = Felt::new_unchecked(index);
+            let output_node_idx = Felt::new_unchecked(index >> 1);
 
             // Direction bit for the NEXT step (forward propagation for routing constraint).
             // On the last step there is no next step, so direction_bit = 0.
@@ -458,8 +458,8 @@ impl Hasher {
                 output_node_idx,
                 is_boundary_input,
                 is_boundary_output,
-                Felt::new(b_i),    // input direction_bit: current step's bit
-                Felt::new(b_next), // output direction_bit: next step's bit (propagated)
+                Felt::new_unchecked(b_i), // input direction_bit: current step's bit
+                Felt::new_unchecked(b_next), // output direction_bit: next step's bit (propagated)
             );
 
             root = get_digest(&permuted);

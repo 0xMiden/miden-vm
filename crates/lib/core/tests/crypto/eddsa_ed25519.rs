@@ -1,8 +1,8 @@
 //! Tests for EdDSA (Ed25519) precompile.
 //!
 //! Validates that:
-//! - Prehash flow (k-digest provided by the caller) works via `verify_prehash` and
-//!   `verify_prehash_impl`
+//! - Prehash flow (k-digest provided by the caller) works via `verify_prehash`
+//! - Private implementation helper returns the expected commitment, tag, and result on stack
 //! - Full message flow recomputes k-digest via SHA2-512 and verifies signatures
 //! - Deferred requests logged by the runtime match expected host-side requests
 
@@ -21,7 +21,7 @@ use miden_core_lib::{
     handlers::eddsa_ed25519::{EddsaPrecompile, EddsaRequest},
 };
 use miden_crypto::{
-    dsa::eddsa_25519_sha512::{PublicKey, SecretKey, Signature},
+    dsa::eddsa_25519_sha512::{PublicKey, Signature, SigningKey as SecretKey},
     hash::{poseidon2::Poseidon2, sha2::Sha512},
 };
 use miden_processor::{
@@ -116,20 +116,18 @@ fn test_eddsa_verify_prehash_impl_commitment() {
 
     for (request, message, expected_valid) in test_cases {
         let memory_stores = generate_memory_store_masm(&request, &message);
-        let source = format!(
-            "
-            use miden::core::crypto::dsa::eddsa_ed25519
-            use miden::core::sys
+        let source = private_proc_harness(
+            include_str!("../../asm/crypto/dsa/eddsa_ed25519.masm"),
+            format!(
+                "
+                    {memory_stores}
 
-            begin
-                {memory_stores}
+                    push.{SIG_ADDR}.{K_DIGEST_ADDR}.{PK_ADDR}
+                    exec.verify_prehash_impl
 
-                push.{SIG_ADDR}.{K_DIGEST_ADDR}.{PK_ADDR}
-                exec.eddsa_ed25519::verify_prehash_impl
-
-                exec.sys::truncate_stack
-            end
-        ",
+                    exec.sys::truncate_stack
+                ",
+            ),
         );
 
         let test = build_debug_test!(source, &[]);
@@ -161,7 +159,7 @@ fn test_eddsa_verify_prehash_impl_commitment() {
 
 #[test]
 fn test_eddsa_verify_with_message() {
-    let message = Word::new([1, 2, 3, 4].map(Felt::new));
+    let message = Word::new([1, 2, 3, 4].map(Felt::new_unchecked));
 
     let mut rng = StdRng::seed_from_u64(42);
     let secret_key = SecretKey::with_rng(&mut rng);
@@ -242,7 +240,12 @@ fn test_eddsa_verify_high_level_wrapper() {
     let mut rng = StdRng::seed_from_u64(19260817);
     let secret_key = SecretKey::with_rng(&mut rng);
     let public_key = secret_key.public_key();
-    let message = Word::from([Felt::new(11), Felt::new(22), Felt::new(33), Felt::new(44)]);
+    let message = Word::from([
+        Felt::new_unchecked(11),
+        Felt::new_unchecked(22),
+        Felt::new_unchecked(33),
+        Felt::new_unchecked(44),
+    ]);
 
     let pk_commitment = {
         let pk_felts = bytes_to_packed_u32_elements(&public_key.to_bytes());
@@ -292,7 +295,7 @@ fn generate_valid_data() -> EddsaTestData {
     let mut rng = StdRng::seed_from_u64(42);
     let secret_key = SecretKey::with_rng(&mut rng);
     let pk = secret_key.public_key();
-    let message = Word::new([1, 2, 3, 4].map(Felt::new));
+    let message = Word::new([1, 2, 3, 4].map(Felt::new_unchecked));
     let sig = secret_key.sign(message);
     let message_bytes: Vec<_> = message
         .into_iter()
@@ -343,4 +346,8 @@ fn generate_memory_store_masm(request: &EddsaRequest, message: &[u8; 32]) -> Str
         masm_store_felts(&msg_felts, MSG_ADDR),
     ]
     .join(" ")
+}
+
+fn private_proc_harness(module_source: &str, body: impl AsRef<str>) -> String {
+    format!("{}\n\nbegin\n{}\nend", module_source.replace("pub proc", "proc"), body.as_ref())
 }

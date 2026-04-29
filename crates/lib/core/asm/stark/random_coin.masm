@@ -139,21 +139,12 @@ end
 #! Initializes the random coin state with domain-separated Fiat-Shamir (DSFS) seeding,
 #! then derives trace domain parameters.
 #!
-#! Implements a two-phase transcript initialization:
+#! Implements the transcript initialization:
 #!
-#!   Phase 1 (INSTANCE_SEED -- compile-time constant per AIR):
-#!           Use the caller-supplied RELATION_DIGEST as initial sponge capacity,
-#!           absorb PCS parameters into the rate, and permute.
-#!           Rate layout: R1 = [nq, query_pow_bits, deep_pow_bits, folding_pow_bits]
-#!                        R2 = [log_blowup, log_final_degree, fold_arity, 0]
-#!           The resulting capacity is the INSTANCE_SEED.
-#!
-#!   Phase 2 (PROOF_SEED -- per-proof):
-#!           Use INSTANCE_SEED as capacity, absorb log(trace_length) into rate[0]
-#!           (with rate[1..7] = 0), and permute.
-#!           The resulting capacity is the PROOF_SEED.
-#!
-#!   The challenger starts with capacity = PROOF_SEED, rate zeroed.
+#!   Use the caller-supplied RELATION_DIGEST as initial sponge capacity,
+#!   absorb PCS parameters into the rate, and permute.
+#!   Rate layout: R1 = [nq, query_pow_bits, deep_pow_bits, folding_pow_bits]
+#!                R2 = [log_blowup, log_final_degree, fold_arity, 0]
 #!
 #! RELATION_DIGEST = hash(PROTOCOL_ID, CIRCUIT_COMMITMENT) is a compile-time constant
 #! computed once per AIR and pushed by the caller (the specific verifier).
@@ -178,7 +169,7 @@ pub proc init_seed
     push.0 exec.constants::random_coin_output_len_ptr mem_store
     #=> [log(tl), rd0, rd1, rd2, rd3, ...]
 
-    # ---- Phase 1: RELATION_DIGEST + PCS_PARAMS -> INSTANCE_SEED ----
+    # ---- RELATION_DIGEST + PCS_PARAMS ----
 
     # Build the sponge state [R1, R2, C] for hperm:
     #   R1 = [nq, query_pow_bits, deep_pow_bits, folding_pow_bits]
@@ -210,39 +201,15 @@ pub proc init_seed
     #=> [nq, query_pow, deep_pow, folding_pow, log_blowup, log_final_deg, fold_arity, 0, rd0, rd1, rd2, rd3, ...]
     #    ^-- R1                                ^-- R2                                     ^-- C
 
-    # Permute: capacity now holds INSTANCE_SEED.
+    # Permute and store the transcript state after absorbing protocol parameters.
     exec.poseidon2::permute
     #=> [R1', R2', C', ...]
 
-    # Discard the permuted rate words, keep INSTANCE_SEED (capacity) on the stack.
-    dropw dropw
-    #=> [C0, C1, C2, C3, ...]   (INSTANCE_SEED)
-
-    # ---- Phase 2: INSTANCE_SEED + log(tl) -> PROOF_SEED ----
-
-    # Build R2 = [0, 0, 0, 0] on top of capacity.
-    padw
-    #=> [0, 0, 0, 0, C0, C1, C2, C3, ...]
-    #    ^-- R2       ^-- C (INSTANCE_SEED)
-
-    # Build R1 = [lth, 0, 0, 0] on top.
-    push.0.0.0
-    exec.constants::get_trace_length_log
-    #=> [lth, 0, 0, 0, 0, 0, 0, 0, C0, C1, C2, C3, ...]
-    #    ^-- R1          ^-- R2     ^-- C (INSTANCE_SEED)
-
-    exec.poseidon2::permute
-    #=> [R1', R2', C', ...]
-
-    # Store PROOF_SEED state to memory (capacity = PROOF_SEED, rate = permuted).
     exec.store_random_coin_state
     #=> [...]
 
-    # Zero the rate in memory. Capacity = PROOF_SEED is now stored.
-    padw
-    exec.constants::r1_ptr mem_storew_le
-    exec.constants::r2_ptr mem_storew_le
-    dropw
+    push.0 exec.constants::random_coin_input_len_ptr mem_store
+    push.8 exec.constants::random_coin_output_len_ptr mem_store
     #=> [...]
 
     # ---- Derive trace domain parameters ----
@@ -304,6 +271,50 @@ pub proc init_seed
 
     # Clean up the stack.
     drop drop
+end
+
+#! Observe the single AIR instance shape and discard the instance challenge.
+#!
+#! miden-lifted-stark 0.24 observes each log(trace_length) after public inputs and then samples
+#! one extension-field instance challenge before absorbing the main trace commitment. The VM
+#! recursive verifier only supports one AIR instance, so this helper observes the stored
+#! log(trace_length), performs the partial-rate duplexing, and marks two base-field outputs as
+#! consumed without materializing the unused extension element.
+#!
+#! SAFETY:
+#!   1. input_len=0 (asserted).
+#!   2. The current random coin state has just absorbed the public inputs.
+#!   3. On exit: input_len=0, output_len=6.
+#!
+#! Input: [...]
+#! Output: [...]
+pub proc observe_trace_height_and_discard_instance_challenge
+    exec.constants::random_coin_input_len_ptr mem_load
+    # => [input_len, ...]
+    assertz.err="observe_trace_height_and_discard_instance_challenge: input buffer must be empty"
+    # => [...]
+
+    # observing clears the output buffer.
+    push.0 exec.constants::random_coin_output_len_ptr mem_store
+    # => [...]
+
+    # observe log(trace_length) into rate[0], leaving rate[1..7] and capacity unchanged.
+    exec.constants::get_trace_length_log
+    # => [log(trace_length), ...]
+    exec.constants::r1_ptr mem_store
+    # => [...]
+
+    exec.load_random_coin_state
+    # => [R1, R2, C, ...]
+    exec.poseidon2::permute
+    # => [R1', R2', C', ...]
+    exec.store_random_coin_state
+    # => [...]
+
+    push.0 exec.constants::random_coin_input_len_ptr mem_store
+    # => [...]
+    push.6 exec.constants::random_coin_output_len_ptr mem_store
+    # => [...]
 end
 
 #! Reseed with a commitment word and absorb an additional single felt, then permute.
@@ -565,9 +576,9 @@ end
 # =============================================================================================
 
 #! Generate a list of `num_queries` number of random indices in the range
-#! [0, lde_size] and store it in memory starting from `query_ptr`.
-#! The list is stored as `(rev_index, depth, natural_index, 0)` where
-#! `depth` is `log(lde_domain_size)` which is needed when computing the DEEP queries.
+#! [0, lde_size) and store it in memory starting from `query_ptr`.
+#! The list is stored as `(index, depth, index, 0)` where `index` is the sampled domain-order
+#! index and `depth` is `log(lde_domain_size)`, which is needed when computing the DEEP queries.
 #!
 #! Reads rate elements directly from memory (decrementing from output_len-1 down to 0),
 #! permuting when the rate is exhausted, rather than calling sample_felt per query.
@@ -586,7 +597,7 @@ pub proc generate_list_indices
     #=> [depth, query_ptr, num_queries, ...]
 
     # Pre-compute pow2_shift = 2^(32 - depth) and mask = 2^depth - 1.
-    # Keep both on the stack to avoid per-element procedure call overhead for memory loads.
+    # pow2_shift is kept for stack shape compatibility with the old bit-reversal path.
     dup push.32 swap u32wrapping_sub pow2
     #=> [pow2_shift, depth, query_ptr, num_queries, ...]
     swap dup pow2 u32assert u32overflowing_sub.1 assertz
@@ -639,20 +650,17 @@ pub proc generate_list_indices
         dup.4 u32and
         #=> [natural_index, idx, query_ptr, num_queries, mask, depth, pow2_shift, ...]
 
-        # --- Bit-reverse ---
-        # Set up [natural_index, pow2_shift, depth, natural_index, idx, query_ptr, ...]
-        # so bit_reverse_len_parallel consumes [natural_index, pow2_shift] and leaves
-        # [rev_index, depth, natural_index, idx, query_ptr, ...].
-        dup.5 dup.7 dup.2
-        #=> [natural_index, pow2_shift, depth, natural_index, idx, query_ptr, num_queries, mask, depth, pow2_shift, ...]
-        exec.utils::bit_reverse_len_parallel
-        #=> [rev_index, depth, natural_index, idx, query_ptr, num_queries, mask, depth, pow2_shift, ...]
+        # --- Prepare domain-order query word ---
+        # 0.24 LMCS trees are indexed by domain order, so the Merkle index and the DEEP
+        # evaluation index are both the sampled natural index.
+        dup.5 swap dup movdn.2
+        #=> [natural_index, depth, natural_index, idx, query_ptr, num_queries, mask, depth, pow2_shift, ...]
 
-        # --- Store [rev_index, depth, natural_index, 0] at query_ptr ---
+        # --- Store [index, depth, index, 0] at query_ptr ---
         push.0 movdn.3
-        #=> [rev_index, depth, natural_index, 0, idx, query_ptr, num_queries, mask, depth, pow2_shift, ...]
+        #=> [natural_index, depth, natural_index, 0, idx, query_ptr, num_queries, mask, depth, pow2_shift, ...]
         dup.5
-        #=> [query_ptr, rev_index, depth, natural_index, 0, idx, query_ptr, num_queries, mask, depth, pow2_shift, ...]
+        #=> [query_ptr, natural_index, depth, natural_index, 0, idx, query_ptr, num_queries, mask, depth, pow2_shift, ...]
         mem_storew_le
         dropw
         #=> [idx, query_ptr, num_queries, mask, depth, pow2_shift, ...]
@@ -701,7 +709,7 @@ proc check_pow
     dup
     push.0 neq
     if.true
-        adv_push.1
+        adv_push
         # Assert input buffer is empty, then write nonce directly to rate[0] and permute.
         exec.constants::random_coin_input_len_ptr mem_load
         assertz.err="check_pow: input buffer must be empty"
@@ -715,7 +723,7 @@ proc check_pow
         assertz.err="proof-of-work check failed"
     else
         # Consume witness to keep advice layout, but do not affect transcript.
-        adv_push.1
+        adv_push
         assertz.err="proof-of-work nonce must be zero when grinding factor is zero"
         drop
     end

@@ -17,7 +17,7 @@ begin
                 noop
                 noop
             end
-            external.0x77ca6b6f945bde6a7a7eec2f0d9ae96c8c5218ad6c1f4e573c6eab2d9b9607fb
+            external.0xf34befe5b657a0fb0222962f53ef81429084c9cd1cd41454c945351e5b2361e2
         end
         call.0x20234ee941e53a15886e733cc8e041198c6e90d2a16ea18ce1030e8c3596dd38
     end

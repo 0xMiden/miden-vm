@@ -70,7 +70,7 @@ impl LiftedAir<F, EF> for MockAir {
 }
 
 fn ef(x: u64) -> EF {
-    EF::from(F::new(x))
+    EF::from(F::new_unchecked(x))
 }
 
 fn build_inputs(layout: &InputLayout) -> Vec<EF> {

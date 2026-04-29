@@ -176,7 +176,7 @@ fn build_trace(
     operations: Vec<Operation>,
     kernel: Kernel,
 ) -> (ChipletsTrace, usize) {
-    let stack_inputs: Vec<Felt> = stack_inputs.iter().map(|v| Felt::new(*v)).collect();
+    let stack_inputs: Vec<Felt> = stack_inputs.iter().map(|v| Felt::new_unchecked(*v)).collect();
     let processor = FastProcessor::new_with_options(
         StackInputs::new(&stack_inputs).unwrap(),
         AdviceInputs::default(),

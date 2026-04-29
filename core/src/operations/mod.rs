@@ -904,6 +904,101 @@ impl Serializable for Operation {
     }
 }
 
+impl Operation {
+    /// Returns the serialized size of this operation in bytes.
+    pub(crate) fn encoded_size(&self) -> usize {
+        let mut size = size_of::<u8>();
+        match self {
+            Operation::Assert(err_code)
+            | Operation::MpVerify(err_code)
+            | Operation::U32assert2(err_code) => {
+                size += err_code.get_size_hint();
+            },
+            Operation::Push(value) => {
+                size += value.as_canonical_u64().get_size_hint();
+            },
+            Operation::Noop
+            | Operation::SDepth
+            | Operation::Caller
+            | Operation::Clk
+            | Operation::Add
+            | Operation::Neg
+            | Operation::Mul
+            | Operation::Inv
+            | Operation::Incr
+            | Operation::And
+            | Operation::Or
+            | Operation::Not
+            | Operation::Eq
+            | Operation::Eqz
+            | Operation::Expacc
+            | Operation::Ext2Mul
+            | Operation::U32split
+            | Operation::U32add
+            | Operation::U32add3
+            | Operation::U32sub
+            | Operation::U32mul
+            | Operation::U32madd
+            | Operation::U32div
+            | Operation::U32and
+            | Operation::U32xor
+            | Operation::Pad
+            | Operation::Drop
+            | Operation::Dup0
+            | Operation::Dup1
+            | Operation::Dup2
+            | Operation::Dup3
+            | Operation::Dup4
+            | Operation::Dup5
+            | Operation::Dup6
+            | Operation::Dup7
+            | Operation::Dup9
+            | Operation::Dup11
+            | Operation::Dup13
+            | Operation::Dup15
+            | Operation::Swap
+            | Operation::SwapW
+            | Operation::SwapW2
+            | Operation::SwapW3
+            | Operation::SwapDW
+            | Operation::Emit
+            | Operation::MovUp2
+            | Operation::MovUp3
+            | Operation::MovUp4
+            | Operation::MovUp5
+            | Operation::MovUp6
+            | Operation::MovUp7
+            | Operation::MovUp8
+            | Operation::MovDn2
+            | Operation::MovDn3
+            | Operation::MovDn4
+            | Operation::MovDn5
+            | Operation::MovDn6
+            | Operation::MovDn7
+            | Operation::MovDn8
+            | Operation::CSwap
+            | Operation::CSwapW
+            | Operation::AdvPop
+            | Operation::AdvPopW
+            | Operation::MLoadW
+            | Operation::MStoreW
+            | Operation::MLoad
+            | Operation::MStore
+            | Operation::MStream
+            | Operation::Pipe
+            | Operation::CryptoStream
+            | Operation::HPerm
+            | Operation::MrUpdate
+            | Operation::FriE2F4
+            | Operation::HornerBase
+            | Operation::HornerExt
+            | Operation::EvalCircuit
+            | Operation::LogPrecompile => (),
+        }
+        size
+    }
+}
+
 impl Deserializable for Operation {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let op_code = source.read_u8()?;

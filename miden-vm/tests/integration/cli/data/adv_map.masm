@@ -5,21 +5,21 @@ adv_map C([3,4,5,6]) = [4]
 begin
   push.A
   adv.push_mapval
-  adv_push.1
+  adv_push
   push.2
   assert_eq
   dropw
 
   push.0x0200000000000000030000000000000004000000000000000500000000000000
   adv.push_mapval
-  adv_push.1
+  adv_push
   push.3
   assert_eq
   dropw
 
   push.C
   adv.push_mapval
-  adv_push.1
+  adv_push
   push.4
   assert_eq
   dropw

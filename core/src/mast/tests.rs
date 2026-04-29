@@ -1,10 +1,10 @@
 use alloc::vec::Vec;
 
-use miden_crypto::{WORD_SIZE, rand::test_utils::prng_array};
+use miden_crypto::rand::test_utils::prng_array;
 use proptest::prelude::*;
 
 use crate::{
-    Felt, Word,
+    Felt, WORD_SIZE, Word,
     chiplets::hasher,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, DynNode, DynNodeBuilder, JoinNodeBuilder,
@@ -58,9 +58,9 @@ fn test_decorator_storage_consistency_with_block_iterator() {
 
     // Create operations
     let operations = vec![
-        Operation::Push(Felt::new(1)),
+        Operation::Push(Felt::new_unchecked(1)),
         Operation::Add,
-        Operation::Push(Felt::new(2)),
+        Operation::Push(Felt::new_unchecked(2)),
         Operation::Mul,
     ];
 
@@ -144,7 +144,7 @@ fn test_decorator_storage_consistency_with_empty_block() {
     let mut forest = MastForest::new();
 
     // Create operations without decorators
-    let operations = vec![Operation::Push(Felt::new(1)), Operation::Add];
+    let operations = vec![Operation::Push(Felt::new_unchecked(1)), Operation::Add];
 
     // Add block to forest using BasicBlockNodeBuilder with no decorators
     let block_id = BasicBlockNodeBuilder::new(operations, vec![])
@@ -181,7 +181,7 @@ fn test_decorator_storage_consistency_with_multiple_blocks() {
     let deco2 = forest.add_decorator(Decorator::Trace(2)).unwrap();
 
     // Create first block
-    let operations1 = vec![Operation::Push(Felt::new(1)), Operation::Add];
+    let operations1 = vec![Operation::Push(Felt::new_unchecked(1)), Operation::Add];
     let decorators1 = vec![(0, deco1), (1, deco2)];
     let block_id1 = BasicBlockNodeBuilder::new(operations1, decorators1)
         .add_to_forest(&mut forest)
@@ -191,7 +191,7 @@ fn test_decorator_storage_consistency_with_multiple_blocks() {
     let deco3 = forest.add_decorator(Decorator::Debug(DebugOptions::StackTop(99))).unwrap();
 
     // Create second block
-    let operations2 = vec![Operation::Push(Felt::new(2)), Operation::Mul];
+    let operations2 = vec![Operation::Push(Felt::new_unchecked(2)), Operation::Mul];
     let decorators2 = vec![(0, deco3)];
     let block_id2 = BasicBlockNodeBuilder::new(operations2, decorators2)
         .add_to_forest(&mut forest)
@@ -243,7 +243,7 @@ fn test_decorator_storage_after_clear_debug_info() {
 
     let deco1 = forest.add_decorator(Decorator::Trace(1)).unwrap();
     let deco2 = forest.add_decorator(Decorator::Trace(2)).unwrap();
-    let operations = vec![Operation::Push(Felt::new(1)), Operation::Add];
+    let operations = vec![Operation::Push(Felt::new_unchecked(1)), Operation::Add];
     let block_id = BasicBlockNodeBuilder::new(operations, vec![(0, deco1), (1, deco2)])
         .add_to_forest(&mut forest)
         .unwrap();
@@ -267,7 +267,7 @@ fn test_clear_debug_info_edge_cases() {
     assert_eq!(forest.debug_info.op_decorator_storage().num_nodes(), 0);
 
     // Idempotent: clearing twice should be safe
-    let operations = vec![Operation::Push(Felt::new(1)), Operation::Add];
+    let operations = vec![Operation::Push(Felt::new_unchecked(1)), Operation::Add];
     let block_id = BasicBlockNodeBuilder::new(operations, vec![])
         .add_to_forest(&mut forest)
         .unwrap();
@@ -283,7 +283,7 @@ fn test_clear_debug_info_multiple_node_types() {
     let mut forest = MastForest::new();
     let deco = forest.add_decorator(Decorator::Trace(1)).unwrap();
     let block_id = BasicBlockNodeBuilder::new(
-        vec![Operation::Push(Felt::new(1)), Operation::Add],
+        vec![Operation::Push(Felt::new_unchecked(1)), Operation::Add],
         vec![(0, deco)],
     )
     .add_to_forest(&mut forest)
@@ -296,6 +296,31 @@ fn test_clear_debug_info_multiple_node_types() {
 
     assert_eq!(forest.debug_info.op_decorator_storage().num_nodes(), 3);
     assert!(forest.decorator_links_for_node(block_id).unwrap().into_iter().next().is_none());
+}
+
+#[test]
+fn test_compact_after_clear_debug_info_does_not_materialize_empty_node_decorators() {
+    let mut forest = MastForest::new();
+    let decorator = forest.add_decorator(Decorator::Trace(1)).unwrap();
+    let block_id = BasicBlockNodeBuilder::new(
+        vec![Operation::Push(Felt::new_unchecked(1)), Operation::Add],
+        vec![(0, decorator)],
+    )
+    .with_before_enter(vec![decorator])
+    .add_to_forest(&mut forest)
+    .unwrap();
+    let call_id = CallNodeBuilder::new(block_id).add_to_forest(&mut forest).unwrap();
+    forest.make_root(call_id);
+
+    forest.clear_debug_info();
+    let (compacted, _) = forest.compact();
+
+    assert!(compacted.debug_info.node_decorator_storage().is_empty());
+    for node_idx in 0..compacted.nodes().len() {
+        let node_id = crate::mast::MastNodeId::new_unchecked(node_idx as u32);
+        assert!(compacted.before_enter_decorators(node_id).is_empty());
+        assert!(compacted.after_exit_decorators(node_id).is_empty());
+    }
 }
 
 #[test]
@@ -323,8 +348,8 @@ fn test_mast_forest_roundtrip_with_basic_blocks_and_decorators() {
 
     // Block 2: Complex block with multiple decorators at same operation index
     let operations2 = vec![
-        Operation::Push(Felt::new(1)),
-        Operation::Push(Felt::new(2)),
+        Operation::Push(Felt::new_unchecked(1)),
+        Operation::Push(Felt::new_unchecked(2)),
         Operation::Mul,
         Operation::Drop,
     ];
@@ -449,8 +474,11 @@ fn test_mast_forest_serde_converts_linked_to_owned_decorators() {
     let deco2 = forest.add_decorator(Decorator::Trace(2)).unwrap();
 
     // Create operations with decorators
-    let operations =
-        vec![Operation::Push(Felt::new(1)), Operation::Add, Operation::Push(Felt::new(2))];
+    let operations = vec![
+        Operation::Push(Felt::new_unchecked(1)),
+        Operation::Add,
+        Operation::Push(Felt::new_unchecked(2)),
+    ];
     let decorators = vec![(0, deco1), (2, deco2)];
 
     // Add block to forest - this will create Linked decorators
@@ -536,8 +564,11 @@ fn test_mast_forest_serializable_converts_linked_to_owned_decorators() {
     let deco2 = forest.add_decorator(Decorator::Trace(2)).unwrap();
 
     // Create operations with decorators
-    let operations =
-        vec![Operation::Push(Felt::new(1)), Operation::Add, Operation::Push(Felt::new(2))];
+    let operations = vec![
+        Operation::Push(Felt::new_unchecked(1)),
+        Operation::Add,
+        Operation::Push(Felt::new_unchecked(2)),
+    ];
     let decorators = vec![(0, deco1), (2, deco2)];
 
     // Add block to forest - this will create Linked decorators
@@ -728,12 +759,14 @@ fn test_mast_forest_compaction_comprehensive() {
     forest.make_root(bb_with_op_deco);
 
     // === Join nodes with before-enter decorators ===
-    let child1 = BasicBlockNodeBuilder::new(vec![Operation::Push(Felt::new(1))], Vec::new())
-        .add_to_forest(&mut forest)
-        .unwrap();
-    let child2 = BasicBlockNodeBuilder::new(vec![Operation::Push(Felt::new(2))], Vec::new())
-        .add_to_forest(&mut forest)
-        .unwrap();
+    let child1 =
+        BasicBlockNodeBuilder::new(vec![Operation::Push(Felt::new_unchecked(1))], Vec::new())
+            .add_to_forest(&mut forest)
+            .unwrap();
+    let child2 =
+        BasicBlockNodeBuilder::new(vec![Operation::Push(Felt::new_unchecked(2))], Vec::new())
+            .add_to_forest(&mut forest)
+            .unwrap();
     let join_no_deco = JoinNodeBuilder::new([child1, child2]).add_to_forest(&mut forest).unwrap();
     let join_with_before_deco = JoinNodeBuilder::new([child1, child2])
         .with_before_enter(vec![debug_deco])
@@ -747,7 +780,7 @@ fn test_mast_forest_compaction_comprehensive() {
         .add_to_forest(&mut forest)
         .unwrap();
     let split_child2 =
-        BasicBlockNodeBuilder::new(vec![Operation::Assert(Felt::new(1))], Vec::new())
+        BasicBlockNodeBuilder::new(vec![Operation::Assert(Felt::new_unchecked(1))], Vec::new())
             .add_to_forest(&mut forest)
             .unwrap();
     let split_no_deco = SplitNodeBuilder::new([split_child1, split_child2])
@@ -837,7 +870,7 @@ fn test_mast_forest_get_assembly_op_basic_block() {
     let asm_op_id = forest.debug_info.add_asm_op(assembly_op.clone()).unwrap();
 
     // Add a basic block node
-    let operations = vec![Operation::Push(Felt::new(1)), Operation::Add];
+    let operations = vec![Operation::Push(Felt::new_unchecked(1)), Operation::Add];
     let node_id = BasicBlockNodeBuilder::new(operations, vec![])
         .add_to_forest(&mut forest)
         .unwrap();
@@ -866,8 +899,8 @@ fn test_mast_forest_get_assembly_op_with_target_index() {
 
     // Add a basic block node with 5 operations
     let operations = vec![
-        Operation::Push(Felt::new(1)),
-        Operation::Push(Felt::new(2)),
+        Operation::Push(Felt::new_unchecked(1)),
+        Operation::Push(Felt::new_unchecked(2)),
         Operation::Mul,
         Operation::Add,
         Operation::Drop,
@@ -921,7 +954,7 @@ fn test_mast_forest_get_assembly_op_all_node_types() {
     let asm_op_id = forest.debug_info.add_asm_op(assembly_op.clone()).unwrap();
 
     // Create a basic block with an AssemblyOp registered for its operations
-    let operations = vec![Operation::Push(Felt::new(1)), Operation::Add];
+    let operations = vec![Operation::Push(Felt::new_unchecked(1)), Operation::Add];
     let bb_node_id = BasicBlockNodeBuilder::new(operations, vec![])
         .add_to_forest(&mut forest)
         .unwrap();
@@ -936,9 +969,10 @@ fn test_mast_forest_get_assembly_op_all_node_types() {
 
     // Create some control flow nodes using this basic block
     let call_node = CallNodeBuilder::new(bb_node_id).add_to_forest(&mut forest).unwrap();
-    let join_child2 = BasicBlockNodeBuilder::new(vec![Operation::Push(Felt::new(2))], vec![])
-        .add_to_forest(&mut forest)
-        .unwrap();
+    let join_child2 =
+        BasicBlockNodeBuilder::new(vec![Operation::Push(Felt::new_unchecked(2))], vec![])
+            .add_to_forest(&mut forest)
+            .unwrap();
     let _join_node = JoinNodeBuilder::new([bb_node_id, join_child2])
         .add_to_forest(&mut forest)
         .unwrap();
@@ -962,7 +996,7 @@ fn test_mast_forest_get_assembly_comprehensive_edge_cases() {
     let mut forest = MastForest::new();
 
     // Test 1: Node with no AssemblyOps registered should return None
-    let operations = vec![Operation::Push(Felt::new(1)), Operation::Add];
+    let operations = vec![Operation::Push(Felt::new_unchecked(1)), Operation::Add];
     let node_id = BasicBlockNodeBuilder::new(operations.clone(), vec![])
         .add_to_forest(&mut forest)
         .unwrap();
@@ -989,7 +1023,7 @@ fn test_mast_forest_get_assembly_comprehensive_edge_cases() {
     let asm_op_id2 = forest.debug_info.add_asm_op(asm_op2.clone()).unwrap();
     let asm_op_id3 = forest.debug_info.add_asm_op(asm_op3.clone()).unwrap();
 
-    let ops_multi = vec![Operation::Push(Felt::new(1)), Operation::Add, Operation::Mul];
+    let ops_multi = vec![Operation::Push(Felt::new_unchecked(1)), Operation::Add, Operation::Mul];
     let node_id3 = BasicBlockNodeBuilder::new(ops_multi, vec![])
         .add_to_forest(&mut forest)
         .unwrap();
@@ -1026,7 +1060,12 @@ fn test_mast_forest_get_assembly_comprehensive_edge_cases() {
     let asm_op_multi = AssemblyOp::new(None, "multi_cycle".into(), 3, "multi_op".into());
     let asm_op_id_multi = forest.debug_info.add_asm_op(asm_op_multi.clone()).unwrap();
 
-    let ops4 = vec![Operation::Push(Felt::new(1)), Operation::Add, Operation::Mul, Operation::Neg];
+    let ops4 = vec![
+        Operation::Push(Felt::new_unchecked(1)),
+        Operation::Add,
+        Operation::Mul,
+        Operation::Neg,
+    ];
     let node_id4 = BasicBlockNodeBuilder::new(ops4, vec![]).add_to_forest(&mut forest).unwrap();
     forest
         .debug_info
@@ -1166,7 +1205,7 @@ fn digest_from_seed(seed: [u8; 32]) -> Word {
     digest.iter_mut().enumerate().for_each(|(i, d)| {
         *d = <[u8; 8]>::try_from(&seed[i * 8..(i + 1) * 8])
             .map(u64::from_le_bytes)
-            .map(Felt::new)
+            .map(Felt::new_unchecked)
             .unwrap()
     });
     digest.into()

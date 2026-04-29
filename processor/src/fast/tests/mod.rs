@@ -84,7 +84,7 @@ fn stack_get_word_safe_partial_read() {
     // elements at indices 15, 16, 17, 18. Only index 15 is valid; the rest should be ZERO.
     let word = processor.stack_get_word_safe(15);
     // Index 15 is the bottom of the stack (value 16, since inputs are in stack order: top first).
-    assert_eq!(word, [Felt::new(16), ZERO, ZERO, ZERO].into());
+    assert_eq!(word, [Felt::new_unchecked(16), ZERO, ZERO, ZERO].into());
 }
 
 #[test]
@@ -383,8 +383,10 @@ fn test_frie2f4() {
     ])
     .unwrap();
 
-    let program =
-        simple_program_with_ops(vec![Operation::Push(Felt::new(42_u64)), Operation::FriE2F4]);
+    let program = simple_program_with_ops(vec![
+        Operation::Push(Felt::new_unchecked(42_u64)),
+        Operation::FriE2F4,
+    ]);
 
     // fast processor
     let fast_processor = FastProcessor::new(stack_inputs);
@@ -609,6 +611,33 @@ fn test_continuation_stack_limit_exceeded() {
     let err = processor.execute_sync(&program, &mut host).unwrap_err();
 
     assert_matches!(err, ExecutionError::Internal(msg) if msg.contains("continuation stack"));
+}
+
+/// Tests that a continuation stack size exactly equal to `max_num_continuations` succeeds.
+#[test]
+fn test_continuation_stack_limit_exactly_max_continuations_succeeds() {
+    let mut host = DefaultHost::default();
+
+    let program = {
+        let mut forest = MastForest::new();
+
+        let leaf_id = BasicBlockNodeBuilder::new(vec![Operation::Noop], Vec::new())
+            .add_to_forest(&mut forest)
+            .unwrap();
+
+        let root = JoinNodeBuilder::new([leaf_id, leaf_id]).add_to_forest(&mut forest).unwrap();
+        forest.make_root(root);
+        Program::new(forest.into(), root)
+    };
+
+    // A single join peaks at three continuations after the join start step:
+    // FinishJoin(root), StartNode(second), StartNode(first).
+    let options = ExecutionOptions::default().with_max_num_continuations(3);
+
+    let processor =
+        FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options);
+
+    processor.execute_sync(&program, &mut host).unwrap();
 }
 
 // TEST HELPERS

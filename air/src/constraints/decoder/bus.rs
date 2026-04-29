@@ -769,7 +769,7 @@ pub fn enforce_op_group_table_constraint<AB>(
     let op_code_next =
         OP_BIT_WEIGHTS.iter().enumerate().fold(AB::Expr::ZERO, |acc, (i, weight)| {
             let bit = next.decoder.op_bits[i];
-            acc + bit * Felt::new(*weight as u64)
+            acc + bit * Felt::new_unchecked(*weight as u64)
         });
 
     // Removal value formula:

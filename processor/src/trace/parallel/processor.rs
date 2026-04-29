@@ -339,7 +339,7 @@ impl StackInterface for ReplayProcessor {
     }
 
     fn increment_size(&mut self) -> Result<(), ExecutionError> {
-        const SENTINEL_VALUE: Felt = Felt::new(Felt::ORDER_U64 - 1);
+        const SENTINEL_VALUE: Felt = Felt::new_unchecked(Felt::ORDER_U64 - 1);
 
         // push the last element on the overflow table
         {

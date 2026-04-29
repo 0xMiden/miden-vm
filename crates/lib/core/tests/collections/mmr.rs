@@ -70,7 +70,7 @@ fn test_mmr_get_single_peak() -> Result<(), MerkleError> {
     let merkle_root = merkle_tree.root();
     let merkle_store = MerkleStore::from(&merkle_tree);
     let mut builder = AdviceStackBuilder::new();
-    builder.push_for_adv_loadw(merkle_root);
+    builder.push_word(merkle_root);
     let advice_stack = builder.build_vec_u64();
 
     for pos in 0..(leaves.len() as u64) {
@@ -117,8 +117,8 @@ fn test_mmr_get_two_peaks() -> Result<(), MerkleError> {
     merkle_store.extend(merkle_tree2.inner_nodes());
 
     let mut builder = AdviceStackBuilder::new();
-    builder.push_for_adv_loadw(merkle_root1);
-    builder.push_for_adv_loadw(merkle_root2);
+    builder.push_word(merkle_root1);
+    builder.push_word(merkle_root2);
     let advice_stack = builder.build_vec_u64();
 
     let examples = [
@@ -182,7 +182,7 @@ fn test_mmr_tree_with_one_element() -> Result<(), MerkleError> {
 
     // Test case for single element MMR
     let mut builder = AdviceStackBuilder::new();
-    builder.push_for_adv_loadw(merkle_root3);
+    builder.push_word(merkle_root3);
     let advice_stack = builder.build_vec_u64();
     let source = format!(
         "
@@ -204,9 +204,9 @@ fn test_mmr_tree_with_one_element() -> Result<(), MerkleError> {
 
     // Test case for the single element tree in a MMR with multiple trees
     let mut builder = AdviceStackBuilder::new();
-    builder.push_for_adv_loadw(merkle_root1);
-    builder.push_for_adv_loadw(merkle_root2);
-    builder.push_for_adv_loadw(merkle_root3);
+    builder.push_word(merkle_root1);
+    builder.push_word(merkle_root2);
+    builder.push_word(merkle_root3);
     let advice_stack = builder.build_vec_u64();
     let num_leaves = leaves1.len() + leaves2.len() + leaves3.len();
     let source = format!(
@@ -241,8 +241,8 @@ fn test_mmr_unpack() {
         // 3 peaks. These hashes are invalid, we can't produce data for any of these peaks (only
         // for testing)
         [ZERO, ZERO, ZERO, ONE],
-        [ZERO, ZERO, ZERO, Felt::new(2)],
-        [ZERO, ZERO, ZERO, Felt::new(3)],
+        [ZERO, ZERO, ZERO, Felt::new_unchecked(2)],
+        [ZERO, ZERO, ZERO, Felt::new_unchecked(3)],
         // Padding, the MMR is padded to a minimum length of 16
         EMPTY_WORD.into(),
         EMPTY_WORD.into(),
@@ -270,7 +270,7 @@ fn test_mmr_unpack() {
     let store = MerkleStore::new();
 
     let mut mmr_mem_repr: Vec<Felt> = Vec::with_capacity(peaks.len() + 1);
-    mmr_mem_repr.extend_from_slice(&[Felt::new(number_of_leaves), ZERO, ZERO, ZERO]);
+    mmr_mem_repr.extend_from_slice(&[Felt::new_unchecked(number_of_leaves), ZERO, ZERO, ZERO]);
     mmr_mem_repr.extend_from_slice(&peaks.as_slice().concat());
 
     // Advice map key is the hash word (positions 0-3 on stack)
@@ -304,8 +304,8 @@ fn test_mmr_unpack_invalid_hash() {
         // 3 peaks. These hashes are invalid, we can't produce data for any of these peaks (only
         // for testing)
         [ZERO, ZERO, ZERO, ONE],
-        [ZERO, ZERO, ZERO, Felt::new(2)],
-        [ZERO, ZERO, ZERO, Felt::new(3)],
+        [ZERO, ZERO, ZERO, Felt::new_unchecked(2)],
+        [ZERO, ZERO, ZERO, Felt::new_unchecked(3)],
         // Padding, the MMR is padded to a minimum length o 16
         EMPTY_WORD.into(),
         EMPTY_WORD.into(),
@@ -337,7 +337,7 @@ fn test_mmr_unpack_invalid_hash() {
     hash_data[0][0] += ONE;
 
     let mut map_data: Vec<Felt> = Vec::with_capacity(hash_data.len() + 1);
-    map_data.extend_from_slice(&[Felt::new(0b10101), ZERO, ZERO, ZERO]); // 3 peaks, 21 leaves
+    map_data.extend_from_slice(&[Felt::new_unchecked(0b10101), ZERO, ZERO, ZERO]); // 3 peaks, 21 leaves
     map_data.extend_from_slice(&hash_data.as_slice().concat());
 
     let hash_key = hash;
@@ -364,23 +364,23 @@ fn test_mmr_unpack_large_mmr() {
         // These hashes are invalid, we can't produce data for any of these peaks (only for
         // testing)
         [ZERO, ZERO, ZERO, ONE],
-        [ZERO, ZERO, ZERO, Felt::new(2)],
-        [ZERO, ZERO, ZERO, Felt::new(3)],
-        [ZERO, ZERO, ZERO, Felt::new(4)],
-        [ZERO, ZERO, ZERO, Felt::new(5)],
-        [ZERO, ZERO, ZERO, Felt::new(6)],
-        [ZERO, ZERO, ZERO, Felt::new(7)],
-        [ZERO, ZERO, ZERO, Felt::new(8)],
-        [ZERO, ZERO, ZERO, Felt::new(9)],
-        [ZERO, ZERO, ZERO, Felt::new(10)],
-        [ZERO, ZERO, ZERO, Felt::new(11)],
-        [ZERO, ZERO, ZERO, Felt::new(12)],
-        [ZERO, ZERO, ZERO, Felt::new(13)],
-        [ZERO, ZERO, ZERO, Felt::new(14)],
-        [ZERO, ZERO, ZERO, Felt::new(15)],
-        [ZERO, ZERO, ZERO, Felt::new(16)],
+        [ZERO, ZERO, ZERO, Felt::new_unchecked(2)],
+        [ZERO, ZERO, ZERO, Felt::new_unchecked(3)],
+        [ZERO, ZERO, ZERO, Felt::new_unchecked(4)],
+        [ZERO, ZERO, ZERO, Felt::new_unchecked(5)],
+        [ZERO, ZERO, ZERO, Felt::new_unchecked(6)],
+        [ZERO, ZERO, ZERO, Felt::new_unchecked(7)],
+        [ZERO, ZERO, ZERO, Felt::new_unchecked(8)],
+        [ZERO, ZERO, ZERO, Felt::new_unchecked(9)],
+        [ZERO, ZERO, ZERO, Felt::new_unchecked(10)],
+        [ZERO, ZERO, ZERO, Felt::new_unchecked(11)],
+        [ZERO, ZERO, ZERO, Felt::new_unchecked(12)],
+        [ZERO, ZERO, ZERO, Felt::new_unchecked(13)],
+        [ZERO, ZERO, ZERO, Felt::new_unchecked(14)],
+        [ZERO, ZERO, ZERO, Felt::new_unchecked(15)],
+        [ZERO, ZERO, ZERO, Felt::new_unchecked(16)],
         // Padding, peaks greater than 16 are padded to an even number
-        [ZERO, ZERO, ZERO, Felt::new(17)],
+        [ZERO, ZERO, ZERO, Felt::new_unchecked(17)],
         EMPTY_WORD.into(),
     ];
     let peaks_hash = hash_elements(&peaks.concat());
@@ -396,7 +396,7 @@ fn test_mmr_unpack_large_mmr() {
     let store = MerkleStore::new();
 
     let mut mmr_mem_repr: Vec<Felt> = Vec::with_capacity(peaks.len() + 1);
-    mmr_mem_repr.extend_from_slice(&[Felt::new(number_of_leaves), ZERO, ZERO, ZERO]);
+    mmr_mem_repr.extend_from_slice(&[Felt::new_unchecked(number_of_leaves), ZERO, ZERO, ZERO]);
     mmr_mem_repr.extend_from_slice(&peaks.as_slice().concat());
 
     // Advice map key is the hash word (positions 0-3 on stack)
@@ -437,9 +437,9 @@ fn test_mmr_unpack_large_mmr() {
 #[test]
 fn test_mmr_pack_roundtrip() {
     let mut mmr = Mmr::new();
-    mmr.add(init_merkle_leaf(1));
-    mmr.add(init_merkle_leaf(2));
-    mmr.add(init_merkle_leaf(3));
+    mmr.add(init_merkle_leaf(1)).unwrap();
+    mmr.add(init_merkle_leaf(2)).unwrap();
+    mmr.add(init_merkle_leaf(3)).unwrap();
 
     let accumulator = mmr.peaks();
     let hash = accumulator.hash_peaks();
@@ -456,7 +456,12 @@ fn test_mmr_pack_roundtrip() {
     let mut hash_data = accumulator.peaks().to_vec();
     hash_data.resize(16, Word::default());
     let mut map_data: Vec<Felt> = Vec::with_capacity(hash_data.len() + 1);
-    map_data.extend_from_slice(&[Felt::new(accumulator.num_leaves() as u64), ZERO, ZERO, ZERO]);
+    map_data.extend_from_slice(&[
+        Felt::new_unchecked(accumulator.num_leaves() as u64),
+        ZERO,
+        ZERO,
+        ZERO,
+    ]);
     map_data.extend_from_slice(Word::words_as_elements(&hash_data).as_ref());
 
     // Advice map key is the hash word
@@ -511,7 +516,7 @@ fn test_mmr_pack() {
     #[rustfmt::skip]
     hash_data.extend_from_slice( &[
         ONE, ZERO, ZERO, ZERO, // peak1
-        Felt::new(2), ZERO, ZERO, ZERO, // peak2
+        Felt::new_unchecked(2), ZERO, ZERO, ZERO, // peak2
     ]);
     hash_data.resize(16 * 4, ZERO); // padding data
 
@@ -521,7 +526,7 @@ fn test_mmr_pack() {
     let hash_key = hash;
 
     let mut expect_data: Vec<Felt> = Vec::new();
-    expect_data.extend_from_slice(&[Felt::new(3), ZERO, ZERO, ZERO]); // num_leaves
+    expect_data.extend_from_slice(&[Felt::new_unchecked(3), ZERO, ZERO, ZERO]); // num_leaves
     expect_data.extend_from_slice(&hash_data);
 
     let (execution_output, _) = build_test!(source).execute_for_output().unwrap();
@@ -575,8 +580,18 @@ fn test_mmr_two() {
     );
 
     let mut mmr = Mmr::new();
-    mmr.add([ONE, Felt::new(2), Felt::new(3), Felt::new(4)].into());
-    mmr.add([Felt::new(5), Felt::new(6), Felt::new(7), Felt::new(8)].into());
+    mmr.add([ONE, Felt::new_unchecked(2), Felt::new_unchecked(3), Felt::new_unchecked(4)].into())
+        .unwrap();
+    mmr.add(
+        [
+            Felt::new_unchecked(5),
+            Felt::new_unchecked(6),
+            Felt::new_unchecked(7),
+            Felt::new_unchecked(8),
+        ]
+        .into(),
+    )
+    .unwrap();
 
     let accumulator = mmr.peaks();
     let num_leaves = accumulator.num_leaves() as u64;
@@ -673,7 +688,7 @@ fn test_add_mmr_large() {
 
     let mut mmr = Mmr::new();
     for i in 1u64..=7 {
-        mmr.add(init_merkle_leaf(i));
+        mmr.add(init_merkle_leaf(i)).unwrap();
     }
 
     let accumulator = mmr.peaks();
@@ -715,7 +730,7 @@ fn debug_mmr_peaks_vs_vm_memory() {
     let mut mmr = Mmr::new();
     for i in 1u64..=7 {
         // Use canonical leaf representation consistent with Merkle trees.
-        mmr.add(init_merkle_leaf(i));
+        mmr.add(init_merkle_leaf(i)).unwrap();
     }
     let accumulator = mmr.peaks();
     let rust_peaks = accumulator.peaks();
@@ -733,7 +748,7 @@ fn debug_mmr_peaks_vs_vm_memory() {
             let addr = mmr_ptr + (word_idx as u32) * 4 + limb;
             let v = execution_output
                 .memory
-                .read_element(ContextId::root(), Felt::new(addr as u64))
+                .read_element(ContextId::root(), Felt::new_unchecked(addr as u64))
                 .unwrap()
                 .as_canonical_u64();
             vm_mem.push(v);
@@ -752,7 +767,7 @@ fn test_mmr_large_add_roundtrip() {
     // Build the initial 7-leaf MMR using the canonical leaf encoding.
     let mut mmr = Mmr::new();
     for i in 1u64..=7 {
-        mmr.add(init_merkle_leaf(i));
+        mmr.add(init_merkle_leaf(i)).unwrap();
     }
 
     let old_accumulator = mmr.peaks();
@@ -772,7 +787,7 @@ fn test_mmr_large_add_roundtrip() {
 
     let mut map_data: Vec<Felt> = Vec::with_capacity(hash_data.len() + 1);
     let num_leaves = old_accumulator.num_leaves() as u64;
-    map_data.extend_from_slice(&[Felt::new(num_leaves), ZERO, ZERO, ZERO]);
+    map_data.extend_from_slice(&[Felt::new_unchecked(num_leaves), ZERO, ZERO, ZERO]);
     map_data.extend_from_slice(Word::words_as_elements(&hash_data));
 
     // Advice map key is the hash word
@@ -793,7 +808,7 @@ fn test_mmr_large_add_roundtrip() {
     "
     );
 
-    mmr.add(init_merkle_leaf(8));
+    mmr.add(init_merkle_leaf(8)).unwrap();
 
     let new_accumulator = mmr.peaks();
     let num_leaves = new_accumulator.num_leaves() as u64;

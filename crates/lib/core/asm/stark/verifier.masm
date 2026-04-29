@@ -60,11 +60,14 @@ pub proc verify
     exec.public_inputs::process_public_inputs
     # => [...]
 
+    # Observe the AIR instance shape and discard the unused instance challenge.
+    exec.random_coin::observe_trace_height_and_discard_instance_challenge
+    # => [...]
+
     # Load main trace commitment and re-seed with it.
     #
     # SAFETY: reseed_direct bypasses the duplex input buffer and requires input_len=0.
-    # The process_public_inputs implementation (dispatched via dynexec) must guarantee
-    # this postcondition.
+    # The preceding trace-height observation helper guarantees this postcondition.
     padw adv_loadw
     exec.constants::main_trace_com_ptr mem_storew_le
     # => [main_trace_commitment, ...]

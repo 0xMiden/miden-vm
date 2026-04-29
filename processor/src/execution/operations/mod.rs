@@ -23,9 +23,9 @@ pub(crate) use eval_circuit::eval_circuit_impl;
 // ================================================================================================
 
 /// WORD_SIZE, but as a `Felt`.
-const WORD_SIZE_FELT: Felt = Felt::new(4);
+const WORD_SIZE_FELT: Felt = Felt::new_unchecked(4);
 /// The size of a double-word.
-const DOUBLE_WORD_SIZE: Felt = Felt::new(8);
+const DOUBLE_WORD_SIZE: Felt = Felt::new_unchecked(8);
 
 // OPERATION HANDLER
 // ================================================================================================

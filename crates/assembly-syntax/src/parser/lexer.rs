@@ -686,7 +686,7 @@ fn parse_hex<'input>(
                         kind: LiteralErrorKind::FeltOverflow,
                     });
                 }
-                *element = Felt::new(value);
+                *element = Felt::new_unchecked(value);
             }
             Ok(Token::HexWord(WordValue(word)))
         },
@@ -726,7 +726,7 @@ pub fn shrink_u64_hex(n: u64) -> IntValue {
     } else if n <= (u32::MAX as u64) {
         IntValue::U32(n as u32)
     } else {
-        IntValue::Felt(Felt::new(n))
+        IntValue::Felt(Felt::new_unchecked(n))
     }
 }
 
