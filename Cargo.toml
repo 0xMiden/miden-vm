@@ -99,7 +99,6 @@ tracing         = { version = "0.1", default-features = false, features = ["attr
 
 loom = "0.7"
 miette = { package = "miden-miette", version = "8.0", default-features = false }
-num-bigint = "0.4"
 pretty_assertions = { version = "1.4", default-features = false }
 proc-macro2 = "1.0"
 quote = "1.0"

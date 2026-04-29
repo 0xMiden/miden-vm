@@ -907,7 +907,7 @@ impl Serializable for Operation {
 impl Operation {
     /// Returns the serialized size of this operation in bytes.
     pub(crate) fn encoded_size(&self) -> usize {
-        let mut size = core::mem::size_of::<u8>();
+        let mut size = size_of::<u8>();
         match self {
             Operation::Assert(err_code)
             | Operation::MpVerify(err_code)
