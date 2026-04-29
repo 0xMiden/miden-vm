@@ -1,0 +1,26 @@
+[package]
+name = "miden-format"
+version.workspace = true
+description = "Formatter for the Miden Assembly language"
+documentation = "https://docs.rs/miden-format"
+readme = "README.md"
+categories = ["compilers"]
+keywords = ["assembly", "formatter", "miden"]
+license.workspace = true
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "miden-format"
+path = "src/main.rs"
+bench = false
+doctest = false
+
+[dependencies]
+miden-assembly-syntax-cst = { workspace = true, features = ["std"] }
+miden-debug-types = { workspace = true, features = ["std"] }
+clap.workspace = true
+thiserror = { workspace = true, features = ["std"] }
