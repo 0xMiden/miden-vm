@@ -8,25 +8,54 @@ use miden_utils_testing::proptest::prelude::*;
 #[test]
 fn wrapping_mul_regression_vectors() {
     for (a, b) in regression_pairs() {
-        assert_binary_u256_op("wrapping_mul", a, b, &a.wrapping_mul(b).to_le_limbs());
+        assert_wrapping_mul(a, b);
     }
 }
 
 #[test]
-fn wrapping_mul_documented_stack_contract() {
+fn wrapping_mul_consumed_result_restores_min_stack_depth() {
     let source = "
         use miden::core::math::u256
         begin
             exec.u256::wrapping_mul
+            dropw dropw
             sdepth push.16 assert_eq
         end";
 
     let a = U256::from_le_u32_limbs([11, 22, 33, 44, 55, 66, 77, 88]);
     let b = U256::from_le_u32_limbs([101, 202, 303, 404, 505, 606, 707, 808]);
     let operands = [b.to_le_limbs(), a.to_le_limbs()].concat();
-    let expected = a.wrapping_mul(b).to_le_limbs();
 
-    build_test!(source, &operands).expect_stack(&expected);
+    build_test!(source, &operands).execute().unwrap();
+}
+
+#[test]
+fn wrapping_mul_preserves_caller_stack() {
+    let a = [11, 22, 33, 44, 55, 66, 77, 88];
+    let b = [101, 202, 303, 404, 505, 606, 707, 808];
+    let sentinels = [
+        9001, 9002, 9003, 9004, 9005, 9006, 9007, 9008, 9009, 9010, 9011, 9012, 9013, 9014, 9015,
+        9016,
+    ];
+
+    let source = format!(
+        "
+        use miden::core::math::u256
+        begin
+            push.{sentinels}
+            push.{a}
+            push.{b}
+            exec.u256::wrapping_mul
+            dropw dropw
+            {assert_sentinels}
+        end",
+        sentinels = push_masm_values(&sentinels),
+        a = push_masm_values(&a),
+        b = push_masm_values(&b),
+        assert_sentinels = assert_stack_words(&sentinels),
+    );
+
+    build_test!(&source).execute().unwrap();
 }
 
 #[test]
@@ -345,6 +374,34 @@ fn assert_binary_u256_op(op: &str, a: U256, b: U256, expected: &[u64]) {
 
     let operands = [b.to_le_limbs(), a.to_le_limbs()].concat();
     build_test!(&source, &operands).expect_stack(expected);
+}
+
+fn assert_wrapping_mul(a: U256, b: U256) {
+    let expected = a.wrapping_mul(b).to_le_limbs();
+    let source = format!(
+        "
+        use miden::core::math::u256
+        begin
+            exec.u256::wrapping_mul
+            {assert_expected}
+        end",
+        assert_expected = assert_stack_words(&expected),
+    );
+
+    let operands = [b.to_le_limbs(), a.to_le_limbs()].concat();
+    build_test!(&source, &operands).execute().unwrap();
+}
+
+fn push_masm_values(values: &[u64]) -> String {
+    values.iter().rev().map(u64::to_string).collect::<Vec<_>>().join(".")
+}
+
+fn assert_stack_words(values: &[u64]) -> String {
+    values
+        .chunks(4)
+        .map(|word| format!("push.{} assert_eqw", push_masm_values(word)))
+        .collect::<Vec<_>>()
+        .join("\n            ")
 }
 
 fn assert_unary_u256_op(op: &str, value: U256, expected: &[u64]) {
