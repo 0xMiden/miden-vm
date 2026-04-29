@@ -52,7 +52,7 @@
 - Removed AIR constraint tagging instrumentation, applied a uniform constraint description style across components, and optimized constraint evaluation ([#2856](https://github.com/0xMiden/miden-vm/pull/2856)).
 
 #### Enhancements
-- Added binary artifact compilation to CI to aid `midenup`'s installation spped (#3029).
+- Added binary artifact compilation to CI to aid `midenup`'s installation spped ([#3029](https://github.com/0xMiden/miden-vm/pull/3029)).
 
 ## 0.22.1
 
