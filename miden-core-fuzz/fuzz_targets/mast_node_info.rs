@@ -2,17 +2,17 @@
 //!
 //! MastNodeInfo is a fixed-width structure (8 bytes node entry + 32 bytes digest = 40 bytes).
 //! This target exercises `MastNodeEntry` decoding plus `MastNodeInfo` materialization through the
-//! serialized-view API.
+//! trusted wire-view API.
 //!
 //! Run with: cargo +nightly fuzz run mast_node_info --fuzz-dir miden-core-fuzz
 
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use miden_core::mast::SerializedMastForest;
+use miden_core::mast::MastForestWireView;
 
 fuzz_target!(|data: &[u8]| {
-    let Ok(view) = SerializedMastForest::new(data) else {
+    let Ok(view) = MastForestWireView::new(data) else {
         return;
     };
 

@@ -692,6 +692,7 @@ fn basic_block_builder_rejects_post_last_padded_decorator_index() {
         vec![(num_padded_ops, decorator_id)],
         digest,
     )
+    .unwrap()
     .add_to_forest(&mut forest);
 
     assert!(matches!(
