@@ -9,10 +9,10 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use miden_core::mast::SerializedMastForest;
+use miden_core::mast::MastForestWireView;
 
 fuzz_target!(|data: &[u8]| {
-    let Ok(view) = SerializedMastForest::new(data) else {
+    let Ok(view) = MastForestWireView::new(data) else {
         return;
     };
 

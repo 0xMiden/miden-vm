@@ -13,21 +13,18 @@
 //! ```
 //!
 //! [`UntrustedMastForest::read_from_bytes`] applies default parsing and validation budgets derived
-//! from the input size. Use [`UntrustedMastForest::read_from_bytes_with_budget`] to tune only the
-//! wire-parsing budget, or [`UntrustedMastForest::read_from_bytes_with_budgets`] to tune both:
-//! the parsing budget limits allocations driven directly by wire counts while reading the payload,
-//! and the validation budget limits later helper allocations needed to materialize and check
-//! stripped or hashless payloads.
+//! from the input size. Use [`UntrustedMastForest::read_from_bytes_with_options`] with
+//! [`UntrustedMastForestReadOptions`] to tune either budget: the wire byte budget limits
+//! allocations driven directly by wire counts while reading the payload, and the validation budget
+//! limits later helper allocations needed to materialize and check stripped or hashless payloads.
 //!
 //! ```ignore
-//! use miden_core::mast::UntrustedMastForest;
+//! use miden_core::mast::{UntrustedMastForest, UntrustedMastForestReadOptions};
 //!
-//! // Parsing budget only
-//! let forest = UntrustedMastForest::read_from_bytes_with_budget(&bytes, bytes.len())?
-//!     .validate()?;
-//!
-//! // Parsing budget plus explicit validation-allocation budget
-//! let forest = UntrustedMastForest::read_from_bytes_with_budgets(&bytes, bytes.len(), bytes.len() * 7)?
+//! let options = UntrustedMastForestReadOptions::new()
+//!     .with_wire_byte_budget(bytes.len())
+//!     .with_validation_allocation_budget(bytes.len() * 7);
+//! let forest = UntrustedMastForest::read_from_bytes_with_options(&bytes, options)?
 //!     .validate()?;
 //! ```
 //!
@@ -38,11 +35,10 @@
 //! In practice, the public entry points split into three policies:
 //! - [`MastForest::read_from_bytes`]: trusted full deserialization; rejects hashless payloads and
 //!   trusts serialized non-external digests.
-//! - [`SerializedMastForest::new`]: structural inspection path for local tooling; scans only the
-//!   layout needed for random access and may accept full, stripped, or hashless payloads, but it is
-//!   not an untrusted-validation entry point.
+//! - [`MastForestWireView::new`]: trusted wire-backed cache access; scans only the layout needed
+//!   for random access and rejects hashless payloads.
 //! - [`UntrustedMastForest::read_from_bytes`] and
-//!   [`UntrustedMastForest::read_from_bytes_with_budgets`]: untrusted paths; parse with bounded
+//!   [`UntrustedMastForest::read_from_bytes_with_options`]: untrusted paths; parse with bounded
 //!   readers and require [`UntrustedMastForest::validate`] before use.
 
 use alloc::{
@@ -89,10 +85,13 @@ pub use debuginfo::{
 };
 
 mod serialization;
-pub use serialization::{MastForestView, MastNodeEntry, MastNodeInfo, SerializedMastForest};
+pub use serialization::{
+    AdviceMapView, AdviceValueView, MastForestReadMode, MastForestReadView, MastForestView,
+    MastForestWireView, MastNodeEntry, MastNodeInfo,
+};
 
 mod untrusted;
-pub use untrusted::UntrustedMastForest;
+pub use untrusted::{UntrustedMastForest, UntrustedMastForestReadOptions};
 
 mod merger;
 pub(crate) use merger::MastForestMerger;
