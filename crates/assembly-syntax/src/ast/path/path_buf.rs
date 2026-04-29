@@ -278,12 +278,50 @@ impl<'a> TryFrom<&'a str> for PathBuf {
     }
 }
 
+fn is_canonical_path(path: &Path) -> bool {
+    let mut is_absolute = false;
+    let mut saw_normal_component = false;
+
+    for component in path.components() {
+        let component = match component {
+            Ok(component) => component,
+            Err(_) => return false,
+        };
+
+        match component {
+            PathComponent::Root => is_absolute = true,
+            component @ PathComponent::Normal(_) => {
+                let is_quoted = component.is_quoted();
+                let component = component.as_str();
+                let is_special = matches!(component, Path::KERNEL_PATH | Path::EXEC_PATH);
+                let requires_quoting = !is_special && Ident::requires_quoting(component);
+
+                if !saw_normal_component && !is_absolute && is_special {
+                    return false;
+                }
+
+                if requires_quoting != is_quoted {
+                    return false;
+                }
+
+                saw_normal_component = true;
+            },
+        }
+    }
+
+    true
+}
+
 impl TryFrom<String> for PathBuf {
     type Error = PathError;
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
-        Path::validate(&value)?;
-        Ok(PathBuf { inner: value })
+        let path = Path::validate(&value)?;
+        if is_canonical_path(path) {
+            Ok(Self { inner: value })
+        } else {
+            path.canonicalize()
+        }
     }
 }
 
@@ -572,6 +610,28 @@ mod tests {
             "::\"root_ns:root@1.0.0\"::abi_transform_tx_kernel_get_inputs_4"
         );
         assert_eq!(parent.parent().map(Path::as_str), Some("::\"root_ns:root@1.0.0\""));
+    }
+
+    #[test]
+    fn try_from_string_canonicalizes_like_str() {
+        let from_str = PathBuf::try_from("foo::\"bar\"").unwrap();
+        let from_string = PathBuf::try_from(alloc::string::String::from("foo::\"bar\"")).unwrap();
+
+        assert_eq!(from_string, from_str);
+        assert_eq!(from_string.as_str(), "foo::bar");
+    }
+
+    #[test]
+    fn try_from_string_reuses_canonical_allocation() {
+        let value = alloc::string::String::from("foo::bar");
+        let original_ptr = value.as_ptr();
+        let original_capacity = value.capacity();
+
+        let path = PathBuf::try_from(value).unwrap();
+
+        assert_eq!(path.as_str(), "foo::bar");
+        assert_eq!(path.inner.as_ptr(), original_ptr);
+        assert_eq!(path.inner.capacity(), original_capacity);
     }
 
     #[test]
