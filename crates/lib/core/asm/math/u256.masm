@@ -442,29 +442,29 @@ end
 pub proc wrapping_mul(rhs: u256, lhs: u256) -> u256
     exec.u256_le_to_be_pair
     # Memory storing setup
-    loc_storew_be.0
+    loc_storew_le.0
     dropw
     # b[5-8] at 0
-    loc_storew_be.4
+    loc_storew_le.4
     # b[0-4] at 1
     push.0 dropw
     # b[0] at top of stack, followed by a[0-7]
     movdn.8
-    loc_storew_be.8
+    loc_storew_le.8
     # a[0-4] at 2
     swapw
-    loc_storew_be.12
+    loc_storew_le.12
     # a[5-8] at 3
     padw
-    loc_storew_be.16
-    loc_storew_be.20
+    loc_storew_le.16
+    loc_storew_le.20
     # p at 4 and 5
 
     # b[0]
     dropw
     swapw
     padw
-    loc_loadw_be.16
+    loc_loadw_le.16
     movdnw.2
     movup.12
 
@@ -473,10 +473,10 @@ pub proc wrapping_mul(rhs: u256, lhs: u256) -> u256
     movdn.9
     movdn.9
     swapw
-    loc_storew_be.16
+    loc_storew_le.16
     dropw
     padw
-    loc_loadw_be.20
+    loc_loadw_le.20
     swapw
     movup.9
     movup.9
@@ -509,21 +509,21 @@ pub proc wrapping_mul(rhs: u256, lhs: u256) -> u256
     exec.mulstep
 
     drop
-    loc_storew_be.20
+    loc_storew_le.20
     dropw
 
     # b[1]
     padw
-    loc_loadw_be.16
+    loc_loadw_le.16
     padw
-    loc_loadw_be.20
+    loc_loadw_le.20
     movup.7
     dropw
     padw
-    loc_loadw_be.12 padw
-    loc_loadw_be.8 # load the xs
+    loc_loadw_le.12 padw
+    loc_loadw_le.8 # load the xs
     padw
-    loc_loadw_be.4
+    loc_loadw_le.4
     movup.2
     movdn.3
     push.0 dropw # only need b[1]
@@ -535,15 +535,15 @@ pub proc wrapping_mul(rhs: u256, lhs: u256) -> u256
     swapw
     movdn.3
     padw
-    loc_loadw_be.16
+    loc_loadw_le.16
     push.0 dropw # only need p[0]
     movdn.3
     # save p[0-3] to memory, not needed any more
-    loc_storew_be.16
+    loc_storew_le.16
     dropw
 
     padw
-    loc_loadw_be.20
+    loc_loadw_le.20
     movup.3
     drop
     swapw
@@ -573,22 +573,22 @@ pub proc wrapping_mul(rhs: u256, lhs: u256) -> u256
     drop
     swap
     drop
-    loc_storew_be.20
+    loc_storew_le.20
     dropw
 
     # b[2]
     padw
-    loc_loadw_be.16
+    loc_loadw_le.16
     padw
-    loc_loadw_be.20
+    loc_loadw_le.20
     movup.7
     movup.7
     dropw
     padw
-    loc_loadw_be.12 padw
-    loc_loadw_be.8 # load the xs
+    loc_loadw_le.12 padw
+    loc_loadw_le.8 # load the xs
     padw
-    loc_loadw_be.4
+    loc_loadw_le.4
     swap
     movdn.3
     push.0 dropw # only need b[1]
@@ -601,15 +601,15 @@ pub proc wrapping_mul(rhs: u256, lhs: u256) -> u256
     movdn.3
     movdn.3
     padw
-    loc_loadw_be.16
+    loc_loadw_le.16
     drop drop
     movdn.3
     movdn.3
-    loc_storew_be.16
+    loc_storew_le.16
     dropw
 
     padw
-    loc_loadw_be.20
+    loc_loadw_le.20
     movup.3
     movup.3
     drop
@@ -634,23 +634,23 @@ pub proc wrapping_mul(rhs: u256, lhs: u256) -> u256
     swap drop
     movdn.3
     drop drop drop
-    loc_storew_be.20
+    loc_storew_le.20
     dropw
 
     # b[3]
     padw
-    loc_loadw_be.16
+    loc_loadw_le.16
     padw
-    loc_loadw_be.20
+    loc_loadw_le.20
 
     movup.7 movup.7 movup.7
     dropw
     padw
-    loc_loadw_be.12 padw
-    loc_loadw_be.8
+    loc_loadw_le.12 padw
+    loc_loadw_le.8
 
     padw
-    loc_loadw_be.4
+    loc_loadw_le.4
     movdn.3
     push.0 dropw
 
@@ -662,14 +662,14 @@ pub proc wrapping_mul(rhs: u256, lhs: u256) -> u256
     swapw
     movup.3
     padw
-    loc_loadw_be.16
+    loc_loadw_le.16
     drop
     movup.3
 
-    loc_storew_be.16
+    loc_storew_le.16
     dropw
     padw
-    loc_loadw_be.20
+    loc_loadw_le.20
     movdn.3
     push.0 dropw
     swapw
@@ -688,12 +688,12 @@ pub proc wrapping_mul(rhs: u256, lhs: u256) -> u256
 
     # b[4]
     padw
-    loc_loadw_be.12 padw
-    loc_loadw_be.8 # load the xs
+    loc_loadw_le.12 padw
+    loc_loadw_le.8 # load the xs
     # OPTIM: don't need a[4-7], but can't use mulstep4 if we don't load
 
     padw
-    loc_loadw_be.0
+    loc_loadw_le.0
     push.0 dropw # b[4]
 
     exec.mulstep4
@@ -701,9 +701,9 @@ pub proc wrapping_mul(rhs: u256, lhs: u256) -> u256
 
     # b[5]
     padw
-    loc_loadw_be.12
+    loc_loadw_le.12
     padw
-    loc_loadw_be.0
+    loc_loadw_le.0
     movup.2 movdn.3
     push.0 dropw
     movup.7
@@ -731,9 +731,9 @@ pub proc wrapping_mul(rhs: u256, lhs: u256) -> u256
 
     # b[6]
     padw
-    loc_loadw_be.12
+    loc_loadw_le.12
     padw
-    loc_loadw_be.0
+    loc_loadw_le.0
     swap
     movdn.3
     push.0 dropw
@@ -755,9 +755,9 @@ pub proc wrapping_mul(rhs: u256, lhs: u256) -> u256
 
     # b[7]
     padw
-    loc_loadw_be.12
+    loc_loadw_le.12
     padw
-    loc_loadw_be.0
+    loc_loadw_le.0
 
     movdn.3 push.0 dropw
     movup.4
@@ -770,7 +770,7 @@ pub proc wrapping_mul(rhs: u256, lhs: u256) -> u256
     drop drop drop
 
     padw
-    loc_loadw_be.16
+    loc_loadw_le.16
     swapw
     exec.u256_le_to_be
 end
