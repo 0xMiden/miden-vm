@@ -33,7 +33,7 @@ proptest-derive = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
 serde-untagged = { workspace = true, optional = true }
 thiserror.workspace = true
-toml = { workspace = true }
+toml = { workspace = true, features = ["serde"] }
 
 [dev-dependencies]
 miden-core.workspace = true

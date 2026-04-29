@@ -566,6 +566,12 @@ impl DebugInfo {
     pub(crate) fn op_decorator_storage(&self) -> &OpToDecoratorIds {
         &self.op_decorator_storage
     }
+
+    /// Returns the node decorator storage.
+    #[cfg(test)]
+    pub(crate) fn node_decorator_storage(&self) -> &NodeToDecoratorIds {
+        &self.node_decorator_storage
+    }
 }
 
 impl Serializable for DebugInfo {
