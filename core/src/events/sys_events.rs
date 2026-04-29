@@ -278,19 +278,19 @@ pub enum SystemEvent {
     ///   absorption; two rounds for four words).
     HqwordToMap,
 
-    /// Reads three words from the operand stack and inserts the top two words into the advice map
-    /// under the key defined by applying a Poseidon2 permutation to all three words.
+    /// Reads a hasher state from the operand stack and inserts the two rate words into the advice
+    /// map under the key defined by applying a Poseidon2 permutation to the full state.
     ///
     /// Inputs:
-    ///   Operand stack: [A, B, C, ...]
+    ///   Operand stack: [R0, R1, C, ...]
     ///   Advice map: {...}
     ///
     /// Outputs:
-    ///   Operand stack: [A, B, C, ...]
-    ///   Advice map: {KEY: [a0, a1, a2, a3, b0, b1, b2, b3]}
+    ///   Operand stack: [R0, R1, C, ...]
+    ///   Advice map: {KEY: [r00, r01, r02, r03, r10, r11, r12, r13]}
     ///
-    /// Where KEY is computed by extracting the digest elements from hperm([C, A, B]). For example,
-    /// if C is [0, d, 0, 0], KEY will be set as hash(A || B, d).
+    /// Where KEY is computed by extracting the digest elements from hperm([R0, R1, C]). For
+    /// example, if C is [0, d, 0, 0], KEY will be set as hash(R0 || R1, d).
     HpermToMap,
 }
 
