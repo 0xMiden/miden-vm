@@ -322,17 +322,17 @@ impl ExecutionTracer {
                     // the top element (the memory address of the callee hash) before entering
                     // the new context. The depth cannot go below MIN_STACK_DEPTH.
                     let depth = processor.stack().depth();
-                    let (stack_depth_after_drop, overflow_addr) =
-                        if depth > MIN_STACK_DEPTH as u32 {
-                            // The pop shifts an overflow entry into the main stack, so the
-                            // recorded overflow address is the one that remains after the shift.
-                            (depth - 1, self.overflow_table.clk_after_pop_in_current_ctx())
-                        } else {
-                            (
-                                MIN_STACK_DEPTH as u32,
-                                self.overflow_table.last_update_clk_in_current_ctx(),
-                            )
-                        };
+                    let (stack_depth_after_drop, overflow_addr) = if depth > MIN_STACK_DEPTH as u32
+                    {
+                        // The pop shifts an overflow entry into the main stack, so the
+                        // recorded overflow address is the one that remains after the shift.
+                        (depth - 1, self.overflow_table.clk_after_pop_in_current_ctx())
+                    } else {
+                        (
+                            MIN_STACK_DEPTH as u32,
+                            self.overflow_table.last_update_clk_in_current_ctx(),
+                        )
+                    };
                     Some(ExecutionContextInfo::new(
                         processor.system().ctx(),
                         processor.system().caller_hash(),
