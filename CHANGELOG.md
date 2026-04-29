@@ -24,6 +24,7 @@
 
 - [BREAKING] Refactored MAST forest serialization around fixed-layout full, stripped, and hashless sections, and bumped the MAST wire format to `0.0.3` ([#2765](https://github.com/0xMiden/miden-vm/pull/2765)).
 - [BREAKING] Cleaned up the unreleased MAST forest wire format, with stable node IDs, stricter untrusted validation, and sorted external node digests before node entries ([#3055](https://github.com/0xMiden/miden-vm/pull/3055)).
+- [BREAKING] Refined MAST forest read policies with trusted wire-backed views, options-based untrusted reads, and separate wire and validation budgets ([#3077](https://github.com/0xMiden/miden-vm/pull/3077)).
 - Documented sortedness precondition more prominently for sorted array operations ([#2832](https://github.com/0xMiden/miden-vm/pull/2832)).
 - [BREAKING] Updated the Miden crypto stack to `miden-crypto` and `miden-lifted-stark` v0.24, and switched digest-ordering code to `Word`'s native lexicographic ordering ([#3039](https://github.com/0xMiden/miden-vm/pull/3039)).
 - Borrowed operation slices in basic-block batching helpers to avoid cloning in the fingerprinting path ([#2994](https://github.com/0xMiden/miden-vm/pull/2994)).
