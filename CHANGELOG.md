@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.22.2 (2026-04-028)
+
+- Improve debug var loc tracking ([#2955](https://github.com/0xMiden/miden-vm/pull/2955)).
+
 ## 0.22.1 (2026-04-07)
 
 - Implemented project assembly ([#2877](https://github.com/0xMiden/miden-vm/pull/2877)).
