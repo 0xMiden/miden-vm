@@ -49,7 +49,7 @@ fn generate_fuzz_seeds() {
                 "mast_forest_deserialize",
                 "mast_forest_validate",
                 "mast_node_info",
-                "serialized_mast_forest_new",
+                "mast_forest_wire_view_new",
                 "basic_block_data",
                 "debug_info",
             ],
@@ -76,7 +76,7 @@ fn generate_fuzz_seeds() {
                 "mast_forest_deserialize",
                 "mast_forest_validate",
                 "mast_node_info",
-                "serialized_mast_forest_new",
+                "mast_forest_wire_view_new",
                 "basic_block_data",
                 "debug_info",
             ],
@@ -100,7 +100,7 @@ fn generate_fuzz_seeds() {
                 "mast_forest_deserialize",
                 "mast_forest_validate",
                 "mast_node_info",
-                "serialized_mast_forest_new",
+                "mast_forest_wire_view_new",
                 "basic_block_data",
             ],
             "stripped.bin",
@@ -119,7 +119,7 @@ fn generate_fuzz_seeds() {
         let mut bytes = Vec::new();
         forest.write_hashless(&mut bytes);
         write_mast_seed(
-            &["mast_forest_validate", "mast_node_info", "serialized_mast_forest_new"],
+            &["mast_forest_validate", "mast_node_info", "mast_forest_wire_view_new"],
             "hashless.bin",
             &bytes,
         );
@@ -133,7 +133,7 @@ fn generate_fuzz_seeds() {
                 "mast_forest_deserialize",
                 "mast_forest_validate",
                 "mast_node_info",
-                "serialized_mast_forest_new",
+                "mast_forest_wire_view_new",
             ],
             "header_only.bin",
             bytes,
@@ -148,7 +148,7 @@ fn generate_fuzz_seeds() {
                 "mast_forest_deserialize",
                 "mast_forest_validate",
                 "mast_node_info",
-                "serialized_mast_forest_new",
+                "mast_forest_wire_view_new",
             ],
             "invalid_magic.bin",
             bytes,

@@ -3,8 +3,7 @@
 //! This target tests the full untrusted deserialization pipeline:
 //! 1. UntrustedMastForest::read_from_bytes (budgeted deserialization)
 //! 2. UntrustedMastForest::validate() (structural + hash validation)
-//! 3. Budgeted parsing-only and parsing+validation entry points
-//! 4. Flag-returning variants for callers that need serializer intent bits
+//! 3. Explicit option-based parsing and validation budgets
 //!
 //! The validation path should never panic on any input.
 //!
@@ -13,7 +12,7 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use miden_core::mast::UntrustedMastForest;
+use miden_core::mast::{UntrustedMastForest, UntrustedMastForestReadOptions};
 
 fuzz_target!(|data: &[u8]| {
     let validate_untrusted = |result| {
@@ -21,30 +20,23 @@ fuzz_target!(|data: &[u8]| {
             let _ = untrusted.validate();
         }
     };
-    let validate_untrusted_with_flags = |result| {
-        if let Ok((untrusted, _flags)) = result {
-            let _ = untrusted.validate();
-        }
-    };
+    let small_budget_options =
+        UntrustedMastForestReadOptions::new().with_wire_byte_budget(64);
+    let explicit_budget_options = UntrustedMastForestReadOptions::new()
+        .with_wire_byte_budget(data.len())
+        .with_validation_allocation_budget(data.len());
 
     // Test the full untrusted deserialization + validation pipeline
     let Ok(untrusted) = UntrustedMastForest::read_from_bytes(data) else {
         // Even if the default path rejects early, exercise the explicit-budget variants too.
-        validate_untrusted(UntrustedMastForest::read_from_bytes_with_budget(data, 64));
-        validate_untrusted_with_flags(UntrustedMastForest::read_from_bytes_with_budget_and_flags(
-            data, 64,
-        ));
-        validate_untrusted(UntrustedMastForest::read_from_bytes_with_budgets(
+        validate_untrusted(UntrustedMastForest::read_from_bytes_with_options(
             data,
-            data.len(),
-            data.len(),
+            small_budget_options,
         ));
-        validate_untrusted_with_flags(UntrustedMastForest::read_from_bytes_with_budgets_and_flags(
+        validate_untrusted(UntrustedMastForest::read_from_bytes_with_options(
             data,
-            data.len(),
-            data.len(),
+            explicit_budget_options,
         ));
-        validate_untrusted_with_flags(UntrustedMastForest::read_from_bytes_with_flags(data));
         return;
     };
 
@@ -53,19 +45,12 @@ fuzz_target!(|data: &[u8]| {
 
     // Test budgeted deserialization with a very small budget
     // This should reject most inputs early without panicking
-    validate_untrusted(UntrustedMastForest::read_from_bytes_with_budget(data, 64));
-    validate_untrusted_with_flags(UntrustedMastForest::read_from_bytes_with_budget_and_flags(
-        data, 64,
-    ));
-    validate_untrusted(UntrustedMastForest::read_from_bytes_with_budgets(
+    validate_untrusted(UntrustedMastForest::read_from_bytes_with_options(
         data,
-        data.len(),
-        data.len(),
+        small_budget_options,
     ));
-    validate_untrusted_with_flags(UntrustedMastForest::read_from_bytes_with_budgets_and_flags(
+    validate_untrusted(UntrustedMastForest::read_from_bytes_with_options(
         data,
-        data.len(),
-        data.len(),
+        explicit_budget_options,
     ));
-    validate_untrusted_with_flags(UntrustedMastForest::read_from_bytes_with_flags(data));
 });
