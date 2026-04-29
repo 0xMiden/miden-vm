@@ -1650,6 +1650,24 @@ fn test_mast_forest_wire_view_rejects_malformed_full_debug_info() {
     assert!(result.is_err());
 }
 
+#[test]
+fn test_mast_forest_wire_view_rejects_missing_full_debug_info() {
+    let mut forest = MastForest::new();
+    let decorator_id = forest.add_decorator(Decorator::Trace(17)).unwrap();
+    let block_id = BasicBlockNodeBuilder::new(vec![Operation::Swap], vec![(0, decorator_id)])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(block_id);
+    forest.insert_procedure_name(forest[block_id].digest(), "missing_debug_proc".into());
+
+    let mut full_bytes = forest.to_bytes();
+    let full_debug_offset = debug_info_offset_after_advice_map(&full_bytes);
+    full_bytes.truncate(full_debug_offset);
+
+    let result = MastForestWireView::new(&full_bytes);
+    assert_matches!(result, Err(DeserializationError::UnexpectedEOF));
+}
+
 fn assert_stripped_size_hint_matches_serialized_len(forest: &MastForest) {
     let mut bytes = Vec::new();
     forest.write_stripped(&mut bytes);

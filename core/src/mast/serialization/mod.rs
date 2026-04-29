@@ -602,16 +602,19 @@ fn check_ignored_debug_payload(
     debug_info_offset: usize,
 ) -> Result<(), DeserializationError> {
     let payload = bytes.get(debug_info_offset..).ok_or(DeserializationError::UnexpectedEOF)?;
-    if payload.is_empty() {
-        return Ok(());
-    }
-
     if flags.is_stripped() {
+        if payload.is_empty() {
+            return Ok(());
+        }
         log::warn!(
             "MastForestWireView ignored {} trailing bytes after a STRIPPED MastForest payload",
             payload.len()
         );
         return Ok(());
+    }
+
+    if payload.is_empty() {
+        return Err(DeserializationError::UnexpectedEOF);
     }
 
     let mut reader = SliceReader::new(payload);
