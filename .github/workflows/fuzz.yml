@@ -39,6 +39,10 @@ jobs:
           - precompile_request_deserialize
           - library_deserialize
           - package_deserialize
+          - package_semantic_deserialize
+          - project_toml_parse
+          - project_load
+          - project_assemble
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
@@ -51,9 +55,42 @@ jobs:
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
       - name: Install cargo-fuzz
         run: cargo install cargo-fuzz --locked
-      - name: Run fuzz target (smoke test)
+      - name: Generate fuzz seed corpus
+        env:
+          TARGET: ${{ matrix.target }}
+          GENERATED_CORPUS_TARGETS: >-
+            mast_forest_deserialize program_deserialize kernel_deserialize
+            stack_io_deserialize advice_inputs_deserialize operation_deserialize
+            execution_proof_deserialize precompile_request_deserialize
+            library_deserialize package_deserialize package_semantic_deserialize
         run: |
+          if [[ " $GENERATED_CORPUS_TARGETS " == *" $TARGET "* ]]; then
+            make fuzz-seeds
+          else
+            echo "No generated seed corpus for $TARGET"
+          fi
+      - name: Run fuzz target (smoke test)
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          FUZZ_TARGET="$(cargo +nightly fuzz build --help | awk '
+            $0 ~ /^      --target <TRIPLE>/ { in_target = 1; next }
+            in_target && /\[default:/ {
+              sub(/^.*\[default: /, "")
+              sub(/\].*$/, "")
+              print
+              exit
+            }
+          ')"
+          test -n "$FUZZ_TARGET"
           # Build the fuzz target first
-          cargo +nightly fuzz build --fuzz-dir miden-core-fuzz ${{ matrix.target }}
+          cargo +nightly fuzz build --target "$FUZZ_TARGET" --fuzz-dir miden-core-fuzz "$TARGET"
           # Run directly to avoid cargo-fuzz wrapper SIGPIPE issue
-          miden-core-fuzz/target/x86_64-unknown-linux-gnu/release/${{ matrix.target }} -max_total_time=60 -runs=10000
+          FUZZ_BIN="miden-core-fuzz/target/$FUZZ_TARGET/release/$TARGET"
+          test -x "$FUZZ_BIN"
+          CORPUS_DIR="miden-core-fuzz/corpus/$TARGET"
+          if [ -d "$CORPUS_DIR" ]; then
+            "$FUZZ_BIN" "$CORPUS_DIR" -max_total_time=60 -runs=10000
+          else
+            "$FUZZ_BIN" -max_total_time=60 -runs=10000
+          fi

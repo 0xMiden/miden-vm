@@ -133,7 +133,7 @@ pub proc load_fri_layer_commitments
         #=> [COM, num_layers, ptr_layer + 4, y, y, ...]
 
         # Reseed with commitment and absorb per-round PoW witness in one shot.
-        adv_push.1
+        adv_push
         exec.random_coin::reseed_with_felt
         # => [num_layers, ptr_layer + 4, y, y, ...]
 

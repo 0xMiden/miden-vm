@@ -715,7 +715,4 @@ pub proc wrapping_mul(rhs: u256, lhs: u256) -> u256
     loc_loadw_be.16
     swapw
     exec.u256_le_to_be
-    # drop intermediate x and carry words to match the documented output
-    swapdw dropw dropw
-    swapdw dropw dropw
 end

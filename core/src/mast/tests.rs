@@ -299,6 +299,31 @@ fn test_clear_debug_info_multiple_node_types() {
 }
 
 #[test]
+fn test_compact_after_clear_debug_info_does_not_materialize_empty_node_decorators() {
+    let mut forest = MastForest::new();
+    let decorator = forest.add_decorator(Decorator::Trace(1)).unwrap();
+    let block_id = BasicBlockNodeBuilder::new(
+        vec![Operation::Push(Felt::new_unchecked(1)), Operation::Add],
+        vec![(0, decorator)],
+    )
+    .with_before_enter(vec![decorator])
+    .add_to_forest(&mut forest)
+    .unwrap();
+    let call_id = CallNodeBuilder::new(block_id).add_to_forest(&mut forest).unwrap();
+    forest.make_root(call_id);
+
+    forest.clear_debug_info();
+    let (compacted, _) = forest.compact();
+
+    assert!(compacted.debug_info.node_decorator_storage().is_empty());
+    for node_idx in 0..compacted.nodes().len() {
+        let node_id = crate::mast::MastNodeId::new_unchecked(node_idx as u32);
+        assert!(compacted.before_enter_decorators(node_id).is_empty());
+        assert!(compacted.after_exit_decorators(node_id).is_empty());
+    }
+}
+
+#[test]
 fn test_mast_forest_roundtrip_with_basic_blocks_and_decorators() {
     use crate::mast::MastNode;
 

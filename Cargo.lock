@@ -1276,6 +1276,7 @@ dependencies = [
  "miden-core",
  "miden-crypto",
  "miden-lifted-stark",
+ "miden-test-serde-macros",
  "miden-utils-indexing",
  "proptest",
  "thiserror",
@@ -1294,6 +1295,7 @@ dependencies = [
  "miden-mast-package",
  "miden-package-registry",
  "miden-project",
+ "miden-test-serde-macros",
  "proptest",
  "smallvec",
  "tempfile",
@@ -1333,6 +1335,7 @@ dependencies = [
  "criterion",
  "derive_more",
  "insta",
+ "log",
  "miden-crypto",
  "miden-debug-types",
  "miden-formatting",
@@ -1372,7 +1375,6 @@ dependencies = [
  "miden-utils-sync",
  "miden-verifier",
  "num",
- "num-bigint",
  "rand 0.9.4",
  "rand_chacha",
  "rstest",
@@ -1440,10 +1442,13 @@ dependencies = [
  "miden-crypto",
  "miden-formatting",
  "miden-miette",
+ "miden-test-serde-macros",
  "miden-utils-indexing",
  "miden-utils-sync",
  "paste",
+ "proptest",
  "serde",
+ "serde_json",
  "serde_spanned",
  "thiserror",
 ]
@@ -1570,8 +1575,11 @@ dependencies = [
  "miden-assembly-syntax",
  "miden-core",
  "miden-mast-package",
+ "miden-test-serde-macros",
+ "proptest",
  "pubgrub",
  "serde",
+ "serde_json",
  "smallvec",
  "thiserror",
 ]
@@ -1607,8 +1615,12 @@ dependencies = [
  "miden-core",
  "miden-mast-package",
  "miden-package-registry",
+ "miden-test-serde-macros",
+ "proptest",
+ "proptest-derive",
  "serde",
  "serde-untagged",
+ "serde_json",
  "tempfile",
  "thiserror",
  "toml",
@@ -1715,7 +1727,10 @@ name = "miden-utils-indexing"
 version = "0.23.0"
 dependencies = [
  "miden-crypto",
+ "miden-test-serde-macros",
+ "proptest",
  "serde",
+ "serde_json",
  "thiserror",
 ]
 
@@ -1761,9 +1776,11 @@ dependencies = [
  "miden-mast-package",
  "miden-processor",
  "miden-prover",
+ "miden-test-serde-macros",
  "miden-test-utils",
  "miden-verifier",
  "predicates",
+ "proptest",
  "serde",
  "serde_json",
  "tokio",
@@ -1771,6 +1788,18 @@ dependencies = [
  "tracing-forest",
  "tracing-subscriber",
  "walkdir",
+]
+
+[[package]]
+name = "miden-vm-synthetic-bench"
+version = "0.23.0"
+dependencies = [
+ "criterion",
+ "miden-processor",
+ "miden-vm",
+ "serde",
+ "serde_json",
+ "thiserror",
 ]
 
 [[package]]

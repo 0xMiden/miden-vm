@@ -14,7 +14,7 @@ use crate::{
     precompile::PrecompileRequest,
     program::{Kernel, Program, StackInputs, StackOutputs},
     proof::{ExecutionProof, HashFunction},
-    serde::Serializable,
+    serde::{ByteWriter, Serializable},
 };
 
 /// Generates seed corpus files for fuzzing.
@@ -22,6 +22,12 @@ use crate::{
 #[test]
 #[ignore = "run manually to generate fuzz seeds"]
 fn generate_fuzz_seeds() {
+    fn write_mast_seed(targets: &[&str], name: &str, bytes: &[u8]) {
+        for target in targets {
+            write_seed(target, name, bytes);
+        }
+    }
+
     fn write_seed(target: &str, name: &str, bytes: &[u8]) {
         let corpus_dir = std::path::Path::new("../miden-core-fuzz/corpus").join(target);
         std::fs::create_dir_all(&corpus_dir).expect("Failed to create corpus directory");
@@ -38,7 +44,18 @@ fn generate_fuzz_seeds() {
         forest.make_root(block_id);
 
         let bytes = forest.to_bytes();
-        write_seed("mast_forest_deserialize", "minimal_block.bin", &bytes);
+        write_mast_seed(
+            &[
+                "mast_forest_deserialize",
+                "mast_forest_validate",
+                "mast_node_info",
+                "serialized_mast_forest_new",
+                "basic_block_data",
+                "debug_info",
+            ],
+            "minimal_block.bin",
+            &bytes,
+        );
     }
 
     // Seed 2: Forest with join node
@@ -54,7 +71,18 @@ fn generate_fuzz_seeds() {
         forest.make_root(join);
 
         let bytes = forest.to_bytes();
-        write_seed("mast_forest_deserialize", "join_node.bin", &bytes);
+        write_mast_seed(
+            &[
+                "mast_forest_deserialize",
+                "mast_forest_validate",
+                "mast_node_info",
+                "serialized_mast_forest_new",
+                "basic_block_data",
+                "debug_info",
+            ],
+            "join_node.bin",
+            &bytes,
+        );
     }
 
     // Seed 3: Stripped forest (no debug info)
@@ -67,19 +95,64 @@ fn generate_fuzz_seeds() {
 
         let mut bytes = Vec::new();
         forest.write_stripped(&mut bytes);
-        write_seed("mast_forest_deserialize", "stripped.bin", &bytes);
+        write_mast_seed(
+            &[
+                "mast_forest_deserialize",
+                "mast_forest_validate",
+                "mast_node_info",
+                "serialized_mast_forest_new",
+                "basic_block_data",
+            ],
+            "stripped.bin",
+            &bytes,
+        );
     }
 
-    // Seed 4: Empty header (just magic + flags + version + minimal counts)
+    // Seed 4: Hashless forest (no internal hash section, no debug info)
+    {
+        let mut forest = MastForest::new();
+        let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+            .add_to_forest(&mut forest)
+            .unwrap();
+        forest.make_root(block_id);
+
+        let mut bytes = Vec::new();
+        forest.write_hashless(&mut bytes);
+        write_mast_seed(
+            &["mast_forest_validate", "mast_node_info", "serialized_mast_forest_new"],
+            "hashless.bin",
+            &bytes,
+        );
+    }
+
+    // Seed 5: Empty header (just magic + flags + version + minimal counts)
     {
         let bytes: &[u8] = b"MAST\x00\x00\x00\x01";
-        write_seed("mast_forest_deserialize", "header_only.bin", bytes);
+        write_mast_seed(
+            &[
+                "mast_forest_deserialize",
+                "mast_forest_validate",
+                "mast_node_info",
+                "serialized_mast_forest_new",
+            ],
+            "header_only.bin",
+            bytes,
+        );
     }
 
-    // Seed 5: Invalid magic
+    // Seed 6: Invalid magic
     {
         let bytes: &[u8] = b"XXXX\x00\x00\x00\x01";
-        write_seed("mast_forest_deserialize", "invalid_magic.bin", bytes);
+        write_mast_seed(
+            &[
+                "mast_forest_deserialize",
+                "mast_forest_validate",
+                "mast_node_info",
+                "serialized_mast_forest_new",
+            ],
+            "invalid_magic.bin",
+            bytes,
+        );
     }
 
     // Program seed
@@ -198,6 +271,36 @@ fn generate_fuzz_seeds() {
         let request = PrecompileRequest::new(EventId::from_u64(1), vec![1, 2, 3, 4]);
         let proof = ExecutionProof::new(Vec::new(), HashFunction::Rpo256, vec![request]);
         write_seed("execution_proof_deserialize", "minimal_proof.bin", &proof.to_bytes());
+    }
+
+    // Execution proof seeds for malicious length-prefix deserialization.
+    {
+        let mut oversized_proof_len = Vec::new();
+        oversized_proof_len.write_usize(usize::MAX);
+        write_seed("execution_proof_deserialize", "oversized_proof_len.bin", &oversized_proof_len);
+
+        let mut oversized_pc_requests_len = Vec::new();
+        oversized_pc_requests_len.write_usize(0);
+        oversized_pc_requests_len.write_u8(HashFunction::Blake3_256 as u8);
+        oversized_pc_requests_len.write_usize(usize::MAX);
+        write_seed(
+            "execution_proof_deserialize",
+            "oversized_pc_requests_len.bin",
+            &oversized_pc_requests_len,
+        );
+    }
+
+    // Execution proof seed with many small precompile requests.
+    {
+        let pc_requests = (0..64)
+            .map(|event_id| PrecompileRequest::new(EventId::from_u64(event_id), Vec::new()))
+            .collect();
+        let proof = ExecutionProof::new(vec![1, 2, 3], HashFunction::Blake3_256, pc_requests);
+        write_seed(
+            "execution_proof_deserialize",
+            "many_minimal_precompile_requests.bin",
+            &proof.to_bytes(),
+        );
     }
 
     println!("\nSeed corpus generated in ../miden-core-fuzz/corpus");

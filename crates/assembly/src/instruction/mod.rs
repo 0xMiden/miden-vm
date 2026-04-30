@@ -17,7 +17,6 @@ use crate::{
     push_value_ops,
 };
 
-mod adv_ops;
 mod crypto_ops;
 mod debug;
 mod env_ops;
@@ -383,8 +382,10 @@ impl Assembler {
             Instruction::Caller => env_ops::caller(block_builder),
             Instruction::Clk => block_builder.push_op(Clk),
             Instruction::AdvPipe => block_builder.push_op(Pipe),
-            Instruction::AdvPush(n) => {
-                adv_ops::adv_push(block_builder, proc_ctx, n.expect_value(), n.span())?
+            Instruction::AdvPush => block_builder.push_op(AdvPop),
+            Instruction::AdvPushW => {
+                block_builder.push_ops([Pad; 4]);
+                block_builder.push_op(AdvPopW);
             },
             Instruction::AdvLoadW => block_builder.push_op(AdvPopW),
 

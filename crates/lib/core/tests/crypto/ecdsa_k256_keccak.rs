@@ -2,7 +2,7 @@
 //!
 //! Validates that:
 //! - Raw event handlers correctly perform ECDSA verification and populate advice provider
-//! - MASM wrapper correctly returns commitment, tag, and result on stack
+//! - Private implementation helper returns the expected commitment, tag, and result on stack
 //! - Both valid and invalid signatures are handled correctly
 
 use miden_core::{
@@ -92,23 +92,21 @@ fn test_ecdsa_verify_impl_commitment() {
         // Verify tag/commitment once on a valid request
         let memory_stores = generate_memory_store_masm(&request);
 
-        let source = format!(
-            "
-            use miden::core::crypto::dsa::ecdsa_k256_keccak
-            use miden::core::sys
+        let source = private_proc_harness(
+            include_str!("../../asm/crypto/dsa/ecdsa_k256_keccak.masm"),
+            format!(
+                "
+                    # Store test data in memory
+                    {memory_stores}
 
-            begin
-                # Store test data in memory
-                {memory_stores}
+                    # Call verify_impl: [ptr_pk, ptr_digest, ptr_sig]
+                    push.{SIG_ADDR}.{DIGEST_ADDR}.{PK_ADDR}
+                    exec.verify_prehash_impl
+                    # => [COMM, TAG, result, ...]
 
-                # Call verify_impl: [ptr_pk, ptr_digest, ptr_sig]
-                push.{SIG_ADDR}.{DIGEST_ADDR}.{PK_ADDR}
-                exec.ecdsa_k256_keccak::verify_prehash_impl
-                # => [COMM, TAG, result, ...]
-
-                exec.sys::truncate_stack
-            end
-        ",
+                    exec.sys::truncate_stack
+                ",
+            ),
         );
 
         let test = build_debug_test!(source, &[]);
@@ -275,4 +273,8 @@ fn generate_memory_store_masm(request: &EcdsaRequest) -> String {
         masm_store_felts(&sig_words, SIG_ADDR),
     ]
     .join(" ")
+}
+
+fn private_proc_harness(module_source: &str, body: impl AsRef<str>) -> String {
+    format!("{}\n\nbegin\n{}\nend", module_source.replace("pub proc", "proc"), body.as_ref())
 }

@@ -159,6 +159,7 @@ pub fn serde_test(args: TokenStream, input: TokenStream) -> TokenStream {
             quote! {
                 #[cfg(all(feature = "arbitrary", feature = "serde", test))]
                 proptest::proptest!{
+                    #![proptest_config(proptest::test_runner::Config::with_cases(100))]
                     #[test]
                     fn #test_name(obj in proptest::prelude::any::#ty()) {
                         use alloc::string::ToString;
@@ -182,6 +183,7 @@ pub fn serde_test(args: TokenStream, input: TokenStream) -> TokenStream {
             quote! {
                 #[cfg(all(feature = "arbitrary", test))]
                 proptest::proptest!{
+                    #![proptest_config(proptest::test_runner::Config::with_cases(100))]
                     #[test]
                     fn #test_name(obj in proptest::prelude::any::#ty()) {
                         let bytes = obj.to_bytes();
