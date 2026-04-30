@@ -452,11 +452,13 @@ $$
 
 When `END` operation is executed, the hash of the completed block is removed from the block
 hash table. We differentiate between the first and second child of a `JOIN` by looking at
-the next opcode: if the next operation is not `END`, `REPEAT`, or `HALT`, then this block
-is the first child and `is_first_child = 1`. The `is_loop_body` flag is read from $h_4$.
+the next opcode: if the next operation is not `END`, `REPEAT`, `RESPAN`, or `HALT`, then this
+block is the first child and `is_first_child = 1`. `RESPAN` is included defensively — no single
+constraint forbids `END → RESPAN`, so excluding it would let an adversarial trace inject a
+false-positive `is_first_child = 1`. The `is_loop_body` flag is read from $h_4$.
 
 $$
-u_{end} = f_{end} \cdot m(a', h_0..h_3, 1 - (f_{end}' + f_{repeat}' + f_{halt}'), h_4) \text{ | } \text{degree} = 8
+u_{end} = f_{end} \cdot m(a', h_0..h_3, 1 - (f_{end}' + f_{repeat}' + f_{respan}' + f_{halt}'), h_4) \text{ | } \text{degree} = 8
 $$
 
 Using the above definitions, we can describe the constraint for updating the block hash table as follows:

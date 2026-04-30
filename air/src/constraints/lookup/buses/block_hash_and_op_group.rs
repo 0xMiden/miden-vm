@@ -182,9 +182,14 @@ pub(in crate::constraints::lookup) fn emit_block_hash_and_op_group<LB>(
                         || {
                             let parent = addr_next.into();
                             let child_hash = h_0.map(LB::Expr::from);
+                            // RESPAN can directly follow END (the decoder only blocks the
+                            // pair conditionally on `delta_group_count`), so include
+                            // `respan_next` here — otherwise an END→RESPAN pair encodes a
+                            // false-positive `is_first_child = 1` and unbalances the bus.
                             let is_first_child = LB::Expr::ONE
                                 - op_flags.end_next()
                                 - op_flags.repeat_next()
+                                - op_flags.respan_next()
                                 - op_flags.halt_next();
                             let is_loop_body = dec.end_block_flags().is_loop_body.into();
                             BlockHashMsg::End {

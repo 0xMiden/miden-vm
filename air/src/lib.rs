@@ -326,9 +326,10 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ProcessorAir {
             public_values,
             var_len_public_inputs,
             sum: EF::ZERO,
+            error: None,
         };
         emit_miden_boundary(&mut reducer);
-        let total_correction = reducer.finalize();
+        let total_correction = reducer.finalize()?;
 
         // TODO(#3032): aux_values[1..] are the placeholder slots from
         // NUM_LOGUP_COMMITTED_FINALS (see `constraints::lookup::miden_air`); enforce the
@@ -463,19 +464,24 @@ where
 /// instead of open-coding the three corrections a second time.
 ///
 /// Denominators are `α + Σ βⁱ · field_i` with random `α, β`; on any legitimate proof they
-/// are non-zero with overwhelming probability, and the outer quotient check already rejects
-/// the degenerate case, so `insert` panics rather than threading an error through the
-/// reducer.
+/// are non-zero with overwhelming probability. A malformed/adversarial proof can still
+/// drive a denominator to zero, so the reducer captures the first failure and surfaces it
+/// to `reduced_aux_values`, which bubbles a [`ReductionError`] to the verifier rather than
+/// panicking.
 struct ReduceBoundaryBuilder<'a, EF: ExtensionField<Felt>> {
     challenges: &'a Challenges<EF>,
     public_values: &'a [Felt],
     var_len_public_inputs: VarLenPublicInputs<'a, Felt>,
     sum: EF,
+    error: Option<ReductionError>,
 }
 
 impl<'a, EF: ExtensionField<Felt>> ReduceBoundaryBuilder<'a, EF> {
-    fn finalize(self) -> EF {
-        self.sum
+    fn finalize(self) -> Result<EF, ReductionError> {
+        match self.error {
+            Some(err) => Err(err),
+            None => Ok(self.sum),
+        }
     }
 }
 
@@ -495,10 +501,14 @@ impl<'a, EF: ExtensionField<Felt>> BoundaryBuilder for ReduceBoundaryBuilder<'a,
     where
         M: LookupMessage<Felt, EF>,
     {
-        let inv = msg
-            .encode(self.challenges)
-            .try_inverse()
-            .expect("LogUp denominator must be non-zero under random challenges");
-        self.sum += inv * multiplicity;
+        if self.error.is_some() {
+            return;
+        }
+        match msg.encode(self.challenges).try_inverse() {
+            Some(inv) => self.sum += inv * multiplicity,
+            None => {
+                self.error = Some("LogUp boundary denominator was zero".into());
+            },
+        }
     }
 }

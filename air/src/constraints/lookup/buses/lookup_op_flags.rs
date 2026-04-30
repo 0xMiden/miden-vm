@@ -77,6 +77,7 @@ pub struct LookupOpFlags<E> {
     // -- Next-row control flow (degree 4) -------------------------------------------------------
     end_next: E,
     repeat_next: E,
+    respan_next: E,
     halt_next: E,
 
     // -- Composite flags ------------------------------------------------------------------------
@@ -167,10 +168,10 @@ where
         let mrupdate = deg4(opcodes::MRUPDATE);
         let cryptostream = deg4(opcodes::CRYPTOSTREAM);
 
-        // -- Next-row control flow (END / REPEAT / HALT only) ------------------------------
+        // -- Next-row control flow (END / REPEAT / RESPAN / HALT) --------------------------
         // prefix = extra[1]' * b4' = b6'*b5'*b4'. Distinguishes among the four deg-4 ops
         // under the `0b0111_xxxx` family via (b3', b2').
-        let (end_next, repeat_next, halt_next) = {
+        let (end_next, repeat_next, respan_next, halt_next) = {
             let prefix: E = decoder_next.extra[1].into();
             let prefix = prefix * decoder_next.op_bits[4];
             let b3n: E = decoder_next.op_bits[3].into();
@@ -178,9 +179,10 @@ where
             let nb3n = E::ONE - b3n.clone();
             let nb2n = E::ONE - b2n.clone();
             (
-                prefix.clone() * nb3n.clone() * nb2n, // END:    nb3' * nb2'
-                prefix.clone() * nb3n * b2n.clone(),  // REPEAT: nb3' * b2'
-                prefix * b3n * b2n,                   // HALT:   b3'  * b2'
+                prefix.clone() * nb3n.clone() * nb2n.clone(), // END:    nb3' * nb2'
+                prefix.clone() * nb3n * b2n.clone(),          // REPEAT: nb3' * b2'
+                prefix.clone() * b3n.clone() * nb2n,          // RESPAN: b3'  * nb2'
+                prefix * b3n * b2n,                           // HALT:   b3'  * b2'
             )
         };
 
@@ -245,6 +247,7 @@ where
             u32xor,
             end_next,
             repeat_next,
+            respan_next,
             halt_next,
             left_shift,
             right_shift,
@@ -315,6 +318,7 @@ impl LookupOpFlags<Felt> {
         match opcode_next {
             opcodes::END => f.end_next = Felt::ONE,
             opcodes::REPEAT => f.repeat_next = Felt::ONE,
+            opcodes::RESPAN => f.respan_next = Felt::ONE,
             opcodes::HALT => f.halt_next = Felt::ONE,
             _ => {},
         }
@@ -389,6 +393,7 @@ impl LookupOpFlags<Felt> {
             u32xor: Felt::ZERO,
             end_next: Felt::ZERO,
             repeat_next: Felt::ZERO,
+            respan_next: Felt::ZERO,
             halt_next: Felt::ZERO,
             left_shift: Felt::ZERO,
             right_shift: Felt::ZERO,
@@ -452,6 +457,7 @@ impl LookupOpFlags<Felt> {
             u32xor,
             end_next,
             repeat_next,
+            respan_next,
             halt_next,
             left_shift,
             right_shift,
@@ -530,6 +536,7 @@ accessors!(
     // Next-row control flow
     end_next,
     repeat_next,
+    respan_next,
     halt_next,
     // Composite flags
     left_shift,
