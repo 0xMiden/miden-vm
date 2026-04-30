@@ -128,70 +128,8 @@ pub proc hash_double_words
     # => [HASH]
 end
 
-#! Hashes the memory `start_addr` to `end_addr`, handles odd number of elements.
-#!
-#! Requires `start_addr ≤ end_addr`, `end_addr` is not inclusive.
-#! Requires `start_addr` and `end_addr` to be word-aligned.
-#!
-#! Input: [start_addr, end_addr, ...]
-#! Output: [H, ...]
-#!
-#! Cycles:
-#! - even words: 53 cycles + 3 * words
-#! - odd words: 65 cycles + 3 * words
-#! where `words` is the `start_addr - end_addr - 1`
-pub proc hash_words
-    # enforce `start_addr ≤ end_addr`
-    dup.1 dup.1 u32assert2 u32gte assert
-
-    # figure out if the range is for an odd number of words (11 cycles)
-    dup.1 dup.1 sub div.4 is_odd
-    # => [is_odd, start_addr, end_addr, ...]
-
-    # make the start/end range even (6 cycles)
-    movup.2 dup.1 mul.4 sub
-    # => [end_addr, is_odd, start_addr, ...]
-
-    # move start_addr to the right stack position (1 cycles)
-    movup.2
-    # => [start_addr, end_addr, is_odd, ...]
-
-    # prepare hasher state (14 cycles)
-    dup.2 mul.4 push.0.0.0 movup.3 padw padw
-    # => [R0, R1, C, start_addr, end_addr, is_odd, ...]
-
-    # (4 + 3 * words cycles)
-    exec.absorb_double_words_from_memory
-    # => [R0', R1', C', end_addr, end_addr, is_odd, ...]
-
-    # (1 cycles)
-    movup.14
-    # => [is_odd, R0', R1', C', end_addr, end_addr, ...]
-
-    # handle the odd element, if any (12 cycles)
-    if.true
-        # start_addr and end_addr are equal after calling `absorb_double_words_from_memory`, and both
-        # point to the last element. Load the last word (6 cycles)
-        dropw dup.9 mem_loadw_le
-        # => [R1, C, end_addr, end_addr, ...]
-
-        # set the padding and compute the permutation (5 cycles)
-        padw swapw exec.permute
-    end
-
-    exec.squeeze_digest
-    # => [HASH, end_addr, end_addr, ...]
-
-    # drop start_addr/end_addr (4 cycles)
-    movup.4 drop movup.4 drop
-    # => [HASH]
-end
-
 #! Hashes the memory `start_addr` to `end_addr` with a domain identifier, handling an odd number
 #! of words.
-#!
-#! Semantically equivalent to `Poseidon2::hash_elements_in_domain(&elements, domain)` where
-#! `elements` is the sequence of felts from `start_addr` to `end_addr` (exclusive).
 #!
 #! Requires `start_addr ≤ end_addr`, `end_addr` is not inclusive.
 #! Requires `start_addr` and `end_addr` to be word-aligned.
@@ -253,6 +191,27 @@ pub proc hash_words_with_domain
     # drop start_addr/end_addr (4 cycles)
     movup.4 drop movup.4 drop
     # => [HASH]
+end
+
+#! Hashes the memory `start_addr` to `end_addr`, handles odd number of elements.
+#!
+#! Equivalent to `hash_words_with_domain` with `domain = 0`.
+#!
+#! Requires `start_addr ≤ end_addr`, `end_addr` is not inclusive.
+#! Requires `start_addr` and `end_addr` to be word-aligned.
+#!
+#! Input: [start_addr, end_addr, ...]
+#! Output: [H, ...]
+#!
+#! Cycles:
+#! - even words: 55 cycles + 3 * words
+#! - odd words: 67 cycles + 3 * words
+#! where `words` is the `start_addr - end_addr - 1`
+pub proc hash_words
+    push.0
+    # => [domain=0, start_addr, end_addr, ...]
+
+    exec.hash_words_with_domain
 end
 
 #! Initializes the hasher state required for the `hash_elements_with_state` procedure.
@@ -553,11 +512,6 @@ pub proc merge
 end
 
 #! Merges two words (256-bit digests) via Poseidon2 hash with a domain identifier.
-#!
-#! Semantically equivalent to `Poseidon2::merge_in_domain(&[B, A], domain)` in miden-crypto
-#! (i.e., B is the first rate word, A is the second rate word, and the domain is placed into
-#! the second element of the capacity word, matching the convention used by
-#! `adv.insert_hdword_d`).
 #!
 #! Inputs:  [domain, B, A, ...]
 #! Outputs: [C, ...]
