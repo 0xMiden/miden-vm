@@ -13,19 +13,20 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use miden_core::mast::UntrustedMastForest;
+use miden_core::{mast::UntrustedMastForest, serde::DeserializationError};
 
 fuzz_target!(|data: &[u8]| {
-    let validate_untrusted = |result| {
+    let validate_untrusted = |result: Result<UntrustedMastForest, DeserializationError>| {
         if let Ok(untrusted) = result {
             let _ = untrusted.validate();
         }
     };
-    let validate_untrusted_with_flags = |result| {
-        if let Ok((untrusted, _flags)) = result {
-            let _ = untrusted.validate();
-        }
-    };
+    let validate_untrusted_with_flags =
+        |result: Result<(UntrustedMastForest, u8), DeserializationError>| {
+            if let Ok((untrusted, _flags)) = result {
+                let _ = untrusted.validate();
+            }
+        };
 
     // Test the full untrusted deserialization + validation pipeline
     let Ok(untrusted) = UntrustedMastForest::read_from_bytes(data) else {

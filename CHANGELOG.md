@@ -2,6 +2,10 @@
 
 ## v0.23.0 (TBD)
 
+#### Features
+
+- Added the `miden-vm-synthetic-bench` crate for VM-level proving regression detection driven by row-count snapshots from an external producer ([#3024](https://github.com/0xMiden/miden-vm/pull/3024)).
+
 #### Fixes
 - Rejected non-syscall references to exported kernel procedures in the linker ([#2902](https://github.com/0xMiden/miden-vm/issues/2902)).
 - Reverted the `MainTrace` typed row storage change that caused a large `blake3_1to1` trace-building regression ([#2949](https://github.com/0xMiden/miden-vm/pull/2949)).
@@ -11,13 +15,19 @@
 
 #### Bug Fixes
 
+- [BREAKING] Removed internal `_impl` precompile helpers from the core-lib API, hardened proof deserialization and debug storage errors, and added u256 regression vectors ([#3026](https://github.com/0xMiden/miden-vm/pull/3026)).
+- Fixed `u256::wrapping_mul` so it preserves caller stack values below its operands ([#3071](https://github.com/0xMiden/miden-vm/pull/3071)).
+- Fixed host event and advice-mutation diagnostics to point to the triggering `emit.event(...)` instruction ([#3042](https://github.com/0xMiden/miden-vm/pull/3042)).
 - Fixed debug-only underflow in memory range-check trace generation when the first memory access is at `clk = 0` ([#2976](https://github.com/0xMiden/miden-vm/pull/2976)).
 - Replaced unsound `ptr::read` with safe unbox in panic recovery, removing UB from potential double-drop ([#2934](https://github.com/0xMiden/miden-vm/pull/2934)).
 - Library deserialization now rejects exports whose `MastNodeId` is not a procedure root, closing a silent-failure path ([#2933](https://github.com/0xMiden/miden-vm/pull/2933)).
 - Reverted `InvokeKind::ProcRef` back to `InvokeKind::Exec` in `visit_mut_procref` and added an explanatory comment (#2893).
+- Fixed `FastProcessor` so `after_exit` trace decorators execute when tracing is enabled without debug mode, and added a tracing-only regression test.
 - Fixed the release dry-run publish cycle between `miden-air` and `miden-ace-codegen`, and preserved leaf-only DAG imports with explicit snapshots ([#2931](https://github.com/0xMiden/miden-vm/pull/2931)).
 - Added regression coverage for the exact `max_num_continuations` continuation-stack boundary ([#2995](https://github.com/0xMiden/miden-vm/pull/2995)).
 - Fixed AEAD padding handling so encrypt does not overwrite memory next to the plaintext buffer and decrypt leaves the plaintext output tail untouched ([#3008](https://github.com/0xMiden/miden-vm/pull/3008)).
+- Fixed MAST compaction after debug info is cleared so compiler-generated packages do not grow ([#3044](https://github.com/0xMiden/miden-vm/pull/3044)).
+- Canonicalized `PathBuf::try_from(String)` to match `TryFrom<&str>`/`FromStr`, so semantically equivalent quoted path components compare and hash consistently.
 
 #### Changes
 
@@ -31,6 +41,7 @@
 - [BREAKING] Removed the deprecated `FastProcessor::execute_for_trace_sync()` and `execute_for_trace()` wrappers; use `execute_trace_inputs_sync()` or `execute_trace_inputs()` instead ([#2865](https://github.com/0xMiden/miden-vm/pull/2865)).
 - [BREAKING] Removed the deprecated unbound `TraceBuildInputs::new()` and `TraceBuildInputs::from_program()` constructors; use `execute_trace_inputs_sync()` or `execute_trace_inputs()` instead ([#2865](https://github.com/0xMiden/miden-vm/pull/2865)).
 - Added `prove_from_trace_sync(...)` for proving from pre-executed trace inputs ([#2865](https://github.com/0xMiden/miden-vm/pull/2865)).
+- [BREAKING] Removed the immediate form of `adv_push` (`adv_push.N`); use N consecutive `adv_push` instructions (or `repeat.N adv_push end` for large N) instead ([#2900](https://github.com/0xMiden/miden-vm/pull/2900)).
 - [BREAKING] Reduced the prove-from-trace API to post-execution trace inputs: `TraceBuildInputs` no longer carries full execution output, `prove_from_trace_sync()` takes `TraceProvingInputs`, and `ProvingOptions` no longer include `ExecutionOptions` ([#2948](https://github.com/0xMiden/miden-vm/pull/2948)).
 - Redesigned the hasher chiplet to use a controller/permutation split architecture with permutation calls deduplication ([#2927](https://github.com/0xMiden/miden-vm/pull/2927)).
 - Cached repeated test compilations to speed up assembler tests without changing coverage, and fixed the core library build watch path ([#3047](https://github.com/0xMiden/miden-vm/pull/3047)).
@@ -38,8 +49,10 @@
 - Refactor trace generation to row-major format ([#2937](https://github.com/0xMiden/miden-vm/pull/2937)).
 - Documented non-overlap requirement for `memcopy_words`, `memcopy_elements`, and AEAD encrypt/decrypt procedures ([#2941](https://github.com/0xMiden/miden-vm/pull/2941)).
 - Aligned AEAD key/nonce stack-order documentation and handler comments with the runtime contract ([#3036](https://github.com/0xMiden/miden-vm/pull/3036)).
+- Aligned `core_lib::math::u256` user docs with unified LE stack limb ordering (`a0/b0` on top), removing conflicting `[b7..b0, a7..a0]` notation ([#3066](https://github.com/0xMiden/miden-vm/pull/3066)).
 - Added chainable `Test` builders for common test setup in `miden-utils-testing` ([#2957](https://github.com/0xMiden/miden-vm/pull/2957)).
 - Added fuzz coverage for package semantic deserialization and project parsing, loading, and assembly ([#3015](https://github.com/0xMiden/miden-vm/pull/3015)).
+- Made serde opt-in for package crates, and added macro-based binary and serde roundtrip tests for Arbitrary serialization types ([#3058](https://github.com/0xMiden/miden-vm/pull/3058)).
 - Speed-up AUX range check trace generation by changing divisors to a flat Vec layout ([#2966](https://github.com/0xMiden/miden-vm/pull/2966)).
 - Removed AIR constraint tagging instrumentation, applied a uniform constraint description style across components, and optimized constraint evaluation ([#2856](https://github.com/0xMiden/miden-vm/pull/2856)).
 
@@ -48,6 +61,7 @@
 #### Enhancements
 
 - Added `FastProcessor::into_parts()` to extract advice provider, memory, and precompile transcript after step-based execution ([#2901](https://github.com/0xMiden/miden-vm/pull/2901)).
+- Added deterministic regression vectors for `math::u256` core-lib tests and replaced `BigUint`-based expectations with an in-test `U256` model ([#2974](https://github.com/0xMiden/miden-vm/pull/2974)).
 
 #### Fixes
 

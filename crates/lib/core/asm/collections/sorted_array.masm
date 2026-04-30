@@ -29,7 +29,7 @@ const LOWERBOUND_KEY_VALUE_EVENT = event("miden::core::collections::sorted_array
 pub proc find_word
     # Call the non-deterministic lowerbound advisor (5 cycles)
     emit.LOWERBOUND_ARRAY_EVENT
-    adv_push.2
+    adv_push adv_push
     #=> [was_value_found, maybe_value_ptr, VALUE, start_ptr, end_ptr]
 
     if.true
@@ -251,7 +251,7 @@ proc find_partial_key_value
     movup.6 loc_store.0
     # => [KEY, start_ptr, end_ptr]
 
-    adv_push.2
+    adv_push adv_push
     #=> [was_key_found, maybe_key_ptr, KEY, start_ptr, end_ptr]
 
     if.true

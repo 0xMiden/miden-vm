@@ -529,7 +529,7 @@ impl FastProcessor {
         current_forest: &MastForest,
         host: &mut impl BaseHost,
     ) -> ControlFlow<BreakReason> {
-        if !self.in_debug_mode() {
+        if !self.should_execute_decorators() {
             return ControlFlow::Continue(());
         }
 

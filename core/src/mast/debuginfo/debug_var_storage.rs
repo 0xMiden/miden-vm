@@ -10,6 +10,8 @@ use alloc::{
 };
 
 use miden_utils_indexing::{Idx, IndexVec};
+#[cfg(feature = "arbitrary")]
+use proptest::prelude::*;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -28,6 +30,10 @@ use crate::{
 /// variable information.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true))
+)]
 pub struct DebugVarId(u32);
 
 impl DebugVarId {
@@ -65,6 +71,16 @@ impl From<u32> for DebugVarId {
 impl From<DebugVarId> for u32 {
     fn from(value: DebugVarId) -> Self {
         value.0
+    }
+}
+
+#[cfg(feature = "arbitrary")]
+impl Arbitrary for DebugVarId {
+    type Parameters = ();
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        any::<u32>().prop_map(Self::from).boxed()
     }
 }
 
@@ -256,10 +272,14 @@ impl OpToDebugVarIds {
             }
         }
 
-        if *self.op_indptr_for_var_ids.last().unwrap() != self.debug_var_ids.len() {
+        let &last_op_ptr = self
+            .op_indptr_for_var_ids
+            .last()
+            .ok_or_else(|| "op_indptr_for_var_ids is unexpectedly empty".to_string())?;
+        if last_op_ptr != self.debug_var_ids.len() {
             return Err(format!(
                 "op_indptr_for_var_ids end {} doesn't match debug_var_ids length {}",
-                self.op_indptr_for_var_ids.last().unwrap(),
+                last_op_ptr,
                 self.debug_var_ids.len()
             ));
         }
@@ -284,11 +304,12 @@ impl OpToDebugVarIds {
         }
 
         let max_node_ptr = self.op_indptr_for_var_ids.len() - 1;
-        if *node_slice.last().unwrap() > max_node_ptr {
+        let &last_node_ptr = node_slice
+            .last()
+            .ok_or_else(|| "node_indptr_for_op_idx is unexpectedly empty".to_string())?;
+        if last_node_ptr > max_node_ptr {
             return Err(format!(
-                "node_indptr_for_op_idx end {} exceeds op_indptr bounds {}",
-                node_slice.last().unwrap(),
-                max_node_ptr
+                "node_indptr_for_op_idx end {last_node_ptr} exceeds op_indptr bounds {max_node_ptr}"
             ));
         }
 
@@ -355,13 +376,15 @@ impl OpToDebugVarIds {
                 .push(op_start)
                 .map_err(|_| DecoratorIndexError::OperationIndex { node, operation: op_start })?;
         } else {
-            let max_op_idx = debug_vars_info.last().unwrap().0;
+            let max_op_idx =
+                debug_vars_info.last().ok_or(DecoratorIndexError::InternalStructure)?.0;
             let mut it = debug_vars_info.into_iter().peekable();
 
             for op in 0..=max_op_idx {
                 self.op_indptr_for_var_ids.push(self.debug_var_ids.len());
                 while it.peek().is_some_and(|(i, _)| *i == op) {
-                    self.debug_var_ids.push(it.next().unwrap().1);
+                    self.debug_var_ids
+                        .push(it.next().ok_or(DecoratorIndexError::InternalStructure)?.1);
                 }
             }
             self.op_indptr_for_var_ids.push(self.debug_var_ids.len());

@@ -138,6 +138,39 @@ fn mast_forest_merge_preserves_dyn_callness_and_digest() {
     assert_eq!(merged_dyncall.digest(), dyncall_digest, "dyncall digest should be preserved");
 }
 
+#[test]
+fn mast_forest_merge_preserves_padded_basic_block_batches() {
+    let mut forest = MastForest::new();
+
+    let operations = vec![Operation::Add, Operation::Push(Felt::new_unchecked(100))];
+    let block_id = BasicBlockNodeBuilder::new(operations.clone(), Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(block_id);
+
+    let original_block = forest[block_id].unwrap_basic_block();
+    assert!(
+        original_block.operations().count() > original_block.raw_operations().count(),
+        "test input must create padded operations"
+    );
+    let original_batches = original_block.op_batches().to_vec();
+
+    let (merged, root_maps) = MastForest::merge([&forest]).unwrap();
+
+    let merged_block_id = root_maps.map_root(0, &block_id).unwrap();
+    let merged_block = merged[merged_block_id].unwrap_basic_block();
+    assert_eq!(
+        merged_block.raw_operations().copied().collect::<Vec<_>>(),
+        operations,
+        "merge must not treat padded operations as raw operations"
+    );
+    assert_eq!(
+        merged_block.op_batches(),
+        original_batches,
+        "merge must preserve the original batch layout"
+    );
+}
+
 /// Tests that Call(bar) still correctly calls the remapped bar block.
 ///
 /// [Block(foo), Call(foo)]

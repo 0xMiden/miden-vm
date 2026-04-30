@@ -376,14 +376,12 @@ fn checked_child_index(
     let child_index = child_id as usize;
     if child_index >= node_count {
         return Err(DeserializationError::InvalidValue(format!(
-            "child id {} out of bounds for {} nodes",
-            child_id, node_count
+            "child id {child_id} out of bounds for {node_count} nodes"
         )));
     }
     if child_index >= parent_index {
         return Err(DeserializationError::InvalidValue(format!(
-            "forward reference from node {} to {} (child index must be less than parent)",
-            parent_index, child_id
+            "forward reference from node {parent_index} to {child_id} (child index must be less than parent)"
         )));
     }
     Ok(child_index)
