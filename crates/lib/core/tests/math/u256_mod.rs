@@ -1,4 +1,4 @@
-use core::ops::{BitAnd, BitOr, BitXor};
+use core::ops::{BitAnd, BitOr, BitXor, Not};
 
 use miden_utils_testing::proptest::prelude::*;
 
@@ -299,6 +299,61 @@ fn eq_edge_cases() {
     }
 }
 
+#[test]
+fn neq_edge_cases() {
+    // Mirrors eq_edge_cases with the expected flag flipped, so both procs cover the same surface.
+    let source = "
+        use miden::core::math::u256
+        begin
+            exec.u256::neq
+        end";
+
+    let max = U256::from_le_u32_limbs([u32::MAX; 8]);
+
+    // (a, b, expected_neq)
+    let cases: [(U256, U256, u64); 11] = [
+        (U256::ZERO, U256::ZERO, 0),
+        (max, max, 0),
+        (U256::from_bit(0), U256::from_bit(0), 0),
+        (U256::from_bit(255), U256::from_bit(255), 0),
+        (U256::ZERO, U256::from_le_u32_limbs([1, 0, 0, 0, 0, 0, 0, 0]), 1),
+        (U256::ZERO, U256::from_le_u32_limbs([0, 1, 0, 0, 0, 0, 0, 0]), 1),
+        (U256::ZERO, U256::from_le_u32_limbs([0, 0, 0, 1, 0, 0, 0, 0]), 1),
+        (U256::ZERO, U256::from_le_u32_limbs([0, 0, 0, 0, 1, 0, 0, 0]), 1),
+        (U256::ZERO, U256::from_le_u32_limbs([0, 0, 0, 0, 0, 0, 0, 1]), 1),
+        (
+            U256::from_le_u32_limbs([1, 2, 3, 4, 5, 6, 7, 8]),
+            U256::from_le_u32_limbs([1, 2, 3, 4, 5, 6, 7, 9]),
+            1,
+        ),
+        (
+            U256::from_le_u32_limbs([1, 2, 3, 4, 5, 6, 7, 8]),
+            U256::from_le_u32_limbs([1, 2, 3, 5, 5, 6, 7, 8]),
+            1,
+        ),
+    ];
+
+    for (a, b, expected_neq) in cases {
+        let operands = [b.to_le_limbs(), a.to_le_limbs()].concat();
+        build_test!(source, &operands).expect_stack(&[expected_neq]);
+    }
+}
+
+#[test]
+fn not_regression_vectors() {
+    let source = "
+        use miden::core::math::u256
+        begin
+            exec.u256::not
+        end";
+
+    for value in regression_values() {
+        let inverted = (!value).to_le_limbs();
+        let operands = value.to_le_limbs();
+        build_test!(source, &operands).expect_stack(&inverted);
+    }
+}
+
 proptest! {
     #[test]
     fn wrapping_mul_proptest(
@@ -436,6 +491,50 @@ proptest! {
         let operands = [a.to_le_limbs(), a.to_le_limbs()].concat();
         build_test!(source, &operands).prop_expect_stack(&[1])?;
     }
+
+    #[test]
+    fn neq_proptest(
+        a in prop::array::uniform8(boundary_biased_u32()),
+        b in prop::array::uniform8(boundary_biased_u32()),
+    ) {
+        let source = "
+            use miden::core::math::u256
+            begin
+                exec.u256::neq
+            end";
+
+        let a = U256::from_le_u32_limbs(a);
+        let b = U256::from_le_u32_limbs(b);
+        let operands = [b.to_le_limbs(), a.to_le_limbs()].concat();
+        build_test!(source, &operands).prop_expect_stack(&[u64::from(a != b)])?;
+    }
+
+    #[test]
+    fn neq_proptest_self(a in prop::array::uniform8(boundary_biased_u32())) {
+        // Self-inequality must always be 0; covers the OR-fold collapsing 8 zero comparisons.
+        let source = "
+            use miden::core::math::u256
+            begin
+                exec.u256::neq
+            end";
+
+        let a = U256::from_le_u32_limbs(a);
+        let operands = [a.to_le_limbs(), a.to_le_limbs()].concat();
+        build_test!(source, &operands).prop_expect_stack(&[0])?;
+    }
+
+    #[test]
+    fn not_proptest(a in prop::array::uniform8(boundary_biased_u32())) {
+        let source = "
+            use miden::core::math::u256
+            begin
+                exec.u256::not
+            end";
+
+        let a = U256::from_le_u32_limbs(a);
+        let expected = (!a).to_le_limbs();
+        build_test!(source, &a.to_le_limbs()).prop_expect_stack(&expected)?;
+    }
 }
 
 // HELPER FUNCTIONS
@@ -567,6 +666,14 @@ impl BitXor for U256 {
 
     fn bitxor(self, rhs: Self) -> Self::Output {
         Self::new(self.lo ^ rhs.lo, self.hi ^ rhs.hi)
+    }
+}
+
+impl Not for U256 {
+    type Output = Self;
+
+    fn not(self) -> Self::Output {
+        Self::new(!self.lo, !self.hi)
     }
 }
 

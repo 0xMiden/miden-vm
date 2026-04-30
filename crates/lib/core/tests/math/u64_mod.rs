@@ -316,6 +316,58 @@ fn widening_mul_edge_cases() {
     }
 }
 
+#[test]
+fn overflowing_mul() {
+    let source = "
+        use miden::core::math::u64
+        begin
+            exec.u64::overflowing_mul
+        end";
+
+    let cases: &[(u64, u64)] = &[
+        (0, 0),
+        (1, 1),
+        (1, u64::MAX),
+        (u64::MAX, 1),
+        (u32::MAX as u64, u32::MAX as u64),  // largest no-overflow product
+        (1u64 << 32, 1u64 << 32),            // smallest overflowing product
+        (u64::MAX, u64::MAX),
+        (rand_value(), rand_value()),
+    ];
+
+    for &(a, b) in cases {
+        let (c, overflow) = a.overflowing_mul(b);
+        let (a1, a0) = split_u64(a);
+        let (b1, b0) = split_u64(b);
+        let (c1, c0) = split_u64(c);
+
+        let input_stack = stack![a0, a1, b0, b1];
+        let test = build_test!(source, &input_stack);
+        test.expect_stack(&[overflow as u64, c0, c1]);
+    }
+}
+
+#[test]
+fn checked_not() {
+    let cases: &[u64] = &[0, 1, u64::MAX, u32::MAX as u64, 1u64 << 32, rand_value()];
+
+    let source = "
+        use miden::core::math::u64
+        begin
+            exec.u64::not
+        end";
+
+    for &a in cases {
+        let c = !a;
+        let (a1, a0) = split_u64(a);
+        let (c1, c0) = split_u64(c);
+
+        let input_stack = stack![a0, a1];
+        let test = build_test!(source, &input_stack);
+        test.expect_stack(&[c0, c1]);
+    }
+}
+
 // COMPARISONS
 // ------------------------------------------------------------------------------------------------
 

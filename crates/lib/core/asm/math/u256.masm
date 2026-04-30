@@ -284,6 +284,22 @@ pub proc xor(b: u256, a: u256) -> u256
     u32xor
 end
 
+#! Computes bitwise NOT of one unsigned 256 bit integer.
+#! Stack transition looks as follows:
+#! [a0, a1, a2, a3, a4, a5, a6, a7, ...]
+#!   -> [c0, c1, c2, c3, c4, c5, c6, c7, ...], where c = !a (i.e., 2^256 - 1 - a).
+pub proc not(a: u256) -> u256
+    # Each `movup.7 u32not` rotates one limb to the top and inverts it; 8 reps cover all limbs.
+    movup.7 u32not
+    movup.7 u32not
+    movup.7 u32not
+    movup.7 u32not
+    movup.7 u32not
+    movup.7 u32not
+    movup.7 u32not
+    movup.7 u32not
+end
+
 #! Returns 1 if the top u256 value is zero; lower stack values are preserved.
 #! Stack transition looks as follows:
 #! [a0, a1, a2, a3, a4, a5, a6, a7, ...] -> [is_zero, ...].
@@ -338,6 +354,50 @@ pub proc eq(b: u256, a: u256) -> i1
     movup.2
     eq
     and
+end
+
+#! Returns 1 if two unsigned 256 bit integers are not equal.
+#! Stack transition looks as follows:
+#! [b0, b1, b2, b3, b4, b5, b6, b7, a0, a1, a2, a3, a4, a5, a6, a7, ...] -> [is_neq, ...].
+pub proc neq(b: u256, a: u256) -> i1
+    # Compare each (a_i, b_i) pair and OR-fold the result.
+    movup.8
+    neq
+
+    movup.8
+    movup.2
+    neq
+    or
+
+    movup.7
+    movup.2
+    neq
+    or
+
+    movup.6
+    movup.2
+    neq
+    or
+
+    movup.5
+    movup.2
+    neq
+    or
+
+    movup.4
+    movup.2
+    neq
+    or
+
+    movup.3
+    movup.2
+    neq
+    or
+
+    movup.2
+    movup.2
+    neq
+    or
 end
 
 # ===== MULTIPLICATION ============================================================================
