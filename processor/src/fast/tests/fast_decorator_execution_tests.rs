@@ -80,6 +80,7 @@ fn test_after_exit_trace_executes_with_tracing_only_fast() {
     let mut host = TestHost::new();
     let processor = FastProcessor::new(StackInputs::default())
         .with_advice(AdviceInputs::default())
+        .expect("advice inputs should fit advice map limits")
         .with_tracing(true);
 
     let result = processor.execute_sync(&program, &mut host);
