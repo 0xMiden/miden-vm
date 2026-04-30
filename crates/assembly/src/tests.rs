@@ -411,6 +411,66 @@ fn library_serialization() -> Result<(), Report> {
     Ok(())
 }
 
+/// Verifies that deserializing a library rejects procedure exports whose `MastNodeId` is not a
+/// procedure root in the underlying MAST forest (issue #2831).
+#[test]
+fn library_deserialization_rejects_non_root_export() {
+    use miden_core::{
+        mast::{BasicBlockNodeBuilder, MastForestContributor},
+        serde::ByteWriter,
+    };
+
+    let context = TestContext::new();
+    let source = r#"
+        pub proc foo
+            add
+        end
+    "#;
+    let module = parse_module!(&context, "test::foo", source);
+
+    // Build a valid library.
+    let lib = Assembler::new(context.source_manager()).assemble_library([module]).unwrap();
+
+    // Clone the forest and add a non-root node.
+    let mut forest: MastForest = (**lib.mast_forest()).clone();
+    let builder = BasicBlockNodeBuilder::new(vec![Operation::Add], vec![]);
+    let non_root_id = builder.add_to_forest(&mut forest).unwrap();
+    assert!(
+        !forest.is_procedure_root(non_root_id),
+        "sanity check: new node should not be a root"
+    );
+
+    // Manually serialize a tampered library: forest + one export referencing the non-root node.
+    let mut tampered_bytes = Vec::new();
+    forest.write_into(&mut tampered_bytes);
+
+    // Number of exports.
+    1usize.write_into(&mut tampered_bytes);
+    // Tag: 0 = Procedure export.
+    0u8.write_into(&mut tampered_bytes);
+    // Fully qualified procedure path.
+    let path = PathBuf::new("::test::foo::foo").unwrap();
+    path.write_into(&mut tampered_bytes);
+    // MastNodeId of the non-root node.
+    u32::from(non_root_id).write_into(&mut tampered_bytes);
+    // No function signature.
+    tampered_bytes.write_bool(false);
+    // Empty attribute set.
+    miden_assembly_syntax::ast::AttributeSet::default().write_into(&mut tampered_bytes);
+
+    // Deserializing should fail because the export references a non-root node.
+    let result = Library::read_from_bytes(&tampered_bytes);
+    assert!(
+        result.is_err(),
+        "deserialization should reject exports referencing non-root nodes"
+    );
+    let err_msg = result.unwrap_err().to_string();
+    assert!(
+        err_msg.contains("no procedure root"),
+        "error should mention missing procedure root, got: {err_msg}"
+    );
+}
+
 #[test]
 fn get_module_by_path() -> Result<(), Report> {
     let context = TestContext::new();
@@ -4928,6 +4988,64 @@ fn regression_empty_kernel_library_is_rejected() {
         .assemble_kernel(kernel_masm)
         .expect_err("expected empty kernel to be rejected");
     assert_diagnostic_lines!(err, "library must contain at least one exported procedure");
+}
+
+/// Reproduces issue #3035: a MAST with padded basic blocks grows when debug info is cleared and the
+/// forest is compacted via self-merge.
+#[test]
+fn issue_3035_compact_after_clear_debug_info_does_not_grow_mast() -> TestResult {
+    let context = TestContext::default();
+    let module = context.parse_module_with_path(
+        "issue_3035::repro",
+        source_file!(
+            &context,
+            "
+            pub proc repro
+                add
+                push.100
+            end
+            "
+        ),
+    )?;
+
+    let library = Assembler::new(context.source_manager()).assemble_library([module])?;
+    let mut forest = library.mast_forest().as_ref().clone();
+    assert!(
+        forest
+            .nodes()
+            .iter()
+            .filter_map(|node| node.get_basic_block())
+            .any(|block| { block.operations().count() > block.raw_operations().count() }),
+        "test input must create at least one padded basic block"
+    );
+
+    forest.clear_debug_info();
+    let stripped_size = forest.to_bytes().len();
+    let stripped_without_debug_info_size = {
+        let mut bytes = Vec::new();
+        forest.write_stripped(&mut bytes);
+        bytes.len()
+    };
+    let stripped_nodes = forest.nodes().len();
+    let (compacted, _) = forest.compact();
+    let compacted_size = compacted.to_bytes().len();
+    let compacted_without_debug_info_size = {
+        let mut bytes = Vec::new();
+        compacted.write_stripped(&mut bytes);
+        bytes.len()
+    };
+    let compacted_nodes = compacted.nodes().len();
+
+    assert!(
+        compacted_size <= stripped_size,
+        "MastForest::compact increased serialized size after clear_debug_info(): \
+         stripped={stripped_size}, compacted={compacted_size}, \
+         stripped_without_debug_info={stripped_without_debug_info_size}, \
+         compacted_without_debug_info={compacted_without_debug_info_size}, \
+         stripped_nodes={stripped_nodes}, compacted_nodes={compacted_nodes}"
+    );
+
+    Ok(())
 }
 
 /// Test for issue #1644: verify that single-forest merge doesn't preserves node digests
