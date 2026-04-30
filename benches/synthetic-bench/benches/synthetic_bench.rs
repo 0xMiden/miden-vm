@@ -42,7 +42,8 @@ fn processor_inputs(program: &Program) -> (DefaultHost, Program, FastProcessor) 
         StackInputs::default(),
         AdviceInputs::default(),
         ExecutionOptions::default(),
-    );
+    )
+    .expect("processor advice inputs should fit advice map limits");
     (host, program.clone(), processor)
 }
 

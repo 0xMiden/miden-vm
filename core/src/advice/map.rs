@@ -11,7 +11,7 @@ use alloc::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    Felt, Word,
+    Felt, WORD_SIZE, Word,
     serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
@@ -82,6 +82,18 @@ impl AdviceMap {
             }
         }
         size
+    }
+
+    /// Returns the total number of field elements stored in this advice map's keys and values.
+    ///
+    /// Each key is a word, so every entry contributes [`WORD_SIZE`] key elements plus the number
+    /// of value elements associated with that key. Returns `None` if the count overflows `usize`.
+    pub fn total_element_count(&self) -> Option<usize> {
+        self.0.values().try_fold(0usize, |total, values| {
+            WORD_SIZE
+                .checked_add(values.len())
+                .and_then(|entry_elements| total.checked_add(entry_elements))
+        })
     }
 
     /// Gets the given key's corresponding entry in the map for in-place manipulation.

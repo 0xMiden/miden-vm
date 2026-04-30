@@ -56,8 +56,9 @@ fn program_execution_fast(c: &mut Criterion) {
                                 .with_library(&CoreLibrary::default())
                                 .unwrap();
 
-                            let processor =
-                                FastProcessor::new(stack_inputs).with_advice(advice_inputs.clone());
+                            let processor = FastProcessor::new(stack_inputs)
+                                .with_advice(advice_inputs.clone())
+                                .expect("advice inputs should fit advice map limits");
 
                             (host, program.clone(), processor)
                         },

@@ -75,7 +75,8 @@ pub async fn prove(
     proving_options: ProvingOptions,
 ) -> Result<(StackOutputs, ExecutionProof), ExecutionError> {
     // execute the program to create an execution trace using FastProcessor
-    let processor = FastProcessor::new_with_options(stack_inputs, advice_inputs, execution_options);
+    let processor = FastProcessor::new_with_options(stack_inputs, advice_inputs, execution_options)
+        .map_err(ExecutionError::advice_error_no_context)?;
 
     let trace_inputs = processor.execute_trace_inputs(program, host).await?;
     prove_from_trace_sync(TraceProvingInputs::new(trace_inputs, proving_options))
@@ -91,7 +92,8 @@ pub fn prove_sync(
     execution_options: ExecutionOptions,
     proving_options: ProvingOptions,
 ) -> Result<(StackOutputs, ExecutionProof), ExecutionError> {
-    let processor = FastProcessor::new_with_options(stack_inputs, advice_inputs, execution_options);
+    let processor = FastProcessor::new_with_options(stack_inputs, advice_inputs, execution_options)
+        .map_err(ExecutionError::advice_error_no_context)?;
 
     let trace_inputs = processor.execute_trace_inputs_sync(program, host)?;
     prove_from_trace_sync(TraceProvingInputs::new(trace_inputs, proving_options))
