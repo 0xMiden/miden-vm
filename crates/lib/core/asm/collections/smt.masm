@@ -359,7 +359,7 @@ proc set_empty_leaf
         dropw
         #=> [V, K, R, ...]
 
-        # Update advice map with domain separation (swap to put K on top for the leaf-domain
+        # Update advice map (swap to put K on top for the leaf-domain
         # hash key hash_in_domain(K || V, LEAF_DOMAIN)).
         swapw push.LEAF_DOMAIN movdn.8 adv.insert_hdword_d movup.8 drop swapw
         #=> [V, K, R, ...]
@@ -460,7 +460,7 @@ proc insert_single_leaf
         dropw
         # => [K, V_in_leaf, V, R]
 
-        # Update advice map with domain separation (swap to put K on top for the leaf-domain
+        # Update advice map (swap to put K on top for the leaf-domain
         # hash key hash_in_domain(K || V, LEAF_DOMAIN)).
         movupw.2 swapw push.LEAF_DOMAIN movdn.8 adv.insert_hdword_d movup.8 drop swapw
         # => [V, K, V_in_leaf, R]
@@ -624,7 +624,7 @@ proc remove_single_leaf
         dropw
         # => [K, V_in_leaf, V, R]
 
-        # Update advice map with domain separation (swap to put K on top for the leaf-domain
+        # Update advice map (swap to put K on top for the leaf-domain
         # hash key hash_in_domain(K || V, LEAF_DOMAIN)).
         movupw.2 swapw push.LEAF_DOMAIN movdn.8 adv.insert_hdword_d movup.8 drop swapw
         # => [V, K, V_in_leaf, R]
