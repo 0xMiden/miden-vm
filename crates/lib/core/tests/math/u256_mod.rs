@@ -13,6 +13,45 @@ fn wrapping_mul_regression_vectors() {
 }
 
 #[test]
+fn wrapping_mul_edge_cases() {
+    let zero = U256::ZERO;
+    let one = U256::from_le_u32_limbs([1, 0, 0, 0, 0, 0, 0, 0]);
+    let max = U256::from_le_u32_limbs([u32::MAX; 8]);
+    let lo_max = U256::from_le_u32_limbs([u32::MAX, u32::MAX, u32::MAX, u32::MAX, 0, 0, 0, 0]);
+    let hi_max = U256::from_le_u32_limbs([0, 0, 0, 0, u32::MAX, u32::MAX, u32::MAX, u32::MAX]);
+    let single_lo = U256::from_le_u32_limbs([u32::MAX, 0, 0, 0, 0, 0, 0, 0]);
+    let mixed = U256::from_le_u32_limbs([
+        0xdead_beef,
+        0xcafe_f00d,
+        0x1234_5678,
+        0x0fed_cba9,
+        0x8000_0000,
+        0x7fff_ffff,
+        0xaaaa_5555,
+        0x5555_aaaa,
+    ]);
+
+    // identity
+    assert_wrapping_mul(mixed, one);
+    assert_wrapping_mul(one, mixed);
+
+    // squaring (diagonal limb products)
+    assert_wrapping_mul(zero, zero);
+    assert_wrapping_mul(one, one);
+    assert_wrapping_mul(max, max);
+    assert_wrapping_mul(mixed, mixed);
+    assert_wrapping_mul(lo_max, lo_max);
+    assert_wrapping_mul(hi_max, hi_max);
+
+    // halves crossed
+    assert_wrapping_mul(lo_max, hi_max);
+
+    // single-limb operand stresses the row-0 special path under maximal carries
+    assert_wrapping_mul(single_lo, max);
+    assert_wrapping_mul(max, single_lo);
+}
+
+#[test]
 fn wrapping_mul_consumed_result_restores_min_stack_depth() {
     let source = "
         use miden::core::math::u256
