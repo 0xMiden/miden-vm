@@ -327,7 +327,7 @@ end
 #! domain-tagged sequential hash matches a given commitment.
 #!
 #! Like `pipe_double_words_preimage_to_memory`, but initializes the Poseidon2 capacity word to
-#! `[0, domain, 0, 0]` so that the digest matches `Poseidon2::hash_elements_in_domain(&elems, domain)`.
+#! `[0, domain, 0, 0]`.
 #!
 #! Inputs:  [domain, num_words, write_ptr, COMMITMENT]
 #! Outputs: [write_ptr']
