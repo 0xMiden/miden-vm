@@ -1,9 +1,8 @@
 use alloc::{sync::Arc, vec::Vec};
 use core::ops::Index;
 
-use midenc_hir_type::FunctionType;
-
 use miden_core::mast::MastNodeId;
+use midenc_hir_type::FunctionType;
 
 use crate::{
     Path, Word,
@@ -38,6 +37,17 @@ impl ModuleInfo {
 
     /// Adds a procedure to the module.
     pub fn add_procedure(
+        &mut self,
+        name: ProcedureName,
+        digest: Word,
+        signature: Option<Arc<FunctionType>>,
+        attributes: AttributeSet,
+    ) {
+        self.add_procedure_with_provenance(name, digest, signature, attributes, None, None);
+    }
+
+    /// Adds a procedure to the module with optional source provenance.
+    pub fn add_procedure_with_provenance(
         &mut self,
         name: ProcedureName,
         digest: Word,
@@ -92,12 +102,17 @@ impl ModuleInfo {
         })
     }
 
-    /// Returns the digest of the procedure with the provided name, if any.
-    pub fn get_procedure_digest_by_name(&self, name: &str) -> Option<Word> {
+    /// Returns the procedure info for the procedure with the provided name, if any.
+    pub fn get_procedure_by_name(&self, name: &str) -> Option<&ProcedureInfo> {
         self.items.iter().find_map(|info| match info {
-            ItemInfo::Procedure(proc) if proc.name.as_str() == name => Some(proc.digest),
+            ItemInfo::Procedure(proc) if proc.name.as_str() == name => Some(proc),
             _ => None,
         })
+    }
+
+    /// Returns the digest of the procedure with the provided name, if any.
+    pub fn get_procedure_digest_by_name(&self, name: &str) -> Option<Word> {
+        self.get_procedure_by_name(name).map(|proc| proc.digest)
     }
 
     /// Returns an iterator over the items in the module with their corresponding item index in the

@@ -374,6 +374,15 @@ impl Library {
         let export = self.exports.get(path.as_ref()).and_then(LibraryExport::as_procedure);
         export.map(|e| self.mast_forest()[e.node].digest())
     }
+
+    /// Returns the exact procedure node for the specified path, if it is present.
+    pub fn get_procedure_node_by_path(&self, path: impl AsRef<Path>) -> Option<MastNodeId> {
+        let path = path.as_ref().to_absolute();
+        self.exports
+            .get(path.as_ref())
+            .and_then(LibraryExport::as_procedure)
+            .map(|export| export.node)
+    }
 }
 
 /// Conversions
@@ -392,7 +401,7 @@ impl Library {
                 LibraryExport::Procedure(ProcedureExport { node, path, signature, attributes }) => {
                     let proc_digest = self.mast_forest[*node].digest();
                     let name = path.last().unwrap();
-                    module.add_procedure(
+                    module.add_procedure_with_provenance(
                         ProcedureName::new(name).expect("valid procedure name"),
                         proc_digest,
                         signature.clone().map(Arc::new),
@@ -540,7 +549,7 @@ impl TryFrom<Arc<Library>> for KernelLibrary {
 
                     let proc_digest = library.mast_forest[export.node].digest();
                     proc_digests.push(proc_digest);
-                    kernel_module.add_procedure(
+                    kernel_module.add_procedure_with_provenance(
                         ProcedureName::new(export.path.last().unwrap())
                             .expect("valid procedure name"),
                         proc_digest,
