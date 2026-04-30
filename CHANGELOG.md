@@ -34,6 +34,7 @@
 - [BREAKING] Reject non-procedure invoke targets during semantic analysis, and return an assembly error instead of panicking if one still reaches assembly ([#2899](https://github.com/0xMiden/miden-vm/pull/2899)).
 - Added `Package::content_digest()` to identify package contents without changing the MAST digest, including manifest data and semantic package metadata ([#2909](https://github.com/0xMiden/miden-vm/pull/2909)).
 - Hardened MAST forest and package byte-slice deserialization against fuzzed length fields ([#3088](https://github.com/0xMiden/miden-vm/pull/3088)).
+- [BREAKING] Bounded the live advice map by total field elements during execution; advice-provider setup now returns an error when initial advice exceeds this limit ([#3085](https://github.com/0xMiden/miden-vm/pull/3085)).
 
 #### Changes
 
