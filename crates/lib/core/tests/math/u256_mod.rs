@@ -122,15 +122,22 @@ fn overflowing_add_edge_cases() {
         // single-limb carry into limb 1
         (high_limb_max, one),
         // carry propagating through several limbs
-        (
-            U256::from_le_u32_limbs([u32::MAX, u32::MAX, u32::MAX, 0, 0, 0, 0, 0]),
-            one,
-        ),
+        (U256::from_le_u32_limbs([u32::MAX, u32::MAX, u32::MAX, 0, 0, 0, 0, 0]), one),
         // carry crossing the lo/hi 128-bit boundary
         (lo_word_max, one),
-        // carry propagates through the bottom 7 limbs and is absorbed by the top limb (no overflow)
+        // carry propagates through the bottom 7 limbs and is absorbed by the top limb (no
+        // overflow)
         (
-            U256::from_le_u32_limbs([u32::MAX, u32::MAX, u32::MAX, u32::MAX, u32::MAX, u32::MAX, u32::MAX, 0]),
+            U256::from_le_u32_limbs([
+                u32::MAX,
+                u32::MAX,
+                u32::MAX,
+                u32::MAX,
+                u32::MAX,
+                u32::MAX,
+                u32::MAX,
+                0,
+            ]),
             one,
         ),
         // overflow at the top: max + 1 = 0 with overflow=1
@@ -259,9 +266,8 @@ proptest! {
         a in prop::array::uniform8(boundary_biased_u32()),
         b in prop::array::uniform8(boundary_biased_u32()),
     ) {
-        // Uses assert_wrapping_mul which embeds assert_stack_words inside the program;
-        // wrapping_mul preserves caller inputs on the stack (per #3071), so we cannot
-        // use prop_expect_stack with a 16-element limit and must assert inside MASM.
+        // assert_wrapping_mul embeds an assert_eqw against the expected product inside the
+        // MASM program; a mismatch surfaces as a MASM execution failure.
         assert_wrapping_mul(U256::from_le_u32_limbs(a), U256::from_le_u32_limbs(b));
     }
 
@@ -568,7 +574,7 @@ fn boundary_biased_u32() -> impl Strategy<Value = u32> {
         Just(1u32),
         Just(u32::MAX),
         Just(u32::MAX - 1),
-        Just(0x7FFFFFFF),
+        Just(0x7fffffff),
         Just(0x80000000),
         any::<u32>(),
     ]

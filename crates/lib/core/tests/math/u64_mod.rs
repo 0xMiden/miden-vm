@@ -287,22 +287,22 @@ fn widening_mul_edge_cases() {
         (1, u64::MAX),
         (u64::MAX, 1),
         // u32::MAX squared: largest product fitting in 64 bits
-        (0xFFFFFFFF, 0xFFFFFFFF),
+        (0xffffffff, 0xffffffff),
         // 2^32 boundary: smallest values where the product needs the c_mid_hi limb
         (1u64 << 32, 1u64 << 32),
         (1u64 << 32, (1u64 << 32) - 1),
         ((1u64 << 32) - 1, 1u64 << 32),
         // single-limb operands
-        (0xFFFFFFFF, 0xFFFFFFFF_00000000),
-        (0xFFFFFFFF_00000000, 0xFFFFFFFF),
-        (0xFFFFFFFF_00000000, 0xFFFFFFFF_00000000),
+        (0xffffffff, 0xffffffff_00000000),
+        (0xffffffff_00000000, 0xffffffff),
+        (0xffffffff_00000000, 0xffffffff_00000000),
         // u64::MAX squared (already covered by widening_mul, kept for completeness)
         (u64::MAX, u64::MAX),
         // values where individual limbs are 0 and 0xFFFFFFFF, exercising mixed-limb carries
-        (0xFFFFFFFF_00000000, 0x00000000_FFFFFFFF),
-        (0x00000000_FFFFFFFF, 0xFFFFFFFF_00000000),
+        (0xffffffff_00000000, 0x00000000_ffffffff),
+        (0x00000000_ffffffff, 0xffffffff_00000000),
         // arbitrary mid-range values to catch generic mixing bugs
-        (0xDEADBEEF_CAFEBABE, 0x0123456789ABCDEF),
+        (0xdeadbeef_cafebabe, 0x0123456789abcdef),
     ];
 
     for &(a, b) in cases {

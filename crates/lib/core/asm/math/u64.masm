@@ -119,7 +119,7 @@ end
 #! Stack transition looks as follows:
 #! [b_lo, b_hi, a_lo, a_hi, ...] -> [c_lo, c_mid_lo, c_mid_hi, c_hi, ...], where
 #! c = a * b is represented as a 128-bit value split into 4 32-bit limbs.
-#! Body executes in 34 VM cycles.
+#! This takes 34 cycles.
 pub proc widening_mul(b: u64, a: u64) -> u128
     # c = a*b = a_lo*b_lo + (a_lo*b_hi + a_hi*b_lo)*2^32 + a_hi*b_hi*2^64
     # Partial products accumulate high-first on the stack, then reversew flips to LE.
@@ -566,7 +566,7 @@ end
 #! The shift value n should be in the range [0, 64), otherwise it will result in an error.
 #! Stack transition looks as follows:
 #! [n, a_lo, a_hi, ...] -> [c_lo, c_hi, ...], where c = a >> n.
-#! Body executes in ~61 VM cycles (varies by 1 cycle depending on n).
+#! This takes 60 or 61 cycles, depending on n.
 pub proc shr(n: u32, a: u64) -> u64
     # ==========================================================================
     # RIGHT SHIFT: Computes a >> n where a is 64-bit and n is shift amount
@@ -710,7 +710,7 @@ end
 #! The rotation amount n should be in the range [0, 64), otherwise it will result in an error.
 #! Stack transition looks as follows:
 #! [n, a_lo, a_hi, ...] -> [c_lo, c_hi, ...], where c = a <<< n (rotate left).
-#! Body executes in 46 VM cycles.
+#! This takes 46 cycles.
 pub proc rotl(n: u32, a: u64) -> u64
     # ==========================================================================
     # LEFT ROTATION: Computes a <<< n (rotate left by n bits)
@@ -802,7 +802,7 @@ end
 #! The rotation amount n should be in the range [0, 64), otherwise it will result in an error.
 #! Stack transition looks as follows:
 #! [n, a_lo, a_hi, ...] -> [c_lo, c_hi, ...], where c = a >>> n (rotate right).
-#! Body executes in 60 VM cycles.
+#! This takes 60 cycles.
 pub proc rotr(n: u32, a: u64) -> u64
     # ==========================================================================
     # RIGHT ROTATION: Computes a >>> n (rotate right by n bits)
