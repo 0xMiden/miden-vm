@@ -546,7 +546,12 @@ mod tests {
     fn stack_set_word_allows_max_start_idx() {
         let mut processor = build_replay_processor();
         let start_idx = MIN_STACK_DEPTH - WORD_SIZE;
-        let word: Word = core::array::from_fn(|i| Felt::new((i as u64) + 1)).into();
+        let word = Word::from([
+            Felt::new_unchecked(1),
+            Felt::new_unchecked(2),
+            Felt::new_unchecked(3),
+            Felt::new_unchecked(4),
+        ]);
 
         processor.set_word(start_idx, &word);
 
