@@ -469,7 +469,7 @@ end
             parse::{Parse, ParseOptions},
         };
 
-        let big_component = "a".repeat(256);
+        let big_component = "a".repeat(u16::MAX as usize);
         let source = format!("begin\n    exec.{big_component}::x::foo\nend\n");
 
         let source_manager = Arc::new(DefaultSourceManager::default());

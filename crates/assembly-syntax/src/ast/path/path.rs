@@ -129,8 +129,12 @@ impl From<&Path> for alloc::sync::Arc<Path> {
 
 /// Conversions
 impl Path {
-    /// Path components  must be 255 bytes or less
-    pub const MAX_COMPONENT_LENGTH: usize = u8::MAX as usize;
+    /// Path components must be no larger than the maximum valid path length, which is u16::MAX
+    /// bytes, minus 2 bytes for the optional absolute path prefix `::`.
+    ///
+    /// While path components of this size are unlikely, it keeps the `Path` API consistent in cases
+    /// where a path is long simply due to a single component.
+    pub const MAX_COMPONENT_LENGTH: usize = (u16::MAX as usize) - 2;
 
     /// An empty path for use as a default value, placeholder, comparisons, etc.
     pub const EMPTY: &Path = unsafe { &*("" as *const str as *const Path) };
@@ -609,6 +613,17 @@ impl fmt::Display for Path {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_path_split_with_quotes_and_large_components() -> Result<(), PathError> {
+        let path = Path::new(
+            "::\"miden:counter-contract/counter-contract@0.1.0\"::counter_contract::_RNvXsg_NtNtCseaniv3neBPi_10miden_base5types7storageINtB5_10StorageMapNtNtCscxjsWiPtnzN_11miden_field4word4WordNtNtB19_10wasm_miden4FeltEINtNtCs3NSMmx5ugmE_4core7convert4FromNtNtNtCs52sTGLXFK3W_14miden_base_sys8bindings5types13StorageSlotIdE4fromCsanZ5gV8dMQ0_16counter_contract",
+        );
+        let canonicalized = path.canonicalize()?;
+
+        assert_eq!(canonicalized.as_path(), path);
+        Ok(())
+    }
 
     #[test]
     fn test_canonicalize_path_identity() -> Result<(), PathError> {
