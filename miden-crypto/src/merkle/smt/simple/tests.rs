@@ -1,6 +1,7 @@
-use alloc::vec::Vec;
+use alloc::{collections::BTreeMap, vec::Vec};
 
 use assert_matches::assert_matches;
+use proptest::prelude::*;
 
 use super::{
     super::{MerkleError, SimpleSmt, Word},
@@ -11,7 +12,7 @@ use crate::{
     hash::poseidon2::Poseidon2,
     merkle::{
         EmptySubtreeRoots, InnerNodeInfo, MerklePath, MerkleTree, int_to_leaf, int_to_node,
-        smt::{LeafIndex, SparseMerkleTree},
+        smt::{LeafIndex, SparseMerkleTreeReader},
     },
 };
 
@@ -418,7 +419,7 @@ fn test_simplesmt_set_subtree_unchanged_for_wrong_index() {
     assert_eq!(tree.root(), tree_root_before_insertion);
 }
 
-/// We insert an empty subtree that has the same depth as the original tree
+// Covers whole-tree replacement, where the subtree depth equals the tree depth.
 #[test]
 fn test_simplesmt_set_subtree_entire_tree() {
     // Initial Tree:
@@ -452,6 +453,158 @@ fn test_simplesmt_set_subtree_entire_tree() {
     tree.set_subtree(0, subtree).unwrap();
 
     assert_eq!(tree.root(), *EmptySubtreeRoots::entry(DEPTH, 0));
+    assert_eq!(tree.num_leaves(), 0);
+    assert!(tree.is_empty());
+    assert_eq!(tree.inner_nodes().count(), 0);
+}
+
+/// Verifies that `set_subtree()` removes stale leaves and inner nodes in the insertion region.
+#[test]
+fn test_simplesmt_set_subtree_clears_region() {
+    let z = EMPTY_WORD;
+
+    let a = Poseidon2::merge(&[z; 2]);
+    let b = Poseidon2::merge(&[a; 2]);
+    let c = Poseidon2::merge(&[b; 2]);
+    let d = Poseidon2::merge(&[c; 2]);
+
+    let mut tree = {
+        let entries = vec![(0, a), (1, b), (4, c), (5, d), (7, d)];
+        SimpleSmt::<3>::with_leaves(entries).unwrap()
+    };
+
+    let empty_subtree = SimpleSmt::<1>::new().unwrap();
+    tree.set_subtree(2, empty_subtree).unwrap();
+
+    assert_eq!(tree.num_leaves(), 3);
+    assert_eq!(tree.get_leaf(&LeafIndex::<3>::new(0).unwrap()), a);
+    assert_eq!(tree.get_leaf(&LeafIndex::<3>::new(1).unwrap()), b);
+    assert_eq!(tree.get_leaf(&LeafIndex::<3>::new(4).unwrap()), EMPTY_WORD);
+    assert_eq!(tree.get_leaf(&LeafIndex::<3>::new(5).unwrap()), EMPTY_WORD);
+    assert_eq!(tree.get_leaf(&LeafIndex::<3>::new(7).unwrap()), d);
+    assert_eq!(tree.get_node(NodeIndex::make(2, 2)).unwrap(), *EmptySubtreeRoots::entry(3, 2));
+}
+
+#[test]
+fn test_simplesmt_set_subtree_replaces_populated_region() {
+    let z = EMPTY_WORD;
+
+    let a = Poseidon2::merge(&[z; 2]);
+    let b = Poseidon2::merge(&[a; 2]);
+    let c = Poseidon2::merge(&[b; 2]);
+    let d = Poseidon2::merge(&[c; 2]);
+
+    let subtree = SimpleSmt::<1>::with_leaves(vec![(1, c)]).unwrap();
+    let mut tree = {
+        let entries = vec![(0, a), (1, b), (4, d), (5, d), (7, d)];
+        SimpleSmt::<3>::with_leaves(entries).unwrap()
+    };
+
+    tree.set_subtree(2, subtree).unwrap();
+
+    let expected_tree = {
+        let entries = vec![(0, a), (1, b), (5, c), (7, d)];
+        SimpleSmt::<3>::with_leaves(entries).unwrap()
+    };
+
+    assert_eq!(tree.root(), expected_tree.root());
+    assert_eq!(tree.num_leaves(), expected_tree.num_leaves());
+    assert_eq!(tree.get_leaf(&LeafIndex::<3>::new(4).unwrap()), EMPTY_WORD);
+    assert_eq!(tree.get_leaf(&LeafIndex::<3>::new(5).unwrap()), c);
+    assert_eq!(
+        tree.open(&LeafIndex::<3>::new(5).unwrap()),
+        expected_tree.open(&LeafIndex::<3>::new(5).unwrap())
+    );
+}
+
+// Covers depth-64 indexing, including `u64::MAX`, outside the bounded proptest.
+#[test]
+fn test_simplesmt_set_subtree_clears_depth_64_tree() {
+    let a = int_to_node(1);
+    let b = int_to_node(2);
+    let subtree = SimpleSmt::<64>::new().unwrap();
+    let mut tree = SimpleSmt::<64>::with_leaves(vec![(0, a), (u64::MAX, b)]).unwrap();
+
+    tree.set_subtree(0, subtree).unwrap();
+
+    assert_eq!(tree.root(), SimpleSmt::<64>::EMPTY_ROOT);
+    assert_eq!(tree.num_leaves(), 0);
+    assert!(tree.is_empty());
+    assert_eq!(tree.inner_nodes().count(), 0);
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(64))]
+
+    #[test]
+    fn prop_simplesmt_set_subtree_matches_rebuilt_tree(
+        initial_entries in prop::collection::vec((0_u64..16, 1_u64..1000), 0..16),
+        subtree_entries in prop::collection::vec((0_u64..4, 1_u64..1000), 0..4),
+        subtree_insertion_index in 0_u64..4,
+    ) {
+        const TREE_DEPTH: u8 = 4;
+        const SUBTREE_DEPTH: u8 = 2;
+
+        let initial_entries = to_entries(initial_entries);
+        let subtree_entries = to_entries(subtree_entries);
+
+        let mut tree = SimpleSmt::<TREE_DEPTH>::with_leaves(initial_entries.clone()).unwrap();
+        let subtree = SimpleSmt::<SUBTREE_DEPTH>::with_leaves(subtree_entries.clone()).unwrap();
+        tree.set_subtree(subtree_insertion_index, subtree).unwrap();
+
+        let expected_entries =
+            expected_entries_after_set_subtree::<SUBTREE_DEPTH>(
+                initial_entries,
+                subtree_entries,
+                subtree_insertion_index,
+            );
+        let expected_tree = SimpleSmt::<TREE_DEPTH>::with_leaves(expected_entries).unwrap();
+
+        prop_assert_eq!(tree.root(), expected_tree.root());
+        prop_assert_eq!(tree.num_leaves(), expected_tree.num_leaves());
+
+        for leaf_idx in 0..16 {
+            let leaf_idx = LeafIndex::<TREE_DEPTH>::new(leaf_idx).unwrap();
+            prop_assert_eq!(tree.get_leaf(&leaf_idx), expected_tree.get_leaf(&leaf_idx));
+            prop_assert_eq!(tree.open(&leaf_idx), expected_tree.open(&leaf_idx));
+        }
+
+        for depth in 1..TREE_DEPTH {
+            for position in 0..(1_u64 << depth) {
+                let index = NodeIndex::new(depth, position).unwrap();
+                prop_assert_eq!(tree.get_node(index).unwrap(), expected_tree.get_node(index).unwrap());
+            }
+        }
+    }
+}
+
+fn to_entries(entries: Vec<(u64, u64)>) -> Vec<(u64, Word)> {
+    entries
+        .into_iter()
+        .map(|(key, value)| (key, int_to_node(value)))
+        .collect::<BTreeMap<_, _>>()
+        .into_iter()
+        .collect()
+}
+
+fn expected_entries_after_set_subtree<const SUBTREE_DEPTH: u8>(
+    initial_entries: Vec<(u64, Word)>,
+    subtree_entries: Vec<(u64, Word)>,
+    subtree_insertion_index: u64,
+) -> Vec<(u64, Word)> {
+    let leaf_index_shift = subtree_insertion_index << u32::from(SUBTREE_DEPTH);
+    let mut expected_entries: BTreeMap<_, _> = initial_entries
+        .into_iter()
+        .filter(|(leaf_idx, _)| (leaf_idx >> u32::from(SUBTREE_DEPTH)) != subtree_insertion_index)
+        .collect();
+
+    expected_entries.extend(
+        subtree_entries
+            .into_iter()
+            .map(|(leaf_idx, value)| (leaf_index_shift + leaf_idx, value)),
+    );
+
+    expected_entries.into_iter().collect()
 }
 
 /// Tests that `EMPTY_ROOT` constant generated in the `SimpleSmt` equals to the root of the empty

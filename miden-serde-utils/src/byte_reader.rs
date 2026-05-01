@@ -754,10 +754,11 @@ impl ByteReader for SliceReader<'_> {
     }
 
     fn check_eor(&self, num_bytes: usize) -> Result<(), DeserializationError> {
-        if self.pos + num_bytes > self.source.len() {
-            return Err(DeserializationError::UnexpectedEOF);
-        }
-        Ok(())
+        self.pos
+            .checked_add(num_bytes)
+            .filter(|end| *end <= self.source.len())
+            .map(|_| ())
+            .ok_or(DeserializationError::UnexpectedEOF)
     }
 
     fn has_more_bytes(&self) -> bool {
@@ -1171,6 +1172,16 @@ mod tests {
         // Unbounded readers return usize::MAX
         assert_eq!(reader.max_alloc(1), usize::MAX);
         assert_eq!(reader.max_alloc(8), usize::MAX);
+    }
+
+    #[test]
+    fn slice_reader_rejects_overflowing_read_lengths() {
+        let data = [1u8];
+        let mut reader = SliceReader::new(&data);
+
+        assert_eq!(reader.read_u8().unwrap(), 1);
+        assert_eq!(reader.read_slice(usize::MAX), Err(DeserializationError::UnexpectedEOF));
+        assert_eq!(reader.check_eor(usize::MAX), Err(DeserializationError::UnexpectedEOF));
     }
 
     // ============================================================================================

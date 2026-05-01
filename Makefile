@@ -192,6 +192,10 @@ fuzz-merkle-store: ## Run fuzzing for MerkleStore deserialization
 fuzz-smt-serde: ## Run fuzzing for SMT serialization
 	cargo +nightly fuzz run smt_serde --release --fuzz-dir miden-crypto-fuzz
 
+.PHONY: fuzz-partial-smt
+fuzz-partial-smt: ## Run fuzzing for PartialSmt deserialization
+	cargo +nightly fuzz run partial_smt --release --fuzz-dir miden-crypto-fuzz
+
 .PHONY: fuzz-mmr
 fuzz-mmr: ## Run fuzzing for MMR structures serialization
 	cargo +nightly fuzz run mmr --release --fuzz-dir miden-crypto-fuzz

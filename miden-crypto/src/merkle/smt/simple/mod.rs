@@ -2,7 +2,8 @@ use alloc::collections::BTreeSet;
 
 use super::{
     EMPTY_WORD, EmptySubtreeRoots, InnerNode, InnerNodeInfo, InnerNodes, LeafIndex, MerkleError,
-    MutationSet, NodeIndex, SMT_MAX_DEPTH, SMT_MIN_DEPTH, SparseMerkleTree, Word,
+    MutationSet, NodeIndex, SMT_MAX_DEPTH, SMT_MIN_DEPTH, SparseMerkleTree, SparseMerkleTreeReader,
+    Word,
 };
 use crate::merkle::{SparseMerklePath, smt::SmtLeafError};
 
@@ -33,7 +34,7 @@ impl<const DEPTH: u8> SimpleSmt<DEPTH> {
     // --------------------------------------------------------------------------------------------
 
     /// The default value used to compute the hash of empty leaves
-    pub const EMPTY_VALUE: Word = <Self as SparseMerkleTree<DEPTH>>::EMPTY_VALUE;
+    pub const EMPTY_VALUE: Word = <Self as SparseMerkleTreeReader<DEPTH>>::EMPTY_VALUE;
 
     // CONSTRUCTORS
     // --------------------------------------------------------------------------------------------
@@ -111,8 +112,16 @@ impl<const DEPTH: u8> SimpleSmt<DEPTH> {
     /// With debug assertions on, this function panics if `root` does not match the root node in
     /// `inner_nodes`.
     pub fn from_raw_parts(inner_nodes: InnerNodes, leaves: Leaves, root: Word) -> Self {
-        // Our particular implementation of `from_raw_parts()` never returns `Err`.
-        <Self as SparseMerkleTree<DEPTH>>::from_raw_parts(inner_nodes, leaves, root).unwrap()
+        if cfg!(debug_assertions) {
+            let root_node_hash = inner_nodes
+                .get(&NodeIndex::root())
+                .map(InnerNode::hash)
+                .unwrap_or(Self::EMPTY_ROOT);
+
+            assert_eq!(root_node_hash, root);
+        }
+
+        Self { root, inner_nodes, leaves }
     }
 
     /// Wrapper around [`SimpleSmt::with_leaves`] which inserts leaves at contiguous indices
@@ -138,7 +147,7 @@ impl<const DEPTH: u8> SimpleSmt<DEPTH> {
 
     /// Returns the root of the tree
     pub fn root(&self) -> Word {
-        <Self as SparseMerkleTree<DEPTH>>::root(self)
+        <Self as SparseMerkleTreeReader<DEPTH>>::root(self)
     }
 
     /// Returns the number of non-empty leaves in this tree.
@@ -148,7 +157,7 @@ impl<const DEPTH: u8> SimpleSmt<DEPTH> {
 
     /// Returns the leaf at the specified index.
     pub fn get_leaf(&self, key: &LeafIndex<DEPTH>) -> Word {
-        <Self as SparseMerkleTree<DEPTH>>::get_leaf(self, key)
+        <Self as SparseMerkleTreeReader<DEPTH>>::get_leaf(self, key)
     }
 
     /// Returns a node at the specified index.
@@ -251,7 +260,7 @@ impl<const DEPTH: u8> SimpleSmt<DEPTH> {
         &self,
         kv_pairs: impl IntoIterator<Item = (LeafIndex<DEPTH>, Word)>,
     ) -> Result<MutationSet<DEPTH, LeafIndex<DEPTH>, Word>, MerkleError> {
-        <Self as SparseMerkleTree<DEPTH>>::compute_mutations(self, kv_pairs)
+        <Self as SparseMerkleTreeReader<DEPTH>>::compute_mutations(self, kv_pairs)
     }
 
     /// Applies the prospective mutations computed with [`SimpleSmt::compute_mutations()`] to this
@@ -307,7 +316,7 @@ impl<const DEPTH: u8> SimpleSmt<DEPTH> {
         let subtree_root_index =
             NodeIndex::new(subtree_root_insertion_depth, subtree_insertion_index)?;
 
-        // add leaves
+        // remove leaves and inner nodes under the insertion root
         // --------------
 
         // The subtree's leaf indices live in their own context - i.e. a subtree of depth `d`. If we
@@ -317,10 +326,28 @@ impl<const DEPTH: u8> SimpleSmt<DEPTH> {
         // you can see it as there's a full subtree sitting on its left. In general, for
         // `subtree_insertion_index = i`, there are `i` subtrees sitting before the subtree we want
         // to insert, so we need to adjust all its leaves by `i * 2^d`.
-        let leaf_index_shift: u64 = subtree_insertion_index * 2_u64.pow(SUBTREE_DEPTH.into());
+        let leaf_index_shift: u64 = if SUBTREE_DEPTH == SMT_MAX_DEPTH {
+            0
+        } else {
+            subtree_insertion_index << u32::from(SUBTREE_DEPTH)
+        };
+
+        self.leaves.retain(|leaf_idx, _| {
+            !Self::leaf_is_in_subtree::<SUBTREE_DEPTH>(*leaf_idx, subtree_insertion_index)
+        });
+        self.inner_nodes.retain(|node_idx, _| {
+            !Self::node_is_in_subtree(
+                *node_idx,
+                subtree_root_insertion_depth,
+                subtree_insertion_index,
+            )
+        });
+
+        // add leaves
+        // --------------
         for (subtree_leaf_idx, leaf_value) in subtree.leaves() {
             let new_leaf_idx = leaf_index_shift + subtree_leaf_idx;
-            debug_assert!(new_leaf_idx < 2_u64.pow(DEPTH.into()));
+            debug_assert!(DEPTH == SMT_MAX_DEPTH || new_leaf_idx < 2_u64.pow(DEPTH.into()));
 
             self.leaves.insert(new_leaf_idx, *leaf_value);
         }
@@ -345,9 +372,37 @@ impl<const DEPTH: u8> SimpleSmt<DEPTH> {
 
         Ok(self.root)
     }
+
+    fn leaf_is_in_subtree<const SUBTREE_DEPTH: u8>(
+        leaf_idx: u64,
+        subtree_insertion_index: u64,
+    ) -> bool {
+        if SUBTREE_DEPTH == SMT_MAX_DEPTH {
+            true
+        } else {
+            (leaf_idx >> u32::from(SUBTREE_DEPTH)) == subtree_insertion_index
+        }
+    }
+
+    fn node_is_in_subtree(
+        node_idx: NodeIndex,
+        subtree_root_depth: u8,
+        subtree_insertion_index: u64,
+    ) -> bool {
+        if node_idx.depth() < subtree_root_depth {
+            return false;
+        }
+
+        let depth_offset = node_idx.depth() - subtree_root_depth;
+        if depth_offset == SMT_MAX_DEPTH {
+            subtree_insertion_index == 0
+        } else {
+            (node_idx.position() >> u32::from(depth_offset)) == subtree_insertion_index
+        }
+    }
 }
 
-impl<const DEPTH: u8> SparseMerkleTree<DEPTH> for SimpleSmt<DEPTH> {
+impl<const DEPTH: u8> SparseMerkleTreeReader<DEPTH> for SimpleSmt<DEPTH> {
     type Key = LeafIndex<DEPTH>;
     type Value = Word;
     type Leaf = Word;
@@ -356,29 +411,8 @@ impl<const DEPTH: u8> SparseMerkleTree<DEPTH> for SimpleSmt<DEPTH> {
     const EMPTY_VALUE: Self::Value = EMPTY_WORD;
     const EMPTY_ROOT: Word = *EmptySubtreeRoots::entry(DEPTH, 0);
 
-    fn from_raw_parts(
-        inner_nodes: InnerNodes,
-        leaves: Leaves,
-        root: Word,
-    ) -> Result<Self, MerkleError> {
-        if cfg!(debug_assertions) {
-            let root_node_hash = inner_nodes
-                .get(&NodeIndex::root())
-                .map(InnerNode::hash)
-                .unwrap_or(Self::EMPTY_ROOT);
-
-            assert_eq!(root_node_hash, root);
-        }
-
-        Ok(Self { root, inner_nodes, leaves })
-    }
-
     fn root(&self) -> Word {
         self.root
-    }
-
-    fn set_root(&mut self, root: Word) {
-        self.root = root;
     }
 
     fn get_inner_node(&self, index: NodeIndex) -> InnerNode {
@@ -386,27 +420,6 @@ impl<const DEPTH: u8> SparseMerkleTree<DEPTH> for SimpleSmt<DEPTH> {
             .get(&index)
             .cloned()
             .unwrap_or_else(|| EmptySubtreeRoots::get_inner_node(DEPTH, index.depth()))
-    }
-
-    fn insert_inner_node(&mut self, index: NodeIndex, inner_node: InnerNode) -> Option<InnerNode> {
-        self.inner_nodes.insert(index, inner_node)
-    }
-
-    fn remove_inner_node(&mut self, index: NodeIndex) -> Option<InnerNode> {
-        self.inner_nodes.remove(&index)
-    }
-
-    fn insert_value(
-        &mut self,
-        key: LeafIndex<DEPTH>,
-        value: Word,
-    ) -> Result<Option<Word>, MerkleError> {
-        let result = if value == Self::EMPTY_VALUE {
-            self.leaves.remove(&key.position())
-        } else {
-            self.leaves.insert(key.position(), value)
-        };
-        Ok(result)
     }
 
     fn get_value(&self, key: &LeafIndex<DEPTH>) -> Word {
@@ -441,5 +454,32 @@ impl<const DEPTH: u8> SparseMerkleTree<DEPTH> for SimpleSmt<DEPTH> {
 
     fn path_and_leaf_to_opening(path: SparseMerklePath, leaf: Word) -> SimpleSmtProof {
         (path, leaf).into()
+    }
+}
+
+impl<const DEPTH: u8> SparseMerkleTree<DEPTH> for SimpleSmt<DEPTH> {
+    fn set_root(&mut self, root: Word) {
+        self.root = root;
+    }
+
+    fn insert_inner_node(&mut self, index: NodeIndex, inner_node: InnerNode) -> Option<InnerNode> {
+        self.inner_nodes.insert(index, inner_node)
+    }
+
+    fn remove_inner_node(&mut self, index: NodeIndex) -> Option<InnerNode> {
+        self.inner_nodes.remove(&index)
+    }
+
+    fn insert_value(
+        &mut self,
+        key: LeafIndex<DEPTH>,
+        value: Word,
+    ) -> Result<Option<Word>, MerkleError> {
+        let result = if value == Self::EMPTY_VALUE {
+            self.leaves.remove(&key.position())
+        } else {
+            self.leaves.insert(key.position(), value)
+        };
+        Ok(result)
     }
 }

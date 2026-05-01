@@ -6,7 +6,7 @@ use p3_maybe_rayon::prelude::*;
 
 use super::{
     EmptySubtreeRoots, InnerNode, InnerNodes, Leaves, MerkleError, MutationSet, NodeIndex,
-    SMT_DEPTH, Smt, SmtLeaf, SparseMerkleTree, Word,
+    SMT_DEPTH, Smt, SmtLeaf, SparseMerkleTreeReader, Word,
 };
 use crate::merkle::smt::{Map, NodeMutation, NodeMutations, SmtLeafError};
 
@@ -54,7 +54,7 @@ impl Smt {
         }
 
         let root = inner_nodes.get(&NodeIndex::root()).unwrap().hash();
-        <Self as SparseMerkleTree<SMT_DEPTH>>::from_raw_parts(inner_nodes, leaves, root)
+        Ok(Self::from_raw_parts(inner_nodes, leaves, root))
     }
 
     /// Similar to `with_entries_concurrent` but used for pre-sorted entries to avoid overhead.
@@ -75,7 +75,7 @@ impl Smt {
         }
 
         let root = inner_nodes.get(&NodeIndex::root()).unwrap().hash();
-        <Self as SparseMerkleTree<SMT_DEPTH>>::from_raw_parts(inner_nodes, leaves, root)
+        Ok(Self::from_raw_parts(inner_nodes, leaves, root))
     }
 
     /// Parallel implementation of [`Smt::compute_mutations()`].

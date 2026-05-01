@@ -12,7 +12,7 @@ use crate::{
     Word,
     merkle::smt::{
         EmptySubtreeRoots, LeafIndex, Map, MerkleError, MutationSet, NodeIndex, NodeMutation,
-        NodeMutations, SmtLeaf, SparseMerkleTree,
+        NodeMutations, SmtLeaf, SparseMerkleTree, SparseMerkleTreeReader,
         full::concurrent::{
             SUBTREE_DEPTH, SubtreeLeaf, SubtreeLeavesIter, fetch_sibling_pair,
             process_sorted_pairs_to_leaves,
@@ -449,7 +449,7 @@ impl<S: SmtStorage> LargeSmt<S> {
         }
 
         let new_root = leaves[0][0].hash;
-        self.in_memory_nodes[ROOT_MEMORY_INDEX] = new_root;
+        self.in_memory_nodes_mut()[ROOT_MEMORY_INDEX] = new_root;
 
         // Build leaf updates for storage (convert Empty to None for deletion)
         let mut leaf_update_map = leaf_map;
@@ -493,7 +493,7 @@ impl<S: SmtStorage> LargeSmt<S> {
 
         // Guard against accidentally trying to apply mutations that were computed against a
         // different tree, including a stale version of this tree.
-        let expected_root = SparseMerkleTree::<SMT_DEPTH>::root(self);
+        let expected_root = SparseMerkleTreeReader::<SMT_DEPTH>::root(self);
         if old_root != expected_root {
             return Err(LargeSmtError::Merkle(MerkleError::ConflictingRoots {
                 expected_root,
@@ -578,7 +578,7 @@ impl<S: SmtStorage> LargeSmt<S> {
         } = prepared;
 
         // Update the root in memory
-        self.in_memory_nodes[ROOT_MEMORY_INDEX] = new_root;
+        self.in_memory_nodes_mut()[ROOT_MEMORY_INDEX] = new_root;
 
         // Process node mutations - group by subtree and apply in batch
         // Since mutations are sorted by subtree root, we can process them in groups
@@ -738,7 +738,7 @@ impl<S: SmtStorage> LargeSmt<S> {
             self.sorted_pairs_to_mutated_leaves_with_preloaded_leaves(sorted_kv_pairs, &leaf_map);
 
         // If no mutations, return an empty mutation set
-        let old_root = SparseMerkleTree::<SMT_DEPTH>::root(self);
+        let old_root = SparseMerkleTreeReader::<SMT_DEPTH>::root(self);
         if leaves.is_empty() {
             return Ok(MutationSet {
                 old_root,
@@ -793,7 +793,7 @@ impl<S: SmtStorage> LargeSmt<S> {
 
         // Create mutation set
         let mutation_set = MutationSet {
-            old_root: SparseMerkleTree::<SMT_DEPTH>::root(self),
+            old_root: SparseMerkleTreeReader::<SMT_DEPTH>::root(self),
             new_root,
             node_mutations,
             new_pairs,

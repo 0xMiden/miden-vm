@@ -49,6 +49,13 @@ name  = "smt_serde"
 path  = "fuzz_targets/smt_serde.rs"
 test  = false
 
+[[bin]]
+bench = false
+doc   = false
+name  = "partial_smt"
+path  = "fuzz_targets/partial_smt.rs"
+test  = false
+
 # MMR structures fuzz target
 [[bin]]
 bench = false

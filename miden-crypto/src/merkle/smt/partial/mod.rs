@@ -1,6 +1,8 @@
+use alloc::{collections::VecDeque, string::ToString, vec::Vec};
+
 use super::{EmptySubtreeRoots, LeafIndex, SMT_DEPTH};
 use crate::{
-    EMPTY_WORD, Word,
+    EMPTY_WORD, Map, Set, Word,
     merkle::{
         InnerNodeInfo, MerkleError, NodeIndex, SparseMerklePath,
         smt::{InnerNode, InnerNodes, Leaves, SmtLeaf, SmtLeafError, SmtProof},
@@ -8,8 +10,11 @@ use crate::{
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
+mod serialization;
 #[cfg(test)]
 mod tests;
+
+pub use serialization::{NodeValue, UniqueNodes};
 
 /// A partial version of an [`super::Smt`].
 ///
@@ -289,6 +294,289 @@ impl PartialSmt {
         Ok(())
     }
 
+    // UNIQUE NODES
+    // --------------------------------------------------------------------------------------------
+
+    /// Converts `self` into the [`UniqueNodes`] serialization representation for compact
+    /// serialization.
+    ///
+    /// This method assumes that the `PartialSmt` is in a valid state.
+    ///
+    /// # Reconstructable Sets
+    ///
+    /// We define the notion of a reconstructable set as one which stores the minimum amount of
+    /// information necessary in order to reconstruct the full state of the tree. We build this set
+    /// as follows:
+    ///
+    /// 1. Start at the leaves and traverse toward the root.
+    /// 2. Wherever a node's value is determined solely by children already implicitly contained
+    ///    within the set, store no new information. If additional information is required (e.g. a
+    ///    sibling node) store that.
+    /// 3. Repeat until the root is reached.
+    ///
+    /// To reconstruct the tree, we just start at the leaves and compute all intermediary nodes from
+    /// the data stored in the reconstructible set.
+    pub fn to_unique_nodes(&self) -> UniqueNodes {
+        // We start by getting all the known leaves, as these give us the starting point for the
+        // reconstruction.
+        let leaf_nodes = self
+            .leaves()
+            .map(|(k, v)| (k, v.clone()))
+            .collect::<Map<LeafIndex<SMT_DEPTH>, SmtLeaf>>();
+
+        // We also create storage for the nodes necessary for reconstruction of the tree...
+        let mut needed_nodes: Map<NodeIndex, NodeValue> = Map::new();
+
+        // ... and grab the full set of inner nodes to work from as a queue for easy use. We sort
+        // them from the bottom of the tree to the top, but retain the standard left-to-right
+        // ordering.
+        let mut inner_nodes = self.inner_node_indices().collect::<Vec<(NodeIndex, InnerNode)>>();
+        inner_nodes.sort_by(|(il, _), (ir, _)| {
+            ir.depth().cmp(&il.depth()).then(il.position().cmp(&ir.position()))
+        });
+        let mut inner_nodes = inner_nodes.into_iter().collect::<VecDeque<(NodeIndex, InnerNode)>>();
+
+        // We also need to store the values for leaves where we ONLY have the hash value, rather
+        // than the proper leaf value.
+        let mut value_only_leaves = Vec::new();
+
+        // We then need to iterate over all the nodes to work out which ones are reconstructible,
+        // and which need us to store additional data to be reconstructible.
+        while let Some((ix, v)) = inner_nodes.pop_front() {
+            // There must be data available for both of the node's children for it to be
+            // reconstructible.
+            for (child, val) in [(ix.left_child(), v.left), (ix.right_child(), v.right)] {
+                if child.depth() != SMT_DEPTH {
+                    // A child of the node `v` can be in one of three states:
+                    //
+                    // 1. The child does not exist as a physical node in `self`, but its value as
+                    //    stored in `v` is real.
+                    // 2. The child does not exist as a physical node in `self`, but its value is
+                    //    the default empty subtree root.
+                    // 3. The child does exist as a physical node in `self`. By induction, as this
+                    //    algorithm runs bottom-up, the data to reconstruct the node already exists.
+                    if self.get_inner_node(child).is_none() {
+                        // In this case, the node does not exist physically, so we have to work out
+                        // which of the other cases it is.
+                        let new = if val == *EmptySubtreeRoots::entry(SMT_DEPTH, child.depth()) {
+                            NodeValue::EmptySubtreeRoot
+                        } else {
+                            NodeValue::Present(val)
+                        };
+
+                        // We allow overwriting existing inserts for algorithmic simplicity, but we
+                        // always check that it is the same value if an overwrite occurs as this
+                        // indicates a programmer bug.
+                        if let Some(v) = needed_nodes.insert(child, new.clone())
+                            && v != new
+                        {
+                            panic!("Overwrite occurred with a different value ")
+                        }
+                    } else {
+                        // Here, the node exists physically, so by induction, it is reconstructible.
+                        // We fall-through with an explicit `continue` for algorithmic clarity.
+                        continue;
+                    }
+                } else {
+                    // Here the child is a leaf node. Leaf nodes can be in one of three states:
+                    //
+                    // 1. A node that has the default empty value, in which case we encode it using
+                    //    absence in the compact representation.
+                    // 2. A node that has a hash value, but that does not exist in the physical
+                    //    leaves in the PartialSmt. These are encoded using an auxiliary buffer to
+                    //    aid in reconstruction.
+                    // 3. A node that exists in fully-materialized form. These are encoded with
+                    //    their full content.
+                    //
+                    // Cases 1 and 3 require no special handling here, as they are encoded with the
+                    // leaves below. Case 2 needs us to take action here.
+                    let empty_leaf_hash =
+                        SmtLeaf::new_empty(LeafIndex::new_max_depth(child.position())).hash();
+
+                    if val != empty_leaf_hash && !self.leaves.contains_key(&child.position()) {
+                        // We are in case 2 here, as the value is not that of the empty leaf, nor is
+                        // there a physical leaf stored in the tree for this. We store this leaf
+                        // value in the auxiliary buffer so we can reconstruct correctly in this
+                        // scenario.
+                        value_only_leaves.push((child.position(), val));
+                    }
+                }
+            }
+        }
+
+        // With all the data gathered, we can convert our types as necessary to create our output.
+        let leaves = leaf_nodes.into_iter().map(|(i, l)| (i.position(), l)).collect::<Vec<_>>();
+        let mut nodes: Map<u8, Vec<(u64, NodeValue)>> = Map::new();
+
+        for (ix, value) in needed_nodes {
+            nodes.entry(ix.depth()).or_default().push((ix.position(), value));
+        }
+
+        UniqueNodes {
+            root: self.root(),
+            leaves,
+            nodes,
+            value_only_leaves,
+        }
+    }
+
+    /// Constructs a new `PartialSmt` from the provided `unique_nodes`, reconstituting the full data
+    /// from the compact representation.
+    ///
+    /// This method assumes that the `unique_nodes` represent a valid `PartialSmt` instance.
+    ///
+    /// See the documentation of [`Self::to_unique_nodes`] for the reconstruction algorithm.
+    ///
+    /// # Errors
+    ///
+    /// - [`MerkleError::NodeIndexNotFoundInStore`] if any node necessary for reconstruction is not
+    ///   available in the provided `unique_nodes` data.
+    pub fn from_unique_nodes(unique_nodes: UniqueNodes) -> Result<Self, DeserializationError> {
+        // We perform our transformation by directly mutating a new instance of `Self`.
+        let mut smt = Self::new(unique_nodes.root);
+
+        // We rely on a minimal set of node values and leaf values to reconstruct the tree, so we
+        // have to be able to perform lookups.
+        let nodes = unique_nodes
+            .nodes
+            .into_iter()
+            .flat_map(|(depth, nodes)| {
+                nodes.into_iter().map(move |(ix, val)| Ok((NodeIndex::new(depth, ix)?, val)))
+            })
+            .collect::<Result<Map<NodeIndex, NodeValue>, MerkleError>>()
+            .map_err(|e| DeserializationError::InvalidValue(e.to_string()))?;
+        let all_leaves = unique_nodes
+            .leaves
+            .into_iter()
+            .map(|(ix, l)| {
+                let node_index = NodeIndex::new(SMT_DEPTH, ix)
+                    .map_err(|e| DeserializationError::InvalidValue(e.to_string()))?;
+                if node_index != l.index().index {
+                    Err(DeserializationError::InvalidValue(format!(
+                        "Node index {ix} did not match the embedded leaf index {}",
+                        l.index().index
+                    )))
+                } else {
+                    Ok((
+                        NodeIndex::new(SMT_DEPTH, ix)
+                            .map_err(|e| DeserializationError::InvalidValue(e.to_string()))?,
+                        l,
+                    ))
+                }
+            })
+            .collect::<Result<Map<_, _>, DeserializationError>>()?;
+
+        // We also need to grab the buffer of the additional leaf values, and we convert it into a
+        // map for easy lookup. It is safe to use `new_unchecked` here as, while this comes from
+        // untrusted input, `ix` can correctly take the value of any `u64`.
+        let value_only_leaves = unique_nodes
+            .value_only_leaves
+            .into_iter()
+            .map(|(ix, v)| (NodeIndex::new_unchecked(SMT_DEPTH, ix), v))
+            .collect::<Map<_, _>>();
+
+        // We then want to process leaf by leaf, with a queue of parent nodes that need visiting.
+        // Rather than trying to de-duplicate on the fly, we instead just discard nodes that have
+        // already been processed when we see them.
+        //
+        // It must be ensured that at no point an index that is lower in the tree than any index
+        // preceding it is inserted.
+        let leaf_based_starting_nodes =
+            all_leaves.keys().map(|k| k.parent()).collect::<VecDeque<_>>();
+
+        // We also, however, need to account for inner nodes which are not reachable in a parent
+        // chain from a leaf, such as those from an exclusion proof. These are all nodes that do not
+        // have a (present) child in the set of nodes or leaves, so to enforce our layering
+        // invariant we add them in sorted order from bottom to top, left to right.
+        //
+        // We process these after the leaf-based nodes to avoid issues with the layering invariant.
+        let mut additional_nodes = nodes.keys().map(|ix| ix.parent()).collect::<Vec<_>>();
+        additional_nodes
+            .sort_by(|il, ir| ir.depth().cmp(&il.depth()).then(il.position().cmp(&ir.position())));
+        let additional_nodes = additional_nodes.into_iter().collect::<VecDeque<_>>();
+
+        // We also track the nodes we have seen to avoid re-doing unnecessary work.
+        let mut seen_nodes = Set::new();
+
+        for mut active_nodes in [leaf_based_starting_nodes, additional_nodes] {
+            seen_nodes.clear();
+            while let Some(ix) = active_nodes.pop_front() {
+                // To avoid re-doing work we immediately discard a node that is already in our tree.
+                if smt.inner_nodes.contains_key(&ix) {
+                    continue;
+                }
+
+                if ix.depth() + 1 == SMT_DEPTH {
+                    // We have to handle the case where the children are the leaves specially.
+                    //
+                    // If no corresponding leaf is present, then either it was a default value, or
+                    // it exists in the value-only leaves buffer, so we have to check both.
+                    let left_child = ix.left_child();
+                    let left = all_leaves
+                        .get(&left_child)
+                        .map(SmtLeaf::hash)
+                        .or_else(|| value_only_leaves.get(&left_child).copied())
+                        .unwrap_or(
+                            SmtLeaf::new_empty(LeafIndex::new_max_depth(left_child.position()))
+                                .hash(),
+                        );
+                    let right_child = ix.right_child();
+                    let right = all_leaves
+                        .get(&right_child)
+                        .map(SmtLeaf::hash)
+                        .or_else(|| value_only_leaves.get(&right_child).copied())
+                        .unwrap_or(
+                            SmtLeaf::new_empty(LeafIndex::new_max_depth(right_child.position()))
+                                .hash(),
+                        );
+
+                    smt.insert_inner_node(ix, InnerNode { left, right })
+                } else {
+                    // If the children are not in the leaves, they can be either in the tree already
+                    // (having been reconstructed) or as a value in the nodes from the unique nodes
+                    // structure.
+                    let [left, right] = [ix.left_child(), ix.right_child()].map(|ix| {
+                        smt.get_inner_node(ix).map(|n| Ok(n.hash())).unwrap_or_else(|| match nodes
+                            .get(&ix)
+                            .ok_or_else(|| {
+                                DeserializationError::InvalidValue(format!(
+                                    "Node at {ix} not found but is required"
+                                ))
+                            })? {
+                            NodeValue::EmptySubtreeRoot => {
+                                Ok(*EmptySubtreeRoots::entry(SMT_DEPTH, ix.depth()))
+                            },
+                            NodeValue::Present(v) => Ok(*v),
+                        })
+                    });
+                    let left = left?;
+                    let right = right?;
+
+                    smt.insert_inner_node(ix, InnerNode { left, right });
+                }
+
+                // Finally, we push the node's parent into the queue if we have not already visited
+                // it. While it would be correct to do unconditionally, we operate over untrusted
+                // input and hence we have to be careful.
+                let parent = ix.parent();
+                if !seen_nodes.contains(&parent) {
+                    active_nodes.push_back(parent);
+                    seen_nodes.insert(parent);
+                }
+            }
+        }
+
+        // With that done, we simply have to write the remaining keys into the tree.
+        all_leaves.into_iter().for_each(|(ix, leaf)| {
+            smt.num_entries += leaf.num_entries();
+            smt.leaves.insert(ix.position(), leaf);
+        });
+
+        smt.validate()?;
+
+        Ok(smt)
+    }
+
     // PRIVATE HELPERS
     // --------------------------------------------------------------------------------------------
 
@@ -539,43 +827,15 @@ impl From<super::Smt> for PartialSmt {
 
 impl Serializable for PartialSmt {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        target.write(self.root());
-        target.write_usize(self.leaves.len());
-        for (i, leaf) in &self.leaves {
-            target.write_u64(*i);
-            target.write(leaf);
-        }
-        target.write_usize(self.inner_nodes.len());
-        for (idx, node) in &self.inner_nodes {
-            target.write(idx);
-            target.write(node);
-        }
+        let unique_rep = self.to_unique_nodes();
+        unique_rep.write_into(target);
     }
 }
 
 impl Deserializable for PartialSmt {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let root: Word = source.read()?;
-
-        let mut leaves = Leaves::<SmtLeaf>::default();
-        for _ in 0..source.read_usize()? {
-            let pos: u64 = source.read()?;
-            let leaf: SmtLeaf = source.read()?;
-            leaves.insert(pos, leaf);
-        }
-
-        let mut inner_nodes = InnerNodes::default();
-        for _ in 0..source.read_usize()? {
-            let idx: NodeIndex = source.read()?;
-            let node: InnerNode = source.read()?;
-            inner_nodes.insert(idx, node);
-        }
-
-        let num_entries = leaves.values().map(SmtLeaf::num_entries).sum();
-
-        let partial = Self { root, num_entries, leaves, inner_nodes };
-        partial.validate()?;
-
-        Ok(partial)
+        let unique_rep = UniqueNodes::read_from(source)?;
+        PartialSmt::from_unique_nodes(unique_rep)
+            .map_err(|e| DeserializationError::InvalidValue(format!("{e}")))
     }
 }

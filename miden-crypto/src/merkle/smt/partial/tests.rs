@@ -1,20 +1,24 @@
-use alloc::collections::{BTreeMap, BTreeSet};
+use alloc::{
+    collections::{BTreeMap, BTreeSet},
+    vec::Vec,
+};
 
 use assert_matches::assert_matches;
+use itertools::Itertools;
 use proptest::prelude::*;
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 
-use super::{PartialSmt, SMT_DEPTH};
+use super::{PartialSmt, SMT_DEPTH, serialization::property_tests::arbitrary_valid_word};
 use crate::{
     EMPTY_WORD, Felt, ONE, Word, ZERO,
     merkle::{
         EmptySubtreeRoots, MerkleError,
         smt::{Smt, SmtLeaf},
     },
+    rand::test_utils::ContinuousRng,
     utils::{Deserializable, Serializable},
 };
-
 // Note: Word's Arbitrary implementation is in word/mod.rs, gated by cfg(any(test, feature =
 // "testing"))
 
@@ -29,7 +33,7 @@ fn random_word<R: Rng>(rng: &mut R) -> Word {
     ])
 }
 
-/// Tests that a partial SMT constructed from a root is well behaved and returns expected
+/// Tests that a partial SMT constructed from a root is well-behaved, and returns expected
 /// values.
 #[test]
 fn partial_smt_new_with_no_entries() {
@@ -417,6 +421,9 @@ fn partial_smt_serialization_roundtrip() {
     let bytes = partial_smt.to_bytes();
     let decoded = PartialSmt::read_from_bytes(&bytes).unwrap();
 
+    assert_eq!(partial_smt.num_entries, decoded.num_entries);
+    assert_eq!(partial_smt.root(), decoded.root());
+
     assert_eq!(partial_smt, decoded);
 }
 
@@ -723,11 +730,115 @@ fn partial_smt_deserialize_leaves_count_larger() {
     assert!(result.is_err());
 }
 
+// UNIQUE NODES TESTS
+// ================================================================================================
+
+#[test]
+fn unique_nodes_roundtrips() {
+    let mut rng = ContinuousRng::new([0x96; 32]);
+
+    // Set up our tree, starting as an empty tree root and then inserting a few values.
+    let mut tree = PartialSmt::new(*EmptySubtreeRoots::entry(SMT_DEPTH, 0));
+    for _ in 0..200 {
+        tree.insert(rng.value(), rng.value()).unwrap();
+    }
+
+    // We then convert it to its representation as unique nodes.
+    let uniques = tree.to_unique_nodes();
+
+    // The leaves in the unique representation should be exactly the same leaves as were stored by
+    // the original tree.
+    let original_leaves = tree
+        .leaves()
+        .sorted_by_key(|(k, _)| *k)
+        .map(|(k, v)| (k.position(), v.clone()))
+        .collect::<Vec<_>>();
+    let unique_leaves = uniques
+        .leaves
+        .iter()
+        .sorted_by_key(|(k, _)| *k)
+        .map(|(k, v)| (*k, v.clone()))
+        .collect::<Vec<_>>();
+    assert_eq!(unique_leaves, original_leaves);
+
+    // Finally, the unique representation should result in the same tree.
+    let reconstituted_tree =
+        PartialSmt::from_unique_nodes(uniques).expect("No data corruption has occurred in memory");
+    assert_eq!(reconstituted_tree, tree);
+}
+
+#[test]
+fn unique_nodes_of_exclusion_proofs_roundtrips() {
+    let mut rng = ChaCha20Rng::from_seed([10u8; 32]);
+    let key = random_word(&mut rng);
+    let val = random_word(&mut rng);
+    let key_1 = random_word(&mut rng);
+    let val_1 = random_word(&mut rng);
+    let key_2 = random_word(&mut rng);
+    let val_2 = random_word(&mut rng);
+    let missing_key = random_word(&mut rng);
+    let smt: Smt = Smt::with_entries([(key, val), (key_1, val_1), (key_2, val_2)]).unwrap();
+
+    let partial_smt = PartialSmt::from_proofs([smt.open(&missing_key)]).unwrap();
+    let unique_nodes = partial_smt.to_unique_nodes();
+    let decoded = PartialSmt::from_unique_nodes(unique_nodes).unwrap();
+
+    assert_eq!(partial_smt, decoded);
+}
+
+#[test]
+fn unique_nodes_serialization_roundtrips() {
+    let mut rng = ContinuousRng::new([0xab; 32]);
+
+    // Set up our tree, starting as an empty tree root and then inserting a few values.
+    let mut tree = PartialSmt::new(*EmptySubtreeRoots::entry(SMT_DEPTH, 0));
+    for _ in 0..200 {
+        tree.insert(rng.value(), rng.value()).unwrap();
+    }
+
+    // We then check that the serialization round-trips correctly.
+    assert_eq!(PartialSmt::read_from_bytes(&tree.to_bytes()), Ok(tree));
+}
+
 // PROPTEST-BASED TESTS
 // ================================================================================================
 // These tests use proptest's Arbitrary trait, which is no_std compatible with the `alloc` feature.
 
 proptest! {
+    /// Conversion to and from unique nodes should always round-trip to the same tree.
+    #[test]
+    fn prop_unique_nodes_roundtrips(
+        kv_pairs in prop::collection::vec((arbitrary_valid_word(), arbitrary_valid_word()), 0..100),
+    ) {
+        let mut smt = PartialSmt::new(*EmptySubtreeRoots::entry(SMT_DEPTH, 0));
+
+        for (k, v) in kv_pairs {
+            smt.insert(k, v)?;
+        }
+
+        let unique = smt.to_unique_nodes();
+        let result = PartialSmt::from_unique_nodes(unique)?;
+
+        prop_assert_eq!(result, smt);
+    }
+
+    /// Deserialization of the serialized blob should always result in the same value.
+    #[test]
+    fn prop_serde_roundtrips(
+        kv_pairs in prop::collection::vec((arbitrary_valid_word(), arbitrary_valid_word()), 0..100),
+    ) {
+        let mut smt = PartialSmt::new(*EmptySubtreeRoots::entry(SMT_DEPTH, 0));
+
+        for (k, v) in kv_pairs {
+            smt.insert(k, v)?;
+        }
+
+        let bytes = smt.to_bytes();
+        let result = PartialSmt::read_from_bytes(&bytes)?;
+
+        prop_assert_eq!(result, smt);
+    }
+
     /// Property test: inserting a value into an empty partial SMT and then reading it back
     /// should return the same value.
     #[test]

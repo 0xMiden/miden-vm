@@ -22,6 +22,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # pin@v4
         with:
+          persist-credentials: false
           fetch-depth: 0
       - name: Check for changes in changelog
         env:

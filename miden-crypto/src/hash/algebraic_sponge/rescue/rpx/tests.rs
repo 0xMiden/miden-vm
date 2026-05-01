@@ -114,6 +114,40 @@ fn hash_elements() {
 }
 
 #[test]
+fn hash_elements_vs_hash_elements_in_domain() {
+    let input16 = [
+        Felt::new_unchecked(1),
+        Felt::new_unchecked(2),
+        Felt::new_unchecked(3),
+        Felt::new_unchecked(4),
+        Felt::new_unchecked(5),
+        Felt::new_unchecked(6),
+        Felt::new_unchecked(7),
+        Felt::new_unchecked(8),
+        Felt::new_unchecked(9),
+        Felt::new_unchecked(10),
+        Felt::new_unchecked(11),
+        Felt::new_unchecked(12),
+        Felt::new_unchecked(13),
+        Felt::new_unchecked(14),
+        Felt::new_unchecked(15),
+        Felt::new_unchecked(16),
+    ];
+
+    // hash_elements and hash_elements_in_domain should be identical if the domain is set to zero.
+    assert_eq!(
+        Rpx256::hash_elements(&input16),
+        Rpx256::hash_elements_in_domain(&input16, Felt::ZERO)
+    );
+
+    // With a non-zero domain set in the latter, the results should differ.
+    assert_ne!(
+        Rpx256::hash_elements(&input16),
+        Rpx256::hash_elements_in_domain(&input16, Felt::ONE)
+    );
+}
+
+#[test]
 fn hash_empty() {
     let elements: Vec<Felt> = vec![];
 

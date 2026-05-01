@@ -56,45 +56,9 @@ pub(crate) trait AlgebraicSponge {
     where
         E: BasedVectorSpace<Felt>,
     {
-        // Count total number of base field elements without collecting
-        let total_len = elements
-            .iter()
-            .map(|elem| E::as_basis_coefficients_slice(elem).len())
-            .sum::<usize>();
-
-        // initialize state to all zeros, except for the first element of the capacity part, which
-        // is set to `total_len % RATE_WIDTH`.
-        let mut state = [ZERO; STATE_WIDTH];
-        state[CAPACITY_RANGE.start] = Felt::from_u8((total_len % RATE_WIDTH) as u8);
-
-        // absorb elements into the state one by one until the rate portion of the state is filled
-        // up; then apply the permutation and start absorbing again; repeat until all
-        // elements have been absorbed
-        let mut i = 0;
-        for elem in elements.iter() {
-            for &felt in E::as_basis_coefficients_slice(elem) {
-                state[RATE_RANGE.start + i] = felt;
-                i += 1;
-                if i.is_multiple_of(RATE_WIDTH) {
-                    Self::apply_permutation(&mut state);
-                    i = 0;
-                }
-            }
-        }
-
-        // if we absorbed some elements but didn't apply a permutation to them (would happen when
-        // the number of elements is not a multiple of RATE_WIDTH), apply the permutation after
-        // padding by as many 0 as necessary to make the input length a multiple of the RATE_WIDTH.
-        if i > 0 {
-            while i != RATE_WIDTH {
-                state[RATE_RANGE.start + i] = ZERO;
-                i += 1;
-            }
-            Self::apply_permutation(&mut state);
-        }
-
-        // return the digest portion of the state as hash result
-        Word::new(state[DIGEST_RANGE].try_into().unwrap())
+        // We initialize the state to all zeroes.
+        let state = [ZERO; STATE_WIDTH];
+        hash_elements_internal::<E, Self>(elements, state)
     }
 
     /// Returns a hash of the provided sequence of bytes.
@@ -213,4 +177,67 @@ pub(crate) trait AlgebraicSponge {
         Self::apply_permutation(&mut state);
         Word::new(state[DIGEST_RANGE].try_into().unwrap())
     }
+
+    /// Hashes the provided `elements` alongside the provided `domain` identifier, allowing for
+    /// domain separation.
+    fn hash_elements_in_domain<E>(elements: &[E], domain: Felt) -> Word
+    where
+        E: BasedVectorSpace<Felt>,
+    {
+        // We then initialize our state to all zeros, except for the second element of the capacity
+        // part which we set to our domain specifier.
+        let mut state = [ZERO; STATE_WIDTH];
+        state[CAPACITY_RANGE.start + 1] = domain;
+
+        hash_elements_internal::<E, Self>(elements, state)
+    }
+}
+
+// INTERNAL IMPLEMENTATION FUNCTIONS
+// ================================================================================================
+
+/// Implements the shared portion of `hash_elements` and `hash_elements_in_domain` such that the
+/// caller can pass in a state that is already populated in some way if necessary.
+fn hash_elements_internal<E, S>(elements: &[E], mut state: [Felt; STATE_WIDTH]) -> Word
+where
+    E: BasedVectorSpace<Felt>,
+    S: AlgebraicSponge + ?Sized,
+{
+    // Count total number of base field elements without collecting
+    let total_len = elements
+        .iter()
+        .map(|elem| E::as_basis_coefficients_slice(elem).len())
+        .sum::<usize>();
+
+    // We set the first element of the capacity part to `total_len % RATE_WIDTH`.
+    state[CAPACITY_RANGE.start] = Felt::from_u8((total_len % RATE_WIDTH) as u8);
+
+    // absorb elements into the state one by one until the rate portion of the state is filled
+    // up; then apply the permutation and start absorbing again; repeat until all
+    // elements have been absorbed
+    let mut i = 0;
+    for elem in elements.iter() {
+        for &felt in E::as_basis_coefficients_slice(elem) {
+            state[RATE_RANGE.start + i] = felt;
+            i += 1;
+            if i.is_multiple_of(RATE_WIDTH) {
+                S::apply_permutation(&mut state);
+                i = 0;
+            }
+        }
+    }
+
+    // if we absorbed some elements but didn't apply a permutation to them (would happen when
+    // the number of elements is not a multiple of RATE_WIDTH), apply the permutation after
+    // padding by as many 0 as necessary to make the input length a multiple of the RATE_WIDTH.
+    if i > 0 {
+        while i != RATE_WIDTH {
+            state[RATE_RANGE.start + i] = ZERO;
+            i += 1;
+        }
+        S::apply_permutation(&mut state);
+    }
+
+    // return the digest portion of the state as hash result
+    Word::new(state[DIGEST_RANGE].try_into().unwrap())
 }

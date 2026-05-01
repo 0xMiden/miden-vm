@@ -12,7 +12,7 @@ use rand_chacha::ChaCha20Rng;
 
 use super::{
     COLS_PER_SUBTREE, InnerNode, Map, NodeIndex, NodeMutations, PairComputations, SMT_DEPTH,
-    SUBTREE_DEPTH, Smt, SmtLeaf, SparseMerkleTree, SubtreeLeaf, SubtreeLeavesIter, Word,
+    SUBTREE_DEPTH, Smt, SmtLeaf, SparseMerkleTreeReader, SubtreeLeaf, SubtreeLeavesIter, Word,
     build_subtree,
 };
 use crate::{

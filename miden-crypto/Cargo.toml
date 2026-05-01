@@ -103,6 +103,7 @@ blake3           = { workspace = true }
 chacha20poly1305 = { features = ["alloc", "stream"], workspace = true }
 clap             = { features = ["derive"], optional = true, workspace = true }
 curve25519-dalek = { workspace = true }
+der              = { workspace = true }
 ed25519-dalek    = { features = ["zeroize"], workspace = true }
 flume            = { workspace = true }
 hkdf             = { workspace = true }
