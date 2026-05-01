@@ -73,6 +73,10 @@ impl FastProcessor {
     #[inline(always)]
     fn restore_overflow_stack(&mut self, ctx_info: &ExecutionContextInfo) {
         let target_overflow_len = ctx_info.overflow_stack.len();
+        debug_assert!(
+            MIN_STACK_DEPTH.saturating_add(target_overflow_len) <= self.options.max_stack_depth(),
+            "suspended caller stacks are checked against the operand stack depth limit before being saved"
+        );
 
         // Check if there's enough room to restore the overflow stack in the current stack buffer.
         if target_overflow_len > self.stack_bot_idx {
