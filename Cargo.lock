@@ -1238,7 +1238,7 @@ checksum = "f8ca58f447f06ed17d5fc4043ce1b10dd205e060fb3ce5b979b8ed8e59ff3f79"
 
 [[package]]
 name = "miden-ace-codegen"
-version = "0.22.2"
+version = "0.22.3"
 dependencies = [
  "miden-air",
  "miden-core",
@@ -1248,7 +1248,7 @@ dependencies = [
 
 [[package]]
 name = "miden-air"
-version = "0.22.2"
+version = "0.22.3"
 dependencies = [
  "miden-core",
  "miden-crypto",
@@ -1260,7 +1260,7 @@ dependencies = [
 
 [[package]]
 name = "miden-assembly"
-version = "0.22.2"
+version = "0.22.3"
 dependencies = [
  "env_logger",
  "insta",
@@ -1279,7 +1279,7 @@ dependencies = [
 
 [[package]]
 name = "miden-assembly-syntax"
-version = "0.22.2"
+version = "0.22.3"
 dependencies = [
  "aho-corasick",
  "env_logger",
@@ -1305,7 +1305,7 @@ dependencies = [
 
 [[package]]
 name = "miden-core"
-version = "0.22.2"
+version = "0.22.3"
 dependencies = [
  "criterion",
  "derive_more",
@@ -1331,7 +1331,7 @@ dependencies = [
 
 [[package]]
 name = "miden-core-lib"
-version = "0.22.2"
+version = "0.22.3"
 dependencies = [
  "criterion",
  "env_logger",
@@ -1412,7 +1412,7 @@ dependencies = [
 
 [[package]]
 name = "miden-debug-types"
-version = "0.22.2"
+version = "0.22.3"
 dependencies = [
  "memchr",
  "miden-crypto",
@@ -1455,7 +1455,7 @@ dependencies = [
 
 [[package]]
 name = "miden-mast-package"
-version = "0.22.2"
+version = "0.22.3"
 dependencies = [
  "derive_more",
  "miden-assembly-syntax",
@@ -1507,7 +1507,7 @@ dependencies = [
 
 [[package]]
 name = "miden-package-registry"
-version = "0.22.2"
+version = "0.22.3"
 dependencies = [
  "miden-assembly-syntax",
  "miden-core",
@@ -1521,7 +1521,7 @@ dependencies = [
 
 [[package]]
 name = "miden-processor"
-version = "0.22.2"
+version = "0.22.3"
 dependencies = [
  "insta",
  "itertools 0.14.0",
@@ -1544,7 +1544,7 @@ dependencies = [
 
 [[package]]
 name = "miden-project"
-version = "0.22.2"
+version = "0.22.3"
 dependencies = [
  "miden-assembly-syntax",
  "miden-core",
@@ -1563,7 +1563,7 @@ dependencies = [
 
 [[package]]
 name = "miden-prover"
-version = "0.22.2"
+version = "0.22.3"
 dependencies = [
  "bincode",
  "miden-air",
@@ -1618,7 +1618,7 @@ dependencies = [
 
 [[package]]
 name = "miden-utils-core-derive"
-version = "0.22.2"
+version = "0.22.3"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1627,7 +1627,7 @@ dependencies = [
 
 [[package]]
 name = "miden-utils-diagnostics"
-version = "0.22.2"
+version = "0.22.3"
 dependencies = [
  "miden-crypto",
  "miden-debug-types",
@@ -1638,7 +1638,7 @@ dependencies = [
 
 [[package]]
 name = "miden-utils-indexing"
-version = "0.22.2"
+version = "0.22.3"
 dependencies = [
  "miden-crypto",
  "serde",
@@ -1647,7 +1647,7 @@ dependencies = [
 
 [[package]]
 name = "miden-utils-sync"
-version = "0.22.2"
+version = "0.22.3"
 dependencies = [
  "lock_api",
  "loom",
@@ -1658,7 +1658,7 @@ dependencies = [
 
 [[package]]
 name = "miden-verifier"
-version = "0.22.2"
+version = "0.22.3"
 dependencies = [
  "bincode",
  "miden-air",
@@ -1671,7 +1671,7 @@ dependencies = [
 
 [[package]]
 name = "miden-vm"
-version = "0.22.2"
+version = "0.22.3"
 dependencies = [
  "assert_cmd",
  "bincode",

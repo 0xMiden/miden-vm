@@ -32,7 +32,7 @@ homepage = "https://miden.xyz"
 repository = "https://github.com/0xMiden/miden-vm"
 exclude = [".github/"]
 rust-version = "1.90"
-version = "0.22.2"
+version = "0.22.3"
 
 [profile.optimized]
 inherits = "release"
