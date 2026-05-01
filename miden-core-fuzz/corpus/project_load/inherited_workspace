@@ -1,0 +1,10 @@
+[package]
+name = "workspace-member"
+version.workspace = true
+description.workspace = true
+
+[lib]
+path = "lib.masm"
+
+[dependencies]
+shared-dep.workspace = true

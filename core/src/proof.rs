@@ -3,6 +3,8 @@ use alloc::{
     vec::Vec,
 };
 
+#[cfg(feature = "arbitrary")]
+use proptest::prelude::*;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -10,7 +12,8 @@ use crate::{
     crypto::hash::{Blake3_256, Poseidon2, Rpo256, Rpx256},
     precompile::PrecompileRequest,
     serde::{
-        ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable, SliceReader,
+        BudgetedReader, ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
+        SliceReader,
     },
 };
 
@@ -87,8 +90,7 @@ impl ExecutionProof {
     ///
     /// The serialization layout matches the [`Serializable`] implementation of [`ExecutionProof`].
     pub fn from_bytes(source: &[u8]) -> Result<Self, DeserializationError> {
-        let mut reader = SliceReader::new(source);
-        Self::read_from(&mut reader)
+        <Self as Deserializable>::read_from_bytes(source)
     }
 
     // DESTRUCTOR
@@ -106,6 +108,10 @@ impl ExecutionProof {
 /// A hash function used during STARK proof generation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true))
+)]
 #[repr(u8)]
 pub enum HashFunction {
     /// BLAKE3 hash function with 256-bit output.
@@ -165,6 +171,24 @@ impl TryFrom<&str> for HashFunction {
     }
 }
 
+#[cfg(feature = "arbitrary")]
+impl Arbitrary for HashFunction {
+    type Parameters = ();
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        any::<u8>()
+            .prop_map(|tag| match tag % 5 {
+                0 => Self::Blake3_256,
+                1 => Self::Rpo256,
+                2 => Self::Rpx256,
+                3 => Self::Poseidon2,
+                _ => Self::Keccak,
+            })
+            .boxed()
+    }
+}
+
 // SERIALIZATION
 // ================================================================================================
 
@@ -195,6 +219,11 @@ impl Deserializable for ExecutionProof {
         let pc_requests = Vec::<PrecompileRequest>::read_from(source)?;
 
         Ok(ExecutionProof { proof, hash_fn, pc_requests })
+    }
+
+    fn read_from_bytes(bytes: &[u8]) -> Result<Self, DeserializationError> {
+        let mut reader = BudgetedReader::new(SliceReader::new(bytes), bytes.len());
+        Self::read_from(&mut reader)
     }
 }
 
@@ -230,7 +259,48 @@ impl ExecutionProof {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::serde::{BudgetedReader, ByteWriter, DeserializationError, SliceReader};
+    use crate::{
+        events::EventId,
+        serde::{BudgetedReader, ByteWriter, DeserializationError, SliceReader},
+    };
+
+    #[test]
+    fn execution_proof_from_bytes_rejects_unbounded_proof_len() {
+        let mut bytes = Vec::new();
+        bytes.write_usize(usize::MAX);
+
+        let err = ExecutionProof::from_bytes(&bytes).unwrap_err();
+        let DeserializationError::InvalidValue(message) = err else {
+            panic!("expected InvalidValue error");
+        };
+        assert!(message.contains("requested"));
+        assert!(message.contains("reader can provide at most"));
+    }
+
+    #[test]
+    fn execution_proof_read_from_bytes_rejects_unbounded_proof_len() {
+        let mut bytes = Vec::new();
+        bytes.write_usize(usize::MAX);
+
+        let err = ExecutionProof::read_from_bytes(&bytes).unwrap_err();
+        let DeserializationError::InvalidValue(message) = err else {
+            panic!("expected InvalidValue error");
+        };
+        assert!(message.contains("requested"));
+        assert!(message.contains("reader can provide at most"));
+    }
+
+    #[test]
+    fn execution_proof_from_bytes_accepts_many_minimal_precompile_requests() {
+        let pc_requests = (0..64)
+            .map(|event_id| PrecompileRequest::new(EventId::from_u64(event_id), Vec::new()))
+            .collect();
+        let proof = ExecutionProof::new(vec![1, 2, 3], HashFunction::Blake3_256, pc_requests);
+
+        let decoded = ExecutionProof::from_bytes(&proof.to_bytes()).unwrap();
+
+        assert_eq!(decoded, proof);
+    }
 
     #[test]
     fn execution_proof_rejects_over_budget_proof_len() {

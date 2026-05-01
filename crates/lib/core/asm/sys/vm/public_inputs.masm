@@ -170,7 +170,7 @@ end
 proc reduce_variable_length_public_inputs
     # 1) Read num_kernel_proc_digests from advice and store for later use.
     #    We use tmp3 because tmp1 and tmp2 are clobbered by reduce_kernel_digests.
-    adv_push.1
+    adv_push
     exec.constants::tmp3 mem_store
     # => [...]
 

@@ -9,6 +9,8 @@ extern crate std;
 use alloc::vec::Vec;
 use core::borrow::Borrow;
 
+#[cfg(feature = "arbitrary")]
+use miden_core::program::Kernel;
 use miden_core::{
     WORD_SIZE, Word,
     field::ExtensionField,
@@ -18,6 +20,8 @@ use miden_core::{
 use miden_crypto::stark::air::{
     ReducedAuxValues, ReductionError, VarLenPublicInputs, WindowAccess,
 };
+#[cfg(feature = "arbitrary")]
+use proptest::prelude::*;
 
 pub mod ace;
 pub mod config;
@@ -85,7 +89,11 @@ impl<T: LiftedAirBuilder<F = Felt>> MidenAirBuilder for T {}
 // PUBLIC INPUTS
 // ================================================================================================
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
+)]
 pub struct PublicInputs {
     program_info: ProgramInfo,
     stack_inputs: StackInputs,
@@ -162,6 +170,35 @@ impl PublicInputs {
         result.extend_from_slice(self.stack_outputs.as_ref());
         result.extend_from_slice(self.pc_transcript_state.as_ref());
         result
+    }
+}
+
+#[cfg(feature = "arbitrary")]
+impl Arbitrary for PublicInputs {
+    type Parameters = ();
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        fn felt_strategy() -> impl Strategy<Value = Felt> {
+            any::<u32>().prop_map(Felt::from)
+        }
+
+        fn word_strategy() -> impl Strategy<Value = Word> {
+            any::<[u32; WORD_SIZE]>().prop_map(|values| Word::new(values.map(Felt::from)))
+        }
+
+        let program_info = word_strategy()
+            .prop_map(|program_hash| ProgramInfo::new(program_hash, Kernel::default()));
+        let stack_inputs = proptest::collection::vec(felt_strategy(), 0..=MIN_STACK_DEPTH)
+            .prop_map(|values| StackInputs::new(&values).expect("generated stack inputs fit"));
+        let stack_outputs = proptest::collection::vec(felt_strategy(), 0..=MIN_STACK_DEPTH)
+            .prop_map(|values| StackOutputs::new(&values).expect("generated stack outputs fit"));
+
+        (program_info, stack_inputs, stack_outputs, word_strategy())
+            .prop_map(|(program_info, stack_inputs, stack_outputs, pc_transcript_state)| {
+                Self::new(program_info, stack_inputs, stack_outputs, pc_transcript_state)
+            })
+            .boxed()
     }
 }
 
