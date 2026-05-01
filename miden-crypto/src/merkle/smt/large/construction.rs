@@ -5,13 +5,14 @@ use p3_maybe_rayon::prelude::*;
 
 use super::{
     CONSTRUCTION_SUBTREE_BATCH_SIZE, IN_MEMORY_DEPTH, LargeSmt, LargeSmtError, NUM_IN_MEMORY_NODES,
-    ROOT_MEMORY_INDEX, SMT_DEPTH, SmtStorage, StorageError, Subtree,
+    ROOT_MEMORY_INDEX, SMT_DEPTH, SmtStorage, SmtStorageReader, StorageError, Subtree,
 };
 use crate::{
     EMPTY_WORD, Word,
     hash::poseidon2::Poseidon2,
     merkle::smt::{
         EmptySubtreeRoots, InnerNode, Map, MerkleError, NodeIndex, Smt, SmtLeaf, SparseMerkleTree,
+        SparseMerkleTreeReader,
         full::concurrent::{
             PairComputations, SUBTREE_DEPTH, SubtreeLeaf, SubtreeLeavesIter, build_subtree,
         },
@@ -22,7 +23,7 @@ use crate::{
 // CONSTRUCTION
 // ================================================================================================
 
-impl<S: SmtStorage> LargeSmt<S> {
+impl<S: SmtStorageReader> LargeSmt<S> {
     /// Creates a new empty [LargeSmt] backed by the provided storage.
     ///
     /// This method is intended for creating a fresh tree with empty storage. If the storage
@@ -113,35 +114,6 @@ impl<S: SmtStorage> LargeSmt<S> {
         Ok(smt)
     }
 
-    /// Returns a new [Smt] instantiated with leaves set as specified by the provided entries.
-    ///
-    /// If the `concurrent` feature is enabled, this function uses a parallel implementation to
-    /// process the entries efficiently, otherwise it defaults to the sequential implementation.
-    ///
-    /// All leaves omitted from the entries list are set to [Self::EMPTY_VALUE].
-    ///
-    /// # Errors
-    /// Returns an error if the provided entries contain multiple values for the same key.
-    pub fn with_entries(
-        storage: S,
-        entries: impl IntoIterator<Item = (Word, Word)>,
-    ) -> Result<Self, LargeSmtError> {
-        let entries: Vec<(Word, Word)> = entries.into_iter().collect();
-
-        if storage.has_leaves()? {
-            return Err(StorageError::Unsupported(
-                "Cannot create SMT with non-empty storage".into(),
-            )
-            .into());
-        }
-        let mut tree = LargeSmt::new(storage)?;
-        if entries.is_empty() {
-            return Ok(tree);
-        }
-        tree.build_subtrees(entries)?;
-        Ok(tree)
-    }
-
     /// Internal method that initializes the in-memory tree from storage.
     ///
     /// For empty storage, returns an empty tree. For non-empty storage,
@@ -165,7 +137,7 @@ impl<S: SmtStorage> LargeSmt<S> {
         if is_empty {
             return Ok(Self {
                 storage,
-                in_memory_nodes,
+                in_memory_nodes: in_memory_nodes.into(),
                 leaf_count: 0,
                 entry_count: 0,
             });
@@ -220,10 +192,41 @@ impl<S: SmtStorage> LargeSmt<S> {
 
         Ok(Self {
             storage,
-            in_memory_nodes,
+            in_memory_nodes: in_memory_nodes.into(),
             leaf_count,
             entry_count,
         })
+    }
+}
+
+impl<S: SmtStorage> LargeSmt<S> {
+    /// Returns a new [Smt] instantiated with leaves set as specified by the provided entries.
+    ///
+    /// If the `concurrent` feature is enabled, this function uses a parallel implementation to
+    /// process the entries efficiently, otherwise it defaults to the sequential implementation.
+    ///
+    /// All leaves omitted from the entries list are set to [Self::EMPTY_VALUE].
+    ///
+    /// # Errors
+    /// Returns an error if the provided entries contain multiple values for the same key.
+    pub fn with_entries(
+        storage: S,
+        entries: impl IntoIterator<Item = (Word, Word)>,
+    ) -> Result<Self, LargeSmtError> {
+        let entries: Vec<(Word, Word)> = entries.into_iter().collect();
+
+        if storage.has_leaves()? {
+            return Err(StorageError::Unsupported(
+                "Cannot create SMT with non-empty storage".into(),
+            )
+            .into());
+        }
+        let mut tree = LargeSmt::new(storage)?;
+        if entries.is_empty() {
+            return Ok(tree);
+        }
+        tree.build_subtrees(entries)?;
+        Ok(tree)
     }
 
     fn build_subtrees(&mut self, mut entries: Vec<(Word, Word)>) -> Result<(), MerkleError> {
@@ -337,9 +340,10 @@ impl<S: SmtStorage> LargeSmt<S> {
         for (index, node) in nodes {
             if index.depth() < IN_MEMORY_DEPTH {
                 let memory_index = to_memory_index(&index);
+                let in_memory_nodes = self.in_memory_nodes_mut();
                 // Store in flat layout: left at 2*i, right at 2*i+1
-                self.in_memory_nodes[memory_index * 2] = node.left;
-                self.in_memory_nodes[memory_index * 2 + 1] = node.right;
+                in_memory_nodes[memory_index * 2] = node.left;
+                in_memory_nodes[memory_index * 2 + 1] = node.right;
             }
         }
     }

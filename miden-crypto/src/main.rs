@@ -6,12 +6,14 @@ use miden_crypto::merkle::smt::{RocksDbConfig, RocksDbStorage};
 use miden_crypto::{
     EMPTY_WORD, Felt, ONE, Word,
     hash::poseidon2::Poseidon2,
-    merkle::smt::{LargeSmt, LargeSmtError, MemoryStorage, SmtStorage},
+    merkle::smt::{LargeSmt, LargeSmtError, MemoryStorage},
     rand::test_utils::rand_value,
 };
 use rand::{Rng, prelude::IteratorRandom, rng};
 
-type Storage = Box<dyn SmtStorage>;
+#[cfg(feature = "executable")]
+mod boxed_storage;
+use boxed_storage::{BoxedSmtStorage as Storage, BoxedStorage};
 
 #[derive(Parser, Debug)]
 #[command(name = "Benchmark", about = "SMT benchmark", version, rename_all = "kebab-case")]
@@ -279,7 +281,7 @@ pub fn proof_generation(tree: &mut LargeSmt<Storage>) -> Result<(), LargeSmtErro
 #[allow(unused_variables)]
 fn get_storage(database_path: Option<PathBuf>, open: bool, kind: StorageKind) -> Storage {
     match kind {
-        StorageKind::Memory => Box::new(MemoryStorage::new()),
+        StorageKind::Memory => Box::new(BoxedStorage(MemoryStorage::new())),
         StorageKind::Rocksdb => {
             #[cfg(feature = "rocksdb")]
             {
@@ -298,12 +300,12 @@ fn get_storage(database_path: Option<PathBuf>, open: bool, kind: StorageKind) ->
                     RocksDbConfig::new(path).with_cache_size(1 << 30).with_max_open_files(2048),
                 )
                 .expect("Failed to open database");
-                Box::new(db)
+                Box::new(BoxedStorage(db))
             }
             #[cfg(not(feature = "rocksdb"))]
             {
                 eprintln!("rocksdb feature not enabled; falling back to memory storage");
-                Box::new(MemoryStorage::new())
+                Box::new(BoxedStorage(MemoryStorage::new()))
             }
         },
     }

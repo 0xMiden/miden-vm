@@ -2,18 +2,19 @@ use alloc::vec::Vec;
 
 use super::{
     IN_MEMORY_DEPTH, LargeSmt, NUM_SUBTREE_LEVELS, ROOT_MEMORY_INDEX, SMT_DEPTH, SmtStorage,
-    StorageError, Subtree,
+    SmtStorageReader, StorageError, Subtree,
 };
 use crate::{
     EMPTY_WORD, Word,
     merkle::smt::{
         EmptySubtreeRoots, InnerNode, LargeSmtError, LeafIndex, Map, MerkleError, NodeIndex,
         SmtLeaf, SmtLeafError, SmtProof, SparseMerklePath, SparseMerkleTree,
+        SparseMerkleTreeReader,
         large::{is_empty_parent, to_memory_index},
     },
 };
 
-impl<S: SmtStorage> SparseMerkleTree<SMT_DEPTH> for LargeSmt<S> {
+impl<S: SmtStorageReader> SparseMerkleTreeReader<SMT_DEPTH> for LargeSmt<S> {
     type Key = Word;
     type Value = Word;
     type Leaf = SmtLeaf;
@@ -22,21 +23,8 @@ impl<S: SmtStorage> SparseMerkleTree<SMT_DEPTH> for LargeSmt<S> {
     const EMPTY_VALUE: Self::Value = EMPTY_WORD;
     const EMPTY_ROOT: Word = *EmptySubtreeRoots::entry(SMT_DEPTH, 0);
 
-    fn from_raw_parts(
-        _inner_nodes: super::InnerNodes,
-        _leaves: super::Leaves,
-        _root: Word,
-    ) -> Result<Self, MerkleError> {
-        // This method is not supported
-        panic!("LargeSmt::from_raw_parts is not supported");
-    }
-
     fn root(&self) -> Word {
         self.in_memory_nodes[ROOT_MEMORY_INDEX]
-    }
-
-    fn set_root(&mut self, root: Word) {
-        self.in_memory_nodes[ROOT_MEMORY_INDEX] = root;
     }
 
     fn get_inner_node(&self, index: NodeIndex) -> InnerNode {
@@ -53,87 +41,6 @@ impl<S: SmtStorage> SparseMerkleTree<SMT_DEPTH> for LargeSmt<S> {
             .get_inner_node(index)
             .expect("Failed to get inner node")
             .unwrap_or_else(|| EmptySubtreeRoots::get_inner_node(SMT_DEPTH, index.depth()))
-    }
-
-    fn insert_inner_node(&mut self, index: NodeIndex, inner_node: InnerNode) -> Option<InnerNode> {
-        if index.depth() < IN_MEMORY_DEPTH {
-            let i = to_memory_index(&index);
-            // Get the old node before replacing
-            let old_left = self.in_memory_nodes[i * 2];
-            let old_right = self.in_memory_nodes[i * 2 + 1];
-
-            // Store new node in flat layout
-            self.in_memory_nodes[i * 2] = inner_node.left;
-            self.in_memory_nodes[i * 2 + 1] = inner_node.right;
-
-            // Check if the old node was empty
-            if is_empty_parent(old_left, old_right, index.depth() + 1) {
-                return None;
-            }
-
-            return Some(InnerNode { left: old_left, right: old_right });
-        }
-        self.storage
-            .set_inner_node(index, inner_node)
-            .expect("Failed to store inner node")
-    }
-
-    fn remove_inner_node(&mut self, index: NodeIndex) -> Option<InnerNode> {
-        if index.depth() < IN_MEMORY_DEPTH {
-            let memory_index = to_memory_index(&index);
-            // Get the old node before replacing with empty hashes
-            let old_left = self.in_memory_nodes[memory_index * 2];
-            let old_right = self.in_memory_nodes[memory_index * 2 + 1];
-
-            // Replace with empty hashes
-            let child_depth = index.depth() + 1;
-            let empty_hash = *EmptySubtreeRoots::entry(SMT_DEPTH, child_depth);
-            self.in_memory_nodes[memory_index * 2] = empty_hash;
-            self.in_memory_nodes[memory_index * 2 + 1] = empty_hash;
-
-            // Return the old node if it wasn't already empty
-            if is_empty_parent(old_left, old_right, child_depth) {
-                return None;
-            }
-
-            return Some(InnerNode { left: old_left, right: old_right });
-        }
-        self.storage.remove_inner_node(index).expect("Failed to remove inner node")
-    }
-
-    fn insert(&mut self, key: Self::Key, value: Self::Value) -> Result<Self::Value, MerkleError> {
-        let old_value = self.get_value(&key);
-        // if the old value and new value are the same, there is nothing to update
-        if value == old_value {
-            return Ok(value);
-        }
-
-        let mutations = self.compute_mutations([(key, value)])?;
-        self.apply_mutations(mutations).expect("Failed to apply mutations in insert");
-
-        Ok(old_value)
-    }
-
-    fn insert_value(
-        &mut self,
-        key: Self::Key,
-        value: Self::Value,
-    ) -> Result<Option<Self::Value>, MerkleError> {
-        // inserting an `EMPTY_VALUE` is equivalent to removing any value associated with `key`
-        let index = Self::key_to_leaf_index(&key).position();
-        if value != Self::EMPTY_VALUE {
-            match self.storage.insert_value(index, key, value) {
-                Ok(prev) => Ok(prev),
-                Err(StorageError::Leaf(SmtLeafError::TooManyLeafEntries { actual })) => {
-                    Err(MerkleError::TooManyLeafEntries { actual })
-                },
-                Err(_) => {
-                    panic!("Storage error during insert_value");
-                },
-            }
-        } else {
-            Ok(self.storage.remove_value(index, key).map_err(LargeSmtError::from)?)
-        }
     }
 
     fn get_value(&self, key: &Self::Key) -> Self::Value {
@@ -245,5 +152,94 @@ impl<S: SmtStorage> SparseMerkleTree<SMT_DEPTH> for LargeSmt<S> {
 
     fn path_and_leaf_to_opening(path: SparseMerklePath, leaf: SmtLeaf) -> SmtProof {
         SmtProof::new_unchecked(path, leaf)
+    }
+}
+
+impl<S: SmtStorage> SparseMerkleTree<SMT_DEPTH> for LargeSmt<S> {
+    fn set_root(&mut self, root: Word) {
+        self.in_memory_nodes_mut()[ROOT_MEMORY_INDEX] = root;
+    }
+
+    fn insert_inner_node(&mut self, index: NodeIndex, inner_node: InnerNode) -> Option<InnerNode> {
+        if index.depth() < IN_MEMORY_DEPTH {
+            let i = to_memory_index(&index);
+            let nodes = self.in_memory_nodes_mut();
+            // Get the old node before replacing
+            let old_left = nodes[i * 2];
+            let old_right = nodes[i * 2 + 1];
+
+            // Store new node in flat layout
+            nodes[i * 2] = inner_node.left;
+            nodes[i * 2 + 1] = inner_node.right;
+
+            // Check if the old node was empty
+            if is_empty_parent(old_left, old_right, index.depth() + 1) {
+                return None;
+            }
+
+            return Some(InnerNode { left: old_left, right: old_right });
+        }
+        self.storage
+            .set_inner_node(index, inner_node)
+            .expect("Failed to store inner node")
+    }
+
+    fn remove_inner_node(&mut self, index: NodeIndex) -> Option<InnerNode> {
+        if index.depth() < IN_MEMORY_DEPTH {
+            let memory_index = to_memory_index(&index);
+            let nodes = self.in_memory_nodes_mut();
+            // Get the old node before replacing with empty hashes
+            let old_left = nodes[memory_index * 2];
+            let old_right = nodes[memory_index * 2 + 1];
+
+            // Replace with empty hashes
+            let child_depth = index.depth() + 1;
+            let empty_hash = *EmptySubtreeRoots::entry(SMT_DEPTH, child_depth);
+            nodes[memory_index * 2] = empty_hash;
+            nodes[memory_index * 2 + 1] = empty_hash;
+
+            // Return the old node if it wasn't already empty
+            if is_empty_parent(old_left, old_right, child_depth) {
+                return None;
+            }
+
+            return Some(InnerNode { left: old_left, right: old_right });
+        }
+        self.storage.remove_inner_node(index).expect("Failed to remove inner node")
+    }
+
+    fn insert(&mut self, key: Self::Key, value: Self::Value) -> Result<Self::Value, MerkleError> {
+        let old_value = self.get_value(&key);
+        // if the old value and new value are the same, there is nothing to update
+        if value == old_value {
+            return Ok(value);
+        }
+
+        let mutations = self.compute_mutations([(key, value)])?;
+        self.apply_mutations(mutations).expect("Failed to apply mutations in insert");
+
+        Ok(old_value)
+    }
+
+    fn insert_value(
+        &mut self,
+        key: Self::Key,
+        value: Self::Value,
+    ) -> Result<Option<Self::Value>, MerkleError> {
+        // inserting an `EMPTY_VALUE` is equivalent to removing any value associated with `key`
+        let index = Self::key_to_leaf_index(&key).position();
+        if value != Self::EMPTY_VALUE {
+            match self.storage.insert_value(index, key, value) {
+                Ok(prev) => Ok(prev),
+                Err(StorageError::Leaf(SmtLeafError::TooManyLeafEntries { actual })) => {
+                    Err(MerkleError::TooManyLeafEntries { actual })
+                },
+                Err(_) => {
+                    panic!("Storage error during insert_value");
+                },
+            }
+        } else {
+            Ok(self.storage.remove_value(index, key).map_err(LargeSmtError::from)?)
+        }
     }
 }

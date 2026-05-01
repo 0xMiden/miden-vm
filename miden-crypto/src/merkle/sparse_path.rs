@@ -462,7 +462,7 @@ mod tests {
         Felt, ONE, Word,
         merkle::{
             EmptySubtreeRoots, MerkleError, MerklePath, MerkleTree, NodeIndex,
-            smt::{LeafIndex, SMT_MAX_DEPTH, SimpleSmt, Smt, SparseMerkleTree},
+            smt::{LeafIndex, SMT_MAX_DEPTH, SimpleSmt, Smt, SparseMerkleTreeReader},
             sparse_path::path_depth_iter,
         },
     };

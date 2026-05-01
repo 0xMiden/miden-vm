@@ -369,6 +369,17 @@ pub struct LargeSmtForest<B: Backend> {
     non_empty_histories: Set<LineageId>,
 }
 
+impl<B: Backend + Clone> Clone for LargeSmtForest<B> {
+    fn clone(&self) -> Self {
+        Self {
+            config: self.config.clone(),
+            backend: self.backend.clone(),
+            lineage_data: self.lineage_data.clone(),
+            non_empty_histories: self.non_empty_histories.clone(),
+        }
+    }
+}
+
 // CONSTRUCTION AND BASIC QUERIES
 // ================================================================================================
 

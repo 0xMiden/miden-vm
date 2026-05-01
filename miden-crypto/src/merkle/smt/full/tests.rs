@@ -10,7 +10,7 @@ use crate::{
         EmptySubtreeRoots,
         smt::{
             LEAF_DOMAIN, Map, MutationSet, NodeMutation, SmtLeafError, SmtProofError,
-            SparseMerkleTree, full::MAX_LEAF_ENTRIES,
+            SparseMerkleTree, SparseMerkleTreeReader, full::MAX_LEAF_ENTRIES,
         },
         store::MerkleStore,
     },

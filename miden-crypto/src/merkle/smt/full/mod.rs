@@ -2,7 +2,7 @@ use alloc::{string::ToString, vec::Vec};
 
 use super::{
     EMPTY_WORD, EmptySubtreeRoots, InnerNode, InnerNodeInfo, InnerNodes, LeafIndex, MerkleError,
-    MutationSet, NodeIndex, SparseMerklePath, SparseMerkleTree, Word,
+    MutationSet, NodeIndex, SparseMerklePath, SparseMerkleTree, SparseMerkleTreeReader, Word,
 };
 
 mod error;
@@ -109,7 +109,7 @@ impl Smt {
     // CONSTANTS
     // --------------------------------------------------------------------------------------------
     /// The default value used to compute the hash of empty leaves
-    pub const EMPTY_VALUE: Word = <Self as SparseMerkleTree<SMT_DEPTH>>::EMPTY_VALUE;
+    pub const EMPTY_VALUE: Word = <Self as SparseMerkleTreeReader<SMT_DEPTH>>::EMPTY_VALUE;
 
     // CONSTRUCTORS
     // --------------------------------------------------------------------------------------------
@@ -221,8 +221,16 @@ impl Smt {
     /// With debug assertions on, this function panics if `root` does not match the root node in
     /// `inner_nodes`.
     pub fn from_raw_parts(inner_nodes: InnerNodes, leaves: Leaves, root: Word) -> Self {
-        // Our particular implementation of `from_raw_parts()` never returns `Err`.
-        <Self as SparseMerkleTree<SMT_DEPTH>>::from_raw_parts(inner_nodes, leaves, root).unwrap()
+        if cfg!(debug_assertions) {
+            let root_node_hash = inner_nodes
+                .get(&NodeIndex::root())
+                .map(InnerNode::hash)
+                .unwrap_or(Self::EMPTY_ROOT);
+
+            assert_eq!(root_node_hash, root);
+        }
+        let num_entries = leaves.values().map(SmtLeaf::num_entries).sum();
+        Self { root, inner_nodes, leaves, num_entries }
     }
 
     // PUBLIC ACCESSORS
@@ -235,7 +243,7 @@ impl Smt {
 
     /// Returns the root of the tree
     pub fn root(&self) -> Word {
-        <Self as SparseMerkleTree<SMT_DEPTH>>::root(self)
+        <Self as SparseMerkleTreeReader<SMT_DEPTH>>::root(self)
     }
 
     /// Returns the number of non-empty leaves in this tree.
@@ -256,7 +264,7 @@ impl Smt {
 
     /// Returns the leaf to which `key` maps
     pub fn get_leaf(&self, key: &Word) -> SmtLeaf {
-        <Self as SparseMerkleTree<SMT_DEPTH>>::get_leaf(self, key)
+        <Self as SparseMerkleTreeReader<SMT_DEPTH>>::get_leaf(self, key)
     }
 
     /// Returns the leaf corresponding to the provided `index`.
@@ -266,13 +274,13 @@ impl Smt {
 
     /// Returns the value associated with `key`
     pub fn get_value(&self, key: &Word) -> Word {
-        <Self as SparseMerkleTree<SMT_DEPTH>>::get_value(self, key)
+        <Self as SparseMerkleTreeReader<SMT_DEPTH>>::get_value(self, key)
     }
 
     /// Returns an opening of the leaf associated with `key`. Conceptually, an opening is a Merkle
     /// path to the leaf, as well as the leaf itself.
     pub fn open(&self, key: &Word) -> SmtProof {
-        <Self as SparseMerkleTree<SMT_DEPTH>>::open(self, key)
+        <Self as SparseMerkleTreeReader<SMT_DEPTH>>::open(self, key)
     }
 
     /// Returns a boolean value indicating whether the SMT is empty.
@@ -364,7 +372,7 @@ impl Smt {
         }
         #[cfg(not(feature = "concurrent"))]
         {
-            <Self as SparseMerkleTree<SMT_DEPTH>>::compute_mutations(self, kv_pairs)
+            <Self as SparseMerkleTreeReader<SMT_DEPTH>>::compute_mutations(self, kv_pairs)
         }
     }
 
@@ -454,7 +462,7 @@ impl Smt {
     }
 }
 
-impl SparseMerkleTree<SMT_DEPTH> for Smt {
+impl SparseMerkleTreeReader<SMT_DEPTH> for Smt {
     type Key = Word;
     type Value = Word;
     type Leaf = SmtLeaf;
@@ -463,29 +471,8 @@ impl SparseMerkleTree<SMT_DEPTH> for Smt {
     const EMPTY_VALUE: Self::Value = EMPTY_WORD;
     const EMPTY_ROOT: Word = *EmptySubtreeRoots::entry(SMT_DEPTH, 0);
 
-    fn from_raw_parts(
-        inner_nodes: InnerNodes,
-        leaves: Leaves,
-        root: Word,
-    ) -> Result<Self, MerkleError> {
-        if cfg!(debug_assertions) {
-            let root_node_hash = inner_nodes
-                .get(&NodeIndex::root())
-                .map(InnerNode::hash)
-                .unwrap_or(Self::EMPTY_ROOT);
-
-            assert_eq!(root_node_hash, root);
-        }
-        let num_entries = leaves.values().map(SmtLeaf::num_entries).sum();
-        Ok(Self { root, inner_nodes, leaves, num_entries })
-    }
-
     fn root(&self) -> Word {
         self.root
-    }
-
-    fn set_root(&mut self, root: Word) {
-        self.root = root;
     }
 
     fn get_inner_node(&self, index: NodeIndex) -> InnerNode {
@@ -493,31 +480,6 @@ impl SparseMerkleTree<SMT_DEPTH> for Smt {
             .get(&index)
             .cloned()
             .unwrap_or_else(|| EmptySubtreeRoots::get_inner_node(SMT_DEPTH, index.depth()))
-    }
-
-    fn insert_inner_node(&mut self, index: NodeIndex, inner_node: InnerNode) -> Option<InnerNode> {
-        if inner_node == EmptySubtreeRoots::get_inner_node(SMT_DEPTH, index.depth()) {
-            self.remove_inner_node(index)
-        } else {
-            self.inner_nodes.insert(index, inner_node)
-        }
-    }
-
-    fn remove_inner_node(&mut self, index: NodeIndex) -> Option<InnerNode> {
-        self.inner_nodes.remove(&index)
-    }
-
-    fn insert_value(
-        &mut self,
-        key: Self::Key,
-        value: Self::Value,
-    ) -> Result<Option<Self::Value>, MerkleError> {
-        // inserting an `EMPTY_VALUE` is equivalent to removing any value associated with `key`
-        if value != Self::EMPTY_VALUE {
-            self.perform_insert(key, value)
-        } else {
-            Ok(self.perform_remove(key))
-        }
     }
 
     fn get_value(&self, key: &Self::Key) -> Self::Value {
@@ -571,6 +533,37 @@ impl SparseMerkleTree<SMT_DEPTH> for Smt {
 
     fn path_and_leaf_to_opening(path: SparseMerklePath, leaf: SmtLeaf) -> SmtProof {
         SmtProof::new_unchecked(path, leaf)
+    }
+}
+
+impl SparseMerkleTree<SMT_DEPTH> for Smt {
+    fn set_root(&mut self, root: Word) {
+        self.root = root;
+    }
+
+    fn insert_inner_node(&mut self, index: NodeIndex, inner_node: InnerNode) -> Option<InnerNode> {
+        if inner_node == EmptySubtreeRoots::get_inner_node(SMT_DEPTH, index.depth()) {
+            self.remove_inner_node(index)
+        } else {
+            self.inner_nodes.insert(index, inner_node)
+        }
+    }
+
+    fn remove_inner_node(&mut self, index: NodeIndex) -> Option<InnerNode> {
+        self.inner_nodes.remove(&index)
+    }
+
+    fn insert_value(
+        &mut self,
+        key: Self::Key,
+        value: Self::Value,
+    ) -> Result<Option<Self::Value>, MerkleError> {
+        // inserting an `EMPTY_VALUE` is equivalent to removing any value associated with `key`
+        if value != Self::EMPTY_VALUE {
+            self.perform_insert(key, value)
+        } else {
+            Ok(self.perform_remove(key))
+        }
     }
 }
 
@@ -648,7 +641,7 @@ impl Smt {
         &self,
         kv_pairs: impl IntoIterator<Item = (Word, Word)>,
     ) -> MutationSet<SMT_DEPTH, Word, Word> {
-        <Self as SparseMerkleTree<SMT_DEPTH>>::compute_mutations(self, kv_pairs)
+        <Self as SparseMerkleTreeReader<SMT_DEPTH>>::compute_mutations(self, kv_pairs)
             .expect("Failed to compute mutations in fuzzing")
     }
 }
