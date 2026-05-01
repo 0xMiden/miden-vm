@@ -63,6 +63,12 @@ const INITIAL_STACK_TOP_IDX: usize = 250;
 const DEFAULT_MAX_STACK_DEPTH: usize =
     INITIAL_STACK_BUFFER_SIZE - INITIAL_STACK_TOP_IDX - 1 + MIN_STACK_DEPTH;
 
+const _: [(); 1] =
+    [(); (ExecutionOptions::DEFAULT_MAX_STACK_DEPTH == DEFAULT_MAX_STACK_DEPTH) as usize];
+
+/// The stack buffer index where the logical operand stack starts after reset/recenter.
+const STACK_BUFFER_BASE_IDX: usize = INITIAL_STACK_TOP_IDX - MIN_STACK_DEPTH;
+
 // FAST PROCESSOR
 // ================================================================================================
 
@@ -252,8 +258,6 @@ impl FastProcessor {
             // Note: we use `Vec::into_boxed_slice()` here, since `Box::new([T; N])` first allocates
             // the array on the stack, and then moves it to the heap. This might cause a
             // stack overflow on some systems.
-            debug_assert_eq!(ExecutionOptions::DEFAULT_MAX_STACK_DEPTH, DEFAULT_MAX_STACK_DEPTH);
-
             let mut stack = vec![ZERO; INITIAL_STACK_BUFFER_SIZE].into_boxed_slice();
 
             // Copy inputs in reverse order so first element ends up at top of stack
@@ -623,19 +627,45 @@ impl FastProcessor {
     }
 
     fn grow_stack_buffer(&mut self, min_len: usize) {
-        let max_len = self
-            .stack_bot_idx
+        // The maximum allocation is tied to the logical operand stack depth, not to the current
+        // buffer position. Using `stack_bot_idx` here would make the allocation ceiling drift when
+        // the live stack has moved away from the initial base.
+        let max_len = STACK_BUFFER_BASE_IDX
             .saturating_add(self.options.max_stack_depth())
             .saturating_add(1);
+        let live_len = self.stack_size();
+
+        // Growth also recenters the live stack at the normal base. This keeps future push/drop
+        // behavior close to the fixed-buffer layout and avoids carrying unused prefix cells into
+        // the new allocation. The extra slot is for the next checked push that triggered growth.
+        let recentered_min_len = STACK_BUFFER_BASE_IDX.saturating_add(live_len).saturating_add(2);
+        let required_len = min_len.min(max_len).max(recentered_min_len);
+        debug_assert!(required_len <= max_len);
+
         let mut new_len = self.stack.len();
-        while new_len < min_len {
-            new_len = new_len.saturating_mul(2);
+        while new_len < required_len {
+            let next_len = new_len.saturating_mul(2);
+            if next_len <= new_len {
+                new_len = required_len;
+                break;
+            }
+            new_len = next_len.min(max_len);
         }
-        new_len = new_len.min(max_len).max(min_len);
+        debug_assert!(new_len <= max_len);
 
         let mut new_stack = vec![ZERO; new_len].into_boxed_slice();
-        new_stack[..self.stack.len()].copy_from_slice(&self.stack);
+        let new_stack_bot_idx = STACK_BUFFER_BASE_IDX;
+        let new_stack_top_idx = new_stack_bot_idx + live_len;
+
+        // Only the active stack range carries VM state. Prefix/suffix cells are scratch storage and
+        // stay zeroed, which keeps growth proportional to the live depth instead of the old buffer
+        // length.
+        new_stack[new_stack_bot_idx..new_stack_top_idx]
+            .copy_from_slice(&self.stack[self.stack_bot_idx..self.stack_top_idx]);
+
         self.stack = new_stack;
+        self.stack_bot_idx = new_stack_bot_idx;
+        self.stack_top_idx = new_stack_top_idx;
     }
 
     /// Decrements the stack top pointer by 1.
