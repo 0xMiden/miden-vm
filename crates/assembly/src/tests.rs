@@ -6335,7 +6335,7 @@ fn forward_declared_import_used_by_constant_ref_is_not_reported_unused_when_warn
 
     let source_manager: Arc<dyn crate::SourceManager> = Arc::new(DefaultSourceManager::default());
     let module = r#"
-        const LOCAL = foo::BAR
+        pub const LOCAL = foo::BAR
         use external::module -> foo
     "#;
 
@@ -7137,6 +7137,25 @@ fn chained_constant_used_transitively() -> TestResult {
 }
 
 #[test]
+fn same_module_qualified_constant_used_transitively() -> TestResult {
+    let context = TestContext::default();
+    let source = source_file!(
+        &context,
+        "
+        const A = 1
+        pub const B = ::test::lib::A
+
+        pub proc foo
+            push.1
+        end"
+    );
+
+    let module = context.parse_module_with_path("test::lib", source)?;
+    let _library = context.assemble_library([module])?;
+    Ok(())
+}
+
+#[test]
 fn dead_constant_does_not_mask_unused_import() {
     let context = TestContext::default();
     let a = "pub const BAR = 42\n\npub proc noop\n    push.1 drop\nend\n";
@@ -7265,8 +7284,8 @@ fn local_constant_shadowing_import_warns_unused_import() {
     let mut context = TestContext::default();
     context.add_library(&lib).unwrap();
 
-    // `use lib::a::FOO` imports FOO, but a local `const FOO = 1` shadows it.
-    // The import should be reported as unused because the local constant takes precedence.
+    // `use lib::a::FOO` imports FOO, but a local `const FOO = 1` tries to reuse the same name.
+    // Current semantic analysis rejects that cross-kind duplicate before unused-import checks.
     let source = source_file!(
         &context,
         "
@@ -7284,13 +7303,17 @@ fn local_constant_shadowing_import_warns_unused_import() {
         source,
         "syntax error",
         "help: see emitted diagnostics for details",
-        "unused import",
+        "symbol conflict: found duplicate definitions of the same name",
         regex!(r#",-\[test[\d]+:2:13\]"#),
         "1 |",
         "2 |         use lib::a::FOO",
-        "  :             ^^^^^^^^^^^",
+        "  :             ^^^^^|^^^^^",
+        "  :                  `-- previously defined here",
         "3 |",
-        "  `----",
-        " help: this import is never used and can be safely removed"
+        "4 |         const FOO = 1",
+        "  :         ^^^^^^|^^^^^^",
+        "  :               `-- conflict occurs here",
+        "5 |",
+        "  `----"
     );
 }

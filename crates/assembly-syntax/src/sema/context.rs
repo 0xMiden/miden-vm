@@ -16,6 +16,7 @@ use crate::ast::{
 
 /// This maintains the state for semantic analysis of a single [Module].
 pub struct AnalysisContext {
+    module_path: PathBuf,
     constants: BTreeMap<Ident, Constant>,
     cached_constant_values: BTreeMap<Ident, ConstantValue>,
     used_constants: BTreeSet<Ident>,
@@ -49,14 +50,7 @@ impl constants::ConstEnvironment for AnalysisContext {
     #[inline]
     fn get(&mut self, name: &Ident) -> Result<Option<CachedConstantValue<'_>>, Self::Error> {
         if self.constants.contains_key(name) {
-            let is_self_ref = self.simplifying_constant.as_ref() == Some(name);
-            if !is_self_ref {
-                if let Some(ref parent) = self.simplifying_constant {
-                    self.constant_deps.entry(parent.clone()).or_default().insert(name.clone());
-                } else {
-                    self.used_constants.insert(name.clone());
-                }
-            }
+            self.record_constant_ref(name);
             if let Some(value) = self.cached_constant_values.get(name) {
                 return Ok(Some(CachedConstantValue::Hit(value)));
             }
@@ -80,6 +74,8 @@ impl constants::ConstEnvironment for AnalysisContext {
     ) -> Result<Option<CachedConstantValue<'_>>, Self::Error> {
         if let Some(name) = path.as_ident() {
             self.get(&name)
+        } else if let Some(name) = self.local_constant_name_for_path(path) {
+            self.get(&name)
         } else {
             Ok(None)
         }
@@ -99,8 +95,13 @@ impl constants::ConstEnvironment for AnalysisContext {
 }
 
 impl AnalysisContext {
-    pub fn new(source_file: Arc<SourceFile>, source_manager: Arc<dyn SourceManager>) -> Self {
+    pub fn new(
+        module_path: impl AsRef<Path>,
+        source_file: Arc<SourceFile>,
+        source_manager: Arc<dyn SourceManager>,
+    ) -> Self {
         Self {
+            module_path: module_path.as_ref().to_relative().to_path_buf(),
             constants: Default::default(),
             cached_constant_values: Default::default(),
             used_constants: Default::default(),
@@ -114,6 +115,29 @@ impl AnalysisContext {
             source_manager,
             warnings_as_errors: false,
         }
+    }
+
+    fn record_constant_ref(&mut self, name: &Ident) {
+        let is_self_ref = self.simplifying_constant.as_ref() == Some(name);
+        if is_self_ref {
+            return;
+        }
+
+        if let Some(ref parent) = self.simplifying_constant {
+            self.constant_deps.entry(parent.clone()).or_default().insert(name.clone());
+        } else {
+            self.used_constants.insert(name.clone());
+        }
+    }
+
+    fn local_constant_name_for_path(&self, path: Span<&Path>) -> Option<Ident> {
+        let (name, module_path) = path.split_last()?;
+        if module_path.to_relative() != self.module_path.as_path() {
+            return None;
+        }
+
+        let name = Ident::new_with_span(path.span(), name).ok()?;
+        self.constants.contains_key(&name).then_some(name)
     }
 
     pub fn set_warnings_as_errors(&mut self, yes: bool) {
@@ -462,7 +486,7 @@ mod tests {
             String::from("begin\n    nop\nend\n").into_boxed_str(),
         );
         let source_file = source_manager.load_from_raw_parts(uri, content);
-        let mut context = AnalysisContext::new(source_file, source_manager);
+        let mut context = AnalysisContext::new(Path::EMPTY, source_file, source_manager);
 
         // Each Ci references C(i+1) twice, so without memoization the number of misses would
         // grow exponentially with depth.
