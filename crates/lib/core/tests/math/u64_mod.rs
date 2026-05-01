@@ -329,8 +329,8 @@ fn overflowing_mul() {
         (1, 1),
         (1, u64::MAX),
         (u64::MAX, 1),
-        (u32::MAX as u64, u32::MAX as u64),  // largest no-overflow product
-        (1u64 << 32, 1u64 << 32),            // smallest overflowing product
+        (u32::MAX as u64, u32::MAX as u64), // largest no-overflow product
+        (1u64 << 32, 1u64 << 32),           // smallest overflowing product
         (u64::MAX, u64::MAX),
         (rand_value(), rand_value()),
     ];

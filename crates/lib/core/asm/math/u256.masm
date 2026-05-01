@@ -619,6 +619,148 @@ pub proc wrapping_mul(b: u256, a: u256) -> u256
     padw loc_loadw_le.8              # [c0, c1, c2, c3, c4, c5, c6, c7, ...]
 end
 
+#! Performs multiplication of two unsigned 256 bit integers preserving the full 512-bit product.
+#! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
+#! Stack transition looks as follows:
+#! [b0, b1, b2, b3, b4, b5, b6, b7, a0, a1, a2, a3, a4, a5, a6, a7, ...]
+#!   -> [c0, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13, c14, c15, ...],
+#! where c = a * b as a 512-bit value with c0 being the least significant 32-bit limb.
+@locals(24)
+pub proc widening_mul(b: u256, a: u256) -> (lo: u256, hi: u256)
+    # Row-by-row schoolbook: for row i in 0..8 and j in 0..8,
+    #   p[i+j] += a[j] * b[i] + carry
+    # After each row, the final carry is stored as the seed value of p[i+8] for the next
+    # row to read in.
+    #
+    # Memory layout (24 local cells):
+    #   mem[0..7]   = b[0..7]
+    #   mem[8..23]  = p[0..15]   (lo half = mem[8..15], hi half = mem[16..23])
+    loc_storew_le.0 dropw            # b0..b3 -> mem[0..3]
+    loc_storew_le.4 dropw            # b4..b7 -> mem[4..7]
+    padw loc_storew_le.8             # p0..p3 = 0
+    loc_storew_le.12 dropw
+    padw loc_storew_le.16            # p8..p11 = 0
+    loc_storew_le.20 dropw           # p12..p15 = 0
+
+    # ----- row 0: b[0] * a[0..7] (p starts at 0, so madd alone suffices) -----
+    loc_load.0 push.0
+    dup.2 dup.2 u32widening_madd loc_store.8
+    dup.3 dup.2 u32widening_madd loc_store.9
+    dup.4 dup.2 u32widening_madd loc_store.10
+    dup.5 dup.2 u32widening_madd loc_store.11
+    dup.6 dup.2 u32widening_madd loc_store.12
+    dup.7 dup.2 u32widening_madd loc_store.13
+    dup.8 dup.2 u32widening_madd loc_store.14
+    dup.9 dup.2 u32widening_madd loc_store.15
+    loc_store.16 drop
+
+    # ----- row 1: b[1] * a[0..7] -----
+    loc_load.1 push.0
+    dup.2 dup.2 loc_load.9  movdn.3 exec.mulstep swap loc_store.9
+    dup.3 dup.2 loc_load.10 movdn.3 exec.mulstep swap loc_store.10
+    dup.4 dup.2 loc_load.11 movdn.3 exec.mulstep swap loc_store.11
+    dup.5 dup.2 loc_load.12 movdn.3 exec.mulstep swap loc_store.12
+    dup.6 dup.2 loc_load.13 movdn.3 exec.mulstep swap loc_store.13
+    dup.7 dup.2 loc_load.14 movdn.3 exec.mulstep swap loc_store.14
+    dup.8 dup.2 loc_load.15 movdn.3 exec.mulstep swap loc_store.15
+    dup.9 dup.2 loc_load.16 movdn.3 exec.mulstep swap loc_store.16
+    loc_store.17 drop
+
+    # ----- row 2: b[2] * a[0..7] -----
+    loc_load.2 push.0
+    dup.2 dup.2 loc_load.10 movdn.3 exec.mulstep swap loc_store.10
+    dup.3 dup.2 loc_load.11 movdn.3 exec.mulstep swap loc_store.11
+    dup.4 dup.2 loc_load.12 movdn.3 exec.mulstep swap loc_store.12
+    dup.5 dup.2 loc_load.13 movdn.3 exec.mulstep swap loc_store.13
+    dup.6 dup.2 loc_load.14 movdn.3 exec.mulstep swap loc_store.14
+    dup.7 dup.2 loc_load.15 movdn.3 exec.mulstep swap loc_store.15
+    dup.8 dup.2 loc_load.16 movdn.3 exec.mulstep swap loc_store.16
+    dup.9 dup.2 loc_load.17 movdn.3 exec.mulstep swap loc_store.17
+    loc_store.18 drop
+
+    # ----- row 3: b[3] * a[0..7] -----
+    loc_load.3 push.0
+    dup.2 dup.2 loc_load.11 movdn.3 exec.mulstep swap loc_store.11
+    dup.3 dup.2 loc_load.12 movdn.3 exec.mulstep swap loc_store.12
+    dup.4 dup.2 loc_load.13 movdn.3 exec.mulstep swap loc_store.13
+    dup.5 dup.2 loc_load.14 movdn.3 exec.mulstep swap loc_store.14
+    dup.6 dup.2 loc_load.15 movdn.3 exec.mulstep swap loc_store.15
+    dup.7 dup.2 loc_load.16 movdn.3 exec.mulstep swap loc_store.16
+    dup.8 dup.2 loc_load.17 movdn.3 exec.mulstep swap loc_store.17
+    dup.9 dup.2 loc_load.18 movdn.3 exec.mulstep swap loc_store.18
+    loc_store.19 drop
+
+    # ----- row 4: b[4] * a[0..7] -----
+    loc_load.4 push.0
+    dup.2 dup.2 loc_load.12 movdn.3 exec.mulstep swap loc_store.12
+    dup.3 dup.2 loc_load.13 movdn.3 exec.mulstep swap loc_store.13
+    dup.4 dup.2 loc_load.14 movdn.3 exec.mulstep swap loc_store.14
+    dup.5 dup.2 loc_load.15 movdn.3 exec.mulstep swap loc_store.15
+    dup.6 dup.2 loc_load.16 movdn.3 exec.mulstep swap loc_store.16
+    dup.7 dup.2 loc_load.17 movdn.3 exec.mulstep swap loc_store.17
+    dup.8 dup.2 loc_load.18 movdn.3 exec.mulstep swap loc_store.18
+    dup.9 dup.2 loc_load.19 movdn.3 exec.mulstep swap loc_store.19
+    loc_store.20 drop
+
+    # ----- row 5: b[5] * a[0..7] -----
+    loc_load.5 push.0
+    dup.2 dup.2 loc_load.13 movdn.3 exec.mulstep swap loc_store.13
+    dup.3 dup.2 loc_load.14 movdn.3 exec.mulstep swap loc_store.14
+    dup.4 dup.2 loc_load.15 movdn.3 exec.mulstep swap loc_store.15
+    dup.5 dup.2 loc_load.16 movdn.3 exec.mulstep swap loc_store.16
+    dup.6 dup.2 loc_load.17 movdn.3 exec.mulstep swap loc_store.17
+    dup.7 dup.2 loc_load.18 movdn.3 exec.mulstep swap loc_store.18
+    dup.8 dup.2 loc_load.19 movdn.3 exec.mulstep swap loc_store.19
+    dup.9 dup.2 loc_load.20 movdn.3 exec.mulstep swap loc_store.20
+    loc_store.21 drop
+
+    # ----- row 6: b[6] * a[0..7] -----
+    loc_load.6 push.0
+    dup.2 dup.2 loc_load.14 movdn.3 exec.mulstep swap loc_store.14
+    dup.3 dup.2 loc_load.15 movdn.3 exec.mulstep swap loc_store.15
+    dup.4 dup.2 loc_load.16 movdn.3 exec.mulstep swap loc_store.16
+    dup.5 dup.2 loc_load.17 movdn.3 exec.mulstep swap loc_store.17
+    dup.6 dup.2 loc_load.18 movdn.3 exec.mulstep swap loc_store.18
+    dup.7 dup.2 loc_load.19 movdn.3 exec.mulstep swap loc_store.19
+    dup.8 dup.2 loc_load.20 movdn.3 exec.mulstep swap loc_store.20
+    dup.9 dup.2 loc_load.21 movdn.3 exec.mulstep swap loc_store.21
+    loc_store.22 drop
+
+    # ----- row 7: b[7] * a[0..7] -----
+    loc_load.7 push.0
+    dup.2 dup.2 loc_load.15 movdn.3 exec.mulstep swap loc_store.15
+    dup.3 dup.2 loc_load.16 movdn.3 exec.mulstep swap loc_store.16
+    dup.4 dup.2 loc_load.17 movdn.3 exec.mulstep swap loc_store.17
+    dup.5 dup.2 loc_load.18 movdn.3 exec.mulstep swap loc_store.18
+    dup.6 dup.2 loc_load.19 movdn.3 exec.mulstep swap loc_store.19
+    dup.7 dup.2 loc_load.20 movdn.3 exec.mulstep swap loc_store.20
+    dup.8 dup.2 loc_load.21 movdn.3 exec.mulstep swap loc_store.21
+    dup.9 dup.2 loc_load.22 movdn.3 exec.mulstep swap loc_store.22
+    loc_store.23 drop
+
+    # Drop a[0..7] from stack.
+    dropw dropw
+
+    # Load c[0..15] from memory in reverse so c0 ends up on top.
+    padw loc_loadw_le.20             # [c12..c15, ...]
+    padw loc_loadw_le.16             # [c8..c11, c12..c15, ...]
+    padw loc_loadw_le.12             # [c4..c7,  c8..c15, ...]
+    padw loc_loadw_le.8              # [c0..c7,  c8..c15, ...]
+end
+
+#! Performs multiplication of two unsigned 256 bit integers preserving the overflow flag.
+#! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
+#! Stack transition looks as follows:
+#! [b0, b1, b2, b3, b4, b5, b6, b7, a0, a1, a2, a3, a4, a5, a6, a7, ...]
+#!   -> [overflow, c0, c1, c2, c3, c4, c5, c6, c7, ...], where c = (a * b) % 2^256
+#! and overflow = 1 iff a * b >= 2^256.
+pub proc overflowing_mul(b: u256, a: u256) -> (i1, u256)
+    exec.widening_mul                # [c0..c15, ...]
+    swapdw                           # [c8..c15, c0..c7, ...]
+    u32or u32or u32or u32or u32or u32or u32or
+    neq.0                            # [overflow, c0..c7, ...]
+end
+
 # ===== BIT COUNTING ==============================================================================
 
 #! Counts the number of leading zeros of an unsigned 256 bit integer.
@@ -1239,4 +1381,100 @@ pub proc rotr(n: u32, a: u256) -> u256
         movup.6 loc_load.6 u32or movdn.6
         movup.7 loc_load.7 u32or movdn.7
     end
+end
+
+# ===== DIVISION ==================================================================================
+
+const U256_DIV_EVENT = event("miden::core::math::u256::u256_div")
+
+#! Performs divmod of two unsigned 256 bit integers.
+#! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
+#! Stack transition looks as follows:
+#! [b0, b1, b2, b3, b4, b5, b6, b7, a0, a1, a2, a3, a4, a5, a6, a7, ...]
+#!   -> [r0, r1, r2, r3, r4, r5, r6, r7, q0, q1, q2, q3, q4, q5, q6, q7, ...],
+#! where q = a / b and r = a % b. Panics if b is zero.
+#!
+#! Verification strategy: the prover hints (q, r) on the advice stack. We check that
+#!   (1) q * b + r = a as integers (no overflow at any step), and
+#!   (2) 0 <= r < b.
+#! Together with uniqueness of Euclidean division, this guarantees q, r are correct.
+@locals(32)
+pub proc divmod(b: u256, a: u256) -> (remainder: u256, quotient: u256)
+    emit.U256_DIV_EVENT
+    # Advice stack (top to bottom): [r0..r7, q0..q7].
+
+    # ----- Phase 0: load (q, r) from advice and stash all four operands to local mem -----
+    # mem[0..7]   = q
+    # mem[8..15]  = r
+    # mem[16..23] = a
+    # mem[24..31] = b
+    padw adv_loadw u32assertw                          # [r4..r7, ...]
+    padw adv_loadw u32assertw                          # [r0..r3, r4..r7, ...]
+    padw adv_loadw u32assertw                          # [q4..q7, r0..r3, r4..r7, ...]
+    padw adv_loadw u32assertw                          # [q0..q3, q4..q7, r0..r3, r4..r7, b0..b7, a0..a7]
+    loc_storew_le.0 dropw                              # mem[0..3] = q0..q3
+    loc_storew_le.4 dropw                              # mem[4..7] = q4..q7
+    loc_storew_le.8 dropw                              # mem[8..11] = r0..r3
+    loc_storew_le.12 dropw                             # mem[12..15] = r4..r7
+    loc_storew_le.24 dropw                             # mem[24..27] = b0..b3
+    loc_storew_le.28 dropw                             # mem[28..31] = b4..b7
+    loc_storew_le.16 dropw                             # mem[16..19] = a0..a3
+    loc_storew_le.20 dropw                             # mem[20..23] = a4..a7
+
+    # ----- Phase 1: assert q * b fits in u256 and (q*b + r) = a as integers -----
+    # Push (b, q) on top and call overflowing_mul: returns [overflow, c0..c7], c = q*b mod 2^256.
+    padw loc_loadw_le.4                                # [q4..q7, ...]
+    padw loc_loadw_le.0                                # [q0..q7, ...]
+    padw loc_loadw_le.28                               # [b4..b7, q0..q7]
+    padw loc_loadw_le.24                               # [b0..b7, q0..q7]
+    exec.overflowing_mul                               # [overflow, c0..c7, ...]
+    assertz.err="u256 divmod: q*b overflows u256"
+
+    # Push r on top of c and call overflowing_add: returns [overflow, sum0..sum7], sum = c + r.
+    padw loc_loadw_le.12                               # [r4..r7, c0..c7]
+    padw loc_loadw_le.8                                # [r0..r7, c0..c7]
+    exec.overflowing_add                               # [overflow, sum0..sum7]
+    assertz.err="u256 divmod: q*b + r overflows u256"
+
+    # Compare sum to a via eq.
+    padw loc_loadw_le.20                               # [a4..a7, sum0..sum7]
+    padw loc_loadw_le.16                               # [a0..a7, sum0..sum7]
+    exec.eq
+    assert.err="u256 divmod: q*b + r != a"
+
+    # ----- Phase 2: assert r < b -----
+    padw loc_loadw_le.12                               # [r4..r7, ...]
+    padw loc_loadw_le.8                                # [r0..r7, ...]
+    padw loc_loadw_le.28                               # [b4..b7, r0..r7]
+    padw loc_loadw_le.24                               # [b0..b7, r0..r7]
+    exec.lt
+    assert.err="u256 divmod: r >= b"
+
+    # ----- Phase 3: output [r0..r7, q0..q7] with r on top -----
+    padw loc_loadw_le.4                                # [q4..q7, ...]
+    padw loc_loadw_le.0                                # [q0..q7, ...]
+    padw loc_loadw_le.12                               # [r4..r7, q0..q7]
+    padw loc_loadw_le.8                                # [r0..r7, q0..q7]
+end
+
+#! Performs division of two unsigned 256 bit integers discarding the remainder.
+#! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
+#! Stack transition looks as follows:
+#! [b0, b1, b2, b3, b4, b5, b6, b7, a0, a1, a2, a3, a4, a5, a6, a7, ...]
+#!   -> [q0, q1, q2, q3, q4, q5, q6, q7, ...], where q = a / b. Panics if b is zero.
+pub proc div(b: u256, a: u256) -> u256
+    exec.divmod
+    # divmod returns [r0..r7, q0..q7]; drop r (top 8) to keep q.
+    dropw dropw
+end
+
+#! Performs modulo operation of two unsigned 256 bit integers.
+#! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
+#! Stack transition looks as follows:
+#! [b0, b1, b2, b3, b4, b5, b6, b7, a0, a1, a2, a3, a4, a5, a6, a7, ...]
+#!   -> [r0, r1, r2, r3, r4, r5, r6, r7, ...], where r = a mod b. Panics if b is zero.
+pub proc mod(b: u256, a: u256) -> u256
+    exec.divmod
+    # divmod returns [r0..r7, q0..q7]; swap halves and drop q to keep r.
+    swapdw dropw dropw
 end
