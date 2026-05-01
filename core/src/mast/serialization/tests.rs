@@ -915,6 +915,8 @@ fn mast_forest_deserialize_invalid_ops_offset_fails() {
 
 #[test]
 fn mast_forest_read_from_bytes_rejects_fuzzed_overflow_payload() {
+    // This fuzz payload contains length fields that make deserialization read far past the input
+    // size. If this starts succeeding, the byte-slice path may no longer be enforcing its budget.
     let payload = [
         0x4d, 0x41, 0x53, 0x54, 0x00, 0x00, 0x00, 0x03, 0x07, 0x03, 0x0b, 0x00, 0x00, 0x00, 0x00,
         0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
@@ -931,6 +933,8 @@ fn mast_forest_read_from_bytes_rejects_fuzzed_overflow_payload() {
     let result = MastForest::read_from_bytes(&payload);
     assert!(result.is_err());
 
+    // Wrapped fuzz inputs must use the generic budgeted entry point; otherwise the outer
+    // collection length can drive unbounded work before the inner forest fails.
     let mut vec_payload = vec![0];
     vec_payload.extend_from_slice(&1000u64.to_le_bytes());
     let budget = vec_payload.len().saturating_mul(TRUSTED_BYTE_READ_BUDGET_MULTIPLIER);

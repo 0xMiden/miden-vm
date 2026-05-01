@@ -601,6 +601,8 @@ mod tests {
 
     #[test]
     fn package_read_from_bytes_rejects_fuzzed_oom_payload() {
+        // This fuzz payload encodes counts large enough to cause excessive allocation or read work.
+        // If this starts succeeding, package byte-slice deserialization is no longer budgeted.
         let payload = [
             0x4d, 0x41, 0x53, 0x50, 0x00, 0x04, 0x00, 0x00, 0x11, 0x74, 0x65, 0x73, 0x74, 0x5f,
             0x70, 0x6b, 0x67, 0x0b, 0x30, 0x2e, 0x30, 0x2e, 0x30, 0x00, 0x00, 0x4d, 0x41, 0x53,
@@ -620,6 +622,8 @@ mod tests {
         let result = Package::read_from_bytes(&payload);
         assert!(result.is_err());
 
+        // Wrapped fuzz inputs must use the generic budgeted entry point; otherwise the outer
+        // collection length can drive unbounded work before the inner package fails.
         let mut vec_payload = vec![0];
         vec_payload.extend_from_slice(&1000u64.to_le_bytes());
         let budget = vec_payload.len().saturating_mul(PACKAGE_BYTE_READ_BUDGET_MULTIPLIER);
