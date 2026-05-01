@@ -574,20 +574,183 @@ fn test_external_node_decorator_sequencing() {
 }
 
 #[test]
-fn issue_2818_2834_fast_processor_stack_grows_past_initial_buffer() {
+fn stack_depth_default_limit_exact_boundary_succeeds() {
     let mut host = DefaultHost::default();
 
-    let pushes_past_initial_buffer = DEFAULT_MAX_STACK_DEPTH - MIN_STACK_DEPTH + 1;
-    let mut ops = vec![Operation::Pad; pushes_past_initial_buffer];
-    ops.extend(vec![Operation::Drop; pushes_past_initial_buffer]);
-    let program = simple_program_with_ops(ops);
+    let pushes_to_default_limit = DEFAULT_MAX_STACK_DEPTH - MIN_STACK_DEPTH;
+    let program = simple_program_with_ops(pad_then_drop_ops(pushes_to_default_limit));
+
+    FastProcessor::new(StackInputs::default())
+        .execute_sync(&program, &mut host)
+        .expect("using the full default stack depth limit should succeed");
+}
+
+#[test]
+fn stack_depth_default_limit_exceeded_returns_typed_error() {
+    let mut host = DefaultHost::default();
+
+    let pushes_past_default_limit = DEFAULT_MAX_STACK_DEPTH - MIN_STACK_DEPTH + 1;
+    let program = simple_program_with_ops(vec![Operation::Pad; pushes_past_default_limit]);
+
+    let err = FastProcessor::new(StackInputs::default())
+        .execute_sync(&program, &mut host)
+        .expect_err("pushing past the default stack depth limit should fail");
+
+    assert_matches!(
+        err,
+        ExecutionError::StackDepthLimitExceeded {
+            depth,
+            max: DEFAULT_MAX_STACK_DEPTH,
+        } if depth == DEFAULT_MAX_STACK_DEPTH + 1
+    );
+}
+
+#[test]
+fn stack_depth_small_custom_limit_fails_before_buffer_growth() {
+    let mut host = DefaultHost::default();
+    let max_stack_depth = MIN_STACK_DEPTH + 1;
+    let program = simple_program_with_ops(vec![Operation::Pad; 2]);
+    let options = ExecutionOptions::default().with_max_stack_depth(max_stack_depth).unwrap();
+
+    let err =
+        FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options)
+            .execute_sync(&program, &mut host)
+            .expect_err("small configured stack depth limit should fail before buffer growth");
+
+    assert_matches!(
+        err,
+        ExecutionError::StackDepthLimitExceeded {
+            depth,
+            max,
+        } if depth == max_stack_depth + 1 && max == max_stack_depth
+    );
+}
+
+#[test]
+fn issue_2818_fast_processor_stack_grows_past_initial_buffer_by_multiple_elements() {
+    const GROWTH_MARGIN: usize = 4;
+
+    let mut host = DefaultHost::default();
+
+    let pushes_past_initial_buffer = DEFAULT_MAX_STACK_DEPTH - MIN_STACK_DEPTH + GROWTH_MARGIN;
+    let program = simple_program_with_ops(pad_then_drop_ops(pushes_past_initial_buffer));
     let options = ExecutionOptions::default()
-        .with_max_stack_depth(DEFAULT_MAX_STACK_DEPTH + 1)
+        .with_max_stack_depth(DEFAULT_MAX_STACK_DEPTH + GROWTH_MARGIN)
         .unwrap();
 
     FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options)
         .execute_sync(&program, &mut host)
-        .expect("stack growth past the initial fast-processor buffer should succeed");
+        .expect("stack growth multiple elements past the initial buffer should succeed");
+}
+
+#[test]
+fn issue_2818_traced_execution_stack_grows_past_initial_buffer() {
+    const GROWTH_MARGIN: usize = 2;
+
+    let mut host = DefaultHost::default();
+
+    let pushes_past_initial_buffer = DEFAULT_MAX_STACK_DEPTH - MIN_STACK_DEPTH + GROWTH_MARGIN;
+    let program = simple_program_with_ops(pad_then_drop_ops(pushes_past_initial_buffer));
+    let options = ExecutionOptions::default()
+        .with_max_stack_depth(DEFAULT_MAX_STACK_DEPTH + GROWTH_MARGIN)
+        .unwrap();
+
+    let trace_inputs =
+        FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options)
+            .execute_trace_inputs_sync(&program, &mut host)
+            .expect("traced execution should grow the stack buffer past the initial buffer");
+
+    crate::trace::build_trace(trace_inputs)
+        .expect("trace replay should accept the same operand stack depth limit");
+}
+
+#[test]
+fn issue_2818_step_execution_stack_grows_past_initial_buffer() {
+    const GROWTH_MARGIN: usize = 2;
+
+    let mut host = DefaultHost::default();
+
+    let pushes_past_initial_buffer = DEFAULT_MAX_STACK_DEPTH - MIN_STACK_DEPTH + GROWTH_MARGIN;
+    let program = simple_program_with_ops(pad_then_drop_ops(pushes_past_initial_buffer));
+    let options = ExecutionOptions::default()
+        .with_max_stack_depth(DEFAULT_MAX_STACK_DEPTH + GROWTH_MARGIN)
+        .unwrap();
+
+    FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options)
+        .execute_by_step_sync(&program, &mut host)
+        .expect("step execution should grow the stack buffer past the initial buffer");
+}
+
+#[test]
+fn issue_2818_restore_context_grows_stack_buffer_for_suspended_caller() {
+    let caller_overflow_len = DEFAULT_MAX_STACK_DEPTH - MIN_STACK_DEPTH + 1;
+    let options = ExecutionOptions::default()
+        .with_max_stack_depth(DEFAULT_MAX_STACK_DEPTH + 1)
+        .unwrap();
+    let mut processor =
+        FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options);
+
+    assert_eq!(processor.stack.len(), INITIAL_STACK_BUFFER_SIZE);
+    processor.call_stack.push(ExecutionContextInfo {
+        overflow_stack: vec![Felt::from_u32(42); caller_overflow_len],
+        ctx: processor.ctx,
+        fn_hash: processor.caller_hash,
+    });
+
+    // The active callee context is still at the minimum stack depth and the storage has not grown.
+    // Restoring this suspended caller is what requires moving the active stack and growing storage.
+    processor
+        .restore_context()
+        .expect("restoring a suspended caller should grow the stack buffer when needed");
+    assert!(
+        processor.stack.len() > INITIAL_STACK_BUFFER_SIZE,
+        "context restore should have grown the stack buffer"
+    );
+    assert_eq!(processor.stack_size(), MIN_STACK_DEPTH + caller_overflow_len);
+}
+
+#[test]
+fn stack_buffer_is_not_preallocated_to_operand_stack_depth_limit() {
+    const GROWTH_MARGIN: usize = 2;
+
+    let options = ExecutionOptions::default()
+        .with_max_stack_depth(DEFAULT_MAX_STACK_DEPTH + GROWTH_MARGIN)
+        .unwrap();
+    let mut processor =
+        FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options);
+
+    assert_eq!(
+        processor.stack.len(),
+        INITIAL_STACK_BUFFER_SIZE,
+        "processor should start with the initial stack buffer, not the full depth limit"
+    );
+
+    let mut host = DefaultHost::default();
+    processor
+        .execute_mut_sync(
+            &simple_program_with_ops(vec![Operation::Pad, Operation::Drop]),
+            &mut host,
+        )
+        .expect("ordinary shallow stack use should succeed");
+    assert_eq!(
+        processor.stack.len(),
+        INITIAL_STACK_BUFFER_SIZE,
+        "ordinary shallow stack use should not grow the buffer"
+    );
+
+    let pushes_past_initial_buffer = DEFAULT_MAX_STACK_DEPTH - MIN_STACK_DEPTH + GROWTH_MARGIN;
+    let program = simple_program_with_ops(pad_then_drop_ops(pushes_past_initial_buffer));
+    let mut processor =
+        FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options);
+    let mut host = DefaultHost::default();
+
+    processor
+        .execute_mut_sync(&program, &mut host)
+        .expect("deep stack use should grow the buffer on demand");
+    assert!(
+        processor.stack.len() > INITIAL_STACK_BUFFER_SIZE,
+        "deep stack use should grow the buffer only when needed"
+    );
 }
 
 #[test]
@@ -691,4 +854,10 @@ fn simple_program_with_ops(ops: Vec<Operation>) -> Program {
     };
 
     program
+}
+
+fn pad_then_drop_ops(num_pads: usize) -> Vec<Operation> {
+    let mut ops = vec![Operation::Pad; num_pads];
+    ops.extend(vec![Operation::Drop; num_pads]);
+    ops
 }
