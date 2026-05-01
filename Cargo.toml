@@ -21,16 +21,16 @@ keywords     = ["crypto", "hash", "merkle", "miden"]
 license      = "MIT OR Apache-2.0"
 repository   = "https://github.com/0xMiden/crypto"
 rust-version = "1.90"
-version      = "0.25.0"
+version      = "0.26.0"
 
 [workspace.dependencies]
-miden-crypto-derive    = { path = "miden-crypto-derive", version = "0.25" }
-miden-field            = { path = "miden-field", version = "0.25" }
-miden-lifted-air       = { default-features = false, path = "stark/miden-lifted-air", version = "0.25" }
-miden-lifted-stark     = { default-features = false, path = "stark/miden-lifted-stark", version = "0.25" }
-miden-serde-utils      = { path = "miden-serde-utils", version = "0.25" }
-miden-stark-transcript = { default-features = false, path = "stark/miden-stark-transcript", version = "0.25" }
-miden-stateful-hasher  = { default-features = false, path = "stark/miden-stateful-hasher", version = "0.25" }
+miden-crypto-derive    = { path = "miden-crypto-derive", version = "0.26" }
+miden-field            = { path = "miden-field", version = "0.26" }
+miden-lifted-air       = { default-features = false, path = "stark/miden-lifted-air", version = "0.26" }
+miden-lifted-stark     = { default-features = false, path = "stark/miden-lifted-stark", version = "0.26" }
+miden-serde-utils      = { path = "miden-serde-utils", version = "0.26" }
+miden-stark-transcript = { default-features = false, path = "stark/miden-stark-transcript", version = "0.26" }
+miden-stateful-hasher  = { default-features = false, path = "stark/miden-stateful-hasher", version = "0.26" }
 
 # Plonky3
 p3-air           = { default-features = false, version = "0.5" }

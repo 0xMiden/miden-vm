@@ -1,3 +1,5 @@
+## 0.26.0 (TBD)
+
 ## 0.25.0 (2026-05-01)
 
 - [BREAKING] Changed the serialization format of `PartialSmt` to be more compact on the wire ([#957](https://github.com/0xMiden/crypto/pull/957)).

@@ -1075,7 +1075,7 @@ checksum = "f8ca58f447f06ed17d5fc4043ce1b10dd205e060fb3ce5b979b8ed8e59ff3f79"
 
 [[package]]
 name = "miden-bench"
-version = "0.25.0"
+version = "0.26.0"
 dependencies = [
  "clap",
  "miden-lifted-stark",
@@ -1105,7 +1105,7 @@ dependencies = [
 
 [[package]]
 name = "miden-crypto"
-version = "0.25.0"
+version = "0.26.0"
 dependencies = [
  "assert_matches",
  "blake3",
@@ -1156,7 +1156,7 @@ dependencies = [
 
 [[package]]
 name = "miden-crypto-derive"
-version = "0.25.0"
+version = "0.26.0"
 dependencies = [
  "quote",
  "syn",
@@ -1164,7 +1164,7 @@ dependencies = [
 
 [[package]]
 name = "miden-field"
-version = "0.25.0"
+version = "0.26.0"
 dependencies = [
  "miden-serde-utils",
  "num-bigint",
@@ -1183,7 +1183,7 @@ dependencies = [
 
 [[package]]
 name = "miden-lifted-air"
-version = "0.25.0"
+version = "0.26.0"
 dependencies = [
  "p3-air",
  "p3-field",
@@ -1194,7 +1194,7 @@ dependencies = [
 
 [[package]]
 name = "miden-lifted-stark"
-version = "0.25.0"
+version = "0.26.0"
 dependencies = [
  "criterion",
  "miden-lifted-air",
@@ -1226,7 +1226,7 @@ dependencies = [
 
 [[package]]
 name = "miden-serde-utils"
-version = "0.25.0"
+version = "0.26.0"
 dependencies = [
  "p3-field",
  "p3-goldilocks",
@@ -1234,7 +1234,7 @@ dependencies = [
 
 [[package]]
 name = "miden-stark-transcript"
-version = "0.25.0"
+version = "0.26.0"
 dependencies = [
  "p3-challenger",
  "p3-field",
@@ -1244,7 +1244,7 @@ dependencies = [
 
 [[package]]
 name = "miden-stateful-hasher"
-version = "0.25.0"
+version = "0.26.0"
 dependencies = [
  "p3-bn254",
  "p3-field",
