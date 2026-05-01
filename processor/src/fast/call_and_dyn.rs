@@ -4,7 +4,7 @@ use miden_core::{ZERO, program::MIN_STACK_DEPTH, utils::range};
 
 use crate::{
     errors::OperationError,
-    fast::{ExecutionContextInfo, FastProcessor, INITIAL_STACK_TOP_IDX, STACK_BUFFER_SIZE},
+    fast::{ExecutionContextInfo, FastProcessor, INITIAL_STACK_TOP_IDX},
 };
 
 impl FastProcessor {
@@ -80,8 +80,8 @@ impl FastProcessor {
             // location of the stack in the buffer. We reset it so that after restoring the overflow
             // stack, the stack_bot_idx is at its original position (i.e. INITIAL_STACK_TOP_IDX -
             // 16).
-            let new_stack_top_idx =
-                core::cmp::min(INITIAL_STACK_TOP_IDX + target_overflow_len, STACK_BUFFER_SIZE - 1);
+            let new_stack_top_idx = INITIAL_STACK_TOP_IDX + target_overflow_len;
+            self.ensure_stack_capacity_for_top_idx(new_stack_top_idx);
 
             self.reset_stack_in_buffer(new_stack_top_idx);
         }
