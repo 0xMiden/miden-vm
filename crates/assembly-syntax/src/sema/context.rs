@@ -16,6 +16,7 @@ use crate::ast::{
 
 /// This maintains the state for semantic analysis of a single [Module].
 pub struct AnalysisContext {
+    module_path: PathBuf,
     constants: BTreeMap<Ident, Constant>,
     used_constants: BTreeSet<Ident>,
     /// Edges from a constant to the constants it references.
@@ -47,15 +48,9 @@ impl constants::ConstEnvironment for AnalysisContext {
     }
     #[inline]
     fn get(&mut self, name: &Ident) -> Result<Option<CachedConstantValue<'_>>, Self::Error> {
-        if let Some(constant) = self.constants.get(name) {
-            let is_self_ref = self.simplifying_constant.as_ref() == Some(name);
-            if !is_self_ref {
-                if let Some(ref parent) = self.simplifying_constant {
-                    self.constant_deps.entry(parent.clone()).or_default().insert(name.clone());
-                } else {
-                    self.used_constants.insert(name.clone());
-                }
-            }
+        if self.constants.contains_key(name) {
+            self.record_constant_ref(name);
+            let constant = self.constants.get(name).expect("constant should exist");
             Ok(Some(CachedConstantValue::Miss(&constant.value)))
         } else if self.imported.contains(name) {
             // We don't have the definition available yet
@@ -75,6 +70,8 @@ impl constants::ConstEnvironment for AnalysisContext {
     ) -> Result<Option<CachedConstantValue<'_>>, Self::Error> {
         if let Some(name) = path.as_ident() {
             self.get(&name)
+        } else if let Some(name) = self.local_constant_name_for_path(path) {
+            self.get(&name)
         } else {
             Ok(None)
         }
@@ -82,8 +79,13 @@ impl constants::ConstEnvironment for AnalysisContext {
 }
 
 impl AnalysisContext {
-    pub fn new(source_file: Arc<SourceFile>, source_manager: Arc<dyn SourceManager>) -> Self {
+    pub fn new(
+        module_path: impl AsRef<Path>,
+        source_file: Arc<SourceFile>,
+        source_manager: Arc<dyn SourceManager>,
+    ) -> Self {
         Self {
+            module_path: module_path.as_ref().to_relative().to_path_buf(),
             constants: Default::default(),
             used_constants: Default::default(),
             constant_deps: Default::default(),
@@ -96,6 +98,29 @@ impl AnalysisContext {
             source_manager,
             warnings_as_errors: false,
         }
+    }
+
+    fn record_constant_ref(&mut self, name: &Ident) {
+        let is_self_ref = self.simplifying_constant.as_ref() == Some(name);
+        if is_self_ref {
+            return;
+        }
+
+        if let Some(ref parent) = self.simplifying_constant {
+            self.constant_deps.entry(parent.clone()).or_default().insert(name.clone());
+        } else {
+            self.used_constants.insert(name.clone());
+        }
+    }
+
+    fn local_constant_name_for_path(&self, path: Span<&Path>) -> Option<Ident> {
+        let (name, module_path) = path.split_last()?;
+        if module_path.to_relative() != self.module_path.as_path() {
+            return None;
+        }
+
+        let name = Ident::new_with_span(path.span(), name).ok()?;
+        self.constants.contains_key(&name).then_some(name)
     }
 
     pub fn set_warnings_as_errors(&mut self, yes: bool) {

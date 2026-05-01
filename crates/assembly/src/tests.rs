@@ -5991,6 +5991,25 @@ fn chained_constant_used_transitively() -> TestResult {
 }
 
 #[test]
+fn same_module_qualified_constant_used_transitively() -> TestResult {
+    let context = TestContext::default();
+    let source = source_file!(
+        &context,
+        "
+        const A = 1
+        pub const B = ::test::lib::A
+
+        pub proc foo
+            push.1
+        end"
+    );
+
+    let module = context.parse_module_with_path("test::lib", source)?;
+    let _library = context.assemble_library([module])?;
+    Ok(())
+}
+
+#[test]
 fn dead_constant_does_not_mask_unused_import() {
     let context = TestContext::default();
     let a = "pub const BAR = 42\n\npub proc noop\n    push.1 drop\nend\n";

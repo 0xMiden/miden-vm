@@ -41,7 +41,7 @@ pub fn analyze(
     source_manager: Arc<dyn SourceManager>,
 ) -> Result<Box<Module>, SyntaxError> {
     log::debug!(target: "sema", "starting semantic analysis for '{path}' (kind = {kind})");
-    let mut analyzer = AnalysisContext::new(source.clone(), source_manager);
+    let mut analyzer = AnalysisContext::new(path, source.clone(), source_manager);
     analyzer.set_warnings_as_errors(warnings_as_errors);
 
     let mut module = Box::new(Module::new(kind, path).with_span(source.source_span()));
