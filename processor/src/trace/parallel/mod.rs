@@ -117,6 +117,7 @@ pub fn build_trace_with_max_len(
         hasher_for_chiplet,
         ace_replay,
         fragment_size,
+        max_stack_depth,
     } = trace_generation_context;
 
     // Before any trace generation, check that the number of core trace rows doesn't exceed the
@@ -157,6 +158,7 @@ pub fn build_trace_with_max_len(
         core_trace_contexts,
         program_info.kernel().clone(),
         fragment_size,
+        max_stack_depth,
     )?;
 
     let core_trace_len = core_trace_data.len() / CORE_TRACE_WIDTH;
@@ -231,6 +233,7 @@ fn generate_core_trace_row_major(
     core_trace_contexts: Vec<CoreTraceFragmentContext>,
     kernel: Kernel,
     fragment_size: usize,
+    max_stack_depth: usize,
 ) -> Result<Vec<Felt>, ExecutionError> {
     let num_fragments = core_trace_contexts.len();
     let total_allocated_rows = num_fragments * fragment_size;
@@ -255,7 +258,7 @@ fn generate_core_trace_row_major(
         .zip(writers.into_par_iter())
         .map(|(trace_state, writer)| {
             let (mut processor, mut tracer, mut continuation_stack, mut current_forest) =
-                split_trace_fragment_context(trace_state, writer, fragment_size);
+                split_trace_fragment_context(trace_state, writer, fragment_size, max_stack_depth);
 
             processor.execute(
                 &mut continuation_stack,
@@ -673,6 +676,7 @@ fn split_trace_fragment_context<'a>(
     fragment_context: CoreTraceFragmentContext,
     writer: RowMajorTraceWriter<'a, Felt>,
     fragment_size: usize,
+    max_stack_depth: usize,
 ) -> (
     ReplayProcessor,
     CoreTraceGenerationTracer<'a>,
@@ -705,6 +709,7 @@ fn split_trace_fragment_context<'a>(
         memory_reads_replay,
         hasher_response_replay,
         mast_forest_resolution_replay,
+        max_stack_depth,
         fragment_size.into(),
     );
     let tracer =

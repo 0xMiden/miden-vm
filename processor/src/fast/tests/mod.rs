@@ -573,6 +573,43 @@ fn test_external_node_decorator_sequencing() {
     );
 }
 
+#[test]
+fn issue_2818_2834_fast_processor_stack_grows_past_initial_buffer() {
+    let mut host = DefaultHost::default();
+
+    let pushes_past_initial_buffer = DEFAULT_MAX_STACK_DEPTH - MIN_STACK_DEPTH + 1;
+    let mut ops = vec![Operation::Pad; pushes_past_initial_buffer];
+    ops.extend(vec![Operation::Drop; pushes_past_initial_buffer]);
+    let program = simple_program_with_ops(ops);
+    let options = ExecutionOptions::default()
+        .with_max_stack_depth(DEFAULT_MAX_STACK_DEPTH + 1)
+        .unwrap();
+
+    FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options)
+        .execute_sync(&program, &mut host)
+        .expect("stack growth past the initial fast-processor buffer should succeed");
+}
+
+#[test]
+fn stack_depth_limit_exceeded() {
+    let mut host = DefaultHost::default();
+    let program = simple_program_with_ops(vec![Operation::Pad]);
+    let options = ExecutionOptions::default().with_max_stack_depth(MIN_STACK_DEPTH).unwrap();
+
+    let err =
+        FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options)
+            .execute_sync(&program, &mut host)
+            .expect_err("pushing past the configured stack depth should fail");
+
+    assert_matches!(
+        err,
+        ExecutionError::StackDepthLimitExceeded {
+            depth,
+            max: MIN_STACK_DEPTH,
+        } if depth == MIN_STACK_DEPTH + 1
+    );
+}
+
 /// Tests that `ExecutionError::Internal` is correctly emitted when the continuation stack grows
 /// past the maximum allowed size.
 #[test]

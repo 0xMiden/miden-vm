@@ -704,6 +704,7 @@ mod tests {
             MemoryReadsReplay::default(),
             HasherResponseReplay::default(),
             MastForestResolutionReplay::default(),
+            crate::ExecutionOptions::DEFAULT_MAX_STACK_DEPTH,
             1u32.into(),
         );
 
