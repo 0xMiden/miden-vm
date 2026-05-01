@@ -32,7 +32,10 @@ use miden_assembly_syntax::{
 };
 use miden_core::{
     Word,
-    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+    serde::{
+        BudgetedReader, ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
+        SliceReader,
+    },
 };
 
 use super::{ConstantExport, PackageId, ProcedureExport, TargetType, TypeExport};
@@ -48,6 +51,12 @@ const MAGIC_PACKAGE: &[u8; 5] = b"MASP\0";
 ///
 /// If future modifications are made to this format, the version should be incremented by 1.
 const VERSION: [u8; 3] = [4, 0, 0];
+
+/// Byte-read budget multiplier for package deserialization from a byte slice.
+///
+/// The budget is intentionally finite to reject malicious length prefixes, but larger than the
+/// source length because collection deserialization uses conservative per-element size estimates.
+const PACKAGE_BYTE_READ_BUDGET_MULTIPLIER: usize = 64;
 
 // PACKAGE SERIALIZATION/DESERIALIZATION
 // ================================================================================================
@@ -135,6 +144,12 @@ impl Deserializable for Package {
             manifest,
             sections,
         })
+    }
+
+    fn read_from_bytes(bytes: &[u8]) -> Result<Self, DeserializationError> {
+        let budget = bytes.len().saturating_mul(PACKAGE_BYTE_READ_BUDGET_MULTIPLIER);
+        let mut reader = BudgetedReader::new(SliceReader::new(bytes), budget);
+        Self::read_from(&mut reader)
     }
 }
 
@@ -272,10 +287,7 @@ impl Deserializable for PackageManifest {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         // Read exports
         let exports_len = source.read_usize()?;
-        let mut exports = Vec::with_capacity(exports_len);
-        for _ in 0..exports_len {
-            exports.push(PackageExport::read_from(source)?);
-        }
+        let exports = source.read_many_iter(exports_len)?.collect::<Result<Vec<_>, _>>()?;
 
         // Read dependencies
         let dependencies = Vec::<Dependency>::read_from(source)?;
@@ -582,6 +594,28 @@ mod tests {
         let mut reader = BudgetedReader::new(SliceReader::new(&bytes), bytes.len());
         let err = Package::read_from(&mut reader).unwrap_err();
         assert!(matches!(err, DeserializationError::InvalidValue(_)));
+    }
+
+    #[test]
+    fn package_read_from_bytes_rejects_fuzzed_oom_payload() {
+        let payload = [
+            0x4d, 0x41, 0x53, 0x50, 0x00, 0x04, 0x00, 0x00, 0x11, 0x74, 0x65, 0x73, 0x74, 0x5f,
+            0x70, 0x6b, 0x67, 0x0b, 0x30, 0x2e, 0x30, 0x2e, 0x30, 0x00, 0x00, 0x4d, 0x41, 0x53,
+            0x54, 0x00, 0x00, 0x00, 0x03, 0x03, 0x03, 0x00, 0x00, 0x00, 0x00, 0x17, 0x03, 0x22,
+            0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x30, 0x2f, 0x08, 0x0a, 0x21, 0xa9, 0xb6, 0xf6, 0x1a, 0x52, 0x30, 0xc5,
+            0x64, 0xc7, 0xdb, 0x4d, 0x83, 0x0b, 0x32, 0x58, 0x89, 0x88, 0xb2, 0x78, 0x69, 0xbb,
+            0x23, 0xa6, 0x18, 0x9c, 0xc9, 0x35, 0x2d, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+            0x01, 0x05, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+            0x01, 0x01, 0x01, 0x01, 0x01, 0x03, 0x00, 0x0c, 0x00, 0x3a, 0x3a, 0x74, 0x65, 0x73,
+            0x74, 0x3a, 0x3a, 0x70, 0x72, 0x6f, 0x63, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x03,
+            0x0f, 0x03, 0x0f, 0x01, 0x00, 0x00, 0x17, 0x03, 0x22, 0x01, 0x00, 0x00, 0x00, 0x01,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x9c, 0xc9, 0x35, 0x2d, 0x01, 0x00, 0x03, 0x0f, 0x03,
+            0x0f, 0x01, 0x01, 0x01,
+        ];
+
+        let result = Package::read_from_bytes(&payload);
+        assert!(result.is_err());
     }
 
     #[test]
