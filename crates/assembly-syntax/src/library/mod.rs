@@ -3,9 +3,11 @@ use alloc::{collections::BTreeMap, string::String, sync::Arc, vec::Vec};
 use miden_core::{
     Word,
     advice::AdviceMap,
-    mast::{MastForest, MastNodeExt, MastNodeId},
+    mast::{MastForest, MastNodeExt, MastNodeId, UntrustedMastForest},
     program::Kernel,
-    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+    serde::{
+        ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable, SliceReader,
+    },
 };
 use midenc_hir_type::{FunctionType, Type};
 #[cfg(feature = "arbitrary")]
@@ -17,7 +19,7 @@ use serde::{Deserialize, Serialize};
 use crate::ast::QualifiedProcedureName;
 #[cfg(feature = "serde")]
 use crate::ast::path;
-use crate::ast::{AttributeSet, ConstantValue, Ident, Path, PathBuf, ProcedureName};
+use crate::ast::{AttributeSet, ConstantValue, Ident, Path, PathBuf, PathComponent, ProcedureName};
 
 mod error;
 mod module;
@@ -319,6 +321,103 @@ impl Library {
         let mast_forest = Arc::make_mut(&mut self.mast_forest);
         mast_forest.advice_map_mut().extend(advice_map);
     }
+
+    fn read_mast_forest<R: ByteReader>(
+        source: &mut R,
+        validate_mast_forest: bool,
+    ) -> Result<Arc<MastForest>, DeserializationError> {
+        let mast_forest = if validate_mast_forest {
+            UntrustedMastForest::read_from(source)?.validate().map_err(|err| {
+                DeserializationError::InvalidValue(format!(
+                    "library contains an invalid untrusted MAST forest: {err}"
+                ))
+            })?
+        } else {
+            MastForest::read_from(source)?
+        };
+
+        Ok(Arc::new(mast_forest))
+    }
+
+    fn read_from_with_mast_forest<R: ByteReader>(
+        source: &mut R,
+        mast_forest: Arc<MastForest>,
+    ) -> Result<Self, DeserializationError> {
+        let num_exports = source.read_usize()?;
+        if num_exports == 0 {
+            return Err(DeserializationError::InvalidValue(String::from("No exported procedures")));
+        };
+        let mut exports = BTreeMap::new();
+        for _ in 0..num_exports {
+            let tag = source.read_u8()?;
+            let path: PathBuf = source.read()?;
+            let path = Arc::<Path>::from(path.into_boxed_path());
+            let export = match tag {
+                0 => {
+                    let node = MastNodeId::from_u32_safe(source.read_u32()?, &mast_forest)?;
+                    let signature = if source.read_bool()? {
+                        Some(FunctionType::read_from(source)?)
+                    } else {
+                        None
+                    };
+                    let attributes = AttributeSet::read_from(source)?;
+                    LibraryExport::Procedure(ProcedureExport {
+                        node,
+                        path: path.clone(),
+                        signature,
+                        attributes,
+                    })
+                },
+                1 => {
+                    let value = ConstantValue::read_from(source)?;
+                    LibraryExport::Constant(ConstantExport { path: path.clone(), value })
+                },
+                2 => {
+                    let ty = Type::read_from(source)?;
+                    LibraryExport::Type(TypeExport { path: path.clone(), ty })
+                },
+                invalid => {
+                    return Err(DeserializationError::InvalidValue(format!(
+                        "unknown LibraryExport tag: '{invalid}'"
+                    )));
+                },
+            };
+            let (path, export) = normalize_export_for_deserialization(export)
+                .map_err(DeserializationError::InvalidValue)?;
+            if exports.insert(path.clone(), export).is_some() {
+                return Err(DeserializationError::InvalidValue(format!(
+                    "duplicate canonical export path in library artifact: '{path}'"
+                )));
+            }
+        }
+
+        Self::new(mast_forest, exports)
+            .map_err(|err| DeserializationError::InvalidValue(format!("{err}")))
+    }
+
+    /// Reads a library from `source` without validating the embedded MAST forest.
+    ///
+    /// This is only correct when serialization and deserialization happen within the same trust
+    /// domain. A typical use case is reloading bytes that were already validated before being
+    /// persisted to local storage controlled by the same trusted system.
+    ///
+    /// Do not use this for inbound artifact processing across a trust boundary, including bytes
+    /// received over the network or from another party. Authenticating the outer byte stream does
+    /// not prove that embedded MAST node digests are semantically valid.
+    pub fn read_from_unchecked<R: ByteReader>(
+        source: &mut R,
+    ) -> Result<Self, DeserializationError> {
+        let mast_forest = Self::read_mast_forest(source, false)?;
+        Self::read_from_with_mast_forest(source, mast_forest)
+    }
+
+    /// Reads a library from `bytes` without validating the embedded MAST forest.
+    ///
+    /// See [`Library::read_from_unchecked`].
+    pub fn read_from_bytes_unchecked(bytes: &[u8]) -> Result<Self, DeserializationError> {
+        let mut source = SliceReader::new(bytes);
+        Self::read_from_unchecked(&mut source)
+    }
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -501,6 +600,14 @@ impl AsRef<Library> for KernelLibrary {
 }
 
 impl KernelLibrary {
+    fn try_from_library(library: Library) -> Result<Self, DeserializationError> {
+        Self::try_from(Arc::new(library)).map_err(|err| {
+            DeserializationError::InvalidValue(format!(
+                "Failed to deserialize kernel library: {err}"
+            ))
+        })
+    }
+
     /// Returns the [Kernel] for this kernel library.
     pub fn kernel(&self) -> &Kernel {
         &self.kernel
@@ -514,6 +621,30 @@ impl KernelLibrary {
     /// Destructures this kernel library into individual parts.
     pub fn into_parts(self) -> (Kernel, ModuleInfo, Arc<MastForest>) {
         (self.kernel, self.kernel_info, self.library.mast_forest().clone())
+    }
+
+    /// Reads a kernel library from `source` without validating the embedded MAST forest.
+    ///
+    /// This is only correct when serialization and deserialization happen within the same trust
+    /// domain. A typical use case is reloading bytes that were already validated before being
+    /// persisted to local storage controlled by the same trusted system.
+    ///
+    /// Do not use this for inbound artifact processing across a trust boundary, including bytes
+    /// received over the network or from another party. Authenticating the outer byte stream does
+    /// not prove that embedded MAST node digests are semantically valid.
+    pub fn read_from_unchecked<R: ByteReader>(
+        source: &mut R,
+    ) -> Result<Self, DeserializationError> {
+        let library = Library::read_from_unchecked(source)?;
+        Self::try_from_library(library)
+    }
+
+    /// Reads a kernel library from `bytes` without validating the embedded MAST forest.
+    ///
+    /// See [`KernelLibrary::read_from_unchecked`].
+    pub fn read_from_bytes_unchecked(bytes: &[u8]) -> Result<Self, DeserializationError> {
+        let mut source = SliceReader::new(bytes);
+        Self::read_from_unchecked(&mut source)
     }
 }
 
@@ -590,6 +721,48 @@ impl KernelLibrary {
 // LIBRARY SERIALIZATION
 // ================================================================================================
 
+fn export_raw_leaf(path: &Path) -> Result<&str, String> {
+    match path.components().next_back() {
+        Some(Ok(PathComponent::Normal(leaf))) => Ok(leaf),
+        Some(Err(err)) => Err(format!("invalid export path '{path}': {err}")),
+        Some(Ok(PathComponent::Root)) | None => {
+            Err(format!("invalid export path (missing export leaf): '{path}'"))
+        },
+    }
+}
+
+fn canonicalize_export_path(path: &Path) -> Result<Arc<Path>, String> {
+    let canonical = path
+        .to_path_buf()
+        .canonicalize()
+        .map_err(|err| format!("invalid export path '{path}': {err}"))?;
+    Ok(Arc::<Path>::from(canonical.into_boxed_path()))
+}
+
+fn normalize_export_for_deserialization(
+    mut export: LibraryExport,
+) -> Result<(Arc<Path>, LibraryExport), String> {
+    let canonical_path = canonicalize_export_path(export.path().as_ref())?;
+
+    if matches!(export, LibraryExport::Procedure(_)) {
+        let leaf = export_raw_leaf(canonical_path.as_ref())?;
+        ProcedureName::new(leaf).map_err(|err| {
+            format!(
+                "invalid procedure export leaf name '{leaf}' in path '{}': {err}",
+                canonical_path
+            )
+        })?;
+    }
+
+    match &mut export {
+        LibraryExport::Procedure(export) => export.path = canonical_path.clone(),
+        LibraryExport::Constant(export) => export.path = canonical_path.clone(),
+        LibraryExport::Type(export) => export.path = canonical_path.clone(),
+    }
+
+    Ok((canonical_path, export))
+}
+
 /// NOTE: Serialization of libraries is likely to be deprecated in a future release
 impl Serializable for Library {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
@@ -607,52 +780,8 @@ impl Serializable for Library {
 /// NOTE: Serialization of libraries is likely to be deprecated in a future release
 impl Deserializable for Library {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let mast_forest = Arc::new(MastForest::read_from(source)?);
-
-        let num_exports = source.read_usize()?;
-        if num_exports == 0 {
-            return Err(DeserializationError::InvalidValue(String::from("No exported procedures")));
-        };
-        let mut exports = BTreeMap::new();
-        for _ in 0..num_exports {
-            let tag = source.read_u8()?;
-            let path: PathBuf = source.read()?;
-            let path = Arc::<Path>::from(path.into_boxed_path());
-            let export = match tag {
-                0 => {
-                    let node = MastNodeId::from_u32_safe(source.read_u32()?, &mast_forest)?;
-                    let signature = if source.read_bool()? {
-                        Some(FunctionType::read_from(source)?)
-                    } else {
-                        None
-                    };
-                    let attributes = AttributeSet::read_from(source)?;
-                    LibraryExport::Procedure(ProcedureExport {
-                        node,
-                        path: path.clone(),
-                        signature,
-                        attributes,
-                    })
-                },
-                1 => {
-                    let value = ConstantValue::read_from(source)?;
-                    LibraryExport::Constant(ConstantExport { path: path.clone(), value })
-                },
-                2 => {
-                    let ty = Type::read_from(source)?;
-                    LibraryExport::Type(TypeExport { path: path.clone(), ty })
-                },
-                invalid => {
-                    return Err(DeserializationError::InvalidValue(format!(
-                        "unknown LibraryExport tag: '{invalid}'"
-                    )));
-                },
-            };
-            exports.insert(path, export);
-        }
-
-        Self::new(mast_forest, exports)
-            .map_err(|err| DeserializationError::InvalidValue(format!("{err}")))
+        let mast_forest = Self::read_mast_forest(source, true)?;
+        Self::read_from_with_mast_forest(source, mast_forest)
     }
 }
 
@@ -705,6 +834,28 @@ impl<'de> Deserialize<'de> for Library {
 
         struct LibraryVisitor;
 
+        impl LibraryVisitor {
+            fn normalize_exports<E>(
+                items: Vec<LibraryExport>,
+            ) -> Result<BTreeMap<Arc<Path>, LibraryExport>, E>
+            where
+                E: serde::de::Error,
+            {
+                let mut exports = BTreeMap::new();
+                for export in items {
+                    let (path, export) = normalize_export_for_deserialization(export)
+                        .map_err(serde::de::Error::custom)?;
+                    if exports.insert(path.clone(), export).is_some() {
+                        return Err(serde::de::Error::custom(format!(
+                            "duplicate canonical export path in library artifact: '{path}'"
+                        )));
+                    }
+                }
+
+                Ok(exports)
+            }
+        }
+
         impl<'de> Visitor<'de> for LibraryVisitor {
             type Value = Library;
 
@@ -719,10 +870,10 @@ impl<'de> Deserialize<'de> for Library {
                 let mast_forest = seq
                     .next_element()?
                     .ok_or_else(|| serde::de::Error::invalid_length(0, &self))?;
-                let exports: Vec<LibraryExport> = seq
+                let export_items: Vec<LibraryExport> = seq
                     .next_element()?
                     .ok_or_else(|| serde::de::Error::invalid_length(1, &self))?;
-                let exports = exports.into_iter().map(|export| (export.path(), export)).collect();
+                let exports = Self::normalize_exports(export_items)?;
                 Library::new(mast_forest, exports).map_err(serde::de::Error::custom)
             }
 
@@ -745,9 +896,7 @@ impl<'de> Deserialize<'de> for Library {
                                 return Err(serde::de::Error::duplicate_field("exports"));
                             }
                             let items: Vec<LibraryExport> = map.next_value()?;
-                            exports = Some(
-                                items.into_iter().map(|export| (export.path(), export)).collect(),
-                            );
+                            exports = Some(Self::normalize_exports(items)?);
                         },
                     }
                 }
@@ -774,13 +923,8 @@ impl Serializable for KernelLibrary {
 /// NOTE: Serialization of libraries is likely to be deprecated in a future release
 impl Deserializable for KernelLibrary {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let library = Arc::new(Library::read_from(source)?);
-
-        Self::try_from(library).map_err(|err| {
-            DeserializationError::InvalidValue(format!(
-                "Failed to deserialize kernel library: {err}"
-            ))
-        })
+        let library = Library::read_from(source)?;
+        Self::try_from_library(library)
     }
 }
 
@@ -896,5 +1040,70 @@ impl Arbitrary for Library {
             .boxed()
     }
 
-    type Strategy = BoxedStrategy<Self>;
+    type Strategy = proptest::prelude::BoxedStrategy<Self>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn serde_library_deserialization_rejects_duplicate_canonical_export_paths() {
+        let quoted = Arc::<Path>::from(Path::validate(r#"::foo::"bar""#).unwrap());
+        let unquoted = Arc::<Path>::from(Path::validate("::foo::bar").unwrap());
+
+        let mut exports = BTreeMap::new();
+        exports.insert(
+            quoted.clone(),
+            LibraryExport::Type(TypeExport { path: quoted, ty: Type::Felt }),
+        );
+        exports.insert(
+            unquoted.clone(),
+            LibraryExport::Type(TypeExport { path: unquoted, ty: Type::Felt }),
+        );
+
+        let lib =
+            Library::new(Arc::new(MastForest::new()), exports).expect("library must validate");
+        let json = serde_json::to_string(&lib).expect("library serialization must succeed");
+
+        let err = serde_json::from_str::<Library>(&json).expect_err(
+            "expected duplicate canonical export paths to be rejected during serde deserialization",
+        );
+        let message = alloc::format!("{err}");
+        assert!(
+            message.contains("duplicate canonical export path in library artifact"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn serde_library_deserialization_rejects_malformed_quoted_procedure_leaf() {
+        use miden_core::{
+            mast::{BasicBlockNodeBuilder, MastForestContributor},
+            operations::Operation,
+        };
+
+        let mut mast_forest = MastForest::new();
+        let node = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+            .add_to_forest(&mut mast_forest)
+            .expect("must create MAST node");
+        mast_forest.make_root(node);
+
+        let bad = Arc::<Path>::from(Path::validate(r#"::foo::"bad name""#).unwrap());
+        let mut exports = BTreeMap::new();
+        exports.insert(bad.clone(), LibraryExport::Procedure(ProcedureExport::new(node, bad)));
+
+        let lib = Library::new(Arc::new(mast_forest), exports).expect("library must validate");
+        let json = serde_json::to_string(&lib).expect("library serialization must succeed");
+
+        let err = serde_json::from_str::<Library>(&json)
+            .expect_err("expected malformed procedure export leaf name rejection during serde");
+        let message = alloc::format!("{err}");
+        assert!(
+            message.contains("invalid procedure export leaf name"),
+            "unexpected error: {err}"
+        );
+    }
 }

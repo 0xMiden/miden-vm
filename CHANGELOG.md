@@ -24,6 +24,22 @@
 - Fixed AEAD padding handling so encrypt does not overwrite memory next to the plaintext buffer and decrypt leaves the plaintext output tail untouched ([#3008](https://github.com/0xMiden/miden-vm/pull/3008)).
 - Fixed MAST compaction after debug info is cleared so compiler-generated packages do not grow ([#3044](https://github.com/0xMiden/miden-vm/pull/3044)).
 - Canonicalized `PathBuf::try_from(String)` to match `TryFrom<&str>`/`FromStr`, so semantically equivalent quoted path components compare and hash consistently.
+- Set a bound on `ContinuationStack` size, checked during execution ([#2824](https://github.com/0xMiden/miden-vm/pull/2824)).
+- Prevented a trace-generation panic by validating op batch groups in basic blocks ([#2782](https://github.com/0xMiden/miden-vm/pull/2782)).
+- Validated push immediate group commitments and slot placement to reject invalid immediates ([#2779](https://github.com/0xMiden/miden-vm/pull/2779)).
+- Fixed undefined behavior in parallel trace generation by limiting H0 batch inversion to initialized rows ([#2842](https://github.com/0xMiden/miden-vm/pull/2842)).
+- Hardened boundary and overflow checks for `u64::shr`, `ilog2`, `u32clz`, and Falcon `mod_12289` ([#2808](https://github.com/0xMiden/miden-vm/pull/2808)).
+- Hardened basic-block batch validation and decode-time padding checks to reject inconsistent padded groups and prevent raw-helper underflow/panic paths on malformed forests ([#2839](https://github.com/0xMiden/miden-vm/pull/2839)).
+- Enforced canonical kernel procedure-hash validation on binary and serde deserialization paths, and expanded serde deserialization fuzz coverage for related artifact types ([#2849](https://github.com/0xMiden/miden-vm/pull/2849)).
+- Fixed constant evaluation across semantic analysis and linking so exported constants no longer retain private local dependencies and cross-module constant chains resolve in the defining module ([#2873](https://github.com/0xMiden/miden-vm/pull/2873)).
+- Memoized semantic constant evaluation in `AnalysisContext` to prevent exponential work from shared constant-dependency graphs during parsing and semantic analysis ([#2858](https://github.com/0xMiden/miden-vm/pull/2858)).
+- Fixed quote-equivalent path ambiguity in library deserialization and linker symbol resolution ([#2836](https://github.com/0xMiden/miden-vm/pull/2836)).
+- Treat serialized libraries and kernel libraries as untrusted MAST forests during deserialization, rejecting spoofed node digests ([#2863](https://github.com/0xMiden/miden-vm/pull/2863)).
+- Return typed cycle errors for self-recursive and rootless procedure call graphs, and roll back linker state on failure ([#2899](https://github.com/0xMiden/miden-vm/pull/2899)).
+- [BREAKING] Reject oversized modules at resolver construction instead of building partial resolver state or panicking ([#2899](https://github.com/0xMiden/miden-vm/pull/2899)).
+- Return a normal assembly error when `pub use <digest> -> <name>` does not resolve to an exported procedure ([#2899](https://github.com/0xMiden/miden-vm/pull/2899)).
+- [BREAKING] Reject non-procedure invoke targets during semantic analysis, and return an assembly error instead of panicking if one still reaches assembly ([#2899](https://github.com/0xMiden/miden-vm/pull/2899)).
+- Added `Package::content_digest()` to identify package contents without changing the MAST digest, including manifest data and semantic package metadata ([#2909](https://github.com/0xMiden/miden-vm/pull/2909)).
 
 #### Changes
 
