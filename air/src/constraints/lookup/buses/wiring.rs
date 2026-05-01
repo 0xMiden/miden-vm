@@ -108,10 +108,8 @@ pub(in crate::constraints::lookup) fn emit_v_wiring<LB>(
     let ace_read = ace.read();
     let ace_eval = ace.eval();
 
-    // Raw `Var` captures — every field below is Copy and flows directly into a struct
-    // field inside the batch closure, so we skip the per-field `LB::Expr` conversion up
-    // front and do it lazily. Prefixed with `ace_` where the shorter name would clash
-    // with the outer function parameter `ctx`.
+    // Prefixed with `ace_` where the shorter name would clash with the outer function
+    // parameter `ctx`.
     let ace_clk = ace.clk;
     let ace_ctx = ace.ctx;
     let id_0 = ace.id_0;

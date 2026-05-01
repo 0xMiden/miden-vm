@@ -77,26 +77,20 @@ fn hasher_response_rows(
         if !is_hasher_controller_row(main, idx) {
             return None;
         }
-        let hs0 = main.chiplet_selector_1(idx);
-        let hs1 = main.chiplet_selector_2(idx);
-        let hs2 = main.chiplet_selector_3(idx);
-        let is_boundary = main.chiplet_is_boundary(idx);
-        let kind = if hs0 == ONE && hs1 == ZERO && hs2 == ZERO && is_boundary == ONE {
-            HasherResponseKind::SpongeStart
-        } else if hs0 == ONE && hs1 == ZERO && hs2 == ZERO && is_boundary == ZERO {
-            HasherResponseKind::SpongeRespan
-        } else if hs0 == ONE && hs1 == ZERO && hs2 == ONE && is_boundary == ONE {
-            HasherResponseKind::MpInput
-        } else if hs0 == ONE && hs1 == ONE && hs2 == ZERO && is_boundary == ONE {
-            HasherResponseKind::MvOldInput
-        } else if hs0 == ONE && hs1 == ONE && hs2 == ONE && is_boundary == ONE {
-            HasherResponseKind::MuNewInput
-        } else if hs0 == ZERO && hs1 == ZERO && hs2 == ZERO {
-            HasherResponseKind::Hout
-        } else if hs0 == ZERO && hs1 == ZERO && hs2 == ONE && is_boundary == ONE {
-            HasherResponseKind::Sout
-        } else {
-            return None;
+        let hs0 = u8::from(main.chiplet_selector_1(idx) == ONE);
+        let hs1 = u8::from(main.chiplet_selector_2(idx) == ONE);
+        let hs2 = u8::from(main.chiplet_selector_3(idx) == ONE);
+        let is_boundary = u8::from(main.chiplet_is_boundary(idx) == ONE);
+        // Selector table — see `docs/src/design/chiplets/hasher.md`.
+        let kind = match (hs0, hs1, hs2, is_boundary) {
+            (1, 0, 0, 1) => HasherResponseKind::SpongeStart,
+            (1, 0, 0, 0) => HasherResponseKind::SpongeRespan,
+            (1, 0, 1, 1) => HasherResponseKind::MpInput,
+            (1, 1, 0, 1) => HasherResponseKind::MvOldInput,
+            (1, 1, 1, 1) => HasherResponseKind::MuNewInput,
+            (0, 0, 0, _) => HasherResponseKind::Hout,
+            (0, 0, 1, 1) => HasherResponseKind::Sout,
+            _ => return None,
         };
         Some((idx, kind))
     })

@@ -65,12 +65,10 @@ pub(in crate::constraints::lookup) fn emit_block_hash_and_op_group<LB>(
     let stk = &local.stack;
     let stk_next = &next.stack;
 
-    // Raw Vars (Copy — captured directly in closures; converted to `LB::Expr` via a typed
-    // binding at the top of each message-producing closure).
     let addr = dec.addr;
     let addr_next = dec_next.addr;
-    // `dec.hasher_state` is `[Var; 8]` — the rate portion of the sponge, split into two
-    // halves of 4: `h_0 = h[0..4]` (first child) and `h_1 = h[4..8]` (second child).
+    // `dec.hasher_state` is the rate portion of the sponge, split into two halves of 4:
+    // `h_0 = h[0..4]` (first child) and `h_1 = h[4..8]` (second child).
     let h_0: [LB::Var; 4] = array::from_fn(|i| dec.hasher_state[i]);
     let h_1: [LB::Var; 4] = array::from_fn(|i| dec.hasher_state[4 + i]);
     let s0 = stk.get(0);

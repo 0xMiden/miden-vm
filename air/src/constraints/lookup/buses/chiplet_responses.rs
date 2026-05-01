@@ -76,11 +76,9 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
     let not_hs1 = hs1.not();
     let not_hs2 = hs2.not();
 
-    // Hasher state split by convention: [rate_0 (4), rate_1 (4), cap (4)]. Kept as Var
-    // arrays (Copy) so each closure can convert to `LB::Expr` as needed.
+    let state: [LB::Var; 12] = ctrl.state;
     let rate_0: [LB::Var; 4] = array::from_fn(|i| ctrl.state[i]);
     let rate_1: [LB::Var; 4] = array::from_fn(|i| ctrl.state[4 + i]);
-    let cap: [LB::Var; 4] = array::from_fn(|i| ctrl.state[8 + i]);
 
     // --- Hasher response flags ---
     // All gated by `chiplet_active.controller`; composed with the per-row-type
@@ -142,15 +140,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
                         f_sponge_start,
                         || {
                             let addr = clk_plus_one.clone();
-                            let state: [LB::Expr; 12] = array::from_fn(|i| {
-                                if i < 4 {
-                                    rate_0[i].into()
-                                } else if i < 8 {
-                                    rate_1[i - 4].into()
-                                } else {
-                                    cap[i - 8].into()
-                                }
-                            });
+                            let state: [LB::Expr; 12] = state.map(Into::into);
                             HasherMsg {
                                 kind: BusId::HasherLinearHashInit,
                                 addr,
@@ -237,15 +227,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
                         f_sout,
                         || {
                             let addr = clk_plus_one.clone();
-                            let state: [LB::Expr; 12] = array::from_fn(|i| {
-                                if i < 4 {
-                                    rate_0[i].into()
-                                } else if i < 8 {
-                                    rate_1[i - 4].into()
-                                } else {
-                                    cap[i - 8].into()
-                                }
-                            });
+                            let state: [LB::Expr; 12] = state.map(Into::into);
                             HasherMsg {
                                 kind: BusId::HasherReturnState,
                                 addr,

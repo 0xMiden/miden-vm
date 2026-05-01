@@ -31,10 +31,20 @@ use super::{
     ExecutionTrace, build_trace_from_ops, build_trace_from_program,
     lookup_harness::{Expectations, InteractionLog},
 };
-use crate::RowIndex;
+use crate::{RowIndex, trace::MainTrace};
 
 // HELPERS
 // ================================================================================================
+
+/// Mirrors the `is_first_child = 1 - end_next - repeat_next - respan_next - halt_next`
+/// arithmetic from the END-overlay constraint. Since END/REPEAT/RESPAN/HALT are distinct
+/// 7-bit opcodes, at most one term is non-zero per row, so the arithmetic form collapses to
+/// the trace-level OR — but we encode it arithmetically to mirror the constraint expression.
+fn next_op_first_child_flag(main: &MainTrace, next: RowIndex) -> Felt {
+    let op_next = main.get_op_code(next);
+    let is = |code: u8| if op_next == Felt::from_u8(code) { ONE } else { ZERO };
+    ONE - is(opcodes::END) - is(opcodes::REPEAT) - is(opcodes::RESPAN) - is(opcodes::HALT)
+}
 
 /// Calls `f(row, opcode)` for every row except the last.
 ///
@@ -375,32 +385,8 @@ fn block_hash_join_enqueue_dequeue() {
             exp.add(row, &BlockHashMsg::Child { parent: addr_next, child_hash: h1 });
         }
 
-        // Emitter uses `is_first_child = 1 - end_next - repeat_next - respan_next - halt_next`
-        // (arithmetic). Since END/REPEAT/RESPAN/HALT are distinct 7-bit opcodes, at most one
-        // flag is non-zero per row, so the arithmetic form collapses to the trace-level OR.
-        // We still encode it arithmetically to mirror the constraint expression exactly.
         if op == Felt::from_u8(opcodes::END) {
-            let next_end = if main.get_op_code(next) == Felt::from_u8(opcodes::END) {
-                ONE
-            } else {
-                ZERO
-            };
-            let next_repeat = if main.get_op_code(next) == Felt::from_u8(opcodes::REPEAT) {
-                ONE
-            } else {
-                ZERO
-            };
-            let next_respan = if main.get_op_code(next) == Felt::from_u8(opcodes::RESPAN) {
-                ONE
-            } else {
-                ZERO
-            };
-            let next_halt = if main.get_op_code(next) == Felt::from_u8(opcodes::HALT) {
-                ONE
-            } else {
-                ZERO
-            };
-            let is_first_child = ONE - next_end - next_repeat - next_respan - next_halt;
+            let is_first_child = next_op_first_child_flag(main, next);
             let is_loop_body = main.is_loop_body_flag(idx);
             exp.remove(
                 row,
@@ -467,27 +453,7 @@ fn block_hash_loop_body_with_repeat() {
 
         // END of the loop body: `is_loop_body` bit is set on the END overlay.
         if op == Felt::from_u8(opcodes::END) && main.is_loop_body_flag(idx) == ONE {
-            let next_end = if main.get_op_code(next) == Felt::from_u8(opcodes::END) {
-                ONE
-            } else {
-                ZERO
-            };
-            let next_repeat = if main.get_op_code(next) == Felt::from_u8(opcodes::REPEAT) {
-                ONE
-            } else {
-                ZERO
-            };
-            let next_respan = if main.get_op_code(next) == Felt::from_u8(opcodes::RESPAN) {
-                ONE
-            } else {
-                ZERO
-            };
-            let next_halt = if main.get_op_code(next) == Felt::from_u8(opcodes::HALT) {
-                ONE
-            } else {
-                ZERO
-            };
-            let is_first_child = ONE - next_end - next_repeat - next_respan - next_halt;
+            let is_first_child = next_op_first_child_flag(main, next);
             exp.remove(
                 row,
                 &BlockHashMsg::End {
@@ -551,28 +517,7 @@ fn block_hash_split_enqueue_dequeue(#[case] cond: u64) {
         if op == Felt::from_u8(opcodes::END) {
             let is_loop_body = main.is_loop_body_flag(idx);
             let h0: [Felt; 4] = [first[0], first[1], first[2], first[3]];
-            let op_next = main.get_op_code(next);
-            let next_end = if op_next == Felt::from_u8(opcodes::END) {
-                ONE
-            } else {
-                ZERO
-            };
-            let next_repeat = if op_next == Felt::from_u8(opcodes::REPEAT) {
-                ONE
-            } else {
-                ZERO
-            };
-            let next_respan = if op_next == Felt::from_u8(opcodes::RESPAN) {
-                ONE
-            } else {
-                ZERO
-            };
-            let next_halt = if op_next == Felt::from_u8(opcodes::HALT) {
-                ONE
-            } else {
-                ZERO
-            };
-            let is_first_child = ONE - next_end - next_repeat - next_respan - next_halt;
+            let is_first_child = next_op_first_child_flag(main, next);
             exp.remove(
                 row,
                 &BlockHashMsg::End {

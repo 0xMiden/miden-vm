@@ -93,10 +93,8 @@ pub(in crate::constraints::lookup) fn emit_hash_kernel_table<LB>(
     let f_mu_all: LB::Expr = controller_flag.clone() * hs0.clone() * hs1.clone() * hs2.clone();
     let f_mv_all: LB::Expr = controller_flag * hs0 * hs1 * hs2.not();
 
-    // Raw `Var` captures for the sibling payload fields (Copy). Each closure does its own
-    // `.into()` so the per-closure construction ends as a flat struct literal. Hasher state
-    // is split by convention into `rate_0 (4), rate_1 (4), cap (4)` — sibling messages only
-    // use the rate halves.
+    // Hasher state is split by convention into `rate_0 (4), rate_1 (4), cap (4)` —
+    // sibling messages only use the rate halves.
     let rate_0: [LB::Var; 4] = array::from_fn(|i| ctrl.state[i]);
     let rate_1: [LB::Var; 4] = array::from_fn(|i| ctrl.state[4 + i]);
     let mrupdate_id = ctrl.mrupdate_id;
@@ -121,8 +119,6 @@ pub(in crate::constraints::lookup) fn emit_hash_kernel_table<LB>(
     let f_ace_read: LB::Expr = is_ace_row.clone() * block_sel.not();
     let f_ace_eval: LB::Expr = is_ace_row * block_sel;
 
-    // Raw `Var` captures for ACE payload fields — each producing closure converts them
-    // via `.into()` inside its body.
     let ace_clk = ace.clk;
     let ace_ctx = ace.ctx;
     let ace_ptr = ace.ptr;

@@ -127,8 +127,8 @@ pub(in crate::constraints::lookup) fn emit_block_stack_and_range_logcap<LB>(
     let sys_ctx = local.system.ctx;
     let sys_ctx_next = next.system.ctx;
 
-    // `fn_hash` is used twice (DYNCALL, CALL/SYSCALL) and `fn_hash_next` once (END-after-
-    // CALL/SYSCALL); keep them as `[Var; 4]` and convert inside each closure.
+    // `fn_hash` is used twice (DYNCALL, CALL/SYSCALL) and `fn_hash_next` once
+    // (END-after-CALL/SYSCALL).
     let fn_hash = local.system.fn_hash;
     let fn_hash_next = next.system.fn_hash;
 
@@ -141,11 +141,10 @@ pub(in crate::constraints::lookup) fn emit_block_stack_and_range_logcap<LB>(
     let f_u32rc = op_flags.u32_rc_op();
     let f_log_precompile = op_flags.log_precompile();
 
-    // u32rc helpers: first 4 of the 6 user_op_helpers. Kept as `[Var; 4]` (Copy) so the
-    // batch closure captures them without cloning.
+    // u32rc helpers: first 4 of the 6 user_op_helpers.
     let u32rc_helpers: [LB::Var; 4] = array::from_fn(|i| user_helpers[i]);
 
-    // LOGPRECOMPILE capacity add/remove payloads — also raw `[Var; 4]`.
+    // LOGPRECOMPILE capacity add/remove payloads.
     let cap_prev: [LB::Var; 4] = array::from_fn(|i| user_helpers[HELPER_CAP_PREV_RANGE.start + i]);
     let cap_next: [LB::Var; 4] = array::from_fn(|i| stk_next.get(STACK_CAP_NEXT_RANGE.start + i));
 

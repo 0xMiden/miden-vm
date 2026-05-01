@@ -97,6 +97,30 @@ impl<EF: PrimeCharacteristicRing> Challenges<EF> {
         acc
     }
 
+    /// Returns **sum(beta_powers\[offset + i\] * elems\[i\])**.
+    ///
+    /// Unlike [`Self::encode`], this does **not** add a bus prefix — callers compose it
+    /// with their own prefix and other contributions when a single message absorbs
+    /// multiple slices at different β offsets (e.g. addr at β⁰, payload at β²).
+    #[inline(always)]
+    pub fn inner_product_at<BF: Clone>(&self, offset: usize, elems: &[BF]) -> EF
+    where
+        EF: Mul<BF, Output = EF> + AddAssign,
+    {
+        debug_assert!(
+            offset + elems.len() <= self.beta_powers.len(),
+            "inner_product_at range {}..{} exceeds beta_powers length ({})",
+            offset,
+            offset + elems.len(),
+            self.beta_powers.len(),
+        );
+        let mut acc = EF::ZERO;
+        for (i, elem) in elems.iter().enumerate() {
+            acc += self.beta_powers[offset + i].clone() * elem.clone();
+        }
+        acc
+    }
+
     /// Encodes as **bus_prefix\[bus\] + sum(beta_powers\[layout\[i\]\] * values\[i\])** using
     /// sparse positions.
     ///

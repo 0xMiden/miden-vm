@@ -569,23 +569,11 @@ where
         let mut acc = challenges.bus_prefix[self.kind as usize].clone();
         acc += bp[0].clone() * self.addr.clone();
         acc += bp[1].clone() * self.node_index.clone();
-        match &self.payload {
-            HasherPayload::State(state) => {
-                for i in 0..12 {
-                    acc += bp[i + 2].clone() * state[i].clone();
-                }
-            },
-            HasherPayload::Rate(rate) => {
-                for i in 0..8 {
-                    acc += bp[i + 2].clone() * rate[i].clone();
-                }
-            },
-            HasherPayload::Word(word) => {
-                for i in 0..4 {
-                    acc += bp[i + 2].clone() * word[i].clone();
-                }
-            },
-        }
+        acc += match &self.payload {
+            HasherPayload::State(state) => challenges.inner_product_at(2, state.as_slice()),
+            HasherPayload::Rate(rate) => challenges.inner_product_at(2, rate.as_slice()),
+            HasherPayload::Word(word) => challenges.inner_product_at(2, word.as_slice()),
+        };
         acc
     }
 }
@@ -614,9 +602,7 @@ where
                 acc += bp[0].clone() * ctx.clone();
                 acc += bp[1].clone() * addr.clone();
                 acc += bp[2].clone() * clk.clone();
-                for i in 0..4 {
-                    acc += bp[i + 3].clone() * word[i].clone();
-                }
+                acc += challenges.inner_product_at(3, word.as_slice());
             },
         }
         acc
@@ -672,10 +658,7 @@ where
                 acc += bp[3].clone() * ctx.clone();
                 acc += bp[4].clone() * fmp.clone();
                 acc += bp[5].clone() * depth.clone();
-                acc += bp[6].clone() * fn_hash[0].clone();
-                acc += bp[7].clone() * fn_hash[1].clone();
-                acc += bp[8].clone() * fn_hash[2].clone();
-                acc += bp[9].clone() * fn_hash[3].clone();
+                acc += challenges.inner_product_at(6, fn_hash.as_slice());
             },
         }
         acc
@@ -934,10 +917,7 @@ where
             SiblingBit::Zero => 7,
             SiblingBit::One => 3,
         };
-        acc += bp[base].clone() * self.h[0].clone();
-        acc += bp[base + 1].clone() * self.h[1].clone();
-        acc += bp[base + 2].clone() * self.h[2].clone();
-        acc += bp[base + 3].clone() * self.h[3].clone();
+        acc += challenges.inner_product_at(base, self.h.as_slice());
         acc
     }
 }

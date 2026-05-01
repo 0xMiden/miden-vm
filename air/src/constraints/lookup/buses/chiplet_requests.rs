@@ -49,10 +49,9 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
     let stk_next = &next.stack;
     let user_helpers = dec.user_op_helpers();
 
-    // Raw Vars (Copy — captured by value and converted at point of use).
     let addr = dec.addr;
     let addr_next = next.decoder.addr;
-    let h = dec.hasher_state; // [Var; 8]
+    let h = dec.hasher_state;
     let helper0 = user_helpers[0];
     let clk = local.system.clk;
     let sys_ctx = local.system.ctx;
@@ -80,50 +79,25 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
             col.group(
                 "decoder_requests",
                 |g| {
-                    // --- Control-block removes (JOIN / SPLIT / LOOP / SPAN / CALL / SYSCALL) ---
-                    // `h` is a `[Var; 8]` captured by copy; each closure shadows it with a fresh
-                    // `[Expr; 8]` via `.map(LB::Expr::from)` at call time.
-                    g.remove(
-                        "join",
-                        op_flags.join(),
-                        move || {
-                            let parent = addr_next.into();
-                            let h = h.map(LB::Expr::from);
-                            HasherMsg::control_block(parent, &h, opcodes::JOIN)
-                        },
-                        Deg { n: 5, d: 6 },
-                    );
-                    g.remove(
-                        "split",
-                        op_flags.split(),
-                        move || {
-                            let parent = addr_next.into();
-                            let h = h.map(LB::Expr::from);
-                            HasherMsg::control_block(parent, &h, opcodes::SPLIT)
-                        },
-                        Deg { n: 5, d: 6 },
-                    );
-                    g.remove(
-                        "loop",
-                        op_flags.loop_op(),
-                        move || {
-                            let parent = addr_next.into();
-                            let h = h.map(LB::Expr::from);
-                            HasherMsg::control_block(parent, &h, opcodes::LOOP)
-                        },
-                        Deg { n: 5, d: 6 },
-                    );
-                    g.remove(
-                        "span",
-                        op_flags.span(),
-                        move || {
-                            // SPAN is encoded with opcode 0 at the `β¹²` slot.
-                            let parent = addr_next.into();
-                            let h = h.map(LB::Expr::from);
-                            HasherMsg::control_block(parent, &h, 0)
-                        },
-                        Deg { n: 5, d: 6 },
-                    );
+                    // --- Control-block removes (JOIN / SPLIT / LOOP / SPAN; CALL / SYSCALL
+                    // share the payload but live in batches below). SPAN encodes opcode 0
+                    // at the β¹² slot.
+                    let mut control_remove = |name, flag, opcode: u8| {
+                        g.remove(
+                            name,
+                            flag,
+                            move || {
+                                let parent = addr_next.into();
+                                let h = h.map(LB::Expr::from);
+                                HasherMsg::control_block(parent, &h, opcode)
+                            },
+                            Deg { n: 5, d: 6 },
+                        );
+                    };
+                    control_remove("join", op_flags.join(), opcodes::JOIN);
+                    control_remove("split", op_flags.split(), opcodes::SPLIT);
+                    control_remove("loop", op_flags.loop_op(), opcodes::LOOP);
+                    control_remove("span", op_flags.span(), 0);
 
                     // CALL: control-block remove + FMP write under a fresh header (ctx_next /
                     // FMP_ADDR / clk).
