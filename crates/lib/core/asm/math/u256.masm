@@ -1,5 +1,7 @@
 pub type u256 = struct { lo: u128, hi: u128 }
 
+const U32_MAX = 0xFFFFFFFF
+
 # ===== ADDITION ==================================================================================
 
 #! Performs addition of two unsigned 256 bit integers preserving the overflow.
@@ -400,6 +402,112 @@ pub proc neq(b: u256, a: u256) -> i1
     or
 end
 
+#! Internal helper: computes (top u256) < (second u256) using a per-limb borrow chain.
+#! Input stack: [x0..x7, y0..y7, ...] -> [c, ...], where c = 1 when x < y, and 0 otherwise.
+#!
+#! For each limb i, borrow_i = (x_i < y_i + borrow_{i-1}); x < y iff borrow_7.
+#! u32widening_add captures the overflow when y_i + borrow_{i-1} reaches 2^32, and
+#! u32overflowing_sub gives the local less-than bit; the two are OR'd into the next borrow.
+#! No diff limb is ever needed. lt and gt both delegate here to avoid a redundant swapdw.
+proc lt_borrow_chain
+    # Limb 0: borrow_0 = (x0 < y0); no incoming carry.
+    movup.8
+    u32overflowing_sub
+    swap drop
+
+    # Limbs 1..7: (movup, widening_add, swap, movdn.2, sub, swap, drop, or).
+    movup.8 u32widening_add swap movdn.2 u32overflowing_sub swap drop or
+    movup.7 u32widening_add swap movdn.2 u32overflowing_sub swap drop or
+    movup.6 u32widening_add swap movdn.2 u32overflowing_sub swap drop or
+    movup.5 u32widening_add swap movdn.2 u32overflowing_sub swap drop or
+    movup.4 u32widening_add swap movdn.2 u32overflowing_sub swap drop or
+    movup.3 u32widening_add swap movdn.2 u32overflowing_sub swap drop or
+    movup.2 u32widening_add swap movdn.2 u32overflowing_sub swap drop or
+end
+
+#! Returns 1 if a < b for unsigned 256 bit integers.
+#! Stack transition looks as follows:
+#! [b0, b1, b2, b3, b4, b5, b6, b7, a0, a1, a2, a3, a4, a5, a6, a7, ...] -> [c, ...],
+#! where c = 1 when a < b, and 0 otherwise.
+pub proc lt(b: u256, a: u256) -> i1
+    # swapdw puts a on top; lt_borrow_chain then computes (top < second) = a < b.
+    swapdw
+    exec.lt_borrow_chain
+end
+
+#! Returns 1 if a > b for unsigned 256 bit integers.
+#! Stack transition looks as follows:
+#! [b0, b1, b2, b3, b4, b5, b6, b7, a0, a1, a2, a3, a4, a5, a6, a7, ...] -> [c, ...],
+#! where c = 1 when a > b, and 0 otherwise.
+pub proc gt(b: u256, a: u256) -> i1
+    # a > b iff b < a. The stack is already [b, a] (b on top), which lt_borrow_chain
+    # interprets as x=b, y=a, directly returning b < a.
+    exec.lt_borrow_chain
+end
+
+#! Returns 1 if a <= b for unsigned 256 bit integers.
+#! Stack transition looks as follows:
+#! [b0, b1, b2, b3, b4, b5, b6, b7, a0, a1, a2, a3, a4, a5, a6, a7, ...] -> [c, ...],
+#! where c = 1 when a <= b, and 0 otherwise.
+pub proc lte(b: u256, a: u256) -> i1
+    exec.gt
+    not
+end
+
+#! Returns 1 if a >= b for unsigned 256 bit integers.
+#! Stack transition looks as follows:
+#! [b0, b1, b2, b3, b4, b5, b6, b7, a0, a1, a2, a3, a4, a5, a6, a7, ...] -> [c, ...],
+#! where c = 1 when a >= b, and 0 otherwise.
+pub proc gte(b: u256, a: u256) -> i1
+    exec.lt
+    not
+end
+
+#! Returns the minimum of two unsigned 256 bit integers.
+#! Stack transition looks as follows:
+#! [b0, b1, b2, b3, b4, b5, b6, b7, a0, a1, a2, a3, a4, a5, a6, a7, ...]
+#!   -> [c0, c1, c2, c3, c4, c5, c6, c7, ...], where c = min(a, b).
+pub proc min(b: u256, a: u256) -> u256
+    # Dup b and a (so exec.gt has a copy to consume), then cdrop each (b_i, a_i) limb pair
+    # against a freshly-duplicated flag and stash the chosen limb deep with movdn. The
+    # movdn index counts down because each iter shrinks the working depth by one.
+    dupw.3 dupw.3 dupw.3 dupw.3
+    exec.gt
+    dup.0  movup.10  movup.3  movup.2  cdrop  movdn.15
+    dup.0  movup.9   movup.3  movup.2  cdrop  movdn.14
+    dup.0  movup.8   movup.3  movup.2  cdrop  movdn.13
+    dup.0  movup.7   movup.3  movup.2  cdrop  movdn.12
+    dup.0  movup.6   movup.3  movup.2  cdrop  movdn.11
+    dup.0  movup.5   movup.3  movup.2  cdrop  movdn.10
+    dup.0  movup.4   movup.3  movup.2  cdrop  movdn.9
+    dup.0  movup.3   movup.3  movup.2  cdrop  movdn.8
+
+    # State: [flag, c0..c7]; drop the trailing flag.
+    drop
+end
+
+#! Returns the maximum of two unsigned 256 bit integers.
+#! Stack transition looks as follows:
+#! [b0, b1, b2, b3, b4, b5, b6, b7, a0, a1, a2, a3, a4, a5, a6, a7, ...]
+#!   -> [c0, c1, c2, c3, c4, c5, c6, c7, ...], where c = max(a, b).
+pub proc max(b: u256, a: u256) -> u256
+    # Mirror of min: use exec.lt so cdrop with c=1 still selects b (the larger when a < b),
+    # and c=0 selects a.
+    dupw.3 dupw.3 dupw.3 dupw.3
+    exec.lt
+
+    dup.0  movup.10  movup.3  movup.2  cdrop  movdn.15
+    dup.0  movup.9   movup.3  movup.2  cdrop  movdn.14
+    dup.0  movup.8   movup.3  movup.2  cdrop  movdn.13
+    dup.0  movup.7   movup.3  movup.2  cdrop  movdn.12
+    dup.0  movup.6   movup.3  movup.2  cdrop  movdn.11
+    dup.0  movup.5   movup.3  movup.2  cdrop  movdn.10
+    dup.0  movup.4   movup.3  movup.2  cdrop  movdn.9
+    dup.0  movup.3   movup.3  movup.2  cdrop  movdn.8
+
+    drop
+end
+
 # ===== MULTIPLICATION ============================================================================
 
 #! Computes (a + c*b + k) on 32-bit limbs and splits the 64-bit result into low and high
@@ -509,4 +617,626 @@ pub proc wrapping_mul(b: u256, a: u256) -> u256
     dropw dropw
     padw loc_loadw_le.12             # [c4, c5, c6, c7, ...]
     padw loc_loadw_le.8              # [c0, c1, c2, c3, c4, c5, c6, c7, ...]
+end
+
+# ===== BIT COUNTING ==============================================================================
+
+#! Counts the number of leading zeros of an unsigned 256 bit integer.
+#! Stack transition looks as follows:
+#! [a0, a1, a2, a3, a4, a5, a6, a7, ...] -> [count, ...], where count is the number of leading
+#! zero bits in a (0..=256).
+pub proc clz(a: u256) -> u8
+    # Walk down from the most significant limb (a7) to the least (a0). For each limb, if it's
+    # zero, drop it and continue; otherwise apply u32clz to it and add 32 * (limb index from low).
+    movup.7
+    dup.0 eq.0
+    if.true
+        drop
+        movup.6
+        dup.0 eq.0
+        if.true
+            drop
+            movup.5
+            dup.0 eq.0
+            if.true
+                drop
+                movup.4
+                dup.0 eq.0
+                if.true
+                    drop
+                    movup.3
+                    dup.0 eq.0
+                    if.true
+                        drop
+                        movup.2
+                        dup.0 eq.0
+                        if.true
+                            drop
+                            swap
+                            dup.0 eq.0
+                            if.true
+                                drop
+                                u32clz add.224
+                            else
+                                swap drop
+                                u32clz add.192
+                            end
+                        else
+                            movdn.2 drop drop
+                            u32clz add.160
+                        end
+                    else
+                        movdn.3 drop drop drop
+                        u32clz add.128
+                    end
+                else
+                    movdn.4 drop drop drop drop
+                    u32clz add.96
+                end
+            else
+                movdn.5 drop drop drop drop drop
+                u32clz add.64
+            end
+        else
+            movdn.6 drop drop drop drop drop drop
+            u32clz add.32
+        end
+    else
+        movdn.7 drop drop drop drop drop drop drop
+        u32clz
+    end
+end
+
+#! Counts the number of trailing zeros of an unsigned 256 bit integer.
+#! Stack transition looks as follows:
+#! [a0, a1, a2, a3, a4, a5, a6, a7, ...] -> [count, ...], where count is the number of trailing
+#! zero bits in a (0..=256).
+pub proc ctz(a: u256) -> u8
+    # Walk up from a0 to a7. The non-zero limb (or a7 if all zero, since u32ctz(0) = 32) gives the
+    # count contribution; preceding zero limbs each contribute 32.
+    dup.0 eq.0
+    if.true
+        drop
+        dup.0 eq.0
+        if.true
+            drop
+            dup.0 eq.0
+            if.true
+                drop
+                dup.0 eq.0
+                if.true
+                    drop
+                    dup.0 eq.0
+                    if.true
+                        drop
+                        dup.0 eq.0
+                        if.true
+                            drop
+                            dup.0 eq.0
+                            if.true
+                                drop
+                                u32ctz add.224
+                            else
+                                swap drop
+                                u32ctz add.192
+                            end
+                        else
+                            movdn.2 drop drop
+                            u32ctz add.160
+                        end
+                    else
+                        movdn.3 drop drop drop
+                        u32ctz add.128
+                    end
+                else
+                    movdn.4 drop drop drop drop
+                    u32ctz add.96
+                end
+            else
+                movdn.5 drop drop drop drop drop
+                u32ctz add.64
+            end
+        else
+            movdn.6 drop drop drop drop drop drop
+            u32ctz add.32
+        end
+    else
+        movdn.7 drop drop drop drop drop drop drop
+        u32ctz
+    end
+end
+
+#! Counts the number of leading ones of an unsigned 256 bit integer.
+#! Stack transition looks as follows:
+#! [a0, a1, a2, a3, a4, a5, a6, a7, ...] -> [count, ...], where count is the number of leading
+#! one bits in a (0..=256).
+pub proc clo(a: u256) -> u8
+    # Mirror of clz: scan from a7 down, treating 0xFFFFFFFF as the "skip" value.
+    movup.7
+    dup.0 eq.U32_MAX
+    if.true
+        drop
+        movup.6
+        dup.0 eq.U32_MAX
+        if.true
+            drop
+            movup.5
+            dup.0 eq.U32_MAX
+            if.true
+                drop
+                movup.4
+                dup.0 eq.U32_MAX
+                if.true
+                    drop
+                    movup.3
+                    dup.0 eq.U32_MAX
+                    if.true
+                        drop
+                        movup.2
+                        dup.0 eq.U32_MAX
+                        if.true
+                            drop
+                            swap
+                            dup.0 eq.U32_MAX
+                            if.true
+                                drop
+                                u32clo add.224
+                            else
+                                swap drop
+                                u32clo add.192
+                            end
+                        else
+                            movdn.2 drop drop
+                            u32clo add.160
+                        end
+                    else
+                        movdn.3 drop drop drop
+                        u32clo add.128
+                    end
+                else
+                    movdn.4 drop drop drop drop
+                    u32clo add.96
+                end
+            else
+                movdn.5 drop drop drop drop drop
+                u32clo add.64
+            end
+        else
+            movdn.6 drop drop drop drop drop drop
+            u32clo add.32
+        end
+    else
+        movdn.7 drop drop drop drop drop drop drop
+        u32clo
+    end
+end
+
+#! Counts the number of trailing ones of an unsigned 256 bit integer.
+#! Stack transition looks as follows:
+#! [a0, a1, a2, a3, a4, a5, a6, a7, ...] -> [count, ...], where count is the number of trailing
+#! one bits in a (0..=256).
+pub proc cto(a: u256) -> u8
+    # Mirror of ctz scanning low-to-high; uses u32cto on the first non-all-ones limb.
+    dup.0 eq.U32_MAX
+    if.true
+        drop
+        dup.0 eq.U32_MAX
+        if.true
+            drop
+            dup.0 eq.U32_MAX
+            if.true
+                drop
+                dup.0 eq.U32_MAX
+                if.true
+                    drop
+                    dup.0 eq.U32_MAX
+                    if.true
+                        drop
+                        dup.0 eq.U32_MAX
+                        if.true
+                            drop
+                            dup.0 eq.U32_MAX
+                            if.true
+                                drop
+                                u32cto add.224
+                            else
+                                swap drop
+                                u32cto add.192
+                            end
+                        else
+                            movdn.2 drop drop
+                            u32cto add.160
+                        end
+                    else
+                        movdn.3 drop drop drop
+                        u32cto add.128
+                    end
+                else
+                    movdn.4 drop drop drop drop
+                    u32cto add.96
+                end
+            else
+                movdn.5 drop drop drop drop drop
+                u32cto add.64
+            end
+        else
+            movdn.6 drop drop drop drop drop drop
+            u32cto add.32
+        end
+    else
+        movdn.7 drop drop drop drop drop drop drop
+        u32cto
+    end
+end
+
+# ===== SHIFTS / ROTATIONS ========================================================================
+#
+# shl / shr stash a in mem[0..7], dispatch on k = n / 32, and write the (8 - k) nonzero
+# output limbs to mem[8..15]. The in-limb shift is a u32 multiply by 2^m (shl) or by
+# 2^(32-m) (shr); the carry between adjacent output limbs is the hi/lo half of the
+# widening product. m == 0 is special-cased inside each shr k-branch because pow2(32)
+# overflows u32; shl uses pow = 1 and the same code path. The k-dispatch is inlined
+# into shl/shr (rather than factored into helpers) so loc_load/loc_store address the
+# same @locals(16) frame as the stash.
+
+#! Computes the left shift of an unsigned 256 bit integer.
+#! The input value is assumed to be represented using 32 bit limbs, but this is not checked.
+#! Stack transition looks as follows:
+#! [n, a0, a1, a2, a3, a4, a5, a6, a7, ...]
+#!   -> [c0, c1, c2, c3, c4, c5, c6, c7, ...], where c = (a << n) mod 2^256.
+#! Panics if n is not in the range [0, 256).
+@locals(16)
+pub proc shl(n: u32, a: u256) -> u256
+    dup u32lt.256 assert.err="shift amount must be in the range [0, 256)"
+
+    dup eq.0
+    if.true
+        drop
+    else
+        movdn.8                                                # [a0..a7, n, ...]
+        loc_storew_le.0 dropw                                  # mem[0..3] = a[0..3]
+        loc_storew_le.4 dropw                                  # mem[4..7] = a[4..7]
+        u32divmod.32                                           # [m, k, ...]
+        pow2                                                   # [pow=2^m, k, ...]
+        swap                                                   # [k, pow, ...]
+        dup eq.0
+        if.true
+            drop                                               # [pow, ...]
+            loc_load.0 dup.1 u32widening_mul loc_store.8
+            loc_load.1 dup.2 u32widening_mul movup.2 add loc_store.9
+            loc_load.2 dup.2 u32widening_mul movup.2 add loc_store.10
+            loc_load.3 dup.2 u32widening_mul movup.2 add loc_store.11
+            loc_load.4 dup.2 u32widening_mul movup.2 add loc_store.12
+            loc_load.5 dup.2 u32widening_mul movup.2 add loc_store.13
+            loc_load.6 dup.2 u32widening_mul movup.2 add loc_store.14
+            loc_load.7 dup.2 u32widening_mul movup.2 add loc_store.15
+            drop drop
+            padw loc_loadw_le.12
+            padw loc_loadw_le.8
+        else
+            dup eq.1
+            if.true
+                drop
+                loc_load.0 dup.1 u32widening_mul loc_store.9
+                loc_load.1 dup.2 u32widening_mul movup.2 add loc_store.10
+                loc_load.2 dup.2 u32widening_mul movup.2 add loc_store.11
+                loc_load.3 dup.2 u32widening_mul movup.2 add loc_store.12
+                loc_load.4 dup.2 u32widening_mul movup.2 add loc_store.13
+                loc_load.5 dup.2 u32widening_mul movup.2 add loc_store.14
+                loc_load.6 dup.2 u32widening_mul movup.2 add loc_store.15
+                drop drop
+                loc_load.15 loc_load.14 loc_load.13 loc_load.12 loc_load.11 loc_load.10 loc_load.9
+                push.0
+            else
+                dup eq.2
+                if.true
+                    drop
+                    loc_load.0 dup.1 u32widening_mul loc_store.10
+                    loc_load.1 dup.2 u32widening_mul movup.2 add loc_store.11
+                    loc_load.2 dup.2 u32widening_mul movup.2 add loc_store.12
+                    loc_load.3 dup.2 u32widening_mul movup.2 add loc_store.13
+                    loc_load.4 dup.2 u32widening_mul movup.2 add loc_store.14
+                    loc_load.5 dup.2 u32widening_mul movup.2 add loc_store.15
+                    drop drop
+                    loc_load.15 loc_load.14 loc_load.13 loc_load.12 loc_load.11 loc_load.10
+                    push.0 push.0
+                else
+                    dup eq.3
+                    if.true
+                        drop
+                        loc_load.0 dup.1 u32widening_mul loc_store.11
+                        loc_load.1 dup.2 u32widening_mul movup.2 add loc_store.12
+                        loc_load.2 dup.2 u32widening_mul movup.2 add loc_store.13
+                        loc_load.3 dup.2 u32widening_mul movup.2 add loc_store.14
+                        loc_load.4 dup.2 u32widening_mul movup.2 add loc_store.15
+                        drop drop
+                        loc_load.15 loc_load.14 loc_load.13 loc_load.12 loc_load.11
+                        push.0 push.0 push.0
+                    else
+                        dup eq.4
+                        if.true
+                            drop
+                            loc_load.0 dup.1 u32widening_mul loc_store.12
+                            loc_load.1 dup.2 u32widening_mul movup.2 add loc_store.13
+                            loc_load.2 dup.2 u32widening_mul movup.2 add loc_store.14
+                            loc_load.3 dup.2 u32widening_mul movup.2 add loc_store.15
+                            drop drop
+                            loc_load.15 loc_load.14 loc_load.13 loc_load.12
+                            push.0 push.0 push.0 push.0
+                        else
+                            dup eq.5
+                            if.true
+                                drop
+                                loc_load.0 dup.1 u32widening_mul loc_store.13
+                                loc_load.1 dup.2 u32widening_mul movup.2 add loc_store.14
+                                loc_load.2 dup.2 u32widening_mul movup.2 add loc_store.15
+                                drop drop
+                                loc_load.15 loc_load.14 loc_load.13
+                                push.0 push.0 push.0 push.0 push.0
+                            else
+                                dup eq.6
+                                if.true
+                                    drop
+                                    loc_load.0 dup.1 u32widening_mul loc_store.14
+                                    loc_load.1 dup.2 u32widening_mul movup.2 add loc_store.15
+                                    drop drop
+                                    loc_load.15 loc_load.14
+                                    push.0 push.0 push.0 push.0 push.0 push.0
+                                else
+                                    drop
+                                    loc_load.0 dup.1 u32widening_mul loc_store.15
+                                    drop drop
+                                    loc_load.15
+                                    push.0 push.0 push.0 push.0 push.0 push.0 push.0
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+end
+
+#! Computes the right shift of an unsigned 256 bit integer.
+#! The input value is assumed to be represented using 32 bit limbs, but this is not checked.
+#! Stack transition looks as follows:
+#! [n, a0, a1, a2, a3, a4, a5, a6, a7, ...]
+#!   -> [c0, c1, c2, c3, c4, c5, c6, c7, ...], where c = a >> n.
+#! Panics if n is not in the range [0, 256).
+@locals(16)
+pub proc shr(n: u32, a: u256) -> u256
+    dup u32lt.256 assert.err="shift amount must be in the range [0, 256)"
+
+    dup eq.0
+    if.true
+        drop
+    else
+        movdn.8
+        loc_storew_le.0 dropw
+        loc_storew_le.4 dropw
+        u32divmod.32                                           # [m, k, ...]
+        swap                                                   # [k, m, ...]
+        # Branches for k=1..7 handle m=0 internally (pow2(32) is not a valid u32).
+        # k=0 with m=0 is n=0, already handled above, so the k=0 branch assumes m > 0.
+        dup eq.0
+        if.true
+            drop                                               # [m, ...] (m > 0)
+            push.32 swap u32wrapping_sub pow2                  # [pow', ...]
+            loc_load.7 dup.1 u32widening_mul swap loc_store.15
+            loc_load.6 dup.2 u32widening_mul movdn.2 add loc_store.14
+            loc_load.5 dup.2 u32widening_mul movdn.2 add loc_store.13
+            loc_load.4 dup.2 u32widening_mul movdn.2 add loc_store.12
+            loc_load.3 dup.2 u32widening_mul movdn.2 add loc_store.11
+            loc_load.2 dup.2 u32widening_mul movdn.2 add loc_store.10
+            loc_load.1 dup.2 u32widening_mul movdn.2 add loc_store.9
+            loc_load.0 dup.2 u32widening_mul movdn.2 add loc_store.8
+            drop drop
+            padw loc_loadw_le.12
+            padw loc_loadw_le.8
+        else
+            dup eq.1
+            if.true
+                drop                                           # [m, ...]
+                dup eq.0
+                if.true
+                    drop
+                    push.0
+                    loc_load.7 loc_load.6 loc_load.5 loc_load.4 loc_load.3 loc_load.2 loc_load.1
+                else
+                    push.32 swap u32wrapping_sub pow2
+                    loc_load.7 dup.1 u32widening_mul swap loc_store.14
+                    loc_load.6 dup.2 u32widening_mul movdn.2 add loc_store.13
+                    loc_load.5 dup.2 u32widening_mul movdn.2 add loc_store.12
+                    loc_load.4 dup.2 u32widening_mul movdn.2 add loc_store.11
+                    loc_load.3 dup.2 u32widening_mul movdn.2 add loc_store.10
+                    loc_load.2 dup.2 u32widening_mul movdn.2 add loc_store.9
+                    loc_load.1 dup.2 u32widening_mul movdn.2 add loc_store.8
+                    drop drop
+                    push.0
+                    loc_load.14 loc_load.13 loc_load.12 loc_load.11 loc_load.10 loc_load.9 loc_load.8
+                end
+            else
+                dup eq.2
+                if.true
+                    drop
+                    dup eq.0
+                    if.true
+                        drop
+                        push.0 push.0
+                        loc_load.7 loc_load.6 loc_load.5 loc_load.4 loc_load.3 loc_load.2
+                    else
+                        push.32 swap u32wrapping_sub pow2
+                        loc_load.7 dup.1 u32widening_mul swap loc_store.13
+                        loc_load.6 dup.2 u32widening_mul movdn.2 add loc_store.12
+                        loc_load.5 dup.2 u32widening_mul movdn.2 add loc_store.11
+                        loc_load.4 dup.2 u32widening_mul movdn.2 add loc_store.10
+                        loc_load.3 dup.2 u32widening_mul movdn.2 add loc_store.9
+                        loc_load.2 dup.2 u32widening_mul movdn.2 add loc_store.8
+                        drop drop
+                        push.0 push.0
+                        loc_load.13 loc_load.12 loc_load.11 loc_load.10 loc_load.9 loc_load.8
+                    end
+                else
+                    dup eq.3
+                    if.true
+                        drop
+                        dup eq.0
+                        if.true
+                            drop
+                            push.0 push.0 push.0
+                            loc_load.7 loc_load.6 loc_load.5 loc_load.4 loc_load.3
+                        else
+                            push.32 swap u32wrapping_sub pow2
+                            loc_load.7 dup.1 u32widening_mul swap loc_store.12
+                            loc_load.6 dup.2 u32widening_mul movdn.2 add loc_store.11
+                            loc_load.5 dup.2 u32widening_mul movdn.2 add loc_store.10
+                            loc_load.4 dup.2 u32widening_mul movdn.2 add loc_store.9
+                            loc_load.3 dup.2 u32widening_mul movdn.2 add loc_store.8
+                            drop drop
+                            push.0 push.0 push.0
+                            loc_load.12 loc_load.11 loc_load.10 loc_load.9 loc_load.8
+                        end
+                    else
+                        dup eq.4
+                        if.true
+                            drop
+                            dup eq.0
+                            if.true
+                                drop
+                                push.0 push.0 push.0 push.0
+                                loc_load.7 loc_load.6 loc_load.5 loc_load.4
+                            else
+                                push.32 swap u32wrapping_sub pow2
+                                loc_load.7 dup.1 u32widening_mul swap loc_store.11
+                                loc_load.6 dup.2 u32widening_mul movdn.2 add loc_store.10
+                                loc_load.5 dup.2 u32widening_mul movdn.2 add loc_store.9
+                                loc_load.4 dup.2 u32widening_mul movdn.2 add loc_store.8
+                                drop drop
+                                push.0 push.0 push.0 push.0
+                                loc_load.11 loc_load.10 loc_load.9 loc_load.8
+                            end
+                        else
+                            dup eq.5
+                            if.true
+                                drop
+                                dup eq.0
+                                if.true
+                                    drop
+                                    push.0 push.0 push.0 push.0 push.0
+                                    loc_load.7 loc_load.6 loc_load.5
+                                else
+                                    push.32 swap u32wrapping_sub pow2
+                                    loc_load.7 dup.1 u32widening_mul swap loc_store.10
+                                    loc_load.6 dup.2 u32widening_mul movdn.2 add loc_store.9
+                                    loc_load.5 dup.2 u32widening_mul movdn.2 add loc_store.8
+                                    drop drop
+                                    push.0 push.0 push.0 push.0 push.0
+                                    loc_load.10 loc_load.9 loc_load.8
+                                end
+                            else
+                                dup eq.6
+                                if.true
+                                    drop
+                                    dup eq.0
+                                    if.true
+                                        drop
+                                        push.0 push.0 push.0 push.0 push.0 push.0
+                                        loc_load.7 loc_load.6
+                                    else
+                                        push.32 swap u32wrapping_sub pow2
+                                        loc_load.7 dup.1 u32widening_mul swap loc_store.9
+                                        loc_load.6 dup.2 u32widening_mul movdn.2 add loc_store.8
+                                        drop drop
+                                        push.0 push.0 push.0 push.0 push.0 push.0
+                                        loc_load.9 loc_load.8
+                                    end
+                                else
+                                    drop                       # [m, ...]
+                                    dup eq.0
+                                    if.true
+                                        drop
+                                        push.0 push.0 push.0 push.0 push.0 push.0 push.0
+                                        loc_load.7
+                                    else
+                                        push.32 swap u32wrapping_sub pow2
+                                        loc_load.7 dup.1 u32widening_mul swap loc_store.8
+                                        drop drop
+                                        push.0 push.0 push.0 push.0 push.0 push.0 push.0
+                                        loc_load.8
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+end
+
+#! Computes the left rotation of an unsigned 256 bit integer.
+#! The input value is assumed to be represented using 32 bit limbs, but this is not checked.
+#! Stack transition looks as follows:
+#! [n, a0, a1, a2, a3, a4, a5, a6, a7, ...]
+#!   -> [c0, c1, c2, c3, c4, c5, c6, c7, ...], where c = rotl(a, n).
+#! Panics if n is not in the range [0, 256).
+@locals(8)
+pub proc rotl(n: u32, a: u256) -> u256
+    # rotl(n, a) = (a << n) | (a >> (256 - n)). Stash shl's result in our own @locals(8)
+    # frame (independent of shl/shr's @locals(16) inside) so we can call shr on a fresh
+    # copy of (n, a) and OR limb-by-limb.
+    dup eq.0
+    if.true
+        drop
+    else
+        dup                                                    # [n, n, a0..a7, ...]
+        dup.9 dup.9 dup.9 dup.9 dup.9 dup.9 dup.9 dup.9        # [a0..a7, n, n, a0..a7, ...]
+        movup.8                                                # [n, a0..a7, n, a0..a7, ...]
+        exec.shl                                               # [shl0..shl7, n, a0..a7, ...]
+        loc_storew_le.0 dropw
+        loc_storew_le.4 dropw
+        push.256 swap u32wrapping_sub                          # [256-n, a0..a7, ...]
+        exec.shr                                               # [shr0..shr7, ...]
+        loc_load.0 u32or
+        swap loc_load.1 u32or swap
+        movup.2 loc_load.2 u32or movdn.2
+        movup.3 loc_load.3 u32or movdn.3
+        movup.4 loc_load.4 u32or movdn.4
+        movup.5 loc_load.5 u32or movdn.5
+        movup.6 loc_load.6 u32or movdn.6
+        movup.7 loc_load.7 u32or movdn.7
+    end
+end
+
+#! Computes the right rotation of an unsigned 256 bit integer.
+#! The input value is assumed to be represented using 32 bit limbs, but this is not checked.
+#! Stack transition looks as follows:
+#! [n, a0, a1, a2, a3, a4, a5, a6, a7, ...]
+#!   -> [c0, c1, c2, c3, c4, c5, c6, c7, ...], where c = rotr(a, n).
+#! Panics if n is not in the range [0, 256).
+@locals(8)
+pub proc rotr(n: u32, a: u256) -> u256
+    # rotr(n, a) = (a >> n) | (a << (256 - n)). Mirrors rotl with shl/shr swapped.
+    dup eq.0
+    if.true
+        drop
+    else
+        dup
+        dup.9 dup.9 dup.9 dup.9 dup.9 dup.9 dup.9 dup.9
+        movup.8                                                # [n, a0..a7, n, a0..a7, ...]
+        exec.shr                                               # [shr0..shr7, n, a0..a7, ...]
+        loc_storew_le.0 dropw
+        loc_storew_le.4 dropw
+        push.256 swap u32wrapping_sub                          # [256-n, a0..a7, ...]
+        exec.shl                                               # [shl0..shl7, ...]
+        loc_load.0 u32or
+        swap loc_load.1 u32or swap
+        movup.2 loc_load.2 u32or movdn.2
+        movup.3 loc_load.3 u32or movdn.3
+        movup.4 loc_load.4 u32or movdn.4
+        movup.5 loc_load.5 u32or movdn.5
+        movup.6 loc_load.6 u32or movdn.6
+        movup.7 loc_load.7 u32or movdn.7
+    end
 end

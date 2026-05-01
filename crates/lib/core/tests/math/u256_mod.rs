@@ -354,6 +354,147 @@ fn not_regression_vectors() {
     }
 }
 
+// COMPARISONS
+// ================================================================================================
+
+#[test]
+fn comparison_edge_cases() {
+    // Probe ordering at the extremes (zero/max), at the lo/hi 128-bit half-boundary, and with
+    // values that differ at each limb position so the per-limb borrow chain has to propagate
+    // across every boundary.
+    let zero = U256::ZERO;
+    let max = U256::from_le_u32_limbs([u32::MAX; 8]);
+    let lo_max = U256::from_le_u32_limbs([u32::MAX, u32::MAX, u32::MAX, u32::MAX, 0, 0, 0, 0]);
+    let just_above_lo = U256::from_le_u32_limbs([0, 0, 0, 0, 1, 0, 0, 0]);
+
+    let mut cases: Vec<(U256, U256)> = vec![
+        (zero, zero),
+        (zero, max),
+        (max, zero),
+        (max, max),
+        (lo_max, just_above_lo),
+        (just_above_lo, lo_max),
+        (lo_max, lo_max),
+    ];
+    // For each limb position i, generate (a, b) pairs that differ only at limb i.
+    for i in 0..8 {
+        let mut a_limbs = [1u32; 8];
+        let mut b_limbs = [1u32; 8];
+        b_limbs[i] = 2;
+        cases.push((
+            U256::from_le_u32_limbs(a_limbs),
+            U256::from_le_u32_limbs(b_limbs),
+        ));
+        // And the symmetric pair with the difference also requiring a borrow from below.
+        a_limbs[i] = 2;
+        b_limbs[i] = 1;
+        cases.push((
+            U256::from_le_u32_limbs(a_limbs),
+            U256::from_le_u32_limbs(b_limbs),
+        ));
+    }
+
+    for &(a, b) in &cases {
+        assert_binary_u256_op("lt", a, b, &[u64::from(a < b)]);
+        assert_binary_u256_op("gt", a, b, &[u64::from(a > b)]);
+        assert_binary_u256_op("lte", a, b, &[u64::from(a <= b)]);
+        assert_binary_u256_op("gte", a, b, &[u64::from(a >= b)]);
+        assert_binary_u256_op("min", a, b, &a.min(b).to_le_limbs());
+        assert_binary_u256_op("max", a, b, &a.max(b).to_le_limbs());
+    }
+}
+
+// BIT COUNTING
+// ================================================================================================
+
+#[test]
+fn bit_count_edge_cases() {
+    // Zero, all-ones, and a single-bit value at every limb boundary. The 8-deep nested-if
+    // dispatch in clz/ctz/clo/cto branches on which limb is the first non-zero (or non-MAX)
+    // one, so a single-bit value at each 32k boundary forces a different branch.
+    let mut cases: Vec<U256> = vec![
+        U256::ZERO,
+        U256::from_le_u32_limbs([u32::MAX; 8]),
+        U256::from_le_u32_limbs([u32::MAX, u32::MAX, u32::MAX, u32::MAX, 0, 0, 0, 0]),
+        U256::from_le_u32_limbs([0, 0, 0, 0, u32::MAX, u32::MAX, u32::MAX, u32::MAX]),
+        U256::from_le_u32_limbs([0xDEAD_BEEF, 0, 0, 0, 0, 0, 0, 0]),
+        U256::from_le_u32_limbs([0, 0, 0, 0, 0, 0, 0, 0xDEAD_BEEF]),
+    ];
+    for bit in [0, 31, 32, 63, 64, 95, 96, 127, 128, 159, 160, 191, 192, 223, 224, 255] {
+        cases.push(U256::from_bit(bit));
+    }
+
+    for &value in &cases {
+        assert_unary_u256_op("clz", value, &[value.clz()]);
+        assert_unary_u256_op("ctz", value, &[value.ctz()]);
+        assert_unary_u256_op("clo", value, &[value.clo()]);
+        assert_unary_u256_op("cto", value, &[value.cto()]);
+    }
+}
+
+// SHIFTS / ROTATIONS
+// ================================================================================================
+
+#[test]
+fn shift_edge_cases() {
+    // Shift amounts target each k = n / 32 dispatch arm and the m = 0 / m > 0 split inside shr.
+    let amounts: &[u32] = &[
+        0, 1, 31, 32, 33, 63, 64, 65, 95, 96, 97, 127, 128, 129, 159, 160, 161, 191, 192, 193, 223,
+        224, 225, 254, 255,
+    ];
+    let mut values: Vec<U256> = vec![
+        U256::ZERO,
+        U256::from_le_u32_limbs([u32::MAX; 8]),
+        // single-limb-full: each limb = u32::MAX, others zero.
+        U256::from_le_u32_limbs([u32::MAX, 0, 0, 0, 0, 0, 0, 0]),
+        U256::from_le_u32_limbs([0, u32::MAX, 0, 0, 0, 0, 0, 0]),
+        U256::from_le_u32_limbs([0, 0, 0, 0, u32::MAX, 0, 0, 0]),
+        U256::from_le_u32_limbs([0, 0, 0, 0, 0, 0, 0, u32::MAX]),
+        // half-fills stress lo/hi crossover.
+        U256::new(u128::MAX, 0),
+        U256::new(0, u128::MAX),
+        // alternating bits within and across limbs.
+        U256::from_le_u32_limbs([0xAAAA_AAAA; 8]),
+        U256::from_le_u32_limbs([0x5555_5555; 8]),
+        pseudo_random_pair().0,
+        pseudo_random_pair().1,
+    ];
+    // Single-bit values at every limb boundary catch off-by-one bit-position errors.
+    for bit in [0, 31, 32, 63, 64, 95, 96, 127, 128, 159, 160, 191, 192, 223, 224, 255] {
+        values.push(U256::from_bit(bit));
+    }
+
+    for &n in amounts {
+        for &a in &values {
+            assert_shift_op("shl", n, a, &a.shl(n).to_le_limbs());
+            assert_shift_op("shr", n, a, &a.shr(n).to_le_limbs());
+            assert_shift_op("rotl", n, a, &a.rotl(n).to_le_limbs());
+            assert_shift_op("rotr", n, a, &a.rotr(n).to_le_limbs());
+        }
+    }
+}
+
+#[test]
+fn shift_panics_when_amount_out_of_range() {
+    for &n in &[256u64, u64::from(u32::MAX)] {
+        for op in ["shl", "shr", "rotl", "rotr"] {
+            let source = format!(
+                "
+                use miden::core::math::u256
+                begin
+                    exec.u256::{op}
+                end"
+            );
+            let mut operands = vec![n];
+            operands.extend(U256::from_bit(0).to_le_limbs());
+            assert!(
+                build_test!(&source, &operands).execute().is_err(),
+                "{op} with n={n} should panic"
+            );
+        }
+    }
+}
+
 proptest! {
     #[test]
     fn wrapping_mul_proptest(
@@ -535,6 +676,232 @@ proptest! {
         let expected = (!a).to_le_limbs();
         build_test!(source, &a.to_le_limbs()).prop_expect_stack(&expected)?;
     }
+
+    #[test]
+    fn lt_proptest(
+        a in prop::array::uniform8(boundary_biased_u32()),
+        b in prop::array::uniform8(boundary_biased_u32()),
+    ) {
+        let source = "
+            use miden::core::math::u256
+            begin
+                exec.u256::lt
+            end";
+
+        let a = U256::from_le_u32_limbs(a);
+        let b = U256::from_le_u32_limbs(b);
+        let operands = [b.to_le_limbs(), a.to_le_limbs()].concat();
+        build_test!(source, &operands).prop_expect_stack(&[u64::from(a < b)])?;
+    }
+
+    #[test]
+    fn gt_proptest(
+        a in prop::array::uniform8(boundary_biased_u32()),
+        b in prop::array::uniform8(boundary_biased_u32()),
+    ) {
+        let source = "
+            use miden::core::math::u256
+            begin
+                exec.u256::gt
+            end";
+
+        let a = U256::from_le_u32_limbs(a);
+        let b = U256::from_le_u32_limbs(b);
+        let operands = [b.to_le_limbs(), a.to_le_limbs()].concat();
+        build_test!(source, &operands).prop_expect_stack(&[u64::from(a > b)])?;
+    }
+
+    #[test]
+    fn lte_proptest(
+        a in prop::array::uniform8(boundary_biased_u32()),
+        b in prop::array::uniform8(boundary_biased_u32()),
+    ) {
+        let source = "
+            use miden::core::math::u256
+            begin
+                exec.u256::lte
+            end";
+
+        let a = U256::from_le_u32_limbs(a);
+        let b = U256::from_le_u32_limbs(b);
+        let operands = [b.to_le_limbs(), a.to_le_limbs()].concat();
+        build_test!(source, &operands).prop_expect_stack(&[u64::from(a <= b)])?;
+    }
+
+    #[test]
+    fn gte_proptest(
+        a in prop::array::uniform8(boundary_biased_u32()),
+        b in prop::array::uniform8(boundary_biased_u32()),
+    ) {
+        let source = "
+            use miden::core::math::u256
+            begin
+                exec.u256::gte
+            end";
+
+        let a = U256::from_le_u32_limbs(a);
+        let b = U256::from_le_u32_limbs(b);
+        let operands = [b.to_le_limbs(), a.to_le_limbs()].concat();
+        build_test!(source, &operands).prop_expect_stack(&[u64::from(a >= b)])?;
+    }
+
+    #[test]
+    fn min_proptest(
+        a in prop::array::uniform8(boundary_biased_u32()),
+        b in prop::array::uniform8(boundary_biased_u32()),
+    ) {
+        let source = "
+            use miden::core::math::u256
+            begin
+                exec.u256::min
+            end";
+
+        let a = U256::from_le_u32_limbs(a);
+        let b = U256::from_le_u32_limbs(b);
+        let operands = [b.to_le_limbs(), a.to_le_limbs()].concat();
+        build_test!(source, &operands).prop_expect_stack(&a.min(b).to_le_limbs())?;
+    }
+
+    #[test]
+    fn max_proptest(
+        a in prop::array::uniform8(boundary_biased_u32()),
+        b in prop::array::uniform8(boundary_biased_u32()),
+    ) {
+        let source = "
+            use miden::core::math::u256
+            begin
+                exec.u256::max
+            end";
+
+        let a = U256::from_le_u32_limbs(a);
+        let b = U256::from_le_u32_limbs(b);
+        let operands = [b.to_le_limbs(), a.to_le_limbs()].concat();
+        build_test!(source, &operands).prop_expect_stack(&a.max(b).to_le_limbs())?;
+    }
+
+    #[test]
+    fn clz_proptest(a in prop::array::uniform8(boundary_biased_u32())) {
+        let a = U256::from_le_u32_limbs(a);
+        let source = "
+            use miden::core::math::u256
+            begin
+                exec.u256::clz
+            end";
+        build_test!(source, &a.to_le_limbs()).prop_expect_stack(&[a.clz()])?;
+    }
+
+    #[test]
+    fn ctz_proptest(a in prop::array::uniform8(boundary_biased_u32())) {
+        let a = U256::from_le_u32_limbs(a);
+        let source = "
+            use miden::core::math::u256
+            begin
+                exec.u256::ctz
+            end";
+        build_test!(source, &a.to_le_limbs()).prop_expect_stack(&[a.ctz()])?;
+    }
+
+    #[test]
+    fn clo_proptest(a in prop::array::uniform8(boundary_biased_u32())) {
+        let a = U256::from_le_u32_limbs(a);
+        let source = "
+            use miden::core::math::u256
+            begin
+                exec.u256::clo
+            end";
+        build_test!(source, &a.to_le_limbs()).prop_expect_stack(&[a.clo()])?;
+    }
+
+    #[test]
+    fn cto_proptest(a in prop::array::uniform8(boundary_biased_u32())) {
+        let a = U256::from_le_u32_limbs(a);
+        let source = "
+            use miden::core::math::u256
+            begin
+                exec.u256::cto
+            end";
+        build_test!(source, &a.to_le_limbs()).prop_expect_stack(&[a.cto()])?;
+    }
+
+    #[test]
+    fn shl_proptest(a in prop::array::uniform8(boundary_biased_u32()), n in 0u32..256) {
+        let a = U256::from_le_u32_limbs(a);
+        let expected = a.shl(n).to_le_limbs();
+        let source = format!(
+            "
+            use miden::core::math::u256
+            begin
+                exec.u256::shl
+                {assert_expected}
+            end",
+            assert_expected = assert_stack_words(&expected),
+        );
+        let mut operands = vec![u64::from(n)];
+        operands.extend(a.to_le_limbs());
+        build_test!(&source, &operands).execute().map_err(|e| {
+            TestCaseError::fail(format!("shl(n={n}, a={a:?}) failed: {e:?}"))
+        })?;
+    }
+
+    #[test]
+    fn shr_proptest(a in prop::array::uniform8(boundary_biased_u32()), n in 0u32..256) {
+        let a = U256::from_le_u32_limbs(a);
+        let expected = a.shr(n).to_le_limbs();
+        let source = format!(
+            "
+            use miden::core::math::u256
+            begin
+                exec.u256::shr
+                {assert_expected}
+            end",
+            assert_expected = assert_stack_words(&expected),
+        );
+        let mut operands = vec![u64::from(n)];
+        operands.extend(a.to_le_limbs());
+        build_test!(&source, &operands).execute().map_err(|e| {
+            TestCaseError::fail(format!("shr(n={n}, a={a:?}) failed: {e:?}"))
+        })?;
+    }
+
+    #[test]
+    fn rotl_proptest(a in prop::array::uniform8(boundary_biased_u32()), n in 0u32..256) {
+        let a = U256::from_le_u32_limbs(a);
+        let expected = a.rotl(n).to_le_limbs();
+        let source = format!(
+            "
+            use miden::core::math::u256
+            begin
+                exec.u256::rotl
+                {assert_expected}
+            end",
+            assert_expected = assert_stack_words(&expected),
+        );
+        let mut operands = vec![u64::from(n)];
+        operands.extend(a.to_le_limbs());
+        build_test!(&source, &operands).execute().map_err(|e| {
+            TestCaseError::fail(format!("rotl(n={n}, a={a:?}) failed: {e:?}"))
+        })?;
+    }
+
+    #[test]
+    fn rotr_proptest(a in prop::array::uniform8(boundary_biased_u32()), n in 0u32..256) {
+        let a = U256::from_le_u32_limbs(a);
+        let expected = a.rotr(n).to_le_limbs();
+        let source = format!(
+            "
+            use miden::core::math::u256
+            begin
+                exec.u256::rotr
+                {assert_expected}
+            end",
+            assert_expected = assert_stack_words(&expected),
+        );
+        let mut operands = vec![u64::from(n)];
+        operands.extend(a.to_le_limbs());
+        build_test!(&source, &operands).execute().map_err(|e| {
+            TestCaseError::fail(format!("rotr(n={n}, a={a:?}) failed: {e:?}"))
+        })?;
+    }
 }
 
 // HELPER FUNCTIONS
@@ -643,6 +1010,80 @@ impl U256 {
     fn eqz(self) -> u64 {
         u64::from(self == Self::ZERO)
     }
+
+    fn clz(self) -> u64 {
+        if self.hi != 0 {
+            self.hi.leading_zeros() as u64
+        } else {
+            128 + self.lo.leading_zeros() as u64
+        }
+    }
+
+    fn ctz(self) -> u64 {
+        if self.lo != 0 {
+            self.lo.trailing_zeros() as u64
+        } else {
+            128 + self.hi.trailing_zeros() as u64
+        }
+    }
+
+    fn clo(self) -> u64 {
+        (!self).clz()
+    }
+
+    fn cto(self) -> u64 {
+        (!self).ctz()
+    }
+
+    fn shl(self, n: u32) -> Self {
+        assert!(n < 256, "shift amount must be in [0, 256)");
+        if n == 0 {
+            return self;
+        }
+        if n < 128 {
+            let lo = self.lo << n;
+            let hi = (self.hi << n) | (self.lo >> (128 - n));
+            Self::new(lo, hi)
+        } else if n == 128 {
+            Self::new(0, self.lo)
+        } else {
+            Self::new(0, self.lo << (n - 128))
+        }
+    }
+
+    fn shr(self, n: u32) -> Self {
+        assert!(n < 256, "shift amount must be in [0, 256)");
+        if n == 0 {
+            return self;
+        }
+        if n < 128 {
+            let hi = self.hi >> n;
+            let lo = (self.lo >> n) | (self.hi << (128 - n));
+            Self::new(lo, hi)
+        } else if n == 128 {
+            Self::new(self.hi, 0)
+        } else {
+            Self::new(self.hi >> (n - 128), 0)
+        }
+    }
+
+    fn rotl(self, n: u32) -> Self {
+        assert!(n < 256, "rotation amount must be in [0, 256)");
+        if n == 0 {
+            self
+        } else {
+            self.shl(n) | self.shr(256 - n)
+        }
+    }
+
+    fn rotr(self, n: u32) -> Self {
+        assert!(n < 256, "rotation amount must be in [0, 256)");
+        if n == 0 {
+            self
+        } else {
+            self.shr(n) | self.shl(256 - n)
+        }
+    }
 }
 
 impl BitAnd for U256 {
@@ -674,6 +1115,18 @@ impl Not for U256 {
 
     fn not(self) -> Self::Output {
         Self::new(!self.lo, !self.hi)
+    }
+}
+
+impl PartialOrd for U256 {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for U256 {
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+        self.hi.cmp(&other.hi).then(self.lo.cmp(&other.lo))
     }
 }
 
@@ -790,6 +1243,21 @@ fn assert_unary_u256_op(op: &str, value: U256, expected: &[u64]) {
     );
 
     build_test!(&source, &value.to_le_limbs()).expect_stack(expected);
+}
+
+fn assert_shift_op(op: &str, n: u32, value: U256, expected: &[u64]) {
+    let source = format!(
+        "
+        use miden::core::math::u256
+        begin
+            exec.u256::{op}
+            {assert_expected}
+        end",
+        assert_expected = assert_stack_words(expected),
+    );
+    let mut operands = vec![u64::from(n)];
+    operands.extend(value.to_le_limbs());
+    build_test!(&source, &operands).execute().unwrap();
 }
 
 fn expected_sub(a: &U256, b: &U256) -> (u64, Vec<u64>) {
