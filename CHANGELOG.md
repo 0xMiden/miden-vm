@@ -1,11 +1,11 @@
-## 0.25.0 (TBD)
+## 0.25.0 (2026-05-01)
 
-- Added `Signature::from_der()` for EdDSA signatures ([#979](https://github.com/0xMiden/crypto/pull/979)).
-- Added domain-separated hashing support for elements to `AlgebraicSpoonge` as `hash_elements_in_domain(...)`.
-- [BREAKING] Changed the serialization format of `PartialSmt` to be more compact on the wire. If you depended on the serialization format directly (or if it is stored), this will be breaking. This ser/de is now covered by fuzz tests.
-- [BREAKING] Changed `SmtLeaf::hash` to perform domain-separated hashing, reducing the risk of a collision with the hash of an inner node. Miden VM **must** be updated to comply with this.
-- Fixed `SimpleSmt::set_subtree()` to clear stale leaves and inner nodes in the replaced subtree region ([#981](https://github.com/0xMiden/crypto/pull/981)).
+- [BREAKING] Changed the serialization format of `PartialSmt` to be more compact on the wire ([#957](https://github.com/0xMiden/crypto/pull/957)).
+- [BREAKING] Changed `SmtLeaf::hash` to perform domain-separated hashing, reducing the risk of a collision with the hash of an inner node. ([#962](https://github.com/0xMiden/crypto/pull/962)).
 - [BREAKING] Extracted `SmtStorageReader` and `SparseMerkleTreeReader`, allowing `LargeSmt<S>` to work with read-only storage backends ([#967](https://github.com/0xMiden/crypto/pull/967)).
+- Added domain-separated hashing support for elements to `AlgebraicSpoonge` as `hash_elements_in_domain(...)` ([#978](https://github.com/0xMiden/crypto/pull/978)).
+- Added `Signature::from_der()` for EdDSA signatures ([#979](https://github.com/0xMiden/crypto/pull/979)).
+- Fixed `SimpleSmt::set_subtree()` to clear stale leaves and inner nodes in the replaced subtree region ([#981](https://github.com/0xMiden/crypto/pull/981)).
 - Fixed `SliceReader` bounds checking to reject overflowing read lengths ([#987](https://github.com/0xMiden/crypto/pull/987)).
 
 ## 0.24.0 (2026-04-19)
