@@ -930,6 +930,18 @@ fn mast_forest_read_from_bytes_rejects_fuzzed_overflow_payload() {
 
     let result = MastForest::read_from_bytes(&payload);
     assert!(result.is_err());
+
+    let mut vec_payload = vec![0];
+    vec_payload.extend_from_slice(&1000u64.to_le_bytes());
+    let budget = vec_payload.len().saturating_mul(TRUSTED_BYTE_READ_BUDGET_MULTIPLIER);
+    let result = Vec::<MastForest>::read_from_bytes_with_budget(&vec_payload, budget);
+    assert!(result.is_err());
+
+    let mut option_payload = vec![1];
+    option_payload.extend_from_slice(&payload);
+    let budget = option_payload.len().saturating_mul(TRUSTED_BYTE_READ_BUDGET_MULTIPLIER);
+    let result = Option::<MastForest>::read_from_bytes_with_budget(&option_payload, budget);
+    assert!(result.is_err());
 }
 
 #[test]

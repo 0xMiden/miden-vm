@@ -414,7 +414,10 @@ mod tests {
     #[cfg(feature = "serde")]
     use serde_json::{json, to_value};
 
-    use super::{MAGIC_PACKAGE, Package, PackageExport, PackageManifest, Section, VERSION};
+    use super::{
+        MAGIC_PACKAGE, PACKAGE_BYTE_READ_BUDGET_MULTIPLIER, Package, PackageExport,
+        PackageManifest, Section, VERSION,
+    };
     use crate::{
         Dependency, ManifestValidationError, PackageId, SectionId, TargetType,
         package::manifest::ProcedureExport as PackageProcedureExport,
@@ -615,6 +618,18 @@ mod tests {
         ];
 
         let result = Package::read_from_bytes(&payload);
+        assert!(result.is_err());
+
+        let mut vec_payload = vec![0];
+        vec_payload.extend_from_slice(&1000u64.to_le_bytes());
+        let budget = vec_payload.len().saturating_mul(PACKAGE_BYTE_READ_BUDGET_MULTIPLIER);
+        let result = Vec::<Package>::read_from_bytes_with_budget(&vec_payload, budget);
+        assert!(result.is_err());
+
+        let mut option_payload = vec![1];
+        option_payload.extend_from_slice(&payload);
+        let budget = option_payload.len().saturating_mul(PACKAGE_BYTE_READ_BUDGET_MULTIPLIER);
+        let result = Option::<Package>::read_from_bytes_with_budget(&option_payload, budget);
         assert!(result.is_err());
     }
 
