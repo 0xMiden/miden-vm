@@ -20,7 +20,7 @@ use crate::{
     PathBuf,
     ast::{self, Ident, types},
     parser::ModuleParser,
-    sema::SemanticAnalysisError,
+    sema::{LimitKind, SemanticAnalysisError},
 };
 
 // MODULE KIND
@@ -218,35 +218,41 @@ impl Module {
         self.span = span;
     }
 
+    fn ensure_item_capacity(&self, span: SourceSpan) -> Result<(), SemanticAnalysisError> {
+        if self.items.len() >= ItemIndex::MAX_ITEMS {
+            return Err(SemanticAnalysisError::LimitExceeded { span, kind: LimitKind::Items });
+        }
+
+        Ok(())
+    }
+
+    pub(crate) fn push_export(&mut self, item: Export) -> Result<(), SemanticAnalysisError> {
+        self.ensure_item_capacity(item.span())?;
+        self.items.push(item);
+        Ok(())
+    }
+
     /// Defines a constant, raising an error if the constant conflicts with a previous definition
     pub fn define_constant(&mut self, constant: Constant) -> Result<(), SemanticAnalysisError> {
-        for item in self.items.iter() {
-            if let Export::Constant(c) = item
-                && c.name == constant.name
-            {
-                return Err(SemanticAnalysisError::SymbolConflict {
-                    span: constant.span,
-                    prev_span: c.span,
-                });
-            }
+        if let Some(prev) = self.items.iter().find(|item| item.name() == &constant.name) {
+            return Err(SemanticAnalysisError::SymbolConflict {
+                span: constant.span,
+                prev_span: prev.span(),
+            });
         }
-        self.items.push(Export::Constant(constant));
+        self.push_export(Export::Constant(constant))?;
         Ok(())
     }
 
     /// Defines a type alias, raising an error if the alias conflicts with a previous definition
     pub fn define_type(&mut self, ty: TypeAlias) -> Result<(), SemanticAnalysisError> {
-        for item in self.items.iter() {
-            if let Export::Type(t) = item
-                && t.name() == ty.name()
-            {
-                return Err(SemanticAnalysisError::SymbolConflict {
-                    span: ty.span(),
-                    prev_span: t.span(),
-                });
-            }
+        if let Some(prev) = self.items.iter().find(|item| item.name() == ty.name()) {
+            return Err(SemanticAnalysisError::SymbolConflict {
+                span: ty.span(),
+                prev_span: prev.span(),
+            });
         }
-        self.items.push(Export::Type(ty.into()));
+        self.push_export(Export::Type(ty.into()))?;
         Ok(())
     }
 
@@ -325,7 +331,7 @@ impl Module {
             })?;
         }
 
-        self.items.push(Export::Type(export.into()));
+        self.push_export(Export::Type(export.into()))?;
 
         Ok(())
     }
@@ -335,17 +341,18 @@ impl Module {
     pub fn define_procedure(
         &mut self,
         procedure: Procedure,
-        source_manager: Arc<dyn SourceManager>,
+        _source_manager: Arc<dyn SourceManager>,
     ) -> Result<(), SemanticAnalysisError> {
-        let name = procedure.name();
-        let name = Span::new(name.span(), name.as_str());
-        if let Ok(prev) = self.resolve(name, source_manager) {
-            let prev_span = prev.span();
-            Err(SemanticAnalysisError::SymbolConflict { span: procedure.span(), prev_span })
-        } else {
-            self.items.push(Export::Procedure(procedure));
-            Ok(())
+        if let Some(prev) =
+            self.items.iter().find(|item| item.name().as_str() == procedure.name().as_str())
+        {
+            return Err(SemanticAnalysisError::SymbolConflict {
+                span: procedure.span(),
+                prev_span: prev.name().span(),
+            });
         }
+        self.push_export(Export::Procedure(procedure))?;
+        Ok(())
     }
 
     /// Defines an item alias, raising an error if the alias is invalid, or conflicts with a
@@ -353,20 +360,23 @@ impl Module {
     pub fn define_alias(
         &mut self,
         item: Alias,
-        source_manager: Arc<dyn SourceManager>,
+        _source_manager: Arc<dyn SourceManager>,
     ) -> Result<(), SemanticAnalysisError> {
         if self.is_kernel() && item.visibility().is_public() {
             return Err(SemanticAnalysisError::ReexportFromKernel { span: item.span() });
         }
-        let name = item.name();
-        let name = Span::new(name.span(), name.as_str());
-        if let Ok(prev) = self.resolve(name, source_manager) {
-            let prev_span = prev.span();
-            Err(SemanticAnalysisError::SymbolConflict { span: item.span(), prev_span })
-        } else {
-            self.items.push(Export::Alias(item));
-            Ok(())
+        if let Some(prev) = self
+            .items
+            .iter()
+            .find(|existing| existing.name().as_str() == item.name().as_str())
+        {
+            return Err(SemanticAnalysisError::SymbolConflict {
+                span: item.name().span(),
+                prev_span: prev.name().span(),
+            });
         }
+        self.push_export(Export::Alias(item))?;
+        Ok(())
     }
 }
 
@@ -590,7 +600,7 @@ impl Module {
         name: Span<&str>,
         source_manager: Arc<dyn SourceManager>,
     ) -> Result<SymbolResolution, SymbolResolutionError> {
-        let resolver = self.resolver(source_manager);
+        let resolver = self.resolver(source_manager)?;
         resolver.resolve(name)
     }
 
@@ -600,13 +610,16 @@ impl Module {
         path: Span<&Path>,
         source_manager: Arc<dyn SourceManager>,
     ) -> Result<SymbolResolution, SymbolResolutionError> {
-        let resolver = self.resolver(source_manager);
+        let resolver = self.resolver(source_manager)?;
         resolver.resolve_path(path)
     }
 
     /// Construct a search structure that can resolve procedure names local to this module
     #[inline]
-    pub fn resolver(&self, source_manager: Arc<dyn SourceManager>) -> LocalSymbolResolver {
+    pub fn resolver(
+        &self,
+        source_manager: Arc<dyn SourceManager>,
+    ) -> Result<LocalSymbolResolver, SymbolResolutionError> {
         LocalSymbolResolver::new(self, source_manager)
     }
 
@@ -632,7 +645,7 @@ impl Module {
         ty: &ast::TypeExpr,
         source_manager: Arc<dyn SourceManager>,
     ) -> Result<Option<types::Type>, SymbolResolutionError> {
-        let mut type_resolver = ModuleTypeResolver::new(self, source_manager);
+        let mut type_resolver = self.type_resolver(source_manager)?;
         type_resolver.resolve(ty)
     }
 
@@ -640,7 +653,7 @@ impl Module {
     pub fn type_resolver(
         &self,
         source_manager: Arc<dyn SourceManager>,
-    ) -> impl TypeResolver<SymbolResolutionError> + '_ {
+    ) -> Result<impl TypeResolver<SymbolResolutionError> + '_, SymbolResolutionError> {
         ModuleTypeResolver::new(self, source_manager)
     }
 }
@@ -734,9 +747,12 @@ struct ModuleTypeResolver<'a> {
 }
 
 impl<'a> ModuleTypeResolver<'a> {
-    pub fn new(module: &'a Module, source_manager: Arc<dyn SourceManager>) -> Self {
-        let resolver = module.resolver(source_manager);
-        Self { module, resolver }
+    pub fn new(
+        module: &'a Module,
+        source_manager: Arc<dyn SourceManager>,
+    ) -> Result<Self, SymbolResolutionError> {
+        let resolver = module.resolver(source_manager)?;
+        Ok(Self { module, resolver })
     }
 }
 

@@ -1,5 +1,5 @@
 use alloc::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     string::{String, ToString},
     vec::Vec,
 };
@@ -10,7 +10,10 @@ use std::{
 };
 
 use miden_assembly_syntax::{
-    MAX_REPEAT_COUNT, ast::Path, diagnostics::WrapErr, library::LibraryExport,
+    MAX_REPEAT_COUNT,
+    ast::Path,
+    diagnostics::WrapErr,
+    library::{LibraryExport, ProcedureExport as LibraryProcedureExport},
 };
 use miden_core::{
     Felt, Word, assert_matches,
@@ -22,7 +25,7 @@ use miden_core::{
     },
     operations::Operation,
     program::Program,
-    serde::{Deserializable, Serializable},
+    serde::{Deserializable, DeserializationError, Serializable},
 };
 use miden_mast_package::{
     ConstantExport, MastForest, Package, PackageExport, PackageId, PackageManifest,
@@ -34,7 +37,8 @@ use proptest::{
 };
 
 use crate::{
-    Assembler, Library, ModuleParser, PathBuf, ProjectSourceInputs, ProjectTargetSelector,
+    Assembler, KernelLibrary, Library, ModuleParser, PathBuf, ProjectSourceInputs,
+    ProjectTargetSelector,
     assembler::MAX_CONTROL_FLOW_NESTING,
     ast::{Module, ModuleKind, ProcedureName, QualifiedProcedureName},
     diagnostics::{IntoDiagnostic, Report},
@@ -468,6 +472,199 @@ fn library_deserialization_rejects_non_root_export() {
     assert!(
         err_msg.contains("no procedure root"),
         "error should mention missing procedure root, got: {err_msg}"
+    );
+}
+
+fn read_usize_vint64(bytes: &[u8], offset: &mut usize) -> usize {
+    // This test patches raw bytes in place, so it needs byte offsets that ByteReader::read_usize
+    // does not expose.
+    let first_byte = bytes.get(*offset).copied().expect("out-of-bounds vint64 peek");
+    let length = first_byte.trailing_zeros() as usize + 1;
+
+    if length == 9 {
+        *offset += 1;
+        let end = (*offset).checked_add(8).expect("offset overflow while reading vint64");
+        let chunk: [u8; 8] = bytes[*offset..end].try_into().expect("out-of-bounds vint64");
+        *offset = end;
+        let value = u64::from_le_bytes(chunk);
+        usize::try_from(value).expect("encoded usize does not fit host usize")
+    } else {
+        let end = (*offset).checked_add(length).expect("offset overflow while reading vint64");
+        let mut encoded = [0u8; 8];
+        encoded[..length].copy_from_slice(&bytes[*offset..end]);
+        *offset = end;
+        let value = u64::from_le_bytes(encoded) >> length;
+        usize::try_from(value).expect("encoded usize does not fit host usize")
+    }
+}
+
+fn locate_first_node_hash(bytes: &[u8]) -> (usize, usize) {
+    // Header: magic[4] + flags[1] + version[3]
+    let mut offset = 0usize;
+    offset += 4;
+    offset += 1;
+    offset += 3;
+
+    let node_count = read_usize_vint64(bytes, &mut offset);
+
+    // Roots: len (usize) + elements (u32 LE)
+    let roots_len = read_usize_vint64(bytes, &mut offset);
+    offset += roots_len * 4;
+
+    // Basic block data: len (usize) + bytes
+    let bb_len = read_usize_vint64(bytes, &mut offset);
+    offset += bb_len;
+
+    // Fixed-width node entries: one 8-byte entry per node. External nodes carry their digest in a
+    // separate section before internal node hashes, so count them while walking the entry table.
+    let mut external_count = 0usize;
+    for _ in 0..node_count {
+        let end = offset.checked_add(8).expect("offset overflow while reading node entry");
+        let entry_bytes: [u8; 8] = bytes[offset..end].try_into().expect("out-of-bounds node entry");
+        let entry = u64::from_le_bytes(entry_bytes);
+        let discriminant = (entry >> 60) as u8;
+        if discriminant == 8 {
+            external_count += 1;
+        }
+        offset = end;
+    }
+
+    offset += external_count * 32;
+
+    (offset, node_count)
+}
+
+fn build_library_bytes_with_spoofed_first_node_digest(
+    lib: &Library,
+    spoof_seed: &str,
+) -> (Vec<u8>, Word) {
+    use miden_core::serde::{ByteWriter, Serializable};
+
+    // Serialize the MastForest in stripped form so the byte layout is minimal and stable.
+    let forest = lib.mast_forest().as_ref();
+    let original_digest = forest[MastNodeId::new_unchecked(0)].digest();
+    let mut forest_bytes = Vec::new();
+    forest.write_stripped(&mut forest_bytes);
+
+    let (node_hashes_start, node_count) = locate_first_node_hash(&forest_bytes);
+    assert!(node_count > 0, "expected at least one node info entry");
+
+    // Patch node 0 digest in-place.
+    let spoofed_digest = miden_core::utils::hash_string_to_word(spoof_seed);
+    assert_ne!(spoofed_digest, original_digest, "spoofed digest must differ");
+
+    let mut spoofed_digest_bytes = Vec::new();
+    spoofed_digest.write_into(&mut spoofed_digest_bytes);
+    assert_eq!(spoofed_digest_bytes.len(), 32, "Word must serialize to 32 bytes");
+
+    let node0_digest_offset = node_hashes_start;
+    forest_bytes[node0_digest_offset..node0_digest_offset + 32]
+        .copy_from_slice(&spoofed_digest_bytes);
+
+    // Re-encode a library byte stream using the spoofed forest bytes.
+    let mut bytes = forest_bytes;
+    bytes.write_usize(lib.exports().count());
+    for export in lib.exports() {
+        export.write_into(&mut bytes);
+    }
+    (bytes, spoofed_digest)
+}
+
+#[test]
+fn regression_library_deserialisation_rejects_spoofed_mast_node_digests() {
+    let lib_src = r#"
+pub proc p
+    push.1
+end
+"#;
+    let lib = Assembler::default()
+        .assemble_library([lib_src])
+        .expect("library assembly must succeed");
+
+    let (bytes, _) =
+        build_library_bytes_with_spoofed_first_node_digest(&lib, "spoofed-library-digest");
+    let err = Library::read_from_bytes(&bytes)
+        .expect_err("expected library deserialization to reject inconsistent node digests");
+    assert!(
+        err.to_string().contains("invalid untrusted MAST forest"),
+        "expected untrusted-MAST validation failure, got: {err}"
+    );
+    assert!(
+        err.to_string().contains("hash mismatch for node"),
+        "expected digest mismatch failure, got: {err}"
+    );
+}
+
+#[test]
+fn unchecked_library_deserialisation_accepts_spoofed_mast_node_digests() {
+    let lib_src = r#"
+pub proc p
+    push.1
+end
+"#;
+    let lib = Assembler::default()
+        .assemble_library([lib_src])
+        .expect("library assembly must succeed");
+
+    let (bytes, spoofed_digest) =
+        build_library_bytes_with_spoofed_first_node_digest(&lib, "spoofed-library-digest");
+    let deserialized = Library::read_from_bytes_unchecked(&bytes)
+        .expect("unchecked library deserialization must accept spoofed node digests");
+
+    assert_eq!(
+        deserialized.mast_forest()[MastNodeId::new_unchecked(0)].digest(),
+        spoofed_digest
+    );
+}
+
+#[test]
+fn regression_kernel_library_deserialisation_rejects_spoofed_mast_node_digests() {
+    let kernel_src = r#"
+pub proc k1
+    push.1
+end
+"#;
+    let kernel_lib = Assembler::default()
+        .assemble_kernel(kernel_src)
+        .expect("kernel assembly must succeed");
+
+    let (bytes, _) = build_library_bytes_with_spoofed_first_node_digest(
+        kernel_lib.as_ref(),
+        "spoofed-kernel-digest",
+    );
+    let err = KernelLibrary::read_from_bytes(&bytes)
+        .expect_err("expected kernel library deserialization to reject inconsistent node digests");
+    assert!(
+        err.to_string().contains("invalid untrusted MAST forest"),
+        "expected untrusted-MAST validation failure, got: {err}"
+    );
+    assert!(
+        err.to_string().contains("hash mismatch for node"),
+        "expected digest mismatch failure, got: {err}"
+    );
+}
+
+#[test]
+fn unchecked_kernel_library_deserialisation_accepts_spoofed_mast_node_digests() {
+    let kernel_src = r#"
+pub proc k1
+    push.1
+end
+"#;
+    let kernel_lib = Assembler::default()
+        .assemble_kernel(kernel_src)
+        .expect("kernel assembly must succeed");
+
+    let (bytes, spoofed_digest) = build_library_bytes_with_spoofed_first_node_digest(
+        kernel_lib.as_ref(),
+        "spoofed-kernel-digest",
+    );
+    let deserialized = KernelLibrary::read_from_bytes_unchecked(&bytes)
+        .expect("unchecked kernel deserialization must accept spoofed node digests");
+
+    assert_eq!(
+        deserialized.mast_forest()[MastNodeId::new_unchecked(0)].digest(),
+        spoofed_digest
     );
 }
 
@@ -5476,6 +5673,97 @@ fn test_issue_2696_imported_constant_with_private_dependency() -> TestResult {
 }
 
 #[test]
+fn imported_main_alias_self_call_is_structured_error() {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    let context = TestContext::new();
+    let program = r#"
+        use ::$exec::"$main"->alias_main
+
+        begin
+            call.alias_main
+        end
+    "#;
+
+    let assembled = catch_unwind(AssertUnwindSafe(|| {
+        Assembler::new(context.source_manager()).assemble_program(program)
+    }));
+
+    assert!(assembled.is_ok(), "assembler panicked during assembly");
+    let err = assembled
+        .unwrap()
+        .expect_err("expected self-referential alias call to be rejected");
+    assert_diagnostic!(&err, "invalid recursive procedure call");
+    assert_diagnostic!(&err, "this call is self-recursive");
+}
+
+#[test]
+fn rootless_call_cycle_is_structured_error() {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    let context = TestContext::new();
+    let program = r#"
+        begin
+            call.b
+        end
+
+        proc b
+            call."$main"
+        end
+    "#;
+
+    let assembled = catch_unwind(AssertUnwindSafe(|| {
+        Assembler::new(context.source_manager()).assemble_program(program)
+    }));
+
+    assert!(assembled.is_ok(), "assembler panicked during assembly");
+    let err = assembled.unwrap().expect_err("expected cyclic program to be rejected");
+    assert_diagnostic!(&err, "found a cycle in the call graph");
+    assert_diagnostic!(&err, "::$exec::$main");
+    assert_diagnostic!(&err, "b");
+}
+
+#[test]
+fn cyclic_link_retry_is_structured_error_without_panicking() {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    use crate::linker::Linker;
+
+    let context = TestContext::new();
+    let module = context
+        .parse_program(source_file!(
+            &context,
+            r#"
+                begin
+                    call.b
+                end
+
+                proc b
+                    call."$main"
+                end
+            "#
+        ))
+        .expect("program parsing must succeed");
+    let source_manager = context.source_manager();
+
+    let first_attempt = catch_unwind(AssertUnwindSafe(|| {
+        let mut linker = Linker::new(source_manager.clone());
+        let first_err = linker
+            .link([module.clone()])
+            .expect_err("expected cyclic program to be rejected on first link");
+        let second_err = linker
+            .link(core::iter::empty())
+            .expect_err("expected cyclic program to be rejected on second link");
+        (first_err, second_err)
+    }));
+
+    assert!(first_attempt.is_ok(), "linker panicked while retrying a cyclic link");
+    let (first_err, second_err) = first_attempt.unwrap();
+    assert!(first_err.to_string().contains("found a cycle in the call graph"));
+    assert!(second_err.to_string().contains("found a cycle in the call graph"));
+}
+
+#[test]
 fn test_cross_module_constant_cycle_in_procedure_scope_is_structured_error() {
     use std::panic::{AssertUnwindSafe, catch_unwind};
 
@@ -5559,6 +5847,269 @@ fn imported_error_message_cycle_is_rejected_without_panicking() {
 }
 
 #[test]
+fn exporting_unresolved_digest_alias_preserves_digest_without_panicking() {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    let context = TestContext::new();
+    let digest = Word::default();
+    let module = context
+        .parse_module_with_path(
+            "m::n",
+            source_file!(
+                &context,
+                "pub use 0x0000000000000000000000000000000000000000000000000000000000000000 -> foo\n"
+            ),
+        )
+        .expect("module parsing must succeed");
+
+    let assembled = catch_unwind(AssertUnwindSafe(|| {
+        Assembler::new(context.source_manager()).assemble_library([module])
+    }));
+
+    assert!(assembled.is_ok(), "assembly panicked, expected library assembly to succeed");
+    let library = assembled
+        .unwrap()
+        .expect("expected digest alias export to assemble successfully");
+    assert_eq!(library.get_procedure_root_by_path("m::n::foo"), Some(digest));
+}
+
+#[test]
+fn path_alias_chain_to_digest_assembles_without_panicking() {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    let context = TestContext::new();
+    let digest = Word::default();
+    let module = context
+        .parse_module_with_path(
+            "m::n",
+            source_file!(
+                &context,
+                r#"
+                    pub use 0x0000000000000000000000000000000000000000000000000000000000000000 -> foo
+                    pub use m::n::foo->bar
+
+                    pub proc calls_bar
+                        call.bar
+                    end
+                "#
+            ),
+        )
+        .expect("module parsing must succeed");
+
+    let assembled = catch_unwind(AssertUnwindSafe(|| {
+        Assembler::new(context.source_manager()).assemble_library([module])
+    }));
+
+    assert!(assembled.is_ok(), "assembly panicked, expected library assembly to succeed");
+    let library = assembled
+        .unwrap()
+        .expect("expected digest alias chain to assemble successfully");
+    assert_eq!(library.get_procedure_root_by_path("m::n::bar"), Some(digest));
+    assert!(library.get_procedure_root_by_path("m::n::calls_bar").is_some());
+}
+
+#[test]
+fn imported_digest_alias_invoke_assembles_without_panicking() {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    let program = r#"
+        use 0x0000000000000000000000000000000000000000000000000000000000000000 -> foo
+
+        begin
+            exec.foo
+        end
+    "#;
+
+    let assembled =
+        catch_unwind(AssertUnwindSafe(|| Assembler::default().assemble_program(program)));
+
+    assert!(
+        assembled.is_ok(),
+        "assembly panicked, expected opaque digest invoke to be allowed"
+    );
+    assembled
+        .unwrap()
+        .expect("expected digest-backed invoke alias to assemble successfully");
+}
+
+#[test]
+fn imported_digest_alias_invoke_is_not_reported_unused_when_warnings_are_errors() {
+    use std::sync::Arc;
+
+    use crate::{DefaultSourceManager, Parse, ParseOptions, ast::ModuleKind};
+
+    let source_manager: Arc<dyn crate::SourceManager> = Arc::new(DefaultSourceManager::default());
+    let program = r#"
+        use 0x0000000000000000000000000000000000000000000000000000000000000000 -> foo
+
+        begin
+            exec.foo
+        end
+    "#;
+
+    let mut options = ParseOptions::new(ModuleKind::Executable, "main");
+    options.warnings_as_errors = true;
+
+    <&str as Parse>::parse_with_options(program, source_manager, options)
+        .expect("expected digest-backed invoke alias to count as used");
+}
+
+#[test]
+fn imported_digest_alias_forward_decl_is_not_reported_unused_when_warnings_are_errors() {
+    use std::sync::Arc;
+
+    use crate::{DefaultSourceManager, Parse, ParseOptions, ast::ModuleKind};
+
+    let source_manager: Arc<dyn crate::SourceManager> = Arc::new(DefaultSourceManager::default());
+    let program = r#"
+        proc helper
+            exec.foo
+        end
+
+        use 0x0000000000000000000000000000000000000000000000000000000000000000 -> foo
+
+        begin
+            call.helper
+        end
+    "#;
+
+    let mut options = ParseOptions::new(ModuleKind::Executable, "main");
+    options.warnings_as_errors = true;
+
+    <&str as Parse>::parse_with_options(program, source_manager, options)
+        .expect("expected forward-declared digest alias to count as used");
+}
+
+#[test]
+fn forward_declared_import_used_by_alias_target_is_not_reported_unused_when_warnings_are_errors() {
+    use std::sync::Arc;
+
+    use crate::{DefaultSourceManager, Parse, ParseOptions, ast::ModuleKind};
+
+    let source_manager: Arc<dyn crate::SourceManager> = Arc::new(DefaultSourceManager::default());
+    let module = r#"
+        pub use foo::bar -> baz
+        use external::module -> foo
+    "#;
+
+    let mut options = ParseOptions::new(ModuleKind::Library, "m");
+    options.warnings_as_errors = true;
+
+    <&str as Parse>::parse_with_options(module, source_manager, options)
+        .expect("expected forward-declared import used by alias target to count as used");
+}
+
+#[test]
+fn forward_declared_import_used_by_type_ref_is_not_reported_unused_when_warnings_are_errors() {
+    use std::sync::Arc;
+
+    use crate::{DefaultSourceManager, Parse, ParseOptions, ast::ModuleKind};
+
+    let source_manager: Arc<dyn crate::SourceManager> = Arc::new(DefaultSourceManager::default());
+    let module = r#"
+        type Local = foo::Type
+        use external::module -> foo
+    "#;
+
+    let mut options = ParseOptions::new(ModuleKind::Library, "m");
+    options.warnings_as_errors = true;
+
+    <&str as Parse>::parse_with_options(module, source_manager, options)
+        .expect("expected forward-declared import used by type ref to count as used");
+}
+
+#[test]
+fn forward_declared_import_used_by_constant_ref_is_not_reported_unused_when_warnings_are_errors() {
+    use std::sync::Arc;
+
+    use crate::{DefaultSourceManager, Parse, ParseOptions, ast::ModuleKind};
+
+    let source_manager: Arc<dyn crate::SourceManager> = Arc::new(DefaultSourceManager::default());
+    let module = r#"
+        const LOCAL = foo::BAR
+        use external::module -> foo
+    "#;
+
+    let mut options = ParseOptions::new(ModuleKind::Library, "m");
+    options.warnings_as_errors = true;
+
+    <&str as Parse>::parse_with_options(module, source_manager, options)
+        .expect("expected forward-declared import used by constant ref to count as used");
+}
+
+#[test]
+fn imported_digest_alias_subpath_is_rejected_without_panicking() {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    let program = r#"
+        use 0x0000000000000000000000000000000000000000000000000000000000000000 -> foo
+
+        begin
+            exec.foo::bar
+        end
+    "#;
+
+    let assembled =
+        catch_unwind(AssertUnwindSafe(|| Assembler::default().assemble_program(program)));
+
+    assert!(assembled.is_ok(), "assembly panicked, expected a structured error");
+    let err = assembled
+        .unwrap()
+        .expect_err("expected digest-backed invoke subpath to be rejected");
+    assert_diagnostic!(&err, "invalid procedure path: not an item");
+}
+
+#[test]
+fn invoking_local_type_alias_returns_error_instead_of_panicking() {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    let masm = "type foo = u32\nbegin\n    exec.foo\nend\n";
+
+    let result = catch_unwind(AssertUnwindSafe(|| Assembler::default().assemble_program(masm)));
+
+    let result = result.expect("assembly panicked, expected a structured error");
+    let err = result.expect_err("assembly unexpectedly succeeded");
+    assert_diagnostic!(&err, "invalid symbol reference: wrong type");
+    assert_diagnostic!(&err, "expected this symbol to reference a procedure item");
+}
+
+#[test]
+fn invoking_local_type_alias_is_rejected_during_semantic_analysis() {
+    let context = TestContext::new();
+    let masm = source_file!(&context, "type foo = u32\nbegin\n    exec.foo\nend\n");
+
+    let err = context
+        .parse_program(masm)
+        .expect_err("semantic analysis unexpectedly accepted invoking a local type alias");
+    assert_diagnostic!(&err, "invalid symbol reference: wrong type");
+    assert_diagnostic!(&err, "expected this symbol to reference a procedure item");
+}
+
+#[test]
+fn invoking_imported_type_alias_returns_error_instead_of_panicking() {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    let context = TestContext::new();
+    let lib = context
+        .parse_module_with_path("test::types", source_file!(&context, "pub type foo = u32\n"))
+        .expect("library module parsing must succeed");
+    let library = Assembler::new(context.source_manager())
+        .assemble_library([lib])
+        .expect("library assembly must succeed");
+
+    let mut assembler = Assembler::new(context.source_manager());
+    assembler.link_dynamic_library(library).expect("library linking must succeed");
+
+    let program = "use test::types\nbegin\n    exec.types::foo\nend\n";
+    let result = catch_unwind(AssertUnwindSafe(|| assembler.assemble_program(program)));
+
+    let result = result.expect("assembly panicked, expected a structured error");
+    let err = result.expect_err("assembly unexpectedly succeeded");
+    assert_diagnostic!(&err, "invalid procedure reference: path refers to a non-procedure item");
+    assert_diagnostic!(&err, "test::types::foo");
+}
+
+#[test]
 fn test_cross_module_quoted_identifier_resolution() -> TestResult {
     let context = TestContext::default();
 
@@ -5607,6 +6158,135 @@ fn test_cross_module_quoted_identifier_resolution() -> TestResult {
     let _ = assembler.assemble_library([module_a, module_b])?;
 
     Ok(())
+}
+
+#[test]
+fn regression_symbol_resolution_duplicate_module_paths_are_rejected_during_linking() {
+    fn try_assemble_program_with_link_order(libs: &[Arc<Library>]) -> Result<(), Report> {
+        let program_source = r#"
+begin
+    exec.::foo::bar::add
+end
+"#;
+
+        let mut assembler = Assembler::default();
+        for lib in libs {
+            assembler.link_static_library(lib)?;
+        }
+
+        assembler.assemble_program(program_source).map(|_| ())
+    }
+
+    let context = TestContext::default();
+    let source_manager = context.source_manager();
+
+    let legit_mod = context
+        .parse_module_with_path(
+            "::foo::bar",
+            r#"
+pub proc add
+    add.1
+end
+"#,
+        )
+        .expect("module must parse and analyse");
+
+    let attacker_mod = context
+        .parse_module_with_path(r#"::foo::"bar""#, "pub proc add add.2 end")
+        .expect("module must parse and analyse");
+
+    let legit_lib = Assembler::new(source_manager.clone())
+        .assemble_library([legit_mod])
+        .expect("library assembly must succeed");
+    let attacker_lib = Assembler::new(source_manager)
+        .assemble_library([attacker_mod])
+        .expect("library assembly must succeed");
+
+    let err = try_assemble_program_with_link_order(&[legit_lib.clone(), attacker_lib.clone()])
+        .expect_err("expected duplicate canonical module namespace to be rejected");
+    assert_diagnostic!(err, "duplicate definition found for module '::foo::bar'");
+
+    let err = try_assemble_program_with_link_order(&[attacker_lib, legit_lib])
+        .expect_err("expected duplicate canonical module namespace to be rejected");
+    assert_diagnostic!(err, "duplicate definition found for module '::foo::bar'");
+}
+
+#[test]
+fn regression_symbol_resolution_in_library_canonical_export_collision_is_rejected() {
+    let context = TestContext::default();
+    let source_manager = context.source_manager();
+    let legit_mod = context
+        .parse_module_with_path("::foo::bar", "pub proc add add.1 end")
+        .expect("module must parse and analyse");
+    let attacker_mod = context
+        .parse_module_with_path(r#"::foo::"bar""#, "pub proc add add.2 end")
+        .expect("module must parse and analyse");
+
+    let err = Assembler::new(source_manager)
+        .assemble_library([legit_mod, attacker_mod])
+        .expect_err("expected duplicate canonical export paths to be rejected during assembly");
+    assert_diagnostic!(err, "duplicate definition found for export path '::foo::bar::add'");
+}
+
+#[test]
+fn regression_symbol_resolution_export_leaf_name_collision_should_be_rejected() {
+    let base = Assembler::default()
+        .assemble_library([r#"
+pub proc p
+    push.1
+end
+"#])
+        .expect("base library assembly must succeed");
+    let node = base
+        .exports()
+        .find_map(|e| e.as_procedure())
+        .expect("expected at least one procedure export")
+        .node;
+
+    let quoted = Arc::<Path>::from(Path::validate(r#"::foo::"bar""#).unwrap());
+    let unquoted = Arc::<Path>::from(Path::validate("::foo::bar").unwrap());
+
+    let mut exports = BTreeMap::new();
+    exports.insert(
+        quoted.clone(),
+        LibraryExport::Procedure(LibraryProcedureExport::new(node, quoted)),
+    );
+    exports.insert(
+        unquoted.clone(),
+        LibraryExport::Procedure(LibraryProcedureExport::new(node, unquoted)),
+    );
+
+    let lib = Library::new(Arc::clone(base.mast_forest()), exports).expect("library must validate");
+    let err = Library::read_from_bytes(&lib.to_bytes()).expect_err(
+        "expected duplicate canonical export paths to be rejected during deserialization",
+    );
+    assert_matches!(err, DeserializationError::InvalidValue(_));
+}
+
+#[test]
+fn regression_symbol_resolution_malformed_quoted_export_leaf_should_return_error_not_panic() {
+    let base = Assembler::default()
+        .assemble_library([r#"
+pub proc p
+    push.1
+end
+"#])
+        .expect("base library assembly must succeed");
+    let node = base
+        .exports()
+        .find_map(|e| e.as_procedure())
+        .expect("expected at least one procedure export")
+        .node;
+
+    let bad = Arc::<Path>::from(Path::validate(r#"::foo::"bad name""#).unwrap());
+
+    let mut exports = BTreeMap::new();
+    exports.insert(bad.clone(), LibraryExport::Procedure(LibraryProcedureExport::new(node, bad)));
+
+    let lib = Library::new(Arc::clone(base.mast_forest()), exports).expect("library must validate");
+    let err = Library::read_from_bytes(&lib.to_bytes())
+        .expect_err("expected malformed procedure export leaf names to be rejected");
+    assert_matches!(err, DeserializationError::InvalidValue(_));
 }
 
 #[test]

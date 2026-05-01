@@ -21,6 +21,10 @@ pub struct ModuleInfo {
 }
 
 impl ModuleInfo {
+    pub(crate) fn raw_items(&self) -> &[ItemInfo] {
+        &self.items
+    }
+
     /// Returns a new [`ModuleInfo`] instantiated by library path and optional semantic version.
     ///
     /// The semantic version is optional, as currently the assembler allows assembling artifacts

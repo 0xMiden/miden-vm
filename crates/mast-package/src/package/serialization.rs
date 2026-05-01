@@ -377,7 +377,13 @@ impl Deserializable for TypeExport {
 
 #[cfg(test)]
 mod tests {
-    use alloc::{collections::BTreeMap, string::ToString, sync::Arc, vec, vec::Vec};
+    use alloc::{
+        collections::BTreeMap,
+        string::{String, ToString},
+        sync::Arc,
+        vec,
+        vec::Vec,
+    };
 
     use miden_assembly_syntax::{
         Library,
@@ -385,6 +391,7 @@ mod tests {
         library::{LibraryExport, ProcedureExport as LibraryProcedureExport},
     };
     use miden_core::{
+        Word,
         mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, MastNodeExt, MastNodeId},
         operations::Operation,
         serde::{
@@ -395,9 +402,9 @@ mod tests {
     #[cfg(feature = "serde")]
     use serde_json::{json, to_value};
 
-    use super::{MAGIC_PACKAGE, Package, PackageExport, PackageManifest, VERSION};
+    use super::{MAGIC_PACKAGE, Package, PackageExport, PackageManifest, Section, VERSION};
     use crate::{
-        Dependency, ManifestValidationError, PackageId, TargetType,
+        Dependency, ManifestValidationError, PackageId, SectionId, TargetType,
         package::manifest::ProcedureExport as PackageProcedureExport,
     };
 
@@ -478,6 +485,84 @@ mod tests {
         bytes.write_usize(count);
 
         bytes
+    }
+
+    #[test]
+    fn package_content_digest_changes_when_identity_fields_change() {
+        let package = build_package();
+        let digest = package.content_digest();
+
+        let renamed = Package {
+            name: PackageId::from("renamed_pkg"),
+            ..package.clone()
+        };
+        assert_ne!(digest, renamed.content_digest());
+
+        let versioned = Package {
+            version: crate::Version::new(1, 2, 3),
+            ..package.clone()
+        };
+        assert_ne!(digest, versioned.content_digest());
+
+        let executable = Package { kind: TargetType::Executable, ..package };
+        assert_ne!(digest, executable.content_digest());
+    }
+
+    #[test]
+    fn package_content_digest_changes_when_manifest_changes() {
+        let package = build_package();
+        let digest = package.content_digest();
+
+        let mut with_dependency = package;
+        with_dependency
+            .manifest
+            .add_dependency(Dependency {
+                name: PackageId::from("dep_pkg"),
+                kind: TargetType::Library,
+                version: crate::Version::new(1, 0, 0),
+                digest: Word::from([1_u32, 2, 3, 4]),
+            })
+            .expect("test dependency should be unique");
+        assert_ne!(digest, with_dependency.content_digest());
+    }
+
+    #[test]
+    fn package_content_digest_changes_when_account_component_metadata_changes() {
+        let package = build_package();
+        let digest = package.content_digest();
+
+        let with_metadata = Package {
+            sections: vec![Section::new(SectionId::ACCOUNT_COMPONENT_METADATA, vec![1, 2, 3, 4])],
+            ..package.clone()
+        };
+        assert_ne!(digest, with_metadata.content_digest());
+
+        let with_different_metadata = Package {
+            sections: vec![Section::new(SectionId::ACCOUNT_COMPONENT_METADATA, vec![4, 3, 2, 1])],
+            ..package
+        };
+        assert_ne!(with_metadata.content_digest(), with_different_metadata.content_digest());
+    }
+
+    #[test]
+    fn package_content_digest_ignores_description_and_opaque_custom_sections_for_now() {
+        let package = build_package();
+        let digest = package.content_digest();
+
+        let described = Package {
+            description: Some(String::from("human-facing package description")),
+            ..package.clone()
+        };
+        assert_eq!(digest, described.content_digest());
+
+        let with_section = Package {
+            sections: vec![Section::new(
+                SectionId::custom("opaque").expect("valid custom section id"),
+                vec![1, 2, 3, 4],
+            )],
+            ..package
+        };
+        assert_eq!(digest, with_section.content_digest());
     }
 
     #[test]

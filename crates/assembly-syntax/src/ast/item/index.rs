@@ -3,9 +3,22 @@
 #[repr(transparent)]
 pub struct ItemIndex(u16);
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("invalid item index: too many items")]
+pub struct ItemIndexError {
+    attempted: usize,
+}
+
 impl ItemIndex {
+    pub const MAX_ITEMS: usize = u16::MAX as usize + 1;
+
     pub fn new(id: usize) -> Self {
-        Self(id.try_into().expect("invalid item index: too many items"))
+        Self::try_new(id).expect("invalid item index: too many items")
+    }
+
+    pub fn try_new(id: usize) -> Result<Self, ItemIndexError> {
+        let raw = id.try_into().map_err(|_| ItemIndexError { attempted: id })?;
+        Ok(Self(raw))
     }
 
     #[inline(always)]
@@ -97,5 +110,86 @@ impl core::ops::Add<ItemIndex> for ModuleIndex {
 impl core::fmt::Display for ModuleIndex {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "{}", &self.as_usize())
+    }
+}
+
+#[cfg(test)]
+mod regression_tests {
+    use std::{string::String, sync::Arc};
+
+    use miden_debug_types::{DefaultSourceManager, SourceSpan, Span};
+
+    use super::ItemIndex;
+    use crate::{
+        Parse, ParseOptions, Path,
+        ast::{
+            Constant, ConstantExpr, Export, Ident, Module, ModuleKind, SymbolResolutionError,
+            Visibility,
+        },
+        parser::IntValue,
+        sema::{LimitKind, SemanticAnalysisError, SyntaxError},
+    };
+
+    fn huge_library_masm() -> String {
+        let num_consts = usize::from(u16::MAX) + 2;
+        let mut masm = String::with_capacity(num_consts * 16);
+        for i in 0..num_consts {
+            masm.push_str("const A");
+            masm.push_str(&format!("{i}"));
+            masm.push_str(" = 0\n");
+        }
+        masm
+    }
+
+    fn oversized_module_for_resolver() -> Module {
+        let mut module = Module::new(ModuleKind::Library, Path::new("::m::huge"));
+        for i in 0..=ItemIndex::MAX_ITEMS {
+            module.items.push(Export::Constant(Constant::new(
+                SourceSpan::UNKNOWN,
+                Visibility::Private,
+                Ident::new(format!("A{i}")).expect("valid identifier"),
+                ConstantExpr::Int(Span::unknown(IntValue::from(0u8))),
+            )));
+        }
+        module
+    }
+
+    #[test]
+    fn too_many_items_in_module_is_rejected_during_analysis() {
+        let source_manager = Arc::new(DefaultSourceManager::default());
+        let err = huge_library_masm()
+            .parse_with_options(
+                source_manager,
+                ParseOptions::new(ModuleKind::Library, Path::new("::m::huge")),
+            )
+            .expect_err("expected oversized module to be rejected during analysis");
+
+        let syntax_error = err.downcast_ref::<SyntaxError>().expect("expected SyntaxError report");
+        assert!(
+            syntax_error.errors.iter().any(|error| {
+                matches!(error, SemanticAnalysisError::LimitExceeded { kind: LimitKind::Items, .. })
+            }),
+            "expected item-limit error, got {:?}",
+            syntax_error.errors
+        );
+    }
+
+    #[test]
+    fn resolving_name_in_too_large_module_returns_structured_error() {
+        let source_manager = Arc::new(DefaultSourceManager::default());
+        let module = oversized_module_for_resolver();
+        let result = module.resolve(Span::unknown("A0"), source_manager);
+
+        assert!(matches!(result, Err(SymbolResolutionError::TooManyItemsInModule { .. })));
+    }
+
+    #[test]
+    fn resolver_construction_for_too_large_module_returns_structured_error() {
+        let source_manager = Arc::new(DefaultSourceManager::default());
+        let module = oversized_module_for_resolver();
+
+        let result = module.resolver(source_manager);
+
+        assert!(matches!(result, Err(SymbolResolutionError::TooManyItemsInModule { .. })));
     }
 }
