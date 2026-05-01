@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.22.3 (2026-05-01)
+
+- Change value of `Path::MAX_COMPONENT_LENGTH` to `u16::MAX - 2` [#3087](https://github.com/0xMiden/miden-vm/pull/3087)
+
 ## 0.22.2 (2026-04-028)
 
 - Improve debug var loc tracking ([#2955](https://github.com/0xMiden/miden-vm/pull/2955)).
