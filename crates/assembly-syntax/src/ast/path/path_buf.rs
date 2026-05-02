@@ -450,7 +450,6 @@ impl fmt::Display for PathBuf {
 /// Tests
 #[cfg(test)]
 mod tests {
-    #[cfg(feature = "serde")]
     use alloc::string::String;
 
     use miden_core::assert_matches;
@@ -612,7 +611,7 @@ mod tests {
     #[test]
     fn try_from_string_canonicalizes_like_str() {
         let from_str = PathBuf::try_from("foo::\"bar\"").unwrap();
-        let from_string = PathBuf::try_from(alloc::string::String::from("foo::\"bar\"")).unwrap();
+        let from_string = PathBuf::try_from(String::from("foo::\"bar\"")).unwrap();
 
         assert_eq!(from_string, from_str);
         assert_eq!(from_string.as_str(), "foo::bar");
@@ -620,7 +619,7 @@ mod tests {
 
     #[test]
     fn try_from_string_reuses_canonical_allocation() {
-        let value = alloc::string::String::from("foo::bar");
+        let value = String::from("foo::bar");
         let original_ptr = value.as_ptr();
         let original_capacity = value.capacity();
 

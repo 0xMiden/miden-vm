@@ -103,7 +103,8 @@ use crate::{
     advice::AdviceMap,
     mast::node::MastNodeExt,
     serde::{
-        ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable, SliceReader,
+        BudgetedReader, ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
+        SliceReader,
     },
 };
 
@@ -168,6 +169,12 @@ type StringIndex = usize;
 /// [`crate::mast::UntrustedMastForest::read_from_bytes_with_budgets`] and choose explicit parsing
 /// and validation budgets.
 const DEFAULT_UNTRUSTED_ALLOCATION_BUDGET_MULTIPLIER: usize = 7;
+
+/// Byte-read budget multiplier for trusted full deserialization from a byte slice.
+///
+/// The budget is intentionally finite to reject malicious length prefixes, but larger than the
+/// source length because collection deserialization uses conservative per-element size estimates.
+const TRUSTED_BYTE_READ_BUDGET_MULTIPLIER: usize = 64;
 
 // CONSTANTS
 // ================================================================================================
@@ -702,6 +709,12 @@ impl Deserializable for MastForest {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let (_flags, forest) = decode_from_reader(source, false)?;
         forest.into_materialized()
+    }
+
+    fn read_from_bytes(bytes: &[u8]) -> Result<Self, DeserializationError> {
+        let budget = bytes.len().saturating_mul(TRUSTED_BYTE_READ_BUDGET_MULTIPLIER);
+        let mut reader = BudgetedReader::new(SliceReader::new(bytes), budget);
+        Self::read_from(&mut reader)
     }
 }
 
