@@ -6,7 +6,10 @@
 #! consume an amount of data which is a multiple of the rate (2 words).
 #!
 #! Input: []
-#! Output: [PERM, PERM, PERM, ...]
+#! Output: [R0, R1, C, ...]
+#!
+#! Where R0, R1, C are three zero words representing the initial Poseidon2 hasher state
+#! (R0 on top of stack).
 #!
 #! Cycles: 12
 pub proc init_no_padding
@@ -447,14 +450,14 @@ end
 #! - A is the word to be hashed.
 #! - B is the resulting hash, computed as `Poseidon2(A)`.
 #!
-#! Cycles: 20
+#! Cycles: 19
 pub proc hash
     hash
 end
 
 #! Merges two words (256-bit digests) via Poseidon2 hash.
 #!
-#! Inputs:  [B, A]
+#! Inputs:  [A, B]
 #! Outputs: [C]
 #!
 #! Where:

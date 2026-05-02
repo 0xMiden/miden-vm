@@ -15,12 +15,14 @@ Module `miden::core::collections::mmr` contains procedures for manipulating [Mer
 
 The following procedures are available to read data from and make updates to a Merkle Mountain Range.
 
-| Procedure   | Description   |
-| ----------- | ------------- |
-| get         | Loads the leaf at the absolute position `pos` in the MMR onto the stack. Valid range for `pos` is between $0$ and $2^{32} - 1$ (both inclusive). Inputs: `[pos, mmr_ptr, ...]`. Output: `[N, ...]`. Where `N` is the leaf loaded from the MMR whose memory location starts at `mmr_ptr`. |
-| add         | Adds a new leaf to the MMR. This will update the MMR peaks in the VM's memory and the advice provider with any merged nodes. Inputs: `[N, mmr_ptr, ...]`. Outputs: `[...]`. Where `N` is the leaf added to the MMR whose memory locations starts at `mmr_ptr`. |
-| pack        | Computes a commitment to the given MMR and copies the MMR to the Advice Map using the commitment as a key. Inputs: `[mmr_ptr, ...]`. Outputs: `[HASH, ...]`. |
-| unpack      | Writes the MMR who's peaks hash to `HASH` to the memory location pointed to by `mmr_ptr`. Inputs: `[HASH, mmr_ptr, ...]`. Outputs: `[...]`. Where: `HASH` is the MMR peak hash, the hash is expected to be padded to an even length and to have a minimum size of 16 elements. The advice map must contain a key with `HASH`, and its value is `[num_leaves, 0, 0, 0] \|\| hash_data`, and hash_data is the data used to computed `HASH`. `mmr_ptr` is the memory location where the MMR data will be written, starting with the MMR forest (the total count of its leaves) followed by its peaks. The memory location must be word-aligned. |
+| Procedure                    | Description   |
+| ---------------------------- | ------------- |
+| get                          | Loads the element at the absolute position `pos` in the MMR onto the stack. Valid range for `pos` is between $0$ and $2^{32} - 1$ (both inclusive). Inputs: `[pos, mmr_ptr, ...]`. Output: `[EL, ...]`. Where `EL` is the element loaded from the MMR whose memory location starts at `mmr_ptr`. |
+| add                          | Adds a new element to the MMR. This will update the MMR peaks in the VM's memory and the advice provider with any merged nodes. Inputs: `[EL, mmr_ptr, ...]`. Outputs: `[...]`. Where `EL` is the element added to the MMR whose memory location starts at `mmr_ptr`.<br /><br />Cycles: `145 + 39 * peak_merges` |
+| pack                         | Computes a commitment to the given MMR and copies the MMR to the Advice Map using the commitment as a key. Inputs: `[mmr_ptr, ...]`. Outputs: `[HASH, ...]`.<br /><br />Cycles: `128 + 3 * num_peaks` |
+| unpack                       | Writes the MMR whose peaks hash to `HASH` to the memory location pointed to by `mmr_ptr`. Inputs: `[HASH, mmr_ptr, ...]`. Outputs: `[...]`. Where: `HASH` is the MMR peak hash, the hash is expected to be padded to an even length and to have a minimum size of 16 elements. The advice map must contain a key with `HASH`, and its value is `[num_leaves, 0, 0, 0] \|\| hash_data`, and hash_data is the data used to compute `HASH`. `mmr_ptr` is the memory location where the MMR data will be written, starting with the MMR forest (the total count of its leaves) followed by its peaks. The memory location must be word-aligned.<br /><br />Cycles: `162 + 9 * extra_peak_pair` |
+| num_leaves_to_num_peaks      | Given the number of leaves in an MMR, computes the number of peaks (i.e. the number of set bits in `num_leaves`).<br /><br />Inputs: `[num_leaves, ...]`<br />Outputs: `[num_peaks, ...]`<br /><br />Cycles: 67 |
+| num_peaks_to_message_size    | Given the number of peaks, computes the size of the hashing message used when computing the MMR commitment (rounded up to the next even length, with a minimum of 16).<br /><br />Inputs: `[num_peaks, ...]`<br />Outputs: `[message_size, ...]`<br /><br />Cycles: 19 |
 
 `mmr_ptr` is a pointer to the `mmr` data structure, which is defined as:
 1. `mmr_ptr[0]` contains the number of leaves in the MMR
