@@ -368,6 +368,8 @@ def summary_markdown(result: dict[str, Any]) -> str:
     top_slowdowns = result["top_slowdowns"]
 
     lines = [
+        "# BENCHMARK REPORT: blake3-1to1-nonregression",
+        "",
         "## Blake3 1-to-1 Non-Regression",
         "",
         f"Status: **{status_word}**",
