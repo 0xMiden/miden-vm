@@ -10,7 +10,11 @@ use std::{
 };
 
 use miden_assembly_syntax::{
-    MAX_REPEAT_COUNT, ast::Path, diagnostics::WrapErr, library::LibraryExport,
+    MAX_REPEAT_COUNT,
+    ast::{Block, Instruction, Op, Path, Procedure, Visibility},
+    debuginfo::{DefaultSourceManager, SourceManager, Span},
+    diagnostics::WrapErr,
+    library::LibraryExport,
 };
 use miden_core::{
     Felt, Word, assert_matches,
@@ -4117,7 +4121,7 @@ fn vendoring() -> TestResult {
         let mod1 = mod_parser
             .parse(PathBuf::new("test::mod1").unwrap(), source, context.source_manager())
             .unwrap();
-        Assembler::default().assemble_library([mod1]).unwrap()
+        Assembler::new(context.source_manager()).assemble_library([mod1]).unwrap()
     };
 
     let lib = {
@@ -4126,7 +4130,7 @@ fn vendoring() -> TestResult {
             .parse(PathBuf::new("test::mod2").unwrap(), source, context.source_manager())
             .unwrap();
 
-        let mut assembler = Assembler::default();
+        let mut assembler = Assembler::new(context.source_manager());
         assembler.link_static_library(vendor_lib)?;
         assembler.assemble_library([mod2]).unwrap()
     };
@@ -4142,7 +4146,7 @@ fn vendoring() -> TestResult {
     let expected_lib = {
         let source = source_file!(&context, "pub proc foo push.1 end");
         let mod2 = mod_parser.parse("test::expected", source, context.source_manager()).unwrap();
-        Assembler::default().assemble_library([mod2]).unwrap()
+        Assembler::new(context.source_manager()).assemble_library([mod2]).unwrap()
     };
 
     // 3. Verify that the expected library (which has push.1) has AssemblyOps
@@ -5174,7 +5178,7 @@ fn test_assembler_debug_info_present() {
     let module = parse_module!(&context, "test::foo", source);
 
     // Test: With debug mode always enabled (issue #1821), debug info should always be present
-    let assembler = Assembler::default();
+    let assembler = Assembler::new(context.source_manager());
     let library = assembler.assemble_library([module]).unwrap();
     let mast_forest = library.mast_forest();
 
@@ -5864,5 +5868,49 @@ fn test_linking_recursive_expansion_via_renamed_aliases() -> TestResult {
     let assembler = Assembler::new(context.source_manager());
     let _ = assembler.assemble_library([a_lib, b_lib])?;
 
+    Ok(())
+}
+
+#[test]
+fn mismatched_source_manager_caught_before_lowering() {
+    // Source manager A (assembler's): pre-load a short file so it occupies SourceId(0).
+    let sm_a: Arc<dyn SourceManager> = Arc::new(DefaultSourceManager::default());
+    let _dummy = Module::parser(ModuleKind::Library)
+        .parse_str("lib::dummy", "pub proc dummy\n  nop\nend", sm_a.clone())
+        .unwrap();
+
+    let assembler = Assembler::new(sm_a);
+
+    // Source manager B (external): parse a module whose code will trigger a compile error
+    // during lowering. `loc_loadw_be.2` fails because 2 is not word-aligned (must be a
+    // multiple of 4). The error formatting tries to resolve the instruction's source span
+    // via the assembler's source manager, which returns the wrong file.
+    let sm_b: Arc<dyn SourceManager> = Arc::new(DefaultSourceManager::default());
+    let module = Module::parser(ModuleKind::Library)
+        .parse_str("lib::external", "@locals(4) pub proc bar\n  loc_loadw_be.2\nend", sm_b)
+        .unwrap();
+
+    let result = assembler.assemble_library([module]);
+    let err = result.expect_err("should fail with source manager mismatch");
+    let msg = err.to_string();
+    assert!(msg.contains("source manager mismatch"), "unexpected error: {msg}");
+}
+
+#[test]
+fn programmatic_module_without_source_file_assembles_ok() -> TestResult {
+    let context = TestContext::default();
+
+    let mut module = Module::new(ModuleKind::Library, "lib::programmatic", None);
+    let nop_body = Block::new(Default::default(), vec![Op::Inst(Span::unknown(Instruction::Nop))]);
+    let procedure = Procedure::new(
+        Default::default(),
+        Visibility::Public,
+        "nop_proc".parse().unwrap(),
+        0,
+        nop_body,
+    );
+    module.define_procedure(procedure, context.source_manager()).unwrap();
+
+    context.assemble_library([alloc::boxed::Box::new(module)])?;
     Ok(())
 }

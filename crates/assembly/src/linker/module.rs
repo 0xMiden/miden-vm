@@ -7,7 +7,7 @@ use miden_assembly_syntax::{
         self, AliasTarget, ItemIndex, LocalSymbol, LocalSymbolResolver, ModuleIndex, ModuleKind,
         SymbolResolution, SymbolResolutionError, SymbolTable,
     },
-    debuginfo::{SourceManager, Span, Spanned},
+    debuginfo::{SourceFile, SourceManager, Span, Spanned},
 };
 
 use super::{AdviceMap, LinkStatus, Symbol, SymbolItem, SymbolResolver};
@@ -50,6 +50,12 @@ pub struct LinkModule {
     ///
     /// This is only relevant for modules parsed from MASM sources.
     advice_map: Option<AdviceMap>,
+    /// The source file from which this module was parsed (if available).
+    ///
+    /// Used to verify source manager identity via [`SourceManager::is_manager_of`] during
+    /// assembly, preventing silent attachment of wrong debug info when a module was parsed
+    /// with a different source manager than the assembler's.
+    source_file: Option<Arc<SourceFile>>,
 }
 
 impl LinkModule {
@@ -69,6 +75,7 @@ impl LinkModule {
             path,
             symbols: Vec::default(),
             advice_map: None,
+            source_file: None,
         }
     }
 
@@ -88,6 +95,13 @@ impl LinkModule {
     #[inline]
     pub fn with_advice_map(mut self, advice_map: AdviceMap) -> Self {
         self.advice_map = Some(advice_map);
+        self
+    }
+
+    /// Specify the source file from which this module was parsed.
+    #[inline]
+    pub fn with_source_file(mut self, source_file: Option<Arc<SourceFile>>) -> Self {
+        self.source_file = source_file;
         self
     }
 
@@ -155,6 +169,12 @@ impl LinkModule {
     #[inline]
     pub fn advice_map(&self) -> Option<&AdviceMap> {
         self.advice_map.as_ref()
+    }
+
+    /// Get the source file from which this module was parsed, if available.
+    #[inline]
+    pub fn source_file(&self) -> Option<&Arc<SourceFile>> {
+        self.source_file.as_ref()
     }
 
     /// Get an iterator over the symbols in this module.

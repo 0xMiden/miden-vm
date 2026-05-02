@@ -18,8 +18,8 @@ use crate::{
         TypeExpr,
         types::{StructType, Type},
     },
-    debuginfo::SourceManager,
-    diagnostics::Report,
+    debuginfo::{SourceFile, SourceManager},
+    diagnostics::{Report, report},
 };
 
 // DEBUG INFO SECTIONS
@@ -50,39 +50,62 @@ impl DebugInfoSections {
         &mut self,
         procedure: &Procedure,
         source_manager: &dyn SourceManager,
+        module_source_file: Option<&SourceFile>,
     ) -> Result<(), Report> {
-        if let Ok(file_line_col) = source_manager.file_line_col(*procedure.span()) {
-            let path_id =
-                self.debug_sources_section.add_string(Arc::from(file_line_col.uri.path()));
-            let file_id = self
-                .debug_sources_section
-                .add_file(miden_mast_package::debug_info::DebugFileInfo::new(path_id));
-            let name = Arc::<str>::from(procedure.path().as_str());
-            let name_id = self.debug_functions_section.add_string(name.clone());
-            let type_index = if let Some(signature) = procedure.signature() {
-                Some(register_debug_type(
-                    &mut self.debug_types_section,
-                    Some(name),
-                    None,
-                    &Type::Function(signature),
-                )?)
-            } else {
-                None
-            };
-            let func_info = miden_mast_package::debug_info::DebugFunctionInfo::new(
-                name_id,
-                file_id,
-                file_line_col.line,
-                file_line_col.column,
-            )
-            .with_mast_root(procedure.mast_root());
-            let func_info = if let Some(type_index) = type_index {
-                func_info.with_type(type_index)
-            } else {
-                func_info
-            };
-            self.debug_functions_section.add_function(func_info);
+        let span = *procedure.span();
+
+        // If no source file is available, skip debug info registration
+        // (the module is synthetic or was deserialized without source info).
+        let Some(source_file) = module_source_file else {
+            return Ok(());
+        };
+
+        // Verify the source file belongs to this source manager.
+        if !source_manager.is_manager_of(source_file) {
+            return Err(report!(
+                "source manager mismatch for procedure '{}': the module's source file \
+                 is not owned by the assembler's source manager",
+                procedure.path(),
+            ));
         }
+
+        let file_line_col =
+            source_manager.file_line_col(span).map_err(|err| {
+                report!(
+                    "failed to resolve source location for procedure '{}': {err}",
+                    procedure.path(),
+                )
+            })?;
+
+        let path_id = self.debug_sources_section.add_string(Arc::from(file_line_col.uri.path()));
+        let file_id = self
+            .debug_sources_section
+            .add_file(miden_mast_package::debug_info::DebugFileInfo::new(path_id));
+        let name = Arc::<str>::from(procedure.path().as_str());
+        let name_id = self.debug_functions_section.add_string(name.clone());
+        let type_index = if let Some(signature) = procedure.signature() {
+            Some(register_debug_type(
+                &mut self.debug_types_section,
+                Some(name),
+                None,
+                &Type::Function(signature),
+            )?)
+        } else {
+            None
+        };
+        let func_info = miden_mast_package::debug_info::DebugFunctionInfo::new(
+            name_id,
+            file_id,
+            file_line_col.line,
+            file_line_col.column,
+        )
+        .with_mast_root(procedure.mast_root());
+        let func_info = if let Some(type_index) = type_index {
+            func_info.with_type(type_index)
+        } else {
+            func_info
+        };
+        self.debug_functions_section.add_function(func_info);
 
         Ok(())
     }

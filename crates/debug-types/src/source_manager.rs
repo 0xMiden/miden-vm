@@ -368,7 +368,7 @@ impl DefaultSourceManagerImpl {
         self.files
             .get(span.source_id())
             .ok_or(SourceManagerError::InvalidSourceId)
-            .map(|file| file.location(span))
+            .and_then(|file| file.location(span).ok_or(SourceManagerError::InvalidBounds))
     }
 
     fn location_to_span(&self, loc: Location) -> Option<SourceSpan> {
