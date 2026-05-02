@@ -868,7 +868,7 @@ fn decoder_dyncall_at_min_stack_depth_records_post_drop_ctx_info() {
     // The caller passes the 4-element procedure hash as the initial stack contents
     // (top-of-stack first).  The preamble stores that word at HASH_ADDR so that DYNCALL
     // can load it and dispatch to the correct procedure.
-    const HASH_ADDR: Felt = Felt::new(40);
+    const HASH_ADDR: Felt = Felt::new_unchecked(40);
 
     // --- build the forest in the same order as dyncall_program() ---
     let mut forest = MastForest::new();
@@ -931,7 +931,7 @@ fn decoder_dyncall_at_min_stack_depth_records_post_drop_ctx_info() {
     // means no overflow entry was pushed, so parent_next_overflow_addr must be ZERO.
     assert_eq!(
         main.decoder_hasher_state_element(4, row),
-        Felt::new(MIN_STACK_DEPTH as u64),
+        Felt::new_unchecked(MIN_STACK_DEPTH as u64),
         "parent_stack_depth should equal MIN_STACK_DEPTH"
     );
     assert_eq!(
@@ -989,7 +989,7 @@ fn decoder_dyncall_with_multiple_overflow_entries_records_correct_overflow_addr(
         operation::opcodes,
     };
 
-    const HASH_ADDR: Felt = Felt::new(40);
+    const HASH_ADDR: Felt = Felt::new_unchecked(40);
 
     let mut forest = MastForest::new();
 
@@ -1063,7 +1063,7 @@ fn decoder_dyncall_with_multiple_overflow_entries_records_correct_overflow_addr(
     // At DYNCALL time depth=18 (>MIN_STACK_DEPTH), so post-drop depth = 17.
     assert_eq!(
         recorded_depth,
-        Felt::new(17),
+        Felt::new_unchecked(17),
         "parent_stack_depth should be 17 (= pre-DYNCALL depth 18 minus 1)"
     );
 
