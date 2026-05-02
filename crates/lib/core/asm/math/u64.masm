@@ -119,7 +119,7 @@ end
 #! Stack transition looks as follows:
 #! [b_lo, b_hi, a_lo, a_hi, ...] -> [c_lo, c_mid_lo, c_mid_hi, c_hi, ...], where
 #! c = a * b is represented as a 128-bit value split into 4 32-bit limbs.
-#! This takes 34 cycles.
+#! This takes 23 cycles.
 pub proc widening_mul(b: u64, a: u64) -> u128
     # c = a*b = a_lo*b_lo + (a_lo*b_hi + a_hi*b_lo)*2^32 + a_hi*b_hi*2^64
     # Partial products accumulate high-first on the stack, then reversew flips to LE.
