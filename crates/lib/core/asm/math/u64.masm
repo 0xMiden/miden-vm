@@ -119,37 +119,36 @@ end
 #! Stack transition looks as follows:
 #! [b_lo, b_hi, a_lo, a_hi, ...] -> [c_lo, c_mid_lo, c_mid_hi, c_hi, ...], where
 #! c = a * b is represented as a 128-bit value split into 4 32-bit limbs.
-#! This takes 26 cycles.
+#! This takes 23 cycles.
 pub proc widening_mul(b: u64, a: u64) -> u128
-    # => [b_lo, b_hi, a_lo, a_hi, ...]
-    reversew
-    # => [a_hi, a_lo, b_hi, b_lo, ...] (effectively [x_hi, x_lo, y_hi, y_lo] for x*y)
+    # c = a*b = a_lo*b_lo + (a_lo*b_hi + a_hi*b_lo)*2^32 + a_hi*b_hi*2^64
+    # Partial products accumulate high-first on the stack, then reversew flips to LE.
 
-    # Core 128-bit multiplication algorithm (operates on BE limb order)
+    # => [b_lo, b_hi, a_lo, a_hi, ...]
+    dup.0
     dup.3
-    dup.2
-    # => [x_lo, y_lo, x_hi, x_lo, y_hi, y_lo, ...]
+    # => [a_lo, b_lo, b_lo, b_hi, a_lo, a_hi, ...]
     u32widening_mul
-    # => [p0_lo, p0_hi, x_hi, x_lo, y_hi, y_lo, ...]
+    # => [p0_lo, p0_hi, b_lo, b_hi, a_lo, a_hi, ...] where p0 = a_lo * b_lo
     swap
-    # => [p0_hi, p0_lo, x_hi, x_lo, y_hi, y_lo, ...]
-    dup.4
+    # => [p0_hi, p0_lo, b_lo, b_hi, a_lo, a_hi, ...]
+    dup.3
+    movup.5
+    # => [a_lo, b_hi, p0_hi, p0_lo, b_lo, b_hi, a_hi, ...]
+    u32widening_madd
+    # => [t1_lo, t1_hi, p0_lo, b_lo, b_hi, a_hi, ...] where t1 = a_lo * b_hi + p0_hi
+    movup.3
+    dup.5
+    # => [a_hi, b_lo, t1_lo, t1_hi, p0_lo, b_hi, a_hi, ...]
+    u32widening_madd
+    # => [t2_lo, t2_hi, t1_hi, p0_lo, b_hi, a_hi, ...] where t2 = a_hi * b_lo + t1_lo
+    swap
+    # => [t2_hi, t2_lo, t1_hi, p0_lo, b_hi, a_hi, ...]
     movup.4
-    # => [x_lo, y_hi, p0_hi, p0_lo, x_hi, y_hi, y_lo, ...]
-    u32widening_madd
-    # => [t1_lo, t1_hi, p0_lo, x_hi, y_hi, y_lo, ...] where t1 = y_hi * x_lo + p0_hi
     movup.5
-    dup.4
-    # => [y_hi, y_lo, t1_lo, t1_hi, p0_lo, x_hi, y_hi, ...]
+    # => [a_hi, b_hi, t2_hi, t2_lo, t1_hi, p0_lo, ...]
     u32widening_madd
-    # => [t2_lo, t2_hi, t1_hi, p0_lo, x_hi, y_hi, ...] where t2 = y_lo * y_hi + t1_lo
-    swap
-    # => [t2_hi, t2_lo, t1_hi, p0_lo, x_hi, y_hi, ...]
-    movup.5
-    movup.5
-    # => [y_hi, x_hi, t2_hi, t2_lo, t1_hi, p0_lo, ...]
-    u32widening_madd
-    # => [t3_lo, t3_hi, t2_lo, t1_hi, p0_lo, ...] where t3 = x_hi * y_hi + t2_hi
+    # => [t3_lo, t3_hi, t2_lo, t1_hi, p0_lo, ...] where t3 = a_hi * b_hi + t2_hi
     swap
     # => [t3_hi, t3_lo, t2_lo, t1_hi, p0_lo, ...]
     movup.3
@@ -157,14 +156,10 @@ pub proc widening_mul(b: u64, a: u64) -> u128
     # => [t3_lo, t1_hi, t3_hi, t2_lo, p0_lo, ...]
     u32widening_add
     # => [sum, carry, t3_hi, t2_lo, p0_lo, ...] where sum = (t3_lo + t1_hi) mod 2^32
-    swap
-    # => [carry, sum, t3_hi, t2_lo, p0_lo, ...]
-    movup.2
-    # => [t3_hi, carry, sum, t2_lo, p0_lo, ...]
+    movdn.2
+    # => [carry, t3_hi, sum, t2_lo, p0_lo, ...]
     add
-    # => [c_hi, c_mid_hi, c_mid_lo, c_lo, ...] (BE order)
-
-    # Convert BE output to LE
+    # => [c_hi, c_mid_hi, c_mid_lo, c_lo, ...]
     reversew
     # => [c_lo, c_mid_lo, c_mid_hi, c_hi, ...]
 end
@@ -571,7 +566,7 @@ end
 #! The shift value n should be in the range [0, 64), otherwise it will result in an error.
 #! Stack transition looks as follows:
 #! [n, a_lo, a_hi, ...] -> [c_lo, c_hi, ...], where c = a >> n.
-#! This takes 49 cycles.
+#! This takes 60 or 61 cycles, depending on n.
 pub proc shr(n: u32, a: u64) -> u64
     # ==========================================================================
     # RIGHT SHIFT: Computes a >> n where a is 64-bit and n is shift amount
@@ -579,31 +574,27 @@ pub proc shr(n: u32, a: u64) -> u64
     # Output: [c_lo, c_hi, ...] where c = a >> n
     # ==========================================================================
 
-    # Convert LE to internal BE format: [n, a_lo, a_hi] -> [n, a_hi, a_lo]
-    movup.2     # [a_hi, n, a_lo]
-    swap        # [n, a_hi, a_lo]
-
     # --- STEP 1: Compute 2^n and split into hi/lo ---
     pow2
-    # [2^b, a_hi, a_lo, ...]
+    # [2^b, a_lo, a_hi, ...]
 
     u32split swap
-    # [pow_hi, pow_lo, a_hi, a_lo, ...]
+    # [pow_hi, pow_lo, a_lo, a_hi, ...]
     # For b=0: pow_hi=0, pow_lo=1
     # For b=1: pow_hi=0, pow_lo=2
     # For b=32: pow_hi=1, pow_lo=0
 
     # --- STEP 2: Compute divisor = pow_hi + pow_lo ---
     dup.1
-    # [pow_lo, pow_hi, pow_lo, a_hi, a_lo, ...]
+    # [pow_lo, pow_hi, pow_lo, a_lo, a_hi, ...]
 
     add
-    # [pow_hi+pow_lo, pow_lo, a_hi, a_lo, ...]
+    # [pow_hi+pow_lo, pow_lo, a_lo, a_hi, ...]
     # For b=0: divisor=1, pow_lo=1
     # For b=1: divisor=2, pow_lo=2
 
     # --- STEP 3: First division - a_hi / divisor ---
-    movup.2
+    movup.3
     # [a_hi, pow_hi+pow_lo, pow_lo, a_lo, ...]
     swap
     # [pow_hi+pow_lo, a_hi, pow_lo, a_lo, ...]
@@ -719,7 +710,7 @@ end
 #! The rotation amount n should be in the range [0, 64), otherwise it will result in an error.
 #! Stack transition looks as follows:
 #! [n, a_lo, a_hi, ...] -> [c_lo, c_hi, ...], where c = a <<< n (rotate left).
-#! This takes 35 cycles.
+#! This takes 46 cycles.
 pub proc rotl(n: u32, a: u64) -> u64
     # ==========================================================================
     # LEFT ROTATION: Computes a <<< n (rotate left by n bits)
@@ -727,46 +718,42 @@ pub proc rotl(n: u32, a: u64) -> u64
     # Output: [c_lo, c_hi, ...] where c = a <<< n
     # ==========================================================================
 
-    # Convert LE to internal BE format: [n, a_lo, a_hi] -> [n, a_hi, a_lo]
-    movup.2     # [a_hi, n, a_lo]
-    swap        # [n, a_hi, a_lo]
-
     # --- STEP 1: Compute swap_flag = (31 - n) borrow, i.e., n > 31 ---
     push.31
-    # [31, b, a_hi, a_lo, ...]
+    # [31, b, a_lo, a_hi, ...]
 
     dup.1
-    # [b, 31, b, a_hi, a_lo, ...]
+    # [b, 31, b, a_lo, a_hi, ...]
     u32overflowing_sub
     # Computes: 31 - b
-    # [borrow, diff, b, a_hi, a_lo, ...]
+    # [borrow, diff, b, a_lo, a_hi, ...]
     # borrow = 1 if b > 31, else 0
 
     swap
-    # [diff, borrow, b, a_hi, a_lo, ...]
+    # [diff, borrow, b, a_lo, a_hi, ...]
 
     drop
-    # [borrow, b, a_hi, a_lo, ...]
+    # [borrow, b, a_lo, a_hi, ...]
     # borrow indicates if b > 31 (swap_flag)
 
     movdn.3
-    # [b, a_hi, a_lo, borrow, ...]
+    # [b, a_lo, a_hi, borrow, ...]
 
     # --- STEP 2: Compute shift_amt = b & 31 and 2^shift_amt ---
     push.31
-    # [31, b, a_hi, a_lo, borrow, ...]
+    # [31, b, a_lo, a_hi, borrow, ...]
 
     u32and
-    # [b&31, a_hi, a_lo, borrow, ...]
+    # [b&31, a_lo, a_hi, borrow, ...]
     # shift_amt = b mod 32
 
     pow2
-    # [2^shift_amt, a_hi, a_lo, borrow, ...]
+    # [2^shift_amt, a_lo, a_hi, borrow, ...]
 
     dup
-    # [2^shift_amt, 2^shift_amt, a_hi, a_lo, borrow, ...]
+    # [2^shift_amt, 2^shift_amt, a_lo, a_hi, borrow, ...]
 
-    movup.3
+    movup.2
     # [a_lo, 2^shift_amt, 2^shift_amt, a_hi, borrow, ...]
 
     # --- STEP 3: Shift the low limb: a_lo * 2^shift_amt ---
@@ -793,34 +780,21 @@ pub proc rotl(n: u32, a: u64) -> u64
     # lo2 = (a_hi * 2^shift_amt + hi1) mod 2^32
     # hi2 = overflow (bits that wrap around)
 
-    swap
-    # [hi2, lo2, lo1, borrow, ...]
-
     # --- STEP 5: Carry the overflow to the low bits ---
-    # c_lo = lo1 + hi2 (the overflow wraps to low bits in rotation)
-    movup.2
-    # [lo1, hi2, lo2, borrow, ...]
+    # c_lo_computed = lo1 + hi2 (the rotation overflow wraps to low bits)
+    movdn.2
+    # [hi2, lo1, lo2, borrow, ...]
 
     add
-    # [c_lo, lo2, borrow, ...]
-    # c_lo = lo1 + hi2
-
-    swap
-    # [lo2, c_lo, borrow, ...]
-    # lo2 becomes c_hi
+    # [c_lo_computed, lo2, borrow, ...]
 
     # --- STEP 6: Conditionally swap based on b > 31 ---
     movup.2
-    # [borrow, lo2, c_lo, ...]
-    # borrow = 1 if b > 31
-
+    # [borrow, c_lo_computed, lo2, ...]
     cswap
-    # If borrow=1 (b>31): swap -> [c_lo, lo2, ...]
-    # If borrow=0 (b<=31): no swap -> [lo2, c_lo, ...]
-    # Result in BE format: [c_hi, c_lo, ...]
-
-    # Convert BE output to LE: [c_hi, c_lo] -> [c_lo, c_hi]
-    swap
+    # borrow=1 (b>31):  [lo2, c_lo_computed, ...]
+    # borrow=0 (b<=31): [c_lo_computed, lo2, ...]
+    # In both cases the top is c_lo and the second is c_hi.
 end
 
 #! Performs right rotation of one unsigned 64-bit integer.
@@ -828,7 +802,7 @@ end
 #! The rotation amount n should be in the range [0, 64), otherwise it will result in an error.
 #! Stack transition looks as follows:
 #! [n, a_lo, a_hi, ...] -> [c_lo, c_hi, ...], where c = a >>> n (rotate right).
-#! This takes 48 cycles.
+#! This takes 60 cycles.
 pub proc rotr(n: u32, a: u64) -> u64
     # ==========================================================================
     # RIGHT ROTATION: Computes a >>> n (rotate right by n bits)
@@ -840,69 +814,65 @@ pub proc rotr(n: u32, a: u64) -> u64
     #           and conditionally swap limbs when the rotation crosses the 32-bit boundary
     # ==========================================================================
 
-    # Convert LE to internal BE format: [n, a_lo, a_hi] -> [n, a_hi, a_lo]
-    movup.2     # [a_hi, n, a_lo]
-    swap        # [n, a_hi, a_lo]
-
     # --- STEP 1: Compute is_upper_half = (n > 31) ---
     push.31
-    # [31, b, a_hi, a_lo, ...]
+    # [31, b, a_lo, a_hi, ...]
 
     dup.1
-    # [b, 31, b, a_hi, a_lo, ...]
+    # [b, 31, b, a_lo, a_hi, ...]
 
     u32overflowing_sub
-    # [borrow, diff, b, a_hi, a_lo, ...]
+    # [borrow, diff, b, a_lo, a_hi, ...]
     # borrow = 1 if b > 31, else 0
 
     swap
-    # [diff, borrow, b, a_hi, a_lo, ...]
+    # [diff, borrow, b, a_lo, a_hi, ...]
 
     drop
-    # [borrow, b, a_hi, a_lo, ...]
+    # [borrow, b, a_lo, a_hi, ...]
     # borrow indicates whether n is in the upper half [32, 63]
 
     movdn.3
-    # [b, a_hi, a_lo, borrow, ...]
+    # [b, a_lo, a_hi, borrow, ...]
 
     # --- STEP 2: Compute complement shift amount = (32 - (b & 31)) & 31 ---
     push.31
-    # [31, b, a_hi, a_lo, borrow, ...]
+    # [31, b, a_lo, a_hi, borrow, ...]
 
     u32and
-    # [b&31, a_hi, a_lo, borrow, ...]
+    # [b&31, a_lo, a_hi, borrow, ...]
     # shift_amt = b mod 32
 
     dup
-    # [shift_amt, shift_amt, a_hi, a_lo, borrow, ...]
+    # [shift_amt, shift_amt, a_lo, a_hi, borrow, ...]
     neq.0
     not
-    # [shift_amt == 0, shift_amt, a_hi, a_lo, borrow, ...]
+    # [shift_amt == 0, shift_amt, a_lo, a_hi, borrow, ...]
 
     movdn.4
-    # [shift_amt, a_hi, a_lo, borrow, shift_amt == 0, ...]
+    # [shift_amt, a_lo, a_hi, borrow, shift_amt == 0, ...]
 
     push.32
-    # [32, shift_amt, a_hi, a_lo, borrow, shift_amt == 0, ...]
+    # [32, shift_amt, a_lo, a_hi, borrow, shift_amt == 0, ...]
 
     swap
-    # [shift_amt, 32, a_hi, a_lo, borrow, shift_amt == 0, ...]
+    # [shift_amt, 32, a_lo, a_hi, borrow, shift_amt == 0, ...]
     u32wrapping_sub
-    # [32-shift_amt, a_hi, a_lo, borrow, shift_amt == 0, ...]
+    # [32-shift_amt, a_lo, a_hi, borrow, shift_amt == 0, ...]
 
     push.31
-    # [31, 32-shift_amt, a_hi, a_lo, borrow, shift_amt == 0, ...]
+    # [31, 32-shift_amt, a_lo, a_hi, borrow, shift_amt == 0, ...]
     u32and
-    # [(32-shift_amt)&31, a_hi, a_lo, borrow, shift_amt == 0, ...]
+    # [(32-shift_amt)&31, a_lo, a_hi, borrow, shift_amt == 0, ...]
     # complement_shift = (32 - (b mod 32)) mod 32
 
     pow2
-    # [2^complement_shift, a_hi, a_lo, borrow, shift_amt == 0, ...]
+    # [2^complement_shift, a_lo, a_hi, borrow, shift_amt == 0, ...]
 
     dup
-    # [2^complement_shift, 2^complement_shift, a_hi, a_lo, borrow, shift_amt == 0, ...]
+    # [2^complement_shift, 2^complement_shift, a_lo, a_hi, borrow, shift_amt == 0, ...]
 
-    movup.3
+    movup.2
     # [a_lo, 2^complement_shift, 2^complement_shift, a_hi, borrow, shift_amt == 0, ...]
 
     # --- STEP 3: Left shift low limb by complement amount ---
@@ -926,39 +896,31 @@ pub proc rotr(n: u32, a: u64) -> u64
     # lo2 = (a_hi * 2^complement_shift + hi1) mod 2^32
     # hi2 = overflow bits (wrap around to low)
 
-    swap
-    # [hi2, lo2, lo1, borrow, shift_amt == 0, ...]
-
     # --- STEP 5: Carry the overflow to the low bits ---
-    movup.2
-    # [lo1, hi2, lo2, borrow, shift_amt == 0, ...]
+    # c_lo_computed = lo1 + hi2 (overflow wraps to low bits)
+    # The add cannot overflow: hi2 < 2^complement_shift and
+    # lo1 = (a_lo * 2^complement_shift) mod 2^32 is a multiple of 2^complement_shift,
+    # so lo1 + hi2 < 2^32.
+    movdn.2
+    # [hi2, lo1, lo2, borrow, shift_amt == 0, ...]
 
     add
-    # [lo1 + hi2, lo2, borrow, shift_amt == 0, ...]
-    # c_lo = lo1 + hi2 (overflow wraps to low bits)
-    # This add is safe: hi2 is the high limb of a_hi * 2^complement_shift + hi1, so
-    # hi2 < 2^complement_shift, while lo1 = (a_lo * 2^complement_shift) mod 2^32 is a multiple
-    # of 2^complement_shift. Thus lo1 <= 2^32 - 2^complement_shift, and lo1 + hi2 < 2^32.
-
-    swap
-    # [lo2, c_lo, borrow, shift_amt == 0, ...]
-    # lo2 = c_hi
+    # [c_lo_computed, lo2, borrow, shift_amt == 0, ...]
 
     # --- STEP 6: Conditionally swap based on (n > 31) == (n mod 32 == 0) ---
     movup.2
-    # [borrow, lo2, c_lo, shift_amt == 0, ...]
+    # [borrow, c_lo_computed, lo2, shift_amt == 0, ...]
 
     movup.3
-    # [shift_amt == 0, borrow, lo2, c_lo, ...]
+    # [shift_amt == 0, borrow, c_lo_computed, lo2, ...]
     eq
-    # [swap_flag, lo2, c_lo, ...]
-    # swap_flag = 1 for n in [1, 32] and 0 for n in {0} ∪ [33, 63]
+    # [swap_flag, c_lo_computed, lo2, ...]
+    # swap_flag = 1 for n in [1, 32] and 0 for n in {0} U [33, 63]
 
     cswap
-    # Result in BE format: [c_hi, c_lo, ...]
-
-    # Convert BE output to LE: [c_hi, c_lo] -> [c_lo, c_hi]
-    swap
+    # swap_flag=1: [lo2, c_lo_computed, ...]
+    # swap_flag=0: [c_lo_computed, lo2, ...]
+    # In both cases the top is c_lo and the second is c_hi.
 end
 
 #! Counts the number of leading zeros of one unsigned 64-bit integer.
