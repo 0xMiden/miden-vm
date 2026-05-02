@@ -39,8 +39,8 @@ const LEAF_DOMAIN = 0x13af
 #! Cycles
 #!   Leaf empty: 66 cycles
 #!   Leaf single: 115 cycles
-#!   Leaf multiple, non-empty value: 189 + 3 * pair_count
-#!   Leaf multiple, empty value: 186 + 3 * pair_count
+#!   Leaf multiple, non-empty value: 189 + 6 * pair_count
+#!   Leaf multiple, empty value: 186 + 6 * pair_count
 pub proc get
     # Prepare for `mtree_get`
     # (6 cycles)
@@ -112,8 +112,8 @@ pub proc get
         else
             # => [leaf_size, NV, K, R]
 
-            # (125 + 3 * leaf_size / 8 cycles if V is not empty)
-            # (122 + 3 * leaf_size / 8 cycles if V is empty)
+            # (125 + 6 * leaf_size / 8 cycles if V is not empty)
+            # (122 + 6 * leaf_size / 8 cycles if V is empty)
             exec.get_multi_leaf_value
             # => [V, R]
         end
@@ -262,8 +262,8 @@ end
 #!   Operand stack: [V, R]
 #!
 #! Cycles:
-#!  Non-empty: 125 + 3 * pair_count
-#!  Empty: 122 + 3 * pair_count
+#!  Non-empty: 125 + 6 * pair_count
+#!  Empty: 122 + 6 * pair_count
 @locals(8192)
 proc get_multi_leaf_value
     # First, we'll pipe all the pairs in the leaf from the advice stack.
@@ -284,7 +284,7 @@ proc get_multi_leaf_value
     # => [num_words, ptr, COM, K, R]
 
     # Push the leaf domain separator.
-    # Cycles: 58 + 3 * num_words / 2
+    # Cycles: 58 + 3 * num_words
     push.LEAF_DOMAIN exec.mem::pipe_double_words_preimage_to_memory_with_domain
     # => [ptr_end, K, R]
 

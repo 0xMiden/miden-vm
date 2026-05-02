@@ -339,7 +339,7 @@ end
 #! - write_ptr' is the memory pointer to the end of the copied words.
 #! - COMMITMENT is the domain-tagged digest that the preimage must hash to.
 #!
-#! Total cycles: 57 + 3 * num_words / 2
+#! Total cycles: 57 + 3 * num_words
 pub proc pipe_double_words_preimage_to_memory_with_domain
   # Bring `num_words` to the top so we can check and consume it below (1 cycle).
   swap
