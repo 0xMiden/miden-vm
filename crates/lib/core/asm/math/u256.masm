@@ -4,6 +4,15 @@ const U32_MAX = 0xFFFFFFFF
 
 # ===== ADDITION ==================================================================================
 
+#! Performs addition of two unsigned 256 bit integers discarding the overflow.
+#! Stack transition looks as follows:
+#! [b0, b1, b2, b3, b4, b5, b6, b7, a0, a1, a2, a3, a4, a5, a6, a7, ...]
+#!   -> [c0, c1, c2, c3, c4, c5, c6, c7, ...], where c = (a + b) % 2^256.
+pub proc wrapping_add(b: u256, a: u256) -> u256
+    exec.overflowing_add
+    drop
+end
+
 #! Performs addition of two unsigned 256 bit integers preserving the overflow.
 #! Stack transition looks as follows:
 #! [b0, b1, b2, b3, b4, b5, b6, b7, a0, a1, a2, a3, a4, a5, a6, a7, ...]
@@ -73,16 +82,16 @@ pub proc widening_add(b: u256, a: u256) -> (u256, i1)
     movdn.8
 end
 
-#! Performs addition of two unsigned 256 bit integers discarding the overflow.
+# ===== SUBTRACTION ===============================================================================
+
+#! Performs subtraction of two unsigned 256 bit integers discarding the underflow.
 #! Stack transition looks as follows:
 #! [b0, b1, b2, b3, b4, b5, b6, b7, a0, a1, a2, a3, a4, a5, a6, a7, ...]
-#!   -> [c0, c1, c2, c3, c4, c5, c6, c7, ...], where c = (a + b) % 2^256.
-pub proc wrapping_add(b: u256, a: u256) -> u256
-    exec.overflowing_add
+#!   -> [c0, c1, c2, c3, c4, c5, c6, c7, ...], where c = (a - b) % 2^256.
+pub proc wrapping_sub(b: u256, a: u256) -> u256
+    exec.overflowing_sub
     drop
 end
-
-# ===== SUBTRACTION ===============================================================================
 
 #! Performs subtraction of two unsigned 256 bit integers preserving the underflow.
 #! Stack transition looks as follows:
@@ -174,15 +183,6 @@ pub proc overflowing_sub(b: u256, a: u256) -> (i1, u256)
     movdn.8
     reversew swapw reversew
     movup.8
-end
-
-#! Performs subtraction of two unsigned 256 bit integers discarding the underflow.
-#! Stack transition looks as follows:
-#! [b0, b1, b2, b3, b4, b5, b6, b7, a0, a1, a2, a3, a4, a5, a6, a7, ...]
-#!   -> [c0, c1, c2, c3, c4, c5, c6, c7, ...], where c = (a - b) % 2^256.
-pub proc wrapping_sub(b: u256, a: u256) -> u256
-    exec.overflowing_sub
-    drop
 end
 
 # ===== BITWISE OPERATIONS ========================================================================
@@ -619,6 +619,19 @@ pub proc wrapping_mul(b: u256, a: u256) -> u256
     padw loc_loadw_le.8              # [c0, c1, c2, c3, c4, c5, c6, c7, ...]
 end
 
+#! Performs multiplication of two unsigned 256 bit integers preserving the overflow flag.
+#! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
+#! Stack transition looks as follows:
+#! [b0, b1, b2, b3, b4, b5, b6, b7, a0, a1, a2, a3, a4, a5, a6, a7, ...]
+#!   -> [overflow, c0, c1, c2, c3, c4, c5, c6, c7, ...], where c = (a * b) % 2^256
+#! and overflow = 1 iff a * b >= 2^256.
+pub proc overflowing_mul(b: u256, a: u256) -> (i1, u256)
+    exec.widening_mul                # [c0..c15, ...]
+    swapdw                           # [c8..c15, c0..c7, ...]
+    u32or u32or u32or u32or u32or u32or u32or
+    neq.0                            # [overflow, c0..c7, ...]
+end
+
 #! Performs multiplication of two unsigned 256 bit integers preserving the full 512-bit product.
 #! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
 #! Stack transition looks as follows:
@@ -746,19 +759,6 @@ pub proc widening_mul(b: u256, a: u256) -> (lo: u256, hi: u256)
     padw loc_loadw_le.16             # [c8..c11, c12..c15, ...]
     padw loc_loadw_le.12             # [c4..c7,  c8..c15, ...]
     padw loc_loadw_le.8              # [c0..c7,  c8..c15, ...]
-end
-
-#! Performs multiplication of two unsigned 256 bit integers preserving the overflow flag.
-#! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
-#! Stack transition looks as follows:
-#! [b0, b1, b2, b3, b4, b5, b6, b7, a0, a1, a2, a3, a4, a5, a6, a7, ...]
-#!   -> [overflow, c0, c1, c2, c3, c4, c5, c6, c7, ...], where c = (a * b) % 2^256
-#! and overflow = 1 iff a * b >= 2^256.
-pub proc overflowing_mul(b: u256, a: u256) -> (i1, u256)
-    exec.widening_mul                # [c0..c15, ...]
-    swapdw                           # [c8..c15, c0..c7, ...]
-    u32or u32or u32or u32or u32or u32or u32or
-    neq.0                            # [overflow, c0..c7, ...]
 end
 
 # ===== BIT COUNTING ==============================================================================
