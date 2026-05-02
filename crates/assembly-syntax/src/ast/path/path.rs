@@ -477,6 +477,9 @@ impl Path {
     pub fn canonicalize(&self) -> Result<PathBuf, PathError> {
         let mut buf = PathBuf::with_capacity(self.byte_len());
         buf.extend_with_components(self.components())?;
+        if buf.byte_len() > u16::MAX as usize {
+            return Err(PathError::TooLong { max: u16::MAX as usize });
+        }
         Ok(buf)
     }
 }
@@ -667,5 +670,24 @@ mod tests {
         let expected = Path::new("foo::\"$bar\"");
         assert_eq!(canonicalized.as_path(), expected);
         Ok(())
+    }
+
+    #[test]
+    fn test_canonicalize_path_rejects_canonical_result_longer_than_u16_max() {
+        let component = alloc::format!("{}-", "a".repeat(254));
+        let mut source = alloc::string::String::new();
+        for i in 0..255 {
+            if i > 0 {
+                source.push_str("::");
+            }
+            source.push_str(&component);
+        }
+
+        let path = Path::validate(&source).expect("source path must be pre-canonicalization valid");
+        let err = path.canonicalize().expect_err(
+            "canonicalization must reject paths that exceed the serialization length bound",
+        );
+
+        assert!(matches!(err, PathError::TooLong { max } if max == u16::MAX as usize));
     }
 }

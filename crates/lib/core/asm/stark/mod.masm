@@ -6,11 +6,11 @@ use miden::core::stark::verifier
 #! verifier can be built. It expects the following parameters on the stack from the caller:
 #!
 #! 1. `[D0, D1, D2, D3, D4]` which are respectively the digests for dynamic execution of procedures
-#!   i. `compute_deep_composition_polynomial_queries`
-#!   ii. `execute_constraint_evaluation_check`
-#!   iii. `process_row_ood_evaluations`
-#!   iv. `process_public_inputs`
-#!   v. `observe_aux_trace`
+#!   D0. `observe_aux_trace`
+#!   D1. `process_public_inputs`
+#!   D2. `process_row_ood_evaluations`
+#!   D3. `execute_constraint_evaluation_check`
+#!   D4. `compute_deep_composition_polynomial_queries`
 #! 2. Per-proof parameter: `log(trace_length)`
 #! 3. `[rd0, rd1, rd2, rd3]`: RELATION_DIGEST = hash(PROTOCOL_ID, CIRCUIT_COMMITMENT),
 #!    a compile-time constant that binds the Fiat-Shamir transcript to the AIR instance.

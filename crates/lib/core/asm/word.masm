@@ -23,7 +23,7 @@ end
 #! - `out_ptr` is an element address in memory.
 #! - Memory layout after the call: `[w0_lo, w0_hi, w1_lo, w1_hi, w2_lo, w2_hi, w3_lo, w3_hi]`.
 #!
-#! Cycles: 8 * (split + store pair) ~= 176
+#! Cycles: 22
 pub proc store_word_u32s_le
     swap u32split
     # => [w1_lo, w1_hi, w0, w2, w3, out_ptr, ...]
@@ -108,7 +108,7 @@ end
 #! Inputs:  [RHS, LHS]
 #! Outputs: [is_lhs_greater]
 #!
-#! Cycles: 117
+#! Cycles: 133
 pub proc gt(rhs: word, lhs: word) -> i1
     # Input words are in LE order (word[0] on top)
     # => [r_0, r_1, r_2, r_3, l_0, l_1, l_2, l_3]
@@ -158,7 +158,7 @@ end
 #! Inputs:  [RHS, LHS]
 #! Outputs: [is_lhs_greater_or_equal]
 #!
-#! Cycles: 118
+#! Cycles: 130
 pub proc gte(rhs: word, lhs: word) -> i1
     exec.lt
     not
@@ -174,7 +174,7 @@ end
 #! Inputs:  [RHS, LHS]
 #! Outputs: [is_lhs_lesser]
 #!
-#! Cycles: 117
+#! Cycles: 129
 pub proc lt(rhs: word, lhs: word) -> i1
     # Input words are in LE order (word[0] on top)
     # => [r_0, r_1, r_2, r_3, l_0, l_1, l_2, l_3]
@@ -224,7 +224,7 @@ end
 #! Inputs:  [RHS, LHS]
 #! Outputs: [is_lhs_less_or_equal]
 #!
-#! Cycles: 118
+#! Cycles: 134
 pub proc lte(rhs: word, lhs: word) -> i1
     exec.gt
     not

@@ -42,7 +42,7 @@ The arithmetic operations below are performed in a 64-bit [prime field](https://
 | inv <br /> - *(1 cycle)*                                                         | [a, ...]    | [b, ...]      | $b \leftarrow a^{-1} \mod p$ <br /> Fails if $a = 0$                                                           |
 | pow2 <br /> - *(16 cycles)*                                                      | [a, ...]    | [b, ...]      | $b \leftarrow 2^a$ <br /> Fails if $a > 63$                                                                    |
 | exp.*uxx* <br /> - *(9 + xx cycles)*  <br /> exp.*b* <br /> - *(9 + log2(b) cycles)* | [b, a, ...] | [c, ...]      | $c \leftarrow a^b$ <br /> Fails if xx is outside [0, 63) <br /> exp is equivalent to exp.u64 and needs 73 cycles |
-| ilog2 <br /> - *(44 cycles)*                                                      | [a, ...]    | [b, ...]      | $b \leftarrow \lfloor{log_2{a}}\rfloor$ <br /> Fails if $a = 0 $                                                                    |
+| ilog2 <br /> - *(66 cycles)*                                                      | [a, ...]    | [b, ...]      | $b \leftarrow \lfloor{log_2{a}}\rfloor$ <br /> Fails if $a = 0 $                                                                    |
 | not <br /> - *(1 cycle)*                                                         | [a, ...]    | [b, ...]      | $b \leftarrow 1 - a$ <br /> Fails if $a > 1$                                                                   |
 | and <br /> - *(1 cycle)*                                                         | [b, a, ...] | [c, ...]      | $c \leftarrow a \cdot b$ <br /> Fails if $max(a, b) > 1$                                                       |
 | or <br /> - *(1 cycle)*                                                          | [b, a, ...] | [c, ...]      | $c \leftarrow a + b - a \cdot b$ <br /> Fails if $max(a, b) > 1$                                               |
@@ -58,7 +58,7 @@ The arithmetic operations below are performed in a 64-bit [prime field](https://
 | lte <br /> - *(18 cycles)* <br /> lte.*b* <br /> - *(19 cycles)* | [b, a, ...] | [c, ...]       | $c \leftarrow \begin{cases} 1, & \text{if}\ a \le b  0, & \text{otherwise}\ \end{cases}$                                   |
 | gt <br /> - *(16 cycles)* <br /> gt.*b* <br /> - *(17 cycles)*   | [b, a, ...] | [c, ...]       | $c \leftarrow \begin{cases} 1, & \text{if}\ a > b  0, & \text{otherwise}\ \end{cases}$                                     |
 | gte <br /> - *(17 cycles)* <br /> gte.*b* <br /> - *(18 cycles)* | [b, a, ...] | [c, ...]       | $c \leftarrow \begin{cases} 1, & \text{if}\ a \ge b  0, & \text{otherwise}\ \end{cases}$                                   |
-| is_odd <br /> - *(5 cycles)*                                 | [a, ...]    | [b, ...]       | $b \leftarrow \begin{cases} 1, & \text{if}\ a \text{ is odd}  0, & \text{otherwise}\ \end{cases}$                          |
+| is_odd <br /> - *(6 cycles)*                                 | [a, ...]    | [b, ...]       | $b \leftarrow \begin{cases} 1, & \text{if}\ a \text{ is odd}  0, & \text{otherwise}\ \end{cases}$                          |
 | eqw <br /> - *(15 cycles)*                                   | [A, B, ...] | [c, A, B, ...] | $c \leftarrow \begin{cases} 1, & \text{if}\ a_i = b_i \; \forall i \in \{0, 1, 2, 3\}  0, & \text{otherwise}\ \end{cases}$ |
 ### Extension Field Operations
 
