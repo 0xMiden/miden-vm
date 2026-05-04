@@ -204,14 +204,15 @@ fn multi_air_ace_circuit_builds_and_has_multi_air_beta_slot() {
     let circuit = build_multi_air_ace_circuit::<QuadFelt>(config).expect("multi-AIR ACE circuit");
     let layout = circuit.layout();
 
-    // Combined main width = NUM_CORE_COLS (51) + CHIPLETS_WIDTH (22) = 73, matching the
-    // unified ProcessorAir trace width. The combined aux width is 4 + 3 = 7.
+    // Combined main width is each per-AIR width aligned to LMCS rate (8 for Poseidon2)
+    // and concatenated: aligned(51) + aligned(22) = 56 + 24 = 80. Combined aux is
+    // aligned(4*2) + aligned(3*2) = 8 + 8 = 16 base coords = 8 EFs.
     assert_eq!(
         layout.counts.width,
-        73,
-        "combined main width must equal CoreAir.width() + ChipletsAir.width()"
+        80,
+        "combined main width must be sum of per-AIR LMCS-aligned widths"
     );
-    assert_eq!(layout.counts.aux_width, 7, "combined aux_width = 4 + 3");
+    assert_eq!(layout.counts.aux_width, 8, "combined aux_width = aligned(4) + aligned(3) = 8 EFs");
     assert_eq!(layout.counts.num_aux_boundary, 2, "one boundary slot per AIR");
 
     // The combined layout reserves the new MultiAirBeta slot in stark_vars.
