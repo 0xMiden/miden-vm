@@ -1821,6 +1821,93 @@ dep = { path = "dep" }
 }
 
 #[test]
+fn package_manifest_changes_without_build_effect_allow_source_dependency_reuse() {
+    let tempdir = TempDir::new().unwrap();
+    let dep_dir = tempdir.path().join("dep");
+    write_file(
+        &dep_dir.join("miden-project.toml"),
+        r#"[package]
+name = "dep"
+version = "1.0.0"
+
+[lib]
+path = "lib.masm"
+"#,
+    );
+    write_file(
+        &dep_dir.join("lib.masm"),
+        r#"pub proc foo
+    push.1
+end
+"#,
+    );
+
+    let root_dir = tempdir.path().join("root");
+    let root_manifest = root_dir.join("miden-project.toml");
+    write_file(
+        &root_manifest,
+        r#"[package]
+name = "root"
+version = "1.0.0"
+
+[lib]
+path = "lib.masm"
+
+[dependencies]
+dep = { path = "../dep" }
+"#,
+    );
+    write_file(
+        &root_dir.join("lib.masm"),
+        r#"pub proc entry
+    exec.::dep::foo
+end
+"#,
+    );
+
+    let mut context = TestContext::new();
+    context
+        .assemble_library_package(&root_manifest, None)
+        .expect("initial build should succeed");
+    let dep_record = context
+        .registry()
+        .get_by_semver(&PackageId::from("dep"), &"1.0.0".parse().unwrap())
+        .expect("dependency should be registered");
+    let dep_version = dep_record.version().clone();
+    context.registry().clear_loaded_packages();
+
+    write_file(
+        &dep_dir.join("miden-project.toml"),
+        r#"# comments and formatting should not affect build provenance
+
+[package]
+name = "dep"
+version = "1.0.0"
+description = "metadata-only update"
+
+[package.metadata.audit]
+ticket = "ignored"
+
+[lib]
+path = "src/lib.masm"
+
+[[bin]]
+name = "unused"
+path = "bin/unused.masm"
+
+[profile.unused]
+debug = false
+custom = "ignored"
+"#,
+    );
+
+    context
+        .assemble_library_package(&root_manifest, None)
+        .expect("manifest-only changes outside build provenance should allow reuse");
+    assert_eq!(context.registry().loaded_packages(), vec![format!("dep@{dep_version}")]);
+}
+
+#[test]
 fn git_dependency_reuses_canonical_revision_and_rejects_new_commit_without_semver_bump() {
     let tempdir = TempDir::new().unwrap();
     let gitdep_repo = tempdir.path().join("gitdep");

@@ -17,7 +17,7 @@ use miden_assembly_syntax::{
 };
 use miden_core::{Word, utils::hash_string_to_word};
 use miden_package_registry::PackageId;
-use miden_project::{DependencyVersionScheme, Package as ProjectPackage, Profile, Target};
+use miden_project::{Package as ProjectPackage, Profile, Target};
 
 use super::TargetSourcePaths;
 use crate::SourceManager;
@@ -39,8 +39,8 @@ pub(super) trait ProjectPackageExt {
     fn compute_path_source_hash(
         &self,
         target: &Target,
+        profile: &Profile,
         manifest_path: &FsPath,
-        workspace_root: Option<&FsPath>,
     ) -> Result<Word, Report>;
 
     fn excluded_target_roots(
@@ -50,8 +50,6 @@ pub(super) trait ProjectPackageExt {
     ) -> Result<BTreeSet<PathBuf>, Report>;
 
     fn resolve_target_source_paths(&self, target: &Target) -> Result<TargetSourcePaths, Report>;
-
-    fn effective_manifest_hash_input(&self) -> Result<String, Report>;
 
     fn resolve_profile(&self, name: &str) -> Result<&Profile, Report>;
 }
@@ -125,8 +123,8 @@ impl ProjectPackageExt for ProjectPackage {
     fn compute_path_source_hash(
         &self,
         target: &Target,
+        profile: &Profile,
         manifest_path: &FsPath,
-        workspace_root: Option<&FsPath>,
     ) -> Result<Word, Report> {
         let source_paths = self.resolve_target_source_paths(target)?;
         let project_root = manifest_path.parent().ok_or_else(|| {
@@ -152,24 +150,7 @@ impl ProjectPackageExt for ProjectPackage {
         }
         inputs.sort_by(|a, b| a.0.cmp(&b.0));
 
-        let mut material = format!(
-            "target:{}\nkind:{}\nnamespace:{}\n",
-            target.name.inner(),
-            target.ty,
-            target.namespace.inner()
-        );
-        if workspace_root.is_some() {
-            material.push_str("manifest:effective\n");
-            material.push_str(&self.effective_manifest_hash_input()?);
-            material.push('\n');
-        } else {
-            let manifest_label = manifest_path
-                .strip_prefix(project_root)
-                .unwrap_or(manifest_path)
-                .display()
-                .to_string();
-            inputs.push((format!("manifest:{manifest_label}"), manifest_path.to_path_buf()));
-        }
+        let mut material = self.build_provenance_projection(target, profile);
         for (label, path) in inputs {
             let bytes = fs::read(&path).map_err(|error| {
                 Report::msg(format!("failed to read source input '{}': {error}", path.display()))
@@ -210,45 +191,6 @@ impl ProjectPackageExt for ProjectPackage {
             read_support_module_paths(&root_dir, target.namespace.inner().as_ref(), &excluded)?;
 
         Ok(TargetSourcePaths { root: root_path, root_dir, support })
-    }
-
-    fn effective_manifest_hash_input(&self) -> Result<String, Report> {
-        let mut manifest = self.to_toml()?;
-
-        let mut workspace_dependencies = self
-            .dependencies()
-            .iter()
-            .filter_map(|dependency| match dependency.scheme() {
-                DependencyVersionScheme::Workspace { member, version } => Some((
-                    dependency.name().to_string(),
-                    member.path().to_string(),
-                    version.as_ref().map(ToString::to_string),
-                    dependency.linkage(),
-                )),
-                DependencyVersionScheme::WorkspacePath { path, version } => Some((
-                    dependency.name().to_string(),
-                    path.path().to_string(),
-                    version.as_ref().map(ToString::to_string),
-                    dependency.linkage(),
-                )),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
-        workspace_dependencies.sort_by(|a, b| a.0.cmp(&b.0));
-
-        if !workspace_dependencies.is_empty() {
-            manifest.push_str("\n# resolved_workspace_dependencies\n");
-            for (name, member_path, version, linkage) in workspace_dependencies {
-                match version {
-                    Some(version) => {
-                        manifest.push_str(&format!("{name}={member_path}@{version}:{linkage}\n"));
-                    },
-                    None => manifest.push_str(&format!("{name}={member_path}:{linkage}\n")),
-                }
-            }
-        }
-
-        Ok(manifest)
     }
 
     fn resolve_profile(&self, name: &str) -> Result<&Profile, Report> {

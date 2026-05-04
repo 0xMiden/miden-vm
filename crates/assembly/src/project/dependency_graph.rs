@@ -151,13 +151,13 @@ impl DependencyGraph {
         profile_name: &str,
         origin: &ProjectSourceOrigin,
         manifest_path: &FsPath,
-        workspace_root: Option<&FsPath>,
+        _workspace_root: Option<&FsPath>,
         visiting: &mut BTreeSet<PackageId>,
     ) -> Result<PackageBuildProvenance, Report> {
         let dependency_hash =
             self.compute_dependency_closure_hash(package_id, profile_name, visiting)?;
-        let build_settings =
-            PackageBuildSettings::from_profile(project.resolve_profile(profile_name)?);
+        let profile = project.resolve_profile(profile_name)?;
+        let build_settings = PackageBuildSettings::from_profile(profile);
 
         match origin {
             ProjectSourceOrigin::Git { repo, resolved_revision, .. } => {
@@ -172,8 +172,8 @@ impl DependencyGraph {
                 Ok(PackageBuildProvenance::Path {
                     source_hash: project.compute_path_source_hash(
                         target,
+                        profile,
                         manifest_path,
-                        workspace_root,
                     )?,
                     dependency_hash,
                     build_settings,
