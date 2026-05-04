@@ -17,6 +17,7 @@
 
 use core::borrow::Borrow;
 
+use miden_core::field::PrimeCharacteristicRing;
 use miden_crypto::stark::air::WindowAccess;
 
 use super::{
@@ -29,7 +30,7 @@ use super::{
     },
 };
 use crate::{
-    Felt, MainCols,
+    ChipletCols, Felt, MainCols,
     lookup::{LookupAir, LookupBuilder},
 };
 
@@ -45,13 +46,15 @@ use crate::{
 pub(crate) trait ChipletLookupBuilder: LookupBuilder<F = Felt> {
     /// Build the shared [`ChipletActiveFlags`] snapshot for one `eval` call.
     ///
-    /// Default body bridges through [`MainCols::as_chiplet_cols`] so the polynomial
-    /// construction operates on the multi-AIR `ChipletCols` view of the trailing chiplet
-    /// columns. Adapters override this when a cheaper construction path is available
-    /// (e.g. the prover path, where the selector columns are concrete 0/1 and the
+    /// Default body calls [`ChipletActiveFlags::from_chiplet_cols`] against the multi-AIR
+    /// `ChipletCols` view. Adapters override this when a cheaper construction path is
+    /// available (e.g. the prover path, where the selector columns are concrete 0/1 and the
     /// active-flag subtractions can short-circuit).
-    fn build_chiplet_active(&self, local: &MainCols<Self::Var>) -> ChipletActiveFlags<Self::Expr> {
-        ChipletActiveFlags::from_chiplet_cols(local.as_chiplet_cols())
+    fn build_chiplet_active(
+        &self,
+        local: &ChipletCols<Self::Var>,
+    ) -> ChipletActiveFlags<Self::Expr> {
+        ChipletActiveFlags::from_chiplet_cols(local)
     }
 }
 
@@ -62,20 +65,30 @@ pub(crate) trait ChipletLookupBuilder: LookupBuilder<F = Felt> {
 ///
 /// Holds the two-row window plus a single [`ChipletActiveFlags`] snapshot built once per
 /// `eval` through [`ChipletLookupBuilder::build_chiplet_active`]. Every emitter reads
-/// `ctx.local`, `ctx.next`, and
-/// `ctx.chiplet_active.{controller,permutation,bitwise,memory,ace,kernel_rom}` directly —
-/// field access, no method indirection.
+/// `ctx.local`, `ctx.next`, `ctx.chiplet_active.*`, and `ctx.clk_plus_one` directly — field
+/// access, no method indirection.
+///
+/// `clk_plus_one` is the chiplet-side response address used by every hasher response variant
+/// (linear-hash init, RESPAN, MR-update legs, HOUT, SOUT). Today it is derived from
+/// `local.system.clk + 1` at construction time — the only cross-trace read in the chiplet
+/// half of the LogUp argument, concentrated here so a future migration to a chiplet-side
+/// row counter only changes one line (see `MULTI_AIR_TODO.md` M1.5).
 pub(crate) struct ChipletBusContext<'a, LB>
 where
     LB: LookupBuilder<F = Felt>,
 {
-    /// Typed view of the current row.
-    pub local: &'a MainCols<LB::Var>,
-    /// Typed view of the next row.
-    pub next: &'a MainCols<LB::Var>,
+    /// Typed view of the current row (Chiplets half of the trace).
+    pub local: &'a ChipletCols<LB::Var>,
+    /// Typed view of the next row (Chiplets half of the trace).
+    pub next: &'a ChipletCols<LB::Var>,
     /// Per-chiplet `is_active` flags, computed from `local`'s selector columns via the
     /// builder-provided hook.
     pub chiplet_active: ChipletActiveFlags<LB::Expr>,
+    /// Hasher response address: `local.system.clk + 1`. Sourced from the Core trace for
+    /// now via the constructor's `MainCols` parameter; this is the last cross-trace read in
+    /// the chiplet half and will be replaced by a chiplet-side row counter once the
+    /// multi-AIR addressing scheme is finalized (see `MULTI_AIR_TODO.md` M1.5).
+    pub clk_plus_one: LB::Expr,
 }
 
 impl<'a, LB> ChipletBusContext<'a, LB>
@@ -83,9 +96,22 @@ where
     LB: ChipletLookupBuilder,
 {
     /// Build the shared chiplet-trace context for one `eval` call.
+    ///
+    /// Takes a `&MainCols` because the responder address is currently derived from
+    /// `local.system.clk + 1` (a Core-trace column). Bridges through
+    /// [`MainCols::as_chiplet_cols`] for the per-row chiplet view so emitters operate on the
+    /// multi-AIR `ChipletCols` type.
     pub fn new(builder: &LB, local: &'a MainCols<LB::Var>, next: &'a MainCols<LB::Var>) -> Self {
-        let chiplet_active = builder.build_chiplet_active(local);
-        Self { local, next, chiplet_active }
+        let local_chiplet = local.as_chiplet_cols();
+        let next_chiplet = next.as_chiplet_cols();
+        let chiplet_active = builder.build_chiplet_active(local_chiplet);
+        let clk_plus_one: LB::Expr = local.system.clk.into() + LB::Expr::ONE;
+        Self {
+            local: local_chiplet,
+            next: next_chiplet,
+            chiplet_active,
+            clk_plus_one,
+        }
     }
 }
 
