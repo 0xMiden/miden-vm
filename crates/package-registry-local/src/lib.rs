@@ -1,7 +1,7 @@
 use std::{
     collections::BTreeMap,
     env, fs,
-    io::{Read, Write},
+    io::{Read, Seek, Write},
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -25,12 +25,18 @@ pub enum LocalRegistryError {
     MissingEnv { var: &'static str },
     #[error("failed to read registry index: {0}")]
     IndexRead(#[source] std::io::Error),
+    #[error("failed to seek in registry index stream: {0}")]
+    IndexSeek(#[source] std::io::Error),
     #[error("failed to lock registry index for reading: {0}")]
     IndexReadLock(#[source] fs::TryLockError),
     #[error("failed to write registry index: {0}")]
     IndexWrite(#[source] std::io::Error),
     #[error("failed to lock registry index for writing: {0}")]
     IndexWriteLock(#[source] fs::TryLockError),
+    #[error(
+        "failed to write registry index: the index was modified by another process, please try again"
+    )]
+    WriteToStaleIndex,
     #[error("failed to parse registry index: {0}")]
     IndexParse(#[from] toml::de::Error),
     #[error("failed to serialize registry index: {0}")]
@@ -80,6 +86,7 @@ pub struct LocalPackageRegistry {
     index_path: PathBuf,
     artifact_dir: PathBuf,
     index: InMemoryPackageRegistry,
+    index_checksum: [u8; 32],
 }
 
 /// The metadata about a package produced when listing or describing a package in the index
@@ -151,6 +158,7 @@ impl LocalPackageRegistry {
         }
         fs::create_dir_all(&artifact_dir).map_err(LocalRegistryError::IndexWrite)?;
 
+        let index_checksum: [u8; 32];
         let index = if index_path.exists() {
             let mut contents = String::with_capacity(4 * 1024);
             #[allow(clippy::verbose_file_reads)]
@@ -168,17 +176,27 @@ impl LocalPackageRegistry {
                 file.try_lock_shared().map_err(LocalRegistryError::IndexReadLock)?;
                 file.read_to_string(&mut contents).map_err(LocalRegistryError::IndexRead)?;
             }
-            if contents.trim().is_empty() {
+            std::println!("=== index file contents ==\n{contents}\n=== end of file contents ==");
+            let contents = contents.trim();
+            index_checksum =
+                *miden_core::crypto::hash::Sha256::hash(contents.as_bytes()).as_bytes();
+            if contents.is_empty() {
                 InMemoryPackageRegistry::default()
             } else {
-                let persisted = toml::from_str::<PersistedIndex>(&contents)?;
+                let persisted = toml::from_str::<PersistedIndex>(contents)?;
                 InMemoryPackageRegistry::from_packages(persisted.packages)
             }
         } else {
+            index_checksum = *miden_core::crypto::hash::Sha256::hash(&[]).as_bytes();
             InMemoryPackageRegistry::default()
         };
 
-        Ok(Self { index_path, artifact_dir, index })
+        Ok(Self {
+            index_path,
+            artifact_dir,
+            index,
+            index_checksum,
+        })
     }
 
     /// Publish the Miden package found at `package_path`.
@@ -227,7 +245,7 @@ impl LocalPackageRegistry {
             Some(version) => self
                 .index
                 .get_by_version(package, version)
-                .map(|record| (version.clone(), record))?,
+                .map(|record| (record.version().clone(), record))?,
             None => self
                 .index
                 .available_versions(package)?
@@ -241,10 +259,7 @@ impl LocalPackageRegistry {
 
     /// Get the path in the artifact store for `version`
     pub fn artifact_path(&self, version: &Version) -> Option<PathBuf> {
-        version
-            .digest
-            .as_ref()
-            .map(|digest| self.artifact_path_for_digest(*digest.inner()))
+        version.digest.as_ref().map(|digest| self.artifact_path_for_digest(*digest))
     }
 
     /// Loads the given version of `package` from the artifact store.
@@ -287,10 +302,11 @@ impl LocalPackageRegistry {
     }
 
     /// Persist the state of the index to disk
-    fn save(&self) -> Result<(), LocalRegistryError> {
+    fn save(&mut self) -> Result<(), LocalRegistryError> {
         let persisted = PersistedIndex { packages: self.index.packages().clone() };
         let contents = toml::to_string_pretty(&persisted)?;
         let mut file = fs::File::options()
+            .read(true)
             .write(true)
             .truncate(false)
             .create(true)
@@ -304,7 +320,33 @@ impl LocalPackageRegistry {
         //
         // See `load` for the non-exclusive lock obtained for reads
         file.try_lock().map_err(LocalRegistryError::IndexWriteLock)?;
-        file.write_all(contents.as_bytes()).map_err(LocalRegistryError::IndexWrite)
+
+        // Validate that the contents of the persisted index have not changed under us, by
+        // recomputing the checksum of its contents and comparing to when we last loaded the index.
+        #[allow(clippy::verbose_file_reads)]
+        {
+            let mut prev_contents = Vec::with_capacity(1024);
+            file.read_to_end(&mut prev_contents).map_err(LocalRegistryError::IndexRead)?;
+            let checksum = miden_core::crypto::hash::Sha256::hash(prev_contents.trim_ascii());
+            if &self.index_checksum != checksum.as_bytes() {
+                return Err(LocalRegistryError::WriteToStaleIndex);
+            }
+        }
+
+        // Compute the new checksum of the updated index contents before we write, but do not
+        // update the in-memory state until we've successfully persisted the index
+        let new_checksum = miden_core::crypto::hash::Sha256::hash(contents.as_bytes().trim_ascii());
+
+        // Truncate the file to ensure that if the new index is smaller than the old one, that
+        // we don't end up with a corrupted index.
+        file.rewind().map_err(LocalRegistryError::IndexSeek)?;
+        file.set_len(0).map_err(LocalRegistryError::IndexWrite)?;
+        file.write_all(contents.as_bytes()).map_err(LocalRegistryError::IndexWrite)?;
+
+        // Update the index checksum for the next write
+        self.index_checksum = *new_checksum.as_bytes();
+
+        Ok(())
     }
 
     /// Derive the path in the artifact store for a package with `digest`
@@ -563,5 +605,30 @@ mod tests {
             .publish(&package_path)
             .expect_err("duplicate semver should fail even for identical bytes");
         assert!(matches!(error, LocalRegistryError::DuplicateSemanticVersion { .. }));
+    }
+
+    #[test]
+    #[should_panic = "stale registry write failed"]
+    fn publish_rejects_writes_to_a_stale_index() {
+        let tempdir = TempDir::new().unwrap();
+        let mut first_registry = load_registry(&tempdir);
+        let mut stale_registry = load_registry(&tempdir);
+
+        let first_path = tempdir.path().join("a.masp");
+        let second_path = tempdir.path().join("longer-package-name.masp");
+        build_package("a", "1.0.0", []).write_to_file(&first_path).unwrap();
+        build_package("longer-package-name", "1.0.0", [])
+            .write_to_file(&second_path)
+            .unwrap();
+
+        // This write succeeds because the index is not yet stale, but this write will make it
+        // stale
+        first_registry.publish(&first_path).unwrap();
+        // This write will fail because it's view of the index is now stale
+        stale_registry.publish(&second_path).expect("stale registry write failed");
+
+        let reloaded = load_registry(&tempdir);
+        assert!(reloaded.show(&PackageId::from("a"), None).is_some());
+        assert!(reloaded.show(&PackageId::from("longer-package-name"), None).is_some());
     }
 }
