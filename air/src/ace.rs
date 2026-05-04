@@ -398,16 +398,40 @@ where
     let chip_aux_w = <ChipletsAir as LiftedAir<Felt, EF>>::aux_width(&chip_air);
     let chip_aux_n = <ChipletsAir as LiftedAir<Felt, EF>>::num_aux_values(&chip_air);
 
+    // LMCS commits each per-AIR matrix as a stack and aligns each matrix's column
+    // count to the LMCS rate (8 for Poseidon2). The wire OOD opens carry data in
+    // *aligned* per-AIR widths concatenated across AIRs. To make the codegen layout
+    // line up with the wire format byte-for-byte, the combined layout uses
+    // ALIGNED per-AIR widths (with trailing slots being unreferenced padding). This
+    // mirrors what `verify_aligned` does internally before truncation.
+    const LMCS_ALIGNMENT: usize = 8;
+    let aligned_core_main = core_main_w.next_multiple_of(LMCS_ALIGNMENT);
+    let aligned_chip_main = chip_main_w.next_multiple_of(LMCS_ALIGNMENT);
+    let aligned_core_aux_coord =
+        (core_aux_w * miden_ace_codegen::EXT_DEGREE).next_multiple_of(LMCS_ALIGNMENT);
+    let aligned_chip_aux_coord =
+        (chip_aux_w * miden_ace_codegen::EXT_DEGREE).next_multiple_of(LMCS_ALIGNMENT);
+
+    let combined_main_w = aligned_core_main + aligned_chip_main;
+    let combined_aux_coord_w = aligned_core_aux_coord + aligned_chip_aux_coord;
+    assert!(
+        combined_aux_coord_w.is_multiple_of(miden_ace_codegen::EXT_DEGREE),
+        "combined aux coord width must be even"
+    );
+    let combined_aux_w = combined_aux_coord_w / miden_ace_codegen::EXT_DEGREE;
+
     // Step 2: combined input counts.
     //
-    // - `width` and `aux_width` sum across AIRs (both opens are concatenated in the
-    //   combined main/aux regions).
+    // - `width` and `aux_width` sum the LMCS-aligned per-AIR widths so the codegen
+    //   layout matches the wire byte order exactly. Padding slots within each AIR's
+    //   subregion are unreferenced by the constraints (see eval bodies of CoreAir
+    //   and ChipletsAir, which only address columns up to the original width).
     // - `num_aux_boundary` sums each AIR's boundary slot count.
     // - `num_periodic` is taken from chiplets (the only AIR with periodic columns
     //   today; the wrapper exposes them once via the combined `LiftedAir` impl).
     let combined_counts = InputCounts {
-        width: core_main_w + chip_main_w,
-        aux_width: core_aux_w + chip_aux_w,
+        width: combined_main_w,
+        aux_width: combined_aux_w,
         num_aux_boundary: core_aux_n + chip_aux_n,
         num_public: core_artifacts.layout.counts.num_public,
         num_vlpi: core_artifacts.layout.counts.num_vlpi,
@@ -441,11 +465,22 @@ where
     // so they land in the chiplets-half of the combined layout.
     let chip_dag = chip_artifacts.dag;
     let chip_root_old = chip_dag.root();
+    // Shift chiplets indices by the *aligned* core width, so chiplets's first slot
+    // sits exactly where chip_main begins on the wire (after core_main + alignment
+    // padding). Padding slots in [core_main_w..aligned_core_main) and
+    // [chip_main_w + aligned_core_main..combined_main_w) are unreferenced by the
+    // chiplet sub-DAG, so their values can be anything (zeros from the wire).
+    // `InputKey::AuxCoord.index` is in EF units (column index). Shift by the
+    // *EF-count* of core's aligned aux region so chip's aux EFs land in the
+    // chiplets-half of the combined aux region.
+    let aligned_core_aux_w = aligned_core_aux_coord / miden_ace_codegen::EXT_DEGREE;
     let chip_translation = reemit_dag_with_rewrite(&mut builder, &chip_dag, |key| match key {
-        InputKey::Main { offset, index } => InputKey::Main { offset, index: index + core_main_w },
+        InputKey::Main { offset, index } => {
+            InputKey::Main { offset, index: index + aligned_core_main }
+        },
         InputKey::AuxCoord { offset, index, coord } => InputKey::AuxCoord {
             offset,
-            index: index + core_aux_w,
+            index: index + aligned_core_aux_w,
             coord,
         },
         InputKey::AuxBusBoundary(slot) => InputKey::AuxBusBoundary(slot + core_aux_n),

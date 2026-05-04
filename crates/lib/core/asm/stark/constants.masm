@@ -173,28 +173,30 @@ const RANDOM_COIN_OUTPUT_LEN_PTR = 3223322757
 ### We use 2 extension field elements for a total of 4 base field elements.
 const AUX_RAND_ELEM_PTR = 3225419776
 
-### OOD evaluations region. After the multi-AIR migration with TRACE_WIDTH=73, the
-### per-row OOD layout (in EF slots) is `73 main + 3 pad + 14 aux + 2 pad + 16 quotient
-### = 108 EF` aligned to DoubleWord boundaries. Two rows (curr + next) × 108 × 2 felts/EF
-### = 432 base elements.
+### OOD evaluations region. The codegen layout uses LMCS-aligned per-AIR widths
+### (alignment = 8 for Poseidon2). Per row in EF slots:
+###   main = aligned(51) + aligned(22) = 56 + 24       = 80 EFs
+###   aux  = aligned(4·2) + aligned(3·2) = 8 + 8       = 16 EFs
+###   quot = 16                                         = 16 EFs
+###   total per row                                     = 112 EFs = 224 felts
+### Two rows (curr + next) × 224 = 448 felts.
 const OOD_EVALUATIONS_PTR = 3225419780        # AUX_RAND_ELEM_PTR + 4
 
 ### Auxiliary bus boundary values (2 extension field elements = 4 base elements).
-### Both slots are real LogUp finals after the multi-AIR split (Core's at slot 0 and
-### Chiplets's at slot 1).
-const AUX_BUS_BOUNDARY_PTR = 3225420212       # OOD_EVALUATIONS_PTR + 432
+### One LogUp final per AIR: Core at slot 0, Chiplets at slot 1.
+const AUX_BUS_BOUNDARY_PTR = 3225420228       # OOD_EVALUATIONS_PTR + 448
 
 ### Auxiliary inputs for ACE (stark vars). After the multi-AIR migration this region
 ### holds 11 extension field elements = 22 base elements, padded to a 6-word boundary
 ### (24 base elements). Slot 10 carries `β_multi` (the multi-AIR accumulation
 ### challenge); slot 11 is unused padding.
-const AUXILIARY_ACE_INPUTS_PTR = 3225420216   # AUX_BUS_BOUNDARY_PTR + 4
+const AUXILIARY_ACE_INPUTS_PTR = 3225420232   # AUX_BUS_BOUNDARY_PTR + 4
 
 ### Address at the start of the memory region holding the arithmetic circuit description (constants + ops).
-const ACE_CIRCUIT_STREAM_PTR = 3225420240     # AUXILIARY_ACE_INPUTS_PTR + 24
+const ACE_CIRCUIT_STREAM_PTR = 3225420256     # AUXILIARY_ACE_INPUTS_PTR + 24
 
 ### Address at the start of the evaluation-gates portion of the arithmetic circuit (EVAL section).
-const ACE_CIRCUIT_PTR = 3225420836            # ACE_CIRCUIT_STREAM_PTR + num_const_felts (596 for multi-AIR)
+const ACE_CIRCUIT_PTR = 3225420852            # ACE_CIRCUIT_STREAM_PTR + num_const_felts (596 for multi-AIR)
 
 ## FRI
 ##
