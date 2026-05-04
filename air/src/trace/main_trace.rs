@@ -1024,8 +1024,6 @@ impl MainTrace {
 
 #[cfg(test)]
 mod tests {
-    use miden_core::field::PrimeCharacteristicRing;
-
     use super::*;
     use crate::{constraints::columns::NUM_CORE_COLS, trace::TRACE_WIDTH};
 

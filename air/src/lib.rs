@@ -740,3 +740,200 @@ where
         (aux_trace, committed)
     }
 }
+
+// CHIPLETS AIR
+// ================================================================================================
+
+/// Chiplets-trace AIR for the multi-AIR proving path.
+///
+/// Owns the 21-column chiplet section (chiplets data + s_perm) and the three chiplet-trace
+/// LogUp accumulator columns. Counterpart to [`CoreAir`].
+///
+/// **Currently unused in production AND not yet sound for real proofs.** The hasher response
+/// addresses on the chiplet-side LogUp bus must reference some unique per-row tag so the
+/// requester (in Core) can pin them — today that tag is `system.clk + 1`, a Core-trace
+/// column. With the multi-AIR split, the Chiplets AIR cannot read across to Core, so the
+/// chiplet trace needs its own row counter (see `MULTI_AIR_TODO.md` M1.5 — adds a chiplet
+/// column with a `clk_next = clk + 1` constraint and a matching trace generator).
+///
+/// Until M1.5 lands, `ChipletsAir::eval` and `LookupAir::eval` use a zero placeholder for
+/// the responder address. The lookup-validation test below still passes because validation
+/// only checks the symbolic shape of the LogUp argument; real proofs would not balance with
+/// this placeholder.
+#[derive(Copy, Clone, Debug, Default)]
+pub struct ChipletsAir;
+
+impl BaseAir<Felt> for ChipletsAir {
+    fn width(&self) -> usize {
+        constraints::columns::NUM_CHIPLETS_COLS
+    }
+
+    fn num_public_values(&self) -> usize {
+        NUM_PUBLIC_VALUES
+    }
+}
+
+impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ChipletsAir {
+    fn periodic_columns(&self) -> Vec<Vec<Felt>> {
+        // All periodic columns (hasher round constants, bitwise operation table) belong to
+        // the chiplets trace.
+        constraints::chiplets::columns::PeriodicCols::periodic_columns()
+    }
+
+    fn num_randomness(&self) -> usize {
+        trace::AUX_TRACE_RAND_CHALLENGES
+    }
+
+    fn aux_width(&self) -> usize {
+        constraints::lookup::chiplet_air::CHIPLET_COLUMN_SHAPE.len()
+    }
+
+    fn num_aux_values(&self) -> usize {
+        // One real committed final per AIR; `ProcessorAir`'s placeholder slot is not needed
+        // once each per-AIR `ReducedAuxValues` carries its own scalar.
+        1
+    }
+
+    fn num_var_len_public_inputs(&self) -> usize {
+        // Kernel digests boundary-cancel against the kernel-rom bus, which lives on
+        // `CHIPLET_COLUMN_SHAPE[0]` — owned by ChipletsAir.
+        1
+    }
+
+    fn reduced_aux_values(
+        &self,
+        aux_values: &[EF],
+        challenges: &[EF],
+        public_values: &[Felt],
+        var_len_public_inputs: VarLenPublicInputs<'_, Felt>,
+    ) -> Result<ReducedAuxValues<EF>, ReductionError>
+    where
+        EF: ExtensionField<Felt>,
+    {
+        if public_values.len() != NUM_PUBLIC_VALUES {
+            return Err(format!(
+                "expected {} public values, got {}",
+                NUM_PUBLIC_VALUES,
+                public_values.len()
+            )
+            .into());
+        }
+        if var_len_public_inputs.len() != 1 {
+            return Err(format!(
+                "ChipletsAir expects 1 var-len public input slice, got {}",
+                var_len_public_inputs.len()
+            )
+            .into());
+        }
+        if !var_len_public_inputs[0].len().is_multiple_of(WORD_SIZE) {
+            return Err(format!(
+                "kernel digest felts length {} is not a multiple of {}",
+                var_len_public_inputs[0].len(),
+                WORD_SIZE
+            )
+            .into());
+        }
+
+        let challenges = Challenges::<EF>::new(
+            challenges[0],
+            challenges[1],
+            MIDEN_MAX_MESSAGE_WIDTH,
+            BusId::COUNT,
+        );
+
+        let mut reducer = ReduceBoundaryBuilder {
+            challenges: &challenges,
+            public_values,
+            var_len_public_inputs,
+            sum: EF::ZERO,
+            error: None,
+        };
+        constraints::lookup::miden_air::emit_chiplets_boundary(&mut reducer);
+        let total_correction = reducer.finalize()?;
+
+        let aux_sum: EF = aux_values.iter().copied().sum();
+        Ok(ReducedAuxValues {
+            prod: EF::ONE,
+            sum: aux_sum + total_correction,
+        })
+    }
+
+    fn eval<AB: MidenAirBuilder>(&self, builder: &mut AB) {
+        let main = builder.main();
+        let local: &ChipletCols<AB::Var> = (*main.current_slice()).borrow();
+        let next: &ChipletCols<AB::Var> = (*main.next_slice()).borrow();
+
+        let selectors = constraints::chiplets::selectors::build_chiplet_selectors(
+            builder, local, next,
+        );
+
+        constraints::enforce_chiplets(builder, local, next, &selectors);
+
+        let mut lb = ConstraintLookupBuilder::new(builder, self);
+        <Self as LookupAir<_>>::eval(self, &mut lb);
+    }
+
+    fn log_quotient_degree(&self) -> usize
+    where
+        Self: Sized,
+    {
+        // Same constraint degree as ProcessorAir today (chiplet hasher dominates the AIR's
+        // quotient degree at deg 9 / log_blowup 3); override to avoid recomputing through
+        // SymbolicAir.
+        3
+    }
+}
+
+// --- LookupAir impl: delegates to ChipletLookupAir with a placeholder responder address ---
+
+impl<LB> LookupAir<LB> for ChipletsAir
+where
+    LB: ChipletLookupBuilder,
+{
+    fn num_columns(&self) -> usize {
+        constraints::lookup::chiplet_air::CHIPLET_COLUMN_SHAPE.len()
+    }
+
+    fn column_shape(&self) -> &[usize] {
+        &constraints::lookup::chiplet_air::CHIPLET_COLUMN_SHAPE
+    }
+
+    fn max_message_width(&self) -> usize {
+        MIDEN_MAX_MESSAGE_WIDTH
+    }
+
+    fn num_bus_ids(&self) -> usize {
+        BusId::COUNT
+    }
+
+    fn eval(&self, builder: &mut LB) {
+        // PLACEHOLDER: until MULTI_AIR_TODO M1.5 adds a chiplet-side row counter, the
+        // responder address has no Chiplets-side source. We pass `LB::Expr::ZERO` so the
+        // symbolic shape validates; real proofs cannot balance the hasher bus until M1.5
+        // wires the actual counter.
+        let main = builder.main();
+        let local: &ChipletCols<_> = main.current_slice().borrow();
+        let next: &ChipletCols<_> = main.next_slice().borrow();
+
+        constraints::lookup::chiplet_air::emit_chiplet_lookup_columns(
+            builder,
+            local,
+            next,
+            <LB::Expr as miden_core::field::PrimeCharacteristicRing>::ZERO,
+        );
+    }
+
+    fn eval_boundary<B>(&self, boundary: &mut B)
+    where
+        B: BoundaryBuilder<F = LB::F, EF = LB::EF>,
+    {
+        constraints::lookup::miden_air::emit_chiplets_boundary(boundary);
+    }
+}
+
+// --- AuxBuilder impl ---
+//
+// Until M1.5 lands, `build_logup_aux_trace` would also receive the placeholder address and
+// produce a Vec<EF> for an unbalanced bus. We omit the AuxBuilder impl here so production
+// callers cannot accidentally use this AIR before M1.5 closes the cross-trace clk hole.
+// `CoreAir`'s AuxBuilder + the lookup-validation test below cover the type-level shape.

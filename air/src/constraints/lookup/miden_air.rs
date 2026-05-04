@@ -133,10 +133,13 @@ mod tests {
 
     use super::NUM_LOGUP_COMMITTED_FINALS;
     use crate::{
-        CoreAir, Felt, NUM_PUBLIC_VALUES, ProcessorAir,
+        ChipletsAir, CoreAir, Felt, NUM_PUBLIC_VALUES, ProcessorAir,
         constraints::{
-            columns::NUM_CORE_COLS,
-            lookup::{BusId, MIDEN_MAX_MESSAGE_WIDTH, main_air::MAIN_COLUMN_SHAPE},
+            columns::{NUM_CHIPLETS_COLS, NUM_CORE_COLS},
+            lookup::{
+                BusId, MIDEN_MAX_MESSAGE_WIDTH, chiplet_air::CHIPLET_COLUMN_SHAPE,
+                main_air::MAIN_COLUMN_SHAPE,
+            },
         },
         lookup::{
             Challenges,
@@ -185,6 +188,27 @@ mod tests {
         };
         ValidateLookupAir::validate(&CoreAir, layout)
             .unwrap_or_else(|err| panic!("CoreAir LookupAir validation failed: {err}"));
+    }
+
+    /// Lookup-structure validation for `ChipletsAir` — the standalone Chiplets-half AIR.
+    /// Symmetric to `core_air_lookup_validates`: 21-col main trace, 3 LogUp accumulator
+    /// columns, 1 committed final, all periodic columns owned here.
+    #[test]
+    fn chiplets_air_lookup_validates() {
+        let num_periodic = miden_crypto::stark::air::LiftedAir::<Felt, QuadFelt>::periodic_columns(
+            &ChipletsAir,
+        )
+        .len();
+        let layout = ValidateLayout {
+            trace_width: NUM_CHIPLETS_COLS,
+            num_public_values: NUM_PUBLIC_VALUES,
+            num_periodic_columns: num_periodic,
+            permutation_width: CHIPLET_COLUMN_SHAPE.len(),
+            num_permutation_challenges: AUX_TRACE_RAND_CHALLENGES,
+            num_permutation_values: 1,
+        };
+        ValidateLookupAir::validate(&ChipletsAir, layout)
+            .unwrap_or_else(|err| panic!("ChipletsAir LookupAir validation failed: {err}"));
     }
 
     /// Smoke test: the trace-balance checker runs to completion on a tiny zero-valued trace
