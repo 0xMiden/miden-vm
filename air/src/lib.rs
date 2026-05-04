@@ -387,35 +387,43 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ProcessorAir {
     }
 
     fn eval<AB: MidenAirBuilder>(&self, builder: &mut AB) {
+        // Borrow the row buffer once as `MainCols`, then immediately bridge to the per-AIR
+        // views: `CoreCols` (system + decoder + stack + range) for the Core half, and
+        // `ChipletCols` (chiplets + s_perm) for the Chiplets half.
         let main = builder.main();
-
-        // Access the two rows: current (local) and next
-        let local = main.current_slice();
-        let next = main.next_slice();
-
-        // Use structured column access via MainTraceCols
-        let local: &MainCols<AB::Var> = (*local).borrow();
-        let next: &MainCols<AB::Var> = (*next).borrow();
+        let local_main: &MainCols<AB::Var> = (*main.current_slice()).borrow();
+        let next_main: &MainCols<AB::Var> = (*main.next_slice()).borrow();
+        let local_core = local_main.as_core_cols();
+        let next_core = next_main.as_core_cols();
+        let local_chiplet = local_main.as_chiplet_cols();
+        let next_chiplet = next_main.as_chiplet_cols();
 
         // Build chiplet selectors and op flags once, shared by main and bus constraints.
         let selectors = constraints::chiplets::selectors::build_chiplet_selectors(
             builder,
-            local.as_chiplet_cols(),
-            next.as_chiplet_cols(),
+            local_chiplet,
+            next_chiplet,
         );
-        let op_flags =
-            constraints::op_flags::OpFlags::new(&local.decoder, &local.stack, &next.decoder);
+        let op_flags = constraints::op_flags::OpFlags::new(
+            &local_core.decoder,
+            &local_core.stack,
+            &next_core.decoder,
+        );
 
-        // Main trace constraints.
-        constraints::enforce_main(builder, local, next, &selectors, &op_flags);
+        // Main trace constraints — partitioned at the call site so the per-AIR shape is
+        // visible at the top level. Each helper takes only its segment's view.
+        constraints::enforce_core(builder, local_core, next_core, &op_flags);
+        constraints::enforce_chiplets(builder, local_chiplet, next_chiplet, &selectors);
 
+        // LogUp lookup-argument constraints. Both halves are aggregated by ProcessorAir's
+        // `LookupAir::eval` which dispatches to `MainLookupAir.eval` + `ChipletLookupAir.eval`.
         {
             let mut lb = ConstraintLookupBuilder::new(builder, self);
             <Self as LookupAir<_>>::eval(self, &mut lb);
         }
 
-        // Public inputs boundary constraints.
-        constraints::public_inputs::enforce_main(builder, local.as_core_cols());
+        // Public input boundary constraints (Core-only).
+        constraints::public_inputs::enforce_main(builder, local_core);
     }
 
     fn log_quotient_degree(&self) -> usize
