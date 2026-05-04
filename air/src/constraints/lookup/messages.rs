@@ -557,7 +557,7 @@ pub struct MemoryResponseMsg<E> {
 
 use crate::lookup::message::LookupMessage;
 
-// --- HasherMsg (interaction-specific bus ids; payload starts at β⁰) ------------------------------
+// --- HasherMsg (interaction-specific bus ids) ----------------------------------------------------
 
 impl<E, EF> LookupMessage<E, EF> for HasherMsg<E>
 where
@@ -578,7 +578,7 @@ where
     }
 }
 
-// --- MemoryMsg (interaction-specific bus ids; payload starts at β⁰) ------------------------------
+// --- MemoryMsg (interaction-specific bus ids) ----------------------------------------------------
 
 impl<E, EF> LookupMessage<E, EF> for MemoryMsg<E>
 where
@@ -609,8 +609,7 @@ where
     }
 }
 
-// --- BitwiseMsg (BusId::Bitwise; op at β⁰)
-// ----------------------------------------------------------
+// --- BitwiseMsg ----------------------------------------------------------------------------------
 
 impl<E, EF> LookupMessage<E, EF> for BitwiseMsg<E>
 where
@@ -625,7 +624,7 @@ where
     }
 }
 
-// --- BlockStackMsg (BusId::BlockStackTable) ---------------------------------------------
+// --- BlockStackMsg -------------------------------------------------------------------------------
 
 impl<E, EF> LookupMessage<E, EF> for BlockStackMsg<E>
 where
@@ -665,7 +664,7 @@ where
     }
 }
 
-// --- BlockHashMsg (BusId::BlockHashTable) -----------------------------------------------
+// --- BlockHashMsg --------------------------------------------------------------------------------
 
 impl<E, EF> LookupMessage<E, EF> for BlockHashMsg<E>
 where
@@ -702,7 +701,7 @@ where
     }
 }
 
-// --- OpGroupMsg (BusId::OpGroupTable) ---------------------------------------------------
+// --- OpGroupMsg ----------------------------------------------------------------------------------
 
 impl<E, EF> LookupMessage<E, EF> for OpGroupMsg<E>
 where
@@ -717,7 +716,7 @@ where
     }
 }
 
-// --- StackOverflowMsg (BusId::StackOverflowTable) ---------------------------------------
+// --- StackOverflowMsg ----------------------------------------------------------------------------
 
 impl<E, EF> LookupMessage<E, EF> for StackOverflowMsg<E>
 where
@@ -732,8 +731,7 @@ where
     }
 }
 
-// --- KernelRomMsg (BusId::KernelRomInit / BusId::KernelRomCall)
-// ------------------------------------
+// --- KernelRomMsg --------------------------------------------------------------------------------
 
 impl<E, EF> LookupMessage<E, EF> for KernelRomMsg<E>
 where
@@ -745,8 +743,7 @@ where
     }
 }
 
-// --- AceInitMsg (BusId::AceInit)
-// -------------------------------------------------------------------
+// --- AceInitMsg ----------------------------------------------------------------------------------
 
 impl<E, EF> LookupMessage<E, EF> for AceInitMsg<E>
 where
@@ -767,7 +764,7 @@ where
     }
 }
 
-// --- RangeMsg (BusId::RangeCheck) --------------------------------------------------------
+// --- RangeMsg ------------------------------------------------------------------------------------
 
 impl<E, EF> LookupMessage<E, EF> for RangeMsg<E>
 where
@@ -779,7 +776,7 @@ where
     }
 }
 
-// --- LogCapacityMsg (BusId::LogPrecompileTranscript; capacity at β⁰..β³) ----------------------
+// --- LogCapacityMsg ------------------------------------------------------------------------------
 
 impl<E, EF> LookupMessage<E, EF> for LogCapacityMsg<E>
 where
@@ -791,8 +788,7 @@ where
     }
 }
 
-// --- HasherPermLinkMsg (BusId::HasherPermLinkInput / HasherPermLinkOutput)
-// -------------------------------------
+// --- HasherPermLinkMsg ---------------------------------------------------------------------------
 
 impl<E, EF> LookupMessage<E, EF> for HasherPermLinkMsg<E>
 where
@@ -808,7 +804,7 @@ where
     }
 }
 
-// --- AceWireMsg (BusId::AceWiring) -------------------------------------------------------
+// --- AceWireMsg ----------------------------------------------------------------------------------
 
 impl<E, EF> LookupMessage<E, EF> for AceWireMsg<E>
 where
