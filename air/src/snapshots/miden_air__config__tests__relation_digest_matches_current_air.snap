@@ -1,8 +1,8 @@
 ---
 source: air/src/config.rs
-assertion_line: 335
+assertion_line: 333
 expression: snapshot
 ---
-num_inputs: 570
-num_eval_gates: 5540
-relation_digest: [12817581244252847621, 10579010921661716929, 2801376834683705192, 7236919513873699770]
+num_inputs: 572
+num_eval_gates: 5548
+relation_digest: [16021353096418446881, 8695402885978561860, 3152993013025853338, 16975233690418952866]
