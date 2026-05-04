@@ -84,9 +84,37 @@ impl BusId {
     pub const COUNT: usize = Self::HasherPermLinkOutput as usize + 1;
 }
 
-// Guard against an enum-update that skips a discriminant: any gap would inflate `COUNT`
-// relative to the real variant count and silently resize the bus-prefix table. If this
-// fires, either fill the gap or extend the check.
+// Per-variant discriminant locks. `BusId::COUNT` only catches gaps — a *reorder* that
+// kept the high watermark would silently swap which `bus_prefix[i]` each variant resolves
+// to, breaking domain separation across every emitter and consumer. These per-variant
+// asserts pin the entire layout so any reorder fails at compile time.
+//
+// If a new bus is added: append it after the current tail, bump `HasherPermLinkOutput`'s
+// expected index here only if necessary, and add a matching assert for the new variant.
+const _: () = assert!(BusId::KernelRomInit as usize == 0);
+const _: () = assert!(BusId::BlockHashTable as usize == 1);
+const _: () = assert!(BusId::LogPrecompileTranscript as usize == 2);
+const _: () = assert!(BusId::KernelRomCall as usize == 3);
+const _: () = assert!(BusId::HasherLinearHashInit as usize == 4);
+const _: () = assert!(BusId::HasherReturnState as usize == 5);
+const _: () = assert!(BusId::HasherAbsorption as usize == 6);
+const _: () = assert!(BusId::HasherReturnHash as usize == 7);
+const _: () = assert!(BusId::HasherMerkleVerifyInit as usize == 8);
+const _: () = assert!(BusId::HasherMerkleOldInit as usize == 9);
+const _: () = assert!(BusId::HasherMerkleNewInit as usize == 10);
+const _: () = assert!(BusId::MemoryReadElement as usize == 11);
+const _: () = assert!(BusId::MemoryWriteElement as usize == 12);
+const _: () = assert!(BusId::MemoryReadWord as usize == 13);
+const _: () = assert!(BusId::MemoryWriteWord as usize == 14);
+const _: () = assert!(BusId::Bitwise as usize == 15);
+const _: () = assert!(BusId::AceInit as usize == 16);
+const _: () = assert!(BusId::BlockStackTable as usize == 17);
+const _: () = assert!(BusId::OpGroupTable as usize == 18);
+const _: () = assert!(BusId::StackOverflowTable as usize == 19);
+const _: () = assert!(BusId::SiblingTable as usize == 20);
+const _: () = assert!(BusId::RangeCheck as usize == 21);
+const _: () = assert!(BusId::AceWiring as usize == 22);
+const _: () = assert!(BusId::HasherPermLinkInput as usize == 23);
 const _: () = assert!(BusId::HasherPermLinkOutput as usize == 24);
 
 // HASHER MESSAGES
