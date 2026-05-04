@@ -5616,6 +5616,123 @@ fn test_cross_module_constant_resolution_as_local_definition() -> TestResult {
 }
 
 #[test]
+fn importing_private_constant_from_another_module_is_rejected() -> TestResult {
+    let context = TestContext::default();
+
+    let module_a = context.parse_module_with_path(
+        "cycle::module_a",
+        source_file!(
+            &context,
+            r#"
+            const A_VAL = 10
+            pub proc a_proc
+                push.A_VAL
+            end
+        "#
+        ),
+    )?;
+
+    let module_b = context.parse_module_with_path(
+        "cycle::module_b",
+        source_file!(
+            &context,
+            r#"
+            use cycle::module_a::A_VAL
+            pub proc b_proc
+                push.A_VAL
+            end
+        "#
+        ),
+    )?;
+
+    let err = Assembler::new(context.source_manager())
+        .assemble_library([module_a, module_b])
+        .expect_err("expected private constant import to be rejected");
+    assert_diagnostic!(&err, "private symbol reference");
+    assert_diagnostic!(&err, "only public items can be referenced from another module");
+
+    Ok(())
+}
+
+#[test]
+fn importing_private_constant_from_another_module_by_absolute_path_is_rejected() -> TestResult {
+    let context = TestContext::default();
+
+    let module_a = context.parse_module_with_path(
+        "cycle::module_a",
+        source_file!(
+            &context,
+            r#"
+            const A_VAL = 10
+            pub proc a_proc
+                push.A_VAL
+            end
+        "#
+        ),
+    )?;
+
+    let module_b = context.parse_module_with_path(
+        "cycle::module_b",
+        source_file!(
+            &context,
+            r#"
+            use ::cycle::module_a::A_VAL
+            pub proc b_proc
+                push.A_VAL
+            end
+        "#
+        ),
+    )?;
+
+    let err = Assembler::new(context.source_manager())
+        .assemble_library([module_a, module_b])
+        .expect_err("expected private absolute constant import to be rejected");
+    assert_diagnostic!(&err, "private symbol reference");
+    assert_diagnostic!(&err, "only public items can be referenced from another module");
+
+    Ok(())
+}
+
+#[test]
+fn importing_private_type_from_another_module_is_rejected() -> TestResult {
+    let context = TestContext::default();
+
+    let module_a = context.parse_module_with_path(
+        "cycle::module_a",
+        source_file!(
+            &context,
+            r#"
+            type PrivateType = felt
+            pub proc a_proc
+                nop
+            end
+        "#
+        ),
+    )?;
+
+    let module_b = context.parse_module_with_path(
+        "cycle::module_b",
+        source_file!(
+            &context,
+            r#"
+            use cycle::module_a::PrivateType
+            pub proc b_proc(value: PrivateType)
+                nop
+            end
+        "#
+        ),
+    )?;
+
+    let err = Assembler::new(context.source_manager())
+        .assemble_library([module_a, module_b])
+        .expect_err("expected private type import to be rejected");
+    assert_diagnostic!(&err, "private symbol reference");
+    assert_diagnostic!(&err, "only public items can be referenced from another module");
+
+    Ok(())
+}
+
+#[test]
 fn test_cross_module_constant_reexport_chain_in_procedure_scope() -> TestResult {
     let context = TestContext::new();
 
