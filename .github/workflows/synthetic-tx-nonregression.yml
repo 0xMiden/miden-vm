@@ -65,7 +65,7 @@ jobs:
           rustup toolchain install "${toolchain}" --profile minimal --target wasm32-unknown-unknown
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        uses: WarpBuilds/rust-cache@9d0cc3090d9c87de74ea67617b246e978735b1a1 # v2.9.1
 
       - name: Prepare benchmark directories
         id: dirs
