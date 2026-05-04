@@ -12,7 +12,7 @@
 
 use chiplets::selectors::ChipletSelectors;
 
-use crate::{ChipletCols, CoreCols, MainCols, MidenAirBuilder};
+use crate::{ChipletCols, CoreCols, MidenAirBuilder};
 
 pub mod chiplets;
 pub mod columns;
@@ -29,25 +29,11 @@ pub mod utils;
 
 // ENTRY POINTS
 // ================================================================================================
-
-/// Enforces all main trace constraints.
-///
-/// Thin wrapper around [`enforce_core`] + [`enforce_chiplets`]; preserved for callers that
-/// want the full single-AIR view in one call. The two halves are also exposed individually
-/// so the per-AIR `LiftedAir` impls (`CoreAir`, `ChipletsAir`)
-/// can each run only their share.
-pub fn enforce_main<AB>(
-    builder: &mut AB,
-    local: &MainCols<AB::Var>,
-    next: &MainCols<AB::Var>,
-    selectors: &ChipletSelectors<AB::Expr>,
-    op_flags: &op_flags::OpFlags<AB::Expr>,
-) where
-    AB: MidenAirBuilder,
-{
-    enforce_core(builder, local.as_core_cols(), next.as_core_cols(), op_flags);
-    enforce_chiplets(builder, local.as_chiplet_cols(), next.as_chiplet_cols(), selectors);
-}
+//
+// Main trace constraints are partitioned by AIR: `enforce_core` runs the Core half (system,
+// range, stack, decoder) and `enforce_chiplets` runs the Chiplets half. `ProcessorAir::eval`
+// calls both at the top level. Per-AIR `LiftedAir` impls (`CoreAir`, `ChipletsAir`) each call
+// only their share.
 
 /// Enforces the Core-trace main constraints: system, range, stack, decoder.
 ///

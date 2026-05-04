@@ -275,6 +275,94 @@ impl MainTrace {
         }
     }
 
+    /// Splits the trace into the per-AIR `(Core, Chiplets)` matrix pair used by the multi-AIR
+    /// proving path.
+    ///
+    /// - **Core matrix** is `NUM_CORE_COLS = 51` wide: the leading system + decoder + stack +
+    ///   range columns, in the same order they appear in the unified row-major trace.
+    /// - **Chiplets matrix** is `CHIPLETS_WIDTH = 21` wide: the trailing chiplet data + s_perm
+    ///   columns, also in unified-trace order.
+    pub fn to_core_chiplets_matrices(&self) -> (RowMajorMatrix<Felt>, RowMajorMatrix<Felt>) {
+        const CORE_W: usize = crate::constraints::columns::NUM_CORE_COLS;
+        const CHIP_W: usize = CHIPLETS_WIDTH;
+        // Sanity: Core covers system + decoder + stack + range, exactly the span of the
+        // monolithic trace before the chiplet section.
+        const _: () = assert!(CORE_W == CORE_WIDTH + RANGE_CHECK_TRACE_WIDTH);
+
+        match &self.storage {
+            TraceStorage::Parts {
+                core_rm,
+                chiplets_rm,
+                range_checker_cols,
+                num_rows,
+            } => {
+                let h = *num_rows;
+                let mut core_data = Vec::with_capacity(h * CORE_W);
+                // SAFETY: the loop below writes exactly `h * CORE_W` elements.
+                #[allow(clippy::uninit_vec)]
+                unsafe {
+                    core_data.set_len(h * CORE_W);
+                }
+
+                let fill_core = |chunk: &mut [Felt], start_row: usize| {
+                    let chunk_rows = chunk.len() / CORE_W;
+                    for i in 0..chunk_rows {
+                        let row = start_row + i;
+                        let dst = &mut chunk[i * CORE_W..(i + 1) * CORE_W];
+                        dst[..CORE_WIDTH]
+                            .copy_from_slice(&core_rm[row * CORE_WIDTH..(row + 1) * CORE_WIDTH]);
+                        dst[CORE_WIDTH] = range_checker_cols[0][row];
+                        dst[CORE_WIDTH + 1] = range_checker_cols[1][row];
+                    }
+                };
+
+                #[cfg(not(feature = "concurrent"))]
+                fill_core(&mut core_data, 0);
+
+                #[cfg(feature = "concurrent")]
+                {
+                    use miden_crypto::parallel::*;
+                    let rows_per_chunk = ROW_MAJOR_CHUNK_SIZE;
+                    core_data.par_chunks_mut(rows_per_chunk * CORE_W).enumerate().for_each(
+                        |(chunk_idx, chunk)| {
+                            fill_core(chunk, chunk_idx * rows_per_chunk);
+                        },
+                    );
+                }
+
+                let chiplets_data = chiplets_rm.clone();
+
+                (
+                    RowMajorMatrix::new(core_data, CORE_W),
+                    RowMajorMatrix::new(chiplets_data, CHIP_W),
+                )
+            },
+            // RowMajor / Transposed go through the unified row-major view and slice the
+            // halves out. These paths exist for round-trips through `MainTrace::new` /
+            // `MainTrace::from_transposed` (e.g. aux trace construction); the build_trace
+            // hot path stays on the `Parts` arm above.
+            TraceStorage::RowMajor(_) | TraceStorage::Transposed { .. } => {
+                let rm = self.to_row_major();
+                let h = rm.height();
+                let w = rm.width();
+                debug_assert!(w >= CORE_W + CHIP_W);
+
+                let mut core_data = Vec::with_capacity(h * CORE_W);
+                let mut chip_data = Vec::with_capacity(h * CHIP_W);
+                for row in 0..h {
+                    let src = rm.row_slice(row).expect("row index in bounds");
+                    core_data.extend_from_slice(&src[..CORE_W]);
+                    chip_data.extend_from_slice(&src[CORE_W..CORE_W + CHIP_W]);
+                }
+
+                (
+                    RowMajorMatrix::new(core_data, CORE_W),
+                    RowMajorMatrix::new(chip_data, CHIP_W),
+                )
+            },
+        }
+    }
+
     pub fn num_rows(&self) -> usize {
         match &self.storage {
             TraceStorage::Parts { num_rows, .. } => *num_rows,
@@ -931,5 +1019,82 @@ impl MainTrace {
             && self.chiplet_selector_1(i) == ONE  // s0=1 (input row)
             && self.chiplet_selector_2(i) == ONE  // s1=1 (MR_UPDATE_NEW)
             && self.chiplet_selector_3(i) == ONE // s2=1
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use miden_core::field::PrimeCharacteristicRing;
+
+    use super::*;
+    use crate::{constraints::columns::NUM_CORE_COLS, trace::TRACE_WIDTH};
+
+    /// Builds a deterministic Parts-form `MainTrace` with `num_rows` rows where each cell
+    /// holds `Felt::from_u32(row * TRACE_WIDTH + col)` for col positions matching the
+    /// equivalent unified-trace column index.
+    fn deterministic_parts_trace(num_rows: usize) -> MainTrace {
+        let mut core_rm = Vec::with_capacity(num_rows * CORE_WIDTH);
+        let mut chiplets_rm = Vec::with_capacity(num_rows * CHIPLETS_WIDTH);
+        let mut range_cols: [Vec<Felt>; 2] = [Vec::with_capacity(num_rows), Vec::with_capacity(num_rows)];
+
+        for row in 0..num_rows {
+            for col in 0..CORE_WIDTH {
+                core_rm.push(Felt::from_u32((row * TRACE_WIDTH + col) as u32));
+            }
+            range_cols[0].push(Felt::from_u32((row * TRACE_WIDTH + CORE_WIDTH) as u32));
+            range_cols[1].push(Felt::from_u32((row * TRACE_WIDTH + CORE_WIDTH + 1) as u32));
+            for c in 0..CHIPLETS_WIDTH {
+                chiplets_rm.push(Felt::from_u32(
+                    (row * TRACE_WIDTH + CORE_WIDTH + 2 + c) as u32,
+                ));
+            }
+        }
+
+        MainTrace::from_parts(core_rm, chiplets_rm, range_cols, num_rows, RowIndex::from(0))
+    }
+
+    /// `to_core_chiplets_matrices` from a `Parts`-form trace produces the same data that the
+    /// equivalent unified-row-major projection would: Core matches `to_row_major()[..51]` and
+    /// Chiplets matches `to_row_major()[51..72]` row by row.
+    #[test]
+    fn split_matches_row_major_projection_parts() {
+        const NUM_ROWS: usize = 8;
+        let trace = deterministic_parts_trace(NUM_ROWS);
+        let unified = trace.to_row_major();
+        let (core, chiplets) = trace.to_core_chiplets_matrices();
+
+        assert_eq!(core.height(), NUM_ROWS);
+        assert_eq!(core.width(), NUM_CORE_COLS);
+        assert_eq!(chiplets.height(), NUM_ROWS);
+        assert_eq!(chiplets.width(), CHIPLETS_WIDTH);
+
+        for row in 0..NUM_ROWS {
+            let unified_row = unified.row_slice(row).expect("unified row in bounds");
+            let core_row = core.row_slice(row).expect("core row in bounds");
+            let chip_row = chiplets.row_slice(row).expect("chiplets row in bounds");
+
+            assert_eq!(&core_row[..], &unified_row[..NUM_CORE_COLS]);
+            assert_eq!(&chip_row[..], &unified_row[NUM_CORE_COLS..NUM_CORE_COLS + CHIPLETS_WIDTH]);
+        }
+    }
+
+    /// Same projection invariant via the `RowMajor` storage path: round-trip through
+    /// `MainTrace::new(unified)` and check the split projection still matches.
+    #[test]
+    fn split_matches_row_major_projection_row_major() {
+        const NUM_ROWS: usize = 8;
+        let parts_trace = deterministic_parts_trace(NUM_ROWS);
+        let unified = parts_trace.to_row_major();
+        let rm_trace = MainTrace::new(unified.clone(), RowIndex::from(0));
+        let (core, chiplets) = rm_trace.to_core_chiplets_matrices();
+
+        for row in 0..NUM_ROWS {
+            let unified_row = unified.row_slice(row).expect("unified row in bounds");
+            let core_row = core.row_slice(row).expect("core row in bounds");
+            let chip_row = chiplets.row_slice(row).expect("chiplets row in bounds");
+
+            assert_eq!(&core_row[..], &unified_row[..NUM_CORE_COLS]);
+            assert_eq!(&chip_row[..], &unified_row[NUM_CORE_COLS..NUM_CORE_COLS + CHIPLETS_WIDTH]);
+        }
     }
 }
