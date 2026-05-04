@@ -116,6 +116,8 @@
 - Add support to the `Assembler` for assembling Miden projects to Miden packages ([#2877](https://github.com/0xMiden/miden-vm/pull/2877))
 
 #### Fixes
+
+- Fixed `ExecutionTracer` DYNCALL stack-depth off-by-one at `MIN_STACK_DEPTH` ([#2813](https://github.com/0xMiden/miden-vm/issues/2813)).
 - Fixed C-like enum validation and constant materialization in `define_enum` ([#2887](https://github.com/0xMiden/miden-vm/pull/2887)).
 - **toposort_caller**: Fixed cycle detection in assembly call graph ([#2871](https://github.com/0xMiden/miden-vm/pull/2871)).
 
