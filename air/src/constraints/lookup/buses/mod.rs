@@ -34,7 +34,7 @@
 
 use miden_core::field::{Algebra, PrimeCharacteristicRing};
 
-use crate::MainCols;
+use crate::ChipletCols;
 
 pub(in crate::constraints::lookup) mod block_hash_and_op_group;
 pub(in crate::constraints::lookup) mod block_stack_and_range_logcap;
@@ -79,7 +79,7 @@ impl<E> ChipletActiveFlags<E>
 where
     E: PrimeCharacteristicRing + Clone,
 {
-    /// Build the chiplet active-flag snapshot from a `MainCols` borrow.
+    /// Build the chiplet active-flag snapshot from a `ChipletCols` borrow.
     ///
     /// Mirrors the active-flag block of
     /// [`build_chiplet_selectors`](super::super::chiplets::selectors::build_chiplet_selectors):
@@ -88,7 +88,7 @@ where
     /// - prefix chain `s01 / s012 / s0123 / s01234`
     /// - `is_bitwise = s0 - s01`, `is_memory = s01 - s012`, `is_ace = s012 - s0123`, `is_kernel_rom
     ///   = s0123 - s01234`
-    pub fn from_main_cols<V>(local: &MainCols<V>) -> Self
+    pub fn from_chiplet_cols<V>(local: &ChipletCols<V>) -> Self
     where
         V: Copy,
         E: Algebra<V>,

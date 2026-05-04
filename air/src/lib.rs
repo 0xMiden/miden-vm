@@ -41,7 +41,7 @@ pub mod logup {
 }
 
 use constraints::{
-    columns::MainCols,
+    columns::{ChipletCols, MainCols},
     lookup::{
         chiplet_air::{ChipletLookupAir, ChipletLookupBuilder},
         main_air::{MainLookupAir, MainLookupBuilder},

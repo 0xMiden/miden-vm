@@ -12,8 +12,8 @@
 //!
 //! The [`ChipletLookupBuilder`] extension trait mirrors [`super::main_air::MainLookupBuilder`]:
 //! it exposes a single construction hook so the prover path can eventually skip the dead
-//! polynomial products in [`ChipletActiveFlags::from_main_cols`]. For now the default body
-//! is the polynomial path and every adapter picks it up via an empty `impl` block.
+//! polynomial products in [`ChipletActiveFlags::from_chiplet_cols`]. For now the default
+//! body is the polynomial path and every adapter picks it up via an empty `impl` block.
 
 use core::borrow::Borrow;
 
@@ -45,12 +45,13 @@ use crate::{
 pub(crate) trait ChipletLookupBuilder: LookupBuilder<F = Felt> {
     /// Build the shared [`ChipletActiveFlags`] snapshot for one `eval` call.
     ///
-    /// Default body calls [`ChipletActiveFlags::from_main_cols`], matching the pre-split
-    /// behavior of `ChipletTraceContext::new`. Adapters override this when a cheaper
-    /// construction path is available (e.g. the prover path, where the selector columns
-    /// are concrete 0/1 and the active-flag subtractions can short-circuit).
+    /// Default body bridges through [`MainCols::as_chiplet_cols`] so the polynomial
+    /// construction operates on the multi-AIR `ChipletCols` view of the trailing chiplet
+    /// columns. Adapters override this when a cheaper construction path is available
+    /// (e.g. the prover path, where the selector columns are concrete 0/1 and the
+    /// active-flag subtractions can short-circuit).
     fn build_chiplet_active(&self, local: &MainCols<Self::Var>) -> ChipletActiveFlags<Self::Expr> {
-        ChipletActiveFlags::from_main_cols(local)
+        ChipletActiveFlags::from_chiplet_cols(local.as_chiplet_cols())
     }
 }
 

@@ -99,6 +99,30 @@ impl<T> MainCols<T> {
     pub fn controller(&self) -> &ControllerCols<T> {
         borrow_chiplet(&self.chiplets[1..])
     }
+
+    /// Returns the trailing chiplets + s_perm fields as a `&ChipletCols<T>`.
+    ///
+    /// Bridges the legacy `MainCols`-based call sites to the multi-AIR `ChipletCols` view
+    /// without requiring callers to re-borrow from a slice. `MainCols<T>` and `ChipletCols<T>`
+    /// are both `#[repr(C)]` and the trailing portion of `MainCols<T>` (`chiplets` +
+    /// `s_perm`) has the same layout as the entirety of `ChipletCols<T>` — verified at
+    /// runtime by the alignment tests in this module and at compile time by the
+    /// `NUM_CORE_COLS + NUM_CHIPLETS_COLS == TRACE_WIDTH` assertion.
+    pub fn as_chiplet_cols(&self) -> &ChipletCols<T> {
+        // SAFETY: `MainCols<T>` is `#[repr(C)]` with the field order
+        // `[system, decoder, stack, range, chiplets, s_perm]`. `ChipletCols<T>` is also
+        // `#[repr(C)]` with the field order `[chiplets, s_perm]` and the same field types
+        // and alignment as the trailing fields of `MainCols<T>`. The pointer arithmetic
+        // computes the byte offset of the `chiplets` field via `offset_of!` and reinterprets
+        // the pointer there as a `&ChipletCols<T>`. The resulting reference's lifetime is
+        // tied to `&self`, which prevents aliasing with any later mutation.
+        unsafe {
+            let chiplets_ptr = (self as *const Self)
+                .cast::<u8>()
+                .add(core::mem::offset_of!(Self, chiplets));
+            &*chiplets_ptr.cast::<ChipletCols<T>>()
+        }
+    }
 }
 
 impl<T> Borrow<MainCols<T>> for [T] {
@@ -443,6 +467,31 @@ mod tests {
         // and the value in our deterministic buffer equals the column index.
         assert_eq!(chiplets.chiplets[0], CHIPLETS_OFFSET);
         assert_eq!(chiplets.s_perm, CHIPLETS_OFFSET + 20);
+    }
+
+    /// `MainCols::as_chiplet_cols()` returns a `&ChipletCols<T>` pointing at the trailing
+    /// portion of the same buffer. Field-by-field comparison verifies the reinterpret cast
+    /// is sound (matching what `chiplet_cols_layout_aligned_with_main` proves through the
+    /// slice-Borrow path).
+    #[test]
+    fn as_chiplet_cols_aliases_main_chiplets() {
+        let buf: alloc::vec::Vec<usize> = (0..TRACE_WIDTH).collect();
+
+        let main: &MainCols<usize> = buf.as_slice().borrow();
+        let bridged: &ChipletCols<usize> = main.as_chiplet_cols();
+
+        // The reinterpret cast yields a reference to the same chiplets array.
+        assert_eq!(bridged.chiplets, main.chiplets);
+        assert_eq!(bridged.s_perm, main.s_perm);
+
+        // And the bridged view starts exactly at the chiplets offset.
+        assert_eq!(bridged.chiplets[0], CHIPLETS_OFFSET);
+        assert_eq!(bridged.s_perm, CHIPLETS_OFFSET + 20);
+
+        // Address parity: the bridged ChipletCols sits at the same address as
+        // re-borrowing the trailing slice as ChipletCols.
+        let direct: &ChipletCols<usize> = buf[NUM_CORE_COLS..].borrow();
+        assert_eq!(bridged as *const _ as usize, direct as *const _ as usize);
     }
 
     /// `ChipletCols` chiplet accessors return the same view as the `MainCols` equivalents
