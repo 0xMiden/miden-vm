@@ -404,6 +404,15 @@ where
     ) where
         M: LookupMessage<F, EF>,
     {
+        // The prover path short-circuits on `flag == F::ZERO`, while the constraint path
+        // evaluates the encode unconditionally. The two agree only when `flag ∈ {0, 1}`.
+        // Every Miden bus emitter today drives `flag` as a product of decoder/op selectors
+        // pinned boolean by the AIR. This debug assertion catches regressions at test time.
+        debug_assert!(
+            flag == F::ZERO || flag == F::ONE,
+            "ProverGroup::insert flag must be in {{0, 1}}; non-boolean flag would diverge \
+             from the constraint path",
+        );
         if flag == F::ZERO {
             return;
         }
@@ -418,6 +427,12 @@ where
         build: impl FnOnce(&mut Self::Batch<'b>),
         _deg: Deg,
     ) {
+        // Same boolean-flag invariant as `insert`; see comment above.
+        debug_assert!(
+            flag == F::ZERO || flag == F::ONE,
+            "ProverGroup::batch flag must be in {{0, 1}}; non-boolean flag would diverge \
+             from the constraint path",
+        );
         // When `active == false` every push inside the batch is a no-op — the
         // `msg.encode()` call is skipped too. The `build` closure still runs so
         // it can produce its `R` return value without requiring `R: Default`.
