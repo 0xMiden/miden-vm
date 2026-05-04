@@ -70,12 +70,12 @@ end
 #!    left-shift) is exactly position (bits-1-i) of the original -- i.e., the
 #!    reversed index. No final shift is needed.
 #!
-#! The two halves never overlap, so XOR = OR = ADD; we use XOR (2 cycles vs 4 for
+#! The two halves never overlap, so XOR = OR = ADD; we use XOR (1 cycle vs 3 for
 #! u32wrapping_add).
 #!
 #! Input: [index, pow2_shift, ...]
 #! Output: [rev_index, ...]
-#! Cycles: 83
+#! Cycles: 78
 pub proc bit_reverse_len_parallel
     u32wrapping_mul
 

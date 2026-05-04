@@ -82,7 +82,7 @@ fn test_after_exit_trace_executes_with_tracing_only_fast() {
         .with_tracing(true);
 
     let result = processor.execute_sync(&program, &mut host);
-    assert!(result.is_ok(), "Execution failed: {:?}", result);
+    assert!(result.is_ok(), "Execution failed: {result:?}");
 
     assert_eq!(
         host.get_trace_count(2),
