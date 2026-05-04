@@ -18,21 +18,24 @@ end
 
 #! Validates the inputs to the recursive verifier.
 #!
-#! Checks log(trace_length) from the stack and security parameters from memory.
-#! The security parameters must already be stored in memory before calling this
-#! procedure (done by the specific verifier's load_security_params).
+#! Checks the two per-AIR `log(trace_length)` values from the stack and security
+#! parameters from memory. The security parameters must already be stored in memory
+#! before calling this procedure (done by the specific verifier's load_security_params).
 #!
-#! Input: [log(trace_length), ...]
-#! Output: [log(trace_length), ...]
+#! Input: [log(min_trace_length), log(max_trace_length), ...]
+#! Output: [log(min_trace_length), log(max_trace_length), ...]
 pub proc validate_inputs
-    # 1) Assert log(trace_length) is u32
+    # Validate log(min_trace_length): u32, in (5, 30). Pattern preserves the value on the stack.
     dup u32assert
+    dup u32lt.30 assert.err="log(min_trace_length) must be less than 30"
+    dup u32gt.5 assert.err="log(min_trace_length) must be greater than 5"
+    drop
 
-    # 2) Assert that the trace length is at most 29. The 2-adicity of our field is 32 and since
-    #    the blowup factor is 8, we need to make sure that the LDE size is at most 2^32.
-    #    We also check that the trace length is greater than the minimal length supported i.e., 2^6.
-    dup u32lt.30 assert.err="log(trace_length) must be less than 30"
-    u32gt.5 assert.err="log(trace_length) must be greater than 5"
+    # Validate log(max_trace_length): same pattern, copying from depth 1.
+    dup.1 u32assert
+    dup u32lt.30 assert.err="log(max_trace_length) must be less than 30"
+    dup u32gt.5 assert.err="log(max_trace_length) must be greater than 5"
+    drop
 
     # 3) Assert that the number of FRI queries is at most 150. This restriction is a soft one
     #    and is due to the memory layout in the `constants.masm` files but can be updated

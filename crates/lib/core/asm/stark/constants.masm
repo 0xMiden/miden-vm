@@ -51,8 +51,17 @@ const TRACE_LENGTH_PTR = 3223322632
 ### data for running FRI check
 const FRI_QUERIES_ADDRESS_PTR = 3223322633
 
-### Address to store the logarithm of the execution trace length
+### Address to store the logarithm of the execution trace length.
+### After the multi-AIR split (MULTI_AIR_TODO M5+), this stores the *max* per-AIR log
+### height (used for the lifted-domain math everywhere downstream). The smaller AIR's
+### log height lives at `MIN_TRACE_LENGTH_LOG_PTR` and is only consulted by
+### `observe_trace_height_and_discard_instance_challenge` to mirror the multi-AIR
+### transcript binding.
 const TRACE_LENGTH_LOG_PTR = 3223322634
+
+### Address storing the smaller of the two per-AIR log heights (multi-AIR M7).
+### See `TRACE_LENGTH_LOG_PTR`.
+const MIN_TRACE_LENGTH_LOG_PTR = 3223322635
 
 ### Addresses to store the commitments to main, auxiliary and constraints composition polynomials traces
 const MAIN_TRACE_COM_PTR = 3223322636
@@ -347,6 +356,14 @@ end
 
 pub proc get_trace_length_log
     push.TRACE_LENGTH_LOG_PTR mem_load
+end
+
+pub proc set_min_trace_length_log
+    push.MIN_TRACE_LENGTH_LOG_PTR mem_store
+end
+
+pub proc get_min_trace_length_log
+    push.MIN_TRACE_LENGTH_LOG_PTR mem_load
 end
 
 pub proc set_query_pow_bits

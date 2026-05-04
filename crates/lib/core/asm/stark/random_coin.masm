@@ -154,12 +154,16 @@ end
 #! Precondition: num_queries, query_pow_bits, deep_pow_bits, and folding_pow_bits must
 #! already be stored in memory before calling this procedure.
 #!
-#! Input: [log(trace_length), rd0, rd1, rd2, rd3, ...]
+#! Input: [log(min_trace_length), log(max_trace_length), rd0, rd1, rd2, rd3, ...]
 #! Output: [...]
 pub proc init_seed
 
-    # Save log(trace_length) in memory for later use.
-    dup exec.constants::set_trace_length_log
+    # Save the per-AIR log heights in memory for later use.
+    # The max height drives all downstream lifted-domain math; the min height is only
+    # consulted by `observe_trace_height_and_discard_instance_challenge` to mirror the
+    # multi-AIR transcript binding.
+    dup exec.constants::set_min_trace_length_log
+    dup.1 exec.constants::set_trace_length_log
 
     # Initialize the zero word and buffers to zero.
     padw
@@ -167,7 +171,7 @@ pub proc init_seed
     dropw
     push.0 exec.constants::random_coin_input_len_ptr mem_store
     push.0 exec.constants::random_coin_output_len_ptr mem_store
-    #=> [log(tl), rd0, rd1, rd2, rd3, ...]
+    #=> [log(min_tl), log(max_tl), rd0, rd1, rd2, rd3, ...]
 
     # ---- RELATION_DIGEST + PCS_PARAMS ----
 
@@ -176,9 +180,9 @@ pub proc init_seed
     #   R2 = [log_blowup, log_final_degree, fold_arity, 0]
     #   C  = [rd0, rd1, rd2, rd3]   (RELATION_DIGEST)
     #
-    # Drop log(tl) from the stack (saved in memory, not part of Phase 1 rate).
+    # Drop both per-AIR log heights from the stack (saved in memory above).
 
-    drop
+    drop drop
     #=> [rd0, rd1, rd2, rd3, ...]
 
     # Build R1 from security parameters stored in memory.
@@ -273,13 +277,15 @@ pub proc init_seed
     drop drop
 end
 
-#! Observe the single AIR instance shape and discard the instance challenge.
+#! Observe the multi-AIR instance shape and discard the instance challenge.
 #!
-#! miden-lifted-stark 0.24 observes each log(trace_length) after public inputs and then samples
-#! one extension-field instance challenge before absorbing the main trace commitment. The VM
-#! recursive verifier only supports one AIR instance, so this helper observes the stored
-#! log(trace_length), performs the partial-rate duplexing, and marks two base-field outputs as
-#! consumed without materializing the unused extension element.
+#! miden-lifted-stark observes each per-AIR `log(trace_length)` (in proof-sort order,
+#! ascending) after public inputs, and then samples one extension-field instance
+#! challenge before absorbing the main trace commitment. This helper:
+#!   1. writes log(min) to rate[0] and log(max) to rate[1] (matching the upstream
+#!      `DuplexChallenger` overwrite-the-first-`input_buffer.len()`-rate-elements rule),
+#!   2. permutes,
+#!   3. marks two base-field outputs as consumed (the throwaway EF squeeze).
 #!
 #! SAFETY:
 #!   1. input_len=0 (asserted).
@@ -298,10 +304,12 @@ pub proc observe_trace_height_and_discard_instance_challenge
     push.0 exec.constants::random_coin_output_len_ptr mem_store
     # => [...]
 
-    # observe log(trace_length) into rate[0], leaving rate[1..7] and capacity unchanged.
-    exec.constants::get_trace_length_log
-    # => [log(trace_length), ...]
+    # observe log(min) into rate[0] and log(max) into rate[1], leaving rate[2..7]
+    # and the capacity unchanged.
+    exec.constants::get_min_trace_length_log
     exec.constants::r1_ptr mem_store
+    exec.constants::get_trace_length_log
+    exec.constants::r1_ptr add.1 mem_store
     # => [...]
 
     exec.load_random_coin_state

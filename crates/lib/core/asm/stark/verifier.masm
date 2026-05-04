@@ -19,7 +19,9 @@ use miden::core::stark::utils
 #!   D2. `process_row_ood_evaluations`
 #!   D3. `execute_constraint_evaluation_check`
 #!   D4. `compute_deep_composition_polynomial_queries`
-#! 2. Per-proof parameter: `log(trace_length)`
+#! 2. Per-proof parameters: `log(min_trace_length), log(max_trace_length)` — the two
+#!    per-AIR log heights of a multi-AIR (Core, Chiplets) proof, in proof-sort order
+#!    (ascending). For a single-AIR proof both values must be equal.
 #! 3. `[rd0, rd1, rd2, rd3]`: RELATION_DIGEST = hash(PROTOCOL_ID, CIRCUIT_COMMITMENT),
 #!    a compile-time constant that binds the Fiat-Shamir transcript to the AIR instance.
 #!
@@ -35,7 +37,7 @@ use miden::core::stark::utils
 #!   Similarly, elements of the auxiliary trace are quadratic extension field elements. The random
 #!   values for computing random linear combinations are also in this extension field.
 #!
-#! Inputs:  [D0, D1, D2, D3, D4, log(trace_length), rd0, rd1, rd2, rd3]
+#! Inputs:  [D0, D1, D2, D3, D4, log(min_trace_length), log(max_trace_length), rd0, rd1, rd2, rd3]
 #! Outputs: []
 pub proc verify
 
@@ -45,14 +47,14 @@ pub proc verify
 
     # Store digests of dynamically executed procedures
     exec.utils::store_dynamically_executed_procedures
-    # => [log(trace_length), rd0, rd1, rd2, rd3]
+    # => [log(min_trace_length), log(max_trace_length), rd0, rd1, rd2, rd3]
 
-    # Validate inputs
+    # Validate inputs (each height independently)
     exec.utils::validate_inputs
-    # => [log(trace_length), rd0, rd1, rd2, rd3]
+    # => [log(min_trace_length), log(max_trace_length), rd0, rd1, rd2, rd3]
 
     # Initialize sponge with DSFS seeding and derive trace domain parameters.
-    # Consumes [log(tl), rd0, rd1, rd2, rd3]. Security params are read from memory.
+    # Consumes [log(min_tl), log(max_tl), rd0, rd1, rd2, rd3]. Security params are read from memory.
     exec.random_coin::init_seed
     # => [...]
 

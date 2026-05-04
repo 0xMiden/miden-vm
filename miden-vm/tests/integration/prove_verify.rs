@@ -239,20 +239,31 @@ mod recursive_verifier {
             challenger,
         )
         .expect("failed to replay verifier transcript");
-        let log_trace_height = stark.instance_shapes.log_trace_heights()[0] as usize;
+        let log_trace_heights = stark.instance_shapes.log_trace_heights().to_vec();
+        assert_eq!(log_trace_heights.len(), 2, "expected two AIR instances");
+        let log_min_trace_height = log_trace_heights[0] as usize;
+        let log_max_trace_height = log_trace_heights[1] as usize;
 
         let kernel_digests: Vec<Word> = kernel_felts
             .chunks_exact(4)
             .map(|chunk| Word::new([chunk[0], chunk[1], chunk[2], chunk[3]]))
             .collect();
 
-        build_advice(&config, &stark, log_trace_height, pub_inputs, &kernel_digests)
+        build_advice(
+            &config,
+            &stark,
+            log_min_trace_height,
+            log_max_trace_height,
+            pub_inputs,
+            &kernel_digests,
+        )
     }
 
     fn build_advice(
         config: &P2Config,
         stark: &StarkTranscript<Challenge, P2Lmcs>,
-        log_trace_height: usize,
+        log_min_trace_height: usize,
+        log_max_trace_height: usize,
         pub_inputs: PublicInputs,
         kernel_digests: &[Word],
     ) -> VerifierInputs {
@@ -311,7 +322,14 @@ mod recursive_verifier {
 
         let (store, advice_map) = build_merkle_data(config, stark);
         VerifierInputs {
-            initial_stack: vec![log_trace_height as u64],
+            // Initial stack matches the multi-AIR `verify` proc signature in
+            // `crates/lib/core/asm/stark/verifier.masm`:
+            //   [log(min_trace_length), log(max_trace_length), rd0, rd1, rd2, rd3, ...]
+            // The recursive verifier procedure expects them this order on entry; we push
+            // them as [log_max_trace_height, log_min_trace_height] so the test framework's
+            // last-pushed-on-top ordering yields [log_min_trace_height, log_max_trace_height]
+            // on the stack at the start of `verify`.
+            initial_stack: vec![log_max_trace_height as u64, log_min_trace_height as u64],
             advice_stack,
             store,
             advice_map,
