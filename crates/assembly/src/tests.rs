@@ -6173,6 +6173,45 @@ fn forward_declared_import_used_by_type_ref_is_not_reported_unused_when_warnings
 }
 
 #[test]
+fn forward_declared_import_used_by_proc_signature_is_not_reported_unused_when_warnings_are_errors()
+{
+    use std::sync::Arc;
+
+    use crate::{DefaultSourceManager, Parse, ParseOptions, ast::ModuleKind};
+
+    let source_manager: Arc<dyn crate::SourceManager> = Arc::new(DefaultSourceManager::default());
+    let module = r#"
+        pub proc check(value: foo::Type) -> foo::Type
+            nop
+        end
+        use external::module -> foo
+    "#;
+
+    let mut options = ParseOptions::new(ModuleKind::Library, "m");
+    options.warnings_as_errors = true;
+
+    <&str as Parse>::parse_with_options(module, source_manager, options)
+        .expect("expected forward-declared import used by signature type to count as used");
+}
+
+#[test]
+fn kernel_import_used_by_proc_signature_is_not_reported_unused_when_warnings_are_errors() {
+    let context = TestContext::new();
+    context
+        .parse_kernel(source_file!(
+            &context,
+            r#"
+            use external::module -> foo
+
+            pub proc check(value: foo::Type) -> foo::Type
+                nop
+            end
+            "#
+        ))
+        .expect("expected kernel signature type import to count as used");
+}
+
+#[test]
 fn forward_declared_import_used_by_constant_ref_is_not_reported_unused_when_warnings_are_errors() {
     use std::sync::Arc;
 
