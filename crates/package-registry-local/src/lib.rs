@@ -242,12 +242,11 @@ impl LocalPackageRegistry {
         Some(self.package_summary(package.clone(), version, record))
     }
 
-    /// Get the path in the artifact store for `version`
-    pub fn artifact_path(&self, version: &Version) -> Option<PathBuf> {
-        version
-            .digest
-            .as_ref()
-            .map(|digest| self.artifact_path_for_digest(*digest.inner()))
+    /// Get the path in the artifact store for `package` at `version`
+    pub fn artifact_path(&self, package: &PackageId, version: &Version) -> Option<PathBuf> {
+        version.digest.as_ref().map(|digest| {
+            self.artifact_path_for_package(package, &version.version, *digest.inner())
+        })
     }
 
     /// Loads the given version of `package` from the artifact store.
@@ -265,7 +264,7 @@ impl LocalPackageRegistry {
             }
         })?;
 
-        let path = self.artifact_path(version).ok_or_else(|| {
+        let path = self.artifact_path(package, version).ok_or_else(|| {
             LocalRegistryError::MissingArtifactDigest {
                 package: package.clone(),
                 version: version.clone(),
@@ -329,12 +328,44 @@ impl LocalPackageRegistry {
         file.flush().map_err(LocalRegistryError::IndexWrite)
     }
 
+    /// Merge records registered directly on this instance into `index`.
+    fn merge_instance_index_into(
+        &self,
+        index: &mut InMemoryPackageRegistry,
+    ) -> Result<(), LocalRegistryError> {
+        for (name, versions) in self.index.packages() {
+            for record in versions.values() {
+                if index.get_by_semver(name, record.semantic_version()).is_some() {
+                    continue;
+                }
+                index.insert_record(name.clone(), record.clone()).map_err(|_error| {
+                    LocalRegistryError::DuplicateSemanticVersion {
+                        package: name.clone(),
+                        version: record.semantic_version().clone(),
+                    }
+                })?;
+            }
+        }
+
+        Ok(())
+    }
+
     /// Derive the path in the artifact store for a package with `digest`
     ///
-    /// The file name of the resulting path is the hexadecimal encoding of the digest, with the
-    /// `.masp` extension.
-    fn artifact_path_for_digest(&self, digest: miden_core::Word) -> PathBuf {
-        let filename = format!("0x{}.masp", DisplayHex::new(&digest.as_bytes()));
+    /// The file name includes the package name and semantic version to avoid collisions between
+    /// package identities that share the same underlying MAST digest.
+    fn artifact_path_for_package(
+        &self,
+        package: &PackageId,
+        version: &miden_package_registry::SemVer,
+        digest: miden_core::Word,
+    ) -> PathBuf {
+        let package_id = DisplayHex(package.as_bytes());
+        let semantic_version = version.to_string();
+        let semantic_version = DisplayHex(semantic_version.as_bytes());
+        let digest_bytes = digest.as_bytes();
+        let digest = DisplayHex::new(&digest_bytes);
+        let filename = format!("{package_id}-{semantic_version}-0x{digest}.masp");
         self.artifact_dir.join(filename)
     }
 
@@ -346,7 +377,7 @@ impl LocalPackageRegistry {
         record: &PackageRecord,
     ) -> PackageSummary {
         PackageSummary {
-            artifact_path: self.artifact_path(&version),
+            artifact_path: self.artifact_path(&name, &version),
             dependencies: record
                 .dependencies()
                 .iter()
@@ -411,6 +442,7 @@ impl LocalPackageRegistry {
         // otherwise concurrent publishers can overwrite each other's index entries.
         file.try_lock().map_err(LocalRegistryError::IndexWriteLock)?;
         let mut latest_index = Self::read_index_from_file(&mut file)?;
+        self.merge_instance_index_into(&mut latest_index)?;
 
         for (dependency_name, dependency_version, _requirement) in dependencies.iter() {
             if latest_index.get_exact_version(dependency_name, dependency_version).is_none() {
@@ -429,7 +461,7 @@ impl LocalPackageRegistry {
             });
         }
 
-        let artifact_path = self.artifact_path_for_digest(digest);
+        let artifact_path = self.artifact_path_for_package(&package.name, &package.version, digest);
         fs::write(&artifact_path, bytes).map_err(LocalRegistryError::IndexWrite)?;
 
         latest_index.insert_record(package.name.clone(), record).map_err(|_error| {
@@ -680,6 +712,55 @@ mod tests {
             .load_package(&PackageId::from("pkg"), &published.version)
             .expect_err("artifact mismatch should be rejected");
         assert!(matches!(error, LocalRegistryError::ArtifactMismatch { .. }));
+    }
+
+    #[test]
+    fn artifact_paths_distinguish_packages_with_same_mast_digest() {
+        let tempdir = TempDir::new().unwrap();
+        let mut registry = load_registry(&tempdir);
+
+        let first = build_package("first", "1.0.0", []);
+        let second = build_package("second", "1.0.0", []);
+        assert_eq!(first.digest(), second.digest());
+
+        let first_path = tempdir.path().join("first.masp");
+        let second_path = tempdir.path().join("second.masp");
+        first.write_to_file(&first_path).unwrap();
+        second.write_to_file(&second_path).unwrap();
+
+        let first = registry.publish(&first_path).unwrap();
+        let second = registry.publish(&second_path).unwrap();
+        assert_ne!(first.artifact_path, second.artifact_path);
+
+        let first_loaded =
+            registry.load_package(&PackageId::from("first"), &first.version).unwrap();
+        let second_loaded =
+            registry.load_package(&PackageId::from("second"), &second.version).unwrap();
+        assert_eq!(first_loaded.name, PackageId::from("first"));
+        assert_eq!(second_loaded.name, PackageId::from("second"));
+    }
+
+    #[test]
+    fn publish_preserves_records_registered_on_same_instance() {
+        let tempdir = TempDir::new().unwrap();
+        let mut registry = load_registry(&tempdir);
+
+        let dependency_digest = miden_core::utils::hash_string_to_word("dep");
+        let dependency_version = Version::new("1.0.0".parse().unwrap(), dependency_digest);
+        registry
+            .register(PackageId::from("dep"), PackageRecord::new(dependency_version.clone(), []))
+            .unwrap();
+
+        let package_path = tempdir.path().join("pkg.masp");
+        build_package("pkg", "1.0.0", [("dep", "1.0.0", TargetType::Library, dependency_digest)])
+            .write_to_file(&package_path)
+            .unwrap();
+
+        registry.publish(&package_path).unwrap();
+
+        let reloaded = load_registry(&tempdir);
+        assert!(reloaded.show(&PackageId::from("dep"), Some(&dependency_version)).is_some());
+        assert!(reloaded.show(&PackageId::from("pkg"), None).is_some());
     }
 
     #[test]
