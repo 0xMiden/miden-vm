@@ -115,6 +115,10 @@ impl MastForestBuilder {
     ) -> Result<Self, Report> {
         // All statically-linked libraries are merged into a single MastForest.
         let forests = static_libraries.into_iter().collect::<Vec<_>>();
+        // TODO(#3067): `MastForest::commitment()` only hashes procedure root digests, so two
+        // forests with identical roots but different debug metadata share the same commitment.
+        // Using that commitment as a lookup key can point provenance from one static library at
+        // another library's root map and still select the wrong diagnostics metadata.
         let statically_linked_forest_indices_by_commitment = forests
             .iter()
             .enumerate()
