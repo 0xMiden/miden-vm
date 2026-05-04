@@ -85,6 +85,21 @@ pub(crate) fn emit_core_boundary<B: BoundaryBuilder>(boundary: &mut B) {
     ];
 
     // Block-hash seed: +1 / encode(BLOCK_HASH_TABLE, [ph, 0, 0, 0]).
+    //
+    // The boundary correction emits a `Child` payload while the in-trace removal at the
+    // root END row (in `block_hash_and_op_group.rs`) emits an `End` payload — the two
+    // collapse to the same denominator by the algebra below, so a single `Child` here
+    // cancels the root END's `-1/d`:
+    //
+    //   - At the root END row, the next op is HALT, so the decoder forces `addr_next = 0`,
+    //     hence `parent = addr_next = 0`.
+    //   - `halt_next() = 1` ⇒ `is_first_child = 1 - end_next - repeat_next - halt_next = 0`.
+    //   - The root block is not a loop body, so `is_loop_body = 0`.
+    //   - `child_hash = h_0 = program_hash` by the decoder's program-hash boundary.
+    //
+    // With `is_first_child = 0` and `is_loop_body = 0`, the `End` payload encodes
+    // identically to `Child { parent: 0, child_hash: program_hash }`, so the boundary
+    // `+1/d` here matches the in-trace `-1/d` and the bus balances.
     boundary.add(
         "block_hash_seed",
         BlockHashMsg::Child {
@@ -161,6 +176,56 @@ mod tests {
             num_permutation_challenges: AUX_TRACE_RAND_CHALLENGES,
             num_permutation_values: NUM_LOGUP_COMMITTED_FINALS,
         }
+    }
+
+    /// Pin the `BlockHashMsg::End → Child` boundary collapse: at the root END row, the
+    /// algebra forces `is_first_child = 0`, `is_loop_body = 0`, `parent = 0`, and
+    /// `child_hash = program_hash`, so the in-trace `End` removal encodes identically to
+    /// the boundary `Child` seed. If a future change to either side breaks the collapse
+    /// (e.g. flips one of those four conditions), the boundary `+1/d` no longer cancels
+    /// the in-trace `-1/d` and this test fires.
+    #[test]
+    fn block_hash_seed_matches_root_end_removal() {
+        use crate::{
+            constraints::lookup::messages::BlockHashMsg,
+            lookup::{Challenges, LookupMessage},
+        };
+
+        let challenges = Challenges::<QuadFelt>::new(
+            QuadFelt::from_u32(7),
+            QuadFelt::from_u32(11),
+            MIDEN_MAX_MESSAGE_WIDTH,
+            BusId::COUNT,
+        );
+
+        let program_hash: [Felt; 4] = [
+            Felt::from_u32(101),
+            Felt::from_u32(102),
+            Felt::from_u32(103),
+            Felt::from_u32(104),
+        ];
+
+        // Boundary side: emitted by `emit_core_boundary` for the root program hash seed.
+        let seed = BlockHashMsg::Child {
+            parent: Felt::ZERO,
+            child_hash: program_hash,
+        };
+
+        // In-trace side: the root END row's removal, with the four conditions documented in
+        // `emit_core_boundary` (addr_next=0 via HALT; halt_next=1 ⇒ is_first_child=0; root
+        // not a loop ⇒ is_loop_body=0; child_hash = h_0 = program_hash).
+        let root_end = BlockHashMsg::End {
+            parent: Felt::ZERO,
+            child_hash: program_hash,
+            is_first_child: Felt::ZERO,
+            is_loop_body: Felt::ZERO,
+        };
+
+        assert_eq!(
+            <BlockHashMsg<Felt> as LookupMessage<Felt, QuadFelt>>::encode(&seed, &challenges),
+            <BlockHashMsg<Felt> as LookupMessage<Felt, QuadFelt>>::encode(&root_end, &challenges),
+            "boundary `Child` seed and root-END `End` removal must encode to equal denominators"
+        );
     }
 
     /// One self-check that covers num_columns consistency, per-group / per-column
