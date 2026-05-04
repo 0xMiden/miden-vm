@@ -242,6 +242,41 @@ fn multi_air_ace_circuit_emits_consistently() {
 }
 
 #[test]
+#[allow(clippy::print_stdout)]
+fn debug_multi_air_layout_regions() {
+    use miden_air::ace::build_multi_air_ace_circuit;
+
+    let config = AceConfig {
+        num_quotient_chunks: 8,
+        num_vlpi_groups: 1,
+        layout: LayoutKind::Masm,
+        is_multi_air: true,
+    };
+
+    let circuit = build_multi_air_ace_circuit::<QuadFelt>(config).expect("multi-AIR ACE circuit");
+    let layout = circuit.layout();
+    let counts = &layout.counts;
+
+    println!("multi-AIR layout total_inputs = {}", layout.total_inputs);
+    println!(
+        "  width={}, aux_width={}, num_aux_boundary={}, num_public={}, num_vlpi={}, num_periodic={}",
+        counts.width,
+        counts.aux_width,
+        counts.num_aux_boundary,
+        counts.num_public,
+        counts.num_vlpi,
+        counts.num_periodic,
+    );
+    println!(
+        "  MultiAirBeta slot = {:?}",
+        layout.index(InputKey::MultiAirBeta)
+    );
+    for (name, offset, width) in layout.debug_regions() {
+        println!("  {name:>20}: [{offset}..{}] width={width}", offset + width);
+    }
+}
+
+#[test]
 fn multi_air_ace_circuit_evaluates_without_panic() {
     use miden_air::ace::build_multi_air_ace_circuit;
 

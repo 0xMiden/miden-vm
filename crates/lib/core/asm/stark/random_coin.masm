@@ -499,10 +499,17 @@ pub proc generate_constraint_composition_coefficients
     exec.constants::composition_coef_ptr
     mem_storew_le dropw
 
-    # Sample beta (multi-AIR accumulation challenge) to keep transcript in sync.
-    # For a single AIR, beta is unused but must be sampled from the random coin.
+    # Sample beta_multi (multi-AIR accumulation challenge). The combined ACE circuit
+    # uses it to β-fold the per-AIR constraint roots. Written directly into the
+    # stark-vars region as Word 5 = [β_0, β_1, 0, 0] (slot 10 = β_multi, slot 11 =
+    # padding). Stored at `AUXILIARY_ACE_INPUTS_PTR + 20`, the trailing word right
+    # after the 5 base words written by `set_up_auxiliary_inputs_ace`.
     exec.sample_ext
-    drop drop
+    push.0.0
+    movup.3
+    movup.3
+    exec.constants::auxiliary_ace_inputs_ptr add.20
+    mem_storew_le dropw
 end
 
 #! Draw deep composition polynomial random coefficient and save it at `deep_rand_coef_ptr`.

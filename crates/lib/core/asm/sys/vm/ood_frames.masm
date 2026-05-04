@@ -13,7 +13,9 @@ use miden::core::crypto::hashes::poseidon2
 #!
 #! Cycles: 78
 pub proc process_row_ood_evaluations
-    repeat.26
+    # Per-row OOD layout (multi-AIR, TRACE_WIDTH=73): 108 EF slots = 216 felts; one
+    # `adv_pipe` reads 8 felts, so 27 iterations cover the full row.
+    repeat.27
         adv_pipe
         horner_eval_ext
         exec.poseidon2::permute

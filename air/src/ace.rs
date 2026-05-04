@@ -454,12 +454,31 @@ where
         // match). Future per-AIR-height work will introduce per-AIR selector slots.
         other => other,
     });
-    let chip_root = chip_translation[chip_root_old.index()];
+    let _chip_root = chip_translation[chip_root_old.index()]; // β-fold uses chip_acc/qv extracted below.
 
-    // Step 5: β-fold across AIRs.
+    // Step 5: extract the pre-quotient accumulators and β-fold across AIRs.
+    //
+    // Each sub-DAG's root is `Sub(acc, q*v)` (per `build_verifier_dag`).  We unpack
+    // it to recover `acc` for each AIR. The combined check then mirrors upstream's
+    // `verify_multi`:
+    //   accumulated = (((0 · β) + core_acc) · β) + chip_acc = core_acc · β + chip_acc
+    // applied in proof order [Core, Chiplets] (caller-index tiebreak with equal
+    // heights). The single shared quotient subtraction `- q*v` lives at the bottom.
+    let core_acc = match core_dag.nodes[core_root_old.index()] {
+        NodeKind::Sub(acc_id, _qv_id) => core_translation[acc_id.index()],
+        _ => panic!("CoreAir sub-DAG root must be `Sub(acc, q*v)`"),
+    };
+    let (chip_acc, chip_qv) = match chip_dag.nodes[chip_root_old.index()] {
+        NodeKind::Sub(acc_id, qv_id) => {
+            (chip_translation[acc_id.index()], chip_translation[qv_id.index()])
+        },
+        _ => panic!("ChipletsAir sub-DAG root must be `Sub(acc, q*v)`"),
+    };
+
     let beta_multi = builder.input(InputKey::MultiAirBeta);
-    let chip_beta = builder.mul(chip_root, beta_multi);
-    let combined_constraint = builder.add(chip_beta, core_root);
+    let beta_core_acc = builder.mul(beta_multi, core_acc);
+    let combined_acc = builder.add(beta_core_acc, chip_acc);
+    let combined_constraint = builder.sub(combined_acc, chip_qv);
 
     // Step 6: combined LogUp boundary.
     let combined_boundary_config = multi_air_logup_boundary_config(core_aux_n, chip_aux_n);

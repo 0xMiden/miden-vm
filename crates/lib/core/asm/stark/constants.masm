@@ -173,24 +173,28 @@ const RANDOM_COIN_OUTPUT_LEN_PTR = 3223322757
 ### We use 2 extension field elements for a total of 4 base field elements.
 const AUX_RAND_ELEM_PTR = 3225419776
 
-### OOD evaluations require a total of (72 + 16 + 16) * 2 * 2 field elements for current and next:
-### - 72 main trace columns (padded)
-### - 16 aux trace base columns (aux width * extension degree)
-### - 16 quotient chunk base columns (8 chunks * extension degree)
+### OOD evaluations region. After the multi-AIR migration with TRACE_WIDTH=73, the
+### per-row OOD layout (in EF slots) is `73 main + 3 pad + 14 aux + 2 pad + 16 quotient
+### = 108 EF` aligned to DoubleWord boundaries. Two rows (curr + next) × 108 × 2 felts/EF
+### = 432 base elements.
 const OOD_EVALUATIONS_PTR = 3225419780        # AUX_RAND_ELEM_PTR + 4
 
 ### Auxiliary bus boundary values (2 extension field elements = 4 base elements).
-### TODO(#3032): The second value is always zero (placeholder for trace splitting).
-const AUX_BUS_BOUNDARY_PTR = 3225420196       # OOD_EVALUATIONS_PTR + (72 + 16 + 16) * 2 * 2
+### Both slots are real LogUp finals after the multi-AIR split (Core's at slot 0 and
+### Chiplets's at slot 1).
+const AUX_BUS_BOUNDARY_PTR = 3225420212       # OOD_EVALUATIONS_PTR + 432
 
-### Auxiliary inputs for ACE (stark vars), 10 extension field elements = 20 base elements.
-const AUXILIARY_ACE_INPUTS_PTR = 3225420200   # AUX_BUS_BOUNDARY_PTR + 4
+### Auxiliary inputs for ACE (stark vars). After the multi-AIR migration this region
+### holds 11 extension field elements = 22 base elements, padded to a 6-word boundary
+### (24 base elements). Slot 10 carries `β_multi` (the multi-AIR accumulation
+### challenge); slot 11 is unused padding.
+const AUXILIARY_ACE_INPUTS_PTR = 3225420216   # AUX_BUS_BOUNDARY_PTR + 4
 
 ### Address at the start of the memory region holding the arithmetic circuit description (constants + ops).
-const ACE_CIRCUIT_STREAM_PTR = 3225420220     # AUXILIARY_ACE_INPUTS_PTR + 20
+const ACE_CIRCUIT_STREAM_PTR = 3225420240     # AUXILIARY_ACE_INPUTS_PTR + 24
 
 ### Address at the start of the evaluation-gates portion of the arithmetic circuit (EVAL section).
-const ACE_CIRCUIT_PTR = 3225420820            # ACE_CIRCUIT_STREAM_PTR + num_const_felts
+const ACE_CIRCUIT_PTR = 3225420836            # ACE_CIRCUIT_STREAM_PTR + num_const_felts (596 for multi-AIR)
 
 ## FRI
 ##

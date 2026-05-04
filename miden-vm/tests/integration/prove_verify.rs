@@ -294,7 +294,10 @@ mod recursive_verifier {
         advice_stack.extend_from_slice(&commitment_to_u64s(stark.main_commit));
         advice_stack.extend_from_slice(&commitment_to_u64s(stark.aux_commit));
 
-        if let Some(aux_values) = stark.all_aux_values.first() {
+        // Multi-AIR: push aux values for ALL AIRs in proof order. MASM stores them
+        // contiguously in the aux_bus_boundary region (slot 0 = first AIR's, slot 1
+        // = second AIR's).
+        for aux_values in &stark.all_aux_values {
             advice_stack.extend_from_slice(&challenges_to_u64s(aux_values));
         }
 
