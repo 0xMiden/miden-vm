@@ -6,6 +6,7 @@ use miden_air::trace::{
     range::{M_COL_IDX, V_COL_IDX},
 };
 
+use super::CycleLookupValues;
 use crate::{
     Felt, ZERO,
     field::ExtensionField,
@@ -23,7 +24,7 @@ pub struct AuxTraceBuilder {
     lookup_values: Vec<u16>,
     /// Range check lookups performed by all user operations, grouped and sorted by the clock cycle
     /// at which they are requested.
-    cycle_lookups: BTreeMap<RowIndex, Vec<u16>>,
+    cycle_lookups: BTreeMap<RowIndex, CycleLookupValues>,
     // The index of the first row of Range Checker's trace when the padded rows end and values to
     // be range checked start.
     values_start: usize,
@@ -34,7 +35,7 @@ impl AuxTraceBuilder {
     // --------------------------------------------------------------------------------------------
     pub fn new(
         lookup_values: Vec<u16>,
-        cycle_lookups: BTreeMap<RowIndex, Vec<u16>>,
+        cycle_lookups: BTreeMap<RowIndex, CycleLookupValues>,
         values_start: usize,
     ) -> Self {
         Self {

@@ -2,7 +2,7 @@ use alloc::{collections::BTreeMap, vec::Vec};
 
 use miden_utils_testing::rand::rand_array;
 
-use super::{RangeCheckTrace, RangeChecker};
+use super::{CycleLookupValues, RangeCheckTrace, RangeChecker};
 use crate::{Felt, ZERO, utils::ToElements};
 
 // TESTS
@@ -71,6 +71,14 @@ fn into_trace_with_table_panics_on_mismatched_len() {
 
     // Pass an inconsistent table length on purpose; this should now panic before unsafe init.
     let _ = checker.into_trace_with_table(table_len + 1, target_len);
+}
+
+#[test]
+fn cycle_lookup_values_tracks_memory_and_stack_lookups() {
+    let mut values = CycleLookupValues::new(&[1, 2]);
+    values.extend(&[3, 4, 5, 6]);
+
+    assert_eq!(values.iter().copied().collect::<Vec<_>>(), vec![1, 2, 3, 4, 5, 6]);
 }
 
 // HELPER FUNCTIONS

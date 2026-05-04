@@ -55,9 +55,9 @@ pub struct RangeChecker {
     /// Tracks lookup count for each checked value.
     lookups: BTreeMap<u16, usize>,
     /// Range check lookups performed by all user operations, grouped and sorted by clock cycle.
-    /// Each cycle is mapped to a vector of the range checks requested at that cycle, which can
-    /// come from the stack, memory, or both.
-    cycle_lookups: BTreeMap<RowIndex, Vec<u16>>,
+    /// Each cycle is mapped to the range checks requested at that cycle, which can come from the
+    /// stack, memory, or both.
+    cycle_lookups: BTreeMap<RowIndex, CycleLookupValues>,
 }
 
 impl RangeChecker {
@@ -93,15 +93,10 @@ impl RangeChecker {
         }
 
         // track the range check requests at each cycle
-        // TODO: optimize this to use a struct instead of vectors, e.g. (#2793):
-        // struct MemoryLookupValues {
-        //   num_lookups: u8,
-        //   lookup_values: [u16; 6],
-        // }
         self.cycle_lookups
             .entry(clk)
-            .and_modify(|entry| entry.append(&mut values.to_vec()))
-            .or_insert_with(|| values.to_vec());
+            .and_modify(|entry| entry.extend(values))
+            .or_insert_with(|| CycleLookupValues::new(values));
     }
 
     // EXECUTION TRACE GENERATION (INTERNAL)
@@ -211,6 +206,42 @@ impl RangeChecker {
 impl Default for RangeChecker {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+// CYCLE LOOKUP VALUES
+// ================================================================================================
+
+/// The maximum number of range check lookups that can be requested at a single clock cycle.
+///
+/// Range checks can come from memory, which requests 2 lookups, and from the stack, which requests
+/// 4 lookups.
+const MAX_CYCLE_LOOKUPS: usize = 6;
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct CycleLookupValues {
+    num_lookups: u8,
+    lookup_values: [u16; MAX_CYCLE_LOOKUPS],
+}
+
+impl CycleLookupValues {
+    fn new(values: &[u16]) -> Self {
+        let mut result = Self::default();
+        result.extend(values);
+        result
+    }
+
+    fn extend(&mut self, values: &[u16]) {
+        let start = usize::from(self.num_lookups);
+        let end = start + values.len();
+        assert!(end <= MAX_CYCLE_LOOKUPS, "too many range check lookups at a single cycle");
+
+        self.lookup_values[start..end].copy_from_slice(values);
+        self.num_lookups = end as u8;
+    }
+
+    pub(crate) fn iter(&self) -> impl Iterator<Item = &u16> {
+        self.lookup_values[..usize::from(self.num_lookups)].iter()
     }
 }
 
