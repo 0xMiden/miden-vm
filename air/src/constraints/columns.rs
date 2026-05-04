@@ -119,6 +119,93 @@ impl<T> BorrowMut<MainCols<T>> for [T] {
     }
 }
 
+// CORE TRACE COLUMN STRUCT
+// ================================================================================================
+
+/// Column layout of the core execution trace.
+///
+/// `CoreCols` covers the system, decoder, stack, and range-check segments — the columns the
+/// `CoreAir` will own when the monolithic trace is split per `MULTI_AIR_TODO.md`. It is laid
+/// out identically to the leading `NUM_CORE_COLS` columns of `MainCols` (`#[repr(C)]` field
+/// order matches), so today it can be borrowed from the same buffer either as the prefix of a
+/// `MainCols` or directly from a 51-element slice.
+///
+/// Borrow it from a raw `[T; NUM_CORE_COLS]` slice via `Borrow<CoreCols<T>>`.
+#[repr(C)]
+pub struct CoreCols<T> {
+    pub system: SystemCols<T>,
+    pub decoder: DecoderCols<T>,
+    pub stack: StackCols<T>,
+    pub range: RangeCols<T>,
+}
+
+/// Number of columns in the core trace (51), derived from the struct layout.
+pub const NUM_CORE_COLS: usize = size_of::<CoreCols<u8>>();
+
+impl<T> Borrow<CoreCols<T>> for [T] {
+    fn borrow(&self) -> &CoreCols<T> {
+        debug_assert_eq!(self.len(), NUM_CORE_COLS);
+        let (prefix, shorts, suffix) = unsafe { self.align_to::<CoreCols<T>>() };
+        debug_assert!(prefix.is_empty() && suffix.is_empty() && shorts.len() == 1);
+        &shorts[0]
+    }
+}
+
+impl<T> BorrowMut<CoreCols<T>> for [T] {
+    fn borrow_mut(&mut self) -> &mut CoreCols<T> {
+        debug_assert_eq!(self.len(), NUM_CORE_COLS);
+        let (prefix, shorts, suffix) = unsafe { self.align_to_mut::<CoreCols<T>>() };
+        debug_assert!(prefix.is_empty() && suffix.is_empty() && shorts.len() == 1);
+        &mut shorts[0]
+    }
+}
+
+// CHIPLETS TRACE COLUMN STRUCT
+// ================================================================================================
+
+/// Column layout of the chiplets execution trace.
+///
+/// `ChipletCols` covers the 20 shared chiplet data columns plus `s_perm` — the columns the
+/// `ChipletsAir` will own when the monolithic trace is split per `MULTI_AIR_TODO.md`. It is
+/// laid out identically to the trailing `NUM_CHIPLETS_COLS` columns of `MainCols`
+/// (`#[repr(C)]` field order matches), so today it can be borrowed from the same buffer
+/// either as the suffix of a `MainCols` or directly from a 21-element slice.
+///
+/// The chiplets array is `pub(crate)` for the same reason as on `MainCols`: the 20 columns
+/// are a union whose interpretation depends on which chiplet is active. Access goes through
+/// typed accessors (added when consumers move from `MainCols` to `ChipletCols` in the M2
+/// milestone).
+#[repr(C)]
+pub struct ChipletCols<T> {
+    pub(crate) chiplets: [T; CHIPLETS_WIDTH - 1],
+    /// Permutation segment selector: consumed by `build_chiplet_selectors`.
+    pub s_perm: T,
+}
+
+/// Number of columns in the chiplets trace (21), derived from the struct layout.
+pub const NUM_CHIPLETS_COLS: usize = size_of::<ChipletCols<u8>>();
+
+impl<T> Borrow<ChipletCols<T>> for [T] {
+    fn borrow(&self) -> &ChipletCols<T> {
+        debug_assert_eq!(self.len(), NUM_CHIPLETS_COLS);
+        let (prefix, shorts, suffix) = unsafe { self.align_to::<ChipletCols<T>>() };
+        debug_assert!(prefix.is_empty() && suffix.is_empty() && shorts.len() == 1);
+        &shorts[0]
+    }
+}
+
+impl<T> BorrowMut<ChipletCols<T>> for [T] {
+    fn borrow_mut(&mut self) -> &mut ChipletCols<T> {
+        debug_assert_eq!(self.len(), NUM_CHIPLETS_COLS);
+        let (prefix, shorts, suffix) = unsafe { self.align_to_mut::<ChipletCols<T>>() };
+        debug_assert!(prefix.is_empty() && suffix.is_empty() && shorts.len() == 1);
+        &mut shorts[0]
+    }
+}
+
+// Compile-time invariant: the two halves cover the full main trace exactly.
+const _: () = assert!(NUM_CORE_COLS + NUM_CHIPLETS_COLS == TRACE_WIDTH);
+
 // CONST INDEX MAP
 // ================================================================================================
 
@@ -245,5 +332,65 @@ mod tests {
         assert_eq!(MAIN_COL_MAP.chiplets[19], CHIPLETS_OFFSET + 19);
         // s_perm is a separate field after chiplets[0..20]
         assert_eq!(MAIN_COL_MAP.s_perm, CHIPLETS_OFFSET + 20);
+    }
+
+    // --- Multi-AIR split (MULTI_AIR_TODO M1): CoreCols + ChipletCols layout ---------------------
+
+    /// `NUM_CORE_COLS` matches the sum of the segment widths it covers.
+    #[test]
+    fn core_cols_width() {
+        assert_eq!(
+            NUM_CORE_COLS,
+            NUM_SYSTEM_COLS + NUM_DECODER_COLS + NUM_STACK_COLS + NUM_RANGE_COLS,
+        );
+        // The core trace covers everything from the start of the system segment up to the
+        // chiplets boundary.
+        assert_eq!(NUM_CORE_COLS, CHIPLETS_OFFSET);
+    }
+
+    /// `NUM_CHIPLETS_COLS` matches the chiplets segment width.
+    #[test]
+    fn chiplet_cols_width() {
+        // 20 shared chiplet data columns + 1 `s_perm` selector.
+        assert_eq!(NUM_CHIPLETS_COLS, crate::trace::CHIPLETS_WIDTH);
+    }
+
+    /// Borrowing the leading `NUM_CORE_COLS` of a `MainCols`-shaped buffer as a `CoreCols`
+    /// yields the same field values as accessing them through `MainCols` directly.
+    #[test]
+    fn core_cols_layout_aligned_with_main() {
+        // Build a deterministic 72-element buffer where each cell holds its own column index.
+        let buf: alloc::vec::Vec<usize> = (0..TRACE_WIDTH).collect();
+
+        let main: &MainCols<usize> = buf.as_slice().borrow();
+        let core: &CoreCols<usize> = buf[..NUM_CORE_COLS].borrow();
+
+        assert_eq!(main.system.clk, core.system.clk);
+        assert_eq!(main.system.ctx, core.system.ctx);
+        assert_eq!(main.system.fn_hash, core.system.fn_hash);
+        assert_eq!(main.decoder.addr, core.decoder.addr);
+        assert_eq!(main.decoder.op_bits, core.decoder.op_bits);
+        assert_eq!(main.stack.top, core.stack.top);
+        assert_eq!(main.stack.b0, core.stack.b0);
+        assert_eq!(main.range.multiplicity, core.range.multiplicity);
+        assert_eq!(main.range.value, core.range.value);
+    }
+
+    /// Borrowing the trailing `NUM_CHIPLETS_COLS` of a `MainCols`-shaped buffer as a
+    /// `ChipletCols` yields the same field values as accessing them through `MainCols`
+    /// directly.
+    #[test]
+    fn chiplet_cols_layout_aligned_with_main() {
+        let buf: alloc::vec::Vec<usize> = (0..TRACE_WIDTH).collect();
+
+        let main: &MainCols<usize> = buf.as_slice().borrow();
+        let chiplets: &ChipletCols<usize> = buf[NUM_CORE_COLS..].borrow();
+
+        assert_eq!(main.chiplets, chiplets.chiplets);
+        assert_eq!(main.s_perm, chiplets.s_perm);
+        // Spot-check absolute column indices: chiplets[0] sits at CHIPLETS_OFFSET,
+        // and the value in our deterministic buffer equals the column index.
+        assert_eq!(chiplets.chiplets[0], CHIPLETS_OFFSET);
+        assert_eq!(chiplets.s_perm, CHIPLETS_OFFSET + 20);
     }
 }
