@@ -12,7 +12,7 @@
 
 use chiplets::selectors::ChipletSelectors;
 
-use crate::{MainCols, MidenAirBuilder};
+use crate::{CoreCols, MainCols, MidenAirBuilder};
 
 pub mod chiplets;
 pub mod columns;
@@ -34,7 +34,7 @@ pub mod utils;
 ///
 /// Thin wrapper around [`enforce_core`] + [`enforce_chiplets`]; preserved for callers that
 /// want the full single-AIR view in one call. The two halves are also exposed individually
-/// so the per-AIR `LiftedAir` impls (`CoreAir`, `ChipletsAir` — see `MULTI_AIR_TODO.md` M3)
+/// so the per-AIR `LiftedAir` impls (`CoreAir`, `ChipletsAir`)
 /// can each run only their share.
 pub fn enforce_main<AB>(
     builder: &mut AB,
@@ -45,7 +45,7 @@ pub fn enforce_main<AB>(
 ) where
     AB: MidenAirBuilder,
 {
-    enforce_core(builder, local, next, op_flags);
+    enforce_core(builder, local.as_core_cols(), next.as_core_cols(), op_flags);
     enforce_chiplets(builder, local, next, selectors);
 }
 
@@ -55,8 +55,8 @@ pub fn enforce_main<AB>(
 /// but live on a separate entry point because they don't read `next` or `op_flags`.
 pub fn enforce_core<AB>(
     builder: &mut AB,
-    local: &MainCols<AB::Var>,
-    next: &MainCols<AB::Var>,
+    local: &CoreCols<AB::Var>,
+    next: &CoreCols<AB::Var>,
     op_flags: &op_flags::OpFlags<AB::Expr>,
 ) where
     AB: MidenAirBuilder,

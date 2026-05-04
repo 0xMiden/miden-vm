@@ -167,11 +167,10 @@ impl<T> BorrowMut<MainCols<T>> for [T] {
 
 /// Column layout of the core execution trace.
 ///
-/// `CoreCols` covers the system, decoder, stack, and range-check segments — the columns the
-/// `CoreAir` will own when the monolithic trace is split per `MULTI_AIR_TODO.md`. It is laid
-/// out identically to the leading `NUM_CORE_COLS` columns of `MainCols` (`#[repr(C)]` field
-/// order matches), so today it can be borrowed from the same buffer either as the prefix of a
-/// `MainCols` or directly from a 51-element slice.
+/// `CoreCols` covers the system, decoder, stack, and range-check segments — the columns owned
+/// by `CoreAir`. It is laid out identically to the leading `NUM_CORE_COLS` columns of
+/// `MainCols` (`#[repr(C)]` field order matches), so it can be borrowed from the same buffer
+/// either as the prefix of a `MainCols` or directly from a 51-element slice.
 ///
 /// Borrow it from a raw `[T; NUM_CORE_COLS]` slice via `Borrow<CoreCols<T>>`.
 #[repr(C)]
@@ -209,7 +208,7 @@ impl<T> BorrowMut<CoreCols<T>> for [T] {
 /// Column layout of the chiplets execution trace.
 ///
 /// `ChipletCols` covers the 20 shared chiplet data columns plus `s_perm` — the columns the
-/// `ChipletsAir` will own when the monolithic trace is split per `MULTI_AIR_TODO.md`. It is
+/// `ChipletsAir` will own when the monolithic trace is split. It is
 /// laid out identically to the trailing `NUM_CHIPLETS_COLS` columns of `MainCols`
 /// (`#[repr(C)]` field order matches), so today it can be borrowed from the same buffer
 /// either as the suffix of a `MainCols` or directly from a 21-element slice.
@@ -428,7 +427,7 @@ mod tests {
         assert_eq!(MAIN_COL_MAP.s_perm, CHIPLETS_OFFSET + 20);
     }
 
-    // --- Multi-AIR split (MULTI_AIR_TODO M1): CoreCols + ChipletCols layout ---------------------
+    // --- Multi-AIR split: CoreCols + ChipletCols layout ---------------------
 
     /// `NUM_CORE_COLS` matches the sum of the segment widths it covers.
     #[test]

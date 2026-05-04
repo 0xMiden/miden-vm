@@ -72,7 +72,7 @@ pub(crate) trait ChipletLookupBuilder: LookupBuilder<F = Felt> {
 /// (linear-hash init, RESPAN, MR-update legs, HOUT, SOUT). Today it is derived from
 /// `local.system.clk + 1` at construction time — the only cross-trace read in the chiplet
 /// half of the LogUp argument, concentrated here so a future migration to a chiplet-side
-/// row counter only changes one line (see `MULTI_AIR_TODO.md` M1.5).
+/// row counter only changes one line.
 pub(crate) struct ChipletBusContext<'a, LB>
 where
     LB: LookupBuilder<F = Felt>,
@@ -84,10 +84,8 @@ where
     /// Per-chiplet `is_active` flags, computed from `local`'s selector columns via the
     /// builder-provided hook.
     pub chiplet_active: ChipletActiveFlags<LB::Expr>,
-    /// Hasher response address: `local.system.clk + 1`. Sourced from the Core trace for
-    /// now via the constructor's `MainCols` parameter; this is the last cross-trace read in
-    /// the chiplet half and will be replaced by a chiplet-side row counter once the
-    /// multi-AIR addressing scheme is finalized (see `MULTI_AIR_TODO.md` M1.5).
+    /// Hasher response address. `MainLookupAir` sources it from the Core trace's
+    /// `system.clk + 1`; `ChipletsAir` sources it from the chiplet-trace `chip_clk` column.
     pub clk_plus_one: LB::Expr,
 }
 

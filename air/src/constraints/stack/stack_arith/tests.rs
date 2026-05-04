@@ -128,7 +128,7 @@ fn set_u32_helpers(row: &mut MainCols<Felt>, lo: u32, hi: u32) {
 fn eval_stack_arith(local: &MainCols<Felt>, next: &MainCols<Felt>) -> Vec<QuadFelt> {
     let mut builder = ConstraintEvalBuilder::new();
     let op_flags = OpFlags::new(&local.decoder, &local.stack, &next.decoder);
-    enforce_main(&mut builder, local, next, &op_flags);
+    enforce_main(&mut builder, local.as_core_cols(), next.as_core_cols(), &op_flags);
     builder.evaluations
 }
 
