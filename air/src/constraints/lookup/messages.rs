@@ -272,6 +272,12 @@ impl<E: PrimeCharacteristicRing + Clone> HasherMsg<E> {
 #[derive(Clone, Debug)]
 pub enum MemoryMsg<E> {
     /// 5-element message: `[ctx, addr, clk, element]`.
+    ///
+    /// `#[non_exhaustive]` forces external construction through the typed
+    /// [`MemoryMsg::read_element`] / [`MemoryMsg::write_element`] helpers, which pin
+    /// `bus` to `MemoryReadElement` / `MemoryWriteElement`. Direct external construction
+    /// with an arbitrary `BusId` would silently break bus domain separation.
+    #[non_exhaustive]
     Element {
         bus: BusId,
         ctx: E,
@@ -280,6 +286,11 @@ pub enum MemoryMsg<E> {
         element: E,
     },
     /// 8-element message: `[ctx, addr, clk, word[0..4]]`.
+    ///
+    /// `#[non_exhaustive]` forces external construction through the typed
+    /// [`MemoryMsg::read_word`] / [`MemoryMsg::write_word`] helpers — see
+    /// [`MemoryMsg::Element`] for rationale.
+    #[non_exhaustive]
     Word {
         bus: BusId,
         ctx: E,
