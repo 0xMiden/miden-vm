@@ -22,9 +22,19 @@ use crate::lookup::Challenges;
 /// messages, i.e. the exponent of `gamma = beta^MIDEN_MAX_MESSAGE_WIDTH` used in
 /// `bus_prefix[i] = alpha + (i + 1) * gamma`.
 ///
-/// Must match the Poseidon2 absorption loop in `crates/lib/core/asm/stark/` which
-/// reads the same β-power table during recursive verification.
+/// Must match the recursive verifier's hardcoded `gamma = beta^16` computation in
+/// `crates/lib/core/asm/sys/vm/public_inputs.masm` (4 squarings). The const assertion
+/// below is a tripwire: anyone changing `MIDEN_MAX_MESSAGE_WIDTH` must also update the
+/// MASM-side computation in lockstep, or the build fails here.
 pub const MIDEN_MAX_MESSAGE_WIDTH: usize = 16;
+
+// Tripwire for the MASM-side `gamma = beta^16` hardcoding in
+// `crates/lib/core/asm/sys/vm/public_inputs.masm:239-251` (4 sequential squarings).
+// If this width ever changes, that MASM must change in lockstep.
+const _: () = assert!(
+    MIDEN_MAX_MESSAGE_WIDTH == 16,
+    "MIDEN_MAX_MESSAGE_WIDTH is hardcoded as 16 by the MASM recursive verifier (4 squarings to reach gamma = beta^16). Update `crates/lib/core/asm/sys/vm/public_inputs.masm` before changing this constant.",
+);
 
 /// Domain-separated bus interaction identifier.
 ///
