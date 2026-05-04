@@ -562,7 +562,7 @@ proptest! {
             ZERO,                  // position 15 (bottom)
         ];
         let mut processor = FastProcessor::new(StackInputs::new(&stack_inputs).unwrap())
-            .with_advice(advice_inputs);
+            .with_advice(advice_inputs).expect("advice inputs should fit advice map limits");
         let mut tracer = NoopTracer;
         let program = MastForest::default();
 
@@ -658,7 +658,7 @@ proptest! {
             ZERO,                     // position 15 (bottom)
         ];
         let mut processor = FastProcessor::new(StackInputs::new(&stack_inputs).unwrap())
-            .with_advice(advice_inputs);
+            .with_advice(advice_inputs).expect("advice inputs should fit advice map limits");
         let mut tracer = NoopTracer;
 
         // Execute the operation
@@ -762,8 +762,9 @@ fn test_op_mrupdate_merge_subtree() {
         ZERO,                              // position 14
         ZERO,                              // position 15 (bottom)
     ];
-    let mut processor =
-        FastProcessor::new(StackInputs::new(&stack_inputs).unwrap()).with_advice(advice_inputs);
+    let mut processor = FastProcessor::new(StackInputs::new(&stack_inputs).unwrap())
+        .with_advice(advice_inputs)
+        .expect("advice inputs should fit advice map limits");
     let mut tracer = NoopTracer;
 
     // Execute the operation
