@@ -88,20 +88,14 @@ def write_json(path: Path, payload: dict[str, Any]) -> None:
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
-def split_criterion_group(group: str) -> tuple[str, str]:
-    producer, separator, scenario = group.partition("_")
-    if not separator or not scenario:
-        raise ValueError(f"Unexpected synthetic benchmark group directory: {group}")
-    return producer, scenario
-
-
 def collect_criterion_metrics(repo_root: Path, *, estimate: str = "mean") -> dict[str, dict[str, Any]]:
     criterion_root = repo_root / "target" / "criterion"
     metrics: dict[str, dict[str, Any]] = {}
 
-    for estimates_path in sorted(criterion_root.glob("bench-tx_*/*/new/estimates.json")):
+    for estimates_path in sorted(criterion_root.glob("bench-tx/*/*/new/estimates.json")):
         axis = estimates_path.parents[1].name
-        producer, scenario = split_criterion_group(estimates_path.parents[2].name)
+        scenario = estimates_path.parents[2].name
+        producer = estimates_path.parents[3].name
         name = f"{producer}/{scenario}/{axis}"
         estimate_data = json.loads(estimates_path.read_text(encoding="utf-8"))[estimate]
         metrics[name] = {
@@ -364,7 +358,8 @@ class Tests(unittest.TestCase):
                 root
                 / "target"
                 / "criterion"
-                / "bench-tx_consume-single-p2id-note"
+                / "bench-tx"
+                / "consume-single-p2id-note"
                 / "prove"
                 / "new"
                 / "estimates.json"
