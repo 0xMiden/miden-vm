@@ -157,6 +157,82 @@ fn processor_air_eval_circuit_masm() {
     test.check_constraints()
 }
 
+#[test]
+#[ignore = "multi-AIR ACE codegen produces a circuit whose Rust `circuit.eval` and MASM \
+            `eval_circuit` disagree on the same inputs (Rust→0 after quotient adjustment, MASM→non-zero). \
+            Bug is in the codegen→encode pipeline for the multi-AIR DAG shape; ProcessorAir's analogous \
+            test passes. Likely culprit: a subtle interaction between the chiplets sub-DAG re-emit \
+            (with input-key index rewriting + hash-consing) and the operation ordering that \
+            `to_ace`/`encode_operation` produces, surfacing only when the source DAG includes hash-consed \
+            references that span both core and chiplets sub-DAGs (e.g., shared `q*v` after q_times_v \
+            recomposition). Diagnose by emitting one circuit with `is_multi_air = false` and one with \
+            `true`, dumping `encoded.instructions()` for both, and diffing the operation list."]
+fn multi_air_eval_circuit_masm() {
+    // Mirrors `processor_air_eval_circuit_masm` but for the combined CoreAir +
+    // ChipletsAir multi-AIR circuit. If this test passes the codegen + MASM ACE
+    // chip are consistent for the multi-AIR shape; any failure in the recursive
+    // verifier (`test_poseidon2_prove_verify`) is then in the input plumbing
+    // (memory layout, advice ordering, transcript binding), not in the circuit.
+    let config = AceConfig {
+        num_quotient_chunks: 8,
+        num_vlpi_groups: 1,
+        layout: LayoutKind::Masm,
+        is_multi_air: true,
+    };
+    let circuit = miden_air::ace::build_multi_air_ace_circuit::<QuadFelt>(config).unwrap();
+    let layout = circuit.layout().clone();
+
+    let mut inputs = fill_inputs(&layout);
+    adjust_quotient_to_zero(&circuit, &layout, &mut inputs);
+    assert_eq!(circuit.eval(&inputs).expect("circuit eval"), QuadFelt::ZERO);
+
+    let encoded = circuit.to_ace().unwrap();
+    let mut memory_felts = Vec::with_capacity(inputs.len() * 2 + encoded.size_in_felt());
+    for value in &inputs {
+        memory_felts.extend_from_slice(value.as_basis_coefficients_slice());
+    }
+    memory_felts.extend_from_slice(encoded.instructions());
+
+    let padded_len = memory_felts.len().next_multiple_of(8);
+    memory_felts.resize(padded_len, ZERO);
+    let num_adv_pipe = padded_len / 8;
+
+    let mut advice_builder = AdviceStackBuilder::new();
+    advice_builder.push_for_adv_pipe(&memory_felts);
+    let adv_stack = advice_builder.build_vec_u64();
+
+    let pointer = 1 << 16;
+    let num_vars = encoded.num_vars();
+    let num_eval = encoded.num_eval_rows();
+    let source = format!(
+        "
+    const NUM_ADV_PIPE = {num_adv_pipe}
+    const NUM_VARS = {num_vars}
+    const NUM_EVAL = {num_eval}
+
+    begin
+        push.{pointer}
+        padw padw padw
+
+        repeat.NUM_ADV_PIPE
+            adv_pipe
+        end
+
+        push.NUM_EVAL push.NUM_VARS push.{pointer}
+        eval_circuit
+
+        drop drop drop
+        repeat.3 dropw end
+        drop
+    end
+    "
+    );
+
+    let test = miden_utils_testing::build_test!(source, &[], &adv_stack);
+    test.expect_stack(&[]);
+    test.check_constraints()
+}
+
 fn fill_inputs(layout: &miden_ace_codegen::InputLayout) -> Vec<QuadFelt> {
     let mut values = Vec::with_capacity(layout.total_inputs);
     let mut state = 0x9e37_79b9_7f4a_7c15u64;

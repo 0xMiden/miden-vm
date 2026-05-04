@@ -134,24 +134,6 @@ impl InputLayout {
         super::InputKeyMapper { layout: self }
     }
 
-    /// Internal regions exposed for debugging — returns `(name, offset, width)` tuples.
-    pub fn debug_regions(&self) -> Vec<(&'static str, usize, usize)> {
-        let r = &self.regions;
-        vec![
-            ("public_values", r.public_values.offset, r.public_values.width),
-            ("vlpi_reductions", r.vlpi_reductions.offset, r.vlpi_reductions.width),
-            ("randomness", r.randomness.offset, r.randomness.width),
-            ("main_curr", r.main_curr.offset, r.main_curr.width),
-            ("aux_curr", r.aux_curr.offset, r.aux_curr.width),
-            ("quotient_curr", r.quotient_curr.offset, r.quotient_curr.width),
-            ("main_next", r.main_next.offset, r.main_next.width),
-            ("aux_next", r.aux_next.offset, r.aux_next.width),
-            ("quotient_next", r.quotient_next.offset, r.quotient_next.width),
-            ("aux_bus_boundary", r.aux_bus_boundary.offset, r.aux_bus_boundary.width),
-            ("stark_vars", r.stark_vars.offset, r.stark_vars.width),
-        ]
-    }
-
     /// Map a logical `InputKey` into the flat input index, if present.
     pub fn index(&self, key: InputKey) -> Option<usize> {
         self.mapper().index_of(key)
