@@ -240,3 +240,25 @@ fn multi_air_ace_circuit_emits_consistently() {
         "encoded multi-AIR circuit must be 8-felt aligned for adv_pipe"
     );
 }
+
+#[test]
+fn multi_air_ace_circuit_evaluates_without_panic() {
+    use miden_air::ace::build_multi_air_ace_circuit;
+
+    let config = AceConfig {
+        num_quotient_chunks: 8,
+        num_vlpi_groups: 1,
+        layout: LayoutKind::Masm,
+        is_multi_air: true,
+    };
+
+    let circuit = build_multi_air_ace_circuit::<QuadFelt>(config).expect("multi-AIR ACE circuit");
+    let layout = circuit.layout();
+
+    // Fill all input slots with deterministic non-zero values. We don't expect the
+    // circuit to evaluate to zero for arbitrary inputs — only that every slot
+    // referenced by the DAG is in-range (i.e., no `wiring bus` panic), which is the
+    // failure mode that surfaces if the chiplets-side index rewrite was wrong.
+    let inputs: Vec<QuadFelt> = fill_inputs(layout);
+    let _root = circuit.eval(&inputs).expect("multi-AIR circuit eval must not panic");
+}
