@@ -119,8 +119,9 @@ check-features: ## Check curated feature combinations across the integrated work
 	./scripts/check-features.sh
 
 .PHONY: check-fuzz
-check-fuzz: ## Check miden-crypto-fuzz compilation
-	cd miden-crypto-fuzz && cargo check
+check-fuzz: ## Check fuzz crate compilation
+	cd miden-crypto-fuzz && cargo check --locked
+	cd miden-serde-utils/fuzz && cargo check --locked
 
 # --- building ------------------------------------------------------------------------------------
 
