@@ -458,8 +458,9 @@ where
         &mut builder,
         &core_dag,
         |key| key, // identity rewrite for core
+        true,      // skip core's `Sub(acc, q*v)` root — combined formula uses a shared q*v
     );
-    let core_root = core_translation[core_root_old.index()];
+    let _core_root = core_root_old; // unused; we extract `core_acc` from core's root structure below
 
     // Step 4: re-emit chiplets sub-DAG, rewriting Main/AuxCoord/AuxBusBoundary indices
     // so they land in the chiplets-half of the combined layout.
@@ -474,22 +475,26 @@ where
     // *EF-count* of core's aligned aux region so chip's aux EFs land in the
     // chiplets-half of the combined aux region.
     let aligned_core_aux_w = aligned_core_aux_coord / miden_ace_codegen::EXT_DEGREE;
-    let chip_translation = reemit_dag_with_rewrite(&mut builder, &chip_dag, |key| match key {
-        InputKey::Main { offset, index } => {
-            InputKey::Main { offset, index: index + aligned_core_main }
+    let chip_translation = reemit_dag_with_rewrite(
+        &mut builder,
+        &chip_dag,
+        |key| match key {
+            InputKey::Main { offset, index } => {
+                InputKey::Main { offset, index: index + aligned_core_main }
+            },
+            InputKey::AuxCoord { offset, index, coord } => InputKey::AuxCoord {
+                offset,
+                index: index + aligned_core_aux_w,
+                coord,
+            },
+            InputKey::AuxBusBoundary(slot) => InputKey::AuxBusBoundary(slot + core_aux_n),
+            // Selectors, randomness, public values, periodic z_k, gamma, alpha, etc. are
+            // shared between AIRs (today both AIRs are at the same height so selectors
+            // match). Future per-AIR-height work will introduce per-AIR selector slots.
+            other => other,
         },
-        InputKey::AuxCoord { offset, index, coord } => InputKey::AuxCoord {
-            offset,
-            index: index + aligned_core_aux_w,
-            coord,
-        },
-        InputKey::AuxBusBoundary(slot) => InputKey::AuxBusBoundary(slot + core_aux_n),
-        // Selectors, randomness, public values, periodic z_k, gamma, alpha, etc. are
-        // shared between AIRs (today both AIRs are at the same height so selectors
-        // match). Future per-AIR-height work will introduce per-AIR selector slots.
-        other => other,
-    });
-    let _chip_root = chip_translation[chip_root_old.index()]; // β-fold uses chip_acc/qv extracted below.
+        true, // skip chiplets's `Sub(acc, q*v)` root — combined formula uses a shared q*v
+    );
 
     // Step 5: extract the pre-quotient accumulators and β-fold across AIRs.
     //
@@ -532,17 +537,29 @@ where
 /// Returns a translation table mapping the source DAG's node indices to the
 /// corresponding `NodeId`s in `builder`. The source DAG's nodes must be in
 /// topological order (which they are by `DagBuilder::intern` construction).
+///
+/// `skip_root` skips the source DAG's root node (the last node) when re-emitting.
+/// Useful when the caller intends to bypass the source's top-level expression and
+/// wire up children directly (e.g., extracting `acc` from a `Sub(acc, q*v)` root
+/// when the `q*v` subtraction is replaced by a shared one in the combined DAG).
 fn reemit_dag_with_rewrite<EF, F>(
     builder: &mut DagBuilder<EF>,
     source: &AceDag<EF>,
     rewrite: F,
+    skip_root: bool,
 ) -> Vec<NodeId>
 where
     EF: ExtensionField<Felt>,
     F: Fn(InputKey) -> InputKey,
 {
-    let mut translation: Vec<NodeId> = Vec::with_capacity(source.nodes.len());
-    for node in &source.nodes {
+    let nodes = &source.nodes;
+    let limit = if skip_root && !nodes.is_empty() {
+        nodes.len() - 1
+    } else {
+        nodes.len()
+    };
+    let mut translation: Vec<NodeId> = Vec::with_capacity(nodes.len());
+    for node in nodes.iter().take(limit) {
         let new_id = match *node {
             NodeKind::Input(key) => builder.input(rewrite(key)),
             NodeKind::Constant(v) => builder.constant(v),
