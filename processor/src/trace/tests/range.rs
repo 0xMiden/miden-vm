@@ -6,11 +6,6 @@
 //! currently packed into different aux columns (M1 for u32rc, C2 for memory range checks),
 //! the subset-based [`InteractionLog`] happens to pick up both without the test having to
 //! know where each one landed.
-//!
-//! Covers the ground the pre-deletion `b_range_trace_stack` + `b_range_trace_mem` tests did,
-//! minus the `b_range + v_wiring = 0` closure identity (no longer meaningful under the new
-//! bus packing — cross-column closure is an AIR-side invariant, not something a processor
-//! test should describe).
 
 use alloc::vec::Vec;
 

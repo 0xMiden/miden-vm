@@ -127,12 +127,9 @@ pub trait LookupBuilder: Sized {
     /// the handle.
     type MainWindow: WindowAccess<Self::Var> + Clone;
 
-    // --- per-column handle (GAT, borrows from self) ---
-
-    /// Per-column handle opened by [`column`](Self::next_column). The GAT lets
-    /// the adapter stash a mutable borrow of its internal state (running
-    /// `(U, V)` on the constraint path, fraction collector on the prover
-    /// path) for the duration of a single column's closure.
+    /// Per-column handle opened by [`Self::next_column`]. Holds the adapter's per-column
+    /// state (running `(U, V)` on the constraint path, fraction collector on the prover
+    /// path) for the column's closure.
     type Column<'a>: LookupColumn<Expr = Self::Expr, ExprEF = Self::ExprEF>
     where
         Self: 'a;
@@ -180,10 +177,6 @@ pub trait LookupBuilder: Sized {
 pub trait LookupColumn {
     /// Expression type over base-field elements. Pinned to
     /// [`LookupBuilder::Expr`] through [`LookupBuilder::Column`].
-    ///
-    /// `PrimeCharacteristicRing` is required so that [`LookupMessage`]'s
-    /// `E: PrimeCharacteristicRing + Clone` bound is transitively
-    /// satisfied when authors pass messages through `group.add(…)` etc.
     type Expr: PrimeCharacteristicRing + Clone;
 
     /// Expression type over extension-field elements. Pinned to
@@ -193,9 +186,7 @@ pub trait LookupColumn {
     /// β-power without manually lifting.
     type ExprEF: PrimeCharacteristicRing + Clone + Algebra<Self::Expr>;
 
-    /// Per-group handle used for the simple (challenge-free) path. GAT so
-    /// the group can borrow from the column for the duration of the
-    /// closure.
+    /// Per-group handle used for the simple (challenge-free) path.
     type Group<'a>: LookupGroup<Expr = Self::Expr, ExprEF = Self::ExprEF>
     where
         Self: 'a;
@@ -205,10 +196,6 @@ pub trait LookupColumn {
     /// Every interaction added inside the closure is folded into this
     /// group's `(Uᵍ, Vᵍ)` pair; on close, the column composes the pair
     /// into its running accumulator.
-    ///
-    /// The `'a` lifetime on the group handle is tied to the `&'a mut
-    /// self` borrow of the column for the same reason as
-    /// [`LookupBuilder::next_column`].
     fn group<'a>(&'a mut self, name: &'static str, f: impl FnOnce(&mut Self::Group<'a>), deg: Deg);
 
     /// Open a group with two sibling descriptions for the same

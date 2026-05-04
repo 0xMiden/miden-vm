@@ -9,10 +9,6 @@
 //! - **LogUp lookup-argument constraints** are evaluated separately through the closure-based
 //!   `LookupAir` impl on [`crate::ProcessorAir`], wired in from `ProcessorAir::eval` via
 //!   [`crate::lookup::ConstraintLookupBuilder`].
-//!
-//! The legacy multiset bus subtree (`bus.rs`, `decoder/bus.rs`, `stack/bus.rs`,
-//! `range/bus.rs`, `chiplets/bus/`) was removed in Milestone B alongside the
-//! stateless `ProcessorAir::build_aux_trace` integration.
 
 use chiplets::selectors::ChipletSelectors;
 

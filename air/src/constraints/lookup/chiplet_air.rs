@@ -8,7 +8,7 @@
 //! Columns (in emission order):
 //! - chiplet responses (memory / bitwise / hasher replies).
 //! - hash-kernel virtual table.
-//! - shared wiring column: ACE wiring + hasher perm-link (the legacy `v_wiring`).
+//! - shared wiring column: ACE wiring + hasher perm-link.
 //!
 //! The [`ChipletLookupBuilder`] extension trait mirrors [`super::main_air::MainLookupBuilder`]:
 //! it exposes a single construction hook so the prover path can eventually skip the dead

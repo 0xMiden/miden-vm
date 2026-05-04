@@ -14,17 +14,6 @@
 //! The global max-degree budget is **not** checked here — the STARK prover's
 //! quotient validation already enforces it and duplicating that check muddies
 //! this module's purpose.
-//!
-//! # Why one walker
-//!
-//! Previously two walkers ran back-to-back over the same `LookupAir::eval` —
-//! one symbolic (degree), one concrete (encoding equivalence). They shared the
-//! same `(U, V)` fold algebra. Because [`SymbolicExpression`] is a closed
-//! `{Leaf, Add, Sub, Neg, Mul}` tree whose leaves can be mapped to concrete
-//! field elements given a row valuation, we keep just the symbolic
-//! accumulators and evaluate the cached-encoding difference on demand at a
-//! random row. Speed is a non-goal here; the `Arc` allocations in the
-//! symbolic tree are debug-only.
 
 use alloc::vec::Vec;
 use core::{fmt, marker::PhantomData};
@@ -221,8 +210,7 @@ where
 // ================================================================================================
 
 /// Concrete valuation used to evaluate symbolic `(U, V)` trees when the walker
-/// needs a numeric answer (cached-encoding equivalence). Borrowed, so construction
-/// is cheap and the walker's lifetime tracks the owning `Vec`s in [`validate`].
+/// needs a numeric answer (cached-encoding equivalence).
 #[derive(Clone, Copy)]
 struct RowValuation<'r> {
     current: &'r [Felt],

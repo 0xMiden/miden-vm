@@ -148,11 +148,9 @@ pub const MAIN_COL_MAP: MainCols<usize> = {
 // COLUMN COUNTS
 // ================================================================================================
 //
-// The auxiliary trace is now the LogUp lookup-argument segment built by
+// The auxiliary trace is the LogUp lookup-argument segment built by
 // [`crate::ProcessorAir`]'s `AuxBuilder` impl (see `air/src/constraints/lookup/`).
-// Its 7-column layout is described entirely by `ProcessorAir::column_shape`; the
-// legacy `AuxCols<T>` struct (which mirrored the multiset bus offsets) was removed in
-// Milestone B alongside the multiset bus deletion.
+// Its 7-column layout is described entirely by `ProcessorAir::column_shape`.
 
 pub const NUM_SYSTEM_COLS: usize = size_of::<SystemCols<u8>>();
 pub const NUM_DECODER_COLS: usize = size_of::<DecoderCols<u8>>();
@@ -188,7 +186,7 @@ mod tests {
         STACK_TRACE_OFFSET, decoder, range, stack,
     };
 
-    // --- Main trace column map vs legacy constants -----------------------------------------------
+    // --- Main trace column map vs offset constants -----------------------------------------------
 
     #[test]
     fn col_map_system() {

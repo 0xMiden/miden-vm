@@ -2,11 +2,9 @@
 //! and range-table response (`BusId::BlockStackTable` + `BusId::RangeCheck` +
 //! `BusId::LogPrecompileTranscript` on one column).
 //!
-//! Packs what used to be two separate columns (block-stack and range_logcap) into one,
-//! saving an aux column. Soundness of the merge relies on the three buses using distinct
-//! `bus_prefix[bus]` bases (so their rationals remain linearly independent in the
-//! extension field) and on all opcode-gated interactions being mutually exclusive in the
-//! main group.
+//! Soundness of the merge relies on the three buses using distinct `bus_prefix[bus]` bases
+//! (so their rationals remain linearly independent in the extension field) and on all
+//! opcode-gated interactions being mutually exclusive in the main group.
 //!
 //! # Structure
 //!

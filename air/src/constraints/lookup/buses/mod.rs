@@ -13,8 +13,8 @@
 //! - [`super::chiplet_air::ChipletLookupAir`] for the chiplet-trace columns.
 //!
 //! [`crate::ProcessorAir`]'s `LookupAir` impl is a thin aggregator that calls both in sequence,
-//! preserving the legacy `enforce_main` / `enforce_chiplet` column order for downstream
-//! consumers that want the full 7-column picture in a single `eval` call.
+//! preserving the `enforce_main` / `enforce_chiplet` column order for downstream consumers
+//! that want the full 7-column picture in a single `eval` call.
 //!
 //! ## Shared precompute contexts
 //!

@@ -146,9 +146,8 @@ pub struct DebugTraceState {
     /// Signed-multiplicity accumulator keyed by encoded denominator. Sorted at
     /// finalize time for deterministic output.
     pub(super) balances: HashMap<QuadFelt, Felt>,
-    /// Per-push record of every interaction emission — the structured equivalent of the
-    /// legacy `busdbg_log` stderr hook. Joined against `balances` in [`finalize`] so
-    /// each unmatched denom carries its source pushes.
+    /// Per-push record of every interaction emission. Joined against `balances` in
+    /// [`finalize`] so each unmatched denom carries its source pushes.
     pub(super) push_log: Vec<PushRecord>,
     pub(super) mutex_violations: Vec<MutualExclusionViolation>,
     /// Per-column `(U_col, V_col)`. Reset to `(ONE, ZERO)` at the start of each row by

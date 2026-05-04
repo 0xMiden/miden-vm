@@ -172,11 +172,10 @@ fn memory_chiplet_bus_request_response_pairs() {
     log.assert_contains(&exp);
 }
 
-/// Regression test for a production bug where `CryptoStream`'s four memory requests weren't
-/// being emitted onto the chiplet-requests bus. Verifies the exact read+read+write+write
-/// pattern using hand-coded expected values (ciphertext = plaintext + rate), not values
-/// read back from the trace — a missing emission, a wrong opcode label, or a swapped
-/// addr/clk would all fail the subset match.
+/// Verifies that `CryptoStream`'s four memory requests land on the chiplet-requests bus
+/// as the exact read+read+write+write pattern, using hand-coded expected values
+/// (ciphertext = plaintext + rate) rather than values read back from the trace — a missing
+/// emission, a wrong opcode label, or a swapped addr/clk would all fail the subset match.
 #[test]
 fn cryptostream_emits_four_memory_requests() {
     // `crypto_stream` stack layout: [rate(8), cap(4), src_ptr, dst_ptr, pad, pad]
@@ -227,11 +226,10 @@ fn cryptostream_emits_four_memory_requests() {
     log.assert_contains(&exp);
 }
 
-/// Regression test for a previously unwired path where `HornerBase`'s two element-reads
-/// weren't emitted onto the chiplet-requests bus. HornerBase reads α = (α₀, α₁) from
-/// memory at (`alpha_ptr`, `alpha_ptr + 1`) — uninitialized memory returns zeros, and
-/// the trace stores those same zeros into helpers[0..2], so a missing request or a
-/// swapped addr/clk would fail the subset match.
+/// Verifies that `HornerBase`'s two element-reads land on the chiplet-requests bus.
+/// HornerBase reads α = (α₀, α₁) from memory at (`alpha_ptr`, `alpha_ptr + 1`);
+/// uninitialized memory returns zeros, and the trace stores those same zeros into
+/// helpers[0..2], so a missing request or a swapped addr/clk would fail the subset match.
 #[test]
 fn hornerbase_emits_two_memory_requests() {
     // HornerBase stack layout: [c0..c7, _, _, _, _, _, alpha_ptr, acc_low, acc_high]
@@ -255,10 +253,9 @@ fn hornerbase_emits_two_memory_requests() {
     log.assert_contains(&exp);
 }
 
-/// Regression test for a previously unwired path where `HornerExt`'s single word-read
-/// wasn't emitted onto the chiplet-requests bus. HornerExt reads `[α₀, α₁, k₀, k₁]` as a
-/// single word from `alpha_ptr`; uninitialized memory returns the zero word, which the
-/// trace parks in helpers[0..4].
+/// Verifies that `HornerExt`'s single word-read lands on the chiplet-requests bus.
+/// HornerExt reads `[α₀, α₁, k₀, k₁]` as a single word from `alpha_ptr`;
+/// uninitialized memory returns the zero word, which the trace parks in helpers[0..4].
 #[test]
 fn hornerext_emits_one_memory_request() {
     // HornerExt stack layout: [s0_lo, s0_hi, ..., s3_lo, s3_hi, _, _, _, _, _, alpha_ptr,

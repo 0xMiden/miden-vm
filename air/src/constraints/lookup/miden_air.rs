@@ -57,9 +57,6 @@ pub const NUM_LOGUP_COMMITTED_FINALS: usize = 2;
 /// See `program_hash_message`, `transcript_messages`, and `kernel_proc_message` in
 /// `air/src/lib.rs` for the canonical formulas this mirrors.
 pub(crate) fn emit_miden_boundary<B: BoundaryBuilder>(boundary: &mut B) {
-    // Snapshot the needed public-input data up front so the mutable
-    // `boundary.add/remove` calls below don't conflict with the immutable
-    // borrows taken by `public_values()` / `var_len_public_inputs()`.
     let pv = boundary.public_values();
     let program_hash: [B::F; 4] = [
         pv[PV_PROGRAM_HASH],

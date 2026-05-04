@@ -1,9 +1,6 @@
 //! Merged block-hash + op-group column: block-hash queue (G_block_hash) + op-group table
 //! (G_op_group) as one mutually-exclusive group.
 //!
-//! Combines what were previously two separate columns into a single column by recognizing
-//! that G_block_hash and G_op_group are mutually exclusive:
-//!
 //! - **G_block_hash** (block-hash queue) fires only on control-flow opcodes: JOIN, SPLIT,
 //!   LOOP/REPEAT, DYN/DYNCALL/CALL/SYSCALL, END.
 //! - **G_op_group** (op-group table) fires only on SPAN/RESPAN (insertion side) or in-span decode

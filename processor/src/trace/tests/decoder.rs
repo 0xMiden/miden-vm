@@ -1,17 +1,15 @@
 //! Decoder virtual-table bus tests.
 //!
-//! The legacy names P1/P2/P3 refer to the block-stack, block-hash queue, and op-group tables
-//! respectively. Those dedicated running-product columns no longer exist: block-stack rides M1
-//! (merged with u32 range checks and the log-precompile capacity bus), and block-hash + op-group
-//! share M_2+5. The names are kept as historical shorthand for the interaction families.
+//! Covers the block-stack table (rides M1, merged with u32 range checks and the
+//! log-precompile capacity bus) and the block-hash + op-group bus (shares M_2+5).
 //!
-//! Under the LogUp framework the interactions still look like "+1 / encode(Msg)" on push rows
+//! Under the LogUp framework the interactions look like "+1 / encode(Msg)" on push rows
 //! and "-1 / encode(Msg)" on pop rows. Each test runs a tiny program that exercises one
 //! push/pop pair (or a small batch) and checks both halves land via the subset matcher.
 //!
 //! Coverage is targeted rather than exhaustive: the tests below hit the control-flow variants
-//! that have historically harbored off-by-one or selector-muxing bugs (JOIN, LOOP+REPEAT, CALL,
-//! SPAN/RESPAN op-group batching). Broader end-to-end soundness comes from
+//! prone to off-by-one or selector-muxing bugs (JOIN, LOOP+REPEAT, CALL, SPAN/RESPAN op-group
+//! batching). Broader end-to-end soundness comes from
 //! `build_lookup_fractions_matches_constraint_path_oracle` in `tests/lookup.rs`.
 
 use alloc::vec::Vec;

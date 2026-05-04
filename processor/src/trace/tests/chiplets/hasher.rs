@@ -8,9 +8,8 @@
 //! Because request and response messages share a `bus_prefix` and the same payload shape,
 //! an add at a controller row and a remove at the matching decoder row produce the same
 //! encoded denominator with opposite multiplicities — which is what makes the bus balance.
-//! We don't need to pin the running-product walk row-by-row the way the legacy
-//! `verify_b_chip_step_by_step` did; the subset matcher verifies each claimed interaction
-//! lands, and their pairing is an algebraic consequence.
+//! The subset matcher verifies each claimed interaction lands; their pairing is an algebraic
+//! consequence.
 //!
 //! Each test pairs the `assert_contains` call with explicit request/response-count guardrails
 //! so a silent-pass bug (e.g. the subset matcher ignoring a whole category of expectations
@@ -631,7 +630,6 @@ fn mrupdate_emits_sibling_add_and_remove_per_level(#[case] index: u64) {
     let old_node = tree.get_node(NodeIndex::new(3, index).unwrap()).unwrap();
     let new_node = init_leaf(11);
 
-    // Build the program inputs the way the legacy test did.
     let mut init_stack = Vec::new();
     init_stack.extend_from_slice(&word_to_ints(old_node));
     init_stack.extend_from_slice(&[3, index]);

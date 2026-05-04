@@ -154,15 +154,10 @@ where
     }
 
     fn eval(&self, builder: &mut LB) {
-        // Hold the `MainWindow` as an owned value so its borrow on the underlying builder is
-        // released by the time we grab the `&mut builder` for the per-column emitters.
         let main = builder.main();
         let local: &MainCols<_> = main.current_slice().borrow();
         let next: &MainCols<_> = main.next_slice().borrow();
 
-        // Build the shared main-trace context once per `eval`. `&*builder` is an immutable
-        // reborrow of the mutable parameter; it's alive only for the duration of the
-        // constructor call and is released before the emitters take their own `&mut builder`.
         let ctx = MainBusContext::new(&*builder, local, next);
 
         emit_block_stack_and_range_logcap::<LB>(builder, &ctx);

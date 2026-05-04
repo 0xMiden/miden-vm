@@ -40,22 +40,18 @@ impl BlockStack {
         parent_addr
     }
 
-    /// Removes a block from the top of the stack and returns it.
     pub fn pop(&mut self) -> BlockInfo {
         self.blocks.pop().expect("block stack is empty")
     }
 
-    /// Returns true if the block stack is empty.
     pub fn is_empty(&self) -> bool {
         self.blocks.is_empty()
     }
 
-    /// Returns a reference to a block at the top of the stack.
     pub fn peek(&self) -> &BlockInfo {
         self.blocks.last().expect("block stack is empty")
     }
 
-    /// Returns a mutable reference to a block at the top of the stack.
     pub fn peek_mut(&mut self) -> &mut BlockInfo {
         self.blocks.last_mut().expect("block stack is empty")
     }
@@ -64,7 +60,6 @@ impl BlockStack {
 // BLOCK INFO
 // ================================================================================================
 
-/// Contains basic information about a code block.
 #[derive(Debug, Clone)]
 pub struct BlockInfo {
     pub addr: Felt,
@@ -91,7 +86,6 @@ pub struct ExecutionContextInfo {
 }
 
 impl ExecutionContextInfo {
-    /// Returns an new [ExecutionContextInfo] instantiated with the specified parameters.
     pub fn new(
         parent_ctx: ContextId,
         parent_fn_hash: Word,

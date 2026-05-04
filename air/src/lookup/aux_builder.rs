@@ -144,15 +144,10 @@ where
     EF: ExtensionField<F>,
 {
     /// Flat fraction buffer, packed in builder write order (see the module doc).
-    ///
-    /// Exposed to the prover builder as `pub(super)` so it can split-borrow this field
-    /// disjointly from `counts` inside `LookupBuilder::column`.
     pub(super) fractions: Vec<(F, EF)>,
     /// Flat count buffer, length `num_rows * num_cols` after a complete collection pass,
     /// laid out row-major so `counts[r * num_cols + c]` is the number of fractions row
     /// `r` pushed into column `c`.
-    ///
-    /// Exposed to the prover builder as `pub(super)` for the same split-borrow reason.
     pub(super) counts: Vec<usize>,
     /// Per-column upper bound on fractions a single row can push. Used as the capacity
     /// hint (`num_rows * Σ shape`) when allocating `fractions`, and as the reference for
@@ -173,9 +168,6 @@ where
     /// `num_rows` rows. The flat fraction capacity is `num_rows * Σ shape`, so the row loop
     /// does not re-allocate as long as each row stays within its declared bound. The flat
     /// count capacity is `num_rows * shape.len()`.
-    ///
-    /// Takes `shape` by value so the caller owns the allocation (typically
-    /// `air.column_shape().to_vec()`).
     pub fn from_shape(shape: Vec<usize>, num_rows: usize) -> Self {
         let num_cols = shape.len();
         let total_fraction_capacity: usize = num_rows * shape.iter().sum::<usize>();

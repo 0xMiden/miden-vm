@@ -65,11 +65,6 @@ use super::{
 /// by the base field `F` and the extension field `EF`; every `Expr` /
 /// `Var` / `VarEF` etc. associated type collapses to `F` or `EF`
 /// directly — there is no symbolic tree on the prover side.
-///
-/// The [`Challenges`] table is **borrowed** from the caller: the
-/// caller builds it once outside the row loop and passes a shared
-/// reference into every `new` call, so per-row construction is O(1) with
-/// no allocations.
 pub struct ProverLookupBuilder<'a, F, EF>
 where
     F: Field,
@@ -81,8 +76,7 @@ where
     /// Dense per-column fraction buffers shared across all rows. Each
     /// [`LookupBuilder::next_column`] call appends the current row's fractions to the end of
     /// `fractions.fractions[column_idx]` and pushes the row's interaction count into
-    /// `fractions.counts_per_row[column_idx]`. The outer Vecs never move or re-allocate
-    /// as long as each row stays within the declared [`LookupAir::column_shape`] bound.
+    /// `fractions.counts_per_row[column_idx]`.
     fractions: &'a mut LookupFractions<F, EF>,
     column_idx: usize,
 }
@@ -235,14 +229,11 @@ where
         _deg: Deg,
     ) -> R {
         let idx = self.column_idx;
-        // Split-borrow disjoint fields of `LookupFractions` so the post-closure
-        // `counts.push(...)` isn't blocked by the GAT-lifetime borrow on `fractions`.
         let vec = &mut self.fractions.fractions;
         let counts = &mut self.fractions.counts;
         let shape_col = self.fractions.shape[idx];
         let start_len = vec.len();
 
-        // Scope the `ProverColumn` so its borrow on `vec` ends before `counts.push`.
         let (result, pushed) = {
             let mut col = ProverColumn {
                 challenges: self.challenges,
