@@ -23,6 +23,10 @@ use crate::{
 /// Each key maps to one or more field element. To access the elements, the VM can move the values
 /// associated with a given key onto the advice stack using `adv.push_mapval` instruction. The VM
 /// can also insert new values into the advice map during execution.
+///
+/// This type is a policy-free container. Execution-specific size limits for live advice map state
+/// are enforced by the processor's `AdviceProvider`, which owns the active execution options and
+/// live resource accounting.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(transparent))]

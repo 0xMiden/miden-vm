@@ -27,6 +27,10 @@ const MAX_ADVICE_STACK_SIZE: usize = 1 << 17;
 /// the host (i.e., result of a computation performed outside of the VM), as well as insert new data
 /// into the advice provider to be recovered by the host after the program has finished executing.
 ///
+/// Advice map size limits are enforced here, rather than by `AdviceMap`, because they are part of
+/// execution policy. The provider owns the active `ExecutionOptions` and tracks the live advice map
+/// budget across initial advice, host mutations, and system-event inserts.
+///
 /// An advice provider consists of the following components:
 /// 1. Advice stack, which is a LIFO data structure. The processor can move the elements from the
 ///    advice stack onto the operand stack, as well as push new elements onto the advice stack. The
