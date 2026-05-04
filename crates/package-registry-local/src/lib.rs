@@ -13,7 +13,7 @@ use miden_core::{
 };
 use miden_mast_package::Package as MastPackage;
 use miden_package_registry::{
-    InMemoryPackageRegistry, PackageId, PackageIndex, PackageProvider, PackageRecord,
+    InMemoryPackageRegistry, PackageCache, PackageId, PackageIndex, PackageProvider, PackageRecord,
     PackageRegistry, PackageStore, PackageVersions, Version, VersionRequirement,
 };
 use serde::{Deserialize, Serialize};
@@ -389,17 +389,10 @@ impl LocalPackageRegistry {
         }
     }
 
-    /// Publish `package`, with `bytes` representing the serialized form of `package` which
-    /// determines its provenance, i.e. if we deserialized `package` from `bytes`, then `bytes`
-    /// is those exact bytes, not the bytes we would get by serializing `package`, which might
-    /// differ from the original bytes.
-    fn publish_package_with_bytes(
-        &mut self,
-        package: Arc<MastPackage>,
-        bytes: Vec<u8>,
-    ) -> Result<PublishedPackage, LocalRegistryError> {
-        let digest = package.digest();
-        let version = Version::new(package.version.clone(), digest);
+    fn record_for_package(
+        package: &MastPackage,
+        version: Version,
+    ) -> (PackageRecord, Vec<(PackageId, Version, VersionRequirement)>) {
         let dependencies = package
             .manifest
             .dependencies()
@@ -417,19 +410,107 @@ impl LocalPackageRegistry {
 
         let record = match package.description.clone() {
             Some(description) => PackageRecord::new(
-                version.clone(),
+                version,
                 dependencies
                     .iter()
                     .map(|(name, _version, requirement)| (name.clone(), requirement.clone())),
             )
             .with_description(description),
             None => PackageRecord::new(
-                version.clone(),
+                version,
                 dependencies
                     .iter()
                     .map(|(name, _version, requirement)| (name.clone(), requirement.clone())),
             ),
         };
+
+        (record, dependencies)
+    }
+
+    fn cache_package_with_bytes(
+        &mut self,
+        package: Arc<MastPackage>,
+        bytes: Vec<u8>,
+    ) -> Result<PublishedPackage, LocalRegistryError> {
+        let digest = package.digest();
+        let version = Version::new(package.version.clone(), digest);
+        let (record, _dependencies) = Self::record_for_package(&package, version.clone());
+
+        let mut file = fs::File::options()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&self.index_path)
+            .map_err(LocalRegistryError::IndexWrite)?;
+        file.try_lock().map_err(LocalRegistryError::IndexWriteLock)?;
+        let mut latest_index = Self::read_index_from_file(&mut file)?;
+        self.merge_instance_index_into(&mut latest_index)?;
+
+        let artifact_path = self.artifact_path_for_package(&package.name, &package.version, digest);
+        if let Some(existing) = latest_index.get_by_semver(&package.name, &package.version) {
+            if existing.version() != &version || existing != &record {
+                return Err(LocalRegistryError::DuplicateSemanticVersion {
+                    package: package.name.clone(),
+                    version: package.version.clone(),
+                });
+            }
+
+            let should_write_artifact = match fs::read(&artifact_path) {
+                Ok(existing_bytes) => match MastPackage::read_from_bytes(&existing_bytes) {
+                    Ok(existing_package) if &existing_package == package.as_ref() => false,
+                    Ok(_) => {
+                        return Err(LocalRegistryError::DuplicateSemanticVersion {
+                            package: package.name.clone(),
+                            version: package.version.clone(),
+                        });
+                    },
+                    Err(_) => true,
+                },
+                Err(_) => true,
+            };
+
+            if should_write_artifact {
+                fs::write(&artifact_path, bytes).map_err(LocalRegistryError::IndexWrite)?;
+            }
+            Self::write_index_to_file(&mut file, &latest_index)?;
+            self.index = latest_index;
+            return Ok(PublishedPackage {
+                name: package.name.clone(),
+                version,
+                artifact_path,
+            });
+        }
+
+        fs::write(&artifact_path, bytes).map_err(LocalRegistryError::IndexWrite)?;
+        latest_index.insert_record(package.name.clone(), record).map_err(|_error| {
+            LocalRegistryError::DuplicateSemanticVersion {
+                package: package.name.clone(),
+                version: package.version.clone(),
+            }
+        })?;
+        Self::write_index_to_file(&mut file, &latest_index)?;
+        self.index = latest_index;
+
+        Ok(PublishedPackage {
+            name: package.name.clone(),
+            version,
+            artifact_path,
+        })
+    }
+
+    /// Publish `package`, with `bytes` representing the serialized form of `package` which
+    /// determines its provenance, i.e. if we deserialized `package` from `bytes`, then `bytes`
+    /// is those exact bytes, not the bytes we would get by serializing `package`, which might
+    /// differ from the original bytes.
+    fn publish_package_with_bytes(
+        &mut self,
+        package: Arc<MastPackage>,
+        bytes: Vec<u8>,
+    ) -> Result<PublishedPackage, LocalRegistryError> {
+        let digest = package.digest();
+        let version = Version::new(package.version.clone(), digest);
+        let (record, dependencies) = Self::record_for_package(&package, version.clone());
 
         let mut file = fs::File::options()
             .read(true)
@@ -508,9 +589,16 @@ impl PackageProvider for LocalPackageRegistry {
     }
 }
 
-impl PackageStore for LocalPackageRegistry {
+impl PackageCache for LocalPackageRegistry {
     type Error = LocalRegistryError;
 
+    fn cache_package(&mut self, package: Arc<MastPackage>) -> Result<Version, Self::Error> {
+        let bytes = package.to_bytes();
+        self.cache_package_with_bytes(package, bytes).map(|published| published.version)
+    }
+}
+
+impl PackageStore for LocalPackageRegistry {
     fn publish_package(&mut self, package: Arc<MastPackage>) -> Result<Version, Self::Error> {
         let bytes = package.to_bytes();
         self.publish_package_with_bytes(package, bytes)
@@ -520,7 +608,7 @@ impl PackageStore for LocalPackageRegistry {
 
 #[cfg(test)]
 mod tests {
-    use miden_mast_package::{Dependency, Package, TargetType};
+    use miden_mast_package::{Dependency, Package, Section, SectionId, TargetType};
     use tempfile::TempDir;
 
     use super::*;
@@ -602,6 +690,57 @@ mod tests {
 
         let error = registry.publish(&package_path).expect_err("publish should fail");
         assert!(matches!(error, LocalRegistryError::MissingDependency { .. }));
+    }
+
+    #[test]
+    fn cache_persists_packages_with_missing_dependencies() {
+        let tempdir = TempDir::new().unwrap();
+        let mut registry = load_registry(&tempdir);
+
+        let dependency_digest = miden_core::utils::hash_string_to_word("dep");
+        let package = build_package(
+            "pkg",
+            "1.0.0",
+            [("dep", "1.0.0", TargetType::Library, dependency_digest)],
+        );
+        let version = registry
+            .cache_package(Arc::from(package))
+            .expect("cache should accept unresolved dependencies");
+
+        let reloaded = load_registry(&tempdir);
+        let shown = reloaded
+            .show(&PackageId::from("pkg"), Some(&version))
+            .expect("cached package should be indexed");
+        assert_eq!(shown.dependencies.len(), 1);
+        assert!(reloaded.load_package(&PackageId::from("pkg"), &version).is_ok());
+    }
+
+    #[test]
+    fn cache_rejects_different_artifact_for_existing_exact_version() {
+        let tempdir = TempDir::new().unwrap();
+        let mut registry = load_registry(&tempdir);
+
+        let package_path = tempdir.path().join("pkg.masp");
+        build_package("pkg", "1.0.0", []).write_to_file(&package_path).unwrap();
+        let published = registry.publish(&package_path).unwrap();
+
+        let mut conflicting_package = build_package("pkg", "1.0.0", []);
+        conflicting_package
+            .sections
+            .push(Section::new(SectionId::custom("cache-test").unwrap(), Vec::from([1, 2, 3])));
+        assert_eq!(
+            Some(conflicting_package.digest()),
+            published.version.digest.as_ref().map(|digest| *digest.inner())
+        );
+
+        let error = registry
+            .cache_package(Arc::from(conflicting_package))
+            .expect_err("cache should reject conflicting package artifacts");
+        assert!(matches!(error, LocalRegistryError::DuplicateSemanticVersion { .. }));
+
+        let loaded = registry.load_package(&PackageId::from("pkg"), &published.version).unwrap();
+        assert_eq!(loaded.manifest.dependencies().count(), 0);
+        assert!(loaded.sections.is_empty());
     }
 
     #[test]

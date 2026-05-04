@@ -11,7 +11,7 @@ use miden_assembly_syntax::{
 };
 use miden_core::serde::{Deserializable, Serializable};
 use miden_mast_package::{Package as MastPackage, Section, SectionId, TargetType};
-use miden_package_registry::{PackageId, PackageStore, Version as PackageVersion};
+use miden_package_registry::{PackageCache, PackageId, Version as PackageVersion};
 use miden_project::{
     Linkage, Package as ProjectPackage, PreassembledDependencyMetadata, Profile,
     ProjectDependencyNodeProvenance, ProjectSource, ProjectSourceOrigin, Target,
@@ -45,7 +45,7 @@ impl Assembler {
         store: &'a mut S,
     ) -> Result<ProjectAssembler<'a, S>, Report>
     where
-        S: PackageStore + ?Sized,
+        S: PackageCache + ?Sized,
     {
         let manifest_path = manifest_path.as_ref();
         let source_manager = self.source_manager();
@@ -69,7 +69,7 @@ impl Assembler {
         store: &'a mut S,
     ) -> Result<ProjectAssembler<'a, S>, Report>
     where
-        S: PackageStore + ?Sized,
+        S: PackageCache + ?Sized,
     {
         let source_manager = self.source_manager();
         let dependency_graph =
@@ -91,7 +91,7 @@ pub struct ProjectSourceInputs {
     pub support: Vec<Box<Module>>,
 }
 
-pub struct ProjectAssembler<'a, S: PackageStore + ?Sized> {
+pub struct ProjectAssembler<'a, S: PackageCache + ?Sized> {
     assembler: Assembler,
     project: Arc<ProjectPackage>,
     dependency_graph: DependencyGraph,
@@ -100,7 +100,7 @@ pub struct ProjectAssembler<'a, S: PackageStore + ?Sized> {
 
 impl<'a, S> ProjectAssembler<'a, S>
 where
-    S: PackageStore + ?Sized,
+    S: PackageCache + ?Sized,
 {
     pub fn project(&self) -> &ProjectPackage {
         self.project.as_ref()
@@ -317,7 +317,7 @@ where
         let node = self.dependency_graph.get(package_id)?;
         let node_version = node.version.clone();
 
-        let package = match &node.provenance {
+        let (package, should_cache) = match &node.provenance {
             ProjectDependencyNodeProvenance::Source(ProjectSource::Virtual { .. }) => {
                 return Err(Report::msg(format!(
                     "package '{package_id}' is missing a manifest path",
@@ -353,11 +353,14 @@ where
                     manifest_path,
                     workspace_root.as_deref(),
                 )? {
-                    RegisteredSourcePackage::Loaded(package) => ResolvedPackage {
-                        linked_kernel_package: self
-                            .resolve_linked_kernel_package(package.clone())?,
-                        package,
-                    },
+                    RegisteredSourcePackage::Loaded(package) => (
+                        ResolvedPackage {
+                            linked_kernel_package: self
+                                .resolve_linked_kernel_package(package.clone())?,
+                            package,
+                        },
+                        false,
+                    ),
                     reuse => {
                         let package = self.assemble_source_package(
                             package_id.clone(),
@@ -369,9 +372,7 @@ where
                             cache,
                         )?;
                         match reuse {
-                            RegisteredSourcePackage::Missing => {
-                                self.publish_source_dependency(package.package.clone())?;
-                            },
+                            RegisteredSourcePackage::Missing => (),
                             RegisteredSourcePackage::IndexedButUnreadable(expected) => {
                                 let actual = PackageVersion::new(
                                     package.package.version.clone(),
@@ -385,7 +386,7 @@ where
                             },
                             RegisteredSourcePackage::Loaded(_) => unreachable!(),
                         }
-                        package
+                        (package, true)
                     },
                 }
             },
@@ -396,17 +397,25 @@ where
                             "dependency '{package_id}' version '{node_version}' was not found in the package registry"
                         ))
                     })?;
-                ResolvedPackage {
-                    linked_kernel_package: self.resolve_linked_kernel_package(package.clone())?,
-                    package,
-                }
+                (
+                    ResolvedPackage {
+                        linked_kernel_package: self
+                            .resolve_linked_kernel_package(package.clone())?,
+                        package,
+                    },
+                    false,
+                )
             },
             ProjectDependencyNodeProvenance::Registry { selected, .. } => {
                 let package = self.store.load_package(package_id, selected)?;
-                ResolvedPackage {
-                    linked_kernel_package: self.resolve_linked_kernel_package(package.clone())?,
-                    package,
-                }
+                (
+                    ResolvedPackage {
+                        linked_kernel_package: self
+                            .resolve_linked_kernel_package(package.clone())?,
+                        package,
+                    },
+                    false,
+                )
             },
             ProjectDependencyNodeProvenance::Preassembled {
                 path,
@@ -421,13 +430,21 @@ where
                     *kind,
                     requirements,
                 )?;
-                ResolvedPackage {
-                    linked_kernel_package: self.resolve_linked_kernel_package(package.clone())?,
-                    package,
-                }
+                let should_cache = !self.store.is_semver_available(package_id, &package.version);
+                (
+                    ResolvedPackage {
+                        linked_kernel_package: self
+                            .resolve_linked_kernel_package(package.clone())?,
+                        package,
+                    },
+                    should_cache,
+                )
             },
         };
 
+        if should_cache {
+            self.cache_resolved_package(&package)?;
+        }
         cache.insert(package_id.clone(), package.clone());
         Ok(package)
     }
@@ -536,9 +553,31 @@ where
         Ok(RegisteredSourcePackage::Loaded(package))
     }
 
-    fn publish_source_dependency(&mut self, package: Arc<MastPackage>) -> Result<(), Report> {
+    fn cache_resolved_package(&mut self, package: &ResolvedPackage) -> Result<(), Report> {
+        self.cache_package(package.package.clone())?;
+        if let Some(kernel_package) = package.linked_kernel_package.clone()
+            && self.should_cache_linked_kernel_package(kernel_package.as_ref())?
+        {
+            self.cache_package(kernel_package)?;
+        }
+        Ok(())
+    }
+
+    fn should_cache_linked_kernel_package(&self, package: &MastPackage) -> Result<bool, Report> {
+        let version = PackageVersion::new(package.version.clone(), package.digest());
+        if !self.store.is_version_available(&package.name, &version) {
+            return Ok(true);
+        }
+
+        match self.store.load_package(&package.name, &version) {
+            Ok(cached) => Ok(cached.as_ref() != package),
+            Err(_) => Ok(true),
+        }
+    }
+
+    fn cache_package(&mut self, package: Arc<MastPackage>) -> Result<(), Report> {
         self.store
-            .publish_package(package)
+            .cache_package(package)
             .map(|_| ())
             .map_err(|error| Report::msg(error.to_string()))
     }

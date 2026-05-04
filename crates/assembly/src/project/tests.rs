@@ -457,6 +457,12 @@ end
             format!("regdep@1.0.0#{regdep_digest}")
         ]
     );
+    let cached_packages = context.registry().cached_packages();
+    assert!(cached_packages.iter().any(|entry| entry.starts_with("pathdep@1.0.0#")));
+    assert!(cached_packages.iter().any(|entry| entry.starts_with("gitdep@1.0.0#")));
+    assert!(cached_packages.iter().any(|entry| entry.starts_with("predep@1.0.0#")));
+    assert!(!cached_packages.iter().any(|entry| entry.starts_with("runtime@")));
+    assert!(!cached_packages.iter().any(|entry| entry.starts_with("regdep@")));
     assert!(!dependency_names.iter().any(|name| name == "pathdep"));
     assert_eq!(package.kind, TargetType::Library);
     assert_eq!(
@@ -482,6 +488,137 @@ end
         context
             .registry()
             .is_semver_available(&PackageId::from("gitdep"), &"1.0.0".parse().unwrap())
+    );
+}
+
+#[test]
+fn source_dependency_with_preassembled_dependency_does_not_require_registry_entry() {
+    let tempdir = TempDir::new().unwrap();
+    let context = TestContext::new();
+
+    let predep =
+        context.assemble_library_package_with_export("predep", "1.0.0", "deps::predep::leaf", []);
+    let predep_path = tempdir.path().join("predep.masp");
+    predep.write_to_file(&predep_path).unwrap();
+
+    let pathdep_dir = tempdir.path().join("pathdep");
+    write_file(
+        &pathdep_dir.join("miden-project.toml"),
+        r#"[package]
+name = "pathdep"
+version = "1.0.0"
+
+[lib]
+path = "lib.masm"
+namespace = "deps::pathdep"
+
+[dependencies]
+predep = { path = "../predep.masp" }
+"#,
+    );
+    write_file(
+        &pathdep_dir.join("lib.masm"),
+        r#"use ::deps::predep
+
+pub proc call_predep
+    exec.predep::leaf
+end
+"#,
+    );
+
+    let root_dir = tempdir.path().join("root");
+    let root_manifest = root_dir.join("miden-project.toml");
+    write_file(
+        &root_manifest,
+        r#"[package]
+name = "root"
+version = "1.0.0"
+
+[lib]
+path = "lib.masm"
+
+[dependencies]
+pathdep = { path = "../pathdep" }
+"#,
+    );
+    write_file(
+        &root_dir.join("lib.masm"),
+        r#"use ::deps::pathdep
+
+pub proc entry
+    exec.pathdep::call_predep
+end
+"#,
+    );
+
+    let mut context = context;
+    let package = context
+        .assemble_library_package(&root_manifest, None)
+        .expect("source dependency with preassembled dependency should assemble");
+
+    assert_eq!(&package.name, "root");
+}
+
+#[test]
+fn preassembled_dependency_bypasses_registry_semver_collision() {
+    let tempdir = TempDir::new().unwrap();
+    let mut context = TestContext::new();
+
+    let registered =
+        context.assemble_library_package_with_export("predep", "1.0.0", "deps::predep::old", []);
+    context.registry_mut().add_package(registered.into());
+
+    let predep =
+        context.assemble_library_package_with_export("predep", "1.0.0", "deps::predep::leaf", []);
+    let predep_digest = predep.digest();
+    let predep_path = tempdir.path().join("predep.masp");
+    predep.write_to_file(&predep_path).unwrap();
+
+    let root_dir = tempdir.path().join("root");
+    let root_manifest = root_dir.join("miden-project.toml");
+    write_file(
+        &root_manifest,
+        r#"[package]
+name = "root"
+version = "1.0.0"
+
+[lib]
+path = "lib.masm"
+
+[dependencies]
+predep = { path = "../predep.masp" }
+"#,
+    );
+    write_file(
+        &root_dir.join("lib.masm"),
+        r#"use ::deps::predep
+
+pub proc entry
+    exec.predep::leaf
+end
+"#,
+    );
+
+    let package = context
+        .assemble_library_package(&root_manifest, None)
+        .expect("explicit preassembled path should bypass registry semver collisions");
+
+    assert_eq!(&package.name, "root");
+    assert_eq!(
+        package
+            .manifest
+            .dependencies()
+            .find(|dependency| &dependency.name == "predep")
+            .unwrap()
+            .digest,
+        predep_digest
+    );
+    assert!(
+        !context
+            .registry()
+            .cached_packages()
+            .iter()
+            .any(|entry| entry.starts_with("predep@"))
     );
 }
 
@@ -2031,7 +2168,14 @@ fn preassembled_libraries_fall_back_to_embedded_kernel_when_store_artifact_is_un
     assert_eq!(embedded_kernel_package.digest(), kernel_package.digest());
     assert_eq!(
         context.registry().loaded_packages(),
-        vec![format!("kernelpkg@{kernel_version}")]
+        vec![format!("kernelpkg@{kernel_version}"), format!("kernelpkg@{kernel_version}")]
+    );
+    assert!(
+        context
+            .registry()
+            .cached_packages()
+            .iter()
+            .any(|entry| entry == &format!("kernelpkg@{kernel_version}"))
     );
 
     let round_tripped_program = MastPackage::read_from_bytes(&package.to_bytes())
