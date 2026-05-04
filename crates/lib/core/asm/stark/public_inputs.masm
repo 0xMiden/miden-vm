@@ -47,9 +47,11 @@ use miden::core::stark::constants
 #!    the benefit of making the reduction using the auxiliary randomness more efficient using
 #!    `horner_eval_base`.
 #!
-#! Input: [...]
-#! Output: [...]
-proc process_public_inputs
+#! Inputs:  [...]
+#! Outputs: [...]
+#!
+#! Invocation: exec
+pub proc process_public_inputs
     exec.constants::get_procedure_digest_process_public_inputs_ptr dynexec
 end
 
@@ -79,9 +81,11 @@ end
 #! The var_len_ptr is the region that will temporarily store the variable-length public inputs
 #! and permanently store the results of reducing them by the auxiliary randomness.
 #!
-#! Input: [num_var_len_pi_groups, num_fixed_len_pi, ...]
-#! Output: [...]
-proc compute_and_store_public_inputs_address
+#! Inputs:  [num_var_len_pi_groups, num_fixed_len_pi, ...]
+#! Outputs: [...]
+#!
+#! Invocation: exec
+pub proc compute_and_store_public_inputs_address
     # 1) Get a pointer to where OOD evaluations are stored
     exec.constants::ood_evaluations_ptr
     # => [ood_evals_ptr, num_var_len_pi_groups, num_fixed_len_pi, ...]
@@ -117,12 +121,14 @@ end
 #! The procedure does NOT absorb the elements into the transcript -- the caller is responsible
 #! for calling `poseidon2::permute` after this procedure to complete the absorption.
 #!
-#! Input: [Y, Y, C, ptr, ...]
-#! Output: [A0, A1, C, ptr + 16, ..]
+#! Inputs:  [Y, Y, C, ptr, ...]
+#! Outputs: [A0, A1, C, ptr + 16, ..]
 #!
 #! where A0 and A1 are the original base element words (from advice), positioned in the rate
 #! slots so that a subsequent `poseidon2::permute` absorbs them into the sponge state.
-proc load_base_store_extension_double_word
+#!
+#! Invocation: exec
+pub proc load_base_store_extension_double_word
     # 1) Load the first 4 base elements from the advice stack and save them temporarily
     adv_loadw
     exec.constants::tmp1 mem_storew_le

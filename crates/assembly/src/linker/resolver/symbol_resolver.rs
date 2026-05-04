@@ -301,6 +301,16 @@ impl<'a> SymbolResolver<'a> {
         path: Span<&Path>,
         ignored_imports: &mut BTreeSet<Arc<str>>,
     ) -> Result<SymbolResolution, LinkerError> {
+        self.expand_path_from(context.module, context, path, ignored_imports)
+    }
+
+    fn expand_path_from(
+        &self,
+        origin_module: ModuleIndex,
+        context: &SymbolResolutionContext,
+        path: Span<&Path>,
+        ignored_imports: &mut BTreeSet<Arc<str>>,
+    ) -> Result<SymbolResolution, LinkerError> {
         let span = path.span();
         let mut path = path.into_inner();
         let mut context = context.clone();
@@ -386,19 +396,25 @@ impl<'a> SymbolResolver<'a> {
                 {
                     SymbolResolution::Local(item) => {
                         log::trace!(target: "name-resolver::expand", "resolved '{symbol}' to local symbol: {}", context.module + item.into_inner());
+                        let gid = context.module + item.into_inner();
+                        self.ensure_item_visible(origin_module, gid, span)?;
                         let path = self.module_path(context.module).join(&symbol);
-                        Ok(SymbolResolution::Exact {
-                            gid: context.module + item.into_inner(),
-                            path: Span::new(span, path.into()),
-                        })
+                        Ok(SymbolResolution::Exact { gid, path: Span::new(span, path.into()) })
                     },
                     SymbolResolution::External(path) => {
                         log::trace!(target: "name-resolver::expand", "expanded '{symbol}' to unresolved external path '{path}'");
-                        self.expand_path(&context, path.as_deref(), ignored_imports)
+                        self.expand_path_from(
+                            origin_module,
+                            &context,
+                            path.as_deref(),
+                            ignored_imports,
+                        )
                     },
-                    resolved @ (SymbolResolution::MastRoot(_) | SymbolResolution::Exact { .. }) => {
+                    resolved @ SymbolResolution::MastRoot(_) => Ok(resolved),
+                    SymbolResolution::Exact { gid, path } => {
                         log::trace!(target: "name-resolver::expand", "resolved '{symbol}' to exact definition");
-                        Ok(resolved)
+                        self.ensure_item_visible(origin_module, gid, span)?;
+                        Ok(SymbolResolution::Exact { gid, path })
                     },
                     SymbolResolution::Module { id, path: module_path } => {
                         log::trace!(target: "name-resolver::expand", "resolved '{symbol}' to module: id={id} path={module_path}");
@@ -437,7 +453,8 @@ impl<'a> SymbolResolver<'a> {
                 if ignored_imports.contains(imported_symbol) {
                     log::trace!(target: "name-resolver::expand", "skipping import expansion of '{imported_symbol}': already expanded, resolving as absolute path instead");
                     let path = path.to_absolute();
-                    break self.expand_path(
+                    break self.expand_path_from(
+                        origin_module,
                         &context,
                         Span::new(span, path.as_ref()),
                         ignored_imports,
@@ -500,7 +517,8 @@ impl<'a> SymbolResolver<'a> {
                         let partially_expanded = external_path.join(subpath);
                         log::trace!(target: "name-resolver::expand", "partially expanded '{path}' to '{partially_expanded}'");
                         ignored_imports.insert(imported_symbol.to_string().into_boxed_str().into());
-                        break self.expand_path(
+                        break self.expand_path_from(
+                            origin_module,
                             &context,
                             Span::new(span, partially_expanded.as_path()),
                             ignored_imports,
@@ -515,7 +533,8 @@ impl<'a> SymbolResolver<'a> {
                         // Try to expand the path by treating it as an absolute path
                         let absolute = path.to_absolute();
                         log::trace!(target: "name-resolver::expand", "no import found for '{imported_symbol}' in '{path}': attempting to resolve as absolute path instead");
-                        break self.expand_path(
+                        break self.expand_path_from(
+                            origin_module,
                             &context,
                             Span::new(span, absolute.as_ref()),
                             ignored_imports,
@@ -528,6 +547,29 @@ impl<'a> SymbolResolver<'a> {
                 }
             }
         }
+    }
+
+    fn ensure_item_visible(
+        &self,
+        origin_module: ModuleIndex,
+        item: GlobalItemIndex,
+        span: SourceSpan,
+    ) -> Result<(), LinkerError> {
+        if origin_module == item.module {
+            return Ok(());
+        }
+
+        let symbol = &self.graph[item.module][item.index];
+        if symbol.visibility().is_public() {
+            return Ok(());
+        }
+
+        Err(SymbolResolutionError::private_symbol(
+            span,
+            symbol.name().span(),
+            self.source_manager(),
+        )
+        .into())
     }
 
     pub fn resolve_local(

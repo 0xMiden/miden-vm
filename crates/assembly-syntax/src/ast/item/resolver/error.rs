@@ -54,6 +54,16 @@ pub enum SymbolResolutionError {
         #[related]
         actual: Option<RelatedLabel>,
     },
+    #[error("private symbol reference")]
+    #[diagnostic(help("only public items can be referenced from another module"))]
+    PrivateSymbol {
+        #[label("this symbol is private to another module")]
+        span: SourceSpan,
+        #[source_code]
+        source_file: Option<Arc<SourceFile>>,
+        #[related]
+        defined: Option<RelatedLabel>,
+    },
     #[error("type expression nesting depth exceeded")]
     #[diagnostic(help("type expression nesting exceeded the maximum depth of {max_depth}"))]
     TypeExpressionDepthExceeded {
@@ -154,6 +164,24 @@ impl SymbolResolutionError {
                 RelatedLabel::advice("but the symbol resolved to this item")
                     .with_labeled_span(actual, "but the symbol resolved to this item")
                     .with_source_file(actual_source_file),
+            ),
+        }
+    }
+
+    pub fn private_symbol(
+        span: SourceSpan,
+        defined: SourceSpan,
+        source_manager: &dyn SourceManager,
+    ) -> Self {
+        let defined_source_file = source_manager.get(defined.source_id()).ok();
+        let source_file = source_manager.get(span.source_id()).ok();
+        Self::PrivateSymbol {
+            span,
+            source_file,
+            defined: Some(
+                RelatedLabel::advice("the referenced item is private")
+                    .with_labeled_span(defined, "the referenced item is private")
+                    .with_source_file(defined_source_file),
             ),
         }
     }
