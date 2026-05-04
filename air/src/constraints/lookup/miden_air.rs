@@ -133,8 +133,11 @@ mod tests {
 
     use super::NUM_LOGUP_COMMITTED_FINALS;
     use crate::{
-        Felt, NUM_PUBLIC_VALUES, ProcessorAir,
-        constraints::lookup::{BusId, MIDEN_MAX_MESSAGE_WIDTH},
+        CoreAir, Felt, NUM_PUBLIC_VALUES, ProcessorAir,
+        constraints::{
+            columns::NUM_CORE_COLS,
+            lookup::{BusId, MIDEN_MAX_MESSAGE_WIDTH, main_air::MAIN_COLUMN_SHAPE},
+        },
         lookup::{
             Challenges,
             debug::{ValidateLayout, ValidateLookupAir, check_trace_balance},
@@ -164,6 +167,24 @@ mod tests {
     fn processor_air_lookup_validates() {
         ValidateLookupAir::validate(&ProcessorAir, validate_layout())
             .unwrap_or_else(|err| panic!("ProcessorAir LookupAir validation failed: {err}"));
+    }
+
+    /// Lookup-structure validation for `CoreAir` — the standalone Core-half AIR used by the
+    /// multi-AIR proving path. Same shape check as `ProcessorAir` but on the Core slice:
+    /// 51-col main trace, 4 LogUp accumulator columns, 1 committed final.
+    #[test]
+    fn core_air_lookup_validates() {
+        let layout = ValidateLayout {
+            trace_width: NUM_CORE_COLS,
+            num_public_values: NUM_PUBLIC_VALUES,
+            // Core has no periodic columns (all serve the chiplets).
+            num_periodic_columns: 0,
+            permutation_width: MAIN_COLUMN_SHAPE.len(),
+            num_permutation_challenges: AUX_TRACE_RAND_CHALLENGES,
+            num_permutation_values: 1,
+        };
+        ValidateLookupAir::validate(&CoreAir, layout)
+            .unwrap_or_else(|err| panic!("CoreAir LookupAir validation failed: {err}"));
     }
 
     /// Smoke test: the trace-balance checker runs to completion on a tiny zero-valued trace

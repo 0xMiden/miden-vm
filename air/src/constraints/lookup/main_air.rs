@@ -32,7 +32,8 @@ use super::{
     },
 };
 use crate::{
-    CoreCols, Felt, MainCols,
+    CoreCols, Felt,
+    constraints::columns::NUM_CORE_COLS,
     lookup::{LookupAir, LookupBuilder},
 };
 
@@ -154,11 +155,17 @@ where
     }
 
     fn eval(&self, builder: &mut LB) {
+        // Hold the `MainWindow` as an owned value so its borrow on the underlying builder is
+        // released by the time we grab the `&mut builder` for the per-column emitters.
+        //
+        // Borrow the leading `NUM_CORE_COLS` of the row as a `CoreCols`. This works whether the
+        // host AIR's declared width is `NUM_CORE_COLS` (multi-AIR `CoreAir`) or `TRACE_WIDTH`
+        // (legacy `ProcessorAir`); in both cases the prefix is the Core half of the trace.
         let main = builder.main();
-        let local_main: &MainCols<_> = main.current_slice().borrow();
-        let next_main: &MainCols<_> = main.next_slice().borrow();
-        let local: &CoreCols<_> = local_main.as_core_cols();
-        let next: &CoreCols<_> = next_main.as_core_cols();
+        let local_slice = main.current_slice();
+        let next_slice = main.next_slice();
+        let local: &CoreCols<_> = local_slice[..NUM_CORE_COLS].borrow();
+        let next: &CoreCols<_> = next_slice[..NUM_CORE_COLS].borrow();
 
         let ctx = MainBusContext::new(&*builder, local, next);
 

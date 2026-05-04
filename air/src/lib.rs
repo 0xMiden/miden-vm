@@ -560,3 +560,183 @@ impl<'a, EF: ExtensionField<Felt>> BoundaryBuilder for ReduceBoundaryBuilder<'a,
         }
     }
 }
+
+// CORE AIR
+// ================================================================================================
+
+/// Core-trace AIR.
+///
+/// Owns the system, decoder, stack, and range-check segments — `NUM_CORE_COLS = 51` columns
+/// of main trace and `MAIN_COLUMN_SHAPE.len() = 4` LogUp accumulator columns. Paired with
+/// [`ChipletsAir`] for the two-AIR proving path.
+#[derive(Copy, Clone, Debug, Default)]
+pub struct CoreAir;
+
+impl BaseAir<Felt> for CoreAir {
+    fn width(&self) -> usize {
+        constraints::columns::NUM_CORE_COLS
+    }
+
+    fn num_public_values(&self) -> usize {
+        NUM_PUBLIC_VALUES
+    }
+}
+
+impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for CoreAir {
+    fn periodic_columns(&self) -> Vec<Vec<Felt>> {
+        // Core has no periodic columns; all periodic columns serve the chiplets.
+        Vec::new()
+    }
+
+    fn num_randomness(&self) -> usize {
+        trace::AUX_TRACE_RAND_CHALLENGES
+    }
+
+    fn aux_width(&self) -> usize {
+        constraints::lookup::main_air::MAIN_COLUMN_SHAPE.len()
+    }
+
+    fn num_aux_values(&self) -> usize {
+        // One real committed final per AIR; the unified `ProcessorAir`'s extra
+        // `NUM_LOGUP_COMMITTED_FINALS` slot is not needed once each per-AIR
+        // `ReducedAuxValues` carries its own scalar.
+        1
+    }
+
+    fn num_var_len_public_inputs(&self) -> usize {
+        // Kernel digests (the only VLPI today) belong to ChipletsAir's reduced_aux_values.
+        0
+    }
+
+    fn reduced_aux_values(
+        &self,
+        aux_values: &[EF],
+        challenges: &[EF],
+        public_values: &[Felt],
+        var_len_public_inputs: VarLenPublicInputs<'_, Felt>,
+    ) -> Result<ReducedAuxValues<EF>, ReductionError>
+    where
+        EF: ExtensionField<Felt>,
+    {
+        if public_values.len() != NUM_PUBLIC_VALUES {
+            return Err(format!(
+                "expected {} public values, got {}",
+                NUM_PUBLIC_VALUES,
+                public_values.len()
+            )
+            .into());
+        }
+        if !var_len_public_inputs.is_empty() {
+            return Err(format!(
+                "CoreAir expects 0 var-len public input slices, got {}",
+                var_len_public_inputs.len()
+            )
+            .into());
+        }
+
+        let challenges = Challenges::<EF>::new(
+            challenges[0],
+            challenges[1],
+            MIDEN_MAX_MESSAGE_WIDTH,
+            BusId::COUNT,
+        );
+
+        let mut reducer = ReduceBoundaryBuilder {
+            challenges: &challenges,
+            public_values,
+            var_len_public_inputs,
+            sum: EF::ZERO,
+            error: None,
+        };
+        constraints::lookup::miden_air::emit_core_boundary(&mut reducer);
+        let total_correction = reducer.finalize()?;
+
+        let aux_sum: EF = aux_values.iter().copied().sum();
+        Ok(ReducedAuxValues {
+            prod: EF::ONE,
+            sum: aux_sum + total_correction,
+        })
+    }
+
+    fn eval<AB: MidenAirBuilder>(&self, builder: &mut AB) {
+        let main = builder.main();
+        let local: &CoreCols<AB::Var> = (*main.current_slice()).borrow();
+        let next: &CoreCols<AB::Var> = (*main.next_slice()).borrow();
+
+        let op_flags = constraints::op_flags::OpFlags::new(
+            &local.decoder,
+            &local.stack,
+            &next.decoder,
+        );
+
+        constraints::enforce_core(builder, local, next, &op_flags);
+        constraints::public_inputs::enforce_main(builder, local);
+
+        let mut lb = ConstraintLookupBuilder::new(builder, self);
+        <Self as LookupAir<_>>::eval(self, &mut lb);
+    }
+
+    fn log_quotient_degree(&self) -> usize
+    where
+        Self: Sized,
+    {
+        // Same constraint degree as ProcessorAir today (Core dominates the AIR's quotient
+        // degree); override to avoid recomputing through SymbolicAir.
+        3
+    }
+}
+
+// --- LookupAir impl: delegates to MainLookupAir ---
+
+impl<LB> LookupAir<LB> for CoreAir
+where
+    LB: MainLookupBuilder,
+{
+    fn num_columns(&self) -> usize {
+        constraints::lookup::main_air::MAIN_COLUMN_SHAPE.len()
+    }
+
+    fn column_shape(&self) -> &[usize] {
+        &constraints::lookup::main_air::MAIN_COLUMN_SHAPE
+    }
+
+    fn max_message_width(&self) -> usize {
+        MIDEN_MAX_MESSAGE_WIDTH
+    }
+
+    fn num_bus_ids(&self) -> usize {
+        BusId::COUNT
+    }
+
+    fn eval(&self, builder: &mut LB) {
+        MainLookupAir.eval(builder);
+    }
+
+    fn eval_boundary<B>(&self, boundary: &mut B)
+    where
+        B: BoundaryBuilder<F = LB::F, EF = LB::EF>,
+    {
+        constraints::lookup::miden_air::emit_core_boundary(boundary);
+    }
+}
+
+// --- AuxBuilder impl ---
+
+impl<EF> AuxBuilder<Felt, EF> for CoreAir
+where
+    EF: ExtensionField<Felt>,
+{
+    fn build_aux_trace(
+        &self,
+        main: &RowMajorMatrix<Felt>,
+        challenges: &[EF],
+    ) -> (RowMajorMatrix<EF>, Vec<EF>) {
+        let (aux_trace, committed) = build_logup_aux_trace(self, main, challenges);
+        debug_assert_eq!(
+            committed.len(),
+            1,
+            "build_logup_aux_trace returns one committed final per AIR (col 0's terminal sum)"
+        );
+        (aux_trace, committed)
+    }
+}
