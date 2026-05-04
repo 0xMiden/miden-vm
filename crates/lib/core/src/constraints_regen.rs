@@ -19,6 +19,7 @@ const MASM_CONFIG: AceConfig = AceConfig {
     num_quotient_chunks: 8,
     num_vlpi_groups: 1,
     layout: LayoutKind::Masm,
+    is_multi_air: false,
 };
 pub const RELATION_DIGEST_PATHS: (&str, &str) =
     ("asm/sys/vm/mod.masm", "asm/sys/vm/constraints_eval.masm");

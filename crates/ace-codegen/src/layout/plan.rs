@@ -99,6 +99,12 @@ pub(crate) struct StarkVarIndices {
     pub f: usize,
     /// `s0 = offset^N` (first chunk shift).
     pub s0: usize,
+
+    // -- Multi-AIR additions (only present when `AceConfig::is_multi_air`) --
+    /// Multi-AIR accumulation challenge β_multi, sampled after the aux commit and
+    /// observed-aux-values absorption. Used by the combined ACE circuit to
+    /// β-fold per-AIR constraint roots: `combined = chip_acc · β_multi + core_acc`.
+    pub multi_air_beta: Option<usize>,
 }
 
 /// ACE input layout for Plonky3-based verifier logic.
@@ -189,6 +195,9 @@ impl InputLayout {
         check("weight0", self.stark.weight0);
         check("f", self.stark.f);
         check("s0", self.stark.s0);
+        if let Some(idx) = self.stark.multi_air_beta {
+            check("multi_air_beta", idx);
+        }
 
         let rand_start = self.regions.randomness.offset;
         let rand_end = rand_start + self.regions.randomness.width;

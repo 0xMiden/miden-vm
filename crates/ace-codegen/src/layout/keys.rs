@@ -10,6 +10,10 @@ pub enum InputKey {
     AuxRandAlpha,
     /// Aux randomness β supplied as an input.
     AuxRandBeta,
+    /// Multi-AIR accumulation challenge β_multi, used when β-folding per-AIR
+    /// constraint roots in the combined ACE circuit. Only present in layouts
+    /// built with `AceConfig::is_multi_air = true`.
+    MultiAirBeta,
     /// Main trace value at (offset, index).
     Main { offset: usize, index: usize },
     /// Base-field coordinate for an aux trace column.
@@ -66,6 +70,7 @@ impl InputKeyMapper<'_> {
             InputKey::Public(i) => layout.regions.public_values.index(i),
             InputKey::AuxRandAlpha => Some(layout.aux_rand_alpha),
             InputKey::AuxRandBeta => Some(layout.aux_rand_beta),
+            InputKey::MultiAirBeta => layout.stark.multi_air_beta,
             InputKey::Main { offset, index } => match offset {
                 0 => layout.regions.main_curr.index(index),
                 1 => layout.regions.main_next.index(index),

@@ -79,19 +79,31 @@ impl LayoutBuilder {
 impl InputLayout {
     /// Build a native layout (no alignment/padding).
     pub(crate) fn new(counts: InputCounts) -> Self {
-        Self::build_with_policy(counts, LayoutPolicy::native())
+        Self::build_with_policy(counts, LayoutPolicy::native(), false)
     }
 
     /// Build a MASM-compatible layout (alignment/padding enforced).
     pub(crate) fn new_masm(counts: InputCounts) -> Self {
-        Self::build_with_policy(counts, LayoutPolicy::masm())
+        Self::build_with_policy(counts, LayoutPolicy::masm(), false)
     }
 
-    fn build_with_policy(counts: InputCounts, policy: LayoutPolicy) -> Self {
-        // Number of EF slots in the stark-vars block. Every ACE input slot is an
-        // extension-field element (QuadFelt). Some stark vars are base-field values
-        // embedded as (val, 0); see the slot table below for which is which.
-        const NUM_STARK_VARS: usize = 10;
+    /// Build a native layout with the multi-AIR flag set.
+    pub(crate) fn new_multi_air(counts: InputCounts) -> Self {
+        Self::build_with_policy(counts, LayoutPolicy::native(), true)
+    }
+
+    /// Build a MASM-compatible multi-AIR layout (alignment/padding enforced; reserves an
+    /// extra stark-vars slot for `MultiAirBeta`).
+    pub(crate) fn new_masm_multi_air(counts: InputCounts) -> Self {
+        Self::build_with_policy(counts, LayoutPolicy::masm(), true)
+    }
+
+    fn build_with_policy(counts: InputCounts, policy: LayoutPolicy, is_multi_air: bool) -> Self {
+        // Number of EF slots in the stark-vars block. The single-AIR base layout uses 10
+        // canonical slots; multi-AIR layouts reserve one additional slot at the end for
+        // `MultiAirBeta`.
+        const NUM_STARK_VARS_BASE: usize = 10;
+        let num_stark_vars = NUM_STARK_VARS_BASE + if is_multi_air { 1 } else { 0 };
 
         let mut builder = LayoutBuilder::new();
 
@@ -110,7 +122,7 @@ impl InputLayout {
         let quotient_next = builder.alloc(counts.num_quotient_chunks * EXT_DEGREE, policy.quotient);
         let aux_bus_boundary = builder.alloc(counts.num_aux_boundary, policy.aux_bus_boundary);
 
-        let stark_vars = builder.alloc(NUM_STARK_VARS, policy.stark_vars);
+        let stark_vars = builder.alloc(num_stark_vars, policy.stark_vars);
 
         // Matches utils::set_up_auxiliary_inputs_ace layout (EF slots).
         //
@@ -140,6 +152,7 @@ impl InputLayout {
         let weight0 = b + 7;
         let f = b + 8;
         let s0 = b + 9;
+        let multi_air_beta = is_multi_air.then_some(b + 10);
 
         if let Some(end_align) = policy.end_align {
             builder.align(end_align);
@@ -173,6 +186,7 @@ impl InputLayout {
                 weight0,
                 f,
                 s0,
+                multi_air_beta,
             },
             total_inputs: builder.offset,
             counts,

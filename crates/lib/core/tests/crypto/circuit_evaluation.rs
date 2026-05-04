@@ -97,6 +97,7 @@ fn processor_air_eval_circuit_masm() {
         num_quotient_chunks: 8,
         num_vlpi_groups: 1,
         layout: LayoutKind::Masm,
+        is_multi_air: false,
     };
     let circuit = build_batched_circuit(config);
     let layout = circuit.layout().clone();

@@ -312,6 +312,7 @@ mod tests {
             num_quotient_chunks: 8,
             num_vlpi_groups: 1,
             layout: LayoutKind::Masm,
+            is_multi_air: false,
         };
         let air = ProcessorAir;
         let boundary_config = ace::logup_boundary_config();
