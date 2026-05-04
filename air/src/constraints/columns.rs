@@ -185,6 +185,57 @@ pub struct ChipletCols<T> {
 /// Number of columns in the chiplets trace (21), derived from the struct layout.
 pub const NUM_CHIPLETS_COLS: usize = size_of::<ChipletCols<u8>>();
 
+impl<T> ChipletCols<T> {
+    /// Returns the 6 chiplet selector columns `[s_ctrl, s_perm, s1, s2, s3, s4]`.
+    ///
+    /// `s_ctrl = chiplets[0]` and `s_perm` are the two physical selectors for the controller
+    /// and permutation sub-chiplets. `s1..s4` subdivide the remaining chiplets under the
+    /// virtual `s0 = 1 - (s_ctrl + s_perm)`. Mirrors [`MainCols::chiplet_selectors`].
+    pub fn chiplet_selectors(&self) -> [T; 6]
+    where
+        T: Copy,
+    {
+        [
+            self.chiplets[0],
+            self.s_perm,
+            self.chiplets[1],
+            self.chiplets[2],
+            self.chiplets[3],
+            self.chiplets[4],
+        ]
+    }
+
+    /// Returns a typed borrow of the bitwise chiplet columns (chiplets\[2..15\]).
+    pub fn bitwise(&self) -> &BitwiseCols<T> {
+        borrow_chiplet(&self.chiplets[2..15])
+    }
+
+    /// Returns a typed borrow of the memory chiplet columns (chiplets\[3..18\]).
+    pub fn memory(&self) -> &MemoryCols<T> {
+        borrow_chiplet(&self.chiplets[3..18])
+    }
+
+    /// Returns a typed borrow of the ACE chiplet columns (chiplets\[4..20\]).
+    pub fn ace(&self) -> &AceCols<T> {
+        borrow_chiplet(&self.chiplets[4..])
+    }
+
+    /// Returns a typed borrow of the kernel ROM chiplet columns (chiplets\[5..10\]).
+    pub fn kernel_rom(&self) -> &KernelRomCols<T> {
+        borrow_chiplet(&self.chiplets[5..10])
+    }
+
+    /// Returns a typed borrow of the permutation sub-chiplet columns (chiplets\[1..20\]).
+    pub fn permutation(&self) -> &PermutationCols<T> {
+        borrow_chiplet(&self.chiplets[1..])
+    }
+
+    /// Returns a typed borrow of the controller sub-chiplet columns (chiplets\[1..20\]).
+    pub fn controller(&self) -> &ControllerCols<T> {
+        borrow_chiplet(&self.chiplets[1..])
+    }
+}
+
 impl<T> Borrow<ChipletCols<T>> for [T] {
     fn borrow(&self) -> &ChipletCols<T> {
         debug_assert_eq!(self.len(), NUM_CHIPLETS_COLS);
@@ -392,5 +443,44 @@ mod tests {
         // and the value in our deterministic buffer equals the column index.
         assert_eq!(chiplets.chiplets[0], CHIPLETS_OFFSET);
         assert_eq!(chiplets.s_perm, CHIPLETS_OFFSET + 20);
+    }
+
+    /// `ChipletCols` chiplet accessors return the same view as the `MainCols` equivalents
+    /// when both are borrowed from the same buffer.
+    #[test]
+    fn chiplet_cols_accessors_match_main() {
+        let buf: alloc::vec::Vec<usize> = (0..TRACE_WIDTH).collect();
+
+        let main: &MainCols<usize> = buf.as_slice().borrow();
+        let chiplets: &ChipletCols<usize> = buf[NUM_CORE_COLS..].borrow();
+
+        assert_eq!(main.chiplet_selectors(), chiplets.chiplet_selectors());
+
+        // The seven typed sub-chiplet accessors return references into a shared backing
+        // slice; compare via address — the two views point to the same physical column.
+        assert_eq!(
+            main.bitwise() as *const _ as usize,
+            chiplets.bitwise() as *const _ as usize,
+        );
+        assert_eq!(
+            main.memory() as *const _ as usize,
+            chiplets.memory() as *const _ as usize,
+        );
+        assert_eq!(
+            main.ace() as *const _ as usize,
+            chiplets.ace() as *const _ as usize,
+        );
+        assert_eq!(
+            main.kernel_rom() as *const _ as usize,
+            chiplets.kernel_rom() as *const _ as usize,
+        );
+        assert_eq!(
+            main.permutation() as *const _ as usize,
+            chiplets.permutation() as *const _ as usize,
+        );
+        assert_eq!(
+            main.controller() as *const _ as usize,
+            chiplets.controller() as *const _ as usize,
+        );
     }
 }
