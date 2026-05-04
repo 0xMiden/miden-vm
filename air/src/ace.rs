@@ -112,7 +112,24 @@ where
 {
     let constraint_root = constraint_dag.root;
     let mut builder = DagBuilder::from_dag(constraint_dag);
+    let root = batch_logup_boundary_into_builder(&mut builder, constraint_root, config);
+    builder.build(root)
+}
 
+/// Same as [`batch_logup_boundary`], but appends the boundary-batched check into an
+/// existing [`DagBuilder`].
+///
+/// Useful when the caller is already composing nodes into a larger DAG (e.g. the
+/// multi-AIR combined builder, where two per-AIR constraint roots are β-folded
+/// before the shared boundary check is appended).
+pub fn batch_logup_boundary_into_builder<EF>(
+    builder: &mut DagBuilder<EF>,
+    constraint_root: NodeId,
+    config: &LogUpBoundaryConfig,
+) -> NodeId
+where
+    EF: ExtensionField<Felt>,
+{
     // sum_aux = Σ aux_bound[col] + Σ scalar_corrections
     let mut sum_aux = builder.constant(EF::ZERO);
     for &col in &config.sum_columns {
@@ -128,7 +145,7 @@ where
     let mut num = builder.constant(EF::ZERO);
     let mut den = builder.constant(EF::ONE);
     for fraction in &config.fractions {
-        let d_i = encode_bus_message(&mut builder, fraction.bus, &fraction.message);
+        let d_i = encode_bus_message(builder, fraction.bus, &fraction.message);
         let sign_value = match fraction.sign {
             Sign::Plus => EF::ONE,
             Sign::Minus => -EF::ONE,
@@ -164,9 +181,7 @@ where
     let constraint_plus_boundary = builder.add(constraint_root, gamma_boundary);
     let gamma_sq = builder.mul(gamma, gamma);
     let gamma_sq_zero = builder.mul(gamma_sq, zero_sum);
-    let root = builder.add(constraint_plus_boundary, gamma_sq_zero);
-
-    builder.build(root)
+    builder.add(constraint_plus_boundary, gamma_sq_zero)
 }
 
 /// Encode a bus message as `bus_prefix[bus] + sum(beta^i * elements[i])`.
