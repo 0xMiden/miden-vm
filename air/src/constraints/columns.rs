@@ -100,6 +100,25 @@ impl<T> MainCols<T> {
         borrow_chiplet(&self.chiplets[1..])
     }
 
+    /// Returns the leading system + decoder + stack + range fields as a `&CoreCols<T>`.
+    ///
+    /// Bridges the legacy `MainCols`-based call sites to the multi-AIR `CoreCols` view
+    /// without requiring callers to re-borrow from a slice. `MainCols<T>` and `CoreCols<T>`
+    /// are both `#[repr(C)]` and the leading portion of `MainCols<T>` (`system`, `decoder`,
+    /// `stack`, `range`) has the same layout as the entirety of `CoreCols<T>` — verified at
+    /// runtime by the alignment tests in this module and at compile time by the
+    /// `NUM_CORE_COLS + NUM_CHIPLETS_COLS == TRACE_WIDTH` assertion.
+    pub fn as_core_cols(&self) -> &CoreCols<T> {
+        // SAFETY: `MainCols<T>` is `#[repr(C)]` with the field order
+        // `[system, decoder, stack, range, chiplets, s_perm]`. `CoreCols<T>` is also
+        // `#[repr(C)]` with the field order `[system, decoder, stack, range]` and the same
+        // field types and alignment as the leading fields of `MainCols<T>`. Since the leading
+        // field of `MainCols` is `system` at offset 0, the pointer cast is a no-op
+        // re-interpretation. The resulting reference's lifetime is tied to `&self`, which
+        // prevents aliasing with any later mutation.
+        unsafe { &*(self as *const Self).cast::<CoreCols<T>>() }
+    }
+
     /// Returns the trailing chiplets + s_perm fields as a `&ChipletCols<T>`.
     ///
     /// Bridges the legacy `MainCols`-based call sites to the multi-AIR `ChipletCols` view
@@ -467,6 +486,33 @@ mod tests {
         // and the value in our deterministic buffer equals the column index.
         assert_eq!(chiplets.chiplets[0], CHIPLETS_OFFSET);
         assert_eq!(chiplets.s_perm, CHIPLETS_OFFSET + 20);
+    }
+
+    /// `MainCols::as_core_cols()` returns a `&CoreCols<T>` pointing at the leading portion
+    /// of the same buffer. Field-by-field comparison verifies the reinterpret cast is sound
+    /// (matching what `core_cols_layout_aligned_with_main` proves through the slice-Borrow
+    /// path).
+    #[test]
+    fn as_core_cols_aliases_main_core() {
+        let buf: alloc::vec::Vec<usize> = (0..TRACE_WIDTH).collect();
+
+        let main: &MainCols<usize> = buf.as_slice().borrow();
+        let bridged: &CoreCols<usize> = main.as_core_cols();
+
+        // The reinterpret cast yields a reference to the same leading fields.
+        assert_eq!(bridged.system.clk, main.system.clk);
+        assert_eq!(bridged.system.ctx, main.system.ctx);
+        assert_eq!(bridged.system.fn_hash, main.system.fn_hash);
+        assert_eq!(bridged.decoder.addr, main.decoder.addr);
+        assert_eq!(bridged.stack.top, main.stack.top);
+        assert_eq!(bridged.range.multiplicity, main.range.multiplicity);
+
+        // Address parity: the bridged CoreCols sits at the same address as re-borrowing the
+        // leading slice as CoreCols (and at the same address as the MainCols itself, since
+        // CoreCols starts at offset 0).
+        let direct: &CoreCols<usize> = buf[..NUM_CORE_COLS].borrow();
+        assert_eq!(bridged as *const _ as usize, direct as *const _ as usize);
+        assert_eq!(bridged as *const _ as usize, main as *const _ as usize);
     }
 
     /// `MainCols::as_chiplet_cols()` returns a `&ChipletCols<T>` pointing at the trailing
