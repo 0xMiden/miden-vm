@@ -7,10 +7,10 @@ extern crate std;
 
 use alloc::{boxed::Box, vec::Vec};
 
-use miden_air::{ProcessorAir, PublicInputs, config};
+use miden_air::{AirInstance, MidenAir, PublicInputs, config};
 use miden_core::{Felt, WORD_SIZE, field::QuadFelt};
 use miden_crypto::stark::{
-    StarkConfig, air::VarLenPublicInputs, challenger::CanObserve, lmcs::Lmcs, proof::StarkProof,
+    StarkConfig, challenger::CanObserve, lmcs::Lmcs, proof::StarkProof,
 };
 use serde::de::DeserializeOwned;
 
@@ -139,29 +139,28 @@ fn verify_stark(
     let pub_inputs =
         PublicInputs::new(program_info, stack_inputs, stack_outputs, pc_transcript_state);
     let (public_values, kernel_felts) = pub_inputs.to_air_inputs();
-    let var_len_public_inputs: &[&[Felt]] = &[&kernel_felts];
 
     let params = config::pcs_params();
     match hash_fn {
         HashFunction::Blake3_256 => {
             let config = config::blake3_256_config(params);
-            verify_stark_proof(&config, &public_values, var_len_public_inputs, &proof_bytes)
+            verify_stark_proof(&config, &public_values, &kernel_felts, &proof_bytes)
         },
         HashFunction::Rpo256 => {
             let config = config::rpo_config(params);
-            verify_stark_proof(&config, &public_values, var_len_public_inputs, &proof_bytes)
+            verify_stark_proof(&config, &public_values, &kernel_felts, &proof_bytes)
         },
         HashFunction::Rpx256 => {
             let config = config::rpx_config(params);
-            verify_stark_proof(&config, &public_values, var_len_public_inputs, &proof_bytes)
+            verify_stark_proof(&config, &public_values, &kernel_felts, &proof_bytes)
         },
         HashFunction::Poseidon2 => {
             let config = config::poseidon2_config(params);
-            verify_stark_proof(&config, &public_values, var_len_public_inputs, &proof_bytes)
+            verify_stark_proof(&config, &public_values, &kernel_felts, &proof_bytes)
         },
         HashFunction::Keccak => {
             let config = config::keccak_config(params);
-            verify_stark_proof(&config, &public_values, var_len_public_inputs, &proof_bytes)
+            verify_stark_proof(&config, &public_values, &kernel_felts, &proof_bytes)
         },
     }
     .map_err(|e| VerificationError::StarkVerificationError(program_hash, Box::new(e)))?;
@@ -195,14 +194,15 @@ pub enum StarkVerificationError {
     Verifier(#[from] miden_crypto::stark::verifier::VerifierError),
 }
 
-/// Verifies a STARK proof for the given public values.
+/// Verifies a multi-AIR STARK proof for the given (Core, Chiplets) split.
 ///
-/// Pre-seeds the challenger with `public_values`, then delegates to the lifted
-/// verifier.
+/// Pre-seeds the challenger with the protocol parameters, public values, and the
+/// concatenated kernel-procedure digests (the only variable-length public input today,
+/// owned by the Chiplets AIR). Then delegates to the lifted multi-AIR verifier.
 fn verify_stark_proof<SC>(
     config: &SC,
     public_values: &[Felt],
-    var_len_public_inputs: VarLenPublicInputs<'_, Felt>,
+    kernel_felts: &[Felt],
     proof_bytes: &[u8],
 ) -> Result<(), StarkVerificationError>
 where
@@ -215,14 +215,21 @@ where
     let mut challenger = config.challenger();
     config::observe_protocol_params(&mut challenger);
     challenger.observe_slice(public_values);
-    config::observe_var_len_public_inputs(&mut challenger, var_len_public_inputs, &[WORD_SIZE]);
-    miden_crypto::stark::verifier::verify_single(
-        config,
-        &ProcessorAir,
+    let chiplets_var_len: &[&[Felt]] = &[kernel_felts];
+    config::observe_var_len_public_inputs(&mut challenger, chiplets_var_len, &[WORD_SIZE]);
+
+    let core_air = MidenAir::CORE;
+    let chiplets_air = MidenAir::CHIPLETS;
+    let core_instance = AirInstance {
         public_values,
-        var_len_public_inputs,
-        &proof,
-        challenger,
-    )?;
+        var_len_public_inputs: &[],
+    };
+    let chiplets_instance = AirInstance {
+        public_values,
+        var_len_public_inputs: chiplets_var_len,
+    };
+    let instances = [(&core_air, core_instance), (&chiplets_air, chiplets_instance)];
+
+    miden_crypto::stark::verifier::verify_multi(config, &instances, &proof, challenger)?;
     Ok(())
 }

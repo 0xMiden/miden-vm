@@ -356,6 +356,13 @@ impl ExecutionTrace {
         row_major
     }
 
+    /// Splits the trace into the per-AIR `(Core, Chiplets)` matrix pair consumed by the
+    /// multi-AIR `prove_multi` path. Strips the Poseidon2 rate-alignment padding columns
+    /// before returning.
+    pub fn to_core_chiplets_matrices(&self) -> (RowMajorMatrix<Felt>, RowMajorMatrix<Felt>) {
+        self.main_trace.to_core_chiplets_matrices()
+    }
+
     // HELPER METHODS
     // --------------------------------------------------------------------------------------------
 

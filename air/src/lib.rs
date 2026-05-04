@@ -71,7 +71,7 @@ mod export {
         },
         debug,
     };
-    pub use miden_lifted_stark::AirWitness;
+    pub use miden_lifted_stark::{AirInstance, AirWitness};
 }
 
 pub use export::*;
@@ -941,5 +941,139 @@ where
             "build_logup_aux_trace returns one committed final per AIR (col 0's terminal sum)"
         );
         (aux_trace, committed)
+    }
+}
+
+// MIDEN AIR (multi-AIR enum wrapper)
+// ================================================================================================
+
+/// Homogeneous wrapper that lets [`CoreAir`] and [`ChipletsAir`] share a single trait-object
+/// type for `prove_multi`/`verify_multi`. Upstream's `prove_multi<F, EF, A, B, SC>` takes
+/// `&[(&A, AirWitness, &B)]` — both `A` (the AIR) and `B` (the aux builder) must be the same
+/// type across all instances, so we dispatch through this enum.
+#[derive(Copy, Clone, Debug)]
+pub enum MidenAir {
+    Core(CoreAir),
+    Chiplets(ChipletsAir),
+}
+
+impl MidenAir {
+    pub const CORE: Self = Self::Core(CoreAir);
+    pub const CHIPLETS: Self = Self::Chiplets(ChipletsAir);
+}
+
+impl BaseAir<Felt> for MidenAir {
+    fn width(&self) -> usize {
+        match self {
+            Self::Core(a) => BaseAir::<Felt>::width(a),
+            Self::Chiplets(a) => BaseAir::<Felt>::width(a),
+        }
+    }
+
+    fn num_public_values(&self) -> usize {
+        match self {
+            Self::Core(a) => BaseAir::<Felt>::num_public_values(a),
+            Self::Chiplets(a) => BaseAir::<Felt>::num_public_values(a),
+        }
+    }
+}
+
+impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for MidenAir {
+    fn periodic_columns(&self) -> Vec<Vec<Felt>> {
+        match self {
+            Self::Core(a) => <CoreAir as LiftedAir<Felt, EF>>::periodic_columns(a),
+            Self::Chiplets(a) => <ChipletsAir as LiftedAir<Felt, EF>>::periodic_columns(a),
+        }
+    }
+
+    fn num_randomness(&self) -> usize {
+        match self {
+            Self::Core(a) => <CoreAir as LiftedAir<Felt, EF>>::num_randomness(a),
+            Self::Chiplets(a) => <ChipletsAir as LiftedAir<Felt, EF>>::num_randomness(a),
+        }
+    }
+
+    fn aux_width(&self) -> usize {
+        match self {
+            Self::Core(a) => <CoreAir as LiftedAir<Felt, EF>>::aux_width(a),
+            Self::Chiplets(a) => <ChipletsAir as LiftedAir<Felt, EF>>::aux_width(a),
+        }
+    }
+
+    fn num_aux_values(&self) -> usize {
+        match self {
+            Self::Core(a) => <CoreAir as LiftedAir<Felt, EF>>::num_aux_values(a),
+            Self::Chiplets(a) => <ChipletsAir as LiftedAir<Felt, EF>>::num_aux_values(a),
+        }
+    }
+
+    fn num_var_len_public_inputs(&self) -> usize {
+        match self {
+            Self::Core(a) => <CoreAir as LiftedAir<Felt, EF>>::num_var_len_public_inputs(a),
+            Self::Chiplets(a) => <ChipletsAir as LiftedAir<Felt, EF>>::num_var_len_public_inputs(a),
+        }
+    }
+
+    fn reduced_aux_values(
+        &self,
+        aux_values: &[EF],
+        challenges: &[EF],
+        public_values: &[Felt],
+        var_len_public_inputs: VarLenPublicInputs<'_, Felt>,
+    ) -> Result<ReducedAuxValues<EF>, ReductionError>
+    where
+        EF: ExtensionField<Felt>,
+    {
+        match self {
+            Self::Core(a) => <CoreAir as LiftedAir<Felt, EF>>::reduced_aux_values(
+                a,
+                aux_values,
+                challenges,
+                public_values,
+                var_len_public_inputs,
+            ),
+            Self::Chiplets(a) => <ChipletsAir as LiftedAir<Felt, EF>>::reduced_aux_values(
+                a,
+                aux_values,
+                challenges,
+                public_values,
+                var_len_public_inputs,
+            ),
+        }
+    }
+
+    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
+        match self {
+            Self::Core(a) => <CoreAir as LiftedAir<Felt, EF>>::eval(a, builder),
+            Self::Chiplets(a) => <ChipletsAir as LiftedAir<Felt, EF>>::eval(a, builder),
+        }
+    }
+
+    fn log_quotient_degree(&self) -> usize
+    where
+        Self: Sized,
+    {
+        match self {
+            Self::Core(a) => <CoreAir as LiftedAir<Felt, EF>>::log_quotient_degree(a),
+            Self::Chiplets(a) => <ChipletsAir as LiftedAir<Felt, EF>>::log_quotient_degree(a),
+        }
+    }
+}
+
+impl<EF> AuxBuilder<Felt, EF> for MidenAir
+where
+    EF: ExtensionField<Felt>,
+{
+    fn build_aux_trace(
+        &self,
+        main: &RowMajorMatrix<Felt>,
+        challenges: &[EF],
+    ) -> (RowMajorMatrix<EF>, Vec<EF>) {
+        match self {
+            Self::Core(a) => <CoreAir as AuxBuilder<Felt, EF>>::build_aux_trace(a, main, challenges),
+            Self::Chiplets(a) => {
+                <ChipletsAir as AuxBuilder<Felt, EF>>::build_aux_trace(a, main, challenges)
+            },
+        }
     }
 }
