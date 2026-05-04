@@ -442,7 +442,7 @@ fn test_find_word_rejects_oob_pointer_above_end() {
 
             push.112 push.100 push.[8675,5816,5458,2767]
             exec.sorted_array::find_word
-            
+
             exec.truncate_stack
         end
     "
@@ -464,7 +464,7 @@ fn test_find_word_rejects_oob_pointer_below_start() {
         {TRUNCATE_STACK_PROC}
         begin
             push.[9000,9000,9000,9000] mem_storew_le.40 dropw
-        
+
             push.[8456,415,4922,593] mem_storew_le.100 dropw
             push.[8675,5816,5458,2767] mem_storew_le.104 dropw
             push.[3015,7211,2002,5143] mem_storew_le.108 dropw
