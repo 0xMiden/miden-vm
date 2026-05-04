@@ -753,6 +753,163 @@ fn stack_buffer_is_not_preallocated_to_operand_stack_depth_limit() {
     );
 }
 
+fn previous_growth_len(
+    stack_len: usize,
+    live_len: usize,
+    requested_min_len: usize,
+    max_len: usize,
+) -> usize {
+    let recentered_min_len = STACK_BUFFER_BASE_IDX.saturating_add(live_len).saturating_add(2);
+    let required_len = requested_min_len.min(max_len).max(recentered_min_len);
+
+    let mut new_len = stack_len;
+    while new_len < required_len {
+        let next_len = new_len.saturating_mul(2);
+        if next_len <= new_len {
+            return required_len;
+        }
+        new_len = next_len.min(max_len);
+    }
+
+    new_len
+}
+
+fn new_growth_len(live_len: usize, requested_min_len: usize, max_len: usize) -> usize {
+    let target_len = STACK_BUFFER_BASE_IDX
+        .saturating_add(live_len)
+        .saturating_add(2)
+        .saturating_mul(2);
+
+    target_len.max(requested_min_len).min(max_len)
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct GrowthSemantics {
+    new_stack_bot_idx: usize,
+    new_stack_top_idx: usize,
+    covers_requested_len: bool,
+    covers_recentered_len: bool,
+    within_max_len: bool,
+}
+
+fn growth_semantics(
+    new_len: usize,
+    live_len: usize,
+    requested_min_len: usize,
+    max_len: usize,
+) -> GrowthSemantics {
+    let recentered_min_len = STACK_BUFFER_BASE_IDX.saturating_add(live_len).saturating_add(2);
+
+    GrowthSemantics {
+        new_stack_bot_idx: STACK_BUFFER_BASE_IDX,
+        new_stack_top_idx: STACK_BUFFER_BASE_IDX + live_len,
+        covers_requested_len: new_len >= requested_min_len,
+        covers_recentered_len: new_len >= recentered_min_len,
+        within_max_len: new_len <= max_len,
+    }
+}
+
+#[test]
+fn new_stack_growth_algorithm_is_vm_equivalent_to_previous_algorithm() {
+    let max_depth = DEFAULT_MAX_STACK_DEPTH * 4;
+    let max_len = STACK_BUFFER_BASE_IDX.saturating_add(max_depth).saturating_add(1);
+
+    for stack_len in [INITIAL_STACK_BUFFER_SIZE, INITIAL_STACK_BUFFER_SIZE * 2] {
+        // Push growth is called when the next push would need one slot past the current buffer.
+        let live_len = stack_len - STACK_BUFFER_BASE_IDX - 1;
+        let requested_min_len = stack_len + 1;
+
+        let previous_len = previous_growth_len(stack_len, live_len, requested_min_len, max_len);
+        let new_len = new_growth_len(live_len, requested_min_len, max_len);
+
+        assert_eq!(
+            growth_semantics(previous_len, live_len, requested_min_len, max_len),
+            growth_semantics(new_len, live_len, requested_min_len, max_len)
+        );
+    }
+
+    for overflow_len in 0..=(max_depth - MIN_STACK_DEPTH) {
+        // Restore growth is called from a callee with only the minimum live stack, but the
+        // requested length must cover the caller overflow stack being restored.
+        let requested_min_len =
+            INITIAL_STACK_TOP_IDX.saturating_add(overflow_len).saturating_add(1);
+        let previous_len = previous_growth_len(
+            INITIAL_STACK_BUFFER_SIZE,
+            MIN_STACK_DEPTH,
+            requested_min_len,
+            max_len,
+        );
+        let new_len = new_growth_len(MIN_STACK_DEPTH, requested_min_len, max_len);
+
+        assert_eq!(
+            growth_semantics(previous_len, MIN_STACK_DEPTH, requested_min_len, max_len),
+            growth_semantics(new_len, MIN_STACK_DEPTH, requested_min_len, max_len)
+        );
+    }
+}
+
+#[test]
+fn new_stack_growth_algorithm_allocation_differences_are_intentional() {
+    let max_depth = DEFAULT_MAX_STACK_DEPTH * 4;
+    let max_len = STACK_BUFFER_BASE_IDX.saturating_add(max_depth).saturating_add(1);
+
+    let push_live_len = INITIAL_STACK_BUFFER_SIZE - STACK_BUFFER_BASE_IDX - 1;
+    let push_requested_min_len = INITIAL_STACK_BUFFER_SIZE + 1;
+    assert_eq!(
+        previous_growth_len(
+            INITIAL_STACK_BUFFER_SIZE,
+            push_live_len,
+            push_requested_min_len,
+            max_len,
+        ),
+        INITIAL_STACK_BUFFER_SIZE * 2
+    );
+    assert_eq!(
+        new_growth_len(push_live_len, push_requested_min_len, max_len),
+        INITIAL_STACK_BUFFER_SIZE * 2 + 2
+    );
+
+    let restore_requested_min_len = INITIAL_STACK_BUFFER_SIZE + 1;
+    assert_eq!(
+        previous_growth_len(
+            INITIAL_STACK_BUFFER_SIZE,
+            MIN_STACK_DEPTH,
+            restore_requested_min_len,
+            max_len,
+        ),
+        INITIAL_STACK_BUFFER_SIZE * 2
+    );
+    assert_eq!(
+        new_growth_len(MIN_STACK_DEPTH, restore_requested_min_len, max_len),
+        restore_requested_min_len
+    );
+}
+
+#[test]
+fn new_stack_growth_algorithm_preserves_required_bounds() {
+    let max_depth = DEFAULT_MAX_STACK_DEPTH * 4;
+    let max_len = STACK_BUFFER_BASE_IDX.saturating_add(max_depth).saturating_add(1);
+
+    for live_len in MIN_STACK_DEPTH..max_depth {
+        let recentered_min_len = STACK_BUFFER_BASE_IDX.saturating_add(live_len).saturating_add(2);
+        let requested_min_len = recentered_min_len.max(INITIAL_STACK_BUFFER_SIZE + 1);
+        let new_len = new_growth_len(live_len, requested_min_len, max_len);
+
+        assert!(new_len >= requested_min_len);
+        assert!(new_len >= recentered_min_len);
+        assert!(new_len <= max_len);
+    }
+
+    for overflow_len in 0..=(max_depth - MIN_STACK_DEPTH) {
+        let requested_min_len =
+            INITIAL_STACK_TOP_IDX.saturating_add(overflow_len).saturating_add(1);
+        let new_len = new_growth_len(MIN_STACK_DEPTH, requested_min_len, max_len);
+
+        assert!(new_len >= requested_min_len);
+        assert!(new_len <= max_len);
+    }
+}
+
 #[test]
 fn stack_depth_limit_exceeded() {
     let mut host = DefaultHost::default();

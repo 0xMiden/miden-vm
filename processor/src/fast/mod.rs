@@ -626,7 +626,7 @@ impl FastProcessor {
         }
     }
 
-    fn grow_stack_buffer(&mut self, min_len: usize) {
+    fn grow_stack_buffer(&mut self, requested_min_len: usize) {
         // The maximum allocation is tied to the logical operand stack depth, not to the current
         // buffer position. Using `stack_bot_idx` here would make the allocation ceiling drift when
         // the live stack has moved away from the initial base.
@@ -639,18 +639,19 @@ impl FastProcessor {
         // behavior close to the fixed-buffer layout and avoids carrying unused prefix cells into
         // the new allocation. The extra slot is for the next checked push that triggered growth.
         let recentered_min_len = STACK_BUFFER_BASE_IDX.saturating_add(live_len).saturating_add(2);
-        let required_len = min_len.min(max_len).max(recentered_min_len);
-        debug_assert!(required_len <= max_len);
+        debug_assert!(requested_min_len <= max_len);
+        debug_assert!(recentered_min_len <= max_len);
 
-        let mut new_len = self.stack.len();
-        while new_len < required_len {
-            let next_len = new_len.saturating_mul(2);
-            if next_len <= new_len {
-                new_len = required_len;
-                break;
-            }
-            new_len = next_len.min(max_len);
-        }
+        // Allocation growth is based on the stack's post-recentered live range, not the previous
+        // buffer length. This preserves the same VM-visible outcome as growing from the old buffer:
+        // the requested index is covered, the live stack is restored at `STACK_BUFFER_BASE_IDX`,
+        // and allocation remains capped by the configured stack depth. The allocation size
+        // can differ, though. Normal push growth may allocate a couple of extra cells
+        // because of the spare push slot, while restoring a deep caller from a shallow
+        // callee may allocate only the requested restored range instead of doubling the old
+        // buffer. That smaller restore allocation is intentional, but it means future
+        // pushes can grow again sooner and should stay covered by benchmarks.
+        let new_len = recentered_min_len.saturating_mul(2).max(requested_min_len).min(max_len);
         debug_assert!(new_len <= max_len);
 
         let mut new_stack = vec![ZERO; new_len].into_boxed_slice();
