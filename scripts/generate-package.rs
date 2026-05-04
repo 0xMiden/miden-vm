@@ -1,4 +1,4 @@
-#!/usr/bin/env carg
+#!/usr/bin/env -S cargo +nightly -Zscript
 
 ---
 [dependencies]
