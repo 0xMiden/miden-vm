@@ -12,7 +12,7 @@
 
 use chiplets::selectors::ChipletSelectors;
 
-use crate::{CoreCols, MainCols, MidenAirBuilder};
+use crate::{ChipletCols, CoreCols, MainCols, MidenAirBuilder};
 
 pub mod chiplets;
 pub mod columns;
@@ -46,7 +46,7 @@ pub fn enforce_main<AB>(
     AB: MidenAirBuilder,
 {
     enforce_core(builder, local.as_core_cols(), next.as_core_cols(), op_flags);
-    enforce_chiplets(builder, local, next, selectors);
+    enforce_chiplets(builder, local.as_chiplet_cols(), next.as_chiplet_cols(), selectors);
 }
 
 /// Enforces the Core-trace main constraints: system, range, stack, decoder.
@@ -72,8 +72,8 @@ pub fn enforce_core<AB>(
 /// [`chiplets::selectors::build_chiplet_selectors`].
 pub fn enforce_chiplets<AB>(
     builder: &mut AB,
-    local: &MainCols<AB::Var>,
-    next: &MainCols<AB::Var>,
+    local: &ChipletCols<AB::Var>,
+    next: &ChipletCols<AB::Var>,
     selectors: &ChipletSelectors<AB::Expr>,
 ) where
     AB: MidenAirBuilder,

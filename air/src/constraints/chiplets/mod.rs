@@ -22,7 +22,7 @@ pub mod selectors;
 
 use selectors::ChipletSelectors;
 
-use crate::{MainCols, MidenAirBuilder};
+use crate::{ChipletCols, MidenAirBuilder};
 
 // ENTRY POINTS
 // ================================================================================================
@@ -30,8 +30,8 @@ use crate::{MainCols, MidenAirBuilder};
 /// Enforces chiplets main-trace constraints.
 pub fn enforce_main<AB>(
     builder: &mut AB,
-    local: &MainCols<AB::Var>,
-    next: &MainCols<AB::Var>,
+    local: &ChipletCols<AB::Var>,
+    next: &ChipletCols<AB::Var>,
     selectors: &ChipletSelectors<AB::Expr>,
 ) where
     AB: MidenAirBuilder,

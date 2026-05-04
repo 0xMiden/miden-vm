@@ -398,8 +398,11 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ProcessorAir {
         let next: &MainCols<AB::Var> = (*next).borrow();
 
         // Build chiplet selectors and op flags once, shared by main and bus constraints.
-        let selectors =
-            constraints::chiplets::selectors::build_chiplet_selectors(builder, local, next);
+        let selectors = constraints::chiplets::selectors::build_chiplet_selectors(
+            builder,
+            local.as_chiplet_cols(),
+            next.as_chiplet_cols(),
+        );
         let op_flags =
             constraints::op_flags::OpFlags::new(&local.decoder, &local.stack, &next.decoder);
 

@@ -23,7 +23,7 @@ use core::borrow::Borrow;
 use miden_crypto::stark::air::AirBuilder;
 
 use crate::{
-    MainCols, MidenAirBuilder,
+    ChipletCols, MidenAirBuilder,
     constraints::chiplets::{
         columns::{HasherPeriodicCols, PeriodicCols},
         selectors::ChipletFlags,
@@ -39,8 +39,8 @@ use crate::{
 /// column is never referenced directly by constraint code.
 pub fn enforce_permutation_constraints<AB>(
     builder: &mut AB,
-    local: &MainCols<AB::Var>,
-    next: &MainCols<AB::Var>,
+    local: &ChipletCols<AB::Var>,
+    next: &ChipletCols<AB::Var>,
     flags: &ChipletFlags<AB::Expr>,
 ) where
     AB: MidenAirBuilder,
