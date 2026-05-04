@@ -1,3 +1,5 @@
+use alloc::string::{String, ToString};
+
 use miden_assembly_syntax::Path;
 
 use crate::*;
@@ -68,5 +70,26 @@ impl Target {
     /// Returns true if this target is a kernel target
     pub const fn is_kernel(&self) -> bool {
         matches!(self.ty, TargetType::Kernel)
+    }
+
+    /// Append the selected target fields that affect package artifact reuse to `out`.
+    pub fn append_build_provenance_projection(&self, out: &mut String) {
+        let Self { ty, name, namespace, path } = self;
+
+        out.push_str("target:kind:");
+        out.push_str(ty.to_string().as_str());
+        out.push('\n');
+        out.push_str("target:name:");
+        out.push_str(name.inner().as_ref());
+        out.push('\n');
+        out.push_str("target:namespace:");
+        out.push_str(namespace.inner().as_str());
+        out.push('\n');
+        out.push_str("target:path:");
+        match path.as_ref() {
+            Some(path) => out.push_str(path.inner().path()),
+            None => out.push_str("<virtual>"),
+        }
+        out.push('\n');
     }
 }
