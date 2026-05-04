@@ -1,7 +1,7 @@
 use std::{
     collections::BTreeMap,
     env, fs,
-    io::{Read, Write},
+    io::{Read, Seek, Write},
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -53,6 +53,16 @@ pub enum LocalRegistryError {
         package: PackageId,
         version: Version,
         path: PathBuf,
+    },
+    #[error(
+        "package artifact at '{path}' does not match requested package '{expected_package}' version '{expected_version}' (found '{actual_package}' version '{actual_version}')"
+    )]
+    ArtifactMismatch {
+        path: PathBuf,
+        expected_package: PackageId,
+        expected_version: Box<Version>,
+        actual_package: PackageId,
+        actual_version: Box<Version>,
     },
     #[error(
         "package '{package}' depends on unpublished package '{dependency}' with version '{version}'"
@@ -152,7 +162,6 @@ impl LocalPackageRegistry {
         fs::create_dir_all(&artifact_dir).map_err(LocalRegistryError::IndexWrite)?;
 
         let index = if index_path.exists() {
-            let mut contents = String::with_capacity(4 * 1024);
             #[allow(clippy::verbose_file_reads)]
             {
                 let mut file =
@@ -161,18 +170,12 @@ impl LocalPackageRegistry {
                 // there is an outstanding exclusive lock on the file already.
                 //
                 // This will fail if a handle to the index file has an exclusive lock on it for
-                // writing, see `save` for details.
+                // writing, see the publishing path for details.
                 //
                 // Multiple readers can hold this type of lock simultaneously, but a shared lock
                 // cannot be acquired in the presence of an exclusive lock, and vice versa.
                 file.try_lock_shared().map_err(LocalRegistryError::IndexReadLock)?;
-                file.read_to_string(&mut contents).map_err(LocalRegistryError::IndexRead)?;
-            }
-            if contents.trim().is_empty() {
-                InMemoryPackageRegistry::default()
-            } else {
-                let persisted = toml::from_str::<PersistedIndex>(&contents)?;
-                InMemoryPackageRegistry::from_packages(persisted.packages)
+                Self::read_index_from_file(&mut file)?
             }
         } else {
             InMemoryPackageRegistry::default()
@@ -277,34 +280,53 @@ impl LocalPackageRegistry {
         }
 
         let bytes = fs::read(&path).map_err(LocalRegistryError::IndexRead)?;
-        let package = MastPackage::read_from_bytes(&bytes).map_err(|error| {
+        let loaded = MastPackage::read_from_bytes(&bytes).map_err(|error| {
             LocalRegistryError::PackageDecode {
                 path: path.clone(),
                 error: error.to_string(),
             }
         })?;
-        Ok(Arc::new(package))
+
+        let actual_version = Version::new(loaded.version.clone(), loaded.digest());
+        if loaded.name != *package || actual_version != *version {
+            return Err(LocalRegistryError::ArtifactMismatch {
+                path,
+                expected_package: package.clone(),
+                expected_version: Box::new(version.clone()),
+                actual_package: loaded.name,
+                actual_version: Box::new(actual_version),
+            });
+        }
+
+        Ok(Arc::new(loaded))
     }
 
-    /// Persist the state of the index to disk
-    fn save(&self) -> Result<(), LocalRegistryError> {
-        let persisted = PersistedIndex { packages: self.index.packages().clone() };
+    fn read_index_from_file(
+        file: &mut fs::File,
+    ) -> Result<InMemoryPackageRegistry, LocalRegistryError> {
+        let mut contents = String::with_capacity(4 * 1024);
+        file.rewind().map_err(LocalRegistryError::IndexRead)?;
+        #[allow(clippy::verbose_file_reads)]
+        file.read_to_string(&mut contents).map_err(LocalRegistryError::IndexRead)?;
+
+        if contents.trim().is_empty() {
+            Ok(InMemoryPackageRegistry::default())
+        } else {
+            let persisted = toml::from_str::<PersistedIndex>(&contents)?;
+            Ok(InMemoryPackageRegistry::from_packages(persisted.packages))
+        }
+    }
+
+    fn write_index_to_file(
+        file: &mut fs::File,
+        index: &InMemoryPackageRegistry,
+    ) -> Result<(), LocalRegistryError> {
+        let persisted = PersistedIndex { packages: index.packages().clone() };
         let contents = toml::to_string_pretty(&persisted)?;
-        let mut file = fs::File::options()
-            .write(true)
-            .truncate(false)
-            .create(true)
-            .open(&self.index_path)
-            .map_err(LocalRegistryError::IndexWrite)?;
-        // Acquire an exclusive lock for writing the index file, and return an error if we cannot
-        // obtain one due to any other outstanding lock on the file.
-        //
-        // This will fail if another write is being performed on the same file, or if the index is
-        // currently being loaded by another process.
-        //
-        // See `load` for the non-exclusive lock obtained for reads
-        file.try_lock().map_err(LocalRegistryError::IndexWriteLock)?;
-        file.write_all(contents.as_bytes()).map_err(LocalRegistryError::IndexWrite)
+        file.rewind().map_err(LocalRegistryError::IndexWrite)?;
+        file.set_len(0).map_err(LocalRegistryError::IndexWrite)?;
+        file.write_all(contents.as_bytes()).map_err(LocalRegistryError::IndexWrite)?;
+        file.flush().map_err(LocalRegistryError::IndexWrite)
     }
 
     /// Derive the path in the artifact store for a package with `digest`
@@ -347,38 +369,77 @@ impl LocalPackageRegistry {
     ) -> Result<PublishedPackage, LocalRegistryError> {
         let digest = package.digest();
         let version = Version::new(package.version.clone(), digest);
-        let mut dependencies = Vec::new();
-        for dependency in package.manifest.dependencies() {
-            let dependency_name = dependency.id().clone();
-            let dependency_version = Version::new(dependency.version.clone(), dependency.digest);
-            let requirement = VersionRequirement::Exact(dependency_version.clone());
-            if self.index.get_exact_version(&dependency_name, &dependency_version).is_none() {
-                return Err(LocalRegistryError::MissingDependency {
-                    package: package.name.clone(),
-                    dependency: dependency_name,
-                    version: dependency_version,
-                });
-            }
-
-            dependencies.push((dependency_name, requirement));
-        }
+        let dependencies = package
+            .manifest
+            .dependencies()
+            .map(|dependency| {
+                let dependency_name = dependency.id().clone();
+                let dependency_version =
+                    Version::new(dependency.version.clone(), dependency.digest);
+                (
+                    dependency_name,
+                    dependency_version.clone(),
+                    VersionRequirement::Exact(dependency_version),
+                )
+            })
+            .collect::<Vec<_>>();
 
         let record = match package.description.clone() {
-            Some(description) => {
-                PackageRecord::new(version.clone(), dependencies).with_description(description)
-            },
-            None => PackageRecord::new(version.clone(), dependencies),
+            Some(description) => PackageRecord::new(
+                version.clone(),
+                dependencies
+                    .iter()
+                    .map(|(name, _version, requirement)| (name.clone(), requirement.clone())),
+            )
+            .with_description(description),
+            None => PackageRecord::new(
+                version.clone(),
+                dependencies
+                    .iter()
+                    .map(|(name, _version, requirement)| (name.clone(), requirement.clone())),
+            ),
         };
 
-        // Write the package artifact to the registry
+        let mut file = fs::File::options()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&self.index_path)
+            .map_err(LocalRegistryError::IndexWrite)?;
+        // Publishing has to validate and write against the latest index under one exclusive lock,
+        // otherwise concurrent publishers can overwrite each other's index entries.
+        file.try_lock().map_err(LocalRegistryError::IndexWriteLock)?;
+        let mut latest_index = Self::read_index_from_file(&mut file)?;
+
+        for (dependency_name, dependency_version, _requirement) in dependencies.iter() {
+            if latest_index.get_exact_version(dependency_name, dependency_version).is_none() {
+                return Err(LocalRegistryError::MissingDependency {
+                    package: package.name.clone(),
+                    dependency: dependency_name.clone(),
+                    version: dependency_version.clone(),
+                });
+            }
+        }
+
+        if latest_index.get_by_semver(&package.name, &package.version).is_some() {
+            return Err(LocalRegistryError::DuplicateSemanticVersion {
+                package: package.name.clone(),
+                version: package.version.clone(),
+            });
+        }
+
         let artifact_path = self.artifact_path_for_digest(digest);
         fs::write(&artifact_path, bytes).map_err(LocalRegistryError::IndexWrite)?;
 
-        // Record the new package to the in-memory registry index
-        self.register(package.name.clone(), record)?;
-
-        // Persist the updated registry index
-        self.save()?;
+        latest_index.insert_record(package.name.clone(), record).map_err(|_error| {
+            LocalRegistryError::DuplicateSemanticVersion {
+                package: package.name.clone(),
+                version: package.version.clone(),
+            }
+        })?;
+        Self::write_index_to_file(&mut file, &latest_index)?;
+        self.index = latest_index;
 
         Ok(PublishedPackage {
             name: package.name.clone(),
@@ -563,5 +624,78 @@ mod tests {
             .publish(&package_path)
             .expect_err("duplicate semver should fail even for identical bytes");
         assert!(matches!(error, LocalRegistryError::DuplicateSemanticVersion { .. }));
+    }
+
+    #[test]
+    fn publish_merges_against_latest_index_when_registry_was_loaded_before_another_publish() {
+        let tempdir = TempDir::new().unwrap();
+        let mut stale_registry = load_registry(&tempdir);
+        let mut fresh_registry = load_registry(&tempdir);
+
+        let first_path = tempdir.path().join("first.masp");
+        let second_path = tempdir.path().join("second.masp");
+        build_package("first", "1.0.0", []).write_to_file(&first_path).unwrap();
+        build_package("second", "1.0.0", []).write_to_file(&second_path).unwrap();
+
+        fresh_registry.publish(&first_path).unwrap();
+        stale_registry.publish(&second_path).unwrap();
+
+        let reloaded = load_registry(&tempdir);
+        assert!(reloaded.show(&PackageId::from("first"), None).is_some());
+        assert!(reloaded.show(&PackageId::from("second"), None).is_some());
+    }
+
+    #[test]
+    fn publish_rejects_duplicate_semver_added_after_registry_was_loaded() {
+        let tempdir = TempDir::new().unwrap();
+        let mut stale_registry = load_registry(&tempdir);
+        let mut fresh_registry = load_registry(&tempdir);
+
+        let first_path = tempdir.path().join("pkg-1.masp");
+        let second_path = tempdir.path().join("pkg-2.masp");
+        build_package("pkg", "1.0.0", []).write_to_file(&first_path).unwrap();
+        build_package("pkg", "1.0.0", []).write_to_file(&second_path).unwrap();
+
+        fresh_registry.publish(&first_path).unwrap();
+        let error = stale_registry
+            .publish(&second_path)
+            .expect_err("duplicate semver should be checked against the latest index");
+        assert!(matches!(error, LocalRegistryError::DuplicateSemanticVersion { .. }));
+    }
+
+    #[test]
+    fn load_package_rejects_artifact_that_does_not_match_requested_identity() {
+        let tempdir = TempDir::new().unwrap();
+        let mut registry = load_registry(&tempdir);
+
+        let package_path = tempdir.path().join("pkg.masp");
+        build_package("pkg", "1.0.0", []).write_to_file(&package_path).unwrap();
+        let published = registry.publish(&package_path).unwrap();
+
+        build_package("other", "1.0.0", [])
+            .write_to_file(&published.artifact_path)
+            .unwrap();
+
+        let error = registry
+            .load_package(&PackageId::from("pkg"), &published.version)
+            .expect_err("artifact mismatch should be rejected");
+        assert!(matches!(error, LocalRegistryError::ArtifactMismatch { .. }));
+    }
+
+    #[test]
+    fn write_index_replaces_longer_previous_contents() {
+        let tempdir = TempDir::new().unwrap();
+        let registry = load_registry(&tempdir);
+
+        fs::write(&registry.index_path, "x".repeat(4096)).unwrap();
+        let mut file =
+            fs::File::options().read(true).write(true).open(&registry.index_path).unwrap();
+        LocalPackageRegistry::write_index_to_file(&mut file, &InMemoryPackageRegistry::default())
+            .unwrap();
+        drop(file);
+
+        let contents = fs::read_to_string(&registry.index_path).unwrap();
+        assert!(contents.len() < 4096);
+        LocalPackageRegistry::load(registry.index_path, registry.artifact_dir).unwrap();
     }
 }
