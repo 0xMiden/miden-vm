@@ -46,17 +46,30 @@ pub const NUM_LOGUP_COMMITTED_FINALS: usize = 2;
 // BOUNDARY EMITTER
 // ================================================================================================
 
-/// Emits the three Miden-AIR boundary correction terms (`c_block_hash`,
-/// `c_log_precompile`, `c_kernel_rom`) into any [`BoundaryBuilder`].
+/// Emits all Miden-AIR boundary correction terms (block-hash seed, log-precompile transcript
+/// terminals, kernel ROM init) into any [`BoundaryBuilder`].
 ///
-/// Single source of truth shared between:
-/// - [`crate::ProcessorAir`]'s `LookupAir::eval_boundary` (consumed by the debug walker), and
-/// - [`crate::ProcessorAir::reduced_aux_values`] (verifier scalar check; drives the emissions
-///   through a reducer that sums `Σ multiplicity / encode(msg)`).
+/// Thin wrapper around [`emit_core_boundary`] + [`emit_chiplets_boundary`]; used by
+/// `ProcessorAir::reduced_aux_values` and the debug walker. Per-AIR `reduced_aux_values`
+/// impls call only their half (see the per-bus partition in the helpers below).
 ///
 /// See `program_hash_message`, `transcript_messages`, and `kernel_proc_message` in
 /// `air/src/lib.rs` for the canonical formulas this mirrors.
 pub(crate) fn emit_miden_boundary<B: BoundaryBuilder>(boundary: &mut B) {
+    emit_core_boundary(boundary);
+    emit_chiplets_boundary(boundary);
+}
+
+/// Emits the Core-trace boundary corrections.
+///
+/// Block-hash seed and log-precompile transcript terminals both cancel against bus
+/// accumulators on Core columns:
+/// - `BlockHashTable` lives on `MAIN_COLUMN_SHAPE[1]` (block_hash + op_group merged column).
+/// - `LogPrecompileTranscript` lives on `MAIN_COLUMN_SHAPE[0]` (block_stack + range + log-cap
+///   merged column).
+///
+/// Both fractions therefore belong to `CoreAir::reduced_aux_values` post-split.
+pub(crate) fn emit_core_boundary<B: BoundaryBuilder>(boundary: &mut B) {
     let pv = boundary.public_values();
     let program_hash: [B::F; 4] = [
         pv[PV_PROGRAM_HASH],
@@ -70,11 +83,6 @@ pub(crate) fn emit_miden_boundary<B: BoundaryBuilder>(boundary: &mut B) {
         pv[PV_TRANSCRIPT_STATE + 2],
         pv[PV_TRANSCRIPT_STATE + 3],
     ];
-    let kernel_digests: Vec<[B::F; 4]> = boundary
-        .var_len_public_inputs()
-        .first()
-        .map(|felts| felts.chunks_exact(WORD_SIZE).map(|d| [d[0], d[1], d[2], d[3]]).collect())
-        .unwrap_or_default();
 
     // Block-hash seed: +1 / encode(BLOCK_HASH_TABLE, [ph, 0, 0, 0]).
     boundary.add(
@@ -88,6 +96,19 @@ pub(crate) fn emit_miden_boundary<B: BoundaryBuilder>(boundary: &mut B) {
     // Log-precompile transcript terminals: +1 / d_initial − 1 / d_final.
     boundary.add("log_precompile_initial", LogCapacityMsg { capacity: [B::F::ZERO; 4] });
     boundary.remove("log_precompile_final", LogCapacityMsg { capacity: final_state });
+}
+
+/// Emits the Chiplets-trace boundary corrections.
+///
+/// Kernel ROM init cancels against the kernel-rom bus on `CHIPLET_COLUMN_SHAPE[0]`
+/// (chiplet_responses), so the fraction belongs to `ChipletsAir::reduced_aux_values`
+/// post-split.
+pub(crate) fn emit_chiplets_boundary<B: BoundaryBuilder>(boundary: &mut B) {
+    let kernel_digests: Vec<[B::F; 4]> = boundary
+        .var_len_public_inputs()
+        .first()
+        .map(|felts| felts.chunks_exact(WORD_SIZE).map(|d| [d[0], d[1], d[2], d[3]]).collect())
+        .unwrap_or_default();
 
     // Kernel ROM init: +Σ 1 / d_kernel_proc_msg_i over VLPI[0].
     for digest in kernel_digests {
