@@ -21,7 +21,7 @@ jobs:
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           fetch-depth: 0
-          ref: main
+          ref: ${{ github.event.release.tag_name }}
           persist-credentials: false
 
       - name: Authenticate with crates.io
@@ -40,6 +40,7 @@ jobs:
   # GitHub release page.
   # Used by midenup to speed up installs.
   upload-artifacts:
+    needs: [publish]
     name: upload pre-built miden-vm executable artifacts
     if: ${{ github.repository_owner == '0xMiden' }}
     permissions:
