@@ -746,20 +746,12 @@ where
 
 /// Chiplets-trace AIR for the multi-AIR proving path.
 ///
-/// Owns the 21-column chiplet section (chiplets data + s_perm) and the three chiplet-trace
-/// LogUp accumulator columns. Counterpart to [`CoreAir`].
+/// Owns the 22-column chiplet section (chiplets data + s_perm + chip_clk) and the three
+/// chiplet-trace LogUp accumulator columns. Counterpart to [`CoreAir`].
 ///
-/// **Currently unused in production AND not yet sound for real proofs.** The hasher response
-/// addresses on the chiplet-side LogUp bus must reference some unique per-row tag so the
-/// requester (in Core) can pin them — today that tag is `system.clk + 1`, a Core-trace
-/// column. With the multi-AIR split, the Chiplets AIR cannot read across to Core, so the
-/// chiplet trace needs its own row counter (see `MULTI_AIR_TODO.md` M1.5 — adds a chiplet
-/// column with a `clk_next = clk + 1` constraint and a matching trace generator).
-///
-/// Until M1.5 lands, `ChipletsAir::eval` and `LookupAir::eval` use a zero placeholder for
-/// the responder address. The lookup-validation test below still passes because validation
-/// only checks the symbolic shape of the LogUp argument; real proofs would not balance with
-/// this placeholder.
+/// `chip_clk` is the chiplet-trace row counter — it provides the responder address for the
+/// hasher LogUp bus, replacing the cross-trace `system.clk + 1` read used in the legacy
+/// monolithic chiplet bus emitter.
 #[derive(Copy, Clone, Debug, Default)]
 pub struct ChipletsAir;
 
@@ -907,19 +899,19 @@ where
     }
 
     fn eval(&self, builder: &mut LB) {
-        // PLACEHOLDER: until MULTI_AIR_TODO M1.5 adds a chiplet-side row counter, the
-        // responder address has no Chiplets-side source. We pass `LB::Expr::ZERO` so the
-        // symbolic shape validates; real proofs cannot balance the hasher bus until M1.5
-        // wires the actual counter.
+        // The chiplet-side `chip_clk` column is the responder address for the hasher
+        // LogUp bus.
         let main = builder.main();
         let local: &ChipletCols<_> = main.current_slice().borrow();
         let next: &ChipletCols<_> = main.next_slice().borrow();
+
+        let clk_plus_one: LB::Expr = local.chip_clk.into();
 
         constraints::lookup::chiplet_air::emit_chiplet_lookup_columns(
             builder,
             local,
             next,
-            <LB::Expr as miden_core::field::PrimeCharacteristicRing>::ZERO,
+            clk_plus_one,
         );
     }
 
@@ -932,8 +924,22 @@ where
 }
 
 // --- AuxBuilder impl ---
-//
-// Until M1.5 lands, `build_logup_aux_trace` would also receive the placeholder address and
-// produce a Vec<EF> for an unbalanced bus. We omit the AuxBuilder impl here so production
-// callers cannot accidentally use this AIR before M1.5 closes the cross-trace clk hole.
-// `CoreAir`'s AuxBuilder + the lookup-validation test below cover the type-level shape.
+
+impl<EF> AuxBuilder<Felt, EF> for ChipletsAir
+where
+    EF: ExtensionField<Felt>,
+{
+    fn build_aux_trace(
+        &self,
+        main: &RowMajorMatrix<Felt>,
+        challenges: &[EF],
+    ) -> (RowMajorMatrix<EF>, Vec<EF>) {
+        let (aux_trace, committed) = build_logup_aux_trace(self, main, challenges);
+        debug_assert_eq!(
+            committed.len(),
+            1,
+            "build_logup_aux_trace returns one committed final per AIR (col 0's terminal sum)"
+        );
+        (aux_trace, committed)
+    }
+}

@@ -246,6 +246,14 @@ impl Chiplets {
         trace[3][kernel_rom_start..].fill(ONE);
         trace[4][padding_start..].fill(ONE);
 
+        // Fill the chip_clk column (last column in the chiplets segment) with the
+        // chiplet-trace row counter [1, 2, 3, ...]. This serves as the chiplet-side
+        // responder address for the hasher LogUp bus — see
+        // `air/src/constraints/chiplets/chip_clk.rs`.
+        for (row, slot) in trace[CHIPLETS_WIDTH - 1].iter_mut().enumerate() {
+            *slot = Felt::from_u32((row + 1) as u32);
+        }
+
         // Fill chiplet traces via fragments. The block scopes the fragment borrows.
         {
             // allocate fragments to be filled with the respective execution traces of each chiplet
@@ -311,6 +319,9 @@ impl Chiplets {
                     20 => {
                         // column 20 is relevant only for the hasher chiplet (s_perm)
                         hasher_fragment.push_column_slice(column);
+                    },
+                    21 => {
+                        // column 21 (chip_clk) is filled at the master level above; skip.
                     },
                     _ => panic!("invalid column index"),
                 }

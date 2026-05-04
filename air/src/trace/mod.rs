@@ -107,7 +107,10 @@ pub const RANGE_CHECK_TRACE_RANGE: Range<usize> =
 
 // Chiplets trace
 pub const CHIPLETS_OFFSET: usize = RANGE_CHECK_TRACE_RANGE.end;
-pub const CHIPLETS_WIDTH: usize = 21;
+// 5 selectors + 15 shared chiplet data columns + s_perm + chip_clk = 22.
+// `chip_clk` is the chiplet-trace row counter (value `row_index + 1`); it sources the
+// hasher responder address on the chiplet side.
+pub const CHIPLETS_WIDTH: usize = 22;
 pub const CHIPLETS_RANGE: Range<usize> = range(CHIPLETS_OFFSET, CHIPLETS_WIDTH);
 
 /// Shared chiplet selector columns at the start of the chiplets segment.

@@ -14,6 +14,7 @@
 
 pub mod ace;
 pub mod bitwise;
+pub mod chip_clk;
 pub mod columns;
 pub mod hasher_control;
 pub mod memory;
@@ -38,6 +39,9 @@ pub fn enforce_main<AB>(
 {
     // Selector constraints (including hasher internal selectors) are enforced in
     // build_chiplet_selectors (called from lib.rs).
+
+    // Chiplet-trace row counter (boundary + transition).
+    chip_clk::enforce_chip_clk_constraints(builder, local, next);
 
     // Hasher sub-chiplets: permutation + controller.
     permutation::enforce_permutation_constraints(builder, local, next, &selectors.permutation);

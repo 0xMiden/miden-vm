@@ -163,19 +163,16 @@ where
     }
 
     fn eval(&self, builder: &mut LB) {
-        // Borrow the row buffer once as `MainCols` (the legacy 72-col aggregator path) so we
-        // can derive `clk_plus_one` from the Core-side `system.clk` column. After
-        // MULTI_AIR_TODO M1.5 — when the chiplet trace gains its own row counter — this
-        // function will live on `ChipletsAir::eval` instead, with `clk_plus_one` sourced
-        // from a Chiplets-side column. The `ChipletBusContext` itself is already pure
-        // `&ChipletCols`-typed.
+        // Borrow the row buffer as `MainCols` (legacy 72-col aggregator path) and bridge to
+        // `ChipletCols`. Source the responder address from the chiplet-side `chip_clk`
+        // column — no cross-trace dependency.
         let main = builder.main();
         let local_main: &MainCols<_> = main.current_slice().borrow();
         let next_main: &MainCols<_> = main.next_slice().borrow();
         let local_chiplet = local_main.as_chiplet_cols();
         let next_chiplet = next_main.as_chiplet_cols();
 
-        let clk_plus_one: LB::Expr = local_main.system.clk.into() + LB::Expr::ONE;
+        let clk_plus_one: LB::Expr = local_chiplet.chip_clk.into();
 
         emit_chiplet_lookup_columns(builder, local_chiplet, next_chiplet, clk_plus_one);
     }

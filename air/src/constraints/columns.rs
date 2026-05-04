@@ -25,7 +25,7 @@ use crate::trace::{CHIPLETS_WIDTH, TRACE_WIDTH};
 // MAIN TRACE COLUMN STRUCT
 // ================================================================================================
 
-/// Column layout of the main execution trace (71 columns).
+/// Column layout of the main execution trace.
 ///
 /// This `#[repr(C)]` struct provides typed, named access to every column. It can be
 /// borrowed zero-copy from a raw `[T; TRACE_WIDTH]` slice via `Borrow<MainCols<T>>`.
@@ -36,15 +36,22 @@ use crate::trace::{CHIPLETS_WIDTH, TRACE_WIDTH};
 ///
 /// The `s_perm` column is separated from the chiplets array because it is consumed
 /// exclusively by the chiplet selector system, not by any chiplet's constraint code.
+///
+/// `chip_clk` is the chiplet-trace row counter (value `row_index + 1`); it serves as the
+/// chiplet-side responder address for the hasher LogUp bus. Required for the multi-AIR
+/// split — eliminates the cross-trace `system.clk + 1` read that appeared in the legacy
+/// monolithic chiplet bus emitter.
 #[repr(C)]
 pub struct MainCols<T> {
     pub system: SystemCols<T>,
     pub decoder: DecoderCols<T>,
     pub stack: StackCols<T>,
     pub range: RangeCols<T>,
-    pub(crate) chiplets: [T; CHIPLETS_WIDTH - 1],
+    pub(crate) chiplets: [T; CHIPLETS_WIDTH - 2],
     /// Permutation segment selector: consumed by `build_chiplet_selectors`.
     pub s_perm: T,
+    /// Chiplet-trace row counter: starts at 1 on the first row, increments by 1 each row.
+    pub chip_clk: T,
 }
 
 impl<T> MainCols<T> {
@@ -146,18 +153,23 @@ impl<T> MainCols<T> {
 
 impl<T> Borrow<MainCols<T>> for [T] {
     fn borrow(&self) -> &MainCols<T> {
-        debug_assert_eq!(self.len(), TRACE_WIDTH);
-        let (prefix, shorts, suffix) = unsafe { self.align_to::<MainCols<T>>() };
-        debug_assert!(prefix.is_empty() && suffix.is_empty() && shorts.len() == 1);
+        // The prover stores rows at `PADDED_TRACE_WIDTH` (next multiple of 8) for
+        // `adv_pipe` rate-8 hashing. `MainCols` itself models only `TRACE_WIDTH` columns;
+        // any trailing padding is ignored.
+        debug_assert!(self.len() >= TRACE_WIDTH);
+        let (prefix, shorts, _suffix) =
+            unsafe { self[..TRACE_WIDTH].align_to::<MainCols<T>>() };
+        debug_assert!(prefix.is_empty() && shorts.len() == 1);
         &shorts[0]
     }
 }
 
 impl<T> BorrowMut<MainCols<T>> for [T] {
     fn borrow_mut(&mut self) -> &mut MainCols<T> {
-        debug_assert_eq!(self.len(), TRACE_WIDTH);
-        let (prefix, shorts, suffix) = unsafe { self.align_to_mut::<MainCols<T>>() };
-        debug_assert!(prefix.is_empty() && suffix.is_empty() && shorts.len() == 1);
+        debug_assert!(self.len() >= TRACE_WIDTH);
+        let (prefix, shorts, _suffix) =
+            unsafe { self[..TRACE_WIDTH].align_to_mut::<MainCols<T>>() };
+        debug_assert!(prefix.is_empty() && shorts.len() == 1);
         &mut shorts[0]
     }
 }
@@ -207,21 +219,25 @@ impl<T> BorrowMut<CoreCols<T>> for [T] {
 
 /// Column layout of the chiplets execution trace.
 ///
-/// `ChipletCols` covers the 20 shared chiplet data columns plus `s_perm` — the columns the
-/// `ChipletsAir` will own when the monolithic trace is split. It is
-/// laid out identically to the trailing `NUM_CHIPLETS_COLS` columns of `MainCols`
-/// (`#[repr(C)]` field order matches), so today it can be borrowed from the same buffer
-/// either as the suffix of a `MainCols` or directly from a 21-element slice.
+/// `ChipletCols` covers the 20 shared chiplet data columns + `s_perm` + `chip_clk` — the
+/// columns owned by `ChipletsAir`. It is laid out identically to the trailing
+/// `NUM_CHIPLETS_COLS` columns of `MainCols` (`#[repr(C)]` field order matches), so it can be
+/// borrowed from the same buffer either as the suffix of a `MainCols` or directly from a
+/// 22-element slice.
 ///
 /// The chiplets array is `pub(crate)` for the same reason as on `MainCols`: the 20 columns
 /// are a union whose interpretation depends on which chiplet is active. Access goes through
-/// typed accessors (added when consumers move from `MainCols` to `ChipletCols` in the M2
-/// milestone).
+/// typed accessors.
+///
+/// `chip_clk` is the chiplet-trace row counter — see the field doc on `MainCols::chip_clk`
+/// for full semantics.
 #[repr(C)]
 pub struct ChipletCols<T> {
-    pub(crate) chiplets: [T; CHIPLETS_WIDTH - 1],
+    pub(crate) chiplets: [T; CHIPLETS_WIDTH - 2],
     /// Permutation segment selector: consumed by `build_chiplet_selectors`.
     pub s_perm: T,
+    /// Chiplet-trace row counter: starts at 1 on the first row, increments by 1 each row.
+    pub chip_clk: T,
 }
 
 /// Number of columns in the chiplets trace (21), derived from the struct layout.
@@ -425,6 +441,8 @@ mod tests {
         assert_eq!(MAIN_COL_MAP.chiplets[19], CHIPLETS_OFFSET + 19);
         // s_perm is a separate field after chiplets[0..20]
         assert_eq!(MAIN_COL_MAP.s_perm, CHIPLETS_OFFSET + 20);
+        // chip_clk follows s_perm at the tail of the chiplet section.
+        assert_eq!(MAIN_COL_MAP.chip_clk, CHIPLETS_OFFSET + 21);
     }
 
     // --- Multi-AIR split: CoreCols + ChipletCols layout ---------------------
@@ -481,10 +499,12 @@ mod tests {
 
         assert_eq!(main.chiplets, chiplets.chiplets);
         assert_eq!(main.s_perm, chiplets.s_perm);
+        assert_eq!(main.chip_clk, chiplets.chip_clk);
         // Spot-check absolute column indices: chiplets[0] sits at CHIPLETS_OFFSET,
         // and the value in our deterministic buffer equals the column index.
         assert_eq!(chiplets.chiplets[0], CHIPLETS_OFFSET);
         assert_eq!(chiplets.s_perm, CHIPLETS_OFFSET + 20);
+        assert_eq!(chiplets.chip_clk, CHIPLETS_OFFSET + 21);
     }
 
     /// `MainCols::as_core_cols()` returns a `&CoreCols<T>` pointing at the leading portion
@@ -528,10 +548,12 @@ mod tests {
         // The reinterpret cast yields a reference to the same chiplets array.
         assert_eq!(bridged.chiplets, main.chiplets);
         assert_eq!(bridged.s_perm, main.s_perm);
+        assert_eq!(bridged.chip_clk, main.chip_clk);
 
         // And the bridged view starts exactly at the chiplets offset.
         assert_eq!(bridged.chiplets[0], CHIPLETS_OFFSET);
         assert_eq!(bridged.s_perm, CHIPLETS_OFFSET + 20);
+        assert_eq!(bridged.chip_clk, CHIPLETS_OFFSET + 21);
 
         // Address parity: the bridged ChipletCols sits at the same address as
         // re-borrowing the trailing slice as ChipletCols.
