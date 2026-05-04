@@ -87,7 +87,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -e
-          gh release upload ${RELEASE_TAG} miden-vm-${{ matrix.target }}
+          gh release upload "${RELEASE_TAG}" miden-vm-${{ matrix.target }}
       # Since the miden-core.masp package is triplet independent, we only build it once.
       - name: Build miden-core.masp
         if: matrix.os == 'ubuntu-latest' && matrix.target == 'x86_64-unknown-linux-gnu'
@@ -109,4 +109,4 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -e
-          gh release upload ${RELEASE_TAG} miden-core.masp
+          gh release upload "${RELEASE_TAG}" miden-core.masp
