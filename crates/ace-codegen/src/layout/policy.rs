@@ -78,23 +78,23 @@ impl LayoutBuilder {
 
 impl InputLayout {
     /// Build a native layout (no alignment/padding).
-    pub(crate) fn new(counts: InputCounts) -> Self {
+    pub fn new(counts: InputCounts) -> Self {
         Self::build_with_policy(counts, LayoutPolicy::native(), false)
     }
 
     /// Build a MASM-compatible layout (alignment/padding enforced).
-    pub(crate) fn new_masm(counts: InputCounts) -> Self {
+    pub fn new_masm(counts: InputCounts) -> Self {
         Self::build_with_policy(counts, LayoutPolicy::masm(), false)
     }
 
     /// Build a native layout with the multi-AIR flag set.
-    pub(crate) fn new_multi_air(counts: InputCounts) -> Self {
+    pub fn new_multi_air(counts: InputCounts) -> Self {
         Self::build_with_policy(counts, LayoutPolicy::native(), true)
     }
 
     /// Build a MASM-compatible multi-AIR layout (alignment/padding enforced; reserves an
     /// extra stark-vars slot for `MultiAirBeta`).
-    pub(crate) fn new_masm_multi_air(counts: InputCounts) -> Self {
+    pub fn new_masm_multi_air(counts: InputCounts) -> Self {
         Self::build_with_policy(counts, LayoutPolicy::masm(), true)
     }
 

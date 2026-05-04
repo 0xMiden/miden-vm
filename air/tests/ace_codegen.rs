@@ -189,3 +189,54 @@ fn quotient_next_inputs_do_not_affect_eval() {
     let result = circuit.eval(&inputs).expect("circuit eval");
     assert!(result.is_zero(), "quotient_next should not affect ACE eval");
 }
+
+#[test]
+fn multi_air_ace_circuit_builds_and_has_multi_air_beta_slot() {
+    use miden_air::ace::build_multi_air_ace_circuit;
+
+    let config = AceConfig {
+        num_quotient_chunks: 8,
+        num_vlpi_groups: 1,
+        layout: LayoutKind::Masm,
+        is_multi_air: true,
+    };
+
+    let circuit = build_multi_air_ace_circuit::<QuadFelt>(config).expect("multi-AIR ACE circuit");
+    let layout = circuit.layout();
+
+    // Combined main width = NUM_CORE_COLS (51) + CHIPLETS_WIDTH (22) = 73, matching the
+    // unified ProcessorAir trace width. The combined aux width is 4 + 3 = 7.
+    assert_eq!(
+        layout.counts.width,
+        73,
+        "combined main width must equal CoreAir.width() + ChipletsAir.width()"
+    );
+    assert_eq!(layout.counts.aux_width, 7, "combined aux_width = 4 + 3");
+    assert_eq!(layout.counts.num_aux_boundary, 2, "one boundary slot per AIR");
+
+    // The combined layout reserves the new MultiAirBeta slot in stark_vars.
+    let beta_idx = layout
+        .index(InputKey::MultiAirBeta)
+        .expect("multi-air layout exposes MultiAirBeta");
+    assert!(beta_idx < layout.total_inputs, "MultiAirBeta slot must be within layout bounds");
+}
+
+#[test]
+fn multi_air_ace_circuit_emits_consistently() {
+    use miden_air::ace::build_multi_air_ace_circuit;
+
+    let config = AceConfig {
+        num_quotient_chunks: 8,
+        num_vlpi_groups: 1,
+        layout: LayoutKind::Masm,
+        is_multi_air: true,
+    };
+
+    // Just check the ACE encoding is well-formed (size_in_felt is rate-aligned).
+    let circuit = build_multi_air_ace_circuit::<QuadFelt>(config).expect("multi-AIR ACE circuit");
+    let encoded = circuit.to_ace().expect("encoded multi-AIR circuit");
+    assert!(
+        encoded.size_in_felt().is_multiple_of(8),
+        "encoded multi-AIR circuit must be 8-felt aligned for adv_pipe"
+    );
+}

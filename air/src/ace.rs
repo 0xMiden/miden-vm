@@ -22,13 +22,16 @@
 use alloc::{vec, vec::Vec};
 
 use miden_ace_codegen::{
-    AceCircuit, AceConfig, AceDag, AceError, DagBuilder, InputKey, NodeId, build_ace_dag_for_air,
+    AceCircuit, AceConfig, AceDag, AceError, DagBuilder, InputKey, NodeId, NodeKind,
+    build_ace_dag_for_air,
 };
 use miden_core::{Felt, field::ExtensionField};
 use miden_crypto::{
     field::Algebra,
-    stark::air::{LiftedAir, symbolic::SymbolicExpressionExt},
+    stark::air::{BaseAir, LiftedAir, symbolic::SymbolicExpressionExt},
 };
+
+use crate::{ChipletsAir, CoreAir};
 
 use crate::{PV_PROGRAM_HASH, PV_TRANSCRIPT_STATE};
 
@@ -341,4 +344,228 @@ where
     let artifacts = build_ace_dag_for_air::<A, Felt, EF>(air, config)?;
     let batched_dag = batch_logup_boundary(artifacts.dag, boundary_config);
     miden_ace_codegen::emit_circuit(&batched_dag, artifacts.layout)
+}
+
+// MULTI-AIR ACE CIRCUIT
+// ================================================================================================
+
+/// Build the combined ACE circuit for the (CoreAir, ChipletsAir) multi-AIR proof.
+///
+/// The output circuit evaluates
+///   `combined + γ · boundary + γ² · zero_sum = 0`
+/// where `combined = chip_acc · β_multi + core_acc` is the β-folded sum of the per-AIR
+/// alpha-folded constraint roots, and `boundary` is the cross-AIR LogUp identity built
+/// over both AIRs' aux-bus-boundary slots plus the open-bus rational corrections plus
+/// the kernel-ROM scalar correction.
+///
+/// Implementation strategy:
+/// 1. Build per-AIR sub-DAGs with their own (single-AIR) layouts via
+///    [`build_ace_dag_for_air`]. These DAGs encode each AIR's alpha-folded constraints
+///    referencing layout-relative `InputKey::Main`/`AuxCoord`/`AuxBusBoundary` slots.
+/// 2. Re-emit each sub-DAG's nodes into a fresh `DagBuilder` configured for the
+///    *combined* layout. The chiplets sub-DAG's input keys are rewritten so its
+///    main/aux/bus-boundary slot indices land in the chiplets-half of the combined
+///    layout. The core sub-DAG passes through unchanged.
+/// 3. β-fold: `combined = chip_root · MultiAirBeta + core_root`.
+/// 4. Apply the shared boundary via [`batch_logup_boundary_into_builder`] using a
+///    [`LogUpBoundaryConfig`] whose `sum_columns` covers both AIRs' boundary slots.
+///
+/// Returns the combined `AceCircuit` ready for emission to the MASM ACE chip.
+pub fn build_multi_air_ace_circuit<EF>(
+    config: AceConfig,
+) -> Result<AceCircuit<EF>, AceError>
+where
+    EF: ExtensionField<Felt>,
+    SymbolicExpressionExt<Felt, EF>: Algebra<EF>,
+{
+    assert!(config.is_multi_air, "build_multi_air_ace_circuit requires AceConfig::is_multi_air = true");
+
+    use miden_ace_codegen::{InputCounts, InputLayout};
+
+    let core_air = CoreAir;
+    let chip_air = ChipletsAir;
+
+    // Step 1: per-AIR sub-DAGs. Each is built with its OWN single-AIR layout (no
+    // multi-air slot) so the symbolic eval references plain `InputKey` variants.
+    let sub_config = AceConfig { is_multi_air: false, ..config };
+    let core_artifacts = build_ace_dag_for_air::<CoreAir, Felt, EF>(&core_air, sub_config)?;
+    let chip_artifacts = build_ace_dag_for_air::<ChipletsAir, Felt, EF>(&chip_air, sub_config)?;
+
+    let core_main_w = <CoreAir as BaseAir<Felt>>::width(&core_air);
+    let core_aux_w = <CoreAir as LiftedAir<Felt, EF>>::aux_width(&core_air);
+    let core_aux_n = <CoreAir as LiftedAir<Felt, EF>>::num_aux_values(&core_air);
+    let chip_main_w = <ChipletsAir as BaseAir<Felt>>::width(&chip_air);
+    let chip_aux_w = <ChipletsAir as LiftedAir<Felt, EF>>::aux_width(&chip_air);
+    let chip_aux_n = <ChipletsAir as LiftedAir<Felt, EF>>::num_aux_values(&chip_air);
+
+    // Step 2: combined input counts.
+    //
+    // - `width` and `aux_width` sum across AIRs (both opens are concatenated in the
+    //   combined main/aux regions).
+    // - `num_aux_boundary` sums each AIR's boundary slot count.
+    // - `num_periodic` is taken from chiplets (the only AIR with periodic columns
+    //   today; the wrapper exposes them once via the combined `LiftedAir` impl).
+    let combined_counts = InputCounts {
+        width: core_main_w + chip_main_w,
+        aux_width: core_aux_w + chip_aux_w,
+        num_aux_boundary: core_aux_n + chip_aux_n,
+        num_public: core_artifacts.layout.counts.num_public,
+        num_vlpi: core_artifacts.layout.counts.num_vlpi,
+        num_randomness: 2,
+        num_periodic: chip_artifacts.layout.counts.num_periodic,
+        num_quotient_chunks: config.num_quotient_chunks,
+    };
+
+    // Build combined layout via the multi-air constructors so the stark-vars region
+    // gets the extra MultiAirBeta slot.
+    let combined_layout = match config.layout {
+        miden_ace_codegen::LayoutKind::Native => InputLayout::new_multi_air(combined_counts),
+        miden_ace_codegen::LayoutKind::Masm => InputLayout::new_masm_multi_air(combined_counts),
+    };
+
+    // Step 3: re-emit the core sub-DAG into a fresh builder. Core's input keys map
+    // 1:1 onto the combined layout (its main/aux/boundary slots occupy the leading
+    // half of the combined regions).
+    let core_dag = core_artifacts.dag;
+    let core_root_old = core_dag.root();
+    let mut builder = DagBuilder::<EF>::new();
+
+    let core_translation = reemit_dag_with_rewrite(
+        &mut builder,
+        &core_dag,
+        |key| key, // identity rewrite for core
+    );
+    let core_root = core_translation[core_root_old.index()];
+
+    // Step 4: re-emit chiplets sub-DAG, rewriting Main/AuxCoord/AuxBusBoundary indices
+    // so they land in the chiplets-half of the combined layout.
+    let chip_dag = chip_artifacts.dag;
+    let chip_root_old = chip_dag.root();
+    let chip_translation = reemit_dag_with_rewrite(&mut builder, &chip_dag, |key| match key {
+        InputKey::Main { offset, index } => InputKey::Main { offset, index: index + core_main_w },
+        InputKey::AuxCoord { offset, index, coord } => InputKey::AuxCoord {
+            offset,
+            index: index + core_aux_w,
+            coord,
+        },
+        InputKey::AuxBusBoundary(slot) => InputKey::AuxBusBoundary(slot + core_aux_n),
+        // Selectors, randomness, public values, periodic z_k, gamma, alpha, etc. are
+        // shared between AIRs (today both AIRs are at the same height so selectors
+        // match). Future per-AIR-height work will introduce per-AIR selector slots.
+        other => other,
+    });
+    let chip_root = chip_translation[chip_root_old.index()];
+
+    // Step 5: β-fold across AIRs.
+    let beta_multi = builder.input(InputKey::MultiAirBeta);
+    let chip_beta = builder.mul(chip_root, beta_multi);
+    let combined_constraint = builder.add(chip_beta, core_root);
+
+    // Step 6: combined LogUp boundary.
+    let combined_boundary_config = multi_air_logup_boundary_config(core_aux_n, chip_aux_n);
+    let final_root = batch_logup_boundary_into_builder(
+        &mut builder,
+        combined_constraint,
+        &combined_boundary_config,
+    );
+
+    let combined_dag = builder.build(final_root);
+    miden_ace_codegen::emit_circuit(&combined_dag, combined_layout)
+}
+
+/// Re-emit `source` into `builder`, rewriting each `Input(key)` via `rewrite`.
+///
+/// Returns a translation table mapping the source DAG's node indices to the
+/// corresponding `NodeId`s in `builder`. The source DAG's nodes must be in
+/// topological order (which they are by `DagBuilder::intern` construction).
+fn reemit_dag_with_rewrite<EF, F>(
+    builder: &mut DagBuilder<EF>,
+    source: &AceDag<EF>,
+    rewrite: F,
+) -> Vec<NodeId>
+where
+    EF: ExtensionField<Felt>,
+    F: Fn(InputKey) -> InputKey,
+{
+    let mut translation: Vec<NodeId> = Vec::with_capacity(source.nodes.len());
+    for node in &source.nodes {
+        let new_id = match *node {
+            NodeKind::Input(key) => builder.input(rewrite(key)),
+            NodeKind::Constant(v) => builder.constant(v),
+            NodeKind::Add(a, b) => builder.add(translation[a.index()], translation[b.index()]),
+            NodeKind::Sub(a, b) => builder.sub(translation[a.index()], translation[b.index()]),
+            NodeKind::Mul(a, b) => builder.mul(translation[a.index()], translation[b.index()]),
+            NodeKind::Neg(a) => builder.neg(translation[a.index()]),
+        };
+        translation.push(new_id);
+    }
+    translation
+}
+
+/// Build the [`LogUpBoundaryConfig`] for the combined multi-AIR ACE circuit.
+///
+/// Mirrors [`logup_boundary_config`] but adapts the column indices to the combined
+/// layout: Core's LogUp final lives at slot `0..core_aux_n`, Chiplets's at
+/// `core_aux_n..core_aux_n + chip_aux_n`.
+pub fn multi_air_logup_boundary_config(
+    core_aux_n: usize,
+    chip_aux_n: usize,
+) -> LogUpBoundaryConfig {
+    use MessageElement::{Constant, PublicInput};
+
+    use crate::constraints::lookup::messages::BusId;
+
+    // Three rational corrections feeding the combined boundary identity. The open-bus
+    // corrections (block-hash + log-precompile) belong to Core's column 0; the kernel-ROM
+    // correction belongs to Chiplets.
+    let ph_msg = vec![
+        PublicInput(PV_PROGRAM_HASH),
+        PublicInput(PV_PROGRAM_HASH + 1),
+        PublicInput(PV_PROGRAM_HASH + 2),
+        PublicInput(PV_PROGRAM_HASH + 3),
+        Constant(Felt::ZERO),
+        Constant(Felt::ZERO),
+        Constant(Felt::ZERO),
+    ];
+    let default_lp_msg = vec![
+        Constant(Felt::ZERO),
+        Constant(Felt::ZERO),
+        Constant(Felt::ZERO),
+        Constant(Felt::ZERO),
+    ];
+    let final_lp_msg = vec![
+        PublicInput(PV_TRANSCRIPT_STATE),
+        PublicInput(PV_TRANSCRIPT_STATE + 1),
+        PublicInput(PV_TRANSCRIPT_STATE + 2),
+        PublicInput(PV_TRANSCRIPT_STATE + 3),
+    ];
+
+    // Sum every per-AIR boundary slot. With `num_aux_values()` returning 1 for both
+    // CoreAir and ChipletsAir, this is just `[0, 1]` — Core's LogUp final at slot 0
+    // and Chiplets's at slot 1 (after the index rewrite).
+    let total_slots = core_aux_n + chip_aux_n;
+    let sum_columns: Vec<usize> = (0..total_slots).collect();
+
+    LogUpBoundaryConfig {
+        sum_columns,
+        zero_columns: vec![],
+        fractions: vec![
+            BusFraction {
+                sign: Sign::Plus,
+                bus: BusId::BlockHashTable as usize,
+                message: ph_msg,
+            },
+            BusFraction {
+                sign: Sign::Plus,
+                bus: BusId::LogPrecompileTranscript as usize,
+                message: default_lp_msg,
+            },
+            BusFraction {
+                sign: Sign::Minus,
+                bus: BusId::LogPrecompileTranscript as usize,
+                message: final_lp_msg,
+            },
+        ],
+        scalar_corrections: vec![InputKey::VlpiReduction(0)],
+    }
 }
