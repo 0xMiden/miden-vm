@@ -11,7 +11,7 @@ use alloc::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    Felt, Word,
+    Felt, WORD_SIZE, Word,
     serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
@@ -23,6 +23,10 @@ use crate::{
 /// Each key maps to one or more field element. To access the elements, the VM can move the values
 /// associated with a given key onto the advice stack using `adv.push_mapval` instruction. The VM
 /// can also insert new values into the advice map during execution.
+///
+/// This type is a policy-free container. Execution-specific size limits for live advice map state
+/// are enforced by the processor's `AdviceProvider`, which owns the active execution options and
+/// live resource accounting.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(transparent))]
@@ -82,6 +86,18 @@ impl AdviceMap {
             }
         }
         size
+    }
+
+    /// Returns the total number of field elements stored in this advice map's keys and values.
+    ///
+    /// Each key is a word, so every entry contributes [`WORD_SIZE`] key elements plus the number
+    /// of value elements associated with that key. Returns `None` if the count overflows `usize`.
+    pub fn total_element_count(&self) -> Option<usize> {
+        self.0.values().try_fold(0usize, |total, values| {
+            WORD_SIZE
+                .checked_add(values.len())
+                .and_then(|entry_elements| total.checked_add(entry_elements))
+        })
     }
 
     /// Gets the given key's corresponding entry in the map for in-place manipulation.

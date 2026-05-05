@@ -1601,7 +1601,8 @@ fn build_trace_helper(stack_inputs: &[u64], program: &Program) -> (DecoderTrace,
         ExecutionOptions::default()
             .with_core_trace_fragment_size(MAX_FRAGMENT_SIZE)
             .unwrap(),
-    );
+    )
+    .expect("processor advice inputs should fit advice map limits");
     let mut host = DefaultHost::default();
     host.register_handler(EMIT_EVENT, Arc::new(NoopEventHandler)).unwrap();
 
@@ -1631,7 +1632,8 @@ fn build_call_trace_helper(program: &Program) -> (SystemTrace, DecoderTrace, usi
         ExecutionOptions::default()
             .with_core_trace_fragment_size(MAX_FRAGMENT_SIZE)
             .unwrap(),
-    );
+    )
+    .expect("processor advice inputs should fit advice map limits");
     let mut host = DefaultHost::default();
 
     let trace_inputs = processor.execute_trace_inputs_sync(program, &mut host).unwrap();

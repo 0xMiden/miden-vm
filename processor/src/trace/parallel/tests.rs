@@ -331,7 +331,8 @@ fn test_trace_generation_at_fragment_boundaries(
             ExecutionOptions::default()
                 .with_core_trace_fragment_size(fragment_size)
                 .unwrap(),
-        );
+        )
+        .expect("processor advice inputs should fit advice map limits");
         let mut host = DefaultHost::default();
         host.load_library(create_simple_library()).unwrap();
         let trace_inputs = processor.execute_trace_inputs_sync(&program, &mut host).unwrap();
@@ -345,7 +346,8 @@ fn test_trace_generation_at_fragment_boundaries(
             ExecutionOptions::default()
                 .with_core_trace_fragment_size(MAX_FRAGMENT_SIZE)
                 .unwrap(),
-        );
+        )
+        .expect("processor advice inputs should fit advice map limits");
         let mut host = DefaultHost::default();
         host.load_library(create_simple_library()).unwrap();
         let trace_inputs = processor.execute_trace_inputs_sync(&program, &mut host).unwrap();
@@ -515,7 +517,8 @@ fn test_partial_last_fragment_exists_for_h0_inversion_path() {
         ExecutionOptions::default()
             .with_core_trace_fragment_size(FRAGMENT_SIZE)
             .unwrap(),
-    );
+    )
+    .expect("processor advice inputs should fit advice map limits");
     let mut host = DefaultHost::default();
     host.load_library(create_simple_library()).unwrap();
 
@@ -550,7 +553,8 @@ fn miri_repro_uninitialized_tail_read_during_h0_inversion() {
         ExecutionOptions::default()
             .with_core_trace_fragment_size(FRAGMENT_SIZE)
             .unwrap(),
-    );
+    )
+    .expect("processor advice inputs should fit advice map limits");
     let mut host = DefaultHost::default();
     host.load_library(create_simple_library()).unwrap();
     let trace_inputs = processor.execute_trace_inputs_sync(&program, &mut host).unwrap();
@@ -926,7 +930,8 @@ fn test_build_trace_returns_err_on_empty_memory_reads_replay() {
         ExecutionOptions::default()
             .with_core_trace_fragment_size(MAX_FRAGMENT_SIZE)
             .unwrap(),
-    );
+    )
+    .expect("processor advice inputs should fit advice map limits");
     let mut host = DefaultHost::default();
     let mut trace_inputs = processor.execute_trace_inputs_sync(&program, &mut host).unwrap();
 
@@ -958,7 +963,8 @@ fn test_build_trace_returns_err_on_bad_node_id_in_hasher_replay() {
         ExecutionOptions::default()
             .with_core_trace_fragment_size(MAX_FRAGMENT_SIZE)
             .unwrap(),
-    );
+    )
+    .expect("processor advice inputs should fit advice map limits");
     let mut host = DefaultHost::default();
     let mut trace_inputs = processor.execute_trace_inputs_sync(&program, &mut host).unwrap();
 
@@ -996,7 +1002,8 @@ fn test_build_trace_rejects_mismatched_precompile_requests() {
         ExecutionOptions::default()
             .with_core_trace_fragment_size(MAX_FRAGMENT_SIZE)
             .unwrap(),
-    );
+    )
+    .expect("processor advice inputs should fit advice map limits");
     let mut host = DefaultHost::default();
     let trace_inputs = processor.execute_trace_inputs_sync(&program, &mut host).unwrap();
     let (trace_output, trace_generation_context, program_info) = trace_inputs.into_parts();
@@ -1049,7 +1056,8 @@ fn test_build_trace_with_max_len_corner_cases(
         ExecutionOptions::default()
             .with_core_trace_fragment_size(MAX_FRAGMENT_SIZE)
             .unwrap(),
-    );
+    )
+    .expect("processor advice inputs should fit advice map limits");
     let mut host = DefaultHost::default();
     let trace_inputs = processor.execute_trace_inputs_sync(&program, &mut host).unwrap();
 
@@ -1095,7 +1103,8 @@ fn test_build_trace_returns_err_on_fragment_size_overflow() {
         ExecutionOptions::default()
             .with_core_trace_fragment_size(MAX_FRAGMENT_SIZE)
             .unwrap(),
-    );
+    )
+    .expect("processor advice inputs should fit advice map limits");
     let mut host = DefaultHost::default();
     let mut trace_inputs = processor.execute_trace_inputs_sync(&program, &mut host).unwrap();
 
@@ -1126,7 +1135,8 @@ fn test_build_trace_returns_err_when_chiplets_trace_exceeds_max_len() {
         ExecutionOptions::default()
             .with_core_trace_fragment_size(MAX_FRAGMENT_SIZE)
             .unwrap(),
-    );
+    )
+    .expect("processor advice inputs should fit advice map limits");
     let mut host = DefaultHost::default();
     let mut trace_inputs = processor.execute_trace_inputs_sync(&program, &mut host).unwrap();
 
@@ -1173,7 +1183,8 @@ fn test_build_trace_returns_err_on_empty_core_trace_contexts() {
         ExecutionOptions::default()
             .with_core_trace_fragment_size(MAX_FRAGMENT_SIZE)
             .unwrap(),
-    );
+    )
+    .expect("processor advice inputs should fit advice map limits");
     let mut host = DefaultHost::default();
     let mut trace_inputs = processor.execute_trace_inputs_sync(&program, &mut host).unwrap();
 
@@ -1208,7 +1219,8 @@ fn build_trace_for_program(
         ExecutionOptions::default()
             .with_core_trace_fragment_size(fragment_size)
             .unwrap(),
-    );
+    )
+    .expect("processor advice inputs should fit advice map limits");
     let mut host = DefaultHost::default();
     host.load_library(create_simple_library()).unwrap();
     let trace_inputs = processor.execute_trace_inputs_sync(program, &mut host).unwrap();

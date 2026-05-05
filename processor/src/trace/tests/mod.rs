@@ -36,7 +36,8 @@ pub fn build_trace_from_program(program: &Program, stack_inputs: &[u64]) -> Exec
         ExecutionOptions::default()
             .with_core_trace_fragment_size(TEST_TRACE_FRAGMENT_SIZE)
             .unwrap(),
-    );
+    )
+    .expect("processor advice inputs should fit advice map limits");
     let trace_inputs = processor.execute_trace_inputs_sync(program, &mut host).unwrap();
     build_trace(trace_inputs).unwrap()
 }
@@ -57,7 +58,8 @@ pub fn build_trace_from_program_with_stack(
         ExecutionOptions::default()
             .with_core_trace_fragment_size(TEST_TRACE_FRAGMENT_SIZE)
             .unwrap(),
-    );
+    )
+    .expect("processor advice inputs should fit advice map limits");
     let trace_inputs = processor.execute_trace_inputs_sync(program, &mut host).unwrap();
     build_trace(trace_inputs).unwrap()
 }
@@ -99,7 +101,8 @@ pub fn build_trace_from_ops_with_inputs(
         ExecutionOptions::default()
             .with_core_trace_fragment_size(TEST_TRACE_FRAGMENT_SIZE)
             .unwrap(),
-    );
+    )
+    .expect("processor advice inputs should fit advice map limits");
     let trace_inputs = processor.execute_trace_inputs_sync(&program, &mut host).unwrap();
     build_trace(trace_inputs).unwrap()
 }

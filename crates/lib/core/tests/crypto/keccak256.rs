@@ -349,7 +349,8 @@ fn run_keccak_with_max_hash_len(
 
     let options = ExecutionOptions::default().with_max_hash_len_bytes(max_hash_len_bytes);
     let processor =
-        FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options);
+        FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options)
+            .map_err(ExecutionError::advice_error_no_context)?;
 
     processor.execute_sync(&program, &mut host)?;
     Ok(())
