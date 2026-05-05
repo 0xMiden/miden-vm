@@ -369,6 +369,7 @@ impl Test {
         // execute the test
         let processor = FastProcessor::new(self.stack_inputs)
             .with_advice(self.advice_inputs.clone())
+            .expect("test advice inputs should fit default advice map limits")
             .with_debugging(self.in_debug_mode)
             .with_tracing(self.in_debug_mode);
         let execution_output = processor.execute_sync(&program, &mut host).unwrap();
@@ -546,7 +547,8 @@ impl Test {
                     .with_debugging(self.in_debug_mode)
                     .with_core_trace_fragment_size(FRAGMENT_SIZE)
                     .unwrap(),
-            );
+            )
+            .map_err(ExecutionError::advice_error_no_context)?;
             fast_processor.execute_trace_inputs_sync(&program, &mut host)
         };
 
@@ -571,6 +573,7 @@ impl Test {
 
         let processor = FastProcessor::new(self.stack_inputs)
             .with_advice(self.advice_inputs.clone())
+            .map_err(ExecutionError::advice_error_no_context)?
             .with_debugging(true)
             .with_tracing(true);
 
@@ -592,6 +595,7 @@ impl Test {
 
         let processor = FastProcessor::new(self.stack_inputs)
             .with_advice(self.advice_inputs.clone())
+            .map_err(ExecutionError::advice_error_no_context)?
             .with_debugging(true)
             .with_tracing(true);
 
@@ -757,6 +761,7 @@ impl Test {
         let fast_result_by_step = {
             let fast_process = FastProcessor::new(stack_inputs)
                 .with_advice(self.advice_inputs.clone())
+                .expect("test advice inputs should fit default advice map limits")
                 .with_debugging(self.in_debug_mode)
                 .with_tracing(self.in_debug_mode);
             fast_process.execute_by_step_sync(&program, &mut host)

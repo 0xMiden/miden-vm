@@ -18,6 +18,7 @@ use miden_core::{
 use crate::{
     AdviceInputs, AdviceProvider, BaseHost, ContextId, ExecutionError, ExecutionOptions,
     ProcessorState,
+    advice::AdviceError,
     continuation_stack::{Continuation, ContinuationStack},
     errors::MapExecErrNoCtx,
     tracer::{OperationHelperRegisters, Tracer},
@@ -198,25 +199,40 @@ impl FastProcessor {
     ///
     /// let processor = FastProcessor::new(stack_inputs)
     ///     .with_advice(advice_inputs)
+    ///     .expect("advice inputs should fit advice map limits")
     ///     .with_debugging(true)
     ///     .with_tracing(true);
     /// ```
+    ///
+    /// When using non-default advice map limits, prefer [`Self::new_with_options`] so the advice
+    /// inputs are validated against the intended execution options.
     pub fn new(stack_inputs: StackInputs) -> Self {
         Self::new_with_options(stack_inputs, AdviceInputs::default(), ExecutionOptions::default())
+            .expect("empty advice inputs should fit default advice map limits")
     }
 
     /// Sets the advice inputs for the processor.
-    pub fn with_advice(mut self, advice_inputs: AdviceInputs) -> Self {
-        self.advice = advice_inputs.into();
-        self
+    ///
+    /// Advice inputs are loaded into the live advice provider immediately and are validated against
+    /// the processor's current [`ExecutionOptions`]. If the advice map needs non-default limits,
+    /// construct the processor with [`Self::new_with_options`] or call [`Self::with_options`]
+    /// before calling this method.
+    pub fn with_advice(mut self, advice_inputs: AdviceInputs) -> Result<Self, AdviceError> {
+        self.advice = AdviceProvider::new(advice_inputs, &self.options)?;
+        Ok(self)
     }
 
     /// Sets the execution options for the processor.
     ///
     /// This will override any previously set debugging or tracing settings.
-    pub fn with_options(mut self, options: ExecutionOptions) -> Self {
+    ///
+    /// Existing advice inputs are revalidated against the new options before they are applied. To
+    /// load advice inputs that require non-default advice map limits, call this before
+    /// [`Self::with_advice`] or use [`Self::new_with_options`].
+    pub fn with_options(mut self, options: ExecutionOptions) -> Result<Self, AdviceError> {
+        self.advice.set_options(&options)?;
         self.options = options;
-        self
+        Ok(self)
     }
 
     /// Enables or disables debugging mode.
@@ -242,7 +258,7 @@ impl FastProcessor {
         stack_inputs: StackInputs,
         advice_inputs: AdviceInputs,
         options: ExecutionOptions,
-    ) -> Self {
+    ) -> Result<Self, AdviceError> {
         let stack_top_idx = INITIAL_STACK_TOP_IDX;
         let stack = {
             // Note: we use `Vec::into_boxed_slice()` here, since `Box::new([T; N])` first allocates
@@ -258,8 +274,8 @@ impl FastProcessor {
             stack
         };
 
-        Self {
-            advice: advice_inputs.into(),
+        Ok(Self {
+            advice: AdviceProvider::new(advice_inputs, &options)?,
             stack,
             stack_top_idx,
             stack_bot_idx: stack_top_idx - MIN_STACK_DEPTH,
@@ -272,7 +288,7 @@ impl FastProcessor {
             pc_transcript: PrecompileTranscript::new(),
             #[cfg(test)]
             decorator_retrieval_count: Rc::new(Cell::new(0)),
-        }
+        })
     }
 
     /// Returns the resume context to be used with the first call to `step_sync()`.

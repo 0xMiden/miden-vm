@@ -152,9 +152,8 @@ fn run_masp_program(params: &RunCmd) -> Result<(ExecutionTrace, [u8; 32]), Repor
     )
     .map_err(|err| Report::msg(format!("{err}")))?;
 
-    let processor = FastProcessor::new(stack_inputs)
-        .with_advice(advice_inputs)
-        .with_options(exec_options);
+    let processor = FastProcessor::new_with_options(stack_inputs, advice_inputs, exec_options)
+        .map_err(|err| Report::msg(format!("{err}")))?;
 
     let trace_inputs = processor
         .execute_trace_inputs_sync(&program, &mut host)
@@ -219,9 +218,8 @@ fn run_masm_program(params: &RunCmd) -> Result<(ExecutionTrace, [u8; 32]), Repor
     )
     .map_err(|err| Report::msg(format!("{err}")))?;
 
-    let processor = FastProcessor::new(stack_inputs)
-        .with_advice(advice_inputs)
-        .with_options(exec_options);
+    let processor = FastProcessor::new_with_options(stack_inputs, advice_inputs, exec_options)
+        .map_err(|err| Report::msg(format!("{err}")))?;
 
     let trace_inputs = processor
         .execute_trace_inputs_sync(&program, &mut host)

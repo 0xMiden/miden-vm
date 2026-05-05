@@ -68,7 +68,8 @@ fn program_execution_for_trace(c: &mut Criterion) {
                                 ExecutionOptions::default()
                                     .with_core_trace_fragment_size(TRACE_FRAGMENT_SIZE)
                                     .unwrap(),
-                            );
+                            )
+                            .expect("processor advice inputs should fit advice map limits");
 
                             (host, program.clone(), processor)
                         },

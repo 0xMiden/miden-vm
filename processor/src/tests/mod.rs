@@ -183,6 +183,7 @@ fn test_diagnostic_host_event_error_uses_emit_location() {
 
     let processor = FastProcessor::new(StackInputs::default())
         .with_advice(AdviceInputs::default())
+        .expect("advice inputs should fit advice map limits")
         .with_debugging(true)
         .with_tracing(true);
     let err = processor.execute_sync(&program, &mut host).expect_err("expected error");
@@ -216,6 +217,7 @@ fn test_diagnostic_host_event_advice_error_uses_emit_location() {
 
     let processor = FastProcessor::new(StackInputs::default())
         .with_advice(AdviceInputs::default().with_map([(Word::default(), vec![ZERO])]))
+        .expect("advice inputs should fit advice map limits")
         .with_debugging(true)
         .with_tracing(true);
     let err = processor.execute_sync(&program, &mut host).expect_err("expected error");
@@ -839,6 +841,7 @@ fn test_diagnostic_procedure_not_found_call() {
 
     let processor = FastProcessor::new(StackInputs::default())
         .with_advice(AdviceInputs::default())
+        .expect("advice inputs should fit advice map limits")
         .with_debugging(true)
         .with_tracing(true);
     let err = processor.execute_sync(&program, &mut host).unwrap_err();
@@ -898,6 +901,7 @@ fn test_diagnostic_procedure_not_found_join() {
 
     let processor = FastProcessor::new(StackInputs::default())
         .with_advice(AdviceInputs::default())
+        .expect("advice inputs should fit advice map limits")
         .with_debugging(true)
         .with_tracing(true);
     let err = processor.execute_sync(&program, &mut host).unwrap_err();
@@ -961,6 +965,7 @@ fn test_diagnostic_procedure_not_found_loop() {
 
     let processor = FastProcessor::new(StackInputs::default())
         .with_advice(AdviceInputs::default())
+        .expect("advice inputs should fit advice map limits")
         .with_debugging(true)
         .with_tracing(true);
     let err = processor.execute_sync(&program, &mut host).unwrap_err();
@@ -1025,6 +1030,7 @@ fn test_diagnostic_procedure_not_found_split() {
 
     let processor = FastProcessor::new(StackInputs::default())
         .with_advice(AdviceInputs::default())
+        .expect("advice inputs should fit advice map limits")
         .with_debugging(true)
         .with_tracing(true);
     let err = processor.execute_sync(&program, &mut host).unwrap_err();
@@ -1252,6 +1258,7 @@ fn test_diagnostic_syscall_target_not_in_kernel() {
 
     let processor = FastProcessor::new(StackInputs::default())
         .with_advice(AdviceInputs::default())
+        .expect("advice inputs should fit advice map limits")
         .with_debugging(true)
         .with_tracing(true);
     let err = processor.execute_sync(&program, &mut host).unwrap_err();
