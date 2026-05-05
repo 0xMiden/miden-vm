@@ -1,7 +1,7 @@
 //! Decoder virtual-table bus tests.
 //!
-//! Covers the block-stack table (rides M1, merged with u32 range checks and the
-//! log-precompile capacity bus) and the block-hash + op-group bus (shares M_2+5).
+//! Covers the block-stack table (merged with u32 range checks and the log-precompile
+//! capacity bus) and the block-hash + op-group table column.
 //!
 //! Under the LogUp framework the interactions look like "+1 / encode(Msg)" on push rows
 //! and "-1 / encode(Msg)" on pop rows. Each test runs a tiny program that exercises one
@@ -347,7 +347,7 @@ fn block_stack_respan_add_and_remove() {
     log.assert_contains(&exp);
 }
 
-// BLOCK HASH QUEUE (M_2+5) TESTS
+// BLOCK HASH / OP-GROUP COLUMN TESTS
 // ================================================================================================
 
 /// A JOIN enqueues two children (first + subsequent) and the two child ENDs dequeue them.
@@ -535,7 +535,7 @@ fn block_hash_split_enqueue_dequeue(#[case] cond: u64) {
     log.assert_contains(&exp);
 }
 
-// OP GROUP TABLE (M_2+5) TESTS
+// OP GROUP TABLE TESTS
 // ================================================================================================
 
 /// A SPAN whose batch holds 8 op groups triggers the g8 insert batch (7 adds for positions 1..=7;
@@ -543,12 +543,13 @@ fn block_hash_split_enqueue_dequeue(#[case] cond: u64) {
 /// row where `group_count` decrements emits a matching remove — covered in
 /// [`op_group_span_removal_covers_decode_rows`].
 ///
-/// A batch of 64 Noops was picked because each op group packs 9 seven-bit opcodes into a 63-bit
-/// group value, so 8 groups hold 72 ops max; 64 Noops reliably fills the batch up to the g8
-/// threshold (`c0 == 1`) without spilling into a second batch.
+/// A batch of 64 simple stack-depth-neutral ops was picked because each op group packs 9 seven-bit
+/// opcodes into a 63-bit group value, so 8 groups hold 72 ops max; 64 ops reliably fills the
+/// batch up to the g8 threshold (`c0 == 1`) without spilling into a second batch.
 #[test]
 fn op_group_span_8_groups_inserts() {
-    let ops: Vec<Operation> = (0..64).map(|_| Operation::Noop).collect();
+    let pattern = [Operation::Noop, Operation::Incr, Operation::Neg, Operation::Eqz];
+    let ops: Vec<Operation> = (0..64).map(|i| pattern[i % pattern.len()]).collect();
     let trace = build_trace_from_ops(ops, &[]);
     let log = InteractionLog::new(&trace);
     let main = trace.main_trace();

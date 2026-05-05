@@ -1,8 +1,6 @@
-//! `LookupMessage` trait — the bus-message contract used by the closure-based
-//! `LookupAir` / `LookupBuilder` API.
+//! Bus-message encoding contract for the closure-based lookup API.
 //!
-//! Each message owns its full encoding loop against a borrowed
-//! [`Challenges`].
+//! Each message encodes itself against borrowed [`Challenges`].
 //!
 //! ## Encoding contract
 //!
@@ -14,11 +12,8 @@
 //! ```
 //!
 //! where `bus_prefix[i] = α + (i + 1) · β^W` is precomputed at builder construction time
-//! and `W = MAX_MESSAGE_WIDTH`. Interaction-specific bus prefixes provide domain separation;
-//! payloads then begin directly at `β⁰`.
-//!
-//! The bus identifier is a `usize` chosen by the caller (typically an enum variant cast
-//! to `usize`); it picks out `bus_prefix[bus]` as the additive base.
+//! and `W = MAX_MESSAGE_WIDTH`. Interaction-specific bus prefixes also provide domain
+//! separation; payloads then begin directly at `β⁰`.
 
 use miden_core::field::{Algebra, PrimeCharacteristicRing};
 
@@ -35,9 +30,8 @@ use crate::lookup::Challenges;
 /// (`AB::ExprEF` / `EF` respectively). The [`Algebra<E>`] bound on `EF` lets each message
 /// multiply a base-field payload by an `EF`-typed β-power without manually lifting.
 ///
-/// Implementors pick a bus identifier, start the accumulator from
-/// `challenges.bus_prefix[bus]`, and fold each payload value against
-/// `challenges.beta_powers[k]` with straight-line arithmetic.
+/// Implementors start from the selected bus prefix and fold each payload value
+/// against `challenges.beta_powers[k]`.
 pub trait LookupMessage<E, EF>: core::fmt::Debug
 where
     E: PrimeCharacteristicRing + Clone,

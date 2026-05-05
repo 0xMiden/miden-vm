@@ -1,6 +1,9 @@
-//! Merged main-trace column: block-stack table, u32 range checks, log-precompile capacity,
-//! and range-table response (`BusId::BlockStackTable` + `BusId::RangeCheck` +
-//! `BusId::LogPrecompileTranscript` on one column).
+//! Packs four buses onto one main-trace lookup column:
+//!
+//! - Block-stack table: control-flow block nesting.
+//! - u32 range-check removes: gated by u32 opcodes.
+//! - Log-precompile capacity: gated by the log precompile opcode.
+//! - Range-table response: always active and isolated in its own group.
 //!
 //! Soundness of the merge relies on the three buses using distinct `bus_prefix[bus]` bases
 //! (so their rationals remain linearly independent in the extension field) and on all
@@ -350,8 +353,6 @@ pub(in crate::constraints::lookup) fn emit_block_stack_and_range_logcap<LB>(
                 Deg { v: 6, u: 7 },
             );
 
-            // ──────────── Sibling group: range-table response (BusId::RangeCheck) ────────────
-            //
             // Always-active insertion with multiplicity `range_m`. Lives in its own group
             // because its gate (`ONE`) makes it fire on every row, overlapping with every
             // opcode-gated interaction in the main group — which would break the simple-group

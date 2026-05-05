@@ -181,7 +181,7 @@ pub trait LookupBuilder: Sized {
     /// 4. Advancing to the next permutation column index so the next call targets a fresh
     ///    accumulator.
     ///
-    /// The closure's return value is forwarded unchanged.
+    /// The closure's return value `R` is forwarded unchanged.
     fn next_column<'a, R>(&'a mut self, f: impl FnOnce(&mut Self::Column<'a>) -> R, deg: Deg) -> R;
 }
 

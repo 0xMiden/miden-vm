@@ -1,4 +1,4 @@
-//! Generic LogUp aux-trace construction: fraction buffer + accumulator + top-level driver.
+//! Generic LogUp aux-trace construction.
 //!
 //! Prover collection writes `(multiplicity, encoded_denominator)` pairs into a
 //! [`LookupFractions`] buffer (one flat `Vec<(F, EF)>` plus one flat `Vec<usize>` of per-row
@@ -7,13 +7,9 @@
 //! [`RowMajorMatrix<EF>`]. [`accumulate_slow`] is the reference oracle that does the same
 //! computation naively (one `try_inverse()` per fraction).
 //!
-//! [`build_logup_aux_trace`] is the top-level driver: it sources challenges /
-//! periodic-column shape directly from the AIR's own trait methods, runs
-//! [`build_lookup_fractions`] + [`accumulate`], and splits the matrix into an
-//! `(aux_trace, committed_final)` pair. Any `LiftedAir + LookupAir` implementor can
-//! delegate its `AuxBuilder::build_aux_trace` to it with a one-line body. Callers whose
-//! verifier expects a different committed-finals width (e.g. the Miden MASM verifier,
-//! which currently absorbs two values) pad the returned `Vec<EF>` themselves.
+//! [`build_logup_aux_trace`] sources challenges and periodic columns from the AIR,
+//! runs [`build_lookup_fractions`] and [`accumulate`], and returns `(aux_trace,
+//! acc_final)`.
 //!
 //! ## Aux trace shape
 //!
@@ -30,8 +26,7 @@
 //!   the running sum **before** the last row's contribution. The last row's fraction contribution
 //!   does **not** appear in the aux trace.
 //! - `committed_finals` is `[acc_final]`: the single accumulator terminal read out of row
-//!   `num_rows`. Verifiers that want a wider absorbed-values vector (e.g. the Miden MASM verifier,
-//!   which absorbs two, the second always `ZERO`) pad this themselves.
+//!   `num_rows`.
 //!
 //! ## Fraction buffer layout
 //!
@@ -66,13 +61,10 @@ const ACCUMULATE_ROWS_PER_CHUNK: usize = 512;
 
 /// Generic `AuxBuilder::build_aux_trace` body for any `LiftedAir + LookupAir` AIR.
 ///
-/// Sources `α`, `β`, `max_message_width`, `num_bus_ids`, and the periodic columns directly
-/// from the AIR's trait methods, runs the collection + accumulation phases, and returns
-/// `(aux_trace, vec![acc_final])`. AIRs wire this in with a near one-line body on their
-/// `AuxBuilder` impl; verifiers that expect extra absorbed values (e.g. the Miden MASM
-/// verifier, which absorbs two) extend the returned `Vec<EF>` themselves.
+/// Sources `alpha`, `beta`, `max_message_width`, `num_bus_ids`, and periodic columns
+/// from the AIR, runs collection + accumulation, and returns `(aux_trace, vec![acc_final])`.
 ///
-/// The challenges ordering (`challenges[0] = α`, `challenges[1] = β`) mirrors the
+/// The challenges ordering (`challenges[0] = alpha`, `challenges[1] = beta`) mirrors the
 /// constraint-path adapter's `ConstraintLookupBuilder::new` so prover- and constraint-path
 /// challenges line up.
 pub fn build_logup_aux_trace<A, F, EF>(
@@ -128,7 +120,7 @@ where
 ///     | row 0, col 0 |  row 0, col 1 | ... | row 0, col C-1 || row 1, col 0 | ... |
 ///
 ///   counts (flat, row-major, length = num_rows * num_cols):
-///     | r0c0 | r0c1 | ... | r0,C-1 | r1c0 | r1c1 | ... | r1,C-1 | ... |
+///     | r0c0 | r0c1 | ... | r0c(C-1) | r1c0 | r1c1 | ... | r1c(C-1) | ... |
 /// ```
 ///
 /// Row `r`'s contribution to column `c` is the slice
@@ -373,14 +365,12 @@ where
             let row_counts = &chunk_counts[row_in_chunk * num_cols..(row_in_chunk + 1) * num_cols];
             let out_row_base = row_in_chunk * num_cols;
 
-            // fᵢ(r) = Σⱼ scratch[j]  (scratch already holds mⱼ · dⱼ⁻¹).
+            // f_i(r) = sum_j scratch[j] (scratch already holds m_j * d_j^-1).
             for (col, &count) in row_counts.iter().enumerate() {
-                let mut sum = EF::ZERO;
-                for i in 0..count {
-                    sum += scratch[cursor + i];
-                }
+                let end = cursor + count;
+                let sum = scratch[cursor..end].iter().copied().sum();
                 per_row_value[col] = sum;
-                cursor += count;
+                cursor = end;
             }
 
             // output[r][i] = fᵢ(r) for fraction columns i > 0.
