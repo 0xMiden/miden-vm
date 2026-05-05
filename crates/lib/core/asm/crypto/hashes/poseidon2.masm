@@ -206,7 +206,7 @@ end
 #! Cycles:
 #! - even words: 55 cycles + 3 * words
 #! - odd words: 67 cycles + 3 * words
-#! where `words` is the `start_addr - end_addr - 1`
+#! where `words` is `(end_addr - start_addr) / 4`.
 pub proc hash_words
     push.0
     # => [domain=0, start_addr, end_addr, ...]
