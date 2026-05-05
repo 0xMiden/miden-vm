@@ -468,11 +468,26 @@ where
     let core_root_old = core_dag.root();
     let mut builder = DagBuilder::<EF>::new();
 
+    // Remap Core's shared (max-AIR) selectors to per-AIR lifted selectors. This is the
+    // fix for the second piece of failure 2: when `core_height < chiplets_height`, the
+    // smaller AIR (Core) needs its own lifted selectors at `z_lift = z^r` where
+    // `r = chiplets_height / core_height`. The MASM verifier computes both selector
+    // sets and stores them in `is_first_core` / `is_last_core` / `is_transition_core`
+    // slots; the combined ACE circuit references those slots from Core's sub-DAG.
+    //
+    // When heights are equal (r=1), the per-AIR selectors equal the shared selectors,
+    // so this remap is a no-op semantically. The codegen always emits the per-AIR
+    // variants in multi-AIR layouts.
     let core_translation = reemit_dag_with_rewrite(
         &mut builder,
         &core_dag,
-        |key| key, // identity rewrite for core
-        true,      // skip core's `Sub(acc, q*v)` root — combined formula uses a shared q*v
+        |key| match key {
+            InputKey::IsFirst => InputKey::IsFirstCore,
+            InputKey::IsLast => InputKey::IsLastCore,
+            InputKey::IsTransition => InputKey::IsTransitionCore,
+            other => other,
+        },
+        true, // skip core's `Sub(acc, q*v)` root — combined formula uses a shared q*v
     );
     let _core_root = core_root_old; // unused; we extract `core_acc` from core's root structure below
 
@@ -502,9 +517,11 @@ where
                 coord,
             },
             InputKey::AuxBusBoundary(slot) => InputKey::AuxBusBoundary(slot + core_aux_n),
-            // Selectors, randomness, public values, periodic z_k, gamma, alpha, etc. are
-            // shared between AIRs (today both AIRs are at the same height so selectors
-            // match). Future per-AIR-height work will introduce per-AIR selector slots.
+            // Chiplets is the LARGEST AIR (the multi-AIR clamp forces
+            // `chiplets_height >= core_height`), so its selectors are the standard
+            // (max-AIR) `IsFirst` / `IsLast` / `IsTransition` — no remapping needed.
+            // Randomness, public values, periodic z_k, gamma, alpha are shared
+            // between AIRs.
             other => other,
         },
         true, // skip chiplets's `Sub(acc, q*v)` root — combined formula uses a shared q*v

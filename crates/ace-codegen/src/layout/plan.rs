@@ -105,6 +105,18 @@ pub(crate) struct StarkVarIndices {
     /// observed-aux-values absorption. Used by the combined ACE circuit to
     /// β-fold per-AIR constraint roots: `combined = chip_acc · β_multi + core_acc`.
     pub multi_air_beta: Option<usize>,
+    /// Per-AIR first-row selector for the SMALLER AIR (Core when chip ≥ core).
+    /// Lifted: `(z^{n_max} - 1) / (z^r - 1)` where `r = n_max / n_core`. Equals
+    /// the standard `is_first` when heights are equal (r=1). Only present when
+    /// `AceConfig::is_multi_air`.
+    pub is_first_core: Option<usize>,
+    /// Per-AIR last-row selector for the smaller AIR. Lifted:
+    /// `(z^{n_max} - 1) / (z^r - g_core^{-1})` where `g_core = g_max^r`. Only
+    /// present in multi-AIR.
+    pub is_last_core: Option<usize>,
+    /// Per-AIR transition selector for the smaller AIR. Lifted:
+    /// `z^r - g_core^{-1}`. Only present in multi-AIR.
+    pub is_transition_core: Option<usize>,
 }
 
 /// ACE input layout for Plonky3-based verifier logic.

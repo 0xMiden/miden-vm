@@ -206,8 +206,16 @@ pub fn build_trace_with_max_len(
     // `next_power_of_two` (no growth when already pow2). Likely fix: bump
     // `chiplets_height = pad_to_trace_length(chiplets.trace_len() + 1)`.
     let core_height = pad_to_trace_length(core_trace_len.max(range_table_len));
-    let chiplets_height = pad_to_trace_length(chiplets.trace_len());
-    let main_trace_len = core_height.max(chiplets_height);
+    // Force `chiplets_height >= core_height` so the multi-AIR proof_order is always
+    // `[Core, Chiplets]` (sorted ascending by `(log_height, caller_idx)`), matching
+    // the hardcoded β-fold direction `accumulated = β · core_acc + chip_acc` baked
+    // into the multi-AIR ACE circuit. This loses the per-AIR-height optimization
+    // for core-heavy programs (e.g. Fibonacci) — chiplets gets padded to
+    // `core_height` — but keeps it for hash-heavy programs where chiplets dominate.
+    // The ACE-codegen-side fix would be per-AIR β slots driven by `air_order`;
+    // deferred since it requires MASM-side plumbing too.
+    let chiplets_height = pad_to_trace_length(chiplets.trace_len()).max(core_height);
+    let main_trace_len = chiplets_height;
 
     let ((range_checker_trace, chiplets_trace), ()) = rayon::join(
         || {

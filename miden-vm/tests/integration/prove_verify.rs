@@ -134,12 +134,6 @@ fn test_rpo_prove_verify() {
 }
 
 #[test]
-#[ignore = "EXPECTED FAIL on robin/multi-air-per-air-heights: Rust verify passes \
-            (failure 1 fixed); MASM recursive verifier fails with `aux randomness \
-            mismatch at element 0 (beta0)`. This is failure 2: with core 512 > chip 256 \
-            proof_order is [Chiplets, Core] and the multi-AIR ACE circuit's hardcoded \
-            β-fold direction (`β·core + chip`) doesn't match. Either bind air_order \
-            into the codegen or force core_height ≤ chiplets_height."]
 fn test_poseidon2_prove_verify() {
     // Compute 150th Fibonacci number to generate a longer trace
     let source = "
@@ -644,15 +638,15 @@ mod fast_parallel {
     }
 
     #[test]
-    #[ignore = "EXPECTED FAIL on robin/multi-air-per-air-heights: Rust verify passes \
-                (failure 1 fixed by per-AIR-height boundary generation), but MASM \
-                recursive verifier fails with `aux randomness mismatch at element 0 \
-                (beta0)`. This is failure 2: the multi-AIR ACE circuit hardcodes \
-                `accumulated = β·core_acc + chip_acc`. When proof_order is \
-                [Chiplets, Core] (because the precompile fixture has chip > core), the \
-                MASM verifier's β-folding doesn't match the prover's order. Either \
-                bind air_order into the codegen, or force core_height ≤ chiplets_height \
-                via padding."]
+    #[ignore = "EXPECTED FAIL on robin/multi-air-per-air-heights: precompile fixture has \
+                divergent heights (chip 2^17 > core 2^16) AND many kernel digests, hits a \
+                MASM-side transcript divergence at β sampling. The β-fold direction (failure 2 \
+                part 1) and per-AIR selectors (failure 2 part 2) are both implemented, but the \
+                precompile fixture exposes a third issue: the MASM verifier's transcript state \
+                diverges from the prover's BEFORE β is sampled — only when both heights differ \
+                AND there are kernel digests in VLPI. Fibonacci recursive (heights equal via \
+                clamp, no kernel digests) passes. Diagnosis pending: instrument both paths to \
+                find where rate[2..7] residue from kernel digest absorption diverges."]
     fn test_poseidon2_recursive_verify_with_precompile_requests() {
         let LoggedPrecompileProofFixture {
             program,
