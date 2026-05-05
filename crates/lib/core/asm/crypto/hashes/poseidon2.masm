@@ -16,6 +16,21 @@ pub proc init_no_padding
     padw padw padw
 end
 
+#! Prepares the top of the stack with the hasher initial state, using a caller-supplied capacity
+#! word.
+#!
+#! The caller must have placed the capacity word `C` on top of the stack before invoking this
+#! procedure. No padding handling is performed: callers must absorb data which is a multiple of
+#! the rate (2 words), or handle odd-length absorption themselves.
+#!
+#! Input: [C, ...]
+#! Output: [R0=0w, R1=0w, C, ...]
+#!
+#! Cycles: 8
+pub proc init_with_capacity
+    padw padw
+end
+
 #! Given the hasher state, returns the hash output (digest).
 #!
 #! Input: [R0, R1, C, ...]
@@ -113,43 +128,49 @@ pub proc hash_double_words
     # => [HASH]
 end
 
-#! Hashes the memory `start_addr` to `end_addr`, handles odd number of elements.
+#! Hashes the memory `start_addr` to `end_addr` with a domain identifier, handling an odd number
+#! of words.
 #!
 #! Requires `start_addr ≤ end_addr`, `end_addr` is not inclusive.
 #! Requires `start_addr` and `end_addr` to be word-aligned.
 #!
-#! Input: [start_addr, end_addr, ...]
+#! Input: [domain, start_addr, end_addr, ...]
 #! Output: [H, ...]
 #!
 #! Cycles:
-#! - even words: 53 cycles + 3 * words
-#! - odd words: 65 cycles + 3 * words
-#! where `words` is the `start_addr - end_addr - 1`
-pub proc hash_words
+#! - even words: 54 cycles + 3 * words
+#! - odd words: 66 cycles + 3 * words
+#! where `words` is `(end_addr - start_addr) / 4`.
+pub proc hash_words_with_domain
+    # Move the domain past the address pair so we can reuse the standard hash_words control flow.
+    # (1 cycle)
+    movdn.2
+    # => [start_addr, end_addr, domain, ...]
+
     # enforce `start_addr ≤ end_addr`
     dup.1 dup.1 u32assert2 u32gte assert
 
     # figure out if the range is for an odd number of words (11 cycles)
     dup.1 dup.1 sub div.4 is_odd
-    # => [is_odd, start_addr, end_addr, ...]
+    # => [is_odd, start_addr, end_addr, domain, ...]
 
     # make the start/end range even (6 cycles)
     movup.2 dup.1 mul.4 sub
-    # => [end_addr, is_odd, start_addr, ...]
+    # => [end_addr, is_odd, start_addr, domain, ...]
 
-    # move start_addr to the right stack position (1 cycles)
+    # move start_addr to the right stack position (1 cycle)
     movup.2
-    # => [start_addr, end_addr, is_odd, ...]
+    # => [start_addr, end_addr, is_odd, domain, ...]
 
-    # prepare hasher state (14 cycles)
-    dup.2 mul.4 push.0.0.0 movup.3 padw padw
-    # => [R0, R1, C, start_addr, end_addr, is_odd, ...]
+    # prepare hasher state with capacity `[is_odd*4, domain, 0, 0]` (14 cycles)
+    dup.2 mul.4 push.0.0 movup.6 movup.3 padw padw
+    # => [R0=0w, R1=0w, C=[is_odd*4, domain, 0, 0], start_addr, end_addr, is_odd, ...]
 
     # (4 + 3 * words cycles)
     exec.absorb_double_words_from_memory
     # => [R0', R1', C', end_addr, end_addr, is_odd, ...]
 
-    # (1 cycles)
+    # (1 cycle)
     movup.14
     # => [is_odd, R0', R1', C', end_addr, end_addr, ...]
 
@@ -158,7 +179,7 @@ pub proc hash_words
         # start_addr and end_addr are equal after calling `absorb_double_words_from_memory`, and both
         # point to the last element. Load the last word (6 cycles)
         dropw dup.9 mem_loadw_le
-        # => [R1, C, end_addr, end_addr, ...]
+        # => [W, C', end_addr, end_addr, ...]
 
         # set the padding and compute the permutation (5 cycles)
         padw swapw exec.permute
@@ -170,6 +191,27 @@ pub proc hash_words
     # drop start_addr/end_addr (4 cycles)
     movup.4 drop movup.4 drop
     # => [HASH]
+end
+
+#! Hashes the memory `start_addr` to `end_addr`, handles odd number of elements.
+#!
+#! Equivalent to `hash_words_with_domain` with `domain = 0`.
+#!
+#! Requires `start_addr ≤ end_addr`, `end_addr` is not inclusive.
+#! Requires `start_addr` and `end_addr` to be word-aligned.
+#!
+#! Input: [start_addr, end_addr, ...]
+#! Output: [H, ...]
+#!
+#! Cycles:
+#! - even words: 55 cycles + 3 * words
+#! - odd words: 67 cycles + 3 * words
+#! where `words` is `(end_addr - start_addr) / 4`.
+pub proc hash_words
+    push.0
+    # => [domain=0, start_addr, end_addr, ...]
+
+    exec.hash_words_with_domain
 end
 
 #! Initializes the hasher state required for the `hash_elements_with_state` procedure.
@@ -467,6 +509,31 @@ end
 #! Cycles: 16
 pub proc merge
     hmerge
+end
+
+#! Merges two words (256-bit digests) via Poseidon2 hash with a domain identifier.
+#!
+#! Inputs:  [domain, A, B, ...]
+#! Outputs: [C, ...]
+#!
+#! Where:
+#! - A and B are the words to be merged (A corresponds to the first rate word).
+#! - C is the resulting hash, computed with capacity `[0, domain, 0, 0]`.
+#!
+#! Cycles: 16
+pub proc merge_in_domain
+    # move `domain` past the two words so we can reuse the `adv.insert_hdword_d` capacity-word
+    # construction pattern (1 cycle)
+    movdn.8
+    # => [A, B, domain, ...]
+
+    # build the hperm state [A, B, [0, domain, 0, 0]] (5 cycles)
+    push.0.0 movup.10 push.0 movdnw.2
+    # => [A, B, [0, domain, 0, 0], ...]
+
+    # run the permutation (1 cycle) and squeeze the digest (9 cycles)
+    hperm
+    exec.squeeze_digest
 end
 
 #! Performs Poseidon2 permutation on the hasher state.
