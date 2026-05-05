@@ -46,9 +46,9 @@ pub struct AceConfig {
     /// Layout policy (Native vs Masm).
     pub layout: LayoutKind,
     /// Whether this circuit is a multi-AIR combined circuit. When `true`, the
-    /// stark-vars region reserves an extra EF slot for `MultiAirBeta` (the
-    /// multi-AIR accumulation challenge β_multi sampled after aux commit).
-    /// Default: `false` (single-AIR layout).
+    /// stark-vars region reserves additional EF slots for the multi-AIR β
+    /// coefficients (one per AIR) and per-AIR lifted selector triples (one per
+    /// AIR). Default: `false` (single-AIR layout).
     pub is_multi_air: bool,
 }
 

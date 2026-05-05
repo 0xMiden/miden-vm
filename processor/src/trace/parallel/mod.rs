@@ -173,12 +173,20 @@ pub fn build_trace_with_max_len(
     // `check_constraints` and aux-trace construction) keeps `V[main_trace_len-1] = 65535`
     // and the V transition (delta ∈ {0, 1, 3, ..., 2187}) is satisfied (delta=0).
     //
-    // `chiplets_height` is clamped to `>= core_height` so proof_order is always
-    // [Core, Chiplets], matching the ACE circuit's hardcoded β-fold direction. The
-    // `+ 1` before padding ensures at least one chiplet padding row exists, so the
-    // slice's last row always falls in the padding region (where the chiplet last-row
-    // invariant holds) — necessary when `chiplets.trace_len()` is itself a power of two.
+    // `+ 1` before chiplets padding ensures at least one chiplet padding row exists, so
+    // the slice's last row always falls in the padding region (where the chiplet
+    // last-row invariant holds) — necessary when `chiplets.trace_len()` is itself a
+    // power of two.
     let core_height = pad_to_trace_length(core_trace_len.max(range_table_len));
+    // Force `chiplets_height >= core_height` so proof_order is always [Core, Chiplets],
+    // matching the codegen's slot arrangement for the OOD frame and the per-AIR β-fold
+    // direction. Lifting the clamp would require either MASM-side memory shuffling
+    // after `process_row_ood_evaluations` (because the prover absorbs OOD evaluations
+    // in proof_order, which must equal caller_order at the codegen's fixed slot
+    // layout) or generating two ACE circuits keyed by proof_order. The symmetric β
+    // (`MultiAirBetaCore` / `MultiAirBetaChip`) and per-AIR selector slots
+    // (`Is*Core` / `Is*Chip`) are in place so a future change can lift this clamp
+    // by only adding the memory-shuffle step.
     let chiplets_height = pad_to_trace_length(chiplets.trace_len() + 1).max(core_height);
     let main_trace_len = chiplets_height;
 

@@ -154,16 +154,19 @@ end
 #! Precondition: num_queries, query_pow_bits, deep_pow_bits, and folding_pow_bits must
 #! already be stored in memory before calling this procedure.
 #!
-#! Input: [log(min_trace_length), log(max_trace_length), rd0, rd1, rd2, rd3, ...]
+#! Input: [log(core_trace_length), log(chiplets_trace_length), rd0, rd1, rd2, rd3, ...]
 #! Output: [...]
 pub proc init_seed
 
-    # Save the per-AIR log heights in memory for later use.
-    # The max height drives all downstream lifted-domain math; the min height is only
-    # consulted by `observe_trace_height_and_discard_instance_challenge` to mirror the
-    # multi-AIR transcript binding.
-    dup exec.constants::set_min_trace_length_log
-    dup.1 exec.constants::set_trace_length_log
+    # Save per-AIR log heights, then derive and store the max (used everywhere
+    # downstream for lifted-domain math, LDE size, and trace generator).
+    dup exec.constants::set_core_trace_length_log
+    dup.1 exec.constants::set_chiplets_trace_length_log
+    dup dup.2
+    # => [log_chip, log_core, log_core, log_chip, rd0, ..., ...]
+    u32max
+    exec.constants::set_trace_length_log
+    # => [log_core, log_chip, rd0, rd1, rd2, rd3, ...]
 
     # Initialize the zero word and buffers to zero.
     padw
@@ -171,7 +174,7 @@ pub proc init_seed
     dropw
     push.0 exec.constants::random_coin_input_len_ptr mem_store
     push.0 exec.constants::random_coin_output_len_ptr mem_store
-    #=> [log(min_tl), log(max_tl), rd0, rd1, rd2, rd3, ...]
+    #=> [log_core, log_chip, rd0, rd1, rd2, rd3, ...]
 
     # ---- RELATION_DIGEST + PCS_PARAMS ----
 
@@ -304,11 +307,21 @@ pub proc observe_trace_height_and_discard_instance_challenge
     push.0 exec.constants::random_coin_output_len_ptr mem_store
     # => [...]
 
-    # observe log(min) into rate[0] and log(max) into rate[1], leaving rate[2..7]
-    # and the capacity unchanged.
-    exec.constants::get_min_trace_length_log
+    # Observe per-AIR heights in proof_order (ascending log_height; tie broken by
+    # caller_idx, where Core has caller_idx=0). Compute (smaller, larger) and write
+    # smaller to rate[0], larger to rate[1]. Other rate slots and capacity are
+    # untouched.
+    exec.constants::get_core_trace_length_log
+    exec.constants::get_chiplets_trace_length_log
+    # => [log_chip, log_core, ...]
+    dup.1 dup.1 u32min
+    # => [log_min, log_chip, log_core, ...]
+    movdn.2
+    u32max
+    # => [log_max, log_min, ...]
+    swap
+    # => [log_min, log_max, ...]
     exec.constants::r1_ptr mem_store
-    exec.constants::get_trace_length_log
     exec.constants::r1_ptr add.1 mem_store
     # => [...]
 
@@ -499,15 +512,33 @@ pub proc generate_constraint_composition_coefficients
     exec.constants::composition_coef_ptr
     mem_storew_le dropw
 
-    # Sample beta_multi (multi-AIR accumulation challenge). The combined ACE circuit
-    # uses it to β-fold the per-AIR constraint roots. Written directly into the
-    # stark-vars region as Word 5 = [β_0, β_1, 0, 0] (slot 10 = β_multi, slot 11 =
-    # padding). Stored at `AUXILIARY_ACE_INPUTS_PTR + 20`, the trailing word right
-    # after the 5 base words written by `set_up_auxiliary_inputs_ace`.
+    # Sample β (multi-AIR accumulation challenge), then write Word 5 = β-coefficient
+    # word into the stark-vars region as [mab_core_0, mab_core_1, mab_chip_0, mab_chip_1]:
+    #   - if `core_height ≤ chiplets_height` (proof_order [Core, Chiplets]):
+    #         mab_core = β, mab_chip = 1   →  yields β·core_acc + 1·chip_acc
+    #   - else (proof_order [Chiplets, Core]):
+    #         mab_core = 1, mab_chip = β   →  yields 1·core_acc + β·chip_acc
+    # Both forms match upstream's Horner accumulation `acc[j] = acc[j-1]·β + folded[j]`.
     exec.sample_ext
-    push.0.0
-    movup.3
-    movup.3
+    # => [β_0, β_1, ...]
+    exec.constants::get_core_trace_length_log
+    exec.constants::get_chiplets_trace_length_log
+    # => [log_chip, log_core, β_0, β_1, ...]
+    # u32lte returns 1 iff log_chip >= log_core, equivalent to log_core <= log_chip,
+    # which means Core is at proof_order position 0 (with the caller_idx=0 tiebreak).
+    u32lte
+    # => [core_first?, β_0, β_1, ...]
+    if.true
+        # core_first: word [mab_core=β, mab_chip=1] = [β_0, β_1, 1, 0]
+        push.0.1
+        # => [1, 0, β_0, β_1, ...]
+        movup.3 movup.3
+        # => [β_0, β_1, 1, 0, ...]
+    else
+        # chip_first: word [mab_core=1, mab_chip=β] = [1, 0, β_0, β_1]
+        push.0.1
+        # => [1, 0, β_0, β_1, ...]
+    end
     exec.constants::auxiliary_ace_inputs_ptr add.20
     mem_storew_le dropw
 end

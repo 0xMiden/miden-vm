@@ -191,7 +191,7 @@ fn quotient_next_inputs_do_not_affect_eval() {
 }
 
 #[test]
-fn multi_air_ace_circuit_builds_and_has_multi_air_beta_slot() {
+fn multi_air_ace_circuit_builds_and_has_multi_air_beta_slots() {
     use miden_air::ace::build_multi_air_ace_circuit;
 
     let config = AceConfig {
@@ -215,11 +215,10 @@ fn multi_air_ace_circuit_builds_and_has_multi_air_beta_slot() {
     assert_eq!(layout.counts.aux_width, 8, "combined aux_width = aligned(4) + aligned(3) = 8 EFs");
     assert_eq!(layout.counts.num_aux_boundary, 2, "one boundary slot per AIR");
 
-    // The combined layout reserves the new MultiAirBeta slot in stark_vars.
-    let beta_idx = layout
-        .index(InputKey::MultiAirBeta)
-        .expect("multi-air layout exposes MultiAirBeta");
-    assert!(beta_idx < layout.total_inputs, "MultiAirBeta slot must be within layout bounds");
+    for key in [InputKey::MultiAirBetaCore, InputKey::MultiAirBetaChip] {
+        let idx = layout.index(key).unwrap_or_else(|| panic!("multi-air layout exposes {key:?}"));
+        assert!(idx < layout.total_inputs, "{key:?} slot must be within layout bounds");
+    }
 }
 
 #[test]

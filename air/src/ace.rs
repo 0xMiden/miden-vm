@@ -373,14 +373,14 @@ where
 /// the kernel-ROM scalar correction.
 ///
 /// Implementation strategy:
-/// 1. Build per-AIR sub-DAGs with their own (single-AIR) layouts via
-///    [`build_ace_dag_for_air`]. These DAGs encode each AIR's alpha-folded constraints
-///    referencing layout-relative `InputKey::Main`/`AuxCoord`/`AuxBusBoundary` slots.
-/// 2. Re-emit each sub-DAG's nodes into a fresh `DagBuilder` configured for the
-///    *combined* layout. The chiplets sub-DAG's input keys are rewritten so its
-///    main/aux/bus-boundary slot indices land in the chiplets-half of the combined
-///    layout. The core sub-DAG passes through unchanged.
-/// 3. β-fold: `combined = chip_root · MultiAirBeta + core_root`.
+/// 1. Build per-AIR sub-DAGs with their own (single-AIR) layouts via [`build_ace_dag_for_air`].
+///    These DAGs encode each AIR's alpha-folded constraints referencing layout-relative
+///    `InputKey::Main`/`AuxCoord`/`AuxBusBoundary` slots.
+/// 2. Re-emit each sub-DAG's nodes into a fresh `DagBuilder` configured for the *combined* layout.
+///    The chiplets sub-DAG's input keys are rewritten so its main/aux/bus-boundary slot indices
+///    land in the chiplets-half of the combined layout. The core sub-DAG passes through unchanged.
+/// 3. β-fold: `combined = MultiAirBetaCore · core_acc + MultiAirBetaChip · chip_acc`, where the
+///    verifier sets one coefficient to β and the other to 1 based on proof_order.
 /// 4. Apply the shared boundary via [`batch_logup_boundary_into_builder`] using a
 ///    [`LogUpBoundaryConfig`] whose `sum_columns` covers both AIRs' boundary slots.
 ///
@@ -455,7 +455,7 @@ where
     };
 
     // Build combined layout via the multi-air constructors so the stark-vars region
-    // gets the extra MultiAirBeta slot.
+    // includes the multi-AIR β coefficients and per-AIR selector slots.
     let combined_layout = match config.layout {
         miden_ace_codegen::LayoutKind::Native => InputLayout::new_multi_air(combined_counts),
         miden_ace_codegen::LayoutKind::Masm => InputLayout::new_masm_multi_air(combined_counts),
@@ -507,21 +507,16 @@ where
                 coord,
             },
             InputKey::AuxBusBoundary(slot) => InputKey::AuxBusBoundary(slot + core_aux_n),
-            // Chiplets is the larger AIR (clamp forces `chiplets_height >=
-            // core_height`), so it uses the canonical max-AIR selectors.
+            InputKey::IsFirst => InputKey::IsFirstChip,
+            InputKey::IsLast => InputKey::IsLastChip,
+            InputKey::IsTransition => InputKey::IsTransitionChip,
             other => other,
         },
         true, // skip chiplets's `Sub(acc, q*v)` root — combined formula uses a shared q*v
     );
 
-    // Step 5: extract the pre-quotient accumulators and β-fold across AIRs.
-    //
-    // Each sub-DAG's root is `Sub(acc, q*v)` (per `build_verifier_dag`).  We unpack
-    // it to recover `acc` for each AIR. The combined check then mirrors upstream's
-    // `verify_multi`:
-    //   accumulated = (((0 · β) + core_acc) · β) + chip_acc = core_acc · β + chip_acc
-    // applied in proof order [Core, Chiplets] (caller-index tiebreak with equal
-    // heights). The single shared quotient subtraction `- q*v` lives at the bottom.
+    // β-fold: `combined = mab_core · core_acc + mab_chip · chip_acc - q*v`. Verifier
+    // picks (β, 1) or (1, β) for (mab_core, mab_chip) per proof_order.
     let core_acc = match core_dag.nodes[core_root_old.index()] {
         NodeKind::Sub(acc_id, _qv_id) => core_translation[acc_id.index()],
         _ => panic!("CoreAir sub-DAG root must be `Sub(acc, q*v)`"),
@@ -533,9 +528,11 @@ where
         _ => panic!("ChipletsAir sub-DAG root must be `Sub(acc, q*v)`"),
     };
 
-    let beta_multi = builder.input(InputKey::MultiAirBeta);
-    let beta_core_acc = builder.mul(beta_multi, core_acc);
-    let combined_acc = builder.add(beta_core_acc, chip_acc);
+    let mab_core = builder.input(InputKey::MultiAirBetaCore);
+    let mab_chip = builder.input(InputKey::MultiAirBetaChip);
+    let core_term = builder.mul(mab_core, core_acc);
+    let chip_term = builder.mul(mab_chip, chip_acc);
+    let combined_acc = builder.add(core_term, chip_term);
     let combined_constraint = builder.sub(combined_acc, chip_qv);
 
     // Step 6: combined LogUp boundary.

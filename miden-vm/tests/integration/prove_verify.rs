@@ -255,10 +255,16 @@ mod recursive_verifier {
             challenger,
         )
         .expect("failed to replay verifier transcript");
-        let log_trace_heights = stark.instance_shapes.log_trace_heights().to_vec();
+        // log_trace_heights is in proof_order; recover caller-order via air_order.
+        let log_trace_heights = stark.instance_shapes.log_trace_heights();
+        let air_order = stark.instance_shapes.air_order();
         assert_eq!(log_trace_heights.len(), 2, "expected two AIR instances");
-        let log_min_trace_height = log_trace_heights[0] as usize;
-        let log_max_trace_height = log_trace_heights[1] as usize;
+        let mut per_air_log_height = [0usize; 2];
+        for (proof_pos, &caller_idx) in air_order.iter().enumerate() {
+            per_air_log_height[caller_idx as usize] = log_trace_heights[proof_pos] as usize;
+        }
+        let log_core_trace_height = per_air_log_height[0];
+        let log_chiplets_trace_height = per_air_log_height[1];
 
         let kernel_digests: Vec<Word> = kernel_felts
             .chunks_exact(4)
@@ -268,8 +274,8 @@ mod recursive_verifier {
         build_advice(
             &config,
             &stark,
-            log_min_trace_height,
-            log_max_trace_height,
+            log_core_trace_height,
+            log_chiplets_trace_height,
             pub_inputs,
             &kernel_digests,
         )
@@ -278,8 +284,8 @@ mod recursive_verifier {
     fn build_advice(
         config: &P2Config,
         stark: &StarkTranscript<Challenge, P2Lmcs>,
-        log_min_trace_height: usize,
-        log_max_trace_height: usize,
+        log_core_trace_height: usize,
+        log_chiplets_trace_height: usize,
         pub_inputs: PublicInputs,
         kernel_digests: &[Word],
     ) -> VerifierInputs {
@@ -310,9 +316,9 @@ mod recursive_verifier {
         advice_stack.extend_from_slice(&commitment_to_u64s(stark.main_commit));
         advice_stack.extend_from_slice(&commitment_to_u64s(stark.aux_commit));
 
-        // Multi-AIR: push aux values for ALL AIRs in proof order. MASM stores them
-        // contiguously in the aux_bus_boundary region (slot 0 = first AIR's, slot 1
-        // = second AIR's).
+        // Aux values per AIR in proof_order (matches transcript absorption); the MASM
+        // verifier's `swap_air_regions_if_chip_first` reorders to caller_order before
+        // eval_circuit when needed.
         for aux_values in &stark.all_aux_values {
             advice_stack.extend_from_slice(&challenges_to_u64s(aux_values));
         }
@@ -341,13 +347,9 @@ mod recursive_verifier {
 
         let (store, advice_map) = build_merkle_data(config, stark);
         VerifierInputs {
-            // `verify_proof` (in `crates/lib/core/asm/sys/vm/mod.masm`) expects
-            // `[log_min_trace_length, log_max_trace_length]` with log_min on TOP.
-            // `build_test!` -> `StackInputs::try_from_ints(vec)` places `vec[0]` at
-            // the top, so push `[log_min, log_max]` here. (Pushing them reversed is
-            // a silent error when heights match — surfaces only with per-AIR-height
-            // divergence as `aux randomness mismatch at element 0 (beta0)`.)
-            initial_stack: vec![log_min_trace_height as u64, log_max_trace_height as u64],
+            // `verify_proof` expects `[log_core, log_chip]` with log_core on top;
+            // `StackInputs::try_from_ints` puts `vec[0]` on top.
+            initial_stack: vec![log_core_trace_height as u64, log_chiplets_trace_height as u64],
             advice_stack,
             store,
             advice_map,

@@ -92,21 +92,19 @@ impl InputLayout {
         Self::build_with_policy(counts, LayoutPolicy::native(), true)
     }
 
-    /// Build a MASM-compatible multi-AIR layout (alignment/padding enforced; reserves an
-    /// extra stark-vars slot for `MultiAirBeta`).
+    /// Build a MASM-compatible multi-AIR layout (alignment/padding enforced; reserves
+    /// extra stark-vars slots for the multi-AIR β coefficients and per-AIR selectors).
     pub fn new_masm_multi_air(counts: InputCounts) -> Self {
         Self::build_with_policy(counts, LayoutPolicy::masm(), true)
     }
 
     fn build_with_policy(counts: InputCounts, policy: LayoutPolicy, is_multi_air: bool) -> Self {
-        // Number of EF slots in the stark-vars block. The single-AIR base layout uses 10
-        // canonical slots; multi-AIR layouts reserve four additional slots at the end:
-        //   slot 10: `MultiAirBeta`
-        //   slot 11: `IsFirstCore`     (per-AIR lifted first-row selector for the smaller AIR)
-        //   slot 12: `IsLastCore`      (per-AIR lifted last-row selector for the smaller AIR)
-        //   slot 13: `IsTransitionCore`(per-AIR lifted transition selector for the smaller AIR)
+        // Number of EF slots in the stark-vars block. Every ACE input slot is an
+        // extension-field element (QuadFelt). Some stark vars are base-field values
+        // embedded as (val, 0); see the slot table below for which is which.
+        // Multi-AIR appends 8 more: 2 β coefficients + 6 per-AIR selectors (3 per AIR).
         const NUM_STARK_VARS_BASE: usize = 10;
-        let num_stark_vars = NUM_STARK_VARS_BASE + if is_multi_air { 4 } else { 0 };
+        let num_stark_vars = NUM_STARK_VARS_BASE + if is_multi_air { 8 } else { 0 };
 
         let mut builder = LayoutBuilder::new();
 
@@ -155,10 +153,14 @@ impl InputLayout {
         let weight0 = b + 7;
         let f = b + 8;
         let s0 = b + 9;
-        let multi_air_beta = is_multi_air.then_some(b + 10);
-        let is_first_core = is_multi_air.then_some(b + 11);
-        let is_last_core = is_multi_air.then_some(b + 12);
-        let is_transition_core = is_multi_air.then_some(b + 13);
+        let multi_air_beta_core = is_multi_air.then_some(b + 10);
+        let multi_air_beta_chip = is_multi_air.then_some(b + 11);
+        let is_first_core = is_multi_air.then_some(b + 12);
+        let is_last_core = is_multi_air.then_some(b + 13);
+        let is_transition_core = is_multi_air.then_some(b + 14);
+        let is_first_chip = is_multi_air.then_some(b + 15);
+        let is_last_chip = is_multi_air.then_some(b + 16);
+        let is_transition_chip = is_multi_air.then_some(b + 17);
 
         if let Some(end_align) = policy.end_align {
             builder.align(end_align);
@@ -192,10 +194,14 @@ impl InputLayout {
                 weight0,
                 f,
                 s0,
-                multi_air_beta,
+                multi_air_beta_core,
+                multi_air_beta_chip,
                 is_first_core,
                 is_last_core,
                 is_transition_core,
+                is_first_chip,
+                is_last_chip,
+                is_transition_chip,
             },
             total_inputs: builder.offset,
             counts,
