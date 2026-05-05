@@ -76,19 +76,19 @@ fn hasher_response_rows(
         if !is_hasher_controller_row(main, idx) {
             return None;
         }
-        let hs0 = u8::from(main.chiplet_selector_1(idx) == ONE);
-        let hs1 = u8::from(main.chiplet_selector_2(idx) == ONE);
-        let hs2 = u8::from(main.chiplet_selector_3(idx) == ONE);
-        let is_boundary = u8::from(main.chiplet_is_boundary(idx) == ONE);
+        let hs0 = as_bit(main.chiplet_selector_1(idx))?;
+        let hs1 = as_bit(main.chiplet_selector_2(idx))?;
+        let hs2 = as_bit(main.chiplet_selector_3(idx))?;
+        let is_boundary = as_bit(main.chiplet_is_boundary(idx))?;
         // Selector table — see `docs/src/design/chiplets/hasher.md`.
         let kind = match (hs0, hs1, hs2, is_boundary) {
-            (1, 0, 0, 1) => HasherResponseKind::SpongeStart,
-            (1, 0, 0, 0) => HasherResponseKind::SpongeRespan,
-            (1, 0, 1, 1) => HasherResponseKind::MpInput,
-            (1, 1, 0, 1) => HasherResponseKind::MvOldInput,
-            (1, 1, 1, 1) => HasherResponseKind::MuNewInput,
-            (0, 0, 0, _) => HasherResponseKind::Hout,
-            (0, 0, 1, 1) => HasherResponseKind::Sout,
+            (true, false, false, true) => HasherResponseKind::SpongeStart,
+            (true, false, false, false) => HasherResponseKind::SpongeRespan,
+            (true, false, true, true) => HasherResponseKind::MpInput,
+            (true, true, false, true) => HasherResponseKind::MvOldInput,
+            (true, true, true, true) => HasherResponseKind::MuNewInput,
+            (false, false, false, _) => HasherResponseKind::Hout,
+            (false, false, true, true) => HasherResponseKind::Sout,
             _ => return None,
         };
         Some((idx, kind))
@@ -597,6 +597,20 @@ fn rate_from_hasher_state(main: &MainTrace, row: RowIndex) -> [Felt; 8] {
 
 fn is_hasher_controller_row(main: &MainTrace, row: RowIndex) -> bool {
     main.chiplet_selector_0(row) == ONE && main.chiplet_s_perm(row) == ZERO
+}
+
+/// Returns `Some(false)` for ZERO, `Some(true)` for ONE, and `None` for any other value.
+///
+/// Used to guard selector-bit reads: a malformed value (e.g. 2) yields `None` so the row is
+/// skipped rather than silently misclassified.
+fn as_bit(val: Felt) -> Option<bool> {
+    if val == ZERO {
+        Some(false)
+    } else if val == ONE {
+        Some(true)
+    } else {
+        None
+    }
 }
 
 /// Recompute the Merkle direction bit the emitter uses: `bit = node_index - 2·node_index_next`

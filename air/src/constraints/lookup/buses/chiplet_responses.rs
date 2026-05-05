@@ -129,6 +129,12 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
     // the matching request at `clk`).
     let clk_plus_one: LB::Expr = local.system.clk.into() + LB::Expr::ONE;
 
+    // Local helpers: convert the copied Var arrays into Expr arrays.
+    let full_state = || -> [LB::Expr; 12] { state.map(Into::into) };
+    let full_rate = || -> [LB::Expr; 8] {
+        array::from_fn(|i| if i < 4 { rate_0[i].into() } else { rate_1[i - 4].into() })
+    };
+
     builder.next_column(
         |col| {
             col.group(
@@ -138,15 +144,11 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
                     g.add(
                         "sponge_start",
                         f_sponge_start,
-                        || {
-                            let addr = clk_plus_one.clone();
-                            let state: [LB::Expr; 12] = state.map(Into::into);
-                            HasherMsg {
-                                kind: BusId::HasherLinearHashInit,
-                                addr,
-                                node_index: LB::Expr::ZERO,
-                                payload: HasherPayload::State(state),
-                            }
+                        || HasherMsg {
+                            kind: BusId::HasherLinearHashInit,
+                            addr: clk_plus_one.clone(),
+                            node_index: LB::Expr::ZERO,
+                            payload: HasherPayload::State(full_state()),
                         },
                         Deg { v: 5, u: 6 },
                     );
@@ -155,17 +157,11 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
                     g.add(
                         "sponge_respan",
                         f_sponge_respan,
-                        || {
-                            let addr = clk_plus_one.clone();
-                            let rate: [LB::Expr; 8] = array::from_fn(|i| {
-                                if i < 4 { rate_0[i].into() } else { rate_1[i - 4].into() }
-                            });
-                            HasherMsg {
-                                kind: BusId::HasherAbsorption,
-                                addr,
-                                node_index: LB::Expr::ZERO,
-                                payload: HasherPayload::Rate(rate),
-                            }
+                        || HasherMsg {
+                            kind: BusId::HasherAbsorption,
+                            addr: clk_plus_one.clone(),
+                            node_index: LB::Expr::ZERO,
+                            payload: HasherPayload::Rate(full_rate()),
                         },
                         Deg { v: 5, u: 6 },
                     );
@@ -225,15 +221,11 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
                     g.add(
                         "sout",
                         f_sout,
-                        || {
-                            let addr = clk_plus_one.clone();
-                            let state: [LB::Expr; 12] = state.map(Into::into);
-                            HasherMsg {
-                                kind: BusId::HasherReturnState,
-                                addr,
-                                node_index: LB::Expr::ZERO,
-                                payload: HasherPayload::State(state),
-                            }
+                        || HasherMsg {
+                            kind: BusId::HasherReturnState,
+                            addr: clk_plus_one.clone(),
+                            node_index: LB::Expr::ZERO,
+                            payload: HasherPayload::State(full_state()),
                         },
                         Deg { v: 5, u: 6 },
                     );

@@ -565,10 +565,8 @@ where
     EF: PrimeCharacteristicRing + Clone + Algebra<E>,
 {
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
-        let bp = &challenges.beta_powers;
         let mut acc = challenges.bus_prefix[self.kind as usize].clone();
-        acc += bp[0].clone() * self.addr.clone();
-        acc += bp[1].clone() * self.node_index.clone();
+        acc += challenges.inner_product_at(0, &[self.addr.clone(), self.node_index.clone()]);
         acc += match &self.payload {
             HasherPayload::State(state) => challenges.inner_product_at(2, state.as_slice()),
             HasherPayload::Rate(rate) => challenges.inner_product_at(2, rate.as_slice()),
@@ -586,22 +584,19 @@ where
     EF: PrimeCharacteristicRing + Clone + Algebra<E>,
 {
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
-        let bp = &challenges.beta_powers;
         let bus = match self {
             Self::Element { bus, .. } | Self::Word { bus, .. } => *bus as usize,
         };
         let mut acc = challenges.bus_prefix[bus].clone();
         match self {
             Self::Element { ctx, addr, clk, element, .. } => {
-                acc += bp[0].clone() * ctx.clone();
-                acc += bp[1].clone() * addr.clone();
-                acc += bp[2].clone() * clk.clone();
-                acc += bp[3].clone() * element.clone();
+                acc += challenges.inner_product_at(
+                    0,
+                    &[ctx.clone(), addr.clone(), clk.clone(), element.clone()],
+                );
             },
             Self::Word { ctx, addr, clk, word, .. } => {
-                acc += bp[0].clone() * ctx.clone();
-                acc += bp[1].clone() * addr.clone();
-                acc += bp[2].clone() * clk.clone();
+                acc += challenges.inner_product_at(0, &[ctx.clone(), addr.clone(), clk.clone()]);
                 acc += challenges.inner_product_at(3, word.as_slice());
             },
         }
@@ -632,15 +627,13 @@ where
     EF: PrimeCharacteristicRing + Clone + Algebra<E>,
 {
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
-        let bp = &challenges.beta_powers;
         let mut acc = challenges.bus_prefix[BusId::BlockStackTable as usize].clone();
         match self {
             // `Simple` zero-pads to 10 slots; slots `3..10` contribute `β^k · 0 = 0` so
             // they are elided from the loop.
             Self::Simple { block_id, parent_id, is_loop } => {
-                acc += bp[0].clone() * block_id.clone();
-                acc += bp[1].clone() * parent_id.clone();
-                acc += bp[2].clone() * is_loop.clone();
+                acc += challenges
+                    .inner_product_at(0, &[block_id.clone(), parent_id.clone(), is_loop.clone()]);
             },
             Self::Full {
                 block_id,
@@ -651,12 +644,17 @@ where
                 depth,
                 fn_hash,
             } => {
-                acc += bp[0].clone() * block_id.clone();
-                acc += bp[1].clone() * parent_id.clone();
-                acc += bp[2].clone() * is_loop.clone();
-                acc += bp[3].clone() * ctx.clone();
-                acc += bp[4].clone() * fmp.clone();
-                acc += bp[5].clone() * depth.clone();
+                acc += challenges.inner_product_at(
+                    0,
+                    &[
+                        block_id.clone(),
+                        parent_id.clone(),
+                        is_loop.clone(),
+                        ctx.clone(),
+                        fmp.clone(),
+                        depth.clone(),
+                    ],
+                );
                 acc += challenges.inner_product_at(6, fn_hash.as_slice());
             },
         }
@@ -905,10 +903,8 @@ where
     EF: PrimeCharacteristicRing + Clone + Algebra<E>,
 {
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
-        let bp = &challenges.beta_powers;
         let mut acc = challenges.bus_prefix[BusId::SiblingTable as usize].clone();
-        acc += bp[1].clone() * self.mrupdate_id.clone();
-        acc += bp[2].clone() * self.node_index.clone();
+        acc += challenges.inner_product_at(1, &[self.mrupdate_id.clone(), self.node_index.clone()]);
         let base = match self.bit {
             SiblingBit::Zero => 7,
             SiblingBit::One => 3,
