@@ -243,7 +243,7 @@ mod package_features {
 
     use miden_mast_package::{Package, PackageId};
     use miden_package_registry::{
-        PackageIndex, PackageProvider, PackageRecord, PackageRegistry, PackageStore,
+        PackageCache, PackageIndex, PackageProvider, PackageRecord, PackageRegistry, PackageStore,
         PackageVersions, Version, VersionRequirement,
     };
 
@@ -256,6 +256,7 @@ mod package_features {
         index: BTreeMap<PackageId, PackageVersions>,
         packages: BTreeMap<(PackageId, Version), Arc<Package>>,
         loads: Mutex<Vec<String>>,
+        caches: Mutex<Vec<String>>,
     }
 
     impl TestRegistry {
@@ -269,6 +270,10 @@ mod package_features {
             self.loads.lock().unwrap().clone()
         }
 
+        pub fn cached_packages(&self) -> Vec<String> {
+            self.caches.lock().unwrap().clone()
+        }
+
         pub fn clear_loaded_packages(&self) {
             self.loads.lock().unwrap().clear();
         }
@@ -279,6 +284,26 @@ mod package_features {
             version: &Version,
         ) -> Option<Arc<Package>> {
             self.packages.remove(&(package.clone(), version.clone()))
+        }
+
+        pub fn replace_semver_package(&mut self, package: Arc<Package>) -> Version {
+            let version = Version::new(package.version.clone(), package.digest());
+            self.packages.retain(|(name, existing), _| {
+                name != &package.name || existing.version != package.version
+            });
+
+            let dependencies = package.manifest.dependencies().map(|dependency| {
+                let version = Version::new(dependency.version.clone(), dependency.digest);
+                (dependency.name.clone(), VersionRequirement::Exact(version))
+            });
+            let record = PackageRecord::new(version.clone(), dependencies)
+                .with_description(package.description.clone().unwrap_or_default());
+            self.index
+                .entry(package.name.clone())
+                .or_default()
+                .insert(package.version.clone(), record);
+            self.packages.insert((package.name.clone(), version.clone()), package);
+            version
         }
     }
 
@@ -320,9 +345,35 @@ mod package_features {
         }
     }
 
-    impl PackageStore for TestRegistry {
+    impl PackageCache for TestRegistry {
         type Error = Report;
 
+        fn cache_package(&mut self, package: Arc<Package>) -> Result<Version, Self::Error> {
+            let version = Version::new(package.version.clone(), package.digest());
+            self.caches.lock().unwrap().push(format!("{}@{version}", package.name));
+            if let Some(record) = self.get_by_semver(&package.name, &package.version) {
+                if record.version() == &version {
+                    self.packages.insert((package.name.clone(), version.clone()), package);
+                    return Ok(version);
+                }
+                return Err(Report::msg(format!(
+                    "package '{}' version '{}' is already registered",
+                    package.name, package.version
+                )));
+            }
+            let dependencies = package.manifest.dependencies().map(|dependency| {
+                let version = Version::new(dependency.version.clone(), dependency.digest);
+                (dependency.name.clone(), VersionRequirement::Exact(version))
+            });
+            let record = PackageRecord::new(version.clone(), dependencies)
+                .with_description(package.description.clone().unwrap_or_default());
+            self.register(package.name.clone(), record)?;
+            self.packages.insert((package.name.clone(), version.clone()), package);
+            Ok(version)
+        }
+    }
+
+    impl PackageStore for TestRegistry {
         fn publish_package(&mut self, package: Arc<Package>) -> Result<Version, Self::Error> {
             let version = Version::new(package.version.clone(), package.digest());
             let dependencies = package
