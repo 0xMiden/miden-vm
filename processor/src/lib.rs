@@ -27,7 +27,7 @@ mod tracer;
 use crate::{
     advice::{AdviceInputs, AdviceProvider},
     continuation_stack::ContinuationStack,
-    errors::MapExecErr,
+    errors::{MapExecErr, MapExecErrNoCtx},
     processor::{Processor, SystemInterface},
     trace::RowIndex,
 };
@@ -106,7 +106,8 @@ pub async fn execute(
     host: &mut impl Host,
     options: ExecutionOptions,
 ) -> Result<ExecutionOutput, ExecutionError> {
-    let processor = FastProcessor::new_with_options(stack_inputs, advice_inputs, options);
+    let processor = FastProcessor::new_with_options(stack_inputs, advice_inputs, options)
+        .map_exec_err_no_ctx()?;
     processor.execute(program, host).await
 }
 
@@ -127,7 +128,8 @@ pub fn execute_sync(
     host: &mut impl SyncHost,
     options: ExecutionOptions,
 ) -> Result<ExecutionOutput, ExecutionError> {
-    let processor = FastProcessor::new_with_options(stack_inputs, advice_inputs, options);
+    let processor = FastProcessor::new_with_options(stack_inputs, advice_inputs, options)
+        .map_exec_err_no_ctx()?;
     processor.execute_sync(program, host)
 }
 

@@ -19,7 +19,7 @@ use miden_core::{
     Felt, ONE, ZERO,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, JoinNodeBuilder, LoopNodeBuilder, MastForest,
-        MastForestContributor, SplitNodeBuilder,
+        MastForestContributor, MastNodeExt, SplitNodeBuilder,
     },
     operations::{Operation, opcodes},
     program::Program,
@@ -27,9 +27,10 @@ use miden_core::{
 
 use super::{
     ExecutionTrace, build_trace_from_ops, build_trace_from_program,
+    build_trace_from_program_with_stack,
     lookup_harness::{Expectations, InteractionLog},
 };
-use crate::{RowIndex, trace::MainTrace};
+use crate::{RowIndex, StackInputs, trace::MainTrace};
 
 // HELPERS
 // ================================================================================================
@@ -739,4 +740,196 @@ fn op_group_span_two_batch_transition_inserts(
     assert_eq!(exp.count_removes(), 0);
 
     log.assert_contains(&exp);
+}
+
+// DYNCALL REGRESSION TESTS
+// ================================================================================================
+
+#[test]
+fn decoder_dyncall_at_min_stack_depth_records_post_drop_ctx_info() {
+    use std::sync::Arc;
+
+    use crate::{
+        MIN_STACK_DEPTH,
+        mast::{DynNodeBuilder, MastForestContributor},
+        operation::opcodes,
+    };
+
+    // Build exactly the same program shape as `dyncall_program()` in parallel/tests.rs:
+    //   join(
+    //       block(push(HASH_ADDR), mem_storew, drop, drop, drop, drop, push(HASH_ADDR)),
+    //       dyncall,
+    //   )
+    // The target procedure (single SWAP) is added as a second root so the VM can find it.
+    //
+    // The caller passes the 4-element procedure hash as the initial stack contents
+    // (top-of-stack first).  The preamble stores that word at HASH_ADDR so that DYNCALL
+    // can load it and dispatch to the correct procedure.
+    const HASH_ADDR: Felt = Felt::new_unchecked(40);
+
+    // --- build the forest in the same order as dyncall_program() ---
+    let mut forest = MastForest::new();
+
+    // 1. Build the root join node first (preamble + dyncall).
+    let root = {
+        let preamble = BasicBlockNodeBuilder::new(
+            vec![
+                Operation::Push(HASH_ADDR),
+                Operation::MStoreW,
+                Operation::Drop,
+                Operation::Drop,
+                Operation::Drop,
+                Operation::Drop,
+                Operation::Push(HASH_ADDR),
+            ],
+            Vec::new(),
+        )
+        .add_to_forest(&mut forest)
+        .unwrap();
+
+        let dyncall = DynNodeBuilder::new_dyncall().add_to_forest(&mut forest).unwrap();
+
+        JoinNodeBuilder::new([preamble, dyncall]).add_to_forest(&mut forest).unwrap()
+    };
+    forest.make_root(root);
+
+    // 2. Add the procedure that DYNCALL will call, as a second forest root.
+    let target = BasicBlockNodeBuilder::new(vec![Operation::Swap], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(target);
+
+    // 3. Derive the stack inputs from the target's digest (4 Felts, top-of-stack first).
+    let target_hash: Vec<Felt> =
+        forest.get_node_by_id(target).unwrap().digest().iter().copied().collect();
+
+    let program = Program::new(Arc::new(forest), root);
+
+    let trace =
+        build_trace_from_program_with_stack(&program, StackInputs::new(&target_hash).unwrap());
+    let main = trace.main_trace();
+
+    // Locate the DYNCALL row.
+    let dyncall_opcode = Felt::from_u8(opcodes::DYNCALL);
+    let row = main
+        .row_iter()
+        .find(|&i| main.get_op_code(i) == dyncall_opcode)
+        .expect("DYNCALL row not found in trace");
+
+    // second_hasher_state[0] = parent_stack_depth        → decoder_hasher_state_element(4)
+    // second_hasher_state[1] = parent_next_overflow_addr → decoder_hasher_state_element(5)
+    //
+    // With 4 hash elements on the stack the depth is still MIN_STACK_DEPTH (16); after
+    // DYNCALL drops those 4 elements the post-drop depth is 12 = MIN_STACK_DEPTH, which
+    // means no overflow entry was pushed, so parent_next_overflow_addr must be ZERO.
+    assert_eq!(
+        main.decoder_hasher_state_element(4, row),
+        Felt::new_unchecked(MIN_STACK_DEPTH as u64),
+        "parent_stack_depth should equal MIN_STACK_DEPTH"
+    );
+    assert_eq!(
+        main.decoder_hasher_state_element(5, row),
+        ZERO,
+        "parent_next_overflow_addr should be ZERO when stack is at MIN_STACK_DEPTH"
+    );
+}
+
+#[test]
+fn decoder_dyncall_with_multiple_overflow_entries_records_correct_overflow_addr() {
+    // Regression test: when the caller context has more than one overflow entry, the
+    // serial ExecutionTracer must record the post-pop overflow address (the clock of
+    // the second-to-last entry), not the pre-pop address (the clock of the top entry).
+    use std::sync::Arc;
+
+    use crate::{
+        mast::{DynNodeBuilder, MastForestContributor},
+        operation::opcodes,
+    };
+
+    const HASH_ADDR: Felt = Felt::new_unchecked(40);
+
+    let mut forest = MastForest::new();
+
+    // 1. Build the callee procedure first so we can get its digest.
+    let target = BasicBlockNodeBuilder::new(vec![Operation::Swap], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(target);
+
+    let target_hash: Vec<Felt> =
+        forest.get_node_by_id(target).unwrap().digest().iter().copied().collect();
+
+    // 2. Build the main program.
+    let root = {
+        let preamble = BasicBlockNodeBuilder::new(
+            vec![
+                Operation::Push(HASH_ADDR),
+                Operation::MStoreW,
+                Operation::Drop,
+                Operation::Drop,
+                Operation::Drop,
+                Operation::Drop,
+                Operation::Push(ZERO),      // depth=17, overflow[0]=0 (clk=T1)
+                Operation::Push(HASH_ADDR), // depth=18, overflow[1]=0 (clk=T2)
+            ],
+            Vec::new(),
+        )
+        .add_to_forest(&mut forest)
+        .unwrap();
+
+        let dyncall = DynNodeBuilder::new_dyncall().add_to_forest(&mut forest).unwrap();
+        let inner_join =
+            JoinNodeBuilder::new([preamble, dyncall]).add_to_forest(&mut forest).unwrap();
+
+        let cleanup = BasicBlockNodeBuilder::new(vec![Operation::Drop], Vec::new())
+            .add_to_forest(&mut forest)
+            .unwrap();
+
+        JoinNodeBuilder::new([inner_join, cleanup]).add_to_forest(&mut forest).unwrap()
+    };
+    forest.make_root(root);
+
+    let program = Program::new(Arc::new(forest), root);
+
+    let trace =
+        build_trace_from_program_with_stack(&program, StackInputs::new(&target_hash).unwrap());
+    let main = trace.main_trace();
+
+    // Locate the DYNCALL row.
+    let dyncall_opcode = Felt::from_u8(opcodes::DYNCALL);
+    let dyncall_row = main
+        .row_iter()
+        .find(|&i| main.get_op_code(i) == dyncall_opcode)
+        .expect("DYNCALL row not found in trace");
+
+    let recorded_depth = main.decoder_hasher_state_element(4, dyncall_row);
+    let recorded_overflow_addr = main.decoder_hasher_state_element(5, dyncall_row);
+
+    // At DYNCALL time depth=18 (>MIN_STACK_DEPTH), so post-drop depth = 17.
+    assert_eq!(
+        recorded_depth,
+        Felt::new_unchecked(17),
+        "parent_stack_depth should be 17 (= pre-DYNCALL depth 18 minus 1)"
+    );
+
+    // Independently determine T1 (clock of push(0)) by scanning for all PUSH rows before DYNCALL.
+    let push_opcode = Felt::from_u8(opcodes::PUSH);
+    let push_rows_before_dyncall: Vec<_> = main
+        .row_iter()
+        .filter(|&i| i < dyncall_row && main.get_op_code(i) == push_opcode)
+        .collect();
+    let n = push_rows_before_dyncall.len();
+    assert!(n >= 2, "expected at least 2 PUSH rows before DYNCALL, found {n}");
+    let t1_row = push_rows_before_dyncall[n - 2]; // push(0) → overflow[0]
+    let t2_row = push_rows_before_dyncall[n - 1]; // push(HASH_ADDR) → overflow[1]
+    let t1 = main.clk(t1_row);
+    let t2 = main.clk(t2_row);
+    assert_eq!(t2, t1 + ONE, "push(0) and push(HASH_ADDR) must be at consecutive clocks");
+
+    // clk_after_pop_in_current_ctx() returns T1 (the second-to-last overflow entry's clock).
+    assert_eq!(
+        recorded_overflow_addr, t1,
+        "parent_next_overflow_addr must equal T1 (second-to-last overflow clock = {t1}); \
+         T2 (top overflow clock = {t2}) would indicate the buggy path"
+    );
 }

@@ -182,7 +182,8 @@ fn build_trace(
         StackInputs::new(&stack_inputs).unwrap(),
         AdviceInputs::default(),
         ExecutionOptions::default().with_core_trace_fragment_size(1 << 10).unwrap(),
-    );
+    )
+    .expect("processor advice inputs should fit advice map limits");
 
     let mut host = DefaultHost::default();
     let program = {

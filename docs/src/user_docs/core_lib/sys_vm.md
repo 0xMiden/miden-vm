@@ -11,6 +11,7 @@ Namespace `miden::core::sys::vm` contains low-level helper procedures that are p
 
 | Module | Description |
 | --- | --- |
+| `miden::core::sys::vm::aux_trace` | Procedures for observing the auxiliary execution trace in the recursive verifier. |
 | `miden::core::sys::vm::constraints_eval` | Procedures that perform the constraints evaluation check and manage its associated parameters. |
 | `miden::core::sys::vm::deep_queries` | Utilities that construct the DEEP queries needed during proof verification. |
 | `miden::core::sys::vm::mod` | Entry-point procedures that orchestrate the overall recursive verification flow. |

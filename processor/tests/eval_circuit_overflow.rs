@@ -29,7 +29,8 @@ fn eval_circuit_overflow_panic_check() {
         stack_inputs,
         AdviceInputs::default(),
         miden_processor::ExecutionOptions::default(),
-    );
+    )
+    .expect("processor advice inputs should fit advice map limits");
 
     // Namely, this checks that execution doesn't panic due to an overflow.
     assert!(matches!(

@@ -37,7 +37,30 @@ pub fn build_trace_from_program(program: &Program, stack_inputs: &[u64]) -> Exec
         ExecutionOptions::default()
             .with_core_trace_fragment_size(TEST_TRACE_FRAGMENT_SIZE)
             .unwrap(),
-    );
+    )
+    .expect("processor advice inputs should fit advice map limits");
+    let trace_inputs = processor.execute_trace_inputs_sync(program, &mut host).unwrap();
+    build_trace(trace_inputs).unwrap()
+}
+
+/// Builds a sample trace by executing the provided program with pre-built `StackInputs`.
+///
+/// Unlike [`build_trace_from_program`], this helper accepts a `StackInputs` value directly so
+/// that callers can supply `Felt` elements (e.g. a procedure hash word) without having to
+/// convert them through `u64` first.
+pub fn build_trace_from_program_with_stack(
+    program: &Program,
+    stack_inputs: StackInputs,
+) -> ExecutionTrace {
+    let mut host = DefaultHost::default();
+    let processor = FastProcessor::new_with_options(
+        stack_inputs,
+        AdviceInputs::default(),
+        ExecutionOptions::default()
+            .with_core_trace_fragment_size(TEST_TRACE_FRAGMENT_SIZE)
+            .unwrap(),
+    )
+    .expect("processor advice inputs should fit advice map limits");
     let trace_inputs = processor.execute_trace_inputs_sync(program, &mut host).unwrap();
     build_trace(trace_inputs).unwrap()
 }
@@ -80,7 +103,8 @@ pub fn build_trace_from_ops_with_inputs(
         ExecutionOptions::default()
             .with_core_trace_fragment_size(TEST_TRACE_FRAGMENT_SIZE)
             .unwrap(),
-    );
+    )
+    .expect("processor advice inputs should fit advice map limits");
     let trace_inputs = processor.execute_trace_inputs_sync(&program, &mut host).unwrap();
     build_trace(trace_inputs).unwrap()
 }
