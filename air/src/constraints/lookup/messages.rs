@@ -514,8 +514,6 @@ pub struct LogCapacityMsg<E> {
 // SIBLING TABLE MESSAGE
 // ================================================================================================
 
-// Sibling table message for Merkle path operations (sparse encoding).
-
 // ACE WIRING MESSAGE
 // ================================================================================================
 
@@ -567,11 +565,12 @@ where
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
         let mut acc = challenges.bus_prefix[self.kind as usize].clone();
         acc += challenges.inner_product_at(0, &[self.addr.clone(), self.node_index.clone()]);
-        acc += match &self.payload {
-            HasherPayload::State(state) => challenges.inner_product_at(2, state.as_slice()),
-            HasherPayload::Rate(rate) => challenges.inner_product_at(2, rate.as_slice()),
-            HasherPayload::Word(word) => challenges.inner_product_at(2, word.as_slice()),
+        let payload = match &self.payload {
+            HasherPayload::State(state) => state.as_slice(),
+            HasherPayload::Rate(rate) => rate.as_slice(),
+            HasherPayload::Word(word) => word.as_slice(),
         };
+        acc += challenges.inner_product_at(2, payload);
         acc
     }
 }
@@ -859,9 +858,7 @@ where
 
         // Element payload (gated by is_element) vs word payload (gated by is_word).
         acc += bp[3].clone() * self.element.clone() * is_element;
-        for i in 0..4 {
-            acc += bp[i + 3].clone() * self.word[i].clone() * is_word.clone();
-        }
+        acc += challenges.inner_product_at(3, self.word.as_slice()) * is_word;
         acc
     }
 }

@@ -87,8 +87,8 @@ pub(in crate::constraints::lookup) fn emit_hash_kernel_table<LB>(
     let hs1: LB::Expr = ctrl.s1.into();
     let hs2: LB::Expr = ctrl.s2.into();
 
-    // Sibling flags — on controller rows, `s0·s1 = 1` selects MU/MV input rows. The new
-    // layout has dropped the old 32-row cycle row filter; all MU/MV input rows participate.
+    // MU/MV controller-row flags for sibling-table participation. Both share `s0 * s1 = 1`;
+    // they differ on `s2` (MU: `s2 = 1`, MV: `s2 = 0`) and fire at each Merkle path step.
     let controller_flag = ctx.chiplet_active.controller.clone();
     let f_mu_all: LB::Expr = controller_flag.clone() * hs0.clone() * hs1.clone() * hs2.clone();
     let f_mv_all: LB::Expr = controller_flag * hs0 * hs1 * hs2.not();
