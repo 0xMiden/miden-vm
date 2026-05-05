@@ -13,7 +13,7 @@ use miden_core::{
 };
 use miden_mast_package::Package as MastPackage;
 use miden_package_registry::{
-    InMemoryPackageRegistry, PackageId, PackageIndex, PackageProvider, PackageRecord,
+    InMemoryPackageRegistry, PackageCache, PackageId, PackageIndex, PackageProvider, PackageRecord,
     PackageRegistry, PackageStore, PackageVersions, Version, VersionRequirement,
 };
 use serde::{Deserialize, Serialize};
@@ -59,6 +59,16 @@ pub enum LocalRegistryError {
         package: PackageId,
         version: Version,
         path: PathBuf,
+    },
+    #[error(
+        "package artifact at '{path}' does not match requested package '{expected_package}' version '{expected_version}' (found '{actual_package}' version '{actual_version}')"
+    )]
+    ArtifactMismatch {
+        path: PathBuf,
+        expected_package: PackageId,
+        expected_version: Box<Version>,
+        actual_package: PackageId,
+        actual_version: Box<Version>,
     },
     #[error(
         "package '{package}' depends on unpublished package '{dependency}' with version '{version}'"
@@ -257,9 +267,35 @@ impl LocalPackageRegistry {
         Some(self.package_summary(package.clone(), version, record))
     }
 
-    /// Get the path in the artifact store for `version`
-    pub fn artifact_path(&self, version: &Version) -> Option<PathBuf> {
-        version.digest.as_ref().map(|digest| self.artifact_path_for_digest(*digest))
+    /// Get the path in the artifact store for `package` at `version`
+    pub fn artifact_path(&self, package: &PackageId, version: &Version) -> Option<PathBuf> {
+        self.artifact_path_for_summary(package, version)
+    }
+
+    fn artifact_path_for_summary(&self, package: &PackageId, version: &Version) -> Option<PathBuf> {
+        let digest = *version.digest.as_ref()?;
+        let artifact_path = self.artifact_path_for_package(package, &version.version, digest);
+        if artifact_path.exists() {
+            return Some(artifact_path);
+        }
+
+        let legacy_path = self.legacy_artifact_path_for_digest(digest);
+        if self.legacy_artifact_matches(package, version, &legacy_path) {
+            Some(legacy_path)
+        } else {
+            Some(artifact_path)
+        }
+    }
+
+    fn legacy_artifact_matches(&self, package: &PackageId, version: &Version, path: &Path) -> bool {
+        let Ok(bytes) = fs::read(path) else {
+            return false;
+        };
+        let Ok(loaded) = MastPackage::read_from_bytes(&bytes) else {
+            return false;
+        };
+        let actual_version = Version::new(loaded.version.clone(), loaded.digest());
+        loaded.name == *package && actual_version == *version
     }
 
     /// Loads the given version of `package` from the artifact store.
@@ -277,32 +313,52 @@ impl LocalPackageRegistry {
             }
         })?;
 
-        let path = self.artifact_path(version).ok_or_else(|| {
-            LocalRegistryError::MissingArtifactDigest {
-                package: package.clone(),
-                version: version.clone(),
-            }
+        let digest = version.digest.ok_or_else(|| LocalRegistryError::MissingArtifactDigest {
+            package: package.clone(),
+            version: version.clone(),
         })?;
-        if !path.exists() {
-            return Err(LocalRegistryError::MissingArtifact {
-                package: package.clone(),
-                version: version.clone(),
-                path,
-            });
-        }
+        let path = self.artifact_path_for_package(package, &version.version, digest);
+        let path = if path.exists() {
+            path
+        } else {
+            let legacy_path = self.legacy_artifact_path_for_digest(digest);
+            if legacy_path.exists() {
+                legacy_path
+            } else {
+                return Err(LocalRegistryError::MissingArtifact {
+                    package: package.clone(),
+                    version: version.clone(),
+                    path,
+                });
+            }
+        };
 
         let bytes = fs::read(&path).map_err(LocalRegistryError::IndexRead)?;
-        let package = MastPackage::read_from_bytes(&bytes).map_err(|error| {
+        let loaded = MastPackage::read_from_bytes(&bytes).map_err(|error| {
             LocalRegistryError::PackageDecode {
                 path: path.clone(),
                 error: error.to_string(),
             }
         })?;
-        Ok(Arc::new(package))
+
+        let actual_version = Version::new(loaded.version.clone(), loaded.digest());
+        if loaded.name != *package || actual_version != *version {
+            return Err(LocalRegistryError::ArtifactMismatch {
+                path,
+                expected_package: package.clone(),
+                expected_version: Box::new(version.clone()),
+                actual_package: loaded.name,
+                actual_version: Box::new(actual_version),
+            });
+        }
+
+        Ok(Arc::new(loaded))
     }
 
-    /// Persist the state of the index to disk
-    fn save(&mut self) -> Result<(), LocalRegistryError> {
+    fn save_with_locked_operation(
+        &mut self,
+        operation: impl FnOnce() -> Result<(), LocalRegistryError>,
+    ) -> Result<(), LocalRegistryError> {
         let persisted = PersistedIndex { packages: self.index.packages().clone() };
         let contents = toml::to_string_pretty(&persisted)?;
         let mut file = fs::File::options()
@@ -333,6 +389,8 @@ impl LocalPackageRegistry {
             }
         }
 
+        operation()?;
+
         // Compute the new checksum of the updated index contents before we write, but do not
         // update the in-memory state until we've successfully persisted the index
         let new_checksum = miden_core::crypto::hash::Sha256::hash(contents.as_bytes().trim_ascii());
@@ -349,11 +407,108 @@ impl LocalPackageRegistry {
         Ok(())
     }
 
+    fn register_and_save_with_locked_operation(
+        &mut self,
+        name: PackageId,
+        record: PackageRecord,
+        operation: impl FnOnce() -> Result<(), LocalRegistryError>,
+    ) -> Result<(), LocalRegistryError> {
+        let previous_packages = self.index.packages().clone();
+        self.register(name, record)?;
+        match self.save_with_locked_operation(operation) {
+            Ok(()) => Ok(()),
+            Err(error) => {
+                self.index = InMemoryPackageRegistry::from_packages(previous_packages);
+                Err(error)
+            },
+        }
+    }
+
+    fn write_cache_artifact_from_legacy_or_bytes(
+        artifact_path: &Path,
+        legacy_path: &Path,
+        package: &MastPackage,
+        version: &Version,
+        bytes: &[u8],
+    ) -> Result<(), LocalRegistryError> {
+        match fs::read(legacy_path) {
+            Ok(existing_bytes) => match MastPackage::read_from_bytes(&existing_bytes) {
+                Ok(existing_package) => {
+                    let existing_version =
+                        Version::new(existing_package.version.clone(), existing_package.digest());
+                    if existing_package.name == package.name && existing_version == *version {
+                        if &existing_package == package {
+                            fs::write(artifact_path, existing_bytes)
+                                .map_err(LocalRegistryError::IndexWrite)
+                        } else {
+                            Err(LocalRegistryError::DuplicateSemanticVersion {
+                                package: package.name.clone(),
+                                version: package.version.clone(),
+                            })
+                        }
+                    } else {
+                        fs::write(artifact_path, bytes).map_err(LocalRegistryError::IndexWrite)
+                    }
+                },
+                Err(_) => fs::write(artifact_path, bytes).map_err(LocalRegistryError::IndexWrite),
+            },
+            Err(_) => fs::write(artifact_path, bytes).map_err(LocalRegistryError::IndexWrite),
+        }
+    }
+
+    fn repair_cache_artifact(
+        artifact_path: &Path,
+        legacy_path: &Path,
+        package: &MastPackage,
+        version: &Version,
+        bytes: &[u8],
+    ) -> Result<(), LocalRegistryError> {
+        match fs::read(artifact_path) {
+            Ok(existing_bytes) => match MastPackage::read_from_bytes(&existing_bytes) {
+                Ok(existing_package) if &existing_package == package => Ok(()),
+                Ok(_) => Err(LocalRegistryError::DuplicateSemanticVersion {
+                    package: package.name.clone(),
+                    version: package.version.clone(),
+                }),
+                Err(_) => Self::write_cache_artifact_from_legacy_or_bytes(
+                    artifact_path,
+                    legacy_path,
+                    package,
+                    version,
+                    bytes,
+                ),
+            },
+            Err(_) => Self::write_cache_artifact_from_legacy_or_bytes(
+                artifact_path,
+                legacy_path,
+                package,
+                version,
+                bytes,
+            ),
+        }
+    }
+
     /// Derive the path in the artifact store for a package with `digest`
     ///
-    /// The file name of the resulting path is the hexadecimal encoding of the digest, with the
-    /// `.masp` extension.
-    fn artifact_path_for_digest(&self, digest: miden_core::Word) -> PathBuf {
+    /// The file name includes the package name and semantic version to avoid collisions between
+    /// package identities that share the same underlying MAST digest.
+    fn artifact_path_for_package(
+        &self,
+        package: &PackageId,
+        version: &miden_package_registry::SemVer,
+        digest: miden_core::Word,
+    ) -> PathBuf {
+        let package_id = DisplayHex(package.as_bytes());
+        let semantic_version = version.to_string();
+        let semantic_version = DisplayHex(semantic_version.as_bytes());
+        let digest_bytes = digest.as_bytes();
+        let digest = DisplayHex::new(&digest_bytes);
+        let filename = format!("{package_id}-{semantic_version}-0x{digest}.masp");
+        self.artifact_dir.join(filename)
+    }
+
+    /// Derive the artifact path used before filenames included package identity.
+    fn legacy_artifact_path_for_digest(&self, digest: miden_core::Word) -> PathBuf {
         let filename = format!("0x{}.masp", DisplayHex::new(&digest.as_bytes()));
         self.artifact_dir.join(filename)
     }
@@ -366,7 +521,7 @@ impl LocalPackageRegistry {
         record: &PackageRecord,
     ) -> PackageSummary {
         PackageSummary {
-            artifact_path: self.artifact_path(&version),
+            artifact_path: self.artifact_path_for_summary(&name, &version),
             dependencies: record
                 .dependencies()
                 .iter()
@@ -376,6 +531,90 @@ impl LocalPackageRegistry {
             name,
             version,
         }
+    }
+
+    fn record_for_package(
+        package: &MastPackage,
+        version: Version,
+    ) -> (PackageRecord, Vec<(PackageId, Version, VersionRequirement)>) {
+        let dependencies = package
+            .manifest
+            .dependencies()
+            .map(|dependency| {
+                let dependency_name = dependency.id().clone();
+                let dependency_version =
+                    Version::new(dependency.version.clone(), dependency.digest);
+                (
+                    dependency_name,
+                    dependency_version.clone(),
+                    VersionRequirement::Exact(dependency_version),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        let record = match package.description.clone() {
+            Some(description) => PackageRecord::new(
+                version,
+                dependencies
+                    .iter()
+                    .map(|(name, _version, requirement)| (name.clone(), requirement.clone())),
+            )
+            .with_description(description),
+            None => PackageRecord::new(
+                version,
+                dependencies
+                    .iter()
+                    .map(|(name, _version, requirement)| (name.clone(), requirement.clone())),
+            ),
+        };
+
+        (record, dependencies)
+    }
+
+    fn cache_package_with_bytes(
+        &mut self,
+        package: Arc<MastPackage>,
+        bytes: Vec<u8>,
+    ) -> Result<PublishedPackage, LocalRegistryError> {
+        let digest = package.digest();
+        let version = Version::new(package.version.clone(), digest);
+        let (record, _dependencies) = Self::record_for_package(&package, version.clone());
+        let artifact_path = self.artifact_path_for_package(&package.name, &package.version, digest);
+
+        if let Some(existing) = self.index.get_by_semver(&package.name, &package.version) {
+            if existing.version() != &version || existing != &record {
+                return Err(LocalRegistryError::DuplicateSemanticVersion {
+                    package: package.name.clone(),
+                    version: package.version.clone(),
+                });
+            }
+
+            let legacy_path = self.legacy_artifact_path_for_digest(digest);
+            self.save_with_locked_operation(|| {
+                Self::repair_cache_artifact(
+                    &artifact_path,
+                    &legacy_path,
+                    package.as_ref(),
+                    &version,
+                    &bytes,
+                )
+            })?;
+            return Ok(PublishedPackage {
+                name: package.name.clone(),
+                version,
+                artifact_path,
+            });
+        }
+
+        self.register_and_save_with_locked_operation(package.name.clone(), record, || {
+            fs::write(&artifact_path, bytes).map_err(LocalRegistryError::IndexWrite)
+        })?;
+
+        Ok(PublishedPackage {
+            name: package.name.clone(),
+            version,
+            artifact_path,
+        })
     }
 
     /// Publish `package`, with `bytes` representing the serialized form of `package` which
@@ -389,38 +628,31 @@ impl LocalPackageRegistry {
     ) -> Result<PublishedPackage, LocalRegistryError> {
         let digest = package.digest();
         let version = Version::new(package.version.clone(), digest);
-        let mut dependencies = Vec::new();
-        for dependency in package.manifest.dependencies() {
-            let dependency_name = dependency.id().clone();
-            let dependency_version = Version::new(dependency.version.clone(), dependency.digest);
-            let requirement = VersionRequirement::Exact(dependency_version.clone());
-            if self.index.get_exact_version(&dependency_name, &dependency_version).is_none() {
+        let (record, dependencies) = Self::record_for_package(&package, version.clone());
+
+        for (dependency_name, dependency_version, _requirement) in dependencies.iter() {
+            if self.index.get_exact_version(dependency_name, dependency_version).is_none() {
                 return Err(LocalRegistryError::MissingDependency {
                     package: package.name.clone(),
-                    dependency: dependency_name,
-                    version: dependency_version,
+                    dependency: dependency_name.clone(),
+                    version: dependency_version.clone(),
                 });
             }
-
-            dependencies.push((dependency_name, requirement));
         }
 
-        let record = match package.description.clone() {
-            Some(description) => {
-                PackageRecord::new(version.clone(), dependencies).with_description(description)
-            },
-            None => PackageRecord::new(version.clone(), dependencies),
-        };
-
         // Write the package artifact to the registry
-        let artifact_path = self.artifact_path_for_digest(digest);
-        fs::write(&artifact_path, bytes).map_err(LocalRegistryError::IndexWrite)?;
+        let artifact_path = self.artifact_path_for_package(&package.name, &package.version, digest);
+        if self.index.get_by_semver(&package.name, &package.version).is_some() {
+            return Err(LocalRegistryError::DuplicateSemanticVersion {
+                package: package.name.clone(),
+                version: package.version.clone(),
+            });
+        }
 
-        // Record the new package to the in-memory registry index
-        self.register(package.name.clone(), record)?;
-
-        // Persist the updated registry index
-        self.save()?;
+        // Persist the updated registry index and artifact under the index write lock.
+        self.register_and_save_with_locked_operation(package.name.clone(), record, || {
+            fs::write(&artifact_path, bytes).map_err(LocalRegistryError::IndexWrite)
+        })?;
 
         Ok(PublishedPackage {
             name: package.name.clone(),
@@ -457,9 +689,16 @@ impl PackageProvider for LocalPackageRegistry {
     }
 }
 
-impl PackageStore for LocalPackageRegistry {
+impl PackageCache for LocalPackageRegistry {
     type Error = LocalRegistryError;
 
+    fn cache_package(&mut self, package: Arc<MastPackage>) -> Result<Version, Self::Error> {
+        let bytes = package.to_bytes();
+        self.cache_package_with_bytes(package, bytes).map(|published| published.version)
+    }
+}
+
+impl PackageStore for LocalPackageRegistry {
     fn publish_package(&mut self, package: Arc<MastPackage>) -> Result<Version, Self::Error> {
         let bytes = package.to_bytes();
         self.publish_package_with_bytes(package, bytes)
@@ -469,7 +708,7 @@ impl PackageStore for LocalPackageRegistry {
 
 #[cfg(test)]
 mod tests {
-    use miden_mast_package::{Dependency, Package, TargetType};
+    use miden_mast_package::{Dependency, Package, Section, SectionId, TargetType};
     use tempfile::TempDir;
 
     use super::*;
@@ -554,6 +793,168 @@ mod tests {
     }
 
     #[test]
+    fn cache_persists_packages_with_missing_dependencies() {
+        let tempdir = TempDir::new().unwrap();
+        let mut registry = load_registry(&tempdir);
+
+        let dependency_digest = miden_core::utils::hash_string_to_word("dep");
+        let package = build_package(
+            "pkg",
+            "1.0.0",
+            [("dep", "1.0.0", TargetType::Library, dependency_digest)],
+        );
+        let version = registry
+            .cache_package(Arc::from(package))
+            .expect("cache should accept unresolved dependencies");
+
+        let reloaded = load_registry(&tempdir);
+        let shown = reloaded
+            .show(&PackageId::from("pkg"), Some(&version))
+            .expect("cached package should be indexed");
+        assert_eq!(shown.dependencies.len(), 1);
+        assert!(reloaded.load_package(&PackageId::from("pkg"), &version).is_ok());
+    }
+
+    #[test]
+    fn cache_rejects_different_artifact_for_existing_exact_version() {
+        let tempdir = TempDir::new().unwrap();
+        let mut registry = load_registry(&tempdir);
+
+        let package_path = tempdir.path().join("pkg.masp");
+        build_package("pkg", "1.0.0", []).write_to_file(&package_path).unwrap();
+        let published = registry.publish(&package_path).unwrap();
+
+        let mut conflicting_package = build_package("pkg", "1.0.0", []);
+        conflicting_package
+            .sections
+            .push(Section::new(SectionId::custom("cache-test").unwrap(), Vec::from([1, 2, 3])));
+        assert_eq!(Some(conflicting_package.digest()), published.version.digest);
+
+        let error = registry
+            .cache_package(Arc::from(conflicting_package))
+            .expect_err("cache should reject conflicting package artifacts");
+        assert!(matches!(error, LocalRegistryError::DuplicateSemanticVersion { .. }));
+
+        let loaded = registry.load_package(&PackageId::from("pkg"), &published.version).unwrap();
+        assert_eq!(loaded.manifest.dependencies().count(), 0);
+        assert!(loaded.sections.is_empty());
+    }
+
+    #[test]
+    fn stale_cache_does_not_overwrite_artifact() {
+        let tempdir = TempDir::new().unwrap();
+        let mut stale_registry = load_registry(&tempdir);
+        let mut current_registry = load_registry(&tempdir);
+
+        let package_path = tempdir.path().join("pkg.masp");
+        build_package("pkg", "1.0.0", []).write_to_file(&package_path).unwrap();
+        let published = current_registry.publish(&package_path).unwrap();
+        let original_bytes = fs::read(&published.artifact_path).unwrap();
+
+        let mut conflicting_package = build_package("pkg", "1.0.0", []);
+        conflicting_package.sections.push(Section::new(
+            SectionId::custom("stale-cache-test").unwrap(),
+            Vec::from([1, 2, 3]),
+        ));
+        assert_eq!(Some(conflicting_package.digest()), published.version.digest);
+
+        let error = stale_registry
+            .cache_package(conflicting_package.into())
+            .expect_err("stale cache should fail before writing artifact bytes");
+        assert!(matches!(error, LocalRegistryError::WriteToStaleIndex));
+        assert_eq!(fs::read(&published.artifact_path).unwrap(), original_bytes);
+    }
+
+    #[test]
+    fn concurrent_cache_repair_does_not_overwrite_existing_artifact() {
+        let tempdir = TempDir::new().unwrap();
+        let mut registry = load_registry(&tempdir);
+
+        let package_path = tempdir.path().join("pkg.masp");
+        build_package("pkg", "1.0.0", []).write_to_file(&package_path).unwrap();
+        let published = registry.publish(&package_path).unwrap();
+        fs::remove_file(&published.artifact_path).unwrap();
+
+        let mut first_registry = load_registry(&tempdir);
+        let mut second_registry = load_registry(&tempdir);
+        let repaired_package = build_package("pkg", "1.0.0", []);
+        let repaired_bytes = repaired_package.to_bytes();
+        first_registry.cache_package(repaired_package.into()).unwrap();
+
+        let mut conflicting_package = build_package("pkg", "1.0.0", []);
+        conflicting_package.sections.push(Section::new(
+            SectionId::custom("cache-repair-race-test").unwrap(),
+            Vec::from([1, 2, 3]),
+        ));
+        assert_eq!(Some(conflicting_package.digest()), published.version.digest);
+        let error = second_registry
+            .cache_package(conflicting_package.into())
+            .expect_err("cache repair should revalidate the artifact under the index lock");
+        assert!(matches!(error, LocalRegistryError::DuplicateSemanticVersion { .. }));
+        assert_eq!(fs::read(&published.artifact_path).unwrap(), repaired_bytes);
+    }
+
+    #[test]
+    fn cache_repair_checks_legacy_artifact_before_writing_qualified_artifact() {
+        let tempdir = TempDir::new().unwrap();
+        let mut registry = load_registry(&tempdir);
+
+        let package_path = tempdir.path().join("pkg.masp");
+        build_package("pkg", "1.0.0", []).write_to_file(&package_path).unwrap();
+        let published = registry.publish(&package_path).unwrap();
+        let original_bytes = fs::read(&published.artifact_path).unwrap();
+        let legacy_path =
+            registry.legacy_artifact_path_for_digest(published.version.digest.unwrap());
+        fs::rename(&published.artifact_path, &legacy_path).unwrap();
+
+        let mut conflicting_package = build_package("pkg", "1.0.0", []);
+        conflicting_package.sections.push(Section::new(
+            SectionId::custom("legacy-cache-repair-test").unwrap(),
+            Vec::from([1, 2, 3]),
+        ));
+        assert_eq!(Some(conflicting_package.digest()), published.version.digest);
+
+        let error = registry
+            .cache_package(conflicting_package.into())
+            .expect_err("cache repair should reject conflicts with the legacy artifact");
+        assert!(matches!(error, LocalRegistryError::DuplicateSemanticVersion { .. }));
+        assert!(!published.artifact_path.exists());
+        assert_eq!(fs::read(&legacy_path).unwrap(), original_bytes);
+
+        let loaded = registry.load_package(&PackageId::from("pkg"), &published.version).unwrap();
+        assert!(loaded.sections.is_empty());
+    }
+
+    #[test]
+    fn cache_repair_checks_legacy_artifact_before_replacing_corrupt_qualified_artifact() {
+        let tempdir = TempDir::new().unwrap();
+        let mut registry = load_registry(&tempdir);
+
+        let package_path = tempdir.path().join("pkg.masp");
+        build_package("pkg", "1.0.0", []).write_to_file(&package_path).unwrap();
+        let published = registry.publish(&package_path).unwrap();
+        let original_bytes = fs::read(&published.artifact_path).unwrap();
+        let legacy_path =
+            registry.legacy_artifact_path_for_digest(published.version.digest.unwrap());
+        fs::write(&legacy_path, &original_bytes).unwrap();
+        fs::write(&published.artifact_path, b"not a package").unwrap();
+
+        let mut conflicting_package = build_package("pkg", "1.0.0", []);
+        conflicting_package.sections.push(Section::new(
+            SectionId::custom("legacy-cache-corrupt-qualified-test").unwrap(),
+            Vec::from([1, 2, 3]),
+        ));
+        assert_eq!(Some(conflicting_package.digest()), published.version.digest);
+
+        let error = registry
+            .cache_package(conflicting_package.into())
+            .expect_err("cache repair should reject conflicts with the legacy artifact");
+        assert!(matches!(error, LocalRegistryError::DuplicateSemanticVersion { .. }));
+        assert_eq!(fs::read(&legacy_path).unwrap(), original_bytes);
+        assert_eq!(fs::read(&published.artifact_path).unwrap(), b"not a package");
+    }
+
+    #[test]
     fn list_and_show_include_multiple_versions() {
         let tempdir = TempDir::new().unwrap();
         let mut registry = load_registry(&tempdir);
@@ -608,6 +1009,88 @@ mod tests {
     }
 
     #[test]
+    fn publish_duplicate_semver_does_not_overwrite_artifact() {
+        let tempdir = TempDir::new().unwrap();
+        let mut registry = load_registry(&tempdir);
+
+        let package_path = tempdir.path().join("pkg.masp");
+        build_package("pkg", "1.0.0", []).write_to_file(&package_path).unwrap();
+        let published = registry.publish(&package_path).unwrap();
+        let original_bytes = fs::read(&published.artifact_path).unwrap();
+
+        let mut conflicting_package = build_package("pkg", "1.0.0", []);
+        conflicting_package
+            .sections
+            .push(Section::new(SectionId::custom("publish-test").unwrap(), Vec::from([1, 2, 3])));
+        assert_eq!(Some(conflicting_package.digest()), published.version.digest);
+        let conflicting_path = tempdir.path().join("pkg-conflicting.masp");
+        conflicting_package.write_to_file(&conflicting_path).unwrap();
+
+        let error = registry
+            .publish(&conflicting_path)
+            .expect_err("duplicate semver should fail before writing artifact bytes");
+        assert!(matches!(error, LocalRegistryError::DuplicateSemanticVersion { .. }));
+        assert_eq!(fs::read(&published.artifact_path).unwrap(), original_bytes);
+
+        let loaded = registry.load_package(&PackageId::from("pkg"), &published.version).unwrap();
+        assert!(loaded.sections.is_empty());
+    }
+
+    #[test]
+    fn stale_publish_duplicate_semver_does_not_overwrite_artifact() {
+        let tempdir = TempDir::new().unwrap();
+        let mut stale_registry = load_registry(&tempdir);
+        let mut current_registry = load_registry(&tempdir);
+
+        let package_path = tempdir.path().join("pkg.masp");
+        build_package("pkg", "1.0.0", []).write_to_file(&package_path).unwrap();
+        let published = current_registry.publish(&package_path).unwrap();
+        let original_bytes = fs::read(&published.artifact_path).unwrap();
+
+        let mut conflicting_package = build_package("pkg", "1.0.0", []);
+        conflicting_package.sections.push(Section::new(
+            SectionId::custom("stale-publish-test").unwrap(),
+            Vec::from([1, 2, 3]),
+        ));
+        assert_eq!(Some(conflicting_package.digest()), published.version.digest);
+        let conflicting_path = tempdir.path().join("pkg-conflicting.masp");
+        conflicting_package.write_to_file(&conflicting_path).unwrap();
+
+        let error = stale_registry
+            .publish(&conflicting_path)
+            .expect_err("stale publish should fail before writing artifact bytes");
+        assert!(matches!(error, LocalRegistryError::WriteToStaleIndex));
+        assert_eq!(fs::read(&published.artifact_path).unwrap(), original_bytes);
+    }
+
+    #[test]
+    fn failed_publish_artifact_write_does_not_persist_index_on_later_save() {
+        let tempdir = TempDir::new().unwrap();
+        let mut registry = load_registry(&tempdir);
+
+        let package = build_package("pkg", "1.0.0", []);
+        let package_path = tempdir.path().join("pkg.masp");
+        package.write_to_file(&package_path).unwrap();
+        let artifact_path =
+            registry.artifact_path_for_package(&package.name, &package.version, package.digest());
+        fs::create_dir(&artifact_path).unwrap();
+
+        let error = registry
+            .publish(&package_path)
+            .expect_err("artifact write should fail while the artifact path is a directory");
+        assert!(matches!(error, LocalRegistryError::IndexWrite(_)));
+        fs::remove_dir(&artifact_path).unwrap();
+
+        let other_path = tempdir.path().join("other.masp");
+        build_package("other", "1.0.0", []).write_to_file(&other_path).unwrap();
+        registry.publish(&other_path).expect("later publish should succeed");
+
+        let reloaded = load_registry(&tempdir);
+        assert!(reloaded.show(&PackageId::from("pkg"), None).is_none());
+        assert!(reloaded.show(&PackageId::from("other"), None).is_some());
+    }
+
+    #[test]
     #[should_panic = "stale registry write failed"]
     fn publish_rejects_writes_to_a_stale_index() {
         let tempdir = TempDir::new().unwrap();
@@ -630,5 +1113,105 @@ mod tests {
         let reloaded = load_registry(&tempdir);
         assert!(reloaded.show(&PackageId::from("a"), None).is_some());
         assert!(reloaded.show(&PackageId::from("longer-package-name"), None).is_some());
+    }
+
+    #[test]
+    fn load_package_rejects_artifact_that_does_not_match_requested_identity() {
+        let tempdir = TempDir::new().unwrap();
+        let mut registry = load_registry(&tempdir);
+
+        let package_path = tempdir.path().join("pkg.masp");
+        build_package("pkg", "1.0.0", []).write_to_file(&package_path).unwrap();
+        let published = registry.publish(&package_path).unwrap();
+
+        build_package("other", "1.0.0", [])
+            .write_to_file(&published.artifact_path)
+            .unwrap();
+
+        let error = registry
+            .load_package(&PackageId::from("pkg"), &published.version)
+            .expect_err("artifact mismatch should be rejected");
+        assert!(matches!(error, LocalRegistryError::ArtifactMismatch { .. }));
+    }
+
+    #[test]
+    fn load_package_accepts_legacy_digest_only_artifact_path() {
+        let tempdir = TempDir::new().unwrap();
+        let mut registry = load_registry(&tempdir);
+
+        let package = build_package("pkg", "1.0.0", []);
+        let package_path = tempdir.path().join("pkg.masp");
+        package.write_to_file(&package_path).unwrap();
+        let published = registry.publish(&package_path).unwrap();
+        let legacy_path =
+            registry.legacy_artifact_path_for_digest(published.version.digest.unwrap());
+        assert_ne!(published.artifact_path, legacy_path);
+        fs::rename(&published.artifact_path, &legacy_path).unwrap();
+
+        let shown = registry.show(&PackageId::from("pkg"), Some(&published.version)).unwrap();
+        assert_eq!(shown.artifact_path.as_ref(), Some(&legacy_path));
+        assert_eq!(
+            registry.artifact_path(&PackageId::from("pkg"), &published.version),
+            Some(legacy_path.clone())
+        );
+        let listed = registry.list();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].artifact_path.as_ref(), Some(&legacy_path));
+
+        let loaded = registry.load_package(&PackageId::from("pkg"), &published.version).unwrap();
+        assert_eq!(loaded.as_ref(), package.as_ref());
+    }
+
+    #[test]
+    fn summaries_do_not_report_legacy_artifact_for_different_package_identity() {
+        let tempdir = TempDir::new().unwrap();
+        let mut registry = load_registry(&tempdir);
+
+        let first = build_package("first", "1.0.0", []);
+        let second = build_package("second", "1.0.0", []);
+        assert_eq!(first.digest(), second.digest());
+
+        let first_path = tempdir.path().join("first.masp");
+        let second_path = tempdir.path().join("second.masp");
+        first.write_to_file(&first_path).unwrap();
+        second.write_to_file(&second_path).unwrap();
+
+        let first = registry.publish(&first_path).unwrap();
+        let second = registry.publish(&second_path).unwrap();
+        let legacy_path = registry.legacy_artifact_path_for_digest(first.version.digest.unwrap());
+        fs::rename(&first.artifact_path, &legacy_path).unwrap();
+        fs::remove_file(&second.artifact_path).unwrap();
+
+        let first_summary = registry.show(&PackageId::from("first"), Some(&first.version)).unwrap();
+        assert_eq!(first_summary.artifact_path.as_ref(), Some(&legacy_path));
+        let second_summary =
+            registry.show(&PackageId::from("second"), Some(&second.version)).unwrap();
+        assert_eq!(second_summary.artifact_path.as_ref(), Some(&second.artifact_path));
+    }
+
+    #[test]
+    fn artifact_paths_distinguish_packages_with_same_mast_digest() {
+        let tempdir = TempDir::new().unwrap();
+        let mut registry = load_registry(&tempdir);
+
+        let first = build_package("first", "1.0.0", []);
+        let second = build_package("second", "1.0.0", []);
+        assert_eq!(first.digest(), second.digest());
+
+        let first_path = tempdir.path().join("first.masp");
+        let second_path = tempdir.path().join("second.masp");
+        first.write_to_file(&first_path).unwrap();
+        second.write_to_file(&second_path).unwrap();
+
+        let first = registry.publish(&first_path).unwrap();
+        let second = registry.publish(&second_path).unwrap();
+        assert_ne!(first.artifact_path, second.artifact_path);
+
+        let first_loaded =
+            registry.load_package(&PackageId::from("first"), &first.version).unwrap();
+        let second_loaded =
+            registry.load_package(&PackageId::from("second"), &second.version).unwrap();
+        assert_eq!(first_loaded.name, PackageId::from("first"));
+        assert_eq!(second_loaded.name, PackageId::from("second"));
     }
 }
