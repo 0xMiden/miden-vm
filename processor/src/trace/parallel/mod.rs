@@ -167,24 +167,25 @@ pub fn build_trace_with_max_len(
     let trace_len_summary =
         TraceLenSummary::new(core_trace_len, range_table_len, ChipletsLengths::new(&chiplets));
 
-    // Per-AIR trace heights. Today both AIRs are padded to the same `main_trace_len`
-    // (= `pad(max(core, range, chiplets))`); the per-AIR-height optimization the multi-AIR
-    // refactor enables is left as a follow-up. The plumbing is in place — `MainTrace`
-    // tracks `core_rows` and `chiplets_rows` independently, and
-    // `to_core_chiplets_matrices` slices each per-AIR matrix to its declared height — so
-    // realizing the optimization is a localized change here once the cross-AIR identity
-    // (verify_multi `ConstraintMismatch` for divergent heights) is sorted.
+    // Per-AIR trace heights — realized on this investigation branch. Each AIR is
+    // padded to its own next power-of-two height; the prover passes them as
+    // independent matrices to `prove_multi`. For hash-heavy programs (chip > core),
+    // this is the optimization the multi-AIR refactor enables. For Fibonacci-style
+    // programs (core > chip), this saves trace cells too.
     //
-    // **Why not yet:** upstream `verify_multi`'s constraint check
-    // `accumulated == q · vanishing(z)` over the *max* LDE coset interacts with each AIR's
-    // lifted-coset selectors in a way that fails on real Miden VM proofs when heights
-    // diverge — Rust verify rejects the proof. The multi-AIR ACE circuit additionally
-    // hardcodes the β-fold direction (`β · core + chiplets`), which is brittle to AIR
-    // reordering. Both are fixable but each is a multi-day investigation.
-    let main_trace_len =
-        compute_main_trace_length(core_trace_len, range_table_len, chiplets.trace_len());
-    let core_height = main_trace_len;
-    let chiplets_height = main_trace_len;
+    // **Open bug** (the reason this branch exists): when `chiplets_height >
+    // core_height`, upstream `verify_multi` rejects the proof at the cross-AIR
+    // constraint identity (`accumulated == q · vanishing(z)`). Minimal reproducer:
+    // a tight `repeat.20 hperm` loop with `core=64 / chip=512` (8× divergence) — see
+    // `prove_verify::test_hash_heavy_divergent_heights`. The reverse direction
+    // (`core > chip`, e.g. Fibonacci with `core=4096 / chip=1024`) verifies fine,
+    // and upstream's own divergent-height tests (TinyAir at `[4, 8]` with periodic
+    // columns + aux trace) verify fine. So the bug is in the interaction between a
+    // Miden-VM-specific construct and the lifted-coset evaluation when chip's
+    // logical content extends past core's.
+    let core_height = pad_to_trace_length(core_trace_len.max(range_table_len));
+    let chiplets_height = pad_to_trace_length(chiplets.trace_len());
+    let main_trace_len = core_height.max(chiplets_height);
 
     let ((range_checker_trace, chiplets_trace), ()) = rayon::join(
         || {
@@ -221,6 +222,9 @@ pub fn build_trace_with_max_len(
 // HELPERS
 // ================================================================================================
 
+// Kept (with `#[allow(dead_code)]`) so that `robin/multi-air-per-air-heights` doesn't drift from
+// the parent branch's helper surface — per-AIR heights inline `pad_to_trace_length` directly.
+#[allow(dead_code)]
 fn compute_main_trace_length(
     core_trace_len: usize,
     range_table_len: usize,
