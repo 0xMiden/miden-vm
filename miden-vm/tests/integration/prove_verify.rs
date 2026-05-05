@@ -134,8 +134,6 @@ fn test_rpo_prove_verify() {
 }
 
 #[test]
-#[ignore = "MASM recursive verifier rewrite for multi-AIR is deferred (MULTI_AIR_TODO M7); \
-            re-enable once `crates/lib/core/asm/stark/` mirrors `verify_multi`."]
 fn test_poseidon2_prove_verify() {
     // Compute 150th Fibonacci number to generate a longer trace
     let source = "
@@ -621,7 +619,6 @@ mod fast_parallel {
     }
 
     #[test]
-    #[ignore = "MASM recursive verifier rewrite for multi-AIR is deferred (MULTI_AIR_TODO M7)."]
     fn test_poseidon2_recursive_verify_with_precompile_requests() {
         let LoggedPrecompileProofFixture {
             program,

@@ -166,6 +166,24 @@ where
     let sum_times_den = builder.mul(sum_aux, den);
     let boundary = builder.add(sum_times_den, num);
 
+    // Batch with the constraint root using gamma.
+    let gamma = builder.input(InputKey::Gamma);
+    let gamma_boundary = builder.mul(gamma, boundary);
+    let constraint_plus_boundary = builder.add(constraint_root, gamma_boundary);
+
+    if config.zero_columns.is_empty() {
+        // SAFETY-CRITICAL invariant: the DAG's root must be the *last* operation
+        // emitted into the builder so the MASM ACE chip's "is the last op zero?"
+        // check evaluates the right node. With no zero_columns the γ² batch
+        // collapses (`zero_sum = 0`, `γ_sq_zero = 0`), and the final
+        // `add(constraint_plus_boundary, 0)` constant-folds to
+        // `constraint_plus_boundary`. But `gamma_sq = gamma * gamma` would still
+        // be emitted as a real op, putting it after the root in the operation
+        // stream. So we just skip the γ² batch entirely when there's nothing to
+        // batch.
+        return constraint_plus_boundary;
+    }
+
     // zero_sum = Σ aux_bound[col]  for col in zero_columns. Each column's identity
     // `aux_bound[col] = 0` is batched at γ² so it cannot cancel against boundary
     // terms at γ¹ or against other zero columns in the same sum (the whole sum is
@@ -178,10 +196,6 @@ where
         zero_sum = builder.add(zero_sum, node);
     }
 
-    // Batch with the constraint root using gamma.
-    let gamma = builder.input(InputKey::Gamma);
-    let gamma_boundary = builder.mul(gamma, boundary);
-    let constraint_plus_boundary = builder.add(constraint_root, gamma_boundary);
     let gamma_sq = builder.mul(gamma, gamma);
     let gamma_sq_zero = builder.mul(gamma_sq, zero_sum);
     builder.add(constraint_plus_boundary, gamma_sq_zero)

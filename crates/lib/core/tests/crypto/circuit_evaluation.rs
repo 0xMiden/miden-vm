@@ -158,15 +158,6 @@ fn processor_air_eval_circuit_masm() {
 }
 
 #[test]
-#[ignore = "multi-AIR ACE codegen produces a circuit whose Rust `circuit.eval` and MASM \
-            `eval_circuit` disagree on the same inputs (Rust→0 after quotient adjustment, MASM→non-zero). \
-            Bug is in the codegen→encode pipeline for the multi-AIR DAG shape; ProcessorAir's analogous \
-            test passes. Likely culprit: a subtle interaction between the chiplets sub-DAG re-emit \
-            (with input-key index rewriting + hash-consing) and the operation ordering that \
-            `to_ace`/`encode_operation` produces, surfacing only when the source DAG includes hash-consed \
-            references that span both core and chiplets sub-DAGs (e.g., shared `q*v` after q_times_v \
-            recomposition). Diagnose by emitting one circuit with `is_multi_air = false` and one with \
-            `true`, dumping `encoded.instructions()` for both, and diffing the operation list."]
 fn multi_air_eval_circuit_masm() {
     // Mirrors `processor_air_eval_circuit_masm` but for the combined CoreAir +
     // ChipletsAir multi-AIR circuit. If this test passes the codegen + MASM ACE
