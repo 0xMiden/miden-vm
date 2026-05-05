@@ -17,13 +17,13 @@ use miden_core::{
     precompile::PrecompileTranscriptState,
     program::{MIN_STACK_DEPTH, ProgramInfo, StackInputs, StackOutputs},
 };
-use miden_crypto::stark::air::{
-    ReducedAuxValues, ReductionError, VarLenPublicInputs, WindowAccess,
+use miden_crypto::stark::{
+    air::{ReducedAuxValues, ReductionError, VarLenPublicInputs, WindowAccess},
+    challenger::CanObserve,
 };
 #[cfg(feature = "arbitrary")]
 use proptest::prelude::*;
 
-pub mod ace;
 pub mod config;
 mod constraints;
 pub mod lookup;
@@ -102,8 +102,8 @@ pub struct PublicInputs {
 }
 
 impl PublicInputs {
-    /// Creates a new instance of `PublicInputs` from program information, stack inputs and outputs,
-    /// and the precompile transcript state (capacity of an internal sponge).
+    /// Creates a new instance of `PublicInputs` from program information, stack inputs and
+    /// outputs, and the precompile transcript state (capacity of an internal sponge).
     pub fn new(
         program_info: ProgramInfo,
         stack_inputs: StackInputs,
@@ -135,28 +135,57 @@ impl PublicInputs {
         self.pc_transcript_state
     }
 
-    /// Returns the fixed-length public values and the variable-length kernel procedure digests
-    /// as a flat slice of `Felt`s.
+    /// Returns the fixed-length public values and the variable-length public input slices.
     ///
     /// The fixed-length public values layout is:
-    ///   [0..4]   program hash
-    ///   [4..20]  stack inputs
-    ///   [20..36] stack outputs
-    ///   [36..40] precompile transcript state
+    ///   [0..16]  stack inputs
+    ///   [16..32] stack outputs
     ///
-    /// The kernel procedure digests are returned as a single flat `Vec<Felt>` (concatenated
-    /// words), to be passed as a single variable-length public input slice to the verifier.
-    pub fn to_air_inputs(&self) -> (Vec<Felt>, Vec<Felt>) {
+    /// The variable-length public inputs are returned as three groups, each carrying messages
+    /// of width `WORD_SIZE` (one digest per message):
+    ///   slot 0: `[program_hash]`            — length 1
+    ///   slot 1: `[pc_transcript_state]`     — length 1
+    ///   slot 2: `[kernel_digest_0, ...]`    — length N (one per kernel procedure)
+    pub fn to_air_inputs(&self) -> (Vec<Felt>, [&[Felt]; 3]) {
         let mut public_values = Vec::with_capacity(NUM_PUBLIC_VALUES);
-        public_values.extend_from_slice(self.program_info.program_hash().as_elements());
         public_values.extend_from_slice(self.stack_inputs.as_ref());
         public_values.extend_from_slice(self.stack_outputs.as_ref());
-        public_values.extend_from_slice(self.pc_transcript_state.as_ref());
 
-        let kernel_felts: Vec<Felt> =
-            Word::words_as_elements(self.program_info.kernel_procedures()).to_vec();
+        let program_hash = self.program_info.program_hash().as_elements();
+        let transcript = self.pc_transcript_state.as_ref();
+        let kernel_felts = Word::words_as_elements(self.program_info.kernel_procedures());
 
-        (public_values, kernel_felts)
+        (public_values, [program_hash, transcript, kernel_felts])
+    }
+
+    /// Observes the public inputs into the Fiat-Shamir challenger in the canonical Miden VM
+    /// protocol order:
+    ///
+    ///   kernel_H + zero word     (8 felts)        — kernel-procedure summary, 8-aligned
+    ///   program_digest           (4 felts)        — natural order
+    ///   transcript_state         (4 felts)        — natural order
+    ///   stack_inputs             (16 felts)       — natural order
+    ///   stack_outputs            (16 felts)       — natural order
+    ///
+    /// where `kernel_H = Poseidon2::hash_elements(...)` over `[digest | zero_word]` 8-felt
+    /// blocks of every kernel-procedure digest. The MASM recursive verifier (in
+    /// `crates/lib/core/asm/sys/vm/public_inputs.masm`) mirrors this exact ordering and FS
+    /// schedule (six rate-aligned permutes total). See
+    /// [`config::hash_kernel_procedure_digests`] for the kernel summary.
+    pub fn observe<C: CanObserve<Felt>>(&self, challenger: &mut C) {
+        // kernel_H + zero pad as one rate-aligned 8-felt chunk.
+        let kernel_h = config::hash_kernel_procedure_digests(self.program_info.kernel_procedures());
+        let mut k_padded = [Felt::ZERO; 8];
+        k_padded[..WORD_SIZE].copy_from_slice(kernel_h.as_elements());
+        challenger.observe_slice(&k_padded);
+
+        // program_digest + transcript_state pack into the next 8-felt rate fill.
+        challenger.observe_slice(self.program_info.program_hash().as_elements());
+        challenger.observe_slice(self.pc_transcript_state.as_ref());
+
+        // stack i/o in natural order — 32 felts = 4 rate fills.
+        challenger.observe_slice(self.stack_inputs.as_ref());
+        challenger.observe_slice(self.stack_outputs.as_ref());
     }
 
     /// Converts public inputs into a vector of field elements (Felt) in the canonical order:
@@ -235,19 +264,16 @@ impl Deserializable for PublicInputs {
 
 /// Number of fixed-length public values for the Miden VM AIR.
 ///
-/// Layout (40 Felts total):
-///   [0..4]   program hash
-///   [4..20]  stack inputs
-///   [20..36] stack outputs
-///   [36..40] precompile transcript state
-pub const NUM_PUBLIC_VALUES: usize = WORD_SIZE + MIN_STACK_DEPTH + MIN_STACK_DEPTH + WORD_SIZE;
+/// Layout (32 Felts total):
+///   [0..16]  stack inputs
+///   [16..32] stack outputs
+///
+/// The program hash and the precompile transcript state live in variable-length public
+/// inputs (slots 0 and 1, each one digest long); see [`PublicInputs::to_air_inputs`].
+pub const NUM_PUBLIC_VALUES: usize = MIN_STACK_DEPTH + MIN_STACK_DEPTH;
 
 /// LogUp aux trace width: 4 main-trace columns + 3 chiplet-trace columns.
 pub const LOGUP_AUX_TRACE_WIDTH: usize = 7;
-
-// Public values layout offsets.
-const PV_PROGRAM_HASH: usize = 0;
-const PV_TRANSCRIPT_STATE: usize = NUM_PUBLIC_VALUES - WORD_SIZE;
 
 /// Miden VM Processor AIR implementation.
 ///
@@ -296,12 +322,13 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ProcessorAir {
 
     /// Returns the number of variable-length public input slices.
     ///
-    /// The Miden VM AIR uses a single variable-length slice that contains all kernel
-    /// procedure digests as concatenated field elements (each digest is `WORD_SIZE`
-    /// elements). The verifier framework uses this count to validate that the correct
-    /// number of slices is provided.
+    /// The Miden VM AIR uses three variable-length slices, each carrying messages of
+    /// width `WORD_SIZE` (one digest per message):
+    ///   slot 0: program hash         — length 1
+    ///   slot 1: pc transcript state  — length 1
+    ///   slot 2: kernel proc digests  — length N
     fn num_var_len_public_inputs(&self) -> usize {
-        1
+        3
     }
 
     fn reduced_aux_values(
@@ -335,17 +362,33 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ProcessorAir {
             )
             .into());
         }
-        if var_len_public_inputs.len() != 1 {
+        let [program_hash_slice, transcript_slice, kernel_slice]: [&[Felt]; 3] =
+            var_len_public_inputs.try_into().map_err(|_| {
+                format!(
+                    "expected 3 var-len public input slices, got {}",
+                    var_len_public_inputs.len()
+                )
+            })?;
+        if program_hash_slice.len() != WORD_SIZE {
             return Err(format!(
-                "expected 1 var-len public input slice, got {}",
-                var_len_public_inputs.len()
+                "program hash slice length {} != {}",
+                program_hash_slice.len(),
+                WORD_SIZE
             )
             .into());
         }
-        if !var_len_public_inputs[0].len().is_multiple_of(WORD_SIZE) {
+        if transcript_slice.len() != WORD_SIZE {
+            return Err(format!(
+                "pc transcript state slice length {} != {}",
+                transcript_slice.len(),
+                WORD_SIZE
+            )
+            .into());
+        }
+        if !kernel_slice.len().is_multiple_of(WORD_SIZE) {
             return Err(format!(
                 "kernel digest felts length {} is not a multiple of {}",
-                var_len_public_inputs[0].len(),
+                kernel_slice.len(),
                 WORD_SIZE
             )
             .into());
@@ -439,12 +482,12 @@ where
     }
 
     fn max_message_width(&self) -> usize {
-        // Width of the `beta_powers` table precomputed by `Challenges::new`, also equal
-        // to the exponent of `gamma = beta^MIDEN_MAX_MESSAGE_WIDTH` used in the per-bus
-        // prefix. Must match the MASM recursive verifier's Poseidon2 absorption loop.
-        // `HasherMsg::State` is the widest live payload at 15 slots (label@β⁰, addr@β¹,
-        // node_index@β², state[0..12]@β³..β¹⁴); the 16th slot is unused slack kept for
-        // MASM transcript alignment.
+        // Width of the `beta_powers` table precomputed by `Challenges::new`. Payloads
+        // occupy β¹..β^MIDEN_MAX_MESSAGE_WIDTH (the β⁰ slot is reserved for the scalar
+        // bus identifier). Must match the β-power range used by the MASM recursive
+        // verifier. `HasherMsg::State` is the widest live payload at 15 slots
+        // (label@β¹, addr@β², node_index@β³, state[0..12]@β⁴..β¹⁵); the 16th slot is
+        // unused slack.
         MIDEN_MAX_MESSAGE_WIDTH
     }
 

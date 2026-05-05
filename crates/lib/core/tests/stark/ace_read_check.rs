@@ -8,8 +8,8 @@
 //! This catches bugs in the MASM verifier's input preparation (wrong values, wrong
 //! memory slots, missing absorptions) that would silently break soundness.
 
-use miden_ace_codegen::{AceConfig, InputKey, InputLayout, LayoutKind};
-use miden_air::{ProcessorAir, ace::build_batched_ace_circuit};
+use miden_ace_codegen::{AceConfig, InputKey, InputLayout, LayoutKind, build_ace_circuit_for_air};
+use miden_air::ProcessorAir;
 use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt},
@@ -98,13 +98,11 @@ fn sanity_check_ace_inputs(inputs: &[QuadFelt], layout: &InputLayout) {
 pub fn cross_check_ace_circuit(output: &ExecutionOutput) {
     let config = AceConfig {
         num_quotient_chunks: 8,
-        num_vlpi_groups: 1,
         layout: LayoutKind::Masm,
     };
 
-    let batch_config = miden_air::ace::logup_boundary_config();
-    let circuit = build_batched_ace_circuit::<_, QuadFelt>(&ProcessorAir, config, &batch_config)
-        .expect("ace circuit");
+    let circuit =
+        build_ace_circuit_for_air::<_, Felt, QuadFelt>(&ProcessorAir, config).expect("ace circuit");
     let layout = circuit.layout();
 
     let inputs = extract_ace_inputs(output, layout);

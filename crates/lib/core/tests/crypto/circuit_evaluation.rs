@@ -1,4 +1,4 @@
-use miden_ace_codegen::{AceCircuit, AceConfig, InputKey, LayoutKind};
+use miden_ace_codegen::{AceCircuit, AceConfig, InputKey, LayoutKind, build_ace_circuit_for_air};
 use miden_core::{
     Felt, ONE, ZERO,
     advice::AdviceStackBuilder,
@@ -6,11 +6,10 @@ use miden_core::{
 };
 use miden_utils_testing::rand::rand_quad_felt;
 
-/// Build the batched ACE circuit for the Miden VM ProcessorAir.
-fn build_batched_circuit(config: AceConfig) -> AceCircuit<QuadFelt> {
+/// Build the ACE circuit for the Miden VM ProcessorAir.
+fn build_circuit(config: AceConfig) -> AceCircuit<QuadFelt> {
     let air = miden_air::ProcessorAir;
-    let batch_config = miden_air::ace::logup_boundary_config();
-    miden_air::ace::build_batched_ace_circuit::<_, QuadFelt>(&air, config, &batch_config).unwrap()
+    build_ace_circuit_for_air::<_, Felt, QuadFelt>(&air, config).unwrap()
 }
 
 #[test]
@@ -95,10 +94,9 @@ fn circuit_evaluation_prove_verify() {
 fn processor_air_eval_circuit_masm() {
     let config = AceConfig {
         num_quotient_chunks: 8,
-        num_vlpi_groups: 1,
         layout: LayoutKind::Masm,
     };
-    let circuit = build_batched_circuit(config);
+    let circuit = build_circuit(config);
     let layout = circuit.layout().clone();
 
     let mut inputs = fill_inputs(&layout);

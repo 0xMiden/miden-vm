@@ -18,20 +18,20 @@ use crate::lookup::Challenges;
 // BUS IDENTIFIERS
 // ================================================================================================
 
-/// Width of the `beta_powers` table `Challenges` precomputes for Miden's bus
-/// messages, i.e. the exponent of `gamma = beta^MIDEN_MAX_MESSAGE_WIDTH` used in
-/// `bus_prefix[i] = alpha + (i + 1) * gamma`.
+/// Width of the `beta_powers` table `Challenges` precomputes for Miden's bus messages.
+/// Payload slots occupy `β¹..β^MIDEN_MAX_MESSAGE_WIDTH` — the `β⁰ = 1` slot is reserved
+/// for the scalar bus identifier in `bus_prefix[i] = alpha + (i + 1)`.
 ///
-/// Must match the Poseidon2 absorption loop in `crates/lib/core/asm/stark/` which
-/// reads the same β-power table during recursive verification.
+/// Must match the β-power range assumed by the recursive verifier in
+/// `crates/lib/core/asm/stark/`.
 pub const MIDEN_MAX_MESSAGE_WIDTH: usize = 16;
 
 /// Domain-separated bus interaction identifier.
 ///
 /// Each variant identifies a distinct bus interaction type. When encoding a message,
 /// the bus is cast to `usize` and indexes into
-/// [`Challenges::bus_prefix`](crate::lookup::Challenges) to obtain the additive base
-/// `bus_prefix[bus] = alpha + (bus + 1) * gamma`.
+/// [`Challenges::bus_prefix`](crate::lookup::Challenges) to obtain the scalar additive
+/// base `bus_prefix[bus] = alpha + (bus + 1)`.
 #[repr(usize)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum BusId {

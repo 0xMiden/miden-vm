@@ -8,10 +8,8 @@ extern crate std;
 use alloc::{string::ToString, vec::Vec};
 
 use ::serde::Serialize;
-use miden_core::{Felt, WORD_SIZE, field::QuadFelt, utils::RowMajorMatrix};
-use miden_crypto::stark::{
-    StarkConfig, air::VarLenPublicInputs, challenger::CanObserve, lmcs::Lmcs, proof::StarkOutput,
-};
+use miden_core::{Felt, field::QuadFelt, utils::RowMajorMatrix};
+use miden_crypto::stark::{StarkConfig, lmcs::Lmcs, proof::StarkOutput};
 use miden_processor::{
     FastProcessor, Program,
     trace::{ExecutionTrace, build_trace},
@@ -134,30 +132,29 @@ fn prove_execution_trace(
         trace.to_row_major_matrix()
     };
 
-    let (public_values, kernel_felts) = trace.public_inputs().to_air_inputs();
-    let var_len_public_inputs: &[&[Felt]] = &[&kernel_felts];
+    let pub_inputs = trace.public_inputs();
 
     let params = config::pcs_params();
     let proof_bytes = match hash_fn {
         HashFunction::Blake3_256 => {
             let config = config::blake3_256_config(params);
-            prove_stark(&config, &trace_matrix, &public_values, var_len_public_inputs)
+            prove_stark(&config, &pub_inputs, &trace_matrix)
         },
         HashFunction::Keccak => {
             let config = config::keccak_config(params);
-            prove_stark(&config, &trace_matrix, &public_values, var_len_public_inputs)
+            prove_stark(&config, &pub_inputs, &trace_matrix)
         },
         HashFunction::Rpo256 => {
             let config = config::rpo_config(params);
-            prove_stark(&config, &trace_matrix, &public_values, var_len_public_inputs)
+            prove_stark(&config, &pub_inputs, &trace_matrix)
         },
         HashFunction::Poseidon2 => {
             let config = config::poseidon2_config(params);
-            prove_stark(&config, &trace_matrix, &public_values, var_len_public_inputs)
+            prove_stark(&config, &pub_inputs, &trace_matrix)
         },
         HashFunction::Rpx256 => {
             let config = config::rpx_config(params);
-            prove_stark(&config, &trace_matrix, &public_values, var_len_public_inputs)
+            prove_stark(&config, &pub_inputs, &trace_matrix)
         },
     }?;
 
@@ -168,15 +165,15 @@ fn prove_execution_trace(
 // STARK PROOF GENERATION
 // ================================================================================================
 
-/// Generates a STARK proof for the given trace and public values.
+/// Generates a STARK proof for the given trace and public inputs.
 ///
-/// Pre-seeds the challenger with `public_values`, then delegates to the lifted
-/// prover. Returns the serialized proof bytes.
+/// Pre-seeds the challenger with `pub_inputs` (via [`PublicInputs::observe`]) and derives
+/// the slice-shaped `public_values` / `var_len_public_inputs` consumed by the lifted prover
+/// from the same typed `pub_inputs`. Returns the serialized proof bytes.
 pub fn prove_stark<SC>(
     config: &SC,
+    pub_inputs: &PublicInputs,
     trace: &RowMajorMatrix<Felt>,
-    public_values: &[Felt],
-    var_len_public_inputs: VarLenPublicInputs<'_, Felt>,
 ) -> Result<Vec<u8>, ExecutionError>
 where
     SC: StarkConfig<Felt, QuadFelt>,
@@ -184,14 +181,15 @@ where
 {
     let mut challenger = config.challenger();
     config::observe_protocol_params(&mut challenger);
-    challenger.observe_slice(public_values);
-    config::observe_var_len_public_inputs(&mut challenger, var_len_public_inputs, &[WORD_SIZE]);
+    pub_inputs.observe(&mut challenger);
+
+    let (public_values, vlpi) = pub_inputs.to_air_inputs();
     let output: StarkOutput<Felt, QuadFelt, SC> = miden_crypto::stark::prover::prove_single(
         config,
         &ProcessorAir,
         trace,
-        public_values,
-        var_len_public_inputs,
+        &public_values,
+        &vlpi,
         &ProcessorAir,
         challenger,
     )

@@ -75,7 +75,7 @@
 //!   is_first       Precomputed selector (z^N - 1) / (z - 1).
 //!   is_last        Precomputed selector (z^N - 1) / (z - g^{-1}).
 //!   is_transition  Precomputed selector z - g^{-1}.
-//!   gamma          Batching challenge for auxiliary trace boundary checks.
+//!   gamma          Auxiliary batching challenge (reserved for future use).
 //!   weight0        First barycentric weight for quotient recomposition.
 //!   f              Chunk shift ratio h^N. Generates coset shifts and weights.
 //!   s0             First coset shift offset^N. Base for shifted evaluation points.
@@ -181,7 +181,7 @@ where
                     acc
                 },
                 ExtEntry::Challenge => randomness::lower_challenge(builder, layout, v.index),
-                ExtEntry::PermutationValue => builder.input(InputKey::AuxBusBoundary(v.index)),
+                ExtEntry::PermutationValue => builder.input(InputKey::AuxValue(v.index)),
             },
             ExtLeaf::ExtConstant(c) => builder.constant(*c),
         },

@@ -166,12 +166,11 @@ mod recursive_verifier {
     use alloc::vec::Vec;
 
     use miden_core::{
-        Felt, WORD_SIZE, Word,
+        Felt, Word,
         field::{BasedVectorSpace, QuadFelt},
     };
     use miden_crypto::stark::{
         StarkConfig,
-        challenger::CanObserve,
         fri::PcsTranscript,
         lmcs::{Lmcs, proof::BatchProofView},
         proof::StarkTranscript,
@@ -197,12 +196,11 @@ mod recursive_verifier {
         let transcript_data =
             bincode::deserialize(proof_bytes).expect("failed to deserialize proof bytes");
 
-        let (public_values, kernel_felts) = pub_inputs.to_air_inputs();
+        let (public_values, vlpi) = pub_inputs.to_air_inputs();
+        let var_len_public_inputs: &[&[Felt]] = &vlpi;
         let mut challenger = config.challenger();
         config::observe_protocol_params(&mut challenger);
-        challenger.observe_slice(&public_values);
-        let var_len_public_inputs: &[&[Felt]] = &[&kernel_felts];
-        config::observe_var_len_public_inputs(&mut challenger, var_len_public_inputs, &[WORD_SIZE]);
+        pub_inputs.observe(&mut challenger);
 
         let air = ProcessorAir;
         let instance = AirInstance {
@@ -215,7 +213,7 @@ mod recursive_verifier {
                 .expect("failed to replay verifier transcript");
         let log_trace_height = stark.instance_shapes.log_trace_heights()[0] as usize;
 
-        let kernel_digests: Vec<Word> = kernel_felts
+        let kernel_digests: Vec<Word> = vlpi[2]
             .chunks_exact(4)
             .map(|chunk| Word::new([chunk[0], chunk[1], chunk[2], chunk[3]]))
             .collect();
@@ -239,10 +237,7 @@ mod recursive_verifier {
         advice_stack.push(config::DEEP_POW_BITS as u64);
         advice_stack.push(config::FOLDING_POW_BITS as u64);
 
-        advice_stack.extend_from_slice(&build_fixed_len_inputs(&pub_inputs));
-        advice_stack.push(kernel_digests.len() as u64);
-        advice_stack.extend_from_slice(&build_kernel_digest_advice(kernel_digests));
-
+        // ND aux randomness [β0, β1, α0, α1] — loaded into AUX_RAND_ND_PTR first.
         let alpha = stark.randomness[0];
         let beta = stark.randomness[1];
         let beta_coeffs: &[Felt] = beta.as_basis_coefficients_slice();
@@ -253,6 +248,21 @@ mod recursive_verifier {
             alpha_coeffs[0].as_canonical_u64(),
             alpha_coeffs[1].as_canonical_u64(),
         ]);
+
+        // Kernel digest count and the digest stream (each digest as 4 canonical felts; the
+        // MASM streaming loop appends a zero pad word in-place to form the 8-felt sponge block).
+        advice_stack.push(kernel_digests.len() as u64);
+        advice_stack.extend_from_slice(&build_kernel_digest_advice(kernel_digests));
+
+        // Single-word VLPI messages: program_digest then transcript_state, each as 4
+        // canonical felts (no pad, no reverse — MASM uses `adv_loadw` and `horner4_base`).
+        let program_hash = *pub_inputs.program_info().program_hash();
+        advice_stack.extend(program_hash.as_elements().iter().map(Felt::as_canonical_u64));
+        let transcript_state = pub_inputs.pc_transcript_state();
+        advice_stack.extend(transcript_state.as_elements().iter().map(Felt::as_canonical_u64));
+
+        // FLPI: stack i/o (32 felts, padded to next multiple of 8).
+        advice_stack.extend_from_slice(&build_fixed_len_inputs(&pub_inputs));
 
         advice_stack.extend_from_slice(&commitment_to_u64s(stark.main_commit));
         advice_stack.extend_from_slice(&commitment_to_u64s(stark.aux_commit));
@@ -377,23 +387,20 @@ mod recursive_verifier {
     }
 
     fn build_kernel_digest_advice(kernel_digests: &[Word]) -> Vec<u64> {
-        let mut result = Vec::with_capacity(kernel_digests.len() * 8);
+        let mut result = Vec::with_capacity(kernel_digests.len() * 4);
         for digest in kernel_digests {
-            let mut padded: Vec<u64> =
-                digest.as_elements().iter().map(Felt::as_canonical_u64).collect();
-            padded.resize(8, 0);
-            padded.reverse();
-            result.extend_from_slice(&padded);
+            result.extend(digest.as_elements().iter().map(Felt::as_canonical_u64));
         }
         result
     }
 
+    /// FLPI consumed by the MASM verifier: stack inputs + stack outputs (32 felts total).
+    /// Program hash and transcript state are part of VLPI in the new layout (see the
+    /// VLPI section in `build_advice`).
     fn build_fixed_len_inputs(pub_inputs: &PublicInputs) -> Vec<u64> {
         let mut felts = Vec::<Felt>::new();
-        felts.extend_from_slice(pub_inputs.program_info().program_hash().as_elements());
         felts.extend_from_slice(pub_inputs.stack_inputs().as_ref());
         felts.extend_from_slice(pub_inputs.stack_outputs().as_ref());
-        felts.extend_from_slice(pub_inputs.pc_transcript_state().as_ref());
 
         let mut fixed_len: Vec<u64> = felts.iter().map(Felt::as_canonical_u64).collect();
         fixed_len.resize(fixed_len.len().next_multiple_of(8), 0);
@@ -499,14 +506,12 @@ mod fast_parallel {
         let trace_matrix = trace.to_row_major_matrix();
 
         // Build public inputs
-        let (public_values, kernel_felts) = trace.public_inputs().to_air_inputs();
-        let var_len_public_inputs: &[&[Felt]] = &[&kernel_felts];
+        let pub_inputs = trace.public_inputs();
 
         // Generate proof using Blake3_256
         let blake3_config = config::blake3_256_config(config::pcs_params());
         let proof_bytes =
-            prove_stark(&blake3_config, &trace_matrix, &public_values, var_len_public_inputs)
-                .expect("Proving failed");
+            prove_stark(&blake3_config, &pub_inputs, &trace_matrix).expect("Proving failed");
 
         let precompile_requests = trace.precompile_requests().to_vec();
 

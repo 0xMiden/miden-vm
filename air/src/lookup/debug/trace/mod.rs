@@ -177,13 +177,14 @@ pub fn check_trace_balance<A>(
 where
     for<'a> A: LookupAir<DebugTraceBuilder<'a>>,
 {
-    run_trace_walk(
+    run_trace_walk_inner(
         air,
         main_trace,
         periodic_columns,
         public_values,
         var_len_public_inputs,
         challenges,
+        false,
     )
     .balance
 }
@@ -203,7 +204,11 @@ pub fn collect_column_oracle_folds<A>(
 where
     for<'a> A: LookupAir<DebugTraceBuilder<'a>>,
 {
-    run_trace_walk(air, main_trace, periodic_columns, public_values, &[], challenges).folds_per_row
+    // Folds are a per-row property of the main trace and don't need boundary emissions, so
+    // pass `skip_boundary: true` to avoid requiring VLPI inputs (which the caller of this
+    // helper typically has no access to).
+    run_trace_walk_inner(air, main_trace, periodic_columns, public_values, &[], challenges, true)
+        .folds_per_row
 }
 
 // SHARED DRIVER
@@ -217,13 +222,18 @@ struct TraceWalkOutput {
 /// Shared row-by-row driver used by both public entry points. Each row gets a fresh
 /// [`DebugTraceBuilder`] with column folds reset to `(ZERO, ONE)`; the balance accumulator
 /// persists across rows, the folds snapshot at row end.
-fn run_trace_walk<A>(
+///
+/// `skip_boundary == true` skips the per-proof boundary emitter call. Callers who only need
+/// the per-row folds (e.g. [`collect_column_oracle_folds`]) use this to avoid requiring
+/// variable-length public inputs they don't have access to.
+fn run_trace_walk_inner<A>(
     air: &A,
     main_trace: &RowMajorMatrix<Felt>,
     periodic_columns: &[Vec<Felt>],
     public_values: &[Felt],
     var_len_public_inputs: &[&[Felt]],
     challenges: &Challenges<QuadFelt>,
+    skip_boundary: bool,
 ) -> TraceWalkOutput
 where
     for<'a> A: LookupAir<DebugTraceBuilder<'a>>,
@@ -268,7 +278,7 @@ where
     // Boundary / outer interactions (once per proof, no row): kernel init, block
     // hash, log-precompile terminals, …. Accumulates into the same balance map as
     // the per-row trace emissions — a fully closed AIR produces `is_ok() == true`.
-    {
+    if !skip_boundary {
         let mut boundary = DebugBoundaryEmitter {
             challenges,
             state: &mut state,

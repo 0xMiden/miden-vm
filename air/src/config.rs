@@ -5,13 +5,13 @@
 
 use alloc::vec;
 
-use miden_core::{Felt, field::QuadFelt};
+use miden_core::{Felt, Word, field::QuadFelt};
 use miden_crypto::{
     field::Field,
     hash::{
         blake::Blake3Hasher,
         keccak::{Keccak256Hash, KeccakF, VECTOR_LEN},
-        poseidon2::Poseidon2Permutation256,
+        poseidon2::{Poseidon2, Poseidon2Permutation256},
         rpo::RpoPermutation256,
         rpx::RpxPermutation256,
     },
@@ -85,10 +85,10 @@ pub fn pcs_params() -> PcsParams {
 /// Compile-time constant binding the Fiat-Shamir transcript to the Miden VM AIR.
 /// Must match the constants in `crates/lib/core/asm/sys/vm/mod.masm`.
 pub const RELATION_DIGEST: [Felt; 4] = [
-    Felt::new_unchecked(18440770617833249030),
-    Felt::new_unchecked(3715283706764782886),
-    Felt::new_unchecked(9714477478219682004),
-    Felt::new_unchecked(15807487205157413791),
+    Felt::new_unchecked(15489007790469175313),
+    Felt::new_unchecked(16310125947883324640),
+    Felt::new_unchecked(17967616689438012064),
+    Felt::new_unchecked(7926645138498208524),
 ];
 
 /// Observes PCS protocol parameters into the challenger.
@@ -109,38 +109,19 @@ pub fn observe_protocol_params(challenger: &mut impl CanObserve<Felt>) {
     challenger.observe(Felt::ZERO);
 }
 
-/// Absorbs variable-length public inputs into the challenger.
-///
-/// Each VLPI group is a flat slice of fixed-width messages. `message_widths[i]` gives the
-/// width of each message in group `i`. Every message is zero-padded to the next multiple
-/// of `SPONGE_RATE` and reversed before observation, matching the layout the MASM recursive
-/// verifier's `mem_stream` + `horner_eval_base` expects.
-pub fn observe_var_len_public_inputs<C: CanObserve<Felt>>(
-    challenger: &mut C,
-    var_len_public_inputs: &[&[Felt]],
-    message_widths: &[usize],
-) {
-    assert_eq!(
-        var_len_public_inputs.len(),
-        message_widths.len(),
-        "must provide one message width per VLPI group"
-    );
-    for (group, &msg_width) in var_len_public_inputs.iter().zip(message_widths) {
-        assert!(msg_width > 0, "VLPI message width must be positive");
-        let padded_width = msg_width.next_multiple_of(SPONGE_RATE);
-        for message in group.chunks(msg_width) {
-            assert_eq!(
-                message.len(),
-                msg_width,
-                "VLPI group has trailing elements that don't form a complete message"
-            );
-            let mut padded = vec![Felt::ZERO; padded_width];
-            for (i, &elem) in message.iter().enumerate() {
-                padded[padded_width - 1 - i] = elem;
-            }
-            challenger.observe_slice(&padded);
-        }
+/// Hashes the kernel-procedure digests into a single 4-felt summary using
+/// [`Poseidon2::hash_elements`] over the same `[digest | zero_word]` 8-felt-per-digest layout
+/// the MASM verifier absorbs into its `kernel_H` sponge (one permute per digest).
+pub fn hash_kernel_procedure_digests(digests: &[Word]) -> Word {
+    let mut input = vec![Felt::ZERO; digests.len() * SPONGE_RATE];
+    for (i, digest) in digests.iter().enumerate() {
+        let base = i * SPONGE_RATE;
+        // Layout per digest: [d0, d1, d2, d3, 0, 0, 0, 0]; the 4 trailing zeros come from
+        // the vec! initialisation, so we only need to write the canonical digest.
+        let elements = digest.as_elements();
+        input[base..base + elements.len()].copy_from_slice(elements);
     }
+    Poseidon2::hash_elements(&input)
 }
 
 // ALGEBRAIC HASHES (RPO, Poseidon2, RPX)
@@ -293,10 +274,10 @@ mod tests {
     extern crate alloc;
     use alloc::vec::Vec;
 
-    use miden_ace_codegen::{AceConfig, LayoutKind};
+    use miden_ace_codegen::{AceConfig, LayoutKind, build_ace_circuit_for_air};
     use miden_core::{Felt, crypto::hash::Poseidon2, field::QuadFelt};
 
-    use crate::{ProcessorAir, ace};
+    use crate::ProcessorAir;
 
     const PROTOCOL_ID: u64 = 0;
     const REGEN_HINT: &str = "cargo run -p miden-core-lib --features constraints-tools --bin regenerate-constraints -- --write";
@@ -310,13 +291,10 @@ mod tests {
     fn relation_digest_matches_current_air() {
         let config = AceConfig {
             num_quotient_chunks: 8,
-            num_vlpi_groups: 1,
             layout: LayoutKind::Masm,
         };
         let air = ProcessorAir;
-        let boundary_config = ace::logup_boundary_config();
-        let circuit =
-            ace::build_batched_ace_circuit::<_, QuadFelt>(&air, config, &boundary_config).unwrap();
+        let circuit = build_ace_circuit_for_air::<_, Felt, QuadFelt>(&air, config).unwrap();
         let encoded = circuit.to_ace().unwrap();
         let circuit_commitment: [Felt; 4] = encoded.circuit_hash().into();
 

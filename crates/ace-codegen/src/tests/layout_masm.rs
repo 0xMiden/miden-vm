@@ -5,11 +5,10 @@ fn masm_layout_aligns_and_maps_aux_inputs() {
     let counts = InputCounts {
         width: 3,
         aux_width: 2,
-        // TODO(#3032): 2 boundary values, but only the first is real (col 0 accumulator).
+        // TODO(#3032): 2 aux values, but only the first is real (col 0 accumulator).
         // The second is always zero. Reduce to 1 once trace splitting lands.
-        num_aux_boundary: 2,
+        num_aux_values: 2,
         num_public: 5,
-        num_vlpi: 0,
         num_randomness: 16,
         num_periodic: 1,
         num_quotient_chunks: 2,
@@ -36,8 +35,8 @@ fn masm_layout_aligns_and_maps_aux_inputs() {
         .index(InputKey::QuotientChunkCoord { offset: 1, chunk: 0, coord: 0 })
         .unwrap();
     assert_eq!(quotient_next_base % 4, 0);
-    let aux_bus_base = layout.index(InputKey::AuxBusBoundary(0)).unwrap();
-    assert_eq!(aux_bus_base % 2, 0);
+    let aux_values_base = layout.index(InputKey::AuxValue(0)).unwrap();
+    assert_eq!(aux_values_base % 2, 0);
     let stark_base = layout.index(InputKey::Alpha).unwrap();
     assert_eq!(stark_base % 2, 0);
     assert_eq!(layout.index(InputKey::AuxRandBeta), Some(rand_base));

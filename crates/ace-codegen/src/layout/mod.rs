@@ -39,7 +39,7 @@
 //! 6) main_next
 //! 7) aux_next
 //! 8) quotient_next
-//! 9) aux_bus_boundary
+//! 9) aux_values
 //! 10) stark_vars
 //!
 //! Notes:

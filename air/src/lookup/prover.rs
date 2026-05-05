@@ -472,7 +472,7 @@ mod tests {
     };
 
     /// Minimal `LookupMessage` used by [`SmokeAir`] to drive a `Vec::push` into the
-    /// prover builder's fraction buffer. Encodes to `bus_prefix[0] + β⁰·value`, which is
+    /// prover builder's fraction buffer. Encodes to `bus_prefix[0] + β¹·value`, which is
     /// always non-zero for non-trivial challenges (so `accumulate_slow` can `try_inverse`
     /// without blowing up).
     #[derive(Clone, Copy, Debug)]

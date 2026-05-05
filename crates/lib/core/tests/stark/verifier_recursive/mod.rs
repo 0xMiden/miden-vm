@@ -9,8 +9,11 @@
 //! The advice stack ordering must match the MASM consumption order exactly:
 //!
 //!   security params (nq, query_pow, deep_pow, folding_pow) ->
-//!   fixed-length PI -> num_kernel_proc_digests -> kernel_digests ->
-//!   aux randomness -> main commit -> aux commit ->
+//!   aux randomness (β, α; ND) ->
+//!   num_kernel_proc_digests -> kernel digests (each 4 felts: canonical) ->
+//!   program_digest (4 canonical felts) -> transcript_state (4 canonical felts) ->
+//!   stack_inputs/outputs (32 felts) ->
+//!   main commit -> aux commit ->
 //!   aux finals -> quotient commit -> deep alpha ND -> OOD evals ->
 //!   DEEP PoW witness -> FRI rounds -> FRI remainder -> query PoW witness
 //!
@@ -19,12 +22,11 @@
 use alloc::vec::Vec;
 
 use miden_air::{ProcessorAir, PublicInputs, config};
-use miden_core::{Felt, WORD_SIZE, Word, field::QuadFelt};
+use miden_core::{Felt, Word, field::QuadFelt};
 use miden_crypto::{
     field::BasedVectorSpace,
     stark::{
         StarkConfig,
-        challenger::CanObserve,
         fri::PcsTranscript,
         lmcs::{Lmcs, proof::BatchProofView},
         proof::StarkTranscript,
@@ -80,13 +82,12 @@ pub fn generate_advice_inputs(
     let transcript_data = bincode::deserialize(proof_bytes)
         .map_err(|e| VerifierError::ProofDeserializationError(e.to_string()))?;
 
-    // 2. Build domain-separated challenger, then observe public values.
-    let (public_values, kernel_felts) = pub_inputs.to_air_inputs();
+    // 2. Build domain-separated challenger and observe public inputs.
+    let (public_values, vlpi) = pub_inputs.to_air_inputs();
+    let var_len_public_inputs: &[&[Felt]] = &vlpi;
     let mut challenger = config.challenger();
     config::observe_protocol_params(&mut challenger);
-    challenger.observe_slice(&public_values);
-    let var_len_public_inputs: &[&[Felt]] = &[&kernel_felts];
-    config::observe_var_len_public_inputs(&mut challenger, var_len_public_inputs, &[WORD_SIZE]);
+    pub_inputs.observe(&mut challenger);
 
     // 3. Build AIR instance.
     let air = ProcessorAir;
@@ -101,10 +102,8 @@ pub fn generate_advice_inputs(
     let log_trace_height = stark.instance_shapes.log_trace_heights()[0] as usize;
 
     // 5. Reconstruct kernel digests as Words for advice building.
-    let kernel_digests: Vec<Word> = kernel_felts
-        .chunks_exact(4)
-        .map(|c| Word::new([c[0], c[1], c[2], c[3]]))
-        .collect();
+    let kernel_digests: Vec<Word> =
+        vlpi[2].chunks_exact(4).map(|c| Word::new([c[0], c[1], c[2], c[3]])).collect();
 
     // 6. Build advice from parsed transcript.
     build_advice(&config, &stark, log_trace_height, pub_inputs, &kernel_digests)
@@ -147,19 +146,7 @@ fn build_advice(
     advice_stack.push(config::DEEP_POW_BITS as u64);
     advice_stack.push(config::FOLDING_POW_BITS as u64);
 
-    // 1. Fixed-length public inputs.
-    let fixed_len_inputs = build_fixed_len_inputs(&pub_inputs);
-    advice_stack.extend_from_slice(&fixed_len_inputs);
-
-    // 2. Number of kernel procedure digests.
-    let num_kernel_proc_digests = kernel_digests.len();
-    advice_stack.push(num_kernel_proc_digests as u64);
-
-    // 3. Kernel procedure digest elements (each digest padded to 8 elements, reversed).
-    let kernel_advice = build_kernel_digest_advice(kernel_digests);
-    advice_stack.extend_from_slice(&kernel_advice);
-
-    // 4. Auxiliary randomness [beta0, beta1, alpha0, alpha1].
+    // 1. Auxiliary randomness [beta0, beta1, alpha0, alpha1] (ND, verified later in step II).
     assert!(
         stark.randomness.len() >= 2,
         "expected at least 2 randomness challenges (alpha, beta), got {}",
@@ -175,6 +162,23 @@ fn build_advice(
         alpha_coeffs[0].as_canonical_u64(),
         alpha_coeffs[1].as_canonical_u64(),
     ]);
+
+    // 2. Number of kernel procedure digests followed by the digests themselves. Each kernel digest
+    //    is supplied as 4 canonical felts; the MASM streaming loop appends a zero word in-place to
+    //    form each 8-felt sponge block.
+    let num_kernel_proc_digests = kernel_digests.len();
+    advice_stack.push(num_kernel_proc_digests as u64);
+    let kernel_advice = build_kernel_digest_advice(kernel_digests);
+    advice_stack.extend_from_slice(&kernel_advice);
+
+    // 3. Single-word VLPI messages: program_digest then transcript_state, each as 4 canonical felts
+    //    (no pad, no reverse — MASM uses `adv_loadw` and `horner4_base` inline).
+    advice_stack.extend_from_slice(&word_to_u64s(*pub_inputs.program_info().program_hash()));
+    advice_stack.extend_from_slice(&word_to_u64s(pub_inputs.pc_transcript_state()));
+
+    // 4. Fixed-length public inputs (stack i/o; 32 felts, padded to next multiple of 8).
+    let fixed_len_inputs = build_fixed_len_inputs(&pub_inputs);
+    advice_stack.extend_from_slice(&fixed_len_inputs);
 
     // 5. Main trace commitment (4 felts).
     advice_stack.extend_from_slice(&commitment_to_u64s(stark.main_commit));
@@ -350,30 +354,40 @@ where
 
 /// Build kernel digest advice data.
 ///
-/// Each digest (4 elements) is padded to 8 elements with zeros, then reversed. This matches
-/// the format used by the MASM `reduce_kernel_digests` procedure which uses `mem_stream` +
-/// `horner_eval_base` to process digests in 8-element chunks.
+/// Each digest is emitted as 4 canonical felts. The MASM streaming kernel-digest loop reads
+/// each digest with `adv_loadw` and appends a zero word in-place to form the 8-felt sponge
+/// block (`[digest | zero_word]`); the same digest copy is folded into `c_total` via
+/// `horner4_base` without any memory write.
 fn build_kernel_digest_advice(kernel_digests: &[Word]) -> Vec<u64> {
-    let mut result = Vec::with_capacity(kernel_digests.len() * 8);
+    let mut result = Vec::with_capacity(kernel_digests.len() * 4);
     for digest in kernel_digests {
-        let mut padded: Vec<u64> =
-            digest.as_elements().iter().map(Felt::as_canonical_u64).collect();
-        padded.resize(8, 0);
-        padded.reverse();
-        result.extend_from_slice(&padded);
+        result.extend(digest.as_elements().iter().map(Felt::as_canonical_u64));
     }
     result
 }
 
+/// Convert a `Word` to 4 canonical `u64`s, in natural order. Used for the single-word VLPI
+/// messages (`program_digest`, `transcript_state`) that the MASM verifier reads via
+/// `adv_loadw` (no pad, no reverse).
+fn word_to_u64s(w: Word) -> [u64; 4] {
+    let elems = w.as_elements();
+    [
+        elems[0].as_canonical_u64(),
+        elems[1].as_canonical_u64(),
+        elems[2].as_canonical_u64(),
+        elems[3].as_canonical_u64(),
+    ]
+}
+
 /// Build the fixed-length public inputs in the order the MASM random coin observes them.
 ///
-/// Must stay in sync with `PublicInputs::to_air_inputs()`.
+/// Must stay in sync with `PublicInputs::to_air_inputs()`. Program hash and the precompile
+/// transcript state live in VLPI now (slots 0 and 1); only stack inputs/outputs remain in
+/// the fixed-length section.
 fn build_fixed_len_inputs(pub_inputs: &PublicInputs) -> Vec<u64> {
     let mut felts = Vec::<Felt>::new();
-    felts.extend_from_slice(pub_inputs.program_info().program_hash().as_elements());
     felts.extend_from_slice(pub_inputs.stack_inputs().as_ref());
     felts.extend_from_slice(pub_inputs.stack_outputs().as_ref());
-    felts.extend_from_slice(pub_inputs.pc_transcript_state().as_ref());
     let mut fixed_len: Vec<u64> = felts.iter().map(Felt::as_canonical_u64).collect();
     fixed_len.resize(fixed_len.len().next_multiple_of(8), 0);
     fixed_len

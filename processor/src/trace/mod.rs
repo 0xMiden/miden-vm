@@ -336,8 +336,8 @@ impl ExecutionTrace {
         let public_inputs = self.public_inputs();
         let trace_matrix = self.to_row_major_matrix();
 
-        let (public_values, kernel_felts) = public_inputs.to_air_inputs();
-        let var_len_public_inputs: &[&[Felt]] = &[&kernel_felts];
+        let (public_values, vlpi) = public_inputs.to_air_inputs();
+        let var_len_public_inputs: &[&[Felt]] = &vlpi;
 
         // Derive deterministic challenges by hashing public values with Poseidon2.
         // The 4-element digest maps directly to 2 QuadFelt challenges.
