@@ -357,6 +357,13 @@ impl LocalPackageRegistry {
 
     /// Persist the state of the index to disk
     fn save(&mut self) -> Result<(), LocalRegistryError> {
+        self.save_with_locked_operation(|| Ok(()))
+    }
+
+    fn save_with_locked_operation(
+        &mut self,
+        operation: impl FnOnce() -> Result<(), LocalRegistryError>,
+    ) -> Result<(), LocalRegistryError> {
         let persisted = PersistedIndex { packages: self.index.packages().clone() };
         let contents = toml::to_string_pretty(&persisted)?;
         let mut file = fs::File::options()
@@ -387,6 +394,8 @@ impl LocalPackageRegistry {
             }
         }
 
+        operation()?;
+
         // Compute the new checksum of the updated index contents before we write, but do not
         // update the in-memory state until we've successfully persisted the index
         let new_checksum = miden_core::crypto::hash::Sha256::hash(contents.as_bytes().trim_ascii());
@@ -401,6 +410,23 @@ impl LocalPackageRegistry {
         self.index_checksum = *new_checksum.as_bytes();
 
         Ok(())
+    }
+
+    fn register_and_save_with_locked_operation(
+        &mut self,
+        name: PackageId,
+        record: PackageRecord,
+        operation: impl FnOnce() -> Result<(), LocalRegistryError>,
+    ) -> Result<(), LocalRegistryError> {
+        let previous_packages = self.index.packages().clone();
+        self.register(name, record)?;
+        match self.save_with_locked_operation(operation) {
+            Ok(()) => Ok(()),
+            Err(error) => {
+                self.index = InMemoryPackageRegistry::from_packages(previous_packages);
+                Err(error)
+            },
+        }
     }
 
     /// Derive the path in the artifact store for a package with `digest`
@@ -519,9 +545,12 @@ impl LocalPackageRegistry {
             };
 
             if should_write_artifact {
-                fs::write(&artifact_path, bytes).map_err(LocalRegistryError::IndexWrite)?;
+                self.save_with_locked_operation(|| {
+                    fs::write(&artifact_path, bytes).map_err(LocalRegistryError::IndexWrite)
+                })?;
+            } else {
+                self.save()?;
             }
-            self.save()?;
             return Ok(PublishedPackage {
                 name: package.name.clone(),
                 version,
@@ -529,9 +558,9 @@ impl LocalPackageRegistry {
             });
         }
 
-        fs::write(&artifact_path, bytes).map_err(LocalRegistryError::IndexWrite)?;
-        self.register(package.name.clone(), record)?;
-        self.save()?;
+        self.register_and_save_with_locked_operation(package.name.clone(), record, || {
+            fs::write(&artifact_path, bytes).map_err(LocalRegistryError::IndexWrite)
+        })?;
 
         Ok(PublishedPackage {
             name: package.name.clone(),
@@ -565,13 +594,17 @@ impl LocalPackageRegistry {
 
         // Write the package artifact to the registry
         let artifact_path = self.artifact_path_for_package(&package.name, &package.version, digest);
-        fs::write(&artifact_path, bytes).map_err(LocalRegistryError::IndexWrite)?;
+        if self.index.get_by_semver(&package.name, &package.version).is_some() {
+            return Err(LocalRegistryError::DuplicateSemanticVersion {
+                package: package.name.clone(),
+                version: package.version.clone(),
+            });
+        }
 
-        // Record the new package to the in-memory registry index
-        self.register(package.name.clone(), record)?;
-
-        // Persist the updated registry index
-        self.save()?;
+        // Persist the updated registry index and artifact under the index write lock.
+        self.register_and_save_with_locked_operation(package.name.clone(), record, || {
+            fs::write(&artifact_path, bytes).map_err(LocalRegistryError::IndexWrite)
+        })?;
 
         Ok(PublishedPackage {
             name: package.name.clone(),
@@ -760,6 +793,31 @@ mod tests {
     }
 
     #[test]
+    fn stale_cache_does_not_overwrite_artifact() {
+        let tempdir = TempDir::new().unwrap();
+        let mut stale_registry = load_registry(&tempdir);
+        let mut current_registry = load_registry(&tempdir);
+
+        let package_path = tempdir.path().join("pkg.masp");
+        build_package("pkg", "1.0.0", []).write_to_file(&package_path).unwrap();
+        let published = current_registry.publish(&package_path).unwrap();
+        let original_bytes = fs::read(&published.artifact_path).unwrap();
+
+        let mut conflicting_package = build_package("pkg", "1.0.0", []);
+        conflicting_package.sections.push(Section::new(
+            SectionId::custom("stale-cache-test").unwrap(),
+            Vec::from([1, 2, 3]),
+        ));
+        assert_eq!(Some(conflicting_package.digest()), published.version.digest);
+
+        let error = stale_registry
+            .cache_package(conflicting_package.into())
+            .expect_err("stale cache should fail before writing artifact bytes");
+        assert!(matches!(error, LocalRegistryError::WriteToStaleIndex));
+        assert_eq!(fs::read(&published.artifact_path).unwrap(), original_bytes);
+    }
+
+    #[test]
     fn list_and_show_include_multiple_versions() {
         let tempdir = TempDir::new().unwrap();
         let mut registry = load_registry(&tempdir);
@@ -811,6 +869,88 @@ mod tests {
             .publish(&package_path)
             .expect_err("duplicate semver should fail even for identical bytes");
         assert!(matches!(error, LocalRegistryError::DuplicateSemanticVersion { .. }));
+    }
+
+    #[test]
+    fn publish_duplicate_semver_does_not_overwrite_artifact() {
+        let tempdir = TempDir::new().unwrap();
+        let mut registry = load_registry(&tempdir);
+
+        let package_path = tempdir.path().join("pkg.masp");
+        build_package("pkg", "1.0.0", []).write_to_file(&package_path).unwrap();
+        let published = registry.publish(&package_path).unwrap();
+        let original_bytes = fs::read(&published.artifact_path).unwrap();
+
+        let mut conflicting_package = build_package("pkg", "1.0.0", []);
+        conflicting_package
+            .sections
+            .push(Section::new(SectionId::custom("publish-test").unwrap(), Vec::from([1, 2, 3])));
+        assert_eq!(Some(conflicting_package.digest()), published.version.digest);
+        let conflicting_path = tempdir.path().join("pkg-conflicting.masp");
+        conflicting_package.write_to_file(&conflicting_path).unwrap();
+
+        let error = registry
+            .publish(&conflicting_path)
+            .expect_err("duplicate semver should fail before writing artifact bytes");
+        assert!(matches!(error, LocalRegistryError::DuplicateSemanticVersion { .. }));
+        assert_eq!(fs::read(&published.artifact_path).unwrap(), original_bytes);
+
+        let loaded = registry.load_package(&PackageId::from("pkg"), &published.version).unwrap();
+        assert!(loaded.sections.is_empty());
+    }
+
+    #[test]
+    fn stale_publish_duplicate_semver_does_not_overwrite_artifact() {
+        let tempdir = TempDir::new().unwrap();
+        let mut stale_registry = load_registry(&tempdir);
+        let mut current_registry = load_registry(&tempdir);
+
+        let package_path = tempdir.path().join("pkg.masp");
+        build_package("pkg", "1.0.0", []).write_to_file(&package_path).unwrap();
+        let published = current_registry.publish(&package_path).unwrap();
+        let original_bytes = fs::read(&published.artifact_path).unwrap();
+
+        let mut conflicting_package = build_package("pkg", "1.0.0", []);
+        conflicting_package.sections.push(Section::new(
+            SectionId::custom("stale-publish-test").unwrap(),
+            Vec::from([1, 2, 3]),
+        ));
+        assert_eq!(Some(conflicting_package.digest()), published.version.digest);
+        let conflicting_path = tempdir.path().join("pkg-conflicting.masp");
+        conflicting_package.write_to_file(&conflicting_path).unwrap();
+
+        let error = stale_registry
+            .publish(&conflicting_path)
+            .expect_err("stale publish should fail before writing artifact bytes");
+        assert!(matches!(error, LocalRegistryError::WriteToStaleIndex));
+        assert_eq!(fs::read(&published.artifact_path).unwrap(), original_bytes);
+    }
+
+    #[test]
+    fn failed_publish_artifact_write_does_not_persist_index_on_later_save() {
+        let tempdir = TempDir::new().unwrap();
+        let mut registry = load_registry(&tempdir);
+
+        let package = build_package("pkg", "1.0.0", []);
+        let package_path = tempdir.path().join("pkg.masp");
+        package.write_to_file(&package_path).unwrap();
+        let artifact_path =
+            registry.artifact_path_for_package(&package.name, &package.version, package.digest());
+        fs::create_dir(&artifact_path).unwrap();
+
+        let error = registry
+            .publish(&package_path)
+            .expect_err("artifact write should fail while the artifact path is a directory");
+        assert!(matches!(error, LocalRegistryError::IndexWrite(_)));
+        fs::remove_dir(&artifact_path).unwrap();
+
+        let other_path = tempdir.path().join("other.masp");
+        build_package("other", "1.0.0", []).write_to_file(&other_path).unwrap();
+        registry.publish(&other_path).expect("later publish should succeed");
+
+        let reloaded = load_registry(&tempdir);
+        assert!(reloaded.show(&PackageId::from("pkg"), None).is_none());
+        assert!(reloaded.show(&PackageId::from("other"), None).is_some());
     }
 
     #[test]
