@@ -342,14 +342,25 @@ mod recursive_verifier {
 
         let (store, advice_map) = build_merkle_data(config, stark);
         VerifierInputs {
-            // Initial stack matches the multi-AIR `verify` proc signature in
-            // `crates/lib/core/asm/stark/verifier.masm`:
-            //   [log(min_trace_length), log(max_trace_length), rd0, rd1, rd2, rd3, ...]
-            // The recursive verifier procedure expects them this order on entry; we push
-            // them as [log_max_trace_height, log_min_trace_height] so the test framework's
-            // last-pushed-on-top ordering yields [log_min_trace_height, log_max_trace_height]
-            // on the stack at the start of `verify`.
-            initial_stack: vec![log_max_trace_height as u64, log_min_trace_height as u64],
+            // Initial stack matches the multi-AIR `verify_proof` proc signature in
+            // `crates/lib/core/asm/sys/vm/mod.masm`:
+            //   [log(min_trace_length), log(max_trace_length)]
+            // (with log_min on TOP).
+            //
+            // `build_test!` runs `StackInputs::try_from_ints(initial_stack.to_vec())` which
+            // makes `vec[0]` the TOP of the operand stack at MASM entry (per
+            // `StackInputs::new` doc: "first element will be at position 0 (top of stack)").
+            // So we push `[log_min, log_max]` to land log_min on top.
+            //
+            // **Historical bug**: a previous comment claimed the framework was
+            // "last-pushed-on-top" and pushed `[log_max, log_min]`. With heights equal
+            // (Fibonacci-style traces, or the placeholder behavior on adr1anh/multi-air)
+            // this was invisible. With per-AIR-height divergence (e.g. precompile fixture:
+            // core=2^16, chip=2^17), `init_seed` then stored log_max at
+            // `MIN_TRACE_LENGTH_LOG_PTR` and log_min at `TRACE_LENGTH_LOG_PTR`, propagating
+            // a swapped β through the entire transcript and surfacing as
+            // `aux randomness mismatch at element 0 (beta0)`.
+            initial_stack: vec![log_min_trace_height as u64, log_max_trace_height as u64],
             advice_stack,
             store,
             advice_map,
@@ -638,15 +649,6 @@ mod fast_parallel {
     }
 
     #[test]
-    #[ignore = "EXPECTED FAIL on robin/multi-air-per-air-heights: precompile fixture has \
-                divergent heights (chip 2^17 > core 2^16) AND many kernel digests, hits a \
-                MASM-side transcript divergence at β sampling. The β-fold direction (failure 2 \
-                part 1) and per-AIR selectors (failure 2 part 2) are both implemented, but the \
-                precompile fixture exposes a third issue: the MASM verifier's transcript state \
-                diverges from the prover's BEFORE β is sampled — only when both heights differ \
-                AND there are kernel digests in VLPI. Fibonacci recursive (heights equal via \
-                clamp, no kernel digests) passes. Diagnosis pending: instrument both paths to \
-                find where rate[2..7] residue from kernel digest absorption diverges."]
     fn test_poseidon2_recursive_verify_with_precompile_requests() {
         let LoggedPrecompileProofFixture {
             program,
