@@ -1,4 +1,5 @@
 use miden_core_lib::handlers::smt_peek::SMT_PEEK_EVENT_NAME;
+use miden_crypto::merkle::smt::LEAF_DOMAIN;
 
 use super::*;
 
@@ -779,6 +780,64 @@ fn test_smt_leaf_hash_matches_merkle_store() {
             node_hash
         );
     }
+}
+
+/// Regression check: a single-entry leaf hash is domain-separated, so it must not equal the
+/// plain `merge([K, V])` that would be produced with domain 0.
+#[test]
+fn test_smt_single_leaf_hash_differs_from_plain_merge() {
+    use miden_utils_testing::crypto::Poseidon2;
+
+    let (key, value) = LEAVES[0];
+    let smt = build_smt_from_pairs(&[(key, value)]);
+
+    let leaf = smt.leaves().next().map(|(_, leaf)| leaf).unwrap();
+    let leaf_hash = leaf.hash();
+
+    let plain_merge = Poseidon2::merge(&[key, value]);
+    let domain_merge = Poseidon2::merge_in_domain(&[key, value], LEAF_DOMAIN);
+
+    assert_ne!(
+        leaf_hash, plain_merge,
+        "single-entry leaf hash must not equal plain merge([K, V])"
+    );
+    assert_eq!(
+        leaf_hash, domain_merge,
+        "single-entry leaf hash must equal merge_in_domain([K, V], LEAF_DOMAIN)"
+    );
+}
+
+/// Regression check: a multi-entry leaf hash is domain-separated, so it must not equal the
+/// plain `hash_elements` of its preimage. This would fail if the preimage check still used
+/// domain 0 on either the Rust or MASM side.
+#[test]
+fn test_smt_multi_leaf_hash_differs_from_domain_zero() {
+    use miden_utils_testing::crypto::Poseidon2;
+
+    let smt = build_smt_from_pairs(&LEAVES_MULTI);
+
+    // Find the leaf that contains multiple entries (same K[0] bucket).
+    let multi_leaf = smt
+        .leaves()
+        .map(|(_, leaf)| leaf)
+        .find(|leaf| leaf.entries().len() > 1)
+        .expect("LEAVES_MULTI must produce at least one multi-entry leaf");
+    assert!(multi_leaf.entries().len() >= 2);
+
+    let leaf_hash = multi_leaf.hash();
+    let elements: Vec<Felt> = multi_leaf.to_elements().collect();
+
+    let plain_hash = Poseidon2::hash_elements(&elements);
+    let domain_hash = Poseidon2::hash_elements_in_domain(&elements, LEAF_DOMAIN);
+
+    assert_ne!(
+        leaf_hash, plain_hash,
+        "multi-entry leaf hash must not equal plain hash_elements(preimage) (domain 0)"
+    );
+    assert_eq!(
+        leaf_hash, domain_hash,
+        "multi-entry leaf hash must equal hash_elements_in_domain(preimage, LEAF_DOMAIN)"
+    );
 }
 
 // HELPER FUNCTIONS
