@@ -74,8 +74,9 @@ const OOD_FIXED_TERM_HORNER_EVALS_PTR = 3223322660
 ### Address storing trace domain generator
 const TRACE_DOMAIN_GENERATOR_PTR = 3223322665
 
-### Address storing a pointer to variable length public inputs
-const VARIABLE_LEN_PUBLIC_INPUTS_ADDRESS_PTR = 3223322666
+### Address storing a pointer to the caller-facing reduced public inputs block
+### (kernel_H, program_digest, transcript_state — 12 base felts).
+const REDUCED_INPUTS_ADDRESS_PTR = 3223322666
 
 ### Address storing a pointer to the public inputs
 const PUBLIC_INPUTS_ADDRESS_PTR = 3223322667
@@ -91,10 +92,6 @@ const TMP2 = 3223322684
 const TMP3 = 3223322688
 const TMP4 = 3223322692
 
-### gamma = beta^MAX_MESSAGE_WIDTH for per-bus domain separation.
-### Stored as [gamma0, gamma1, 0, 0] (one extension field element, word-aligned).
-### Computed once in generate_aux_randomness, read by reduce_kernel_digests.
-const BUS_GAMMA_PTR = 3223322696
 
 ### Address to the word holding the non-deterministically loaded 2 random challenges, which will be
 ### checked for correctness once we receive the commitment to the auxiliary trace and are able to
@@ -133,52 +130,74 @@ const RANDOM_COIN_INPUT_BUF_PTR = 3223322748
 const RANDOM_COIN_INPUT_LEN_PTR = 3223322756
 const RANDOM_COIN_OUTPUT_LEN_PTR = 3223322757
 
+### Address holding the running boundary correction `c_total` computed during public-input
+### processing. Stored as a 4-felt word [c_total_0, c_total_1, 0, 0]; only the first EF pair
+### is used. Asserted to satisfy `c_total + aux_sum == 0` once `inner_c` (= aux_sum) is
+### observed in step II. See `crates/lib/core/asm/sys/vm/public_inputs.masm`.
+const C_TOTAL_PTR = 3223322760
+
 ## ACE related
 ## Starts at address 3225419776 = 2**31 + 2**30 + 2**22 and the memory region grows backward
 ## and forward, forming the ACE READ section consumed by `eval_circuit`.
 ##
 ## In the backward direction, the size is determined by the fixed-length public inputs (FLPI)
-## and the variable-length public input reductions (VLPI). These regions are laid out by
-## `compute_and_store_public_inputs_address` in `stark/public_inputs.masm`.
+## and a small caller-facing block holding the reduced variable-length public inputs.
+## These regions are laid out by `compute_and_store_public_inputs_address` in
+## `stark/public_inputs.masm`.
 ##
 ## In the forward direction, the size is determined by the OOD evaluations, aux bus boundary
 ## values, stark variables, and circuit constants.
 ##
-## ACE READ section layout (low address -> high address):
+## Caller-facing public-input layout (low address -> high address):
 ##
-##   pi_ptr -->  [  FLPI (m EF)                    ]  fixed-length public inputs
-##               [  VLPI reductions (k words)      ]  k groups, word-aligned (per-instance)
-##   anchor -->  [  aux_rand (1 word)              ]  AUX_RAND_ELEM_PTR (this address)
-##               [  OOD evaluations                ]  OOD_EVALUATIONS_PTR
-##               [  aux bus boundary               ]  AUX_BUS_BOUNDARY_PTR
-##               [  stark vars                     ]  AUXILIARY_ACE_INPUTS_PTR
-##               [  constants                      ]  ACE_CIRCUIT_STREAM_PTR
-##                                                    ... EVAL section follows ...
+##   reduced_inputs_ptr -->  [ kernel_H          (4 felts) ]  Poseidon2 hash of all kernel digests
+##                           [ zero word         (4 felts) ]  alignment pad for FS observation
+##                           [ program_digest    (4 felts) ]  natural order
+##                           [ transcript_state  (4 felts) ]  natural order
 ##
-## The FLPI and VLPI pointers are dynamic (stored at PUBLIC_INPUTS_ADDRESS_PTR and
-## VARIABLE_LEN_PUBLIC_INPUTS_ADDRESS_PTR). All other pointers are fixed constants.
+##   pi_ptr             -->  [ FLPI (m EF)               ]  fixed-length public inputs (stack i/o)
 ##
-## Relationship to ACE codegen: Each VLPI group occupies 1 word (4 base felts = 2 EF
-## slots) due to word-alignment, so `k` groups map to `k * 2` EF slots in AceConfig.
+##   anchor             -->  [ aux_rand (1 word)         ]  AUX_RAND_ELEM_PTR (this address)
+##                           [ codegen alignment pad     ]  AUX_RAND_ELEM_PTR + 4 (1 word)
+##                           [ OOD evaluations           ]  OOD_EVALUATIONS_PTR
+##                           [ aux bus boundary          ]  AUX_BUS_BOUNDARY_PTR
+##                           [ stark vars                ]  AUXILIARY_ACE_INPUTS_PTR
+##                           [ constants                 ]  ACE_CIRCUIT_STREAM_PTR
+##                                                          ... EVAL section follows ...
+##
+## After `verify_proof` returns, the 12 felts at `reduced_inputs_ptr` together with
+## the FLPI window at `pi_ptr` (read base felts at `pi_ptr + 2*i`) constitute the
+## verified public-input commitment that the caller can hash, push to the stack, etc.
+##
+## The FLPI and reduced-inputs pointers are dynamic (stored at PUBLIC_INPUTS_ADDRESS_PTR
+## and REDUCED_INPUTS_ADDRESS_PTR). All other pointers are fixed constants. The
+## reduced-inputs block is NOT part of the ACE circuit's input section — it sits just
+## below `pi_ptr` purely as a caller-facing payload.
 
 ### We use 2 extension field elements for a total of 4 base field elements.
 const AUX_RAND_ELEM_PTR = 3225419776
+
+### Reserved 1-word padding (4 base felts) between aux_rand and OOD_EVALUATIONS_PTR. The ACE
+### codegen layout (`crates/ace-codegen/src/layout/policy.rs::masm`) aligns `main_curr` to
+### double-word boundaries, which forces a 1-word gap after the word-aligned randomness slot.
+### Memory at this region is unused; fresh memory is zero so the chip reads 0s for the wires.
+### Range: AUX_RAND_ELEM_PTR + 4 .. AUX_RAND_ELEM_PTR + 7  (= 3225419780 .. 3225419783).
 
 ### OOD evaluations require a total of (72 + 16 + 16) * 2 * 2 field elements for current and next:
 ### - 72 main trace columns (padded)
 ### - 16 aux trace base columns (aux width * extension degree)
 ### - 16 quotient chunk base columns (8 chunks * extension degree)
-const OOD_EVALUATIONS_PTR = 3225419780        # AUX_RAND_ELEM_PTR + 4
+const OOD_EVALUATIONS_PTR = 3225419784        # AUX_RAND_ELEM_PTR + 4 (rand word) + 4 (codegen pad)
 
 ### Auxiliary bus boundary values (2 extension field elements = 4 base elements).
 ### TODO(#3032): The second value is always zero (placeholder for trace splitting).
-const AUX_BUS_BOUNDARY_PTR = 3225420196       # OOD_EVALUATIONS_PTR + (72 + 16 + 16) * 2 * 2
+const AUX_BUS_BOUNDARY_PTR = 3225420200       # OOD_EVALUATIONS_PTR + (72 + 16 + 16) * 2 * 2
 
 ### Auxiliary inputs for ACE (stark vars), 10 extension field elements = 20 base elements.
-const AUXILIARY_ACE_INPUTS_PTR = 3225420200   # AUX_BUS_BOUNDARY_PTR + 4
+const AUXILIARY_ACE_INPUTS_PTR = 3225420204   # AUX_BUS_BOUNDARY_PTR + 4
 
 ### Address at the start of the memory region holding the arithmetic circuit description (constants + ops).
-const ACE_CIRCUIT_STREAM_PTR = 3225420220     # AUXILIARY_ACE_INPUTS_PTR + 20
+const ACE_CIRCUIT_STREAM_PTR = 3225420224     # AUXILIARY_ACE_INPUTS_PTR + 20
 
 ### Address at the start of the evaluation-gates portion of the arithmetic circuit (EVAL section).
 const ACE_CIRCUIT_PTR = 3225420820            # ACE_CIRCUIT_STREAM_PTR + num_const_felts
@@ -412,12 +431,16 @@ pub proc get_trace_domain_generator
     push.TRACE_DOMAIN_GENERATOR_PTR mem_load
 end
 
-pub proc variable_length_public_inputs_address_ptr
-    push.VARIABLE_LEN_PUBLIC_INPUTS_ADDRESS_PTR
+pub proc reduced_inputs_address_ptr
+    push.REDUCED_INPUTS_ADDRESS_PTR
 end
 
 pub proc public_inputs_address_ptr
     push.PUBLIC_INPUTS_ADDRESS_PTR
+end
+
+pub proc c_total_ptr
+    push.C_TOTAL_PTR
 end
 
 #! Returns the pointer to the capacity word of the Poseidon2-based random coin.
@@ -461,10 +484,6 @@ end
 
 pub proc random_coin_output_len_ptr
     push.RANDOM_COIN_OUTPUT_LEN_PTR
-end
-
-pub proc bus_gamma_ptr
-    push.BUS_GAMMA_PTR
 end
 
 pub proc aux_rand_nd_ptr

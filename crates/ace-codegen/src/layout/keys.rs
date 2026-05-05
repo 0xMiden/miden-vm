@@ -18,12 +18,14 @@ pub enum InputKey {
         index: usize,
         coord: usize,
     },
-    /// Aux bus boundary value at the given index.
-    AuxBusBoundary(usize),
-    /// Variable-length public input reduction at the given group index.
-    VlpiReduction(usize),
-    /// Batching challenge gamma for combining the constraint evaluation with the
-    /// auxiliary trace boundary checks.
+    /// Committed aux-trace value exposed to the verifier at the given index.
+    ///
+    /// Mirrors the air builder's notion of "aux values": final accumulator column
+    /// values the AIR publishes alongside the proof. The ACE circuit can reference
+    /// them via `ExtEntry::PermutationValue` without needing any boundary-batching
+    /// machinery on top.
+    AuxValue(usize),
+    /// Auxiliary batching challenge reserved for future use (e.g. multi-root folding).
     Gamma,
     /// Composition challenge used to fold constraints.
     Alpha,
@@ -82,11 +84,7 @@ impl InputKeyMapper<'_> {
                     _ => None,
                 }
             },
-            InputKey::AuxBusBoundary(i) => layout.regions.aux_bus_boundary.index(i),
-            InputKey::VlpiReduction(i) => {
-                let local = i * layout.vlpi_stride;
-                layout.regions.vlpi_reductions.index(local)
-            },
+            InputKey::AuxValue(i) => layout.regions.aux_values.index(i),
             // Extension-field stark vars.
             InputKey::Alpha => Some(layout.stark.alpha),
             InputKey::ZPowN => Some(layout.stark.z_pow_n),

@@ -5,7 +5,7 @@ use alloc::{
 };
 use std::{fs, io, println};
 
-use miden_ace_codegen::{AceCircuit, AceConfig, LayoutKind};
+use miden_ace_codegen::{AceCircuit, AceConfig, LayoutKind, build_ace_circuit_for_air};
 use miden_air::ProcessorAir;
 use miden_core::{Felt, crypto::hash::Poseidon2, field::QuadFelt};
 
@@ -17,7 +17,6 @@ pub enum Mode {
 
 const MASM_CONFIG: AceConfig = AceConfig {
     num_quotient_chunks: 8,
-    num_vlpi_groups: 1,
     layout: LayoutKind::Masm,
 };
 pub const RELATION_DIGEST_PATHS: (&str, &str) =
@@ -28,11 +27,10 @@ const AIR_CONFIG_PATH: &str = "../../../air/src/config.rs";
 const CONSTRAINTS_EVAL_PATH: &str = "asm/sys/vm/constraints_eval.masm";
 const RELATION_DIGEST_PATH: &str = RELATION_DIGEST_PATHS.0;
 
-/// Builds the batched ACE circuit used by the Miden VM recursive verifier.
-pub fn build_batched_circuit(config: AceConfig) -> AceCircuit<QuadFelt> {
+/// Builds the ACE circuit used by the Miden VM recursive verifier.
+pub fn build_circuit(config: AceConfig) -> AceCircuit<QuadFelt> {
     let air = ProcessorAir;
-    let batch_config = miden_air::ace::logup_boundary_config();
-    miden_air::ace::build_batched_ace_circuit::<_, QuadFelt>(&air, config, &batch_config).unwrap()
+    build_ace_circuit_for_air::<_, Felt, QuadFelt>(&air, config).unwrap()
 }
 
 /// Computes the relation digest used by recursive verification.
@@ -68,7 +66,7 @@ fn check() -> Result<(), String> {
 
 /// Generate a full computed snapshot from the current AIR.
 fn compute_artifacts() -> io::Result<ComputedArtifacts> {
-    let circuit = build_batched_circuit(MASM_CONFIG);
+    let circuit = build_circuit(MASM_CONFIG);
     let encoded = circuit.to_ace().unwrap();
 
     let num_inputs = encoded.num_vars();

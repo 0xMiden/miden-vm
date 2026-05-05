@@ -12,7 +12,10 @@ use miden::core::stark::random_coin
 #!   [commitment, W0]
 #!
 #! The commitment is stored at aux_trace_com_ptr and the boundary values at
-#! aux_bus_boundary_ptr.
+#! aux_bus_boundary_ptr. Once `inner_c` (= aux_sum) is in memory, this procedure asserts the
+#! outer-LogUp closure identity `c_total + aux_sum == 0`, where `c_total` was reduced into
+#! C_TOTAL_PTR during step I (`process_public_inputs`). Note that `aux_values[1..]` are zero
+#! placeholders (TODO #3032), so `aux_sum` collapses to the first EF pair `inner_c`.
 #!
 #! Precondition:  input_len=0 (guaranteed by the preceding reseed_direct in the generic verifier).
 #! Postcondition: input_len=0, output_len=8.
@@ -53,4 +56,17 @@ pub proc observe_aux_trace
 
     # Mark output buffer as full (8 elements available for sampling).
     push.8 exec.constants::random_coin_output_len_ptr mem_store
+
+    # --- Boundary check: assert (c_total + aux_sum) == 0 coordinate-wise. ---
+    # aux_sum = aux_values[0] + aux_values[1] = inner_c + 0 = inner_c (placeholder is zero).
+    exec.constants::c_total_ptr add.1 mem_load
+    exec.constants::c_total_ptr mem_load
+    # => [c_total_0, c_total_1, ...]
+    exec.constants::aux_bus_boundary_ptr add.1 mem_load
+    exec.constants::aux_bus_boundary_ptr mem_load
+    # => [inner_c_0, inner_c_1, c_total_0, c_total_1, ...]
+    ext2add
+    # => [sum_0, sum_1, ...]
+    push.0 assert_eq.err="aux bus boundary mismatch: c_total + aux_sum coord 0"
+    push.0 assert_eq.err="aux bus boundary mismatch: c_total + aux_sum coord 1"
 end

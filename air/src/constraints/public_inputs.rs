@@ -14,8 +14,9 @@ use crate::{MainCols, MidenAirBuilder};
 const STACK_DEPTH: usize = 16;
 
 /// Number of public values at the tail of the public_values slice
-/// (stack_inputs + stack_outputs + pc_transcript_state).
-const TAIL_LEN: usize = STACK_DEPTH + STACK_DEPTH + 4;
+/// (stack_inputs + stack_outputs). Program hash and pc_transcript_state now live in the
+/// variable-length public inputs (see `PublicInputs::to_air_inputs`).
+const TAIL_LEN: usize = STACK_DEPTH + STACK_DEPTH;
 
 // ENTRY POINTS
 // ================================================================================================

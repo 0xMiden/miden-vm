@@ -10,12 +10,17 @@
 //! the denominator
 //!
 //! ```text
-//!     bus_prefix[bus] + Σ_{k=0..width} β^k · values[k]
+//!     bus_prefix[bus] + Σ_{k=0..width} β^(k+1) · values[k]
 //! ```
 //!
-//! where `bus_prefix[i] = α + (i + 1) · β^W` is precomputed at builder construction time
-//! and `W = MAX_MESSAGE_WIDTH`. Interaction-specific bus prefixes provide domain separation;
-//! payloads then begin directly at `β⁰`.
+//! where `bus_prefix[i] = α + (i + 1)` is a pure scalar offset precomputed at builder
+//! construction time — no β power is involved. Payloads occupy `β¹..β^W`
+//! (`W = MAX_MESSAGE_WIDTH`), leaving the `β⁰ = 1` slot for the scalar bus identifier so
+//! distinct `(bus, payload)` tuples cannot collide.
+//!
+//! The [`Challenges::beta_powers`](crate::lookup::Challenges::beta_powers) table is shifted
+//! to match: `beta_powers[k] = β^(k+1)`, so message bodies can keep writing
+//! `challenges.beta_powers[k] * values[k]` as if `k` were the payload index.
 //!
 //! The bus identifier is a `usize` chosen by the caller (typically an enum variant cast
 //! to `usize`); it picks out `bus_prefix[bus]` as the additive base.

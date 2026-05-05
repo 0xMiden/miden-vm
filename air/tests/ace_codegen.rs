@@ -18,7 +18,6 @@ fn processor_air_dag_matches_manual_eval() {
     let air = ProcessorAir;
     let config = AceConfig {
         num_quotient_chunks: 2,
-        num_vlpi_groups: 0,
         layout: LayoutKind::Native,
     };
     let artifacts = build_ace_dag_for_air::<_, Felt, QuadFelt>(&air, config).unwrap();
@@ -63,12 +62,10 @@ fn processor_air_dag_rejects_mismatched_layout() {
     let air = ProcessorAir;
     let dag_config = AceConfig {
         num_quotient_chunks: 8,
-        num_vlpi_groups: 0,
         layout: LayoutKind::Native,
     };
     let layout_config = AceConfig {
         num_quotient_chunks: 1,
-        num_vlpi_groups: 0,
         layout: LayoutKind::Native,
     };
 
@@ -90,7 +87,6 @@ fn processor_air_chiplet_rows() {
     let air = ProcessorAir;
     let config = AceConfig {
         num_quotient_chunks: 8,
-        num_vlpi_groups: 1,
         layout: LayoutKind::Masm,
     };
 
@@ -115,7 +111,6 @@ fn processor_air_chiplet_rows() {
 fn synthetic_ood_adjusts_quotient_to_zero() {
     let config = AceConfig {
         num_quotient_chunks: 8,
-        num_vlpi_groups: 0,
         layout: LayoutKind::Masm,
     };
 
@@ -145,7 +140,6 @@ fn synthetic_ood_adjusts_quotient_to_zero() {
 fn quotient_next_inputs_do_not_affect_eval() {
     let config = AceConfig {
         num_quotient_chunks: 8,
-        num_vlpi_groups: 0,
         layout: LayoutKind::Masm,
     };
 

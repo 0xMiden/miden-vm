@@ -159,7 +159,7 @@ where
                     }
                 },
                 ExtEntry::PermutationValue => {
-                    let key = InputKey::AuxBusBoundary(v.index);
+                    let key = InputKey::AuxValue(v.index);
                     inputs[layout.index(key).unwrap()]
                 },
             },

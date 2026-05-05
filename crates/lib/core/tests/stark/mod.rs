@@ -188,47 +188,56 @@ fn fib_stack_inputs() -> Vec<u64> {
 // VARIABLE LENGTH PUBLIC INPUTS TESTS
 // ================================================================================================
 
+// OUTER LOGUP BOUNDARY CORRECTION TESTS
+// ================================================================================================
+
 #[rstest]
 #[case(0)]
 #[case(1)]
-#[case(2)]
 #[case(3)]
 #[case(8)]
-#[case(1000)]
-fn variable_length_public_inputs(#[case] num_kernel_proc_digests: usize) {
-    // init_seed expects [log(trace_length), rd0, rd1, rd2, rd3, ...]
+fn outer_logup_correction(#[case] num_kernel_proc_digests: usize) {
+    // Validates that MASM's `process_public_inputs` computes
+    //   c_total = c_kr + 1/d_bh + 1/d_lp_init − 1/d_lp_final
+    // and stores it at C_TOTAL_PTR.
+    //
+    // Advice ordering (matching `verifier_recursive::build_advice`):
+    //   α/β (4) | N | kernel_digests canonical (4N) | program_digest (4) |
+    //   transcript_state (4) | stack_inputs (16) | stack_outputs (16).
+
     let log_trace_length = 10_u64;
-    // Relation digest values are arbitrary here; the test only validates VLPI reduction.
     let rd = [1_u64, 2, 3, 4];
     let initial_stack = vec![log_trace_length, rd[0], rd[1], rd[2], rd[3]];
 
-    let seed = [0_u8; 32];
+    let seed = [7_u8; 32];
     let mut rng = ChaCha20Rng::from_seed(seed);
 
-    // 1) Generate fixed-length public inputs
-    let input_operand_stack: [u64; 16] = array::from_fn(|_| rng.next_u64());
-    let output_operand_stack: [u64; 16] = array::from_fn(|_| rng.next_u64());
+    // 1) Fixed-length public inputs (stack i/o only).
+    let stack_inputs: [u64; 16] = array::from_fn(|_| rng.next_u64());
+    let stack_outputs: [u64; 16] = array::from_fn(|_| rng.next_u64());
+
+    // 2) VLPI canonical digests (program_digest, transcript_state, kernel_digests).
     let program_digest: [u64; 4] = array::from_fn(|_| rng.next_u64());
-
-    let mut fixed_length_public_inputs = input_operand_stack.to_vec();
-    fixed_length_public_inputs.extend_from_slice(&output_operand_stack);
-    fixed_length_public_inputs.extend_from_slice(&program_digest);
-    fixed_length_public_inputs.resize(fixed_length_public_inputs.len().next_multiple_of(8), 0);
-
-    // 2) Generate the variable-length public inputs (kernel procedure digests)
+    let transcript_state: [u64; 4] = array::from_fn(|_| rng.next_u64());
     let kernel_procedures_digests =
         generate_kernel_procedures_digests(&mut rng, num_kernel_proc_digests);
 
-    // 3) Generate the auxiliary randomness
+    // 3) Aux randomness [β0, β1, α0, α1].
     let auxiliary_rand_values: [u64; 4] = array::from_fn(|_| rng.next_u64());
 
-    // 4) Build the advice stack
-    let mut advice_stack = fixed_length_public_inputs.clone();
+    // 4) Build advice stack in MASM consumption order: α/β | num_kernel + kernel_digests canonical
+    //    | program_digest | transcript_state | stack_io.
+    let mut advice_stack = Vec::new();
+    advice_stack.extend_from_slice(&auxiliary_rand_values);
     advice_stack.push(num_kernel_proc_digests as u64);
     advice_stack.extend_from_slice(&kernel_procedures_digests);
-    advice_stack.extend_from_slice(&auxiliary_rand_values);
+    advice_stack.extend_from_slice(&program_digest);
+    advice_stack.extend_from_slice(&transcript_state);
+    advice_stack.extend_from_slice(&stack_inputs);
+    advice_stack.extend_from_slice(&stack_outputs);
 
-    // 5) Compute the expected reduced value
+    // 5) Rust reference: mirror `Challenges::encode` (bus_prefix = α + (BusId+1), payload at
+    //    β^1..β^K, no γ-shift) and the boundary identity from `emit_miden_boundary`.
     let beta = QuadFelt::new([
         Felt::new_unchecked(auxiliary_rand_values[0]),
         Felt::new_unchecked(auxiliary_rand_values[1]),
@@ -238,10 +247,16 @@ fn variable_length_public_inputs(#[case] num_kernel_proc_digests: usize) {
         Felt::new_unchecked(auxiliary_rand_values[3]),
     ]);
 
-    let reduced_value = reduce_kernel_procedures_digests(&kernel_procedures_digests, alpha, beta);
-    let coeffs: &[Felt] = reduced_value.as_basis_coefficients_slice();
+    let expected = expected_outer_logup(
+        &program_digest,
+        &transcript_state,
+        &kernel_procedures_digests,
+        alpha,
+        beta,
+    );
+    let expected_coeffs: &[Felt] = expected.as_basis_coefficients_slice();
 
-    // 6) Run process_public_inputs and verify the reduced value in memory
+    // 6) Run process_public_inputs and read c_total from C_TOTAL_PTR.
     let source = "
         use miden::core::stark::random_coin
         use miden::core::stark::constants
@@ -259,78 +274,99 @@ fn variable_length_public_inputs(#[case] num_kernel_proc_digests: usize) {
     use miden_processor::ContextId;
     let ctx = ContextId::root();
 
-    // Read reduced kernel value from var_len_ptr (in ACE READ section)
-    let var_len_addr_ptr = 3223322666_u32; // VARIABLE_LEN_PUBLIC_INPUTS_ADDRESS_PTR
-    let var_len_ptr = output
-        .memory
-        .read_element(ctx, Felt::from_u32(var_len_addr_ptr))
-        .unwrap()
-        .as_canonical_u64() as u32;
-    let masm_0 = output.memory.read_element(ctx, Felt::from_u32(var_len_ptr)).unwrap();
-    let masm_1 = output.memory.read_element(ctx, Felt::from_u32(var_len_ptr + 1)).unwrap();
+    // C_TOTAL_PTR (see stark/constants.masm). c_total stored as 2 contiguous felts.
+    let c_total_ptr = 3223322760_u32;
+    let masm_0 = output.memory.read_element(ctx, Felt::from_u32(c_total_ptr)).unwrap();
+    let masm_1 = output.memory.read_element(ctx, Felt::from_u32(c_total_ptr + 1)).unwrap();
 
     assert_eq!(
         masm_0.as_canonical_u64(),
-        coeffs[0].as_canonical_u64(),
-        "kernel_reduced coord 0 mismatch (nk={num_kernel_proc_digests})"
+        expected_coeffs[0].as_canonical_u64(),
+        "c_total coord 0 mismatch (nk={num_kernel_proc_digests})"
     );
     assert_eq!(
         masm_1.as_canonical_u64(),
-        coeffs[1].as_canonical_u64(),
-        "kernel_reduced coord 1 mismatch (nk={num_kernel_proc_digests})"
+        expected_coeffs[1].as_canonical_u64(),
+        "c_total coord 1 mismatch (nk={num_kernel_proc_digests})"
     );
 }
 
 // HELPERS
 // ===============================================================================================
 
+/// Rust reference for the outer LogUp boundary correction; mirrors `emit_miden_boundary` and
+/// `Challenges::encode`. Each denominator is `(α + BusId + 1) + β · horner4(payload, β)` with
+/// BusIds: KernelRomInit = 0, BlockHashTable = 1, LogPrecompileTranscript = 2.
+fn expected_outer_logup(
+    program_digest: &[u64; 4],
+    transcript_state: &[u64; 4],
+    kernel_digests_canonical: &[u64],
+    alpha: QuadFelt,
+    beta: QuadFelt,
+) -> QuadFelt {
+    let bp_kernel_rom_init = alpha + QuadFelt::from(Felt::new_unchecked(1));
+    let bp_block_hash = alpha + QuadFelt::from(Felt::new_unchecked(2));
+    let bp_log_precompile = alpha + QuadFelt::from(Felt::new_unchecked(3));
+
+    // β · horner4(payload, β) over a canonical 4-felt digest.
+    let beta_shifted_horner = |payload: &[u64; 4]| -> QuadFelt {
+        let h: QuadFelt = payload
+            .iter()
+            .rev()
+            .fold(QuadFelt::ZERO, |acc, p| acc * beta + QuadFelt::from(Felt::new_unchecked(*p)));
+        beta * h
+    };
+
+    let d_bh = bp_block_hash + beta_shifted_horner(program_digest);
+    let d_lp_init = bp_log_precompile;
+    let d_lp_final = bp_log_precompile + beta_shifted_horner(transcript_state);
+
+    let c_kr = reduce_kernel_procedures_digests(kernel_digests_canonical, bp_kernel_rom_init, beta);
+    c_kr + d_bh.try_inverse().expect("d_bh zero") + d_lp_init.try_inverse().expect("d_lp_init zero")
+        - d_lp_final.try_inverse().expect("d_lp_final zero")
+}
+
 /// Generates a vector with a specific number of kernel procedures digests given a `Rng`.
 ///
-/// The digests are padded to the next multiple of 8 and are reversed. This is done in order to
-/// make reducing these, in the recursive verifier, faster using Horner evaluation.
+/// Each digest is emitted as 4 canonical felts. The MASM verifier appends a zero word to each
+/// digest in-place to form the 8-felt sponge block.
 fn generate_kernel_procedures_digests<R: Rng>(
     rng: &mut R,
     num_kernel_proc_digests: usize,
 ) -> Vec<u64> {
-    let num_elements_kernel_proc_digests = num_kernel_proc_digests * 2 * WORD_SIZE;
-
-    let mut kernel_proc_digests: Vec<u64> = Vec::with_capacity(num_elements_kernel_proc_digests);
+    let mut kernel_proc_digests: Vec<u64> = Vec::with_capacity(num_kernel_proc_digests * WORD_SIZE);
 
     (0..num_kernel_proc_digests).for_each(|_| {
         let digest: [u64; WORD_SIZE] = array::from_fn(|_| rng.next_u64());
-        let mut digest = digest.to_vec();
-        digest.resize(WORD_SIZE * 2, 0);
-        digest.reverse();
         kernel_proc_digests.extend_from_slice(&digest);
     });
 
     kernel_proc_digests
 }
 
+/// Reduces all kernel digests (each given as 4 canonical felts) into
+/// `Σ_i 1 / ((α + 1) + β · horner4(d_i, β))`.
 fn reduce_kernel_procedures_digests(
-    kernel_procedures_digests: &[u64],
-    alpha: QuadFelt,
+    kernel_digests_canonical: &[u64],
+    bus_prefix: QuadFelt,
     beta: QuadFelt,
 ) -> QuadFelt {
-    // kernel_corr = Σ_i 1 / term_i  (MASM: chiplet removes, boundary adds — no negation).
-    kernel_procedures_digests
-        .chunks(2 * WORD_SIZE)
-        .map(|digest| reduce_digest(digest, alpha, beta))
+    kernel_digests_canonical
+        .chunks(WORD_SIZE)
+        .map(|digest| reduce_digest(digest, bus_prefix, beta))
         .fold(QuadFelt::ZERO, |acc, term| {
             acc + term.try_inverse().expect("zero kernel ROM denominator")
         })
 }
 
-fn reduce_digest(digest: &[u64], alpha: QuadFelt, beta: QuadFelt) -> QuadFelt {
-    // gamma = beta^MAX_MESSAGE_WIDTH = beta^16
-    let gamma = (0..16).fold(QuadFelt::ONE, |acc, _| acc * beta);
-    // KERNEL_ROM_INIT = 0, so bus_prefix = alpha + (0+1) * gamma = alpha + gamma
-    let bus_prefix = alpha + gamma;
-    // Horner evaluation matches MASM `horner_eval_base` over the 8-element reversed digest.
-    bus_prefix
-        + digest.iter().fold(QuadFelt::ZERO, |acc, coef| {
-            acc * beta + QuadFelt::from(Felt::new_unchecked(*coef))
-        })
+/// Computes `term = bus_prefix + β · horner4(d, β)` for a single 4-felt canonical digest.
+fn reduce_digest(digest: &[u64], bus_prefix: QuadFelt, beta: QuadFelt) -> QuadFelt {
+    // Horner from highest-degree coefficient down: acc = d0 + d1·β + d2·β² + d3·β³.
+    let h = digest.iter().rev().fold(QuadFelt::ZERO, |acc, coef| {
+        acc * beta + QuadFelt::from(Felt::new_unchecked(*coef))
+    });
+    // Multiply by β to shift payload to β^1..β^4 (matches `Challenges::encode`).
+    bus_prefix + beta * h
 }
 
 // CONSTANTS

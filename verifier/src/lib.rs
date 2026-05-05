@@ -8,10 +8,8 @@ extern crate std;
 use alloc::{boxed::Box, vec::Vec};
 
 use miden_air::{ProcessorAir, PublicInputs, config};
-use miden_core::{Felt, WORD_SIZE, field::QuadFelt};
-use miden_crypto::stark::{
-    StarkConfig, air::VarLenPublicInputs, challenger::CanObserve, lmcs::Lmcs, proof::StarkProof,
-};
+use miden_core::{Felt, field::QuadFelt};
+use miden_crypto::stark::{StarkConfig, lmcs::Lmcs, proof::StarkProof};
 use serde::de::DeserializeOwned;
 
 // RE-EXPORTS
@@ -138,30 +136,28 @@ fn verify_stark(
 
     let pub_inputs =
         PublicInputs::new(program_info, stack_inputs, stack_outputs, pc_transcript_state);
-    let (public_values, kernel_felts) = pub_inputs.to_air_inputs();
-    let var_len_public_inputs: &[&[Felt]] = &[&kernel_felts];
 
     let params = config::pcs_params();
     match hash_fn {
         HashFunction::Blake3_256 => {
             let config = config::blake3_256_config(params);
-            verify_stark_proof(&config, &public_values, var_len_public_inputs, &proof_bytes)
+            verify_stark_proof(&config, &pub_inputs, &proof_bytes)
         },
         HashFunction::Rpo256 => {
             let config = config::rpo_config(params);
-            verify_stark_proof(&config, &public_values, var_len_public_inputs, &proof_bytes)
+            verify_stark_proof(&config, &pub_inputs, &proof_bytes)
         },
         HashFunction::Rpx256 => {
             let config = config::rpx_config(params);
-            verify_stark_proof(&config, &public_values, var_len_public_inputs, &proof_bytes)
+            verify_stark_proof(&config, &pub_inputs, &proof_bytes)
         },
         HashFunction::Poseidon2 => {
             let config = config::poseidon2_config(params);
-            verify_stark_proof(&config, &public_values, var_len_public_inputs, &proof_bytes)
+            verify_stark_proof(&config, &pub_inputs, &proof_bytes)
         },
         HashFunction::Keccak => {
             let config = config::keccak_config(params);
-            verify_stark_proof(&config, &public_values, var_len_public_inputs, &proof_bytes)
+            verify_stark_proof(&config, &pub_inputs, &proof_bytes)
         },
     }
     .map_err(|e| VerificationError::StarkVerificationError(program_hash, Box::new(e)))?;
@@ -195,14 +191,14 @@ pub enum StarkVerificationError {
     Verifier(#[from] miden_crypto::stark::verifier::VerifierError),
 }
 
-/// Verifies a STARK proof for the given public values.
+/// Verifies a STARK proof for the given public inputs.
 ///
-/// Pre-seeds the challenger with `public_values`, then delegates to the lifted
-/// verifier.
+/// Pre-seeds the challenger with `pub_inputs` (via [`PublicInputs::observe`]) and derives
+/// the slice-shaped `public_values` / `var_len_public_inputs` consumed by the lifted
+/// verifier from the same typed `pub_inputs`.
 fn verify_stark_proof<SC>(
     config: &SC,
-    public_values: &[Felt],
-    var_len_public_inputs: VarLenPublicInputs<'_, Felt>,
+    pub_inputs: &PublicInputs,
     proof_bytes: &[u8],
 ) -> Result<(), StarkVerificationError>
 where
@@ -214,13 +210,14 @@ where
 
     let mut challenger = config.challenger();
     config::observe_protocol_params(&mut challenger);
-    challenger.observe_slice(public_values);
-    config::observe_var_len_public_inputs(&mut challenger, var_len_public_inputs, &[WORD_SIZE]);
+    pub_inputs.observe(&mut challenger);
+
+    let (public_values, vlpi) = pub_inputs.to_air_inputs();
     miden_crypto::stark::verifier::verify_single(
         config,
         &ProcessorAir,
-        public_values,
-        var_len_public_inputs,
+        &public_values,
+        &vlpi,
         &proof,
         challenger,
     )?;

@@ -36,12 +36,14 @@ fn reduce_kernel_digests_upper_bound() {
     //   Memory: num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits
     //
     // process_public_inputs advice stack (consumed in order):
-    //   1. load_public_inputs: 40 fixed-length PI felts (5 iterations of 8)
-    //   2. reduce_variable_length_public_inputs:
-    //        - 1 felt (num_kernel_proc_digests)
-    //        - num_kernel_proc_digests * 8 felts (digests via adv_pipe)
-    //        - 4 felts (aux randomness via adv_loadw)
-    //   3. reduce_kernel_digests asserts num_kernel_proc_digests < 1024
+    //   1. 4 felts: aux randomness β0,β1,α0,α1
+    //   2. 1 felt: num_kernel_proc_digests
+    //   3. num_kernel_proc_digests * 4 felts (kernel digests, canonical)
+    //   4. 4 felts: program_digest (canonical)
+    //   5. 4 felts: transcript_state (canonical)
+    //   6. 32 fixed-length PI felts (stack i/o)
+    //
+    // The streaming kernel-digest loop asserts num_kernel_proc_digests < 1024.
     let source = "
         use miden::core::stark::random_coin
         use miden::core::stark::constants
@@ -58,18 +60,20 @@ fn reduce_kernel_digests_upper_bound() {
     ";
 
     let num_kernel_proc_digests = 1024_usize;
-    let num_elements_kernel_proc_digests = num_kernel_proc_digests * WORD_SIZE.next_multiple_of(8);
-    let fixed_length_public_inputs = vec![0_u64; 40];
-    let kernel_procedures_digests = vec![0_u64; num_elements_kernel_proc_digests];
+    let num_elements_kernel_proc_digests = num_kernel_proc_digests * WORD_SIZE;
     let auxiliary_rand_values = [0_u64; 4];
+    let kernel_procedures_digests = vec![0_u64; num_elements_kernel_proc_digests];
+    let program_digest = [0_u64; WORD_SIZE];
+    let transcript_state = [0_u64; WORD_SIZE];
+    let fixed_length_public_inputs = vec![0_u64; 32];
 
-    // Advice layout (consumed top-to-bottom):
-    //   40 fixed-len PI, 1 num_kernel_proc_digests, 8192 digest felts, 4 aux rand
     let mut advice_stack = Vec::new();
-    advice_stack.extend_from_slice(&fixed_length_public_inputs);
+    advice_stack.extend_from_slice(&auxiliary_rand_values);
     advice_stack.push(num_kernel_proc_digests as u64);
     advice_stack.extend_from_slice(&kernel_procedures_digests);
-    advice_stack.extend_from_slice(&auxiliary_rand_values);
+    advice_stack.extend_from_slice(&program_digest);
+    advice_stack.extend_from_slice(&transcript_state);
+    advice_stack.extend_from_slice(&fixed_length_public_inputs);
 
     let test = build_test!(source, &[], &advice_stack);
     expect_assert_error_message!(test);

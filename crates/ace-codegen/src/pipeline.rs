@@ -38,11 +38,6 @@ pub enum LayoutKind {
 pub struct AceConfig {
     /// Number of quotient chunks used by the AIR.
     pub num_quotient_chunks: usize,
-    /// Number of variable-length public input groups.
-    /// Each group produces one reduced extension field element.
-    /// The layout policy handles alignment (e.g., MASM word-aligns each group to
-    /// 2 EF slots; Native uses 1 EF slot per group).
-    pub num_vlpi_groups: usize,
     /// Layout policy (Native vs Masm).
     pub layout: LayoutKind,
 }
@@ -140,20 +135,11 @@ where
         "AIR must declare exactly 2 randomness challenges (alpha, beta), got {num_randomness}"
     );
 
-    // Convert logical VLPI groups to EF slots based on layout policy.
-    // MASM word-aligns each group (4 base felts = 2 EF slots per group).
-    // Native uses 1 EF slot per group (no padding).
-    let num_vlpi = match config.layout {
-        LayoutKind::Masm => config.num_vlpi_groups * 2,
-        LayoutKind::Native => config.num_vlpi_groups,
-    };
-
     InputCounts {
         width: air.width(),
         aux_width: air.aux_width(),
-        num_aux_boundary: air.num_aux_values(),
+        num_aux_values: air.num_aux_values(),
         num_public: air.num_public_values(),
-        num_vlpi,
         num_randomness,
         num_periodic,
         num_quotient_chunks: config.num_quotient_chunks,

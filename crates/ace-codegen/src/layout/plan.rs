@@ -22,14 +22,11 @@ pub struct InputCounts {
     pub width: usize,
     /// Width of the aux trace.
     pub aux_width: usize,
-    /// Number of committed boundary values (accumulator column finals).
-    pub num_aux_boundary: usize,
+    /// Number of committed aux-trace values the verifier receives (mirrors
+    /// `LiftedAir::num_aux_values`).
+    pub num_aux_values: usize,
     /// Number of public inputs.
     pub num_public: usize,
-    /// Number of variable-length public input (VLPI) reduction slots (in EF elements).
-    /// This is derived from `AceConfig::num_vlpi_groups` by the layout policy:
-    /// MASM expands each group to 2 EF slots (word-aligned); Native uses 1 per group.
-    pub num_vlpi: usize,
     /// Number of randomness challenges used by the AIR.
     pub num_randomness: usize,
     /// Number of periodic columns.
@@ -43,8 +40,6 @@ pub struct InputCounts {
 pub(crate) struct LayoutRegions {
     /// Region containing fixed-length public values.
     pub public_values: InputRegion,
-    /// Region containing variable-length public input reductions.
-    pub vlpi_reductions: InputRegion,
     /// Region containing randomness inputs (alpha, beta).
     pub randomness: InputRegion,
     /// Main trace OOD values at `zeta`.
@@ -59,8 +54,8 @@ pub(crate) struct LayoutRegions {
     pub aux_next: InputRegion,
     /// Quotient chunk OOD coordinates at `g * zeta`.
     pub quotient_next: InputRegion,
-    /// Aux bus boundary values.
-    pub aux_bus_boundary: InputRegion,
+    /// Committed aux-trace values exposed to the verifier.
+    pub aux_values: InputRegion,
     /// Stark variables (selectors, powers, weights).
     pub stark_vars: InputRegion,
 }
@@ -113,8 +108,6 @@ pub struct InputLayout {
     pub(crate) aux_rand_alpha: usize,
     /// Input index for aux randomness beta.
     pub(crate) aux_rand_beta: usize,
-    /// Stride between logical VLPI groups (2 for MASM word-aligned, 1 for native).
-    pub(crate) vlpi_stride: usize,
     /// Indexes into the stark-vars region.
     pub(crate) stark: StarkVarIndices,
     /// Total number of inputs (length of the READ section).
@@ -138,7 +131,6 @@ impl InputLayout {
         let mut max_end = 0usize;
         for region in [
             self.regions.public_values,
-            self.regions.vlpi_reductions,
             self.regions.randomness,
             self.regions.main_curr,
             self.regions.aux_curr,
@@ -146,7 +138,7 @@ impl InputLayout {
             self.regions.main_next,
             self.regions.aux_next,
             self.regions.quotient_next,
-            self.regions.aux_bus_boundary,
+            self.regions.aux_values,
             self.regions.stark_vars,
         ] {
             max_end = max_end.max(region.offset.saturating_add(region.width));
@@ -168,8 +160,8 @@ impl InputLayout {
             "quotient_next width mismatch"
         );
         assert_eq!(
-            self.regions.aux_bus_boundary.width, self.counts.num_aux_boundary,
-            "aux bus boundary width mismatch"
+            self.regions.aux_values.width, self.counts.num_aux_values,
+            "aux_values width mismatch"
         );
 
         let stark_start = self.regions.stark_vars.offset;

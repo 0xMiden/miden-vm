@@ -12,13 +12,11 @@ enum Alignment {
 #[derive(Clone, Copy)]
 struct LayoutPolicy {
     public_values: Alignment,
-    vlpi: Alignment,
-    vlpi_stride: usize,
     randomness: Alignment,
     main: Alignment,
     aux: Alignment,
     quotient: Alignment,
-    aux_bus_boundary: Alignment,
+    aux_values: Alignment,
     stark_vars: Alignment,
     end_align: Option<Alignment>,
 }
@@ -27,13 +25,11 @@ impl LayoutPolicy {
     fn native() -> Self {
         Self {
             public_values: Alignment::Unaligned,
-            vlpi: Alignment::Unaligned,
-            vlpi_stride: 1,
             randomness: Alignment::Unaligned,
             main: Alignment::Unaligned,
             aux: Alignment::Unaligned,
             quotient: Alignment::Unaligned,
-            aux_bus_boundary: Alignment::Unaligned,
+            aux_values: Alignment::Unaligned,
             stark_vars: Alignment::Unaligned,
             end_align: None,
         }
@@ -42,13 +38,11 @@ impl LayoutPolicy {
     fn masm() -> Self {
         Self {
             public_values: Alignment::QuadWord,
-            vlpi: Alignment::Word,
-            vlpi_stride: 2,
             randomness: Alignment::Word,
             main: Alignment::DoubleWord,
             aux: Alignment::DoubleWord,
             quotient: Alignment::DoubleWord,
-            aux_bus_boundary: Alignment::Word,
+            aux_values: Alignment::Word,
             stark_vars: Alignment::Word,
             end_align: Some(Alignment::Word),
         }
@@ -96,7 +90,6 @@ impl InputLayout {
         let mut builder = LayoutBuilder::new();
 
         let public_values = builder.alloc(counts.num_public, policy.public_values);
-        let vlpi_reductions = builder.alloc(counts.num_vlpi, policy.vlpi);
         /// Number of randomness inputs (alpha + beta).
         const NUM_RANDOMNESS_INPUTS: usize = 2;
         let randomness = builder.alloc(NUM_RANDOMNESS_INPUTS, policy.randomness);
@@ -108,7 +101,7 @@ impl InputLayout {
         let main_next = builder.alloc(counts.width, policy.main);
         let aux_next = builder.alloc(aux_coord_width, policy.aux);
         let quotient_next = builder.alloc(counts.num_quotient_chunks * EXT_DEGREE, policy.quotient);
-        let aux_bus_boundary = builder.alloc(counts.num_aux_boundary, policy.aux_bus_boundary);
+        let aux_values = builder.alloc(counts.num_aux_values, policy.aux_values);
 
         let stark_vars = builder.alloc(NUM_STARK_VARS, policy.stark_vars);
 
@@ -148,7 +141,6 @@ impl InputLayout {
         Self {
             regions: LayoutRegions {
                 public_values,
-                vlpi_reductions,
                 randomness,
                 main_curr,
                 aux_curr,
@@ -156,12 +148,11 @@ impl InputLayout {
                 main_next,
                 aux_next,
                 quotient_next,
-                aux_bus_boundary,
+                aux_values,
                 stark_vars,
             },
             aux_rand_alpha,
             aux_rand_beta,
-            vlpi_stride: policy.vlpi_stride,
             stark: StarkVarIndices {
                 alpha,
                 z_pow_n,
@@ -177,57 +168,5 @@ impl InputLayout {
             total_inputs: builder.offset,
             counts,
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::super::{InputCounts, InputKey, InputLayout};
-
-    #[test]
-    fn masm_layout_vlpi_groups_use_word_stride() {
-        let counts = InputCounts {
-            width: 1,
-            aux_width: 1,
-            num_aux_boundary: 1,
-            num_public: 8,
-            // Two logical VLPI groups in MASM occupy four EF slots total:
-            // [group0, pad0, group1, pad1].
-            num_vlpi: 4,
-            num_randomness: 2,
-            num_periodic: 0,
-            num_quotient_chunks: 1,
-        };
-        let layout = InputLayout::new_masm(counts);
-
-        let vlpi_base = layout.index(InputKey::VlpiReduction(0)).unwrap();
-        assert_eq!(layout.index(InputKey::VlpiReduction(0)), Some(vlpi_base));
-        assert_eq!(
-            layout.index(InputKey::VlpiReduction(1)),
-            Some(vlpi_base + 2),
-            "MASM VLPI groups should advance by a word-aligned stride"
-        );
-    }
-
-    #[test]
-    fn native_layout_vlpi_groups_use_unit_stride() {
-        let counts = InputCounts {
-            width: 1,
-            aux_width: 1,
-            num_aux_boundary: 1,
-            num_public: 8,
-            num_vlpi: 2,
-            num_randomness: 2,
-            num_periodic: 0,
-            num_quotient_chunks: 1,
-        };
-        let layout = InputLayout::new(counts);
-
-        let vlpi_base = layout.index(InputKey::VlpiReduction(0)).unwrap();
-        assert_eq!(
-            layout.index(InputKey::VlpiReduction(1)),
-            Some(vlpi_base + 1),
-            "Native VLPI groups should advance by unit stride"
-        );
     }
 }

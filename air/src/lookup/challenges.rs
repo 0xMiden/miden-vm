@@ -20,9 +20,11 @@ use miden_core::field::PrimeCharacteristicRing;
 /// Encodes multiset/LogUp contributions as **bus_prefix\[bus\] + \<beta, message\>**.
 ///
 /// - `alpha`: randomness base (kept public for direct access by range checker etc.)
-/// - `beta_powers`: precomputed powers `[beta^0, beta^1, ..., beta^(max_message_width-1)]`
-/// - `bus_prefix`: per-bus domain separation constants `bus_prefix[i] = alpha + (i+1) *
-///   beta^max_message_width`
+/// - `beta_powers`: precomputed powers **shifted by one** so `beta_powers[k] = beta^(k+1)` for `k =
+///   0..max_message_width`. The shift reserves the `β⁰ = 1` slot for the bus identifier in
+///   [`bus_prefix`](Self::bus_prefix) so payloads never collide with it.
+/// - `bus_prefix`: per-bus domain separation constants `bus_prefix[i] = alpha + (i+1)` (a pure
+///   scalar offset — no β power involved).
 ///
 /// The challenges are derived from permutation randomness:
 /// - `alpha = challenges[0]`
@@ -33,40 +35,45 @@ use miden_core::field::PrimeCharacteristicRing;
 /// once and read-only thereafter — `Box<[EF]>` over `Vec<EF>` drops the unused
 /// capacity word and signals fixed length.
 ///
+/// # Soundness
+///
+/// Encoding a message as `α + (bus+1) + Σ_k β^(k+1)·payload[k]` is injective as a
+/// polynomial map in `(α, β)` over all `(bus, payload)` tuples: `(bus+1)` sits alone at
+/// the `β⁰` coefficient (payloads occupy `β¹…β^W`), so any two distinct tuples differ in
+/// at least one monomial and the Schwartz–Zippel collision bound applies.
+///
 /// [`LookupAir`]: crate::lookup::LookupAir
 pub struct Challenges<EF: PrimeCharacteristicRing> {
     pub alpha: EF,
+    /// Powers `[beta^1, beta^2, ..., beta^max_message_width]` (shifted by one so `β⁰ = 1`
+    /// is reserved for the bus identifier).
     pub beta_powers: Box<[EF]>,
-    /// Per-bus domain separation: `bus_prefix[i] = alpha + (i+1) * gamma`
-    /// where `gamma = beta^max_message_width`.
+    /// Per-bus domain separation: `bus_prefix[i] = alpha + (i+1)`, a scalar offset.
     pub bus_prefix: Box<[EF]>,
 }
 
 impl<EF: PrimeCharacteristicRing> Challenges<EF> {
-    /// Builds `alpha`, precomputed `beta` powers, and per-bus prefixes sized from the
-    /// [`LookupAir`]'s `max_message_width()` / `num_bus_ids()`.
+    /// Builds `alpha`, precomputed shifted `beta` powers, and per-bus prefixes sized from
+    /// the [`LookupAir`]'s `max_message_width()` / `num_bus_ids()`.
     ///
-    /// `beta_powers` holds `max_message_width` entries (indices `0..max_message_width`).
-    /// `bus_prefix` holds `num_bus_ids` entries.
-    /// `gamma = beta^max_message_width` (one power beyond the highest `beta_powers` index).
+    /// `beta_powers` holds `max_message_width` entries, with `beta_powers[k] = beta^(k+1)`.
+    /// `bus_prefix` holds `num_bus_ids` entries, each the pure scalar `alpha + (i+1)`.
     ///
     /// [`LookupAir`]: crate::lookup::LookupAir
     pub fn new(alpha: EF, beta: EF, max_message_width: usize, num_bus_ids: usize) -> Self {
         assert!(max_message_width > 0, "max_message_width must be non-zero");
 
+        // `beta_powers[k] = beta^(k+1)`. Start the table at β¹ so the `β⁰ = 1` slot is
+        // reserved for the scalar bus identifier in `bus_prefix`.
         let mut beta_powers: Vec<EF> = Vec::with_capacity(max_message_width);
-        beta_powers.push(EF::ONE);
+        beta_powers.push(beta.clone());
         for i in 1..max_message_width {
             beta_powers.push(beta_powers[i - 1].clone() * beta.clone());
         }
         let beta_powers = beta_powers.into_boxed_slice();
 
-        // gamma = beta^max_message_width (one power beyond the message range)
-        let gamma = beta_powers[max_message_width - 1].clone() * beta;
-
-        let bus_prefix: Box<[EF]> = (0..num_bus_ids)
-            .map(|i| alpha.clone() + gamma.clone() * EF::from_u32((i as u32) + 1))
-            .collect();
+        let bus_prefix: Box<[EF]> =
+            (0..num_bus_ids).map(|i| alpha.clone() + EF::from_u32((i as u32) + 1)).collect();
 
         Self { alpha, beta_powers, bus_prefix }
     }

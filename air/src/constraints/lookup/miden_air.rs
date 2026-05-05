@@ -15,7 +15,7 @@ use super::{
     main_air::MAIN_COLUMN_SHAPE,
     messages::{BlockHashMsg, KernelRomMsg, LogCapacityMsg},
 };
-use crate::{PV_PROGRAM_HASH, PV_TRANSCRIPT_STATE, lookup::BoundaryBuilder};
+use crate::lookup::BoundaryBuilder;
 
 // COLUMN SHAPE AND COMMITTED-FINALS COUNT
 // ================================================================================================
@@ -57,24 +57,24 @@ pub const NUM_LOGUP_COMMITTED_FINALS: usize = 2;
 /// See `program_hash_message`, `transcript_messages`, and `kernel_proc_message` in
 /// `air/src/lib.rs` for the canonical formulas this mirrors.
 pub(crate) fn emit_miden_boundary<B: BoundaryBuilder>(boundary: &mut B) {
-    let pv = boundary.public_values();
-    let program_hash: [B::F; 4] = [
-        pv[PV_PROGRAM_HASH],
-        pv[PV_PROGRAM_HASH + 1],
-        pv[PV_PROGRAM_HASH + 2],
-        pv[PV_PROGRAM_HASH + 3],
-    ];
-    let final_state: [B::F; 4] = [
-        pv[PV_TRANSCRIPT_STATE],
-        pv[PV_TRANSCRIPT_STATE + 1],
-        pv[PV_TRANSCRIPT_STATE + 2],
-        pv[PV_TRANSCRIPT_STATE + 3],
-    ];
-    let kernel_digests: Vec<[B::F; 4]> = boundary
+    // Snapshot the needed VLPI data up front so the mutable `boundary.add/remove`
+    // calls below don't conflict with the immutable borrow taken by
+    // `var_len_public_inputs()`. Slot layout (see `PublicInputs::to_air_inputs`):
+    //   VLPI[0] = [program_hash]              (length 1, width WORD_SIZE)
+    //   VLPI[1] = [pc_transcript_state_final] (length 1, width WORD_SIZE)
+    //   VLPI[2] = [kernel_digest_0, ...]      (length N, width WORD_SIZE)
+    let [program_hash_slice, transcript_slice, kernel_slice]: [&[B::F]; 3] = boundary
         .var_len_public_inputs()
-        .first()
-        .map(|felts| felts.chunks_exact(WORD_SIZE).map(|d| [d[0], d[1], d[2], d[3]]).collect())
-        .unwrap_or_default();
+        .try_into()
+        .expect("ProcessorAir requires exactly 3 VLPI slots");
+    let program_hash: [B::F; 4] = program_hash_slice
+        .try_into()
+        .expect("VLPI[0] must hold exactly one program-hash digest");
+    let final_state: [B::F; 4] = transcript_slice
+        .try_into()
+        .expect("VLPI[1] must hold exactly one pc-transcript-state digest");
+    let kernel_digests: Vec<[B::F; 4]> =
+        kernel_slice.chunks_exact(WORD_SIZE).map(|d| [d[0], d[1], d[2], d[3]]).collect();
 
     // Block-hash seed: +1 / encode(BLOCK_HASH_TABLE, [ph, 0, 0, 0]).
     boundary.add(
@@ -89,7 +89,7 @@ pub(crate) fn emit_miden_boundary<B: BoundaryBuilder>(boundary: &mut B) {
     boundary.add("log_precompile_initial", LogCapacityMsg { capacity: [B::F::ZERO; 4] });
     boundary.remove("log_precompile_final", LogCapacityMsg { capacity: final_state });
 
-    // Kernel ROM init: +Σ 1 / d_kernel_proc_msg_i over VLPI[0].
+    // Kernel ROM init: +Σ 1 / d_kernel_proc_msg_i over VLPI[2].
     for digest in kernel_digests {
         boundary.add("kernel_rom_init", KernelRomMsg::init(digest));
     }
@@ -105,6 +105,7 @@ mod tests {
     use std::{vec, vec::Vec};
 
     use miden_core::{
+        WORD_SIZE,
         field::{PrimeCharacteristicRing, QuadFelt},
         utils::RowMajorMatrix,
     };
@@ -164,7 +165,17 @@ mod tests {
             BusId::COUNT,
         );
 
-        let _ =
-            check_trace_balance(&ProcessorAir, &main_trace, &periodic, &publics, &[], &challenges);
+        // ProcessorAir requires exactly 3 VLPI slots (program_hash, transcript_state, kernel
+        // digests). On a zero trace the kernel slice is empty.
+        let zero_word = [Felt::ZERO; WORD_SIZE];
+        let vlpi: [&[Felt]; 3] = [&zero_word, &zero_word, &[]];
+        let _ = check_trace_balance(
+            &ProcessorAir,
+            &main_trace,
+            &periodic,
+            &publics,
+            &vlpi,
+            &challenges,
+        );
     }
 }
