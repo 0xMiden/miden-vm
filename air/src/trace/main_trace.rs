@@ -100,7 +100,19 @@ enum TraceStorage {
         core_rm: Vec<Felt>,
         chiplets_rm: Vec<Felt>,
         range_checker_cols: [Vec<Felt>; 2],
+        /// Unified storage height: `max(core_rows, chiplets_rows)`. Used for the
+        /// `to_row_major` view that callers like `check_constraints` and the
+        /// transposed-form aux trace construction consume.
         num_rows: usize,
+        /// Per-AIR height for the Core (system + decoder + stack + range) matrix
+        /// in `to_core_chiplets_matrices`. `core_rows ≤ num_rows`; the rows
+        /// beyond `core_rows` in `core_rm` and `range_checker_cols` are
+        /// zero-padded.
+        core_rows: usize,
+        /// Per-AIR height for the Chiplets matrix in
+        /// `to_core_chiplets_matrices`. `chiplets_rows ≤ num_rows`; the rows
+        /// beyond `chiplets_rows` in `chiplets_rm` are zero-padded.
+        chiplets_rows: usize,
     },
     RowMajor(RowMajorMatrix<Felt>),
     Transposed {
@@ -134,23 +146,36 @@ impl MainTrace {
 
     /// Builds from `build_trace` outputs: core and chiplets row-major, range checker column
     /// vectors.
+    ///
+    /// `core_rows` and `chiplets_rows` are the per-AIR padded heights returned by
+    /// `to_core_chiplets_matrices`. Both must be powers of two, both ≤ `num_rows`.
+    /// The data arrays are sized to `num_rows`; rows beyond each per-AIR height are
+    /// expected to be zero-padded.
     pub fn from_parts(
         core_rm: Vec<Felt>,
         chiplets_rm: Vec<Felt>,
         range_checker_cols: [Vec<Felt>; 2],
         num_rows: usize,
+        core_rows: usize,
+        chiplets_rows: usize,
         last_program_row: RowIndex,
     ) -> Self {
         assert_eq!(core_rm.len(), num_rows * CORE_WIDTH);
         assert_eq!(chiplets_rm.len(), num_rows * CHIPLETS_WIDTH);
         assert_eq!(range_checker_cols[0].len(), num_rows);
         assert_eq!(range_checker_cols[1].len(), num_rows);
+        assert!(core_rows.is_power_of_two(), "core_rows must be a power of two");
+        assert!(chiplets_rows.is_power_of_two(), "chiplets_rows must be a power of two");
+        assert!(core_rows <= num_rows && chiplets_rows <= num_rows);
+        assert_eq!(core_rows.max(chiplets_rows), num_rows, "num_rows must equal max of per-AIR rows");
         Self {
             storage: TraceStorage::Parts {
                 core_rm,
                 chiplets_rm,
                 range_checker_cols,
                 num_rows,
+                core_rows,
+                chiplets_rows,
             },
             last_program_row,
         }
@@ -179,6 +204,8 @@ impl MainTrace {
                 chiplets_rm,
                 range_checker_cols,
                 num_rows,
+                core_rows: _,
+                chiplets_rows: _,
             } => {
                 assert!(r < *num_rows, "main trace row index in bounds");
                 assert!(col < TRACE_WIDTH, "main trace column index in bounds");
@@ -229,6 +256,8 @@ impl MainTrace {
                 chiplets_rm,
                 range_checker_cols,
                 num_rows,
+                core_rows: _,
+                chiplets_rows: _,
             } => {
                 let h = *num_rows;
                 let w = TRACE_WIDTH;
@@ -278,10 +307,13 @@ impl MainTrace {
     /// Splits the trace into the per-AIR `(Core, Chiplets)` matrix pair used by the multi-AIR
     /// proving path.
     ///
-    /// - **Core matrix** is `NUM_CORE_COLS = 51` wide: the leading system + decoder + stack +
-    ///   range columns, in the same order they appear in the unified row-major trace.
-    /// - **Chiplets matrix** is `CHIPLETS_WIDTH = 21` wide: the trailing chiplet data + s_perm
-    ///   columns, also in unified-trace order.
+    /// - **Core matrix** is `NUM_CORE_COLS = 51` wide and `core_rows` tall (the leading
+    ///   system + decoder + stack + range columns).
+    /// - **Chiplets matrix** is `CHIPLETS_WIDTH` wide and `chiplets_rows` tall (chiplet data +
+    ///   `s_perm` + `chip_clk`).
+    ///
+    /// Each matrix is sliced to its own per-AIR padded height: hash-heavy programs grow the
+    /// chiplets trace while core stays small (and vice versa).
     pub fn to_core_chiplets_matrices(&self) -> (RowMajorMatrix<Felt>, RowMajorMatrix<Felt>) {
         const CORE_W: usize = crate::constraints::columns::NUM_CORE_COLS;
         const CHIP_W: usize = CHIPLETS_WIDTH;
@@ -294,14 +326,17 @@ impl MainTrace {
                 core_rm,
                 chiplets_rm,
                 range_checker_cols,
-                num_rows,
+                num_rows: _,
+                core_rows,
+                chiplets_rows,
             } => {
-                let h = *num_rows;
-                let mut core_data = Vec::with_capacity(h * CORE_W);
-                // SAFETY: the loop below writes exactly `h * CORE_W` elements.
+                let core_h = *core_rows;
+                let chip_h = *chiplets_rows;
+                let mut core_data = Vec::with_capacity(core_h * CORE_W);
+                // SAFETY: the loop below writes exactly `core_h * CORE_W` elements.
                 #[allow(clippy::uninit_vec)]
                 unsafe {
-                    core_data.set_len(h * CORE_W);
+                    core_data.set_len(core_h * CORE_W);
                 }
 
                 let fill_core = |chunk: &mut [Felt], start_row: usize| {
@@ -330,7 +365,8 @@ impl MainTrace {
                     );
                 }
 
-                let chiplets_data = chiplets_rm.clone();
+                // Chiplets data is already row-major in storage; slice to the per-AIR height.
+                let chiplets_data = chiplets_rm[..chip_h * CHIP_W].to_vec();
 
                 (
                     RowMajorMatrix::new(core_data, CORE_W),
@@ -1048,7 +1084,15 @@ mod tests {
             }
         }
 
-        MainTrace::from_parts(core_rm, chiplets_rm, range_cols, num_rows, RowIndex::from(0))
+        MainTrace::from_parts(
+            core_rm,
+            chiplets_rm,
+            range_cols,
+            num_rows,
+            num_rows,
+            num_rows,
+            RowIndex::from(0),
+        )
     }
 
     /// `to_core_chiplets_matrices` from a `Parts`-form trace produces the same data that the

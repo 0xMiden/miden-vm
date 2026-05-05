@@ -167,9 +167,24 @@ pub fn build_trace_with_max_len(
     let trace_len_summary =
         TraceLenSummary::new(core_trace_len, range_table_len, ChipletsLengths::new(&chiplets));
 
-    // Compute the final main trace length
+    // Per-AIR trace heights. Today both AIRs are padded to the same `main_trace_len`
+    // (= `pad(max(core, range, chiplets))`); the per-AIR-height optimization the multi-AIR
+    // refactor enables is left as a follow-up. The plumbing is in place — `MainTrace`
+    // tracks `core_rows` and `chiplets_rows` independently, and
+    // `to_core_chiplets_matrices` slices each per-AIR matrix to its declared height — so
+    // realizing the optimization is a localized change here once the cross-AIR identity
+    // (verify_multi `ConstraintMismatch` for divergent heights) is sorted.
+    //
+    // **Why not yet:** upstream `verify_multi`'s constraint check
+    // `accumulated == q · vanishing(z)` over the *max* LDE coset interacts with each AIR's
+    // lifted-coset selectors in a way that fails on real Miden VM proofs when heights
+    // diverge — Rust verify rejects the proof. The multi-AIR ACE circuit additionally
+    // hardcodes the β-fold direction (`β · core + chiplets`), which is brittle to AIR
+    // reordering. Both are fixable but each is a multi-day investigation.
     let main_trace_len =
         compute_main_trace_length(core_trace_len, range_table_len, chiplets.trace_len());
+    let core_height = main_trace_len;
+    let chiplets_height = main_trace_len;
 
     let ((range_checker_trace, chiplets_trace), ()) = rayon::join(
         || {
@@ -189,6 +204,8 @@ pub fn build_trace_with_max_len(
             chiplets_trace.trace,
             range_checker_trace.trace,
             main_trace_len,
+            core_height,
+            chiplets_height,
             last_program_row,
         )
     };
@@ -211,10 +228,12 @@ fn compute_main_trace_length(
 ) -> usize {
     // Get the trace length required to hold all execution trace steps
     let max_len = range_table_len.max(core_trace_len).max(chiplets_trace_len);
+    pad_to_trace_length(max_len)
+}
 
-    // Pad the trace length to the next power of two
-    let trace_len = max_len.next_power_of_two();
-    core::cmp::max(trace_len, MIN_TRACE_LEN)
+/// Pad a logical row count to a valid trace length: next power of two, clamped to `MIN_TRACE_LEN`.
+fn pad_to_trace_length(logical_len: usize) -> usize {
+    logical_len.next_power_of_two().max(MIN_TRACE_LEN)
 }
 
 /// Generates row-major core trace in parallel from the provided trace fragment contexts.
