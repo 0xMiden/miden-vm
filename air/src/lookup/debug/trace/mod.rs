@@ -1,4 +1,4 @@
-//! Combined real-trace balance + per-column `(U, V)` oracle debug surface.
+//! Combined real-trace balance + per-column `(V, U)` oracle debug surface.
 //!
 //! One walk over a concrete main trace, row by row, produces three outputs projected
 //! out of the shared `run_trace_walk` driver:
@@ -9,7 +9,7 @@
 //!   encoded denominator, signed multiplicity, and `(row, column, group)` source coordinates.
 //!   Joined back against the balance map at finalize time so each unmatched denominator lists the
 //!   exact pushes that summed to it.
-//! - **Column oracle folds** — per-row per-column `(U_col, V_col)` pairs computed via the
+//! - **Column oracle folds** — per-row per-column `(V_col, U_col)` pairs computed via the
 //!   constraint-path cross-multiplication rule, used by the processor's LogUp cross-check.
 //!
 //! Layout:
@@ -150,7 +150,7 @@ pub struct DebugTraceState {
     /// [`finalize`] so each unmatched denom carries its source pushes.
     pub(super) push_log: Vec<PushRecord>,
     pub(super) mutex_violations: Vec<MutualExclusionViolation>,
-    /// Per-column `(U_col, V_col)`. Reset to `(ONE, ZERO)` at the start of each row by
+    /// Per-column `(V_col, U_col)`. Reset to `(ZERO, ONE)` at the start of each row by
     /// [`run_trace_walk`].
     pub(super) column_folds: Vec<(QuadFelt, QuadFelt)>,
 }
@@ -188,7 +188,7 @@ where
     .balance
 }
 
-/// Walk a complete main trace and return the per-row constraint-path `(U_col, V_col)`
+/// Walk a complete main trace and return the per-row constraint-path `(V_col, U_col)`
 /// folds. `folds[r][col]` is the fold for column `col` at row `r`.
 ///
 /// Does not incorporate boundary contributions — the folds are a per-row property of
@@ -215,7 +215,7 @@ struct TraceWalkOutput {
 }
 
 /// Shared row-by-row driver used by both public entry points. Each row gets a fresh
-/// [`DebugTraceBuilder`] with column folds reset to `(ONE, ZERO)`; the balance accumulator
+/// [`DebugTraceBuilder`] with column folds reset to `(ZERO, ONE)`; the balance accumulator
 /// persists across rows, the folds snapshot at row end.
 fn run_trace_walk<A>(
     air: &A,
@@ -237,7 +237,7 @@ where
         balances: HashMap::new(),
         push_log: Vec::new(),
         mutex_violations: Vec::new(),
-        column_folds: vec![(QuadFelt::ONE, QuadFelt::ZERO); num_cols],
+        column_folds: vec![(QuadFelt::ZERO, QuadFelt::ONE); num_cols],
     };
     let mut folds_per_row: Vec<Vec<(QuadFelt, QuadFelt)>> = Vec::with_capacity(num_rows);
     let mut periodic_row: Vec<Felt> = vec![Felt::ZERO; periodic_columns.len()];
@@ -254,7 +254,7 @@ where
 
         // Reset per-row folds; balances and mutex_violations persist.
         for fold in state.column_folds.iter_mut() {
-            *fold = (QuadFelt::ONE, QuadFelt::ZERO);
+            *fold = (QuadFelt::ZERO, QuadFelt::ONE);
         }
 
         {

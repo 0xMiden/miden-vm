@@ -29,7 +29,7 @@
 //! [`LookupMessage::encode`] body, so the adapter carries **no scratch
 //! buffer**: every `add` / `remove` / `insert` body is a two-liner that
 //! calls `msg.encode(self.challenges)` and absorbs the resulting
-//! `AB::ExprEF` denominator into the running `(U, V)` (group) or
+//! `AB::ExprEF` denominator into the running `(V, U)` (group) or
 //! `(N, D)` (batch) pair.
 //!
 //! The running-pair updates are also inlined at every call site (no
@@ -136,7 +136,7 @@ where
         f: impl FnOnce(&mut Self::Column<'a>) -> R,
         _deg: Deg,
     ) -> R {
-        // Open the column with an empty `(U, V) = (1, 0)` accumulator.
+        // Open the column with an empty `(V, U) = (0, 1)` accumulator.
         // The column only holds a shared borrow of the challenges and
         // the two running-pair slots — the `&mut AB` stays on the
         // builder and is only reached back into for the constraint
@@ -181,7 +181,7 @@ where
             // The natural closing check would fold the last row's interactions into the
             // boundary constraint, but `when_last_row`'s selector adds a polynomial factor
             // that would push some columns past the degree budget. Our model assumes the
-            // last row never fires any interactions (U = 1, V = 0), so we use the
+            // last row never fires any interactions (V = 0, U = 1), so we use the
             // lower-degree form: `acc − committed_final = 0`. The fraction columns below
             // enforce this algebraically via `when_last_row acc[i] = 0`.
             self.ab.when_first_row().assert_zero_ext(acc.clone());
@@ -209,7 +209,7 @@ where
 
 /// Per-column handle returned by [`ConstraintLookupBuilder::next_column`].
 ///
-/// Holds only the running `(U, V)` accumulator and a shared borrow of
+/// Holds only the running `(V, U)` accumulator and a shared borrow of
 /// the precomputed [`Challenges`]. The wrapped `&mut AB` and the
 /// permutation `acc` / `acc_next` values do **not** live on the column
 /// — the enclosing `next_column` method handles finalization
@@ -228,8 +228,8 @@ impl<'a, AB> ConstraintColumn<'a, AB>
 where
     AB: LiftedAirBuilder,
 {
-    /// Compose an inner-group `(U_g, V_g)` pair into this column's
-    /// running `(U, V)` using the cross-multiplication rule
+    /// Compose an inner-group `(V_g, U_g)` pair into this column's
+    /// running `(V, U)` using the cross-multiplication rule
     /// `V ← V·U_g + V_g·U`, `U ← U·U_g`.
     fn fold_group(&mut self, u_g: AB::ExprEF, v_g: AB::ExprEF) {
         self.v = self.v.clone() * u_g.clone() + v_g * self.u.clone();
@@ -298,13 +298,13 @@ where
 /// and `insert_encoded` overrides (the constraint path always has the
 /// precomputed challenge tables available).
 ///
-/// Accumulates an internal `(U_g, V_g)` pair as the author calls
+/// Accumulates an internal `(V_g, U_g)` pair as the author calls
 /// `add` / `remove` / `insert` / `batch`. The column consumes the pair
 /// via `ConstraintColumn::fold_group` once the group closure returns.
 ///
 /// Each per-interaction `add` / `remove` / `insert` body calls
 /// `msg.encode(self.challenges)` directly and folds the resulting
-/// denominator into `(U_g, V_g)` inline — no intermediate scratch
+/// denominator into `(V_g, U_g)` inline — no intermediate scratch
 /// buffer and no helper method call.
 pub struct ConstraintGroup<'a, AB>
 where
@@ -380,8 +380,8 @@ where
         _deg: Deg,
     ) {
         // Batch algebra: start with `(N, D) = (0, 1)`, run `build`,
-        // then fold the final `(N, D)` into `(U_g, V_g)` via
-        // `U_g += (D − 1) · flag`, `V_g += N · flag`.
+        // then fold the final `(N, D)` into `(V_g, U_g)` via
+        // `V_g += N · flag`, `U_g += (D − 1) · flag`.
         let mut batch = ConstraintBatch {
             challenges: self.challenges,
             n: AB::ExprEF::ZERO,
@@ -410,7 +410,7 @@ where
         encoded: impl FnOnce() -> Self::ExprEF,
         _deg: Deg,
     ) {
-        // Same `(U_g, V_g)` update as `insert`, but the denominator
+        // Same `(V_g, U_g)` update as `insert`, but the denominator
         // comes straight from the user's pre-computed closure instead
         // of a `LookupMessage::encode` call.
         let v = encoded();
@@ -427,7 +427,7 @@ where
 /// Wraps an internal `(N, D)` pair and absorbs each interaction via the
 /// cross-multiplication rule `N' = N·v + m·D`, `D' = D·v`. The
 /// enclosing [`ConstraintGroup::batch`] folds the final `(N, D)` into
-/// the group's `(U_g, V_g)` using the outer flag.
+/// the group's `(V_g, U_g)` using the outer flag.
 ///
 /// Per-interaction encoding lives on the message itself
 /// ([`LookupMessage::encode`]), and the `(N, D)` update is inlined at

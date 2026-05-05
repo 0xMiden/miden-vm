@@ -6,8 +6,8 @@
 //!
 //! - `num_columns` declared vs observed (the walker counts `next_column` calls).
 //! - Per-group and per-column `Deg { n, d }` declared vs observed (via
-//!   [`SymbolicExpression::degree_multiple`] on the running `(U, V)`).
-//! - Cached-encoding canonical vs encoded `(U, V)` equivalence, checked by evaluating the symbolic
+//!   [`SymbolicExpression::degree_multiple`] on the running `(V, U)`).
+//! - Cached-encoding canonical vs encoded `(V, U)` equivalence, checked by evaluating the symbolic
 //!   difference `U_c·V_e − U_e·V_c` at a random row.
 //! - Simple-group scope: no illegal `insert_encoded` outside the `encoded` closure.
 //!
@@ -51,7 +51,7 @@ pub enum ValidationError {
     /// issued by `eval`.
     NumColumnsMismatch { declared: usize, observed: usize },
     /// A column's declared `Deg` differs from the observed symbolic degree of
-    /// its accumulated `(U, V)`. Declared degrees are authoritative and must
+    /// its accumulated `(V, U)`. Declared degrees are authoritative and must
     /// match exactly — loose upper bounds are rejected.
     ColumnDegreeMismatch {
         column_idx: usize,
@@ -59,7 +59,7 @@ pub enum ValidationError {
         observed: Deg,
     },
     /// A group's declared `Deg` differs from the observed symbolic degree of
-    /// the group's `(U, V)` fold. Declared degrees are authoritative and must
+    /// the group's `(V, U)` fold. Declared degrees are authoritative and must
     /// match exactly — loose upper bounds are rejected.
     GroupDegreeMismatch {
         column_idx: usize,
@@ -69,7 +69,7 @@ pub enum ValidationError {
         observed: Deg,
     },
     /// A cached-encoding group's canonical and encoded closures produced different
-    /// `(U, V)` pairs: the symbolic difference `U_c·V_e − U_e·V_c` evaluated to a
+    /// `(V, U)` pairs: the symbolic difference `V_c·U_e − V_e·U_c` evaluated to a
     /// non-zero `QuadFelt` at the sampled random row.
     EncodingMismatch {
         column_idx: usize,
@@ -94,8 +94,8 @@ impl fmt::Display for ValidationError {
             },
             Self::ColumnDegreeMismatch { column_idx, declared, observed } => write!(
                 f,
-                "column[{column_idx}] degree mismatch: declared (n={}, d={}), observed (n={}, d={})",
-                declared.n, declared.d, observed.n, observed.d,
+                "column[{column_idx}] degree mismatch: declared (v={}, u={}), observed (v={}, u={})",
+                declared.v, declared.u, observed.v, observed.u,
             ),
             Self::GroupDegreeMismatch {
                 column_idx,
@@ -105,12 +105,12 @@ impl fmt::Display for ValidationError {
                 observed,
             } => write!(
                 f,
-                "column[{column_idx}] group[{group_idx}] {name:?} degree mismatch: declared (n={}, d={}), observed (n={}, d={})",
-                declared.n, declared.d, observed.n, observed.d,
+                "column[{column_idx}] group[{group_idx}] {name:?} degree mismatch: declared (v={}, u={}), observed (v={}, u={})",
+                declared.v, declared.u, observed.v, observed.u,
             ),
             Self::EncodingMismatch { column_idx, group_idx, name, diff } => write!(
                 f,
-                "column[{column_idx}] group[{group_idx}] {name:?} cached-encoding mismatch: U_c·V_e − U_e·V_c = {diff:?}",
+                "column[{column_idx}] group[{group_idx}] {name:?} cached-encoding mismatch: V_c·U_e − V_e·U_c = {diff:?}",
             ),
             Self::ScopeViolation { column_idx, group_idx, name } => write!(
                 f,
@@ -209,7 +209,7 @@ where
 // ROW VALUATION
 // ================================================================================================
 
-/// Concrete valuation used to evaluate symbolic `(U, V)` trees when the walker
+/// Concrete valuation used to evaluate symbolic `(V, U)` trees when the walker
 /// needs a numeric answer (cached-encoding equivalence).
 #[derive(Clone, Copy)]
 struct RowValuation<'r> {
@@ -290,7 +290,7 @@ impl<'r> RowValuation<'r> {
 // BUILDER
 // ================================================================================================
 
-/// Unified walker that cross-checks `(U, V)` degrees, cached-encoding equivalence,
+/// Unified walker that cross-checks `(V, U)` degrees, cached-encoding equivalence,
 /// and simple-group scope in a single pass over [`LookupAir::eval`]. The first
 /// error observed is preserved in an internal slot; any later problem is ignored
 /// so [`validate`] can short-circuit cleanly once `eval` returns.
@@ -383,8 +383,8 @@ impl<'ab, 'r> LookupBuilder for ValidationBuilder<'ab, 'r> {
                 self.error = Some(err);
             } else {
                 let observed = Deg {
-                    n: col.v.degree_multiple(),
-                    d: col.u.degree_multiple(),
+                    v: col.v.degree_multiple(),
+                    u: col.u.degree_multiple(),
                 };
                 if observed != deg {
                     self.error = Some(ValidationError::ColumnDegreeMismatch {
@@ -434,8 +434,8 @@ impl<'c, 'r> ValidationColumn<'c, 'r> {
             return;
         }
         let observed = Deg {
-            n: v.degree_multiple(),
-            d: u.degree_multiple(),
+            v: v.degree_multiple(),
+            u: u.degree_multiple(),
         };
         if observed != declared {
             self.error = Some(ValidationError::GroupDegreeMismatch {
@@ -509,12 +509,12 @@ impl<'c, 'r> LookupColumn for ValidationColumn<'c, 'r> {
         let mut enc = fresh_group(self.challenges, true);
         encoded(&mut enc);
 
-        // Cached-encoding equivalence: the two closures must agree on `(U, V)`
-        // up to cross-multiplication, i.e. `U_c·V_e − U_e·V_c == 0`. We don't
+        // Cached-encoding equivalence: the two closures must agree on `(V, U)`
+        // up to cross-multiplication, i.e. `V_c·U_e − V_e·U_c == 0`. We don't
         // rely on symbolic simplification to zero — we evaluate the difference
         // at the shared random row.
         if self.error.is_none() {
-            let diff_expr = canon.u.clone() * enc.v.clone() - enc.u.clone() * canon.v;
+            let diff_expr = canon.v.clone() * enc.u.clone() - enc.v.clone() * canon.u;
             let diff = self.row_valuation.eval_ext(&diff_expr);
             if diff != QuadFelt::ZERO {
                 self.error = Some(ValidationError::EncodingMismatch {

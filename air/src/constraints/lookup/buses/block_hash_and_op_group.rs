@@ -8,8 +8,8 @@
 //!
 //! Control-flow opcodes are never in-span, and SPAN/RESPAN are not in G_block_hash's
 //! variant list, so no row fires both buses. The merged group's
-//! `(deg(U_g), deg(V_g))` is the elementwise max of the two individual buses:
-//! `(max(8, 8), max(6, 7)) = (8, 7)`, giving a column transition of
+//! `(deg(V_g), deg(U_g))` is the elementwise max of the two individual buses:
+//! `(max(6, 7), max(8, 8)) = (7, 8)`, giving a column transition of
 //! `max(1 + 8, 7) = 9` — the same saturated cost the two original columns had
 //! individually, but using **one** column instead of two, saving one accumulator column in
 //! `ProcessorAir::num_columns` (LookupAir impl).
@@ -117,15 +117,15 @@ pub(in crate::constraints::lookup) fn emit_block_hash_and_op_group<LB>(
                                     parent: parent.clone(),
                                     child_hash: first_hash,
                                 },
-                                Deg { n: 5, d: 6 },
+                                Deg { v: 5, u: 6 },
                             );
                             b.add(
                                 "join_second_child",
                                 BlockHashMsg::Child { parent, child_hash: second_hash },
-                                Deg { n: 5, d: 6 },
+                                Deg { v: 5, u: 6 },
                             );
                         },
-                        Deg { n: 1, d: 2 },
+                        Deg { v: 6, u: 7 }, // (V, U) = (1 + 5, 2 + 5)
                     );
 
                     // SPLIT: `s0`-muxed selection between `h_0` and `h_1`.
@@ -141,7 +141,7 @@ pub(in crate::constraints::lookup) fn emit_block_hash_and_op_group<LB>(
                             });
                             BlockHashMsg::Child { parent, child_hash }
                         },
-                        Deg { n: 5, d: 7 },
+                        Deg { v: 5, u: 7 },
                     );
 
                     // LOOP/REPEAT body: first child is `h_0`.
@@ -153,7 +153,7 @@ pub(in crate::constraints::lookup) fn emit_block_hash_and_op_group<LB>(
                             let child_hash = h_0.map(LB::Expr::from);
                             BlockHashMsg::LoopBody { parent, child_hash }
                         },
-                        Deg { n: 6, d: 7 },
+                        Deg { v: 6, u: 7 },
                     );
 
                     // DYN/DYNCALL/CALL/SYSCALL: single child at `h_0`.
@@ -165,7 +165,7 @@ pub(in crate::constraints::lookup) fn emit_block_hash_and_op_group<LB>(
                             let child_hash = h_0.map(LB::Expr::from);
                             BlockHashMsg::Child { parent, child_hash }
                         },
-                        Deg { n: 5, d: 6 },
+                        Deg { v: 5, u: 6 },
                     );
 
                     // END: pop the queue entry. `is_first_child` distinguishes the head-of-queue
@@ -194,7 +194,7 @@ pub(in crate::constraints::lookup) fn emit_block_hash_and_op_group<LB>(
                                 is_loop_body,
                             }
                         },
-                        Deg { n: 4, d: 8 },
+                        Deg { v: 4, u: 8 },
                     );
 
                     // =================== G_op_group OP GROUP TABLE ===================
@@ -212,7 +212,7 @@ pub(in crate::constraints::lookup) fn emit_block_hash_and_op_group<LB>(
                                 b.add(
                                     "g8_group",
                                     OpGroupMsg::new(&batch_id, gc8.clone(), i, group_value),
-                                    Deg { n: 1, d: 2 },
+                                    Deg { v: 1, u: 2 },
                                 );
                             }
                             for i in 4u16..=7 {
@@ -220,11 +220,11 @@ pub(in crate::constraints::lookup) fn emit_block_hash_and_op_group<LB>(
                                 b.add(
                                     "g8_group",
                                     OpGroupMsg::new(&batch_id, gc8.clone(), i, group_value),
-                                    Deg { n: 1, d: 2 },
+                                    Deg { v: 1, u: 2 },
                                 );
                             }
                         },
-                        Deg { n: 6, d: 7 },
+                        Deg { v: 7, u: 8 }, // (V, U) = (6 + 1, 7 + 1)
                     );
 
                     // g4: (1 - c0) · c1 · (1 - c2) triggers a 3-add batch (groups 1..=3 from
@@ -240,11 +240,11 @@ pub(in crate::constraints::lookup) fn emit_block_hash_and_op_group<LB>(
                                 b.add(
                                     "g4_group",
                                     OpGroupMsg::new(&batch_id, gc4.clone(), i, group_value),
-                                    Deg { n: 3, d: 4 },
+                                    Deg { v: 3, u: 4 },
                                 );
                             }
                         },
-                        Deg { n: 2, d: 3 },
+                        Deg { v: 5, u: 6 }, // (V, U) = (2 + 3, 3 + 3)
                     );
 
                     // g2: (1 - c0) · (1 - c1) · c2 is a single add for group 1 (from `h_0[1]`).
@@ -258,7 +258,7 @@ pub(in crate::constraints::lookup) fn emit_block_hash_and_op_group<LB>(
                             let group_value = h_0[1].into();
                             OpGroupMsg::new(&batch_id, gc2, 1, group_value)
                         },
-                        Deg { n: 3, d: 4 },
+                        Deg { v: 3, u: 4 },
                     );
 
                     // Removal: `in_span · (gc - gc_next)`-gated muxed removal whose group_value is
@@ -275,12 +275,12 @@ pub(in crate::constraints::lookup) fn emit_block_hash_and_op_group<LB>(
                             let batch_id = addr.into();
                             OpGroupMsg { batch_id, group_pos: gc, group_value }
                         },
-                        Deg { n: 2, d: 8 },
+                        Deg { v: 2, u: 8 },
                     );
                 },
-                Deg { n: 7, d: 8 },
+                Deg { v: 7, u: 8 },
             );
         },
-        Deg { n: 7, d: 8 },
+        Deg { v: 7, u: 8 },
     );
 }

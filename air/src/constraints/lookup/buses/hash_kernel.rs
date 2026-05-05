@@ -169,9 +169,9 @@ pub(in crate::constraints::lookup) fn emit_hash_kernel_table<LB>(
                             SiblingMsg { bit: bit_tag, mrupdate_id, node_index, h }
                         };
                         if is_add {
-                            g.add(op_name, gate, build, Deg { n: 5, d: 6 });
+                            g.add(op_name, gate, build, Deg { v: 5, u: 6 });
                         } else {
-                            g.remove(op_name, gate, build, Deg { n: 5, d: 6 });
+                            g.remove(op_name, gate, build, Deg { v: 5, u: 6 });
                         }
                     }
 
@@ -192,7 +192,7 @@ pub(in crate::constraints::lookup) fn emit_hash_kernel_table<LB>(
                             ];
                             MemoryMsg::read_word(ctx, addr, clk, word)
                         },
-                        Deg { n: 5, d: 6 },
+                        Deg { v: 5, u: 6 },
                     );
 
                     // Element read on EVAL rows.
@@ -212,7 +212,7 @@ pub(in crate::constraints::lookup) fn emit_hash_kernel_table<LB>(
                                     * LB::Expr::from(ACE_INSTRUCTION_ID2_OFFSET);
                             MemoryMsg::read_element(ctx, addr, clk, element)
                         },
-                        Deg { n: 5, d: 6 },
+                        Deg { v: 5, u: 6 },
                     );
 
                     // --- MEMORY-SIDE RANGE CHECKS (BusId::RangeCheck) ---
@@ -229,30 +229,30 @@ pub(in crate::constraints::lookup) fn emit_hash_kernel_table<LB>(
                             b.remove(
                                 "mem_d0",
                                 RangeMsg { value: mem_d0.into() },
-                                Deg { n: 3, d: 4 },
+                                Deg { v: 3, u: 4 },
                             );
                             b.remove(
                                 "mem_d1",
                                 RangeMsg { value: mem_d1.into() },
-                                Deg { n: 3, d: 4 },
+                                Deg { v: 3, u: 4 },
                             );
                             let w0: LB::Expr = mem_w0.into();
                             let w1: LB::Expr = mem_w1.into();
                             let w1_mul4 = w1.clone() * LB::Expr::from_u16(4);
-                            b.remove("mem_w0", RangeMsg { value: w0 }, Deg { n: 3, d: 4 });
-                            b.remove("mem_w1", RangeMsg { value: w1 }, Deg { n: 3, d: 4 });
+                            b.remove("mem_w0", RangeMsg { value: w0 }, Deg { v: 3, u: 4 });
+                            b.remove("mem_w1", RangeMsg { value: w1 }, Deg { v: 3, u: 4 });
                             b.remove(
                                 "mem_w1_mul4",
                                 RangeMsg { value: w1_mul4 },
-                                Deg { n: 3, d: 4 },
+                                Deg { v: 3, u: 4 },
                             );
                         },
-                        Deg { n: 4, d: 5 },
+                        Deg { v: 7, u: 8 }, // (V, U) = (4 + 3, 5 + 3); mem_active flag deg 3
                     );
                 },
-                Deg { n: 7, d: 8 },
+                Deg { v: 7, u: 8 },
             );
         },
-        Deg { n: 7, d: 8 },
+        Deg { v: 7, u: 8 },
     );
 }

@@ -91,7 +91,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
                                 let h = h.map(LB::Expr::from);
                                 HasherMsg::control_block(parent, &h, opcode)
                             },
-                            Deg { n: 5, d: 6 },
+                            Deg { v: 5, u: 6 },
                         );
                     };
                     control_remove("join", op_flags.join(), opcodes::JOIN);
@@ -110,7 +110,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
                             b.remove(
                                 "call_ctrl_block",
                                 HasherMsg::control_block(parent, &h, opcodes::CALL),
-                                Deg { n: 4, d: 5 },
+                                Deg { v: 4, u: 5 },
                             );
                             b.remove(
                                 "call_fmp_write",
@@ -120,10 +120,10 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
                                     clk.into(),
                                     FMP_INIT_VALUE.into(),
                                 ),
-                                Deg { n: 4, d: 5 },
+                                Deg { v: 4, u: 5 },
                             );
                         },
-                        Deg { n: 1, d: 2 },
+                        Deg { v: 5, u: 6 }, // (V, U) = (1 + 4, 2 + 4)
                     );
 
                     // SYSCALL: control-block remove + kernel-ROM call with the h[0..4] digest.
@@ -137,15 +137,15 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
                             b.remove(
                                 "syscall_ctrl_block",
                                 HasherMsg::control_block(parent, &h, opcodes::SYSCALL),
-                                Deg { n: 4, d: 5 },
+                                Deg { v: 4, u: 5 },
                             );
                             b.remove(
                                 "syscall_kernel_rom",
                                 KernelRomMsg::call(digest),
-                                Deg { n: 4, d: 5 },
+                                Deg { v: 4, u: 5 },
                             );
                         },
-                        Deg { n: 1, d: 2 },
+                        Deg { v: 5, u: 6 }, // (V, U) = (1 + 4, 2 + 4)
                     );
 
                     // --- RESPAN ---
@@ -160,7 +160,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
                             let h = h.map(LB::Expr::from);
                             HasherMsg::absorption(parent, h)
                         },
-                        Deg { n: 4, d: 5 },
+                        Deg { v: 4, u: 5 },
                     );
 
                     // --- END ---
@@ -175,7 +175,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
                                 let h = array::from_fn(|i| h[i].into());
                                 HasherMsg::return_hash(parent, h)
                             },
-                            Deg { n: 4, d: 5 },
+                            Deg { v: 4, u: 5 },
                         );
                     }
 
@@ -193,16 +193,16 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
                                 b.remove(
                                     "dyn_ctrl_block",
                                     HasherMsg::control_block(parent, &zeros8, opcodes::DYN),
-                                    Deg { n: 5, d: 6 },
+                                    Deg { v: 5, u: 6 },
                                 );
                                 let word = array::from_fn(|i| h[i].into());
                                 b.remove(
                                     "dyn_mem_read",
                                     MemoryMsg::read_word(mem_ctx, mem_addr, mem_clk, word),
-                                    Deg { n: 5, d: 6 },
+                                    Deg { v: 5, u: 6 },
                                 );
                             },
-                            Deg { n: 1, d: 2 },
+                            Deg { v: 6, u: 7 }, // (V, U) = (1 + 5, 2 + 5)
                         );
                     }
 
@@ -220,13 +220,13 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
                                 b.remove(
                                     "dyncall_ctrl_block",
                                     HasherMsg::control_block(parent, &zeros8, opcodes::DYNCALL),
-                                    Deg { n: 5, d: 6 },
+                                    Deg { v: 5, u: 6 },
                                 );
                                 let word = array::from_fn(|i| h[i].into());
                                 b.remove(
                                     "dyncall_mem_read",
                                     MemoryMsg::read_word(mem_ctx, mem_addr, mem_clk.clone(), word),
-                                    Deg { n: 5, d: 6 },
+                                    Deg { v: 5, u: 6 },
                                 );
                                 b.remove(
                                     "dyncall_fmp_write",
@@ -236,10 +236,10 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
                                         mem_clk,
                                         FMP_INIT_VALUE.into(),
                                     ),
-                                    Deg { n: 5, d: 6 },
+                                    Deg { v: 5, u: 6 },
                                 );
                             },
-                            Deg { n: 2, d: 3 },
+                            Deg { v: 7, u: 8 }, // (V, U) = (2 + 5, 3 + 5)
                         );
                     }
 
@@ -256,16 +256,16 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
                                 b.remove(
                                     "hperm_init",
                                     HasherMsg::linear_hash_init(helper0.clone(), stk_state),
-                                    Deg { n: 5, d: 6 },
+                                    Deg { v: 5, u: 6 },
                                 );
                                 let return_addr = helper0 + last_off;
                                 b.remove(
                                     "hperm_return",
                                     HasherMsg::return_state(return_addr, stk_next_state),
-                                    Deg { n: 5, d: 6 },
+                                    Deg { v: 5, u: 6 },
                                 );
                             },
-                            Deg { n: 1, d: 2 },
+                            Deg { v: 6, u: 7 }, // (V, U) = (1 + 5, 2 + 5)
                         );
                     }
 
@@ -288,16 +288,16 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
                                         mp_index,
                                         stk_word_0,
                                     ),
-                                    Deg { n: 5, d: 6 },
+                                    Deg { v: 5, u: 6 },
                                 );
                                 let return_addr = helper0 + mp_depth * cycle_len - LB::Expr::ONE;
                                 b.remove(
                                     "mpverify_return",
                                     HasherMsg::return_hash(return_addr, old_root),
-                                    Deg { n: 5, d: 6 },
+                                    Deg { v: 5, u: 6 },
                                 );
                             },
-                            Deg { n: 1, d: 2 },
+                            Deg { v: 6, u: 7 }, // (V, U) = (1 + 5, 2 + 5)
                         );
                     }
 
@@ -322,7 +322,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
                                         mr_index.clone(),
                                         stk_word_0,
                                     ),
-                                    Deg { n: 4, d: 5 },
+                                    Deg { v: 4, u: 5 },
                                 );
                                 let old_return_addr = helper0.clone()
                                     + mr_depth.clone() * cycle_len.clone()
@@ -330,14 +330,14 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
                                 b.remove(
                                     "mrupdate_old_return",
                                     HasherMsg::return_hash(old_return_addr, old_root),
-                                    Deg { n: 4, d: 5 },
+                                    Deg { v: 4, u: 5 },
                                 );
                                 let new_init_addr =
                                     helper0.clone() + mr_depth.clone() * cycle_len.clone();
                                 b.remove(
                                     "mrupdate_new_init",
                                     HasherMsg::merkle_new_init(new_init_addr, mr_index, new_node),
-                                    Deg { n: 4, d: 5 },
+                                    Deg { v: 4, u: 5 },
                                 );
                                 let new_return_addr = helper0
                                     + mr_depth * (cycle_len.clone() + cycle_len)
@@ -345,10 +345,10 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
                                 b.remove(
                                     "mrupdate_new_return",
                                     HasherMsg::return_hash(new_return_addr, stk_next_word_0),
-                                    Deg { n: 4, d: 5 },
+                                    Deg { v: 4, u: 5 },
                                 );
                             },
-                            Deg { n: 3, d: 4 },
+                            Deg { v: 7, u: 8 }, // (V, U) = (3 + 4, 4 + 4)
                         );
                     }
 
@@ -361,7 +361,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
                             "mload",
                             op_flags.mload(),
                             move || MemoryMsg::read_element(c, a, k, stk_next_0.into()),
-                            Deg { n: 7, d: 8 },
+                            Deg { v: 7, u: 8 },
                         );
                     }
                     {
@@ -370,7 +370,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
                             "mstore",
                             op_flags.mstore(),
                             move || MemoryMsg::write_element(c, a, k, s1.into()),
-                            Deg { n: 7, d: 8 },
+                            Deg { v: 7, u: 8 },
                         );
                     }
                     {
@@ -382,7 +382,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
                                 let word = array::from_fn(|i| stk_next.get(i).into());
                                 MemoryMsg::read_word(c, a, k, word)
                             },
-                            Deg { n: 7, d: 8 },
+                            Deg { v: 7, u: 8 },
                         );
                     }
                     g.remove(
@@ -397,7 +397,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
                             ];
                             MemoryMsg::write_word(mem_ctx, mem_addr, mem_clk, word)
                         },
-                        Deg { n: 7, d: 8 },
+                        Deg { v: 7, u: 8 },
                     );
 
                     // --- MSTREAM / PIPE ---
@@ -420,15 +420,15 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
                             b.remove(
                                 "mstream_word0",
                                 MemoryMsg::read_word(sys_ctx.into(), addr0, clk.into(), word0),
-                                Deg { n: 5, d: 6 },
+                                Deg { v: 5, u: 6 },
                             );
                             b.remove(
                                 "mstream_word1",
                                 MemoryMsg::read_word(sys_ctx.into(), addr1, clk.into(), word1),
-                                Deg { n: 5, d: 6 },
+                                Deg { v: 5, u: 6 },
                             );
                         },
-                        Deg { n: 1, d: 2 },
+                        Deg { v: 6, u: 7 }, // (V, U) = (1 + 5, 2 + 5)
                     );
                     g.batch(
                         "pipe",
@@ -442,15 +442,15 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
                             b.remove(
                                 "pipe_word0",
                                 MemoryMsg::write_word(sys_ctx.into(), addr0, clk.into(), word0),
-                                Deg { n: 5, d: 6 },
+                                Deg { v: 5, u: 6 },
                             );
                             b.remove(
                                 "pipe_word1",
                                 MemoryMsg::write_word(sys_ctx.into(), addr1, clk.into(), word1),
-                                Deg { n: 5, d: 6 },
+                                Deg { v: 5, u: 6 },
                             );
                         },
-                        Deg { n: 1, d: 2 },
+                        Deg { v: 6, u: 7 }, // (V, U) = (1 + 5, 2 + 5)
                     );
 
                     // --- CRYPTOSTREAM ---
@@ -481,12 +481,12 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
                             b.remove(
                                 "cryptostream_read0",
                                 MemoryMsg::read_word(sys_ctx.into(), src0, clk.into(), plain_word0),
-                                Deg { n: 4, d: 5 },
+                                Deg { v: 4, u: 5 },
                             );
                             b.remove(
                                 "cryptostream_read1",
                                 MemoryMsg::read_word(sys_ctx.into(), src1, clk.into(), plain_word1),
-                                Deg { n: 4, d: 5 },
+                                Deg { v: 4, u: 5 },
                             );
                             b.remove(
                                 "cryptostream_write0",
@@ -496,7 +496,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
                                     clk.into(),
                                     cipher_word0,
                                 ),
-                                Deg { n: 4, d: 5 },
+                                Deg { v: 4, u: 5 },
                             );
                             b.remove(
                                 "cryptostream_write1",
@@ -506,10 +506,10 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
                                     clk.into(),
                                     cipher_word1,
                                 ),
-                                Deg { n: 4, d: 5 },
+                                Deg { v: 4, u: 5 },
                             );
                         },
-                        Deg { n: 3, d: 4 },
+                        Deg { v: 7, u: 8 }, // (V, U) = (3 + 4, 4 + 4)
                     );
 
                     // --- HORNERBASE / HORNEREXT ---
@@ -529,15 +529,15 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
                             b.remove(
                                 "hornerbase_alpha0",
                                 MemoryMsg::read_element(sys_ctx.into(), addr0, clk.into(), eval0),
-                                Deg { n: 5, d: 6 },
+                                Deg { v: 5, u: 6 },
                             );
                             b.remove(
                                 "hornerbase_alpha1",
                                 MemoryMsg::read_element(sys_ctx.into(), addr1, clk.into(), eval1),
-                                Deg { n: 5, d: 6 },
+                                Deg { v: 5, u: 6 },
                             );
                         },
-                        Deg { n: 1, d: 2 },
+                        Deg { v: 6, u: 7 }, // (V, U) = (1 + 5, 2 + 5)
                     );
                     g.remove(
                         "hornerext",
@@ -552,7 +552,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
                             ];
                             MemoryMsg::read_word(sys_ctx.into(), addr, clk.into(), word)
                         },
-                        Deg { n: 5, d: 6 },
+                        Deg { v: 5, u: 6 },
                     );
 
                     // --- U32AND / U32XOR ---
@@ -565,7 +565,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
                             let c = stk_next_0.into();
                             BitwiseMsg::and(a, b, c)
                         },
-                        Deg { n: 7, d: 8 },
+                        Deg { v: 7, u: 8 },
                     );
                     g.remove(
                         "u32xor",
@@ -576,7 +576,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
                             let c = stk_next_0.into();
                             BitwiseMsg::xor(a, b, c)
                         },
-                        Deg { n: 7, d: 8 },
+                        Deg { v: 7, u: 8 },
                     );
 
                     // --- EVALCIRCUIT ---
@@ -591,7 +591,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
                             let num_eval = stk.get(2).into();
                             AceInitMsg { clk, ctx, ptr, num_read, num_eval }
                         },
-                        Deg { n: 5, d: 6 },
+                        Deg { v: 5, u: 6 },
                     );
 
                     // --- LOGPRECOMPILE ---
@@ -631,21 +631,21 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
                             b.remove(
                                 "logprecompile_init",
                                 HasherMsg::linear_hash_init(log_addr.clone(), logpre_in),
-                                Deg { n: 5, d: 6 },
+                                Deg { v: 5, u: 6 },
                             );
                             let return_addr = log_addr + last_off;
                             b.remove(
                                 "logprecompile_return",
                                 HasherMsg::return_state(return_addr, logpre_out),
-                                Deg { n: 5, d: 6 },
+                                Deg { v: 5, u: 6 },
                             );
                         },
-                        Deg { n: 1, d: 2 },
+                        Deg { v: 6, u: 7 }, // (V, U) = (1 + 5, 2 + 5)
                     );
                 },
-                Deg { n: 7, d: 8 },
+                Deg { v: 7, u: 8 },
             );
         },
-        Deg { n: 7, d: 8 },
+        Deg { v: 7, u: 8 },
     );
 }

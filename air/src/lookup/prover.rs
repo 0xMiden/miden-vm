@@ -4,7 +4,7 @@
 //!
 //! Implements [`LookupBuilder`] for concrete base-field rows. Where the
 //! [constraint-path adapter](super::constraint::ConstraintLookupBuilder)
-//! emits symbolic `(U, V)` constraint expressions against a
+//! emits symbolic `(V, U)` constraint expressions against a
 //! `LiftedAirBuilder`, this adapter consumes two concrete rows of
 //! base-field values and **pushes the individual fractions** each
 //! interaction contributes — one `(multiplicity, denominator)` entry per
@@ -328,7 +328,7 @@ where
 /// skipped entirely (no encode, no push); otherwise the push happens
 /// with the canonical multiplicity (`+1` for `add`, `-1` for `remove`,
 /// `multiplicity` for `insert`). This matches the constraint path's
-/// `(U_g, V_g)` algebra, which silently assumes flag is 0 or 1 —
+/// `(V_g, U_g)` algebra, which silently assumes flag is 0 or 1 —
 /// non-boolean flags produce wrong results on both sides.
 ///
 /// ## Encoded-group methods
@@ -522,19 +522,19 @@ mod tests {
                                 "smoke_add",
                                 Felt::ONE,
                                 || SmokeMsg { value: Felt::ONE },
-                                Deg { n: 0, d: 0 },
+                                Deg { v: 0, u: 0 },
                             );
                             g.remove(
                                 "smoke_remove",
                                 Felt::ONE,
                                 || SmokeMsg { value: Felt::new_unchecked(2) },
-                                Deg { n: 0, d: 0 },
+                                Deg { v: 0, u: 0 },
                             );
                         },
-                        Deg { n: 0, d: 0 },
+                        Deg { v: 0, u: 0 },
                     );
                 },
-                Deg { n: 0, d: 0 },
+                Deg { v: 0, u: 0 },
             );
             builder.next_column(
                 |col| {
@@ -549,16 +549,16 @@ mod tests {
                                         "smoke_batch_insert",
                                         Felt::ONE,
                                         SmokeMsg { value: Felt::new_unchecked(3) },
-                                        Deg { n: 0, d: 0 },
+                                        Deg { v: 0, u: 0 },
                                     );
                                 },
-                                Deg { n: 0, d: 0 },
+                                Deg { v: 0, u: 0 },
                             );
                         },
-                        Deg { n: 0, d: 0 },
+                        Deg { v: 0, u: 0 },
                     );
                 },
-                Deg { n: 0, d: 0 },
+                Deg { v: 0, u: 0 },
             );
         }
     }

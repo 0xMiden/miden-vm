@@ -31,7 +31,7 @@ use super::message::LookupMessage;
 // DEGREE ANNOTATION
 // ================================================================================================
 
-/// Expected numerator / denominator degree for one interaction or scope.
+/// Expected post-flag `(V, U)` contribution for one interaction or scope.
 ///
 /// Every builder method takes a `Deg` as its last argument so authors can
 /// declare the expected degrees inline. Production adapters ignore the value
@@ -39,12 +39,36 @@ use super::message::LookupMessage;
 /// can compare the declared degrees against the symbolic expression it just
 /// accumulated and panic with the interaction's `name` if they disagree.
 ///
-/// - `n`: degree of the numerator polynomial (the `V` contribution).
-/// - `d`: degree of the denominator polynomial (the `U` contribution).
+/// - `v`: degree of the numerator (`V`) contribution after multiplying by the surrounding flag.
+/// - `u`: degree of the denominator (`U`) contribution after multiplying by the surrounding flag.
+///
+/// Field order mirrors the `(V, U)` tuple convention used throughout the
+/// adapter code: numerator first, denominator second.
+///
+/// ## Semantics by call site
+///
+/// - **Single interactions** ([`LookupGroup::add`], `remove`, `insert`, `insert_encoded`, and the
+///   corresponding [`LookupBatch`] methods): `(v, u) = (deg(m · D) + deg(f), deg(D) + deg(f))`
+///   where `m` is the interaction's signed multiplicity, `D` is its denominator polynomial, and `f`
+///   is the gating flag (the enclosing batch flag for `LookupBatch` methods). The standalone
+///   post-flag contribution this interaction would make if folded directly into the enclosing
+///   group's `(V_g, U_g)`.
+///
+/// - **Batch outer** ([`LookupGroup::batch`]): the post-flag contribution the *whole* batch makes
+///   to the enclosing group's `(V_g, U_g)` — `(deg(N) + deg(f), deg(D) + deg(f))` where `(N, D)` is
+///   the running pair the inner-loop body accumulates and `f` is the batch flag. The pre-flag `(N,
+///   D)` is mechanically derivable from the inner-loop body — `((k − 1) · d_v, k · d_v)` for `k`
+///   interactions of inner denominator degree `d_v` — so it is documented inline at each batch site
+///   rather than carried in the struct.
+///
+/// - **Group / column scope** ([`LookupColumn::group`], `group_with_cached_encoding`,
+///   [`LookupBuilder::next_column`]): the total post-flag `(V, U)` contribution of the group /
+///   column to the surrounding accumulator. Useful as a budget audit number when the author wants
+///   to assert what the scope as a whole contributes.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct Deg {
-    pub n: usize,
-    pub d: usize,
+    pub v: usize,
+    pub u: usize,
 }
 
 // LOOKUP BUILDER
@@ -128,7 +152,7 @@ pub trait LookupBuilder: Sized {
     type MainWindow: WindowAccess<Self::Var> + Clone;
 
     /// Per-column handle opened by [`Self::next_column`]. Holds the adapter's per-column
-    /// state (running `(U, V)` on the constraint path, fraction collector on the prover
+    /// state (running `(V, U)` on the constraint path, fraction collector on the prover
     /// path) for the column's closure.
     type Column<'a>: LookupColumn<Expr = Self::Expr, ExprEF = Self::ExprEF>
     where
@@ -172,8 +196,8 @@ pub trait LookupBuilder: Sized {
 ///
 /// Multiple groups may be opened per column; the adapter is responsible
 /// for composing them according to the column accumulator algebra
-/// (`V ← V·Uᵍ + Vᵍ·U`, `U ← U·Uᵍ`). Groups opened inside the same column
-/// are assumed *product-closed*, not mutually exclusive.
+/// (`V ← V·U_g + V_g·U`, `U ← U·U_g`). Groups opened inside the same
+/// column are assumed *product-closed*, not mutually exclusive.
 pub trait LookupColumn {
     /// Expression type over base-field elements. Pinned to
     /// [`LookupBuilder::Expr`] through [`LookupBuilder::Column`].
@@ -194,7 +218,7 @@ pub trait LookupColumn {
     /// Open a group using the simple, challenge-free API.
     ///
     /// Every interaction added inside the closure is folded into this
-    /// group's `(Uᵍ, Vᵍ)` pair; on close, the column composes the pair
+    /// group's `(V_g, U_g)` pair; on close, the column composes the pair
     /// into its running accumulator.
     fn group<'a>(&'a mut self, name: &'static str, f: impl FnOnce(&mut Self::Group<'a>), deg: Deg);
 
@@ -209,7 +233,7 @@ pub trait LookupColumn {
     ///   this to precompute shared encoding fragments (e.g. a common `α + β·addr` prefix) and reuse
     ///   them across mutually-exclusive variants.
     ///
-    /// Both closures must produce mathematically identical `(U, V)`
+    /// Both closures must produce mathematically identical `(V, U)`
     /// pairs; the split is purely an optimization for expensive
     /// extension-field arithmetic on the symbolic path. Adapters are
     /// free to drop whichever closure they do not use.

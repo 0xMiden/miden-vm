@@ -166,7 +166,7 @@ pub(in crate::constraints::lookup) fn emit_block_stack_and_range_logcap<LB>(
                             let is_loop = LB::Expr::ZERO;
                             BlockStackMsg::Simple { block_id, parent_id, is_loop }
                         },
-                        Deg { n: 5, d: 6 },
+                        Deg { v: 5, u: 6 },
                     );
 
                     // LOOP: push with is_loop = s0.
@@ -179,7 +179,7 @@ pub(in crate::constraints::lookup) fn emit_block_stack_and_range_logcap<LB>(
                             let is_loop = s0.into();
                             BlockStackMsg::Simple { block_id, parent_id, is_loop }
                         },
-                        Deg { n: 5, d: 6 },
+                        Deg { v: 5, u: 6 },
                     );
 
                     // DYNCALL: full push with h[4]/h[5] as fmp/depth.
@@ -204,7 +204,7 @@ pub(in crate::constraints::lookup) fn emit_block_stack_and_range_logcap<LB>(
                                 fn_hash,
                             }
                         },
-                        Deg { n: 5, d: 6 },
+                        Deg { v: 5, u: 6 },
                     );
 
                     // CALL/SYSCALL: full push saving the caller context.
@@ -230,7 +230,7 @@ pub(in crate::constraints::lookup) fn emit_block_stack_and_range_logcap<LB>(
                                 fn_hash,
                             }
                         },
-                        Deg { n: 4, d: 5 },
+                        Deg { v: 4, u: 5 },
                     );
 
                     // END (simple blocks): pop with the stored is_loop.
@@ -245,7 +245,7 @@ pub(in crate::constraints::lookup) fn emit_block_stack_and_range_logcap<LB>(
                             let is_loop = end_flags.is_loop.into();
                             BlockStackMsg::Simple { block_id, parent_id, is_loop }
                         },
-                        Deg { n: 5, d: 6 },
+                        Deg { v: 5, u: 6 },
                     );
 
                     // END (after CALL/SYSCALL): pop with restored caller context.
@@ -272,7 +272,7 @@ pub(in crate::constraints::lookup) fn emit_block_stack_and_range_logcap<LB>(
                                 fn_hash,
                             }
                         },
-                        Deg { n: 5, d: 6 },
+                        Deg { v: 5, u: 6 },
                     );
 
                     // RESPAN: simultaneous push + pop — one batch under the RESPAN flag.
@@ -290,7 +290,7 @@ pub(in crate::constraints::lookup) fn emit_block_stack_and_range_logcap<LB>(
                                     parent_id: parent_id_add,
                                     is_loop: is_loop_add,
                                 },
-                                Deg { n: 4, d: 5 },
+                                Deg { v: 4, u: 5 },
                             );
                             let block_id_rem = addr.into();
                             let parent_id_rem = h1_next.into();
@@ -302,10 +302,10 @@ pub(in crate::constraints::lookup) fn emit_block_stack_and_range_logcap<LB>(
                                     parent_id: parent_id_rem,
                                     is_loop: is_loop_rem,
                                 },
-                                Deg { n: 4, d: 5 },
+                                Deg { v: 4, u: 5 },
                             );
                         },
-                        Deg { n: 1, d: 2 },
+                        Deg { v: 5, u: 6 }, // (V, U) = (1 + 4, 2 + 4)
                     );
 
                     // ---- u32 range-check removes (BusId::RangeCheck) ----
@@ -318,10 +318,10 @@ pub(in crate::constraints::lookup) fn emit_block_stack_and_range_logcap<LB>(
                         move |b| {
                             for helper in u32rc_helpers {
                                 let value = helper.into();
-                                b.remove("u32rc_remove", RangeMsg { value }, Deg { n: 3, d: 4 });
+                                b.remove("u32rc_remove", RangeMsg { value }, Deg { v: 3, u: 4 });
                             }
                         },
-                        Deg { n: 3, d: 4 },
+                        Deg { v: 6, u: 7 }, // (V, U) = (3 + 3, 4 + 3)
                     );
 
                     // ---- Log-precompile capacity update (BusId::LogPrecompileTranscript) ----
@@ -335,19 +335,19 @@ pub(in crate::constraints::lookup) fn emit_block_stack_and_range_logcap<LB>(
                             b.remove(
                                 "logpre_cap_remove",
                                 LogCapacityMsg { capacity: capacity_prev },
-                                Deg { n: 5, d: 6 },
+                                Deg { v: 5, u: 6 },
                             );
                             let capacity_next = cap_next.map(LB::Expr::from);
                             b.add(
                                 "logpre_cap_add",
                                 LogCapacityMsg { capacity: capacity_next },
-                                Deg { n: 5, d: 6 },
+                                Deg { v: 5, u: 6 },
                             );
                         },
-                        Deg { n: 1, d: 2 },
+                        Deg { v: 6, u: 7 }, // (V, U) = (1 + 5, 2 + 5)
                     );
                 },
-                Deg { n: 6, d: 7 },
+                Deg { v: 6, u: 7 },
             );
 
             // ──────────── Sibling group: range-table response (BusId::RangeCheck) ────────────
@@ -367,12 +367,12 @@ pub(in crate::constraints::lookup) fn emit_block_stack_and_range_logcap<LB>(
                             let value = range_v.into();
                             RangeMsg { value }
                         },
-                        Deg { n: 1, d: 1 },
+                        Deg { v: 1, u: 1 },
                     );
                 },
-                Deg { n: 1, d: 1 },
+                Deg { v: 1, u: 1 },
             );
         },
-        Deg { n: 8, d: 8 },
+        Deg { v: 8, u: 8 },
     );
 }

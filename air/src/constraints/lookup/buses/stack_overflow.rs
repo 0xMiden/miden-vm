@@ -63,7 +63,7 @@ pub(in crate::constraints::lookup) fn emit_stack_overflow<LB>(
                             val: s15.into(),
                             prev: b1.into(),
                         },
-                        Deg { n: 6, d: 7 },
+                        Deg { v: 6, u: 7 },
                     );
 
                     // Left shift with non-empty overflow: pop `(b1, s15', b1')` off the overflow
@@ -76,7 +76,7 @@ pub(in crate::constraints::lookup) fn emit_stack_overflow<LB>(
                             val: s15_next.into(),
                             prev: b1_next.into(),
                         },
-                        Deg { n: 7, d: 8 },
+                        Deg { v: 7, u: 8 },
                     );
 
                     // DYNCALL with non-empty overflow: pop `(b1, s15', h5)`. The new overflow
@@ -90,12 +90,12 @@ pub(in crate::constraints::lookup) fn emit_stack_overflow<LB>(
                             val: s15_next.into(),
                             prev: h5.into(),
                         },
-                        Deg { n: 7, d: 8 },
+                        Deg { v: 7, u: 8 },
                     );
                 },
-                Deg { n: 7, d: 8 },
+                Deg { v: 7, u: 8 },
             );
         },
-        Deg { n: 7, d: 8 },
+        Deg { v: 7, u: 8 },
     );
 }

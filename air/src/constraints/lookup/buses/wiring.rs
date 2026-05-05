@@ -5,7 +5,7 @@
 //! tri-state (`s_ctrl + s_perm + s0_virtual = 1`) makes ACE rows, hasher controller rows,
 //! and hasher permutation rows pairwise mutually exclusive, so the simple-group
 //! composition `U_g += (d_i − 1)·f_i`, `V_g += m_i·f_i` is sound: at most one of the five
-//! interactions fires per row, and the column's running `(U, V)` takes MAX over per-
+//! interactions fires per row, and the column's running `(V, U)` takes MAX over per-
 //! interaction degrees rather than summing them (which a sibling-group split would do).
 //! Each bus's denominator uses a distinct `bus_prefix[bus]` additive base, so even
 //! though they share the same accumulator their contributions are linearly independent in
@@ -170,7 +170,7 @@ pub(in crate::constraints::lookup) fn emit_v_wiring<LB>(
             // (`chiplet_active.controller`), and permutation rows (`chiplet_active.permutation`)
             // are pairwise mutually exclusive via the chiplet tri-state, so the simple-group
             // composition is sound. Merging into one group takes MAX over per-interaction
-            // degrees instead of multiplying sibling `(U_g, V_g)` pairs — critical for keeping
+            // degrees instead of multiplying sibling `(V_g, U_g)` pairs — critical for keeping
             // this column's transition inside the degree-9 budget.
             col.group(
                 "ace_perm_link",
@@ -196,7 +196,7 @@ pub(in crate::constraints::lookup) fn emit_v_wiring<LB>(
                                 v0: v_0.0.into(),
                                 v1: v_0.1.into(),
                             };
-                            b.insert("wire_0", m_0, wire_0, Deg { n: 5, d: 5 });
+                            b.insert("wire_0", m_0, wire_0, Deg { v: 5, u: 5 });
 
                             let wire_1 = AceWireMsg {
                                 clk: ace_clk.into(),
@@ -205,7 +205,7 @@ pub(in crate::constraints::lookup) fn emit_v_wiring<LB>(
                                 v0: v_1.0.into(),
                                 v1: v_1.1.into(),
                             };
-                            b.insert("wire_1", wire_1_mult, wire_1, Deg { n: 6, d: 5 });
+                            b.insert("wire_1", wire_1_mult, wire_1, Deg { v: 6, u: 5 });
 
                             let wire_2 = AceWireMsg {
                                 clk: ace_clk.into(),
@@ -214,9 +214,9 @@ pub(in crate::constraints::lookup) fn emit_v_wiring<LB>(
                                 v0: v_2.0.into(),
                                 v1: v_2.1.into(),
                             };
-                            b.insert("wire_2", wire_2_mult, wire_2, Deg { n: 5, d: 5 });
+                            b.insert("wire_2", wire_2_mult, wire_2, Deg { v: 5, u: 5 });
                         },
-                        Deg { n: 4, d: 3 },
+                        Deg { v: 8, u: 7 }, // (V, U) = (4 + 4, 3 + 4); ace_flag deg 4
                     );
 
                     // ---- Hasher perm-link (BusId::HasherPermLink{Input,Output}) ----
@@ -229,7 +229,7 @@ pub(in crate::constraints::lookup) fn emit_v_wiring<LB>(
                             let state: [LB::Expr; 12] = ctrl_state.map(Into::into);
                             HasherPermLinkMsg::Input { state }
                         },
-                        Deg { n: 2, d: 3 },
+                        Deg { v: 2, u: 3 },
                     );
 
                     // Controller output: +1 / encode(ctrl.state) on HasherPermLinkOutput.
@@ -240,7 +240,7 @@ pub(in crate::constraints::lookup) fn emit_v_wiring<LB>(
                             let state: [LB::Expr; 12] = ctrl_state.map(Into::into);
                             HasherPermLinkMsg::Output { state }
                         },
-                        Deg { n: 3, d: 4 },
+                        Deg { v: 3, u: 4 },
                     );
 
                     // Perm row 0: -m / encode(perm.state) on HasherPermLinkInput. Multiplicity is
@@ -254,7 +254,7 @@ pub(in crate::constraints::lookup) fn emit_v_wiring<LB>(
                             let state: [LB::Expr; 12] = perm_state.map(Into::into);
                             HasherPermLinkMsg::Input { state }
                         },
-                        Deg { n: 3, d: 3 },
+                        Deg { v: 3, u: 3 },
                     );
 
                     // Perm row 15: -m / encode(perm.state) on HasherPermLinkOutput.
@@ -267,12 +267,12 @@ pub(in crate::constraints::lookup) fn emit_v_wiring<LB>(
                             let state: [LB::Expr; 12] = perm_state.map(Into::into);
                             HasherPermLinkMsg::Output { state }
                         },
-                        Deg { n: 3, d: 3 },
+                        Deg { v: 3, u: 3 },
                     );
                 },
-                Deg { n: 8, d: 7 },
+                Deg { v: 8, u: 7 },
             );
         },
-        Deg { n: 8, d: 7 },
+        Deg { v: 8, u: 7 },
     );
 }

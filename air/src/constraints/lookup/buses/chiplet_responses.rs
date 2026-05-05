@@ -148,7 +148,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
                                 payload: HasherPayload::State(state),
                             }
                         },
-                        Deg { n: 5, d: 6 },
+                        Deg { v: 5, u: 6 },
                     );
 
                     // Sponge RESPAN: rate-only 8 lanes, node_index = 0.
@@ -167,7 +167,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
                                 payload: HasherPayload::Rate(rate),
                             }
                         },
-                        Deg { n: 5, d: 6 },
+                        Deg { v: 5, u: 6 },
                     );
 
                     // Merkle leaf-word inputs for MP_VERIFY / MR_UPDATE_OLD / MR_UPDATE_NEW.
@@ -199,7 +199,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
                                     payload: HasherPayload::Word(word),
                                 }
                             },
-                            Deg { n: 5, d: 7 },
+                            Deg { v: 5, u: 7 },
                         );
                     }
 
@@ -218,7 +218,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
                                 payload: HasherPayload::Word(word),
                             }
                         },
-                        Deg { n: 4, d: 5 },
+                        Deg { v: 4, u: 5 },
                     );
 
                     // SOUT: full 12-lane state (HPERM return), node_index = 0.
@@ -235,7 +235,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
                                 payload: HasherPayload::State(state),
                             }
                         },
-                        Deg { n: 5, d: 6 },
+                        Deg { v: 5, u: 6 },
                     );
 
                     // Bitwise: runtime op selector bit.
@@ -251,7 +251,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
                                 result: bw.output.into(),
                             }
                         },
-                        Deg { n: 3, d: 4 },
+                        Deg { v: 3, u: 4 },
                     );
 
                     // Memory response: runtime (is_read, is_word) mux keeps column transition at 8.
@@ -284,7 +284,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
                                 word,
                             }
                         },
-                        Deg { n: 3, d: 7 },
+                        Deg { v: 3, u: 7 },
                     );
 
                     // ACE init.
@@ -302,7 +302,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
                                 num_eval,
                             }
                         },
-                        Deg { n: 5, d: 6 },
+                        Deg { v: 5, u: 6 },
                     );
 
                     // Kernel ROM: two fractions per active row.
@@ -319,21 +319,21 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
                             b.remove(
                                 "kernel_rom_init",
                                 KernelRomMsg::init(digest.clone()),
-                                Deg { n: 5, d: 6 },
+                                Deg { v: 5, u: 6 },
                             );
                             b.insert(
                                 "kernel_rom_call",
                                 krom_mult,
                                 KernelRomMsg::call(digest),
-                                Deg { n: 6, d: 6 },
+                                Deg { v: 6, u: 6 },
                             );
                         },
-                        Deg { n: 2, d: 2 },
+                        Deg { v: 7, u: 7 }, // (V, U) = (2 + 5, 2 + 5); kernel_rom flag deg 5
                     );
                 },
-                Deg { n: 7, d: 7 },
+                Deg { v: 7, u: 7 },
             );
         },
-        Deg { n: 7, d: 7 },
+        Deg { v: 7, u: 7 },
     );
 }

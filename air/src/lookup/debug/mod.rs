@@ -5,7 +5,7 @@
 //! | Module | Regime |
 //! |--------|--------|
 //! | [`validation`] | AIR self-checks — run against the `LookupAir` itself, no execution trace needed. One entry point, [`validation::validate`] / `.validate()`. |
-//! | [`trace`] | Concrete-trace debugging — balance accumulator + per-column `(U, V)` oracle folds + mutex checks over a real main trace. |
+//! | [`trace`] | Concrete-trace debugging — balance accumulator + per-column `(V, U)` oracle folds + mutex checks over a real main trace. |
 
 pub mod trace;
 pub mod validation;

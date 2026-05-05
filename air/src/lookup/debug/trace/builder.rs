@@ -108,8 +108,8 @@ pub struct DebugTraceColumn<'c> {
 
 impl<'c> DebugTraceColumn<'c> {
     /// Common path shared by `group` and `group_with_cached_encoding`. Opens a group,
-    /// drives the caller's closure, folds the group's `(U_g, V_g)` into the column's
-    /// running `(U_col, V_col)`, and (for cached-encoding groups) records any mutex
+    /// drives the caller's closure, folds the group's `(V_g, U_g)` into the column's
+    /// running `(V_col, U_col)`, and (for cached-encoding groups) records any mutex
     /// violation.
     fn open_group<'g>(
         &'g mut self,
@@ -141,9 +141,9 @@ impl<'c> DebugTraceColumn<'c> {
                 active_flags: group.active_flag_count,
             });
         }
-        // Fold `(U_g, V_g)` into `(U_col, V_col)`:  (U, V) ← (U·U_g, V·U_g + V_g·U)
-        let (u_col, v_col) = group.state.column_folds[column_idx];
-        group.state.column_folds[column_idx] = (u_col * group.u, v_col * group.u + group.v * u_col);
+        // Fold `(V_g, U_g)` into `(V_col, U_col)`:  (V, U) ← (V·U_g + V_g·U, U·U_g)
+        let (v_col, u_col) = group.state.column_folds[column_idx];
+        group.state.column_folds[column_idx] = (v_col * group.u + group.v * u_col, u_col * group.u);
 
         self.next_group_idx += 1;
     }
@@ -313,7 +313,7 @@ pub struct DebugTraceBatch<'b> {
     challenges: &'b Challenges<QuadFelt>,
     state: &'b mut DebugTraceState,
     /// `false` if the outer group's flag was zero — batch-level short-circuit for balance
-    /// accumulation. `(N, D)` still tracks normally so the outer group's `(U_g, V_g)` fold
+    /// accumulation. `(N, D)` still tracks normally so the outer group's `(V_g, U_g)` fold
     /// stays correct.
     active: bool,
     n: QuadFelt,

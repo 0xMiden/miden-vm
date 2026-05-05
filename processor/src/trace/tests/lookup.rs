@@ -12,7 +12,7 @@
 //! 3. **Pipeline plumbing**: row slicing with wraparound, per-row periodic composition, `RowWindow`
 //!    construction over a real matrix, and the dense `LookupFractions` buffer all line up.
 //! 4. **Prover/constraint agreement**: the fused `accumulate` prover path must agree with the
-//!    constraint-path `(U_col, V_col)` oracle bit-exactly on every `(row, col)` delta. If any pair
+//!    constraint-path `(V_col, U_col)` oracle bit-exactly on every `(row, col)` delta. If any pair
 //!    disagrees, either the prover path or the oracle has a bug.
 //!
 //! The oracle cross-check in (4) subsumes the "does it run to completion?" shape of a
@@ -47,13 +47,13 @@ fn tiny_span() -> Vec<Operation> {
 }
 
 /// Cross-check: the fused `accumulate` prover path must agree with the constraint-path
-/// `(U_col, V_col)` oracle bit-exactly on every `(row, col)` delta.
+/// `(V_col, U_col)` oracle bit-exactly on every `(row, col)` delta.
 ///
 /// - **Prover path**: collect `(m_i, d_i)` fractions via `ProverLookupBuilder` on each row, then
 ///   `accumulate` runs batched Montgomery inversion + per-column partial sums to produce
 ///   `aux[col][r+1] - aux[col][r] = Σ m_i · d_i^{-1}`.
 /// - **Constraint path**: `ColumnOracleBuilder` evaluates `ProcessorAir` row-by-row using the same
-///   `(U_g, V_g)` algebra the constraint system uses, folded per column via cross-multiplication,
+///   `(V_g, U_g)` algebra the constraint system uses, folded per column via cross-multiplication,
 ///   producing `expected_delta = V_col · U_col^{-1}`.
 ///
 /// A divergence means either the prover path or the oracle has a bug — fix the root cause.
@@ -96,7 +96,7 @@ fn build_lookup_fractions_matches_constraint_path_oracle() {
     assert_eq!(aux.height(), num_rows + 1);
 
     // --- Constraint path: walk the trace through the oracle to collect per-row folded
-    //     `(U_col, V_col)` pairs. ---
+    //     `(V_col, U_col)` pairs. ---
     let oracle_folds =
         collect_column_oracle_folds(&air, &main_trace, &periodic, &public_vals, &challenges);
     assert_eq!(oracle_folds.len(), num_rows);
@@ -109,7 +109,7 @@ fn build_lookup_fractions_matches_constraint_path_oracle() {
         let per_row_values: Vec<QuadFelt> = row_folds
             .iter()
             .enumerate()
-            .map(|(col, &(u_col, v_col))| {
+            .map(|(col, &(v_col, u_col))| {
                 let u_inv = u_col.try_inverse().unwrap_or_else(|| {
                     panic!(
                         "row {r} col {col}: oracle U_col is zero — bus has a zero-denominator \
