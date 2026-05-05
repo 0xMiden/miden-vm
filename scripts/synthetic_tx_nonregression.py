@@ -268,30 +268,48 @@ def summary_markdown(result: dict[str, Any]) -> str:
         if result["baseline_bench_wall_ms"] is None or result["current_bench_wall_ms"] is None
         else result["current_bench_wall_ms"] - result["baseline_bench_wall_ms"]
     )
+    wall_delta_pct = percent_delta(result["current_bench_wall_ms"], result["baseline_bench_wall_ms"])
+    over_threshold = [
+        row
+        for row in result["metric_rows"]
+        if row["delta_pct"] is not None and row["delta_pct"] > result["threshold_pct"]
+    ]
+    metric_rows = result["metric_rows"]
     lines = [
         "# BENCHMARK REPORT: synthetic-tx-kernel-nonregression",
         "",
         "## Synthetic Transaction Kernel Non-Regression",
         "",
-        f"Status: **{status}**",
-        f"Threshold: `{result['threshold_pct']:.2f}%`",
-        f"Baseline: `{baseline}`",
-        f"Current: `{current}`",
-        (
-            "Worst slowdown: "
-            f"`{result['max_delta_metric']}` moved by "
-            f"`{fmt_delta(result['max_delta_ms'])}` ({fmt_pct(result['max_delta_pct'])})"
-        ),
+        "### Run",
         "",
-        "| Metric | Baseline | Current | Delta | Delta % |",
-        "| --- | ---: | ---: | ---: | ---: |",
-        (
-            "| bench wall | "
-            f"{fmt_ms(result['baseline_bench_wall_ms'])} | "
-            f"{fmt_ms(result['current_bench_wall_ms'])} | "
-            f"{fmt_delta(wall_delta)} | "
-            f"{fmt_pct(percent_delta(result['current_bench_wall_ms'], result['baseline_bench_wall_ms']))} |"
-        ),
+        f"- Baseline: `{baseline}`",
+        f"- Current: `{current}`",
+        f"- Threshold: `{result['threshold_pct']:.2f}%`",
+        "- Bench wall: "
+        f"{fmt_ms(result['baseline_bench_wall_ms'])} -> "
+        f"{fmt_ms(result['current_bench_wall_ms'])} "
+        f"({fmt_delta(wall_delta)}, {fmt_pct(wall_delta_pct)})",
+        "",
+        "### Result",
+        "",
+        f"- Status: **{status}**",
+        "- Worst regression: "
+        f"`{result['max_delta_metric']}` moved by "
+        f"`{fmt_delta(result['max_delta_ms'])}` ({fmt_pct(result['max_delta_pct'])})",
+        "",
+        "### Metrics over threshold",
+        "",
+    ]
+    if over_threshold:
+        lines.extend(
+            f"- `{row['name']}`: {fmt_delta(row['delta_ms'])} ({fmt_pct(row['delta_pct'])})"
+            for row in over_threshold
+        )
+    else:
+        lines.append("- None")
+    lines += [
+        "",
+        f"### Per-benchmark results ({len(metric_rows)} of {len(metric_rows)})",
         "",
         "| Benchmark | Baseline | Current | Delta | Delta % |",
         "| --- | ---: | ---: | ---: | ---: |",
@@ -301,7 +319,7 @@ def summary_markdown(result: dict[str, Any]) -> str:
             f"| {row['name']} | {fmt_ms(row['baseline_ms'])} | {fmt_ms(row['current_ms'])} | "
             f"{fmt_delta(row['delta_ms'])} | {fmt_pct(row['delta_pct'])} |"
         )
-        for row in result["metric_rows"][:20]
+        for row in metric_rows
     ]
     if result["missing_in_current"] or result["missing_in_baseline"]:
         lines.append("\nMetric set changed:")
@@ -386,6 +404,49 @@ class Tests(unittest.TestCase):
         result = compare_results(baseline, current, 5.0)
         self.assertTrue(result["regression"])
         self.assertEqual(result["max_delta_metric"], "bench-tx/a/verify")
+
+    def test_summary_markdown_uses_requested_report_shape(self) -> None:
+        result = compare_results(
+            {
+                "git_sha": "1764d66ca1c6deadbeef",
+                "bench_wall_ms": 145_000.0,
+                "metrics": {
+                    "bench-tx/consume-b2agg-note-bridge-out/exec": {"estimate_ms": 23.96},
+                    "bench-tx/consume-single-p2id-note/prove": {"estimate_ms": 1_987.33},
+                },
+            },
+            {
+                "git_sha": "1234567890abcdef",
+                "bench_wall_ms": 152_000.0,
+                "metrics": {
+                    "bench-tx/consume-b2agg-note-bridge-out/exec": {"estimate_ms": 23.96},
+                    "bench-tx/consume-single-p2id-note/prove": {"estimate_ms": 2_132.40},
+                },
+            },
+            5.0,
+        )
+
+        summary = summary_markdown(result)
+
+        self.assertIn("# BENCHMARK REPORT: synthetic-tx-kernel-nonregression", summary)
+        self.assertIn("### Run", summary)
+        self.assertIn("- Baseline: `1764d66ca1c6`", summary)
+        self.assertIn("- Current: `1234567890ab`", summary)
+        self.assertIn("- Threshold: `5.00%`", summary)
+        self.assertIn("- Bench wall: 145,000.00 ms -> 152,000.00 ms (+7,000.00 ms, +4.83%)", summary)
+        self.assertIn("### Result", summary)
+        self.assertIn("- Status: **REGRESSION**", summary)
+        self.assertIn(
+            "- Worst regression: `bench-tx/consume-single-p2id-note/prove` moved by `+145.07 ms` (+7.30%)",
+            summary,
+        )
+        self.assertIn("### Metrics over threshold", summary)
+        self.assertIn("- `bench-tx/consume-single-p2id-note/prove`: +145.07 ms (+7.30%)", summary)
+        self.assertIn("### Per-benchmark results (2 of 2)", summary)
+        self.assertIn(
+            "| bench-tx/consume-single-p2id-note/prove | 1,987.33 ms | 2,132.40 ms | +145.07 ms | +7.30% |",
+            summary,
+        )
 
 
 def cmd_self_test(args: argparse.Namespace) -> int:
