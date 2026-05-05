@@ -54,6 +54,9 @@ skip = [
     # Allow duplicate rand versions - miden-field uses 0.10, miden-vm uses 0.9
     { name = "rand" },
     { name = "rand_core" },
+    # Allow duplicate anstream/anstyle-parse versions due to divergent env_logger and clap reqs
+    { name = "anstream" },
+    { name = "anstyle-parse" },
 ]
 skip-tree = [
     # Allow getrandom v0.2.x for now - will be phased out with nanorand
