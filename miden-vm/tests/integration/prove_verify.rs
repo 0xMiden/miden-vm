@@ -162,11 +162,10 @@ fn test_poseidon2_prove_verify_rust_only() {
     assert_prove_verify(source, HashFunction::Poseidon2, "Poseidon2", true, false);
 }
 
-/// Hash-heavy program that produces `chip_height > core_height`. Originally introduced
-/// as a reproducer for the multi-AIR `verify_multi` `ConstraintMismatch` bug; now serves
-/// as a regression test that the per-AIR-height boundary fix (build each component at
-/// its own per-AIR height in `processor/src/trace/parallel/mod.rs`) keeps the
-/// chip>core direction passing.
+/// Hash-heavy program that produces `chip_height > core_height`. Regression test
+/// for the per-AIR-height path: each component must be built at its own per-AIR
+/// height (see `processor/src/trace/parallel/mod.rs`) so per-AIR boundary
+/// constraints fire at the slice's last row.
 #[test]
 fn test_hash_heavy_divergent_heights() {
     let source = "
@@ -342,24 +341,12 @@ mod recursive_verifier {
 
         let (store, advice_map) = build_merkle_data(config, stark);
         VerifierInputs {
-            // Initial stack matches the multi-AIR `verify_proof` proc signature in
-            // `crates/lib/core/asm/sys/vm/mod.masm`:
-            //   [log(min_trace_length), log(max_trace_length)]
-            // (with log_min on TOP).
-            //
-            // `build_test!` runs `StackInputs::try_from_ints(initial_stack.to_vec())` which
-            // makes `vec[0]` the TOP of the operand stack at MASM entry (per
-            // `StackInputs::new` doc: "first element will be at position 0 (top of stack)").
-            // So we push `[log_min, log_max]` to land log_min on top.
-            //
-            // **Historical bug**: a previous comment claimed the framework was
-            // "last-pushed-on-top" and pushed `[log_max, log_min]`. With heights equal
-            // (Fibonacci-style traces, or the placeholder behavior on adr1anh/multi-air)
-            // this was invisible. With per-AIR-height divergence (e.g. precompile fixture:
-            // core=2^16, chip=2^17), `init_seed` then stored log_max at
-            // `MIN_TRACE_LENGTH_LOG_PTR` and log_min at `TRACE_LENGTH_LOG_PTR`, propagating
-            // a swapped β through the entire transcript and surfacing as
-            // `aux randomness mismatch at element 0 (beta0)`.
+            // `verify_proof` (in `crates/lib/core/asm/sys/vm/mod.masm`) expects
+            // `[log_min_trace_length, log_max_trace_length]` with log_min on TOP.
+            // `build_test!` -> `StackInputs::try_from_ints(vec)` places `vec[0]` at
+            // the top, so push `[log_min, log_max]` here. (Pushing them reversed is
+            // a silent error when heights match — surfaces only with per-AIR-height
+            // divergence as `aux randomness mismatch at element 0 (beta0)`.)
             initial_stack: vec![log_min_trace_height as u64, log_max_trace_height as u64],
             advice_stack,
             store,

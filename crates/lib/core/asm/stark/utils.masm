@@ -278,131 +278,86 @@ pub proc set_up_auxiliary_inputs_ace
     dropw
 
     # ==================================================================
-    # Phase 4: per-AIR lifted selectors for the SMALLER AIR (Core)
+    # Phase 4: per-AIR lifted selectors for the smaller AIR (Core)
     # ==================================================================
     #
-    # Multi-AIR layout: when `core_height < chiplets_height`, the smaller AIR
-    # (Core) needs its own selectors evaluated at the lifted point
-    # `z_lift = z^r` where `r = chiplets_height / core_height = 2^(log_max - log_min)`.
-    # When `r = 1` (heights equal), these reduce to the standard selectors and the
-    # arithmetic below produces the same values.
-    #
-    # Slot 11 (offset +22) stores `is_first_core = (z^N - 1) / (z^r - 1)`.
-    # Slot 12 (offset +24) stores `is_last_core  = (z^N - 1) / (z^r - g_core^{-1})`
-    #   where `g_core = g_max^r` (g_core^{-1} = (g_max^{-1})^r).
-    # Slot 13 (offset +26) stores `is_transition_core = z^r - g_core^{-1}`.
-    #
-    # Note: `vanishing = z^N - 1` is the SAME for both AIRs because lifted
-    # vanishing = `z_lift^{n_core} - 1 = z^{r·n_core} - 1 = z^{n_max} - 1`.
+    # When `core_height < chiplets_height`, Core's lifted selectors at
+    # `z_lift = z^r` (r = 2^(log_max - log_min)) differ from the canonical
+    # max-AIR selectors. Computed here:
+    #   slot 11 (offset +22): is_first_core    = (z^N - 1) / (z^r - 1)
+    #   slot 12 (offset +24): is_last_core     = (z^N - 1) / (z^r - g_core^{-1})
+    #   slot 13 (offset +26): is_transition_core = z^r - g_core^{-1}
+    # where `g_core = g_max^r`. When `r = 1` these reduce to the canonical
+    # selectors. Vanishing `z^N - 1` is identical for both AIRs.
 
-    # ----------------------------------------------------------------
-    # Step 1: compute z_lift = z^(2^r_log) via repeated squaring of z.
-    # ----------------------------------------------------------------
-
-    # Load z_0, z_1 from z_ptr (which stores [z^N_0, z^N_1, z_0, z_1]).
+    # Compute z_lift = z^(2^r_log) by repeated squaring.
     exec.constants::z_ptr add.2 mem_load
     exec.constants::z_ptr add.3 mem_load
     swap
     # => [z_0, z_1, ...]
-
-    # Push r_log = log_max - log_min and run `r_log` squarings (mirrors the
-    # Phase 1 z_k loop pattern: `dup.1 dup.1 ext2mul` squares the EF on top).
     exec.constants::get_trace_length_log
     exec.constants::get_min_trace_length_log
     sub
     # => [r_log, z_0, z_1, ...]
     dup push.0 neq
     while.true
-        # On entry: [r_log_remaining, z_running_0, z_running_1, ...] (sentinel consumed).
         movdn.2
-        # => [z_running_0, z_running_1, r_log_remaining, ...]
         dup.1 dup.1 ext2mul
-        # => [z_running^2_0, z_running^2_1, r_log_remaining, ...]
         movup.2 sub.1
-        # => [r_log_remaining - 1, z_running^2_0, z_running^2_1, ...]
         dup push.0 neq
-        # => [enter, r_log_remaining - 1, z_running^2_0, z_running^2_1, ...]
     end
     drop
     # => [z_lift_0, z_lift_1, ...]
 
-    # ----------------------------------------------------------------
-    # Step 2: load vanishing = z^N - 1 from memory (slot 1, offset +2/+3).
-    # ----------------------------------------------------------------
+    # Load vanishing = z^N - 1 from slot 1 (offset +2/+3).
     exec.constants::auxiliary_ace_inputs_ptr add.2 mem_load
     exec.constants::auxiliary_ace_inputs_ptr add.3 mem_load
     swap
-    # => [z_n_0, z_n_1, z_lift_0, z_lift_1, ...]
     sub.1
     # => [van_0, van_1, z_lift_0, z_lift_1, ...]
 
-    # ----------------------------------------------------------------
-    # Step 3: is_first_core = van / (z_lift - 1)
-    # ----------------------------------------------------------------
+    # is_first_core = van / (z_lift - 1); store at slot 11 (offset +22/+23).
     dup.3 dup.3
-    # => [z_lift_0, z_lift_1, van_0, van_1, z_lift_0, z_lift_1, ...]
     sub.1 ext2inv
-    # => [inv0, inv1, van_0, van_1, z_lift_0, z_lift_1, ...]
     dup.3 dup.3 ext2mul
     # => [is_first_core_0, is_first_core_1, van_0, van_1, z_lift_0, z_lift_1, ...]
-
-    # Store is_first_core at slot 11 (offset +22 / +23).
     exec.constants::auxiliary_ace_inputs_ptr add.22 mem_store
     exec.constants::auxiliary_ace_inputs_ptr add.23 mem_store
     # => [van_0, van_1, z_lift_0, z_lift_1, ...]
 
-    # ----------------------------------------------------------------
-    # Step 4: compute g_core^{-1} = (g_max^{-1})^(2^r_log) by squaring g_max^{-1}.
-    # ----------------------------------------------------------------
+    # g_core^{-1} = (g_max^{-1})^(2^r_log) by repeated squaring.
     exec.constants::get_trace_domain_generator
     inv
-    # => [g_max_inv, van_0, van_1, z_lift_0, z_lift_1, ...]
     exec.constants::get_trace_length_log
     exec.constants::get_min_trace_length_log
     sub
     # => [r_log, g_max_inv, van_0, van_1, z_lift_0, z_lift_1, ...]
     dup push.0 neq
     while.true
-        # On entry: [r_log_remaining, g_running, ...]
         swap dup mul
-        # => [g_running^2, r_log_remaining, ...]
         swap sub.1
-        # => [r_log_remaining - 1, g_running^2, ...]
         dup push.0 neq
-        # => [enter, r_log_remaining - 1, g_running^2, ...]
     end
     drop
     # => [g_core_inv, van_0, van_1, z_lift_0, z_lift_1, ...]
 
-    # ----------------------------------------------------------------
-    # Step 5: is_transition_core = z_lift - g_core_inv
-    # ----------------------------------------------------------------
+    # is_transition_core = z_lift - g_core_inv (g_core_inv is base-field).
     movup.3 swap sub
-    # => [is_trans_core_0, van_0, van_1, z_lift_1, ...]
     movup.3
     swap
     # => [is_trans_core_0, is_trans_core_1, van_0, van_1, ...]
 
-    # ----------------------------------------------------------------
-    # Step 6: is_last_core = van / is_transition_core
-    # ----------------------------------------------------------------
+    # is_last_core = van / is_transition_core.
     dup.1 dup.1
-    # => [is_trans_core_0, is_trans_core_1, is_trans_core_0, is_trans_core_1, van_0, van_1, ...]
     ext2inv
-    # => [inv_t_0, inv_t_1, is_trans_core_0, is_trans_core_1, van_0, van_1, ...]
     movup.5 movup.5
-    # => [van_0, van_1, inv_t_0, inv_t_1, is_trans_core_0, is_trans_core_1, ...]
     ext2mul
     # => [is_last_core_0, is_last_core_1, is_trans_core_0, is_trans_core_1, ...]
 
-    # ----------------------------------------------------------------
-    # Step 7: store Word 6 = [is_last_core_0, is_last_core_1, is_trans_core_0, is_trans_core_1]
-    # at offset +24, covering slots 12 and 13.
-    # ----------------------------------------------------------------
+    # Store Word 6 (slots 12 & 13) at offset +24.
     exec.constants::auxiliary_ace_inputs_ptr add.24
     mem_storew_le
     dropw
-    # => [...]
 end
 
 #! Sample the batching challenge gamma (EF element).
