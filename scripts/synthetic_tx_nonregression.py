@@ -88,14 +88,27 @@ def write_json(path: Path, payload: dict[str, Any]) -> None:
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
+def parse_criterion_estimate_path(criterion_root: Path, estimates_path: Path) -> tuple[str, str, str]:
+    relative_parts = estimates_path.relative_to(criterion_root).parts
+    if len(relative_parts) == 5 and relative_parts[-2:] == ("new", "estimates.json"):
+        producer, scenario, axis = relative_parts[:3]
+        return producer, scenario, axis
+
+    if len(relative_parts) == 4 and relative_parts[-2:] == ("new", "estimates.json"):
+        group, axis = relative_parts[:2]
+        producer, separator, scenario = group.partition("_")
+        if separator and scenario:
+            return producer, scenario, axis
+
+    raise ValueError(f"Unexpected synthetic benchmark estimate path: {estimates_path}")
+
+
 def collect_criterion_metrics(repo_root: Path, *, estimate: str = "mean") -> dict[str, dict[str, Any]]:
     criterion_root = repo_root / "target" / "criterion"
     metrics: dict[str, dict[str, Any]] = {}
 
-    for estimates_path in sorted(criterion_root.glob("bench-tx/*/*/new/estimates.json")):
-        axis = estimates_path.parents[1].name
-        scenario = estimates_path.parents[2].name
-        producer = estimates_path.parents[3].name
+    for estimates_path in sorted(criterion_root.glob("**/new/estimates.json")):
+        producer, scenario, axis = parse_criterion_estimate_path(criterion_root, estimates_path)
         name = f"{producer}/{scenario}/{axis}"
         estimate_data = json.loads(estimates_path.read_text(encoding="utf-8"))[estimate]
         metrics[name] = {
@@ -395,6 +408,34 @@ class Tests(unittest.TestCase):
             try:
                 metrics = collect_criterion_metrics(root)
                 self.assertEqual(metrics["bench-tx/consume-single-p2id-note/prove"]["estimate_ms"], 1.5)
+            finally:
+                subprocess.run(["rm", "-rf", str(root)], check=False)
+
+    def test_collect_criterion_estimate_from_sanitized_group_dir(self) -> None:
+        with mock.patch("subprocess.check_output", return_value="abc\n"):
+            root = Path(self.id().replace("/", "_"))
+            estimates = (
+                root
+                / "target"
+                / "criterion"
+                / "bench-tx_create-single-p2id-note"
+                / "prove"
+                / "new"
+                / "estimates.json"
+            )
+            estimates.parent.mkdir(parents=True, exist_ok=True)
+            write_json(
+                estimates,
+                {
+                    "mean": {
+                        "point_estimate": 1_500_000.0,
+                        "confidence_interval": {"lower_bound": 1_000_000.0, "upper_bound": 2_000_000.0},
+                    }
+                },
+            )
+            try:
+                metrics = collect_criterion_metrics(root)
+                self.assertEqual(metrics["bench-tx/create-single-p2id-note/prove"]["estimate_ms"], 1.5)
             finally:
                 subprocess.run(["rm", "-rf", str(root)], check=False)
 
