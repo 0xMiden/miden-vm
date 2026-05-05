@@ -355,11 +355,6 @@ impl LocalPackageRegistry {
         Ok(Arc::new(loaded))
     }
 
-    /// Persist the state of the index to disk
-    fn save(&mut self) -> Result<(), LocalRegistryError> {
-        self.save_with_locked_operation(|| Ok(()))
-    }
-
     fn save_with_locked_operation(
         &mut self,
         operation: impl FnOnce() -> Result<(), LocalRegistryError>,
@@ -426,6 +421,70 @@ impl LocalPackageRegistry {
                 self.index = InMemoryPackageRegistry::from_packages(previous_packages);
                 Err(error)
             },
+        }
+    }
+
+    fn write_cache_artifact_from_legacy_or_bytes(
+        artifact_path: &Path,
+        legacy_path: &Path,
+        package: &MastPackage,
+        version: &Version,
+        bytes: &[u8],
+    ) -> Result<(), LocalRegistryError> {
+        match fs::read(legacy_path) {
+            Ok(existing_bytes) => match MastPackage::read_from_bytes(&existing_bytes) {
+                Ok(existing_package) => {
+                    let existing_version =
+                        Version::new(existing_package.version.clone(), existing_package.digest());
+                    if existing_package.name == package.name && existing_version == *version {
+                        if &existing_package == package {
+                            fs::write(artifact_path, existing_bytes)
+                                .map_err(LocalRegistryError::IndexWrite)
+                        } else {
+                            Err(LocalRegistryError::DuplicateSemanticVersion {
+                                package: package.name.clone(),
+                                version: package.version.clone(),
+                            })
+                        }
+                    } else {
+                        fs::write(artifact_path, bytes).map_err(LocalRegistryError::IndexWrite)
+                    }
+                },
+                Err(_) => fs::write(artifact_path, bytes).map_err(LocalRegistryError::IndexWrite),
+            },
+            Err(_) => fs::write(artifact_path, bytes).map_err(LocalRegistryError::IndexWrite),
+        }
+    }
+
+    fn repair_cache_artifact(
+        artifact_path: &Path,
+        legacy_path: &Path,
+        package: &MastPackage,
+        version: &Version,
+        bytes: &[u8],
+    ) -> Result<(), LocalRegistryError> {
+        match fs::read(artifact_path) {
+            Ok(existing_bytes) => match MastPackage::read_from_bytes(&existing_bytes) {
+                Ok(existing_package) if &existing_package == package => Ok(()),
+                Ok(_) => Err(LocalRegistryError::DuplicateSemanticVersion {
+                    package: package.name.clone(),
+                    version: package.version.clone(),
+                }),
+                Err(_) => Self::write_cache_artifact_from_legacy_or_bytes(
+                    artifact_path,
+                    legacy_path,
+                    package,
+                    version,
+                    bytes,
+                ),
+            },
+            Err(_) => Self::write_cache_artifact_from_legacy_or_bytes(
+                artifact_path,
+                legacy_path,
+                package,
+                version,
+                bytes,
+            ),
         }
     }
 
@@ -530,27 +589,16 @@ impl LocalPackageRegistry {
                 });
             }
 
-            let should_write_artifact = match fs::read(&artifact_path) {
-                Ok(existing_bytes) => match MastPackage::read_from_bytes(&existing_bytes) {
-                    Ok(existing_package) if &existing_package == package.as_ref() => false,
-                    Ok(_) => {
-                        return Err(LocalRegistryError::DuplicateSemanticVersion {
-                            package: package.name.clone(),
-                            version: package.version.clone(),
-                        });
-                    },
-                    Err(_) => true,
-                },
-                Err(_) => true,
-            };
-
-            if should_write_artifact {
-                self.save_with_locked_operation(|| {
-                    fs::write(&artifact_path, bytes).map_err(LocalRegistryError::IndexWrite)
-                })?;
-            } else {
-                self.save()?;
-            }
+            let legacy_path = self.legacy_artifact_path_for_digest(digest);
+            self.save_with_locked_operation(|| {
+                Self::repair_cache_artifact(
+                    &artifact_path,
+                    &legacy_path,
+                    package.as_ref(),
+                    &version,
+                    &bytes,
+                )
+            })?;
             return Ok(PublishedPackage {
                 name: package.name.clone(),
                 version,
@@ -815,6 +863,95 @@ mod tests {
             .expect_err("stale cache should fail before writing artifact bytes");
         assert!(matches!(error, LocalRegistryError::WriteToStaleIndex));
         assert_eq!(fs::read(&published.artifact_path).unwrap(), original_bytes);
+    }
+
+    #[test]
+    fn concurrent_cache_repair_does_not_overwrite_existing_artifact() {
+        let tempdir = TempDir::new().unwrap();
+        let mut registry = load_registry(&tempdir);
+
+        let package_path = tempdir.path().join("pkg.masp");
+        build_package("pkg", "1.0.0", []).write_to_file(&package_path).unwrap();
+        let published = registry.publish(&package_path).unwrap();
+        fs::remove_file(&published.artifact_path).unwrap();
+
+        let mut first_registry = load_registry(&tempdir);
+        let mut second_registry = load_registry(&tempdir);
+        let repaired_package = build_package("pkg", "1.0.0", []);
+        let repaired_bytes = repaired_package.to_bytes();
+        first_registry.cache_package(repaired_package.into()).unwrap();
+
+        let mut conflicting_package = build_package("pkg", "1.0.0", []);
+        conflicting_package.sections.push(Section::new(
+            SectionId::custom("cache-repair-race-test").unwrap(),
+            Vec::from([1, 2, 3]),
+        ));
+        assert_eq!(Some(conflicting_package.digest()), published.version.digest);
+        let error = second_registry
+            .cache_package(conflicting_package.into())
+            .expect_err("cache repair should revalidate the artifact under the index lock");
+        assert!(matches!(error, LocalRegistryError::DuplicateSemanticVersion { .. }));
+        assert_eq!(fs::read(&published.artifact_path).unwrap(), repaired_bytes);
+    }
+
+    #[test]
+    fn cache_repair_checks_legacy_artifact_before_writing_qualified_artifact() {
+        let tempdir = TempDir::new().unwrap();
+        let mut registry = load_registry(&tempdir);
+
+        let package_path = tempdir.path().join("pkg.masp");
+        build_package("pkg", "1.0.0", []).write_to_file(&package_path).unwrap();
+        let published = registry.publish(&package_path).unwrap();
+        let original_bytes = fs::read(&published.artifact_path).unwrap();
+        let legacy_path =
+            registry.legacy_artifact_path_for_digest(published.version.digest.unwrap());
+        fs::rename(&published.artifact_path, &legacy_path).unwrap();
+
+        let mut conflicting_package = build_package("pkg", "1.0.0", []);
+        conflicting_package.sections.push(Section::new(
+            SectionId::custom("legacy-cache-repair-test").unwrap(),
+            Vec::from([1, 2, 3]),
+        ));
+        assert_eq!(Some(conflicting_package.digest()), published.version.digest);
+
+        let error = registry
+            .cache_package(conflicting_package.into())
+            .expect_err("cache repair should reject conflicts with the legacy artifact");
+        assert!(matches!(error, LocalRegistryError::DuplicateSemanticVersion { .. }));
+        assert!(!published.artifact_path.exists());
+        assert_eq!(fs::read(&legacy_path).unwrap(), original_bytes);
+
+        let loaded = registry.load_package(&PackageId::from("pkg"), &published.version).unwrap();
+        assert!(loaded.sections.is_empty());
+    }
+
+    #[test]
+    fn cache_repair_checks_legacy_artifact_before_replacing_corrupt_qualified_artifact() {
+        let tempdir = TempDir::new().unwrap();
+        let mut registry = load_registry(&tempdir);
+
+        let package_path = tempdir.path().join("pkg.masp");
+        build_package("pkg", "1.0.0", []).write_to_file(&package_path).unwrap();
+        let published = registry.publish(&package_path).unwrap();
+        let original_bytes = fs::read(&published.artifact_path).unwrap();
+        let legacy_path =
+            registry.legacy_artifact_path_for_digest(published.version.digest.unwrap());
+        fs::write(&legacy_path, &original_bytes).unwrap();
+        fs::write(&published.artifact_path, b"not a package").unwrap();
+
+        let mut conflicting_package = build_package("pkg", "1.0.0", []);
+        conflicting_package.sections.push(Section::new(
+            SectionId::custom("legacy-cache-corrupt-qualified-test").unwrap(),
+            Vec::from([1, 2, 3]),
+        ));
+        assert_eq!(Some(conflicting_package.digest()), published.version.digest);
+
+        let error = registry
+            .cache_package(conflicting_package.into())
+            .expect_err("cache repair should reject conflicts with the legacy artifact");
+        assert!(matches!(error, LocalRegistryError::DuplicateSemanticVersion { .. }));
+        assert_eq!(fs::read(&legacy_path).unwrap(), original_bytes);
+        assert_eq!(fs::read(&published.artifact_path).unwrap(), b"not a package");
     }
 
     #[test]
