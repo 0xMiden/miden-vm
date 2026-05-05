@@ -513,11 +513,11 @@ end
 
 #! Merges two words (256-bit digests) via Poseidon2 hash with a domain identifier.
 #!
-#! Inputs:  [domain, B, A, ...]
+#! Inputs:  [domain, A, B, ...]
 #! Outputs: [C, ...]
 #!
 #! Where:
-#! - B and A are the words to be merged (B corresponds to the first rate word).
+#! - A and B are the words to be merged (A corresponds to the first rate word).
 #! - C is the resulting hash, computed with capacity `[0, domain, 0, 0]`.
 #!
 #! Cycles: 16
@@ -525,11 +525,11 @@ pub proc merge_in_domain
     # move `domain` past the two words so we can reuse the `adv.insert_hdword_d` capacity-word
     # construction pattern (1 cycle)
     movdn.8
-    # => [B, A, domain, ...]
+    # => [A, B, domain, ...]
 
-    # build the hperm state [B, A, [0, domain, 0, 0]] (5 cycles)
+    # build the hperm state [A, B, [0, domain, 0, 0]] (5 cycles)
     push.0.0 movup.10 push.0 movdnw.2
-    # => [B, A, [0, domain, 0, 0], ...]
+    # => [A, B, [0, domain, 0, 0], ...]
 
     # run the permutation (1 cycle) and squeeze the digest (9 cycles)
     hperm
