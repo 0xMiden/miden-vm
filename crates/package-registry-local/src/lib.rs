@@ -186,7 +186,6 @@ impl LocalPackageRegistry {
                 file.try_lock_shared().map_err(LocalRegistryError::IndexReadLock)?;
                 file.read_to_string(&mut contents).map_err(LocalRegistryError::IndexRead)?;
             }
-            std::println!("=== index file contents ==\n{contents}\n=== end of file contents ==");
             let contents = contents.trim();
             index_checksum =
                 *miden_core::crypto::hash::Sha256::hash(contents.as_bytes()).as_bytes();
@@ -503,13 +502,13 @@ impl LocalPackageRegistry {
         let semantic_version = DisplayHex(semantic_version.as_bytes());
         let digest_bytes = digest.as_bytes();
         let digest = DisplayHex::new(&digest_bytes);
-        let filename = format!("{package_id}-{semantic_version}-0x{digest}.masp");
+        let filename = format!("{package_id}-{semantic_version}-{digest:#}.masp");
         self.artifact_dir.join(filename)
     }
 
     /// Derive the artifact path used before filenames included package identity.
     fn legacy_artifact_path_for_digest(&self, digest: miden_core::Word) -> PathBuf {
-        let filename = format!("0x{}.masp", DisplayHex::new(&digest.as_bytes()));
+        let filename = format!("{:#}.masp", DisplayHex::new(&digest.as_bytes()));
         self.artifact_dir.join(filename)
     }
 

@@ -5,7 +5,7 @@ Local filesystem-backed registry and CLI for publishing and inspecting Miden pac
 The data managed by this registry using the local filesystem is as follows:
 
 - The registry index, stored at `$MIDEN_SYSROOT/etc/registry/index.toml`
-- The artifacts of registered packages, as `$MIDEN_SYSROOT/lib/<digest>.masp`
+- The artifacts of registered packages, as `$MIDEN_SYSROOT/lib/{pkdid}-{version}-<digest>.masp`
 
 The `MIDEN_SYSROOT` directory is managed by [`midenup`](https://github.com/0xMiden/midenup), and automatically made available to `miden-registry` when invoked as `miden registry`. If running `miden-registry` directly, you must ensure that the `MIDEN_SYSROOT` environment variable is set in your shell.
 
