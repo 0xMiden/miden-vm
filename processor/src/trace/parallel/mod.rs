@@ -4,8 +4,8 @@ use itertools::Itertools;
 use miden_air::{
     Felt,
     trace::{
-        CLK_COL_IDX, DECODER_TRACE_OFFSET, DECODER_TRACE_WIDTH, MIN_TRACE_LEN, MainTrace, RowIndex,
-        STACK_TRACE_OFFSET, STACK_TRACE_WIDTH, SYS_TRACE_WIDTH,
+        CHIPLETS_WIDTH, CLK_COL_IDX, DECODER_TRACE_OFFSET, DECODER_TRACE_WIDTH, MIN_TRACE_LEN,
+        MainTrace, RowIndex, STACK_TRACE_OFFSET, STACK_TRACE_WIDTH, SYS_TRACE_WIDTH,
         decoder::{
             HASHER_STATE_OFFSET, NUM_HASHER_COLUMNS, NUM_OP_BITS, OP_BITS_EXTRA_COLS_OFFSET,
             OP_BITS_OFFSET,
@@ -167,22 +167,44 @@ pub fn build_trace_with_max_len(
     let trace_len_summary =
         TraceLenSummary::new(core_trace_len, range_table_len, ChipletsLengths::new(&chiplets));
 
-    // Per-AIR trace heights — realized on this investigation branch. Each AIR is
-    // padded to its own next power-of-two height; the prover passes them as
-    // independent matrices to `prove_multi`. For hash-heavy programs (chip > core),
-    // this is the optimization the multi-AIR refactor enables. For Fibonacci-style
-    // programs (core > chip), this saves trace cells too.
+    // Per-AIR trace heights. Each AIR is sized at its own next-power-of-two padded
+    // height. The unified `MainTrace::Parts` storage holds `main_trace_len = max(...)`
+    // rows so that the legacy `to_row_major` view (used by debug `check_constraints`
+    // and aux-trace construction) still sees a uniformly-padded trace; the per-AIR
+    // matrix slices `to_core_chiplets_matrices` returns are what the multi-AIR prover
+    // consumes.
     //
-    // **Open bug** (the reason this branch exists): when `chiplets_height >
-    // core_height`, upstream `verify_multi` rejects the proof at the cross-AIR
-    // constraint identity (`accumulated == q · vanishing(z)`). Minimal reproducer:
-    // a tight `repeat.20 hperm` loop with `core=64 / chip=512` (8× divergence) — see
-    // `prove_verify::test_hash_heavy_divergent_heights`. The reverse direction
-    // (`core > chip`, e.g. Fibonacci with `core=4096 / chip=1024`) verifies fine,
-    // and upstream's own divergent-height tests (TinyAir at `[4, 8]` with periodic
-    // columns + aux trace) verify fine. So the bug is in the interaction between a
-    // Miden-VM-specific construct and the lifted-coset evaluation when chip's
-    // logical content extends past core's.
+    // **Range checker:** generated at `core_height` so `V[core_height - 1] = 65535`
+    // satisfies the per-AIR Core boundary constraint after slicing. The extra rows
+    // [core_height..main_trace_len] continue with `(M=0, V=65535)` so the legacy
+    // unified view still has `V[main_trace_len - 1] = 65535` and the transition
+    // constraint (`V_next - V` in {0, 1, 3, …, 2187}) keeps holding (delta = 0).
+    //
+    // **Chiplets:** generated at `main_trace_len`; the chiplet last-row invariant
+    // (s_ctrl=0, s_perm=0, s1..s4=1, the padding-region pattern) holds at the slice's
+    // last row `chiplets_height - 1` because chiplet padding spans
+    // `[chiplets.trace_len()..main_trace_len]` and `chiplets_height >=
+    // chiplets.trace_len()` so the slice ends within the padding region (assuming
+    // `chiplets.trace_len()` isn't itself a power of two — see TODO below).
+    //
+    // **Core:** HALT-padded at `main_trace_len`; the slice's last row
+    // `core_height - 1` is a HALT row because core HALT-padding fills
+    // `[core_trace_len..main_trace_len]` and `core_height >= core_trace_len`.
+    //
+    // **Earlier bug (failure 1, now fixed):** generating range_checker at
+    // `main_trace_len` placed `V[main_trace_len - 1] = 65535` past the Core slice's
+    // last row, so after slicing `V[core_height - 1]` held an intermediate range
+    // table value (or 0). The boundary `V[last] = 65535` on the SLICED Core then
+    // didn't hold, the prover's quotient wasn't divisible by the vanishing
+    // polynomial, and Rust `verify_multi` rejected with `ConstraintMismatch`. See
+    // `prove_verify::test_hash_heavy_divergent_heights`.
+    //
+    // TODO: when `chiplets.trace_len()` is itself a power of two AND
+    // `chiplets_height < main_trace_len`, the slice's last row is the LAST chiplet
+    // data row (not a padding row), violating the last-row invariant. Today this
+    // edge case is masked because `pad_to_trace_length` rounds up via
+    // `next_power_of_two` (no growth when already pow2). Likely fix: bump
+    // `chiplets_height = pad_to_trace_length(chiplets.trace_len() + 1)`.
     let core_height = pad_to_trace_length(core_trace_len.max(range_table_len));
     let chiplets_height = pad_to_trace_length(chiplets.trace_len());
     let main_trace_len = core_height.max(chiplets_height);
@@ -190,7 +212,20 @@ pub fn build_trace_with_max_len(
     let ((range_checker_trace, chiplets_trace), ()) = rayon::join(
         || {
             rayon::join(
-                || range_checker.into_trace_with_table(range_table_len, main_trace_len),
+                || {
+                    let mut rc = range_checker.into_trace_with_table(range_table_len, core_height);
+                    // Extend (M=0, V=65535) so the legacy unified view also satisfies
+                    // `V[last] = 65535` and `V_next - V` ∈ {0, 1, 3, …, 2187}.
+                    if core_height < main_trace_len {
+                        // Continue (M=0, V=65535) in the unified-view tail so that the
+                        // legacy single-AIR `to_row_major` view still satisfies
+                        // `range::enforce_main`'s boundary at `main_trace_len - 1` and
+                        // its degree-9 transition (delta=0 is in the allowed set).
+                        rc.trace[0].resize(main_trace_len, ZERO);
+                        rc.trace[1].resize(main_trace_len, Felt::new_unchecked(u16::MAX as u64));
+                    }
+                    rc
+                },
                 || chiplets.into_trace(main_trace_len),
             )
         },

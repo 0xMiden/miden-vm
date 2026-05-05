@@ -134,11 +134,12 @@ fn test_rpo_prove_verify() {
 }
 
 #[test]
-#[ignore = "EXPECTED FAIL on robin/multi-air-per-air-heights: with divergent heights \
-            (core 512 > chip 256) proof_order is [Chiplets, Core] and the multi-AIR \
-            ACE circuit's hardcoded β-fold direction (`β·core + chip`) is wrong. \
-            Either bind air_order into the codegen or force core_height ≤ chiplets_height \
-            once the verify_multi divergent-heights bug is fixed."]
+#[ignore = "EXPECTED FAIL on robin/multi-air-per-air-heights: Rust verify passes \
+            (failure 1 fixed); MASM recursive verifier fails with `aux randomness \
+            mismatch at element 0 (beta0)`. This is failure 2: with core 512 > chip 256 \
+            proof_order is [Chiplets, Core] and the multi-AIR ACE circuit's hardcoded \
+            β-fold direction (`β·core + chip`) doesn't match. Either bind air_order \
+            into the codegen or force core_height ≤ chiplets_height."]
 fn test_poseidon2_prove_verify() {
     // Compute 150th Fibonacci number to generate a longer trace
     let source = "
@@ -167,16 +168,12 @@ fn test_poseidon2_prove_verify_rust_only() {
     assert_prove_verify(source, HashFunction::Poseidon2, "Poseidon2", true, false);
 }
 
-/// Hash-heavy program that produces `chip_height > core_height` — minimal reproducer
-/// for the multi-AIR `verify_multi` `ConstraintMismatch` bug being investigated on
-/// this branch. With per-AIR-height trace generation enabled (current state of
-/// `processor/src/trace/parallel/mod.rs` on `robin/multi-air-per-air-heights`), this
-/// test FAILS with `Verifier(ConstraintMismatch)`. With heights forced equal (the
-/// state on `adr1anh/multi-air`), it passes. When the bug is fixed, this test should
-/// pass with divergent heights enabled.
+/// Hash-heavy program that produces `chip_height > core_height`. Originally introduced
+/// as a reproducer for the multi-AIR `verify_multi` `ConstraintMismatch` bug; now serves
+/// as a regression test that the per-AIR-height boundary fix (build each component at
+/// its own per-AIR height in `processor/src/trace/parallel/mod.rs`) keeps the
+/// chip>core direction passing.
 #[test]
-#[ignore = "EXPECTED FAIL: multi-AIR verify_multi ConstraintMismatch when chip > core; \
-            investigation pending. Run with `--include-ignored` to confirm reproducer."]
 fn test_hash_heavy_divergent_heights() {
     let source = "
         begin
@@ -625,10 +622,6 @@ mod fast_parallel {
     }
 
     #[test]
-    #[ignore = "EXPECTED FAIL on robin/multi-air-per-air-heights: precompile fixture has \
-                core_logical=33542 / chip_logical=70658 → core=2^16 / chip=2^17, hits failure 1 \
-                (verify_multi ConstraintMismatch when chip > core). Same root cause as \
-                `test_hash_heavy_divergent_heights`."]
     fn test_prove_from_trace_sync_preserves_precompile_requests() {
         let LoggedPrecompileProofFixture {
             program,
@@ -651,9 +644,15 @@ mod fast_parallel {
     }
 
     #[test]
-    #[ignore = "EXPECTED FAIL on robin/multi-air-per-air-heights: precompile fixture forces \
-                chip > core (2^17 vs 2^16), so Rust verify_multi rejects before MASM gets a \
-                chance — same failure 1 root cause."]
+    #[ignore = "EXPECTED FAIL on robin/multi-air-per-air-heights: Rust verify passes \
+                (failure 1 fixed by per-AIR-height boundary generation), but MASM \
+                recursive verifier fails with `aux randomness mismatch at element 0 \
+                (beta0)`. This is failure 2: the multi-AIR ACE circuit hardcodes \
+                `accumulated = β·core_acc + chip_acc`. When proof_order is \
+                [Chiplets, Core] (because the precompile fixture has chip > core), the \
+                MASM verifier's β-folding doesn't match the prover's order. Either \
+                bind air_order into the codegen, or force core_height ≤ chiplets_height \
+                via padding."]
     fn test_poseidon2_recursive_verify_with_precompile_requests() {
         let LoggedPrecompileProofFixture {
             program,
