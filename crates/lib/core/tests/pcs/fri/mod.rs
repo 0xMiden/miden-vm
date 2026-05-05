@@ -8,6 +8,14 @@ pub(crate) mod verifier_fri_e2f4;
 use miden_core::Word;
 pub use verifier_fri_e2f4::*;
 
+const PREPROCESS_SOURCE: &str = "
+        use miden::core::pcs::fri::frie2f4
+
+        begin
+            exec.frie2f4::preprocess
+        end
+        ";
+
 #[test]
 fn fri_fold4_ext2_remainder64() {
     let source = "
@@ -102,6 +110,79 @@ fn fri_fold4_ext2_remainder128() {
     let test = build_test!(source, &[domain_generator], &advice_stack, store, advice_map.clone());
 
     test.expect_stack(&[]);
+}
+
+#[test]
+fn fri_preprocess_rejects_non_u32_num_queries() {
+    let (domain_generator, mut advice_stack, num_layers_index, remainder_length_index) =
+        prepare_preprocess_inputs(14);
+    let invalid_u32 = u64::from(u32::MAX) + 1;
+
+    advice_stack[0] = invalid_u32;
+    // Keep later counters valid so this test isolates the first assertion.
+    advice_stack[num_layers_index] = 1;
+    advice_stack[remainder_length_index] = 1;
+
+    let test = build_test!(PREPROCESS_SOURCE, &[domain_generator], &advice_stack);
+    expect_assert_error_message!(test);
+}
+
+#[test]
+fn fri_preprocess_rejects_non_u32_num_layers() {
+    let (domain_generator, mut advice_stack, num_layers_index, remainder_length_index) =
+        prepare_preprocess_inputs(14);
+    let invalid_u32 = u64::from(u32::MAX) + 1;
+
+    advice_stack[num_layers_index] = invalid_u32;
+    advice_stack[remainder_length_index] = 1;
+
+    let test = build_test!(PREPROCESS_SOURCE, &[domain_generator], &advice_stack);
+    expect_assert_error_message!(test);
+}
+
+#[test]
+fn fri_preprocess_rejects_non_u32_remainder_length() {
+    let (domain_generator, mut advice_stack, _, remainder_length_index) =
+        prepare_preprocess_inputs(14);
+    let invalid_u32 = u64::from(u32::MAX) + 1;
+
+    advice_stack[remainder_length_index] = invalid_u32;
+
+    let test = build_test!(PREPROCESS_SOURCE, &[domain_generator], &advice_stack);
+    expect_assert_error_message!(test);
+}
+
+fn prepare_preprocess_inputs(trace_len_e: usize) -> (u64, Vec<u64>, usize, usize) {
+    let blowup_exp = 3;
+    let depth = trace_len_e + blowup_exp;
+    let domain_size = 1 << depth;
+
+    let FriResult {
+        positions,
+        alphas,
+        commitments,
+        remainder,
+        num_queries,
+        ..
+    } = fri_prove_verify_fold4_ext2(trace_len_e).unwrap();
+
+    let num_layers = (commitments.len() / 4) - 1;
+    let num_layers_index = 1 + positions.len();
+    let remainder_length_index = num_layers_index + 1 + (num_layers * 8);
+
+    let advice_stack = prepare_advice_stack(
+        depth,
+        domain_size,
+        num_queries,
+        positions,
+        alphas,
+        commitments,
+        remainder,
+    );
+
+    let domain_generator = Felt::get_root_of_unity(domain_size.ilog2()).as_canonical_u64();
+
+    (domain_generator, advice_stack, num_layers_index, remainder_length_index)
 }
 
 fn prepare_advice_stack(
