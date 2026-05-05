@@ -59,6 +59,7 @@ fn test_decorators_only_execute_in_debug_mode() {
     let mut host_debug_on = TestHost::new();
     let process_debug_on = FastProcessor::new(StackInputs::default())
         .with_advice(AdviceInputs::default())
+        .expect("advice inputs should fit advice map limits")
         .with_debugging(true)
         .with_tracing(true);
 
@@ -110,6 +111,7 @@ fn test_decorators_only_execute_in_debug_mode_on() {
     // Create processor with debug mode ON (tracing enabled)
     let processor = FastProcessor::new(StackInputs::default())
         .with_advice(AdviceInputs::default())
+        .expect("advice inputs should fit advice map limits")
         .with_debugging(true)
         .with_tracing(true);
 
@@ -174,6 +176,7 @@ fn test_zero_overhead_when_debug_off() {
     let mut host_on = TestHost::new();
     let processor_on = FastProcessor::new(StackInputs::default())
         .with_advice(AdviceInputs::default())
+        .expect("advice inputs should fit advice map limits")
         .with_debugging(true)
         .with_tracing(true);
 

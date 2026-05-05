@@ -232,7 +232,8 @@ fn test_cycle_limit_exceeded() {
     let program = simple_program_with_ops(vec![Operation::Swap; MIN_TRACE_LEN]);
 
     let processor =
-        FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options);
+        FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options)
+            .expect("processor advice inputs should fit advice map limits");
     let err = processor.execute_sync(&program, &mut host).unwrap_err();
 
     assert_matches!(err, ExecutionError::CycleLimitExceeded(max_cycles) if max_cycles == MIN_TRACE_LEN as u32);
@@ -265,7 +266,8 @@ fn test_cycle_limit_exactly_max_cycles_succeeds() {
     .unwrap();
 
     let processor =
-        FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options);
+        FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options)
+            .expect("processor advice inputs should fit advice map limits");
     let result = processor.execute_sync(&program, &mut host);
 
     // The program should succeed since it uses exactly max_cycles cycles.
@@ -540,6 +542,7 @@ fn test_external_node_decorator_sequencing() {
     let mut host = crate::test_utils::TestHost::with_kernel_forest(Arc::new(lib_forest));
     let processor = FastProcessor::new(StackInputs::default())
         .with_advice(AdviceInputs::default())
+        .expect("advice inputs should fit advice map limits")
         .with_debugging(true)
         .with_tracing(true);
 
@@ -607,7 +610,8 @@ fn test_continuation_stack_limit_exceeded() {
     let options = ExecutionOptions::default().with_max_num_continuations(3);
 
     let processor =
-        FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options);
+        FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options)
+            .expect("processor advice inputs should fit advice map limits");
     let err = processor.execute_sync(&program, &mut host).unwrap_err();
 
     assert_matches!(err, ExecutionError::Internal(msg) if msg.contains("continuation stack"));
@@ -635,7 +639,8 @@ fn test_continuation_stack_limit_exactly_max_continuations_succeeds() {
     let options = ExecutionOptions::default().with_max_num_continuations(3);
 
     let processor =
-        FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options);
+        FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options)
+            .expect("processor advice inputs should fit advice map limits");
 
     processor.execute_sync(&program, &mut host).unwrap();
 }

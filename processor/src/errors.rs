@@ -108,6 +108,17 @@ pub enum ExecutionError {
     HostError(#[from] HostError),
 }
 
+impl ExecutionError {
+    /// Wraps an advice error without source-location context.
+    pub fn advice_error_no_context(err: AdviceError) -> Self {
+        Self::AdviceError {
+            label: SourceSpan::UNKNOWN,
+            source_file: None,
+            err,
+        }
+    }
+}
+
 impl AsRef<dyn Diagnostic> for ExecutionError {
     fn as_ref(&self) -> &(dyn Diagnostic + 'static) {
         self

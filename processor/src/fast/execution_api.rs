@@ -529,7 +529,7 @@ impl FastProcessor {
         program: &Program,
         host: &mut impl SyncHost,
     ) -> Result<StackOutputs, ExecutionError> {
-        let mut current_resume_ctx = self.get_initial_resume_context(program).unwrap();
+        let mut current_resume_ctx = self.get_initial_resume_context(program)?;
 
         loop {
             match self.step_sync(host, current_resume_ctx)? {
@@ -548,7 +548,7 @@ impl FastProcessor {
         program: &Program,
         host: &mut impl Host,
     ) -> Result<StackOutputs, ExecutionError> {
-        let mut current_resume_ctx = self.get_initial_resume_context(program).unwrap();
+        let mut current_resume_ctx = self.get_initial_resume_context(program)?;
         let mut processor = self;
 
         loop {

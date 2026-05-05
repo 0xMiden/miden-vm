@@ -110,6 +110,25 @@ impl OverflowTable {
             .map_or(ZERO, |entry| Felt::from(entry.clk))
     }
 
+    /// Returns the clock cycle that would become the new `last_update_clk_in_current_ctx` after
+    /// one pop from the current overflow stack, *without* actually mutating the table.
+    ///
+    /// Concretely this is the clock of the **second-to-last** entry in the current overflow stack,
+    /// or `ZERO` if the stack has fewer than two entries (i.e. the stack would be empty after the
+    /// pop).
+    ///
+    /// Used by `ExecutionTracer` to compute `parent_next_overflow_addr` for `DYNCALL` before
+    /// the actual pop has occurred (fixes #2813 / addresses huitseeker's review on PR #2904).
+    pub fn clk_after_pop_in_current_ctx(&self) -> Felt {
+        let stack = self.get_current_overflow_stack();
+        let entries = stack.overflow.as_slice();
+        if entries.len() < 2 {
+            ZERO
+        } else {
+            Felt::from(entries[entries.len() - 2].clk)
+        }
+    }
+
     /// Returns the number of elements in the overflow stack for the current context.
     pub fn num_elements_in_current_ctx(&self) -> usize {
         self.get_current_overflow_stack().num_elements()

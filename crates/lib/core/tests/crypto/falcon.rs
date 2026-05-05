@@ -512,6 +512,7 @@ fn falcon_prove_verify() {
 
     let trace_inputs =
         FastProcessor::new_with_options(stack_inputs, advice_inputs, Default::default())
+            .expect("processor advice inputs should fit advice map limits")
             .execute_trace_inputs_sync(&program, &mut host)
             .expect("failed to execute");
     let trace = miden_processor::trace::build_trace(trace_inputs).expect("failed to build trace");
