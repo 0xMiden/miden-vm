@@ -1,11 +1,14 @@
 use alloc::vec::Vec;
 
-use hashbrown::HashMap;
-
 use miden_air::trace::RowIndex;
 use miden_core::{EMPTY_WORD, Felt, WORD_SIZE, Word, ZERO};
 
 use crate::{ContextId, MemoryAddress, MemoryError, processor::MemoryInterface};
+
+#[cfg(feature = "std")]
+type MemoryMap = std::collections::HashMap<(ContextId, u32), Word>;
+#[cfg(not(feature = "std"))]
+type MemoryMap = alloc::collections::BTreeMap<(ContextId, u32), Word>;
 
 /// The memory for the processor.
 ///
@@ -23,7 +26,7 @@ use crate::{ContextId, MemoryAddress, MemoryError, processor::MemoryInterface};
 /// but not multiple writes in the same clock cycle to the same address.
 #[derive(Debug, Default)]
 pub struct Memory {
-    memory: HashMap<(ContextId, u32), Word>,
+    memory: MemoryMap,
 }
 
 impl Memory {
