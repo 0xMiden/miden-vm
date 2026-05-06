@@ -8,7 +8,7 @@ use std::path::Path as FsPath;
 
 use miden_assembly_syntax::diagnostics::Report;
 use miden_core::{Word, utils::hash_string_to_word};
-use miden_package_registry::{PackageId, PackageStore};
+use miden_package_registry::{PackageId, PackageRegistry};
 use miden_project::{
     Package as ProjectPackage, ProjectDependencyGraph, ProjectDependencyGraphBuilder,
     ProjectDependencyNode, ProjectDependencyNodeProvenance, ProjectSource, ProjectSourceOrigin,
@@ -30,7 +30,7 @@ impl DependencyGraph {
     // CONSTRUCTORS
     // --------------------------------------------------------------------------------------------
 
-    pub fn from_project_path<S: PackageStore + ?Sized>(
+    pub fn from_project_path<S: PackageRegistry + ?Sized>(
         manifest_path: impl AsRef<FsPath>,
         store: &S,
         source_manager: Arc<dyn SourceManager>,
@@ -42,7 +42,7 @@ impl DependencyGraph {
         Ok(Self { dependency_graph, source_manager })
     }
 
-    pub fn from_project<S: PackageStore + ?Sized>(
+    pub fn from_project<S: PackageRegistry + ?Sized>(
         project: Arc<ProjectPackage>,
         store: &S,
         source_manager: Arc<dyn SourceManager>,
