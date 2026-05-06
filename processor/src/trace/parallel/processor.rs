@@ -238,6 +238,11 @@ impl SystemInterface for ReplayProcessor {
     }
 }
 
+#[inline(always)]
+fn stack_word_start_idx(stack_len: usize, start_idx: usize) -> usize {
+    stack_len - start_idx - WORD_SIZE
+}
+
 impl StackInterface for ReplayProcessor {
     fn top(&self) -> &[Felt] {
         &self.stack.stack_top
@@ -255,9 +260,9 @@ impl StackInterface for ReplayProcessor {
     }
 
     fn get_word(&self, start_idx: usize) -> Word {
-        debug_assert!(start_idx < MIN_STACK_DEPTH - 4);
+        debug_assert!(start_idx + WORD_SIZE <= MIN_STACK_DEPTH);
 
-        let word_start_idx = MIN_STACK_DEPTH - start_idx - 4;
+        let word_start_idx = stack_word_start_idx(MIN_STACK_DEPTH, start_idx);
         let mut result: [Felt; WORD_SIZE] =
             self.top()[range(word_start_idx, WORD_SIZE)].try_into().unwrap();
         // Reverse so top of stack (idx 0) goes to word[0]
@@ -274,8 +279,8 @@ impl StackInterface for ReplayProcessor {
     }
 
     fn set_word(&mut self, start_idx: usize, word: &Word) {
-        debug_assert!(start_idx < MIN_STACK_DEPTH - 4);
-        let word_start_idx = MIN_STACK_DEPTH - start_idx - 4;
+        debug_assert!(start_idx + WORD_SIZE <= MIN_STACK_DEPTH);
+        let word_start_idx = stack_word_start_idx(MIN_STACK_DEPTH, start_idx);
 
         // Reverse so word[0] ends up at the top of stack (highest internal index)
         let mut source: [Felt; WORD_SIZE] = (*word).into();
@@ -504,5 +509,52 @@ impl Stopper for ReplayStopper {
         } else {
             ControlFlow::Continue(())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::trace::trace_state::{
+        AdviceReplay, ExecutionContextReplay, HasherResponseReplay, MastForestResolutionReplay,
+        MemoryReadsReplay, StackOverflowReplay, StackState, SystemState,
+    };
+
+    fn build_replay_processor() -> ReplayProcessor {
+        let system = SystemState {
+            clk: 0_u32.into(),
+            ctx: ContextId::root(),
+            fn_hash: Word::default(),
+            pc_transcript_state: Word::default(),
+        };
+        let stack = StackState::new([ZERO; MIN_STACK_DEPTH], MIN_STACK_DEPTH, ZERO);
+
+        ReplayProcessor::new(
+            system,
+            stack,
+            StackOverflowReplay::default(),
+            ExecutionContextReplay::default(),
+            AdviceReplay::default(),
+            MemoryReadsReplay::default(),
+            HasherResponseReplay::default(),
+            MastForestResolutionReplay::default(),
+            1_u32.into(),
+        )
+    }
+
+    #[test]
+    fn stack_set_word_allows_max_start_idx() {
+        let mut processor = build_replay_processor();
+        let start_idx = MIN_STACK_DEPTH - WORD_SIZE;
+        let word = Word::from([
+            Felt::new_unchecked(1),
+            Felt::new_unchecked(2),
+            Felt::new_unchecked(3),
+            Felt::new_unchecked(4),
+        ]);
+
+        processor.set_word(start_idx, &word);
+
+        assert_eq!(processor.get_word(start_idx), word);
     }
 }

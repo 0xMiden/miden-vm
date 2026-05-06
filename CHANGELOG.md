@@ -17,6 +17,7 @@
 - Fixed `u256::wrapping_mul` so it preserves caller stack values below its operands ([#3071](https://github.com/0xMiden/miden-vm/pull/3071)).
 - Fixed host event and advice-mutation diagnostics to point to the triggering `emit.event(...)` instruction ([#3042](https://github.com/0xMiden/miden-vm/pull/3042)).
 - Fixed debug-only underflow in memory range-check trace generation when the first memory access is at `clk = 0` ([#2976](https://github.com/0xMiden/miden-vm/pull/2976)).
+- Aligned replay stack word access bounds with `StackInterface`, allowing the maximum valid start index for word reads and writes ([#3014](https://github.com/0xMiden/miden-vm/pull/3014)).
 - Replaced unsound `ptr::read` with safe unbox in panic recovery, removing UB from potential double-drop ([#2934](https://github.com/0xMiden/miden-vm/pull/2934)).
 - Library deserialization now rejects exports whose `MastNodeId` is not a procedure root, closing a silent-failure path ([#2933](https://github.com/0xMiden/miden-vm/pull/2933)).
 - Reverted `InvokeKind::ProcRef` back to `InvokeKind::Exec` in `visit_mut_procref` and added an explanatory comment (#2893).
