@@ -1923,7 +1923,6 @@ dependencies = [
  "miden-assembly",
  "miden-core",
  "miden-core-lib",
- "miden-debug-types",
  "miden-lifted-stark",
  "miden-mast-package",
  "miden-processor",
