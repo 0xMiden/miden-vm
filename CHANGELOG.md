@@ -82,6 +82,7 @@
 #### Fixes
 
 - Fixed stale `ReplayProcessor` doc comment links to `ExecutionTracer` after module-structure refactors.
+- Preserved `AssemblyOp` source mappings when merging `MastForest`s, preventing source-location loss after node deduplication.
 
 ## 0.22.1 (2026-04-07)
 
