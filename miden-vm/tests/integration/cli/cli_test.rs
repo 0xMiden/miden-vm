@@ -112,7 +112,7 @@ fn cli_bundle_kernel_noexports() {
     cmd.arg("bundle")
         .arg("./tests/integration/cli/data/lib_noexports")
         .arg("--kernel")
-        .arg("./tests/integration/cli/data/kernel_main.masm")
+        .arg("./tests/integration/cli/data/kernel_noexports.masm")
         .arg("--output")
         .arg(output_file.as_path());
     cmd.assert().success();

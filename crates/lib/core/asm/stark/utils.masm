@@ -295,11 +295,13 @@ proc sample_gamma
     swap
 end
 
-#! Executes the constraints evalution check.
+#! Executes the constraints evaluation check.
 #!
-#! Input: [...]
-#! Output: [...]
-proc execute_constraint_evaluation_check
+#! Inputs:  [...]
+#! Outputs: [...]
+#!
+#! Invocation: exec
+pub proc execute_constraint_evaluation_check
     exec.constants::get_procedure_digest_execute_constraint_evaluation_check_ptr dynexec
 end
 
@@ -308,9 +310,11 @@ end
 #!
 #! For AIRs without an auxiliary trace, the implementation should be a no-op.
 #!
-#! Input: [...]
-#! Output: [...]
-proc observe_aux_trace
+#! Inputs:  [...]
+#! Outputs: [...]
+#!
+#! Invocation: exec
+pub proc observe_aux_trace
     exec.constants::get_procedure_digest_observe_aux_trace_ptr dynexec
 end
 
