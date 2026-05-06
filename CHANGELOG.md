@@ -68,6 +68,8 @@
 - Speed-up AUX range check trace generation by changing divisors to a flat Vec layout ([#2966](https://github.com/0xMiden/miden-vm/pull/2966)).
 - Optimized call graph topological sort from O(V\*E) to O(V + E) by pre-computing in-degrees ([#2830](https://github.com/0xMiden/miden-vm/pull/2830)).
 - Removed AIR constraint tagging instrumentation, applied a uniform constraint description style across components, and optimized constraint evaluation ([#2856](https://github.com/0xMiden/miden-vm/pull/2856)).
+- [BREAKING] Unified all auxiliary-trace buses under a single declarative LogUp `LookupAir` shared by the verifier, prover aux-trace generator, and recursive ACE circuit; reduced committed boundary values to one per trace ([#2962](https://github.com/0xMiden/miden-vm/pull/2962)).
+- Collapsed the kernel ROM chiplet to one row per digest with a LogUp multiplicity, eliminating duplicate-callsite rows ([#2962](https://github.com/0xMiden/miden-vm/pull/2962)).
 - Made all internal `core::math` procedures natively little-endian ([#3084](https://github.com/0xMiden/miden-vm/pull/3084)).
 - [BREAKING] Updated the Miden crypto stack to `miden-crypto` 0.25, and switched SMT leaf hashing to use Poseidon2 domain separation so masm-side leaf digests match `SmtLeaf::hash()` ([#3095](https://github.com/0xMiden/miden-vm/pull/3095)).
 

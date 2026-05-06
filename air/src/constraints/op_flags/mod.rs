@@ -106,7 +106,6 @@ pub struct OpFlags<E> {
     right_shift: E,
     control_flow: E,
     overflow: E,
-    u32_rc_op: E,
 
     // Next-row control flow flags (degree 4)
     end_next: E,
@@ -269,7 +268,6 @@ where
             right_shift: composite.right_shift_scalar,
             control_flow: composite.control_flow,
             overflow: composite.overflow,
-            u32_rc_op: composite.u32_rc_op,
             end_next,
             repeat_next,
             respan_next,
@@ -584,7 +582,7 @@ where
         // DYNCALL is intentionally excluded — it left-shifts the stack but uses
         // decoder hasher state (h5) for overflow constraints, not the generic path.
         let prefix_010 = prefix_01 * bits[4][0].clone();
-        let u32_add3_madd_group = prefix_100.clone() * bits[3][1].clone() * bits[2][1].clone();
+        let u32_add3_madd_group = prefix_100 * bits[3][1].clone() * bits[2][1].clone();
         let left_shift_scalar = E::sum_array::<7>(&[
             // +prefix_010          — ASSERT, EQ, ADD, MUL, AND, OR, U32AND, U32XOR, DROP,
             //                        CSWAP, CSWAPW, MLOADW, MSTORE, MSTOREW, (op46), (op47)
@@ -632,9 +630,6 @@ where
             op4(opcodes::CALL),
         ]);
 
-        // Flag if current operation is a degree-6 u32 operation
-        let u32_rc_op = prefix_100;
-
         // Flag if overflow table contains values
         let overflow: E = stack.b0.into();
         let overflow = (overflow - E::from_u64(16)) * stack.h0;
@@ -646,7 +641,6 @@ where
             left_shift_scalar,
             right_shift_scalar,
             control_flow,
-            u32_rc_op,
             overflow,
         }
     }
@@ -747,12 +741,6 @@ where
     pub fn halt_next(&self) -> E {
         self.halt_next.clone()
     }
-
-    /// Returns the flag when the current operation is a u32 operation requiring range checks.
-    #[inline(always)]
-    pub fn u32_rc_op(&self) -> E {
-        self.u32_rc_op.clone()
-    }
 }
 
 macro_rules! op_flag_getters {
@@ -788,6 +776,7 @@ impl<E: PrimeCharacteristicRing> OpFlags<E> {
         /// Operation Flag of NOT operation.
         not => opcodes::NOT,
         /// Operation Flag of MLOAD operation.
+        #[expect(dead_code)]
         mload => opcodes::MLOAD,
         /// Operation Flag of SWAP operation.
         swap => opcodes::SWAP,
@@ -852,8 +841,10 @@ impl<E: PrimeCharacteristicRing> OpFlags<E> {
         /// Operation Flag of OR operation.
         or => opcodes::OR,
         /// Operation Flag of U32AND operation.
+        #[expect(dead_code)]
         u32and => opcodes::U32AND,
         /// Operation Flag of U32XOR operation.
+        #[expect(dead_code)]
         u32xor => opcodes::U32XOR,
         /// Operation Flag of FRIE2F4 operation.
         frie2f4 => opcodes::FRIE2F4,
@@ -865,10 +856,13 @@ impl<E: PrimeCharacteristicRing> OpFlags<E> {
         /// Operation Flag of CSWAPW operation.
         cswapw => opcodes::CSWAPW,
         /// Operation Flag of MLOADW operation.
+        #[expect(dead_code)]
         mloadw => opcodes::MLOADW,
         /// Operation Flag of MSTORE operation.
+        #[expect(dead_code)]
         mstore => opcodes::MSTORE,
         /// Operation Flag of MSTOREW operation.
+        #[expect(dead_code)]
         mstorew => opcodes::MSTOREW,
         /// Operation Flag of PAD operation.
         pad => opcodes::PAD,
@@ -930,8 +924,10 @@ impl<E: PrimeCharacteristicRing> OpFlags<E> {
 
     op_flag_getters!(degree5_op_flags,
         /// Operation Flag of HPERM operation.
+        #[expect(dead_code)]
         hperm => opcodes::HPERM,
         /// Operation Flag of MPVERIFY operation.
+        #[expect(dead_code)]
         mpverify => opcodes::MPVERIFY,
         /// Operation Flag of SPLIT operation.
         split => opcodes::SPLIT,
@@ -940,6 +936,7 @@ impl<E: PrimeCharacteristicRing> OpFlags<E> {
         /// Operation Flag of SPAN operation.
         span => opcodes::SPAN,
         /// Operation Flag of JOIN operation.
+        #[expect(dead_code)]
         join => opcodes::JOIN,
         /// Operation Flag of PUSH operation.
         push => opcodes::PUSH,
@@ -948,16 +945,20 @@ impl<E: PrimeCharacteristicRing> OpFlags<E> {
         /// Operation Flag of DYNCALL operation.
         dyncall => opcodes::DYNCALL,
         /// Operation Flag of EVALCIRCUIT operation.
+        #[expect(dead_code)]
         evalcircuit => opcodes::EVALCIRCUIT,
         /// Operation Flag of LOG_PRECOMPILE operation.
+        #[expect(dead_code)]
         log_precompile => opcodes::LOGPRECOMPILE,
         /// Operation Flag of HORNERBASE operation.
         hornerbase => opcodes::HORNERBASE,
         /// Operation Flag of HORNEREXT operation.
         hornerext => opcodes::HORNEREXT,
         /// Operation Flag of MSTREAM operation.
+        #[expect(dead_code)]
         mstream => opcodes::MSTREAM,
         /// Operation Flag of PIPE operation.
+        #[expect(dead_code)]
         pipe => opcodes::PIPE,
     );
 
@@ -965,6 +966,7 @@ impl<E: PrimeCharacteristicRing> OpFlags<E> {
 
     op_flag_getters!(degree4_op_flags,
         /// Operation Flag of MRUPDATE operation.
+        #[expect(dead_code)]
         mrupdate => opcodes::MRUPDATE,
         /// Operation Flag of CALL operation.
         call => opcodes::CALL,
@@ -1007,7 +1009,6 @@ struct CompositeFlags<E> {
     left_shift_scalar: E,
     right_shift_scalar: E,
     control_flow: E,
-    u32_rc_op: E,
     overflow: E,
 }
 

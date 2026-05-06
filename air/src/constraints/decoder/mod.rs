@@ -81,8 +81,6 @@ use crate::{
     trace::chiplets::hasher::CONTROLLER_ROWS_PER_PERM_FELT,
 };
 
-pub mod bus;
-
 // ENTRY POINTS
 // ================================================================================================
 

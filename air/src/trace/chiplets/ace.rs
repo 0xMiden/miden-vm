@@ -2,10 +2,6 @@ use crate::trace::chiplets::Felt;
 
 // --- CONSTANTS ----------------------------------------------------------------------------------
 
-/// Unique label ACE operation, computed as the chiplet selector with the bits reversed, plus one.
-/// `selector = [1, 1, 1, 0]`, `flag = rev(selector) + 1 = [0, 1, 1, 1] + 1 = 8`
-pub const ACE_INIT_LABEL: Felt = Felt::new_unchecked(0b0111 + 1);
-
 /// Total number of columns making up the ACE chiplet.
 pub const ACE_CHIPLET_NUM_COLS: usize = 16;
 

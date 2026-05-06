@@ -6,7 +6,7 @@ use miden_air::trace::chiplets::hasher::{
 use miden_core::{FMP_ADDR, FMP_INIT_VALUE, operations::Operation};
 
 use super::{
-    decoder::block_stack::{BlockInfo, BlockStack, ExecutionContextInfo},
+    block_stack::{BlockInfo, BlockStack, ExecutionContextInfo},
     stack::OverflowTable,
     trace_state::{
         AceReplay, AdviceReplay, BitwiseReplay, BlockAddressReplay, BlockStackReplay,

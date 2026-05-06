@@ -1280,6 +1280,7 @@ dependencies = [
  "miden-utils-indexing",
  "proptest",
  "thiserror",
+ "tracing",
 ]
 
 [[package]]
