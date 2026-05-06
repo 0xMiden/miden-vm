@@ -1,0 +1,23 @@
+# Memory-heavy benchmark: 16384 sequential word writes followed by 16384 reads.
+# Exercises the processor memory map with 16384 distinct word addresses (0, 4, 8, ..., 65532).
+# Used to compare BTreeMap vs HashMap backing store performance (issue #2819).
+#
+# Stack discipline:
+#   mem_store: pops addr (top), val (second) is stored and stays → net -1
+#   mem_load:  replaces addr (top) with loaded element → net 0
+
+begin
+    # Write phase: store address-as-value at each of 16384 word-aligned addresses.
+    push.0
+    repeat.16384
+        dup mem_store add.4
+    end
+    drop
+
+    # Read phase: load each value back and discard.
+    push.0
+    repeat.16384
+        dup mem_load drop add.4
+    end
+    drop
+end
