@@ -19,7 +19,7 @@ doctest = false
 
 [features]
 default = ["std"]
-arbitrary = ["std", "dep:proptest-derive", "dep:proptest", "miden-assembly-syntax/arbitrary"]
+arbitrary = ["std", "dep:proptest", "dep:proptest-derive", "miden-assembly-syntax/arbitrary", "miden-core/arbitrary"]
 std = ["miden-assembly-syntax/std", "miden-core/std", "serde?/std", "thiserror/std"]
 serde = ["dep:serde", "miden-assembly-syntax/serde", "miden-core/serde"]
 
@@ -36,5 +36,9 @@ serde = { workspace = true, optional = true }
 thiserror.workspace = true
 
 [dev-dependencies]
+miden-assembly-syntax = { workspace = true, features = ["arbitrary"] }
+miden-core = { workspace = true, features = ["arbitrary"] }
 miden-test-serde-macros.workspace = true
+proptest.workspace = true
+proptest-derive.workspace = true
 serde_json = { workspace = true }

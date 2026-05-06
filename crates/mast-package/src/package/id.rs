@@ -99,7 +99,7 @@ impl From<alloc::string::String> for PackageId {
     }
 }
 
-#[cfg(feature = "arbitrary")]
+#[cfg(any(test, feature = "arbitrary"))]
 impl proptest::arbitrary::Arbitrary for PackageId {
     type Parameters = ();
     type Strategy = proptest::prelude::BoxedStrategy<Self>;

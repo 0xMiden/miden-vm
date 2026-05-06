@@ -642,7 +642,7 @@ impl Package {
     }
 }
 
-#[cfg(feature = "arbitrary")]
+#[cfg(any(test, feature = "arbitrary"))]
 #[doc(hidden)]
 pub struct ArbitraryPackageParams {
     pub name: PackageId,
@@ -651,7 +651,7 @@ pub struct ArbitraryPackageParams {
     pub dependencies: Vec<Dependency>,
 }
 
-#[cfg(feature = "arbitrary")]
+#[cfg(any(test, feature = "arbitrary"))]
 impl Default for ArbitraryPackageParams {
     fn default() -> Self {
         Self {
@@ -663,7 +663,7 @@ impl Default for ArbitraryPackageParams {
     }
 }
 
-#[cfg(feature = "arbitrary")]
+#[cfg(any(test, feature = "arbitrary"))]
 impl proptest::arbitrary::Arbitrary for Package {
     type Parameters = ArbitraryPackageParams;
 
