@@ -2,6 +2,10 @@
 
 ## v0.23.0 (TBD)
 
+#### Improvements
+
+- Replaced `BTreeMap` with `HashMap` in `FastProcessor` memory storage, reducing insert and lookup cost from O(log n) to O(1) for memory-heavy programs ([#2819](https://github.com/0xMiden/miden-vm/issues/2819)).
+
 #### Features
 
 - Added the `miden-vm-synthetic-bench` crate for VM-level proving regression detection driven by row-count snapshots from an external producer ([#3024](https://github.com/0xMiden/miden-vm/pull/3024)).

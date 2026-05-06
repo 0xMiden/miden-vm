@@ -1,4 +1,6 @@
-use alloc::{collections::BTreeMap, vec::Vec};
+use alloc::vec::Vec;
+
+use hashbrown::HashMap;
 
 use miden_air::trace::RowIndex;
 use miden_core::{EMPTY_WORD, Felt, WORD_SIZE, Word, ZERO};
@@ -21,7 +23,7 @@ use crate::{ContextId, MemoryAddress, MemoryError, processor::MemoryInterface};
 /// but not multiple writes in the same clock cycle to the same address.
 #[derive(Debug, Default)]
 pub struct Memory {
-    memory: BTreeMap<(ContextId, u32), Word>,
+    memory: HashMap<(ContextId, u32), Word>,
 }
 
 impl Memory {
@@ -111,7 +113,8 @@ impl Memory {
     /// The state is returned as a vector of (address, value) tuples, and includes addresses which
     /// have been accessed at least once.
     pub fn get_memory_state(&self, ctx: ContextId) -> Vec<(MemoryAddress, Felt)> {
-        self.memory
+        let mut state: Vec<(MemoryAddress, Felt)> = self
+            .memory
             .iter()
             .filter(|((c, _), _)| *c == ctx)
             .flat_map(|(&(_c, addr), word)| {
@@ -123,7 +126,9 @@ impl Memory {
                     (addr + 3_u32, word[3]),
                 ]
             })
-            .collect()
+            .collect();
+        state.sort_unstable_by_key(|(addr, _)| u32::from(*addr));
+        state
     }
 
     // HELPERS

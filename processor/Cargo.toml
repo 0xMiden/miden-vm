@@ -42,6 +42,7 @@ miden-utils-diagnostics.workspace = true
 miden-utils-indexing.workspace = true
 
 # External dependencies
+hashbrown.workspace = true
 itertools.workspace = true
 paste.workspace = true
 rayon = { version = "1.10", default-features = false }

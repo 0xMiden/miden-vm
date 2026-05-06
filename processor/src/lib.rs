@@ -290,7 +290,7 @@ pub trait Stopper {
 // ================================================================================================
 
 /// Represents the ID of an execution context
-#[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct ContextId(u32);
 
 impl ContextId {
