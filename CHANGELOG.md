@@ -70,6 +70,9 @@
 - Made all internal `core::math` procedures natively little-endian ([#3084](https://github.com/0xMiden/miden-vm/pull/3084)).
 - [BREAKING] Updated the Miden crypto stack to `miden-crypto` 0.25, and switched SMT leaf hashing to use Poseidon2 domain separation so masm-side leaf digests match `SmtLeaf::hash()` ([#3095](https://github.com/0xMiden/miden-vm/pull/3095)).
 
+#### Enhancements
+- Added binary artifact compilation to CI to aid `midenup`'s installation spped ([#3029](https://github.com/0xMiden/miden-vm/pull/3029)).
+
 ## 0.22.1
 
 #### Enhancements
