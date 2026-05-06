@@ -253,8 +253,8 @@ impl Memory {
     /// [RangeChecker] chiplet instance, along with their row in the finalized execution trace.
     pub fn append_range_checks(&self, memory_start_row: RowIndex, range: &mut RangeChecker) {
         // set the previous address and clock cycle to the first address and clock cycle of the
-        // trace; we also adjust the clock cycle so that delta value for the first row would end
-        // up being ZERO. if the trace is empty, return without any further processing.
+        // trace; we also adjust the clock cycle back by 1 so that the delta for the first row
+        // equals 1. if the trace is empty, return without any further processing.
         let (mut prev_ctx, mut prev_addr, mut prev_clk) = match self.get_first_row_info() {
             Some((ctx, addr, clk)) => (ctx, addr, clk.as_canonical_u64().wrapping_sub(1)),
             None => return,
@@ -307,9 +307,9 @@ impl Memory {
     pub fn fill_trace(self, trace: &mut TraceFragment) {
         debug_assert_eq!(self.trace_len(), trace.len(), "inconsistent trace lengths");
 
-        // set the pervious address and clock cycle to the first address and clock cycle of the
-        // trace; we also adjust the clock cycle so that delta value for the first row would end
-        // up being ZERO. if the trace is empty, return without any further processing.
+        // set the previous address and clock cycle to the first address and clock cycle of the
+        // trace; we also adjust the clock cycle back by 1 so that the delta for the first row
+        // equals 1. if the trace is empty, return without any further processing.
         let (mut prev_ctx, mut prev_addr, mut prev_clk) = match self.get_first_row_info() {
             Some((ctx, addr, clk)) => (Felt::from(ctx), Felt::from_u32(addr), clk - ONE),
             None => return,
