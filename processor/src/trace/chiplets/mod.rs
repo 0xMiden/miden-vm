@@ -19,15 +19,10 @@ mod memory;
 use memory::Memory;
 
 mod ace;
-use ace::AceHints;
 pub use ace::{Ace, CircuitEvaluation, MAX_NUM_ACE_WIRES, PTR_OFFSET_ELEM, PTR_OFFSET_WORD};
 
 mod kernel_rom;
 use kernel_rom::KernelRom;
-
-mod aux_trace;
-
-pub use aux_trace::AuxTraceBuilder;
 
 #[cfg(test)]
 #[allow(clippy::needless_range_loop)]
@@ -38,7 +33,6 @@ mod tests;
 
 pub struct ChipletsTrace {
     pub(crate) trace: Vec<Felt>,
-    pub(crate) aux_builder: AuxTraceBuilder,
 }
 
 // CHIPLETS MODULE OF HASHER, BITWISE, MEMORY, ACE, AND KERNEL ROM CHIPLETS
@@ -214,17 +208,14 @@ impl Chiplets {
             .collect::<Vec<_>>()
             .try_into()
             .expect("failed to convert vector to array");
-        let ace_hint = self.fill_trace(&mut trace);
+        self.fill_trace(&mut trace);
 
         let mut row_flat = Vec::with_capacity(CHIPLETS_WIDTH * trace_len);
         for row_idx in 0..trace_len {
             row_flat.extend(trace.iter().map(|column| column[row_idx]));
         }
 
-        ChipletsTrace {
-            trace: row_flat,
-            aux_builder: AuxTraceBuilder::new(ace_hint),
-        }
+        ChipletsTrace { trace: row_flat }
     }
 
     // HELPER METHODS
@@ -234,7 +225,7 @@ impl Chiplets {
     /// Hasher, Bitwise, Memory, ACE, and kernel ROM chiplets along with selector columns
     /// to identify each individual chiplet trace in addition to padding to fill the rest of
     /// the trace.
-    fn fill_trace(self, trace: &mut [Vec<Felt>; CHIPLETS_WIDTH]) -> AceHints {
+    fn fill_trace(self, trace: &mut [Vec<Felt>; CHIPLETS_WIDTH]) {
         // s_ctrl (trace[0]) is 1 on the hasher's controller rows and 0 elsewhere.
         // The controller region is the padded prefix of the hasher region; `region_lengths`
         // returns the same padded length that `finalize_trace` will materialize later.
@@ -325,8 +316,7 @@ impl Chiplets {
                 }
             }
 
-            // Fill independent chiplets in parallel: hasher, bitwise, memory, kernel_rom.
-            // ACE must be processed separately since it returns a value.
+            // Fill all chiplets in parallel.
             rayon::scope(|s| {
                 s.spawn(move |_| {
                     hasher.fill_trace(&mut hasher_fragment);
@@ -340,10 +330,10 @@ impl Chiplets {
                 s.spawn(move |_| {
                     kernel_rom.fill_trace(&mut kernel_rom_fragment);
                 });
+                s.spawn(move |_| {
+                    ace.fill_trace(&mut ace_fragment);
+                });
             });
-
-            let ace_sections = ace.fill_trace(&mut ace_fragment);
-            AceHints::new(ace_start, ace_sections)
         }
     }
 }

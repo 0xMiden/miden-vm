@@ -28,7 +28,7 @@ use crate::{
     continuation_stack::ContinuationStack,
     errors::MapExecErrNoCtx,
     trace::{
-        AuxTraceBuilders, ChipletsLengths, ExecutionTrace, TraceBuildInputs, TraceLenSummary,
+        ChipletsLengths, ExecutionTrace, TraceBuildInputs, TraceLenSummary,
         parallel::{processor::ReplayProcessor, tracer::CoreTraceGenerationTracer},
         range::RangeChecker,
         utils::RowMajorTraceWriter,
@@ -50,9 +50,7 @@ mod tracer;
 
 use super::{
     chiplets::Chiplets,
-    decoder::AuxTraceBuilder as DecoderAuxTraceBuilder,
     execution_tracer::TraceGenerationContext,
-    stack::AuxTraceBuilder as StackAuxTraceBuilder,
     trace_state::{
         AceReplay, BitwiseOp, BitwiseReplay, CoreTraceFragmentContext, CoreTraceState,
         ExecutionReplay, HasherOp, HasherRequestReplay, KernelReplay, MemoryWritesReplay,
@@ -193,19 +191,10 @@ pub fn build_trace_with_max_len(
         )
     };
 
-    // Create aux trace builders
-    let aux_trace_builders = AuxTraceBuilders {
-        decoder: DecoderAuxTraceBuilder::default(),
-        range: range_checker_trace.aux_builder,
-        chiplets: chiplets_trace.aux_builder,
-        stack: StackAuxTraceBuilder,
-    };
-
     Ok(ExecutionTrace::new_from_parts(
         program_info,
         trace_output,
         main_trace,
-        aux_trace_builders,
         trace_len_summary,
     ))
 }

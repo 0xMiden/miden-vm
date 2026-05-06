@@ -3,9 +3,6 @@ use core::ops::Range;
 use chiplets::hasher::RATE_LEN;
 use miden_core::utils::range;
 
-mod challenges;
-pub use challenges::Challenges;
-
 pub mod chiplets;
 pub mod decoder;
 pub mod range;
@@ -49,9 +46,6 @@ pub const DECODER_TRACE_RANGE: Range<usize> = range(DECODER_TRACE_OFFSET, DECODE
 pub const STACK_TRACE_OFFSET: usize = DECODER_TRACE_RANGE.end;
 pub const STACK_TRACE_WIDTH: usize = 19;
 pub const STACK_TRACE_RANGE: Range<usize> = range(STACK_TRACE_OFFSET, STACK_TRACE_WIDTH);
-
-/// Label for log_precompile transcript state messages on the virtual table bus.
-pub const LOG_PRECOMPILE_LABEL: u8 = miden_core::operations::opcodes::LOGPRECOMPILE;
 
 pub mod log_precompile {
     use core::ops::Range;
@@ -130,66 +124,26 @@ pub const PADDED_TRACE_WIDTH: usize = TRACE_WIDTH.next_multiple_of(RATE_LEN);
 
 // AUXILIARY COLUMNS LAYOUT
 // ------------------------------------------------------------------------------------------------
+//
+// The auxiliary trace is the LogUp lookup-argument segment built by
+// [`crate::ProcessorAir`]'s `AuxBuilder` impl. It has 7 columns: 4 main-trace LogUp
+// columns followed by 3 chiplet-trace LogUp columns. See
+// [`crate::constraints::lookup::main_air::MainLookupAir`] and
+// [`crate::constraints::lookup::chiplet_air::ChipletLookupAir`] for the per-column
+// contents.
 
-//      decoder                     stack              range checks          chiplets
-//    (3 columns)                (1 column)             (1 column)          (3 column)
-// ├─────────────────────┴──────────────────────┴────────────────────┴───────────────────┤
-
-/// Decoder auxiliary columns
-pub const DECODER_AUX_TRACE_OFFSET: usize = 0;
-pub const DECODER_AUX_TRACE_WIDTH: usize = 3;
-pub const DECODER_AUX_TRACE_RANGE: Range<usize> =
-    range(DECODER_AUX_TRACE_OFFSET, DECODER_AUX_TRACE_WIDTH);
-
-/// Stack auxiliary columns
-pub const STACK_AUX_TRACE_OFFSET: usize = DECODER_AUX_TRACE_RANGE.end;
-pub const STACK_AUX_TRACE_WIDTH: usize = 1;
-pub const STACK_AUX_TRACE_RANGE: Range<usize> =
-    range(STACK_AUX_TRACE_OFFSET, STACK_AUX_TRACE_WIDTH);
-
-/// Range check auxiliary columns
-pub const RANGE_CHECK_AUX_TRACE_OFFSET: usize = STACK_AUX_TRACE_RANGE.end;
-pub const RANGE_CHECK_AUX_TRACE_WIDTH: usize = 1;
-pub const RANGE_CHECK_AUX_TRACE_RANGE: Range<usize> =
-    range(RANGE_CHECK_AUX_TRACE_OFFSET, RANGE_CHECK_AUX_TRACE_WIDTH);
-
-/// Chiplets virtual table auxiliary column.
-///
-/// This column combines two virtual tables:
-///
-/// 1. Hash chiplet's sibling table,
-/// 2. Kernel ROM chiplet's kernel procedure table.
-pub const HASH_KERNEL_VTABLE_AUX_TRACE_OFFSET: usize = RANGE_CHECK_AUX_TRACE_RANGE.end;
-pub const HASHER_AUX_TRACE_WIDTH: usize = 1;
-pub const HASHER_AUX_TRACE_RANGE: Range<usize> =
-    range(HASH_KERNEL_VTABLE_AUX_TRACE_OFFSET, HASHER_AUX_TRACE_WIDTH);
-
-/// Chiplets bus auxiliary columns.
-pub const CHIPLETS_BUS_AUX_TRACE_OFFSET: usize = HASHER_AUX_TRACE_RANGE.end;
-pub const CHIPLETS_BUS_AUX_TRACE_WIDTH: usize = 1;
-pub const CHIPLETS_BUS_AUX_TRACE_RANGE: Range<usize> =
-    range(CHIPLETS_BUS_AUX_TRACE_OFFSET, CHIPLETS_BUS_AUX_TRACE_WIDTH);
-
-/// ACE chiplet wiring bus.
-pub const ACE_CHIPLET_WIRING_BUS_OFFSET: usize = CHIPLETS_BUS_AUX_TRACE_RANGE.end;
-pub const ACE_CHIPLET_WIRING_BUS_WIDTH: usize = 1;
-pub const ACE_CHIPLET_WIRING_BUS_RANGE: Range<usize> =
-    range(ACE_CHIPLET_WIRING_BUS_OFFSET, ACE_CHIPLET_WIRING_BUS_WIDTH);
-
-/// Auxiliary trace segment width.
-pub const AUX_TRACE_WIDTH: usize = ACE_CHIPLET_WIRING_BUS_RANGE.end;
+/// Auxiliary trace segment width — see the LogUp aux trace layout above.
+pub const AUX_TRACE_WIDTH: usize = crate::LOGUP_AUX_TRACE_WIDTH;
 
 /// Number of random challenges used for auxiliary trace constraints.
 pub const AUX_TRACE_RAND_CHALLENGES: usize = 2;
-
-/// Maximum number of coefficients used in bus message encodings.
-pub const MAX_MESSAGE_WIDTH: usize = 16;
 
 /// Bus message coefficient indices.
 ///
 /// These define the standard positions for encoding bus messages using the pattern:
 /// `bus_prefix[bus] + sum(beta_powers\[i\] * elem\[i\])` where:
-/// - `bus_prefix[bus]` is the per-bus domain-separated base (see [`bus_types`])
+/// - `bus_prefix[bus]` is the per-bus domain-separated base (see `BusId` in
+///   `constraints::lookup::logup_msg`)
 /// - `beta_powers\[i\] = beta^i` are the powers of beta
 ///
 /// These indices refer to positions in the `beta_powers` array, not including the bus prefix.
@@ -231,38 +185,4 @@ pub mod bus_message {
     /// Second capacity element. Used for encoding operation-specific data (e.g., op_code in control
     /// block messages).
     pub const CAPACITY_DOMAIN_IDX: usize = CAPACITY_START_IDX + 1;
-}
-
-/// Bus interaction type constants for domain separation.
-///
-/// Each constant identifies a distinct bus interaction type. When encoding a message,
-/// the bus index is passed to [`Challenges::encode`] or [`Challenges::encode_sparse`],
-/// which uses `bus_prefix[bus]` as the additive base instead of bare `alpha`.
-///
-/// This ensures messages from different buses are always distinct, even if they share
-/// the same coefficient layout and labels. This is a prerequisite for a future unified bus.
-pub mod bus_types {
-    /// All chiplet interactions: hasher, bitwise, memory, ACE, kernel ROM.
-    pub const CHIPLETS_BUS: usize = 0;
-    /// Block stack table (decoder p1): tracks control flow block nesting.
-    pub const BLOCK_STACK_TABLE: usize = 1;
-    /// Block hash table (decoder p2): tracks block digest computation.
-    pub const BLOCK_HASH_TABLE: usize = 2;
-    /// Op group table (decoder p3): tracks operation batch consumption.
-    pub const OP_GROUP_TABLE: usize = 3;
-    /// Stack overflow table.
-    pub const STACK_OVERFLOW_TABLE: usize = 4;
-    /// Sibling table: shares Merkle tree sibling nodes between old/new root computations.
-    pub const SIBLING_TABLE: usize = 5;
-    /// Log-precompile transcript: tracks capacity state transitions for LOGPRECOMPILE.
-    pub const LOG_PRECOMPILE_TRANSCRIPT: usize = 6;
-    /// Range checker bus (LogUp): verifies values are in the valid range.
-    pub const RANGE_CHECK_BUS: usize = 7;
-    /// ACE wiring bus (LogUp): verifies arithmetic circuit wire connections.
-    pub const ACE_WIRING_BUS: usize = 8;
-    /// Hasher perm-link bus: links hasher controller rows to permutation segment rows on
-    /// `v_wiring`.
-    pub const HASHER_PERM_LINK: usize = 9;
-    /// Total number of distinct bus interaction types.
-    pub const NUM_BUS_TYPES: usize = 10;
 }

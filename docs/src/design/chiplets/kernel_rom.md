@@ -12,108 +12,50 @@ More background about Miden VM execution contexts can be found [here](../../user
 
 ## Kernel ROM trace
 
-The kernel ROM table consists of five columns.
-The following example table shows the execution trace of the kernel ROM with procedure digests $a, b, c$, which were called 1, 2, and 0 times, respectively.
-Each digest is included once to respond to the initialization request by the public inputs, and then repeated for each call made by the decoder. 
+The kernel ROM table consists of five columns, with exactly one row per declared kernel procedure.
+The following example table shows the execution trace for three procedures with digests $a, b, c$, called 1, 2, and 0 times respectively.
 
-| $s_{first}$ | $r_0$ | $r_1$ | $r_2$ | $r_3$ |
-|-------------|-------|-------|-------|-------|
-| 1           | $a_0$ | $a_1$ | $a_2$ | $a_3$ |
-| 0           | $a_0$ | $a_1$ | $a_2$ | $a_3$ |
-| 1           | $b_0$ | $b_1$ | $b_2$ | $b_3$ |
-| 0           | $b_0$ | $b_1$ | $b_2$ | $b_3$ |
-| 0           | $b_0$ | $b_1$ | $b_2$ | $b_3$ |
-| 1           | $c_0$ | $c_1$ | $c_2$ | $c_3$ |
+| $m$ | $r_0$ | $r_1$ | $r_2$ | $r_3$ |
+|-----|-------|-------|-------|-------|
+| 1   | $a_0$ | $a_1$ | $a_2$ | $a_3$ |
+| 2   | $b_0$ | $b_1$ | $b_2$ | $b_3$ |
+| 0   | $c_0$ | $c_1$ | $c_2$ | $c_3$ |
 
-The meaning of columns in the above is as follows:
+Column meanings:
 
-- Column $s_{first}$ specifies the start of a block of rows with identical kernel procedure digests.
-- $r_0, ..., r_3$ contain the digests of the kernel procedures. The values in these columns can change only when $s_{first}$ is set to 1 in the next row. Otherwise, the values in the $r$ columns remain the same.
+- $m$ is the CALL-label multiplicity — the number of times the procedure was invoked by a `SYSCALL`. It may be zero for procedures declared in the kernel but never called.
+- $r_0, \ldots, r_3$ contain the digest of the kernel procedure.
 
-## Constraints
+## Main-trace constraints
 
-We first define the selector flag $f_{krom}$ that is active in all rows of the kernel ROM chiplet.
+The kernel ROM chiplet has **no main-trace shape constraints** under the all-LogUp layout.
+Earlier designs carried a binary "first-row-of-block" selector, a digest-contiguity rule, and an entry-row anchor to shape the trace for a permutation argument.
+LogUp replaces those with multiset equality under a random challenge $\alpha$, so any prover assignment to $(m, r_0, \ldots, r_3)$ that balances the chiplets bus is sound; no extra shape constraints are required.
 
->$$
-> f_{krom} = s_0 \cdot s_1 \cdot s_2 \cdot s_3 \cdot (1 - s_4) \text{ | degree} = 5
->$$
+## Chiplets bus constraints
 
-where $s_i$ are the chiplet selector flags. Refer to the [chiplets order](./index.md#chiplets-order) for more information.
-
-The following constraints are required to enforce the correctness of the kernel ROM trace.
-
-The $s_{first}$ column is a selector indicating the start of a new digest included in the kernel ROM chiplet trace.
-In this row, the chiplet responds to a bus request made by the verifier to ensure consistency with the set of kernel procedure digests given as public inputs.
-
-As $s_{first}$ is a selector, it must be binary.
-
-> $$
-> f_{krom} \cdot (s_{first}^2 - s_{first}) = 0 \text{ | degree} = 7
-> $$
-
-
-The flag $s_{first}$ must be set to be 1 in the first row of the kernel ROM chiplet.
-Otherwise, the digest in this row would not be matched with one of the input procedure roots.
-This constraint is enforced in the last row of the previous trace, using selector columns from the [chiplets](index.md) module.
-More precisely, we use the virtual $f_{ACE}$ flag, which is active in all rows of the ACE chiplet (which comes right before this chiplet),
-along with the selector $s_3$ which transitions from 0 to 1 in the last row, allowing us to target the first row of the kernel ROM trace.
-
-> $$
-> f_{ACE} \cdot s_{3}' \cdot (1 - s_{4}') \cdot (s_{first}' - 1) = 0 \text{ | degree} = 7
-> $$
-
-The contiguity of the digests in a block is ensured by enforcing equality between digests across two consecutive rows, whenever the next row is not the start of a new block.
-That is, when $s_{first}' = 0$, it must hold that $r_i = r_i'$.
-We disable this constraint in the last row of the kernel ROM chiplet trace by using the kernel ROM chiplet selector $s_4'$, since the latter transitions from 0 to 1 in the first row of the next chiplet.
-
-For $i \in \{0,1,2,3\}$,
-
-> $$
-> f_{krom} \cdot (1 - s_4') \cdot (1 - s_{first}') \cdot (r_i' - r_i) = 0 \text{ | degree} = 8
-> $$
-
-### Chiplets bus constraints
-
-The kernel ROM chiplet must ensure that all kernel procedure digests requested by the decoder correspond to one of the digests provided by the verifier through public inputs.
-This is achieved by making use of the chiplet bus $b_{bus}$, responding to requests made by the decoder and by the verifier through public inputs.
-
-In the first row of each new block of hashes in the kernel ROM chiplet trace (i.e., when $s_{first} = 1$), the chiplet responds to a message $v_{init}$ requested by the verifier.
-Since these initialization messages must match, the set of digests across all blocks must be equal to the set of procedure digests provided by the verifier (though not necessarily in the same order).
-
-Whenever a digest is requested by the decoder during program block hashing of the [`SYSCALL` operation](../decoder/constraints.md#block-hash-computation-constraints), a new row is added to the trace after the first row which is used to respond to one of the initialization requests made by the verifier using public inputs.
-The chiplet responds to the request with a message $v_{call}$.
-
-In other words, the selector $s_{first}$ indicates whether the chiplet should respond to the decoder or the verifier initialization requests.
-If a digest is requested $n$ times by the decoder, the same digest appears in a single block of length $n+1$.
-
-The variables $v_{init}$ and $v_{call}$ representing the bus messages contain reduced bus messages containing a kernel procedure digest.
-Denoting the random values received from the verifier as $\alpha_0, \alpha_1$, etc., this can be defined as
+The kernel ROM chiplet emits two fractions on the chiplets bus $b_{chip}$ per active row, gated by the selector flag $f_{krom}$.
+Let
 
 $$
 \begin{aligned}
-\tilde{r} &= \sum_{i=0}^3 (\alpha_{i + 2} \cdot r_i) 
-v_{init} &= \alpha_0 + \alpha_1 \cdot \textsf{KERNEL\_PROC\_INIT} + \tilde{r} 
+\tilde{r} &= \sum_{i=0}^{3} \alpha_{i+2} \cdot r_i \\
+v_{init} &= \alpha_0 + \alpha_1 \cdot \textsf{KERNEL\_PROC\_INIT} + \tilde{r} \\
 v_{call} &= \alpha_0 + \alpha_1 \cdot \textsf{KERNEL\_PROC\_CALL} + \tilde{r}
 \end{aligned}
 $$
 
-Here, $\textsf{KERNEL\_PROC\_INIT}$ and $\textsf{KERNEL\_PROC\_CALL}$ are the unique [operation labels](./index.md#operation-labels) for the kernel ROM bus message.
+denote the two encoded bus messages for a row's digest. Here $\textsf{KERNEL\_PROC\_INIT}$ and $\textsf{KERNEL\_PROC\_CALL}$ are the unique [operation labels](./index.md#operation-labels), and $\alpha_i$ are challenges received from the verifier.
 
-Each row of the kernel ROM chiplet trace responds to either a procedure digest initialization or decoder call request.
-Since the $s_{first}$ column defines which type of response is sent to the bus, it is used to combine both requests into a single constraint given by
+The chiplet contributes to $b_{chip}$ via
 
 > $$
-> b'_{chip} = b_{chip} \cdot (s_{first} \cdot v_{init} + (1 - s_{first}) \cdot v_{call}) \text{ | degree} = 3.
+> f_{krom} \cdot \left( -\frac{1}{v_{init}} + \frac{m}{v_{call}} \right)
 > $$
 
-The above simplifies to
+- The **INIT term** removes exactly one fraction per declared procedure. It is balanced by the public-input boundary term the verifier injects on $b_{chip}$ (one add per kernel procedure digest read from public inputs). This anchors every chiplet row to a declared procedure: a forged row would leave an unmatched INIT remove.
+- The **CALL term** contributes $m$ fractions. Each `SYSCALL` in the decoder emits one matching remove on $b_{chip}$. Bus balance forces $m$ to equal the true syscall count for that procedure.
 
-- $s_{first} = 1$: $b'_{chip} = b_{chip} \cdot v_{init}$, when responding to a $\textsf{KERNEL\_PROC\_INIT}$ request.
-- $s_{first} = 0$: $b'_{chip} = b_{chip} \cdot v_{call}$, when responding to a $\textsf{KERNEL\_PROC\_CALL}$ request.
+The full set of constraints applied to $b_{chip}$ (including the public-input boundary term for INIT) is described in the [chiplets bus constraints](../chiplets/index.md#chiplets-bus-constraints).
 
-The kernel procedure digests initialization requests are implemented by imposing a boundary constraint in the first row of the $b_{chip}$ column.
-This is described in the [chiplets bus constraints](../chiplets/index.md#chiplets-bus-constraints).
-
-By using the bus to initialize the kernel ROM procedure digest in this way, the verifier only learns which procedures can be invoked but doesn't learn how often they were called, if at all.
-
-The full set of constraints applied to the $b_{chip}$ are described as part of the [chiplets bus constraints](../chiplets/index.md#chiplets-bus-constraints).
+By using the bus this way, the verifier only learns which procedures can be invoked, not how often they were called — the multiplicity $m$ is a private witness that only reaches the verifier through the bus balance.

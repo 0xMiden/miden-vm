@@ -108,7 +108,7 @@ impl InputLayout {
         let main_next = builder.alloc(counts.width, policy.main);
         let aux_next = builder.alloc(aux_coord_width, policy.aux);
         let quotient_next = builder.alloc(counts.num_quotient_chunks * EXT_DEGREE, policy.quotient);
-        let aux_bus_boundary = builder.alloc(counts.aux_width, policy.aux_bus_boundary);
+        let aux_bus_boundary = builder.alloc(counts.num_aux_boundary, policy.aux_bus_boundary);
 
         let stark_vars = builder.alloc(NUM_STARK_VARS, policy.stark_vars);
 
@@ -189,6 +189,7 @@ mod tests {
         let counts = InputCounts {
             width: 1,
             aux_width: 1,
+            num_aux_boundary: 1,
             num_public: 8,
             // Two logical VLPI groups in MASM occupy four EF slots total:
             // [group0, pad0, group1, pad1].
@@ -213,6 +214,7 @@ mod tests {
         let counts = InputCounts {
             width: 1,
             aux_width: 1,
+            num_aux_boundary: 1,
             num_public: 8,
             num_vlpi: 2,
             num_randomness: 2,
