@@ -16,7 +16,7 @@ use miden_core::{
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, DynNodeBuilder, ExternalNodeBuilder,
         JoinNodeBuilder, LoopNodeBuilder, MastForest, MastForestContributor, MastNodeExt,
-        SplitNodeBuilder,
+        MastNodeId, SplitNodeBuilder,
     },
     operations::{Operation, opcodes},
     precompile::PrecompileRequest,
@@ -990,18 +990,15 @@ fn test_build_trace_returns_err_on_bad_node_id_in_hasher_replay() {
     let mut host = DefaultHost::default();
     let mut trace_inputs = processor.execute_trace_inputs_sync(&program, &mut host).unwrap();
 
-    // Inject a HashBasicBlock entry with a node ID that points to a non-existent node in an empty
-    // forest.
-    let empty_forest = Arc::new(MastForest::new());
-    // Build a small forest just to get a valid MastNodeId, then pair it with the empty forest.
-    let mut temp_forest = MastForest::new();
-    let valid_id = BasicBlockNodeBuilder::new(vec![Operation::Noop], Vec::new())
-        .add_to_forest(&mut temp_forest)
-        .unwrap();
+    // Inject a HashBasicBlock entry that references the executed program's forest (id 0 in the
+    // store, which the tracer always populates with the entrypoint's forest) with a node ID that
+    // is well past any node actually in the sparse forest.
+    let bogus_node_id = MastNodeId::new_unchecked(u32::MAX);
+    let forest_id = MastForestId::from(0u32);
     trace_inputs
         .trace_generation_context_mut()
         .hasher_for_chiplet
-        .record_hash_basic_block(empty_forest, valid_id, [ZERO; 4].into());
+        .record_hash_basic_block(forest_id, bogus_node_id, [ZERO; 4].into());
 
     let result = build_trace(trace_inputs);
     assert!(

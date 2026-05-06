@@ -7,7 +7,7 @@ use crate::{
     ContextId, Felt, MemoryError, ONE, RowIndex, Word, ZERO,
     errors::{CryptoError, MerklePathVerificationFailedInner, OperationError},
     field::{BasedVectorSpace, QuadFelt},
-    mast::MastForest,
+    mast::ExecutableMastForest,
     processor::{
         AdviceProviderInterface, HasherInterface, MemoryInterface, Processor, StackInterface,
         SystemInterface,
@@ -93,12 +93,15 @@ pub(super) fn op_hperm<P: Processor, T: Tracer>(
 ///   the specified root.
 /// - Path to the node at the specified depth and index is not known to the advice provider.
 #[inline(always)]
-pub(super) fn op_mpverify<P: Processor, T: Tracer>(
+pub(super) fn op_mpverify<P: Processor, T: Tracer, F>(
     processor: &mut P,
     err_code: Felt,
-    program: &MastForest,
+    program: &F,
     tracer: &mut T,
-) -> Result<OperationHelperRegisters, CryptoError> {
+) -> Result<OperationHelperRegisters, CryptoError>
+where
+    F: ExecutableMastForest + ?Sized,
+{
     // read node value, depth, index and root value from the stack
     let node = processor.stack().get_word(0);
     let depth = processor.stack().get(4);

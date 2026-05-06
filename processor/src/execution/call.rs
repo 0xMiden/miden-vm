@@ -1,4 +1,3 @@
-use alloc::sync::Arc;
 use core::ops::ControlFlow;
 
 use miden_core::{FMP_ADDR, FMP_INIT_VALUE};
@@ -10,8 +9,9 @@ use crate::{
         ExecutionState, finalize_clock_cycle, finalize_clock_cycle_with_continuation,
         get_next_ctx_id,
     },
-    mast::{CallNode, MastForest, MastNodeExt, MastNodeId},
+    mast::{CallNode, ExecutableMastForest, MastNodeId},
     operation::OperationError,
+    option_map_break_reason,
     processor::{MemoryInterface, Processor, SystemInterface},
     tracer::Tracer,
 };
@@ -21,17 +21,18 @@ use crate::{
 
 /// Executes a Call node from the start.
 #[inline(always)]
-pub(super) fn start_call_node<P, H, S, T>(
-    state: &mut ExecutionState<'_, P, H, S, T>,
+pub(super) fn start_call_node<P, H, S, T, F>(
+    state: &mut ExecutionState<'_, P, H, S, T, F>,
     call_node: &CallNode,
     current_node_id: MastNodeId,
-    current_forest: &Arc<MastForest>,
-) -> ControlFlow<BreakReason>
+    current_forest: &F,
+) -> ControlFlow<BreakReason<F>>
 where
     P: Processor,
     H: BaseHost,
-    S: Stopper<Processor = P>,
-    T: Tracer<Processor = P>,
+    S: Stopper<Processor = P, Forest = F>,
+    T: Tracer<Processor = P, Forest = F>,
+    F: ExecutableMastForest + Clone,
 {
     state.tracer.start_clock_cycle(
         state.processor,
@@ -47,7 +48,10 @@ where
 
     state.processor.save_context_and_truncate_stack();
 
-    let callee_hash = current_forest[call_node.callee()].digest();
+    let callee_hash = option_map_break_reason(
+        current_forest.get_digest_by_id(call_node.callee()),
+        "callee node not found in current forest",
+    )?;
     if call_node.is_syscall() {
         // check if the callee is in the kernel
         if !state.kernel.contains_proc(callee_hash) {
@@ -103,16 +107,17 @@ where
 
 /// Executes the finish phase of a Call node.
 #[inline(always)]
-pub(super) fn finish_call_node<P, H, S, T>(
-    state: &mut ExecutionState<'_, P, H, S, T>,
+pub(super) fn finish_call_node<P, H, S, T, F>(
+    state: &mut ExecutionState<'_, P, H, S, T, F>,
     node_id: MastNodeId,
-    current_forest: &Arc<MastForest>,
-) -> ControlFlow<BreakReason>
+    current_forest: &F,
+) -> ControlFlow<BreakReason<F>>
 where
     P: Processor,
     H: BaseHost,
-    S: Stopper<Processor = P>,
-    T: Tracer<Processor = P>,
+    S: Stopper<Processor = P, Forest = F>,
+    T: Tracer<Processor = P, Forest = F>,
+    F: ExecutableMastForest + Clone,
 {
     state.tracer.start_clock_cycle(
         state.processor,
