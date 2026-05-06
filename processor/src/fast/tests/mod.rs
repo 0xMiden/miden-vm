@@ -763,6 +763,31 @@ fn stack_buffer_is_not_preallocated_to_operand_stack_depth_limit() {
     );
 }
 
+#[test]
+fn stack_growth_recenters_shallow_context_when_requested_len_exceeds_allocation_cap() {
+    let options = ExecutionOptions::default()
+        .with_max_stack_depth(DEFAULT_MAX_STACK_DEPTH)
+        .unwrap();
+    let mut processor =
+        FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options)
+            .expect("processor advice inputs should fit advice map limits");
+
+    // This models a callee that has only the minimum live stack depth, but is still positioned at
+    // the end of the current stack buffer after the caller filled the buffer and entered a new
+    // context. The next push requests one slot past the allocation cap using the old position, but
+    // growth can still succeed because it recenters the live stack before the push.
+    processor.stack_top_idx = INITIAL_STACK_BUFFER_SIZE - 1;
+    processor.stack_bot_idx = processor.stack_top_idx - MIN_STACK_DEPTH;
+
+    processor
+        .ensure_stack_capacity_for_push()
+        .expect("recentered shallow context push should fit within the stack depth limit");
+
+    assert_eq!(processor.stack_bot_idx, STACK_BUFFER_BASE_IDX);
+    assert_eq!(processor.stack_top_idx, STACK_BUFFER_BASE_IDX + MIN_STACK_DEPTH);
+    assert_eq!(processor.stack.len(), INITIAL_STACK_BUFFER_SIZE);
+}
+
 fn previous_growth_len(
     stack_len: usize,
     live_len: usize,

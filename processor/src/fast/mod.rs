@@ -655,18 +655,19 @@ impl FastProcessor {
         // behavior close to the fixed-buffer layout and avoids carrying unused prefix cells into
         // the new allocation. The extra slot is for the next checked push that triggered growth.
         let recentered_min_len = STACK_BUFFER_BASE_IDX.saturating_add(live_len).saturating_add(2);
-        debug_assert!(requested_min_len <= max_len);
         debug_assert!(recentered_min_len <= max_len);
 
         // Allocation growth is based on the stack's post-recentered live range, not the previous
-        // buffer length. This preserves the same VM-visible outcome as growing from the old buffer:
-        // the requested index is covered, the live stack is restored at `STACK_BUFFER_BASE_IDX`,
-        // and allocation remains capped by the configured stack depth. The allocation size
-        // can differ, though. Normal push growth may allocate a couple of extra cells
-        // because of the spare push slot, while restoring a deep caller from a shallow
-        // callee may allocate only the requested restored range instead of doubling the old
-        // buffer. That smaller restore allocation is intentional, but it means future
-        // pushes can grow again sooner and should stay covered by benchmarks.
+        // buffer length. The `requested_min_len` may be beyond the allocation cap when a shallow
+        // context is still positioned near the end of the old buffer; recentering the live stack is
+        // what makes that valid. The VM-visible requirements are that the live stack is restored at
+        // `STACK_BUFFER_BASE_IDX`, the post-recentered push slot is available, and allocation stays
+        // capped by the configured stack depth. The allocation size can differ from the previous
+        // doubling policy: normal push growth may allocate a couple of extra cells because of the
+        // spare push slot, while restoring a deep caller from a shallow callee may allocate only
+        // the requested restored range instead of doubling the old buffer. That smaller
+        // restore allocation is intentional, but it means future pushes can grow again
+        // sooner and should stay covered by benchmarks.
         let new_len = recentered_min_len.saturating_mul(2).max(requested_min_len).min(max_len);
         debug_assert!(new_len <= max_len);
 
