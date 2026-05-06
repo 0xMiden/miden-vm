@@ -53,16 +53,16 @@ _Note: Assertions can be parameterized with an error message (e.g., assert.err="
 
 ### Extension Field Operations
 
-All operations in this section are defined over the quadratic extension field $\mathbb{F}_p[x] / (x^2 - x + 2)$, with modulus $p = 2^{64} - 2^{32} + 1$.
+All operations in this section are defined over the quadratic extension field $\mathbb{F}_p[x] / (x^2 - 7)$, with modulus $p = 2^{64} - 2^{32} + 1$.
 
 | Instruction | Stack Input             | Stack Output      | Cycles | Notes                                                                       |
 | ----------- | ----------------------- | ----------------- | ------ | --------------------------------------------------------------------------- |
 | `ext2add`   | `[b1, b0, a1, a0, ...]` | `[c1, c0, ...]`   | 5      | $c1 = (a1 + b1) \bmod p$ <br /> $c0 = (a0 + b0) \bmod p$                    |
 | `ext2sub`   | `[b1, b0, a1, a0, ...]` | `[c1, c0, ...]`   | 7      | $c1 = (a1 - b1) \bmod p$ <br /> $c0 = (a0 - b0) \bmod p$                    |
-| `ext2mul`   | `[b1, b0, a1, a0, ...]` | `[c1, c0, ...]`   | 3      | $c1 = (a0 + a1)(b0 + b1) - a0b0 \bmod p$ <br /> $c0 = a0b0 - 2a1b1 \bmod p$ |
+| `ext2mul`   | `[b1, b0, a1, a0, ...]` | `[c1, c0, ...]`   | 3      | $c1 = (a0 + a1)(b0 + b1) - a0b0 - a1b1 \bmod p$ <br /> $c0 = a0b0 + 7a1b1 \bmod p$ |
 | `ext2neg`   | `[a1, a0, ...]`         | `[a1', a0', ...]` | 4      | $a1' = -a1$ <br /> $a0' = -a0$                                              |
-| `ext2inv`   | `[a1, a0, ...]`         | `[a1', a0', ...]` | 8      | $a' = a^{-1}$ in $\mathbb{F}_p[x]/(x^2 - x + 2)$. Fails if $a = 0$.         |
-| `ext2div`   | `[b1, b0, a1, a0, ...]` | `[c1, c0, ...]`   | 11     | $c = a \cdot b^{-1}$ in $\mathbb{F}_p[x]/(x^2 - x + 2)$. Fails if $b = 0$.  |
+| `ext2inv`   | `[a1, a0, ...]`         | `[a1', a0', ...]` | 8      | $a' = a^{-1}$ in $\mathbb{F}_p[x]/(x^2 - 7)$. Fails if $a = 0$.            |
+| `ext2div`   | `[b1, b0, a1, a0, ...]` | `[c1, c0, ...]`   | 11     | $c = a \cdot b^{-1}$ in $\mathbb{F}_p[x]/(x^2 - 7)$. Fails if $b = 0$.     |
 
 ## U32 Operations
 
