@@ -26,12 +26,10 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_assembly_syntax::{
-    Library,
-    ast::{AttributeSet, PathBuf},
-};
+use miden_assembly_syntax::ast::{AttributeSet, PathBuf};
 use miden_core::{
     Word,
+    mast::{MastForest, MastNodeId, UntrustedMastForest},
     serde::{
         BudgetedReader, ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
         SliceReader,
@@ -39,7 +37,9 @@ use miden_core::{
 };
 
 use super::{ConstantExport, PackageId, ProcedureExport, TargetType, TypeExport};
-use crate::{Dependency, Package, PackageExport, PackageManifest, Section};
+use crate::{
+    Dependency, ManifestValidationError, Package, PackageExport, PackageManifest, Section,
+};
 
 // CONSTANTS
 // ================================================================================================
@@ -61,8 +61,9 @@ const PACKAGE_BYTE_READ_BUDGET_MULTIPLIER: usize = 64;
 // PACKAGE SERIALIZATION/DESERIALIZATION
 // ================================================================================================
 
-impl Serializable for Package {
-    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+impl Package {
+    #[doc(hidden)]
+    pub fn write_header_into<W: ByteWriter>(&self, target: &mut W) {
         // Write magic & version
         target.write_bytes(MAGIC_PACKAGE);
         target.write_bytes(&VERSION);
@@ -78,10 +79,10 @@ impl Serializable for Package {
 
         // Write package kind
         target.write_u8(self.kind.into());
+    }
 
-        // Write MAST artifact
-        self.mast.write_into(target);
-
+    #[doc(hidden)]
+    pub fn write_trailer_into<W: ByteWriter>(&self, target: &mut W) {
         // Write manifest
         self.manifest.write_into(target);
 
@@ -91,10 +92,71 @@ impl Serializable for Package {
             section.write_into(target);
         }
     }
+
+    /// Reads a package from `source` without validating the embedded MAST forest.
+    ///
+    /// This is only correct when serialization and deserialization happen within the same trust
+    /// domain. A typical use case is reloading bytes that were already validated before being
+    /// persisted to local storage controlled by the same trusted system.
+    ///
+    /// Do not use this for inbound artifact processing across a trust boundary, including bytes
+    /// received over the network or from another party. Authenticating the outer byte stream does
+    /// not prove that embedded MAST node digests are semantically valid.
+    pub fn read_from_unchecked<R: ByteReader>(
+        source: &mut R,
+    ) -> Result<Self, DeserializationError> {
+        let header = Self::read_header_from(source)?;
+        let mast_forest = Self::read_mast_forest(source, false)?;
+        Self::read_from_with_header_and_mast(source, header, mast_forest)
+    }
+
+    /// Reads a package from `bytes` without validating the embedded MAST forest.
+    ///
+    /// See [`Package::read_from_unchecked`].
+    pub fn read_from_bytes_unchecked(bytes: &[u8]) -> Result<Self, DeserializationError> {
+        let mut source = SliceReader::new(bytes);
+        Self::read_from_unchecked(&mut source)
+    }
+
+    fn read_mast_forest<R: ByteReader>(
+        source: &mut R,
+        validate_mast_forest: bool,
+    ) -> Result<Arc<MastForest>, DeserializationError> {
+        if validate_mast_forest {
+            UntrustedMastForest::read_from(source)?.validate().map_err(|err| {
+                DeserializationError::InvalidValue(format!(
+                    "library contains an invalid untrusted MAST forest: {err}"
+                ))
+            })
+        } else {
+            MastForest::read_from(source)
+        }
+        .map(Arc::new)
+    }
 }
 
-impl Deserializable for Package {
-    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+impl Serializable for Package {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        self.write_header_into(target);
+
+        // Write MAST artifact
+        self.mast.write_into(target);
+
+        self.write_trailer_into(target);
+    }
+}
+
+struct PackageHeader {
+    name: PackageId,
+    version: crate::Version,
+    description: Option<String>,
+    kind: TargetType,
+}
+
+impl Package {
+    fn read_header_from<R: ByteReader>(
+        source: &mut R,
+    ) -> Result<PackageHeader, DeserializationError> {
         // Read and validate magic & version
         let magic: [u8; 5] = source.read_array()?;
         if magic != *MAGIC_PACKAGE {
@@ -126,24 +188,49 @@ impl Deserializable for Package {
         let kind = TargetType::try_from(kind_tag)
             .map_err(|e| DeserializationError::InvalidValue(e.to_string()))?;
 
-        // Read MAST artifact
-        let mast = Arc::new(Library::read_from(source)?);
+        Ok(PackageHeader { name, version, description, kind })
+    }
+
+    fn read_from_with_header_and_mast<R: ByteReader>(
+        source: &mut R,
+        header: PackageHeader,
+        mast: Arc<MastForest>,
+    ) -> Result<Self, DeserializationError> {
+        let PackageHeader { name, version, description, kind } = header;
 
         // Read manifest
-        let manifest = PackageManifest::read_from(source)?;
+        let manifest = PackageManifest::read_from_safe(source, &mast)?;
 
         // Read custom sections
         let sections = Vec::<Section>::read_from(source)?;
 
-        Ok(Self {
+        let mut package = Self {
             name,
             version,
+            digest: Default::default(),
             description,
             kind,
             mast,
             manifest,
             sections,
-        })
+        };
+
+        package
+            .recompute_mast_commitment()
+            .map_err(|err| DeserializationError::InvalidValue(err.to_string()))?;
+
+        Ok(package)
+    }
+}
+
+impl Deserializable for Package {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let header = Self::read_header_from(source)?;
+
+        // Read MAST artifact
+        let mast = Self::read_mast_forest(source, true)?;
+
+        Self::read_from_with_header_and_mast(source, header, mast)
     }
 
     fn read_from_bytes(bytes: &[u8]) -> Result<Self, DeserializationError> {
@@ -283,6 +370,33 @@ impl Serializable for PackageManifest {
     }
 }
 
+impl PackageManifest {
+    pub fn read_from_safe<R: ByteReader>(
+        source: &mut R,
+        mast: &MastForest,
+    ) -> Result<Self, DeserializationError> {
+        // Read exports
+        let exports_len = source.read_usize()?;
+        let max_exports = source.max_alloc(PackageExport::min_serialized_size());
+        if exports_len > max_exports {
+            return Err(DeserializationError::InvalidValue(format!(
+                "requested {exports_len} elements but reader can provide at most {max_exports}"
+            )));
+        }
+        let mut exports = Vec::with_capacity(exports_len);
+        for _ in 0..exports_len {
+            exports.push(PackageExport::read_from_safe(source, mast)?);
+        }
+
+        // Read dependencies
+        let dependencies = Vec::<Dependency>::read_from(source)?;
+
+        PackageManifest::new(exports)
+            .and_then(|manifest| manifest.with_dependencies(dependencies))
+            .map_err(|error| DeserializationError::InvalidValue(error.to_string()))
+    }
+}
+
 impl Deserializable for PackageManifest {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         // Read exports
@@ -300,6 +414,7 @@ impl Deserializable for PackageManifest {
 
 // PACKAGE EXPORT SERIALIZATION/DESERIALIZATION
 // ================================================================================================
+
 impl Serializable for PackageExport {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         target.write_u8(self.tag());
@@ -307,6 +422,22 @@ impl Serializable for PackageExport {
             Self::Procedure(export) => export.write_into(target),
             Self::Constant(export) => export.write_into(target),
             Self::Type(export) => export.write_into(target),
+        }
+    }
+}
+
+impl PackageExport {
+    pub fn read_from_safe<R: ByteReader>(
+        source: &mut R,
+        mast: &MastForest,
+    ) -> Result<Self, DeserializationError> {
+        match source.read_u8()? {
+            1 => ProcedureExport::read_from_safe(source, mast).map(Self::Procedure),
+            2 => ConstantExport::read_from(source).map(Self::Constant),
+            3 => TypeExport::read_from(source).map(Self::Type),
+            invalid => Err(DeserializationError::InvalidValue(format!(
+                "unexpected PackageExport tag: '{invalid}'"
+            ))),
         }
     }
 }
@@ -327,6 +458,12 @@ impl Deserializable for PackageExport {
 impl Serializable for ProcedureExport {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         self.path.write_into(target);
+        if let Some(node_id) = self.node {
+            target.write_bool(true);
+            target.write_u32(node_id.into());
+        } else {
+            target.write_bool(false);
+        }
         self.digest.write_into(target);
         match self.signature.as_ref() {
             Some(sig) => {
@@ -341,10 +478,24 @@ impl Serializable for ProcedureExport {
     }
 }
 
-impl Deserializable for ProcedureExport {
-    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+impl ProcedureExport {
+    pub fn read_from_safe<R: ByteReader>(
+        source: &mut R,
+        mast: &MastForest,
+    ) -> Result<Self, DeserializationError> {
         use miden_assembly_syntax::ast::types::FunctionType;
         let path = PathBuf::read_from(source)?.into_boxed_path().into();
+        let node = if source.read_bool()? {
+            let node_id = MastNodeId::from_u32_safe(source.read_u32()?, mast)?;
+            if !mast.is_procedure_root(node_id) {
+                return Err(DeserializationError::InvalidValue(
+                    ManifestValidationError::InvalidProcedureNode { path }.to_string(),
+                ));
+            }
+            Some(node_id)
+        } else {
+            None
+        };
         let digest = Word::read_from(source)?;
         let signature = if source.read_bool()? {
             Some(FunctionType::read_from(source)?)
@@ -352,7 +503,39 @@ impl Deserializable for ProcedureExport {
             None
         };
         let attributes = AttributeSet::read_from(source)?;
-        Ok(Self { path, digest, signature, attributes })
+        Ok(Self {
+            path,
+            node,
+            digest,
+            signature,
+            attributes,
+        })
+    }
+}
+
+impl Deserializable for ProcedureExport {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        use miden_assembly_syntax::ast::types::FunctionType;
+        let path = PathBuf::read_from(source)?.into_boxed_path().into();
+        let node = if source.read_bool()? {
+            Some(MastNodeId::new_unchecked(source.read_u32()?))
+        } else {
+            None
+        };
+        let digest = Word::read_from(source)?;
+        let signature = if source.read_bool()? {
+            Some(FunctionType::read_from(source)?)
+        } else {
+            None
+        };
+        let attributes = AttributeSet::read_from(source)?;
+        Ok(Self {
+            path,
+            node,
+            digest,
+            signature,
+            attributes,
+        })
     }
 }
 
@@ -390,20 +573,15 @@ impl Deserializable for TypeExport {
 #[cfg(test)]
 mod tests {
     use alloc::{
-        collections::BTreeMap,
         string::{String, ToString},
         sync::Arc,
         vec,
         vec::Vec,
     };
 
-    use miden_assembly_syntax::{
-        Library,
-        ast::{AttributeSet, Path as AstPath, PathBuf},
-        library::{LibraryExport, ProcedureExport as LibraryProcedureExport},
-    };
+    use miden_assembly_syntax::ast::{Path as AstPath, PathBuf};
     use miden_core::{
-        Word,
+        Word, assert_matches,
         mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, MastNodeExt, MastNodeId},
         operations::Operation,
         serde::{
@@ -415,12 +593,12 @@ mod tests {
     use serde_json::{json, to_value};
 
     use super::{
-        MAGIC_PACKAGE, PACKAGE_BYTE_READ_BUDGET_MULTIPLIER, Package, PackageExport,
-        PackageManifest, Section, VERSION,
+        MAGIC_PACKAGE, PACKAGE_BYTE_READ_BUDGET_MULTIPLIER, Package, PackageManifest, Section,
+        VERSION,
     };
     use crate::{
-        Dependency, ManifestValidationError, PackageId, SectionId, TargetType,
-        package::manifest::ProcedureExport as PackageProcedureExport,
+        Dependency, ManifestValidationError, PackageExport, PackageId, ProcedureExport, SectionId,
+        TargetType,
     };
 
     fn build_forest() -> (MastForest, MastNodeId) {
@@ -438,42 +616,27 @@ mod tests {
         Arc::from(path.into_boxed_path())
     }
 
-    fn build_library() -> Arc<Library> {
+    fn build_package_exports() -> (Arc<MastForest>, Vec<PackageExport>) {
         let (forest, node_id) = build_forest();
         let path = absolute_path("test::proc");
-        let export = LibraryProcedureExport::new(node_id, Arc::clone(&path));
+        let export =
+            ProcedureExport::new(Arc::clone(&path), Some(node_id), forest[node_id].digest(), None);
 
-        let mut exports = BTreeMap::new();
-        exports.insert(path, LibraryExport::Procedure(export));
-
-        Arc::new(Library::new(Arc::new(forest), exports).expect("failed to build library"))
+        (Arc::new(forest), vec![PackageExport::Procedure(export)])
     }
 
     fn build_package() -> Package {
-        let library = build_library();
-        let path = absolute_path("test::proc");
-        let node_id = library.get_export_node_id(path.as_ref());
-        let digest = library.mast_forest()[node_id].digest();
+        let (mast, exports) = build_package_exports();
 
-        let export = PackageExport::Procedure(PackageProcedureExport {
-            path: Arc::clone(&path),
-            digest,
-            signature: None,
-            attributes: AttributeSet::default(),
-        });
-
-        let manifest =
-            PackageManifest::new([export]).expect("test package manifest should be valid");
-
-        Package {
-            name: PackageId::from("test_pkg"),
-            version: crate::Version::new(0, 0, 0),
-            description: None,
-            kind: TargetType::Library,
-            mast: library,
-            manifest,
-            sections: Vec::new(),
-        }
+        Package::create(
+            PackageId::from("test_pkg"),
+            crate::Version::new(0, 0, 0),
+            TargetType::Library,
+            mast,
+            exports,
+            None,
+        )
+        .expect("test package should be valid")
     }
 
     fn build_dependency() -> Dependency {
@@ -500,6 +663,28 @@ mod tests {
         bytes.write_usize(count);
 
         bytes
+    }
+
+    #[test]
+    fn package_serialization_roundtrip() {
+        use proptest::{
+            prelude::*,
+            test_runner::{Config, TestRunner},
+        };
+
+        // since the test is quite expensive, 128 cases should be enough to cover all edge cases
+        // (default is 256)
+        let cases = 128;
+        TestRunner::new(Config::with_cases(cases))
+            .run(&any::<Package>(), move |package| {
+                let bytes = package.to_bytes();
+                let deserialized = Package::read_from_bytes(&bytes).unwrap();
+                prop_assert_eq!(package, deserialized);
+                Ok(())
+            })
+            .unwrap_or_else(|err| {
+                panic!("{err}");
+            });
     }
 
     #[test]
@@ -637,28 +822,78 @@ mod tests {
         assert!(result.is_err());
     }
 
+    /// Verifies that deserializing a library rejects procedure exports whose `MastNodeId` is not a
+    /// procedure root in the underlying MAST forest (issue #2831).
+    #[test]
+    fn package_rejects_non_root_export() {
+        let mut forest = MastForest::new();
+        let node_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+            .add_to_forest(&mut forest)
+            .expect("failed to build basic block");
+        let digest = forest[node_id].digest();
+
+        let path = absolute_path("test::proc");
+        let exports = vec![PackageExport::Procedure(ProcedureExport::new(
+            Arc::clone(&path),
+            Some(node_id),
+            digest,
+            None,
+        ))];
+
+        let package = Package {
+            name: PackageId::from("test_pkg"),
+            version: crate::Version::new(0, 0, 0),
+            digest,
+            description: None,
+            kind: TargetType::Library,
+            mast: Arc::new(forest),
+            manifest: PackageManifest::new(exports).expect("test manifest should be valid"),
+            sections: Default::default(),
+        };
+
+        // Manually serialize the tampered package: forest + one export referencing a non-root node.
+        let mut tampered_bytes = Vec::new();
+        package.write_into(&mut tampered_bytes);
+
+        // Deserializing should fail because the export references a non-root node.
+        let result = Package::read_from_bytes(&tampered_bytes);
+        assert!(
+            result.is_err(),
+            "deserialization should reject exports referencing non-root nodes"
+        );
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("the node id in the manifest is not a procedure root"),
+            "error should mention missing procedure root, got: {err_msg}"
+        );
+    }
+
     #[test]
     fn package_manifest_new_rejects_duplicate_export_paths() {
-        let library = build_library();
         let path = absolute_path("test::proc");
-        let node_id = library.get_export_node_id(path.as_ref());
-        let digest = library.mast_forest()[node_id].digest();
-        let export = PackageExport::Procedure(PackageProcedureExport {
-            path: path.clone(),
-            digest,
-            signature: None,
-            attributes: AttributeSet::default(),
-        });
+        let exports = vec![
+            PackageExport::Procedure(ProcedureExport::new(
+                path.clone(),
+                None,
+                Word::default(),
+                None,
+            )),
+            PackageExport::Procedure(ProcedureExport::new(
+                path.clone(),
+                None,
+                Word::default(),
+                None,
+            )),
+        ];
 
-        let err = PackageManifest::new([export.clone(), export])
+        let err = PackageManifest::new(exports)
             .expect_err("duplicate export paths should be rejected by constructors");
-        assert_eq!(err, ManifestValidationError::DuplicateExport(path));
+        assert_matches!(err, ManifestValidationError::DuplicateExport(err_path) if err_path == path);
     }
 
     #[test]
     fn package_manifest_add_dependency_rejects_duplicate_dependencies() {
-        let mut manifest =
-            PackageManifest::new([]).expect("empty package manifest should be valid");
+        let mut manifest = PackageManifest::default();
         let dependency = build_dependency();
 
         manifest
@@ -667,21 +902,14 @@ mod tests {
         let err = manifest
             .add_dependency(dependency)
             .expect_err("duplicate dependencies should be rejected by helpers");
-        assert_eq!(err, ManifestValidationError::DuplicateDependency(PackageId::from("dep")));
+        assert_matches!(err, ManifestValidationError::DuplicateDependency(pkgid) if pkgid == "dep");
     }
 
     #[test]
     fn package_manifest_rejects_duplicate_export_paths() {
-        let library = build_library();
         let path = absolute_path("test::proc");
-        let node_id = library.get_export_node_id(path.as_ref());
-        let digest = library.mast_forest()[node_id].digest();
-        let export = PackageExport::Procedure(PackageProcedureExport {
-            path,
-            digest,
-            signature: None,
-            attributes: AttributeSet::default(),
-        });
+        let export =
+            PackageExport::Procedure(ProcedureExport::new(path, None, Word::default(), None));
 
         let mut bytes = Vec::new();
         bytes.write_usize(2);
@@ -714,16 +942,9 @@ mod tests {
     #[cfg(feature = "serde")]
     #[test]
     fn serde_package_manifest_rejects_duplicate_export_paths() {
-        let library = build_library();
         let path = absolute_path("test::proc");
-        let node_id = library.get_export_node_id(path.as_ref());
-        let digest = library.mast_forest()[node_id].digest();
-        let export = PackageExport::Procedure(PackageProcedureExport {
-            path,
-            digest,
-            signature: None,
-            attributes: AttributeSet::default(),
-        });
+        let export =
+            PackageExport::Procedure(ProcedureExport::new(path, None, Word::default(), None));
         let export = to_value(&export).expect("export should serialize");
 
         let manifest = serde_json::to_string(&json!({
@@ -740,16 +961,140 @@ mod tests {
     #[cfg(feature = "serde")]
     #[test]
     fn serde_package_manifest_rejects_duplicate_dependencies() {
+        let path = absolute_path("test::proc");
+        let export =
+            PackageExport::Procedure(ProcedureExport::new(path, None, Word::default(), None));
+        let export = to_value(&export).expect("export should serialize");
+
         let dependency = to_value(build_dependency()).expect("dependency should serialize");
 
         let manifest = serde_json::to_string(&json!({
-            "exports": [],
+            "exports": [export],
             "dependencies": [dependency.clone(), dependency],
         }))
         .expect("manifest should serialize to JSON");
         let err = serde_json::from_str::<PackageManifest>(&manifest)
             .expect_err("serde deserialization should reject duplicate dependencies");
         let message = err.to_string();
-        assert!(message.contains("duplicate dependency"));
+        assert_matches!(message.as_str(), msg if msg.contains("duplicate dependency"));
+        //assert!(message.contains("duplicate dependency"));
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn serde_package_deserialization_rejects_malformed_quoted_procedure_leaf() {
+        use miden_core::{
+            mast::{BasicBlockNodeBuilder, MastForestContributor},
+            operations::Operation,
+        };
+
+        let mut mast_forest = MastForest::new();
+        let node = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+            .add_to_forest(&mut mast_forest)
+            .expect("must create MAST node");
+        mast_forest.make_root(node);
+
+        let bad = Arc::<AstPath>::from(AstPath::validate(r#"::foo::"bad name""#).unwrap());
+        let exports = vec![PackageExport::Procedure(ProcedureExport::new(
+            bad,
+            Some(node),
+            mast_forest[node].digest(),
+            None,
+        ))];
+
+        let mut package = Package {
+            name: "test".into(),
+            description: None,
+            version: crate::Version::new(0, 0, 0),
+            digest: Default::default(),
+            kind: TargetType::Library,
+            mast: Arc::new(mast_forest),
+            manifest: PackageManifest {
+                exports: exports.into_iter().map(|export| (export.path(), export)).collect(),
+                dependencies: Default::default(),
+            },
+            sections: Default::default(),
+        };
+        package.recompute_mast_commitment().unwrap();
+
+        let json = serde_json::to_string(&package).expect("package serialization must succeed");
+
+        let err = serde_json::from_str::<Package>(&json)
+            .expect_err("expected malformed procedure export leaf name rejection during serde");
+        let message = alloc::format!("{err}");
+        assert_matches!(
+            message,
+            msg if msg.contains("invalid export path '::foo::\"bad name\"': invalid item path component"),
+        );
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn serde_package_deserialization_rejects_malformed_quoted_constant_leaf() {
+        let bad = Arc::<AstPath>::from(AstPath::validate(r#"::foo::"bad name""#).unwrap());
+        let exports = vec![PackageExport::Constant(crate::ConstantExport {
+            path: bad,
+            value: miden_assembly_syntax::ast::ConstantValue::Int(
+                miden_debug_types::Span::unknown(1u8.into()),
+            ),
+        })];
+
+        let package = Package {
+            name: "test".into(),
+            description: None,
+            version: crate::Version::new(0, 0, 0),
+            digest: Default::default(),
+            kind: TargetType::Library,
+            mast: Default::default(),
+            manifest: PackageManifest {
+                exports: exports.into_iter().map(|export| (export.path(), export)).collect(),
+                dependencies: Default::default(),
+            },
+            sections: Default::default(),
+        };
+
+        let json = serde_json::to_string(&package).expect("package serialization must succeed");
+
+        let err = serde_json::from_str::<Package>(&json)
+            .expect_err("expected malformed constant export leaf name rejection during serde");
+        let message = alloc::format!("{err}");
+        assert_matches!(
+            message,
+            msg if msg.contains("invalid export path '::foo::\"bad name\"': invalid item path component"),
+        );
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn serde_package_deserialization_rejects_malformed_quoted_type_leaf() {
+        let bad = Arc::<AstPath>::from(AstPath::validate(r#"::foo::"bad name""#).unwrap());
+        let exports = vec![PackageExport::Type(crate::TypeExport {
+            path: bad,
+            ty: miden_assembly_syntax::ast::types::Type::Felt,
+        })];
+
+        let package = Package {
+            name: "test".into(),
+            description: None,
+            version: crate::Version::new(0, 0, 0),
+            digest: Default::default(),
+            kind: TargetType::Library,
+            mast: Default::default(),
+            manifest: PackageManifest {
+                exports: exports.into_iter().map(|export| (export.path(), export)).collect(),
+                dependencies: Default::default(),
+            },
+            sections: Default::default(),
+        };
+
+        let json = serde_json::to_string(&package).expect("package serialization must succeed");
+
+        let err = serde_json::from_str::<Package>(&json)
+            .expect_err("expected malformed type export leaf name rejection during serde");
+        let message = alloc::format!("{err}");
+        assert_matches!(
+            message,
+            msg if msg.contains("invalid export path '::foo::\"bad name\"': invalid item path component"),
+        );
     }
 }

@@ -54,6 +54,7 @@ FEATURES_assembly        := testing
 FEATURES_assembly-syntax := testing,serde
 FEATURES_core            :=
 FEATURES_vm              := concurrent,executable,internal
+FEATURES_mast-package    := serde
 FEATURES_processor       := concurrent,testing,bus-debugger
 FEATURES_project         := resolver,serde
 FEATURES_package-registry:= resolver

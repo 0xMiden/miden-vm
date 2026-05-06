@@ -236,18 +236,16 @@ where
 
 #[cfg(test)]
 mod tests {
-    use alloc::{collections::BTreeMap, vec, vec::Vec};
+    use alloc::{vec, vec::Vec};
 
-    use miden_assembly_syntax::{
-        Library,
-        ast::{Path as AstPath, PathBuf},
-        library::{LibraryExport, ProcedureExport as LibraryProcedureExport},
-    };
+    use miden_assembly_syntax::ast::{Path as AstPath, PathBuf};
     use miden_core::{
-        mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, MastNodeId},
+        mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, MastNodeExt, MastNodeId},
         operations::Operation,
     };
-    use miden_mast_package::{Dependency, Package, Section, SectionId, TargetType};
+    use miden_mast_package::{
+        Dependency, Package, PackageExport, ProcedureExport, Section, SectionId, TargetType,
+    };
 
     use super::*;
 
@@ -266,15 +264,13 @@ mod tests {
         Arc::from(path.into_boxed_path())
     }
 
-    fn build_library(export: &str) -> Arc<Library> {
+    fn build_package_exports(export: &str) -> (Arc<MastForest>, Vec<PackageExport>) {
         let (forest, node_id) = build_forest();
         let path = absolute_path(export);
-        let export = LibraryProcedureExport::new(node_id, Arc::clone(&path));
+        let export =
+            ProcedureExport::new(Arc::clone(&path), Some(node_id), forest[node_id].digest(), None);
 
-        let mut exports = BTreeMap::new();
-        exports.insert(path, LibraryExport::Procedure(export));
-
-        Arc::new(Library::new(Arc::new(forest), exports).expect("failed to build library"))
+        (Arc::new(forest), vec![PackageExport::Procedure(export)])
     }
 
     fn build_package<'a>(
@@ -282,19 +278,23 @@ mod tests {
         version: &str,
         dependencies: impl IntoIterator<Item = (&'a str, &'a str, TargetType, miden_core::Word)>,
     ) -> Arc<MastPackage> {
-        Package::from_library(
-            name.into(),
-            version.parse().unwrap(),
-            TargetType::Library,
-            build_library("test::pkg::entry"),
-            dependencies.into_iter().map(|(name, version, kind, digest)| Dependency {
-                name: name.into(),
-                version: version.parse().unwrap(),
-                kind,
-                digest,
-            }),
+        let (mast, exports) = build_package_exports("test::pkg::entry");
+        Arc::new(
+            Package::create(
+                name.into(),
+                version.parse().unwrap(),
+                TargetType::Library,
+                mast,
+                exports,
+                dependencies.into_iter().map(|(name, version, kind, digest)| Dependency {
+                    name: name.into(),
+                    version: version.parse().unwrap(),
+                    kind,
+                    digest,
+                }),
+            )
+            .expect("test package should be valid"),
         )
-        .into()
     }
 
     #[test]

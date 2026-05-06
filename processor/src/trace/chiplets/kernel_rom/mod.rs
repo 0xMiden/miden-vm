@@ -94,15 +94,14 @@ impl KernelRom {
             trace.width(),
             "inconsistent trace fragment width"
         );
-        let mut row = RowIndex::from(0);
-        for access_info in self.access_map.values() {
+        for (row, access_info) in (0u32..).zip(self.access_map.values()) {
+            let row = RowIndex::from(row);
             let multiplicity = Felt::from_u64(access_info.num_accesses as u64);
             trace.set(row, 0, multiplicity);
             trace.set(row, 1, access_info.proc_hash[0]);
             trace.set(row, 2, access_info.proc_hash[1]);
             trace.set(row, 3, access_info.proc_hash[2]);
             trace.set(row, 4, access_info.proc_hash[3]);
-            row += 1_u32;
         }
     }
 

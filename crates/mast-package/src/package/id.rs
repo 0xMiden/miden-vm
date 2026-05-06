@@ -34,6 +34,12 @@ impl PartialEq<str> for PackageId {
     }
 }
 
+impl PartialEq<&str> for PackageId {
+    fn eq(&self, other: &&str) -> bool {
+        self.0.as_ref() == *other
+    }
+}
+
 impl Borrow<str> for PackageId {
     fn borrow(&self) -> &str {
         &self.0

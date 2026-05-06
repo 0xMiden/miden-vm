@@ -1,3 +1,5 @@
+use miden_assembly::package::Package;
+
 use super::*;
 use crate::test_utils::TestHost;
 
@@ -136,11 +138,15 @@ fn test_advice_provider() {
     let (program, kernel_lib) = {
         let source_manager = Arc::new(DefaultSourceManager::default());
 
-        let kernel_lib =
-            Assembler::new(source_manager.clone()).assemble_kernel(kernel_source).unwrap();
-        let program = Assembler::with_kernel(source_manager, kernel_lib.clone())
-            .assemble_program(program_source)
+        let kernel_lib = Assembler::new(source_manager.clone())
+            .assemble_kernel("kernel", kernel_source)
+            .map(Arc::<Package>::from)
             .unwrap();
+        let program = Assembler::with_kernel(source_manager, kernel_lib.clone())
+            .unwrap()
+            .assemble_program("program", program_source)
+            .unwrap()
+            .unwrap_program();
 
         (program, kernel_lib)
     };

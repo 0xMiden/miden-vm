@@ -30,7 +30,7 @@ pub struct RunCmd {
     #[arg(short = 'i', long = "input", value_parser)]
     input_file: Option<PathBuf>,
 
-    /// Paths to .masl library files (only used for assembly files)
+    /// Paths to .masp library files (only used for assembly files)
     #[arg(short = 'l', long = "libraries", value_parser)]
     library_paths: Vec<PathBuf>,
 

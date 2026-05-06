@@ -19,8 +19,10 @@ fn advice_map_loaded_before_execution() {
     end";
 
     // compile and execute program
-    let program_without_advice_map: Program =
-        Assembler::default().assemble_program(source).unwrap();
+    let program_without_advice_map: Program = Assembler::default()
+        .assemble_program("program", source)
+        .unwrap()
+        .unwrap_program();
 
     // Test `miden_processor::execute_sync` fails if no advice map provided with the program
     let mut host =

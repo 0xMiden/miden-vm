@@ -72,7 +72,10 @@ mod tests;
 /// use miden_assembly::Assembler;
 /// use miden_processor::{DefaultHost, FastProcessor, StackInputs};
 ///
-/// let program = Assembler::default().assemble_program("begin push.1 drop end").unwrap();
+/// let program = Assembler::default()
+///     .assemble_program("prg", "begin push.1 drop end")
+///     .unwrap()
+///     .unwrap_program();
 /// let mut host = DefaultHost::default();
 ///
 /// let trace_inputs = FastProcessor::new(StackInputs::default())

@@ -1,16 +1,13 @@
 use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
 use core::fmt;
 
-use miden_assembly_syntax::{
-    ast::{
-        self, AttributeSet, Path,
-        types::{FunctionType, Type},
-    },
-    library::Library,
+use miden_assembly_syntax::ast::{
+    self, AttributeSet, Path,
+    types::{FunctionType, Type},
 };
 #[cfg(all(feature = "arbitrary", test))]
 use miden_core::serde::{Deserializable, Serializable};
-use miden_core::{Word, utils::DisplayHex};
+use miden_core::{Word, mast::MastNodeId, utils::DisplayHex};
 #[cfg(feature = "arbitrary")]
 use proptest::prelude::{Strategy, any};
 #[cfg(feature = "serde")]
@@ -44,12 +41,24 @@ pub struct PackageManifest {
     pub(super) dependencies: Vec<Dependency>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[derive(Debug, Error)]
 pub enum ManifestValidationError {
     #[error("duplicate export path '{0}' in package manifest")]
     DuplicateExport(Arc<Path>),
     #[error("duplicate dependency '{0}' in package manifest")]
     DuplicateDependency(PackageId),
+    #[error(
+        "package manifest declares export for procedure '{path}', but no procedure root with its digest was found in the MAST"
+    )]
+    MissingProcedureMast { path: Arc<Path>, digest: Word },
+    #[error(
+        "invalid procedure export '{path}': the node id in the manifest is not a procedure root"
+    )]
+    InvalidProcedureNode { path: Arc<Path> },
+    #[error("invalid export path '{path}': {error}")]
+    InvalidExportPath { path: Arc<Path>, error: ast::PathError },
+    #[error("package must contain at least one exported procedure")]
+    NoProcedures,
 }
 
 impl PackageManifest {
@@ -62,38 +71,20 @@ impl PackageManifest {
             exports: Default::default(),
             dependencies: Default::default(),
         };
-        for export in exports {
+        let mut has_procedures = false;
+        for mut export in exports {
+            if export.is_procedure() {
+                has_procedures = true;
+            }
+            normalize_export(&mut export)?;
             manifest.add_export(export)?;
         }
 
+        if !has_procedures {
+            return Err(ManifestValidationError::NoProcedures);
+        }
+
         Ok(manifest)
-    }
-
-    /// Construct a new [PackageManifest] by deriving export information from the given [Library].
-    pub fn from_library(library: &Library) -> Self {
-        use miden_assembly_syntax::library::LibraryExport;
-        use miden_core::mast::MastNodeExt;
-
-        Self::new(library.exports().map(|export| match export {
-            LibraryExport::Procedure(export) => {
-                let digest = library.mast_forest()[export.node].digest();
-                PackageExport::Procedure(ProcedureExport {
-                    path: export.path.clone(),
-                    digest,
-                    signature: export.signature.clone(),
-                    attributes: export.attributes.clone(),
-                })
-            },
-            LibraryExport::Constant(export) => PackageExport::Constant(ConstantExport {
-                path: export.path.clone(),
-                value: export.value.clone(),
-            }),
-            LibraryExport::Type(export) => PackageExport::Type(TypeExport {
-                path: export.path.clone(),
-                ty: export.ty.clone(),
-            }),
-        }))
-        .expect("library exports should have unique paths")
     }
 
     /// Extend this manifest with the provided dependencies
@@ -237,6 +228,33 @@ impl PackageExport {
         matches!(self, Self::Type(_))
     }
 
+    /// Returns true if this item is a procedure
+    #[inline]
+    pub fn as_procedure(&self) -> Option<&ProcedureExport> {
+        match self {
+            Self::Procedure(export) => Some(export),
+            _ => None,
+        }
+    }
+
+    /// Returns true if this item is a constant
+    #[inline]
+    pub fn as_constant(&self) -> Option<&ConstantExport> {
+        match self {
+            Self::Constant(export) => Some(export),
+            _ => None,
+        }
+    }
+
+    /// Returns true if this item is a type declaration
+    #[inline]
+    pub fn as_type(&self) -> Option<&TypeExport> {
+        match self {
+            Self::Type(export) => Some(export),
+            _ => None,
+        }
+    }
+
     pub(crate) const fn tag(&self) -> u8 {
         // SAFETY: This is safe because we have given this enum a
         // primitive representation with #[repr(u8)], with the first
@@ -282,6 +300,15 @@ pub struct ProcedureExport {
         proptest(strategy = "miden_assembly_syntax::arbitrary::path::bare_path_random_length(2)")
     )]
     pub path: Arc<Path>,
+    /// The id of the MAST root node corresponding to this procedure
+    ///
+    /// This is used for provenance, i.e. tracing which specific node in the package MAST this
+    /// export corresponds to, when multiple exports may have the same digest.
+    ///
+    /// If not present, the digest is used to resolve a MAST node
+    #[cfg_attr(any(test, feature = "arbitrary"), proptest(value = "None"))]
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub node: Option<MastNodeId>,
     /// The digest of the procedure exported by this package.
     #[cfg_attr(feature = "arbitrary", proptest(value = "Word::default()"))]
     pub digest: Word,
@@ -295,11 +322,35 @@ pub struct ProcedureExport {
     pub attributes: AttributeSet,
 }
 
+impl ProcedureExport {
+    pub fn new(
+        path: Arc<Path>,
+        node: Option<MastNodeId>,
+        digest: Word,
+        signature: Option<FunctionType>,
+    ) -> Self {
+        Self {
+            path,
+            node,
+            digest,
+            signature,
+            attributes: Default::default(),
+        }
+    }
+}
+
 impl fmt::Debug for ProcedureExport {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let Self { path, digest, signature, attributes } = self;
+        let Self {
+            path,
+            node,
+            digest,
+            signature,
+            attributes,
+        } = self;
         f.debug_struct("PackageExport")
             .field("path", &format_args!("{path}"))
+            .field("node", node)
             .field("digest", &format_args!("{}", DisplayHex::new(&digest.as_bytes())))
             .field("signature", signature)
             .field("attributes", attributes)
@@ -374,5 +425,56 @@ impl fmt::Debug for TypeExport {
             .field("path", &format_args!("{path}"))
             .field("ty", ty)
             .finish()
+    }
+}
+
+fn normalize_export(export: &mut PackageExport) -> Result<(), ManifestValidationError> {
+    let canonical_path = canonicalize_export_path(export.path().as_ref())?;
+    let leaf = export_raw_leaf(&canonical_path)?;
+
+    match export {
+        PackageExport::Procedure(proc) => {
+            ast::ProcedureName::new(leaf).map_err(|err| {
+                ManifestValidationError::InvalidExportPath {
+                    path: proc.path.clone(),
+                    error: ast::PathError::InvalidComponent(err),
+                }
+            })?;
+            proc.path = canonical_path;
+        },
+        PackageExport::Constant(ConstantExport { path, .. })
+        | PackageExport::Type(TypeExport { path, .. }) => {
+            ast::Ident::new(leaf).map_err(|err| ManifestValidationError::InvalidExportPath {
+                path: path.clone(),
+                error: ast::PathError::InvalidComponent(err),
+            })?;
+            *path = canonical_path;
+        },
+    }
+
+    Ok(())
+}
+
+fn canonicalize_export_path(path: &Path) -> Result<Arc<Path>, ManifestValidationError> {
+    let canonical =
+        path.canonicalize()
+            .map_err(|error| ManifestValidationError::InvalidExportPath {
+                error,
+                path: path.to_path_buf().into(),
+            })?;
+    Ok(Arc::<Path>::from(canonical.into_boxed_path()))
+}
+
+fn export_raw_leaf(path: &Arc<Path>) -> Result<&str, ManifestValidationError> {
+    use ast::PathComponent;
+    match path.components().next_back() {
+        Some(Ok(PathComponent::Normal(leaf))) => Ok(leaf),
+        Some(Err(error)) => {
+            Err(ManifestValidationError::InvalidExportPath { path: path.clone(), error })
+        },
+        Some(Ok(PathComponent::Root)) | None => Err(ManifestValidationError::InvalidExportPath {
+            path: path.clone(),
+            error: ast::PathError::Empty,
+        }),
     }
 }

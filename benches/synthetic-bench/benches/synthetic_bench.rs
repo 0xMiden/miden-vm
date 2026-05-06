@@ -272,8 +272,9 @@ fn bench_one_scenario(
     );
 
     let program = Assembler::default()
-        .assemble_program(&source)
-        .expect("assemble emitted program");
+        .assemble_program("program", &source)
+        .expect("assemble emitted program")
+        .unwrap_program();
 
     let mut group = c.benchmark_group(format!("{producer_stem}/{scenario_slug}"));
     group

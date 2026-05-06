@@ -25,7 +25,7 @@ fn test_issue_2456_statically_linked_library_call() {
     let source_manager = Arc::new(DefaultSourceManager::default());
     let mut assembler = Assembler::new(source_manager);
 
-    let library = assembler.clone().assemble_library([source]).unwrap();
+    let library = assembler.clone().assemble_library("library", [source]).unwrap();
 
     // This program calls a procedure from a statically linked library, which
     // triggers the DecoratorId remapping issue.
@@ -39,8 +39,8 @@ fn test_issue_2456_statically_linked_library_call() {
         end
     ";
 
-    assembler.link_static_library(library).unwrap();
-    let program = assembler.assemble_program(source).unwrap();
+    assembler.link_package(library.into(), miden_assembly::Linkage::Static).unwrap();
+    let program = assembler.assemble_program("program", source).unwrap().unwrap_program();
 
     // Execute the program - this should now succeed without DecoratorId out of bounds error
     let stack_inputs = StackInputs::default();

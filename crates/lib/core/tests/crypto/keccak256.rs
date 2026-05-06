@@ -9,6 +9,7 @@
 
 use core::array;
 
+use miden_assembly::Linkage;
 use miden_core::{
     Felt,
     precompile::{PrecompileCommitment, PrecompileVerifier},
@@ -336,13 +337,14 @@ fn run_keccak_with_max_hash_len(
 
     let core_lib = miden_core_lib::CoreLibrary::default();
     let program = Assembler::default()
-        .with_static_library(core_lib.library())
+        .with_package(core_lib.package(), Linkage::Static)
         .unwrap()
-        .assemble_program(&source)
-        .unwrap();
+        .assemble_program("program", &source)
+        .unwrap()
+        .unwrap_program();
 
     let mut host = DefaultHost::default();
-    host.load_library(core_lib.library().mast_forest()).unwrap();
+    host.load_library(core_lib.mast_forest()).unwrap();
     for (event_name, handler) in core_lib.handlers() {
         host.register_handler(event_name, handler).unwrap();
     }

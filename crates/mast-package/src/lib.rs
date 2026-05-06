@@ -1,5 +1,5 @@
-//! The [Package] containing a [Program] or [Library] and a manifest consisting of its exports and
-//! dependencies.
+//! This crate defines the [Package] type - the artifact produced as a result of assembling some
+//! Miden Asssembly code to MAST.
 #![no_std]
 
 extern crate alloc;
@@ -12,7 +12,7 @@ mod dependency;
 mod package;
 
 pub use miden_assembly_syntax::{
-    KernelLibrary, Library, PathBuf, Version, VersionError,
+    PathBuf, Version, VersionError,
     ast::{ProcedureName, QualifiedProcedureName},
 };
 pub use miden_core::{Word, mast::MastForest, program::Program};
