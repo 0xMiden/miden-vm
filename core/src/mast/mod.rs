@@ -1315,6 +1315,8 @@ pub enum MastForestError {
     AdviceMapKeyCollisionOnMerge(Word),
     #[error("decorator storage error: {0}")]
     DecoratorError(DecoratorIndexError),
+    #[error("assembly op storage error: {0}")]
+    AssemblyOpError(AsmOpIndexError),
     #[error("digest is required for deserialization")]
     DigestRequiredForDeserialization,
     #[error("invalid batch in basic block node {0:?}: {1}")]

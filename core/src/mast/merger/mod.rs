@@ -186,7 +186,7 @@ impl MastForestMerger {
             }
         }
 
-        self.register_asm_op_mappings();
+        self.register_asm_op_mappings()?;
 
         for (forest_idx, forest) in forests.iter().enumerate() {
             self.merge_roots(forest_idx, forest)?;
@@ -481,10 +481,12 @@ impl MastForestMerger {
         let lhs_expanded = Self::expand_asm_op_mapping(num_operations, lhs);
         let rhs_expanded = Self::expand_asm_op_mapping(num_operations, rhs);
         let preference = Self::compare_asm_op_mapping_specificity(num_operations, lhs, rhs);
+        let has_conflicting_assignments =
+            lhs_expanded.iter().zip(&rhs_expanded).any(|(lhs_entry, rhs_entry)| {
+                matches!((lhs_entry, rhs_entry), (Some(lhs_asm_op), Some(rhs_asm_op)) if lhs_asm_op != rhs_asm_op)
+            });
 
-        if preference.is_eq()
-            && Self::has_conflicting_asm_op_assignments(&lhs_expanded, &rhs_expanded)
-        {
+        if preference.is_eq() && has_conflicting_assignments {
             return match Self::compare_asm_op_mapping_value_key(lhs, rhs, asm_op_value_by_id) {
                 Ordering::Greater | Ordering::Equal => lhs.to_vec(),
                 Ordering::Less => rhs.to_vec(),
@@ -514,42 +516,19 @@ impl MastForestMerger {
         Self::compress_asm_op_mapping(&merged, &preserved_transition_points)
     }
 
-    fn has_conflicting_asm_op_assignments(
-        lhs_expanded: &[Option<AsmOpId>],
-        rhs_expanded: &[Option<AsmOpId>],
-    ) -> bool {
-        lhs_expanded.iter().zip(rhs_expanded.iter()).any(|(lhs_entry, rhs_entry)| {
-            match (lhs_entry, rhs_entry) {
-                (Some(lhs_asm_op), Some(rhs_asm_op)) => lhs_asm_op != rhs_asm_op,
-                _ => false,
-            }
-        })
-    }
-
     fn compare_asm_op_mapping_value_key(
         lhs: &[(usize, AsmOpId)],
         rhs: &[(usize, AsmOpId)],
         asm_op_value_by_id: &BTreeMap<AsmOpId, AssemblyOpKey>,
     ) -> Ordering {
-        for ((lhs_op_idx, lhs_asm_op), (rhs_op_idx, rhs_asm_op)) in lhs.iter().zip(rhs.iter()) {
-            let op_idx_cmp = lhs_op_idx.cmp(rhs_op_idx);
-            if !op_idx_cmp.is_eq() {
-                return op_idx_cmp;
-            }
+        let value_key = |(op_idx, asm_op): &(usize, AsmOpId)| {
+            (
+                *op_idx,
+                asm_op_value_by_id.get(asm_op).expect("asm-op id should resolve to a value key"),
+            )
+        };
 
-            let lhs_key = asm_op_value_by_id
-                .get(lhs_asm_op)
-                .expect("asm-op id should resolve to a value key");
-            let rhs_key = asm_op_value_by_id
-                .get(rhs_asm_op)
-                .expect("asm-op id should resolve to a value key");
-            let key_cmp = lhs_key.cmp(rhs_key);
-            if !key_cmp.is_eq() {
-                return key_cmp;
-            }
-        }
-
-        lhs.len().cmp(&rhs.len())
+        lhs.iter().map(value_key).cmp(rhs.iter().map(value_key))
     }
 
     /// Expands sparse mapping transitions into per-operation mapping.
@@ -621,15 +600,17 @@ impl MastForestMerger {
     }
 
     /// Registers all merged asm-op mappings into the merged forest.
-    fn register_asm_op_mappings(&mut self) {
+    fn register_asm_op_mappings(&mut self) -> Result<(), MastForestError> {
         for (node_id, (num_operations, asm_ops)) in
             core::mem::take(&mut self.pending_asm_op_mappings)
         {
             self.mast_forest
                 .debug_info
                 .register_asm_ops(node_id, num_operations, asm_ops)
-                .expect("asm-op mappings should be registered in increasing node id order");
+                .map_err(MastForestError::AssemblyOpError)?;
         }
+
+        Ok(())
     }
 
     /// Adds the provided AssemblyOp to the merged forest if not present and returns its ID.
