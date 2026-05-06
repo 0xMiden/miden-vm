@@ -35,9 +35,9 @@ pub proc find_word
     if.true
         # assert `start_ptr <= maybe_value_ptr < end_ptr` (15 cycles)
         dup dup.6 u32assert2.err="maybe_value_ptr is not u32"
-        u32gte assert.err="lowerbound_array invariant: maybe_value_ptr < start_ptr"
+        u32gte assert.err="lowerbound_array invariant: maybe_value_ptr must be >= start_ptr"
         dup dup.7 u32assert2.err="maybe_value_ptr is not u32"
-        u32lt assert.err="lowerbound_array invariant: maybe_value_ptr >= end_ptr"
+        u32lt assert.err="lowerbound_array invariant: maybe_value_ptr must be < end_ptr"
         #=> [maybe_value_ptr, VALUE, start_ptr, end_ptr]
 
         # dereference maybe_value_ptr (8 cycles)
@@ -46,7 +46,7 @@ pub proc find_word
 
         # check if it matches the requested VALUE (15 cycles)
         exec.word::eq
-        dup assert.err="lowerbound_array invariant: value_ptr not pointing to VALUE"
+        dup assert.err="lowerbound_array invariant: value_ptr must point to VALUE"
         #=> [is_value_found, maybe_value_ptr, start_ptr, end_ptr]
     else
         # the value was not found
@@ -84,7 +84,7 @@ pub proc find_word
                 # there was no match, the first array element must be larger than VALUE
                 # (123 cycles)
                 exec.word::lt
-                assert.err="lowerbound_array invariant: start_ptr not greater than VALUE"
+                assert.err="lowerbound_array invariant: start_ptr must point to a word greater than VALUE"
 
                 # No value was found (1 cycle)
                 push.0
@@ -105,7 +105,7 @@ pub proc find_word
                 # there was no match, the last array element must be smaller than VALUE
                 # (119 cycles)
                 exec.word::gt
-                assert.err="lowerbound_array invariant: last word not smaller than VALUE"
+                assert.err="lowerbound_array invariant: last word must be smaller than VALUE"
 
                 # No value was found (1 cycle)
                 push.0
@@ -113,9 +113,18 @@ pub proc find_word
             else
                 # The value was not found, and the maybe_value_ptr is neither the start nor the end
                 # of the list. Make sure that:
+                # - `start_ptr <= maybe_value_ptr < end_ptr`, and
                 # - `the value at maybe_value_ptr-1 < VALUE`, and
-                # - `the value at maybe_value_ptr > VALUE`
+                # - `the value at maybe_value_ptr > VALUE`.
+                # `maybe_value_ptr` must already be word aligned to allow reading values.
                 #=> [maybe_value_ptr, VALUE, start_ptr, end_ptr]
+
+                # `maybe_value_ptr` bounds check
+                dup dup.6 u32assert2.err="maybe_value_ptr is not u32"
+                u32gte assert.err="lowerbound_array invariant: maybe_value_ptr must be >= start_ptr"
+
+                dup dup.7 u32assert2.err="maybe_value_ptr is not u32"
+                u32lt assert.err="lowerbound_array invariant: maybe_value_ptr must be < end_ptr"
 
                 # Duplicate VALUE word (5 cycles)
                 movdn.4 dupw
@@ -127,7 +136,7 @@ pub proc find_word
 
                 # there was no match, MAYBE_VALUE must be larger than VALUE (123 cycles)
                 exec.word::lt
-                assert.err="lowerbound_array invariant: *maybe_value_ptr not greater than VALUE"
+                assert.err="lowerbound_array invariant: *maybe_value_ptr must be greater than VALUE"
 
                 # dereference `maybe_value_ptr-4` (11 cycles)
                 padw dup.8 sub.4 mem_loadw_le
@@ -135,7 +144,7 @@ pub proc find_word
 
                 # there was no match, MAYBE_VALUE_PREV must be smaller than VALUE (119 cycles)
                 exec.word::gt
-                assert.err="lowerbound_array invariant: *(maybe_value_ptr-4) not smaller than VALUE"
+                assert.err="lowerbound_array invariant: *(maybe_value_ptr-4) must be smaller than VALUE"
 
                 # No value was found (1 cycle)
                 push.0
@@ -248,9 +257,9 @@ proc find_partial_key_value
     if.true
         # assert `start_ptr <= maybe_key_ptr < end_ptr` (15 cycles)
         dup dup.6 u32assert2.err="maybe_key_ptr is not u32"
-        u32gte assert.err="lowerbound_key_value invariant: maybe_key_ptr < start_ptr"
+        u32gte assert.err="lowerbound_key_value invariant: maybe_key_ptr must be >= start_ptr"
         dup dup.7 u32assert2.err="maybe_key_ptr is not u32"
-        u32lt assert.err="lowerbound_key_value invariant: maybe_key_ptr >= end_ptr"
+        u32lt assert.err="lowerbound_key_value invariant: maybe_key_ptr must be < end_ptr"
         #=> [maybe_key_ptr, KEY, start_ptr, end_ptr]
 
         # make sure maybe_key_ptr is pointing to a key, not value (10 cycles)
@@ -266,7 +275,7 @@ proc find_partial_key_value
 
         # check if it matches the requested KEY (15 cycles)
         exec.word::eq
-        dup assert.err="lowerbound_key_value invariant: key_ptr not pointing to KEY"
+        dup assert.err="lowerbound_key_value invariant: key_ptr must point to KEY"
         #=> [is_key_found, maybe_key_ptr, start_ptr, end_ptr]
     else
         # pre-compute is_start_ptr, is_end_ptr to reduce the depth of the
@@ -281,7 +290,7 @@ proc find_partial_key_value
             # the key was not found, `maybe_key_ptr = start_ptr`
 
             if.true
-                # the list is empty and `start_ptr = end_ptr` (both are equal to `maybe_value_ptr`)
+                # the list is empty and `start_ptr = end_ptr` (both are equal to `maybe_key_ptr`)
                 #=> [maybe_key_ptr = start_ptr = end_ptr, KEY, start_ptr, end_ptr]
 
                 # Prepare output (6 cycles)
@@ -302,7 +311,7 @@ proc find_partial_key_value
                 # there was no match, the first map element must be larger than KEY
                 # (123 cycles)
                 exec.word::lt
-                assert.err="lowerbound_key_value invariant: start_ptr not greater than KEY"
+                assert.err="lowerbound_key_value invariant: start_ptr must point to a key greater than KEY"
 
                 # No value was found (1 cycle)
                 push.0
@@ -311,7 +320,7 @@ proc find_partial_key_value
         else
             if.true
                 # the key was not found, `maybe_key_ptr = end_ptr`
-                # the list is not empty, otherwise `maybe_value_ptr = start_ptr` and handled above
+                # the list is not empty, otherwise `maybe_key_ptr = start_ptr` and handled above
                 # assert `the key before end_ptr < KEY`
 
                 #=> [maybe_key_ptr = end_ptr, KEY, start_ptr, end_ptr]
@@ -326,7 +335,7 @@ proc find_partial_key_value
                 # there was no match, the last map element must be smaller than KEY
                 # (119 cycles)
                 exec.word::gt
-                assert.err="lowerbound_key_value invariant: last key-value pair not smaller than KEY"
+                assert.err="lowerbound_key_value invariant: last key-value pair must be smaller than KEY"
 
                 # No value was found (1 cycle)
                 push.0
@@ -334,9 +343,18 @@ proc find_partial_key_value
             else
                 # The key was not found, and the maybe_key_ptr is neither the start nor the end
                 # of the list. Make sure that:
+                # - `start_ptr <= maybe_key_ptr < end_ptr`, and
+                # - `maybe_key_ptr` is word aligned with `start_ptr`, and
                 # - `the key at maybe_key_ptr-1 < KEY`, and
                 # - `the key at maybe_key_ptr > KEY`
                 #=> [maybe_key_ptr, KEY, start_ptr, end_ptr]
+
+                # `maybe_key_ptr` bounds check
+                dup dup.6 u32assert2.err="maybe_key_ptr is not u32"
+                u32gte assert.err="lowerbound_key_value invariant: maybe_key_ptr must be >= start_ptr"
+
+                dup dup.7 u32assert2.err="maybe_key_ptr is not u32"
+                u32lt assert.err="lowerbound_key_value invariant: maybe_key_ptr must be < end_ptr"
 
                 # make sure maybe_key_ptr is pointing to a key, not value (10 cycles)
                 dup dup.6 sub u32assert2.err="maybe_key_ptr is not u32"
@@ -352,7 +370,7 @@ proc find_partial_key_value
 
                 # there was no match, `*maybe_key_ptr` must be larger than KEY (123 cycles)
                 exec.word::lt
-                assert.err="lowerbound_key_value invariant: MAYBE_KEY not greater than KEY"
+                assert.err="lowerbound_key_value invariant: MAYBE_KEY must be greater than KEY"
                 #=> [KEY, maybe_key_ptr, start_ptr, end_ptr]
 
                 # dereference `maybe_key_ptr-8` (previous key) (22 cycles)
@@ -364,7 +382,7 @@ proc find_partial_key_value
 
                 # there was no match, `*(maybe_key_ptr-8)` must be smaller than KEY (119 cycles)
                 exec.word::gt
-                assert.err="lowerbound_key_value invariant: MAYBE_KEY_PREV not smaller than KEY"
+                assert.err="lowerbound_key_value invariant: MAYBE_KEY_PREV must be smaller than KEY"
 
                 # No value was found (1 cycle)
                 push.0
