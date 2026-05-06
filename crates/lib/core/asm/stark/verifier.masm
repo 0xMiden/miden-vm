@@ -122,6 +122,8 @@ pub proc verify
 
     exec.ood_frames::load_and_horner_eval_ood_frames
 
+    exec.utils::swap_air_regions_if_chip_first
+
     #==============================================================================================
     #       VI) Draw gamma for reduced_aux_values batching and evaluate constraints
     #==============================================================================================

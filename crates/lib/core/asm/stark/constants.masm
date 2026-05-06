@@ -141,6 +141,10 @@ const RANDOM_COIN_INPUT_BUF_PTR = 3223322752
 const RANDOM_COIN_INPUT_LEN_PTR = 3223322760
 const RANDOM_COIN_OUTPUT_LEN_PTR = 3223322761
 
+### Scratch buffer (64 felts) used by `swap_air_regions_if_chip_first` to hold the
+### smaller AIR's main block during the swap.
+const SWAP_SCRATCH_PTR = 3223322764
+
 ## ACE related
 ## Starts at address 3225419776 = 2**31 + 2**30 + 2**22 and the memory region grows backward
 ## and forward, forming the ACE READ section consumed by `eval_circuit`.
@@ -480,6 +484,10 @@ end
 
 pub proc tmp4
     push.TMP4
+end
+
+pub proc swap_scratch_ptr
+    push.SWAP_SCRATCH_PTR
 end
 
 pub proc random_coin_input_buf_ptr

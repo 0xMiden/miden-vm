@@ -415,6 +415,107 @@ pub proc execute_constraint_evaluation_check
     exec.constants::get_procedure_digest_execute_constraint_evaluation_check_ptr dynexec
 end
 
+# OOD MEMORY SHUFFLE
+# =================================================================================================
+#
+# When `core_height > chiplets_height`, proof_order is `[Chiplets, Core]` but the codegen's slot
+# indexing is fixed in caller_order. The procs below conditionally swap per-AIR halves of the OOD
+# frame and aux_bus_boundary so eval_circuit reads the right values.
+
+#! Copy `n_words` consecutive words from `src` to `dst`. Forward iteration; safe for left-shifts.
+#! Uses TMP3/TMP4 as iterator state.
+#!
+#! Input:  [n_words, dst, src, ...]
+#! Output: [...]
+proc copy_words_fwd
+    swap exec.constants::tmp4 mem_store
+    swap exec.constants::tmp3 mem_store
+    # => [n_words, ...]
+
+    dup push.0 neq
+    while.true
+        sub.1
+
+        padw exec.constants::tmp3 mem_load mem_loadw_le
+        exec.constants::tmp4 mem_load mem_storew_le
+        dropw
+
+        exec.constants::tmp3 mem_load add.4
+        exec.constants::tmp3 mem_store
+        exec.constants::tmp4 mem_load add.4
+        exec.constants::tmp4 mem_store
+
+        dup push.0 neq
+    end
+    drop
+end
+
+#! Swap `mem[base..base+16]` ↔ `mem[base+16..base+32]` via SWAP_SCRATCH.
+#! Input: [base, ...]
+proc swap_two_4_word_blocks
+    dup
+    exec.constants::swap_scratch_ptr push.4
+    exec.copy_words_fwd
+
+    dup add.16 dup.1 push.4
+    exec.copy_words_fwd
+
+    add.16 exec.constants::swap_scratch_ptr swap push.4
+    exec.copy_words_fwd
+end
+
+#! Swap [chip_main(48 felts), core_main(112 felts)] → [core_main, chip_main] at `base`.
+#! Input: [base, ...]
+proc swap_chip_core_main_blocks
+    dup
+    exec.constants::swap_scratch_ptr push.12
+    exec.copy_words_fwd
+
+    dup add.48 dup.1 push.28
+    exec.copy_words_fwd
+
+    add.112 exec.constants::swap_scratch_ptr swap push.12
+    exec.copy_words_fwd
+end
+
+#! Swap the two EF halves of the aux_bus_boundary word: [c0, c1, k0, k1] → [k0, k1, c0, c1].
+proc swap_aux_bus_boundary_word
+    padw exec.constants::aux_bus_boundary_ptr mem_loadw_le
+    movup.2 movup.3 swap
+    exec.constants::aux_bus_boundary_ptr mem_storew_le
+    dropw
+end
+
+#! Shuffle the OOD frame and aux_bus_boundary from proof_order to caller_order if
+#! `log_chip < log_core` (i.e. proof_order = [Chiplets, Core]). No-op otherwise.
+#! MUST run after OOD streaming + aux observation, before eval_circuit.
+pub proc swap_air_regions_if_chip_first
+    exec.constants::get_chiplets_trace_length_log
+    exec.constants::get_core_trace_length_log
+    u32lt
+    # 1 iff log_chip < log_core (proof_order = [Chiplets, Core])
+    if.true
+        # main_curr at OOD_EVALUATIONS_PTR + 0
+        exec.constants::ood_evaluations_ptr
+        exec.swap_chip_core_main_blocks
+
+        # aux_curr at OOD_EVALUATIONS_PTR + 160 (16-felt symmetric swap)
+        exec.constants::ood_evaluations_ptr add.160
+        exec.swap_two_4_word_blocks
+
+        # main_next at OOD_EVALUATIONS_PTR + 224
+        exec.constants::ood_evaluations_ptr add.224
+        exec.swap_chip_core_main_blocks
+
+        # aux_next at OOD_EVALUATIONS_PTR + 384
+        exec.constants::ood_evaluations_ptr add.384
+        exec.swap_two_4_word_blocks
+
+        # aux_bus_boundary
+        exec.swap_aux_bus_boundary_word
+    end
+end
+
 #! Observes the auxiliary trace: draws aux randomness, reseeds with the aux trace commitment,
 #! and absorbs aux trace boundary values into the transcript.
 #!

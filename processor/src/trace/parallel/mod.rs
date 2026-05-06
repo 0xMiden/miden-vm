@@ -177,18 +177,19 @@ pub fn build_trace_with_max_len(
     // the slice's last row always falls in the padding region (where the chiplet
     // last-row invariant holds) — necessary when `chiplets.trace_len()` is itself a
     // power of two.
+    // Per-AIR heights: each AIR is sized to its own next-power-of-two padded height.
+    // Both directions (chip ≥ core AND core > chip) are supported end-to-end by the
+    // codegen's symmetric β coefficients + per-AIR selectors and the MASM verifier's
+    // `swap_air_regions_if_chip_first` shuffle (which conditionally rearranges OOD frame
+    // and aux_bus_boundary memory from proof_order to caller_order before
+    // `eval_circuit`).
+    //
+    // `+ 1` before chiplets padding ensures at least one chiplet padding row exists
+    // (required for the chiplet last-row invariant when `chiplets.trace_len()` is itself
+    // a power of two).
     let core_height = pad_to_trace_length(core_trace_len.max(range_table_len));
-    // Force `chiplets_height >= core_height` so proof_order is always [Core, Chiplets],
-    // matching the codegen's slot arrangement for the OOD frame and the per-AIR β-fold
-    // direction. Lifting the clamp would require either MASM-side memory shuffling
-    // after `process_row_ood_evaluations` (because the prover absorbs OOD evaluations
-    // in proof_order, which must equal caller_order at the codegen's fixed slot
-    // layout) or generating two ACE circuits keyed by proof_order. The symmetric β
-    // (`MultiAirBetaCore` / `MultiAirBetaChip`) and per-AIR selector slots
-    // (`Is*Core` / `Is*Chip`) are in place so a future change can lift this clamp
-    // by only adding the memory-shuffle step.
-    let chiplets_height = pad_to_trace_length(chiplets.trace_len() + 1).max(core_height);
-    let main_trace_len = chiplets_height;
+    let chiplets_height = pad_to_trace_length(chiplets.trace_len() + 1);
+    let main_trace_len = core_height.max(chiplets_height);
 
     let ((range_checker_trace, chiplets_trace), ()) = rayon::join(
         || {
