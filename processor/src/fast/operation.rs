@@ -16,7 +16,7 @@ use super::step::BreakReason;
 use crate::{
     AdviceProvider, BaseHost, ContextId, ExecutionError,
     errors::OperationError,
-    fast::{FastProcessor, STACK_BUFFER_SIZE, memory::Memory},
+    fast::{FastProcessor, memory::Memory},
     processor::{HasherInterface, Processor, StackInterface, SystemInterface},
 };
 
@@ -309,12 +309,9 @@ impl StackInterface for FastProcessor {
 
     #[inline(always)]
     fn increment_size(&mut self) -> Result<(), ExecutionError> {
-        if self.stack_top_idx < STACK_BUFFER_SIZE - 1 {
-            self.increment_stack_size();
-            Ok(())
-        } else {
-            Err(ExecutionError::Internal("stack overflow"))
-        }
+        self.ensure_stack_capacity_for_push()?;
+        self.increment_stack_size();
+        Ok(())
     }
 
     #[inline(always)]

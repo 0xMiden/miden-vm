@@ -58,6 +58,8 @@ pub enum ExecutionError {
     },
     #[error("failed to execute the program for internal reason: {0}")]
     Internal(&'static str),
+    #[error("operand stack depth {depth} exceeds the maximum of {max}")]
+    StackDepthLimitExceeded { depth: usize, max: usize },
     /// This means trace generation would go over the configured row limit.
     ///
     /// In parallel trace building, this is used for core-row prechecks and chiplet overflow.

@@ -61,6 +61,10 @@ pub struct TraceGenerationContext {
     /// The number of rows per core trace fragment, except for the last fragment which may be
     /// shorter.
     pub fragment_size: usize,
+
+    /// The maximum number of field elements allowed on the operand stack in an active execution
+    /// context.
+    pub max_stack_depth: usize,
 }
 
 /// Builder for recording the context to generate trace fragments during execution.
@@ -113,6 +117,10 @@ pub struct ExecutionTracer {
     /// The number of rows per core trace fragment.
     fragment_size: usize,
 
+    /// The maximum number of field elements allowed on the operand stack in an active execution
+    /// context.
+    max_stack_depth: usize,
+
     /// Flag set in `start_clock_cycle` when a Call/Syscall/Dyncall END is encountered, consumed
     /// in `finalize_clock_cycle` to call `overflow_table.restore_context()`. This is deferred to
     /// `finalize_clock_cycle` because `finalize_clock_cycle` is only called when the operation
@@ -127,7 +135,7 @@ pub struct ExecutionTracer {
 impl ExecutionTracer {
     /// Creates a new `ExecutionTracer` with the given fragment size.
     #[inline(always)]
-    pub fn new(fragment_size: usize) -> Self {
+    pub fn new(fragment_size: usize, max_stack_depth: usize) -> Self {
         Self {
             state_snapshot: None,
             overflow_table: OverflowTable::default(),
@@ -147,6 +155,7 @@ impl ExecutionTracer {
             external: MastForestResolutionReplay::default(),
             fragment_contexts: Vec::new(),
             fragment_size,
+            max_stack_depth,
             pending_restore_context: false,
             is_eval_circuit_op: false,
         }
@@ -168,6 +177,7 @@ impl ExecutionTracer {
             hasher_for_chiplet: self.hasher_for_chiplet,
             ace_replay: self.ace,
             fragment_size: self.fragment_size,
+            max_stack_depth: self.max_stack_depth,
         }
     }
 

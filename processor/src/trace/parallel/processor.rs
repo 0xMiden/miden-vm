@@ -54,6 +54,10 @@ pub(crate) struct ReplayProcessor {
     pub hasher_response_replay: HasherResponseReplay,
     pub mast_forest_resolution_replay: MastForestResolutionReplay,
 
+    /// The maximum number of field elements allowed on the operand stack in an active execution
+    /// context.
+    pub max_stack_depth: usize,
+
     /// The maximum clock cycle at which this processor should stop execution.
     pub maximum_clock: RowIndex,
 }
@@ -73,6 +77,7 @@ impl ReplayProcessor {
         memory_reads_replay: MemoryReadsReplay,
         hasher_response_replay: HasherResponseReplay,
         mast_forest_resolution_replay: MastForestResolutionReplay,
+        max_stack_depth: usize,
         num_clocks_to_execute: RowIndex,
     ) -> Self {
         let maximum_clock = initial_system.clk + num_clocks_to_execute.as_usize();
@@ -86,6 +91,7 @@ impl ReplayProcessor {
             memory_reads_replay,
             hasher_response_replay,
             mast_forest_resolution_replay,
+            max_stack_depth,
             maximum_clock,
         }
     }
@@ -335,6 +341,12 @@ impl StackInterface for ReplayProcessor {
 
     fn increment_size(&mut self) -> Result<(), ExecutionError> {
         const SENTINEL_VALUE: Felt = Felt::new_unchecked(Felt::ORDER_U64 - 1);
+
+        let depth = self.depth() as usize + 1;
+        let max = self.max_stack_depth;
+        if depth > max {
+            return Err(ExecutionError::StackDepthLimitExceeded { depth, max });
+        }
 
         // push the last element on the overflow table
         {

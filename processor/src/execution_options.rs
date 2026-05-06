@@ -1,4 +1,5 @@
 use miden_air::trace::MIN_TRACE_LEN;
+use miden_core::program::MIN_STACK_DEPTH;
 
 // EXECUTION OPTIONS
 // ================================================================================================
@@ -24,6 +25,9 @@ pub struct ExecutionOptions {
     /// Maximum number of continuations allowed on the continuation stack at any point during
     /// execution.
     max_num_continuations: usize,
+    /// Maximum number of field elements allowed on the operand stack in the active execution
+    /// context.
+    max_stack_depth: usize,
 }
 
 impl Default for ExecutionOptions {
@@ -38,6 +42,7 @@ impl Default for ExecutionOptions {
             max_adv_map_elements: Self::DEFAULT_MAX_ADV_MAP_ELEMENTS,
             max_hash_len_bytes: Self::DEFAULT_MAX_HASH_LEN_BYTES,
             max_num_continuations: Self::DEFAULT_MAX_NUM_CONTINUATIONS,
+            max_stack_depth: Self::DEFAULT_MAX_STACK_DEPTH,
         }
     }
 }
@@ -69,6 +74,12 @@ impl ExecutionOptions {
     /// Default maximum number of continuations allowed on the continuation stack.
     /// Set to 2^16 (65536).
     pub const DEFAULT_MAX_NUM_CONTINUATIONS: usize = 1 << 16;
+
+    /// Default maximum number of field elements allowed on the operand stack.
+    ///
+    /// This preserves the effective stack depth ceiling imposed by the previous fixed
+    /// `FastProcessor` stack buffer.
+    pub const DEFAULT_MAX_STACK_DEPTH: usize = 6615;
 
     // CONSTRUCTOR
     // --------------------------------------------------------------------------------------------
@@ -133,6 +144,7 @@ impl ExecutionOptions {
             max_adv_map_elements: Self::DEFAULT_MAX_ADV_MAP_ELEMENTS,
             max_hash_len_bytes: Self::DEFAULT_MAX_HASH_LEN_BYTES,
             max_num_continuations: Self::DEFAULT_MAX_NUM_CONTINUATIONS,
+            max_stack_depth: Self::DEFAULT_MAX_STACK_DEPTH,
         })
     }
 
@@ -246,10 +258,33 @@ impl ExecutionOptions {
         self.max_num_continuations
     }
 
+    /// Returns the maximum number of field elements allowed on the operand stack in the active
+    /// execution context.
+    #[inline]
+    pub fn max_stack_depth(&self) -> usize {
+        self.max_stack_depth
+    }
+
     /// Sets the maximum number of continuations allowed on the continuation stack.
     pub fn with_max_num_continuations(mut self, max_num_continuations: usize) -> Self {
         self.max_num_continuations = max_num_continuations;
         self
+    }
+
+    /// Sets the maximum number of field elements allowed on the operand stack in the active
+    /// execution context.
+    pub fn with_max_stack_depth(
+        mut self,
+        max_stack_depth: usize,
+    ) -> Result<Self, ExecutionOptionsError> {
+        if max_stack_depth < MIN_STACK_DEPTH {
+            return Err(ExecutionOptionsError::MaxStackDepthTooSmall {
+                max_stack_depth,
+                min_stack_depth: MIN_STACK_DEPTH,
+            });
+        }
+        self.max_stack_depth = max_stack_depth;
+        Ok(self)
     }
 }
 
@@ -268,6 +303,11 @@ pub enum ExecutionOptionsError {
     MaxCycleNumTooBig { max_cycles: u32, max_cycles_limit: u32 },
     #[error("core trace fragment size must be greater than 0")]
     CoreTraceFragmentSizeTooSmall,
+    #[error("maximum stack depth {max_stack_depth} must be at least {min_stack_depth}")]
+    MaxStackDepthTooSmall {
+        max_stack_depth: usize,
+        min_stack_depth: usize,
+    },
 }
 
 // TESTS
@@ -325,5 +365,21 @@ mod tests {
         let opts = ExecutionOptions::new(Some(100), 64, 1024, false, false);
         assert!(opts.is_ok());
         assert_eq!(opts.unwrap().expected_cycles(), 64);
+    }
+
+    #[test]
+    fn max_stack_depth_validates_minimum_depth() {
+        let result = ExecutionOptions::default().with_max_stack_depth(MIN_STACK_DEPTH - 1);
+        assert!(matches!(
+            result,
+            Err(ExecutionOptionsError::MaxStackDepthTooSmall {
+                max_stack_depth,
+                min_stack_depth: MIN_STACK_DEPTH,
+            }) if max_stack_depth == MIN_STACK_DEPTH - 1
+        ));
+
+        let result = ExecutionOptions::default().with_max_stack_depth(MIN_STACK_DEPTH);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().max_stack_depth(), MIN_STACK_DEPTH);
     }
 }
