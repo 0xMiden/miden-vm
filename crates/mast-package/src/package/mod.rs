@@ -223,9 +223,7 @@ impl Package {
             )));
         }
         let main_path = MasmPath::exec_path().join(ast::ProcedureName::MAIN_PROC_NAME);
-        if let Some(digest) = self.mast.get_procedure_root_by_path(&main_path)
-            && let Some(entrypoint) = self.mast.mast_forest().find_procedure_root(digest)
-        {
+        if let Some(entrypoint) = self.mast.get_procedure_node_by_path(&main_path) {
             let mast_forest = self.mast.mast_forest().clone();
             let kernel_dependency = self.kernel_runtime_dependency()?.cloned();
             match (self.try_embedded_kernel_library()?, kernel_dependency) {
@@ -387,24 +385,29 @@ impl Package {
             return Err(Report::msg("expected library but got an executable"));
         }
 
+        let entrypoint_namespace = entrypoint.namespace().to_absolute();
         let module = self
             .mast
             .module_infos()
-            .find(|info| info.path() == entrypoint.namespace())
+            .find(|info| info.path() == entrypoint_namespace.as_ref())
             .ok_or_else(|| {
                 Report::msg(format!(
                     "invalid entrypoint: library does not contain a module named '{}'",
                     entrypoint.namespace()
                 ))
             })?;
-        if let Some(digest) = module.get_procedure_digest_by_name(entrypoint.name()) {
+        if let Some(procedure) = module.get_procedure_by_name(entrypoint.name()) {
             let mast_forest = self.mast.mast_forest().clone();
-            let node_id = mast_forest.find_procedure_root(digest).ok_or_else(|| {
-                Report::msg(
-                    "invalid entrypoint: malformed library - procedure exported, but digest has \
-                     no node in the forest",
-                )
-            })?;
+            let digest = procedure.digest;
+            let node_id = procedure
+                .source_root_id()
+                .or_else(|| mast_forest.find_procedure_root(digest))
+                .ok_or_else(|| {
+                    Report::msg(
+                        "invalid entrypoint: malformed library - procedure exported, but digest \
+                         has no node in the forest",
+                    )
+                })?;
 
             let exec_path: Arc<MasmPath> =
                 MasmPath::exec_path().join(masm::ProcedureName::MAIN_PROC_NAME).into();
@@ -510,15 +513,16 @@ fn arbitrary_library() -> Arc<Library> {
 #[cfg(test)]
 mod tests {
     use alloc::{collections::BTreeMap, sync::Arc, vec, vec::Vec};
+    use core::str::FromStr;
 
     use miden_assembly_syntax::{
         Library,
-        ast::{Path as AstPath, PathBuf},
+        ast::{Path as AstPath, PathBuf, ProcedureName, QualifiedProcedureName},
         library::{LibraryExport, ProcedureExport as LibraryProcedureExport},
     };
     use miden_core::{
         mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, MastNodeId},
-        operations::Operation,
+        operations::{AssemblyOp, Operation},
         serde::Serializable,
     };
 
@@ -549,6 +553,35 @@ mod tests {
         exports.insert(path, LibraryExport::Procedure(export));
 
         Arc::new(Library::new(Arc::new(forest), exports).expect("failed to build library"))
+    }
+
+    fn build_same_digest_library(exports: &[(&str, &str)]) -> Arc<Library> {
+        let mut forest = MastForest::new();
+        let mut library_exports = BTreeMap::new();
+
+        for (path_str, context_name) in exports {
+            let asm_op_id = forest
+                .debug_info_mut()
+                .add_asm_op(AssemblyOp::new(None, (*context_name).into(), 1, "add".into()))
+                .expect("failed to add asm op");
+            let node_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+                .add_to_forest(&mut forest)
+                .expect("failed to build basic block");
+            let num_ops = forest[node_id].get_basic_block().unwrap().num_operations() as usize;
+            forest
+                .debug_info_mut()
+                .register_asm_ops(node_id, num_ops, vec![(0, asm_op_id)])
+                .expect("failed to register asm ops");
+            forest.make_root(node_id);
+
+            let path = absolute_path(path_str);
+            library_exports.insert(
+                Arc::clone(&path),
+                LibraryExport::Procedure(LibraryProcedureExport::new(node_id, path)),
+            );
+        }
+
+        Arc::new(Library::new(Arc::new(forest), library_exports).expect("failed to build library"))
     }
 
     fn build_package(
@@ -621,5 +654,46 @@ mod tests {
             .expect_err("multiple kernel runtime dependencies should be rejected");
 
         assert!(error.to_string().contains("declares multiple kernel runtime dependencies"));
+    }
+
+    #[test]
+    fn make_executable_preserves_selected_same_digest_root_metadata() {
+        let library =
+            build_same_digest_library(&[("app::alias_a", "alias_a"), ("app::alias_b", "alias_b")]);
+        let package = *Package::from_library(
+            PackageId::from("app"),
+            Version::new(1, 0, 0),
+            TargetType::Library,
+            library,
+            [],
+        );
+
+        let entrypoint = QualifiedProcedureName::from_str("app::alias_b").unwrap();
+        let executable = package.make_executable(&entrypoint).unwrap();
+
+        let main_path =
+            miden_assembly_syntax::Path::exec_path().join(ProcedureName::MAIN_PROC_NAME);
+        let entrypoint_node = executable.mast.get_procedure_node_by_path(&main_path).unwrap();
+        assert_eq!(
+            executable
+                .mast
+                .mast_forest()
+                .debug_info()
+                .first_asm_op_for_node(entrypoint_node)
+                .unwrap()
+                .context_name(),
+            "alias_b"
+        );
+
+        let program = executable.try_into_program().unwrap();
+        assert_eq!(
+            program
+                .mast_forest()
+                .debug_info()
+                .first_asm_op_for_node(program.entrypoint())
+                .unwrap()
+                .context_name(),
+            "alias_b"
+        );
     }
 }
