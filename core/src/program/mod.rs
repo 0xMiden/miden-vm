@@ -27,7 +27,7 @@ pub use stack::{InputError, MIN_STACK_DEPTH, OutputError, StackInputs, StackOutp
 /// execution begins, and a definition of the kernel against which the program must be executed
 /// (the kernel can be an empty kernel).
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize))]
 #[cfg_attr(
     all(feature = "arbitrary", test),
     miden_test_serde_macros::serde_test(binary_serde(true))
@@ -184,6 +184,36 @@ impl Deserializable for Program {
         }
 
         Ok(Self::with_kernel(mast_forest, entrypoint, kernel))
+    }
+}
+
+#[cfg(feature = "serde")]
+#[derive(Deserialize)]
+struct ProgramSerde {
+    mast_forest: Arc<MastForest>,
+    entrypoint: MastNodeId,
+    kernel: Kernel,
+}
+
+#[cfg(feature = "serde")]
+impl<'de> Deserialize<'de> for Program {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let ProgramSerde { mast_forest, entrypoint, kernel } =
+            ProgramSerde::deserialize(deserializer)?;
+
+        if mast_forest.get_node_by_id(entrypoint).is_none() {
+            return Err(serde::de::Error::custom(format!("invalid entrypoint {entrypoint}")));
+        }
+        if !mast_forest.is_procedure_root(entrypoint) {
+            return Err(serde::de::Error::custom(format!(
+                "entrypoint {entrypoint} is not a procedure"
+            )));
+        }
+
+        Ok(Self { mast_forest, entrypoint, kernel })
     }
 }
 
