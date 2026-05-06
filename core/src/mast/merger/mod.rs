@@ -1,5 +1,5 @@
 use alloc::{
-    collections::{BTreeMap, btree_map::Entry},
+    collections::{BTreeMap, BTreeSet, btree_map::Entry},
     string::String,
     vec::Vec,
 };
@@ -412,56 +412,24 @@ impl MastForestMerger {
         source_node_id: MastNodeId,
         merged_node_id: MastNodeId,
     ) -> Result<(), MastForestError> {
-        let (num_operations, asm_ops) = match &source_forest[source_node_id] {
-            MastNode::Block(block) => {
-                let num_operations = block.num_operations() as usize;
-                let mut asm_ops = Vec::new();
-                let mut previous_asm_op: Option<AssemblyOpKey> = None;
+        let source_asm_ops = source_forest.debug_info.asm_ops_for_node(source_node_id);
+        if source_asm_ops.is_empty() {
+            return Ok(());
+        }
 
-                for op_idx in 0..num_operations {
-                    let asm_op =
-                        source_forest.debug_info.asm_op_for_operation(source_node_id, op_idx);
-                    let asm_op_key = asm_op.map(Self::asm_op_key);
-
-                    if asm_op_key == previous_asm_op {
-                        continue;
-                    }
-
-                    if let Some(asm_op) = asm_op {
-                        let merged_asm_op_id = self.intern_asm_op(asm_op)?;
-                        asm_ops.push((op_idx, merged_asm_op_id));
-                    }
-
-                    previous_asm_op = asm_op_key;
-                }
-
-                (num_operations, asm_ops)
-            },
-            _ => {
-                let source_asm_ops = source_forest.debug_info.asm_ops_for_node(source_node_id);
-                if source_asm_ops.is_empty() {
-                    return Ok(());
-                }
-
-                let mut asm_ops = Vec::with_capacity(source_asm_ops.len());
-                for (op_idx, asm_op_id) in source_asm_ops.iter().copied() {
-                    let asm_op = source_forest
-                        .debug_info
-                        .asm_op(asm_op_id)
-                        .expect("asm-op mapping should reference a valid assembly op");
-                    let merged_asm_op_id = self.intern_asm_op(asm_op)?;
-                    asm_ops.push((op_idx, merged_asm_op_id));
-                }
-
-                let num_operations =
-                    source_asm_ops.last().map(|(op_idx, _)| op_idx + 1).unwrap_or(0);
-
-                (num_operations, asm_ops)
-            },
+        let num_operations = match &source_forest[source_node_id] {
+            MastNode::Block(block) => block.num_operations() as usize,
+            _ => source_asm_ops.last().map(|(op_idx, _)| op_idx + 1).unwrap_or(0),
         };
 
-        if asm_ops.is_empty() {
-            return Ok(());
+        let mut asm_ops = Vec::with_capacity(source_asm_ops.len());
+        for (op_idx, asm_op_id) in source_asm_ops.iter().copied() {
+            let asm_op = source_forest
+                .debug_info
+                .asm_op(asm_op_id)
+                .expect("asm-op mapping should reference a valid assembly op");
+            let merged_asm_op_id = self.intern_asm_op(asm_op)?;
+            asm_ops.push((op_idx, merged_asm_op_id));
         }
 
         self.merge_pending_asm_op_mapping(merged_node_id, num_operations, asm_ops);
@@ -540,7 +508,10 @@ impl MastForestMerger {
             merged.push(merged_asm_op);
         }
 
-        Self::compress_asm_op_mapping(&merged)
+        let preserved_transition_points =
+            lhs.iter().chain(rhs.iter()).map(|(op_idx, _)| *op_idx).collect::<BTreeSet<_>>();
+
+        Self::compress_asm_op_mapping(&merged, &preserved_transition_points)
     }
 
     fn has_conflicting_asm_op_assignments(
@@ -599,12 +570,15 @@ impl MastForestMerger {
     }
 
     /// Compresses per-operation mapping into sparse transition points.
-    fn compress_asm_op_mapping(asm_ops: &[Option<AsmOpId>]) -> Vec<(usize, AsmOpId)> {
+    fn compress_asm_op_mapping(
+        asm_ops: &[Option<AsmOpId>],
+        preserved_transition_points: &BTreeSet<usize>,
+    ) -> Vec<(usize, AsmOpId)> {
         let mut compressed = Vec::new();
         let mut previous_asm_op = None;
 
         for (op_idx, asm_op) in asm_ops.iter().copied().enumerate() {
-            if asm_op == previous_asm_op {
+            if asm_op == previous_asm_op && !preserved_transition_points.contains(&op_idx) {
                 continue;
             }
 
@@ -743,45 +717,23 @@ fn augment_fingerprint_with_metadata(
 /// This ensures that nodes with identical structure but different source-mapping metadata do not
 /// collapse during merge.
 fn serialize_asm_op_content_for_node(forest: &MastForest, node_id: MastNodeId) -> Vec<u8> {
+    let entries = forest.debug_info().asm_ops_for_node(node_id);
+    if entries.is_empty() {
+        return Vec::new();
+    }
+
     let mut data = Vec::new();
 
-    match &forest[node_id] {
-        MastNode::Block(block) => {
-            let num_operations = block.num_operations() as usize;
-            let mut previous_asm_op: Option<AssemblyOpKey> = None;
+    if !matches!(forest[node_id], MastNode::Block(_)) {
+        let num_operations = entries.last().map(|(op_idx, _)| op_idx + 1).unwrap_or(0);
+        data.extend_from_slice(&num_operations.to_le_bytes());
+    }
 
-            for op_idx in 0..num_operations {
-                let asm_op = forest.debug_info().asm_op_for_operation(node_id, op_idx);
-                let asm_op_key = asm_op.map(MastForestMerger::asm_op_key);
-
-                if asm_op_key == previous_asm_op {
-                    continue;
-                }
-
-                if let Some(asm_op) = asm_op {
-                    data.extend_from_slice(&op_idx.to_le_bytes());
-                    serialize_asm_op_content(asm_op, &mut data);
-                }
-
-                previous_asm_op = asm_op_key;
-            }
-        },
-        _ => {
-            let entries = forest.debug_info().asm_ops_for_node(node_id);
-            if entries.is_empty() {
-                return data;
-            }
-
-            let num_operations = entries.last().map(|(op_idx, _)| op_idx + 1).unwrap_or(0);
-            data.extend_from_slice(&num_operations.to_le_bytes());
-
-            for (op_idx, asm_op_id) in entries {
-                data.extend_from_slice(&op_idx.to_le_bytes());
-                if let Some(asm_op) = forest.debug_info().asm_op(asm_op_id) {
-                    serialize_asm_op_content(asm_op, &mut data);
-                }
-            }
-        },
+    for (op_idx, asm_op_id) in entries {
+        data.extend_from_slice(&op_idx.to_le_bytes());
+        if let Some(asm_op) = forest.debug_info().asm_op(asm_op_id) {
+            serialize_asm_op_content(asm_op, &mut data);
+        }
     }
 
     data

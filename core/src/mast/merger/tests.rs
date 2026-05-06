@@ -1260,6 +1260,44 @@ fn mast_forest_merge_preserves_asm_op_mappings_for_deduplicated_nodes() {
 }
 
 #[test]
+fn mast_forest_merge_preserves_explicit_adjacent_asm_op_transitions() {
+    let mut forest_lhs = MastForest::new();
+    let lhs_block_id = block_foo().add_to_forest(&mut forest_lhs).unwrap();
+    forest_lhs.make_root(lhs_block_id);
+
+    let lhs_asm_op = AssemblyOp::new(None, "proc::foo".into(), 1, "mul".into());
+    let lhs_asm_op_id = forest_lhs.debug_info_mut().add_asm_op(lhs_asm_op).unwrap();
+    forest_lhs
+        .debug_info_mut()
+        .register_asm_ops(lhs_block_id, 2, vec![(0, lhs_asm_op_id), (1, lhs_asm_op_id)])
+        .unwrap();
+
+    let mut forest_rhs = MastForest::new();
+    let rhs_block_id = block_foo().add_to_forest(&mut forest_rhs).unwrap();
+    forest_rhs.make_root(rhs_block_id);
+
+    let rhs_asm_op = AssemblyOp::new(None, "proc::foo".into(), 1, "mul".into());
+    let rhs_asm_op_id = forest_rhs.debug_info_mut().add_asm_op(rhs_asm_op).unwrap();
+    forest_rhs
+        .debug_info_mut()
+        .register_asm_ops(rhs_block_id, 2, vec![(0, rhs_asm_op_id), (1, rhs_asm_op_id)])
+        .unwrap();
+
+    let (merged, root_maps) = MastForest::merge([&forest_lhs, &forest_rhs]).unwrap();
+    let mapped_lhs_root = root_maps.map_root(0, &lhs_block_id).unwrap();
+    let mapped_rhs_root = root_maps.map_root(1, &rhs_block_id).unwrap();
+    assert_eq!(mapped_lhs_root, mapped_rhs_root);
+
+    let mapped_with_asm_root = mapped_lhs_root;
+    let merged_entries = merged.debug_info().asm_ops_for_node(mapped_with_asm_root);
+
+    assert_eq!(merged_entries.len(), 2);
+    assert_eq!(merged_entries[0].0, 0);
+    assert_eq!(merged_entries[1].0, 1);
+    assert_eq!(merged_entries[0].1, merged_entries[1].1);
+}
+
+#[test]
 fn mast_forest_merge_keeps_same_blocks_with_different_asm_ops_distinct() {
     let mut forest_lhs = MastForest::new();
     let lhs_block_id = block_foo().add_to_forest(&mut forest_lhs).unwrap();
