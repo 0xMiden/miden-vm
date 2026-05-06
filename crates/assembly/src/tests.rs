@@ -5187,6 +5187,43 @@ fn regression_empty_kernel_library_is_rejected() {
     assert_diagnostic_lines!(err, "library must contain at least one exported procedure");
 }
 
+#[test]
+fn regression_empty_kernel_package_is_rejected_without_panicking() {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    let context = TestContext::default();
+    let source_manager = context.source_manager();
+    let kernel_lib = Assembler::new(source_manager.clone())
+        .assemble_kernel(
+            r#"
+            pub proc foo
+                add
+            end
+            "#,
+        )
+        .expect("kernel assembly should succeed");
+    let mut package = *Package::from_library(
+        PackageId::from("kernel"),
+        "1.0.0".parse().unwrap(),
+        TargetType::Kernel,
+        Arc::new(kernel_lib.as_ref().clone()),
+        [],
+    );
+    package.manifest = PackageManifest::new([]).expect("empty package manifest should be valid");
+
+    let linked = catch_unwind(AssertUnwindSafe(|| {
+        Assembler::new(source_manager)
+            .link_package(Arc::new(package), miden_project::Linkage::Dynamic)
+    }));
+    assert!(linked.is_ok(), "assembler panicked while linking an empty kernel package");
+
+    let error = linked.unwrap().expect_err("empty kernel packages should be rejected");
+    assert_diagnostic_lines!(
+        error,
+        "invalid kernel package: does not export any kernel procedures"
+    );
+}
+
 /// Reproduces issue #3035: a MAST with padded basic blocks grows when debug info is cleared and the
 /// forest is compacted via self-merge.
 #[test]
