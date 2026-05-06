@@ -617,6 +617,7 @@ fn stack_depth_small_custom_limit_fails_before_buffer_growth() {
 
     let err =
         FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options)
+            .expect("processor advice inputs should fit advice map limits")
             .execute_sync(&program, &mut host)
             .expect_err("small configured stack depth limit should fail before buffer growth");
 
@@ -642,6 +643,7 @@ fn issue_2818_fast_processor_stack_grows_past_initial_buffer_by_multiple_element
         .unwrap();
 
     FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options)
+        .expect("processor advice inputs should fit advice map limits")
         .execute_sync(&program, &mut host)
         .expect("stack growth multiple elements past the initial buffer should succeed");
 }
@@ -660,6 +662,7 @@ fn issue_2818_traced_execution_stack_grows_past_initial_buffer() {
 
     let trace_inputs =
         FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options)
+            .expect("processor advice inputs should fit advice map limits")
             .execute_trace_inputs_sync(&program, &mut host)
             .expect("traced execution should grow the stack buffer past the initial buffer");
 
@@ -680,6 +683,7 @@ fn issue_2818_step_execution_stack_grows_past_initial_buffer() {
         .unwrap();
 
     FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options)
+        .expect("processor advice inputs should fit advice map limits")
         .execute_by_step_sync(&program, &mut host)
         .expect("step execution should grow the stack buffer past the initial buffer");
 }
@@ -691,7 +695,8 @@ fn issue_2818_restore_context_grows_stack_buffer_for_suspended_caller() {
         .with_max_stack_depth(DEFAULT_MAX_STACK_DEPTH + 1)
         .unwrap();
     let mut processor =
-        FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options);
+        FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options)
+            .expect("processor advice inputs should fit advice map limits");
 
     assert_eq!(processor.stack.len(), INITIAL_STACK_BUFFER_SIZE);
     processor.call_stack.push(ExecutionContextInfo {
@@ -720,7 +725,8 @@ fn stack_buffer_is_not_preallocated_to_operand_stack_depth_limit() {
         .with_max_stack_depth(DEFAULT_MAX_STACK_DEPTH + GROWTH_MARGIN)
         .unwrap();
     let mut processor =
-        FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options);
+        FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options)
+            .expect("processor advice inputs should fit advice map limits");
 
     assert_eq!(
         processor.stack.len(),
@@ -744,7 +750,8 @@ fn stack_buffer_is_not_preallocated_to_operand_stack_depth_limit() {
     let pushes_past_initial_buffer = DEFAULT_MAX_STACK_DEPTH - MIN_STACK_DEPTH + GROWTH_MARGIN;
     let program = simple_program_with_ops(pad_then_drop_ops(pushes_past_initial_buffer));
     let mut processor =
-        FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options);
+        FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options)
+            .expect("processor advice inputs should fit advice map limits");
     let mut host = DefaultHost::default();
 
     processor
@@ -921,6 +928,7 @@ fn stack_depth_limit_exceeded() {
 
     let err =
         FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options)
+            .expect("processor advice inputs should fit advice map limits")
             .execute_sync(&program, &mut host)
             .expect_err("pushing past the configured stack depth should fail");
 
