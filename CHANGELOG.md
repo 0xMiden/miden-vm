@@ -39,6 +39,7 @@
 - [BREAKING] Bounded the live advice map by total field elements during execution; advice-provider setup now returns an error when initial advice exceeds this limit ([#3085](https://github.com/0xMiden/miden-vm/pull/3085)).
 - Rejected empty kernel packages before linking so malformed dependency metadata returns a structured package error instead of reaching the linker's non-empty-kernel assertion ([#3082](https://github.com/0xMiden/miden-vm/pull/3082)).
 - [BREAKING] Fixed project artifact reuse to ignore unrelated manifest fields, rejected private cross-module imports, and kept signature-only type imports live ([#3091](https://github.com/0xMiden/miden-vm/pull/3091)).
+- Hardened `Program` serde deserialization to enforce entrypoint existence and procedure-root invariants, and expanded serde fuzz coverage for post-deserialization `Program` use paths ([#3102](https://github.com/0xMiden/miden-vm/pull/3102)).
 
 #### Changes
 
