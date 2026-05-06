@@ -85,13 +85,191 @@ pub mod serde {
 
 pub mod crypto {
     pub mod merkle {
+        use alloc::vec::Vec;
+
         pub use miden_crypto::merkle::{
             EmptySubtreeRoots, InnerNodeInfo, MerkleError, MerklePath, MerkleTree, NodeIndex,
             PartialMerkleTree,
-            mmr::{Mmr, MmrPeaks},
             smt::{LeafIndex, SMT_DEPTH, SimpleSmt, Smt, SmtProof, SmtProofError},
             store::{MerkleStore, StoreNode},
         };
+
+        use crate::{Felt, Word, ZERO};
+
+        pub mod mmr {
+            pub use miden_crypto::merkle::mmr::{
+                Forest, InOrderIndex, MmrDelta, MmrError, MmrPath, MmrProof, PartialMmr,
+            };
+
+            use super::{Felt, InnerNodeInfo, Vec, Word, ZERO};
+
+            /// A fully materialized Merkle Mountain Range.
+            #[derive(Debug, Clone, Default)]
+            pub struct Mmr(miden_crypto::merkle::mmr::Mmr);
+
+            impl Mmr {
+                /// Constructor for an empty `Mmr`.
+                pub fn new() -> Self {
+                    Self(miden_crypto::merkle::mmr::Mmr::new())
+                }
+
+                /// Constructs an MMR from an iterator of leaves.
+                ///
+                /// # Errors
+                /// Returns an error if the maximum forest size is exceeded.
+                pub fn try_from_iter<T: IntoIterator<Item = Word>>(
+                    values: T,
+                ) -> Result<Self, MmrError> {
+                    miden_crypto::merkle::mmr::Mmr::try_from_iter(values).map(Self)
+                }
+
+                /// Returns the MMR forest representation. See [`Forest`].
+                pub fn forest(&self) -> Forest {
+                    self.0.forest()
+                }
+
+                /// Returns an [`MmrProof`] for the leaf at the specified position.
+                ///
+                /// # Errors
+                /// Returns an error if the specified leaf position is out of bounds for this MMR.
+                pub fn open(&self, pos: usize) -> Result<MmrProof, MmrError> {
+                    self.0.open(pos)
+                }
+
+                /// Returns the leaf value at position `pos`.
+                ///
+                /// # Errors
+                /// Returns an error if the specified leaf position is out of bounds for this MMR.
+                pub fn get(&self, pos: usize) -> Result<Word, MmrError> {
+                    self.0.get(pos)
+                }
+
+                /// Adds a new element to the MMR.
+                ///
+                /// # Errors
+                /// Returns an error if the MMR exceeds the maximum supported forest size.
+                pub fn add(&mut self, el: Word) -> Result<(), MmrError> {
+                    self.0.add(el)
+                }
+
+                /// Returns the current peaks of the MMR.
+                pub fn peaks(&self) -> MmrPeaks {
+                    MmrPeaks(self.0.peaks())
+                }
+
+                /// Returns the peaks of the MMR at the state specified by `forest`.
+                ///
+                /// # Errors
+                /// Returns an error if the specified `forest` value is not valid for this MMR.
+                pub fn peaks_at(&self, forest: Forest) -> Result<MmrPeaks, MmrError> {
+                    self.0.peaks_at(forest).map(MmrPeaks)
+                }
+
+                /// Compute the required update to `original_forest`.
+                ///
+                /// # Errors
+                /// Returns an error if either forest is out of bounds for this MMR.
+                pub fn get_delta(
+                    &self,
+                    from_forest: Forest,
+                    to_forest: Forest,
+                ) -> Result<MmrDelta, MmrError> {
+                    self.0.get_delta(from_forest, to_forest)
+                }
+
+                /// Returns the inner nodes in this MMR.
+                pub fn inner_nodes(&self) -> impl Iterator<Item = InnerNodeInfo> + '_ {
+                    self.0.inner_nodes()
+                }
+            }
+
+            /// The peaks of an MMR at a specific forest size.
+            #[derive(Debug, Clone, PartialEq, Eq, Default)]
+            pub struct MmrPeaks(miden_crypto::merkle::mmr::MmrPeaks);
+
+            impl MmrPeaks {
+                /// Returns new [`MmrPeaks`] instantiated from the provided vector of peaks and the
+                /// number of leaves in the underlying MMR.
+                ///
+                /// # Errors
+                /// Returns an error if the number of leaves and the number of peaks are
+                /// inconsistent.
+                pub fn new(forest: Forest, peaks: Vec<Word>) -> Result<Self, MmrError> {
+                    miden_crypto::merkle::mmr::MmrPeaks::new(forest, peaks).map(Self)
+                }
+
+                /// Returns the underlying forest.
+                pub fn forest(&self) -> Forest {
+                    self.0.forest()
+                }
+
+                /// Returns a count of leaves in the underlying MMR.
+                pub fn num_leaves(&self) -> usize {
+                    self.0.num_leaves()
+                }
+
+                /// Returns the number of peaks of the underlying MMR.
+                pub fn num_peaks(&self) -> usize {
+                    self.0.num_peaks()
+                }
+
+                /// Returns the list of peaks of the underlying MMR.
+                pub fn peaks(&self) -> &[Word] {
+                    self.0.peaks()
+                }
+
+                /// Returns the peak by the provided index.
+                ///
+                /// # Errors
+                /// Returns an error if the provided peak index is greater or equal to the current
+                /// number of peaks in the MMR.
+                pub fn get_peak(&self, peak_idx: usize) -> Result<&Word, MmrError> {
+                    self.0.get_peak(peak_idx)
+                }
+
+                /// Converts this [`MmrPeaks`] into its components.
+                pub fn into_parts(self) -> (Forest, Vec<Word>) {
+                    self.0.into_parts()
+                }
+
+                /// Hashes the forest leaf count and peaks.
+                pub fn hash_peaks(&self) -> Word {
+                    let padded_peaks = self.flatten_and_pad_peaks();
+                    let mut elements = Vec::with_capacity(Word::NUM_ELEMENTS + padded_peaks.len());
+                    elements.extend_from_slice(&[
+                        Felt::new_unchecked(self.num_leaves() as u64),
+                        ZERO,
+                        ZERO,
+                        ZERO,
+                    ]);
+                    elements.extend_from_slice(&padded_peaks);
+
+                    miden_crypto::hash::poseidon2::Poseidon2::hash_elements(&elements)
+                }
+
+                /// Verifies the Merkle opening proof.
+                ///
+                /// # Errors
+                /// Returns an error if the provided opening proof is invalid.
+                pub fn verify(&self, value: Word, opening: MmrProof) -> Result<(), MmrError> {
+                    self.0.verify(value, opening)
+                }
+
+                /// Flattens and pads the peaks to make hashing inside of the Miden VM easier.
+                pub fn flatten_and_pad_peaks(&self) -> Vec<Felt> {
+                    self.0.flatten_and_pad_peaks()
+                }
+            }
+
+            impl From<MmrPeaks> for Vec<Word> {
+                fn from(peaks: MmrPeaks) -> Self {
+                    let (_, peaks) = peaks.into_parts();
+                    peaks
+                }
+            }
+        }
+
+        pub use mmr::{Mmr, MmrPeaks};
     }
 
     pub mod hash {
