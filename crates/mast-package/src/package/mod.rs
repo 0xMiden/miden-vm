@@ -193,6 +193,11 @@ impl Package {
                 }
             })
             .collect::<Vec<_>>();
+        if exports.is_empty() {
+            return Err(Report::msg(
+                "invalid kernel package: does not export any kernel procedures",
+            ));
+        }
         Kernel::new(&exports).map_err(|err| Report::msg(format!("invalid kernel package: {err}")))
     }
 
@@ -571,6 +576,23 @@ mod tests {
 
     fn build_kernel_package(name: &str) -> Package {
         build_package(name, TargetType::Kernel, &format!("{name}::boot"), [], Vec::new())
+    }
+
+    #[test]
+    fn to_kernel_rejects_empty_kernel_exports() {
+        let mut package = build_package("kernel", TargetType::Kernel, "$kernel::boot", [], vec![]);
+        package.manifest =
+            PackageManifest::new([]).expect("empty package manifest should be valid");
+
+        let error = package
+            .to_kernel()
+            .expect_err("kernel packages without exported procedures should be rejected");
+
+        assert!(
+            error
+                .to_string()
+                .contains("invalid kernel package: does not export any kernel procedures")
+        );
     }
 
     fn kernel_dependency(package: &Package) -> Dependency {
