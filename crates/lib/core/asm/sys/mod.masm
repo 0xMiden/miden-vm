@@ -35,15 +35,17 @@ pub proc drop_stack_top()
     dropw dropw dropw dropw
 end
 
-#! Logs a precompile commitment and removes the helper words produced by `log_precompile`.
+#! Folds a precomputed precompile statement into the transcript via `log_precompile` and
+#! removes the helper words produced by the instruction.
 #!
-#! Input: `[COMM, TAG, ...]`
-#! Output: Stack without the three helper words `[R1, R0, CAP_NEXT]`.
-#! Cycles: 1 (plus cost of the underlying `log_precompile` instruction).
+#! Input: `[STMNT, ...]`
+#! Output: Stack with `STMNT` consumed and the three helper words produced by `log_precompile`
+#!         dropped.
+#! Cycles: 5 (plus the cost of the underlying `log_precompile` instruction).
 pub proc log_precompile_request
-    padw movdnw.2
-    # => [COMM, TAG, PAD, ...]
+    padw padw
+    # => [PAD, PAD, STMNT, ...]
     log_precompile
-    # => [R1, R0, CAP_NEXT, ...]
+    # => [IGNORE, IGNORE, NEW_STATE, ...]
     dropw dropw dropw
 end

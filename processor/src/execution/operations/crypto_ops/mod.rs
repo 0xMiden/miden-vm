@@ -448,63 +448,68 @@ pub(super) fn op_horner_eval_ext<P: Processor, T: Tracer>(
 // LOG PRECOMPILE OPERATION
 // ================================================================================================
 
-/// Logs a precompile event by absorbing `TAG` and `COMM` into the precompile sponge
-/// capacity.
+/// Folds a precomputed statement into the rolling precompile-transcript state.
 ///
 /// Stack transition:
-/// `[COMM, TAG, PAD, ...] -> [R0, R1, CAP_NEXT, ...]`
+/// `[JUNK_R1, JUNK_CAP, STMNT, ...] -> [STATE_NEW, OUT_RATE1, OUT_CAP, ...]`
 ///
 /// Where:
-/// - The hasher computes: `[R0, R1, CAP_NEXT] = Poseidon2([COMM, TAG, CAP_PREV])`
-/// - `CAP_PREV` is the previous sponge capacity provided non-deterministically via helper
-///   registers.
-/// - Stack elements are in LSB-first order (structural order).
+/// - The hasher computes `[STATE_NEW, OUT_RATE1, OUT_CAP] = Poseidon2([STATE_PREV, STMNT, ZERO])`
+///   under the standard `[RATE0, RATE1, CAPACITY]` Poseidon2 layout, so `STATE_NEW` is the `rate0`
+///   half of the output.
+/// - `STATE_PREV` is the previous transcript state, supplied non-deterministically via helper
+///   registers (`helper[1..5]`).
+/// - The output mapping between hasher lanes and stack slots is the identity (matching HPERM):
+///   `rate0_out -> stack[0..4]`, `rate1_out -> stack[4..8]`, `cap_out -> stack[8..12]`.
+/// - The upper two stack words are unconstrained on input.
 #[inline(always)]
 pub(super) fn op_log_precompile<P: Processor, T: Tracer>(
     processor: &mut P,
     tracer: &mut T,
 ) -> Result<OperationHelperRegisters, OperationError> {
-    // Read COMM and TAG from the stack
-    let comm: Word = processor.stack().get_word(0);
-    let tag: Word = processor.stack().get_word(4);
+    // Read STMNT from the bottom slot of the top three stack words.
+    let stmnt: Word = processor.stack().get_word(8);
 
-    // Get the current precompile sponge capacity
-    let cap_prev = processor.precompile_transcript_state();
+    // Get the current rolling transcript state.
+    let state_prev = processor.precompile_transcript_state();
 
-    // Build the full 12-element hasher state for Poseidon2 permutation
-    // State layout: [RATE0 = COMM, RATE1 = TAG, CAPACITY = CAP_PREV]
+    // Build the full 12-element hasher state for Poseidon2 permutation.
+    // State layout: [RATE0 = STATE_PREV, RATE1 = STMNT, CAPACITY = ZERO].
     let mut hasher_state: [Felt; STATE_WIDTH] = [ZERO; 12];
-    hasher_state[STATE_RATE_0_RANGE].copy_from_slice(comm.as_slice());
-    hasher_state[STATE_RATE_1_RANGE].copy_from_slice(tag.as_slice());
-    hasher_state[STATE_CAP_RANGE].copy_from_slice(cap_prev.as_slice());
+    hasher_state[STATE_RATE_0_RANGE].copy_from_slice(state_prev.as_slice());
+    hasher_state[STATE_RATE_1_RANGE].copy_from_slice(stmnt.as_slice());
+    // The capacity slice is left as ZERO.
 
-    // Perform the Poseidon2 permutation
+    // Apply the Poseidon2 permutation.
     let (addr, output_state) = processor.hasher().permute(hasher_state)?;
 
-    // Extract R0, R1 and CAP_NEXT from the output state
-    let r0: Word = output_state[STATE_RATE_0_RANGE.clone()]
+    // Extract STATE_NEW (= output rate0) and the unused rate1/capacity halves.
+    let state_new: Word = output_state[STATE_RATE_0_RANGE.clone()]
         .try_into()
-        .expect("r0 slice has length 4");
-    let r1: Word = output_state[STATE_RATE_1_RANGE.clone()]
+        .expect("state_new slice has length 4");
+    let out_rate1: Word = output_state[STATE_RATE_1_RANGE.clone()]
         .try_into()
-        .expect("r1 slice has length 4");
-    let cap_next: Word = output_state[STATE_CAP_RANGE.clone()]
+        .expect("out_rate1 slice has length 4");
+    let out_cap: Word = output_state[STATE_CAP_RANGE.clone()]
         .try_into()
-        .expect("cap_next slice has length 4");
+        .expect("out_cap slice has length 4");
 
-    // Update the processor's precompile sponge capacity
-    processor.set_precompile_transcript_state(cap_next);
+    // Update the processor's rolling transcript state.
+    processor.set_precompile_transcript_state(state_new);
 
-    // Write the output to the stack (top 12 elements): [R0, R1, CAP_NEXT, ...].
-    processor.stack_mut().set_word(0, &r0);
-    processor.stack_mut().set_word(4, &r1);
-    processor.stack_mut().set_word(8, &cap_next);
+    // Write the hasher output back onto the stack using the identity lane→slot mapping:
+    //   stack[0..4]  = output rate0    (= STATE_NEW),
+    //   stack[4..8]  = output rate1    (junk),
+    //   stack[8..12] = output capacity (junk).
+    processor.stack_mut().set_word(0, &state_new);
+    processor.stack_mut().set_word(4, &out_rate1);
+    processor.stack_mut().set_word(8, &out_cap);
 
-    // Record the hasher permutation for trace generation
+    // Record the hasher permutation for trace generation.
     tracer.record_hasher_permute(hasher_state, output_state);
 
-    // Return helper registers containing the hasher address and CAP_PREV
-    Ok(OperationHelperRegisters::LogPrecompile { addr, cap_prev })
+    // Return helper registers containing the hasher address and STATE_PREV.
+    Ok(OperationHelperRegisters::LogPrecompile { addr, state_prev })
 }
 
 // STREAM CIPHER OPERATION

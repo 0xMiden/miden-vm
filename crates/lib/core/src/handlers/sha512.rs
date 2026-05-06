@@ -134,8 +134,9 @@ impl Sha512Preimage {
 
     pub fn precompile_commitment(&self) -> PrecompileCommitment {
         let tag = self.precompile_tag();
-        let comm = Poseidon2::merge(&[self.input_commitment(), self.digest().to_commitment()]);
-        PrecompileCommitment::new(tag, comm)
+        let comm_0 = self.input_commitment();
+        let comm_1 = self.digest().to_commitment();
+        PrecompileCommitment::new(tag, comm_0, comm_1)
     }
 
     fn precompile_tag(&self) -> Word {

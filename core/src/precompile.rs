@@ -23,8 +23,9 @@
 //!    proof.
 //!
 //! 3. **Proof Generation**: The prover generates a STARK proof of the VM execution. The final
-//!    [`PrecompileTranscript`] state (sponge capacity) is a public input. The verifier enforces the
-//!    initial (empty) and final state via variable‑length public inputs.
+//!    [`PrecompileTranscript`] state (the rolling digest of all per-call statements) is a public
+//!    input. The verifier enforces the initial (empty) and final state via variable‑length public
+//!    inputs.
 //!
 //! 4. **Verification**: The verifier:
 //!    - Recomputes each precompile commitment using the stored requests via [`PrecompileVerifier`]
@@ -36,11 +37,12 @@
 //!
 //! - [`PrecompileRequest`]: Stores the event ID and raw input bytes for a precompile call
 //! - [`PrecompileCommitment`]: A cryptographic commitment to both inputs and outputs, consisting of
-//!   a tag (with event ID and metadata) and a commitment to the request's calldata.
+//!   a tag (with event ID and metadata) and the two halves `(COMM_0, COMM_1)` of the request's
+//!   calldata commitment.
 //! - [`PrecompileVerifier`]: Trait for implementing verification logic for specific precompiles
 //! - [`PrecompileVerifierRegistry`]: Registry mapping event IDs to their verifier implementations
-//! - [`PrecompileTranscript`]: A transcript (implemented via a Poseidon2 sponge) that creates a
-//!   sequential commitment to all precompile requests.
+//! - [`PrecompileTranscript`]: A linear hash tree over Poseidon2 that produces a rolling digest of
+//!   all recorded precompile statements; the state is itself a complete digest at every step.
 //!
 //! # Example Implementation
 //!
@@ -127,15 +129,12 @@ impl Deserializable for PrecompileRequest {
 // PRECOMPILE TRANSCRIPT TYPES
 // ================================================================================================
 
-/// Type alias representing the precompile transcript state (sponge capacity word).
+/// Type alias representing the precompile transcript state.
 ///
-/// This is simply a [`Word`] used to track the evolving state of the precompile transcript sponge.
+/// The transcript is a linear hash tree: the state is the rolling digest of all per-call
+/// statements absorbed so far. After every `log_precompile` call the state is itself a complete
+/// digest — no separate finalization step is required.
 pub type PrecompileTranscriptState = Word;
-
-/// Type alias representing the finalized transcript digest.
-///
-/// This is simply a [`Word`] representing the final digest of all precompile commitments.
-pub type PrecompileTranscriptDigest = Word;
 
 // PRECOMPILE COMMITMENT
 // ================================================================================================
@@ -143,8 +142,11 @@ pub type PrecompileTranscriptDigest = Word;
 /// A commitment to the evaluation of [`PrecompileRequest`], representing both the input and result
 /// of the request.
 ///
-/// This structure contains both the tag (which includes metadata like event ID)
-/// and the commitment to the input and result (calldata) of the precompile request.
+/// The commitment is a triple `(TAG, COMM_0, COMM_1)`. The transcript condenses each commitment
+/// into a single statement word
+/// `STMNT = Permute(COMM_0, COMM_1, TAG).rate0` (TAG enters the sponge as initial capacity, acting
+/// as a domain separator), and then folds that statement into the rolling state via the 2-to-1
+/// hash `state' = Permute(state, STMNT, ZERO).rate0`.
 ///
 /// # Tag Structure
 ///
@@ -156,18 +158,21 @@ pub type PrecompileTranscriptDigest = Word;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PrecompileCommitment {
     tag: Word,
-    comm: Word,
+    comm_0: Word,
+    comm_1: Word,
 }
 
 impl PrecompileCommitment {
-    /// Creates a new precompile commitment from a `TAG` and `COMM`.
+    /// Creates a new precompile commitment from a `TAG` and the two halves `COMM_0`, `COMM_1` of
+    /// the calldata commitment.
     ///
     /// - `TAG`: 4-element word where the first element encodes the [`EventId`]; the remaining
     ///   elements are available as precompile-specific metadata (e.g., `len_bytes`).
-    /// - `COMM`: 4-element word containing the commitment to the calldata (or handler-specific
-    ///   witness) for this precompile request.
-    pub fn new(tag: Word, comm: Word) -> Self {
-        Self { tag, comm }
+    /// - `COMM_0`, `COMM_1`: two 4-element words that together commit to the calldata (or
+    ///   handler-specific witness). The transcript hashes them together with the tag as the initial
+    ///   sponge capacity.
+    pub fn new(tag: Word, comm_0: Word, comm_1: Word) -> Self {
+        Self { tag, comm_0, comm_1 }
     }
 
     /// Returns the `TAG` word which encodes the [`EventId`] in the first element and optional
@@ -176,16 +181,31 @@ impl PrecompileCommitment {
         self.tag
     }
 
-    /// Returns the `COMM` word (calldata commitment), i.e., the commitment to the precompile's
-    /// calldata (or other handler-specific witness).
-    pub fn comm_calldata(&self) -> Word {
-        self.comm
+    /// Returns the first half of the calldata commitment, hashed into the sponge rate0 input.
+    pub fn comm_0(&self) -> Word {
+        self.comm_0
     }
 
-    /// Returns the concatenation of `TAG` and `COMM` as field elements.
-    pub fn to_elements(&self) -> [Felt; 8] {
-        let words = [self.tag, self.comm];
+    /// Returns the second half of the calldata commitment, hashed into the sponge rate1 input.
+    pub fn comm_1(&self) -> Word {
+        self.comm_1
+    }
+
+    /// Returns the concatenation of `TAG`, `COMM_0`, and `COMM_1` as field elements.
+    pub fn to_elements(&self) -> [Felt; 12] {
+        let words = [self.tag, self.comm_0, self.comm_1];
         Word::words_as_elements(&words).try_into().unwrap()
+    }
+
+    /// Returns the per-call statement `STMNT = Permute(COMM_0, COMM_1, TAG).rate0` that the
+    /// transcript folds into its rolling state.
+    pub fn statement(&self) -> Word {
+        let mut state = [ZERO; Poseidon2::STATE_WIDTH];
+        state[Poseidon2::RATE0_RANGE].copy_from_slice(self.comm_0.as_elements());
+        state[Poseidon2::RATE1_RANGE].copy_from_slice(self.comm_1.as_elements());
+        state[Poseidon2::CAPACITY_RANGE].copy_from_slice(self.tag.as_elements());
+        Poseidon2::apply_permutation(&mut state);
+        Word::new(state[Poseidon2::DIGEST_RANGE].try_into().unwrap())
     }
 
     /// Returns the `EventId` used to identify the verifier that produced this commitment from a
@@ -318,29 +338,27 @@ pub trait PrecompileVerifier: Send + Sync {
 // PRECOMPILE TRANSCRIPT
 // ================================================================================================
 
-/// Precompile transcript implemented with a Poseidon2 sponge.
+/// Precompile transcript implemented as a linear hash tree over Poseidon2.
 ///
 /// # Structure
-/// Standard Poseidon2 sponge: 12 elements = rate (8 elements) + capacity (4 elements)
+/// The transcript holds a single 4-element [`Word`] — the rolling state. After each `record` call,
+/// the state is itself a complete digest of every commitment absorbed so far.
 ///
 /// # Operation
-/// - **Record**: Each precompile commitment is recorded by absorbing it into the rate, updating the
-///   capacity
-/// - **State**: The evolving capacity tracks all absorbed commitments in order
-/// - **Finalization**: Squeeze with zero rate to extract a transcript digest (the sequential
-///   commitment)
-///
-/// # Implementation Note
-/// We store only the 4-element capacity portion between absorptions since since the rate is always
-/// overwritten when absorbing blocks that are a multiple of the rate width.
+/// - For each commitment, the transcript first computes the per-call statement `STMNT =
+///   Permute(COMM_0, COMM_1, TAG).rate0` (TAG enters the sponge as initial capacity, acting as a
+///   domain separator).
+/// - It then folds the statement into the rolling state via the 2-to-1 hash `state' =
+///   Permute(state, STMNT, ZERO).rate0`.
+/// - The state is exposed directly as the transcript digest — no finalization step is required.
 #[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
 pub struct PrecompileTranscript {
-    /// The transcript state (capacity portion of the sponge).
+    /// The rolling transcript digest.
     state: Word,
 }
 
 impl PrecompileTranscript {
-    /// Creates a new sponge with zero capacity.
+    /// Creates a new transcript with the zero word as initial state.
     pub fn new() -> Self {
         Self::default()
     }
@@ -350,46 +368,26 @@ impl PrecompileTranscript {
         Self { state }
     }
 
-    /// Returns the current transcript state (capacity word).
+    /// Returns the current transcript state (also the rolling digest of all recorded commitments).
     pub fn state(&self) -> PrecompileTranscriptState {
         self.state
     }
 
     /// Records a precompile commitment into the transcript, updating the state.
-    pub fn record(&mut self, commitment: PrecompileCommitment) {
-        // Internal Poseidon2 state layout is [RATE0, RATE1, CAPACITY].
-        // For the transcript:
-        // - RATE0 = COMM (commitment to calldata)
-        // - RATE1 = TAG  (event metadata)
-        // - CAPACITY = current transcript state.
-        let mut state = [ZERO; Poseidon2::STATE_WIDTH];
-        let comm = commitment.comm_calldata();
-        let tag = commitment.tag();
-
-        state[Poseidon2::RATE0_RANGE].copy_from_slice(comm.as_elements());
-        state[Poseidon2::RATE1_RANGE].copy_from_slice(tag.as_elements());
-        state[Poseidon2::CAPACITY_RANGE].copy_from_slice(self.state.as_elements());
-
-        Poseidon2::apply_permutation(&mut state);
-        // After absorption, update the state.
-        self.state = Word::new(state[Poseidon2::CAPACITY_RANGE].try_into().unwrap());
-    }
-
-    /// Finalizes the transcript to a digest (sequential commitment to all recorded requests).
     ///
-    /// # Details
-    /// The output is equivalent to the sequential hash of all [`PrecompileCommitment`]s, followed
-    /// by two empty words. This is because
-    /// - Each commitment is represented as two words, a multiple of the rate.
-    /// - The initial capacity is set to the zero word since we absorb full double words when
-    ///   calling `record` or `finalize`.
-    pub fn finalize(self) -> PrecompileTranscriptDigest {
-        // Interpret state as [RATE0, RATE1, CAPACITY] with two empty rate words.
+    /// Computes `STMNT = Permute(COMM_0, COMM_1, TAG).rate0` and then folds it into the rolling
+    /// state via `state' = Permute(state, STMNT, ZERO).rate0`.
+    pub fn record(&mut self, commitment: PrecompileCommitment) {
+        let stmnt = commitment.statement();
+
+        // Fold the statement into the rolling state: state' = Permute(state, STMNT, ZERO).rate0.
         let mut state = [ZERO; Poseidon2::STATE_WIDTH];
-        state[Poseidon2::CAPACITY_RANGE].copy_from_slice(self.state.as_elements());
+        state[Poseidon2::RATE0_RANGE].copy_from_slice(self.state.as_elements());
+        state[Poseidon2::RATE1_RANGE].copy_from_slice(stmnt.as_elements());
+        // Capacity is left as ZERO.
 
         Poseidon2::apply_permutation(&mut state);
-        PrecompileTranscriptDigest::new(state[Poseidon2::DIGEST_RANGE].try_into().unwrap())
+        self.state = Word::new(state[Poseidon2::DIGEST_RANGE].try_into().unwrap());
     }
 }
 

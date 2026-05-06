@@ -127,9 +127,10 @@ impl PrecompileVerifier for EcdsaPrecompile {
     ///
     /// Receives the serialized request data (public key || digest || signature) stored during
     /// execution (see [`EventHandler::on_event`]), re-performs the ECDSA verification, and
-    /// generates a commitment `P2(P2(P2(pk) || P2(digest)) || P2(sig))` with tag
-    /// `[event_id, result, 0, 0]` that validates against the execution trace. Each of `pk`,
-    /// `digest`, and `sig` is first converted to u32‑packed field elements before hashing.
+    /// produces a [`PrecompileCommitment`] with tag `[event_id, result, 0, 0]` and halves
+    /// `COMM_0 = P2(P2(pk) || P2(digest))`, `COMM_1 = P2(sig)` that validates against the
+    /// execution trace. Each of `pk`, `digest`, and `sig` is first converted to u32‑packed
+    /// field elements before hashing.
     fn verify(&self, calldata: &[u8]) -> Result<PrecompileCommitment, PrecompileError> {
         let request = EcdsaRequest::read_from_bytes(calldata)?;
         Ok(request.as_precompile_commitment())
@@ -196,9 +197,10 @@ impl EcdsaRequest {
 
     /// Computes the precompile commitment for this request.
     ///
-    /// The commitment is `P2(P2(P2(pk) || P2(digest)) || P2(sig))` with tag
-    /// `[event_id, result, 0, 0]`, where `result` is 1 for valid signatures and 0 for
-    /// invalid ones. Each component is hashed over u32‑packed field elements.
+    /// The commitment is the triple
+    /// `(TAG = [event_id, result, 0, 0], COMM_0 = P2(P2(pk) || P2(digest)), COMM_1 = P2(sig))`,
+    /// where `result` is 1 for valid signatures and 0 for invalid ones. Each component is hashed
+    /// over u32‑packed field elements.
     ///
     /// This is called by the [`PrecompileVerifier`] at verification time and must match
     /// the commitment generated during execution.
@@ -222,9 +224,10 @@ impl EcdsaRequest {
             Poseidon2::hash_elements(&felts)
         };
 
-        let commitment = Poseidon2::merge(&[Poseidon2::merge(&[pk_comm, digest_comm]), sig_comm]);
+        let comm_0 = Poseidon2::merge(&[pk_comm, digest_comm]);
+        let comm_1 = sig_comm;
 
-        PrecompileCommitment::new(tag, commitment)
+        PrecompileCommitment::new(tag, comm_0, comm_1)
     }
 }
 

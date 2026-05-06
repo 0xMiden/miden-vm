@@ -19,8 +19,8 @@ use crate::{
     trace::{
         chiplets::hasher::CONTROLLER_ROWS_PER_PERMUTATION,
         log_precompile::{
-            HELPER_ADDR_IDX, HELPER_CAP_PREV_RANGE, STACK_CAP_NEXT_RANGE, STACK_COMM_RANGE,
-            STACK_R0_RANGE, STACK_R1_RANGE, STACK_TAG_RANGE,
+            HELPER_ADDR_IDX, HELPER_STATE_PREV_RANGE, STACK_JUNK_CAP_RANGE, STACK_JUNK_RATE1_RANGE,
+            STACK_STATE_NEW_RANGE, STACK_STMNT_RANGE,
         },
     },
 };
@@ -595,38 +595,43 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
                     );
 
                     // --- LOGPRECOMPILE ---
+                    //
+                    // Hasher input state  = [STATE_PREV (helper), STMNT (stack), ZERO (constant)].
+                    // Hasher output state = [STATE_NEW  (stack_next, slot stack[8..12]),
+                    //                        JUNK_RATE1 (stack_next[0..4]),
+                    //                        JUNK_CAP   (stack_next[4..8])].
                     g.batch(
                         "logprecompile",
                         op_flags.log_precompile(),
                         move |b| {
                             let log_addr: LB::Expr = log_addr.into();
                             let logpre_in: [LB::Expr; 12] = [
-                                stk.get(STACK_COMM_RANGE.start).into(),
-                                stk.get(STACK_COMM_RANGE.start + 1).into(),
-                                stk.get(STACK_COMM_RANGE.start + 2).into(),
-                                stk.get(STACK_COMM_RANGE.start + 3).into(),
-                                stk.get(STACK_TAG_RANGE.start).into(),
-                                stk.get(STACK_TAG_RANGE.start + 1).into(),
-                                stk.get(STACK_TAG_RANGE.start + 2).into(),
-                                stk.get(STACK_TAG_RANGE.start + 3).into(),
-                                user_helpers[HELPER_CAP_PREV_RANGE.start].into(),
-                                user_helpers[HELPER_CAP_PREV_RANGE.start + 1].into(),
-                                user_helpers[HELPER_CAP_PREV_RANGE.start + 2].into(),
-                                user_helpers[HELPER_CAP_PREV_RANGE.start + 3].into(),
+                                user_helpers[HELPER_STATE_PREV_RANGE.start].into(),
+                                user_helpers[HELPER_STATE_PREV_RANGE.start + 1].into(),
+                                user_helpers[HELPER_STATE_PREV_RANGE.start + 2].into(),
+                                user_helpers[HELPER_STATE_PREV_RANGE.start + 3].into(),
+                                stk.get(STACK_STMNT_RANGE.start).into(),
+                                stk.get(STACK_STMNT_RANGE.start + 1).into(),
+                                stk.get(STACK_STMNT_RANGE.start + 2).into(),
+                                stk.get(STACK_STMNT_RANGE.start + 3).into(),
+                                LB::Expr::ZERO,
+                                LB::Expr::ZERO,
+                                LB::Expr::ZERO,
+                                LB::Expr::ZERO,
                             ];
                             let logpre_out: [LB::Expr; 12] = [
-                                stk_next.get(STACK_R0_RANGE.start).into(),
-                                stk_next.get(STACK_R0_RANGE.start + 1).into(),
-                                stk_next.get(STACK_R0_RANGE.start + 2).into(),
-                                stk_next.get(STACK_R0_RANGE.start + 3).into(),
-                                stk_next.get(STACK_R1_RANGE.start).into(),
-                                stk_next.get(STACK_R1_RANGE.start + 1).into(),
-                                stk_next.get(STACK_R1_RANGE.start + 2).into(),
-                                stk_next.get(STACK_R1_RANGE.start + 3).into(),
-                                stk_next.get(STACK_CAP_NEXT_RANGE.start).into(),
-                                stk_next.get(STACK_CAP_NEXT_RANGE.start + 1).into(),
-                                stk_next.get(STACK_CAP_NEXT_RANGE.start + 2).into(),
-                                stk_next.get(STACK_CAP_NEXT_RANGE.start + 3).into(),
+                                stk_next.get(STACK_STATE_NEW_RANGE.start).into(),
+                                stk_next.get(STACK_STATE_NEW_RANGE.start + 1).into(),
+                                stk_next.get(STACK_STATE_NEW_RANGE.start + 2).into(),
+                                stk_next.get(STACK_STATE_NEW_RANGE.start + 3).into(),
+                                stk_next.get(STACK_JUNK_RATE1_RANGE.start).into(),
+                                stk_next.get(STACK_JUNK_RATE1_RANGE.start + 1).into(),
+                                stk_next.get(STACK_JUNK_RATE1_RANGE.start + 2).into(),
+                                stk_next.get(STACK_JUNK_RATE1_RANGE.start + 3).into(),
+                                stk_next.get(STACK_JUNK_CAP_RANGE.start).into(),
+                                stk_next.get(STACK_JUNK_CAP_RANGE.start + 1).into(),
+                                stk_next.get(STACK_JUNK_CAP_RANGE.start + 2).into(),
+                                stk_next.get(STACK_JUNK_CAP_RANGE.start + 3).into(),
                             ];
                             b.remove(
                                 "logprecompile_init",

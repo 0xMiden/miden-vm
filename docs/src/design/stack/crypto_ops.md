@@ -390,57 +390,75 @@ The `log_precompile` operation logs a precompile event by recording two user-pro
 
 ### Operation Overview
 
-The stack is expected to be arranged as `[COMM, TAG, PAD, ...]`. See [Precompiles](./precompiles.md#core-data) for a thorough explanation of the precompile commitment model. In brief:
-- `TAG` encodes the precompile's event ID (first element) along with metadata or simple outputs (remaining elements),
-- `COMM` commits to the precompile inputs (and may include outputs for long results),
-- `PAD` is a word that will get overwritten in the next cycle.
+The stack is expected to be arranged as `[JUNK_R1, JUNK_CAP, STMNT, ...]`. See
+[Precompiles](./precompiles.md#core-data) for a thorough explanation of the precompile commitment
+model. In brief:
+- `STMNT` is the precomputed per-call statement
+  `STMNT = Permute(COMM_0, COMM_1, TAG).rate0`. The wrapper computes it via a single `hperm` with
+  the per-call tag in the initial sponge capacity, acting as a domain separator.
+- The upper two stack words are unconstrained on input.
 
-Additionally, the processor maintains a persistent precompile transcript state word `CAP` (the sponge capacity) that is updated with each `LOG_PRECOMPILE` invocation. This word is provided non-deterministically via helper registers and is denoted `CAP_PREV`. The virtual table bus links each removal to a matching insertion, ensuring a single, consistent state sequence.
+Additionally, the processor maintains a persistent rolling transcript state `STATE` that is
+updated with each `LOG_PRECOMPILE` invocation. This word is provided non-deterministically via
+helper registers and is denoted `STATE_PREV`. The virtual table bus links each removal to a
+matching insertion, ensuring a single, consistent state sequence.
 
-The operation evaluates `[R0, R1, CAP_NEXT] = Poseidon2([COMM, TAG, CAP_PREV])`, with the following stack transition
+The operation evaluates `[STATE_NEW, OUT_RATE1, OUT_CAP] = Poseidon2([STATE_PREV, STMNT, ZERO])`,
+treating the input as `[rate0, rate1, capacity]`. The new transcript state is the `rate0` half of
+the output. The output mapping between hasher lanes and stack slots is the identity, matching
+`HPERM`. Stack transition:
 
 ```
-Before:  [COMM, TAG, PAD,      ...]
-After:   [R0,   R1,  CAP_NEXT, ...]
+Before:  [JUNK_R1,   JUNK_CAP,  STMNT,   ...]
+After:   [STATE_NEW, OUT_RATE1, OUT_CAP, ...]
 ```
 
-The VM updates its internal precompile transcript state (`CAP_NEXT`) using a bus as we describe below. The rate outputs `R0` and `R1` are transient; together with `CAP_NEXT`, they are typically dropped by the caller immediately after logging.
+The VM updates its internal rolling transcript state (`STATE_NEW`) using a bus as we describe
+below. The two unused halves are transient and typically dropped by the caller after logging.
+Because each fold uses a 2-to-1 hash whose `rate0` output is the next state, the transcript
+state is itself a complete digest at every step — no separate finalization step is required.
 
 The operation uses the following helper registers:
 - $h_0$: Hasher chiplet row address
-- $h_1, h_2, h_3, h_4$: Previous capacity `CAP_PREV`
+- $h_1, h_2, h_3, h_4$: Previous transcript state `STATE_PREV`
 
-Note: helper registers expose `CAP_PREV` for bus constraints only; the VM maintains the
+Note: helper registers expose `STATE_PREV` for bus constraints only; the VM maintains the
 transcript state internally between invocations.
 
 ### Bus Communication
 
 #### Hasher chiplet
 
-The following two messages are sent to the hasher chiplet, ensuring the validity of the resulting permutation. Let $s_i$ denote the $i$-th stack column at that row (top of stack is $s_0$). The elements appearing on the bus are:
+The following two messages are sent to the hasher chiplet, ensuring the validity of the resulting
+permutation. Let $s_i$ denote the $i$-th stack column at that row (top of stack is $s_0$). The
+elements appearing on the bus are:
 
 $$
 \begin{aligned}
-\mathsf{CAP}^{\text{prev}}_i &= h_{i+1} &&\text{(helper registers)}\\
-\mathsf{TAG}_i &= s_{4+i} &&\text{(stack slots 4..7)}\\
-\mathsf{COMM}_i &= s_{i} &&\text{(stack slots 0..3)}
+\mathsf{STATE}^{\text{prev}}_i &= h_{i+1} &&\text{(helper registers)}\\
+\mathsf{STMNT}_i &= s_{8+i} &&\text{(stack slots 8..11)}\\
+0 &&&\text{(constant capacity input)}
 \end{aligned}
 \qquad i \in \{0,1,2,3\}.
 $$
 
-The input message therefore reduces the Poseidon2 state in the canonical order `[COMM, TAG, CAP_PREV]`:
+The input message therefore reduces the Poseidon2 state in the canonical order
+`[STATE_PREV, STMNT, ZERO]`:
 
 $$
-v_{\text{input}} = \alpha_0 + \alpha_1 \cdot op_{linhash} + \alpha_2 \cdot h_0 + \sum_{i=0}^{3} \alpha_{i+4} \cdot \mathsf{COMM}_i + \sum_{i=0}^{3} \alpha_{i+8} \cdot \mathsf{TAG}_i + \sum_{i=0}^{3} \alpha_{i+12} \cdot \mathsf{CAP}_{\text{prev},i}.
+v_{\text{input}} = \alpha_0 + \alpha_1 \cdot op_{linhash} + \alpha_2 \cdot h_0 + \sum_{i=0}^{3} \alpha_{i+4} \cdot \mathsf{STATE}^{\text{prev}}_i + \sum_{i=0}^{3} \alpha_{i+8} \cdot \mathsf{STMNT}_i + \sum_{i=0}^{3} \alpha_{i+12} \cdot 0.
 $$
 
-One controller row later, the `op_retstate` response provides the permuted state `[R0, R1, CAP_{next}]` (with R0 on top). Denote the stack after the instruction by $s'_i$; the top twelve elements are `[R0, R1, CAP_NEXT]`. Thus
+One controller row later, the `op_retstate` response provides the permuted state
+`[STATE_NEW, OUT_RATE1, OUT_CAP]` (with `STATE_NEW` on top of the hasher state). Denote the stack
+after the instruction by $s'_i$; the bus output uses the identity lane→slot mapping (`STATE_NEW`
+to the top slot, then `OUT_RATE1`, then `OUT_CAP`):
 
 $$
 \begin{aligned}
-\mathsf{R}_0{}_i &= s'_{i},\\
-\mathsf{R}_1{}_i &= s'_{4+i},\\
-\mathsf{CAP}^{\text{next}}_i &= s'_{8+i},
+\mathsf{STATE}^{\text{new}}_i &= s'_{i},\\
+\mathsf{OUT}^{\text{rate1}}_i &= s'_{4+i},\\
+\mathsf{OUT}^{\text{cap}}_i   &= s'_{8+i},
 \end{aligned}
 \qquad i \in \{0,1,2,3\},
 $$
@@ -448,7 +466,7 @@ $$
 and the response message is
 
 $$
-v_{\text{output}} = \alpha_0 + \alpha_1 \cdot op_{retstate} + \alpha_2 \cdot (h_0 + 1) + \sum_{i=0}^{3} \alpha_{i+4} \cdot \mathsf{R}_0{}_i + \sum_{i=0}^{3} \alpha_{i+8} \cdot \mathsf{R}_1{}_i + \sum_{i=0}^{3} \alpha_{i+12} \cdot \mathsf{CAP}^{\text{next}}_i.
+v_{\text{output}} = \alpha_0 + \alpha_1 \cdot op_{retstate} + \alpha_2 \cdot (h_0 + 1) + \sum_{i=0}^{3} \alpha_{i+4} \cdot \mathsf{STATE}^{\text{new}}_i + \sum_{i=0}^{3} \alpha_{i+8} \cdot \mathsf{OUT}^{\text{rate1}}_i + \sum_{i=0}^{3} \alpha_{i+12} \cdot \mathsf{OUT}^{\text{cap}}_i.
 $$
 
 Using the above values, we can describe the constraint for the chiplet bus column as follows:
@@ -457,22 +475,29 @@ $$
 b_{chip}' \cdot v_{input} \cdot v_{output} = b_{chip}
 $$
 
-The above constraint enforces that the specified input and output controller rows must be present in the trace of the hash chiplet. In the controller/permutation split design these two controller rows are consecutive, so their addresses differ by exactly 1. The Poseidon2 permutation outputs `[R0, R1, CAP]` (with R0 on top); on the stack, the VM stores these words as `[R0, R1, CAP]`.
+The above constraint enforces that the specified input and output controller rows must be present
+in the trace of the hash chiplet. In the controller/permutation split design these two controller
+rows are consecutive, so their addresses differ by exactly 1. The Poseidon2 permutation outputs
+`[STATE_NEW, OUT_RATE1, OUT_CAP]`; the VM routes them to `stack[0..4]`, `stack[4..8]`, and
+`stack[8..12]` respectively (identity lane→slot mapping, matching HPERM).
 
-Given the similarity with the `HPERM` opcode which sends the same message, albeit from different variables in the trace, it should be possible to combine the bus constraint in a way that avoids increasing the degree of the overall bus expression.
+Given the similarity with the `HPERM` opcode which sends the same message, albeit from different
+variables in the trace, it should be possible to combine the bus constraint in a way that avoids
+increasing the degree of the overall bus expression.
 
-### Capacity Initialization
+### Transcript State Initialization
 
-Inside the VM, the transcript state (sponge capacity) is tracked via the virtual table bus: each update removes the previous entry before inserting the next one.
+Inside the VM, the rolling transcript state is tracked via the virtual table bus: each update
+removes the previous entry before inserting the next one.
 
-We denote the messages for removing and inserting the message as
+We denote the messages for removing and inserting the state as
 
 $$
-v_{rem} = \alpha_0 + \alpha_1 \cdot op_{log\_precompile} + \sum_{j=0}^{3} \alpha_{j+2} \cdot \mathsf{CAP\_PREV}_j
+v_{rem} = \alpha_0 + \alpha_1 \cdot op_{log\_precompile} + \sum_{j=0}^{3} \alpha_{j+2} \cdot \mathsf{STATE\_PREV}_j
 $$
 
 $$
-v_{ins} = \alpha_0 + \alpha_1 \cdot op_{log\_precompile} + \sum_{j=0}^{3} \alpha_{j+2} \cdot \mathsf{CAP\_NEXT}_j
+v_{ins} = \alpha_0 + \alpha_1 \cdot op_{log\_precompile} + \sum_{j=0}^{3} \alpha_{j+2} \cdot \mathsf{STATE\_NEW}_j
 $$
 
 The bus constraint is applied to the virtual table column as follows.
@@ -481,21 +506,27 @@ $$
 b_{vtable}' \cdot v_{rem} = b_{vtable} \cdot v_{ins}
 $$
 
-To ensure the column accounts for the initial and final transcript state, the verifier initializes the bus with variable‑length public inputs (see kernel ROM chiplet). More specifically, it constrains the first value of the bus to be equal to
+To ensure the column accounts for the initial and final transcript state, the verifier
+initialises the bus with variable‑length public inputs (see kernel ROM chiplet). More
+specifically, it constrains the first value of the bus to be equal to
 
 $$
 b_{vtable,0} = \frac{v_{ins, init}}{v_{rem, last}}
 $$
 
-Usually, we initialize the transcript state to the empty word `[0,0,0,0]`, though it may also be used to extend an existing running state from a previous execution. The final transcript state is provided to the verifier (as a variable‑length public input) and enforced via the boundary constraint.
-The messages $v_{ins, init}$ and $v_{rem, last}$ are given by
+Usually, we initialise the transcript state to the empty word `[0,0,0,0]`, though it may also be
+used to extend an existing running state from a previous execution. The final transcript state is
+provided to the verifier (as a variable‑length public input) and enforced via the boundary
+constraint. The messages $v_{ins, init}$ and $v_{rem, last}$ are given by
 
 $$
 v_{ins,init} = \alpha_0 + \alpha_1 \cdot op_{log\_precompile},
 $$
 
 $$
-v_{rem,last} = \alpha_0 + \alpha_1 \cdot op_{log\_precompile} + \sum_{j=0}^{3} \alpha_{j+2} \cdot \mathsf{CAP\_FINAL}_j.
+v_{rem,last} = \alpha_0 + \alpha_1 \cdot op_{log\_precompile} + \sum_{j=0}^{3} \alpha_{j+2} \cdot \mathsf{STATE\_FINAL}_j.
 $$
 
-The bus records only the transcript state (sponge capacity); the VM never finalizes the digest internally. Instead, the verifier (or any external consumer) reconstructs the transcript from the recorded requests. By convention, when a digest is required, the transcript is finalized by absorbing two empty words and applying one more permutation—matching the fact that `log_precompile` discards the rate outputs (`R0`, `R1`) after each absorption.
+The transcript state is itself a complete digest at every step — no separate finalization
+permutation is required. The verifier (or any external consumer) can compare the rolling state
+directly after replaying the recorded requests.

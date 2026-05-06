@@ -22,7 +22,7 @@ const SHA512_HASH_BYTES_EVENT = event("miden::core::hash::sha512::hash_bytes")
 #! Output: [DIGEST_U32[16], ...]
 pub proc hash_bytes
     exec.hash_bytes_impl
-    # => [COMM, TAG, DIGEST_U32[16], ...]
+    # => [STMNT, DIGEST_U32[16], ...]
 
     exec.sys::log_precompile_request
     # => [DIGEST_U32[16], ...]
@@ -34,10 +34,11 @@ end
 #! Internal implementation of memory-based SHA512 computation via deferred computation.
 #!
 #! Emits an event to populate the advice stack with the digest and store the preimage for deferred
-#! verification. Returns the commitment to the calldata and its tag.
+#! verification. Returns the precompile statement word, derived from the calldata commitment
+#! halves and the per-call tag via a Poseidon2 permutation with `TAG` in the initial capacity.
 #!
 #! Input:  [ptr, len_bytes, ...]
-#! Output: [COMM, TAG, DIGEST_U32[16], ...]
+#! Output: [STMNT, DIGEST_U32[16], ...]
 @locals(24)
 proc hash_bytes_impl
     emit.SHA512_HASH_BYTES_EVENT
@@ -48,7 +49,7 @@ proc hash_bytes_impl
     # => [ptr, len_u32, len_bytes, ...]
 
     # Load digest from advice stack (16 u32 limbs) and write to digest_ptr = locaddr.0
-    # simultaneously compute COMM_DIGEST = Poseidon2(DIGEST[0..16])
+    # simultaneously compute COMM_1 = Poseidon2(DIGEST[0..16])
     locaddr.0
     exec.poseidon2::init_no_padding
     # => [R0, R1, C, digest_ptr, ptr, len_u32, len_bytes, ...]
@@ -57,27 +58,33 @@ proc hash_bytes_impl
         exec.poseidon2::permute
     end
     exec.poseidon2::squeeze_digest
-    # => [COMM_DIGEST, digest_ptr, ptr, len_u32, len_bytes, ...]
+    # => [COMM_1, digest_ptr, ptr, len_u32, len_bytes, ...]
 
     movup.4 drop
-    # => [COMM_DIGEST, ptr, len_u32, len_bytes, ...]
+    # => [COMM_1, ptr, len_u32, len_bytes, ...]
 
-    # Compute COMM_INPUT = poseidon2::hash_elements(ptr, len_u32)
+    # Compute COMM_0 = poseidon2::hash_elements(ptr, len_u32)
     movup.5 movup.5 exec.poseidon2::hash_elements
-    # => [COMM_INPUT, COMM_DIGEST, len_bytes, ...]
+    # => [COMM_0, COMM_1, len_bytes, ...]
 
-    # Compute COMM = hash(COMM_INPUT || COMM_DIGEST)
-    exec.poseidon2::merge
-    # => [COMM, len_bytes, ...]
+    # Build TAG = [SHA512_HASH_BYTES_EVENT, len_bytes, 0, 0] and place it in the capacity slot.
+    push.0.0 movup.10 push.SHA512_HASH_BYTES_EVENT
+    # => [TAG, COMM_0, COMM_1, ...]
+    movdnw.2
+    # => [COMM_0, COMM_1, TAG, ...]
 
-    # Prepare TAG = [SHA512_HASH_BYTES_EVENT, len_bytes, 0, 0]
-    push.0.0 movup.6 push.SHA512_HASH_BYTES_EVENT swapw
-    # => [COMM, TAG, ...]
+    # Compute STMNT = Permute(COMM_0, COMM_1, TAG).rate0 via the chiplet `hperm` instruction.
+    hperm
+    # => [STMNT, RATE1_OUT, CAP_OUT, ...]
 
-    # Reload digest limbs from locals
-    padw loc_loadw_le.12 movdnw.2
-    padw loc_loadw_le.8 movdnw.2
-    padw loc_loadw_le.4 movdnw.2
-    padw loc_loadw_le.0 movdnw.2
-    # => [COMM, TAG, DIGEST_U32[16], ...]
+    # Drop the two unused output words so only STMNT remains on top.
+    movdnw.2 dropw dropw
+    # => [STMNT, ...]
+
+    # Reload digest limbs from locals, leaving STMNT at the top.
+    padw loc_loadw_le.12 swapw
+    padw loc_loadw_le.8 swapw
+    padw loc_loadw_le.4 swapw
+    padw loc_loadw_le.0 swapw
+    # => [STMNT, DIGEST_U32[16], ...]
 end

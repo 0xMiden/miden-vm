@@ -354,38 +354,36 @@ fn test_masm_errors_consistency(
 /// Tests that `log_precompile` correctly computes the Poseidon2 permutation and updates the stack.
 ///
 /// This test verifies:
-/// 1. The Poseidon2 permutation is applied correctly with LE sponge layout [RATE0, RATE1, CAP]
-/// 2. The stack is updated with [R0, R1, CAP_NEXT] as expected
-/// 3. The capacity is properly initialized to [0,0,0,0] for the first call
+/// 1. The Poseidon2 permutation is applied correctly to `[STATE_PREV, STMNT, ZERO]`.
+/// 2. The hasher output lands on the stack via the identity lane→slot mapping (`rate0_out ->
+///    stack[0..4]`, `rate1_out -> stack[4..8]`, `cap_out -> stack[8..12]`).
+/// 3. The transcript state is properly initialised to `[0,0,0,0]` for the first call.
 #[test]
 fn test_log_precompile_correctness() {
     use miden_core::crypto::hash::Poseidon2;
 
-    // Stack inputs: [1,2,3,4,5,6,7,8] with 1 at top
-    // The stack represents [COMM, TAG] where COMM=[1,2,3,4] and TAG=[5,6,7,8]
-    let stack_inputs = [1, 2, 3, 4, 5, 6, 7, 8].map(Felt::new_unchecked);
-    let comm_calldata: Word = [1, 2, 3, 4].map(Felt::new_unchecked).into();
-    let tag: Word = [5, 6, 7, 8].map(Felt::new_unchecked).into();
-    let cap_prev = Word::empty();
+    // Stack inputs (top-to-bottom): [JUNK_0=1..4, JUNK_1=5..8, STMNT=9..12].
+    let stack_inputs = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(Felt::new_unchecked);
+    let stmnt: Word = [9, 10, 11, 12].map(Felt::new_unchecked).into();
+    let state_prev = Word::empty();
 
-    // Compute expected output using Poseidon2 permutation
-    // Input state: [COMM, TAG, CAP_PREV], with CAP_PREV = [0,0,0,0]
+    // Hasher input state: [STATE_PREV (rate0), STMNT (rate1), ZERO (capacity)].
     let mut hasher_state = [ZERO; 12];
-    hasher_state[0..4].copy_from_slice(comm_calldata.as_slice());
-    hasher_state[4..8].copy_from_slice(tag.as_slice());
-    hasher_state[8..12].copy_from_slice(cap_prev.as_slice());
+    hasher_state[0..4].copy_from_slice(state_prev.as_slice());
+    hasher_state[4..8].copy_from_slice(stmnt.as_slice());
+    // stack[8..12] is left as ZERO (the capacity).
 
-    // Apply Poseidon2 permutation
     Poseidon2::apply_permutation(&mut hasher_state);
 
-    // The implementation writes output to stack as:
-    // stack[0..4] = R0 elements, stack[4..8] = R1 elements, stack[8..12] = CAP_NEXT elements
-    // Each written as: stack[i] = word[i]
-    let expected_r0: Word = hasher_state[0..4].try_into().unwrap();
-    let expected_r1: Word = hasher_state[4..8].try_into().unwrap();
-    let expected_cap: Word = hasher_state[8..12].try_into().unwrap();
+    // The implementation routes the hasher output to the stack via the identity mapping:
+    //   stack[0..4]  = output rate0    (= STATE_NEW),
+    //   stack[4..8]  = output rate1    (junk),
+    //   stack[8..12] = output capacity (junk).
+    let expected_state_new: Word = hasher_state[0..4].try_into().unwrap();
+    let expected_junk_rate1: Word = hasher_state[4..8].try_into().unwrap();
+    let expected_junk_cap: Word = hasher_state[8..12].try_into().unwrap();
 
-    // Execute the program
+    // Execute the program.
     let program_source = "begin log_precompile end";
     let program = {
         let source_manager = Arc::new(DefaultSourceManager::default());
@@ -396,13 +394,13 @@ fn test_log_precompile_correctness() {
     let processor = FastProcessor::new(StackInputs::new(&stack_inputs).unwrap());
     let execution_output = processor.execute_sync(&program, &mut host).unwrap();
 
-    let actual_r0 = execution_output.stack.get_word(0).unwrap();
-    let actual_r1 = execution_output.stack.get_word(4).unwrap();
-    let actual_cap = execution_output.stack.get_word(8).unwrap();
+    let actual_state_new = execution_output.stack.get_word(0).unwrap();
+    let actual_junk_rate1 = execution_output.stack.get_word(4).unwrap();
+    let actual_junk_cap = execution_output.stack.get_word(8).unwrap();
 
-    assert_eq!(expected_r0, actual_r0, "R0 mismatch");
-    assert_eq!(expected_r1, actual_r1, "R1 mismatch");
-    assert_eq!(expected_cap, actual_cap, "CAP_NEXT mismatch");
+    assert_eq!(expected_state_new, actual_state_new, "STATE_NEW mismatch");
+    assert_eq!(expected_junk_rate1, actual_junk_rate1, "junk rate1 slot mismatch");
+    assert_eq!(expected_junk_cap, actual_junk_cap, "junk capacity slot mismatch");
 }
 
 // Workaround to make insta and rstest work together.

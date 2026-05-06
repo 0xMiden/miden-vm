@@ -9,7 +9,7 @@ use miden_core::{
     Felt, Word,
     events::EventName,
     field::PrimeCharacteristicRing,
-    precompile::{PrecompileCommitment, PrecompileVerifier},
+    precompile::PrecompileVerifier,
     serde::{Deserializable, Serializable},
     utils::bytes_to_packed_u32_elements,
 };
@@ -113,22 +113,18 @@ fn test_ecdsa_verify_impl_commitment() {
         let (output, _) = test.execute_for_output().unwrap();
         let stack = output.stack;
 
-        // Verify stack layout: [COMM (0-3), TAG (4-7), result (at position 8), ...]
-        // TAG = [event_id, result, 0, 0] where TAG[1]=result is at position 5
-        // Use get_stack_word to match LE stack convention
-        let commitment = stack.get_word(0).unwrap();
-        let tag = stack.get_word(4).unwrap();
-        // Commitment and tag must match verifier output
-        let precompile_commitment = PrecompileCommitment::new(tag, commitment);
+        // verify_prehash_impl returns [STMNT, result, ...]; verify the statement matches the
+        // verifier-derived commitment and that `result` follows directly below STMNT.
+        let stmnt = stack.get_word(0).unwrap();
         let verifier_commitment =
             EcdsaPrecompile.verify(&request.to_bytes()).expect("verifier should succeed");
         assert_eq!(
-            precompile_commitment, verifier_commitment,
-            "commitment on stack should match verifier output"
+            stmnt,
+            verifier_commitment.statement(),
+            "statement on stack should match verifier output"
         );
 
-        // Verify result - TAG[1] is at position 5 (TAG is at positions 4-7)
-        let result = stack.get_element(5).unwrap();
+        let result = stack.get_element(4).unwrap();
         assert_eq!(
             result,
             Felt::from_bool(expected_valid),

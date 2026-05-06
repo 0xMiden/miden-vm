@@ -24,8 +24,8 @@ use miden_air::{
         MainTrace,
         chiplets::hasher::CONTROLLER_ROWS_PER_PERM_FELT,
         log_precompile::{
-            HELPER_ADDR_IDX, HELPER_CAP_PREV_RANGE, STACK_CAP_NEXT_RANGE, STACK_COMM_RANGE,
-            STACK_R0_RANGE, STACK_R1_RANGE, STACK_TAG_RANGE,
+            HELPER_ADDR_IDX, HELPER_STATE_PREV_RANGE, STACK_JUNK_CAP_RANGE, STACK_JUNK_RATE1_RANGE,
+            STACK_STATE_NEW_RANGE, STACK_STMNT_RANGE,
         },
     },
 };
@@ -321,7 +321,8 @@ fn hperm_hasher_bus() {
 #[test]
 fn logprecompile_hasher_bus() {
     let program = single_block_program(vec![Operation::LogPrecompile]);
-    let stack_inputs = stack![5, 6, 7, 8, 1, 2, 3, 4];
+    // Stack (top → bottom): JUNK_RATE1=[1..4], JUNK_CAP=[5..8], STMNT=[9..12].
+    let stack_inputs = stack![9, 10, 11, 12, 5, 6, 7, 8, 1, 2, 3, 4];
     let trace = build_trace_from_program(&program, &stack_inputs);
     let log = InteractionLog::new(&trace);
     let main = trace.main_trace();
@@ -340,25 +341,26 @@ fn logprecompile_hasher_bus() {
         let log_addr = main.helper_register(HELPER_ADDR_IDX, idx);
         logprecompile_addr = Some(log_addr);
 
-        // Input: [COMM, TAG, CAP_PREV] — 8 stack lanes + 4 helper registers.
+        // Input: [STATE_PREV (helper), STMNT (stack), ZERO (constant)].
         let input_state: [Felt; 12] = core::array::from_fn(|i| {
             if i < 4 {
-                main.stack_element(STACK_COMM_RANGE.start + i, idx)
+                main.helper_register(HELPER_STATE_PREV_RANGE.start + i, idx)
             } else if i < 8 {
-                main.stack_element(STACK_TAG_RANGE.start + (i - 4), idx)
+                main.stack_element(STACK_STMNT_RANGE.start + (i - 4), idx)
             } else {
-                main.helper_register(HELPER_CAP_PREV_RANGE.start + (i - 8), idx)
+                ZERO
             }
         });
 
-        // Output (next row): [R0, R1, CAP_NEXT] — all 12 lanes from stack.
+        // Output (next row) uses the identity lane→slot mapping:
+        // rate0 = STATE_NEW at stack[0..4], rate1 at stack[4..8], capacity at stack[8..12].
         let output_state: [Felt; 12] = core::array::from_fn(|i| {
             if i < 4 {
-                main.stack_element(STACK_R0_RANGE.start + i, next)
+                main.stack_element(STACK_STATE_NEW_RANGE.start + i, next)
             } else if i < 8 {
-                main.stack_element(STACK_R1_RANGE.start + (i - 4), next)
+                main.stack_element(STACK_JUNK_RATE1_RANGE.start + (i - 4), next)
             } else {
-                main.stack_element(STACK_CAP_NEXT_RANGE.start + (i - 8), next)
+                main.stack_element(STACK_JUNK_CAP_RANGE.start + (i - 8), next)
             }
         });
 

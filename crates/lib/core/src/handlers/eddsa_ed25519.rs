@@ -150,9 +150,10 @@ impl EddsaRequest {
             Poseidon2::hash_elements(&felts)
         };
 
-        let commitment = Poseidon2::merge(&[Poseidon2::merge(&[pk_comm, k_digest_comm]), sig_comm]);
+        let comm_0 = Poseidon2::merge(&[pk_comm, k_digest_comm]);
+        let comm_1 = sig_comm;
 
-        PrecompileCommitment::new(tag, commitment)
+        PrecompileCommitment::new(tag, comm_0, comm_1)
     }
 }
 

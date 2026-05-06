@@ -553,7 +553,7 @@ mod fast_parallel {
             expected_transcript,
         } = prove_logged_precompile_fixture(HashFunction::Blake3_256);
 
-        let (_, pc_transcript_digest) = verify_with_precompiles(
+        let (_, pc_transcript_state) = verify_with_precompiles(
             program.into(),
             stack_inputs,
             stack_outputs,
@@ -561,7 +561,7 @@ mod fast_parallel {
             &verifier_registry,
         )
         .expect("proof verification with precompiles failed");
-        assert_eq!(expected_transcript.finalize(), pc_transcript_digest);
+        assert_eq!(expected_transcript.state(), pc_transcript_state);
     }
 
     #[test]
@@ -663,7 +663,7 @@ mod fast_parallel {
         for fixture in &fixtures {
             expected_transcript.record(fixture.commitment);
         }
-        assert_eq!(transcript.finalize(), expected_transcript.finalize());
+        assert_eq!(transcript.state(), expected_transcript.state());
 
         LoggedPrecompileProofFixture {
             program,
@@ -701,11 +701,17 @@ mod fast_parallel {
     }
 
     impl LoggedPrecompileFixture {
-        fn new(event_name: EventName, calldata: [u8; 4], tag: Word, comm_calldata: Word) -> Self {
+        fn new(
+            event_name: EventName,
+            calldata: [u8; 4],
+            tag: Word,
+            comm_0: Word,
+            comm_1: Word,
+        ) -> Self {
             Self {
                 event_name,
                 calldata: calldata.into(),
-                commitment: PrecompileCommitment::new(tag, comm_calldata),
+                commitment: PrecompileCommitment::new(tag, comm_0, comm_1),
             }
         }
 
@@ -736,6 +742,12 @@ mod fast_parallel {
                     Felt::new_unchecked((iteration * 11) + slot + 17),
                     Felt::new_unchecked((iteration * 13) + slot + 19),
                 ]),
+                Word::from([
+                    Felt::new_unchecked((iteration * 17) + slot + 23),
+                    Felt::new_unchecked((iteration * 19) + slot + 29),
+                    Felt::new_unchecked((iteration * 23) + slot + 31),
+                    Felt::new_unchecked((iteration * 29) + slot + 37),
+                ]),
             )
         }
 
@@ -748,13 +760,12 @@ mod fast_parallel {
         }
 
         fn source_snippet(&self) -> String {
+            let stmnt = self.commitment.statement();
             format!(
                 "emit.event(\"{event_name}\")\n\
-                 push.{tag} push.{comm}\n\
+                 push.{stmnt}\n\
                  exec.sys::log_precompile_request",
                 event_name = self.event_name,
-                tag = self.commitment.tag(),
-                comm = self.commitment.comm_calldata(),
             )
         }
     }

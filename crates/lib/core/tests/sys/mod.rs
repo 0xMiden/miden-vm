@@ -109,13 +109,20 @@ fn log_precompile_request_procedure() {
         Felt::new_unchecked(0),
         Felt::new_unchecked(7),
     ]);
-    let comm = Word::from([
+    let comm_0 = Word::from([
         Felt::new_unchecked(43),
         Felt::new_unchecked(62),
         Felt::new_unchecked(24),
         Felt::new_unchecked(1),
     ]);
-    let commitment = PrecompileCommitment::new(tag, comm);
+    let comm_1 = Word::from([
+        Felt::new_unchecked(11),
+        Felt::new_unchecked(13),
+        Felt::new_unchecked(17),
+        Felt::new_unchecked(19),
+    ]);
+    let commitment = PrecompileCommitment::new(tag, comm_0, comm_1);
+    let stmnt = commitment.statement();
 
     let source = format!(
         "
@@ -124,7 +131,7 @@ fn log_precompile_request_procedure() {
             begin
                 emit.event(\"{EVENT_NAME}\")
 
-                push.{tag} push.{comm}
+                push.{stmnt}
                 exec.sys::log_precompile_request
             end
         ",
@@ -186,21 +193,21 @@ fn log_precompile_request_procedure() {
         .requests_transcript(proof.precompile_requests())
         .expect("failed to recompute deferred commitment (proof)");
     assert_eq!(
-        verifier_transcript.finalize(),
-        transcript.finalize(),
+        verifier_transcript.state(),
+        transcript.state(),
         "deferred commitment mismatch in proof"
     );
 
     let mut expected_proof_transcript = PrecompileTranscript::new();
     expected_proof_transcript.record(commitment);
     assert_eq!(
-        expected_proof_transcript.finalize(),
-        transcript.finalize(),
+        expected_proof_transcript.state(),
+        transcript.state(),
         "deferred commitment mismatch in proof"
     );
 
     let program_info = ProgramInfo::from(program);
-    let (_, pc_transcript_digest) = miden_verifier::verify_with_precompiles(
+    let (_, pc_transcript_state) = miden_verifier::verify_with_precompiles(
         program_info,
         stack_inputs,
         stack_outputs,
@@ -208,7 +215,7 @@ fn log_precompile_request_procedure() {
         &verifier_registry,
     )
     .expect("proof verification with precompiles failed");
-    assert_eq!(transcript.finalize(), pc_transcript_digest);
+    assert_eq!(transcript.state(), pc_transcript_state);
 }
 
 #[derive(Clone)]

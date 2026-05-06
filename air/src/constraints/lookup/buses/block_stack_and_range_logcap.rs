@@ -72,10 +72,10 @@ use miden_core::field::PrimeCharacteristicRing;
 use crate::{
     constraints::lookup::{
         main_air::{MainBusContext, MainLookupBuilder},
-        messages::{BlockStackMsg, LogCapacityMsg, RangeMsg},
+        messages::{BlockStackMsg, LogStateMsg, RangeMsg},
     },
     lookup::{Deg, LookupBatch, LookupColumn, LookupGroup},
-    trace::log_precompile::{HELPER_CAP_PREV_RANGE, STACK_CAP_NEXT_RANGE},
+    trace::log_precompile::{HELPER_STATE_PREV_RANGE, STACK_STATE_NEW_RANGE},
 };
 
 /// Upper bound on fractions this emitter pushes into its column per row.
@@ -144,9 +144,10 @@ pub(in crate::constraints::lookup) fn emit_block_stack_and_range_logcap<LB>(
     // u32rc helpers: first 4 of the 6 user_op_helpers.
     let u32rc_helpers: [LB::Var; 4] = array::from_fn(|i| user_helpers[i]);
 
-    // LOGPRECOMPILE capacity add/remove payloads.
-    let cap_prev: [LB::Var; 4] = array::from_fn(|i| user_helpers[HELPER_CAP_PREV_RANGE.start + i]);
-    let cap_next: [LB::Var; 4] = array::from_fn(|i| stk_next.get(STACK_CAP_NEXT_RANGE.start + i));
+    // LOGPRECOMPILE transcript-state add/remove payloads.
+    let state_prev: [LB::Var; 4] =
+        array::from_fn(|i| user_helpers[HELPER_STATE_PREV_RANGE.start + i]);
+    let state_new: [LB::Var; 4] = array::from_fn(|i| stk_next.get(STACK_STATE_NEW_RANGE.start + i));
 
     builder.next_column(
         |col| {
@@ -326,23 +327,24 @@ pub(in crate::constraints::lookup) fn emit_block_stack_and_range_logcap<LB>(
                         Deg { n: 3, d: 4 },
                     );
 
-                    // ---- Log-precompile capacity update (BusId::LogPrecompileTranscript) ----
-                    // Remove the previous capacity, add the next. Mutually exclusive with all
-                    // block-stack branches and with u32rc.
+                    // ---- Log-precompile transcript-state update (BusId::LogPrecompileTranscript)
+                    // ---- Remove the previous transcript state, add the next.
+                    // Mutually exclusive with all block-stack branches and with
+                    // u32rc.
                     g.batch(
-                        "log_precompile_capacity",
+                        "log_precompile_state",
                         f_log_precompile,
                         move |b| {
-                            let capacity_prev = cap_prev.map(LB::Expr::from);
+                            let state_prev_expr = state_prev.map(LB::Expr::from);
                             b.remove(
-                                "logpre_cap_remove",
-                                LogCapacityMsg { capacity: capacity_prev },
+                                "logpre_state_remove",
+                                LogStateMsg { state: state_prev_expr },
                                 Deg { n: 5, d: 6 },
                             );
-                            let capacity_next = cap_next.map(LB::Expr::from);
+                            let state_new_expr = state_new.map(LB::Expr::from);
                             b.add(
-                                "logpre_cap_add",
-                                LogCapacityMsg { capacity: capacity_next },
+                                "logpre_state_add",
+                                LogStateMsg { state: state_new_expr },
                                 Deg { n: 5, d: 6 },
                             );
                         },

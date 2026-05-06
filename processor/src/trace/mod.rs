@@ -15,7 +15,7 @@ use crate::{
     Felt, MIN_STACK_DEPTH, Program, ProgramInfo, StackInputs, StackOutputs, Word, ZERO,
     fast::ExecutionOutput,
     field::QuadFelt,
-    precompile::{PrecompileRequest, PrecompileTranscript, PrecompileTranscriptDigest},
+    precompile::{PrecompileRequest, PrecompileTranscript, PrecompileTranscriptState},
     utils::RowMajorMatrix,
 };
 
@@ -119,9 +119,10 @@ impl TraceBuildInputs {
         &self.trace_output.final_precompile_transcript
     }
 
-    /// Returns the digest of the final precompile transcript observed during execution.
-    pub fn precompile_transcript_digest(&self) -> PrecompileTranscriptDigest {
-        self.final_precompile_transcript().finalize()
+    /// Returns the rolling state of the final precompile transcript observed during execution.
+    /// The state is itself a complete digest — no separate finalization is required.
+    pub fn precompile_transcript_state(&self) -> PrecompileTranscriptState {
+        self.final_precompile_transcript().state()
     }
 
     /// Returns the program info captured for the execution being replayed.
@@ -264,9 +265,10 @@ impl ExecutionTrace {
         self.final_precompile_transcript
     }
 
-    /// Returns the digest of the final precompile transcript observed during execution.
-    pub fn precompile_transcript_digest(&self) -> PrecompileTranscriptDigest {
-        self.final_precompile_transcript().finalize()
+    /// Returns the rolling state of the final precompile transcript observed during execution.
+    /// The state is itself a complete digest — no separate finalization is required.
+    pub fn precompile_transcript_state(&self) -> PrecompileTranscriptState {
+        self.final_precompile_transcript().state()
     }
 
     /// Returns the owned execution outputs required for proof packaging.

@@ -59,41 +59,54 @@ pub mod log_precompile {
 
     /// Decoder helper register index where the hasher address is stored for `log_precompile`.
     pub const HELPER_ADDR_IDX: usize = 0;
-    /// Decoder helper register offset where `CAP_PREV` begins; spans four consecutive registers.
-    pub const HELPER_CAP_PREV_OFFSET: usize = 1;
-    /// Range covering the four helper registers holding `CAP_PREV`.
-    pub const HELPER_CAP_PREV_RANGE: Range<usize> = range(HELPER_CAP_PREV_OFFSET, CAPACITY_LEN);
+    /// Decoder helper register offset where `STATE_PREV` begins; spans four consecutive registers.
+    pub const HELPER_STATE_PREV_OFFSET: usize = 1;
+    /// Range covering the four helper registers holding `STATE_PREV`.
+    pub const HELPER_STATE_PREV_RANGE: Range<usize> = range(HELPER_STATE_PREV_OFFSET, CAPACITY_LEN);
 
     // STACK LAYOUT (TOP OF STACK)
     // --------------------------------------------------------------------------------------------
-    // After executing `log_precompile`, the top 12 stack elements contain `[R0, R1, CAP_NEXT]`
-    // in LE (structural) order.
+    //
+    // The top 12 stack elements participate in the opcode. Before executing `log_precompile`:
+    //   `[JUNK_R1, JUNK_CAP, STMNT, ...]`
+    // i.e. the precomputed statement word `STMNT` sits in the bottom slot. The upper two words
+    // are unconstrained on input.
+    //
+    // After executing `log_precompile`:
+    //   `[STATE_NEW, OUT_RATE1, OUT_CAP, ...]`
+    // where `STATE_NEW` = output rate0 of the Poseidon2 permutation = the new transcript state.
+    // The output mapping is the identity between hasher lanes and stack slots
+    // (`[rate0, rate1, capacity] -> [stack[0..4], stack[4..8], stack[8..12]]`), matching the
+    // convention used by HPERM. The lower two words receive the (unused) rate1 and capacity
+    // halves of the hasher output so that every column referenced by the chiplet bus message has
+    // a well-defined value.
 
-    pub const STACK_R0_BASE: usize = 0;
-    pub const STACK_R0_RANGE: Range<usize> = range(STACK_R0_BASE, DIGEST_LEN);
+    /// Stack range containing the precomputed statement word on opcode entry.
+    pub const STACK_STMNT_RANGE: Range<usize> = range(8, DIGEST_LEN);
+    /// Stack range that receives the new transcript state (output rate0) on opcode exit.
+    pub const STACK_STATE_NEW_RANGE: Range<usize> = range(0, DIGEST_LEN);
 
-    pub const STACK_R1_BASE: usize = STACK_R0_RANGE.end;
-    pub const STACK_R1_RANGE: Range<usize> = range(STACK_R1_BASE, DIGEST_LEN);
-
-    pub const STACK_CAP_NEXT_BASE: usize = STACK_R1_RANGE.end;
-    pub const STACK_CAP_NEXT_RANGE: Range<usize> = range(STACK_CAP_NEXT_BASE, CAPACITY_LEN);
-
-    /// Stack range containing `COMM` prior to executing `log_precompile`.
-    pub const STACK_COMM_RANGE: Range<usize> = STACK_R0_RANGE;
-    /// Stack range containing `TAG` prior to executing `log_precompile`.
-    pub const STACK_TAG_RANGE: Range<usize> = STACK_R1_RANGE;
+    /// Stack range that holds the (unused) output rate1 of the hasher on opcode exit.
+    pub const STACK_JUNK_RATE1_RANGE: Range<usize> = range(STACK_STATE_NEW_RANGE.end, DIGEST_LEN);
+    /// Stack range that holds the (unused) output capacity of the hasher on opcode exit.
+    pub const STACK_JUNK_CAP_RANGE: Range<usize> = range(STACK_JUNK_RATE1_RANGE.end, CAPACITY_LEN);
 
     // HASHER STATE LAYOUT
     // --------------------------------------------------------------------------------------------
-    // The hasher permutation uses a 12-element state. With LE layout, the state is interpreted
-    // as [RATE0, RATE1, CAPACITY]:
+    //
+    // The hasher permutation uses a 12-element state laid out as `[RATE0, RATE1, CAPACITY]`:
     // - RATE0 occupies the first 4 lanes (0..4),
     // - RATE1 occupies the next 4 lanes (4..8),
     // - CAPACITY occupies the last 4 lanes (8..12).
     //
     // For `log_precompile` this corresponds to:
-    // - input state words:  [COMM, TAG, CAP_PREV]
-    // - output state words: [R0,   R1,  CAP_NEXT]
+    // - input state words:  `[STATE_PREV, STMNT, ZERO]`
+    // - output state words: `[STATE_NEW,  RATE1_OUT, CAP_OUT]`
+    //
+    // The bus message routes the input from `(helper[STATE_PREV], stack[STMNT], constant ZERO)`.
+    // The output mapping is the identity between hasher lanes and stack slots, so
+    // `(stack_next[STATE_NEW], stack_next[JUNK_RATE1], stack_next[JUNK_CAP])` maps to
+    // `(rate0_out, rate1_out, cap_out)` in lane order.
 
     pub const STATE_RATE_0_RANGE: Range<usize> = range(0, DIGEST_LEN);
     pub const STATE_RATE_1_RANGE: Range<usize> = range(STATE_RATE_0_RANGE.end, DIGEST_LEN);

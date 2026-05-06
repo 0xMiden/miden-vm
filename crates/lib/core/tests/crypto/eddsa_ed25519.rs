@@ -12,7 +12,7 @@ use miden_core::{
     Felt, Word,
     events::EventName,
     field::PrimeCharacteristicRing,
-    precompile::{PrecompileCommitment, PrecompileVerifier},
+    precompile::PrecompileVerifier,
     serde::{Deserializable, Serializable},
     utils::bytes_to_packed_u32_elements,
 };
@@ -134,16 +134,15 @@ fn test_eddsa_verify_prehash_impl_commitment() {
         let (output, _) = test.execute_for_output().unwrap();
         let stack = output.stack;
 
-        let commitment = stack.get_word(0).unwrap();
-        let tag = stack.get_word(4).unwrap();
-        let precompile_commitment = PrecompileCommitment::new(tag, commitment);
+        // verify_prehash_impl returns [STMNT, result, ...].
+        let stmnt = stack.get_word(0).unwrap();
 
         let verifier_commitment =
             EddsaPrecompile.verify(&request.to_bytes()).expect("verifier should succeed");
-        assert_eq!(precompile_commitment, verifier_commitment);
+        assert_eq!(stmnt, verifier_commitment.statement(), "statement mismatch");
 
-        // Verify result - TAG[1] is at position 5 (TAG is at positions 4-7)
-        let result = stack.get_element(5).unwrap();
+        // `result` sits in the slot immediately below STMNT (stack[4]).
+        let result = stack.get_element(4).unwrap();
         assert_eq!(result, Felt::from_bool(expected_valid));
 
         let deferred = output.advice.precompile_requests().to_vec();

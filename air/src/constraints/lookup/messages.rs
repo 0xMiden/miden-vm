@@ -502,13 +502,13 @@ pub struct RangeMsg<E> {
     pub value: E,
 }
 
-// LOG-PRECOMPILE CAPACITY MESSAGE
+// LOG-PRECOMPILE TRANSCRIPT STATE MESSAGE
 // ================================================================================================
 
-/// Log-precompile capacity state message (4 elements): `cap[4]`.
+/// Log-precompile transcript-state message (4 elements): `state[4]`.
 #[derive(Clone, Debug)]
-pub struct LogCapacityMsg<E> {
-    pub capacity: [E; 4],
+pub struct LogStateMsg<E> {
+    pub state: [E; 4],
 }
 
 // SIBLING TABLE MESSAGE
@@ -779,15 +779,15 @@ where
     }
 }
 
-// --- LogCapacityMsg (BusId::LogPrecompileTranscript; capacity at β⁰..β³) ----------------------
+// --- LogStateMsg (BusId::LogPrecompileTranscript; state at β⁰..β³) -----------------------------
 
-impl<E, EF> LookupMessage<E, EF> for LogCapacityMsg<E>
+impl<E, EF> LookupMessage<E, EF> for LogStateMsg<E>
 where
     E: PrimeCharacteristicRing + Clone,
     EF: PrimeCharacteristicRing + Clone + Algebra<E>,
 {
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
-        challenges.encode(BusId::LogPrecompileTranscript as usize, self.capacity.clone())
+        challenges.encode(BusId::LogPrecompileTranscript as usize, self.state.clone())
     }
 }
 

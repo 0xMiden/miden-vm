@@ -13,7 +13,7 @@ use miden_core::{WORD_SIZE, field::PrimeCharacteristicRing};
 use super::{
     chiplet_air::CHIPLET_COLUMN_SHAPE,
     main_air::MAIN_COLUMN_SHAPE,
-    messages::{BlockHashMsg, KernelRomMsg, LogCapacityMsg},
+    messages::{BlockHashMsg, KernelRomMsg, LogStateMsg},
 };
 use crate::{PV_PROGRAM_HASH, PV_TRANSCRIPT_STATE, lookup::BoundaryBuilder};
 
@@ -89,8 +89,8 @@ pub(crate) fn emit_miden_boundary<B: BoundaryBuilder>(boundary: &mut B) {
     );
 
     // Log-precompile transcript terminals: +1 / d_initial − 1 / d_final.
-    boundary.add("log_precompile_initial", LogCapacityMsg { capacity: [B::F::ZERO; 4] });
-    boundary.remove("log_precompile_final", LogCapacityMsg { capacity: final_state });
+    boundary.add("log_precompile_initial", LogStateMsg { state: [B::F::ZERO; 4] });
+    boundary.remove("log_precompile_final", LogStateMsg { state: final_state });
 
     // Kernel ROM init: +Σ 1 / d_kernel_proc_msg_i over VLPI[0].
     for digest in kernel_digests {

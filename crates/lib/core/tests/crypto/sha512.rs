@@ -6,10 +6,7 @@
 //! - Private implementation helper returns the expected commitment and tag
 //! - Various input lengths (including empty) are handled correctly
 
-use miden_core::{
-    Felt,
-    precompile::{PrecompileCommitment, PrecompileVerifier},
-};
+use miden_core::{Felt, precompile::PrecompileVerifier};
 use miden_core_lib::handlers::sha512::{
     SHA512_HASH_BYTES_EVENT_NAME, Sha512Precompile, Sha512Preimage,
 };
@@ -103,11 +100,9 @@ fn test_sha512_hash_memory_impl(bytes: &[u8]) {
 
     let preimage = Sha512Preimage::new(request.calldata().to_vec());
 
-    let commitment = stack.get_word(0).unwrap();
-    let tag = stack.get_word(4).unwrap();
-    let precompile_commitment = PrecompileCommitment::new(tag, commitment);
+    let stmnt = stack.get_word(0).unwrap();
     let verifier_commitment = Sha512Precompile.verify(preimage.as_ref()).unwrap();
-    assert_eq!(precompile_commitment, verifier_commitment, "commitment mismatch");
+    assert_eq!(stmnt, verifier_commitment.statement(), "statement mismatch");
 
     assert!(
         output.advice.stack().is_empty(),

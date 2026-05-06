@@ -464,13 +464,13 @@ pub enum OperationHelperRegisters {
         k1: Felt,
         acc_tmp: QuadFelt,
     },
-    /// Helper for the `LOG_PRECOMPILE` operation, which absorbs `TAG` and `COMM` into the
-    /// precompile sponge via a Poseidon2 permutation.
+    /// Helper for the `LOG_PRECOMPILE` operation, which folds the precomputed statement word
+    /// into the rolling precompile transcript state via a Poseidon2 permutation.
     ///
     /// - `addr`: the address in the hasher chiplet where the permutation is recorded.
-    /// - `cap_prev`: the previous sponge capacity word, provided non-deterministically and used as
-    ///   the capacity input to the permutation.
-    LogPrecompile { addr: Felt, cap_prev: Word },
+    /// - `state_prev`: the previous transcript state word, provided non-deterministically and used
+    ///   as the `rate0` input to the permutation.
+    LogPrecompile { addr: Felt, state_prev: Word },
     /// No helper registers are needed for this operation. All helper columns are set to ZERO.
     Empty,
 }
@@ -616,8 +616,8 @@ impl OperationHelperRegisters {
                 acc_tmp.as_basis_coefficients_slice()[0],
                 acc_tmp.as_basis_coefficients_slice()[1],
             ],
-            Self::LogPrecompile { addr, cap_prev } => {
-                [*addr, cap_prev[0], cap_prev[1], cap_prev[2], cap_prev[3], ZERO]
+            Self::LogPrecompile { addr, state_prev } => {
+                [*addr, state_prev[0], state_prev[1], state_prev[2], state_prev[3], ZERO]
             },
             Self::Empty => [ZERO; NUM_USER_OP_HELPERS],
         }

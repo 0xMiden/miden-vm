@@ -9,10 +9,7 @@
 
 use core::array;
 
-use miden_core::{
-    Felt,
-    precompile::{PrecompileCommitment, PrecompileVerifier},
-};
+use miden_core::{Felt, precompile::PrecompileVerifier};
 use miden_core_lib::handlers::keccak256::{
     KECCAK_HASH_BYTES_EVENT_NAME, KeccakPrecompile, KeccakPreimage,
 };
@@ -123,14 +120,14 @@ fn test_keccak_hash_bytes_impl(input_u8: &[u8]) {
     let (output, _) = test.execute_for_output().unwrap();
 
     let stack = output.stack;
-    let commitment = stack.get_word(0).unwrap();
-    let tag = stack.get_word(4).unwrap();
-    let precompile_commitment = PrecompileCommitment::new(tag, commitment);
+    // hash_bytes_impl returns [STMNT, DIGEST_U32[8], ...]. After truncate_stack, that's exactly
+    // 12 elements at the top.
+    let stmnt = stack.get_word(0).unwrap();
     let verifier_commitment = KeccakPrecompile.verify(preimage.as_ref()).unwrap();
-    assert_eq!(precompile_commitment, verifier_commitment);
+    assert_eq!(stmnt, verifier_commitment.statement(), "statement mismatch");
 
-    // Digest occupies the elements after COMM/TAG
-    let digest: [Felt; 8] = array::from_fn(|i| stack.get_element(8 + i).unwrap());
+    // Digest occupies the 8 elements right below STMNT.
+    let digest: [Felt; 8] = array::from_fn(|i| stack.get_element(4 + i).unwrap());
     assert_eq!(&digest, preimage.digest().as_ref(), "output digest does not match");
 
     let deferred = output.advice.precompile_requests().to_vec();

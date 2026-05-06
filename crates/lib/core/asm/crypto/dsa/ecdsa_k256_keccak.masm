@@ -122,7 +122,7 @@ end
 #! in the final u32 set to zero.
 pub proc verify_prehash
     exec.verify_prehash_impl
-    # => [COMM, TAG, result, ...]
+    # => [STMNT, result, ...]
 
     # Log the precompile request for deferred verification
     exec.sys::log_precompile_request
@@ -137,22 +137,24 @@ end
 #! has already computed the message digest.
 #!
 #! Emits an event to trigger the precompile handler, reads the verification result from
-#! the advice stack, and computes the commitment and tag for tracking deferred verification.
+#! the advice stack, and produces the precompile statement word from the calldata commitment
+#! halves and the per-call tag via a Poseidon2 permutation with `TAG` in the initial capacity.
 #!
 #! This procedure mimics the `ecdsa_secp256k1::PublicKey::verify_prehash()` function from
 #! `miden-crypto`, which takes a pre-hashed message that the caller must provide
 #! (e.g. obtained using the keccak256 precompile).
 #!
 #! Input: `[pk_ptr, digest_ptr, sig_ptr, ...]`
-#! Output: `[COMM, TAG, result, ...]`
+#! Output: `[STMNT, result, ...]`
 #!
 #! Where:
 #! - `pk_ptr`: word-aligned memory address containing 33-byte public key
 #! - `digest_ptr`: word-aligned memory address containing 32-byte digest
 #! - `sig_ptr`: word-aligned memory address containing 65-byte signature
-#! - `COMM`: commitment to calldata computed as
-#!       `Poseidon2(Poseidon2(Poseidon2(pk) || Poseidon2(digest)) || Poseidon2(sig))`
-#! - `TAG`: `[ECDSA_VERIFY_EVENT, result, 0, 0]`
+#! - `COMM_0 = Poseidon2(Poseidon2(pk) || Poseidon2(digest))`
+#! - `COMM_1 = Poseidon2(sig)`
+#! - `TAG    = [ECDSA_VERIFY_EVENT, result, 0, 0]`
+#! - `STMNT  = Permute(COMM_0, COMM_1, TAG).rate0`
 #! - `result`: 1 if signature is valid, 0 if invalid
 proc verify_prehash_impl
     emit.ECDSA_VERIFY_EVENT
@@ -162,7 +164,6 @@ proc verify_prehash_impl
     adv_push
     # => [result, pk_ptr, digest_ptr, sig_ptr, ...]
 
-    # Compute commitment: COMM = Poseidon2(Poseidon2(Poseidon2(pk) || Poseidon2(digest)) || Poseidon2(sig))
     # Compute COMM_PK = Poseidon2(pk)
     push.PK_LEN_FELTS movup.2 exec.poseidon2::hash_elements
     # => [COMM_PK, result, digest_ptr, sig_ptr]
@@ -171,26 +172,33 @@ proc verify_prehash_impl
     push.DIGEST_LEN_FELTS movup.6 exec.poseidon2::hash_elements
     # => [COMM_DIGEST, COMM_PK, result, sig_ptr]
 
-    # Merge COMM_PK and COMM_DIGEST into COMM_PK_DIGEST = Poseidon2(Poseidon2(pk) || Poseidon2(digest))
-    # hmerge([A, B]) computes merge(&[A, B]), so we need COMM_PK on top
+    # Merge COMM_PK and COMM_DIGEST into COMM_0 = Poseidon2::merge(COMM_PK, COMM_DIGEST)
     swapw
     # => [COMM_PK, COMM_DIGEST, result, sig_ptr]
     exec.poseidon2::merge
-    # => [COMM_PK_DIGEST, result, sig_ptr]
+    # => [COMM_0, result, sig_ptr]
 
-    # Compute COMM_SIG = Poseidon2(sig_bytes)
+    # Compute COMM_1 = Poseidon2(sig_bytes)
     push.SIG_LEN_FELTS movup.6 exec.poseidon2::hash_elements
-    # => [COMM_SIG, COMM_PK_DIGEST, result]
+    # => [COMM_1, COMM_0, result]
 
-    # Merge into final commitment COMM = Poseidon2(COMM_PK_DIGEST || COMM_SIG)
-    # hmerge([A, B]) computes merge(&[A, B]), so we need COMM_PK_DIGEST on top
     swapw
-    # => [COMM_PK_DIGEST, COMM_SIG, result]
-    exec.poseidon2::merge
-    # => [COMM, result]
+    # => [COMM_0, COMM_1, result]
 
-    # Create TAG = [ECDSA_VERIFY_EVENT, result, 0, 0] on stack
-    # Stack positions 4-7 should have [event_id, result, 0, 0] for get_stack_word(4)
-    push.0.0 dup.6 push.ECDSA_VERIFY_EVENT swapw
-    # => [COMM, TAG, result]
+    # Build TAG = [ECDSA_VERIFY_EVENT, result, 0, 0], duplicating `result` so the original
+    # copy survives below the resulting statement.
+    push.0.0 dup.10 push.ECDSA_VERIFY_EVENT
+    # => [TAG, COMM_0, COMM_1, result, ...]
+
+    # Move TAG down to the capacity slot.
+    movdnw.2
+    # => [COMM_0, COMM_1, TAG, result, ...]
+
+    # Compute STMNT = Permute(COMM_0, COMM_1, TAG).rate0.
+    hperm
+    # => [STMNT, RATE1_OUT, CAP_OUT, result, ...]
+
+    # Drop the two unused output words.
+    movdnw.2 dropw dropw
+    # => [STMNT, result, ...]
 end

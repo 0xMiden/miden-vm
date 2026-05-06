@@ -139,7 +139,7 @@ end
 #! in the final word set to zero.
 pub proc verify_prehash
     exec.verify_prehash_impl
-    # => [COMM, TAG, result, ...]
+    # => [STMNT, result, ...]
 
     # Log the precompile request for deferred verification.
     exec.sys::log_precompile_request
@@ -212,14 +212,17 @@ end
 #! Internal implementation of EdDSA verification via deferred computation.
 #!
 #! Emits an event to trigger the host precompile, reads the verification result from the
-#! advice stack, and computes the commitment/tag pair used for deferred verification.
+#! advice stack, and produces the precompile statement word from the calldata commitment
+#! halves and the per-call tag via a Poseidon2 permutation with `TAG` in the initial capacity.
 #!
 #! Input:  `[pk_ptr, k_digest_ptr, sig_ptr, ...]`
-#! Output: `[COMM, TAG, result, ...]`
+#! Output: `[STMNT, result, ...]`
 #!
 #! Where:
-#! - `COMM`: `Poseidon2(Poseidon2(Poseidon2(pk) || Poseidon2(k_digest)) || Poseidon2(sig))`
-#! - `TAG`:  `[EDDSA_VERIFY_EVENT, result, 0, 0]`
+#! - `COMM_0 = Poseidon2(Poseidon2(pk) || Poseidon2(k_digest))`
+#! - `COMM_1 = Poseidon2(sig)`
+#! - `TAG    = [EDDSA_VERIFY_EVENT, result, 0, 0]`
+#! - `STMNT  = Permute(COMM_0, COMM_1, TAG).rate0`
 #! - `result`: host verification result (1 or 0)
 proc verify_prehash_impl
     emit.EDDSA_VERIFY_EVENT
@@ -237,26 +240,33 @@ proc verify_prehash_impl
     push.K_DIGEST_LEN_FELTS movup.6 exec.poseidon2::hash_elements
     # => [COMM_K, COMM_PK, result, sig_ptr]
 
-    # Merge COMM_PK and COMM_K into COMM_PK_K = poseidon2::merge(COMM_PK, COMM_K)
-    # hmerge([A, B]) computes merge(&[A, B]), so we need COMM_PK on top
+    # Merge COMM_PK and COMM_K into COMM_0 = poseidon2::merge(COMM_PK, COMM_K)
     swapw
     # => [COMM_PK, COMM_K, result, sig_ptr]
     exec.poseidon2::merge
-    # => [COMM_PK_K, result, sig_ptr]
+    # => [COMM_0, result, sig_ptr]
 
-    # Compute COMM_SIG = poseidon2::hash_memory(sig_ptr, SIG_LEN_FELTS)
+    # Compute COMM_1 = poseidon2::hash_memory(sig_ptr, SIG_LEN_FELTS)
     push.SIG_LEN_FELTS movup.6 exec.poseidon2::hash_elements
-    # => [COMM_SIG, COMM_PK_K, result]
+    # => [COMM_1, COMM_0, result]
 
-    # Merge into final commitment COMM = poseidon2::merge(COMM_PK_K, COMM_SIG)
-    # hmerge([A, B]) computes merge(&[A, B]), so we need COMM_PK_K on top
     swapw
-    # => [COMM_PK_K, COMM_SIG, result]
-    exec.poseidon2::merge
-    # => [COMM, result]
+    # => [COMM_0, COMM_1, result]
 
-    # Create TAG = [EDDSA_VERIFY_EVENT, result, 0, 0] on stack
-    # Stack positions 4-7 should have [event_id, result, 0, 0] for get_stack_word(4)
-    push.0.0 dup.6 push.EDDSA_VERIFY_EVENT swapw
-    # => [COMM, TAG, result]
+    # Build TAG = [EDDSA_VERIFY_EVENT, result, 0, 0] on top, duplicating `result` so that the
+    # original copy survives below the resulting statement.
+    push.0.0 dup.10 push.EDDSA_VERIFY_EVENT
+    # => [TAG, COMM_0, COMM_1, result, ...]
+
+    # Move TAG down to the capacity slot.
+    movdnw.2
+    # => [COMM_0, COMM_1, TAG, result, ...]
+
+    # Compute STMNT = Permute(COMM_0, COMM_1, TAG).rate0.
+    hperm
+    # => [STMNT, RATE1_OUT, CAP_OUT, result, ...]
+
+    # Drop the two unused output words.
+    movdnw.2 dropw dropw
+    # => [STMNT, result, ...]
 end
