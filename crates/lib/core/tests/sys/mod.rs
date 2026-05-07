@@ -32,7 +32,7 @@ fn truncate_stack() {
 #[test]
 fn reduce_kernel_digests_upper_bound() {
     // init_seed contract:
-    //   Stack: [log(trace_length), rd0, rd1, rd2, rd3, ...]
+    //   Stack: [log(core_trace_length), log(chiplets_trace_length), rd0, rd1, rd2, rd3, ...]
     //   Memory: num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits
     //
     // process_public_inputs advice stack (consumed in order):
@@ -51,7 +51,7 @@ fn reduce_kernel_digests_upper_bound() {
             push.0  exec.constants::set_query_pow_bits
             push.0  exec.constants::set_deep_pow_bits
             push.16 exec.constants::set_folding_pow_bits
-            push.0.0.0.0 push.10
+            push.0.0.0.0 push.10 push.10
             exec.random_coin::init_seed
             exec.public_inputs::process_public_inputs
         end

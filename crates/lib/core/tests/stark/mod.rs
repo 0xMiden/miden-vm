@@ -196,11 +196,14 @@ fn fib_stack_inputs() -> Vec<u64> {
 #[case(8)]
 #[case(1000)]
 fn variable_length_public_inputs(#[case] num_kernel_proc_digests: usize) {
-    // init_seed expects [log(trace_length), rd0, rd1, rd2, rd3, ...]
-    let log_trace_length = 10_u64;
+    // init_seed expects [log(core_trace_length), log(chiplets_trace_length), rd0, rd1, rd2, rd3,
+    // ...]
+    let log_core_trace_length = 10_u64;
+    let log_chiplets_trace_length = 10_u64;
     // Relation digest values are arbitrary here; the test only validates VLPI reduction.
     let rd = [1_u64, 2, 3, 4];
-    let initial_stack = vec![log_trace_length, rd[0], rd[1], rd[2], rd[3]];
+    let initial_stack =
+        vec![log_core_trace_length, log_chiplets_trace_length, rd[0], rd[1], rd[2], rd[3]];
 
     let seed = [0_u8; 32];
     let mut rng = ChaCha20Rng::from_seed(seed);
@@ -259,8 +262,10 @@ fn variable_length_public_inputs(#[case] num_kernel_proc_digests: usize) {
     use miden_processor::ContextId;
     let ctx = ContextId::root();
 
-    // Read reduced kernel value from var_len_ptr (in ACE READ section)
-    let var_len_addr_ptr = 3223322666_u32; // VARIABLE_LEN_PUBLIC_INPUTS_ADDRESS_PTR
+    // Read reduced kernel value from var_len_ptr (in ACE READ section).
+    // Must match `VARIABLE_LEN_PUBLIC_INPUTS_ADDRESS_PTR` in
+    // `crates/lib/core/asm/stark/constants.masm`.
+    let var_len_addr_ptr = 3223322670_u32;
     let var_len_ptr = output
         .memory
         .read_element(ctx, Felt::from_u32(var_len_addr_ptr))

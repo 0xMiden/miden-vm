@@ -164,32 +164,22 @@ pub fn build_trace_with_max_len(
     // Get the number of rows for the range checker
     let range_table_len = range_checker.get_number_range_checker_rows();
 
-    let trace_len_summary =
-        TraceLenSummary::new(core_trace_len, range_table_len, ChipletsLengths::new(&chiplets));
-
-    // Per-AIR heights: each AIR is padded to its own power-of-two height. Range checker
-    // is built at `core_height` so `V[last] = 65535` holds on the Core slice; its tail
-    // is filled with `(M=0, V=65535)` so the unified `to_row_major` view (used by debug
-    // `check_constraints` and aux-trace construction) keeps `V[main_trace_len-1] = 65535`
-    // and the V transition (delta ∈ {0, 1, 3, ..., 2187}) is satisfied (delta=0).
-    //
-    // `+ 1` before chiplets padding ensures at least one chiplet padding row exists, so
-    // the slice's last row always falls in the padding region (where the chiplet
-    // last-row invariant holds) — necessary when `chiplets.trace_len()` is itself a
-    // power of two.
-    // Per-AIR heights: each AIR is sized to its own next-power-of-two padded height.
-    // Both directions (chip ≥ core AND core > chip) are supported end-to-end by the
-    // codegen's symmetric β coefficients + per-AIR selectors and the MASM verifier's
-    // `swap_air_regions_if_chip_first` shuffle (which conditionally rearranges OOD frame
-    // and aux_bus_boundary memory from proof_order to caller_order before
-    // `eval_circuit`).
-    //
-    // `+ 1` before chiplets padding ensures at least one chiplet padding row exists
-    // (required for the chiplet last-row invariant when `chiplets.trace_len()` is itself
-    // a power of two).
     let core_height = pad_to_trace_length(core_trace_len.max(range_table_len));
-    let chiplets_height = pad_to_trace_length(chiplets.trace_len() + 1);
+    let chiplets_height = pad_to_trace_length(chiplets.trace_len());
     let main_trace_len = core_height.max(chiplets_height);
+
+    // Cap check against the padded height: pad-up can push over MAX_TRACE_LEN even
+    // when the unpadded check above passed.
+    if main_trace_len > max_trace_len {
+        return Err(ExecutionError::TraceLenExceeded(max_trace_len));
+    }
+
+    let trace_len_summary = TraceLenSummary::new_with_padded(
+        core_trace_len,
+        range_table_len,
+        ChipletsLengths::new(&chiplets),
+        main_trace_len,
+    );
 
     let ((range_checker_trace, chiplets_trace), ()) = rayon::join(
         || {

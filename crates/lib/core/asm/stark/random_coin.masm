@@ -280,20 +280,14 @@ pub proc init_seed
     drop drop
 end
 
-#! Observe the multi-AIR instance shape and discard the instance challenge.
+#! Observe the multi-AIR instance shape (air_order + heights) and discard the
+#! instance challenge.
 #!
-#! miden-lifted-stark observes each per-AIR `log(trace_length)` (in proof-sort order,
-#! ascending) after public inputs, and then samples one extension-field instance
-#! challenge before absorbing the main trace commitment. This helper:
-#!   1. writes log(min) to rate[0] and log(max) to rate[1] (matching the upstream
-#!      `DuplexChallenger` overwrite-the-first-`input_buffer.len()`-rate-elements rule),
-#!   2. permutes,
-#!   3. marks two base-field outputs as consumed (the throwaway EF squeeze).
-#!
-#! SAFETY:
-#!   1. input_len=0 (asserted).
-#!   2. The current random coin state has just absorbed the public inputs.
-#!   3. On exit: input_len=0, output_len=6.
+#! Rust side: caller observes `air_order` then `prove_multi`/`verify_multi` invoke
+#! `observe_heights`. The DuplexChallenger buffers all four felts and absorbs them
+#! in a single permutation as the rate prefix `[a0, a1, log_min, log_max]`.
+#! `air_order` is reconstructed locally from per-AIR heights in memory; ties
+#! break to caller-order (a0 = 0) per Rust's `InstanceShapes::from_trace_heights`.
 #!
 #! Input: [...]
 #! Output: [...]
@@ -307,22 +301,27 @@ pub proc observe_trace_height_and_discard_instance_challenge
     push.0 exec.constants::random_coin_output_len_ptr mem_store
     # => [...]
 
-    # Observe per-AIR heights in proof_order (ascending log_height; tie broken by
-    # caller_idx, where Core has caller_idx=0). Compute (smaller, larger) and write
-    # smaller to rate[0], larger to rate[1]. Other rate slots and capacity are
-    # untouched.
     exec.constants::get_core_trace_length_log
     exec.constants::get_chiplets_trace_length_log
     # => [log_chip, log_core, ...]
-    dup.1 dup.1 u32min
-    # => [log_min, log_chip, log_core, ...]
-    movdn.2
-    u32max
-    # => [log_max, log_min, ...]
-    swap
-    # => [log_min, log_max, ...]
+
+    dup.1 dup.1 u32max exec.constants::tmp1 mem_store
+    dup.1 dup.1 u32min exec.constants::tmp2 mem_store
+    # => [log_chip, log_core, ...]
+
+    # a0 = (log_chip < log_core ? 1 : 0): u32lte returns log_core <= log_chip; not
+    # gives strict log_chip < log_core, so equal heights tie-break to a0 = 0.
+    u32lte not
+    dup not swap
+    # => [a0, a1, ...]
+
+    # Write rate[0..4] = [a0, a1, log_min, log_max].
     exec.constants::r1_ptr mem_store
     exec.constants::r1_ptr add.1 mem_store
+    exec.constants::tmp2 mem_load
+    exec.constants::r1_ptr add.2 mem_store
+    exec.constants::tmp1 mem_load
+    exec.constants::r1_ptr add.3 mem_store
     # => [...]
 
     exec.load_random_coin_state
@@ -334,6 +333,9 @@ pub proc observe_trace_height_and_discard_instance_challenge
 
     push.0 exec.constants::random_coin_input_len_ptr mem_store
     # => [...]
+    # The next 4 rate slots (rate[4..7]) are unconsumed by this absorption (they
+    # carried prior state). The instance_challenge (1 EF) sample consumes rate[7] and
+    # rate[6], leaving 6 elements valid in the output buffer.
     push.6 exec.constants::random_coin_output_len_ptr mem_store
     # => [...]
 end

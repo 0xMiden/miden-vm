@@ -5,7 +5,7 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
-use alloc::{string::ToString, vec::Vec};
+use alloc::{string::ToString, vec, vec::Vec};
 
 use ::serde::Serialize;
 use miden_core::{Felt, WORD_SIZE, field::QuadFelt, utils::RowMajorMatrix};
@@ -188,6 +188,16 @@ where
     challenger.observe_slice(public_values);
     let chiplets_var_len: VarLenPublicInputs<'_, Felt> = &[kernel_felts];
     config::observe_var_len_public_inputs(&mut challenger, chiplets_var_len, &[WORD_SIZE]);
+
+    // Bind air_order into Fiat-Shamir before `prove_multi` (it absorbs heights but not
+    // the air_order permutation, so the caller must).
+    let trace_heights = vec![
+        core_trace.values.len() / core_trace.width,
+        chiplets_trace.values.len() / chiplets_trace.width,
+    ];
+    let shapes = miden_air::InstanceShapes::from_trace_heights(trace_heights)
+        .map_err(|e| ExecutionError::ProvingError(e.to_string()))?;
+    config::observe_air_order(&mut challenger, shapes.air_order());
 
     let core_witness = miden_air::AirWitness::new(core_trace, public_values, &[]);
     let chiplets_witness =

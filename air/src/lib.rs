@@ -71,7 +71,7 @@ mod export {
         },
         debug,
     };
-    pub use miden_lifted_stark::{AirInstance, AirWitness};
+    pub use miden_lifted_stark::{AirInstance, AirWitness, InstanceShapes};
 }
 
 pub use export::*;

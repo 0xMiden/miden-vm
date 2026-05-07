@@ -162,10 +162,20 @@ fn test_poseidon2_prove_verify_rust_only() {
     assert_prove_verify(source, HashFunction::Poseidon2, "Poseidon2", true, false);
 }
 
-/// Hash-heavy program that produces `chip_height > core_height`. Regression test
-/// for the per-AIR-height path: each component must be built at its own per-AIR
-/// height (see `processor/src/trace/parallel/mod.rs`) so per-AIR boundary
-/// constraints fire at the slice's last row.
+/// Equal-heights regression: tiny program where both AIRs land at MIN_TRACE_LEN.
+/// Catches mistakes in the MASM `air_order` reconstruction's tie-break rule.
+#[test]
+fn test_equal_heights_recursive() {
+    let source = "
+        begin
+            push.1 drop
+        end
+    ";
+    assert_prove_verify(source, HashFunction::Poseidon2, "Poseidon2", false, true);
+}
+
+/// Hash-heavy program where `chip_height > core_height`. Regression for the
+/// per-AIR-height boundary handling on the SLICED Core trace.
 #[test]
 fn test_hash_heavy_divergent_heights() {
     let source = "
@@ -236,6 +246,10 @@ mod recursive_verifier {
         challenger.observe_slice(&public_values);
         let chiplets_var_len: &[&[Felt]] = &[&kernel_felts];
         config::observe_var_len_public_inputs(&mut challenger, chiplets_var_len, &[WORD_SIZE]);
+
+        let proof: miden_crypto::stark::proof::StarkProof<Felt, Challenge, P2Config> =
+            bincode::deserialize(proof_bytes).expect("failed to deserialize proof bytes");
+        config::observe_air_order(&mut challenger, proof.air_order());
 
         let core_air = MidenAir::CORE;
         let chiplets_air = MidenAir::CHIPLETS;

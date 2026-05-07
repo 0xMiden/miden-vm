@@ -218,6 +218,8 @@ where
     let chiplets_var_len: &[&[Felt]] = &[kernel_felts];
     config::observe_var_len_public_inputs(&mut challenger, chiplets_var_len, &[WORD_SIZE]);
 
+    config::observe_air_order(&mut challenger, proof.air_order());
+
     let core_air = MidenAir::CORE;
     let chiplets_air = MidenAir::CHIPLETS;
     let core_instance = AirInstance {

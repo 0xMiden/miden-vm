@@ -18,7 +18,7 @@
 
 use alloc::vec::Vec;
 
-use miden_air::{ProcessorAir, PublicInputs, config};
+use miden_air::{MidenAir, PublicInputs, config};
 use miden_core::{Felt, WORD_SIZE, Word, field::QuadFelt};
 use miden_crypto::{
     field::BasedVectorSpace,
@@ -88,17 +88,40 @@ pub fn generate_advice_inputs(
     let var_len_public_inputs: &[&[Felt]] = &[&kernel_felts];
     config::observe_var_len_public_inputs(&mut challenger, var_len_public_inputs, &[WORD_SIZE]);
 
-    // 3. Build AIR instance.
-    let air = ProcessorAir;
-    let instance = AirInstance {
+    let proof: miden_crypto::stark::proof::StarkProof<Felt, Challenge, P2Config> =
+        bincode::deserialize(proof_bytes)
+            .map_err(|e| VerifierError::ProofDeserializationError(e.to_string()))?;
+    config::observe_air_order(&mut challenger, proof.air_order());
+
+    // 3. Build AIR instances.
+    let core_air = MidenAir::CORE;
+    let chiplets_air = MidenAir::CHIPLETS;
+    let core_instance = AirInstance {
+        public_values: &public_values,
+        var_len_public_inputs: &[],
+    };
+    let chiplets_instance = AirInstance {
         public_values: &public_values,
         var_len_public_inputs,
     };
 
     // 4. Parse STARK transcript (mirrors Fiat-Shamir protocol).
-    let (stark, _digest) =
-        StarkTranscript::from_proof(&config, &[(&air, instance)], &transcript_data, challenger)?;
-    let log_trace_height = stark.instance_shapes.log_trace_heights()[0] as usize;
+    let (stark, _digest) = StarkTranscript::from_proof(
+        &config,
+        &[(&core_air, core_instance), (&chiplets_air, chiplets_instance)],
+        &transcript_data,
+        challenger,
+    )?;
+
+    // log_trace_heights is in proof_order; recover caller-order via air_order.
+    let log_trace_heights = stark.instance_shapes.log_trace_heights();
+    let air_order = stark.instance_shapes.air_order();
+    let mut per_air_log_height = [0usize; 2];
+    for (proof_pos, &caller_idx) in air_order.iter().enumerate() {
+        per_air_log_height[caller_idx as usize] = log_trace_heights[proof_pos] as usize;
+    }
+    let log_core_trace_height = per_air_log_height[0];
+    let log_chiplets_trace_height = per_air_log_height[1];
 
     // 5. Reconstruct kernel digests as Words for advice building.
     let kernel_digests: Vec<Word> = kernel_felts
@@ -107,7 +130,14 @@ pub fn generate_advice_inputs(
         .collect();
 
     // 6. Build advice from parsed transcript.
-    build_advice(&config, &stark, log_trace_height, pub_inputs, &kernel_digests)
+    build_advice(
+        &config,
+        &stark,
+        log_core_trace_height,
+        log_chiplets_trace_height,
+        pub_inputs,
+        &kernel_digests,
+    )
 }
 
 // ADVICE CONSTRUCTION
@@ -121,15 +151,17 @@ pub fn generate_advice_inputs(
 fn build_advice(
     config: &P2Config,
     stark: &StarkTranscript<Challenge, P2Lmcs>,
-    log_trace_height: usize,
+    log_core_trace_height: usize,
+    log_chiplets_trace_height: usize,
     pub_inputs: PublicInputs,
     kernel_digests: &[Word],
 ) -> Result<VerifierData, VerifierError> {
     let pcs = &stark.pcs_transcript;
 
     // --- initial stack ---
-    // Only log(trace_length) is on the operand stack. Security parameters are on the advice stack.
-    let initial_stack = vec![log_trace_height as u64];
+    // `[log_core, log_chip]` with log_core on top. Security parameters are on the advice stack.
+    // `StackInputs::try_from_ints` puts `vec[0]` on top.
+    let initial_stack = vec![log_core_trace_height as u64, log_chiplets_trace_height as u64];
 
     // --- advice stack ---
     let mut advice_stack = Vec::new();
@@ -182,9 +214,9 @@ fn build_advice(
     // 6. Aux trace commitment.
     advice_stack.extend_from_slice(&commitment_to_u64s(stark.aux_commit));
 
-    // 7. Aux finals (bus boundary values).
-    if !stark.all_aux_values.is_empty() {
-        let aux_values = &stark.all_aux_values[0];
+    // 7. Aux finals (bus boundary values), one slot per AIR in proof_order; MASM swaps to
+    //    caller_order if needed.
+    for aux_values in &stark.all_aux_values {
         advice_stack.extend_from_slice(&challenges_to_u64s(aux_values));
     }
 
