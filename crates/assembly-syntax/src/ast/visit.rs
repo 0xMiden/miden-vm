@@ -303,6 +303,11 @@ pub fn visit_procedure<V, T>(visitor: &mut V, procedure: &Procedure) -> ControlF
 where
     V: ?Sized + Visit<T>,
 {
+    if let Some(signature) = procedure.signature() {
+        for ty in signature.args.iter().chain(signature.results.iter()) {
+            visitor.visit_type_expr(ty)?;
+        }
+    }
     visitor.visit_block(procedure.body())
 }
 
@@ -894,6 +899,11 @@ pub fn visit_mut_procedure<V, T>(visitor: &mut V, procedure: &mut Procedure) -> 
 where
     V: ?Sized + VisitMut<T>,
 {
+    if let Some(signature) = procedure.signature_mut() {
+        for ty in signature.args.iter_mut().chain(signature.results.iter_mut()) {
+            visitor.visit_mut_type_expr(ty)?;
+        }
+    }
     visitor.visit_mut_block(procedure.body_mut())
 }
 

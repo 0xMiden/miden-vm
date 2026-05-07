@@ -39,11 +39,13 @@
 - Hardened MAST forest and package byte-slice deserialization against fuzzed length fields ([#3088](https://github.com/0xMiden/miden-vm/pull/3088)).
 - [BREAKING] Bounded the live advice map by total field elements during execution; advice-provider setup now returns an error when initial advice exceeds this limit ([#3085](https://github.com/0xMiden/miden-vm/pull/3085)).
 - Rejected empty kernel packages before linking so malformed dependency metadata returns a structured package error instead of reaching the linker's non-empty-kernel assertion ([#3082](https://github.com/0xMiden/miden-vm/pull/3082)).
+- [BREAKING] Fixed project artifact reuse to ignore unrelated manifest fields, rejected private cross-module imports, and kept signature-only type imports live ([#3091](https://github.com/0xMiden/miden-vm/pull/3091)).
 
 #### Changes
 
 - [BREAKING] Refactored MAST forest serialization around fixed-layout full, stripped, and hashless sections, and bumped the MAST wire format to `0.0.3` ([#2765](https://github.com/0xMiden/miden-vm/pull/2765)).
 - Documented sortedness precondition more prominently for sorted array operations ([#2832](https://github.com/0xMiden/miden-vm/pull/2832)).
+- Corrected memory trace delta encoding comments to match first-row and same-word clock delta behavior ([#3062](https://github.com/0xMiden/miden-vm/pull/3062)).
 - [BREAKING] Updated the Miden crypto stack to `miden-crypto` and `miden-lifted-stark` v0.24, and switched digest-ordering code to `Word`'s native lexicographic ordering ([#3039](https://github.com/0xMiden/miden-vm/pull/3039)).
 - Borrowed operation slices in basic-block batching helpers to avoid cloning in the fingerprinting path ([#2994](https://github.com/0xMiden/miden-vm/pull/2994)).
 - [BREAKING] Sync execution and proving APIs now require `SyncHost`; async `Host`, `execute`, and `prove` remain available ([#2865](https://github.com/0xMiden/miden-vm/pull/2865)).
