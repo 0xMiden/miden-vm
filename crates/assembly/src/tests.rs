@@ -6824,8 +6824,7 @@ fn test_linking_imported_symbols_with_duplicate_prefix_components() -> TestResul
 }
 
 #[test]
-#[ignore = "leave disabled until either symbol resolution is rewritten or path semantics are refined"]
-fn test_linking_recursive_expansion() -> TestResult {
+fn test_linking_recursive_expansion_is_structured_error() -> TestResult {
     let context = TestContext::default();
 
     let a_lib = context.parse_module_with_path(
@@ -6855,14 +6854,16 @@ fn test_linking_recursive_expansion() -> TestResult {
     )?;
 
     let assembler = Assembler::new(context.source_manager());
-    let _ = assembler.assemble_library([a_lib, b_lib])?;
+    let err = assembler
+        .assemble_library([a_lib, b_lib])
+        .expect_err("expected recursive alias expansion to fail with a diagnostic");
+    assert_diagnostic!(&err, "alias expansion cycle detected");
 
     Ok(())
 }
 
 #[test]
-#[ignore = "leave disabled until either symbol resolution is rewritten or path semantics are refined"]
-fn test_linking_recursive_expansion_via_renamed_aliases() -> TestResult {
+fn test_linking_recursive_expansion_via_renamed_aliases_is_structured_error() -> TestResult {
     let context = TestContext::default();
 
     let a_lib = context.parse_module_with_path(
@@ -6892,7 +6893,47 @@ fn test_linking_recursive_expansion_via_renamed_aliases() -> TestResult {
     )?;
 
     let assembler = Assembler::new(context.source_manager());
-    let _ = assembler.assemble_library([a_lib, b_lib])?;
+    let err = assembler
+        .assemble_library([a_lib, b_lib])
+        .expect_err("expected recursive alias expansion to fail with a diagnostic");
+    assert_diagnostic!(&err, "invalid procedure reference");
+
+    Ok(())
+}
+
+#[test]
+fn test_linking_recursive_expansion_depth_limit_is_structured_error() -> TestResult {
+    const MODULE_COUNT: usize = 130;
+
+    let context = TestContext::default();
+    let mut modules = Vec::new();
+
+    for index in 0..MODULE_COUNT {
+        let module_source = if index + 1 == MODULE_COUNT {
+            String::from(
+                r#"
+        pub proc x
+            push.1
+        end
+        "#,
+            )
+        } else {
+            format!("pub use m{}::x", index + 1)
+        };
+        let module_path = format!("m{index}");
+        modules.push(
+            context.parse_module_with_path(
+                module_path.as_str(),
+                source_file!(&context, module_source),
+            )?,
+        );
+    }
+
+    let assembler = Assembler::new(context.source_manager());
+    let err = assembler
+        .assemble_library(modules)
+        .expect_err("expected recursive alias expansion to hit the depth limit");
+    assert_diagnostic!(&err, "alias expansion depth exceeded");
 
     Ok(())
 }

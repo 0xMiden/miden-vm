@@ -1,4 +1,4 @@
-use alloc::{boxed::Box, collections::BTreeSet, string::ToString, sync::Arc};
+use alloc::{boxed::Box, collections::BTreeSet, string::ToString, sync::Arc, vec::Vec};
 
 use miden_assembly_syntax::{
     ast::{
@@ -10,6 +10,8 @@ use miden_assembly_syntax::{
 use miden_core::Word;
 
 use crate::{GlobalItemIndex, LinkerError, ModuleIndex, linker::Linker};
+
+const MAX_LINKER_PATH_EXPANSION_DEPTH: usize = 128;
 
 // HELPER STRUCTS
 // ================================================================================================
@@ -36,6 +38,51 @@ impl SymbolResolutionContext {
     #[inline]
     pub fn in_syscall(&self) -> bool {
         matches!(self.kind, Some(InvokeKind::SysCall))
+    }
+}
+
+#[derive(Debug, Default)]
+struct PathExpansionState {
+    ignored_imports: BTreeSet<Arc<str>>,
+    stack: Vec<(ModuleIndex, Arc<Path>)>,
+}
+
+impl PathExpansionState {
+    fn with_ignored_import(import: Arc<str>) -> Self {
+        Self {
+            ignored_imports: BTreeSet::from_iter([import]),
+            stack: Vec::new(),
+        }
+    }
+
+    fn enter(
+        &mut self,
+        module: ModuleIndex,
+        path: &Path,
+        span: SourceSpan,
+        source_manager: &dyn SourceManager,
+    ) -> Result<(), LinkerError> {
+        if self.stack.len() >= MAX_LINKER_PATH_EXPANSION_DEPTH {
+            return Err(SymbolResolutionError::alias_expansion_depth_exceeded(
+                span,
+                MAX_LINKER_PATH_EXPANSION_DEPTH,
+                source_manager,
+            )
+            .into());
+        }
+
+        if self.stack.iter().any(|(entry_module, entry_path)| {
+            *entry_module == module && entry_path.as_ref() == path
+        }) {
+            return Err(SymbolResolutionError::alias_expansion_cycle(span, source_manager).into());
+        }
+
+        self.stack.push((module, Arc::from(path)));
+        Ok(())
+    }
+
+    fn exit(&mut self) {
+        self.stack.pop();
     }
 }
 
@@ -280,8 +327,9 @@ impl<'a> SymbolResolver<'a> {
                 // We ensure that we do not unintentionally recursively expand an alias target using
                 // its own definition, e.g. with something like `use lib::lib` which without this,
                 // will expand until the stack blows
-                let mut ignored_imports = BTreeSet::from_iter([alias.name().clone().into_inner()]);
-                self.expand_path(context, path.as_deref(), &mut ignored_imports)
+                let mut state =
+                    PathExpansionState::with_ignored_import(alias.name().clone().into_inner());
+                self.expand_path(context.module, context, path.as_deref(), &mut state)
             },
         }
     }
@@ -291,25 +339,30 @@ impl<'a> SymbolResolver<'a> {
         context: &SymbolResolutionContext,
         path: Span<&Path>,
     ) -> Result<SymbolResolution, LinkerError> {
-        let mut ignored_imports = BTreeSet::default();
-        self.expand_path(context, path, &mut ignored_imports)
+        let mut state = PathExpansionState::default();
+        self.expand_path(context.module, context, path, &mut state)
     }
 
     fn expand_path(
         &self,
+        origin_module: ModuleIndex,
         context: &SymbolResolutionContext,
         path: Span<&Path>,
-        ignored_imports: &mut BTreeSet<Arc<str>>,
+        state: &mut PathExpansionState,
     ) -> Result<SymbolResolution, LinkerError> {
-        self.expand_path_from(context.module, context, path, ignored_imports)
+        let span = path.span();
+        state.enter(context.module, *path, span, self.source_manager())?;
+        let result = self.expand_path_inner(origin_module, context, path, state);
+        state.exit();
+        result
     }
 
-    fn expand_path_from(
+    fn expand_path_inner(
         &self,
         origin_module: ModuleIndex,
         context: &SymbolResolutionContext,
         path: Span<&Path>,
-        ignored_imports: &mut BTreeSet<Arc<str>>,
+        state: &mut PathExpansionState,
     ) -> Result<SymbolResolution, LinkerError> {
         let span = path.span();
         let mut path = path.into_inner();
@@ -370,7 +423,7 @@ impl<'a> SymbolResolver<'a> {
                         log::trace!(target: "name-resolver::expand", "found prefix match for '{path}': id={module_id}, prefix={module_path}");
                         let subpath = path.strip_prefix(&module_path).unwrap();
                         context.module = module_id;
-                        ignored_imports.clear();
+                        state.ignored_imports.clear();
                         path = subpath;
                     },
                     // No matching module paths found, path is undefined symbol reference
@@ -403,12 +456,7 @@ impl<'a> SymbolResolver<'a> {
                     },
                     SymbolResolution::External(path) => {
                         log::trace!(target: "name-resolver::expand", "expanded '{symbol}' to unresolved external path '{path}'");
-                        self.expand_path_from(
-                            origin_module,
-                            &context,
-                            path.as_deref(),
-                            ignored_imports,
-                        )
+                        self.expand_path(origin_module, &context, path.as_deref(), state)
                     },
                     resolved @ SymbolResolution::MastRoot(_) => Ok(resolved),
                     SymbolResolution::Exact { gid, path } => {
@@ -450,14 +498,14 @@ impl<'a> SymbolResolver<'a> {
                 // and the result of this recursive expansion is what gets returned from this
                 // function.
                 let (imported_symbol, subpath) = path.split_first().expect("multi-component path");
-                if ignored_imports.contains(imported_symbol) {
+                if state.ignored_imports.contains(imported_symbol) {
                     log::trace!(target: "name-resolver::expand", "skipping import expansion of '{imported_symbol}': already expanded, resolving as absolute path instead");
                     let path = path.to_absolute();
-                    break self.expand_path_from(
+                    break self.expand_path(
                         origin_module,
                         &context,
                         Span::new(span, path.as_ref()),
-                        ignored_imports,
+                        state,
                     );
                 }
                 match self
@@ -504,7 +552,7 @@ impl<'a> SymbolResolver<'a> {
                         // We've resolved the import to a known module, resolve `subpath` relative
                         // to it
                         context.module = id;
-                        ignored_imports.clear();
+                        state.ignored_imports.clear();
                         path = subpath;
                     },
                     Ok(SymbolResolution::External(external_path)) => {
@@ -516,12 +564,14 @@ impl<'a> SymbolResolver<'a> {
                         log::trace!(target: "name-resolver::expand", "expanded import '{imported_symbol}' to unresolved external path '{external_path}'");
                         let partially_expanded = external_path.join(subpath);
                         log::trace!(target: "name-resolver::expand", "partially expanded '{path}' to '{partially_expanded}'");
-                        ignored_imports.insert(imported_symbol.to_string().into_boxed_str().into());
-                        break self.expand_path_from(
+                        state
+                            .ignored_imports
+                            .insert(imported_symbol.to_string().into_boxed_str().into());
+                        break self.expand_path(
                             origin_module,
                             &context,
                             Span::new(span, partially_expanded.as_path()),
-                            ignored_imports,
+                            state,
                         );
                     },
                     Err(err)
@@ -533,11 +583,11 @@ impl<'a> SymbolResolver<'a> {
                         // Try to expand the path by treating it as an absolute path
                         let absolute = path.to_absolute();
                         log::trace!(target: "name-resolver::expand", "no import found for '{imported_symbol}' in '{path}': attempting to resolve as absolute path instead");
-                        break self.expand_path_from(
+                        break self.expand_path(
                             origin_module,
                             &context,
                             Span::new(span, absolute.as_ref()),
-                            ignored_imports,
+                            state,
                         );
                     },
                     Err(err) => {
