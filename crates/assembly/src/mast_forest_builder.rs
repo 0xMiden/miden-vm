@@ -759,7 +759,6 @@ impl MastForestBuilder {
         after_exit: Vec<DecoratorId>,
     ) -> Result<MastNodeId, Report> {
         let split = split_post_last_decorators(operations.len(), decorators, after_exit);
-        log_deprecated_post_last_op_decorators(split.post_last_decorator_count);
         let block = BasicBlockNodeBuilder::new(operations, split.op_indexed_decorators)
             .with_before_enter(before_enter)
             .with_after_exit(split.after_exit_decorators);
