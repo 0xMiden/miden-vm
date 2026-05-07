@@ -127,61 +127,42 @@ end
 #!    starting with the MMR forest (its total leaves count) followed by its peaks.
 #!    The address is expected to be word-aligned.
 #!
-#! Cycles: 283 + 15 * extra_peak_pair cycles
+#! Cycles: 215 + 9 * extra_peak_pair cycles
 #!    where `extra_peak_pair` is the number of peak pairs in addition to the
 #!    first 16 peaks, i.e. `round_up((num_of_peaks - 16) / 2)`
 pub proc unpack
-  # load the num_leaves and peaks to the advice_stack (0 cycles)
-  adv.push_mapval
-  # operand_stack => [HASH, mmr_ptr, ...]
+  # load the preimage and its size to the advice_stack (0 cycles)
+  adv.push_mapvaln adv_push
+  # operand_stack => [preimage_size, HASH, mmr_ptr, ...]
   # advice_stack => [NUM_LEAVES, peaks*, ...]
 
-  # load the size from the advice stack (10 cycles)
-  adv_pushw movdn.3 drop drop drop
-  # operand_stack => [num_leaves, HASH, mmr_ptr, ...]
-  # advice_stack => [peaks*, ...]
+  # make sure the preimage is word-aligned
+  dup u32mod.4 assertz.err="invalid MMR preimage: size must be word-aligned"
 
-  # save the forest to memory (4 cycles)
-  dup dup.6 mem_store
-  # => [num_leaves, HASH, mmr_ptr, ...]
+  # compute the number of words in the preimage
+  div.4
+  # operand_stack => [num_words, HASH, mmr_ptr, ...]
+  # advice_stack => [NUM_LEAVES, peaks*, ...]
 
-  # find the hasher state size, this is how many words will be read from the advice_stack
+  # copy the MMR preimage to memory and verify the leaf-count-bound commitment
+  dup.5 swap
+  # => [num_words, mmr_ptr, HASH, mmr_ptr, ...]
+
+  exec.mem::pipe_preimage_to_memory
+  # => [mmr_ptr_end, mmr_ptr, ...]
+
+  # verify that the preimage size matches the encoded MMR leaf count
+  dup.1 mem_load
+  # => [num_leaves, mmr_ptr_end, mmr_ptr, ...]
+
   exec.num_leaves_to_num_peaks
   exec.num_peaks_to_message_size
-  # => [state_size, HASH, mmr_ptr, ...]
+  # => [peak_elements, mmr_ptr_end, mmr_ptr, ...]
 
-  # compute the end address including the padding data and forest (3 cycles)
-  dup.5 add add.4
-  # => [mmr_ptr_end, HASH, mmr_ptr, ...]
+  add.4 dup.2 add
+  # => [expected_mmr_ptr_end, mmr_ptr_end, mmr_ptr, ...]
 
-  # update the write pointer to account for the header while preserving the start pointer
-  dup.5 add.4
-  # => [mmr_ptr+4, mmr_ptr_end, HASH, mmr_ptr, ...]
-
-  # copy and hash the first 16 peak words
-  padw padw padw
-  adv_pipe exec.poseidon2::permute
-  adv_pipe exec.poseidon2::permute
-  adv_pipe exec.poseidon2::permute
-  adv_pipe exec.poseidon2::permute
-  adv_pipe exec.poseidon2::permute
-  adv_pipe exec.poseidon2::permute
-  adv_pipe exec.poseidon2::permute
-  adv_pipe exec.poseidon2::permute
-  # => [R0, R1, C, mmr_ptr+68, mmr_ptr_end, HASH, mmr_ptr, ...]
-
-  # copy the remaining peak words
-  exec.mem::pipe_double_words_to_memory
-  # => [R0, R1, C, mmr_ptr_end, HASH, mmr_ptr, ...]
-
-  # verify the full MMR preimage, including the leaf count header
-  dropw dropw dropw
-  # => [mmr_ptr_end, HASH, mmr_ptr, ...]
-
-  movup.5 exec.poseidon2::hash_words
-  # => [DIGEST, HASH, ...]
-
-  assert_eqw
+  assert_eq drop
 end
 
 #! Computes the hash of the given MMR and copies it to the Advice Map using its hash as a key.
