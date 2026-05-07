@@ -31,9 +31,7 @@ use miden_crypto::{
     stark::air::{BaseAir, LiftedAir, symbolic::SymbolicExpressionExt},
 };
 
-use crate::{ChipletsAir, CoreAir};
-
-use crate::{PV_PROGRAM_HASH, PV_TRANSCRIPT_STATE};
+use crate::{ChipletsAir, CoreAir, PV_PROGRAM_HASH, PV_TRANSCRIPT_STATE};
 
 // BATCHING TYPES
 // ================================================================================================
@@ -385,14 +383,15 @@ where
 ///    [`LogUpBoundaryConfig`] whose `sum_columns` covers both AIRs' boundary slots.
 ///
 /// Returns the combined `AceCircuit` ready for emission to the MASM ACE chip.
-pub fn build_multi_air_ace_circuit<EF>(
-    config: AceConfig,
-) -> Result<AceCircuit<EF>, AceError>
+pub fn build_multi_air_ace_circuit<EF>(config: AceConfig) -> Result<AceCircuit<EF>, AceError>
 where
     EF: ExtensionField<Felt>,
     SymbolicExpressionExt<Felt, EF>: Algebra<EF>,
 {
-    assert!(config.is_multi_air, "build_multi_air_ace_circuit requires AceConfig::is_multi_air = true");
+    assert!(
+        config.is_multi_air,
+        "build_multi_air_ace_circuit requires AceConfig::is_multi_air = true"
+    );
 
     use miden_ace_codegen::{InputCounts, InputLayout};
 
@@ -436,13 +435,13 @@ where
 
     // Step 2: combined input counts.
     //
-    // - `width` and `aux_width` sum the LMCS-aligned per-AIR widths so the codegen
-    //   layout matches the wire byte order exactly. Padding slots within each AIR's
-    //   subregion are unreferenced by the constraints (see eval bodies of CoreAir
-    //   and ChipletsAir, which only address columns up to the original width).
+    // - `width` and `aux_width` sum the LMCS-aligned per-AIR widths so the codegen layout matches
+    //   the wire byte order exactly. Padding slots within each AIR's subregion are unreferenced by
+    //   the constraints (see eval bodies of CoreAir and ChipletsAir, which only address columns up
+    //   to the original width).
     // - `num_aux_boundary` sums each AIR's boundary slot count.
-    // - `num_periodic` is taken from chiplets (the only AIR with periodic columns
-    //   today; the wrapper exposes them once via the combined `LiftedAir` impl).
+    // - `num_periodic` is taken from chiplets (the only AIR with periodic columns today; the
+    //   wrapper exposes them once via the combined `LiftedAir` impl).
     let combined_counts = InputCounts {
         width: combined_main_w,
         aux_width: combined_aux_w,

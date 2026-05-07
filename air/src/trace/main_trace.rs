@@ -167,7 +167,11 @@ impl MainTrace {
         assert!(core_rows.is_power_of_two(), "core_rows must be a power of two");
         assert!(chiplets_rows.is_power_of_two(), "chiplets_rows must be a power of two");
         assert!(core_rows <= num_rows && chiplets_rows <= num_rows);
-        assert_eq!(core_rows.max(chiplets_rows), num_rows, "num_rows must equal max of per-AIR rows");
+        assert_eq!(
+            core_rows.max(chiplets_rows),
+            num_rows,
+            "num_rows must equal max of per-AIR rows"
+        );
         Self {
             storage: TraceStorage::Parts {
                 core_rm,
@@ -307,8 +311,8 @@ impl MainTrace {
     /// Splits the trace into the per-AIR `(Core, Chiplets)` matrix pair used by the multi-AIR
     /// proving path.
     ///
-    /// - **Core matrix** is `NUM_CORE_COLS = 51` wide and `core_rows` tall (the leading
-    ///   system + decoder + stack + range columns).
+    /// - **Core matrix** is `NUM_CORE_COLS = 51` wide and `core_rows` tall (the leading system +
+    ///   decoder + stack + range columns).
     /// - **Chiplets matrix** is `CHIPLETS_WIDTH` wide and `chiplets_rows` tall (chiplet data +
     ///   `s_perm` + `chip_clk`).
     ///
@@ -391,10 +395,7 @@ impl MainTrace {
                     chip_data.extend_from_slice(&src[CORE_W..CORE_W + CHIP_W]);
                 }
 
-                (
-                    RowMajorMatrix::new(core_data, CORE_W),
-                    RowMajorMatrix::new(chip_data, CHIP_W),
-                )
+                (RowMajorMatrix::new(core_data, CORE_W), RowMajorMatrix::new(chip_data, CHIP_W))
             },
         }
     }
@@ -1069,7 +1070,8 @@ mod tests {
     fn deterministic_parts_trace(num_rows: usize) -> MainTrace {
         let mut core_rm = Vec::with_capacity(num_rows * CORE_WIDTH);
         let mut chiplets_rm = Vec::with_capacity(num_rows * CHIPLETS_WIDTH);
-        let mut range_cols: [Vec<Felt>; 2] = [Vec::with_capacity(num_rows), Vec::with_capacity(num_rows)];
+        let mut range_cols: [Vec<Felt>; 2] =
+            [Vec::with_capacity(num_rows), Vec::with_capacity(num_rows)];
 
         for row in 0..num_rows {
             for col in 0..CORE_WIDTH {
@@ -1078,9 +1080,7 @@ mod tests {
             range_cols[0].push(Felt::from_u32((row * TRACE_WIDTH + CORE_WIDTH) as u32));
             range_cols[1].push(Felt::from_u32((row * TRACE_WIDTH + CORE_WIDTH + 1) as u32));
             for c in 0..CHIPLETS_WIDTH {
-                chiplets_rm.push(Felt::from_u32(
-                    (row * TRACE_WIDTH + CORE_WIDTH + 2 + c) as u32,
-                ));
+                chiplets_rm.push(Felt::from_u32((row * TRACE_WIDTH + CORE_WIDTH + 2 + c) as u32));
             }
         }
 

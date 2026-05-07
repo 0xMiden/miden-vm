@@ -91,8 +91,8 @@ pub(crate) fn emit_core_boundary<B: BoundaryBuilder>(boundary: &mut B) {
     // collapse to the same denominator by the algebra below, so a single `Child` here
     // cancels the root END's `-1/d`:
     //
-    //   - At the root END row, the next op is HALT, so the decoder forces `addr_next = 0`,
-    //     hence `parent = addr_next = 0`.
+    //   - At the root END row, the next op is HALT, so the decoder forces `addr_next = 0`, hence
+    //     `parent = addr_next = 0`.
     //   - `halt_next() = 1` ⇒ `is_first_child = 1 - end_next - repeat_next - halt_next = 0`.
     //   - The root block is not a loop body, so `is_loop_body = 0`.
     //   - `child_hash = h_0 = program_hash` by the decoder's program-hash boundary.
@@ -260,10 +260,9 @@ mod tests {
     /// columns, 1 committed final, all periodic columns owned here.
     #[test]
     fn chiplets_air_lookup_validates() {
-        let num_periodic = miden_crypto::stark::air::LiftedAir::<Felt, QuadFelt>::periodic_columns(
-            &ChipletsAir,
-        )
-        .len();
+        let num_periodic =
+            miden_crypto::stark::air::LiftedAir::<Felt, QuadFelt>::periodic_columns(&ChipletsAir)
+                .len();
         let layout = ValidateLayout {
             trace_width: NUM_CHIPLETS_COLS,
             num_public_values: NUM_PUBLIC_VALUES,

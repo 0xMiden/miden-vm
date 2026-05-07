@@ -143,9 +143,8 @@ impl<T> MainCols<T> {
         // the pointer there as a `&ChipletCols<T>`. The resulting reference's lifetime is
         // tied to `&self`, which prevents aliasing with any later mutation.
         unsafe {
-            let chiplets_ptr = (self as *const Self)
-                .cast::<u8>()
-                .add(core::mem::offset_of!(Self, chiplets));
+            let chiplets_ptr =
+                (self as *const Self).cast::<u8>().add(core::mem::offset_of!(Self, chiplets));
             &*chiplets_ptr.cast::<ChipletCols<T>>()
         }
     }
@@ -157,8 +156,7 @@ impl<T> Borrow<MainCols<T>> for [T] {
         // `adv_pipe` rate-8 hashing. `MainCols` itself models only `TRACE_WIDTH` columns;
         // any trailing padding is ignored.
         debug_assert!(self.len() >= TRACE_WIDTH);
-        let (prefix, shorts, _suffix) =
-            unsafe { self[..TRACE_WIDTH].align_to::<MainCols<T>>() };
+        let (prefix, shorts, _suffix) = unsafe { self[..TRACE_WIDTH].align_to::<MainCols<T>>() };
         debug_assert!(prefix.is_empty() && shorts.len() == 1);
         &shorts[0]
     }
@@ -574,18 +572,9 @@ mod tests {
 
         // The seven typed sub-chiplet accessors return references into a shared backing
         // slice; compare via address — the two views point to the same physical column.
-        assert_eq!(
-            main.bitwise() as *const _ as usize,
-            chiplets.bitwise() as *const _ as usize,
-        );
-        assert_eq!(
-            main.memory() as *const _ as usize,
-            chiplets.memory() as *const _ as usize,
-        );
-        assert_eq!(
-            main.ace() as *const _ as usize,
-            chiplets.ace() as *const _ as usize,
-        );
+        assert_eq!(main.bitwise() as *const _ as usize, chiplets.bitwise() as *const _ as usize,);
+        assert_eq!(main.memory() as *const _ as usize, chiplets.memory() as *const _ as usize,);
+        assert_eq!(main.ace() as *const _ as usize, chiplets.ace() as *const _ as usize,);
         assert_eq!(
             main.kernel_rom() as *const _ as usize,
             chiplets.kernel_rom() as *const _ as usize,

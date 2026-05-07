@@ -663,11 +663,8 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for CoreAir {
         let local: &CoreCols<AB::Var> = (*main.current_slice()).borrow();
         let next: &CoreCols<AB::Var> = (*main.next_slice()).borrow();
 
-        let op_flags = constraints::op_flags::OpFlags::new(
-            &local.decoder,
-            &local.stack,
-            &next.decoder,
-        );
+        let op_flags =
+            constraints::op_flags::OpFlags::new(&local.decoder, &local.stack, &next.decoder);
 
         constraints::enforce_core(builder, local, next, &op_flags);
         constraints::public_inputs::enforce_main(builder, local);
@@ -855,9 +852,8 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ChipletsAir {
         let local: &ChipletCols<AB::Var> = (*main.current_slice()).borrow();
         let next: &ChipletCols<AB::Var> = (*main.next_slice()).borrow();
 
-        let selectors = constraints::chiplets::selectors::build_chiplet_selectors(
-            builder, local, next,
-        );
+        let selectors =
+            constraints::chiplets::selectors::build_chiplet_selectors(builder, local, next);
 
         constraints::enforce_chiplets(builder, local, next, &selectors);
 
@@ -1070,7 +1066,9 @@ where
         challenges: &[EF],
     ) -> (RowMajorMatrix<EF>, Vec<EF>) {
         match self {
-            Self::Core(a) => <CoreAir as AuxBuilder<Felt, EF>>::build_aux_trace(a, main, challenges),
+            Self::Core(a) => {
+                <CoreAir as AuxBuilder<Felt, EF>>::build_aux_trace(a, main, challenges)
+            },
             Self::Chiplets(a) => {
                 <ChipletsAir as AuxBuilder<Felt, EF>>::build_aux_trace(a, main, challenges)
             },

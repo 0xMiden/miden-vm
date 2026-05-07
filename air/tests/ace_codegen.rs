@@ -208,11 +208,13 @@ fn multi_air_ace_circuit_builds_and_has_multi_air_beta_slots() {
     // and concatenated: aligned(51) + aligned(22) = 56 + 24 = 80. Combined aux is
     // aligned(4*2) + aligned(3*2) = 8 + 8 = 16 base coords = 8 EFs.
     assert_eq!(
-        layout.counts.width,
-        80,
+        layout.counts.width, 80,
         "combined main width must be sum of per-AIR LMCS-aligned widths"
     );
-    assert_eq!(layout.counts.aux_width, 8, "combined aux_width = aligned(4) + aligned(3) = 8 EFs");
+    assert_eq!(
+        layout.counts.aux_width, 8,
+        "combined aux_width = aligned(4) + aligned(3) = 8 EFs"
+    );
     assert_eq!(layout.counts.num_aux_boundary, 2, "one boundary slot per AIR");
 
     for key in [InputKey::MultiAirBetaCore, InputKey::MultiAirBetaChip] {

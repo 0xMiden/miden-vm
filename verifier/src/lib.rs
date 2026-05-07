@@ -9,9 +9,7 @@ use alloc::{boxed::Box, vec::Vec};
 
 use miden_air::{AirInstance, MidenAir, PublicInputs, config};
 use miden_core::{Felt, WORD_SIZE, field::QuadFelt};
-use miden_crypto::stark::{
-    StarkConfig, challenger::CanObserve, lmcs::Lmcs, proof::StarkProof,
-};
+use miden_crypto::stark::{StarkConfig, challenger::CanObserve, lmcs::Lmcs, proof::StarkProof};
 use serde::de::DeserializeOwned;
 
 // RE-EXPORTS

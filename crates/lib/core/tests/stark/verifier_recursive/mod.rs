@@ -145,7 +145,7 @@ pub fn generate_advice_inputs(
 
 /// Packs the parsed STARK transcript into the advice inputs consumed by the MASM verifier.
 ///
-/// The initial operand stack receives `[log_trace_height]`.
+/// The initial operand stack receives `[log_core_trace_height]` and `[log_chiplets_trace_height]`.
 /// The advice stack receives security parameters first, then all remaining data
 /// in the order listed in the module doc.
 fn build_advice(

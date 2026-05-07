@@ -305,7 +305,7 @@ mod tests {
     use miden_ace_codegen::{AceConfig, LayoutKind};
     use miden_core::{Felt, crypto::hash::Poseidon2, field::QuadFelt};
 
-    use crate::{ProcessorAir, ace};
+    use crate::ace;
 
     const PROTOCOL_ID: u64 = 0;
     const REGEN_HINT: &str = "cargo run -p miden-core-lib --features constraints-tools --bin regenerate-constraints -- --write";
