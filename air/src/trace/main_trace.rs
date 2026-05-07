@@ -189,10 +189,8 @@ impl MainTrace {
                     let nc = col - CORE_WIDTH;
                     if nc < RANGE_CHECK_TRACE_WIDTH {
                         range_checker_cols[nc][r]
-                    } else if nc < RANGE_CHECK_TRACE_WIDTH + CHIPLETS_WIDTH {
-                        chiplets_rm[r * CHIPLETS_WIDTH + (nc - RANGE_CHECK_TRACE_WIDTH)]
                     } else {
-                        ZERO
+                        chiplets_rm[r * CHIPLETS_WIDTH + (nc - RANGE_CHECK_TRACE_WIDTH)]
                     }
                 }
             },
@@ -308,9 +306,6 @@ impl MainTrace {
                 row[CORE_WIDTH + 2..CORE_WIDTH + 2 + CHIPLETS_WIDTH].copy_from_slice(
                     &chiplets_rm[row_idx * CHIPLETS_WIDTH..(row_idx + 1) * CHIPLETS_WIDTH],
                 );
-                for dst in &mut row[CORE_WIDTH + 2 + CHIPLETS_WIDTH..w] {
-                    *dst = ZERO;
-                }
             },
             TraceStorage::Transposed { matrix, num_cols, .. } => {
                 for (col_idx, cell) in row[..*num_cols].iter_mut().enumerate() {
@@ -327,17 +322,16 @@ impl MainTrace {
             TraceStorage::Parts {
                 core_rm, chiplets_rm, range_checker_cols, ..
             } => {
+                assert!(col_idx < TRACE_WIDTH, "main trace column index in bounds");
                 if col_idx < CORE_WIDTH {
                     (0..h).map(|r| core_rm[r * CORE_WIDTH + col_idx]).collect()
                 } else {
                     let nc = col_idx - CORE_WIDTH;
-                    if nc < 2 {
+                    if nc < RANGE_CHECK_TRACE_WIDTH {
                         range_checker_cols[nc].clone()
-                    } else if nc < 2 + CHIPLETS_WIDTH {
-                        let cc = nc - 2;
-                        (0..h).map(|r| chiplets_rm[r * CHIPLETS_WIDTH + cc]).collect()
                     } else {
-                        vec![ZERO; h]
+                        let cc = nc - RANGE_CHECK_TRACE_WIDTH;
+                        (0..h).map(|r| chiplets_rm[r * CHIPLETS_WIDTH + cc]).collect()
                     }
                 }
             },
