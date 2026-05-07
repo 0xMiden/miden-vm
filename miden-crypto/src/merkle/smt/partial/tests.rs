@@ -6,7 +6,7 @@ use alloc::{
 use assert_matches::assert_matches;
 use itertools::Itertools;
 use proptest::prelude::*;
-use rand::{Rng, SeedableRng};
+use rand::{Rng, RngExt, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 
 use super::{PartialSmt, SMT_DEPTH, serialization::property_tests::arbitrary_valid_word};

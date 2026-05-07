@@ -1,6 +1,6 @@
 use alloc::{collections::BTreeSet, vec::Vec};
 
-use rand::{Rng, prelude::IteratorRandom, rng};
+use rand::{RngExt, prelude::IteratorRandom, rng};
 
 use super::{IN_MEMORY_DEPTH, MemoryStorage, SmtStorage, SmtStorageReader};
 use crate::{
@@ -35,7 +35,7 @@ fn generate_updates(entries: Vec<(Word, Word)>, updates: usize) -> Vec<(Word, Wo
     );
     let mut sorted_entries: Vec<(Word, Word)> = entries
         .into_iter()
-        .choose_multiple(&mut rng, updates)
+        .sample(&mut rng, updates)
         .into_iter()
         .map(|(key, _)| {
             let value = if rng.random_bool(REMOVAL_PROBABILITY) {

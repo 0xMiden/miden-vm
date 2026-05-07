@@ -10,12 +10,13 @@ use k256::{
     pkcs8::DecodePublicKey,
 };
 use miden_crypto_derive::{SilentDebug, SilentDisplay};
-use rand::{CryptoRng, RngCore};
+use rand::CryptoRng;
 use thiserror::Error;
 
 use crate::{
     Felt, SequentialCommit, Word,
     ecdh::k256::{EphemeralPublicKey, SharedSecret},
+    rand::compat::RandCore06,
     utils::{
         ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
         bytes_to_packed_u32_elements,
@@ -50,20 +51,9 @@ struct SecretKey {
 
 impl SecretKey {
     /// Generates a new secret key using the provided random number generator.
-    fn with_rng<R: CryptoRng + RngCore>(rng: &mut R) -> Self {
-        // we use a seedable CSPRNG and seed it with `rng`
-        // this is a work around the fact that the version of the `rand` dependency in our crate
-        // is different than the one used in the `k256` one. This solution will no longer be needed
-        // once `k256` gets a new release with a version of the `rand` dependency matching ours
-        use k256::elliptic_curve::rand_core::SeedableRng;
-        let mut seed = [0_u8; 32];
-        RngCore::fill_bytes(rng, &mut seed);
-        let mut rng = rand_hc::Hc128Rng::from_seed(seed);
-
-        let signing_key = ecdsa::SigningKey::random(&mut rng);
-
-        // Zeroize the seed to prevent leaking secret material
-        seed.zeroize();
+    fn with_rng<R: CryptoRng>(rng: &mut R) -> Self {
+        let mut compat_rng = RandCore06::new(rng);
+        let signing_key = ecdsa::SigningKey::random(&mut compat_rng);
 
         Self { inner: signing_key }
     }
@@ -137,7 +127,7 @@ impl SigningKey {
     }
 
     /// Generates a new signing key using the provided random number generator.
-    pub fn with_rng<R: CryptoRng + RngCore>(rng: &mut R) -> Self {
+    pub fn with_rng<R: CryptoRng>(rng: &mut R) -> Self {
         Self(SecretKey::with_rng(rng))
     }
 
@@ -198,7 +188,7 @@ impl KeyExchangeKey {
     }
 
     /// Generates a new signing key using the provided random number generator.
-    pub fn with_rng<R: CryptoRng + RngCore>(rng: &mut R) -> Self {
+    pub fn with_rng<R: CryptoRng>(rng: &mut R) -> Self {
         Self(SecretKey::with_rng(rng))
     }
 

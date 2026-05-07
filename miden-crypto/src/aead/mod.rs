@@ -52,7 +52,7 @@ pub(crate) trait AeadScheme {
     // BYTE METHODS
     // ================================================================================================
 
-    fn encrypt_bytes<R: rand::CryptoRng + rand::RngCore>(
+    fn encrypt_bytes<R: rand::CryptoRng>(
         key: &Self::Key,
         rng: &mut R,
         plaintext: &[u8],
@@ -69,7 +69,7 @@ pub(crate) trait AeadScheme {
     // ================================================================================================
 
     /// Encrypts field elements with associated data. Default implementation converts to bytes.
-    fn encrypt_elements<R: rand::CryptoRng + rand::RngCore>(
+    fn encrypt_elements<R: rand::CryptoRng>(
         key: &Self::Key,
         rng: &mut R,
         plaintext: &[Felt],

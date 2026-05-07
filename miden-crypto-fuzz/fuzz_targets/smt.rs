@@ -2,7 +2,7 @@
 
 use libfuzzer_sys::fuzz_target;
 use miden_crypto::{merkle::smt::Smt, Felt, Word, ONE};
-use rand::Rng; // Needed for randomizing the split percentage
+use rand::RngExt; // Needed for randomizing the split percentage
 
 struct FuzzInput {
     entries: Vec<(Word, Word)>,

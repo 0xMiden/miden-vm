@@ -6,7 +6,7 @@ use alloc::{string::ToString, vec::Vec};
 use der::{Decode, asn1::BitStringRef};
 use ed25519_dalek::{Signer, Verifier};
 use miden_crypto_derive::{SilentDebug, SilentDisplay};
-use rand::{CryptoRng, RngCore};
+use rand::CryptoRng;
 use thiserror::Error;
 
 use crate::{
@@ -42,9 +42,9 @@ struct SecretKey {
 
 impl SecretKey {
     /// Generates a new secret key using RNG.
-    fn with_rng<R: CryptoRng + RngCore>(rng: &mut R) -> Self {
+    fn with_rng<R: CryptoRng>(rng: &mut R) -> Self {
         let mut seed = [0u8; SECRET_KEY_BYTES];
-        RngCore::fill_bytes(rng, &mut seed);
+        rng.fill_bytes(&mut seed);
 
         let inner = ed25519_dalek::SigningKey::from_bytes(&seed);
 
@@ -122,7 +122,7 @@ impl SigningKey {
     }
 
     /// Generates a new secret key using RNG.
-    pub fn with_rng<R: CryptoRng + RngCore>(rng: &mut R) -> Self {
+    pub fn with_rng<R: CryptoRng>(rng: &mut R) -> Self {
         Self(SecretKey::with_rng(rng))
     }
 
@@ -178,7 +178,7 @@ impl KeyExchangeKey {
     }
 
     /// Generates a new secret key using RNG.
-    pub fn with_rng<R: CryptoRng + RngCore>(rng: &mut R) -> Self {
+    pub fn with_rng<R: CryptoRng>(rng: &mut R) -> Self {
         Self(SecretKey::with_rng(rng))
     }
 

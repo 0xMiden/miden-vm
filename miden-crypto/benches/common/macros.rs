@@ -961,8 +961,8 @@ macro_rules! benchmark_aead_bytes {
         /// Benchmark AEAD operations on byte arrays
         fn $bytes_fn(c: &mut Criterion) {
             use miden_crypto::aead::$aead_module::{Nonce, SecretKey};
+            use rand::SeedableRng;
             use rand_chacha::ChaCha20Rng;
-            use rand_core::SeedableRng;
 
             let group_name = format!("{} - Byte Arrays", $group_prefix);
             let mut group = c.benchmark_group(&group_name);
@@ -1044,8 +1044,8 @@ macro_rules! benchmark_aead_field {
         /// Benchmark AEAD operations on field elements
         fn $felts_fn(c: &mut Criterion) {
             use miden_crypto::aead::$aead_module::{Nonce, SecretKey};
+            use rand::SeedableRng;
             use rand_chacha::ChaCha20Rng;
-            use rand_core::SeedableRng;
 
             let group_name = format!("{} - Field Elements", $group_prefix);
             let mut group = c.benchmark_group(&group_name);

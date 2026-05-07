@@ -61,23 +61,21 @@ p3-util          = { default-features = false, version = "0.5" }
 assert_matches   = { default-features = false, version = "1.5" }
 blake3           = { default-features = false, version = "1.8" }
 cc               = "1.2"
-chacha20poly1305 = "0.10"
+chacha20poly1305 = { default-features = false, version = "0.10" }
 curve25519-dalek = { default-features = false, version = "4" }
 der              = { default-features = false, version = "0.7" }
-ed25519-dalek    = "2"
-flume            = "0.11.1"
+ed25519-dalek    = { default-features = false, version = "2" }
+flume            = { default-features = false, version = "0.11.1" }
 hex              = { default-features = false, version = "0.4" }
 hkdf             = { default-features = false, version = "0.12" }
 itertools        = "0.14"
-k256             = "0.13"
+k256             = { default-features = false, version = "0.13" }
 num              = { default-features = false, version = "0.4" }
 num-complex      = { default-features = false, version = "0.4" }
 once_cell        = { default-features = false, version = "1.21" }
 proptest         = { default-features = false, version = "1.7" }
 quote            = "1.0"
-rand_chacha      = { default-features = false, version = "0.9" }
-rand_core        = { default-features = false, version = "0.9" }
-rand_hc          = "0.3"
+rand_chacha      = { default-features = false, version = "0.10" }
 rayon            = "1.10"
 rocksdb          = { default-features = false, version = "0.24" }
 rstest           = "0.26"

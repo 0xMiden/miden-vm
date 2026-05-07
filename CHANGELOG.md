@@ -1,5 +1,7 @@
 ## 0.26.0 (TBD)
 
+- [BREAKING] Upgraded direct `rand` dependencies to 0.10, updating RNG trait bounds and removing direct `rand_hc` usage ([#995](https://github.com/0xMiden/crypto/pull/995)).
+
 ## 0.25.0 (2026-05-01)
 
 - [BREAKING] Changed the serialization format of `PartialSmt` to be more compact on the wire ([#957](https://github.com/0xMiden/crypto/pull/957)).

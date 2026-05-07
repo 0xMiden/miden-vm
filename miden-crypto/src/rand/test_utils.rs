@@ -18,7 +18,7 @@
 
 use alloc::{vec, vec::Vec};
 
-use rand::{Rng, SeedableRng};
+use rand::{Rng, RngExt, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 
 use crate::rand::Randomizable;
@@ -32,7 +32,7 @@ use crate::rand::Randomizable;
 /// ```
 /// # use miden_crypto::rand::test_utils::seeded_rng;
 /// let mut rng = seeded_rng([0u8; 32]);
-/// // Use rng with any function that accepts impl RngCore
+/// // Use rng with any function that accepts impl Rng
 /// ```
 pub fn seeded_rng(seed: [u8; 32]) -> ChaCha20Rng {
     ChaCha20Rng::from_seed(seed)

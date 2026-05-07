@@ -3,7 +3,7 @@ use data::{
     SYNC_DATA_FOR_TEST_VECTOR,
 };
 use prng::Shake256Testing;
-use rand::{RngCore, SeedableRng};
+use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 
 use super::{Serializable, math::Polynomial};
