@@ -1,4 +1,4 @@
-use miden_core::WORD_SIZE;
+use miden_core::{WORD_SIZE, crypto::merkle::PartialMmr};
 use miden_processor::advice::AdviceStackBuilder;
 use miden_utils_testing::{
     EMPTY_WORD, Felt, ONE, TRUNCATE_STACK_PROC, Word, ZERO,
@@ -427,6 +427,25 @@ fn poc_mmr_unpack_peak_hash_does_not_bind_num_leaves() -> Result<(), MerkleError
     assert!(forged_test.execute().is_err());
 
     Ok(())
+}
+
+#[test]
+fn test_partial_mmr_peaks_hash_binds_num_leaves() {
+    let mut mmr = Mmr::new();
+    for i in 1u64..=7 {
+        mmr.add(init_merkle_leaf(i)).unwrap();
+    }
+
+    let accumulator = mmr.peaks();
+    let partial = PartialMmr::from_peaks(accumulator.clone());
+
+    let mut padded_peaks = accumulator.peaks().to_vec();
+    padded_peaks.resize(16, Word::default());
+
+    assert_eq!(
+        partial.peaks().hash_peaks(),
+        mmr_commitment(accumulator.num_leaves() as u64, &padded_peaks)
+    );
 }
 
 /// Tests the case of an MMR with more than 16 peaks
