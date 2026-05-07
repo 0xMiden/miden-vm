@@ -113,7 +113,7 @@ In the benchmarks below, the VM executes the same Blake3 example program for 2<s
 
 | Machine                        | Execution time | Proving time | Execution % | Implied Frequency |
 | ------------------------------ | :------------: | :----------: | :---------: | :---------------: |
-| Apple M1 Pro (16 threads)      |     14.5 ms    |   14.7 sec   |    0.1%     |      70 KHz       |
+| Apple M1 Pro (16 threads)      |     9 ms       |   14.2 sec   |    0.1%     |      70 KHz       |
 | Apple M4 Max (16 threads)      |     6 ms       |   5.9 sec    |    0.2%     |      170 KHz      |
 | Amazon Graviton 4 (64 threads) |     11 ms      |   4.9 sec    |    0.2%     |      205 KHz      |
 | AMD EPYC 9R45 (64 threads)     |     7.5 ms     |   3.7 sec    |    0.2%     |      270 KHz      |
@@ -128,7 +128,7 @@ In the benchmarks below we execute the same Blake3 example program for 2<sup>20<
 
 | Machine                        | Execution time | Proving time | Slowdown vs BLAKE3 |
 | ------------------------------ | :------------: | :----------: | :----------------: |
-| Apple M1 Pro (16 threads)      |     14.5 ms    |   31.9 sec   |     2.2x           |
+| Apple M1 Pro (16 threads)      |     9 ms       |   25.5 sec   |     1.8x           |
 | Apple M4 Max (16 threads)      |     6 ms       |   10.1 sec   |     1.7x           |
 | Amazon Graviton 4 (64 threads) |     11 ms      |   7.7 sec    |     1.6x           |
 | AMD EPYC 9R45 (64 threads)     |     7.5 ms     |   6.9 sec    |     1.9x           |
