@@ -16,6 +16,7 @@
 - Added bounds checks for non-deterministic `maybe_value_ptr`/`maybe_key_ptr` hints in `sorted_array::find_word` and `find_partial_key_value` ([#3051](https://github.com/0xMiden/miden-vm/pull/3051)).
 - [BREAKING] Removed internal `_impl` precompile helpers from the core-lib API, hardened proof deserialization and debug storage errors, and added u256 regression vectors ([#3026](https://github.com/0xMiden/miden-vm/pull/3026)).
 - Fixed `u256::wrapping_mul` so it preserves caller stack values below its operands ([#3071](https://github.com/0xMiden/miden-vm/pull/3071)).
+- Fixed `FastProcessor` stack growth so operand stack depth is bounded by `ExecutionOptions::max_stack_depth` instead of the internal buffer size ([#3086](https://github.com/0xMiden/miden-vm/pull/3086)).
 - Fixed host event and advice-mutation diagnostics to point to the triggering `emit.event(...)` instruction ([#3042](https://github.com/0xMiden/miden-vm/pull/3042)).
 - Fixed debug-only underflow in memory range-check trace generation when the first memory access is at `clk = 0` ([#2976](https://github.com/0xMiden/miden-vm/pull/2976)).
 - Replaced unsound `ptr::read` with safe unbox in panic recovery, removing UB from potential double-drop ([#2934](https://github.com/0xMiden/miden-vm/pull/2934)).
