@@ -85,10 +85,19 @@ pub fn rewrite_symbol(
                 cache,
                 current_module: gid.module,
             };
-            let ty = item
-                .ty()
-                .resolve_type(&mut resolver)?
-                .expect("type or error to have been raised");
+            let ty = match item.ty().resolve_type(&mut resolver)? {
+                Some(ty) => ty,
+                None => {
+                    return Err(LinkerError::UndefinedType {
+                        span: item.span(),
+                        source_file: resolver
+                            .resolver
+                            .source_manager()
+                            .get(item.span().source_id())
+                            .ok(),
+                    });
+                },
+            };
             resolver.cache.types.insert(gid, ty);
         },
     }

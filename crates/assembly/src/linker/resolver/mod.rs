@@ -34,11 +34,14 @@ pub struct Resolver<'a, 'b: 'a> {
 /// values that contain no references to other symbols. Since these resolutions can be expensive
 /// to compute, and often represent items which are referenced multiple times, we cache them to
 /// avoid recomputing the same information over and over again.
+const MAX_TYPE_ALIAS_RESOLUTION_DEPTH: usize = 128;
+
 #[derive(Default)]
 pub struct ResolverCache {
     pub types: BTreeMap<GlobalItemIndex, types::Type>,
     pub constants: BTreeMap<GlobalItemIndex, ast::ConstantValue>,
     pub evaluating_constants: BTreeMap<GlobalItemIndex, SourceSpan>,
+    pub evaluating_types: BTreeMap<GlobalItemIndex, SourceSpan>,
 }
 
 impl<'a, 'b: 'a> Resolver<'a, 'b> {
@@ -199,7 +202,28 @@ impl<'a, 'b: 'a> ast::TypeResolver<LinkerError> for Resolver<'a, 'b> {
         context: SourceSpan,
         gid: GlobalItemIndex,
     ) -> Result<types::Type, LinkerError> {
-        match self.resolver.linker()[gid].item() {
+        if let Some(ty) = self.cache.types.get(&gid) {
+            return Ok(ty.clone());
+        }
+
+        if self.cache.evaluating_types.contains_key(&gid) {
+            return Err(LinkerError::from(SymbolResolutionError::alias_expansion_cycle(
+                context,
+                self.resolver.source_manager(),
+            )));
+        }
+
+        if self.cache.evaluating_types.len() >= MAX_TYPE_ALIAS_RESOLUTION_DEPTH {
+            return Err(LinkerError::from(SymbolResolutionError::type_expression_depth_exceeded(
+                context,
+                MAX_TYPE_ALIAS_RESOLUTION_DEPTH,
+                self.resolver.source_manager(),
+            )));
+        }
+
+        self.cache.evaluating_types.insert(gid, context);
+
+        let result = match self.resolver.linker()[gid].item() {
             SymbolItem::Compiled(ItemInfo::Type(info)) => Ok(info.ty.clone()),
             SymbolItem::Type(ast::TypeDecl::Enum(ty)) => {
                 // When resolving an EnumType, we must do three things:
@@ -250,8 +274,12 @@ impl<'a, 'b: 'a> ast::TypeResolver<LinkerError> for Resolver<'a, 'b> {
                         .into_boxed_slice(),
                     })
             },
-            SymbolItem::Type(ast::TypeDecl::Alias(ty)) => {
-                Ok(ty.ty.resolve_type(self)?.expect("unreachable"))
+            SymbolItem::Type(ast::TypeDecl::Alias(ty)) => match ty.ty.resolve_type(self)? {
+                Some(ty) => Ok(ty),
+                None => Err(LinkerError::UndefinedType {
+                    span: context,
+                    source_file: self.get_source_file_for(context),
+                }),
             },
             SymbolItem::Compiled(_) | SymbolItem::Constant(_) | SymbolItem::Procedure(_) => {
                 Err(LinkerError::InvalidTypeRef {
@@ -260,7 +288,15 @@ impl<'a, 'b: 'a> ast::TypeResolver<LinkerError> for Resolver<'a, 'b> {
                 })
             },
             SymbolItem::Alias { .. } => unreachable!("resolver should have expanded all aliases"),
+        };
+
+        self.cache.evaluating_types.remove(&gid);
+
+        if let Ok(ty) = &result {
+            self.cache.types.insert(gid, ty.clone());
         }
+
+        result
     }
 
     fn get_local_type(

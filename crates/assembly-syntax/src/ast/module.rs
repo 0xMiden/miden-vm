@@ -744,7 +744,10 @@ impl crate::prettier::PrettyPrint for Module {
 struct ModuleTypeResolver<'a> {
     module: &'a Module,
     resolver: LocalSymbolResolver,
+    evaluating_types: Vec<ItemIndex>,
 }
+
+const MAX_LOCAL_TYPE_ALIAS_RESOLUTION_DEPTH: usize = 128;
 
 impl<'a> ModuleTypeResolver<'a> {
     pub fn new(
@@ -752,7 +755,11 @@ impl<'a> ModuleTypeResolver<'a> {
         source_manager: Arc<dyn SourceManager>,
     ) -> Result<Self, SymbolResolutionError> {
         let resolver = module.resolver(source_manager)?;
-        Ok(Self { module, resolver })
+        Ok(Self {
+            module,
+            resolver,
+            evaluating_types: Vec::new(),
+        })
     }
 }
 
@@ -772,7 +779,24 @@ impl TypeResolver<SymbolResolutionError> for ModuleTypeResolver<'_> {
         context: SourceSpan,
         id: ItemIndex,
     ) -> Result<Option<types::Type>, SymbolResolutionError> {
-        match &self.module[id] {
+        if self.evaluating_types.contains(&id) {
+            return Err(SymbolResolutionError::alias_expansion_cycle(
+                context,
+                &self.resolver.source_manager(),
+            ));
+        }
+
+        if self.evaluating_types.len() >= MAX_LOCAL_TYPE_ALIAS_RESOLUTION_DEPTH {
+            return Err(SymbolResolutionError::type_expression_depth_exceeded(
+                context,
+                MAX_LOCAL_TYPE_ALIAS_RESOLUTION_DEPTH,
+                &self.resolver.source_manager(),
+            ));
+        }
+
+        self.evaluating_types.push(id);
+
+        let result = match &self.module[id] {
             Export::Type(ty) => match ty {
                 TypeDecl::Alias(ty) => self.resolve(&ty.ty),
                 TypeDecl::Enum(ty) => Ok(Some(ty.ty().clone())),
@@ -783,7 +807,11 @@ impl TypeResolver<SymbolResolutionError> for ModuleTypeResolver<'_> {
                 item.span(),
                 &self.resolver.source_manager(),
             ))),
-        }
+        };
+
+        self.evaluating_types.pop();
+
+        result
     }
     #[inline(always)]
     fn resolve_local_failed(&self, err: SymbolResolutionError) -> SymbolResolutionError {

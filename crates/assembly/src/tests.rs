@@ -6303,6 +6303,48 @@ fn invoking_imported_type_alias_returns_error_instead_of_panicking() {
 }
 
 #[test]
+fn cyclic_type_aliases_are_rejected_without_panicking() {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    let program = r#"
+        type a = b
+        type b = a
+
+        begin
+            push.1
+        end
+    "#;
+
+    let assembled =
+        catch_unwind(AssertUnwindSafe(|| Assembler::default().assemble_program(program)));
+
+    assert!(assembled.is_ok(), "assembly panicked, expected a structured error");
+    let err = assembled.unwrap().expect_err("expected cyclic type aliases to be rejected");
+    assert_diagnostic!(&err, "alias expansion cycle detected");
+}
+
+#[test]
+fn deep_type_alias_chain_hits_resolution_depth_limit() {
+    use std::{
+        fmt::Write,
+        panic::{AssertUnwindSafe, catch_unwind},
+    };
+
+    let mut source = String::new();
+    for i in 0..=260 {
+        writeln!(&mut source, "type t{i} = t{}", i + 1).unwrap();
+    }
+    source.push_str("type t261 = u32\n\nbegin\n    push.1\nend\n");
+
+    let assembled =
+        catch_unwind(AssertUnwindSafe(|| Assembler::default().assemble_program(&source)));
+
+    assert!(assembled.is_ok(), "assembly panicked, expected a structured error");
+    let err = assembled.unwrap().expect_err("expected deep type alias chain to be rejected");
+    assert_diagnostic!(&err, "type expression nesting depth exceeded");
+}
+
+#[test]
 fn test_cross_module_quoted_identifier_resolution() -> TestResult {
     let context = TestContext::default();
 
