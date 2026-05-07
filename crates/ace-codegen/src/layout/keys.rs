@@ -16,7 +16,10 @@ pub enum InputKey {
     /// Multi-AIR β coefficient for Chiplets. Complement of `MultiAirBetaCore`.
     MultiAirBetaChip,
     /// Main trace value at (offset, index).
-    Main { offset: usize, index: usize },
+    Main {
+        offset: usize,
+        index: usize,
+    },
     /// Base-field coordinate for an aux trace column.
     AuxCoord {
         offset: usize,

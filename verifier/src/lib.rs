@@ -5,9 +5,10 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
-use alloc::{boxed::Box, vec::Vec};
+use alloc::{boxed::Box, vec, vec::Vec};
 
-use miden_air::{AirInstance, MidenAir, PublicInputs, config};
+use bincode::Options;
+use miden_air::{AirInstance, InstanceShapes, MidenAir, PublicInputs, config};
 use miden_core::{Felt, WORD_SIZE, field::QuadFelt};
 use miden_crypto::stark::{StarkConfig, challenger::CanObserve, lmcs::Lmcs, proof::StarkProof};
 use serde::de::DeserializeOwned;
@@ -188,6 +189,10 @@ pub enum StarkVerificationError {
     Deserialization(#[from] bincode::Error),
     #[error("log_trace_height {0} exceeds the two-adic order of the field")]
     InvalidTraceHeight(u8),
+    #[error(
+        "non-canonical multi-AIR instance shape: expected air_order {expected:?}, got {actual:?}"
+    )]
+    NonCanonicalAirOrder { expected: Vec<u32>, actual: Vec<u32> },
     #[error(transparent)]
     Verifier(#[from] miden_crypto::stark::verifier::VerifierError),
 }
@@ -209,6 +214,7 @@ where
 {
     // Proof deserialization via bincode; see https://github.com/0xMiden/miden-vm/issues/2550.
     let proof: StarkProof<Felt, QuadFelt, SC> = bincode::deserialize(proof_bytes)?;
+    validate_canonical_air_order(proof_bytes, proof.air_order())?;
 
     let mut challenger = config.challenger();
     config::observe_protocol_params(&mut challenger);
@@ -231,5 +237,62 @@ where
     let instances = [(&core_air, core_instance), (&chiplets_air, chiplets_instance)];
 
     miden_crypto::stark::verifier::verify_multi(config, &instances, &proof, challenger)?;
+    Ok(())
+}
+
+fn validate_canonical_air_order(
+    proof_bytes: &[u8],
+    proof_air_order: &[u32],
+) -> Result<(), StarkVerificationError> {
+    let proof_shapes: InstanceShapes = bincode::DefaultOptions::new()
+        .with_fixint_encoding()
+        .allow_trailing_bytes()
+        .deserialize(proof_bytes)?;
+
+    let log_trace_heights = proof_shapes.log_trace_heights();
+    if proof_air_order.len() != 2 || log_trace_heights.len() != 2 {
+        return Err(StarkVerificationError::NonCanonicalAirOrder {
+            expected: vec![0, 1],
+            actual: proof_air_order.to_vec(),
+        });
+    }
+
+    let mut caller_heights = [0usize; 2];
+    let mut seen = [false; 2];
+    for (&caller_idx, &log_h) in proof_air_order.iter().zip(log_trace_heights) {
+        let Some(seen_slot) = seen.get_mut(caller_idx as usize) else {
+            return Err(StarkVerificationError::NonCanonicalAirOrder {
+                expected: vec![0, 1],
+                actual: proof_air_order.to_vec(),
+            });
+        };
+        if *seen_slot {
+            return Err(StarkVerificationError::NonCanonicalAirOrder {
+                expected: vec![0, 1],
+                actual: proof_air_order.to_vec(),
+            });
+        }
+        *seen_slot = true;
+        caller_heights[caller_idx as usize] = 1usize
+            .checked_shl(log_h as u32)
+            .ok_or(StarkVerificationError::InvalidTraceHeight(log_h))?;
+    }
+
+    let expected_shapes =
+        InstanceShapes::from_trace_heights(caller_heights.to_vec()).map_err(|_| {
+            StarkVerificationError::NonCanonicalAirOrder {
+                expected: vec![0, 1],
+                actual: proof_air_order.to_vec(),
+            }
+        })?;
+    if expected_shapes.air_order() != proof_air_order
+        || expected_shapes.log_trace_heights() != log_trace_heights
+    {
+        return Err(StarkVerificationError::NonCanonicalAirOrder {
+            expected: expected_shapes.air_order().to_vec(),
+            actual: proof_air_order.to_vec(),
+        });
+    }
+
     Ok(())
 }

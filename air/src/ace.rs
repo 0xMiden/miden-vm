@@ -516,8 +516,10 @@ where
 
     // β-fold: `combined = mab_core · core_acc + mab_chip · chip_acc - q*v`. Verifier
     // picks (β, 1) or (1, β) for (mab_core, mab_chip) per proof_order.
-    let core_acc = match core_dag.nodes[core_root_old.index()] {
-        NodeKind::Sub(acc_id, _qv_id) => core_translation[acc_id.index()],
+    let (core_acc, core_qv) = match core_dag.nodes[core_root_old.index()] {
+        NodeKind::Sub(acc_id, qv_id) => {
+            (core_translation[acc_id.index()], core_translation[qv_id.index()])
+        },
         _ => panic!("CoreAir sub-DAG root must be `Sub(acc, q*v)`"),
     };
     let (chip_acc, chip_qv) = match chip_dag.nodes[chip_root_old.index()] {
@@ -526,6 +528,12 @@ where
         },
         _ => panic!("ChipletsAir sub-DAG root must be `Sub(acc, q*v)`"),
     };
+    if core_qv != chip_qv {
+        return Err(AceError::InvalidInputLayout {
+            message: "CoreAir and ChipletsAir quotient bindings must share the same q*v node"
+                .into(),
+        });
+    }
 
     let mab_core = builder.input(InputKey::MultiAirBetaCore);
     let mab_chip = builder.input(InputKey::MultiAirBetaChip);
