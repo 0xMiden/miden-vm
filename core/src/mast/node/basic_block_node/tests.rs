@@ -680,6 +680,29 @@ fn basic_block_builder_rejects_post_last_op_decorator_index() {
     assert!(result.is_err());
 }
 
+#[test]
+fn basic_block_builder_rejects_post_last_padded_decorator_index() {
+    let mut forest = MastForest::new();
+    let decorator_id = forest.add_decorator(Decorator::Trace(7)).unwrap();
+    let (op_batches, digest) = batch_and_hash_ops(&[Operation::Add, Operation::Mul]);
+    let num_padded_ops = num_padded_operations(&op_batches);
+
+    let result = BasicBlockNodeBuilder::from_op_batches(
+        op_batches,
+        vec![(num_padded_ops, decorator_id)],
+        digest,
+    )
+    .add_to_forest(&mut forest);
+
+    assert!(matches!(
+        result,
+        Err(MastForestError::DecoratorOpIndexOutOfBounds {
+            operation_idx,
+            num_operations,
+        }) if operation_idx == num_padded_ops && num_operations == num_padded_ops
+    ));
+}
+
 // Tests for the basic block decorator functionality added to support before_enter and after_exit
 // decorators.
 // --------------------------------------------------------------------------------------------
