@@ -39,6 +39,7 @@
 - [BREAKING] Bounded the live advice map by total field elements during execution; advice-provider setup now returns an error when initial advice exceeds this limit ([#3085](https://github.com/0xMiden/miden-vm/pull/3085)).
 - Rejected empty kernel packages before linking so malformed dependency metadata returns a structured package error instead of reaching the linker's non-empty-kernel assertion ([#3082](https://github.com/0xMiden/miden-vm/pull/3082)).
 - [BREAKING] Fixed project artifact reuse to ignore unrelated manifest fields, rejected private cross-module imports, and kept signature-only type imports live ([#3091](https://github.com/0xMiden/miden-vm/pull/3091)).
+- Bounded linker alias/path expansion so recursive import cycles return structured diagnostics instead of recursing indefinitely ([#3110](https://github.com/0xMiden/miden-vm/pull/3110)).
 
 #### Changes
 
