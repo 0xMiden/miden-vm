@@ -89,10 +89,10 @@ end
 #!
 #! Input: [num_leaves, ...]
 #! Output: [num_peaks, ...]
-#! Cycles: 67
+#! Cycles: 32
 pub proc num_leaves_to_num_peaks
-  # count number of peaks (67 cycles)
-  u32split u32popcnt swap u32popcnt add
+  # count number of peaks (32 cycles)
+  u32popcnt
   # => [count, ...]
 end
 
