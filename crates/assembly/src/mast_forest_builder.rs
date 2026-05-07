@@ -743,7 +743,8 @@ impl MastForestBuilder {
 
         let base_fingerprint = block
             .fingerprint_for_node(&self.mast_forest, &self.hash_by_node_id)
-            .expect("hash_by_node_id should contain the fingerprints of all children of `node`");
+            .into_diagnostic()
+            .wrap_err("assembler failed to fingerprint basic block")?;
         let dedup_fingerprint = self.maybe_augment(
             self.maybe_augment(
                 base_fingerprint,
@@ -1062,7 +1063,8 @@ impl MastForestBuilder {
         // builder itself.
         let base_fingerprint = block
             .fingerprint_for_node(&self.mast_forest, &self.hash_by_node_id)
-            .expect("hash_by_node_id should contain the fingerprints of all children of `node`");
+            .into_diagnostic()
+            .wrap_err("assembler failed to fingerprint basic block")?;
         let dedup_fingerprint = self.maybe_augment(
             self.maybe_augment(base_fingerprint, &serialize_asm_ops(&asm_ops)),
             &serialize_debug_vars(&self.mast_forest, &debug_vars),
@@ -1566,6 +1568,23 @@ mod tests {
         assert_eq!(merged_blocks.len(), 2);
         assert_eq!(merged_blocks[0], large_block_id);
         assert_eq!(merged_blocks[1], small_block_id);
+    }
+
+    #[test]
+    fn ensure_block_rejects_decorator_index_beyond_operation_count_without_panicking() {
+        let mut builder = MastForestBuilder::new(&[]).unwrap();
+        let decorator_id = builder.ensure_decorator(Decorator::Trace(42)).unwrap();
+
+        let result = builder.ensure_block(
+            vec![Operation::Add],
+            vec![(2, decorator_id)],
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+        );
+
+        assert!(result.is_err());
     }
 
     /// Cloning a block with debug vars via `to_builder().with_before_enter()` must

@@ -687,6 +687,21 @@ impl MastForest {
                 basic_block.validate_batch_invariants().map_err(|error_msg| {
                     MastForestError::InvalidBatchPadding(node_id, error_msg)
                 })?;
+
+                let num_operations = basic_block.num_operations() as usize;
+                let decorator_links = match self.decorator_links_for_node(node_id) {
+                    Ok(decorator_links) => decorator_links,
+                    Err(DecoratorIndexError::NodeIndex(_)) => continue,
+                    Err(error) => return Err(MastForestError::DecoratorError(error)),
+                };
+                for (operation_idx, _) in decorator_links {
+                    if operation_idx >= num_operations {
+                        return Err(MastForestError::DecoratorOpIndexOutOfBounds {
+                            operation_idx,
+                            num_operations,
+                        });
+                    }
+                }
             }
         }
 

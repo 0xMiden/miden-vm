@@ -2408,6 +2408,31 @@ fn test_untrusted_forest_accepts_full_prefix_batch() {
 }
 
 #[test]
+fn test_untrusted_forest_rejects_post_last_op_decorator_storage() {
+    let mut forest = MastForest::new();
+    let decorator_id = forest.add_decorator(Decorator::Trace(42)).unwrap();
+    let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.debug_info_mut().clear_mappings();
+    forest
+        .debug_info_mut()
+        .register_op_indexed_decorators(block_id, vec![(1, decorator_id)])
+        .unwrap();
+    forest.make_root(block_id);
+
+    let bytes = forest.to_bytes();
+
+    let parsed = MastForest::read_from_bytes(&bytes).unwrap();
+    let result = parsed.validate();
+
+    assert_matches!(
+        result,
+        Err(MastForestError::DecoratorOpIndexOutOfBounds { operation_idx: 1, num_operations: 1 })
+    );
+}
+
+#[test]
 fn test_untrusted_forest_rejects_basic_block_indptr_that_breaks_push_immediate_commitment() {
     // Two distinct immediates. Using large values reduces the chance of accidental equality with a
     // packed opcode group value.
