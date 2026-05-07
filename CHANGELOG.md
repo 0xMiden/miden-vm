@@ -75,6 +75,7 @@
 - Collapsed the kernel ROM chiplet to one row per digest with a LogUp multiplicity, eliminating duplicate-callsite rows ([#2962](https://github.com/0xMiden/miden-vm/pull/2962)).
 - Made all internal `core::math` procedures natively little-endian ([#3084](https://github.com/0xMiden/miden-vm/pull/3084)).
 - [BREAKING] Updated the Miden crypto stack to `miden-crypto` 0.25, and switched SMT leaf hashing to use Poseidon2 domain separation so masm-side leaf digests match `SmtLeaf::hash()` ([#3095](https://github.com/0xMiden/miden-vm/pull/3095)).
+- Deprecated post-last operation-indexed decorators in favor of `after_exit`, normalizing legacy assembler input with a warning and rejecting malformed linked or serialized decorator indices ([#3114](https://github.com/0xMiden/miden-vm/pull/3114))
 
 ## 0.22.1
 
