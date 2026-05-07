@@ -1569,6 +1569,38 @@ mod tests {
     }
 
     #[test]
+    fn test_merge_basic_blocks_preserves_trailing_after_exit_decorator() {
+        let mut builder = MastForestBuilder::new(&[]).unwrap();
+
+        let first_block_id = builder
+            .ensure_block(vec![Operation::Add], Vec::new(), vec![], vec![], vec![], vec![])
+            .unwrap();
+        let after_exit_decorator = builder.ensure_decorator(Decorator::Trace(7)).unwrap();
+        let second_block_id = builder
+            .ensure_block(
+                vec![Operation::Mul],
+                Vec::new(),
+                vec![],
+                vec![],
+                vec![],
+                vec![after_exit_decorator],
+            )
+            .unwrap();
+
+        let merged_blocks = builder.merge_basic_blocks(&[first_block_id, second_block_id]).unwrap();
+
+        assert_eq!(merged_blocks.len(), 1);
+        let merged_block_id = merged_blocks[0];
+        let merged_block = builder.mast_forest[merged_block_id].unwrap_basic_block();
+
+        assert!(merged_block.indexed_decorator_iter(&builder.mast_forest).next().is_none());
+        assert_eq!(
+            builder.mast_forest.after_exit_decorators(merged_block_id),
+            &[after_exit_decorator],
+        );
+    }
+
+    #[test]
     fn ensure_block_rejects_decorator_index_beyond_operation_count_without_panicking() {
         let mut builder = MastForestBuilder::new(&[]).unwrap();
         let decorator_id = builder.ensure_decorator(Decorator::Trace(42)).unwrap();
