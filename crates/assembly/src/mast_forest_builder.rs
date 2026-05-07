@@ -29,6 +29,8 @@ use crate::{
 
 /// Constant that decides how many operation batches disqualify a procedure from inlining.
 const PROCEDURE_INLINING_THRESHOLD: usize = 32;
+const POST_LAST_OP_DECORATOR_DEPRECATION_MESSAGE: &str = "post-last op decorators are deprecated; \
+this practice will be rejected in a future release. Use after-exit decorators instead.";
 
 // MAST FOREST BUILDER
 // ================================================================================================
@@ -258,24 +260,45 @@ fn serialize_asm_ops(asm_ops: &[(usize, AssemblyOp)]) -> Vec<u8> {
     data
 }
 
+struct SplitPostLastDecorators {
+    op_indexed_decorators: DecoratorList,
+    after_exit_decorators: Vec<DecoratorId>,
+    post_last_decorator_count: usize,
+}
+
 fn split_post_last_decorators(
     operations_len: usize,
     decorators: DecoratorList,
     after_exit: Vec<DecoratorId>,
-) -> (DecoratorList, Vec<DecoratorId>) {
+) -> SplitPostLastDecorators {
     let mut op_indexed_decorators = DecoratorList::with_capacity(decorators.len());
     let mut after_exit_decorators = Vec::new();
+    let mut post_last_decorator_count = 0;
 
     for (op_idx, decorator_id) in decorators {
         if op_idx == operations_len {
             after_exit_decorators.push(decorator_id);
+            post_last_decorator_count += 1;
         } else {
             op_indexed_decorators.push((op_idx, decorator_id));
         }
     }
     after_exit_decorators.extend(after_exit);
 
-    (op_indexed_decorators, after_exit_decorators)
+    SplitPostLastDecorators {
+        op_indexed_decorators,
+        after_exit_decorators,
+        post_last_decorator_count,
+    }
+}
+
+fn log_deprecated_post_last_op_decorators(post_last_decorator_count: usize) {
+    if post_last_decorator_count != 0 {
+        log::error!(
+            "{POST_LAST_OP_DECORATOR_DEPRECATION_MESSAGE} \
+rewrote {post_last_decorator_count} post-last op decorator(s) as after-exit decorator(s)."
+        );
+    }
 }
 
 /// Serializes AssemblyOp content referenced by `AsmOpId`s into bytes for fingerprint augmentation.
@@ -735,11 +758,11 @@ impl MastForestBuilder {
         before_enter: Vec<DecoratorId>,
         after_exit: Vec<DecoratorId>,
     ) -> Result<MastNodeId, Report> {
-        let (decorators, after_exit) =
-            split_post_last_decorators(operations.len(), decorators, after_exit);
-        let block = BasicBlockNodeBuilder::new(operations, decorators)
+        let split = split_post_last_decorators(operations.len(), decorators, after_exit);
+        log_deprecated_post_last_op_decorators(split.post_last_decorator_count);
+        let block = BasicBlockNodeBuilder::new(operations, split.op_indexed_decorators)
             .with_before_enter(before_enter)
-            .with_after_exit(after_exit);
+            .with_after_exit(split.after_exit_decorators);
 
         let base_fingerprint = block
             .fingerprint_for_node(&self.mast_forest, &self.hash_by_node_id)
@@ -1052,11 +1075,11 @@ impl MastForestBuilder {
         before_enter: Vec<DecoratorId>,
         after_exit: Vec<DecoratorId>,
     ) -> Result<MastNodeId, Report> {
-        let (decorators, after_exit) =
-            split_post_last_decorators(operations.len(), decorators, after_exit);
-        let block = BasicBlockNodeBuilder::new(operations, decorators)
+        let split = split_post_last_decorators(operations.len(), decorators, after_exit);
+        log_deprecated_post_last_op_decorators(split.post_last_decorator_count);
+        let block = BasicBlockNodeBuilder::new(operations, split.op_indexed_decorators)
             .with_before_enter(before_enter)
-            .with_after_exit(after_exit);
+            .with_after_exit(split.after_exit_decorators);
 
         // Compute the base fingerprint from the builder, then augment with external metadata
         // so the dedup key stays sensitive to source mappings without storing them on the
@@ -1585,6 +1608,24 @@ mod tests {
         );
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn split_post_last_decorators_reports_deprecated_compatibility_path() {
+        let op_indexed = DecoratorId::from(9);
+        let post_last = DecoratorId::from(10);
+        let after_exit = DecoratorId::from(11);
+
+        let split =
+            split_post_last_decorators(1, vec![(0, op_indexed), (1, post_last)], vec![after_exit]);
+
+        assert_eq!(split.op_indexed_decorators, vec![(0, op_indexed)]);
+        assert_eq!(split.after_exit_decorators, vec![post_last, after_exit]);
+        assert_eq!(split.post_last_decorator_count, 1);
+        assert!(
+            POST_LAST_OP_DECORATOR_DEPRECATION_MESSAGE
+                .contains("will be rejected in a future release")
+        );
     }
 
     /// Cloning a block with debug vars via `to_builder().with_before_enter()` must
