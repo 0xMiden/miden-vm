@@ -5,7 +5,7 @@ use core::ops::Range;
 use miden_air::{
     AirWitness, ProcessorAir, PublicInputs, debug,
     trace::{
-        DECODER_TRACE_OFFSET, MainTrace, PADDED_TRACE_WIDTH, TRACE_WIDTH,
+        DECODER_TRACE_OFFSET, MainTrace, TRACE_WIDTH,
         decoder::{NUM_USER_OP_HELPERS, USER_OP_HELPERS_OFFSET},
     },
 };
@@ -16,7 +16,7 @@ use crate::{
     fast::ExecutionOutput,
     field::QuadFelt,
     precompile::{PrecompileRequest, PrecompileTranscript, PrecompileTranscriptDigest},
-    utils::RowMajorMatrix,
+    utils::{Matrix, RowMajorMatrix},
 };
 
 pub(crate) mod utils;
@@ -350,19 +350,10 @@ impl ExecutionTrace {
     }
 
     /// Returns the main trace as a row-major matrix for proving.
-    ///
-    /// Only includes the first [`TRACE_WIDTH`] columns (excluding padding columns added for
-    /// Poseidon2 rate alignment), which is the width expected by the AIR.
-    // TODO: the padding columns can be removed once we use the lifted-stark's virtual trace
-    // alignment, which pads to the required rate width without materializing extra columns.
     pub fn to_row_major_matrix(&self) -> RowMajorMatrix<Felt> {
-        let stored_w = self.main_trace.width();
-        if stored_w == TRACE_WIDTH {
-            return self.main_trace.to_row_major();
-        }
-
-        assert_eq!(stored_w, PADDED_TRACE_WIDTH);
-        self.main_trace.to_row_major_stripped(TRACE_WIDTH)
+        let row_major = self.main_trace.to_row_major();
+        debug_assert_eq!(row_major.width(), TRACE_WIDTH);
+        row_major
     }
 
     // HELPER METHODS
@@ -377,15 +368,10 @@ impl ExecutionTrace {
     // --------------------------------------------------------------------------------------------
     #[cfg(feature = "std")]
     pub fn print(&self) {
-        use miden_air::trace::TRACE_WIDTH;
-
-        let mut row = [ZERO; PADDED_TRACE_WIDTH];
+        let mut row = [ZERO; TRACE_WIDTH];
         for i in 0..self.length() {
             self.main_trace.read_row_into(i, &mut row);
-            std::println!(
-                "{:?}",
-                row.iter().take(TRACE_WIDTH).map(Felt::as_canonical_u64).collect::<Vec<_>>()
-            );
+            std::println!("{:?}", row.map(|v| v.as_canonical_u64()));
         }
     }
 

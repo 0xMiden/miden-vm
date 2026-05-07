@@ -96,7 +96,7 @@ impl RangeChecker {
         // }
         self.cycle_lookups
             .entry(clk)
-            .and_modify(|entry| entry.append(&mut values.to_vec()))
+            .and_modify(|entry| entry.extend_from_slice(values))
             .or_insert_with(|| values.to_vec());
     }
 
