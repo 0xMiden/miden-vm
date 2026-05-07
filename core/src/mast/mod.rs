@@ -1308,6 +1308,13 @@ pub enum MastForestError {
     #[error("basic block cannot be created from an empty list of operations")]
     EmptyBasicBlock,
     #[error(
+        "decorator operation index {operation_idx} is greater than or equal to operation count {num_operations}"
+    )]
+    DecoratorOpIndexOutOfBounds {
+        operation_idx: usize,
+        num_operations: usize,
+    },
+    #[error(
         "decorator root of child with node id {0} is missing but is required for fingerprint computation"
     )]
     ChildFingerprintMissing(MastNodeId),

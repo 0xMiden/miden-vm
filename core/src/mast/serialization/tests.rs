@@ -341,8 +341,6 @@ fn serialize_deserialize_all_nodes() {
     let basic_block_id = {
         let operations = sample_basic_block_operations_all_variants();
 
-        let num_operations = operations.len();
-
         // Note: AssemblyOps are now stored separately in DebugInfo's asm_op storage,
         // not as decorators. See the asm_op module tests for AssemblyOp serialization.
         let decorators = vec![
@@ -352,8 +350,8 @@ fn serialize_deserialize_all_nodes() {
             (15, Decorator::Debug(DebugOptions::MemInterval(0, 16))),
             (17, Decorator::Debug(DebugOptions::LocalInterval(1, 2, 3))),
             (19, Decorator::Debug(DebugOptions::AdvStackTop(255))),
-            (num_operations, Decorator::Trace(55)),
         ];
+        let after_exit_decorator = Decorator::Trace(55);
 
         // Convert raw decorators to decorator list by adding them to the forest first
         let decorator_list: Vec<(usize, crate::mast::DecoratorId)> = decorators
@@ -363,8 +361,10 @@ fn serialize_deserialize_all_nodes() {
             })
             .collect::<Result<Vec<_>, MastForestError>>()
             .unwrap();
+        let after_exit = vec![mast_forest.add_decorator(after_exit_decorator).unwrap()];
 
         BasicBlockNodeBuilder::new(operations, decorator_list)
+            .with_after_exit(after_exit)
             .add_to_forest(&mut mast_forest)
             .unwrap()
     };
@@ -686,7 +686,8 @@ fn mast_forest_serialize_deserialize_with_child_ids_exceeding_parent_id() {
     let first = BasicBlockNodeBuilder::new(vec![Operation::U32add], vec![(0, deco0)])
         .add_to_forest(&mut forest)
         .unwrap();
-    let second = BasicBlockNodeBuilder::new(vec![Operation::U32and], vec![(1, deco1)])
+    let second = BasicBlockNodeBuilder::new(vec![Operation::U32and], Vec::new())
+        .with_after_exit(vec![deco1])
         .add_to_forest(&mut forest)
         .unwrap();
     JoinNodeBuilder::new([first, second]).add_to_forest(&mut forest).unwrap();
@@ -719,7 +720,8 @@ fn mast_forest_serialize_deserialize_with_overflowing_ids_fails() {
     let mut forest = MastForest::new();
     let deco0 = forest.add_decorator(Decorator::Trace(0)).unwrap();
     let deco1 = forest.add_decorator(Decorator::Trace(1)).unwrap();
-    BasicBlockNodeBuilder::new(vec![Operation::U32add], vec![(0, deco0), (1, deco1)])
+    BasicBlockNodeBuilder::new(vec![Operation::U32add], vec![(0, deco0)])
+        .with_after_exit(vec![deco1])
         .add_to_forest(&mut forest)
         .unwrap();
     // hack to force addition of a node which builder would return an error at runtime
@@ -800,7 +802,8 @@ fn mast_forest_serialize_deserialize_advice_map() {
     let first = BasicBlockNodeBuilder::new(vec![Operation::U32add], vec![(0, deco0)])
         .add_to_forest(&mut forest)
         .unwrap();
-    let second = BasicBlockNodeBuilder::new(vec![Operation::U32and], vec![(1, deco1)])
+    let second = BasicBlockNodeBuilder::new(vec![Operation::U32and], Vec::new())
+        .with_after_exit(vec![deco1])
         .add_to_forest(&mut forest)
         .unwrap();
     JoinNodeBuilder::new([first, second]).add_to_forest(&mut forest).unwrap();

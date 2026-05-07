@@ -258,6 +258,26 @@ fn serialize_asm_ops(asm_ops: &[(usize, AssemblyOp)]) -> Vec<u8> {
     data
 }
 
+fn split_post_last_decorators(
+    operations_len: usize,
+    decorators: DecoratorList,
+    after_exit: Vec<DecoratorId>,
+) -> (DecoratorList, Vec<DecoratorId>) {
+    let mut op_indexed_decorators = DecoratorList::with_capacity(decorators.len());
+    let mut after_exit_decorators = Vec::new();
+
+    for (op_idx, decorator_id) in decorators {
+        if op_idx == operations_len {
+            after_exit_decorators.push(decorator_id);
+        } else {
+            op_indexed_decorators.push((op_idx, decorator_id));
+        }
+    }
+    after_exit_decorators.extend(after_exit);
+
+    (op_indexed_decorators, after_exit_decorators)
+}
+
 /// Serializes AssemblyOp content referenced by `AsmOpId`s into bytes for fingerprint augmentation.
 fn serialize_asm_op_ids(forest: &MastForest, asm_op_ids: &[(usize, AsmOpId)]) -> Vec<u8> {
     let mut data = Vec::new();
@@ -715,6 +735,8 @@ impl MastForestBuilder {
         before_enter: Vec<DecoratorId>,
         after_exit: Vec<DecoratorId>,
     ) -> Result<MastNodeId, Report> {
+        let (decorators, after_exit) =
+            split_post_last_decorators(operations.len(), decorators, after_exit);
         let block = BasicBlockNodeBuilder::new(operations, decorators)
             .with_before_enter(before_enter)
             .with_after_exit(after_exit);
@@ -1029,6 +1051,8 @@ impl MastForestBuilder {
         before_enter: Vec<DecoratorId>,
         after_exit: Vec<DecoratorId>,
     ) -> Result<MastNodeId, Report> {
+        let (decorators, after_exit) =
+            split_post_last_decorators(operations.len(), decorators, after_exit);
         let block = BasicBlockNodeBuilder::new(operations, decorators)
             .with_before_enter(before_enter)
             .with_after_exit(after_exit);

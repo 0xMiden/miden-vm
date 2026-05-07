@@ -279,13 +279,14 @@ fn operation_or_decorator_iterator() {
     let mut mast_forest = MastForest::new();
     let operations = vec![Operation::Add, Operation::Mul, Operation::MovDn2, Operation::MovDn3];
 
-    // Note: there are 2 decorators after the last instruction
     let decorators = vec![
         (0, Decorator::Trace(0)), // ID: 0
         (0, Decorator::Trace(1)), // ID: 1
         (3, Decorator::Trace(2)), // ID: 2
-        (4, Decorator::Trace(3)), // ID: 3
-        (4, Decorator::Trace(4)), // ID: 4
+    ];
+    let after_exit_decorators = vec![
+        Decorator::Trace(3), // ID: 3
+        Decorator::Trace(4), // ID: 4
     ];
 
     // Convert raw decorators to decorator list by adding them to the forest first
@@ -297,8 +298,14 @@ fn operation_or_decorator_iterator() {
         })
         .collect::<Result<Vec<_>, _>>()
         .unwrap();
+    let after_exit: Vec<DecoratorId> = after_exit_decorators
+        .into_iter()
+        .map(|decorator| mast_forest.add_decorator(decorator))
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
 
     let node_id = BasicBlockNodeBuilder::new(operations, decorator_list)
+        .with_after_exit(after_exit)
         .add_to_forest(&mut mast_forest)
         .unwrap();
     let node = mast_forest.get_node_by_id(node_id).unwrap().unwrap_basic_block();
@@ -605,9 +612,13 @@ fn validate_padding_semantics_rejects_num_groups_overflow_without_panicking() {
 fn decorator_strategy(
     nops: usize,
     max_decorators: usize,
-) -> impl Strategy<Value = Vec<(usize, DecoratorId)>> {
+) -> BoxedStrategy<Vec<(usize, DecoratorId)>> {
+    if nops == 0 {
+        return Just(Vec::new()).boxed();
+    }
+
     prop::collection::vec(
-        (0..=nops, any::<u32>().prop_map(DecoratorId::new_unchecked)),
+        (0..nops, any::<u32>().prop_map(DecoratorId::new_unchecked)),
         0..=max_decorators,
     )
     .prop_map(move |mut decorators| {
@@ -615,6 +626,7 @@ fn decorator_strategy(
         decorators.sort_by_key(|(idx, _)| *idx);
         decorators
     })
+    .boxed()
 }
 
 // Strategy for generating a list of decorators with valid indices for a given operation sequence
@@ -654,6 +666,18 @@ proptest! {
         // The collected decorators should match the original decorators
         prop_assert_eq!(collected_decorators, decs);
     }
+}
+
+#[test]
+fn basic_block_builder_rejects_post_last_op_decorator_index() {
+    let mut forest = MastForest::new();
+    let decorator_id = forest.add_decorator(Decorator::Trace(7)).unwrap();
+    let operations = vec![Operation::Add, Operation::Mul];
+
+    let result =
+        BasicBlockNodeBuilder::new(operations, vec![(2, decorator_id)]).add_to_forest(&mut forest);
+
+    assert!(result.is_err());
 }
 
 // Tests for the basic block decorator functionality added to support before_enter and after_exit

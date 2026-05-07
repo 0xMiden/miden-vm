@@ -139,6 +139,7 @@ impl BasicBlockNode {
         if operations.is_empty() {
             return Err(MastForestError::EmptyBasicBlock);
         }
+        validate_decorator_indices_within_ops(operations.len(), &decorators)?;
 
         // Validate decorators list (only in debug mode).
         #[cfg(debug_assertions)]
@@ -1239,6 +1240,20 @@ pub(crate) fn validate_decorators(operations_len: usize, decorators: &DecoratorL
     }
 }
 
+fn validate_decorator_indices_within_ops(
+    operations_len: usize,
+    decorators: &DecoratorList,
+) -> Result<(), MastForestError> {
+    if let Some(&(operation_idx, _)) = decorators.iter().find(|(idx, _)| *idx >= operations_len) {
+        return Err(MastForestError::DecoratorOpIndexOutOfBounds {
+            operation_idx,
+            num_operations: operations_len,
+        });
+    }
+
+    Ok(())
+}
+
 /// Raw-indexed prefix: how many paddings strictly before raw index r
 ///
 /// This struct provides O(1) lookup for converting raw operation indices to padded indices.
@@ -1492,6 +1507,7 @@ impl BasicBlockNodeBuilder {
                 if operations.is_empty() {
                     return Err(MastForestError::EmptyBasicBlock);
                 }
+                validate_decorator_indices_within_ops(operations.len(), &decorators)?;
 
                 // Validate decorators list (only in debug mode).
                 #[cfg(debug_assertions)]
@@ -1610,6 +1626,7 @@ impl MastForestContributor for BasicBlockNodeBuilder {
                 if operations.is_empty() {
                     return Err(MastForestError::EmptyBasicBlock);
                 }
+                validate_decorator_indices_within_ops(operations.len(), &decorators)?;
 
                 // Validate decorators list (only in debug mode).
                 #[cfg(debug_assertions)]
@@ -1678,6 +1695,7 @@ impl MastForestContributor for BasicBlockNodeBuilder {
         let (op_batches, digest, raw_decorators) = match &self.operation_data {
             OperationData::Raw { operations, decorators } => {
                 // Compute digest - use forced digest if available, otherwise compute normally
+                validate_decorator_indices_within_ops(operations.len(), decorators)?;
                 let (op_batches, computed_digest) = batch_and_hash_ops(operations);
                 let digest = self.digest.unwrap_or(computed_digest);
 
