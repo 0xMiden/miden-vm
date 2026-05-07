@@ -33,14 +33,12 @@ pub(crate) const MIDEN_COLUMN_SHAPE: [usize; 7] = [
     CHIPLET_COLUMN_SHAPE[2],
 ];
 
-/// Number of committed final aux values published with a proof.
+/// Number of committed final aux values published with a proof of `ProcessorAir`.
 ///
-/// Only col 0 is a real committed final; slot 1 is a placeholder forced to zero, kept for
-/// forward-compatibility with the MASM recursive verifier (which absorbs 2 boundary
-/// values). All paths that emit or consume the pair must preserve the zero in slot 1.
-///
-/// TODO(#3032): reduce to 1 once trace splitting lands and each sub-trace has its own
-/// accumulator.
+/// `ProcessorAir` (the legacy aggregator) has a single real LogUp accumulator; slot 1 is
+/// forced to zero so its layout matches the multi-AIR proof shape (Core final at slot 0,
+/// Chiplets final at slot 1). All paths that emit or consume the pair must preserve the
+/// zero in slot 1 for `ProcessorAir`.
 pub const NUM_LOGUP_COMMITTED_FINALS: usize = 2;
 
 // BOUNDARY EMITTER

@@ -300,13 +300,10 @@ pub fn logup_boundary_config() -> LogUpBoundaryConfig {
         PublicInput(PV_TRANSCRIPT_STATE + 3),
     ];
 
-    // TODO(#3032): only col 0 carries a real final accumulator; slot 1 is the
-    // placeholder — see `NUM_LOGUP_COMMITTED_FINALS`. Once trace splitting lands,
-    // move slot 1 from `zero_columns` to `sum_columns`.
-    //
-    // Slot 1 is in `zero_columns` so the recursive verifier independently rejects
-    // any nonzero padding value. The native verifier applies the matching runtime
-    // check in `ProcessorAir::reduced_aux_values` (see `lib.rs`).
+    // ProcessorAir (legacy aggregator) has one real accumulator at col 0; slot 1 is a
+    // forced-zero pad. It's in `zero_columns` so the recursive verifier independently
+    // rejects any nonzero value, matching the runtime check in
+    // `ProcessorAir::reduced_aux_values`.
     LogUpBoundaryConfig {
         sum_columns: vec![0],
         zero_columns: vec![1],

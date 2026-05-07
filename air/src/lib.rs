@@ -368,11 +368,9 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ProcessorAir {
         emit_miden_boundary(&mut reducer);
         let total_correction = reducer.finalize()?;
 
-        // TODO(#3032): aux_values[1..] are the placeholder slots from
-        // NUM_LOGUP_COMMITTED_FINALS (see `constraints::lookup::miden_air`); enforce the
-        // zero invariant until trace splitting lands. The recursive verifier gets the
-        // matching `AuxBusBoundary(col) = 0` identity via `LogUpBoundaryConfig::zero_columns`
-        // (see `ace.rs`), so both paths reject a nonzero padding slot.
+        // ProcessorAir has one real LogUp final at col 0; slot 1 is a forced-zero pad
+        // (see `NUM_LOGUP_COMMITTED_FINALS`). The recursive verifier rejects nonzero pads
+        // via `LogUpBoundaryConfig::zero_columns`; mirror that check here.
         for unused_aux in aux_values.iter().skip(1) {
             if !unused_aux.is_zero() {
                 return Err("padding aux value is non-zero".into());
@@ -488,8 +486,8 @@ where
         challenges: &[EF],
     ) -> (RowMajorMatrix<EF>, Vec<EF>) {
         let (aux_trace, mut committed) = build_logup_aux_trace(self, main, challenges);
-        // TODO(#3032): pad the placeholder slot — see `NUM_LOGUP_COMMITTED_FINALS`. Remove
-        // the pad once trace splitting lands.
+        // Pad the second slot to zero — `ProcessorAir` has one real final but the proof
+        // layout reserves two (see `NUM_LOGUP_COMMITTED_FINALS`).
         debug_assert_eq!(
             committed.len(),
             1,
