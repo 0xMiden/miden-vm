@@ -598,21 +598,27 @@ impl MastForestBuilder {
             ) {
                 // Collect decorators and operations from the block (while still borrowing)
                 // We need owned copies so we can drop the borrow before mutating self
-                let (raw_decorators_including_node_level, block_ops) = {
+                let (block_decorators, block_before_enter, block_after_exit, block_ops) = {
                     let basic_block_node =
                         self.mast_forest[basic_block_id].get_basic_block().unwrap();
-                    let raw_decorators_including_node_level: Vec<_> =
-                        basic_block_node.raw_decorator_iter(&self.mast_forest).collect();
+                    let block_decorators =
+                        basic_block_node.raw_op_indexed_decorators(&self.mast_forest);
+                    let block_before_enter =
+                        basic_block_node.before_enter(&self.mast_forest).to_vec();
+                    let block_after_exit = basic_block_node.after_exit(&self.mast_forest).to_vec();
                     let block_ops: Vec<Operation> = basic_block_node
                         .op_batches()
                         .iter()
                         .flat_map(|b| b.raw_ops().copied())
                         .collect();
-                    (raw_decorators_including_node_level, block_ops)
+                    (block_decorators, block_before_enter, block_after_exit, block_ops)
                 };
                 let ops_offset = operations.len();
 
                 for decorator in core::mem::take(&mut pending_after_exit) {
+                    decorators.push((ops_offset, decorator));
+                }
+                for decorator in block_before_enter {
                     decorators.push((ops_offset, decorator));
                 }
 
@@ -624,17 +630,11 @@ impl MastForestBuilder {
                     &mut merged_debug_vars,
                 );
 
-                // Add decorators with adjusted indices. The raw iterator includes node-level
-                // decorators: `before_enter` appears at index 0, and `after_exit` appears at the
-                // block-length sentinel. Keep the latter pending until we know whether another
-                // block follows in this merged block.
-                for (op_idx, decorator) in raw_decorators_including_node_level {
-                    if op_idx == block_ops.len() {
-                        pending_after_exit.push(decorator);
-                    } else {
-                        decorators.push((op_idx + ops_offset, decorator));
-                    }
+                // Add operation-indexed decorators with adjusted indices.
+                for (op_idx, decorator) in block_decorators {
+                    decorators.push((op_idx + ops_offset, decorator));
                 }
+                pending_after_exit.extend(block_after_exit);
                 operations.extend(block_ops);
             } else {
                 // If we don't want to merge this block, flush the buffer of operations into a
