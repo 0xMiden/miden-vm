@@ -23,7 +23,7 @@ use miden_core::{
         CallNodeBuilder, JoinNodeBuilder, LoopNodeBuilder, MastForestContributor, MastNodeExt,
         MastNodeId, SplitNodeBuilder,
     },
-    operations::Operation,
+    operations::{Decorator, Operation},
     program::Program,
     serde::{Deserializable, DeserializationError, Serializable},
 };
@@ -2107,6 +2107,78 @@ fn decorators_basic_block() -> TestResult {
     );
     let program = context.assemble(source)?;
     insta::assert_snapshot!(program);
+    Ok(())
+}
+
+#[test]
+fn trailing_decorator_is_after_exit_not_last_op_decorator() -> TestResult {
+    let context = TestContext::default();
+    let source = source_file!(
+        &context,
+        "\
+    begin
+        push.1
+        push.2
+        trace.1
+        add
+        trace.2
+    end"
+    );
+
+    let program = context.assemble(source)?;
+    let forest = program.mast_forest();
+    let (block_id, block) = forest
+        .nodes()
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, node)| {
+            node.get_basic_block().map(|block| (MastNodeId::from(idx as u32), block))
+        })
+        .find(|(_, block)| matches!(block.raw_operations().last(), Some(Operation::Add)))
+        .expect("expected a basic block ending in add");
+
+    let raw_ops = block.raw_operations().collect::<Vec<_>>();
+    let last_real_op_idx = raw_ops.len() - 1;
+    assert!(
+        matches!(raw_ops.last(), Some(Operation::Add)),
+        "expected add to be the last real operation in the block",
+    );
+
+    let indexed_decorators = block.indexed_decorator_iter(forest).collect::<Vec<_>>();
+    let last_op_trace_decorators = indexed_decorators
+        .iter()
+        .filter_map(|(op_idx, decorator_id)| {
+            (*op_idx == last_real_op_idx).then(|| match &forest[*decorator_id] {
+                Decorator::Trace(value) => Some(*value),
+                _ => None,
+            })?
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        last_op_trace_decorators,
+        vec![1],
+        "only the pre-add decorator should be attached to the last real op",
+    );
+
+    let after_exit_trace_decorators = block
+        .after_exit(forest)
+        .iter()
+        .map(|decorator_id| match &forest[*decorator_id] {
+            Decorator::Trace(value) => *value,
+            decorator => panic!("expected trace decorator in after_exit, got {decorator:?}"),
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        after_exit_trace_decorators,
+        vec![2],
+        "trailing decorator should be placed in the containing block's after_exit set",
+    );
+
+    assert!(
+        forest.after_exit_decorators(block_id) == block.after_exit(forest),
+        "block-level and forest-level after_exit accessors should agree",
+    );
+
     Ok(())
 }
 
