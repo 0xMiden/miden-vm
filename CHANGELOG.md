@@ -42,6 +42,7 @@
 - [BREAKING] Bounded the live advice map by total field elements during execution; advice-provider setup now returns an error when initial advice exceeds this limit ([#3085](https://github.com/0xMiden/miden-vm/pull/3085)).
 - Rejected empty kernel packages before linking so malformed dependency metadata returns a structured package error instead of reaching the linker's non-empty-kernel assertion ([#3082](https://github.com/0xMiden/miden-vm/pull/3082)).
 - [BREAKING] Fixed project artifact reuse to ignore unrelated manifest fields, rejected private cross-module imports, and kept signature-only type imports live ([#3091](https://github.com/0xMiden/miden-vm/pull/3091)).
+- Fixed stale `ReplayProcessor` doc comment links to `ExecutionTracer` after module-structure refactors.
 
 #### Changes
 
@@ -77,18 +78,16 @@
 - Made all internal `core::math` procedures natively little-endian ([#3084](https://github.com/0xMiden/miden-vm/pull/3084)).
 - [BREAKING] Updated the Miden crypto stack to `miden-crypto` 0.25, and switched SMT leaf hashing to use Poseidon2 domain separation so masm-side leaf digests match `SmtLeaf::hash()` ([#3095](https://github.com/0xMiden/miden-vm/pull/3095)).
 - Follow-up refactoring + couple perf improvements on trace generation ([#2953](https://github.com/0xMiden/miden-vm/pull/2953)).
-
-
-## 0.22.1
-
-#### Enhancements
-
 - Added `FastProcessor::into_parts()` to extract advice provider, memory, and precompile transcript after step-based execution ([#2901](https://github.com/0xMiden/miden-vm/pull/2901)).
 - Added deterministic regression vectors for `math::u256` core-lib tests and replaced `BigUint`-based expectations with an in-test `U256` model ([#2974](https://github.com/0xMiden/miden-vm/pull/2974)).
 
-#### Fixes
+## 0.22.3 (2026-05-01)
 
-- Fixed stale `ReplayProcessor` doc comment links to `ExecutionTracer` after module-structure refactors.
+- Change value of `Path::MAX_COMPONENT_LENGTH` to `u16::MAX - 2` [#3087](https://github.com/0xMiden/miden-vm/pull/3087)
+
+## 0.22.2 (2026-04-28)
+
+- Improve debug var loc tracking ([#2955](https://github.com/0xMiden/miden-vm/pull/2955)).
 
 ## 0.22.1 (2026-04-07)
 
