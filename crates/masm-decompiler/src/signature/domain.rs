@@ -48,6 +48,14 @@ pub enum ProcSignature {
         outputs: usize,
         /// Net stack effect of the procedure
         net_effect: isize,
+        /// Entry stack depths that are still present in the final stack.
+        preserved_inputs: Vec<usize>,
+        /// Per-output provenance as an entry input depth, or `None` for local outputs.
+        output_input_depths: Vec<Option<usize>>,
+        /// Per-output entry input depths that feed non-pass-through outputs.
+        output_dependency_depths: Vec<Vec<usize>>,
+        /// Entry input depths read by non-pass-through operations.
+        used_input_depths: Vec<usize>,
     },
     Unknown,
 }
@@ -56,14 +64,47 @@ impl ProcSignature {
     /// Return a copy with a refined public input arity.
     pub(crate) fn with_public_inputs(self, public_inputs: usize) -> Self {
         match self {
-            ProcSignature::Known { inputs, outputs, net_effect, .. } => ProcSignature::Known {
+            ProcSignature::Known {
+                inputs,
+                outputs,
+                net_effect,
+                preserved_inputs,
+                output_input_depths,
+                output_dependency_depths,
+                used_input_depths,
+                ..
+            } => ProcSignature::Known {
                 inputs,
                 public_inputs,
                 outputs,
                 net_effect,
+                preserved_inputs,
+                output_input_depths,
+                output_dependency_depths,
+                used_input_depths,
             },
             ProcSignature::Unknown => ProcSignature::Unknown,
         }
+    }
+
+    /// Return whether all inputs hidden below `public_inputs` are preserved.
+    pub(crate) fn preserves_input_depths_from(&self, public_inputs: usize) -> bool {
+        let ProcSignature::Known {
+            inputs,
+            preserved_inputs,
+            output_dependency_depths,
+            used_input_depths,
+            ..
+        } = self
+        else {
+            return false;
+        };
+        (public_inputs..*inputs).all(|depth| preserved_inputs.contains(&depth))
+            && !output_dependency_depths
+                .iter()
+                .flatten()
+                .any(|depth| (public_inputs..*inputs).contains(depth))
+            && !used_input_depths.iter().any(|depth| (public_inputs..*inputs).contains(depth))
     }
 }
 
@@ -99,15 +140,21 @@ impl From<&ProvenanceStack> for ProcSignature {
             public_inputs: stack.inputs(),
             outputs: stack.outputs(),
             net_effect: stack.net_effect(),
+            preserved_inputs: stack.preserved_inputs(),
+            output_input_depths: stack.output_input_depths(),
+            output_dependency_depths: stack.output_dependency_depths(),
+            used_input_depths: stack.used_input_depths(),
         }
     }
 }
 
 /// Provenance of a stack slot.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum Provenance {
     /// An input to the procedure.
-    Input,
+    Input(usize),
+    /// A value derived from one or more entry inputs.
+    Derived(Vec<usize>),
     /// A locally computed value.
     Local,
 }
@@ -118,8 +165,44 @@ impl Provenance {
     /// If either branch writes to the slot, the slot is marked as local.
     fn merge(self, other: Self) -> Self {
         match (self, other) {
-            (Provenance::Input, Provenance::Input) => Provenance::Input,
-            _ => Provenance::Local,
+            (Provenance::Input(lhs), Provenance::Input(rhs)) if lhs == rhs => {
+                Provenance::Input(lhs)
+            },
+            (lhs, rhs) => {
+                let deps = joined_dependency_depths(
+                    lhs.dependencies_including_pass_through()
+                        .into_iter()
+                        .chain(rhs.dependencies_including_pass_through()),
+                );
+                if deps.is_empty() {
+                    Provenance::Local
+                } else {
+                    Provenance::Derived(deps)
+                }
+            },
+        }
+    }
+
+    fn dependencies(&self) -> Vec<usize> {
+        match self {
+            Provenance::Input(_) | Provenance::Local => Vec::new(),
+            Provenance::Derived(depths) => depths.clone(),
+        }
+    }
+
+    fn dependencies_including_pass_through(&self) -> Vec<usize> {
+        match self {
+            Provenance::Input(depth) => vec![*depth],
+            Provenance::Derived(depths) => depths.clone(),
+            Provenance::Local => Vec::new(),
+        }
+    }
+
+    fn from_dependencies(dependencies: &[usize]) -> Self {
+        if dependencies.is_empty() {
+            Provenance::Local
+        } else {
+            Provenance::Derived(dependencies.to_vec())
         }
     }
 }
@@ -142,6 +225,7 @@ pub(super) struct ProvenanceStack {
     stack: VecDeque<Provenance>,
     current_depth: isize,
     required_depth: usize,
+    used_input_depths: Vec<usize>,
 }
 
 impl ProvenanceStack {
@@ -150,7 +234,7 @@ impl ProvenanceStack {
     /// from the stack.
     pub(super) fn ensure_depth(&mut self, required_depth: usize) {
         while self.stack.len() < required_depth {
-            self.stack.push_front(Provenance::Input);
+            self.stack.push_front(Provenance::Input(self.required_depth));
             self.required_depth += 1;
         }
     }
@@ -171,12 +255,87 @@ impl ProvenanceStack {
     /// Apply the known stack effects of a single instruction.
     pub(super) fn apply(&mut self, pops: usize, pushes: usize, required_depth: usize) {
         self.ensure_depth(required_depth);
+        let pushed_dependencies = self.read_dependency_depths(required_depth);
+        if pops > 0 || pushes > 0 {
+            self.record_used_dependencies(&pushed_dependencies);
+        }
         for _ in 0..pops {
             self.pop();
         }
         for _ in 0..pushes {
-            self.push()
+            self.push_with_dependencies(&pushed_dependencies)
         }
+    }
+
+    /// Apply an in-place stack read that constrains values but does not consume
+    /// them or produce a derived value.
+    pub(super) fn apply_preserving_read(&mut self, required_depth: usize) {
+        self.ensure_depth(required_depth);
+    }
+
+    /// Apply an in-place read whose result escapes through side effects.
+    pub(super) fn apply_side_effecting_read(&mut self, required_depth: usize) {
+        self.ensure_depth(required_depth);
+        let dependencies = self.read_dependency_depths(required_depth);
+        self.record_used_dependencies(&dependencies);
+    }
+
+    fn push_with_dependencies(&mut self, dependencies: &[usize]) {
+        if dependencies.is_empty() {
+            self.push();
+        } else {
+            self.stack.push_back(Provenance::Derived(dependencies.to_vec()));
+            self.current_depth += 1;
+        }
+    }
+
+    /// Apply a callee signature while preserving known input provenance in outputs.
+    pub(super) fn apply_signature(&mut self, signature: &ProcSignature) -> bool {
+        let ProcSignature::Known {
+            inputs,
+            outputs,
+            net_effect,
+            output_input_depths,
+            output_dependency_depths,
+            used_input_depths,
+            ..
+        } = signature
+        else {
+            return false;
+        };
+        assert!(net_effect <= &(*outputs as isize));
+
+        self.ensure_depth(*inputs);
+        let input_provenance: Vec<_> = (0..*inputs)
+            .map(|depth| self.stack.get(self.stack.len() - 1 - depth).cloned())
+            .collect();
+        let used_dependencies = joined_dependency_depths(
+            used_input_depths
+                .iter()
+                .filter_map(|depth| input_provenance.get(*depth).cloned().flatten())
+                .flat_map(|provenance| provenance.dependencies_including_pass_through()),
+        );
+        self.record_used_dependencies(&used_dependencies);
+        let pops = ((*outputs as isize) - net_effect) as usize;
+        for _ in 0..pops {
+            self.pop();
+        }
+        for (exit_depth, output_depth) in output_input_depths.iter().take(*outputs).enumerate() {
+            let output_dependencies = joined_dependency_depths(
+                output_dependency_depths
+                    .get(exit_depth)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|depth| input_provenance.get(*depth).cloned().flatten())
+                    .flat_map(|provenance| provenance.dependencies_including_pass_through()),
+            );
+            let provenance = output_depth
+                .and_then(|depth| input_provenance.get(depth).cloned().flatten())
+                .unwrap_or_else(|| Provenance::from_dependencies(&output_dependencies));
+            self.stack.push_back(provenance);
+            self.current_depth += 1;
+        }
+        true
     }
 
     /// Returns the number of inputs to the procedure.
@@ -194,14 +353,55 @@ impl ProvenanceStack {
         self.current_depth
     }
 
+    fn preserved_inputs(&self) -> Vec<usize> {
+        let mut depths: Vec<_> = self.output_input_depths().into_iter().flatten().collect();
+        depths.sort_unstable();
+        depths.dedup();
+        depths
+    }
+
+    fn output_input_depths(&self) -> Vec<Option<usize>> {
+        self.stack
+            .iter()
+            .map(|provenance| match provenance {
+                Provenance::Input(depth) => Some(*depth),
+                Provenance::Derived(_) | Provenance::Local => None,
+            })
+            .collect()
+    }
+
+    fn output_dependency_depths(&self) -> Vec<Vec<usize>> {
+        self.stack.iter().map(Provenance::dependencies).collect()
+    }
+
+    fn used_input_depths(&self) -> Vec<usize> {
+        self.used_input_depths.clone()
+    }
+
+    fn read_dependency_depths(&self, required_depth: usize) -> Vec<usize> {
+        joined_dependency_depths(
+            self.stack
+                .iter()
+                .rev()
+                .take(required_depth)
+                .flat_map(Provenance::dependencies_including_pass_through),
+        )
+    }
+
+    fn record_used_dependencies(&mut self, dependencies: &[usize]) {
+        self.used_input_depths.extend(dependencies);
+        self.used_input_depths.sort_unstable();
+        self.used_input_depths.dedup();
+    }
+
     pub(super) fn current_depth(&self) -> isize {
         self.current_depth
     }
 
     // Merge stack effects of two branches. This assumes that the stack depth is
     // the same for both versions of the stack. The required depth of the merged
-    // stack is the maximum depth across the two inputs. Individual slots are
-    // marked as local if either of the inputs has marked the slot as local.
+    // stack is the maximum depth across the two inputs. Individual slots that
+    // differ across branches retain any entry-input dependencies they may carry.
     pub(super) fn merge(&self, other: &Self) -> Self {
         assert!(self.current_depth == other.current_depth);
 
@@ -221,6 +421,24 @@ impl ProvenanceStack {
 
         let current_depth = self.current_depth;
         let required_depth = self.required_depth.max(other.required_depth);
-        ProvenanceStack { stack, current_depth, required_depth }
+        let used_input_depths = joined_dependency_depths(
+            self.used_input_depths
+                .iter()
+                .copied()
+                .chain(other.used_input_depths.iter().copied()),
+        );
+        ProvenanceStack {
+            stack,
+            current_depth,
+            required_depth,
+            used_input_depths,
+        }
     }
+}
+
+fn joined_dependency_depths(depths: impl IntoIterator<Item = usize>) -> Vec<usize> {
+    let mut depths: Vec<_> = depths.into_iter().collect();
+    depths.sort_unstable();
+    depths.dedup();
+    depths
 }

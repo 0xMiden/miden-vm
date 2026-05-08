@@ -21,10 +21,14 @@ fn run_masm_lint(cwd: &Path, input: &Path) -> Output {
 }
 
 fn run_masm_lint_with_args(cwd: &Path, args: &[&str], input: &Path) -> Output {
+    run_masm_lint_with_inputs(cwd, args, &[input])
+}
+
+fn run_masm_lint_with_inputs(cwd: &Path, args: &[&str], inputs: &[&Path]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_masm-lint"))
         .arg("--no-color")
         .args(args)
-        .arg(input)
+        .args(inputs)
         .current_dir(cwd)
         .output()
         .expect("failed to run masm-lint")
@@ -110,6 +114,38 @@ end
 }
 
 #[test]
+fn u32asserted_advice_memory_address_is_reported() {
+    let dir = temp_dir("u32asserted-advice-address");
+    let file = dir.join("u32asserted_advice_address.masm");
+    fs::write(
+        &file,
+        "\
+pub proc test(seed: felt) -> felt
+    adv_push
+    u32assert
+    mem_load
+    drop
+end
+",
+    )
+    .expect("failed to write MASM fixture");
+
+    let output = run_masm_lint(&dir, &file);
+
+    assert!(
+        !output.status.success(),
+        "u32asserted advice memory address unexpectedly passed: {output:?}"
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let output_text = format!("{stdout}\n{stderr}");
+    assert!(
+        output_text.contains("unconstrained advice used as memory address"),
+        "u32asserted advice memory address did not emit a warning: {output_text}"
+    );
+}
+
+#[test]
 fn u32testw_is_lifted_as_supported_instruction() {
     let dir = temp_dir("u32testw");
     let file = dir.join("u32testw.masm");
@@ -137,6 +173,120 @@ end
         !stderr.contains("unsupported instruction"),
         "u32testw was still reported unsupported: {stderr}"
     );
+}
+
+#[test]
+fn core_u32_ops_are_lifted_as_supported_instructions() {
+    let dir = temp_dir("core-u32-ops");
+    let file = dir.join("core_u32_ops.masm");
+    fs::write(
+        &file,
+        "\
+pub proc test(seed: felt) -> felt
+    u32assert
+    push.16
+    u32max
+    u32popcnt
+    u32div.4
+    u32rotl.1
+end
+",
+    )
+    .expect("failed to write MASM fixture");
+
+    let output = run_masm_lint(&dir, &file);
+
+    assert!(output.status.success(), "core U32 op MASM input failed: {output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains("unsupported instruction"),
+        "core U32 op was reported unsupported: {stderr}"
+    );
+}
+
+#[test]
+fn absolute_inputs_outside_cwd_do_not_share_fallback_module_path() {
+    let cwd = temp_dir("fallback-cwd");
+    let inputs_dir = temp_dir("fallback-inputs");
+    let clean = inputs_dir.join("clean.masm");
+    fs::write(
+        &clean,
+        "\
+pub proc clean(seed: felt) -> felt
+    push.1
+    add
+end
+",
+    )
+    .expect("failed to write clean MASM fixture");
+
+    let warning = inputs_dir.join("warning.masm");
+    fs::write(
+        &warning,
+        "\
+pub proc warning(seed: felt) -> felt
+    adv_push
+    u32wrapping_add
+end
+",
+    )
+    .expect("failed to write warning MASM fixture");
+
+    let output = run_masm_lint_with_inputs(&cwd, &[], &[&clean, &warning]);
+
+    assert!(!output.status.success(), "second standalone MASM input was skipped: {output:?}");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let output_text = format!("{stdout}\n{stderr}");
+    assert!(
+        output_text.contains("unconstrained advice reaches a u32 operation"),
+        "second standalone MASM input did not emit its warning: {output_text}"
+    );
+}
+
+#[test]
+fn core_intrinsics_are_lifted_as_supported_instructions() {
+    let dir = temp_dir("core-intrinsics");
+    let eval_file = dir.join("eval_circuit.masm");
+    fs::write(
+        &eval_file,
+        "\
+pub proc eval(a: felt, b: felt, c: felt) -> (felt, felt, felt)
+    eval_circuit
+end
+",
+    )
+    .expect("failed to write eval_circuit fixture");
+
+    let log_file = dir.join("log_precompile.masm");
+    fs::write(
+        &log_file,
+        "\
+pub proc log(
+    a: felt, b: felt, c: felt, d: felt,
+    e: felt, f: felt, g: felt, h: felt,
+    i: felt, j: felt, k: felt, l: felt
+) -> (
+    felt, felt, felt, felt,
+    felt, felt, felt, felt,
+    felt, felt, felt, felt
+)
+    log_precompile
+end
+",
+    )
+    .expect("failed to write log_precompile fixture");
+
+    for file in [&eval_file, &log_file] {
+        let output = run_masm_lint(&dir, file);
+
+        assert!(output.status.success(), "core intrinsic MASM input failed: {output:?}");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !stderr.contains("unsupported instruction"),
+            "core intrinsic was reported unsupported: {stderr}"
+        );
+    }
 }
 
 #[test]
@@ -168,5 +318,131 @@ end
         output_text.contains("unconstrained advice reaches a u32 operation")
             || output_text.contains("unconstrained advice reaches a u32 intrinsic"),
         "adv_pushw advice source did not emit a u32 warning: {output_text}"
+    );
+}
+
+#[test]
+fn u32assert_preserves_advice_provenance_for_nonzero_sinks() {
+    let dir = temp_dir("u32assert-advice-nonzero");
+    let file = dir.join("u32assert_advice_nonzero.masm");
+    fs::write(
+        &file,
+        "\
+pub proc test() -> felt
+    adv_push
+    u32assert
+    inv
+end
+",
+    )
+    .expect("failed to write MASM fixture");
+
+    let output = run_masm_lint(&dir, &file);
+
+    assert!(
+        !output.status.success(),
+        "u32assert advice nonzero sink unexpectedly passed: {output:?}"
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let output_text = format!("{stdout}\n{stderr}");
+    assert!(
+        output_text.contains("unconstrained advice reaches a divisor or `inv` input"),
+        "u32assert advice nonzero sink did not emit a warning: {output_text}"
+    );
+}
+
+#[test]
+fn branch_merged_u32asserted_advice_is_not_reported_as_u32_sink() {
+    let dir = temp_dir("branch-merged-u32assert-advice");
+    let file = dir.join("branch_merged_u32assert_advice.masm");
+    fs::write(
+        &file,
+        "\
+pub proc test(flag: felt) -> felt
+    if.true
+        adv_push
+        u32assert
+    else
+        adv_push
+        u32assert
+    end
+    push.1
+    u32wrapping_add
+end
+",
+    )
+    .expect("failed to write MASM fixture");
+
+    let output = run_masm_lint(&dir, &file);
+
+    assert!(output.status.success(), "branch-merged u32asserted advice failed: {output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains("unconstrained advice reaches a u32 operation"),
+        "branch-merged u32asserted advice emitted a u32 warning: {stderr}"
+    );
+}
+
+#[test]
+fn u32div_checks_advice_divisor_after_u32assert() {
+    let dir = temp_dir("u32div-advice-divisor");
+    let file = dir.join("u32div_advice_divisor.masm");
+    fs::write(
+        &file,
+        "\
+pub proc test() -> felt
+    push.10
+    adv_push
+    u32assert
+    u32div
+end
+",
+    )
+    .expect("failed to write MASM fixture");
+
+    let output = run_masm_lint(&dir, &file);
+
+    assert!(
+        !output.status.success(),
+        "u32div advice divisor unexpectedly passed: {output:?}"
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let output_text = format!("{stdout}\n{stderr}");
+    assert!(
+        output_text.contains("unconstrained advice reaches a divisor or `inv` input"),
+        "u32div advice divisor did not emit a warning: {output_text}"
+    );
+}
+
+#[test]
+fn u32div_immediate_does_not_treat_advice_dividend_as_divisor() {
+    let dir = temp_dir("u32div-imm-advice-dividend");
+    let file = dir.join("u32div_imm_advice_dividend.masm");
+    fs::write(
+        &file,
+        "\
+pub proc test() -> felt
+    adv_push
+    u32assert
+    u32div.4
+end
+",
+    )
+    .expect("failed to write MASM fixture");
+
+    let output = run_masm_lint(&dir, &file);
+
+    assert!(
+        output.status.success(),
+        "u32div immediate advice dividend unexpectedly failed: {output:?}"
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let output_text = format!("{stdout}\n{stderr}");
+    assert!(
+        !output_text.contains("unconstrained advice reaches a divisor or `inv` input"),
+        "u32div immediate advice dividend emitted a non-zero warning: {output_text}"
     );
 }

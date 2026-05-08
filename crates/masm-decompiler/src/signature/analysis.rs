@@ -96,9 +96,29 @@ impl<'a> Analysis<'a> {
         match inst {
             // Handle calls explicitly
             Exec(target) => self.visit_call(target, stack),
+            U32Assert | U32AssertWithError(_) => {
+                stack.apply_preserving_read(1);
+                OpResult::Known
+            },
+            U32Assert2 | U32Assert2WithError(_) => {
+                stack.apply_preserving_read(2);
+                OpResult::Known
+            },
+            U32AssertW | U32AssertWWithError(_) => {
+                stack.apply_preserving_read(4);
+                OpResult::Known
+            },
+            Emit => {
+                stack.apply_side_effecting_read(1);
+                OpResult::Known
+            },
             // TODO: Handle call and syscall
             Call(..) | SysCall(..) | DynCall | DynExec => OpResult::Unknown,
             _ => match StackEffect::from(inst) {
+                StackEffect::Known { pops: 0, pushes: 0, required_depth } if required_depth > 0 => {
+                    stack.apply_side_effecting_read(required_depth);
+                    OpResult::Known
+                },
                 StackEffect::Known { pops, pushes, required_depth } => {
                     stack.apply(pops, pushes, required_depth);
                     OpResult::Known
@@ -123,10 +143,9 @@ impl<'a> Analysis<'a> {
         // either callee signatures are known or inference failed. If inference
         // failed we cannot determine stack effects for the caller either and so
         // we bail here.
-        let StackEffect::Known { pops, pushes, required_depth } = signature.into() else {
+        if !stack.apply_signature(signature) {
             return OpResult::Unknown;
         };
-        stack.apply(pops, pushes, required_depth);
         OpResult::Known
     }
 

@@ -175,9 +175,8 @@ impl Env {
         self.set_var_zero_test(var, None);
     }
 
-    /// Sanitize a variable from this point onward.
+    /// Mark a variable as range-checked from this point onward.
     pub(super) fn sanitize_var(&mut self, var: &Var) {
-        self.set_var_fact(var, AdviceFact::bottom());
         let identity = self.identity_for_var(var);
         self.set_identity_u32_validity(&identity, U32Validity::ProvenU32);
     }
@@ -228,25 +227,9 @@ impl Env {
             let current = joined.locals.get(slot).cloned().unwrap_or_else(AdviceFact::bottom);
             joined.locals.insert(*slot, current.join(fact));
         }
-        for (key, validity) in &other.u32_validity {
-            let current = joined.u32_validity.get(key).copied().unwrap_or(U32Validity::Unknown);
-            let merged = current.join(*validity);
-            if merged.is_proven() {
-                joined.u32_validity.insert(key.clone(), merged);
-            } else {
-                joined.u32_validity.remove(key);
-            }
-        }
-        for (slot, validity) in &other.local_u32_validity {
-            let current =
-                joined.local_u32_validity.get(slot).copied().unwrap_or(U32Validity::Unknown);
-            let merged = current.join(*validity);
-            if merged.is_proven() {
-                joined.local_u32_validity.insert(*slot, merged);
-            } else {
-                joined.local_u32_validity.remove(slot);
-            }
-        }
+        joined.u32_validity = join_u32_validity_maps(&self.u32_validity, &other.u32_validity);
+        joined.local_u32_validity =
+            join_u32_validity_maps(&self.local_u32_validity, &other.local_u32_validity);
         joined.aliases = agreeing_entries(&self.aliases, &other.aliases);
         joined.local_aliases = agreeing_entries(&self.local_aliases, &other.local_aliases);
         joined.zero_tests = agreeing_entries(&self.zero_tests, &other.zero_tests);
@@ -262,6 +245,11 @@ impl Env {
 
     /// Set one alias identity to the requested `u32` validity fact.
     fn set_identity_u32_validity(&mut self, identity: &VarKey, validity: U32Validity) {
+        if validity.is_proven() {
+            self.u32_validity.insert(identity.clone(), validity);
+        } else {
+            self.u32_validity.remove(identity);
+        }
         for key in self
             .aliases
             .iter()
@@ -349,6 +337,29 @@ where
         .collect()
 }
 
+/// Join two sparse `u32` validity maps, treating absent entries as unknown.
+fn join_u32_validity_maps<K>(
+    lhs: &HashMap<K, U32Validity>,
+    rhs: &HashMap<K, U32Validity>,
+) -> HashMap<K, U32Validity>
+where
+    K: Clone + Eq + std::hash::Hash,
+{
+    lhs.keys()
+        .chain(rhs.keys())
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .filter_map(|key| {
+            let merged = lhs
+                .get(key)
+                .copied()
+                .unwrap_or(U32Validity::Unknown)
+                .join(rhs.get(key).copied().unwrap_or(U32Validity::Unknown));
+            merged.is_proven().then_some((key.clone(), merged))
+        })
+        .collect()
+}
+
 /// Seed input variables using the same numbering scheme as the lifting pass.
 pub(super) fn seed_input_env(input_count: usize) -> Env {
     let mut env = Env::default();
@@ -371,7 +382,7 @@ pub(super) fn assign_expr_metadata(dest: &Var, expr: &Expr, env: &mut Env) {
     env.set_var_u32_validity(dest, expr_u32_validity(expr, env));
 }
 
-/// Preserve metadata across a phi only when both sides agree exactly.
+/// Preserve metadata across a phi only when both sides agree on the fact being preserved.
 pub(super) fn assign_phi_metadata(
     dest: &Var,
     lhs_var: &Var,
@@ -395,6 +406,13 @@ pub(super) fn assign_phi_metadata(
     } else {
         env.set_var_zero_test(dest, None);
     }
+
+    env.set_var_u32_validity(
+        dest,
+        lhs_env
+            .u32_validity_for_var(lhs_var)
+            .join(rhs_env.u32_validity_for_var(rhs_var)),
+    );
 }
 
 /// Join one loop-body evaluation back into the current abstract loop state.
@@ -805,5 +823,46 @@ fn apply_adv_pipe_effect(
     for result in &intrinsic.results {
         env.set_var_fact(result, AdviceFact::from_source(span));
         env.clear_var_metadata(result);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn var(depth: usize) -> Var {
+        Var::new((depth as u64).into(), depth)
+    }
+
+    #[test]
+    fn join_requires_var_u32_validity_on_both_sides() {
+        let value = var(0);
+        let mut proven = Env::default();
+        proven.set_var_u32_validity(&value, U32Validity::ProvenU32);
+
+        assert_eq!(proven.join(&Env::default()).u32_validity_for_var(&value), U32Validity::Unknown);
+        assert_eq!(Env::default().join(&proven).u32_validity_for_var(&value), U32Validity::Unknown);
+        assert_eq!(proven.join(&proven).u32_validity_for_var(&value), U32Validity::ProvenU32);
+    }
+
+    #[test]
+    fn join_preserves_sanitized_identity_u32_validity_when_both_sides_prove_it() {
+        let value = var(0);
+        let mut proven = Env::default();
+        proven.sanitize_var(&value);
+
+        assert_eq!(proven.join(&Env::default()).u32_validity_for_var(&value), U32Validity::Unknown);
+        assert_eq!(Env::default().join(&proven).u32_validity_for_var(&value), U32Validity::Unknown);
+        assert_eq!(proven.join(&proven).u32_validity_for_var(&value), U32Validity::ProvenU32);
+    }
+
+    #[test]
+    fn join_requires_local_u32_validity_on_both_sides() {
+        let mut proven = Env::default();
+        proven.set_local_u32_validity(7, U32Validity::ProvenU32);
+
+        assert_eq!(proven.join(&Env::default()).u32_validity_for_local(7), U32Validity::Unknown);
+        assert_eq!(Env::default().join(&proven).u32_validity_for_local(7), U32Validity::Unknown);
+        assert_eq!(proven.join(&proven).u32_validity_for_local(7), U32Validity::ProvenU32);
     }
 }

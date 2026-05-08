@@ -1,6 +1,8 @@
 //! Frontend: parse MASM source into an AST module plus lightweight metadata.
 
 use std::{
+    collections::hash_map::DefaultHasher,
+    hash::{Hash, Hasher},
     path::{Path as FsPath, PathBuf as FsPathBuf},
     sync::Arc,
 };
@@ -83,8 +85,9 @@ impl Program {
         // Prefer the library parser; fall back to executable if needed.
         let mut parser = ModuleParser::new(ModuleKind::Library);
 
-        let module_name =
-            derive_module_path(path, roots).unwrap_or_else(|_| MasmPathBuf::absolute(Module::ROOT));
+        let module_name = derive_module_path(path, roots).unwrap_or_else(|_| {
+            fallback_module_path(path).unwrap_or_else(|_| MasmPathBuf::absolute(Module::ROOT))
+        });
 
         let module = match parser.parse_file(&module_name, path, source_manager.clone()) {
             Ok(m) => m,
@@ -117,6 +120,27 @@ impl Program {
     pub(crate) fn procedures(&self) -> impl Iterator<Item = &Procedure> {
         self.module.procedures()
     }
+}
+
+/// Derive a stable, unique module path for standalone files outside all configured roots.
+fn fallback_module_path(file_path: &FsPath) -> Result<MasmPathBuf, String> {
+    let normalized_file_path = normalize_path_for_matching(file_path)?;
+    let stem = normalized_file_path.file_stem().and_then(|s| s.to_str()).unwrap_or("module");
+
+    let mut component = String::from("file");
+    for ch in stem.chars().take(48) {
+        if ch.is_ascii_alphanumeric() {
+            component.push('_');
+            component.push(ch.to_ascii_lowercase());
+        } else if ch == '_' {
+            component.push('_');
+        }
+    }
+
+    let mut hasher = DefaultHasher::new();
+    normalized_file_path.hash(&mut hasher);
+    let path_str = format!("standalone::{component}_{:016x}", hasher.finish());
+    MasmPathBuf::new(&path_str).map_err(|e| format!("invalid fallback module path {path_str}: {e}"))
 }
 
 /// Derive a MASM module path (e.g. `miden::core::math::u64`) from a filesystem path and library

@@ -2,7 +2,9 @@
 
 use std::collections::BTreeSet;
 
-use masm_decompiler::{BinOp, Expr, LocalAccessKind, LoopPhi, Stmt, SymbolPath, UnOp, Var};
+use masm_decompiler::{
+    BinOp, Expr, Intrinsic, LocalAccessKind, LoopPhi, Stmt, SymbolPath, UnOp, Var,
+};
 
 use super::{
     domain::AdviceFact,
@@ -227,6 +229,15 @@ impl<'a> ProcNonZeroAnalyzer<'a> {
                 opaque = true;
             },
             Stmt::Intrinsic { span, intrinsic } => {
+                let sink_fact = intrinsic_nonzero_sink_fact(intrinsic, &env);
+                if sink_fact.has_concrete_sources() {
+                    diagnostics.push(self.new_diagnostic(
+                        *span,
+                        "unconstrained advice reaches a divisor or `inv` input without a nearby non-zero check",
+                        &sink_fact,
+                    ));
+                }
+                required_inputs.extend(sink_fact.from_inputs.iter().copied());
                 refine_nonzero_from_intrinsic(intrinsic, &mut env);
                 apply_intrinsic_effect(*span, intrinsic, &mut env);
             },
@@ -419,6 +430,18 @@ impl<'a> ProcNonZeroAnalyzer<'a> {
 struct CallResult {
     diagnostics: Vec<AdviceDiagnostic>,
     required_inputs: BTreeSet<usize>,
+}
+
+/// Return the advice fact feeding any intrinsic divisor input.
+fn intrinsic_nonzero_sink_fact(intrinsic: &Intrinsic, env: &Env) -> AdviceFact {
+    if !matches!(intrinsic.name.as_str(), "u32div" | "u32mod" | "u32divmod") {
+        return AdviceFact::bottom();
+    }
+
+    let Some(divisor) = intrinsic.args.first().filter(|arg| !env.is_var_nonzero(arg)) else {
+        return AdviceFact::bottom();
+    };
+    env.fact_for_var(divisor)
 }
 
 /// Return the advice fact feeding any divisor or `inv` input nested in this expression.

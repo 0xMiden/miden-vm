@@ -147,10 +147,22 @@ fn lift_u32_inst(
         Instruction::U32ShlImm(imm) => lift_binop_u8_imm(inst, span, BinOp::U32Shl, imm, stack)?,
         Instruction::U32ShrImm(imm) => lift_binop_u8_imm(inst, span, BinOp::U32Shr, imm, stack)?,
         Instruction::U32RotrImm(imm) => lift_binop_u8_imm(inst, span, BinOp::U32Rotr, imm, stack)?,
+        Instruction::U32Rotl => {
+            return lift_u32_intrinsic(inst, span, "u32rotl", resolver, sigs, stack);
+        },
+        Instruction::U32RotlImm(imm) => {
+            return lift_u32_intrinsic_u8_imm(inst, span, "u32rotl", imm, resolver, sigs, stack);
+        },
         Instruction::U32Lt => lift_binop(inst, span, BinOp::U32Lt, stack)?,
         Instruction::U32Lte => lift_binop(inst, span, BinOp::U32Lte, stack)?,
         Instruction::U32Gt => lift_binop(inst, span, BinOp::U32Gt, stack)?,
         Instruction::U32Gte => lift_binop(inst, span, BinOp::U32Gte, stack)?,
+        Instruction::U32Min => {
+            return lift_u32_intrinsic(inst, span, "u32min", resolver, sigs, stack);
+        },
+        Instruction::U32Max => {
+            return lift_u32_intrinsic(inst, span, "u32max", resolver, sigs, stack);
+        },
         Instruction::U32WrappingAdd => lift_binop(inst, span, BinOp::U32WrappingAdd, stack)?,
         Instruction::U32WrappingSub => lift_binop(inst, span, BinOp::U32WrappingSub, stack)?,
         Instruction::U32WrappingMul => lift_binop(inst, span, BinOp::U32WrappingMul, stack)?,
@@ -175,6 +187,9 @@ fn lift_u32_inst(
         Instruction::U32Ctz => lift_unop(inst, span, UnOp::U32Ctz, stack)?,
         Instruction::U32Clo => lift_unop(inst, span, UnOp::U32Clo, stack)?,
         Instruction::U32Cto => lift_unop(inst, span, UnOp::U32Cto, stack)?,
+        Instruction::U32Popcnt => {
+            return lift_u32_intrinsic(inst, span, "u32popcnt", resolver, sigs, stack);
+        },
         Instruction::U32WideningAdd => {
             return lift_u32_intrinsic(inst, span, "u32widening_add", resolver, sigs, stack);
         },
@@ -251,6 +266,12 @@ fn lift_u32_inst(
         },
         Instruction::U32DivModImm(imm) => {
             return lift_u32_intrinsic_imm(inst, span, "u32divmod", imm, resolver, sigs, stack);
+        },
+        Instruction::U32Div => {
+            return lift_u32_intrinsic(inst, span, "u32div", resolver, sigs, stack);
+        },
+        Instruction::U32DivImm(imm) => {
+            return lift_u32_intrinsic_imm(inst, span, "u32div", imm, resolver, sigs, stack);
         },
         Instruction::U32Mod => {
             return lift_u32_intrinsic(inst, span, "u32mod", resolver, sigs, stack);
@@ -569,6 +590,34 @@ fn lift_u32_intrinsic_imm(
     span: SourceSpan,
     name: &str,
     imm: &ImmU32,
+    resolver: &SymbolResolver<'_>,
+    sigs: &SignatureMap,
+    stack: &mut SymbolicStack,
+) -> LiftingResult<Option<Vec<Stmt>>> {
+    let effect = effect_for_inst(inst, span, resolver, sigs)?;
+    let (args, results) = stack.apply_checked(
+        effect.pops(),
+        effect.pushes(),
+        effect.required_depth(),
+        span,
+        inst.to_string(),
+    )?;
+    Ok(Some(vec![Stmt::Intrinsic {
+        span,
+        intrinsic: Intrinsic {
+            name: format!("{name}.{imm}"),
+            args,
+            results,
+        },
+    }]))
+}
+
+/// Lift a u32 intrinsic instruction with a u8 immediate suffix.
+fn lift_u32_intrinsic_u8_imm(
+    inst: &Instruction,
+    span: SourceSpan,
+    name: &str,
+    imm: &ImmU8,
     resolver: &SymbolResolver<'_>,
     sigs: &SignatureMap,
     stack: &mut SymbolicStack,
@@ -1103,8 +1152,10 @@ fn lift_intrinsic_inst(
         Instruction::MTreeMerge => "mtree_merge".to_string(),
         Instruction::MTreeVerify => "mtree_verify".to_string(),
         Instruction::MTreeVerifyWithError(err) => format!("mtree_verify.{err}"),
+        Instruction::EvalCircuit => "eval_circuit".to_string(),
         Instruction::HornerBase => "horner_eval_base".to_string(),
         Instruction::HornerExt => "horner_eval_ext".to_string(),
+        Instruction::LogPrecompile => "log_precompile".to_string(),
         Instruction::Emit => "emit".to_string(),
         Instruction::EmitImm(imm) => format!("emit.{imm}"),
         Instruction::Sdepth => "sdepth".to_string(),
