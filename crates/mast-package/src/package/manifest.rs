@@ -52,9 +52,9 @@ pub enum ManifestValidationError {
     )]
     MissingProcedureMast { path: Arc<Path>, digest: Word },
     #[error(
-        "invalid procedure export '{path}': the node id in the manifest is not a procedure root"
+        "invalid procedure export '{path}': the declared node id and digest do not correspond to a procedure root in the MAST"
     )]
-    InvalidProcedureNode { path: Arc<Path> },
+    InvalidProcedureExport { path: Arc<Path> },
     #[error("invalid export path '{path}': {error}")]
     InvalidExportPath { path: Arc<Path>, error: ast::PathError },
     #[error("package must contain at least one exported procedure")]

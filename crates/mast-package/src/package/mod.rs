@@ -97,9 +97,9 @@ impl Package {
         for export in manifest.exports() {
             if let Some(proc) = export.as_procedure()
                 && let Some(node) = proc.node
-                && !mast.is_procedure_root(node)
+                && !mast.is_procedure_root_with_exact_digest(node, proc.digest)
             {
-                return Err(ManifestValidationError::InvalidProcedureNode {
+                return Err(ManifestValidationError::InvalidProcedureExport {
                     path: proc.path.clone(),
                 });
             }

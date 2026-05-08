@@ -427,6 +427,15 @@ impl MastForest {
         self.roots.contains(&node_id)
     }
 
+    /// Returns true if a node with the specified ID is a root of a procedure in this MAST forest,
+    /// and the digest of that procedure is `digest`.
+    ///
+    /// This is primarily intended for use in confirming that procedure exports of a package,
+    /// which declare their MAST node and digest, actually exist in the MAST.
+    pub fn is_procedure_root_with_exact_digest(&self, node_id: MastNodeId, digest: Word) -> bool {
+        self.is_procedure_root(node_id) && self[node_id].digest() == digest
+    }
+
     /// Returns an iterator over the digests of all procedures in this MAST forest.
     pub fn procedure_digests(&self) -> impl Iterator<Item = Word> + '_ {
         self.roots.iter().map(|&root_id| self[root_id].digest())

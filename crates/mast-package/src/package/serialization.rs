@@ -489,7 +489,7 @@ impl ProcedureExport {
             let node_id = MastNodeId::from_u32_safe(source.read_u32()?, mast)?;
             if !mast.is_procedure_root(node_id) {
                 return Err(DeserializationError::InvalidValue(
-                    ManifestValidationError::InvalidProcedureNode { path }.to_string(),
+                    ManifestValidationError::InvalidProcedureExport { path }.to_string(),
                 ));
             }
             Some(node_id)
@@ -863,7 +863,7 @@ mod tests {
         );
         let err_msg = result.unwrap_err().to_string();
         assert!(
-            err_msg.contains("the node id in the manifest is not a procedure root"),
+            err_msg.contains("node id and digest do not correspond to a procedure root"),
             "error should mention missing procedure root, got: {err_msg}"
         );
     }
