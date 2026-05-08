@@ -2,18 +2,18 @@
 
 use std::collections::HashMap;
 
-use masm_decompiler::{SymbolPath, ir::Stmt};
+use masm_decompiler::{Stmt, SymbolPath};
 
 use super::{
     domain::AdviceFact,
     inter::PreparedProc,
     shared::{Env, intrinsic_base_name},
-    summary::{AdviceDiagnostic, AdviceDiagnosticsMap, AdviceSinkKind, AdviceSummaryMap},
+    summary::{AdviceDiagnostic, AdviceDiagnosticsMap, AdviceSummaryMap},
     walker::{self, SinkDetector},
 };
 
 /// Collect Merkle-root diagnostics for all procedures.
-pub(crate) fn collect_merkle_diagnostics(
+pub(super) fn collect_merkle_diagnostics(
     prepared: &HashMap<SymbolPath, PreparedProc>,
     provenance_summaries: &AdviceSummaryMap,
 ) -> AdviceDiagnosticsMap {
@@ -65,12 +65,7 @@ impl MerkleDetector {
         message: impl Into<String>,
         fact: &AdviceFact,
     ) -> AdviceDiagnostic {
-        let mut diagnostic = AdviceDiagnostic::new(
-            self.proc_path.clone(),
-            span,
-            AdviceSinkKind::MerkleRoot,
-            message,
-        );
+        let mut diagnostic = AdviceDiagnostic::new(self.proc_path.clone(), span, message);
         diagnostic.origins = fact.source_spans.iter().copied().collect();
         diagnostic
     }

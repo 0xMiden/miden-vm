@@ -1,2 +1,2 @@
-pub mod path;
-pub mod resolution;
+pub(crate) mod path;
+pub(crate) mod resolution;

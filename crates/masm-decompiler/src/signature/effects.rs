@@ -5,7 +5,7 @@ use miden_assembly_syntax::{
 
 /// Describes the local stack effect of a single instruction or operation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum StackEffect {
+pub(crate) enum StackEffect {
     Known {
         /// The number of elements popped from the stack.
         pops: usize,
@@ -19,87 +19,16 @@ pub enum StackEffect {
 }
 
 impl StackEffect {
-    pub const fn known(pops: usize, pushes: usize) -> Self {
+    const fn known(pops: usize, pushes: usize) -> Self {
         StackEffect::Known { pops, pushes, required_depth: pops }
     }
 
-    pub const fn unknown() -> Self {
-        StackEffect::Unknown
-    }
-
-    pub const fn with_required_depth(self, required_depth: usize) -> Self {
+    const fn with_required_depth(self, required_depth: usize) -> Self {
         match self {
             StackEffect::Known { pops, pushes, .. } => {
                 StackEffect::Known { pops, pushes, required_depth }
             },
             StackEffect::Unknown => StackEffect::Unknown,
-        }
-    }
-
-    /// Returns the net stack effect (pushes - pops) if known.
-    pub fn net_effect(&self) -> Option<isize> {
-        match self {
-            StackEffect::Known { pops, pushes, .. } => Some(*pushes as isize - *pops as isize),
-            StackEffect::Unknown => None,
-        }
-    }
-
-    /// Compose two effects in sequence: `self` followed by `other`.
-    ///
-    /// Returns `Unknown` if either effect is unknown.
-    ///
-    /// # Semantics
-    ///
-    /// After `self` executes, it has popped `self.pops` values and pushed
-    /// `self.pushes` new values. The `other` effect then operates on this
-    /// modified stack, first consuming from `self`'s pushed values before
-    /// reaching the original stack.
-    pub fn then(self, other: Self) -> Self {
-        let StackEffect::Known {
-            pops: self_pops,
-            pushes: self_pushes,
-            required_depth: self_required_depth,
-        } = self
-        else {
-            return StackEffect::Unknown;
-        };
-
-        let StackEffect::Known {
-            pops: other_pops,
-            pushes: other_pushes,
-            required_depth: other_required_depth,
-        } = other
-        else {
-            return StackEffect::Unknown;
-        };
-
-        // `other` consumes from `self`'s pushes first, then from original stack.
-        let other_pops_from_original = other_pops.saturating_sub(self_pushes);
-        let combined_pops = self_pops + other_pops_from_original;
-
-        // Values remaining from `self` after `other`'s consumption, plus `other`'s pushes.
-        let remaining_from_self = self_pushes.saturating_sub(other_pops);
-        let combined_pushes = remaining_from_self + other_pushes;
-
-        // Required depth calculation:
-        // - `self` needs `self_required_depth` on entry
-        // - `other` needs `other_required_depth` after `self`, which means `other_required_depth -
-        //   self_pushes + self_pops` from original stack
-        let self_net = self_pushes as isize - self_pops as isize;
-        let other_required_from_original = if self_net >= 0 {
-            other_required_depth.saturating_sub(self_net as usize)
-        } else {
-            other_required_depth + (-self_net) as usize
-        };
-
-        // Maintain the invariant: required_depth >= pops
-        let combined_required_depth =
-            self_required_depth.max(other_required_from_original).max(combined_pops);
-
-        StackEffect::Known {
-            pops: combined_pops,
-            pushes: combined_pushes,
-            required_depth: combined_required_depth,
         }
     }
 }

@@ -4,7 +4,8 @@ use std::collections::HashMap;
 
 use miden_debug_types::SourceSpan;
 
-use super::{AdviceDiagnostic, AdviceDiagnosticsMap};
+use super::AdviceDiagnostic;
+use crate::SymbolPath;
 
 /// One origin-centric view over downstream unconstrained-advice diagnostics.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -17,7 +18,7 @@ pub struct AdviceRootCauseGroup {
 
 impl AdviceRootCauseGroup {
     /// Return the number of downstream sinks reachable from this origin.
-    pub fn sink_count(&self) -> usize {
+    pub(crate) fn sink_count(&self) -> usize {
         self.diagnostics.len()
     }
 
@@ -34,7 +35,7 @@ impl AdviceRootCauseGroup {
 /// root-cause group. Diagnostics without resolved origins are skipped because
 /// there is no root-cause location to anchor them to in grouped UIs.
 pub fn group_advice_diagnostics_by_origin(
-    diagnostics: &AdviceDiagnosticsMap,
+    diagnostics: &HashMap<SymbolPath, Vec<AdviceDiagnostic>>,
 ) -> Vec<AdviceRootCauseGroup> {
     let mut grouped = HashMap::<SourceSpan, Vec<AdviceDiagnostic>>::new();
 

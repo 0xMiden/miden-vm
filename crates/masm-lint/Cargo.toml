@@ -17,6 +17,5 @@ test = false
 [dependencies]
 clap.workspace = true
 masm-analysis = { path = "../masm-analysis" }
-masm-decompiler = { path = "../masm-decompiler" }
 miden-debug-types = { workspace = true, features = ["std"] }
 yansi.workspace = true

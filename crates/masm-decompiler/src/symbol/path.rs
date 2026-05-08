@@ -25,7 +25,7 @@ impl SymbolPath {
     }
 
     /// Build a fully-qualified path for an item in a module path string.
-    pub fn from_module_path_and_name(module_path: &str, name: &str) -> Self {
+    pub(crate) fn from_module_path_and_name(module_path: &str, name: &str) -> Self {
         if module_path.is_empty() {
             Self::new(name)
         } else {
@@ -50,25 +50,6 @@ impl SymbolPath {
     /// For path `miden::core::crypto::sha256::hash`, returns `Some("miden::core::crypto::sha256")`.
     pub fn module_path(&self) -> Option<&str> {
         self.0.rsplit_once("::").map(|(prefix, _)| prefix)
-    }
-
-    /// Iterate over path segments.
-    ///
-    /// For path `miden::core::crypto::sha256::hash`, yields `[
-    ///   "miden", "core", "crypto", "sha256", "hash"
-    /// ]`.
-    pub fn segments(&self) -> impl Iterator<Item = &str> {
-        self.0.split("::").filter(|s| !s.is_empty())
-    }
-
-    /// Check if this path ends with the given suffix.
-    pub fn ends_with(&self, suffix: &str) -> bool {
-        self.0.ends_with(suffix)
-    }
-
-    /// Convert into the inner String.
-    pub fn into_inner(self) -> String {
-        self.0
     }
 }
 

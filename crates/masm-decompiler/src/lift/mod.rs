@@ -14,8 +14,7 @@ use miden_assembly_syntax::{
     ast::{Block, Instruction, Op, Procedure},
     debuginfo::{SourceSpan, Spanned},
 };
-pub use stack::SymbolicStack;
-use stack::{SlotId, StackEntry};
+use stack::{SlotId, StackEntry, SymbolicStack};
 
 use crate::{
     ir::{Expr, IfPhi, IndexExpr, LoopPhi, LoopVar, Stmt, ValueId, Var, VarBase},
@@ -158,35 +157,30 @@ pub type LiftingResult<T> = Result<T, LiftingError>;
 
 /// Context for tracking loop nesting during lifting.
 #[derive(Debug, Clone, Default)]
-pub struct LoopContext {
+struct LoopContext {
     /// Stack of (loop_var, entry_depth) for each enclosing loop.
     loops: Vec<(LoopVar, usize)>,
 }
 
 impl LoopContext {
     /// Create a new empty loop context.
-    pub fn new() -> Self {
+    fn new() -> Self {
         Self { loops: Vec::new() }
     }
 
     /// Enter a new loop with the given loop variable and entry stack depth.
-    pub fn enter(&mut self, loop_var: LoopVar, entry_depth: usize) {
+    fn enter(&mut self, loop_var: LoopVar, entry_depth: usize) {
         self.loops.push((loop_var, entry_depth));
     }
 
     /// Exit the current loop.
-    pub fn exit(&mut self) {
+    fn exit(&mut self) {
         self.loops.pop();
     }
 
     /// Get the current loop nesting depth (number of enclosing loops).
-    pub fn depth(&self) -> usize {
+    fn depth(&self) -> usize {
         self.loops.len()
-    }
-
-    /// Get the innermost loop info, if any.
-    pub fn innermost(&self) -> Option<&(LoopVar, usize)> {
-        self.loops.last()
     }
 }
 
@@ -208,10 +202,10 @@ pub fn lift_proc(
     if let Some(ProcSignature::Known { inputs, public_inputs, .. }) = sigs.get(proc_path) {
         if public_inputs < inputs {
             for hidden_depth in *public_inputs..*inputs {
-                stack.push_fresh_with_value_id(ValueId::new(hidden_depth as u64), hidden_depth);
+                stack.push_fresh_with_value_id((hidden_depth as u64).into(), hidden_depth);
             }
             for display_depth in 0..*public_inputs {
-                stack.push_fresh_with_value_id(ValueId::new(display_depth as u64), display_depth);
+                stack.push_fresh_with_value_id((display_depth as u64).into(), display_depth);
             }
         } else {
             stack.ensure_depth(*inputs);
@@ -376,7 +370,7 @@ fn lift_repeat(
     // Create loop variable using current nesting depth.
     // The depth uniquely identifies this loop within its scope and maps
     // directly to loop counter names (0 → i, 1 → j, etc.).
-    let loop_var = LoopVar::new(loop_ctx.depth());
+    let loop_var = LoopVar { loop_depth: loop_ctx.depth() };
 
     // Enter loop context.
     loop_ctx.enter(loop_var, entry_depth);

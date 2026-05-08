@@ -9,14 +9,10 @@ use std::{
 };
 
 use clap::Parser;
-use masm_analysis::{
-    AdviceDiagnostic, AdviceRootCauseGroup, AnalysisSnapshot, SignatureMismatch, TypeDiagnostic,
-    group_advice_diagnostics_by_origin, signature_mismatch_message,
+use masm_analysis::lint::{
+    AdviceDiagnostic, AdviceRootCauseGroup, AnalysisSnapshot, LibraryRoot, SignatureMismatch,
+    SymbolPath, Workspace, group_advice_diagnostics_by_origin, signature_mismatch_message,
     signature_mismatches_from_snapshot,
-};
-use masm_decompiler::{
-    SymbolPath,
-    frontend::{LibraryRoot, Workspace},
 };
 use miden_debug_types::DefaultSourceManager;
 use render::{LintDiagnostic, RelatedSpan};
@@ -143,14 +139,6 @@ fn run(cli: Cli) -> i32 {
         emit_unresolved_dependency_errors(&unresolved, &workspace);
     }
 
-    // TODO: Re-enable once the decompiler's type analysis distinguishes
-    // genuinely incorrect types from unresolved (default Felt) types.
-    // for type_diags in snapshot.type_diagnostics.values() {
-    //     for td in type_diags {
-    //         diagnostics.push(type_diagnostic_to_lint(td));
-    //     }
-    // }
-
     // Advice diagnostics.
     if cli.group_by_origin {
         for group in group_advice_diagnostics_by_origin(&snapshot.advice_diagnostics) {
@@ -220,17 +208,6 @@ fn signature_mismatch_to_lint(m: &SignatureMismatch) -> Option<LintDiagnostic> {
         note: format!("in procedure `{}`", procedure.as_str()),
         related: Vec::new(),
     })
-}
-
-/// Convert a [`TypeDiagnostic`] into a [`LintDiagnostic`].
-#[allow(dead_code)]
-fn type_diagnostic_to_lint(td: &TypeDiagnostic) -> LintDiagnostic {
-    LintDiagnostic {
-        message: td.message.clone(),
-        span: td.span,
-        note: format!("in procedure `{}`", td.procedure.as_str()),
-        related: Vec::new(),
-    }
 }
 
 /// Convert an [`AdviceDiagnostic`] into a [`LintDiagnostic`], attaching

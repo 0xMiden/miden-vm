@@ -1,15 +1,9 @@
-use std::{
-    collections::{HashMap, HashSet},
-    sync::Arc,
-};
+use std::collections::{HashMap, HashSet};
 
-use miden_assembly_syntax::{
-    ast::{Invoke, InvokeKind, path::PathBuf as MasmPathBuf},
-    debuginfo::DefaultSourceManager,
-};
+use miden_assembly_syntax::ast::{Invoke, path::PathBuf as MasmPathBuf};
 
 use crate::{
-    frontend::{Program, Workspace},
+    frontend::Workspace,
     symbol::{
         path::SymbolPath,
         resolution::{SymbolResolver, create_resolver},
@@ -17,49 +11,37 @@ use crate::{
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum CallTarget {
+enum CallTarget {
     Direct(SymbolPath),
     Opaque,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CallEdge {
-    pub kind: InvokeKind,
-    pub target: CallTarget,
+struct CallEdge {
+    target: CallTarget,
 }
 
 #[derive(Debug, Clone)]
 pub struct ProcNode {
-    pub name: SymbolPath,
-    pub module_path: SymbolPath,
-    pub edges: Vec<CallEdge>,
+    name: SymbolPath,
+    module_path: SymbolPath,
+    edges: Vec<CallEdge>,
+}
+
+impl ProcNode {
+    pub fn name(&self) -> &SymbolPath {
+        &self.name
+    }
+
+    pub(crate) fn module_path(&self) -> &SymbolPath {
+        &self.module_path
+    }
 }
 
 #[derive(Debug, Default)]
 pub struct CallGraph {
-    pub nodes: Vec<ProcNode>,
-    pub name_to_id: HashMap<SymbolPath, usize>,
-}
-
-impl From<&Program> for CallGraph {
-    fn from(program: &Program) -> Self {
-        let mut graph = CallGraph::default();
-
-        let resolver = create_resolver(program.module(), Arc::new(DefaultSourceManager::default()));
-        for (idx, proc) in program.procedures().enumerate() {
-            let module_path = program.module_path().clone();
-            let module_path_str = <MasmPathBuf as AsRef<str>>::as_ref(&module_path);
-            let name = SymbolPath::from_module_path_and_name(module_path_str, proc.name().as_str());
-            let edges = proc.invoked().map(|invoke| edge_from_invoke(invoke, &resolver)).collect();
-            graph.name_to_id.insert(name.clone(), idx);
-            graph.nodes.push(ProcNode {
-                name,
-                module_path: SymbolPath::new(module_path_str),
-                edges,
-            });
-        }
-        graph
-    }
+    nodes: Vec<ProcNode>,
+    name_to_id: HashMap<SymbolPath, usize>,
 }
 
 impl From<&Workspace> for CallGraph {
@@ -91,14 +73,13 @@ impl From<&Workspace> for CallGraph {
 impl CallGraph {
     /// Returns an iterator that yields nodes in bottom-up order (leaves first,
     /// then nodes whose callees have all been processed, and so on).
-    pub fn iter(&self) -> CallGraphIterator<'_> {
+    pub fn iter(&self) -> impl Iterator<Item = &ProcNode> + '_ {
         CallGraphIterator::new(self)
     }
 }
 
 fn edge_from_invoke(invoke: &Invoke, resolver: &SymbolResolver<'_>) -> CallEdge {
     CallEdge {
-        kind: invoke.kind,
         target: resolver
             .resolve_target(&invoke.target)
             .ok()
@@ -108,23 +89,10 @@ fn edge_from_invoke(invoke: &Invoke, resolver: &SymbolResolver<'_>) -> CallEdge 
     }
 }
 
-pub trait EdgeTargetString {
-    fn target_string(&self) -> String;
-}
-
-impl EdgeTargetString for CallEdge {
-    fn target_string(&self) -> String {
-        match &self.target {
-            CallTarget::Direct(s) => s.to_string(),
-            CallTarget::Opaque => "unknown".to_string(),
-        }
-    }
-}
-
 /// Iterator that yields nodes in bottom-up order (leaves first, then nodes
 /// whose callees have all been processed, and so on). Non-SCC nodes are
 /// guaranteed to come before SCC nodes.
-pub struct CallGraphIterator<'a> {
+struct CallGraphIterator<'a> {
     graph: &'a CallGraph,
     /// Collected nodes in bottom-up order
     sorted_nodes: Vec<usize>,
@@ -135,7 +103,7 @@ pub struct CallGraphIterator<'a> {
 }
 
 impl<'a> CallGraphIterator<'a> {
-    pub fn new(graph: &'a CallGraph) -> Self {
+    fn new(graph: &'a CallGraph) -> Self {
         CallGraphIterator {
             graph,
             sorted_nodes: Vec::new(),

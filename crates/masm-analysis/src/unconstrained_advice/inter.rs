@@ -3,12 +3,7 @@
 use std::collections::HashMap;
 
 use masm_decompiler::{
-    callgraph::CallGraph,
-    frontend::Workspace,
-    lift::lift_proc,
-    signature::{ProcSignature, SignatureMap},
-    symbol::resolution::create_resolver,
-    types::TypeSummaryMap,
+    CallGraph, ProcSignature, SignatureMap, TypeSummaryMap, Workspace, create_resolver, lift_proc,
 };
 
 use super::{
@@ -19,21 +14,20 @@ use super::{
     summary::{AdviceDiagnosticsMap, AdviceSummary, AdviceSummaryMap},
     u32::collect_u32_diagnostics,
 };
-use crate::analysis_inputs;
 
 /// Prepared lifting result for one procedure.
 #[derive(Debug, Clone)]
-pub(crate) struct PreparedProc {
+pub(super) struct PreparedProc {
     /// Input arity inferred from the procedure signature.
-    pub(crate) inputs: usize,
+    pub(super) inputs: usize,
     /// Output arity inferred from the procedure signature.
-    pub(crate) outputs: usize,
+    pub(super) outputs: usize,
     /// Lifted SSA statements, when the procedure is analyzable.
-    pub(crate) stmts: Option<Vec<masm_decompiler::ir::Stmt>>,
+    pub(super) stmts: Option<Vec<masm_decompiler::Stmt>>,
 }
 
 /// Infer unconstrained-advice summaries and diagnostics using precomputed analysis inputs.
-pub fn infer_unconstrained_advice(
+pub(super) fn infer_unconstrained_advice(
     workspace: &Workspace,
     callgraph: &CallGraph,
     signatures: &SignatureMap,
@@ -62,7 +56,7 @@ fn prepare_procs(
     let mut prepared = HashMap::new();
 
     for node in callgraph.iter() {
-        let proc_path = node.name.clone();
+        let proc_path = node.name().clone();
         let Some(signature) = signatures.get(&proc_path) else {
             prepared.insert(proc_path, PreparedProc { inputs: 0, outputs: 0, stmts: None });
             continue;
@@ -95,14 +89,6 @@ fn prepare_procs(
     prepared
 }
 
-/// Infer unconstrained-advice summaries and diagnostics by building analysis inputs locally.
-pub fn infer_unconstrained_advice_in_workspace(
-    workspace: &Workspace,
-) -> (AdviceSummaryMap, AdviceDiagnosticsMap) {
-    let (callgraph, signatures, type_summaries) = analysis_inputs(workspace);
-    infer_unconstrained_advice(workspace, &callgraph, &signatures, &type_summaries)
-}
-
 /// Infer bottom-up provenance summaries for all procedures.
 fn infer_provenance_summaries(
     callgraph: &CallGraph,
@@ -111,15 +97,15 @@ fn infer_provenance_summaries(
     let mut summaries = AdviceSummaryMap::default();
 
     for node in callgraph.iter() {
-        let Some(proc) = prepared.get(&node.name) else {
-            summaries.insert(node.name.clone(), AdviceSummary::unknown());
+        let Some(proc) = prepared.get(node.name()) else {
+            summaries.insert(node.name().clone(), AdviceSummary::unknown());
             continue;
         };
         let summary = match proc.stmts.as_deref() {
             Some(stmts) => analyze_proc_provenance(proc.inputs, proc.outputs, stmts, &summaries),
             None => AdviceSummary::unknown_with_arity(proc.outputs),
         };
-        summaries.insert(node.name.clone(), summary);
+        summaries.insert(node.name().clone(), summary);
     }
 
     summaries

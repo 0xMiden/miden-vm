@@ -1,9 +1,6 @@
 //! Interprocedural provenance summaries for unconstrained advice.
 
-use masm_decompiler::{
-    SymbolPath,
-    ir::{LocalAccessKind, LoopPhi, Stmt, Var},
-};
+use masm_decompiler::{LocalAccessKind, LoopPhi, Stmt, SymbolPath, Var};
 
 use super::{
     shared::{
@@ -17,7 +14,7 @@ use super::{
 use crate::abstract_interp::{FixpointConfig, JoinSemiLattice, iterate_to_fixpoint};
 
 /// Analyze one lifted procedure and summarize which outputs may carry unconstrained advice.
-pub(crate) fn analyze_proc_provenance(
+pub(super) fn analyze_proc_provenance(
     input_count: usize,
     output_count: usize,
     stmts: &[Stmt],
@@ -267,7 +264,7 @@ fn eval_loop_block(
 }
 
 /// Assign call-result facts by substituting caller arguments into callee summaries.
-pub(crate) fn assign_call_results(
+pub(super) fn assign_call_results(
     env: &mut Env,
     target: &str,
     args: &[Var],

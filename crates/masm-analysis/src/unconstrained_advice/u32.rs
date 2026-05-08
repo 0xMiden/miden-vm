@@ -1,9 +1,8 @@
 //! Diagnostics for unconstrained advice reaching `U32` sinks.
 
 use masm_decompiler::{
-    SymbolPath,
-    ir::{BinOp, Expr, Intrinsic, Stmt, UnOp},
-    types::{TypeRequirement, TypeSummaryMap},
+    BinOp, Expr, Intrinsic, LocalAccessKind, LoopPhi, Stmt, SymbolPath, TypeRequirement,
+    TypeSummaryMap, UnOp, Var,
 };
 
 use super::{
@@ -15,14 +14,11 @@ use super::{
         assign_phi_metadata, expr_output_fact, expr_u32_validity,
         intrinsic_requires_u32_precondition, refine_if_envs, seed_input_env, stmt_span,
     },
-    summary::{
-        AdviceDiagnostic, AdviceDiagnosticsMap, AdviceSinkKind, AdviceSummaryMap,
-        CallArgumentRequirement,
-    },
+    summary::{AdviceDiagnostic, AdviceDiagnosticsMap, AdviceSummaryMap},
 };
 
 /// Collect U32 diagnostics for all procedures using already-computed provenance summaries.
-pub(crate) fn collect_u32_diagnostics(
+pub(super) fn collect_u32_diagnostics(
     prepared: &std::collections::HashMap<SymbolPath, super::inter::PreparedProc>,
     provenance_summaries: &AdviceSummaryMap,
     type_summaries: &TypeSummaryMap,
@@ -101,7 +97,6 @@ impl<'a> ProcU32Analyzer<'a> {
                 if sink_fact.has_concrete_sources() {
                     diagnostics.push(self.new_diagnostic(
                         *span,
-                        AdviceSinkKind::U32Expression,
                         "unconstrained advice reaches a u32 operation",
                         &sink_fact,
                     ));
@@ -130,11 +125,10 @@ impl<'a> ProcU32Analyzer<'a> {
                 apply_local_store_word(store.kind, &store.values, u32::from(store.index), &mut env);
             },
             Stmt::LocalLoad { load, .. } => match load.kind {
-                masm_decompiler::ir::LocalAccessKind::Element => {
+                LocalAccessKind::Element => {
                     apply_local_load_scalar(&load.outputs, u32::from(load.index), &mut env);
                 },
-                masm_decompiler::ir::LocalAccessKind::WordBe
-                | masm_decompiler::ir::LocalAccessKind::WordLe => {
+                LocalAccessKind::WordBe | LocalAccessKind::WordLe => {
                     apply_local_load_word(
                         load.kind,
                         &load.outputs,
@@ -166,7 +160,6 @@ impl<'a> ProcU32Analyzer<'a> {
                 if sink_fact.has_concrete_sources() {
                     diagnostics.push(self.new_diagnostic(
                         *span,
-                        AdviceSinkKind::U32Intrinsic,
                         "unconstrained advice reaches a u32 intrinsic",
                         &sink_fact,
                     ));
@@ -178,7 +171,6 @@ impl<'a> ProcU32Analyzer<'a> {
                 if sink_fact.has_concrete_sources() {
                     diagnostics.push(self.new_diagnostic(
                         stmt_span(stmt),
-                        AdviceSinkKind::U32Expression,
                         "unconstrained advice reaches a u32 operation",
                         &sink_fact,
                     ));
@@ -211,7 +203,6 @@ impl<'a> ProcU32Analyzer<'a> {
                 if sink_fact.has_concrete_sources() {
                     diagnostics.push(self.new_diagnostic(
                         stmt_span(stmt),
-                        AdviceSinkKind::U32Expression,
                         "unconstrained advice reaches a u32 operation",
                         &sink_fact,
                     ));
@@ -231,12 +222,7 @@ impl<'a> ProcU32Analyzer<'a> {
     }
 
     /// Evaluate a structured loop body conservatively.
-    fn eval_loop_block(
-        &self,
-        body: &[Stmt],
-        phis: &[masm_decompiler::ir::LoopPhi],
-        entry_env: Env,
-    ) -> EvalResult {
+    fn eval_loop_block(&self, body: &[Stmt], phis: &[LoopPhi], entry_env: Env) -> EvalResult {
         let mut loop_env = entry_env.clone();
 
         for _ in 0..MAX_LOOP_PASSES {
@@ -292,11 +278,10 @@ impl<'a> ProcU32Analyzer<'a> {
     fn new_diagnostic(
         &self,
         span: miden_debug_types::SourceSpan,
-        sink: AdviceSinkKind,
         message: impl Into<String>,
         fact: &AdviceFact,
     ) -> AdviceDiagnostic {
-        let mut diagnostic = AdviceDiagnostic::new(self.proc_path.clone(), span, sink, message);
+        let mut diagnostic = AdviceDiagnostic::new(self.proc_path.clone(), span, message);
         diagnostic.origins = fact.source_spans.iter().copied().collect();
         diagnostic
     }
@@ -306,7 +291,7 @@ impl<'a> ProcU32Analyzer<'a> {
         &self,
         span: miden_debug_types::SourceSpan,
         target: &str,
-        args: &[masm_decompiler::ir::Var],
+        args: &[Var],
         env: &Env,
     ) -> Vec<AdviceDiagnostic> {
         let Some(summary) = self.type_summaries.get(&SymbolPath::new(target.to_string())) else {
@@ -322,17 +307,13 @@ impl<'a> ProcU32Analyzer<'a> {
                 continue;
             }
             let callee = SymbolPath::new(target.to_string());
-            let mut diagnostic = self.new_diagnostic(
+            let diagnostic = self.new_diagnostic(
                 span,
-                AdviceSinkKind::CallArgument,
                 format!(
                     "argument {index} to `{callee}` expects U32 and may contain unconstrained advice"
                 ),
                 &arg_fact,
             );
-            diagnostic.callee = Some(callee);
-            diagnostic.arg_index = Some(index);
-            diagnostic.call_requirement = Some(CallArgumentRequirement::U32);
             diagnostics.push(diagnostic);
         }
         diagnostics
