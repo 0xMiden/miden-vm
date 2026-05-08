@@ -590,7 +590,6 @@ begin
     exp.POWER
     mem_load.0b1010
     locaddr.LOCAL
-    adv_push.1
     dup.3
     swap.2
     movup.4

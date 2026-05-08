@@ -413,6 +413,7 @@ fn lower_felt_primitive_instruction(text: &str) -> Option<Instruction> {
 fn lower_stack_primitive_instruction(text: &str) -> Option<Instruction> {
     match text {
         "adv_push" => Some(Instruction::AdvPush),
+        "adv_pushw" => Some(Instruction::AdvPushW),
         "caller" => Some(Instruction::Caller),
         "cdrop" => Some(Instruction::CDrop),
         "cdropw" => Some(Instruction::CDropW),
