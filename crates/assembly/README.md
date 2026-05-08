@@ -121,7 +121,7 @@ let kernel_lib = Assembler::new(source_manager.clone())
     .unwrap();
 
 // Create assembler with the kernel
-let assembler = Assembler::with_kernel(source_manager, kernel_lib.into());
+let assembler = Assembler::with_kernel(source_manager, kernel_lib.into()).unwrap();
 ```
 
 Programs compiled by this assembler will be able to make calls to the
