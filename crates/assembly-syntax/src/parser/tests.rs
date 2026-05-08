@@ -788,6 +788,33 @@ end
 }
 
 #[test]
+fn cst_backend_rejects_oversized_bit_size_without_panic() {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    let source = test_source_file(
+        "\
+begin
+    exp.u256
+end
+",
+    );
+
+    let parsed = catch_unwind(AssertUnwindSafe(|| {
+        parse_forms_with_backend(source.clone(), ParserBackend::Cst)
+    }));
+    assert!(parsed.is_ok(), "CST backend panicked for oversized bit-size");
+
+    let cst = parsed.unwrap().expect_err("expected invalid bit-size error");
+    let rendered = render_diagnostic(&cst);
+
+    assert!(
+        rendered.contains("invalid literal: expected value to be a valid bit size"),
+        "{rendered}"
+    );
+    assert!(rendered.contains("exp.u256"), "{rendered}");
+}
+
+#[test]
 fn cst_backend_matches_legacy_suffixless_primitive_syntax_errors() {
     let source = test_source_file(
         "\

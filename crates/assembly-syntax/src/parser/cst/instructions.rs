@@ -1300,8 +1300,9 @@ fn lower_exp_family(
         && let Some(bits) = token.text().strip_prefix('u')
         && let Some(bits) = parse_decimal_u64(bits)
     {
-        let bits = u8::try_from(bits).expect("parsed decimal bit-size should fit in u8");
-        if bits < 64 {
+        if let Ok(bits) = u8::try_from(bits)
+            && bits < 64
+        {
             return Ok(Some(vec![inst_op(span, Instruction::ExpBitLength(bits))]));
         }
 
