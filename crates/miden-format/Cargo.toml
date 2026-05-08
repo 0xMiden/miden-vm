@@ -26,3 +26,4 @@ clap.workspace = true
 serde.workspace = true
 thiserror = { workspace = true, features = ["std"] }
 toml = { workspace = true, features = ["display", "parse", "serde", "std"] }
+walkdir.workspace = true

@@ -66,6 +66,8 @@ enum CliError {
     Config(#[from] config::ConfigError),
     #[error(transparent)]
     SourceManagerError(#[from] SourceManagerError),
+    #[error(transparent)]
+    WalkDir(#[from] walkdir::Error),
 }
 
 fn main() -> ExitCode {
@@ -176,7 +178,7 @@ fn collect_inputs(
     cli: &Cli,
     source_manager: &dyn SourceManager,
 ) -> Result<Vec<Arc<SourceFile>>, CliError> {
-    let mut inputs = vec![];
+    let mut inputs = Vec::with_capacity(cli.paths.len());
 
     if cli.stdin {
         let path = cli.stdin_filepath.clone().unwrap_or_else(|| PathBuf::from("<stdin>"));
@@ -191,10 +193,26 @@ fn collect_inputs(
         return Err(CliError::MissingInput);
     }
 
-    inputs.reserve_exact(cli.paths.len());
     for path in cli.paths.iter() {
-        let source = source_manager.load_file(path)?;
-        inputs.push(source);
+        if path.is_dir() {
+            let walker = walkdir::WalkDir::new(path);
+            for entry in walker {
+                let entry = entry?;
+                // We only care about files
+                if !entry.file_type().is_file() {
+                    continue;
+                }
+                // We only care about .masm files specifically
+                if entry.path().extension().is_none_or(|ext| !ext.eq_ignore_ascii_case("masm")) {
+                    continue;
+                }
+                let source = source_manager.load_file(entry.path())?;
+                inputs.push(source);
+            }
+        } else {
+            let source = source_manager.load_file(path)?;
+            inputs.push(source);
+        }
     }
 
     Ok(inputs)

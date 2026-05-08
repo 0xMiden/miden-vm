@@ -111,6 +111,7 @@ quote = "1.0"
 rand_chacha = { version = "0.9", default-features = false }
 rstest = "0.26"
 toml = { version = "1.0", default-features = false }
+walkdir = "2.5"
 
 [workspace.lints.rust]
 unexpected_cfgs = { check-cfg = ['cfg(fuzzing)'], level = "warn" }

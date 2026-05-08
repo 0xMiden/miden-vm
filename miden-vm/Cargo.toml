@@ -102,4 +102,4 @@ miden-utils-testing.workspace = true
 predicates = { version = "3.1" }
 proptest.workspace = true
 tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
-walkdir = { version = "2.5" }
+walkdir.workspace = true
