@@ -1486,7 +1486,9 @@ dependencies = [
  "clap",
  "miden-assembly-syntax-cst",
  "miden-debug-types",
+ "serde",
  "thiserror",
+ "toml",
 ]
 
 [[package]]

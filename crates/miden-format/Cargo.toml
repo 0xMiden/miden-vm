@@ -23,4 +23,6 @@ doctest = false
 miden-assembly-syntax-cst = { workspace = true, features = ["std"] }
 miden-debug-types = { workspace = true, features = ["std"] }
 clap.workspace = true
+serde.workspace = true
 thiserror = { workspace = true, features = ["std"] }
+toml = { workspace = true, features = ["display", "parse", "serde", "std"] }

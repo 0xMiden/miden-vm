@@ -9,10 +9,9 @@ use miden_assembly_syntax_cst::{
     rowan::{NodeOrToken, ast::AstNode},
 };
 
-const INDENT_WIDTH: usize = 4;
-const MAX_LINE_WIDTH: usize = 80;
+use crate::config::Config;
 
-pub fn format_syntax(root: &SyntaxNode) -> String {
+pub fn format_syntax(config: &Config, root: &SyntaxNode) -> String {
     let source = SourceFile::cast(root.clone()).expect("expected source file root");
     let mut lines = Vec::new();
     let (entries, tail) = analyze_children(source.syntax());
@@ -21,7 +20,7 @@ pub fn format_syntax(root: &SyntaxNode) -> String {
         emit_leading_layout(&mut lines, &entry, 0);
 
         let item = Item::cast(entry.node).expect("expected top-level item");
-        let mut rendered = render_item(&item, 0);
+        let mut rendered = render_item(&item, 0, config);
         if let Some(comment) = entry.trailing_comment {
             append_inline_comment(&mut rendered, &comment);
         }
@@ -178,15 +177,17 @@ fn analyze_children(parent: &SyntaxNode) -> (Vec<NodeLayout>, ContainerTail) {
     )
 }
 
-fn render_item(item: &Item, indent: usize) -> String {
+fn render_item(item: &Item, indent: usize, config: &Config) -> String {
     match item {
         Item::Doc(doc) => render_doc(doc, indent),
-        Item::Import(import) => render_import(import, indent),
-        Item::Constant(constant) => render_value_declaration(constant.syntax(), indent),
-        Item::TypeDecl(type_decl) => render_type_decl(type_decl, indent),
-        Item::AdviceMap(advice_map) => render_value_declaration(advice_map.syntax(), indent),
-        Item::BeginBlock(begin) => render_begin_block(begin, indent),
-        Item::Procedure(procedure) => render_procedure(procedure, indent),
+        Item::Import(import) => render_import(import, indent, config),
+        Item::Constant(constant) => render_value_declaration(constant.syntax(), indent, config),
+        Item::TypeDecl(type_decl) => render_type_decl(type_decl, indent, config),
+        Item::AdviceMap(advice_map) => {
+            render_value_declaration(advice_map.syntax(), indent, config)
+        },
+        Item::BeginBlock(begin) => render_begin_block(begin, indent, config),
+        Item::Procedure(procedure) => render_procedure(procedure, indent, config),
     }
 }
 
@@ -205,7 +206,7 @@ fn render_line_form(node: &SyntaxNode, indent: usize) -> String {
     rendered
 }
 
-fn render_import(import: &Import, indent: usize) -> String {
+fn render_import(import: &Import, indent: usize, config: &Config) -> String {
     let Some(path) = import.path() else {
         return render_line_form(import.syntax(), indent);
     };
@@ -218,7 +219,7 @@ fn render_import(import: &Import, indent: usize) -> String {
 
     let path_tokens = significant_tokens(path.syntax());
     let alias_tokens = significant_tokens_after_child(import.syntax(), path.syntax());
-    let mut lines = render_path_lines(&header, &path_tokens, indent);
+    let mut lines = render_path_lines(&header, &path_tokens, indent, config);
     if !alias_tokens.is_empty() {
         let alias = render_import_alias(&alias_tokens);
         if let Some(last) = lines.last_mut() {
@@ -228,16 +229,18 @@ fn render_import(import: &Import, indent: usize) -> String {
                 } else {
                     " "
                 };
-            if line_length(last) + line_length(separator) + line_length(&alias) <= MAX_LINE_WIDTH {
+            if line_length(last) + line_length(separator) + line_length(&alias)
+                <= config.max_line_length()
+            {
                 last.push_str(separator);
                 last.push_str(&alias);
             } else {
-                lines.push(format!("{}{}", indent_string(indent + INDENT_WIDTH), alias));
+                lines.push(format!("{}{}", indent_string(indent + config.indent_size()), alias));
             }
         }
     }
 
-    let mut rendered = if lines.len() == 1 && line_length(&lines[0]) <= MAX_LINE_WIDTH {
+    let mut rendered = if lines.len() == 1 && line_length(&lines[0]) <= config.max_line_length() {
         lines.remove(0)
     } else {
         lines.join("\n")
@@ -250,7 +253,7 @@ fn render_import(import: &Import, indent: usize) -> String {
     rendered
 }
 
-fn render_value_declaration(node: &SyntaxNode, indent: usize) -> String {
+fn render_value_declaration(node: &SyntaxNode, indent: usize, config: &Config) -> String {
     let Some(value) = direct_child_of_kind(node, SyntaxKind::Expr) else {
         return render_line_form(node, indent);
     };
@@ -266,13 +269,15 @@ fn render_value_declaration(node: &SyntaxNode, indent: usize) -> String {
 
     let mut rendered = if has_comment_token(&value) {
         let header = format!("{}{}", indent_string(indent), render_token_sequence(&prefix_tokens));
-        let body = render_expression_with_comments(&value, indent + INDENT_WIDTH).join("\n");
+        let body = render_expression_with_comments(&value, indent + config.indent_size(), config)
+            .join("\n");
         format!("{header}\n{body}")
-    } else if line_length(&compact) <= MAX_LINE_WIDTH {
+    } else if line_length(&compact) <= config.max_line_length() {
         compact
     } else {
         let header = format!("{}{}", indent_string(indent), render_token_sequence(&prefix_tokens));
-        let body = render_token_lines(&value_tokens, indent + INDENT_WIDTH, true).join("\n");
+        let body = render_token_lines(&value_tokens, indent + config.indent_size(), true, config)
+            .join("\n");
         format!("{header}\n{body}")
     };
 
@@ -283,11 +288,11 @@ fn render_value_declaration(node: &SyntaxNode, indent: usize) -> String {
     rendered
 }
 
-fn render_type_decl(type_decl: &TypeDecl, indent: usize) -> String {
+fn render_type_decl(type_decl: &TypeDecl, indent: usize, config: &Config) -> String {
     let mut rendered = render_type_decl_prefix(type_decl, indent);
 
     if let Some(body) = type_decl.body() {
-        rendered.push_str(&render_type_body(&body, indent, line_length(&rendered)));
+        rendered.push_str(&render_type_body(&body, indent, line_length(&rendered), config));
     }
 
     if let Some(comment) = direct_comment_token(type_decl.syntax()) {
@@ -316,7 +321,12 @@ fn render_type_decl_prefix(type_decl: &TypeDecl, indent: usize) -> String {
     rendered
 }
 
-fn render_type_body(body: &TypeBody, indent: usize, prefix_width: usize) -> String {
+fn render_type_body(
+    body: &TypeBody,
+    indent: usize,
+    prefix_width: usize,
+    config: &Config,
+) -> String {
     let text = body.syntax().text().to_string();
     let has_multiline_body = text.contains('\n');
     let has_comment = body
@@ -328,16 +338,16 @@ fn render_type_body(body: &TypeBody, indent: usize, prefix_width: usize) -> Stri
     let compact_body = render_compact_tokens(body.syntax());
     if !has_multiline_body
         && !has_comment
-        && prefix_width + 1 + line_length(&compact_body) <= MAX_LINE_WIDTH
+        && prefix_width + 1 + line_length(&compact_body) <= config.max_line_length()
     {
         return format!(" {compact_body}");
     }
 
     if !has_multiline_body && !has_comment {
-        if let Some(braced_body) = render_wrapped_braced_type_body(body, indent) {
+        if let Some(braced_body) = render_wrapped_braced_type_body(body, indent, config) {
             return braced_body;
         }
-        return format!("\n{}{}", indent_string(indent + INDENT_WIDTH), compact_body);
+        return format!("\n{}{}", indent_string(indent + config.indent_size()), compact_body);
     }
 
     let lines = trim_line_ends(&text);
@@ -359,7 +369,7 @@ fn render_type_body(body: &TypeBody, indent: usize, prefix_width: usize) -> Stri
         let line_indent = if trimmed.starts_with('}') {
             indent
         } else {
-            indent + INDENT_WIDTH
+            indent + config.indent_size()
         };
         rendered.push_str(&indent_string(line_indent));
         rendered.push_str(trimmed);
@@ -368,13 +378,13 @@ fn render_type_body(body: &TypeBody, indent: usize, prefix_width: usize) -> Stri
     rendered
 }
 
-fn render_begin_block(begin: &BeginBlock, indent: usize) -> String {
+fn render_begin_block(begin: &BeginBlock, indent: usize, config: &Config) -> String {
     let mut rendered = format!("{}begin", indent_string(indent));
     if let Some(comment) = comment_before_child_of_kind(begin.syntax(), SyntaxKind::Block, 0) {
         append_inline_comment(&mut rendered, &comment);
     }
     if let Some(block) = begin.block() {
-        let body = render_block(&block, indent + INDENT_WIDTH);
+        let body = render_block(&block, indent + config.indent_size(), config);
         if !body.is_empty() {
             rendered.push('\n');
             rendered.push_str(&body);
@@ -385,7 +395,7 @@ fn render_begin_block(begin: &BeginBlock, indent: usize) -> String {
     rendered
 }
 
-fn render_procedure(procedure: &Procedure, indent: usize) -> String {
+fn render_procedure(procedure: &Procedure, indent: usize, config: &Config) -> String {
     let mut lines = Vec::new();
 
     for attribute in procedure.attributes() {
@@ -406,7 +416,7 @@ fn render_procedure(procedure: &Procedure, indent: usize) -> String {
         header.push_str(name.text());
     }
     if let Some(signature) = procedure.signature() {
-        lines.extend(render_signature_lines(&header, &signature, indent));
+        lines.extend(render_signature_lines(&header, &signature, indent, config));
     } else {
         lines.push(header);
     }
@@ -420,14 +430,14 @@ fn render_procedure(procedure: &Procedure, indent: usize) -> String {
         standalone_comments_before_child_of_kind(procedure.syntax(), SyntaxKind::Block, 0);
     if !body_comments.is_empty() {
         lines.extend(
-            body_comments
-                .into_iter()
-                .map(|comment| format!("{}{}", indent_string(indent + INDENT_WIDTH), comment)),
+            body_comments.into_iter().map(|comment| {
+                format!("{}{}", indent_string(indent + config.indent_size()), comment)
+            }),
         );
     }
 
     if let Some(block) = procedure.block() {
-        let body = render_block(&block, indent + INDENT_WIDTH);
+        let body = render_block(&block, indent + config.indent_size(), config);
         if !body.is_empty() {
             lines.extend(body.split('\n').map(ToOwned::to_owned));
         }
@@ -441,6 +451,7 @@ fn render_signature_lines(
     header_prefix: &str,
     signature: &Signature,
     indent: usize,
+    config: &Config,
 ) -> Vec<String> {
     let has_comments = has_comment_tokens(&all_tokens(signature.syntax()));
     let compact_signature = (!has_comments).then(|| {
@@ -451,7 +462,7 @@ fn render_signature_lines(
     });
     if let Some(compact_signature) = compact_signature.as_ref() {
         let compact = format!("{header_prefix}{compact_signature}");
-        if line_length(&compact) <= MAX_LINE_WIDTH {
+        if line_length(&compact) <= config.max_line_length() {
             return vec![compact];
         }
     }
@@ -485,7 +496,8 @@ fn render_signature_lines(
     let mut lines = vec![format!("{header_prefix}(")];
     let param_count = params.len();
     for (index, param) in params.into_iter().enumerate() {
-        let mut param_lines = render_signature_item_lines(&param, indent + INDENT_WIDTH);
+        let mut param_lines =
+            render_signature_item_lines(&param, indent + config.indent_size(), config);
         if index + 1 != param_count
             && let Some(last_line) = param_lines.last_mut()
         {
@@ -514,7 +526,7 @@ fn render_signature_lines(
         let result = render_token_sequence_with_style(&result_tokens, SpacingStyle::TypeBodyItem);
         if items.len() <= 1
             && !result_has_comments
-            && line_length(&closing) + 4 + line_length(&result) <= MAX_LINE_WIDTH
+            && line_length(&closing) + 4 + line_length(&result) <= config.max_line_length()
         {
             closing.push_str(" -> ");
             closing.push_str(&result);
@@ -527,7 +539,8 @@ fn render_signature_lines(
 
         let item_count = items.len();
         for (index, item) in items.into_iter().enumerate() {
-            let mut item_lines = render_signature_item_lines(&item, indent + INDENT_WIDTH);
+            let mut item_lines =
+                render_signature_item_lines(&item, indent + config.indent_size(), config);
             if index + 1 != item_count
                 && let Some(last_line) = item_lines.last_mut()
             {
@@ -541,7 +554,9 @@ fn render_signature_lines(
     }
 
     let result = render_token_sequence_with_style(&result_tokens, SpacingStyle::TypeBodyItem);
-    if !result_has_comments && line_length(&closing) + 4 + line_length(&result) <= MAX_LINE_WIDTH {
+    if !result_has_comments
+        && line_length(&closing) + 4 + line_length(&result) <= config.max_line_length()
+    {
         closing.push_str(" -> ");
         closing.push_str(&result);
         lines.push(closing);
@@ -550,11 +565,15 @@ fn render_signature_lines(
 
     closing.push_str(" ->");
     lines.push(closing);
-    lines.extend(render_signature_item_lines(&result_tokens, indent + INDENT_WIDTH));
+    lines.extend(render_signature_item_lines(
+        &result_tokens,
+        indent + config.indent_size(),
+        config,
+    ));
     lines
 }
 
-fn render_block(block: &Block, indent: usize) -> String {
+fn render_block(block: &Block, indent: usize, config: &Config) -> String {
     let (entries, tail) = analyze_children(block.syntax());
     let mut lines = Vec::new();
     let mut current_instruction_line: Option<String> = None;
@@ -575,11 +594,12 @@ fn render_block(block: &Block, indent: usize) -> String {
                     &instruction,
                     &entry,
                     indent,
+                    config,
                 );
             },
             Operation::If(if_op) => {
                 flush_instruction_line(&mut lines, &mut current_instruction_line);
-                let mut rendered = render_if(&if_op, indent);
+                let mut rendered = render_if(&if_op, indent, config);
                 if let Some(comment) = entry.trailing_comment {
                     append_inline_comment(&mut rendered, &comment);
                 }
@@ -587,7 +607,7 @@ fn render_block(block: &Block, indent: usize) -> String {
             },
             Operation::While(while_op) => {
                 flush_instruction_line(&mut lines, &mut current_instruction_line);
-                let mut rendered = render_while(&while_op, indent);
+                let mut rendered = render_while(&while_op, indent, config);
                 if let Some(comment) = entry.trailing_comment {
                     append_inline_comment(&mut rendered, &comment);
                 }
@@ -595,7 +615,7 @@ fn render_block(block: &Block, indent: usize) -> String {
             },
             Operation::Repeat(repeat_op) => {
                 flush_instruction_line(&mut lines, &mut current_instruction_line);
-                let mut rendered = render_repeat(&repeat_op, indent);
+                let mut rendered = render_repeat(&repeat_op, indent, config);
                 if let Some(comment) = entry.trailing_comment {
                     append_inline_comment(&mut rendered, &comment);
                 }
@@ -620,13 +640,18 @@ fn render_instruction(
     instruction: &Instruction,
     entry: &NodeLayout,
     indent: usize,
+    config: &Config,
 ) {
     let tokens = all_tokens(instruction.syntax());
     if has_comment_tokens(&tokens) {
         flush_instruction_line(lines, current_instruction_line);
 
-        let mut rendered_lines =
-            render_token_stream_with_comments(&tokens, indent, SpacingStyle::CompactInstruction);
+        let mut rendered_lines = render_token_stream_with_comments(
+            &tokens,
+            indent,
+            SpacingStyle::CompactInstruction,
+            config,
+        );
         if let Some(comment) = entry.trailing_comment.as_deref()
             && let Some(last_line) = rendered_lines.last_mut()
         {
@@ -647,7 +672,7 @@ fn render_instruction(
     if can_append {
         let line = current_instruction_line.as_mut().expect("line exists");
         let candidate_len = line.len() + 1 + op_text.len();
-        if candidate_len <= MAX_LINE_WIDTH {
+        if candidate_len <= config.max_line_length() {
             line.push(' ');
             line.push_str(&op_text);
             return;
@@ -667,7 +692,7 @@ fn render_instruction(
     }
 }
 
-fn render_if(if_op: &IfOp, indent: usize) -> String {
+fn render_if(if_op: &IfOp, indent: usize, config: &Config) -> String {
     let mut rendered =
         format!("{}{}", indent_string(indent), render_prefix_before_first_block(if_op.syntax()));
     if let Some(comment) = comment_before_child_of_kind(if_op.syntax(), SyntaxKind::Block, 0) {
@@ -675,7 +700,7 @@ fn render_if(if_op: &IfOp, indent: usize) -> String {
     }
 
     if let Some(then_block) = if_op.then_block() {
-        let then_body = render_block(&then_block, indent + INDENT_WIDTH);
+        let then_body = render_block(&then_block, indent + config.indent_size(), config);
         if !then_body.is_empty() {
             rendered.push('\n');
             rendered.push_str(&then_body);
@@ -689,7 +714,7 @@ fn render_if(if_op: &IfOp, indent: usize) -> String {
             append_inline_comment(&mut else_line, &comment);
         }
         rendered.push_str(&else_line);
-        let else_body = render_block(&else_block, indent + INDENT_WIDTH);
+        let else_body = render_block(&else_block, indent + config.indent_size(), config);
         if !else_body.is_empty() {
             rendered.push('\n');
             rendered.push_str(&else_body);
@@ -701,7 +726,7 @@ fn render_if(if_op: &IfOp, indent: usize) -> String {
     rendered
 }
 
-fn render_while(while_op: &WhileOp, indent: usize) -> String {
+fn render_while(while_op: &WhileOp, indent: usize, config: &Config) -> String {
     let mut rendered = format!(
         "{}{}",
         indent_string(indent),
@@ -712,7 +737,7 @@ fn render_while(while_op: &WhileOp, indent: usize) -> String {
     }
 
     if let Some(body) = while_op.body() {
-        let block = render_block(&body, indent + INDENT_WIDTH);
+        let block = render_block(&body, indent + config.indent_size(), config);
         if !block.is_empty() {
             rendered.push('\n');
             rendered.push_str(&block);
@@ -724,7 +749,7 @@ fn render_while(while_op: &WhileOp, indent: usize) -> String {
     rendered
 }
 
-fn render_repeat(repeat_op: &RepeatOp, indent: usize) -> String {
+fn render_repeat(repeat_op: &RepeatOp, indent: usize, config: &Config) -> String {
     let mut rendered = format!(
         "{}{}",
         indent_string(indent),
@@ -735,7 +760,7 @@ fn render_repeat(repeat_op: &RepeatOp, indent: usize) -> String {
     }
 
     if let Some(body) = repeat_op.body() {
-        let block = render_block(&body, indent + INDENT_WIDTH);
+        let block = render_block(&body, indent + config.indent_size(), config);
         if !block.is_empty() {
             rendered.push('\n');
             rendered.push_str(&block);
@@ -764,7 +789,11 @@ fn render_compact_tokens(node: &SyntaxNode) -> String {
     render_token_sequence(&significant_tokens(node))
 }
 
-fn render_wrapped_braced_type_body(body: &TypeBody, indent: usize) -> Option<String> {
+fn render_wrapped_braced_type_body(
+    body: &TypeBody,
+    indent: usize,
+    config: &Config,
+) -> Option<String> {
     let tokens = significant_tokens(body.syntax());
     let (open_index, close_index) =
         outer_group_indices(&tokens, SyntaxKind::LBrace, SyntaxKind::RBrace)?;
@@ -785,7 +814,7 @@ fn render_wrapped_braced_type_body(body: &TypeBody, indent: usize) -> Option<Str
         rendered.push('\n');
         rendered.push_str(&format!(
             "{}{},",
-            indent_string(indent + INDENT_WIDTH),
+            indent_string(indent + config.indent_size()),
             render_token_sequence_with_style(&item, SpacingStyle::TypeBodyItem)
         ));
     }
@@ -800,8 +829,15 @@ fn render_token_lines(
     tokens: &[SyntaxToken],
     indent: usize,
     prefer_multiline_groups: bool,
+    config: &Config,
 ) -> Vec<String> {
-    render_token_lines_with_style(tokens, indent, prefer_multiline_groups, SpacingStyle::Default)
+    render_token_lines_with_style(
+        tokens,
+        indent,
+        prefer_multiline_groups,
+        SpacingStyle::Default,
+        config,
+    )
 }
 
 fn render_token_lines_with_style(
@@ -809,39 +845,40 @@ fn render_token_lines_with_style(
     indent: usize,
     prefer_multiline_groups: bool,
     style: SpacingStyle,
+    config: &Config,
 ) -> Vec<String> {
     if prefer_multiline_groups {
         if let Some((open_index, close_index)) =
             outer_group_indices(tokens, SyntaxKind::LBracket, SyntaxKind::RBracket)
         {
-            return render_delimited_group(tokens, indent, open_index, close_index, style);
+            return render_delimited_group(tokens, indent, open_index, close_index, style, config);
         }
 
         if let Some((open_index, close_index)) =
             outer_group_indices(tokens, SyntaxKind::LParen, SyntaxKind::RParen)
             && open_index > 0
         {
-            return render_delimited_group(tokens, indent, open_index, close_index, style);
+            return render_delimited_group(tokens, indent, open_index, close_index, style, config);
         }
     }
 
     let compact = render_token_sequence_with_style(tokens, style);
     let inline = format!("{}{}", indent_string(indent), compact);
-    if line_length(&inline) <= MAX_LINE_WIDTH {
+    if line_length(&inline) <= config.max_line_length() {
         return vec![inline];
     }
 
     if let Some((open_index, close_index)) =
         outer_group_indices(tokens, SyntaxKind::LBracket, SyntaxKind::RBracket)
     {
-        return render_delimited_group(tokens, indent, open_index, close_index, style);
+        return render_delimited_group(tokens, indent, open_index, close_index, style, config);
     }
 
     if let Some((open_index, close_index)) =
         outer_group_indices(tokens, SyntaxKind::LParen, SyntaxKind::RParen)
         && open_index > 0
     {
-        return render_delimited_group(tokens, indent, open_index, close_index, style);
+        return render_delimited_group(tokens, indent, open_index, close_index, style, config);
     }
 
     vec![inline]
@@ -853,6 +890,7 @@ fn render_delimited_group(
     open_index: usize,
     close_index: usize,
     style: SpacingStyle,
+    config: &Config,
 ) -> Vec<String> {
     let opener = render_token_sequence(&tokens[..=open_index]);
     let closer = render_token_sequence(&tokens[close_index..]);
@@ -865,8 +903,13 @@ fn render_delimited_group(
             continue;
         }
 
-        let mut item_lines =
-            render_token_lines_with_style(&item, indent + INDENT_WIDTH, true, style);
+        let mut item_lines = render_token_lines_with_style(
+            &item,
+            indent + config.indent_size(),
+            true,
+            style,
+            config,
+        );
         if index + 1 != item_count
             && let Some(last_line) = item_lines.last_mut()
         {
@@ -878,14 +921,19 @@ fn render_delimited_group(
     lines
 }
 
-fn render_expression_with_comments(expr: &SyntaxNode, indent: usize) -> Vec<String> {
-    render_token_stream_with_comments(&all_tokens(expr), indent, SpacingStyle::Default)
+fn render_expression_with_comments(
+    expr: &SyntaxNode,
+    indent: usize,
+    config: &Config,
+) -> Vec<String> {
+    render_token_stream_with_comments(&all_tokens(expr), indent, SpacingStyle::Default, config)
 }
 
 fn render_token_stream_with_comments(
     tokens: &[SyntaxToken],
     indent: usize,
     style: SpacingStyle,
+    config: &Config,
 ) -> Vec<String> {
     let mut lines = Vec::new();
     let mut current = String::new();
@@ -919,7 +967,7 @@ fn render_token_stream_with_comments(
 
                 if current.is_empty() {
                     current.push_str(&indent_string(
-                        indent + nesting.line_indent_offset(token.kind()) * INDENT_WIDTH,
+                        indent + nesting.line_indent_offset(token.kind()) * config.indent_size(),
                     ));
                     current.push_str(&trimmed_comment(token));
                 } else {
@@ -939,7 +987,7 @@ fn render_token_stream_with_comments(
 
                 if current.is_empty() {
                     current.push_str(&indent_string(
-                        indent + nesting.line_indent_offset(token.kind()) * INDENT_WIDTH,
+                        indent + nesting.line_indent_offset(token.kind()) * config.indent_size(),
                     ));
                 }
 
@@ -1035,7 +1083,12 @@ fn render_token_sequence_with_style(tokens: &[SyntaxToken], style: SpacingStyle)
     rendered
 }
 
-fn render_path_lines(header: &str, path_tokens: &[SyntaxToken], indent: usize) -> Vec<String> {
+fn render_path_lines(
+    header: &str,
+    path_tokens: &[SyntaxToken],
+    indent: usize,
+    config: &Config,
+) -> Vec<String> {
     let pieces = split_path_pieces(path_tokens);
     let Some(first) = pieces.first() else {
         return vec![header.to_string()];
@@ -1044,11 +1097,11 @@ fn render_path_lines(header: &str, path_tokens: &[SyntaxToken], indent: usize) -
     let mut lines = Vec::new();
     let mut current = format!("{header} {first}");
     for piece in pieces.iter().skip(1) {
-        if line_length(&current) + line_length(piece) <= MAX_LINE_WIDTH {
+        if line_length(&current) + line_length(piece) <= config.max_line_length() {
             current.push_str(piece);
         } else {
             lines.push(current);
-            current = format!("{}{}", indent_string(indent + INDENT_WIDTH), piece);
+            current = format!("{}{}", indent_string(indent + config.indent_size()), piece);
         }
     }
     lines.push(current);
@@ -1161,11 +1214,15 @@ fn result_tokens_after_params(tokens: &[SyntaxToken], params_close: usize) -> Ve
     trim_outer_whitespace_tokens(&tokens[(arrow_offset + 1)..])
 }
 
-fn render_signature_item_lines(tokens: &[SyntaxToken], indent: usize) -> Vec<String> {
+fn render_signature_item_lines(
+    tokens: &[SyntaxToken],
+    indent: usize,
+    config: &Config,
+) -> Vec<String> {
     if has_comment_tokens(tokens) {
-        render_token_stream_with_comments(tokens, indent, SpacingStyle::TypeBodyItem)
+        render_token_stream_with_comments(tokens, indent, SpacingStyle::TypeBodyItem, config)
     } else {
-        render_token_lines_with_style(tokens, indent, true, SpacingStyle::TypeBodyItem)
+        render_token_lines_with_style(tokens, indent, true, SpacingStyle::TypeBodyItem, config)
     }
 }
 
@@ -1515,7 +1572,7 @@ fn needs_space(previous: &SyntaxToken, next: &SyntaxToken, style: SpacingStyle) 
 mod tests {
     use miden_assembly_syntax_cst::parse_text;
 
-    use super::{MAX_LINE_WIDTH, format_syntax};
+    use super::{Config, format_syntax};
 
     #[test]
     fn formats_top_level_forms_and_anchors_comments() {
@@ -1540,7 +1597,8 @@ end
         let parse = parse_text(source);
         assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
 
-        let formatted = format_syntax(&parse.syntax());
+        let config = Config::default();
+        let formatted = format_syntax(&config, &parse.syntax());
         let expected = "\
 #! docs
 pub use miden::core::mem->memory
@@ -1569,14 +1627,15 @@ end
     fn breaks_grouped_instruction_lines_when_they_overflow() {
         let source = "\
 begin
-    instruction_alpha_one instruction_beta_two instruction_gamma_three instruction_delta_four
+    instruction_alpha_one instruction_beta_two instruction_gamma_three instruction_delta_four instruction_five
 end
 ";
 
         let parse = parse_text(source);
         assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
 
-        let formatted = format_syntax(&parse.syntax());
+        let config = Config::default();
+        let formatted = format_syntax(&config, &parse.syntax());
         let body_lines =
             formatted.lines().skip(1).take_while(|line| *line != "end").collect::<Vec<_>>();
 
@@ -1584,8 +1643,8 @@ end
             body_lines.len() >= 2,
             "expected at least two formatted body lines, got {body_lines:?}"
         );
-        assert!(body_lines.iter().all(|line| line.len() <= MAX_LINE_WIDTH));
-        assert!(formatted.contains("\n    instruction_delta_four\n"));
+        assert!(body_lines.iter().all(|line| line.len() <= config.max_line_length()));
+        assert!(formatted.contains("\n    instruction_five\n"));
 
         let reparsed = parse_text(&formatted);
         assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
@@ -1611,7 +1670,8 @@ end
         let parse = parse_text(source);
         assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
 
-        let formatted = format_syntax(&parse.syntax());
+        let config = Config::default();
+        let formatted = format_syntax(&config, &parse.syntax());
         let expected = "\
 begin
     foo(
@@ -1647,13 +1707,14 @@ end
         let parse = parse_text(source);
         assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
 
-        let formatted = format_syntax(&parse.syntax());
+        let config = Config::default();
+        let formatted = format_syntax(&config, &parse.syntax());
         assert_eq!(formatted, source);
 
         let reparsed = parse_text(&formatted);
         assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
 
-        let reformatted = format_syntax(&reparsed.syntax());
+        let reformatted = format_syntax(&config, &reparsed.syntax());
         assert_eq!(reformatted, formatted);
     }
 
@@ -1670,31 +1731,33 @@ end
         let parse = parse_text(source);
         assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
 
-        let formatted = format_syntax(&parse.syntax());
+        let config = Config::default();
+        let formatted = format_syntax(&config, &parse.syntax());
         assert_eq!(formatted, source);
 
         let reparsed = parse_text(&formatted);
         assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
 
-        let reformatted = format_syntax(&reparsed.syntax());
+        let reformatted = format_syntax(&config, &reparsed.syntax());
         assert_eq!(reformatted, formatted);
     }
 
     #[test]
     fn wraps_long_constants_and_advice_maps() {
         let source = "\
-const VERY_LONG_EVENT = event(\"miden::core::collections::sorted_array::lowerbound_key_value\")
-adv_map CIRCUIT_COMMITMENT = [1, 0, 0, 0, 2305843126251553075, 114890375379, 2305843283017859381]
+const VERY_LONG_EVENT = event(\"miden::core::collections::sorted_array::lowerbound_key_value::extra_long\")
+adv_map CIRCUIT_COMMITMENT = [1, 0, 0, 0, 2305843126251553075, 114890375379, 2305843283017859381, 123]
 ";
 
         let parse = parse_text(source);
         assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
 
-        let formatted = format_syntax(&parse.syntax());
+        let config = Config::default();
+        let formatted = format_syntax(&config, &parse.syntax());
         let expected = "\
 const VERY_LONG_EVENT =
     event(
-        \"miden::core::collections::sorted_array::lowerbound_key_value\"
+        \"miden::core::collections::sorted_array::lowerbound_key_value::extra_long\"
     )
 adv_map CIRCUIT_COMMITMENT =
     [
@@ -1704,12 +1767,13 @@ adv_map CIRCUIT_COMMITMENT =
         0,
         2305843126251553075,
         114890375379,
-        2305843283017859381
+        2305843283017859381,
+        123
     ]
 ";
 
         assert_eq!(formatted, expected);
-        assert!(formatted.lines().all(|line| line.len() <= MAX_LINE_WIDTH));
+        assert!(formatted.lines().all(|line| line.len() <= config.max_line_length()));
 
         let reparsed = parse_text(&formatted);
         assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
@@ -1718,7 +1782,7 @@ adv_map CIRCUIT_COMMITMENT =
     #[test]
     fn wraps_long_type_bodies_and_normalizes_multiline_body_comments() {
         let source = "\
-pub type VeryLongTypeName = struct { lower_bound_key_value: u128, upper_bound_key_value: u128 }
+pub type VeryLongTypeName = struct { lower_bound_key_value: u128, upper_bound_key_value: u128, extra_field: felt }
 
 enum Status : u16 {
 # ready
@@ -1731,11 +1795,13 @@ WAITING = 2,
         let parse = parse_text(source);
         assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
 
-        let formatted = format_syntax(&parse.syntax());
+        let config = Config::default();
+        let formatted = format_syntax(&config, &parse.syntax());
         let expected = "\
 pub type VeryLongTypeName = struct {
     lower_bound_key_value: u128,
     upper_bound_key_value: u128,
+    extra_field: felt,
 }
 
 enum Status : u16 {
@@ -1755,7 +1821,7 @@ enum Status : u16 {
     #[test]
     fn wraps_long_imports_and_procedure_headers_without_mangling_generic_types() {
         let source = "\
-pub use ::miden::core::collections::sorted_array::lowerbound_key_value -> lowerbound_key_value
+pub use ::miden::core::collections::sorted_array::lowerbound_key_value -> lowerbound_key_value_long_alias
 
 pub proc println_debug_message_with_context(message: ptr<u8, addrspace(byte)>, context: ptr<u8, addrspace(byte)>) -> (result: ptr<u8, addrspace(byte)>, status: i1)
     nop
@@ -1765,10 +1831,11 @@ end
         let parse = parse_text(source);
         assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
 
-        let formatted = format_syntax(&parse.syntax());
+        let config = Config::default();
+        let formatted = format_syntax(&config, &parse.syntax());
         let expected = "\
 pub use ::miden::core::collections::sorted_array::lowerbound_key_value
-    ->lowerbound_key_value
+    ->lowerbound_key_value_long_alias
 
 pub proc println_debug_message_with_context(
     message: ptr<u8, addrspace(byte)>,
@@ -1782,7 +1849,7 @@ end
 ";
 
         assert_eq!(formatted, expected);
-        assert!(formatted.lines().all(|line| line.len() <= MAX_LINE_WIDTH));
+        assert!(formatted.lines().all(|line| line.len() <= config.max_line_length()));
 
         let reparsed = parse_text(&formatted);
         assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
@@ -1813,7 +1880,8 @@ end
         let parse = parse_text(source);
         assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
 
-        let formatted = format_syntax(&parse.syntax());
+        let config = Config::default();
+        let formatted = format_syntax(&config, &parse.syntax());
         let expected = "\
 use ::miden::utils::panic # import
 
@@ -1863,7 +1931,8 @@ end
         let parse = parse_text(source);
         assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
 
-        let formatted = format_syntax(&parse.syntax());
+        let config = Config::default();
+        let formatted = format_syntax(&config, &parse.syntax());
         assert_eq!(formatted, source);
 
         let reparsed = parse_text(&formatted);
@@ -1885,13 +1954,14 @@ end
         let parse = parse_text(source);
         assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
 
-        let formatted = format_syntax(&parse.syntax());
+        let config = Config::default();
+        let formatted = format_syntax(&config, &parse.syntax());
         assert_eq!(formatted, source);
 
         let reparsed = parse_text(&formatted);
         assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
 
-        let reformatted = format_syntax(&reparsed.syntax());
+        let reformatted = format_syntax(&config, &reparsed.syntax());
         assert_eq!(reformatted, formatted);
     }
 
@@ -1915,7 +1985,8 @@ end
         let parse = parse_text(source);
         assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
 
-        let formatted = format_syntax(&parse.syntax());
+        let config = Config::default();
+        let formatted = format_syntax(&config, &parse.syntax());
         let expected = "\
 pub proc println_debug_message_with_context(
     # message
@@ -1932,7 +2003,7 @@ end
 ";
 
         assert_eq!(formatted, expected);
-        assert!(formatted.lines().all(|line| line.len() <= MAX_LINE_WIDTH));
+        assert!(formatted.lines().all(|line| line.len() <= config.max_line_length()));
 
         let reparsed = parse_text(&formatted);
         assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
@@ -1959,7 +2030,8 @@ adv_map TABLE = [
         let parse = parse_text(source);
         assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
 
-        let formatted = format_syntax(&parse.syntax());
+        let config = Config::default();
+        let formatted = format_syntax(&config, &parse.syntax());
         let expected = "\
 const LONG =
     event(

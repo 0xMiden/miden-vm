@@ -1,3 +1,4 @@
+mod config;
 mod formatter;
 
 use std::{
@@ -19,7 +20,7 @@ use miden_debug_types::{
     SourceManagerExt, Uri,
 };
 
-use self::formatter::format_syntax;
+use self::{config::Config, formatter::format_syntax};
 
 #[derive(Debug, Parser)]
 #[command(name = "miden-format", version, about = "Format Miden Assembly source files")]
@@ -35,6 +36,10 @@ struct Cli {
     /// Logical path to associate with stdin input for diagnostics.
     #[arg(long, requires = "stdin")]
     stdin_filepath: Option<PathBuf>,
+
+    /// Set formatter options from the command line
+    #[arg(long)]
+    config: Config,
 
     /// Paths to Miden Assembly source files.
     #[arg(value_name = "PATH")]
@@ -58,6 +63,8 @@ enum CliError {
     #[error("the following inputs are not formatted:\n{0}")]
     CheckFailed(String),
     #[error(transparent)]
+    Config(#[from] config::ConfigError),
+    #[error(transparent)]
     SourceManagerError(#[from] SourceManagerError),
 }
 
@@ -76,6 +83,19 @@ fn run() -> Result<(), CliError> {
 
     let cli = Cli::parse();
     let source_manager = Arc::new(DefaultSourceManager::default());
+
+    let mut config = if let Ok(cwd) = std::env::current_dir() {
+        let path = cwd.join("miden-format.toml");
+        if path.try_exists().ok().is_some_and(|exists| exists) {
+            Config::load(path)?
+        } else {
+            Config::default()
+        }
+    } else {
+        Config::default()
+    };
+    config.merge(&cli.config);
+
     let inputs = collect_inputs(&cli, &source_manager)?;
 
     let mut has_syntax_errors = false;
@@ -93,7 +113,7 @@ fn run() -> Result<(), CliError> {
             continue;
         }
 
-        formatted_inputs.push((input, format_syntax(&parse.syntax())));
+        formatted_inputs.push((input, format_syntax(&config, &parse.syntax())));
     }
 
     if has_syntax_errors {
