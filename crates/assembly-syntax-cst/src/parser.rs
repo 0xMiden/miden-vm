@@ -608,11 +608,6 @@ impl<'input> Parser<'input> {
                 return BlockParseOutcome::FoundTerminator;
             }
 
-            if self.doc_comment_looks_like_regular_comment_in_block() {
-                self.bump();
-                continue;
-            }
-
             if self.at_regular_trivia() {
                 self.bump();
                 continue;
@@ -624,6 +619,14 @@ impl<'input> Parser<'input> {
                 self.finish_node();
                 self.finish_node();
                 return BlockParseOutcome::RecoveredImplicitEnd;
+            }
+
+            if self.at_kind(SyntaxKind::DocComment) {
+                self.start_node(SyntaxKind::Error);
+                self.error_here("doc comments are only allowed before module-level items");
+                self.bump();
+                self.finish_node();
+                continue;
             }
 
             if self.at_keyword("if") {
@@ -997,20 +1000,6 @@ impl<'input> Parser<'input> {
         }
     }
 
-    fn doc_comment_looks_like_regular_comment_in_block(&self) -> bool {
-        if !self.at_kind(SyntaxKind::DocComment) {
-            return false;
-        }
-
-        self.next_relevant_block_token(self.pos + 1)
-            .and_then(|index| self.tokens.get(index).map(|token| (index, token)))
-            .is_some_and(|(index, token)| {
-                token.kind() == SyntaxKind::Ident
-                    && !self.is_top_level_starter(index)
-                    && is_non_top_level_block_keyword(token.text())
-            })
-    }
-
     fn at_terminator(&self, terminators: &[&str]) -> bool {
         terminators.iter().any(|terminator| self.at_keyword(terminator))
     }
@@ -1236,10 +1225,6 @@ fn is_reserved_block_keyword(text: &str) -> bool {
             | "use"
             | "while"
     )
-}
-
-fn is_non_top_level_block_keyword(text: &str) -> bool {
-    matches!(text, "else" | "end" | "if" | "repeat" | "while")
 }
 
 #[cfg(test)]
@@ -1473,7 +1458,7 @@ end
     }
 
     #[test]
-    fn treats_block_local_doc_comments_as_regular_comments_before_block_keywords() {
+    fn rejects_block_local_doc_comments_before_block_keywords() {
         let source = "\
 proc foo
     #! mistaken doc comment before if
@@ -1490,7 +1475,17 @@ end
 ";
 
         let parse = parse_text(source);
-        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+        assert!(parse.has_errors());
+        assert!(
+            parse
+                .diagnostics()
+                .iter()
+                .flat_map(|diag| diag.labels.as_deref().unwrap_or(&[]).iter())
+                .filter_map(|label| label.label())
+                .any(|label| label.contains("doc comments are only allowed")),
+            "expected block-local doc comments before block keywords to be rejected, got {:?}",
+            parse.diagnostics()
+        );
 
         let root = parse.syntax();
         assert!(root.descendants().any(|node| node.kind() == SyntaxKind::Procedure));
@@ -1517,7 +1512,7 @@ end
                 .iter()
                 .flat_map(|diag| diag.labels.as_deref().unwrap_or(&[]).iter())
                 .filter_map(|label| label.label())
-                .any(|label| label.contains("unexpected token in block")),
+                .any(|label| label.contains("doc comments are only allowed")),
             "expected block-local doc comments before instructions to remain invalid, got {:?}",
             parse.diagnostics()
         );
