@@ -247,7 +247,11 @@ fn scan_layout_sections<R: OffsetTrackingReader>(
     source: &mut R,
     is_hashless: bool,
 ) -> Result<ForestLayout, DeserializationError> {
-    let node_count = source.read_usize()?;
+    let internal_node_count = source.read_usize()?;
+    let external_node_count = source.read_usize()?;
+    let node_count = internal_node_count
+        .checked_add(external_node_count)
+        .ok_or_else(|| DeserializationError::InvalidValue("node count overflow".to_string()))?;
     if node_count > MastForest::MAX_NODES {
         return Err(DeserializationError::InvalidValue(format!(
             "node count {} exceeds maximum allowed {}",
@@ -256,17 +260,6 @@ fn scan_layout_sections<R: OffsetTrackingReader>(
         )));
     }
     validate_budgeted_count(source, node_count, MastNodeEntry::SERIALIZED_SIZE, "node count")?;
-
-    let internal_node_count = source.read_usize()?;
-    let external_node_count = source.read_usize()?;
-    let total_node_count = internal_node_count
-        .checked_add(external_node_count)
-        .ok_or_else(|| DeserializationError::InvalidValue("node count overflow".to_string()))?;
-    if total_node_count != node_count {
-        return Err(DeserializationError::InvalidValue(format!(
-            "internal node count {internal_node_count} plus external node count {external_node_count} must equal total node count {node_count}"
-        )));
-    }
     validate_budgeted_count(
         source,
         external_node_count,

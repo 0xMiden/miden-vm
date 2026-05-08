@@ -267,7 +267,6 @@ impl MastForest {
         let node_count = self.nodes.len();
         let external_node_count = self.nodes.iter().filter(|node| node.is_external()).count();
         let internal_node_count = node_count - external_node_count;
-        target.write_usize(node_count);
         target.write_usize(internal_node_count);
         target.write_usize(external_node_count);
 
@@ -338,7 +337,6 @@ fn serialized_size_hint(forest: &MastForest, stripped: bool, hashless: bool) -> 
     let non_external_count = node_count - external_count;
 
     let mut size = MAGIC.len() + 1 + VERSION.len();
-    size += node_count.get_size_hint();
     size += non_external_count.get_size_hint();
     size += external_count.get_size_hint();
 

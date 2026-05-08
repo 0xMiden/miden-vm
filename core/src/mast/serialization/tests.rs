@@ -895,7 +895,6 @@ fn mast_forest_deserialize_invalid_ops_offset_fails() {
     let mut reader = SliceReader::new(&serialized);
 
     let _: [u8; 8] = reader.read_array().unwrap(); // magic (4) + flags (1) + version (3)
-    let _node_count: usize = reader.read().unwrap();
     let _internal_node_count: usize = reader.read().unwrap();
     let _external_node_count: usize = reader.read().unwrap();
     let _roots: Vec<u32> = Deserializable::read_from(&mut reader).unwrap();
@@ -1246,12 +1245,11 @@ fn assert_header_flags(bytes: &[u8], expected_flags: u8) {
     assert_eq!(&bytes[5..8], &[0, 0, 3], "Version should be [0, 0, 3]");
 }
 
-fn read_header_counts(bytes: &[u8]) -> (usize, usize, usize) {
+fn read_header_counts(bytes: &[u8]) -> (usize, usize) {
     let mut offset = 8;
-    let node_count = read_usize_at(bytes, &mut offset).unwrap();
     let internal_node_count = read_usize_at(bytes, &mut offset).unwrap();
     let external_node_count = read_usize_at(bytes, &mut offset).unwrap();
-    (node_count, internal_node_count, external_node_count)
+    (internal_node_count, external_node_count)
 }
 
 #[test]
@@ -1285,9 +1283,7 @@ fn test_header_counts_match_node_kinds() {
         .unwrap();
     forest.make_root(join_id);
 
-    let (node_count, internal_node_count, external_node_count) =
-        read_header_counts(&forest.to_bytes());
-    assert_eq!(node_count, 3);
+    let (internal_node_count, external_node_count) = read_header_counts(&forest.to_bytes());
     assert_eq!(internal_node_count, 2);
     assert_eq!(external_node_count, 1);
 }
@@ -1321,7 +1317,6 @@ fn test_deserialization_rejects_mismatched_header_counts() {
 
     let mut bytes = forest.to_bytes();
     let mut offset = 8;
-    let _node_count = read_usize_at(&bytes, &mut offset).unwrap();
     let internal_count_offset = offset;
     let _internal_node_count = read_usize_at(&bytes, &mut offset).unwrap();
     let external_count_offset = offset;
@@ -2371,8 +2366,6 @@ fn locate_single_block_indptr_and_digest_offsets(bytes: &[u8]) -> (usize, usize)
     // header: MAGIC (4) + FLAGS (1) + VERSION (3)
     let _header: [u8; 8] = cursor.read_array().unwrap();
 
-    let node_count: usize = cursor.read().unwrap();
-    assert_eq!(node_count, 1);
     let internal_node_count: usize = cursor.read().unwrap();
     assert_eq!(internal_node_count, 1);
     let external_node_count: usize = cursor.read().unwrap();
@@ -2647,9 +2640,10 @@ fn test_deserialization_rejects_excessive_node_count() {
     bytes.write_u8(0); // flags
     VERSION.write_into(&mut bytes);
 
-    // Write excessive node count (MAX_NODES + 1)
+    // Write excessive derived node count (MAX_NODES + 1 internal nodes)
     let excessive_count: usize = MastForest::MAX_NODES + 1;
     excessive_count.write_into(&mut bytes);
+    0usize.write_into(&mut bytes);
 
     // Attempt to deserialize - should fail before any large allocation
     let result = MastForest::read_from_bytes(&bytes);
@@ -2672,6 +2666,7 @@ fn test_untrusted_deserialization_rejects_node_count_above_budget_bound() {
     VERSION.write_into(&mut bytes);
 
     2usize.write_into(&mut bytes);
+    0usize.write_into(&mut bytes);
 
     let result = UntrustedMastForest::read_from_bytes_with_budget(&bytes, bytes.len());
     assert!(result.is_err());

@@ -558,9 +558,11 @@ fn locate_first_node_hash(bytes: &[u8]) -> (usize, usize) {
     offset += 1;
     offset += 3;
 
-    let node_count = read_usize_vint64(bytes, &mut offset);
     let internal_node_count = read_usize_vint64(bytes, &mut offset);
     let external_node_count = read_usize_vint64(bytes, &mut offset);
+    let node_count = internal_node_count
+        .checked_add(external_node_count)
+        .expect("node count overflow");
 
     // Roots: len (usize) + elements (u32 LE)
     let roots_len = read_usize_vint64(bytes, &mut offset);
