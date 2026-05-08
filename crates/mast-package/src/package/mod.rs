@@ -29,8 +29,6 @@ use miden_core::{
     program::Kernel,
     serde::{ByteWriter, Deserializable, Serializable},
 };
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
 
 pub use self::{
     id::PackageId,
@@ -55,7 +53,6 @@ use crate::{Dependency, Version};
 /// * One or more custom sections containing metadata produced by the assembler or other tools which
 ///   applies to the package, e.g. debug symbols.
 #[derive(Debug, Clone, Eq, PartialEq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Package {
     /// Name of the package
     pub name: PackageId,
@@ -65,7 +62,6 @@ pub struct Package {
     /// exports in lexicographical order (by digest, not procedure name)
     digest: Word,
     /// An optional description of the package
-    #[cfg_attr(feature = "serde", serde(default))]
     pub description: Option<String>,
     /// The project target type which produced this package
     pub kind: TargetType,
@@ -76,7 +72,6 @@ pub struct Package {
     pub manifest: PackageManifest,
     /// The set of custom sections included with the package, e.g. debug information, account
     /// metadata, etc.
-    #[cfg_attr(feature = "serde", serde(default))]
     pub sections: Vec<Section>,
 }
 

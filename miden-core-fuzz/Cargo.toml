@@ -192,13 +192,6 @@ doc = false
 bench = false
 
 [[bin]]
-name = "package_serde_deserialize"
-path = "fuzz_targets/package_serde_deserialize.rs"
-test = false
-doc = false
-bench = false
-
-[[bin]]
 name = "mast_forest_serde_deserialize"
 path = "fuzz_targets/mast_forest_serde_deserialize.rs"
 test = false

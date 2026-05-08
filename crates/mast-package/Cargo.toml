@@ -41,4 +41,7 @@ miden-core = { workspace = true, features = ["arbitrary"] }
 miden-test-serde-macros.workspace = true
 proptest.workspace = true
 proptest-derive.workspace = true
-serde_json = { workspace = true }
+serde_json.workspace = true
+
+[package.metadata.cargo-shear]
+ignored = ["serde_json"]

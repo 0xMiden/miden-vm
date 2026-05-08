@@ -572,6 +572,8 @@ impl Deserializable for TypeExport {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use alloc::{
         string::{String, ToString},
         sync::Arc,
@@ -579,6 +581,14 @@ mod tests {
         vec::Vec,
     };
 
+    use super::{
+        MAGIC_PACKAGE, PACKAGE_BYTE_READ_BUDGET_MULTIPLIER, Package, PackageManifest, Section,
+        VERSION,
+    };
+    use crate::{
+        Dependency, ManifestValidationError, PackageExport, PackageId, ProcedureExport, SectionId,
+        TargetType,
+    };
     use miden_assembly_syntax::ast::{Path as AstPath, PathBuf};
     use miden_core::{
         Word, assert_matches,
@@ -588,17 +598,6 @@ mod tests {
             BudgetedReader, ByteWriter, Deserializable, DeserializationError, Serializable,
             SliceReader,
         },
-    };
-    #[cfg(feature = "serde")]
-    use serde_json::{json, to_value};
-
-    use super::{
-        MAGIC_PACKAGE, PACKAGE_BYTE_READ_BUDGET_MULTIPLIER, Package, PackageManifest, Section,
-        VERSION,
-    };
-    use crate::{
-        Dependency, ManifestValidationError, PackageExport, PackageId, ProcedureExport, SectionId,
-        TargetType,
     };
 
     fn build_forest() -> (MastForest, MastNodeId) {
@@ -939,88 +938,24 @@ mod tests {
         assert!(matches!(err, DeserializationError::InvalidValue(_)));
     }
 
-    #[cfg(feature = "serde")]
     #[test]
-    fn serde_package_manifest_rejects_duplicate_export_paths() {
-        let path = absolute_path("test::proc");
-        let export =
-            PackageExport::Procedure(ProcedureExport::new(path, None, Word::default(), None));
-        let export = to_value(&export).expect("export should serialize");
-
-        let manifest = serde_json::to_string(&json!({
-            "exports": [export.clone(), export],
-            "dependencies": [],
-        }))
-        .expect("manifest should serialize to JSON");
-        let err = serde_json::from_str::<PackageManifest>(&manifest)
-            .expect_err("serde deserialization should reject duplicate export paths");
-        let message = err.to_string();
-        assert!(message.contains("duplicate export path"));
-    }
-
-    #[cfg(feature = "serde")]
-    #[test]
-    fn serde_package_manifest_rejects_duplicate_dependencies() {
-        let path = absolute_path("test::proc");
-        let export =
-            PackageExport::Procedure(ProcedureExport::new(path, None, Word::default(), None));
-        let export = to_value(&export).expect("export should serialize");
-
-        let dependency = to_value(build_dependency()).expect("dependency should serialize");
-
-        let manifest = serde_json::to_string(&json!({
-            "exports": [export],
-            "dependencies": [dependency.clone(), dependency],
-        }))
-        .expect("manifest should serialize to JSON");
-        let err = serde_json::from_str::<PackageManifest>(&manifest)
-            .expect_err("serde deserialization should reject duplicate dependencies");
-        let message = err.to_string();
-        assert_matches!(message.as_str(), msg if msg.contains("duplicate dependency"));
-        //assert!(message.contains("duplicate dependency"));
-    }
-
-    #[cfg(feature = "serde")]
-    #[test]
-    fn serde_package_deserialization_rejects_malformed_quoted_procedure_leaf() {
-        use miden_core::{
-            mast::{BasicBlockNodeBuilder, MastForestContributor},
-            operations::Operation,
-        };
-
-        let mut mast_forest = MastForest::new();
-        let node = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
-            .add_to_forest(&mut mast_forest)
-            .expect("must create MAST node");
-        mast_forest.make_root(node);
-
+    fn package_manifest_deserialization_rejects_malformed_quoted_procedure_leaf() {
         let bad = Arc::<AstPath>::from(AstPath::validate(r#"::foo::"bad name""#).unwrap());
-        let exports = vec![PackageExport::Procedure(ProcedureExport::new(
-            bad,
-            Some(node),
-            mast_forest[node].digest(),
-            None,
-        ))];
+        let exports = BTreeMap::from_iter([(
+            bad.clone(),
+            PackageExport::Procedure(ProcedureExport::new(bad, None, Default::default(), None)),
+        )]);
 
-        let mut package = Package {
-            name: "test".into(),
-            description: None,
-            version: crate::Version::new(0, 0, 0),
-            digest: Default::default(),
-            kind: TargetType::Library,
-            mast: Arc::new(mast_forest),
-            manifest: PackageManifest {
-                exports: exports.into_iter().map(|export| (export.path(), export)).collect(),
-                dependencies: Default::default(),
-            },
-            sections: Default::default(),
+        let manifest = PackageManifest {
+            exports,
+            dependencies: Default::default(),
         };
-        package.recompute_mast_commitment().unwrap();
 
-        let json = serde_json::to_string(&package).expect("package serialization must succeed");
+        let bytes = manifest.to_bytes();
 
-        let err = serde_json::from_str::<Package>(&json)
-            .expect_err("expected malformed procedure export leaf name rejection during serde");
+        let err = PackageManifest::read_from_bytes(&bytes).expect_err(
+            "expected malformed procedure export leaf name rejection during deserialization",
+        );
         let message = alloc::format!("{err}");
         assert_matches!(
             message,
@@ -1028,35 +963,29 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "serde")]
     #[test]
-    fn serde_package_deserialization_rejects_malformed_quoted_constant_leaf() {
+    fn package_manifest_deserialization_rejects_malformed_quoted_constant_leaf() {
         let bad = Arc::<AstPath>::from(AstPath::validate(r#"::foo::"bad name""#).unwrap());
-        let exports = vec![PackageExport::Constant(crate::ConstantExport {
-            path: bad,
-            value: miden_assembly_syntax::ast::ConstantValue::Int(
-                miden_debug_types::Span::unknown(1u8.into()),
-            ),
-        })];
+        let exports = BTreeMap::from_iter([(
+            bad.clone(),
+            PackageExport::Constant(crate::ConstantExport {
+                path: bad,
+                value: miden_assembly_syntax::ast::ConstantValue::Int(
+                    miden_debug_types::Span::unknown(1u32.into()),
+                ),
+            }),
+        )]);
 
-        let package = Package {
-            name: "test".into(),
-            description: None,
-            version: crate::Version::new(0, 0, 0),
-            digest: Default::default(),
-            kind: TargetType::Library,
-            mast: Default::default(),
-            manifest: PackageManifest {
-                exports: exports.into_iter().map(|export| (export.path(), export)).collect(),
-                dependencies: Default::default(),
-            },
-            sections: Default::default(),
+        let manifest = PackageManifest {
+            exports,
+            dependencies: Default::default(),
         };
 
-        let json = serde_json::to_string(&package).expect("package serialization must succeed");
+        let bytes = manifest.to_bytes();
 
-        let err = serde_json::from_str::<Package>(&json)
-            .expect_err("expected malformed constant export leaf name rejection during serde");
+        let err = PackageManifest::read_from_bytes(&bytes).expect_err(
+            "expected malformed constant export leaf name rejection during deserialization",
+        );
         let message = alloc::format!("{err}");
         assert_matches!(
             message,
@@ -1064,33 +993,27 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "serde")]
     #[test]
-    fn serde_package_deserialization_rejects_malformed_quoted_type_leaf() {
+    fn package_manifest_deserialization_rejects_malformed_quoted_type_leaf() {
         let bad = Arc::<AstPath>::from(AstPath::validate(r#"::foo::"bad name""#).unwrap());
-        let exports = vec![PackageExport::Type(crate::TypeExport {
-            path: bad,
-            ty: miden_assembly_syntax::ast::types::Type::Felt,
-        })];
+        let exports = BTreeMap::from_iter([(
+            bad.clone(),
+            PackageExport::Type(crate::TypeExport {
+                path: bad,
+                ty: miden_assembly_syntax::ast::types::Type::Felt,
+            }),
+        )]);
 
-        let package = Package {
-            name: "test".into(),
-            description: None,
-            version: crate::Version::new(0, 0, 0),
-            digest: Default::default(),
-            kind: TargetType::Library,
-            mast: Default::default(),
-            manifest: PackageManifest {
-                exports: exports.into_iter().map(|export| (export.path(), export)).collect(),
-                dependencies: Default::default(),
-            },
-            sections: Default::default(),
+        let manifest = PackageManifest {
+            exports,
+            dependencies: Default::default(),
         };
 
-        let json = serde_json::to_string(&package).expect("package serialization must succeed");
+        let bytes = manifest.to_bytes();
 
-        let err = serde_json::from_str::<Package>(&json)
-            .expect_err("expected malformed type export leaf name rejection during serde");
+        let err = PackageManifest::read_from_bytes(&bytes).expect_err(
+            "expected malformed type export leaf name rejection during deserialization",
+        );
         let message = alloc::format!("{err}");
         assert_matches!(
             message,

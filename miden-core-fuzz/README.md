@@ -135,12 +135,6 @@ These targets exercise package deserializers used by `.masp`.
 cargo +nightly fuzz run package_deserialize --fuzz-dir miden-core-fuzz
 ```
 
-**`package_serde_deserialize`** — Tests `Package` JSON deserialization via `serde_json`.
-
-```bash
-cargo +nightly fuzz run package_serde_deserialize --fuzz-dir miden-core-fuzz
-```
-
 ### Component Targets
 
 These fuzz internal structures through the MastForest deserialization path:
