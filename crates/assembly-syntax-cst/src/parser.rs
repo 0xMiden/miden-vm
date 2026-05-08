@@ -4,6 +4,7 @@ use miden_debug_types::{SourceFile, SourceId, SourceLanguage, SourceSpan, Uri};
 use rowan::{GreenNodeBuilder, NodeOrToken, TextRange};
 
 use crate::{
+    MasmLanguage,
     ast::AstNode,
     diagnostics::{LabeledSpan, Severity, diagnostic, miette::MietteDiagnostic as Diagnostic},
     lexer::{Token, tokenize},
@@ -56,6 +57,14 @@ impl Parse {
     /// Returns `true` when the parse emitted at least one syntax diagnostic.
     pub fn has_errors(&self) -> bool {
         !self.diagnostics.is_empty()
+    }
+
+    /// Maps a rowan node back to a [`SourceSpan`] in the originating source file.
+    pub fn span_for_ast_node<T>(&self, node: &T) -> SourceSpan
+    where
+        T: AstNode<Language = MasmLanguage>,
+    {
+        self.span_for_node(node.syntax())
     }
 
     /// Maps a rowan node back to a [`SourceSpan`] in the originating source file.

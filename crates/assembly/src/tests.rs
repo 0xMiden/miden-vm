@@ -1462,11 +1462,11 @@ fn constant_must_be_valid_felt() -> TestResult {
     assert_assembler_diagnostic!(
         context,
         source,
-        "invalid syntax: unexpected trailing tokens in constant expression",
+        "invalid syntax: unexpected trailing tokens in expression",
         regex!(r#",-\[test[\d]+:1:22\]"#),
         "1 | const CONSTANT = 1122INVALID begin push.CONSTANT end",
         "  :                      ^^^|^^^",
-        "  :                         `-- unexpected trailing tokens in constant expression",
+        "  :                         `-- unexpected trailing tokens in expression",
         "  `----"
     );
     Ok(())

@@ -278,7 +278,8 @@ fn lower_type_decl(
             Ok(ast::Form::Type(ast::TypeAlias::new(visibility, name, ty).with_span(span)))
         },
         "enum" => {
-            let enum_ty = lower_enum_decl_from_body(context, visibility, name, &body, span)?;
+            let enum_ty =
+                lower_enum_decl_from_body(context, visibility, name, &body, span)?.with_span(span);
             Ok(ast::Form::Enum(enum_ty))
         },
         _ => Err(ParsingError::InvalidSyntax {

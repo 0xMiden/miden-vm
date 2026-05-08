@@ -557,7 +557,7 @@ fn lower_extended_instruction(
     context: &mut LoweringContext<'_>,
     instruction: &CstInstruction,
 ) -> Result<Option<Vec<ast::Op>>, ParsingError> {
-    let tokens = significant_tokens(instruction);
+    let tokens = instruction.significant_tokens().collect::<Vec<_>>();
     let Some(first) = tokens.first() else {
         return Ok(None);
     };
@@ -1147,16 +1147,6 @@ fn lower_u8_immediate(
         },
         _ => Ok(None),
     }
-}
-
-/// Extracts the significant, non-trivia tokens from an instruction node.
-fn significant_tokens(instruction: &CstInstruction) -> Vec<SyntaxToken> {
-    instruction
-        .syntax()
-        .children_with_tokens()
-        .filter_map(rowan::NodeOrToken::into_token)
-        .filter(|token| !token.kind().is_trivia())
-        .collect()
 }
 
 /// Returns the span covering the first through last token in `tokens`.

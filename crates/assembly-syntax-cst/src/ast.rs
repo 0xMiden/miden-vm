@@ -4,8 +4,26 @@ use rowan::ast::support;
 
 use crate::syntax::{MasmLanguage, SyntaxKind, SyntaxNode, SyntaxToken};
 
+pub trait AstNodeExt: AstNode<Language = MasmLanguage> {
+    /// Get a short description of this node
+    fn describe(&self) -> &'static str;
+
+    /// Collects the direct, non-trivia tokens under `node`.
+    fn significant_tokens(&self) -> impl Iterator<Item = SyntaxToken>;
+}
+
 macro_rules! ast_node {
-    ($(#[$meta:meta])* $name:ident, $kind:path) => {
+    ($(#[$meta:meta])* $name:ident, $kind:path, $description:literal) => {
+        __ast_node!($(#[$meta])* $name, $kind, $description, significant_tokens);
+    };
+
+    ($(#[$meta:meta])* $name:ident, $kind:path, $description:literal, recursive = true) => {
+        __ast_node!($(#[$meta])* $name, $kind, $description, significant_tokens_recursive);
+    };
+}
+
+macro_rules! __ast_node {
+    ($(#[$meta:meta])* $name:ident, $kind:path, $description:literal, $significant_tokens:ident) => {
         $(#[$meta])*
         #[derive(Debug, Clone, PartialEq, Eq, Hash)]
         pub struct $name {
@@ -27,103 +45,143 @@ macro_rules! ast_node {
                 &self.syntax
             }
         }
+
+        impl $name {
+            /// Collects the direct, non-trivia tokens under `node`.
+            #[inline]
+            pub fn significant_tokens(&self) -> impl Iterator<Item = SyntaxToken> {
+                <Self as AstNodeExt>::significant_tokens(self)
+            }
+        }
+
+        impl AstNodeExt for $name {
+            #[inline]
+            fn describe(&self) -> &'static str {
+                $description
+            }
+
+            #[inline]
+            fn significant_tokens(&self) -> impl Iterator<Item = SyntaxToken> {
+                $significant_tokens(self.syntax())
+            }
+        }
     };
 }
 
 ast_node!(
     #[doc = "The root node for a parsed MASM source file."]
     SourceFile,
-    SyntaxKind::SourceFile
+    SyntaxKind::SourceFile,
+    "source file"
 );
 ast_node!(
     #[doc = "A `#!` documentation line. Lowering decides whether a contiguous group becomes module-level or item-level documentation."]
     Doc,
-    SyntaxKind::Doc
+    SyntaxKind::Doc,
+    "doc comment"
 );
 ast_node!(
     #[doc = "A `use` item."]
     Import,
-    SyntaxKind::Import
+    SyntaxKind::Import,
+    "import"
 );
 ast_node!(
     #[doc = "A `const` item."]
     Constant,
-    SyntaxKind::Constant
+    SyntaxKind::Constant,
+    "constant declaration"
 );
 ast_node!(
     #[doc = "A `type` or `enum` item."]
     TypeDecl,
-    SyntaxKind::TypeDecl
+    SyntaxKind::TypeDecl,
+    "type declaration"
 );
 ast_node!(
     #[doc = "An `adv_map` item."]
     AdviceMap,
-    SyntaxKind::AdviceMap
+    SyntaxKind::AdviceMap,
+    "advice map entry declaration",
+    recursive = true
 );
 ast_node!(
     #[doc = "A top-level `begin` block."]
     BeginBlock,
-    SyntaxKind::BeginBlock
+    SyntaxKind::BeginBlock,
+    "begin"
 );
 ast_node!(
     #[doc = "A `proc` item together with its attributes and body."]
     Procedure,
-    SyntaxKind::Procedure
+    SyntaxKind::Procedure,
+    "procedure declaration"
 );
 ast_node!(
     #[doc = "An attribute attached to a procedure."]
     Attribute,
-    SyntaxKind::Attribute
+    SyntaxKind::Attribute,
+    "attribute"
 );
 ast_node!(
     #[doc = "A visibility marker such as `pub`."]
     Visibility,
-    SyntaxKind::Visibility
+    SyntaxKind::Visibility,
+    "visibility modifier"
 );
 ast_node!(
     #[doc = "A procedure signature node."]
     Signature,
-    SyntaxKind::Signature
+    SyntaxKind::Signature,
+    "type signature"
 );
 ast_node!(
     #[doc = "A structured operation body."]
     Block,
-    SyntaxKind::Block
+    SyntaxKind::Block,
+    "block"
 );
 ast_node!(
     #[doc = "An `if.true` or `if.false` structured operation."]
     IfOp,
-    SyntaxKind::IfOp
+    SyntaxKind::IfOp,
+    "if statement"
 );
 ast_node!(
     #[doc = "A `while.true` structured operation."]
     WhileOp,
-    SyntaxKind::WhileOp
+    SyntaxKind::WhileOp,
+    "while loop"
 );
 ast_node!(
     #[doc = "A `repeat.<count>` structured operation."]
     RepeatOp,
-    SyntaxKind::RepeatOp
+    SyntaxKind::RepeatOp,
+    "repeat"
 );
 ast_node!(
     #[doc = "A single instruction line or grouped same-line instruction sequence."]
     Instruction,
-    SyntaxKind::Instruction
+    SyntaxKind::Instruction,
+    "instruction"
 );
 ast_node!(
     #[doc = "A path-like token group used in imports and invocation targets."]
     Path,
-    SyntaxKind::Path
+    SyntaxKind::Path,
+    "symbol path"
 );
 ast_node!(
     #[doc = "A lossless expression token group."]
     Expr,
-    SyntaxKind::Expr
+    SyntaxKind::Expr,
+    "expression"
 );
 ast_node!(
     #[doc = "The body of a `type` or `enum` declaration."]
     TypeBody,
-    SyntaxKind::TypeBody
+    SyntaxKind::TypeBody,
+    "type definition"
 );
 
 /// Any top-level item that can appear beneath the CST root.
@@ -339,33 +397,46 @@ impl Path {
     }
 }
 
-impl Expr {
-    /// Returns all non-trivia tokens in this expression subtree.
-    pub fn significant_tokens(&self) -> impl Iterator<Item = SyntaxToken> + '_ {
-        self.syntax
-            .children_with_tokens()
-            .filter_map(rowan::NodeOrToken::into_token)
-            .filter(|token| !token.kind().is_trivia())
-    }
-}
-
 fn token_after_keyword(node: &SyntaxNode, keyword: &str) -> Option<SyntaxToken> {
-    let keyword_token = node
-        .children_with_tokens()
+    node.children_with_tokens()
         .filter_map(rowan::NodeOrToken::into_token)
-        .find(|token| token.kind() == SyntaxKind::Ident && token.text() == keyword)?;
-    next_significant_token(node, &keyword_token)
+        .skip_while(|token| !(token.kind() == SyntaxKind::Ident && token.text() == keyword))
+        .skip(1)
+        .find(|token| !token.kind().is_trivia())
 }
 
 fn token_after_punctuation(node: &SyntaxNode, punctuation: SyntaxKind) -> Option<SyntaxToken> {
-    let punctuation_token = node
-        .children_with_tokens()
+    node.children_with_tokens()
         .filter_map(rowan::NodeOrToken::into_token)
-        .find(|token| token.kind() == punctuation)?;
-    next_significant_token(node, &punctuation_token)
+        .skip_while(|token| token.kind() != punctuation)
+        .skip(1)
+        .find(|token| !token.kind().is_trivia())
+}
+
+/// Collects the direct, non-trivia tokens under `node`.
+fn significant_tokens(node: &SyntaxNode) -> impl Iterator<Item = SyntaxToken> {
+    node.children_with_tokens()
+        .filter_map(rowan::NodeOrToken::into_token)
+        .filter(|token| !token.kind().is_trivia())
+}
+
+/// Collects all non-trivia tokens in `node`'s subtree.
+///
+/// Some fragments nest their significant syntax under container nodes, so direct-child token
+/// collection is not sufficient.
+fn significant_tokens_recursive(node: &SyntaxNode) -> impl Iterator<Item = SyntaxToken> {
+    node.descendants_with_tokens()
+        .filter_map(rowan::NodeOrToken::into_token)
+        .filter(|token| !token.kind().is_trivia())
 }
 
 fn next_significant_token(node: &SyntaxNode, token: &SyntaxToken) -> Option<SyntaxToken> {
+    node.children_with_tokens()
+        .filter_map(rowan::NodeOrToken::into_token)
+        .skip_while(|t| t != token)
+        .skip(1)
+        .find(|token| !token.kind().is_trivia())
+    /*
     let mut seen = false;
     for candidate in node.children_with_tokens().filter_map(rowan::NodeOrToken::into_token) {
         if !seen {
@@ -377,4 +448,5 @@ fn next_significant_token(node: &SyntaxNode, token: &SyntaxToken) -> Option<Synt
         }
     }
     None
+     */
 }

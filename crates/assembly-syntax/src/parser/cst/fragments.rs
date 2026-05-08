@@ -33,12 +33,7 @@ pub(super) fn lower_constant_expr(
     context: &mut LoweringContext<'_>,
     expr: &CstExpr,
 ) -> Result<ast::ConstantExpr, ParsingError> {
-    let span = context.parse().span_for_node(expr.syntax());
-    let tokens = expr.significant_tokens().collect::<Vec<_>>();
-    let mut parser = FragmentParser::new(context, tokens, span);
-    let expr = parser.parse_constant_expr()?;
-    parser.expect_eof("unexpected trailing tokens in constant expression")?;
-    Ok(expr)
+    FragmentParser::parse(context, expr, FragmentParser::parse_constant_expr)
 }
 
 /// Lowers the right-hand side of a `type` alias declaration.
@@ -46,13 +41,10 @@ pub(super) fn lower_type_expr_from_alias_body(
     context: &mut LoweringContext<'_>,
     body: &CstTypeBody,
 ) -> Result<ast::TypeExpr, ParsingError> {
-    let span = context.parse().span_for_node(body.syntax());
-    let tokens = significant_tokens(body.syntax());
-    let mut parser = FragmentParser::new(context, tokens, span);
-    parser.expect_kind(SyntaxKind::Equal, "expected `=` in type declaration")?;
-    let ty = parser.parse_type_expr()?;
-    parser.expect_eof("unexpected trailing tokens in type declaration")?;
-    Ok(ty)
+    FragmentParser::parse(context, body, |parser| {
+        parser.expect_kind(SyntaxKind::Equal, "expected `=` in type declaration")?;
+        parser.parse_type_expr()
+    })
 }
 
 /// Lowers the body of an `enum` declaration into the legacy enum AST.
@@ -63,11 +55,7 @@ pub(super) fn lower_enum_decl_from_body(
     body: &CstTypeBody,
     span: SourceSpan,
 ) -> Result<ast::EnumType, ParsingError> {
-    let tokens = significant_tokens(body.syntax());
-    let mut parser = FragmentParser::new(context, tokens, span);
-    let enum_ty = parser.parse_enum_decl(visibility, name, span)?;
-    parser.expect_eof("unexpected trailing tokens in enum declaration")?;
-    Ok(enum_ty)
+    FragmentParser::parse(context, body, |parser| parser.parse_enum_decl(visibility, name, span))
 }
 
 /// Lowers a CST procedure signature into the legacy function-type AST.
@@ -75,12 +63,7 @@ pub(super) fn lower_function_type_from_signature(
     context: &mut LoweringContext<'_>,
     signature: &CstSignature,
 ) -> Result<ast::FunctionType, ParsingError> {
-    let span = context.parse().span_for_node(signature.syntax());
-    let tokens = significant_tokens(signature.syntax());
-    let mut parser = FragmentParser::new(context, tokens, span);
-    let ty = parser.parse_function_type()?;
-    parser.expect_eof("unexpected trailing tokens in procedure signature")?;
-    Ok(ty)
+    FragmentParser::parse(context, signature, FragmentParser::parse_function_type)
 }
 
 /// Lowers a token that must be either a `u32` literal or a constant reference.
@@ -109,12 +92,7 @@ pub(super) fn lower_attribute(
     context: &mut LoweringContext<'_>,
     attribute: &CstAttribute,
 ) -> Result<ast::Attribute, ParsingError> {
-    let span = context.parse().span_for_node(attribute.syntax());
-    let tokens = significant_tokens(attribute.syntax());
-    let mut parser = FragmentParser::new(context, tokens, span);
-    let attribute = parser.parse_attribute()?;
-    parser.expect_eof("unexpected trailing tokens in attribute")?;
-    Ok(attribute)
+    FragmentParser::parse(context, attribute, FragmentParser::parse_attribute)
 }
 
 /// Lowers an `adv_map` declaration fragment into the legacy advice-map entry AST.
@@ -123,32 +101,7 @@ pub(super) fn lower_advice_map_decl(
     advice_map: &CstAdviceMap,
 ) -> Result<ast::AdviceMapEntry, ParsingError> {
     let span = context.parse().span_for_node(advice_map.syntax());
-    let tokens = significant_tokens_recursive(advice_map.syntax());
-    let mut parser = FragmentParser::new(context, tokens, span);
-    let entry = parser.parse_advice_map_decl(span)?;
-    parser.expect_eof("unexpected trailing tokens in advice-map declaration")?;
-    Ok(entry)
-}
-
-/// Collects the direct, non-trivia tokens under `node`.
-fn significant_tokens(node: &miden_assembly_syntax_cst::syntax::SyntaxNode) -> Vec<SyntaxToken> {
-    node.children_with_tokens()
-        .filter_map(rowan::NodeOrToken::into_token)
-        .filter(|token| !token.kind().is_trivia())
-        .collect()
-}
-
-/// Collects all non-trivia tokens in `node`'s subtree.
-///
-/// Some fragments nest their significant syntax under container nodes, so direct-child token
-/// collection is not sufficient.
-fn significant_tokens_recursive(
-    node: &miden_assembly_syntax_cst::syntax::SyntaxNode,
-) -> Vec<SyntaxToken> {
-    node.descendants_with_tokens()
-        .filter_map(rowan::NodeOrToken::into_token)
-        .filter(|token| !token.kind().is_trivia())
-        .collect()
+    FragmentParser::parse(context, advice_map, |parser| parser.parse_advice_map_decl(span))
 }
 
 /// Small recursive-descent/Pratt parser used to re-parse fragment-local CST token streams.
@@ -161,12 +114,25 @@ struct FragmentParser<'a, 'b> {
 
 impl<'a, 'b> FragmentParser<'a, 'b> {
     /// Creates a fragment parser over the provided token sequence and enclosing span.
-    fn new(
+    pub fn parse<T, U, F>(
         context: &'a mut LoweringContext<'b>,
-        tokens: Vec<SyntaxToken>,
-        span: SourceSpan,
-    ) -> Self {
-        Self { context, tokens, pos: 0, span }
+        node: &T,
+        action: F,
+    ) -> Result<U, ParsingError>
+    where
+        T: miden_assembly_syntax_cst::ast::AstNodeExt,
+        F: FnOnce(&mut Self) -> Result<U, ParsingError>,
+    {
+        let span = context.parse().span_for_node(node.syntax());
+        let mut parser = Self {
+            context,
+            tokens: node.significant_tokens().collect(),
+            pos: 0,
+            span,
+        };
+        let parsed = action(&mut parser)?;
+        parser.expect_eof(format!("unexpected trailing tokens in {}", node.describe()))?;
+        Ok(parsed)
     }
 
     /// Parses a complete constant expression from the current fragment.
@@ -1019,7 +985,7 @@ impl<'a, 'b> FragmentParser<'a, 'b> {
     }
 
     /// Ensures that the fragment parser consumed the entire token sequence supplied by the caller.
-    fn expect_eof(&self, message: &'static str) -> Result<(), ParsingError> {
+    fn expect_eof(&self, message: impl ToString) -> Result<(), ParsingError> {
         if self.is_eof() {
             Ok(())
         } else {
@@ -1167,7 +1133,7 @@ impl<'a, 'b> FragmentParser<'a, 'b> {
     }
 
     /// Constructs a generic syntax error anchored at the current cursor position.
-    fn invalid_syntax(&self, message: &'static str) -> ParsingError {
+    fn invalid_syntax(&self, message: impl ToString) -> ParsingError {
         ParsingError::InvalidSyntax {
             span: self.current_span(),
             message: message.to_string(),
