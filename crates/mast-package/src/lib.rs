@@ -17,6 +17,8 @@ pub use miden_assembly_syntax::{
 };
 pub use miden_core::{Word, mast::MastForest, program::Program};
 
+#[cfg(feature = "arbitrary")]
+pub use self::package::arbitrary;
 pub use self::{
     dependency::Dependency,
     package::{
