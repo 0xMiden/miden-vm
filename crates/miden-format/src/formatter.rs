@@ -396,15 +396,7 @@ fn render_begin_block(begin: &BeginBlock, indent: usize, config: &Config) -> Str
 }
 
 fn render_procedure(procedure: &Procedure, indent: usize, config: &Config) -> String {
-    let mut lines = Vec::new();
-
-    for attribute in procedure.attributes() {
-        lines.push(format!(
-            "{}{}",
-            indent_string(indent),
-            render_compact_tokens(attribute.syntax())
-        ));
-    }
+    let mut lines = render_procedure_attribute_prologue(procedure, indent);
 
     let mut header = indent_string(indent);
     if procedure.visibility().is_some() {
@@ -445,6 +437,56 @@ fn render_procedure(procedure: &Procedure, indent: usize, config: &Config) -> St
 
     lines.push(format!("{}end", indent_string(indent)));
     lines.join("\n")
+}
+
+fn render_procedure_attribute_prologue(procedure: &Procedure, indent: usize) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut inline_comment_target = None;
+    let mut same_line = false;
+
+    for element in procedure.syntax().children_with_tokens() {
+        match element {
+            NodeOrToken::Node(child) if child.kind() == SyntaxKind::Attribute => {
+                lines.push(format!("{}{}", indent_string(indent), render_compact_tokens(&child)));
+                inline_comment_target = Some(lines.len() - 1);
+                same_line = true;
+            },
+            NodeOrToken::Node(child)
+                if matches!(
+                    child.kind(),
+                    SyntaxKind::Visibility | SyntaxKind::Signature | SyntaxKind::Block
+                ) =>
+            {
+                break;
+            },
+            NodeOrToken::Node(_) => {
+                inline_comment_target = None;
+                same_line = false;
+            },
+            NodeOrToken::Token(token) => match token.kind() {
+                SyntaxKind::Comment | SyntaxKind::DocComment => {
+                    let comment = trimmed_comment(&token);
+                    if same_line && let Some(target) = inline_comment_target {
+                        append_inline_comment(&mut lines[target], &comment);
+                    } else {
+                        lines.push(format!("{}{}", indent_string(indent), comment));
+                    }
+                    inline_comment_target = Some(lines.len() - 1);
+                    same_line = true;
+                },
+                SyntaxKind::Whitespace => {},
+                SyntaxKind::Newline => {
+                    inline_comment_target = None;
+                    same_line = false;
+                },
+                SyntaxKind::Ident if token.text() == "proc" => break,
+                kind if !kind.is_trivia() => break,
+                _ => {},
+            },
+        }
+    }
+
+    lines
 }
 
 fn render_signature_lines(
@@ -1957,6 +1999,38 @@ end
         let config = Config::default();
         let formatted = format_syntax(&config, &parse.syntax());
         assert_eq!(formatted, source);
+
+        let reparsed = parse_text(&formatted);
+        assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
+
+        let reformatted = format_syntax(&config, &reparsed.syntax());
+        assert_eq!(reformatted, formatted);
+    }
+
+    #[test]
+    fn preserves_comments_between_procedure_attributes() {
+        let source = "\
+@inline # keep me
+# keep standalone
+@locals(1)
+pub proc foo  nop end
+";
+
+        let parse = parse_text(source);
+        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+
+        let config = Config::default();
+        let formatted = format_syntax(&config, &parse.syntax());
+        let expected = "\
+@inline # keep me
+# keep standalone
+@locals(1)
+pub proc foo
+    nop
+end
+";
+
+        assert_eq!(formatted, expected);
 
         let reparsed = parse_text(&formatted);
         assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());

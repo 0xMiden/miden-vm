@@ -543,7 +543,7 @@ impl<'input> Parser<'input> {
             self.error_here("expected an attribute name");
         }
 
-        self.bump_regular_trivia();
+        self.bump_inline_whitespace();
         if self.at_kind(SyntaxKind::LParen) {
             self.parse_balanced_group(
                 SyntaxKind::LParen,
