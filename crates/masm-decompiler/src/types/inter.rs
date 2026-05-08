@@ -1,12 +1,10 @@
 //! Interprocedural type-summary inference.
 
-use miden_assembly_syntax::debuginfo::Spanned;
-
 use super::{
     declared_summary_for_proc_with_arity,
     domain::{InferredType, TypeRequirement},
     intra::analyze_proc_types,
-    summary::{TypeDiagnosticsMap, TypeSummary, TypeSummaryMap},
+    summary::{TypeSummary, TypeSummaryMap},
 };
 use crate::{
     callgraph::CallGraph,
@@ -24,23 +22,21 @@ pub fn infer_type_summaries(
     workspace: &Workspace,
     callgraph: &CallGraph,
     signatures: &SignatureMap,
-) -> (TypeSummaryMap, TypeDiagnosticsMap) {
+) -> TypeSummaryMap {
     let mut summaries = TypeSummaryMap::default();
-    let mut diagnostics = TypeDiagnosticsMap::default();
 
     for node in callgraph.iter() {
         let summary = infer_summary_for_node(
             workspace,
-            node.name.as_str(),
+            node.name().as_str(),
             callgraph,
             signatures,
             &summaries,
-            &mut diagnostics,
         );
-        summaries.insert(node.name.clone(), summary);
+        summaries.insert(node.name().clone(), summary);
     }
 
-    (summaries, diagnostics)
+    summaries
 }
 
 /// Infer a summary for a single procedure.
@@ -50,7 +46,6 @@ fn infer_summary_for_node(
     _callgraph: &CallGraph,
     signatures: &SignatureMap,
     callee_summaries: &TypeSummaryMap,
-    diagnostics: &mut TypeDiagnosticsMap,
 ) -> TypeSummary {
     let proc_path = crate::symbol::path::SymbolPath::new(fq_name.to_string());
     let Some(signature) = signatures.get(&proc_path) else {
@@ -66,11 +61,6 @@ fn infer_summary_for_node(
         return TypeSummary::opaque_with_arity(inputs, outputs);
     };
     let declared_summary = declared_summary_for_proc_with_arity(program, proc, inputs, outputs);
-    let visibility = proc.visibility();
-    // Use the procedure name span rather than the full body span for
-    // diagnostics. MASM procedures have implicit stack arguments, so
-    // there is no explicit parameter list to point at.
-    let proc_span = proc.name().span();
     let resolver = create_resolver(program.module(), workspace.source_manager());
     let stmts = match lift::lift_proc(proc, &proc_path, &resolver, signatures) {
         Ok(stmts) => stmts,
@@ -80,20 +70,9 @@ fn infer_summary_for_node(
         },
     };
 
-    let analysis = analyze_proc_types(
-        &proc_path,
-        inputs,
-        outputs,
-        visibility,
-        proc_span,
-        &stmts,
-        callee_summaries,
-    );
-    if !analysis.diagnostics.is_empty() {
-        diagnostics.insert(proc_path.clone(), analysis.diagnostics.clone());
-    }
-    let raw_outputs = analysis.summary.outputs.clone();
-    let summary = refine_known_stdlib_outputs(workspace, program, &proc_path, analysis.summary);
+    let analysis = analyze_proc_types(inputs, outputs, &stmts, callee_summaries);
+    let raw_outputs = analysis.outputs.clone();
+    let summary = refine_known_stdlib_outputs(workspace, program, &proc_path, analysis);
     let summary = refine_trusted_declared_inputs_when_outputs_exact(
         workspace,
         program,

@@ -32,15 +32,8 @@ pub enum IndexExpr {
 pub struct ValueId(u64);
 
 impl ValueId {
-    /// Create a new value identifier from a raw integer.
-    ///
-    /// This is primarily intended for tests and deterministic fixtures.
-    pub const fn new(raw: u64) -> Self {
-        Self(raw)
-    }
-
     /// Return the raw integer value of this identifier.
-    pub const fn as_u64(self) -> u64 {
+    pub(crate) const fn as_u64(self) -> u64 {
         self.0
     }
 }
@@ -67,16 +60,8 @@ pub enum VarBase {
 }
 
 impl VarBase {
-    /// Return the loop depth for loop-input bases, if any.
-    pub const fn loop_depth(&self) -> Option<usize> {
-        match self {
-            VarBase::LoopInput { loop_depth } => Some(*loop_depth),
-            VarBase::Value(_) => None,
-        }
-    }
-
     /// Return the value identifier for value bases, if any.
-    pub const fn value_id(&self) -> Option<ValueId> {
+    pub(crate) const fn value_id(&self) -> Option<ValueId> {
         match self {
             VarBase::Value(id) => Some(*id),
             VarBase::LoopInput { .. } => None,
@@ -110,17 +95,8 @@ impl Var {
         }
     }
 
-    /// Create a new loop-input variable for a repeat loop entry snapshot.
-    pub fn loop_input(loop_depth: usize, stack_depth: usize, subscript: IndexExpr) -> Self {
-        Self {
-            base: VarBase::LoopInput { loop_depth },
-            stack_depth,
-            subscript,
-        }
-    }
-
     /// Return a copy of this variable with a new subscript.
-    pub fn with_subscript(&self, subscript: IndexExpr) -> Self {
+    pub(crate) fn with_subscript(&self, subscript: IndexExpr) -> Self {
         Self {
             base: self.base.clone(),
             stack_depth: self.stack_depth,
@@ -129,7 +105,7 @@ impl Var {
     }
 
     /// Return a copy of this variable with a new base identity.
-    pub fn with_base(&self, base: VarBase) -> Self {
+    pub(crate) fn with_base(&self, base: VarBase) -> Self {
         Self {
             base,
             stack_depth: self.stack_depth,
@@ -147,13 +123,6 @@ impl Var {
 pub struct LoopVar {
     /// Nesting depth of this loop (0 for outermost, 1 for next level, etc.).
     pub loop_depth: usize,
-}
-
-impl LoopVar {
-    /// Create a new loop variable at the given nesting depth.
-    pub const fn new(loop_depth: usize) -> Self {
-        Self { loop_depth }
-    }
 }
 
 /// Expression tree.
@@ -261,36 +230,11 @@ pub enum Constant {
 }
 
 impl Constant {
-    /// Check if this constant is a felt literal.
-    pub fn as_felt(&self) -> Option<u64> {
-        match self {
-            Constant::Felt(v) => Some(*v),
-            _ => None,
-        }
-    }
-
-    /// Check if this constant is a word literal.
-    pub fn as_word(&self) -> Option<&[u64; 4]> {
-        match self {
-            Constant::Word(w) => Some(w),
-            _ => None,
-        }
-    }
-
     /// Check if this constant is zero.
     pub fn is_zero(&self) -> bool {
         match self {
             Constant::Felt(v) => *v == 0,
             Constant::Word(w) => w.iter().all(|&x| x == 0),
-            Constant::Defined(_) => false,
-        }
-    }
-
-    /// Check if this constant is one.
-    pub fn is_one(&self) -> bool {
-        match self {
-            Constant::Felt(v) => *v == 1,
-            Constant::Word(w) => w[0] == 1 && w[1] == 0 && w[2] == 0 && w[3] == 0,
             Constant::Defined(_) => false,
         }
     }

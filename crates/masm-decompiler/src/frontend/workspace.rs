@@ -4,10 +4,7 @@ use std::{
     sync::Arc,
 };
 
-use miden_assembly_syntax::{
-    ast::path::PathBuf as MasmPathBuf,
-    debuginfo::{DefaultSourceManager, SourceManager},
-};
+use miden_assembly_syntax::{ast::path::PathBuf as MasmPathBuf, debuginfo::SourceManager};
 
 use super::{LibraryRoot, Program};
 use crate::symbol::{path::SymbolPath, resolution::create_resolver};
@@ -20,15 +17,9 @@ pub struct Workspace {
     modules: Vec<Program>,
     index: HashMap<SymbolPath, usize>,
     pub(crate) proc_index: HashMap<SymbolPath, (usize, usize)>,
-    pub(crate) const_index: HashMap<SymbolPath, (usize, usize)>,
 }
 
 impl Workspace {
-    pub fn new(roots: Vec<LibraryRoot>) -> Self {
-        let source_manager: Arc<dyn SourceManager> = Arc::new(DefaultSourceManager::default());
-        Self::with_source_manager(roots, source_manager)
-    }
-
     pub fn with_source_manager(
         roots: Vec<LibraryRoot>,
         source_manager: Arc<dyn SourceManager>,
@@ -39,7 +30,6 @@ impl Workspace {
             modules: Vec::new(),
             index: HashMap::new(),
             proc_index: HashMap::new(),
-            const_index: HashMap::new(),
         }
     }
 
@@ -56,22 +46,6 @@ impl Workspace {
         self.index.insert(key, idx);
         self.reindex_symbols(idx);
         Ok(idx)
-    }
-
-    /// Insert a program directly (useful for in-memory tests).
-    ///
-    /// Note: `program` should be parsed using this workspace's source manager to
-    /// ensure SourceSpan lookups resolve correctly.
-    pub fn add_program(&mut self, program: Program) -> usize {
-        let key = SymbolPath::new(as_str(program.module_path()).to_string());
-        if let Some(idx) = self.index.get(&key).copied() {
-            return idx;
-        }
-        let idx = self.modules.len();
-        self.modules.push(program);
-        self.index.insert(key, idx);
-        self.reindex_symbols(idx);
-        idx
     }
 
     /// Iteratively load modules referenced by path-based invocations until no new modules can be
@@ -103,7 +77,7 @@ impl Workspace {
 
     /// Load a module by its absolute MASM path (e.g., `miden::core::math::u64`) if it exists on
     /// disk. Returns `None` if no matching file could be found.
-    pub fn load_module_by_path(&mut self, module_path: &str) -> Option<usize> {
+    fn load_module_by_path(&mut self, module_path: &str) -> Option<usize> {
         let key = SymbolPath::new(module_path);
         if let Some(idx) = self.index.get(&key).copied() {
             return Some(idx);
@@ -122,7 +96,7 @@ impl Workspace {
         self.modules.iter()
     }
 
-    pub fn lookup_module(&self, module_path: &SymbolPath) -> Option<&Program> {
+    pub(crate) fn lookup_module(&self, module_path: &SymbolPath) -> Option<&Program> {
         let idx = self.index.get(module_path).copied()?;
         self.modules.get(idx)
     }
@@ -135,28 +109,6 @@ impl Workspace {
         let program = self.modules.get(m_idx)?;
         let proc = program.procedures().nth(p_idx)?;
         Some((program, proc))
-    }
-
-    pub fn lookup_proc(&self, name: &str) -> Option<&miden_assembly_syntax::ast::Procedure> {
-        let key = SymbolPath::new(name);
-        self.lookup_proc_entry(&key).map(|(_, proc)| proc)
-    }
-
-    /// Look up a constant by fully-qualified path.
-    pub fn lookup_constant_entry(
-        &self,
-        name: &SymbolPath,
-    ) -> Option<(&Program, &miden_assembly_syntax::ast::Constant)> {
-        let (m_idx, c_idx) = self.const_index.get(name).copied()?;
-        let program = self.modules.get(m_idx)?;
-        let constant = program.constants().nth(c_idx)?;
-        Some((program, constant))
-    }
-
-    /// Look up a constant by fully-qualified path string.
-    pub fn lookup_constant(&self, name: &str) -> Option<&miden_assembly_syntax::ast::Constant> {
-        let key = SymbolPath::new(name);
-        self.lookup_constant_entry(&key).map(|(_, constant)| constant)
     }
 
     pub fn roots(&self) -> &[LibraryRoot] {
@@ -204,7 +156,7 @@ fn as_str(path: &MasmPathBuf) -> &str {
 
 /// Given a fully-qualified module path and library roots, locate the corresponding file on disk.
 /// Tries `<root>/<components>.masm` and `<root>/<components>/<name>/mod.masm`.
-pub fn find_module_file(module_path: &str, roots: &[LibraryRoot]) -> Option<FsPathBuf> {
+fn find_module_file(module_path: &str, roots: &[LibraryRoot]) -> Option<FsPathBuf> {
     for root in roots {
         let Some(relative) = root.module_relative_path(module_path) else {
             continue;
@@ -241,10 +193,6 @@ fn proc_fq_name(module_path: &str, proc_name: &str) -> SymbolPath {
     SymbolPath::from_module_path_and_name(module_path, proc_name)
 }
 
-fn constant_fq_name(module_path: &str, constant_name: &str) -> SymbolPath {
-    SymbolPath::from_module_path_and_name(module_path, constant_name)
-}
-
 impl Workspace {
     fn reindex_symbols(&mut self, module_idx: usize) {
         if let Some(prog) = self.modules.get(module_idx) {
@@ -252,10 +200,6 @@ impl Workspace {
             for (proc_idx, proc) in prog.procedures().enumerate() {
                 let name = proc_fq_name(module_path, proc.name().as_str());
                 self.proc_index.insert(name, (module_idx, proc_idx));
-            }
-            for (const_idx, constant) in prog.constants().enumerate() {
-                let name = constant_fq_name(module_path, constant.name().as_str());
-                self.const_index.insert(name, (module_idx, const_idx));
             }
         }
     }

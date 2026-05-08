@@ -53,21 +53,8 @@ pub enum ProcSignature {
 }
 
 impl ProcSignature {
-    pub fn known(inputs: usize, outputs: usize, net_effect: isize) -> Self {
-        ProcSignature::Known {
-            inputs,
-            public_inputs: inputs,
-            outputs,
-            net_effect,
-        }
-    }
-
-    pub fn unknown() -> Self {
-        ProcSignature::Unknown
-    }
-
     /// Return a copy with a refined public input arity.
-    pub fn with_public_inputs(self, public_inputs: usize) -> Self {
+    pub(crate) fn with_public_inputs(self, public_inputs: usize) -> Self {
         match self {
             ProcSignature::Known { inputs, outputs, net_effect, .. } => ProcSignature::Known {
                 inputs,
@@ -118,7 +105,7 @@ impl From<&ProvenanceStack> for ProcSignature {
 
 /// Provenance of a stack slot.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Provenance {
+enum Provenance {
     /// An input to the procedure.
     Input,
     /// A locally computed value.
@@ -129,7 +116,7 @@ impl Provenance {
     /// Merge two individual stack slot values from two different branches.
     ///
     /// If either branch writes to the slot, the slot is marked as local.
-    pub fn merge(self, other: Self) -> Self {
+    fn merge(self, other: Self) -> Self {
         match (self, other) {
             (Provenance::Input, Provenance::Input) => Provenance::Input,
             _ => Provenance::Local,
@@ -151,17 +138,17 @@ pub type SignatureMap = HashMap<SymbolPath, ProcSignature>;
 /// while loops, or calls to procedures with unknown stack effects, the analysis
 /// fails.
 #[derive(Debug, Default, Clone)]
-pub struct ProvenanceStack {
+pub(super) struct ProvenanceStack {
     stack: VecDeque<Provenance>,
-    pub current_depth: isize,
-    pub required_depth: usize,
+    current_depth: isize,
+    required_depth: usize,
 }
 
 impl ProvenanceStack {
     /// Ensure that the stack depth is at least `required_depth` by pushing
     /// additional inputs to the stack. Must be called before popping values
     /// from the stack.
-    pub fn ensure_depth(&mut self, required_depth: usize) {
+    pub(super) fn ensure_depth(&mut self, required_depth: usize) {
         while self.stack.len() < required_depth {
             self.stack.push_front(Provenance::Input);
             self.required_depth += 1;
@@ -169,7 +156,7 @@ impl ProvenanceStack {
     }
 
     /// Pop a single value from the stack.
-    pub fn pop(&mut self) {
+    pub(super) fn pop(&mut self) {
         assert!(!self.stack.is_empty());
         self.stack.pop_back();
         self.current_depth -= 1;
@@ -182,7 +169,7 @@ impl ProvenanceStack {
     }
 
     /// Apply the known stack effects of a single instruction.
-    pub fn apply(&mut self, pops: usize, pushes: usize, required_depth: usize) {
+    pub(super) fn apply(&mut self, pops: usize, pushes: usize, required_depth: usize) {
         self.ensure_depth(required_depth);
         for _ in 0..pops {
             self.pop();
@@ -193,17 +180,21 @@ impl ProvenanceStack {
     }
 
     /// Returns the number of inputs to the procedure.
-    pub fn inputs(&self) -> usize {
+    fn inputs(&self) -> usize {
         self.required_depth
     }
 
     /// Returns the number of outputs from the procedure.
-    pub fn outputs(&self) -> usize {
+    fn outputs(&self) -> usize {
         self.stack.len()
     }
 
     /// Returns the net stack effect of the procedure on exit.
-    pub fn net_effect(&self) -> isize {
+    fn net_effect(&self) -> isize {
+        self.current_depth
+    }
+
+    pub(super) fn current_depth(&self) -> isize {
         self.current_depth
     }
 
@@ -211,7 +202,7 @@ impl ProvenanceStack {
     // the same for both versions of the stack. The required depth of the merged
     // stack is the maximum depth across the two inputs. Individual slots are
     // marked as local if either of the inputs has marked the slot as local.
-    pub fn merge(&self, other: &Self) -> Self {
+    pub(super) fn merge(&self, other: &Self) -> Self {
         assert!(self.current_depth == other.current_depth);
 
         let mut self_stack = self.stack.clone();

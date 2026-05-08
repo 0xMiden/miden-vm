@@ -131,7 +131,7 @@ impl fmt::Display for TypeRequirement {
 
 /// Base identity used in type maps.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum VarBaseKey {
+pub(crate) enum VarBaseKey {
     /// Concrete SSA value.
     Value(ValueId),
     /// Repeat-loop input identity.
@@ -142,9 +142,9 @@ pub enum VarBaseKey {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct VarKey {
     /// Base identity.
-    pub base: VarBaseKey,
+    pub(crate) base: VarBaseKey,
     /// SSA subscript.
-    pub subscript: IndexExpr,
+    pub(crate) subscript: IndexExpr,
 }
 
 impl VarKey {

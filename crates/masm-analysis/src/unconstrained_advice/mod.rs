@@ -14,8 +14,15 @@ mod u32_domain;
 mod walker;
 
 pub use grouping::{AdviceRootCauseGroup, group_advice_diagnostics_by_origin};
-pub use inter::{infer_unconstrained_advice, infer_unconstrained_advice_in_workspace};
-pub use summary::{
-    AdviceDiagnostic, AdviceDiagnosticsMap, AdviceSinkKind, AdviceSummary, AdviceSummaryMap,
-    CallArgumentRequirement,
-};
+use masm_decompiler::{CallGraph, SignatureMap, TypeSummaryMap, Workspace};
+pub use summary::AdviceDiagnostic;
+use summary::AdviceDiagnosticsMap;
+
+pub(super) fn infer_unconstrained_advice(
+    workspace: &Workspace,
+    callgraph: &CallGraph,
+    signatures: &SignatureMap,
+    type_summaries: &TypeSummaryMap,
+) -> AdviceDiagnosticsMap {
+    inter::infer_unconstrained_advice(workspace, callgraph, signatures, type_summaries).1
+}

@@ -14,15 +14,15 @@ pub fn infer_signatures(workspace: &Workspace, callgraph: &CallGraph) -> Signatu
     // Iterate over call graph nodes in bottom up order, starting with
     // call-graph leaves.
     for node in callgraph.iter() {
-        if let Some(proc) = workspace.lookup_proc(node.name.as_str()) {
-            let analysis = Analysis::new(&node.module_path, workspace, &signatures);
+        if let Some((_, proc)) = workspace.lookup_proc_entry(node.name()) {
+            let analysis = Analysis::new(node.module_path(), workspace, &signatures);
             let signature = analysis.visit_proc(proc);
             if let ProcSignature::Known { inputs, outputs, .. } = signature {
-                debug!("`{}` takes {} inputs and returns {} outputs", node.name, inputs, outputs);
+                debug!("`{}` takes {} inputs and returns {} outputs", node.name(), inputs, outputs);
             } else {
-                debug!("failed to infer signature for `{}`", node.name)
+                debug!("failed to infer signature for `{}`", node.name())
             }
-            signatures.insert(node.name.clone(), signature);
+            signatures.insert(node.name().clone(), signature);
         }
     }
     signatures
@@ -49,7 +49,7 @@ struct Analysis<'a> {
 }
 
 impl<'a> Analysis<'a> {
-    pub fn new(
+    fn new(
         module_path: &SymbolPath,
         resolver: &'a dyn WorkspaceSymbolResolver,
         signatures: &'a SignatureMap,
@@ -61,7 +61,7 @@ impl<'a> Analysis<'a> {
         }
     }
 
-    pub fn visit_proc(&self, procedure: &Procedure) -> ProcSignature {
+    fn visit_proc(&self, procedure: &Procedure) -> ProcSignature {
         let mut stack = ProvenanceStack::default();
         match self.visit_block(procedure.body(), &mut stack) {
             OpResult::Known => ProcSignature::from(&stack),
@@ -150,7 +150,7 @@ impl<'a> Analysis<'a> {
         }
 
         // We bail on branches with different stack effects.
-        if then_stack.current_depth != else_stack.current_depth {
+        if then_stack.current_depth() != else_stack.current_depth() {
             return OpResult::Unknown;
         }
         *stack = then_stack.merge(&else_stack);
@@ -186,7 +186,7 @@ impl<'a> Analysis<'a> {
 
         // We require that the loop body is stack neutral after the condition is
         // popped. Otherwise we bail.
-        if entry_stack.current_depth != body_stack.current_depth {
+        if entry_stack.current_depth() != body_stack.current_depth() {
             return OpResult::Unknown;
         }
         *stack = entry_stack.merge(&body_stack);

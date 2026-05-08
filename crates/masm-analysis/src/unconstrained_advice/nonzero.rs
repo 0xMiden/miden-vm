@@ -2,10 +2,7 @@
 
 use std::collections::BTreeSet;
 
-use masm_decompiler::{
-    SymbolPath,
-    ir::{BinOp, Expr, Stmt, UnOp},
-};
+use masm_decompiler::{BinOp, Expr, LocalAccessKind, LoopPhi, Stmt, SymbolPath, UnOp, Var};
 
 use super::{
     domain::AdviceFact,
@@ -16,29 +13,26 @@ use super::{
         assign_phi_metadata, expr_is_proven_nonzero, expr_output_fact, refine_if_envs,
         refine_nonzero_from_intrinsic, seed_input_env, stmt_span,
     },
-    summary::{
-        AdviceDiagnostic, AdviceDiagnosticsMap, AdviceSinkKind, AdviceSummaryMap,
-        CallArgumentRequirement,
-    },
+    summary::{AdviceDiagnostic, AdviceDiagnosticsMap, AdviceSummaryMap},
 };
 
 /// Summary of non-zero sink requirements for one procedure.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub(crate) struct NonZeroSummary {
+pub(super) struct NonZeroSummary {
     /// Input positions that may reach a `div` or `inv` sink without a local proof.
-    pub(crate) required_inputs: BTreeSet<usize>,
+    required_inputs: BTreeSet<usize>,
     /// Whether this summary is opaque.
-    pub(crate) unknown: bool,
+    unknown: bool,
 }
 
 impl NonZeroSummary {
     /// Create a known summary from required input positions.
-    pub(crate) fn new(required_inputs: BTreeSet<usize>) -> Self {
+    fn new(required_inputs: BTreeSet<usize>) -> Self {
         Self { required_inputs, unknown: false }
     }
 
     /// Create an opaque summary.
-    pub(crate) fn unknown() -> Self {
+    fn unknown() -> Self {
         Self {
             required_inputs: BTreeSet::new(),
             unknown: true,
@@ -46,17 +40,17 @@ impl NonZeroSummary {
     }
 
     /// Return true if the summary is opaque.
-    pub(crate) fn is_unknown(&self) -> bool {
+    fn is_unknown(&self) -> bool {
         self.unknown
     }
 }
 
 /// Map of non-zero summaries by procedure.
-pub(crate) type NonZeroSummaryMap = std::collections::HashMap<SymbolPath, NonZeroSummary>;
+pub(super) type NonZeroSummaryMap = std::collections::HashMap<SymbolPath, NonZeroSummary>;
 
 /// Infer non-zero summaries and diagnostics using already-computed provenance summaries.
-pub(crate) fn infer_nonzero_summaries_and_diagnostics(
-    callgraph: &masm_decompiler::callgraph::CallGraph,
+pub(super) fn infer_nonzero_summaries_and_diagnostics(
+    callgraph: &masm_decompiler::CallGraph,
     prepared: &std::collections::HashMap<SymbolPath, super::inter::PreparedProc>,
     provenance_summaries: &AdviceSummaryMap,
 ) -> (NonZeroSummaryMap, AdviceDiagnosticsMap) {
@@ -64,22 +58,22 @@ pub(crate) fn infer_nonzero_summaries_and_diagnostics(
     let mut diagnostics = AdviceDiagnosticsMap::default();
 
     for node in callgraph.iter() {
-        let Some(proc) = prepared.get(&node.name) else {
-            summaries.insert(node.name.clone(), NonZeroSummary::unknown());
+        let Some(proc) = prepared.get(node.name()) else {
+            summaries.insert(node.name().clone(), NonZeroSummary::unknown());
             continue;
         };
         let Some(stmts) = proc.stmts.as_deref() else {
-            summaries.insert(node.name.clone(), NonZeroSummary::unknown());
+            summaries.insert(node.name().clone(), NonZeroSummary::unknown());
             continue;
         };
 
         let analyzer =
-            ProcNonZeroAnalyzer::new(node.name.clone(), provenance_summaries, &summaries);
+            ProcNonZeroAnalyzer::new(node.name().clone(), provenance_summaries, &summaries);
         let result = analyzer.analyze(proc.inputs, stmts);
         if !result.diagnostics.is_empty() {
-            diagnostics.insert(node.name.clone(), result.diagnostics);
+            diagnostics.insert(node.name().clone(), result.diagnostics);
         }
-        summaries.insert(node.name.clone(), result.summary);
+        summaries.insert(node.name().clone(), result.summary);
     }
 
     (summaries, diagnostics)
@@ -169,7 +163,6 @@ impl<'a> ProcNonZeroAnalyzer<'a> {
                 if sink_fact.has_concrete_sources() {
                     diagnostics.push(self.new_diagnostic(
                         *span,
-                        AdviceSinkKind::NonZeroOperand,
                         "unconstrained advice reaches a divisor or `inv` input without a nearby non-zero check",
                         &sink_fact,
                     ));
@@ -199,11 +192,10 @@ impl<'a> ProcNonZeroAnalyzer<'a> {
                 apply_local_store_word(store.kind, &store.values, u32::from(store.index), &mut env);
             },
             Stmt::LocalLoad { load, .. } => match load.kind {
-                masm_decompiler::ir::LocalAccessKind::Element => {
+                LocalAccessKind::Element => {
                     apply_local_load_scalar(&load.outputs, u32::from(load.index), &mut env);
                 },
-                masm_decompiler::ir::LocalAccessKind::WordBe
-                | masm_decompiler::ir::LocalAccessKind::WordLe => {
+                LocalAccessKind::WordBe | LocalAccessKind::WordLe => {
                     apply_local_load_word(
                         load.kind,
                         &load.outputs,
@@ -243,7 +235,6 @@ impl<'a> ProcNonZeroAnalyzer<'a> {
                 if sink_fact.has_concrete_sources() {
                     diagnostics.push(self.new_diagnostic(
                         stmt_span(stmt),
-                        AdviceSinkKind::NonZeroOperand,
                         "unconstrained advice reaches a divisor or `inv` input without a nearby non-zero check",
                         &sink_fact,
                     ));
@@ -281,7 +272,6 @@ impl<'a> ProcNonZeroAnalyzer<'a> {
                 if sink_fact.has_concrete_sources() {
                     diagnostics.push(self.new_diagnostic(
                         stmt_span(stmt),
-                        AdviceSinkKind::NonZeroOperand,
                         "unconstrained advice reaches a divisor or `inv` input without a nearby non-zero check",
                         &sink_fact,
                     ));
@@ -311,12 +301,7 @@ impl<'a> ProcNonZeroAnalyzer<'a> {
     }
 
     /// Evaluate a structured loop body conservatively.
-    fn eval_loop_block(
-        &self,
-        body: &[Stmt],
-        phis: &[masm_decompiler::ir::LoopPhi],
-        entry_env: Env,
-    ) -> EvalResult {
+    fn eval_loop_block(&self, body: &[Stmt], phis: &[LoopPhi], entry_env: Env) -> EvalResult {
         let mut loop_env = entry_env.clone();
         let mut opaque = false;
 
@@ -378,11 +363,10 @@ impl<'a> ProcNonZeroAnalyzer<'a> {
     fn new_diagnostic(
         &self,
         span: miden_debug_types::SourceSpan,
-        sink: AdviceSinkKind,
         message: impl Into<String>,
         fact: &AdviceFact,
     ) -> AdviceDiagnostic {
-        let mut diagnostic = AdviceDiagnostic::new(self.proc_path.clone(), span, sink, message);
+        let mut diagnostic = AdviceDiagnostic::new(self.proc_path.clone(), span, message);
         diagnostic.origins = fact.source_spans.iter().copied().collect();
         diagnostic
     }
@@ -392,7 +376,7 @@ impl<'a> ProcNonZeroAnalyzer<'a> {
         &self,
         span: miden_debug_types::SourceSpan,
         target: &str,
-        args: &[masm_decompiler::ir::Var],
+        args: &[Var],
         env: &Env,
     ) -> CallResult {
         let Some(summary) = self.callee_summaries.get(&SymbolPath::new(target.to_string())) else {
@@ -414,17 +398,13 @@ impl<'a> ProcNonZeroAnalyzer<'a> {
             let arg_fact = env.fact_for_var(arg);
             if arg_fact.has_concrete_sources() {
                 let callee = SymbolPath::new(target.to_string());
-                let mut diagnostic = self.new_diagnostic(
+                let diagnostic = self.new_diagnostic(
                     span,
-                    AdviceSinkKind::CallArgument,
                     format!(
                         "argument {index} to `{callee}` may reach a divisor or `inv` input without a nearby non-zero check"
                     ),
                     &arg_fact,
                 );
-                diagnostic.callee = Some(callee);
-                diagnostic.arg_index = Some(*index);
-                diagnostic.call_requirement = Some(CallArgumentRequirement::NonZero);
                 diagnostics.push(diagnostic);
             }
             required_inputs.extend(arg_fact.from_inputs.iter().copied());

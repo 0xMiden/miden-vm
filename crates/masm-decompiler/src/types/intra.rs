@@ -2,14 +2,12 @@
 
 use std::collections::HashMap;
 
-use miden_assembly_syntax::{ast::Visibility, debuginfo::SourceSpan};
-
 use super::{
     domain::{TypeFact, VarKey},
-    summary::{TypeDiagnostic, TypeSummary, TypeSummaryMap},
+    summary::{TypeSummary, TypeSummaryMap},
 };
 use crate::{
-    ir::{BinOp, Call, Constant, Expr, Stmt, UnOp, ValueId, Var},
+    ir::{BinOp, Constant, Expr, Stmt, UnOp, Var},
     symbol::path::SymbolPath,
 };
 
@@ -65,56 +63,29 @@ enum Origin {
     Computed,
 }
 
-/// Output of type analysis for a single procedure.
-#[derive(Debug, Clone)]
-pub struct ProcTypeAnalysisResult {
-    /// Inferred procedure summary.
-    pub summary: TypeSummary,
-    /// Type mismatch diagnostics found in the procedure body.
-    pub diagnostics: Vec<TypeDiagnostic>,
-}
-
 /// Analyze a single procedure body and infer its [TypeSummary].
-pub fn analyze_proc_types(
-    proc_path: &SymbolPath,
+pub(crate) fn analyze_proc_types(
     input_count: usize,
     output_count: usize,
-    visibility: Visibility,
-    proc_span: SourceSpan,
     stmts: &[Stmt],
     callee_summaries: &TypeSummaryMap,
-) -> ProcTypeAnalysisResult {
-    let mut analyzer = ProcTypeAnalyzer::new(
-        proc_path.clone(),
-        input_count,
-        output_count,
-        visibility,
-        proc_span,
-        callee_summaries,
-    );
+) -> TypeSummary {
+    let mut analyzer = ProcTypeAnalyzer::new(input_count, output_count, callee_summaries);
     analyzer.analyze(stmts)
 }
 
 /// Internal fixed-point analyzer for one procedure.
 struct ProcTypeAnalyzer<'a> {
-    /// Fully-qualified procedure name.
-    proc_path: SymbolPath,
     /// Number of stack inputs.
     input_count: usize,
     /// Number of stack outputs.
     output_count: usize,
-    /// Visibility of the procedure (public or private).
-    visibility: Visibility,
-    /// Source span of the procedure definition.
-    proc_span: SourceSpan,
     /// Previously inferred summaries for callees.
     callee_summaries: &'a TypeSummaryMap,
     /// Inferred type guarantees for variables.
     inferred: HashMap<VarKey, TypeFact>,
     /// Inferred requirements for variables.
     required: HashMap<VarKey, TypeFact>,
-    /// Collected diagnostics.
-    diagnostics: Vec<TypeDiagnostic>,
     /// Inferred types for local variable slots.
     ///
     /// Updated on `LocalStore`/`LocalStoreW` and read on `LocalLoad`.
@@ -149,24 +120,13 @@ struct ProcTypeAnalyzer<'a> {
 
 impl<'a> ProcTypeAnalyzer<'a> {
     /// Construct a new analyzer.
-    fn new(
-        proc_path: SymbolPath,
-        input_count: usize,
-        output_count: usize,
-        visibility: Visibility,
-        proc_span: SourceSpan,
-        callee_summaries: &'a TypeSummaryMap,
-    ) -> Self {
+    fn new(input_count: usize, output_count: usize, callee_summaries: &'a TypeSummaryMap) -> Self {
         Self {
-            proc_path,
             input_count,
             output_count,
-            visibility,
-            proc_span,
             callee_summaries,
             inferred: HashMap::new(),
             required: HashMap::new(),
-            diagnostics: Vec::new(),
             local_types: HashMap::new(),
             var_address_keys: HashMap::new(),
             mem_types: HashMap::new(),
@@ -178,7 +138,7 @@ impl<'a> ProcTypeAnalyzer<'a> {
     }
 
     /// Run fixed-point inference and mismatch checks.
-    fn analyze(&mut self, stmts: &[Stmt]) -> ProcTypeAnalysisResult {
+    fn analyze(&mut self, stmts: &[Stmt]) -> TypeSummary {
         self.origins = self.compute_origins(stmts);
         self.expr_defs = Self::collect_expr_defs(stmts);
 
@@ -210,12 +170,7 @@ impl<'a> ProcTypeAnalyzer<'a> {
             }
         }
 
-        self.collect_diagnostics_in_block(stmts);
-        self.collect_input_diagnostics();
-        let summary = self.build_summary(stmts);
-        let diagnostics = std::mem::take(&mut self.diagnostics);
-
-        ProcTypeAnalysisResult { summary, diagnostics }
+        self.build_summary(stmts)
     }
 
     /// Collect direct assignment expressions keyed by destination SSA variable.
@@ -507,7 +462,7 @@ impl<'a> ProcTypeAnalyzer<'a> {
 
     /// Build the canonical key for an input variable by stack index.
     fn input_var_key(index: usize) -> VarKey {
-        let var = Var::new(ValueId::new(index as u64), index);
+        let var = Var::new((index as u64).into(), index);
         VarKey::from_var(&var)
     }
 
@@ -808,15 +763,6 @@ impl<'a> ProcTypeAnalyzer<'a> {
     /// Return intrinsic base name without suffixes such as `.err=*` or immediates.
     fn intrinsic_base_name(name: &str) -> &str {
         name.split_once('.').map_or(name, |(base, _)| base)
-    }
-
-    /// Return true if the intrinsic is an advice-sourced operation.
-    ///
-    /// Advice intrinsics (`adv_push`, `adv_pushw`, `adv_pipe`) have a separate analysis
-    /// pass and should not generate type-widening diagnostics.
-    fn is_advice_intrinsic(name: &str) -> bool {
-        let base = Self::intrinsic_base_name(name);
-        matches!(base, "adv_push" | "adv_pushw" | "adv_pipe")
     }
 
     /// Return true if intrinsic arguments require a caller-side u32 precondition.
@@ -1612,219 +1558,6 @@ impl<'a> ProcTypeAnalyzer<'a> {
             Expr::True | Expr::False | Expr::Constant(_) | Expr::Binary(..) | Expr::Unary(..) => {
                 false
             },
-        }
-    }
-
-    /// Collect all mismatch diagnostics in a statement block.
-    fn collect_diagnostics_in_block(&mut self, stmts: &[Stmt]) {
-        for stmt in stmts {
-            self.collect_diagnostics_in_stmt(stmt);
-        }
-    }
-
-    /// Collect mismatch diagnostics for one statement.
-    fn collect_diagnostics_in_stmt(&mut self, stmt: &Stmt) {
-        match stmt {
-            Stmt::Assign { span, dest, expr, .. } => {
-                // Wider-output operation. If the destination has a
-                // requirement stricter than what the RHS expression produces,
-                // and the expression is not a simple variable copy (which just
-                // propagates, not originates), emit a diagnostic.
-                let req = self.requirement_for_var(dest);
-                if req != TypeFact::Felt {
-                    let actual = self.infer_expr_type(expr);
-                    if !actual.satisfies(req) && !matches!(expr, Expr::Var(_)) {
-                        let mut diag = TypeDiagnostic::new(
-                            self.proc_path.clone(),
-                            *span,
-                            format!(
-                                "expression produces {} but {} is required",
-                                actual.to_inferred_type(),
-                                req.to_requirement(),
-                            ),
-                        );
-                        diag.expected = Some(req.to_requirement());
-                        diag.actual = Some(actual.to_inferred_type());
-                        diag.source_span = Some(*span);
-                        diag.source_description = Some(format!(
-                            "Felt arithmetic can produce values outside the {} range",
-                            req.to_requirement(),
-                        ));
-                        self.diagnostics.push(diag);
-                    }
-                }
-            },
-            Stmt::MemLoad { .. } | Stmt::MemStore { .. } => {
-                // Address requirements back-propagate to callers via
-                // TypeSummary.inputs — no interior diagnostic needed.
-            },
-            Stmt::Call { span, call }
-            | Stmt::Exec { span, call }
-            | Stmt::SysCall { span, call } => {
-                let (is_opaque, suppress) = self.call_result_suppression(call);
-                if !is_opaque {
-                    self.collect_result_widening_diagnostics(
-                        *span,
-                        &call.results,
-                        &format!("call to {}", call.target),
-                        &suppress,
-                    );
-                }
-            },
-            Stmt::Intrinsic { span, intrinsic } => {
-                // Advice-sourced intrinsics have a separate analysis pass;
-                // skip result-widening diagnostics for them.
-                if !Self::is_advice_intrinsic(&intrinsic.name) {
-                    self.collect_result_widening_diagnostics(
-                        *span,
-                        &intrinsic.results,
-                        &format!("{} intrinsic", intrinsic.name),
-                        &[],
-                    );
-                }
-            },
-            Stmt::DynCall { span, results, .. } => {
-                self.collect_result_widening_diagnostics(*span, results, "dynamic call", &[]);
-            },
-            Stmt::If { then_body, else_body, .. } => {
-                self.collect_diagnostics_in_block(then_body);
-                self.collect_diagnostics_in_block(else_body);
-            },
-            Stmt::While { body, .. } => {
-                self.collect_diagnostics_in_block(body);
-            },
-            Stmt::Repeat { body, loop_count, .. } => {
-                if *loop_count > 0 {
-                    self.collect_diagnostics_in_block(body);
-                }
-            },
-            Stmt::AdvLoad { .. }
-            | Stmt::AdvStore { .. }
-            | Stmt::LocalLoad { .. }
-            | Stmt::LocalStore { .. }
-            | Stmt::LocalStoreW { .. }
-            | Stmt::Return { .. } => {},
-        }
-    }
-
-    /// Emit diagnostics for public procedure inputs that don't satisfy their requirements.
-    fn collect_input_diagnostics(&mut self) {
-        if self.visibility != Visibility::Public {
-            return;
-        }
-        for index in (0..self.input_count).rev() {
-            let key = Self::input_var_key(index);
-            let req = self.required.get(&key).copied().unwrap_or(TypeFact::Felt);
-            if req == TypeFact::Felt {
-                continue; // No specific requirement.
-            }
-            let inferred = self.inferred.get(&key).copied().unwrap_or(TypeFact::Felt);
-            if !inferred.satisfies(req) {
-                let mut diag = TypeDiagnostic::new(
-                    self.proc_path.clone(),
-                    self.proc_span,
-                    format!(
-                        "public procedure input {} requires {} but is not validated (inferred {})",
-                        index + 1,
-                        req.to_requirement(),
-                        inferred.to_inferred_type(),
-                    ),
-                );
-                diag.expected = Some(req.to_requirement());
-                diag.actual = Some(inferred.to_inferred_type());
-                diag.source_span = Some(self.proc_span);
-                diag.source_description = Some(format!(
-                    "public procedure input must be validated as {} (e.g. via u32assert)",
-                    req.to_requirement(),
-                ));
-                self.diagnostics.push(diag);
-            }
-        }
-    }
-
-    /// Compute suppression flags for call result-widening diagnostics.
-    ///
-    /// Returns `(is_opaque, suppress)` where `suppress[i]` is `true` when
-    /// result `i` is a passthrough whose requirement was propagated backward
-    /// to the caller's argument. Suppressed results should not produce
-    /// result-widening diagnostics because a root-cause diagnostic will
-    /// fire at the argument's origin instead.
-    fn call_result_suppression(&self, call: &Call) -> (bool, Vec<bool>) {
-        let Some(summary) = self.summary_for_target(&call.target) else {
-            return (false, Vec::new());
-        };
-        if summary.is_opaque() {
-            return (true, Vec::new());
-        }
-        let suppress = call
-            .results
-            .iter()
-            .enumerate()
-            .map(|(idx, result)| {
-                let req = self.requirement_for_var(result);
-                if req == TypeFact::Felt {
-                    return false;
-                }
-                if let Some(input_idx) = summary.output_input_map.get(idx).copied().flatten()
-                    && let Some(arg) =
-                        call.args.len().checked_sub(1 + input_idx).and_then(|i| call.args.get(i))
-                {
-                    let arg_req = self.requirement_for_var(arg);
-                    return arg_req.satisfies(req);
-                }
-                false
-            })
-            .collect();
-        (false, suppress)
-    }
-
-    /// Emit diagnostics for result variables whose inferred type is wider than
-    /// the back-propagated requirement.
-    ///
-    /// Call, intrinsic, and dynamic-call results are terminal points for
-    /// backward propagation: their type is determined by the callee or
-    /// instruction, not by upstream data flow. When a result carries a
-    /// requirement stricter than its inferred type, the mismatch is reported
-    /// here.
-    fn collect_result_widening_diagnostics(
-        &mut self,
-        span: SourceSpan,
-        results: &[Var],
-        origin: &str,
-        suppress: &[bool],
-    ) {
-        for (idx, result) in results.iter().enumerate() {
-            if suppress.get(idx).copied().unwrap_or(false) {
-                continue;
-            }
-            let req = self.requirement_for_var(result);
-            if req == TypeFact::Felt {
-                continue;
-            }
-            let actual = self.inferred_type_for_var(result);
-            if !actual.satisfies(req) {
-                let mut diag = TypeDiagnostic::new(
-                    self.proc_path.clone(),
-                    span,
-                    format!(
-                        "{} result {} produces {} but {} is required",
-                        origin,
-                        idx,
-                        actual.to_inferred_type(),
-                        req.to_requirement(),
-                    ),
-                );
-                diag.expected = Some(req.to_requirement());
-                diag.actual = Some(actual.to_inferred_type());
-                diag.source_span = Some(span);
-                diag.source_description = Some(format!(
-                    "{} produces {} which does not satisfy the {} requirement",
-                    origin,
-                    actual.to_inferred_type(),
-                    req.to_requirement(),
-                ));
-                self.diagnostics.push(diag);
-            }
         }
     }
 
