@@ -1081,6 +1081,67 @@ end"
 #[test]
 fn test_ast_parsing_module_docs_fail() {
     let context = SyntaxTestContext::new().with_warnings_as_errors(true);
+    let source = source_file!(&context, "#! orphaned module doc\n");
+    let error = context
+        .parse_module(source)
+        .expect_err("expected docs-only source to produce an unused-docstring warning");
+    let rendered =
+        format!("{}", crate::diagnostics::reporting::PrintDiagnostic::new_without_color(error));
+    assert!(rendered.contains("Warning:   ! unused docstring"), "{rendered}");
+    assert!(rendered.contains("#! orphaned module doc"), "{rendered}");
+
+    let source = source_file!(
+        &context,
+        "\
+    #! module doc
+
+    #! orphaned doc
+
+    #! foo doc
+    pub proc foo
+        nop
+    end
+    "
+    );
+    assert_module_diagnostic_lines!(
+        context,
+        source,
+        "syntax error",
+        "help: see emitted diagnostics for details",
+        "Warning:   ! unused docstring",
+        regex!(r#",-\[test[\d]+:3:5\]"#),
+        " 2 |",
+        " 3 |     #! orphaned doc",
+        "   :     ^^^^^^^^^^^^^^^",
+        " 4 |",
+        "   `----",
+        "help: this docstring is immediately followed by at least one empty line, then another docstring, if you intended these to be a single docstring, you should remove the empty lines"
+    );
+    let source = source_file!(
+        &context,
+        "\
+    pub proc foo
+        nop
+    end
+
+    #! trailing doc
+    "
+    );
+    assert_module_diagnostic_lines!(
+        context,
+        source,
+        "syntax error",
+        "help: see emitted diagnostics for details",
+        "Warning:   ! unused docstring",
+        regex!(r#",-\[test[\d]+:5:5\]"#),
+        " 4 |",
+        " 5 |     #! trailing doc",
+        "   :     ^^^^^^^^^^^^^^^",
+        " 6 |",
+        "   `----",
+        "help: trailing docstrings are useless"
+    );
+
     let source = source_file!(
         &context,
         "\
@@ -1107,7 +1168,7 @@ fn test_ast_parsing_module_docs_fail() {
         "   :     ^^^^^^^^^^^^^^^^",
         "10 |",
         "   `----",
-        "help: this docstring is immediately followed by at least one empty line, then another docstring,if you intended these to be a single docstring, you should remove the empty lines"
+        "help: trailing docstrings are useless"
     );
 
     let source = source_file!(
@@ -1134,7 +1195,7 @@ fn test_ast_parsing_module_docs_fail() {
         "  :     ^^^^^^^^^^^^^^^^",
         "8 |",
         "  `----",
-        "help: this docstring is immediately followed by at least one empty line, then another docstring,if you intended these to be a single docstring, you should remove the empty lines"
+        "help: trailing docstrings are useless"
     );
 
     let source = source_file!(
@@ -1145,20 +1206,13 @@ fn test_ast_parsing_module_docs_fail() {
     #! malformed doc
     "
     );
-    assert_module_diagnostic_lines!(
-        context,
-        source,
-        "syntax error",
-        "help: see emitted diagnostics for details",
-        "Warning:   ! unused docstring",
-        regex!(r#",-\[test[\d]+:3:5\]"#),
-        "2 |",
-        "3 |     #! malformed doc",
-        "  :     ^^^^^^^^^^^^^^^^",
-        "4 |",
-        "  `----",
-        "help: this docstring is immediately followed by at least one empty line, then another docstring,if you intended these to be a single docstring, you should remove the empty lines"
-    );
+    let error = context
+        .parse_module(source)
+        .expect_err("expected docs-only source to produce unused-docstring warnings");
+    let rendered =
+        format!("{}", crate::diagnostics::reporting::PrintDiagnostic::new_without_color(error));
+    assert!(rendered.contains("#! module doc"), "{rendered}");
+    assert!(rendered.contains("#! malformed doc"), "{rendered}");
 
     let source = source_file!(
         &context,
@@ -1183,7 +1237,7 @@ fn test_ast_parsing_module_docs_fail() {
         "  :     ^^^^^^^^^^^^^^^^",
         "7 |",
         "  `----",
-        "help: this docstring is immediately followed by at least one empty line, then another docstring,if you intended these to be a single docstring, you should remove the empty lines"
+        "help: trailing docstrings are useless"
     );
 
     let source = source_file!(
@@ -1211,7 +1265,7 @@ fn test_ast_parsing_module_docs_fail() {
         "  :     ^^^^^^^^^^^^^^^^",
         "9 |",
         "  `----",
-        "help: this docstring is immediately followed by at least one empty line, then another docstring,if you intended these to be a single docstring, you should remove the empty lines"
+        "help: trailing docstrings are useless"
     );
 
     let source = source_file!(
@@ -1233,7 +1287,7 @@ fn test_ast_parsing_module_docs_fail() {
         "3 |     pub proc foo",
         "4 |         #! malformed doc",
         "  :         ^^^^^^^^|^^^^^^^",
-        "  :                 `-- unexpected token in block",
+        "  :                 `-- doc comments are only allowed before module-level items",
         "5 |         loc_load.0",
         "  `----"
     );
