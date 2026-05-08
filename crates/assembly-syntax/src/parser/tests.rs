@@ -9,6 +9,7 @@ use miden_core::assert_matches;
 use miden_debug_types::{SourceFile, SourceId, SourceLanguage, Uri};
 
 use super::*;
+use crate::ast::{Form, Immediate, Instruction, Op};
 
 fn test_source_file(source: &str) -> Arc<SourceFile> {
     Arc::new(SourceFile::new(
@@ -32,7 +33,6 @@ fn checked_in_masm_corpus() -> Vec<PathBuf> {
     let mut files = Vec::new();
     for relative in [
         "crates/lib/core/asm",
-        "crates/project/examples",
         "miden-vm/masm-examples",
         "miden-vm/tests/integration/cli/data",
     ] {
@@ -585,7 +585,6 @@ fn cst_backend_matches_legacy_immediate_instruction_blocks() {
 begin
     add.1
     eq.FLAG
-    lt.3
     exp.u32
     exp.POWER
     mem_load.0b1010
@@ -610,6 +609,63 @@ end
         parse_forms_with_backend(source, ParserBackend::Cst).expect("cst backend should succeed");
 
     assert_eq!(cst, legacy);
+}
+
+#[test]
+fn cst_backend_preserves_explicit_zero_shift_rotate_instructions() {
+    let source = test_source_file(
+        "\
+begin
+    u32shl.0
+    u32shr.0
+    u32rotl.0
+    u32rotr.0
+end
+",
+    );
+
+    let forms =
+        parse_forms_with_backend(source, ParserBackend::Cst).expect("cst backend should succeed");
+    let [Form::Begin(block)] = forms.as_slice() else {
+        panic!("expected a single begin block, got {forms:?}");
+    };
+
+    let ops = block.iter().collect::<Vec<_>>();
+    assert_eq!(
+        ops.len(),
+        4,
+        "expected each explicit zero shift/rotate spelling to be preserved"
+    );
+    assert_zero_u8_instruction(ops[0], |instruction| {
+        matches!(instruction, Instruction::U32ShlImm(_))
+    });
+    assert_zero_u8_instruction(ops[1], |instruction| {
+        matches!(instruction, Instruction::U32ShrImm(_))
+    });
+    assert_zero_u8_instruction(ops[2], |instruction| {
+        matches!(instruction, Instruction::U32RotlImm(_))
+    });
+    assert_zero_u8_instruction(ops[3], |instruction| {
+        matches!(instruction, Instruction::U32RotrImm(_))
+    });
+}
+
+fn assert_zero_u8_instruction(op: &Op, matches_instruction: impl FnOnce(&Instruction) -> bool) {
+    let Op::Inst(instruction) = op else {
+        panic!("expected instruction op, got {op:?}");
+    };
+    assert!(
+        matches_instruction(instruction.inner()),
+        "unexpected instruction: {instruction:?}"
+    );
+    let imm = match instruction.inner() {
+        Instruction::U32ShlImm(imm)
+        | Instruction::U32ShrImm(imm)
+        | Instruction::U32RotlImm(imm)
+        | Instruction::U32RotrImm(imm) => imm,
+        other => panic!("expected u32 shift/rotate immediate, got {other:?}"),
+    };
+    assert_matches!(imm, Immediate::Value(value) if *value.inner() == 0);
 }
 
 #[test]

@@ -55,9 +55,13 @@ pub enum Instruction {
     NeqImm(ImmFelt),
     Eqw,
     Lt,
+    LtImm(ImmFelt),
     Lte,
+    LteImm(ImmFelt),
     Gt,
+    GtImm(ImmFelt),
     Gte,
+    GteImm(ImmFelt),
     IsOdd,
 
     // ----- ext2 operations ---------------------------------------------------------------------
