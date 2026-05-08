@@ -558,7 +558,7 @@ fn locate_first_node_hash(bytes: &[u8]) -> (usize, usize) {
     offset += 1;
     offset += 3;
 
-    let _node_count = read_usize_vint64(bytes, &mut offset);
+    let node_count = read_usize_vint64(bytes, &mut offset);
     let internal_node_count = read_usize_vint64(bytes, &mut offset);
     let external_node_count = read_usize_vint64(bytes, &mut offset);
 
@@ -570,6 +570,7 @@ fn locate_first_node_hash(bytes: &[u8]) -> (usize, usize) {
     let bb_len = read_usize_vint64(bytes, &mut offset);
     offset += bb_len;
 
+    offset += node_count * 8;
     offset += external_node_count * 32;
 
     (offset, internal_node_count)
