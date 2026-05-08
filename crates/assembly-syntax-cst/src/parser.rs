@@ -283,7 +283,7 @@ impl<'input> Parser<'input> {
             self.bump_non_comment_trivia();
             self.bump();
             self.bump_non_comment_trivia();
-            if self.at_name_like() || self.at_keyword_like() {
+            if self.at_name_like() {
                 self.bump();
             } else {
                 self.error_here("expected an alias name after `->`");
@@ -303,7 +303,7 @@ impl<'input> Parser<'input> {
 
         self.expect_keyword("const", "expected `const` in constant declaration");
         self.bump_regular_trivia();
-        if self.at_name_like() || self.at_keyword_like() {
+        if self.at_name_like() {
             self.bump();
         } else {
             self.error_here("expected a constant name");
@@ -332,7 +332,7 @@ impl<'input> Parser<'input> {
         }
 
         self.bump_regular_trivia();
-        if self.at_name_like() || self.at_keyword_like() {
+        if self.at_name_like() {
             self.bump();
         } else {
             self.error_here("expected a type name");
@@ -352,7 +352,7 @@ impl<'input> Parser<'input> {
         self.start_node(SyntaxKind::AdviceMap);
         self.expect_keyword("adv_map", "expected `adv_map`");
         self.bump_regular_trivia();
-        if self.at_name_like() || self.at_keyword_like() {
+        if self.at_name_like() {
             self.bump();
         } else {
             self.error_here("expected an advice-map name");
@@ -390,7 +390,7 @@ impl<'input> Parser<'input> {
         }
 
         self.bump_non_comment_trivia();
-        if self.at_name_like() || self.at_keyword_like() {
+        if self.at_name_like() {
             self.bump();
         } else {
             self.error_here("expected an import path");
@@ -406,7 +406,7 @@ impl<'input> Parser<'input> {
             self.bump_non_comment_trivia();
             self.bump();
             self.bump_non_comment_trivia();
-            if self.at_name_like() || self.at_keyword_like() {
+            if self.at_name_like() {
                 self.bump();
             } else {
                 self.error_here("expected a path segment after `::`");
@@ -537,7 +537,7 @@ impl<'input> Parser<'input> {
         self.start_node(SyntaxKind::Attribute);
         let _ = self.expect_kind(SyntaxKind::At, "expected `@`");
         self.bump_regular_trivia();
-        if self.at_name_like() || self.at_keyword_like() {
+        if self.at_name_like() {
             self.bump();
         } else {
             self.error_here("expected an attribute name");
@@ -743,7 +743,6 @@ impl<'input> Parser<'input> {
                     "expected `]` to close structured operation suffix",
                 );
             } else if self.at_name_like()
-                || self.at_keyword_like()
                 || self.at_kind(SyntaxKind::Number)
                 || self.at_kind(SyntaxKind::QuotedString)
             {
@@ -1015,10 +1014,6 @@ impl<'input> Parser<'input> {
             self.current_kind(),
             Some(SyntaxKind::Ident | SyntaxKind::SpecialIdent | SyntaxKind::QuotedIdent)
         )
-    }
-
-    fn at_keyword_like(&self) -> bool {
-        self.current_kind() == Some(SyntaxKind::Ident)
     }
 
     fn at_keyword(&self, keyword: &str) -> bool {
