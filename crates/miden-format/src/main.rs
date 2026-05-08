@@ -140,14 +140,9 @@ fn run() -> Result<(), CliError> {
             eprintln!("would reformat {path}");
         }
 
-        return Err(CliError::CheckFailed(mismatches.iter().map(ToString::to_string).fold(
-            String::new(),
-            |mut acc, item| {
-                acc.push('\n');
-                acc.push_str(&item);
-                acc
-            },
-        )));
+        return Err(CliError::CheckFailed(
+            mismatches.iter().map(ToString::to_string).collect::<Vec<_>>().join("\n"),
+        ));
     }
 
     if cli.stdin {
