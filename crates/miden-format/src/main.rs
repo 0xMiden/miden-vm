@@ -4,7 +4,7 @@ mod formatter;
 use std::{
     fs,
     io::{self, Read},
-    path::{Path, PathBuf},
+    path::PathBuf,
     process::ExitCode,
     sync::Arc,
 };
@@ -56,6 +56,8 @@ enum CliError {
         #[source]
         source: io::Error,
     },
+    #[error("failed to write formatted source to '{path}': not a valid file path")]
+    InvalidSourceUri { path: String },
     #[error("failed to read source from stdin: {0}")]
     ReadStdin(#[source] io::Error),
     #[error("syntax errors were found in the provided inputs")]
@@ -160,9 +162,12 @@ fn run() -> Result<(), CliError> {
             continue;
         }
 
-        let path = Path::new(source.uri().path());
+        let path = source
+            .uri()
+            .to_path()
+            .ok_or_else(|| CliError::InvalidSourceUri { path: source.uri().to_string() })?;
         fs::write(path, formatted).map_err(|err| CliError::WriteFile {
-            path: source.uri().path().to_string(),
+            path: source.uri().to_string(),
             source: err,
         })?;
     }
