@@ -572,13 +572,23 @@ impl Deserializable for TypeExport {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
-
     use alloc::{
         string::{String, ToString},
         sync::Arc,
         vec,
         vec::Vec,
+    };
+    use std::collections::BTreeMap;
+
+    use miden_assembly_syntax::ast::{Path as AstPath, PathBuf};
+    use miden_core::{
+        Felt, Word, assert_matches,
+        mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, MastNodeExt, MastNodeId},
+        operations::Operation,
+        serde::{
+            BudgetedReader, ByteWriter, Deserializable, DeserializationError, Serializable,
+            SliceReader,
+        },
     };
 
     use super::{
@@ -588,16 +598,6 @@ mod tests {
     use crate::{
         Dependency, ManifestValidationError, PackageExport, PackageId, ProcedureExport, SectionId,
         TargetType,
-    };
-    use miden_assembly_syntax::ast::{Path as AstPath, PathBuf};
-    use miden_core::{
-        Word, assert_matches,
-        mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, MastNodeExt, MastNodeId},
-        operations::Operation,
-        serde::{
-            BudgetedReader, ByteWriter, Deserializable, DeserializationError, Serializable,
-            SliceReader,
-        },
     };
 
     fn build_forest() -> (MastForest, MastNodeId) {
@@ -1019,5 +1019,274 @@ mod tests {
             message,
             msg if msg.contains("invalid export path '::foo::\"bad name\"': invalid item path component"),
         );
+    }
+
+    #[test]
+    fn regression_package_deserialisation_rejects_spoofed_mast_node_digests() {
+        // Build mast for:
+        //
+        // pub proc p
+        //     push.1
+        // end
+        let mut forest = MastForest::new();
+        let node_id =
+            BasicBlockNodeBuilder::new(vec![Operation::Push(Felt::from_u32(1))], Vec::new())
+                .add_to_forest(&mut forest)
+                .expect("failed to build basic block");
+        let digest = forest[node_id].digest();
+
+        let path = absolute_path("lib::p");
+        let exports = vec![PackageExport::Procedure(ProcedureExport::new(
+            Arc::clone(&path),
+            Some(node_id),
+            digest,
+            None,
+        ))];
+
+        let package = Package {
+            name: PackageId::from("lib"),
+            version: crate::Version::new(0, 0, 0),
+            digest,
+            description: None,
+            kind: TargetType::Library,
+            mast: Arc::new(forest),
+            manifest: PackageManifest::new(exports).expect("test manifest should be valid"),
+            sections: Default::default(),
+        };
+
+        let (bytes, _) =
+            build_package_bytes_with_spoofed_first_node_digest(&package, "spoofed-library-digest");
+        let err = Package::read_from_bytes(&bytes)
+            .expect_err("expected package deserialization to reject inconsistent node digests");
+        assert!(
+            err.to_string().contains("invalid untrusted MAST forest"),
+            "expected untrusted-MAST validation failure, got: {err}"
+        );
+        assert!(
+            err.to_string().contains("hash mismatch for node"),
+            "expected digest mismatch failure, got: {err}"
+        );
+    }
+
+    #[test]
+    fn unchecked_package_deserialisation_rejects_spoofed_mast_node_digests() {
+        // Build mast for:
+        //
+        // pub proc p
+        //     push.1
+        // end
+        let mut forest = MastForest::new();
+        let node_id =
+            BasicBlockNodeBuilder::new(vec![Operation::Push(Felt::from_u32(1))], Vec::new())
+                .add_to_forest(&mut forest)
+                .expect("failed to build basic block");
+        let digest = forest[node_id].digest();
+
+        let path = absolute_path("lib::p");
+        let exports = vec![PackageExport::Procedure(ProcedureExport::new(
+            Arc::clone(&path),
+            Some(node_id),
+            digest,
+            None,
+        ))];
+
+        let package = Package {
+            name: PackageId::from("lib"),
+            version: crate::Version::new(0, 0, 0),
+            digest,
+            description: None,
+            kind: TargetType::Library,
+            mast: Arc::new(forest),
+            manifest: PackageManifest::new(exports).expect("test manifest should be valid"),
+            sections: Default::default(),
+        };
+
+        let (bytes, _spoofed_digest) =
+            build_package_bytes_with_spoofed_first_node_digest(&package, "spoofed-library-digest");
+        let err = Package::read_from_bytes_unchecked(&bytes)
+            .expect_err("expected package deserialization to reject inconsistent node digests");
+        assert!(
+            err.to_string()
+                .contains("declared node id and digest do not correspond to a procedure root"),
+            "expected package manifest validation failure, got: {err}"
+        );
+    }
+
+    #[test]
+    fn regression_kernel_package_deserialisation_rejects_spoofed_mast_node_digests() {
+        // Build mast for:
+        //
+        // pub proc k1
+        //     push.1
+        // end
+        let mut forest = MastForest::new();
+        let node_id =
+            BasicBlockNodeBuilder::new(vec![Operation::Push(Felt::from_u32(1))], Vec::new())
+                .add_to_forest(&mut forest)
+                .expect("failed to build basic block");
+        let digest = forest[node_id].digest();
+
+        let path = absolute_path("$kernel::k1");
+        let exports = vec![PackageExport::Procedure(ProcedureExport::new(
+            Arc::clone(&path),
+            Some(node_id),
+            digest,
+            None,
+        ))];
+
+        let package = Package {
+            name: PackageId::from("kernel"),
+            version: crate::Version::new(0, 0, 0),
+            digest,
+            description: None,
+            kind: TargetType::Kernel,
+            mast: Arc::new(forest),
+            manifest: PackageManifest::new(exports).expect("test manifest should be valid"),
+            sections: Default::default(),
+        };
+
+        let (bytes, _) =
+            build_package_bytes_with_spoofed_first_node_digest(&package, "spoofed-kernel-digest");
+        let err = Package::read_from_bytes(&bytes).expect_err(
+            "expected kernel package deserialization to reject inconsistent node digests",
+        );
+        assert!(
+            err.to_string().contains("invalid untrusted MAST forest"),
+            "expected untrusted-MAST validation failure, got: {err}"
+        );
+        assert!(
+            err.to_string().contains("hash mismatch for node"),
+            "expected digest mismatch failure, got: {err}"
+        );
+    }
+
+    #[test]
+    fn unchecked_kernel_package_deserialisation_accepts_spoofed_mast_node_digests() {
+        // Build mast for:
+        //
+        // pub proc k1
+        //     push.1
+        // end
+        let mut forest = MastForest::new();
+        let node_id =
+            BasicBlockNodeBuilder::new(vec![Operation::Push(Felt::from_u32(1))], Vec::new())
+                .add_to_forest(&mut forest)
+                .expect("failed to build basic block");
+        let digest = forest[node_id].digest();
+
+        let path = absolute_path("$kernel::k1");
+        let exports = vec![PackageExport::Procedure(ProcedureExport::new(
+            Arc::clone(&path),
+            Some(node_id),
+            digest,
+            None,
+        ))];
+
+        let package = Package {
+            name: PackageId::from("kernel"),
+            version: crate::Version::new(0, 0, 0),
+            digest,
+            description: None,
+            kind: TargetType::Kernel,
+            mast: Arc::new(forest),
+            manifest: PackageManifest::new(exports).expect("test manifest should be valid"),
+            sections: Default::default(),
+        };
+
+        let (bytes, _spoofed_digest) =
+            build_package_bytes_with_spoofed_first_node_digest(&package, "spoofed-kernel-digest");
+        let err = Package::read_from_bytes_unchecked(&bytes).expect_err(
+            "expected unchecked kernel deserialization to reject inconsistent node digests",
+        );
+        assert!(
+            err.to_string()
+                .contains("declared node id and digest do not correspond to a procedure root"),
+            "expected package manifest validation failure, got: {err}"
+        );
+    }
+
+    fn read_usize_vint64(bytes: &[u8], offset: &mut usize) -> usize {
+        // This test patches raw bytes in place, so it needs byte offsets that
+        // ByteReader::read_usize does not expose.
+        let first_byte = bytes.get(*offset).copied().expect("out-of-bounds vint64 peek");
+        let length = first_byte.trailing_zeros() as usize + 1;
+
+        if length == 9 {
+            *offset += 1;
+            let end = (*offset).checked_add(8).expect("offset overflow while reading vint64");
+            let chunk: [u8; 8] = bytes[*offset..end].try_into().expect("out-of-bounds vint64");
+            *offset = end;
+            let value = u64::from_le_bytes(chunk);
+            usize::try_from(value).expect("encoded usize does not fit host usize")
+        } else {
+            let end = (*offset).checked_add(length).expect("offset overflow while reading vint64");
+            let mut encoded = [0u8; 8];
+            encoded[..length].copy_from_slice(&bytes[*offset..end]);
+            *offset = end;
+            let value = u64::from_le_bytes(encoded) >> length;
+            usize::try_from(value).expect("encoded usize does not fit host usize")
+        }
+    }
+
+    fn locate_first_node_hash(bytes: &[u8]) -> (usize, usize) {
+        // Header: magic[4] + flags[1] + version[3]
+        let mut offset = 0usize;
+        offset += 4;
+        offset += 1;
+        offset += 3;
+
+        let internal_node_count = read_usize_vint64(bytes, &mut offset);
+        let external_node_count = read_usize_vint64(bytes, &mut offset);
+        let node_count = internal_node_count
+            .checked_add(external_node_count)
+            .expect("node count overflow");
+
+        // Roots: len (usize) + elements (u32 LE)
+        let roots_len = read_usize_vint64(bytes, &mut offset);
+        offset += roots_len * 4;
+
+        // Basic block data: len (usize) + bytes
+        let bb_len = read_usize_vint64(bytes, &mut offset);
+        offset += bb_len;
+
+        offset += node_count * 8;
+        offset += external_node_count * 32;
+
+        (offset, internal_node_count)
+    }
+
+    fn build_package_bytes_with_spoofed_first_node_digest(
+        lib: &Package,
+        spoof_seed: &str,
+    ) -> (Vec<u8>, Word) {
+        use miden_core::serde::Serializable;
+
+        // Serialize the MastForest in stripped form so the byte layout is minimal and stable.
+        let forest = lib.mast_forest().as_ref();
+        let original_digest = forest[MastNodeId::new_unchecked(0)].digest();
+        let mut output_bytes = Vec::new();
+        lib.write_header_into(&mut output_bytes);
+        let forest_offset = output_bytes.len();
+        forest.write_stripped(&mut output_bytes);
+
+        let (node_hashes_start, node_count) =
+            locate_first_node_hash(&output_bytes[forest_offset..]);
+        assert!(node_count > 0, "expected at least one node info entry");
+
+        // Patch node 0 digest in-place.
+        let spoofed_digest = miden_core::utils::hash_string_to_word(spoof_seed);
+        assert_ne!(spoofed_digest, original_digest, "spoofed digest must differ");
+
+        let mut spoofed_digest_bytes = Vec::new();
+        spoofed_digest.write_into(&mut spoofed_digest_bytes);
+        assert_eq!(spoofed_digest_bytes.len(), 32, "Word must serialize to 32 bytes");
+
+        let node0_digest_offset = forest_offset + node_hashes_start;
+        output_bytes[node0_digest_offset..node0_digest_offset + 32]
+            .copy_from_slice(&spoofed_digest_bytes);
+
+        lib.write_trailer_into(&mut output_bytes);
+
+        (output_bytes, spoofed_digest)
     }
 }
