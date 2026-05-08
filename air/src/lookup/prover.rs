@@ -156,8 +156,9 @@ pub fn build_lookup_fractions<A, F, EF>(
     challenges: &Challenges<EF>,
 ) -> LookupFractions<F, EF>
 where
-    F: Field,
-    EF: ExtensionField<F>,
+    F: Field + Sync,
+    EF: ExtensionField<F> + Sync,
+    A: Sync,
     for<'a> A: LookupAir<ProverLookupBuilder<'a, F, EF>>,
 {
     let num_rows = main_trace.height();
@@ -165,25 +166,59 @@ where
     let flat: &[F] = main_trace.values.borrow();
 
     let shape = air.column_shape().to_vec();
-    let mut fractions = LookupFractions::from_shape(shape, num_rows);
 
-    // Per-row periodic slice, filled in place each row — no per-iteration allocation.
-    let mut periodic_row: Vec<F> = vec![F::ZERO; periodic_columns.len()];
+    // Fill one chunk of rows into a fresh per-chunk `LookupFractions`.
+    let process_chunk = |row_lo: usize, row_hi: usize| -> LookupFractions<F, EF> {
+        let mut chunk = LookupFractions::from_shape(shape.clone(), row_hi - row_lo);
+        let mut periodic_row: Vec<F> = vec![F::ZERO; periodic_columns.len()];
+        for r in row_lo..row_hi {
+            let curr = &flat[r * width..(r + 1) * width];
+            let nxt_idx = (r + 1) % num_rows;
+            let next = &flat[nxt_idx * width..(nxt_idx + 1) * width];
+            let window = RowWindow::from_two_rows(curr, next);
+            for (i, col) in periodic_columns.iter().enumerate() {
+                periodic_row[i] = col[r % col.len()];
+            }
+            let mut lb =
+                ProverLookupBuilder::new(window, &periodic_row, challenges, air, &mut chunk);
+            air.eval(&mut lb);
+        }
+        chunk
+    };
 
-    for r in 0..num_rows {
-        let curr = &flat[r * width..(r + 1) * width];
-        let nxt_idx = (r + 1) % num_rows;
-        let next = &flat[nxt_idx * width..(nxt_idx + 1) * width];
-        let window = RowWindow::from_two_rows(curr, next);
+    #[cfg(not(feature = "concurrent"))]
+    let fractions = process_chunk(0, num_rows);
 
-        for (i, col) in periodic_columns.iter().enumerate() {
-            periodic_row[i] = col[r % col.len()];
+    // Concatenation after parallel processing preserves global row order because chunks
+    // tile `0..num_rows` contiguously and each chunk's `fractions` / `counts` are
+    // row-major within the chunk.
+    #[cfg(feature = "concurrent")]
+    let fractions = {
+        use miden_crypto::parallel::*;
+
+        let num_cols = shape.len();
+        let rows_per_chunk = crate::lookup::aux_builder::ACCUMULATE_ROWS_PER_CHUNK;
+        let num_chunks = num_rows.div_ceil(rows_per_chunk);
+
+        let chunks: Vec<LookupFractions<F, EF>> = (0..num_chunks)
+            .into_par_iter()
+            .map(|chunk_idx| {
+                let row_lo = chunk_idx * rows_per_chunk;
+                let row_hi = (row_lo + rows_per_chunk).min(num_rows);
+                process_chunk(row_lo, row_hi)
+            })
+            .collect();
+
+        let total_fractions: usize = chunks.iter().map(|c| c.fractions.len()).sum();
+        let mut fractions_vec: Vec<(F, EF)> = Vec::with_capacity(total_fractions);
+        let mut counts_vec: Vec<usize> = Vec::with_capacity(num_rows * num_cols);
+        for chunk in chunks {
+            fractions_vec.extend(chunk.fractions);
+            counts_vec.extend(chunk.counts);
         }
 
-        let mut lb =
-            ProverLookupBuilder::new(window, &periodic_row, challenges, air, &mut fractions);
-        air.eval(&mut lb);
-    }
+        LookupFractions::from_parts(shape, num_rows, fractions_vec, counts_vec)
+    };
 
     debug_assert_eq!(
         fractions.counts().len(),
