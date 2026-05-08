@@ -71,18 +71,19 @@ use crate::handlers::{
 /// in compiled programs:
 ///
 /// ```rust,ignore
-/// use miden_assembly::Assembler;
+/// use miden_assembly::{Assembler, Linkage};
 /// use miden_core_lib::CoreLibrary;
 ///
+/// let core_lib = CoreLibrary::default();
 /// let assembler = Assembler::new(source_manager)
-///     .with_dynamic_library(&CoreLibrary::default())
+///     .with_package(core_lib.package(), Linkage::Dynamic)
 ///     .unwrap();
 /// ```
 ///
 /// For program execution, you'll also need to register the event handlers:
 ///
 /// ```rust,ignore
-/// let core_lib = CoreLibrary::default();
+/// # let core_lib = CoreLibrary::default();
 /// let handlers = core_lib.handlers();
 /// // Register handlers with your host...
 /// ```
