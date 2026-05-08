@@ -303,9 +303,22 @@ pub struct ProcedureExport {
     /// The id of the MAST root node corresponding to this procedure
     ///
     /// This is used for provenance, i.e. tracing which specific node in the package MAST this
-    /// export corresponds to, when multiple exports may have the same digest.
+    /// export corresponds to, when multiple exports may have the same digest (conversely, some
+    /// procedure roots in the MAST may not be associated with any exports).
     ///
-    /// If not present, the digest is used to resolve a MAST node
+    /// Provenance is important because debug info/decorators may differ between two logically
+    /// distinct procedures, even if they ultimately compile to the same MAST. The MAST will use
+    /// decorators to "fingerprint" nodes that have the same digest, but differ in their
+    /// decorators. This fingerprint is then used to keep all distinct nodes in the forest. The
+    /// only way to guarantee that you will get the precise MAST node that corresponds to the
+    /// specific procedure you've named, is to use the MAST node, rather than the digest.
+    ///
+    /// NOTE: While one might get the impression that `MastNodeId` is a unique identifier for each
+    /// procedure that gets assembled to the MAST, that isn't actually true. If multiple nodes have
+    /// the same digest _and_ the same decorators, they will have the same fingerprint, and thus
+    /// will be collapsed into a single node in the MAST and have the same `MastNodeId`.
+    ///
+    /// If this field contains `None`, the digest is used to resolve a MAST node.
     #[cfg_attr(any(test, feature = "arbitrary"), proptest(value = "None"))]
     #[cfg_attr(feature = "serde", serde(default))]
     pub node: Option<MastNodeId>,
