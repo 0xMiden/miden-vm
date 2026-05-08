@@ -34,9 +34,6 @@ impl SinkDetector for AddressDetector {
         match stmt {
             Stmt::MemStore { span, store } => {
                 if let Some(addr_var) = store.address.first() {
-                    if env.u32_validity_for_var(addr_var).is_proven() {
-                        return diagnostics;
-                    }
                     let addr_fact = env.fact_for_var(addr_var);
                     if addr_fact.has_concrete_sources() {
                         diagnostics.push(self.new_diagnostic(
@@ -49,9 +46,6 @@ impl SinkDetector for AddressDetector {
             },
             Stmt::MemLoad { span, load } => {
                 if let Some(addr_var) = load.address.first() {
-                    if env.u32_validity_for_var(addr_var).is_proven() {
-                        return diagnostics;
-                    }
                     let addr_fact = env.fact_for_var(addr_var);
                     if addr_fact.has_concrete_sources() {
                         diagnostics.push(self.new_diagnostic(
@@ -68,9 +62,6 @@ impl SinkDetector for AddressDetector {
                     && intrinsic.args.len() == 13
                     && intrinsic.results.len() == 13
                 {
-                    if env.u32_validity_for_var(&intrinsic.args[12]).is_proven() {
-                        return diagnostics;
-                    }
                     let addr_fact = env.fact_for_var(&intrinsic.args[12]);
                     if addr_fact.has_concrete_sources() {
                         diagnostics.push(self.new_diagnostic(

@@ -39,6 +39,15 @@ impl Workspace {
             .map_err(|e| e.to_string())?;
         let key = SymbolPath::new(as_str(prog.module_path()).to_string());
         if let Some(idx) = self.index.get(&key).copied() {
+            let existing = self.modules[idx].source_path();
+            if !same_source_path(existing, path) {
+                return Err(format!(
+                    "module path `{}` for {} conflicts with previously loaded {}",
+                    key.as_str(),
+                    path.display(),
+                    existing.display()
+                ));
+            }
             return Ok(idx);
         }
         let idx = self.modules.len();
@@ -152,6 +161,12 @@ impl Workspace {
 
 fn as_str(path: &MasmPathBuf) -> &str {
     <MasmPathBuf as AsRef<str>>::as_ref(path)
+}
+
+fn same_source_path(a: &FsPath, b: &FsPath) -> bool {
+    let canonical_a = std::fs::canonicalize(a).unwrap_or_else(|_| a.to_path_buf());
+    let canonical_b = std::fs::canonicalize(b).unwrap_or_else(|_| b.to_path_buf());
+    canonical_a == canonical_b
 }
 
 /// Given a fully-qualified module path and library roots, locate the corresponding file on disk.

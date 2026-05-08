@@ -181,14 +181,14 @@ fn emit_summary(warning_count: usize, error_count: usize) -> i32 {
         },
         (e, 0) => {
             eprintln!("{}: masm-lint found {e} error(s)", "error".red().bold(),);
-            1
+            2
         },
         (e, w) => {
             eprintln!(
                 "{}: masm-lint found {e} error(s); {w} warning(s) emitted",
                 "error".red().bold(),
             );
-            1
+            2
         },
     }
 }
@@ -232,15 +232,6 @@ fn advice_diagnostic_to_lint(ad: &AdviceDiagnostic) -> LintDiagnostic {
 
 /// Convert a root-cause group into a grouped [`LintDiagnostic`].
 fn root_cause_group_to_lint(group: &AdviceRootCauseGroup) -> LintDiagnostic {
-    let mut procedures = group
-        .diagnostics
-        .iter()
-        .map(|diag| diag.procedure.as_str().to_string())
-        .collect::<HashSet<_>>()
-        .into_iter()
-        .collect::<Vec<_>>();
-    procedures.sort();
-
     let related = group
         .diagnostics
         .iter()
