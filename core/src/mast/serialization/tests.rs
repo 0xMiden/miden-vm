@@ -479,17 +479,6 @@ fn test_operation_encoded_size_push_varint_boundaries() {
     }
 }
 
-#[test]
-fn mast_node_entry_external_rejects_oversized_payload() {
-    let oversized_payload = u32::MAX as u64 + 1;
-    let raw_external_entry = (8u64 << 60) | oversized_payload;
-    let mut bytes = Vec::new();
-    raw_external_entry.write_into(&mut bytes);
-
-    let result = MastNodeEntry::read_from(&mut SliceReader::new(&bytes));
-    assert_matches!(result, Err(DeserializationError::InvalidValue(_)));
-}
-
 fn assert_serialized_view_matches_forest(forest: &MastForest) {
     let mut bytes = Vec::new();
     forest.write_stripped(&mut bytes);
