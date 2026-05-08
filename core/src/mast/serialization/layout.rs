@@ -401,13 +401,9 @@ fn scan_layout_sections<R: OffsetTrackingReader>(
     let node_hash_offset = if header.is_hashless() {
         None
     } else {
-        Some(
-            external_digest_offset
-                .checked_add(header.external_digests_len)
-                .ok_or_else(|| {
-                    DeserializationError::InvalidValue("node hash offset overflow".to_string())
-                })?,
-        )
+        Some(external_digest_offset.checked_add(header.external_digests_len).ok_or_else(|| {
+            DeserializationError::InvalidValue("node hash offset overflow".to_string())
+        })?)
     };
     let advice_map_offset =
         basic_block_offset.checked_add(header.core_tail_len).ok_or_else(|| {
@@ -415,9 +411,10 @@ fn scan_layout_sections<R: OffsetTrackingReader>(
         })?;
 
     let node_entries_start = header.basic_block_len;
-    let node_entries_end = node_entries_start.checked_add(header.node_entries_len).ok_or_else(|| {
-        DeserializationError::InvalidValue("node entries slice offset overflow".to_string())
-    })?;
+    let node_entries_end =
+        node_entries_start.checked_add(header.node_entries_len).ok_or_else(|| {
+            DeserializationError::InvalidValue("node entries slice offset overflow".to_string())
+        })?;
     let node_entries_slice = &core_tail[node_entries_start..node_entries_end];
     validate_node_entries(node_entries_slice, header.node_count, header.external_node_count)?;
 

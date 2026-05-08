@@ -793,18 +793,12 @@ fn test_mast_forest_wire_view_external_digests_are_ordered_by_node_index() {
     assert_eq!(view.node_digest_at(first_id.to_usize()).unwrap(), first);
     assert_eq!(view.node_digest_at(second_id.to_usize()).unwrap(), second);
     assert_eq!(view.node_digest_at(third_id.to_usize()).unwrap(), third);
-    assert_eq!(
-        read_word_at(&bytes, external_digest_offset(&view, first_id.to_usize())),
-        first
-    );
+    assert_eq!(read_word_at(&bytes, external_digest_offset(&view, first_id.to_usize())), first);
     assert_eq!(
         read_word_at(&bytes, external_digest_offset(&view, second_id.to_usize())),
         second
     );
-    assert_eq!(
-        read_word_at(&bytes, external_digest_offset(&view, third_id.to_usize())),
-        third
-    );
+    assert_eq!(read_word_at(&bytes, external_digest_offset(&view, third_id.to_usize())), third);
 }
 
 #[test]
