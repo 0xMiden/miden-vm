@@ -558,7 +558,9 @@ fn locate_first_node_hash(bytes: &[u8]) -> (usize, usize) {
     offset += 1;
     offset += 3;
 
-    let node_count = read_usize_vint64(bytes, &mut offset);
+    let _node_count = read_usize_vint64(bytes, &mut offset);
+    let internal_node_count = read_usize_vint64(bytes, &mut offset);
+    let external_node_count = read_usize_vint64(bytes, &mut offset);
 
     // Roots: len (usize) + elements (u32 LE)
     let roots_len = read_usize_vint64(bytes, &mut offset);
@@ -568,23 +570,9 @@ fn locate_first_node_hash(bytes: &[u8]) -> (usize, usize) {
     let bb_len = read_usize_vint64(bytes, &mut offset);
     offset += bb_len;
 
-    // Fixed-width node entries: one 8-byte entry per node. External nodes carry their digest in a
-    // separate section before internal node hashes, so count them while walking the entry table.
-    let mut external_count = 0usize;
-    for _ in 0..node_count {
-        let end = offset.checked_add(8).expect("offset overflow while reading node entry");
-        let entry_bytes: [u8; 8] = bytes[offset..end].try_into().expect("out-of-bounds node entry");
-        let entry = u64::from_le_bytes(entry_bytes);
-        let discriminant = (entry >> 60) as u8;
-        if discriminant == 8 {
-            external_count += 1;
-        }
-        offset = end;
-    }
+    offset += external_node_count * 32;
 
-    offset += external_count * 32;
-
-    (offset, node_count)
+    (offset, internal_node_count)
 }
 
 fn build_library_bytes_with_spoofed_first_node_digest(
