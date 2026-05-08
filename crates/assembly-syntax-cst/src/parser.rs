@@ -116,18 +116,24 @@ impl Nesting {
         self.parens == 0 && self.brackets == 0 && self.braces == 0
     }
 
-    fn bump(self, kind: SyntaxKind) -> Self {
+    fn bump(self, kind: SyntaxKind) -> Result<Self, SyntaxKind> {
         let mut next = self;
         match kind {
             SyntaxKind::LParen => next.parens += 1,
             SyntaxKind::LBracket => next.brackets += 1,
             SyntaxKind::LBrace => next.braces += 1,
-            SyntaxKind::RParen => next.parens = next.parens.saturating_sub(1),
-            SyntaxKind::RBracket => next.brackets = next.brackets.saturating_sub(1),
-            SyntaxKind::RBrace => next.braces = next.braces.saturating_sub(1),
+            SyntaxKind::RParen => {
+                next.parens = next.parens.checked_sub(1).ok_or(kind)?;
+            },
+            SyntaxKind::RBracket => {
+                next.brackets = next.brackets.checked_sub(1).ok_or(kind)?;
+            },
+            SyntaxKind::RBrace => {
+                next.braces = next.braces.checked_sub(1).ok_or(kind)?;
+            },
             _ => (),
         }
-        next
+        Ok(next)
     }
 }
 
@@ -436,7 +442,7 @@ impl<'input> Parser<'input> {
             }
 
             saw_significant |= !kind.is_trivia();
-            nesting = nesting.bump(kind);
+            self.bump_nesting(&mut nesting, kind);
             self.bump();
         }
 
@@ -456,7 +462,7 @@ impl<'input> Parser<'input> {
             }
 
             let current = self.current_kind().expect("not eof");
-            nesting = nesting.bump(current);
+            self.bump_nesting(&mut nesting, current);
             self.bump();
         }
 
@@ -591,7 +597,7 @@ impl<'input> Parser<'input> {
                 break;
             }
 
-            nesting = nesting.bump(kind);
+            self.bump_nesting(&mut nesting, kind);
             self.bump();
         }
 
@@ -780,7 +786,7 @@ impl<'input> Parser<'input> {
             }
 
             previous_significant = Some(kind);
-            nesting = nesting.bump(kind);
+            self.bump_nesting(&mut nesting, kind);
             self.bump();
         }
 
@@ -1118,6 +1124,18 @@ impl<'input> Parser<'input> {
         }
     }
 
+    fn bump_nesting(&mut self, nesting: &mut Nesting, kind: SyntaxKind) {
+        match nesting.bump(kind) {
+            Ok(next) => *nesting = next,
+            Err(closing) => {
+                self.error_here(format!(
+                    "unexpected closing delimiter `{}`",
+                    closing_delimiter_text(closing)
+                ));
+            },
+        }
+    }
+
     fn error_here(&mut self, message: impl Into<String>) {
         let span = self.current().map(Token::span).unwrap_or(self.eof_span);
         self.diagnostics.push(diagnostic!(
@@ -1164,6 +1182,15 @@ fn eof_anchor_span(source: &SourceFile) -> SourceSpan {
 
 fn source_span_from_text_range(source_id: SourceId, range: TextRange) -> SourceSpan {
     SourceSpan::new(source_id, u32::from(range.start())..u32::from(range.end()))
+}
+
+fn closing_delimiter_text(kind: SyntaxKind) -> &'static str {
+    match kind {
+        SyntaxKind::RParen => ")",
+        SyntaxKind::RBracket => "]",
+        SyntaxKind::RBrace => "}",
+        _ => "delimiter",
+    }
 }
 
 fn expects_continuation_operand(kind: SyntaxKind) -> bool {
@@ -1552,6 +1579,31 @@ proc foo
         assert!(matches!(items[0], Item::Procedure(_)));
         assert!(matches!(items[1], Item::Doc(_)));
         assert!(matches!(items[2], Item::Constant(_)));
+    }
+
+    #[test]
+    fn rejects_stray_closing_delimiters() {
+        let cases = [
+            ("const X = )\n", ")"),
+            ("begin  foo ] end\n", "]"),
+            ("begin\n    foo}\nend\n", "}"),
+        ];
+
+        for (source, delimiter) in cases {
+            let parse = parse_text(source);
+            assert!(parse.has_errors(), "expected {source:?} to be rejected");
+            let expected = format!("unexpected closing delimiter `{delimiter}`");
+            assert!(
+                parse
+                    .diagnostics()
+                    .iter()
+                    .flat_map(|diag| diag.labels.as_deref().unwrap_or(&[]).iter())
+                    .filter_map(|label| label.label())
+                    .any(|label| label.contains(&expected)),
+                "expected {source:?} to report {expected:?}, got {:?}",
+                parse.diagnostics()
+            );
+        }
     }
 
     #[test]
