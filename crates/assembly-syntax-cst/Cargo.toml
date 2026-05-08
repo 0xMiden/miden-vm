@@ -27,8 +27,5 @@ miden-utils-diagnostics.workspace = true
 thiserror.workspace = true
 rowan = { package = "miden-rowan", version = "0.16", default-features = false }
 
-[build-dependencies]
-ungrammar = "1.16.1"
-
 [dev-dependencies]
 pretty_assertions = { workspace = true, features = ["alloc"] }

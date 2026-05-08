@@ -19,5 +19,3 @@ pub use self::{
     parser::{Parse, parse_source_file, parse_text},
     syntax::{MasmLanguage, SyntaxElement, SyntaxKind, SyntaxNode, SyntaxToken},
 };
-
-include!(concat!(env!("OUT_DIR"), "/generated.rs"));
