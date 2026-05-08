@@ -21,6 +21,11 @@ use crate::{Dependency, PackageId};
 
 /// The manifest of a package, containing the set of package dependencies (libraries or packages)
 /// and exported items (procedures, constants, types), if known.
+///
+/// Exports declared in the package manifest are keyed by their fully-qualified path.
+///
+/// Dependencies must each specify a unique package identifier, i.e. it is not allowed to have
+/// multiple dependencies on the same package identifier, even if they are different versions.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(proptest_derive::Arbitrary))]
 #[cfg_attr(

@@ -48,10 +48,20 @@ use crate::{Dependency, Version};
 ///
 /// * Basic metadata like name, description, and semantic version
 /// * The type of target the package represents, e.g. a library or executable
-/// * The assembled [miden_core::mast::MastForest] for that target
-/// * A manifest describing the exported contents of the package, and its runtime dependencies.
+/// * A manifest describing the contents of the package, see [PackageManifest] for more details.
+/// * A [MastForest] corresponding to the assembled target
 /// * One or more custom sections containing metadata produced by the assembler or other tools which
-///   applies to the package, e.g. debug symbols.
+///   is relevant to the package, e.g. debug symbols.
+///
+/// Custom sections which are of particular interest:
+///
+/// * For account components, the package will contain a section that provides component metadata
+/// * For executable packages which link against a kernel, the package will embed the kernel package
+///   in a custom section, so that executables are "self-contained".
+/// * When assembled with debug information, various types of debug info are emitted to custom
+///   sections for use by debuggers and other introspection tooling.
+///
+/// See [SectionId] for the set of well-known sections, and what they are used for.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Package {
     /// Name of the package
