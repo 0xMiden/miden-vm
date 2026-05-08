@@ -246,155 +246,6 @@ impl Package {
             .ok_or_else(|| Report::msg("invalid kernel package: does not contain kernel module"))
     }
 
-    /// Get a [Kernel] from this package, if this package contains one.
-    pub fn to_kernel(&self) -> Result<Kernel, Report> {
-        let exports = self
-            .manifest
-            .exports()
-            .filter_map(|export| {
-                if export.namespace().is_kernel_path()
-                    && let PackageExport::Procedure(p) = export
-                {
-                    Some(p.digest)
-                } else {
-                    None
-                }
-            })
-            .collect::<Vec<_>>();
-        if exports.is_empty() {
-            return Err(Report::msg(
-                "invalid kernel package: does not export any kernel procedures",
-            ));
-        }
-        Kernel::new(&exports).map_err(|err| Report::msg(format!("invalid kernel package: {err}")))
-    }
-
-    // TODO(pauls): This function can be removed when we remove Program
-    #[doc(hidden)]
-    pub fn try_into_program(&self) -> Result<miden_core::program::Program, Report> {
-        use miden_assembly_syntax::{Path as MasmPath, ast};
-        use miden_core::program::Program;
-
-        if !self.is_program() {
-            return Err(Report::msg(format!(
-                "cannot convert package of type {} to Executable",
-                self.kind
-            )));
-        }
-        let main_path = MasmPath::exec_path().join(ast::ProcedureName::MAIN_PROC_NAME);
-        if let Some(entrypoint) = self.get_procedure_node_by_path(&main_path) {
-            let mast_forest = self.mast.clone();
-            let kernel_dependency = self.kernel_runtime_dependency()?.cloned();
-            match (self.try_embedded_kernel_package()?, kernel_dependency) {
-                (Some(kernel_package), _) => {
-                    Ok(Program::with_kernel(mast_forest, entrypoint, kernel_package.to_kernel()?))
-                },
-                (None, Some(kernel_dependency)) => Err(Report::msg(format!(
-                    "package '{}' declares kernel runtime dependency '{}@{}#{}', but does not embed the kernel package required to reconstruct a program",
-                    self.name,
-                    kernel_dependency.name,
-                    kernel_dependency.version,
-                    kernel_dependency.digest
-                ))),
-                (None, None) => Ok(Program::new(mast_forest, entrypoint)),
-            }
-        } else {
-            Err(Report::msg(format!(
-                "malformed executable package: no procedure root for '{main_path}'"
-            )))
-        }
-    }
-
-    // TODO(pauls): This function can be removed when we remove Program
-    #[doc(hidden)]
-    pub fn unwrap_program(&self) -> miden_core::program::Program {
-        assert_eq!(self.kind, TargetType::Executable);
-        self.try_into_program().unwrap_or_else(|err| panic!("{err}"))
-    }
-
-    #[doc(hidden)]
-    pub fn try_embedded_kernel_package(&self) -> Result<Option<Box<Self>>, Report> {
-        let Some(kernel_package) = self.embedded_kernel_package()? else {
-            return Ok(None);
-        };
-        self.validate_embedded_kernel_dependency(&kernel_package)?;
-        Ok(Some(kernel_package))
-    }
-
-    /// This function extracts a embedded kernel package from the KERNEL section of this package,
-    /// if present.
-    ///
-    /// This returns an error in the following situations:
-    ///
-    /// * There are duplicate KERNEL sections
-    /// * Deserialization of a package from the KERNEL section fails
-    fn embedded_kernel_package(&self) -> Result<Option<Box<Self>>, Report> {
-        let mut sections = self.sections.iter().filter(|section| section.id == SectionId::KERNEL);
-        let Some(section) = sections.next() else {
-            return Ok(None);
-        };
-        if sections.next().is_some() {
-            return Err(Report::msg(format!(
-                "package '{}' contains multiple '{}' sections",
-                self.name,
-                SectionId::KERNEL
-            )));
-        }
-
-        Self::read_from_bytes(section.data.as_ref())
-            .map(Box::new)
-            .map(Some)
-            .map_err(|error| {
-                Report::msg(format!(
-                    "failed to decode embedded kernel package for '{}': {error}",
-                    self.name
-                ))
-            })
-    }
-
-    fn validate_embedded_kernel_dependency(&self, kernel_package: &Self) -> Result<(), Report> {
-        if !kernel_package.is_kernel() {
-            return Err(Report::msg(format!(
-                "package '{}' embeds '{}', but its kind is '{}'",
-                self.name, kernel_package.name, kernel_package.kind
-            )));
-        }
-
-        let Some(kernel_dependency) = self.kernel_runtime_dependency()? else {
-            return Err(Report::msg(format!(
-                "package '{}' embeds a kernel package, but does not declare a kernel runtime dependency",
-                self.name
-            )));
-        };
-
-        if kernel_dependency.name != kernel_package.name
-            || kernel_dependency.version != kernel_package.version
-            || kernel_dependency.digest != kernel_package.digest()
-        {
-            return Err(Report::msg(format!(
-                "package '{}' declares kernel runtime dependency '{}@{}#{}', but that does not match the embedded kernel package '{}@{}#{}'",
-                self.name,
-                kernel_dependency.name,
-                kernel_dependency.version,
-                kernel_dependency.digest,
-                kernel_package.name,
-                kernel_package.version,
-                kernel_package.digest()
-            )));
-        }
-
-        Ok(())
-    }
-
-    pub fn to_dependency(&self) -> Dependency {
-        Dependency {
-            name: self.name.clone(),
-            version: self.version.clone(),
-            kind: self.kind,
-            digest: self.digest(),
-        }
-    }
-
     /// If this package depends on a kernel, this method extracts the [Dependency] corresponding to
     /// it.
     ///
@@ -415,74 +266,6 @@ impl Package {
         }
 
         Ok(Some(kernel_dependency))
-    }
-
-    /// Derive a new executable package from this one by specifying the entrypoint to use.
-    ///
-    /// To succeed, the following must be true:
-    ///
-    /// * This package was produced from a library target
-    /// * The `entrypoint` procedure is exported from this package according to the manifest
-    /// * The `entrypoint` procedure can be resolved to a node in the MAST of this package
-    ///
-    /// The resulting package has a target type and manifest reflecting what would have been used
-    /// if the package was originally assembled as an executable, however the underlying
-    /// [miden_core::mast::MastForest] is left untouched, so the resulting package may still contain
-    /// nodes in the forest which are now unused.
-    pub fn make_executable(&self, entrypoint: &QualifiedProcedureName) -> Result<Self, Report> {
-        use miden_assembly_syntax::{Path as MasmPath, ast as masm};
-        if !self.is_library() {
-            return Err(Report::msg("expected library but got an executable"));
-        }
-
-        let entrypoint_namespace = entrypoint.namespace().to_absolute();
-        let module = self
-            .module_infos()
-            .find(|info| info.path() == entrypoint_namespace.as_ref())
-            .ok_or_else(|| {
-                Report::msg(format!(
-                    "invalid entrypoint: library does not contain a module named '{}'",
-                    entrypoint.namespace()
-                ))
-            })?;
-        if let Some(procedure) = module.get_procedure_by_name(entrypoint.name()) {
-            let digest = procedure.digest;
-            let node_id = procedure
-                 .source_root_id()
-                 .or_else(|| self.mast.find_procedure_root(digest))
-                 .ok_or_else(|| {
-                     Report::msg(
-                         "invalid entrypoint: malformed library - procedure exported, but digest has \
-                          no node in the forest",
-                     )
-                 })?;
-
-            let exec_path: Arc<MasmPath> =
-                MasmPath::exec_path().join(masm::ProcedureName::MAIN_PROC_NAME).into();
-            let mut package = Self::create(
-                self.name.clone(),
-                self.version.clone(),
-                TargetType::Executable,
-                self.mast.clone(),
-                vec![PackageExport::Procedure(ProcedureExport::new(
-                    exec_path,
-                    Some(node_id),
-                    digest,
-                    None,
-                ))],
-                self.manifest.dependencies.clone(),
-            )
-            .map_err(Report::msg)?;
-
-            package.description = self.description.clone();
-            package.sections = self.sections.clone();
-
-            Ok(package)
-        } else {
-            Err(Report::msg(format!(
-                "invalid entrypoint: library does not export '{entrypoint}'"
-            )))
-        }
     }
 
     /// Returns the procedure name for the given MAST root digest, if present.
@@ -582,7 +365,239 @@ impl Package {
 
         modules_by_path.into_values()
     }
+}
 
+/// Conversions
+impl Package {
+    /// Get a [Kernel] from this package, if this package contains one.
+    pub fn to_kernel(&self) -> Result<Kernel, Report> {
+        let exports = self
+            .manifest
+            .exports()
+            .filter_map(|export| {
+                if export.namespace().is_kernel_path()
+                    && let PackageExport::Procedure(p) = export
+                {
+                    Some(p.digest)
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+        if exports.is_empty() {
+            return Err(Report::msg(
+                "invalid kernel package: does not export any kernel procedures",
+            ));
+        }
+        Kernel::new(&exports).map_err(|err| Report::msg(format!("invalid kernel package: {err}")))
+    }
+
+    // TODO(pauls): This function can be removed when we remove Program
+    #[doc(hidden)]
+    pub fn try_into_program(&self) -> Result<miden_core::program::Program, Report> {
+        use miden_assembly_syntax::{Path as MasmPath, ast};
+        use miden_core::program::Program;
+
+        if !self.is_program() {
+            return Err(Report::msg(format!(
+                "cannot convert package of type {} to Executable",
+                self.kind
+            )));
+        }
+        let main_path = MasmPath::exec_path().join(ast::ProcedureName::MAIN_PROC_NAME);
+        if let Some(entrypoint) = self.get_procedure_node_by_path(&main_path) {
+            let mast_forest = self.mast.clone();
+            let kernel_dependency = self.kernel_runtime_dependency()?.cloned();
+            match (self.try_embedded_kernel_package()?, kernel_dependency) {
+                (Some(kernel_package), _) => {
+                    Ok(Program::with_kernel(mast_forest, entrypoint, kernel_package.to_kernel()?))
+                },
+                (None, Some(kernel_dependency)) => Err(Report::msg(format!(
+                    "package '{}' declares kernel runtime dependency '{}@{}#{}', but does not embed the kernel package required to reconstruct a program",
+                    self.name,
+                    kernel_dependency.name,
+                    kernel_dependency.version,
+                    kernel_dependency.digest
+                ))),
+                (None, None) => Ok(Program::new(mast_forest, entrypoint)),
+            }
+        } else {
+            Err(Report::msg(format!(
+                "malformed executable package: no procedure root for '{main_path}'"
+            )))
+        }
+    }
+
+    // TODO(pauls): This function can be removed when we remove Program
+    #[doc(hidden)]
+    pub fn unwrap_program(&self) -> miden_core::program::Program {
+        assert_eq!(self.kind, TargetType::Executable);
+        self.try_into_program().unwrap_or_else(|err| panic!("{err}"))
+    }
+
+    /// Extract the embedded kernel package from this package.
+    ///
+    /// Returns `Ok(None)` if the kernel custom section is not present.
+    ///
+    /// Returns an error if:
+    ///
+    /// * The embedded package is not a kernel
+    /// * The package manifest of `self` does not declare a kernel dependency
+    /// * The embedded kernel does not match the declared kernel dependency
+    pub fn try_embedded_kernel_package(&self) -> Result<Option<Box<Self>>, Report> {
+        let Some(kernel_package) = self.embedded_kernel_package()? else {
+            return Ok(None);
+        };
+        self.validate_embedded_kernel_dependency(&kernel_package)?;
+        Ok(Some(kernel_package))
+    }
+
+    /// This function extracts a embedded kernel package from the KERNEL section of this package,
+    /// if present.
+    ///
+    /// This returns an error in the following situations:
+    ///
+    /// * There are duplicate KERNEL sections
+    /// * Deserialization of a package from the KERNEL section fails
+    fn embedded_kernel_package(&self) -> Result<Option<Box<Self>>, Report> {
+        let mut sections = self.sections.iter().filter(|section| section.id == SectionId::KERNEL);
+        let Some(section) = sections.next() else {
+            return Ok(None);
+        };
+        if sections.next().is_some() {
+            return Err(Report::msg(format!(
+                "package '{}' contains multiple '{}' sections",
+                self.name,
+                SectionId::KERNEL
+            )));
+        }
+
+        Self::read_from_bytes(section.data.as_ref())
+            .map(Box::new)
+            .map(Some)
+            .map_err(|error| {
+                Report::msg(format!(
+                    "failed to decode embedded kernel package for '{}': {error}",
+                    self.name
+                ))
+            })
+    }
+
+    fn validate_embedded_kernel_dependency(&self, kernel_package: &Self) -> Result<(), Report> {
+        if !kernel_package.is_kernel() {
+            return Err(Report::msg(format!(
+                "package '{}' embeds '{}', but its kind is '{}'",
+                self.name, kernel_package.name, kernel_package.kind
+            )));
+        }
+
+        let Some(kernel_dependency) = self.kernel_runtime_dependency()? else {
+            return Err(Report::msg(format!(
+                "package '{}' embeds a kernel package, but does not declare a kernel runtime dependency",
+                self.name
+            )));
+        };
+
+        if kernel_dependency.name != kernel_package.name
+            || kernel_dependency.version != kernel_package.version
+            || kernel_dependency.digest != kernel_package.digest()
+        {
+            return Err(Report::msg(format!(
+                "package '{}' declares kernel runtime dependency '{}@{}#{}', but that does not match the embedded kernel package '{}@{}#{}'",
+                self.name,
+                kernel_dependency.name,
+                kernel_dependency.version,
+                kernel_dependency.digest,
+                kernel_package.name,
+                kernel_package.version,
+                kernel_package.digest()
+            )));
+        }
+
+        Ok(())
+    }
+
+    /// Get a [Dependency] that represents this package
+    pub fn to_dependency(&self) -> Dependency {
+        Dependency {
+            name: self.name.clone(),
+            version: self.version.clone(),
+            kind: self.kind,
+            digest: self.digest(),
+        }
+    }
+
+    /// Derive a new executable package from this one by specifying the entrypoint to use.
+    ///
+    /// To succeed, the following must be true:
+    ///
+    /// * This package was produced from a library target
+    /// * The `entrypoint` procedure is exported from this package according to the manifest
+    /// * The `entrypoint` procedure can be resolved to a node in the MAST of this package
+    ///
+    /// The resulting package has a target type and manifest reflecting what would have been used
+    /// if the package was originally assembled as an executable, however the underlying
+    /// [miden_core::mast::MastForest] is left untouched, so the resulting package may still contain
+    /// nodes in the forest which are now unused.
+    pub fn make_executable(&self, entrypoint: &QualifiedProcedureName) -> Result<Self, Report> {
+        use miden_assembly_syntax::{Path as MasmPath, ast as masm};
+        if !self.is_library() {
+            return Err(Report::msg("expected library but got an executable"));
+        }
+
+        let entrypoint_namespace = entrypoint.namespace().to_absolute();
+        let module = self
+            .module_infos()
+            .find(|info| info.path() == entrypoint_namespace.as_ref())
+            .ok_or_else(|| {
+                Report::msg(format!(
+                    "invalid entrypoint: library does not contain a module named '{}'",
+                    entrypoint.namespace()
+                ))
+            })?;
+        if let Some(procedure) = module.get_procedure_by_name(entrypoint.name()) {
+            let digest = procedure.digest;
+            let node_id = procedure
+                 .source_root_id()
+                 .or_else(|| self.mast.find_procedure_root(digest))
+                 .ok_or_else(|| {
+                     Report::msg(
+                         "invalid entrypoint: malformed library - procedure exported, but digest has \
+                          no node in the forest",
+                     )
+                 })?;
+
+            let exec_path: Arc<MasmPath> =
+                MasmPath::exec_path().join(masm::ProcedureName::MAIN_PROC_NAME).into();
+            let mut package = Self::create(
+                self.name.clone(),
+                self.version.clone(),
+                TargetType::Executable,
+                self.mast.clone(),
+                vec![PackageExport::Procedure(ProcedureExport::new(
+                    exec_path,
+                    Some(node_id),
+                    digest,
+                    None,
+                ))],
+                self.manifest.dependencies.clone(),
+            )
+            .map_err(Report::msg)?;
+
+            package.description = self.description.clone();
+            package.sections = self.sections.clone();
+
+            Ok(package)
+        } else {
+            Err(Report::msg(format!(
+                "invalid entrypoint: library does not export '{entrypoint}'"
+            )))
+        }
+    }
+}
+
+/// Serialization
+impl Package {
     /// Write this package to `path`
     #[cfg(feature = "std")]
     pub fn write_to_file(&self, path: impl AsRef<std::path::Path>) -> std::io::Result<()> {
