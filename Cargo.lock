@@ -1315,7 +1315,6 @@ version = "0.3.0"
 dependencies = [
  "clap",
  "masm-analysis",
- "masm-decompiler",
  "miden-debug-types",
  "yansi",
 ]

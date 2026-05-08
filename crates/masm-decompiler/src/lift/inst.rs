@@ -1217,7 +1217,7 @@ fn lift_push_word_slice(
 // Helper functions
 
 /// Compute the stack effect for an instruction, resolving call signatures when needed.
-pub(crate) fn effect_for_inst(
+pub(super) fn effect_for_inst(
     inst: &Instruction,
     span: SourceSpan,
     resolver: &SymbolResolver<'_>,

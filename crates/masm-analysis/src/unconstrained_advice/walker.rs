@@ -2,10 +2,7 @@
 
 use std::collections::HashMap;
 
-use masm_decompiler::{
-    SymbolPath,
-    ir::{LoopPhi, Stmt},
-};
+use masm_decompiler::{LocalAccessKind, LoopPhi, Stmt, SymbolPath};
 
 use super::{
     domain::AdviceFact,
@@ -21,7 +18,7 @@ use super::{
 use crate::abstract_interp::{FixpointConfig, JoinSemiLattice, iterate_to_fixpoint};
 
 /// Trait for passes that detect specific advice-reaching-sink patterns.
-pub(crate) trait SinkDetector {
+pub(super) trait SinkDetector {
     /// Inspect a statement before environment updates are applied.
     ///
     /// Return any diagnostics for sinks detected in this statement.
@@ -29,7 +26,7 @@ pub(crate) trait SinkDetector {
 }
 
 /// Collect diagnostics for all procedures using a sink detector.
-pub(crate) fn collect_diagnostics<D: SinkDetector>(
+pub(super) fn collect_diagnostics<D: SinkDetector>(
     prepared: &HashMap<SymbolPath, PreparedProc>,
     provenance_summaries: &AdviceSummaryMap,
     make_detector: impl Fn(SymbolPath) -> D,
@@ -158,11 +155,10 @@ fn eval_stmt<D: SinkDetector>(
             apply_local_store_word(store.kind, &store.values, u32::from(store.index), &mut env);
         },
         Stmt::LocalLoad { load, .. } => match load.kind {
-            masm_decompiler::ir::LocalAccessKind::Element => {
+            LocalAccessKind::Element => {
                 apply_local_load_scalar(&load.outputs, u32::from(load.index), &mut env);
             },
-            masm_decompiler::ir::LocalAccessKind::WordBe
-            | masm_decompiler::ir::LocalAccessKind::WordLe => {
+            LocalAccessKind::WordBe | LocalAccessKind::WordLe => {
                 apply_local_load_word(load.kind, &load.outputs, u32::from(load.index), &mut env);
             },
         },

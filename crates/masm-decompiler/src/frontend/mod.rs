@@ -7,7 +7,7 @@ use std::{
 
 use miden_assembly_syntax::{
     ModuleParser, Report,
-    ast::{Constant, Module, ModuleKind, Procedure, path::PathBuf as MasmPathBuf},
+    ast::{Module, ModuleKind, Procedure, path::PathBuf as MasmPathBuf},
     debuginfo::SourceManager,
 };
 
@@ -50,7 +50,7 @@ impl LibraryRoot {
     }
 
     /// Strip this root's namespace prefix from a fully-qualified module path.
-    pub fn module_relative_path<'a>(&self, module_path: &'a str) -> Option<&'a str> {
+    fn module_relative_path<'a>(&self, module_path: &'a str) -> Option<&'a str> {
         let module_path = strip_leading_path_separators(module_path);
         if self.namespace.is_empty() {
             return Some(module_path);
@@ -73,7 +73,7 @@ pub struct Program {
 }
 
 impl Program {
-    pub fn from_path(
+    pub(crate) fn from_path(
         path: impl AsRef<FsPath>,
         roots: &[LibraryRoot],
         source_manager: Arc<dyn SourceManager>,
@@ -102,34 +102,20 @@ impl Program {
         })
     }
 
-    /// Construct a program from an already-parsed module and explicit metadata.
-    pub fn from_parts(
-        module: Box<Module>,
-        source_path: FsPathBuf,
-        module_path: MasmPathBuf,
-    ) -> Self {
-        Self { module, source_path, module_path }
-    }
-
     pub fn module(&self) -> &Module {
         &self.module
     }
 
-    pub fn source_path(&self) -> &FsPathBuf {
+    pub(crate) fn source_path(&self) -> &FsPathBuf {
         &self.source_path
     }
 
-    pub fn module_path(&self) -> &MasmPathBuf {
+    pub(crate) fn module_path(&self) -> &MasmPathBuf {
         &self.module_path
     }
 
-    pub fn procedures(&self) -> impl Iterator<Item = &Procedure> {
+    pub(crate) fn procedures(&self) -> impl Iterator<Item = &Procedure> {
         self.module.procedures()
-    }
-
-    /// Iterate over constant definitions in this module.
-    pub fn constants(&self) -> impl Iterator<Item = &Constant> {
-        self.module.constants()
     }
 }
 
@@ -138,10 +124,7 @@ impl Program {
 ///
 /// Roots are searched in order; the first that contains `file_path` is used. If no root matches,
 /// returns an error.
-pub fn derive_module_path(
-    file_path: &FsPath,
-    roots: &[LibraryRoot],
-) -> Result<MasmPathBuf, String> {
+fn derive_module_path(file_path: &FsPath, roots: &[LibraryRoot]) -> Result<MasmPathBuf, String> {
     let normalized_file_path = normalize_path_for_matching(file_path)?;
     let file_name = normalized_file_path
         .file_name()

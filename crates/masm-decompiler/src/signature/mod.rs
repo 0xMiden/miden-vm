@@ -6,7 +6,7 @@ mod effects;
 
 pub use analysis::infer_signatures;
 pub use domain::{ProcSignature, SignatureMap};
-pub use effects::StackEffect;
+pub(crate) use effects::StackEffect;
 
 use crate::{frontend::Workspace, symbol::path::SymbolPath};
 

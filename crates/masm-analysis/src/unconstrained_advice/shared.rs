@@ -2,27 +2,24 @@
 
 use std::collections::{HashMap, HashSet};
 
-use masm_decompiler::{
-    ir::{BinOp, Expr, Intrinsic, LocalAccessKind, LoopPhi, Stmt, UnOp, Var},
-    types::VarKey,
-};
+use masm_decompiler::{BinOp, Expr, Intrinsic, LocalAccessKind, LoopPhi, Stmt, UnOp, Var, VarKey};
 
 use super::{domain::AdviceFact, u32_domain::U32Validity};
 use crate::abstract_interp::JoinSemiLattice;
 
 /// Maximum number of loop-approximation passes.
-pub(crate) const MAX_LOOP_PASSES: usize = 32;
+pub(super) const MAX_LOOP_PASSES: usize = 32;
 
 /// Exact witness that a boolean value was computed as `x == 0`.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct EqZeroWitness {
+pub(super) struct EqZeroWitness {
     /// Alias identity of the value compared against zero.
-    pub(crate) value_identity: VarKey,
+    pub(super) value_identity: VarKey,
 }
 
 /// Shared flow environment at a program point.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub(crate) struct Env {
+pub(super) struct Env {
     vars: HashMap<VarKey, AdviceFact>,
     locals: HashMap<u32, AdviceFact>,
     u32_validity: HashMap<VarKey, U32Validity>,
@@ -37,7 +34,7 @@ pub(crate) struct Env {
 
 impl Env {
     /// Read the current fact for a variable.
-    pub(crate) fn fact_for_var(&self, var: &Var) -> AdviceFact {
+    pub(super) fn fact_for_var(&self, var: &Var) -> AdviceFact {
         self.vars
             .get(&VarKey::from_var(var))
             .cloned()
@@ -45,12 +42,12 @@ impl Env {
     }
 
     /// Set the current fact for a variable.
-    pub(crate) fn set_var_fact(&mut self, var: &Var, fact: AdviceFact) {
+    pub(super) fn set_var_fact(&mut self, var: &Var, fact: AdviceFact) {
         self.vars.insert(VarKey::from_var(var), fact);
     }
 
     /// Read the current `u32` validity fact for a variable.
-    pub(crate) fn u32_validity_for_var(&self, var: &Var) -> U32Validity {
+    pub(super) fn u32_validity_for_var(&self, var: &Var) -> U32Validity {
         let key = VarKey::from_var(var);
         let direct = self.u32_validity.get(&key).copied().unwrap_or(U32Validity::Unknown);
         if direct.is_proven() {
@@ -66,7 +63,7 @@ impl Env {
     }
 
     /// Set the current `u32` validity fact for a variable.
-    pub(crate) fn set_var_u32_validity(&mut self, var: &Var, validity: U32Validity) {
+    pub(super) fn set_var_u32_validity(&mut self, var: &Var, validity: U32Validity) {
         let key = VarKey::from_var(var);
         if validity.is_proven() {
             self.u32_validity.insert(key.clone(), validity);
@@ -78,18 +75,18 @@ impl Env {
     }
 
     /// Return the alias identity for a variable.
-    pub(crate) fn identity_for_var(&self, var: &Var) -> VarKey {
+    pub(super) fn identity_for_var(&self, var: &Var) -> VarKey {
         let key = VarKey::from_var(var);
         self.aliases.get(&key).cloned().unwrap_or(key)
     }
 
     /// Return the alias identity for a local slot, if known.
-    pub(crate) fn identity_for_local(&self, slot: u32) -> Option<VarKey> {
+    pub(super) fn identity_for_local(&self, slot: u32) -> Option<VarKey> {
         self.local_aliases.get(&slot).cloned()
     }
 
     /// Set the alias identity for a variable.
-    pub(crate) fn set_var_identity(&mut self, var: &Var, identity: VarKey) {
+    pub(super) fn set_var_identity(&mut self, var: &Var, identity: VarKey) {
         let key = VarKey::from_var(var);
         let old_identity = self.identity_for_var(var);
         if identity == key {
@@ -102,7 +99,7 @@ impl Env {
     }
 
     /// Clear any alias identity for a variable.
-    pub(crate) fn clear_var_identity(&mut self, var: &Var) {
+    pub(super) fn clear_var_identity(&mut self, var: &Var) {
         let old_identity = self.identity_for_var(var);
         self.aliases.remove(&VarKey::from_var(var));
         self.refresh_u32_identity_cache(&old_identity);
@@ -110,7 +107,7 @@ impl Env {
     }
 
     /// Set the alias identity for a local slot.
-    pub(crate) fn set_local_identity(&mut self, slot: u32, identity: Option<VarKey>) {
+    pub(super) fn set_local_identity(&mut self, slot: u32, identity: Option<VarKey>) {
         let old_identity = self.identity_for_local(slot);
         match identity {
             Some(identity) => {
@@ -129,17 +126,17 @@ impl Env {
     }
 
     /// Return the zero-test witness for a variable, if any.
-    pub(crate) fn zero_test_for_var(&self, var: &Var) -> Option<EqZeroWitness> {
+    pub(super) fn zero_test_for_var(&self, var: &Var) -> Option<EqZeroWitness> {
         self.zero_tests.get(&VarKey::from_var(var)).cloned()
     }
 
     /// Return the zero-test witness for a local slot, if any.
-    pub(crate) fn zero_test_for_local(&self, slot: u32) -> Option<EqZeroWitness> {
+    pub(super) fn zero_test_for_local(&self, slot: u32) -> Option<EqZeroWitness> {
         self.local_zero_tests.get(&slot).cloned()
     }
 
     /// Set the zero-test witness for a variable.
-    pub(crate) fn set_var_zero_test(&mut self, var: &Var, witness: Option<EqZeroWitness>) {
+    pub(super) fn set_var_zero_test(&mut self, var: &Var, witness: Option<EqZeroWitness>) {
         match witness {
             Some(witness) => {
                 self.zero_tests.insert(VarKey::from_var(var), witness);
@@ -151,7 +148,7 @@ impl Env {
     }
 
     /// Set the zero-test witness for a local slot.
-    pub(crate) fn set_local_zero_test(&mut self, slot: u32, witness: Option<EqZeroWitness>) {
+    pub(super) fn set_local_zero_test(&mut self, slot: u32, witness: Option<EqZeroWitness>) {
         match witness {
             Some(witness) => {
                 self.local_zero_tests.insert(slot, witness);
@@ -163,35 +160,35 @@ impl Env {
     }
 
     /// Return true if the variable is proven non-zero on the current path.
-    pub(crate) fn is_var_nonzero(&self, var: &Var) -> bool {
+    pub(super) fn is_var_nonzero(&self, var: &Var) -> bool {
         self.nonzero_identities.contains(&self.identity_for_var(var))
     }
 
     /// Mark the given alias identity as non-zero on the current path.
-    pub(crate) fn mark_identity_nonzero(&mut self, identity: VarKey) {
+    pub(super) fn mark_identity_nonzero(&mut self, identity: VarKey) {
         self.nonzero_identities.insert(identity);
     }
 
     /// Clear all best-effort metadata for a variable definition.
-    pub(crate) fn clear_var_metadata(&mut self, var: &Var) {
+    pub(super) fn clear_var_metadata(&mut self, var: &Var) {
         self.clear_var_identity(var);
         self.set_var_zero_test(var, None);
     }
 
     /// Sanitize a variable from this point onward.
-    pub(crate) fn sanitize_var(&mut self, var: &Var) {
+    pub(super) fn sanitize_var(&mut self, var: &Var) {
         self.set_var_fact(var, AdviceFact::bottom());
         let identity = self.identity_for_var(var);
         self.set_identity_u32_validity(&identity, U32Validity::ProvenU32);
     }
 
     /// Read the current fact for a local slot.
-    pub(crate) fn fact_for_local(&self, slot: u32) -> AdviceFact {
+    pub(super) fn fact_for_local(&self, slot: u32) -> AdviceFact {
         self.locals.get(&slot).cloned().unwrap_or_else(AdviceFact::bottom)
     }
 
     /// Read the current `u32` validity fact for a local slot.
-    pub(crate) fn u32_validity_for_local(&self, slot: u32) -> U32Validity {
+    pub(super) fn u32_validity_for_local(&self, slot: u32) -> U32Validity {
         let direct = self.local_u32_validity.get(&slot).copied().unwrap_or(U32Validity::Unknown);
         if direct.is_proven() {
             return direct;
@@ -204,12 +201,12 @@ impl Env {
     }
 
     /// Set the current fact for a local slot.
-    pub(crate) fn set_local_fact(&mut self, slot: u32, fact: AdviceFact) {
+    pub(super) fn set_local_fact(&mut self, slot: u32, fact: AdviceFact) {
         self.locals.insert(slot, fact);
     }
 
     /// Set the current `u32` validity fact for a local slot.
-    pub(crate) fn set_local_u32_validity(&mut self, slot: u32, validity: U32Validity) {
+    pub(super) fn set_local_u32_validity(&mut self, slot: u32, validity: U32Validity) {
         if validity.is_proven() {
             self.local_u32_validity.insert(slot, validity);
         } else {
@@ -221,7 +218,7 @@ impl Env {
     }
 
     /// Join two environments conservatively.
-    pub(crate) fn join(&self, other: &Self) -> Self {
+    pub(super) fn join(&self, other: &Self) -> Self {
         let mut joined = self.clone();
         for (key, fact) in &other.vars {
             let current = joined.vars.get(key).cloned().unwrap_or_else(AdviceFact::bottom);
@@ -353,7 +350,7 @@ where
 }
 
 /// Seed input variables using the same numbering scheme as the lifting pass.
-pub(crate) fn seed_input_env(input_count: usize) -> Env {
+pub(super) fn seed_input_env(input_count: usize) -> Env {
     let mut env = Env::default();
     for depth in 0..input_count {
         let input_position = input_count - 1 - depth;
@@ -364,7 +361,7 @@ pub(crate) fn seed_input_env(input_count: usize) -> Env {
 }
 
 /// Preserve alias and zero-test metadata across a fresh assignment.
-pub(crate) fn assign_expr_metadata(dest: &Var, expr: &Expr, env: &mut Env) {
+pub(super) fn assign_expr_metadata(dest: &Var, expr: &Expr, env: &mut Env) {
     if let Some(identity) = expr_identity(expr, env) {
         env.set_var_identity(dest, identity);
     } else {
@@ -375,7 +372,7 @@ pub(crate) fn assign_expr_metadata(dest: &Var, expr: &Expr, env: &mut Env) {
 }
 
 /// Preserve metadata across a phi only when both sides agree exactly.
-pub(crate) fn assign_phi_metadata(
+pub(super) fn assign_phi_metadata(
     dest: &Var,
     lhs_var: &Var,
     lhs_env: &Env,
@@ -401,7 +398,7 @@ pub(crate) fn assign_phi_metadata(
 }
 
 /// Join one loop-body evaluation back into the current abstract loop state.
-pub(crate) fn join_loop_head_env(
+pub(super) fn join_loop_head_env(
     loop_env: &Env,
     entry_env: &Env,
     body_env: &Env,
@@ -418,7 +415,7 @@ pub(crate) fn join_loop_head_env(
 }
 
 /// Refine branch environments using an exact `eq.0` witness when available.
-pub(crate) fn refine_if_envs(cond: &Expr, env: &Env) -> (Env, Env) {
+pub(super) fn refine_if_envs(cond: &Expr, env: &Env) -> (Env, Env) {
     let then_env = env.clone();
     let mut else_env = env.clone();
     if let Some(witness) = eq_zero_witness_for_expr(cond, env) {
@@ -428,7 +425,7 @@ pub(crate) fn refine_if_envs(cond: &Expr, env: &Env) -> (Env, Env) {
 }
 
 /// Refine the environment after `assertz` proves an `eq.0` witness is zero.
-pub(crate) fn refine_nonzero_from_intrinsic(intrinsic: &Intrinsic, env: &mut Env) {
+pub(super) fn refine_nonzero_from_intrinsic(intrinsic: &Intrinsic, env: &mut Env) {
     if intrinsic_base_name(&intrinsic.name) != "assertz" {
         return;
     }
@@ -442,7 +439,7 @@ pub(crate) fn refine_nonzero_from_intrinsic(intrinsic: &Intrinsic, env: &mut Env
 }
 
 /// Return the exact alias identity of an expression, when it is a simple copy.
-pub(crate) fn expr_identity(expr: &Expr, env: &Env) -> Option<VarKey> {
+pub(super) fn expr_identity(expr: &Expr, env: &Env) -> Option<VarKey> {
     match expr {
         Expr::Var(var) => Some(env.identity_for_var(var)),
         _ => None,
@@ -450,7 +447,7 @@ pub(crate) fn expr_identity(expr: &Expr, env: &Env) -> Option<VarKey> {
 }
 
 /// Return the exact `eq.0` witness carried by an expression, if any.
-pub(crate) fn eq_zero_witness_for_expr(expr: &Expr, env: &Env) -> Option<EqZeroWitness> {
+pub(super) fn eq_zero_witness_for_expr(expr: &Expr, env: &Env) -> Option<EqZeroWitness> {
     match expr {
         Expr::Var(var) => env.zero_test_for_var(var),
         Expr::Binary(BinOp::Eq, lhs, rhs) => {
@@ -463,7 +460,7 @@ pub(crate) fn eq_zero_witness_for_expr(expr: &Expr, env: &Env) -> Option<EqZeroW
 }
 
 /// Return true when the expression is proven non-zero by the best-effort refinement.
-pub(crate) fn expr_is_proven_nonzero(expr: &Expr, env: &Env) -> bool {
+pub(super) fn expr_is_proven_nonzero(expr: &Expr, env: &Env) -> bool {
     match expr {
         Expr::Constant(constant) => !constant.is_zero(),
         Expr::Var(var) => env.is_var_nonzero(var),
@@ -472,7 +469,7 @@ pub(crate) fn expr_is_proven_nonzero(expr: &Expr, env: &Env) -> bool {
 }
 
 /// Compute the provenance fact for an expression result.
-pub(crate) fn expr_output_fact(expr: &Expr, env: &Env) -> AdviceFact {
+pub(super) fn expr_output_fact(expr: &Expr, env: &Env) -> AdviceFact {
     match expr {
         Expr::Var(var) => env.fact_for_var(var),
         Expr::Ternary { then_expr, else_expr, .. } => {
@@ -522,7 +519,7 @@ pub(crate) fn expr_output_fact(expr: &Expr, env: &Env) -> AdviceFact {
 }
 
 /// Compute the `u32` validity of an expression result.
-pub(crate) fn expr_u32_validity(expr: &Expr, env: &Env) -> U32Validity {
+pub(super) fn expr_u32_validity(expr: &Expr, env: &Env) -> U32Validity {
     match expr {
         Expr::Var(var) => env.u32_validity_for_var(var),
         Expr::Ternary { then_expr, else_expr, .. } => {
@@ -572,7 +569,7 @@ pub(crate) fn expr_u32_validity(expr: &Expr, env: &Env) -> U32Validity {
 }
 
 /// Apply the common provenance transfer semantics of one intrinsic statement.
-pub(crate) fn apply_intrinsic_effect(
+pub(super) fn apply_intrinsic_effect(
     span: miden_debug_types::SourceSpan,
     intrinsic: &Intrinsic,
     env: &mut Env,
@@ -653,7 +650,7 @@ pub(crate) fn apply_intrinsic_effect(
 }
 
 /// Store a scalar local and preserve exact alias metadata when possible.
-pub(crate) fn apply_local_store(values: &[Var], index: u32, env: &mut Env) {
+pub(super) fn apply_local_store(values: &[Var], index: u32, env: &mut Env) {
     let fact = AdviceFact::join_all(values.iter().map(|var| env.fact_for_var(var)));
     env.set_local_fact(index, fact);
     let validity = single_var(values)
@@ -667,7 +664,7 @@ pub(crate) fn apply_local_store(values: &[Var], index: u32, env: &mut Env) {
 }
 
 /// Store a local word slot-by-slot.
-pub(crate) fn apply_local_store_word(
+pub(super) fn apply_local_store_word(
     kind: LocalAccessKind,
     values: &[Var],
     index: u32,
@@ -688,7 +685,7 @@ pub(crate) fn apply_local_store_word(
 }
 
 /// Load a scalar local and restore exact alias metadata when available.
-pub(crate) fn apply_local_load_scalar(outputs: &[Var], index: u32, env: &mut Env) {
+pub(super) fn apply_local_load_scalar(outputs: &[Var], index: u32, env: &mut Env) {
     let fact = env.fact_for_local(index);
     let identity = env.identity_for_local(index);
     let witness = env.zero_test_for_local(index);
@@ -705,7 +702,7 @@ pub(crate) fn apply_local_load_scalar(outputs: &[Var], index: u32, env: &mut Env
 }
 
 /// Load a local word slot-by-slot, preserving stack order.
-pub(crate) fn apply_local_load_word(
+pub(super) fn apply_local_load_word(
     kind: LocalAccessKind,
     outputs: &[Var],
     index: u32,
@@ -724,7 +721,7 @@ pub(crate) fn apply_local_load_word(
 }
 
 /// Return the variable compared against zero in an `eq.0`-shaped expression.
-pub(crate) fn zero_comparison_var<'a>(lhs: &'a Expr, rhs: &'a Expr) -> Option<&'a Var> {
+pub(super) fn zero_comparison_var<'a>(lhs: &'a Expr, rhs: &'a Expr) -> Option<&'a Var> {
     match (lhs, rhs) {
         (Expr::Var(var), Expr::Constant(constant)) if constant.is_zero() => Some(var),
         (Expr::Constant(constant), Expr::Var(var)) if constant.is_zero() => Some(var),
@@ -733,7 +730,7 @@ pub(crate) fn zero_comparison_var<'a>(lhs: &'a Expr, rhs: &'a Expr) -> Option<&'
 }
 
 /// Return the statement span for a structured statement.
-pub(crate) fn stmt_span(stmt: &Stmt) -> miden_debug_types::SourceSpan {
+pub(super) fn stmt_span(stmt: &Stmt) -> miden_debug_types::SourceSpan {
     match stmt {
         Stmt::Assign { span, .. }
         | Stmt::MemLoad { span, .. }
@@ -756,12 +753,12 @@ pub(crate) fn stmt_span(stmt: &Stmt) -> miden_debug_types::SourceSpan {
 }
 
 /// Return the base intrinsic name before immediates or `.err=*` suffixes.
-pub(crate) fn intrinsic_base_name(name: &str) -> &str {
+pub(super) fn intrinsic_base_name(name: &str) -> &str {
     name.split_once('.').map_or(name, |(base, _)| base)
 }
 
 /// Return true if an intrinsic requires caller-side `U32` preconditions.
-pub(crate) fn intrinsic_requires_u32_precondition(name: &str) -> bool {
+pub(super) fn intrinsic_requires_u32_precondition(name: &str) -> bool {
     if !name.starts_with("u32") {
         return false;
     }
@@ -773,7 +770,7 @@ pub(crate) fn intrinsic_requires_u32_precondition(name: &str) -> bool {
 }
 
 /// Return the sole variable in the slice, if there is exactly one.
-pub(crate) fn single_var(vars: &[Var]) -> Option<&Var> {
+pub(super) fn single_var(vars: &[Var]) -> Option<&Var> {
     match vars {
         [var] => Some(var),
         _ => None,
