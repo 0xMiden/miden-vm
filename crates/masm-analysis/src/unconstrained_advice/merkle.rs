@@ -8,7 +8,7 @@ use super::{
     domain::AdviceFact,
     shared::{Env, intrinsic_merkle_root_arg_range},
     summary::{AdviceDiagnostic, AdviceDiagnosticsMap, AdviceSummaryMap, diagnostic_from_fact},
-    walker::{self, SinkDetector},
+    walker::{self, AdviceCapability, AdviceEffect},
 };
 use crate::prepared::PreparedProc;
 
@@ -17,20 +17,20 @@ pub(super) fn collect_merkle_diagnostics(
     prepared: &HashMap<SymbolPath, PreparedProc>,
     provenance_summaries: &AdviceSummaryMap,
 ) -> AdviceDiagnosticsMap {
-    walker::collect_diagnostics(prepared, provenance_summaries, |proc_path| MerkleDetector {
+    walker::collect_diagnostics(prepared, provenance_summaries, |proc_path| MerkleCapability {
         proc_path,
     })
 }
 
-/// Sink detector for unconstrained advice reaching Merkle tree root positions.
-struct MerkleDetector {
+/// Advice capability for unconstrained advice reaching Merkle tree root positions.
+struct MerkleCapability {
     proc_path: SymbolPath,
 }
 
-impl SinkDetector for MerkleDetector {
-    fn check_stmt(&self, stmt: &Stmt, env: &Env) -> Vec<AdviceDiagnostic> {
+impl AdviceCapability for MerkleCapability {
+    fn check_stmt(&self, stmt: &Stmt, env: &Env) -> AdviceEffect {
         let Stmt::Intrinsic { span, intrinsic } = stmt else {
-            return Vec::new();
+            return AdviceEffect::new();
         };
 
         let Some(root_range) = intrinsic_merkle_root_arg_range(
@@ -38,7 +38,7 @@ impl SinkDetector for MerkleDetector {
             intrinsic.args.len(),
             intrinsic.results.len(),
         ) else {
-            return Vec::new();
+            return AdviceEffect::new();
         };
 
         let root_fact = AdviceFact::join_all(
@@ -46,18 +46,18 @@ impl SinkDetector for MerkleDetector {
         );
 
         if root_fact.has_concrete_sources() {
-            vec![self.new_diagnostic(
+            AdviceEffect::diagnostics(vec![self.new_diagnostic(
                 *span,
                 "unconstrained advice used as Merkle tree root",
                 &root_fact,
-            )]
+            )])
         } else {
-            Vec::new()
+            AdviceEffect::new()
         }
     }
 }
 
-impl MerkleDetector {
+impl MerkleCapability {
     /// Create a diagnostic for a Merkle root sink.
     fn new_diagnostic(
         &self,

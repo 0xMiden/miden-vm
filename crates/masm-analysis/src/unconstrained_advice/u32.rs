@@ -13,7 +13,7 @@ use super::{
         intrinsic_requires_u32_precondition, stmt_span,
     },
     summary::{AdviceDiagnostic, AdviceDiagnosticsMap, AdviceSummaryMap, diagnostic_from_fact},
-    walker::{self, SinkDetector},
+    walker::{self, AdviceCapability, AdviceEffect},
 };
 use crate::prepared::PreparedProc;
 
@@ -23,27 +23,27 @@ pub(super) fn collect_u32_diagnostics(
     provenance_summaries: &AdviceSummaryMap,
     type_summaries: &TypeSummaryMap,
 ) -> AdviceDiagnosticsMap {
-    walker::collect_diagnostics(prepared, provenance_summaries, |proc_path| U32Detector {
+    walker::collect_diagnostics(prepared, provenance_summaries, |proc_path| U32Capability {
         proc_path,
         type_summaries,
     })
 }
 
 /// Intraprocedural U32 diagnostic collector for one procedure.
-struct U32Detector<'a> {
+struct U32Capability<'a> {
     proc_path: SymbolPath,
     type_summaries: &'a TypeSummaryMap,
 }
 
-impl SinkDetector for U32Detector<'_> {
-    fn check_stmt(&self, stmt: &Stmt, env: &Env) -> Vec<AdviceDiagnostic> {
-        let mut diagnostics = Vec::new();
+impl AdviceCapability for U32Capability<'_> {
+    fn check_stmt(&self, stmt: &Stmt, env: &Env) -> AdviceEffect {
+        let mut effect = AdviceEffect::new();
 
         match stmt {
             Stmt::Assign { span, expr, .. } => {
                 let sink_fact = expr_u32_sink_fact(expr, env);
                 if sink_fact.has_concrete_sources() {
-                    diagnostics.push(self.new_diagnostic(
+                    effect.push_diagnostic(self.new_diagnostic(
                         *span,
                         "unconstrained advice reaches a u32 operation",
                         &sink_fact,
@@ -53,12 +53,14 @@ impl SinkDetector for U32Detector<'_> {
             Stmt::Call { span, call }
             | Stmt::Exec { span, call }
             | Stmt::SysCall { span, call } => {
-                diagnostics.extend(self.call_diagnostics(*span, &call.target, &call.args, env));
+                for diagnostic in self.call_diagnostics(*span, &call.target, &call.args, env) {
+                    effect.push_diagnostic(diagnostic);
+                }
             },
             Stmt::Intrinsic { span, intrinsic } => {
                 let sink_fact = intrinsic_u32_sink_fact(intrinsic, env);
                 if sink_fact.has_concrete_sources() {
-                    diagnostics.push(self.new_diagnostic(
+                    effect.push_diagnostic(self.new_diagnostic(
                         *span,
                         "unconstrained advice reaches a u32 intrinsic",
                         &sink_fact,
@@ -68,7 +70,7 @@ impl SinkDetector for U32Detector<'_> {
             Stmt::If { cond, .. } => {
                 let sink_fact = expr_u32_sink_fact(cond, env);
                 if sink_fact.has_concrete_sources() {
-                    diagnostics.push(self.new_diagnostic(
+                    effect.push_diagnostic(self.new_diagnostic(
                         stmt_span(stmt),
                         "unconstrained advice reaches a u32 operation",
                         &sink_fact,
@@ -78,7 +80,7 @@ impl SinkDetector for U32Detector<'_> {
             Stmt::While { cond, .. } => {
                 let sink_fact = expr_u32_sink_fact(cond, env);
                 if sink_fact.has_concrete_sources() {
-                    diagnostics.push(self.new_diagnostic(
+                    effect.push_diagnostic(self.new_diagnostic(
                         stmt_span(stmt),
                         "unconstrained advice reaches a u32 operation",
                         &sink_fact,
@@ -97,11 +99,11 @@ impl SinkDetector for U32Detector<'_> {
             | Stmt::Return { .. } => {},
         }
 
-        diagnostics
+        effect
     }
 }
 
-impl U32Detector<'_> {
+impl U32Capability<'_> {
     /// Create a diagnostic whose related source spans are derived from a fact.
     fn new_diagnostic(
         &self,

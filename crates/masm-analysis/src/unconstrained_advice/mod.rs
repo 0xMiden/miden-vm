@@ -17,8 +17,15 @@ pub use grouping::{AdviceRootCauseGroup, group_advice_diagnostics_by_origin};
 pub use summary::AdviceDiagnostic;
 use summary::AdviceDiagnosticsMap;
 
-use crate::prepared::PreparedAnalysis;
+use crate::{capability::AnalysisCapability, prepared::PreparedAnalysis};
 
-pub(super) fn infer_unconstrained_advice(prepared: &PreparedAnalysis) -> AdviceDiagnosticsMap {
-    inter::infer_unconstrained_advice(prepared).1
+/// Scheduler-level capability for advice-related diagnostics.
+pub(super) struct UnconstrainedAdviceCapability;
+
+impl AnalysisCapability for UnconstrainedAdviceCapability {
+    type Output = AdviceDiagnosticsMap;
+
+    fn analyze(&self, prepared: &PreparedAnalysis) -> Self::Output {
+        inter::infer_unconstrained_advice(prepared).1
+    }
 }

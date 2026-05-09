@@ -8,7 +8,7 @@ use super::{
     domain::AdviceFact,
     shared::{Env, intrinsic_memory_address_arg_index},
     summary::{AdviceDiagnostic, AdviceDiagnosticsMap, AdviceSummaryMap, diagnostic_from_fact},
-    walker::{self, SinkDetector},
+    walker::{self, AdviceCapability, AdviceEffect},
 };
 use crate::prepared::PreparedProc;
 
@@ -17,26 +17,26 @@ pub(super) fn collect_address_diagnostics(
     prepared: &HashMap<SymbolPath, PreparedProc>,
     provenance_summaries: &AdviceSummaryMap,
 ) -> AdviceDiagnosticsMap {
-    walker::collect_diagnostics(prepared, provenance_summaries, |proc_path| AddressDetector {
+    walker::collect_diagnostics(prepared, provenance_summaries, |proc_path| AddressCapability {
         proc_path,
     })
 }
 
-/// Sink detector for unconstrained advice reaching memory addresses.
-struct AddressDetector {
+/// Advice capability for unconstrained advice reaching memory addresses.
+struct AddressCapability {
     proc_path: SymbolPath,
 }
 
-impl SinkDetector for AddressDetector {
-    fn check_stmt(&self, stmt: &Stmt, env: &Env) -> Vec<AdviceDiagnostic> {
-        let mut diagnostics = Vec::new();
+impl AdviceCapability for AddressCapability {
+    fn check_stmt(&self, stmt: &Stmt, env: &Env) -> AdviceEffect {
+        let mut effect = AdviceEffect::new();
 
         match stmt {
             Stmt::MemStore { span, store } => {
                 if let Some(addr_var) = store.address.first() {
                     let addr_fact = env.fact_for_var(addr_var);
                     if addr_fact.has_concrete_sources() {
-                        diagnostics.push(self.new_diagnostic(
+                        effect.push_diagnostic(self.new_diagnostic(
                             *span,
                             "unconstrained advice used as memory address",
                             &addr_fact,
@@ -48,7 +48,7 @@ impl SinkDetector for AddressDetector {
                 if let Some(addr_var) = load.address.first() {
                     let addr_fact = env.fact_for_var(addr_var);
                     if addr_fact.has_concrete_sources() {
-                        diagnostics.push(self.new_diagnostic(
+                        effect.push_diagnostic(self.new_diagnostic(
                             *span,
                             "unconstrained advice used as memory address",
                             &addr_fact,
@@ -64,7 +64,7 @@ impl SinkDetector for AddressDetector {
                 {
                     let addr_fact = env.fact_for_var(&intrinsic.args[addr_index]);
                     if addr_fact.has_concrete_sources() {
-                        diagnostics.push(self.new_diagnostic(
+                        effect.push_diagnostic(self.new_diagnostic(
                             *span,
                             "unconstrained advice used as memory address",
                             &addr_fact,
@@ -75,11 +75,11 @@ impl SinkDetector for AddressDetector {
             _ => {},
         }
 
-        diagnostics
+        effect
     }
 }
 
-impl AddressDetector {
+impl AddressCapability {
     /// Create a diagnostic for a memory address sink.
     fn new_diagnostic(
         &self,

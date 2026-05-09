@@ -1,340 +1,77 @@
 //! Diagnostics and summaries for unconstrained advice reaching non-zero sinks.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::HashMap;
 
-use masm_decompiler::{
-    BinOp, Expr, Intrinsic, LocalAccessKind, LoopPhi, Stmt, SymbolPath, UnOp, Var,
-};
+use masm_decompiler::{BinOp, Expr, Intrinsic, Stmt, SymbolPath, UnOp, Var};
 
 use super::{
     domain::AdviceFact,
-    provenance::assign_call_results,
     shared::{
-        Env, apply_intrinsic_effect, apply_local_load_scalar, apply_local_load_word,
-        apply_local_store, apply_local_store_word, assign_expr_metadata, assign_phi_metadata,
-        expr_is_proven_nonzero, expr_output_fact, intrinsic_nonzero_arg_index, join_loop_head_env,
-        refine_if_envs, refine_nonzero_from_intrinsic, seed_input_env, stabilized_loop_head_env,
-        stmt_span,
+        Env, expr_is_proven_nonzero, expr_output_fact, intrinsic_nonzero_arg_index,
+        refine_nonzero_from_intrinsic, stmt_span,
     },
-    summary::{AdviceDiagnostic, AdviceDiagnosticsMap, AdviceSummaryMap, diagnostic_from_fact},
+    summary::{
+        AdviceDiagnostic, AdviceDiagnosticsMap, AdviceSummary, AdviceSummaryMap,
+        diagnostic_from_fact,
+    },
+    walker::{self, AdviceCapability, AdviceEffect},
 };
 use crate::prepared::PreparedProc;
-
-/// Summary of non-zero sink requirements for one procedure.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub(super) struct NonZeroSummary {
-    /// Input positions that may reach a `div` or `inv` sink without a local proof.
-    required_inputs: BTreeSet<usize>,
-    /// Whether this summary is opaque.
-    unknown: bool,
-}
-
-impl NonZeroSummary {
-    /// Create a known summary from required input positions.
-    fn new(required_inputs: BTreeSet<usize>) -> Self {
-        Self { required_inputs, unknown: false }
-    }
-
-    /// Create an opaque summary.
-    fn unknown() -> Self {
-        Self {
-            required_inputs: BTreeSet::new(),
-            unknown: true,
-        }
-    }
-
-    /// Return true if the summary is opaque.
-    fn is_unknown(&self) -> bool {
-        self.unknown
-    }
-}
-
-/// Map of non-zero summaries by procedure.
-pub(super) type NonZeroSummaryMap = HashMap<SymbolPath, NonZeroSummary>;
 
 /// Infer non-zero summaries and diagnostics using already-computed provenance summaries.
 pub(super) fn infer_nonzero_summaries_and_diagnostics(
     callgraph: &masm_decompiler::CallGraph,
     prepared: &HashMap<SymbolPath, PreparedProc>,
-    provenance_summaries: &AdviceSummaryMap,
-) -> (NonZeroSummaryMap, AdviceDiagnosticsMap) {
-    let mut summaries = NonZeroSummaryMap::default();
+    summaries: &mut AdviceSummaryMap,
+) -> AdviceDiagnosticsMap {
     let mut diagnostics = AdviceDiagnosticsMap::default();
 
     for node in callgraph.iter() {
         let Some(proc) = prepared.get(node.name()) else {
-            summaries.insert(node.name().clone(), NonZeroSummary::unknown());
+            mark_nonzero_unknown(summaries, node.name());
             continue;
         };
         let Some(stmts) = proc.stmts.as_deref() else {
-            summaries.insert(node.name().clone(), NonZeroSummary::unknown());
+            mark_nonzero_unknown(summaries, node.name());
             continue;
         };
 
-        let analyzer =
-            ProcNonZeroAnalyzer::new(node.name().clone(), provenance_summaries, &summaries);
-        let result = analyzer.analyze(proc.inputs, stmts);
+        let result = {
+            let capability = NonZeroCapability::new(node.name().clone(), summaries);
+            walker::analyze_procedure(&capability, summaries, proc.inputs, stmts)
+        };
         if !result.diagnostics.is_empty() {
             diagnostics.insert(node.name().clone(), result.diagnostics);
         }
-        summaries.insert(node.name().clone(), result.summary);
-    }
-
-    (summaries, diagnostics)
-}
-
-/// Result of non-zero analysis for one procedure.
-#[derive(Debug, Clone)]
-struct ProcNonZeroAnalysisResult {
-    summary: NonZeroSummary,
-    diagnostics: Vec<AdviceDiagnostic>,
-}
-
-/// Result of evaluating a statement block.
-#[derive(Debug, Clone)]
-struct EvalResult {
-    env: Env,
-    diagnostics: Vec<AdviceDiagnostic>,
-    required_inputs: BTreeSet<usize>,
-    opaque: bool,
-}
-
-/// Intraprocedural non-zero analyzer for one procedure.
-struct ProcNonZeroAnalyzer<'a> {
-    proc_path: SymbolPath,
-    provenance_summaries: &'a AdviceSummaryMap,
-    callee_summaries: &'a NonZeroSummaryMap,
-}
-
-impl<'a> ProcNonZeroAnalyzer<'a> {
-    /// Construct a new non-zero analyzer.
-    fn new(
-        proc_path: SymbolPath,
-        provenance_summaries: &'a AdviceSummaryMap,
-        callee_summaries: &'a NonZeroSummaryMap,
-    ) -> Self {
-        Self {
-            proc_path,
-            provenance_summaries,
-            callee_summaries,
-        }
-    }
-
-    /// Analyze one procedure body.
-    fn analyze(&self, input_count: usize, stmts: &[Stmt]) -> ProcNonZeroAnalysisResult {
-        let env = seed_input_env(input_count);
-        let result = self.eval_block(stmts, env);
-        let summary = if result.opaque {
-            NonZeroSummary::unknown()
+        let summary = summaries.entry(node.name().clone()).or_insert_with(AdviceSummary::unknown);
+        if result.opaque {
+            summary.set_nonzero_unknown();
         } else {
-            NonZeroSummary::new(result.required_inputs)
-        };
-
-        ProcNonZeroAnalysisResult { summary, diagnostics: result.diagnostics }
-    }
-
-    /// Evaluate a statement block from top to bottom.
-    fn eval_block(&self, stmts: &[Stmt], mut env: Env) -> EvalResult {
-        let mut diagnostics = Vec::new();
-        let mut required_inputs = BTreeSet::new();
-        let mut opaque = false;
-
-        for stmt in stmts {
-            let result = self.eval_stmt(stmt, env);
-            env = result.env;
-            diagnostics.extend(result.diagnostics);
-            required_inputs.extend(result.required_inputs);
-            opaque |= result.opaque;
-        }
-
-        EvalResult {
-            env,
-            diagnostics,
-            required_inputs,
-            opaque,
+            summary.set_nonzero_requirements(result.required_inputs);
         }
     }
 
-    /// Evaluate a single statement.
-    fn eval_stmt(&self, stmt: &Stmt, mut env: Env) -> EvalResult {
-        let mut diagnostics = Vec::new();
-        let mut required_inputs = BTreeSet::new();
-        let mut opaque = false;
+    diagnostics
+}
 
-        match stmt {
-            Stmt::Assign { span, dest, expr } => {
-                let sink_fact = expr_nonzero_sink_fact(expr, &env);
-                if sink_fact.has_concrete_sources() {
-                    diagnostics.push(self.new_diagnostic(
-                        *span,
-                        "unconstrained advice reaches a divisor or `inv` input without a nearby non-zero check",
-                        &sink_fact,
-                    ));
-                }
-                required_inputs.extend(sink_fact.from_inputs.iter().copied());
-                let fact = expr_output_fact(expr, &env);
-                env.set_var_fact(dest, fact);
-                assign_expr_metadata(dest, expr, &mut env);
-            },
-            Stmt::AdvLoad { span, load } => {
-                for output in &load.outputs {
-                    env.set_var_fact(output, AdviceFact::from_source(*span));
-                    env.clear_var_metadata(output);
-                }
-            },
-            Stmt::AdvStore { .. } | Stmt::MemStore { .. } | Stmt::Return { .. } => {},
-            Stmt::MemLoad { load, .. } => {
-                for output in &load.outputs {
-                    env.set_var_fact(output, AdviceFact::bottom());
-                    env.clear_var_metadata(output);
-                }
-            },
-            Stmt::LocalStore { store, .. } => {
-                apply_local_store(&store.values, u32::from(store.index), &mut env);
-            },
-            Stmt::LocalStoreW { store, .. } => {
-                apply_local_store_word(store.kind, &store.values, u32::from(store.index), &mut env);
-            },
-            Stmt::LocalLoad { load, .. } => match load.kind {
-                LocalAccessKind::Element => {
-                    apply_local_load_scalar(&load.outputs, u32::from(load.index), &mut env);
-                },
-                LocalAccessKind::WordBe | LocalAccessKind::WordLe => {
-                    apply_local_load_word(
-                        load.kind,
-                        &load.outputs,
-                        u32::from(load.index),
-                        &mut env,
-                    );
-                },
-            },
-            Stmt::Call { span, call }
-            | Stmt::Exec { span, call }
-            | Stmt::SysCall { span, call } => {
-                let call_result =
-                    self.call_diagnostics_and_requirements(*span, &call.target, &call.args, &env);
-                diagnostics.extend(call_result.diagnostics);
-                required_inputs.extend(call_result.required_inputs);
-                assign_call_results(
-                    &mut env,
-                    &call.target,
-                    &call.args,
-                    &call.results,
-                    self.provenance_summaries,
-                );
-            },
-            Stmt::DynCall { results, .. } => {
-                for result in results {
-                    env.set_var_fact(result, AdviceFact::bottom());
-                    env.clear_var_metadata(result);
-                }
-                opaque = true;
-            },
-            Stmt::Intrinsic { span, intrinsic } => {
-                let sink_fact = intrinsic_nonzero_sink_fact(intrinsic, &env);
-                if sink_fact.has_concrete_sources() {
-                    diagnostics.push(self.new_diagnostic(
-                        *span,
-                        "unconstrained advice reaches a divisor or `inv` input without a nearby non-zero check",
-                        &sink_fact,
-                    ));
-                }
-                required_inputs.extend(sink_fact.from_inputs.iter().copied());
-                refine_nonzero_from_intrinsic(intrinsic, &mut env);
-                apply_intrinsic_effect(*span, intrinsic, &mut env);
-            },
-            Stmt::If { cond, then_body, else_body, phis, .. } => {
-                let sink_fact = expr_nonzero_sink_fact(cond, &env);
-                if sink_fact.has_concrete_sources() {
-                    diagnostics.push(self.new_diagnostic(
-                        stmt_span(stmt),
-                        "unconstrained advice reaches a divisor or `inv` input without a nearby non-zero check",
-                        &sink_fact,
-                    ));
-                }
-                required_inputs.extend(sink_fact.from_inputs.iter().copied());
+/// Mark one procedure's non-zero summary as opaque.
+fn mark_nonzero_unknown(summaries: &mut AdviceSummaryMap, proc_path: &SymbolPath) {
+    summaries
+        .entry(proc_path.clone())
+        .or_insert_with(AdviceSummary::unknown)
+        .set_nonzero_unknown();
+}
 
-                let (then_env, else_env) = refine_if_envs(cond, &env);
-                let then_result = self.eval_block(then_body, then_env);
-                let else_result = self.eval_block(else_body, else_env);
-                diagnostics.extend(then_result.diagnostics);
-                diagnostics.extend(else_result.diagnostics);
-                required_inputs.extend(then_result.required_inputs);
-                required_inputs.extend(else_result.required_inputs);
-                opaque |= then_result.opaque || else_result.opaque;
+/// Advice capability for unconstrained advice reaching non-zero sinks.
+struct NonZeroCapability<'a> {
+    proc_path: SymbolPath,
+    callee_summaries: &'a AdviceSummaryMap,
+}
 
-                env = then_result.env.join(&else_result.env);
-                for phi in phis {
-                    let merged = then_result
-                        .env
-                        .fact_for_var(&phi.then_var)
-                        .join(&else_result.env.fact_for_var(&phi.else_var));
-                    env.set_var_fact(&phi.dest, merged);
-                    assign_phi_metadata(
-                        &phi.dest,
-                        &phi.then_var,
-                        &then_result.env,
-                        &phi.else_var,
-                        &else_result.env,
-                        &mut env,
-                    );
-                }
-            },
-            Stmt::While { cond, body, phis, .. } => {
-                let sink_fact = expr_nonzero_sink_fact(cond, &env);
-                if sink_fact.has_concrete_sources() {
-                    diagnostics.push(self.new_diagnostic(
-                        stmt_span(stmt),
-                        "unconstrained advice reaches a divisor or `inv` input without a nearby non-zero check",
-                        &sink_fact,
-                    ));
-                }
-                required_inputs.extend(sink_fact.from_inputs.iter().copied());
-                let loop_result = self.eval_loop_block(body, phis, env);
-                env = loop_result.env;
-                diagnostics.extend(loop_result.diagnostics);
-                required_inputs.extend(loop_result.required_inputs);
-                opaque |= loop_result.opaque;
-            },
-            Stmt::Repeat { body, phis, .. } => {
-                let loop_result = self.eval_loop_block(body, phis, env);
-                env = loop_result.env;
-                diagnostics.extend(loop_result.diagnostics);
-                required_inputs.extend(loop_result.required_inputs);
-                opaque |= loop_result.opaque;
-            },
-        }
-
-        EvalResult {
-            env,
-            diagnostics,
-            required_inputs,
-            opaque,
-        }
-    }
-
-    /// Evaluate a structured loop body conservatively.
-    fn eval_loop_block(&self, body: &[Stmt], phis: &[LoopPhi], entry_env: Env) -> EvalResult {
-        let mut opaque = false;
-
-        let mut loop_env = stabilized_loop_head_env(&entry_env, phis, |loop_env| {
-            let body_result = self.eval_block(body, loop_env);
-            opaque |= body_result.opaque;
-            body_result.env
-        });
-
-        let body_result = self.eval_block(body, loop_env.clone());
-        opaque |= body_result.opaque;
-        let mut diagnostics = body_result.diagnostics;
-        let mut required_inputs = body_result.required_inputs;
-        loop_env = join_loop_head_env(&loop_env, &entry_env, &body_result.env, phis);
-
-        EvalResult {
-            env: loop_env,
-            diagnostics: std::mem::take(&mut diagnostics),
-            required_inputs: std::mem::take(&mut required_inputs),
-            opaque,
-        }
+impl<'a> NonZeroCapability<'a> {
+    /// Construct a new non-zero capability.
+    fn new(proc_path: SymbolPath, callee_summaries: &'a AdviceSummaryMap) -> Self {
+        Self { proc_path, callee_summaries }
     }
 
     /// Create a diagnostic whose related source spans are derived from a fact.
@@ -347,24 +84,38 @@ impl<'a> ProcNonZeroAnalyzer<'a> {
         diagnostic_from_fact(self.proc_path.clone(), span, message, fact)
     }
 
+    /// Add diagnostics and summary requirements for a non-zero sink fact.
+    fn add_sink_fact(
+        &self,
+        effect: &mut AdviceEffect,
+        span: miden_debug_types::SourceSpan,
+        message: impl Into<String>,
+        fact: &AdviceFact,
+    ) {
+        let message = message.into();
+        if fact.has_concrete_sources() {
+            effect.push_diagnostic(self.new_diagnostic(span, message, fact));
+        }
+        effect.extend_required_inputs(fact.from_inputs.iter().copied());
+    }
+
     /// Emit call-site diagnostics and summary requirements for a callee non-zero precondition.
-    fn call_diagnostics_and_requirements(
+    fn call_effect(
         &self,
         span: miden_debug_types::SourceSpan,
         target: &str,
         args: &[Var],
         env: &Env,
-    ) -> CallResult {
+    ) -> AdviceEffect {
         let Some(summary) = self.callee_summaries.get(&SymbolPath::new(target.to_string())) else {
-            return CallResult::default();
+            return AdviceEffect::new();
         };
-        if summary.is_unknown() {
-            return CallResult::default();
+        if summary.nonzero_is_unknown() {
+            return AdviceEffect::new();
         }
 
-        let mut diagnostics = Vec::new();
-        let mut required_inputs = BTreeSet::new();
-        for index in &summary.required_inputs {
+        let mut effect = AdviceEffect::new();
+        for index in summary.nonzero_required_inputs() {
             let Some(arg) = args.get(*index) else {
                 continue;
             };
@@ -381,20 +132,78 @@ impl<'a> ProcNonZeroAnalyzer<'a> {
                     ),
                     &arg_fact,
                 );
-                diagnostics.push(diagnostic);
+                effect.push_diagnostic(diagnostic);
             }
-            required_inputs.extend(arg_fact.from_inputs.iter().copied());
+            effect.extend_required_inputs(arg_fact.from_inputs.iter().copied());
         }
 
-        CallResult { diagnostics, required_inputs }
+        effect
     }
 }
 
-/// Result of processing a non-zero-sensitive call.
-#[derive(Debug, Clone, Default)]
-struct CallResult {
-    diagnostics: Vec<AdviceDiagnostic>,
-    required_inputs: BTreeSet<usize>,
+impl AdviceCapability for NonZeroCapability<'_> {
+    fn check_stmt(&self, stmt: &Stmt, env: &Env) -> AdviceEffect {
+        let mut effect = AdviceEffect::new();
+        match stmt {
+            Stmt::Assign { span, expr, .. } => {
+                let sink_fact = expr_nonzero_sink_fact(expr, env);
+                self.add_sink_fact(
+                    &mut effect,
+                    *span,
+                    "unconstrained advice reaches a divisor or `inv` input without a nearby non-zero check",
+                    &sink_fact,
+                );
+            },
+            Stmt::Call { span, call }
+            | Stmt::Exec { span, call }
+            | Stmt::SysCall { span, call } => {
+                effect = self.call_effect(*span, &call.target, &call.args, env);
+            },
+            Stmt::Intrinsic { span, intrinsic } => {
+                let sink_fact = intrinsic_nonzero_sink_fact(intrinsic, env);
+                self.add_sink_fact(
+                    &mut effect,
+                    *span,
+                    "unconstrained advice reaches a divisor or `inv` input without a nearby non-zero check",
+                    &sink_fact,
+                );
+            },
+            Stmt::If { cond, .. } => {
+                let sink_fact = expr_nonzero_sink_fact(cond, env);
+                self.add_sink_fact(
+                    &mut effect,
+                    stmt_span(stmt),
+                    "unconstrained advice reaches a divisor or `inv` input without a nearby non-zero check",
+                    &sink_fact,
+                );
+            },
+            Stmt::While { cond, .. } => {
+                let sink_fact = expr_nonzero_sink_fact(cond, env);
+                self.add_sink_fact(
+                    &mut effect,
+                    stmt_span(stmt),
+                    "unconstrained advice reaches a divisor or `inv` input without a nearby non-zero check",
+                    &sink_fact,
+                );
+            },
+            Stmt::AdvLoad { .. }
+            | Stmt::AdvStore { .. }
+            | Stmt::MemStore { .. }
+            | Stmt::MemLoad { .. }
+            | Stmt::LocalStore { .. }
+            | Stmt::LocalStoreW { .. }
+            | Stmt::LocalLoad { .. }
+            | Stmt::DynCall { .. }
+            | Stmt::Repeat { .. }
+            | Stmt::Return { .. } => {},
+        }
+
+        effect
+    }
+
+    fn before_intrinsic_transfer(&self, intrinsic: &Intrinsic, env: &mut Env) {
+        refine_nonzero_from_intrinsic(intrinsic, env);
+    }
 }
 
 /// Return the advice fact feeding any intrinsic divisor input.

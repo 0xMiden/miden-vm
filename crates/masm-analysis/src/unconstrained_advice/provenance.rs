@@ -1,15 +1,12 @@
 //! Interprocedural provenance summaries for unconstrained advice.
 
-use masm_decompiler::{LocalAccessKind, LoopPhi, Stmt, SymbolPath, Var};
+use masm_decompiler::{Stmt, SymbolPath, Var};
 
 use super::{
-    shared::{
-        Env, apply_intrinsic_effect, apply_local_load_scalar, apply_local_load_word,
-        apply_local_store, apply_local_store_word, assign_expr_metadata, assign_phi_metadata,
-        expr_output_fact, refine_if_envs, seed_input_env, stabilized_loop_head_env,
-    },
+    shared::Env,
     summary::{AdviceSummary, AdviceSummaryMap},
     u32_domain::U32Validity,
+    walker::{self, AdviceCapability, AdviceEffect},
 };
 
 /// Analyze one lifted procedure and summarize which outputs may carry unconstrained advice.
@@ -19,8 +16,8 @@ pub(super) fn analyze_proc_provenance(
     stmts: &[Stmt],
     callee_summaries: &AdviceSummaryMap,
 ) -> AdviceSummary {
-    let env = seed_input_env(input_count);
-    let result = eval_block(stmts, env, callee_summaries);
+    let result =
+        walker::analyze_procedure(&ProvenanceCapability, callee_summaries, input_count, stmts);
     if result.opaque {
         AdviceSummary::unknown_with_arity(output_count)
     } else {
@@ -28,11 +25,13 @@ pub(super) fn analyze_proc_provenance(
     }
 }
 
-/// Result of evaluating a statement block.
-#[derive(Debug, Clone)]
-struct EvalResult {
-    env: Env,
-    opaque: bool,
+/// No-op capability used when the shared advice walker computes provenance summaries.
+struct ProvenanceCapability;
+
+impl AdviceCapability for ProvenanceCapability {
+    fn check_stmt(&self, _stmt: &Stmt, _env: &Env) -> AdviceEffect {
+        AdviceEffect::new()
+    }
 }
 
 /// Build the final output summary from the return statement.
@@ -99,125 +98,6 @@ fn input_var_for_position(input_count: usize, input_position: usize) -> Var {
     Var::new((depth as u64).into(), depth)
 }
 
-/// Evaluate a statement block from top to bottom.
-fn eval_block(stmts: &[Stmt], mut env: Env, callee_summaries: &AdviceSummaryMap) -> EvalResult {
-    let mut opaque = false;
-
-    for stmt in stmts {
-        let result = eval_stmt(stmt, env, callee_summaries);
-        env = result.env;
-        opaque |= result.opaque;
-    }
-
-    EvalResult { env, opaque }
-}
-
-/// Evaluate a single statement.
-fn eval_stmt(stmt: &Stmt, mut env: Env, callee_summaries: &AdviceSummaryMap) -> EvalResult {
-    let mut opaque = false;
-
-    match stmt {
-        Stmt::Assign { dest, expr, .. } => {
-            let fact = expr_output_fact(expr, &env);
-            env.set_var_fact(dest, fact);
-            assign_expr_metadata(dest, expr, &mut env);
-        },
-        Stmt::AdvLoad { span, load } => {
-            for output in &load.outputs {
-                env.set_var_fact(output, super::domain::AdviceFact::from_source(*span));
-                env.clear_var_metadata(output);
-            }
-        },
-        Stmt::AdvStore { .. } | Stmt::MemStore { .. } | Stmt::Return { .. } => {},
-        Stmt::MemLoad { load, .. } => {
-            for output in &load.outputs {
-                env.set_var_fact(output, super::domain::AdviceFact::bottom());
-                env.clear_var_metadata(output);
-            }
-        },
-        Stmt::LocalStore { store, .. } => {
-            apply_local_store(&store.values, u32::from(store.index), &mut env);
-        },
-        Stmt::LocalStoreW { store, .. } => {
-            apply_local_store_word(store.kind, &store.values, u32::from(store.index), &mut env);
-        },
-        Stmt::LocalLoad { load, .. } => match load.kind {
-            LocalAccessKind::Element => {
-                apply_local_load_scalar(&load.outputs, u32::from(load.index), &mut env);
-            },
-            LocalAccessKind::WordBe | LocalAccessKind::WordLe => {
-                apply_local_load_word(load.kind, &load.outputs, u32::from(load.index), &mut env);
-            },
-        },
-        Stmt::Call { call, .. } | Stmt::Exec { call, .. } | Stmt::SysCall { call, .. } => {
-            assign_call_results(
-                &mut env,
-                &call.target,
-                &call.args,
-                &call.results,
-                callee_summaries,
-            );
-        },
-        Stmt::DynCall { results, .. } => {
-            for result in results {
-                env.set_var_fact(result, super::domain::AdviceFact::bottom());
-                env.clear_var_metadata(result);
-            }
-            opaque = true;
-        },
-        Stmt::Intrinsic { span, intrinsic } => {
-            apply_intrinsic_effect(*span, intrinsic, &mut env);
-        },
-        Stmt::If { cond, then_body, else_body, phis, .. } => {
-            let (then_env, else_env) = refine_if_envs(cond, &env);
-            let then_result = eval_block(then_body, then_env, callee_summaries);
-            let else_result = eval_block(else_body, else_env, callee_summaries);
-            opaque |= then_result.opaque || else_result.opaque;
-
-            env = then_result.env.join(&else_result.env);
-            for phi in phis {
-                let merged = then_result
-                    .env
-                    .fact_for_var(&phi.then_var)
-                    .join(&else_result.env.fact_for_var(&phi.else_var));
-                env.set_var_fact(&phi.dest, merged);
-                assign_phi_metadata(
-                    &phi.dest,
-                    &phi.then_var,
-                    &then_result.env,
-                    &phi.else_var,
-                    &else_result.env,
-                    &mut env,
-                );
-            }
-        },
-        Stmt::While { body, phis, .. } | Stmt::Repeat { body, phis, .. } => {
-            let loop_result = eval_loop_block(body, phis, env, callee_summaries);
-            env = loop_result.env;
-            opaque |= loop_result.opaque;
-        },
-    }
-
-    EvalResult { env, opaque }
-}
-
-/// Evaluate a structured loop body conservatively.
-fn eval_loop_block(
-    body: &[Stmt],
-    phis: &[LoopPhi],
-    entry_env: Env,
-    callee_summaries: &AdviceSummaryMap,
-) -> EvalResult {
-    let mut opaque = false;
-    let env = stabilized_loop_head_env(&entry_env, phis, |loop_env| {
-        let body_result = eval_block(body, loop_env, callee_summaries);
-        opaque |= body_result.opaque;
-        body_result.env
-    });
-
-    EvalResult { env, opaque }
-}
-
 /// Assign call-result facts by substituting caller arguments into callee summaries.
 pub(super) fn assign_call_results(
     env: &mut Env,
@@ -254,7 +134,7 @@ pub(super) fn assign_call_results(
     }
     for (((result, summary_fact), summary_u32), forwarded_input) in results
         .iter()
-        .zip(summary.outputs.iter())
+        .zip(summary.output_facts().iter())
         .zip(summary.u32_outputs().iter())
         .zip(summary.forwarded_inputs().iter())
     {
