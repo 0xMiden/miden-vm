@@ -322,6 +322,43 @@ end
 }
 
 #[test]
+fn mem_stream_preserves_advice_provenance_in_sponge_capacity() {
+    let dir = temp_dir("mem-stream-preserves-capacity");
+    let file = dir.join("mem_stream_preserves_capacity.masm");
+    fs::write(
+        &file,
+        "\
+pub proc test() -> felt
+    push.0
+    adv_pushw
+    push.0 push.0 push.0 push.0
+    push.0 push.0 push.0 push.0
+    mem_stream
+    dropw
+    dropw
+    u32wrapping_add
+    drop drop drop
+end
+",
+    )
+    .expect("failed to write MASM fixture");
+
+    let output = run_masm_lint(&dir, &file);
+
+    assert!(
+        !output.status.success(),
+        "mem_stream preserved advice source unexpectedly passed: {output:?}"
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let output_text = format!("{stdout}\n{stderr}");
+    assert!(
+        output_text.contains("unconstrained advice reaches a u32 operation"),
+        "mem_stream preserved capacity did not emit a u32 warning: {output_text}"
+    );
+}
+
+#[test]
 fn u32assert_preserves_advice_provenance_for_nonzero_sinks() {
     let dir = temp_dir("u32assert-advice-nonzero");
     let file = dir.join("u32assert_advice_nonzero.masm");
@@ -473,6 +510,35 @@ end
     assert!(
         output_text.contains("unconstrained advice used as Merkle tree root"),
         "advice Merkle root did not emit a warning: {output_text}"
+    );
+}
+
+#[test]
+fn advice_used_as_merkle_depth_is_reported_as_u32_sink() {
+    let dir = temp_dir("advice-merkle-depth");
+    let file = dir.join("advice_merkle_depth.masm");
+    fs::write(
+        &file,
+        "\
+pub proc test() -> (felt, felt, felt, felt)
+    push.0 push.0 push.0 push.0
+    push.0
+    adv_push
+    mtree_get
+end
+",
+    )
+    .expect("failed to write MASM fixture");
+
+    let output = run_masm_lint(&dir, &file);
+
+    assert!(!output.status.success(), "advice Merkle depth unexpectedly passed: {output:?}");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let output_text = format!("{stdout}\n{stderr}");
+    assert!(
+        output_text.contains("unconstrained advice reaches a u32 intrinsic"),
+        "advice Merkle depth did not emit a u32 warning: {output_text}"
     );
 }
 

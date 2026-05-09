@@ -8,6 +8,10 @@ use super::{
 };
 use crate::{
     ir::{BinOp, Constant, Expr, Stmt, UnOp, Var},
+    semantics::{
+        intrinsic_asserts_u32_args, intrinsic_base_name, intrinsic_positional_u32_arg_range,
+        intrinsic_requires_u32_precondition,
+    },
     symbol::path::SymbolPath,
 };
 
@@ -564,7 +568,7 @@ impl<'a> ProcTypeAnalyzer<'a> {
                     );
                     changed |= self.set_inferred_type_for_var(result, result_ty);
                 }
-                if allow_proof_narrowing && Self::intrinsic_asserts_u32_args(&intrinsic.name) {
+                if allow_proof_narrowing && intrinsic_asserts_u32_args(&intrinsic.name) {
                     for arg in &intrinsic.args {
                         changed |= self.set_inferred_type_for_var(arg, TypeFact::U32);
                     }
@@ -709,7 +713,7 @@ impl<'a> ProcTypeAnalyzer<'a> {
         output_count: usize,
         args: &[Var],
     ) -> TypeFact {
-        let base = Self::intrinsic_base_name(name);
+        let base = intrinsic_base_name(name);
         match base {
             // Multi-output intrinsics with Bool carry/borrow flag as last output.
             "u32overflowing_add" | "u32overflowing_sub" | "u32overflowing_add3" => {
@@ -758,29 +762,6 @@ impl<'a> ProcTypeAnalyzer<'a> {
             // adv_pipe, etc.): Felt.
             _ => TypeFact::Felt,
         }
-    }
-
-    /// Return intrinsic base name without suffixes such as `.err=*` or immediates.
-    fn intrinsic_base_name(name: &str) -> &str {
-        name.split_once('.').map_or(name, |(base, _)| base)
-    }
-
-    /// Return true if intrinsic arguments require a caller-side u32 precondition.
-    fn intrinsic_requires_u32_precondition(name: &str) -> bool {
-        let base = Self::intrinsic_base_name(name);
-        if !name.starts_with("u32") {
-            return false;
-        }
-
-        !matches!(
-            base,
-            "u32assert" | "u32assert2" | "u32assertw" | "u32split" | "u32cast" | "u32testw"
-        )
-    }
-
-    /// Return true if this intrinsic asserts that all arguments are valid u32 values.
-    fn intrinsic_asserts_u32_args(name: &str) -> bool {
-        matches!(Self::intrinsic_base_name(name), "u32assert" | "u32assert2" | "u32assertw")
     }
 
     /// Infer type for an expression.
@@ -1052,7 +1033,7 @@ impl<'a> ProcTypeAnalyzer<'a> {
     /// When `assert_eq(lhs, rhs)` succeeds, both operands must satisfy the
     /// greatest lower bound of their already-proven facts.
     fn assert_eq_common_fact(&self, intrinsic: &crate::ir::Intrinsic) -> Option<TypeFact> {
-        if Self::intrinsic_base_name(&intrinsic.name) != "assert_eq" || intrinsic.args.len() != 2 {
+        if intrinsic_base_name(&intrinsic.name) != "assert_eq" || intrinsic.args.len() != 2 {
             return None;
         }
 
@@ -1153,40 +1134,18 @@ impl<'a> ProcTypeAnalyzer<'a> {
         let mut changed = false;
 
         // Blanket u32 precondition for u32 arithmetic intrinsics.
-        if Self::intrinsic_requires_u32_precondition(&intrinsic.name) {
+        if intrinsic_requires_u32_precondition(&intrinsic.name) {
             for arg in &intrinsic.args {
                 changed |= self.require_u32_var_if_not_guaranteed(arg);
             }
         }
 
-        // Per-intrinsic positional requirements.
-        let base = Self::intrinsic_base_name(&intrinsic.name);
-        match base {
-            // mtree_get: [d, i, R, ...] — depth (arg 0) and index (arg 1) are U32.
-            "mtree_get" => {
-                for arg in intrinsic.args.iter().take(2) {
-                    changed |= self.require_u32_var_if_not_guaranteed(arg);
-                }
-            },
-            // mtree_set: [d, i, R, V', ...] — depth (arg 0) and index (arg 1) are U32.
-            "mtree_set" => {
-                for arg in intrinsic.args.iter().take(2) {
-                    changed |= self.require_u32_var_if_not_guaranteed(arg);
-                }
-            },
-            // mtree_verify: [V, d, i, R, ...] — depth (arg 4) and index (arg 5) are U32.
-            "mtree_verify" => {
-                for arg in intrinsic.args.iter().skip(4).take(2) {
-                    changed |= self.require_u32_var_if_not_guaranteed(arg);
-                }
-            },
-            // mem_stream / adv_pipe: address is the last argument.
-            "mem_stream" | "adv_pipe" => {
-                if let Some(addr) = intrinsic.args.last() {
-                    changed |= self.require_u32_var_if_not_guaranteed(addr);
-                }
-            },
-            _ => {},
+        if let Some(range) =
+            intrinsic_positional_u32_arg_range(&intrinsic.name, intrinsic.args.len())
+        {
+            for arg in &intrinsic.args[range] {
+                changed |= self.require_u32_var_if_not_guaranteed(arg);
+            }
         }
 
         if allow_proof_narrowing && let Some(common_fact) = self.assert_eq_common_fact(intrinsic) {
