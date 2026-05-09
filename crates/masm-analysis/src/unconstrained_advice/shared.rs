@@ -3,6 +3,12 @@
 use std::collections::{HashMap, HashSet};
 
 use masm_decompiler::{BinOp, Expr, Intrinsic, LocalAccessKind, LoopPhi, Stmt, UnOp, Var, VarKey};
+pub(super) use masm_decompiler::{
+    INTRINSIC_ADV_PIPE, INTRINSIC_ADV_PUSH, INTRINSIC_ADV_PUSHW, INTRINSIC_MEM_STREAM,
+    intrinsic_base_name, intrinsic_memory_address_arg_index, intrinsic_merkle_root_arg_range,
+    intrinsic_nonzero_arg_index, intrinsic_positional_u32_arg_range,
+    intrinsic_requires_u32_precondition,
+};
 
 use super::{domain::AdviceFact, u32_domain::U32Validity};
 use crate::abstract_interp::{FixpointConfig, JoinSemiLattice, iterate_to_fixpoint};
@@ -644,7 +650,7 @@ pub(super) fn apply_intrinsic_effect(
     intrinsic: &Intrinsic,
     env: &mut Env,
 ) {
-    if matches!(intrinsic_base_name(&intrinsic.name), "adv_push" | "adv_pushw") {
+    if matches!(intrinsic_base_name(&intrinsic.name), INTRINSIC_ADV_PUSH | INTRINSIC_ADV_PUSHW) {
         for result in &intrinsic.results {
             env.set_var_fact(result, AdviceFact::from_source(span));
             env.clear_var_metadata(result);
@@ -686,10 +692,13 @@ pub(super) fn apply_intrinsic_effect(
                 }
             }
         },
-        "adv_pipe" => {
+        INTRINSIC_ADV_PIPE => {
             apply_adv_pipe_effect(span, intrinsic, env);
         },
-        "mem_stream" | "sdepth" => {
+        INTRINSIC_MEM_STREAM => {
+            apply_mem_stream_effect(intrinsic, env);
+        },
+        "sdepth" => {
             for result in &intrinsic.results {
                 env.set_var_fact(result, AdviceFact::bottom());
                 env.clear_var_metadata(result);
@@ -822,28 +831,40 @@ pub(super) fn stmt_span(stmt: &Stmt) -> miden_debug_types::SourceSpan {
     }
 }
 
-/// Return the base intrinsic name before immediates or `.err=*` suffixes.
-pub(super) fn intrinsic_base_name(name: &str) -> &str {
-    name.split_once('.').map_or(name, |(base, _)| base)
-}
-
-/// Return true if an intrinsic requires caller-side `U32` preconditions.
-pub(super) fn intrinsic_requires_u32_precondition(name: &str) -> bool {
-    if !name.starts_with("u32") {
-        return false;
-    }
-
-    !matches!(
-        intrinsic_base_name(name),
-        "u32assert" | "u32assert2" | "u32assertw" | "u32cast" | "u32split" | "u32test" | "u32testw"
-    )
-}
-
 /// Return the sole variable in the slice, if there is exactly one.
 pub(super) fn single_var(vars: &[Var]) -> Option<&Var> {
     match vars {
         [var] => Some(var),
         _ => None,
+    }
+}
+
+/// Apply the custom transfer semantics of `mem_stream`.
+fn apply_mem_stream_effect(intrinsic: &Intrinsic, env: &mut Env) {
+    if intrinsic.args.len() == 13 && intrinsic.results.len() == 13 {
+        let address = &intrinsic.args[12];
+        env.set_var_fact(&intrinsic.results[0], env.fact_for_var(address));
+        env.set_var_u32_validity(&intrinsic.results[0], U32Validity::Unknown);
+        env.clear_var_metadata(&intrinsic.results[0]);
+
+        for (offset, result) in intrinsic.results[1..5].iter().enumerate() {
+            let preserved_input = &intrinsic.args[11 - offset];
+            env.set_var_fact(result, env.fact_for_var(preserved_input));
+            env.set_var_u32_validity(result, env.u32_validity_for_var(preserved_input));
+            env.set_var_identity(result, env.identity_for_var(preserved_input));
+            env.set_var_zero_test(result, env.zero_test_for_var(preserved_input));
+        }
+
+        for result in &intrinsic.results[5..] {
+            env.set_var_fact(result, AdviceFact::bottom());
+            env.clear_var_metadata(result);
+        }
+        return;
+    }
+
+    for result in &intrinsic.results {
+        env.set_var_fact(result, AdviceFact::bottom());
+        env.clear_var_metadata(result);
     }
 }
 
