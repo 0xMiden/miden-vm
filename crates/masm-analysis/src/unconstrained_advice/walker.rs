@@ -6,7 +6,6 @@ use masm_decompiler::{LocalAccessKind, LoopPhi, Stmt, SymbolPath};
 
 use super::{
     domain::AdviceFact,
-    inter::PreparedProc,
     provenance::assign_call_results,
     shared::{
         Env, MAX_LOOP_PASSES, apply_intrinsic_effect, apply_local_load_scalar,
@@ -15,7 +14,10 @@ use super::{
     },
     summary::{AdviceDiagnostic, AdviceDiagnosticsMap, AdviceSummaryMap},
 };
-use crate::abstract_interp::{FixpointConfig, JoinSemiLattice, iterate_to_fixpoint};
+use crate::{
+    abstract_interp::{FixpointConfig, JoinSemiLattice, iterate_to_fixpoint},
+    prepared::PreparedProc,
+};
 
 /// Trait for passes that detect specific advice-reaching-sink patterns.
 pub(super) trait SinkDetector {

@@ -27,8 +27,6 @@ pub enum ResolutionError {
         reference: String,
         source: SymbolResolutionError,
     },
-    /// The symbol resolved to a non-path target (e.g. MAST root digest).
-    NonPathResolution { module: SymbolPath, reference: String },
 }
 
 impl std::fmt::Display for ResolutionError {
@@ -40,9 +38,6 @@ impl std::fmt::Display for ResolutionError {
             ResolutionError::SymbolResolution { module, reference, .. } => {
                 write!(f, "failed to resolve `{reference}` in module `{module}`")
             },
-            ResolutionError::NonPathResolution { module, reference } => {
-                write!(f, "symbol `{reference}` in module `{module}` resolved to a non-path target")
-            },
         }
     }
 }
@@ -51,9 +46,7 @@ impl std::error::Error for ResolutionError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             ResolutionError::SymbolResolution { source, .. } => Some(source),
-            ResolutionError::ModuleNotLoaded { .. } | ResolutionError::NonPathResolution { .. } => {
-                None
-            },
+            ResolutionError::ModuleNotLoaded { .. } => None,
         }
     }
 }
