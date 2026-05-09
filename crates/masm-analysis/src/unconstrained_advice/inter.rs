@@ -16,27 +16,26 @@ use crate::prepared::{PreparedAnalysis, PreparedProc};
 pub(super) fn infer_unconstrained_advice(
     prepared: &PreparedAnalysis,
 ) -> (AdviceSummaryMap, AdviceDiagnosticsMap) {
-    let provenance_summaries =
+    let mut advice_summaries =
         infer_provenance_summaries(&prepared.callgraph, &prepared.lifted_procs);
     let mut diagnostics = collect_u32_diagnostics(
         &prepared.lifted_procs,
-        &provenance_summaries,
+        &advice_summaries,
         &prepared.type_summaries,
     );
     let address_diagnostics =
-        collect_address_diagnostics(&prepared.lifted_procs, &provenance_summaries);
+        collect_address_diagnostics(&prepared.lifted_procs, &advice_summaries);
     merge_diagnostics(&mut diagnostics, address_diagnostics);
-    let merkle_diagnostics =
-        collect_merkle_diagnostics(&prepared.lifted_procs, &provenance_summaries);
+    let merkle_diagnostics = collect_merkle_diagnostics(&prepared.lifted_procs, &advice_summaries);
     merge_diagnostics(&mut diagnostics, merkle_diagnostics);
-    let (_, nonzero_diagnostics) = infer_nonzero_summaries_and_diagnostics(
+    let nonzero_diagnostics = infer_nonzero_summaries_and_diagnostics(
         &prepared.callgraph,
         &prepared.lifted_procs,
-        &provenance_summaries,
+        &mut advice_summaries,
     );
     merge_diagnostics(&mut diagnostics, nonzero_diagnostics);
 
-    (provenance_summaries, diagnostics)
+    (advice_summaries, diagnostics)
 }
 
 /// Infer bottom-up provenance summaries for all procedures.

@@ -9,12 +9,14 @@ use miden_assembly_syntax::ast::{
 use miden_debug_types::{DefaultSourceManager, SourceSpan, Spanned};
 
 pub mod abstract_interp;
+mod capability;
 pub mod lint;
 mod prepared;
 mod unconstrained_advice;
 
+use capability::{AnalysisCapability, ModuleAnalysisCapability};
 use prepared::PreparedAnalysis;
-use unconstrained_advice::{AdviceDiagnostic, infer_unconstrained_advice};
+use unconstrained_advice::{AdviceDiagnostic, UnconstrainedAdviceCapability};
 
 /// Results of running all analysis passes on a workspace.
 #[derive(Debug)]
@@ -29,7 +31,7 @@ impl AnalysisSnapshot {
     /// Run all analysis passes on a workspace and return the combined results.
     pub fn from_workspace(workspace: &Workspace) -> Self {
         let prepared = PreparedAnalysis::new(workspace);
-        let advice_diagnostics = infer_unconstrained_advice(&prepared);
+        let advice_diagnostics = UnconstrainedAdviceCapability.analyze(&prepared);
 
         Self {
             signatures: prepared.signatures,
@@ -93,45 +95,60 @@ pub fn signature_mismatches_from_snapshot(
     sources: Arc<DefaultSourceManager>,
     signatures: &SignatureMap,
 ) -> Vec<SignatureMismatch> {
-    let mut findings = Vec::new();
-    let Ok(mut resolver) = module.type_resolver(sources) else {
-        return findings;
-    };
-    for proc in module.procedures() {
-        let Some(signature) = proc.signature() else {
-            continue;
-        };
-        let Some(declared) = signature_stack_signature(signature, &mut resolver) else {
-            continue;
-        };
+    SignatureMismatchCapability { sources, signatures }.analyze_module(module)
+}
 
-        let symbol_path = SymbolPath::from_module_and_name(module, proc.name().as_str());
-        let Some(inferred) = signatures.get(&symbol_path) else {
-            continue;
-        };
-        let Some(StackSignature { inputs, outputs }) = inferred_stack_signature(inferred) else {
-            continue;
-        };
+/// Module-level capability for declared-vs-inferred signature mismatches.
+struct SignatureMismatchCapability<'a> {
+    sources: Arc<DefaultSourceManager>,
+    signatures: &'a SignatureMap,
+}
 
-        if declared.inputs != inputs || declared.outputs != outputs {
-            let span = {
-                let sig_span = signature.span();
-                if sig_span == SourceSpan::UNKNOWN {
-                    proc.name().span()
-                } else {
-                    sig_span
-                }
+impl ModuleAnalysisCapability for SignatureMismatchCapability<'_> {
+    type Output = Vec<SignatureMismatch>;
+
+    fn analyze_module(&self, module: &Module) -> Self::Output {
+        let mut findings = Vec::new();
+        let Ok(mut resolver) = module.type_resolver(self.sources.clone()) else {
+            return findings;
+        };
+        for proc in module.procedures() {
+            let Some(signature) = proc.signature() else {
+                continue;
             };
-            findings.push(SignatureMismatch {
-                proc_name: proc.name().as_str().to_string(),
-                span,
-                declared,
-                inferred: StackSignature { inputs, outputs },
-            });
-        }
-    }
+            let Some(declared) = signature_stack_signature(signature, &mut resolver) else {
+                continue;
+            };
 
-    findings
+            let symbol_path = SymbolPath::from_module_and_name(module, proc.name().as_str());
+            let Some(inferred) = self.signatures.get(&symbol_path) else {
+                continue;
+            };
+            let Some(StackSignature { inputs, outputs }) = inferred_stack_signature(inferred)
+            else {
+                continue;
+            };
+
+            if declared.inputs != inputs || declared.outputs != outputs {
+                let span = {
+                    let sig_span = signature.span();
+                    if sig_span == SourceSpan::UNKNOWN {
+                        proc.name().span()
+                    } else {
+                        sig_span
+                    }
+                };
+                findings.push(SignatureMismatch {
+                    proc_name: proc.name().as_str().to_string(),
+                    span,
+                    declared,
+                    inferred: StackSignature { inputs, outputs },
+                });
+            }
+        }
+
+        findings
+    }
 }
 
 fn signature_stack_signature<R>(
