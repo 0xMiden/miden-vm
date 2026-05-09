@@ -446,3 +446,128 @@ end
         "u32div immediate advice dividend emitted a non-zero warning: {output_text}"
     );
 }
+
+#[test]
+fn advice_used_as_merkle_root_is_reported() {
+    let dir = temp_dir("advice-merkle-root");
+    let file = dir.join("advice_merkle_root.masm");
+    fs::write(
+        &file,
+        "\
+pub proc test() -> (felt, felt, felt, felt)
+    adv_pushw
+    push.0
+    push.1
+    mtree_get
+end
+",
+    )
+    .expect("failed to write MASM fixture");
+
+    let output = run_masm_lint(&dir, &file);
+
+    assert!(!output.status.success(), "advice Merkle root unexpectedly passed: {output:?}");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let output_text = format!("{stdout}\n{stderr}");
+    assert!(
+        output_text.contains("unconstrained advice used as Merkle tree root"),
+        "advice Merkle root did not emit a warning: {output_text}"
+    );
+}
+
+#[test]
+fn advice_provenance_flows_across_exec_calls() {
+    let dir = temp_dir("interprocedural-advice");
+    let file = dir.join("interprocedural_advice.masm");
+    fs::write(
+        &file,
+        "\
+proc source() -> felt
+    adv_push
+end
+
+pub proc test(seed: felt) -> felt
+    exec.source
+    u32wrapping_add
+end
+",
+    )
+    .expect("failed to write MASM fixture");
+
+    let output = run_masm_lint(&dir, &file);
+
+    assert!(
+        !output.status.success(),
+        "interprocedural advice source unexpectedly passed: {output:?}"
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let output_text = format!("{stdout}\n{stderr}");
+    assert!(
+        output_text.contains("unconstrained advice reaches a u32 operation"),
+        "interprocedural advice source did not emit a u32 warning: {output_text}"
+    );
+}
+
+#[test]
+fn advice_provenance_survives_repeat_blocks() {
+    let dir = temp_dir("repeat-advice");
+    let file = dir.join("repeat_advice.masm");
+    fs::write(
+        &file,
+        "\
+pub proc test(seed: felt) -> felt
+    adv_push
+    repeat.2
+        push.1
+        add
+    end
+    push.1
+    u32wrapping_add
+end
+",
+    )
+    .expect("failed to write MASM fixture");
+
+    let output = run_masm_lint(&dir, &file);
+
+    assert!(
+        !output.status.success(),
+        "repeat-carried advice unexpectedly passed: {output:?}"
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let output_text = format!("{stdout}\n{stderr}");
+    assert!(
+        output_text.contains("unconstrained advice reaches a u32 operation"),
+        "repeat-carried advice did not emit a u32 warning: {output_text}"
+    );
+}
+
+#[test]
+fn while_blocks_are_lifted_for_clean_inputs() {
+    let dir = temp_dir("while-clean");
+    let file = dir.join("while_clean.masm");
+    fs::write(
+        &file,
+        "\
+pub proc test(flag: felt) -> felt
+    while.true
+        push.0
+    end
+    push.1
+end
+",
+    )
+    .expect("failed to write MASM fixture");
+
+    let output = run_masm_lint(&dir, &file);
+
+    assert!(output.status.success(), "while block MASM input failed: {output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains("unsupported construct") && !stderr.contains("unsupported instruction"),
+        "while block was reported unsupported: {stderr}"
+    );
+}
