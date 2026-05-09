@@ -21,6 +21,8 @@ pub use symbol::{
     path::SymbolPath,
     resolution::{ResolutionError, ResolutionResult, SymbolResolver, create_resolver},
 };
+#[doc(hidden)]
+pub use types::infer_type_summaries_from_lifted;
 pub use types::{
     InferredType, TypeRequirement, TypeSummary, TypeSummaryMap, VarKey, infer_type_summaries,
 };

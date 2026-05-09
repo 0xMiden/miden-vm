@@ -9,13 +9,8 @@ use std::{
 };
 
 use clap::Parser;
-use masm_analysis::lint::{
-    AdviceDiagnostic, AdviceRootCauseGroup, AnalysisSnapshot, LibraryRoot, SignatureMismatch,
-    SymbolPath, Workspace, group_advice_diagnostics_by_origin, signature_mismatch_message,
-    signature_mismatches_from_snapshot,
-};
+use masm_analysis::lint::{LibraryRoot, SymbolPath, Workspace, diagnostics_from_workspace};
 use miden_debug_types::DefaultSourceManager;
-use render::{LintDiagnostic, RelatedSpan};
 
 // ── CLI ───────────────────────────────────────────────────────────────────────
 
@@ -116,44 +111,18 @@ fn run(cli: Cli) -> i32 {
     workspace.load_dependencies();
     let unresolved = workspace.unresolved_module_paths();
 
-    // Run all analysis passes.
-    let snapshot = AnalysisSnapshot::from_workspace(&workspace);
-
-    // Collect all lint diagnostics.
-    let mut diagnostics: Vec<LintDiagnostic> = Vec::new();
-
-    // Signature mismatches — only when all dependencies are resolved.
-    if unresolved.is_empty() {
-        for program in workspace.modules() {
-            let module = program.module();
-            let mismatches =
-                signature_mismatches_from_snapshot(module, sources.clone(), &snapshot.signatures);
-            for m in mismatches {
-                if let Some(diag) = signature_mismatch_to_lint(&m) {
-                    diagnostics.push(diag);
-                }
-            }
-        }
-    } else {
+    let include_signature_mismatches = unresolved.is_empty();
+    if !include_signature_mismatches {
         error_count += unresolved.len();
         emit_unresolved_dependency_errors(&unresolved, &workspace);
     }
 
-    // Advice diagnostics.
-    if cli.group_by_origin {
-        for group in group_advice_diagnostics_by_origin(&snapshot.advice_diagnostics) {
-            diagnostics.push(root_cause_group_to_lint(&group));
-        }
-    } else {
-        for advice_diags in snapshot.advice_diagnostics.values() {
-            for ad in advice_diags {
-                diagnostics.push(advice_diagnostic_to_lint(ad));
-            }
-        }
-    }
-
-    // Sort diagnostics deterministically by file/line/col.
-    sort_diagnostics(&mut diagnostics, sources.as_ref());
+    let diagnostics = diagnostics_from_workspace(
+        &workspace,
+        sources.clone(),
+        include_signature_mismatches,
+        cli.group_by_origin,
+    );
 
     let warning_count = diagnostics.len();
 
@@ -191,110 +160,6 @@ fn emit_summary(warning_count: usize, error_count: usize) -> i32 {
             2
         },
     }
-}
-
-// ── Diagnostic conversion ─────────────────────────────────────────────────────
-
-/// Convert a [`SignatureMismatch`] into a [`LintDiagnostic`].
-fn signature_mismatch_to_lint(m: &SignatureMismatch) -> Option<LintDiagnostic> {
-    let message = signature_mismatch_message(m);
-    if message.is_empty() {
-        return None;
-    }
-    let procedure = SymbolPath::new(&m.proc_name);
-    Some(LintDiagnostic {
-        message,
-        span: m.span,
-        note: format!("in procedure `{}`", procedure.as_str()),
-        related: Vec::new(),
-    })
-}
-
-/// Convert an [`AdviceDiagnostic`] into a [`LintDiagnostic`], attaching
-/// advice origin spans as related locations.
-fn advice_diagnostic_to_lint(ad: &AdviceDiagnostic) -> LintDiagnostic {
-    let related = ad
-        .origins
-        .iter()
-        .map(|&origin_span| RelatedSpan {
-            span: origin_span,
-            message: "unconstrained advice introduced here".to_string(),
-        })
-        .collect();
-
-    LintDiagnostic {
-        message: ad.message.clone(),
-        span: ad.span,
-        note: format!("in procedure `{}`", ad.procedure.as_str()),
-        related,
-    }
-}
-
-/// Convert a root-cause group into a grouped [`LintDiagnostic`].
-fn root_cause_group_to_lint(group: &AdviceRootCauseGroup) -> LintDiagnostic {
-    let related = group
-        .diagnostics
-        .iter()
-        .map(|diag| RelatedSpan {
-            span: diag.span,
-            message: format!("{} (in procedure `{}`)", diag.message, diag.procedure.as_str()),
-        })
-        .collect();
-
-    LintDiagnostic {
-        message: group.summary_message(),
-        span: group.origin,
-        note: grouped_procedure_note(&group.diagnostics),
-        related,
-    }
-}
-
-fn grouped_procedure_note(diagnostics: &[AdviceDiagnostic]) -> String {
-    let mut procedures = diagnostics
-        .iter()
-        .map(|diag| diag.procedure.as_str().to_string())
-        .collect::<HashSet<_>>()
-        .into_iter()
-        .collect::<Vec<_>>();
-    procedures.sort();
-
-    match procedures.as_slice() {
-        [] => "root cause group has no downstream procedures".to_string(),
-        [procedure] => format!("root cause fan-out stays within procedure `{procedure}`"),
-        [first, second] => {
-            format!("root cause fan-out reaches procedures `{first}` and `{second}`")
-        },
-        [first, second, rest @ ..] => format!(
-            "root cause fan-out reaches procedures `{first}`, `{second}`, and {} more",
-            rest.len()
-        ),
-    }
-}
-
-// ── Sorting ───────────────────────────────────────────────────────────────────
-
-/// Sort diagnostics by (uri, line, col) of their primary span.
-fn sort_diagnostics(
-    diagnostics: &mut [LintDiagnostic],
-    sources: &dyn miden_debug_types::SourceManager,
-) {
-    diagnostics.sort_by(|a, b| {
-        let key_a = sort_key(a.span, sources);
-        let key_b = sort_key(b.span, sources);
-        key_a.cmp(&key_b)
-    });
-}
-
-/// Produce a sortable key `(file_uri, line, col)` for a span.
-fn sort_key(
-    span: miden_debug_types::SourceSpan,
-    sources: &dyn miden_debug_types::SourceManager,
-) -> (String, usize, usize) {
-    sources
-        .file_line_col(span)
-        .ok()
-        .map(|flc| (flc.uri.as_str().to_owned(), flc.line.to_usize(), flc.column.to_usize()))
-        .unwrap_or_default()
 }
 
 // ── Unresolved dependencies ───────────────────────────────────────────────────

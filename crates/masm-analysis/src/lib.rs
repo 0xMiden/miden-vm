@@ -2,10 +2,7 @@
 
 use std::{collections::HashMap, sync::Arc};
 
-use masm_decompiler::{
-    CallGraph, ProcSignature, SignatureMap, SymbolPath, Workspace, infer_signatures,
-    infer_type_summaries, refine_public_signature_inputs,
-};
+use masm_decompiler::{ProcSignature, SignatureMap, SymbolPath, Workspace};
 use miden_assembly_syntax::ast::{
     FunctionType, Module, SymbolResolutionError, TypeResolver, types::Type as AstType,
 };
@@ -13,8 +10,10 @@ use miden_debug_types::{DefaultSourceManager, SourceSpan, Spanned};
 
 pub mod abstract_interp;
 pub mod lint;
+mod prepared;
 mod unconstrained_advice;
 
+use prepared::PreparedAnalysis;
 use unconstrained_advice::{AdviceDiagnostic, infer_unconstrained_advice};
 
 /// Results of running all analysis passes on a workspace.
@@ -29,14 +28,13 @@ pub struct AnalysisSnapshot {
 impl AnalysisSnapshot {
     /// Run all analysis passes on a workspace and return the combined results.
     pub fn from_workspace(workspace: &Workspace) -> Self {
-        let callgraph = CallGraph::from(workspace);
-        let mut signatures = infer_signatures(workspace, &callgraph);
-        refine_public_signature_inputs(workspace, &mut signatures);
-        let type_summaries = infer_type_summaries(workspace, &callgraph, &signatures);
-        let advice_diagnostics =
-            infer_unconstrained_advice(workspace, &callgraph, &signatures, &type_summaries);
+        let prepared = PreparedAnalysis::new(workspace);
+        let advice_diagnostics = infer_unconstrained_advice(&prepared);
 
-        Self { signatures, advice_diagnostics }
+        Self {
+            signatures: prepared.signatures,
+            advice_diagnostics,
+        }
     }
 }
 

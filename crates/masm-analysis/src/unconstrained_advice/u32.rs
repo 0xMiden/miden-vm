@@ -1,5 +1,7 @@
 //! Diagnostics for unconstrained advice reaching `U32` sinks.
 
+use std::collections::HashMap;
+
 use masm_decompiler::{
     BinOp, Expr, Intrinsic, LocalAccessKind, LoopPhi, Stmt, SymbolPath, TypeRequirement,
     TypeSummaryMap, UnOp, Var,
@@ -16,10 +18,11 @@ use super::{
     },
     summary::{AdviceDiagnostic, AdviceDiagnosticsMap, AdviceSummaryMap},
 };
+use crate::prepared::PreparedProc;
 
 /// Collect U32 diagnostics for all procedures using already-computed provenance summaries.
 pub(super) fn collect_u32_diagnostics(
-    prepared: &std::collections::HashMap<SymbolPath, super::inter::PreparedProc>,
+    prepared: &HashMap<SymbolPath, PreparedProc>,
     provenance_summaries: &AdviceSummaryMap,
     type_summaries: &TypeSummaryMap,
 ) -> AdviceDiagnosticsMap {
