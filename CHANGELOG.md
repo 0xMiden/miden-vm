@@ -340,6 +340,7 @@ The following entries come from the standalone `midenc-hir-type` changelog befor
 ## miden-vm v0.23.1 (2026-05-20)
 
 - Restored metadata-neutral MAST node identity so public procedure roots do not depend on debug/decorator metadata shape; this reopens debug metadata precision issues from #2955 and #3054.
+- Added experimental `masm-lint` CI coverage for core MASM code to detect unconstrained advice reaching unsafe sinks ([#3052](https://github.com/0xMiden/miden-vm/pull/3052)).
 
 ## miden-vm v0.23.0 (2026-05-09)
 
