@@ -62,8 +62,8 @@ exceed that width, or when the construct already contains comments that require 
 ### Imports
 
 - `use` declarations stay on one line if they fit
-- long imports wrap by path segment
-- wrapped aliases are indented by `4` spaces
+- import paths stay on one line and are not broken at `::` separators
+- long aliases may wrap to an indented continuation line
 - import aliases always use `->alias` with no spaces around `->`
 
 Example:
@@ -247,7 +247,7 @@ If you want a comment to be visually associated with the following construct:
 | `indent_width` | `4` | Indentation level for structured bodies and wrapped continuations |
 | `max_blank_lines` | `1` | Maximum number of blank lines preserved between sibling constructs |
 | `preserve_single_line_instruction_groups` | `true` | Keep same-line instruction groups when they fit |
-| `wrap_long_imports` | `true` | Wrap long `use` paths and aliases |
+| `wrap_long_import_aliases` | `true` | Wrap long import aliases without breaking the import path |
 | `wrap_long_values` | `true` | Wrap long `const` and `adv_map` value expressions |
 | `wrap_long_signatures` | `true` | Wrap long procedure signatures |
 | `comment_anchor_mode` | `"line_based"` | Anchor comments based on same-line vs immediate-following-line placement |

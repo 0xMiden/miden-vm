@@ -219,7 +219,12 @@ fn render_import(import: &Import, indent: usize, config: &Config) -> String {
 
     let path_tokens = significant_tokens(path.syntax());
     let alias_tokens = significant_tokens_after_child(import.syntax(), path.syntax());
-    let mut lines = render_path_lines(&header, &path_tokens, indent, config);
+    let path = render_token_sequence(&path_tokens);
+    let mut lines = vec![if path.is_empty() {
+        header
+    } else {
+        format!("{header} {path}")
+    }];
     if !alias_tokens.is_empty() {
         let alias = render_import_alias(&alias_tokens);
         if let Some(last) = lines.last_mut() {
@@ -1149,31 +1154,6 @@ fn render_token_sequence_with_style(tokens: &[SyntaxToken], style: SpacingStyle)
     rendered
 }
 
-fn render_path_lines(
-    header: &str,
-    path_tokens: &[SyntaxToken],
-    indent: usize,
-    config: &Config,
-) -> Vec<String> {
-    let pieces = split_path_pieces(path_tokens);
-    let Some(first) = pieces.first() else {
-        return vec![header.to_string()];
-    };
-
-    let mut lines = Vec::new();
-    let mut current = format!("{header} {first}");
-    for piece in pieces.iter().skip(1) {
-        if line_length(&current) + line_length(piece) <= config.max_line_length() {
-            current.push_str(piece);
-        } else {
-            lines.push(current);
-            current = format!("{}{}", indent_string(indent + config.indent_size()), piece);
-        }
-    }
-    lines.push(current);
-    lines
-}
-
 fn all_tokens(node: &SyntaxNode) -> Vec<SyntaxToken> {
     node.descendants_with_tokens().filter_map(NodeOrToken::into_token).collect()
 }
@@ -1346,25 +1326,6 @@ fn matching_group_end(
     }
 
     None
-}
-
-fn split_path_pieces(tokens: &[SyntaxToken]) -> Vec<String> {
-    let mut pieces = Vec::new();
-    let mut current = String::new();
-
-    for token in tokens {
-        if token.kind() == SyntaxKind::ColonColon && !current.is_empty() {
-            pieces.push(mem::take(&mut current));
-        }
-
-        current.push_str(token.text());
-    }
-
-    if !current.is_empty() {
-        pieces.push(current);
-    }
-
-    pieces
 }
 
 fn split_top_level_items(tokens: &[SyntaxToken]) -> Vec<Vec<SyntaxToken>> {
@@ -1948,6 +1909,30 @@ end
 
         let reparsed = parse_text(&formatted);
         assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
+    }
+
+    #[test]
+    fn wrapped_long_imports_do_not_break_on_components() {
+        let source = "\
+use miden::protocol::kernel_proc_offsets::TX_UPDATE_EXPIRATION_BLOCK_DELTA_OFFSET_PLUS_ENOUGH_EXTRA_TO_WRAP
+";
+
+        let parse = parse_text(source);
+        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+
+        let config = Config::default();
+        let formatted = format_syntax(&config, &parse.syntax());
+        let expected = "\
+use miden::protocol::kernel_proc_offsets::TX_UPDATE_EXPIRATION_BLOCK_DELTA_OFFSET_PLUS_ENOUGH_EXTRA_TO_WRAP
+";
+
+        assert_eq!(formatted, expected);
+
+        let reparsed = parse_text(&formatted);
+        assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
+
+        let reformatted = format_syntax(&config, &reparsed.syntax());
+        assert_eq!(reformatted, formatted);
     }
 
     #[test]
