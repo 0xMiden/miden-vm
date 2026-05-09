@@ -1,10 +1,10 @@
-use std::{fs, path::PathBuf, sync::Arc};
-
-use masm_analysis::{
-    AnalysisSnapshot,
-    lint::{LibraryRoot, Workspace},
-    signature_mismatch_message, signature_mismatches_from_snapshot,
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    sync::Arc,
 };
+
+use masm_analysis::lint::{LibraryRoot, Workspace, diagnostics_from_workspace};
 use miden_debug_types::DefaultSourceManager;
 
 fn temp_module_dir(test_name: &str) -> PathBuf {
@@ -13,6 +13,21 @@ fn temp_module_dir(test_name: &str) -> PathBuf {
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).expect("create temp module dir");
     dir
+}
+
+fn signature_messages(dir: &Path, module_path: &Path) -> Vec<String> {
+    let sources = Arc::new(DefaultSourceManager::default());
+    let mut workspace = Workspace::with_source_manager(
+        vec![LibraryRoot::new("", dir.to_path_buf())],
+        sources.clone(),
+    );
+    workspace.load_entry(module_path).expect("load MASM module");
+    workspace.load_dependencies();
+
+    diagnostics_from_workspace(&workspace, sources, true, false)
+        .into_iter()
+        .map(|diagnostic| diagnostic.message)
+        .collect()
 }
 
 #[test]
@@ -28,19 +43,11 @@ end
     )
     .expect("write MASM module");
 
-    let sources = Arc::new(DefaultSourceManager::default());
-    let mut workspace =
-        Workspace::with_source_manager(vec![LibraryRoot::new("", dir.clone())], sources.clone());
-    workspace.load_entry(&module_path).expect("load MASM module");
-    workspace.load_dependencies();
+    let messages = signature_messages(&dir, &module_path);
 
-    let snapshot = AnalysisSnapshot::from_workspace(&workspace);
-    let module = workspace.modules().next().expect("loaded module").module();
-    let mismatches = signature_mismatches_from_snapshot(module, sources, &snapshot.signatures);
-
-    assert_eq!(mismatches.len(), 1);
+    assert_eq!(messages.len(), 1);
     assert_eq!(
-        signature_mismatch_message(&mismatches[0]),
+        messages[0],
         "the definition declares 0 inputs, but the inferred input count is 1"
     );
 
@@ -60,17 +67,9 @@ end
     )
     .expect("write MASM module");
 
-    let sources = Arc::new(DefaultSourceManager::default());
-    let mut workspace =
-        Workspace::with_source_manager(vec![LibraryRoot::new("", dir.clone())], sources.clone());
-    workspace.load_entry(&module_path).expect("load MASM module");
-    workspace.load_dependencies();
+    let messages = signature_messages(&dir, &module_path);
 
-    let snapshot = AnalysisSnapshot::from_workspace(&workspace);
-    let module = workspace.modules().next().expect("loaded module").module();
-    let mismatches = signature_mismatches_from_snapshot(module, sources, &snapshot.signatures);
-
-    assert_eq!(mismatches, []);
+    assert_eq!(messages, Vec::<String>::new());
 
     fs::remove_dir_all(dir).expect("remove temp module dir");
 }
@@ -88,19 +87,11 @@ end
     )
     .expect("write MASM module");
 
-    let sources = Arc::new(DefaultSourceManager::default());
-    let mut workspace =
-        Workspace::with_source_manager(vec![LibraryRoot::new("", dir.clone())], sources.clone());
-    workspace.load_entry(&module_path).expect("load MASM module");
-    workspace.load_dependencies();
+    let messages = signature_messages(&dir, &module_path);
 
-    let snapshot = AnalysisSnapshot::from_workspace(&workspace);
-    let module = workspace.modules().next().expect("loaded module").module();
-    let mismatches = signature_mismatches_from_snapshot(module, sources, &snapshot.signatures);
-
-    assert_eq!(mismatches.len(), 1);
+    assert_eq!(messages.len(), 1);
     assert_eq!(
-        signature_mismatch_message(&mismatches[0]),
+        messages[0],
         "the definition declares 0 inputs, but the inferred input count is 1"
     );
 
@@ -124,17 +115,9 @@ end
     )
     .expect("write MASM module");
 
-    let sources = Arc::new(DefaultSourceManager::default());
-    let mut workspace =
-        Workspace::with_source_manager(vec![LibraryRoot::new("", dir.clone())], sources.clone());
-    workspace.load_entry(&module_path).expect("load MASM module");
-    workspace.load_dependencies();
+    let messages = signature_messages(&dir, &module_path);
 
-    let snapshot = AnalysisSnapshot::from_workspace(&workspace);
-    let module = workspace.modules().next().expect("loaded module").module();
-    let mismatches = signature_mismatches_from_snapshot(module, sources, &snapshot.signatures);
-
-    assert_eq!(mismatches, []);
+    assert_eq!(messages, Vec::<String>::new());
 
     fs::remove_dir_all(dir).expect("remove temp module dir");
 }
@@ -156,19 +139,11 @@ end
     )
     .expect("write MASM module");
 
-    let sources = Arc::new(DefaultSourceManager::default());
-    let mut workspace =
-        Workspace::with_source_manager(vec![LibraryRoot::new("", dir.clone())], sources.clone());
-    workspace.load_entry(&module_path).expect("load MASM module");
-    workspace.load_dependencies();
+    let messages = signature_messages(&dir, &module_path);
 
-    let snapshot = AnalysisSnapshot::from_workspace(&workspace);
-    let module = workspace.modules().next().expect("loaded module").module();
-    let mismatches = signature_mismatches_from_snapshot(module, sources, &snapshot.signatures);
-
-    assert_eq!(mismatches.len(), 1);
+    assert_eq!(messages.len(), 1);
     assert_eq!(
-        signature_mismatch_message(&mismatches[0]),
+        messages[0],
         "the definition declares 0 inputs, but the inferred input count is 1"
     );
 
@@ -194,19 +169,11 @@ end
     )
     .expect("write MASM module");
 
-    let sources = Arc::new(DefaultSourceManager::default());
-    let mut workspace =
-        Workspace::with_source_manager(vec![LibraryRoot::new("", dir.clone())], sources.clone());
-    workspace.load_entry(&module_path).expect("load MASM module");
-    workspace.load_dependencies();
+    let messages = signature_messages(&dir, &module_path);
 
-    let snapshot = AnalysisSnapshot::from_workspace(&workspace);
-    let module = workspace.modules().next().expect("loaded module").module();
-    let mismatches = signature_mismatches_from_snapshot(module, sources, &snapshot.signatures);
-
-    assert_eq!(mismatches.len(), 1);
+    assert_eq!(messages.len(), 1);
     assert_eq!(
-        signature_mismatch_message(&mismatches[0]),
+        messages[0],
         "the definition declares 0 inputs, but the inferred input count is 1"
     );
 
@@ -228,19 +195,11 @@ end
     )
     .expect("write MASM module");
 
-    let sources = Arc::new(DefaultSourceManager::default());
-    let mut workspace =
-        Workspace::with_source_manager(vec![LibraryRoot::new("", dir.clone())], sources.clone());
-    workspace.load_entry(&module_path).expect("load MASM module");
-    workspace.load_dependencies();
+    let messages = signature_messages(&dir, &module_path);
 
-    let snapshot = AnalysisSnapshot::from_workspace(&workspace);
-    let module = workspace.modules().next().expect("loaded module").module();
-    let mismatches = signature_mismatches_from_snapshot(module, sources, &snapshot.signatures);
-
-    assert_eq!(mismatches.len(), 1);
+    assert_eq!(messages.len(), 1);
     assert_eq!(
-        signature_mismatch_message(&mismatches[0]),
+        messages[0],
         "the definition declares 0 inputs, but the inferred input count is 1"
     );
 
@@ -260,19 +219,11 @@ end
     )
     .expect("write MASM module");
 
-    let sources = Arc::new(DefaultSourceManager::default());
-    let mut workspace =
-        Workspace::with_source_manager(vec![LibraryRoot::new("", dir.clone())], sources.clone());
-    workspace.load_entry(&module_path).expect("load MASM module");
-    workspace.load_dependencies();
+    let messages = signature_messages(&dir, &module_path);
 
-    let snapshot = AnalysisSnapshot::from_workspace(&workspace);
-    let module = workspace.modules().next().expect("loaded module").module();
-    let mismatches = signature_mismatches_from_snapshot(module, sources, &snapshot.signatures);
-
-    assert_eq!(mismatches.len(), 1);
+    assert_eq!(messages.len(), 1);
     assert_eq!(
-        signature_mismatch_message(&mismatches[0]),
+        messages[0],
         "the definition declares 0 inputs, but the inferred input count is 4"
     );
 
