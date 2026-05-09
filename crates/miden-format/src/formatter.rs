@@ -335,7 +335,7 @@ fn render_type_body(
         .filter_map(NodeOrToken::into_token)
         .any(|token| matches!(token.kind(), SyntaxKind::Comment | SyntaxKind::DocComment));
 
-    let compact_body = render_compact_tokens(body.syntax());
+    let compact_body = render_inline_type_body(body);
     if !has_multiline_body
         && !has_comment
         && prefix_width + 1 + line_length(&compact_body) <= config.max_line_length()
@@ -865,6 +865,30 @@ fn render_wrapped_braced_type_body(
     rendered.push_str(&indent_string(indent));
     rendered.push_str(&render_token_sequence(suffix_tokens));
     Some(rendered)
+}
+
+fn render_inline_type_body(body: &TypeBody) -> String {
+    let tokens = significant_tokens(body.syntax());
+    let Some((open_index, close_index)) =
+        outer_group_indices(&tokens, SyntaxKind::LBrace, SyntaxKind::RBrace)
+    else {
+        return render_token_sequence(&tokens);
+    };
+
+    let prefix = render_token_sequence(&tokens[..=open_index]);
+    let suffix = render_token_sequence(&tokens[close_index..]);
+    let items = split_top_level_items(&tokens[(open_index + 1)..close_index])
+        .into_iter()
+        .map(|item| trim_outer_whitespace_tokens(&item))
+        .filter(|item| !item.is_empty())
+        .map(|item| render_token_sequence_with_style(&item, SpacingStyle::TypeBodyItem))
+        .collect::<Vec<_>>();
+
+    if items.is_empty() {
+        format!("{prefix}{suffix}")
+    } else {
+        format!("{prefix} {} {suffix}", items.join(", "))
+    }
 }
 
 fn render_token_lines(
@@ -1625,6 +1649,7 @@ pub   use   miden::core::mem  ->  memory
 # const comment
 pub const EVENT=event(\"miden::event\")
 adv_map   TABLE=[0x01,0x02]
+type T   = struct {f:u32,   other: felt}
 begin
  swap  dup.1 add
  # branch
@@ -1648,6 +1673,7 @@ pub use miden::core::mem->memory
 # const comment
 pub const EVENT = event(\"miden::event\")
 adv_map TABLE = [0x01, 0x02]
+type T = struct { f: u32, other: felt }
 begin
     swap dup.1 add
     # branch
@@ -1663,6 +1689,9 @@ end
 
         let reparsed = parse_text(&formatted);
         assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
+
+        let reformatted = format_syntax(&config, &reparsed.syntax());
+        assert_eq!(reformatted, formatted);
     }
 
     #[test]
