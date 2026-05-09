@@ -88,7 +88,7 @@ internal          = ["concurrent"]
 persistent-forest = ["rocksdb", "serde"]
 rocksdb           = ["concurrent", "dep:rocksdb"]
 serde             = ["dep:serde", "serde?/alloc"]
-std               = ["blake3/std", "dep:cc", "miden-serde-utils/std", "rand/std", "rand/thread_rng", "serde?/std"]
+std               = ["blake3/std", "dep:cc", "miden-serde-utils/std", "once_cell/std", "rand/std", "rand/thread_rng", "serde?/std"]
 testing           = ["dep:proptest", "miden-field/testing"]
 
 [dependencies]

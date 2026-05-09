@@ -67,7 +67,9 @@ jobs:
       - name: Cleanup large tools for build space
         uses: ./.github/actions/cleanup-runner
       - name: Install Rust toolchain
-        run: rustup toolchain install --no-self-update
+        run: |
+          rustup toolchain install --no-self-update
+          rustup toolchain install --no-self-update nightly
       - uses: WarpBuilds/rust-cache@9d0cc3090d9c87de74ea67617b246e978735b1a1 # pin@v2
         with:
           # Fuzz crates are separate workspaces, so cache them explicitly.
@@ -75,5 +77,7 @@ jobs:
             .
             miden-crypto-fuzz
             miden-serde-utils/fuzz
+      - name: Install cargo-fuzz
+        run: cargo +nightly install cargo-fuzz --version 0.13.1
       - name: Check fuzz crates
         run: make check-fuzz

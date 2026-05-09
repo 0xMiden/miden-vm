@@ -8,6 +8,8 @@ help:
 
 ALL_FEATURES_EXCEPT_ROCKSDB="concurrent executable internal serde std"
 MIDEN_STARK_TEST_PACKAGES=-p miden-lifted-air -p miden-lifted-stark -p miden-stateful-hasher -p miden-stark-transcript
+MIDEN_CRYPTO_FUZZ_TARGETS=word merkle merkle_store smt_serde partial_smt mmr crypto aead signatures
+MIDEN_SERDE_UTILS_FUZZ_TARGETS=primitives collections string vint64 goldilocks budgeted
 WARNINGS=RUSTDOCFLAGS="-D warnings"
 
 # -- linting --------------------------------------------------------------------------------------
@@ -119,9 +121,15 @@ check-features: ## Check curated feature combinations across the integrated work
 	./scripts/check-features.sh
 
 .PHONY: check-fuzz
-check-fuzz: ## Check fuzz crate compilation
+check-fuzz: ## Check and link fuzz targets
 	cd miden-crypto-fuzz && cargo check --locked
 	cd miden-serde-utils/fuzz && cargo check --locked
+	for target in $(MIDEN_CRYPTO_FUZZ_TARGETS); do \
+		cargo +nightly fuzz build --fuzz-dir miden-crypto-fuzz $$target; \
+	done
+	for target in $(MIDEN_SERDE_UTILS_FUZZ_TARGETS); do \
+		(cd miden-serde-utils && cargo +nightly fuzz build $$target); \
+	done
 
 # --- building ------------------------------------------------------------------------------------
 
