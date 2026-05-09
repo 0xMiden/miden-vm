@@ -9,7 +9,8 @@ use masm_decompiler::{
 use super::{
     domain::AdviceFact,
     shared::{
-        Env, expr_output_fact, expr_u32_validity, intrinsic_requires_u32_precondition, stmt_span,
+        Env, expr_output_fact, expr_u32_validity, intrinsic_positional_u32_arg_range,
+        intrinsic_requires_u32_precondition, stmt_span,
     },
     summary::{AdviceDiagnostic, AdviceDiagnosticsMap, AdviceSummaryMap, diagnostic_from_fact},
     walker::{self, SinkDetector},
@@ -188,14 +189,19 @@ fn expr_u32_sink_fact(expr: &Expr, env: &Env) -> AdviceFact {
 
 /// Return the advice fact feeding a `U32` intrinsic sink.
 fn intrinsic_u32_sink_fact(intrinsic: &Intrinsic, env: &Env) -> AdviceFact {
-    if !intrinsic_requires_u32_precondition(&intrinsic.name) {
+    let args: &[Var] = if intrinsic_requires_u32_precondition(&intrinsic.name) {
+        &intrinsic.args
+    } else if let Some(range) =
+        intrinsic_positional_u32_arg_range(&intrinsic.name, intrinsic.args.len())
+    {
+        &intrinsic.args[range]
+    } else {
         return AdviceFact::bottom();
-    }
+    };
+
     AdviceFact::join_all(
-        intrinsic
-            .args
-            .iter()
-            .filter(|arg| !env.u32_validity_for_var(arg).is_proven())
+        args.iter()
+            .filter(|&arg| !env.u32_validity_for_var(arg).is_proven())
             .map(|arg| env.fact_for_var(arg)),
     )
 }

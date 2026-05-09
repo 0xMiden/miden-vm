@@ -6,7 +6,7 @@ use masm_decompiler::{Stmt, SymbolPath};
 
 use super::{
     domain::AdviceFact,
-    shared::{Env, intrinsic_base_name},
+    shared::{Env, intrinsic_memory_address_arg_index},
     summary::{AdviceDiagnostic, AdviceDiagnosticsMap, AdviceSummaryMap, diagnostic_from_fact},
     walker::{self, SinkDetector},
 };
@@ -57,12 +57,12 @@ impl SinkDetector for AddressDetector {
                 }
             },
             Stmt::Intrinsic { span, intrinsic } => {
-                let base = intrinsic_base_name(&intrinsic.name);
-                if (base == "adv_pipe" || base == "mem_stream")
-                    && intrinsic.args.len() == 13
+                if intrinsic.args.len() == 13
                     && intrinsic.results.len() == 13
+                    && let Some(addr_index) =
+                        intrinsic_memory_address_arg_index(&intrinsic.name, intrinsic.args.len())
                 {
-                    let addr_fact = env.fact_for_var(&intrinsic.args[12]);
+                    let addr_fact = env.fact_for_var(&intrinsic.args[addr_index]);
                     if addr_fact.has_concrete_sources() {
                         diagnostics.push(self.new_diagnostic(
                             *span,

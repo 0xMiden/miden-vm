@@ -12,6 +12,10 @@ use crate::{
         AdvLoad, BinOp, Call, Constant, Expr, Intrinsic, LocalAccessKind, LocalLoad, LocalStore,
         LocalStoreW, MemAccessKind, MemLoad, MemStore, Stmt, UnOp, Var,
     },
+    semantics::{
+        INTRINSIC_ADV_PIPE, INTRINSIC_ADV_PUSH, INTRINSIC_ADV_PUSHW, INTRINSIC_MEM_STREAM,
+        INTRINSIC_MTREE_GET, INTRINSIC_MTREE_MERGE, INTRINSIC_MTREE_SET, INTRINSIC_MTREE_VERIFY,
+    },
     signature::{SignatureMap, StackEffect},
     symbol::{path::SymbolPath, resolution::SymbolResolver},
 };
@@ -1097,7 +1101,7 @@ fn lift_adv_inst(
             Ok(Some(vec![Stmt::Intrinsic {
                 span,
                 intrinsic: Intrinsic {
-                    name: "adv_push".to_string(),
+                    name: INTRINSIC_ADV_PUSH.to_string(),
                     args: Vec::new(),
                     results: pushed,
                 },
@@ -1108,7 +1112,7 @@ fn lift_adv_inst(
             Ok(Some(vec![Stmt::Intrinsic {
                 span,
                 intrinsic: Intrinsic {
-                    name: "adv_pushw".to_string(),
+                    name: INTRINSIC_ADV_PUSHW.to_string(),
                     args: Vec::new(),
                     results: pushed,
                 },
@@ -1142,16 +1146,16 @@ fn lift_intrinsic_inst(
         Instruction::Ext2Div => "ext2div".to_string(),
         Instruction::Ext2Neg => "ext2neg".to_string(),
         Instruction::Ext2Inv => "ext2inv".to_string(),
-        Instruction::MemStream => "mem_stream".to_string(),
-        Instruction::AdvPipe => "adv_pipe".to_string(),
+        Instruction::MemStream => INTRINSIC_MEM_STREAM.to_string(),
+        Instruction::AdvPipe => INTRINSIC_ADV_PIPE.to_string(),
         Instruction::Hash => "hash".to_string(),
         Instruction::HMerge => "hmerge".to_string(),
         Instruction::HPerm => "hperm".to_string(),
-        Instruction::MTreeGet => "mtree_get".to_string(),
-        Instruction::MTreeSet => "mtree_set".to_string(),
-        Instruction::MTreeMerge => "mtree_merge".to_string(),
-        Instruction::MTreeVerify => "mtree_verify".to_string(),
-        Instruction::MTreeVerifyWithError(err) => format!("mtree_verify.{err}"),
+        Instruction::MTreeGet => INTRINSIC_MTREE_GET.to_string(),
+        Instruction::MTreeSet => INTRINSIC_MTREE_SET.to_string(),
+        Instruction::MTreeMerge => INTRINSIC_MTREE_MERGE.to_string(),
+        Instruction::MTreeVerify => INTRINSIC_MTREE_VERIFY.to_string(),
+        Instruction::MTreeVerifyWithError(err) => format!("{INTRINSIC_MTREE_VERIFY}.{err}"),
         Instruction::EvalCircuit => "eval_circuit".to_string(),
         Instruction::HornerBase => "horner_eval_base".to_string(),
         Instruction::HornerExt => "horner_eval_ext".to_string(),

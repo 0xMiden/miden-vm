@@ -12,8 +12,9 @@ use super::{
     shared::{
         Env, apply_intrinsic_effect, apply_local_load_scalar, apply_local_load_word,
         apply_local_store, apply_local_store_word, assign_expr_metadata, assign_phi_metadata,
-        expr_is_proven_nonzero, expr_output_fact, join_loop_head_env, refine_if_envs,
-        refine_nonzero_from_intrinsic, seed_input_env, stabilized_loop_head_env, stmt_span,
+        expr_is_proven_nonzero, expr_output_fact, intrinsic_nonzero_arg_index, join_loop_head_env,
+        refine_if_envs, refine_nonzero_from_intrinsic, seed_input_env, stabilized_loop_head_env,
+        stmt_span,
     },
     summary::{AdviceDiagnostic, AdviceDiagnosticsMap, AdviceSummaryMap, diagnostic_from_fact},
 };
@@ -398,11 +399,11 @@ struct CallResult {
 
 /// Return the advice fact feeding any intrinsic divisor input.
 fn intrinsic_nonzero_sink_fact(intrinsic: &Intrinsic, env: &Env) -> AdviceFact {
-    if !matches!(intrinsic.name.as_str(), "u32div" | "u32mod" | "u32divmod") {
+    let Some(index) = intrinsic_nonzero_arg_index(&intrinsic.name) else {
         return AdviceFact::bottom();
-    }
+    };
 
-    let Some(divisor) = intrinsic.args.first().filter(|arg| !env.is_var_nonzero(arg)) else {
+    let Some(divisor) = intrinsic.args.get(index).filter(|arg| !env.is_var_nonzero(arg)) else {
         return AdviceFact::bottom();
     };
     env.fact_for_var(divisor)

@@ -6,7 +6,7 @@ use masm_decompiler::{Stmt, SymbolPath};
 
 use super::{
     domain::AdviceFact,
-    shared::{Env, intrinsic_base_name},
+    shared::{Env, intrinsic_merkle_root_arg_range},
     summary::{AdviceDiagnostic, AdviceDiagnosticsMap, AdviceSummaryMap, diagnostic_from_fact},
     walker::{self, SinkDetector},
 };
@@ -33,12 +33,12 @@ impl SinkDetector for MerkleDetector {
             return Vec::new();
         };
 
-        let base = intrinsic_base_name(&intrinsic.name);
-        let root_range = match base {
-            "mtree_get" if intrinsic.args.len() == 6 && intrinsic.results.len() == 4 => 2..6,
-            "mtree_set" if intrinsic.args.len() == 10 && intrinsic.results.len() == 8 => 2..6,
-            "mtree_verify" if intrinsic.args.len() == 10 && intrinsic.results.is_empty() => 6..10,
-            _ => return Vec::new(),
+        let Some(root_range) = intrinsic_merkle_root_arg_range(
+            &intrinsic.name,
+            intrinsic.args.len(),
+            intrinsic.results.len(),
+        ) else {
+            return Vec::new();
         };
 
         let root_fact = AdviceFact::join_all(
