@@ -1,4 +1,4 @@
-//! Reusable analysis passes for MASM LSP.
+//! Reusable analysis passes for MASM linting.
 
 use std::{collections::HashMap, sync::Arc};
 
@@ -8,7 +8,7 @@ use miden_assembly_syntax::ast::{
 };
 use miden_debug_types::{DefaultSourceManager, SourceSpan, Spanned};
 
-pub mod abstract_interp;
+mod abstract_interp;
 mod capability;
 pub mod lint;
 mod prepared;
@@ -20,16 +20,16 @@ use unconstrained_advice::{AdviceDiagnostic, UnconstrainedAdviceCapability};
 
 /// Results of running all analysis passes on a workspace.
 #[derive(Debug)]
-pub struct AnalysisSnapshot {
+struct AnalysisSnapshot {
     /// Inferred procedure signatures.
-    pub signatures: SignatureMap,
+    signatures: SignatureMap,
     /// Unconstrained advice flow diagnostics.
-    pub advice_diagnostics: HashMap<SymbolPath, Vec<AdviceDiagnostic>>,
+    advice_diagnostics: HashMap<SymbolPath, Vec<AdviceDiagnostic>>,
 }
 
 impl AnalysisSnapshot {
     /// Run all analysis passes on a workspace and return the combined results.
-    pub fn from_workspace(workspace: &Workspace) -> Self {
+    fn from_workspace(workspace: &Workspace) -> Self {
         let prepared = PreparedAnalysis::new(workspace);
         let advice_diagnostics = UnconstrainedAdviceCapability.analyze(&prepared);
 
@@ -51,11 +51,11 @@ struct StackSignature {
 
 /// Mismatch between declared and inferred stack signatures.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SignatureMismatch {
+struct SignatureMismatch {
     /// Procedure name without module path.
-    pub proc_name: String,
+    proc_name: String,
     /// Source span associated with the mismatch.
-    pub span: SourceSpan,
+    span: SourceSpan,
     /// Declared stack signature.
     declared: StackSignature,
     /// Inferred stack signature.
@@ -63,7 +63,7 @@ pub struct SignatureMismatch {
 }
 
 /// Generate a human-readable message describing a signature mismatch.
-pub fn signature_mismatch_message(mismatch: &SignatureMismatch) -> String {
+fn signature_mismatch_message(mismatch: &SignatureMismatch) -> String {
     let inputs_diff = mismatch.declared.inputs != mismatch.inferred.inputs;
     let outputs_diff = mismatch.declared.outputs != mismatch.inferred.outputs;
     match (inputs_diff, outputs_diff) {
@@ -90,7 +90,7 @@ pub fn signature_mismatch_message(mismatch: &SignatureMismatch) -> String {
 ///
 /// This avoids rebuilding the call graph and signatures from scratch. Use this
 /// when an [`AnalysisSnapshot`] is already available.
-pub fn signature_mismatches_from_snapshot(
+fn signature_mismatches_from_snapshot(
     module: &Module,
     sources: Arc<DefaultSourceManager>,
     signatures: &SignatureMap,

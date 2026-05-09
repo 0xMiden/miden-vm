@@ -10,7 +10,6 @@ mod summary;
 
 pub(crate) use declared::{declared_summary_for_proc, declared_summary_for_proc_with_arity};
 pub use domain::{InferredType, TypeRequirement, VarKey};
-pub use inter::infer_type_summaries;
 #[doc(hidden)]
 pub use inter::infer_type_summaries_from_lifted;
 pub use summary::{TypeSummary, TypeSummaryMap};

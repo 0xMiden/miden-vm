@@ -11,35 +11,8 @@ use crate::{
     callgraph::CallGraph,
     frontend::{Program, Workspace},
     ir::Stmt,
-    lift,
     signature::{ProcSignature, SignatureMap},
-    symbol::resolution::create_resolver,
 };
-
-/// Infer type summaries for all procedures in a workspace.
-///
-/// Procedures are processed in callgraph bottom-up order. Unknown signatures or
-/// unsupported lifting patterns produce opaque summaries.
-pub fn infer_type_summaries(
-    workspace: &Workspace,
-    callgraph: &CallGraph,
-    signatures: &SignatureMap,
-) -> TypeSummaryMap {
-    let mut summaries = TypeSummaryMap::default();
-
-    for node in callgraph.iter() {
-        let summary = infer_summary_for_node(
-            workspace,
-            node.name().as_str(),
-            callgraph,
-            signatures,
-            &summaries,
-        );
-        summaries.insert(node.name().clone(), summary);
-    }
-
-    summaries
-}
 
 /// Infer type summaries using procedures that have already been lifted.
 ///
@@ -66,49 +39,6 @@ pub fn infer_type_summaries_from_lifted<'a>(
     }
 
     summaries
-}
-
-/// Infer a summary for a single procedure.
-fn infer_summary_for_node(
-    workspace: &Workspace,
-    fq_name: &str,
-    _callgraph: &CallGraph,
-    signatures: &SignatureMap,
-    callee_summaries: &TypeSummaryMap,
-) -> TypeSummary {
-    let proc_path = SymbolPath::new(fq_name.to_string());
-    let Some(signature) = signatures.get(&proc_path) else {
-        return TypeSummary::opaque();
-    };
-
-    let (inputs, outputs) = match signature {
-        ProcSignature::Known { public_inputs, outputs, .. } => (*public_inputs, *outputs),
-        ProcSignature::Unknown => return TypeSummary::opaque(),
-    };
-
-    let Some((program, proc)) = workspace.lookup_proc_entry(&proc_path) else {
-        return TypeSummary::opaque_with_arity(inputs, outputs);
-    };
-    let declared_summary = declared_summary_for_proc_with_arity(program, proc, inputs, outputs);
-    let resolver = create_resolver(program.module(), workspace.source_manager());
-    let stmts = match lift::lift_proc(proc, &proc_path, &resolver, signatures) {
-        Ok(stmts) => stmts,
-        Err(_err) => {
-            return declared_summary
-                .unwrap_or_else(|| TypeSummary::opaque_with_arity(inputs, outputs));
-        },
-    };
-
-    infer_summary_from_stmts(
-        workspace,
-        program,
-        &proc_path,
-        inputs,
-        outputs,
-        &stmts,
-        callee_summaries,
-        declared_summary,
-    )
 }
 
 /// Infer a summary for one already-lifted procedure.
