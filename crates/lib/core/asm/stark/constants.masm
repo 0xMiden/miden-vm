@@ -531,14 +531,6 @@ pub proc get_procedure_digest_observe_aux_trace_ptr
     push.DYNAMIC_PROCEDURE_4_PTR
 end
 
-pub proc get_num_fixed_len_public_inputs
-    push.NUM_FIXED_LEN_PUBLIC_INPUTS
-end
-
-pub proc get_kernel_op_label
-    push.KERNEL_OP_LABEL
-end
-
 pub proc num_fixed_len_public_inputs_ptr
     push.NUM_FIXED_LEN_PUBLIC_INPUTS_PTR
 end
