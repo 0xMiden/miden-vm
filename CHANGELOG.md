@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.24.0 (TBD)
+
+#### Fixes
+
+- Fixed `op_u32sub` to pass the `borrow` flag as the second argument to `record_u32_range_checks`, matching the pattern of `op_u32add` (which passes `carry`) and `op_u32mul` (which passes the high word). Previously, `ZERO` was passed unconditionally, meaning the borrow auxiliary value was omitted from the range-check column, leaving the u32 subtract trace inconsistent with every other u32 arithmetic operation.
+
 ## v0.23.0 (TBD)
 
 ## 0.22.0 (2025-03-18)
