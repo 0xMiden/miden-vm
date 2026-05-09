@@ -8,16 +8,14 @@ use super::{
     domain::AdviceFact,
     provenance::assign_call_results,
     shared::{
-        Env, MAX_LOOP_PASSES, apply_intrinsic_effect, apply_local_load_scalar,
-        apply_local_load_word, apply_local_store, apply_local_store_word, assign_expr_metadata,
-        assign_phi_metadata, expr_output_fact, join_loop_head_env, refine_if_envs, seed_input_env,
+        Env, apply_intrinsic_effect, apply_local_load_scalar, apply_local_load_word,
+        apply_local_store, apply_local_store_word, assign_expr_metadata, assign_phi_metadata,
+        expr_output_fact, join_loop_head_env, refine_if_envs, seed_input_env,
+        stabilized_loop_head_env,
     },
     summary::{AdviceDiagnostic, AdviceDiagnosticsMap, AdviceSummaryMap},
 };
-use crate::{
-    abstract_interp::{FixpointConfig, JoinSemiLattice, iterate_to_fixpoint},
-    prepared::PreparedProc,
-};
+use crate::prepared::PreparedProc;
 
 /// Trait for passes that detect specific advice-reaching-sink patterns.
 pub(super) trait SinkDetector {
@@ -64,43 +62,6 @@ fn walk_procedure<D: SinkDetector>(
 struct EvalResult {
     env: Env,
     diagnostics: Vec<AdviceDiagnostic>,
-}
-
-/// Loop-head state used when sink walkers iterate to a stable environment.
-///
-/// The walker still collects diagnostics from a final pass over the stabilized loop-head
-/// environment, but the fixpoint engine now owns the convergence bookkeeping.
-#[derive(Clone)]
-struct SinkLoopState<'a> {
-    env: Env,
-    entry_env: &'a Env,
-    phis: &'a [LoopPhi],
-}
-
-impl<'a> SinkLoopState<'a> {
-    /// Build the initial loop-head state from the loop entry environment.
-    fn at_loop_head(entry_env: &'a Env, phis: &'a [LoopPhi]) -> Self {
-        Self { env: entry_env.clone(), entry_env, phis }
-    }
-
-    /// Build the candidate state produced by one loop-body evaluation.
-    fn from_body_env(body_env: Env, entry_env: &'a Env, phis: &'a [LoopPhi]) -> Self {
-        Self { env: body_env, entry_env, phis }
-    }
-
-    /// Return a clone of the stabilized loop-head environment.
-    fn env(&self) -> Env {
-        self.env.clone()
-    }
-}
-
-impl JoinSemiLattice for SinkLoopState<'_> {
-    fn join_assign(&mut self, other: &Self) -> bool {
-        let next_env = join_loop_head_env(&self.env, self.entry_env, &other.env, self.phis);
-        let changed = self.env != next_env;
-        self.env = next_env;
-        changed
-    }
 }
 
 /// Evaluate a statement block from top to bottom.
@@ -223,19 +184,13 @@ fn eval_loop_block<D: SinkDetector>(
     phis: &[LoopPhi],
     entry_env: Env,
 ) -> EvalResult {
-    let loop_state = iterate_to_fixpoint(
-        SinkLoopState::at_loop_head(&entry_env, phis),
-        FixpointConfig::new(MAX_LOOP_PASSES),
-        |loop_env| {
-            let body_result = eval_block(detector, summaries, body, loop_env.env());
-            SinkLoopState::from_body_env(body_result.env, &entry_env, phis)
-        },
-    )
-    .into_state();
+    let loop_env = stabilized_loop_head_env(&entry_env, phis, |loop_env| {
+        eval_block(detector, summaries, body, loop_env).env
+    });
 
-    let body_result = eval_block(detector, summaries, body, loop_state.env());
+    let body_result = eval_block(detector, summaries, body, loop_env.clone());
     let diagnostics = body_result.diagnostics;
-    let loop_env = join_loop_head_env(&loop_state.env(), &entry_env, &body_result.env, phis);
+    let loop_env = join_loop_head_env(&loop_env, &entry_env, &body_result.env, phis);
 
     EvalResult { env: loop_env, diagnostics }
 }

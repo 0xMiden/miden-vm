@@ -126,6 +126,18 @@ impl AdviceDiagnostic {
     }
 }
 
+/// Create a diagnostic whose related source spans are derived from an advice fact.
+pub(super) fn diagnostic_from_fact(
+    procedure: SymbolPath,
+    span: SourceSpan,
+    message: impl Into<String>,
+    fact: &AdviceFact,
+) -> AdviceDiagnostic {
+    let mut diagnostic = AdviceDiagnostic::new(procedure, span, message);
+    diagnostic.origins = fact.source_spans.iter().copied().collect();
+    diagnostic
+}
+
 /// Map of advice summaries by procedure.
 pub(super) type AdviceSummaryMap = HashMap<SymbolPath, AdviceSummary>;
 

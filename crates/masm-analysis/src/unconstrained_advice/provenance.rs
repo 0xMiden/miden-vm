@@ -4,14 +4,13 @@ use masm_decompiler::{LocalAccessKind, LoopPhi, Stmt, SymbolPath, Var};
 
 use super::{
     shared::{
-        Env, MAX_LOOP_PASSES, apply_intrinsic_effect, apply_local_load_scalar,
-        apply_local_load_word, apply_local_store, apply_local_store_word, assign_expr_metadata,
-        assign_phi_metadata, expr_output_fact, join_loop_head_env, refine_if_envs, seed_input_env,
+        Env, apply_intrinsic_effect, apply_local_load_scalar, apply_local_load_word,
+        apply_local_store, apply_local_store_word, assign_expr_metadata, assign_phi_metadata,
+        expr_output_fact, refine_if_envs, seed_input_env, stabilized_loop_head_env,
     },
     summary::{AdviceSummary, AdviceSummaryMap},
     u32_domain::U32Validity,
 };
-use crate::abstract_interp::{FixpointConfig, JoinSemiLattice, iterate_to_fixpoint};
 
 /// Analyze one lifted procedure and summarize which outputs may carry unconstrained advice.
 pub(super) fn analyze_proc_provenance(
@@ -34,43 +33,6 @@ pub(super) fn analyze_proc_provenance(
 struct EvalResult {
     env: Env,
     opaque: bool,
-}
-
-/// Loop-head state driven by the generic fixpoint engine.
-///
-/// The engine still operates on `join_assign`, but loop phi updates are part of the loop-head
-/// transition itself rather than a second generic environment join.
-#[derive(Clone)]
-struct ProvenanceLoopState<'a> {
-    env: Env,
-    entry_env: &'a Env,
-    phis: &'a [LoopPhi],
-}
-
-impl<'a> ProvenanceLoopState<'a> {
-    /// Build the initial loop-head state from the loop entry environment.
-    fn at_loop_head(entry_env: &'a Env, phis: &'a [LoopPhi]) -> Self {
-        Self { env: entry_env.clone(), entry_env, phis }
-    }
-
-    /// Build the candidate state produced by one loop-body evaluation.
-    fn from_body_env(body_env: Env, entry_env: &'a Env, phis: &'a [LoopPhi]) -> Self {
-        Self { env: body_env, entry_env, phis }
-    }
-
-    /// Consume the loop state and return its loop-head environment.
-    fn into_env(self) -> Env {
-        self.env
-    }
-}
-
-impl JoinSemiLattice for ProvenanceLoopState<'_> {
-    fn join_assign(&mut self, other: &Self) -> bool {
-        let next_env = join_loop_head_env(&self.env, self.entry_env, &other.env, self.phis);
-        let changed = self.env != next_env;
-        self.env = next_env;
-        changed
-    }
 }
 
 /// Build the final output summary from the return statement.
@@ -247,20 +209,13 @@ fn eval_loop_block(
     callee_summaries: &AdviceSummaryMap,
 ) -> EvalResult {
     let mut opaque = false;
-    let result = iterate_to_fixpoint(
-        ProvenanceLoopState::at_loop_head(&entry_env, phis),
-        FixpointConfig::new(MAX_LOOP_PASSES),
-        |loop_env| {
-            let body_result = eval_block(body, loop_env.env.clone(), callee_summaries);
-            opaque |= body_result.opaque;
-            ProvenanceLoopState::from_body_env(body_result.env, &entry_env, phis)
-        },
-    );
+    let env = stabilized_loop_head_env(&entry_env, phis, |loop_env| {
+        let body_result = eval_block(body, loop_env, callee_summaries);
+        opaque |= body_result.opaque;
+        body_result.env
+    });
 
-    EvalResult {
-        env: result.into_state().into_env(),
-        opaque,
-    }
+    EvalResult { env, opaque }
 }
 
 /// Assign call-result facts by substituting caller arguments into callee summaries.
