@@ -67,34 +67,9 @@ impl<S> FixpointResult<S> {
         Self { state, iterations, outcome }
     }
 
-    /// Return the final abstract state.
-    pub fn state(&self) -> &S {
-        &self.state
-    }
-
     /// Consume the result and return the final abstract state.
     pub fn into_state(self) -> S {
         self.state
-    }
-
-    /// Return the number of transfer rounds that were executed.
-    pub fn iterations(&self) -> usize {
-        self.iterations
-    }
-
-    /// Return the engine outcome.
-    pub fn outcome(&self) -> FixpointOutcome {
-        self.outcome
-    }
-
-    /// Return `true` when the last allowed transfer changed the state but the budget was exhausted.
-    pub fn limit_exhausted_after_change(&self) -> bool {
-        self.outcome == FixpointOutcome::ReachedIterationLimitAfterChange
-    }
-
-    /// Return `true` if the engine observed stability within the configured evaluation budget.
-    pub fn converged(&self) -> bool {
-        self.outcome == FixpointOutcome::Converged
     }
 }
 
