@@ -802,6 +802,7 @@ dependencies = [
  "lalrpop",
  "lalrpop-util",
  "log",
+ "miden-assembly-syntax-cst",
  "miden-core",
  "miden-debug-types",
  "miden-utils-diagnostics",
@@ -812,6 +813,16 @@ dependencies = [
  "semver 1.0.28",
  "serde",
  "smallvec",
+ "thiserror",
+]
+
+[[package]]
+name = "miden-assembly-syntax-cst"
+version = "0.23.0"
+dependencies = [
+ "miden-debug-types",
+ "miden-rowan",
+ "miden-utils-diagnostics",
  "thiserror",
 ]
 
@@ -1059,6 +1070,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "miden-rowan"
+version = "0.16.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c13695bf99aabaa21d6572b807c66bb26251aa3d9b75e828b3c99b97a3b1ce7e"
+dependencies = [
+ "hashbrown",
+ "rustc-hash",
+]
+
+[[package]]
 name = "miden-serde-utils"
 version = "0.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1103,7 +1124,6 @@ dependencies = [
 name = "miden-utils-diagnostics"
 version = "0.23.0"
 dependencies = [
- "miden-crypto",
  "miden-debug-types",
  "miden-miette",
  "tracing",
