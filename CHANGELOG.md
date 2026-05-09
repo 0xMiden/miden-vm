@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.24.0 (TBD)
+
+#### Changes
+
+- Improved performances of auxiliary trace generation ([#3119](https://github.com/0xMiden/miden-vm/pull/3119)).
+
 ## v0.23.0 (2026-05-07)
 
 #### Features

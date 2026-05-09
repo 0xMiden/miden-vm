@@ -422,8 +422,8 @@ fn initialize_range_checker(
     let mut range_checker = RangeChecker::new();
 
     // Add all u32 range checks recorded during execution
-    for (clk, values) in range_checker_replay.into_iter() {
-        range_checker.add_range_checks(clk, &values);
+    for (_clk, values) in range_checker_replay.into_iter() {
+        range_checker.add_range_checks(&values);
     }
 
     // Add all memory-related range checks
