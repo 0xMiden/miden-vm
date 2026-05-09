@@ -1414,8 +1414,8 @@ fn comment_before_child_of_kind(
     child_kind: SyntaxKind,
     occurrence: usize,
 ) -> Option<String> {
-    let mut comments = None;
-    let mut comment_on_same_line = false;
+    let mut inline_comment = None;
+    let mut line_has_syntax = false;
     let mut seen = 0usize;
 
     for element in node.children_with_tokens() {
@@ -1423,20 +1423,23 @@ fn comment_before_child_of_kind(
             NodeOrToken::Node(child) => {
                 if child.kind() == child_kind {
                     if seen == occurrence {
-                        return comment_on_same_line.then_some(comments).flatten();
+                        return inline_comment;
                     }
                     seen += 1;
                 }
-                comments = None;
-                comment_on_same_line = false;
+                inline_comment = None;
+                update_line_has_syntax_from_text(&mut line_has_syntax, &child.text().to_string());
             },
             NodeOrToken::Token(token) => match token.kind() {
-                SyntaxKind::Comment | SyntaxKind::DocComment => {
-                    comments = Some(trimmed_comment(&token));
-                    comment_on_same_line = true;
+                SyntaxKind::Comment | SyntaxKind::DocComment if line_has_syntax => {
+                    inline_comment = Some(trimmed_comment(&token));
                 },
-                SyntaxKind::Whitespace => (),
-                SyntaxKind::Newline => comment_on_same_line = false,
+                SyntaxKind::Comment | SyntaxKind::DocComment | SyntaxKind::Whitespace => (),
+                SyntaxKind::Newline => line_has_syntax = false,
+                kind if !kind.is_trivia() => {
+                    inline_comment = None;
+                    update_line_has_syntax_from_text(&mut line_has_syntax, token.text());
+                },
                 _ => (),
             },
         }
@@ -1452,7 +1455,8 @@ fn standalone_comments_before_child_of_kind(
 ) -> Vec<String> {
     let mut comments = Vec::new();
     let mut pending_comment: Option<String> = None;
-    let mut pending_same_line = false;
+    let mut pending_same_line_with_syntax = false;
+    let mut line_has_syntax = false;
     let mut seen = 0usize;
 
     for element in node.children_with_tokens() {
@@ -1460,7 +1464,8 @@ fn standalone_comments_before_child_of_kind(
             NodeOrToken::Node(child) => {
                 if child.kind() == child_kind {
                     if seen == occurrence {
-                        if let Some(comment) = pending_comment.take().filter(|_| !pending_same_line)
+                        if let Some(comment) =
+                            pending_comment.take().filter(|_| !pending_same_line_with_syntax)
                         {
                             comments.push(comment);
                         }
@@ -1471,19 +1476,28 @@ fn standalone_comments_before_child_of_kind(
 
                 comments.clear();
                 pending_comment = None;
-                pending_same_line = false;
+                pending_same_line_with_syntax = false;
+                update_line_has_syntax_from_text(&mut line_has_syntax, &child.text().to_string());
             },
             NodeOrToken::Token(token) => match token.kind() {
                 SyntaxKind::Comment | SyntaxKind::DocComment => {
-                    if let Some(comment) = pending_comment.take().filter(|_| !pending_same_line) {
+                    if let Some(comment) =
+                        pending_comment.take().filter(|_| !pending_same_line_with_syntax)
+                    {
                         comments.push(comment);
                     }
                     pending_comment = Some(trimmed_comment(&token));
-                    pending_same_line = true;
+                    pending_same_line_with_syntax = line_has_syntax;
                 },
                 SyntaxKind::Whitespace => (),
-                SyntaxKind::Newline if pending_comment.is_some() => {
-                    pending_same_line = false;
+                SyntaxKind::Newline => {
+                    line_has_syntax = false;
+                },
+                kind if !kind.is_trivia() => {
+                    comments.clear();
+                    pending_comment = None;
+                    pending_same_line_with_syntax = false;
+                    update_line_has_syntax_from_text(&mut line_has_syntax, token.text());
                 },
                 _ => (),
             },
@@ -1570,6 +1584,16 @@ fn trimmed_comment(token: &SyntaxToken) -> String {
 
 fn trim_line_ends(text: &str) -> Vec<String> {
     text.lines().map(|line| line.trim_end().to_string()).collect()
+}
+
+fn update_line_has_syntax_from_text(line_has_syntax: &mut bool, text: &str) {
+    for character in text.chars() {
+        if character == '\n' {
+            *line_has_syntax = false;
+        } else if !character.is_whitespace() {
+            *line_has_syntax = true;
+        }
+    }
 }
 
 fn needs_space(previous: &SyntaxToken, next: &SyntaxToken, style: SpacingStyle) -> bool {
@@ -2157,5 +2181,69 @@ adv_map TABLE =
 
         let reparsed = parse_text(&formatted);
         assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
+    }
+
+    #[test]
+    fn leading_comment_in_procedure_body_is_correctly_placed_when_signature_is_wrapped() {
+        let source = "\
+pub proc tx_prepare_fpi(foreign_account_id: AccountId, foreign_proc_root: word, foreign_procedure_input_15: felt)
+    # validate the provided foreign account ID
+    push.1
+end
+";
+
+        let parse = parse_text(source);
+        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+
+        let config = Config::default();
+        let formatted = format_syntax(&config, &parse.syntax());
+        let expected = "\
+pub proc tx_prepare_fpi(
+    foreign_account_id: AccountId,
+    foreign_proc_root: word,
+    foreign_procedure_input_15: felt
+)
+    # validate the provided foreign account ID
+    push.1
+end
+";
+
+        assert_eq!(formatted, expected);
+
+        let reparsed = parse_text(&formatted);
+        assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
+
+        let reformatted = format_syntax(&config, &reparsed.syntax());
+        assert_eq!(reformatted, formatted);
+    }
+
+    #[test]
+    fn leading_comment_in_procedure_body_is_correctly_placed_when_signature_fits_on_one_line() {
+        let source = "\
+pub proc tx_prepare_fpi(foreign_account_id: AccountId)
+    # validate the provided foreign account ID
+    push.1
+end
+";
+
+        let parse = parse_text(source);
+        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+
+        let config = Config::default();
+        let formatted = format_syntax(&config, &parse.syntax());
+        let expected = "\
+pub proc tx_prepare_fpi(foreign_account_id: AccountId)
+    # validate the provided foreign account ID
+    push.1
+end
+";
+
+        assert_eq!(formatted, expected);
+
+        let reparsed = parse_text(&formatted);
+        assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
+
+        let reformatted = format_syntax(&config, &reparsed.syntax());
+        assert_eq!(reformatted, formatted);
     }
 }
