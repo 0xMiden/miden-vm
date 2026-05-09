@@ -1,6 +1,6 @@
 //! Diagnostics and summaries for unconstrained advice reaching non-zero sinks.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 
 use masm_decompiler::{
     BinOp, Expr, Intrinsic, LocalAccessKind, LoopPhi, Stmt, SymbolPath, UnOp, Var,
@@ -17,6 +17,7 @@ use super::{
     },
     summary::{AdviceDiagnostic, AdviceDiagnosticsMap, AdviceSummaryMap},
 };
+use crate::prepared::PreparedProc;
 
 /// Summary of non-zero sink requirements for one procedure.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -48,12 +49,12 @@ impl NonZeroSummary {
 }
 
 /// Map of non-zero summaries by procedure.
-pub(super) type NonZeroSummaryMap = std::collections::HashMap<SymbolPath, NonZeroSummary>;
+pub(super) type NonZeroSummaryMap = HashMap<SymbolPath, NonZeroSummary>;
 
 /// Infer non-zero summaries and diagnostics using already-computed provenance summaries.
 pub(super) fn infer_nonzero_summaries_and_diagnostics(
     callgraph: &masm_decompiler::CallGraph,
-    prepared: &std::collections::HashMap<SymbolPath, super::inter::PreparedProc>,
+    prepared: &HashMap<SymbolPath, PreparedProc>,
     provenance_summaries: &AdviceSummaryMap,
 ) -> (NonZeroSummaryMap, AdviceDiagnosticsMap) {
     let mut summaries = NonZeroSummaryMap::default();

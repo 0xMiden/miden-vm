@@ -1,10 +1,6 @@
 //! Interprocedural driver for unconstrained-advice analysis.
 
-use std::collections::HashMap;
-
-use masm_decompiler::{
-    CallGraph, ProcSignature, SignatureMap, TypeSummaryMap, Workspace, create_resolver, lift_proc,
-};
+use masm_decompiler::{CallGraph, SymbolPath};
 
 use super::{
     address::collect_address_diagnostics,
@@ -14,85 +10,39 @@ use super::{
     summary::{AdviceDiagnosticsMap, AdviceSummary, AdviceSummaryMap},
     u32::collect_u32_diagnostics,
 };
-
-/// Prepared lifting result for one procedure.
-#[derive(Debug, Clone)]
-pub(super) struct PreparedProc {
-    /// Input arity inferred from the procedure signature.
-    pub(super) inputs: usize,
-    /// Output arity inferred from the procedure signature.
-    pub(super) outputs: usize,
-    /// Lifted SSA statements, when the procedure is analyzable.
-    pub(super) stmts: Option<Vec<masm_decompiler::Stmt>>,
-}
+use crate::prepared::{PreparedAnalysis, PreparedProc};
 
 /// Infer unconstrained-advice summaries and diagnostics using precomputed analysis inputs.
 pub(super) fn infer_unconstrained_advice(
-    workspace: &Workspace,
-    callgraph: &CallGraph,
-    signatures: &SignatureMap,
-    type_summaries: &TypeSummaryMap,
+    prepared: &PreparedAnalysis,
 ) -> (AdviceSummaryMap, AdviceDiagnosticsMap) {
-    let prepared = prepare_procs(workspace, callgraph, signatures);
-    let provenance_summaries = infer_provenance_summaries(callgraph, &prepared);
-    let mut diagnostics = collect_u32_diagnostics(&prepared, &provenance_summaries, type_summaries);
-    let address_diagnostics = collect_address_diagnostics(&prepared, &provenance_summaries);
+    let provenance_summaries =
+        infer_provenance_summaries(&prepared.callgraph, &prepared.lifted_procs);
+    let mut diagnostics = collect_u32_diagnostics(
+        &prepared.lifted_procs,
+        &provenance_summaries,
+        &prepared.type_summaries,
+    );
+    let address_diagnostics =
+        collect_address_diagnostics(&prepared.lifted_procs, &provenance_summaries);
     merge_diagnostics(&mut diagnostics, address_diagnostics);
-    let merkle_diagnostics = collect_merkle_diagnostics(&prepared, &provenance_summaries);
+    let merkle_diagnostics =
+        collect_merkle_diagnostics(&prepared.lifted_procs, &provenance_summaries);
     merge_diagnostics(&mut diagnostics, merkle_diagnostics);
-    let (_, nonzero_diagnostics) =
-        infer_nonzero_summaries_and_diagnostics(callgraph, &prepared, &provenance_summaries);
+    let (_, nonzero_diagnostics) = infer_nonzero_summaries_and_diagnostics(
+        &prepared.callgraph,
+        &prepared.lifted_procs,
+        &provenance_summaries,
+    );
     merge_diagnostics(&mut diagnostics, nonzero_diagnostics);
 
     (provenance_summaries, diagnostics)
 }
 
-/// Prepare and lift all procedures once for the downstream analyses.
-fn prepare_procs(
-    workspace: &Workspace,
-    callgraph: &CallGraph,
-    signatures: &SignatureMap,
-) -> HashMap<crate::SymbolPath, PreparedProc> {
-    let mut prepared = HashMap::new();
-
-    for node in callgraph.iter() {
-        let proc_path = node.name().clone();
-        let Some(signature) = signatures.get(&proc_path) else {
-            prepared.insert(proc_path, PreparedProc { inputs: 0, outputs: 0, stmts: None });
-            continue;
-        };
-
-        let (inputs, outputs) = match signature {
-            ProcSignature::Known { inputs, outputs, .. } => (*inputs, *outputs),
-            ProcSignature::Unknown => {
-                prepared.insert(proc_path, PreparedProc { inputs: 0, outputs: 0, stmts: None });
-                continue;
-            },
-        };
-
-        let Some((program, proc)) = workspace.lookup_proc_entry(&proc_path) else {
-            prepared.insert(proc_path, PreparedProc { inputs, outputs, stmts: None });
-            continue;
-        };
-
-        let resolver = create_resolver(program.module(), workspace.source_manager());
-        let stmts = match lift_proc(proc, &proc_path, &resolver, signatures) {
-            Ok(stmts) => Some(stmts),
-            Err(_) => {
-                prepared.insert(proc_path, PreparedProc { inputs, outputs, stmts: None });
-                continue;
-            },
-        };
-        prepared.insert(proc_path, PreparedProc { inputs, outputs, stmts });
-    }
-
-    prepared
-}
-
 /// Infer bottom-up provenance summaries for all procedures.
 fn infer_provenance_summaries(
     callgraph: &CallGraph,
-    prepared: &HashMap<crate::SymbolPath, PreparedProc>,
+    prepared: &std::collections::HashMap<SymbolPath, PreparedProc>,
 ) -> AdviceSummaryMap {
     let mut summaries = AdviceSummaryMap::default();
 

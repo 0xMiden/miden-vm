@@ -2,30 +2,9 @@
 
 use std::fmt::Write;
 
+use masm_analysis::lint::LintDiagnostic;
 use miden_debug_types::{SourceManager, SourceSpan};
 use yansi::Paint as _;
-
-/// A unified diagnostic ready for rendering.
-#[derive(Debug)]
-pub struct LintDiagnostic {
-    /// Human-readable warning message.
-    pub message: String,
-    /// Primary source span.
-    pub span: SourceSpan,
-    /// Additional explanatory note rendered after the snippets.
-    pub note: String,
-    /// Related source locations (e.g., advice origins).
-    pub related: Vec<RelatedSpan>,
-}
-
-/// A related source location with an explanatory message.
-#[derive(Debug)]
-pub struct RelatedSpan {
-    /// Source span of the related location.
-    pub span: SourceSpan,
-    /// Human-readable explanation.
-    pub message: String,
-}
 
 /// Render a single diagnostic to stdout in clippy/rustc style.
 pub fn render_diagnostic(diag: &LintDiagnostic, sources: &dyn SourceManager) {

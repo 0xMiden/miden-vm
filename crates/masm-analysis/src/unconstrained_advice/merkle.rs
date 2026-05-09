@@ -6,11 +6,11 @@ use masm_decompiler::{Stmt, SymbolPath};
 
 use super::{
     domain::AdviceFact,
-    inter::PreparedProc,
     shared::{Env, intrinsic_base_name},
     summary::{AdviceDiagnostic, AdviceDiagnosticsMap, AdviceSummaryMap},
     walker::{self, SinkDetector},
 };
+use crate::prepared::PreparedProc;
 
 /// Collect Merkle-root diagnostics for all procedures.
 pub(super) fn collect_merkle_diagnostics(
