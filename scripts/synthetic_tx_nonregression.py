@@ -13,6 +13,8 @@ import unittest.mock as mock
 from pathlib import Path
 from typing import Any
 
+DEFAULT_MIN_REGRESSION_MS = 1.0
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -28,6 +30,7 @@ def parse_args() -> argparse.Namespace:
     run.add_argument("--sample-size", type=int)
     run.add_argument("--measurement-time-secs", type=int)
     run.add_argument("--warm-up-time-secs", type=int)
+    run.add_argument("--bench-axes", default="")
     run.add_argument("--git-ref", default="")
 
     collect = commands.add_parser("collect", help="Collect Criterion estimates into JSON.")
@@ -36,6 +39,7 @@ def parse_args() -> argparse.Namespace:
     collect.add_argument("--bench-wall-ms", type=float)
     collect.add_argument("--rayon-num-threads", type=int)
     collect.add_argument("--scenario-filter", default="")
+    collect.add_argument("--bench-axes", default="")
     collect.add_argument("--git-ref", default="")
 
     compare = commands.add_parser("compare", help="Compare two benchmark result JSON files.")
@@ -44,6 +48,7 @@ def parse_args() -> argparse.Namespace:
     compare.add_argument("--summary-out", required=True, type=Path)
     compare.add_argument("--json-out", required=True, type=Path)
     compare.add_argument("--threshold-pct", required=True, type=float)
+    compare.add_argument("--min-regression-ms", type=float, default=DEFAULT_MIN_REGRESSION_MS)
     compare.add_argument("--github-output", type=Path)
 
     self_test = commands.add_parser("self-test", help="Run parser and comparison tests.")
@@ -86,6 +91,10 @@ def current_sha(repo_root: Path) -> str:
 def write_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def split_csv(value: str) -> list[str]:
+    return [part.strip() for part in value.split(",") if part.strip()]
 
 
 def parse_criterion_estimate_path(criterion_root: Path, estimates_path: Path) -> tuple[str, str, str]:
@@ -133,6 +142,10 @@ def collect_result(
     bench_wall_ms: float | None,
     rayon_num_threads: int | None,
     scenario_filter: str,
+    bench_axes: str,
+    sample_size: int | None,
+    measurement_time_secs: int | None,
+    warm_up_time_secs: int | None,
 ) -> dict[str, Any]:
     return {
         "repo_root": str(repo_root),
@@ -141,6 +154,10 @@ def collect_result(
         "bench_wall_ms": bench_wall_ms,
         "rayon_num_threads": rayon_num_threads,
         "scenario_filter": scenario_filter,
+        "bench_axes": split_csv(bench_axes),
+        "sample_size": sample_size,
+        "measurement_time_secs": measurement_time_secs,
+        "warm_up_time_secs": warm_up_time_secs,
         "metrics": collect_criterion_metrics(repo_root),
     }
 
@@ -154,6 +171,14 @@ def cmd_run(args: argparse.Namespace) -> int:
     env["RAYON_NUM_THREADS"] = str(args.rayon_num_threads)
     if args.scenario_filter:
         env["SYNTH_SCENARIO"] = args.scenario_filter
+    if args.bench_axes:
+        env["SYNTH_BENCH_AXES"] = args.bench_axes
+    if args.sample_size is not None:
+        env["SYNTH_SAMPLE_SIZE"] = str(args.sample_size)
+    if args.measurement_time_secs is not None:
+        env["SYNTH_MEASUREMENT_TIME_SECS"] = str(args.measurement_time_secs)
+    if args.warm_up_time_secs is not None:
+        env["SYNTH_WARM_UP_TIME_SECS"] = str(args.warm_up_time_secs)
 
     run_logged_command(["cargo", "clean"], cwd=repo_root, env=env, log_path=output_dir / "clean.log")
 
@@ -187,6 +212,10 @@ def cmd_run(args: argparse.Namespace) -> int:
             bench_wall_ms=bench_wall_ms,
             rayon_num_threads=args.rayon_num_threads,
             scenario_filter=args.scenario_filter,
+            bench_axes=args.bench_axes,
+            sample_size=args.sample_size,
+            measurement_time_secs=args.measurement_time_secs,
+            warm_up_time_secs=args.warm_up_time_secs,
         ),
     )
     return 0
@@ -201,6 +230,10 @@ def cmd_collect(args: argparse.Namespace) -> int:
             bench_wall_ms=args.bench_wall_ms,
             rayon_num_threads=args.rayon_num_threads,
             scenario_filter=args.scenario_filter,
+            bench_axes=args.bench_axes,
+            sample_size=None,
+            measurement_time_secs=None,
+            warm_up_time_secs=None,
         ),
     )
     return 0
@@ -229,7 +262,10 @@ def fmt_pct(value: float | None) -> str:
 
 
 def compare_results(
-    baseline: dict[str, Any], current: dict[str, Any], threshold_pct: float
+    baseline: dict[str, Any],
+    current: dict[str, Any],
+    threshold_pct: float,
+    min_regression_ms: float = DEFAULT_MIN_REGRESSION_MS,
 ) -> dict[str, Any]:
     baseline_metrics = baseline.get("metrics", {})
     current_metrics = current.get("metrics", {})
@@ -252,21 +288,32 @@ def compare_results(
         )
     rows.sort(key=lambda r: r["delta_pct"] if r["delta_pct"] is not None else float("-inf"), reverse=True)
     worst = rows[0]
-    regression = bool(worst["delta_pct"] is not None and worst["delta_pct"] > threshold_pct)
+    regression_rows = [
+        row
+        for row in rows
+        if row["delta_pct"] is not None
+        and row["delta_pct"] > threshold_pct
+        and row["delta_ms"] > min_regression_ms
+    ]
+    regression = bool(regression_rows)
     return {
         "status": "regression" if regression else "ok",
         "regression": regression,
         "threshold_pct": threshold_pct,
+        "min_regression_ms": min_regression_ms,
         "baseline_sha": baseline.get("git_sha", ""),
         "current_sha": current.get("git_sha", ""),
         "baseline_ref": baseline.get("git_ref", ""),
         "current_ref": current.get("git_ref", ""),
         "baseline_bench_wall_ms": baseline.get("bench_wall_ms"),
         "current_bench_wall_ms": current.get("bench_wall_ms"),
+        "baseline_bench_axes": baseline.get("bench_axes", []),
+        "current_bench_axes": current.get("bench_axes", []),
         "max_delta_metric": worst["name"],
         "max_delta_ms": worst["delta_ms"],
         "max_delta_pct": worst["delta_pct"],
         "metric_rows": rows,
+        "regression_rows": regression_rows,
         "missing_in_current": sorted(set(baseline_metrics) - set(current_metrics)),
         "missing_in_baseline": sorted(set(current_metrics) - set(baseline_metrics)),
     }
@@ -282,11 +329,7 @@ def summary_markdown(result: dict[str, Any]) -> str:
         else result["current_bench_wall_ms"] - result["baseline_bench_wall_ms"]
     )
     wall_delta_pct = percent_delta(result["current_bench_wall_ms"], result["baseline_bench_wall_ms"])
-    over_threshold = [
-        row
-        for row in result["metric_rows"]
-        if row["delta_pct"] is not None and row["delta_pct"] > result["threshold_pct"]
-    ]
+    over_threshold = result["regression_rows"]
     metric_rows = result["metric_rows"]
     lines = [
         "# BENCHMARK REPORT: synthetic-tx-kernel-nonregression",
@@ -298,6 +341,9 @@ def summary_markdown(result: dict[str, Any]) -> str:
         f"- Baseline: `{baseline}`",
         f"- Current: `{current}`",
         f"- Threshold: `{result['threshold_pct']:.2f}%`",
+        f"- Minimum absolute slowdown: `{fmt_ms(result['min_regression_ms'])}`",
+        "- Axes: "
+        f"`{', '.join(result['current_bench_axes'] or result['baseline_bench_axes'] or ['all'])}`",
         "- Bench wall: "
         f"{fmt_ms(result['baseline_bench_wall_ms'])} -> "
         f"{fmt_ms(result['current_bench_wall_ms'])} "
@@ -306,11 +352,11 @@ def summary_markdown(result: dict[str, Any]) -> str:
         "### Result",
         "",
         f"- Status: **{status}**",
-        "- Worst regression: "
+        "- Worst slowdown: "
         f"`{result['max_delta_metric']}` moved by "
         f"`{fmt_delta(result['max_delta_ms'])}` ({fmt_pct(result['max_delta_pct'])})",
         "",
-        "### Metrics over threshold",
+        "### Regressions over threshold",
         "",
     ]
     if over_threshold:
@@ -372,6 +418,7 @@ def cmd_compare(args: argparse.Namespace) -> int:
         json.loads(args.baseline.read_text(encoding="utf-8")),
         json.loads(args.current.read_text(encoding="utf-8")),
         args.threshold_pct,
+        args.min_regression_ms,
     )
     write_json(args.json_out, result)
     args.summary_out.parent.mkdir(parents=True, exist_ok=True)
@@ -446,6 +493,14 @@ class Tests(unittest.TestCase):
         self.assertTrue(result["regression"])
         self.assertEqual(result["max_delta_metric"], "bench-tx/a/verify")
 
+    def test_compare_ignores_sub_millisecond_noise(self) -> None:
+        baseline = {"metrics": {"bench-tx/a/trace_prep": {"estimate_ms": 6.46}}}
+        current = {"metrics": {"bench-tx/a/trace_prep": {"estimate_ms": 6.94}}}
+        result = compare_results(baseline, current, 5.0)
+        self.assertFalse(result["regression"])
+        self.assertEqual(result["max_delta_metric"], "bench-tx/a/trace_prep")
+        self.assertEqual(result["regression_rows"], [])
+
     def test_summary_markdown_uses_requested_report_shape(self) -> None:
         result = compare_results(
             {
@@ -474,14 +529,15 @@ class Tests(unittest.TestCase):
         self.assertIn("- Baseline: `1764d66ca1c6`", summary)
         self.assertIn("- Current: `1234567890ab`", summary)
         self.assertIn("- Threshold: `5.00%`", summary)
+        self.assertIn("- Minimum absolute slowdown: `1.00 ms`", summary)
         self.assertIn("- Bench wall: 145,000.00 ms -> 152,000.00 ms (+7,000.00 ms, +4.83%)", summary)
         self.assertIn("### Result", summary)
         self.assertIn("- Status: **REGRESSION**", summary)
         self.assertIn(
-            "- Worst regression: `bench-tx/consume-single-p2id-note/prove` moved by `+145.07 ms` (+7.30%)",
+            "- Worst slowdown: `bench-tx/consume-single-p2id-note/prove` moved by `+145.07 ms` (+7.30%)",
             summary,
         )
-        self.assertIn("### Metrics over threshold", summary)
+        self.assertIn("### Regressions over threshold", summary)
         self.assertIn("- `bench-tx/consume-single-p2id-note/prove`: +145.07 ms (+7.30%)", summary)
         self.assertIn("### Per-benchmark results (2 of 2)", summary)
         self.assertIn(

@@ -9,7 +9,6 @@
 
 #### Fixes
 
-
 - Fixed quote-equivalent path ambiguity in library deserialization and linker symbol resolution ([#2836](https://github.com/0xMiden/miden-vm/pull/2836)).
 - Memoized semantic constant evaluation in `AnalysisContext` to prevent exponential work from shared constant-dependency graphs during parsing and semantic analysis ([#2858](https://github.com/0xMiden/miden-vm/pull/2858)).
 - Treat serialized libraries and kernel libraries as untrusted MAST forests during deserialization, rejecting spoofed node digests ([#2863](https://github.com/0xMiden/miden-vm/pull/2863)).
