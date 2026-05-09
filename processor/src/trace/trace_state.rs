@@ -80,7 +80,7 @@ pub struct SystemState {
     /// - For SYSCALL contexts: hash remains from the calling function
     pub fn_hash: Word,
 
-    /// Precompile transcript state (sponge capacity) used for recording `log_precompile` calls
+    /// Precompile-transcript state (rolling digest) used for recording `log_precompile` calls
     /// - Initially [ZERO; 4]
     /// - Updated with each `log_precompile` invocation
     pub pc_transcript_state: PrecompileTranscriptState,

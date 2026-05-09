@@ -15,7 +15,7 @@ use crate::{
     Felt, MIN_STACK_DEPTH, Program, ProgramInfo, StackInputs, StackOutputs, Word, ZERO,
     fast::ExecutionOutput,
     field::QuadFelt,
-    precompile::{PrecompileRequest, PrecompileTranscript, PrecompileTranscriptDigest},
+    precompile::{PrecompileRequest, PrecompileTranscript},
     utils::{Matrix, RowMajorMatrix},
 };
 
@@ -117,11 +117,6 @@ impl TraceBuildInputs {
     /// Returns the final precompile transcript observed during execution.
     pub fn final_precompile_transcript(&self) -> &PrecompileTranscript {
         &self.trace_output.final_precompile_transcript
-    }
-
-    /// Returns the digest of the final precompile transcript observed during execution.
-    pub fn precompile_transcript_digest(&self) -> PrecompileTranscriptDigest {
-        self.final_precompile_transcript().finalize()
     }
 
     /// Returns the program info captured for the execution being replayed.
@@ -262,11 +257,6 @@ impl ExecutionTrace {
     /// Returns the final precompile transcript observed during execution.
     pub fn final_precompile_transcript(&self) -> PrecompileTranscript {
         self.final_precompile_transcript
-    }
-
-    /// Returns the digest of the final precompile transcript observed during execution.
-    pub fn precompile_transcript_digest(&self) -> PrecompileTranscriptDigest {
-        self.final_precompile_transcript().finalize()
     }
 
     /// Returns the owned execution outputs required for proof packaging.
