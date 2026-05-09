@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use masm_decompiler::{BinOp, Expr, Intrinsic, LocalAccessKind, LoopPhi, Stmt, UnOp, Var, VarKey};
 
 use super::{domain::AdviceFact, u32_domain::U32Validity};
-use crate::abstract_interp::JoinSemiLattice;
+use crate::abstract_interp::{FixpointConfig, JoinSemiLattice, iterate_to_fixpoint};
 
 /// Maximum number of loop-approximation passes.
 pub(super) const MAX_LOOP_PASSES: usize = 32;
@@ -430,6 +430,58 @@ pub(super) fn join_loop_head_env(
     }
 
     next_env
+}
+
+/// Loop-head state used while iterating to a stable environment.
+#[derive(Clone)]
+struct LoopHeadState<'a> {
+    env: Env,
+    entry_env: &'a Env,
+    phis: &'a [LoopPhi],
+}
+
+impl<'a> LoopHeadState<'a> {
+    /// Build the initial loop-head state from the loop entry environment.
+    fn at_loop_head(entry_env: &'a Env, phis: &'a [LoopPhi]) -> Self {
+        Self { env: entry_env.clone(), entry_env, phis }
+    }
+
+    /// Build the candidate state produced by one loop-body evaluation.
+    fn from_body_env(body_env: Env, entry_env: &'a Env, phis: &'a [LoopPhi]) -> Self {
+        Self { env: body_env, entry_env, phis }
+    }
+
+    /// Return a clone of the stabilized loop-head environment.
+    fn env(&self) -> Env {
+        self.env.clone()
+    }
+}
+
+impl JoinSemiLattice for LoopHeadState<'_> {
+    fn join_assign(&mut self, other: &Self) -> bool {
+        let next_env = join_loop_head_env(&self.env, self.entry_env, &other.env, self.phis);
+        let changed = self.env != next_env;
+        self.env = next_env;
+        changed
+    }
+}
+
+/// Iterate a loop body to a stable loop-head environment.
+pub(super) fn stabilized_loop_head_env(
+    entry_env: &Env,
+    phis: &[LoopPhi],
+    mut eval_body: impl FnMut(Env) -> Env,
+) -> Env {
+    iterate_to_fixpoint(
+        LoopHeadState::at_loop_head(entry_env, phis),
+        FixpointConfig::new(MAX_LOOP_PASSES),
+        |loop_env| {
+            let body_env = eval_body(loop_env.env());
+            LoopHeadState::from_body_env(body_env, entry_env, phis)
+        },
+    )
+    .into_state()
+    .env()
 }
 
 /// Refine branch environments using an exact `eq.0` witness when available.
