@@ -1,23 +1,86 @@
 //! Summary and diagnostic types for unconstrained-advice analysis.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 use miden_debug_types::SourceSpan;
 
 use super::{domain::AdviceFact, u32_domain::U32Validity};
 use crate::SymbolPath;
 
-/// Summary of unconstrained-advice flow for one procedure.
+/// Provenance portion of an advice summary.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct AdviceSummary {
+pub(super) struct AdviceProvenanceSummary {
     /// Per-output unconstrained-advice provenance.
-    pub(super) outputs: Vec<AdviceFact>,
-    /// Per-output `u32` validity.
-    u32_outputs: Vec<U32Validity>,
+    outputs: Vec<AdviceFact>,
     /// Exact input-position forwarding for each output, when known.
     forwarded_inputs: Vec<Option<usize>>,
+}
+
+impl AdviceProvenanceSummary {
+    /// Create a provenance summary for procedure outputs.
+    fn new(outputs: Vec<AdviceFact>, forwarded_inputs: Vec<Option<usize>>) -> Self {
+        debug_assert_eq!(outputs.len(), forwarded_inputs.len());
+        Self { outputs, forwarded_inputs }
+    }
+}
+
+/// U32-validity portion of an advice summary.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct AdviceU32Summary {
+    /// Per-output `u32` validity.
+    outputs: Vec<U32Validity>,
     /// Per-input `u32` postconditions guaranteed after the call returns.
-    u32_inputs: Vec<U32Validity>,
+    inputs: Vec<U32Validity>,
+}
+
+impl AdviceU32Summary {
+    /// Create a U32 summary for procedure inputs and outputs.
+    fn new(outputs: Vec<U32Validity>, inputs: Vec<U32Validity>) -> Self {
+        Self { outputs, inputs }
+    }
+}
+
+/// Non-zero precondition portion of an advice summary.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct AdviceNonZeroSummary {
+    /// Input positions that may reach a divisor or `inv` input without a local proof.
+    required_inputs: BTreeSet<usize>,
+    /// Whether this summary is opaque.
+    unknown: bool,
+}
+
+impl AdviceNonZeroSummary {
+    /// Create a known non-zero summary with no required inputs.
+    fn empty() -> Self {
+        Self {
+            required_inputs: BTreeSet::new(),
+            unknown: false,
+        }
+    }
+
+    /// Create an opaque non-zero summary.
+    fn unknown() -> Self {
+        Self {
+            required_inputs: BTreeSet::new(),
+            unknown: true,
+        }
+    }
+
+    /// Create a known non-zero summary from required input positions.
+    fn new(required_inputs: BTreeSet<usize>) -> Self {
+        Self { required_inputs, unknown: false }
+    }
+}
+
+/// Typed summary carrier for advice-related capabilities.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct AdviceSummary {
+    /// Provenance facts owned by the provenance capability.
+    provenance: AdviceProvenanceSummary,
+    /// U32 facts owned by the U32 capability.
+    u32: AdviceU32Summary,
+    /// Non-zero precondition facts owned by the non-zero capability.
+    nonzero: AdviceNonZeroSummary,
     /// Whether this summary is opaque.
     unknown: bool,
 }
@@ -27,10 +90,9 @@ impl AdviceSummary {
     pub(super) fn new(outputs: Vec<AdviceFact>) -> Self {
         let output_count = outputs.len();
         Self {
-            outputs,
-            u32_outputs: vec![U32Validity::Unknown; output_count],
-            forwarded_inputs: vec![None; output_count],
-            u32_inputs: Vec::new(),
+            provenance: AdviceProvenanceSummary::new(outputs, vec![None; output_count]),
+            u32: AdviceU32Summary::new(vec![U32Validity::Unknown; output_count], Vec::new()),
+            nonzero: AdviceNonZeroSummary::empty(),
             unknown: false,
         }
     }
@@ -45,10 +107,9 @@ impl AdviceSummary {
         debug_assert_eq!(outputs.len(), u32_outputs.len());
         debug_assert_eq!(outputs.len(), forwarded_inputs.len());
         Self {
-            outputs,
-            u32_outputs,
-            forwarded_inputs,
-            u32_inputs,
+            provenance: AdviceProvenanceSummary::new(outputs, forwarded_inputs),
+            u32: AdviceU32Summary::new(u32_outputs, u32_inputs),
+            nonzero: AdviceNonZeroSummary::empty(),
             unknown: false,
         }
     }
@@ -56,10 +117,12 @@ impl AdviceSummary {
     /// Create an opaque summary with explicit output arity.
     pub(super) fn unknown_with_arity(outputs: usize) -> Self {
         Self {
-            outputs: vec![AdviceFact::bottom(); outputs],
-            u32_outputs: vec![U32Validity::Unknown; outputs],
-            forwarded_inputs: vec![None; outputs],
-            u32_inputs: Vec::new(),
+            provenance: AdviceProvenanceSummary::new(
+                vec![AdviceFact::bottom(); outputs],
+                vec![None; outputs],
+            ),
+            u32: AdviceU32Summary::new(vec![U32Validity::Unknown; outputs], Vec::new()),
+            nonzero: AdviceNonZeroSummary::unknown(),
             unknown: true,
         }
     }
@@ -76,22 +139,47 @@ impl AdviceSummary {
 
     /// Return the per-output `u32` validity.
     pub(super) fn u32_outputs(&self) -> &[U32Validity] {
-        &self.u32_outputs
+        &self.u32.outputs
     }
 
     /// Return the exact-forwarding metadata for each output.
     pub(super) fn forwarded_inputs(&self) -> &[Option<usize>] {
-        &self.forwarded_inputs
+        &self.provenance.forwarded_inputs
     }
 
     /// Return the per-input `u32` postconditions.
     pub(super) fn u32_inputs(&self) -> &[U32Validity] {
-        &self.u32_inputs
+        &self.u32.inputs
+    }
+
+    /// Return the per-output provenance facts.
+    pub(super) fn output_facts(&self) -> &[AdviceFact] {
+        &self.provenance.outputs
     }
 
     /// Return the number of summarized outputs.
     pub(super) fn output_count(&self) -> usize {
-        self.outputs.len()
+        self.provenance.outputs.len()
+    }
+
+    /// Set non-zero precondition summary facts.
+    pub(super) fn set_nonzero_requirements(&mut self, required_inputs: BTreeSet<usize>) {
+        self.nonzero = AdviceNonZeroSummary::new(required_inputs);
+    }
+
+    /// Mark the non-zero summary as opaque.
+    pub(super) fn set_nonzero_unknown(&mut self) {
+        self.nonzero = AdviceNonZeroSummary::unknown();
+    }
+
+    /// Return true if the non-zero summary is opaque.
+    pub(super) fn nonzero_is_unknown(&self) -> bool {
+        self.nonzero.unknown
+    }
+
+    /// Return input positions required by non-zero preconditions.
+    pub(super) fn nonzero_required_inputs(&self) -> &BTreeSet<usize> {
+        &self.nonzero.required_inputs
     }
 }
 

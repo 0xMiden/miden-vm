@@ -16,6 +16,13 @@ For this PR, `masm-decompiler` remains an implementation detail. We should hide 
 - **Prepared analysis**: internal cached semantic state shared by multiple lint analyses.
 - **Characterization test**: a behavior-level test that protects current lint output before internal refactors.
 - **Instruction semantics**: the shared meaning of a MASM instruction for stack effects, lifting, type facts, and lint diagnostics.
+- **Analysis capability**: an internal lint analysis unit that consumes prepared analysis and emits semantic diagnostics.
+- **Advice domain**: the shared abstract state used by advice-related analyses to track advice provenance, refinements, and sink reachability.
+- **Advice capability**: an advice-specific semantic hook that contributes sources, sanitizers, sinks, summaries, or diagnostics while sharing the advice domain.
+- **Advice summary**: a shared interprocedural carrier whose fields are owned by individual advice capabilities.
+- **Analysis diagnostic**: a semantic finding produced before lint-facing rendering or grouping.
+- **Capability orchestration**: the explicit ordering of analysis capabilities inside the MASM analysis pipeline.
+- **Declarative instruction semantics**: a possible later representation of instruction semantics that can derive repeated per-instruction behavior after capability boundaries stabilize.
 
 ## Non-goals
 
@@ -23,6 +30,9 @@ For this PR, `masm-decompiler` remains an implementation detail. We should hide 
 - Do not rename or split the `masm-decompiler` crate in this PR.
 - Do not expose prepared analysis as a public API until its shape has survived the first refactors.
 - Do not centralize instruction semantics before behavior tests and prepared analysis are in place.
+- Do not make capability traits public in this PR.
+- Do not introduce a dynamic plugin registry or generic scheduler.
+- Do not introduce a staged macro/DSL for instruction semantics as part of the trait refactor.
 
 ## Plan
 
@@ -78,7 +88,27 @@ The advice analyses currently repeat statement-walking and transfer behavior acr
 
 Do this incrementally, one diagnostic family or shared behavior at a time.
 
-### 6. Centralize instruction semantics
+### 6. Introduce internal capability traits
+
+Use traits to make the analysis boundaries explicit without creating a public plugin API.
+
+The first implementation slice should extract the existing sink hook into an internal `AdviceCapability` with no behavior change. This keeps the current shared advice walker and advice domain, while making source, sanitizer, sink, summary, and diagnostic responsibilities explicit.
+
+Design constraints:
+
+- keep `masm-analysis::lint` as the public lint-facing interface
+- keep capability traits crate-internal
+- keep capability orchestration explicit because analysis order encodes semantic dependencies
+- use a shared advice domain for advice-related capabilities
+- use a typed advice summary carrier with capability-owned fields
+- let capabilities emit semantic analysis diagnostics, then convert them to lint diagnostics in the lint-facing interface
+- use procedure-level analysis capabilities for structurally different analyses such as signature mismatch
+- use statement-level advice capabilities for advice-related checks that share control-flow, loop, call, and summary mechanics
+- avoid `Box<dyn Any>` summary registries and dynamic plugin discovery
+
+The immediate goal is to reduce duplicated walking and transfer machinery. A broader declarative instruction-semantics table can follow later, after the capability boundaries are stable.
+
+### 7. Centralize instruction semantics
 
 After prepared analysis is in place, introduce a single classification point for instruction behavior used by stack effects, lifting, type facts, and lint checks. This should reduce regressions where a MASM instruction is supported by one pass but missed by another.
 
@@ -89,7 +119,10 @@ After prepared analysis is in place, introduce a single classification point for
 3. Add internal prepared analysis with behavior unchanged.
 4. Route existing analyses through prepared analysis and remove duplicate lifting.
 5. Consolidate advice transfer logic incrementally.
-6. Centralize instruction semantics.
+6. Extract the existing advice sink hook into an internal `AdviceCapability` with behavior unchanged.
+7. Introduce typed advice summaries and capability-owned summary fields where this removes duplicated call handling.
+8. Keep capability orchestration explicit while adding procedure-level `AnalysisCapability` boundaries for non-advice analyses.
+9. Centralize instruction semantics.
 
 Each commit should be small enough to review independently and should preserve all current diagnostics unless the commit message explicitly documents a deliberate behavior change.
 
@@ -105,6 +138,11 @@ The refactor is acceptable when all of the following are true:
 - Characterization tests cover the major current diagnostics and CLI exit-code behavior.
 - Refactor-specific regression tests cover control flow, calls, summaries, and instruction semantics touched by the changes.
 - The abstract interpretation loop remains present and reusable.
+- Advice-related diagnostics share one advice domain and one walker instead of each owning an independent abstract interpreter.
+- Internal capability traits exist only where they remove duplicated behavior or clarify semantic ownership.
+- Capability orchestration remains explicit; no dynamic registry is introduced.
+- Advice summaries use typed fields rather than type-erased per-capability storage.
+- Capabilities emit semantic diagnostics, and the lint-facing interface remains responsible for user-facing lint diagnostics.
 - No diagnostic family is removed for size reasons.
 - `make check`, `make test` or `make test-fast`, `make lint`, and `make check-features` or `scripts/check-features.sh` pass in that order after each completed implementation step.
 - Roborev review passes for the checkpoint commit according to the existing commit gate.
