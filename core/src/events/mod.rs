@@ -6,7 +6,7 @@ use miden_crypto::{
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 #[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::{Felt, utils::hash_string_to_word};
 
@@ -29,13 +29,24 @@ pub use sys_events::SystemEvent;
 ///
 /// Event IDs are derived from event names using blake3 hashing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize))]
 #[cfg_attr(feature = "serde", serde(transparent))]
 #[cfg_attr(
     all(feature = "arbitrary", test),
     miden_test_serde_macros::serde_test(binary_serde(true))
 )]
 pub struct EventId(u64);
+
+#[cfg(feature = "serde")]
+impl<'de> Deserialize<'de> for EventId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let event_id = u64::deserialize(deserializer)?;
+        Ok(Self::from_u64(event_id))
+    }
+}
 
 impl EventId {
     /// Computes the canonical event identifier for the given `name`.

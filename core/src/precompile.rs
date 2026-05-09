@@ -230,6 +230,15 @@ mod tests {
         };
         assert!(message.contains("requested 2 elements"));
     }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn precompile_request_serde_canonicalizes_event_id() {
+        let json = format!("{{\"event_id\":{},\"calldata\":[]}}", Felt::ORDER);
+        let request: PrecompileRequest = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(request.event_id(), EventId::from_u64(0));
+    }
 }
 
 impl PrecompileVerifierRegistry {
