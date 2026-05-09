@@ -156,8 +156,8 @@ pub fn build_lookup_fractions<A, F, EF>(
     challenges: &Challenges<EF>,
 ) -> LookupFractions<F, EF>
 where
-    F: Field + Sync,
-    EF: ExtensionField<F> + Sync,
+    F: Field,
+    EF: ExtensionField<F>,
     A: Sync,
     for<'a> A: LookupAir<ProverLookupBuilder<'a, F, EF>>,
 {
