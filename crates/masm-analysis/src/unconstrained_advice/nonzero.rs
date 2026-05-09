@@ -10,12 +10,12 @@ use super::{
     domain::AdviceFact,
     provenance::assign_call_results,
     shared::{
-        Env, MAX_LOOP_PASSES, apply_intrinsic_effect, apply_local_load_scalar,
-        apply_local_load_word, apply_local_store, apply_local_store_word, assign_expr_metadata,
-        assign_phi_metadata, expr_is_proven_nonzero, expr_output_fact, refine_if_envs,
-        refine_nonzero_from_intrinsic, seed_input_env, stmt_span,
+        Env, apply_intrinsic_effect, apply_local_load_scalar, apply_local_load_word,
+        apply_local_store, apply_local_store_word, assign_expr_metadata, assign_phi_metadata,
+        expr_is_proven_nonzero, expr_output_fact, join_loop_head_env, refine_if_envs,
+        refine_nonzero_from_intrinsic, seed_input_env, stabilized_loop_head_env, stmt_span,
     },
-    summary::{AdviceDiagnostic, AdviceDiagnosticsMap, AdviceSummaryMap},
+    summary::{AdviceDiagnostic, AdviceDiagnosticsMap, AdviceSummaryMap, diagnostic_from_fact},
 };
 use crate::prepared::PreparedProc;
 
@@ -314,54 +314,19 @@ impl<'a> ProcNonZeroAnalyzer<'a> {
 
     /// Evaluate a structured loop body conservatively.
     fn eval_loop_block(&self, body: &[Stmt], phis: &[LoopPhi], entry_env: Env) -> EvalResult {
-        let mut loop_env = entry_env.clone();
         let mut opaque = false;
 
-        for _ in 0..MAX_LOOP_PASSES {
-            let body_result = self.eval_block(body, loop_env.clone());
+        let mut loop_env = stabilized_loop_head_env(&entry_env, phis, |loop_env| {
+            let body_result = self.eval_block(body, loop_env);
             opaque |= body_result.opaque;
-
-            let mut next_env = loop_env.join(&body_result.env);
-            for phi in phis {
-                let merged = entry_env
-                    .fact_for_var(&phi.init)
-                    .join(&body_result.env.fact_for_var(&phi.step));
-                next_env.set_var_fact(&phi.dest, merged);
-                assign_phi_metadata(
-                    &phi.dest,
-                    &phi.init,
-                    &entry_env,
-                    &phi.step,
-                    &body_result.env,
-                    &mut next_env,
-                );
-            }
-
-            if next_env == loop_env {
-                loop_env = next_env;
-                break;
-            }
-            loop_env = next_env;
-        }
+            body_result.env
+        });
 
         let body_result = self.eval_block(body, loop_env.clone());
         opaque |= body_result.opaque;
         let mut diagnostics = body_result.diagnostics;
         let mut required_inputs = body_result.required_inputs;
-        loop_env = loop_env.join(&body_result.env);
-        for phi in phis {
-            let merged =
-                entry_env.fact_for_var(&phi.init).join(&body_result.env.fact_for_var(&phi.step));
-            loop_env.set_var_fact(&phi.dest, merged);
-            assign_phi_metadata(
-                &phi.dest,
-                &phi.init,
-                &entry_env,
-                &phi.step,
-                &body_result.env,
-                &mut loop_env,
-            );
-        }
+        loop_env = join_loop_head_env(&loop_env, &entry_env, &body_result.env, phis);
 
         EvalResult {
             env: loop_env,
@@ -378,9 +343,7 @@ impl<'a> ProcNonZeroAnalyzer<'a> {
         message: impl Into<String>,
         fact: &AdviceFact,
     ) -> AdviceDiagnostic {
-        let mut diagnostic = AdviceDiagnostic::new(self.proc_path.clone(), span, message);
-        diagnostic.origins = fact.source_spans.iter().copied().collect();
-        diagnostic
+        diagnostic_from_fact(self.proc_path.clone(), span, message, fact)
     }
 
     /// Emit call-site diagnostics and summary requirements for a callee non-zero precondition.

@@ -7,7 +7,7 @@ use masm_decompiler::{Stmt, SymbolPath};
 use super::{
     domain::AdviceFact,
     shared::{Env, intrinsic_base_name},
-    summary::{AdviceDiagnostic, AdviceDiagnosticsMap, AdviceSummaryMap},
+    summary::{AdviceDiagnostic, AdviceDiagnosticsMap, AdviceSummaryMap, diagnostic_from_fact},
     walker::{self, SinkDetector},
 };
 use crate::prepared::PreparedProc;
@@ -87,8 +87,6 @@ impl AddressDetector {
         message: impl Into<String>,
         fact: &AdviceFact,
     ) -> AdviceDiagnostic {
-        let mut diagnostic = AdviceDiagnostic::new(self.proc_path.clone(), span, message);
-        diagnostic.origins = fact.source_spans.iter().copied().collect();
-        diagnostic
+        diagnostic_from_fact(self.proc_path.clone(), span, message, fact)
     }
 }
