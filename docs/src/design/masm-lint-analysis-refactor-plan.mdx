@@ -1,0 +1,118 @@
+# MASM lint analysis refactor plan
+
+This plan reduces the size and breadth of the MASM lint integration while preserving current lint diagnostics. The goal is not to minimize lines of code by deleting diagnostic families; it is to make the imported MASM analysis pipeline narrower, better tested, and easier to review incrementally.
+
+## Scope
+
+The MASM lint integration currently vendors a semantic-analysis pipeline around `masm-lint`, `masm-analysis`, and `masm-decompiler`. The abstract interpretation loop itself is small. Most of the imported code supports loading MASM modules, resolving symbols, ordering calls, inferring signatures, lifting procedures, deriving type facts, and producing advice-related diagnostics.
+
+For this PR, `masm-decompiler` remains an implementation detail. We should hide it behind the lint-facing `masm-analysis` API instead of renaming or splitting crates immediately.
+
+## Definitions
+
+- **MASM analysis pipeline**: the semantic flow that loads MASM modules, resolves procedures, orders calls, infers signatures, lifts procedures, derives type facts, and emits lint diagnostics.
+- **Minimal components**: the smallest integration that preserves current user-facing lint diagnostics while reducing duplicate machinery and public API surface.
+- **Lint-facing interface**: the narrow API used by the MASM lint command to request diagnostics from the analysis implementation.
+- **Prepared analysis**: internal cached semantic state shared by multiple lint analyses.
+- **Characterization test**: a behavior-level test that protects current lint output before internal refactors.
+- **Instruction semantics**: the shared meaning of a MASM instruction for stack effects, lifting, type facts, and lint diagnostics.
+
+## Non-goals
+
+- Do not remove current diagnostic families solely to reduce line count.
+- Do not rename or split the `masm-decompiler` crate in this PR.
+- Do not expose prepared analysis as a public API until its shape has survived the first refactors.
+- Do not centralize instruction semantics before behavior tests and prepared analysis are in place.
+
+## Plan
+
+### 1. Add characterization coverage
+
+Add tests through the lint-facing interface before reshaping internals. These tests should validate current behavior rather than module structure.
+
+Cover:
+
+- signature mismatch diagnostics
+- unconstrained advice provenance
+- u32 precondition diagnostics
+- nonzero precondition diagnostics
+- address advice diagnostics
+- Merkle advice diagnostics
+- interprocedural summaries
+- `if`, `while`, and `repeat` control-flow cases
+- grouped output if `--group-by-origin` remains user-facing
+- CLI exit codes for clean, warning, and hard-error cases
+
+### 2. Narrow the lint-facing interface
+
+Make `masm-analysis::lint` the stable API used by `masm-lint`. Stop exposing broad `masm-decompiler` internals unless external callers need them.
+
+Expected changes:
+
+- keep `masm-lint` focused on CLI argument parsing, file selection, rendering, and exit codes
+- move lint policy and diagnostic assembly into `masm-analysis`
+- reduce public reexports from `masm-decompiler`
+- keep behavior unchanged
+
+### 3. Introduce prepared analysis
+
+Add an internal prepared-analysis layer owned by `masm-analysis`.
+
+It should cache:
+
+- workspace
+- call graph
+- inferred signatures
+- lifted procedures
+- type summaries
+
+This creates one pipeline entry point for downstream analyses and prepares the codebase to remove duplicate lifting.
+
+### 4. Remove duplicate lifting
+
+Route type inference and unconstrained-advice analysis through prepared analysis. The code should lift each analyzed procedure once per analysis run unless there is a correctness reason to do otherwise.
+
+### 5. Consolidate advice transfer logic
+
+The advice analyses currently repeat statement-walking and transfer behavior across provenance, u32, nonzero, and sink walkers. Consolidate shared loop, branch, call, and summary handling while preserving sink-specific diagnostics.
+
+Do this incrementally, one diagnostic family or shared behavior at a time.
+
+### 6. Centralize instruction semantics
+
+After prepared analysis is in place, introduce a single classification point for instruction behavior used by stack effects, lifting, type facts, and lint checks. This should reduce regressions where a MASM instruction is supported by one pass but missed by another.
+
+## Suggested commit order
+
+1. Add characterization tests only.
+2. Narrow the lint-facing interface and public exports.
+3. Add internal prepared analysis with behavior unchanged.
+4. Route existing analyses through prepared analysis and remove duplicate lifting.
+5. Consolidate advice transfer logic incrementally.
+6. Centralize instruction semantics.
+
+Each commit should be small enough to review independently and should preserve all current diagnostics unless the commit message explicitly documents a deliberate behavior change.
+
+## Acceptance conditions
+
+The refactor is acceptable when all of the following are true:
+
+- Current lint diagnostic coverage is preserved, including signature mismatch, unconstrained advice provenance, u32, nonzero, address, and Merkle diagnostics.
+- The `masm-lint` binary uses a narrow lint-facing API instead of directly depending on broad decompiler internals.
+- `masm-decompiler` internals are hidden or de-exported where they are only implementation details of `masm-analysis`.
+- Prepared analysis exists internally and owns shared products needed by multiple analyses.
+- Type inference and advice analysis no longer perform duplicate procedure lifting for the same analysis run.
+- Characterization tests cover the major current diagnostics and CLI exit-code behavior.
+- Refactor-specific regression tests cover control flow, calls, summaries, and instruction semantics touched by the changes.
+- The abstract interpretation loop remains present and reusable.
+- No diagnostic family is removed for size reasons.
+- `make check`, `make test` or `make test-fast`, `make lint`, and `make check-features` or `scripts/check-features.sh` pass in that order after each completed implementation step.
+- Roborev review passes for the checkpoint commit according to the existing commit gate.
+
+## Out of scope for this PR
+
+- A public analysis-core crate split.
+- A crate rename from `masm-decompiler`.
+- A new lint rule taxonomy.
+- A compatibility layer for old internal APIs.
+- Deleting address or Merkle diagnostics.
