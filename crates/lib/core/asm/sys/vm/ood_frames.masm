@@ -8,12 +8,12 @@ use miden::core::crypto::hashes::poseidon2
 #! evaluation.
 #!
 #!
-#! Inputs:  [R2, R1, C, ptr, acc1, acc0]
-#! Outputs: [R2, R1, C, ptr, acc1`, acc0`]
+#! Inputs:  [R0, R1, C, ptr, acc0, acc1]
+#! Outputs: [R0, R1, C, ptr, acc0`, acc1`]
 #!
-#! Cycles: 72
+#! Cycles: 78
 pub proc process_row_ood_evaluations
-    repeat.24
+    repeat.26
         adv_pipe
         horner_eval_ext
         exec.poseidon2::permute

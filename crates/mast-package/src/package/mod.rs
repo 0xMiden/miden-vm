@@ -17,7 +17,12 @@ use alloc::{
 use miden_assembly_syntax::{
     KernelLibrary, Library, Report, ast::QualifiedProcedureName, library::ModuleInfo,
 };
-use miden_core::{Word, program::Kernel, serde::Deserializable};
+use miden_core::{
+    Word,
+    crypto::hash::Poseidon2,
+    program::Kernel,
+    serde::{ByteWriter, Deserializable, Serializable},
+};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -107,6 +112,49 @@ impl Package {
         *self.mast.digest()
     }
 
+    /// Returns a digest of the package content relevant to assembly and dependency resolution.
+    ///
+    /// This is distinct from [`Self::digest`], which is only the digest of the underlying MAST
+    /// artifact. The content digest currently binds the MAST digest, package name, semantic
+    /// version, package kind, manifest, and any semantic package sections. Package descriptions
+    /// and opaque custom sections are intentionally excluded for now; kernel-section binding is
+    /// added separately.
+    pub fn content_digest(&self) -> Word {
+        let mut bytes = Vec::new();
+        self.write_content_digest_preimage(&mut bytes, None);
+        Poseidon2::hash(&bytes)
+    }
+
+    fn write_content_digest_preimage<W: ByteWriter>(
+        &self,
+        target: &mut W,
+        kernel_digest: Option<&Word>,
+    ) {
+        target.write_bytes(b"miden.package.content.v2");
+        self.digest().write_into(target);
+        self.name.write_into(target);
+        self.version.to_string().write_into(target);
+        target.write_u8(self.kind.into());
+        self.manifest.write_into(target);
+        self.write_content_digest_sections(target);
+        target.write_bool(kernel_digest.is_some());
+        if let Some(kernel_digest) = kernel_digest {
+            kernel_digest.write_into(target);
+        }
+    }
+
+    fn write_content_digest_sections<W: ByteWriter>(&self, target: &mut W) {
+        let semantic_sections = self
+            .sections
+            .iter()
+            .filter(|section| section.id == SectionId::ACCOUNT_COMPONENT_METADATA)
+            .collect::<Vec<_>>();
+        target.write_usize(semantic_sections.len());
+        for section in semantic_sections {
+            section.write_into(target);
+        }
+    }
+
     /// Returns true if this package was produced for an executable target
     pub fn is_program(&self) -> bool {
         self.kind.is_executable()
@@ -145,6 +193,11 @@ impl Package {
                 }
             })
             .collect::<Vec<_>>();
+        if exports.is_empty() {
+            return Err(Report::msg(
+                "invalid kernel package: does not export any kernel procedures",
+            ));
+        }
         Kernel::new(&exports).map_err(|err| Report::msg(format!("invalid kernel package: {err}")))
     }
 
@@ -175,17 +228,23 @@ impl Package {
             )));
         }
         let main_path = MasmPath::exec_path().join(ast::ProcedureName::MAIN_PROC_NAME);
-        if let Some(digest) = self.mast.get_procedure_root_by_path(&main_path)
-            && let Some(entrypoint) = self.mast.mast_forest().find_procedure_root(digest)
-        {
+        if let Some(entrypoint) = self.mast.get_procedure_node_by_path(&main_path) {
             let mast_forest = self.mast.mast_forest().clone();
-            match self.try_embedded_kernel_library()? {
-                Some(kernel_library) => Ok(Program::with_kernel(
+            let kernel_dependency = self.kernel_runtime_dependency()?.cloned();
+            match (self.try_embedded_kernel_library()?, kernel_dependency) {
+                (Some(kernel_library), _) => Ok(Program::with_kernel(
                     mast_forest,
                     entrypoint,
                     kernel_library.kernel().clone(),
                 )),
-                None => Ok(Program::new(mast_forest, entrypoint)),
+                (None, Some(kernel_dependency)) => Err(Report::msg(format!(
+                    "package '{}' declares kernel runtime dependency '{}@{}#{}', but does not embed the kernel package required to reconstruct a program",
+                    self.name,
+                    kernel_dependency.name,
+                    kernel_dependency.version,
+                    kernel_dependency.digest
+                ))),
+                (None, None) => Ok(Program::new(mast_forest, entrypoint)),
             }
         } else {
             Err(Report::msg(format!(
@@ -331,24 +390,29 @@ impl Package {
             return Err(Report::msg("expected library but got an executable"));
         }
 
+        let entrypoint_namespace = entrypoint.namespace().to_absolute();
         let module = self
             .mast
             .module_infos()
-            .find(|info| info.path() == entrypoint.namespace())
+            .find(|info| info.path() == entrypoint_namespace.as_ref())
             .ok_or_else(|| {
                 Report::msg(format!(
                     "invalid entrypoint: library does not contain a module named '{}'",
                     entrypoint.namespace()
                 ))
             })?;
-        if let Some(digest) = module.get_procedure_digest_by_name(entrypoint.name()) {
+        if let Some(procedure) = module.get_procedure_by_name(entrypoint.name()) {
             let mast_forest = self.mast.mast_forest().clone();
-            let node_id = mast_forest.find_procedure_root(digest).ok_or_else(|| {
-                Report::msg(
-                    "invalid entrypoint: malformed library - procedure exported, but digest has \
-                     no node in the forest",
-                )
-            })?;
+            let digest = procedure.digest;
+            let node_id = procedure
+                .source_root_id()
+                .or_else(|| mast_forest.find_procedure_root(digest))
+                .ok_or_else(|| {
+                    Report::msg(
+                        "invalid entrypoint: malformed library - procedure exported, but digest \
+                         has no node in the forest",
+                    )
+                })?;
 
             let exec_path: Arc<MasmPath> =
                 MasmPath::exec_path().join(masm::ProcedureName::MAIN_PROC_NAME).into();
@@ -454,15 +518,16 @@ fn arbitrary_library() -> Arc<Library> {
 #[cfg(test)]
 mod tests {
     use alloc::{collections::BTreeMap, sync::Arc, vec, vec::Vec};
+    use core::str::FromStr;
 
     use miden_assembly_syntax::{
         Library,
-        ast::{Path as AstPath, PathBuf},
+        ast::{Path as AstPath, PathBuf, ProcedureName, QualifiedProcedureName},
         library::{LibraryExport, ProcedureExport as LibraryProcedureExport},
     };
     use miden_core::{
         mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, MastNodeId},
-        operations::Operation,
+        operations::{AssemblyOp, Operation},
         serde::Serializable,
     };
 
@@ -495,6 +560,35 @@ mod tests {
         Arc::new(Library::new(Arc::new(forest), exports).expect("failed to build library"))
     }
 
+    fn build_same_digest_library(exports: &[(&str, &str)]) -> Arc<Library> {
+        let mut forest = MastForest::new();
+        let mut library_exports = BTreeMap::new();
+
+        for (path_str, context_name) in exports {
+            let asm_op_id = forest
+                .debug_info_mut()
+                .add_asm_op(AssemblyOp::new(None, (*context_name).into(), 1, "add".into()))
+                .expect("failed to add asm op");
+            let node_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+                .add_to_forest(&mut forest)
+                .expect("failed to build basic block");
+            let num_ops = forest[node_id].get_basic_block().unwrap().num_operations() as usize;
+            forest
+                .debug_info_mut()
+                .register_asm_ops(node_id, num_ops, vec![(0, asm_op_id)])
+                .expect("failed to register asm ops");
+            forest.make_root(node_id);
+
+            let path = absolute_path(path_str);
+            library_exports.insert(
+                Arc::clone(&path),
+                LibraryExport::Procedure(LibraryProcedureExport::new(node_id, path)),
+            );
+        }
+
+        Arc::new(Library::new(Arc::new(forest), library_exports).expect("failed to build library"))
+    }
+
     fn build_package(
         name: &str,
         kind: TargetType,
@@ -515,6 +609,23 @@ mod tests {
 
     fn build_kernel_package(name: &str) -> Package {
         build_package(name, TargetType::Kernel, &format!("{name}::boot"), [], Vec::new())
+    }
+
+    #[test]
+    fn to_kernel_rejects_empty_kernel_exports() {
+        let mut package = build_package("kernel", TargetType::Kernel, "$kernel::boot", [], vec![]);
+        package.manifest =
+            PackageManifest::new([]).expect("empty package manifest should be valid");
+
+        let error = package
+            .to_kernel()
+            .expect_err("kernel packages without exported procedures should be rejected");
+
+        assert!(
+            error
+                .to_string()
+                .contains("invalid kernel package: does not export any kernel procedures")
+        );
     }
 
     fn kernel_dependency(package: &Package) -> Dependency {
@@ -565,5 +676,46 @@ mod tests {
             .expect_err("multiple kernel runtime dependencies should be rejected");
 
         assert!(error.to_string().contains("declares multiple kernel runtime dependencies"));
+    }
+
+    #[test]
+    fn make_executable_preserves_selected_same_digest_root_metadata() {
+        let library =
+            build_same_digest_library(&[("app::alias_a", "alias_a"), ("app::alias_b", "alias_b")]);
+        let package = *Package::from_library(
+            PackageId::from("app"),
+            Version::new(1, 0, 0),
+            TargetType::Library,
+            library,
+            [],
+        );
+
+        let entrypoint = QualifiedProcedureName::from_str("app::alias_b").unwrap();
+        let executable = package.make_executable(&entrypoint).unwrap();
+
+        let main_path =
+            miden_assembly_syntax::Path::exec_path().join(ProcedureName::MAIN_PROC_NAME);
+        let entrypoint_node = executable.mast.get_procedure_node_by_path(&main_path).unwrap();
+        assert_eq!(
+            executable
+                .mast
+                .mast_forest()
+                .debug_info()
+                .first_asm_op_for_node(entrypoint_node)
+                .unwrap()
+                .context_name(),
+            "alias_b"
+        );
+
+        let program = executable.try_into_program().unwrap();
+        assert_eq!(
+            program
+                .mast_forest()
+                .debug_info()
+                .first_asm_op_for_node(program.entrypoint())
+                .unwrap()
+                .context_name(),
+            "alias_b"
+        );
     }
 }

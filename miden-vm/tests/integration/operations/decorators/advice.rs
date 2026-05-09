@@ -81,7 +81,12 @@ fn advice_push_mapval() {
     let stack_key: [u64; 4] = [1, 2, 3, 4];
     let adv_map = [(
         Word::try_from(stack_key).unwrap(),
-        vec![Felt::new(5), Felt::new(6), Felt::new(7), Felt::new(8)],
+        vec![
+            Felt::new_unchecked(5),
+            Felt::new_unchecked(6),
+            Felt::new_unchecked(7),
+            Felt::new_unchecked(8),
+        ],
     )];
 
     let test = build_test!(source, &stack_inputs, [], MerkleStore::default(), adv_map);
@@ -97,7 +102,7 @@ fn advice_push_mapval() {
         dropw
 
         # move the number of values from the advice stack to the operand stack
-        adv_push.1
+        adv_push
         swap drop
     end";
 
@@ -105,7 +110,13 @@ fn advice_push_mapval() {
     let stack_key: [u64; 4] = [1, 2, 3, 4];
     let adv_map = [(
         Word::try_from(stack_key).unwrap(),
-        vec![Felt::new(9), Felt::new(8), Felt::new(7), Felt::new(6), Felt::new(5)],
+        vec![
+            Felt::new_unchecked(9),
+            Felt::new_unchecked(8),
+            Felt::new_unchecked(7),
+            Felt::new_unchecked(6),
+            Felt::new_unchecked(5),
+        ],
     )];
 
     let test = build_test!(source, &stack_inputs, [], MerkleStore::default(), adv_map);
@@ -125,7 +136,7 @@ fn adv_push_mapvaln() {
         dropw
 
         # move the values from the advice stack to the operand stack
-        adv_push.6
+        repeat.6 adv_push end
         swapdw dropw dropw
     end";
 
@@ -133,7 +144,13 @@ fn adv_push_mapvaln() {
     let stack_key: [u64; 4] = [1, 2, 3, 4];
     let adv_map = [(
         Word::try_from(stack_key).unwrap(),
-        vec![Felt::new(11), Felt::new(12), Felt::new(13), Felt::new(14), Felt::new(15)],
+        vec![
+            Felt::new_unchecked(11),
+            Felt::new_unchecked(12),
+            Felt::new_unchecked(13),
+            Felt::new_unchecked(14),
+            Felt::new_unchecked(15),
+        ],
     )];
 
     let test = build_test!(source, &stack_inputs, [], MerkleStore::default(), adv_map);
@@ -154,7 +171,7 @@ fn adv_push_mapvaln_padding() {
         dropw
 
         # move the values from the advice stack to the operand stack
-        adv_push.6
+        repeat.6 adv_push end
         swapdw dropw dropw
     end";
 
@@ -162,7 +179,13 @@ fn adv_push_mapvaln_padding() {
     let stack_key: [u64; 4] = [1, 2, 3, 4];
     let adv_map = [(
         Word::try_from(stack_key).unwrap(),
-        vec![Felt::new(11), Felt::new(12), Felt::new(13), Felt::new(14), Felt::new(15)],
+        vec![
+            Felt::new_unchecked(11),
+            Felt::new_unchecked(12),
+            Felt::new_unchecked(13),
+            Felt::new_unchecked(14),
+            Felt::new_unchecked(15),
+        ],
     )];
 
     let test = build_test!(source, &stack_inputs, [], MerkleStore::default(), adv_map);
@@ -181,7 +204,7 @@ fn adv_push_mapvaln_padding() {
         dropw
 
         # move the values from the advice stack to the operand stack
-        adv_push.5
+        repeat.5 adv_push end
         swapdw dropw dropw
     end";
 
@@ -189,7 +212,7 @@ fn adv_push_mapvaln_padding() {
     let stack_key: [u64; 4] = [1, 2, 3, 4];
     let adv_map = [(
         Word::try_from(stack_key).unwrap(),
-        vec![Felt::new(11), Felt::new(12), Felt::new(13)],
+        vec![Felt::new_unchecked(11), Felt::new_unchecked(12), Felt::new_unchecked(13)],
     )];
 
     let test = build_test!(source, &stack_inputs, [], MerkleStore::default(), adv_map);
@@ -208,8 +231,8 @@ fn adv_push_mapvaln_padding() {
         dropw
 
         # move the values from the advice stack to the operand stack
-        adv_push.8 swapdw dropw dropw
-        adv_push.1 movup.9 drop
+        repeat.8 adv_push end swapdw dropw dropw
+        adv_push movup.9 drop
     end";
 
     let stack_inputs = [1, 2, 3, 4];
@@ -217,12 +240,12 @@ fn adv_push_mapvaln_padding() {
     let adv_map = [(
         Word::try_from(stack_key).unwrap(),
         vec![
-            Felt::new(11),
-            Felt::new(12),
-            Felt::new(13),
-            Felt::new(14),
-            Felt::new(15),
-            Felt::new(16),
+            Felt::new_unchecked(11),
+            Felt::new_unchecked(12),
+            Felt::new_unchecked(13),
+            Felt::new_unchecked(14),
+            Felt::new_unchecked(15),
+            Felt::new_unchecked(16),
         ],
     )];
 
@@ -241,7 +264,7 @@ fn advice_has_mapkey() {
         adv.has_mapkey
 
         # move the the flag from the advice stack to the operand stack
-        adv_push.1
+        adv_push
 
         # check that the flag equals 1 -- the key is present in the map
         dup assert.err="presence flag should be equal 1"
@@ -254,7 +277,12 @@ fn advice_has_mapkey() {
     let stack_key: [u64; 4] = [1, 2, 3, 4];
     let adv_map = [(
         Word::try_from(stack_key).unwrap(),
-        vec![Felt::new(8), Felt::new(7), Felt::new(6), Felt::new(5)],
+        vec![
+            Felt::new_unchecked(8),
+            Felt::new_unchecked(7),
+            Felt::new_unchecked(6),
+            Felt::new_unchecked(5),
+        ],
     )];
 
     let test = build_test!(source, &stack_inputs, [], MerkleStore::default(), adv_map);
@@ -269,7 +297,7 @@ fn advice_has_mapkey() {
         adv.has_mapkey
 
         # move the the flag from the advice stack to the operand stack
-        adv_push.1
+        adv_push
 
         # check that the flag equals 0 -- the key is not present in the map
         dup assertz.err="presence flag should be equal 0"
@@ -282,7 +310,12 @@ fn advice_has_mapkey() {
     let map_key = [5u64, 6, 7, 8];
     let adv_map = [(
         Word::try_from(map_key).unwrap(),
-        vec![Felt::new(9), Felt::new(10), Felt::new(11), Felt::new(12)],
+        vec![
+            Felt::new_unchecked(9),
+            Felt::new_unchecked(10),
+            Felt::new_unchecked(11),
+            Felt::new_unchecked(12),
+        ],
     )];
 
     let test = build_test!(source, &stack_inputs, [], MerkleStore::default(), adv_map);

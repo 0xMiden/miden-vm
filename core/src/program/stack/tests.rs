@@ -140,17 +140,17 @@ fn test_get_stack_word() {
 
     // For idx=0, we expect [1, 2, 3, 4] (elements at positions 0-3, in order)
     let word_0 = outputs.get_word(0).unwrap();
-    assert_eq!(word_0[0], Felt::new(1), "word[0] element 0");
-    assert_eq!(word_0[1], Felt::new(2), "word[0] element 1");
-    assert_eq!(word_0[2], Felt::new(3), "word[0] element 2");
-    assert_eq!(word_0[3], Felt::new(4), "word[0] element 3");
+    assert_eq!(word_0[0], Felt::new_unchecked(1), "word[0] element 0");
+    assert_eq!(word_0[1], Felt::new_unchecked(2), "word[0] element 1");
+    assert_eq!(word_0[2], Felt::new_unchecked(3), "word[0] element 2");
+    assert_eq!(word_0[3], Felt::new_unchecked(4), "word[0] element 3");
 
     // For idx=4, we expect [5, 6, 7, 8]
     let word_4 = outputs.get_word(4).unwrap();
-    assert_eq!(word_4[0], Felt::new(5), "word[4] element 0");
-    assert_eq!(word_4[1], Felt::new(6), "word[4] element 1");
-    assert_eq!(word_4[2], Felt::new(7), "word[4] element 2");
-    assert_eq!(word_4[3], Felt::new(8), "word[4] element 3");
+    assert_eq!(word_4[0], Felt::new_unchecked(5), "word[4] element 0");
+    assert_eq!(word_4[1], Felt::new_unchecked(6), "word[4] element 1");
+    assert_eq!(word_4[2], Felt::new_unchecked(7), "word[4] element 2");
+    assert_eq!(word_4[3], Felt::new_unchecked(8), "word[4] element 3");
 
     // Test bounds checking - should return None for out of bounds access
     assert!(outputs.get_word(13).is_none(), "Should return None for out of bounds");

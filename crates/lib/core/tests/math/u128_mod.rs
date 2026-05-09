@@ -45,7 +45,7 @@ fn test_u128_op_stack_preservation(op: &str, a: u128, b: u128, expected_len: usi
     let stack_value = output.stack_outputs().get_element(expected_len).unwrap();
     assert_eq!(
         stack_value,
-        Felt::new(sentinel),
+        Felt::new_unchecked(sentinel),
         "Stack preservation failed for {op}: sentinel at position {expected_len} was corrupted"
     );
 }
@@ -782,10 +782,14 @@ fn shr_stack_padding_k1() {
 
     // Verify the result is correct and sentinels do not appear in the output
     let stack = result.stack_outputs();
-    assert_eq!(stack.get_element(0).unwrap(), Felt::new(c0), "c0 mismatch");
-    assert_eq!(stack.get_element(1).unwrap(), Felt::new(c1), "c1 mismatch");
-    assert_eq!(stack.get_element(2).unwrap(), Felt::new(c2), "c2 mismatch");
-    assert_eq!(stack.get_element(3).unwrap(), Felt::new(0), "c3 should be 0, not a sentinel");
+    assert_eq!(stack.get_element(0).unwrap(), Felt::new_unchecked(c0), "c0 mismatch");
+    assert_eq!(stack.get_element(1).unwrap(), Felt::new_unchecked(c1), "c1 mismatch");
+    assert_eq!(stack.get_element(2).unwrap(), Felt::new_unchecked(c2), "c2 mismatch");
+    assert_eq!(
+        stack.get_element(3).unwrap(),
+        Felt::new_unchecked(0),
+        "c3 should be 0, not a sentinel"
+    );
 }
 
 #[test]
@@ -811,10 +815,18 @@ fn shr_stack_padding_k2() {
     let result = test.execute().unwrap();
 
     let stack = result.stack_outputs();
-    assert_eq!(stack.get_element(0).unwrap(), Felt::new(c0), "c0 mismatch");
-    assert_eq!(stack.get_element(1).unwrap(), Felt::new(c1), "c1 mismatch");
-    assert_eq!(stack.get_element(2).unwrap(), Felt::new(0), "c2 should be 0, not a sentinel");
-    assert_eq!(stack.get_element(3).unwrap(), Felt::new(0), "c3 should be 0, not a sentinel");
+    assert_eq!(stack.get_element(0).unwrap(), Felt::new_unchecked(c0), "c0 mismatch");
+    assert_eq!(stack.get_element(1).unwrap(), Felt::new_unchecked(c1), "c1 mismatch");
+    assert_eq!(
+        stack.get_element(2).unwrap(),
+        Felt::new_unchecked(0),
+        "c2 should be 0, not a sentinel"
+    );
+    assert_eq!(
+        stack.get_element(3).unwrap(),
+        Felt::new_unchecked(0),
+        "c3 should be 0, not a sentinel"
+    );
 }
 
 #[test]
@@ -840,10 +852,22 @@ fn shr_stack_padding_k3() {
     let result = test.execute().unwrap();
 
     let stack = result.stack_outputs();
-    assert_eq!(stack.get_element(0).unwrap(), Felt::new(c0), "c0 mismatch");
-    assert_eq!(stack.get_element(1).unwrap(), Felt::new(0), "c1 should be 0, not a sentinel");
-    assert_eq!(stack.get_element(2).unwrap(), Felt::new(0), "c2 should be 0, not a sentinel");
-    assert_eq!(stack.get_element(3).unwrap(), Felt::new(0), "c3 should be 0, not a sentinel");
+    assert_eq!(stack.get_element(0).unwrap(), Felt::new_unchecked(c0), "c0 mismatch");
+    assert_eq!(
+        stack.get_element(1).unwrap(),
+        Felt::new_unchecked(0),
+        "c1 should be 0, not a sentinel"
+    );
+    assert_eq!(
+        stack.get_element(2).unwrap(),
+        Felt::new_unchecked(0),
+        "c2 should be 0, not a sentinel"
+    );
+    assert_eq!(
+        stack.get_element(3).unwrap(),
+        Felt::new_unchecked(0),
+        "c3 should be 0, not a sentinel"
+    );
 }
 
 /// Test shr with non-zero m values and sentinels to verify cross-limb bit transfer
@@ -870,10 +894,14 @@ fn shr_stack_padding_nonzero_m() {
     let result = test.execute().unwrap();
 
     let stack = result.stack_outputs();
-    assert_eq!(stack.get_element(0).unwrap(), Felt::new(c0), "c0 mismatch");
-    assert_eq!(stack.get_element(1).unwrap(), Felt::new(c1), "c1 mismatch");
-    assert_eq!(stack.get_element(2).unwrap(), Felt::new(c2), "c2 mismatch");
-    assert_eq!(stack.get_element(3).unwrap(), Felt::new(0), "c3 should be 0, not a sentinel");
+    assert_eq!(stack.get_element(0).unwrap(), Felt::new_unchecked(c0), "c0 mismatch");
+    assert_eq!(stack.get_element(1).unwrap(), Felt::new_unchecked(c1), "c1 mismatch");
+    assert_eq!(stack.get_element(2).unwrap(), Felt::new_unchecked(c2), "c2 mismatch");
+    assert_eq!(
+        stack.get_element(3).unwrap(),
+        Felt::new_unchecked(0),
+        "c3 should be 0, not a sentinel"
+    );
 }
 
 /// Test shr with boundary shift values.

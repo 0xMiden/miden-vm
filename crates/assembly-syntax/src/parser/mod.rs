@@ -10,7 +10,10 @@ macro_rules! span {
 
 lalrpop_util::lalrpop_mod!(
     #[expect(clippy::all)]
+    #[expect(clippy::redundant_closure_for_method_calls)]
+    #[expect(clippy::trivially_copy_pass_by_ref)]
     #[expect(unused_lifetimes)]
+    #[expect(unused_qualifications)]
     grammar,
     "/parser/grammar.rs"
 );
@@ -95,7 +98,7 @@ impl ModuleParser {
     ) -> Result<Box<ast::Module>, Report> {
         let path = path.as_ref();
         if let Err(err) = Path::validate(path.as_str()) {
-            return Err(Report::msg(err.to_string()).with_source_code(source.clone()));
+            return Err(Report::msg(err.to_string()).with_source_code(source));
         }
         let forms = parse_forms_internal(source.clone(), &mut self.interned)
             .map_err(|err| Report::new(err).with_source_code(source.clone()))?;
@@ -270,7 +273,7 @@ mod module_walker {
         fn next_entry(
             &mut self,
             entry: &DirEntry,
-            ty: &FileType,
+            ty: FileType,
         ) -> Result<Option<ModuleEntry>, Report> {
             if ty.is_dir() {
                 let dir = entry.path();
@@ -325,7 +328,7 @@ mod module_walker {
                     .into_diagnostic();
 
                 match entry {
-                    Ok((ref entry, ref file_type)) => {
+                    Ok((ref entry, file_type)) => {
                         match self.next_entry(entry, file_type).transpose() {
                             None => {},
                             result => break result,

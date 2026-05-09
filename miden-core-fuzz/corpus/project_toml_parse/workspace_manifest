@@ -1,0 +1,10 @@
+[workspace]
+members = ["crate-a", "crate-b", "crate-c"]
+
+[workspace.package]
+version = "0.1.0"
+description = "A workspace example"
+
+[workspace.dependencies]
+foo = { path = "crate-a" }
+bar = { version = "1.0.0", linkage = "static" }

@@ -1,6 +1,6 @@
 use alloc::collections::BTreeMap;
 
-use miden_air::trace::{RowIndex, chiplets::kernel_rom::TRACE_WIDTH};
+use miden_air::trace::{RowIndex, chiplets::KERNEL_ROM_TRACE_WIDTH};
 use miden_core::field::PrimeCharacteristicRing;
 
 use super::{Felt, Kernel, TraceFragment, Word as Digest};
@@ -19,27 +19,21 @@ type ProcHashBytes = [u8; 32];
 
 /// Kernel ROM chiplet for the VM.
 ///
-/// This component is responsible for validating that kernel calls requested by the executing
-/// program are made against procedures which are contained within the specified kernel. It also
-/// tacks all calls to kernel procedures and this info is used to construct an execution trace of
-/// all kernel accesses.
+/// Validates that every SYSCALL targets a procedure declared in the kernel, and produces
+/// exactly one trace row per declared procedure carrying the row's CALL-side multiplicity.
 ///
 /// # Execution trace
-/// The layout of the execution trace of kernel procedure accesses is shown below:
 ///
-///   s_first   h0   h1   h2   h3
-/// ├─────────┴────┴────┴────┴────┤
+///   m   h0   h1   h2   h3
+/// ├────┴────┴────┴────┴────┤
 ///
-/// In the above, the meaning of columns is as follows:
-/// - `s_first` indicates that this is the first occurrence of a new block of kernel procedure
-///   hashes. It also acts as a flag within the block indicating whether the hash should be sent to
-///   the virtual table or the bus.
-/// - `h0` - `h3` columns contain roots of procedures in a given kernel.
+/// - `m` is the number of SYSCALLs to this procedure (0 if declared but never called). It gates the
+///   chiplet-side CALL add; the INIT add is always emitted with multiplicity 1.
+/// - `h0..h3` is the procedure root digest.
 #[derive(Debug)]
 pub struct KernelRom {
     access_map: BTreeMap<ProcHashBytes, ProcAccessInfo>,
     kernel: Kernel,
-    trace_len: usize,
 }
 
 impl KernelRom {
@@ -50,21 +44,23 @@ impl KernelRom {
     /// The kernel ROM is populated with all procedures from the provided kernel. For each
     /// procedure the access count is set to 0.
     pub fn new(kernel: Kernel) -> Self {
-        let trace_len = kernel.proc_hashes().len();
         let mut access_map = BTreeMap::new();
         for &proc_hash in kernel.proc_hashes() {
             access_map.insert(proc_hash.into(), ProcAccessInfo::new(proc_hash));
         }
 
-        Self { access_map, kernel, trace_len }
+        Self { access_map, kernel }
     }
 
     // PUBLIC ACCESSORS
     // --------------------------------------------------------------------------------------------
 
     /// Returns length of execution trace required to describe kernel ROM.
-    pub const fn trace_len(&self) -> usize {
-        self.trace_len
+    ///
+    /// Under the all-LogUp layout this is exactly the number of declared kernel procedures
+    /// (one row per proc, regardless of access count).
+    pub fn trace_len(&self) -> usize {
+        self.access_map.len()
     }
 
     // STATE MUTATORS
@@ -81,7 +77,6 @@ impl KernelRom {
             .get_mut(&proc_hash_bytes)
             .ok_or(OperationError::SyscallTargetNotInKernel { proc_root })?;
 
-        self.trace_len += 1;
         access_info.num_accesses += 1;
         Ok(())
     }
@@ -90,22 +85,24 @@ impl KernelRom {
     // --------------------------------------------------------------------------------------------
 
     /// Populates the provided execution trace fragment with execution trace of this kernel ROM.
+    ///
+    /// Emits one row per declared kernel procedure: column 0 is the CALL-label multiplicity
+    /// (= number of SYSCALLs to this proc), columns 1..5 are the procedure digest.
     pub fn fill_trace(self, trace: &mut TraceFragment) {
-        debug_assert_eq!(TRACE_WIDTH, trace.width(), "inconsistent trace fragment width");
+        debug_assert_eq!(
+            KERNEL_ROM_TRACE_WIDTH,
+            trace.width(),
+            "inconsistent trace fragment width"
+        );
         let mut row = RowIndex::from(0);
         for access_info in self.access_map.values() {
-            // Always write an entry for this procedure hash responding to the requests in the
-            // requests in the virtual table. The verifier makes those requests by initializing
-            // the bus with the set of procedure hashes included in the public inputs.
-            access_info.write_into_trace(trace, row, true);
+            let multiplicity = Felt::from_u64(access_info.num_accesses as u64);
+            trace.set(row, 0, multiplicity);
+            trace.set(row, 1, access_info.proc_hash[0]);
+            trace.set(row, 2, access_info.proc_hash[1]);
+            trace.set(row, 3, access_info.proc_hash[2]);
+            trace.set(row, 4, access_info.proc_hash[3]);
             row += 1_u32;
-
-            // For every access made by the decoder/trace, include an entry in the chiplet bus
-            // responding to those requests.
-            for _ in 0..access_info.num_accesses {
-                access_info.write_into_trace(trace, row, false);
-                row += 1_u32;
-            }
         }
     }
 
@@ -132,15 +129,5 @@ impl ProcAccessInfo {
     /// Returns a new [ProcAccessInfo] for the specified procedure with `num_accesses` set to 0.
     pub fn new(proc_hash: Digest) -> Self {
         Self { proc_hash, num_accesses: 0 }
-    }
-
-    /// Writes a single row into the provided trace fragment for this procedure access entry.
-    pub fn write_into_trace(&self, trace: &mut TraceFragment, row: RowIndex, is_first: bool) {
-        let s_first = Felt::from_bool(is_first);
-        trace.set(row, 0, s_first);
-        trace.set(row, 1, self.proc_hash[0]);
-        trace.set(row, 2, self.proc_hash[1]);
-        trace.set(row, 3, self.proc_hash[2]);
-        trace.set(row, 4, self.proc_hash[3]);
     }
 }

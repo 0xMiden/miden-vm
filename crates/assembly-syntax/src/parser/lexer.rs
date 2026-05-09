@@ -541,7 +541,7 @@ impl<'input> Lexer<'input> {
             .map_err(|error| ParsingError::InvalidLiteral {
                 span: self.span(),
                 kind: int_error_kind_to_literal_error_kind(
-                    error.kind(),
+                    *error.kind(),
                     LiteralErrorKind::FeltOverflow,
                 ),
             })
@@ -624,7 +624,7 @@ fn pad_hex_if_needed<'a>(hex: &'a str) -> Cow<'a, str> {
         Cow::Borrowed(hex)
     } else {
         // allocate once, with exact capacity
-        let mut s = alloc::string::String::with_capacity(hex.len() + 1);
+        let mut s = String::with_capacity(hex.len() + 1);
         s.push('0');
         s.push_str(hex);
         Cow::Owned(s)
@@ -647,7 +647,7 @@ fn parse_hex<'input>(
                 ParsingError::InvalidLiteral {
                     span,
                     kind: int_error_kind_to_literal_error_kind(
-                        error.kind(),
+                        *error.kind(),
                         LiteralErrorKind::FeltOverflow,
                     ),
                 }
@@ -673,7 +673,7 @@ fn parse_hex<'input>(
                         ParsingError::InvalidLiteral {
                             span,
                             kind: int_error_kind_to_literal_error_kind(
-                                error.kind(),
+                                *error.kind(),
                                 LiteralErrorKind::FeltOverflow,
                             ),
                         }
@@ -686,7 +686,7 @@ fn parse_hex<'input>(
                         kind: LiteralErrorKind::FeltOverflow,
                     });
                 }
-                *element = Felt::new(value);
+                *element = Felt::new_unchecked(value);
             }
             Ok(Token::HexWord(WordValue(word)))
         },
@@ -702,7 +702,7 @@ fn parse_bin(span: SourceSpan, bin_digits: &str) -> Result<BinEncodedValue, Pars
             u32::from_str_radix(bin_digits, 2).map_err(|error| ParsingError::InvalidLiteral {
                 span,
                 kind: int_error_kind_to_literal_error_kind(
-                    error.kind(),
+                    *error.kind(),
                     LiteralErrorKind::U32Overflow,
                 ),
             })?;
@@ -726,7 +726,7 @@ pub fn shrink_u64_hex(n: u64) -> IntValue {
     } else if n <= (u32::MAX as u64) {
         IntValue::U32(n as u32)
     } else {
-        IntValue::Felt(Felt::new(n))
+        IntValue::Felt(Felt::new_unchecked(n))
     }
 }
 
@@ -743,7 +743,7 @@ fn shrink_u32_bin(n: u32) -> BinEncodedValue {
 
 #[inline]
 fn int_error_kind_to_literal_error_kind(
-    kind: &IntErrorKind,
+    kind: IntErrorKind,
     overflow: LiteralErrorKind,
 ) -> LiteralErrorKind {
     match kind {

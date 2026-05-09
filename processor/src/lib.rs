@@ -1,4 +1,7 @@
 #![no_std]
+// Trace tests intentionally use index-based `for i in a..b` over column slices; clippy's iterator
+// suggestion is noisier than helpful there.
+#![cfg_attr(test, allow(clippy::needless_range_loop))]
 
 #[macro_use]
 extern crate alloc;
@@ -13,7 +16,6 @@ use core::{
 };
 
 mod continuation_stack;
-mod debug;
 mod errors;
 mod execution;
 mod execution_options;
@@ -25,9 +27,9 @@ mod tracer;
 use crate::{
     advice::{AdviceInputs, AdviceProvider},
     continuation_stack::ContinuationStack,
-    errors::MapExecErr,
+    errors::{MapExecErr, MapExecErrNoCtx},
     processor::{Processor, SystemInterface},
-    trace::{ExecutionTrace, RowIndex},
+    trace::RowIndex,
 };
 
 #[cfg(any(test, feature = "testing"))]
@@ -46,7 +48,7 @@ pub use errors::{AceError, ExecutionError, HostError, MemoryError};
 pub use execution_options::{ExecutionOptions, ExecutionOptionsError};
 pub use fast::{BreakReason, ExecutionOutput, FastProcessor, ResumeContext};
 pub use host::{
-    FutureMaybeSend, Host, MastForestStore, MemMastForestStore,
+    BaseHost, FutureMaybeSend, Host, MastForestStore, MemMastForestStore, SyncHost,
     debug::DefaultDebugHandler,
     default::{DefaultHost, HostLibrary},
     handlers::{DebugError, DebugHandler, TraceError},
@@ -58,6 +60,7 @@ pub use miden_core::{
     },
     serde, utils,
 };
+pub use trace::{TraceBuildInputs, TraceGenerationContext};
 
 pub mod advice {
     pub use miden_core::advice::{AdviceInputs, AdviceMap, AdviceStackBuilder};
@@ -87,10 +90,8 @@ pub mod trace;
 // EXECUTORS
 // ================================================================================================
 
-/// Returns an execution trace resulting from executing the provided program against the provided
-/// inputs.
-///
-/// This is an async function that works on all platforms including wasm32.
+/// Executes the provided program against the provided inputs and returns the resulting execution
+/// output.
 ///
 /// The `host` parameter is used to provide the external environment to the program being executed,
 /// such as access to the advice provider and libraries that the program depends on.
@@ -104,15 +105,10 @@ pub async fn execute(
     advice_inputs: AdviceInputs,
     host: &mut impl Host,
     options: ExecutionOptions,
-) -> Result<ExecutionTrace, ExecutionError> {
-    let processor = FastProcessor::new_with_options(stack_inputs, advice_inputs, options);
-    let (execution_output, trace_generation_context) =
-        processor.execute_for_trace(program, host).await?;
-
-    let trace = trace::build_trace(execution_output, trace_generation_context, program.to_info())?;
-
-    assert_eq!(&program.hash(), trace.program_hash(), "inconsistent program hash");
-    Ok(trace)
+) -> Result<ExecutionOutput, ExecutionError> {
+    let processor = FastProcessor::new_with_options(stack_inputs, advice_inputs, options)
+        .map_exec_err_no_ctx()?;
+    processor.execute(program, host).await
 }
 
 /// Synchronous wrapper for the async `execute()` function.
@@ -129,24 +125,12 @@ pub fn execute_sync(
     program: &Program,
     stack_inputs: StackInputs,
     advice_inputs: AdviceInputs,
-    host: &mut impl Host,
+    host: &mut impl SyncHost,
     options: ExecutionOptions,
-) -> Result<ExecutionTrace, ExecutionError> {
-    match tokio::runtime::Handle::try_current() {
-        Ok(_handle) => {
-            // We're already inside a Tokio runtime - this is not supported because we cannot
-            // safely create a nested runtime or move the non-Send host reference to another thread
-            panic!(
-                "Cannot call execute_sync from within a Tokio runtime. \
-                 Use the async execute() method instead."
-            )
-        },
-        Err(_) => {
-            // No runtime exists - create one and use it
-            let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
-            rt.block_on(execute(program, stack_inputs, advice_inputs, host, options))
-        },
-    }
+) -> Result<ExecutionOutput, ExecutionError> {
+    let processor = FastProcessor::new_with_options(stack_inputs, advice_inputs, options)
+        .map_exec_err_no_ctx()?;
+    processor.execute_sync(program, host)
 }
 
 // PROCESSOR STATE
@@ -298,7 +282,7 @@ pub trait Stopper {
         &self,
         processor: &Self::Processor,
         continuation_stack: &ContinuationStack,
-        continuation_after_stop: impl FnOnce() -> Option<continuation_stack::Continuation>,
+        continuation_after_stop: impl FnOnce() -> Option<Continuation>,
     ) -> ControlFlow<BreakReason>;
 }
 
@@ -376,13 +360,13 @@ impl From<MemoryAddress> for u32 {
 }
 
 impl Display for MemoryAddress {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         Display::fmt(&self.0, f)
     }
 }
 
 impl LowerHex for MemoryAddress {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         LowerHex::fmt(&self.0, f)
     }
 }

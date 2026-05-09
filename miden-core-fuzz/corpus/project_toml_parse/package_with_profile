@@ -1,0 +1,14 @@
+[package]
+name = "profiled"
+version = "0.1.0"
+
+[lib]
+path = "lib.masm"
+
+[profile.release]
+debug = false
+trim-paths = true
+
+[profile.custom]
+inherits = "dev"
+debug = true

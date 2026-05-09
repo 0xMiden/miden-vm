@@ -19,7 +19,7 @@ pub fn set_panic_hook() {
 pub type ReportHandlerOpts = miette::MietteHandlerOpts;
 
 #[cfg(feature = "std")]
-pub type DefaultReportHandler = miette::GraphicalReportHandler;
+pub type DefaultReportHandler = GraphicalReportHandler;
 
 #[cfg(not(feature = "std"))]
 pub type DefaultReportHandler = miette::DebugReportHandler;
@@ -63,19 +63,19 @@ impl<D: AsRef<dyn super::Diagnostic>> PrintDiagnostic<D, JSONReportHandler> {
 }
 
 impl<D: AsRef<dyn super::Diagnostic>> fmt::Display for PrintDiagnostic<D> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> core::fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         self.handler.render_report(f, self.diag.as_ref())
     }
 }
 
 impl<D: AsRef<dyn super::Diagnostic>> fmt::Display for PrintDiagnostic<D, NarratableReportHandler> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> core::fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         self.handler.render_report(f, self.diag.as_ref())
     }
 }
 
 impl<D: AsRef<dyn super::Diagnostic>> fmt::Display for PrintDiagnostic<D, JSONReportHandler> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> core::fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         self.handler.render_report(f, self.diag.as_ref())
     }
 }

@@ -2,12 +2,11 @@ use core::ops::Range;
 
 use miden_core::{Felt, ONE, ZERO, utils::range as create_range};
 
-use super::{CHIPLETS_OFFSET, HASH_KERNEL_VTABLE_AUX_TRACE_OFFSET};
+use super::CHIPLETS_OFFSET;
 
 pub mod ace;
 pub mod bitwise;
 pub mod hasher;
-pub mod kernel_rom;
 pub mod memory;
 // CONSTANTS
 // ================================================================================================
@@ -22,6 +21,9 @@ pub const NUM_MEMORY_SELECTORS: usize = 3;
 pub const NUM_ACE_SELECTORS: usize = 4;
 /// The number of columns in the chiplets which are used as selectors for the kernel ROM chiplet.
 pub const NUM_KERNEL_ROM_SELECTORS: usize = 5;
+
+/// Number of columns needed to record an execution trace of the kernel ROM chiplet.
+pub const KERNEL_ROM_TRACE_WIDTH: usize = 5;
 
 /// The first column of the hash chiplet.
 pub const HASHER_TRACE_OFFSET: usize = CHIPLETS_OFFSET + NUM_HASHER_SELECTORS;
@@ -53,6 +55,14 @@ pub const HASHER_RATE_COL_RANGE: Range<usize> = Range {
 };
 /// The index of the hasher's node index column in the execution trace.
 pub const HASHER_NODE_INDEX_COL_IDX: usize = HASHER_STATE_COL_RANGE.end;
+/// The index of the hasher's mrupdate_id column in the execution trace.
+pub const HASHER_MRUPDATE_ID_COL_IDX: usize = HASHER_TRACE_OFFSET + hasher::MRUPDATE_ID_COL_IDX;
+/// The index of the hasher's is_boundary column in the execution trace.
+pub const HASHER_IS_BOUNDARY_COL_IDX: usize = HASHER_TRACE_OFFSET + hasher::IS_BOUNDARY_COL_IDX;
+/// The index of the hasher's direction_bit column in the execution trace.
+pub const HASHER_DIRECTION_BIT_COL_IDX: usize = HASHER_TRACE_OFFSET + hasher::DIRECTION_BIT_COL_IDX;
+/// The index of the hasher's s_perm column in the execution trace.
+pub const HASHER_S_PERM_COL_IDX: usize = HASHER_TRACE_OFFSET + hasher::S_PERM_COL_IDX;
 
 // --- GLOBALLY-INDEXED CHIPLET COLUMN ACCESSORS: BITWISE -----------------------------------------
 
@@ -123,3 +133,7 @@ pub const MEMORY_D_INV_COL_IDX: usize = MEMORY_TRACE_OFFSET + memory::D_INV_COL_
 /// and same word as the previous operation.
 pub const MEMORY_FLAG_SAME_CONTEXT_AND_WORD: usize =
     MEMORY_TRACE_OFFSET + memory::FLAG_SAME_CONTEXT_AND_WORD;
+/// The index of the memory's word address low 16-bit limb column in the execution trace.
+pub const MEMORY_WORD_ADDR_LO_COL_IDX: usize = MEMORY_TRACE_OFFSET + memory::WORD_ADDR_LO_COL_IDX;
+/// The index of the memory's word address high 16-bit limb column in the execution trace.
+pub const MEMORY_WORD_ADDR_HI_COL_IDX: usize = MEMORY_TRACE_OFFSET + memory::WORD_ADDR_HI_COL_IDX;

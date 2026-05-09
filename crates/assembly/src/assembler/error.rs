@@ -1,6 +1,7 @@
 use alloc::sync::Arc;
 
 use miden_assembly_syntax::{
+    Path,
     debuginfo::{SourceFile, SourceSpan},
     diagnostics::{Diagnostic, miette},
 };
@@ -16,4 +17,7 @@ pub(super) enum AssemblerError {
         source_file: Option<Arc<SourceFile>>,
         max_depth: usize,
     },
+    #[error("duplicate definition found for export path '{path}'")]
+    #[diagnostic()]
+    DuplicateExportPath { path: Arc<Path> },
 }

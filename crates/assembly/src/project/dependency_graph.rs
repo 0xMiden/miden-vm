@@ -8,7 +8,7 @@ use std::path::Path as FsPath;
 
 use miden_assembly_syntax::diagnostics::Report;
 use miden_core::{Word, utils::hash_string_to_word};
-use miden_package_registry::{PackageId, PackageStore};
+use miden_package_registry::{PackageId, PackageRegistry};
 use miden_project::{
     Package as ProjectPackage, ProjectDependencyGraph, ProjectDependencyGraphBuilder,
     ProjectDependencyNode, ProjectDependencyNodeProvenance, ProjectSource, ProjectSourceOrigin,
@@ -30,7 +30,7 @@ impl DependencyGraph {
     // CONSTRUCTORS
     // --------------------------------------------------------------------------------------------
 
-    pub fn from_project_path<S: PackageStore + ?Sized>(
+    pub fn from_project_path<S: PackageRegistry + ?Sized>(
         manifest_path: impl AsRef<FsPath>,
         store: &S,
         source_manager: Arc<dyn SourceManager>,
@@ -42,7 +42,7 @@ impl DependencyGraph {
         Ok(Self { dependency_graph, source_manager })
     }
 
-    pub fn from_project<S: PackageStore + ?Sized>(
+    pub fn from_project<S: PackageRegistry + ?Sized>(
         project: Arc<ProjectPackage>,
         store: &S,
         source_manager: Arc<dyn SourceManager>,
@@ -52,7 +52,7 @@ impl DependencyGraph {
         let dependency_graph = if let Some(manifest_path) = project.manifest_path() {
             dependency_graph_builder.build_from_path(manifest_path)?
         } else {
-            dependency_graph_builder.build(project.clone())?
+            dependency_graph_builder.build(project)?
         };
 
         Ok(Self { dependency_graph, source_manager })
@@ -151,13 +151,13 @@ impl DependencyGraph {
         profile_name: &str,
         origin: &ProjectSourceOrigin,
         manifest_path: &FsPath,
-        workspace_root: Option<&FsPath>,
+        _workspace_root: Option<&FsPath>,
         visiting: &mut BTreeSet<PackageId>,
     ) -> Result<PackageBuildProvenance, Report> {
         let dependency_hash =
             self.compute_dependency_closure_hash(package_id, profile_name, visiting)?;
-        let build_settings =
-            PackageBuildSettings::from_profile(project.resolve_profile(profile_name)?);
+        let profile = project.resolve_profile(profile_name)?;
+        let build_settings = PackageBuildSettings::from_profile(profile);
 
         match origin {
             ProjectSourceOrigin::Git { repo, resolved_revision, .. } => {
@@ -172,8 +172,8 @@ impl DependencyGraph {
                 Ok(PackageBuildProvenance::Path {
                     source_hash: project.compute_path_source_hash(
                         target,
+                        profile,
                         manifest_path,
-                        workspace_root,
                     )?,
                     dependency_hash,
                     build_settings,
@@ -264,8 +264,7 @@ impl DependencyGraph {
                     .map(|target| target.inner().clone())
                     .ok_or_else(|| {
                         Report::msg(format!(
-                            "dependency '{}' does not define a library target",
-                            package_id
+                            "dependency '{package_id}' does not define a library target"
                         ))
                     })?;
                 let provenance = self.expected_source_provenance_with_visited(

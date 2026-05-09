@@ -1519,10 +1519,10 @@ pub proc divmod(b: u128, a: u128) -> (remainder: u128, quotient: u128)
 
     # ==== Phase 0: Load r and q from advice ====
 
-    padw adv_loadw u32assertw
+    adv_pushw u32assertw
     # => [r0, r1, r2, r3, b0, b1, b2, b3, a0, a1, a2, a3]
 
-    padw adv_loadw u32assertw
+    adv_pushw u32assertw
     # => [q0, q1, q2, q3, r0, r1, r2, r3, b0, b1, b2, b3, a0, a1, a2, a3]
     #      0   1   2   3   4   5   6   7   8   9  10  11  12  13  14  15
 

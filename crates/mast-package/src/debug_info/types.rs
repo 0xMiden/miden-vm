@@ -33,8 +33,13 @@ use serde::{Deserialize, Serialize};
 /// This prevents accidental misuse of raw `u32` indices (e.g., using a string index
 /// where a type index is expected).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(proptest_derive::Arbitrary))]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(transparent))]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true))
+)]
 pub struct DebugTypeIdx(u32);
 
 impl DebugTypeIdx {

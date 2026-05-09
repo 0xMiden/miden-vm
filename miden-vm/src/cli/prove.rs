@@ -69,16 +69,18 @@ pub struct ProveCmd {
 }
 
 impl ProveCmd {
-    pub fn get_proof_options(&self) -> Result<ProvingOptions, Report> {
-        let exec_options = ExecutionOptions::new(
+    pub fn get_execution_options(&self) -> Result<ExecutionOptions, Report> {
+        ExecutionOptions::new(
             Some(self.max_cycles),
             self.expected_cycles,
             ExecutionOptions::DEFAULT_CORE_TRACE_FRAGMENT_SIZE,
             self.trace,
             !self.release,
         )
-        .map_err(|err| Report::msg(format!("{err}")))?;
+        .map_err(|err| Report::msg(format!("{err}")))
+    }
 
+    pub fn get_proof_options(&self) -> Result<ProvingOptions, Report> {
         let hash_fn = HashFunction::try_from(self.hasher.as_str())
             .map_err(|err| Report::msg(format!("{err}")))?;
         let proving_options = match self.security.as_str() {
@@ -89,7 +91,7 @@ impl ProveCmd {
                 )));
             },
         };
-        Ok(proving_options.with_execution_options(exec_options))
+        Ok(proving_options)
     }
     pub fn execute(&self) -> Result<(), Report> {
         println!("===============================================================================");
@@ -143,6 +145,7 @@ impl ProveCmd {
         let stack_inputs = input_data.parse_stack_inputs().map_err(Report::msg)?;
         let advice_inputs = input_data.parse_advice_inputs().map_err(Report::msg)?;
 
+        let execution_options = self.get_execution_options()?;
         let proving_options = self.get_proof_options()?;
 
         // execute program and generate proof
@@ -151,6 +154,7 @@ impl ProveCmd {
             stack_inputs,
             advice_inputs,
             &mut host,
+            execution_options,
             proving_options,
         )
         .wrap_err("Failed to prove program")?;

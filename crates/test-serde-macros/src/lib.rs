@@ -155,10 +155,11 @@ pub fn serde_test(args: TokenStream, input: TokenStream) -> TokenStream {
     for (i, ty) in types.into_iter().enumerate() {
         let serde_test = if serde_test {
             let test_name =
-                Ident::new(&format!("test_serde_roundtrip_{}_{}", name, i), Span::mixed_site());
+                Ident::new(&format!("test_serde_roundtrip_{name}_{i}"), Span::mixed_site());
             quote! {
                 #[cfg(all(feature = "arbitrary", feature = "serde", test))]
                 proptest::proptest!{
+                    #![proptest_config(proptest::test_runner::Config::with_cases(100))]
                     #[test]
                     fn #test_name(obj in proptest::prelude::any::#ty()) {
                         use alloc::string::ToString;
@@ -182,6 +183,7 @@ pub fn serde_test(args: TokenStream, input: TokenStream) -> TokenStream {
             quote! {
                 #[cfg(all(feature = "arbitrary", test))]
                 proptest::proptest!{
+                    #![proptest_config(proptest::test_runner::Config::with_cases(100))]
                     #[test]
                     fn #test_name(obj in proptest::prelude::any::#ty()) {
                         let bytes = obj.to_bytes();

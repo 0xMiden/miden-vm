@@ -49,7 +49,7 @@ fn test_decorators_only_execute_in_debug_mode() {
     let process_debug_off = FastProcessor::new(StackInputs::default());
 
     let result = process_debug_off.execute_sync(&program, &mut host_debug_off);
-    assert!(result.is_ok(), "Execution failed: {:?}", result);
+    assert!(result.is_ok(), "Execution failed: {result:?}");
     assert!(
         host_debug_off.get_trace_count(999) == 0,
         "Decorator should NOT execute when debug mode is OFF"
@@ -59,11 +59,12 @@ fn test_decorators_only_execute_in_debug_mode() {
     let mut host_debug_on = TestHost::new();
     let process_debug_on = FastProcessor::new(StackInputs::default())
         .with_advice(AdviceInputs::default())
+        .expect("advice inputs should fit advice map limits")
         .with_debugging(true)
         .with_tracing(true);
 
     let result = process_debug_on.execute_sync(&program, &mut host_debug_on);
-    assert!(result.is_ok(), "Execution failed: {:?}", result);
+    assert!(result.is_ok(), "Execution failed: {result:?}");
     assert!(
         host_debug_on.get_trace_count(999) == 1,
         "Decorator SHOULD execute when debug mode is ON"
@@ -84,7 +85,7 @@ fn test_decorators_only_execute_in_debug_mode_off() {
 
     // Execute the program
     let result = processor.execute_sync(&program, &mut host);
-    assert!(result.is_ok(), "Execution failed: {:?}", result);
+    assert!(result.is_ok(), "Execution failed: {result:?}");
 
     // Verify that the decorator was NOT executed (trace count should be 0)
     assert_eq!(
@@ -110,12 +111,13 @@ fn test_decorators_only_execute_in_debug_mode_on() {
     // Create processor with debug mode ON (tracing enabled)
     let processor = FastProcessor::new(StackInputs::default())
         .with_advice(AdviceInputs::default())
+        .expect("advice inputs should fit advice map limits")
         .with_debugging(true)
         .with_tracing(true);
 
     // Execute the program
     let result = processor.execute_sync(&program, &mut host);
-    assert!(result.is_ok(), "Execution failed: {:?}", result);
+    assert!(result.is_ok(), "Execution failed: {result:?}");
 
     // Verify that the decorator WAS executed (trace count should be 1)
     assert_eq!(
@@ -174,6 +176,7 @@ fn test_zero_overhead_when_debug_off() {
     let mut host_on = TestHost::new();
     let processor_on = FastProcessor::new(StackInputs::default())
         .with_advice(AdviceInputs::default())
+        .expect("advice inputs should fit advice map limits")
         .with_debugging(true)
         .with_tracing(true);
 

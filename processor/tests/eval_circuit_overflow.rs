@@ -9,9 +9,9 @@ use miden_processor::{
 
 #[test]
 fn eval_circuit_overflow_panic_check() {
-    let ptr = Felt::new(0);
-    let n_read = Felt::new(Felt::ORDER_U64 - 3); // = 2^64 - 2^32 - 2
-    let n_eval = Felt::new((1u64 << 32) + 4); // = 2^32 + 4
+    let ptr = Felt::new_unchecked(0);
+    let n_read = Felt::new_unchecked(Felt::ORDER_U64 - 3); // = 2^64 - 2^32 - 2
+    let n_eval = Felt::new_unchecked((1u64 << 32) + 4); // = 2^32 + 4
 
     let stack_inputs = StackInputs::new(&[ptr, n_read, n_eval]).unwrap();
 
@@ -29,7 +29,8 @@ fn eval_circuit_overflow_panic_check() {
         stack_inputs,
         AdviceInputs::default(),
         miden_processor::ExecutionOptions::default(),
-    );
+    )
+    .expect("processor advice inputs should fit advice map limits");
 
     // Namely, this checks that execution doesn't panic due to an overflow.
     assert!(matches!(

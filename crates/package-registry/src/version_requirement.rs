@@ -1,14 +1,19 @@
 use core::fmt;
 
 use miden_assembly_syntax::debuginfo::Span;
+#[cfg(feature = "arbitrary")]
+use miden_core::utils::hash_string_to_word;
+#[cfg(feature = "arbitrary")]
+use proptest::prelude::*;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
 use super::*;
-use crate::{LexicographicWord, Word};
+use crate::Word;
 
 /// Represents a requirement on a specific version (or versions) of a dependency.
 #[derive(Debug, Clone)]
+#[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
 pub enum VersionRequirement {
     /// A semantic versioning constraint, e.g. `~> 0.1`
     ///
@@ -54,9 +59,7 @@ impl PartialEq for VersionRequirement {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::Exact(l), Self::Exact(r)) => l == r,
-            (Self::Digest(l), Self::Digest(r)) => {
-                LexicographicWord::new(l.into_inner()) == LexicographicWord::new(r.into_inner())
-            },
+            (Self::Digest(l), Self::Digest(r)) => l.into_inner() == r.into_inner(),
             (Self::Semantic(l), Self::Semantic(r)) => l == r,
             (Self::Semantic(_) | Self::Exact(_), Self::Digest(_))
             | (Self::Semantic(_), Self::Exact(_))
@@ -123,10 +126,10 @@ impl<'de> Deserialize<'de> for VersionRequirement {
     {
         use core::str::FromStr;
 
-        let value = <alloc::string::String as Deserialize>::deserialize(deserializer)?;
+        let value = <String as Deserialize>::deserialize(deserializer)?;
 
         if value == "*" {
-            return Ok(Self::from(VersionReq::STAR.clone()));
+            return Ok(Self::from(VersionReq::STAR));
         }
 
         if let Some((version, digest)) = value.split_once('#') {
@@ -141,5 +144,41 @@ impl<'de> Deserialize<'de> for VersionRequirement {
 
         let requirement = VersionReq::from_str(&value).map_err(serde::de::Error::custom)?;
         Ok(Self::from(requirement))
+    }
+}
+
+#[cfg(feature = "arbitrary")]
+impl Arbitrary for VersionRequirement {
+    type Parameters = ();
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        let semantic =
+            (0u64..=4, 0u64..=8, 0u64..=16, 0u8..=2).prop_map(|(major, minor, patch, kind)| {
+                let req = match kind {
+                    0 => format!("^{major}.{minor}.{patch}"),
+                    1 => format!("~{major}.{minor}.{patch}"),
+                    _ => format!("={major}.{minor}.{patch}"),
+                }
+                .parse::<VersionReq>()
+                .expect("generated version requirements are valid");
+
+                Self::Semantic(Span::unknown(req))
+            });
+
+        let digest =
+            proptest::collection::vec(proptest::char::range('a', 'z'), 1..16).prop_map(|chars| {
+                let material = chars.into_iter().collect::<String>();
+                let digest = hash_string_to_word(material.as_str());
+                Self::Digest(Span::unknown(digest))
+            });
+
+        let exact = any::<Version>()
+            .prop_filter("exact requirements must include a digest", |version| {
+                version.digest.is_some()
+            })
+            .prop_map(Self::Exact);
+
+        proptest::prop_oneof![Just(Self::from(VersionReq::STAR)), semantic, digest, exact,].boxed()
     }
 }

@@ -5,7 +5,10 @@ use alloc::sync::Arc;
 
 use miden_debug_types::{SourceFile, SourceManager, SourceSpan};
 
-use crate::diagnostics::{Diagnostic, RelatedLabel, miette};
+use crate::{
+    ast::ItemIndex,
+    diagnostics::{Diagnostic, RelatedLabel, miette},
+};
 
 /// Represents an error that occurs during symbol resolution
 #[derive(Debug, Clone, thiserror::Error, Diagnostic)]
@@ -51,6 +54,16 @@ pub enum SymbolResolutionError {
         #[related]
         actual: Option<RelatedLabel>,
     },
+    #[error("private symbol reference")]
+    #[diagnostic(help("only public items can be referenced from another module"))]
+    PrivateSymbol {
+        #[label("this symbol is private to another module")]
+        span: SourceSpan,
+        #[source_code]
+        source_file: Option<Arc<SourceFile>>,
+        #[related]
+        defined: Option<RelatedLabel>,
+    },
     #[error("type expression nesting depth exceeded")]
     #[diagnostic(help("type expression nesting exceeded the maximum depth of {max_depth}"))]
     TypeExpressionDepthExceeded {
@@ -76,6 +89,15 @@ pub enum SymbolResolutionError {
         #[source_code]
         source_file: Option<Arc<SourceFile>>,
         max_depth: usize,
+    },
+    #[error("too many items in module")]
+    #[diagnostic(help("break this module up into smaller modules"))]
+    TooManyItemsInModule {
+        #[label("module item count exceeds the supported limit of {max_items}")]
+        span: SourceSpan,
+        #[source_code]
+        source_file: Option<Arc<SourceFile>>,
+        max_items: usize,
     },
 }
 
@@ -146,6 +168,24 @@ impl SymbolResolutionError {
         }
     }
 
+    pub fn private_symbol(
+        span: SourceSpan,
+        defined: SourceSpan,
+        source_manager: &dyn SourceManager,
+    ) -> Self {
+        let defined_source_file = source_manager.get(defined.source_id()).ok();
+        let source_file = source_manager.get(span.source_id()).ok();
+        Self::PrivateSymbol {
+            span,
+            source_file,
+            defined: Some(
+                RelatedLabel::advice("the referenced item is private")
+                    .with_labeled_span(defined, "the referenced item is private")
+                    .with_source_file(defined_source_file),
+            ),
+        }
+    }
+
     pub fn type_expression_depth_exceeded(
         span: SourceSpan,
         max_depth: usize,
@@ -174,6 +214,14 @@ impl SymbolResolutionError {
             span,
             source_file: source_manager.get(span.source_id()).ok(),
             max_depth,
+        }
+    }
+
+    pub fn too_many_items_in_module(span: SourceSpan, source_manager: &dyn SourceManager) -> Self {
+        Self::TooManyItemsInModule {
+            span,
+            source_file: source_manager.get(span.source_id()).ok(),
+            max_items: ItemIndex::MAX_ITEMS,
         }
     }
 }

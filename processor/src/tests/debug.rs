@@ -324,7 +324,7 @@ fn test_debug_adv_stack() {
             push.[8, 7, 6, 5] assert_eqw
             # => [4, 3, 2, 1, 0]
 
-            adv_push.1
+            adv_push
             # => [4, 4, 3, 2, 1, 0]
             debug.stack.6
             debug.adv_stack # => [3, 2, 1]
@@ -334,7 +334,7 @@ fn test_debug_adv_stack() {
             # => [3, 2, 1, 0]
 
             # Pops the remaining elements one-by-one
-            adv_push.3
+            adv_push adv_push adv_push
             # => [1, 2, 3, 3, 2, 1, 0]
             debug.stack.7
 

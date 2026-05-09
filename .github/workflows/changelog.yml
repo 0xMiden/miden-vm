@@ -14,16 +14,5 @@ on:
     types: [opened, reopened, synchronize, labeled, unlabeled]
 
 jobs:
-  changelog:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Check for changes in changelog
-        env:
-          BASE_REF: ${{ github.event.pull_request.base.ref }}
-          NO_CHANGELOG_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'no changelog') }}
-        run: ./scripts/check-changelog.sh "${{ inputs.changelog }}"
-        shell: bash
+  changelog-reusable:
+    uses: 0xMiden/.github/.github/workflows/changelog.yml@d34ae3cd29234c5aa4d3ab57635b30563471c3c3

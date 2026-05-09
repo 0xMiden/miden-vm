@@ -104,7 +104,7 @@ proptest! {
 
         // Calculate expected value by padding with leading zero for odd lengths
         let padded_hex = if hex_str.len() % 2 == 1 {
-            format!("0{}", hex_str)
+            format!("0{hex_str}")
         } else {
             hex_str.clone()
         };
@@ -113,7 +113,7 @@ proptest! {
         let expected = u64::from_str_radix(&padded_hex, 16).unwrap();
 
         // Build assembly operation
-        let asm_op = format!("push.0x{}", hex_str);
+        let asm_op = format!("push.0x{hex_str}");
 
         // Test that it parses and executes correctly
         let test = build_op_test!(&asm_op);

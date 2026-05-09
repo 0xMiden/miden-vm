@@ -1,10 +1,6 @@
 use core::ops::Range;
 
-use chiplets::hasher::RATE_LEN;
 use miden_core::utils::range;
-
-mod challenges;
-pub use challenges::Challenges;
 
 pub mod chiplets;
 pub mod decoder;
@@ -28,7 +24,7 @@ pub const MIN_TRACE_LEN: usize = 64;
 // ------------------------------------------------------------------------------------------------
 
 //      system          decoder           stack      range checks       chiplets
-//    (6 columns)     (24 columns)    (19 columns)    (2 columns)     (20 columns)
+//    (6 columns)     (24 columns)    (19 columns)    (2 columns)     (21 columns)
 // ├───────────────┴───────────────┴───────────────┴───────────────┴─────────────────┤
 
 pub const SYS_TRACE_OFFSET: usize = 0;
@@ -49,9 +45,6 @@ pub const DECODER_TRACE_RANGE: Range<usize> = range(DECODER_TRACE_OFFSET, DECODE
 pub const STACK_TRACE_OFFSET: usize = DECODER_TRACE_RANGE.end;
 pub const STACK_TRACE_WIDTH: usize = 19;
 pub const STACK_TRACE_RANGE: Range<usize> = range(STACK_TRACE_OFFSET, STACK_TRACE_WIDTH);
-
-/// Label for log_precompile transcript state messages on the virtual table bus.
-pub const LOG_PRECOMPILE_LABEL: u8 = miden_core::operations::opcodes::LOGPRECOMPILE;
 
 pub mod log_precompile {
     use core::ops::Range;
@@ -114,7 +107,7 @@ pub const RANGE_CHECK_TRACE_RANGE: Range<usize> =
 
 // Chiplets trace
 pub const CHIPLETS_OFFSET: usize = RANGE_CHECK_TRACE_RANGE.end;
-pub const CHIPLETS_WIDTH: usize = 20;
+pub const CHIPLETS_WIDTH: usize = 21;
 pub const CHIPLETS_RANGE: Range<usize> = range(CHIPLETS_OFFSET, CHIPLETS_WIDTH);
 
 /// Shared chiplet selector columns at the start of the chiplets segment.
@@ -126,73 +119,32 @@ pub const CHIPLET_S3_COL_IDX: usize = CHIPLET_SELECTORS_RANGE.start + 3;
 pub const CHIPLET_S4_COL_IDX: usize = CHIPLET_SELECTORS_RANGE.start + 4;
 
 pub const TRACE_WIDTH: usize = CHIPLETS_OFFSET + CHIPLETS_WIDTH;
-pub const PADDED_TRACE_WIDTH: usize = TRACE_WIDTH.next_multiple_of(RATE_LEN);
 
 // AUXILIARY COLUMNS LAYOUT
 // ------------------------------------------------------------------------------------------------
+//
+// The auxiliary trace is the LogUp lookup-argument segment built by
+// [`crate::ProcessorAir`]'s `AuxBuilder` impl. It has 7 columns: 4 main-trace LogUp
+// columns followed by 3 chiplet-trace LogUp columns. See
+// [`crate::constraints::lookup::main_air::MainLookupAir`] and
+// [`crate::constraints::lookup::chiplet_air::ChipletLookupAir`] for the per-column
+// contents.
 
-//      decoder                     stack              range checks          chiplets
-//    (3 columns)                (1 column)             (1 column)          (3 column)
-// ├─────────────────────┴──────────────────────┴────────────────────┴───────────────────┤
-
-/// Decoder auxiliary columns
-pub const DECODER_AUX_TRACE_OFFSET: usize = 0;
-pub const DECODER_AUX_TRACE_WIDTH: usize = 3;
-pub const DECODER_AUX_TRACE_RANGE: Range<usize> =
-    range(DECODER_AUX_TRACE_OFFSET, DECODER_AUX_TRACE_WIDTH);
-
-/// Stack auxiliary columns
-pub const STACK_AUX_TRACE_OFFSET: usize = DECODER_AUX_TRACE_RANGE.end;
-pub const STACK_AUX_TRACE_WIDTH: usize = 1;
-pub const STACK_AUX_TRACE_RANGE: Range<usize> =
-    range(STACK_AUX_TRACE_OFFSET, STACK_AUX_TRACE_WIDTH);
-
-/// Range check auxiliary columns
-pub const RANGE_CHECK_AUX_TRACE_OFFSET: usize = STACK_AUX_TRACE_RANGE.end;
-pub const RANGE_CHECK_AUX_TRACE_WIDTH: usize = 1;
-pub const RANGE_CHECK_AUX_TRACE_RANGE: Range<usize> =
-    range(RANGE_CHECK_AUX_TRACE_OFFSET, RANGE_CHECK_AUX_TRACE_WIDTH);
-
-/// Chiplets virtual table auxiliary column.
-///
-/// This column combines two virtual tables:
-///
-/// 1. Hash chiplet's sibling table,
-/// 2. Kernel ROM chiplet's kernel procedure table.
-pub const HASH_KERNEL_VTABLE_AUX_TRACE_OFFSET: usize = RANGE_CHECK_AUX_TRACE_RANGE.end;
-pub const HASHER_AUX_TRACE_WIDTH: usize = 1;
-pub const HASHER_AUX_TRACE_RANGE: Range<usize> =
-    range(HASH_KERNEL_VTABLE_AUX_TRACE_OFFSET, HASHER_AUX_TRACE_WIDTH);
-
-/// Chiplets bus auxiliary columns.
-pub const CHIPLETS_BUS_AUX_TRACE_OFFSET: usize = HASHER_AUX_TRACE_RANGE.end;
-pub const CHIPLETS_BUS_AUX_TRACE_WIDTH: usize = 1;
-pub const CHIPLETS_BUS_AUX_TRACE_RANGE: Range<usize> =
-    range(CHIPLETS_BUS_AUX_TRACE_OFFSET, CHIPLETS_BUS_AUX_TRACE_WIDTH);
-
-/// ACE chiplet wiring bus.
-pub const ACE_CHIPLET_WIRING_BUS_OFFSET: usize = CHIPLETS_BUS_AUX_TRACE_RANGE.end;
-pub const ACE_CHIPLET_WIRING_BUS_WIDTH: usize = 1;
-pub const ACE_CHIPLET_WIRING_BUS_RANGE: Range<usize> =
-    range(ACE_CHIPLET_WIRING_BUS_OFFSET, ACE_CHIPLET_WIRING_BUS_WIDTH);
-
-/// Auxiliary trace segment width.
-pub const AUX_TRACE_WIDTH: usize = ACE_CHIPLET_WIRING_BUS_RANGE.end;
+/// Auxiliary trace segment width — see the LogUp aux trace layout above.
+pub const AUX_TRACE_WIDTH: usize = crate::LOGUP_AUX_TRACE_WIDTH;
 
 /// Number of random challenges used for auxiliary trace constraints.
 pub const AUX_TRACE_RAND_CHALLENGES: usize = 2;
 
-/// Maximum number of coefficients used in bus message encodings.
-pub const MAX_MESSAGE_WIDTH: usize = 16;
-
 /// Bus message coefficient indices.
 ///
 /// These define the standard positions for encoding bus messages using the pattern:
-/// `alpha + sum(beta_powers\[i\] * elem\[i\])` where:
-/// - `alpha` is the randomness base (accessed directly as `.alpha`)
+/// `bus_prefix[bus] + sum(beta_powers\[i\] * elem\[i\])` where:
+/// - `bus_prefix[bus]` is the per-bus domain-separated base (see `BusId` in
+///   `constraints::lookup::logup_msg`)
 /// - `beta_powers\[i\] = beta^i` are the powers of beta
 ///
-/// These indices refer to positions in the `beta_powers` array, not including alpha.
+/// These indices refer to positions in the `beta_powers` array, not including the bus prefix.
 ///
 /// This layout is shared between:
 /// - AIR constraint builders (symbolic expressions): `Challenges<AB::ExprEF>`

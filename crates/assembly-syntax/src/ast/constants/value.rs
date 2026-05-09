@@ -19,6 +19,10 @@ use crate::{
 #[derive(Clone)]
 #[repr(u8)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true))
+)]
 pub enum ConstantValue {
     /// A literal [`miden_core::Felt`] value.
     Int(Span<IntValue>) = 1,

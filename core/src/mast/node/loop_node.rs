@@ -39,7 +39,7 @@ pub struct LoopNode {
 /// Constants
 impl LoopNode {
     /// The domain of the loop node (used for control block hashing).
-    pub const DOMAIN: Felt = Felt::new(opcodes::LOOP as u64);
+    pub const DOMAIN: Felt = Felt::new_unchecked(opcodes::LOOP as u64);
 }
 
 impl LoopNode {
@@ -70,7 +70,7 @@ struct LoopNodePrettyPrint<'a> {
     mast_forest: &'a MastForest,
 }
 
-impl crate::prettier::PrettyPrint for LoopNodePrettyPrint<'_> {
+impl PrettyPrint for LoopNodePrettyPrint<'_> {
     fn render(&self) -> crate::prettier::Document {
         use crate::prettier::*;
 
@@ -209,13 +209,12 @@ impl MastNodeExt for LoopNode {
             let forest_node = &forest.nodes[id];
             let forest_node_ptr = match forest_node {
                 MastNode::Loop(loop_node) => loop_node as *const LoopNode as *const (),
-                _ => panic!("Node type mismatch at {:?}", id),
+                _ => panic!("Node type mismatch at {id:?}"),
             };
             let self_as_void = self_ptr as *const ();
             debug_assert_eq!(
                 self_as_void, forest_node_ptr,
-                "Node pointer mismatch: expected node at {:?} to be self",
-                id
+                "Node pointer mismatch: expected node at {id:?} to be self"
             );
         }
     }
@@ -237,7 +236,7 @@ impl proptest::prelude::Arbitrary for LoopNode {
         (any::<MastNodeId>(), any::<[u64; 4]>())
             .prop_map(|(body, digest_array)| {
                 // Generate a random digest
-                let digest = Word::from(digest_array.map(Felt::new));
+                let digest = Word::from(digest_array.map(Felt::new_unchecked));
                 // Construct directly to avoid MastForest validation for arbitrary data
                 LoopNode {
                     body,
@@ -353,10 +352,7 @@ impl MastForestContributor for LoopNodeBuilder {
             } else {
                 let body_hash = forest[self.body].digest();
 
-                crate::chiplets::hasher::merge_in_domain(
-                    &[body_hash, miden_crypto::Word::default()],
-                    LoopNode::DOMAIN,
-                )
+                hasher::merge_in_domain(&[body_hash, Word::default()], LoopNode::DOMAIN)
             },
         )
     }
@@ -388,7 +384,7 @@ impl MastForestContributor for LoopNodeBuilder {
         self.after_exit.extend(decorators);
     }
 
-    fn with_digest(mut self, digest: crate::Word) -> Self {
+    fn with_digest(mut self, digest: Word) -> Self {
         self.digest = Some(digest);
         self
     }

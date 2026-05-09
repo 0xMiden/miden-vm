@@ -340,14 +340,14 @@ pub fn u32rotr(
                     .with_source_file(proc_ctx.source_manager().get(span.source_id()).ok())
                     .into());
             }
-            span_builder.push_op(Push(Felt::new(1 << (32 - imm))));
+            span_builder.push_op(Push(Felt::new_unchecked(1 << (32 - imm))));
             span_builder.push_ops([U32mul, Add]);
         },
         None => {
             // Compute 32 - b, where b is rotation amount on top of stack
             // Stack: [b, ...], push 32 to get [32, b, ...], swap to get [b, 32, ...]
             // U32sub computes second - top = 32 - b
-            span_builder.push_ops([Push(Felt::new(32)), Swap, U32sub, Drop]);
+            span_builder.push_ops([Push(Felt::new_unchecked(32)), Swap, U32sub, Drop]);
             append_pow2_op(span_builder);
             span_builder.push_ops([Mul, U32split, Add]);
         },
@@ -365,33 +365,33 @@ pub fn u32popcnt(span_builder: &mut BasicBlockBuilder) {
         // U32div computes second/top. Stack: [i, ...], push 2 to get [2, i, ...].
         // U32div gives i/2. Output [remainder, quotient], drop remainder to keep quotient.
         Dup0,
-        Push(Felt::new(1 << 1)), U32div, Drop,
-        Push(Felt::new(0x55555555)),
+        Push(Felt::new_unchecked(1 << 1)), U32div, Drop,
+        Push(Felt::new_unchecked(0x55555555)),
         U32and,
         // U32sub computes second - top. Stack: [masked, i], gives i - masked
         U32sub, Drop,
         // i = (i & 0x33333333) + ((i >> 2) & 0x33333333);
         Dup0,
-        Push(Felt::new(1 << 2)), U32div, Drop,
-        Push(Felt::new(0x33333333)),
+        Push(Felt::new_unchecked(1 << 2)), U32div, Drop,
+        Push(Felt::new_unchecked(0x33333333)),
         U32and,
         Swap,
-        Push(Felt::new(0x33333333)),
+        Push(Felt::new_unchecked(0x33333333)),
         U32and,
         // U32add outputs [sum, carry], swap to drop carry and keep sum
         U32add, Swap, Drop,
         // i = (i + (i >> 4)) & 0x0F0F0F0F;
         Dup0,
-        Push(Felt::new(1 << 4)), U32div, Drop,
+        Push(Felt::new_unchecked(1 << 4)), U32div, Drop,
         // U32add outputs [sum, carry], swap to drop carry and keep sum
         U32add, Swap, Drop,
-        Push(Felt::new(0x0F0F0F0F)),
+        Push(Felt::new_unchecked(0x0F0F0F0F)),
         U32and,
         // return (i * 0x01010101) >> 24;
         // U32mul outputs [lo, hi], swap before drop to keep lo
-        Push(Felt::new(0x01010101)),
+        Push(Felt::new_unchecked(0x01010101)),
         U32mul, Swap, Drop,
-        Push(Felt::new(1 << 24)), U32div, Drop
+        Push(Felt::new_unchecked(1 << 24)), U32div, Drop
     ];
     span_builder.push_ops(ops);
 }
@@ -523,7 +523,7 @@ fn prepare_bitwise<const MAX_VALUE: u8>(
                     .with_source_file(proc_ctx.source_manager().get(span.source_id()).ok())
                     .into());
             }
-            block_builder.push_op(Push(Felt::new(1 << imm)));
+            block_builder.push_op(Push(Felt::new_unchecked(1 << imm)));
         },
         None => {
             append_pow2_op(block_builder);

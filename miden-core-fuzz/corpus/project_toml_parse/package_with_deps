@@ -1,0 +1,12 @@
+[package]
+name = "myproject"
+version = "0.5.0"
+
+[lib]
+path = "lib.masm"
+
+[dependencies]
+stdlib = { version = "1.0.0" }
+local-dep = { path = "../local-dep", linkage = "static" }
+remote-dep = { git = "https://github.com/example/repo", branch = "main" }
+workspace-dep.workspace = true

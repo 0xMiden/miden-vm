@@ -15,5 +15,4 @@ name = "entry-alt"
 path = "bin/main-alt.masm"
 
 [dependencies]
-miden-core.workspace = true
 miden-utils.workspace = true

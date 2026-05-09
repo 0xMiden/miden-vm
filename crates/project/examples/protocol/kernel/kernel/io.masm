@@ -1,4 +1,4 @@
-const PRINTLN = event("sys.println")
+const PRINTLN = 0
 
 #! Prints the given null-terminated byte string to stdout, if debug tracing is enabled
 pub proc println(message: ptr<u8, addrspace(byte)>)

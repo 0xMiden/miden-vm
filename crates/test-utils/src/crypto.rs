@@ -6,8 +6,8 @@ pub use miden_core::crypto::{
     dsa::*,
     hash::Poseidon2,
     merkle::{
-        EmptySubtreeRoots, LeafIndex, MerkleError, MerklePath, MerkleStore, MerkleTree, Mmr,
-        MmrPeaks, NodeIndex, PartialMerkleTree, SimpleSmt, Smt,
+        EmptySubtreeRoots, InnerNodeInfo, LeafIndex, MerkleError, MerklePath, MerkleStore,
+        MerkleTree, Mmr, MmrPeaks, NodeIndex, PartialMerkleTree, SimpleSmt, Smt,
     },
 };
 
@@ -28,5 +28,5 @@ pub fn init_merkle_leaves(values: &[u64]) -> Vec<Word> {
 }
 
 pub fn init_merkle_leaf(value: u64) -> Word {
-    [Felt::new(value), ZERO, ZERO, ZERO].into()
+    [Felt::new_unchecked(value), ZERO, ZERO, ZERO].into()
 }

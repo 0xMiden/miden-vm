@@ -67,6 +67,7 @@ extern {
         "adv_loadw" => Token::AdvLoadw,
         "adv_pipe" => Token::AdvPipe,
         "adv_push" => Token::AdvPush,
+        "adv_pushw" => Token::AdvPushw,
         "adv_stack" => Token::AdvStack,
         "push_mapval" => Token::PushMapval,
         "push_mapval_count" => Token::PushMapvalCount,
@@ -988,6 +989,8 @@ Inst: Instruction = {
     InstWithU32Immediate,
     ProcRef,
     "adv_pipe" => Instruction::AdvPipe,
+    "adv_push" => Instruction::AdvPush,
+    "adv_pushw" => Instruction::AdvPushW,
     "adv_loadw" => Instruction::AdvLoadW,
     "and" => Instruction::And,
     "eval_circuit" => Instruction::EvalCircuit,
@@ -1561,7 +1564,6 @@ InstWithLocalIndex: Instruction = {
 
 #[inline]
 InstWithStackIndex: Instruction = {
-    "adv_push" "." <l:@L> <i:OneBasedStackIndex> <r:@R> => Instruction::AdvPush(Immediate::Value(Span::new(span!(source_id, l, r), i))),
     "dup" <i:("." <U8>)?> =>? {
         let (span, idx) = i.map(|s| s.into_parts()).unwrap_or((SourceSpan::default(), 0));
         Ok(match idx {
@@ -1909,7 +1911,7 @@ IntValue: IntValue = {
         } else if n <= (u32::MAX as u64) {
             Ok(IntValue::U32(n as u32))
         } else {
-            Ok(IntValue::Felt(Felt::new(n)))
+            Ok(IntValue::Felt(Felt::new_unchecked(n)))
         }
     },
 
@@ -1936,7 +1938,7 @@ WordValue: WordValue = {
 
 #[inline]
 Felt: Felt = {
-    <l:@L> <value:IntValue> <r:@R> => Felt::new(value.as_int()),
+    <l:@L> <value:IntValue> <r:@R> => Felt::new_unchecked(value.as_int()),
 }
 
 // SYMBOLS
@@ -2128,6 +2130,7 @@ Opcode: &'static str = {
     "adv_loadw" => "adv_loadw",
     "adv_pipe" => "adv_pipe",
     "adv_push" => "adv_push",
+    "adv_pushw" => "adv_pushw",
     "adv_stack" => "adv_stack",
     "and" => "and",
     "eval_circuit" => "eval_circuit",

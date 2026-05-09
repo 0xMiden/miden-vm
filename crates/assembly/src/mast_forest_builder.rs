@@ -11,8 +11,8 @@ use miden_core::{
     mast::{
         AsmOpId, BasicBlockNode, BasicBlockNodeBuilder, DecoratorFingerprint, DecoratorId,
         ExternalNodeBuilder, JoinNodeBuilder, MastForest, MastForestContributor, MastForestError,
-        MastNode, MastNodeBuilder, MastNodeExt, MastNodeFingerprint, MastNodeId, Remapping,
-        SubtreeIterator,
+        MastForestRootMap, MastNode, MastNodeBuilder, MastNodeExt, MastNodeFingerprint, MastNodeId,
+        Remapping, SubtreeIterator,
     },
     operations::{AssemblyOp, Decorator, DecoratorList, Operation},
     serde::Serializable,
@@ -71,6 +71,12 @@ pub struct MastForestBuilder {
     /// A MastForest that contains the MAST of all statically-linked libraries, it's used to find
     /// precompiled procedures and copy their subtrees instead of inserting external nodes.
     statically_linked_mast: Arc<MastForest>,
+    /// Maps each statically linked source forest commitment to its position in the merged forest
+    /// root map.
+    statically_linked_forest_indices_by_commitment: BTreeMap<Word, usize>,
+    /// Maps procedure roots from each source static library to their new root ID in the merged
+    /// static forest.
+    statically_linked_root_map: MastForestRootMap,
     /// Keeps track of the new ids assigned to nodes that are copied from the MAST of
     /// statically-linked libraries.
     statically_linked_mast_remapping: Remapping,
@@ -108,8 +114,18 @@ impl MastForestBuilder {
         static_libraries: impl IntoIterator<Item = &'a MastForest>,
     ) -> Result<Self, Report> {
         // All statically-linked libraries are merged into a single MastForest.
-        let forests = static_libraries.into_iter();
-        let (statically_linked_mast, _remapping) = MastForest::merge(forests).into_diagnostic()?;
+        let forests = static_libraries.into_iter().collect::<Vec<_>>();
+        // TODO(#3067): `MastForest::commitment()` only hashes procedure root digests, so two
+        // forests with identical roots but different debug metadata share the same commitment.
+        // Using that commitment as a lookup key can point provenance from one static library at
+        // another library's root map and still select the wrong diagnostics metadata.
+        let statically_linked_forest_indices_by_commitment = forests
+            .iter()
+            .enumerate()
+            .map(|(idx, forest)| (forest.commitment(), idx))
+            .collect();
+        let (statically_linked_mast, statically_linked_root_map) =
+            MastForest::merge(forests.iter().copied()).into_diagnostic()?;
         // The AdviceMap of the statically-linked forest is copied to the forest being built.
         //
         // This might include excess advice map data in the built MastForest, but we currently do
@@ -120,6 +136,8 @@ impl MastForestBuilder {
         Ok(MastForestBuilder {
             mast_forest,
             statically_linked_mast: Arc::new(statically_linked_mast),
+            statically_linked_forest_indices_by_commitment,
+            statically_linked_root_map,
             emit_debug_info: true,
             ..Self::default()
         })
@@ -580,6 +598,7 @@ impl MastForestBuilder {
 
         let mut operations: Vec<Operation> = Vec::new();
         let mut decorators = DecoratorList::new();
+        let mut pending_after_exit = Vec::new();
         // Track asm_ops and debug_vars being accumulated for merged blocks, with adjusted indices
         let mut merged_asm_ops: Vec<(usize, AsmOpId)> = Vec::new();
         let mut merged_debug_vars: Vec<(usize, miden_core::mast::DebugVarId)> = Vec::new();
@@ -597,19 +616,29 @@ impl MastForestBuilder {
             ) {
                 // Collect decorators and operations from the block (while still borrowing)
                 // We need owned copies so we can drop the borrow before mutating self
-                let (block_decorators, block_ops) = {
+                let (block_decorators, block_before_enter, block_after_exit, block_ops) = {
                     let basic_block_node =
                         self.mast_forest[basic_block_id].get_basic_block().unwrap();
-                    let block_decorators: Vec<_> =
-                        basic_block_node.raw_decorator_iter(&self.mast_forest).collect();
+                    let block_decorators =
+                        basic_block_node.raw_op_indexed_decorators(&self.mast_forest);
+                    let block_before_enter =
+                        basic_block_node.before_enter(&self.mast_forest).to_vec();
+                    let block_after_exit = basic_block_node.after_exit(&self.mast_forest).to_vec();
                     let block_ops: Vec<Operation> = basic_block_node
                         .op_batches()
                         .iter()
                         .flat_map(|b| b.raw_ops().copied())
                         .collect();
-                    (block_decorators, block_ops)
+                    (block_decorators, block_before_enter, block_after_exit, block_ops)
                 };
                 let ops_offset = operations.len();
+
+                for decorator in core::mem::take(&mut pending_after_exit) {
+                    decorators.push((ops_offset, decorator));
+                }
+                for decorator in block_before_enter {
+                    decorators.push((ops_offset, decorator));
+                }
 
                 // Transfer any pending asm_ops and debug_vars for this block to the merged result
                 self.transfer_asm_ops_for_merge(basic_block_id, ops_offset, &mut merged_asm_ops);
@@ -619,10 +648,11 @@ impl MastForestBuilder {
                     &mut merged_debug_vars,
                 );
 
-                // Add decorators with adjusted indices
+                // Add operation-indexed decorators with adjusted indices.
                 for (op_idx, decorator) in block_decorators {
                     decorators.push((op_idx + ops_offset, decorator));
                 }
+                pending_after_exit.extend(block_after_exit);
                 operations.extend(block_ops);
             } else {
                 // If we don't want to merge this block, flush the buffer of operations into a
@@ -630,6 +660,7 @@ impl MastForestBuilder {
                 if !operations.is_empty() {
                     let block_ops = core::mem::take(&mut operations);
                     let block_decorators = core::mem::take(&mut decorators);
+                    let block_after_exit = core::mem::take(&mut pending_after_exit);
                     let block_asm_ops = core::mem::take(&mut merged_asm_ops);
                     let block_debug_vars = core::mem::take(&mut merged_debug_vars);
                     let merged_basic_block_id = self.ensure_block_with_asm_op_and_debug_var_ids(
@@ -638,7 +669,7 @@ impl MastForestBuilder {
                         block_asm_ops,
                         block_debug_vars,
                         vec![],
-                        vec![],
+                        block_after_exit,
                     )?;
 
                     merged_basic_blocks.push(merged_basic_block_id);
@@ -650,14 +681,14 @@ impl MastForestBuilder {
         // Mark the removed basic blocks as merged
         self.merged_basic_block_ids.extend(contiguous_basic_block_ids.iter());
 
-        if !operations.is_empty() || !decorators.is_empty() {
+        if !operations.is_empty() || !decorators.is_empty() || !pending_after_exit.is_empty() {
             let merged_basic_block = self.ensure_block_with_asm_op_and_debug_var_ids(
                 operations,
                 decorators,
                 merged_asm_ops,
                 merged_debug_vars,
                 vec![],
-                vec![],
+                pending_after_exit,
             )?;
             merged_basic_blocks.push(merged_basic_block);
         }
@@ -721,7 +752,8 @@ impl MastForestBuilder {
 
         let base_fingerprint = block
             .fingerprint_for_node(&self.mast_forest, &self.hash_by_node_id)
-            .expect("hash_by_node_id should contain the fingerprints of all children of `node`");
+            .into_diagnostic()
+            .wrap_err("assembler failed to fingerprint basic block")?;
         let dedup_fingerprint = self.maybe_augment(
             self.maybe_augment(
                 base_fingerprint,
@@ -1038,7 +1070,8 @@ impl MastForestBuilder {
         // builder itself.
         let base_fingerprint = block
             .fingerprint_for_node(&self.mast_forest, &self.hash_by_node_id)
-            .expect("hash_by_node_id should contain the fingerprints of all children of `node`");
+            .into_diagnostic()
+            .wrap_err("assembler failed to fingerprint basic block")?;
         let dedup_fingerprint = self.maybe_augment(
             self.maybe_augment(base_fingerprint, &serialize_asm_ops(&asm_ops)),
             &serialize_debug_vars(&self.mast_forest, &debug_vars),
@@ -1089,12 +1122,12 @@ impl MastForestBuilder {
     ///
     /// This must be called before copying nodes from the subtree to ensure all decorator IDs
     /// can be properly remapped.
-    fn collect_decorators_from_subtree(&mut self, root_id: &MastNodeId) -> Result<(), Report> {
+    fn collect_decorators_from_subtree(&mut self, root_id: MastNodeId) -> Result<(), Report> {
         // Clear the decorator remapping for this subtree
         self.statically_linked_decorator_remapping.clear();
 
         // Iterate through all nodes in the subtree
-        for node_id in SubtreeIterator::new(root_id, &self.statically_linked_mast.clone()) {
+        for node_id in SubtreeIterator::new(&root_id, &self.statically_linked_mast.clone()) {
             // Get all decorator IDs used by this node
             let decorator_ids: Vec<DecoratorId> = {
                 let mut ids = Vec::new();
@@ -1157,15 +1190,47 @@ impl MastForestBuilder {
     ///   the inserted subtree is returned.
     /// * If dynamically-linked, then an external node is inserted, and its MastNodeId is returned
     ///
-    /// TODO(#2990): when multiple roots share the same digest but carry
-    /// different metadata, this always picks the first match. Needs a source
-    /// MastNodeId threaded from ProcedureInfo through the linker.
-    pub fn ensure_external_link(&mut self, mast_root: Word) -> Result<MastNodeId, Report> {
-        if let Some(root_id) = self.statically_linked_mast.find_procedure_root(mast_root) {
-            self.copy_statically_linked_subtree(root_id)
-        } else {
-            self.ensure_node(ExternalNodeBuilder::new(mast_root))
+    /// Adds a node corresponding to the given MAST root, preferring an exact source root when
+    /// provenance from a statically-linked library is available.
+    pub fn ensure_external_link_with_source(
+        &mut self,
+        mast_root: Word,
+        source_library_commitment: Option<Word>,
+        source_root_id: Option<MastNodeId>,
+    ) -> Result<MastNodeId, Report> {
+        if let Some(root_id) =
+            self.find_statically_linked_root(source_library_commitment, source_root_id, mast_root)
+        {
+            return self.copy_statically_linked_subtree(root_id);
         }
+
+        self.ensure_node(ExternalNodeBuilder::new(mast_root))
+    }
+
+    fn find_statically_linked_root(
+        &self,
+        source_library_commitment: Option<Word>,
+        source_root_id: Option<MastNodeId>,
+        mast_root: Word,
+    ) -> Option<MastNodeId> {
+        if let (Some(source_library_commitment), Some(source_root_id)) =
+            (source_library_commitment, source_root_id)
+        {
+            let exact_root = self
+                .statically_linked_forest_indices_by_commitment
+                .get(&source_library_commitment)
+                .and_then(|forest_idx| {
+                    self.statically_linked_root_map.map_root(*forest_idx, &source_root_id)
+                });
+
+            if let Some(exact_root) = exact_root
+                .filter(|root_id| self.statically_linked_mast[*root_id].digest() == mast_root)
+            {
+                return Some(exact_root);
+            }
+        }
+
+        self.statically_linked_mast.find_procedure_root(mast_root)
     }
 
     /// Copies a subtree from the statically linked forest into the builder's forest.
@@ -1173,7 +1238,7 @@ impl MastForestBuilder {
         &mut self,
         root_id: MastNodeId,
     ) -> Result<MastNodeId, Report> {
-        self.collect_decorators_from_subtree(&root_id)?;
+        self.collect_decorators_from_subtree(root_id)?;
 
         for old_id in SubtreeIterator::new(&root_id, &self.statically_linked_mast.clone()) {
             let node = self.statically_linked_mast[old_id].clone();
@@ -1347,15 +1412,15 @@ mod tests {
         // This will result in padding after Push(2) because Push operations get padded
         // Note: the following unpadded operations are 9 in number, indexed 0 to 8
         let block1_ops = vec![
-            Operation::Push(Felt::new(1)),
+            Operation::Push(Felt::new_unchecked(1)),
             Operation::Drop,
             Operation::Drop,
             Operation::Drop,
             Operation::Drop,
             Operation::Drop,
             Operation::Drop,
-            Operation::Push(Felt::new(2)),
-            Operation::Push(Felt::new(3)),
+            Operation::Push(Felt::new_unchecked(2)),
+            Operation::Push(Felt::new_unchecked(3)),
         ]; // [push drop drop drop drop drop drop push noop] [1] [2] [push noop] [3] [noop] [noop] [noop]
         let block1_raw_ops_len = block1_ops.len();
 
@@ -1370,7 +1435,7 @@ mod tests {
         ];
 
         let block1_id = builder
-            .ensure_block(block1_ops.clone(), block1_decorators, vec![], vec![], vec![], vec![])
+            .ensure_block(block1_ops, block1_decorators, vec![], vec![], vec![], vec![])
             .unwrap();
 
         // Sanity check the test itself makes sense
@@ -1380,7 +1445,7 @@ mod tests {
 
         // Create second block with operations
         // Block2: [Push(4), Mul]
-        let block2_ops = vec![Operation::Push(Felt::new(4)), Operation::Mul];
+        let block2_ops = vec![Operation::Push(Felt::new_unchecked(4)), Operation::Mul];
 
         // Add decorators for each operation in block2
         let block2_decorator1 = builder.ensure_decorator(Decorator::Trace(4)).unwrap();
@@ -1391,7 +1456,7 @@ mod tests {
         ]; // [push mul] [3]
 
         let block2_id = builder
-            .ensure_block(block2_ops.clone(), block2_decorators, vec![], vec![], vec![], vec![])
+            .ensure_block(block2_ops, block2_decorators, vec![], vec![], vec![], vec![])
             .unwrap();
 
         // Merge the blocks
@@ -1439,7 +1504,7 @@ mod tests {
                             0 => {
                                 // Should be Push(1) from block1
                                 match &merged_ops[op_idx] {
-                                    Operation::Push(x) if *x == Felt::new(1) => {
+                                    Operation::Push(x) if *x == Felt::new_unchecked(1) => {
                                         assert_eq!(
                                             *trace_value, 1,
                                             "Decorator for Push(1) should have trace value 1"
@@ -1451,7 +1516,7 @@ mod tests {
                             7 => {
                                 // Should be Push(2) from block1
                                 match &merged_ops[op_idx] {
-                                    Operation::Push(x) if *x == Felt::new(2) => {
+                                    Operation::Push(x) if *x == Felt::new_unchecked(2) => {
                                         assert_eq!(
                                             *trace_value, 2,
                                             "Decorator for Push(2) should have trace value 2"
@@ -1463,7 +1528,7 @@ mod tests {
                             9 => {
                                 // Should be Push(3) from block1
                                 match &merged_ops[op_idx] {
-                                    Operation::Push(x) if *x == Felt::new(3) => {
+                                    Operation::Push(x) if *x == Felt::new_unchecked(3) => {
                                         assert_eq!(
                                             *trace_value, 3,
                                             "Decorator for Push(3) should have trace value 3"
@@ -1475,7 +1540,7 @@ mod tests {
                             10 => {
                                 // Should be Push(4) from block2
                                 match &merged_ops[op_idx] {
-                                    Operation::Push(x) if *x == Felt::new(4) => {
+                                    Operation::Push(x) if *x == Felt::new_unchecked(4) => {
                                         assert_eq!(
                                             *trace_value, 4,
                                             "Decorator for Push(4) should have trace value 4"
@@ -1502,7 +1567,7 @@ mod tests {
                             ),
                         }
                     } else {
-                        panic!("Operation index {} is out of bounds", op_idx);
+                        panic!("Operation index {op_idx} is out of bounds");
                     }
                 },
                 _ => panic!("Expected Trace decorator"),
@@ -1514,8 +1579,7 @@ mod tests {
         for expected_trace in expected_traces {
             assert!(
                 found_traces.contains(&expected_trace),
-                "Missing trace value: {}",
-                expected_trace
+                "Missing trace value: {expected_trace}"
             );
         }
 
@@ -1543,6 +1607,112 @@ mod tests {
         assert_eq!(merged_blocks.len(), 2);
         assert_eq!(merged_blocks[0], large_block_id);
         assert_eq!(merged_blocks[1], small_block_id);
+    }
+
+    #[test]
+    fn test_merge_basic_blocks_preserves_trailing_after_exit_decorator() {
+        let mut builder = MastForestBuilder::new(&[]).unwrap();
+
+        let first_block_id = builder
+            .ensure_block(vec![Operation::Add], Vec::new(), vec![], vec![], vec![], vec![])
+            .unwrap();
+        let after_exit_decorator = builder.ensure_decorator(Decorator::Trace(7)).unwrap();
+        let second_block_id = builder
+            .ensure_block(
+                vec![Operation::Mul],
+                Vec::new(),
+                vec![],
+                vec![],
+                vec![],
+                vec![after_exit_decorator],
+            )
+            .unwrap();
+
+        let merged_blocks = builder.merge_basic_blocks(&[first_block_id, second_block_id]).unwrap();
+
+        assert_eq!(merged_blocks.len(), 1);
+        let merged_block_id = merged_blocks[0];
+        let merged_block = builder.mast_forest[merged_block_id].unwrap_basic_block();
+
+        assert!(merged_block.indexed_decorator_iter(&builder.mast_forest).next().is_none());
+        assert_eq!(
+            builder.mast_forest.after_exit_decorators(merged_block_id),
+            &[after_exit_decorator],
+        );
+    }
+
+    #[test]
+    fn test_merge_basic_blocks_places_boundary_after_exit_before_next_before_enter() {
+        let mut builder = MastForestBuilder::new(&[]).unwrap();
+
+        let first_after_exit = builder.ensure_decorator(Decorator::Trace(1)).unwrap();
+        let first_block_id = builder
+            .ensure_block(
+                vec![Operation::Add],
+                Vec::new(),
+                vec![],
+                vec![],
+                vec![],
+                vec![first_after_exit],
+            )
+            .unwrap();
+
+        let second_before_enter = builder.ensure_decorator(Decorator::Trace(2)).unwrap();
+        let second_block_id = builder
+            .ensure_block(
+                vec![Operation::Mul],
+                Vec::new(),
+                vec![],
+                vec![],
+                vec![second_before_enter],
+                vec![],
+            )
+            .unwrap();
+
+        let merged_blocks = builder.merge_basic_blocks(&[first_block_id, second_block_id]).unwrap();
+
+        assert_eq!(merged_blocks.len(), 1);
+        let merged_block_id = merged_blocks[0];
+        let merged_block = builder.mast_forest[merged_block_id].unwrap_basic_block();
+        let decorators: Vec<_> =
+            merged_block.indexed_decorator_iter(&builder.mast_forest).collect();
+
+        assert_eq!(decorators, vec![(1, first_after_exit), (1, second_before_enter)]);
+        assert!(builder.mast_forest.after_exit_decorators(merged_block_id).is_empty());
+    }
+
+    #[test]
+    fn ensure_block_rejects_decorator_index_beyond_operation_count_without_panicking() {
+        let mut builder = MastForestBuilder::new(&[]).unwrap();
+        let decorator_id = builder.ensure_decorator(Decorator::Trace(42)).unwrap();
+
+        let result = builder.ensure_block(
+            vec![Operation::Add],
+            vec![(2, decorator_id)],
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+        );
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn ensure_block_rejects_post_last_decorator_index_without_panicking() {
+        let mut builder = MastForestBuilder::new(&[]).unwrap();
+        let decorator_id = builder.ensure_decorator(Decorator::Trace(42)).unwrap();
+
+        let result = builder.ensure_block(
+            vec![Operation::Add],
+            vec![(1, decorator_id)],
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+        );
+
+        assert!(result.is_err());
     }
 
     /// Cloning a block with debug vars via `to_builder().with_before_enter()` must
@@ -1843,8 +2013,9 @@ mod tests {
         static_forest.make_root(static_block_id);
 
         let mut builder = MastForestBuilder::new([&static_forest]).unwrap();
-        let copied_block_id =
-            builder.ensure_external_link(static_forest[static_block_id].digest()).unwrap();
+        let copied_block_id = builder
+            .ensure_external_link_with_source(static_forest[static_block_id].digest(), None, None)
+            .unwrap();
 
         let local_var_id = builder
             .add_debug_var(DebugVarInfo::new("y", DebugVarLocation::Stack(1)))
@@ -1893,15 +2064,15 @@ mod tests {
     fn test_statically_linked_padded_block_dedups_with_equivalent_local_block() {
         let mut source_builder = MastForestBuilder::new(&[]).unwrap();
         let ops = vec![
-            Operation::Push(Felt::new(1)),
+            Operation::Push(Felt::from_u32(1)),
             Operation::Drop,
             Operation::Drop,
             Operation::Drop,
             Operation::Drop,
             Operation::Drop,
             Operation::Drop,
-            Operation::Push(Felt::new(2)),
-            Operation::Push(Felt::new(3)),
+            Operation::Push(Felt::from_u32(2)),
+            Operation::Push(Felt::from_u32(3)),
         ];
         let asm_op = AssemblyOp::new(None, "padded_ctx".into(), 1, "push.3".into());
 
@@ -1921,8 +2092,9 @@ mod tests {
         let expected_padded_idx = static_forest.debug_info().asm_ops_for_node(static_block)[0].0;
 
         let mut builder = MastForestBuilder::new([&static_forest]).unwrap();
-        let copied_block_id =
-            builder.ensure_external_link(static_forest[static_block].digest()).unwrap();
+        let copied_block_id = builder
+            .ensure_external_link_with_source(static_forest[static_block].digest(), None, None)
+            .unwrap();
         let local_block_id = builder
             .ensure_block(ops, Vec::new(), vec![(8, asm_op)], vec![], vec![], vec![])
             .unwrap();
@@ -2090,7 +2262,9 @@ mod tests {
         let (static_forest, _) = source_builder.build();
 
         let mut builder = MastForestBuilder::new([&static_forest]).unwrap();
-        let linked = builder.ensure_external_link(static_forest[alias_a].digest()).unwrap();
+        let linked = builder
+            .ensure_external_link_with_source(static_forest[alias_a].digest(), None, None)
+            .unwrap();
         builder.mast_forest.make_root(linked);
         let (forest, _) = builder.build();
 
@@ -2102,11 +2276,10 @@ mod tests {
         );
     }
 
-    /// Digest-based linking picks the first root, so the second alias gets
-    /// the wrong metadata. Fixing this needs #2990.
+    /// Provenance-aware static linking can select the exact same-digest root instead of falling
+    /// back to the first digest match.
     #[test]
-    #[ignore = "requires #2990: source MastNodeId in ProcedureInfo"]
-    fn repro_statically_linked_same_digest_root_uses_first_alias_metadata() {
+    fn test_static_link_with_source_root_preserves_selected_alias_metadata() {
         let mut source_builder = MastForestBuilder::new(&[]).unwrap();
 
         let alias_a = source_builder
@@ -2145,10 +2318,15 @@ mod tests {
         };
         let (exact_forest, _) = exact_builder.build();
 
-        let mut digest_builder = MastForestBuilder::new([&static_forest]).unwrap();
-        let linked_alias_b =
-            digest_builder.ensure_external_link(static_forest[alias_b].digest()).unwrap();
-        let (linked_forest, _) = digest_builder.build();
+        let mut provenance_builder = MastForestBuilder::new([&static_forest]).unwrap();
+        let linked_alias_b = provenance_builder
+            .ensure_external_link_with_source(
+                static_forest[alias_b].digest(),
+                Some(static_forest.commitment()),
+                Some(alias_b),
+            )
+            .unwrap();
+        let (linked_forest, _) = provenance_builder.build();
 
         assert_eq!(
             exact_forest
@@ -2165,7 +2343,7 @@ mod tests {
                 .unwrap()
                 .context_name(),
             "alias_b",
-            "linking the second same-digest root by digest should preserve that root's metadata",
+            "provenance-aware linking should preserve the selected same-digest root metadata",
         );
     }
 }

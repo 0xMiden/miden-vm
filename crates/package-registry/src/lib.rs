@@ -20,9 +20,11 @@ pub use miden_assembly_syntax::{
     semver,
     semver::{Version as SemVer, VersionReq},
 };
-pub use miden_core::{LexicographicWord, Word};
+pub use miden_core::Word;
 use miden_mast_package::Package as MastPackage;
 pub use miden_mast_package::PackageId;
+#[cfg(feature = "arbitrary")]
+use proptest::prelude::*;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -42,6 +44,7 @@ pub type PackageRequirements = BTreeMap<PackageId, VersionRequirement>;
 /// Metadata tracked for a specific canonical package version.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
 pub struct PackageRecord {
     /// The exact published version associated with this package
     version: Version,
@@ -82,7 +85,7 @@ impl PackageRecord {
 
     /// The digest of the MAST forest contained in this package
     pub fn digest(&self) -> Option<&Word> {
-        self.version.digest.as_ref().map(|word| word.inner())
+        self.version.digest.as_ref()
     }
 
     /// Returns the package description, if known.
@@ -93,6 +96,32 @@ impl PackageRecord {
     /// Returns the dependency metadata for this package.
     pub fn dependencies(&self) -> &PackageRequirements {
         &self.dependencies
+    }
+}
+
+#[cfg(feature = "arbitrary")]
+impl Arbitrary for PackageRecord {
+    type Parameters = ();
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        let description = proptest::option::of(
+            proptest::collection::vec(proptest::char::range('a', 'z'), 1..32)
+                .prop_map(|chars| Arc::<str>::from(chars.into_iter().collect::<String>())),
+        );
+        let dependencies =
+            proptest::collection::vec((any::<PackageId>(), any::<VersionRequirement>()), 0..4)
+                .prop_map(|entries| entries.into_iter().collect::<BTreeMap<_, _>>());
+
+        (any::<Version>(), description, dependencies)
+            .prop_map(|(version, description, dependencies)| {
+                let mut record = Self::new(version, dependencies);
+                if let Some(description) = description {
+                    record = record.with_description(description);
+                }
+                record
+            })
+            .boxed()
     }
 }
 
@@ -147,12 +176,11 @@ pub trait PackageRegistry {
 
     /// Return the metadata for `package` with `digest`, if present.
     fn get_by_digest(&self, package: &PackageId, digest: &Word) -> Option<&PackageRecord> {
-        let digest = LexicographicWord::new(*digest);
         self.available_versions(package).and_then(|versions| {
             versions
                 .values()
                 .rev()
-                .find(|record| record.version().digest.is_some_and(|d| d == digest))
+                .find(|record| record.version().digest.as_ref() == Some(digest))
         })
     }
 
@@ -193,10 +221,16 @@ pub trait PackageIndex: PackageRegistry {
     fn register(&mut self, name: PackageId, record: PackageRecord) -> Result<(), Self::Error>;
 }
 
-/// A writable package store used to publish assembled package artifacts and index metadata.
-pub trait PackageStore: PackageRegistry + PackageProvider {
+/// A writable package cache used to store assembled package artifacts resolved during assembly.
+pub trait PackageCache: PackageRegistry + PackageProvider {
     type Error: fmt::Display;
 
+    /// Cache `package`, returning the fully-qualified stored version.
+    fn cache_package(&mut self, package: Arc<MastPackage>) -> Result<Version, Self::Error>;
+}
+
+/// A writable package store used to publish assembled package artifacts and index metadata.
+pub trait PackageStore: PackageCache {
     /// Publish `package` to the store, returning the fully-qualified stored version.
     fn publish_package(&mut self, package: Arc<MastPackage>) -> Result<Version, Self::Error>;
 }
@@ -206,7 +240,10 @@ pub trait PackageStore: PackageRegistry + PackageProvider {
 #[error("{0}")]
 pub struct NoPackageStoreError(String);
 
-/// A package store implementation which always refuses publication.
+/// A package store implementation which refuses publication and loading.
+///
+/// Cache writes are accepted as a no-op so callers which do not need a persistent package store can
+/// still assemble source dependencies.
 #[derive(Default)]
 pub struct NoPackageStore;
 
@@ -226,13 +263,90 @@ impl PackageProvider for NoPackageStore {
     }
 }
 
-impl PackageStore for NoPackageStore {
+impl PackageCache for NoPackageStore {
     type Error = NoPackageStoreError;
 
+    fn cache_package(&mut self, package: Arc<MastPackage>) -> Result<Version, Self::Error> {
+        Ok(Version::new(package.version.clone(), package.digest()))
+    }
+}
+
+impl PackageStore for NoPackageStore {
     fn publish_package(&mut self, package: Arc<MastPackage>) -> Result<Version, Self::Error> {
         Err(NoPackageStoreError(format!(
             "cannot publish package {}@{}",
             package.name, package.version
         )))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use alloc::{collections::BTreeMap, vec, vec::Vec};
+
+    use miden_assembly_syntax::{
+        Library,
+        ast::{Path as AstPath, PathBuf},
+        library::{LibraryExport, ProcedureExport as LibraryProcedureExport},
+    };
+    use miden_core::{
+        mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, MastNodeId},
+        operations::Operation,
+    };
+    use miden_mast_package::{Package, TargetType};
+
+    use super::*;
+
+    fn build_forest() -> (MastForest, MastNodeId) {
+        let mut forest = MastForest::new();
+        let node_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+            .add_to_forest(&mut forest)
+            .expect("failed to build basic block");
+        forest.make_root(node_id);
+        (forest, node_id)
+    }
+
+    fn absolute_path(name: &str) -> Arc<AstPath> {
+        let path = PathBuf::new(name).expect("invalid path");
+        let path = path.as_path().to_absolute().into_owned();
+        Arc::from(path.into_boxed_path())
+    }
+
+    fn build_library(export: &str) -> Arc<Library> {
+        let (forest, node_id) = build_forest();
+        let path = absolute_path(export);
+        let export = LibraryProcedureExport::new(node_id, Arc::clone(&path));
+
+        let mut exports = BTreeMap::new();
+        exports.insert(path, LibraryExport::Procedure(export));
+
+        Arc::new(Library::new(Arc::new(forest), exports).expect("failed to build library"))
+    }
+
+    #[test]
+    fn no_package_store_cache_package_is_noop() {
+        let package: Arc<MastPackage> = Package::from_library(
+            PackageId::from("pkg"),
+            "1.0.0".parse().unwrap(),
+            TargetType::Library,
+            build_library("test::pkg::entry"),
+            [],
+        )
+        .into();
+        let expected = Version::new(package.version.clone(), package.digest());
+
+        let mut store = NoPackageStore;
+        let cached = store
+            .cache_package(Arc::clone(&package))
+            .expect("no package store should accept cache writes as no-op");
+
+        assert_eq!(cached, expected);
+        assert!(store.available_versions(&package.name).is_none());
+        store
+            .load_package(&package.name, &cached)
+            .expect_err("no package store should not persist cache writes");
+        store
+            .publish_package(package)
+            .expect_err("no package store should still reject publication");
     }
 }

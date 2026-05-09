@@ -278,12 +278,50 @@ impl<'a> TryFrom<&'a str> for PathBuf {
     }
 }
 
+fn is_canonical_path(path: &Path) -> bool {
+    let mut is_absolute = false;
+    let mut saw_normal_component = false;
+
+    for component in path.components() {
+        let component = match component {
+            Ok(component) => component,
+            Err(_) => return false,
+        };
+
+        match component {
+            PathComponent::Root => is_absolute = true,
+            component @ PathComponent::Normal(_) => {
+                let is_quoted = component.is_quoted();
+                let component = component.as_str();
+                let is_special = matches!(component, Path::KERNEL_PATH | Path::EXEC_PATH);
+                let requires_quoting = !is_special && Ident::requires_quoting(component);
+
+                if !saw_normal_component && !is_absolute && is_special {
+                    return false;
+                }
+
+                if requires_quoting != is_quoted {
+                    return false;
+                }
+
+                saw_normal_component = true;
+            },
+        }
+    }
+
+    true
+}
+
 impl TryFrom<String> for PathBuf {
     type Error = PathError;
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
-        Path::validate(&value)?;
-        Ok(PathBuf { inner: value })
+        let path = Path::validate(&value)?;
+        if is_canonical_path(path) {
+            Ok(Self { inner: value })
+        } else {
+            path.canonicalize()
+        }
     }
 }
 
@@ -341,11 +379,10 @@ impl Deserializable for PathBuf {
         let path = source.read_slice(len)?;
         let path =
             str::from_utf8(path).map_err(|e| DeserializationError::InvalidValue(e.to_string()))?;
-        Path::validate(path).map_err(|e| DeserializationError::InvalidValue(e.to_string()))?;
-        // We deserialize like this due to our deserialization tests expecting round-trips to be
-        // identical to what was serialized, though ideally we'd like to canonicalize paths that
-        // were deserialized. We should probably change how these tests work in the future.
-        Ok(PathBuf { inner: path.to_string() })
+        let path =
+            Path::validate(path).map_err(|e| DeserializationError::InvalidValue(e.to_string()))?;
+        path.canonicalize()
+            .map_err(|e| DeserializationError::InvalidValue(e.to_string()))
     }
 }
 
@@ -372,7 +409,7 @@ impl<'de> serde::Deserialize<'de> for PathBuf {
         impl<'de> Visitor<'de> for PathVisitor {
             type Value = PathBuf;
 
-            fn expecting(&self, formatter: &mut core::fmt::Formatter) -> core::fmt::Result {
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
                 formatter.write_str("a valid Path/PathBuf")
             }
 
@@ -380,24 +417,20 @@ impl<'de> serde::Deserialize<'de> for PathBuf {
             where
                 E: serde::de::Error,
             {
-                Path::validate(v).map_err(serde::de::Error::custom)?;
-                // We deserialize like this due to our deserialization tests expecting round-trips
-                // to be identical to what was serialized, though ideally we'd like
-                // to canonicalize paths that were deserialized. We should probably
-                // change how these tests work in the future.
-                Ok(PathBuf { inner: v.to_string() })
+                Path::validate(v)
+                    .map_err(serde::de::Error::custom)?
+                    .canonicalize()
+                    .map_err(serde::de::Error::custom)
             }
 
             fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
             where
                 E: serde::de::Error,
             {
-                Path::validate(&v).map_err(serde::de::Error::custom)?;
-                // We deserialize like this due to our deserialization tests expecting round-trips
-                // to be identical to what was serialized, though ideally we'd like
-                // to canonicalize paths that were deserialized. We should probably
-                // change how these tests work in the future.
-                Ok(PathBuf { inner: v })
+                Path::validate(&v)
+                    .map_err(serde::de::Error::custom)?
+                    .canonicalize()
+                    .map_err(serde::de::Error::custom)
             }
         }
 
@@ -417,6 +450,7 @@ impl fmt::Display for PathBuf {
 /// Tests
 #[cfg(test)]
 mod tests {
+    use alloc::string::String;
 
     use miden_core::assert_matches;
 
@@ -448,7 +482,7 @@ mod tests {
         assert_eq!(path.components().count(), 3);
         assert_eq!(path.last(), Some("baz"));
         assert_eq!(path.first(), Some("foo"));
-        assert_eq!(path.parent().map(|p| p.as_str()), Some("foo::bar"));
+        assert_eq!(path.parent().map(Path::as_str), Some("foo::bar"));
     }
 
     #[test]
@@ -476,7 +510,7 @@ mod tests {
         assert_eq!(path.components().count(), 3);
         assert_eq!(path.last(), Some("item"));
         assert_eq!(path.first(), Some("foo"));
-        assert_eq!(path.parent().map(|p| p.as_str()), Some("foo::\"miden::base/account@0.1.0\""));
+        assert_eq!(path.parent().map(Path::as_str), Some("foo::\"miden::base/account@0.1.0\""));
     }
 
     #[test]
@@ -560,7 +594,7 @@ mod tests {
             parent.as_str(),
             "::\"root_ns:root@1.0.0\"::abi_transform_tx_kernel_get_inputs_4"
         );
-        assert_eq!(parent.parent().map(|p| p.as_str()), Some("::\"root_ns:root@1.0.0\""));
+        assert_eq!(parent.parent().map(Path::as_str), Some("::\"root_ns:root@1.0.0\""));
 
         assert!(p2.is_absolute());
         assert_eq!(p2.components().count(), 4);
@@ -571,7 +605,29 @@ mod tests {
             parent.as_str(),
             "::\"root_ns:root@1.0.0\"::abi_transform_tx_kernel_get_inputs_4"
         );
-        assert_eq!(parent.parent().map(|p| p.as_str()), Some("::\"root_ns:root@1.0.0\""));
+        assert_eq!(parent.parent().map(Path::as_str), Some("::\"root_ns:root@1.0.0\""));
+    }
+
+    #[test]
+    fn try_from_string_canonicalizes_like_str() {
+        let from_str = PathBuf::try_from("foo::\"bar\"").unwrap();
+        let from_string = PathBuf::try_from(String::from("foo::\"bar\"")).unwrap();
+
+        assert_eq!(from_string, from_str);
+        assert_eq!(from_string.as_str(), "foo::bar");
+    }
+
+    #[test]
+    fn try_from_string_reuses_canonical_allocation() {
+        let value = String::from("foo::bar");
+        let original_ptr = value.as_ptr();
+        let original_capacity = value.capacity();
+
+        let path = PathBuf::try_from(value).unwrap();
+
+        assert_eq!(path.as_str(), "foo::bar");
+        assert_eq!(path.inner.as_ptr(), original_ptr);
+        assert_eq!(path.inner.capacity(), original_capacity);
     }
 
     #[test]
@@ -614,5 +670,41 @@ mod tests {
     fn invalid_path_invalid_character() {
         let result = Path::validate("#foo::bar");
         assert_matches!(result, Err(PathError::InvalidComponent(IdentError::InvalidChars { .. })));
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn serde_deserialize_path_buf_canonicalizes_redundant_quotes() {
+        let path: PathBuf = serde_json::from_str(r#""\"foo\"::\"bar\"""#)
+            .expect("path deserialization must succeed");
+        assert_eq!(path.as_str(), "foo::bar");
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn serde_deserialize_path_buf_preserves_required_quotes() {
+        let path: PathBuf = serde_json::from_value(serde_json::Value::String(String::from(
+            "::foo::\"miden::base/account@0.1.0\"",
+        )))
+        .expect("path deserialization must succeed");
+        assert_eq!(path.as_str(), "::foo::\"miden::base/account@0.1.0\"");
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn serde_deserialize_path_buf_rejects_overflow_after_canonicalization() {
+        let component = format!("{}-", "a".repeat(254));
+        let mut source = String::new();
+        for i in 0..255 {
+            if i > 0 {
+                source.push_str("::");
+            }
+            source.push_str(&component);
+        }
+
+        let err = serde_json::from_value::<PathBuf>(serde_json::Value::String(source))
+            .expect_err("deserialization must fail when canonicalization exceeds u16::MAX bytes");
+        let message = format!("{err}");
+        assert!(message.contains("too long"), "unexpected error: {message}");
     }
 }

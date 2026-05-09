@@ -2,8 +2,6 @@ use core::ops::Range;
 
 use miden_core::{Felt, ONE, ZERO, operations::Operation, utils::range};
 
-use super::DECODER_AUX_TRACE_OFFSET;
-
 // CONSTANTS
 // ================================================================================================
 
@@ -89,17 +87,6 @@ pub const IS_CALL_FLAG_COL_IDX: usize = HASHER_STATE_RANGE.start + 6;
 
 /// Index of a flag column which indicates whether an ending block is a SYSCALL block.
 pub const IS_SYSCALL_FLAG_COL_IDX: usize = HASHER_STATE_RANGE.start + 7;
-
-// --- Column accessors in the auxiliary columns --------------------------------------------------
-
-/// Running product column representing block stack table.
-pub const P1_COL_IDX: usize = DECODER_AUX_TRACE_OFFSET;
-
-/// Running product column representing block hash table
-pub const P2_COL_IDX: usize = DECODER_AUX_TRACE_OFFSET + 1;
-
-/// Running product column representing op group table.
-pub const P3_COL_IDX: usize = DECODER_AUX_TRACE_OFFSET + 2;
 
 // --- GLOBALLY-INDEXED DECODER COLUMN ACCESSORS --------------------------------------------------
 pub const DECODER_OP_BITS_OFFSET: usize = super::DECODER_TRACE_OFFSET + OP_BITS_OFFSET;

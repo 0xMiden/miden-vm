@@ -31,7 +31,7 @@ pub fn seeded_word(seed: &mut u64) -> Word {
 
 pub fn seeded_element(seed: &mut u64) -> Felt {
     *seed = (*seed).wrapping_add(0x9e37_79b9_7f4a_7c15);
-    Felt::new(splitmix64(*seed))
+    Felt::new_unchecked(splitmix64(*seed))
 }
 
 // HELPERS

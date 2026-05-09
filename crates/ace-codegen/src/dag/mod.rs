@@ -11,5 +11,5 @@ mod ir;
 mod lower;
 
 pub use builder::DagBuilder;
-pub use ir::{AceDag, NodeId, NodeKind, PeriodicColumnData};
+pub use ir::{AceDag, DagSnapshot, NodeId, NodeKind, PeriodicColumnData};
 pub use lower::build_verifier_dag;

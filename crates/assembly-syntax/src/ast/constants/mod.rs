@@ -76,11 +76,7 @@ impl crate::prettier::PrettyPrint for Constant {
     fn render(&self) -> crate::prettier::Document {
         use crate::prettier::*;
 
-        let mut doc = self
-            .docs
-            .as_ref()
-            .map(|docstring| docstring.render())
-            .unwrap_or(Document::Empty);
+        let mut doc = self.docs.as_ref().map(PrettyPrint::render).unwrap_or(Document::Empty);
 
         doc += flatten(const_text("const") + const_text(" ") + display(&self.name));
         doc += const_text(" = ");

@@ -121,6 +121,10 @@ $$
 s_1' = h_2 \text{ | degree} = 1
 $$
 
+$$
+h_3 = 0 \text{ | degree} = 1
+$$
+
 In addition to the above constraints, we also need to verify that values in $h_0, ..., h_3$ are smaller than $2^{16}$, which we can do using 16-bit range checks as described [previously](#range-checks).
 
 The effect of this operation on the rest of the stack is:
@@ -146,6 +150,10 @@ $$
 
 $$
 s_1' = h_2 \text{ | degree} = 1
+$$
+
+$$
+h_3 = 0 \text{ | degree} = 1
 $$
 
 In addition to the above constraints, we also need to verify that values in $h_0, ..., h_3$ are smaller than $2^{16}$, which we can do using 16-bit range checks as described [previously](#range-checks).

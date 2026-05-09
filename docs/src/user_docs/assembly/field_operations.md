@@ -28,19 +28,21 @@ The message is hashed and turned into a field element. If the error code is omit
 
 ### Arithmetic and Boolean operations
 
-The arithmetic operations below are performed in a 64-bit [prime field](https://en.wikipedia.org/wiki/Finite_field) defined by modulus $p = 2^{64} - 2^{32} + 1$. This means that overflow happens after a value exceeds $p$. Also, the result of divisions may appear counter-intuitive because divisions are defined via inversions.
+The arithmetic operations below are performed in a 64-bit [prime field](https://en.wikipedia.org/wiki/Finite_field) defined by modulus $p = 2^{64} - 2^{32} + 1$. This means that overflow happens after a value exceeds $p$.
+
+> **Warning:** `div` performs *field division*, not integer floor division. Field division computes $a \cdot b^{-1} \bmod p$, which bears no relation to $\lfloor a / b \rfloor$ and will produce unexpected results for most integer use cases. For integer floor division, use [`u32div`](./u32_operations.md) instead.
 
 | Instruction                                                                    | Stack_input | Stack_output  | Notes                                                                                                        |
 | ------------------------------------------------------------------------------ | ----------- | ------------- | ------------------------------------------------------------------------------------------------------------ |
 | add <br /> - *(1 cycle)*  <br /> add.*b* <br /> - *(1-2 cycle)*                      | [b, a, ...] | [c, ...]      | $c \leftarrow (a + b) \mod p$                                                                                |
 | sub <br /> - *(2 cycles)*  <br /> sub.*b* <br /> - *(2 cycles)*                      | [b, a, ...] | [c, ...]      | $c \leftarrow (a - b) \mod p$                                                                                |
 | mul <br /> - *(1 cycle)*  <br /> mul.*b* <br /> - *(2 cycles)*                       | [b, a, ...] | [c, ...]      | $c \leftarrow (a \cdot b) \mod p$                                                                            |
-| div <br /> - *(2 cycles)*  <br /> div.*b* <br /> - *(2 cycles)*                      | [b, a, ...] | [c, ...]      | $c \leftarrow (a \cdot b^{-1}) \mod p$ <br /> Fails if $b = 0$                                                 |
+| div <br /> - *(2 cycles)*  <br /> div.*b* <br /> - *(2 cycles)*                      | [b, a, ...] | [c, ...]      | $c \leftarrow (a \cdot b^{-1}) \mod p$ <br /> Fails if $b = 0$ <br /> **Note:** this is field division, not integer floor division. Use [`u32div`](./u32_operations.md) for floor division.                                                 |
 | neg <br /> - *(1 cycle)*                                                         | [a, ...]    | [b, ...]      | $b \leftarrow -a \mod p$                                                                                     |
 | inv <br /> - *(1 cycle)*                                                         | [a, ...]    | [b, ...]      | $b \leftarrow a^{-1} \mod p$ <br /> Fails if $a = 0$                                                           |
 | pow2 <br /> - *(16 cycles)*                                                      | [a, ...]    | [b, ...]      | $b \leftarrow 2^a$ <br /> Fails if $a > 63$                                                                    |
 | exp.*uxx* <br /> - *(9 + xx cycles)*  <br /> exp.*b* <br /> - *(9 + log2(b) cycles)* | [b, a, ...] | [c, ...]      | $c \leftarrow a^b$ <br /> Fails if xx is outside [0, 63) <br /> exp is equivalent to exp.u64 and needs 73 cycles |
-| ilog2 <br /> - *(44 cycles)*                                                      | [a, ...]    | [b, ...]      | $b \leftarrow \lfloor{log_2{a}}\rfloor$ <br /> Fails if $a = 0 $                                                                    |
+| ilog2 <br /> - *(66 cycles)*                                                      | [a, ...]    | [b, ...]      | $b \leftarrow \lfloor{log_2{a}}\rfloor$ <br /> Fails if $a = 0 $                                                                    |
 | not <br /> - *(1 cycle)*                                                         | [a, ...]    | [b, ...]      | $b \leftarrow 1 - a$ <br /> Fails if $a > 1$                                                                   |
 | and <br /> - *(1 cycle)*                                                         | [b, a, ...] | [c, ...]      | $c \leftarrow a \cdot b$ <br /> Fails if $max(a, b) > 1$                                                       |
 | or <br /> - *(1 cycle)*                                                          | [b, a, ...] | [c, ...]      | $c \leftarrow a + b - a \cdot b$ <br /> Fails if $max(a, b) > 1$                                               |
@@ -56,17 +58,18 @@ The arithmetic operations below are performed in a 64-bit [prime field](https://
 | lte <br /> - *(18 cycles)* <br /> lte.*b* <br /> - *(19 cycles)* | [b, a, ...] | [c, ...]       | $c \leftarrow \begin{cases} 1, & \text{if}\ a \le b  0, & \text{otherwise}\ \end{cases}$                                   |
 | gt <br /> - *(16 cycles)* <br /> gt.*b* <br /> - *(17 cycles)*   | [b, a, ...] | [c, ...]       | $c \leftarrow \begin{cases} 1, & \text{if}\ a > b  0, & \text{otherwise}\ \end{cases}$                                     |
 | gte <br /> - *(17 cycles)* <br /> gte.*b* <br /> - *(18 cycles)* | [b, a, ...] | [c, ...]       | $c \leftarrow \begin{cases} 1, & \text{if}\ a \ge b  0, & \text{otherwise}\ \end{cases}$                                   |
-| is_odd <br /> - *(5 cycles)*                                 | [a, ...]    | [b, ...]       | $b \leftarrow \begin{cases} 1, & \text{if}\ a \text{ is odd}  0, & \text{otherwise}\ \end{cases}$                          |
+| is_odd <br /> - *(6 cycles)*                                 | [a, ...]    | [b, ...]       | $b \leftarrow \begin{cases} 1, & \text{if}\ a \text{ is odd}  0, & \text{otherwise}\ \end{cases}$                          |
 | eqw <br /> - *(15 cycles)*                                   | [A, B, ...] | [c, A, B, ...] | $c \leftarrow \begin{cases} 1, & \text{if}\ a_i = b_i \; \forall i \in \{0, 1, 2, 3\}  0, & \text{otherwise}\ \end{cases}$ |
+
 ### Extension Field Operations
 
-All operations in this section are defined over the quadratic extension field $\mathbb{F}_p[x] / (x^2 - x + 2)$, with modulus $p = 2^{64} - 2^{32} + 1$.
+All operations in this section are defined over the quadratic extension field $\mathbb{F}_p[x] / (x^2 - 7)$, with modulus $p = 2^{64} - 2^{32} + 1$.
 
-| Instruction                        | Stack_input           | Stack_output    | Notes                                                                                                               |
-| ---------------------------------- | --------------------- | --------------- | ------------------------------------------------------------------------------------------------------------------- |
-| ext2add <br /> - *(5 cycles)*   <br /> | [b1, b0, a1, a0, ...] | [c1, c0, ...]   | $c1 \leftarrow (a1 + b1) \mod p$ and <br /> $c0 \leftarrow (a0 + b0) \mod p$                                          |
-| ext2sub <br /> - *(7 cycles)*   <br /> | [b1, b0, a1, a0, ...] | [c1, c0, ...]   | $c1 \leftarrow (a1 - b1) \mod p$ and <br /> $c0 \leftarrow (a0 - b0) \mod p$                                          |
-| ext2mul <br /> - *(3 cycles)*   <br /> | [b1, b0, a1, a0, ...] | [c1, c0, ...]   | $c1 \leftarrow (a0 + a1)(b0 + b1) - a0b0 \mod p$ and <br /> $c0 \leftarrow a0b0 - 2a1b1 \mod p$                       |
-| ext2neg <br /> - *(4 cycles)*   <br /> | [a1, a0, ...]         | [a1', a0', ...] | $a1' \leftarrow -a1$ and $a0' \leftarrow -a0$                                                                       |
-| ext2inv <br /> - *(8 cycles)*   <br /> | [a1, a0, ...]         | [a1', a0', ...] | $a' \leftarrow a^{-1}$ in $\mathbb{F}_p[x]/(x^2 - x + 2)$ <br /> Fails if $a = 0$                                     |
-| ext2div <br /> - *(11 cycles)*  <br /> | [b1, b0, a1, a0, ...] | [c1, c0,]       | $c \leftarrow a \cdot b^{-1}$ in $\mathbb{F}_p[x]/(x^2 - x + 2)$ <br /> Fails if $b=0$                                |
+| Instruction                        | Stack_input           | Stack_output        | Notes                                                                                           |
+| ---------------------------------- | --------------------- | ------------------- | ----------------------------------------------------------------------------------------------- |
+| ext2add <br /> - *(5 cycles)*   <br /> | [b0, b1, a0, a1, ...] | [c0, c1, ...]   | $c0 \leftarrow (a0 + b0) \mod p$ and <br /> $c1 \leftarrow (a1 + b1) \mod p$                    |
+| ext2sub <br /> - *(7 cycles)*   <br /> | [b0, b1, a0, a1, ...] | [c0, c1, ...]   | $c0 \leftarrow (a0 - b0) \mod p$ and <br /> $c1 \leftarrow (a1 - b1) \mod p$                    |
+| ext2mul <br /> - *(3 cycles)*   <br /> | [b0, b1, a0, a1, ...] | [c0, c1, ...]   | $c0 \leftarrow a0b0 - 7a1b1 \mod p$ and <br /> $c1 \leftarrow a0b0 + a1b0 \mod p$               |
+| ext2neg <br /> - *(4 cycles)*   <br /> | [a0, a1, ...]         | [a0', a1', ...] | $a0' \leftarrow -a0$ and $a1' \leftarrow -a1$                                                   |
+| ext2inv <br /> - *(8 cycles)*   <br /> | [a0, a1, ...]         | [a0', a1', ...] | $a' \leftarrow a^{-1}$ in $\mathbb{F}_p[x]/(x^2 - 7)$ <br /> Fails if $a = 0$                   |
+| ext2div <br /> - *(11 cycles)*  <br /> | [b0, b1, a0, a1, ...] | [c0, c1,]       | $c \leftarrow a \cdot b^{-1}$ in $\mathbb{F}_p[x]/(x^2 - 7)$ <br /> Fails if $b=0$              |

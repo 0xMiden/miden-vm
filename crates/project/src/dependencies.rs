@@ -58,7 +58,7 @@ impl Dependency {
                 version.as_ref().map(|spanned| VersionRequirement::Semantic(spanned.clone()))
             },
         };
-        req.unwrap_or_else(|| VersionRequirement::from(VersionReq::STAR.clone()))
+        req.unwrap_or_else(|| VersionRequirement::from(VersionReq::STAR))
     }
 }
 

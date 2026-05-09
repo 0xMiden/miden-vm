@@ -9,9 +9,6 @@ use crate::{
     utils::{assume_init_vec, uninit_vector},
 };
 
-mod aux_trace;
-pub use aux_trace::AuxTraceBuilder;
-
 #[cfg(test)]
 mod tests;
 
@@ -20,7 +17,6 @@ mod tests;
 
 pub struct RangeCheckTrace {
     pub(crate) trace: [Vec<Felt>; RANGE_CHECK_TRACE_WIDTH],
-    pub(crate) aux_builder: AuxTraceBuilder,
 }
 
 // RANGE CHECKER
@@ -100,7 +96,7 @@ impl RangeChecker {
         // }
         self.cycle_lookups
             .entry(clk)
-            .and_modify(|entry| entry.append(&mut values.to_vec()))
+            .and_modify(|entry| entry.extend_from_slice(values))
             .or_insert_with(|| values.to_vec());
     }
 
@@ -153,14 +149,7 @@ impl RangeChecker {
         let [t0, t1] = trace;
         let trace = unsafe { [assume_init_vec(t0), assume_init_vec(t1)] };
 
-        RangeCheckTrace {
-            trace,
-            aux_builder: AuxTraceBuilder::new(
-                self.lookups.keys().cloned().collect(),
-                self.cycle_lookups,
-                num_padding_rows,
-            ),
-        }
+        RangeCheckTrace { trace }
     }
 
     // PUBLIC ACCESSORS
@@ -265,7 +254,7 @@ fn write_trace_row(
     num_lookups: usize,
     value: u64,
 ) {
-    trace[0][*step].write(Felt::new(num_lookups as u64));
-    trace[1][*step].write(Felt::new(value));
+    trace[0][*step].write(Felt::new_unchecked(num_lookups as u64));
+    trace[1][*step].write(Felt::new_unchecked(value));
     *step += 1;
 }

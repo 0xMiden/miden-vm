@@ -1,3 +1,9 @@
+use miden_core_lib::{
+    CoreLibrary,
+    handlers::sorted_array::{LOWERBOUND_ARRAY_EVENT_NAME, LOWERBOUND_KEY_VALUE_EVENT_NAME},
+};
+use miden_processor::{ProcessorState, advice::AdviceMutation, event::EventError};
+
 use super::*;
 
 #[test]
@@ -290,7 +296,7 @@ fn test_malicious_advice_invalid_pointer() {
 
             # Pop the malicious values from advice stack (initialized at test start)
             # was_key_found, maybe_key_ptr
-            adv_push.2
+            adv_push adv_push
             # => [maybe_key_ptr, was_key_found, KEY, start_ptr, end_ptr, ...]
 
             # Now validate the pointer is within bounds
@@ -305,7 +311,8 @@ fn test_malicious_advice_invalid_pointer() {
     );
 
     // Initialize advice stack with malicious values: [maybe_key_ptr=200, was_key_found=1]
-    // adv_push.2 pops values and pushes them, resulting in [maybe_key_ptr, was_key_found, ...]
+    // `adv_push adv_push` pops values and pushes them, resulting in [maybe_key_ptr,
+    // was_key_found, ...].
     // The valid range is [100, 112], so 200 is clearly out of bounds
     let test = build_test!(source, &[], &[200, 1]);
 
@@ -334,7 +341,7 @@ fn test_malicious_advice_misaligned_pointer() {
             push.104 push.100 push.[8456,415,4922,593]
 
             # Pop the malicious values from advice stack
-            adv_push.2
+            adv_push adv_push
             # => [maybe_key_ptr, was_key_found, ...]
 
             # Validate alignment: pointer must be divisible by 4
@@ -350,8 +357,8 @@ fn test_malicious_advice_misaligned_pointer() {
     );
 
     // Initialize advice stack with malicious values: [maybe_key_ptr=101, was_key_found=1]
-    // adv_push.2 pops values and pushes them, resulting in [maybe_key_ptr, was_key_found, ...]
-    // 101 is not divisible by 4, so it's misaligned
+    // adv_push adv_push pops values and pushes them, resulting in [maybe_key_ptr,
+    // was_key_found, ...] 101 is not divisible by 4, so it's misaligned
     let test = build_test!(source, &[], &[101, 1]);
 
     // Execution should fail due to alignment check
@@ -380,7 +387,7 @@ fn test_malicious_advice_wrong_key_found_flag() {
             push.104 push.100 push.[9999,9999,9999,9999]
 
             # Pop the malicious values from advice stack
-            adv_push.2
+            adv_push adv_push
             # => [maybe_key_ptr=100, was_key_found=1, KEY_search, start_ptr, end_ptr]
 
             # If was_key_found is true, verify the key at the pointer matches
@@ -410,11 +417,167 @@ fn test_malicious_advice_wrong_key_found_flag() {
     );
 
     // Initialize advice stack with malicious values: [maybe_key_ptr=100, was_key_found=1]
-    // adv_push.2 pops values and pushes them, resulting in [maybe_key_ptr, was_key_found, ...]
-    // Claiming the key was found at ptr=100, but we're searching for a different key
+    // adv_push adv_push pops values and pushes them, resulting in [maybe_key_ptr,
+    // was_key_found, ...] Claiming the key was found at ptr=100, but we're searching for a
+    // different key
     let test = build_test!(source, &[], &[100, 1]);
 
     // Should fail because the key at ptr=100 doesn't match the search key
     let result = test.execute();
     assert!(result.is_err(), "Expected validation to fail for wrong key_found flag");
+}
+
+#[test]
+fn test_find_word_rejects_oob_pointer_above_end() {
+    let source = format!(
+        "
+        use miden::core::collections::sorted_array
+        {TRUNCATE_STACK_PROC}
+        begin
+            push.[9000,9000,9000,9000] mem_storew_le.204 dropw
+
+            push.[8456,415,4922,593] mem_storew_le.100 dropw
+            push.[8675,5816,5458,2767] mem_storew_le.104 dropw
+            push.[3015,7211,2002,5143] mem_storew_le.108 dropw
+
+            push.112 push.100 push.[8675,5816,5458,2767]
+            exec.sorted_array::find_word
+
+            exec.truncate_stack
+        end
+    "
+    );
+    let test = build_lib_test(&source, &[])
+        .with_event_handler(LOWERBOUND_ARRAY_EVENT_NAME, malicious_lowerbound_oob_above);
+
+    assert!(
+        test.execute().is_err(),
+        "find_word must reject maybe_value_ptr above end_ptr in the not-found branch",
+    );
+}
+
+#[test]
+fn test_find_word_rejects_oob_pointer_below_start() {
+    let source = format!(
+        "
+        use miden::core::collections::sorted_array
+        {TRUNCATE_STACK_PROC}
+        begin
+            push.[9000,9000,9000,9000] mem_storew_le.40 dropw
+
+            push.[8456,415,4922,593] mem_storew_le.100 dropw
+            push.[8675,5816,5458,2767] mem_storew_le.104 dropw
+            push.[3015,7211,2002,5143] mem_storew_le.108 dropw
+
+            push.112 push.100 push.[8675,5816,5458,2767]
+            exec.sorted_array::find_word
+
+            exec.truncate_stack
+        end
+    "
+    );
+    let test = build_lib_test(&source, &[])
+        .with_event_handler(LOWERBOUND_ARRAY_EVENT_NAME, malicious_lowerbound_oob_below);
+
+    assert!(
+        test.execute().is_err(),
+        "find_word must reject maybe_value_ptr below start_ptr in the not-found branch",
+    );
+}
+
+#[test]
+fn test_find_partial_key_value_rejects_oob_pointer_above_end() {
+    let source = format!(
+        "
+        use miden::core::collections::sorted_array
+        {TRUNCATE_STACK_PROC}
+        begin
+            push.[9000,9000,9000,9000] mem_storew_le.204 dropw
+            push.[9000,9000,9000,9000] mem_storew_le.208 dropw
+
+            push.[8456,415,4922,593] mem_storew_le.100 dropw
+            push.[8595,8794,8303,7256] mem_storew_le.104 dropw
+
+            push.[3348,6058,5470,2813] mem_storew_le.108 dropw
+            push.[3015,7211,2002,5143] mem_storew_le.112 dropw
+
+            push.[7513,7106,9944,7176] mem_storew_le.116 dropw
+            push.[4942,5573,1077,1968] mem_storew_le.120 dropw
+
+            push.124 push.100 push.[3348,6058,5470,2813]
+            exec.sorted_array::find_key_value
+
+            exec.truncate_stack
+        end
+    "
+    );
+
+    let test = build_lib_test(&source, &[])
+        .with_event_handler(LOWERBOUND_KEY_VALUE_EVENT_NAME, malicious_lowerbound_oob_above);
+
+    assert!(
+        test.execute().is_err(),
+        "find_partial_key_value must reject maybe_key_ptr above end_ptr in the not-found branch",
+    );
+}
+
+#[test]
+fn test_find_partial_key_value_rejects_oob_pointer_below_start() {
+    let source = format!(
+        "
+        use miden::core::collections::sorted_array
+        {TRUNCATE_STACK_PROC}
+        begin
+            push.[9000,9000,9000,9000] mem_storew_le.40 dropw
+            push.[9000,9000,9000,9000] mem_storew_le.44 dropw
+
+            push.[8456,415,4922,593] mem_storew_le.100 dropw
+            push.[8595,8794,8303,7256] mem_storew_le.104 dropw
+
+            push.[3348,6058,5470,2813] mem_storew_le.108 dropw
+            push.[3015,7211,2002,5143] mem_storew_le.112 dropw
+
+            push.[7513,7106,9944,7176] mem_storew_le.116 dropw
+            push.[4942,5573,1077,1968] mem_storew_le.120 dropw
+
+            push.124 push.100 push.[3348,6058,5470,2813]
+            exec.sorted_array::find_key_value
+
+            exec.truncate_stack
+        end
+    "
+    );
+
+    let test = build_lib_test(&source, &[])
+        .with_event_handler(LOWERBOUND_KEY_VALUE_EVENT_NAME, malicious_lowerbound_oob_below);
+
+    assert!(
+        test.execute().is_err(),
+        "find_partial_key_value must reject maybe_key_ptr below start_ptr in the not-found branch",
+    );
+}
+
+// MALICIOUS ADVICE PROVIDERS
+// ================================================================================================
+
+/// Builds a test with the core library and no event handlers.
+fn build_lib_test(source: &str, op_stack: &[u64]) -> miden_utils_testing::Test {
+    let core_lib = CoreLibrary::default();
+    miden_utils_testing::build_test_by_mode!(false, source, op_stack)
+        .with_library(core_lib.library().clone())
+}
+
+/// Returns `(was_found = false, maybe_value_ptr = 204)` regardless of the actual array. 204 is
+/// past the array's `end_ptr = 112`, so the bounds check must fire.
+fn malicious_lowerbound_oob_above(
+    _process: &ProcessorState,
+) -> Result<Vec<AdviceMutation>, EventError> {
+    Ok(vec![AdviceMutation::extend_stack(vec![Felt::new_unchecked(204), Felt::ZERO])])
+}
+
+/// Returns `(was_found = false, maybe_value_ptr = 40)` which is below `start_ptr = 100`.
+fn malicious_lowerbound_oob_below(
+    _process: &ProcessorState,
+) -> Result<Vec<AdviceMutation>, EventError> {
+    Ok(vec![AdviceMutation::extend_stack(vec![Felt::new_unchecked(40), Felt::ZERO])])
 }

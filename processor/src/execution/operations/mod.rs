@@ -1,5 +1,5 @@
 use crate::{
-    ExecutionError, Felt, Host,
+    BaseHost, ExecutionError, Felt,
     errors::MapExecErrWithOpIdx,
     mast::{MastForest, MastNodeId},
     operation::Operation,
@@ -23,9 +23,9 @@ pub(crate) use eval_circuit::eval_circuit_impl;
 // ================================================================================================
 
 /// WORD_SIZE, but as a `Felt`.
-const WORD_SIZE_FELT: Felt = Felt::new(4);
+const WORD_SIZE_FELT: Felt = Felt::new_unchecked(4);
 /// The size of a double-word.
-const DOUBLE_WORD_SIZE: Felt = Felt::new(8);
+const DOUBLE_WORD_SIZE: Felt = Felt::new_unchecked(8);
 
 // OPERATION HANDLER
 // ================================================================================================
@@ -45,7 +45,7 @@ pub(crate) fn execute_op<P, T>(
     op_idx: usize,
     current_forest: &MastForest,
     node_id: MastNodeId,
-    host: &mut impl Host,
+    host: &mut impl BaseHost,
     tracer: &mut T,
 ) -> Result<OperationHelperRegisters, ExecutionError>
 where
@@ -165,8 +165,10 @@ where
             host,
             op_idx,
         )?,
-        Operation::U32assert2(err_code) => u32_ops::op_u32assert2(processor, *err_code, tracer)
-            .map_exec_err_with_op_idx(current_forest, node_id, host, op_idx)?,
+        Operation::U32assert2(err_code) => {
+            u32_ops::op_u32assert2(processor, *err_code, tracer, current_forest)
+                .map_exec_err_with_op_idx(current_forest, node_id, host, op_idx)?
+        },
 
         // ----- stack manipulation -----------------------------------------------------------
         Operation::Pad => stack_ops::op_pad(processor)?,

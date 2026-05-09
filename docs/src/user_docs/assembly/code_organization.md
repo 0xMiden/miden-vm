@@ -384,6 +384,15 @@ end
 
 Note that nothing currently validates that a `u8` value passed as an instance of `Level` is actually one of those three constants, that is up to you. Instead, the `enum` syntax is intended to provide more semantic information for readers of the code, and to better express the relationship between the type and the constants in question.
 
+Because enum variants are expanded into module-level constants, variant names must be unique across all enums (and constants) within the same module. For example, the following will produce a compile-time error because `OK` is defined by both enums:
+
+```
+enum Status : u8 { OK, ERR }
+enum Health : u8 { OK, CRIT } # error: symbol conflict for `OK`
+```
+
+If you need similar variant names in different enums, consider placing each enum in its own module, or choosing distinct names for the variants.
+
 #### Type signatures
 
 Procedure type signatures are expressed using familiar function type syntax, e.g.:

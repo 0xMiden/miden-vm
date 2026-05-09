@@ -6,101 +6,10 @@
 
 use miden_crypto::field::{ExtensionField, Field};
 
-#[cfg(test)]
-use crate::AceError;
 use crate::{
     dag::{DagBuilder, NodeId},
     layout::{InputKey, InputLayout},
 };
-
-/// Evaluate the quotient recomposition at `zeta` using provided inputs.
-#[cfg(test)]
-pub fn eval_quotient<F, EF>(layout: &InputLayout, inputs: &[EF]) -> Result<EF, AceError>
-where
-    F: Field,
-    EF: ExtensionField<F>,
-{
-    if inputs.len() != layout.total_inputs {
-        return Err(AceError::InvalidInputLength {
-            expected: layout.total_inputs,
-            got: inputs.len(),
-        });
-    }
-
-    let k = layout.counts.num_quotient_chunks;
-    let z_pow_n = inputs[layout.index(InputKey::ZPowN).expect("ZPowN in layout")];
-    let s0 = inputs[layout.index(InputKey::S0).expect("S0 in layout")];
-    let g = inputs[layout.index(InputKey::G).expect("G in layout")];
-    let weight0 = inputs[layout.index(InputKey::Weight0).expect("Weight0 in layout")];
-
-    let (deltas, weights) = {
-        let mut ops = FieldOps;
-        compute_deltas_and_weights(k, z_pow_n, s0, g, weight0, &mut ops)
-    };
-
-    let mut chunk_values = Vec::with_capacity(k);
-    for chunk in 0..k {
-        let mut value = EF::ZERO;
-        for coord in 0..EF::DIMENSION {
-            let basis = EF::ith_basis_element(coord).expect("basis index within extension degree");
-            let coord_value = inputs[layout
-                .index(InputKey::QuotientChunkCoord { offset: 0, chunk, coord })
-                .expect("quotient chunk coord in layout")];
-            value += basis * coord_value;
-        }
-        chunk_values.push(value);
-    }
-
-    let mut quotient = EF::ZERO;
-    for (i, &chunk_value) in chunk_values.iter().enumerate() {
-        let mut prod = EF::ONE;
-        for (j, delta) in deltas.iter().enumerate() {
-            if i != j {
-                prod *= *delta;
-            }
-        }
-        let zps = weights[i] * prod;
-        quotient += zps * chunk_value;
-    }
-
-    Ok(quotient)
-}
-
-/// Compute the barycentric kernel value (`zps`) for a single chunk.
-#[cfg(test)]
-pub fn zps_for_chunk<EF>(layout: &InputLayout, inputs: &[EF], chunk: usize) -> Result<EF, AceError>
-where
-    EF: Field,
-{
-    if inputs.len() != layout.total_inputs {
-        return Err(AceError::InvalidInputLength {
-            expected: layout.total_inputs,
-            got: inputs.len(),
-        });
-    }
-
-    let k = layout.counts.num_quotient_chunks;
-    assert!(chunk < k, "quotient chunk {chunk} out of range (k={k})");
-
-    let z_pow_n = inputs[layout.index(InputKey::ZPowN).expect("ZPowN in layout")];
-    let s0 = inputs[layout.index(InputKey::S0).expect("S0 in layout")];
-    let g = inputs[layout.index(InputKey::G).expect("G in layout")];
-    let weight0 = inputs[layout.index(InputKey::Weight0).expect("Weight0 in layout")];
-
-    let (deltas, weights) = {
-        let mut ops = FieldOps;
-        compute_deltas_and_weights(k, z_pow_n, s0, g, weight0, &mut ops)
-    };
-
-    let mut prod = EF::ONE;
-    for (j, delta) in deltas.iter().enumerate() {
-        if j != chunk {
-            prod *= *delta;
-        }
-    }
-
-    Ok(weights[chunk] * prod)
-}
 
 /// Build DAG nodes that recombine quotient chunks.
 pub(crate) fn build_quotient_recomposition_dag<F, EF>(
@@ -114,12 +23,12 @@ where
     let k = layout.counts.num_quotient_chunks;
     let z_pow_n = builder.input(InputKey::ZPowN);
     let s0 = builder.input(InputKey::S0);
-    let g = builder.input(InputKey::G);
+    let f = builder.input(InputKey::F);
     let weight0 = builder.input(InputKey::Weight0);
 
     let (deltas, weights) = {
         let mut ops = DagOps { builder };
-        compute_deltas_and_weights(k, z_pow_n, s0, g, weight0, &mut ops)
+        compute_deltas_and_weights(k, z_pow_n, s0, f, weight0, &mut ops)
     };
 
     let mut chunk_values = Vec::with_capacity(k);
@@ -152,23 +61,6 @@ where
     quotient
 }
 
-#[cfg(test)]
-struct FieldOps;
-
-#[cfg(test)]
-impl<EF> Ops<EF> for FieldOps
-where
-    EF: Field,
-{
-    fn sub(&mut self, a: EF, b: EF) -> EF {
-        a - b
-    }
-
-    fn mul(&mut self, a: EF, b: EF) -> EF {
-        a * b
-    }
-}
-
 struct DagOps<'a, EF> {
     builder: &'a mut DagBuilder<EF>,
 }
@@ -195,7 +87,7 @@ fn compute_deltas_and_weights<T>(
     k: usize,
     z_pow_n: T,
     s0: T,
-    g: T,
+    f: T,
     weight0: T,
     ops: &mut impl Ops<T>,
 ) -> (Vec<T>, Vec<T>)
@@ -209,8 +101,8 @@ where
     for _ in 0..k {
         deltas.push(ops.sub(z_pow_n, shift));
         weights.push(weight);
-        shift = ops.mul(shift, g);
-        weight = ops.mul(weight, g);
+        shift = ops.mul(shift, f);
+        weight = ops.mul(weight, f);
     }
     (deltas, weights)
 }

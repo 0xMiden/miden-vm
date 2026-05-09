@@ -1,16 +1,18 @@
 use alloc::{sync::Arc, vec::Vec};
 
-use miden_air::trace::chiplets::hasher::{HASH_CYCLE_LEN, HASH_CYCLE_LEN_FELT, STATE_WIDTH};
+use miden_air::trace::chiplets::hasher::{
+    CONTROLLER_ROWS_PER_PERM_FELT, CONTROLLER_ROWS_PER_PERMUTATION, STATE_WIDTH,
+};
 use miden_core::{FMP_ADDR, FMP_INIT_VALUE, operations::Operation};
 
 use super::{
-    decoder::block_stack::{BlockInfo, BlockStack, BlockType, ExecutionContextInfo},
+    block_stack::{BlockInfo, BlockStack, ExecutionContextInfo},
     stack::OverflowTable,
     trace_state::{
         AceReplay, AdviceReplay, BitwiseReplay, BlockAddressReplay, BlockStackReplay,
         CoreTraceFragmentContext, CoreTraceState, DecoderState, ExecutionContextReplay,
         ExecutionContextSystemInfo, ExecutionReplay, HasherRequestReplay, HasherResponseReplay,
-        KernelReplay, MastForestResolutionReplay, MemoryReadsReplay, MemoryWritesReplay, NodeFlags,
+        KernelReplay, MastForestResolutionReplay, MemoryReadsReplay, MemoryWritesReplay,
         RangeCheckerReplay, StackOverflowReplay, StackState, SystemState,
     },
     utils::split_u32_into_u16,
@@ -42,6 +44,7 @@ struct StateSnapshot {
 // TRACE GENERATION CONTEXT
 // ================================================================================================
 
+#[derive(Debug)]
 pub struct TraceGenerationContext {
     /// The list of trace fragment contexts built during execution.
     pub core_trace_contexts: Vec<CoreTraceFragmentContext>,
@@ -58,6 +61,10 @@ pub struct TraceGenerationContext {
     /// The number of rows per core trace fragment, except for the last fragment which may be
     /// shorter.
     pub fragment_size: usize,
+
+    /// The maximum number of field elements allowed on the operand stack in an active execution
+    /// context.
+    pub max_stack_depth: usize,
 }
 
 /// Builder for recording the context to generate trace fragments during execution.
@@ -110,6 +117,10 @@ pub struct ExecutionTracer {
     /// The number of rows per core trace fragment.
     fragment_size: usize,
 
+    /// The maximum number of field elements allowed on the operand stack in an active execution
+    /// context.
+    max_stack_depth: usize,
+
     /// Flag set in `start_clock_cycle` when a Call/Syscall/Dyncall END is encountered, consumed
     /// in `finalize_clock_cycle` to call `overflow_table.restore_context()`. This is deferred to
     /// `finalize_clock_cycle` because `finalize_clock_cycle` is only called when the operation
@@ -124,7 +135,7 @@ pub struct ExecutionTracer {
 impl ExecutionTracer {
     /// Creates a new `ExecutionTracer` with the given fragment size.
     #[inline(always)]
-    pub fn new(fragment_size: usize) -> Self {
+    pub fn new(fragment_size: usize, max_stack_depth: usize) -> Self {
         Self {
             state_snapshot: None,
             overflow_table: OverflowTable::default(),
@@ -144,6 +155,7 @@ impl ExecutionTracer {
             external: MastForestResolutionReplay::default(),
             fragment_contexts: Vec::new(),
             fragment_size,
+            max_stack_depth,
             pending_restore_context: false,
             is_eval_circuit_op: false,
         }
@@ -165,6 +177,7 @@ impl ExecutionTracer {
             hasher_for_chiplet: self.hasher_for_chiplet,
             ace_replay: self.ace,
             fragment_size: self.fragment_size,
+            max_stack_depth: self.max_stack_depth,
         }
     }
 
@@ -233,7 +246,7 @@ impl ExecutionTracer {
         processor: &P,
         current_forest: &MastForest,
     ) {
-        let (ctx_info, block_type) = match node {
+        let ctx_info = match node {
             MastNode::Join(node) => {
                 let child1_hash = current_forest
                     .get_node_by_id(node.first())
@@ -250,7 +263,7 @@ impl ExecutionTracer {
                     node.digest(),
                 );
 
-                (None, BlockType::Join(false))
+                None
             },
             MastNode::Split(node) => {
                 let child1_hash = current_forest
@@ -268,7 +281,7 @@ impl ExecutionTracer {
                     node.digest(),
                 );
 
-                (None, BlockType::Split)
+                None
             },
             MastNode::Loop(node) => {
                 let body_hash = current_forest
@@ -283,12 +296,7 @@ impl ExecutionTracer {
                     node.digest(),
                 );
 
-                let loop_entered = {
-                    let condition = processor.stack().get(0);
-                    condition == ONE
-                };
-
-                (None, BlockType::Loop(loop_entered))
+                None
             },
             MastNode::Call(node) => {
                 let callee_hash = current_forest
@@ -303,22 +311,13 @@ impl ExecutionTracer {
                     node.digest(),
                 );
 
-                let exec_ctx = {
-                    let overflow_addr = self.overflow_table.last_update_clk_in_current_ctx();
-                    ExecutionContextInfo::new(
-                        processor.system().ctx(),
-                        processor.system().caller_hash(),
-                        processor.stack().depth(),
-                        overflow_addr,
-                    )
-                };
-                let block_type = if node.is_syscall() {
-                    BlockType::SysCall
-                } else {
-                    BlockType::Call
-                };
-
-                (Some(exec_ctx), block_type)
+                let overflow_addr = self.overflow_table.last_update_clk_in_current_ctx();
+                Some(ExecutionContextInfo::new(
+                    processor.system().ctx(),
+                    processor.system().caller_hash(),
+                    processor.stack().depth(),
+                    overflow_addr,
+                ))
             },
             MastNode::Dyn(dyn_node) => {
                 self.hasher_for_chiplet.record_hash_control_block(
@@ -329,27 +328,37 @@ impl ExecutionTracer {
                 );
 
                 if dyn_node.is_dyncall() {
-                    let exec_ctx = {
-                        let overflow_addr = self.overflow_table.last_update_clk_in_current_ctx();
-                        // Note: the stack depth to record is the `current_stack_depth - 1` due to
-                        // the semantics of DYNCALL. That is, the top of the
-                        // stack contains the memory address to where the
-                        // address to dynamically call is located. Then, the
-                        // DYNCALL operation performs a drop, and
-                        // records the stack depth after the drop as the beginning of
-                        // the new context. For more information, look at the docs for how the
-                        // constraints are designed; it's a bit tricky but it works.
-                        let stack_depth_after_drop = processor.stack().depth() - 1;
-                        ExecutionContextInfo::new(
-                            processor.system().ctx(),
-                            processor.system().caller_hash(),
-                            stack_depth_after_drop,
-                            overflow_addr,
-                        )
-                    };
-                    (Some(exec_ctx), BlockType::Dyncall)
+                    // DYNCALL drops the top stack element (the memory address holding the
+                    // callee hash) and records the stack state *after* the drop as the new
+                    // context.
+                    //
+                    // `record_control_node_start()` is called *before* `decrement_stack_size()`,
+                    // so we must compute the post-drop overflow address without actually
+                    // performing the pop.  We use `clk_after_pop_in_current_ctx()` which
+                    // returns the clock of the second-to-last overflow entry (i.e. what
+                    // `last_update_clk_in_current_ctx()` would return after the pop), or ZERO
+                    // when the overflow stack has ≤1 entry and would become empty.
+                    //
+                    // When the stack is already at MIN_STACK_DEPTH the drop does not reduce
+                    // the depth and the overflow address is ZERO — mirroring the same guard
+                    // already present in the parallel-tracer path.  See #2813 / PR #2904.
+                    let (stack_depth_after_drop, overflow_addr) =
+                        if processor.stack().depth() > MIN_STACK_DEPTH as u32 {
+                            (
+                                processor.stack().depth() - 1,
+                                self.overflow_table.clk_after_pop_in_current_ctx(),
+                            )
+                        } else {
+                            (processor.stack().depth(), ZERO)
+                        };
+                    Some(ExecutionContextInfo::new(
+                        processor.system().ctx(),
+                        processor.system().caller_hash(),
+                        stack_depth_after_drop,
+                        overflow_addr,
+                    ))
                 } else {
-                    (None, BlockType::Dyn)
+                    None
                 }
             },
             MastNode::Block(_) => panic!(
@@ -361,31 +370,21 @@ impl ExecutionTracer {
         };
 
         let block_addr = self.hasher_chiplet_shim.record_hash_control_block();
-        let parent_addr = self.block_stack.push(block_addr, block_type, ctx_info);
+        let parent_addr = self.block_stack.push(block_addr, ctx_info);
         self.block_stack_replay.record_node_start_parent_addr(parent_addr);
     }
 
-    /// Records the block address and flags for an END operation based on the block being popped.
+    /// Records the block address for an END operation based on the block being popped.
     #[inline(always)]
     fn record_node_end(&mut self, block_info: &BlockInfo) {
-        let flags = NodeFlags::new(
-            block_info.is_loop_body() == ONE,
-            block_info.is_entered_loop() == ONE,
-            block_info.is_call() == ONE,
-            block_info.is_syscall() == ONE,
-        );
         let (prev_addr, prev_parent_addr) = if self.block_stack.is_empty() {
             (ZERO, ZERO)
         } else {
             let prev_block = self.block_stack.peek();
             (prev_block.addr, prev_block.parent_addr)
         };
-        self.block_stack_replay.record_node_end(
-            block_info.addr,
-            flags,
-            prev_addr,
-            prev_parent_addr,
-        );
+        self.block_stack_replay
+            .record_node_end(block_info.addr, prev_addr, prev_parent_addr);
     }
 
     /// Records the execution context system info for CALL/SYSCALL/DYNCALL operations.
@@ -546,7 +545,7 @@ impl Tracer for ExecutionTracer {
                     let block_addr =
                         self.hasher_chiplet_shim.record_hash_basic_block(basic_block_node);
                     let parent_addr =
-                        self.block_stack.push(block_addr, BlockType::BasicBlock, None);
+                        self.block_stack.push(block_addr, None);
                     self.block_stack_replay.record_node_start_parent_addr(parent_addr);
                 },
                 MastNode::External(_) => unreachable!(
@@ -554,7 +553,7 @@ impl Tracer for ExecutionTracer {
                 ),
             },
             Continuation::Respan { node_id: _, batch_index: _ } => {
-                self.block_stack.peek_mut().addr += HASH_CYCLE_LEN_FELT;
+                self.block_stack.peek_mut().addr += CONTROLLER_ROWS_PER_PERM_FELT;
             },
             Continuation::FinishLoop { node_id: _, was_entered }
                 if was_entered && processor.stack_get(0) == ONE =>
@@ -591,10 +590,9 @@ impl Tracer for ExecutionTracer {
             },
             Continuation::FinishExternal(_)
             | Continuation::EnterForest(_)
-            | Continuation::AfterExitDecorators(_)
-            | Continuation::AfterExitDecoratorsBasicBlock(_) => {
+            | Continuation::AfterExitDecorators(_) => {
                 panic!(
-                    "FinishExternal, EnterForest, AfterExitDecorators and AfterExitDecoratorsBasicBlock continuations are guaranteed not to be passed here"
+                    "FinishExternal, EnterForest, and AfterExitDecorators continuations are guaranteed not to be passed here"
                 )
             },
         }
@@ -703,7 +701,7 @@ impl Tracer for ExecutionTracer {
         clk: RowIndex,
     ) {
         self.memory_reads.record_read_word(words[0], addr, ctx, clk);
-        self.memory_reads.record_read_word(words[1], addr + Felt::new(4), ctx, clk);
+        self.memory_reads.record_read_word(words[1], addr + PTR_OFFSET_WORD, ctx, clk);
     }
 
     #[inline(always)]
@@ -731,17 +729,17 @@ impl Tracer for ExecutionTracer {
     ) {
         self.memory_reads.record_read_word(plaintext[0], src_addr, ctx, clk);
         self.memory_reads
-            .record_read_word(plaintext[1], src_addr + Felt::new(4), ctx, clk);
+            .record_read_word(plaintext[1], src_addr + PTR_OFFSET_WORD, ctx, clk);
         self.memory_writes.record_write_word(ciphertext[0], dst_addr, ctx, clk);
         self.memory_writes
-            .record_write_word(ciphertext[1], dst_addr + Felt::new(4), ctx, clk);
+            .record_write_word(ciphertext[1], dst_addr + PTR_OFFSET_WORD, ctx, clk);
     }
 
     #[inline(always)]
     fn record_pipe(&mut self, words: [Word; 2], addr: Felt, ctx: ContextId, clk: RowIndex) {
         self.advice.record_pop_stack_dword(words);
         self.memory_writes.record_write_word(words[0], addr, ctx, clk);
-        self.memory_writes.record_write_word(words[1], addr + Felt::new(4), ctx, clk);
+        self.memory_writes.record_write_word(words[1], addr + PTR_OFFSET_WORD, ctx, clk);
     }
 
     #[inline(always)]
@@ -842,9 +840,8 @@ impl Tracer for ExecutionTracer {
 // HASHER CHIPLET SHIM
 // ================================================================================================
 
-/// The number of hasher rows per permutation operation. This is used to compute the address for
-/// the next operation in the hasher chiplet.
-const NUM_HASHER_ROWS_PER_PERMUTATION: u32 = HASH_CYCLE_LEN as u32;
+/// The number of controller rows per permutation request (input + output = 2), as u32.
+const NUM_HASHER_ROWS_PER_PERMUTATION: u32 = CONTROLLER_ROWS_PER_PERMUTATION as u32;
 
 /// Implements a shim for the hasher chiplet, where the responses of the hasher chiplet are emulated
 /// and recorded for later replay.

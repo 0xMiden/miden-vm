@@ -1,12 +1,15 @@
-use alloc::boxed::Box;
+use alloc::{
+    boxed::Box,
+    string::{String, ToString},
+};
 #[cfg(feature = "std")]
 use std::path::Path;
 
-#[cfg(feature = "std")]
+#[cfg(all(feature = "std", feature = "serde"))]
 use miden_assembly_syntax::debuginfo::Spanned;
 use miden_mast_package::PackageId;
 
-#[cfg(feature = "std")]
+#[cfg(all(feature = "std", feature = "serde"))]
 use crate::ast::{ProjectFileError, WorkspaceFile};
 use crate::*;
 
@@ -212,6 +215,35 @@ impl Package {
     pub fn manifest_path(&self) -> Option<&Path> {
         self.manifest_path.as_deref()
     }
+
+    /// Return the package model projection that affects artifact reuse for `target` under
+    /// `profile`.
+    pub fn build_provenance_projection(&self, target: &Target, profile: &Profile) -> String {
+        let Self {
+            #[cfg(feature = "std")]
+                manifest_path: _,
+            name,
+            version,
+            description: _,
+            dependencies: _,
+            lints: _,
+            metadata: _,
+            lib: _,
+            bins: _,
+            profiles: _,
+        } = self;
+
+        let mut projection = String::new();
+        projection.push_str("package:name:");
+        projection.push_str(name.inner().as_ref());
+        projection.push('\n');
+        projection.push_str("package:version:");
+        projection.push_str(version.inner().to_string().as_str());
+        projection.push('\n');
+        target.append_build_provenance_projection(&mut projection);
+        profile.append_build_provenance_projection(&mut projection);
+        projection
+    }
 }
 
 /// Parsing
@@ -307,7 +339,7 @@ impl Package {
 
         Ok(Box::new(Self {
             manifest_path,
-            name: package_ast.package.name.clone().map(|id| id.into()),
+            name: package_ast.package.name.map(Into::into),
             version,
             description,
             dependencies,
@@ -327,11 +359,11 @@ impl Package {
     /// The output of this function is not guaranteed to be identical to the way the original
     /// manifest (if one exists) was written, i.e. it may emit keys that are optional or that
     /// contain default or inherited values.
-    pub fn to_toml(&self) -> Result<alloc::string::String, Report> {
+    pub fn to_toml(&self) -> Result<String, Report> {
         let manifest_ast = ast::ProjectFile {
             source_file: None,
             package: ast::PackageTable {
-                name: self.name().map(|id| id.into_inner()),
+                name: self.name().map(PackageId::into_inner),
                 detail: ast::PackageDetail {
                     version: Some(
                         self.version().map(|v| ast::parsing::MaybeInherit::Value(v.clone())),

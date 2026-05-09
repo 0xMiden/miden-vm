@@ -17,13 +17,14 @@ concurrency:
 jobs:
   release-dry-run:
     if: ${{ github.repository_owner == '0xMiden' }}
-    runs-on: ubuntu-latest
+    runs-on: warp-ubuntu-latest-x64-8x
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Dry-run workspace release
         uses: ./.github/actions/workspace-release

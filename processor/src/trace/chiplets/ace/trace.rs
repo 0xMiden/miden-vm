@@ -20,11 +20,6 @@ use super::{
 };
 use crate::{ContextId, errors::AceError};
 
-/// Number of LogUp fractions in the wiring bus for rows in the `READ` section.
-pub const NUM_ACE_LOGUP_FRACTIONS_READ: usize = 2;
-/// Number of LogUp fractions in the wiring bus for rows in the `EVAL` section.
-pub const NUM_ACE_LOGUP_FRACTIONS_EVAL: usize = 3;
-
 /// Contains the variable and evaluation nodes resulting from the evaluation of a circuit.
 /// The output value is checked to be equal to 0.
 ///

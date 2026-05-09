@@ -149,9 +149,9 @@ mod tests {
     fn test_builder_push_for_adv_push() {
         // push_for_adv_push reverses the slice
         // Input: [a, b, c] -> Builder stack: [c, b, a] (c on top)
-        let a = Felt::new(1);
-        let b = Felt::new(2);
-        let c = Felt::new(3);
+        let a = Felt::new_unchecked(1);
+        let b = Felt::new_unchecked(2);
+        let c = Felt::new_unchecked(3);
 
         let mut builder = AdviceStackBuilder::new();
         builder.push_for_adv_push(&[a, b, c]);
@@ -163,20 +163,34 @@ mod tests {
     }
 
     #[test]
-    fn test_builder_push_for_adv_loadw() {
-        let word: Word = [Felt::new(1), Felt::new(2), Felt::new(3), Felt::new(4)].into();
+    fn test_builder_push_word() {
+        let word: Word = [
+            Felt::new_unchecked(1),
+            Felt::new_unchecked(2),
+            Felt::new_unchecked(3),
+            Felt::new_unchecked(4),
+        ]
+        .into();
 
         let mut builder = AdviceStackBuilder::new();
-        builder.push_for_adv_loadw(word);
+        builder.push_word(word);
         let advice = builder.build();
 
         // Builder stack is [w0, w1, w2, w3] with w0 on top
-        assert_eq!(advice.stack, vec![Felt::new(1), Felt::new(2), Felt::new(3), Felt::new(4)]);
+        assert_eq!(
+            advice.stack,
+            vec![
+                Felt::new_unchecked(1),
+                Felt::new_unchecked(2),
+                Felt::new_unchecked(3),
+                Felt::new_unchecked(4)
+            ]
+        );
     }
 
     #[test]
     fn test_builder_push_for_adv_pipe() {
-        let slice: Vec<Felt> = (1..=8).map(Felt::new).collect();
+        let slice: Vec<Felt> = (1..=8).map(Felt::new_unchecked).collect();
 
         let mut builder = AdviceStackBuilder::new();
         builder.push_for_adv_pipe(&slice);
@@ -188,7 +202,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "push_for_adv_pipe requires slice length to be a multiple of 8")]
     fn test_builder_push_for_adv_pipe_panics_on_misalignment() {
-        let slice: Vec<Felt> = (1..=7).map(Felt::new).collect();
+        let slice: Vec<Felt> = (1..=7).map(Felt::new_unchecked).collect();
 
         let mut builder = AdviceStackBuilder::new();
         builder.push_for_adv_pipe(&slice);
@@ -202,36 +216,58 @@ mod tests {
         builder.push_u64_slice(&[1, 2, 3, 4]);
         let advice = builder.build();
 
-        assert_eq!(advice.stack, vec![Felt::new(1), Felt::new(2), Felt::new(3), Felt::new(4)]);
+        assert_eq!(
+            advice.stack,
+            vec![
+                Felt::new_unchecked(1),
+                Felt::new_unchecked(2),
+                Felt::new_unchecked(3),
+                Felt::new_unchecked(4)
+            ]
+        );
     }
 
     #[test]
     fn test_builder_chaining_top_first() {
         // First call adds elements consumed first (on top)
         // Second call adds elements consumed second (below)
-        let a = Felt::new(1);
-        let b = Felt::new(2);
-        let c = Felt::new(3);
-        let word: Word = [Felt::new(10), Felt::new(20), Felt::new(30), Felt::new(40)].into();
+        let a = Felt::new_unchecked(1);
+        let b = Felt::new_unchecked(2);
+        let c = Felt::new_unchecked(3);
+        let word: Word = [
+            Felt::new_unchecked(10),
+            Felt::new_unchecked(20),
+            Felt::new_unchecked(30),
+            Felt::new_unchecked(40),
+        ]
+        .into();
 
         let mut builder = AdviceStackBuilder::new();
         builder.push_for_adv_push(&[a, b, c]); // Consumed first
-        builder.push_for_adv_loadw(word); // Consumed second
+        builder.push_word(word); // Consumed second
         let advice = builder.build();
 
         // Builder stack: [c, b, a, w0, w1, w2, w3]
         // (c on top from reversed [a,b,c], then word below)
         assert_eq!(
             advice.stack,
-            vec![c, b, a, Felt::new(10), Felt::new(20), Felt::new(30), Felt::new(40)]
+            vec![
+                c,
+                b,
+                a,
+                Felt::new_unchecked(10),
+                Felt::new_unchecked(20),
+                Felt::new_unchecked(30),
+                Felt::new_unchecked(40)
+            ]
         );
     }
 
     #[test]
     fn test_builder_multiple_push_for_adv_push() {
         // Multiple calls should maintain top-first ordering
-        let first = [Felt::new(1), Felt::new(2)];
-        let second = [Felt::new(3), Felt::new(4)];
+        let first = [Felt::new_unchecked(1), Felt::new_unchecked(2)];
+        let second = [Felt::new_unchecked(3), Felt::new_unchecked(4)];
 
         let mut builder = AdviceStackBuilder::new();
         builder.push_for_adv_push(&first); // Consumed first
@@ -243,6 +279,14 @@ mod tests {
         // So second should go BELOW first in the stack
         // Builder stack after first: [2, 1]
         // Builder stack after second: [2, 1, 4, 3]
-        assert_eq!(advice.stack, vec![Felt::new(2), Felt::new(1), Felt::new(4), Felt::new(3)]);
+        assert_eq!(
+            advice.stack,
+            vec![
+                Felt::new_unchecked(2),
+                Felt::new_unchecked(1),
+                Felt::new_unchecked(4),
+                Felt::new_unchecked(3)
+            ]
+        );
     }
 }

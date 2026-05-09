@@ -50,10 +50,10 @@ impl ToElements for Vec<u64> {
 pub fn hash_string_to_word<'a>(value: impl Into<&'a str>) -> Word {
     let digest_bytes: [u8; 32] = Blake3_256::hash(value.into().as_bytes()).into();
     [
-        Felt::new(u64::from_le_bytes(digest_bytes[0..8].try_into().unwrap())),
-        Felt::new(u64::from_le_bytes(digest_bytes[8..16].try_into().unwrap())),
-        Felt::new(u64::from_le_bytes(digest_bytes[16..24].try_into().unwrap())),
-        Felt::new(u64::from_le_bytes(digest_bytes[24..32].try_into().unwrap())),
+        Felt::new_unchecked(u64::from_le_bytes(digest_bytes[0..8].try_into().unwrap())),
+        Felt::new_unchecked(u64::from_le_bytes(digest_bytes[8..16].try_into().unwrap())),
+        Felt::new_unchecked(u64::from_le_bytes(digest_bytes[16..24].try_into().unwrap())),
+        Felt::new_unchecked(u64::from_le_bytes(digest_bytes[24..32].try_into().unwrap())),
     ]
     .into()
 }
@@ -110,7 +110,7 @@ where
 /// Number of bytes packed into each u32 field element.
 ///
 /// Used for converting between byte arrays and u32-packed field elements in memory.
-const BYTES_PER_U32: usize = core::mem::size_of::<u32>();
+const BYTES_PER_U32: usize = size_of::<u32>();
 
 /// Converts bytes to field elements using u32 packing in little-endian format.
 ///

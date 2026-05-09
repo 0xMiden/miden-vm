@@ -2,6 +2,8 @@ use alloc::{boxed::Box, collections::BTreeMap, string::String, sync::Arc};
 use core::{error::Error, fmt::Debug};
 
 use miden_utils_indexing::IndexVec;
+#[cfg(feature = "arbitrary")]
+use proptest::prelude::*;
 
 use super::*;
 
@@ -13,6 +15,7 @@ use super::*;
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
 #[cfg_attr(feature = "serde", serde(transparent))]
+#[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
 pub struct SourceId(u32);
 
 impl From<u32> for SourceId {
@@ -75,6 +78,16 @@ impl TryFrom<usize> for SourceId {
             Ok(n) if n < u32::MAX => Ok(Self(n)),
             _ => Err(()),
         }
+    }
+}
+
+#[cfg(feature = "arbitrary")]
+impl Arbitrary for SourceId {
+    type Parameters = ();
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        any::<u32>().prop_map(Self::from).boxed()
     }
 }
 
@@ -343,7 +356,7 @@ impl DefaultSourceManagerImpl {
         self.files
             .push(file_clone)
             .expect("system limit: source manager has exhausted its supply of source ids");
-        self.uris.insert(uri.clone(), id);
+        self.uris.insert(uri, id);
         file
     }
 
@@ -474,7 +487,7 @@ mod error_assertions {
     use super::*;
 
     /// Asserts at compile time that the passed error has Send + Sync + 'static bounds.
-    fn _assert_error_is_send_sync_static<E: core::error::Error + Send + Sync + 'static>(_: E) {}
+    fn _assert_error_is_send_sync_static<E: Error + Send + Sync + 'static>(_: E) {}
 
     fn _assert_source_manager_error_bounds(err: SourceManagerError) {
         _assert_error_is_send_sync_static(err);

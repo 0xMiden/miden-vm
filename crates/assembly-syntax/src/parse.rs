@@ -182,7 +182,7 @@ impl Parse for Arc<SourceFile> {
                 .uri()
                 .path()
                 .parse::<PathBuf>()
-                .map(|p| p.into())
+                .map(Into::into)
                 .into_diagnostic()
                 .wrap_err("cannot parse module as it has an invalid path/name")?,
         };
@@ -319,7 +319,7 @@ where
             None => self
                 .name()
                 .parse::<PathBuf>()
-                .map(|p| p.into())
+                .map(Into::into)
                 .into_diagnostic()
                 .wrap_err("cannot parse module as it has an invalid path/name")?,
         };

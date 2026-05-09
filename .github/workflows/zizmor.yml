@@ -1,0 +1,38 @@
+name: GitHub Actions Security Analysis with zizmor
+
+on:
+  push:
+    branches: [main, next]
+    paths:
+      - ".github/workflows/**"
+      - ".github/actions/**"
+      - "zizmor.yml"
+  pull_request:
+    types: [opened, reopened, synchronize]
+    paths:
+      - ".github/workflows/**"
+      - ".github/actions/**"
+      - "zizmor.yml"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  zizmor:
+    name: Run zizmor
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+
+      - name: Run zizmor
+        uses: zizmorcore/zizmor-action@71321a20a9ded102f6e9ce5718a2fcec2c4f70d8 # v0.5.2
+        with:
+          advanced-security: false
+          config: zizmor.yml
+          version: 1.23.1

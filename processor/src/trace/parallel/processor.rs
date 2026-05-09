@@ -5,7 +5,7 @@ use miden_air::{Felt, trace::RowIndex};
 use miden_core::{
     WORD_SIZE, Word, ZERO,
     field::PrimeField64,
-    mast::{BasicBlockNode, MastForest, MastNodeId},
+    mast::{MastForest, MastNodeId},
     precompile::PrecompileTranscriptState,
     program::{Kernel, MIN_STACK_DEPTH},
     utils::range,
@@ -16,7 +16,7 @@ use super::super::trace_state::{
     MemoryReadsReplay, StackOverflowReplay, StackState, SystemState,
 };
 use crate::{
-    BreakReason, ContextId, ExecutionError, Host, Stopper,
+    BaseHost, BreakReason, ContextId, ExecutionError, Stopper,
     continuation_stack::{Continuation, ContinuationStack},
     errors::OperationError,
     execution::{
@@ -41,8 +41,8 @@ use crate::{
 /// maximum clock cycle, at which point it stops execution (due to the [`ReplayStopper`]).
 ///
 /// The replay structures and initial system and stack state are built by the
-/// [`crate::execution_tracer::ExecutionTracer`] in conjunction with
-/// [`crate::FastProcessor::execute_for_trace`].
+/// [`crate::trace::execution_tracer::ExecutionTracer`] in conjunction with
+/// [`crate::FastProcessor::execute_trace_inputs`].
 #[derive(Debug)]
 pub(crate) struct ReplayProcessor {
     pub system: SystemState,
@@ -54,6 +54,10 @@ pub(crate) struct ReplayProcessor {
     pub hasher_response_replay: HasherResponseReplay,
     pub mast_forest_resolution_replay: MastForestResolutionReplay,
 
+    /// The maximum number of field elements allowed on the operand stack in an active execution
+    /// context.
+    pub max_stack_depth: usize,
+
     /// The maximum clock cycle at which this processor should stop execution.
     pub maximum_clock: RowIndex,
 }
@@ -62,8 +66,8 @@ impl ReplayProcessor {
     /// Creates a new instance of the [`ReplayProcessor`].
     ///
     /// The parameters are expected to be built by the
-    /// [`crate::execution_tracer::ExecutionTracer`] when used in conjunction with
-    /// [`crate::FastProcessor::execute_for_trace`].
+    /// [`crate::trace::execution_tracer::ExecutionTracer`] when used in conjunction with
+    /// [`crate::FastProcessor::execute_trace_inputs`].
     pub fn new(
         initial_system: SystemState,
         initial_stack: StackState,
@@ -73,6 +77,7 @@ impl ReplayProcessor {
         memory_reads_replay: MemoryReadsReplay,
         hasher_response_replay: HasherResponseReplay,
         mast_forest_resolution_replay: MastForestResolutionReplay,
+        max_stack_depth: usize,
         num_clocks_to_execute: RowIndex,
     ) -> Self {
         let maximum_clock = initial_system.clk + num_clocks_to_execute.as_usize();
@@ -86,6 +91,7 @@ impl ReplayProcessor {
             memory_reads_replay,
             hasher_response_replay,
             mast_forest_resolution_replay,
+            max_stack_depth,
             maximum_clock,
         }
     }
@@ -334,7 +340,13 @@ impl StackInterface for ReplayProcessor {
     }
 
     fn increment_size(&mut self) -> Result<(), ExecutionError> {
-        const SENTINEL_VALUE: Felt = Felt::new(Felt::ORDER_U64 - 1);
+        const SENTINEL_VALUE: Felt = Felt::new_unchecked(Felt::ORDER_U64 - 1);
+
+        let depth = self.depth() as usize + 1;
+        let max = self.max_stack_depth;
+        if depth > max {
+            return Err(ExecutionError::StackDepthLimitExceeded { depth, max });
+        }
 
         // push the last element on the overflow table
         {
@@ -443,7 +455,7 @@ impl Processor for ReplayProcessor {
         &self,
         _node_id: MastNodeId,
         _current_forest: &MastForest,
-        _host: &mut impl Host,
+        _host: &mut impl BaseHost,
     ) -> ControlFlow<BreakReason> {
         // do nothing - we don't execute decorators in this processor
         ControlFlow::Continue(())
@@ -453,7 +465,7 @@ impl Processor for ReplayProcessor {
         &self,
         _node_id: MastNodeId,
         _current_forest: &MastForest,
-        _host: &mut impl Host,
+        _host: &mut impl BaseHost,
     ) -> ControlFlow<BreakReason> {
         // do nothing - we don't execute decorators in this processor
         ControlFlow::Continue(())
@@ -464,18 +476,7 @@ impl Processor for ReplayProcessor {
         _node_id: MastNodeId,
         _op_idx_in_block: usize,
         _current_forest: &MastForest,
-        _host: &mut impl Host,
-    ) -> ControlFlow<BreakReason> {
-        // do nothing - we don't execute decorators in this processor
-        ControlFlow::Continue(())
-    }
-
-    fn execute_end_of_block_decorators(
-        &self,
-        _basic_block_node: &BasicBlockNode,
-        _node_id: MastNodeId,
-        _current_forest: &Arc<MastForest>,
-        _host: &mut impl Host,
+        _host: &mut impl BaseHost,
     ) -> ControlFlow<BreakReason> {
         // do nothing - we don't execute decorators in this processor
         ControlFlow::Continue(())

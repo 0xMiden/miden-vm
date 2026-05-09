@@ -330,7 +330,7 @@ where
 
                 if let Some(name) = path.as_ident() {
                     let name = name.with_span(path.span());
-                    if let Some(expr) = env.get(&name)?.map(|e| e.into_expr()) {
+                    if let Some(expr) = env.get(&name)?.map(CachedConstantValue::into_expr) {
                         env.on_eval_start(path.as_deref());
                         evaluating.push(path.clone());
                         continuations.push(Cont::Return(path.clone()));
@@ -394,8 +394,8 @@ where
                                     }
                                     .into());
                                 }
-                                let lhs = Felt::new(lhs.as_int());
-                                let rhs = Felt::new(rhs.as_int());
+                                let lhs = Felt::new_unchecked(lhs.as_int());
+                                let rhs = Felt::new_unchecked(rhs.as_int());
                                 IntValue::from(lhs / rhs)
                             },
                         };

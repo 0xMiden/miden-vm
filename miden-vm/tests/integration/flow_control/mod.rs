@@ -2,9 +2,8 @@ use alloc::sync::Arc;
 
 use miden_assembly::{Assembler, PathBuf, Report, ast::ModuleKind};
 use miden_core_lib::CoreLibrary;
-use miden_debug_types::{SourceLanguage, SourceManager};
 use miden_processor::{ExecutionError, Word, operation::OperationError};
-use miden_utils_testing::{StackInputs, Test, build_test, expect_exec_error_matches, push_inputs};
+use miden_utils_testing::{build_debug_test, build_test, expect_exec_error_matches, push_inputs};
 use miden_vm::Module;
 
 // SIMPLE FLOW CONTROL TESTS
@@ -240,14 +239,7 @@ fn simple_syscall() {
             syscall.foo
         end";
 
-    // TODO: update and use macro?
-    let mut test = Test::new(&format!("test{}", line!()), program_source, false);
-    test.stack_inputs = StackInputs::try_from_ints([1, 2]).unwrap();
-    test.kernel_source = Some(test.source_manager.load(
-        SourceLanguage::Masm,
-        format!("kernel{}", line!()).into(),
-        kernel_source.to_string(),
-    ));
+    let test = build_test!(program_source, &[1, 2]).with_kernel(kernel_source);
     test.expect_stack(&[3]);
 
     test.check_constraints();
@@ -273,16 +265,9 @@ fn simple_syscall_2() {
             syscall.bar
         end";
 
-    // TODO: update and use macro?
-    let mut test = Test::new(&format!("test{}", line!()), program_source, false);
     // Stack [1, 2, 3, 2, 2] with 1 on top
     // foo(1+2=3), foo(3+3=6), bar(6*2=12), bar(12*2=24) => 24
-    test.stack_inputs = StackInputs::try_from_ints([1, 2, 3, 2, 2]).unwrap();
-    test.kernel_source = Some(test.source_manager.load(
-        SourceLanguage::Masm,
-        format!("kernel{}", line!()).into(),
-        kernel_source.to_string(),
-    ));
+    let test = build_test!(program_source, &[1, 2, 3, 2, 2]).with_kernel(kernel_source);
     test.expect_stack(&[24]);
 
     test.check_constraints();
@@ -354,12 +339,7 @@ fn call_in_syscall() {
             call.new_ctx
         end";
 
-    let mut test = Test::new(&format!("test{}", line!()), program_source, false);
-    test.kernel_source = Some(test.source_manager.load(
-        SourceLanguage::Masm,
-        format!("kernel{}", line!()).into(),
-        kernel_source.to_string(),
-    ));
+    let test = build_test!(program_source).with_kernel(kernel_source);
     test.expect_stack(&[]);
 
     test.check_constraints();
@@ -393,13 +373,7 @@ fn root_context_separate_overflows() {
         drop swap.15
     end";
 
-    let mut test = Test::new(&format!("test{}", line!()), program_source, false);
-    test.stack_inputs = StackInputs::try_from_ints([100]).unwrap();
-    test.kernel_source = Some(test.source_manager.load(
-        SourceLanguage::Masm,
-        format!("kernel{}", line!()).into(),
-        kernel_source.to_string(),
-    ));
+    let test = build_test!(program_source, &[100]).with_kernel(kernel_source);
     test.expect_stack(&[100]);
     test.check_constraints();
 }
@@ -447,10 +421,7 @@ fn simple_dyn_exec() {
         3,
     ];
 
-    let test = Test {
-        stack_inputs: StackInputs::try_from_ints(stack_init).unwrap(),
-        ..Test::new(&format!("test{}", line!()), program_source, true)
-    };
+    let test = build_debug_test!(program_source).with_stack_inputs(stack_init);
 
     test.expect_stack(&[6]);
 
@@ -481,16 +452,16 @@ fn dynexec_with_procref() {
         swap drop
     end";
 
-    let mut test = build_test!(program_source, &[]);
-    test.libraries.push(CoreLibrary::default().library().clone());
-    test.add_module(
-        "external::module",
-        "\
-        pub proc func
-            u32wrapping_add.1
-        end
-        ",
-    );
+    let test = build_test!(program_source, &[])
+        .with_library(CoreLibrary::default().library().clone())
+        .with_module(
+            "external::module",
+            "\
+            pub proc func
+                u32wrapping_add.1
+            end
+            ",
+        );
 
     test.expect_stack(&[4]);
 }
@@ -540,12 +511,11 @@ fn simple_dyncall() {
         3,
     ];
 
-    let mut test = Test {
-        stack_inputs: StackInputs::try_from_ints(stack_init).unwrap(),
-        libraries: vec![CoreLibrary::default().into()],
-        ..Test::new(&format!("test{}", line!()), program_source, false)
-    };
-    test.add_event_handlers(CoreLibrary::default().handlers());
+    let core_lib = CoreLibrary::default();
+    let test = build_test!(program_source)
+        .with_stack_inputs(stack_init)
+        .with_library(core_lib.library().clone())
+        .with_event_handlers(core_lib.handlers());
 
     test.expect_stack(&[6]);
 
@@ -582,13 +552,7 @@ fn dyncall_with_syscall_and_caller() {
             movupw.3 dropw movupw.3 dropw
         end";
 
-    // Set up the test with kernel
-    let mut test = Test::new(&format!("test{}", line!()), program_source, true);
-    test.kernel_source = Some(test.source_manager.load(
-        SourceLanguage::Masm,
-        format!("kernel{}", line!()).into(),
-        kernel_source.to_string(),
-    ));
+    let test = build_debug_test!(program_source).with_kernel(kernel_source);
 
     // Compile to get the hash of `bar`
     let (program, _kernel) = test.compile().unwrap();
@@ -663,9 +627,9 @@ fn procref() -> Result<(), Report> {
     end";
 
     let core_lib = CoreLibrary::default();
-    let mut test = build_test!(source, &[]);
-    test.libraries.push(core_lib.library().clone());
-    test.add_event_handlers(core_lib.handlers());
+    let test = build_test!(source, &[])
+        .with_library(core_lib.library().clone())
+        .with_event_handlers(core_lib.handlers());
 
     // procref pushes element[0] on top
     // Word from procedure_digests stores elements in BE order (word[0] = high)

@@ -44,7 +44,7 @@ impl<'de> serde::Deserialize<'de> for &'de Path {
         impl<'de> Visitor<'de> for PathVisitor {
             type Value = &'de Path;
 
-            fn expecting(&self, formatter: &mut core::fmt::Formatter) -> core::fmt::Result {
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
                 formatter.write_str("a borrowed Path")
             }
 
@@ -204,7 +204,7 @@ impl Path {
     ///
     /// Returns `None` if the path cannot be losslessly represented as a single component.
     pub fn as_ident(&self) -> Option<Ident> {
-        let mut components = self.components().filter_map(|c| c.ok());
+        let mut components = self.components().filter_map(Result::ok);
         match components.next()? {
             component @ PathComponent::Normal(_) => {
                 if components.next().is_none() {
@@ -326,7 +326,7 @@ impl Path {
         let mut components = self.components();
         match components.next()?.ok()? {
             PathComponent::Root => {
-                let first = components.next().and_then(|c| c.ok()).map(|c| c.as_str())?;
+                let first = components.next().and_then(Result::ok).map(|c| c.as_str())?;
                 Some((first, components.as_path()))
             },
             first @ PathComponent::Normal(_) => Some((first.as_str(), components.as_path())),
@@ -481,6 +481,9 @@ impl Path {
     pub fn canonicalize(&self) -> Result<PathBuf, PathError> {
         let mut buf = PathBuf::with_capacity(self.byte_len());
         buf.extend_with_components(self.components())?;
+        if buf.byte_len() > u16::MAX as usize {
+            return Err(PathError::TooLong { max: u16::MAX as usize });
+        }
         Ok(buf)
     }
 }
@@ -598,8 +601,8 @@ impl PartialEq<alloc::sync::Arc<Path>> for Path {
     }
 }
 
-impl PartialEq<alloc::borrow::Cow<'_, Path>> for Path {
-    fn eq(&self, other: &alloc::borrow::Cow<'_, Path>) -> bool {
+impl PartialEq<Cow<'_, Path>> for Path {
+    fn eq(&self, other: &Cow<'_, Path>) -> bool {
         self.inner == other.as_ref().inner
     }
 }
@@ -682,5 +685,24 @@ mod tests {
         let expected = Path::new("foo::\"$bar\"");
         assert_eq!(canonicalized.as_path(), expected);
         Ok(())
+    }
+
+    #[test]
+    fn test_canonicalize_path_rejects_canonical_result_longer_than_u16_max() {
+        let component = alloc::format!("{}-", "a".repeat(254));
+        let mut source = alloc::string::String::new();
+        for i in 0..255 {
+            if i > 0 {
+                source.push_str("::");
+            }
+            source.push_str(&component);
+        }
+
+        let path = Path::validate(&source).expect("source path must be pre-canonicalization valid");
+        let err = path.canonicalize().expect_err(
+            "canonicalization must reject paths that exceed the serialization length bound",
+        );
+
+        assert!(matches!(err, PathError::TooLong { max } if max == u16::MAX as usize));
     }
 }

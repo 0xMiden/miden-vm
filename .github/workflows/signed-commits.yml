@@ -1,0 +1,110 @@
+# Verifies that all commits in a PR are signed (GPG or SSH).
+# Posts a comment with remediation steps if unsigned commits are found.
+
+name: signed commits
+
+permissions: {}
+
+on:
+  pull_request_target:
+    branches:
+      - main
+      - next
+    types: [opened, reopened, synchronize]
+
+jobs:
+  check-signed-commits:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Resolve author permission
+        id: perm
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
+        with:
+          script: |
+            const login = (context.payload.pull_request.user?.login || '').toLowerCase();
+            let permission = 'none';
+            try {
+              // Signed-commit checks only apply to maintainers.
+              // GitHub repo roles are too broad here because most access
+              // comes from org team permissions, so this probe reads the
+              // PR author's effective repo write access and decides who
+              // should be asked to sign commits.
+              const { data } = await github.rest.repos.getCollaboratorPermissionLevel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                username: login,
+              });
+              permission = (data.permission || 'none').toLowerCase();
+            } catch (error) {
+              if (error.status !== 404) {
+                core.warning(`Failed to resolve collaborator permission for ${login}: ${error.message}`);
+              }
+            }
+
+            const enforce = ['admin', 'maintain', 'write'].includes(permission);
+            core.info(`author=${login} permission=${permission} enforce=${enforce}`);
+            core.setOutput('enforce', enforce ? 'true' : 'false');
+
+      - name: Check for unsigned commits
+        if: steps.perm.outputs.enforce == 'true'
+        id: check
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
+        with:
+          script: |
+            const prNumber = context.payload.pull_request.number;
+            const commits = await github.rest.pulls.listCommits({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber,
+              per_page: 250
+            });
+
+            const unsigned = commits.data.filter(c => !c.commit.verification.verified);
+
+            if (unsigned.length === 0) {
+              core.setOutput('unsigned', '');
+              core.info('All commits are signed.');
+              return;
+            }
+
+            const lines = unsigned.map(c =>
+              `- \`${c.sha.slice(0, 8)}\` ${c.commit.message.split('\n')[0]}`
+            );
+
+            core.setOutput('unsigned', lines.join('\n'));
+            core.setOutput('pr_number', String(prNumber));
+            core.setFailed(
+              `Found ${unsigned.length} unsigned commit(s) in this PR. ` +
+              'All commits must be signed (GPG or SSH).'
+            );
+
+      - name: Comment with remediation steps
+        if: failure() && steps.perm.outputs.enforce == 'true' && steps.check.outputs.unsigned != ''
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
+        env:
+          UNSIGNED: ${{ steps.check.outputs.unsigned }}
+          PRNUM: ${{ steps.check.outputs.pr_number }}
+        with:
+          script: |
+            const issue_number = parseInt(process.env.PRNUM, 10);
+            const unsignedList = process.env.UNSIGNED;
+
+            const body = [
+              'This PR contains unsigned commits. All commits must be cryptographically signed (GPG or SSH).',
+              '',
+              'Unsigned commits:',
+              unsignedList,
+              '',
+              'For instructions on setting up commit signing and re-signing existing commits, see:',
+              'https://docs.github.com/en/authentication/managing-commit-signature-verification/signing-commits'
+            ].join('\n');
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number,
+              body
+            });

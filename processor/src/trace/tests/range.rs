@@ -1,79 +1,68 @@
-use miden_air::trace::{
-    AUX_TRACE_RAND_CHALLENGES, chiplets::hasher::HASH_CYCLE_LEN, range::B_RANGE_COL_IDX,
+//! Range-check bus test.
+//!
+//! Verifies that every expected `RangeMsg` interaction fires at the right row, whether it
+//! comes from a u32 stack op (decoder-side `user_op_helpers`) or a memory chiplet row (delta
+//! limbs + word-address decomposition). The test is column-blind — since both call sites are
+//! currently packed into different aux columns (M1 for u32rc, C2 for memory range checks),
+//! the subset-based [`InteractionLog`] happens to pick up both without the test having to
+//! know where each one landed.
+
+use alloc::vec::Vec;
+
+use miden_air::{
+    logup::RangeMsg,
+    trace::{
+        MainTrace, RANGE_CHECK_TRACE_OFFSET,
+        chiplets::{MEMORY_D0_COL_IDX, MEMORY_D1_COL_IDX},
+    },
 };
-use miden_core::{ONE, ZERO, field::Field, operations::Operation};
-use miden_utils_testing::rand::rand_array;
+use miden_core::{Felt, operations::Operation};
+use miden_utils_testing::stack;
 
-use super::{Felt, build_trace_from_ops};
+use super::{
+    build_trace_from_ops,
+    lookup_harness::{Expectations, InteractionLog},
+};
+use crate::RowIndex;
 
-/// This test checks that range check lookups from stack operations are balanced by the range checks
-/// processed in the Range Checker.
-///
-/// The `U32add` operation results in 4 16-bit range checks of 256, 0, 0, 0.
+/// `U32add` range-checks its four decoder helper columns: for `1 + 255 = 256`, the four
+/// values are `{0, 256, 0, 0}`, so we expect exactly three removes of `RangeMsg { value: 0 }`
+/// and one remove of `RangeMsg { value: 256 }` at the U32add row.
 #[test]
-fn b_range_trace_stack() {
+fn u32_stack_op_emits_range_check_removes() {
     let stack = [1, 255];
     let operations = vec![Operation::U32add];
     let trace = build_trace_from_ops(operations, &stack);
+    let log = InteractionLog::new(&trace);
+    let main = trace.main_trace();
 
-    let rand_elements = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
-    let alpha = rand_elements[0];
-    let aux_columns = trace.build_aux_trace(&rand_elements).unwrap();
-    let b_range = aux_columns.get_column(B_RANGE_COL_IDX);
+    let u32add_row = find_op_row(main, miden_core::operations::opcodes::U32ADD);
 
-    assert_eq!(trace.length(), b_range.len());
+    let mut exp = Expectations::new(&log);
+    for i in 0..4 {
+        let value = main.helper_register(i, u32add_row);
+        exp.remove(usize::from(u32add_row), &RangeMsg { value });
+    }
 
-    // --- Check the stack processor's range check lookups. ---------------------------------------
-
-    // Before any range checks are executed, the value in b_range should be zero.
-    assert_eq!(ZERO, b_range[0]);
-    assert_eq!(ZERO, b_range[1]);
-
-    // The first range check lookup from the stack will happen when the add operation is executed,
-    // at cycle 1. (The trace begins by executing `span`). It must be subtracted out of `b_range`.
-    // The range-checked values are 0, 256, 0, 0, so the values to subtract are 3/(alpha + 0) and
-    // 1/(alpha + 256).
-    let lookups = alpha.inverse() * Felt::new(3) + (alpha + Felt::new(256)).inverse();
-    let mut expected = b_range[1] - lookups;
-    assert_eq!(expected, b_range[2]);
-
-    // --- Check the range checker's lookups. -----------------------------------------------------
-
-    // 44 rows are needed for 0, 243, 252, 255, 256, ... 38 additional bridge rows of powers of
-    // 3 ..., 65535. (0 and 256 are range-checked. 65535 is the max, and the rest are "bridge"
-    // values.) An extra row is added to pad the u16::MAX value.
-    let len_16bit = 44 + 1;
-    // The start of the values in the range checker table.
-    let values_start = trace.length() - len_16bit;
-
-    // After the padded rows, the first value will be unchanged.
-    assert_eq!(expected, b_range[values_start]);
-    // We include 3 lookups of 0.
-    expected += alpha.inverse() * Felt::new(3);
-    assert_eq!(expected, b_range[values_start + 1]);
-    // Then we have 3 bridge rows between 0 and 255 where the value does not change
-    assert_eq!(expected, b_range[values_start + 2]);
-    assert_eq!(expected, b_range[values_start + 3]);
-    assert_eq!(expected, b_range[values_start + 4]);
-    // Then we include 1 lookup of 256, so it should be multiplied by alpha + 256.
-    expected += (alpha + Felt::new(256)).inverse();
-    assert_eq!(expected, b_range[values_start + 5]);
-
-    // --- Check the last value of the b_range column is zero --------------------------------------
-
-    let last_row = b_range.len() - 1;
-    assert_eq!(ZERO, b_range[last_row]);
+    assert_eq!(exp.count_removes(), 4, "expected 4 helper-register range-check removes");
+    assert_eq!(exp.count_adds(), 0);
+    log.assert_contains(&exp);
 }
 
-/// This test checks that range check lookups from memory operations are balanced by the
-/// range checks processed in the Range Checker.
+/// Two memory ops (`MStoreW` + `MLoadW`) on the same word address emit 5 `RangeMsg` removes
+/// per memory chiplet row: `d0`, `d1` (the 16-bit delta limbs used for sorted-access
+/// constraints) and `w0`, `w1`, `4·w1` (the word-address decomposition).
 ///
-/// The `StoreW` memory operation results in 2 16-bit range checks of 1, 0.
-/// The `LoadW` memory operation results in 2 16-bit range checks of 5, 0.
+/// The address `262148 = 4 · 65537` is word-aligned with `word_index = 65537 = 0x10001`, so
+/// `w0 = 1`, `w1 = 1`, `4·w1 = 4` — a non-trivial decomposition that exercises the full
+/// five-way range-check batch.
 #[test]
-#[expect(clippy::needless_range_loop)]
-fn b_range_trace_mem() {
-    let stack = [0, 1, 2, 3, 4, 0];
+fn memory_chiplet_row_emits_range_check_removes() {
+    let addr: u64 = 262148;
+    let stack_input = stack![addr, 1, 2, 3, 4, addr];
+
+    // MStoreW + 4×Drop + MLoadW, then 60 Noops so the memory chiplet segment does not overlap
+    // with the range checker's table segment at the end of the chiplet trace.
     let mut operations = vec![
         Operation::MStoreW,
         Operation::Drop,
@@ -82,67 +71,85 @@ fn b_range_trace_mem() {
         Operation::Drop,
         Operation::MLoadW,
     ];
-    // Pad so that the memory chiplet and range checker sections don't overlap,
-    // in order to simplify the logic of the test.
     operations.resize(operations.len() + 60, Operation::Noop);
-    let trace = build_trace_from_ops(operations, &stack);
+    let trace = build_trace_from_ops(operations, &stack_input);
+    let log = InteractionLog::new(&trace);
+    let main = trace.main_trace();
 
-    let rand_elements = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
-    let alpha = rand_elements[0];
-    let aux_columns = trace.build_aux_trace(&rand_elements).unwrap();
-    let b_range = aux_columns.get_column(B_RANGE_COL_IDX);
-
-    assert_eq!(trace.length(), b_range.len());
-
-    // The memory section of the chiplets trace starts after the span hash.
-    let memory_start = HASH_CYCLE_LEN;
-
-    // 40 rows are needed for 0, 3, 4, ... 36 bridge additional bridge rows of powers of
-    // 3  ..., 65535. (0 and 4 are both range-checked. 65535 is the max, and the rest are "bridge"
-    // values.) An extra row is added to pad the u16::MAX value.
-    let len_16bit = 40 + 1;
-    let values_start = trace.length() - len_16bit;
-
-    // The value should start at ZERO.
-    let mut expected = ZERO;
-    assert_eq!(expected, b_range[0]);
-
-    // --- Check the memory processor's range check lookups. --------------------------------------
-
-    // There are two memory lookups. For each memory lookup, the context and address are unchanged,
-    // so the delta values indicated the clock cycle change clk' - clk.
-    // StoreW is executed at cycle 1 (after the initial span), so clk' - clk = 1.
-    let (d0_store, d1_store) = (ONE, ZERO);
-    // LoadW is executed at cycle 6, so i' - i = 6 - 1 = 5.
-    let (d0_load, d1_load) = (Felt::new(5), ZERO);
-
-    // Include the lookups from the `MStoreW` operation at the next row.
-    expected -= (alpha + d0_store).inverse() + (alpha + d1_store).inverse();
-    assert_eq!(expected, b_range[memory_start + 1]);
-    // Include the lookup from the `MLoadW` operation at the next row.
-    expected -= (alpha + d0_load).inverse() + (alpha + d1_load).inverse();
-    assert_eq!(expected, b_range[memory_start + 2]);
-
-    // --- Check the range checker's lookups. -----------------------------------------------------
-
-    // We include 2 lookups of ZERO in the next row.
-    expected += alpha.inverse() * Felt::new(2);
-    assert_eq!(expected, b_range[values_start + 1]);
-
-    // We include 1 lookup of ONE in the next row.
-    expected += (alpha + d0_store).inverse();
-    assert_eq!(expected, b_range[values_start + 2]);
-
-    // We have one bridge row between 1 and 5 where the value does not change.
-    assert_eq!(expected, b_range[values_start + 3]);
-
-    // We include 1 lookup of 5 in the next row.
-    expected += (alpha + d0_load).inverse();
-    assert_eq!(expected, b_range[values_start + 4]);
-
-    // --- The value should now be ZERO for the rest of the trace. ---------------------------------
-    assert_eq!(expected, ZERO);
-    for i in (values_start + 4)..(b_range.len()) {
-        assert_eq!(ZERO, b_range[i]);
+    // Collect every memory chiplet row — we expect exactly two for the two memory ops.
+    let mut mem_rows: Vec<RowIndex> = Vec::new();
+    for row in 0..main.num_rows() {
+        let idx = RowIndex::from(row);
+        if main.is_memory_row(idx) {
+            mem_rows.push(idx);
+        }
     }
+    assert_eq!(mem_rows.len(), 2, "expected exactly two memory chiplet rows");
+
+    let mut exp = Expectations::new(&log);
+    for mem_row in &mem_rows {
+        let row = usize::from(*mem_row);
+        let d0 = main.get(*mem_row, MEMORY_D0_COL_IDX);
+        let d1 = main.get(*mem_row, MEMORY_D1_COL_IDX);
+        let w0 = main.chiplet_memory_word_addr_lo(*mem_row);
+        let w1 = main.chiplet_memory_word_addr_hi(*mem_row);
+        let four_w1 = w1 * Felt::from_u8(4);
+
+        for value in [d0, d1, w0, w1, four_w1] {
+            exp.remove(row, &RangeMsg { value });
+        }
+    }
+
+    assert_eq!(exp.count_removes(), 5 * mem_rows.len(), "expected 5 RC removes per memory row");
+    assert_eq!(exp.count_adds(), 0);
+    log.assert_contains(&exp);
+}
+
+/// Every trace row carries the range-checker table's response: a `RangeMsg { value: v }` add
+/// with runtime multiplicity `m`. This test verifies the per-row add side of the bus using
+/// hardcoded request demand: a `U32add` requests 4 values (helper columns) and each chiplet
+/// row with a range-check demand adds its `m` copies of that value to the bus.
+///
+/// Catches regressions where the range-checker add-back emitter misreads the multiplicity
+/// column, the value column, or drops the always-active gate — bugs that the per-request
+/// removes-only tests above cannot detect.
+#[test]
+fn range_checker_table_emits_per_row_adds() {
+    // U32add issues 4 range-check requests for values {0, 256, 0, 0} on 1 + 255 = 256. The
+    // range-checker chiplet will then add back four multiplicities of those values distributed
+    // across its trace rows. We don't need to predict where — subset semantics lets us verify
+    // that *every* row's add matches its `(m, v)` columns.
+    let stack = [1, 255];
+    let operations = vec![Operation::U32add];
+    let trace = build_trace_from_ops(operations, &stack);
+    let log = InteractionLog::new(&trace);
+    let main = trace.main_trace();
+
+    const M_COL_IDX: usize = RANGE_CHECK_TRACE_OFFSET;
+    const V_COL_IDX: usize = RANGE_CHECK_TRACE_OFFSET + 1;
+
+    let mut nonzero_mult_rows = 0usize;
+    let mut exp = Expectations::new(&log);
+    for row in 0..main.num_rows() {
+        let idx = RowIndex::from(row);
+        let m = main.get(idx, M_COL_IDX);
+        let v = main.get(idx, V_COL_IDX);
+        exp.push(row, m, &RangeMsg { value: v });
+        if m != Felt::from_u8(0) {
+            nonzero_mult_rows += 1;
+        }
+    }
+
+    assert!(nonzero_mult_rows > 0, "range checker table is empty — test is vacuous");
+    log.assert_contains(&exp);
+}
+
+fn find_op_row(main: &MainTrace, opcode: u8) -> RowIndex {
+    for row in 0..main.num_rows() {
+        let idx = RowIndex::from(row);
+        if main.get_op_code(idx) == Felt::from_u8(opcode) {
+            return idx;
+        }
+    }
+    panic!("no row with opcode 0x{opcode:02x} in trace");
 }

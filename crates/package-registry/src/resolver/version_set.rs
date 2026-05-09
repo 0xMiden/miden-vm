@@ -1,6 +1,6 @@
 use core::fmt;
 
-use miden_core::{LexicographicWord, Word};
+use miden_core::Word;
 use pubgrub::VersionSet as _;
 use smallvec::{SmallVec, smallvec};
 
@@ -36,7 +36,7 @@ pub struct VersionSet {
     /// The content digest filter, represented as the set of content digests that are considered
     /// to be members of this set. When non-empty, the set _only_ includes versions that are
     /// considered contained in `range` _and_ have a content digest in `digests`.
-    digests: SmallVec<[LexicographicWord; 1]>,
+    digests: SmallVec<[Word; 1]>,
 }
 
 /// Represents an additional filter on the versions considered a member of a [VersionSet].
@@ -45,7 +45,7 @@ pub enum VersionSetFilter<'a> {
     /// Matches any version, regardless of content digest
     Any,
     /// Matches only versions which have a content digest in the given set of digests
-    Digest(&'a [LexicographicWord]),
+    Digest(&'a [Word]),
 }
 
 impl VersionSetFilter<'_> {
@@ -86,7 +86,6 @@ impl VersionSet {
         digest: Word,
         versions: impl IntoIterator<Item = &'a Version>,
     ) -> Self {
-        let digest = LexicographicWord::new(digest);
         let mut range = SemverPubgrub::empty();
         let mut matched = false;
 
@@ -116,7 +115,7 @@ impl From<Word> for VersionSet {
     fn from(value: Word) -> Self {
         Self {
             range: SemverPubgrub::full(),
-            digests: smallvec![LexicographicWord::new(value)],
+            digests: smallvec![value],
         }
     }
 }
@@ -178,14 +177,14 @@ impl fmt::Display for VersionSet {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.digests.as_slice() {
             [] => write!(f, "{}", &self.range),
-            [digest] => write!(f, "{} in {}", digest.inner(), &self.range),
+            [digest] => write!(f, "{digest} in {}", &self.range),
             digests => {
                 f.write_str("any of ")?;
                 for (i, digest) in digests.iter().enumerate() {
                     if i > 0 {
                         f.write_str(", ")?;
                     }
-                    write!(f, "{}", &digest.inner())?;
+                    write!(f, "{digest}")?;
                 }
                 write!(f, " in {}", &self.range)
             },

@@ -172,7 +172,7 @@ where
             let lhs_id = node_id(op.lhs)?;
             let rhs_id = node_id(op.rhs)?;
             let tag = op_tag(op.op);
-            Ok(Felt::new(lhs_id + rhs_id * RHS_NODE_OFFSET + tag * OP_TAG_OFFSET))
+            Ok(Felt::new_unchecked(lhs_id + rhs_id * RHS_NODE_OFFSET + tag * OP_TAG_OFFSET))
         };
 
         for op in &self.operations {

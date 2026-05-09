@@ -9,13 +9,13 @@ use miden_utils_testing::rand::rand_array;
 
 use super::{ExecutionTrace, Felt};
 use crate::{
-    AdviceInputs, DefaultHost, ExecutionOptions, FastProcessor, StackInputs,
-    trace::{build_trace, chiplets::init_state_from_words},
+    AdviceInputs, DefaultHost, ExecutionOptions, FastProcessor, StackInputs, trace::build_trace,
 };
 
 mod chiplets;
 mod decoder;
-mod hasher;
+mod lookup;
+mod lookup_harness;
 mod range;
 mod stack;
 
@@ -29,7 +29,7 @@ const TEST_TRACE_FRAGMENT_SIZE: usize = 1 << 10;
 
 /// Builds a sample trace by executing the provided code block against the provided stack inputs.
 pub fn build_trace_from_program(program: &Program, stack_inputs: &[u64]) -> ExecutionTrace {
-    let stack_inputs = stack_inputs.iter().map(|&v| Felt::new(v)).collect::<Vec<Felt>>();
+    let stack_inputs = stack_inputs.iter().map(|&v| Felt::new_unchecked(v)).collect::<Vec<Felt>>();
     let mut host = DefaultHost::default();
     let processor = FastProcessor::new_with_options(
         StackInputs::new(&stack_inputs).unwrap(),
@@ -37,11 +37,32 @@ pub fn build_trace_from_program(program: &Program, stack_inputs: &[u64]) -> Exec
         ExecutionOptions::default()
             .with_core_trace_fragment_size(TEST_TRACE_FRAGMENT_SIZE)
             .unwrap(),
-    );
-    let (execution_output, trace_generation_context) =
-        processor.execute_for_trace_sync(program, &mut host).unwrap();
+    )
+    .expect("processor advice inputs should fit advice map limits");
+    let trace_inputs = processor.execute_trace_inputs_sync(program, &mut host).unwrap();
+    build_trace(trace_inputs).unwrap()
+}
 
-    build_trace(execution_output, trace_generation_context, program.to_info()).unwrap()
+/// Builds a sample trace by executing the provided program with pre-built `StackInputs`.
+///
+/// Unlike [`build_trace_from_program`], this helper accepts a `StackInputs` value directly so
+/// that callers can supply `Felt` elements (e.g. a procedure hash word) without having to
+/// convert them through `u64` first.
+pub fn build_trace_from_program_with_stack(
+    program: &Program,
+    stack_inputs: StackInputs,
+) -> ExecutionTrace {
+    let mut host = DefaultHost::default();
+    let processor = FastProcessor::new_with_options(
+        stack_inputs,
+        AdviceInputs::default(),
+        ExecutionOptions::default()
+            .with_core_trace_fragment_size(TEST_TRACE_FRAGMENT_SIZE)
+            .unwrap(),
+    )
+    .expect("processor advice inputs should fit advice map limits");
+    let trace_inputs = processor.execute_trace_inputs_sync(program, &mut host).unwrap();
+    build_trace(trace_inputs).unwrap()
 }
 
 /// Builds a sample trace by executing a span block containing the specified operations. This
@@ -59,9 +80,10 @@ pub fn build_trace_from_ops(operations: Vec<Operation>, stack: &[u64]) -> Execut
     build_trace_from_program(&program, stack)
 }
 
-/// Builds a sample trace by executing a span block containing the specified operations. Unlike the
-/// function above, this function accepts the full [AdviceInputs] object, which means it can run
-/// the programs with initialized advice provider.
+/// Builds a sample trace by executing a span block containing the specified operations. Unlike
+/// [`build_trace_from_ops`], this variant accepts the full [`AdviceInputs`] object, so the
+/// program can run against an initialised advice provider (e.g. to seed a Merkle tree for the
+/// sibling-table tests).
 pub fn build_trace_from_ops_with_inputs(
     operations: Vec<Operation>,
     stack_inputs: StackInputs,
@@ -81,9 +103,8 @@ pub fn build_trace_from_ops_with_inputs(
         ExecutionOptions::default()
             .with_core_trace_fragment_size(TEST_TRACE_FRAGMENT_SIZE)
             .unwrap(),
-    );
-    let (execution_output, trace_generation_context) =
-        processor.execute_for_trace_sync(&program, &mut host).unwrap();
-
-    build_trace(execution_output, trace_generation_context, program.to_info()).unwrap()
+    )
+    .expect("processor advice inputs should fit advice map limits");
+    let trace_inputs = processor.execute_trace_inputs_sync(&program, &mut host).unwrap();
+    build_trace(trace_inputs).unwrap()
 }

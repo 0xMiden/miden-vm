@@ -8,9 +8,6 @@ proc invoke_user_script
 end
 
 begin
-    # At program start, initialize the kernel environment
-    exec.$kernel::init
-
     # Execute the user script whose entrypoint digest is on top of the stack
     exec.invoke_user_script
 end

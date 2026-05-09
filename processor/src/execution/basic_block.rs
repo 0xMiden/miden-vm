@@ -2,7 +2,7 @@ use alloc::sync::Arc;
 use core::ops::ControlFlow;
 
 use crate::{
-    BreakReason, Host, Stopper,
+    BaseHost, BreakReason, Stopper,
     continuation_stack::{Continuation, ContinuationStack},
     execution::{
         ExecutionState, InternalBreakReason, execute_op, finalize_clock_cycle_with_continuation,
@@ -27,7 +27,7 @@ pub(super) fn execute_basic_block_node_from_start<P, H, S, T>(
 ) -> ControlFlow<InternalBreakReason>
 where
     P: Processor,
-    H: Host,
+    H: BaseHost,
     S: Stopper<Processor = P>,
     T: Tracer<Processor = P>,
 {
@@ -85,7 +85,7 @@ pub(super) fn execute_basic_block_node_from_op_idx<P, H, S, T>(
 ) -> ControlFlow<InternalBreakReason>
 where
     P: Processor,
-    H: Host,
+    H: BaseHost,
     S: Stopper<Processor = P>,
     T: Tracer<Processor = P>,
 {
@@ -127,7 +127,7 @@ pub(super) fn execute_basic_block_node_from_batch<P, H, S, T>(
 ) -> ControlFlow<InternalBreakReason>
 where
     P: Processor,
-    H: Host,
+    H: BaseHost,
     S: Stopper<Processor = P>,
     T: Tracer<Processor = P>,
 {
@@ -194,13 +194,13 @@ where
 #[inline(always)]
 pub(super) fn finish_basic_block<P, H, S, T>(
     state: &mut ExecutionState<'_, P, H, S, T>,
-    basic_block_node: &BasicBlockNode,
+    _basic_block_node: &BasicBlockNode,
     node_id: MastNodeId,
     current_forest: &Arc<MastForest>,
 ) -> ControlFlow<BreakReason>
 where
     P: Processor,
-    H: Host,
+    H: BaseHost,
     S: Stopper<Processor = P>,
     T: Tracer<Processor = P>,
 {
@@ -217,16 +217,10 @@ where
         state.tracer,
         state.stopper,
         state.continuation_stack,
-        || Some(Continuation::AfterExitDecoratorsBasicBlock(node_id)),
+        || Some(Continuation::AfterExitDecorators(node_id)),
         current_forest,
     )?;
 
-    state.processor.execute_end_of_block_decorators(
-        basic_block_node,
-        node_id,
-        current_forest,
-        state.host,
-    )?;
     state
         .processor
         .execute_after_exit_decorators(node_id, current_forest, state.host)
@@ -248,7 +242,7 @@ fn execute_op_batch<P, H, S, T>(
 ) -> ControlFlow<InternalBreakReason>
 where
     P: Processor,
-    H: Host,
+    H: BaseHost,
     S: Stopper<Processor = P>,
     T: Tracer<Processor = P>,
 {

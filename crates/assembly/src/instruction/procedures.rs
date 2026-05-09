@@ -34,7 +34,7 @@ impl Assembler {
     ) -> Result<MastNodeId, Report> {
         let resolved = self
             .resolve_target(kind, callee, caller, mast_forest_builder)?
-            .expect("invocation target is not a procedure");
+            .ok_or_else(|| self.invalid_invoke_target_report(kind, callee, caller))?;
 
         match kind {
             InvokeKind::ProcRef | InvokeKind::Exec => Ok(resolved.node),
@@ -101,7 +101,9 @@ impl Assembler {
                     caller,
                     block_builder.mast_forest_builder_mut(),
                 )?
-                .expect("invocation target is not a procedure");
+                .ok_or_else(|| {
+                    self.invalid_invoke_target_report(InvokeKind::ProcRef, callee, caller)
+                })?;
             // Note: it's ok to `unwrap()` here since `proc_body_id` was returned from
             // `mast_forest_builder`
             block_builder

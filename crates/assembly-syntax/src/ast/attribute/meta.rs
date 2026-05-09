@@ -48,7 +48,9 @@ impl FromIterator<MetaItem> for Meta {
                 core::iter::once(expr)
                     .chain(iter.map(|item| match item {
                         MetaItem::Expr(expr) => expr,
-                        MetaItem::KeyValue(..) => unsafe { core::hint::unreachable_unchecked() },
+                        MetaItem::KeyValue(..) => {
+                            unreachable!("mixed MetaItem variants in iterator: expected Expr")
+                        },
                     }))
                     .collect(),
             ),
@@ -56,7 +58,9 @@ impl FromIterator<MetaItem> for Meta {
                 core::iter::once((k, v))
                     .chain(iter.map(|item| match item {
                         MetaItem::KeyValue(k, v) => (k, v),
-                        MetaItem::Expr(_) => unsafe { core::hint::unreachable_unchecked() },
+                        MetaItem::Expr(_) => {
+                            unreachable!("mixed MetaItem variants in iterator: expected KeyValue")
+                        },
                     }))
                     .collect(),
             ),

@@ -33,28 +33,28 @@ pub struct DynNode {
 /// Constants
 impl DynNode {
     /// The domain of the Dyn block (used for control block hashing).
-    pub const DYN_DOMAIN: Felt = Felt::new(opcodes::DYN as u64);
+    pub const DYN_DOMAIN: Felt = Felt::new_unchecked(opcodes::DYN as u64);
 
     /// The domain of the Dyncall block (used for control block hashing).
-    pub const DYNCALL_DOMAIN: Felt = Felt::new(opcodes::DYNCALL as u64);
+    pub const DYNCALL_DOMAIN: Felt = Felt::new_unchecked(opcodes::DYNCALL as u64);
 }
 
 /// Default digest constants
 impl DynNode {
     /// The default digest for a DynNode representing a dyncall operation.
     pub const DYNCALL_DEFAULT_DIGEST: Word = Word::new([
-        Felt::new(14319792288905293245),
-        Felt::new(11465345153771181037),
-        Felt::new(16104169334207009019),
-        Felt::new(2750797734633655770),
+        Felt::new_unchecked(16830415514927835337),
+        Felt::new_unchecked(12164645914672292987),
+        Felt::new_unchecked(13192574193032437705),
+        Felt::new_unchecked(4604554596675732269),
     ]);
 
     /// The default digest for a DynNode representing a dynexec operation.
     pub const DYN_DEFAULT_DIGEST: Word = Word::new([
-        Felt::new(13210061556570014836),
-        Felt::new(16003296542960478536),
-        Felt::new(6732564319544917702),
-        Felt::new(16687523027086140644),
+        Felt::new_unchecked(16952228088962355159),
+        Felt::new_unchecked(5793482471479538911),
+        Felt::new_unchecked(14446299416172848527),
+        Felt::new_unchecked(13522295374716441620),
     ]);
 }
 
@@ -143,8 +143,8 @@ impl DynNodePrettyPrint<'_> {
     }
 }
 
-impl crate::prettier::PrettyPrint for DynNodePrettyPrint<'_> {
-    fn render(&self) -> crate::prettier::Document {
+impl PrettyPrint for DynNodePrettyPrint<'_> {
+    fn render(&self) -> Document {
         let dyn_text = if self.node.is_dyncall() {
             const_text("dyncall")
         } else {
@@ -254,13 +254,12 @@ impl MastNodeExt for DynNode {
             let forest_node = &forest.nodes[id];
             let forest_node_ptr = match forest_node {
                 MastNode::Dyn(dyn_node) => dyn_node as *const DynNode as *const (),
-                _ => panic!("Node type mismatch at {:?}", id),
+                _ => panic!("Node type mismatch at {id:?}"),
             };
             let self_as_void = self_ptr as *const ();
             debug_assert_eq!(
                 self_as_void, forest_node_ptr,
-                "Node pointer mismatch: expected node at {:?} to be self",
-                id
+                "Node pointer mismatch: expected node at {id:?} to be self"
             );
         }
     }
@@ -426,7 +425,7 @@ impl MastForestContributor for DynNodeBuilder {
         self.after_exit.extend(decorators);
     }
 
-    fn with_digest(mut self, digest: crate::Word) -> Self {
+    fn with_digest(mut self, digest: Word) -> Self {
         self.digest = Some(digest);
         self
     }

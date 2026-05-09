@@ -29,35 +29,14 @@
 //! Note: END operation's restoration is handled by the block stack table (bus-based),
 //! not by these constraints. These constraints only handle the non-END cases.
 
-use miden_core::field::PrimeCharacteristicRing;
-use miden_crypto::stark::air::{AirBuilder, LiftedAirBuilder};
+pub mod columns;
+
+use miden_crypto::stark::air::AirBuilder;
 
 use crate::{
-    MainTraceRow,
-    constraints::{
-        op_flags::{ExprDecoderAccess, OpFlags},
-        tagging::{
-            TaggingAirBuilderExt,
-            ids::{
-                TAG_SYSTEM_CLK_BASE, TAG_SYSTEM_CLK_COUNT, TAG_SYSTEM_CTX_BASE,
-                TAG_SYSTEM_CTX_COUNT, TAG_SYSTEM_FN_HASH_BASE,
-            },
-        },
-    },
-    trace::decoder::HASHER_STATE_OFFSET,
+    MainCols, MidenAirBuilder,
+    constraints::{constants::F_1, op_flags::OpFlags, utils::BoolNot},
 };
-
-// TAGGING CONSTANTS
-// ================================================================================================
-
-const SYSTEM_CLK_NAMES: [&str; TAG_SYSTEM_CLK_COUNT] =
-    ["system.clk.first_row", "system.clk.transition"];
-
-const SYSTEM_CTX_NAMES: [&str; TAG_SYSTEM_CTX_COUNT] =
-    ["system.ctx.call_dyncall", "system.ctx.syscall", "system.ctx.default"];
-
-const SYSTEM_FN_HASH_LOAD_NAMESPACE: &str = "system.fn_hash.load";
-const SYSTEM_FN_HASH_PRESERVE_NAMESPACE: &str = "system.fn_hash.preserve";
 
 // ENTRY POINTS
 // ================================================================================================
@@ -65,111 +44,58 @@ const SYSTEM_FN_HASH_PRESERVE_NAMESPACE: &str = "system.fn_hash.preserve";
 /// Enforces system constraints.
 pub fn enforce_main<AB>(
     builder: &mut AB,
-    local: &MainTraceRow<AB::Var>,
-    next: &MainTraceRow<AB::Var>,
+    local: &MainCols<AB::Var>,
+    next: &MainCols<AB::Var>,
+    op_flags: &OpFlags<AB::Expr>,
 ) where
-    AB: LiftedAirBuilder,
+    AB: MidenAirBuilder,
 {
-    enforce_clock_constraint(builder, local, next);
-    enforce_ctx_constraints(builder, local, next);
-    enforce_fn_hash_constraints(builder, local, next);
-}
-
-// CONSTRAINT HELPERS
-// ================================================================================================
-
-/// Enforces the clock constraint: clk' = clk + 1.
-pub(crate) fn enforce_clock_constraint<AB>(
-    builder: &mut AB,
-    local: &MainTraceRow<AB::Var>,
-    next: &MainTraceRow<AB::Var>,
-) where
-    AB: LiftedAirBuilder,
-{
-    builder.tagged(TAG_SYSTEM_CLK_BASE, SYSTEM_CLK_NAMES[0], |builder| {
-        builder.when_first_row().assert_zero(local.clk.clone());
-    });
-
-    builder.tagged(TAG_SYSTEM_CLK_BASE + 1, SYSTEM_CLK_NAMES[1], |builder| {
-        builder
-            .when_transition()
-            .assert_eq(next.clk.clone(), local.clk.clone() + AB::Expr::ONE);
-    });
-}
-
-/// Enforces execution context transition constraints.
-pub(crate) fn enforce_ctx_constraints<AB>(
-    builder: &mut AB,
-    local: &MainTraceRow<AB::Var>,
-    next: &MainTraceRow<AB::Var>,
-) where
-    AB: LiftedAirBuilder,
-{
-    let ctx: AB::Expr = local.ctx.clone().into();
-    let ctx_next: AB::Expr = next.ctx.clone().into();
-    let clk: AB::Expr = local.clk.clone().into();
-
-    let op_flags = OpFlags::new(ExprDecoderAccess::new(local));
+    // Clock: starts at 0, increments by 1
+    {
+        builder.when_first_row().assert_zero(local.system.clk);
+        builder.when_transition().assert_eq(next.system.clk, local.system.clk + F_1);
+    }
     let f_call = op_flags.call();
     let f_syscall = op_flags.syscall();
     let f_dyncall = op_flags.dyncall();
     let f_end = op_flags.end();
 
-    let call_dyncall_flag = f_call.clone() + f_dyncall.clone();
-    let expected_new_ctx = clk + AB::Expr::ONE;
-    builder.tagged(TAG_SYSTEM_CTX_BASE, SYSTEM_CTX_NAMES[0], |builder| {
-        builder
-            .when_transition()
-            .assert_zero(call_dyncall_flag * (ctx_next.clone() - expected_new_ctx));
-    });
+    // Execution context transition constraints (see module doc for transition table)
+    {
+        let ctx = local.system.ctx;
+        let ctx_next = next.system.ctx;
+        let clk = local.system.clk;
 
-    builder.tagged(TAG_SYSTEM_CTX_BASE + 1, SYSTEM_CTX_NAMES[1], |builder| {
-        builder.when_transition().assert_zero(f_syscall.clone() * ctx_next.clone());
-    });
+        let call_dyncall_flag = f_call.clone() + f_dyncall.clone();
+        let change_ctx_flag =
+            f_call.clone() + f_syscall.clone() + f_dyncall.clone() + f_end.clone();
+        let default_flag = change_ctx_flag.not();
 
-    let change_ctx_flag = f_call + f_syscall + f_dyncall + f_end;
-    let default_flag = AB::Expr::ONE - change_ctx_flag;
-    builder.tagged(TAG_SYSTEM_CTX_BASE + 2, SYSTEM_CTX_NAMES[2], |builder| {
-        builder.when_transition().assert_zero(default_flag * (ctx_next - ctx));
-    });
-}
+        let builder = &mut builder.when_transition();
+        builder.when(call_dyncall_flag).assert_eq(ctx_next, clk + F_1);
+        builder.when(f_syscall).assert_zero(ctx_next);
+        builder.when(default_flag).assert_eq(ctx_next, ctx);
+    }
 
-/// Enforces function hash transition constraints.
-pub(crate) fn enforce_fn_hash_constraints<AB>(
-    builder: &mut AB,
-    local: &MainTraceRow<AB::Var>,
-    next: &MainTraceRow<AB::Var>,
-) where
-    AB: LiftedAirBuilder,
-{
-    let op_flags = OpFlags::new(ExprDecoderAccess::new(local));
-    let f_call = op_flags.call();
-    let f_dyncall = op_flags.dyncall();
-    let f_end = op_flags.end();
+    // Function hash transition constraints (see module doc for transition table)
+    {
+        let f_load = f_call + f_dyncall;
+        let f_preserve = (f_load.clone() + f_end).not();
 
-    let f_load = f_call.clone() + f_dyncall.clone();
-    let f_preserve = AB::Expr::ONE - (f_load.clone() + f_end);
+        let builder = &mut builder.when_transition();
 
-    let load_ids: [usize; 4] = core::array::from_fn(|i| TAG_SYSTEM_FN_HASH_BASE + i);
-    builder.tagged_list(load_ids, SYSTEM_FN_HASH_LOAD_NAMESPACE, |builder| {
-        builder.when_transition().when(f_load.clone()).assert_zeros(
-            core::array::from_fn::<_, 4, _>(|i| {
-                let fn_hash_i_next: AB::Expr = next.fn_hash[i].clone().into();
-                let decoder_h_i: AB::Expr = local.decoder[HASHER_STATE_OFFSET + i].clone().into();
-                fn_hash_i_next - decoder_h_i
-            }),
-        );
-    });
+        {
+            let builder = &mut builder.when(f_load);
+            for i in 0..4 {
+                builder.assert_eq(next.system.fn_hash[i], local.decoder.hasher_state[i]);
+            }
+        }
 
-    let preserve_ids: [usize; 4] = core::array::from_fn(|i| TAG_SYSTEM_FN_HASH_BASE + 4 + i);
-    builder.tagged_list(preserve_ids, SYSTEM_FN_HASH_PRESERVE_NAMESPACE, |builder| {
-        builder
-            .when_transition()
-            .when(f_preserve.clone())
-            .assert_zeros(core::array::from_fn::<_, 4, _>(|i| {
-                let fn_hash_i: AB::Expr = local.fn_hash[i].clone().into();
-                let fn_hash_i_next: AB::Expr = next.fn_hash[i].clone().into();
-                fn_hash_i_next - fn_hash_i
-            }));
-    });
+        {
+            let builder = &mut builder.when(f_preserve);
+            for i in 0..4 {
+                builder.assert_eq(next.system.fn_hash[i], local.system.fn_hash[i]);
+            }
+        }
+    }
 }

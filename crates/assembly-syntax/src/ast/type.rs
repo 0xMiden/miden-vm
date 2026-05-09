@@ -188,7 +188,7 @@ impl crate::prettier::PrettyPrint for FunctionType {
         let singleline_args = self
             .args
             .iter()
-            .map(|arg| arg.render())
+            .map(PrettyPrint::render)
             .reduce(|acc, arg| acc + const_text(", ") + arg)
             .unwrap_or(Document::Empty);
         let multiline_args = indent(
@@ -196,7 +196,7 @@ impl crate::prettier::PrettyPrint for FunctionType {
             nl() + self
                 .args
                 .iter()
-                .map(|arg| arg.render())
+                .map(PrettyPrint::render)
                 .reduce(|acc, arg| acc + const_text(",") + nl() + arg)
                 .unwrap_or(Document::Empty),
         ) + nl();
@@ -210,7 +210,7 @@ impl crate::prettier::PrettyPrint for FunctionType {
                 let results = self
                     .results
                     .iter()
-                    .map(|r| r.render())
+                    .map(PrettyPrint::render)
                     .reduce(|acc, r| acc + const_text(", ") + r)
                     .unwrap_or(Document::Empty);
                 args + const_text(" -> ") + const_text("(") + results + const_text(")")
@@ -353,11 +353,11 @@ impl TypeExpr {
             TypeExpr::Array(t) => Ok(t
                 .elem
                 .resolve_type_with_depth(resolver, depth + 1)?
-                .map(|elem| types::Type::Array(Arc::new(types::ArrayType::new(elem, t.arity))))),
+                .map(|elem| Type::Array(Arc::new(types::ArrayType::new(elem, t.arity))))),
             TypeExpr::Ptr(ty) => Ok(ty
                 .pointee
                 .resolve_type_with_depth(resolver, depth + 1)?
-                .map(|pointee| types::Type::Ptr(Arc::new(types::PointerType::new(pointee))))),
+                .map(|pointee| Type::Ptr(Arc::new(types::PointerType::new(pointee))))),
             TypeExpr::Struct(t) => {
                 let mut fields = Vec::with_capacity(t.fields.len());
                 for field in t.fields.iter() {
@@ -369,7 +369,7 @@ impl TypeExpr {
                     }
                 }
                 Ok(Some(Type::Struct(Arc::new(types::StructType::from_parts(
-                    t.name.clone().map(|id| id.into_inner()),
+                    t.name.clone().map(Ident::into_inner),
                     t.repr.into_inner(),
                     fields,
                 )))))
@@ -513,7 +513,7 @@ impl crate::prettier::PrettyPrint for PointerType {
 
         let doc = const_text("ptr<") + self.pointee.render();
         if let Some(addrspace) = self.addrspace.as_ref() {
-            doc + const_text(", ") + text(format!("addrspace({})", addrspace)) + const_text(">")
+            doc + const_text(", ") + text(format!("addrspace({addrspace})")) + const_text(">")
         } else {
             doc + const_text(">")
         }
@@ -653,7 +653,7 @@ impl crate::prettier::PrettyPrint for StructType {
         let singleline_body = self
             .fields
             .iter()
-            .map(|field| field.render())
+            .map(PrettyPrint::render)
             .reduce(|acc, field| acc + const_text(", ") + field)
             .unwrap_or(Document::Empty);
         let multiline_body = indent(
@@ -661,7 +661,7 @@ impl crate::prettier::PrettyPrint for StructType {
             nl() + self
                 .fields
                 .iter()
-                .map(|field| field.render())
+                .map(PrettyPrint::render)
                 .reduce(|acc, field| acc + const_text(",") + nl() + field)
                 .unwrap_or(Document::Empty),
         ) + nl();
@@ -810,11 +810,7 @@ impl crate::prettier::PrettyPrint for TypeAlias {
     fn render(&self) -> crate::prettier::Document {
         use crate::prettier::*;
 
-        let mut doc = self
-            .docs
-            .as_ref()
-            .map(|docstring| docstring.render())
-            .unwrap_or(Document::Empty);
+        let mut doc = self.docs.as_ref().map(PrettyPrint::render).unwrap_or(Document::Empty);
 
         if self.visibility.is_public() {
             doc += display(self.visibility) + const_text(" ");
@@ -993,16 +989,12 @@ impl crate::prettier::PrettyPrint for EnumType {
     fn render(&self) -> crate::prettier::Document {
         use crate::prettier::*;
 
-        let mut doc = self
-            .docs
-            .as_ref()
-            .map(|docstring| docstring.render())
-            .unwrap_or(Document::Empty);
+        let mut doc = self.docs.as_ref().map(PrettyPrint::render).unwrap_or(Document::Empty);
 
         let variants = self
             .variants
             .iter()
-            .map(|v| v.render())
+            .map(PrettyPrint::render)
             .reduce(|acc, v| acc + const_text(",") + nl() + v)
             .unwrap_or(Document::Empty);
 
@@ -1172,11 +1164,7 @@ impl crate::prettier::PrettyPrint for Variant {
     fn render(&self) -> crate::prettier::Document {
         use crate::prettier::*;
 
-        let doc = self
-            .docs
-            .as_ref()
-            .map(|docstring| docstring.render())
-            .unwrap_or(Document::Empty);
+        let doc = self.docs.as_ref().map(PrettyPrint::render).unwrap_or(Document::Empty);
 
         let name = display(&self.name);
         let name_and_payload = if let Some(value_ty) = self.value_ty.as_ref() {

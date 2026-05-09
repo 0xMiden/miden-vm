@@ -55,7 +55,10 @@ assertion failed: `(left matches right)`
 // EXPORTS
 // ================================================================================================
 
-pub use miden_crypto::{EMPTY_WORD, Felt, LexicographicWord, ONE, WORD_SIZE, Word, ZERO};
+pub use miden_crypto::{EMPTY_WORD, Felt, ONE, Word, ZERO};
+
+/// The number of field elements in a Miden word.
+pub const WORD_SIZE: usize = Word::NUM_ELEMENTS;
 
 pub mod advice;
 pub mod chiplets;
@@ -135,7 +138,7 @@ pub mod prettier {
 
 /// The initial value for the frame pointer, corresponding to the start address for procedure
 /// locals.
-pub const FMP_INIT_VALUE: Felt = Felt::new(2_u64.pow(31));
+pub const FMP_INIT_VALUE: Felt = Felt::new_unchecked(2_u64.pow(31));
 
 /// The address where the frame pointer is stored in memory.
-pub const FMP_ADDR: Felt = Felt::new(u32::MAX as u64 - 1_u64);
+pub const FMP_ADDR: Felt = Felt::new_unchecked(u32::MAX as u64 - 1_u64);

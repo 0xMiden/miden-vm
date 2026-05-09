@@ -89,22 +89,21 @@ impl<EF: Field> AceCircuit<EF> {
 }
 
 /// Emit an ACE circuit from the DAG and input layout.
-pub(crate) fn emit_circuit<EF>(
-    dag: &AceDag<EF>,
-    layout: InputLayout,
-) -> Result<AceCircuit<EF>, AceError>
+pub fn emit_circuit<EF>(dag: &AceDag<EF>, layout: InputLayout) -> Result<AceCircuit<EF>, AceError>
 where
     EF: Field,
 {
     let mut constants = Vec::new();
     let mut constant_map = HashMap::<EF, usize>::new();
     let mut operations = Vec::new();
-    let mut node_map: Vec<Option<AceNode>> = vec![None; dag.nodes.len()];
+    let mut node_map: Vec<Option<AceNode>> = vec![None; dag.nodes().len()];
 
-    for (idx, node) in dag.nodes.iter().enumerate() {
+    for (idx, node) in dag.nodes().iter().enumerate() {
         let ace_node = match node {
             NodeKind::Input(key) => {
-                let input_idx = layout.index(*key).expect("input key must be present in layout");
+                let input_idx = layout.index(*key).ok_or_else(|| AceError::InvalidInputLayout {
+                    message: format!("missing input key in layout: {key:?}"),
+                })?;
                 AceNode::Input(input_idx)
             },
             NodeKind::Constant(value) => {
@@ -153,7 +152,7 @@ where
         node_map[idx] = Some(ace_node);
     }
 
-    let root = lookup_node(&node_map, dag.root);
+    let root = lookup_node(&node_map, dag.root());
     Ok(AceCircuit { layout, constants, operations, root })
 }
 

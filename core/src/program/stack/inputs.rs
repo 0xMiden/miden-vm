@@ -13,7 +13,7 @@ use crate::{
 /// Defines the initial state of the VM's operand stack.
 ///
 /// The first element is at position 0 (top of stack).
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct StackInputs {
     elements: [Felt; MIN_STACK_DEPTH],
 }

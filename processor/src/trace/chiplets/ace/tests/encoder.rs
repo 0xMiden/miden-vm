@@ -141,7 +141,7 @@ impl EncodedCircuit {
         };
 
         let encoded = id_l as u64 + ((id_r as u64) << ID_BITS) + (op << (2 * ID_BITS));
-        Some(Felt::new(encoded))
+        Some(Felt::new_unchecked(encoded))
     }
 }
 

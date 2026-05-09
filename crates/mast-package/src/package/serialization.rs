@@ -32,7 +32,10 @@ use miden_assembly_syntax::{
 };
 use miden_core::{
     Word,
-    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+    serde::{
+        BudgetedReader, ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
+        SliceReader,
+    },
 };
 
 use super::{ConstantExport, PackageId, ProcedureExport, TargetType, TypeExport};
@@ -48,6 +51,12 @@ const MAGIC_PACKAGE: &[u8; 5] = b"MASP\0";
 ///
 /// If future modifications are made to this format, the version should be incremented by 1.
 const VERSION: [u8; 3] = [4, 0, 0];
+
+/// Byte-read budget multiplier for package deserialization from a byte slice.
+///
+/// The budget is intentionally finite to reject malicious length prefixes, but larger than the
+/// source length because collection deserialization uses conservative per-element size estimates.
+const PACKAGE_BYTE_READ_BUDGET_MULTIPLIER: usize = 64;
 
 // PACKAGE SERIALIZATION/DESERIALIZATION
 // ================================================================================================
@@ -135,6 +144,12 @@ impl Deserializable for Package {
             manifest,
             sections,
         })
+    }
+
+    fn read_from_bytes(bytes: &[u8]) -> Result<Self, DeserializationError> {
+        let budget = bytes.len().saturating_mul(PACKAGE_BYTE_READ_BUDGET_MULTIPLIER);
+        let mut reader = BudgetedReader::new(SliceReader::new(bytes), budget);
+        Self::read_from(&mut reader)
     }
 }
 
@@ -272,10 +287,7 @@ impl Deserializable for PackageManifest {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         // Read exports
         let exports_len = source.read_usize()?;
-        let mut exports = Vec::with_capacity(exports_len);
-        for _ in 0..exports_len {
-            exports.push(PackageExport::read_from(source)?);
-        }
+        let exports = source.read_many_iter(exports_len)?.collect::<Result<Vec<_>, _>>()?;
 
         // Read dependencies
         let dependencies = Vec::<Dependency>::read_from(source)?;
@@ -377,7 +389,13 @@ impl Deserializable for TypeExport {
 
 #[cfg(test)]
 mod tests {
-    use alloc::{collections::BTreeMap, string::ToString, sync::Arc, vec, vec::Vec};
+    use alloc::{
+        collections::BTreeMap,
+        string::{String, ToString},
+        sync::Arc,
+        vec,
+        vec::Vec,
+    };
 
     use miden_assembly_syntax::{
         Library,
@@ -385,6 +403,7 @@ mod tests {
         library::{LibraryExport, ProcedureExport as LibraryProcedureExport},
     };
     use miden_core::{
+        Word,
         mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, MastNodeExt, MastNodeId},
         operations::Operation,
         serde::{
@@ -395,9 +414,12 @@ mod tests {
     #[cfg(feature = "serde")]
     use serde_json::{json, to_value};
 
-    use super::{MAGIC_PACKAGE, Package, PackageExport, PackageManifest, VERSION};
+    use super::{
+        MAGIC_PACKAGE, PACKAGE_BYTE_READ_BUDGET_MULTIPLIER, Package, PackageExport,
+        PackageManifest, Section, VERSION,
+    };
     use crate::{
-        Dependency, ManifestValidationError, PackageId, TargetType,
+        Dependency, ManifestValidationError, PackageId, SectionId, TargetType,
         package::manifest::ProcedureExport as PackageProcedureExport,
     };
 
@@ -481,6 +503,84 @@ mod tests {
     }
 
     #[test]
+    fn package_content_digest_changes_when_identity_fields_change() {
+        let package = build_package();
+        let digest = package.content_digest();
+
+        let renamed = Package {
+            name: PackageId::from("renamed_pkg"),
+            ..package.clone()
+        };
+        assert_ne!(digest, renamed.content_digest());
+
+        let versioned = Package {
+            version: crate::Version::new(1, 2, 3),
+            ..package.clone()
+        };
+        assert_ne!(digest, versioned.content_digest());
+
+        let executable = Package { kind: TargetType::Executable, ..package };
+        assert_ne!(digest, executable.content_digest());
+    }
+
+    #[test]
+    fn package_content_digest_changes_when_manifest_changes() {
+        let package = build_package();
+        let digest = package.content_digest();
+
+        let mut with_dependency = package;
+        with_dependency
+            .manifest
+            .add_dependency(Dependency {
+                name: PackageId::from("dep_pkg"),
+                kind: TargetType::Library,
+                version: crate::Version::new(1, 0, 0),
+                digest: Word::from([1_u32, 2, 3, 4]),
+            })
+            .expect("test dependency should be unique");
+        assert_ne!(digest, with_dependency.content_digest());
+    }
+
+    #[test]
+    fn package_content_digest_changes_when_account_component_metadata_changes() {
+        let package = build_package();
+        let digest = package.content_digest();
+
+        let with_metadata = Package {
+            sections: vec![Section::new(SectionId::ACCOUNT_COMPONENT_METADATA, vec![1, 2, 3, 4])],
+            ..package.clone()
+        };
+        assert_ne!(digest, with_metadata.content_digest());
+
+        let with_different_metadata = Package {
+            sections: vec![Section::new(SectionId::ACCOUNT_COMPONENT_METADATA, vec![4, 3, 2, 1])],
+            ..package
+        };
+        assert_ne!(with_metadata.content_digest(), with_different_metadata.content_digest());
+    }
+
+    #[test]
+    fn package_content_digest_ignores_description_and_opaque_custom_sections_for_now() {
+        let package = build_package();
+        let digest = package.content_digest();
+
+        let described = Package {
+            description: Some(String::from("human-facing package description")),
+            ..package.clone()
+        };
+        assert_eq!(digest, described.content_digest());
+
+        let with_section = Package {
+            sections: vec![Section::new(
+                SectionId::custom("opaque").expect("valid custom section id"),
+                vec![1, 2, 3, 4],
+            )],
+            ..package
+        };
+        assert_eq!(digest, with_section.content_digest());
+    }
+
+    #[test]
     fn package_manifest_rejects_over_budget_dependencies() {
         let mut bytes = Vec::new();
         bytes.write_usize(0);
@@ -497,6 +597,44 @@ mod tests {
         let mut reader = BudgetedReader::new(SliceReader::new(&bytes), bytes.len());
         let err = Package::read_from(&mut reader).unwrap_err();
         assert!(matches!(err, DeserializationError::InvalidValue(_)));
+    }
+
+    #[test]
+    fn package_read_from_bytes_rejects_fuzzed_oom_payload() {
+        // This fuzz payload encodes counts large enough to cause excessive allocation or read work.
+        // If this starts succeeding, package byte-slice deserialization is no longer budgeted.
+        let payload = [
+            0x4d, 0x41, 0x53, 0x50, 0x00, 0x04, 0x00, 0x00, 0x11, 0x74, 0x65, 0x73, 0x74, 0x5f,
+            0x70, 0x6b, 0x67, 0x0b, 0x30, 0x2e, 0x30, 0x2e, 0x30, 0x00, 0x00, 0x4d, 0x41, 0x53,
+            0x54, 0x00, 0x00, 0x00, 0x03, 0x03, 0x03, 0x00, 0x00, 0x00, 0x00, 0x17, 0x03, 0x22,
+            0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x30, 0x2f, 0x08, 0x0a, 0x21, 0xa9, 0xb6, 0xf6, 0x1a, 0x52, 0x30, 0xc5,
+            0x64, 0xc7, 0xdb, 0x4d, 0x83, 0x0b, 0x32, 0x58, 0x89, 0x88, 0xb2, 0x78, 0x69, 0xbb,
+            0x23, 0xa6, 0x18, 0x9c, 0xc9, 0x35, 0x2d, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+            0x01, 0x05, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+            0x01, 0x01, 0x01, 0x01, 0x01, 0x03, 0x00, 0x0c, 0x00, 0x3a, 0x3a, 0x74, 0x65, 0x73,
+            0x74, 0x3a, 0x3a, 0x70, 0x72, 0x6f, 0x63, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x03,
+            0x0f, 0x03, 0x0f, 0x01, 0x00, 0x00, 0x17, 0x03, 0x22, 0x01, 0x00, 0x00, 0x00, 0x01,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x9c, 0xc9, 0x35, 0x2d, 0x01, 0x00, 0x03, 0x0f, 0x03,
+            0x0f, 0x01, 0x01, 0x01,
+        ];
+
+        let result = Package::read_from_bytes(&payload);
+        assert!(result.is_err());
+
+        // Wrapped fuzz inputs must use the generic budgeted entry point; otherwise the outer
+        // collection length can drive unbounded work before the inner package fails.
+        let mut vec_payload = vec![0];
+        vec_payload.extend_from_slice(&1000u64.to_le_bytes());
+        let budget = vec_payload.len().saturating_mul(PACKAGE_BYTE_READ_BUDGET_MULTIPLIER);
+        let result = Vec::<Package>::read_from_bytes_with_budget(&vec_payload, budget);
+        assert!(result.is_err());
+
+        let mut option_payload = vec![1];
+        option_payload.extend_from_slice(&payload);
+        let budget = option_payload.len().saturating_mul(PACKAGE_BYTE_READ_BUDGET_MULTIPLIER);
+        let result = Option::<Package>::read_from_bytes_with_budget(&option_payload, budget);
+        assert!(result.is_err());
     }
 
     #[test]

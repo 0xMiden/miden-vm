@@ -262,17 +262,13 @@ impl crate::prettier::PrettyPrint for Procedure {
     fn render(&self) -> crate::prettier::Document {
         use crate::prettier::*;
 
-        let mut doc = self
-            .docs
-            .as_ref()
-            .map(|docstring| docstring.render())
-            .unwrap_or(Document::Empty);
+        let mut doc = self.docs.as_ref().map(PrettyPrint::render).unwrap_or(Document::Empty);
 
         if !self.attrs.is_empty() {
             doc += self
                 .attrs
                 .iter()
-                .map(|attr| attr.render())
+                .map(PrettyPrint::render)
                 .reduce(|acc, attr| acc + nl() + attr)
                 .unwrap_or(Document::Empty);
         }

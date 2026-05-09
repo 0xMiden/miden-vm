@@ -1,6 +1,6 @@
 #[cfg(test)]
 use alloc::rc::Rc;
-use alloc::{boxed::Box, sync::Arc, vec::Vec};
+use alloc::{boxed::Box, sync::Arc, vec, vec::Vec};
 #[cfg(test)]
 use core::cell::Cell;
 use core::{cmp::min, ops::ControlFlow};
@@ -11,36 +11,30 @@ use miden_core::{
     mast::{MastForest, MastNodeExt, MastNodeId},
     operations::Decorator,
     precompile::PrecompileTranscript,
-    program::{Kernel, MIN_STACK_DEPTH, Program, StackInputs, StackOutputs},
+    program::{MIN_STACK_DEPTH, Program, StackInputs, StackOutputs},
     utils::range,
 };
-use tracing::instrument;
 
 use crate::{
-    AdviceInputs, AdviceProvider, ContextId, ExecutionError, ExecutionOptions, Host,
-    ProcessorState, Stopper,
+    AdviceInputs, AdviceProvider, BaseHost, ContextId, ExecutionError, ExecutionOptions,
+    ProcessorState,
+    advice::AdviceError,
     continuation_stack::{Continuation, ContinuationStack},
-    errors::{MapExecErr, MapExecErrNoCtx, OperationError},
-    execution::{
-        InternalBreakReason, execute_impl, finish_emit_op_execution,
-        finish_load_mast_forest_from_dyn_start, finish_load_mast_forest_from_external,
-    },
-    trace::execution_tracer::{ExecutionTracer, TraceGenerationContext},
+    errors::MapExecErrNoCtx,
     tracer::{OperationHelperRegisters, Tracer},
 };
 
 mod basic_block;
 mod call_and_dyn;
+mod execution_api;
 mod external;
 mod memory;
 mod operation;
 mod step;
 
 pub use basic_block::SystemEventError;
-use external::maybe_use_caller_error_context;
 pub use memory::Memory;
 pub use step::{BreakReason, ResumeContext};
-use step::{NeverStopper, StepStopper};
 
 #[cfg(test)]
 mod tests;
@@ -48,7 +42,7 @@ mod tests;
 // CONSTANTS
 // ================================================================================================
 
-/// The size of the stack buffer.
+/// The initial size of the stack buffer.
 ///
 /// Note: This value is much larger than it needs to be for the majority of programs. However, some
 /// existing programs need it, so we're forced to push it up (though this should be double-checked).
@@ -56,7 +50,7 @@ mod tests;
 /// example, the blake3 benchmark went from 285 MHz to 250 MHz (~10% degradation). Perhaps a better
 /// solution would be to make this value much smaller (~1000), and then fallback to a `Vec` if the
 /// stack overflows.
-const STACK_BUFFER_SIZE: usize = 6850;
+const INITIAL_STACK_BUFFER_SIZE: usize = 6850;
 
 /// The initial position of the top of the stack in the stack buffer.
 ///
@@ -65,6 +59,16 @@ const STACK_BUFFER_SIZE: usize = 6850;
 /// 0's that were generated automatically to keep the stack depth at 16. In practice, if this
 /// occurs, it is most likely a bug.
 const INITIAL_STACK_TOP_IDX: usize = 250;
+
+/// Default maximum operand stack depth preserving the previous fixed-buffer ceiling.
+const DEFAULT_MAX_STACK_DEPTH: usize =
+    INITIAL_STACK_BUFFER_SIZE - INITIAL_STACK_TOP_IDX - 1 + MIN_STACK_DEPTH;
+
+const _: [(); 1] =
+    [(); (ExecutionOptions::DEFAULT_MAX_STACK_DEPTH == DEFAULT_MAX_STACK_DEPTH) as usize];
+
+/// The stack buffer index where the logical operand stack starts after reset/recenter.
+const STACK_BUFFER_BASE_IDX: usize = INITIAL_STACK_TOP_IDX - MIN_STACK_DEPTH;
 
 // FAST PROCESSOR
 // ================================================================================================
@@ -78,7 +82,7 @@ const INITIAL_STACK_TOP_IDX: usize = 250;
 /// # Stack Management
 /// A few key points about how the stack was designed for maximum performance:
 ///
-/// - The stack has a fixed buffer size defined by `STACK_BUFFER_SIZE`.
+/// - The stack starts with a fixed buffer size defined by `INITIAL_STACK_BUFFER_SIZE`.
 ///     - This was observed to increase performance by at least 2x compared to using a `Vec` with
 ///       `push()` & `pop()`.
 ///     - We track the stack top and bottom using indices `stack_top_idx` and `stack_bot_idx`,
@@ -103,7 +107,7 @@ const INITIAL_STACK_TOP_IDX: usize = 250;
 #[derive(Debug)]
 pub struct FastProcessor {
     /// The stack is stored in reverse order, so that the last element is at the top of the stack.
-    stack: Box<[Felt; STACK_BUFFER_SIZE]>,
+    stack: Box<[Felt]>,
     /// The index of the top of the stack.
     stack_top_idx: usize,
     /// The index of the bottom of the stack.
@@ -144,6 +148,53 @@ pub struct FastProcessor {
 }
 
 impl FastProcessor {
+    /// Packages the processor state after successful execution into a public result type.
+    #[inline(always)]
+    fn into_execution_output(self, stack: StackOutputs) -> ExecutionOutput {
+        ExecutionOutput {
+            stack,
+            advice: self.advice,
+            memory: self.memory,
+            final_precompile_transcript: self.pc_transcript,
+        }
+    }
+
+    /// Converts the terminal result of a full execution run into [`ExecutionOutput`].
+    #[inline(always)]
+    fn execution_result_from_flow(
+        flow: ControlFlow<BreakReason, StackOutputs>,
+        processor: Self,
+    ) -> Result<ExecutionOutput, ExecutionError> {
+        match flow {
+            ControlFlow::Continue(stack_outputs) => {
+                Ok(processor.into_execution_output(stack_outputs))
+            },
+            ControlFlow::Break(break_reason) => match break_reason {
+                BreakReason::Err(err) => Err(err),
+                BreakReason::Stopped(_) => {
+                    unreachable!("Execution never stops prematurely with NeverStopper")
+                },
+            },
+        }
+    }
+
+    /// Converts a testing-only execution result into stack outputs.
+    #[cfg(any(test, feature = "testing"))]
+    #[inline(always)]
+    fn stack_result_from_flow(
+        flow: ControlFlow<BreakReason, StackOutputs>,
+    ) -> Result<StackOutputs, ExecutionError> {
+        match flow {
+            ControlFlow::Continue(stack_outputs) => Ok(stack_outputs),
+            ControlFlow::Break(break_reason) => match break_reason {
+                BreakReason::Err(err) => Err(err),
+                BreakReason::Stopped(_) => {
+                    unreachable!("Execution never stops prematurely with NeverStopper")
+                },
+            },
+        }
+    }
+
     // CONSTRUCTORS
     // ----------------------------------------------------------------------------------------------
 
@@ -158,25 +209,40 @@ impl FastProcessor {
     ///
     /// let processor = FastProcessor::new(stack_inputs)
     ///     .with_advice(advice_inputs)
+    ///     .expect("advice inputs should fit advice map limits")
     ///     .with_debugging(true)
     ///     .with_tracing(true);
     /// ```
+    ///
+    /// When using non-default advice map limits, prefer [`Self::new_with_options`] so the advice
+    /// inputs are validated against the intended execution options.
     pub fn new(stack_inputs: StackInputs) -> Self {
         Self::new_with_options(stack_inputs, AdviceInputs::default(), ExecutionOptions::default())
+            .expect("empty advice inputs should fit default advice map limits")
     }
 
     /// Sets the advice inputs for the processor.
-    pub fn with_advice(mut self, advice_inputs: AdviceInputs) -> Self {
-        self.advice = advice_inputs.into();
-        self
+    ///
+    /// Advice inputs are loaded into the live advice provider immediately and are validated against
+    /// the processor's current [`ExecutionOptions`]. If the advice map needs non-default limits,
+    /// construct the processor with [`Self::new_with_options`] or call [`Self::with_options`]
+    /// before calling this method.
+    pub fn with_advice(mut self, advice_inputs: AdviceInputs) -> Result<Self, AdviceError> {
+        self.advice = AdviceProvider::new(advice_inputs, &self.options)?;
+        Ok(self)
     }
 
     /// Sets the execution options for the processor.
     ///
     /// This will override any previously set debugging or tracing settings.
-    pub fn with_options(mut self, options: ExecutionOptions) -> Self {
+    ///
+    /// Existing advice inputs are revalidated against the new options before they are applied. To
+    /// load advice inputs that require non-default advice map limits, call this before
+    /// [`Self::with_advice`] or use [`Self::new_with_options`].
+    pub fn with_options(mut self, options: ExecutionOptions) -> Result<Self, AdviceError> {
+        self.advice.set_options(&options)?;
         self.options = options;
-        self
+        Ok(self)
     }
 
     /// Enables or disables debugging mode.
@@ -202,14 +268,13 @@ impl FastProcessor {
         stack_inputs: StackInputs,
         advice_inputs: AdviceInputs,
         options: ExecutionOptions,
-    ) -> Self {
+    ) -> Result<Self, AdviceError> {
         let stack_top_idx = INITIAL_STACK_TOP_IDX;
         let stack = {
             // Note: we use `Vec::into_boxed_slice()` here, since `Box::new([T; N])` first allocates
             // the array on the stack, and then moves it to the heap. This might cause a
             // stack overflow on some systems.
-            let mut stack: Box<[Felt; STACK_BUFFER_SIZE]> =
-                vec![ZERO; STACK_BUFFER_SIZE].into_boxed_slice().try_into().unwrap();
+            let mut stack = vec![ZERO; INITIAL_STACK_BUFFER_SIZE].into_boxed_slice();
 
             // Copy inputs in reverse order so first element ends up at top of stack
             for (i, &input) in stack_inputs.iter().enumerate() {
@@ -218,8 +283,8 @@ impl FastProcessor {
             stack
         };
 
-        Self {
-            advice: advice_inputs.into(),
+        Ok(Self {
+            advice: AdviceProvider::new(advice_inputs, &options)?,
             stack,
             stack_top_idx,
             stack_bot_idx: stack_top_idx - MIN_STACK_DEPTH,
@@ -232,10 +297,10 @@ impl FastProcessor {
             pc_transcript: PrecompileTranscript::new(),
             #[cfg(test)]
             decorator_retrieval_count: Rc::new(Cell::new(0)),
-        }
+        })
     }
 
-    /// Returns the resume context to be used with the first call to `step()`.
+    /// Returns the resume context to be used with the first call to `step_sync()`.
     pub fn get_initial_resume_context(
         &mut self,
         program: &Program,
@@ -454,231 +519,6 @@ impl FastProcessor {
         self.stack_write(idx2, a);
     }
 
-    // EXECUTE
-    // -------------------------------------------------------------------------------------------
-
-    /// Executes the given program and returns the stack outputs as well as the advice provider.
-    pub async fn execute(
-        self,
-        program: &Program,
-        host: &mut impl Host,
-    ) -> Result<ExecutionOutput, ExecutionError> {
-        self.execute_with_tracer(program, host, &mut NoopTracer).await
-    }
-
-    /// Executes the given program and returns the stack outputs, the advice provider, and
-    /// context necessary to build the trace.
-    #[instrument(name = "execute_for_trace", skip_all)]
-    pub async fn execute_for_trace(
-        self,
-        program: &Program,
-        host: &mut impl Host,
-    ) -> Result<(ExecutionOutput, TraceGenerationContext), ExecutionError> {
-        let mut tracer = ExecutionTracer::new(self.options.core_trace_fragment_size());
-        let execution_output = self.execute_with_tracer(program, host, &mut tracer).await?;
-
-        let context = tracer.into_trace_generation_context();
-
-        Ok((execution_output, context))
-    }
-
-    /// Executes the given program with the provided tracer and returns the stack outputs, and the
-    /// advice provider.
-    pub async fn execute_with_tracer<T>(
-        mut self,
-        program: &Program,
-        host: &mut impl Host,
-        tracer: &mut T,
-    ) -> Result<ExecutionOutput, ExecutionError>
-    where
-        T: Tracer<Processor = Self>,
-    {
-        let mut continuation_stack = ContinuationStack::new(program);
-        let mut current_forest = program.mast_forest().clone();
-
-        // Merge the program's advice map into the advice provider
-        self.advice.extend_map(current_forest.advice_map()).map_exec_err_no_ctx()?;
-
-        match self
-            .execute_impl(
-                &mut continuation_stack,
-                &mut current_forest,
-                program.kernel(),
-                host,
-                tracer,
-                &NeverStopper,
-            )
-            .await
-        {
-            ControlFlow::Continue(stack_outputs) => Ok(ExecutionOutput {
-                stack: stack_outputs,
-                advice: self.advice,
-                memory: self.memory,
-                final_pc_transcript: self.pc_transcript,
-            }),
-            ControlFlow::Break(break_reason) => match break_reason {
-                BreakReason::Err(err) => Err(err),
-                BreakReason::Stopped(_) => {
-                    unreachable!("Execution never stops prematurely with NeverStopper")
-                },
-            },
-        }
-    }
-
-    /// Executes a single clock cycle
-    pub async fn step(
-        &mut self,
-        host: &mut impl Host,
-        resume_ctx: ResumeContext,
-    ) -> Result<Option<ResumeContext>, ExecutionError> {
-        let ResumeContext {
-            mut current_forest,
-            mut continuation_stack,
-            kernel,
-        } = resume_ctx;
-
-        match self
-            .execute_impl(
-                &mut continuation_stack,
-                &mut current_forest,
-                &kernel,
-                host,
-                &mut NoopTracer,
-                &StepStopper,
-            )
-            .await
-        {
-            ControlFlow::Continue(_) => Ok(None),
-            ControlFlow::Break(break_reason) => match break_reason {
-                BreakReason::Err(err) => Err(err),
-                BreakReason::Stopped(maybe_continuation) => {
-                    if let Some(continuation) = maybe_continuation {
-                        continuation_stack.push_continuation(continuation);
-                    }
-
-                    Ok(Some(ResumeContext {
-                        current_forest,
-                        continuation_stack,
-                        kernel,
-                    }))
-                },
-            },
-        }
-    }
-
-    /// Executes the given program with the provided tracer and returns the stack outputs.
-    ///
-    /// This function takes a `&mut self` (compared to `self` for the public execute functions) so
-    /// that the processor state may be accessed after execution. It is incorrect to execute a
-    /// second program using the same processor. This is mainly meant to be used in tests.
-    async fn execute_impl<S, T>(
-        &mut self,
-        continuation_stack: &mut ContinuationStack,
-        current_forest: &mut Arc<MastForest>,
-        kernel: &Kernel,
-        host: &mut impl Host,
-        tracer: &mut T,
-        stopper: &S,
-    ) -> ControlFlow<BreakReason, StackOutputs>
-    where
-        S: Stopper<Processor = Self>,
-        T: Tracer<Processor = Self>,
-    {
-        while let ControlFlow::Break(internal_break_reason) =
-            execute_impl(self, continuation_stack, current_forest, kernel, host, tracer, stopper)
-        {
-            match internal_break_reason {
-                InternalBreakReason::User(break_reason) => return ControlFlow::Break(break_reason),
-                InternalBreakReason::Emit {
-                    basic_block_node_id,
-                    op_idx,
-                    continuation,
-                } => {
-                    self.op_emit(host, current_forest, basic_block_node_id, op_idx).await?;
-
-                    // Call `finish_emit_op_execution()`, as per the sans-IO contract.
-                    finish_emit_op_execution(
-                        continuation,
-                        self,
-                        continuation_stack,
-                        current_forest,
-                        tracer,
-                        stopper,
-                    )?;
-                },
-                InternalBreakReason::LoadMastForestFromDyn { dyn_node_id, callee_hash } => {
-                    // load mast forest asynchronously
-                    let (root_id, new_forest) = match self
-                        .load_mast_forest(callee_hash, host, current_forest, dyn_node_id)
-                        .await
-                    {
-                        Ok(result) => result,
-                        Err(err) => return ControlFlow::Break(BreakReason::Err(err)),
-                    };
-
-                    // Finish loading the MAST forest from the Dyn node, as per the sans-IO
-                    // contract.
-                    finish_load_mast_forest_from_dyn_start(
-                        root_id,
-                        new_forest,
-                        self,
-                        current_forest,
-                        continuation_stack,
-                        tracer,
-                        stopper,
-                    )?;
-                },
-                InternalBreakReason::LoadMastForestFromExternal {
-                    external_node_id,
-                    procedure_hash,
-                } => {
-                    // load mast forest asynchronously
-                    let (root_id, new_forest) = match self
-                        .load_mast_forest(procedure_hash, host, current_forest, external_node_id)
-                        .await
-                    {
-                        Ok(result) => result,
-                        Err(err) => {
-                            let maybe_enriched_err = maybe_use_caller_error_context(
-                                err,
-                                current_forest,
-                                continuation_stack,
-                                host,
-                            );
-
-                            return ControlFlow::Break(BreakReason::Err(maybe_enriched_err));
-                        },
-                    };
-
-                    // Finish loading the MAST forest from the External node, as per the sans-IO
-                    // contract.
-                    finish_load_mast_forest_from_external(
-                        root_id,
-                        new_forest,
-                        external_node_id,
-                        current_forest,
-                        continuation_stack,
-                        host,
-                        tracer,
-                    )?;
-                },
-            }
-        }
-
-        match StackOutputs::new(
-            &self.stack[self.stack_bot_idx..self.stack_top_idx]
-                .iter()
-                .rev()
-                .copied()
-                .collect::<Vec<_>>(),
-        ) {
-            Ok(stack_outputs) => ControlFlow::Continue(stack_outputs),
-            Err(_) => ControlFlow::Break(BreakReason::Err(ExecutionError::OutputStackOverflow(
-                self.stack_top_idx - self.stack_bot_idx - MIN_STACK_DEPTH,
-            ))),
-        }
-    }
-
     // DECORATOR EXECUTORS
     // --------------------------------------------------------------------------------------------
 
@@ -687,7 +527,7 @@ impl FastProcessor {
         &self,
         node_id: MastNodeId,
         current_forest: &MastForest,
-        host: &mut impl Host,
+        host: &mut impl BaseHost,
     ) -> ControlFlow<BreakReason> {
         if !self.should_execute_decorators() {
             return ControlFlow::Continue(());
@@ -712,9 +552,9 @@ impl FastProcessor {
         &self,
         node_id: MastNodeId,
         current_forest: &MastForest,
-        host: &mut impl Host,
+        host: &mut impl BaseHost,
     ) -> ControlFlow<BreakReason> {
-        if !self.in_debug_mode() {
+        if !self.should_execute_decorators() {
             return ControlFlow::Continue(());
         }
 
@@ -736,7 +576,7 @@ impl FastProcessor {
     fn execute_decorator(
         &self,
         decorator: &Decorator,
-        host: &mut impl Host,
+        host: &mut impl BaseHost,
     ) -> ControlFlow<BreakReason> {
         match decorator {
             Decorator::Debug(options) => {
@@ -764,53 +604,86 @@ impl FastProcessor {
         ControlFlow::Continue(())
     }
 
-    // HELPERS
-    // ----------------------------------------------------------------------------------------------
-
-    async fn load_mast_forest(
-        &mut self,
-        node_digest: Word,
-        host: &mut impl Host,
-        current_forest: &MastForest,
-        node_id: MastNodeId,
-    ) -> Result<(MastNodeId, Arc<MastForest>), ExecutionError> {
-        let mast_forest = host.get_mast_forest(&node_digest).await.ok_or_else(|| {
-            crate::errors::procedure_not_found_with_context(
-                node_digest,
-                current_forest,
-                node_id,
-                host,
-            )
-        })?;
-
-        // We limit the parts of the program that can be called externally to procedure
-        // roots, even though MAST doesn't have that restriction.
-        let root_id = mast_forest.find_procedure_root(node_digest).ok_or_else(|| {
-            Err::<(), _>(OperationError::MalformedMastForestInHost { root_digest: node_digest })
-                .map_exec_err(current_forest, node_id, host)
-                .unwrap_err()
-        })?;
-
-        // Merge the advice map of this forest into the advice provider.
-        // Note that the map may be merged multiple times if a different procedure from the same
-        // forest is called.
-        // For now, only compiled libraries contain non-empty advice maps, so for most cases,
-        // this call will be cheap.
-        self.advice.extend_map(mast_forest.advice_map()).map_exec_err(
-            current_forest,
-            node_id,
-            host,
-        )?;
-
-        Ok((root_id, mast_forest))
-    }
-
     /// Increments the stack top pointer by 1.
     ///
     /// The bottom of the stack is never affected by this operation.
     #[inline(always)]
     fn increment_stack_size(&mut self) {
         self.stack_top_idx += 1;
+    }
+
+    /// Ensures the internal stack storage can accommodate one additional logical stack element.
+    ///
+    /// The operand stack depth limit is the semantic resource bound; the buffer is only an
+    /// implementation detail. We therefore check the logical depth before allocating so a program
+    /// cannot force memory growth beyond `ExecutionOptions::max_stack_depth()`. When storage does
+    /// need to grow, it grows geometrically and remains heap-allocated as a boxed slice. A
+    /// `SmallVec` would put a useful inline buffer inside `FastProcessor`, and preallocating the
+    /// full limit would penalize ordinary programs. This policy is performance-sensitive and should
+    /// be benchmarked against the fixed-buffer baseline.
+    #[inline(always)]
+    fn ensure_stack_capacity_for_push(&mut self) -> Result<(), ExecutionError> {
+        let depth = self.stack_size() + 1;
+        let max = self.options.max_stack_depth();
+        if depth > max {
+            return Err(ExecutionError::StackDepthLimitExceeded { depth, max });
+        }
+
+        if self.stack_top_idx >= self.stack.len() - 1 {
+            self.grow_stack_buffer(self.stack_top_idx + 2);
+        }
+
+        Ok(())
+    }
+
+    fn ensure_stack_capacity_for_top_idx(&mut self, top_idx: usize) {
+        if top_idx >= self.stack.len() {
+            self.grow_stack_buffer(top_idx + 1);
+        }
+    }
+
+    fn grow_stack_buffer(&mut self, requested_min_len: usize) {
+        // The maximum allocation is tied to the logical operand stack depth, not to the current
+        // buffer position. Using `stack_bot_idx` here would make the allocation ceiling drift when
+        // the live stack has moved away from the initial base.
+        let max_len = STACK_BUFFER_BASE_IDX
+            .saturating_add(self.options.max_stack_depth())
+            .saturating_add(1);
+        let live_len = self.stack_size();
+
+        // Growth also recenters the live stack at the normal base. This keeps future push/drop
+        // behavior close to the fixed-buffer layout and avoids carrying unused prefix cells into
+        // the new allocation. The extra slot is for the next checked push that triggered growth.
+        let recentered_min_len = STACK_BUFFER_BASE_IDX.saturating_add(live_len).saturating_add(2);
+        debug_assert!(recentered_min_len <= max_len);
+
+        // Allocation growth is based on the stack's post-recentered live range, not the previous
+        // buffer length. The `requested_min_len` may be beyond the allocation cap when a shallow
+        // context is still positioned near the end of the old buffer; recentering the live stack is
+        // what makes that valid. The VM-visible requirements are that the live stack is restored at
+        // `STACK_BUFFER_BASE_IDX`, the post-recentered push slot is available, and allocation stays
+        // capped by the configured stack depth. The allocation size can differ from the previous
+        // doubling policy: normal push growth may allocate a couple of extra cells because of the
+        // spare push slot, while restoring a deep caller from a shallow callee may allocate only
+        // the requested restored range instead of doubling the old buffer. That smaller
+        // restore allocation is intentional, but it means future pushes can grow again
+        // sooner and should stay covered by benchmarks.
+        let new_len = recentered_min_len.saturating_mul(2).max(requested_min_len).min(max_len);
+        debug_assert!(new_len <= max_len);
+
+        let mut new_stack = vec![ZERO; new_len].into_boxed_slice();
+        let new_stack_bot_idx = STACK_BUFFER_BASE_IDX;
+        let new_stack_top_idx = new_stack_bot_idx + live_len;
+
+        // Only the active stack range carries VM state. Prefix/suffix cells are scratch storage and
+        // stay zeroed, which keeps growth proportional to the live depth instead of the old buffer
+        // length.
+        new_stack[new_stack_bot_idx..new_stack_top_idx]
+            .copy_from_slice(&self.stack[self.stack_bot_idx..self.stack_top_idx]);
+
+        self.stack = new_stack;
+        self.stack_bot_idx = new_stack_bot_idx;
+        self.stack_top_idx = new_stack_top_idx;
     }
 
     /// Decrements the stack top pointer by 1.
@@ -854,186 +727,6 @@ impl FastProcessor {
         self.stack_bot_idx = new_stack_bot_idx;
         self.stack_top_idx = new_stack_top_idx;
     }
-
-    // SYNC WRAPPERS
-    // ----------------------------------------------------------------------------------------------
-
-    /// Convenience sync wrapper to [Self::step].
-    pub fn step_sync(
-        &mut self,
-        host: &mut impl Host,
-        resume_ctx: ResumeContext,
-    ) -> Result<Option<ResumeContext>, ExecutionError> {
-        // Create a new Tokio runtime and block on the async execution
-        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
-
-        let execution_output = rt.block_on(self.step(host, resume_ctx))?;
-
-        Ok(execution_output)
-    }
-
-    /// Executes the given program step by step (calling [`Self::step`] repeatedly) and returns the
-    /// stack outputs.
-    pub fn execute_by_step_sync(
-        mut self,
-        program: &Program,
-        host: &mut impl Host,
-    ) -> Result<StackOutputs, ExecutionError> {
-        // Create a new Tokio runtime and block on the async execution
-        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
-        let mut current_resume_ctx = self.get_initial_resume_context(program).unwrap();
-
-        rt.block_on(async {
-            loop {
-                match self.step(host, current_resume_ctx).await {
-                    Ok(maybe_resume_ctx) => match maybe_resume_ctx {
-                        Some(next_resume_ctx) => {
-                            current_resume_ctx = next_resume_ctx;
-                        },
-                        None => {
-                            // End of program was reached
-                            break Ok(StackOutputs::new(
-                                &self.stack[self.stack_bot_idx..self.stack_top_idx]
-                                    .iter()
-                                    .rev()
-                                    .copied()
-                                    .collect::<Vec<_>>(),
-                            )
-                            .unwrap());
-                        },
-                    },
-                    Err(err) => {
-                        break Err(err);
-                    },
-                }
-            }
-        })
-    }
-
-    /// Convenience sync wrapper to [Self::execute].
-    ///
-    /// This method is only available on non-wasm32 targets. On wasm32, use the
-    /// async `execute()` method directly since wasm32 runs in the browser's event loop.
-    ///
-    /// # Panics
-    /// Panics if called from within an existing Tokio runtime. Use the async `execute()`
-    /// method instead in async contexts.
-    #[cfg(not(target_family = "wasm"))]
-    pub fn execute_sync(
-        self,
-        program: &Program,
-        host: &mut impl Host,
-    ) -> Result<ExecutionOutput, ExecutionError> {
-        match tokio::runtime::Handle::try_current() {
-            Ok(_handle) => {
-                // We're already inside a Tokio runtime - this is not supported
-                // because we cannot safely create a nested runtime or move the
-                // non-Send host reference to another thread
-                panic!(
-                    "Cannot call execute_sync from within a Tokio runtime. \
-                     Use the async execute() method instead."
-                )
-            },
-            Err(_) => {
-                // No runtime exists - create one and use it
-                let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
-                rt.block_on(self.execute(program, host))
-            },
-        }
-    }
-
-    /// Convenience sync wrapper to [Self::execute_for_trace].
-    ///
-    /// This method is only available on non-wasm32 targets. On wasm32, use the
-    /// async `execute_for_trace()` method directly since wasm32 runs in the browser's event loop.
-    ///
-    /// # Panics
-    /// Panics if called from within an existing Tokio runtime. Use the async `execute_for_trace()`
-    /// method instead in async contexts.
-    #[cfg(not(target_family = "wasm"))]
-    #[instrument(name = "execute_for_trace_sync", skip_all)]
-    pub fn execute_for_trace_sync(
-        self,
-        program: &Program,
-        host: &mut impl Host,
-    ) -> Result<(ExecutionOutput, TraceGenerationContext), ExecutionError> {
-        match tokio::runtime::Handle::try_current() {
-            Ok(_handle) => {
-                // We're already inside a Tokio runtime - this is not supported
-                // because we cannot safely create a nested runtime or move the
-                // non-Send host reference to another thread
-                panic!(
-                    "Cannot call execute_for_trace_sync from within a Tokio runtime. \
-                     Use the async execute_for_trace() method instead."
-                )
-            },
-            Err(_) => {
-                // No runtime exists - create one and use it
-                let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
-                rt.block_on(self.execute_for_trace(program, host))
-            },
-        }
-    }
-
-    /// Similar to [Self::execute_sync], but allows mutable access to the processor.
-    ///
-    /// This method is only available on non-wasm32 targets for testing. On wasm32, use
-    /// async execution methods directly since wasm32 runs in the browser's event loop.
-    ///
-    /// # Panics
-    /// Panics if called from within an existing Tokio runtime. Use async execution
-    /// methods instead in async contexts.
-    #[cfg(all(any(test, feature = "testing"), not(target_family = "wasm")))]
-    pub fn execute_sync_mut(
-        &mut self,
-        program: &Program,
-        host: &mut impl Host,
-    ) -> Result<StackOutputs, ExecutionError> {
-        let mut continuation_stack = ContinuationStack::new(program);
-        let mut current_forest = program.mast_forest().clone();
-
-        // Merge the program's advice map into the advice provider
-        self.advice.extend_map(current_forest.advice_map()).map_exec_err_no_ctx()?;
-
-        let execute_fut = async {
-            match self
-                .execute_impl(
-                    &mut continuation_stack,
-                    &mut current_forest,
-                    program.kernel(),
-                    host,
-                    &mut NoopTracer,
-                    &NeverStopper,
-                )
-                .await
-            {
-                ControlFlow::Continue(stack_outputs) => Ok(stack_outputs),
-                ControlFlow::Break(break_reason) => match break_reason {
-                    BreakReason::Err(err) => Err(err),
-                    BreakReason::Stopped(_) => {
-                        unreachable!("Execution never stops prematurely with NeverStopper")
-                    },
-                },
-            }
-        };
-
-        match tokio::runtime::Handle::try_current() {
-            Ok(_handle) => {
-                // We're already inside a Tokio runtime - this is not supported
-                // because we cannot safely create a nested runtime or move the
-                // non-Send host reference to another thread
-                panic!(
-                    "Cannot call execute_sync_mut from within a Tokio runtime. \
-                     Use async execution methods instead."
-                )
-            },
-            Err(_) => {
-                // No runtime exists - create one and use it
-                let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
-                rt.block_on(execute_fut)
-            },
-        }
-    }
 }
 
 // EXECUTION OUTPUT
@@ -1046,7 +739,7 @@ pub struct ExecutionOutput {
     pub stack: StackOutputs,
     pub advice: AdviceProvider,
     pub memory: Memory,
-    pub final_pc_transcript: PrecompileTranscript,
+    pub final_precompile_transcript: PrecompileTranscript,
 }
 
 // EXECUTION CONTEXT INFO

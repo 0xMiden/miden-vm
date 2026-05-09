@@ -1,0 +1,56 @@
+use miden::core::crypto::hashes::poseidon2
+use miden::core::stark::constants
+use miden::core::stark::random_coin
+
+#! Observes the auxiliary trace for the Miden VM AIR.
+#!
+#! Draws auxiliary randomness, reseeds the transcript with the auxiliary trace commitment,
+#! and absorbs the boundary values (2 extension field elements = 4 base field elements = 1 word).
+#! TODO(#3032): the second value is always zero (placeholder for trace splitting).
+#!
+#! The advice provider must supply exactly 2 words in order:
+#!   [commitment, W0]
+#!
+#! The commitment is stored at aux_trace_com_ptr and the boundary values at
+#! aux_bus_boundary_ptr.
+#!
+#! Precondition:  input_len=0 (guaranteed by the preceding reseed_direct in the generic verifier).
+#! Postcondition: input_len=0, output_len=8.
+#!
+#! Input:  [...]
+#! Output: [...]
+pub proc observe_aux_trace
+    # Draw random extension field elements for the auxiliary trace.
+    exec.random_coin::generate_aux_randomness
+    # => [...]
+
+    # Assert precondition: input buffer must be empty.
+    exec.constants::random_coin_input_len_ptr mem_load
+    assertz.err="observe_aux_trace: input buffer must be empty"
+
+    # Reseeding clears the output buffer.
+    push.0 exec.constants::random_coin_output_len_ptr mem_store
+
+    # --- Single permutation: Absorb [COM, W0] ---
+
+    padw adv_loadw
+    exec.constants::aux_trace_com_ptr mem_storew_le
+    # => [COM, ...]
+
+    padw adv_loadw
+    exec.constants::aux_bus_boundary_ptr mem_storew_le
+    # => [W0, COM, ...]
+
+    swapw
+    exec.random_coin::get_capacity
+    movdnw.2
+    exec.poseidon2::permute
+    # => [R1', R2', C', ...]
+
+    # Store final sponge state.
+    exec.random_coin::store_random_coin_state
+    # => [...]
+
+    # Mark output buffer as full (8 elements available for sampling).
+    push.8 exec.constants::random_coin_output_len_ptr mem_store
+end

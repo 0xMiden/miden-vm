@@ -1,5 +1,10 @@
 #![no_std]
 
+#[cfg(feature = "std")]
+extern crate std;
+
+#[cfg(any(feature = "constraints-tools", all(test, feature = "std")))]
+pub mod constraints_regen;
 pub mod dsa;
 pub mod handlers;
 

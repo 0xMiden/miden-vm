@@ -201,7 +201,7 @@ fn test_empty_nodes_basic_functionality() {
 #[test]
 fn test_debug_impl() {
     let storage = OpToDecoratorIds::new();
-    let debug_str = format!("{:?}", storage);
+    let debug_str = format!("{storage:?}");
     assert!(debug_str.contains("OpToDecoratorIds"));
 }
 
@@ -222,8 +222,8 @@ fn test_clone_and_equality() {
     node_indptr_for_op_idx.push(3).expect("test setup: IndexVec capacity exceeded");
 
     let storage1 = OpToDecoratorIds::from_components(
-        decorator_indices.clone(),
-        op_indptr_for_dec_idx.clone(),
+        decorator_indices,
+        op_indptr_for_dec_idx,
         node_indptr_for_op_idx.clone(),
     )
     .unwrap();
@@ -500,8 +500,7 @@ fn test_csr_and_coo_produce_same_elements() {
     ];
 
     // Build COO representation as a HashMap for easy lookup during verification
-    let mut coo_map: alloc::collections::BTreeMap<(MastNodeId, usize), Vec<DecoratorId>> =
-        alloc::collections::BTreeMap::new();
+    let mut coo_map: BTreeMap<(MastNodeId, usize), Vec<DecoratorId>> = BTreeMap::new();
     for (node, op_idx, decorator_id) in &coo_data {
         coo_map.entry((*node, *op_idx)).or_default().push(*decorator_id);
     }
@@ -562,8 +561,7 @@ fn test_csr_and_coo_produce_same_elements() {
             // They should be the same
             assert_eq!(
                 csr_decorator_ids, coo_decorator_ids,
-                "CSR and COO should produce the same decorator IDs for node {:?}, op {}",
-                node_id, op_idx
+                "CSR and COO should produce the same decorator IDs for node {node_id:?}, op {op_idx}"
             );
         }
     }
@@ -590,8 +588,7 @@ fn test_csr_and_coo_produce_same_elements() {
 
         assert_eq!(
             csr_flat, expected_flat,
-            "Flattened CSR and COO should produce the same elements for node {:?}",
-            node_id
+            "Flattened CSR and COO should produce the same elements for node {node_id:?}"
         );
     }
 }
@@ -707,7 +704,7 @@ fn test_sparse_case_manual() {
     let result =
         OpToDecoratorIds::from_components(decorator_ids, op_indptr_for_dec_ids, node_indptr);
 
-    assert!(result.is_ok(), "Single node with decorator should validate: {:?}", result);
+    assert!(result.is_ok(), "Single node with decorator should validate: {result:?}");
 }
 
 #[test]
@@ -725,8 +722,7 @@ fn test_sparse_case_two_nodes() {
 
     assert!(
         result.is_ok(),
-        "Two nodes (one with decorator, one empty) should validate: {:?}",
-        result
+        "Two nodes (one with decorator, one empty) should validate: {result:?}"
     );
 }
 
@@ -750,7 +746,7 @@ fn test_sparse_debuginfo_round_trip() {
     node_indptr_for_op_idx.push(4).unwrap(); // node 5
 
     let op_storage = OpToDecoratorIds::from_components(
-        decorator_ids.clone(),
+        decorator_ids,
         op_indptr_for_dec_ids,
         node_indptr_for_op_idx,
     )

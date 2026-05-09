@@ -101,7 +101,7 @@ cargo +nightly fuzz run operation_deserialize --fuzz-dir miden-core-fuzz
 cargo +nightly fuzz run operation_serde_deserialize --fuzz-dir miden-core-fuzz
 ```
 
-**`execution_proof_deserialize`** — Tests `ExecutionProof::read_from_bytes`.
+**`execution_proof_deserialize`** — Tests `ExecutionProof::from_bytes` and `ExecutionProof::read_from_bytes`.
 
 ```bash
 cargo +nightly fuzz run execution_proof_deserialize --fuzz-dir miden-core-fuzz

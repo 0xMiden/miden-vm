@@ -84,7 +84,7 @@ fn stack_get_word_safe_partial_read() {
     // elements at indices 15, 16, 17, 18. Only index 15 is valid; the rest should be ZERO.
     let word = processor.stack_get_word_safe(15);
     // Index 15 is the bottom of the stack (value 16, since inputs are in stack order: top first).
-    assert_eq!(word, [Felt::new(16), ZERO, ZERO, ZERO].into());
+    assert_eq!(word, [Felt::new_unchecked(16), ZERO, ZERO, ZERO].into());
 }
 
 #[test]
@@ -232,7 +232,8 @@ fn test_cycle_limit_exceeded() {
     let program = simple_program_with_ops(vec![Operation::Swap; MIN_TRACE_LEN]);
 
     let processor =
-        FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options);
+        FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options)
+            .expect("processor advice inputs should fit advice map limits");
     let err = processor.execute_sync(&program, &mut host).unwrap_err();
 
     assert_matches!(err, ExecutionError::CycleLimitExceeded(max_cycles) if max_cycles == MIN_TRACE_LEN as u32);
@@ -265,7 +266,8 @@ fn test_cycle_limit_exactly_max_cycles_succeeds() {
     .unwrap();
 
     let processor =
-        FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options);
+        FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options)
+            .expect("processor advice inputs should fit advice map limits");
     let result = processor.execute_sync(&program, &mut host);
 
     // The program should succeed since it uses exactly max_cycles cycles.
@@ -357,10 +359,11 @@ fn test_frie2f4() {
     // --- build stack inputs ---------------------------------------------
     // FastProcessor::new expects inputs in natural order: first element goes to top.
     // After Push(42), the stack layout becomes:
-    //   [v0, v1, v2, v3, v4, v5, v6, v7, f_pos, d_seg, poe, pe1, pe0, a1, a0, cptr, ...]
-    //    ^0   1   2   3   4   5   6   7    8      9    10   11   12  13  14   15
+    //   [v0, v1, v2, v3, v4, v5, v6, v7, f_pos, p, poe, pe0, pe1, a0, a1, cptr, ...]
+    //    ^0   1   2   3   4   5   6   7    8     9  10   11   12   13  14   15
     //
-    // With d_seg=2, query_values[2] = (v4, v5) must equal prev_value = (pe0, pe1).
+    // p is the bit-reversed tree index; the instruction computes d_seg = p & 3.
+    // With p=38 (d_seg=2, f_pos=9), query_values[2] = (v4, v5) must equal prev_value = (pe0, pe1).
     let previous_value: [Felt; 2] = [Felt::from_u32(10), Felt::from_u32(11)];
     let stack_inputs = StackInputs::new(&[
         Felt::from_u32(16), // pos 0 -> pos 1 (v1) after push
@@ -371,19 +374,21 @@ fn test_frie2f4() {
         Felt::from_u32(11), // pos 5 -> pos 6 (v6) after push
         Felt::from_u32(10), // pos 6 -> pos 7 (v7) after push
         Felt::from_u32(9),  // pos 7 -> pos 8 (f_pos) after push
-        Felt::from_u32(2),  // pos 8 -> pos 9 (d_seg=2) after push
+        Felt::from_u32(38), // pos 8 -> pos 9 (p=4*9+2=38, d_seg=2) after push
         Felt::from_u32(7),  // pos 9 -> pos 10 (poe) after push
-        previous_value[1],  // pos 10 -> pos 11 (pe1) after push
-        previous_value[0],  // pos 11 -> pos 12 (pe0) after push
-        Felt::from_u32(3),  // pos 12 -> pos 13 (a1) after push
-        Felt::from_u32(2),  // pos 13 -> pos 14 (a0) after push
+        previous_value[0],  // pos 10 -> pos 11 (pe0) after push
+        previous_value[1],  // pos 11 -> pos 12 (pe1) after push
+        Felt::from_u32(2),  // pos 12 -> pos 13 (a0) after push
+        Felt::from_u32(3),  // pos 13 -> pos 14 (a1) after push
         Felt::from_u32(1),  // pos 14 -> pos 15 (cptr) after push
         Felt::from_u32(0),  // pos 15 -> overflow after push
     ])
     .unwrap();
 
-    let program =
-        simple_program_with_ops(vec![Operation::Push(Felt::new(42_u64)), Operation::FriE2F4]);
+    let program = simple_program_with_ops(vec![
+        Operation::Push(Felt::new_unchecked(42_u64)),
+        Operation::FriE2F4,
+    ]);
 
     // fast processor
     let fast_processor = FastProcessor::new(stack_inputs);
@@ -472,7 +477,7 @@ fn test_call_node_preserves_stack_overflow_table() {
     );
 
     // Execute the program
-    let result = processor.execute_sync_mut(&program, &mut host).unwrap();
+    let result = processor.execute_mut_sync(&program, &mut host).unwrap();
 
     assert_eq!(
         result.get_num_elements(16),
@@ -510,7 +515,7 @@ fn test_external_node_decorator_sequencing() {
 
     // Add a decorator to the lib forest to track execution inside the external node
     let lib_decorator = Decorator::Trace(2);
-    let lib_decorator_id = lib_forest.add_decorator(lib_decorator.clone()).unwrap();
+    let lib_decorator_id = lib_forest.add_decorator(lib_decorator).unwrap();
 
     let lib_operations = [Operation::Push(Felt::from_u32(1)), Operation::Add];
     // Attach the decorator to the first operation (index 0)
@@ -523,8 +528,8 @@ fn test_external_node_decorator_sequencing() {
     let mut main_forest = MastForest::new();
     let before_decorator = Decorator::Trace(1);
     let after_decorator = Decorator::Trace(3);
-    let before_id = main_forest.add_decorator(before_decorator.clone()).unwrap();
-    let after_id = main_forest.add_decorator(after_decorator.clone()).unwrap();
+    let before_id = main_forest.add_decorator(before_decorator).unwrap();
+    let after_id = main_forest.add_decorator(after_decorator).unwrap();
 
     let external_id = ExternalNodeBuilder::new(lib_forest[lib_block_id].digest())
         .with_before_enter([before_id])
@@ -537,11 +542,12 @@ fn test_external_node_decorator_sequencing() {
     let mut host = crate::test_utils::TestHost::with_kernel_forest(Arc::new(lib_forest));
     let processor = FastProcessor::new(StackInputs::default())
         .with_advice(AdviceInputs::default())
+        .expect("advice inputs should fit advice map limits")
         .with_debugging(true)
         .with_tracing(true);
 
     let result = processor.execute_sync(&program, &mut host);
-    assert!(result.is_ok(), "Execution failed: {:?}", result);
+    assert!(result.is_ok(), "Execution failed: {result:?}");
 
     // Verify all decorators executed
     assert_eq!(host.get_trace_count(1), 1, "before_enter decorator should execute exactly once");
@@ -567,6 +573,396 @@ fn test_external_node_decorator_sequencing() {
     assert!(
         execution_order[2].1 > execution_order[1].1,
         "after_exit should execute after external node operations"
+    );
+}
+
+#[test]
+fn stack_depth_default_limit_exact_boundary_succeeds() {
+    let mut host = DefaultHost::default();
+
+    let pushes_to_default_limit = DEFAULT_MAX_STACK_DEPTH - MIN_STACK_DEPTH;
+    let program = simple_program_with_ops(pad_then_drop_ops(pushes_to_default_limit));
+
+    FastProcessor::new(StackInputs::default())
+        .execute_sync(&program, &mut host)
+        .expect("using the full default stack depth limit should succeed");
+}
+
+#[test]
+fn stack_depth_default_limit_exceeded_returns_typed_error() {
+    let mut host = DefaultHost::default();
+
+    let pushes_past_default_limit = DEFAULT_MAX_STACK_DEPTH - MIN_STACK_DEPTH + 1;
+    let program = simple_program_with_ops(vec![Operation::Pad; pushes_past_default_limit]);
+
+    let err = FastProcessor::new(StackInputs::default())
+        .execute_sync(&program, &mut host)
+        .expect_err("pushing past the default stack depth limit should fail");
+
+    assert_matches!(
+        err,
+        ExecutionError::StackDepthLimitExceeded {
+            depth,
+            max: DEFAULT_MAX_STACK_DEPTH,
+        } if depth == DEFAULT_MAX_STACK_DEPTH + 1
+    );
+}
+
+#[test]
+fn stack_depth_small_custom_limit_fails_before_buffer_growth() {
+    let mut host = DefaultHost::default();
+    let max_stack_depth = MIN_STACK_DEPTH + 1;
+    let program = simple_program_with_ops(vec![Operation::Pad; 2]);
+    let options = ExecutionOptions::default().with_max_stack_depth(max_stack_depth).unwrap();
+
+    let err =
+        FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options)
+            .expect("processor advice inputs should fit advice map limits")
+            .execute_sync(&program, &mut host)
+            .expect_err("small configured stack depth limit should fail before buffer growth");
+
+    assert_matches!(
+        err,
+        ExecutionError::StackDepthLimitExceeded {
+            depth,
+            max,
+        } if depth == max_stack_depth + 1 && max == max_stack_depth
+    );
+}
+
+#[test]
+fn issue_2818_fast_processor_stack_grows_past_initial_buffer_by_multiple_elements() {
+    const GROWTH_MARGIN: usize = 4;
+
+    let mut host = DefaultHost::default();
+
+    let pushes_past_initial_buffer = DEFAULT_MAX_STACK_DEPTH - MIN_STACK_DEPTH + GROWTH_MARGIN;
+    let program = simple_program_with_ops(pad_then_drop_ops(pushes_past_initial_buffer));
+    let options = ExecutionOptions::default()
+        .with_max_stack_depth(DEFAULT_MAX_STACK_DEPTH + GROWTH_MARGIN)
+        .unwrap();
+
+    FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options)
+        .expect("processor advice inputs should fit advice map limits")
+        .execute_sync(&program, &mut host)
+        .expect("stack growth multiple elements past the initial buffer should succeed");
+}
+
+#[test]
+fn issue_2818_traced_execution_stack_grows_past_initial_buffer() {
+    const GROWTH_MARGIN: usize = 2;
+
+    let mut host = DefaultHost::default();
+
+    let pushes_past_initial_buffer = DEFAULT_MAX_STACK_DEPTH - MIN_STACK_DEPTH + GROWTH_MARGIN;
+    let program = simple_program_with_ops(pad_then_drop_ops(pushes_past_initial_buffer));
+    let options = ExecutionOptions::default()
+        .with_max_stack_depth(DEFAULT_MAX_STACK_DEPTH + GROWTH_MARGIN)
+        .unwrap();
+
+    let trace_inputs =
+        FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options)
+            .expect("processor advice inputs should fit advice map limits")
+            .execute_trace_inputs_sync(&program, &mut host)
+            .expect("traced execution should grow the stack buffer past the initial buffer");
+
+    crate::trace::build_trace(trace_inputs)
+        .expect("trace replay should accept the same operand stack depth limit");
+}
+
+#[test]
+fn issue_2818_step_execution_stack_grows_past_initial_buffer() {
+    const GROWTH_MARGIN: usize = 2;
+
+    let mut host = DefaultHost::default();
+
+    let pushes_past_initial_buffer = DEFAULT_MAX_STACK_DEPTH - MIN_STACK_DEPTH + GROWTH_MARGIN;
+    let program = simple_program_with_ops(pad_then_drop_ops(pushes_past_initial_buffer));
+    let options = ExecutionOptions::default()
+        .with_max_stack_depth(DEFAULT_MAX_STACK_DEPTH + GROWTH_MARGIN)
+        .unwrap();
+
+    FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options)
+        .expect("processor advice inputs should fit advice map limits")
+        .execute_by_step_sync(&program, &mut host)
+        .expect("step execution should grow the stack buffer past the initial buffer");
+}
+
+#[test]
+fn issue_2818_restore_context_grows_stack_buffer_for_suspended_caller() {
+    let caller_overflow_len = DEFAULT_MAX_STACK_DEPTH - MIN_STACK_DEPTH + 1;
+    let options = ExecutionOptions::default()
+        .with_max_stack_depth(DEFAULT_MAX_STACK_DEPTH + 1)
+        .unwrap();
+    let mut processor =
+        FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options)
+            .expect("processor advice inputs should fit advice map limits");
+
+    assert_eq!(processor.stack.len(), INITIAL_STACK_BUFFER_SIZE);
+    processor.call_stack.push(ExecutionContextInfo {
+        overflow_stack: vec![Felt::from_u32(42); caller_overflow_len],
+        ctx: processor.ctx,
+        fn_hash: processor.caller_hash,
+    });
+
+    // The active callee context is still at the minimum stack depth and the storage has not grown.
+    // Restoring this suspended caller is what requires moving the active stack and growing storage.
+    processor
+        .restore_context()
+        .expect("restoring a suspended caller should grow the stack buffer when needed");
+    assert!(
+        processor.stack.len() > INITIAL_STACK_BUFFER_SIZE,
+        "context restore should have grown the stack buffer"
+    );
+    assert_eq!(processor.stack_size(), MIN_STACK_DEPTH + caller_overflow_len);
+}
+
+#[test]
+fn stack_buffer_is_not_preallocated_to_operand_stack_depth_limit() {
+    const GROWTH_MARGIN: usize = 2;
+
+    let options = ExecutionOptions::default()
+        .with_max_stack_depth(DEFAULT_MAX_STACK_DEPTH + GROWTH_MARGIN)
+        .unwrap();
+    let mut processor =
+        FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options)
+            .expect("processor advice inputs should fit advice map limits");
+
+    assert_eq!(
+        processor.stack.len(),
+        INITIAL_STACK_BUFFER_SIZE,
+        "processor should start with the initial stack buffer, not the full depth limit"
+    );
+
+    let mut host = DefaultHost::default();
+    processor
+        .execute_mut_sync(
+            &simple_program_with_ops(vec![Operation::Pad, Operation::Drop]),
+            &mut host,
+        )
+        .expect("ordinary shallow stack use should succeed");
+    assert_eq!(
+        processor.stack.len(),
+        INITIAL_STACK_BUFFER_SIZE,
+        "ordinary shallow stack use should not grow the buffer"
+    );
+
+    let pushes_past_initial_buffer = DEFAULT_MAX_STACK_DEPTH - MIN_STACK_DEPTH + GROWTH_MARGIN;
+    let program = simple_program_with_ops(pad_then_drop_ops(pushes_past_initial_buffer));
+    let mut processor =
+        FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options)
+            .expect("processor advice inputs should fit advice map limits");
+    let mut host = DefaultHost::default();
+
+    processor
+        .execute_mut_sync(&program, &mut host)
+        .expect("deep stack use should grow the buffer on demand");
+    assert!(
+        processor.stack.len() > INITIAL_STACK_BUFFER_SIZE,
+        "deep stack use should grow the buffer only when needed"
+    );
+}
+
+#[test]
+fn stack_growth_recenters_shallow_context_when_requested_len_exceeds_allocation_cap() {
+    let options = ExecutionOptions::default()
+        .with_max_stack_depth(DEFAULT_MAX_STACK_DEPTH)
+        .unwrap();
+    let mut processor =
+        FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options)
+            .expect("processor advice inputs should fit advice map limits");
+
+    // This models a callee that has only the minimum live stack depth, but is still positioned at
+    // the end of the current stack buffer after the caller filled the buffer and entered a new
+    // context. The next push requests one slot past the allocation cap using the old position, but
+    // growth can still succeed because it recenters the live stack before the push.
+    processor.stack_top_idx = INITIAL_STACK_BUFFER_SIZE - 1;
+    processor.stack_bot_idx = processor.stack_top_idx - MIN_STACK_DEPTH;
+
+    processor
+        .ensure_stack_capacity_for_push()
+        .expect("recentered shallow context push should fit within the stack depth limit");
+
+    assert_eq!(processor.stack_bot_idx, STACK_BUFFER_BASE_IDX);
+    assert_eq!(processor.stack_top_idx, STACK_BUFFER_BASE_IDX + MIN_STACK_DEPTH);
+    assert_eq!(processor.stack.len(), INITIAL_STACK_BUFFER_SIZE);
+}
+
+fn previous_growth_len(
+    stack_len: usize,
+    live_len: usize,
+    requested_min_len: usize,
+    max_len: usize,
+) -> usize {
+    let recentered_min_len = STACK_BUFFER_BASE_IDX.saturating_add(live_len).saturating_add(2);
+    let required_len = requested_min_len.min(max_len).max(recentered_min_len);
+
+    let mut new_len = stack_len;
+    while new_len < required_len {
+        let next_len = new_len.saturating_mul(2);
+        if next_len <= new_len {
+            return required_len;
+        }
+        new_len = next_len.min(max_len);
+    }
+
+    new_len
+}
+
+fn new_growth_len(live_len: usize, requested_min_len: usize, max_len: usize) -> usize {
+    let target_len = STACK_BUFFER_BASE_IDX
+        .saturating_add(live_len)
+        .saturating_add(2)
+        .saturating_mul(2);
+
+    target_len.max(requested_min_len).min(max_len)
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct GrowthSemantics {
+    new_stack_bot_idx: usize,
+    new_stack_top_idx: usize,
+    covers_requested_len: bool,
+    covers_recentered_len: bool,
+    within_max_len: bool,
+}
+
+fn growth_semantics(
+    new_len: usize,
+    live_len: usize,
+    requested_min_len: usize,
+    max_len: usize,
+) -> GrowthSemantics {
+    let recentered_min_len = STACK_BUFFER_BASE_IDX.saturating_add(live_len).saturating_add(2);
+
+    GrowthSemantics {
+        new_stack_bot_idx: STACK_BUFFER_BASE_IDX,
+        new_stack_top_idx: STACK_BUFFER_BASE_IDX + live_len,
+        covers_requested_len: new_len >= requested_min_len,
+        covers_recentered_len: new_len >= recentered_min_len,
+        within_max_len: new_len <= max_len,
+    }
+}
+
+#[test]
+fn new_stack_growth_algorithm_is_vm_equivalent_to_previous_algorithm() {
+    let max_depth = DEFAULT_MAX_STACK_DEPTH * 4;
+    let max_len = STACK_BUFFER_BASE_IDX.saturating_add(max_depth).saturating_add(1);
+
+    for stack_len in [INITIAL_STACK_BUFFER_SIZE, INITIAL_STACK_BUFFER_SIZE * 2] {
+        // Push growth is called when the next push would need one slot past the current buffer.
+        let live_len = stack_len - STACK_BUFFER_BASE_IDX - 1;
+        let requested_min_len = stack_len + 1;
+
+        let previous_len = previous_growth_len(stack_len, live_len, requested_min_len, max_len);
+        let new_len = new_growth_len(live_len, requested_min_len, max_len);
+
+        assert_eq!(
+            growth_semantics(previous_len, live_len, requested_min_len, max_len),
+            growth_semantics(new_len, live_len, requested_min_len, max_len)
+        );
+    }
+
+    for overflow_len in 0..=(max_depth - MIN_STACK_DEPTH) {
+        // Restore growth is called from a callee with only the minimum live stack, but the
+        // requested length must cover the caller overflow stack being restored.
+        let requested_min_len =
+            INITIAL_STACK_TOP_IDX.saturating_add(overflow_len).saturating_add(1);
+        let previous_len = previous_growth_len(
+            INITIAL_STACK_BUFFER_SIZE,
+            MIN_STACK_DEPTH,
+            requested_min_len,
+            max_len,
+        );
+        let new_len = new_growth_len(MIN_STACK_DEPTH, requested_min_len, max_len);
+
+        assert_eq!(
+            growth_semantics(previous_len, MIN_STACK_DEPTH, requested_min_len, max_len),
+            growth_semantics(new_len, MIN_STACK_DEPTH, requested_min_len, max_len)
+        );
+    }
+}
+
+#[test]
+fn new_stack_growth_algorithm_allocation_differences_are_intentional() {
+    let max_depth = DEFAULT_MAX_STACK_DEPTH * 4;
+    let max_len = STACK_BUFFER_BASE_IDX.saturating_add(max_depth).saturating_add(1);
+
+    let push_live_len = INITIAL_STACK_BUFFER_SIZE - STACK_BUFFER_BASE_IDX - 1;
+    let push_requested_min_len = INITIAL_STACK_BUFFER_SIZE + 1;
+    assert_eq!(
+        previous_growth_len(
+            INITIAL_STACK_BUFFER_SIZE,
+            push_live_len,
+            push_requested_min_len,
+            max_len,
+        ),
+        INITIAL_STACK_BUFFER_SIZE * 2
+    );
+    assert_eq!(
+        new_growth_len(push_live_len, push_requested_min_len, max_len),
+        INITIAL_STACK_BUFFER_SIZE * 2 + 2
+    );
+
+    let restore_requested_min_len = INITIAL_STACK_BUFFER_SIZE + 1;
+    assert_eq!(
+        previous_growth_len(
+            INITIAL_STACK_BUFFER_SIZE,
+            MIN_STACK_DEPTH,
+            restore_requested_min_len,
+            max_len,
+        ),
+        INITIAL_STACK_BUFFER_SIZE * 2
+    );
+    assert_eq!(
+        new_growth_len(MIN_STACK_DEPTH, restore_requested_min_len, max_len),
+        restore_requested_min_len
+    );
+}
+
+#[test]
+fn new_stack_growth_algorithm_preserves_required_bounds() {
+    let max_depth = DEFAULT_MAX_STACK_DEPTH * 4;
+    let max_len = STACK_BUFFER_BASE_IDX.saturating_add(max_depth).saturating_add(1);
+
+    for live_len in MIN_STACK_DEPTH..max_depth {
+        let recentered_min_len = STACK_BUFFER_BASE_IDX.saturating_add(live_len).saturating_add(2);
+        let requested_min_len = recentered_min_len.max(INITIAL_STACK_BUFFER_SIZE + 1);
+        let new_len = new_growth_len(live_len, requested_min_len, max_len);
+
+        assert!(new_len >= requested_min_len);
+        assert!(new_len >= recentered_min_len);
+        assert!(new_len <= max_len);
+    }
+
+    for overflow_len in 0..=(max_depth - MIN_STACK_DEPTH) {
+        let requested_min_len =
+            INITIAL_STACK_TOP_IDX.saturating_add(overflow_len).saturating_add(1);
+        let new_len = new_growth_len(MIN_STACK_DEPTH, requested_min_len, max_len);
+
+        assert!(new_len >= requested_min_len);
+        assert!(new_len <= max_len);
+    }
+}
+
+#[test]
+fn stack_depth_limit_exceeded() {
+    let mut host = DefaultHost::default();
+    let program = simple_program_with_ops(vec![Operation::Pad]);
+    let options = ExecutionOptions::default().with_max_stack_depth(MIN_STACK_DEPTH).unwrap();
+
+    let err =
+        FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options)
+            .expect("processor advice inputs should fit advice map limits")
+            .execute_sync(&program, &mut host)
+            .expect_err("pushing past the configured stack depth should fail");
+
+    assert_matches!(
+        err,
+        ExecutionError::StackDepthLimitExceeded {
+            depth,
+            max: MIN_STACK_DEPTH,
+        } if depth == MIN_STACK_DEPTH + 1
     );
 }
 
@@ -604,10 +1000,39 @@ fn test_continuation_stack_limit_exceeded() {
     let options = ExecutionOptions::default().with_max_num_continuations(3);
 
     let processor =
-        FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options);
+        FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options)
+            .expect("processor advice inputs should fit advice map limits");
     let err = processor.execute_sync(&program, &mut host).unwrap_err();
 
     assert_matches!(err, ExecutionError::Internal(msg) if msg.contains("continuation stack"));
+}
+
+/// Tests that a continuation stack size exactly equal to `max_num_continuations` succeeds.
+#[test]
+fn test_continuation_stack_limit_exactly_max_continuations_succeeds() {
+    let mut host = DefaultHost::default();
+
+    let program = {
+        let mut forest = MastForest::new();
+
+        let leaf_id = BasicBlockNodeBuilder::new(vec![Operation::Noop], Vec::new())
+            .add_to_forest(&mut forest)
+            .unwrap();
+
+        let root = JoinNodeBuilder::new([leaf_id, leaf_id]).add_to_forest(&mut forest).unwrap();
+        forest.make_root(root);
+        Program::new(forest.into(), root)
+    };
+
+    // A single join peaks at three continuations after the join start step:
+    // FinishJoin(root), StartNode(second), StartNode(first).
+    let options = ExecutionOptions::default().with_max_num_continuations(3);
+
+    let processor =
+        FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options)
+            .expect("processor advice inputs should fit advice map limits");
+
+    processor.execute_sync(&program, &mut host).unwrap();
 }
 
 // TEST HELPERS
@@ -624,4 +1049,10 @@ fn simple_program_with_ops(ops: Vec<Operation>) -> Program {
     };
 
     program
+}
+
+fn pad_then_drop_ops(num_pads: usize) -> Vec<Operation> {
+    let mut ops = vec![Operation::Pad; num_pads];
+    ops.extend(vec![Operation::Drop; num_pads]);
+    ops
 }

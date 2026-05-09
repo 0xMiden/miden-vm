@@ -1,0 +1,11 @@
+[package]
+name = "mykernel"
+version = "2.0.0"
+
+[lib]
+kind = "kernel"
+path = "kernel/mod.masm"
+
+[[bin]]
+name = "entry"
+path = "bin/entry.masm"

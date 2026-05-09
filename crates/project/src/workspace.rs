@@ -1,9 +1,7 @@
+#[cfg(all(feature = "std", feature = "serde"))]
+use std::string::{String, ToString};
 #[cfg(feature = "std")]
-use std::{
-    boxed::Box,
-    path::Path,
-    string::{String, ToString},
-};
+use std::{boxed::Box, path::Path};
 
 #[cfg(all(feature = "std", feature = "serde"))]
 use miden_assembly_syntax::debuginfo::SourceManager;
@@ -87,7 +85,7 @@ impl Workspace {
         let members = file.workspace.members.clone();
 
         let mut workspace = Box::new(Workspace {
-            manifest_path: manifest_path.clone(),
+            manifest_path,
             members: Vec::with_capacity(members.len()),
         });
         let mut seen_member_names = Map::<String, SourceSpan>::default();
@@ -104,13 +102,12 @@ impl Workspace {
                 .into());
             };
             let relative_path = Path::new(member.as_str());
-            let member_dir =
-                crate::absolutize_path(relative_path, workspace_root).map_err(|err| {
-                    ProjectFileError::LoadWorkspaceMemberFailed {
-                        source_file: source.clone(),
-                        span: Label::new(member.span(), err.to_string()),
-                    }
-                })?;
+            let member_dir = absolutize_path(relative_path, workspace_root).map_err(|err| {
+                ProjectFileError::LoadWorkspaceMemberFailed {
+                    source_file: source.clone(),
+                    span: Label::new(member.span(), err.to_string()),
+                }
+            })?;
             if member_dir.strip_prefix(workspace_root).is_err() {
                 return Err(ProjectFileError::LoadWorkspaceMemberFailed {
                     source_file: source.clone(),

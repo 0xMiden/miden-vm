@@ -1,8 +1,16 @@
 use alloc::string::{String, ToString};
 use core::{fmt, str::FromStr};
 
+#[cfg(all(feature = "arbitrary", feature = "serde", test))]
+use miden_core::serde::{Deserializable, Serializable};
+
 /// This represents the way in which a dependent will link against a dependency during assembly.
 #[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "arbitrary", derive(proptest_derive::Arbitrary))]
+#[cfg_attr(
+    all(feature = "arbitrary", feature = "serde", test),
+    miden_test_serde_macros::serde_test(binary_serde(true))
+)]
 #[repr(u8)]
 pub enum Linkage {
     /// Link against the target package dynamically, i.e. it is expected that the package will be

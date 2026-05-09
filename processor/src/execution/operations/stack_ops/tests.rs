@@ -30,7 +30,7 @@ fn test_op_push() {
     assert_eq!(expected, processor.stack_top());
 
     // push another item onto the stack
-    op_push(&mut processor, Felt::new(3)).unwrap();
+    op_push(&mut processor, Felt::new_unchecked(3)).unwrap();
     let expected = build_expected(&[3, 1]);
 
     assert_eq!(MIN_STACK_DEPTH as u32 + 2, processor.stack_depth());
@@ -67,7 +67,7 @@ fn test_op_drop() {
 
     // push a few items onto the stack
     op_push(&mut processor, ONE).unwrap();
-    op_push(&mut processor, Felt::new(2)).unwrap();
+    op_push(&mut processor, Felt::new_unchecked(2)).unwrap();
 
     // drop the first value
     Processor::stack_mut(&mut processor).decrement_size().unwrap();
@@ -107,8 +107,8 @@ fn test_op_dup() {
     // put 15 more items onto the stack
     let mut expected_arr = [ONE; 16];
     for i in 2..17u64 {
-        op_push(&mut processor, Felt::new(i)).unwrap();
-        expected_arr[16 - i as usize] = Felt::new(i);
+        op_push(&mut processor, Felt::new_unchecked(i)).unwrap();
+        expected_arr[16 - i as usize] = Felt::new_unchecked(i);
     }
     // expected_arr now is [16, 15, 14, ..., 2, 1, 1] in "old test order" (top at index 0)
     // We need to reverse for comparison with stack_top()
@@ -125,7 +125,7 @@ fn test_op_dup() {
 
     // duplicate 8th stack item (dup7 on the new stack state)
     dup_nth(&mut processor, 7).unwrap();
-    assert_eq!(Felt::new(10), processor.stack_get(0));
+    assert_eq!(Felt::new_unchecked(10), processor.stack_get(0));
     assert_eq!(ONE, processor.stack_get(1));
 
     // remove 4 items off the stack
@@ -147,8 +147,10 @@ fn test_op_dup() {
 #[test]
 fn test_op_swap() {
     // Create processor with initial stack [3, 2, 1] (top=3)
-    let mut processor =
-        FastProcessor::new(StackInputs::new(&[Felt::new(3), Felt::new(2), Felt::new(1)]).unwrap());
+    let mut processor = FastProcessor::new(
+        StackInputs::new(&[Felt::new_unchecked(3), Felt::new_unchecked(2), Felt::new_unchecked(1)])
+            .unwrap(),
+    );
 
     op_swap(&mut processor);
     let expected = build_expected(&[2, 3, 1]);
@@ -164,15 +166,15 @@ fn test_op_swapw() {
     // Create processor with initial stack [9, 8, 7, 6, 5, 4, 3, 2, 1] (top=9)
     let mut processor = FastProcessor::new(
         StackInputs::new(&[
-            Felt::new(9),
-            Felt::new(8),
-            Felt::new(7),
-            Felt::new(6),
-            Felt::new(5),
-            Felt::new(4),
-            Felt::new(3),
-            Felt::new(2),
-            Felt::new(1),
+            Felt::new_unchecked(9),
+            Felt::new_unchecked(8),
+            Felt::new_unchecked(7),
+            Felt::new_unchecked(6),
+            Felt::new_unchecked(5),
+            Felt::new_unchecked(4),
+            Felt::new_unchecked(3),
+            Felt::new_unchecked(2),
+            Felt::new_unchecked(1),
         ])
         .unwrap(),
     );
@@ -191,19 +193,19 @@ fn test_op_swapw2() {
     // Create processor with initial stack [13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1] (top=13)
     let mut processor = FastProcessor::new(
         StackInputs::new(&[
-            Felt::new(13),
-            Felt::new(12),
-            Felt::new(11),
-            Felt::new(10),
-            Felt::new(9),
-            Felt::new(8),
-            Felt::new(7),
-            Felt::new(6),
-            Felt::new(5),
-            Felt::new(4),
-            Felt::new(3),
-            Felt::new(2),
-            Felt::new(1),
+            Felt::new_unchecked(13),
+            Felt::new_unchecked(12),
+            Felt::new_unchecked(11),
+            Felt::new_unchecked(10),
+            Felt::new_unchecked(9),
+            Felt::new_unchecked(8),
+            Felt::new_unchecked(7),
+            Felt::new_unchecked(6),
+            Felt::new_unchecked(5),
+            Felt::new_unchecked(4),
+            Felt::new_unchecked(3),
+            Felt::new_unchecked(2),
+            Felt::new_unchecked(1),
         ])
         .unwrap(),
     );
@@ -222,22 +224,22 @@ fn test_op_swapw3() {
     // Create processor with initial stack [16, 15, ..., 1] (top=16)
     let mut processor = FastProcessor::new(
         StackInputs::new(&[
-            Felt::new(16),
-            Felt::new(15),
-            Felt::new(14),
-            Felt::new(13),
-            Felt::new(12),
-            Felt::new(11),
-            Felt::new(10),
-            Felt::new(9),
-            Felt::new(8),
-            Felt::new(7),
-            Felt::new(6),
-            Felt::new(5),
-            Felt::new(4),
-            Felt::new(3),
-            Felt::new(2),
-            Felt::new(1),
+            Felt::new_unchecked(16),
+            Felt::new_unchecked(15),
+            Felt::new_unchecked(14),
+            Felt::new_unchecked(13),
+            Felt::new_unchecked(12),
+            Felt::new_unchecked(11),
+            Felt::new_unchecked(10),
+            Felt::new_unchecked(9),
+            Felt::new_unchecked(8),
+            Felt::new_unchecked(7),
+            Felt::new_unchecked(6),
+            Felt::new_unchecked(5),
+            Felt::new_unchecked(4),
+            Felt::new_unchecked(3),
+            Felt::new_unchecked(2),
+            Felt::new_unchecked(1),
         ])
         .unwrap(),
     );
@@ -256,22 +258,22 @@ fn test_op_swapdw() {
     // Create processor with initial stack [16, 15, ..., 1] (top=16)
     let mut processor = FastProcessor::new(
         StackInputs::new(&[
-            Felt::new(16),
-            Felt::new(15),
-            Felt::new(14),
-            Felt::new(13),
-            Felt::new(12),
-            Felt::new(11),
-            Felt::new(10),
-            Felt::new(9),
-            Felt::new(8),
-            Felt::new(7),
-            Felt::new(6),
-            Felt::new(5),
-            Felt::new(4),
-            Felt::new(3),
-            Felt::new(2),
-            Felt::new(1),
+            Felt::new_unchecked(16),
+            Felt::new_unchecked(15),
+            Felt::new_unchecked(14),
+            Felt::new_unchecked(13),
+            Felt::new_unchecked(12),
+            Felt::new_unchecked(11),
+            Felt::new_unchecked(10),
+            Felt::new_unchecked(9),
+            Felt::new_unchecked(8),
+            Felt::new_unchecked(7),
+            Felt::new_unchecked(6),
+            Felt::new_unchecked(5),
+            Felt::new_unchecked(4),
+            Felt::new_unchecked(3),
+            Felt::new_unchecked(2),
+            Felt::new_unchecked(1),
         ])
         .unwrap(),
     );
@@ -295,22 +297,22 @@ fn test_op_movup() {
     // Create processor with initial stack [1, 2, ..., 16] (top=1)
     let mut processor = FastProcessor::new(
         StackInputs::new(&[
-            Felt::new(1),
-            Felt::new(2),
-            Felt::new(3),
-            Felt::new(4),
-            Felt::new(5),
-            Felt::new(6),
-            Felt::new(7),
-            Felt::new(8),
-            Felt::new(9),
-            Felt::new(10),
-            Felt::new(11),
-            Felt::new(12),
-            Felt::new(13),
-            Felt::new(14),
-            Felt::new(15),
-            Felt::new(16),
+            Felt::new_unchecked(1),
+            Felt::new_unchecked(2),
+            Felt::new_unchecked(3),
+            Felt::new_unchecked(4),
+            Felt::new_unchecked(5),
+            Felt::new_unchecked(6),
+            Felt::new_unchecked(7),
+            Felt::new_unchecked(8),
+            Felt::new_unchecked(9),
+            Felt::new_unchecked(10),
+            Felt::new_unchecked(11),
+            Felt::new_unchecked(12),
+            Felt::new_unchecked(13),
+            Felt::new_unchecked(14),
+            Felt::new_unchecked(15),
+            Felt::new_unchecked(16),
         ])
         .unwrap(),
     );
@@ -345,22 +347,22 @@ fn test_op_movdn() {
     // Create processor with initial stack [1, 2, ..., 16] (top=1)
     let mut processor = FastProcessor::new(
         StackInputs::new(&[
-            Felt::new(1),
-            Felt::new(2),
-            Felt::new(3),
-            Felt::new(4),
-            Felt::new(5),
-            Felt::new(6),
-            Felt::new(7),
-            Felt::new(8),
-            Felt::new(9),
-            Felt::new(10),
-            Felt::new(11),
-            Felt::new(12),
-            Felt::new(13),
-            Felt::new(14),
-            Felt::new(15),
-            Felt::new(16),
+            Felt::new_unchecked(1),
+            Felt::new_unchecked(2),
+            Felt::new_unchecked(3),
+            Felt::new_unchecked(4),
+            Felt::new_unchecked(5),
+            Felt::new_unchecked(6),
+            Felt::new_unchecked(7),
+            Felt::new_unchecked(8),
+            Felt::new_unchecked(9),
+            Felt::new_unchecked(10),
+            Felt::new_unchecked(11),
+            Felt::new_unchecked(12),
+            Felt::new_unchecked(13),
+            Felt::new_unchecked(14),
+            Felt::new_unchecked(15),
+            Felt::new_unchecked(16),
         ])
         .unwrap(),
     );
@@ -394,8 +396,14 @@ fn test_op_movdn() {
 fn test_op_cswap() {
     // Create processor with initial stack [0, 1, 2, 3, 4] (top=0)
     let mut processor = FastProcessor::new(
-        StackInputs::new(&[Felt::new(0), Felt::new(1), Felt::new(2), Felt::new(3), Felt::new(4)])
-            .unwrap(),
+        StackInputs::new(&[
+            Felt::new_unchecked(0),
+            Felt::new_unchecked(1),
+            Felt::new_unchecked(2),
+            Felt::new_unchecked(3),
+            Felt::new_unchecked(4),
+        ])
+        .unwrap(),
     );
     // no swap (top of the stack is 0)
     op_cswap(&mut processor).unwrap();
@@ -420,18 +428,18 @@ fn test_op_cswapw() {
     // Create processor with initial stack [0, 1, 2, ..., 11] (top=0)
     let mut processor = FastProcessor::new(
         StackInputs::new(&[
-            Felt::new(0),
-            Felt::new(1),
-            Felt::new(2),
-            Felt::new(3),
-            Felt::new(4),
-            Felt::new(5),
-            Felt::new(6),
-            Felt::new(7),
-            Felt::new(8),
-            Felt::new(9),
-            Felt::new(10),
-            Felt::new(11),
+            Felt::new_unchecked(0),
+            Felt::new_unchecked(1),
+            Felt::new_unchecked(2),
+            Felt::new_unchecked(3),
+            Felt::new_unchecked(4),
+            Felt::new_unchecked(5),
+            Felt::new_unchecked(6),
+            Felt::new_unchecked(7),
+            Felt::new_unchecked(8),
+            Felt::new_unchecked(9),
+            Felt::new_unchecked(10),
+            Felt::new_unchecked(11),
         ])
         .unwrap(),
     );
@@ -465,7 +473,7 @@ fn build_expected(values: &[u64]) -> Vec<Felt> {
     let mut expected = vec![ZERO; 16];
     for (i, &value) in values.iter().enumerate() {
         // In the result, top of stack is at index 15, second at 14, etc.
-        expected[15 - i] = Felt::new(value);
+        expected[15 - i] = Felt::new_unchecked(value);
     }
     expected
 }

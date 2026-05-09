@@ -1,0 +1,14 @@
+[package]
+name = "metadata-example"
+version = "0.1.0"
+description = "Example with metadata"
+
+[lib]
+path = "lib.masm"
+
+[package.metadata.custom]
+key = "value"
+number = 42
+
+[lints.miden]
+unused = "warn"

@@ -18,7 +18,7 @@ pub fn test_input_out_of_bounds(asm_op: &str) {
         test,
         ExecutionError::OperationError{ err: OperationError::NotU32Values{ values }, .. } if
             values.len() == 1 &&
-            values[0] == Felt::new(U32_BOUND)
+            values[0] == Felt::new_unchecked(U32_BOUND)
     );
 }
 
@@ -38,7 +38,7 @@ pub fn test_inputs_out_of_bounds(asm_op: &str, input_count: usize) {
             test,
             ExecutionError::OperationError{ err: OperationError::NotU32Values{ values }, .. } if
                 values.len() == 1 &&
-                values[0] == Felt::new(U32_BOUND)
+                values[0] == Felt::new_unchecked(U32_BOUND)
         );
     }
 }

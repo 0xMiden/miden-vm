@@ -68,13 +68,14 @@ fn program_execution_for_trace(c: &mut Criterion) {
                                 ExecutionOptions::default()
                                     .with_core_trace_fragment_size(TRACE_FRAGMENT_SIZE)
                                     .unwrap(),
-                            );
+                            )
+                            .expect("processor advice inputs should fit advice map limits");
 
                             (host, program.clone(), processor)
                         },
                         |(mut host, program, processor)| async move {
                             let out =
-                                processor.execute_for_trace(&program, &mut host).await.unwrap();
+                                processor.execute_trace_inputs(&program, &mut host).await.unwrap();
                             black_box(out);
                         },
                         BatchSize::SmallInput,

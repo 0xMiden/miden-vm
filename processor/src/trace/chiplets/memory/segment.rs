@@ -53,7 +53,7 @@ impl MemorySegmentTrace {
         let (word_addr, _) = addr_to_word_addr_and_idx(addr);
 
         match self.0.get(&word_addr) {
-            Some(addr_trace) => Ok(addr_trace.last().map(|access| access.word())),
+            Some(addr_trace) => Ok(addr_trace.last().map(MemorySegmentAccess::word)),
             None => Ok(None),
         }
     }

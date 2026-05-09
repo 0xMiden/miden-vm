@@ -105,7 +105,7 @@ fn test_op_incr() {
 
 #[test]
 fn test_op_and() {
-    let two = Felt::new(2);
+    let two = Felt::new_unchecked(2);
 
     // --- test 0 AND 0 ---------------------------------------------------
     let mut processor = FastProcessor::new(StackInputs::new(&[ZERO, ZERO, two]).unwrap());
@@ -146,7 +146,7 @@ fn test_op_and() {
 
 #[test]
 fn test_op_or() {
-    let two = Felt::new(2);
+    let two = Felt::new_unchecked(2);
 
     // --- test 0 OR 0 ---------------------------------------------------
     let mut processor = FastProcessor::new(StackInputs::new(&[ZERO, ZERO, two]).unwrap());
@@ -187,7 +187,7 @@ fn test_op_or() {
 
 #[test]
 fn test_op_not() {
-    let two = Felt::new(2);
+    let two = Felt::new_unchecked(2);
 
     // --- test NOT 0 -----------------------------------------------------
     let mut processor = FastProcessor::new(StackInputs::new(&[ZERO, two]).unwrap());
@@ -211,9 +211,9 @@ fn test_op_not() {
 
 #[test]
 fn test_op_eq() {
-    let three = Felt::new(3);
-    let five = Felt::new(5);
-    let seven = Felt::new(7);
+    let three = Felt::new_unchecked(3);
+    let five = Felt::new_unchecked(5);
+    let seven = Felt::new_unchecked(7);
 
     // --- test when top two values are equal -----------------------------
     let mut processor = FastProcessor::new(StackInputs::new(&[seven, seven, three]).unwrap());
@@ -234,8 +234,8 @@ fn test_op_eq() {
 
 #[test]
 fn test_op_eqz() {
-    let three = Felt::new(3);
-    let four = Felt::new(4);
+    let three = Felt::new_unchecked(3);
+    let four = Felt::new_unchecked(4);
 
     // --- test when top is zero ------------------------------------------
     let mut processor = FastProcessor::new(StackInputs::new(&[ZERO, three]).unwrap());
@@ -256,13 +256,13 @@ fn test_op_eqz() {
 #[test]
 fn test_op_expacc() {
     // --- when base = 0 and exp is even, acc doesn't change --------------------------------
-    let old_exp = Felt::new(8);
-    let old_acc = Felt::new(1);
-    let old_base = Felt::new(0);
+    let old_exp = Felt::new_unchecked(8);
+    let old_acc = Felt::new_unchecked(1);
+    let old_base = Felt::new_unchecked(0);
 
-    let new_exp = Felt::new(4);
-    let new_acc = Felt::new(1);
-    let new_base = Felt::new(0);
+    let new_exp = Felt::new_unchecked(4);
+    let new_acc = Felt::new_unchecked(1);
+    let new_base = Felt::new_unchecked(0);
 
     // Stack layout: [bit, base, acc, exp] with bit at position 0 (top)
     let mut processor =
@@ -272,13 +272,13 @@ fn test_op_expacc() {
     assert_eq!(expected, processor.stack_top());
 
     // --- when base = 0 and exp is odd, acc becomes 0 --------------------------------------
-    let old_exp = Felt::new(9);
-    let old_acc = Felt::new(1);
-    let old_base = Felt::new(0);
+    let old_exp = Felt::new_unchecked(9);
+    let old_acc = Felt::new_unchecked(1);
+    let old_base = Felt::new_unchecked(0);
 
-    let new_exp = Felt::new(4);
-    let new_acc = Felt::new(0);
-    let new_base = Felt::new(0);
+    let new_exp = Felt::new_unchecked(4);
+    let new_acc = Felt::new_unchecked(0);
+    let new_base = Felt::new_unchecked(0);
 
     let mut processor =
         FastProcessor::new(StackInputs::new(&[ZERO, old_base, old_acc, old_exp]).unwrap());
@@ -287,13 +287,13 @@ fn test_op_expacc() {
     assert_eq!(expected, processor.stack_top());
 
     // --- when exp = 0, acc doesn't change, and base doubles -------------------------------
-    let old_exp = Felt::new(0);
-    let old_acc = Felt::new(32);
-    let old_base = Felt::new(4);
+    let old_exp = Felt::new_unchecked(0);
+    let old_acc = Felt::new_unchecked(32);
+    let old_base = Felt::new_unchecked(4);
 
-    let new_exp = Felt::new(0);
-    let new_acc = Felt::new(32);
-    let new_base = Felt::new(16);
+    let new_exp = Felt::new_unchecked(0);
+    let new_acc = Felt::new_unchecked(32);
+    let new_base = Felt::new_unchecked(16);
 
     let mut processor =
         FastProcessor::new(StackInputs::new(&[ZERO, old_base, old_acc, old_exp]).unwrap());
@@ -303,13 +303,13 @@ fn test_op_expacc() {
 
     // --- when lsb(exp) == 1, acc is updated
     // ----------------------------------------------------------
-    let old_exp = Felt::new(3);
-    let old_acc = Felt::new(1);
-    let old_base = Felt::new(16);
+    let old_exp = Felt::new_unchecked(3);
+    let old_acc = Felt::new_unchecked(1);
+    let old_base = Felt::new_unchecked(16);
 
-    let new_exp = Felt::new(1);
-    let new_acc = Felt::new(16);
-    let new_base = Felt::new(16 * 16);
+    let new_exp = Felt::new_unchecked(1);
+    let new_acc = Felt::new_unchecked(16);
+    let new_base = Felt::new_unchecked(16 * 16);
 
     let mut processor =
         FastProcessor::new(StackInputs::new(&[ZERO, old_base, old_acc, old_exp]).unwrap());
@@ -323,16 +323,16 @@ fn test_op_expacc() {
     let old_acc_val = 5u64;
     let old_base_val = u32::MAX as u64 + 1;
 
-    let new_exp = Felt::new(8);
-    let new_acc = Felt::new(old_acc_val * old_base_val);
-    let new_base = Felt::new(old_base_val) * Felt::new(old_base_val);
+    let new_exp = Felt::new_unchecked(8);
+    let new_acc = Felt::new_unchecked(old_acc_val * old_base_val);
+    let new_base = Felt::new_unchecked(old_base_val) * Felt::new_unchecked(old_base_val);
 
     let mut processor = FastProcessor::new(
         StackInputs::new(&[
             ZERO,
-            Felt::new(old_base_val),
-            Felt::new(old_acc_val),
-            Felt::new(old_exp_val),
+            Felt::new_unchecked(old_base_val),
+            Felt::new_unchecked(old_acc_val),
+            Felt::new_unchecked(old_exp_val),
         ])
         .unwrap(),
     );
@@ -374,7 +374,7 @@ fn get_rand_values() -> (Felt, Felt, Felt) {
     let a: u64 = rand_value();
     let b: u64 = rand_value();
     let c: u64 = rand_value();
-    (Felt::new(a), Felt::new(b), Felt::new(c))
+    (Felt::new_unchecked(a), Felt::new_unchecked(b), Felt::new_unchecked(c))
 }
 
 /// Builds an expected stack state from the given values.

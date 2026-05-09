@@ -135,7 +135,7 @@ impl Validate for WorkspaceFile {
                     "cannot use the 'workspace' option in a workspace-level dependency spec"
                 };
                 return Err(Report::from(ProjectFileError::InvalidWorkspaceDependency {
-                    source_file: source.clone(),
+                    source_file: source,
                     label: Label::new(dependency.span(), label),
                 }));
             }

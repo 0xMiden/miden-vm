@@ -6,7 +6,6 @@ members = [
 ]
 
 [workspace.dependencies]
-miden-core = { path = "../../../../../lib/core/asm" }
 miden-utils = { path = "utils", linkage = "static" }
 miden-tx = { path = "kernel" }
 

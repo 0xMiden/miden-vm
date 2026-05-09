@@ -174,7 +174,7 @@ impl proptest::arbitrary::Arbitrary for WordValue {
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
         use proptest::{array::uniform4, strategy::Strategy};
-        uniform4((0..crate::FIELD_MODULUS).prop_map(Felt::new))
+        uniform4((0..crate::FIELD_MODULUS).prop_map(Felt::new_unchecked))
             .prop_map(WordValue)
             .no_shrink()  // Pure random values, no meaningful shrinking pattern
             .boxed()
@@ -437,7 +437,7 @@ impl proptest::arbitrary::Arbitrary for IntValue {
             (num::u64::ANY)
                 .prop_filter_map("valid felt value", |n| {
                     if n > u32::MAX as u64 && n < crate::FIELD_MODULUS {
-                        Some(IntValue::Felt(Felt::new(n)))
+                        Some(IntValue::Felt(Felt::new_unchecked(n)))
                     } else {
                         None
                     }
@@ -483,6 +483,7 @@ pub enum Token<'input> {
     AdvLoadw,
     AdvPipe,
     AdvPush,
+    AdvPushw,
     AdvStack,
     PushMapval,
     PushMapvalCount,
@@ -712,6 +713,7 @@ impl fmt::Display for Token<'_> {
             Token::AdvLoadw => write!(f, "adv_loadw"),
             Token::AdvPipe => write!(f, "adv_pipe"),
             Token::AdvPush => write!(f, "adv_push"),
+            Token::AdvPushw => write!(f, "adv_pushw"),
             Token::PushMapval => write!(f, "push_mapval"),
             Token::PushMapvalCount => write!(f, "push_mapval_count"),
             Token::PushMapvaln => write!(f, "push_mapvaln"),
@@ -945,6 +947,7 @@ impl<'input> Token<'input> {
                 | Token::AdvLoadw
                 | Token::AdvPipe
                 | Token::AdvPush
+                | Token::AdvPushw
                 | Token::AdvStack
                 | Token::PushMapval
                 | Token::PushMapvalCount
@@ -1132,6 +1135,7 @@ impl<'input> Token<'input> {
         ("adv_loadw", Token::AdvLoadw),
         ("adv_pipe", Token::AdvPipe),
         ("adv_push", Token::AdvPush),
+        ("adv_pushw", Token::AdvPushw),
         ("adv_stack", Token::AdvStack),
         ("push_mapval", Token::PushMapval),
         ("push_mapval_count", Token::PushMapvalCount),

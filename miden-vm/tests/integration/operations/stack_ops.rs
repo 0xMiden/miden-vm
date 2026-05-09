@@ -433,6 +433,7 @@ fn cdropw() {
 }
 
 proptest! {
+    #![proptest_config(ProptestConfig::with_cases(100))]
 
     #[test]
     fn drop_proptest(test_values in prop::collection::vec(any::<u64>(), MIN_STACK_DEPTH)) {

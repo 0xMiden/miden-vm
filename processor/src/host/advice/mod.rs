@@ -1,19 +1,18 @@
-use alloc::{
-    collections::{VecDeque, btree_map::Entry},
-    vec::Vec,
-};
+use alloc::{collections::VecDeque, vec::Vec};
 
 use miden_core::{
-    Felt, Word,
+    Felt, WORD_SIZE, Word,
     advice::{AdviceInputs, AdviceMap},
     crypto::merkle::{InnerNodeInfo, MerklePath, MerkleStore, NodeIndex},
     precompile::PrecompileRequest,
 };
+#[cfg(test)]
+use miden_core::{crypto::hash::Blake3_256, serde::Serializable};
 
 mod errors;
 pub use errors::AdviceError;
 
-use crate::{host::AdviceMutation, processor::AdviceProviderInterface};
+use crate::{ExecutionOptions, host::AdviceMutation, processor::AdviceProviderInterface};
 
 // CONSTANTS
 // ================================================================================================
@@ -27,6 +26,10 @@ const MAX_ADVICE_STACK_SIZE: usize = 1 << 17;
 /// An advice provider is a component through which the VM can request nondeterministic inputs from
 /// the host (i.e., result of a computation performed outside of the VM), as well as insert new data
 /// into the advice provider to be recovered by the host after the program has finished executing.
+///
+/// Advice map size limits are enforced here, rather than by `AdviceMap`, because they are part of
+/// execution policy. The provider owns the active `ExecutionOptions` and tracks the live advice map
+/// budget across initial advice, host mutations, and system-event inserts.
 ///
 /// An advice provider consists of the following components:
 /// 1. Advice stack, which is a LIFO data structure. The processor can move the elements from the
@@ -46,16 +49,72 @@ const MAX_ADVICE_STACK_SIZE: usize = 1 << 17;
 ///      or,
 ///    - used to produce a STARK proof using a precompile VM, which can be verified in the epilog of
 ///      the program.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AdviceProvider {
     stack: VecDeque<Felt>,
     map: AdviceMap,
+    map_element_count: usize,
+    max_map_value_size: usize,
+    max_map_elements: usize,
     store: MerkleStore,
     pc_requests: Vec<PrecompileRequest>,
 }
 
+impl Default for AdviceProvider {
+    fn default() -> Self {
+        Self::empty(&ExecutionOptions::default())
+    }
+}
+
 impl AdviceProvider {
+    /// Creates a new advice provider from the provided inputs and execution options.
+    ///
+    /// The advice map limits in `options` are enforced while loading the initial advice inputs.
+    pub fn new(inputs: AdviceInputs, options: &ExecutionOptions) -> Result<Self, AdviceError> {
+        let AdviceInputs { stack, map, store } = inputs;
+        let mut provider = Self::empty(options);
+        provider.extend_stack(stack)?;
+        provider.extend_merkle_store(store.inner_nodes());
+        provider.extend_map(&map)?;
+        Ok(provider)
+    }
+
+    fn empty(options: &ExecutionOptions) -> Self {
+        Self {
+            stack: VecDeque::new(),
+            map: AdviceMap::default(),
+            map_element_count: 0,
+            max_map_value_size: options.max_adv_map_value_size(),
+            max_map_elements: options.max_adv_map_elements(),
+            store: MerkleStore::default(),
+            pc_requests: Vec::new(),
+        }
+    }
+
+    pub(crate) fn set_options(&mut self, options: &ExecutionOptions) -> Result<(), AdviceError> {
+        Self::validate_map_values(&self.map, options.max_adv_map_value_size())?;
+        let map_element_count =
+            self.map.total_element_count().ok_or(AdviceError::AdvMapElementBudgetExceeded {
+                current: self.map_element_count,
+                added: usize::MAX,
+                max: options.max_adv_map_elements(),
+            })?;
+        if map_element_count > options.max_adv_map_elements() {
+            return Err(AdviceError::AdvMapElementBudgetExceeded {
+                current: 0,
+                added: map_element_count,
+                max: options.max_adv_map_elements(),
+            });
+        }
+
+        self.map_element_count = map_element_count;
+        self.max_map_value_size = options.max_adv_map_value_size();
+        self.max_map_elements = options.max_adv_map_elements();
+        Ok(())
+    }
+
     #[cfg(test)]
+    #[expect(dead_code)]
     pub(crate) fn merkle_store(&self) -> &MerkleStore {
         &self.store
     }
@@ -84,6 +143,44 @@ impl AdviceProvider {
             },
         }
         Ok(())
+    }
+
+    /// Returns a stable fingerprint of the advice state.
+    ///
+    /// The fingerprint is insensitive to advice-map insertion order and Merkle-store insertion
+    /// order, but it still reflects advice-stack order and precompile-request order.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn fingerprint(&self) -> [u8; 32] {
+        let stack = self.stack.iter().copied().collect::<Vec<_>>().to_bytes();
+        let map = self.map.to_bytes();
+        let mut store_nodes = self
+            .store
+            .inner_nodes()
+            .map(|info| (info.value, info.left, info.right))
+            .collect::<Vec<_>>();
+        store_nodes.sort_unstable_by(|lhs, rhs| {
+            lhs.0
+                .cmp(&rhs.0)
+                .then_with(|| lhs.1.cmp(&rhs.1))
+                .then_with(|| lhs.2.cmp(&rhs.2))
+        });
+        let store = store_nodes
+            .into_iter()
+            .flat_map(|(value, left, right)| [value, left, right])
+            .collect::<Vec<_>>()
+            .to_bytes();
+        let precompile_requests = self.pc_requests.to_bytes();
+        Blake3_256::hash_iter(
+            [
+                stack.as_slice(),
+                map.as_slice(),
+                store.as_slice(),
+                precompile_requests.as_slice(),
+            ]
+            .into_iter(),
+        )
+        .into()
     }
 
     // ADVICE STACK
@@ -222,12 +319,12 @@ impl AdviceProvider {
 
         // Treat map values as already canonical sequences of FELTs.
         // The advice stack is LIFO; extend in reverse so that the first element of `values`
-        // becomes the first element returned by a subsequent `adv_push.*`.
+        // becomes the first element returned by a subsequent `adv_push`.
         for &value in values.iter().rev() {
             self.stack.push_front(value);
         }
         if include_len {
-            self.stack.push_front(Felt::new(values.len() as u64));
+            self.stack.push_front(Felt::new_unchecked(values.len() as u64));
         }
         Ok(())
     }
@@ -260,7 +357,52 @@ impl AdviceProvider {
 
     /// Returns a reference to the value(s) associated with the specified key in the advice map.
     pub fn get_mapped_values(&self, key: &Word) -> Option<&[Felt]> {
-        self.map.get(key).map(|value| value.as_ref())
+        self.map.get(key).map(AsRef::as_ref)
+    }
+
+    fn validate_map_values(map: &AdviceMap, max_value_size: usize) -> Result<(), AdviceError> {
+        for (_, values) in map.iter() {
+            if values.len() > max_value_size {
+                return Err(AdviceError::AdvMapValueSizeExceeded {
+                    size: values.len(),
+                    max: max_value_size,
+                });
+            }
+        }
+        Ok(())
+    }
+
+    fn entry_element_count(value_len: usize) -> Option<usize> {
+        WORD_SIZE.checked_add(value_len)
+    }
+
+    fn check_map_value_size(&self, size: usize) -> Result<(), AdviceError> {
+        if size > self.max_map_value_size {
+            return Err(AdviceError::AdvMapValueSizeExceeded {
+                size,
+                max: self.max_map_value_size,
+            });
+        }
+        Ok(())
+    }
+
+    fn check_map_element_budget(&self, added: usize) -> Result<(), AdviceError> {
+        let Some(new_total) = self.map_element_count.checked_add(added) else {
+            return Err(AdviceError::AdvMapElementBudgetExceeded {
+                current: self.map_element_count,
+                added,
+                max: self.max_map_elements,
+            });
+        };
+
+        if new_total > self.max_map_elements {
+            return Err(AdviceError::AdvMapElementBudgetExceeded {
+                current: self.map_element_count,
+                added,
+                max: self.max_map_elements,
+            });
+        }
+        Ok(())
     }
 
     /// Inserts the provided value into the advice map under the specified key.
@@ -270,12 +412,9 @@ impl AdviceProvider {
     ///
     /// Returns an error if the specified key is already present in the advice map.
     pub fn insert_into_map(&mut self, key: Word, values: Vec<Felt>) -> Result<(), AdviceError> {
-        match self.map.entry(key) {
-            Entry::Vacant(entry) => {
-                entry.insert(values.into());
-            },
-            Entry::Occupied(entry) => {
-                let existing_values = entry.get().as_ref();
+        match self.map.get(&key) {
+            Some(existing_values) => {
+                let existing_values = existing_values.as_ref();
                 if existing_values != values {
                     return Err(AdviceError::MapKeyAlreadyPresent {
                         key,
@@ -283,6 +422,19 @@ impl AdviceProvider {
                         new_values: values,
                     });
                 }
+            },
+            None => {
+                self.check_map_value_size(values.len())?;
+                let added = Self::entry_element_count(values.len()).ok_or(
+                    AdviceError::AdvMapElementBudgetExceeded {
+                        current: self.map_element_count,
+                        added: usize::MAX,
+                        max: self.max_map_elements,
+                    },
+                )?;
+                self.check_map_element_budget(added)?;
+                self.map.insert(key, values);
+                self.map_element_count += added;
             },
         }
         Ok(())
@@ -293,13 +445,46 @@ impl AdviceProvider {
     /// Returns an error if any new entry already exists with the same key but a different value
     /// than the one currently stored. The current map remains unchanged.
     pub fn extend_map(&mut self, other: &AdviceMap) -> Result<(), AdviceError> {
+        let mut added = 0usize;
+        for (key, values) in other.iter() {
+            if let Some(existing_values) = self.map.get(key) {
+                if existing_values.as_ref() != values.as_ref() {
+                    return Err(AdviceError::MapKeyAlreadyPresent {
+                        key: *key,
+                        prev_values: existing_values.to_vec(),
+                        new_values: values.to_vec(),
+                    });
+                }
+                continue;
+            }
+
+            self.check_map_value_size(values.len())?;
+            let entry_elements = Self::entry_element_count(values.len()).ok_or(
+                AdviceError::AdvMapElementBudgetExceeded {
+                    current: self.map_element_count,
+                    added: usize::MAX,
+                    max: self.max_map_elements,
+                },
+            )?;
+            added = added.checked_add(entry_elements).ok_or(
+                AdviceError::AdvMapElementBudgetExceeded {
+                    current: self.map_element_count,
+                    added: usize::MAX,
+                    max: self.max_map_elements,
+                },
+            )?;
+        }
+        self.check_map_element_budget(added)?;
+
         self.map.merge(other).map_err(|((key, prev_values), new_values)| {
             AdviceError::MapKeyAlreadyPresent {
                 key,
                 prev_values: prev_values.to_vec(),
                 new_values: new_values.to_vec(),
             }
-        })
+        })?;
+        self.map_element_count += added;
+        Ok(())
     }
 
     // MERKLE STORE
@@ -457,18 +642,6 @@ impl AdviceProvider {
     }
 }
 
-impl From<AdviceInputs> for AdviceProvider {
-    fn from(inputs: AdviceInputs) -> Self {
-        let AdviceInputs { stack, map, store } = inputs;
-        Self {
-            stack: VecDeque::from(stack),
-            map,
-            store,
-            pc_requests: Vec::new(),
-        }
-    }
-}
-
 // ADVICE PROVIDER INTERFACE IMPLEMENTATION
 // ================================================================================================
 
@@ -507,5 +680,145 @@ impl AdviceProviderInterface for AdviceProvider {
         value: Word,
     ) -> Result<Option<MerklePath>, AdviceError> {
         self.update_merkle_node(root, depth, index, value).map(|(path, _)| Some(path))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use alloc::{collections::BTreeMap, vec, vec::Vec};
+
+    use miden_core::WORD_SIZE;
+
+    use super::AdviceProvider;
+    use crate::{
+        AdviceInputs, ExecutionOptions, Felt, Word,
+        advice::{AdviceError, AdviceMap},
+        crypto::merkle::{MerkleStore, MerkleTree},
+    };
+
+    fn make_leaf(seed: u64) -> Word {
+        [
+            Felt::new_unchecked(seed),
+            Felt::new_unchecked(seed + 1),
+            Felt::new_unchecked(seed + 2),
+            Felt::new_unchecked(seed + 3),
+        ]
+        .into()
+    }
+
+    #[test]
+    fn fingerprint_is_stable_across_merkle_store_insertion_order() {
+        let tree_a =
+            MerkleTree::new([make_leaf(1), make_leaf(5), make_leaf(9), make_leaf(13)]).unwrap();
+        let tree_b =
+            MerkleTree::new([make_leaf(17), make_leaf(21), make_leaf(25), make_leaf(29)]).unwrap();
+
+        let mut store_a = MerkleStore::default();
+        store_a.extend(tree_a.inner_nodes());
+        store_a.extend(tree_b.inner_nodes());
+
+        let mut store_b = MerkleStore::default();
+        store_b.extend(tree_b.inner_nodes());
+        store_b.extend(tree_a.inner_nodes());
+
+        assert_eq!(store_a, store_b);
+
+        let provider_a = AdviceProvider::new(
+            AdviceInputs::default().with_merkle_store(store_a),
+            &Default::default(),
+        )
+        .unwrap();
+        let provider_b = AdviceProvider::new(
+            AdviceInputs::default().with_merkle_store(store_b),
+            &Default::default(),
+        )
+        .unwrap();
+
+        assert_eq!(provider_a, provider_b);
+        assert_eq!(provider_a.fingerprint(), provider_b.fingerprint());
+    }
+
+    #[test]
+    fn advice_map_insert_respects_element_budget() {
+        let options = ExecutionOptions::default().with_max_adv_map_elements(WORD_SIZE + 1);
+        let mut provider = AdviceProvider::new(AdviceInputs::default(), &options).unwrap();
+
+        provider.insert_into_map(make_leaf(0), vec![Felt::ONE]).unwrap();
+
+        let err = provider.insert_into_map(make_leaf(1), vec![Felt::ONE]).unwrap_err();
+        assert!(matches!(
+            err,
+            AdviceError::AdvMapElementBudgetExceeded { current: 5, added: 5, max: 5 }
+        ));
+
+        assert_eq!(provider.map.len(), 1);
+        assert!(provider.contains_map_key(&make_leaf(0)));
+        assert!(!provider.contains_map_key(&make_leaf(1)));
+    }
+
+    #[test]
+    fn advice_map_insert_respects_value_limit() {
+        let options = ExecutionOptions::default().with_max_adv_map_value_size(1);
+        let mut provider = AdviceProvider::new(AdviceInputs::default(), &options).unwrap();
+        let values = vec![Felt::ONE, Felt::new_unchecked(2)];
+
+        let err = provider.insert_into_map(make_leaf(0), values).unwrap_err();
+        assert!(matches!(err, AdviceError::AdvMapValueSizeExceeded { size: 2, max: 1 }));
+
+        assert_eq!(provider.map.len(), 0);
+    }
+
+    #[test]
+    fn advice_map_extend_respects_element_budget_atomically() {
+        let options = ExecutionOptions::default().with_max_adv_map_elements(2 * (WORD_SIZE + 1));
+        let mut provider = AdviceProvider::new(AdviceInputs::default(), &options).unwrap();
+        provider.insert_into_map(make_leaf(0), vec![Felt::ONE]).unwrap();
+        let other = advice_map_from_entries(1..3, 1);
+
+        let err = provider.extend_map(&other).unwrap_err();
+        assert!(matches!(
+            err,
+            AdviceError::AdvMapElementBudgetExceeded { current: 5, added: 10, max: 10 }
+        ));
+
+        assert_eq!(provider.map.len(), 1);
+        assert!(provider.contains_map_key(&make_leaf(0)));
+        assert!(!provider.contains_map_key(&make_leaf(1)));
+        assert!(!provider.contains_map_key(&make_leaf(2)));
+    }
+
+    #[test]
+    fn advice_map_extend_respects_value_limit_atomically() {
+        let options = ExecutionOptions::default().with_max_adv_map_value_size(1);
+        let mut provider = AdviceProvider::new(AdviceInputs::default(), &options).unwrap();
+        let other = advice_map_from_entries(0..2, 2);
+
+        let err = provider.extend_map(&other).unwrap_err();
+        assert!(matches!(err, AdviceError::AdvMapValueSizeExceeded { size: 2, max: 1 }));
+
+        assert_eq!(provider.map.len(), 0);
+    }
+
+    #[test]
+    fn initial_advice_map_respects_element_budget() {
+        let options = ExecutionOptions::default().with_max_adv_map_elements(WORD_SIZE);
+        let inputs = AdviceInputs::default().with_map([(make_leaf(0), vec![Felt::ONE])]);
+
+        let err = AdviceProvider::new(inputs, &options).unwrap_err();
+        assert!(matches!(
+            err,
+            AdviceError::AdvMapElementBudgetExceeded { current: 0, added: 5, max: 4 }
+        ));
+    }
+
+    fn advice_map_from_entries(keys: impl Iterator<Item = u64>, value_len: usize) -> AdviceMap {
+        keys.map(|key| {
+            let values = (0..value_len)
+                .map(|offset| Felt::new_unchecked(key + offset as u64))
+                .collect::<Vec<_>>();
+            (make_leaf(key), values)
+        })
+        .collect::<BTreeMap<_, _>>()
+        .into()
     }
 }

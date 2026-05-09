@@ -2,7 +2,7 @@ use alloc::sync::Arc;
 use core::ops::ControlFlow;
 
 use crate::{
-    BreakReason, Host, MapExecErr, ONE, Stopper, ZERO,
+    BaseHost, BreakReason, MapExecErr, ONE, Stopper, ZERO,
     continuation_stack::Continuation,
     execution::{ExecutionState, finalize_clock_cycle, finalize_clock_cycle_with_continuation},
     mast::{MastForest, MastNodeId, SplitNode},
@@ -24,7 +24,7 @@ pub(super) fn start_split_node<P, H, S, T>(
 ) -> ControlFlow<BreakReason>
 where
     P: Processor,
-    H: Host,
+    H: BaseHost,
     S: Stopper<Processor = P>,
     T: Tracer<Processor = P>,
 {
@@ -85,7 +85,7 @@ pub(super) fn finish_split_node<P, H, S, T>(
 ) -> ControlFlow<BreakReason>
 where
     P: Processor,
-    H: Host,
+    H: BaseHost,
     S: Stopper<Processor = P>,
     T: Tracer<Processor = P>,
 {

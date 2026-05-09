@@ -168,6 +168,41 @@ impl Assembler {
         self.trim_paths = yes;
         self
     }
+
+    pub(crate) fn invalid_invoke_target_report(
+        &self,
+        kind: InvokeKind,
+        callee: &InvocationTarget,
+        caller: GlobalItemIndex,
+    ) -> Report {
+        let span = callee.span();
+        let source_file = self.source_manager.get(span.source_id()).ok();
+        let context = SymbolResolutionContext {
+            span,
+            module: caller.module,
+            kind: Some(kind),
+        };
+
+        let path = match self.linker.resolve_invoke_target(&context, callee) {
+            Ok(
+                SymbolResolution::Exact { path, .. }
+                | SymbolResolution::Module { path, .. }
+                | SymbolResolution::External(path),
+            ) => Some(path.into_inner()),
+            Ok(SymbolResolution::Local(_) | SymbolResolution::MastRoot(_)) => None,
+            Err(err) => return Report::new(err),
+        }
+        .or_else(|| match callee {
+            InvocationTarget::Symbol(symbol) => Some(Path::from_ident(symbol).into_owned().into()),
+            InvocationTarget::Path(path) => Some(path.clone().into_inner()),
+            InvocationTarget::MastRoot(_) => None,
+        });
+
+        match path {
+            Some(path) => Report::new(LinkerError::InvalidInvokeTarget { span, source_file, path }),
+            None => Report::msg("invalid procedure reference: target is not a procedure"),
+        }
+    }
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -349,8 +384,7 @@ impl Assembler {
             TargetType::Kernel => {
                 if !self.kernel().is_empty() {
                     return Err(Report::msg(format!(
-                        "duplicate kernels present in the dependency graph: '{}@{
-    }' conflicts with another kernel we've already linked",
+                        "duplicate kernels present in the dependency graph: '{}@{}' conflicts with another kernel we've already linked",
                         &package.name, &package.version
                     )));
                 }
@@ -559,7 +593,12 @@ impl Assembler {
                         if !symbol.visibility().is_public() {
                             continue;
                         }
-                        module_path.join(symbol.name()).into()
+                        module_path
+                            .join(symbol.name())
+                            .canonicalize()
+                            .into_diagnostic()?
+                            .into_boxed_path()
+                            .into()
                     };
                     let export = self.export_symbol(
                         gid,
@@ -567,7 +606,9 @@ impl Assembler {
                         path.clone(),
                         &mut mast_forest_builder,
                     )?;
-                    exports.insert(path, export);
+                    if exports.insert(path.clone(), export).is_some() {
+                        return Err(Report::new(AssemblerError::DuplicateExportPath { path }));
+                    }
                 }
             }
 
@@ -625,6 +666,8 @@ impl Assembler {
                             InvokeKind::ProcRef,
                             SourceSpan::UNKNOWN,
                             item.digest,
+                            item.source_library_commitment(),
+                            item.source_root_id(),
                             mast_forest_builder,
                         )?;
                         ResolvedProcedure { node, signature: item.signature.clone() }
@@ -689,11 +732,48 @@ impl Assembler {
             },
 
             SymbolItem::Alias { alias, resolved } => {
-                // All aliases should've been resolved by now
-                let resolved = resolved.get().unwrap_or_else(|| {
-                    panic!("unresolved alias {symbol_path} targeting: {}", alias.target())
-                });
-                return self.export_symbol(resolved, module_kind, symbol_path, mast_forest_builder);
+                if let Some(resolved) = resolved.get() {
+                    return self.export_symbol(
+                        resolved,
+                        module_kind,
+                        symbol_path,
+                        mast_forest_builder,
+                    );
+                }
+
+                let Some(ResolvedProcedure { node, signature }) = self.resolve_target(
+                    InvokeKind::ProcRef,
+                    &alias.target().into(),
+                    gid,
+                    mast_forest_builder,
+                )?
+                else {
+                    return Err(self.unresolved_alias_report("export", &symbol_path, alias));
+                };
+
+                let digest = mast_forest_builder
+                    .get_mast_node(node)
+                    .expect("resolved alias export node must exist")
+                    .digest();
+                let pctx = ProcedureContext::new(
+                    gid,
+                    /* is_program_entrypoint= */ false,
+                    symbol_path.clone(),
+                    Visibility::Public,
+                    signature.clone(),
+                    module_kind.is_kernel(),
+                    self.source_manager.clone(),
+                );
+                let procedure = pctx.into_procedure(digest, node);
+                self.linker.register_procedure_root(gid, digest)?;
+                mast_forest_builder.insert_procedure(gid, procedure)?;
+
+                return Ok(LibraryExport::Procedure(ProcedureExport {
+                    node,
+                    path: symbol_path,
+                    signature: signature.map(Arc::unwrap_or_clone),
+                    attributes: Default::default(),
+                }));
             },
         };
 
@@ -815,8 +895,7 @@ impl Assembler {
         self.apply_debug_options(&mut mast_forest);
 
         let mast = Arc::new(mast_forest);
-        let entry: Arc<Path> =
-            ast::Path::exec_path().join(ast::ProcedureName::MAIN_PROC_NAME).into();
+        let entry: Arc<Path> = Path::exec_path().join(ast::ProcedureName::MAIN_PROC_NAME).into();
         let entrypoint = LibraryExport::Procedure(ProcedureExport {
             node: entrypoint,
             path: entry.clone(),
@@ -965,26 +1044,34 @@ impl Assembler {
                     mast_forest_builder.insert_procedure(procedure_gid, procedure)?;
                 },
                 SymbolItem::Alias { alias, resolved } => {
-                    let procedure_gid = resolved.get().expect("resolved alias");
-                    match self.linker[procedure_gid].item() {
-                        SymbolItem::Procedure(_) | SymbolItem::Compiled(ItemInfo::Procedure(_)) => {
+                    let path: Arc<Path> = module_path.join(alias.name().as_str()).into();
+                    let procedure_gid = match resolved.get() {
+                        Some(procedure_gid) => {
+                            match self.linker[procedure_gid].item() {
+                                SymbolItem::Procedure(_)
+                                | SymbolItem::Compiled(ItemInfo::Procedure(_)) => {},
+                                SymbolItem::Constant(_)
+                                | SymbolItem::Type(_)
+                                | SymbolItem::Compiled(_) => {
+                                    continue;
+                                },
+                                // A resolved alias will always refer to a non-alias item, this is
+                                // because when aliases are resolved, they are resolved
+                                // recursively. Had the alias chain been cyclical, we would have
+                                // raised an error already.
+                                SymbolItem::Alias { .. } => unreachable!(),
+                            }
+                            procedure_gid
                         },
-                        SymbolItem::Constant(_) | SymbolItem::Type(_) | SymbolItem::Compiled(_) => {
-                            continue;
-                        },
-                        // A resolved alias will always refer to a non-alias item, this is because
-                        // when aliases are resolved, they are resolved recursively. Had the alias
-                        // chain been cyclical, we would have raised an error already.
-                        SymbolItem::Alias { .. } => unreachable!(),
-                    }
-                    let path = module_path.join(alias.name().as_str()).into();
+                        None => procedure_gid,
+                    };
                     // A program entrypoint is never an alias
                     let is_program_entrypoint = false;
                     let mut pctx = ProcedureContext::new(
                         procedure_gid,
                         is_program_entrypoint,
                         path,
-                        ast::Visibility::Public,
+                        Visibility::Public,
                         None,
                         module_kind.is_kernel(),
                         self.source_manager.clone(),
@@ -1023,6 +1110,30 @@ impl Assembler {
         }
 
         Ok(())
+    }
+
+    fn unresolved_alias_report(
+        &self,
+        action: &'static str,
+        symbol_path: &Path,
+        alias: &ast::Alias,
+    ) -> Report {
+        let span = alias.target().span();
+        let reason = match alias.target() {
+            ast::AliasTarget::MastRoot(_) => {
+                "this digest target does not resolve to a known procedure"
+            },
+            ast::AliasTarget::Path(_) => "this alias target does not resolve to a concrete item",
+        };
+
+        RelatedLabel::error(format!(
+            "unable to {action} alias '{symbol_path}' targeting '{}'",
+            alias.target()
+        ))
+        .with_labeled_span(span, reason)
+        .with_help("aliases must resolve to a concrete item before they can be used")
+        .with_source_file(self.source_manager.get(span.source_id()).ok())
+        .into()
     }
 
     /// Compiles a single Miden Assembly procedure to its MAST representation.
@@ -1357,10 +1468,16 @@ impl Assembler {
         let resolved = self.linker.resolve_invoke_target(&caller, target)?;
         match resolved {
             SymbolResolution::MastRoot(mast_root) => {
+                // Literal MAST-root references in MASM do not carry any source-level provenance,
+                // so there is no exact source root or source package commitment to thread through
+                // here. We could try to guess based on linked libraries, but any such heuristic
+                // would be ambiguous when multiple procedures share the same digest.
                 let node = self.ensure_valid_procedure_mast_root(
                     kind,
                     target.span(),
                     mast_root.into_inner(),
+                    None,
+                    None,
                     mast_forest_builder,
                 )?;
                 Ok(Some(ResolvedProcedure { node, signature: None }))
@@ -1379,6 +1496,8 @@ impl Assembler {
                                 kind,
                                 target.span(),
                                 p.digest,
+                                p.source_library_commitment(),
+                                p.source_root_id(),
                                 mast_forest_builder,
                             )?;
                             Ok(Some(ResolvedProcedure { node, signature: p.signature.clone() }))
@@ -1410,6 +1529,8 @@ impl Assembler {
         kind: InvokeKind,
         span: SourceSpan,
         mast_root: Word,
+        source_library_commitment: Option<Word>,
+        source_root_id: Option<MastNodeId>,
         mast_forest_builder: &mut MastForestBuilder,
     ) -> Result<MastNodeId, Report> {
         // Get the procedure from the assembler
@@ -1435,7 +1556,11 @@ impl Assembler {
             }
         }
 
-        mast_forest_builder.ensure_external_link(mast_root)
+        mast_forest_builder.ensure_external_link_with_source(
+            mast_root,
+            source_library_commitment,
+            source_root_id,
+        )
     }
 }
 

@@ -18,9 +18,9 @@ bench = false
 doctest = false
 
 [features]
-default = ["std", "serde"]
+default = ["std"]
 arbitrary = ["std", "dep:proptest-derive", "dep:proptest", "miden-assembly-syntax/arbitrary"]
-std = ["miden-assembly-syntax/std", "miden-core/std", "serde/std", "thiserror/std"]
+std = ["miden-assembly-syntax/std", "miden-core/std", "serde?/std", "thiserror/std"]
 serde = ["dep:serde", "miden-assembly-syntax/serde", "miden-core/serde"]
 
 [dependencies]
@@ -30,7 +30,6 @@ miden-core.workspace = true
 miden-debug-types.workspace = true
 
 # External dependencies
-derive_more.workspace = true
 proptest = { workspace = true, optional = true }
 proptest-derive = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }

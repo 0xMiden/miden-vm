@@ -3,6 +3,8 @@ use core::{fmt, ops::Range};
 use miden_crypto::utils::{
     ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
 };
+#[cfg(feature = "arbitrary")]
+use proptest::prelude::*;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -14,6 +16,7 @@ use super::{
 /// A [Location] represents file and span information for portability across source managers
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
+#[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
 pub struct Location {
     /// The path to the source file in which the relevant source code can be found
     pub uri: Uri,
@@ -43,6 +46,10 @@ impl Location {
 /// A [FileLineCol] represents traditional file/line/column information for use in rendering.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true))
+)]
 pub struct FileLineCol {
     /// The path to the source file in which the relevant source code can be found
     pub uri: Uri,
@@ -102,5 +109,32 @@ impl Deserializable for FileLineCol {
         let line = LineNumber::read_from(source)?;
         let column = ColumnNumber::read_from(source)?;
         Ok(Self::new(uri, line, column))
+    }
+}
+
+#[cfg(feature = "arbitrary")]
+impl Arbitrary for Location {
+    type Parameters = ();
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        (any::<Uri>(), any::<u32>(), any::<u32>())
+            .prop_map(|(uri, start, end)| {
+                let (start, end) = if start <= end { (start, end) } else { (end, start) };
+                Self::new(uri, ByteIndex::new(start), ByteIndex::new(end))
+            })
+            .boxed()
+    }
+}
+
+#[cfg(feature = "arbitrary")]
+impl Arbitrary for FileLineCol {
+    type Parameters = ();
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        (any::<Uri>(), any::<LineNumber>(), any::<ColumnNumber>())
+            .prop_map(|(uri, line, column)| Self::new(uri, line, column))
+            .boxed()
     }
 }

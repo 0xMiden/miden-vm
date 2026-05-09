@@ -450,7 +450,7 @@ impl Validate for ProjectFile {
                         entry.insert(None);
                     },
                     Entry::Occupied(mut entry) => {
-                        let path_span = target.path.as_ref().map(|p| p.span()).unwrap_or(span);
+                        let path_span = target.path.as_ref().map(Span::span).unwrap_or(span);
                         let conflict_label = Label::new(path_span, "conflict occurs here");
                         let path = entry.key().clone();
                         match entry.get_mut() {
@@ -482,7 +482,7 @@ impl Validate for ProjectFile {
                     entry.insert(None);
                 },
                 Entry::Occupied(mut entry) => {
-                    let ns_span = target.name.as_ref().map(|ns| ns.span()).unwrap_or(span);
+                    let ns_span = target.name.as_ref().map(Span::span).unwrap_or(span);
                     let conflict_label = Label::new(ns_span, "conflict occurs here");
                     let ns = entry.key().clone();
                     match entry.get_mut() {
@@ -509,7 +509,7 @@ impl Validate for ProjectFile {
 
         if !invalid_config.is_empty() {
             return Err(ProjectFileError::InvalidBuildTargets {
-                source_file: source.clone(),
+                source_file: source,
                 related: invalid_config,
             }
             .into());

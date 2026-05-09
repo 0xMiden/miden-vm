@@ -4,10 +4,10 @@ use core::{cell::Cell, ops::Index};
 use miden_assembly_syntax::{
     Path,
     ast::{
-        self, AliasTarget, ItemIndex, LocalSymbol, LocalSymbolResolver, ModuleIndex, ModuleKind,
+        AliasTarget, ItemIndex, LocalSymbol, LocalSymbolResolver, ModuleIndex, ModuleKind,
         SymbolResolution, SymbolResolutionError, SymbolTable,
     },
-    debuginfo::{SourceManager, Span, Spanned},
+    debuginfo::{SourceManager, SourceSpan, Span, Spanned},
 };
 
 use super::{AdviceMap, LinkStatus, Symbol, SymbolItem, SymbolResolver};
@@ -182,7 +182,8 @@ impl LinkModule {
         resolver: &SymbolResolver<'_>,
     ) -> Result<SymbolResolution, Box<SymbolResolutionError>> {
         let container = LinkModuleIter { resolver, module: self };
-        let local_resolver = LocalSymbolResolver::new(container, resolver.source_manager_arc());
+        let local_resolver =
+            LocalSymbolResolver::new(container, resolver.source_manager_arc()).map_err(Box::new)?;
         local_resolver.resolve(name).map_err(Box::new)
     }
 
@@ -193,7 +194,8 @@ impl LinkModule {
         resolver: &SymbolResolver<'_>,
     ) -> Result<SymbolResolution, Box<SymbolResolutionError>> {
         let container = LinkModuleIter { resolver, module: self };
-        let local_resolver = LocalSymbolResolver::new(container, resolver.source_manager_arc());
+        let local_resolver =
+            LocalSymbolResolver::new(container, resolver.source_manager_arc()).map_err(Box::new)?;
         local_resolver.resolve_path(path).map_err(Box::new)
     }
 }
@@ -230,7 +232,7 @@ impl<'a, 'b: 'a> SymbolTable for LinkModuleIter<'a, 'b> {
                     | SymbolItem::Constant(_)
                     | SymbolItem::Type(_) => {
                         let path = self.module.path.join(symbol.name());
-                        ast::LocalSymbol::Item {
+                        LocalSymbol::Item {
                             name: symbol.name().clone(),
                             resolved: SymbolResolution::Exact {
                                 gid,
@@ -244,7 +246,7 @@ impl<'a, 'b: 'a> SymbolTable for LinkModuleIter<'a, 'b> {
                         if let Some(resolved) = resolved.get() {
                             let path = self.resolver.item_path(gid);
                             let span = name.span();
-                            ast::LocalSymbol::Import {
+                            LocalSymbol::Import {
                                 name,
                                 resolution: Ok(SymbolResolution::Exact {
                                     gid: resolved,
@@ -253,7 +255,7 @@ impl<'a, 'b: 'a> SymbolTable for LinkModuleIter<'a, 'b> {
                             }
                         } else {
                             match alias.target() {
-                                AliasTarget::MastRoot(root) => ast::LocalSymbol::Import {
+                                AliasTarget::MastRoot(root) => LocalSymbol::Import {
                                     name,
                                     resolution: Ok(SymbolResolution::MastRoot(*root)),
                                 },
@@ -270,7 +272,7 @@ impl<'a, 'b: 'a> SymbolTable for LinkModuleIter<'a, 'b> {
                                         path.as_deref(),
                                         &source_manager,
                                     );
-                                    ast::LocalSymbol::Import { name, resolution }
+                                    LocalSymbol::Import { name, resolution }
                                 },
                             }
                         }
@@ -279,5 +281,22 @@ impl<'a, 'b: 'a> SymbolTable for LinkModuleIter<'a, 'b> {
             })
             .collect::<Vec<_>>();
         symbols.into_iter()
+    }
+
+    fn checked_symbols(
+        &self,
+        source_manager: Arc<dyn SourceManager>,
+    ) -> Result<Self::SymbolIter, SymbolResolutionError> {
+        if self.module.symbols.len() > ItemIndex::MAX_ITEMS {
+            let span = self
+                .module
+                .symbols
+                .first()
+                .map(|symbol| symbol.name().span())
+                .unwrap_or(SourceSpan::UNKNOWN);
+            Err(SymbolResolutionError::too_many_items_in_module(span, &*source_manager))
+        } else {
+            Ok(self.symbols(source_manager))
+        }
     }
 }

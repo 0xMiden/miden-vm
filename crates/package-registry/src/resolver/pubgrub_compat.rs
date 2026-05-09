@@ -797,8 +797,6 @@ mod test {
     use std::{collections::HashSet, eprintln, format, ops::RangeBounds};
 
     use super::*;
-    use crate::semver;
-
     const OPS: &[&str] = &["^", "~", "=", "<", ">", "<=", ">="];
 
     #[test]
@@ -819,15 +817,15 @@ mod test {
                 "18446744073709551615.18446744073709551615.18446744073709551615",
             ] {
                 let raw_req = format!("{op}{psot}");
-                let req = semver::VersionReq::parse(&raw_req).unwrap();
+                let req = VersionReq::parse(&raw_req).unwrap();
                 let pver: SemverPubgrub = (&req).into();
                 let bounding_range = pver.bounding_range();
                 let raw_ver = "18446744073709551615.1.0";
-                let ver = semver::Version::parse(raw_ver).unwrap();
+                let ver = Version::parse(raw_ver).unwrap();
                 let mat = req.matches(&ver);
                 if mat != pver.contains(&ver) {
-                    eprintln!("{}", ver);
-                    eprintln!("{}", req);
+                    eprintln!("{ver}");
+                    eprintln!("{req}");
                     assert_eq!(mat, pver.contains(&ver));
                 }
 
@@ -859,15 +857,15 @@ mod test {
                 "0.0.2-r, ^0.0.1",
             ] {
                 let raw_req = format!("{op}{psot}");
-                let req = semver::VersionReq::parse(&raw_req).unwrap();
+                let req = VersionReq::parse(&raw_req).unwrap();
                 let pver: SemverPubgrub = (&req).into();
                 let bounding_range = pver.bounding_range();
                 for raw_ver in ["0.0.0-0", "0.0.1-z0", "0.0.2-z0", "0.9.8-z", "1.0.1-z0"] {
-                    let ver = semver::Version::parse(raw_ver).unwrap();
+                    let ver = Version::parse(raw_ver).unwrap();
                     let mat = req.matches(&ver);
                     if mat != pver.contains(&ver) {
-                        eprintln!("{}", ver);
-                        eprintln!("{}", req);
+                        eprintln!("{ver}");
+                        eprintln!("{req}");
                         assert_eq!(mat, pver.contains(&ver));
                     }
 
@@ -886,7 +884,7 @@ mod test {
             "0.0.2", "0.1.0-0", "0.1.0-r", "0.1.0", "0.1.1", "0.2.0-0", "0.2.0-r", "0.2.0",
             "1.0.0-0", "1.0.0-r", "1.0.0", "1.1.0", "2.0.0-0", "2.0.0-r", "2.0.0", "3.0.0",
         ];
-        let vers = raw_vers.map(|raw_ver| semver::Version::parse(raw_ver).unwrap());
+        let vers = raw_vers.map(|raw_ver| Version::parse(raw_ver).unwrap());
         assert!(vers.is_sorted());
         assert!(vers.is_sorted_by_key(SemverCompatibility::from));
         for op in OPS {
@@ -909,7 +907,7 @@ mod test {
                 "1.0.0-r, <=2.0.0-0",
             ] {
                 let raw_req = format!("{op}{psot}");
-                let req = semver::VersionReq::parse(&raw_req).unwrap();
+                let req = VersionReq::parse(&raw_req).unwrap();
                 let pver: SemverPubgrub = (&req).into();
 
                 let set: HashSet<_> = vers
@@ -917,8 +915,8 @@ mod test {
                     .filter_map(|ver| {
                         let mat = req.matches(ver);
                         if mat != pver.contains(ver) {
-                            eprintln!("{}", ver);
-                            eprintln!("{}", req);
+                            eprintln!("{ver}");
+                            eprintln!("{req}");
                             assert_eq!(mat, pver.contains(ver));
                         }
                         let cap: SemverCompatibility = ver.into();
@@ -939,10 +937,10 @@ mod test {
             "0.0.2", "0.1.0-0", "0.1.0-r", "0.1.0", "0.1.1", "0.2.0-0", "0.2.0-r", "0.2.0",
             "1.0.0-0", "1.0.0-r", "1.0.0", "1.1.0", "2.0.0-0", "2.0.0-r", "2.0.0", "3.0.0",
         ];
-        let vers = raw_vers.map(|raw_ver| semver::Version::parse(raw_ver).unwrap());
+        let vers = raw_vers.map(|raw_ver| Version::parse(raw_ver).unwrap());
         assert!(vers.is_sorted());
         assert!(vers.is_sorted_by_key(SemverCompatibility::from));
-        let reqs = vers.clone().map(|v| SemverPubgrub::singleton(v.clone()));
+        let reqs = vers.clone().map(SemverPubgrub::singleton);
         for pver in &reqs {
             pver.as_singleton().unwrap();
             // Singletons can only match one thing so they definitely only match one compatibility
@@ -956,7 +954,7 @@ mod test {
 
         for preq in req_unions {
             let set: HashSet<SemverCompatibility> =
-                vers.iter().filter(|ver| preq.contains(ver)).map(|ver| ver.into()).collect();
+                vers.iter().filter(|ver| preq.contains(ver)).map(Into::into).collect();
             let only_one_comp = preq.only_one_compatibility_range();
             assert_eq!(set.len() <= 1, only_one_comp.is_some());
             if only_one_comp.is_none() {

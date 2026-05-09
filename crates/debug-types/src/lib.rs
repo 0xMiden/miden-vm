@@ -11,11 +11,15 @@ mod source_file;
 mod source_manager;
 mod span;
 
+#[cfg(feature = "arbitrary")]
+use alloc::vec;
 use alloc::{string::String, sync::Arc};
 
 use miden_crypto::utils::{
     ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
 };
+#[cfg(feature = "arbitrary")]
+use proptest::prelude::*;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "serde")]
@@ -41,6 +45,10 @@ pub use self::{
 /// the location of a source file, whether on disk, on the network, or elsewhere.
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true))
+)]
 pub struct Uri(Arc<str>);
 
 impl Uri {
@@ -184,6 +192,35 @@ impl core::str::FromStr for Uri {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(Self::from(s))
+    }
+}
+
+#[cfg(feature = "arbitrary")]
+impl Arbitrary for Uri {
+    type Parameters = ();
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        use alloc::string::String;
+
+        proptest::collection::vec(
+            proptest::prop_oneof![
+                proptest::char::range('a', 'z'),
+                proptest::char::range('A', 'Z'),
+                proptest::char::range('0', '9'),
+                Just('/'),
+                Just(':'),
+                Just('.'),
+                Just('-'),
+                Just('_'),
+                Just('#'),
+                Just('?'),
+                Just('@'),
+            ],
+            1..48,
+        )
+        .prop_map(|chars| Self::from(chars.into_iter().collect::<String>()))
+        .boxed()
     }
 }
 

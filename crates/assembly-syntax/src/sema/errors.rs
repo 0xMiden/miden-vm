@@ -234,6 +234,8 @@ impl From<SymbolResolutionError> for SemanticAnalysisError {
 /// Represents a system limit that was exceeded
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum LimitKind {
+    /// The total number of items in a module
+    Items,
     /// The total number of procedures in a module
     Procedures,
     /// The total number of procedure locals
@@ -251,6 +253,7 @@ pub enum LimitKind {
 impl fmt::Display for LimitKind {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
+            Self::Items => f.write_str("too many items in module"),
             Self::Procedures => f.write_str("too many procedures in module"),
             Self::Locals => f.write_str("too many procedure locals"),
             Self::Imports => f.write_str("too many imported procedures"),

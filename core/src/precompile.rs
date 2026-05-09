@@ -118,6 +118,10 @@ impl Deserializable for PrecompileRequest {
         let calldata = Vec::<u8>::read_from(source)?;
         Ok(Self { event_id, calldata })
     }
+
+    fn min_serialized_size() -> usize {
+        EventId::min_serialized_size() + Vec::<u8>::min_serialized_size()
+    }
 }
 
 // PRECOMPILE TRANSCRIPT TYPES

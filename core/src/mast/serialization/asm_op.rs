@@ -199,8 +199,7 @@ mod tests {
     fn test_asm_op_roundtrip_with_location() {
         let location =
             Location::new(Uri::new("test://file.masm"), ByteIndex::new(10), ByteIndex::new(20));
-        let asm_op =
-            AssemblyOp::new(Some(location.clone()), "my_proc".to_string(), 3, "mul".to_string());
+        let asm_op = AssemblyOp::new(Some(location), "my_proc".to_string(), 3, "mul".to_string());
 
         let mut builder = AsmOpDataBuilder::new();
         builder.add_asm_op(&asm_op);
@@ -237,9 +236,9 @@ mod tests {
         // Verify all restore correctly
         for (i, (info, original)) in infos.iter().zip([&asm_op1, &asm_op2, &asm_op3]).enumerate() {
             let restored = info.try_into_asm_op(&string_table, &data).unwrap();
-            assert_eq!(restored.context_name(), original.context_name(), "asm_op {}", i);
-            assert_eq!(restored.op(), original.op(), "asm_op {}", i);
-            assert_eq!(restored.num_cycles(), original.num_cycles(), "asm_op {}", i);
+            assert_eq!(restored.context_name(), original.context_name(), "asm_op {i}");
+            assert_eq!(restored.op(), original.op(), "asm_op {i}");
+            assert_eq!(restored.num_cycles(), original.num_cycles(), "asm_op {i}");
         }
     }
 

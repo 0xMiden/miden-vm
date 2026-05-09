@@ -5,11 +5,11 @@ use miden::core::stark::random_coin
 #!
 #! This also computes Q^z(alpha) and Q^gz(alpha) where:
 #!
-#! Q^z(alpha) = (q_z_0, q_z_1) = \sum_{i=0}^{n+m+l} S_i * alpha^i
+#! Q^z(alpha) = (q_z_0, q_z_1) = \sum_{i=0}^{n+m+l} S_i * alpha^{n+m+l-i}
 #!
 #! and
 #!
-#! Q^gz(alpha) = (q_gz_0, q_gz_1) = \sum_{i=0}^{n+m+l} T_i * alpha^i
+#! Q^gz(alpha) = (q_gz_0, q_gz_1) = \sum_{i=0}^{n+m+l} T_i * alpha^{n+m+l-i}
 #!
 #! where:
 #!
@@ -36,12 +36,12 @@ pub proc load_and_horner_eval_ood_frames
     # `core::stark::random_coin::generate_deep_composition_random_coefficients`
 
     ## Load the random challenge non-deterministically
-    adv_push.2
-    # => [alpha_1, alpha_0]
+    adv_push adv_push
+    # => [alpha_0, alpha_1]
 
     # Save the random challenge
-    dup.1 dup.1
-    exec.constants::deep_rand_alpha_nd_ptr mem_storew_be
+    push.0.0 movup.3 movup.3
+    exec.constants::deep_rand_alpha_nd_ptr mem_storew_le
     # => [Y]
 
     # --- Compute Q^z(alpha) --------------------------------------------------
@@ -58,53 +58,56 @@ pub proc load_and_horner_eval_ood_frames
 
     ## 2) Process the fully aligned OOD `current` evaluations at z of the execution trace
     ##    and constraints polynomials evaluations.
-    ##    Note that, by the assumption on the widths of committed traces, the capacity portion
-    ##    of the sponge state is always initialized to `[0, 0, 0, 0]`.
+    ##    We load the random coin state and overwrite the rate with OOD blocks; capacity carries over.
 
-    ### a) Set up the hasher state
-    padw padw
-    # => [ZERO, 0, 0, 0, 0, U, Y]
-    movupw.3
-    # => [Y, ZERO, 0, 0, 0, 0, U]
+    ### a) Load the random coin state as the initial sponge state.
+    push.0 exec.constants::random_coin_output_len_ptr mem_store
+    push.0 exec.constants::random_coin_input_len_ptr mem_store
+    exec.random_coin::load_random_coin_state
+    # => [R0, R1, C, ood_frame_ptr, alpha_ptr, 0, 0]
 
     ### b) Process the `current` OOD evaluations
     exec.process_row_ood_evaluations
-    # => [Y, Y, C, ood_frame_ptr, alpha_ptr, acc1, acc0]
+    # => [Y, Y, C, ood_frame_ptr, alpha_ptr, acc0, acc1]
 
     ### c) Save -Q^z(alpha)
     swapw.3
-    # => [ood_frame_ptr, alpha_ptr, acc1, acc0, Y, C, Y]
+    # => [ood_frame_ptr, alpha_ptr, acc0, acc1, Y, C, Y]
     movup.3 neg
     movup.3 neg
     push.0.0
-    exec.constants::ood_fixed_term_horner_evaluations_ptr mem_storew_be
-    # => [0, 0, -acc1, -acc0, ood_frame_ptr, alpha_ptr, Y, C, Y]
+    movup.2
+    movup.3
+    swap.1
+    exec.constants::ood_fixed_term_horner_evaluations_ptr mem_storew_le
+    dropw
+    push.0.0
+    movdn.3
+    movdn.3
+    # => [ood_frame_ptr, alpha_ptr, 0, 0, Y, C, Y]
 
     # --- Compute Q^gz(alpha) -------------------------------------------------
-
-    # Reset the Horner accumulator
-    movdn.5 movdn.5 drop drop
-    # => [ood_frame_ptr, alpha_ptr, 0, 0, Y, C, Y]
 
     # Load the `next` trace polynomials OOD evaluations.
     swapw.3
     # => [Y, Y, C, ood_frame_ptr, alpha_ptr, 0, 0]
     exec.process_row_ood_evaluations
-    # => [Y, D, C, ood_frame_ptr, alpha_ptr, acc1, acc0]
+    # => [R0, R1, C, ood_frame_ptr, alpha_ptr, acc0, acc1]
 
-    # Reseed with the digest of the OOD evaluations
-    swapw
-    exec.random_coin::reseed
-    # => [Y, C, ood_frame_ptr, alpha_ptr, acc1, acc0]
+    # Update the random coin state with the OOD stream digest.
+    exec.random_coin::store_random_coin_state
+    push.0 exec.constants::random_coin_input_len_ptr mem_store
+    push.8 exec.constants::random_coin_output_len_ptr mem_store
+    # => [ood_frame_ptr, alpha_ptr, acc0, acc1]
 
-    # Negate Q^z(alpha) and save it
-    dropw dropw drop drop
-    # => [acc1, acc0]
-    neg
-    exec.constants::ood_fixed_term_horner_evaluations_ptr add.3 mem_store
-    # => [acc0]
+    # Negate Q^gz(alpha) and save it
+    drop drop
+    # => [acc0, acc1]
     neg
     exec.constants::ood_fixed_term_horner_evaluations_ptr add.2 mem_store
+    # => [acc1]
+    neg
+    exec.constants::ood_fixed_term_horner_evaluations_ptr add.3 mem_store
     # => []
 end
 
@@ -115,8 +118,8 @@ end
 #! into the hasher state and simultaneously computing a random linear combination using Horner
 #! evaluation.
 #!
-#! Inputs:  [R2, R1, C, ptr, acc1, acc0]
-#! Outputs: [R2, R1, C, ptr, acc1`, acc0`]
+#! Inputs:  [R0, R1, C, ptr, acc0, acc1]
+#! Outputs: [R0, R1, C, ptr, acc0`, acc1`]
 proc process_row_ood_evaluations
     exec.constants::get_procedure_digest_process_row_ood_evaluations_ptr dynexec
 end

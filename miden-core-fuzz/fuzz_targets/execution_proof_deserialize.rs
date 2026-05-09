@@ -8,6 +8,7 @@ use libfuzzer_sys::fuzz_target;
 use miden_core::{proof::ExecutionProof, serde::Deserializable};
 
 fuzz_target!(|data: &[u8]| {
+    let _ = ExecutionProof::from_bytes(data);
     let _ = ExecutionProof::read_from_bytes(data);
     let _ = Vec::<ExecutionProof>::read_from_bytes(data);
     let _ = Option::<ExecutionProof>::read_from_bytes(data);

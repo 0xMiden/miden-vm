@@ -44,6 +44,16 @@ pub enum LinkerError {
     #[error("duplicate definition found for module '{path}'")]
     #[diagnostic()]
     DuplicateModule { path: Arc<Path> },
+    #[error("ambiguous module path resolution for '{path}'")]
+    #[diagnostic(help("matching module prefixes: {}", matches.join(", ")))]
+    AmbiguousModulePath {
+        #[label]
+        span: SourceSpan,
+        #[source_code]
+        source_file: Option<Arc<SourceFile>>,
+        path: Arc<Path>,
+        matches: Box<[String]>,
+    },
     #[error("undefined module '{path}'")]
     #[diagnostic()]
     UndefinedModule {
@@ -68,6 +78,15 @@ pub enum LinkerError {
     #[diagnostic()]
     InvalidSysCallTarget {
         #[label("call occurs here")]
+        span: SourceSpan,
+        #[source_code]
+        source_file: Option<Arc<SourceFile>>,
+        callee: Arc<Path>,
+    },
+    #[error("kernel procedure '{callee}' can only be invoked via syscall")]
+    #[diagnostic()]
+    KernelProcNotSyscall {
+        #[label("non-syscall reference to kernel procedure")]
         span: SourceSpan,
         #[source_code]
         source_file: Option<Arc<SourceFile>>,

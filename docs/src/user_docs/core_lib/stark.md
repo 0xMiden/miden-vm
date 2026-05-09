@@ -12,6 +12,7 @@ These helpers expose constants, memory layout pointers, and routines shared acro
 
 | Module | Description |
 | --- | --- |
+| `miden::core::stark` | Top-level entry point that re-exports `verifier::verify`; the public STARK verification procedure. |
 | `miden::core::stark::constants` | Defines memory layout constants and general constants used by the verifier. |
 | `miden::core::stark::random_coin` | Contains procedures for sampling and updating the Poseidon2-based random coin used throughout the verifier. |
 | `miden::core::stark::deep_queries` | Implements helper procedures for constructing DEEP queries. |
