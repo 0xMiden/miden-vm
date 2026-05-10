@@ -9,10 +9,10 @@ use masm_decompiler::{
 use super::{
     domain::AdviceFact,
     shared::{
-        Env, expr_output_fact, expr_u32_validity, intrinsic_positional_u32_arg_range,
-        intrinsic_requires_u32_precondition, stmt_span,
+        Env, collect_expr_sink_fact, expr_output_fact, expr_u32_validity,
+        intrinsic_positional_u32_arg_range, intrinsic_requires_u32_precondition, stmt_span,
     },
-    summary::{AdviceDiagnostic, AdviceDiagnosticsMap, AdviceSummaryMap, diagnostic_from_fact},
+    summary::{AdviceDiagnostic, AdviceDiagnosticContext, AdviceDiagnosticsMap, AdviceSummaryMap},
     walker::{self, AdviceCapability, AdviceEffect},
 };
 use crate::prepared::PreparedProc;
@@ -24,14 +24,14 @@ pub(super) fn collect_u32_diagnostics(
     type_summaries: &TypeSummaryMap,
 ) -> AdviceDiagnosticsMap {
     walker::collect_diagnostics(prepared, provenance_summaries, |proc_path| U32Capability {
-        proc_path,
+        diagnostics: AdviceDiagnosticContext::new(proc_path),
         type_summaries,
     })
 }
 
 /// Intraprocedural U32 diagnostic collector for one procedure.
 struct U32Capability<'a> {
-    proc_path: SymbolPath,
+    diagnostics: AdviceDiagnosticContext,
     type_summaries: &'a TypeSummaryMap,
 }
 
@@ -43,7 +43,7 @@ impl AdviceCapability for U32Capability<'_> {
             Stmt::Assign { span, expr, .. } => {
                 let sink_fact = expr_u32_sink_fact(expr, env);
                 if sink_fact.has_concrete_sources() {
-                    effect.push_diagnostic(self.new_diagnostic(
+                    effect.push_diagnostic(self.diagnostics.diagnostic_for_fact(
                         *span,
                         "unconstrained advice reaches a u32 operation",
                         &sink_fact,
@@ -60,7 +60,7 @@ impl AdviceCapability for U32Capability<'_> {
             Stmt::Intrinsic { span, intrinsic } => {
                 let sink_fact = intrinsic_u32_sink_fact(intrinsic, env);
                 if sink_fact.has_concrete_sources() {
-                    effect.push_diagnostic(self.new_diagnostic(
+                    effect.push_diagnostic(self.diagnostics.diagnostic_for_fact(
                         *span,
                         "unconstrained advice reaches a u32 intrinsic",
                         &sink_fact,
@@ -70,7 +70,7 @@ impl AdviceCapability for U32Capability<'_> {
             Stmt::If { cond, .. } => {
                 let sink_fact = expr_u32_sink_fact(cond, env);
                 if sink_fact.has_concrete_sources() {
-                    effect.push_diagnostic(self.new_diagnostic(
+                    effect.push_diagnostic(self.diagnostics.diagnostic_for_fact(
                         stmt_span(stmt),
                         "unconstrained advice reaches a u32 operation",
                         &sink_fact,
@@ -80,7 +80,7 @@ impl AdviceCapability for U32Capability<'_> {
             Stmt::While { cond, .. } => {
                 let sink_fact = expr_u32_sink_fact(cond, env);
                 if sink_fact.has_concrete_sources() {
-                    effect.push_diagnostic(self.new_diagnostic(
+                    effect.push_diagnostic(self.diagnostics.diagnostic_for_fact(
                         stmt_span(stmt),
                         "unconstrained advice reaches a u32 operation",
                         &sink_fact,
@@ -104,16 +104,6 @@ impl AdviceCapability for U32Capability<'_> {
 }
 
 impl U32Capability<'_> {
-    /// Create a diagnostic whose related source spans are derived from a fact.
-    fn new_diagnostic(
-        &self,
-        span: miden_debug_types::SourceSpan,
-        message: impl Into<String>,
-        fact: &AdviceFact,
-    ) -> AdviceDiagnostic {
-        diagnostic_from_fact(self.proc_path.clone(), span, message, fact)
-    }
-
     /// Emit diagnostics for call arguments whose callee expects `U32`.
     fn call_diagnostics(
         &self,
@@ -135,7 +125,7 @@ impl U32Capability<'_> {
                 continue;
             }
             let callee = SymbolPath::new(target.to_string());
-            let diagnostic = self.new_diagnostic(
+            let diagnostic = self.diagnostics.diagnostic_for_fact(
                 span,
                 format!(
                     "argument {index} to `{callee}` expects U32 and may contain unconstrained advice"
@@ -150,42 +140,41 @@ impl U32Capability<'_> {
 
 /// Return the advice fact feeding any `U32` sink nested in this expression.
 fn expr_u32_sink_fact(expr: &Expr, env: &Env) -> AdviceFact {
+    collect_expr_sink_fact(expr, env, &u32_node_sink_fact)
+}
+
+/// Return the advice fact feeding a `U32` sink at the current expression node.
+fn u32_node_sink_fact(expr: &Expr, env: &Env) -> AdviceFact {
     match expr {
-        Expr::Var(_) | Expr::True | Expr::False | Expr::Constant(_) | Expr::EqW { .. } => {
-            AdviceFact::bottom()
-        },
-        Expr::Ternary { cond, then_expr, else_expr } => expr_u32_sink_fact(cond, env)
-            .join(&expr_u32_sink_fact(then_expr, env))
-            .join(&expr_u32_sink_fact(else_expr, env)),
         Expr::Unary(op, inner) => match op {
             UnOp::U32Not | UnOp::U32Clz | UnOp::U32Ctz | UnOp::U32Clo | UnOp::U32Cto => {
-                expr_u32_sink_fact(inner, env).join(&u32_operand_fact(inner, env))
+                u32_operand_fact(inner, env)
             },
-            _ => expr_u32_sink_fact(inner, env),
+            _ => AdviceFact::bottom(),
         },
-        Expr::Binary(op, lhs, rhs) => {
-            let nested = expr_u32_sink_fact(lhs, env).join(&expr_u32_sink_fact(rhs, env));
-            let sink = match op {
-                BinOp::U32And
-                | BinOp::U32Or
-                | BinOp::U32Xor
-                | BinOp::U32Shl
-                | BinOp::U32Shr
-                | BinOp::U32Rotr
-                | BinOp::U32Lt
-                | BinOp::U32Lte
-                | BinOp::U32Gt
-                | BinOp::U32Gte
-                | BinOp::U32WrappingAdd
-                | BinOp::U32WrappingSub
-                | BinOp::U32WrappingMul => {
-                    u32_operand_fact(lhs, env).join(&u32_operand_fact(rhs, env))
-                },
-                BinOp::U32Exp => u32_operand_fact(rhs, env),
-                _ => AdviceFact::bottom(),
-            };
-            nested.join(&sink)
+        Expr::Binary(op, lhs, rhs) => match op {
+            BinOp::U32And
+            | BinOp::U32Or
+            | BinOp::U32Xor
+            | BinOp::U32Shl
+            | BinOp::U32Shr
+            | BinOp::U32Rotr
+            | BinOp::U32Lt
+            | BinOp::U32Lte
+            | BinOp::U32Gt
+            | BinOp::U32Gte
+            | BinOp::U32WrappingAdd
+            | BinOp::U32WrappingSub
+            | BinOp::U32WrappingMul => u32_operand_fact(lhs, env).join(&u32_operand_fact(rhs, env)),
+            BinOp::U32Exp => u32_operand_fact(rhs, env),
+            _ => AdviceFact::bottom(),
         },
+        Expr::Var(_)
+        | Expr::True
+        | Expr::False
+        | Expr::Constant(_)
+        | Expr::Ternary { .. }
+        | Expr::EqW { .. } => AdviceFact::bottom(),
     }
 }
 
@@ -214,5 +203,56 @@ fn u32_operand_fact(expr: &Expr, env: &Env) -> AdviceFact {
         AdviceFact::bottom()
     } else {
         expr_output_fact(expr, env)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use masm_decompiler::{Constant, ValueId, Var};
+    use miden_debug_types::{SourceId, SourceSpan};
+
+    use super::*;
+
+    fn var(id: u64) -> Var {
+        Var::new(ValueId::from(id), id as usize)
+    }
+
+    fn span(start: u32) -> SourceSpan {
+        SourceSpan::new(SourceId::new(0), start..start + 1)
+    }
+
+    #[test]
+    fn u32_sink_fact_traverses_nested_ternary_unary_and_binary_expressions() {
+        let advice = var(0);
+        let clean = var(1);
+        let advice_span = span(10);
+
+        let mut env = Env::default();
+        env.set_var_fact(&advice, AdviceFact::from_source(advice_span));
+
+        let expr = Expr::Binary(
+            BinOp::Add,
+            Box::new(Expr::Unary(
+                UnOp::Neg,
+                Box::new(Expr::Ternary {
+                    cond: Box::new(Expr::Var(clean.clone())),
+                    then_expr: Box::new(Expr::Unary(
+                        UnOp::Not,
+                        Box::new(Expr::Binary(
+                            BinOp::U32And,
+                            Box::new(Expr::Var(advice.clone())),
+                            Box::new(Expr::Var(clean)),
+                        )),
+                    )),
+                    else_expr: Box::new(Expr::Constant(Constant::Felt(0))),
+                }),
+            )),
+            Box::new(Expr::Constant(Constant::Felt(1))),
+        );
+
+        let fact = expr_u32_sink_fact(&expr, &env);
+
+        assert_eq!(fact.source_spans.len(), 1);
+        assert!(fact.source_spans.contains(&advice_span));
     }
 }
