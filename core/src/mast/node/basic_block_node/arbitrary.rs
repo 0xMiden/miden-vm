@@ -143,29 +143,73 @@ impl Arbitrary for BasicBlockNode {
 
 // ---------- Optional: MastForest strategy (behind feature gate) ----------
 
-/// Parameters for generating MastForest instances
+/// Controls the generation mode for `MastForest` samples.
 ///
-/// # Execution Compatibility
+/// The default mode (`Executable`) emits forests that satisfy the four executability closure
+/// invariants required by the Miden VM (dyn-suppression, external-resolution,
+/// external-acyclicity, and kernel-closure). The `StructureOnly` mode preserves the
+/// pre-existing, structure-focused generator behaviour used by serialization and merging
+/// tests and does not enforce those invariants.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum MastForestGenerationMode {
+    /// Generate forests that are guaranteed to be executable by the Miden VM.
+    #[default]
+    Executable,
+    /// Generate forests that exercise the full structural surface (including dyn, unresolved
+    /// externals, and free-form syscalls) without enforcing executability invariants.
+    StructureOnly,
+}
+
+/// Parameters for generating `MastForest` instances via proptest.
 ///
-/// Generated forests will only be executable if certain node types are excluded:
-/// - **Syscalls**: Require matching kernel procedures. Set `max_syscalls = 0` for executable
-///   forests.
-/// - **Externals**: Use random digests that won't match valid procedures. Set `max_externals = 0`
-///   for executable forests.
-/// - **Dyn nodes**: Leave junk on the stack and cannot execute properly. Set `max_dyns = 0` for
-///   executable forests.
+/// # Default behaviour: executable forests
 ///
-/// The default parameters create executable forests by setting all three of the above to 0.
+/// `MastForestParams::default()` selects [`MastForestGenerationMode::Executable`], so every
+/// sample is executable by the Miden VM against a co-generated (or caller-supplied)
+/// [`Kernel`]. Callers that only need the forest can keep using
+/// `<MastForest as Arbitrary>::arbitrary_with`; callers that also need the paired kernel
+/// should use the `(MastForest, Kernel)` strategy exposed alongside this struct.
 ///
-/// # Non-executable Forests
+/// # Executability guarantees
 ///
-/// If you want to generate forests for testing assembly or parsing without execution:
-/// - Set `max_syscalls > 0` to include syscall nodes
-/// - Set `max_externals > 0` to include external nodes
-/// - Set `max_dyns > 0` to include dynamic nodes
+/// When `mode` is [`MastForestGenerationMode::Executable`], the generator enforces the
+/// following four closure invariants on every emitted sample:
 ///
-/// These forests are useful for testing MAST structure and serialization but will fail during
-/// execution.
+/// 1. **No dyn nodes.** No `DynNode` instances are emitted, regardless of `max_dyns`. The
+///    MAST-level generator cannot synthesise valid operand-stack preconditions for dyn
+///    targets (see *Future work* below).
+/// 2. **External-resolution.** Every external node's digest equals the MAST root of a
+///    procedure root already present in the same forest, so the VM can resolve the call
+///    without additional forest registration.
+/// 3. **External-acyclicity.** The directed graph induced by external nodes on the forest's
+///    procedure roots is a DAG; no external resolves, transitively, back to the procedure
+///    root that contains it.
+/// 4. **Kernel-closure.** Every syscall's callee is a procedure root whose MAST root is a
+///    member of the paired kernel's procedure hashes; the generator never falls back to a
+///    plain `Call` when a kernel-eligible callee is unavailable.
+///
+/// Together, these invariants guarantee that any procedure root in the emitted forest can be
+/// selected as an entrypoint and executed to completion by the VM on empty inputs.
+///
+/// # `StructureOnly` mode
+///
+/// Setting `mode = MastForestGenerationMode::StructureOnly` retains the pre-feature,
+/// permissive behaviour: syscalls may reference arbitrary callees, external digests are drawn
+/// at random and do not have to resolve inside the forest, and a mix of `DynNode::new_dyn`
+/// and `DynNode::new_dyncall` instances may be emitted. Use this mode for tests that
+/// exercise serialization, merging, or other non-execution code paths where broad structural
+/// coverage is valuable and executability is not required.
+///
+/// # Future work — MASM-level dyn generation
+///
+/// Dyn nodes are intentionally unsupported in `Executable` mode because the generator cannot
+/// synthesise valid operand-stack preconditions: each dyn/dyncall reads its callee digest off
+/// the operand stack at runtime, and producing a semantically valid stack state requires
+/// program-synthesis-level reasoning that the MAST-level generator does not perform. The
+/// intended extension is an assembly-level (MASM) generator that can emit instruction
+/// sequences which push a valid callee digest before each dyn/dyncall; until such a generator
+/// exists, callers who need executable dyn coverage should rely on hand-written fixtures or
+/// opt into `StructureOnly` mode.
 #[derive(Clone, Debug)]
 pub struct MastForestParams {
     /// Range of number of blocks to generate
@@ -195,6 +239,16 @@ pub struct MastForestParams {
     /// These nodes are primarily for testing MAST structure, not execution. Set to 0 for
     /// executable forests.
     pub max_dyns: usize,
+    /// Controls whether the generator emits executable forests (with the closure invariants
+    /// enforced) or legacy, structure-only forests.
+    pub mode: MastForestGenerationMode,
+    /// Optional user-supplied kernel procedure hashes.
+    ///
+    /// When `Some`, the generator freezes the kernel to exactly these hashes (after validation
+    /// for uniqueness and `Kernel::MAX_NUM_PROCEDURES`) and will only emit syscalls whose
+    /// callee digest is present in this set. When `None`, the generator derives the kernel
+    /// from procedure roots selected during generation.
+    pub kernel_procedures: Option<Vec<Word>>,
 }
 
 impl Default for MastForestParams {
@@ -205,9 +259,11 @@ impl Default for MastForestParams {
             max_splits: 1,
             max_loops: 1,
             max_calls: 1,
-            max_syscalls: 0,  // Default to 0 for executable forests
-            max_externals: 0, // Default to 0 for executable forests
-            max_dyns: 0,      // Default to 0 for executable forests
+            max_syscalls: 1,
+            max_externals: 1,
+            max_dyns: 0,
+            mode: MastForestGenerationMode::Executable,
+            kernel_procedures: None,
         }
     }
 }
