@@ -146,6 +146,102 @@ end
 }
 
 #[test]
+fn allow_marker_suppresses_unconstrained_advice_origin() {
+    let dir = temp_dir("allowed-advice-origin");
+    let file = dir.join("allowed_advice_origin.masm");
+    fs::write(
+        &file,
+        "\
+pub proc test
+    # masm-lint: allow unconstrained-advice -- test fixture accepts this source.
+    adv_push
+    mem_load
+    drop
+end
+",
+    )
+    .expect("failed to write MASM fixture");
+
+    let output = run_masm_lint(&dir, &file);
+
+    assert!(output.status.success(), "allowed advice origin failed: {output:?}");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let output_text = format!("{stdout}\n{stderr}");
+    assert!(
+        !output_text.contains("unconstrained advice used as memory address"),
+        "allowed advice origin emitted a warning: {output_text}"
+    );
+}
+
+#[test]
+fn allow_marker_suppresses_grouped_unconstrained_advice_origin() {
+    let dir = temp_dir("allowed-grouped-advice-origin");
+    let file = dir.join("allowed_grouped_advice_origin.masm");
+    fs::write(
+        &file,
+        "\
+pub proc test
+    # masm-lint: allow unconstrained-advice -- test fixture accepts this source.
+    adv_push
+    mem_load
+    drop
+end
+",
+    )
+    .expect("failed to write MASM fixture");
+
+    let output = run_masm_lint_with_args(&dir, &["--group-by-origin"], &file);
+
+    assert!(output.status.success(), "allowed grouped advice origin failed: {output:?}");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let output_text = format!("{stdout}\n{stderr}");
+    assert!(
+        !output_text.contains("unconstrained advice introduced here reaches"),
+        "allowed grouped advice origin emitted a warning: {output_text}"
+    );
+}
+
+#[test]
+fn allow_marker_keeps_unmarked_origins_for_the_same_sink() {
+    let dir = temp_dir("partially-allowed-advice-origin");
+    let file = dir.join("partially_allowed_advice_origin.masm");
+    fs::write(
+        &file,
+        "\
+pub proc test(flag: felt)
+    if.true
+        # masm-lint: allow unconstrained-advice -- test fixture accepts this source.
+        adv_push
+    else
+        adv_push
+    end
+    mem_load
+    drop
+end
+",
+    )
+    .expect("failed to write MASM fixture");
+
+    let output = run_masm_lint(&dir, &file);
+
+    assert!(!output.status.success(), "partially allowed advice origin passed");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let output_text = format!("{stdout}\n{stderr}");
+    assert!(
+        output_text.contains("unconstrained advice used as memory address"),
+        "unmarked advice origin did not emit a warning: {output_text}"
+    );
+    assert_eq!(
+        output_text.matches("unconstrained advice introduced here").count(),
+        1,
+        "expected exactly one unsuppressed related origin: {output_text}"
+    );
+}
+
+#[test]
 fn u32testw_is_lifted_as_supported_instruction() {
     let dir = temp_dir("u32testw");
     let file = dir.join("u32testw.masm");
