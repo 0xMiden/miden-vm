@@ -539,6 +539,7 @@ mod tests {
             MemoryReadsReplay::default(),
             HasherResponseReplay::default(),
             MastForestResolutionReplay::default(),
+            MIN_STACK_DEPTH,
             1_u32.into(),
         )
     }
