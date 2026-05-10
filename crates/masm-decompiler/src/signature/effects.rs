@@ -3,6 +3,8 @@ use miden_assembly_syntax::{
     parser::PushValue,
 };
 
+use crate::semantics::{StackFamily, stack_family};
+
 /// Describes the local stack effect of a single instruction or operation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum StackEffect {
@@ -36,6 +38,14 @@ impl StackEffect {
 impl From<&Instruction> for StackEffect {
     fn from(inst: &Instruction) -> Self {
         use Instruction::*;
+
+        if let Some(effect) = stack_family(inst).map(StackFamily::effect) {
+            return StackEffect::Known {
+                pops: effect.pops,
+                pushes: effect.pushes,
+                required_depth: effect.required_depth,
+            };
+        }
 
         // Unary instructions
         let unary = matches!(
@@ -130,90 +140,11 @@ impl From<&Instruction> for StackEffect {
             DropW => StackEffect::known(4, 0),
             PadW => StackEffect::known(0, 4),
 
-            Dup0 => StackEffect::known(0, 1).with_required_depth(1),
-            Dup1 => StackEffect::known(0, 1).with_required_depth(2),
-            Dup2 => StackEffect::known(0, 1).with_required_depth(3),
-            Dup3 => StackEffect::known(0, 1).with_required_depth(4),
-            Dup4 => StackEffect::known(0, 1).with_required_depth(5),
-            Dup5 => StackEffect::known(0, 1).with_required_depth(6),
-            Dup6 => StackEffect::known(0, 1).with_required_depth(7),
-            Dup7 => StackEffect::known(0, 1).with_required_depth(8),
-            Dup8 => StackEffect::known(0, 1).with_required_depth(9),
-            Dup9 => StackEffect::known(0, 1).with_required_depth(10),
-            Dup10 => StackEffect::known(0, 1).with_required_depth(11),
-            Dup11 => StackEffect::known(0, 1).with_required_depth(12),
-            Dup12 => StackEffect::known(0, 1).with_required_depth(13),
-            Dup13 => StackEffect::known(0, 1).with_required_depth(14),
-            Dup14 => StackEffect::known(0, 1).with_required_depth(15),
-            Dup15 => StackEffect::known(0, 1).with_required_depth(16),
-
-            DupW0 => StackEffect::known(0, 4).with_required_depth(4),
-            DupW1 => StackEffect::known(0, 4).with_required_depth(8),
-            DupW2 => StackEffect::known(0, 4).with_required_depth(12),
-            DupW3 => StackEffect::known(0, 4).with_required_depth(16),
-
-            // We model stack permutations as simply clobbering the effected stack slots.
-            Swap1 => StackEffect::known(2, 2),
-            Swap2 => StackEffect::known(3, 3),
-            Swap3 => StackEffect::known(4, 4),
-            Swap4 => StackEffect::known(5, 5),
-            Swap5 => StackEffect::known(6, 6),
-            Swap6 => StackEffect::known(7, 7),
-            Swap7 => StackEffect::known(8, 8),
-            Swap8 => StackEffect::known(9, 9),
-            Swap9 => StackEffect::known(10, 10),
-            Swap10 => StackEffect::known(11, 11),
-            Swap11 => StackEffect::known(12, 12),
-            Swap12 => StackEffect::known(13, 13),
-            Swap13 => StackEffect::known(14, 14),
-            Swap14 => StackEffect::known(15, 15),
-            Swap15 => StackEffect::known(16, 16),
-
-            SwapW1 => StackEffect::known(8, 8),
-            SwapW2 => StackEffect::known(12, 12),
-            SwapW3 => StackEffect::known(16, 16),
-            SwapDw => StackEffect::known(16, 16),
-
             CSwap => StackEffect::known(3, 2),
             CSwapW => StackEffect::known(9, 8),
             CDrop => StackEffect::known(3, 1),
             CDropW => StackEffect::known(9, 4),
             Reversew => StackEffect::known(4, 4),
-
-            MovUp2 => StackEffect::known(3, 3),
-            MovUp3 => StackEffect::known(4, 4),
-            MovUp4 => StackEffect::known(5, 5),
-            MovUp5 => StackEffect::known(6, 6),
-            MovUp6 => StackEffect::known(7, 7),
-            MovUp7 => StackEffect::known(8, 8),
-            MovUp8 => StackEffect::known(9, 9),
-            MovUp9 => StackEffect::known(10, 10),
-            MovUp10 => StackEffect::known(11, 11),
-            MovUp11 => StackEffect::known(12, 12),
-            MovUp12 => StackEffect::known(13, 13),
-            MovUp13 => StackEffect::known(14, 14),
-            MovUp14 => StackEffect::known(15, 15),
-            MovUp15 => StackEffect::known(16, 16),
-
-            MovDn2 => StackEffect::known(3, 3),
-            MovDn3 => StackEffect::known(4, 4),
-            MovDn4 => StackEffect::known(5, 5),
-            MovDn5 => StackEffect::known(6, 6),
-            MovDn6 => StackEffect::known(7, 7),
-            MovDn7 => StackEffect::known(8, 8),
-            MovDn8 => StackEffect::known(9, 9),
-            MovDn9 => StackEffect::known(10, 10),
-            MovDn10 => StackEffect::known(11, 11),
-            MovDn11 => StackEffect::known(12, 12),
-            MovDn12 => StackEffect::known(13, 13),
-            MovDn13 => StackEffect::known(14, 14),
-            MovDn14 => StackEffect::known(15, 15),
-            MovDn15 => StackEffect::known(16, 16),
-
-            MovUpW2 => StackEffect::known(12, 12),
-            MovUpW3 => StackEffect::known(16, 16),
-            MovDnW2 => StackEffect::known(12, 12),
-            MovDnW3 => StackEffect::known(16, 16),
 
             // Remaining U32 operations
             U32OverflowingAdd => StackEffect::known(2, 2),

@@ -2,6 +2,8 @@
 
 use std::ops::Range;
 
+use miden_assembly_syntax::ast::Instruction;
+
 pub const INTRINSIC_ADV_PIPE: &str = "adv_pipe";
 pub const INTRINSIC_ADV_PUSH: &str = "adv_push";
 pub const INTRINSIC_ADV_PUSHW: &str = "adv_pushw";
@@ -75,12 +77,162 @@ pub fn intrinsic_nonzero_arg_index(name: &str) -> Option<usize> {
     }
 }
 
+/// Repetitive stack-operation families that carry a depth or word index.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum StackFamily {
+    Dup(usize),
+    DupWord(usize),
+    Swap(usize),
+    SwapWord(usize),
+    SwapDoubleWord,
+    MovUp(usize),
+    MovUpWord(usize),
+    MovDown(usize),
+    MovDownWord(usize),
+}
+
+/// Stack effect metadata for a repetitive stack-operation family.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct StackFamilyEffect {
+    pub(crate) pops: usize,
+    pub(crate) pushes: usize,
+    pub(crate) required_depth: usize,
+}
+
+impl StackFamily {
+    pub(crate) const fn effect(self) -> StackFamilyEffect {
+        match self {
+            StackFamily::Dup(index) => StackFamilyEffect {
+                pops: 0,
+                pushes: 1,
+                required_depth: index + 1,
+            },
+            StackFamily::DupWord(index) => StackFamilyEffect {
+                pops: 0,
+                pushes: 4,
+                required_depth: (index + 1) * 4,
+            },
+            StackFamily::Swap(index) | StackFamily::MovUp(index) | StackFamily::MovDown(index) => {
+                let depth = index + 1;
+                StackFamilyEffect {
+                    pops: depth,
+                    pushes: depth,
+                    required_depth: depth,
+                }
+            },
+            StackFamily::SwapWord(index)
+            | StackFamily::MovUpWord(index)
+            | StackFamily::MovDownWord(index) => {
+                let depth = (index + 1) * 4;
+                StackFamilyEffect {
+                    pops: depth,
+                    pushes: depth,
+                    required_depth: depth,
+                }
+            },
+            StackFamily::SwapDoubleWord => {
+                StackFamilyEffect { pops: 16, pushes: 16, required_depth: 16 }
+            },
+        }
+    }
+}
+
+/// Return stack-family metadata for indexed stack manipulation instructions.
+pub(crate) fn stack_family(inst: &Instruction) -> Option<StackFamily> {
+    use Instruction::*;
+
+    Some(match inst {
+        Dup0 => StackFamily::Dup(0),
+        Dup1 => StackFamily::Dup(1),
+        Dup2 => StackFamily::Dup(2),
+        Dup3 => StackFamily::Dup(3),
+        Dup4 => StackFamily::Dup(4),
+        Dup5 => StackFamily::Dup(5),
+        Dup6 => StackFamily::Dup(6),
+        Dup7 => StackFamily::Dup(7),
+        Dup8 => StackFamily::Dup(8),
+        Dup9 => StackFamily::Dup(9),
+        Dup10 => StackFamily::Dup(10),
+        Dup11 => StackFamily::Dup(11),
+        Dup12 => StackFamily::Dup(12),
+        Dup13 => StackFamily::Dup(13),
+        Dup14 => StackFamily::Dup(14),
+        Dup15 => StackFamily::Dup(15),
+
+        DupW0 => StackFamily::DupWord(0),
+        DupW1 => StackFamily::DupWord(1),
+        DupW2 => StackFamily::DupWord(2),
+        DupW3 => StackFamily::DupWord(3),
+
+        Swap1 => StackFamily::Swap(1),
+        Swap2 => StackFamily::Swap(2),
+        Swap3 => StackFamily::Swap(3),
+        Swap4 => StackFamily::Swap(4),
+        Swap5 => StackFamily::Swap(5),
+        Swap6 => StackFamily::Swap(6),
+        Swap7 => StackFamily::Swap(7),
+        Swap8 => StackFamily::Swap(8),
+        Swap9 => StackFamily::Swap(9),
+        Swap10 => StackFamily::Swap(10),
+        Swap11 => StackFamily::Swap(11),
+        Swap12 => StackFamily::Swap(12),
+        Swap13 => StackFamily::Swap(13),
+        Swap14 => StackFamily::Swap(14),
+        Swap15 => StackFamily::Swap(15),
+
+        SwapW1 => StackFamily::SwapWord(1),
+        SwapW2 => StackFamily::SwapWord(2),
+        SwapW3 => StackFamily::SwapWord(3),
+        SwapDw => StackFamily::SwapDoubleWord,
+
+        MovUp2 => StackFamily::MovUp(2),
+        MovUp3 => StackFamily::MovUp(3),
+        MovUp4 => StackFamily::MovUp(4),
+        MovUp5 => StackFamily::MovUp(5),
+        MovUp6 => StackFamily::MovUp(6),
+        MovUp7 => StackFamily::MovUp(7),
+        MovUp8 => StackFamily::MovUp(8),
+        MovUp9 => StackFamily::MovUp(9),
+        MovUp10 => StackFamily::MovUp(10),
+        MovUp11 => StackFamily::MovUp(11),
+        MovUp12 => StackFamily::MovUp(12),
+        MovUp13 => StackFamily::MovUp(13),
+        MovUp14 => StackFamily::MovUp(14),
+        MovUp15 => StackFamily::MovUp(15),
+
+        MovUpW2 => StackFamily::MovUpWord(2),
+        MovUpW3 => StackFamily::MovUpWord(3),
+
+        MovDn2 => StackFamily::MovDown(2),
+        MovDn3 => StackFamily::MovDown(3),
+        MovDn4 => StackFamily::MovDown(4),
+        MovDn5 => StackFamily::MovDown(5),
+        MovDn6 => StackFamily::MovDown(6),
+        MovDn7 => StackFamily::MovDown(7),
+        MovDn8 => StackFamily::MovDown(8),
+        MovDn9 => StackFamily::MovDown(9),
+        MovDn10 => StackFamily::MovDown(10),
+        MovDn11 => StackFamily::MovDown(11),
+        MovDn12 => StackFamily::MovDown(12),
+        MovDn13 => StackFamily::MovDown(13),
+        MovDn14 => StackFamily::MovDown(14),
+        MovDn15 => StackFamily::MovDown(15),
+
+        MovDnW2 => StackFamily::MovDownWord(2),
+        MovDnW3 => StackFamily::MovDownWord(3),
+
+        _ => return None,
+    })
+}
+
 #[cfg(test)]
 mod tests {
+    use miden_assembly_syntax::ast::Instruction;
+
     use super::{
         intrinsic_asserts_u32_args, intrinsic_base_name, intrinsic_memory_address_arg_index,
         intrinsic_merkle_root_arg_range, intrinsic_nonzero_arg_index,
-        intrinsic_positional_u32_arg_range, intrinsic_requires_u32_precondition,
+        intrinsic_positional_u32_arg_range, intrinsic_requires_u32_precondition, stack_family,
     };
 
     #[test]
@@ -153,5 +305,28 @@ mod tests {
         assert_eq!(intrinsic_nonzero_arg_index("u32div.4"), None);
         assert_eq!(intrinsic_nonzero_arg_index("u32mod.4"), None);
         assert_eq!(intrinsic_nonzero_arg_index("inv"), None);
+    }
+
+    #[test]
+    fn stack_family_effects_cover_repetitive_stack_instructions() {
+        let effect = stack_family(&Instruction::Dup3).expect("dup classified").effect();
+        assert_eq!((effect.pops, effect.pushes, effect.required_depth), (0, 1, 4));
+
+        let effect = stack_family(&Instruction::DupW2).expect("dupw classified").effect();
+        assert_eq!((effect.pops, effect.pushes, effect.required_depth), (0, 4, 12));
+
+        let effect = stack_family(&Instruction::Swap4).expect("swap classified").effect();
+        assert_eq!((effect.pops, effect.pushes, effect.required_depth), (5, 5, 5));
+
+        let effect = stack_family(&Instruction::MovUpW3).expect("movupw classified").effect();
+        assert_eq!((effect.pops, effect.pushes, effect.required_depth), (16, 16, 16));
+
+        let effect = stack_family(&Instruction::MovDn15).expect("movdn classified").effect();
+        assert_eq!((effect.pops, effect.pushes, effect.required_depth), (16, 16, 16));
+
+        let effect = stack_family(&Instruction::SwapDw).expect("swapdw classified").effect();
+        assert_eq!((effect.pops, effect.pushes, effect.required_depth), (16, 16, 16));
+
+        assert!(stack_family(&Instruction::Drop).is_none());
     }
 }
