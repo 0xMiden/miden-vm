@@ -15,6 +15,7 @@ use crate::{
     semantics::{
         INTRINSIC_ADV_PIPE, INTRINSIC_ADV_PUSH, INTRINSIC_ADV_PUSHW, INTRINSIC_MEM_STREAM,
         INTRINSIC_MTREE_GET, INTRINSIC_MTREE_MERGE, INTRINSIC_MTREE_SET, INTRINSIC_MTREE_VERIFY,
+        StackFamily, stack_family,
     },
     signature::{SignatureMap, StackEffect},
     symbol::{path::SymbolPath, resolution::SymbolResolver},
@@ -315,6 +316,10 @@ fn lift_stack_inst(
     span: SourceSpan,
     stack: &mut SymbolicStack,
 ) -> LiftingResult<Option<Vec<Stmt>>> {
+    if let Some(family) = stack_family(inst) {
+        return lift_stack_family_inst(family, inst, span, stack).map(Some);
+    }
+
     match inst {
         Instruction::Drop => {
             stack.require_depth(1, span, inst.to_string())?;
@@ -333,236 +338,52 @@ fn lift_stack_inst(
         Instruction::CDropW => Ok(Some(lift_cdropw(span, inst.to_string(), stack)?)),
         Instruction::CSwap => Ok(Some(lift_cswap(span, inst.to_string(), stack)?)),
         Instruction::CSwapW => Ok(Some(lift_cswapw(span, inst.to_string(), stack)?)),
-        Instruction::Dup0 => lift_dup(span, 0, stack),
-        Instruction::Dup1 => lift_dup(span, 1, stack),
-        Instruction::Dup2 => lift_dup(span, 2, stack),
-        Instruction::Dup3 => lift_dup(span, 3, stack),
-        Instruction::Dup4 => lift_dup(span, 4, stack),
-        Instruction::Dup5 => lift_dup(span, 5, stack),
-        Instruction::Dup6 => lift_dup(span, 6, stack),
-        Instruction::Dup7 => lift_dup(span, 7, stack),
-        Instruction::Dup8 => lift_dup(span, 8, stack),
-        Instruction::Dup9 => lift_dup(span, 9, stack),
-        Instruction::Dup10 => lift_dup(span, 10, stack),
-        Instruction::Dup11 => lift_dup(span, 11, stack),
-        Instruction::Dup12 => lift_dup(span, 12, stack),
-        Instruction::Dup13 => lift_dup(span, 13, stack),
-        Instruction::Dup14 => lift_dup(span, 14, stack),
-        Instruction::Dup15 => lift_dup(span, 15, stack),
-        Instruction::DupW0 => lift_dupw(span, 0, stack),
-        Instruction::DupW1 => lift_dupw(span, 1, stack),
-        Instruction::DupW2 => lift_dupw(span, 2, stack),
-        Instruction::DupW3 => lift_dupw(span, 3, stack),
-        Instruction::Swap1 => {
-            stack.swap(1, span, inst.to_string())?;
-            Ok(Some(Vec::new()))
-        },
-        Instruction::Swap2 => {
-            stack.swap(2, span, inst.to_string())?;
-            Ok(Some(Vec::new()))
-        },
-        Instruction::Swap3 => {
-            stack.swap(3, span, inst.to_string())?;
-            Ok(Some(Vec::new()))
-        },
-        Instruction::Swap4 => {
-            stack.swap(4, span, inst.to_string())?;
-            Ok(Some(Vec::new()))
-        },
-        Instruction::Swap5 => {
-            stack.swap(5, span, inst.to_string())?;
-            Ok(Some(Vec::new()))
-        },
-        Instruction::Swap6 => {
-            stack.swap(6, span, inst.to_string())?;
-            Ok(Some(Vec::new()))
-        },
-        Instruction::Swap7 => {
-            stack.swap(7, span, inst.to_string())?;
-            Ok(Some(Vec::new()))
-        },
-        Instruction::Swap8 => {
-            stack.swap(8, span, inst.to_string())?;
-            Ok(Some(Vec::new()))
-        },
-        Instruction::Swap9 => {
-            stack.swap(9, span, inst.to_string())?;
-            Ok(Some(Vec::new()))
-        },
-        Instruction::Swap10 => {
-            stack.swap(10, span, inst.to_string())?;
-            Ok(Some(Vec::new()))
-        },
-        Instruction::Swap11 => {
-            stack.swap(11, span, inst.to_string())?;
-            Ok(Some(Vec::new()))
-        },
-        Instruction::Swap12 => {
-            stack.swap(12, span, inst.to_string())?;
-            Ok(Some(Vec::new()))
-        },
-        Instruction::Swap13 => {
-            stack.swap(13, span, inst.to_string())?;
-            Ok(Some(Vec::new()))
-        },
-        Instruction::Swap14 => {
-            stack.swap(14, span, inst.to_string())?;
-            Ok(Some(Vec::new()))
-        },
-        Instruction::Swap15 => {
-            stack.swap(15, span, inst.to_string())?;
-            Ok(Some(Vec::new()))
-        },
-        Instruction::SwapW1 => {
-            stack.swapw(1, span, inst.to_string())?;
-            Ok(Some(Vec::new()))
-        },
-        Instruction::SwapW2 => {
-            stack.swapw(2, span, inst.to_string())?;
-            Ok(Some(Vec::new()))
-        },
-        Instruction::SwapW3 => {
-            stack.swapw(3, span, inst.to_string())?;
-            Ok(Some(Vec::new()))
-        },
-        Instruction::SwapDw => {
-            stack.swapdw(span, inst.to_string())?;
-            Ok(Some(Vec::new()))
-        },
-        Instruction::MovUp2 => {
-            stack.movup(2, span, inst.to_string())?;
-            Ok(Some(Vec::new()))
-        },
-        Instruction::MovUp3 => {
-            stack.movup(3, span, inst.to_string())?;
-            Ok(Some(Vec::new()))
-        },
-        Instruction::MovUp4 => {
-            stack.movup(4, span, inst.to_string())?;
-            Ok(Some(Vec::new()))
-        },
-        Instruction::MovUp5 => {
-            stack.movup(5, span, inst.to_string())?;
-            Ok(Some(Vec::new()))
-        },
-        Instruction::MovUp6 => {
-            stack.movup(6, span, inst.to_string())?;
-            Ok(Some(Vec::new()))
-        },
-        Instruction::MovUp7 => {
-            stack.movup(7, span, inst.to_string())?;
-            Ok(Some(Vec::new()))
-        },
-        Instruction::MovUp8 => {
-            stack.movup(8, span, inst.to_string())?;
-            Ok(Some(Vec::new()))
-        },
-        Instruction::MovUp9 => {
-            stack.movup(9, span, inst.to_string())?;
-            Ok(Some(Vec::new()))
-        },
-        Instruction::MovUp10 => {
-            stack.movup(10, span, inst.to_string())?;
-            Ok(Some(Vec::new()))
-        },
-        Instruction::MovUp11 => {
-            stack.movup(11, span, inst.to_string())?;
-            Ok(Some(Vec::new()))
-        },
-        Instruction::MovUp12 => {
-            stack.movup(12, span, inst.to_string())?;
-            Ok(Some(Vec::new()))
-        },
-        Instruction::MovUp13 => {
-            stack.movup(13, span, inst.to_string())?;
-            Ok(Some(Vec::new()))
-        },
-        Instruction::MovUp14 => {
-            stack.movup(14, span, inst.to_string())?;
-            Ok(Some(Vec::new()))
-        },
-        Instruction::MovUp15 => {
-            stack.movup(15, span, inst.to_string())?;
-            Ok(Some(Vec::new()))
-        },
-        Instruction::MovUpW2 => {
-            stack.movupw(2, span, inst.to_string())?;
-            Ok(Some(Vec::new()))
-        },
-        Instruction::MovUpW3 => {
-            stack.movupw(3, span, inst.to_string())?;
-            Ok(Some(Vec::new()))
-        },
-        Instruction::MovDn2 => {
-            stack.movdn(2, span, inst.to_string())?;
-            Ok(Some(Vec::new()))
-        },
-        Instruction::MovDn3 => {
-            stack.movdn(3, span, inst.to_string())?;
-            Ok(Some(Vec::new()))
-        },
-        Instruction::MovDn4 => {
-            stack.movdn(4, span, inst.to_string())?;
-            Ok(Some(Vec::new()))
-        },
-        Instruction::MovDn5 => {
-            stack.movdn(5, span, inst.to_string())?;
-            Ok(Some(Vec::new()))
-        },
-        Instruction::MovDn6 => {
-            stack.movdn(6, span, inst.to_string())?;
-            Ok(Some(Vec::new()))
-        },
-        Instruction::MovDn7 => {
-            stack.movdn(7, span, inst.to_string())?;
-            Ok(Some(Vec::new()))
-        },
-        Instruction::MovDn8 => {
-            stack.movdn(8, span, inst.to_string())?;
-            Ok(Some(Vec::new()))
-        },
-        Instruction::MovDn9 => {
-            stack.movdn(9, span, inst.to_string())?;
-            Ok(Some(Vec::new()))
-        },
-        Instruction::MovDn10 => {
-            stack.movdn(10, span, inst.to_string())?;
-            Ok(Some(Vec::new()))
-        },
-        Instruction::MovDn11 => {
-            stack.movdn(11, span, inst.to_string())?;
-            Ok(Some(Vec::new()))
-        },
-        Instruction::MovDn12 => {
-            stack.movdn(12, span, inst.to_string())?;
-            Ok(Some(Vec::new()))
-        },
-        Instruction::MovDnW2 => {
-            stack.movdnw(2, span, inst.to_string())?;
-            Ok(Some(Vec::new()))
-        },
-        Instruction::MovDnW3 => {
-            stack.movdnw(3, span, inst.to_string())?;
-            Ok(Some(Vec::new()))
-        },
-        Instruction::MovDn13 => {
-            stack.movdn(13, span, inst.to_string())?;
-            Ok(Some(Vec::new()))
-        },
-        Instruction::MovDn14 => {
-            stack.movdn(14, span, inst.to_string())?;
-            Ok(Some(Vec::new()))
-        },
-        Instruction::MovDn15 => {
-            stack.movdn(15, span, inst.to_string())?;
-            Ok(Some(Vec::new()))
-        },
         Instruction::Reversew => {
             stack.reversew(span, inst.to_string())?;
             Ok(Some(Vec::new()))
         },
         Instruction::Nop | Instruction::Debug(_) => Ok(Some(Vec::new())),
         _ => Ok(None),
+    }
+}
+
+fn lift_stack_family_inst(
+    family: StackFamily,
+    inst: &Instruction,
+    span: SourceSpan,
+    stack: &mut SymbolicStack,
+) -> LiftingResult<Vec<Stmt>> {
+    match family {
+        StackFamily::Dup(index) => lift_dup(span, index, stack),
+        StackFamily::DupWord(index) => lift_dupw(span, index, stack),
+        StackFamily::Swap(index) => {
+            stack.swap(index, span, inst.to_string())?;
+            Ok(Vec::new())
+        },
+        StackFamily::SwapWord(index) => {
+            stack.swapw(index, span, inst.to_string())?;
+            Ok(Vec::new())
+        },
+        StackFamily::SwapDoubleWord => {
+            stack.swapdw(span, inst.to_string())?;
+            Ok(Vec::new())
+        },
+        StackFamily::MovUp(index) => {
+            stack.movup(index, span, inst.to_string())?;
+            Ok(Vec::new())
+        },
+        StackFamily::MovUpWord(index) => {
+            stack.movupw(index, span, inst.to_string())?;
+            Ok(Vec::new())
+        },
+        StackFamily::MovDown(index) => {
+            stack.movdn(index, span, inst.to_string())?;
+            Ok(Vec::new())
+        },
+        StackFamily::MovDownWord(index) => {
+            stack.movdnw(index, span, inst.to_string())?;
+            Ok(Vec::new())
+        },
     }
 }
 
@@ -1650,23 +1471,15 @@ fn lift_padw(span: SourceSpan, stack: &mut SymbolicStack) -> Vec<Stmt> {
     stmts
 }
 
-fn lift_dup(
-    span: SourceSpan,
-    idx: usize,
-    stack: &mut SymbolicStack,
-) -> LiftingResult<Option<Vec<Stmt>>> {
+fn lift_dup(span: SourceSpan, idx: usize, stack: &mut SymbolicStack) -> LiftingResult<Vec<Stmt>> {
     let required_depth = idx + 1;
     stack.require_depth(required_depth, span, format!("dup.{idx}"))?;
     let src = stack.peek(idx).cloned().unwrap();
     let dest = stack.push_fresh();
-    Ok(Some(vec![Stmt::Assign { span, dest, expr: Expr::Var(src) }]))
+    Ok(vec![Stmt::Assign { span, dest, expr: Expr::Var(src) }])
 }
 
-fn lift_dupw(
-    span: SourceSpan,
-    idx: usize,
-    stack: &mut SymbolicStack,
-) -> LiftingResult<Option<Vec<Stmt>>> {
+fn lift_dupw(span: SourceSpan, idx: usize, stack: &mut SymbolicStack) -> LiftingResult<Vec<Stmt>> {
     let required_depth = (idx + 1) * 4;
     stack.require_depth(required_depth, span, format!("dupw.{idx}"))?;
     let offset = idx * 4;
@@ -1682,7 +1495,7 @@ fn lift_dupw(
         let dest = stack.push_fresh();
         stmts.push(Stmt::Assign { span, dest, expr: Expr::Var(src) });
     }
-    Ok(Some(stmts))
+    Ok(stmts)
 }
 
 fn assign_from_u32_immediate(
