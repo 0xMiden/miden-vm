@@ -5,9 +5,8 @@ use std::collections::HashMap;
 use masm_decompiler::{Stmt, SymbolPath};
 
 use super::{
-    domain::AdviceFact,
     shared::{Env, intrinsic_memory_address_arg_index},
-    summary::{AdviceDiagnostic, AdviceDiagnosticsMap, AdviceSummaryMap, diagnostic_from_fact},
+    summary::{AdviceDiagnosticContext, AdviceDiagnosticsMap, AdviceSummaryMap},
     walker::{self, AdviceCapability, AdviceEffect},
 };
 use crate::prepared::PreparedProc;
@@ -18,13 +17,13 @@ pub(super) fn collect_address_diagnostics(
     provenance_summaries: &AdviceSummaryMap,
 ) -> AdviceDiagnosticsMap {
     walker::collect_diagnostics(prepared, provenance_summaries, |proc_path| AddressCapability {
-        proc_path,
+        diagnostics: AdviceDiagnosticContext::new(proc_path),
     })
 }
 
 /// Advice capability for unconstrained advice reaching memory addresses.
 struct AddressCapability {
-    proc_path: SymbolPath,
+    diagnostics: AdviceDiagnosticContext,
 }
 
 impl AdviceCapability for AddressCapability {
@@ -36,7 +35,7 @@ impl AdviceCapability for AddressCapability {
                 if let Some(addr_var) = store.address.first() {
                     let addr_fact = env.fact_for_var(addr_var);
                     if addr_fact.has_concrete_sources() {
-                        effect.push_diagnostic(self.new_diagnostic(
+                        effect.push_diagnostic(self.diagnostics.diagnostic_for_fact(
                             *span,
                             "unconstrained advice used as memory address",
                             &addr_fact,
@@ -48,7 +47,7 @@ impl AdviceCapability for AddressCapability {
                 if let Some(addr_var) = load.address.first() {
                     let addr_fact = env.fact_for_var(addr_var);
                     if addr_fact.has_concrete_sources() {
-                        effect.push_diagnostic(self.new_diagnostic(
+                        effect.push_diagnostic(self.diagnostics.diagnostic_for_fact(
                             *span,
                             "unconstrained advice used as memory address",
                             &addr_fact,
@@ -64,7 +63,7 @@ impl AdviceCapability for AddressCapability {
                 {
                     let addr_fact = env.fact_for_var(&intrinsic.args[addr_index]);
                     if addr_fact.has_concrete_sources() {
-                        effect.push_diagnostic(self.new_diagnostic(
+                        effect.push_diagnostic(self.diagnostics.diagnostic_for_fact(
                             *span,
                             "unconstrained advice used as memory address",
                             &addr_fact,
@@ -76,17 +75,5 @@ impl AdviceCapability for AddressCapability {
         }
 
         effect
-    }
-}
-
-impl AddressCapability {
-    /// Create a diagnostic for a memory address sink.
-    fn new_diagnostic(
-        &self,
-        span: miden_debug_types::SourceSpan,
-        message: impl Into<String>,
-        fact: &AdviceFact,
-    ) -> AdviceDiagnostic {
-        diagnostic_from_fact(self.proc_path.clone(), span, message, fact)
     }
 }

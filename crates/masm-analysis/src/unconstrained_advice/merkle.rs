@@ -7,7 +7,7 @@ use masm_decompiler::{Stmt, SymbolPath};
 use super::{
     domain::AdviceFact,
     shared::{Env, intrinsic_merkle_root_arg_range},
-    summary::{AdviceDiagnostic, AdviceDiagnosticsMap, AdviceSummaryMap, diagnostic_from_fact},
+    summary::{AdviceDiagnosticContext, AdviceDiagnosticsMap, AdviceSummaryMap},
     walker::{self, AdviceCapability, AdviceEffect},
 };
 use crate::prepared::PreparedProc;
@@ -18,13 +18,13 @@ pub(super) fn collect_merkle_diagnostics(
     provenance_summaries: &AdviceSummaryMap,
 ) -> AdviceDiagnosticsMap {
     walker::collect_diagnostics(prepared, provenance_summaries, |proc_path| MerkleCapability {
-        proc_path,
+        diagnostics: AdviceDiagnosticContext::new(proc_path),
     })
 }
 
 /// Advice capability for unconstrained advice reaching Merkle tree root positions.
 struct MerkleCapability {
-    proc_path: SymbolPath,
+    diagnostics: AdviceDiagnosticContext,
 }
 
 impl AdviceCapability for MerkleCapability {
@@ -46,7 +46,7 @@ impl AdviceCapability for MerkleCapability {
         );
 
         if root_fact.has_concrete_sources() {
-            AdviceEffect::diagnostics(vec![self.new_diagnostic(
+            AdviceEffect::diagnostics(vec![self.diagnostics.diagnostic_for_fact(
                 *span,
                 "unconstrained advice used as Merkle tree root",
                 &root_fact,
@@ -54,17 +54,5 @@ impl AdviceCapability for MerkleCapability {
         } else {
             AdviceEffect::new()
         }
-    }
-}
-
-impl MerkleCapability {
-    /// Create a diagnostic for a Merkle root sink.
-    fn new_diagnostic(
-        &self,
-        span: miden_debug_types::SourceSpan,
-        message: impl Into<String>,
-        fact: &AdviceFact,
-    ) -> AdviceDiagnostic {
-        diagnostic_from_fact(self.proc_path.clone(), span, message, fact)
     }
 }
