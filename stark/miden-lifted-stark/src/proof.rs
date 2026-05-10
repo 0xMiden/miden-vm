@@ -24,8 +24,9 @@ use crate::{
     StarkConfig,
     coset::LiftedCoset,
     instance::{AirInstance, InstanceShapes, validate_air_order, validate_inputs},
-    lmcs::{Lmcs, utils::aligned_len},
+    lmcs::Lmcs,
     pcs::proof::PcsTranscript,
+    util::align::aligned_len,
     verifier::VerifierError,
 };
 

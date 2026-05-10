@@ -145,6 +145,5 @@ pub(crate) use define_lmcs_test_helpers;
 // =============================================================================
 pub use crate::pcs::{
     deep::interpolate::PointQuotients, fri::fold::FriFold, prover::open_with_channel,
-    utils::bit_reversed_coset_points,
 };
-pub use crate::prover::quotient::commit_quotient;
+pub use crate::{prover::quotient::commit_quotient, util::bitrev::bit_reversed_coset_points};

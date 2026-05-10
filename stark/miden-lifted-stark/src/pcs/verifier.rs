@@ -21,7 +21,7 @@ use p3_matrix::{Matrix, horizontally_truncated::HorizontallyTruncated};
 use thiserror::Error;
 
 use crate::{
-    lmcs::{Lmcs, tree_indices::TreeIndices, utils::aligned_widths},
+    lmcs::{Lmcs, tree_indices::TreeIndices},
     pcs::{
         deep::{
             proof::OpenedValues,
@@ -30,6 +30,7 @@ use crate::{
         fri::verifier::{FriError, FriOracle},
         params::PcsParams,
     },
+    util::align::aligned_widths,
 };
 
 /// Verify polynomial evaluation claims against commitments.

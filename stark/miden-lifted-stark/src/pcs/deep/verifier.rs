@@ -8,10 +8,8 @@ use thiserror::Error;
 
 use crate::{
     lmcs::{Lmcs, LmcsError, tree_indices::TreeIndices},
-    pcs::{
-        deep::{DeepParams, proof::OpenedValues, read_eval_matrices},
-        utils::horner_acc,
-    },
+    pcs::deep::{DeepParams, proof::OpenedValues, read_eval_matrices},
+    util::horner::horner_acc,
 };
 
 /// Verifier's view of the DEEP quotient as a point-query oracle.

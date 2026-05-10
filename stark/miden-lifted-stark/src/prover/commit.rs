@@ -20,7 +20,8 @@ use tracing::info_span;
 use crate::{
     StarkConfig,
     coset::LiftedCoset,
-    lmcs::{Lmcs, LmcsTree, bitrev::materialize_bitrev},
+    lmcs::{Lmcs, LmcsTree},
+    util::bitrev::materialize_bitrev,
 };
 
 // ============================================================================

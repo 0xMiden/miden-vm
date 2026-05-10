@@ -2,6 +2,7 @@
 
 use alloc::{collections::BTreeMap, vec, vec::Vec};
 
+use miden_lifted_air::log2_strict_u8;
 use miden_stark_transcript::VerifierTranscript;
 use p3_challenger::CanObserve;
 use p3_dft::{Radix2DFTSmallBatch, TwoAdicSubgroupDft};
@@ -14,7 +15,7 @@ use verifier::{FriError, FriOracle};
 
 use super::*;
 use crate::{
-    lmcs::{tree_indices::TreeIndices, utils::log2_strict_u8},
+    lmcs::tree_indices::TreeIndices,
     testing::{
         configs::goldilocks_poseidon2::{
             Challenger, Felt, Lmcs as BaseLmcs, QuadFelt, TestDigest, TestTranscriptData,

@@ -69,7 +69,6 @@
 //! This equivalence follows from the bit-reversal identity: for `r = N/n = 2^k`,
 //! `bitrev_N(i) mod n = bitrev_n(i >> k)`.
 
-pub mod bitrev;
 pub mod config;
 pub mod hiding_config;
 pub mod lifted_tree;
@@ -78,20 +77,20 @@ pub mod node_id;
 pub mod proof;
 pub mod row_list;
 pub mod tree_indices;
-pub mod utils;
 
 #[cfg(test)]
 mod tests;
 
 use alloc::{collections::BTreeMap, vec::Vec};
 
-use bitrev::BitReversibleMatrix;
 use miden_stark_transcript::{ProverChannel, TranscriptError, VerifierChannel};
 use p3_matrix::Matrix;
 use proof::BatchProofView;
 use row_list::RowList;
 use thiserror::Error;
 use tree_indices::TreeIndices;
+
+use crate::util::{align::aligned_len, bitrev::BitReversibleMatrix};
 
 // ============================================================================
 // Type Aliases
@@ -227,7 +226,7 @@ pub trait LmcsTree<F, Commitment, M> {
     /// Get aligned widths for each committed matrix (padded to alignment).
     fn aligned_widths(&self) -> Vec<usize> {
         let alignment = self.alignment();
-        self.widths().into_iter().map(|w| utils::aligned_len(w, alignment)).collect()
+        self.widths().into_iter().map(|w| aligned_len(w, alignment)).collect()
     }
 
     /// Prove a batch opening and stream it into a transcript channel.

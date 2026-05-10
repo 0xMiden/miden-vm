@@ -20,10 +20,8 @@ use p3_util::log2_strict_usize;
 use tracing::info_span;
 
 use crate::{
-    StarkConfig,
-    coset::LiftedCoset,
-    lmcs::{Lmcs, bitrev::materialize_bitrev},
-    prover::commit::Committed,
+    StarkConfig, coset::LiftedCoset, lmcs::Lmcs, prover::commit::Committed,
+    util::bitrev::materialize_bitrev,
 };
 
 // ============================================================================

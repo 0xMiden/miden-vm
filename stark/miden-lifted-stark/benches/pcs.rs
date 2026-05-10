@@ -8,7 +8,8 @@ use std::hint::black_box;
 
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use miden_lifted_stark::{
-    Lmcs, LmcsTree, log2_strict_u8,
+    Lmcs, LmcsTree,
+    air::log2_strict_u8,
     testing::{
         BENCH_PCS_PARAMS, LOG_HEIGHTS, PARALLEL_STR, RELATIVE_SPECS,
         configs::goldilocks_poseidon2::{Felt, QuadFelt, test_challenger, test_lmcs},

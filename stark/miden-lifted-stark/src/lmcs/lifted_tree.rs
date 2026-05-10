@@ -10,9 +10,9 @@ use p3_symmetric::{Hash, PseudoCompressionFunction};
 use p3_util::{log2_strict_usize, reverse_bits_len};
 use tracing::info_span;
 
-use crate::lmcs::{
-    LmcsTree, bitrev::BitReversibleMatrix, proof::LeafOpening, row_list::RowList,
-    tree_indices::TreeIndices, utils::PackedValueExt,
+use crate::{
+    lmcs::{LmcsTree, proof::LeafOpening, row_list::RowList, tree_indices::TreeIndices},
+    util::{bitrev::BitReversibleMatrix, packing::PackedValueExt},
 };
 
 /// A uniform binary Merkle tree whose leaves are constructed from matrices with power-of-two
@@ -535,10 +535,11 @@ mod tests {
 
     use super::*;
     use crate::{
-        lmcs::{tests::build_leaves_single, utils::aligned_len},
+        lmcs::tests::build_leaves_single,
         testing::configs::goldilocks_poseidon2::{
             self as gl, DIGEST, Felt, PackedFelt, RATE, Sponge,
         },
+        util::align::aligned_len,
     };
 
     /// Common matrix group scenarios for testing lifting with varying heights.

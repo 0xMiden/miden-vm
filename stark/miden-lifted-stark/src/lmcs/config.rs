@@ -9,14 +9,16 @@ use p3_field::PackedValue;
 use p3_matrix::Matrix;
 use p3_symmetric::{Hash, PseudoCompressionFunction};
 
-use crate::lmcs::{
-    Lmcs, LmcsError, OpenedRows,
-    bitrev::BitReversibleMatrix,
-    lifted_tree::LiftedMerkleTree,
-    merkle_witness::MerkleWitness,
-    proof::{BatchProof, LeafOpening},
-    row_list::RowList,
-    tree_indices::TreeIndices,
+use crate::{
+    lmcs::{
+        Lmcs, LmcsError, OpenedRows,
+        lifted_tree::LiftedMerkleTree,
+        merkle_witness::MerkleWitness,
+        proof::{BatchProof, LeafOpening},
+        row_list::RowList,
+        tree_indices::TreeIndices,
+    },
+    util::bitrev::BitReversibleMatrix,
 };
 
 /// LMCS configuration holding cryptographic primitives (sponge + compression).
@@ -263,15 +265,13 @@ where
 mod tests {
     use alloc::vec;
 
+    use miden_lifted_air::log2_strict_u8;
     use miden_stark_transcript::{ProverTranscript, TranscriptData, VerifierTranscript};
     use p3_field::PrimeCharacteristicRing;
     use p3_matrix::dense::RowMajorMatrix;
 
     use super::*;
-    use crate::{
-        lmcs::{LmcsTree, utils::log2_strict_u8},
-        testing::configs::goldilocks_poseidon2 as gl,
-    };
+    use crate::{lmcs::LmcsTree, testing::configs::goldilocks_poseidon2 as gl};
 
     fn small_matrix(height: usize, width: usize, seed: u64) -> RowMajorMatrix<gl::Felt> {
         let values = (0..height * width).map(|i| gl::Felt::from_u64(seed + i as u64)).collect();

@@ -59,6 +59,7 @@ mod pcs;
 pub mod proof;
 pub mod prover;
 mod selectors;
+pub(crate) mod util;
 pub mod verifier;
 
 pub use config::{GenericStarkConfig, StarkConfig};
@@ -67,7 +68,6 @@ pub use debug::{check_constraints, check_constraints_multi};
 pub use instance::{AirInstance, AirWitness, InstanceShapes, InstanceValidationError};
 pub use lmcs::{
     Lmcs, LmcsError, LmcsTree, OpenedRows,
-    bitrev::{BitReversibleMatrix, materialize_bitrev},
     config::LmcsConfig,
     hiding_config::HidingLmcsConfig,
     lifted_tree::LiftedMerkleTree,
@@ -79,7 +79,6 @@ pub use lmcs::{
     },
     row_list::RowList,
     tree_indices::{MissingSiblingsIter, TreeIndices},
-    utils::log2_strict_u8,
 };
 pub use pcs::{
     deep::{
@@ -96,47 +95,8 @@ pub use pcs::{
 };
 pub use proof::{StarkDigest, StarkOutput, StarkProof, StarkTranscript};
 pub use prover::{ProverError, prove_multi, prove_single};
+pub use util::bitrev::{BitReversibleMatrix, materialize_bitrev};
 pub use verifier::{VerifierError, verify_multi, verify_single};
-
-/// Backward-compatible PCS namespace.
-///
-/// Older consumers accessed DEEP/FRI/PCS types through `miden_lifted_stark::fri`.
-/// The current implementation organizes them under an internal `pcs` module, so this
-/// public facade preserves the earlier module path.
-pub mod fri {
-    pub use crate::{
-        DeepError, DeepTranscript, FriError, FriRoundTranscript, FriTranscript, PcsError,
-        PcsOpenedValues, PcsParams, PcsParamsError, PcsTranscript,
-    };
-
-    pub mod deep {
-        pub use crate::{DeepError, DeepTranscript, PcsOpenedValues};
-
-        pub mod proof {
-            pub use crate::{DeepTranscript, PcsOpenedValues};
-        }
-
-        pub mod verifier {
-            pub use crate::DeepError;
-        }
-    }
-
-    pub mod params {
-        pub use crate::{PcsParams, PcsParamsError};
-    }
-
-    pub mod proof {
-        pub use crate::PcsTranscript;
-    }
-
-    pub mod round_proof {
-        pub use crate::{FriRoundTranscript, FriTranscript};
-    }
-
-    pub mod verifier {
-        pub use crate::{FriError, PcsError};
-    }
-}
 
 // ============================================================================
 // Namespaced re-exports from upstream crates

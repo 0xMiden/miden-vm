@@ -16,7 +16,8 @@ use std::hint::black_box;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use miden_lifted_stark::{
-    LiftedCoset, Lmcs, LmcsTree, log2_strict_u8,
+    LiftedCoset, Lmcs, LmcsTree,
+    air::log2_strict_u8,
     testing::{
         BENCH_PCS_PARAMS, LOG_HEIGHTS, PARALLEL_STR, QC_CONSTRAINT_DEGREE, QC_PCS_PARAMS,
         RELATIVE_SPECS, commit_quotient,

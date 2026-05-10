@@ -140,14 +140,13 @@ impl<F, const SALT_ELEMS: usize> LeafOpening<F, SALT_ELEMS> {
 
 #[cfg(test)]
 mod tests {
+    use miden_lifted_air::log2_strict_u8;
     use p3_matrix::dense::RowMajorMatrix;
     use rand::{SeedableRng, rngs::SmallRng};
 
     use super::*;
     use crate::{
-        lmcs::{
-            LmcsTree, tests::roundtrip_open_batch, tree_indices::TreeIndices, utils::log2_strict_u8,
-        },
+        lmcs::{LmcsTree, tests::roundtrip_open_batch, tree_indices::TreeIndices},
         testing::configs::goldilocks_poseidon2 as gl,
     };
 

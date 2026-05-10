@@ -11,7 +11,8 @@
 use std::time::Instant;
 
 use miden_lifted_stark::{
-    Lmcs, LmcsTree, PcsParams, log2_strict_u8,
+    Lmcs, LmcsTree, PcsParams,
+    air::log2_strict_u8,
     testing::{
         LOG_HEIGHTS, RELATIVE_SPECS,
         configs::goldilocks_poseidon2::{Felt, QuadFelt, test_challenger, test_lmcs},
