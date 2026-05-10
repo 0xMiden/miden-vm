@@ -51,6 +51,7 @@ fn bench_serialization_sizes(c: &mut Criterion) {
             max_syscalls: 0,
             max_externals: blocks_per_forest.min(2),
             max_dyns: blocks_per_forest.min(2),
+            ..Default::default()
         };
 
         let forest = sample_forest(gen_params, &mut runner);
