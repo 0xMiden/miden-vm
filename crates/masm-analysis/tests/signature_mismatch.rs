@@ -30,6 +30,30 @@ fn signature_messages(dir: &Path, module_path: &Path) -> Vec<String> {
         .collect()
 }
 
+fn signature_messages_for_source(test_name: &str, source: &str) -> Vec<String> {
+    let dir = temp_module_dir(test_name);
+    let module_path = dir.join("test.masm");
+    fs::write(&module_path, source).expect("write MASM module");
+
+    let messages = signature_messages(&dir, &module_path);
+
+    fs::remove_dir_all(dir).expect("remove temp module dir");
+    messages
+}
+
+fn felt_outputs(count: usize) -> String {
+    assert!(count > 1, "single-output tests should write `felt` directly");
+    format!("({})", vec!["felt"; count].join(", "))
+}
+
+fn zero_input_proc_with_outputs(name: &str, outputs: usize, body: &str) -> String {
+    format!("pub proc {name}() -> {}\n{body}\nend\n", felt_outputs(outputs))
+}
+
+fn declared_zero_inputs_message(inferred_inputs: usize) -> String {
+    format!("the definition declares 0 inputs, but the inferred input count is {inferred_inputs}")
+}
+
 #[test]
 fn declared_zero_input_proc_consuming_stack_value_is_reported() {
     let dir = temp_module_dir("signature_mismatch");
@@ -96,6 +120,46 @@ end
     );
 
     fs::remove_dir_all(dir).expect("remove temp module dir");
+}
+
+#[test]
+fn hidden_inputs_derived_by_dup_families_are_reported() {
+    for (name, body, outputs, inferred_inputs) in
+        [("dup_scalar", "    dup.3", 5, 4), ("dup_word", "    dupw.2", 16, 12)]
+    {
+        let source = zero_input_proc_with_outputs(name, outputs, body);
+        let messages = signature_messages_for_source(name, &source);
+
+        assert_eq!(messages, vec![declared_zero_inputs_message(inferred_inputs)]);
+    }
+}
+
+#[test]
+fn scalar_stack_permutations_report_required_hidden_inputs() {
+    for (name, body, outputs, inferred_inputs) in [
+        ("swap_scalar", "    swap.4", 5, 5),
+        ("movup_scalar", "    movup.5", 6, 6),
+        ("movdn_scalar", "    movdn.5", 6, 6),
+    ] {
+        let source = zero_input_proc_with_outputs(name, outputs, body);
+        let messages = signature_messages_for_source(name, &source);
+
+        assert_eq!(messages, vec![declared_zero_inputs_message(inferred_inputs)]);
+    }
+}
+
+#[test]
+fn word_stack_permutations_report_required_hidden_inputs() {
+    for (name, body, inferred_inputs) in [
+        ("swap_word", "    swapw.3", 16),
+        ("movup_word", "    movupw.3", 16),
+        ("movdn_word", "    movdnw.3", 16),
+    ] {
+        let source = zero_input_proc_with_outputs(name, 16, body);
+        let messages = signature_messages_for_source(name, &source);
+
+        assert_eq!(messages, vec![declared_zero_inputs_message(inferred_inputs)]);
+    }
 }
 
 #[test]
