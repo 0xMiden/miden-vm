@@ -38,7 +38,6 @@
 //! - MAGIC (4 bytes) + FLAGS (1 byte) + VERSION (3 bytes)
 //!
 //! (Counts)
-//! - nodes count (`usize`)
 //! - internal nodes count (`usize`)
 //! - external nodes count (`usize`)
 //!
@@ -636,11 +635,11 @@ impl SerializedMastForest<'_> {
     }
 
     fn node_entry_offset(&self) -> usize {
-        self.layout.node_entry_offset
+        self.layout.node_entry_offset()
     }
 
     fn node_hash_offset(&self) -> Option<usize> {
-        self.layout.node_hash_offset
+        self.layout.node_hash_offset()
     }
 
     fn digest_slot_at(&self, index: usize) -> usize {
@@ -788,7 +787,7 @@ fn decode_from_reader_inner<R: ByteReader>(
 ) -> Result<(WireFlags, super::UntrustedMastForest), DeserializationError> {
     let mut recording = TrackingReader::new_recording(source);
     let (flags, layout) = read_header_and_scan_layout(&mut recording, allow_hashless)?;
-    debug_assert_eq!(recording.offset(), layout.advice_map_offset);
+    debug_assert_eq!(recording.offset(), layout.advice_map_offset());
 
     let advice_map = AdviceMap::read_from(&mut recording)?;
     let debug_info = if flags.is_stripped() {

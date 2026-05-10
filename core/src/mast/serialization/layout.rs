@@ -29,13 +29,13 @@ pub(crate) struct ForestLayout {
     pub(super) internal_node_count: usize,
     pub(super) external_node_count: usize,
     pub(super) roots_count: usize,
-    pub(super) roots_offset: usize,
-    pub(super) basic_block_offset: usize,
-    pub(super) basic_block_len: usize,
-    pub(super) node_entry_offset: usize,
-    pub(super) external_digest_offset: usize,
-    pub(super) node_hash_offset: Option<usize>,
-    pub(super) advice_map_offset: usize,
+    roots_offset: usize,
+    basic_block_offset: usize,
+    basic_block_len: usize,
+    node_entry_offset: usize,
+    external_digest_offset: usize,
+    node_hash_offset: Option<usize>,
+    advice_map_offset: usize,
 }
 
 /// Raw wire flags from the MAST header.
@@ -95,9 +95,38 @@ impl ForestLayout {
         MastNodeEntry::read_from(&mut reader)
     }
 
-    #[cfg(test)]
     pub(super) fn advice_map_offset(&self) -> usize {
         self.advice_map_offset
+    }
+
+    // OFFSET ACCESSORS
+    //
+    // These expose the structural section offsets for consumers that need random access
+    // into the serialized wire format.
+    #[allow(dead_code)]
+    pub(super) fn roots_offset(&self) -> usize {
+        self.roots_offset
+    }
+
+    pub(super) fn basic_block_offset(&self) -> usize {
+        self.basic_block_offset
+    }
+
+    pub(super) fn basic_block_len(&self) -> usize {
+        self.basic_block_len
+    }
+
+    #[allow(dead_code)]
+    pub(super) fn node_entry_offset(&self) -> usize {
+        self.node_entry_offset
+    }
+
+    pub(super) fn external_digest_offset(&self) -> usize {
+        self.external_digest_offset
+    }
+
+    pub(super) fn node_hash_offset(&self) -> Option<usize> {
+        self.node_hash_offset
     }
 }
 
