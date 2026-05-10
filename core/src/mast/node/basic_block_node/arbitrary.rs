@@ -323,6 +323,41 @@ impl Default for MastForestParams {
     }
 }
 
+// ---------- Internal helpers for executable pipeline ----------
+
+/// Counts of each node type to be generated in a single sample.
+///
+/// Used internally by the `ForestSeeds` container to drive the four-phase executable
+/// pipeline. All counts are upper bounds; the generator may emit fewer nodes of a given type
+/// when the `RootPool` or `KernelPool` is empty at emission time.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct NodeCounts {
+    pub num_joins: usize,
+    pub num_splits: usize,
+    pub num_loops: usize,
+    pub num_calls: usize,
+    pub num_syscalls: usize,
+    pub num_externals: usize,
+    pub num_dyns: usize,
+}
+
+/// Selects how an external node's digest is chosen during generation.
+///
+/// In `Executable` mode, external nodes must resolve to procedure roots already present in
+/// the same forest, so the generator uses `FromRoot(index)` to pick from the current
+/// `RootPool`. In `StructureOnly` mode, externals use randomly generated digests via
+/// `Random([u64; 4])` that will not resolve and are intended for structural tests only.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum ExternalPick {
+    /// Executable mode: index into the current `RootPool` at the moment the external is
+    /// emitted. The generator will modulo this index by the pool's length to select a valid
+    /// target.
+    FromRoot(usize),
+    /// StructureOnly mode: digest bytes sampled directly from proptest. The resulting external
+    /// will not resolve to any procedure in the forest and is not executable.
+    Random([u64; 4]),
+}
+
 impl Arbitrary for MastForest {
     type Parameters = MastForestParams;
     type Strategy = BoxedStrategy<Self>;
