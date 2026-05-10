@@ -1703,6 +1703,7 @@ mod proptests {
                 max_syscalls: 0, // Avoid syscalls in roundtrip tests
                 max_externals: 1,
                 max_dyns: 1,
+                ..Default::default()
             })
         ) {
             // Serialize
@@ -1935,6 +1936,7 @@ mod proptests {
                 max_syscalls: 0,
                 max_externals: 1,
                 max_dyns: 1,
+                ..Default::default()
             })
         ) {
             // Stripped serialization
