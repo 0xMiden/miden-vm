@@ -535,6 +535,29 @@ pub(super) fn eq_zero_witness_for_expr(expr: &Expr, env: &Env) -> Option<EqZeroW
     }
 }
 
+/// Traverse an expression and join sink facts produced at each expression node.
+pub(super) fn collect_expr_sink_fact(
+    expr: &Expr,
+    env: &Env,
+    sink_fact: &impl Fn(&Expr, &Env) -> AdviceFact,
+) -> AdviceFact {
+    let nested = match expr {
+        Expr::Var(_) | Expr::True | Expr::False | Expr::Constant(_) | Expr::EqW { .. } => {
+            AdviceFact::bottom()
+        },
+        Expr::Ternary { cond, then_expr, else_expr } => {
+            collect_expr_sink_fact(cond, env, sink_fact)
+                .join(&collect_expr_sink_fact(then_expr, env, sink_fact))
+                .join(&collect_expr_sink_fact(else_expr, env, sink_fact))
+        },
+        Expr::Unary(_, inner) => collect_expr_sink_fact(inner, env, sink_fact),
+        Expr::Binary(_, lhs, rhs) => collect_expr_sink_fact(lhs, env, sink_fact)
+            .join(&collect_expr_sink_fact(rhs, env, sink_fact)),
+    };
+
+    nested.join(&sink_fact(expr, env))
+}
+
 /// Return true when the expression is proven non-zero by the best-effort refinement.
 pub(super) fn expr_is_proven_nonzero(expr: &Expr, env: &Env) -> bool {
     match expr {

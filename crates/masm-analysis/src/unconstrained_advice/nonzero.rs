@@ -7,13 +7,10 @@ use masm_decompiler::{BinOp, Expr, Intrinsic, Stmt, SymbolPath, UnOp, Var};
 use super::{
     domain::AdviceFact,
     shared::{
-        Env, expr_is_proven_nonzero, expr_output_fact, intrinsic_nonzero_arg_index,
-        refine_nonzero_from_intrinsic, stmt_span,
+        Env, collect_expr_sink_fact, expr_is_proven_nonzero, expr_output_fact,
+        intrinsic_nonzero_arg_index, refine_nonzero_from_intrinsic, stmt_span,
     },
-    summary::{
-        AdviceDiagnostic, AdviceDiagnosticsMap, AdviceSummary, AdviceSummaryMap,
-        diagnostic_from_fact,
-    },
+    summary::{AdviceDiagnosticContext, AdviceDiagnosticsMap, AdviceSummary, AdviceSummaryMap},
     walker::{self, AdviceCapability, AdviceEffect},
 };
 use crate::prepared::PreparedProc;
@@ -64,24 +61,17 @@ fn mark_nonzero_unknown(summaries: &mut AdviceSummaryMap, proc_path: &SymbolPath
 
 /// Advice capability for unconstrained advice reaching non-zero sinks.
 struct NonZeroCapability<'a> {
-    proc_path: SymbolPath,
+    diagnostics: AdviceDiagnosticContext,
     callee_summaries: &'a AdviceSummaryMap,
 }
 
 impl<'a> NonZeroCapability<'a> {
     /// Construct a new non-zero capability.
     fn new(proc_path: SymbolPath, callee_summaries: &'a AdviceSummaryMap) -> Self {
-        Self { proc_path, callee_summaries }
-    }
-
-    /// Create a diagnostic whose related source spans are derived from a fact.
-    fn new_diagnostic(
-        &self,
-        span: miden_debug_types::SourceSpan,
-        message: impl Into<String>,
-        fact: &AdviceFact,
-    ) -> AdviceDiagnostic {
-        diagnostic_from_fact(self.proc_path.clone(), span, message, fact)
+        Self {
+            diagnostics: AdviceDiagnosticContext::new(proc_path),
+            callee_summaries,
+        }
     }
 
     /// Add diagnostics and summary requirements for a non-zero sink fact.
@@ -94,7 +84,7 @@ impl<'a> NonZeroCapability<'a> {
     ) {
         let message = message.into();
         if fact.has_concrete_sources() {
-            effect.push_diagnostic(self.new_diagnostic(span, message, fact));
+            effect.push_diagnostic(self.diagnostics.diagnostic_for_fact(span, message, fact));
         }
         effect.extend_required_inputs(fact.from_inputs.iter().copied());
     }
@@ -125,7 +115,7 @@ impl<'a> NonZeroCapability<'a> {
             let arg_fact = env.fact_for_var(arg);
             if arg_fact.has_concrete_sources() {
                 let callee = SymbolPath::new(target.to_string());
-                let diagnostic = self.new_diagnostic(
+                let diagnostic = self.diagnostics.diagnostic_for_fact(
                     span,
                     format!(
                         "argument {index} to `{callee}` may reach a divisor or `inv` input without a nearby non-zero check"
@@ -220,28 +210,77 @@ fn intrinsic_nonzero_sink_fact(intrinsic: &Intrinsic, env: &Env) -> AdviceFact {
 
 /// Return the advice fact feeding any divisor or `inv` input nested in this expression.
 fn expr_nonzero_sink_fact(expr: &Expr, env: &Env) -> AdviceFact {
+    collect_expr_sink_fact(expr, env, &nonzero_node_sink_fact)
+}
+
+/// Return the advice fact feeding a divisor or `inv` input at the current expression node.
+fn nonzero_node_sink_fact(expr: &Expr, env: &Env) -> AdviceFact {
     match expr {
-        Expr::Var(_) | Expr::True | Expr::False | Expr::Constant(_) | Expr::EqW { .. } => {
-            AdviceFact::bottom()
+        Expr::Unary(UnOp::Inv, inner) if !expr_is_proven_nonzero(inner, env) => {
+            expr_output_fact(inner, env)
         },
-        Expr::Ternary { cond, then_expr, else_expr } => expr_nonzero_sink_fact(cond, env)
-            .join(&expr_nonzero_sink_fact(then_expr, env))
-            .join(&expr_nonzero_sink_fact(else_expr, env)),
-        Expr::Unary(op, inner) => {
-            let nested = expr_nonzero_sink_fact(inner, env);
-            let sink = match op {
-                UnOp::Inv if !expr_is_proven_nonzero(inner, env) => expr_output_fact(inner, env),
-                _ => AdviceFact::bottom(),
-            };
-            nested.join(&sink)
+        Expr::Binary(BinOp::Div, _, rhs) if !expr_is_proven_nonzero(rhs, env) => {
+            expr_output_fact(rhs, env)
         },
-        Expr::Binary(op, lhs, rhs) => {
-            let nested = expr_nonzero_sink_fact(lhs, env).join(&expr_nonzero_sink_fact(rhs, env));
-            let sink = match op {
-                BinOp::Div if !expr_is_proven_nonzero(rhs, env) => expr_output_fact(rhs, env),
-                _ => AdviceFact::bottom(),
-            };
-            nested.join(&sink)
-        },
+        Expr::Var(_)
+        | Expr::True
+        | Expr::False
+        | Expr::Constant(_)
+        | Expr::Ternary { .. }
+        | Expr::Unary(..)
+        | Expr::Binary(..)
+        | Expr::EqW { .. } => AdviceFact::bottom(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use masm_decompiler::{Constant, ValueId, Var};
+    use miden_debug_types::{SourceId, SourceSpan};
+
+    use super::*;
+
+    fn var(id: u64) -> Var {
+        Var::new(ValueId::from(id), id as usize)
+    }
+
+    fn span(start: u32) -> SourceSpan {
+        SourceSpan::new(SourceId::new(0), start..start + 1)
+    }
+
+    #[test]
+    fn nonzero_sink_fact_traverses_nested_ternary_unary_and_binary_expressions() {
+        let divisor = var(0);
+        let inverse_input = var(1);
+        let clean = var(2);
+        let divisor_span = span(20);
+        let inverse_span = span(30);
+
+        let mut env = Env::default();
+        env.set_var_fact(&divisor, AdviceFact::from_source(divisor_span));
+        env.set_var_fact(&inverse_input, AdviceFact::from_source(inverse_span));
+
+        let expr = Expr::Binary(
+            BinOp::Add,
+            Box::new(Expr::Unary(
+                UnOp::Neg,
+                Box::new(Expr::Ternary {
+                    cond: Box::new(Expr::Var(clean)),
+                    then_expr: Box::new(Expr::Binary(
+                        BinOp::Div,
+                        Box::new(Expr::Constant(Constant::Felt(10))),
+                        Box::new(Expr::Var(divisor)),
+                    )),
+                    else_expr: Box::new(Expr::Unary(UnOp::Inv, Box::new(Expr::Var(inverse_input)))),
+                }),
+            )),
+            Box::new(Expr::Constant(Constant::Felt(1))),
+        );
+
+        let fact = expr_nonzero_sink_fact(&expr, &env);
+
+        assert_eq!(fact.source_spans.len(), 2);
+        assert!(fact.source_spans.contains(&divisor_span));
+        assert!(fact.source_spans.contains(&inverse_span));
     }
 }

@@ -214,6 +214,29 @@ impl AdviceDiagnostic {
     }
 }
 
+/// Procedure-local context for building advice diagnostics.
+#[derive(Debug, Clone)]
+pub(super) struct AdviceDiagnosticContext {
+    procedure: SymbolPath,
+}
+
+impl AdviceDiagnosticContext {
+    /// Create a diagnostic context for one procedure.
+    pub(super) fn new(procedure: SymbolPath) -> Self {
+        Self { procedure }
+    }
+
+    /// Create a diagnostic whose related source spans are derived from an advice fact.
+    pub(super) fn diagnostic_for_fact(
+        &self,
+        span: SourceSpan,
+        message: impl Into<String>,
+        fact: &AdviceFact,
+    ) -> AdviceDiagnostic {
+        diagnostic_from_fact(self.procedure.clone(), span, message, fact)
+    }
+}
+
 /// Create a diagnostic whose related source spans are derived from an advice fact.
 pub(super) fn diagnostic_from_fact(
     procedure: SymbolPath,
