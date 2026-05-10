@@ -26,6 +26,8 @@ pub struct AnalysisContext {
     /// Edges from a constant to the imports it references.
     /// Used to avoid marking imports as used when only dead constants reference them.
     constant_import_refs: BTreeMap<Ident, BTreeSet<alloc::string::String>>,
+    /// Stack of constants currently being expanded by the constant evaluator.
+    evaluating_constants: Vec<Ident>,
     /// When set, references are recorded as constant-to-constant edges
     /// rather than marking the target as directly used.
     simplifying_constant: Option<Ident>,
@@ -82,10 +84,24 @@ impl constants::ConstEnvironment for AnalysisContext {
     }
 
     #[inline]
+    fn on_eval_start(&mut self, path: Span<&Path>) {
+        let Some(name) = path.as_ident() else {
+            return;
+        };
+        if self.constants.contains_key(&name) {
+            self.evaluating_constants.push(name);
+        }
+    }
+
+    #[inline]
     fn on_eval_completed(&mut self, name: Span<&Path>, value: &ConstantExpr) {
         let Some(name) = name.as_ident() else {
             return;
         };
+        if self.constants.contains_key(&name) {
+            let current = self.evaluating_constants.pop();
+            debug_assert_eq!(current.as_ref(), Some(&name));
+        }
         if let Some(value) = value.as_value() {
             self.cached_constant_values.insert(name, value);
         } else {
@@ -107,6 +123,7 @@ impl AnalysisContext {
             used_constants: Default::default(),
             constant_deps: Default::default(),
             constant_import_refs: Default::default(),
+            evaluating_constants: Default::default(),
             simplifying_constant: None,
             imported: Default::default(),
             procedures: Default::default(),
@@ -118,12 +135,13 @@ impl AnalysisContext {
     }
 
     fn record_constant_ref(&mut self, name: &Ident) {
-        let is_self_ref = self.simplifying_constant.as_ref() == Some(name);
+        let parent = self.evaluating_constants.last().or(self.simplifying_constant.as_ref());
+        let is_self_ref = parent == Some(name);
         if is_self_ref {
             return;
         }
 
-        if let Some(ref parent) = self.simplifying_constant {
+        if let Some(parent) = parent {
             self.constant_deps.entry(parent.clone()).or_default().insert(name.clone());
         } else {
             self.used_constants.insert(name.clone());
@@ -432,6 +450,10 @@ mod tests {
             } else {
                 <AnalysisContext as constants::ConstEnvironment>::get_by_path(self.inner, path)
             }
+        }
+
+        fn on_eval_start(&mut self, path: Span<&Path>) {
+            <AnalysisContext as constants::ConstEnvironment>::on_eval_start(self.inner, path);
         }
 
         fn on_eval_completed(&mut self, name: Span<&Path>, value: &ConstantExpr) {

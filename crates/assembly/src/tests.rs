@@ -7137,6 +7137,32 @@ fn chained_constant_used_transitively() -> TestResult {
 }
 
 #[test]
+fn cached_chained_constant_records_transitive_dependency() {
+    let context = TestContext::default();
+    let source = source_file!(
+        &context,
+        "
+        const A = B
+        const B = C
+        const C = 1
+
+        begin
+            push.B
+        end"
+    );
+
+    let error = context
+        .assemble(source)
+        .expect_err("only the genuinely dead constant should warn");
+    let rendered =
+        format!("{}", crate::diagnostics::reporting::PrintDiagnostic::new_without_color(&error));
+
+    assert_eq!(rendered.matches("unused constant").count(), 1, "{rendered}");
+    assert!(rendered.contains("const A = B"), "{rendered}");
+    assert!(!rendered.contains("const C = 1"), "{rendered}");
+}
+
+#[test]
 fn same_module_qualified_constant_used_transitively() -> TestResult {
     let context = TestContext::default();
     let source = source_file!(
