@@ -47,6 +47,7 @@ fn bench_merge_varied_sizes(c: &mut Criterion) {
             max_syscalls: 0, // Disabled for executable benchmark forests
             max_externals: blocks_per_forest.min(2),
             max_dyns: blocks_per_forest.min(2),
+            ..Default::default()
         };
 
         // Pre-generate inputs (excluded from timing).
