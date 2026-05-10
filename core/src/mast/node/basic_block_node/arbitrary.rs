@@ -222,22 +222,30 @@ pub struct MastForestParams {
     pub max_loops: usize,
     /// Maximum number of call nodes to generate
     pub max_calls: usize,
-    /// Maximum number of syscall nodes to generate
+    /// Maximum number of syscall nodes to generate.
     ///
-    /// **Warning**: Syscalls require a properly configured kernel with matching procedure hashes.
-    /// Generated syscalls use random procedure digests and will not execute without providing
-    /// a matching kernel. Set to 0 for executable forests.
+    /// In [`MastForestGenerationMode::Executable`] (the default), each emitted syscall targets a
+    /// procedure root whose MAST root is a member of the paired kernel, satisfying the
+    /// kernel-closure invariant. In [`MastForestGenerationMode::StructureOnly`], syscalls retain
+    /// the legacy behaviour of pointing at arbitrary local node IDs with unresolvable digests
+    /// and will not execute.
     pub max_syscalls: usize,
-    /// Maximum number of external nodes to generate
+    /// Maximum number of external nodes to generate.
     ///
-    /// **Warning**: External nodes use random digests that won't correspond to valid procedures.
-    /// Any program with external nodes will fail to execute. Set to 0 for executable forests.
+    /// In [`MastForestGenerationMode::Executable`] (the default), each emitted external's digest
+    /// equals the MAST root of a procedure root already present in the same forest and the
+    /// resulting external call graph is acyclic, so the VM can resolve every external locally.
+    /// In [`MastForestGenerationMode::StructureOnly`], externals use randomly generated digests
+    /// that will not resolve and forests containing them will fail to execute.
     pub max_externals: usize,
-    /// Maximum number of dyn/dyncall nodes to generate
+    /// Maximum number of dyn/dyncall nodes to generate.
     ///
-    /// **Warning**: Dyn nodes leave junk on the stack and cannot execute properly.
-    /// These nodes are primarily for testing MAST structure, not execution. Set to 0 for
-    /// executable forests.
+    /// In [`MastForestGenerationMode::Executable`] (the default), this field is treated as `0`
+    /// and no dyn nodes are emitted (see the *Future work* note on the struct doc). In
+    /// [`MastForestGenerationMode::StructureOnly`], a mix of `DynNode::new_dyn` and
+    /// `DynNode::new_dyncall` instances may be emitted up to this bound; such forests are
+    /// intended for structural tests (serialization, merging, pretty-printing) and are not
+    /// guaranteed to execute.
     pub max_dyns: usize,
     /// Controls whether the generator emits executable forests (with the closure invariants
     /// enforced) or legacy, structure-only forests.
@@ -272,44 +280,62 @@ impl Arbitrary for MastForest {
     type Parameters = MastForestParams;
     type Strategy = BoxedStrategy<Self>;
 
-    /// Generates a MastForest with the specified parameters.
+    /// Generates a `MastForest` with the specified parameters.
     ///
-    /// # Generated Forest Properties
+    /// # Generated forest properties
     ///
-    /// - **Basic blocks**: Always generated (1..=blocks.end()) with operations
-    /// - **Control flow nodes**: Generated according to max_* parameters, may be 0
-    /// - **Root nodes**: ~1/3 of generated nodes are marked as roots
+    /// - **Basic blocks**: always generated (`1..=blocks.end()`) with operations.
+    /// - **Control flow nodes**: generated according to the `max_*` parameters; any given count
+    ///   may be `0` for a particular sample.
+    /// - **Root nodes**: a non-empty subset of the generated nodes is marked as procedure roots,
+    ///   so downstream externals and syscalls always have at least one valid callee to target.
     ///
-    /// # Execution Limitations
+    /// # Executability guarantees
     ///
-    /// Generated forests may not be executable depending on parameters:
+    /// When `params.mode` is [`MastForestGenerationMode::Executable`] (the default), every
+    /// emitted sample satisfies the four closure invariants documented on
+    /// [`MastForestParams`]:
     ///
-    /// ## Syscalls (`max_syscalls`)
-    /// - Generated syscalls reference random procedure digests
-    /// - Execution requires a kernel containing matching procedure hashes
-    /// - For executable forests, set `max_syscalls = 0`
+    /// 1. No dyn nodes are emitted (regardless of `max_dyns`).
+    /// 2. Every external's digest equals a procedure root already present in the forest
+    ///    (external-resolution).
+    /// 3. The external call graph over procedure roots is acyclic (external-acyclicity).
+    /// 4. Every syscall callee is a procedure root whose MAST root is a member of the paired
+    ///    kernel (kernel-closure).
     ///
-    /// ## External Nodes (`max_externals`)
-    /// - Generated with random digests that won't match valid procedures
-    /// - Any program with external nodes will fail during execution
-    /// - For executable forests, set `max_externals = 0`
+    /// This `arbitrary_with` strategy yields only the forest. Callers that need the paired
+    /// kernel — required to actually execute the forest on the VM — should use the
+    /// `(MastForest, Kernel)` strategy exposed alongside [`MastForestParams`] in this module.
     ///
-    /// ## Dynamic Nodes (`max_dyns`)
-    /// - Dyn and dyncall nodes leave junk on the stack
-    /// - These nodes cannot execute properly in practice
-    /// - For executable forests, set `max_dyns = 0`
+    /// When `params.mode` is [`MastForestGenerationMode::StructureOnly`], none of the
+    /// closure invariants are enforced: syscalls may target arbitrary callees with random
+    /// digests, externals use randomly generated digests, and both `DynNode::new_dyn` and
+    /// `DynNode::new_dyncall` variants may be emitted up to `max_dyns`. Forests produced in
+    /// this mode are appropriate for serialization, merging, and pretty-printing tests but are
+    /// not guaranteed to execute.
     ///
-    /// # Example Usage
+    /// # Future work — MASM-level dyn generation
+    ///
+    /// Dyn nodes remain unsupported in `Executable` mode because the MAST-level generator
+    /// cannot synthesise valid operand-stack preconditions for the callee digest that each
+    /// dyn/dyncall reads off the stack at runtime. An assembly-level (MASM) generator — which
+    /// can emit instruction sequences that push a valid digest before each dyn/dyncall — is
+    /// the intended future extension for producing executable forests with dyn coverage.
+    /// Until then, callers should keep `max_dyns = 0` in `Executable` mode or opt into
+    /// `StructureOnly` mode for structural (non-executing) tests.
+    ///
+    /// # Example usage
     ///
     /// ```rust
     /// use miden_core::mast::{MastForest, arbitrary::MastForestParams};
     /// use proptest::arbitrary::Arbitrary;
     ///
-    /// // Generate executable forest (default)
+    /// // Executable forest (default mode).
     /// let forest = MastForest::arbitrary_with(MastForestParams::default());
     ///
-    /// // Generate forest with non-executable nodes for testing
+    /// // Structure-only forest, e.g. for serialization tests.
     /// let params = MastForestParams {
+    ///     mode: miden_core::mast::arbitrary::MastForestGenerationMode::StructureOnly,
     ///     max_syscalls: 2,
     ///     max_externals: 1,
     ///     max_dyns: 1,
