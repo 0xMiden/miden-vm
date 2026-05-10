@@ -411,6 +411,168 @@ pub(crate) struct ForestSeeds {
     pub root_selection: Vec<bool>,
 }
 
+/// Ordered multiset of `MastNodeId`s that the generator has already committed as procedure
+/// roots.
+///
+/// Supports filtering by "roots that do not transitively reach a given subtree" so that
+/// external-node additions stay acyclic. For proptest-scale forests (single-digit counts per
+/// node type), a simple on-demand DFS is sufficient; no caching is required.
+#[derive(Debug)]
+pub(crate) struct RootPool<'a> {
+    forest: &'a MastForest,
+    roots: Vec<MastNodeId>,
+}
+
+impl<'a> RootPool<'a> {
+    /// Creates a new empty `RootPool` for the given forest.
+    pub fn new(forest: &'a MastForest) -> Self {
+        Self { forest, roots: Vec::new() }
+    }
+
+    /// Adds a procedure root to the pool.
+    pub fn push(&mut self, id: MastNodeId) {
+        self.roots.push(id);
+    }
+
+    /// Returns `true` if the pool contains no roots.
+    pub fn is_empty(&self) -> bool {
+        self.roots.is_empty()
+    }
+
+    /// Returns the number of roots in the pool.
+    pub fn len(&self) -> usize {
+        self.roots.len()
+    }
+
+    /// Returns an iterator of procedure roots whose transitive descendants do not include
+    /// `excluded`.
+    ///
+    /// The iterator is ordered by insertion order so the generator is deterministic for a
+    /// given seed. Uses an on-demand DFS to check reachability.
+    pub fn roots_not_reaching(
+        &self,
+        excluded: MastNodeId,
+    ) -> impl Iterator<Item = MastNodeId> + '_ {
+        self.roots.iter().copied().filter(move |&root| !self.reaches(root, excluded))
+    }
+
+    /// Returns `true` if `from` transitively reaches `to` through the forest's child edges.
+    ///
+    /// Uses a simple DFS with a visited set to detect cycles and avoid infinite loops.
+    fn reaches(&self, from: MastNodeId, to: MastNodeId) -> bool {
+        use alloc::collections::BTreeSet;
+
+        if from == to {
+            return true;
+        }
+
+        let mut visited = BTreeSet::new();
+        let mut stack = alloc::vec![from];
+
+        while let Some(current) = stack.pop() {
+            if current == to {
+                return true;
+            }
+
+            if !visited.insert(current) {
+                // Already visited this node, skip to avoid cycles
+                continue;
+            }
+
+            // Get the node and push its children onto the stack
+            if let Some(node) = self.forest.get_node_by_id(current) {
+                match node {
+                    MastNode::Join(join) => {
+                        stack.push(join.first());
+                        stack.push(join.second());
+                    }
+                    MastNode::Split(split) => {
+                        stack.push(split.on_true());
+                        stack.push(split.on_false());
+                    }
+                    MastNode::Loop(loop_node) => {
+                        stack.push(loop_node.body());
+                    }
+                    MastNode::Call(call) => {
+                        stack.push(call.callee());
+                    }
+                    // Basic blocks, external nodes, and dyn nodes have no children
+                    MastNode::Block(_) | MastNode::External(_) | MastNode::Dyn(_) => {}
+                }
+            }
+        }
+
+        false
+    }
+}
+
+/// Mutable view of the kernel pool during generation.
+///
+/// In Executable mode with `kernel_procedures = None`, this grows monotonically as syscalls
+/// are added. With `kernel_procedures = Some(hs)`, it is initialised with `hs` and never
+/// mutates (frozen).
+///
+/// The `frozen` flag controls whether new hashes can be inserted: when `true`, `insert` is a
+/// no-op. This allows the generator to use a single code path for both user-supplied and
+/// co-generated kernels.
+#[derive(Debug)]
+pub(crate) struct KernelPool {
+    hashes: Vec<Word>,
+    frozen: bool,
+}
+
+impl KernelPool {
+    /// Creates a new empty `KernelPool` that accepts insertions.
+    pub fn new() -> Self {
+        Self { hashes: Vec::new(), frozen: false }
+    }
+
+    /// Creates a new `KernelPool` initialised with the given hashes and frozen so no further
+    /// insertions are allowed.
+    ///
+    /// Used when the caller supplies `kernel_procedures = Some(hs)` to lock the kernel to
+    /// exactly those hashes.
+    pub fn new_frozen(hashes: Vec<Word>) -> Self {
+        Self { hashes, frozen: true }
+    }
+
+    /// Inserts a hash into the pool if the pool is not frozen.
+    ///
+    /// When `frozen` is `true`, this is a no-op. This allows the generator to call `insert`
+    /// unconditionally during syscall emission without branching on whether the kernel is
+    /// user-supplied or co-generated.
+    pub fn insert(&mut self, h: Word) {
+        if !self.frozen {
+            self.hashes.push(h);
+        }
+    }
+
+    /// Returns `true` if the pool contains the given hash.
+    pub fn contains(&self, h: Word) -> bool {
+        self.hashes.contains(&h)
+    }
+
+    /// Returns a slice of all hashes in the pool.
+    pub fn hashes(&self) -> &[Word] {
+        &self.hashes
+    }
+
+    /// Returns `true` if at least one procedure root in `roots` has a digest that is a member
+    /// of this pool.
+    ///
+    /// Used by Phase 3 to decide whether a syscall node can be emitted: if the kernel is
+    /// frozen (user-supplied) and no existing root matches any kernel hash, the generator
+    /// skips the syscall rather than emitting an invalid one.
+    pub fn has_candidate_in(&self, roots: &[MastNodeId], forest: &MastForest) -> bool {
+        roots.iter().any(|&root| {
+            forest
+                .get_node_by_id(root)
+                .map(|node| self.contains(node.digest()))
+                .unwrap_or(false)
+        })
+    }
+}
+
 impl Arbitrary for MastForest {
     type Parameters = MastForestParams;
     type Strategy = BoxedStrategy<Self>;
