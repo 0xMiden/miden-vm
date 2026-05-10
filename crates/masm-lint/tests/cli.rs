@@ -205,6 +205,53 @@ end
 }
 
 #[test]
+fn multi_output_u32_intrinsics_are_lifted_as_supported_instructions() {
+    let dir = temp_dir("multi-output-u32-ops");
+    let file = dir.join("multi_output_u32_ops.masm");
+    fs::write(
+        &file,
+        "\
+pub proc test()
+    push.1 push.2
+    u32overflowing_add
+    drop drop
+
+    push.3 push.4 push.5
+    u32overflowing_add3
+    drop drop
+
+    push.6 push.7
+    u32widening_mul
+    drop drop
+
+    push.8 push.9 push.10
+    u32widening_madd
+    drop drop
+
+    push.11
+    u32split
+    drop drop
+
+    push.12 push.13 push.14 push.15
+    u32assertw
+    dropw
+end
+",
+    )
+    .expect("failed to write MASM fixture");
+
+    let output = run_masm_lint(&dir, &file);
+
+    assert!(output.status.success(), "multi-output U32 MASM input failed: {output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains("unsupported instruction"),
+        "multi-output U32 op was reported unsupported: {stderr}"
+    );
+    assert!(!stderr.contains("warning"), "multi-output U32 op emitted a warning: {stderr}");
+}
+
+#[test]
 fn absolute_inputs_outside_cwd_do_not_share_fallback_module_path() {
     let cwd = temp_dir("fallback-cwd");
     let inputs_dir = temp_dir("fallback-inputs");
@@ -514,6 +561,60 @@ end
 }
 
 #[test]
+fn advice_used_as_merkle_root_is_reported_for_set_and_verify() {
+    let dir = temp_dir("advice-merkle-root-set-verify");
+
+    let mtree_set = dir.join("advice_merkle_root_set.masm");
+    fs::write(
+        &mtree_set,
+        "\
+pub proc test() -> (felt, felt, felt, felt, felt, felt, felt, felt)
+    push.0 push.0 push.0 push.0
+    adv_pushw
+    push.0
+    push.1
+    mtree_set
+end
+",
+    )
+    .expect("failed to write mtree_set MASM fixture");
+
+    let mtree_verify = dir.join("advice_merkle_root_verify.masm");
+    fs::write(
+        &mtree_verify,
+        "\
+pub proc test() -> (
+    felt, felt, felt, felt, felt,
+    felt, felt, felt, felt, felt
+)
+    adv_pushw
+    push.0
+    push.1
+    push.0 push.0 push.0 push.0
+    mtree_verify
+end
+",
+    )
+    .expect("failed to write mtree_verify MASM fixture");
+
+    for file in [&mtree_set, &mtree_verify] {
+        let output = run_masm_lint(&dir, file);
+
+        assert!(
+            !output.status.success(),
+            "advice Merkle root unexpectedly passed for {file:?}: {output:?}"
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let output_text = format!("{stdout}\n{stderr}");
+        assert!(
+            output_text.contains("unconstrained advice used as Merkle tree root"),
+            "advice Merkle root did not emit a warning for {file:?}: {output_text}"
+        );
+    }
+}
+
+#[test]
 fn advice_used_as_merkle_depth_is_reported_as_u32_sink() {
     let dir = temp_dir("advice-merkle-depth");
     let file = dir.join("advice_merkle_depth.masm");
@@ -539,6 +640,76 @@ end
     assert!(
         output_text.contains("unconstrained advice reaches a u32 intrinsic"),
         "advice Merkle depth did not emit a u32 warning: {output_text}"
+    );
+}
+
+#[test]
+fn advice_used_as_adv_pipe_address_is_reported() {
+    let dir = temp_dir("advice-adv-pipe-address");
+    let file = dir.join("advice_adv_pipe_address.masm");
+    fs::write(
+        &file,
+        "\
+pub proc test() -> (
+    felt, felt, felt, felt, felt,
+    felt, felt, felt, felt, felt,
+    felt, felt, felt
+)
+    adv_push
+    push.0 push.0 push.0 push.0
+    push.0 push.0 push.0 push.0
+    push.0 push.0 push.0 push.0
+    adv_pipe
+end
+",
+    )
+    .expect("failed to write MASM fixture");
+
+    let output = run_masm_lint(&dir, &file);
+
+    assert!(
+        !output.status.success(),
+        "advice adv_pipe address unexpectedly passed: {output:?}"
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let output_text = format!("{stdout}\n{stderr}");
+    assert!(
+        output_text.contains("unconstrained advice used as memory address"),
+        "advice adv_pipe address did not emit a warning: {output_text}"
+    );
+}
+
+#[test]
+fn adv_pipe_outputs_are_reported_as_unconstrained_advice() {
+    let dir = temp_dir("adv-pipe-outputs");
+    let file = dir.join("adv_pipe_outputs.masm");
+    fs::write(
+        &file,
+        "\
+pub proc test() -> (felt, felt, felt, felt, felt, felt, felt, felt, felt, felt, felt, felt)
+    push.0
+    push.0 push.0 push.0 push.0
+    push.0 push.0 push.0 push.0
+    push.0 push.0 push.0 push.0
+    adv_pipe
+    push.1
+    u32wrapping_add
+    drop
+end
+",
+    )
+    .expect("failed to write MASM fixture");
+
+    let output = run_masm_lint(&dir, &file);
+
+    assert!(!output.status.success(), "adv_pipe output unexpectedly passed: {output:?}");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let output_text = format!("{stdout}\n{stderr}");
+    assert!(
+        output_text.contains("unconstrained advice reaches a u32 operation"),
+        "adv_pipe output did not emit a u32 warning: {output_text}"
     );
 }
 
