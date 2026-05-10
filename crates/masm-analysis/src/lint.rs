@@ -3,7 +3,10 @@
 //! Keep this surface narrow: it defines what the lint binary consumes from the
 //! vendored analysis/decompiler crates.
 
-use std::{collections::HashSet, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 pub use masm_decompiler::{LibraryRoot, SymbolPath, Workspace};
 use miden_debug_types::{DefaultSourceManager, SourceManager, SourceSpan};
@@ -15,6 +18,8 @@ use crate::{
         AdviceDiagnostic, AdviceRootCauseGroup, group_advice_diagnostics_by_origin,
     },
 };
+
+const ALLOW_UNCONSTRAINED_ADVICE_MARKER: &str = "masm-lint: allow unconstrained-advice";
 
 /// A unified lint diagnostic ready for rendering.
 #[derive(Debug)]
@@ -46,6 +51,8 @@ pub fn diagnostics_from_workspace(
     group_by_origin: bool,
 ) -> Vec<LintDiagnostic> {
     let snapshot = AnalysisSnapshot::from_workspace(workspace);
+    let advice_diagnostics =
+        filtered_advice_diagnostics(&snapshot.advice_diagnostics, sources.as_ref());
     let mut diagnostics = Vec::new();
 
     if include_signature_mismatches {
@@ -59,14 +66,13 @@ pub fn diagnostics_from_workspace(
 
     if group_by_origin {
         diagnostics.extend(
-            group_advice_diagnostics_by_origin(&snapshot.advice_diagnostics)
+            group_advice_diagnostics_by_origin(&advice_diagnostics)
                 .iter()
                 .map(root_cause_group_to_lint),
         );
     } else {
         diagnostics.extend(
-            snapshot
-                .advice_diagnostics
+            advice_diagnostics
                 .values()
                 .flat_map(|advice_diags| advice_diags.iter().map(advice_diagnostic_to_lint)),
         );
@@ -74,6 +80,66 @@ pub fn diagnostics_from_workspace(
 
     sort_diagnostics(&mut diagnostics, sources.as_ref());
     diagnostics
+}
+
+fn filtered_advice_diagnostics(
+    diagnostics: &HashMap<SymbolPath, Vec<AdviceDiagnostic>>,
+    sources: &dyn SourceManager,
+) -> HashMap<SymbolPath, Vec<AdviceDiagnostic>> {
+    diagnostics
+        .iter()
+        .filter_map(|(procedure, advice_diags)| {
+            let retained = advice_diags
+                .iter()
+                .filter_map(|diag| filter_advice_diagnostic(diag, sources))
+                .collect::<Vec<_>>();
+            (!retained.is_empty()).then(|| (procedure.clone(), retained))
+        })
+        .collect()
+}
+
+fn filter_advice_diagnostic(
+    diag: &AdviceDiagnostic,
+    sources: &dyn SourceManager,
+) -> Option<AdviceDiagnostic> {
+    if line_has_allow_marker(diag.span, sources) {
+        return None;
+    }
+
+    let origins = diag
+        .origins
+        .iter()
+        .copied()
+        .filter(|&origin_span| !line_has_allow_marker(origin_span, sources))
+        .collect::<Vec<_>>();
+
+    if !diag.origins.is_empty() && origins.is_empty() {
+        return None;
+    }
+
+    let mut diag = diag.clone();
+    diag.origins = origins;
+    Some(diag)
+}
+
+fn line_has_allow_marker(span: SourceSpan, sources: &dyn SourceManager) -> bool {
+    let Ok(file_line_col) = sources.file_line_col(span) else {
+        return false;
+    };
+    let Ok(source_file) = sources.get(span.source_id()) else {
+        return false;
+    };
+    let Some(line_idx) = file_line_col.line.to_usize().checked_sub(1) else {
+        return false;
+    };
+
+    let first_line = line_idx.saturating_sub(1);
+    source_file
+        .as_str()
+        .lines()
+        .skip(first_line)
+        .take(line_idx - first_line + 1)
+        .any(|line| line.contains(ALLOW_UNCONSTRAINED_ADVICE_MARKER))
 }
 
 /// Convert a [`SignatureMismatch`] into a [`LintDiagnostic`].
