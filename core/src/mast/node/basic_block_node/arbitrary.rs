@@ -311,6 +311,59 @@ pub(crate) enum ExternalPick {
     Random([u64; 4]),
 }
 
+/// Collection of primitive samples drawn from proptest for a single `MastForest` generation.
+///
+/// This struct is computed once per sample and consumed by either `build_executable_forest`
+/// or `build_structure_only_forest` depending on the selected [`MastForestGenerationMode`].
+/// The field layout is frozen per the strategy composition order to ensure deterministic
+/// shrinking: basic blocks and decorators are sampled first, then counts, then pair/index
+/// vectors sized by those counts, and finally the selection bits for roots and kernel
+/// inclusion.
+///
+/// # Field layout invariants
+///
+/// - `join_pairs.len() == counts.num_joins`
+/// - `split_pairs.len() == counts.num_splits`
+/// - `loop_indices.len() == counts.num_loops`
+/// - `call_indices.len() == counts.num_calls`
+/// - `syscall_picks.len() == counts.num_syscalls`
+/// - `external_picks.len() == counts.num_externals`
+/// - `dyn_selectors.len() == counts.num_dyns`
+/// - `root_selection.len() >= basic_blocks.len() + counts.num_joins + counts.num_splits + counts.num_loops + counts.num_calls`
+/// - `kernel_inclusion.len()` is sized to cover all procedure roots that may be committed
+///   during generation
+#[derive(Clone, Debug)]
+pub(crate) struct ForestSeeds {
+    /// Basic block nodes to be added in Phase 1.
+    pub basic_blocks: Vec<BasicBlockNode>,
+    /// Decorators to be registered before any nodes are added.
+    pub decorators: Vec<Decorator>,
+    /// Counts of each control-flow node type to be generated.
+    pub counts: NodeCounts,
+    /// Child index pairs for join nodes (Phase 2).
+    pub join_pairs: Vec<(usize, usize)>,
+    /// Child index pairs for split nodes (Phase 2).
+    pub split_pairs: Vec<(usize, usize)>,
+    /// Child indices for loop nodes (Phase 2).
+    pub loop_indices: Vec<usize>,
+    /// Child indices for call nodes (Phase 2).
+    pub call_indices: Vec<usize>,
+    /// Each entry is a child index into the set of nodes already added at the moment the
+    /// syscall is emitted. Used only in Executable mode via `KernelPool::pick`.
+    pub syscall_picks: Vec<usize>,
+    /// Each entry is a pick into the current `RootPool` (Executable mode) or a random digest
+    /// (StructureOnly mode).
+    pub external_picks: Vec<ExternalPick>,
+    /// Bit for each dyn node selecting `new_dyn` (false) or `new_dyncall` (true).
+    pub dyn_selectors: Vec<bool>,
+    /// Used only when `kernel_procedures` is `None` in Executable mode. Each bit says whether
+    /// the i-th committed procedure root is included in the minted kernel.
+    pub kernel_inclusion: Vec<bool>,
+    /// Bits controlling Phase 2.5 root seeding (which non-block nodes become roots before
+    /// Phase 3 externals/syscalls are added).
+    pub root_selection: Vec<bool>,
+}
+
 impl Arbitrary for MastForest {
     type Parameters = MastForestParams;
     type Strategy = BoxedStrategy<Self>;
