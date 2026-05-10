@@ -25,7 +25,7 @@ struct Cli {
     #[arg(required = true, value_name = "INPUT")]
     inputs: Vec<PathBuf>,
 
-    /// Register an additional library root: <namespace>=<path>
+    /// Register an additional library root: `<namespace>=<path>`
     #[arg(long = "library", value_parser = parse_library_spec)]
     libraries: Vec<LibraryRoot>,
 
