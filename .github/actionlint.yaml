@@ -1,5 +1,5 @@
 # Allow actionlint to recognize the org's custom Warp runner label used by the
-# blake3 non-regression workflow.
+# non-regression benchmark workflows.
 self-hosted-runner:
   labels:
     - warp-ubuntu-latest-x64-8x

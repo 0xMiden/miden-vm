@@ -115,6 +115,7 @@ pub fn build_trace_with_max_len(
         hasher_for_chiplet,
         ace_replay,
         fragment_size,
+        max_stack_depth,
     } = trace_generation_context;
 
     // Before any trace generation, check that the number of core trace rows doesn't exceed the
@@ -155,6 +156,7 @@ pub fn build_trace_with_max_len(
         core_trace_contexts,
         program_info.kernel().clone(),
         fragment_size,
+        max_stack_depth,
     )?;
 
     let core_trace_len = core_trace_data.len() / CORE_TRACE_WIDTH;
@@ -220,6 +222,7 @@ fn generate_core_trace_row_major(
     core_trace_contexts: Vec<CoreTraceFragmentContext>,
     kernel: Kernel,
     fragment_size: usize,
+    max_stack_depth: usize,
 ) -> Result<Vec<Felt>, ExecutionError> {
     let num_fragments = core_trace_contexts.len();
     let total_allocated_rows = num_fragments * fragment_size;
@@ -244,7 +247,7 @@ fn generate_core_trace_row_major(
         .zip(writers.into_par_iter())
         .map(|(trace_state, writer)| {
             let (mut processor, mut tracer, mut continuation_stack, mut current_forest) =
-                split_trace_fragment_context(trace_state, writer, fragment_size);
+                split_trace_fragment_context(trace_state, writer, fragment_size, max_stack_depth);
 
             processor.execute(
                 &mut continuation_stack,
@@ -419,8 +422,8 @@ fn initialize_range_checker(
     let mut range_checker = RangeChecker::new();
 
     // Add all u32 range checks recorded during execution
-    for (clk, values) in range_checker_replay.into_iter() {
-        range_checker.add_range_checks(clk, &values);
+    for (_clk, values) in range_checker_replay.into_iter() {
+        range_checker.add_range_checks(&values);
     }
 
     // Add all memory-related range checks
@@ -649,11 +652,15 @@ fn pad_core_row_major(core_trace_data: &mut Vec<Felt>, main_trace_len: usize) {
 
     // Pad CLK trace - fill with index values
 
-    core_trace_data.reserve(num_padding_rows * w);
-    for idx in 0..num_padding_rows {
-        template[CLK_COL_IDX] = Felt::from_u32((total_program_rows + idx) as u32);
-        core_trace_data.extend_from_slice(&template);
-    }
+    let pad_start = total_program_rows * w;
+    core_trace_data.resize(pad_start + num_padding_rows * w, ZERO);
+    core_trace_data[pad_start..]
+        .par_chunks_mut(w)
+        .enumerate()
+        .for_each(|(idx, row)| {
+            row.copy_from_slice(&template);
+            row[CLK_COL_IDX] = Felt::from_u32((total_program_rows + idx) as u32);
+        });
 }
 
 /// Uses the provided `CoreTraceFragmentContext` to build and return a `ReplayProcessor` and
@@ -662,6 +669,7 @@ fn split_trace_fragment_context<'a>(
     fragment_context: CoreTraceFragmentContext,
     writer: RowMajorTraceWriter<'a, Felt>,
     fragment_size: usize,
+    max_stack_depth: usize,
 ) -> (
     ReplayProcessor,
     CoreTraceGenerationTracer<'a>,
@@ -694,6 +702,7 @@ fn split_trace_fragment_context<'a>(
         memory_reads_replay,
         hasher_response_replay,
         mast_forest_resolution_replay,
+        max_stack_depth,
         fragment_size.into(),
     );
     let tracer =

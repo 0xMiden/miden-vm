@@ -226,8 +226,17 @@ impl BasicBlockBuilder<'_> {
     /// epilogue of the builder.
     pub fn make_basic_block(&mut self) -> Result<Option<MastNodeId>, Report> {
         if !self.ops.is_empty() {
+            let op_count = self.ops.len();
             let ops = self.ops.drain(..).collect();
-            let decorators = self.decorators.drain(..).collect();
+            let mut decorators = DecoratorList::new();
+            let mut after_exit = Vec::new();
+            for (op_idx, decorator_id) in self.decorators.drain(..) {
+                if op_idx == op_count {
+                    after_exit.push(decorator_id);
+                } else {
+                    decorators.push((op_idx, decorator_id));
+                }
+            }
             let asm_ops = core::mem::take(&mut self.asm_ops);
             let debug_vars: Vec<(usize, DebugVarId)> = self.debug_vars.drain(..).collect();
 
@@ -237,7 +246,7 @@ impl BasicBlockBuilder<'_> {
                 asm_ops,
                 debug_vars,
                 vec![],
-                vec![],
+                after_exit,
             )?;
 
             Ok(Some(basic_block_node_id))
