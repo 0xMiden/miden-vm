@@ -333,7 +333,7 @@ TypeDecl: Form = {
         Form::Type(TypeAlias::new(vis, name, ty).with_span(span))
     },
 
-    <l:@L> <vis:Visibility> "enum" <name:BareIdent> ":" <repr:IntType> "{" <variants:CommaDelimitedAllowTrailing<EnumVariant>> "}" <r:@R> => {
+    <l:@L> <vis:Visibility> "enum" <name:BareIdent> ":" <repr:EnumReprType> "{" <variants:CommaDelimitedAllowTrailing<EnumVariant>> "}" <r:@R> => {
         let span = span!(source_id, l, r);
         let mut vs = Vec::with_capacity(variants.len());
         let mut next = ConstantExpr::Int(Span::new(span, IntValue::U8(0)));
@@ -584,6 +584,20 @@ IntType: Type = {
     "u32" => Type::U32,
     "u64" => Type::U64,
     "u128" => Type::U128,
+    "felt" => Type::Felt,
+}
+
+#[inline]
+EnumReprType: Type = {
+    "i1" => Type::I1,
+    "i8" => Type::I8,
+    "i16" => Type::I16,
+    "i32" => Type::I32,
+    "i64" => Type::I64,
+    "u8" => Type::U8,
+    "u16" => Type::U16,
+    "u32" => Type::U32,
+    "u64" => Type::U64,
     "felt" => Type::Felt,
 }
 

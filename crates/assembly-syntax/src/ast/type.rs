@@ -1061,8 +1061,8 @@ impl Variant {
     }
 
     /// Used to validate that this variant's discriminant value is an instance of `ty`,
-    /// which must be a type valid for use as the underlying representation for an enum, i.e. an
-    /// integer type up to 64 bits in size.
+    /// which must be a type valid for use as the underlying representation for an enum, i.e. felt
+    /// or an integer type up to 64 bits in size.
     ///
     /// It is expected that the discriminant expression has been folded to an integer value by the
     /// time this is called. If the discriminant has not been fully folded, then an error will be
@@ -1122,6 +1122,7 @@ impl Variant {
                     repr: ty.clone(),
                 })
             },
+            Type::I64 | Type::U64 => Ok(()),
             _ => Err(SemanticAnalysisError::InvalidEnumRepr { span: self.span }),
         }
     }
