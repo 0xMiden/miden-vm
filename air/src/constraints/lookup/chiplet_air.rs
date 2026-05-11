@@ -68,10 +68,9 @@ pub(crate) trait ChipletLookupBuilder: LookupBuilder<F = Felt> {
 /// access, no method indirection.
 ///
 /// `clk_plus_one` is the chiplet-side response address used by every hasher response variant
-/// (linear-hash init, RESPAN, MR-update legs, HOUT, SOUT). Today it is derived from
-/// `local.system.clk + 1` at construction time — the only cross-trace read in the chiplet
-/// half of the LogUp argument, concentrated here so a future migration to a chiplet-side
-/// row counter only changes one line.
+/// (linear-hash init, RESPAN, MR-update legs, HOUT, SOUT). Both callers (the legacy
+/// [`ChipletLookupAir`] aggregator and the standalone `ChipletsAir`) source it from the
+/// chiplet-trace `chip_clk` column.
 pub(crate) struct ChipletBusContext<'a, LB>
 where
     LB: LookupBuilder<F = Felt>,
@@ -83,8 +82,7 @@ where
     /// Per-chiplet `is_active` flags, computed from `local`'s selector columns via the
     /// builder-provided hook.
     pub chiplet_active: ChipletActiveFlags<LB::Expr>,
-    /// Hasher response address. `MainLookupAir` sources it from the Core trace's
-    /// `system.clk + 1`; `ChipletsAir` sources it from the chiplet-trace `chip_clk` column.
+    /// Hasher response address, sourced from the chiplet-trace `chip_clk` column.
     pub clk_plus_one: LB::Expr,
 }
 
@@ -94,10 +92,8 @@ where
 {
     /// Build the shared chiplet-trace context for one `eval` call.
     ///
-    /// Takes per-row `&ChipletCols` views and an externally-supplied `clk_plus_one` value.
-    /// The caller owns the responder-address sourcing: `MainLookupAir` derives it from the
-    /// Core trace's `system.clk` column; `ChipletsAir` derives it from the chiplet-trace
-    /// row counter `chip_clk`.
+    /// Takes per-row `&ChipletCols` views and an externally-supplied `clk_plus_one` value
+    /// (the chiplet-trace `chip_clk` column).
     pub fn new(
         builder: &LB,
         local: &'a ChipletCols<LB::Var>,
@@ -180,9 +176,9 @@ where
 /// Emit the three chiplet-trace LogUp columns (responses, hash-kernel virtual table,
 /// wiring) using a caller-supplied responder address.
 ///
-/// Shared between [`ChipletLookupAir`]'s [`LookupAir`] impl (`clk_plus_one` from the Core
-/// trace's `system.clk + 1`) and `ChipletsAir`'s [`LookupAir`] impl (`clk_plus_one` from
-/// `chip_clk`). Centralizes the three-emitter sequence so the two AIR types stay in lockstep.
+/// Shared between [`ChipletLookupAir`]'s [`LookupAir`] impl and `ChipletsAir`'s
+/// [`LookupAir`] impl. Both source `clk_plus_one` from the chiplet-trace `chip_clk` column;
+/// centralizing the three-emitter sequence keeps the two AIR types in lockstep.
 pub(crate) fn emit_chiplet_lookup_columns<LB: ChipletLookupBuilder>(
     builder: &mut LB,
     local: &ChipletCols<LB::Var>,
