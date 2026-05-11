@@ -8,8 +8,8 @@ use debuginfo::DebugInfoSections;
 use miden_assembly_syntax::{
     KernelLibrary, Library, MAX_REPEAT_COUNT, Parse, ParseOptions, SemanticAnalysisError,
     ast::{
-        self, Ident, InvocationTarget, InvokeKind, ItemIndex, ModuleKind, SymbolResolution,
-        Visibility, types::FunctionType,
+        self, AttributeSet, Ident, InvocationTarget, InvokeKind, ItemIndex, ModuleKind,
+        SymbolResolution, Visibility, types::FunctionType,
     },
     debuginfo::{DefaultSourceManager, SourceManager, SourceSpan, Spanned},
     diagnostics::{IntoDiagnostic, RelatedLabel, Report},
@@ -34,7 +34,8 @@ use crate::{
     basic_block_builder::{BasicBlockBuilder, BasicBlockOrDecorators},
     fmp::{fmp_end_frame_sequence, fmp_initialization_sequence, fmp_start_frame_sequence},
     linker::{LinkLibrary, Linker, LinkerError, SymbolItem, SymbolResolutionContext},
-    mast_forest_builder::MastForestBuilder,
+    mast_forest_builder::{MastForestBuilder, MastNodeRef},
+    report,
 };
 
 /// Maximum allowed nesting of control-flow blocks during compilation.
@@ -42,6 +43,52 @@ use crate::{
 /// This limit is intended to prevent stack overflows from maliciously deep block nesting while
 /// remaining far above typical program structure depth.
 pub(crate) const MAX_CONTROL_FLOW_NESTING: usize = 256;
+
+#[derive(Debug)]
+enum PendingLibraryExport {
+    Procedure(PendingProcedureExport),
+    Constant(ConstantExport),
+    Type(TypeExport),
+}
+
+#[derive(Debug)]
+struct PendingProcedureExport {
+    node_ref: MastNodeRef,
+    path: Arc<Path>,
+    signature: Option<FunctionType>,
+    attributes: AttributeSet,
+}
+
+impl PendingLibraryExport {
+    fn into_library_export(
+        self,
+        node_id_by_ref: &BTreeMap<MastNodeRef, MastNodeId>,
+    ) -> Result<LibraryExport, Report> {
+        match self {
+            Self::Procedure(export) => export.into_library_export(node_id_by_ref),
+            Self::Constant(export) => Ok(LibraryExport::Constant(export)),
+            Self::Type(export) => Ok(LibraryExport::Type(export)),
+        }
+    }
+}
+
+impl PendingProcedureExport {
+    fn into_library_export(
+        self,
+        node_id_by_ref: &BTreeMap<MastNodeRef, MastNodeId>,
+    ) -> Result<LibraryExport, Report> {
+        let node = node_id_by_ref
+            .get(&self.node_ref)
+            .copied()
+            .ok_or_else(|| report!("procedure export ref {} was not finalized", self.node_ref))?;
+        Ok(LibraryExport::Procedure(ProcedureExport {
+            node,
+            path: self.path,
+            signature: self.signature,
+            attributes: self.attributes,
+        }))
+    }
+}
 
 // ASSEMBLER
 // ================================================================================================
@@ -572,7 +619,7 @@ impl Assembler {
         });
         let mut mast_forest_builder = MastForestBuilder::new(staticlibs)?;
         mast_forest_builder.set_emit_debug_info(self.emit_debug_info);
-        let mut exports = {
+        let exports = {
             let mut exports = BTreeMap::new();
 
             for module_idx in module_indices.iter().copied() {
@@ -615,17 +662,13 @@ impl Assembler {
             exports
         };
 
-        let (mast_forest, id_remappings) = mast_forest_builder.build();
-        for export in exports.values_mut() {
-            match export {
-                LibraryExport::Procedure(export) => {
-                    if let Some(&new_node_id) = id_remappings.get(&export.node) {
-                        export.node = new_node_id;
-                    }
-                },
-                LibraryExport::Constant(_) | LibraryExport::Type(_) => (),
-            }
-        }
+        let (mast_forest, node_id_by_ref) = mast_forest_builder.build().into_parts();
+        let exports = exports
+            .into_iter()
+            .map(|(path, export)| {
+                export.into_library_export(&node_id_by_ref).map(|export| (path, export))
+            })
+            .collect::<Result<BTreeMap<_, _>, Report>>()?;
 
         self.finish_library_product(mast_forest, exports, kind)
     }
@@ -641,7 +684,7 @@ impl Assembler {
         module_kind: ModuleKind,
         symbol_path: Arc<Path>,
         mast_forest_builder: &mut MastForestBuilder,
-    ) -> Result<LibraryExport, Report> {
+    ) -> Result<PendingLibraryExport, Report> {
         log::trace!(target: "assembler::export_symbol", "exporting {} {symbol_path}", match self.linker[gid].item() {
             SymbolItem::Compiled(ItemInfo::Procedure(_)) => "compiled procedure",
             SymbolItem::Compiled(ItemInfo::Constant(_)) => "compiled constant",
@@ -656,7 +699,7 @@ impl Assembler {
             SymbolItem::Compiled(ItemInfo::Procedure(item)) => {
                 let resolved = match mast_forest_builder.get_procedure(gid) {
                     Some(proc) => ResolvedProcedure {
-                        node: proc.body_node_id(),
+                        node: proc.body_node_ref(),
                         signature: proc.signature(),
                     },
                     // We didn't find the procedure in our current MAST forest. We still need to
@@ -666,6 +709,8 @@ impl Assembler {
                             InvokeKind::ProcRef,
                             SourceSpan::UNKNOWN,
                             item.digest,
+                            item.source_library_commitment(),
+                            item.source_root_id(),
                             mast_forest_builder,
                         )?;
                         ResolvedProcedure { node, signature: item.signature.clone() }
@@ -687,32 +732,32 @@ impl Assembler {
                 let procedure = pctx.into_procedure(digest, node);
                 self.linker.register_procedure_root(gid, digest);
                 mast_forest_builder.insert_procedure(gid, procedure)?;
-                LibraryExport::Procedure(ProcedureExport {
-                    node,
+                PendingLibraryExport::Procedure(PendingProcedureExport {
+                    node_ref: node,
                     path: symbol_path,
                     signature: signature.map(|sig| (*sig).clone()),
                     attributes,
                 })
             },
             SymbolItem::Compiled(ItemInfo::Constant(item)) => {
-                LibraryExport::Constant(ConstantExport {
+                PendingLibraryExport::Constant(ConstantExport {
                     path: symbol_path,
                     value: item.value.clone(),
                 })
             },
             SymbolItem::Compiled(ItemInfo::Type(item)) => {
-                LibraryExport::Type(TypeExport { path: symbol_path, ty: item.ty.clone() })
+                PendingLibraryExport::Type(TypeExport { path: symbol_path, ty: item.ty.clone() })
             },
             SymbolItem::Procedure(_) => {
                 self.compile_subgraph(SubgraphRoot::not_as_entrypoint(gid), mast_forest_builder)?;
                 let node = mast_forest_builder
                     .get_procedure(gid)
                     .expect("compilation succeeded but root not found in cache")
-                    .body_node_id();
+                    .body_node_ref();
                 let signature = self.linker.resolve_signature(gid)?;
                 let attributes = self.linker.resolve_attributes(gid)?;
-                LibraryExport::Procedure(ProcedureExport {
-                    node,
+                PendingLibraryExport::Procedure(PendingProcedureExport {
+                    node_ref: node,
                     path: symbol_path,
                     signature: signature.map(Arc::unwrap_or_clone),
                     attributes,
@@ -722,11 +767,11 @@ impl Assembler {
                 // Evaluate constant to a concrete value for export
                 let value = self.linker.const_eval(gid, &item.value, &mut cache)?;
 
-                LibraryExport::Constant(ConstantExport { path: symbol_path, value })
+                PendingLibraryExport::Constant(ConstantExport { path: symbol_path, value })
             },
             SymbolItem::Type(item) => {
                 let ty = self.linker.resolve_type(item.span(), gid)?;
-                LibraryExport::Type(TypeExport { path: symbol_path, ty })
+                PendingLibraryExport::Type(TypeExport { path: symbol_path, ty })
             },
 
             SymbolItem::Alias { alias, resolved } => {
@@ -750,7 +795,7 @@ impl Assembler {
                 };
 
                 let digest = mast_forest_builder
-                    .get_mast_node(node)
+                    .get_mast_node_by_ref(node)
                     .expect("resolved alias export node must exist")
                     .digest();
                 let pctx = ProcedureContext::new(
@@ -766,8 +811,8 @@ impl Assembler {
                 self.linker.register_procedure_root(gid, digest);
                 mast_forest_builder.insert_procedure(gid, procedure)?;
 
-                return Ok(LibraryExport::Procedure(ProcedureExport {
-                    node,
+                return Ok(PendingLibraryExport::Procedure(PendingProcedureExport {
+                    node_ref: node,
                     path: symbol_path,
                     signature: signature.map(Arc::unwrap_or_clone),
                     attributes: Default::default(),
@@ -849,14 +894,17 @@ impl Assembler {
         }
 
         self.compile_subgraph(SubgraphRoot::with_entrypoint(entrypoint), &mut mast_forest_builder)?;
-        let entry_node_id = mast_forest_builder
+        let entry_node_ref = mast_forest_builder
             .get_procedure(entrypoint)
             .expect("compilation succeeded but root not found in cache")
-            .body_node_id();
+            .body_node_ref();
 
         // in case the node IDs changed, update the entrypoint ID to the new value
-        let (mast_forest, id_remappings) = mast_forest_builder.build();
-        let entry_node_id = *id_remappings.get(&entry_node_id).unwrap_or(&entry_node_id);
+        let (mast_forest, node_id_by_ref) = mast_forest_builder.build().into_parts();
+        let entry_node_id = node_id_by_ref
+            .get(&entry_node_ref)
+            .copied()
+            .expect("entrypoint ref must resolve after building MAST forest");
 
         self.finish_program_product(mast_forest, entry_node_id, self.linker.kernel().clone())
     }
@@ -1093,7 +1141,7 @@ impl Assembler {
                     pctx.set_signature(signature);
 
                     let proc_mast_root =
-                        mast_forest_builder.get_mast_node(proc_node_id).unwrap().digest();
+                        mast_forest_builder.get_mast_node_by_ref(proc_node_id).unwrap().digest();
 
                     let procedure = pctx.into_procedure(proc_mast_root, proc_node_id);
 
@@ -1165,13 +1213,13 @@ impl Assembler {
             None
         };
 
-        let proc_body_id =
+        let proc_body_ref =
             self.compile_body(proc.iter(), &mut proc_ctx, body_wrapper, mast_forest_builder, 0)?;
 
         let proc_body_node = mast_forest_builder
-            .get_mast_node(proc_body_id)
+            .get_mast_node_by_ref(proc_body_ref)
             .expect("no MAST node for compiled procedure");
-        Ok(proc_ctx.into_procedure(proc_body_node.digest(), proc_body_id))
+        Ok(proc_ctx.into_procedure(proc_body_node.digest(), proc_body_ref))
     }
 
     /// Creates an assembly operation decorator for control flow nodes.
@@ -1194,37 +1242,37 @@ impl Assembler {
         wrapper: Option<BodyWrapper>,
         mast_forest_builder: &mut MastForestBuilder,
         nesting_depth: usize,
-    ) -> Result<MastNodeId, Report>
+    ) -> Result<MastNodeRef, Report>
     where
         I: Iterator<Item = &'a ast::Op>,
     {
         use ast::Op;
 
-        let mut body_node_ids: Vec<MastNodeId> = Vec::new();
+        let mut body_node_refs: Vec<MastNodeRef> = Vec::new();
         let mut block_builder = BasicBlockBuilder::new(wrapper, mast_forest_builder);
 
         for op in body {
             match op {
                 Op::Inst(inst) => {
-                    if let Some(node_id) =
+                    if let Some(node_ref) =
                         self.compile_instruction(inst, &mut block_builder, proc_ctx)?
                     {
                         if let Some(basic_block_id) = block_builder.make_basic_block()? {
-                            body_node_ids.push(basic_block_id);
+                            body_node_refs.push(basic_block_id);
                         } else if let Some(decorator_ids) = block_builder.drain_decorators() {
                             block_builder
                                 .mast_forest_builder_mut()
-                                .append_before_enter(node_id, decorator_ids)
+                                .append_before_enter_ref(node_ref, decorator_ids)
                                 .into_diagnostic()?;
                         }
 
-                        body_node_ids.push(node_id);
+                        body_node_refs.push(node_ref);
                     }
                 },
 
                 Op::If { then_blk, else_blk, span } => {
                     if let Some(basic_block_id) = block_builder.make_basic_block()? {
-                        body_node_ids.push(basic_block_id);
+                        body_node_refs.push(basic_block_id);
                     }
 
                     let next_depth = nesting_depth + 1;
@@ -1252,21 +1300,23 @@ impl Assembler {
                     )?;
 
                     let asm_op = self.create_asmop_decorator(span, "if.true", proc_ctx);
-                    let mut split_builder = SplitNodeBuilder::new([then_blk, else_blk]);
+                    let then_blk_id = block_builder.mast_forest_builder().node_id(then_blk);
+                    let else_blk_id = block_builder.mast_forest_builder().node_id(else_blk);
+                    let mut split_builder = SplitNodeBuilder::new([then_blk_id, else_blk_id]);
                     if let Some(decorator_ids) = block_builder.drain_decorators() {
                         split_builder.append_before_enter(decorator_ids);
                     }
 
-                    let split_node_id = block_builder
+                    let split_node_ref = block_builder
                         .mast_forest_builder_mut()
-                        .ensure_node_with_asm_op(split_builder, asm_op)?;
+                        .ensure_node_with_asm_op_ref(split_builder, asm_op)?;
 
-                    body_node_ids.push(split_node_id);
+                    body_node_refs.push(split_node_ref);
                 },
 
                 Op::Repeat { count, body, span } => {
                     if let Some(basic_block_id) = block_builder.make_basic_block()? {
-                        body_node_ids.push(basic_block_id);
+                        body_node_refs.push(basic_block_id);
                     }
 
                     let next_depth = nesting_depth + 1;
@@ -1278,13 +1328,15 @@ impl Assembler {
                         }));
                     }
 
-                    let repeat_node_id = self.compile_body(
+                    let repeat_node_ref = self.compile_body(
                         body.iter(),
                         proc_ctx,
                         None,
                         block_builder.mast_forest_builder_mut(),
                         next_depth,
                     )?;
+                    let repeat_node_id =
+                        block_builder.mast_forest_builder().node_id(repeat_node_ref);
 
                     let iteration_count = (*count).expect_value();
                     if iteration_count == 0 {
@@ -1321,14 +1373,14 @@ impl Assembler {
                             .clone()
                             .to_builder(block_builder.mast_forest_builder().mast_forest())
                             .with_before_enter(decorator_ids);
-                        let first_repeat_node_id = block_builder
+                        let first_repeat_node_ref = block_builder
                             .mast_forest_builder_mut()
-                            .ensure_node_preserving_debug_vars(
+                            .ensure_node_preserving_debug_vars_ref(
                                 first_repeat_builder,
                                 repeat_node_id,
                             )?;
 
-                        body_node_ids.push(first_repeat_node_id);
+                        body_node_refs.push(first_repeat_node_ref);
                         let remaining_iterations =
                             iteration_count.checked_sub(1).ok_or_else(|| {
                                 Report::new(
@@ -1347,18 +1399,18 @@ impl Assembler {
                                 )
                             })?;
                         for _ in 0..remaining_iterations {
-                            body_node_ids.push(repeat_node_id);
+                            body_node_refs.push(repeat_node_ref);
                         }
                     } else {
                         for _ in 0..iteration_count {
-                            body_node_ids.push(repeat_node_id);
+                            body_node_refs.push(repeat_node_ref);
                         }
                     }
                 },
 
                 Op::While { body, span } => {
                     if let Some(basic_block_id) = block_builder.make_basic_block()? {
-                        body_node_ids.push(basic_block_id);
+                        body_node_refs.push(basic_block_id);
                     }
 
                     let next_depth = nesting_depth + 1;
@@ -1370,24 +1422,26 @@ impl Assembler {
                         }));
                     }
 
-                    let loop_body_node_id = self.compile_body(
+                    let loop_body_node_ref = self.compile_body(
                         body.iter(),
                         proc_ctx,
                         None,
                         block_builder.mast_forest_builder_mut(),
                         next_depth,
                     )?;
+                    let loop_body_node_id =
+                        block_builder.mast_forest_builder().node_id(loop_body_node_ref);
                     let mut loop_builder = LoopNodeBuilder::new(loop_body_node_id);
                     if let Some(decorator_ids) = block_builder.drain_decorators() {
                         loop_builder.append_before_enter(decorator_ids);
                     }
 
                     let asm_op = self.create_asmop_decorator(span, "while.true", proc_ctx);
-                    let loop_node_id = block_builder
+                    let loop_node_ref = block_builder
                         .mast_forest_builder_mut()
-                        .ensure_node_with_asm_op(loop_builder, asm_op)?;
+                        .ensure_node_with_asm_op_ref(loop_builder, asm_op)?;
 
-                    body_node_ids.push(loop_node_id);
+                    body_node_refs.push(loop_node_ref);
                 },
             }
         }
@@ -1395,7 +1449,7 @@ impl Assembler {
         let maybe_post_decorators: Option<Vec<DecoratorId>> =
             match block_builder.try_into_basic_block()? {
                 BasicBlockOrDecorators::BasicBlock(basic_block_id) => {
-                    body_node_ids.push(basic_block_id);
+                    body_node_refs.push(basic_block_id);
                     None
                 },
                 BasicBlockOrDecorators::Decorators(decorator_ids) => {
@@ -1405,7 +1459,7 @@ impl Assembler {
                 BasicBlockOrDecorators::Nothing => None,
             };
 
-        let procedure_body_id = if body_node_ids.is_empty() {
+        let procedure_body_ref = if body_node_refs.is_empty() {
             // We cannot allow only decorators in a procedure body, since decorators don't change
             // the MAST digest of a node. Hence, two empty procedures with different decorators
             // would look the same to the `MastForestBuilder`.
@@ -1422,7 +1476,7 @@ impl Assembler {
                 ));
             }
 
-            mast_forest_builder.ensure_block(
+            mast_forest_builder.ensure_block_ref(
                 vec![Operation::Noop],
                 Vec::new(),
                 vec![],
@@ -1432,25 +1486,25 @@ impl Assembler {
             )?
         } else {
             let asm_op = self.create_asmop_decorator(&proc_ctx.span(), "begin", proc_ctx);
-            mast_forest_builder.join_nodes(body_node_ids, Some(asm_op))?
+            mast_forest_builder.join_node_refs(body_node_refs, Some(asm_op))?
         };
 
         // Make sure that any post decorators are added at the end of the procedure body
         if let Some(post_decorator_ids) = maybe_post_decorators {
             mast_forest_builder
-                .append_after_exit(procedure_body_id, post_decorator_ids)
+                .append_after_exit_ref(procedure_body_ref, post_decorator_ids)
                 .into_diagnostic()?;
         }
 
-        Ok(procedure_body_id)
+        Ok(procedure_body_ref)
     }
 
-    /// Resolves the specified target to the corresponding procedure root [`MastNodeId`].
+    /// Resolves the specified target to the corresponding procedure root [`MastNodeRef`].
     ///
     /// If the resolved target is a non-procedure item, this returns `Ok(None)`.
     ///
-    /// If no [`MastNodeId`] exists for that procedure root, we wrap the root in an
-    /// [`crate::mast::ExternalNode`], and return the resulting [`MastNodeId`].
+    /// If no [`MastNodeRef`] exists for that procedure root, we wrap the root in an
+    /// [`crate::mast::ExternalNode`], and return the resulting [`MastNodeRef`].
     pub(super) fn resolve_target(
         &self,
         kind: InvokeKind,
@@ -1466,10 +1520,16 @@ impl Assembler {
         let resolved = self.linker.resolve_invoke_target(&caller, target)?;
         match resolved {
             SymbolResolution::MastRoot(mast_root) => {
+                // Literal MAST-root references in MASM do not carry any source-level provenance,
+                // so there is no exact source root or source package commitment to thread through
+                // here. We could try to guess based on linked libraries, but any such heuristic
+                // would be ambiguous when multiple procedures share the same digest.
                 let node = self.ensure_valid_procedure_mast_root(
                     kind,
                     target.span(),
                     mast_root.into_inner(),
+                    None,
+                    None,
                     mast_forest_builder,
                 )?;
                 Ok(Some(ResolvedProcedure { node, signature: None }))
@@ -1477,7 +1537,7 @@ impl Assembler {
             SymbolResolution::Exact { gid, .. } => {
                 match mast_forest_builder.get_procedure(gid) {
                     Some(proc) => Ok(Some(ResolvedProcedure {
-                        node: proc.body_node_id(),
+                        node: proc.body_node_ref(),
                         signature: proc.signature(),
                     })),
                     // We didn't find the procedure in our current MAST forest. We still need to
@@ -1488,6 +1548,8 @@ impl Assembler {
                                 kind,
                                 target.span(),
                                 p.digest,
+                                p.source_library_commitment(),
+                                p.source_root_id(),
                                 mast_forest_builder,
                             )?;
                             Ok(Some(ResolvedProcedure { node, signature: p.signature.clone() }))
@@ -1519,8 +1581,10 @@ impl Assembler {
         kind: InvokeKind,
         span: SourceSpan,
         mast_root: Word,
+        source_library_commitment: Option<Word>,
+        source_root_id: Option<MastNodeId>,
         mast_forest_builder: &mut MastForestBuilder,
-    ) -> Result<MastNodeId, Report> {
+    ) -> Result<MastNodeRef, Report> {
         // Get the procedure from the assembler
         let current_source_file = self.source_manager.get(span.source_id()).ok();
 
@@ -1544,7 +1608,11 @@ impl Assembler {
             }
         }
 
-        mast_forest_builder.ensure_external_link(mast_root)
+        mast_forest_builder.ensure_external_link_with_source_ref(
+            mast_root,
+            source_library_commitment,
+            source_root_id,
+        )
     }
 }
 
@@ -1578,6 +1646,6 @@ pub(crate) struct BodyWrapper {
 }
 
 pub(super) struct ResolvedProcedure {
-    pub node: MastNodeId,
+    pub node: MastNodeRef,
     pub signature: Option<Arc<FunctionType>>,
 }

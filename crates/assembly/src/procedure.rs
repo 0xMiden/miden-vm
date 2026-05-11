@@ -4,9 +4,9 @@ use miden_assembly_syntax::{
     ast::{Path, Visibility, types::FunctionType},
     debuginfo::{SourceManager, SourceSpan, Spanned},
 };
-use miden_core::{Word, mast::MastNodeId};
+use miden_core::Word;
 
-use super::GlobalItemIndex;
+use super::{GlobalItemIndex, mast_forest_builder::MastNodeRef};
 
 // PROCEDURE CONTEXT
 // ================================================================================================
@@ -108,17 +108,14 @@ impl ProcedureContext {
 impl ProcedureContext {
     /// Transforms this procedure context into a [Procedure].
     ///
-    /// The passed-in `mast_root` defines the MAST root of the procedure's body while
-    /// `mast_node_id` specifies the ID of the procedure's body node in the MAST forest in
-    /// which the procedure is defined. Note that if the procedure is re-exported (i.e., the body
-    /// of the procedure is defined in some other MAST forest) `mast_node_id` will point to a
-    /// single `External` node.
+    /// The passed-in `mast_root` defines the MAST root of the procedure's body while `body_node`
+    /// specifies the assembly-time reference to the procedure's body node.
     ///
     /// <div class="warning">
-    /// `mast_root` and `mast_node_id` must be consistent. That is, the node located in the MAST
-    /// forest under `mast_node_id` must have the digest equal to the `mast_root`.
+    /// `mast_root` and `body_node` must be consistent. That is, `body_node` must resolve to a MAST
+    /// node whose digest equals `mast_root`.
     /// </div>
-    pub fn into_procedure(self, mast_root: Word, mast_node_id: MastNodeId) -> Procedure {
+    pub(crate) fn into_procedure(self, mast_root: Word, body_node_ref: MastNodeRef) -> Procedure {
         let is_syscall = self.is_kernel && self.visibility.is_public();
         Procedure::new(
             self.path,
@@ -127,7 +124,7 @@ impl ProcedureContext {
             is_syscall,
             self.num_locals as u32,
             mast_root,
-            mast_node_id,
+            body_node_ref,
         )
         .with_span(self.span)
     }
@@ -161,8 +158,8 @@ pub struct Procedure {
     num_locals: u32,
     /// The MAST root of the procedure.
     mast_root: Word,
-    /// The MAST node id which resolves to the above MAST root.
-    body_node_id: MastNodeId,
+    /// The assembly-time node reference which resolves to the above MAST root.
+    body_node_ref: MastNodeRef,
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -175,7 +172,7 @@ impl Procedure {
         is_syscall: bool,
         num_locals: u32,
         mast_root: Word,
-        body_node_id: MastNodeId,
+        body_node_ref: MastNodeRef,
     ) -> Self {
         Self {
             span: SourceSpan::default(),
@@ -185,7 +182,7 @@ impl Procedure {
             is_syscall,
             num_locals,
             mast_root,
-            body_node_id,
+            body_node_ref,
         }
     }
 
@@ -239,9 +236,9 @@ impl Procedure {
         self.mast_root
     }
 
-    /// Returns a reference to the MAST node ID of this procedure.
-    pub fn body_node_id(&self) -> MastNodeId {
-        self.body_node_id
+    /// Returns the assembly-time node reference of this procedure.
+    pub(crate) fn body_node_ref(&self) -> MastNodeRef {
+        self.body_node_ref
     }
 }
 
