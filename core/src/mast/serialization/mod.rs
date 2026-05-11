@@ -39,6 +39,8 @@
 //!
 //! (Counts)
 //! - nodes count (`usize`)
+//! - internal nodes count (`usize`)
+//! - external nodes count (`usize`)
 //!
 //! (Procedure roots section)
 //! - procedure roots (`Vec<u32>` as MastNodeId values)
@@ -119,7 +121,7 @@ pub use view::MastForestView;
 
 mod layout;
 pub(super) use layout::ForestLayout;
-use layout::{TrackingReader, WireFlags, read_header_and_scan_layout};
+use layout::{OffsetTrackingReader, TrackingReader, WireFlags, read_header_and_scan_layout};
 
 mod resolved;
 use resolved::{ResolvedSerializedForest, basic_block_offset_for_node_index};
@@ -155,7 +157,8 @@ type StringIndex = usize;
 ///
 /// The budgeted byte reader limits wire-driven parsing. Hashless and stripped validation also
 /// needs transient per-node allocations for the slot table, empty debug-info scaffolding, and
-/// rebuilt digest table. The generic untrusted path also retains a recorded copy of the consumed
+/// rebuilt digest data.
+/// The generic untrusted path also retains a recorded copy of the consumed
 /// serialized payload for deferred validation.
 ///
 /// This convenience multiplier is therefore a coarse "wire bytes plus worst-case helper
@@ -225,7 +228,8 @@ const FLAGS_RESERVED_MASK: u8 = 0xfc;
 ///   rejects HASHLESS. Split fixed-width node entries from digest storage. External digests moved
 ///   to a dedicated section. Hashless serialization omits the general node-hash section entirely.
 ///   Dropped the serialized decorator-count field because it was not used by the wire layout or
-///   deserializers.
+///   deserializers. Before any public release on this branch, the same unreleased wire version also
+///   grew explicit internal/external node counts in the header.
 const VERSION: [u8; 3] = [0, 0, 3];
 
 // MAST FOREST SERIALIZATION/DESERIALIZATION
@@ -259,8 +263,12 @@ impl MastForest {
         // version
         target.write_bytes(&VERSION);
 
-        // node count
-        target.write_usize(self.nodes.len());
+        // header counts
+        let node_count = self.nodes.len();
+        let external_node_count = self.nodes.iter().filter(|node| node.is_external()).count();
+        let internal_node_count = node_count - external_node_count;
+        target.write_usize(internal_node_count);
+        target.write_usize(external_node_count);
 
         // roots
         let roots: Vec<u32> = self.roots.iter().copied().map(u32::from).collect();
@@ -329,7 +337,8 @@ fn serialized_size_hint(forest: &MastForest, stripped: bool, hashless: bool) -> 
     let non_external_count = node_count - external_count;
 
     let mut size = MAGIC.len() + 1 + VERSION.len();
-    size += node_count.get_size_hint();
+    size += non_external_count.get_size_hint();
+    size += external_count.get_size_hint();
 
     let roots_len = forest.roots.len();
     size += roots_len.get_size_hint();
@@ -623,7 +632,7 @@ impl MastForestView for MastForest {
 #[cfg(test)]
 impl SerializedMastForest<'_> {
     fn advice_map_offset(&self) -> Result<usize, DeserializationError> {
-        self.layout.advice_map_offset(self.bytes.len())
+        self.layout.advice_map_offset()
     }
 
     fn node_entry_offset(&self) -> usize {
@@ -779,6 +788,7 @@ fn decode_from_reader_inner<R: ByteReader>(
 ) -> Result<(WireFlags, super::UntrustedMastForest), DeserializationError> {
     let mut recording = TrackingReader::new_recording(source);
     let (flags, layout) = read_header_and_scan_layout(&mut recording, allow_hashless)?;
+    debug_assert_eq!(recording.offset(), layout.advice_map_offset);
 
     let advice_map = AdviceMap::read_from(&mut recording)?;
     let debug_info = if flags.is_stripped() {

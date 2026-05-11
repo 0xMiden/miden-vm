@@ -742,7 +742,7 @@ fn serialize_asm_op_content(asm_op: &AssemblyOp, data: &mut Vec<u8>) {
 ///
 /// It maps the roots ([`MastNodeId`]s) of a forest to their new [`MastNodeId`] in the merged
 /// forest. See [`MastForest::merge`] for more details.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MastForestRootMap {
     root_maps: Vec<BTreeMap<MastNodeId, MastNodeId>>,
 }

@@ -54,7 +54,7 @@ use super::{Challenges, LookupAir, ProverLookupBuilder, prover::build_lookup_fra
 /// [`crate::trace::main_trace::ROW_MAJOR_CHUNK_SIZE`] so we stay consistent with the
 /// repo's row-major tuning: ~512 rows × avg shape ~3 ≈ 1.5 K fractions per chunk and
 /// ~24 KiB of chunk-local scratch, comfortably L1-resident on any modern x86/arm core.
-const ACCUMULATE_ROWS_PER_CHUNK: usize = 512;
+pub(crate) const ACCUMULATE_ROWS_PER_CHUNK: usize = 512;
 
 // TOP-LEVEL DRIVER
 // ================================================================================================
@@ -165,6 +165,26 @@ where
         let total_fraction_capacity: usize = num_rows * shape.iter().sum::<usize>();
         let fractions = Vec::with_capacity(total_fraction_capacity);
         let counts = Vec::with_capacity(num_rows * num_cols);
+        Self {
+            fractions,
+            counts,
+            shape,
+            num_rows,
+            num_cols,
+        }
+    }
+
+    #[cfg(feature = "concurrent")]
+    /// Build a `LookupFractions` from already-populated `fractions` and `counts` buffers.
+    pub(super) fn from_parts(
+        shape: Vec<usize>,
+        num_rows: usize,
+        fractions: Vec<(F, EF)>,
+        counts: Vec<usize>,
+    ) -> Self {
+        let num_cols = shape.len();
+        debug_assert_eq!(counts.len(), num_rows * num_cols);
+
         Self {
             fractions,
             counts,

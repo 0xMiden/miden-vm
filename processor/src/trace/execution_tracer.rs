@@ -61,6 +61,10 @@ pub struct TraceGenerationContext {
     /// The number of rows per core trace fragment, except for the last fragment which may be
     /// shorter.
     pub fragment_size: usize,
+
+    /// The maximum number of field elements allowed on the operand stack in an active execution
+    /// context.
+    pub max_stack_depth: usize,
 }
 
 /// Builder for recording the context to generate trace fragments during execution.
@@ -113,6 +117,10 @@ pub struct ExecutionTracer {
     /// The number of rows per core trace fragment.
     fragment_size: usize,
 
+    /// The maximum number of field elements allowed on the operand stack in an active execution
+    /// context.
+    max_stack_depth: usize,
+
     /// Flag set in `start_clock_cycle` when a Call/Syscall/Dyncall END is encountered, consumed
     /// in `finalize_clock_cycle` to call `overflow_table.restore_context()`. This is deferred to
     /// `finalize_clock_cycle` because `finalize_clock_cycle` is only called when the operation
@@ -127,7 +135,7 @@ pub struct ExecutionTracer {
 impl ExecutionTracer {
     /// Creates a new `ExecutionTracer` with the given fragment size.
     #[inline(always)]
-    pub fn new(fragment_size: usize) -> Self {
+    pub fn new(fragment_size: usize, max_stack_depth: usize) -> Self {
         Self {
             state_snapshot: None,
             overflow_table: OverflowTable::default(),
@@ -147,6 +155,7 @@ impl ExecutionTracer {
             external: MastForestResolutionReplay::default(),
             fragment_contexts: Vec::new(),
             fragment_size,
+            max_stack_depth,
             pending_restore_context: false,
             is_eval_circuit_op: false,
         }
@@ -168,6 +177,7 @@ impl ExecutionTracer {
             hasher_for_chiplet: self.hasher_for_chiplet,
             ace_replay: self.ace,
             fragment_size: self.fragment_size,
+            max_stack_depth: self.max_stack_depth,
         }
     }
 
@@ -580,10 +590,9 @@ impl Tracer for ExecutionTracer {
             },
             Continuation::FinishExternal(_)
             | Continuation::EnterForest(_)
-            | Continuation::AfterExitDecorators(_)
-            | Continuation::AfterExitDecoratorsBasicBlock(_) => {
+            | Continuation::AfterExitDecorators(_) => {
                 panic!(
-                    "FinishExternal, EnterForest, AfterExitDecorators and AfterExitDecoratorsBasicBlock continuations are guaranteed not to be passed here"
+                    "FinishExternal, EnterForest, and AfterExitDecorators continuations are guaranteed not to be passed here"
                 )
             },
         }
@@ -754,11 +763,11 @@ impl Tracer for ExecutionTracer {
     }
 
     #[inline(always)]
-    fn record_u32_range_checks(&mut self, clk: RowIndex, u32_lo: Felt, u32_hi: Felt) {
+    fn record_u32_range_checks(&mut self, u32_lo: Felt, u32_hi: Felt) {
         let (t1, t0) = split_u32_into_u16(u32_lo.as_canonical_u64());
         let (t3, t2) = split_u32_into_u16(u32_hi.as_canonical_u64());
 
-        self.range_checker.record_range_check_u32(clk, [t0, t1, t2, t3]);
+        self.range_checker.record_range_check_u32([t0, t1, t2, t3]);
     }
 
     #[inline(always)]

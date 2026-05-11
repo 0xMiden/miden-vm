@@ -148,9 +148,9 @@ pub fn decorator_pairs_strategy(
     max_id: u32,
     max_pairs: usize,
 ) -> impl Strategy<Value = Vec<(usize, DecoratorId)>> {
-    // indices in [0, ops_len] inclusive; size 0..=max_pairs
+    // indices in [0, ops_len); size 0..=max_pairs
     // Generate, then sort by index to match validation expectations
-    prop::collection::vec((0..=ops_len, decorator_id_strategy(max_id)), 0..=max_pairs).prop_map(
+    prop::collection::vec((0..ops_len, decorator_id_strategy(max_id)), 0..=max_pairs).prop_map(
         |mut v| {
             v.sort_by_key(|(i, _)| *i);
             v

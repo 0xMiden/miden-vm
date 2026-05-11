@@ -3,7 +3,6 @@ use core::mem::MaybeUninit;
 
 use miden_air::trace::RANGE_CHECK_TRACE_WIDTH;
 
-use super::RowIndex;
 use crate::{
     Felt, ZERO,
     utils::{assume_init_vec, uninit_vector},
@@ -50,10 +49,6 @@ pub struct RangeCheckTrace {
 pub struct RangeChecker {
     /// Tracks lookup count for each checked value.
     lookups: BTreeMap<u16, usize>,
-    /// Range check lookups performed by all user operations, grouped and sorted by clock cycle.
-    /// Each cycle is mapped to a vector of the range checks requested at that cycle, which can
-    /// come from the stack, memory, or both.
-    cycle_lookups: BTreeMap<RowIndex, Vec<u16>>,
 }
 
 impl RangeChecker {
@@ -66,7 +61,7 @@ impl RangeChecker {
         // range checker table are initialized. this simplifies trace table building later on.
         lookups.insert(0, 0);
         lookups.insert(u16::MAX, 0);
-        Self { lookups, cycle_lookups: BTreeMap::new() }
+        Self { lookups }
     }
 
     // TRACE MUTATORS
@@ -78,7 +73,7 @@ impl RangeChecker {
     }
 
     /// Adds range check lookups from the stack or memory to this [RangeChecker] instance.
-    pub fn add_range_checks(&mut self, clk: RowIndex, values: &[u16]) {
+    pub fn add_range_checks(&mut self, values: &[u16]) {
         // range checks requests only come from memory or from the stack, which always request 2 or
         // 4 lookups respectively.
         debug_assert!(values.len() == 2 || values.len() == 4);
@@ -87,17 +82,6 @@ impl RangeChecker {
             // add the specified value to the trace of this range checker's lookups.
             self.add_value(*value);
         }
-
-        // track the range check requests at each cycle
-        // TODO: optimize this to use a struct instead of vectors, e.g. (#2793):
-        // struct MemoryLookupValues {
-        //   num_lookups: u8,
-        //   lookup_values: [u16; 6],
-        // }
-        self.cycle_lookups
-            .entry(clk)
-            .and_modify(|entry| entry.append(&mut values.to_vec()))
-            .or_insert_with(|| values.to_vec());
     }
 
     // EXECUTION TRACE GENERATION (INTERNAL)
