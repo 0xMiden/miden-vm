@@ -37,6 +37,17 @@ pub struct ExternalNode {
     decorator_store: DecoratorStore,
 }
 
+impl ExternalNode {
+    pub(super) fn into_linked_decorator_store(mut self, node_id: MastNodeId) -> Self {
+        self.decorator_store = DecoratorStore::Linked { id: node_id };
+        self
+    }
+
+    pub(crate) fn linked_decorator_store_id(&self) -> Option<MastNodeId> {
+        self.decorator_store.linked_id()
+    }
+}
+
 // PRETTY PRINTING
 // ================================================================================================
 
@@ -287,6 +298,7 @@ impl ExternalNodeBuilder {
 }
 
 impl MastForestContributor for ExternalNodeBuilder {
+    #[cfg(any(test, feature = "arbitrary", feature = "testing"))]
     fn add_to_forest(self, forest: &mut MastForest) -> Result<MastNodeId, MastForestError> {
         // Determine the node ID that will be assigned
         let future_node_id = MastNodeId::new_unchecked(forest.nodes.len() as u32);
@@ -353,40 +365,6 @@ impl MastForestContributor for ExternalNodeBuilder {
     fn with_digest(mut self, digest: Word) -> Self {
         self.digest = digest;
         self
-    }
-}
-
-impl ExternalNodeBuilder {
-    /// Add this node to a forest using relaxed validation.
-    ///
-    /// This method is used during deserialization where nodes may reference child nodes
-    /// that haven't been added to the forest yet. The child node IDs have already been
-    /// validated against the expected final node count during the `try_into_mast_node_builder`
-    /// step, so we can safely skip validation here.
-    ///
-    /// Note: This is not part of the `MastForestContributor` trait because it's only
-    /// intended for internal use during deserialization.
-    pub(in crate::mast) fn add_to_forest_relaxed(
-        self,
-        forest: &mut MastForest,
-    ) -> Result<MastNodeId, MastForestError> {
-        // Determine the node ID that will be assigned
-        let future_node_id = MastNodeId::new_unchecked(forest.nodes.len() as u32);
-
-        // Create the node in the forest with Linked variant from the start
-        // Move the data directly without intermediate cloning
-        let node_id = forest
-            .nodes
-            .push(
-                ExternalNode {
-                    digest: self.digest,
-                    decorator_store: DecoratorStore::Linked { id: future_node_id },
-                }
-                .into(),
-            )
-            .map_err(|_| MastForestError::TooManyNodes)?;
-
-        Ok(node_id)
     }
 }
 

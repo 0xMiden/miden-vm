@@ -8,10 +8,11 @@ use crate::{
     Felt,
     chiplets::hasher,
     mast::{
-        CallNode, DebugInfo, DynNode, JoinNode, LoopNode, SplitNode,
+        CallNode, DebugInfo, DynNode, JoinNode, LoopNode, MastForestParts, SplitNode,
         serialization::{basic_blocks::BasicBlockDataDecoder, layout::read_fixed_section_entry},
     },
     serde::{Deserializable, DeserializationError, SliceReader},
+    utils::IndexVec,
 };
 
 /// Digest sources for a parsed serialized forest.
@@ -137,31 +138,53 @@ impl<'a> ResolvedSerializedForest<'a> {
             self.layout.basic_block_offset(),
             self.layout.basic_block_len(),
         )?);
-        let mut mast_forest = MastForest::new();
-        mast_forest.debug_info = debug_info;
+        let mut nodes = IndexVec::with_capacity(self.node_count());
 
         for index in 0..self.node_count() {
             let entry = self.node_entry_at(index)?;
             let digest = self.node_digest_for_entry(index, entry)?;
+            let node_id = MastNodeId::new_unchecked(index.try_into().map_err(|_| {
+                DeserializationError::InvalidValue(format!(
+                    "too many MAST nodes while deserializing: {}",
+                    self.node_count()
+                ))
+            })?);
 
             let mast_node_builder = entry.try_into_mast_node_builder(
                 self.node_count(),
                 &basic_block_data_decoder,
                 digest,
             )?;
-            mast_node_builder.add_to_forest_relaxed(&mut mast_forest).map_err(|e| {
+            let node = mast_node_builder.build_linked(node_id).map_err(|e| {
                 DeserializationError::InvalidValue(format!(
-                    "failed to add node to MAST forest while deserializing: {e}",
+                    "failed to build MAST node while deserializing: {e}",
                 ))
             })?;
+            let inserted_id = nodes.push(node).map_err(|_| {
+                DeserializationError::InvalidValue(format!(
+                    "too many MAST nodes while deserializing: {}",
+                    self.node_count()
+                ))
+            })?;
+            debug_assert_eq!(inserted_id, node_id);
         }
 
+        let mut roots = Vec::with_capacity(self.procedure_root_count());
         for index in 0..self.procedure_root_count() {
-            mast_forest.make_root(self.procedure_root_at(index)?);
+            roots.push(self.procedure_root_at(index)?);
         }
 
-        mast_forest.advice_map = advice_map;
-        Ok(mast_forest)
+        MastForest::from_trusted_deserialization_parts(MastForestParts {
+            nodes,
+            roots,
+            advice_map,
+            debug_info,
+        })
+        .map_err(|e| {
+            DeserializationError::InvalidValue(format!(
+                "failed to finalize MAST forest while deserializing: {e}",
+            ))
+        })
     }
 
     pub(super) fn node_count(&self) -> usize {

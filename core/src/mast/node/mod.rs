@@ -39,7 +39,7 @@ mod decorator_store;
 pub use decorator_store::DecoratorStore;
 
 use super::DecoratorId;
-use crate::mast::{ExecutableMastForest, MastForest, MastNodeId};
+use crate::mast::{ExecutableMastForest, MastForest, MastForestError, MastNodeId};
 
 pub trait MastNodeExt {
     /// Returns a commitment/hash of the node.
@@ -205,6 +205,41 @@ impl MastNode {
         match self {
             Self::External(external_node) => external_node,
             other => unwrap_failed(other, "external"),
+        }
+    }
+
+    pub(in crate::mast) fn into_linked_decorator_store(self, node_id: MastNodeId) -> Self {
+        match self {
+            Self::Block(node) => Self::Block(node.into_linked_decorator_store(node_id)),
+            Self::Join(node) => Self::Join(node.into_linked_decorator_store(node_id)),
+            Self::Split(node) => Self::Split(node.into_linked_decorator_store(node_id)),
+            Self::Loop(node) => Self::Loop(node.into_linked_decorator_store(node_id)),
+            Self::Call(node) => Self::Call(node.into_linked_decorator_store(node_id)),
+            Self::Dyn(node) => Self::Dyn(node.into_linked_decorator_store(node_id)),
+            Self::External(node) => Self::External(node.into_linked_decorator_store(node_id)),
+        }
+    }
+
+    pub(crate) fn validate_decorator_store_link(
+        &self,
+        node_id: MastNodeId,
+    ) -> Result<(), MastForestError> {
+        let linked_node_id = match self {
+            Self::Block(node) => node.linked_decorator_store_id(),
+            Self::Join(node) => node.linked_decorator_store_id(),
+            Self::Split(node) => node.linked_decorator_store_id(),
+            Self::Loop(node) => node.linked_decorator_store_id(),
+            Self::Call(node) => node.linked_decorator_store_id(),
+            Self::Dyn(node) => node.linked_decorator_store_id(),
+            Self::External(node) => node.linked_decorator_store_id(),
+        };
+
+        match linked_node_id {
+            Some(linked_node_id) if linked_node_id == node_id => Ok(()),
+            Some(linked_node_id) => {
+                Err(MastForestError::InvalidDecoratorStoreLink { node_id, linked_node_id })
+            },
+            None => Err(MastForestError::UnlinkedDecoratorStore(node_id)),
         }
     }
 }

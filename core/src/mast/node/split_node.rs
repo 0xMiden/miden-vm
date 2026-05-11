@@ -37,6 +37,17 @@ pub struct SplitNode {
     decorator_store: DecoratorStore,
 }
 
+impl SplitNode {
+    pub(super) fn into_linked_decorator_store(mut self, node_id: MastNodeId) -> Self {
+        self.decorator_store = DecoratorStore::Linked { id: node_id };
+        self
+    }
+
+    pub(crate) fn linked_decorator_store_id(&self) -> Option<MastNodeId> {
+        self.decorator_store.linked_id()
+    }
+}
+
 /// Constants
 impl SplitNode {
     /// The domain of the split node (used for control block hashing).
@@ -346,6 +357,7 @@ impl SplitNodeBuilder {
 }
 
 impl MastForestContributor for SplitNodeBuilder {
+    #[cfg(any(test, feature = "arbitrary", feature = "testing"))]
     fn add_to_forest(self, forest: &mut MastForest) -> Result<MastNodeId, MastForestError> {
         // Validate branch node IDs
         let forest_len = forest.nodes.len();
@@ -445,46 +457,6 @@ impl MastForestContributor for SplitNodeBuilder {
     fn with_digest(mut self, digest: Word) -> Self {
         self.digest = Some(digest);
         self
-    }
-}
-
-impl SplitNodeBuilder {
-    /// Add this node to a forest using relaxed validation.
-    ///
-    /// This method is used during deserialization where nodes may reference child nodes
-    /// that haven't been added to the forest yet. The child node IDs have already been
-    /// validated against the expected final node count during the `try_into_mast_node_builder`
-    /// step, so we can safely skip validation here.
-    ///
-    /// Note: This is not part of the `MastForestContributor` trait because it's only
-    /// intended for internal use during deserialization.
-    pub(in crate::mast) fn add_to_forest_relaxed(
-        self,
-        forest: &mut MastForest,
-    ) -> Result<MastNodeId, MastForestError> {
-        // Use the forced digest if provided, otherwise use a default digest
-        // The actual digest computation will be handled when the forest is complete
-        let Some(digest) = self.digest else {
-            return Err(MastForestError::DigestRequiredForDeserialization);
-        };
-
-        let future_node_id = MastNodeId::new_unchecked(forest.nodes.len() as u32);
-
-        // Create the node in the forest with Linked variant from the start
-        // Move the data directly without intermediate cloning
-        let node_id = forest
-            .nodes
-            .push(
-                SplitNode {
-                    branches: self.branches,
-                    digest,
-                    decorator_store: DecoratorStore::Linked { id: future_node_id },
-                }
-                .into(),
-            )
-            .map_err(|_| MastForestError::TooManyNodes)?;
-
-        Ok(node_id)
     }
 }
 

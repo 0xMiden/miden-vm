@@ -8,14 +8,16 @@ use core::cmp::Ordering;
 use miden_debug_types::Location;
 
 use crate::{
+    advice::AdviceMap,
     crypto::hash::Blake3Digest,
     mast::{
-        AsmOpId, DebugVarId, DecoratorId, MastForest, MastForestContributor, MastForestError,
-        MastNode, MastNodeBuilder, MastNodeFingerprint, MastNodeId, MultiMastForestIteratorItem,
-        MultiMastForestNodeIter,
+        AsmOpId, DebugInfo, DebugVarId, DecoratorId, MastForest, MastForestContributor,
+        MastForestError, MastForestParts, MastNode, MastNodeBuilder, MastNodeExt,
+        MastNodeFingerprint, MastNodeId, MultiMastForestIteratorItem, MultiMastForestNodeIter,
     },
     operations::AssemblyOp,
-    utils::{DenseIdMap, IndexVec},
+    serde::Serializable,
+    utils::{DenseIdMap, Idx, IndexVec},
 };
 
 #[cfg(test)]
@@ -27,12 +29,16 @@ type AssemblyOpKey = (Option<Location>, String, u8, String);
 ///
 /// This functionality is exposed via [`MastForest::merge`]. See its documentation for more details.
 pub(crate) struct MastForestMerger {
-    mast_forest: MastForest,
+    nodes: IndexVec<MastNodeId, MastNode>,
+    roots: Vec<MastNodeId>,
+    advice_map: AdviceMap,
+    debug_info: DebugInfo,
+    decorator_lookup_forest: Option<MastForest>,
     // Internal indices needed for efficient duplicate checking and MastNodeFingerprint
     // computation.
     //
-    // These are always in-sync with the nodes in `mast_forest`, i.e. all nodes added to the
-    // `mast_forest` are also added to the indices.
+    // These are always in-sync with `nodes`, i.e. all nodes added to the final parts are also
+    // added to the indices.
     node_id_by_hash: BTreeMap<MastNodeFingerprint, MastNodeId>,
     hash_by_node_id: IndexVec<MastNodeId, MastNodeFingerprint>,
     decorators_by_hash: BTreeMap<Blake3Digest<32>, DecoratorId>,
@@ -77,12 +83,16 @@ impl MastForestMerger {
             forests.iter().map(|f| DenseIdMap::with_len(f.nodes().len())).collect();
 
         let mut merger = Self {
+            nodes: IndexVec::new(),
+            roots: Vec::new(),
+            advice_map: AdviceMap::default(),
+            debug_info: DebugInfo::new(),
+            decorator_lookup_forest: None,
             node_id_by_hash: BTreeMap::new(),
             hash_by_node_id: IndexVec::new(),
             decorators_by_hash: BTreeMap::new(),
             asm_op_id_by_value: BTreeMap::new(),
             asm_op_value_by_id: BTreeMap::new(),
-            mast_forest: MastForest::new(),
             decorator_id_mappings,
             node_id_mappings,
             pending_asm_op_mappings: BTreeMap::new(),
@@ -90,7 +100,16 @@ impl MastForestMerger {
 
         merger.merge_inner(forests.clone())?;
 
-        let Self { mast_forest, node_id_mappings, .. } = merger;
+        let Self {
+            nodes,
+            roots,
+            advice_map,
+            debug_info,
+            node_id_mappings,
+            ..
+        } = merger;
+        let mast_forest =
+            MastForest::from_parts(MastForestParts { nodes, roots, advice_map, debug_info })?;
 
         let root_maps = MastForestRootMap::from_node_id_map(node_id_mappings, forests);
 
@@ -145,6 +164,12 @@ impl MastForestMerger {
         for other_forest in forests.iter() {
             self.merge_error_codes(other_forest);
         }
+        self.decorator_lookup_forest = Some(MastForest::from_parts(MastForestParts {
+            nodes: IndexVec::new(),
+            roots: Vec::new(),
+            advice_map: AdviceMap::default(),
+            debug_info: self.debug_info.clone(),
+        })?);
 
         let iterator = MultiMastForestNodeIter::new(forests.clone());
         for item in iterator {
@@ -209,7 +234,7 @@ impl MastForestMerger {
             {
                 *existing_decorator
             } else {
-                let new_decorator_id = self.mast_forest.add_decorator(merging_decorator.clone())?;
+                let new_decorator_id = self.debug_info.add_decorator(merging_decorator.clone())?;
                 self.decorators_by_hash.insert(merging_decorator_hash, new_decorator_id);
                 new_decorator_id
             };
@@ -224,14 +249,13 @@ impl MastForestMerger {
     }
 
     fn merge_advice_map(&mut self, other_forest: &MastForest) -> Result<(), MastForestError> {
-        self.mast_forest
-            .advice_map
+        self.advice_map
             .merge(&other_forest.advice_map)
             .map_err(|((key, _prev), _new)| MastForestError::AdviceMapKeyCollisionOnMerge(key))
     }
 
     fn merge_error_codes(&mut self, other_forest: &MastForest) {
-        self.mast_forest.debug_info.extend_error_codes(
+        self.debug_info.extend_error_codes(
             other_forest.debug_info.error_codes().map(|(k, v)| (*k, v.clone())),
         );
     }
@@ -262,8 +286,23 @@ impl MastForestMerger {
             &self.decorator_id_mappings[forest_idx],
         )?;
 
+        let decorator_lookup_forest = self
+            .decorator_lookup_forest
+            .as_ref()
+            .expect("decorator lookup forest should be initialized before merging nodes");
+        let base_fingerprint = remapped_builder
+            .fingerprint_for_node(decorator_lookup_forest, &self.hash_by_node_id)?;
+
+        // Augment with the source node's debug vars so same-ops/different-vars
+        // blocks from different forests are not collapsed.
+        let debug_var_data =
+            serialize_debug_var_content_for_node(original_forests[forest_idx], merging_id);
+        let asm_op_data =
+            serialize_asm_op_content_for_node(original_forests[forest_idx], merging_id);
         let node_fingerprint =
-            remapped_builder.fingerprint_for_node(&self.mast_forest, &self.hash_by_node_id)?;
+            augment_fingerprint_with_metadata(base_fingerprint, b"debug-vars", &debug_var_data);
+        let node_fingerprint =
+            augment_fingerprint_with_metadata(node_fingerprint, b"asm-ops", &asm_op_data);
 
         let mapped_node_id = match self.lookup_node_by_fingerprint(&node_fingerprint) {
             Some(matching_node_id) => {
@@ -275,7 +314,7 @@ impl MastForestMerger {
             None => {
                 // If no node with a matching fingerprint exists, then the merging node is
                 // unique and we can add it to the merged forest using builders.
-                let new_node_id = remapped_builder.add_to_forest(&mut self.mast_forest)?;
+                let new_node_id = self.push_node_from_builder(remapped_builder)?;
                 self.node_id_mappings[forest_idx].insert(merging_id, new_node_id);
 
                 // We need to update the indices with the newly inserted nodes
@@ -310,7 +349,9 @@ impl MastForestMerger {
             // This takes O(n) where n is the number of roots in the merged forest every time to
             // check if the root already exists. As the number of roots is relatively low generally,
             // this should be okay.
-            self.mast_forest.make_root(new_root);
+            if !self.roots.contains(&new_root) {
+                self.roots.push(new_root);
+            }
         }
     }
 
@@ -325,8 +366,8 @@ impl MastForestMerger {
         // forest cannot silently rename an already-registered procedure.
         for forest in forests.iter() {
             for (digest, name) in forest.debug_info.procedure_names() {
-                if self.mast_forest.debug_info.procedure_name(&digest).is_none() {
-                    self.mast_forest.debug_info.insert_procedure_name(digest, name.clone());
+                if self.debug_info.procedure_name(&digest).is_none() {
+                    self.debug_info.insert_procedure_name(digest, name.clone());
                 }
             }
         }
@@ -340,7 +381,7 @@ impl MastForestMerger {
             let mut dbg_id_map: BTreeMap<DebugVarId, DebugVarId> = BTreeMap::new();
             for (raw, dvar) in forest.debug_info.debug_vars().iter().enumerate() {
                 let old_id = DebugVarId::from(raw as u32);
-                let new_id = self.mast_forest.debug_info.add_debug_var(dvar.clone())?;
+                let new_id = self.debug_info.add_debug_var(dvar.clone())?;
                 dbg_id_map.insert(old_id, new_id);
             }
 
@@ -365,8 +406,7 @@ impl MastForestMerger {
 
         // Register in node-ID order (CSR sequential constraint).
         for (node_id, entries) in dbg_entries {
-            self.mast_forest
-                .debug_info
+            self.debug_info
                 .register_op_indexed_debug_vars(node_id, entries)
                 .map_err(|_| MastForestError::TooManyNodes)?;
         }
@@ -585,8 +625,7 @@ impl MastForestMerger {
         for (node_id, (num_operations, asm_ops)) in
             core::mem::take(&mut self.pending_asm_op_mappings)
         {
-            self.mast_forest
-                .debug_info
+            self.debug_info
                 .register_asm_ops(node_id, num_operations, asm_ops)
                 .map_err(MastForestError::AssemblyOpError)?;
         }
@@ -601,7 +640,7 @@ impl MastForestMerger {
             return Ok(*existing_id);
         }
 
-        let asm_op_id = self.mast_forest.debug_info.add_asm_op(asm_op.clone())?;
+        let asm_op_id = self.debug_info.add_asm_op(asm_op.clone())?;
         self.asm_op_id_by_value.insert(key.clone(), asm_op_id);
         self.asm_op_value_by_id.insert(asm_op_id, key);
 
@@ -617,6 +656,57 @@ impl MastForestMerger {
         )
     }
 
+    fn push_node_from_builder(
+        &mut self,
+        builder: MastNodeBuilder,
+    ) -> Result<MastNodeId, MastForestError> {
+        let new_node_id = MastNodeId::new_unchecked(
+            self.nodes.len().try_into().map_err(|_| MastForestError::TooManyNodes)?,
+        );
+        let owned_node = builder.build_with_forced_digest()?;
+
+        let mut children = Vec::new();
+        owned_node.append_children_to(&mut children);
+        for child_id in children {
+            if child_id.to_usize() >= self.nodes.len() {
+                return Err(MastForestError::NodeIdOverflow(child_id, self.nodes.len()));
+            }
+        }
+
+        let (before_enter, after_exit, op_indexed_decorators) = {
+            let decorator_lookup_forest = self
+                .decorator_lookup_forest
+                .as_ref()
+                .expect("decorator lookup forest should be initialized before merging nodes");
+            let before_enter = owned_node.before_enter(decorator_lookup_forest).to_vec();
+            let after_exit = owned_node.after_exit(decorator_lookup_forest).to_vec();
+            let op_indexed_decorators = match &owned_node {
+                MastNode::Block(block) => {
+                    block.indexed_decorator_iter(decorator_lookup_forest).collect()
+                },
+                _ => Vec::new(),
+            };
+            (before_enter, after_exit, op_indexed_decorators)
+        };
+
+        if !before_enter.is_empty() || !after_exit.is_empty() {
+            self.debug_info
+                .register_node_decorators(new_node_id, &before_enter, &after_exit);
+        }
+        if matches!(owned_node, MastNode::Block(_)) {
+            self.debug_info
+                .register_op_indexed_decorators(new_node_id, op_indexed_decorators)
+                .map_err(MastForestError::DecoratorError)?;
+        }
+
+        let linked_node = owned_node.into_linked_decorator_store(new_node_id);
+        let inserted_id =
+            self.nodes.push(linked_node).map_err(|_| MastForestError::TooManyNodes)?;
+        debug_assert_eq!(inserted_id, new_node_id);
+
+        Ok(new_node_id)
+    }
+
     /// Builds a new node with remapped children and decorators using the provided mappings.
     fn build_with_remapped_children(
         &self,
@@ -627,6 +717,92 @@ impl MastForestMerger {
         dmap: &DenseIdMap<DecoratorId, DecoratorId>,
     ) -> Result<MastNodeBuilder, MastForestError> {
         super::build_node_with_remapped_ids(merging_id, src, original_forest, nmap, dmap)
+    }
+}
+
+// HELPERS
+// ================================================================================================
+
+/// Serializes the actual debug var *content* (name, location, etc.) for a node,
+/// producing a stable byte sequence suitable for fingerprint augmentation.
+///
+/// Unlike the assembler's `serialize_debug_vars` (which serializes `(op_idx, DebugVarId)` pairs),
+/// this serializes the resolved DebugVarInfo so that two forests assigning different DebugVarIds
+/// to identical variables still produce the same fingerprint contribution.
+fn serialize_debug_var_content_for_node(forest: &MastForest, node_id: MastNodeId) -> Vec<u8> {
+    let entries = forest.debug_info().debug_vars_for_node(node_id);
+    if entries.is_empty() {
+        return Vec::new();
+    }
+
+    let mut data = Vec::new();
+    for (op_idx, var_id) in entries {
+        data.extend_from_slice(&op_idx.to_le_bytes());
+        if let Some(info) = forest.debug_info().debug_var(var_id) {
+            info.write_into(&mut data);
+        }
+    }
+    data
+}
+
+fn augment_fingerprint_with_metadata(
+    fingerprint: MastNodeFingerprint,
+    tag: &[u8],
+    payload: &[u8],
+) -> MastNodeFingerprint {
+    if payload.is_empty() {
+        return fingerprint;
+    }
+
+    let mut data = Vec::new();
+    data.extend_from_slice(&(tag.len() as u32).to_le_bytes());
+    data.extend_from_slice(tag);
+    data.extend_from_slice(&(payload.len() as u64).to_le_bytes());
+    data.extend_from_slice(payload);
+
+    fingerprint.augment_with_data(&data)
+}
+
+/// Serializes the actual asm-op content for a node, producing a stable byte sequence suitable for
+/// fingerprint augmentation.
+///
+/// This ensures that nodes with identical structure but different source-mapping metadata do not
+/// collapse during merge.
+fn serialize_asm_op_content_for_node(forest: &MastForest, node_id: MastNodeId) -> Vec<u8> {
+    let entries = forest.debug_info().asm_ops_for_node(node_id);
+    if entries.is_empty() {
+        return Vec::new();
+    }
+
+    let mut data = Vec::new();
+
+    if !matches!(forest[node_id], MastNode::Block(_)) {
+        let num_operations = entries.last().map(|(op_idx, _)| op_idx + 1).unwrap_or(0);
+        data.extend_from_slice(&num_operations.to_le_bytes());
+    }
+
+    for (op_idx, asm_op_id) in entries {
+        data.extend_from_slice(&op_idx.to_le_bytes());
+        if let Some(asm_op) = forest.debug_info().asm_op(asm_op_id) {
+            serialize_asm_op_content(asm_op, &mut data);
+        }
+    }
+
+    data
+}
+
+fn serialize_asm_op_content(asm_op: &AssemblyOp, data: &mut Vec<u8>) {
+    asm_op.context_name().write_into(data);
+    asm_op.op().write_into(data);
+    asm_op.num_cycles().write_into(data);
+    match asm_op.location() {
+        Some(location) => {
+            data.push(1);
+            location.uri.write_into(data);
+            data.extend_from_slice(&u32::from(location.start).to_le_bytes());
+            data.extend_from_slice(&u32::from(location.end).to_le_bytes());
+        },
+        None => data.push(0),
     }
 }
 

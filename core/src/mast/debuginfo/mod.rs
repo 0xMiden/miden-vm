@@ -60,7 +60,7 @@ use crate::{
     },
     operations::{AssemblyOp, DebugVarInfo},
     serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
-    utils::{Idx, IndexVec},
+    utils::IndexVec,
 };
 
 mod asm_op_storage;
@@ -297,21 +297,13 @@ impl DebugInfo {
         self.decorators.push(decorator).map_err(|_| MastForestError::TooManyDecorators)
     }
 
-    /// Returns a mutable reference the decorator with the given ID, if it exists.
-    pub(super) fn decorator_mut(&mut self, decorator_id: DecoratorId) -> Option<&mut Decorator> {
-        if decorator_id.to_usize() < self.decorators.len() {
-            Some(&mut self.decorators[decorator_id])
-        } else {
-            None
-        }
-    }
-
     /// Adds node-level decorators (before_enter and after_exit) for the given node.
     ///
     /// # Note
     /// This method does not validate decorator IDs immediately. Validation occurs during
     /// operations that need to access the actual decorator data (e.g., merging, serialization).
-    pub(super) fn register_node_decorators(
+    #[doc(hidden)]
+    pub fn register_node_decorators(
         &mut self,
         node_id: MastNodeId,
         before_enter: &[DecoratorId],
@@ -324,7 +316,8 @@ impl DebugInfo {
     /// Registers operation-indexed decorators for a node.
     ///
     /// This associates already-added decorators with specific operations within a node.
-    pub(crate) fn register_op_indexed_decorators(
+    #[doc(hidden)]
+    pub fn register_op_indexed_decorators(
         &mut self,
         node_id: MastNodeId,
         decorators_info: Vec<(usize, DecoratorId)>,
@@ -414,14 +407,6 @@ impl DebugInfo {
         asm_ops: Vec<(usize, AsmOpId)>,
     ) -> Result<(), AsmOpIndexError> {
         self.asm_op_storage.add_asm_ops_for_node(node_id, num_operations, asm_ops)
-    }
-
-    /// Remaps the asm_op_storage to use new node IDs after nodes have been removed/reordered.
-    ///
-    /// This should be called after nodes are removed from the MastForest to ensure the asm_op
-    /// storage still references valid node IDs.
-    pub(super) fn remap_asm_op_storage(&mut self, remapping: &BTreeMap<MastNodeId, MastNodeId>) {
-        self.asm_op_storage = self.asm_op_storage.remap_nodes(remapping);
     }
 
     // DEBUG VARIABLE MUTATORS

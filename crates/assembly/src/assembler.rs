@@ -907,11 +907,11 @@ impl Assembler {
 
     fn finish_library_product(
         &self,
-        mut mast_forest: miden_core::mast::MastForest,
+        mast_forest: miden_core::mast::MastForest,
         exports: BTreeMap<Arc<Path>, LibraryExport>,
         kind: TargetType,
     ) -> Result<AssemblyProduct, Report> {
-        self.apply_debug_options(&mut mast_forest);
+        let mast_forest = self.apply_debug_options(mast_forest);
 
         let library = Library::new(Arc::new(mast_forest), exports)?;
         let manifest = PackageManifest::from_library(&library);
@@ -930,11 +930,11 @@ impl Assembler {
 
     fn finish_program_product(
         &self,
-        mut mast_forest: miden_core::mast::MastForest,
+        mast_forest: miden_core::mast::MastForest,
         entrypoint: MastNodeId,
         kernel: Kernel,
     ) -> Result<AssemblyProduct, Report> {
-        self.apply_debug_options(&mut mast_forest);
+        let mast_forest = self.apply_debug_options(mast_forest);
 
         let mast = Arc::new(mast_forest);
         let entry: Arc<Path> = Path::exec_path().join(ast::ProcedureName::MAIN_PROC_NAME).into();
@@ -965,21 +965,25 @@ impl Assembler {
         ))
     }
 
-    fn apply_debug_options(&self, mast_forest: &mut miden_core::mast::MastForest) {
+    fn apply_debug_options(
+        &self,
+        mast_forest: miden_core::mast::MastForest,
+    ) -> miden_core::mast::MastForest {
         if !self.emit_debug_info {
-            mast_forest.clear_debug_info();
-            return;
+            return mast_forest.into_stripped();
         }
 
         if self.trim_paths {
             #[cfg(feature = "std")]
             if let Some(trimmer) = self.source_path_trimmer() {
-                mast_forest.debug_info_mut().rewrite_source_locations(
+                return mast_forest.into_rewritten_source_locations(
                     |location| trimmer.trim_location(location),
                     |location| trimmer.trim_file_line_col(location),
                 );
             }
         }
+
+        mast_forest
     }
 
     #[cfg(feature = "std")]

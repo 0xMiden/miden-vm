@@ -11,11 +11,12 @@ use miden_core::{
     chiplets::hasher,
     crypto::hash::Blake3_256,
     mast::{
-        BasicBlockNode, BasicBlockNodeBuilder, CallNode, CallNodeBuilder, DecoratorFingerprint,
-        DecoratorId, DynNode, DynNodeBuilder, ExternalNodeBuilder, JoinNode, JoinNodeBuilder,
-        LoopNode, LoopNodeBuilder, MastForest, MastForestContributor, MastForestRootMap, MastNode,
-        MastNodeBuilder, MastNodeExt, MastNodeFingerprint, MastNodeId, OpBatch, SplitNode,
-        SplitNodeBuilder, SubtreeIterator, error_code_from_msg, fingerprint_from_fingerprints,
+        BasicBlockNode, BasicBlockNodeBuilder, CallNode, CallNodeBuilder, DebugInfo,
+        DecoratorFingerprint, DecoratorId, DynNode, DynNodeBuilder, ExternalNodeBuilder, JoinNode,
+        JoinNodeBuilder, LoopNode, LoopNodeBuilder, MastForest, MastForestContributor,
+        MastForestParts, MastForestRootMap, MastNode, MastNodeBuilder, MastNodeExt,
+        MastNodeFingerprint, MastNodeId, OpBatch, SplitNode, SplitNodeBuilder, SubtreeIterator,
+        error_code_from_msg, fingerprint_from_fingerprints,
     },
     operations::{AssemblyOp, DebugVarInfo, Decorator, DecoratorList, Operation},
     serde::Serializable,
@@ -591,23 +592,22 @@ impl MastForestBuilder {
         let node_refs_to_remove =
             get_node_refs_to_remove(removable_node_refs, &procedure_root_refs, &self.nodes);
 
-        let mut final_forest = MastForest::new();
-        *final_forest.advice_map_mut() = self.advice_map;
-
         let live_node_refs = live_node_refs_in_final_order(&self.nodes, &node_refs_to_remove);
         let mut live_decorator_refs = BTreeSet::new();
         for node_ref in &live_node_refs {
             live_decorator_refs.extend(self.nodes[*node_ref].decorator_refs.refs());
         }
 
+        let mut debug_info = DebugInfo::new();
         let mut final_decorator_id_by_ref = BTreeMap::new();
         for decorator_ref in live_decorator_refs {
-            let final_decorator_id = final_forest
+            let final_decorator_id = debug_info
                 .add_decorator(self.decorators[decorator_ref].clone())
                 .expect("failed to add decorator - internal ordering error");
             final_decorator_id_by_ref.insert(decorator_ref, final_decorator_id);
         }
 
+        let mut nodes = IndexVec::new();
         let mut node_id_by_ref = BTreeMap::new();
         for &node_ref in &live_node_refs {
             let pending_node = &self.nodes[node_ref];
@@ -617,9 +617,22 @@ impl MastForestBuilder {
                 &final_decorator_id_by_ref,
             )
             .expect("failed to remap MAST node - internal ordering error");
-            let final_node_id = builder
-                .add_to_forest(&mut final_forest)
-                .expect("failed to add MAST node - internal ordering error");
+
+            let final_node_id = MastNodeId::new_unchecked(
+                nodes.len().try_into().expect("MAST forest node count exceeds u32::MAX"),
+            );
+            let node = builder
+                .build_linked(final_node_id)
+                .expect("failed to build MAST node - internal ordering error");
+            register_pending_node_decorators(
+                &mut debug_info,
+                final_node_id,
+                pending_node,
+                &final_decorator_id_by_ref,
+            );
+            let inserted_node_id =
+                nodes.push(node).expect("failed to add MAST node - internal ordering error");
+            debug_assert_eq!(inserted_node_id, final_node_id);
             node_id_by_ref.insert(node_ref, final_node_id);
         }
 
@@ -633,12 +646,11 @@ impl MastForestBuilder {
 
             let node_id = node_id_by_ref[&node_ref];
             let (num_operations, adjusted_mappings) =
-                compute_operations_and_adjust_mappings(&final_forest[node_id], asm_op_mappings);
+                compute_operations_and_adjust_mappings(&nodes[node_id], asm_op_mappings);
             let adjusted_mappings = adjusted_mappings
                 .into_iter()
                 .map(|(op_idx, asm_op_ref)| {
-                    let asm_op_id = final_forest
-                        .debug_info_mut()
+                    let asm_op_id = debug_info
                         .add_asm_op(self.asm_op_by_ref[asm_op_ref].clone())
                         .expect("failed to add AssemblyOp - internal ordering error");
                     (op_idx, asm_op_id)
@@ -647,8 +659,7 @@ impl MastForestBuilder {
 
             // Errors here are programming errors since we control the ordering.
             // Use expect to surface any issues during development.
-            final_forest
-                .debug_info_mut()
+            debug_info
                 .register_asm_ops(node_id, num_operations, adjusted_mappings)
                 .expect("failed to register AssemblyOps - internal ordering error");
         }
@@ -667,7 +678,7 @@ impl MastForestBuilder {
                     if let Some(debug_var_id) = debug_var_id_by_ref.get(&debug_var_ref).copied() {
                         debug_var_id
                     } else {
-                        let debug_var_id = final_forest
+                        let debug_var_id = debug_info
                             .add_debug_var(self.debug_vars[debug_var_ref].clone())
                             .expect("failed to add debug variable - internal ordering error");
                         debug_var_id_by_ref.insert(debug_var_ref, debug_var_id);
@@ -675,22 +686,28 @@ impl MastForestBuilder {
                     };
                 debug_var_ids.push((op_idx, debug_var_id));
             }
-            final_forest
-                .debug_info_mut()
+            debug_info
                 .register_op_indexed_debug_vars(node_id, debug_var_ids)
                 .expect("failed to register debug variables - internal ordering error");
         }
 
+        let mut roots = Vec::with_capacity(procedure_root_refs.len());
         for &root_ref in &procedure_root_refs {
             let root_id = *node_id_by_ref
                 .get(&root_ref)
                 .expect("procedure root must be retained in final MAST forest");
-            final_forest.make_root(root_id);
+            roots.push(root_id);
         }
 
-        final_forest
-            .debug_info_mut()
-            .extend_error_codes(core::mem::take(&mut self.error_codes));
+        debug_info.extend_error_codes(core::mem::take(&mut self.error_codes));
+        let final_forest = MastForest::from_parts(MastForestParts {
+            nodes,
+            roots,
+            advice_map: self.advice_map,
+            debug_info,
+        })
+        .expect("failed to finalize MAST forest - internal ordering error");
+
         BuiltMastForest {
             mast_forest: final_forest,
             node_id_by_ref,
@@ -857,6 +874,40 @@ fn build_pending_node_with_final_ids(
     };
 
     Ok(builder)
+}
+
+fn register_pending_node_decorators(
+    debug_info: &mut DebugInfo,
+    node_id: MastNodeId,
+    pending_node: &PendingMastNode,
+    final_decorator_id_by_ref: &BTreeMap<DecoratorRef, DecoratorId>,
+) {
+    let before_enter = final_decorator_ids_from_refs(
+        &pending_node.decorator_refs.before_enter,
+        final_decorator_id_by_ref,
+    );
+    let after_exit = final_decorator_ids_from_refs(
+        &pending_node.decorator_refs.after_exit,
+        final_decorator_id_by_ref,
+    );
+    if !before_enter.is_empty() || !after_exit.is_empty() {
+        debug_info.register_node_decorators(node_id, &before_enter, &after_exit);
+    }
+
+    if pending_node.kind.is_basic_block() {
+        let indexed_decorators = final_indexed_decorator_ids_from_refs(
+            &pending_node.decorator_refs.indexed,
+            final_decorator_id_by_ref,
+        );
+        debug_info
+            .register_op_indexed_decorators(node_id, indexed_decorators)
+            .expect("failed to register decorators - internal ordering error");
+    } else {
+        debug_assert!(
+            pending_node.decorator_refs.indexed.is_empty(),
+            "only basic block nodes can have indexed decorators"
+        );
+    }
 }
 
 fn final_child_ids<const N: usize>(
@@ -2669,26 +2720,40 @@ mod tests {
     fn test_statically_linked_nodes_preserve_metadata_in_dedup() {
         use miden_core::operations::{DebugVarInfo, DebugVarLocation};
 
-        let mut static_forest = MastForest::new();
-        let static_asm_op_id = static_forest
-            .debug_info_mut()
+        let mut debug_info = DebugInfo::new();
+        let static_asm_op_id = debug_info
             .add_asm_op(AssemblyOp::new(None, "lib_ctx".into(), 1, "add".into()))
             .unwrap();
-        let static_var_id = static_forest
+        let static_var_id = debug_info
             .add_debug_var(DebugVarInfo::new("x", DebugVarLocation::Stack(0)))
             .unwrap();
-        let static_block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
-            .add_to_forest(&mut static_forest)
-            .unwrap();
-        static_forest
-            .debug_info_mut()
+        let static_block_id = MastNodeId::new_unchecked(0);
+        debug_info
             .register_asm_ops(static_block_id, 1, vec![(0, static_asm_op_id)])
             .unwrap();
-        static_forest
-            .debug_info_mut()
+        debug_info
             .register_op_indexed_debug_vars(static_block_id, vec![(0, static_var_id)])
             .unwrap();
-        static_forest.make_root(static_block_id);
+
+        let mut nodes = IndexVec::new();
+        let inserted_node_id = nodes
+            .push(
+                MastNodeBuilder::BasicBlock(BasicBlockNodeBuilder::new(
+                    vec![Operation::Add],
+                    Vec::new(),
+                ))
+                .build_linked(static_block_id)
+                .unwrap(),
+            )
+            .unwrap();
+        assert_eq!(inserted_node_id, static_block_id);
+        let static_forest = MastForest::from_parts(MastForestParts {
+            nodes,
+            roots: vec![static_block_id],
+            advice_map: AdviceMap::default(),
+            debug_info,
+        })
+        .unwrap();
 
         let mut builder = MastForestBuilder::new([&static_forest]).unwrap();
         let copied_block_ref = builder

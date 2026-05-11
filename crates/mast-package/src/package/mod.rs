@@ -228,9 +228,7 @@ impl Package {
             )));
         }
         let main_path = MasmPath::exec_path().join(ast::ProcedureName::MAIN_PROC_NAME);
-        if let Some(digest) = self.mast.get_procedure_root_by_path(&main_path)
-            && let Some(entrypoint) = self.mast.mast_forest().find_procedure_root(digest)
-        {
+        if let Some(entrypoint) = self.mast.get_procedure_node_by_path(&main_path) {
             let mast_forest = self.mast.mast_forest().clone();
             let kernel_dependency = self.kernel_runtime_dependency()?.cloned();
             match (self.try_embedded_kernel_library()?, kernel_dependency) {
@@ -403,14 +401,18 @@ impl Package {
                     entrypoint.namespace()
                 ))
             })?;
-        if let Some(digest) = module.get_procedure_digest_by_name(entrypoint.name()) {
+        if let Some(procedure) = module.get_procedure_by_name(entrypoint.name()) {
             let mast_forest = self.mast.mast_forest().clone();
-            let node_id = mast_forest.find_procedure_root(digest).ok_or_else(|| {
-                Report::msg(
-                    "invalid entrypoint: malformed library - procedure exported, but digest has \
-                     no node in the forest",
-                )
-            })?;
+            let digest = procedure.digest;
+            let node_id = procedure
+                .source_root_id()
+                .or_else(|| mast_forest.find_procedure_root(digest))
+                .ok_or_else(|| {
+                    Report::msg(
+                        "invalid entrypoint: malformed library - procedure exported, but digest \
+                         has no node in the forest",
+                    )
+                })?;
 
             let exec_path: Arc<MasmPath> =
                 MasmPath::exec_path().join(masm::ProcedureName::MAIN_PROC_NAME).into();
@@ -516,27 +518,44 @@ fn arbitrary_library() -> Arc<Library> {
 #[cfg(test)]
 mod tests {
     use alloc::{collections::BTreeMap, sync::Arc, vec, vec::Vec};
+    use core::str::FromStr;
 
     use miden_assembly_syntax::{
         Library,
-        ast::{Path as AstPath, PathBuf},
+        ast::{Path as AstPath, PathBuf, ProcedureName, QualifiedProcedureName},
         library::{LibraryExport, ProcedureExport as LibraryProcedureExport},
     };
     use miden_core::{
-        mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, MastNodeId},
-        operations::Operation,
+        advice::AdviceMap,
+        mast::{
+            BasicBlockNodeBuilder, DebugInfo, MastForest, MastForestParts, MastNodeBuilder,
+            MastNodeId,
+        },
+        operations::{AssemblyOp, Operation},
         serde::Serializable,
+        utils::IndexVec,
     };
 
     use super::*;
     use crate::{Dependency, Version};
 
     fn build_forest() -> (MastForest, MastNodeId) {
-        let mut forest = MastForest::new();
-        let node_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
-            .add_to_forest(&mut forest)
-            .expect("failed to build basic block");
-        forest.make_root(node_id);
+        let node_id = MastNodeId::new_unchecked(0);
+        let node = MastNodeBuilder::BasicBlock(BasicBlockNodeBuilder::new(
+            vec![Operation::Add],
+            Vec::new(),
+        ))
+        .build_linked(node_id)
+        .expect("failed to build basic block");
+        let mut nodes = IndexVec::new();
+        nodes.push(node).expect("failed to add MAST node");
+        let forest = MastForest::from_parts(MastForestParts {
+            nodes,
+            roots: vec![node_id],
+            advice_map: AdviceMap::default(),
+            debug_info: DebugInfo::new(),
+        })
+        .expect("failed to build MAST forest");
         (forest, node_id)
     }
 
@@ -555,6 +574,51 @@ mod tests {
         exports.insert(path, LibraryExport::Procedure(export));
 
         Arc::new(Library::new(Arc::new(forest), exports).expect("failed to build library"))
+    }
+
+    fn build_same_digest_library(exports: &[(&str, &str)]) -> Arc<Library> {
+        let mut nodes = IndexVec::new();
+        let mut roots = Vec::new();
+        let mut debug_info = DebugInfo::new();
+        let mut library_exports = BTreeMap::new();
+
+        for (path_str, context_name) in exports {
+            let asm_op_id = debug_info
+                .add_asm_op(AssemblyOp::new(None, (*context_name).into(), 1, "add".into()))
+                .expect("failed to add asm op");
+
+            let node_id = MastNodeId::new_unchecked(
+                nodes.len().try_into().expect("MAST forest node count exceeds u32::MAX"),
+            );
+            let node = MastNodeBuilder::BasicBlock(BasicBlockNodeBuilder::new(
+                vec![Operation::Add],
+                Vec::new(),
+            ))
+            .build_linked(node_id)
+            .expect("failed to build basic block");
+            let num_ops = node.get_basic_block().unwrap().num_operations() as usize;
+            debug_info
+                .register_asm_ops(node_id, num_ops, vec![(0, asm_op_id)])
+                .expect("failed to register asm ops");
+            let inserted_node_id = nodes.push(node).expect("failed to add MAST node");
+            assert_eq!(inserted_node_id, node_id);
+            roots.push(node_id);
+
+            let path = absolute_path(path_str);
+            library_exports.insert(
+                Arc::clone(&path),
+                LibraryExport::Procedure(LibraryProcedureExport::new(node_id, path)),
+            );
+        }
+
+        let forest = MastForest::from_parts(MastForestParts {
+            nodes,
+            roots,
+            advice_map: AdviceMap::default(),
+            debug_info,
+        })
+        .expect("failed to build MAST forest");
+        Arc::new(Library::new(Arc::new(forest), library_exports).expect("failed to build library"))
     }
 
     fn build_package(
@@ -644,5 +708,46 @@ mod tests {
             .expect_err("multiple kernel runtime dependencies should be rejected");
 
         assert!(error.to_string().contains("declares multiple kernel runtime dependencies"));
+    }
+
+    #[test]
+    fn make_executable_preserves_selected_same_digest_root_metadata() {
+        let library =
+            build_same_digest_library(&[("app::alias_a", "alias_a"), ("app::alias_b", "alias_b")]);
+        let package = *Package::from_library(
+            PackageId::from("app"),
+            Version::new(1, 0, 0),
+            TargetType::Library,
+            library,
+            [],
+        );
+
+        let entrypoint = QualifiedProcedureName::from_str("app::alias_b").unwrap();
+        let executable = package.make_executable(&entrypoint).unwrap();
+
+        let main_path =
+            miden_assembly_syntax::Path::exec_path().join(ProcedureName::MAIN_PROC_NAME);
+        let entrypoint_node = executable.mast.get_procedure_node_by_path(&main_path).unwrap();
+        assert_eq!(
+            executable
+                .mast
+                .mast_forest()
+                .debug_info()
+                .first_asm_op_for_node(entrypoint_node)
+                .unwrap()
+                .context_name(),
+            "alias_b"
+        );
+
+        let program = executable.try_into_program().unwrap();
+        assert_eq!(
+            program
+                .mast_forest()
+                .debug_info()
+                .first_asm_op_for_node(program.entrypoint())
+                .unwrap()
+                .context_name(),
+            "alias_b"
+        );
     }
 }
