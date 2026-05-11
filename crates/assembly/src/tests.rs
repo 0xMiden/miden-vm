@@ -5556,13 +5556,33 @@ fn issue_1644_single_forest_merge_identity() -> TestResult {
     // This should act as identity (return the same forest) but doesn't
     let (merged_forest, _) = MastForest::merge([&*original_forest]).into_diagnostic()?;
 
-    // Assert that the merged forest reorders nodes and both have Join nodes at expected positions
-    let original_join = original_forest.nodes()[6].unwrap_join();
-    let merged_join = merged_forest.nodes()[5].unwrap_join();
+    // Assert that both forests contain the same join node without depending on layout positions.
+    let original_join = original_forest
+        .nodes()
+        .iter()
+        .find_map(|node| match node {
+            MastNode::Join(join) => Some(join),
+            _ => None,
+        })
+        .expect("original forest should contain a join node");
+    let merged_join = merged_forest
+        .nodes()
+        .iter()
+        .find_map(|node| match node {
+            MastNode::Join(join) if join.digest() == original_join.digest() => Some(join),
+            _ => None,
+        })
+        .expect("merged forest should contain the same join node");
 
-    // Check that they have the same structure (same first and second children, same digest)
-    assert_eq!(original_join.first(), merged_join.first());
-    assert_eq!(original_join.second(), merged_join.second());
+    // Check that they have the same structure by digest without depending on remapped child IDs.
+    assert_eq!(
+        original_forest[original_join.first()].digest(),
+        merged_forest[merged_join.first()].digest()
+    );
+    assert_eq!(
+        original_forest[original_join.second()].digest(),
+        merged_forest[merged_join.second()].digest()
+    );
     assert_eq!(original_join.digest(), merged_join.digest());
 
     //Assert that merging is idempotent
