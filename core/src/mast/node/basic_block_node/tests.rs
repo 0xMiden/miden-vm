@@ -1089,7 +1089,7 @@ fn test_to_builder_identity() {
         .add_to_forest(&mut forest)
         .unwrap();
     let linked = match &forest[node_id] {
-        MastNode::Block(block) => block.clone(),
+        crate::mast::MastNode::Block(block) => block.clone(),
         _ => panic!("Expected BasicBlockNode"),
     };
     let linked_rt = linked.clone().to_builder(&forest).build().unwrap();
@@ -1135,7 +1135,7 @@ proptest! {
             .unwrap();
 
         let linked_node = match &forest[node_id] {
-            MastNode::Block(block) => block.clone(),
+            crate::mast::MastNode::Block(block) => block.clone(),
             _ => panic!("Expected BasicBlockNode"),
         };
 

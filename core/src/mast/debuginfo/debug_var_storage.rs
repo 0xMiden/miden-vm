@@ -492,49 +492,6 @@ impl OpToDebugVarIds {
         result
     }
 
-    /// Creates a new [`OpToDebugVarIds`] with remapped node IDs.
-    ///
-    /// This is used when nodes are removed from a MastForest and the remaining nodes are
-    /// renumbered. The remapping maps old node IDs to new node IDs.
-    ///
-    /// Nodes that are not in the remapping are considered removed and their debug var data
-    /// is discarded.
-    pub fn remap_nodes(
-        &self,
-        remapping: &alloc::collections::BTreeMap<MastNodeId, MastNodeId>,
-    ) -> Self {
-        if self.is_empty() {
-            return Self::new();
-        }
-        if remapping.is_empty() {
-            return self.clone();
-        }
-
-        let max_new_id = remapping.values().map(|id| id.to_usize()).max().unwrap_or(0);
-        let num_new_nodes = max_new_id + 1;
-
-        let mut new_node_data: alloc::collections::BTreeMap<usize, Vec<(usize, DebugVarId)>> =
-            alloc::collections::BTreeMap::new();
-
-        for (old_id, new_id) in remapping {
-            let vars = self.debug_vars_for_node(*old_id);
-            if !vars.is_empty() {
-                new_node_data.insert(new_id.to_usize(), vars);
-            }
-        }
-
-        let mut new_storage = Self::new();
-        for idx in 0..num_new_nodes {
-            let node_id = MastNodeId::new_unchecked(idx as u32);
-            let vars = new_node_data.remove(&idx).unwrap_or_default();
-            new_storage
-                .add_debug_var_info_for_node(node_id, vars)
-                .expect("failed to remap debug var storage");
-        }
-
-        new_storage
-    }
-
     /// Clears this storage.
     pub fn clear(&mut self) {
         self.debug_var_ids.clear();

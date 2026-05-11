@@ -31,6 +31,17 @@ pub struct DynNode {
     decorator_store: DecoratorStore,
 }
 
+impl DynNode {
+    pub(super) fn into_linked_decorator_store(mut self, node_id: MastNodeId) -> Self {
+        self.decorator_store = DecoratorStore::Linked { id: node_id };
+        self
+    }
+
+    pub(crate) fn linked_decorator_store_id(&self) -> Option<MastNodeId> {
+        self.decorator_store.linked_id()
+    }
+}
+
 /// Constants
 impl DynNode {
     /// The domain of the Dyn block (used for control block hashing).
@@ -362,6 +373,7 @@ impl DynNodeBuilder {
 }
 
 impl MastForestContributor for DynNodeBuilder {
+    #[cfg(any(test, feature = "arbitrary", feature = "testing"))]
     fn add_to_forest(self, forest: &mut MastForest) -> Result<MastNodeId, MastForestError> {
         // Use the forced digest if provided, otherwise use the default digest
         let digest = if let Some(forced_digest) = self.digest {
@@ -445,51 +457,6 @@ impl MastForestContributor for DynNodeBuilder {
     fn with_digest(mut self, digest: Word) -> Self {
         self.digest = Some(digest);
         self
-    }
-}
-
-impl DynNodeBuilder {
-    /// Add this node to a forest using relaxed validation.
-    ///
-    /// This method is used during deserialization where nodes may reference child nodes
-    /// that haven't been added to the forest yet. The child node IDs have already been
-    /// validated against the expected final node count during the `try_into_mast_node_builder`
-    /// step, so we can safely skip validation here.
-    ///
-    /// Note: This is not part of the `MastForestContributor` trait because it's only
-    /// intended for internal use during deserialization.
-    pub(in crate::mast) fn add_to_forest_relaxed(
-        self,
-        forest: &mut MastForest,
-    ) -> Result<MastNodeId, MastForestError> {
-        // Use the forced digest if provided, otherwise use the default digest
-        let digest = if let Some(forced_digest) = self.digest {
-            forced_digest
-        } else if self.is_dyncall {
-            DynNode::DYNCALL_DEFAULT_DIGEST
-        } else {
-            DynNode::DYN_DEFAULT_DIGEST
-        };
-
-        // Determine the node ID that will be assigned
-        let future_node_id = MastNodeId::new_unchecked(forest.nodes.len() as u32);
-
-        // Create the node in the forest with Linked variant from the start
-        // Note: Decorators are already in forest.debug_info from deserialization
-        // Move the data directly without intermediate cloning
-        let node_id = forest
-            .nodes
-            .push(
-                DynNode {
-                    is_dyncall: self.is_dyncall,
-                    digest,
-                    decorator_store: DecoratorStore::Linked { id: future_node_id },
-                }
-                .into(),
-            )
-            .map_err(|_| MastForestError::TooManyNodes)?;
-
-        Ok(node_id)
     }
 }
 

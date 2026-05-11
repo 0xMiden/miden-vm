@@ -41,6 +41,17 @@ pub struct CallNode {
     decorator_store: DecoratorStore,
 }
 
+impl CallNode {
+    pub(super) fn into_linked_decorator_store(mut self, node_id: MastNodeId) -> Self {
+        self.decorator_store = DecoratorStore::Linked { id: node_id };
+        self
+    }
+
+    pub(crate) fn linked_decorator_store_id(&self) -> Option<MastNodeId> {
+        self.decorator_store.linked_id()
+    }
+}
+
 //-------------------------------------------------------------------------------------------------
 /// Constants
 impl CallNode {
@@ -419,6 +430,7 @@ impl CallNodeBuilder {
 }
 
 impl MastForestContributor for CallNodeBuilder {
+    #[cfg(any(test, feature = "arbitrary", feature = "testing"))]
     fn add_to_forest(self, forest: &mut MastForest) -> Result<MastNodeId, MastForestError> {
         if self.callee.to_usize() >= forest.nodes.len() {
             return Err(MastForestError::NodeIdOverflow(self.callee, forest.nodes.len()));
@@ -521,48 +533,6 @@ impl MastForestContributor for CallNodeBuilder {
     fn with_digest(mut self, digest: Word) -> Self {
         self.digest = Some(digest);
         self
-    }
-}
-
-impl CallNodeBuilder {
-    /// Add this node to a forest using relaxed validation.
-    ///
-    /// This method is used during deserialization where nodes may reference child nodes
-    /// that haven't been added to the forest yet. The child node IDs have already been
-    /// validated against the expected final node count during the `try_into_mast_node_builder`
-    /// step, so we can safely skip validation here.
-    ///
-    /// Note: This is not part of the `MastForestContributor` trait because it's only
-    /// intended for internal use during deserialization.
-    pub(in crate::mast) fn add_to_forest_relaxed(
-        self,
-        forest: &mut MastForest,
-    ) -> Result<MastNodeId, MastForestError> {
-        // Use the forced digest if provided, otherwise use a default digest
-        // The actual digest computation will be handled when the forest is complete
-        let Some(digest) = self.digest else {
-            return Err(MastForestError::DigestRequiredForDeserialization);
-        };
-
-        let future_node_id = MastNodeId::new_unchecked(forest.nodes.len() as u32);
-
-        // Create the node in the forest with Linked variant from the start
-        // Note: Decorators are already in forest.debug_info from deserialization
-        // Move the data directly without intermediate cloning
-        let node_id = forest
-            .nodes
-            .push(
-                CallNode {
-                    callee: self.callee,
-                    is_syscall: self.is_syscall,
-                    digest,
-                    decorator_store: DecoratorStore::Linked { id: future_node_id },
-                }
-                .into(),
-            )
-            .map_err(|_| MastForestError::TooManyNodes)?;
-
-        Ok(node_id)
     }
 }
 

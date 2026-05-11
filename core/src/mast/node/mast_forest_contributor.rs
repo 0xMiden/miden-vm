@@ -12,6 +12,7 @@ use crate::{
 };
 
 pub trait MastForestContributor {
+    #[cfg(any(test, feature = "arbitrary", feature = "testing"))]
     fn add_to_forest(self, forest: &mut MastForest) -> Result<MastNodeId, MastForestError>;
 
     /// Returns the fingerprint for this builder without constructing a MastNode.
@@ -101,25 +102,9 @@ impl MastNodeBuilder {
         }
     }
 
-    /// Adds the node from this builder to the forest without validation, used during
-    /// deserialization.
-    ///
-    /// This method bypasses normal validation and directly creates nodes with
-    /// `DecoratorStore::Linked`. It should only be used during deserialization where the forest
-    /// structure is being reconstructed.
-    pub(in crate::mast) fn add_to_forest_relaxed(
-        self,
-        mast_forest: &mut MastForest,
-    ) -> Result<MastNodeId, MastForestError> {
-        match self {
-            MastNodeBuilder::BasicBlock(builder) => builder.add_to_forest_relaxed(mast_forest),
-            MastNodeBuilder::Call(builder) => builder.add_to_forest_relaxed(mast_forest),
-            MastNodeBuilder::Dyn(builder) => builder.add_to_forest_relaxed(mast_forest),
-            MastNodeBuilder::External(builder) => builder.add_to_forest_relaxed(mast_forest),
-            MastNodeBuilder::Join(builder) => builder.add_to_forest_relaxed(mast_forest),
-            MastNodeBuilder::Loop(builder) => builder.add_to_forest_relaxed(mast_forest),
-            MastNodeBuilder::Split(builder) => builder.add_to_forest_relaxed(mast_forest),
-        }
+    #[doc(hidden)]
+    pub fn build_linked(self, node_id: MastNodeId) -> Result<MastNode, MastForestError> {
+        Ok(self.build_with_forced_digest()?.into_linked_decorator_store(node_id))
     }
 }
 
