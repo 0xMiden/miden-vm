@@ -2,9 +2,8 @@ use alloc::vec::Vec;
 
 use crate::{
     mast::{
-        BasicBlockNodeBuilder, DecoratorId, DynNodeBuilder, ExternalNodeBuilder, MastForest,
-        MastForestContributor, MastForestError, MastNode, MastNodeBuilder, MastNodeId,
-        node::MastNodeExt,
+        BasicBlockNodeBuilder, DecoratorId, ExternalNodeBuilder, MastForest, MastForestContributor,
+        MastForestError, MastNode, MastNodeBuilder, MastNodeId, node::MastNodeExt,
     },
     utils::LookupByIdx,
 };
@@ -107,13 +106,10 @@ where
             MastNodeBuilder::BasicBlock(builder)
         },
         MastNode::Dyn(dyn_node) => {
-            let builder = if dyn_node.is_dyncall() {
-                DynNodeBuilder::new_dyncall()
-            } else {
-                DynNodeBuilder::new_dyn()
-            }
-            .with_before_enter(before_enter_decorators)
-            .with_after_exit(after_exit_decorators);
+            let builder = dyn_node
+                .to_builder(source_forest)
+                .with_before_enter(before_enter_decorators)
+                .with_after_exit(after_exit_decorators);
             MastNodeBuilder::Dyn(builder)
         },
         MastNode::External(external_node) => {
@@ -217,13 +213,10 @@ where
         MastNode::Dyn(dyn_node) => {
             let before_enter_decorators = map_decorators(dyn_node.before_enter(&empty_forest))?;
             let after_exit_decorators = map_decorators(dyn_node.after_exit(&empty_forest))?;
-            let builder = if dyn_node.is_dyncall() {
-                DynNodeBuilder::new_dyncall()
-            } else {
-                DynNodeBuilder::new_dyn()
-            }
-            .with_before_enter(before_enter_decorators)
-            .with_after_exit(after_exit_decorators);
+            let builder = dyn_node
+                .to_builder(&empty_forest)
+                .with_before_enter(before_enter_decorators)
+                .with_after_exit(after_exit_decorators);
             MastNodeBuilder::Dyn(builder)
         },
         MastNode::External(external_node) => {

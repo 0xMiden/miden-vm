@@ -242,7 +242,10 @@ impl MastNodeExt for JoinNode {
         match self.decorator_store {
             DecoratorStore::Owned { before_enter, after_exit, .. } => {
                 let mut builder = JoinNodeBuilder::new(self.children);
-                builder = builder.with_before_enter(before_enter).with_after_exit(after_exit);
+                builder = builder
+                    .with_before_enter(before_enter)
+                    .with_after_exit(after_exit)
+                    .with_digest(self.digest);
                 builder
             },
             DecoratorStore::Linked { id } => {
@@ -250,7 +253,10 @@ impl MastNodeExt for JoinNode {
                 let before_enter = forest.before_enter_decorators(id).to_vec();
                 let after_exit = forest.after_exit_decorators(id).to_vec();
                 let mut builder = JoinNodeBuilder::new(self.children);
-                builder = builder.with_before_enter(before_enter).with_after_exit(after_exit);
+                builder = builder
+                    .with_before_enter(before_enter)
+                    .with_after_exit(after_exit)
+                    .with_digest(self.digest);
                 builder
             },
         }
@@ -344,6 +350,21 @@ impl JoinNodeBuilder {
             let right_child_hash = mast_forest[self.children[1]].digest();
 
             hasher::merge_in_domain(&[left_child_hash, right_child_hash], JoinNode::DOMAIN)
+        };
+
+        Ok(JoinNode {
+            children: self.children,
+            digest,
+            decorator_store: DecoratorStore::new_owned_with_decorators(
+                self.before_enter,
+                self.after_exit,
+            ),
+        })
+    }
+
+    pub(in crate::mast) fn build_with_forced_digest(self) -> Result<JoinNode, MastForestError> {
+        let Some(digest) = self.digest else {
+            return Err(MastForestError::DigestRequiredForDeserialization);
         };
 
         Ok(JoinNode {

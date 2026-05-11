@@ -83,26 +83,51 @@ pub fn fingerprint_from_parts(
     children_ids: &[MastNodeId],
     node_digest: Word,
 ) -> Result<MastNodeFingerprint, MastForestError> {
-    let pre_decorator_hash_bytes: Vec<[u8; 32]> = before_enter_ids
-        .iter()
-        .map(|&id| *forest[id].fingerprint().as_bytes())
-        .collect();
-    let post_decorator_hash_bytes: Vec<[u8; 32]> =
-        after_exit_ids.iter().map(|&id| *forest[id].fingerprint().as_bytes()).collect();
+    let before_enter_fingerprints: Vec<_> =
+        before_enter_ids.iter().map(|&id| forest[id].fingerprint()).collect();
+    let after_exit_fingerprints: Vec<_> =
+        after_exit_ids.iter().map(|&id| forest[id].fingerprint()).collect();
 
-    let children_decorator_roots: Vec<[u8; 32]> = {
-        let mut roots = Vec::new();
-        for child_id in children_ids {
-            if let Some(child_fingerprint) = hash_by_node_id.get(*child_id) {
-                if let Some(decorator_root) = child_fingerprint.decorator_root {
-                    roots.push(*decorator_root.as_bytes());
-                }
-            } else {
-                return Err(MastForestError::ChildFingerprintMissing(*child_id));
-            }
-        }
-        roots
-    };
+    let child_fingerprints: Vec<_> = children_ids
+        .iter()
+        .map(|&child_id| {
+            hash_by_node_id
+                .get(child_id)
+                .copied()
+                .ok_or(MastForestError::ChildFingerprintMissing(child_id))
+        })
+        .collect::<Result<_, _>>()?;
+
+    Ok(fingerprint_from_fingerprints(
+        before_enter_fingerprints.iter().copied(),
+        after_exit_fingerprints.iter().copied(),
+        child_fingerprints.iter().copied(),
+        node_digest,
+    ))
+}
+
+pub fn fingerprint_from_fingerprints(
+    before_enter_fingerprints: impl IntoIterator<Item = DecoratorFingerprint>,
+    after_exit_fingerprints: impl IntoIterator<Item = DecoratorFingerprint>,
+    child_fingerprints: impl IntoIterator<Item = MastNodeFingerprint>,
+    node_digest: Word,
+) -> MastNodeFingerprint {
+    let pre_decorator_hash_bytes: Vec<[u8; 32]> = before_enter_fingerprints
+        .into_iter()
+        .map(|fingerprint| *fingerprint.as_bytes())
+        .collect();
+    let post_decorator_hash_bytes: Vec<[u8; 32]> = after_exit_fingerprints
+        .into_iter()
+        .map(|fingerprint| *fingerprint.as_bytes())
+        .collect();
+    let children_decorator_roots: Vec<[u8; 32]> = child_fingerprints
+        .into_iter()
+        .filter_map(|child_fingerprint| {
+            child_fingerprint
+                .decorator_root
+                .map(|decorator_root| *decorator_root.as_bytes())
+        })
+        .collect();
 
     // Reminder: the `MastNodeFingerprint`'s decorator root will be `None` if and only if there are
     // no decorators attached to the node, and all children have no decorator roots (meaning
@@ -111,7 +136,7 @@ pub fn fingerprint_from_parts(
         && post_decorator_hash_bytes.is_empty()
         && children_decorator_roots.is_empty()
     {
-        Ok(MastNodeFingerprint::new(node_digest))
+        MastNodeFingerprint::new(node_digest)
     } else {
         let decorator_bytes_iter = pre_decorator_hash_bytes
             .iter()
@@ -120,7 +145,7 @@ pub fn fingerprint_from_parts(
             .chain(children_decorator_roots.iter().map(<[u8; 32]>::as_slice));
 
         let decorator_root = Blake3_256::hash_iter(decorator_bytes_iter);
-        Ok(MastNodeFingerprint::with_decorator_root(node_digest, decorator_root))
+        MastNodeFingerprint::with_decorator_root(node_digest, decorator_root)
     }
 }
 
