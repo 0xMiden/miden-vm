@@ -90,6 +90,10 @@ jobs:
           set -e
           gh release upload "${RELEASE_TAG}" miden-vm-${{ matrix.target }}
       # Since the miden-core.masp package is triplet independent, we only build it once.
+      - name: Install nightly
+        if: matrix.os == 'ubuntu-latest' && matrix.target == 'x86_64-unknown-linux-gnu'
+        run: |
+          rustup update --no-self-update nightly
       - name: Build miden-core.masp
         if: matrix.os == 'ubuntu-latest' && matrix.target == 'x86_64-unknown-linux-gnu'
         run: |
