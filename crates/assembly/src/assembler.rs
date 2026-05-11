@@ -17,7 +17,7 @@ use miden_assembly_syntax::{
 };
 use miden_core::{
     Word,
-    mast::{LoopNodeBuilder, MastForestContributor, MastNodeExt, MastNodeId, SplitNodeBuilder},
+    mast::{MastNodeExt, MastNodeId},
     operations::{AssemblyOp, Operation},
     program::{Kernel, Program},
 };
@@ -1251,16 +1251,15 @@ impl Assembler {
         for op in body {
             match op {
                 Op::Inst(inst) => {
-                    if let Some(node_ref) =
+                    if let Some(mut node_ref) =
                         self.compile_instruction(inst, &mut block_builder, proc_ctx)?
                     {
                         if let Some(basic_block_id) = block_builder.make_basic_block()? {
                             body_node_refs.push(basic_block_id);
                         } else if let Some(decorator_ids) = block_builder.drain_decorators() {
-                            block_builder
+                            node_ref = block_builder
                                 .mast_forest_builder_mut()
-                                .append_before_enter_refs(node_ref, decorator_ids)
-                                .into_diagnostic()?;
+                                .append_before_enter_refs(node_ref, decorator_ids)?;
                         }
 
                         body_node_refs.push(node_ref);
@@ -1297,18 +1296,10 @@ impl Assembler {
                     )?;
 
                     let asm_op = self.create_asmop_decorator(span, "if.true", proc_ctx);
-                    let then_blk_id = block_builder.mast_forest_builder().node_id(then_blk);
-                    let else_blk_id = block_builder.mast_forest_builder().node_id(else_blk);
-                    let mut split_builder = SplitNodeBuilder::new([then_blk_id, else_blk_id]);
-                    if let Some(decorator_ids) = block_builder.drain_decorators() {
-                        let decorator_ids =
-                            block_builder.mast_forest_builder_mut().decorator_ids(decorator_ids)?;
-                        split_builder.append_before_enter(decorator_ids);
-                    }
-
+                    let before_enter = block_builder.drain_decorators();
                     let split_node_ref = block_builder
                         .mast_forest_builder_mut()
-                        .ensure_node_with_asm_op_ref(split_builder, asm_op)?;
+                        .ensure_split_node_ref([then_blk, else_blk], before_enter, asm_op)?;
 
                     body_node_refs.push(split_node_ref);
                 },
@@ -1334,8 +1325,6 @@ impl Assembler {
                         block_builder.mast_forest_builder_mut(),
                         next_depth,
                     )?;
-                    let repeat_node_id =
-                        block_builder.mast_forest_builder().node_id(repeat_node_ref);
 
                     let iteration_count = (*count).expect_value();
                     if iteration_count == 0 {
@@ -1362,24 +1351,14 @@ impl Assembler {
                             .into());
                     }
 
-                    if let Some(decorator_ids) = block_builder.drain_decorators() {
-                        let decorator_ids =
-                            block_builder.mast_forest_builder_mut().decorator_ids(decorator_ids)?;
+                    if let Some(decorator_refs) = block_builder.drain_decorators() {
                         // Attach decorators before the first iteration. We must carry the
                         // original node's external metadata into the dedup fingerprint,
                         // otherwise structurally identical nodes with different source mappings
                         // can alias.
-                        let first_repeat_builder = block_builder.mast_forest_builder()
-                            [repeat_node_id]
-                            .clone()
-                            .to_builder(block_builder.mast_forest_builder().mast_forest())
-                            .with_before_enter(decorator_ids);
                         let first_repeat_node_ref = block_builder
                             .mast_forest_builder_mut()
-                            .ensure_node_preserving_debug_vars_ref(
-                                first_repeat_builder,
-                                repeat_node_id,
-                            )?;
+                            .clone_node_with_before_enter_refs(repeat_node_ref, decorator_refs)?;
 
                         body_node_refs.push(first_repeat_node_ref);
                         let remaining_iterations =
@@ -1430,19 +1409,12 @@ impl Assembler {
                         block_builder.mast_forest_builder_mut(),
                         next_depth,
                     )?;
-                    let loop_body_node_id =
-                        block_builder.mast_forest_builder().node_id(loop_body_node_ref);
-                    let mut loop_builder = LoopNodeBuilder::new(loop_body_node_id);
-                    if let Some(decorator_ids) = block_builder.drain_decorators() {
-                        let decorator_ids =
-                            block_builder.mast_forest_builder_mut().decorator_ids(decorator_ids)?;
-                        loop_builder.append_before_enter(decorator_ids);
-                    }
 
                     let asm_op = self.create_asmop_decorator(span, "while.true", proc_ctx);
+                    let before_enter = block_builder.drain_decorators();
                     let loop_node_ref = block_builder
                         .mast_forest_builder_mut()
-                        .ensure_node_with_asm_op_ref(loop_builder, asm_op)?;
+                        .ensure_loop_node_ref(loop_body_node_ref, before_enter, asm_op)?;
 
                     body_node_refs.push(loop_node_ref);
                 },
@@ -1462,7 +1434,7 @@ impl Assembler {
                 BasicBlockOrDecorators::Nothing => None,
             };
 
-        let procedure_body_ref = if body_node_refs.is_empty() {
+        let mut procedure_body_ref = if body_node_refs.is_empty() {
             // We cannot allow only decorators in a procedure body, since decorators don't change
             // the MAST digest of a node. Hence, two empty procedures with different decorators
             // would look the same to the `MastForestBuilder`.
@@ -1494,9 +1466,8 @@ impl Assembler {
 
         // Make sure that any post decorators are added at the end of the procedure body
         if let Some(post_decorator_ids) = maybe_post_decorators {
-            mast_forest_builder
-                .append_after_exit_refs(procedure_body_ref, post_decorator_ids)
-                .into_diagnostic()?;
+            procedure_body_ref = mast_forest_builder
+                .append_after_exit_refs(procedure_body_ref, post_decorator_ids)?;
         }
 
         Ok(procedure_body_ref)

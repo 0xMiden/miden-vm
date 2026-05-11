@@ -1,12 +1,10 @@
-use alloc::vec::Vec;
-
 use miden_assembly_syntax::{
     Word,
     ast::{InvocationTarget, InvokeKind},
     diagnostics::Report,
 };
 use miden_core::{
-    mast::{CallNodeBuilder, DynNodeBuilder, MastForestContributor, MastNodeExt},
+    mast::MastNodeExt,
     operations::{AssemblyOp, Operation},
 };
 use smallvec::SmallVec;
@@ -30,27 +28,18 @@ impl Assembler {
         callee: &InvocationTarget,
         caller: GlobalItemIndex,
         mast_forest_builder: &mut MastForestBuilder,
-        before_enter: Vec<miden_core::mast::DecoratorId>,
         asm_op: Option<AssemblyOp>,
     ) -> Result<MastNodeRef, Report> {
         let resolved = self
             .resolve_target(kind, callee, caller, mast_forest_builder)?
             .ok_or_else(|| self.invalid_invoke_target_report(kind, callee, caller))?;
-        let resolved_node_id = mast_forest_builder.node_id(resolved.node);
 
         match kind {
             InvokeKind::ProcRef | InvokeKind::Exec => Ok(resolved.node),
-            InvokeKind::Call => mast_forest_builder.ensure_node_with_asm_op_ref(
-                CallNodeBuilder::new(resolved_node_id)
-                    .with_before_enter(before_enter)
-                    .with_after_exit(vec![]),
-                asm_op.expect("call invocations must provide an AssemblyOp"),
-            ),
-            InvokeKind::SysCall => mast_forest_builder.ensure_node_with_asm_op_ref(
-                CallNodeBuilder::new_syscall(resolved_node_id)
-                    .with_before_enter(before_enter)
-                    .with_after_exit(vec![]),
-                asm_op.expect("syscall invocations must provide an AssemblyOp"),
+            InvokeKind::Call | InvokeKind::SysCall => mast_forest_builder.ensure_call_node_ref(
+                resolved.node,
+                matches!(kind, InvokeKind::SysCall),
+                asm_op.expect("call and syscall invocations must provide an AssemblyOp"),
             ),
         }
     }
@@ -59,15 +48,9 @@ impl Assembler {
     pub(super) fn dynexec(
         &self,
         mast_forest_builder: &mut MastForestBuilder,
-        before_enter: Vec<miden_core::mast::DecoratorId>,
         asm_op: AssemblyOp,
     ) -> Result<Option<MastNodeRef>, Report> {
-        let dyn_node_ref = mast_forest_builder.ensure_node_with_asm_op_ref(
-            DynNodeBuilder::new_dyn()
-                .with_before_enter(before_enter)
-                .with_after_exit(vec![]),
-            asm_op,
-        )?;
+        let dyn_node_ref = mast_forest_builder.ensure_dyn_node_ref(false, asm_op)?;
 
         Ok(Some(dyn_node_ref))
     }
@@ -76,15 +59,9 @@ impl Assembler {
     pub(super) fn dyncall(
         &self,
         mast_forest_builder: &mut MastForestBuilder,
-        before_enter: Vec<miden_core::mast::DecoratorId>,
         asm_op: AssemblyOp,
     ) -> Result<Option<MastNodeRef>, Report> {
-        let dyn_call_node_ref = mast_forest_builder.ensure_node_with_asm_op_ref(
-            DynNodeBuilder::new_dyncall()
-                .with_before_enter(before_enter)
-                .with_after_exit(vec![]),
-            asm_op,
-        )?;
+        let dyn_call_node_ref = mast_forest_builder.ensure_dyn_node_ref(true, asm_op)?;
 
         Ok(Some(dyn_call_node_ref))
     }
