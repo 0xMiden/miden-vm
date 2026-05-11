@@ -64,9 +64,15 @@ pub(super) fn op_hperm<P: Processor, T: Tracer>(
     let (addr, output_state) = processor.hasher().permute(input_state)?;
 
     // Write result back to stack (state[0] at top).
-    let r0: Word = output_state[STATE_RATE_0_RANGE].try_into().expect("r0 slice has length 4");
-    let r1: Word = output_state[STATE_RATE_1_RANGE].try_into().expect("r1 slice has length 4");
-    let cap: Word = output_state[STATE_CAP_RANGE].try_into().expect("cap slice has length 4");
+    let r0: Word = output_state[STATE_RATE_0_RANGE]
+        .try_into()
+        .unwrap_or_else(|_| unreachable!("STATE_RATE_0_RANGE always yields exactly 4 elements"));
+    let r1: Word = output_state[STATE_RATE_1_RANGE]
+        .try_into()
+        .unwrap_or_else(|_| unreachable!("STATE_RATE_1_RANGE always yields exactly 4 elements"));
+    let cap: Word = output_state[STATE_CAP_RANGE]
+        .try_into()
+        .unwrap_or_else(|_| unreachable!("STATE_CAP_RANGE always yields exactly 4 elements"));
     processor.stack_mut().set_word(0, &r0);
     processor.stack_mut().set_word(4, &r1);
     processor.stack_mut().set_word(8, &cap);
@@ -277,7 +283,7 @@ pub(super) fn op_mrupdate<P: Processor, T: Tracer>(
 pub(super) fn op_horner_eval_base<P: Processor, T: Tracer>(
     processor: &mut P,
     tracer: &mut T,
-) -> Result<OperationHelperRegisters, crate::MemoryError> {
+) -> Result<OperationHelperRegisters, MemoryError> {
     // Stack positions: low coefficient closer to top (lower index)
     const ALPHA_ADDR_INDEX: usize = 13;
     const ACC_LOW_INDEX: usize = 14;
@@ -387,7 +393,7 @@ pub(super) fn op_horner_eval_base<P: Processor, T: Tracer>(
 pub(super) fn op_horner_eval_ext<P: Processor, T: Tracer>(
     processor: &mut P,
     tracer: &mut T,
-) -> Result<OperationHelperRegisters, crate::MemoryError> {
+) -> Result<OperationHelperRegisters, MemoryError> {
     // Stack positions: low coefficient closer to top (lower index)
     const ALPHA_ADDR_INDEX: usize = 13;
     const ACC_LOW_INDEX: usize = 14;
@@ -527,7 +533,7 @@ pub(super) fn op_log_precompile<P: Processor, T: Tracer>(
 pub(super) fn op_crypto_stream<P: Processor, T: Tracer>(
     processor: &mut P,
     tracer: &mut T,
-) -> Result<OperationHelperRegisters, crate::MemoryError> {
+) -> Result<OperationHelperRegisters, MemoryError> {
     // Stack layout: [rate(8), capacity(4), src_ptr, dst_ptr, ...]
     const SRC_PTR_IDX: usize = 12;
     const DST_PTR_IDX: usize = 13;
