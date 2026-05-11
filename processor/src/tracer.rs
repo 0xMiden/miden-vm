@@ -297,7 +297,7 @@ pub trait Tracer {
     ///
     /// Called by: `U32SPLIT`, `U32ADD`, `U32ADD3`, `U32SUB`, `U32MUL`, `U32MADD`, `U32DIV`,
     /// `U32ASSERT2`.
-    fn record_u32_range_checks(&mut self, _clk: RowIndex, _u32_lo: Felt, _u32_hi: Felt) {}
+    fn record_u32_range_checks(&mut self, _u32_lo: Felt, _u32_hi: Felt) {}
 
     /// Records the procedure hash of a syscall.
     ///
