@@ -239,9 +239,8 @@ impl BasicBlockBuilder<'_> {
                     decorators.push((op_idx, decorator_ref));
                 }
             }
-            let asm_ops = self.mast_forest_builder.asm_ops(core::mem::take(&mut self.asm_ops));
+            let asm_ops = core::mem::take(&mut self.asm_ops);
             let debug_vars = self.debug_vars.drain(..).collect();
-            let after_exit = self.mast_forest_builder.decorator_ids(after_exit_refs)?;
 
             let basic_block_node_ref = self.mast_forest_builder.ensure_block_ref(
                 ops,
@@ -249,7 +248,7 @@ impl BasicBlockBuilder<'_> {
                 asm_ops,
                 debug_vars,
                 vec![],
-                after_exit,
+                after_exit_refs,
             )?;
 
             Ok(Some(basic_block_node_ref))

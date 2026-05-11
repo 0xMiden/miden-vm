@@ -6,6 +6,7 @@ use miden_core::{
     program::Program,
 };
 use miden_utils_testing::rand::rand_array;
+use rayon::ThreadPoolBuilder;
 
 use super::{ExecutionTrace, Felt};
 use crate::{
@@ -27,6 +28,14 @@ const TEST_TRACE_FRAGMENT_SIZE: usize = 1 << 10;
 // TEST HELPERS
 // ================================================================================================
 
+fn build_test_trace(inputs: crate::trace::TraceBuildInputs) -> ExecutionTrace {
+    ThreadPoolBuilder::new()
+        .num_threads(1)
+        .build()
+        .expect("test trace thread pool should build")
+        .install(|| build_trace(inputs).unwrap())
+}
+
 /// Builds a sample trace by executing the provided code block against the provided stack inputs.
 pub fn build_trace_from_program(program: &Program, stack_inputs: &[u64]) -> ExecutionTrace {
     let stack_inputs = stack_inputs.iter().map(|&v| Felt::new_unchecked(v)).collect::<Vec<Felt>>();
@@ -40,7 +49,7 @@ pub fn build_trace_from_program(program: &Program, stack_inputs: &[u64]) -> Exec
     )
     .expect("processor advice inputs should fit advice map limits");
     let trace_inputs = processor.execute_trace_inputs_sync(program, &mut host).unwrap();
-    build_trace(trace_inputs).unwrap()
+    build_test_trace(trace_inputs)
 }
 
 /// Builds a sample trace by executing the provided program with pre-built `StackInputs`.
@@ -62,7 +71,7 @@ pub fn build_trace_from_program_with_stack(
     )
     .expect("processor advice inputs should fit advice map limits");
     let trace_inputs = processor.execute_trace_inputs_sync(program, &mut host).unwrap();
-    build_trace(trace_inputs).unwrap()
+    build_test_trace(trace_inputs)
 }
 
 /// Builds a sample trace by executing a span block containing the specified operations. This
@@ -104,5 +113,5 @@ pub fn build_trace_from_ops_with_inputs(
     )
     .expect("processor advice inputs should fit advice map limits");
     let trace_inputs = processor.execute_trace_inputs_sync(&program, &mut host).unwrap();
-    build_trace(trace_inputs).unwrap()
+    build_test_trace(trace_inputs)
 }

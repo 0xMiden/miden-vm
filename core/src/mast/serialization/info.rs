@@ -1,3 +1,5 @@
+use alloc::vec::Vec;
+
 use super::{NodeDataOffset, basic_blocks::BasicBlockDataDecoder};
 #[cfg(test)]
 use crate::mast::node::MastNodeExt;
@@ -116,8 +118,11 @@ impl MastNodeEntry {
         match self {
             Self::Block { ops_offset } => {
                 let op_batches = basic_block_data_decoder.decode_operations(ops_offset)?;
-                let builder =
-                    crate::mast::node::BasicBlockNodeBuilder::from_op_batches(op_batches, digest);
+                let builder = crate::mast::node::BasicBlockNodeBuilder::from_op_batches_unchecked(
+                    op_batches,
+                    Vec::new(), // decorators set later
+                    digest,
+                );
                 Ok(MastNodeBuilder::BasicBlock(builder))
             },
             Self::Join { left_child_id, right_child_id } => {
