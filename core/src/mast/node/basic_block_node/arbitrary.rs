@@ -794,7 +794,7 @@ pub fn mast_forest_and_kernel_strategy(
 
 /// Builds an executable `(MastForest, Kernel)` pair from the provided seeds.
 ///
-/// TODO: initial root selection,externals + syscalls, and kernel finalisation.
+/// TODO: externals + syscalls, and kernel finalisation.
 fn build_executable_forest(
     seeds: ForestSeeds,
     params: &MastForestParams,
@@ -813,7 +813,7 @@ fn build_executable_forest(
         external_picks: _,
         dyn_selectors: _,
         kernel_inclusion: _,
-        root_selection: _,
+        root_selection,
     } = seeds;
 
     let mut forest = MastForest::new();
@@ -889,7 +889,21 @@ fn build_executable_forest(
         }
     }
 
-    let _ = (&basic_block_ids, &all_node_ids);
+    // TODO: wire RootPool to support acyclicity filtering for externals.
+    let mut root_ids: Vec<MastNodeId> = Vec::new();
+    for (i, &id) in all_node_ids.iter().enumerate() {
+        if root_selection.get(i).copied().unwrap_or(false) {
+            forest.make_root(id);
+            root_ids.push(id);
+        }
+    }
+
+    // Externals and syscalls need at least one procedure root to target.
+    if root_ids.is_empty() && !basic_block_ids.is_empty() {
+        let fallback = basic_block_ids[0];
+        forest.make_root(fallback);
+        root_ids.push(fallback);
+    }
 
     (forest, Kernel::default())
 }
