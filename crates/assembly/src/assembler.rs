@@ -17,10 +17,7 @@ use miden_assembly_syntax::{
 };
 use miden_core::{
     Word,
-    mast::{
-        DecoratorId, LoopNodeBuilder, MastForestContributor, MastNodeExt, MastNodeId,
-        SplitNodeBuilder,
-    },
+    mast::{LoopNodeBuilder, MastForestContributor, MastNodeExt, MastNodeId, SplitNodeBuilder},
     operations::{AssemblyOp, Operation},
     program::{Kernel, Program},
 };
@@ -34,7 +31,7 @@ use crate::{
     basic_block_builder::{BasicBlockBuilder, BasicBlockOrDecorators},
     fmp::{fmp_end_frame_sequence, fmp_initialization_sequence, fmp_start_frame_sequence},
     linker::{LinkLibrary, Linker, LinkerError, SymbolItem, SymbolResolutionContext},
-    mast_forest_builder::{MastForestBuilder, MastNodeRef},
+    mast_forest_builder::{DecoratorRef, MastForestBuilder, MastNodeRef},
     report,
 };
 
@@ -1262,7 +1259,7 @@ impl Assembler {
                         } else if let Some(decorator_ids) = block_builder.drain_decorators() {
                             block_builder
                                 .mast_forest_builder_mut()
-                                .append_before_enter_ref(node_ref, decorator_ids)
+                                .append_before_enter_refs(node_ref, decorator_ids)
                                 .into_diagnostic()?;
                         }
 
@@ -1304,6 +1301,8 @@ impl Assembler {
                     let else_blk_id = block_builder.mast_forest_builder().node_id(else_blk);
                     let mut split_builder = SplitNodeBuilder::new([then_blk_id, else_blk_id]);
                     if let Some(decorator_ids) = block_builder.drain_decorators() {
+                        let decorator_ids =
+                            block_builder.mast_forest_builder_mut().decorator_ids(decorator_ids)?;
                         split_builder.append_before_enter(decorator_ids);
                     }
 
@@ -1364,6 +1363,8 @@ impl Assembler {
                     }
 
                     if let Some(decorator_ids) = block_builder.drain_decorators() {
+                        let decorator_ids =
+                            block_builder.mast_forest_builder_mut().decorator_ids(decorator_ids)?;
                         // Attach decorators before the first iteration. We must carry the
                         // original node's external metadata into the dedup fingerprint,
                         // otherwise structurally identical nodes with different source mappings
@@ -1423,8 +1424,8 @@ impl Assembler {
                     }
 
                     // `while.true` desugars to `if.true { LOOP { body } } else { noop }`. The LOOP
-                    // itself has do-while semantics — the body executes unconditionally for the
-                    // first iteration — so the surrounding SPLIT performs the initial true-check.
+                    // itself has do-while semantics: the body executes unconditionally for the
+                    // first iteration, so the surrounding SPLIT performs the initial true-check.
                     //
                     // The `while.true` asm_op is attached to *both* the LOOP and the wrapping
                     // SPLIT: both nodes belong to a single source-level `while.true` construct, and
@@ -1458,6 +1459,8 @@ impl Assembler {
                     let noop_block_id = block_builder.mast_forest_builder().node_id(noop_block_ref);
                     let mut split_builder = SplitNodeBuilder::new([loop_node_id, noop_block_id]);
                     if let Some(decorator_ids) = block_builder.drain_decorators() {
+                        let decorator_ids =
+                            block_builder.mast_forest_builder_mut().decorator_ids(decorator_ids)?;
                         split_builder.append_before_enter(decorator_ids);
                     }
 
@@ -1470,7 +1473,7 @@ impl Assembler {
             }
         }
 
-        let maybe_post_decorators: Option<Vec<DecoratorId>> =
+        let maybe_post_decorators: Option<Vec<DecoratorRef>> =
             match block_builder.try_into_basic_block()? {
                 BasicBlockOrDecorators::BasicBlock(basic_block_id) => {
                     body_node_refs.push(basic_block_id);
@@ -1516,7 +1519,7 @@ impl Assembler {
         // Make sure that any post decorators are added at the end of the procedure body
         if let Some(post_decorator_ids) = maybe_post_decorators {
             mast_forest_builder
-                .append_after_exit_ref(procedure_body_ref, post_decorator_ids)
+                .append_after_exit_refs(procedure_body_ref, post_decorator_ids)
                 .into_diagnostic()?;
         }
 
