@@ -86,7 +86,7 @@ where
     )?;
 
     // Create FRI oracle (observes commitments + final poly, checks per-round PoW)
-    let fri_oracle = FriOracle::new(&params.fri, *domain.lde_coset().subgroup(), channel)?;
+    let fri_oracle = FriOracle::new(&params.fri, domain, channel)?;
 
     // Check query PoW witness and sample query indices
     channel.grind(params.query_pow_bits())?;

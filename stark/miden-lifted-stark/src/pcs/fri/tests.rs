@@ -16,7 +16,7 @@ use verifier::{FriError, FriOracle};
 
 use super::*;
 use crate::{
-    domain::TwoAdicSubgroup,
+    domain::LiftedDomain,
     lmcs::tree_indices::TreeIndices,
     testing::{
         configs::goldilocks_poseidon2::{
@@ -107,13 +107,13 @@ fn build_initial_evals(
 fn prove_queries(
     params: &FriParams,
     lmcs: &BaseLmcs,
+    domain: &LiftedDomain<Felt>,
     evals: Vec<QuadFelt>,
     tree_indices: TreeIndices,
 ) -> (TestDigest, TestTranscriptData) {
     let mut prover_channel = prover_channel();
-    let subgroup = TwoAdicSubgroup::<Felt>::new(log2_strict_u8(evals.len()));
     let fri_polys =
-        FriPolys::<Felt, QuadFelt, _>::new(params, lmcs, subgroup, evals, &mut prover_channel);
+        FriPolys::<Felt, QuadFelt, _>::new(params, lmcs, domain, evals, &mut prover_channel);
     fri_polys.prove_queries(params, tree_indices, &mut prover_channel);
     prover_channel.finalize()
 }
@@ -122,7 +122,7 @@ fn verify_queries(
     params: &FriParams,
     lmcs: &BaseLmcs,
     transcript: &TestTranscriptData,
-    lde_size: usize,
+    domain: &LiftedDomain<Felt>,
     initial_evals: &BTreeMap<usize, QuadFelt>,
     tree_indices: TreeIndices,
     challenger: Option<Challenger>,
@@ -131,9 +131,7 @@ fn verify_queries(
         Some(challenger) => VerifierTranscript::from_data(challenger, transcript),
         None => verifier_channel(transcript),
     };
-    let log_domain_size = log2_strict_u8(lde_size);
-    let subgroup = TwoAdicSubgroup::<Felt>::new(log_domain_size);
-    let oracle = FriOracle::new(params, subgroup, &mut channel)?;
+    let oracle = FriOracle::new(params, domain, &mut channel)?;
     oracle.test_low_degree(lmcs, params, initial_evals.clone(), tree_indices, &mut channel)?;
     let digest = channel.finalize().expect("transcript should finalize cleanly");
     Ok(digest)
@@ -144,7 +142,6 @@ fn run_roundtrip_case(case: &FriRoundtripCase, seed: u64) -> Result<(), FriError
     let lmcs = test_lmcs();
 
     let params = FriParams {
-        log_blowup: case.log_blowup,
         fold: case.fold,
         log_final_degree: case.log_final_degree,
         folding_pow_bits: case.folding_pow_bits,
@@ -160,23 +157,24 @@ fn run_roundtrip_case(case: &FriRoundtripCase, seed: u64) -> Result<(), FriError
     .values;
     let lde_size = evals.len();
     let log_domain_size = log2_strict_u8(lde_size);
+    let domain = LiftedDomain::<Felt>::canonical(case.log_poly_degree, case.log_blowup);
     // Sample domain indices (no bit-reversal needed — tree is in domain order)
     let tree_indices =
         TreeIndices::new(sample_indices(&mut rng, lde_size, case.num_queries), log_domain_size)
             .expect("indices are in range");
     let initial_evals = build_initial_evals(&evals, &tree_indices);
 
-    let (prover_digest, transcript) = prove_queries(&params, &lmcs, evals, tree_indices.clone());
+    let (prover_digest, transcript) =
+        prove_queries(&params, &lmcs, &domain, evals, tree_indices.clone());
     let verifier_digest =
-        verify_queries(&params, &lmcs, &transcript, lde_size, &initial_evals, tree_indices, None)?;
+        verify_queries(&params, &lmcs, &transcript, &domain, &initial_evals, tree_indices, None)?;
     assert_eq!(prover_digest, verifier_digest);
 
     // Re-parse FriTranscript (commit phase only) from a fresh channel.
     let mut reparse_channel = verifier_channel(&transcript);
-    let reparse_subgroup = TwoAdicSubgroup::<Felt>::new(log_domain_size);
     FriTranscript::<Felt, QuadFelt, _>::from_verifier_channel(
         &params,
-        &reparse_subgroup,
+        &domain,
         &mut reparse_channel,
     )
     .expect("FriTranscript re-parse should succeed");
@@ -205,7 +203,6 @@ fn test_fri_verify_wrong_eval() {
     let log_final_degree: u8 = 2;
 
     let params = FriParams {
-        log_blowup,
         fold: FRI_FOLD_ARITY_2,
         log_final_degree,
         folding_pow_bits: 1,
@@ -215,6 +212,7 @@ fn test_fri_verify_wrong_eval() {
         random_lde_matrix::<QuadFelt>(&mut rng, log_poly_degree, log_blowup, 1, Felt::ONE).values;
     let lde_size = evals.len();
     let log_domain_size = log2_strict_u8(lde_size);
+    let domain = LiftedDomain::<Felt>::canonical(log_poly_degree, log_blowup);
     let tree_indices = TreeIndices::new(sample_indices(&mut rng, lde_size, 2), log_domain_size)
         .expect("indices are in range");
     let mut initial_evals = build_initial_evals(&evals, &tree_indices);
@@ -228,9 +226,10 @@ fn test_fri_verify_wrong_eval() {
     }
     initial_evals.insert(first_idx, wrong_eval);
 
-    let (_prover_digest, transcript) = prove_queries(&params, &lmcs, evals, tree_indices.clone());
+    let (_prover_digest, transcript) =
+        prove_queries(&params, &lmcs, &domain, evals, tree_indices.clone());
     let result =
-        verify_queries(&params, &lmcs, &transcript, lde_size, &initial_evals, tree_indices, None);
+        verify_queries(&params, &lmcs, &transcript, &domain, &initial_evals, tree_indices, None);
 
     assert!(
         matches!(result, Err(FriError::EvaluationMismatch { .. })),
@@ -253,7 +252,6 @@ fn test_fri_verify_wrong_beta() {
     let log_final_degree: u8 = 2;
 
     let params = FriParams {
-        log_blowup,
         fold: FRI_FOLD_ARITY_2,
         log_final_degree,
         folding_pow_bits: 0, // No grinding to simplify test
@@ -266,18 +264,19 @@ fn test_fri_verify_wrong_beta() {
         random_lde_matrix::<QuadFelt>(&mut rng, log_poly_degree, log_blowup, 1, Felt::ONE).values;
     let lde_size = evals1.len();
     let log_domain_size = log2_strict_u8(lde_size);
+    let domain = LiftedDomain::<Felt>::canonical(log_poly_degree, log_blowup);
 
     // Prover 1: generate FRI transcript (grinds per-round internally).
     let tree_indices = TreeIndices::new(sample_indices(&mut rng, lde_size, 2), log_domain_size)
         .expect("indices are in range");
     let initial_evals = build_initial_evals(&evals1, &tree_indices);
-    let (_prover_digest, transcript) = prove_queries(&params, &lmcs, evals1, tree_indices.clone());
+    let (_prover_digest, transcript) =
+        prove_queries(&params, &lmcs, &domain, evals1, tree_indices.clone());
 
     // Prover 2: generate different transcript (different commitments = different betas).
     let mut prover2_channel = prover_channel();
-    let subgroup2 = TwoAdicSubgroup::<Felt>::new(log2_strict_u8(evals2.len()));
     let _ =
-        FriPolys::<Felt, QuadFelt, _>::new(&params, &lmcs, subgroup2, evals2, &mut prover2_channel);
+        FriPolys::<Felt, QuadFelt, _>::new(&params, &lmcs, &domain, evals2, &mut prover2_channel);
     let (_, prover2_transcript) = prover2_channel.finalize();
     let other_commitment = prover2_transcript
         .commitments()
@@ -292,7 +291,7 @@ fn test_fri_verify_wrong_beta() {
         &params,
         &lmcs,
         &transcript,
-        lde_size,
+        &domain,
         &initial_evals,
         tree_indices,
         Some(wrong_challenger),
@@ -319,7 +318,6 @@ fn test_fri_zero_rounds_final_poly_only() {
     let log_final_degree: u8 = log_poly_degree; // final degree >= domain size => zero rounds
 
     let params = FriParams {
-        log_blowup,
         fold: FRI_FOLD_ARITY_2,
         log_final_degree,
         folding_pow_bits: 0,
@@ -329,15 +327,16 @@ fn test_fri_zero_rounds_final_poly_only() {
         random_lde_matrix::<QuadFelt>(&mut rng, log_poly_degree, log_blowup, 1, Felt::ONE).values;
     let lde_size = evals.len();
     let log_domain_size = log2_strict_u8(lde_size);
+    let domain = LiftedDomain::<Felt>::canonical(log_poly_degree, log_blowup);
     let tree_indices = TreeIndices::new(sample_indices(&mut rng, lde_size, 2), log_domain_size)
         .expect("indices are in range");
     let initial_evals = build_initial_evals(&evals, &tree_indices);
-    let (prover_digest, transcript) = prove_queries(&params, &lmcs, evals, tree_indices.clone());
+    let (prover_digest, transcript) =
+        prove_queries(&params, &lmcs, &domain, evals, tree_indices.clone());
 
     let mut channel = verifier_channel(&transcript);
-    let subgroup = TwoAdicSubgroup::<Felt>::new(log_domain_size);
     let fri_transcript: FriTranscript<Felt, QuadFelt, _> =
-        FriTranscript::from_verifier_channel(&params, &subgroup, &mut channel)
+        FriTranscript::from_verifier_channel(&params, &domain, &mut channel)
             .expect("transcript parsing should succeed");
 
     assert!(fri_transcript.rounds.is_empty(), "expected zero folding rounds");
@@ -348,7 +347,7 @@ fn test_fri_zero_rounds_final_poly_only() {
     );
 
     let verifier_digest =
-        verify_queries(&params, &lmcs, &transcript, lde_size, &initial_evals, tree_indices, None)
+        verify_queries(&params, &lmcs, &transcript, &domain, &initial_evals, tree_indices, None)
             .expect("zero-round FRI should verify");
     assert_eq!(prover_digest, verifier_digest);
 }
@@ -365,7 +364,6 @@ fn test_final_polynomial_correctness() {
     let log_final_degree: u8 = 3;
 
     let params = FriParams {
-        log_blowup,
         fold: FRI_FOLD_ARITY_2,
         log_final_degree,
         folding_pow_bits: 0, // No grinding for this test
@@ -389,17 +387,16 @@ fn test_final_polynomial_correctness() {
     let lde = dft.coset_lde_algebra_batch(evals_h, log_blowup as usize, Felt::ONE);
     let evals = lde.bit_reverse_rows().to_row_major_matrix().values;
 
-    let log_domain_size = log_poly_degree + log_blowup;
-    let subgroup = TwoAdicSubgroup::<Felt>::new(log_domain_size);
+    let domain = LiftedDomain::<Felt>::canonical(log_poly_degree, log_blowup);
 
     let mut prover_channel = prover_channel();
     let _fri_polys =
-        FriPolys::<Felt, QuadFelt, _>::new(&params, &lmcs, subgroup, evals, &mut prover_channel);
+        FriPolys::<Felt, QuadFelt, _>::new(&params, &lmcs, &domain, evals, &mut prover_channel);
     let (_, transcript) = prover_channel.finalize();
 
     let mut v_channel = verifier_channel(&transcript);
     let fri_transcript: FriTranscript<Felt, QuadFelt, _> =
-        FriTranscript::from_verifier_channel(&params, &subgroup, &mut v_channel)
+        FriTranscript::from_verifier_channel(&params, &domain, &mut v_channel)
             .expect("transcript parsing should succeed");
 
     assert_eq!(

@@ -23,7 +23,7 @@ use crate::{
 ///   heights are not supported yet and will panic.
 ///
 /// `domain` is the max LDE coset the trace trees were committed on; `domain.log_lde_height`
-/// equals `log_trace_height + params.fri.log_blowup` for the tallest trace.
+/// equals `log_trace_height + domain.log_blowup()` for the tallest trace.
 ///
 /// Alignment is derived from the trace trees to pad DEEP evaluations consistently.
 /// Trace trees must be built with `build_aligned_tree` to match this padding.
@@ -66,13 +66,7 @@ pub fn open_with_channel<F, EF, L, M, Ch, const N: usize>(
     // The deep_poly contains evaluations on the LDE domain (size 2^log_lde_height).
     // FRI will prove that this polynomial is low-degree.
     let fri_polys = info_span!("FRI commit phase").in_scope(|| {
-        FriPolys::<F, EF, L>::new(
-            &params.fri,
-            lmcs,
-            *domain.lde_coset().subgroup(),
-            deep_poly.deep_evals,
-            channel,
-        )
+        FriPolys::<F, EF, L>::new(&params.fri, lmcs, domain, deep_poly.deep_evals, channel)
     });
 
     // ─────────────────────────────────────────────────────────────────────────

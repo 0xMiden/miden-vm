@@ -71,11 +71,7 @@ where
             channel,
         )?;
 
-        let fri_transcript = FriTranscript::from_verifier_channel(
-            &params.fri,
-            domain.lde_coset().subgroup(),
-            channel,
-        )?;
+        let fri_transcript = FriTranscript::from_verifier_channel(&params.fri, domain, channel)?;
 
         let query_pow_witness = channel.grind(params.query_pow_bits())?;
 
@@ -98,7 +94,7 @@ where
 
         let log_arity = params.fri.fold.log_arity();
         let arity = params.fri.fold.arity();
-        let num_rounds = params.fri.num_rounds(log_lde_height);
+        let num_rounds = params.fri.num_rounds(domain);
 
         let mut fri_witnesses = Vec::with_capacity(num_rounds);
         let mut round_indices = tree_indices;

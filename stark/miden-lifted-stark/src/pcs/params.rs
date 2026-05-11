@@ -24,6 +24,11 @@ pub enum PcsParamsError {
 /// Internal sub-parameters are accessible to crate-internal code only.
 #[derive(Clone, Copy, Debug)]
 pub struct PcsParams {
+    /// Log₂ of the LDE blowup factor (LDE domain size / trace size).
+    ///
+    /// Higher values increase soundness per query but also proof size and prover time
+    /// (LDE over a larger domain). Typical values: 2-4 (blowup factors of 4-16).
+    pub(crate) log_blowup: u8,
     /// DEEP quotient parameters.
     pub(crate) deep: DeepParams,
     /// FRI protocol parameters.
@@ -64,13 +69,9 @@ impl PcsParams {
             return Err(PcsParamsError::ZeroQueries);
         }
         Ok(Self {
+            log_blowup,
             deep: DeepParams { deep_pow_bits },
-            fri: FriParams {
-                log_blowup,
-                fold,
-                log_final_degree,
-                folding_pow_bits,
-            },
+            fri: FriParams { fold, log_final_degree, folding_pow_bits },
             num_queries,
             query_pow_bits,
         })
@@ -79,7 +80,7 @@ impl PcsParams {
     /// Log₂ of the blowup factor.
     #[inline]
     pub fn log_blowup(&self) -> u8 {
-        self.fri.log_blowup
+        self.log_blowup
     }
 
     /// Number of query repetitions.
