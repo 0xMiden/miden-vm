@@ -214,7 +214,7 @@ where
 {
     // Proof deserialization via bincode; see https://github.com/0xMiden/miden-vm/issues/2550.
     let proof: StarkProof<Felt, QuadFelt, SC> = bincode::deserialize(proof_bytes)?;
-    validate_canonical_air_order(proof_bytes, proof.air_order())?;
+    validate_canonical_air_order(proof_bytes)?;
 
     let mut challenger = config.challenger();
     config::observe_protocol_params(&mut challenger);
@@ -240,37 +240,29 @@ where
     Ok(())
 }
 
-fn validate_canonical_air_order(
-    proof_bytes: &[u8],
-    proof_air_order: &[u32],
-) -> Result<(), StarkVerificationError> {
+fn validate_canonical_air_order(proof_bytes: &[u8]) -> Result<(), StarkVerificationError> {
     let proof_shapes: InstanceShapes = bincode::DefaultOptions::new()
         .with_fixint_encoding()
         .allow_trailing_bytes()
         .deserialize(proof_bytes)?;
 
+    let proof_air_order = proof_shapes.air_order();
     let log_trace_heights = proof_shapes.log_trace_heights();
+    let non_canonical = || StarkVerificationError::NonCanonicalAirOrder {
+        expected: vec![0, 1],
+        actual: proof_air_order.to_vec(),
+    };
+
     if proof_air_order.len() != 2 || log_trace_heights.len() != 2 {
-        return Err(StarkVerificationError::NonCanonicalAirOrder {
-            expected: vec![0, 1],
-            actual: proof_air_order.to_vec(),
-        });
+        return Err(non_canonical());
     }
 
     let mut caller_heights = [0usize; 2];
     let mut seen = [false; 2];
     for (&caller_idx, &log_h) in proof_air_order.iter().zip(log_trace_heights) {
-        let Some(seen_slot) = seen.get_mut(caller_idx as usize) else {
-            return Err(StarkVerificationError::NonCanonicalAirOrder {
-                expected: vec![0, 1],
-                actual: proof_air_order.to_vec(),
-            });
-        };
+        let seen_slot = seen.get_mut(caller_idx as usize).ok_or_else(non_canonical)?;
         if *seen_slot {
-            return Err(StarkVerificationError::NonCanonicalAirOrder {
-                expected: vec![0, 1],
-                actual: proof_air_order.to_vec(),
-            });
+            return Err(non_canonical());
         }
         *seen_slot = true;
         caller_heights[caller_idx as usize] = 1usize
@@ -279,12 +271,7 @@ fn validate_canonical_air_order(
     }
 
     let expected_shapes =
-        InstanceShapes::from_trace_heights(caller_heights.to_vec()).map_err(|_| {
-            StarkVerificationError::NonCanonicalAirOrder {
-                expected: vec![0, 1],
-                actual: proof_air_order.to_vec(),
-            }
-        })?;
+        InstanceShapes::from_trace_heights(caller_heights.to_vec()).map_err(|_| non_canonical())?;
     if expected_shapes.air_order() != proof_air_order
         || expected_shapes.log_trace_heights() != log_trace_heights
     {
