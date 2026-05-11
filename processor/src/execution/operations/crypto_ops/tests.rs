@@ -25,6 +25,10 @@ use crate::{
 // The memory address where alpha is stored
 const ALPHA_ADDR: u64 = 1000;
 
+fn felt(value: u64) -> Felt {
+    Felt::new_unchecked(value % Felt::ORDER)
+}
+
 // HASHING TESTS
 // --------------------------------------------------------------------------------------------
 
@@ -53,22 +57,22 @@ proptest! {
         // Build the initial stack state
         // Stack layout (top first): [s0, s1, s2, ..., s11, s12, s13, s14, s15]
         let stack_inputs = [
-            Felt::new_unchecked(s0),  // position 0 (top)
-            Felt::new_unchecked(s1),  // position 1
-            Felt::new_unchecked(s2),  // position 2
-            Felt::new_unchecked(s3),  // position 3
-            Felt::new_unchecked(s4),  // position 4
-            Felt::new_unchecked(s5),  // position 5
-            Felt::new_unchecked(s6),  // position 6
-            Felt::new_unchecked(s7),  // position 7
-            Felt::new_unchecked(s8),  // position 8
-            Felt::new_unchecked(s9),  // position 9
-            Felt::new_unchecked(s10), // position 10
-            Felt::new_unchecked(s11), // position 11
-            Felt::new_unchecked(s12), // position 12
-            Felt::new_unchecked(s13), // position 13
-            Felt::new_unchecked(s14), // position 14
-            Felt::new_unchecked(s15), // position 15 (bottom)
+            felt(s0),  // position 0 (top)
+            felt(s1),  // position 1
+            felt(s2),  // position 2
+            felt(s3),  // position 3
+            felt(s4),  // position 4
+            felt(s5),  // position 5
+            felt(s6),  // position 6
+            felt(s7),  // position 7
+            felt(s8),  // position 8
+            felt(s9),  // position 9
+            felt(s10), // position 10
+            felt(s11), // position 11
+            felt(s12), // position 12
+            felt(s13), // position 13
+            felt(s14), // position 14
+            felt(s15), // position 15 (bottom)
         ];
         let mut processor = FastProcessor::new(StackInputs::new(&stack_inputs).unwrap());
         let mut tracer = NoopTracer;
@@ -78,18 +82,18 @@ proptest! {
         // So input_state = [s0, s1, s2, ..., s11]
         let expected_state = {
             let mut expected_state = [
-                Felt::new_unchecked(s0),
-                Felt::new_unchecked(s1),
-                Felt::new_unchecked(s2),
-                Felt::new_unchecked(s3),
-                Felt::new_unchecked(s4),
-                Felt::new_unchecked(s5),
-                Felt::new_unchecked(s6),
-                Felt::new_unchecked(s7),
-                Felt::new_unchecked(s8),
-                Felt::new_unchecked(s9),
-                Felt::new_unchecked(s10),
-                Felt::new_unchecked(s11),
+                felt(s0),
+                felt(s1),
+                felt(s2),
+                felt(s3),
+                felt(s4),
+                felt(s5),
+                felt(s6),
+                felt(s7),
+                felt(s8),
+                felt(s9),
+                felt(s10),
+                felt(s11),
             ];
             apply_permutation(&mut expected_state);
 
@@ -116,10 +120,10 @@ proptest! {
         }
 
         // Check that positions 12-15 are NOT affected
-        prop_assert_eq!(stack[3], Felt::new_unchecked(s12), "s12 at position 12");
-        prop_assert_eq!(stack[2], Felt::new_unchecked(s13), "s13 at position 13");
-        prop_assert_eq!(stack[1], Felt::new_unchecked(s14), "s14 at position 14");
-        prop_assert_eq!(stack[0], Felt::new_unchecked(s15), "s15 at position 15");
+        prop_assert_eq!(stack[3], felt(s12), "s12 at position 12");
+        prop_assert_eq!(stack[2], felt(s13), "s13 at position 13");
+        prop_assert_eq!(stack[1], felt(s14), "s14 at position 14");
+        prop_assert_eq!(stack[0], felt(s15), "s15 at position 15");
     }
 }
 
@@ -160,20 +164,20 @@ proptest! {
         // Build the initial stack state
         // Stack layout (top first): [r0, r1, r2, r3, r4, r5, r6, r7, c0, c1, c2, c3, src_ptr, dst_ptr, 0, 0]
         let stack_inputs = [
-            Felt::new_unchecked(r0),           // position 0 (top)
-            Felt::new_unchecked(r1),           // position 1
-            Felt::new_unchecked(r2),           // position 2
-            Felt::new_unchecked(r3),           // position 3
-            Felt::new_unchecked(r4),           // position 4
-            Felt::new_unchecked(r5),           // position 5
-            Felt::new_unchecked(r6),           // position 6
-            Felt::new_unchecked(r7),           // position 7
-            Felt::new_unchecked(c0),           // position 8
-            Felt::new_unchecked(c1),           // position 9
-            Felt::new_unchecked(c2),           // position 10
-            Felt::new_unchecked(c3),           // position 11
-            Felt::new_unchecked(src_addr),     // position 12 (src_ptr)
-            Felt::new_unchecked(dst_addr),     // position 13 (dst_ptr)
+            felt(r0),           // position 0 (top)
+            felt(r1),           // position 1
+            felt(r2),           // position 2
+            felt(r3),           // position 3
+            felt(r4),           // position 4
+            felt(r5),           // position 5
+            felt(r6),           // position 6
+            felt(r7),           // position 7
+            felt(c0),           // position 8
+            felt(c1),           // position 9
+            felt(c2),           // position 10
+            felt(c3),           // position 11
+            felt(src_addr),     // position 12 (src_ptr)
+            felt(dst_addr),     // position 13 (dst_ptr)
             ZERO,                    // position 14
             ZERO,                    // position 15 (bottom)
         ];
@@ -181,13 +185,13 @@ proptest! {
         let mut tracer = NoopTracer;
 
         // Store plaintext in memory at src_addr
-        let plaintext_word1: Word = [Felt::new_unchecked(p0), Felt::new_unchecked(p1), Felt::new_unchecked(p2), Felt::new_unchecked(p3)].into();
-        let plaintext_word2: Word = [Felt::new_unchecked(p4), Felt::new_unchecked(p5), Felt::new_unchecked(p6), Felt::new_unchecked(p7)].into();
+        let plaintext_word1: Word = [felt(p0), felt(p1), felt(p2), felt(p3)].into();
+        let plaintext_word2: Word = [felt(p4), felt(p5), felt(p6), felt(p7)].into();
 
         let clk = processor.clock();
         processor.memory_mut().write_word(
             ContextId::root(),
-            Felt::new_unchecked(src_addr),
+            felt(src_addr),
             clk,
             plaintext_word1,
         ).unwrap();
@@ -196,7 +200,7 @@ proptest! {
         let clk = processor.clock();
         processor.memory_mut().write_word(
             ContextId::root(),
-            Felt::new_unchecked(src_addr + 4),
+            felt(src_addr + 4),
             clk,
             plaintext_word2,
         ).unwrap();
@@ -209,22 +213,22 @@ proptest! {
 
         // Compute expected ciphertext: ciphertext = plaintext + rate
         let expected_cipher1 = [
-            Felt::new_unchecked(p0) + Felt::new_unchecked(r0),
-            Felt::new_unchecked(p1) + Felt::new_unchecked(r1),
-            Felt::new_unchecked(p2) + Felt::new_unchecked(r2),
-            Felt::new_unchecked(p3) + Felt::new_unchecked(r3),
+            felt(p0) + felt(r0),
+            felt(p1) + felt(r1),
+            felt(p2) + felt(r2),
+            felt(p3) + felt(r3),
         ];
         let expected_cipher2 = [
-            Felt::new_unchecked(p4) + Felt::new_unchecked(r4),
-            Felt::new_unchecked(p5) + Felt::new_unchecked(r5),
-            Felt::new_unchecked(p6) + Felt::new_unchecked(r6),
-            Felt::new_unchecked(p7) + Felt::new_unchecked(r7),
+            felt(p4) + felt(r4),
+            felt(p5) + felt(r5),
+            felt(p6) + felt(r6),
+            felt(p7) + felt(r7),
         ];
 
         // Check that ciphertext was written to destination memory
         let clk = processor.clock();
-        let cipher_word1 = processor.memory_mut().read_word(ContextId::root(), Felt::new_unchecked(dst_addr), clk).unwrap();
-        let cipher_word2 = processor.memory_mut().read_word(ContextId::root(), Felt::new_unchecked(dst_addr + 4), clk).unwrap();
+        let cipher_word1 = processor.memory_mut().read_word(ContextId::root(), felt(dst_addr), clk).unwrap();
+        let cipher_word2 = processor.memory_mut().read_word(ContextId::root(), felt(dst_addr + 4), clk).unwrap();
 
         prop_assert_eq!(cipher_word1[0], expected_cipher1[0], "cipher word1[0]");
         prop_assert_eq!(cipher_word1[1], expected_cipher1[1], "cipher word1[1]");
@@ -249,14 +253,14 @@ proptest! {
         prop_assert_eq!(stack[8], expected_cipher2[3], "cipher2[3] at position 7");
 
         // Capacity should be unchanged (c0 at position 8)
-        prop_assert_eq!(stack[7], Felt::new_unchecked(c0), "c0 at position 8");
-        prop_assert_eq!(stack[6], Felt::new_unchecked(c1), "c1 at position 9");
-        prop_assert_eq!(stack[5], Felt::new_unchecked(c2), "c2 at position 10");
-        prop_assert_eq!(stack[4], Felt::new_unchecked(c3), "c3 at position 11");
+        prop_assert_eq!(stack[7], felt(c0), "c0 at position 8");
+        prop_assert_eq!(stack[6], felt(c1), "c1 at position 9");
+        prop_assert_eq!(stack[5], felt(c2), "c2 at position 10");
+        prop_assert_eq!(stack[4], felt(c3), "c3 at position 11");
 
         // Pointers should be incremented by 8
-        prop_assert_eq!(stack[3], Felt::new_unchecked(src_addr + 8), "src_ptr incremented");
-        prop_assert_eq!(stack[2], Felt::new_unchecked(dst_addr + 8), "dst_ptr incremented");
+        prop_assert_eq!(stack[3], felt(src_addr + 8), "src_ptr incremented");
+        prop_assert_eq!(stack[2], felt(dst_addr + 8), "dst_ptr incremented");
     }
 }
 
@@ -292,33 +296,33 @@ proptest! {
         // Stack layout (top first): [c0, c1, c2, c3, c4, c5, c6, c7, s8, s9, s10, s11, s12, alpha_addr, acc0, acc1]
         // Position 0 (top) = c0, position 7 = c7, position 13 = alpha_addr, position 14 = acc0, position 15 = acc1
         let stack_inputs = [
-            Felt::new_unchecked(c0),          // position 0 (top)
-            Felt::new_unchecked(c1),          // position 1
-            Felt::new_unchecked(c2),          // position 2
-            Felt::new_unchecked(c3),          // position 3
-            Felt::new_unchecked(c4),          // position 4
-            Felt::new_unchecked(c5),          // position 5
-            Felt::new_unchecked(c6),          // position 6
-            Felt::new_unchecked(c7),          // position 7
-            Felt::new_unchecked(s8),          // position 8
-            Felt::new_unchecked(s9),          // position 9
-            Felt::new_unchecked(s10),         // position 10
-            Felt::new_unchecked(s11),         // position 11
-            Felt::new_unchecked(s12),         // position 12
-            Felt::new_unchecked(ALPHA_ADDR),  // position 13
-            Felt::new_unchecked(acc_0),       // position 14 (acc low)
-            Felt::new_unchecked(acc_1),       // position 15 (bottom, acc high)
+            felt(c0),          // position 0 (top)
+            felt(c1),          // position 1
+            felt(c2),          // position 2
+            felt(c3),          // position 3
+            felt(c4),          // position 4
+            felt(c5),          // position 5
+            felt(c6),          // position 6
+            felt(c7),          // position 7
+            felt(s8),          // position 8
+            felt(s9),          // position 9
+            felt(s10),         // position 10
+            felt(s11),         // position 11
+            felt(s12),         // position 12
+            felt(ALPHA_ADDR),  // position 13
+            felt(acc_0),       // position 14 (acc low)
+            felt(acc_1),       // position 15 (bottom, acc high)
         ];
         let mut processor = FastProcessor::new(StackInputs::new(&stack_inputs).unwrap());
         let mut tracer = NoopTracer;
 
         // Store alpha in memory at ALPHA_ADDR
         // Memory format requirement: [alpha_0, alpha_1, 0, 0]
-        let alpha_word: Word = [Felt::new_unchecked(alpha_0), Felt::new_unchecked(alpha_1), ZERO, ZERO].into();
+        let alpha_word: Word = [felt(alpha_0), felt(alpha_1), ZERO, ZERO].into();
         let clk = processor.clock();
         processor.memory_mut().write_word(
             ContextId::root(),
-            Felt::new_unchecked(ALPHA_ADDR),
+            felt(ALPHA_ADDR),
             clk,
             alpha_word,
         ).unwrap();
@@ -333,17 +337,17 @@ proptest! {
         processor.system_mut().increment_clock();
 
         // Compute expected result
-        let alpha = QuadFelt::new([Felt::new_unchecked(alpha_0), Felt::new_unchecked(alpha_1)]);
-        let acc_old = QuadFelt::new([Felt::new_unchecked(acc_0), Felt::new_unchecked(acc_1)]);
+        let alpha = QuadFelt::new([felt(alpha_0), felt(alpha_1)]);
+        let acc_old = QuadFelt::new([felt(acc_0), felt(acc_1)]);
 
-        let c0_q = QuadFelt::from(Felt::new_unchecked(c0));
-        let c1_q = QuadFelt::from(Felt::new_unchecked(c1));
-        let c2_q = QuadFelt::from(Felt::new_unchecked(c2));
-        let c3_q = QuadFelt::from(Felt::new_unchecked(c3));
-        let c4_q = QuadFelt::from(Felt::new_unchecked(c4));
-        let c5_q = QuadFelt::from(Felt::new_unchecked(c5));
-        let c6_q = QuadFelt::from(Felt::new_unchecked(c6));
-        let c7_q = QuadFelt::from(Felt::new_unchecked(c7));
+        let c0_q = QuadFelt::from(felt(c0));
+        let c1_q = QuadFelt::from(felt(c1));
+        let c2_q = QuadFelt::from(felt(c2));
+        let c3_q = QuadFelt::from(felt(c3));
+        let c4_q = QuadFelt::from(felt(c4));
+        let c5_q = QuadFelt::from(felt(c5));
+        let c6_q = QuadFelt::from(felt(c6));
+        let c7_q = QuadFelt::from(felt(c7));
 
         // Horner evaluation: P(α) = c0*α⁷ + c1*α⁶ + c2*α⁵ + c3*α⁴ + c4*α³ + c5*α² + c6*α + c7
         // c0 (at stack position 0) has highest degree, c7 (at stack position 7) is constant term
@@ -361,24 +365,24 @@ proptest! {
         let stack = processor.stack_top();
 
         // Check that the top 8 stack elements (coefficients) were NOT affected (LE: c0 at top)
-        prop_assert_eq!(stack[15], Felt::new_unchecked(c0), "c0 at position 0 (top)");
-        prop_assert_eq!(stack[14], Felt::new_unchecked(c1), "c1 at position 1");
-        prop_assert_eq!(stack[13], Felt::new_unchecked(c2), "c2 at position 2");
-        prop_assert_eq!(stack[12], Felt::new_unchecked(c3), "c3 at position 3");
-        prop_assert_eq!(stack[11], Felt::new_unchecked(c4), "c4 at position 4");
-        prop_assert_eq!(stack[10], Felt::new_unchecked(c5), "c5 at position 5");
-        prop_assert_eq!(stack[9], Felt::new_unchecked(c6), "c6 at position 6");
-        prop_assert_eq!(stack[8], Felt::new_unchecked(c7), "c7 at position 7");
+        prop_assert_eq!(stack[15], felt(c0), "c0 at position 0 (top)");
+        prop_assert_eq!(stack[14], felt(c1), "c1 at position 1");
+        prop_assert_eq!(stack[13], felt(c2), "c2 at position 2");
+        prop_assert_eq!(stack[12], felt(c3), "c3 at position 3");
+        prop_assert_eq!(stack[11], felt(c4), "c4 at position 4");
+        prop_assert_eq!(stack[10], felt(c5), "c5 at position 5");
+        prop_assert_eq!(stack[9], felt(c6), "c6 at position 6");
+        prop_assert_eq!(stack[8], felt(c7), "c7 at position 7");
 
         // Check that middle stack elements were NOT affected
-        prop_assert_eq!(stack[7], Felt::new_unchecked(s8), "s8 at position 8");
-        prop_assert_eq!(stack[6], Felt::new_unchecked(s9), "s9 at position 9");
-        prop_assert_eq!(stack[5], Felt::new_unchecked(s10), "s10 at position 10");
-        prop_assert_eq!(stack[4], Felt::new_unchecked(s11), "s11 at position 11");
-        prop_assert_eq!(stack[3], Felt::new_unchecked(s12), "s12 at position 12");
+        prop_assert_eq!(stack[7], felt(s8), "s8 at position 8");
+        prop_assert_eq!(stack[6], felt(s9), "s9 at position 9");
+        prop_assert_eq!(stack[5], felt(s10), "s10 at position 10");
+        prop_assert_eq!(stack[4], felt(s11), "s11 at position 11");
+        prop_assert_eq!(stack[3], felt(s12), "s12 at position 12");
 
         // Check that alpha_addr was NOT affected
-        prop_assert_eq!(stack[2], Felt::new_unchecked(ALPHA_ADDR), "alpha_addr at position 13");
+        prop_assert_eq!(stack[2], felt(ALPHA_ADDR), "alpha_addr at position 13");
 
         // Check that the accumulator was updated correctly (LE: low at lower position)
         let acc_new_base: &[Felt] = acc_new.as_basis_coefficients_slice();
@@ -418,33 +422,33 @@ proptest! {
         // Position 6 = c3_0 (low), position 7 = c3_1 (high)
         // Position 13 = alpha_addr, position 14 = acc0 (low), position 15 = acc1 (high)
         let stack_inputs = [
-            Felt::new_unchecked(c0_0),        // position 0 (top, c0 low)
-            Felt::new_unchecked(c0_1),        // position 1 (c0 high)
-            Felt::new_unchecked(c1_0),        // position 2 (c1 low)
-            Felt::new_unchecked(c1_1),        // position 3 (c1 high)
-            Felt::new_unchecked(c2_0),        // position 4 (c2 low)
-            Felt::new_unchecked(c2_1),        // position 5 (c2 high)
-            Felt::new_unchecked(c3_0),        // position 6 (c3 low)
-            Felt::new_unchecked(c3_1),        // position 7 (c3 high)
-            Felt::new_unchecked(s8),          // position 8
-            Felt::new_unchecked(s9),          // position 9
-            Felt::new_unchecked(s10),         // position 10
-            Felt::new_unchecked(s11),         // position 11
-            Felt::new_unchecked(s12),         // position 12
-            Felt::new_unchecked(ALPHA_ADDR),  // position 13
-            Felt::new_unchecked(acc_0),       // position 14 (low)
-            Felt::new_unchecked(acc_1),       // position 15 (bottom, high)
+            felt(c0_0),        // position 0 (top, c0 low)
+            felt(c0_1),        // position 1 (c0 high)
+            felt(c1_0),        // position 2 (c1 low)
+            felt(c1_1),        // position 3 (c1 high)
+            felt(c2_0),        // position 4 (c2 low)
+            felt(c2_1),        // position 5 (c2 high)
+            felt(c3_0),        // position 6 (c3 low)
+            felt(c3_1),        // position 7 (c3 high)
+            felt(s8),          // position 8
+            felt(s9),          // position 9
+            felt(s10),         // position 10
+            felt(s11),         // position 11
+            felt(s12),         // position 12
+            felt(ALPHA_ADDR),  // position 13
+            felt(acc_0),       // position 14 (low)
+            felt(acc_1),       // position 15 (bottom, high)
         ];
         let mut processor = FastProcessor::new(StackInputs::new(&stack_inputs).unwrap());
         let mut tracer = NoopTracer;
 
         // Store alpha in memory at ALPHA_ADDR
         // Memory format requirement: [alpha_0, alpha_1, k0, k1] (k0, k1 are unused but read)
-        let alpha_word: Word = [Felt::new_unchecked(alpha_0), Felt::new_unchecked(alpha_1), ZERO, ZERO].into();
+        let alpha_word: Word = [felt(alpha_0), felt(alpha_1), ZERO, ZERO].into();
         let clk = processor.clock();
         processor.memory_mut().write_word(
             ContextId::root(),
-            Felt::new_unchecked(ALPHA_ADDR),
+            felt(ALPHA_ADDR),
             clk,
             alpha_word,
         ).unwrap();
@@ -456,13 +460,13 @@ proptest! {
         processor.system_mut().increment_clock();
 
         // Compute expected result
-        let alpha = QuadFelt::new([Felt::new_unchecked(alpha_0), Felt::new_unchecked(alpha_1)]);
-        let acc_old = QuadFelt::new([Felt::new_unchecked(acc_0), Felt::new_unchecked(acc_1)]);
+        let alpha = QuadFelt::new([felt(alpha_0), felt(alpha_1)]);
+        let acc_old = QuadFelt::new([felt(acc_0), felt(acc_1)]);
 
-        let c0 = QuadFelt::new([Felt::new_unchecked(c0_0), Felt::new_unchecked(c0_1)]);
-        let c1 = QuadFelt::new([Felt::new_unchecked(c1_0), Felt::new_unchecked(c1_1)]);
-        let c2 = QuadFelt::new([Felt::new_unchecked(c2_0), Felt::new_unchecked(c2_1)]);
-        let c3 = QuadFelt::new([Felt::new_unchecked(c3_0), Felt::new_unchecked(c3_1)]);
+        let c0 = QuadFelt::new([felt(c0_0), felt(c0_1)]);
+        let c1 = QuadFelt::new([felt(c1_0), felt(c1_1)]);
+        let c2 = QuadFelt::new([felt(c2_0), felt(c2_1)]);
+        let c3 = QuadFelt::new([felt(c3_0), felt(c3_1)]);
 
         let coefficients = [c0, c1, c2, c3];
 
@@ -476,24 +480,24 @@ proptest! {
         let stack = processor.stack_top();
 
         // Check that the top 8 stack elements (coefficients) were NOT affected (LE: low at lower position)
-        prop_assert_eq!(stack[15], Felt::new_unchecked(c0_0), "c0_0 at position 0 (top, low)");
-        prop_assert_eq!(stack[14], Felt::new_unchecked(c0_1), "c0_1 at position 1 (high)");
-        prop_assert_eq!(stack[13], Felt::new_unchecked(c1_0), "c1_0 at position 2 (low)");
-        prop_assert_eq!(stack[12], Felt::new_unchecked(c1_1), "c1_1 at position 3 (high)");
-        prop_assert_eq!(stack[11], Felt::new_unchecked(c2_0), "c2_0 at position 4 (low)");
-        prop_assert_eq!(stack[10], Felt::new_unchecked(c2_1), "c2_1 at position 5 (high)");
-        prop_assert_eq!(stack[9], Felt::new_unchecked(c3_0), "c3_0 at position 6 (low)");
-        prop_assert_eq!(stack[8], Felt::new_unchecked(c3_1), "c3_1 at position 7 (high)");
+        prop_assert_eq!(stack[15], felt(c0_0), "c0_0 at position 0 (top, low)");
+        prop_assert_eq!(stack[14], felt(c0_1), "c0_1 at position 1 (high)");
+        prop_assert_eq!(stack[13], felt(c1_0), "c1_0 at position 2 (low)");
+        prop_assert_eq!(stack[12], felt(c1_1), "c1_1 at position 3 (high)");
+        prop_assert_eq!(stack[11], felt(c2_0), "c2_0 at position 4 (low)");
+        prop_assert_eq!(stack[10], felt(c2_1), "c2_1 at position 5 (high)");
+        prop_assert_eq!(stack[9], felt(c3_0), "c3_0 at position 6 (low)");
+        prop_assert_eq!(stack[8], felt(c3_1), "c3_1 at position 7 (high)");
 
         // Check that middle stack elements were NOT affected
-        prop_assert_eq!(stack[7], Felt::new_unchecked(s8), "s8 at position 8");
-        prop_assert_eq!(stack[6], Felt::new_unchecked(s9), "s9 at position 9");
-        prop_assert_eq!(stack[5], Felt::new_unchecked(s10), "s10 at position 10");
-        prop_assert_eq!(stack[4], Felt::new_unchecked(s11), "s11 at position 11");
-        prop_assert_eq!(stack[3], Felt::new_unchecked(s12), "s12 at position 12");
+        prop_assert_eq!(stack[7], felt(s8), "s8 at position 8");
+        prop_assert_eq!(stack[6], felt(s9), "s9 at position 9");
+        prop_assert_eq!(stack[5], felt(s10), "s10 at position 10");
+        prop_assert_eq!(stack[4], felt(s11), "s11 at position 11");
+        prop_assert_eq!(stack[3], felt(s12), "s12 at position 12");
 
         // Check that alpha_addr was NOT affected
-        prop_assert_eq!(stack[2], Felt::new_unchecked(ALPHA_ADDR), "alpha_addr at position 13");
+        prop_assert_eq!(stack[2], felt(ALPHA_ADDR), "alpha_addr at position 13");
 
         // Check that the accumulator was updated correctly (LE: low at lower position)
         let acc_new_base: &[Felt] = acc_new.as_basis_coefficients_slice();
@@ -548,8 +552,8 @@ proptest! {
             node[1],               // position 1
             node[2],               // position 2
             node[3],               // position 3 (node[3])
-            Felt::new_unchecked(depth),      // position 4
-            Felt::new_unchecked(leaf_idx),   // position 5
+            felt(depth),      // position 4
+            felt(leaf_idx),   // position 5
             root[0],               // position 6 (root[0])
             root[1],               // position 7
             root[2],               // position 8
@@ -581,8 +585,8 @@ proptest! {
         prop_assert_eq!(stack[12], node[3], "node[3] at position 3");
 
         // Check depth and index
-        prop_assert_eq!(stack[11], Felt::new_unchecked(depth), "depth at position 4");
-        prop_assert_eq!(stack[10], Felt::new_unchecked(leaf_idx), "index at position 5");
+        prop_assert_eq!(stack[11], felt(depth), "depth at position 4");
+        prop_assert_eq!(stack[10], felt(leaf_idx), "index at position 5");
 
         // Check root value - LE: root[0] at position 6 (stack[9])
         prop_assert_eq!(stack[9], root[0], "root[0] at position 6");
@@ -644,8 +648,8 @@ proptest! {
             old_node[1],              // position 1
             old_node[2],              // position 2
             old_node[3],              // position 3 (old_node[3])
-            Felt::new_unchecked(depth),         // position 4
-            Felt::new_unchecked(leaf_idx),      // position 5
+            felt(depth),         // position 4
+            felt(leaf_idx),      // position 5
             old_root[0],              // position 6 (old_root[0])
             old_root[1],              // position 7
             old_root[2],              // position 8
@@ -676,8 +680,8 @@ proptest! {
         prop_assert_eq!(stack[12], expected_new_root[3], "new_root[3] at position 3");
 
         // Check depth and index remain unchanged
-        prop_assert_eq!(stack[11], Felt::new_unchecked(depth), "depth at position 4");
-        prop_assert_eq!(stack[10], Felt::new_unchecked(leaf_idx), "index at position 5");
+        prop_assert_eq!(stack[11], felt(depth), "depth at position 4");
+        prop_assert_eq!(stack[10], felt(leaf_idx), "index at position 5");
 
         // Check old root remains unchanged (LE: [0] at position 6)
         prop_assert_eq!(stack[9], old_root[0], "old_root[0] at position 6");
@@ -745,22 +749,22 @@ fn test_op_mrupdate_merge_subtree() {
     // Stack layout (top first):
     // [old_node[0..3], depth, index, old_root[0..3], new_node[0..3], ...]
     let stack_inputs = [
-        replaced_node[0],                  // position 0 (top, replaced_node[0])
-        replaced_node[1],                  // position 1
-        replaced_node[2],                  // position 2
-        replaced_node[3],                  // position 3 (replaced_node[3])
-        Felt::new_unchecked(target_depth), // position 4
-        Felt::new_unchecked(target_index), // position 5
-        replaced_root[0],                  // position 6 (replaced_root[0])
-        replaced_root[1],                  // position 7
-        replaced_root[2],                  // position 8
-        replaced_root[3],                  // position 9 (replaced_root[3])
-        target_node[0],                    // position 10 (target_node[0])
-        target_node[1],                    // position 11
-        target_node[2],                    // position 12
-        target_node[3],                    // position 13 (target_node[3])
-        ZERO,                              // position 14
-        ZERO,                              // position 15 (bottom)
+        replaced_node[0],   // position 0 (top, replaced_node[0])
+        replaced_node[1],   // position 1
+        replaced_node[2],   // position 2
+        replaced_node[3],   // position 3 (replaced_node[3])
+        felt(target_depth), // position 4
+        felt(target_index), // position 5
+        replaced_root[0],   // position 6 (replaced_root[0])
+        replaced_root[1],   // position 7
+        replaced_root[2],   // position 8
+        replaced_root[3],   // position 9 (replaced_root[3])
+        target_node[0],     // position 10 (target_node[0])
+        target_node[1],     // position 11
+        target_node[2],     // position 12
+        target_node[3],     // position 13 (target_node[3])
+        ZERO,               // position 14
+        ZERO,               // position 15 (bottom)
     ];
     let mut processor = FastProcessor::new(StackInputs::new(&stack_inputs).unwrap())
         .with_advice(advice_inputs)
@@ -782,8 +786,8 @@ fn test_op_mrupdate_merge_subtree() {
     assert_eq!(stack[12], expected_root[3], "expected_root[3] at position 3");
 
     // Check depth and index remain unchanged
-    assert_eq!(stack[11], Felt::new_unchecked(target_depth), "depth at position 4");
-    assert_eq!(stack[10], Felt::new_unchecked(target_index), "index at position 5");
+    assert_eq!(stack[11], felt(target_depth), "depth at position 4");
+    assert_eq!(stack[10], felt(target_index), "index at position 5");
 
     // Check old root remains unchanged (LE: [0] at position 6)
     assert_eq!(stack[9], replaced_root[0], "replaced_root[0] at position 6");
@@ -806,5 +810,5 @@ fn test_op_mrupdate_merge_subtree() {
 
 /// Creates a Word from a u64 value (used for Merkle tree leaves).
 fn init_node(value: u64) -> Word {
-    [Felt::new_unchecked(value), ZERO, ZERO, ZERO].into()
+    [felt(value), ZERO, ZERO, ZERO].into()
 }

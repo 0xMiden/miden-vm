@@ -349,6 +349,7 @@ fn build_group_chunks(batches: &[OpBatch]) -> impl Iterator<Item = &[Operation]>
 fn basic_block_from_batch(batch: OpBatch) -> BasicBlockNode {
     let digest = hasher::hash_elements(batch.groups());
     BasicBlockNodeBuilder::from_op_batches(vec![batch], Vec::new(), digest)
+        .expect("digest must match batched operations")
         .build()
         .expect("basic block should build")
 }
@@ -692,6 +693,7 @@ fn basic_block_builder_rejects_post_last_padded_decorator_index() {
         vec![(num_padded_ops, decorator_id)],
         digest,
     )
+    .unwrap()
     .add_to_forest(&mut forest);
 
     assert!(matches!(

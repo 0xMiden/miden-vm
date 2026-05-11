@@ -1315,6 +1315,7 @@ fn test_raw_vs_batched_construction_equivalence() {
     let decorators: Vec<_> = original_node.indexed_decorator_iter(&forest1).collect();
 
     let block_id2 = BasicBlockNodeBuilder::from_op_batches(op_batches, decorators, digest)
+        .unwrap()
         .add_to_forest(&mut forest2)
         .unwrap();
 
@@ -1395,6 +1396,7 @@ fn test_batched_construction_preserves_structure() {
         Vec::new(),
         original_digest,
     )
+    .unwrap()
     .add_to_forest(&mut forest2)
     .unwrap();
 
@@ -2668,6 +2670,7 @@ fn test_untrusted_forest_rejects_non_full_prefix_batch() {
 
     let mut forest = MastForest::new();
     let block_id = BasicBlockNodeBuilder::from_op_batches(op_batches, Vec::new(), digest)
+        .unwrap()
         .add_to_forest(&mut forest)
         .unwrap();
     forest.make_root(block_id);
@@ -2689,6 +2692,7 @@ fn test_untrusted_forest_accepts_full_prefix_batch() {
 
     let mut forest = MastForest::new();
     let block_id = BasicBlockNodeBuilder::from_op_batches(op_batches, Vec::new(), digest)
+        .unwrap()
         .add_to_forest(&mut forest)
         .unwrap();
     forest.make_root(block_id);

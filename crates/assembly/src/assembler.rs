@@ -17,7 +17,7 @@ use miden_assembly_syntax::{
 };
 use miden_core::{
     Word,
-    mast::{MastNodeExt, MastNodeId},
+    mast::MastNodeId,
     operations::{AssemblyOp, Operation},
     program::{Kernel, Program},
 };
@@ -792,9 +792,8 @@ impl Assembler {
                 };
 
                 let digest = mast_forest_builder
-                    .get_mast_node_by_ref(node)
-                    .expect("resolved alias export node must exist")
-                    .digest();
+                    .mast_root_for_ref(node)
+                    .expect("resolved alias export node must exist");
                 let pctx = ProcedureContext::new(
                     gid,
                     /* is_program_entrypoint= */ false,
@@ -1138,7 +1137,7 @@ impl Assembler {
                     pctx.set_signature(signature);
 
                     let proc_mast_root =
-                        mast_forest_builder.get_mast_node_by_ref(proc_node_id).unwrap().digest();
+                        mast_forest_builder.mast_root_for_ref(proc_node_id).unwrap();
 
                     let procedure = pctx.into_procedure(proc_mast_root, proc_node_id);
 
@@ -1213,10 +1212,10 @@ impl Assembler {
         let proc_body_ref =
             self.compile_body(proc.iter(), &mut proc_ctx, body_wrapper, mast_forest_builder, 0)?;
 
-        let proc_body_node = mast_forest_builder
-            .get_mast_node_by_ref(proc_body_ref)
+        let proc_mast_root = mast_forest_builder
+            .mast_root_for_ref(proc_body_ref)
             .expect("no MAST node for compiled procedure");
-        Ok(proc_ctx.into_procedure(proc_body_node.digest(), proc_body_ref))
+        Ok(proc_ctx.into_procedure(proc_mast_root, proc_body_ref))
     }
 
     /// Creates an assembly operation decorator for control flow nodes.

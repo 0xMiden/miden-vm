@@ -36,12 +36,6 @@ pub struct ExternalNode {
     decorator_store: DecoratorStore,
 }
 
-impl ExternalNode {
-    pub(crate) fn has_linked_decorators(&self) -> bool {
-        self.decorator_store.is_linked()
-    }
-}
-
 // PRETTY PRINTING
 // ================================================================================================
 

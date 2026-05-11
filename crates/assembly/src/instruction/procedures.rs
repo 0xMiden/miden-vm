@@ -3,10 +3,7 @@ use miden_assembly_syntax::{
     ast::{InvocationTarget, InvokeKind},
     diagnostics::Report,
 };
-use miden_core::{
-    mast::MastNodeExt,
-    operations::{AssemblyOp, Operation},
-};
+use miden_core::operations::{AssemblyOp, Operation};
 use smallvec::SmallVec;
 
 use crate::{
@@ -85,11 +82,7 @@ impl Assembler {
                 })?;
             // Note: it's ok to `unwrap()` here since `proc_body_id` was returned from
             // `mast_forest_builder`
-            block_builder
-                .mast_forest_builder()
-                .get_mast_node_by_ref(resolved.node)
-                .unwrap()
-                .digest()
+            block_builder.mast_forest_builder().mast_root_for_ref(resolved.node).unwrap()
         };
 
         self.procref_mast_root(mast_root, block_builder)
