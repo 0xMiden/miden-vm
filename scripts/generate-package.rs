@@ -6,7 +6,7 @@ miden-assembly = { path = "../crates/assembly" }
 miden-package-registry = { path = "../crates/package-registry" }
 ---
 
-use std::{env, path::PathBuf};
+use std::{env};
 
 use miden_assembly::{Assembler, ProjectTargetSelector, Report, diagnostics::IntoDiagnostic};
 use miden_package_registry::InMemoryPackageRegistry;
