@@ -62,7 +62,7 @@ impl PathExpansionState {
         span: SourceSpan,
         source_manager: &dyn SourceManager,
     ) -> Result<(), LinkerError> {
-        if self.stack.len() >= MAX_LINKER_PATH_EXPANSION_DEPTH {
+        if self.stack.len() > MAX_LINKER_PATH_EXPANSION_DEPTH {
             return Err(SymbolResolutionError::alias_expansion_depth_exceeded(
                 span,
                 MAX_LINKER_PATH_EXPANSION_DEPTH,

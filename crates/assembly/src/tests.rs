@@ -1,4 +1,5 @@
 use alloc::{
+    boxed::Box,
     collections::{BTreeMap, BTreeSet},
     string::{String, ToString},
     vec::Vec,
@@ -6901,15 +6902,14 @@ fn test_linking_recursive_expansion_via_renamed_aliases_is_structured_error() ->
     Ok(())
 }
 
-#[test]
-fn test_linking_recursive_expansion_depth_limit_is_structured_error() -> TestResult {
-    const MODULE_COUNT: usize = 130;
-
-    let context = TestContext::default();
+fn linker_alias_chain_modules(
+    context: &TestContext,
+    module_count: usize,
+) -> Result<Vec<Box<Module>>, Report> {
     let mut modules = Vec::new();
 
-    for index in 0..MODULE_COUNT {
-        let module_source = if index + 1 == MODULE_COUNT {
+    for index in 0..module_count {
+        let module_source = if index + 1 == module_count {
             String::from(
                 r#"
         pub proc x
@@ -6928,6 +6928,29 @@ fn test_linking_recursive_expansion_depth_limit_is_structured_error() -> TestRes
             )?,
         );
     }
+
+    Ok(modules)
+}
+
+#[test]
+fn test_linking_recursive_expansion_depth_boundary_resolves() -> TestResult {
+    const MODULE_COUNT: usize = 129;
+
+    let context = TestContext::default();
+    let modules = linker_alias_chain_modules(&context, MODULE_COUNT)?;
+
+    let assembler = Assembler::new(context.source_manager());
+    let _ = assembler.assemble_library(modules)?;
+
+    Ok(())
+}
+
+#[test]
+fn test_linking_recursive_expansion_depth_limit_is_structured_error() -> TestResult {
+    const MODULE_COUNT: usize = 130;
+
+    let context = TestContext::default();
+    let modules = linker_alias_chain_modules(&context, MODULE_COUNT)?;
 
     let assembler = Assembler::new(context.source_manager());
     let err = assembler
