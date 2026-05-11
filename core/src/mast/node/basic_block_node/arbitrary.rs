@@ -573,6 +573,166 @@ impl KernelPool {
     }
 }
 
+// ---------- ForestSeeds sampling strategy ----------
+
+/// Composes the proptest strategies that produce a [`ForestSeeds`] for a single
+/// `MastForest` sample.
+///
+/// The composition order is fixed per the design to keep proptest shrinking effective:
+///
+/// 1. Basic blocks and decorators are sampled first (independent of everything else).
+/// 2. Control-flow node counts (`num_joins`, `num_splits`, `num_loops`, `num_calls`,
+///    `num_syscalls`, `num_externals`, `num_dyns`) are sampled next.
+/// 3. Pair / index vectors (`join_pairs`, `split_pairs`, `loop_indices`, `call_indices`) are
+///    sized by those counts.
+/// 4. Finally, the selection vectors (`syscall_picks`, `external_picks`, `dyn_selectors`,
+///    `root_selection`, `kernel_inclusion`) are sampled with lengths derived from the counts
+///    and the total number of nodes that may be committed.
+///
+/// Later choices depend on earlier samples only through length invariants, so each
+/// individual sample can be shrunk independently once the counts have been minimised.
+///
+/// The `external_picks` strategy branches on [`MastForestParams::mode`]: in
+/// [`MastForestGenerationMode::Executable`] it yields [`ExternalPick::FromRoot`] indices
+/// (into the generator's `RootPool` at emission time), while in
+/// [`MastForestGenerationMode::StructureOnly`] it yields [`ExternalPick::Random`] digest
+/// seeds.
+pub(crate) fn forest_seeds_strategy(params: &MastForestParams) -> BoxedStrategy<ForestSeeds> {
+    let bb_params = BasicBlockNodeParams {
+        max_decorator_id_u32: params.decorators,
+        ..Default::default()
+    };
+    let blocks_end = *params.blocks.end();
+    let decorators_count = params.decorators as usize;
+    let max_joins = params.max_joins;
+    let max_splits = params.max_splits;
+    let max_loops = params.max_loops;
+    let max_calls = params.max_calls;
+    let max_syscalls = params.max_syscalls;
+    let max_externals = params.max_externals;
+    let max_dyns = params.max_dyns;
+    let mode = params.mode;
+
+    // Stage 1: basic blocks + decorators (independent of everything else).
+    (
+        prop::collection::vec(any_with::<BasicBlockNode>(bb_params), 1..=blocks_end),
+        prop::collection::vec(any::<Decorator>(), decorators_count..=decorators_count),
+    )
+        // Stage 2: control-flow counts, each bounded by the corresponding `max_*`.
+        .prop_flat_map(move |(basic_blocks, decorators)| {
+            (
+                Just(basic_blocks),
+                Just(decorators),
+                (
+                    0..=max_joins,
+                    0..=max_splits,
+                    0..=max_loops,
+                    0..=max_calls,
+                    0..=max_syscalls,
+                    0..=max_externals,
+                    0..=max_dyns,
+                ),
+            )
+        })
+        // Stage 3 + 4: pair/index vectors sized by counts, then selection vectors.
+        .prop_flat_map(move |(basic_blocks, decorators, counts_tuple)| {
+            let (
+                num_joins,
+                num_splits,
+                num_loops,
+                num_calls,
+                num_syscalls,
+                num_externals,
+                num_dyns,
+            ) = counts_tuple;
+
+            // Upper bound on the number of nodes that can end up in the forest. Sizes the
+            // `root_selection` and `kernel_inclusion` bit vectors so the build functions
+            // always have a selection bit available per committed node / root.
+            let max_nodes_total = basic_blocks.len()
+                + num_joins
+                + num_splits
+                + num_loops
+                + num_calls
+                + num_syscalls
+                + num_externals
+                + num_dyns;
+
+            // Branch on mode: Executable picks an index into the current RootPool;
+            // StructureOnly samples a random digest seed.
+            let external_picks_strategy: BoxedStrategy<Vec<ExternalPick>> = match mode {
+                MastForestGenerationMode::Executable => prop::collection::vec(
+                    any::<usize>(),
+                    num_externals..=num_externals,
+                )
+                .prop_map(|picks| picks.into_iter().map(ExternalPick::FromRoot).collect())
+                .boxed(),
+                MastForestGenerationMode::StructureOnly => prop::collection::vec(
+                    any::<[u64; 4]>(),
+                    num_externals..=num_externals,
+                )
+                .prop_map(|seeds| seeds.into_iter().map(ExternalPick::Random).collect())
+                .boxed(),
+            };
+
+            let counts = NodeCounts {
+                num_joins,
+                num_splits,
+                num_loops,
+                num_calls,
+                num_syscalls,
+                num_externals,
+                num_dyns,
+            };
+
+            (
+                Just(basic_blocks),
+                Just(decorators),
+                Just(counts),
+                // Pair / index vectors, sized exactly by the counts above.
+                (
+                    prop::collection::vec(any::<(usize, usize)>(), num_joins..=num_joins),
+                    prop::collection::vec(any::<(usize, usize)>(), num_splits..=num_splits),
+                    prop::collection::vec(any::<usize>(), num_loops..=num_loops),
+                    prop::collection::vec(any::<usize>(), num_calls..=num_calls),
+                ),
+                // Selection vectors: picks/selectors consumed during Phases 2.5/3/4.
+                (
+                    prop::collection::vec(any::<usize>(), num_syscalls..=num_syscalls),
+                    external_picks_strategy,
+                    prop::collection::vec(any::<bool>(), num_dyns..=num_dyns),
+                    prop::collection::vec(any::<bool>(), max_nodes_total..=max_nodes_total),
+                    prop::collection::vec(any::<bool>(), max_nodes_total..=max_nodes_total),
+                ),
+            )
+        })
+        .prop_map(
+            |(
+                basic_blocks,
+                decorators,
+                counts,
+                (join_pairs, split_pairs, loop_indices, call_indices),
+                (syscall_picks, external_picks, dyn_selectors, root_selection, kernel_inclusion),
+            )| {
+                ForestSeeds {
+                    basic_blocks,
+                    decorators,
+                    counts,
+                    join_pairs,
+                    split_pairs,
+                    loop_indices,
+                    call_indices,
+                    syscall_picks,
+                    external_picks,
+                    dyn_selectors,
+                    kernel_inclusion,
+                    root_selection,
+                }
+            },
+        )
+        .boxed()
+}
+
 impl Arbitrary for MastForest {
     type Parameters = MastForestParams;
     type Strategy = BoxedStrategy<Self>;
