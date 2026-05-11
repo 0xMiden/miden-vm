@@ -6,7 +6,8 @@
 use alloc::vec::Vec;
 
 use p3_challenger::DuplexChallenger;
-use p3_field::PrimeCharacteristicRing;
+use p3_dft::Radix2DitParallel;
+use p3_field::{BasedVectorSpace, PrimeCharacteristicRing};
 use p3_goldilocks::Poseidon2Goldilocks;
 use p3_matrix::dense::RowMajorMatrix;
 use p3_symmetric::{Hash, TruncatedPermutation};
@@ -93,7 +94,7 @@ pub fn random_lde_matrix<V>(
     shift: Felt,
 ) -> RowMajorMatrix<V>
 where
-    V: p3_field::BasedVectorSpace<Felt> + Clone + Send + Sync + Default,
+    V: BasedVectorSpace<Felt> + Clone + Send + Sync + Default,
     rand::distr::StandardUniform: rand::distr::Distribution<V>,
 {
     use p3_dft::{Radix2DFTSmallBatch, TwoAdicSubgroupDft};
@@ -111,7 +112,7 @@ where
 // STARK layer
 // =============================================================================
 
-pub type Dft = p3_dft::Radix2DitParallel<Felt>;
+pub type Dft = Radix2DitParallel<Felt>;
 
 pub type TestConfig = crate::config::GenericStarkConfig<Felt, QuadFelt, Lmcs, Dft, Challenger>;
 

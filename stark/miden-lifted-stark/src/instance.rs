@@ -15,6 +15,8 @@ use p3_matrix::{Matrix, dense::RowMajorMatrix};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::domain::{DomainError, LiftedDomain};
+
 // ============================================================================
 // Instance data
 // ============================================================================
@@ -220,6 +222,8 @@ pub enum InstanceValidationError {
     VarLenPublicInputsMismatch { expected: usize, actual: usize },
     #[error("trace height {trace_height} is less than max periodic column length {max_period}")]
     TraceHeightBelowPeriod { trace_height: usize, max_period: usize },
+    #[error("log trace height {log_h} exceeds {max} (would overflow usize on this target)")]
+    LogTraceHeightTooLarge { log_h: u8, max: u8 },
     #[error(
         "instance count {instances} does not match log trace heights count {log_trace_heights}"
     )]
@@ -227,95 +231,105 @@ pub enum InstanceValidationError {
         instances: usize,
         log_trace_heights: usize,
     },
-    #[error("LDE domain log-size {log_h} + {log_blowup} exceeds field two-adicity {two_adicity}")]
-    LdeDomainExceedsTwoAdicity {
-        log_h: u8,
-        log_blowup: u8,
-        two_adicity: usize,
-    },
     #[error("air_order length {air_order} does not match instance count {instances}")]
     AirOrderLengthMismatch { instances: usize, air_order: usize },
     #[error("invalid air_order permutation for {count} instances")]
     InvalidAirOrder { count: usize },
     #[error("log trace heights are not in ascending order")]
     HeightsNotAscending,
+    #[error(transparent)]
+    Domain(#[from] DomainError),
 }
 
-/// Cross-check instances against their shapes and return the log of the
-/// maximum trace height.
-///
-/// Instances and shapes must already be in the proof's AIR ordering.
-///
-/// Checks:
-/// - shape count matches instance count
-/// - each `log_h + log_blowup` fits in both `F::TWO_ADICITY` and `usize::BITS - 1` (guards
-///   downstream `two_adic_generator` and `1usize << log_lde_height` against wire-format shapes; the
-///   `usize` bound only bites on 32-bit targets)
-/// - each AIR is structurally valid ([`LiftedAir::validate`])
-/// - each instance's public values / var-len inputs match its AIR
-/// - max height ≥ 2 (needed for the 2-row transition window)
-/// - each trace height covers the AIR's longest periodic column
-pub(crate) fn validate_inputs<F, EF, A>(
-    instances: &[(&A, AirInstance<'_, F>)],
-    shapes: &InstanceShapes,
-    log_blowup: u8,
-) -> Result<u8, InstanceValidationError>
-where
-    F: TwoAdicField,
-    A: LiftedAir<F, EF>,
-{
-    if instances.len() != shapes.len() {
-        return Err(InstanceValidationError::HeightCountMismatch {
-            instances: instances.len(),
-            log_trace_heights: shapes.len(),
-        });
+impl InstanceShapes {
+    /// Per-instance data checks: count match, AIR structural validity, public
+    /// values length, var-len public inputs length, log_h platform bound, and
+    /// periodic column coverage. Independent of ordering — see
+    /// [`Self::ascending_subdomains`] for the ordering + subdomain build.
+    ///
+    /// Instances and shapes must already be in the proof's AIR ordering.
+    pub(crate) fn validate_instance_data<F, EF, A>(
+        &self,
+        instances: &[(&A, AirInstance<'_, F>)],
+    ) -> Result<(), InstanceValidationError>
+    where
+        F: Field,
+        A: LiftedAir<F, EF>,
+    {
+        if instances.len() != self.len() {
+            return Err(InstanceValidationError::HeightCountMismatch {
+                instances: instances.len(),
+                log_trace_heights: self.len(),
+            });
+        }
+        // Bound `log_h` so `1usize << log_h` cannot overflow on this target.
+        // Field-relative bounds live in [`LiftedDomain::canonical`].
+        let max_log_trace_height = (usize::BITS - 1) as u8;
+        for ((air, inst), &log_h) in instances.iter().zip(self.log_trace_heights()) {
+            if log_h > max_log_trace_height {
+                return Err(InstanceValidationError::LogTraceHeightTooLarge {
+                    log_h,
+                    max: max_log_trace_height,
+                });
+            }
+            air.validate()?;
+            let expected_pv = air.num_public_values();
+            if inst.public_values.len() != expected_pv {
+                return Err(InstanceValidationError::PublicValuesMismatch {
+                    expected: expected_pv,
+                    actual: inst.public_values.len(),
+                });
+            }
+            let expected_vl = air.num_var_len_public_inputs();
+            if inst.var_len_public_inputs.len() != expected_vl {
+                return Err(InstanceValidationError::VarLenPublicInputsMismatch {
+                    expected: expected_vl,
+                    actual: inst.var_len_public_inputs.len(),
+                });
+            }
+            let trace_height = 1usize << log_h as usize;
+            let max_period = air.periodic_columns().iter().map(Vec::len).max().unwrap_or(0);
+            if trace_height < max_period {
+                return Err(InstanceValidationError::TraceHeightBelowPeriod {
+                    trace_height,
+                    max_period,
+                });
+            }
+        }
+        Ok(())
     }
-    // Upper bound on `log_h + log_blowup`: the two-adic generator must exist,
-    // and `1usize << log_lde_height` must not overflow on this target.
-    let max_log_lde_height = F::TWO_ADICITY.min((usize::BITS - 1) as usize);
-    let mut log_prev: u8 = 0;
-    for ((air, inst), &log_h) in instances.iter().zip(shapes.log_trace_heights()) {
-        if log_h as usize + log_blowup as usize > max_log_lde_height {
-            return Err(InstanceValidationError::LdeDomainExceedsTwoAdicity {
-                log_h,
-                log_blowup,
-                two_adicity: F::TWO_ADICITY,
-            });
+
+    /// Build per-instance [`LiftedDomain`]s by lifting each height `n_j` into
+    /// `max_lde_domain` with lift ratio `r_j = N / n_j` (the same ratio the
+    /// per-AIR quotient pipeline uses). Enforces ascending heights (canonical
+    /// for the proof) and that the max height ≥ 2 (required for the 2-row
+    /// transition window).
+    ///
+    /// Returns the subdomains in the same order as
+    /// [`Self::log_trace_heights`].
+    pub(crate) fn ascending_subdomains<F: TwoAdicField>(
+        &self,
+        max_lde_domain: &LiftedDomain<F>,
+    ) -> Result<Vec<LiftedDomain<F>>, InstanceValidationError> {
+        // First: ordering + transition-window check, so errors here surface as
+        // `HeightsNotAscending` / `Empty` rather than `DomainError` from a
+        // later out-of-bounds `try_sub_domain`.
+        let mut log_prev: u8 = 0;
+        for &log_h in self.log_trace_heights() {
+            if log_h < log_prev {
+                return Err(InstanceValidationError::HeightsNotAscending);
+            }
+            log_prev = log_h;
         }
-        air.validate()?;
-        let expected_pv = air.num_public_values();
-        if inst.public_values.len() != expected_pv {
-            return Err(InstanceValidationError::PublicValuesMismatch {
-                expected: expected_pv,
-                actual: inst.public_values.len(),
-            });
+        if log_prev == 0 {
+            return Err(InstanceValidationError::Empty);
         }
-        let expected_vl = air.num_var_len_public_inputs();
-        if inst.var_len_public_inputs.len() != expected_vl {
-            return Err(InstanceValidationError::VarLenPublicInputsMismatch {
-                expected: expected_vl,
-                actual: inst.var_len_public_inputs.len(),
-            });
-        }
-        if log_h < log_prev {
-            return Err(InstanceValidationError::HeightsNotAscending);
-        }
-        let trace_height = 1usize << log_h as usize;
-        let max_period = air.periodic_columns().iter().map(Vec::len).max().unwrap_or(0);
-        if trace_height < max_period {
-            return Err(InstanceValidationError::TraceHeightBelowPeriod {
-                trace_height,
-                max_period,
-            });
-        }
-        log_prev = log_h;
+        // Then: build the subdomains.
+        self.log_trace_heights()
+            .iter()
+            .map(|&h| max_lde_domain.try_sub_domain(h).map_err(Into::into))
+            .collect()
     }
-    // `log_prev == 0` catches both "no instances" and "all traces are
-    // height 1" — both break the 2-row transition window.
-    if log_prev == 0 {
-        return Err(InstanceValidationError::Empty);
-    }
-    Ok(log_prev)
 }
 
 /// Validate that `air_order` is a valid permutation of `0..n`.

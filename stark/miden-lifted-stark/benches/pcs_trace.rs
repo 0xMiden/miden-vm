@@ -11,8 +11,7 @@
 use std::time::Instant;
 
 use miden_lifted_stark::{
-    Lmcs, LmcsTree, PcsParams,
-    air::log2_strict_u8,
+    LiftedDomain, Lmcs, LmcsTree, PcsParams,
     testing::{
         LOG_HEIGHTS, RELATIVE_SPECS,
         configs::goldilocks_poseidon2::{Felt, QuadFelt, test_challenger, test_lmcs},
@@ -22,7 +21,6 @@ use miden_lifted_stark::{
 use miden_stark_transcript::ProverTranscript;
 use p3_challenger::{CanObserve, FieldChallenger};
 use p3_dft::{Radix2DitParallel, TwoAdicSubgroupDft};
-use p3_field::Field;
 use p3_matrix::{Matrix, bitrev::BitReversibleMatrix, dense::RowMajorMatrix};
 use tracing_subscriber::EnvFilter;
 
@@ -37,7 +35,6 @@ fn main() {
         .init();
 
     let dft = Radix2DitParallel::<Felt>::default();
-    let shift = Felt::GENERATOR;
 
     let params = PcsParams::new(
         2,  // log_blowup
@@ -55,6 +52,10 @@ fn main() {
         eprintln!("\n{}", "=".repeat(60));
         eprintln!("=== Goldilocks lifted/arity4  log_height={log_lde_height}  (n={size}) ===");
         eprintln!("{}\n", "=".repeat(60));
+
+        // LDE coset for this batch — sole source of `F::GENERATOR`.
+        let domain = LiftedDomain::<Felt>::canonical(log_lde_height, 0);
+        let shift = domain.lde_shift();
 
         let matrix_groups: Vec<Vec<RowMajorMatrix<Felt>>> =
             generate_matrices_from_specs(RELATIVE_SPECS, log_lde_height);
@@ -77,7 +78,6 @@ fn main() {
 
         let tree = lmcs.build_aligned_tree(all_lde_matrices);
         let commitment = tree.root();
-        let log_lde_height = log2_strict_u8(tree.height());
 
         let mut challenger = test_challenger();
         challenger.observe(commitment);
@@ -91,7 +91,7 @@ fn main() {
         open_with_channel::<Felt, QuadFelt, _, _, _, 2>(
             &params,
             &lmcs,
-            log_lde_height,
+            &domain,
             [z1, z2],
             trace_trees,
             &mut channel,

@@ -160,7 +160,7 @@ $$
 Z_{H^{r_j}}(y_j) = y_j^{n_j} - 1,
 $$
 
-and the unnormalized selector formulas (matching `LiftedCoset::selectors_at`):
+and the unnormalized selector formulas (matching `LiftedDomain::selectors_at`):
 
 $$
 \mathrm{is\_first}(y) = \frac{Z_{H^{r_j}}(y)}{y-1},

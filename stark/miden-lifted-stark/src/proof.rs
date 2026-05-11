@@ -22,8 +22,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     StarkConfig,
-    coset::LiftedCoset,
-    instance::{AirInstance, InstanceShapes, validate_air_order, validate_inputs},
+    domain::{Coset, LiftedDomain},
+    instance::{AirInstance, InstanceShapes, InstanceValidationError, validate_air_order},
     lmcs::Lmcs,
     pcs::proof::PcsTranscript,
     util::align::aligned_len,
@@ -209,7 +209,13 @@ where
         let instances = proof.instance_shapes.reorder(instances.to_vec())?;
 
         let log_blowup = config.pcs().log_blowup();
-        let log_max_trace_height = validate_inputs(&instances, &proof.instance_shapes, log_blowup)?;
+        proof.instance_shapes.validate_instance_data(&instances)?;
+        let log_max_trace_height = *proof
+            .instance_shapes
+            .log_trace_heights()
+            .last()
+            .ok_or(InstanceValidationError::Empty)?;
+        let max_lde_domain = LiftedDomain::<L::F>::try_canonical(log_max_trace_height, log_blowup)?;
         proof.instance_shapes.observe_heights::<L::F, _>(&mut challenger);
 
         let mut channel = VerifierTranscript::from_data(challenger, &proof.transcript);
@@ -220,13 +226,9 @@ where
 
         let alignment = config.lmcs().alignment();
 
-        // Infer constraint degree from symbolic AIR analysis (max across all AIRs)
-        let constraint_degree =
-            instances.iter().map(|(air, _)| air.constraint_degree()).max().unwrap_or(2);
-        let log_lde_height = log_max_trace_height + log_blowup;
-
-        // Max LDE coset (for the largest trace, no lifting)
-        let max_lde_coset = LiftedCoset::unlifted(log_max_trace_height, log_blowup);
+        // Infer quotient degree from symbolic AIR analysis (max across all AIRs)
+        let quotient_degree =
+            instances.iter().map(|(air, _)| air.quotient_degree()).max().unwrap_or(2);
 
         // 1. Receive main trace commitment
         let main_commit = channel.receive_commitment()?.clone();
@@ -261,8 +263,8 @@ where
         let quotient_commit = channel.receive_commitment()?.clone();
 
         // 7. Sample OOD point (outside max trace domain H and max LDE coset gK)
-        let z: EF = max_lde_coset.sample_ood_point(&mut channel);
-        let h = L::F::two_adic_generator(log_max_trace_height.into());
+        let z: EF = max_lde_domain.sample_ood_point(&mut channel);
+        let h = max_lde_domain.trace_subgroup().generator();
         let z_next = z * h;
 
         // 8. Build commitment widths for PCS.
@@ -274,7 +276,7 @@ where
         // truncates the returned evals back to original widths for constraint checking.)
         let main_widths: Vec<usize> =
             instances.iter().map(|(air, _)| aligned_len(air.width(), alignment)).collect();
-        let quotient_width = aligned_len(constraint_degree * EF::DIMENSION, alignment);
+        let quotient_width = aligned_len(quotient_degree * EF::DIMENSION, alignment);
 
         let aux_widths: Vec<usize> = instances
             .iter()
@@ -292,7 +294,7 @@ where
             config.pcs(),
             config.lmcs(),
             &commitments,
-            log_lde_height,
+            &max_lde_domain,
             [z, z_next],
             &mut channel,
         )?;

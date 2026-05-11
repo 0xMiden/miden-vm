@@ -5,9 +5,22 @@
 //!
 //! ## Domain Convention
 //!
-//! This FRI implementation treats inputs as evaluations over the unshifted two-adic subgroup.
-//! If the PCS evaluates over a coset `gK`, the shift is absorbed into the polynomial:
-//! `Q'(X) = Q(g·X)`. The low-degree test is run on `Q'` using subgroup points.
+//! This FRI implementation treats inputs as evaluations over the unshifted two-adic
+//! subgroup. If the PCS evaluates over a coset `gK`, the shift is absorbed into
+//! the polynomial: `Q'(X) = Q(g·X)`. The low-degree test is run on `Q'` using
+//! subgroup points.
+//!
+//! ## Type vocabulary
+//!
+//! FRI takes its initial domain as a [`TwoAdicSubgroup<F>`](crate::domain::TwoAdicSubgroup) —
+//! the unshifted view of the LDE coset. Each fold round shrinks the domain by the
+//! folding arity, derived via [`TwoAdicSubgroup::shrink`] (or per-round
+//! generator squaring inside the round loop, which is equivalent and avoids
+//! re-querying `F::two_adic_generator`). Internal `arity`-th roots of unity
+//! used by the fold operations come from `TwoAdicSubgroup::<F>::new(log_arity).generator()`.
+//! Together with [`LiftedDomain`](crate::domain::LiftedDomain) at the layer above, this
+//! routes every two-adic root and every multiplicative coset shift through the
+//! two encapsulation types.
 
 pub mod fold;
 pub mod proof;
@@ -52,7 +65,8 @@ pub struct FriParams {
 }
 
 impl FriParams {
-    /// Compute the number of folding rounds for a given initial evaluation domain size.
+    /// Compute the number of folding rounds for an initial evaluation domain
+    /// of order `2^log_domain_size`.
     ///
     /// Each round reduces the domain by `2^log_folding_factor`. We fold until the domain
     /// size reaches `2^(log_final_degree + log_blowup)`, at which point the polynomial
@@ -62,15 +76,7 @@ impl FriParams {
     /// the domain size doesn't divide evenly by the folding factor.
     #[inline]
     pub fn num_rounds(&self, log_domain_size: u8) -> usize {
-        // Final domain size = final_degree × blowup = 2^(log_final_degree + log_blowup).
-        // Safety: PcsParams::new() validates this sum does not exceed MAX_LOG_DOMAIN_SIZE.
-        debug_assert!(
-            (self.log_final_degree as u16 + self.log_blowup as u16)
-                <= crate::pcs::params::MAX_LOG_DOMAIN_SIZE as u16,
-            "log_final_degree + log_blowup overflows; construct FriParams via PcsParams::new()",
-        );
         let log_max_final_size = self.log_final_degree + self.log_blowup;
-        // Number of times we need to divide by 2^log_folding_factor
         log_domain_size
             .saturating_sub(log_max_final_size)
             .div_ceil(self.fold.log_arity()) as usize
@@ -87,9 +93,7 @@ impl FriParams {
     #[inline]
     pub fn final_poly_degree(&self, log_domain_size: u8) -> usize {
         let num_rounds = self.num_rounds(log_domain_size);
-        // log of final domain size after folding
         let log_final_size = log_domain_size as usize - num_rounds * self.fold.log_arity() as usize;
-        // degree = domain_size / blowup = 2^(log_final_size - log_blowup)
         1 << log_final_size.saturating_sub(self.log_blowup as usize)
     }
 }

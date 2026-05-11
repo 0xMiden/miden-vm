@@ -168,11 +168,11 @@ impl<A: LiftedAir<Felt, QuadFelt>> LiftedAir<Felt, QuadFelt> for OverrideLogQuot
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
         self.inner.eval(builder)
     }
-    fn log_quotient_degree(&self) -> usize
+    fn log_quotient_degree(&self) -> u8
     where
         Self: Sized,
     {
-        self.log_qd
+        self.log_qd as u8
     }
 }
 

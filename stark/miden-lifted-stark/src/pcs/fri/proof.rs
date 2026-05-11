@@ -5,7 +5,10 @@ use alloc::vec::Vec;
 use miden_stark_transcript::{TranscriptError, VerifierChannel};
 use p3_field::{ExtensionField, TwoAdicField};
 
-use crate::pcs::fri::FriParams;
+use crate::{
+    domain::{Coset, TwoAdicSubgroup},
+    pcs::fri::FriParams,
+};
 
 /// Structured transcript view for a single FRI folding round.
 pub struct FriRoundTranscript<F, EF, Commitment> {
@@ -39,12 +42,13 @@ where
     /// that validation happens in `FriOracle::test_low_degree`.
     pub fn from_verifier_channel<Ch>(
         params: &FriParams,
-        log_domain_size: u8,
+        subgroup: &TwoAdicSubgroup<F>,
         channel: &mut Ch,
     ) -> Result<Self, TranscriptError>
     where
         Ch: VerifierChannel<F = F, Commitment = Commitment>,
     {
+        let log_domain_size = subgroup.log_size();
         let num_rounds = params.num_rounds(log_domain_size);
         let mut rounds = Vec::with_capacity(num_rounds);
 

@@ -12,7 +12,7 @@ use p3_dft::{NaiveDft, TwoAdicSubgroupDft};
 use p3_field::{PackedValue, TwoAdicField};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
-use crate::coset::LiftedCoset;
+use crate::domain::{Coset, EvaluationDomain};
 
 /// Prover-side periodic LDE values for constraint evaluation.
 ///
@@ -40,13 +40,13 @@ impl<F: TwoAdicField> PeriodicLde<F> {
     /// Uses NaiveDft since periodic column periods are typically small.
     ///
     /// # Arguments
-    /// - `coset`: The lifted coset providing domain information
+    /// - `domain`: The evaluation domain (trace + LDE + constraint degree)
     /// - `repeated_matrix`: Periodic columns extended to a common height (max period), or `None` if
     ///   there are no periodic columns
     ///
     /// # Panics
     /// Panics if the matrix height exceeds the trace height or is not a power of two.
-    pub fn build(coset: &LiftedCoset, repeated_matrix: Option<RowMajorMatrix<F>>) -> Self {
+    pub fn build(domain: &EvaluationDomain<F>, repeated_matrix: Option<RowMajorMatrix<F>>) -> Self {
         let Some(repeated_matrix) = repeated_matrix else {
             return Self { ldes: None };
         };
@@ -54,19 +54,19 @@ impl<F: TwoAdicField> PeriodicLde<F> {
         let max_period = repeated_matrix.height();
         let log_max_period = log2_strict_u8(max_period);
         assert!(
-            coset.log_trace_height >= log_max_period,
+            domain.log_trace_height() >= log_max_period,
             "periodic column period ({max_period}) exceeds trace height ({})",
-            1 << coset.log_trace_height as usize,
+            1 << domain.log_trace_height() as usize,
         );
-        let log_blowup = coset.log_blowup();
+        let log_blowup = domain.log_quotient_degree() as usize;
 
         // Compute the coset shift for the max-period subgroup.
         //
         // Periodic polynomials are naturally defined on a subgroup of order `max_period`.
-        // We derive the corresponding coset shift by taking the lifted coset shift
-        // gʳ and mapping from trace height down to `max_period` via a power-of-two ratio.
-        let log_ratio = coset.log_trace_height - log_max_period;
-        let period_shift: F = coset.lde_shift::<F>().exp_power_of_2(log_ratio as usize);
+        // The quotient evaluation coset shares the LDE coset's shift; map it down
+        // from trace height to `max_period` via a power-of-two ratio.
+        let log_ratio = domain.log_trace_height() - log_max_period;
+        let period_shift: F = domain.shift().exp_power_of_2(log_ratio as usize);
 
         // Compute LDE using NaiveDft (periods are small)
         let ldes = NaiveDft
@@ -105,10 +105,10 @@ mod tests {
     use alloc::{vec, vec::Vec};
 
     use p3_dft::TwoAdicSubgroupDft;
-    use p3_field::{Field, PackedValue, PrimeCharacteristicRing};
+    use p3_field::{PackedValue, PrimeCharacteristicRing};
 
     use super::*;
-    use crate::testing::configs::goldilocks_poseidon2 as gl;
+    use crate::{domain::LiftedDomain, testing::configs::goldilocks_poseidon2 as gl};
 
     /// Verify that periodic LDE values match the full LDE computation.
     fn assert_periodic_lde_matches_full(
@@ -119,8 +119,10 @@ mod tests {
         let trace_height = 1 << log_trace_height as usize;
         let lde_height = trace_height << log_blowup as usize;
 
-        // Create a coset at max height (no lifting)
-        let coset = LiftedCoset::unlifted(log_trace_height, log_blowup);
+        // Create an evaluation domain at max height (no lifting), with constraint
+        // degree = log_blowup (the max-degree case for this test).
+        let lifted: LiftedDomain<gl::Felt> = LiftedDomain::canonical(log_trace_height, log_blowup);
+        let domain = lifted.evaluation_domain(log_blowup);
 
         // Build the repeated matrix (same logic as periodic_columns_matrix)
         let max_period = columns.iter().map(Vec::len).max().unwrap();
@@ -133,16 +135,18 @@ mod tests {
         }
         let repeated_matrix = RowMajorMatrix::new(values, num_cols);
 
-        let periodic_lde = PeriodicLde::build(&coset, Some(repeated_matrix));
+        let periodic_lde = PeriodicLde::build(&domain, Some(repeated_matrix));
 
-        // Compute expected LDE for each column via full expansion (natural order)
+        // Compute expected LDE for each column via full expansion (natural order).
+        // The PeriodicLde uses `domain.lde_shift()` internally — match it here.
+        let expected_shift = domain.shift();
         let expected: Vec<Vec<gl::Felt>> = columns
             .iter()
             .map(|col| {
                 let full: Vec<gl::Felt> = (0..trace_height).map(|i| col[i % col.len()]).collect();
                 let matrix = RowMajorMatrix::new(full, 1);
                 NaiveDft
-                    .coset_lde_batch(matrix, log_blowup.into(), gl::Felt::GENERATOR)
+                    .coset_lde_batch(matrix, log_blowup.into(), expected_shift)
                     .to_row_major_matrix()
                     .values
             })

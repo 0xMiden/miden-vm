@@ -21,7 +21,10 @@ use p3_matrix::{Matrix, bitrev::BitReversedMatrixView, dense::RowMajorMatrixView
 use p3_maybe_rayon::prelude::*;
 use packed_row_bitrev::collect_vertically_packed_row_pair_bitrev_into;
 
-use crate::{coset::LiftedCoset, prover::periodic::PeriodicLde};
+use crate::{
+    domain::{Coset, EvaluationDomain},
+    prover::periodic::PeriodicLde,
+};
 
 /// Row-blocks (`i_start = r * packing_width`) processed per rayon task.
 const ROW_BLOCKS_PER_PARALLEL_TASK: usize = 32;
@@ -44,9 +47,11 @@ type PackedExt<F, EF> = <EF as ExtensionField<F>>::ExtensionPacking;
 ///
 /// `output[i] = folded_constraints(x_i) / Z_{H_j}(x_i)`.
 ///
-/// `inv_z_h` is the length-`D_j` slice of `1 / Z_{H_j}` values on `gJ_j` (use
-/// [`crate::prover::quotient::compute_z_h_inverses`]). Fusing the divide into the
-/// write loop saves a second pass over the `n_j * D_j`-point output buffer.
+/// `inv_z_h` is a length-`D_j` slice: `Z_{H_j}(x)` takes only `D_j` distinct
+/// values over `gJ_j` by periodicity, so batch-inverting them once suffices
+/// (use [`crate::domain::EvaluationDomain::inv_vanishing_evals`]). Fusing the
+/// divide into the write loop saves a second pass over the `n_j · D_j`-point
+/// output buffer.
 ///
 /// `output` must be a fresh zero-initialized buffer of length `n_j * D_j`; each
 /// point is written once. Upsampling to the batch-wide target and beta-accumulation
@@ -79,7 +84,7 @@ pub fn evaluate_constraints_into<F, EF, A>(
     air: &A,
     main_on_gj: &BitReversedMatrixView<RowMajorMatrixView<'_, F>>,
     aux_on_gj: &BitReversedMatrixView<RowMajorMatrixView<'_, F>>,
-    coset: &LiftedCoset,
+    eval_domain: &EvaluationDomain<F>,
     alpha: EF,
     randomness: &[EF],
     public_values: &[F],
@@ -96,18 +101,18 @@ pub fn evaluate_constraints_into<F, EF, A>(
     type P<F> = PackedVal<F>;
     type PE<F, EF> = PackedExt<F, EF>;
 
-    let gj_height = coset.lde_height();
+    let quotient_degree = eval_domain.quotient_degree();
+    let gj_height = eval_domain.size();
     assert_eq!(output.len(), gj_height);
-    let constraint_degree = coset.blowup();
     let width = P::<F>::WIDTH;
 
     assert_eq!(gj_height % width, 0, "quotient height must be divisible by packing width");
-    assert_eq!(inv_z_h.len(), constraint_degree, "inv_z_h length must equal D_j");
+    assert_eq!(inv_z_h.len(), quotient_degree, "inv_z_h length must equal D_j");
     // Bitmask for `i % inv_z_h.len()`; len is `2^log_blowup` by construction.
     let inv_z_h_mask: usize = inv_z_h.len() - 1;
 
-    // Precompute selectors via coset method
-    let sels = coset.selectors::<F>();
+    // Precompute selectors over the quotient evaluation coset.
+    let sels = eval_domain.selectors();
 
     // ─── Decompose alpha powers by constraint layout ───
     let aux_ef_width = air.aux_width();
@@ -150,7 +155,7 @@ pub fn evaluate_constraints_into<F, EF, A>(
             collect_vertically_packed_row_pair_bitrev_into::<F, P<F>>(
                 &main_trace_view,
                 i_start,
-                constraint_degree,
+                quotient_degree,
                 main_buf,
             );
             let main_mat = RowMajorMatrixView::new(main_buf.as_slice(), main_width);
@@ -159,7 +164,7 @@ pub fn evaluate_constraints_into<F, EF, A>(
             collect_vertically_packed_row_pair_bitrev_into::<F, P<F>>(
                 &aux_trace_view,
                 i_start,
-                constraint_degree,
+                quotient_degree,
                 aux_base_buf,
             );
 

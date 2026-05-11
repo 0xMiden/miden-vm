@@ -24,6 +24,7 @@ use p3_util::reverse_bits_len;
 use thiserror::Error;
 
 use crate::{
+    domain::{Coset, TwoAdicSubgroup},
     lmcs::{Lmcs, LmcsError, tree_indices::TreeIndices},
     pcs::fri::FriParams,
     util::horner::horner,
@@ -45,8 +46,8 @@ where
     EF: ExtensionField<F>,
     L: Lmcs<F = F>,
 {
-    /// Log₂ of the initial domain size.
-    log_domain_size: u8,
+    /// Initial round's domain (the LDE evaluation subgroup).
+    subgroup: TwoAdicSubgroup<F>,
     /// Per-round commitment and folding challenge.
     rounds: Vec<FriRoundOracle<L::Commitment, EF>>,
     /// Coefficients of the final low-degree polynomial in descending degree order
@@ -68,12 +69,13 @@ where
     /// Create oracle by reading from a verifier channel.
     pub fn new<Ch>(
         params: &FriParams,
-        log_domain_size: u8,
+        subgroup: TwoAdicSubgroup<F>,
         channel: &mut Ch,
     ) -> Result<Self, FriError>
     where
         Ch: VerifierChannel<F = F, Commitment = L::Commitment>,
     {
+        let log_domain_size = subgroup.log_size();
         let num_rounds = params.num_rounds(log_domain_size);
         let mut rounds = Vec::with_capacity(num_rounds);
 
@@ -89,7 +91,7 @@ where
         let final_degree = params.final_poly_degree(log_domain_size);
         let final_poly = channel.receive_algebra_slice(final_degree)?;
 
-        Ok(Self { log_domain_size, rounds, final_poly })
+        Ok(Self { subgroup, rounds, final_poly })
     }
 
     /// Test low-degree proximity by reading openings from a verifier channel.
@@ -120,8 +122,8 @@ where
         let base_width = arity * EF::DIMENSION;
         let widths = [base_width];
 
-        let mut log_domain_size = self.log_domain_size;
-        let mut g_inv = F::two_adic_generator(log_domain_size as usize).inverse();
+        let mut log_domain_size = self.subgroup.log_size();
+        let mut g_inv = self.subgroup.generator_inverse();
 
         for (round_idx, round) in self.rounds.iter().enumerate() {
             let log_folded_domain_size = log_domain_size - log_arity;
@@ -195,7 +197,11 @@ where
         //
         // `final_poly` is in descending degree order [cₙ, ..., c₁, c₀], which is
         // the native order for Horner evaluation.
-        let generator = F::two_adic_generator(log_domain_size as usize);
+        // After all rounds, the final-round subgroup has size 2^log_domain_size
+        // (after num_rounds * log_arity shrinks). Derive its generator from the
+        // initial subgroup via `shrink` rather than a fresh `two_adic_generator` call.
+        let final_subgroup_log_factor = self.subgroup.log_size() - log_domain_size;
+        let generator = self.subgroup.shrink(final_subgroup_log_factor).generator();
         for (idx, eval) in evals {
             // Domain index directly gives the exponent (no bit-reversal needed).
             let x = generator.exp_u64(idx as u64);

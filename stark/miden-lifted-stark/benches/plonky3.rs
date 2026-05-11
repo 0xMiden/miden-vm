@@ -16,8 +16,7 @@ use std::hint::black_box;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use miden_lifted_stark::{
-    LiftedCoset, Lmcs, LmcsTree,
-    air::log2_strict_u8,
+    Coset, LiftedDomain, Lmcs, LmcsTree, log2_strict_u8,
     testing::{
         BENCH_PCS_PARAMS, LOG_HEIGHTS, PARALLEL_STR, QC_CONSTRAINT_DEGREE, QC_PCS_PARAMS,
         RELATIVE_SPECS, commit_quotient,
@@ -33,7 +32,7 @@ use p3_blake3::Blake3;
 use p3_challenger::{CanObserve, FieldChallenger};
 use p3_commit::{ExtensionMmcs, Mmcs, Pcs};
 use p3_dft::{Radix2DitParallel, TwoAdicSubgroupDft};
-use p3_field::{Field, coset::TwoAdicMultiplicativeCoset};
+use p3_field::coset::TwoAdicMultiplicativeCoset;
 use p3_fri::{FriParameters, TwoAdicFriPcs};
 use p3_keccak::KeccakF;
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
@@ -173,9 +172,10 @@ fn bench_lmcs_vs_mmcs(c: &mut Criterion) {
 
 fn bench_pcs_open(c: &mut Criterion) {
     let dft = Radix2DitParallel::<gl::Felt>::default();
-    let shift = gl::Felt::GENERATOR;
 
     for &log_lde_height in LOG_HEIGHTS {
+        let domain = LiftedDomain::<gl::Felt>::canonical(log_lde_height, 0);
+        let shift = domain.lde_shift();
         let max_lde_size = 1usize << log_lde_height;
         let group_name = format!("PCS_Open/{max_lde_size}/goldilocks/poseidon2/{PARALLEL_STR}");
         let mut group = c.benchmark_group(&group_name);
@@ -264,7 +264,6 @@ fn bench_pcs_open(c: &mut Criterion) {
 
             let tree = lmcs.build_aligned_tree(all_lde_matrices);
             let commitment = tree.root();
-            let log_lde_height = log2_strict_u8(tree.height());
 
             let base_challenger = gl::test_challenger();
 
@@ -281,7 +280,7 @@ fn bench_pcs_open(c: &mut Criterion) {
                         open_with_channel::<gl::Felt, gl::QuadFelt, _, _, _, 2>(
                             &BENCH_PCS_PARAMS,
                             &lmcs,
-                            log_lde_height,
+                            &domain,
                             [z1, z2],
                             trace_trees,
                             &mut channel,
@@ -326,13 +325,14 @@ fn bench_quotient_commit(c: &mut Criterion) {
         // --- Lifted ---
         {
             let config = lifted_config();
-            let coset = LiftedCoset::unlifted(log_n, QC_PCS_PARAMS.log_blowup());
+            let domain = LiftedDomain::<gl::Felt>::canonical(log_n, QC_PCS_PARAMS.log_blowup())
+                .evaluation_domain(log_d);
 
             group.bench_function(BenchmarkId::new("lifted", &label), |bench| {
                 bench.iter(|| {
                     let mut q_evals = random_quotient_evals(n, QC_CONSTRAINT_DEGREE, 42);
                     q_evals.reserve(n * b - n * QC_CONSTRAINT_DEGREE);
-                    let committed = commit_quotient(&config, q_evals, &coset);
+                    let committed = commit_quotient(&config, q_evals, &domain);
                     black_box(committed)
                 });
             });
@@ -341,8 +341,11 @@ fn bench_quotient_commit(c: &mut Criterion) {
         // --- Plonky3 PCS ---
         {
             let pcs = workspace_pcs(QC_PCS_PARAMS.log_blowup() as usize, 0, 1, 1);
+            // Quotient evaluation domain (order N·D, sharing the LDE shift).
+            let q_domain =
+                LiftedDomain::<gl::Felt>::canonical(log_n, log_d).evaluation_domain(log_d);
             let quotient_domain =
-                TwoAdicMultiplicativeCoset::new(gl::Felt::GENERATOR, (log_n + log_d) as usize)
+                TwoAdicMultiplicativeCoset::new(q_domain.shift(), q_domain.log_size() as usize)
                     .unwrap();
 
             group.bench_function(BenchmarkId::new("plonky3_pcs", &label), |bench| {

@@ -1,6 +1,5 @@
 use alloc::vec::Vec;
 
-use miden_lifted_air::log2_strict_u8;
 use miden_stark_transcript::ProverChannel;
 use p3_dft::{Radix2DFTSmallBatch, TwoAdicSubgroupDft};
 use p3_field::{ExtensionField, TwoAdicField};
@@ -10,6 +9,7 @@ use p3_util::reverse_slice_index_bits;
 use tracing::{debug_span, info_span};
 
 use crate::{
+    domain::{Coset, TwoAdicSubgroup},
     lmcs::{Lmcs, LmcsTree, tree_indices::TreeIndices},
     pcs::fri::FriParams,
 };
@@ -90,7 +90,13 @@ where
     /// evaluations and sampling a random challenge `beta` — until the degree is small enough to
     /// send the polynomial directly. The query phase then spot-checks that each fold was
     /// performed correctly.
-    pub fn new<Ch>(params: &FriParams, lmcs: &L, evals: Vec<EF>, channel: &mut Ch) -> Self
+    pub fn new<Ch>(
+        params: &FriParams,
+        lmcs: &L,
+        subgroup: TwoAdicSubgroup<F>,
+        evals: Vec<EF>,
+        channel: &mut Ch,
+    ) -> Self
     where
         Ch: ProverChannel<F = F, Commitment = L::Commitment>,
     {
@@ -100,8 +106,8 @@ where
         let mut folded_trees = Vec::new();
 
         let mut domain_size = evals.len();
-        let log_domain_size = log2_strict_u8(domain_size);
-        let final_poly_degree = params.final_poly_degree(log_domain_size);
+        debug_assert_eq!(domain_size, subgroup.size(), "evals length must match subgroup size");
+        let final_poly_degree = params.final_poly_degree(subgroup.log_size());
         let final_domain_size = final_poly_degree << params.log_blowup;
 
         // ─────────────────────────────────────────────────────────────────────────
@@ -123,8 +129,8 @@ where
         // and g has order 2^log_domain_size.
         //
         // We generate sequential powers of g_inv and bit-reverse to get s_inv values
-        // in the correct order for each row.
-        let g_inv = F::two_adic_generator(log_domain_size as usize).inverse();
+        // in the correct order for each row. Per-round we square g_inv `log_arity` times.
+        let g_inv = subgroup.generator_inverse();
         let mut s_invs: Vec<F> = g_inv.powers().take(domain_size >> log_arity as usize).collect();
         reverse_slice_index_bits(&mut s_invs);
 

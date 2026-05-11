@@ -8,6 +8,7 @@ use p3_challenger::CanObserve;
 use p3_dft::{Radix2DFTSmallBatch, TwoAdicSubgroupDft};
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::{Matrix, bitrev::BitReversibleMatrix, dense::RowMajorMatrix};
+use p3_util::{log2_strict_usize, reverse_bits_len};
 use proof::FriTranscript;
 use prover::FriPolys;
 use rand::{RngExt, SeedableRng, distr::StandardUniform, prelude::SmallRng};
@@ -15,6 +16,7 @@ use verifier::{FriError, FriOracle};
 
 use super::*;
 use crate::{
+    domain::TwoAdicSubgroup,
     lmcs::tree_indices::TreeIndices,
     testing::{
         configs::goldilocks_poseidon2::{
@@ -92,11 +94,11 @@ fn build_initial_evals(
     evals: &[QuadFelt],
     tree_indices: &TreeIndices,
 ) -> BTreeMap<usize, QuadFelt> {
-    let log_n = log2_strict_u8(evals.len()) as usize;
+    let log_n = log2_strict_usize(evals.len());
     tree_indices
         .iter()
         .map(|&domain_idx| {
-            let bitrev_idx = p3_util::reverse_bits_len(domain_idx, log_n);
+            let bitrev_idx = reverse_bits_len(domain_idx, log_n);
             (domain_idx, evals[bitrev_idx])
         })
         .collect()
@@ -109,7 +111,9 @@ fn prove_queries(
     tree_indices: TreeIndices,
 ) -> (TestDigest, TestTranscriptData) {
     let mut prover_channel = prover_channel();
-    let fri_polys = FriPolys::<Felt, QuadFelt, _>::new(params, lmcs, evals, &mut prover_channel);
+    let subgroup = TwoAdicSubgroup::<Felt>::new(log2_strict_u8(evals.len()));
+    let fri_polys =
+        FriPolys::<Felt, QuadFelt, _>::new(params, lmcs, subgroup, evals, &mut prover_channel);
     fri_polys.prove_queries(params, tree_indices, &mut prover_channel);
     prover_channel.finalize()
 }
@@ -128,7 +132,8 @@ fn verify_queries(
         None => verifier_channel(transcript),
     };
     let log_domain_size = log2_strict_u8(lde_size);
-    let oracle = FriOracle::new(params, log_domain_size, &mut channel)?;
+    let subgroup = TwoAdicSubgroup::<Felt>::new(log_domain_size);
+    let oracle = FriOracle::new(params, subgroup, &mut channel)?;
     oracle.test_low_degree(lmcs, params, initial_evals.clone(), tree_indices, &mut channel)?;
     let digest = channel.finalize().expect("transcript should finalize cleanly");
     Ok(digest)
@@ -168,9 +173,10 @@ fn run_roundtrip_case(case: &FriRoundtripCase, seed: u64) -> Result<(), FriError
 
     // Re-parse FriTranscript (commit phase only) from a fresh channel.
     let mut reparse_channel = verifier_channel(&transcript);
+    let reparse_subgroup = TwoAdicSubgroup::<Felt>::new(log_domain_size);
     FriTranscript::<Felt, QuadFelt, _>::from_verifier_channel(
         &params,
-        log_domain_size,
+        &reparse_subgroup,
         &mut reparse_channel,
     )
     .expect("FriTranscript re-parse should succeed");
@@ -269,7 +275,9 @@ fn test_fri_verify_wrong_beta() {
 
     // Prover 2: generate different transcript (different commitments = different betas).
     let mut prover2_channel = prover_channel();
-    let _ = FriPolys::<Felt, QuadFelt, _>::new(&params, &lmcs, evals2, &mut prover2_channel);
+    let subgroup2 = TwoAdicSubgroup::<Felt>::new(log2_strict_u8(evals2.len()));
+    let _ =
+        FriPolys::<Felt, QuadFelt, _>::new(&params, &lmcs, subgroup2, evals2, &mut prover2_channel);
     let (_, prover2_transcript) = prover2_channel.finalize();
     let other_commitment = prover2_transcript
         .commitments()
@@ -327,8 +335,9 @@ fn test_fri_zero_rounds_final_poly_only() {
     let (prover_digest, transcript) = prove_queries(&params, &lmcs, evals, tree_indices.clone());
 
     let mut channel = verifier_channel(&transcript);
+    let subgroup = TwoAdicSubgroup::<Felt>::new(log_domain_size);
     let fri_transcript: FriTranscript<Felt, QuadFelt, _> =
-        FriTranscript::from_verifier_channel(&params, log_domain_size, &mut channel)
+        FriTranscript::from_verifier_channel(&params, &subgroup, &mut channel)
             .expect("transcript parsing should succeed");
 
     assert!(fri_transcript.rounds.is_empty(), "expected zero folding rounds");
@@ -381,14 +390,16 @@ fn test_final_polynomial_correctness() {
     let evals = lde.bit_reverse_rows().to_row_major_matrix().values;
 
     let log_domain_size = log_poly_degree + log_blowup;
+    let subgroup = TwoAdicSubgroup::<Felt>::new(log_domain_size);
 
     let mut prover_channel = prover_channel();
-    let _fri_polys = FriPolys::<Felt, QuadFelt, _>::new(&params, &lmcs, evals, &mut prover_channel);
+    let _fri_polys =
+        FriPolys::<Felt, QuadFelt, _>::new(&params, &lmcs, subgroup, evals, &mut prover_channel);
     let (_, transcript) = prover_channel.finalize();
 
     let mut v_channel = verifier_channel(&transcript);
     let fri_transcript: FriTranscript<Felt, QuadFelt, _> =
-        FriTranscript::from_verifier_channel(&params, log_domain_size, &mut v_channel)
+        FriTranscript::from_verifier_channel(&params, &subgroup, &mut v_channel)
             .expect("transcript parsing should succeed");
 
     assert_eq!(
