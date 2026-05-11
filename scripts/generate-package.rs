@@ -32,6 +32,6 @@ fn main() -> Result<(), Report> {
 
     package.write_masp_file(&packages_dir).into_diagnostic()?;
 
-    println!("wrote miden-core.masp to {}", packages_dir.display());
+    println!("wrote core.masp to {}", packages_dir.display());
     Ok(())
 }

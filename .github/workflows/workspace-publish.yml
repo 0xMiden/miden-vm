@@ -36,7 +36,7 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
 
-  # Upload the pre-compiled artifacts (miden-vm CLI and miden-core.masp) on the
+  # Upload the pre-compiled artifacts (miden-vm CLI and core.masp) on the
   # GitHub release page.
   # Used by midenup to speed up installs.
   upload-artifacts:
@@ -89,29 +89,29 @@ jobs:
         run: |
           set -e
           gh release upload "${RELEASE_TAG}" miden-vm-${{ matrix.target }}
-      # Since the miden-core.masp package is triplet independent, we only build it once.
+      # Since the core.masp package is triplet independent, we only build it once.
       - name: Install nightly
         if: matrix.os == 'ubuntu-latest' && matrix.target == 'x86_64-unknown-linux-gnu'
         run: |
           rustup update --no-self-update nightly
-      - name: Build miden-core.masp
+      - name: Build core.masp
         if: matrix.os == 'ubuntu-latest' && matrix.target == 'x86_64-unknown-linux-gnu'
         run: |
           make packages
       - name: Prepare artifact
         if: matrix.os == 'ubuntu-latest' && matrix.target == 'x86_64-unknown-linux-gnu'
         run: |
-          mv target/packages/miden-core.masp miden-core.masp
-      - name: Attest miden-core.masp
+          mv target/packages/core.masp core.masp
+      - name: Attest core.masp
         if: matrix.os == 'ubuntu-latest' && matrix.target == 'x86_64-unknown-linux-gnu'
         uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
         with:
-          subject-path: miden-core.masp
-      - name: Upload miden-core.masp
+          subject-path: core.masp
+      - name: Upload core.masp
         if: matrix.os == 'ubuntu-latest' && matrix.target == 'x86_64-unknown-linux-gnu'
         env:
           RELEASE_TAG: ${{ github.event.release.tag_name }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -e
-          gh release upload "${RELEASE_TAG}" miden-core.masp
+          gh release upload "${RELEASE_TAG}" core.masp
