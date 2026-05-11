@@ -6,19 +6,20 @@ use miden_assembly_syntax::{
     diagnostics::Report,
 };
 use miden_core::{
-    mast::{CallNodeBuilder, DynNodeBuilder, MastForestContributor, MastNodeExt, MastNodeId},
+    mast::{CallNodeBuilder, DynNodeBuilder, MastForestContributor, MastNodeExt},
     operations::{AssemblyOp, Operation},
 };
 use smallvec::SmallVec;
 
 use crate::{
-    Assembler, GlobalItemIndex, basic_block_builder::BasicBlockBuilder,
-    mast_forest_builder::MastForestBuilder,
+    Assembler, GlobalItemIndex,
+    basic_block_builder::BasicBlockBuilder,
+    mast_forest_builder::{MastForestBuilder, MastNodeRef},
 };
 
 /// Procedure Invocation
 impl Assembler {
-    /// Returns the [`MastNodeId`] of the invoked procedure specified by `callee`.
+    /// Returns the [`MastNodeRef`] of the invoked procedure specified by `callee`.
     ///
     /// For example, given `exec.f`, this method would return the procedure body id of `f`. If the
     /// only representation of `f` that we have is its MAST root, then this method will also insert
@@ -31,21 +32,22 @@ impl Assembler {
         mast_forest_builder: &mut MastForestBuilder,
         before_enter: Vec<miden_core::mast::DecoratorId>,
         asm_op: Option<AssemblyOp>,
-    ) -> Result<MastNodeId, Report> {
+    ) -> Result<MastNodeRef, Report> {
         let resolved = self
             .resolve_target(kind, callee, caller, mast_forest_builder)?
             .ok_or_else(|| self.invalid_invoke_target_report(kind, callee, caller))?;
+        let resolved_node_id = mast_forest_builder.node_id(resolved.node);
 
         match kind {
             InvokeKind::ProcRef | InvokeKind::Exec => Ok(resolved.node),
-            InvokeKind::Call => mast_forest_builder.ensure_node_with_asm_op(
-                CallNodeBuilder::new(resolved.node)
+            InvokeKind::Call => mast_forest_builder.ensure_node_with_asm_op_ref(
+                CallNodeBuilder::new(resolved_node_id)
                     .with_before_enter(before_enter)
                     .with_after_exit(vec![]),
                 asm_op.expect("call invocations must provide an AssemblyOp"),
             ),
-            InvokeKind::SysCall => mast_forest_builder.ensure_node_with_asm_op(
-                CallNodeBuilder::new_syscall(resolved.node)
+            InvokeKind::SysCall => mast_forest_builder.ensure_node_with_asm_op_ref(
+                CallNodeBuilder::new_syscall(resolved_node_id)
                     .with_before_enter(before_enter)
                     .with_after_exit(vec![]),
                 asm_op.expect("syscall invocations must provide an AssemblyOp"),
@@ -59,15 +61,15 @@ impl Assembler {
         mast_forest_builder: &mut MastForestBuilder,
         before_enter: Vec<miden_core::mast::DecoratorId>,
         asm_op: AssemblyOp,
-    ) -> Result<Option<MastNodeId>, Report> {
-        let dyn_node_id = mast_forest_builder.ensure_node_with_asm_op(
+    ) -> Result<Option<MastNodeRef>, Report> {
+        let dyn_node_ref = mast_forest_builder.ensure_node_with_asm_op_ref(
             DynNodeBuilder::new_dyn()
                 .with_before_enter(before_enter)
                 .with_after_exit(vec![]),
             asm_op,
         )?;
 
-        Ok(Some(dyn_node_id))
+        Ok(Some(dyn_node_ref))
     }
 
     /// Creates a new DYNCALL block for the dynamic function call and return.
@@ -76,15 +78,15 @@ impl Assembler {
         mast_forest_builder: &mut MastForestBuilder,
         before_enter: Vec<miden_core::mast::DecoratorId>,
         asm_op: AssemblyOp,
-    ) -> Result<Option<MastNodeId>, Report> {
-        let dyn_call_node_id = mast_forest_builder.ensure_node_with_asm_op(
+    ) -> Result<Option<MastNodeRef>, Report> {
+        let dyn_call_node_ref = mast_forest_builder.ensure_node_with_asm_op_ref(
             DynNodeBuilder::new_dyncall()
                 .with_before_enter(before_enter)
                 .with_after_exit(vec![]),
             asm_op,
         )?;
 
-        Ok(Some(dyn_call_node_id))
+        Ok(Some(dyn_call_node_ref))
     }
 
     pub(super) fn procref(
@@ -108,7 +110,7 @@ impl Assembler {
             // `mast_forest_builder`
             block_builder
                 .mast_forest_builder()
-                .get_mast_node(resolved.node)
+                .get_mast_node_by_ref(resolved.node)
                 .unwrap()
                 .digest()
         };

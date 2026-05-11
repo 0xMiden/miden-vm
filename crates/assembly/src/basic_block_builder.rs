@@ -13,11 +13,15 @@ use miden_assembly_syntax::{
 use miden_core::{
     Felt,
     events::SystemEvent,
-    mast::{DebugVarId, DecoratorId, MastNodeId},
+    mast::{DebugVarId, DecoratorId},
     operations::{AssemblyOp, DebugVarInfo, Decorator, DecoratorList, Operation},
 };
 
-use crate::{ProcedureContext, assembler::BodyWrapper, mast_forest_builder::MastForestBuilder};
+use crate::{
+    ProcedureContext,
+    assembler::BodyWrapper,
+    mast_forest_builder::{MastForestBuilder, MastNodeRef},
+};
 
 // PENDING ASM OP
 // ================================================================================================
@@ -224,7 +228,7 @@ impl BasicBlockBuilder<'_> {
     ///
     /// This consumes all operations in the builder, but does not touch the operations in the
     /// epilogue of the builder.
-    pub fn make_basic_block(&mut self) -> Result<Option<MastNodeId>, Report> {
+    pub(crate) fn make_basic_block(&mut self) -> Result<Option<MastNodeRef>, Report> {
         if !self.ops.is_empty() {
             let op_count = self.ops.len();
             let ops = self.ops.drain(..).collect();
@@ -240,7 +244,7 @@ impl BasicBlockBuilder<'_> {
             let asm_ops = core::mem::take(&mut self.asm_ops);
             let debug_vars: Vec<(usize, DebugVarId)> = self.debug_vars.drain(..).collect();
 
-            let basic_block_node_id = self.mast_forest_builder.ensure_block(
+            let basic_block_node_ref = self.mast_forest_builder.ensure_block_ref(
                 ops,
                 decorators,
                 asm_ops,
@@ -249,7 +253,7 @@ impl BasicBlockBuilder<'_> {
                 after_exit,
             )?;
 
-            Ok(Some(basic_block_node_id))
+            Ok(Some(basic_block_node_ref))
         } else {
             Ok(None)
         }
@@ -298,7 +302,7 @@ impl BasicBlockBuilder<'_> {
 /// Holds either the node id of a basic block, or a list of decorators that are currently not
 /// attached to any node.
 pub enum BasicBlockOrDecorators {
-    BasicBlock(MastNodeId),
+    BasicBlock(MastNodeRef),
     Decorators(Vec<DecoratorId>),
     Nothing,
 }

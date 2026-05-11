@@ -3,7 +3,10 @@ use alloc::{
     sync::Arc,
     vec::Vec,
 };
-use core::ops::{Index, IndexMut};
+use core::{
+    fmt,
+    ops::{Index, IndexMut},
+};
 
 use miden_core::{
     Felt, Word,
@@ -16,6 +19,7 @@ use miden_core::{
     },
     operations::{AssemblyOp, Decorator, DecoratorList, Operation},
     serde::Serializable,
+    utils::{Idx, IndexVec},
 };
 
 use super::{GlobalItemIndex, LinkerError, Procedure};
@@ -32,6 +36,103 @@ const PROCEDURE_INLINING_THRESHOLD: usize = 32;
 
 // MAST FOREST BUILDER
 // ================================================================================================
+
+/// Stable assembly-time reference to a MAST node.
+///
+/// This is a builder-local dense arena handle, not a positional [`MastNodeId`] in the final
+/// [`MastForest`].
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
+#[repr(transparent)]
+pub(crate) struct MastNodeRef(u32);
+
+impl From<u32> for MastNodeRef {
+    fn from(value: u32) -> Self {
+        Self(value)
+    }
+}
+
+impl From<MastNodeRef> for u32 {
+    fn from(value: MastNodeRef) -> Self {
+        value.0
+    }
+}
+
+impl fmt::Display for MastNodeRef {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "MastNodeRef({})", self.0)
+    }
+}
+
+impl Idx for MastNodeRef {}
+
+/// Stable assembly-time reference to a decorator.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
+#[repr(transparent)]
+pub(crate) struct DecoratorRef(u32);
+
+impl From<u32> for DecoratorRef {
+    fn from(value: u32) -> Self {
+        Self(value)
+    }
+}
+
+impl From<DecoratorRef> for u32 {
+    fn from(value: DecoratorRef) -> Self {
+        value.0
+    }
+}
+
+impl Idx for DecoratorRef {}
+
+/// Stable assembly-time reference to assembly operation metadata.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
+#[repr(transparent)]
+pub(crate) struct AsmOpRef(u32);
+
+impl From<u32> for AsmOpRef {
+    fn from(value: u32) -> Self {
+        Self(value)
+    }
+}
+
+impl From<AsmOpRef> for u32 {
+    fn from(value: AsmOpRef) -> Self {
+        value.0
+    }
+}
+
+impl Idx for AsmOpRef {}
+
+/// Stable assembly-time reference to debug variable metadata.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
+#[repr(transparent)]
+pub(crate) struct DebugVarRef(u32);
+
+impl From<u32> for DebugVarRef {
+    fn from(value: u32) -> Self {
+        Self(value)
+    }
+}
+
+impl From<DebugVarRef> for u32 {
+    fn from(value: DebugVarRef) -> Self {
+        value.0
+    }
+}
+
+impl Idx for DebugVarRef {}
+
+/// Result of finalizing a [`MastForestBuilder`].
+pub(crate) struct BuiltMastForest {
+    mast_forest: MastForest,
+    node_id_by_ref: BTreeMap<MastNodeRef, MastNodeId>,
+}
+
+impl BuiltMastForest {
+    pub(crate) fn into_parts(self) -> (MastForest, BTreeMap<MastNodeRef, MastNodeId>) {
+        (self.mast_forest, self.node_id_by_ref)
+    }
+}
 
 /// Builder for a [`MastForest`].
 ///
@@ -62,6 +163,14 @@ pub struct MastForestBuilder {
     /// The reverse mapping of `node_id_by_fingerprint`. This map caches the fingerprints of all
     /// nodes (for performance reasons).
     hash_by_node_id: BTreeMap<MastNodeId, MastNodeFingerprint>,
+    /// Builder-owned dense storage for node refs.
+    ///
+    /// This is transitional while node construction still writes through to `mast_forest`
+    /// immediately: each ref resolves to the current backing node ID until finalization assigns
+    /// the final dense IDs.
+    node_id_by_ref: IndexVec<MastNodeRef, MastNodeId>,
+    /// Reverse lookup for the transitional backing node ID of each node ref.
+    node_ref_by_id: BTreeMap<MastNodeId, MastNodeRef>,
     /// A map of decorator fingerprints to their corresponding positions in the MAST forest.
     decorator_id_by_fingerprint: BTreeMap<DecoratorFingerprint, DecoratorId>,
     /// A set of IDs for basic blocks which have been merged into a bigger basic blocks. This is
@@ -166,12 +275,35 @@ impl MastForestBuilder {
         &self.mast_forest
     }
 
+    fn intern_node_id(&mut self, node_id: MastNodeId) -> Result<MastNodeRef, Report> {
+        if let Some(&node_ref) = self.node_ref_by_id.get(&node_id) {
+            return Ok(node_ref);
+        }
+
+        let node_ref = self
+            .node_id_by_ref
+            .push(node_id)
+            .into_diagnostic()
+            .wrap_err("assembler created too many MAST node refs")?;
+        self.node_ref_by_id.insert(node_id, node_ref);
+        Ok(node_ref)
+    }
+
+    pub(crate) fn node_id(&self, node_ref: MastNodeRef) -> MastNodeId {
+        self.node_id_by_ref[node_ref]
+    }
+
+    #[cfg(test)]
+    pub(crate) fn node_ref(&self, node_id: MastNodeId) -> Option<MastNodeRef> {
+        self.node_ref_by_id.get(&node_id).copied()
+    }
+
     /// Removes the unused nodes that were created as part of the assembly process, and returns the
     /// resulting MAST forest.
     ///
-    /// It also returns the map from old node IDs to new node IDs. Any [`MastNodeId`] used in
-    /// reference to the old [`MastForest`] should be remapped using this map.
-    pub fn build(mut self) -> (MastForest, BTreeMap<MastNodeId, MastNodeId>) {
+    /// It also returns the map from assembly-time node refs to final node IDs. Any [`MastNodeRef`]
+    /// used in reference to this builder should be resolved using this map.
+    pub(crate) fn build(mut self) -> BuiltMastForest {
         // Register all pending AssemblyOp mappings in sorted node order.
         // The CSR structure requires nodes to be added sequentially.
         // We must also merge mappings for duplicate node_ids (can happen when control flow nodes
@@ -206,9 +338,24 @@ impl MastForestBuilder {
         }
 
         let nodes_to_remove = get_nodes_to_remove(self.merged_basic_block_ids, &self.mast_forest);
-        let id_remappings = self.mast_forest.remove_nodes(&nodes_to_remove);
+        let node_id_remappings = self.mast_forest.remove_nodes(&nodes_to_remove);
+        let node_id_by_ref = self
+            .node_id_by_ref
+            .into_inner()
+            .into_iter()
+            .enumerate()
+            .map(|(index, backing_node_id)| {
+                let node_ref = MastNodeRef::from(index as u32);
+                let final_node_id =
+                    node_id_remappings.get(&backing_node_id).copied().unwrap_or(backing_node_id);
+                (node_ref, final_node_id)
+            })
+            .collect();
 
-        (self.mast_forest, id_remappings)
+        BuiltMastForest {
+            mast_forest: self.mast_forest,
+            node_id_by_ref,
+        }
     }
 }
 
@@ -441,6 +588,10 @@ impl MastForestBuilder {
     pub fn get_mast_node(&self, id: MastNodeId) -> Option<&MastNode> {
         self.mast_forest.get_node_by_id(id)
     }
+
+    pub(crate) fn get_mast_node_by_ref(&self, node_ref: MastNodeRef) -> Option<&MastNode> {
+        self.get_mast_node(self.node_id(node_ref))
+    }
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -496,7 +647,7 @@ impl MastForestBuilder {
             }
         }
 
-        self.mast_forest.make_root(procedure.body_node_id());
+        self.mast_forest.make_root(self.node_id(procedure.body_node_ref()));
         self.proc_gid_by_mast_root.insert(procedure.mast_root(), gid);
         self.procedures.insert(gid, procedure);
 
@@ -553,6 +704,16 @@ impl MastForestBuilder {
         }
 
         Ok(node_ids.remove(0))
+    }
+
+    pub(crate) fn join_node_refs(
+        &mut self,
+        node_refs: Vec<MastNodeRef>,
+        asm_op: Option<AssemblyOp>,
+    ) -> Result<MastNodeRef, Report> {
+        let node_ids = node_refs.into_iter().map(|node_ref| self.node_id(node_ref)).collect();
+        let node_id = self.join_nodes(node_ids, asm_op)?;
+        self.intern_node_id(node_id)
     }
 
     /// Returns a list of [`MastNodeId`]s built from merging the contiguous basic blocks
@@ -782,6 +943,7 @@ impl MastForestBuilder {
             self.pending_debug_var_mappings.push((node_id, debug_vars));
         }
 
+        let _node_ref = self.intern_node_id(node_id)?;
         Ok(node_id)
     }
 }
@@ -833,6 +995,7 @@ impl MastForestBuilder {
         builder: impl MastForestContributor,
     ) -> Result<MastNodeId, Report> {
         let (node_id, _is_new) = self.ensure_node_exists(builder)?;
+        let _node_ref = self.intern_node_id(node_id)?;
         Ok(node_id)
     }
 
@@ -850,7 +1013,9 @@ impl MastForestBuilder {
             self.maybe_augment(base_fingerprint, &serialize_asm_ops(&[(0, asm_op.clone())]));
 
         if let Some(node_id) = self.node_id_by_fingerprint.get(&dedup_fingerprint) {
-            Ok(*node_id)
+            let node_id = *node_id;
+            let _node_ref = self.intern_node_id(node_id)?;
+            Ok(node_id)
         } else {
             let new_node_id = builder
                 .add_to_forest(&mut self.mast_forest)
@@ -867,8 +1032,19 @@ impl MastForestBuilder {
                 .wrap_err("failed to add AssemblyOp for control flow node")?;
             self.pending_asm_op_mappings.push((new_node_id, vec![(0, asm_op_id)]));
 
+            let _node_ref = self.intern_node_id(new_node_id)?;
             Ok(new_node_id)
         }
+    }
+
+    /// Like [`Self::ensure_node_with_asm_op`], but returns a builder-local ref.
+    pub(crate) fn ensure_node_with_asm_op_ref(
+        &mut self,
+        builder: impl MastForestContributor,
+        asm_op: AssemblyOp,
+    ) -> Result<MastNodeRef, Report> {
+        let node_id = self.ensure_node_with_asm_op(builder, asm_op)?;
+        self.intern_node_id(node_id)
     }
 
     /// Like [`Self::ensure_node`], but includes external metadata from `source_node_id` in the
@@ -898,7 +1074,9 @@ impl MastForestBuilder {
             .maybe_augment(self.maybe_augment(base_fingerprint, &asm_ops_data), &debug_vars_data);
 
         if let Some(node_id) = self.node_id_by_fingerprint.get(&dedup_fingerprint) {
-            Ok(*node_id)
+            let node_id = *node_id;
+            let _node_ref = self.intern_node_id(node_id)?;
+            Ok(node_id)
         } else {
             let new_node_id = builder
                 .add_to_forest(&mut self.mast_forest)
@@ -931,8 +1109,19 @@ impl MastForestBuilder {
                 self.pending_debug_var_mappings.push((new_node_id, vars));
             }
 
+            let _node_ref = self.intern_node_id(new_node_id)?;
             Ok(new_node_id)
         }
+    }
+
+    /// Like [`Self::ensure_node_preserving_debug_vars`], but returns a builder-local ref.
+    pub(crate) fn ensure_node_preserving_debug_vars_ref(
+        &mut self,
+        builder: impl MastForestContributor,
+        source_node_id: MastNodeId,
+    ) -> Result<MastNodeRef, Report> {
+        let node_id = self.ensure_node_preserving_debug_vars(builder, source_node_id)?;
+        self.intern_node_id(node_id)
     }
 
     /// Copies a statically linked node into this builder while keeping source metadata in the
@@ -953,7 +1142,9 @@ impl MastForestBuilder {
             .maybe_augment(self.maybe_augment(base_fingerprint, &asm_ops_data), &debug_vars_data);
 
         if let Some(node_id) = self.node_id_by_fingerprint.get(&dedup_fingerprint) {
-            return Ok(*node_id);
+            let node_id = *node_id;
+            let _node_ref = self.intern_node_id(node_id)?;
+            return Ok(node_id);
         }
 
         let new_node_id = builder
@@ -1005,6 +1196,7 @@ impl MastForestBuilder {
             }
         }
 
+        let _node_ref = self.intern_node_id(new_node_id)?;
         Ok(new_node_id)
     }
 
@@ -1114,7 +1306,29 @@ impl MastForestBuilder {
             self.pending_debug_var_mappings.push((node_id, debug_vars));
         }
 
+        let _node_ref = self.intern_node_id(node_id)?;
         Ok(node_id)
+    }
+
+    /// Adds a basic block node to the forest, and returns its builder-local [`MastNodeRef`].
+    pub(crate) fn ensure_block_ref(
+        &mut self,
+        operations: Vec<Operation>,
+        decorators: DecoratorList,
+        asm_ops: Vec<(usize, AssemblyOp)>,
+        debug_vars: Vec<(usize, miden_core::mast::DebugVarId)>,
+        before_enter: Vec<DecoratorId>,
+        after_exit: Vec<DecoratorId>,
+    ) -> Result<MastNodeRef, Report> {
+        let node_id = self.ensure_block(
+            operations,
+            decorators,
+            asm_ops,
+            debug_vars,
+            before_enter,
+            after_exit,
+        )?;
+        self.intern_node_id(node_id)
     }
 
     /// Collects all decorators from a subtree in the statically linked forest and copies them
@@ -1207,6 +1421,21 @@ impl MastForestBuilder {
         self.ensure_node(ExternalNodeBuilder::new(mast_root))
     }
 
+    /// Adds an externally-linked procedure root and returns its builder-local [`MastNodeRef`].
+    pub(crate) fn ensure_external_link_with_source_ref(
+        &mut self,
+        mast_root: Word,
+        source_library_commitment: Option<Word>,
+        source_root_id: Option<MastNodeId>,
+    ) -> Result<MastNodeRef, Report> {
+        let node_id = self.ensure_external_link_with_source(
+            mast_root,
+            source_library_commitment,
+            source_root_id,
+        )?;
+        self.intern_node_id(node_id)
+    }
+
     fn find_statically_linked_root(
         &self,
         source_library_commitment: Option<Word>,
@@ -1283,6 +1512,14 @@ impl MastForestBuilder {
         Ok(())
     }
 
+    pub(crate) fn append_before_enter_ref(
+        &mut self,
+        node_ref: MastNodeRef,
+        decorator_ids: Vec<DecoratorId>,
+    ) -> Result<(), MastForestError> {
+        self.append_before_enter(self.node_id(node_ref), decorator_ids)
+    }
+
     pub fn append_after_exit(
         &mut self,
         node_id: MastNodeId,
@@ -1311,6 +1548,14 @@ impl MastForestBuilder {
         self.hash_by_node_id.insert(node_id, new_node_fingerprint);
         self.node_id_by_fingerprint.insert(new_node_fingerprint, node_id);
         Ok(())
+    }
+
+    pub(crate) fn append_after_exit_ref(
+        &mut self,
+        node_ref: MastNodeRef,
+        decorator_ids: Vec<DecoratorId>,
+    ) -> Result<(), MastForestError> {
+        self.append_after_exit(self.node_id(node_ref), decorator_ids)
     }
 }
 
@@ -1749,7 +1994,7 @@ mod tests {
 
         assert_ne!(cloned_id, block_id);
 
-        let (forest, _remapping) = builder.build();
+        let (forest, _remapping) = builder.build().into_parts();
 
         let cloned_vars = forest.debug_info().debug_vars_for_node(cloned_id);
         assert_eq!(cloned_vars.len(), 1, "cloned node should have debug vars");
@@ -1814,7 +2059,7 @@ mod tests {
 
         assert_ne!(cloned_a, cloned_b, "different debug vars must prevent dedup");
 
-        let (forest, _remapping) = builder.build();
+        let (forest, _remapping) = builder.build().into_parts();
         let vars_a = forest.debug_info().debug_vars_for_node(cloned_a);
         let vars_b = forest.debug_info().debug_vars_for_node(cloned_b);
 
@@ -1897,7 +2142,7 @@ mod tests {
             "same op stream plus different AssemblyOp payload must not dedup"
         );
 
-        let (forest, _remapping) = builder.build();
+        let (forest, _remapping) = builder.build().into_parts();
         assert_eq!(
             forest.debug_info().first_asm_op_for_node(block_a).unwrap().context_name(),
             "ctx_a"
@@ -1934,7 +2179,7 @@ mod tests {
             "same-structure non-block nodes with different AssemblyOps must not dedup"
         );
 
-        let (forest, _remapping) = builder.build();
+        let (forest, _remapping) = builder.build().into_parts();
         assert_eq!(
             forest.debug_info().first_asm_op_for_node(call_a).unwrap().context_name(),
             "ctx_a"
@@ -1973,7 +2218,7 @@ mod tests {
 
         assert_ne!(cloned_id, block_id);
 
-        let (forest, _remapping) = builder.build();
+        let (forest, _remapping) = builder.build().into_parts();
 
         assert_eq!(
             forest.debug_info().first_asm_op_for_node(cloned_id).unwrap().context_name(),
@@ -2036,7 +2281,7 @@ mod tests {
             "statically linked nodes must not alias local nodes with different metadata"
         );
 
-        let (forest, _remapping) = builder.build();
+        let (forest, _remapping) = builder.build().into_parts();
         assert_eq!(
             forest
                 .debug_info()
@@ -2088,13 +2333,14 @@ mod tests {
             .unwrap();
         source_builder.mast_forest.make_root(static_block);
 
-        let (static_forest, _) = source_builder.build();
+        let (static_forest, _) = source_builder.build().into_parts();
         let expected_padded_idx = static_forest.debug_info().asm_ops_for_node(static_block)[0].0;
 
         let mut builder = MastForestBuilder::new([&static_forest]).unwrap();
         let copied_block_id = builder
             .ensure_external_link_with_source(static_forest[static_block].digest(), None, None)
             .unwrap();
+        let copied_block_ref = builder.node_ref(copied_block_id).unwrap();
         let local_block_id = builder
             .ensure_block(ops, Vec::new(), vec![(8, asm_op)], vec![], vec![], vec![])
             .unwrap();
@@ -2104,8 +2350,8 @@ mod tests {
             "copied padded blocks should dedup with equivalent local blocks",
         );
 
-        let (forest, remapping) = builder.build();
-        let final_block_id = remapping.get(&copied_block_id).copied().unwrap_or(copied_block_id);
+        let (forest, remapping) = builder.build().into_parts();
+        let final_block_id = remapping.get(&copied_block_ref).copied().unwrap_or(copied_block_id);
 
         assert!(
             forest
@@ -2149,6 +2395,7 @@ mod tests {
                 vec![],
             )
             .unwrap();
+        let root_block_ref = builder.node_ref(root_block).unwrap();
         builder.mast_forest.make_root(root_block);
 
         // Second block to merge with.
@@ -2162,10 +2409,10 @@ mod tests {
         let merged_id = merged[0];
         assert_ne!(merged_id, root_block);
 
-        let (forest, remapping) = builder.build();
+        let (forest, remapping) = builder.build().into_parts();
 
         // The root block survives removal (it's a procedure root).
-        let final_root_id = remapping.get(&root_block).copied().unwrap_or(root_block);
+        let final_root_id = remapping.get(&root_block_ref).copied().unwrap_or(root_block);
         assert!(forest.is_procedure_root(final_root_id), "root should survive");
 
         // Root block must still have its debug vars.
@@ -2207,7 +2454,7 @@ mod tests {
         source_builder.mast_forest.make_root(alias_a);
         source_builder.mast_forest.make_root(alias_b);
 
-        let (static_forest, _remapping) = source_builder.build();
+        let (static_forest, _remapping) = source_builder.build().into_parts();
         assert_eq!(static_forest[alias_a].digest(), static_forest[alias_b].digest());
 
         // Exact path via internal API — gets alias_b's metadata.
@@ -2219,7 +2466,7 @@ mod tests {
                 .ensure_node_from_statically_linked_source(builder, alias_b)
                 .unwrap()
         };
-        let (exact_forest, _) = exact_builder.build();
+        let (exact_forest, _) = exact_builder.build().into_parts();
         assert_eq!(
             exact_forest
                 .debug_info()
@@ -2259,14 +2506,14 @@ mod tests {
         source_builder.mast_forest.make_root(alias_a);
         source_builder.mast_forest.make_root(alias_b);
 
-        let (static_forest, _) = source_builder.build();
+        let (static_forest, _) = source_builder.build().into_parts();
 
         let mut builder = MastForestBuilder::new([&static_forest]).unwrap();
         let linked = builder
             .ensure_external_link_with_source(static_forest[alias_a].digest(), None, None)
             .unwrap();
         builder.mast_forest.make_root(linked);
-        let (forest, _) = builder.build();
+        let (forest, _) = builder.build().into_parts();
 
         // Only one node should be in the forest — the selected alias.
         assert_eq!(forest.num_nodes(), 1, "only the selected alias should be imported");
@@ -2305,7 +2552,7 @@ mod tests {
         source_builder.mast_forest.make_root(alias_a);
         source_builder.mast_forest.make_root(alias_b);
 
-        let (static_forest, _remapping) = source_builder.build();
+        let (static_forest, _remapping) = source_builder.build().into_parts();
         assert_eq!(static_forest[alias_a].digest(), static_forest[alias_b].digest());
 
         let mut exact_builder = MastForestBuilder::new([&static_forest]).unwrap();
@@ -2316,7 +2563,7 @@ mod tests {
                 .ensure_node_from_statically_linked_source(builder, alias_b)
                 .unwrap()
         };
-        let (exact_forest, _) = exact_builder.build();
+        let (exact_forest, _) = exact_builder.build().into_parts();
 
         let mut provenance_builder = MastForestBuilder::new([&static_forest]).unwrap();
         let linked_alias_b = provenance_builder
@@ -2326,7 +2573,7 @@ mod tests {
                 Some(alias_b),
             )
             .unwrap();
-        let (linked_forest, _) = provenance_builder.build();
+        let (linked_forest, _) = provenance_builder.build().into_parts();
 
         assert_eq!(
             exact_forest

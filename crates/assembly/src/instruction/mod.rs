@@ -8,13 +8,12 @@ use miden_assembly_syntax::{
 };
 use miden_core::{
     Felt, WORD_SIZE, ZERO,
-    mast::MastNodeId,
     operations::{AssemblyOp, Decorator, Operation},
 };
 
 use crate::{
     Assembler, ProcedureContext, ast::InvokeKind, basic_block_builder::BasicBlockBuilder,
-    push_value_ops,
+    mast_forest_builder::MastNodeRef, push_value_ops,
 };
 
 mod crypto_ops;
@@ -35,7 +34,7 @@ impl Assembler {
         instruction: &Span<Instruction>,
         block_builder: &mut BasicBlockBuilder,
         proc_ctx: &mut ProcedureContext,
-    ) -> Result<Option<MastNodeId>, Report> {
+    ) -> Result<Option<MastNodeRef>, Report> {
         // Determine whether this instruction can create a new node
         let can_create_node = matches!(
             instruction.inner(),
@@ -87,7 +86,7 @@ impl Assembler {
         proc_ctx: &mut ProcedureContext,
         before_enter: Vec<miden_core::mast::DecoratorId>,
         node_asm_op: Option<AssemblyOp>,
-    ) -> Result<Option<MastNodeId>, Report> {
+    ) -> Result<Option<MastNodeRef>, Report> {
         use Operation::*;
 
         let span = instruction.span();
