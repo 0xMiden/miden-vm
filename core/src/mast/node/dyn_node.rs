@@ -32,6 +32,10 @@ pub struct DynNode {
 
 /// Constants
 impl DynNode {
+    pub(crate) fn has_linked_decorators(&self) -> bool {
+        self.decorator_store.is_linked()
+    }
+
     /// The domain of the Dyn block (used for control block hashing).
     pub const DYN_DOMAIN: Felt = Felt::new_unchecked(opcodes::DYN as u64);
 

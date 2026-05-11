@@ -34,6 +34,10 @@ pub struct JoinNode {
 
 /// Constants
 impl JoinNode {
+    pub(crate) fn has_linked_decorators(&self) -> bool {
+        self.decorator_store.is_linked()
+    }
+
     /// The domain of the join block (used for control block hashing).
     pub const DOMAIN: Felt = Felt::new_unchecked(opcodes::JOIN as u64);
 }

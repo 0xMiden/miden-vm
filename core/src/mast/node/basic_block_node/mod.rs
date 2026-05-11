@@ -91,6 +91,10 @@ pub struct BasicBlockNode {
 // ------------------------------------------------------------------------------------------------
 /// Constants
 impl BasicBlockNode {
+    pub(crate) fn has_linked_decorators(&self) -> bool {
+        self.decorators.is_linked()
+    }
+
     /// The domain of the basic block node (used for control block hashing).
     pub const DOMAIN: Felt = ZERO;
 }

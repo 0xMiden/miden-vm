@@ -106,7 +106,9 @@ mod node_fingerprint;
 pub use node_fingerprint::{DecoratorFingerprint, MastNodeFingerprint};
 
 mod node_builder_utils;
-pub use node_builder_utils::build_node_with_remapped_ids;
+pub use node_builder_utils::{
+    OwnedMastNode, build_node_with_remapped_ids, build_owned_node_with_remapped_ids,
+};
 
 #[cfg(test)]
 mod tests;
@@ -1321,6 +1323,8 @@ pub enum MastForestError {
     NodeIdOverflow(MastNodeId, usize),
     #[error("decorator id {0} is greater than or equal to decorator count {1}")]
     DecoratorIdOverflow(DecoratorId, usize),
+    #[error("owned MAST node helper received a node with linked decorator storage")]
+    LinkedDecoratorStorage,
     #[error("basic block cannot be created from an empty list of operations")]
     EmptyBasicBlock,
     #[error(

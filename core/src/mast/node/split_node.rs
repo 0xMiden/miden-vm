@@ -38,6 +38,10 @@ pub struct SplitNode {
 
 /// Constants
 impl SplitNode {
+    pub(crate) fn has_linked_decorators(&self) -> bool {
+        self.decorator_store.is_linked()
+    }
+
     /// The domain of the split node (used for control block hashing).
     pub const DOMAIN: Felt = Felt::new_unchecked(opcodes::SPLIT as u64);
 }
