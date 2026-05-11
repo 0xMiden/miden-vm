@@ -19,10 +19,7 @@ use miden_core::{
     Felt, Word, assert_matches,
     events::EventId,
     field::PrimeField64,
-    mast::{
-        CallNodeBuilder, JoinNodeBuilder, LoopNodeBuilder, MastForestContributor, MastNode,
-        MastNodeExt, MastNodeId, SplitNodeBuilder,
-    },
+    mast::{MastNode, MastNodeExt, MastNodeId},
     operations::{Decorator, Operation},
     program::Program,
     serde::{Deserializable, DeserializationError, Serializable},
@@ -42,8 +39,6 @@ use crate::{
     assembler::MAX_CONTROL_FLOW_NESTING,
     ast::{Module, ModuleKind, ProcedureName, QualifiedProcedureName},
     diagnostics::{IntoDiagnostic, Report},
-    fmp::fmp_initialization_sequence,
-    mast_forest_builder::MastForestBuilder,
     report,
     testing::{
         TestContext, assert_diagnostic, assert_diagnostic_lines, parse_module, regex, source_file,
@@ -4902,28 +4897,6 @@ fn nested_blocks() -> Result<(), Report> {
         assembler
     };
 
-    // The expected `MastForest` for the program (that we will build by hand)
-    let mut expected_mast_forest_builder = MastForestBuilder::default();
-
-    // fetch the kernel digest and store into a syscall block
-    //
-    // Note: this assumes the current internal implementation detail that `assembler.mast_forest`
-    // contains the MAST nodes for the kernel after a call to
-    // `Assembler::with_kernel_from_module()`.
-    let syscall_foo_node_id = {
-        let kernel_foo_node_id = expected_mast_forest_builder
-            .ensure_block(vec![Operation::Add], Vec::new(), vec![], vec![], vec![], vec![])
-            .unwrap();
-
-        expected_mast_forest_builder
-            .ensure_node(
-                CallNodeBuilder::new_syscall(kernel_foo_node_id)
-                    .with_before_enter(vec![])
-                    .with_after_exit(vec![]),
-            )
-            .unwrap()
-    };
-
     let program = r#"
     use libs::helpers
 
@@ -4961,163 +4934,8 @@ fn nested_blocks() -> Result<(), Report> {
     end"#;
 
     let program = assembler.assemble_program(program).unwrap();
-
-    // basic block representing foo::bar.baz procedure
-    let exec_foo_bar_baz_node_id = expected_mast_forest_builder
-        .ensure_block(
-            vec![Operation::Push(Felt::from_u32(29))],
-            Vec::new(),
-            vec![],
-            vec![],
-            vec![],
-            vec![],
-        )
-        .unwrap();
-
-    let fmp_initialization = expected_mast_forest_builder
-        .ensure_block(fmp_initialization_sequence(), Vec::new(), vec![], vec![], vec![], vec![])
-        .unwrap();
-
-    let before = expected_mast_forest_builder
-        .ensure_block(
-            vec![Operation::Push(Felt::from_u32(2))],
-            Vec::new(),
-            vec![],
-            vec![],
-            vec![],
-            vec![],
-        )
-        .unwrap();
-
-    let r#true1 = expected_mast_forest_builder
-        .ensure_block(
-            vec![Operation::Push(Felt::from_u32(3))],
-            Vec::new(),
-            vec![],
-            vec![],
-            vec![],
-            vec![],
-        )
-        .unwrap();
-    let r#false1 = expected_mast_forest_builder
-        .ensure_block(
-            vec![Operation::Push(Felt::from_u32(5))],
-            Vec::new(),
-            vec![],
-            vec![],
-            vec![],
-            vec![],
-        )
-        .unwrap();
-    let r#if1 = expected_mast_forest_builder
-        .ensure_node(
-            SplitNodeBuilder::new([r#true1, r#false1])
-                .with_before_enter(vec![])
-                .with_after_exit(vec![]),
-        )
-        .unwrap();
-
-    let r#true3 = expected_mast_forest_builder
-        .ensure_block(
-            vec![Operation::Push(Felt::from_u32(7))],
-            Vec::new(),
-            vec![],
-            vec![],
-            vec![],
-            vec![],
-        )
-        .unwrap();
-    let r#false3 = expected_mast_forest_builder
-        .ensure_block(
-            vec![Operation::Push(Felt::from_u32(11))],
-            Vec::new(),
-            vec![],
-            vec![],
-            vec![],
-            vec![],
-        )
-        .unwrap();
-    let r#true2 = expected_mast_forest_builder
-        .ensure_node(
-            SplitNodeBuilder::new([r#true3, r#false3])
-                .with_before_enter(vec![])
-                .with_after_exit(vec![]),
-        )
-        .unwrap();
-
-    let r#while = {
-        let body_node_id = expected_mast_forest_builder
-            .ensure_block(
-                vec![
-                    Operation::Push(Felt::from_u32(17)),
-                    Operation::Push(Felt::from_u32(19)),
-                    Operation::Push(Felt::from_u32(23)),
-                ],
-                Vec::new(),
-                vec![],
-                vec![],
-                vec![],
-                vec![],
-            )
-            .unwrap();
-
-        expected_mast_forest_builder
-            .ensure_node(
-                LoopNodeBuilder::new(body_node_id)
-                    .with_before_enter(vec![])
-                    .with_after_exit(vec![]),
-            )
-            .unwrap()
-    };
-    let push_13_basic_block_id = expected_mast_forest_builder
-        .ensure_block(
-            vec![Operation::Push(Felt::from_u32(13))],
-            Vec::new(),
-            vec![],
-            vec![],
-            vec![],
-            vec![],
-        )
-        .unwrap();
-
-    let r#false2 = expected_mast_forest_builder
-        .ensure_node(
-            JoinNodeBuilder::new([push_13_basic_block_id, r#while])
-                .with_before_enter(vec![])
-                .with_after_exit(vec![]),
-        )
-        .unwrap();
-    let nested = expected_mast_forest_builder
-        .ensure_node(
-            SplitNodeBuilder::new([r#true2, r#false2])
-                .with_before_enter(vec![])
-                .with_after_exit(vec![]),
-        )
-        .unwrap();
-
-    let combined_node_id = expected_mast_forest_builder
-        .join_nodes(
-            vec![
-                fmp_initialization,
-                before,
-                r#if1,
-                nested,
-                exec_foo_bar_baz_node_id,
-                syscall_foo_node_id,
-            ],
-            None,
-        )
-        .unwrap();
-    let combined_node_ref = expected_mast_forest_builder
-        .node_ref(combined_node_id)
-        .expect("missing combined node ref");
-
-    let (mut expected_mast_forest, node_remapping) =
-        expected_mast_forest_builder.build().into_parts();
-    expected_mast_forest.make_root(node_remapping[&combined_node_ref]);
-    let expected_program =
-        Program::new(expected_mast_forest.into(), node_remapping[&combined_node_ref]);
-    assert_eq!(expected_program.hash(), program.hash());
+    insta::assert_snapshot!(program);
+    insta::assert_snapshot!("nested_blocks_hash", program.hash());
 
     // also check that the program has the right number of procedures (which excludes the dummy
     // library and kernel)

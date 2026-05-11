@@ -91,10 +91,6 @@ pub struct BasicBlockNode {
 // ------------------------------------------------------------------------------------------------
 /// Constants
 impl BasicBlockNode {
-    pub(crate) fn has_linked_decorators(&self) -> bool {
-        self.decorators.is_linked()
-    }
-
     /// The domain of the basic block node (used for control block hashing).
     pub const DOMAIN: Felt = ZERO;
 }
@@ -815,10 +811,14 @@ impl MastNodeExt for BasicBlockNode {
             },
         };
 
-        // Use from_op_batches to avoid re-batching and re-adjusting decorators
-        BasicBlockNodeBuilder::from_op_batches(self.op_batches, padded_decorators, self.digest)
-            .with_before_enter(before_enter)
-            .with_after_exit(after_exit)
+        // Preserve the stored batches and digest. Existing nodes may have a forced digest.
+        BasicBlockNodeBuilder::from_op_batches_preserving_digest(
+            self.op_batches,
+            padded_decorators,
+            self.digest,
+        )
+        .with_before_enter(before_enter)
+        .with_after_exit(after_exit)
     }
 
     #[cfg(debug_assertions)]
@@ -1395,11 +1395,14 @@ fn batch_and_hash_ops(ops: &[Operation]) -> (Vec<OpBatch>, Word) {
     // Group the operations into batches.
     let batches = batch_ops(ops);
 
-    // Compute the hash of all operation groups.
-    let op_groups: Vec<Felt> = batches.iter().flat_map(|batch| batch.groups).collect();
-    let hash = hasher::hash_elements(&op_groups);
+    let hash = hash_op_batches(&batches);
 
     (batches, hash)
+}
+
+fn hash_op_batches(op_batches: &[OpBatch]) -> Word {
+    let op_groups: Vec<Felt> = op_batches.iter().flat_map(|batch| batch.groups).collect();
+    hasher::hash_elements(&op_groups)
 }
 
 /// Groups the provided operations into batches as described in the docs for this module (i.e., up
@@ -1480,7 +1483,40 @@ impl BasicBlockNodeBuilder {
     /// and decorators already use padded indices. The digest must also be provided.
     ///
     /// The decorators must use padded operation indices that match the batched operations.
-    pub(crate) fn from_op_batches(
+    pub fn from_op_batches(
+        op_batches: Vec<OpBatch>,
+        decorators: DecoratorList,
+        digest: Word,
+    ) -> Result<Self, MastForestError> {
+        if op_batches.is_empty() {
+            return Err(MastForestError::EmptyBasicBlock);
+        }
+
+        let computed_digest = hash_op_batches(&op_batches);
+        if computed_digest != digest {
+            return Err(MastForestError::BasicBlockDigestMismatch {
+                expected: digest,
+                computed: computed_digest,
+            });
+        }
+
+        Ok(Self::from_op_batches_unchecked(op_batches, decorators, computed_digest))
+    }
+
+    /// Creates a builder from pre-existing OpBatches and preserves the supplied digest.
+    ///
+    /// This is intended for trusted reconstruction paths where the source node already exists and
+    /// may have a forced digest. New caller-supplied batched data should use
+    /// [`Self::from_op_batches`] so the digest is validated against the operation batches.
+    pub fn from_op_batches_preserving_digest(
+        op_batches: Vec<OpBatch>,
+        decorators: DecoratorList,
+        digest: Word,
+    ) -> Self {
+        Self::from_op_batches_unchecked(op_batches, decorators, digest)
+    }
+
+    pub(in crate::mast) fn from_op_batches_unchecked(
         op_batches: Vec<OpBatch>,
         decorators: DecoratorList,
         digest: Word,

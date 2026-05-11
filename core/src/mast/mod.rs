@@ -108,9 +108,7 @@ pub use node_fingerprint::{
 };
 
 mod node_builder_utils;
-pub use node_builder_utils::{
-    OwnedMastNode, build_node_with_remapped_ids, build_owned_node_with_remapped_ids,
-};
+pub use node_builder_utils::build_node_with_remapped_ids;
 
 mod sparse;
 pub use sparse::{MastForestId, SparseMastForest, SparseMastForestBuilder, VisitKind};
@@ -1527,8 +1525,6 @@ pub enum MastForestError {
     NodeIdOverflow(MastNodeId, usize),
     #[error("decorator id {0} is greater than or equal to decorator count {1}")]
     DecoratorIdOverflow(DecoratorId, usize),
-    #[error("owned MAST node helper received a node with linked decorator storage")]
-    LinkedDecoratorStorage,
     #[error("basic block cannot be created from an empty list of operations")]
     EmptyBasicBlock,
     #[error(
@@ -1552,6 +1548,8 @@ pub enum MastForestError {
     DigestRequiredForDeserialization,
     #[error("invalid batch in basic block node {0:?}: {1}")]
     InvalidBatchPadding(MastNodeId, String),
+    #[error("basic block digest mismatch: expected {expected:?}, computed {computed:?}")]
+    BasicBlockDigestMismatch { expected: Word, computed: Word },
     #[error("procedure name references digest that is not a procedure root: {0:?}")]
     InvalidProcedureNameDigest(Word),
     #[error(

@@ -39,10 +39,6 @@ pub struct LoopNode {
 
 /// Constants
 impl LoopNode {
-    pub(crate) fn has_linked_decorators(&self) -> bool {
-        self.decorator_store.is_linked()
-    }
-
     /// The domain of the loop node (used for control block hashing).
     pub const DOMAIN: Felt = Felt::new_unchecked(opcodes::LOOP as u64);
 }

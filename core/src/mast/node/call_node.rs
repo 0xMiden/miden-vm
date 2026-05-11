@@ -44,10 +44,6 @@ pub struct CallNode {
 //-------------------------------------------------------------------------------------------------
 /// Constants
 impl CallNode {
-    pub(crate) fn has_linked_decorators(&self) -> bool {
-        self.decorator_store.is_linked()
-    }
-
     /// The domain of the call block (used for control block hashing).
     pub const CALL_DOMAIN: Felt = Felt::new_unchecked(opcodes::CALL as u64);
     /// The domain of the syscall block (used for control block hashing).

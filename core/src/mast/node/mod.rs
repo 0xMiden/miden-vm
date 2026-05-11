@@ -105,18 +105,6 @@ pub enum MastNode {
 // ------------------------------------------------------------------------------------------------
 /// Public accessors
 impl MastNode {
-    pub(crate) fn has_linked_decorators(&self) -> bool {
-        match self {
-            Self::Block(node) => node.has_linked_decorators(),
-            Self::Join(node) => node.has_linked_decorators(),
-            Self::Split(node) => node.has_linked_decorators(),
-            Self::Loop(node) => node.has_linked_decorators(),
-            Self::Call(node) => node.has_linked_decorators(),
-            Self::Dyn(node) => node.has_linked_decorators(),
-            Self::External(node) => node.has_linked_decorators(),
-        }
-    }
-
     /// Returns true if this node is an external node.
     pub fn is_external(&self) -> bool {
         matches!(self, MastNode::External(_))
