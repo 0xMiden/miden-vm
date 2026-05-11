@@ -9,16 +9,17 @@ use miden_core::{
     proof::HashFunction,
 };
 use miden_processor::{DefaultHost, ExecutionOptions, Program, ProgramInfo};
-use miden_utils_testing::{AdviceInputs, ProvingOptions, StackInputs, prove_sync};
+use miden_utils_testing::{
+    AdviceInputs, ProvingOptions, StackInputs, prove_sync,
+    recursive_verifier::{VerifierData, VerifierError, generate_advice_inputs},
+};
 use rand::{Rng, RngCore, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use rstest::rstest;
-use verifier_recursive::{VerifierData, VerifierError, generate_advice_inputs};
 
 mod ace_circuit;
 mod ace_read_check;
 mod batch_query_gen;
-mod verifier_recursive;
 
 // RECURSIVE VERIFIER TESTS
 // ================================================================================================

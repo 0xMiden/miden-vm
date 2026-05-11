@@ -94,7 +94,6 @@ assert_cmd = { version = "2.1" }
 bincode = { workspace = true }
 criterion = { workspace = true, features = ["async_tokio"] }
 escargot = { version = "0.5" }
-miden-crypto.workspace = true
 miden-processor = { workspace = true, features = ["testing"] }
 miden-lifted-stark.workspace = true
 miden-test-serde-macros.workspace = true

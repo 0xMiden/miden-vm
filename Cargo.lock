@@ -1345,7 +1345,6 @@ dependencies = [
 name = "miden-core-lib"
 version = "0.24.0"
 dependencies = [
- "bincode",
  "criterion",
  "env_logger",
  "fs-err",
@@ -1354,7 +1353,6 @@ dependencies = [
  "miden-assembly",
  "miden-core",
  "miden-crypto",
- "miden-lifted-stark",
  "miden-package-registry",
  "miden-processor",
  "miden-prover",
@@ -1694,6 +1692,7 @@ dependencies = [
 name = "miden-test-utils"
 version = "0.1.0"
 dependencies = [
+ "bincode",
  "env_logger",
  "miden-air",
  "miden-assembly",
@@ -1705,6 +1704,7 @@ dependencies = [
  "pretty_assertions",
  "proptest",
  "test-case",
+ "thiserror",
 ]
 
 [[package]]
@@ -1774,7 +1774,6 @@ dependencies = [
  "miden-assembly",
  "miden-core",
  "miden-core-lib",
- "miden-crypto",
  "miden-debug-types",
  "miden-lifted-stark",
  "miden-mast-package",
