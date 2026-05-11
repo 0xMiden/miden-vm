@@ -1,3 +1,5 @@
+use alloc::vec::Vec;
+
 use miden_utils_core_derive::MastForestContributor;
 
 use super::{
@@ -5,8 +7,7 @@ use super::{
     LoopNodeBuilder, SplitNodeBuilder,
 };
 use crate::{
-    Word,
-    mast::{MastForest, MastForestError, MastNode, MastNodeId},
+    mast::{DecoratorId, MastForest, MastForestError, MastNode, MastNodeFingerprint, MastNodeId},
     utils::LookupByIdx,
 };
 
@@ -18,17 +19,39 @@ pub trait MastForestContributor {
     /// This method computes the fingerprint for a node directly from the builder data
     /// without first constructing a MastNode, providing the same result as the
     /// traditional fingerprint computation approach.
-    fn fingerprint_for_node(&self, forest: &MastForest) -> Result<Word, MastForestError>;
+    fn fingerprint_for_node(
+        &self,
+        forest: &MastForest,
+        hash_by_node_id: &impl LookupByIdx<MastNodeId, MastNodeFingerprint>,
+    ) -> Result<MastNodeFingerprint, MastForestError>;
 
     /// Remap the node children to their new positions indicated by the given
     /// lookup.
     fn remap_children(self, remapping: &impl LookupByIdx<MastNodeId, MastNodeId>) -> Self;
 
+    /// Adds decorators to be executed before this node.
+    fn with_before_enter(self, _decorators: impl Into<Vec<DecoratorId>>) -> Self;
+
+    /// Adds decorators to be executed after this node.
+    fn with_after_exit(self, _decorators: impl Into<Vec<DecoratorId>>) -> Self;
+
+    /// Appends decorators to be executed before this node.
+    ///
+    /// Unlike `with_before_enter`, this method adds to the existing list of decorators
+    /// rather than replacing them.
+    fn append_before_enter(&mut self, decorators: impl IntoIterator<Item = DecoratorId>);
+
+    /// Appends decorators to be executed after this node.
+    ///
+    /// Unlike `with_after_exit`, this method adds to the existing list of decorators
+    /// rather than replacing them.
+    fn append_after_exit(&mut self, decorators: impl IntoIterator<Item = DecoratorId>);
+
     /// Sets a digest to be forced into the built node.
     ///
     /// When a digest is set, the builder will use this digest instead of computing
     /// the normal digest for the node during the build() operation.
-    fn with_digest(self, digest: Word) -> Self;
+    fn with_digest(self, digest: crate::Word) -> Self;
 }
 
 /// Enum of all MAST node builders that can be added to a forest.
@@ -62,11 +85,28 @@ impl MastNodeBuilder {
         }
     }
 
+    /// Build the node from this builder without reading child nodes from a forest.
+    ///
+    /// Forest-dependent node kinds require a forced digest. This is intended for assembly-time
+    /// builders that already computed the digest from builder-local child references.
+    pub fn build_with_forced_digest(self) -> Result<MastNode, MastForestError> {
+        match self {
+            MastNodeBuilder::BasicBlock(builder) => Ok(builder.build()?.into()),
+            MastNodeBuilder::Call(builder) => Ok(builder.build_with_forced_digest()?.into()),
+            MastNodeBuilder::Dyn(builder) => Ok(builder.build().into()),
+            MastNodeBuilder::External(builder) => Ok(builder.build().into()),
+            MastNodeBuilder::Join(builder) => Ok(builder.build_with_forced_digest()?.into()),
+            MastNodeBuilder::Loop(builder) => Ok(builder.build_with_forced_digest()?.into()),
+            MastNodeBuilder::Split(builder) => Ok(builder.build_with_forced_digest()?.into()),
+        }
+    }
+
     /// Adds the node from this builder to the forest without validation, used during
     /// deserialization.
     ///
-    /// This method bypasses normal validation. It should only be used during deserialization where
-    /// the forest structure is being reconstructed.
+    /// This method bypasses normal validation and directly creates nodes with
+    /// `DecoratorStore::Linked`. It should only be used during deserialization where the forest
+    /// structure is being reconstructed.
     pub(in crate::mast) fn add_to_forest_relaxed(
         self,
         mast_forest: &mut MastForest,
@@ -106,27 +146,228 @@ impl proptest::prelude::Arbitrary for MastNodeBuilder {
 
 #[cfg(test)]
 mod fingerprint_invariant_tests {
+    use alloc::{collections::BTreeMap, vec::Vec};
+
+    use proptest::prelude::*;
+
     use crate::{
         Felt,
-        mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor},
-        operations::Operation,
+        mast::{
+            BasicBlockNodeBuilder, DecoratorId, MastForest, MastForestContributor,
+            arbitrary::op_non_control_strategy,
+        },
+        operations::{Decorator, Operation},
     };
 
+    /// Creates a decorator and returns its ID
+    fn add_trace_decorator(forest: &mut MastForest, value: u8) -> DecoratorId {
+        forest.add_decorator(Decorator::Trace(value.into())).unwrap()
+    }
+
     #[test]
-    fn basic_block_fingerprint_ignores_assert_error_codes() {
-        let forest = MastForest::new();
-        let builder_assert_1 =
-            BasicBlockNodeBuilder::new(vec![Operation::Assert(Felt::new_unchecked(1))]);
-        let builder_assert_2 =
-            BasicBlockNodeBuilder::new(vec![Operation::Assert(Felt::new_unchecked(2))]);
+    fn basic_block_fingerprint_different_before_decorators() {
+        let mut forest = MastForest::new();
+        let deco1 = add_trace_decorator(&mut forest, 1);
+        let deco2 = add_trace_decorator(&mut forest, 2);
 
-        let fp_assert_1 = builder_assert_1.fingerprint_for_node(&forest).unwrap();
-        let fp_assert_2 = builder_assert_2.fingerprint_for_node(&forest).unwrap();
+        // Create two identical basic blocks with different before_enter decorators using builder
+        // pattern
+        let builder1 = BasicBlockNodeBuilder::new(vec![Operation::Add, Operation::Mul], Vec::new())
+            .with_before_enter(vec![deco1]);
+        let builder2 = BasicBlockNodeBuilder::new(vec![Operation::Add, Operation::Mul], Vec::new())
+            .with_before_enter(vec![deco2]);
 
-        assert_eq!(
-            fp_assert_1, fp_assert_2,
-            "assert error codes are debug metadata and should not affect MAST node identity"
+        // Compute fingerprints using fingerprint_for_node
+        let empty_map = BTreeMap::new();
+        let fp1 = builder1.fingerprint_for_node(&forest, &empty_map).unwrap();
+        let fp2 = builder2.fingerprint_for_node(&forest, &empty_map).unwrap();
+
+        // Fingerprints should be different
+        assert_ne!(
+            fp1, fp2,
+            "Basic blocks with different before_enter decorators should have different fingerprints"
         );
+    }
+
+    #[test]
+    fn basic_block_fingerprint_different_after_decorators() {
+        let mut forest = MastForest::new();
+        let deco1 = add_trace_decorator(&mut forest, 1);
+        let deco2 = add_trace_decorator(&mut forest, 2);
+
+        // Create two identical basic blocks with different after_exit decorators using builder
+        // pattern
+        let builder1 = BasicBlockNodeBuilder::new(vec![Operation::Add, Operation::Mul], Vec::new())
+            .with_after_exit(vec![deco1]);
+        let builder2 = BasicBlockNodeBuilder::new(vec![Operation::Add, Operation::Mul], Vec::new())
+            .with_after_exit(vec![deco2]);
+
+        // Compute fingerprints using fingerprint_for_node
+        let empty_map = BTreeMap::new();
+        let fp1 = builder1.fingerprint_for_node(&forest, &empty_map).unwrap();
+        let fp2 = builder2.fingerprint_for_node(&forest, &empty_map).unwrap();
+
+        // Fingerprints should be different
+        assert_ne!(
+            fp1, fp2,
+            "Basic blocks with different after_exit decorators should have different fingerprints"
+        );
+    }
+
+    #[test]
+    fn basic_block_fingerprint_different_assert_opcodes_no_decorators() {
+        let forest = MastForest::new();
+        let error_code = Felt::new_unchecked(42);
+
+        // Create three basic blocks with different assert opcodes but no decorators using builders
+        let builder_assert =
+            BasicBlockNodeBuilder::new(vec![Operation::Assert(error_code)], Vec::new());
+        let builder_u32assert2 =
+            BasicBlockNodeBuilder::new(vec![Operation::U32assert2(error_code)], Vec::new());
+        let builder_mpverify =
+            BasicBlockNodeBuilder::new(vec![Operation::MpVerify(error_code)], Vec::new());
+
+        // Compute fingerprints using fingerprint_for_node
+        let empty_map = BTreeMap::new();
+        let fp_assert = builder_assert.fingerprint_for_node(&forest, &empty_map).unwrap();
+        let fp_u32assert2 = builder_u32assert2.fingerprint_for_node(&forest, &empty_map).unwrap();
+        let fp_mpverify = builder_mpverify.fingerprint_for_node(&forest, &empty_map).unwrap();
+
+        // All fingerprints should be different since the opcodes are different
+        assert_ne!(
+            fp_assert, fp_u32assert2,
+            "Basic blocks with Assert vs U32assert2 should have different fingerprints"
+        );
+        assert_ne!(
+            fp_assert, fp_mpverify,
+            "Basic blocks with Assert vs MpVerify should have different fingerprints"
+        );
+        assert_ne!(
+            fp_u32assert2, fp_mpverify,
+            "Basic blocks with U32assert2 vs MpVerify should have different fingerprints"
+        );
+    }
+
+    #[test]
+    fn basic_block_fingerprint_different_assert_values_no_decorators() {
+        let forest = MastForest::new();
+        let error_code_1 = Felt::new_unchecked(42);
+        let error_code_2 = Felt::new_unchecked(123);
+
+        // Create basic blocks with same assert opcode but different inner values, no decorators
+        let builder_assert_1 =
+            BasicBlockNodeBuilder::new(vec![Operation::Assert(error_code_1)], Vec::new());
+        let builder_assert_2 =
+            BasicBlockNodeBuilder::new(vec![Operation::Assert(error_code_2)], Vec::new());
+
+        let builder_u32assert2_1 =
+            BasicBlockNodeBuilder::new(vec![Operation::U32assert2(error_code_1)], Vec::new());
+        let builder_u32assert2_2 =
+            BasicBlockNodeBuilder::new(vec![Operation::U32assert2(error_code_2)], Vec::new());
+
+        let builder_mpverify_1 =
+            BasicBlockNodeBuilder::new(vec![Operation::MpVerify(error_code_1)], Vec::new());
+        let builder_mpverify_2 =
+            BasicBlockNodeBuilder::new(vec![Operation::MpVerify(error_code_2)], Vec::new());
+
+        // Compute fingerprints using fingerprint_for_node
+        let empty_map = BTreeMap::new();
+        let fp_assert_1 = builder_assert_1.fingerprint_for_node(&forest, &empty_map).unwrap();
+        let fp_assert_2 = builder_assert_2.fingerprint_for_node(&forest, &empty_map).unwrap();
+
+        let fp_u32assert2_1 =
+            builder_u32assert2_1.fingerprint_for_node(&forest, &empty_map).unwrap();
+        let fp_u32assert2_2 =
+            builder_u32assert2_2.fingerprint_for_node(&forest, &empty_map).unwrap();
+
+        let fp_mpverify_1 = builder_mpverify_1.fingerprint_for_node(&forest, &empty_map).unwrap();
+        let fp_mpverify_2 = builder_mpverify_2.fingerprint_for_node(&forest, &empty_map).unwrap();
+
+        // All fingerprints should be different since the inner values are different
+        assert_ne!(
+            fp_assert_1, fp_assert_2,
+            "Basic blocks with Assert operations with different error codes should have different fingerprints"
+        );
+        assert_ne!(
+            fp_u32assert2_1, fp_u32assert2_2,
+            "Basic blocks with U32assert2 operations with different error codes should have different fingerprints"
+        );
+        assert_ne!(
+            fp_mpverify_1, fp_mpverify_2,
+            "Basic blocks with MpVerify operations with different error codes should have different fingerprints"
+        );
+    }
+
+    // Property-based test using proptest to verify fingerprint invariants with random builders
+    proptest! {
+        #[test]
+        fn prop_basic_block_fingerprint_different_before_decorators(
+            ops in prop::collection::vec(op_non_control_strategy(), 1..=10),
+            deco1_val in any::<u8>(),
+            deco2_val in any::<u8>(),
+        ) {
+            prop_assume!(deco1_val != deco2_val); // Ensure different decorator values
+
+            let mut forest = MastForest::new();
+            let deco1 = add_trace_decorator(&mut forest, deco1_val);
+            let deco2 = add_trace_decorator(&mut forest, deco2_val);
+
+            let builder1 = BasicBlockNodeBuilder::new(ops.clone(), Vec::new())
+                .with_before_enter(vec![deco1]);
+            let builder2 = BasicBlockNodeBuilder::new(ops, Vec::new())
+                .with_before_enter(vec![deco2]);
+
+            let empty_map = BTreeMap::new();
+            let fp1 = builder1.fingerprint_for_node(&forest, &empty_map).unwrap();
+            let fp2 = builder2.fingerprint_for_node(&forest, &empty_map).unwrap();
+
+            assert_ne!(fp1, fp2, "Basic blocks with different before_enter decorators should have different fingerprints");
+        }
+
+        #[test]
+        fn prop_basic_block_fingerprint_different_after_decorators(
+            ops in prop::collection::vec(op_non_control_strategy(), 1..=10),
+            deco1_val in any::<u8>(),
+            deco2_val in any::<u8>(),
+        ) {
+            prop_assume!(deco1_val != deco2_val); // Ensure different decorator values
+
+            let mut forest = MastForest::new();
+            let deco1 = add_trace_decorator(&mut forest, deco1_val);
+            let deco2 = add_trace_decorator(&mut forest, deco2_val);
+
+            let builder1 = BasicBlockNodeBuilder::new(ops.clone(), Vec::new())
+                .with_after_exit(vec![deco1]);
+            let builder2 = BasicBlockNodeBuilder::new(ops, Vec::new())
+                .with_after_exit(vec![deco2]);
+
+            let empty_map = BTreeMap::new();
+            let fp1 = builder1.fingerprint_for_node(&forest, &empty_map).unwrap();
+            let fp2 = builder2.fingerprint_for_node(&forest, &empty_map).unwrap();
+
+            assert_ne!(fp1, fp2, "Basic blocks with different after_exit decorators should have different fingerprints");
+        }
+
+        #[test]
+        fn prop_basic_block_fingerprint_different_assert_values(
+            error_code_1 in any::<u64>(),
+            error_code_2 in any::<u64>(),
+        ) {
+            prop_assume!(error_code_1 != error_code_2); // Ensure different error codes
+
+            let forest = MastForest::new();
+            let felt_1 = Felt::new_unchecked(error_code_1);
+            let felt_2 = Felt::new_unchecked(error_code_2);
+
+            let builder_assert_1 = BasicBlockNodeBuilder::new(vec![Operation::Assert(felt_1)], Vec::new());
+            let builder_assert_2 = BasicBlockNodeBuilder::new(vec![Operation::Assert(felt_2)], Vec::new());
+
+            let empty_map = BTreeMap::new();
+            let fp_assert_1 = builder_assert_1.fingerprint_for_node(&forest, &empty_map).unwrap();
+            let fp_assert_2 = builder_assert_2.fingerprint_for_node(&forest, &empty_map).unwrap();
+
+            assert_ne!(fp_assert_1, fp_assert_2, "Basic blocks with Assert operations with different error codes should have different fingerprints");
+        }
     }
 }
 
@@ -137,20 +378,66 @@ mod round_trip_tests {
     use crate::{
         Word,
         mast::{
-            BasicBlockNodeBuilder, MastForest, MastNodeBuilder, MastNodeExt,
-            node::mast_forest_contributor::MastForestContributor,
+            BasicBlockNodeBuilder, JoinNodeBuilder, MastForest, MastNode, MastNodeBuilder,
+            MastNodeExt, MastNodeId, node::mast_forest_contributor::MastForestContributor,
         },
         operations::Operation,
     };
 
     #[test]
+    fn test_join_node_builder_round_trip_with_digest() {
+        let mut forest = MastForest::new();
+
+        // create two basic block nodes to use as children for the join node
+        let add_builder = BasicBlockNodeBuilder::new(vec![Operation::Add], vec![]);
+        let mul_builder = BasicBlockNodeBuilder::new(vec![Operation::Mul], vec![]);
+
+        // add children to forest and build node
+        let child1 = add_builder.add_to_forest(&mut forest).unwrap();
+        let child2 = mul_builder.add_to_forest(&mut forest).unwrap();
+        let join_builder1 = JoinNodeBuilder::new([child1, child2]);
+        let join_id = join_builder1.add_to_forest(&mut forest).unwrap();
+
+        // perform round-trip
+        let join_node = forest.get_node_by_id(join_id).unwrap();
+        let rebuilt_node = join_node.clone().to_builder(&forest).build(&forest).unwrap();
+
+        // Use semantic equality to handle decorator store state differences
+        match (join_node, &rebuilt_node) {
+            (MastNode::Join(original), MastNode::Join(rebuilt)) => {
+                assert!(original.semantic_eq(rebuilt, &forest));
+            },
+            _ => panic!("Both nodes should be Join nodes"),
+        }
+
+        // Test digest forcing
+        let forced_join_digest = Word::new([
+            Felt::new_unchecked(5),
+            Felt::new_unchecked(6),
+            Felt::new_unchecked(7),
+            Felt::new_unchecked(8),
+        ]);
+        let join_builder2 = JoinNodeBuilder::new([child1, child2]).with_digest(forced_join_digest);
+        let join_node_id2 = join_builder2
+            .add_to_forest(&mut forest)
+            .expect("Failed to add join node to forest with forced digest");
+        let join_node2 = forest.get_node_by_id(join_node_id2).unwrap().unwrap_join();
+
+        assert_eq!(
+            join_node2.digest(),
+            forced_join_digest,
+            "Forced digest should be used for join node"
+        );
+    }
+
+    #[test]
     fn test_mast_node_builder_enum_digest_forcing() {
         let mut forest = MastForest::new();
 
-        let mast_builder1 =
-            MastNodeBuilder::BasicBlock(BasicBlockNodeBuilder::new(vec![Operation::Push(
-                Felt::new_unchecked(10),
-            )]));
+        let mast_builder1 = MastNodeBuilder::BasicBlock(BasicBlockNodeBuilder::new(
+            vec![Operation::Push(Felt::new_unchecked(10))],
+            vec![],
+        ));
         let mast_node_id1 = mast_builder1
             .add_to_forest(&mut forest)
             .expect("Failed to add mast node1 to forest");
@@ -164,7 +451,7 @@ mod round_trip_tests {
             Felt::new_unchecked(12),
         ]);
         let mast_builder2 = MastNodeBuilder::BasicBlock(
-            BasicBlockNodeBuilder::new(vec![Operation::Push(Felt::new_unchecked(10))])
+            BasicBlockNodeBuilder::new(vec![Operation::Push(Felt::new_unchecked(10))], vec![])
                 .with_digest(forced_mast_digest),
         );
         let mast_node_id2 = mast_builder2
@@ -180,6 +467,34 @@ mod round_trip_tests {
             mast_node2.digest(),
             forced_mast_digest,
             "Forced digest should be used for mast node builder enum"
+        );
+    }
+
+    #[test]
+    fn mast_node_builder_builds_control_flow_with_forced_digest_without_forest() {
+        let forced_digest = Word::new([
+            Felt::new_unchecked(13),
+            Felt::new_unchecked(14),
+            Felt::new_unchecked(15),
+            Felt::new_unchecked(16),
+        ]);
+        let children = [MastNodeId::new_unchecked(10), MastNodeId::new_unchecked(11)];
+
+        let node = MastNodeBuilder::Join(JoinNodeBuilder::new(children).with_digest(forced_digest))
+            .build_with_forced_digest()
+            .expect("forced-digest join should build without reading a forest");
+
+        let MastNode::Join(node) = node else {
+            panic!("expected join node");
+        };
+        assert_eq!(node.digest(), forced_digest);
+        assert_eq!([node.first(), node.second()], children);
+
+        assert!(
+            MastNodeBuilder::Join(JoinNodeBuilder::new(children))
+                .build_with_forced_digest()
+                .is_err(),
+            "control-flow nodes require a forced digest when built without a forest"
         );
     }
 }

@@ -5,10 +5,15 @@ use core::fmt;
 use serde::{Deserialize, Serialize};
 
 use super::{MastForestContributor, MastNodeExt};
+#[cfg(debug_assertions)]
+use crate::mast::MastNode;
 use crate::{
     Felt, Word,
     chiplets::hasher,
-    mast::{MastForest, MastForestError, MastNodeId},
+    mast::{
+        DecoratorId, DecoratorStore, ExecutableMastForest, MastForest, MastForestError,
+        MastNodeFingerprint, MastNodeId,
+    },
     operations::opcodes,
     prettier::PrettyPrint,
     utils::{Idx, LookupByIdx},
@@ -30,10 +35,15 @@ use crate::{
 pub struct LoopNode {
     body: MastNodeId,
     digest: Word,
+    decorator_store: DecoratorStore,
 }
 
 /// Constants
 impl LoopNode {
+    pub(crate) fn has_linked_decorators(&self) -> bool {
+        self.decorator_store.is_linked()
+    }
+
     /// The domain of the loop node (used for control block hashing).
     pub const DOMAIN: Felt = Felt::new_unchecked(opcodes::LOOP as u64);
 }
@@ -70,9 +80,43 @@ impl PrettyPrint for LoopNodePrettyPrint<'_> {
     fn render(&self) -> crate::prettier::Document {
         use crate::prettier::*;
 
+        let pre_decorators = {
+            let mut pre_decorators = self
+                .loop_node
+                .before_enter(self.mast_forest)
+                .iter()
+                .map(|&decorator_id| self.mast_forest[decorator_id].render())
+                .reduce(|acc, doc| acc + const_text(" ") + doc)
+                .unwrap_or_default();
+            if !pre_decorators.is_empty() {
+                pre_decorators += nl();
+            }
+
+            pre_decorators
+        };
+
+        let post_decorators = {
+            let mut post_decorators = self
+                .loop_node
+                .after_exit(self.mast_forest)
+                .iter()
+                .map(|&decorator_id| self.mast_forest[decorator_id].render())
+                .reduce(|acc, doc| acc + const_text(" ") + doc)
+                .unwrap_or_default();
+            if !post_decorators.is_empty() {
+                post_decorators = nl() + post_decorators;
+            }
+
+            post_decorators
+        };
+
         let loop_body = self.mast_forest[self.loop_node.body].to_pretty_print(self.mast_forest);
 
-        indent(4, const_text("loop") + nl() + loop_body.render()) + nl() + const_text("end")
+        pre_decorators
+            + indent(4, const_text("loop") + nl() + loop_body.render())
+            + nl()
+            + const_text("end")
+            + post_decorators
     }
 }
 
@@ -99,6 +143,26 @@ impl MastNodeExt for LoopNode {
     /// ```
     fn digest(&self) -> Word {
         self.digest
+    }
+
+    /// Returns the decorators to be executed before this node is executed.
+    fn before_enter<'a, F>(&'a self, forest: &'a F) -> &'a [DecoratorId]
+    where
+        F: ExecutableMastForest + ?Sized,
+    {
+        #[cfg(debug_assertions)]
+        self.verify_node_in_forest(forest);
+        self.decorator_store.before_enter(forest)
+    }
+
+    /// Returns the decorators to be executed after this node is executed.
+    fn after_exit<'a, F>(&'a self, forest: &'a F) -> &'a [DecoratorId]
+    where
+        F: ExecutableMastForest + ?Sized,
+    {
+        #[cfg(debug_assertions)]
+        self.verify_node_in_forest(forest);
+        self.decorator_store.after_exit(forest)
     }
 
     fn to_display<'a>(&'a self, mast_forest: &'a MastForest) -> Box<dyn fmt::Display + 'a> {
@@ -130,15 +194,51 @@ impl MastNodeExt for LoopNode {
 
     type Builder = LoopNodeBuilder;
 
-    fn to_builder(self, _forest: &MastForest) -> Self::Builder {
-        LoopNodeBuilder::new(self.body)
+    fn to_builder(self, forest: &MastForest) -> Self::Builder {
+        // Extract decorators from decorator_store if in Owned state
+        match self.decorator_store {
+            DecoratorStore::Owned { before_enter, after_exit, .. } => {
+                let mut builder = LoopNodeBuilder::new(self.body);
+                builder = builder
+                    .with_before_enter(before_enter)
+                    .with_after_exit(after_exit)
+                    .with_digest(self.digest);
+                builder
+            },
+            DecoratorStore::Linked { id } => {
+                // Extract decorators from forest storage when in Linked state
+                let before_enter = forest.before_enter_decorators(id).to_vec();
+                let after_exit = forest.after_exit_decorators(id).to_vec();
+                let mut builder = LoopNodeBuilder::new(self.body);
+                builder = builder
+                    .with_before_enter(before_enter)
+                    .with_after_exit(after_exit)
+                    .with_digest(self.digest);
+                builder
+            },
+        }
     }
 
     #[cfg(debug_assertions)]
-    fn verify_node_in_forest<F>(&self, _forest: &F)
+    fn verify_node_in_forest<F>(&self, forest: &F)
     where
-        F: crate::mast::ExecutableMastForest + ?Sized,
+        F: ExecutableMastForest + ?Sized,
     {
+        if let Some(id) = self.decorator_store.linked_id() {
+            // Verify that this node is the one stored at the given ID in the forest
+            let self_ptr = self as *const Self;
+            let forest_node =
+                forest.get_node_by_id(id).expect("linked node id must be present in forest");
+            let forest_node_ptr = match forest_node {
+                MastNode::Loop(loop_node) => loop_node as *const LoopNode as *const (),
+                _ => panic!("Node type mismatch at {id:?}"),
+            };
+            let self_as_void = self_ptr as *const ();
+            debug_assert_eq!(
+                self_as_void, forest_node_ptr,
+                "Node pointer mismatch: expected node at {id:?} to be self"
+            );
+        }
     }
 }
 
@@ -163,6 +263,7 @@ impl proptest::prelude::Arbitrary for LoopNode {
                 LoopNode {
                     body,
                     digest,
+                    decorator_store: DecoratorStore::default(),
                 }
             })
             .no_shrink()  // Pure random values, no meaningful shrinking pattern
@@ -173,20 +274,27 @@ impl proptest::prelude::Arbitrary for LoopNode {
 }
 
 // ------------------------------------------------------------------------------------------------
-/// Builder for creating [`LoopNode`] instances.
+/// Builder for creating [`LoopNode`] instances with decorators.
 #[derive(Debug)]
 pub struct LoopNodeBuilder {
     body: MastNodeId,
+    before_enter: Vec<DecoratorId>,
+    after_exit: Vec<DecoratorId>,
     digest: Option<Word>,
 }
 
 impl LoopNodeBuilder {
     /// Creates a new builder for a LoopNode with the specified body.
     pub fn new(body: MastNodeId) -> Self {
-        Self { body, digest: None }
+        Self {
+            body,
+            before_enter: Vec::new(),
+            after_exit: Vec::new(),
+            digest: None,
+        }
     }
 
-    /// Builds the LoopNode.
+    /// Builds the LoopNode with the specified decorators.
     pub fn build(self, mast_forest: &MastForest) -> Result<LoopNode, MastForestError> {
         if self.body.to_usize() >= mast_forest.nodes.len() {
             return Err(MastForestError::NodeIdOverflow(self.body, mast_forest.nodes.len()));
@@ -201,7 +309,29 @@ impl LoopNodeBuilder {
             hasher::merge_in_domain(&[body_hash, Word::default()], LoopNode::DOMAIN)
         };
 
-        Ok(LoopNode { body: self.body, digest })
+        Ok(LoopNode {
+            body: self.body,
+            digest,
+            decorator_store: DecoratorStore::new_owned_with_decorators(
+                self.before_enter,
+                self.after_exit,
+            ),
+        })
+    }
+
+    pub(in crate::mast) fn build_with_forced_digest(self) -> Result<LoopNode, MastForestError> {
+        let Some(digest) = self.digest else {
+            return Err(MastForestError::DigestRequiredForDeserialization);
+        };
+
+        Ok(LoopNode {
+            body: self.body,
+            digest,
+            decorator_store: DecoratorStore::new_owned_with_decorators(
+                self.before_enter,
+                self.after_exit,
+            ),
+        })
     }
 }
 
@@ -209,28 +339,86 @@ impl MastForestContributor for LoopNodeBuilder {
     fn add_to_forest(self, forest: &mut MastForest) -> Result<MastNodeId, MastForestError> {
         let node = self.build(forest)?;
 
+        let LoopNode {
+            body,
+            digest,
+            decorator_store: DecoratorStore::Owned { before_enter, after_exit, .. },
+        } = node
+        else {
+            unreachable!("LoopNodeBuilder::build() should always return owned decorators");
+        };
+
+        // Determine the node ID that will be assigned
+        let future_node_id = MastNodeId::new_unchecked(forest.nodes.len() as u32);
+
+        // Store node-level decorators in the centralized NodeToDecoratorIds for efficient access
+        forest.register_node_decorators(future_node_id, &before_enter, &after_exit);
+
         // Create the node in the forest with Linked variant from the start
         // Move the data directly without intermediate cloning
-        let node_id = forest.nodes.push(node.into()).map_err(|_| MastForestError::TooManyNodes)?;
+        let node_id = forest
+            .nodes
+            .push(
+                LoopNode {
+                    body,
+                    digest,
+                    decorator_store: DecoratorStore::Linked { id: future_node_id },
+                }
+                .into(),
+            )
+            .map_err(|_| MastForestError::TooManyNodes)?;
 
         Ok(node_id)
     }
 
-    fn fingerprint_for_node(&self, forest: &MastForest) -> Result<Word, MastForestError> {
-        Ok(if let Some(forced_digest) = self.digest {
-            forced_digest
-        } else {
-            let body_hash = forest[self.body].digest();
+    fn fingerprint_for_node(
+        &self,
+        forest: &MastForest,
+        hash_by_node_id: &impl LookupByIdx<MastNodeId, MastNodeFingerprint>,
+    ) -> Result<MastNodeFingerprint, MastForestError> {
+        // Use the fingerprint_from_parts helper function
+        crate::mast::node_fingerprint::fingerprint_from_parts(
+            forest,
+            hash_by_node_id,
+            &self.before_enter,
+            &self.after_exit,
+            &[self.body],
+            // Use the forced digest if available, otherwise compute the digest
+            if let Some(forced_digest) = self.digest {
+                forced_digest
+            } else {
+                let body_hash = forest[self.body].digest();
 
-            hasher::merge_in_domain(&[body_hash, Word::default()], LoopNode::DOMAIN)
-        })
+                hasher::merge_in_domain(&[body_hash, Word::default()], LoopNode::DOMAIN)
+            },
+        )
     }
 
     fn remap_children(self, remapping: &impl LookupByIdx<MastNodeId, MastNodeId>) -> Self {
         LoopNodeBuilder {
             body: *remapping.get(self.body).unwrap_or(&self.body),
+            before_enter: self.before_enter,
+            after_exit: self.after_exit,
             digest: self.digest,
         }
+    }
+
+    fn with_before_enter(mut self, decorators: impl Into<Vec<DecoratorId>>) -> Self {
+        self.before_enter = decorators.into();
+        self
+    }
+
+    fn with_after_exit(mut self, decorators: impl Into<Vec<DecoratorId>>) -> Self {
+        self.after_exit = decorators.into();
+        self
+    }
+
+    fn append_before_enter(&mut self, decorators: impl IntoIterator<Item = DecoratorId>) {
+        self.before_enter.extend(decorators);
+    }
+
+    fn append_after_exit(&mut self, decorators: impl IntoIterator<Item = DecoratorId>) {
+        self.after_exit.extend(decorators);
     }
 
     fn with_digest(mut self, digest: Word) -> Self {
@@ -259,11 +447,20 @@ impl LoopNodeBuilder {
             return Err(MastForestError::DigestRequiredForDeserialization);
         };
 
+        let future_node_id = MastNodeId::new_unchecked(forest.nodes.len() as u32);
+
         // Create the node in the forest with Linked variant from the start
         // Move the data directly without intermediate cloning
         let node_id = forest
             .nodes
-            .push(LoopNode { body: self.body, digest }.into())
+            .push(
+                LoopNode {
+                    body: self.body,
+                    digest,
+                    decorator_store: DecoratorStore::Linked { id: future_node_id },
+                }
+                .into(),
+            )
             .map_err(|_| MastForestError::TooManyNodes)?;
 
         Ok(node_id)
@@ -272,12 +469,44 @@ impl LoopNodeBuilder {
 
 #[cfg(any(test, feature = "arbitrary"))]
 impl proptest::prelude::Arbitrary for LoopNodeBuilder {
-    type Parameters = ();
+    type Parameters = LoopNodeBuilderParams;
     type Strategy = proptest::strategy::BoxedStrategy<Self>;
 
-    fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
+    fn arbitrary_with(params: Self::Parameters) -> Self::Strategy {
         use proptest::prelude::*;
 
-        any::<MastNodeId>().prop_map(Self::new).boxed()
+        (
+            any::<MastNodeId>(),
+            proptest::collection::vec(
+                super::arbitrary::decorator_id_strategy(params.max_decorator_id_u32),
+                0..=params.max_decorators,
+            ),
+            proptest::collection::vec(
+                super::arbitrary::decorator_id_strategy(params.max_decorator_id_u32),
+                0..=params.max_decorators,
+            ),
+        )
+            .prop_map(|(body, before_enter, after_exit)| {
+                Self::new(body).with_before_enter(before_enter).with_after_exit(after_exit)
+            })
+            .boxed()
+    }
+}
+
+/// Parameters for generating LoopNodeBuilder instances
+#[cfg(any(test, feature = "arbitrary"))]
+#[derive(Clone, Debug)]
+pub struct LoopNodeBuilderParams {
+    pub max_decorators: usize,
+    pub max_decorator_id_u32: u32,
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+impl Default for LoopNodeBuilderParams {
+    fn default() -> Self {
+        Self {
+            max_decorators: 4,
+            max_decorator_id_u32: 10,
+        }
     }
 }
