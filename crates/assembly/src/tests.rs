@@ -4212,11 +4212,15 @@ fn nested_blocks() -> Result<(), Report> {
             None,
         )
         .unwrap();
+    let combined_node_ref = expected_mast_forest_builder
+        .node_ref(combined_node_id)
+        .expect("missing combined node ref");
 
-    let (mut expected_mast_forest, node_remapping) = expected_mast_forest_builder.build();
-    expected_mast_forest.make_root(node_remapping[&combined_node_id]);
+    let (mut expected_mast_forest, node_remapping) =
+        expected_mast_forest_builder.build().into_parts();
+    expected_mast_forest.make_root(node_remapping[&combined_node_ref]);
     let expected_program =
-        Program::new(expected_mast_forest.into(), node_remapping[&combined_node_id]);
+        Program::new(expected_mast_forest.into(), node_remapping[&combined_node_ref]);
     assert_eq!(expected_program.hash(), program.hash());
 
     // also check that the program has the right number of procedures (which excludes the dummy
