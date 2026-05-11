@@ -686,6 +686,83 @@ pub(crate) fn forest_seeds_strategy(params: &MastForestParams) -> BoxedStrategy<
         .boxed()
 }
 
+// ---------- (MastForest, Kernel) strategy ----------
+
+/// Validates a caller supplied `kernel_procedures` slice.
+///
+/// Returns `true` iff the slice is `None` or contains no duplicates and at most
+/// [`Kernel::MAX_NUM_PROCEDURES`] entries. Used by
+/// [`mast_forest_and_kernel_strategy`] to reject malformed parameter configurations via
+/// `prop_filter_map` rather than panicking downstream when [`Kernel::from_hashes`] would
+/// otherwise fail.
+fn kernel_procedures_are_valid(kernel_procedures: &Option<Vec<Word>>) -> bool {
+    let Some(hs) = kernel_procedures.as_ref() else {
+        return true;
+    };
+    if hs.len() > Kernel::MAX_NUM_PROCEDURES {
+        return false;
+    }
+    // Check for duplicates: sort a copy by canonical byte order and scan consecutive pairs.
+    let mut sorted: Vec<&Word> = hs.iter().collect();
+    sorted.sort_by_key(|w| w.as_bytes());
+    !sorted.windows(2).any(|pair| pair[0] == pair[1])
+}
+
+/// Strategy yielding executable `(MastForest, Kernel)` pairs, or structure-only pairs when
+/// [`MastForestParams::mode`] is [`MastForestGenerationMode::StructureOnly`].
+///
+/// The strategy first samples a [`ForestSeeds`] via [`forest_seeds_strategy`] and then
+/// dispatches to either [`build_executable_forest`] or [`build_structure_only_forest`]
+/// depending on `params.mode`.
+///
+/// # Precondition rejection
+///
+/// The sampler is wrapped in a `prop_filter_map("valid kernel_procedures", ...)` so that a
+/// `Some(hs)` with duplicates or with `hs.len() > Kernel::MAX_NUM_PROCEDURES` rejects the
+/// precondition rather than panicking downstream. The validity check is invariant in the
+/// seed, so either every sample passes the filter (when `kernel_procedures` is well-formed
+/// or `None`) or every sample is rejected (surfacing as a proptest "too many rejects"
+/// error, which signals a misconfigured caller rather than a generator bug).
+///
+/// See the module-level docs on [`MastForestParams`] for the full list of invariants this
+/// strategy guarantees in `Executable` mode.
+pub fn mast_forest_and_kernel_strategy(
+    params: MastForestParams,
+) -> BoxedStrategy<(MastForest, Kernel)> {
+    forest_seeds_strategy(&params)
+        .prop_filter_map("valid kernel_procedures", move |seeds| {
+            if !kernel_procedures_are_valid(&params.kernel_procedures) {
+                return None;
+            }
+            let result = match params.mode {
+                MastForestGenerationMode::Executable => build_executable_forest(seeds, &params),
+                MastForestGenerationMode::StructureOnly => {
+                    build_structure_only_forest(seeds, &params)
+                },
+            };
+            Some(result)
+        })
+        .boxed()
+}
+
+/// Builds an executable `(MastForest, Kernel)` pair from the provided seeds.
+#[allow(unused_variables)]
+fn build_executable_forest(
+    seeds: ForestSeeds,
+    params: &MastForestParams,
+) -> (MastForest, Kernel) {
+    unimplemented!("will be implemented later!")
+}
+
+/// Builds a structure-only `(MastForest, Kernel)` pair from the provided seeds.
+#[allow(unused_variables)]
+fn build_structure_only_forest(
+    seeds: ForestSeeds,
+    params: &MastForestParams,
+) -> (MastForest, Kernel) {
+    unimplemented!("will be implemented later!")
+}
+
 impl Arbitrary for MastForest {
     type Parameters = MastForestParams;
     type Strategy = BoxedStrategy<Self>;
