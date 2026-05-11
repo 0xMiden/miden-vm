@@ -7,7 +7,7 @@ use crate::{
     crypto::hash::Blake3_256,
     mast::{
         DecoratedLinksIter, DecoratedOpLink, DecoratorId, DecoratorStore, MastForest,
-        MastForestError, MastNode, MastNodeFingerprint, MastNodeId,
+        MastForestError, MastNodeFingerprint, MastNodeId,
     },
     operations::{DecoratorList, Operation},
     prettier::PrettyPrint,
@@ -82,6 +82,17 @@ pub struct BasicBlockNode {
     /// Stores both operation-level and node-level decorators
     /// Custom serialization is handled via Serialize/Deserialize impls
     decorators: DecoratorStore,
+}
+
+impl BasicBlockNode {
+    pub(super) fn into_linked_decorator_store(mut self, node_id: MastNodeId) -> Self {
+        self.decorators = DecoratorStore::Linked { id: node_id };
+        self
+    }
+
+    pub(crate) fn linked_decorator_store_id(&self) -> Option<MastNodeId> {
+        self.decorators.linked_id()
+    }
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -347,9 +358,8 @@ impl BasicBlockNode {
                     .collect()
             },
             DecoratorStore::Linked { id } => {
-                // This is used in MastForest::remove_nodes, which strips the `MastForest` of its
-                // nodes before remapping decorators, so calling
-                // verify_node_in_forest will not work here.
+                // This can be used while rematerializing linked decorator stores, so avoid
+                // requiring a separate node-in-forest verification pass here.
 
                 let pad2raw = PaddedToRawPrefix::new(self.op_batches());
                 match forest.decorator_links_for_node(*id) {
@@ -822,7 +832,9 @@ impl MastNodeExt for BasicBlockNode {
             let self_ptr = self as *const Self;
             let forest_node = &forest.nodes[*id];
             let forest_node_ptr = match forest_node {
-                MastNode::Block(block_node) => block_node as *const BasicBlockNode as *const (),
+                crate::mast::MastNode::Block(block_node) => {
+                    block_node as *const BasicBlockNode as *const ()
+                },
                 _ => panic!("Node type mismatch at {id:?}"),
             };
             let self_as_void = self_ptr as *const ();
@@ -1565,71 +1577,10 @@ impl BasicBlockNodeBuilder {
             },
         })
     }
-
-    /// Add this node to a forest using relaxed validation.
-    ///
-    /// This method is used during deserialization where nodes may reference child nodes
-    /// that haven't been added to the forest yet. The child node IDs have already been
-    /// validated against the expected final node count during the `try_into_mast_node_builder`
-    /// step, so we can safely skip validation here.
-    ///
-    /// Note: This is not part of the `MastForestContributor` trait because it's only
-    /// intended for internal use during deserialization.
-    ///
-    /// For BasicBlockNode, this is equivalent to the normal `add_to_forest` since basic blocks
-    /// don't have child nodes to validate.
-    pub(in crate::mast) fn add_to_forest_relaxed(
-        self,
-        forest: &mut MastForest,
-    ) -> Result<MastNodeId, MastForestError> {
-        // For deserialization: decorators are already in forest.debug_info,
-        // so we don't register them again. We just create the node.
-
-        let future_node_id = MastNodeId::new_unchecked(forest.nodes.len() as u32);
-
-        // Process based on operation data type
-        let (op_batches, digest) = match self.operation_data {
-            OperationData::Raw { operations, decorators: _ } => {
-                if operations.is_empty() {
-                    return Err(MastForestError::EmptyBasicBlock);
-                }
-
-                // Batch operations (adds padding NOOPs)
-                let (op_batches, computed_digest) = batch_and_hash_ops(&operations);
-
-                // Use the forced digest if provided, otherwise use the computed digest
-                let digest = self.digest.unwrap_or(computed_digest);
-
-                (op_batches, digest)
-            },
-            OperationData::Batched { op_batches, decorators: _ } => {
-                if op_batches.is_empty() {
-                    return Err(MastForestError::EmptyBasicBlock);
-                }
-
-                // For batched operations, digest must be set
-                let digest = self.digest.expect("digest must be set for batched operations");
-
-                (op_batches, digest)
-            },
-        };
-
-        // Create the node in the forest with Linked variant
-        // Note: Decorators are already in forest.debug_info from deserialization
-        let node_id = forest
-            .nodes
-            .push(MastNode::Block(BasicBlockNode {
-                op_batches,
-                digest,
-                decorators: DecoratorStore::Linked { id: future_node_id },
-            }))
-            .map_err(|_| MastForestError::TooManyNodes)?;
-
-        Ok(node_id)
-    }
 }
 
 impl MastForestContributor for BasicBlockNodeBuilder {
+    #[cfg(any(test, feature = "arbitrary", feature = "testing"))]
     fn add_to_forest(self, forest: &mut MastForest) -> Result<MastNodeId, MastForestError> {
         // Determine the node ID that will be assigned
         let future_node_id = MastNodeId::new_unchecked(forest.nodes.len() as u32);
@@ -1682,7 +1633,7 @@ impl MastForestContributor for BasicBlockNodeBuilder {
         // Create the node in the forest with Linked variant from the start
         let node_id = forest
             .nodes
-            .push(MastNode::Block(BasicBlockNode {
+            .push(crate::mast::MastNode::Block(BasicBlockNode {
                 op_batches,
                 digest,
                 decorators: DecoratorStore::Linked { id: future_node_id },

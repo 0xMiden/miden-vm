@@ -521,7 +521,7 @@ fn test_mast_forest_view_trait_matches_serialized_view() {
         Felt::new_unchecked(14),
     ]);
     let advice_values = vec![Felt::new_unchecked(15), Felt::new_unchecked(16)];
-    forest.advice_map_mut().insert(advice_key, advice_values.clone());
+    forest = forest.with_advice_map(AdviceMap::from_iter([(advice_key, advice_values.clone())]));
 
     let mut bytes = Vec::new();
     forest.write_stripped(&mut bytes);
@@ -588,7 +588,7 @@ fn test_mast_forest_read_view_modes_match() {
         Felt::new_unchecked(24),
     ]);
     let advice_values = vec![Felt::new_unchecked(25), Felt::new_unchecked(26)];
-    forest.advice_map_mut().insert(advice_key, advice_values.clone());
+    forest = forest.with_advice_map(AdviceMap::from_iter([(advice_key, advice_values.clone())]));
 
     let mut bytes = Vec::new();
     forest.write_stripped(&mut bytes);
@@ -972,7 +972,7 @@ fn mast_forest_serialize_deserialize_advice_map() {
     let key = Word::new([ONE, ONE, ONE, ONE]);
     let value = vec![ONE, ONE];
 
-    forest.advice_map_mut().insert(key, value.clone());
+    forest = forest.with_advice_map(AdviceMap::from_iter([(key, value.clone())]));
 
     let parsed = MastForest::read_from_bytes(&forest.to_bytes()).unwrap();
     assert_eq!(forest.advice_map, parsed.advice_map);
@@ -1667,9 +1667,10 @@ fn test_stripped_size_hint_matches_serialized_len() {
     .unwrap();
     let join = JoinNodeBuilder::new([block1, block2]).add_to_forest(&mut small_forest).unwrap();
     small_forest.make_root(join);
-    small_forest
-        .advice_map_mut()
-        .insert(Word::default(), vec![ONE, Felt::new_unchecked(2)]);
+    small_forest = small_forest.with_advice_map(AdviceMap::from_iter([(
+        Word::default(),
+        vec![ONE, Felt::new_unchecked(2)],
+    )]));
     assert_stripped_size_hint_matches_serialized_len(&small_forest);
 
     let mut forest = MastForest::new();
@@ -1704,8 +1705,7 @@ fn test_stripped_size_hint_matches_serialized_len() {
     let values_a: Vec<Felt> = (0..200).map(|i| Felt::new_unchecked(i as u64)).collect();
     let values_b: Vec<Felt> = (0..5).map(|i| Felt::new_unchecked((i + 10) as u64)).collect();
 
-    forest.advice_map_mut().insert(key_a, values_a);
-    forest.advice_map_mut().insert(key_b, values_b);
+    forest = forest.with_advice_map(AdviceMap::from_iter([(key_a, values_a), (key_b, values_b)]));
 
     assert_stripped_size_hint_matches_serialized_len(&forest);
 }

@@ -319,7 +319,7 @@ impl Library {
     /// Extends the advice map of this library
     pub fn extend_advice_map(&mut self, advice_map: AdviceMap) {
         let mast_forest = Arc::make_mut(&mut self.mast_forest);
-        mast_forest.advice_map_mut().extend(advice_map);
+        *mast_forest = core::mem::take(mast_forest).with_advice_map(advice_map);
     }
 
     fn read_mast_forest<R: ByteReader>(
@@ -1101,15 +1101,31 @@ mod tests {
     #[test]
     fn serde_library_deserialization_rejects_malformed_quoted_procedure_leaf() {
         use miden_core::{
-            mast::{BasicBlockNodeBuilder, MastForestContributor},
+            advice::AdviceMap,
+            mast::{
+                BasicBlockNodeBuilder, DebugInfo, MastForest, MastForestParts, MastNodeBuilder,
+                MastNodeId,
+            },
             operations::Operation,
+            utils::IndexVec,
         };
 
-        let mut mast_forest = MastForest::new();
-        let node = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
-            .add_to_forest(&mut mast_forest)
-            .expect("must create MAST node");
-        mast_forest.make_root(node);
+        let node = MastNodeId::new_unchecked(0);
+        let mast_node = MastNodeBuilder::BasicBlock(BasicBlockNodeBuilder::new(
+            vec![Operation::Add],
+            Vec::new(),
+        ))
+        .build_linked(node)
+        .expect("must create MAST node");
+        let mut nodes = IndexVec::new();
+        nodes.push(mast_node).expect("must insert MAST node");
+        let mast_forest = MastForest::from_parts(MastForestParts {
+            nodes,
+            roots: vec![node],
+            advice_map: AdviceMap::default(),
+            debug_info: DebugInfo::new(),
+        })
+        .expect("must create MAST forest");
 
         let bad = Arc::<Path>::from(Path::validate(r#"::foo::"bad name""#).unwrap());
         let mut exports = BTreeMap::new();

@@ -5382,10 +5382,10 @@ fn regression_empty_kernel_package_is_rejected_without_panicking() {
     );
 }
 
-/// Reproduces issue #3035: a MAST with padded basic blocks grows when debug info is cleared and the
-/// forest is compacted via self-merge.
+/// Reproduces issue #3035: a MAST with padded basic blocks grows when debug info is stripped and
+/// the forest is compacted via self-merge.
 #[test]
-fn issue_3035_compact_after_clear_debug_info_does_not_grow_mast() -> TestResult {
+fn issue_3035_compact_after_strip_debug_info_does_not_grow_mast() -> TestResult {
     let context = TestContext::default();
     let module = context.parse_module_with_path(
         "issue_3035::repro",
@@ -5411,7 +5411,7 @@ fn issue_3035_compact_after_clear_debug_info_does_not_grow_mast() -> TestResult 
         "test input must create at least one padded basic block"
     );
 
-    forest.clear_debug_info();
+    forest = forest.into_stripped();
     let stripped_size = forest.to_bytes().len();
     let stripped_without_debug_info_size = {
         let mut bytes = Vec::new();
@@ -5430,7 +5430,7 @@ fn issue_3035_compact_after_clear_debug_info_does_not_grow_mast() -> TestResult 
 
     assert!(
         compacted_size <= stripped_size,
-        "MastForest::compact increased serialized size after clear_debug_info(): \
+        "MastForest::compact increased serialized size after into_stripped(): \
          stripped={stripped_size}, compacted={compacted_size}, \
          stripped_without_debug_info={stripped_without_debug_info_size}, \
          compacted_without_debug_info={compacted_without_debug_info_size}, \

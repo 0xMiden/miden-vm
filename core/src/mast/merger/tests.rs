@@ -965,7 +965,7 @@ fn mast_forest_merge_advice_maps_merged() {
         Felt::new_unchecked(4),
     ]);
     let value_a = vec![ONE, ONE];
-    forest_a.advice_map_mut().insert(key_a, value_a.clone());
+    forest_a = forest_a.with_advice_map(AdviceMap::from_iter([(key_a, value_a.clone())]));
 
     let mut forest_b = MastForest::new();
     let id_bar = block_bar().add_to_forest(&mut forest_b).unwrap();
@@ -978,7 +978,7 @@ fn mast_forest_merge_advice_maps_merged() {
         Felt::new_unchecked(1),
     ]);
     let value_b = vec![Felt::new_unchecked(2), Felt::new_unchecked(2)];
-    forest_b.advice_map_mut().insert(key_b, value_b.clone());
+    forest_b = forest_b.with_advice_map(AdviceMap::from_iter([(key_b, value_b.clone())]));
 
     let (merged, _root_maps) = MastForest::merge([&forest_a, &forest_b]).unwrap();
 
@@ -1002,7 +1002,7 @@ fn mast_forest_merge_advice_maps_collision() {
         Felt::new_unchecked(4),
     ]);
     let value_a = vec![ONE, ONE];
-    forest_a.advice_map_mut().insert(key_a, value_a);
+    forest_a = forest_a.with_advice_map(AdviceMap::from_iter([(key_a, value_a)]));
 
     let mut forest_b = MastForest::new();
     let id_bar = block_bar().add_to_forest(&mut forest_b).unwrap();
@@ -1011,7 +1011,7 @@ fn mast_forest_merge_advice_maps_collision() {
     // The key collides with key_a in the forest_a.
     let key_b = key_a;
     let value_b = vec![Felt::new_unchecked(2), Felt::new_unchecked(2)];
-    forest_b.advice_map_mut().insert(key_b, value_b);
+    forest_b = forest_b.with_advice_map(AdviceMap::from_iter([(key_b, value_b)]));
 
     let err = MastForest::merge([&forest_a, &forest_b]).unwrap_err();
     assert_matches!(err, MastForestError::AdviceMapKeyCollisionOnMerge(_));

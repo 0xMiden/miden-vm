@@ -404,12 +404,17 @@ mod tests {
     };
     use miden_core::{
         Word,
-        mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, MastNodeExt, MastNodeId},
+        advice::AdviceMap,
+        mast::{
+            BasicBlockNodeBuilder, DebugInfo, MastForest, MastForestParts, MastNodeBuilder,
+            MastNodeExt, MastNodeId,
+        },
         operations::Operation,
         serde::{
             BudgetedReader, ByteWriter, Deserializable, DeserializationError, Serializable,
             SliceReader,
         },
+        utils::IndexVec,
     };
     #[cfg(feature = "serde")]
     use serde_json::{json, to_value};
@@ -424,11 +429,22 @@ mod tests {
     };
 
     fn build_forest() -> (MastForest, MastNodeId) {
-        let mut forest = MastForest::new();
-        let node_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
-            .add_to_forest(&mut forest)
-            .expect("failed to build basic block");
-        forest.make_root(node_id);
+        let node_id = MastNodeId::new_unchecked(0);
+        let node = MastNodeBuilder::BasicBlock(BasicBlockNodeBuilder::new(
+            vec![Operation::Add],
+            Vec::new(),
+        ))
+        .build_linked(node_id)
+        .expect("failed to build basic block");
+        let mut nodes = IndexVec::new();
+        nodes.push(node).expect("failed to add MAST node");
+        let forest = MastForest::from_parts(MastForestParts {
+            nodes,
+            roots: vec![node_id],
+            advice_map: AdviceMap::default(),
+            debug_info: DebugInfo::new(),
+        })
+        .expect("failed to build MAST forest");
         (forest, node_id)
     }
 

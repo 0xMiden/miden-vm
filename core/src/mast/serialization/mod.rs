@@ -399,15 +399,29 @@ pub enum MastForestReadView<'a> {
 ///
 /// ```
 /// use miden_core::{
-///     mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, MastForestWireView},
+///     advice::AdviceMap,
+///     mast::{
+///         BasicBlockNodeBuilder, DebugInfo, MastForest, MastForestParts, MastForestWireView,
+///         MastNodeBuilder, MastNodeId,
+///     },
 ///     operations::Operation,
+///     utils::IndexVec,
 /// };
 ///
-/// let mut forest = MastForest::new();
-/// let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
-///     .add_to_forest(&mut forest)
-///     .unwrap();
-/// forest.make_root(block_id);
+/// let block_id = MastNodeId::new_unchecked(0);
+/// let block =
+///     MastNodeBuilder::BasicBlock(BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new()))
+///         .build_linked(block_id)
+///         .unwrap();
+/// let mut nodes = IndexVec::new();
+/// nodes.push(block).unwrap();
+/// let forest = MastForest::from_parts(MastForestParts {
+///     nodes,
+///     roots: vec![block_id],
+///     advice_map: AdviceMap::default(),
+///     debug_info: DebugInfo::new(),
+/// })
+/// .unwrap();
 ///
 /// let mut bytes = Vec::new();
 /// forest.write_stripped(&mut bytes);
@@ -458,15 +472,29 @@ impl<'a> MastForestWireView<'a> {
     ///
     /// ```
     /// use miden_core::{
-    ///     mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, MastForestWireView},
+    ///     advice::AdviceMap,
+    ///     mast::{
+    ///         BasicBlockNodeBuilder, DebugInfo, MastForest, MastForestParts, MastForestWireView,
+    ///         MastNodeBuilder, MastNodeId,
+    ///     },
     ///     operations::Operation,
+    ///     utils::IndexVec,
     /// };
     ///
-    /// let mut forest = MastForest::new();
-    /// let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
-    ///     .add_to_forest(&mut forest)
-    ///     .unwrap();
-    /// forest.make_root(block_id);
+    /// let block_id = MastNodeId::new_unchecked(0);
+    /// let block =
+    ///     MastNodeBuilder::BasicBlock(BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new()))
+    ///         .build_linked(block_id)
+    ///         .unwrap();
+    /// let mut nodes = IndexVec::new();
+    /// nodes.push(block).unwrap();
+    /// let forest = MastForest::from_parts(MastForestParts {
+    ///     nodes,
+    ///     roots: vec![block_id],
+    ///     advice_map: AdviceMap::default(),
+    ///     debug_info: DebugInfo::new(),
+    /// })
+    /// .unwrap();
     ///
     /// let mut bytes = Vec::new();
     /// forest.write_stripped(&mut bytes);
@@ -520,15 +548,29 @@ impl<'a> MastForestWireView<'a> {
     ///
     /// ```
     /// use miden_core::{
-    ///     mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, MastForestWireView},
+    ///     advice::AdviceMap,
+    ///     mast::{
+    ///         BasicBlockNodeBuilder, DebugInfo, MastForest, MastForestParts, MastForestWireView,
+    ///         MastNodeBuilder, MastNodeId,
+    ///     },
     ///     operations::Operation,
+    ///     utils::IndexVec,
     /// };
     ///
-    /// let mut forest = MastForest::new();
-    /// let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
-    ///     .add_to_forest(&mut forest)
-    ///     .unwrap();
-    /// forest.make_root(block_id);
+    /// let block_id = MastNodeId::new_unchecked(0);
+    /// let block =
+    ///     MastNodeBuilder::BasicBlock(BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new()))
+    ///         .build_linked(block_id)
+    ///         .unwrap();
+    /// let mut nodes = IndexVec::new();
+    /// nodes.push(block).unwrap();
+    /// let forest = MastForest::from_parts(MastForestParts {
+    ///     nodes,
+    ///     roots: vec![block_id],
+    ///     advice_map: AdviceMap::default(),
+    ///     debug_info: DebugInfo::new(),
+    /// })
+    /// .unwrap();
     ///
     /// let mut bytes = Vec::new();
     /// forest.write_stripped(&mut bytes);

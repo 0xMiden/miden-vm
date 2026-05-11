@@ -41,17 +41,10 @@
 //!   [`UntrustedMastForest::read_from_bytes_with_options`]: untrusted paths; parse with bounded
 //!   readers and require [`UntrustedMastForest::validate`] before use.
 
-use alloc::{
-    collections::{BTreeMap, BTreeSet},
-    string::String,
-    sync::Arc,
-    vec::Vec,
-};
-use core::{
-    fmt,
-    ops::{Index, IndexMut},
-};
+use alloc::{collections::BTreeMap, string::String, sync::Arc, vec::Vec};
+use core::{fmt, ops::Index};
 
+use miden_debug_types::{FileLineCol, Location};
 use miden_utils_sync::OnceLockCompat;
 #[cfg(any(test, feature = "arbitrary"))]
 use proptest::prelude::*;
@@ -144,18 +137,90 @@ pub struct MastForest {
     commitment_cache: OnceLockCompat<Word>,
 }
 
+/// Complete parts needed to construct a finalized [`MastForest`].
+///
+/// This is intentionally hidden: builders, mergers, and deserializers may assemble mutable
+/// parts, but consumers should receive an immutable forest after construction.
+#[doc(hidden)]
+pub struct MastForestParts {
+    pub nodes: IndexVec<MastNodeId, MastNode>,
+    pub roots: Vec<MastNodeId>,
+    pub advice_map: AdviceMap,
+    pub debug_info: DebugInfo,
+}
+
 // ------------------------------------------------------------------------------------------------
 /// Constructors
 impl MastForest {
     /// Creates a new empty [`MastForest`].
     pub fn new() -> Self {
-        Self {
+        Self::from_parts(MastForestParts {
             nodes: IndexVec::new(),
             roots: Vec::new(),
             advice_map: AdviceMap::default(),
             debug_info: DebugInfo::new(),
-            commitment_cache: OnceLockCompat::new(),
+        })
+        .expect("empty MastForest parts should be valid")
+    }
+
+    #[doc(hidden)]
+    pub fn from_parts(parts: MastForestParts) -> Result<Self, MastForestError> {
+        if parts.nodes.len() > Self::MAX_NODES {
+            return Err(MastForestError::TooManyNodes);
         }
+
+        let node_count = parts.nodes.len();
+        for &root_id in &parts.roots {
+            if root_id.to_usize() >= node_count {
+                return Err(MastForestError::NodeIdOverflow(root_id, node_count));
+            }
+        }
+        for (idx, node) in parts.nodes.iter().enumerate() {
+            let node_id = MastNodeId::new_unchecked(
+                idx.try_into().expect("MAST forest node count exceeds u32::MAX"),
+            );
+            node.validate_decorator_store_link(node_id)?;
+        }
+        parts.debug_info.validate().map_err(MastForestError::InvalidDebugInfo)?;
+
+        let forest = Self {
+            nodes: parts.nodes,
+            roots: parts.roots,
+            advice_map: parts.advice_map,
+            debug_info: parts.debug_info,
+            commitment_cache: OnceLockCompat::new(),
+        };
+
+        forest.validate()?;
+        forest.validate_node_hashes()?;
+        Ok(forest)
+    }
+
+    pub(in crate::mast) fn from_trusted_deserialization_parts(
+        parts: MastForestParts,
+    ) -> Result<Self, MastForestError> {
+        if parts.nodes.len() > Self::MAX_NODES {
+            return Err(MastForestError::TooManyNodes);
+        }
+
+        let node_count = parts.nodes.len();
+        let mut roots = Vec::with_capacity(parts.roots.len());
+        for root_id in parts.roots {
+            if root_id.to_usize() >= node_count {
+                return Err(MastForestError::NodeIdOverflow(root_id, node_count));
+            }
+            if !roots.contains(&root_id) {
+                roots.push(root_id);
+            }
+        }
+
+        Ok(Self {
+            nodes: parts.nodes,
+            roots,
+            advice_map: parts.advice_map,
+            debug_info: parts.debug_info,
+            commitment_cache: OnceLockCompat::new(),
+        })
     }
 }
 
@@ -179,13 +244,8 @@ impl MastForest {
     /// The maximum number of nodes that can be stored in a single MAST forest.
     const MAX_NODES: usize = (1 << 30) - 1;
 
-    /// Marks the given [`MastNodeId`] as being the root of a procedure.
-    ///
-    /// If the specified node is already marked as a root, this will have no effect.
-    ///
-    /// # Panics
-    /// - if `new_root_id`'s internal index is larger than the number of nodes in this forest (i.e.
-    ///   clearly doesn't belong to this MAST forest).
+    #[cfg(any(test, feature = "arbitrary", feature = "testing"))]
+    #[doc(hidden)]
     pub fn make_root(&mut self, new_root_id: MastNodeId) {
         assert!(new_root_id.to_usize() < self.nodes.len());
 
@@ -196,54 +256,37 @@ impl MastForest {
         }
     }
 
-    /// Removes all nodes in the provided set from the MAST forest. The nodes MUST be orphaned (i.e.
-    /// have no parent). Otherwise, this parent's reference is considered "dangling" after the
-    /// removal (i.e. will point to an incorrect node after the removal), and this removal operation
-    /// would result in an invalid [`MastForest`].
-    ///
-    /// It also returns the map from old node IDs to new node IDs. Any [`MastNodeId`] used in
-    /// reference to the old [`MastForest`] should be remapped using this map.
-    pub fn remove_nodes(
-        &mut self,
-        nodes_to_remove: &BTreeSet<MastNodeId>,
-    ) -> BTreeMap<MastNodeId, MastNodeId> {
-        if nodes_to_remove.is_empty() {
-            return BTreeMap::new();
-        }
-
-        let old_nodes = core::mem::replace(&mut self.nodes, IndexVec::new());
-        let old_root_ids = core::mem::take(&mut self.roots);
-        let (retained_nodes, id_remappings) = remove_nodes(old_nodes.into_inner(), nodes_to_remove);
-
-        self.remap_and_add_nodes(retained_nodes, &id_remappings);
-        self.remap_and_add_roots(old_root_ids, &id_remappings);
-
-        // Remap the asm_op_storage and debug_var_storage to use the new node IDs
-        self.debug_info.remap_asm_op_storage(&id_remappings);
-        self.debug_info.remap_debug_var_storage(&id_remappings);
-
-        // Invalidate the cached commitment since we modified the forest structure
-        self.commitment_cache.take();
-
-        id_remappings
-    }
-
-    /// Clears all [`DebugInfo`] from this forest: decorators, error codes, and procedure names.
+    /// Returns this forest with all [`DebugInfo`] removed: decorators, error codes, and procedure
+    /// names.
     ///
     /// ```
     /// # use miden_core::mast::MastForest;
-    /// let mut forest = MastForest::new();
-    /// forest.clear_debug_info();
+    /// let forest = MastForest::new().into_stripped();
     /// assert!(forest.decorators().is_empty());
     /// ```
-    pub fn clear_debug_info(&mut self) {
+    pub fn into_stripped(mut self) -> Self {
         self.debug_info = DebugInfo::empty_for_nodes(self.nodes.len());
+        self
+    }
+
+    /// Returns this forest with source-backed debug locations rewritten.
+    ///
+    /// This is a consuming transform so callers can adjust finalized debug metadata without
+    /// obtaining mutable access to the forest itself.
+    pub fn into_rewritten_source_locations(
+        mut self,
+        rewrite_location: impl FnMut(Location) -> Location,
+        rewrite_file_line_col: impl FnMut(FileLineCol) -> FileLineCol,
+    ) -> Self {
+        self.debug_info
+            .rewrite_source_locations(rewrite_location, rewrite_file_line_col);
+        self
     }
 
     /// Compacts the forest by merging duplicate nodes.
     ///
     /// This operation performs node deduplication by merging the forest with itself.
-    /// The method assumes that debug info has already been cleared if that is desired.
+    /// The method assumes that debug info has already been stripped if that is desired.
     /// This method consumes the forest and returns a new compacted forest.
     ///
     /// The process works by:
@@ -260,7 +303,7 @@ impl MastForest {
     /// // Add nodes to the forest
     ///
     /// // First clear debug info if needed
-    /// forest.clear_debug_info();
+    /// let forest = forest.into_stripped();
     ///
     /// // Then compact the forest (consumes the original)
     /// let (compacted_forest, root_map) = forest.compact();
@@ -330,78 +373,6 @@ impl MastForest {
     ) -> Result<(MastForest, MastForestRootMap), MastForestError> {
         MastForestMerger::merge(forests)
     }
-}
-
-// ------------------------------------------------------------------------------------------------
-/// Helpers
-impl MastForest {
-    /// Adds all provided nodes to the internal set of nodes, remapping all [`MastNodeId`]
-    /// references in those nodes.
-    ///
-    /// # Panics
-    /// - Panics if the internal set of nodes is not empty.
-    fn remap_and_add_nodes(
-        &mut self,
-        nodes_to_add: Vec<MastNode>,
-        id_remappings: &BTreeMap<MastNodeId, MastNodeId>,
-    ) {
-        assert!(self.nodes.is_empty());
-        // extract decorator information from the nodes by converting them into builders
-        let node_builders =
-            nodes_to_add.into_iter().map(|node| node.to_builder(self)).collect::<Vec<_>>();
-
-        // Clear decorator storage after extracting builders (builders contain decorator data)
-        self.debug_info.clear_mappings();
-
-        // Add each node to the new MAST forest, making sure to rewrite any outdated internal
-        // `MastNodeId`s
-        for live_node_builder in node_builders {
-            live_node_builder.remap_children(id_remappings).add_to_forest(self).unwrap();
-        }
-    }
-
-    /// Remaps and adds all old root ids to the internal set of roots.
-    ///
-    /// # Panics
-    /// - Panics if the internal set of roots is not empty.
-    fn remap_and_add_roots(
-        &mut self,
-        old_root_ids: Vec<MastNodeId>,
-        id_remappings: &BTreeMap<MastNodeId, MastNodeId>,
-    ) {
-        assert!(self.roots.is_empty());
-
-        for old_root_id in old_root_ids {
-            let new_root_id = id_remappings.get(&old_root_id).copied().unwrap_or(old_root_id);
-            self.make_root(new_root_id);
-        }
-    }
-}
-
-/// Returns the set of nodes that are live, as well as the mapping from "old ID" to "new ID" for all
-/// live nodes.
-fn remove_nodes(
-    mast_nodes: Vec<MastNode>,
-    nodes_to_remove: &BTreeSet<MastNodeId>,
-) -> (Vec<MastNode>, BTreeMap<MastNodeId, MastNodeId>) {
-    // Note: this allows us to safely use `usize as u32`, guaranteeing that it won't wrap around.
-    assert!(mast_nodes.len() < u32::MAX as usize);
-
-    let mut retained_nodes = Vec::with_capacity(mast_nodes.len());
-    let mut id_remappings = BTreeMap::new();
-
-    for (old_node_index, old_node) in mast_nodes.into_iter().enumerate() {
-        let old_node_id: MastNodeId = MastNodeId(old_node_index as u32);
-
-        if !nodes_to_remove.contains(&old_node_id) {
-            let new_node_id: MastNodeId = MastNodeId(retained_nodes.len() as u32);
-            id_remappings.insert(old_node_id, new_node_id);
-
-            retained_nodes.push(old_node);
-        }
-    }
-
-    (retained_nodes, id_remappings)
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -495,8 +466,10 @@ impl MastForest {
         &self.advice_map
     }
 
-    pub fn advice_map_mut(&mut self) -> &mut AdviceMap {
-        &mut self.advice_map
+    /// Returns this forest with `advice_map` entries added.
+    pub fn with_advice_map(mut self, advice_map: AdviceMap) -> Self {
+        self.advice_map.extend(advice_map);
+        self
     }
 
     // SERIALIZATION
@@ -615,13 +588,14 @@ impl MastForest {
         self.debug_info.decorator_links_for_node(node_id)
     }
 
-    /// Adds a decorator to the forest, and returns the associated [`DecoratorId`].
+    #[cfg(any(test, feature = "arbitrary", feature = "testing"))]
+    #[doc(hidden)]
     pub fn add_decorator(&mut self, decorator: Decorator) -> Result<DecoratorId, MastForestError> {
         self.debug_info.add_decorator(decorator)
     }
 
-    /// Adds a debug variable to the forest, and returns the associated [`DebugVarId`].
-    pub fn add_debug_var(
+    #[cfg(test)]
+    pub(crate) fn add_debug_var(
         &mut self,
         debug_var: DebugVarInfo,
     ) -> Result<DebugVarId, MastForestError> {
@@ -650,6 +624,7 @@ impl MastForest {
     /// This method does not validate decorator IDs immediately. Validation occurs during
     /// operations that need to access the actual decorator data (e.g., merging, serialization).
     #[inline]
+    #[cfg(any(test, feature = "arbitrary", feature = "testing"))]
     pub(crate) fn register_node_decorators(
         &mut self,
         node_id: MastNodeId,
@@ -861,15 +836,6 @@ impl MastForest {
         let key = code.as_canonical_u64();
         self.debug_info.error_message(key)
     }
-
-    /// Registers an error message in the MAST Forest and returns the corresponding error code as a
-    /// Felt.
-    pub fn register_error(&mut self, msg: Arc<str>) -> Felt {
-        let code: Felt = error_code_from_msg(&msg);
-        // we use u64 as keys for the map
-        self.debug_info.insert_error_code(code.as_canonical_u64(), msg);
-        code
-    }
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -885,8 +851,8 @@ impl MastForest {
         self.debug_info.procedure_names()
     }
 
-    /// Inserts a procedure name for the given MAST root digest.
-    pub fn insert_procedure_name(&mut self, digest: Word, name: Arc<str>) {
+    #[cfg(test)]
+    pub(crate) fn insert_procedure_name(&mut self, digest: Word, name: Arc<str>) {
         assert!(
             self.find_procedure_root(digest).is_some(),
             "attempted to insert procedure name for digest that is not a procedure root"
@@ -899,11 +865,8 @@ impl MastForest {
         &self.debug_info
     }
 
-    /// Returns a mutable reference to the debug info.
-    ///
-    /// This is intended for use by the assembler to register AssemblyOps and other debug
-    /// information during compilation.
-    pub fn debug_info_mut(&mut self) -> &mut DebugInfo {
+    #[cfg(test)]
+    pub(crate) fn debug_info_mut(&mut self) -> &mut DebugInfo {
         &mut self.debug_info
     }
 }
@@ -978,26 +941,12 @@ impl Index<MastNodeId> for MastForest {
     }
 }
 
-impl IndexMut<MastNodeId> for MastForest {
-    #[inline(always)]
-    fn index_mut(&mut self, node_id: MastNodeId) -> &mut Self::Output {
-        &mut self.nodes[node_id]
-    }
-}
-
 impl Index<DecoratorId> for MastForest {
     type Output = Decorator;
 
     #[inline(always)]
     fn index(&self, decorator_id: DecoratorId) -> &Self::Output {
         self.debug_info.decorator(decorator_id).expect("DecoratorId out of bounds")
-    }
-}
-
-impl IndexMut<DecoratorId> for MastForest {
-    #[inline(always)]
-    fn index_mut(&mut self, decorator_id: DecoratorId) -> &mut Self::Output {
-        self.debug_info.decorator_mut(decorator_id).expect("DecoratorId out of bounds")
     }
 }
 
@@ -1321,6 +1270,15 @@ pub enum MastForestError {
     TooManyNodes,
     #[error("node id {0} is greater than or equal to forest length {1}")]
     NodeIdOverflow(MastNodeId, usize),
+    #[error("node {0:?} has an unlinked decorator store")]
+    UnlinkedDecoratorStore(MastNodeId),
+    #[error("node {node_id:?} has a decorator store linked to {linked_node_id:?}")]
+    InvalidDecoratorStoreLink {
+        node_id: MastNodeId,
+        linked_node_id: MastNodeId,
+    },
+    #[error("invalid MAST forest debug info: {0}")]
+    InvalidDebugInfo(String),
     #[error("decorator id {0} is greater than or equal to decorator count {1}")]
     DecoratorIdOverflow(DecoratorId, usize),
     #[error("basic block cannot be created from an empty list of operations")]

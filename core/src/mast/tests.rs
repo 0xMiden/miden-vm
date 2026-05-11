@@ -5,14 +5,17 @@ use proptest::prelude::*;
 
 use crate::{
     Felt, WORD_SIZE, Word,
+    advice::AdviceMap,
     chiplets::hasher,
     mast::{
-        BasicBlockNodeBuilder, CallNodeBuilder, DynNode, DynNodeBuilder, JoinNodeBuilder,
-        MastForest, MastForestContributor, MastNodeExt, SplitNodeBuilder,
+        BasicBlockNodeBuilder, CallNodeBuilder, DebugInfo, DecoratorId, DynNode, DynNodeBuilder,
+        JoinNodeBuilder, MastForest, MastForestContributor, MastForestError, MastForestParts,
+        MastNode, MastNodeBuilder, MastNodeExt, MastNodeId, SplitNodeBuilder,
     },
     operations::{AssemblyOp, DebugOptions, Decorator, Operation},
     program::{Kernel, ProgramInfo},
     serde::{Deserializable, Serializable},
+    utils::IndexVec,
 };
 
 #[test]
@@ -24,6 +27,73 @@ fn dyn_hash_is_correct() {
     let dyn_node_id = DynNodeBuilder::new_dyn().add_to_forest(&mut forest).unwrap();
     let dyn_node = forest.get_node_by_id(dyn_node_id).unwrap().unwrap_dyn();
     assert_eq!(expected_constant, dyn_node.digest());
+}
+
+fn forest_parts_with_node(node: MastNode) -> MastForestParts {
+    forest_parts_with_node_and_debug_info(node, DebugInfo::new())
+}
+
+fn forest_parts_with_node_and_debug_info(node: MastNode, debug_info: DebugInfo) -> MastForestParts {
+    let node_id = MastNodeId::new_unchecked(0);
+    let mut nodes = IndexVec::new();
+    nodes.push(node).unwrap();
+
+    MastForestParts {
+        nodes,
+        roots: vec![node_id],
+        advice_map: AdviceMap::default(),
+        debug_info,
+    }
+}
+
+#[test]
+fn from_parts_rejects_unlinked_decorator_store() {
+    let node = BasicBlockNodeBuilder::new(vec![Operation::Push(Felt::new_unchecked(1))], vec![])
+        .build()
+        .unwrap()
+        .into();
+
+    assert_eq!(
+        MastForest::from_parts(forest_parts_with_node(node)),
+        Err(MastForestError::UnlinkedDecoratorStore(MastNodeId::new_unchecked(0)))
+    );
+}
+
+#[test]
+fn from_parts_rejects_mislinked_decorator_store() {
+    let node = MastNodeBuilder::BasicBlock(BasicBlockNodeBuilder::new(
+        vec![Operation::Push(Felt::new_unchecked(1))],
+        vec![],
+    ))
+    .build_linked(MastNodeId::new_unchecked(1))
+    .unwrap();
+
+    assert_eq!(
+        MastForest::from_parts(forest_parts_with_node(node)),
+        Err(MastForestError::InvalidDecoratorStoreLink {
+            node_id: MastNodeId::new_unchecked(0),
+            linked_node_id: MastNodeId::new_unchecked(1),
+        })
+    );
+}
+
+#[test]
+fn from_parts_rejects_invalid_debug_info() {
+    let node_id = MastNodeId::new_unchecked(0);
+    let node = MastNodeBuilder::BasicBlock(BasicBlockNodeBuilder::new(
+        vec![Operation::Push(Felt::new_unchecked(1))],
+        vec![],
+    ))
+    .build_linked(node_id)
+    .unwrap();
+
+    let mut debug_info = DebugInfo::new();
+    debug_info.register_node_decorators(node_id, &[DecoratorId(0)], &[]);
+
+    assert!(matches!(
+        MastForest::from_parts(forest_parts_with_node_and_debug_info(node, debug_info)),
+        Err(MastForestError::InvalidDebugInfo(_))
+    ));
 }
 
 proptest! {
@@ -77,7 +147,7 @@ fn test_decorator_storage_consistency_with_block_iterator() {
         .unwrap();
 
     // Verify the block was created and get the actual block
-    let block = if let crate::mast::MastNode::Block(block) = &forest[block_id] {
+    let block = if let MastNode::Block(block) = &forest[block_id] {
         block
     } else {
         panic!("Expected a block node");
@@ -152,7 +222,7 @@ fn test_decorator_storage_consistency_with_empty_block() {
         .unwrap();
 
     // Verify the block was created
-    let block = if let crate::mast::MastNode::Block(block) = &forest[block_id] {
+    let block = if let MastNode::Block(block) = &forest[block_id] {
         block
     } else {
         panic!("Expected a block node");
@@ -206,7 +276,7 @@ fn test_decorator_storage_consistency_with_multiple_blocks() {
         .flat_map(|(op_idx, decorators)| decorators.iter().map(move |dec_id| (op_idx, *dec_id)))
         .collect();
 
-    let block1 = if let crate::mast::MastNode::Block(block) = &forest[block_id1] {
+    let block1 = if let MastNode::Block(block) = &forest[block_id1] {
         block
     } else {
         panic!("Expected a block node");
@@ -224,7 +294,7 @@ fn test_decorator_storage_consistency_with_multiple_blocks() {
         .flat_map(|(op_idx, decorators)| decorators.iter().map(move |dec_id| (op_idx, *dec_id)))
         .collect();
 
-    let block2 = if let crate::mast::MastNode::Block(block) = &forest[block_id2] {
+    let block2 = if let MastNode::Block(block) = &forest[block_id2] {
         block
     } else {
         panic!("Expected a block node");
@@ -238,7 +308,7 @@ fn test_decorator_storage_consistency_with_multiple_blocks() {
 }
 
 #[test]
-fn test_decorator_storage_after_clear_debug_info() {
+fn test_decorator_storage_after_strip_debug_info() {
     let mut forest = MastForest::new();
 
     let deco1 = forest.add_decorator(Decorator::Trace(1)).unwrap();
@@ -251,7 +321,7 @@ fn test_decorator_storage_after_clear_debug_info() {
     assert_eq!(forest.debug_info.num_decorators(), 2);
     assert_eq!(forest.debug_info.op_decorator_storage().num_decorator_ids(), 2);
 
-    forest.clear_debug_info();
+    forest = forest.into_stripped();
 
     assert_eq!(forest.debug_info.num_decorators(), 0);
     assert_eq!(forest.debug_info.op_decorator_storage().num_nodes(), 1);
@@ -259,10 +329,10 @@ fn test_decorator_storage_after_clear_debug_info() {
 }
 
 #[test]
-fn test_clear_debug_info_edge_cases() {
+fn test_strip_debug_info_edge_cases() {
     // Empty forest
     let mut forest = MastForest::new();
-    forest.clear_debug_info();
+    forest = forest.into_stripped();
     assert_eq!(forest.debug_info.num_decorators(), 0);
     assert_eq!(forest.debug_info.op_decorator_storage().num_nodes(), 0);
 
@@ -271,15 +341,14 @@ fn test_clear_debug_info_edge_cases() {
     let block_id = BasicBlockNodeBuilder::new(operations, vec![])
         .add_to_forest(&mut forest)
         .unwrap();
-    forest.clear_debug_info();
-    forest.clear_debug_info();
+    forest = forest.into_stripped().into_stripped();
     assert_eq!(forest.debug_info.num_decorators(), 0);
     assert_eq!(forest.debug_info.op_decorator_storage().num_nodes(), 1);
     assert!(forest.decorator_links_for_node(block_id).unwrap().into_iter().next().is_none());
 }
 
 #[test]
-fn test_clear_debug_info_multiple_node_types() {
+fn test_strip_debug_info_multiple_node_types() {
     let mut forest = MastForest::new();
     let deco = forest.add_decorator(Decorator::Trace(1)).unwrap();
     let block_id = BasicBlockNodeBuilder::new(
@@ -292,14 +361,14 @@ fn test_clear_debug_info_multiple_node_types() {
     JoinNodeBuilder::new([block_id, block_id]).add_to_forest(&mut forest).unwrap();
     SplitNodeBuilder::new([block_id, block_id]).add_to_forest(&mut forest).unwrap();
 
-    forest.clear_debug_info();
+    forest = forest.into_stripped();
 
     assert_eq!(forest.debug_info.op_decorator_storage().num_nodes(), 3);
     assert!(forest.decorator_links_for_node(block_id).unwrap().into_iter().next().is_none());
 }
 
 #[test]
-fn test_compact_after_clear_debug_info_does_not_materialize_empty_node_decorators() {
+fn test_compact_after_strip_debug_info_does_not_materialize_empty_node_decorators() {
     let mut forest = MastForest::new();
     let decorator = forest.add_decorator(Decorator::Trace(1)).unwrap();
     let block_id = BasicBlockNodeBuilder::new(
@@ -312,12 +381,12 @@ fn test_compact_after_clear_debug_info_does_not_materialize_empty_node_decorator
     let call_id = CallNodeBuilder::new(block_id).add_to_forest(&mut forest).unwrap();
     forest.make_root(call_id);
 
-    forest.clear_debug_info();
+    forest = forest.into_stripped();
     let (compacted, _) = forest.compact();
 
     assert!(compacted.debug_info.node_decorator_storage().is_empty());
     for node_idx in 0..compacted.nodes().len() {
-        let node_id = crate::mast::MastNodeId::new_unchecked(node_idx as u32);
+        let node_id = MastNodeId::new_unchecked(node_idx as u32);
         assert!(compacted.before_enter_decorators(node_id).is_empty());
         assert!(compacted.after_exit_decorators(node_id).is_empty());
     }
@@ -487,7 +556,7 @@ fn test_mast_forest_serde_converts_linked_to_owned_decorators() {
         .unwrap();
 
     // Verify that the block was created
-    let original_block = if let crate::mast::MastNode::Block(block) = &forest[block_id] {
+    let original_block = if let MastNode::Block(block) = &forest[block_id] {
         block
     } else {
         panic!("Expected a block node");
@@ -514,12 +583,11 @@ fn test_mast_forest_serde_converts_linked_to_owned_decorators() {
         MastForest::read_from_bytes(&serialized_bytes).expect("Failed to deserialize MastForest");
 
     // Get the deserialized block
-    let deserialized_block =
-        if let crate::mast::MastNode::Block(block) = &deserialized_forest[block_id] {
-            block
-        } else {
-            panic!("Expected a block node in deserialized forest");
-        };
+    let deserialized_block = if let MastNode::Block(block) = &deserialized_forest[block_id] {
+        block
+    } else {
+        panic!("Expected a block node in deserialized forest");
+    };
 
     // Verify that the decorator data is still correct using the deserialized forest
     let deserialized_decorators: Vec<_> =
@@ -577,7 +645,7 @@ fn test_mast_forest_serializable_converts_linked_to_owned_decorators() {
         .unwrap();
 
     // Verify that the block was created
-    let original_block = if let crate::mast::MastNode::Block(block) = &forest[block_id] {
+    let original_block = if let MastNode::Block(block) = &forest[block_id] {
         block
     } else {
         panic!("Expected a block node");
@@ -609,7 +677,7 @@ fn test_mast_forest_serializable_converts_linked_to_owned_decorators() {
     // Verify that the decorator data is still correct by collecting data from the deserialized
     // block
     let deserialized_decorators: Vec<_> = {
-        let block = if let crate::mast::MastNode::Block(block) = &deserialized_forest[block_id] {
+        let block = if let MastNode::Block(block) = &deserialized_forest[block_id] {
             block
         } else {
             panic!("Expected a block node in deserialized forest");
@@ -664,7 +732,7 @@ fn test_forest_borrowing_decorator_access() {
 
     // Get the block from forest
     let block = &forest[node_id];
-    if let crate::mast::MastNode::Block(block_node) = block {
+    if let MastNode::Block(block_node) = block {
         // Test that forest borrowing methods work correctly
 
         // Test 1: decorator_indices_for_op
@@ -848,7 +916,7 @@ fn test_mast_forest_compaction_comprehensive() {
     assert!(!forest.debug_info.is_empty());
 
     // Action: Clear debug info first, then compact
-    forest.clear_debug_info();
+    forest = forest.into_stripped();
     let (forest, _root_map) = forest.compact();
 
     // Verify compaction results:
@@ -1089,7 +1157,7 @@ fn test_mast_forest_get_assembly_comprehensive_edge_cases() {
 }
 
 #[test]
-fn test_clear_debug_info_independent() {
+fn test_strip_debug_info_independent() {
     let mut forest = MastForest::new();
 
     // Add some nodes with decorators
@@ -1104,7 +1172,7 @@ fn test_clear_debug_info_independent() {
     assert_eq!(forest.decorators().len(), 1);
 
     // Clear debug info only
-    forest.clear_debug_info();
+    forest = forest.into_stripped();
 
     // Verify debug info is removed but structure remains
     assert!(forest.debug_info.is_empty());
@@ -1173,28 +1241,21 @@ fn test_commitment_caching() {
     let commitment4 = forest.commitment();
     assert_eq!(commitment3, commitment4);
 
-    // Test that advice_map mutations don't invalidate the cache
-    forest.advice_map_mut().insert(Word::from([Felt::ZERO; 4]), vec![]);
+    // Test that extending the advice map doesn't invalidate the cache
+    forest =
+        forest.with_advice_map(AdviceMap::from_iter([(Word::from([Felt::ZERO; 4]), Vec::new())]));
     let commitment5 = forest.commitment();
     assert_eq!(
         commitment3, commitment5,
         "advice_map mutation should not invalidate commitment cache"
     );
 
-    // Test that clear_debug_info doesn't invalidate the cache
-    forest.clear_debug_info();
+    // Test that stripping debug info doesn't invalidate the cache
+    forest = forest.into_stripped();
     let commitment6 = forest.commitment();
-    assert_eq!(
-        commitment3, commitment6,
-        "clear_debug_info should not invalidate commitment cache"
-    );
+    assert_eq!(commitment3, commitment6, "into_stripped should not invalidate commitment cache");
 
-    // Test that remove_nodes invalidates the cache
-    let nodes_to_remove = alloc::collections::BTreeSet::new();
-    forest.remove_nodes(&nodes_to_remove); // Empty set, but still calls the method
-    let commitment7 = forest.commitment();
-    // Since we didn't actually remove anything, commitment should still be the same
-    assert_eq!(commitment3, commitment7);
+    // There are no remaining post-finalization mutation paths that invalidate this cache.
 }
 
 // HELPER FUNCTIONS
