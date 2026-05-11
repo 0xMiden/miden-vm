@@ -85,6 +85,22 @@ impl MastNodeBuilder {
         }
     }
 
+    /// Build the node from this builder without reading child nodes from a forest.
+    ///
+    /// Forest-dependent node kinds require a forced digest. This is intended for assembly-time
+    /// builders that already computed the digest from builder-local child references.
+    pub fn build_with_forced_digest(self) -> Result<MastNode, MastForestError> {
+        match self {
+            MastNodeBuilder::BasicBlock(builder) => Ok(builder.build()?.into()),
+            MastNodeBuilder::Call(builder) => Ok(builder.build_with_forced_digest()?.into()),
+            MastNodeBuilder::Dyn(builder) => Ok(builder.build().into()),
+            MastNodeBuilder::External(builder) => Ok(builder.build().into()),
+            MastNodeBuilder::Join(builder) => Ok(builder.build_with_forced_digest()?.into()),
+            MastNodeBuilder::Loop(builder) => Ok(builder.build_with_forced_digest()?.into()),
+            MastNodeBuilder::Split(builder) => Ok(builder.build_with_forced_digest()?.into()),
+        }
+    }
+
     /// Adds the node from this builder to the forest without validation, used during
     /// deserialization.
     ///
@@ -363,7 +379,7 @@ mod round_trip_tests {
         Word,
         mast::{
             BasicBlockNodeBuilder, JoinNodeBuilder, MastForest, MastNode, MastNodeBuilder,
-            MastNodeExt, node::mast_forest_contributor::MastForestContributor,
+            MastNodeExt, MastNodeId, node::mast_forest_contributor::MastForestContributor,
         },
         operations::Operation,
     };
@@ -451,6 +467,34 @@ mod round_trip_tests {
             mast_node2.digest(),
             forced_mast_digest,
             "Forced digest should be used for mast node builder enum"
+        );
+    }
+
+    #[test]
+    fn mast_node_builder_builds_control_flow_with_forced_digest_without_forest() {
+        let forced_digest = Word::new([
+            Felt::new_unchecked(13),
+            Felt::new_unchecked(14),
+            Felt::new_unchecked(15),
+            Felt::new_unchecked(16),
+        ]);
+        let children = [MastNodeId::new_unchecked(10), MastNodeId::new_unchecked(11)];
+
+        let node = MastNodeBuilder::Join(JoinNodeBuilder::new(children).with_digest(forced_digest))
+            .build_with_forced_digest()
+            .expect("forced-digest join should build without reading a forest");
+
+        let MastNode::Join(node) = node else {
+            panic!("expected join node");
+        };
+        assert_eq!(node.digest(), forced_digest);
+        assert_eq!([node.first(), node.second()], children);
+
+        assert!(
+            MastNodeBuilder::Join(JoinNodeBuilder::new(children))
+                .build_with_forced_digest()
+                .is_err(),
+            "control-flow nodes require a forced digest when built without a forest"
         );
     }
 }

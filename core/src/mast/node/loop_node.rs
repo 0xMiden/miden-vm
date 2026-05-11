@@ -198,7 +198,10 @@ impl MastNodeExt for LoopNode {
         match self.decorator_store {
             DecoratorStore::Owned { before_enter, after_exit, .. } => {
                 let mut builder = LoopNodeBuilder::new(self.body);
-                builder = builder.with_before_enter(before_enter).with_after_exit(after_exit);
+                builder = builder
+                    .with_before_enter(before_enter)
+                    .with_after_exit(after_exit)
+                    .with_digest(self.digest);
                 builder
             },
             DecoratorStore::Linked { id } => {
@@ -206,7 +209,10 @@ impl MastNodeExt for LoopNode {
                 let before_enter = forest.before_enter_decorators(id).to_vec();
                 let after_exit = forest.after_exit_decorators(id).to_vec();
                 let mut builder = LoopNodeBuilder::new(self.body);
-                builder = builder.with_before_enter(before_enter).with_after_exit(after_exit);
+                builder = builder
+                    .with_before_enter(before_enter)
+                    .with_after_exit(after_exit)
+                    .with_digest(self.digest);
                 builder
             },
         }
@@ -300,6 +306,21 @@ impl LoopNodeBuilder {
             let body_hash = mast_forest[self.body].digest();
 
             hasher::merge_in_domain(&[body_hash, Word::default()], LoopNode::DOMAIN)
+        };
+
+        Ok(LoopNode {
+            body: self.body,
+            digest,
+            decorator_store: DecoratorStore::new_owned_with_decorators(
+                self.before_enter,
+                self.after_exit,
+            ),
+        })
+    }
+
+    pub(in crate::mast) fn build_with_forced_digest(self) -> Result<LoopNode, MastForestError> {
+        let Some(digest) = self.digest else {
+            return Err(MastForestError::DigestRequiredForDeserialization);
         };
 
         Ok(LoopNode {

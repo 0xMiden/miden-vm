@@ -239,7 +239,10 @@ impl MastNodeExt for DynNode {
                 } else {
                     DynNodeBuilder::new_dyn()
                 };
-                builder = builder.with_before_enter(before_enter).with_after_exit(after_exit);
+                builder = builder
+                    .with_before_enter(before_enter)
+                    .with_after_exit(after_exit)
+                    .with_digest(self.digest);
                 builder
             },
             DecoratorStore::Linked { id } => {
@@ -251,7 +254,10 @@ impl MastNodeExt for DynNode {
                 } else {
                     DynNodeBuilder::new_dyn()
                 };
-                builder = builder.with_before_enter(before_enter).with_after_exit(after_exit);
+                builder = builder
+                    .with_before_enter(before_enter)
+                    .with_after_exit(after_exit)
+                    .with_digest(self.digest);
                 builder
             },
         }
