@@ -746,12 +746,105 @@ pub fn mast_forest_and_kernel_strategy(
 }
 
 /// Builds an executable `(MastForest, Kernel)` pair from the provided seeds.
-#[allow(unused_variables)]
+///
+/// TODO: initial root selection,externals + syscalls, and kernel finalisation.
 fn build_executable_forest(
     seeds: ForestSeeds,
     params: &MastForestParams,
 ) -> (MastForest, Kernel) {
-    unimplemented!("will be implemented later!")
+    let _ = params;
+
+    let ForestSeeds {
+        basic_blocks,
+        decorators,
+        counts,
+        join_pairs,
+        split_pairs,
+        loop_indices,
+        call_indices,
+        syscall_picks: _,
+        external_picks: _,
+        dyn_selectors: _,
+        kernel_inclusion: _,
+        root_selection: _,
+    } = seeds;
+
+    let mut forest = MastForest::new();
+
+    for decorator in decorators {
+        forest.add_decorator(decorator).expect("Failed to add decorator");
+    }
+
+    let num_basic_blocks = basic_blocks.len();
+    let mut basic_block_ids: Vec<MastNodeId> = Vec::with_capacity(num_basic_blocks);
+    for block in basic_blocks {
+        let builder = block.to_builder(&forest);
+        let node_id = builder.add_to_forest(&mut forest).expect("Failed to add block");
+        basic_block_ids.push(node_id);
+    }
+
+    // Track all node IDs in insertion (topological) order so children referenced by
+    // control-flow nodes are guaranteed to already exist in the forest.
+    let mut all_node_ids: Vec<MastNodeId> = basic_block_ids.clone();
+
+    let max_parent_nodes = num_basic_blocks.saturating_sub(1);
+    let num_joins = counts.num_joins.min(max_parent_nodes);
+    let num_splits = counts.num_splits.min(max_parent_nodes);
+    let num_loops = counts.num_loops.min(num_basic_blocks);
+    let num_calls = counts.num_calls.min(num_basic_blocks);
+
+    for &(left_raw, right_raw) in join_pairs.iter().take(num_joins) {
+        let left_idx = left_raw % num_basic_blocks;
+        let right_idx = right_raw % num_basic_blocks;
+        if left_idx < all_node_ids.len() && right_idx < all_node_ids.len() {
+            let left_id = all_node_ids[left_idx];
+            let right_id = all_node_ids[right_idx];
+            if let Ok(join_id) =
+                JoinNodeBuilder::new([left_id, right_id]).add_to_forest(&mut forest)
+            {
+                all_node_ids.push(join_id);
+            }
+        }
+    }
+
+    for &(true_raw, false_raw) in split_pairs.iter().take(num_splits) {
+        let true_idx = true_raw % num_basic_blocks;
+        let false_idx = false_raw % num_basic_blocks;
+        if true_idx < all_node_ids.len() && false_idx < all_node_ids.len() {
+            let true_id = all_node_ids[true_idx];
+            let false_id = all_node_ids[false_idx];
+            if let Ok(split_id) =
+                SplitNodeBuilder::new([true_id, false_id]).add_to_forest(&mut forest)
+            {
+                all_node_ids.push(split_id);
+            }
+        }
+    }
+
+    for &body_raw in loop_indices.iter().take(num_loops) {
+        let body_idx = body_raw % num_basic_blocks;
+        if body_idx < all_node_ids.len() {
+            let body_id = all_node_ids[body_idx];
+            if let Ok(loop_id) = LoopNodeBuilder::new(body_id).add_to_forest(&mut forest) {
+                all_node_ids.push(loop_id);
+            }
+        }
+    }
+
+    for &callee_raw in call_indices.iter().take(num_calls) {
+        let callee_idx = callee_raw % num_basic_blocks;
+        if callee_idx < all_node_ids.len() {
+            let callee_id = all_node_ids[callee_idx];
+            let call_id = CallNodeBuilder::new(callee_id)
+                .add_to_forest(&mut forest)
+                .expect("Failed to add call node");
+            all_node_ids.push(call_id);
+        }
+    }
+
+    let _ = (&basic_block_ids, &all_node_ids);
+
+    (forest, Kernel::default())
 }
 
 /// Builds a structure-only `(MastForest, Kernel)` pair from the provided seeds.
