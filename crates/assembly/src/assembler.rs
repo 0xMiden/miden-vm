@@ -659,7 +659,7 @@ impl Assembler {
             exports
         };
 
-        let (mast_forest, node_id_by_ref) = mast_forest_builder.build().into_parts();
+        let (mast_forest, node_id_by_ref) = mast_forest_builder.build()?.into_parts();
         let exports = exports
             .into_iter()
             .map(|(path, export)| {
@@ -896,7 +896,7 @@ impl Assembler {
             .body_node_ref();
 
         // in case the node IDs changed, update the entrypoint ID to the new value
-        let (mast_forest, node_id_by_ref) = mast_forest_builder.build().into_parts();
+        let (mast_forest, node_id_by_ref) = mast_forest_builder.build()?.into_parts();
         let entry_node_id = node_id_by_ref
             .get(&entry_node_ref)
             .copied()
