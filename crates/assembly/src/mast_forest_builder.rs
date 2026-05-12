@@ -740,6 +740,7 @@ impl MastForestBuilder {
 
         // Register owned AssemblyOp metadata in final node order. The CSR structure requires
         // nodes to be registered sequentially.
+        let mut asm_op_id_by_ref = BTreeMap::new();
         for &node_ref in &live_node_refs {
             let asm_op_mappings = self.nodes[node_ref].asm_ops.clone();
             if asm_op_mappings.is_empty() {
@@ -752,11 +753,19 @@ impl MastForestBuilder {
             let adjusted_mappings = adjusted_mappings
                 .into_iter()
                 .map(|(op_idx, asm_op_ref)| {
-                    let asm_op_id = debug_info
-                        .add_asm_op(self.asm_op_by_ref[asm_op_ref].clone())
-                        .map_err(|source| {
-                        Report::new(MastForestBuilderError::AddAsmOp { node_id, source })
-                    })?;
+                    let asm_op_id = if let Some(asm_op_id) =
+                        asm_op_id_by_ref.get(&asm_op_ref).copied()
+                    {
+                        asm_op_id
+                    } else {
+                        let asm_op_id = debug_info
+                            .add_asm_op(self.asm_op_by_ref[asm_op_ref].clone())
+                            .map_err(|source| {
+                                Report::new(MastForestBuilderError::AddAsmOp { node_id, source })
+                            })?;
+                        asm_op_id_by_ref.insert(asm_op_ref, asm_op_id);
+                        asm_op_id
+                    };
                     Ok((op_idx, asm_op_id))
                 })
                 .collect::<Result<Vec<_>, Report>>()?;
@@ -2032,7 +2041,8 @@ fn should_merge(is_procedure: bool, num_op_batches: usize) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use miden_core::operations::Operation;
+    use miden_core::operations::{DebugVarLocation, Operation};
+    use proptest::prelude::*;
 
     use super::*;
 
@@ -2045,8 +2055,286 @@ mod tests {
         builder.add_asm_op_ref(asm_op).unwrap()
     }
 
+    fn test_asm_op(context: impl Into<String>, op: impl Into<String>) -> AssemblyOp {
+        AssemblyOp::new(None, context.into(), 1, op.into())
+    }
+
     fn test_word(value: u64) -> Word {
         Word::from([Felt::new_unchecked(value), Felt::ZERO, Felt::ZERO, Felt::ZERO])
+    }
+
+    #[derive(Debug, Clone)]
+    struct GeneratedBuildStep {
+        tag: u8,
+        first: usize,
+        second: usize,
+        flags: u8,
+    }
+
+    fn generated_build_steps() -> impl Strategy<Value = Vec<GeneratedBuildStep>> {
+        proptest::collection::vec((0u8..5, any::<usize>(), any::<usize>(), any::<u8>()), 1..24)
+            .prop_map(|steps| {
+                steps
+                    .into_iter()
+                    .map(|(tag, first, second, flags)| GeneratedBuildStep {
+                        tag,
+                        first,
+                        second,
+                        flags,
+                    })
+                    .collect()
+            })
+    }
+
+    fn assert_finalization_invariants(
+        forest: &MastForest,
+        remapping: &BTreeMap<MastNodeRef, MastNodeId>,
+    ) {
+        let mut final_ids = BTreeSet::new();
+        let node_count = forest.num_nodes() as usize;
+        for &node_id in remapping.values() {
+            assert!(node_id.to_usize() < node_count, "final node ID {node_id} must be in bounds");
+            assert!(final_ids.insert(node_id), "final node ID {node_id} must resolve once");
+        }
+
+        for &root_id in forest.procedure_roots() {
+            assert!(root_id.to_usize() < node_count, "procedure root {root_id} must be in bounds");
+        }
+
+        for node_idx in 0..forest.num_nodes() {
+            let node_id = MastNodeId::new_unchecked(node_idx);
+            let mut children = Vec::new();
+            forest[node_id].append_children_to(&mut children);
+            for child_id in children {
+                assert!(
+                    child_id.to_usize() < node_idx as usize,
+                    "child {child_id} must precede parent {node_id}"
+                );
+            }
+
+            for (_, asm_op_id) in forest.debug_info().asm_ops_for_node(node_id) {
+                assert!(
+                    forest.debug_info().asm_op(asm_op_id).is_some(),
+                    "AssemblyOp ID {asm_op_id} must resolve"
+                );
+            }
+
+            for (_, debug_var_id) in forest.debug_info().debug_vars_for_node(node_id) {
+                assert!(
+                    forest.debug_info().debug_var(debug_var_id).is_some(),
+                    "debug variable ID {debug_var_id:?} must resolve"
+                );
+            }
+        }
+
+        let mut asm_payloads = BTreeSet::new();
+        for asm_op in forest.debug_info().asm_ops() {
+            let payload =
+                format!("{}:{}:{}", asm_op.context_name(), asm_op.op(), asm_op.num_cycles());
+            assert!(asm_payloads.insert(payload), "AssemblyOp payloads should not duplicate");
+        }
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(32))]
+
+        #[test]
+        fn finalization_invariants_hold_for_generated_builder_shapes(
+            steps in generated_build_steps()
+        ) {
+            let mut builder = MastForestBuilder::new(&[]).unwrap();
+            let shared_asm_op = add_test_asm_op(&mut builder, test_asm_op("generated::shared", "add"));
+            let shared_debug_var = builder
+                .add_debug_var_ref(DebugVarInfo::new(
+                    "shared",
+                    DebugVarLocation::Stack(0),
+                ))
+                .unwrap();
+
+            let seed_ref = builder
+                .ensure_block_ref(
+                    vec![Operation::Add, Operation::Mul],
+                    Vec::new(),
+                    vec![(0, shared_asm_op), (1, shared_asm_op)],
+                    vec![(0, shared_debug_var)],
+                    vec![],
+                    vec![],
+                )
+                .unwrap();
+            record_test_root(&mut builder, seed_ref);
+
+            let mut node_refs = vec![seed_ref];
+            for (step_idx, step) in steps.iter().enumerate() {
+                let first_ref = node_refs[step.first % node_refs.len()];
+                let second_ref = node_refs[step.second % node_refs.len()];
+                let context = format!("generated::{step_idx}");
+                let next_ref = match step.tag {
+                    0 => {
+                        let asm_op = add_test_asm_op(
+                            &mut builder,
+                            test_asm_op(context.clone(), "add"),
+                        );
+                        builder
+                            .ensure_block_ref(
+                                vec![Operation::Add],
+                                Vec::new(),
+                                vec![(0, asm_op)],
+                                vec![],
+                                vec![],
+                                vec![],
+                            )
+                            .unwrap()
+                    },
+                    1 => builder
+                        .ensure_split_node_ref(
+                            [first_ref, second_ref],
+                            None,
+                            test_asm_op(context.clone(), "if.true"),
+                        )
+                        .unwrap(),
+                    2 => builder
+                        .ensure_loop_node_ref(
+                            first_ref,
+                            None,
+                            test_asm_op(context.clone(), "begin"),
+                        )
+                        .unwrap(),
+                    3 => builder
+                        .ensure_call_node_ref(
+                            first_ref,
+                            step.flags & 1 == 1,
+                            test_asm_op(context.clone(), "call"),
+                        )
+                        .unwrap(),
+                    _ => builder
+                        .join_node_refs(
+                            vec![first_ref, second_ref],
+                            Some(test_asm_op(context.clone(), "begin")),
+                        )
+                        .unwrap(),
+                };
+
+                if step.flags & 2 == 2 {
+                    record_test_root(&mut builder, next_ref);
+                }
+                node_refs.push(next_ref);
+            }
+
+            record_test_root(&mut builder, *node_refs.last().unwrap());
+
+            let (forest, remapping) = builder.build().unwrap().into_parts();
+            assert_finalization_invariants(&forest, &remapping);
+        }
+    }
+
+    #[test]
+    fn deterministic_stress_builds_deep_repeated_metadata_forest() {
+        let mut builder = MastForestBuilder::new(&[]).unwrap();
+        let shared_asm_op = add_test_asm_op(&mut builder, test_asm_op("stress::shared", "base"));
+        let shared_debug_var = builder
+            .add_debug_var_ref(DebugVarInfo::new("shared", DebugVarLocation::Stack(0)))
+            .unwrap();
+        let shared_decorator = builder.ensure_decorator_ref(Decorator::Trace(1)).unwrap();
+
+        let base_ref = builder
+            .ensure_block_ref(
+                vec![Operation::Add, Operation::Mul],
+                vec![(0, shared_decorator)],
+                vec![(0, shared_asm_op), (1, shared_asm_op)],
+                vec![(0, shared_debug_var)],
+                vec![],
+                vec![],
+            )
+            .unwrap();
+
+        let mut alias_refs = Vec::new();
+        for idx in 0..48 {
+            let decorator = builder.ensure_decorator_ref(Decorator::Trace(1_000 + idx)).unwrap();
+            let alias_ref =
+                builder.clone_node_with_before_enter_refs(base_ref, vec![decorator]).unwrap();
+            if idx.is_multiple_of(12) {
+                record_test_root(&mut builder, alias_ref);
+            }
+            alias_refs.push(alias_ref);
+        }
+
+        let wide_ref = builder.join_node_refs(alias_refs, None).unwrap();
+        record_test_root(&mut builder, wide_ref);
+
+        let mut deep_ref = wide_ref;
+        for idx in 0..96 {
+            let decorator = builder.ensure_decorator_ref(Decorator::Trace(2_000 + idx)).unwrap();
+            let context = format!("stress::deep::{idx}");
+            deep_ref = match idx % 3 {
+                0 => builder
+                    .ensure_loop_node_ref(
+                        deep_ref,
+                        Some(vec![decorator]),
+                        test_asm_op(context, "while.true"),
+                    )
+                    .unwrap(),
+                1 => builder
+                    .ensure_call_node_ref(deep_ref, false, test_asm_op(context, "call"))
+                    .unwrap(),
+                _ => builder
+                    .ensure_split_node_ref(
+                        [deep_ref, base_ref],
+                        Some(vec![decorator]),
+                        test_asm_op(context, "if.true"),
+                    )
+                    .unwrap(),
+            };
+            if idx.is_multiple_of(24) {
+                record_test_root(&mut builder, deep_ref);
+            }
+        }
+        record_test_root(&mut builder, deep_ref);
+
+        let superseded_asm_op =
+            add_test_asm_op(&mut builder, test_asm_op("stress::superseded", "base"));
+        let superseded_debug_var = builder
+            .add_debug_var_ref(DebugVarInfo::new("superseded", DebugVarLocation::Stack(1)))
+            .unwrap();
+        let superseded_seed = builder
+            .ensure_block_ref(
+                vec![Operation::Add],
+                Vec::new(),
+                vec![(0, superseded_asm_op)],
+                vec![(0, superseded_debug_var)],
+                vec![],
+                vec![],
+            )
+            .unwrap();
+
+        let mut superseded_cursor = superseded_seed;
+        let mut expected_removed_refs = Vec::new();
+        for idx in 0..32 {
+            let decorator = builder.ensure_decorator_ref(Decorator::Trace(3_000 + idx)).unwrap();
+            let next_ref =
+                builder.append_before_enter_refs(superseded_cursor, vec![decorator]).unwrap();
+            expected_removed_refs.push(superseded_cursor);
+            superseded_cursor = next_ref;
+        }
+        record_test_root(&mut builder, superseded_cursor);
+
+        let pending_node_count = builder.nodes.len();
+        let pending_decorator_count = builder.decorators.len();
+        let (forest, remapping) = builder.build().unwrap().into_parts();
+
+        assert_finalization_invariants(&forest, &remapping);
+        assert!(forest.num_nodes() as usize > 100);
+        assert!((forest.num_nodes() as usize) < pending_node_count);
+        assert!(forest.debug_info().asm_ops().len() >= 98);
+        assert_eq!(forest.debug_info().num_debug_vars(), 2);
+        assert_eq!(forest.debug_info().num_decorators(), 145);
+        assert!(forest.debug_info().num_decorators() < pending_decorator_count);
+        assert!(remapping.contains_key(&superseded_cursor));
+        for removed_ref in expected_removed_refs {
+            assert!(
+                !remapping.contains_key(&removed_ref),
+                "superseded ref {removed_ref} should not be materialized"
+            );
+        }
     }
 
     #[test]
