@@ -591,9 +591,12 @@ impl MastForest {
         self.debug_info.decorator_links_for_node(node_id)
     }
 
-    #[cfg(any(test, feature = "arbitrary", feature = "testing"))]
+    #[cfg(any(test, feature = "arbitrary"))]
     #[doc(hidden)]
-    pub fn add_decorator(&mut self, decorator: Decorator) -> Result<DecoratorId, MastForestError> {
+    pub(crate) fn add_decorator(
+        &mut self,
+        decorator: Decorator,
+    ) -> Result<DecoratorId, MastForestError> {
         self.debug_info.add_decorator(decorator)
     }
 

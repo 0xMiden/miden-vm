@@ -1,19 +1,46 @@
-use miden_core::operations::{Decorator, Operation};
+use alloc::vec::Vec;
+
+use miden_assembly::testing::regex;
+use miden_core::{
+    advice::AdviceMap,
+    operations::{Decorator, Operation},
+    utils::IndexVec,
+};
+use miden_utils_testing::{Test, assert_diagnostic_lines};
 
 use crate::{
     FastProcessor, Program, StackInputs,
     advice::AdviceInputs,
-    mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor},
+    mast::{
+        BasicBlockNodeBuilder, DebugInfo, DecoratorId, MastForest, MastForestContributor,
+        MastForestParts,
+    },
     test_utils::TestHost,
 };
 
+fn mast_forest_with_decorator_ids(
+    decorators: impl IntoIterator<Item = Decorator>,
+) -> (MastForest, Vec<DecoratorId>) {
+    let mut debug_info = DebugInfo::new();
+    let decorator_ids = decorators
+        .into_iter()
+        .map(|decorator| debug_info.add_decorator(decorator).unwrap())
+        .collect();
+    let mast_forest = MastForest::from_parts(MastForestParts {
+        nodes: IndexVec::new(),
+        roots: Vec::new(),
+        advice_map: AdviceMap::default(),
+        debug_info,
+    })
+    .unwrap();
+
+    (mast_forest, decorator_ids)
+}
+
 /// Creates a simple test program with a Trace decorator attached
 fn create_debug_test_program() -> Program {
-    let mut mast_forest = MastForest::new();
-
-    // Create a Trace decorator
-    let trace_decorator = Decorator::Trace(999);
-    let decorator_id = mast_forest.add_decorator(trace_decorator).unwrap();
+    let (mut mast_forest, decorator_ids) = mast_forest_with_decorator_ids([Decorator::Trace(999)]);
+    let decorator_id = decorator_ids[0];
 
     // Create a simple basic block with 1 operation, decorator attached before_enter
     let operations = alloc::vec![Operation::Noop];
@@ -30,9 +57,8 @@ fn create_debug_test_program() -> Program {
 #[test]
 fn test_decorators_only_execute_in_debug_mode() {
     // Create program with Trace decorator
-    let mut forest = MastForest::new();
-    let decorator = Decorator::Trace(999);
-    let decorator_id = forest.add_decorator(decorator).unwrap();
+    let (mut forest, decorator_ids) = mast_forest_with_decorator_ids([Decorator::Trace(999)]);
+    let decorator_id = decorator_ids[0];
     let block = BasicBlockNodeBuilder::new(
         vec![Operation::Noop],
         vec![], // decorators on ops
@@ -136,17 +162,15 @@ fn test_decorators_only_execute_in_debug_mode_on() {
 /// with debug mode on vs off for a more complex program
 #[test]
 fn test_zero_overhead_when_debug_off() {
-    // Create a more complex program with multiple decorators
-    let mut mast_forest = MastForest::new();
-
     // Add multiple trace decorators
     let decorator1 = Decorator::Trace(100);
     let decorator2 = Decorator::Trace(200);
     let decorator3 = Decorator::Trace(300);
-
-    let id1 = mast_forest.add_decorator(decorator1).unwrap();
-    let id2 = mast_forest.add_decorator(decorator2).unwrap();
-    let id3 = mast_forest.add_decorator(decorator3).unwrap();
+    let (mut mast_forest, decorator_ids) =
+        mast_forest_with_decorator_ids([decorator1, decorator2, decorator3]);
+    let id1 = decorator_ids[0];
+    let id2 = decorator_ids[1];
+    let id3 = decorator_ids[2];
 
     // Create a program with multiple operations and decorators
     let operations = alloc::vec![Operation::Noop, Operation::Noop, Operation::Noop,];
@@ -187,4 +211,98 @@ fn test_zero_overhead_when_debug_off() {
     assert_eq!(host_on.get_trace_count(100), 1);
     assert_eq!(host_on.get_trace_count(200), 1);
     assert_eq!(host_on.get_trace_count(300), 1);
+}
+
+#[test]
+fn assembled_static_import_debug_decorators_survive_finalization() {
+    let test = Test::new(
+        "debug_trace_static_import",
+        r#"
+        use e2e::helpers
+
+        begin
+            push.4
+            exec.helpers::traced_helper
+            trace.21
+            debug.stack.4
+            drop
+        end
+        "#,
+        true,
+    )
+    .with_module(
+        "e2e::helpers",
+        r#"
+        pub proc traced_helper
+            trace.11
+            debug.stack.4
+            push.1 add
+            push.1
+            if.true
+                trace.12
+                debug.stack.4
+                push.2 add
+            else
+                trace.13
+                push.0 drop
+            end
+        end
+        "#,
+    );
+
+    let (program, _) = test.compile().expect("test program should compile");
+    let mut host = TestHost::new();
+    host.source_manager = test.source_manager;
+    let processor = FastProcessor::new(StackInputs::default())
+        .with_advice(AdviceInputs::default())
+        .expect("advice inputs should fit advice map limits")
+        .with_debugging(true)
+        .with_tracing(true);
+
+    processor.execute_sync(&program, &mut host).expect("execution should succeed");
+
+    assert_eq!(host.debug_handler, ["stack.4", "stack.4", "stack.4"]);
+    assert_eq!(host.get_trace_count(11), 1);
+    assert_eq!(host.get_trace_count(12), 1);
+    assert_eq!(host.get_trace_count(13), 0);
+    assert_eq!(host.get_trace_count(21), 1);
+}
+
+#[test]
+fn static_import_execution_error_keeps_imported_source_location() {
+    let test = Test::new(
+        "debug_trace_static_import_failure",
+        r#"
+        use e2e::fail
+
+        begin
+            exec.fail::fail_in_import
+        end
+        "#,
+        true,
+    )
+    .with_module(
+        "e2e::fail",
+        r#"
+        pub proc fail_in_import
+            trace.31
+            push.0
+            inv
+        end
+        "#,
+    );
+
+    let err = test.execute().expect_err("expected imported procedure to fail");
+    #[rustfmt::skip]
+    assert_diagnostic_lines!(
+        err,
+        "  x division by zero",
+        regex!(r#",-\[e2e::fail:5:13\]"#),
+        " 4 |             push.0",
+        " 5 |             inv",
+        "   :             ^^^",
+        " 6 |         end",
+        "   `----",
+        "  help: ensure the divisor (second stack element) is non-zero before division or modulo operations"
+    );
 }

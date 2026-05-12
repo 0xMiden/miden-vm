@@ -1,0 +1,13 @@
+error[E0624]: method `add_decorator` is private
+ --> tests/ui/mast_forest_immutable/add_decorator.rs:5:32
+  |
+5 |       let _decorator_id = forest.add_decorator(Decorator::Trace(0)).unwrap();
+  |                                  ^^^^^^^^^^^^^ private method
+  |
+ ::: src/mast/mod.rs
+  |
+  | /     pub(crate) fn add_decorator(
+  | |         &mut self,
+  | |         decorator: Decorator,
+  | |     ) -> Result<DecoratorId, MastForestError> {
+  | |_____________________________________________- private method defined here

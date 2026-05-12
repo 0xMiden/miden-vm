@@ -1,16 +1,19 @@
-use alloc::{string::ToString, sync::Arc, vec};
+use alloc::{string::ToString, sync::Arc, vec, vec::Vec};
 
 use miden_air::trace::MIN_TRACE_LEN;
 use miden_assembly::{Assembler, DefaultSourceManager};
 use miden_core::{
-    ONE, assert_matches,
+    ONE,
+    advice::AdviceMap,
+    assert_matches,
     events::SystemEvent,
     mast::{
-        BasicBlockNodeBuilder, CallNodeBuilder, ExternalNodeBuilder, JoinNodeBuilder,
-        MastForestContributor,
+        BasicBlockNodeBuilder, CallNodeBuilder, DebugInfo, DecoratorId, ExternalNodeBuilder,
+        JoinNodeBuilder, MastForest, MastForestContributor, MastForestParts,
     },
-    operations::Operation,
+    operations::{Decorator, Operation},
     program::StackInputs,
+    utils::IndexVec,
 };
 use miden_utils_testing::build_test;
 use rstest::rstest;
@@ -23,6 +26,25 @@ mod all_ops;
 mod fast_decorator_execution_tests;
 mod masm_consistency;
 mod memory;
+
+fn mast_forest_with_decorator_ids(
+    decorators: impl IntoIterator<Item = Decorator>,
+) -> (MastForest, Vec<DecoratorId>) {
+    let mut debug_info = DebugInfo::new();
+    let decorator_ids = decorators
+        .into_iter()
+        .map(|decorator| debug_info.add_decorator(decorator).unwrap())
+        .collect();
+    let mast_forest = MastForest::from_parts(MastForestParts {
+        nodes: IndexVec::new(),
+        roots: Vec::new(),
+        advice_map: AdviceMap::default(),
+        debug_info,
+    })
+    .unwrap();
+
+    (mast_forest, decorator_ids)
+}
 
 #[test]
 fn stack_get_word_out_of_bounds_read() {
@@ -511,11 +533,8 @@ fn test_call_node_preserves_stack_overflow_table() {
 
 #[test]
 fn test_external_node_decorator_sequencing() {
-    let mut lib_forest = MastForest::new();
-
-    // Add a decorator to the lib forest to track execution inside the external node
-    let lib_decorator = Decorator::Trace(2);
-    let lib_decorator_id = lib_forest.add_decorator(lib_decorator).unwrap();
+    let (mut lib_forest, lib_decorator_ids) = mast_forest_with_decorator_ids([Decorator::Trace(2)]);
+    let lib_decorator_id = lib_decorator_ids[0];
 
     let lib_operations = [Operation::Push(Felt::from_u32(1)), Operation::Add];
     // Attach the decorator to the first operation (index 0)
@@ -525,11 +544,12 @@ fn test_external_node_decorator_sequencing() {
             .unwrap();
     lib_forest.make_root(lib_block_id);
 
-    let mut main_forest = MastForest::new();
     let before_decorator = Decorator::Trace(1);
     let after_decorator = Decorator::Trace(3);
-    let before_id = main_forest.add_decorator(before_decorator).unwrap();
-    let after_id = main_forest.add_decorator(after_decorator).unwrap();
+    let (mut main_forest, main_decorator_ids) =
+        mast_forest_with_decorator_ids([before_decorator, after_decorator]);
+    let before_id = main_decorator_ids[0];
+    let after_id = main_decorator_ids[1];
 
     let external_id = ExternalNodeBuilder::new(lib_forest[lib_block_id].digest())
         .with_before_enter([before_id])
