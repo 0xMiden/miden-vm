@@ -557,6 +557,11 @@ impl KernelPool {
         &self.hashes
     }
 
+    /// Returns `true` if the pool is frozen.
+    pub fn is_frozen(&self) -> bool {
+        self.frozen
+    }
+
     /// Returns `true` if at least one procedure root in `roots` has a digest that is a member
     /// of this pool.
     ///
@@ -794,12 +799,15 @@ pub fn mast_forest_and_kernel_strategy(
 
 /// Builds an executable `(MastForest, Kernel)` pair from the provided seeds.
 ///
-/// TODO: syscalls and kernel finalisation.
+/// TODO: kernel finalisation.
 fn build_executable_forest(
     seeds: ForestSeeds,
     params: &MastForestParams,
 ) -> (MastForest, Kernel) {
-    let _ = params;
+    let mut kernel_pool = match params.kernel_procedures.as_ref() {
+        Some(hs) => KernelPool::new_frozen(hs.clone()),
+        None => KernelPool::new(),
+    };
 
     let ForestSeeds {
         basic_blocks,
@@ -809,7 +817,7 @@ fn build_executable_forest(
         split_pairs,
         loop_indices,
         call_indices,
-        syscall_picks: _,
+        syscall_picks,
         external_picks,
         dyn_selectors: _,
         kernel_inclusion: _,
@@ -930,6 +938,44 @@ fn build_executable_forest(
         forest.make_root(ext_id);
         root_ids.push(ext_id);
     }
+
+    for &raw_pick in syscall_picks.iter().take(counts.num_syscalls) {
+        // When the kernel is frozen, only roots whose digest is already in the pool are
+        // eligible; when free, any current root is eligible and will be added to the pool.
+        let eligible: Vec<MastNodeId> = if kernel_pool.is_frozen() {
+            root_ids
+                .iter()
+                .copied()
+                .filter(|&id| {
+                    forest
+                        .get_node_by_id(id)
+                        .map(|node| kernel_pool.contains(node.digest()))
+                        .unwrap_or(false)
+                })
+                .collect()
+        } else {
+            root_ids.clone()
+        };
+
+        if eligible.is_empty() {
+            continue;
+        }
+
+        let callee_id = eligible[raw_pick % eligible.len()];
+        let callee_digest = forest.get_node_by_id(callee_id).unwrap().digest();
+
+        let sc_id = CallNodeBuilder::new_syscall(callee_id)
+            .add_to_forest(&mut forest)
+            .expect("Failed to add syscall node");
+
+        forest.make_root(sc_id);
+        root_ids.push(sc_id);
+
+        kernel_pool.insert(callee_digest);
+    }
+
+    // TODO
+    let _ = kernel_pool;
 
     (forest, Kernel::default())
 }
