@@ -7,6 +7,9 @@
 - Improved performances of auxiliary trace generation ([#3119](https://github.com/0xMiden/miden-vm/pull/3119)).
 - Aligned replay stack word access bounds with `StackInterface`, allowing the maximum valid start index for word reads and writes ([#3014](https://github.com/0xMiden/miden-vm/pull/3014)).
 
+#### Fixes
+
+- Preserved `AssemblyOp` source mappings when merging `MastForest`s, preventing source-location loss after node deduplication.
 
 ## v0.23.0 (2026-05-07)
 
