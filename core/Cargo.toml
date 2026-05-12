@@ -73,3 +73,4 @@ proptest.workspace = true
 rstest = { workspace = true }
 serde_json = { workspace = true }
 miden-utils-testing.workspace = true
+trybuild.workspace = true

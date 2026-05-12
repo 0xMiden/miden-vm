@@ -1387,6 +1387,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
+ "trybuild",
 ]
 
 [[package]]
