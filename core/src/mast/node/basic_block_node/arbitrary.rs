@@ -418,15 +418,14 @@ pub(crate) struct ForestSeeds {
 /// external-node additions stay acyclic. For proptest-scale forests (single-digit counts per
 /// node type), a simple on-demand DFS is sufficient; no caching is required.
 #[derive(Debug)]
-pub(crate) struct RootPool<'a> {
-    forest: &'a MastForest,
+pub(crate) struct RootPool {
     roots: Vec<MastNodeId>,
 }
 
-impl<'a> RootPool<'a> {
-    /// Creates a new empty `RootPool` for the given forest.
-    pub fn new(forest: &'a MastForest) -> Self {
-        Self { forest, roots: Vec::new() }
+impl RootPool {
+    /// Creates a new empty `RootPool`.
+    pub fn new() -> Self {
+        Self { roots: Vec::new() }
     }
 
     /// Adds a procedure root to the pool.
@@ -439,27 +438,23 @@ impl<'a> RootPool<'a> {
         self.roots.is_empty()
     }
 
-    /// Returns the number of roots in the pool.
-    pub fn len(&self) -> usize {
-        self.roots.len()
-    }
-
     /// Returns an iterator of procedure roots whose transitive descendants do not include
-    /// `excluded`.
+    /// `excluded`, according to the current state of `forest`.
     ///
     /// The iterator is ordered by insertion order so the generator is deterministic for a
     /// given seed. Uses an on-demand DFS to check reachability.
-    pub fn roots_not_reaching(
-        &self,
+    pub fn roots_not_reaching<'a>(
+        &'a self,
         excluded: MastNodeId,
-    ) -> impl Iterator<Item = MastNodeId> + '_ {
-        self.roots.iter().copied().filter(move |&root| !self.reaches(root, excluded))
+        forest: &'a MastForest,
+    ) -> impl Iterator<Item = MastNodeId> + 'a {
+        self.roots.iter().copied().filter(move |&root| !Self::reaches(root, excluded, forest))
     }
 
     /// Returns `true` if `from` transitively reaches `to` through the forest's child edges.
     ///
     /// Uses a simple DFS with a visited set to detect cycles and avoid infinite loops.
-    fn reaches(&self, from: MastNodeId, to: MastNodeId) -> bool {
+    fn reaches(from: MastNodeId, to: MastNodeId, forest: &MastForest) -> bool {
         use alloc::collections::BTreeSet;
 
         if from == to {
@@ -480,7 +475,7 @@ impl<'a> RootPool<'a> {
             }
 
             // Get the node and push its children onto the stack
-            if let Some(node) = self.forest.get_node_by_id(current) {
+            if let Some(node) = forest.get_node_by_id(current) {
                 match node {
                     MastNode::Join(join) => {
                         stack.push(join.first());
@@ -895,25 +890,26 @@ fn build_executable_forest(
         }
     }
 
-    let mut root_ids: Vec<MastNodeId> = Vec::new();
+    // Select initial procedure roots so externals and syscalls have targets.
+    let mut root_pool = RootPool::new();
     for (i, &id) in all_node_ids.iter().enumerate() {
         if root_selection.get(i).copied().unwrap_or(false) {
             forest.make_root(id);
-            root_ids.push(id);
+            root_pool.push(id);
         }
     }
 
     // Externals and syscalls need at least one procedure root to target.
-    if root_ids.is_empty() && !basic_block_ids.is_empty() {
+    if root_pool.is_empty() && !basic_block_ids.is_empty() {
         let fallback = basic_block_ids[0];
         forest.make_root(fallback);
-        root_ids.push(fallback);
+        root_pool.push(fallback);
     }
 
     // Add external nodes. Each external's digest must equal a procedure root already in the
     // forest, and the external call graph must remain acyclic.
     for pick in external_picks {
-        if root_ids.is_empty() {
+        if root_pool.is_empty() {
             break;
         }
 
@@ -923,10 +919,19 @@ fn build_executable_forest(
         };
 
         // External nodes are leaves — they have no children — so they cannot create a cycle
-        // by themselves. The acyclicity concern is about the *containing* procedure root
-        // referencing a target root that transitively reaches back. Since we only pick from
-        // existing roots and the external is a new leaf, all current roots are eligible.
-        let target_id = root_ids[idx % root_ids.len()];
+        // by themselves. All current roots are eligible targets; collect them so we can index.
+        let eligible: Vec<MastNodeId> = root_pool.roots_not_reaching(
+            // Pass a sentinel that no real node equals so the filter passes all roots.
+            // MastNodeId is a newtype over u32; the forest never has u32::MAX nodes in tests.
+            MastNodeId::new_unchecked(u32::MAX),
+            &forest,
+        ).collect();
+
+        if eligible.is_empty() {
+            break;
+        }
+
+        let target_id = eligible[idx % eligible.len()];
         let target_digest = forest.get_node_by_id(target_id).unwrap().digest();
 
         let ext_id = ExternalNodeBuilder::new(target_digest)
@@ -934,16 +939,22 @@ fn build_executable_forest(
             .expect("Failed to add external node");
 
         forest.make_root(ext_id);
-        root_ids.push(ext_id);
+        root_pool.push(ext_id);
     }
 
     for &raw_pick in syscall_picks.iter().take(counts.num_syscalls) {
         // When the kernel is frozen, only roots whose digest is already in the pool are
         // eligible; when free, any current root is eligible and will be added to the pool.
+        let sentinel = MastNodeId::new_unchecked(u32::MAX);
         let eligible: Vec<MastNodeId> = if kernel_pool.is_frozen() {
-            root_ids
-                .iter()
-                .copied()
+            // has_candidate_in checks whether any root qualifies before we collect.
+            let all_roots: Vec<MastNodeId> =
+                root_pool.roots_not_reaching(sentinel, &forest).collect();
+            if !kernel_pool.has_candidate_in(&all_roots, &forest) {
+                continue;
+            }
+            all_roots
+                .into_iter()
                 .filter(|&id| {
                     forest
                         .get_node_by_id(id)
@@ -952,7 +963,7 @@ fn build_executable_forest(
                 })
                 .collect()
         } else {
-            root_ids.clone()
+            root_pool.roots_not_reaching(sentinel, &forest).collect()
         };
 
         if eligible.is_empty() {
@@ -967,10 +978,15 @@ fn build_executable_forest(
             .expect("Failed to add syscall node");
 
         forest.make_root(sc_id);
-        root_ids.push(sc_id);
+        root_pool.push(sc_id);
 
         kernel_pool.insert(callee_digest);
     }
+
+    // Collect the final root list for kernel finalisation.
+    let sentinel = MastNodeId::new_unchecked(u32::MAX);
+    let root_ids: Vec<MastNodeId> =
+        root_pool.roots_not_reaching(sentinel, &forest).collect();
 
     let kernel = match params.kernel_procedures.as_ref() {
         Some(hs) => Kernel::from_hashes(hs.clone())
@@ -1007,12 +1023,177 @@ fn build_executable_forest(
 }
 
 /// Builds a structure-only `(MastForest, Kernel)` pair from the provided seeds.
-#[allow(unused_variables)]
+///
+/// This preserves the pre-feature generator behaviour: externals use randomly generated
+/// digests via [`ExternalPick::Random`] (and so will not resolve inside the forest),
+/// syscalls target arbitrary entries of `all_node_ids` without any kernel-closure check,
+/// and dyn nodes are emitted using [`ForestSeeds::dyn_selectors`] to pick between
+/// `DynNodeBuilder::new_dyn` and `DynNodeBuilder::new_dyncall`.
+///
+/// Phase 1 (basic blocks + decorators) and Phase 2 (join / split / loop / call) use the
+/// same seed-driven logic as [`build_executable_forest`], so any seed for which
+/// `num_syscalls = num_externals = num_dyns = 0` yields a [`MastForest`] that is
+/// byte-identical to the one produced by [`build_executable_forest`]. This is what
+/// mode equivalence on the intersection configuration relies on.
 fn build_structure_only_forest(
     seeds: ForestSeeds,
     params: &MastForestParams,
 ) -> (MastForest, Kernel) {
-    unimplemented!("will be implemented later!")
+    let ForestSeeds {
+        basic_blocks,
+        decorators,
+        counts,
+        join_pairs,
+        split_pairs,
+        loop_indices,
+        call_indices,
+        syscall_picks,
+        external_picks,
+        dyn_selectors,
+        kernel_inclusion: _,
+        root_selection,
+    } = seeds;
+
+    let mut forest = MastForest::new();
+
+    for decorator in decorators {
+        forest.add_decorator(decorator).expect("Failed to add decorator");
+    }
+
+    let num_basic_blocks = basic_blocks.len();
+    let mut basic_block_ids: Vec<MastNodeId> = Vec::with_capacity(num_basic_blocks);
+    for block in basic_blocks {
+        let builder = block.to_builder(&forest);
+        let node_id = builder.add_to_forest(&mut forest).expect("Failed to add block");
+        basic_block_ids.push(node_id);
+    }
+
+    // Track all node IDs in insertion (topological) order so children referenced by
+    // control-flow nodes are guaranteed to already exist in the forest.
+    let mut all_node_ids: Vec<MastNodeId> = basic_block_ids.clone();
+
+    let max_parent_nodes = num_basic_blocks.saturating_sub(1);
+    let num_joins = counts.num_joins.min(max_parent_nodes);
+    let num_splits = counts.num_splits.min(max_parent_nodes);
+    let num_loops = counts.num_loops.min(num_basic_blocks);
+    let num_calls = counts.num_calls.min(num_basic_blocks);
+
+    for &(left_raw, right_raw) in join_pairs.iter().take(num_joins) {
+        let left_idx = left_raw % num_basic_blocks;
+        let right_idx = right_raw % num_basic_blocks;
+        if left_idx < all_node_ids.len() && right_idx < all_node_ids.len() {
+            let left_id = all_node_ids[left_idx];
+            let right_id = all_node_ids[right_idx];
+            if let Ok(join_id) =
+                JoinNodeBuilder::new([left_id, right_id]).add_to_forest(&mut forest)
+            {
+                all_node_ids.push(join_id);
+            }
+        }
+    }
+
+    for &(true_raw, false_raw) in split_pairs.iter().take(num_splits) {
+        let true_idx = true_raw % num_basic_blocks;
+        let false_idx = false_raw % num_basic_blocks;
+        if true_idx < all_node_ids.len() && false_idx < all_node_ids.len() {
+            let true_id = all_node_ids[true_idx];
+            let false_id = all_node_ids[false_idx];
+            if let Ok(split_id) =
+                SplitNodeBuilder::new([true_id, false_id]).add_to_forest(&mut forest)
+            {
+                all_node_ids.push(split_id);
+            }
+        }
+    }
+
+    for &body_raw in loop_indices.iter().take(num_loops) {
+        let body_idx = body_raw % num_basic_blocks;
+        if body_idx < all_node_ids.len() {
+            let body_id = all_node_ids[body_idx];
+            if let Ok(loop_id) = LoopNodeBuilder::new(body_id).add_to_forest(&mut forest) {
+                all_node_ids.push(loop_id);
+            }
+        }
+    }
+
+    for &callee_raw in call_indices.iter().take(num_calls) {
+        let callee_idx = callee_raw % num_basic_blocks;
+        if callee_idx < all_node_ids.len() {
+            let callee_id = all_node_ids[callee_idx];
+            let call_id = CallNodeBuilder::new(callee_id)
+                .add_to_forest(&mut forest)
+                .expect("Failed to add call node");
+            all_node_ids.push(call_id);
+        }
+    }
+
+    // Phase 2.5: mirror `build_executable_forest` so that when num_syscalls =
+    // num_externals = num_dyns = 0 the resulting forest is byte-identical.
+    let mut root_ids: Vec<MastNodeId> = Vec::new();
+    for (i, &id) in all_node_ids.iter().enumerate() {
+        if root_selection.get(i).copied().unwrap_or(false) {
+            forest.make_root(id);
+            root_ids.push(id);
+        }
+    }
+
+    if root_ids.is_empty() && !basic_block_ids.is_empty() {
+        let fallback = basic_block_ids[0];
+        forest.make_root(fallback);
+        root_ids.push(fallback);
+    }
+
+    // Phase 3 (legacy): syscalls pick directly from `all_node_ids` without any kernel-
+    // closure check. Under-emit when `all_node_ids` is empty.
+    for &raw_pick in syscall_picks.iter().take(counts.num_syscalls) {
+        if all_node_ids.is_empty() {
+            break;
+        }
+        let callee_id = all_node_ids[raw_pick % all_node_ids.len()];
+        let syscall_id = CallNodeBuilder::new_syscall(callee_id)
+            .add_to_forest(&mut forest)
+            .expect("Failed to add syscall node");
+        all_node_ids.push(syscall_id);
+    }
+
+    // Phase 3 (legacy): externals use randomly sampled digests. Picks sampled in
+    // `Executable` mode via `ExternalPick::FromRoot` are ignored here — the
+    // structure-only path only honours `ExternalPick::Random`.
+    for pick in external_picks.iter().take(counts.num_externals) {
+        if let ExternalPick::Random([a, b, c, d]) = *pick {
+            let digest = Word::from([
+                Felt::new_unchecked(a),
+                Felt::new_unchecked(b),
+                Felt::new_unchecked(c),
+                Felt::new_unchecked(d),
+            ]);
+            if let Ok(ext_id) = ExternalNodeBuilder::new(digest).add_to_forest(&mut forest) {
+                all_node_ids.push(ext_id);
+            }
+        }
+    }
+
+    // Phase 3 (legacy): dyn nodes pick between dyn and dyncall via `dyn_selectors`.
+    for &is_dyncall in dyn_selectors.iter().take(counts.num_dyns) {
+        let dyn_id = if is_dyncall {
+            DynNodeBuilder::new_dyncall()
+                .add_to_forest(&mut forest)
+                .expect("Failed to add dyncall node")
+        } else {
+            DynNodeBuilder::new_dyn()
+                .add_to_forest(&mut forest)
+                .expect("Failed to add dyn node")
+        };
+        all_node_ids.push(dyn_id);
+    }
+
+    let kernel = match params.kernel_procedures.as_ref() {
+        Some(hs) => Kernel::from_hashes(hs.clone())
+            .expect("kernel_procedures validated by prop_filter_map"),
+        None => Kernel::default(),
+    };
+
+    (forest, kernel)
 }
 
 impl Arbitrary for MastForest {

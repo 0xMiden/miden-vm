@@ -1186,23 +1186,20 @@ mod arbitrary_helpers {
         let id3 = block3.to_builder(&forest).add_to_forest(&mut forest).unwrap();
 
         // Create a RootPool
-        let mut pool = RootPool::new(&forest);
+        let mut pool = RootPool::new();
 
         // Test empty pool
         assert!(pool.is_empty());
-        assert_eq!(pool.len(), 0);
 
         // Add roots
         pool.push(id1);
         assert!(!pool.is_empty());
-        assert_eq!(pool.len(), 1);
 
         pool.push(id2);
         pool.push(id3);
-        assert_eq!(pool.len(), 3);
 
         // Test roots_not_reaching - all basic blocks should not reach each other
-        let not_reaching: Vec<_> = pool.roots_not_reaching(id1).collect();
+        let not_reaching: Vec<_> = pool.roots_not_reaching(id1, &forest).collect();
         assert_eq!(not_reaching.len(), 2); // id2 and id3 don't reach id1
         assert!(not_reaching.contains(&id2));
         assert!(not_reaching.contains(&id3));
@@ -1235,17 +1232,17 @@ mod arbitrary_helpers {
         let join_id = JoinNodeBuilder::new([id1, id2]).add_to_forest(&mut forest).unwrap();
 
         // Create a RootPool
-        let mut pool = RootPool::new(&forest);
+        let mut pool = RootPool::new();
         pool.push(id1);
         pool.push(id2);
         pool.push(join_id);
 
         // Test that join_id reaches both id1 and id2
-        let not_reaching_id1: Vec<_> = pool.roots_not_reaching(id1).collect();
+        let not_reaching_id1: Vec<_> = pool.roots_not_reaching(id1, &forest).collect();
         assert!(!not_reaching_id1.contains(&join_id)); // join_id reaches id1
         assert!(not_reaching_id1.contains(&id2)); // id2 doesn't reach id1
 
-        let not_reaching_id2: Vec<_> = pool.roots_not_reaching(id2).collect();
+        let not_reaching_id2: Vec<_> = pool.roots_not_reaching(id2, &forest).collect();
         assert!(!not_reaching_id2.contains(&join_id)); // join_id reaches id2
         assert!(not_reaching_id2.contains(&id1)); // id1 doesn't reach id2
     }
@@ -1263,11 +1260,11 @@ mod arbitrary_helpers {
         .unwrap();
         let id = block.to_builder(&forest).add_to_forest(&mut forest).unwrap();
 
-        let mut pool = RootPool::new(&forest);
+        let mut pool = RootPool::new();
         pool.push(id);
 
         // A node should not be in the list of roots not reaching itself
-        let not_reaching: Vec<_> = pool.roots_not_reaching(id).collect();
+        let not_reaching: Vec<_> = pool.roots_not_reaching(id, &forest).collect();
         assert_eq!(not_reaching.len(), 0);
     }
 
@@ -1299,14 +1296,14 @@ mod arbitrary_helpers {
         let join_id = JoinNodeBuilder::new([loop_id, id2]).add_to_forest(&mut forest).unwrap();
 
         // Create a RootPool
-        let mut pool = RootPool::new(&forest);
+        let mut pool = RootPool::new();
         pool.push(id1);
         pool.push(id2);
         pool.push(loop_id);
         pool.push(join_id);
 
         // Test transitive reachability: join_id -> loop_id -> id1
-        let not_reaching_id1: Vec<_> = pool.roots_not_reaching(id1).collect();
+        let not_reaching_id1: Vec<_> = pool.roots_not_reaching(id1, &forest).collect();
         assert!(!not_reaching_id1.contains(&join_id)); // join_id transitively reaches id1
         assert!(!not_reaching_id1.contains(&loop_id)); // loop_id reaches id1
         assert!(not_reaching_id1.contains(&id2)); // id2 doesn't reach id1
