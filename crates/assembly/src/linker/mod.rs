@@ -341,31 +341,12 @@ impl Linker {
         source_manager: Arc<dyn SourceManager>,
         kernel_package: Arc<MastPackage>,
     ) -> Result<Self, Report> {
-        if !kernel_package.is_kernel() {
-            return Err(Report::msg("invalid kernel package: not a kernel"));
-        }
-        let kernel = kernel_package.to_kernel()?;
-        if kernel.is_empty() {
-            return Err(Report::msg("invalid kernel package: kernel cannot be empty"));
-        }
-
         log::debug!(target: "linker", "instantiating linker with kernel package {}@{}", &kernel_package.name, &kernel_package.version);
 
-        let mut graph = Self::new(source_manager);
-        let mut kernel_index = None;
-        for module_info in kernel_package.module_infos() {
-            let is_kernel_module = module_info.path().is_kernel_path();
-            let module_index = graph.link_assembled_module(module_info)?;
-            if is_kernel_module {
-                kernel_index = Some(module_index);
-            }
-        }
-        debug_assert!(kernel_index.is_some());
+        let mut linker = Self::new(source_manager);
+        linker.link_with_kernel(kernel_package)?;
 
-        graph.kernel_index = kernel_index;
-        graph.kernel = kernel;
-        graph.kernel_package = Some(kernel_package);
-        Ok(graph)
+        Ok(linker)
     }
 
     /// Add a kernel to the linker after the linker is initially constructed.
@@ -399,7 +380,7 @@ impl Linker {
                 kernel_index = Some(module_index);
             }
         }
-        debug_assert!(kernel_index.is_some());
+        assert!(kernel_index.is_some());
 
         self.kernel_index = kernel_index;
         self.kernel = kernel;
