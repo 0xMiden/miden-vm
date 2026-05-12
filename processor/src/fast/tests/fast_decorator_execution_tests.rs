@@ -2,12 +2,36 @@ use alloc::vec::Vec;
 
 use miden_core::{
     Felt,
-    mast::{BasicBlockNodeBuilder, DecoratorId, MastForest, MastForestContributor},
+    advice::AdviceMap,
+    mast::{
+        BasicBlockNodeBuilder, DebugInfo, DecoratorId, MastForest, MastForestContributor,
+        MastForestParts,
+    },
     operations::{Decorator, Operation},
     program::StackInputs,
+    utils::IndexVec,
 };
 
 use crate::{AdviceInputs, Program, fast::FastProcessor, test_utils::TestHost};
+
+fn mast_forest_with_decorator_ids(
+    decorators: impl IntoIterator<Item = Decorator>,
+) -> (MastForest, Vec<DecoratorId>) {
+    let mut debug_info = DebugInfo::new();
+    let decorator_ids = decorators
+        .into_iter()
+        .map(|decorator| debug_info.add_decorator(decorator).unwrap())
+        .collect();
+    let mast_forest = MastForest::from_parts(MastForestParts {
+        nodes: IndexVec::new(),
+        roots: Vec::new(),
+        advice_map: AdviceMap::default(),
+        debug_info,
+    })
+    .unwrap();
+
+    (mast_forest, decorator_ids)
+}
 
 // Test helper to create a basic block with decorators for fast processor
 fn create_test_program(
@@ -15,22 +39,14 @@ fn create_test_program(
     after_exit: &[Decorator],
     operations: &[Operation],
 ) -> Program {
-    let mut mast_forest = MastForest::new();
-
-    // Collect decorator IDs
-    let before_enter_ids: Vec<_> = before_enter
-        .iter()
-        .map(|decorator| mast_forest.add_decorator(decorator.clone()).unwrap())
-        .collect();
-    let after_exit_ids: Vec<_> = after_exit
-        .iter()
-        .map(|decorator| mast_forest.add_decorator(decorator.clone()).unwrap())
-        .collect();
+    let (mut mast_forest, decorator_ids) =
+        mast_forest_with_decorator_ids(before_enter.iter().chain(after_exit).cloned());
+    let (before_enter_ids, after_exit_ids) = decorator_ids.split_at(before_enter.len());
 
     // Create the basic block with decorators using builder pattern
     let basic_block_id = BasicBlockNodeBuilder::new(operations.to_vec(), Vec::new())
-        .with_before_enter(before_enter_ids)
-        .with_after_exit(after_exit_ids)
+        .with_before_enter(before_enter_ids.to_vec())
+        .with_after_exit(after_exit_ids.to_vec())
         .add_to_forest(&mut mast_forest)
         .unwrap();
     mast_forest.make_root(basic_block_id);
@@ -329,31 +345,28 @@ fn create_test_program_with_inner_decorators(
     operations: &[Operation],
     inner_decorators: &[(usize, Decorator)], // (operation_index, decorator)
 ) -> Program {
-    let mut mast_forest = MastForest::new();
+    let (mut mast_forest, decorator_ids) = mast_forest_with_decorator_ids(
+        inner_decorators
+            .iter()
+            .map(|(_op_idx, decorator)| decorator)
+            .chain(before_enter)
+            .chain(after_exit)
+            .cloned(),
+    );
+    let (inner_decorator_ids, decorator_ids) = decorator_ids.split_at(inner_decorators.len());
+    let (before_enter_ids, after_exit_ids) = decorator_ids.split_at(before_enter.len());
 
     // Create the basic block with inner decorators
     let inner_decorator_list: Vec<(usize, DecoratorId)> = inner_decorators
         .iter()
-        .map(|(op_idx, decorator)| {
-            let decorator_id = mast_forest.add_decorator(decorator.clone()).unwrap();
-            (*op_idx, decorator_id)
-        })
-        .collect();
-
-    // Collect decorator IDs
-    let before_enter_ids: Vec<_> = before_enter
-        .iter()
-        .map(|decorator| mast_forest.add_decorator(decorator.clone()).unwrap())
-        .collect();
-    let after_exit_ids: Vec<_> = after_exit
-        .iter()
-        .map(|decorator| mast_forest.add_decorator(decorator.clone()).unwrap())
+        .zip(inner_decorator_ids)
+        .map(|((op_idx, _decorator), &decorator_id)| (*op_idx, decorator_id))
         .collect();
 
     // Create the basic block with decorators using builder pattern
     let basic_block_id = BasicBlockNodeBuilder::new(operations.to_vec(), inner_decorator_list)
-        .with_before_enter(before_enter_ids)
-        .with_after_exit(after_exit_ids)
+        .with_before_enter(before_enter_ids.to_vec())
+        .with_after_exit(after_exit_ids.to_vec())
         .add_to_forest(&mut mast_forest)
         .unwrap();
     mast_forest.make_root(basic_block_id);
