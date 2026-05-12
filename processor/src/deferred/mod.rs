@@ -14,7 +14,7 @@ mod registry;
 mod state;
 mod transaction;
 
-pub use handlers::DeferredTypeHandler;
+pub use handlers::{DeferredTypeHandler, Field0Handler};
 pub use registry::TypeHandlerRegistry;
 pub use state::DeferredState;
 pub use transaction::{DeferredMutation, HandlerTransaction, VmMutation};

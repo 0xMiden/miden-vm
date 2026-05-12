@@ -1,3 +1,7 @@
+mod field0;
+
+pub use field0::Field0Handler;
+
 use alloc::vec::Vec;
 
 use miden_core::{
