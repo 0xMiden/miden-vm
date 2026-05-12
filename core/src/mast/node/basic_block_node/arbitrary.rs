@@ -798,8 +798,6 @@ pub fn mast_forest_and_kernel_strategy(
 }
 
 /// Builds an executable `(MastForest, Kernel)` pair from the provided seeds.
-///
-/// TODO: kernel finalisation.
 fn build_executable_forest(
     seeds: ForestSeeds,
     params: &MastForestParams,
@@ -820,7 +818,7 @@ fn build_executable_forest(
         syscall_picks,
         external_picks,
         dyn_selectors: _,
-        kernel_inclusion: _,
+        kernel_inclusion,
         root_selection,
     } = seeds;
 
@@ -974,10 +972,38 @@ fn build_executable_forest(
         kernel_pool.insert(callee_digest);
     }
 
-    // TODO
-    let _ = kernel_pool;
+    let kernel = match params.kernel_procedures.as_ref() {
+        Some(hs) => Kernel::from_hashes(hs.clone())
+            .expect("kernel_procedures validated by prop_filter_map"),
+        None => {
+            let mut hashes: Vec<Word> = kernel_pool.hashes().to_vec();
 
-    (forest, Kernel::default())
+            for (i, &root_id) in root_ids.iter().enumerate() {
+                if kernel_inclusion.get(i).copied().unwrap_or(false) {
+                    let digest = forest.get_node_by_id(root_id).unwrap().digest();
+                    if !hashes.contains(&digest) {
+                        hashes.push(digest);
+                    }
+                }
+            }
+
+            // The co-generated kernel must be non-empty. Fall back to the first committed
+            // root when no syscalls fired and no inclusion bits were set.
+            if hashes.is_empty() {
+                if let Some(&first) = root_ids.first() {
+                    hashes.push(forest.get_node_by_id(first).unwrap().digest());
+                }
+            }
+
+            if hashes.len() > Kernel::MAX_NUM_PROCEDURES {
+                hashes.truncate(Kernel::MAX_NUM_PROCEDURES);
+            }
+
+            Kernel::from_hashes(hashes).expect("bounded and deduplicated")
+        },
+    };
+
+    (forest, kernel)
 }
 
 /// Builds a structure-only `(MastForest, Kernel)` pair from the provided seeds.
