@@ -14,6 +14,7 @@ mod handlers;
 mod registry;
 mod state;
 mod transaction;
+mod witness;
 
 pub use events::{
     EVENT_ASSERT_EQ, EVENT_REGISTER_LEAF, EVENT_REGISTER_OP, assert_eq, binary_op_payload,
@@ -23,3 +24,4 @@ pub use handlers::{DeferredTypeHandler, Field0Handler};
 pub use registry::TypeHandlerRegistry;
 pub use state::DeferredState;
 pub use transaction::{DeferredMutation, HandlerTransaction, VmMutation};
+pub use witness::extract_witness;

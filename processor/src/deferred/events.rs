@@ -14,7 +14,7 @@
 use alloc::vec::Vec;
 
 use miden_core::{
-    Felt, Word,
+    Felt,
     deferred::{DeferredError, DeferredTag, Digest, Node, Payload, TagKind, hash_node},
 };
 
@@ -85,8 +85,8 @@ fn evaluate(
     match node.tag.kind() {
         TagKind::Leaf => Ok((node.tag, node.payload)),
         TagKind::BinaryOp => {
-            let lhs_digest = digest_from_payload(&node.payload, ChildSlot::Lhs);
-            let rhs_digest = digest_from_payload(&node.payload, ChildSlot::Rhs);
+            let (lhs_digest, rhs_digest) =
+                node.binary_op_children().ok_or(DeferredError::InvalidTag)?;
             let lhs = evaluate(state, registry, lhs_digest)?;
             let rhs = evaluate(state, registry, rhs_digest)?;
             let handler = registry.get(node.tag.type_prefix())?;
@@ -129,25 +129,6 @@ pub fn assert_eq(
 // PAYLOAD HELPERS
 // ================================================================================================
 
-#[derive(Copy, Clone)]
-enum ChildSlot {
-    Lhs,
-    Rhs,
-}
-
-fn digest_from_payload(payload: &Payload, slot: ChildSlot) -> Digest {
-    let start = match slot {
-        ChildSlot::Lhs => 0,
-        ChildSlot::Rhs => 4,
-    };
-    Word::new([
-        payload.0[start],
-        payload.0[start + 1],
-        payload.0[start + 2],
-        payload.0[start + 3],
-    ])
-}
-
 /// Build the payload of a binary-op node from two child digests in `(lhs, rhs)` order.
 pub fn binary_op_payload(lhs: Digest, rhs: Digest) -> Payload {
     let mut felts: [Felt; 8] = [Felt::from_u32(0); 8];
@@ -161,7 +142,7 @@ mod tests {
     use alloc::sync::Arc;
 
     use miden_core::{
-        Felt,
+        Felt, Word,
         deferred::{DeferredTag, Payload},
     };
 
