@@ -56,10 +56,13 @@ pub const PARALLEL_STR: &str = if cfg!(feature = "parallel") {
 // =============================================================================
 
 /// PCS parameters for unit tests (fast, minimal security).
+///
+/// `log_blowup = 3` supports AIRs with symbolic degree up to 9
+/// (`log_quotient_degree = 3`).
 pub const TEST_PCS_PARAMS: PcsParams = PcsParams {
     deep: DeepParams { deep_pow_bits: 0 },
     fri: FriParams {
-        log_blowup: 2,
+        log_blowup: 3,
         fold: FRI_FOLD_ARITY_4,
         log_final_degree: 2,
         folding_pow_bits: 0,

@@ -251,18 +251,18 @@ fn malformed_log_trace_heights_is_rejected() {
     ));
 
     // Boundary case: `log_h` fits the raw bound (`log_h ≤ TWO_ADICITY`) but
-    // the LDE domain `log_h + log_blowup` does not. With `log_blowup = 2`
-    // from `TEST_PCS_PARAMS` and `Felt::TWO_ADICITY = 32`, `31 + 2 = 33 > 32`
+    // the LDE domain `log_h + log_blowup` does not. With `log_blowup = 3`
+    // from `TEST_PCS_PARAMS` and `Felt::TWO_ADICITY = 32`, `30 + 3 = 33 > 32`
     // must be rejected before any `two_adic_generator` call on the LDE domain.
     let mut bad_proof = output.proof;
-    bad_proof.instance_shapes.log_trace_heights = vec![31];
+    bad_proof.instance_shapes.log_trace_heights = vec![30];
     let err = verify_single(&config, &air, &public_values, &[], &bad_proof, test_challenger())
         .expect_err("log_h + log_blowup exceeding two-adicity should fail verification");
     assert!(matches!(
         err,
         VerifierError::Instance(InstanceValidationError::LdeDomainExceedsTwoAdicity {
-            log_h: 31,
-            log_blowup: 2,
+            log_h: 30,
+            log_blowup: 3,
             ..
         })
     ));

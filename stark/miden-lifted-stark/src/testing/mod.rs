@@ -20,6 +20,8 @@ mod test_bus;
 #[cfg(test)]
 mod test_multi_aux_alignment;
 #[cfg(test)]
+mod test_per_air_degree;
+#[cfg(test)]
 mod test_tiny_air;
 
 // Re-export commonly used params at the module level for convenience.

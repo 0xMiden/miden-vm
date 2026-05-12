@@ -32,19 +32,29 @@ type PackedVal<F> = <F as Field>::Packing;
 /// Type alias for packed extension field from EF.
 type PackedExt<F, EF> = <EF as ExtensionField<F>>::ExtensionPacking;
 
-/// Evaluate constraints on the quotient domain, adding results into `output`.
+/// Evaluate an AIR's constraints on its native quotient coset and write the
+/// per-AIR quotient evaluations (constraint numerator divided by `Z_{H_j}`)
+/// into `output`.
 ///
-/// Here `gJ` is the quotient evaluation coset of size `N * D`, the subset of the
-/// committed LDE coset `gK` (size `N * B`) that contains just enough points to
-/// evaluate the quotient point-wise. For each point on `gJ`, we evaluate all AIR
-/// constraints, fold them with powers of `alpha`, and add the resulting numerator value:
+/// `coset` is the AIR's native quotient evaluation coset `gJ_j` of size `n_j * D_j`,
+/// where `n_j` is the AIR's trace height and `D_j = 2^log_quotient_degree` is its
+/// per-AIR constraint-degree bound. For each point on `gJ_j` we evaluate every
+/// constraint, fold with powers of `alpha`, multiply by the precomputed `1 / Z_H`
+/// value, and write the result:
 ///
-/// `output[i] += folded_constraints(xᵢ)`.
+/// `output[i] = folded_constraints(x_i) / Z_{H_j}(x_i)`.
 ///
-/// The caller is responsible for preparing `output` before calling this function
-/// (e.g. cyclically extending and scaling by beta for multi-trace accumulation).
-/// Trace views must be [`BitReversedMatrixView`] over dense row-major storage (as returned by
-/// [`crate::prover::commit::Committed::evals_on_quotient_domain`]), in natural order on gJ.
+/// `inv_z_h` is the length-`D_j` slice of `1 / Z_{H_j}` values on `gJ_j` (use
+/// [`crate::prover::quotient::compute_z_h_inverses`]). Fusing the divide into the
+/// write loop saves a second pass over the `n_j * D_j`-point output buffer.
+///
+/// `output` must be a fresh zero-initialized buffer of length `n_j * D_j`; each
+/// point is written once. Upsampling to the batch-wide target and beta-accumulation
+/// into the shared quotient accumulator happen in the caller.
+///
+/// Trace views must be [`BitReversedMatrixView`] over dense row-major storage (as
+/// returned by [`crate::prover::commit::Committed::evals_on_quotient_domain`]), in
+/// natural order on `gJ_j`.
 ///
 /// Uses SIMD-packed parallel iteration via rayon for optimal performance:
 /// - Processes `WIDTH` points simultaneously using packed field types
@@ -59,10 +69,10 @@ type PackedExt<F, EF> = <EF as ExtensionField<F>>::ExtensionPacking;
 /// collapses them into one numerator polynomial while preserving soundness (a non-zero
 /// constraint survives with high probability).
 ///
-/// Why we only evaluate on `gJ`: `gJ` (size `N * D`) is a subset of the committed LDE
-/// coset `gK` (size `N * B`). For `B >= D`, these `N * D` points are sufficient for
-/// the quotient-degree bounds used by the protocol; division by the vanishing polynomial
-/// happens later.
+/// Why we evaluate on the native coset: the quotient `Q_j = C_j / Z_{H_j}` has degree
+/// `< n_j * D_j` by construction, so `n_j * D_j` evaluation points suffice to determine
+/// it. The committed LDE coset (size `n_j * B`, with `B >= D_j`) contains `gJ_j` as a
+/// subset, so the truncated view the caller passes in is zero-copy.
 #[allow(clippy::too_many_arguments)]
 pub fn evaluate_constraints_into<F, EF, A>(
     output: &mut [EF],
@@ -76,6 +86,7 @@ pub fn evaluate_constraints_into<F, EF, A>(
     periodic_lde: &PeriodicLde<F>,
     layout: &ConstraintLayout,
     permutation_values: &[EF],
+    inv_z_h: &[F],
 ) where
     F: TwoAdicField,
     EF: ExtensionField<F>,
@@ -91,6 +102,9 @@ pub fn evaluate_constraints_into<F, EF, A>(
     let width = P::<F>::WIDTH;
 
     assert_eq!(gj_height % width, 0, "quotient height must be divisible by packing width");
+    assert_eq!(inv_z_h.len(), constraint_degree, "inv_z_h length must equal D_j");
+    // Bitmask for `i % inv_z_h.len()`; len is `2^log_blowup` by construction.
+    let inv_z_h_mask: usize = inv_z_h.len() - 1;
 
     // Precompute selectors via coset method
     let sels = coset.selectors::<F>();
@@ -185,9 +199,12 @@ pub fn evaluate_constraints_into<F, EF, A>(
             air.eval(&mut folder);
             let folded = folder.finalize_constraints();
 
-            // Unpack folded result and add scalars directly into the output chunk.
-            for (slot, val) in chunk.iter_mut().zip(PE::<F, EF>::to_ext_iter([folded])) {
-                *slot += val;
+            // Unpack the folded result, multiply by 1/Z_H (modular indexing since Z_H
+            // takes only D_j distinct values on gJ_j), and write into the output chunk.
+            for (k, (slot, val)) in
+                chunk.iter_mut().zip(PE::<F, EF>::to_ext_iter([folded])).enumerate()
+            {
+                *slot = val * inv_z_h[(i_start + k) & inv_z_h_mask];
             }
         }
     };

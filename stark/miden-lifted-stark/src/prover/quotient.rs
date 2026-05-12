@@ -1,17 +1,18 @@
-//! Quotient polynomial helpers: accumulation, vanishing division, decomposition.
+//! Quotient polynomial helpers used by the prover's per-AIR pipeline.
 //!
-//! The prover orchestrates the quotient pipeline (loop over instances, accumulate,
-//! divide, commit). This module provides the building blocks:
-//!
-//! - [`cyclic_extend_and_scale`]: Horner-style beta scaling + cyclic extension
-//! - [`divide_by_vanishing_in_place`]: Divide by Z_H on the quotient evaluation domain
-//! - [`commit_quotient`]: Decompose Q(gJ) into chunks and commit on gK
+//! - [`upsample_evals`]: Low-degree extend coset evaluations onto a larger two-adic coset (the
+//!   constraint-degree axis: `D_j -> D_max`, same polynomial, denser evaluations).
+//! - [`cyclic_extend_and_accumulate`]: Lift the running accumulator along the trace-height axis
+//!   (`n_j -> N`) by cyclic repetition, and Horner-fold a new AIR's contribution in via beta.
+//! - [`compute_z_h_inverses`]: Precompute the distinct `1 / Z_H` values on a quotient coset.
+//! - [`commit_quotient`]: Decompose Q(gJ) into chunks and commit on gK.
 
 use alloc::{format, vec, vec::Vec};
 
 use p3_dft::TwoAdicSubgroupDft;
 use p3_field::{
     BasedVectorSpace, ExtensionField, Field, TwoAdicField, batch_multiplicative_inverse,
+    par_add_scaled_slice_in_place, par_scale_slice_in_place,
 };
 use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::*;
@@ -26,62 +27,107 @@ use crate::{
 };
 
 // ============================================================================
-// Accumulation
+// Domain lifting and accumulation
 // ============================================================================
 
-/// Cyclically extend the accumulator to `target_len` and scale every element by `β`.
+/// Low-degree extend coset evaluations onto a larger two-adic coset.
 ///
-/// On the first call (empty accumulator) this simply zero-fills to `target_len`.
-/// On subsequent calls it scales the existing buffer by `β` (Horner folding)
-/// then doubles via `extend_from_within` until it reaches `target_len`.
+/// Treats `evals` as evaluations of a polynomial `p` on a coset `g*H` of size
+/// `evals.len()`, and returns evaluations of the same `p` on the coset `g*K`
+/// of size `evals.len() << added_bits` (same shift `g`, larger two-adic
+/// subgroup).
 ///
-/// Both `accumulator.len()` and `target_len` must be powers of two, and
-/// `target_len ≥ accumulator.len()`.
+/// # Precondition
 ///
-/// Cyclic extension is valid because H_small is a subgroup of H_big, so
-/// evaluations repeat cyclically. The β scaling implements Horner folding for
-/// multi-trace accumulation: `acc = acc·β + Nⱼ`.
-pub fn cyclic_extend_and_scale<EF: Field>(accumulator: &mut Vec<EF>, target_len: usize, beta: EF) {
-    if accumulator.is_empty() {
-        accumulator.resize(target_len, EF::ZERO);
-    } else {
-        // Horner: scale the smaller buffer by beta before upsampling
-        accumulator.par_iter_mut().for_each(|v| *v *= beta);
-        // Cyclic extension by repeated doubling (all sizes are powers of 2)
-        while accumulator.len() < target_len {
-            accumulator.extend_from_within(..);
-        }
-    }
-}
-
-// ============================================================================
-// Vanishing division
-// ============================================================================
-
-/// Divide quotient numerator by vanishing polynomial in-place (natural order).
-///
-/// Replaces each `numerator[i]` with `numerator[i] / Z_H(xᵢ)` where
-/// `Z_H(X) = Xᴺ − 1` and `N` is the trace height.
-///
-/// This uses a periodicity trick: on the quotient evaluation coset `gJ` of size `N·D`,
-/// the values `Z_H(x)` take only `D` distinct values, so we can batch-invert those `D`
-/// values once and reuse them by modular indexing.
-///
-/// Note that here `coset.log_blowup()` is `log2(D)` because `coset` is the *quotient*
-/// domain (blowup = constraint degree), not the PCS/FRI blowup `B`.
-pub fn divide_by_vanishing_in_place<F, EF>(numerator: &mut [EF], coset: &LiftedCoset)
+/// `deg(p) < evals.len()`. If the input evaluations are of a polynomial whose
+/// actual degree is `>= evals.len()`, this function silently returns evaluations
+/// of a different polynomial (the unique degree-`< evals.len()` interpolant of
+/// the input). The caller is responsible for ensuring the degree bound.
+pub fn upsample_evals<F, EF, DFT>(dft: &DFT, evals: Vec<EF>, added_bits: usize) -> Vec<EF>
 where
     F: TwoAdicField,
     EF: ExtensionField<F>,
+    DFT: TwoAdicSubgroupDft<F>,
 {
-    // D = constraint degree. On the quotient coset, log_blowup() = log₂(D).
+    if added_bits == 0 {
+        return evals;
+    }
+
+    dft.lde_algebra_batch(RowMajorMatrix::new_col(evals), added_bits).values
+}
+
+/// Fold a new AIR's quotient contribution into the cross-AIR accumulator via one
+/// Horner step, after lifting the prior accumulator onto the larger coset:
+///
+/// ```text
+/// acc <- lift_r(acc) * beta + contribution,    r = contribution.len() / acc.len()
+/// ```
+///
+/// On return, `accumulator.len() == contribution.len()`. `contribution.len()` and
+/// (when non-empty) `accumulator.len()` must be powers of two, with
+/// `contribution.len() >= accumulator.len()`.
+///
+/// # Why
+///
+/// - **Scale before extend.** Horner-multiplying the smaller buffer is strictly less work than the
+///   lifted one, and the lifted values are determined entirely by the smaller buffer via cyclic
+///   repetition.
+/// - **Cyclic repetition = polynomial lift on two-adic cosets.** In natural-order coset
+///   evaluations, `extended[i] = original[i mod n_old]` realises the composition `P(X) -> P(X^r)`:
+///   iterating `gJ` in natural order and raising to the `r`-th power cycles through `(gJ)^r` with
+///   period `|(gJ)^r|`.
+pub fn cyclic_extend_and_accumulate<EF: Field>(
+    accumulator: &mut Vec<EF>,
+    contribution: Vec<EF>,
+    beta: EF,
+) {
+    debug_assert!(contribution.len().is_power_of_two());
+    debug_assert!(accumulator.is_empty() || accumulator.len().is_power_of_two());
+    debug_assert!(contribution.len() >= accumulator.len());
+
+    if accumulator.is_empty() {
+        accumulator.extend(contribution);
+        return;
+    }
+
+    if accumulator.len() == contribution.len() {
+        // No lift needed; fuse the Horner mul and add into a single packed pass by
+        // computing `contribution + beta * accumulator` in place on the (owned)
+        // contribution buffer and swapping it in.
+        let mut contribution = contribution;
+        par_add_scaled_slice_in_place(&mut contribution, accumulator, beta);
+        *accumulator = contribution;
+        return;
+    }
+
+    par_scale_slice_in_place(accumulator, beta);
+    while accumulator.len() < contribution.len() {
+        accumulator.extend_from_within(..);
+    }
+    // TODO: use parallel packed addition
+    accumulator
+        .par_iter_mut()
+        .zip(contribution.into_par_iter())
+        .for_each(|(a, c)| *a += c);
+}
+
+// ============================================================================
+// Vanishing-polynomial inverses
+// ============================================================================
+
+/// Compute the `D = 2^log_constraint_degree` distinct values of `1 / Z_H` on the
+/// quotient evaluation coset `gJ`.
+///
+/// On `gJ` of size `N*D`, `Z_H(X) = X^N - 1` takes only `D` distinct values
+/// indexed by `i mod D`, so `D` inverses suffice. The caller applies
+/// `inv_z_h[i & (D - 1)]` to the `i`-th output point.
+pub fn compute_z_h_inverses<F: TwoAdicField>(coset: &LiftedCoset) -> Vec<F> {
+    // For a quotient coset, `log_blowup` is exactly the `log_constraint_degree`.
     let log_blowup = coset.log_blowup();
     let num_distinct = 1 << log_blowup;
 
-    // The D distinct values of Z_H on gJ:
-    // Z_H(g·ω_Jⁱ) = sᴺ·ω_Dⁱ − 1 where
-    // - s is the coset shift
-    // - ω_D is a D-th root of unity.
+    // Z_H(g*w_J^i) = s^N * w_D^i - 1 where s is the coset shift and w_D is a
+    // D-th root of unity.
     let shift: F = coset.lde_shift();
     let s_pow_n = shift.exp_power_of_2(coset.log_trace_height as usize);
     let z_h_evals: Vec<F> = F::two_adic_generator(log_blowup)
@@ -90,14 +136,7 @@ where
         .map(|x| s_pow_n * x - F::ONE)
         .collect();
 
-    let inv_van = batch_multiplicative_inverse(&z_h_evals);
-
-    // Parallel division using modular indexing for periodicity.
-    // Z_H has only num_distinct unique values on gJ; power-of-2 size
-    // lets us use bitmask: i & (num_distinct - 1) == i % num_distinct.
-    numerator.par_iter_mut().enumerate().for_each(|(i, n)| {
-        *n *= inv_van[i & (num_distinct - 1)];
-    });
+    batch_multiplicative_inverse(&z_h_evals)
 }
 
 // ============================================================================
@@ -235,4 +274,88 @@ where
     let tree = config.lmcs().build_aligned_tree(vec![quotient_matrix]);
 
     Committed::new(tree, log_blowup)
+}
+
+#[cfg(test)]
+mod tests {
+    use alloc::vec::Vec;
+
+    use p3_dft::{NaiveDft, TwoAdicSubgroupDft};
+    use p3_field::{Field, PrimeCharacteristicRing, TwoAdicField};
+    use p3_matrix::dense::RowMajorMatrix;
+
+    use super::{compute_z_h_inverses, upsample_evals};
+    use crate::{
+        coset::LiftedCoset,
+        testing::configs::goldilocks_poseidon2::{Felt, QuadFelt},
+    };
+
+    fn coeffs(height: usize) -> Vec<QuadFelt> {
+        (0..height).map(|i| QuadFelt::from_u64((i as u64) + 1)).collect()
+    }
+
+    /// Checks that `upsample_evals` on `dft` produces the same result as a direct
+    /// coset DFT of zero-padded coefficients.
+    fn assert_upsample_matches_direct<D: TwoAdicSubgroupDft<Felt>>(dft: &D, shift: Felt) {
+        let small_height = 8;
+        let added_bits = 2;
+        let large_height = small_height << added_bits;
+
+        let small_coeffs = RowMajorMatrix::new(coeffs(small_height), 1);
+        let small_evals = NaiveDft.coset_dft_algebra_batch(small_coeffs, shift).values;
+
+        let mut large_coeffs = coeffs(small_height);
+        large_coeffs.resize(large_height, QuadFelt::ZERO);
+        let direct_large = NaiveDft
+            .coset_dft_algebra_batch(RowMajorMatrix::new(large_coeffs, 1), shift)
+            .values;
+
+        let upsampled = upsample_evals::<Felt, QuadFelt, _>(dft, small_evals, added_bits);
+        assert_eq!(upsampled, direct_large);
+    }
+
+    #[test]
+    fn upsample_evals_matches_direct_coset_dft() {
+        assert_upsample_matches_direct(&NaiveDft, Felt::GENERATOR.exp_power_of_2(2));
+    }
+
+    /// Same check with the production DFT backend.
+    #[test]
+    fn upsample_evals_with_radix2_dit_parallel_matches_naive() {
+        use p3_dft::Radix2DitParallel;
+        let dft = Radix2DitParallel::<Felt>::default();
+        assert_upsample_matches_direct(&dft, Felt::GENERATOR.exp_power_of_2(2));
+    }
+
+    #[test]
+    fn upsample_evals_with_zero_added_bits_returns_input_unchanged() {
+        let evals = coeffs(8);
+        let out = upsample_evals::<Felt, QuadFelt, _>(&NaiveDft, evals.clone(), 0);
+        assert_eq!(out, evals);
+    }
+
+    /// Verify that `compute_z_h_inverses` returns the true pointwise inverses of
+    /// `Z_H(x) = x^N - 1` at the `D` distinct values it takes on the quotient coset.
+    #[test]
+    fn compute_z_h_inverses_product_is_one() {
+        let log_trace_height = 5u8;
+        let log_blowup = 3u8;
+        let log_max_trace_height = 5u8;
+        let log_constraint_degree = 2u8; // D = 4
+
+        let lde = LiftedCoset::new(log_trace_height, log_blowup, log_max_trace_height);
+        let coset = lde.quotient_domain(log_constraint_degree);
+        let inv_z_h = compute_z_h_inverses::<Felt>(&coset);
+
+        assert_eq!(inv_z_h.len(), 1 << log_constraint_degree);
+
+        let n = 1u64 << log_trace_height;
+        let g: Felt = coset.lde_shift();
+        let w_j = Felt::two_adic_generator((log_trace_height + log_constraint_degree) as usize);
+        for (i, &inv) in inv_z_h.iter().enumerate() {
+            let x = g * w_j.exp_u64(i as u64);
+            let z_h_x = x.exp_u64(n) - Felt::ONE;
+            assert_eq!(z_h_x * inv, Felt::ONE, "point {i}");
+        }
+    }
 }
