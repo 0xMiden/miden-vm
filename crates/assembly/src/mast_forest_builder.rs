@@ -1,5 +1,6 @@
 use alloc::{
     collections::{BTreeMap, BTreeSet},
+    string::{String, ToString},
     sync::Arc,
     vec::Vec,
 };
@@ -14,9 +15,9 @@ use miden_core::{
         BasicBlockNode, BasicBlockNodeBuilder, CallNode, CallNodeBuilder, DebugInfo,
         DecoratorFingerprint, DecoratorId, DynNode, DynNodeBuilder, ExternalNodeBuilder, JoinNode,
         JoinNodeBuilder, LoopNode, LoopNodeBuilder, MastForest, MastForestContributor,
-        MastForestParts, MastForestRootMap, MastNode, MastNodeBuilder, MastNodeExt,
-        MastNodeFingerprint, MastNodeId, OpBatch, SplitNode, SplitNodeBuilder, SubtreeIterator,
-        error_code_from_msg, fingerprint_from_fingerprints,
+        MastForestError, MastForestParts, MastForestRootMap, MastNode, MastNodeBuilder,
+        MastNodeExt, MastNodeFingerprint, MastNodeId, OpBatch, SplitNode, SplitNodeBuilder,
+        SubtreeIterator, error_code_from_msg, fingerprint_from_fingerprints,
     },
     operations::{AssemblyOp, DebugVarInfo, Decorator, DecoratorList, Operation},
     serde::Serializable,
@@ -25,7 +26,7 @@ use miden_core::{
 
 use super::{GlobalItemIndex, LinkerError, Procedure};
 use crate::{
-    diagnostics::{IntoDiagnostic, Report, WrapErr},
+    diagnostics::{Diagnostic, IntoDiagnostic, Report, WrapErr, miette},
     report,
 };
 
@@ -136,6 +137,79 @@ impl BuiltMastForest {
     }
 }
 
+#[derive(Debug, thiserror::Error, Diagnostic)]
+enum MastForestBuilderError {
+    #[error("failed to add decorator {decorator_ref:?} while finalizing MAST forest: {source}")]
+    AddDecorator {
+        decorator_ref: DecoratorRef,
+        #[source]
+        source: MastForestError,
+    },
+    #[error("pending {node_kind} node {node_ref} has {actual} children, expected {expected}")]
+    InvalidChildCount {
+        node_ref: MastNodeRef,
+        node_kind: &'static str,
+        expected: usize,
+        actual: usize,
+    },
+    #[error("pending {node_kind} node {node_ref} has indexed decorators")]
+    InvalidIndexedDecorators {
+        node_ref: MastNodeRef,
+        node_kind: &'static str,
+    },
+    #[error(
+        "pending {node_kind} node {node_ref} references child {child_ref} before the child was finalized"
+    )]
+    MissingFinalChild {
+        node_ref: MastNodeRef,
+        node_kind: &'static str,
+        child_ref: MastNodeRef,
+    },
+    #[error("pending node {node_ref} references decorator {decorator_ref:?} before finalization")]
+    MissingFinalDecorator {
+        node_ref: MastNodeRef,
+        decorator_ref: DecoratorRef,
+    },
+    #[error("failed to build pending {node_kind} node {node_ref}: {source}")]
+    BuildNode {
+        node_ref: MastNodeRef,
+        node_kind: &'static str,
+        #[source]
+        source: MastForestError,
+    },
+    #[error("failed to add finalized MAST node for pending node {node_ref}: {source}")]
+    AddNode {
+        node_ref: MastNodeRef,
+        #[source]
+        source: MastForestError,
+    },
+    #[error("failed to add assembly op metadata for node {node_id:?}: {source}")]
+    AddAsmOp {
+        node_id: MastNodeId,
+        #[source]
+        source: MastForestError,
+    },
+    #[error("failed to register assembly op metadata for node {node_id:?}: {source_msg}")]
+    RegisterAsmOps { node_id: MastNodeId, source_msg: String },
+    #[error("failed to add debug variable metadata for node {node_id:?}: {source}")]
+    AddDebugVar {
+        node_id: MastNodeId,
+        #[source]
+        source: MastForestError,
+    },
+    #[error("failed to register debug variable metadata for node {node_id:?}: {source_msg}")]
+    RegisterDebugVars { node_id: MastNodeId, source_msg: String },
+    #[error("procedure root {root_ref} was not retained in final MAST forest")]
+    MissingProcedureRoot { root_ref: MastNodeRef },
+    #[error("failed to finalize MAST forest: {source}")]
+    FinalizeForest {
+        #[source]
+        source: MastForestError,
+    },
+    #[error("failed to register decorators for node {node_id:?}: {source_msg}")]
+    RegisterDecorators { node_id: MastNodeId, source_msg: String },
+}
+
 #[derive(Clone, Debug)]
 struct PendingMastNode {
     fingerprint: MastNodeFingerprint,
@@ -172,6 +246,18 @@ enum PendingMastNodeKind {
 }
 
 impl PendingMastNodeKind {
+    fn name(&self) -> &'static str {
+        match self {
+            Self::BasicBlock { .. } => "basic block",
+            Self::Join => "join",
+            Self::Split => "split",
+            Self::Loop => "loop",
+            Self::Call { .. } => "call",
+            Self::Dyn { .. } => "dyn",
+            Self::External => "external",
+        }
+    }
+
     fn from_node(node: MastNode) -> Self {
         match node {
             MastNode::Block(node) => Self::BasicBlock { op_batches: node.op_batches().to_vec() },
@@ -584,7 +670,7 @@ impl MastForestBuilder {
     ///
     /// It also returns the map from assembly-time node refs to final node IDs. Any [`MastNodeRef`]
     /// used in reference to this builder should be resolved using this map.
-    pub(crate) fn build(mut self) -> BuiltMastForest {
+    pub(crate) fn build(mut self) -> Result<BuiltMastForest, Report> {
         let procedure_root_refs = core::mem::take(&mut self.procedure_root_refs);
 
         let mut removable_node_refs = core::mem::take(&mut self.merged_basic_block_refs);
@@ -603,7 +689,9 @@ impl MastForestBuilder {
         for decorator_ref in live_decorator_refs {
             let final_decorator_id = debug_info
                 .add_decorator(self.decorators[decorator_ref].clone())
-                .expect("failed to add decorator - internal ordering error");
+                .map_err(|source| {
+                    Report::new(MastForestBuilderError::AddDecorator { decorator_ref, source })
+                })?;
             final_decorator_id_by_ref.insert(decorator_ref, final_decorator_id);
         }
 
@@ -613,25 +701,39 @@ impl MastForestBuilder {
             let pending_node = &self.nodes[node_ref];
             let builder = build_pending_node_with_final_ids(
                 pending_node,
+                node_ref,
                 &node_id_by_ref,
                 &final_decorator_id_by_ref,
             )
-            .expect("failed to remap MAST node - internal ordering error");
+            .map_err(Report::new)?;
 
-            let final_node_id = MastNodeId::new_unchecked(
-                nodes.len().try_into().expect("MAST forest node count exceeds u32::MAX"),
-            );
-            let node = builder
-                .build_linked(final_node_id)
-                .expect("failed to build MAST node - internal ordering error");
+            let final_node_id =
+                MastNodeId::new_unchecked(nodes.len().try_into().map_err(|_| {
+                    Report::new(MastForestBuilderError::FinalizeForest {
+                        source: MastForestError::TooManyNodes,
+                    })
+                })?);
+            let node = builder.build_linked(final_node_id).map_err(|source| {
+                Report::new(MastForestBuilderError::BuildNode {
+                    node_ref,
+                    node_kind: pending_node.kind.name(),
+                    source,
+                })
+            })?;
             register_pending_node_decorators(
                 &mut debug_info,
                 final_node_id,
+                node_ref,
                 pending_node,
                 &final_decorator_id_by_ref,
-            );
-            let inserted_node_id =
-                nodes.push(node).expect("failed to add MAST node - internal ordering error");
+            )
+            .map_err(Report::new)?;
+            let inserted_node_id = nodes.push(node).map_err(|_| {
+                Report::new(MastForestBuilderError::AddNode {
+                    node_ref,
+                    source: MastForestError::TooManyNodes,
+                })
+            })?;
             debug_assert_eq!(inserted_node_id, final_node_id);
             node_id_by_ref.insert(node_ref, final_node_id);
         }
@@ -652,16 +754,21 @@ impl MastForestBuilder {
                 .map(|(op_idx, asm_op_ref)| {
                     let asm_op_id = debug_info
                         .add_asm_op(self.asm_op_by_ref[asm_op_ref].clone())
-                        .expect("failed to add AssemblyOp - internal ordering error");
-                    (op_idx, asm_op_id)
+                        .map_err(|source| {
+                        Report::new(MastForestBuilderError::AddAsmOp { node_id, source })
+                    })?;
+                    Ok((op_idx, asm_op_id))
                 })
-                .collect();
+                .collect::<Result<Vec<_>, Report>>()?;
 
-            // Errors here are programming errors since we control the ordering.
-            // Use expect to surface any issues during development.
             debug_info
                 .register_asm_ops(node_id, num_operations, adjusted_mappings)
-                .expect("failed to register AssemblyOps - internal ordering error");
+                .map_err(|source| {
+                    Report::new(MastForestBuilderError::RegisterAsmOps {
+                        node_id,
+                        source_msg: source.to_string(),
+                    })
+                })?;
         }
 
         let mut debug_var_id_by_ref = BTreeMap::new();
@@ -680,22 +787,29 @@ impl MastForestBuilder {
                     } else {
                         let debug_var_id = debug_info
                             .add_debug_var(self.debug_vars[debug_var_ref].clone())
-                            .expect("failed to add debug variable - internal ordering error");
+                            .map_err(|source| {
+                                Report::new(MastForestBuilderError::AddDebugVar { node_id, source })
+                            })?;
                         debug_var_id_by_ref.insert(debug_var_ref, debug_var_id);
                         debug_var_id
                     };
                 debug_var_ids.push((op_idx, debug_var_id));
             }
-            debug_info
-                .register_op_indexed_debug_vars(node_id, debug_var_ids)
-                .expect("failed to register debug variables - internal ordering error");
+            debug_info.register_op_indexed_debug_vars(node_id, debug_var_ids).map_err(
+                |source| {
+                    Report::new(MastForestBuilderError::RegisterDebugVars {
+                        node_id,
+                        source_msg: source.to_string(),
+                    })
+                },
+            )?;
         }
 
         let mut roots = Vec::with_capacity(procedure_root_refs.len());
         for &root_ref in &procedure_root_refs {
-            let root_id = *node_id_by_ref
-                .get(&root_ref)
-                .expect("procedure root must be retained in final MAST forest");
+            let root_id = *node_id_by_ref.get(&root_ref).ok_or_else(|| {
+                Report::new(MastForestBuilderError::MissingProcedureRoot { root_ref })
+            })?;
             roots.push(root_id);
         }
 
@@ -706,12 +820,12 @@ impl MastForestBuilder {
             advice_map: self.advice_map,
             debug_info,
         })
-        .expect("failed to finalize MAST forest - internal ordering error");
+        .map_err(|source| Report::new(MastForestBuilderError::FinalizeForest { source }))?;
 
-        BuiltMastForest {
+        Ok(BuiltMastForest {
             mast_forest: final_forest,
             node_id_by_ref,
-        }
+        })
     }
 }
 
@@ -747,25 +861,29 @@ fn batch_basic_block_operations(
 
 fn build_pending_node_with_final_ids(
     pending_node: &PendingMastNode,
+    node_ref: MastNodeRef,
     final_node_id_by_ref: &BTreeMap<MastNodeRef, MastNodeId>,
     final_decorator_id_by_ref: &BTreeMap<DecoratorRef, DecoratorId>,
-) -> Result<MastNodeBuilder, miden_core::mast::MastForestError> {
+) -> Result<MastNodeBuilder, MastForestBuilderError> {
     let before_enter = final_decorator_ids_from_refs(
+        node_ref,
         &pending_node.decorator_refs.before_enter,
         final_decorator_id_by_ref,
-    );
+    )?;
     let after_exit = final_decorator_ids_from_refs(
+        node_ref,
         &pending_node.decorator_refs.after_exit,
         final_decorator_id_by_ref,
-    );
+    )?;
 
     let builder = match &pending_node.kind {
         PendingMastNodeKind::BasicBlock { op_batches } => {
-            assert!(pending_node.child_refs.is_empty(), "basic block nodes cannot have children");
+            ensure_child_count(node_ref, pending_node, 0)?;
             let decorators = final_indexed_decorator_ids_from_refs(
+                node_ref,
                 &pending_node.decorator_refs.indexed,
                 final_decorator_id_by_ref,
-            );
+            )?;
             MastNodeBuilder::BasicBlock(
                 BasicBlockNodeBuilder::from_op_batches_preserving_digest(
                     op_batches.clone(),
@@ -777,13 +895,9 @@ fn build_pending_node_with_final_ids(
             )
         },
         PendingMastNodeKind::Join => {
-            assert_eq!(pending_node.child_refs.len(), 2, "join nodes must have two children");
-            assert!(
-                pending_node.decorator_refs.indexed.is_empty(),
-                "join nodes cannot have indexed decorators"
-            );
-            let children =
-                final_child_ids::<2>(&pending_node.child_refs, final_node_id_by_ref, "join");
+            ensure_child_count(node_ref, pending_node, 2)?;
+            ensure_no_indexed_decorators(node_ref, pending_node)?;
+            let children = final_child_ids::<2>(node_ref, pending_node, final_node_id_by_ref)?;
             MastNodeBuilder::Join(
                 JoinNodeBuilder::new(children)
                     .with_before_enter(before_enter)
@@ -792,13 +906,9 @@ fn build_pending_node_with_final_ids(
             )
         },
         PendingMastNodeKind::Split => {
-            assert_eq!(pending_node.child_refs.len(), 2, "split nodes must have two children");
-            assert!(
-                pending_node.decorator_refs.indexed.is_empty(),
-                "split nodes cannot have indexed decorators"
-            );
-            let branches =
-                final_child_ids::<2>(&pending_node.child_refs, final_node_id_by_ref, "split");
+            ensure_child_count(node_ref, pending_node, 2)?;
+            ensure_no_indexed_decorators(node_ref, pending_node)?;
+            let branches = final_child_ids::<2>(node_ref, pending_node, final_node_id_by_ref)?;
             MastNodeBuilder::Split(
                 SplitNodeBuilder::new(branches)
                     .with_before_enter(before_enter)
@@ -807,13 +917,9 @@ fn build_pending_node_with_final_ids(
             )
         },
         PendingMastNodeKind::Loop => {
-            assert_eq!(pending_node.child_refs.len(), 1, "loop nodes must have one child");
-            assert!(
-                pending_node.decorator_refs.indexed.is_empty(),
-                "loop nodes cannot have indexed decorators"
-            );
-            let [body] =
-                final_child_ids::<1>(&pending_node.child_refs, final_node_id_by_ref, "loop");
+            ensure_child_count(node_ref, pending_node, 1)?;
+            ensure_no_indexed_decorators(node_ref, pending_node)?;
+            let [body] = final_child_ids::<1>(node_ref, pending_node, final_node_id_by_ref)?;
             MastNodeBuilder::Loop(
                 LoopNodeBuilder::new(body)
                     .with_before_enter(before_enter)
@@ -822,13 +928,9 @@ fn build_pending_node_with_final_ids(
             )
         },
         PendingMastNodeKind::Call { is_syscall } => {
-            assert_eq!(pending_node.child_refs.len(), 1, "call nodes must have one child");
-            assert!(
-                pending_node.decorator_refs.indexed.is_empty(),
-                "call nodes cannot have indexed decorators"
-            );
-            let [callee] =
-                final_child_ids::<1>(&pending_node.child_refs, final_node_id_by_ref, "call");
+            ensure_child_count(node_ref, pending_node, 1)?;
+            ensure_no_indexed_decorators(node_ref, pending_node)?;
+            let [callee] = final_child_ids::<1>(node_ref, pending_node, final_node_id_by_ref)?;
             let builder = if *is_syscall {
                 CallNodeBuilder::new_syscall(callee)
             } else {
@@ -842,11 +944,8 @@ fn build_pending_node_with_final_ids(
             )
         },
         PendingMastNodeKind::Dyn { is_dyncall } => {
-            assert!(pending_node.child_refs.is_empty(), "dyn nodes cannot have children");
-            assert!(
-                pending_node.decorator_refs.indexed.is_empty(),
-                "dyn nodes cannot have indexed decorators"
-            );
+            ensure_child_count(node_ref, pending_node, 0)?;
+            ensure_no_indexed_decorators(node_ref, pending_node)?;
             let builder = if *is_dyncall {
                 DynNodeBuilder::new_dyncall()
             } else {
@@ -860,11 +959,8 @@ fn build_pending_node_with_final_ids(
             )
         },
         PendingMastNodeKind::External => {
-            assert!(pending_node.child_refs.is_empty(), "external nodes cannot have children");
-            assert!(
-                pending_node.decorator_refs.indexed.is_empty(),
-                "external nodes cannot have indexed decorators"
-            );
+            ensure_child_count(node_ref, pending_node, 0)?;
+            ensure_no_indexed_decorators(node_ref, pending_node)?;
             MastNodeBuilder::External(
                 ExternalNodeBuilder::new(pending_node.digest)
                     .with_before_enter(before_enter)
@@ -876,83 +972,142 @@ fn build_pending_node_with_final_ids(
     Ok(builder)
 }
 
+fn ensure_child_count(
+    node_ref: MastNodeRef,
+    pending_node: &PendingMastNode,
+    expected: usize,
+) -> Result<(), MastForestBuilderError> {
+    let actual = pending_node.child_refs.len();
+    if actual == expected {
+        Ok(())
+    } else {
+        Err(MastForestBuilderError::InvalidChildCount {
+            node_ref,
+            node_kind: pending_node.kind.name(),
+            expected,
+            actual,
+        })
+    }
+}
+
+fn ensure_no_indexed_decorators(
+    node_ref: MastNodeRef,
+    pending_node: &PendingMastNode,
+) -> Result<(), MastForestBuilderError> {
+    if pending_node.decorator_refs.indexed.is_empty() {
+        Ok(())
+    } else {
+        Err(MastForestBuilderError::InvalidIndexedDecorators {
+            node_ref,
+            node_kind: pending_node.kind.name(),
+        })
+    }
+}
+
 fn register_pending_node_decorators(
     debug_info: &mut DebugInfo,
     node_id: MastNodeId,
+    node_ref: MastNodeRef,
     pending_node: &PendingMastNode,
     final_decorator_id_by_ref: &BTreeMap<DecoratorRef, DecoratorId>,
-) {
+) -> Result<(), MastForestBuilderError> {
     let before_enter = final_decorator_ids_from_refs(
+        node_ref,
         &pending_node.decorator_refs.before_enter,
         final_decorator_id_by_ref,
-    );
+    )?;
     let after_exit = final_decorator_ids_from_refs(
+        node_ref,
         &pending_node.decorator_refs.after_exit,
         final_decorator_id_by_ref,
-    );
+    )?;
     if !before_enter.is_empty() || !after_exit.is_empty() {
         debug_info.register_node_decorators(node_id, &before_enter, &after_exit);
     }
 
     if pending_node.kind.is_basic_block() {
         let indexed_decorators = final_indexed_decorator_ids_from_refs(
+            node_ref,
             &pending_node.decorator_refs.indexed,
             final_decorator_id_by_ref,
-        );
-        debug_info
-            .register_op_indexed_decorators(node_id, indexed_decorators)
-            .expect("failed to register decorators - internal ordering error");
-    } else {
-        debug_assert!(
-            pending_node.decorator_refs.indexed.is_empty(),
-            "only basic block nodes can have indexed decorators"
-        );
+        )?;
+        debug_info.register_op_indexed_decorators(node_id, indexed_decorators).map_err(
+            |source| MastForestBuilderError::RegisterDecorators {
+                node_id,
+                source_msg: source.to_string(),
+            },
+        )?;
+    } else if !pending_node.decorator_refs.indexed.is_empty() {
+        return Err(MastForestBuilderError::InvalidIndexedDecorators {
+            node_ref,
+            node_kind: pending_node.kind.name(),
+        });
     }
+
+    Ok(())
 }
 
 fn final_child_ids<const N: usize>(
-    child_refs: &[MastNodeRef],
+    node_ref: MastNodeRef,
+    pending_node: &PendingMastNode,
     final_node_id_by_ref: &BTreeMap<MastNodeRef, MastNodeId>,
-    node_kind: &'static str,
-) -> [MastNodeId; N] {
-    assert_eq!(child_refs.len(), N, "{node_kind} node has an invalid child count");
-    child_refs
+) -> Result<[MastNodeId; N], MastForestBuilderError> {
+    let node_kind = pending_node.kind.name();
+    pending_node
+        .child_refs
         .iter()
         .map(|child_ref| {
-            *final_node_id_by_ref
-                .get(child_ref)
-                .expect("pending node children must be finalized before their parent")
+            final_node_id_by_ref.get(child_ref).copied().ok_or(
+                MastForestBuilderError::MissingFinalChild {
+                    node_ref,
+                    node_kind,
+                    child_ref: *child_ref,
+                },
+            )
         })
-        .collect::<Vec<_>>()
+        .collect::<Result<Vec<_>, MastForestBuilderError>>()?
         .try_into()
-        .unwrap_or_else(|_| panic!("{node_kind} node has an invalid child count"))
+        .map_err(|values: Vec<_>| MastForestBuilderError::InvalidChildCount {
+            node_ref,
+            node_kind,
+            expected: N,
+            actual: values.len(),
+        })
 }
 
 fn final_decorator_ids_from_refs(
+    node_ref: MastNodeRef,
     decorator_refs: &[DecoratorRef],
     final_decorator_id_by_ref: &BTreeMap<DecoratorRef, DecoratorId>,
-) -> Vec<DecoratorId> {
+) -> Result<Vec<DecoratorId>, MastForestBuilderError> {
     decorator_refs
         .iter()
         .map(|decorator_ref| {
-            *final_decorator_id_by_ref
-                .get(decorator_ref)
-                .expect("pending node decorators must be finalized before their node")
+            final_decorator_id_by_ref.get(decorator_ref).copied().ok_or(
+                MastForestBuilderError::MissingFinalDecorator {
+                    node_ref,
+                    decorator_ref: *decorator_ref,
+                },
+            )
         })
         .collect()
 }
 
 fn final_indexed_decorator_ids_from_refs(
+    node_ref: MastNodeRef,
     decorator_refs: &[(usize, DecoratorRef)],
     final_decorator_id_by_ref: &BTreeMap<DecoratorRef, DecoratorId>,
-) -> DecoratorList {
+) -> Result<DecoratorList, MastForestBuilderError> {
     decorator_refs
         .iter()
         .map(|(op_idx, decorator_ref)| {
-            let decorator_id = *final_decorator_id_by_ref
-                .get(decorator_ref)
-                .expect("pending node decorators must be finalized before their node");
-            (*op_idx, decorator_id)
+            let decorator_id = *final_decorator_id_by_ref.get(decorator_ref).ok_or(
+                MastForestBuilderError::MissingFinalDecorator {
+                    node_ref,
+                    decorator_ref: *decorator_ref,
+                },
+            )?;
+            Ok((*op_idx, decorator_id))
         })
         .collect()
 }
@@ -2142,7 +2297,7 @@ mod tests {
 
         assert_eq!(merged_blocks.len(), 1);
         let merged_block_ref = merged_blocks[0];
-        let (forest, remapping) = builder.build().into_parts();
+        let (forest, remapping) = builder.build().unwrap().into_parts();
         let merged_block_id = remapping[&merged_block_ref];
         let merged_block = forest[merged_block_id].unwrap_basic_block();
 
@@ -2191,7 +2346,7 @@ mod tests {
 
         assert_eq!(merged_blocks.len(), 1);
         let merged_block_ref = merged_blocks[0];
-        let (forest, remapping) = builder.build().into_parts();
+        let (forest, remapping) = builder.build().unwrap().into_parts();
         let merged_block_id = remapping[&merged_block_ref];
         let merged_block = forest[merged_block_id].unwrap_basic_block();
         let decorator_traces = merged_block
@@ -2262,7 +2417,7 @@ mod tests {
         assert_eq!(merged_blocks.len(), 1);
         assert_ne!(merged_blocks[0], root_block_ref);
 
-        let (forest, remapping) = builder.build().into_parts();
+        let (forest, remapping) = builder.build().unwrap().into_parts();
         let final_root_id = remapping[&root_block_ref];
 
         assert!(forest.is_procedure_root(final_root_id));
@@ -2291,7 +2446,7 @@ mod tests {
         ];
         expected_external_refs.sort_by_key(|(_, fingerprint)| *fingerprint);
 
-        let (forest, remapping) = builder.build().into_parts();
+        let (forest, remapping) = builder.build().unwrap().into_parts();
 
         assert_eq!(remapping[&expected_external_refs[0].0], MastNodeId::new_unchecked(0));
         assert_eq!(remapping[&expected_external_refs[1].0], MastNodeId::new_unchecked(1));
@@ -2359,7 +2514,7 @@ mod tests {
             builder.append_before_enter_refs(loop_ref, vec![third_decorator_ref]).unwrap();
         builder.record_procedure_root_ref(loop_ref);
 
-        let (forest, remapping) = builder.build().into_parts();
+        let (forest, remapping) = builder.build().unwrap().into_parts();
 
         assert_eq!(before_enter_traces(&forest, remapping[&split_ref]), vec![10, 20]);
         assert_eq!(after_exit_traces(&forest, remapping[&split_ref]), vec![30]);
@@ -2421,7 +2576,7 @@ mod tests {
 
         assert_ne!(cloned_ref, block_ref);
 
-        let (forest, remapping) = builder.build().into_parts();
+        let (forest, remapping) = builder.build().unwrap().into_parts();
         let final_cloned_id = remapping[&cloned_ref];
 
         let cloned_vars = forest.debug_info().debug_vars_for_node(final_cloned_id);
@@ -2442,7 +2597,7 @@ mod tests {
             builder.append_before_enter_refs(block_ref, vec![decorator_ref]).unwrap();
         builder.record_procedure_root_ref(decorated_ref);
 
-        let (_forest, remapping) = builder.build().into_parts();
+        let (_forest, remapping) = builder.build().unwrap().into_parts();
         assert!(remapping.contains_key(&decorated_ref));
         assert!(!remapping.contains_key(&block_ref));
     }
@@ -2496,7 +2651,7 @@ mod tests {
 
         assert_ne!(cloned_a_ref, cloned_b_ref, "different debug vars must prevent dedup");
 
-        let (forest, remapping) = builder.build().into_parts();
+        let (forest, remapping) = builder.build().unwrap().into_parts();
         let final_cloned_a = remapping[&cloned_a_ref];
         let final_cloned_b = remapping[&cloned_b_ref];
         let vars_a = forest.debug_info().debug_vars_for_node(final_cloned_a);
@@ -2573,7 +2728,7 @@ mod tests {
             )
             .unwrap();
 
-        let (forest, remapping) = builder.build().into_parts();
+        let (forest, remapping) = builder.build().unwrap().into_parts();
         let final_block_id = remapping[&block_ref];
         let vars = forest.debug_info().debug_vars_for_node(final_block_id);
 
@@ -2618,7 +2773,7 @@ mod tests {
             "same op stream plus different AssemblyOp payload must not dedup"
         );
 
-        let (forest, remapping) = builder.build().into_parts();
+        let (forest, remapping) = builder.build().unwrap().into_parts();
         let final_block_a = remapping[&block_a_ref];
         let final_block_b = remapping[&block_b_ref];
         assert_eq!(
@@ -2659,7 +2814,7 @@ mod tests {
             "same-structure non-block nodes with different AssemblyOps must not dedup"
         );
 
-        let (forest, remapping) = builder.build().into_parts();
+        let (forest, remapping) = builder.build().unwrap().into_parts();
         let final_call_a = remapping[&call_a_ref];
         let final_call_b = remapping[&call_b_ref];
         assert_eq!(
@@ -2700,7 +2855,7 @@ mod tests {
 
         assert_ne!(cloned_ref, block_ref);
 
-        let (forest, remapping) = builder.build().into_parts();
+        let (forest, remapping) = builder.build().unwrap().into_parts();
         let final_cloned_id = remapping[&cloned_ref];
 
         assert_eq!(
@@ -2787,7 +2942,7 @@ mod tests {
             "statically linked nodes must not alias local nodes with different metadata"
         );
 
-        let (forest, remapping) = builder.build().into_parts();
+        let (forest, remapping) = builder.build().unwrap().into_parts();
         let final_copied_block_id = remapping[&copied_block_ref];
         let final_local_block_id = remapping[&local_block_ref];
         assert_eq!(
@@ -2842,7 +2997,7 @@ mod tests {
             .unwrap();
         record_test_root(&mut source_builder, static_block_ref);
 
-        let (static_forest, source_remapping) = source_builder.build().into_parts();
+        let (static_forest, source_remapping) = source_builder.build().unwrap().into_parts();
         let final_static_block = source_remapping[&static_block_ref];
         let expected_padded_idx =
             static_forest.debug_info().asm_ops_for_node(final_static_block)[0].0;
@@ -2865,7 +3020,7 @@ mod tests {
             "copied padded blocks should dedup with equivalent local blocks",
         );
 
-        let (forest, remapping) = builder.build().into_parts();
+        let (forest, remapping) = builder.build().unwrap().into_parts();
         let final_block_id = remapping[&copied_block_ref];
 
         assert!(
@@ -2924,7 +3079,7 @@ mod tests {
         let merged_ref = merged[0];
         assert_ne!(merged_ref, root_block_ref);
 
-        let (forest, remapping) = builder.build().into_parts();
+        let (forest, remapping) = builder.build().unwrap().into_parts();
 
         // The root block survives removal (it's a procedure root).
         let final_root_id = remapping[&root_block_ref];
@@ -2977,7 +3132,7 @@ mod tests {
         record_test_root(&mut source_builder, alias_a_ref);
         record_test_root(&mut source_builder, alias_b_ref);
 
-        let (static_forest, source_remapping) = source_builder.build().into_parts();
+        let (static_forest, source_remapping) = source_builder.build().unwrap().into_parts();
         let final_alias_a = source_remapping[&alias_a_ref];
         let final_alias_b = source_remapping[&alias_b_ref];
         assert_eq!(static_forest[final_alias_a].digest(), static_forest[final_alias_b].digest());
@@ -3005,7 +3160,7 @@ mod tests {
                 )
                 .unwrap()
         };
-        let (exact_forest, exact_remapping) = exact_builder.build().into_parts();
+        let (exact_forest, exact_remapping) = exact_builder.build().unwrap().into_parts();
         let final_exact_alias_b = exact_remapping[&exact_alias_b_ref];
         assert_eq!(
             exact_forest
@@ -3054,7 +3209,7 @@ mod tests {
         record_test_root(&mut source_builder, alias_a_ref);
         record_test_root(&mut source_builder, alias_b_ref);
 
-        let (static_forest, source_remapping) = source_builder.build().into_parts();
+        let (static_forest, source_remapping) = source_builder.build().unwrap().into_parts();
         let final_alias_a = source_remapping[&alias_a_ref];
 
         let mut builder = MastForestBuilder::new([&static_forest]).unwrap();
@@ -3062,7 +3217,7 @@ mod tests {
             .ensure_external_link_with_source_ref(static_forest[final_alias_a].digest(), None, None)
             .unwrap();
         record_test_root(&mut builder, linked_ref);
-        let (forest, remapping) = builder.build().into_parts();
+        let (forest, remapping) = builder.build().unwrap().into_parts();
         let final_linked = remapping[&linked_ref];
 
         // Only one node should be in the forest — the selected alias.
@@ -3116,7 +3271,7 @@ mod tests {
             .unwrap();
         source_builder.record_procedure_root_ref(split_ref);
 
-        let (static_forest, source_remapping) = source_builder.build().into_parts();
+        let (static_forest, source_remapping) = source_builder.build().unwrap().into_parts();
         let static_split_id = source_remapping[&split_ref];
 
         let mut builder = MastForestBuilder::new([&static_forest]).unwrap();
@@ -3129,7 +3284,7 @@ mod tests {
             .unwrap();
         record_test_root(&mut builder, linked_ref);
 
-        let (forest, remapping) = builder.build().into_parts();
+        let (forest, remapping) = builder.build().unwrap().into_parts();
         let final_split_id = remapping[&linked_ref];
 
         assert_eq!(
@@ -3187,7 +3342,7 @@ mod tests {
         record_test_root(&mut source_builder, alias_a_ref);
         record_test_root(&mut source_builder, alias_b_ref);
 
-        let (static_forest, source_remapping) = source_builder.build().into_parts();
+        let (static_forest, source_remapping) = source_builder.build().unwrap().into_parts();
         let final_alias_a = source_remapping[&alias_a_ref];
         let final_alias_b = source_remapping[&alias_b_ref];
         assert_eq!(static_forest[final_alias_a].digest(), static_forest[final_alias_b].digest());
@@ -3214,7 +3369,7 @@ mod tests {
                 )
                 .unwrap()
         };
-        let (exact_forest, exact_remapping) = exact_builder.build().into_parts();
+        let (exact_forest, exact_remapping) = exact_builder.build().unwrap().into_parts();
         let final_exact_alias_b = exact_remapping[&exact_alias_b_ref];
 
         let mut provenance_builder = MastForestBuilder::new([&static_forest]).unwrap();
@@ -3225,7 +3380,7 @@ mod tests {
                 Some(final_alias_b),
             )
             .unwrap();
-        let (linked_forest, linked_remapping) = provenance_builder.build().into_parts();
+        let (linked_forest, linked_remapping) = provenance_builder.build().unwrap().into_parts();
         let final_linked_alias_b = linked_remapping[&linked_alias_b_ref];
 
         assert_eq!(
