@@ -102,7 +102,7 @@ jobs:
       - name: Prepare artifact
         if: matrix.os == 'ubuntu-latest' && matrix.target == 'x86_64-unknown-linux-gnu'
         run: |
-          mv target/packages/core.masp core.masp
+          mv target/packages/miden-core.masp core.masp
       - name: Attest core.masp
         if: matrix.os == 'ubuntu-latest' && matrix.target == 'x86_64-unknown-linux-gnu'
         uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0

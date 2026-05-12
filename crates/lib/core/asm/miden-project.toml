@@ -1,5 +1,5 @@
 [package]
-name = "core"
+name = "miden-core"
 version = "0.22.0"
 
 [lib]
