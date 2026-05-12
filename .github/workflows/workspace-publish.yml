@@ -43,6 +43,7 @@ jobs:
     needs: [publish]
     name: upload pre-built miden-vm executable artifacts
     if: ${{ github.repository_owner == '0xMiden' }}
+    environment: release  # Optional: for enhanced security
     permissions:
       contents: write
       id-token: write
