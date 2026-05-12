@@ -747,7 +747,7 @@ pub fn mast_forest_and_kernel_strategy(
 
 /// Builds an executable `(MastForest, Kernel)` pair from the provided seeds.
 ///
-/// TODO: externals + syscalls, and kernel finalisation.
+/// TODO: syscalls and kernel finalisation.
 fn build_executable_forest(
     seeds: ForestSeeds,
     params: &MastForestParams,
@@ -763,7 +763,7 @@ fn build_executable_forest(
         loop_indices,
         call_indices,
         syscall_picks: _,
-        external_picks: _,
+        external_picks,
         dyn_selectors: _,
         kernel_inclusion: _,
         root_selection,
@@ -842,7 +842,6 @@ fn build_executable_forest(
         }
     }
 
-    // TODO: wire RootPool to support acyclicity filtering for externals.
     let mut root_ids: Vec<MastNodeId> = Vec::new();
     for (i, &id) in all_node_ids.iter().enumerate() {
         if root_selection.get(i).copied().unwrap_or(false) {
@@ -856,6 +855,33 @@ fn build_executable_forest(
         let fallback = basic_block_ids[0];
         forest.make_root(fallback);
         root_ids.push(fallback);
+    }
+
+    // Add external nodes. Each external's digest must equal a procedure root already in the
+    // forest, and the external call graph must remain acyclic.
+    for pick in external_picks {
+        if root_ids.is_empty() {
+            break;
+        }
+
+        let idx = match pick {
+            ExternalPick::FromRoot(raw) => raw,
+            ExternalPick::Random(_) => continue,
+        };
+
+        // External nodes are leaves — they have no children — so they cannot create a cycle
+        // by themselves. The acyclicity concern is about the *containing* procedure root
+        // referencing a target root that transitively reaches back. Since we only pick from
+        // existing roots and the external is a new leaf, all current roots are eligible.
+        let target_id = root_ids[idx % root_ids.len()];
+        let target_digest = forest.get_node_by_id(target_id).unwrap().digest();
+
+        let ext_id = ExternalNodeBuilder::new(target_digest)
+            .add_to_forest(&mut forest)
+            .expect("Failed to add external node");
+
+        forest.make_root(ext_id);
+        root_ids.push(ext_id);
     }
 
     (forest, Kernel::default())
