@@ -4595,8 +4595,6 @@ fn mast_builder_acceptance_corpus() -> TestResult {
 fn append_program_acceptance_summary(output: &mut String, case_name: &str, program: &Program) {
     let forest = program.mast_forest();
     let debug_info = forest.debug_info();
-    let serialized_program_len = program.to_bytes().len();
-    let serialized_forest_len = forest.to_bytes().len();
 
     writeln!(output, "=== {case_name} ===").unwrap();
     writeln!(output, "program_hash={:?}", program.hash()).unwrap();
@@ -4604,8 +4602,6 @@ fn append_program_acceptance_summary(output: &mut String, case_name: &str, progr
     writeln!(output, "num_procedures={}", program.num_procedures()).unwrap();
     writeln!(output, "num_nodes={}", forest.num_nodes()).unwrap();
     writeln!(output, "forest_commitment={:?}", forest.commitment()).unwrap();
-    writeln!(output, "serialized_program_len={serialized_program_len}").unwrap();
-    writeln!(output, "serialized_forest_len={serialized_forest_len}").unwrap();
 
     let roots = forest
         .procedure_roots()
@@ -4613,10 +4609,11 @@ fn append_program_acceptance_summary(output: &mut String, case_name: &str, progr
         .map(|&node_id| u32::from(node_id))
         .collect::<Vec<_>>();
     let procedure_digests = forest.procedure_digests().collect::<Vec<_>>();
-    let node_digests = forest.nodes().iter().map(MastNodeExt::digest).collect::<Vec<_>>();
+    let mut node_digests = forest.nodes().iter().map(MastNodeExt::digest).collect::<Vec<_>>();
+    node_digests.sort();
     writeln!(output, "roots={roots:?}").unwrap();
     writeln!(output, "procedure_digests={procedure_digests:?}").unwrap();
-    writeln!(output, "node_digests={node_digests:?}").unwrap();
+    writeln!(output, "node_digest_multiset={node_digests:?}").unwrap();
 
     writeln!(
         output,
@@ -4628,57 +4625,84 @@ fn append_program_acceptance_summary(output: &mut String, case_name: &str, progr
     )
     .unwrap();
 
-    let decorators = debug_info
+    let mut decorators = debug_info
         .decorators()
         .iter()
         .map(|decorator| format!("{decorator:?}"))
         .collect::<Vec<_>>();
-    let asm_ops = debug_info
-        .asm_ops()
-        .iter()
-        .map(|asm_op| {
-            format!(
-                "{}:{}:{}:loc={}",
-                asm_op.context_name(),
-                asm_op.op(),
-                asm_op.num_cycles(),
-                asm_op.location().is_some(),
-            )
-        })
-        .collect::<Vec<_>>();
-    let debug_vars = debug_info.debug_vars().iter().map(ToString::to_string).collect::<Vec<_>>();
+    decorators.sort();
+    let mut asm_ops = debug_info.asm_ops().iter().map(format_asm_op).collect::<Vec<_>>();
+    asm_ops.sort();
+    let mut debug_vars =
+        debug_info.debug_vars().iter().map(ToString::to_string).collect::<Vec<_>>();
+    debug_vars.sort();
     writeln!(output, "decorators={decorators:?}").unwrap();
     writeln!(output, "asm_ops={asm_ops:?}").unwrap();
     writeln!(output, "debug_vars={debug_vars:?}").unwrap();
 
+    let mut node_metadata_lines = Vec::new();
     for node_idx in 0..forest.num_nodes() {
         let node_id = MastNodeId::new_unchecked(node_idx);
+        let node_digest = forest[node_id].digest();
         let before_enter = forest
             .before_enter_decorators(node_id)
             .iter()
-            .map(|&decorator_id| u32::from(decorator_id))
+            .map(|&decorator_id| {
+                format!(
+                    "{:?}",
+                    debug_info.decorator(decorator_id).expect("decorator ID must resolve")
+                )
+            })
             .collect::<Vec<_>>();
         let after_exit = forest
             .after_exit_decorators(node_id)
             .iter()
-            .map(|&decorator_id| u32::from(decorator_id))
+            .map(|&decorator_id| {
+                format!(
+                    "{:?}",
+                    debug_info.decorator(decorator_id).expect("decorator ID must resolve")
+                )
+            })
             .collect::<Vec<_>>();
         let indexed_decorators = match &forest[node_id] {
             MastNode::Block(block) => block
                 .indexed_decorator_iter(forest)
-                .map(|(op_idx, decorator_id)| (op_idx, u32::from(decorator_id)))
+                .map(|(op_idx, decorator_id)| {
+                    (
+                        op_idx,
+                        format!(
+                            "{:?}",
+                            debug_info.decorator(decorator_id).expect("decorator ID must resolve")
+                        ),
+                    )
+                })
                 .collect::<Vec<_>>(),
             _ => Vec::new(),
         };
         let asm_op_links = debug_info
             .asm_ops_for_node(node_id)
             .into_iter()
-            .map(|(op_idx, asm_op_id)| (op_idx, u32::from(asm_op_id)))
+            .map(|(op_idx, asm_op_id)| {
+                (
+                    op_idx,
+                    format_asm_op(
+                        debug_info.asm_op(asm_op_id).expect("AssemblyOp ID must resolve"),
+                    ),
+                )
+            })
             .collect::<Vec<_>>();
         let debug_var_links = debug_info
             .debug_vars_for_node(node_id)
             .into_iter()
-            .map(|(op_idx, debug_var_id)| (op_idx, u32::from(debug_var_id)))
+            .map(|(op_idx, debug_var_id)| {
+                (
+                    op_idx,
+                    debug_info
+                        .debug_var(debug_var_id)
+                        .expect("debug variable ID must resolve")
+                        .to_string(),
+                )
+            })
             .collect::<Vec<_>>();
 
         if !before_enter.is_empty()
@@ -4687,13 +4711,25 @@ fn append_program_acceptance_summary(output: &mut String, case_name: &str, progr
             || !asm_op_links.is_empty()
             || !debug_var_links.is_empty()
         {
-            writeln!(
-                output,
-                "node[{node_idx}]=before:{before_enter:?} after:{after_exit:?} indexed:{indexed_decorators:?} asm:{asm_op_links:?} debug:{debug_var_links:?}",
-            )
-            .unwrap();
+            node_metadata_lines.push(format!(
+                "node[{node_digest:?}]=before:{before_enter:?} after:{after_exit:?} indexed:{indexed_decorators:?} asm:{asm_op_links:?} debug:{debug_var_links:?}",
+            ));
         }
     }
+    node_metadata_lines.sort();
+    for line in node_metadata_lines {
+        writeln!(output, "{line}").unwrap();
+    }
+}
+
+fn format_asm_op(asm_op: &miden_core::operations::AssemblyOp) -> String {
+    format!(
+        "{}:{}:{}:loc={}",
+        asm_op.context_name(),
+        asm_op.op(),
+        asm_op.num_cycles(),
+        asm_op.location().is_some(),
+    )
 }
 
 #[test]
