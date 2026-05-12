@@ -13,11 +13,7 @@ on:
       - "Makefile"
   workflow_dispatch:
 
-# Sets permissions of the GITHUB_TOKEN to allow deployment to GitHub Pages
-permissions:
-  contents: write
-  pages: write
-  id-token: write
+permissions: {}
 
 # Allow only one concurrent deployment, skipping runs queued between the run in-progress and latest queued
 concurrency:
@@ -28,6 +24,10 @@ jobs:
   docs:
     name: Generate and deploy crate documentation
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

@@ -4,14 +4,15 @@ on:
   release:
     types: [published]
 
-permissions:
-  contents: read
-  id-token: write  # Required for OIDC token exchange
+permissions: {}
 
 jobs:
   publish:
     if: ${{ github.repository_owner == '0xMiden' }}
     runs-on: warp-ubuntu-latest-x64-8x
+    permissions:
+      contents: read
+      id-token: write
     environment: release  # Optional: for enhanced security
 
     steps:
