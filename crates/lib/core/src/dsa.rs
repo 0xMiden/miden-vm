@@ -117,15 +117,14 @@ pub mod falcon512_poseidon2 {
     };
 
     /// Signs the provided message with the provided secret key and returns the resulting signature
-    /// encoded in the format required by the `falcon512_poseidon2::verify` procedure, or `None` if
-    /// the secret key is malformed due to either incorrect length or failed decoding.
+    /// encoded in the format required by the `falcon512_poseidon2::verify` procedure
     ///
     /// This is equivalent to calling [`encode_signature`] on the result of signing the message.
     ///
     /// See [`encode_signature`] for the encoding format.
-    pub fn sign(sk: &SecretKey, msg: Word) -> Option<Vec<Felt>> {
+    pub fn sign(sk: &SecretKey, msg: Word) -> Vec<Felt> {
         let sig = sk.sign(msg);
-        Some(encode_signature(sig.public_key(), &sig))
+        encode_signature(sig.public_key(), &sig)
     }
 
     /// Encodes the provided Falcon public key and signature into a vector of field elements in the

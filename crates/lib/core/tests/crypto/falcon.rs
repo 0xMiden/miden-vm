@@ -85,8 +85,7 @@ pub fn push_falcon_signature(process: &ProcessorState) -> Result<Vec<AdviceMutat
     let sk = SecretKey::read_from_bytes(&sk_bytes)
         .map_err(|_| FalconError::MalformedSignatureKey { key_type: "Poseidon2 Falcon512" })?;
 
-    let signature_result = falcon512_poseidon2::sign(&sk, msg)
-        .ok_or(FalconError::MalformedSignatureKey { key_type: "Poseidon2 Falcon512" })?;
+    let signature_result = falcon512_poseidon2::sign(&sk, msg);
 
     Ok(vec![AdviceMutation::extend_stack(signature_result)])
 }
@@ -273,7 +272,7 @@ fn test_move_sig_to_adv_stack() {
     let advice_map: Vec<(Word, Vec<Felt>)> = {
         let sig_key = Poseidon2::merge(&[public_key, message]);
         let signature =
-            falcon512_poseidon2::sign(&secret_key, message).expect("failed to sign message");
+        falcon512_poseidon2::sign(&secret_key, message);
 
         vec![(sig_key, signature)]
     };
