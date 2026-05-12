@@ -1,7 +1,8 @@
 use alloc::{sync::Arc, vec::Vec};
 
 use miden_core::{
-    Word,
+    Felt, Word,
+    deferred::{DeferredError, DeferredTag, Payload, TagKind},
     events::{EventId, EventName},
     mast::MastForest,
     operations::DebugOptions,
@@ -14,7 +15,12 @@ use super::{
 };
 use crate::{
     BaseHost, DebugError, DebugHandler, ExecutionError, MastForestStore, MemMastForestStore,
-    ProcessorState, SyncHost, TraceError, advice::AdviceMutation,
+    ProcessorState, SyncHost, TraceError,
+    advice::AdviceMutation,
+    deferred::{
+        DeferredState, EVENT_ASSERT_EQ, EVENT_REGISTER_LEAF, EVENT_REGISTER_OP, Field0Handler,
+        TypeHandlerRegistry, assert_eq as deferred_assert_eq, register_node,
+    },
 };
 
 // DEFAULT HOST IMPLEMENTATION
@@ -30,15 +36,47 @@ pub struct DefaultHost<
     event_handlers: EventHandlerRegistry,
     debug_handler: D,
     source_manager: Arc<S>,
+    deferred_state: DeferredState,
+    deferred_registry: TypeHandlerRegistry,
+    deferred_event_ids: DeferredEventIds,
+}
+
+/// Cached event IDs for the three deferred system events. Computed once at host construction
+/// so [`DefaultHost::on_event`] can fast-path the intercept check.
+#[derive(Debug, Clone, Copy)]
+struct DeferredEventIds {
+    register_leaf: EventId,
+    register_op: EventId,
+    assert_eq: EventId,
+}
+
+impl DeferredEventIds {
+    fn new() -> Self {
+        Self {
+            register_leaf: EventId::from_name(EVENT_REGISTER_LEAF),
+            register_op: EventId::from_name(EVENT_REGISTER_OP),
+            assert_eq: EventId::from_name(EVENT_ASSERT_EQ),
+        }
+    }
 }
 
 impl Default for DefaultHost {
     fn default() -> Self {
+        let mut deferred_registry = TypeHandlerRegistry::new();
+        // Registering Field0Handler can only fail on a duplicate prefix, which is impossible
+        // on a fresh registry — unwrap is sound here.
+        deferred_registry
+            .register(Arc::new(Field0Handler))
+            .expect("Field0Handler registration on empty registry");
+
         Self {
             store: MemMastForestStore::default(),
             event_handlers: EventHandlerRegistry::default(),
             debug_handler: DefaultDebugHandler::default(),
             source_manager: Arc::new(DefaultSourceManager::default()),
+            deferred_state: DeferredState::new(),
+            deferred_registry,
+            deferred_event_ids: DeferredEventIds::new(),
         }
     }
 }
@@ -59,6 +97,9 @@ where
             event_handlers: self.event_handlers,
             debug_handler: self.debug_handler,
             source_manager,
+            deferred_state: self.deferred_state,
+            deferred_registry: self.deferred_registry,
+            deferred_event_ids: self.deferred_event_ids,
         }
     }
 
@@ -114,6 +155,9 @@ where
             event_handlers: self.event_handlers,
             debug_handler: handler,
             source_manager: self.source_manager,
+            deferred_state: self.deferred_state,
+            deferred_registry: self.deferred_registry,
+            deferred_event_ids: self.deferred_event_ids,
         }
     }
 
@@ -121,6 +165,12 @@ where
     /// emitted during a program execution.
     pub fn debug_handler(&self) -> &D {
         &self.debug_handler
+    }
+
+    /// Returns a read-only view of the deferred-DAG state populated by the three deferred
+    /// system events.
+    pub fn deferred_state(&self) -> &DeferredState {
+        &self.deferred_state
     }
 }
 
@@ -169,6 +219,22 @@ where
         process: &ProcessorState<'_>,
     ) -> Result<Vec<AdviceMutation>, EventError> {
         let event_id = EventId::from_felt(process.get_stack_item(0));
+
+        // Intercept the three deferred system events. We bypass EventHandlerRegistry here
+        // because EventHandler::on_event takes &self, which would force the deferred state and
+        // type-handler registry behind interior-mutability primitives that aren't available in
+        // no_std. The plan flagged this contingency; mirrors how the VM intercepts SystemEvents.
+        let ids = self.deferred_event_ids;
+        if event_id == ids.register_leaf {
+            return self.handle_register_node(process, TagKind::Leaf);
+        }
+        if event_id == ids.register_op {
+            return self.handle_register_node(process, TagKind::BinaryOp);
+        }
+        if event_id == ids.assert_eq {
+            return self.handle_assert_eq(process);
+        }
+
         match self.event_handlers.handle_event(event_id, process) {
             Ok(Some(mutations)) => Ok(mutations),
             Ok(None) => {
@@ -181,6 +247,78 @@ where
             Err(e) => Err(e),
         }
     }
+}
+
+// DEFERRED EVENT DISPATCH HELPERS
+// ================================================================================================
+
+impl<D, S> DefaultHost<D, S>
+where
+    D: DebugHandler,
+    S: SourceManager,
+{
+    fn handle_register_node(
+        &mut self,
+        process: &ProcessorState<'_>,
+        expected_kind: TagKind,
+    ) -> Result<Vec<AdviceMutation>, EventError> {
+        let tag = read_tag(process, 1)?;
+        let payload = read_payload(process, 5);
+
+        let digest = register_node(
+            &mut self.deferred_state,
+            &self.deferred_registry,
+            tag,
+            payload,
+            expected_kind,
+        )
+        .map_err(deferred_error_to_event_error)?;
+
+        // Push the digest onto the advice stack so MASM can read it back and check that the
+        // host-computed hash matches its own hperm.
+        Ok(vec![AdviceMutation::extend_stack(digest.as_elements().iter().copied())])
+    }
+
+    fn handle_assert_eq(
+        &mut self,
+        process: &ProcessorState<'_>,
+    ) -> Result<Vec<AdviceMutation>, EventError> {
+        let tag = read_tag(process, 1)?;
+        let lhs_digest = read_digest(process, 5);
+        let rhs_digest = read_digest(process, 9);
+
+        deferred_assert_eq(
+            &mut self.deferred_state,
+            &self.deferred_registry,
+            tag,
+            lhs_digest,
+            rhs_digest,
+        )
+        .map_err(deferred_error_to_event_error)?;
+        Ok(Vec::new())
+    }
+}
+
+fn read_tag(process: &ProcessorState<'_>, start: usize) -> Result<DeferredTag, EventError> {
+    let felts: [Felt; 4] = core::array::from_fn(|i| process.get_stack_item(start + i));
+    DeferredTag::from_felts(felts).map_err(deferred_error_to_event_error)
+}
+
+fn read_payload(process: &ProcessorState<'_>, start: usize) -> Payload {
+    let felts: [Felt; 8] = core::array::from_fn(|i| process.get_stack_item(start + i));
+    Payload::new(felts)
+}
+
+fn read_digest(process: &ProcessorState<'_>, start: usize) -> Word {
+    let felts: [Felt; 4] = core::array::from_fn(|i| process.get_stack_item(start + i));
+    Word::new(felts)
+}
+
+fn deferred_error_to_event_error(err: DeferredError) -> EventError {
+    #[derive(Debug, thiserror::Error)]
+    #[error("deferred event failed: {0:?}")]
+    struct Wrapped(DeferredError);
+    Wrapped(err).into()
 }
 
 // NOOPHOST

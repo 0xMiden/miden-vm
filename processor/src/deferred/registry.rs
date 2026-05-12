@@ -1,4 +1,5 @@
-use alloc::{collections::BTreeMap, sync::Arc};
+use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
+use core::fmt;
 
 use miden_core::{Felt, deferred::DeferredError};
 
@@ -40,6 +41,13 @@ impl TypeHandlerRegistry {
 
     pub fn contains(&self, prefix: [Felt; 2]) -> bool {
         self.by_prefix.contains_key(&prefix)
+    }
+}
+
+impl fmt::Debug for TypeHandlerRegistry {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let prefixes: Vec<_> = self.by_prefix.keys().collect();
+        f.debug_struct("TypeHandlerRegistry").field("prefixes", &prefixes).finish()
     }
 }
 
