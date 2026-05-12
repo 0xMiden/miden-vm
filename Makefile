@@ -243,7 +243,7 @@ exec-info: ## Builds an executable with log tree enabled
 .PHONY: exec-dist
 exec-dist: ## Builds the CLI for $(BUILD_TARGET) with --locked (for release artifact uploads)
 # NOTE: the resulting binary is stores in target/<$(BUILD_TARGET)>/optimized/
-	cargo build --profile optimized $(FEATURES_CONCURRENT_EXEC) --target $(BUILD_TARGET) --locked
+	cargo build -p miden-vm --bin miden-vm --profile optimized $(FEATURES_CONCURRENT_EXEC) --target $(BUILD_TARGET) --locked
 
 .PHONY: packages
 packages: ## Builds .masp packages and store them in target/packages
