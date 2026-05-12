@@ -280,7 +280,7 @@ impl Memory {
                     };
 
                     let (delta_hi, delta_lo) = split_u32_into_u16(delta);
-                    range.add_range_checks(row, &[delta_lo, delta_hi]);
+                    range.add_range_checks(&[delta_lo, delta_hi]);
 
                     // word index decomposition range checks: prove addr is a valid 32-bit value
                     // by checking w0, w1, and 4*w1 are all in [0, 2^16).
