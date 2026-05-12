@@ -29,7 +29,7 @@ use alloc::{
 use miden_assembly_syntax::ast::{AttributeSet, PathBuf};
 use miden_core::{
     Word,
-    mast::{MastForest, MastNodeId, UntrustedMastForest},
+    mast::{MastForest, MastNodeExt, MastNodeId, UntrustedMastForest},
     serde::{
         BudgetedReader, ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
         SliceReader,
@@ -497,6 +497,14 @@ impl ProcedureExport {
             None
         };
         let digest = Word::read_from(source)?;
+        // Ensure that the digest associated with `node` matches the provided digest
+        if let Some(node) = node
+            && digest != mast[node].digest()
+        {
+            return Err(DeserializationError::InvalidValue(
+                ManifestValidationError::InvalidProcedureExport { path }.to_string(),
+            ));
+        }
         let signature = if source.read_bool()? {
             Some(FunctionType::read_from(source)?)
         } else {
