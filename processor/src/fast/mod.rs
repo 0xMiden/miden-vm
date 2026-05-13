@@ -20,6 +20,7 @@ use crate::{
     ProcessorState,
     advice::AdviceError,
     continuation_stack::{Continuation, ContinuationStack},
+    deferred::TypeHandlerRegistry,
     errors::MapExecErrNoCtx,
     tracer::{OperationHelperRegisters, Tracer},
 };
@@ -142,6 +143,11 @@ pub struct FastProcessor {
     /// Poseidon2 sponge).
     pc_transcript: PrecompileTranscript,
 
+    /// Registry of per-value-type handlers used by the deferred-DAG system events. The registry
+    /// is read-only during execution and shared via `Arc` so it can be cloned cheaply into nested
+    /// contexts.
+    deferred_registry: Arc<TypeHandlerRegistry>,
+
     /// Tracks decorator retrieval calls for testing.
     #[cfg(test)]
     pub decorator_retrieval_count: Rc<Cell<usize>>,
@@ -261,6 +267,16 @@ impl FastProcessor {
         self
     }
 
+    /// Installs a [`TypeHandlerRegistry`] used by the deferred-DAG system events.
+    ///
+    /// The default registry is empty; programs that emit `SystemEvent::DeferredRegister*` or
+    /// `SystemEvent::DeferredAssertEq` must install a registry that resolves the value-type tags
+    /// they use, otherwise registration will fail with `DeferredError::UnknownTypePrefix`.
+    pub fn with_deferred_registry(mut self, registry: Arc<TypeHandlerRegistry>) -> Self {
+        self.deferred_registry = registry;
+        self
+    }
+
     /// Constructor for creating a `FastProcessor` with all options specified at once.
     ///
     /// For a more fluent API, consider using `FastProcessor::new()` with builder methods.
@@ -295,6 +311,7 @@ impl FastProcessor {
             call_stack: Vec::new(),
             options,
             pc_transcript: PrecompileTranscript::new(),
+            deferred_registry: Arc::new(TypeHandlerRegistry::new()),
             #[cfg(test)]
             decorator_retrieval_count: Rc::new(Cell::new(0)),
         })
@@ -323,6 +340,12 @@ impl FastProcessor {
     #[inline(always)]
     pub fn in_debug_mode(&self) -> bool {
         self.options.enable_debugging()
+    }
+
+    /// Returns the deferred-DAG type-handler registry.
+    #[inline(always)]
+    pub fn deferred_registry(&self) -> &TypeHandlerRegistry {
+        &self.deferred_registry
     }
 
     /// Returns true if decorators should be executed.
