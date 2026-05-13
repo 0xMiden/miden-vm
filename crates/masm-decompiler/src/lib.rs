@@ -8,7 +8,7 @@ mod symbol;
 mod types;
 
 #[doc(hidden)]
-pub use callgraph::{CallGraph, ProcNode};
+pub use callgraph::CallGraph;
 #[doc(hidden)]
 pub use frontend::{LibraryRoot, Program, Workspace};
 #[doc(hidden)]
