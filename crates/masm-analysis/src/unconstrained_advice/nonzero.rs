@@ -2,13 +2,15 @@
 
 use std::collections::BTreeSet;
 
-use masm_decompiler::{BinOp, Expr, Intrinsic, Stmt, SymbolPath, UnOp, Var};
+use masm_decompiler::{
+    BinOp, Expr, Intrinsic, Stmt, SymbolPath, UnOp, Var, intrinsic_nonzero_arg_index,
+};
 
 use super::{
     domain::AdviceFact,
     shared::{
         Env, collect_expr_sink_fact, expr_is_proven_nonzero, expr_output_fact,
-        intrinsic_nonzero_arg_index, refine_nonzero_from_intrinsic, stmt_span,
+        refine_nonzero_from_intrinsic, stmt_span,
     },
     summary::{AdviceDiagnosticContext, AdviceDiagnosticsMap, AdviceSummary, AdviceSummaryMap},
     walker::{self, AdviceCapability, AdviceEffect},
