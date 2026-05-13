@@ -12,6 +12,79 @@ use crate::{
     symbol::resolution::SymbolResolver,
 };
 
+/// Require the stack to have at least the given depth without synthesizing slots.
+fn require_slot_depth(
+    slots: &[SlotId],
+    required_depth: usize,
+    span: SourceSpan,
+    operation: String,
+) -> LiftingResult<()> {
+    let actual_depth = slots.len();
+    if actual_depth < required_depth {
+        return Err(LiftingError::InsufficientStackDepth {
+            span,
+            operation,
+            required_depth,
+            actual_depth,
+        });
+    }
+    Ok(())
+}
+
+/// Swap the top slot with the slot at the given depth.
+fn swap_slot_at_depth(slots: &mut [SlotId], depth: usize) {
+    let len = slots.len();
+    if depth > 0 && depth < len {
+        let top_idx = len - 1;
+        let other_idx = len - 1 - depth;
+        slots.swap(top_idx, other_idx);
+    }
+}
+
+/// Swap the top word with a lower word.
+fn swap_word_at_index(slots: &mut [SlotId], word_index: usize) {
+    let len = slots.len();
+    let offset = word_index.saturating_mul(4);
+    if offset + 4 > len {
+        return;
+    }
+    for i in 0..4 {
+        let top_idx = len - 1 - i;
+        let other_idx = len - 1 - offset - i;
+        slots.swap(top_idx, other_idx);
+    }
+}
+
+/// Reverse the order of the top word.
+fn reverse_top_word(slots: &mut [SlotId]) {
+    let len = slots.len();
+    if len < 4 {
+        return;
+    }
+    slots.swap(len - 4, len - 1);
+    slots.swap(len - 3, len - 2);
+}
+
+/// Move the slot at the given depth to the top.
+fn movup_slot(slots: &mut Vec<SlotId>, depth: usize) {
+    let len = slots.len();
+    if depth > 0 && depth < len {
+        let idx = len - 1 - depth;
+        let slot = slots.remove(idx);
+        slots.push(slot);
+    }
+}
+
+/// Move the top slot down to the given depth.
+fn movdn_slot(slots: &mut Vec<SlotId>, depth: usize) {
+    let len = slots.len();
+    if depth > 0 && depth < len {
+        let slot = slots.pop().expect("slot stack underflow");
+        let idx = len - 1 - depth;
+        slots.insert(idx, slot);
+    }
+}
+
 /// Lightweight slot-only stack used for repeat-loop simulation.
 #[derive(Debug, Clone)]
 pub(super) struct SlotStack {
@@ -43,16 +116,7 @@ impl SlotStack {
         span: SourceSpan,
         operation: impl Into<String>,
     ) -> LiftingResult<()> {
-        let actual_depth = self.slots.len();
-        if actual_depth < required_depth {
-            return Err(LiftingError::InsufficientStackDepth {
-                span,
-                operation: operation.into(),
-                required_depth,
-                actual_depth,
-            });
-        }
-        Ok(())
+        require_slot_depth(&self.slots, required_depth, span, operation.into())
     }
 
     /// Allocate a fresh slot identifier.
@@ -75,12 +139,7 @@ impl SlotStack {
         operation: impl Into<String>,
     ) -> LiftingResult<()> {
         self.require_depth(depth + 1, span, operation)?;
-        let len = self.slots.len();
-        if depth > 0 && depth < len {
-            let top_idx = len - 1;
-            let other_idx = len - 1 - depth;
-            self.slots.swap(top_idx, other_idx);
-        }
+        swap_slot_at_depth(&mut self.slots, depth);
         Ok(())
     }
 
@@ -95,28 +154,14 @@ impl SlotStack {
             return Ok(());
         }
         self.require_depth((word_index + 1) * 4, span, operation)?;
-        let len = self.slots.len();
-        let offset = word_index.saturating_mul(4);
-        if offset + 4 > len {
-            return Ok(());
-        }
-        for i in 0..4 {
-            let top_idx = len - 1 - i;
-            let other_idx = len - 1 - offset - i;
-            self.slots.swap(top_idx, other_idx);
-        }
+        swap_word_at_index(&mut self.slots, word_index);
         Ok(())
     }
 
     /// Reverse the order of the top word.
     fn reversew(&mut self, span: SourceSpan, operation: impl Into<String>) -> LiftingResult<()> {
         self.require_depth(4, span, operation)?;
-        let len = self.slots.len();
-        if len < 4 {
-            return Ok(());
-        }
-        self.slots.swap(len - 4, len - 1);
-        self.slots.swap(len - 3, len - 2);
+        reverse_top_word(&mut self.slots);
         Ok(())
     }
 
@@ -128,12 +173,7 @@ impl SlotStack {
         operation: impl Into<String>,
     ) -> LiftingResult<()> {
         self.require_depth(depth + 1, span, operation)?;
-        let len = self.slots.len();
-        if depth > 0 && depth < len {
-            let idx = len - 1 - depth;
-            let slot = self.slots.remove(idx);
-            self.slots.push(slot);
-        }
+        movup_slot(&mut self.slots, depth);
         Ok(())
     }
 
@@ -145,12 +185,7 @@ impl SlotStack {
         operation: impl Into<String>,
     ) -> LiftingResult<()> {
         self.require_depth(depth + 1, span, operation)?;
-        let len = self.slots.len();
-        if depth > 0 && depth < len {
-            let slot = self.slots.pop().expect("slot stack underflow");
-            let idx = len - 1 - depth;
-            self.slots.insert(idx, slot);
-        }
+        movdn_slot(&mut self.slots, depth);
         Ok(())
     }
 
@@ -258,16 +293,7 @@ impl TaggedSlotStack {
         span: SourceSpan,
         operation: impl Into<String>,
     ) -> LiftingResult<()> {
-        let actual_depth = self.slots.len();
-        if actual_depth < required_depth {
-            return Err(LiftingError::InsufficientStackDepth {
-                span,
-                operation: operation.into(),
-                required_depth,
-                actual_depth,
-            });
-        }
-        Ok(())
+        require_slot_depth(&self.slots, required_depth, span, operation.into())
     }
 
     /// Allocate a fresh slot identifier.
@@ -290,12 +316,7 @@ impl TaggedSlotStack {
         operation: impl Into<String>,
     ) -> LiftingResult<()> {
         self.require_depth(depth + 1, span, operation)?;
-        let len = self.slots.len();
-        if depth > 0 && depth < len {
-            let top_idx = len - 1;
-            let other_idx = len - 1 - depth;
-            self.slots.swap(top_idx, other_idx);
-        }
+        swap_slot_at_depth(&mut self.slots, depth);
         Ok(())
     }
 
@@ -310,28 +331,14 @@ impl TaggedSlotStack {
             return Ok(());
         }
         self.require_depth((word_index + 1) * 4, span, operation)?;
-        let len = self.slots.len();
-        let offset = word_index.saturating_mul(4);
-        if offset + 4 > len {
-            return Ok(());
-        }
-        for i in 0..4 {
-            let top_idx = len - 1 - i;
-            let other_idx = len - 1 - offset - i;
-            self.slots.swap(top_idx, other_idx);
-        }
+        swap_word_at_index(&mut self.slots, word_index);
         Ok(())
     }
 
     /// Reverse the order of the top word.
     fn reversew(&mut self, span: SourceSpan, operation: impl Into<String>) -> LiftingResult<()> {
         self.require_depth(4, span, operation)?;
-        let len = self.slots.len();
-        if len < 4 {
-            return Ok(());
-        }
-        self.slots.swap(len - 4, len - 1);
-        self.slots.swap(len - 3, len - 2);
+        reverse_top_word(&mut self.slots);
         Ok(())
     }
 
@@ -343,12 +350,7 @@ impl TaggedSlotStack {
         operation: impl Into<String>,
     ) -> LiftingResult<()> {
         self.require_depth(depth + 1, span, operation)?;
-        let len = self.slots.len();
-        if depth > 0 && depth < len {
-            let idx = len - 1 - depth;
-            let slot = self.slots.remove(idx);
-            self.slots.push(slot);
-        }
+        movup_slot(&mut self.slots, depth);
         Ok(())
     }
 
@@ -360,12 +362,7 @@ impl TaggedSlotStack {
         operation: impl Into<String>,
     ) -> LiftingResult<()> {
         self.require_depth(depth + 1, span, operation)?;
-        let len = self.slots.len();
-        if depth > 0 && depth < len {
-            let slot = self.slots.pop().expect("slot stack underflow");
-            let idx = len - 1 - depth;
-            self.slots.insert(idx, slot);
-        }
+        movdn_slot(&mut self.slots, depth);
         Ok(())
     }
 
