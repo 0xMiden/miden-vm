@@ -91,6 +91,7 @@ extern {
         "cswap" => Token::Cswap,
         "cswapw" => Token::Cswapw,
         "debug" => Token::Debug,
+        "deferred_evaluate" => Token::DeferredEvaluate,
         "deferred_register" => Token::DeferredRegister,
         "div" => Token::Div,
         "drop" => Token::Drop,
@@ -1078,6 +1079,7 @@ SystemEvent: Instruction = {
     "adv" "." "has_mapkey" => Instruction::SysEvent(SystemEventNode::HasMapKey),
     "adv" "." "push_mtnode" => Instruction::SysEvent(SystemEventNode::PushMtNode),
     "deferred_register" => Instruction::DeferredEvent(DeferredEventNode::Register),
+    "deferred_evaluate" => Instruction::DeferredEvent(DeferredEventNode::Evaluate),
 }
 
 #[inline]
@@ -2151,6 +2153,7 @@ Opcode: &'static str = {
     "cswap" => "cswap",
     "cswapw" => "cswapw",
     "debug" => "debug",
+    "deferred_evaluate" => "deferred_evaluate",
     "deferred_register" => "deferred_register",
     "div" => "div",
     "drop" => "drop",

@@ -73,6 +73,7 @@ pub fn handle_system_event(
         SystemEvent::HqwordToMap => insert_hqword_into_adv_map(processor),
         SystemEvent::HpermToMap => insert_hperm_into_adv_map(processor),
         SystemEvent::DeferredRegister => handle_deferred_register(processor),
+        SystemEvent::DeferredEvaluate => handle_deferred_evaluate(processor),
     }
 }
 
@@ -572,7 +573,42 @@ fn handle_deferred_register(processor: &mut FastProcessor) -> Result<(), SystemE
     let payload = read_deferred_payload(processor, DEFERRED_PAYLOAD_OFFSET);
 
     let (state, schema) = processor.deferred_view_mut();
-    state.register(schema, tag, payload)?;
+    let _ = state.register(schema, tag, payload)?;
+    Ok(())
+}
+
+/// Handles `SystemEvent::DeferredEvaluate`. Reads the tag and payload off the operand stack,
+/// asks the schema to evaluate the node, and pushes the 12 felts of the canonical
+/// `(tag, payload)` onto the advice stack so MASM can consume them via the `adv_push*` family.
+///
+/// The advice stack is LIFO. Payload felts are pushed first (in reverse), then tag felts (in
+/// reverse), so the top of the advice stack is the tag's first felt — meaning an `adv_pushw`
+/// pulls the canonical tag back as a word.
+fn handle_deferred_evaluate(processor: &mut FastProcessor) -> Result<(), SystemEventError> {
+    let tag = read_deferred_tag(processor, DEFERRED_TAG_OFFSET);
+    let payload = read_deferred_payload(processor, DEFERRED_PAYLOAD_OFFSET);
+
+    let (state, schema) = processor.deferred_view_mut();
+    let canonical = state.evaluate(schema, tag, payload)?;
+
+    // Push deeper words first so the tag word ends up on top — matching the convention used
+    // by `copy_merkle_node_to_adv_stack` (push_stack_word handles the reverse-felt push so
+    // that an `adv_pushw` on the MASM side recovers the word in structural order).
+    let payload_hi = Word::new([
+        canonical.payload.0[4],
+        canonical.payload.0[5],
+        canonical.payload.0[6],
+        canonical.payload.0[7],
+    ]);
+    let payload_lo = Word::new([
+        canonical.payload.0[0],
+        canonical.payload.0[1],
+        canonical.payload.0[2],
+        canonical.payload.0[3],
+    ]);
+    processor.advice.push_stack_word(&payload_hi)?;
+    processor.advice.push_stack_word(&payload_lo)?;
+    processor.advice.push_stack_word(&Word::new(canonical.tag))?;
     Ok(())
 }
 

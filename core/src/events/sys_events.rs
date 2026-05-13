@@ -311,6 +311,22 @@ pub enum SystemEvent {
     ///   Operand stack: [event_id, TAG, PAYLOAD_LO, PAYLOAD_HI, ...] (unchanged)
     ///   DAG state:     {... node(TAG, PAYLOAD)}
     DeferredRegister,
+
+    /// Evaluates an opaque node `(tag, payload)` to its canonical form and pushes the result's
+    /// 12 felts (`tag || payload`) onto the advice stack.
+    ///
+    /// The schema's `is_valid` must classify the input as an expression. Children referenced
+    /// in the payload must already be registered in the DAG. The state is not mutated.
+    ///
+    /// Inputs:
+    ///   Operand stack: [event_id, TAG, PAYLOAD_LO, PAYLOAD_HI, ...]
+    ///   Advice stack:  [...]
+    ///
+    /// Outputs:
+    ///   Operand stack: [event_id, TAG, PAYLOAD_LO, PAYLOAD_HI, ...] (unchanged)
+    ///   Advice stack:  [CANONICAL_TAG, CANONICAL_PAYLOAD_LO, CANONICAL_PAYLOAD_HI, ...]
+    ///     (top of advice is `CANONICAL_TAG`)
+    DeferredEvaluate,
 }
 
 impl SystemEvent {
@@ -384,6 +400,7 @@ impl SystemEvent {
             Self::HqwordToMap,
             Self::HpermToMap,
             Self::DeferredRegister,
+            Self::DeferredEvaluate,
         ]
     }
 }
@@ -425,7 +442,7 @@ pub(crate) struct SystemEventEntry {
 
 impl SystemEvent {
     /// The total number of system events.
-    pub const COUNT: usize = 20;
+    pub const COUNT: usize = 21;
 
     /// Lookup table mapping system events to their metadata.
     ///
@@ -531,6 +548,11 @@ impl SystemEvent {
             id: EventId::from_u64(3200266522440553751),
             event: SystemEvent::DeferredRegister,
             name: "sys::deferred_register",
+        },
+        SystemEventEntry {
+            id: EventId::from_u64(12566028600487412345),
+            event: SystemEvent::DeferredEvaluate,
+            name: "sys::deferred_evaluate",
         },
     ];
 }
@@ -640,7 +662,8 @@ mod test {
                 | SystemEvent::HdwordToMapWithDomain
                 | SystemEvent::HqwordToMap
                 | SystemEvent::HpermToMap
-                | SystemEvent::DeferredRegister => {},
+                | SystemEvent::DeferredRegister
+                | SystemEvent::DeferredEvaluate => {},
             }
         }
     }

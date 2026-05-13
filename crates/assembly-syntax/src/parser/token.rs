@@ -507,6 +507,7 @@ pub enum Token<'input> {
     Cswap,
     Cswapw,
     Debug,
+    DeferredEvaluate,
     DeferredRegister,
     Div,
     Drop,
@@ -737,6 +738,7 @@ impl fmt::Display for Token<'_> {
             Token::Cswap => write!(f, "cswap"),
             Token::Cswapw => write!(f, "cswapw"),
             Token::Debug => write!(f, "debug"),
+            Token::DeferredEvaluate => write!(f, "deferred_evaluate"),
             Token::DeferredRegister => write!(f, "deferred_register"),
             Token::Div => write!(f, "div"),
             Token::Drop => write!(f, "drop"),
@@ -970,6 +972,7 @@ impl<'input> Token<'input> {
                 | Token::Cswap
                 | Token::Cswapw
                 | Token::Debug
+                | Token::DeferredEvaluate
                 | Token::DeferredRegister
                 | Token::Div
                 | Token::Drop
@@ -1161,6 +1164,7 @@ impl<'input> Token<'input> {
         ("cswap", Token::Cswap),
         ("cswapw", Token::Cswapw),
         ("debug", Token::Debug),
+        ("deferred_evaluate", Token::DeferredEvaluate),
         ("deferred_register", Token::DeferredRegister),
         ("div", Token::Div),
         ("drop", Token::Drop),

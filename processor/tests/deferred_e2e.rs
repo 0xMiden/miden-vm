@@ -35,22 +35,45 @@ fn build_processor() -> FastProcessor {
     .with_schema(Box::new(Field0Handler))
 }
 
-// MASM BUILDER
+// MASM BUILDERS
 // ================================================================================================
 
 /// Build a MASM block that pushes the 8-felt payload then the 4-felt tag, invokes the unified
 /// `deferred_register` keyword, and cleans up the 12 felts left on the operand stack.
 fn emit_register(src: &mut String, tag: [Felt; 4], payload: [Felt; 8]) {
+    push_node(src, tag, payload);
+    src.push_str("    deferred_register\n");
+    for _ in 0..12 {
+        src.push_str("    drop\n");
+    }
+}
+
+/// Build a MASM block that pushes the node, invokes `deferred_evaluate`, drops the 12 input
+/// felts, and pulls the canonical 12 felts off the advice stack into memory starting at
+/// `out_base` so the test can inspect them via `output.memory`.
+fn emit_evaluate_into_mem(src: &mut String, tag: [Felt; 4], payload: [Felt; 8], out_base: u32) {
+    use core::fmt::Write;
+    push_node(src, tag, payload);
+    src.push_str("    deferred_evaluate\n");
+    for _ in 0..12 {
+        src.push_str("    drop\n");
+    }
+    // Advice stack: tag word (top) || payload first half || payload second half. Pull each
+    // word and write to memory in order.
+    for word_idx in 0..3u32 {
+        src.push_str("    adv_pushw\n");
+        writeln!(src, "    mem_storew_le.{}", out_base + word_idx * 4).unwrap();
+        src.push_str("    dropw\n");
+    }
+}
+
+fn push_node(src: &mut String, tag: [Felt; 4], payload: [Felt; 8]) {
     use core::fmt::Write;
     for f in payload.iter().rev() {
         writeln!(src, "    push.{}", f.as_int()).unwrap();
     }
     for f in tag.iter().rev() {
         writeln!(src, "    push.{}", f.as_int()).unwrap();
-    }
-    src.push_str("    deferred_register\n");
-    for _ in 0..12 {
-        src.push_str("    drop\n");
     }
 }
 
@@ -142,6 +165,50 @@ fn deferred_end_to_end_register_eval_assert() {
     }
     assert_eq!(witness.assertions.len(), 1);
     assert_eq!(witness.transcript, expected_transcript);
+}
+
+// E2E: deferred_evaluate pushes the canonical (tag, payload) onto the advice stack.
+// ================================================================================================
+
+#[test]
+fn deferred_evaluate_pushes_canonical_form_to_advice() {
+    // Register two leaves a=3 and b=4, then ask `deferred_evaluate` for the canonical form of
+    // (a + b). Confirm the advice-pop yields a leaf node with payload limb0 = 7.
+    let a_payload = field0_leaf_payload(3);
+    let b_payload = field0_leaf_payload(4);
+    let a_digest = hash_node(FIELD0_LEAF, &a_payload);
+    let b_digest = hash_node(FIELD0_LEAF, &b_payload);
+    let add_payload = binary_op_payload(a_digest, b_digest);
+
+    let mut src = String::from("begin\n");
+    emit_register(&mut src, FIELD0_LEAF, a_payload.0);
+    emit_register(&mut src, FIELD0_LEAF, b_payload.0);
+    emit_evaluate_into_mem(&mut src, FIELD0_ADD, add_payload.0, 0);
+    src.push_str("end\n");
+
+    let program = Assembler::default().assemble_program(&src).expect("program must assemble");
+
+    let mut host = DefaultHost::default();
+    let output = build_processor()
+        .execute_sync(&program, &mut host)
+        .expect("execution must succeed");
+
+    // Memory layout: addresses 0..4 hold the canonical tag (FIELD0_LEAF), 4..12 hold the
+    // canonical payload (a 256-bit u32-limbed integer of value 7).
+    let ctx = 0u32.into();
+    let mut mem = [Felt::from_u32(0); 12];
+    for i in 0..12u32 {
+        mem[i as usize] = output
+            .memory
+            .read_element(ctx, Felt::from_u32(i))
+            .expect("memory read");
+    }
+    let canonical_tag = [mem[0], mem[1], mem[2], mem[3]];
+    assert_eq!(canonical_tag, FIELD0_LEAF, "evaluate returns canonical leaf tag");
+    assert_eq!(mem[4].as_canonical_u64(), 7, "limb 0 of (3+4)");
+    for (limb_idx, felt) in mem.iter().enumerate().skip(5) {
+        assert_eq!(felt.as_canonical_u64(), 0, "limb {} of (3+4) must be zero", limb_idx - 4);
+    }
 }
 
 // E2E: assert_eq with mismatched values surfaces as an execution error.

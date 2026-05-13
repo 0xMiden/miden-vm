@@ -7,18 +7,24 @@ use miden_core::events::SystemEvent;
 
 /// MASM instructions which drive the deferred-computation DAG via `SystemEvent` dispatch.
 ///
-/// The single variant lowers to `push.<id>; emit; drop`. The schema's classification of the
-/// node decides whether the event records an expression or an assertion — that distinction
-/// lives in user code, not in the AST.
+/// Each variant lowers to `push.<id>; emit; drop`. The schema decides what each tag means;
+/// the AST is opaque.
+///
+/// - [`Register`](DeferredEventNode::Register): register a node, classified by the schema as
+///   expression or assertion.
+/// - [`Evaluate`](DeferredEventNode::Evaluate): evaluate a node and push the canonical
+///   `(tag, payload)` onto the advice stack.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum DeferredEventNode {
     Register,
+    Evaluate,
 }
 
 impl From<&DeferredEventNode> for SystemEvent {
     fn from(value: &DeferredEventNode) -> Self {
         match value {
             DeferredEventNode::Register => Self::DeferredRegister,
+            DeferredEventNode::Evaluate => Self::DeferredEvaluate,
         }
     }
 }
@@ -33,6 +39,7 @@ impl fmt::Display for DeferredEventNode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Register => write!(f, "deferred_register"),
+            Self::Evaluate => write!(f, "deferred_evaluate"),
         }
     }
 }
