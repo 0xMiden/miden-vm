@@ -93,12 +93,11 @@ impl PreparedAnalysis {
     }
 
     /// Prepared procedures in bottom-up callgraph order.
-    pub(crate) fn callgraph_procs(
-        &self,
-    ) -> impl Iterator<Item = (&SymbolPath, Option<&PreparedProc>)> {
+    pub(crate) fn callgraph_procs(&self) -> impl Iterator<Item = (&SymbolPath, &PreparedProc)> {
         self.callgraph.iter().map(|node| {
             let proc_path = node.name();
-            (proc_path, self.proc(proc_path))
+            let proc = self.proc(proc_path).expect("every callgraph procedure should be prepared");
+            (proc_path, proc)
         })
     }
 

@@ -26,10 +26,6 @@ pub(super) fn infer_nonzero_summaries_and_diagnostics(
     let mut diagnostics = AdviceDiagnosticsMap::default();
 
     for (proc_path, proc) in prepared.callgraph_procs() {
-        let Some(proc) = proc else {
-            mark_nonzero_unknown(summaries, proc_path);
-            continue;
-        };
         let Some(stmts) = proc.stmts() else {
             mark_nonzero_unknown(summaries, proc_path);
             continue;
