@@ -1102,10 +1102,7 @@ mod tests {
     fn serde_library_deserialization_rejects_malformed_quoted_procedure_leaf() {
         use miden_core::{
             advice::AdviceMap,
-            mast::{
-                BasicBlockNodeBuilder, DebugInfo, MastForest, MastForestParts, MastNodeBuilder,
-                MastNodeId,
-            },
+            mast::{BasicBlockNodeBuilder, DebugInfo, MastForest, MastNodeBuilder, MastNodeId},
             operations::Operation,
             utils::IndexVec,
         };
@@ -1119,13 +1116,9 @@ mod tests {
         .expect("must create MAST node");
         let mut nodes = IndexVec::new();
         nodes.push(mast_node).expect("must insert MAST node");
-        let mast_forest = MastForest::from_parts(MastForestParts {
-            nodes,
-            roots: vec![node],
-            advice_map: AdviceMap::default(),
-            debug_info: DebugInfo::new(),
-        })
-        .expect("must create MAST forest");
+        let mast_forest =
+            MastForest::from_raw_parts(nodes, vec![node], AdviceMap::default(), DebugInfo::new())
+                .expect("must create MAST forest");
 
         let bad = Arc::<Path>::from(Path::validate(r#"::foo::"bad name""#).unwrap());
         let mut exports = BTreeMap::new();

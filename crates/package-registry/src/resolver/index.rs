@@ -245,10 +245,7 @@ mod tests {
     };
     use miden_core::{
         advice::AdviceMap,
-        mast::{
-            BasicBlockNodeBuilder, DebugInfo, MastForest, MastForestParts, MastNodeBuilder,
-            MastNodeId,
-        },
+        mast::{BasicBlockNodeBuilder, DebugInfo, MastForest, MastNodeBuilder, MastNodeId},
         operations::Operation,
         utils::IndexVec,
     };
@@ -266,12 +263,12 @@ mod tests {
         .expect("failed to build basic block");
         let mut nodes = IndexVec::new();
         nodes.push(node).expect("failed to add MAST node");
-        let forest = MastForest::from_parts(MastForestParts {
+        let forest = MastForest::from_raw_parts(
             nodes,
-            roots: vec![node_id],
-            advice_map: AdviceMap::default(),
-            debug_info: DebugInfo::new(),
-        })
+            vec![node_id],
+            AdviceMap::default(),
+            DebugInfo::new(),
+        )
         .expect("failed to build MAST forest");
         (forest, node_id)
     }

@@ -11,10 +11,7 @@ use miden_utils_testing::{Test, assert_diagnostic_lines};
 use crate::{
     FastProcessor, Program, StackInputs,
     advice::AdviceInputs,
-    mast::{
-        BasicBlockNodeBuilder, DebugInfo, DecoratorId, MastForest, MastForestContributor,
-        MastForestParts,
-    },
+    mast::{BasicBlockNodeBuilder, DebugInfo, DecoratorId, MastForest, MastForestContributor},
     test_utils::TestHost,
 };
 
@@ -26,13 +23,9 @@ fn mast_forest_with_decorator_ids(
         .into_iter()
         .map(|decorator| debug_info.add_decorator(decorator).unwrap())
         .collect();
-    let mast_forest = MastForest::from_parts(MastForestParts {
-        nodes: IndexVec::new(),
-        roots: Vec::new(),
-        advice_map: AdviceMap::default(),
-        debug_info,
-    })
-    .unwrap();
+    let mast_forest =
+        MastForest::from_raw_parts(IndexVec::new(), Vec::new(), AdviceMap::default(), debug_info)
+            .unwrap();
 
     (mast_forest, decorator_ids)
 }
