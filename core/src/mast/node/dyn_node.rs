@@ -12,6 +12,7 @@ use crate::{
     mast::{
         DecoratorId, DecoratorStore, ExecutableMastForest, MastForest, MastForestError,
         MastNodeFingerprint, MastNodeId,
+        digest,
     },
     operations::opcodes,
     prettier::{Document, PrettyPrint, const_text, nl},
@@ -355,10 +356,8 @@ impl DynNodeBuilder {
         // Use the forced digest if provided, otherwise use the default digest
         let digest = if let Some(forced_digest) = self.digest {
             forced_digest
-        } else if self.is_dyncall {
-            DynNode::DYNCALL_DEFAULT_DIGEST
         } else {
-            DynNode::DYN_DEFAULT_DIGEST
+            digest::dyn_digest(self.is_dyncall)
         };
 
         DynNode {
@@ -378,10 +377,8 @@ impl MastForestContributor for DynNodeBuilder {
         // Use the forced digest if provided, otherwise use the default digest
         let digest = if let Some(forced_digest) = self.digest {
             forced_digest
-        } else if self.is_dyncall {
-            DynNode::DYNCALL_DEFAULT_DIGEST
         } else {
-            DynNode::DYN_DEFAULT_DIGEST
+            digest::dyn_digest(self.is_dyncall)
         };
 
         // Determine the node ID that will be assigned
@@ -423,10 +420,8 @@ impl MastForestContributor for DynNodeBuilder {
             // Use the forced digest if available, otherwise use the default digest values
             if let Some(forced_digest) = self.digest {
                 forced_digest
-            } else if self.is_dyncall {
-                DynNode::DYNCALL_DEFAULT_DIGEST
             } else {
-                DynNode::DYN_DEFAULT_DIGEST
+                digest::dyn_digest(self.is_dyncall)
             },
         )
     }

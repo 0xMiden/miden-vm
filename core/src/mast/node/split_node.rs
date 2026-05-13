@@ -9,10 +9,10 @@ use super::{MastForestContributor, MastNodeExt};
 use crate::mast::MastNode;
 use crate::{
     Felt, Word,
-    chiplets::hasher,
     mast::{
         DecoratorId, DecoratorStore, ExecutableMastForest, MastForest, MastForestError,
         MastNodeFingerprint, MastNodeId,
+        digest,
     },
     operations::opcodes,
     prettier::PrettyPrint,
@@ -327,7 +327,7 @@ impl SplitNodeBuilder {
             let true_branch_hash = mast_forest[self.branches[0]].digest();
             let false_branch_hash = mast_forest[self.branches[1]].digest();
 
-            hasher::merge_in_domain(&[true_branch_hash, false_branch_hash], SplitNode::DOMAIN)
+            digest::split_digest(true_branch_hash, false_branch_hash)
         };
 
         Ok(SplitNode {
@@ -374,7 +374,7 @@ impl MastForestContributor for SplitNodeBuilder {
             let true_branch_hash = forest[self.branches[0]].digest();
             let false_branch_hash = forest[self.branches[1]].digest();
 
-            hasher::merge_in_domain(&[true_branch_hash, false_branch_hash], SplitNode::DOMAIN)
+            digest::split_digest(true_branch_hash, false_branch_hash)
         };
 
         // Determine the node ID that will be assigned
@@ -419,7 +419,7 @@ impl MastForestContributor for SplitNodeBuilder {
                 let if_branch_hash = forest[self.branches[0]].digest();
                 let else_branch_hash = forest[self.branches[1]].digest();
 
-                hasher::merge_in_domain(&[if_branch_hash, else_branch_hash], SplitNode::DOMAIN)
+                digest::split_digest(if_branch_hash, else_branch_hash)
             },
         )
     }

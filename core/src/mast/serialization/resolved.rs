@@ -5,10 +5,8 @@ use super::{
     reserve_allocation,
 };
 use crate::{
-    Felt,
-    chiplets::hasher,
     mast::{
-        CallNode, DebugInfo, DynNode, JoinNode, LoopNode, MastForestParts, SplitNode,
+        DebugInfo, MastForestParts, digest,
         serialization::{basic_blocks::BasicBlockDataDecoder, layout::read_fixed_section_entry},
     },
     serde::{Deserializable, DeserializationError, SliceReader},
@@ -327,40 +325,32 @@ fn recompute_hash_table(
         let computed = match entry {
             MastNodeEntry::Block { ops_offset } => {
                 let op_batches = basic_block_data_decoder.decode_operations(ops_offset)?;
-                let op_groups: Vec<Felt> =
-                    op_batches.iter().flat_map(|batch| *batch.groups()).collect();
-                hasher::hash_elements(&op_groups)
+                digest::basic_block_digest(&op_batches)
             },
             MastNodeEntry::Join { left_child_id, right_child_id } => {
                 let left = checked_child_index(index, left_child_id, layout.node_count)?;
                 let right = checked_child_index(index, right_child_id, layout.node_count)?;
-                hasher::merge_in_domain(&[digests[left], digests[right]], JoinNode::DOMAIN)
+                digest::join_digest(digests[left], digests[right])
             },
             MastNodeEntry::Split { if_branch_id, else_branch_id } => {
                 let on_true = checked_child_index(index, if_branch_id, layout.node_count)?;
                 let on_false = checked_child_index(index, else_branch_id, layout.node_count)?;
-                hasher::merge_in_domain(&[digests[on_true], digests[on_false]], SplitNode::DOMAIN)
+                digest::split_digest(digests[on_true], digests[on_false])
             },
             MastNodeEntry::Loop { body_id } => {
                 let body = checked_child_index(index, body_id, layout.node_count)?;
-                hasher::merge_in_domain(&[digests[body], crate::Word::default()], LoopNode::DOMAIN)
+                digest::loop_digest(digests[body])
             },
             MastNodeEntry::Call { callee_id } => {
                 let callee = checked_child_index(index, callee_id, layout.node_count)?;
-                hasher::merge_in_domain(
-                    &[digests[callee], crate::Word::default()],
-                    CallNode::CALL_DOMAIN,
-                )
+                digest::call_digest(digests[callee], false)
             },
             MastNodeEntry::SysCall { callee_id } => {
                 let callee = checked_child_index(index, callee_id, layout.node_count)?;
-                hasher::merge_in_domain(
-                    &[digests[callee], crate::Word::default()],
-                    CallNode::SYSCALL_DOMAIN,
-                )
+                digest::call_digest(digests[callee], true)
             },
-            MastNodeEntry::Dyn => DynNode::DYN_DEFAULT_DIGEST,
-            MastNodeEntry::Dyncall => DynNode::DYNCALL_DEFAULT_DIGEST,
+            MastNodeEntry::Dyn => digest::dyn_digest(false),
+            MastNodeEntry::Dyncall => digest::dyn_digest(true),
             MastNodeEntry::External => {
                 let digest =
                     read_digest_entry(bytes, layout.external_digest_offset(), external_slot)?;
