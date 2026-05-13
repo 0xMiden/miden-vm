@@ -31,9 +31,9 @@ pub(super) fn infer_unconstrained_advice(
 fn infer_provenance_summaries(prepared: &PreparedAnalysis) -> AdviceSummaryMap {
     let mut summaries = AdviceSummaryMap::default();
 
-    for node in prepared.callgraph().iter() {
-        let Some(proc) = prepared.proc(node.name()) else {
-            summaries.insert(node.name().clone(), AdviceSummary::unknown());
+    for (proc_path, proc) in prepared.callgraph_procs() {
+        let Some(proc) = proc else {
+            summaries.insert(proc_path.clone(), AdviceSummary::unknown());
             continue;
         };
         let summary = match proc.stmts() {
@@ -42,7 +42,7 @@ fn infer_provenance_summaries(prepared: &PreparedAnalysis) -> AdviceSummaryMap {
             },
             None => AdviceSummary::unknown_with_arity(proc.outputs()),
         };
-        summaries.insert(node.name().clone(), summary);
+        summaries.insert(proc_path.clone(), summary);
     }
 
     summaries
