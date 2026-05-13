@@ -337,6 +337,210 @@ impl PendingDecoratorRefs {
     }
 }
 
+struct MastForestFinalizer {
+    debug_info: DebugInfo,
+    nodes: IndexVec<MastNodeId, MastNode>,
+    node_id_by_ref: BTreeMap<MastNodeRef, MastNodeId>,
+    final_decorator_id_by_ref: BTreeMap<DecoratorRef, DecoratorId>,
+}
+
+impl MastForestFinalizer {
+    fn new() -> Self {
+        Self {
+            debug_info: DebugInfo::new(),
+            nodes: IndexVec::new(),
+            node_id_by_ref: BTreeMap::new(),
+            final_decorator_id_by_ref: BTreeMap::new(),
+        }
+    }
+
+    fn register_live_decorators(
+        &mut self,
+        live_decorator_refs: BTreeSet<DecoratorRef>,
+        decorators: &IndexVec<DecoratorRef, Decorator>,
+    ) -> Result<(), Report> {
+        for decorator_ref in live_decorator_refs {
+            let final_decorator_id = self
+                .debug_info
+                .add_decorator(decorators[decorator_ref].clone())
+                .map_err(|source| {
+                    Report::new(MastForestBuilderError::AddDecorator { decorator_ref, source })
+                })?;
+            self.final_decorator_id_by_ref.insert(decorator_ref, final_decorator_id);
+        }
+
+        Ok(())
+    }
+
+    fn materialize_live_nodes(
+        &mut self,
+        live_node_refs: &[MastNodeRef],
+        pending_nodes: &IndexVec<MastNodeRef, PendingMastNode>,
+    ) -> Result<(), Report> {
+        for &node_ref in live_node_refs {
+            let pending_node = &pending_nodes[node_ref];
+            let MaterializedPendingNode { builder, decorators } =
+                build_pending_node_with_final_ids(
+                    pending_node,
+                    node_ref,
+                    &self.node_id_by_ref,
+                    &self.final_decorator_id_by_ref,
+                )
+                .map_err(Report::new)?;
+
+            let final_node_id =
+                MastNodeId::new_unchecked(self.nodes.len().try_into().map_err(|_| {
+                    Report::new(MastForestBuilderError::FinalizeForest {
+                        source: MastForestError::TooManyNodes,
+                    })
+                })?);
+            let node = builder.build_linked(final_node_id).map_err(|source| {
+                Report::new(MastForestBuilderError::BuildNode {
+                    node_ref,
+                    node_kind: pending_node.kind.name(),
+                    source,
+                })
+            })?;
+            decorators
+                .register(&mut self.debug_info, final_node_id, node_ref, pending_node)
+                .map_err(Report::new)?;
+            let inserted_node_id = self.nodes.push(node).map_err(|_| {
+                Report::new(MastForestBuilderError::AddNode {
+                    node_ref,
+                    source: MastForestError::TooManyNodes,
+                })
+            })?;
+            debug_assert_eq!(inserted_node_id, final_node_id);
+            self.node_id_by_ref.insert(node_ref, final_node_id);
+        }
+
+        Ok(())
+    }
+
+    fn register_live_asm_ops(
+        &mut self,
+        live_node_refs: &[MastNodeRef],
+        pending_nodes: &IndexVec<MastNodeRef, PendingMastNode>,
+        asm_op_by_ref: &IndexVec<AsmOpRef, AssemblyOp>,
+    ) -> Result<(), Report> {
+        let mut asm_op_id_by_ref = BTreeMap::new();
+        for &node_ref in live_node_refs {
+            let asm_op_mappings = pending_nodes[node_ref].asm_ops.clone();
+            if asm_op_mappings.is_empty() {
+                continue;
+            }
+
+            let node_id = self.node_id_by_ref[&node_ref];
+            let (num_operations, adjusted_mappings) =
+                compute_operations_and_adjust_mappings(&self.nodes[node_id], asm_op_mappings);
+            let adjusted_mappings = adjusted_mappings
+                .into_iter()
+                .map(|(op_idx, asm_op_ref)| {
+                    let asm_op_id = if let Some(asm_op_id) =
+                        asm_op_id_by_ref.get(&asm_op_ref).copied()
+                    {
+                        asm_op_id
+                    } else {
+                        let asm_op_id = self
+                            .debug_info
+                            .add_asm_op(asm_op_by_ref[asm_op_ref].clone())
+                            .map_err(|source| {
+                                Report::new(MastForestBuilderError::AddAsmOp { node_id, source })
+                            })?;
+                        asm_op_id_by_ref.insert(asm_op_ref, asm_op_id);
+                        asm_op_id
+                    };
+                    Ok((op_idx, asm_op_id))
+                })
+                .collect::<Result<Vec<_>, Report>>()?;
+
+            self.debug_info
+                .register_asm_ops(node_id, num_operations, adjusted_mappings)
+                .map_err(|source| {
+                    Report::new(MastForestBuilderError::RegisterAsmOps {
+                        node_id,
+                        source_msg: source.to_string(),
+                    })
+                })?;
+        }
+
+        Ok(())
+    }
+
+    fn register_live_debug_vars(
+        &mut self,
+        live_node_refs: &[MastNodeRef],
+        pending_nodes: &IndexVec<MastNodeRef, PendingMastNode>,
+        debug_vars: &IndexVec<DebugVarRef, DebugVarInfo>,
+    ) -> Result<(), Report> {
+        let mut debug_var_id_by_ref = BTreeMap::new();
+        for &node_ref in live_node_refs {
+            let pending_debug_vars = pending_nodes[node_ref].debug_vars.clone();
+            if pending_debug_vars.is_empty() {
+                continue;
+            }
+
+            let node_id = self.node_id_by_ref[&node_ref];
+            let mut debug_var_ids = Vec::with_capacity(pending_debug_vars.len());
+            for (op_idx, debug_var_ref) in pending_debug_vars {
+                let debug_var_id =
+                    if let Some(debug_var_id) = debug_var_id_by_ref.get(&debug_var_ref).copied() {
+                        debug_var_id
+                    } else {
+                        let debug_var_id = self
+                            .debug_info
+                            .add_debug_var(debug_vars[debug_var_ref].clone())
+                            .map_err(|source| {
+                                Report::new(MastForestBuilderError::AddDebugVar { node_id, source })
+                            })?;
+                        debug_var_id_by_ref.insert(debug_var_ref, debug_var_id);
+                        debug_var_id
+                    };
+                debug_var_ids.push((op_idx, debug_var_id));
+            }
+            self.debug_info.register_op_indexed_debug_vars(node_id, debug_var_ids).map_err(
+                |source| {
+                    Report::new(MastForestBuilderError::RegisterDebugVars {
+                        node_id,
+                        source_msg: source.to_string(),
+                    })
+                },
+            )?;
+        }
+
+        Ok(())
+    }
+
+    fn into_built_forest(
+        mut self,
+        procedure_root_refs: &[MastNodeRef],
+        advice_map: AdviceMap,
+        error_codes: BTreeMap<u64, Arc<str>>,
+    ) -> Result<BuiltMastForest, Report> {
+        let mut roots = Vec::with_capacity(procedure_root_refs.len());
+        for &root_ref in procedure_root_refs {
+            let root_id = *self.node_id_by_ref.get(&root_ref).ok_or_else(|| {
+                Report::new(MastForestBuilderError::MissingProcedureRoot { root_ref })
+            })?;
+            roots.push(root_id);
+        }
+
+        self.debug_info.extend_error_codes(error_codes);
+        let mast_forest = MastForest::from_parts(MastForestParts {
+            nodes: self.nodes,
+            roots,
+            advice_map,
+            debug_info: self.debug_info,
+        })
+        .map_err(|source| Report::new(MastForestBuilderError::FinalizeForest { source }))?;
+
+        Ok(BuiltMastForest {
+            mast_forest,
+            node_id_by_ref: self.node_id_by_ref,
+        })
+    }
+}
+
 /// Builder for a [`MastForest`].
 ///
 /// The purpose of the builder is to ensure that the underlying MAST forest contains as little
@@ -722,166 +926,28 @@ impl MastForestBuilder {
 
         let mut removable_node_refs = core::mem::take(&mut self.merged_basic_block_refs);
         removable_node_refs.append(&mut self.superseded_node_refs);
-        let node_refs_to_remove =
-            get_node_refs_to_remove(removable_node_refs, &procedure_root_refs, &self.nodes);
+        let layout = FinalForestLayout::plan(procedure_root_refs, removable_node_refs, &self.nodes);
 
-        let live_node_refs = live_node_refs_in_final_order(&self.nodes, &node_refs_to_remove);
-        let mut live_decorator_refs = BTreeSet::new();
-        for node_ref in &live_node_refs {
-            live_decorator_refs.extend(self.nodes[*node_ref].decorator_refs.refs());
-        }
+        let mut finalizer = MastForestFinalizer::new();
+        finalizer.register_live_decorators(layout.live_decorator_refs, &self.decorators)?;
+        finalizer.materialize_live_nodes(&layout.live_node_refs, &self.nodes)?;
 
-        let mut debug_info = DebugInfo::new();
-        let mut final_decorator_id_by_ref = BTreeMap::new();
-        for decorator_ref in live_decorator_refs {
-            let final_decorator_id = debug_info
-                .add_decorator(self.decorators[decorator_ref].clone())
-                .map_err(|source| {
-                    Report::new(MastForestBuilderError::AddDecorator { decorator_ref, source })
-                })?;
-            final_decorator_id_by_ref.insert(decorator_ref, final_decorator_id);
-        }
+        finalizer.register_live_asm_ops(
+            &layout.live_node_refs,
+            &self.nodes,
+            &self.asm_op_by_ref,
+        )?;
+        finalizer.register_live_debug_vars(
+            &layout.live_node_refs,
+            &self.nodes,
+            &self.debug_vars,
+        )?;
 
-        let mut nodes = IndexVec::new();
-        let mut node_id_by_ref = BTreeMap::new();
-        for &node_ref in &live_node_refs {
-            let pending_node = &self.nodes[node_ref];
-            let builder = build_pending_node_with_final_ids(
-                pending_node,
-                node_ref,
-                &node_id_by_ref,
-                &final_decorator_id_by_ref,
-            )
-            .map_err(Report::new)?;
-
-            let final_node_id =
-                MastNodeId::new_unchecked(nodes.len().try_into().map_err(|_| {
-                    Report::new(MastForestBuilderError::FinalizeForest {
-                        source: MastForestError::TooManyNodes,
-                    })
-                })?);
-            let node = builder.build_linked(final_node_id).map_err(|source| {
-                Report::new(MastForestBuilderError::BuildNode {
-                    node_ref,
-                    node_kind: pending_node.kind.name(),
-                    source,
-                })
-            })?;
-            register_pending_node_decorators(
-                &mut debug_info,
-                final_node_id,
-                node_ref,
-                pending_node,
-                &final_decorator_id_by_ref,
-            )
-            .map_err(Report::new)?;
-            let inserted_node_id = nodes.push(node).map_err(|_| {
-                Report::new(MastForestBuilderError::AddNode {
-                    node_ref,
-                    source: MastForestError::TooManyNodes,
-                })
-            })?;
-            debug_assert_eq!(inserted_node_id, final_node_id);
-            node_id_by_ref.insert(node_ref, final_node_id);
-        }
-
-        // Register owned AssemblyOp metadata in final node order. The CSR structure requires
-        // nodes to be registered sequentially.
-        let mut asm_op_id_by_ref = BTreeMap::new();
-        for &node_ref in &live_node_refs {
-            let asm_op_mappings = self.nodes[node_ref].asm_ops.clone();
-            if asm_op_mappings.is_empty() {
-                continue;
-            }
-
-            let node_id = node_id_by_ref[&node_ref];
-            let (num_operations, adjusted_mappings) =
-                compute_operations_and_adjust_mappings(&nodes[node_id], asm_op_mappings);
-            let adjusted_mappings = adjusted_mappings
-                .into_iter()
-                .map(|(op_idx, asm_op_ref)| {
-                    let asm_op_id = if let Some(asm_op_id) =
-                        asm_op_id_by_ref.get(&asm_op_ref).copied()
-                    {
-                        asm_op_id
-                    } else {
-                        let asm_op_id = debug_info
-                            .add_asm_op(self.asm_op_by_ref[asm_op_ref].clone())
-                            .map_err(|source| {
-                                Report::new(MastForestBuilderError::AddAsmOp { node_id, source })
-                            })?;
-                        asm_op_id_by_ref.insert(asm_op_ref, asm_op_id);
-                        asm_op_id
-                    };
-                    Ok((op_idx, asm_op_id))
-                })
-                .collect::<Result<Vec<_>, Report>>()?;
-
-            debug_info
-                .register_asm_ops(node_id, num_operations, adjusted_mappings)
-                .map_err(|source| {
-                    Report::new(MastForestBuilderError::RegisterAsmOps {
-                        node_id,
-                        source_msg: source.to_string(),
-                    })
-                })?;
-        }
-
-        let mut debug_var_id_by_ref = BTreeMap::new();
-        for &node_ref in &live_node_refs {
-            let debug_vars = self.nodes[node_ref].debug_vars.clone();
-            if debug_vars.is_empty() {
-                continue;
-            }
-
-            let node_id = node_id_by_ref[&node_ref];
-            let mut debug_var_ids = Vec::with_capacity(debug_vars.len());
-            for (op_idx, debug_var_ref) in debug_vars {
-                let debug_var_id =
-                    if let Some(debug_var_id) = debug_var_id_by_ref.get(&debug_var_ref).copied() {
-                        debug_var_id
-                    } else {
-                        let debug_var_id = debug_info
-                            .add_debug_var(self.debug_vars[debug_var_ref].clone())
-                            .map_err(|source| {
-                                Report::new(MastForestBuilderError::AddDebugVar { node_id, source })
-                            })?;
-                        debug_var_id_by_ref.insert(debug_var_ref, debug_var_id);
-                        debug_var_id
-                    };
-                debug_var_ids.push((op_idx, debug_var_id));
-            }
-            debug_info.register_op_indexed_debug_vars(node_id, debug_var_ids).map_err(
-                |source| {
-                    Report::new(MastForestBuilderError::RegisterDebugVars {
-                        node_id,
-                        source_msg: source.to_string(),
-                    })
-                },
-            )?;
-        }
-
-        let mut roots = Vec::with_capacity(procedure_root_refs.len());
-        for &root_ref in &procedure_root_refs {
-            let root_id = *node_id_by_ref.get(&root_ref).ok_or_else(|| {
-                Report::new(MastForestBuilderError::MissingProcedureRoot { root_ref })
-            })?;
-            roots.push(root_id);
-        }
-
-        debug_info.extend_error_codes(core::mem::take(&mut self.error_codes));
-        let final_forest = MastForest::from_parts(MastForestParts {
-            nodes,
-            roots,
-            advice_map: self.advice_map,
-            debug_info,
-        })
-        .map_err(|source| Report::new(MastForestBuilderError::FinalizeForest { source }))?;
-
-        Ok(BuiltMastForest {
-            mast_forest: final_forest,
-            node_id_by_ref,
-        })
+        finalizer.into_built_forest(
+            &layout.procedure_root_refs,
+            self.advice_map,
+            core::mem::take(&mut self.error_codes),
+        )
     }
 }
 
@@ -920,34 +986,24 @@ fn build_pending_node_with_final_ids(
     node_ref: MastNodeRef,
     final_node_id_by_ref: &BTreeMap<MastNodeRef, MastNodeId>,
     final_decorator_id_by_ref: &BTreeMap<DecoratorRef, DecoratorId>,
-) -> Result<MastNodeBuilder, MastForestBuilderError> {
-    let before_enter = final_decorator_ids_from_refs(
+) -> Result<MaterializedPendingNode, MastForestBuilderError> {
+    let decorators = FinalDecoratorIds::from_pending_refs(
         node_ref,
-        &pending_node.decorator_refs.before_enter,
-        final_decorator_id_by_ref,
-    )?;
-    let after_exit = final_decorator_ids_from_refs(
-        node_ref,
-        &pending_node.decorator_refs.after_exit,
+        &pending_node.decorator_refs,
         final_decorator_id_by_ref,
     )?;
 
     let builder = match &pending_node.kind {
         PendingMastNodeKind::BasicBlock { op_batches } => {
             ensure_child_count(node_ref, pending_node, 0)?;
-            let decorators = final_indexed_decorator_ids_from_refs(
-                node_ref,
-                &pending_node.decorator_refs.indexed,
-                final_decorator_id_by_ref,
-            )?;
             MastNodeBuilder::BasicBlock(
                 BasicBlockNodeBuilder::from_op_batches_preserving_digest(
                     op_batches.clone(),
-                    decorators,
+                    decorators.indexed.clone(),
                     pending_node.digest,
                 )
-                .with_before_enter(before_enter)
-                .with_after_exit(after_exit),
+                .with_before_enter(decorators.before_enter.clone())
+                .with_after_exit(decorators.after_exit.clone()),
             )
         },
         PendingMastNodeKind::Join => {
@@ -956,8 +1012,8 @@ fn build_pending_node_with_final_ids(
             let children = final_child_ids::<2>(node_ref, pending_node, final_node_id_by_ref)?;
             MastNodeBuilder::Join(
                 JoinNodeBuilder::new(children)
-                    .with_before_enter(before_enter)
-                    .with_after_exit(after_exit)
+                    .with_before_enter(decorators.before_enter.clone())
+                    .with_after_exit(decorators.after_exit.clone())
                     .with_digest(pending_node.digest),
             )
         },
@@ -967,8 +1023,8 @@ fn build_pending_node_with_final_ids(
             let branches = final_child_ids::<2>(node_ref, pending_node, final_node_id_by_ref)?;
             MastNodeBuilder::Split(
                 SplitNodeBuilder::new(branches)
-                    .with_before_enter(before_enter)
-                    .with_after_exit(after_exit)
+                    .with_before_enter(decorators.before_enter.clone())
+                    .with_after_exit(decorators.after_exit.clone())
                     .with_digest(pending_node.digest),
             )
         },
@@ -978,8 +1034,8 @@ fn build_pending_node_with_final_ids(
             let [body] = final_child_ids::<1>(node_ref, pending_node, final_node_id_by_ref)?;
             MastNodeBuilder::Loop(
                 LoopNodeBuilder::new(body)
-                    .with_before_enter(before_enter)
-                    .with_after_exit(after_exit)
+                    .with_before_enter(decorators.before_enter.clone())
+                    .with_after_exit(decorators.after_exit.clone())
                     .with_digest(pending_node.digest),
             )
         },
@@ -994,8 +1050,8 @@ fn build_pending_node_with_final_ids(
             };
             MastNodeBuilder::Call(
                 builder
-                    .with_before_enter(before_enter)
-                    .with_after_exit(after_exit)
+                    .with_before_enter(decorators.before_enter.clone())
+                    .with_after_exit(decorators.after_exit.clone())
                     .with_digest(pending_node.digest),
             )
         },
@@ -1009,8 +1065,8 @@ fn build_pending_node_with_final_ids(
             };
             MastNodeBuilder::Dyn(
                 builder
-                    .with_before_enter(before_enter)
-                    .with_after_exit(after_exit)
+                    .with_before_enter(decorators.before_enter.clone())
+                    .with_after_exit(decorators.after_exit.clone())
                     .with_digest(pending_node.digest),
             )
         },
@@ -1019,13 +1075,78 @@ fn build_pending_node_with_final_ids(
             ensure_no_indexed_decorators(node_ref, pending_node)?;
             MastNodeBuilder::External(
                 ExternalNodeBuilder::new(pending_node.digest)
-                    .with_before_enter(before_enter)
-                    .with_after_exit(after_exit),
+                    .with_before_enter(decorators.before_enter.clone())
+                    .with_after_exit(decorators.after_exit.clone()),
             )
         },
     };
 
-    Ok(builder)
+    Ok(MaterializedPendingNode { builder, decorators })
+}
+
+struct MaterializedPendingNode {
+    builder: MastNodeBuilder,
+    decorators: FinalDecoratorIds,
+}
+
+struct FinalDecoratorIds {
+    before_enter: Vec<DecoratorId>,
+    indexed: DecoratorList,
+    after_exit: Vec<DecoratorId>,
+}
+
+impl FinalDecoratorIds {
+    fn register(
+        &self,
+        debug_info: &mut DebugInfo,
+        node_id: MastNodeId,
+        node_ref: MastNodeRef,
+        pending_node: &PendingMastNode,
+    ) -> Result<(), MastForestBuilderError> {
+        if !self.before_enter.is_empty() || !self.after_exit.is_empty() {
+            debug_info.register_node_decorators(node_id, &self.before_enter, &self.after_exit);
+        }
+
+        if pending_node.kind.is_basic_block() {
+            debug_info
+                .register_op_indexed_decorators(node_id, self.indexed.clone())
+                .map_err(|source| MastForestBuilderError::RegisterDecorators {
+                    node_id,
+                    source_msg: source.to_string(),
+                })?;
+        } else if !self.indexed.is_empty() {
+            return Err(MastForestBuilderError::InvalidIndexedDecorators {
+                node_ref,
+                node_kind: pending_node.kind.name(),
+            });
+        }
+
+        Ok(())
+    }
+
+    fn from_pending_refs(
+        node_ref: MastNodeRef,
+        decorator_refs: &PendingDecoratorRefs,
+        final_decorator_id_by_ref: &BTreeMap<DecoratorRef, DecoratorId>,
+    ) -> Result<Self, MastForestBuilderError> {
+        Ok(Self {
+            before_enter: final_decorator_ids_from_refs(
+                node_ref,
+                &decorator_refs.before_enter,
+                final_decorator_id_by_ref,
+            )?,
+            indexed: final_indexed_decorator_ids_from_refs(
+                node_ref,
+                &decorator_refs.indexed,
+                final_decorator_id_by_ref,
+            )?,
+            after_exit: final_decorator_ids_from_refs(
+                node_ref,
+                &decorator_refs.after_exit,
+                final_decorator_id_by_ref,
+            )?,
+        })
+    }
 }
 
 fn ensure_child_count(
@@ -1058,49 +1179,6 @@ fn ensure_no_indexed_decorators(
             node_kind: pending_node.kind.name(),
         })
     }
-}
-
-fn register_pending_node_decorators(
-    debug_info: &mut DebugInfo,
-    node_id: MastNodeId,
-    node_ref: MastNodeRef,
-    pending_node: &PendingMastNode,
-    final_decorator_id_by_ref: &BTreeMap<DecoratorRef, DecoratorId>,
-) -> Result<(), MastForestBuilderError> {
-    let before_enter = final_decorator_ids_from_refs(
-        node_ref,
-        &pending_node.decorator_refs.before_enter,
-        final_decorator_id_by_ref,
-    )?;
-    let after_exit = final_decorator_ids_from_refs(
-        node_ref,
-        &pending_node.decorator_refs.after_exit,
-        final_decorator_id_by_ref,
-    )?;
-    if !before_enter.is_empty() || !after_exit.is_empty() {
-        debug_info.register_node_decorators(node_id, &before_enter, &after_exit);
-    }
-
-    if pending_node.kind.is_basic_block() {
-        let indexed_decorators = final_indexed_decorator_ids_from_refs(
-            node_ref,
-            &pending_node.decorator_refs.indexed,
-            final_decorator_id_by_ref,
-        )?;
-        debug_info.register_op_indexed_decorators(node_id, indexed_decorators).map_err(
-            |source| MastForestBuilderError::RegisterDecorators {
-                node_id,
-                source_msg: source.to_string(),
-            },
-        )?;
-    } else if !pending_node.decorator_refs.indexed.is_empty() {
-        return Err(MastForestBuilderError::InvalidIndexedDecorators {
-            node_ref,
-            node_kind: pending_node.kind.name(),
-        });
-    }
-
-    Ok(())
 }
 
 fn final_child_ids<const N: usize>(
@@ -1232,88 +1310,114 @@ fn truncate_index_vec<I: Idx, T>(items: &mut IndexVec<I, T>, len: usize) {
     }
 }
 
-/// Takes the set of MAST node refs (all basic blocks) that were merged as part of the assembly
-/// process (i.e. they were contiguous and were merged into a single basic block), and returns the
-/// subset of nodes that can be removed from the MAST forest.
-///
-/// Specifically, MAST node refs can be reused, so merging a basic block doesn't mean it should be
-/// removed (specifically in the case where another node refers to it). Hence, we cycle through all
-/// builder-local dependencies and only mark for removal those nodes that are not referenced.
-/// We also ensure that procedure roots are not removed.
-fn get_node_refs_to_remove(
-    candidate_node_refs: BTreeSet<MastNodeRef>,
-    procedure_root_refs: &[MastNodeRef],
-    nodes: &IndexVec<MastNodeRef, PendingMastNode>,
-) -> BTreeSet<MastNodeRef> {
-    // make sure not to remove procedure roots
-    let mut nodes_to_remove: BTreeSet<MastNodeRef> = candidate_node_refs
-        .iter()
-        .filter(|&&node_ref| !procedure_root_refs.contains(&node_ref))
-        .copied()
-        .collect();
+struct FinalForestLayout {
+    procedure_root_refs: Vec<MastNodeRef>,
+    live_node_refs: Vec<MastNodeRef>,
+    live_decorator_refs: BTreeSet<DecoratorRef>,
+}
 
-    for node in nodes {
-        for child_ref in &node.child_refs {
-            if nodes_to_remove.contains(child_ref) {
+impl FinalForestLayout {
+    fn plan(
+        procedure_root_refs: Vec<MastNodeRef>,
+        removable_node_refs: BTreeSet<MastNodeRef>,
+        nodes: &IndexVec<MastNodeRef, PendingMastNode>,
+    ) -> Self {
+        let node_refs_to_remove =
+            Self::node_refs_to_remove(removable_node_refs, &procedure_root_refs, nodes);
+        let live_node_refs = Self::live_node_refs_in_final_order(nodes, &node_refs_to_remove);
+        let live_decorator_refs = Self::live_decorator_refs(&live_node_refs, nodes);
+
+        Self {
+            procedure_root_refs,
+            live_node_refs,
+            live_decorator_refs,
+        }
+    }
+
+    fn node_refs_to_remove(
+        candidate_node_refs: BTreeSet<MastNodeRef>,
+        procedure_root_refs: &[MastNodeRef],
+        nodes: &IndexVec<MastNodeRef, PendingMastNode>,
+    ) -> BTreeSet<MastNodeRef> {
+        // make sure not to remove procedure roots
+        let mut nodes_to_remove: BTreeSet<MastNodeRef> = candidate_node_refs
+            .iter()
+            .filter(|&&node_ref| !procedure_root_refs.contains(&node_ref))
+            .copied()
+            .collect();
+
+        for node in nodes {
+            for child_ref in &node.child_refs {
                 nodes_to_remove.remove(child_ref);
             }
         }
+
+        nodes_to_remove
     }
 
-    nodes_to_remove
-}
-
-fn live_node_refs_in_final_order(
-    nodes: &IndexVec<MastNodeRef, PendingMastNode>,
-    node_refs_to_remove: &BTreeSet<MastNodeRef>,
-) -> Vec<MastNodeRef> {
-    let mut live_node_refs = (0..nodes.len())
-        .map(|index| MastNodeRef::from(index as u32))
-        .filter(|node_ref| !node_refs_to_remove.contains(node_ref))
-        .collect::<Vec<_>>();
-
-    let live_node_ref_set = live_node_refs.iter().copied().collect::<BTreeSet<_>>();
-
-    let mut external_node_refs = Vec::new();
-    live_node_refs.retain(|node_ref| {
-        if nodes[*node_ref].kind.is_external() {
-            external_node_refs.push(*node_ref);
-            false
-        } else {
-            true
-        }
-    });
-    external_node_refs.sort_by_key(|node_ref| (nodes[*node_ref].fingerprint, *node_ref));
-
-    let mut final_order = external_node_refs;
-    let mut emitted_node_refs = final_order.iter().copied().collect::<BTreeSet<_>>();
-    let mut remaining_node_refs = live_node_refs.into_iter().collect::<BTreeSet<_>>();
-
-    while !remaining_node_refs.is_empty() {
-        let mut ready_node_refs = remaining_node_refs
-            .iter()
-            .copied()
-            .filter(|node_ref| {
-                nodes[*node_ref].child_refs.iter().all(|child_ref| {
-                    !live_node_ref_set.contains(child_ref) || emitted_node_refs.contains(child_ref)
-                })
-            })
+    fn live_node_refs_in_final_order(
+        nodes: &IndexVec<MastNodeRef, PendingMastNode>,
+        node_refs_to_remove: &BTreeSet<MastNodeRef>,
+    ) -> Vec<MastNodeRef> {
+        let mut live_node_refs = (0..nodes.len())
+            .map(|index| MastNodeRef::from(index as u32))
+            .filter(|node_ref| !node_refs_to_remove.contains(node_ref))
             .collect::<Vec<_>>();
 
-        assert!(
-            !ready_node_refs.is_empty(),
-            "pending MAST nodes must form an acyclic dependency graph"
-        );
+        let live_node_ref_set = live_node_refs.iter().copied().collect::<BTreeSet<_>>();
 
-        ready_node_refs.sort();
-        for node_ref in ready_node_refs {
-            remaining_node_refs.remove(&node_ref);
-            emitted_node_refs.insert(node_ref);
-            final_order.push(node_ref);
+        let mut external_node_refs = Vec::new();
+        live_node_refs.retain(|node_ref| {
+            if nodes[*node_ref].kind.is_external() {
+                external_node_refs.push(*node_ref);
+                false
+            } else {
+                true
+            }
+        });
+        external_node_refs.sort_by_key(|node_ref| (nodes[*node_ref].fingerprint, *node_ref));
+
+        let mut final_order = external_node_refs;
+        let mut emitted_node_refs = final_order.iter().copied().collect::<BTreeSet<_>>();
+        let mut remaining_node_refs = live_node_refs.into_iter().collect::<BTreeSet<_>>();
+
+        while !remaining_node_refs.is_empty() {
+            let mut ready_node_refs = remaining_node_refs
+                .iter()
+                .copied()
+                .filter(|node_ref| {
+                    nodes[*node_ref].child_refs.iter().all(|child_ref| {
+                        !live_node_ref_set.contains(child_ref)
+                            || emitted_node_refs.contains(child_ref)
+                    })
+                })
+                .collect::<Vec<_>>();
+
+            assert!(
+                !ready_node_refs.is_empty(),
+                "pending MAST nodes must form an acyclic dependency graph"
+            );
+
+            ready_node_refs.sort();
+            for node_ref in ready_node_refs {
+                remaining_node_refs.remove(&node_ref);
+                emitted_node_refs.insert(node_ref);
+                final_order.push(node_ref);
+            }
         }
+
+        final_order
     }
 
-    final_order
+    fn live_decorator_refs(
+        live_node_refs: &[MastNodeRef],
+        nodes: &IndexVec<MastNodeRef, PendingMastNode>,
+    ) -> BTreeSet<DecoratorRef> {
+        live_node_refs
+            .iter()
+            .flat_map(|node_ref| nodes[*node_ref].decorator_refs.refs())
+            .collect()
+    }
 }
 
 // ------------------------------------------------------------------------------------------------
