@@ -35,13 +35,35 @@ impl AnalysisSnapshot {
         include_signature_mismatches: bool,
     ) -> Self {
         let prepared = PreparedAnalysis::new(workspace);
-        let signature_mismatches = if include_signature_mismatches {
-            SignatureMismatchCapability::new(workspace, sources).analyze(&prepared)
-        } else {
-            Vec::new()
-        };
-        let advice_diagnostics = UnconstrainedAdviceCapability.analyze(&prepared);
-
-        Self { signature_mismatches, advice_diagnostics }
+        run_capabilities(workspace, sources, &prepared, include_signature_mismatches)
     }
+}
+
+/// Run the static MASM analysis capability schedule.
+///
+/// Capabilities consume the same prepared analysis snapshot, so the schedule is
+/// deliberately explicit instead of a dynamic registry:
+///
+/// 1. Signature mismatch diagnostics are optional lint output and need access to source
+///    declarations in the workspace.
+/// 2. Advice diagnostics consume only prepared lifted procedures, signatures, type summaries, and
+///    callgraph order.
+///
+/// The capabilities currently have no data dependency on each other's outputs;
+/// keeping the ordering here makes that invariant visible if a future pass does
+/// start consuming diagnostics or summaries produced by another capability.
+fn run_capabilities(
+    workspace: &Workspace,
+    sources: Arc<DefaultSourceManager>,
+    prepared: &PreparedAnalysis,
+    include_signature_mismatches: bool,
+) -> AnalysisSnapshot {
+    let signature_mismatches = if include_signature_mismatches {
+        SignatureMismatchCapability::new(workspace, sources).analyze(prepared)
+    } else {
+        Vec::new()
+    };
+    let advice_diagnostics = UnconstrainedAdviceCapability.analyze(prepared);
+
+    AnalysisSnapshot { signature_mismatches, advice_diagnostics }
 }
