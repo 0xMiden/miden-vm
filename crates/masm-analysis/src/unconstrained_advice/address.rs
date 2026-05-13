@@ -1,19 +1,17 @@
 //! Diagnostics for unconstrained advice reaching memory address sinks.
 
-use std::collections::HashMap;
-
-use masm_decompiler::{Stmt, SymbolPath};
+use masm_decompiler::Stmt;
 
 use super::{
     shared::{Env, intrinsic_memory_address_arg_index},
     summary::{AdviceDiagnosticContext, AdviceDiagnosticsMap, AdviceSummaryMap},
     walker::{self, AdviceCapability, AdviceEffect},
 };
-use crate::prepared::PreparedProc;
+use crate::prepared::PreparedAnalysis;
 
 /// Collect memory-address diagnostics for all procedures.
 pub(super) fn collect_address_diagnostics(
-    prepared: &HashMap<SymbolPath, PreparedProc>,
+    prepared: &PreparedAnalysis,
     provenance_summaries: &AdviceSummaryMap,
 ) -> AdviceDiagnosticsMap {
     walker::collect_diagnostics(prepared, provenance_summaries, |proc_path| AddressCapability {

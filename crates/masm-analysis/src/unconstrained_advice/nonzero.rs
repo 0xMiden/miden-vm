@@ -1,7 +1,5 @@
 //! Diagnostics and summaries for unconstrained advice reaching non-zero sinks.
 
-use std::collections::HashMap;
-
 use masm_decompiler::{BinOp, Expr, Intrinsic, Stmt, SymbolPath, UnOp, Var};
 
 use super::{
@@ -13,29 +11,28 @@ use super::{
     summary::{AdviceDiagnosticContext, AdviceDiagnosticsMap, AdviceSummary, AdviceSummaryMap},
     walker::{self, AdviceCapability, AdviceEffect},
 };
-use crate::prepared::PreparedProc;
+use crate::prepared::PreparedAnalysis;
 
 /// Infer non-zero summaries and diagnostics using already-computed provenance summaries.
 pub(super) fn infer_nonzero_summaries_and_diagnostics(
-    callgraph: &masm_decompiler::CallGraph,
-    prepared: &HashMap<SymbolPath, PreparedProc>,
+    prepared: &PreparedAnalysis,
     summaries: &mut AdviceSummaryMap,
 ) -> AdviceDiagnosticsMap {
     let mut diagnostics = AdviceDiagnosticsMap::default();
 
-    for node in callgraph.iter() {
-        let Some(proc) = prepared.get(node.name()) else {
+    for node in prepared.callgraph().iter() {
+        let Some(proc) = prepared.proc(node.name()) else {
             mark_nonzero_unknown(summaries, node.name());
             continue;
         };
-        let Some(stmts) = proc.stmts.as_deref() else {
+        let Some(stmts) = proc.stmts() else {
             mark_nonzero_unknown(summaries, node.name());
             continue;
         };
 
         let result = {
             let capability = NonZeroCapability::new(node.name().clone(), summaries);
-            walker::analyze_procedure(&capability, summaries, proc.inputs, stmts)
+            walker::analyze_procedure(&capability, summaries, proc.inputs(), stmts)
         };
         if !result.diagnostics.is_empty() {
             diagnostics.insert(node.name().clone(), result.diagnostics);
