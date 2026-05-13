@@ -1,5 +1,6 @@
 use alloc::vec::Vec;
 
+use miden_lifted_air::log2_strict_u8;
 use miden_stark_transcript::ProverChannel;
 use p3_dft::{Radix2DFTSmallBatch, TwoAdicSubgroupDft};
 use p3_field::{ExtensionField, TwoAdicField};
@@ -9,7 +10,7 @@ use p3_util::reverse_slice_index_bits;
 use tracing::{debug_span, info_span};
 
 use crate::{
-    lmcs::{Lmcs, LmcsTree, tree_indices::TreeIndices, utils::log2_strict_u8},
+    lmcs::{Lmcs, LmcsTree, tree_indices::TreeIndices},
     pcs::fri::FriParams,
 };
 

@@ -44,7 +44,7 @@ pub mod periodic;
 use alloc::{vec, vec::Vec};
 use core::marker::PhantomData;
 
-use constraints::{ConstraintFolder, reconstruct_quotient, row_to_packed_ext};
+use constraints::ConstraintFolder;
 use miden_lifted_air::{
     LiftedAir, ReducedAuxValues, ReductionError, RowWindow, VarLenPublicInputs,
 };
@@ -60,6 +60,7 @@ use crate::{
     instance::{AirInstance, InstanceValidationError, validate_air_order, validate_inputs},
     pcs::verifier::{PcsError, verify_aligned},
     proof::{StarkDigest, StarkProof},
+    util::packing::row_to_packed_ext,
 };
 
 /// Errors that can occur during verification.
@@ -272,8 +273,10 @@ where
 
         // Extract aux trace opened values (reconstitute EF from base field components).
         let aux_mat = &opened[aux_g][j];
-        let aux_local = row_to_packed_ext::<F, EF>(&aux_mat.row_slice(0).expect("aux row 0"))?;
-        let aux_next = row_to_packed_ext::<F, EF>(&aux_mat.row_slice(1).expect("aux row 1"))?;
+        let aux_local = row_to_packed_ext::<F, EF>(&aux_mat.row_slice(0).expect("aux row 0"))
+            .ok_or(VerifierError::InvalidAuxShape)?;
+        let aux_next = row_to_packed_ext::<F, EF>(&aux_mat.row_slice(1).expect("aux row 1"))
+            .ok_or(VerifierError::InvalidAuxShape)?;
         let aux_window = RowWindow::from_two_rows(&aux_local, &aux_next);
 
         // Selectors at the lifted OOD point yⱼ = z^{rⱼ} (encapsulated in LiftedCoset).
@@ -322,8 +325,9 @@ where
     // 11. Reconstruct Q(z) and check quotient identity Q(z) * Z_{H_max}(z)
     // Quotient group has a single matrix; row 0 is the evaluation at z.
     let quot_row = opened[quot_g][0].row_slice(0).expect("quotient row 0");
-    let quotient_chunks = row_to_packed_ext::<F, EF>(&quot_row)?;
-    let quotient_z = reconstruct_quotient::<F, EF>(z, &max_lde_coset, &quotient_chunks);
+    let quotient_chunks =
+        row_to_packed_ext::<F, EF>(&quot_row).ok_or(VerifierError::InvalidAuxShape)?;
+    let quotient_z = max_lde_coset.reconstruct_quotient::<F, _>(z, &quotient_chunks);
 
     let vanishing = max_lde_coset.vanishing_at::<F, _>(z);
     if accumulated != quotient_z * vanishing {

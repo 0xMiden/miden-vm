@@ -8,17 +8,17 @@ use gl::{
 };
 use hiding_config::HidingLmcsConfig;
 use lifted_tree::LiftedMerkleTree;
+use miden_lifted_air::log2_strict_u8;
 use miden_stateful_hasher::{Alignable, StatefulHasher};
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::dense::RowMajorMatrix;
 use rand::{RngExt, SeedableRng, rngs::SmallRng};
-use utils::{aligned_len, log2_strict_u8};
 
 use super::*;
 // ============================================================================
 // Test Helpers and Re-exports
 // ============================================================================
-use crate::testing::configs::goldilocks_poseidon2 as gl;
+use crate::{testing::configs::goldilocks_poseidon2 as gl, util::align::aligned_len};
 
 type OpenedRows = BTreeMap<usize, RowList<Felt>>;
 

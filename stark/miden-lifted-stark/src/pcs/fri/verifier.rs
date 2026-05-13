@@ -25,7 +25,8 @@ use thiserror::Error;
 
 use crate::{
     lmcs::{Lmcs, LmcsError, tree_indices::TreeIndices},
-    pcs::{fri::FriParams, utils::horner},
+    pcs::fri::FriParams,
+    util::horner::horner,
 };
 
 /// FRI low-degree test oracle.

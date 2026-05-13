@@ -213,8 +213,8 @@ mod tests {
 
     use super::*;
     use crate::{
-        pcs::utils::bit_reversed_coset_points,
         testing::configs::goldilocks_poseidon2::{Felt, QuadFelt},
+        util::bitrev::bit_reversed_coset_points,
     };
 
     /// Verify `batch_eval_lifted` matches `interpolate_coset` for various lift factors.

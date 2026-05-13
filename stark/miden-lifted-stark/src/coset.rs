@@ -9,6 +9,7 @@ use alloc::vec::Vec;
 use miden_stark_transcript::Channel;
 use p3_field::{ExtensionField, TwoAdicField, batch_multiplicative_inverse};
 use p3_maybe_rayon::prelude::*;
+use p3_util::log2_strict_usize;
 
 use crate::{pcs::params::MAX_LOG_DOMAIN_SIZE, selectors::Selectors};
 
@@ -281,6 +282,60 @@ impl LiftedCoset {
         EF: ExtensionField<F>,
     {
         z.exp_power_of_2(self.log_trace_height as usize) - EF::ONE
+    }
+
+    // ============ Quotient reconstruction ============
+
+    /// Reconstruct `Q(z)` from `D` quotient chunk evaluations.
+    ///
+    /// The quotient `Q` is committed as `D` chunk polynomials qₜ of degree `< N`, one for
+    /// each `H`-coset inside `J`:
+    ///
+    /// qₜ agrees with `Q` on the coset `g·ω_Jᵗ·H`.
+    ///
+    /// During verification we open all qₜ(z) at the same OOD point `z` and need to
+    /// recombine them into `Q(z)`.
+    ///
+    /// The key observation is that the map `x → xᴺ` collapses each coset
+    /// `g·ω_Jᵗ·H` to a single `D`-th root of unity. Let
+    /// - ωₛ = ω_Jᴺ (a `D`-th root of unity),
+    /// - u = (z/s)ᴺ where s = `self.lde_shift()`.
+    ///
+    /// Then `Q(z)` is the barycentric interpolation of the values qₜ(z) at the points
+    /// ωₛᵗ:
+    ///
+    /// ```text
+    /// wₜ = ωₛᵗ / (u − ωₛᵗ)
+    /// Q(z) = (Σₜ wₜ·qₜ(z)) / (Σₜ wₜ)
+    /// ```
+    pub fn reconstruct_quotient<F, EF>(&self, z: EF, chunks: &[EF]) -> EF
+    where
+        F: TwoAdicField,
+        EF: ExtensionField<F>,
+    {
+        let log_d = log2_strict_usize(chunks.len());
+        let shift: F = self.lde_shift();
+        let omega_s = F::two_adic_generator(log_d);
+
+        // u = (z/s)ᴺ where s = lde_shift
+        let u = (z * shift.inverse()).exp_power_of_2(self.log_trace_height as usize);
+
+        // Compute weighted sum: Σₜ wₜ·qₜ(z) and Σₜ wₜ
+        let mut numerator = EF::ZERO;
+        let mut denominator = EF::ZERO;
+        let mut omega_s_t = F::ONE; // ωₛᵗ
+
+        for &q_t in chunks.iter() {
+            let a_t = u - omega_s_t; // aₜ = u − ωₛᵗ
+            let w_t = a_t.inverse() * omega_s_t; // wₜ = ωₛᵗ / aₜ
+
+            numerator += w_t * q_t;
+            denominator += w_t;
+
+            omega_s_t *= omega_s;
+        }
+
+        numerator * denominator.inverse()
     }
 
     // ============ Domain membership ============

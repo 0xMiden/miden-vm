@@ -1,6 +1,7 @@
 use alloc::vec::Vec;
 use core::iter::zip;
 
+use miden_lifted_air::log2_strict_u8;
 use miden_stark_transcript::ProverChannel;
 use p3_field::{
     ExtensionField, Field, FieldArray, PackedFieldExtension, PackedValue, TwoAdicField,
@@ -10,14 +11,11 @@ use p3_maybe_rayon::prelude::*;
 use tracing::info_span;
 
 use crate::{
-    lmcs::{
-        Lmcs, LmcsTree,
-        row_list::RowList,
-        utils::{aligned_widths, log2_strict_u8},
-    },
-    pcs::{
-        deep::{DeepParams, interpolate::PointQuotients},
-        utils::{PackedFieldExtensionExt, bit_reversed_coset_points, horner},
+    lmcs::{Lmcs, LmcsTree, row_list::RowList},
+    pcs::deep::{DeepParams, interpolate::PointQuotients},
+    util::{
+        align::aligned_widths, bitrev::bit_reversed_coset_points, horner::horner,
+        packing::PackedFieldExtensionExt,
     },
 };
 

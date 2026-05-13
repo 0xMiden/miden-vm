@@ -2,6 +2,7 @@
 
 - Optimized prover quotient evaluation by evaluating each AIR's quotient on its native coset (size `n_j · D_j`) and lifting per-AIR, instead of always on the global maximum coset; constraint division is fused into the constraint evaluation loop ([#991](https://github.com/0xMiden/crypto/pull/991)).
 - [BREAKING] Upgraded direct `rand` dependencies to 0.10, updating RNG trait bounds and removing direct `rand_hc` usage ([#995](https://github.com/0xMiden/crypto/pull/995)).
+- [BREAKING] Reorganized `miden-lifted-stark` internals: consolidated `align`, `bitrev`, `horner`, and `packing` helpers under a new `util` module; moved `reconstruct_quotient` onto `LiftedCoset`; removed the legacy `fri::*` re-export facade ([#1000](https://github.com/0xMiden/crypto/pull/1000)).
 
 ## 0.25.0 (2026-05-01)
 

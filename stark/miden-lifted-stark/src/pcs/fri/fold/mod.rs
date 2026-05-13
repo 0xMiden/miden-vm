@@ -25,7 +25,7 @@ use p3_field::{ExtensionField, PackedValue, TwoAdicField};
 use p3_matrix::{Matrix, dense::RowMajorMatrixView};
 use p3_maybe_rayon::prelude::*;
 
-use crate::pcs::utils::PackedFieldExtensionExt;
+use crate::util::packing::PackedFieldExtensionExt;
 
 /// FRI folding strategy.
 ///
@@ -201,11 +201,11 @@ pub mod tests {
 
     use super::*;
     use crate::{
-        pcs::utils::horner,
         testing::{
             configs::goldilocks_poseidon2::{Felt, QuadFelt},
             params::{FRI_FOLD_ARITY_2, FRI_FOLD_ARITY_4, FRI_FOLD_ARITY_8},
         },
+        util::horner::horner,
     };
 
     // Type alias for tests using packed fields

@@ -19,7 +19,7 @@ use p3_field::{
 };
 use p3_matrix::{Matrix, bitrev::BitReversedMatrixView, dense::RowMajorMatrixView};
 use p3_maybe_rayon::prelude::*;
-use packed_row_bitrev::RowMajorMatrixBitrevPackedExt;
+use packed_row_bitrev::collect_vertically_packed_row_pair_bitrev_into;
 
 use crate::{coset::LiftedCoset, prover::periodic::PeriodicLde};
 
@@ -147,7 +147,8 @@ pub fn evaluate_constraints_into<F, EF, A>(
             let selectors = sels.packed_at::<P<F>>(i_start);
 
             // Get main trace as packed row pair (stays in base field)
-            main_trace_view.collect_vertically_packed_row_pair_bitrev_into(
+            collect_vertically_packed_row_pair_bitrev_into::<F, P<F>>(
+                &main_trace_view,
                 i_start,
                 constraint_degree,
                 main_buf,
@@ -155,7 +156,8 @@ pub fn evaluate_constraints_into<F, EF, A>(
             let main_mat = RowMajorMatrixView::new(main_buf.as_slice(), main_width);
 
             // Get aux trace as packed row pair and convert to packed extension field
-            aux_trace_view.collect_vertically_packed_row_pair_bitrev_into(
+            collect_vertically_packed_row_pair_bitrev_into::<F, P<F>>(
+                &aux_trace_view,
                 i_start,
                 constraint_degree,
                 aux_base_buf,
