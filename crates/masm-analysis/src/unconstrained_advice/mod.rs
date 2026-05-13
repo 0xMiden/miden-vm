@@ -7,6 +7,7 @@ mod env;
 mod expr;
 mod grouping;
 mod inter;
+mod local_transfer;
 mod merkle;
 mod nonzero;
 mod provenance;
