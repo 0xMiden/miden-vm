@@ -271,8 +271,7 @@ fn test_move_sig_to_adv_stack() {
 
     let advice_map: Vec<(Word, Vec<Felt>)> = {
         let sig_key = Poseidon2::merge(&[public_key, message]);
-        let signature =
-        falcon512_poseidon2::sign(&secret_key, message);
+        let signature = falcon512_poseidon2::sign(&secret_key, message);
 
         vec![(sig_key, signature)]
     };
