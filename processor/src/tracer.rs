@@ -73,9 +73,8 @@ pub trait Tracer {
     /// - Continuation::FinishExternal: because external nodes are resolved before starting a clock
     ///   cycle,
     /// - Continuation::EnterForest: because entering a new forest does not consume a clock cycle,
-    /// - Continuation::AfterExitDecorators and Continuation::AfterExitDecoratorsBasicBlock: because
-    ///   after-exit decorators are executed at the end of an `END` operation; never at the start of
-    ///   a clock cycle
+    /// - Continuation::AfterExitDecorators: because after-exit decorators are executed at the end
+    ///   of an `END` operation; never at the start of a clock cycle
     ///
     /// Additionally, [miden_core::mast::ExternalNode] nodes are guaranteed to be resolved before
     /// this method is called.
@@ -298,7 +297,7 @@ pub trait Tracer {
     ///
     /// Called by: `U32SPLIT`, `U32ADD`, `U32ADD3`, `U32SUB`, `U32MUL`, `U32MADD`, `U32DIV`,
     /// `U32ASSERT2`.
-    fn record_u32_range_checks(&mut self, _clk: RowIndex, _u32_lo: Felt, _u32_hi: Felt) {}
+    fn record_u32_range_checks(&mut self, _u32_lo: Felt, _u32_hi: Felt) {}
 
     /// Records the procedure hash of a syscall.
     ///

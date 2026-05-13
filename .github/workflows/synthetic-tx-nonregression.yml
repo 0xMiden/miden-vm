@@ -20,16 +20,43 @@ on:
         required: false
         default: "5"
         type: string
+      regression_min_delta_ms:
+        description: Minimum absolute slowdown before the workflow fails.
+        required: false
+        default: "1"
+        type: string
       rayon_num_threads:
         description: RAYON_NUM_THREADS value used for the benchmark.
         required: false
         default: "8"
+        type: string
+      sample_size:
+        description: Criterion sample size.
+        required: false
+        default: "10"
+        type: string
+      measurement_time_secs:
+        description: Criterion measurement time per benchmark.
+        required: false
+        default: "10"
+        type: string
+      warm_up_time_secs:
+        description: Criterion warm-up time per benchmark.
+        required: false
+        default: "1"
+        type: string
+      bench_axes:
+        description: Comma-separated benchmark axes. Defaults to the fast CI axes.
+        required: false
+        default: "exec,trace_prep,verify"
         type: string
       scenario_filter:
         description: Optional SYNTH_SCENARIO filter for the synthetic benchmark.
         required: false
         default: ""
         type: string
+
+permissions: {}
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
@@ -39,7 +66,7 @@ jobs:
   benchmark:
     name: Benchmark baseline vs current
     runs-on: warp-ubuntu-latest-x64-8x
-    timeout-minutes: 240
+    timeout-minutes: 60
     permissions:
       contents: read
     outputs:
@@ -90,7 +117,12 @@ jobs:
           INPUT_BASELINE_REF: ${{ inputs.baseline_ref }}
           INPUT_CURRENT_REF: ${{ inputs.current_ref }}
           INPUT_THRESHOLD_PCT: ${{ inputs.regression_threshold_pct }}
+          INPUT_MIN_DELTA_MS: ${{ inputs.regression_min_delta_ms }}
           INPUT_RAYON_THREADS: ${{ inputs.rayon_num_threads }}
+          INPUT_SAMPLE_SIZE: ${{ inputs.sample_size }}
+          INPUT_MEASUREMENT_TIME_SECS: ${{ inputs.measurement_time_secs }}
+          INPUT_WARM_UP_TIME_SECS: ${{ inputs.warm_up_time_secs }}
+          INPUT_BENCH_AXES: ${{ inputs.bench_axes }}
           INPUT_SCENARIO_FILTER: ${{ inputs.scenario_filter }}
         shell: bash
         run: |
@@ -126,13 +158,23 @@ jobs:
             current_ref="${GITHUB_SHA}"
             baseline_ref="${BEFORE_SHA}"
             threshold_pct="5"
+            min_delta_ms="1"
             rayon_threads="8"
+            sample_size="10"
+            measurement_time_secs="10"
+            warm_up_time_secs="1"
+            bench_axes="exec,trace_prep,verify"
             scenario_filter=""
           else
             baseline_ref="${INPUT_BASELINE_REF}"
             current_ref="${INPUT_CURRENT_REF}"
             threshold_pct="${INPUT_THRESHOLD_PCT}"
+            min_delta_ms="${INPUT_MIN_DELTA_MS}"
             rayon_threads="${INPUT_RAYON_THREADS}"
+            sample_size="${INPUT_SAMPLE_SIZE}"
+            measurement_time_secs="${INPUT_MEASUREMENT_TIME_SECS}"
+            warm_up_time_secs="${INPUT_WARM_UP_TIME_SECS}"
+            bench_axes="${INPUT_BENCH_AXES}"
             scenario_filter="${INPUT_SCENARIO_FILTER}"
           fi
 
@@ -144,8 +186,28 @@ jobs:
             threshold_pct="5"
           fi
 
+          if [[ -z "${min_delta_ms}" ]]; then
+            min_delta_ms="1"
+          fi
+
           if [[ -z "${rayon_threads}" ]]; then
             rayon_threads="8"
+          fi
+
+          if [[ -z "${sample_size}" ]]; then
+            sample_size="10"
+          fi
+
+          if [[ -z "${measurement_time_secs}" ]]; then
+            measurement_time_secs="10"
+          fi
+
+          if [[ -z "${warm_up_time_secs}" ]]; then
+            warm_up_time_secs="1"
+          fi
+
+          if [[ -z "${bench_axes}" ]]; then
+            bench_axes="exec,trace_prep,verify"
           fi
 
           if [[ ! "${threshold_pct}" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
@@ -153,8 +215,28 @@ jobs:
             exit 1
           fi
 
+          if [[ ! "${min_delta_ms}" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+            echo "regression_min_delta_ms must be numeric" >&2
+            exit 1
+          fi
+
           if [[ ! "${rayon_threads}" =~ ^[0-9]+$ ]]; then
             echo "rayon_num_threads must be an integer" >&2
+            exit 1
+          fi
+
+          if [[ ! "${sample_size}" =~ ^[0-9]+$ ]]; then
+            echo "sample_size must be an integer" >&2
+            exit 1
+          fi
+
+          if [[ ! "${measurement_time_secs}" =~ ^[0-9]+$ ]]; then
+            echo "measurement_time_secs must be an integer" >&2
+            exit 1
+          fi
+
+          if [[ ! "${warm_up_time_secs}" =~ ^[0-9]+$ ]]; then
+            echo "warm_up_time_secs must be an integer" >&2
             exit 1
           fi
 
@@ -199,7 +281,12 @@ jobs:
             echo "baseline_sha=${baseline_sha}"
             echo "current_sha=${current_sha}"
             echo "threshold_pct=${threshold_pct}"
+            echo "min_delta_ms=${min_delta_ms}"
             echo "rayon_threads=${rayon_threads}"
+            echo "sample_size=${sample_size}"
+            echo "measurement_time_secs=${measurement_time_secs}"
+            echo "warm_up_time_secs=${warm_up_time_secs}"
+            echo "bench_axes=${bench_axes}"
             echo "scenario_filter=${scenario_filter}"
           } >> "${GITHUB_OUTPUT}"
 
@@ -220,6 +307,10 @@ jobs:
           WORKTREE_DIR: ${{ steps.dirs.outputs.worktree_dir }}
           ARTIFACT_DIR: ${{ steps.dirs.outputs.artifact_dir }}
           RAYON_THREADS: ${{ steps.refs.outputs.rayon_threads }}
+          SAMPLE_SIZE: ${{ steps.refs.outputs.sample_size }}
+          MEASUREMENT_TIME_SECS: ${{ steps.refs.outputs.measurement_time_secs }}
+          WARM_UP_TIME_SECS: ${{ steps.refs.outputs.warm_up_time_secs }}
+          BENCH_AXES: ${{ steps.refs.outputs.bench_axes }}
           SCENARIO_FILTER: ${{ steps.refs.outputs.scenario_filter }}
           BASELINE_SHA: ${{ steps.refs.outputs.baseline_sha }}
         shell: bash
@@ -229,6 +320,10 @@ jobs:
             --repo-root "${WORKTREE_DIR}/baseline" \
             --output-dir "${ARTIFACT_DIR}/baseline" \
             --rayon-num-threads "${RAYON_THREADS}" \
+            --sample-size "${SAMPLE_SIZE}" \
+            --measurement-time-secs "${MEASUREMENT_TIME_SECS}" \
+            --warm-up-time-secs "${WARM_UP_TIME_SECS}" \
+            --bench-axes "${BENCH_AXES}" \
             --scenario-filter "${SCENARIO_FILTER}" \
             --git-ref "${BASELINE_SHA}"
 
@@ -238,6 +333,10 @@ jobs:
           WORKTREE_DIR: ${{ steps.dirs.outputs.worktree_dir }}
           ARTIFACT_DIR: ${{ steps.dirs.outputs.artifact_dir }}
           RAYON_THREADS: ${{ steps.refs.outputs.rayon_threads }}
+          SAMPLE_SIZE: ${{ steps.refs.outputs.sample_size }}
+          MEASUREMENT_TIME_SECS: ${{ steps.refs.outputs.measurement_time_secs }}
+          WARM_UP_TIME_SECS: ${{ steps.refs.outputs.warm_up_time_secs }}
+          BENCH_AXES: ${{ steps.refs.outputs.bench_axes }}
           SCENARIO_FILTER: ${{ steps.refs.outputs.scenario_filter }}
           CURRENT_SHA: ${{ steps.refs.outputs.current_sha }}
         shell: bash
@@ -247,6 +346,10 @@ jobs:
             --repo-root "${WORKTREE_DIR}/current" \
             --output-dir "${ARTIFACT_DIR}/current" \
             --rayon-num-threads "${RAYON_THREADS}" \
+            --sample-size "${SAMPLE_SIZE}" \
+            --measurement-time-secs "${MEASUREMENT_TIME_SECS}" \
+            --warm-up-time-secs "${WARM_UP_TIME_SECS}" \
+            --bench-axes "${BENCH_AXES}" \
             --scenario-filter "${SCENARIO_FILTER}" \
             --git-ref "${CURRENT_SHA}"
 
@@ -256,6 +359,7 @@ jobs:
           GITHUB_WORKSPACE_PATH: ${{ github.workspace }}
           ARTIFACT_DIR: ${{ steps.dirs.outputs.artifact_dir }}
           THRESHOLD_PCT: ${{ steps.refs.outputs.threshold_pct }}
+          MIN_DELTA_MS: ${{ steps.refs.outputs.min_delta_ms }}
         shell: bash
         run: |
           set -euo pipefail
@@ -265,6 +369,7 @@ jobs:
             --summary-out "${ARTIFACT_DIR}/summary.md" \
             --json-out "${ARTIFACT_DIR}/comparison.json" \
             --threshold-pct "${THRESHOLD_PCT}" \
+            --min-regression-ms "${MIN_DELTA_MS}" \
             --github-output "${GITHUB_OUTPUT}"
 
       - name: Publish job summary

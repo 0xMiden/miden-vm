@@ -26,17 +26,16 @@ use crate::{
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct ForestLayout {
     pub(super) node_count: usize,
+    pub(super) internal_node_count: usize,
+    pub(super) external_node_count: usize,
     pub(super) roots_count: usize,
     pub(super) roots_offset: usize,
     pub(super) basic_block_offset: usize,
     pub(super) basic_block_len: usize,
     pub(super) node_entry_offset: usize,
     pub(super) external_digest_offset: usize,
-    #[cfg(test)]
-    pub(super) external_digest_count: usize,
     pub(super) node_hash_offset: Option<usize>,
-    #[cfg(test)]
-    pub(super) node_hash_count: usize,
+    pub(super) advice_map_offset: usize,
 }
 
 /// Raw wire flags from the MAST header.
@@ -97,31 +96,8 @@ impl ForestLayout {
     }
 
     #[cfg(test)]
-    pub(super) fn advice_map_offset(
-        &self,
-        bytes_len: usize,
-    ) -> Result<usize, DeserializationError> {
-        let digest_section_end = if let Some(node_hash_offset) = self.node_hash_offset {
-            node_hash_offset
-                .checked_add(self.node_hash_count * crate::Word::min_serialized_size())
-                .ok_or_else(|| {
-                    DeserializationError::InvalidValue("node hash section overflow".to_string())
-                })?
-        } else {
-            self.external_digest_offset
-                .checked_add(self.external_digest_count * crate::Word::min_serialized_size())
-                .ok_or_else(|| {
-                    DeserializationError::InvalidValue(
-                        "external digest section overflow".to_string(),
-                    )
-                })?
-        };
-
-        if digest_section_end > bytes_len {
-            return Err(DeserializationError::UnexpectedEOF);
-        }
-
-        Ok(digest_section_end)
+    pub(super) fn advice_map_offset(&self) -> Result<usize, DeserializationError> {
+        Ok(self.advice_map_offset)
     }
 }
 
@@ -271,7 +247,11 @@ fn scan_layout_sections<R: OffsetTrackingReader>(
     source: &mut R,
     is_hashless: bool,
 ) -> Result<ForestLayout, DeserializationError> {
-    let node_count = source.read_usize()?;
+    let internal_node_count = source.read_usize()?;
+    let external_node_count = source.read_usize()?;
+    let node_count = internal_node_count
+        .checked_add(external_node_count)
+        .ok_or_else(|| DeserializationError::InvalidValue("node count overflow".to_string()))?;
     if node_count > MastForest::MAX_NODES {
         return Err(DeserializationError::InvalidValue(format!(
             "node count {} exceeds maximum allowed {}",
@@ -280,6 +260,20 @@ fn scan_layout_sections<R: OffsetTrackingReader>(
         )));
     }
     validate_budgeted_count(source, node_count, MastNodeEntry::SERIALIZED_SIZE, "node count")?;
+    validate_budgeted_count(
+        source,
+        external_node_count,
+        crate::Word::min_serialized_size(),
+        "external node count",
+    )?;
+    if !is_hashless {
+        validate_budgeted_count(
+            source,
+            internal_node_count,
+            crate::Word::min_serialized_size(),
+            "internal node count",
+        )?;
+    }
 
     let roots_count = source.read_usize()?;
     validate_budgeted_count(source, roots_count, size_of::<u32>(), "root count")?;
@@ -291,56 +285,92 @@ fn scan_layout_sections<R: OffsetTrackingReader>(
 
     let basic_block_len = source.read_usize()?;
     let basic_block_offset = source.offset();
-    let _basic_block_data = source.read_slice(basic_block_len)?;
-
-    let node_entry_offset = source.offset();
-    let mut external_digest_count = 0usize;
-    for _ in 0..node_count {
-        let node_entry = MastNodeEntry::read_from(source)?;
-        if matches!(node_entry, MastNodeEntry::External) {
-            external_digest_count = external_digest_count.checked_add(1).ok_or_else(|| {
-                DeserializationError::InvalidValue("external digest count overflow".to_string())
-            })?;
-        }
-    }
-
-    let external_digest_offset = source.offset();
-    let external_digests_len = external_digest_count
+    let external_digests_len = external_node_count
         .checked_mul(crate::Word::min_serialized_size())
         .ok_or_else(|| {
             DeserializationError::InvalidValue("external digest length overflow".to_string())
         })?;
-    let _external_digests = source.read_slice(external_digests_len)?;
+    let node_entries_len =
+        node_count.checked_mul(MastNodeEntry::SERIALIZED_SIZE).ok_or_else(|| {
+            DeserializationError::InvalidValue("node entry length overflow".to_string())
+        })?;
+    let node_hash_len =
+        if is_hashless {
+            0
+        } else {
+            internal_node_count.checked_mul(crate::Word::min_serialized_size()).ok_or_else(
+                || DeserializationError::InvalidValue("node hash length overflow".to_string()),
+            )?
+        };
+    let core_tail_len = basic_block_len
+        .checked_add(node_entries_len)
+        .and_then(|len| len.checked_add(external_digests_len))
+        .and_then(|len| len.checked_add(node_hash_len))
+        .ok_or_else(|| {
+            DeserializationError::InvalidValue("core payload length overflow".to_string())
+        })?;
+    let core_tail = source.read_slice(core_tail_len)?;
 
-    let node_hash_count = node_count.checked_sub(external_digest_count).ok_or_else(|| {
-        DeserializationError::InvalidValue("node hash count underflow".to_string())
+    let node_entry_offset = basic_block_offset.checked_add(basic_block_len).ok_or_else(|| {
+        DeserializationError::InvalidValue("node entry offset overflow".to_string())
     })?;
+    let external_digest_offset =
+        node_entry_offset.checked_add(node_entries_len).ok_or_else(|| {
+            DeserializationError::InvalidValue("external digest offset overflow".to_string())
+        })?;
     let node_hash_offset = if is_hashless {
         None
     } else {
-        let offset = source.offset();
-        let node_hash_len =
-            node_hash_count.checked_mul(crate::Word::min_serialized_size()).ok_or_else(|| {
-                DeserializationError::InvalidValue("node hash length overflow".to_string())
-            })?;
-        let _node_hashes = source.read_slice(node_hash_len)?;
-        Some(offset)
+        Some(external_digest_offset.checked_add(external_digests_len).ok_or_else(|| {
+            DeserializationError::InvalidValue("node hash offset overflow".to_string())
+        })?)
     };
+    let advice_map_offset = basic_block_offset.checked_add(core_tail_len).ok_or_else(|| {
+        DeserializationError::InvalidValue("advice map offset overflow".to_string())
+    })?;
+
+    let node_entries_slice = &core_tail[basic_block_len..basic_block_len + node_entries_len];
+    validate_node_entries(node_entries_slice, node_count, external_node_count)?;
 
     Ok(ForestLayout {
         node_count,
+        internal_node_count,
+        external_node_count,
         roots_count,
         roots_offset,
         basic_block_offset,
         basic_block_len,
         node_entry_offset,
         external_digest_offset,
-        #[cfg(test)]
-        external_digest_count,
         node_hash_offset,
-        #[cfg(test)]
-        node_hash_count,
+        advice_map_offset,
     })
+}
+
+fn validate_node_entries(
+    node_entries: &[u8],
+    node_count: usize,
+    external_node_count: usize,
+) -> Result<(), DeserializationError> {
+    let mut reader = SliceReader::new(node_entries);
+    let mut counted_externals = 0usize;
+
+    for _ in 0..node_count {
+        let node_entry = MastNodeEntry::read_from(&mut reader)?;
+        if matches!(node_entry, MastNodeEntry::External) {
+            counted_externals = counted_externals.checked_add(1).ok_or_else(|| {
+                DeserializationError::InvalidValue("external node count overflow".to_string())
+            })?;
+        }
+    }
+
+    if counted_externals != external_node_count {
+        return Err(DeserializationError::InvalidValue(format!(
+            "header external node count {external_node_count} does not match {counted_externals} external node entries"
+        )));
+    }
+
+    Ok(())
 }
 
 fn validate_budgeted_count<R: ByteReader>(

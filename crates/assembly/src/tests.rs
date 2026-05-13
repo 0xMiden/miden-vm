@@ -23,7 +23,7 @@ use miden_core::{
         CallNodeBuilder, JoinNodeBuilder, LoopNodeBuilder, MastForestContributor, MastNode,
         MastNodeExt, MastNodeId, SplitNodeBuilder,
     },
-    operations::Operation,
+    operations::{Decorator, Operation},
     program::Program,
     serde::{Deserializable, DeserializationError, Serializable},
 };
@@ -557,7 +557,11 @@ fn locate_first_node_hash(bytes: &[u8]) -> (usize, usize) {
     offset += 1;
     offset += 3;
 
-    let node_count = read_usize_vint64(bytes, &mut offset);
+    let internal_node_count = read_usize_vint64(bytes, &mut offset);
+    let external_node_count = read_usize_vint64(bytes, &mut offset);
+    let node_count = internal_node_count
+        .checked_add(external_node_count)
+        .expect("node count overflow");
 
     // Roots: len (usize) + elements (u32 LE)
     let roots_len = read_usize_vint64(bytes, &mut offset);
@@ -567,23 +571,10 @@ fn locate_first_node_hash(bytes: &[u8]) -> (usize, usize) {
     let bb_len = read_usize_vint64(bytes, &mut offset);
     offset += bb_len;
 
-    // Fixed-width node entries: one 8-byte entry per node. External nodes carry their digest in a
-    // separate section before internal node hashes, so count them while walking the entry table.
-    let mut external_count = 0usize;
-    for _ in 0..node_count {
-        let end = offset.checked_add(8).expect("offset overflow while reading node entry");
-        let entry_bytes: [u8; 8] = bytes[offset..end].try_into().expect("out-of-bounds node entry");
-        let entry = u64::from_le_bytes(entry_bytes);
-        let discriminant = (entry >> 60) as u8;
-        if discriminant == 8 {
-            external_count += 1;
-        }
-        offset = end;
-    }
+    offset += node_count * 8;
+    offset += external_node_count * 32;
 
-    offset += external_count * 32;
-
-    (offset, node_count)
+    (offset, internal_node_count)
 }
 
 fn build_library_bytes_with_spoofed_first_node_digest(
@@ -2156,6 +2147,78 @@ fn decorators_basic_block() -> TestResult {
     );
     let program = context.assemble(source)?;
     insta::assert_snapshot!(program);
+    Ok(())
+}
+
+#[test]
+fn trailing_decorator_is_after_exit_not_last_op_decorator() -> TestResult {
+    let context = TestContext::default();
+    let source = source_file!(
+        &context,
+        "\
+    begin
+        push.1
+        push.2
+        trace.1
+        add
+        trace.2
+    end"
+    );
+
+    let program = context.assemble(source)?;
+    let forest = program.mast_forest();
+    let (block_id, block) = forest
+        .nodes()
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, node)| {
+            node.get_basic_block().map(|block| (MastNodeId::from(idx as u32), block))
+        })
+        .find(|(_, block)| matches!(block.raw_operations().last(), Some(Operation::Add)))
+        .expect("expected a basic block ending in add");
+
+    let raw_ops = block.raw_operations().collect::<Vec<_>>();
+    let last_real_op_idx = raw_ops.len() - 1;
+    assert!(
+        matches!(raw_ops.last(), Some(Operation::Add)),
+        "expected add to be the last real operation in the block",
+    );
+
+    let indexed_decorators = block.indexed_decorator_iter(forest).collect::<Vec<_>>();
+    let last_op_trace_decorators = indexed_decorators
+        .iter()
+        .filter_map(|(op_idx, decorator_id)| {
+            (*op_idx == last_real_op_idx).then(|| match &forest[*decorator_id] {
+                Decorator::Trace(value) => Some(*value),
+                _ => None,
+            })?
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        last_op_trace_decorators,
+        vec![1],
+        "only the pre-add decorator should be attached to the last real op",
+    );
+
+    let after_exit_trace_decorators = block
+        .after_exit(forest)
+        .iter()
+        .map(|decorator_id| match &forest[*decorator_id] {
+            Decorator::Trace(value) => *value,
+            decorator => panic!("expected trace decorator in after_exit, got {decorator:?}"),
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        after_exit_trace_decorators,
+        vec![2],
+        "trailing decorator should be placed in the containing block's after_exit set",
+    );
+
+    assert!(
+        forest.after_exit_decorators(block_id) == block.after_exit(forest),
+        "block-level and forest-level after_exit accessors should agree",
+    );
+
     Ok(())
 }
 

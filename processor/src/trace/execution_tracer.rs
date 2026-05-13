@@ -590,10 +590,9 @@ impl Tracer for ExecutionTracer {
             },
             Continuation::FinishExternal(_)
             | Continuation::EnterForest(_)
-            | Continuation::AfterExitDecorators(_)
-            | Continuation::AfterExitDecoratorsBasicBlock(_) => {
+            | Continuation::AfterExitDecorators(_) => {
                 panic!(
-                    "FinishExternal, EnterForest, AfterExitDecorators and AfterExitDecoratorsBasicBlock continuations are guaranteed not to be passed here"
+                    "FinishExternal, EnterForest, and AfterExitDecorators continuations are guaranteed not to be passed here"
                 )
             },
         }
@@ -764,11 +763,11 @@ impl Tracer for ExecutionTracer {
     }
 
     #[inline(always)]
-    fn record_u32_range_checks(&mut self, clk: RowIndex, u32_lo: Felt, u32_hi: Felt) {
+    fn record_u32_range_checks(&mut self, u32_lo: Felt, u32_hi: Felt) {
         let (t1, t0) = split_u32_into_u16(u32_lo.as_canonical_u64());
         let (t3, t2) = split_u32_into_u16(u32_hi.as_canonical_u64());
 
-        self.range_checker.record_range_check_u32(clk, [t0, t1, t2, t3]);
+        self.range_checker.record_range_check_u32([t0, t1, t2, t3]);
     }
 
     #[inline(always)]

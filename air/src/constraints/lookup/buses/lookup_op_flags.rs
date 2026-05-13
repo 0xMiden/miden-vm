@@ -550,7 +550,10 @@ accessors!(
 
 #[cfg(test)]
 mod tests {
-    use miden_core::{ONE, ZERO, operations::Operation};
+    use miden_core::{
+        Felt, ONE, ZERO,
+        operations::{Operation, opcodes},
+    };
 
     use super::LookupOpFlags;
     use crate::constraints::op_flags::generate_test_row;
@@ -588,9 +591,113 @@ mod tests {
         }
     }
 
-    fn flags_for_opcode(opcode: usize) -> LookupOpFlags<miden_core::Felt> {
+    fn flags_for_opcode(opcode: usize) -> LookupOpFlags<Felt> {
         let row = generate_test_row(opcode);
         let row_next = generate_test_row(0);
         LookupOpFlags::from_main_cols(&row.decoder, &row.stack, &row_next.decoder)
+    }
+
+    #[test]
+    fn boolean_row_matches_polynomial_for_chiplet_request_ops() {
+        let cases: [(&str, u8, fn(&LookupOpFlags<Felt>) -> Felt); 26] = [
+            ("join", opcodes::JOIN, LookupOpFlags::<Felt>::join),
+            ("split", opcodes::SPLIT, LookupOpFlags::<Felt>::split),
+            ("loop", opcodes::LOOP, LookupOpFlags::<Felt>::loop_op),
+            ("span", opcodes::SPAN, LookupOpFlags::<Felt>::span),
+            ("call", opcodes::CALL, LookupOpFlags::<Felt>::call),
+            ("syscall", opcodes::SYSCALL, LookupOpFlags::<Felt>::syscall),
+            ("respan", opcodes::RESPAN, LookupOpFlags::<Felt>::respan),
+            ("end", opcodes::END, LookupOpFlags::<Felt>::end),
+            ("dyn", opcodes::DYN, LookupOpFlags::<Felt>::dyn_op),
+            ("dyncall", opcodes::DYNCALL, LookupOpFlags::<Felt>::dyncall),
+            ("hperm", opcodes::HPERM, LookupOpFlags::<Felt>::hperm),
+            ("mpverify", opcodes::MPVERIFY, LookupOpFlags::<Felt>::mpverify),
+            ("mrupdate", opcodes::MRUPDATE, LookupOpFlags::<Felt>::mrupdate),
+            ("mload", opcodes::MLOAD, LookupOpFlags::<Felt>::mload),
+            ("mstore", opcodes::MSTORE, LookupOpFlags::<Felt>::mstore),
+            ("mloadw", opcodes::MLOADW, LookupOpFlags::<Felt>::mloadw),
+            ("mstorew", opcodes::MSTOREW, LookupOpFlags::<Felt>::mstorew),
+            ("mstream", opcodes::MSTREAM, LookupOpFlags::<Felt>::mstream),
+            ("pipe", opcodes::PIPE, LookupOpFlags::<Felt>::pipe),
+            ("cryptostream", opcodes::CRYPTOSTREAM, LookupOpFlags::<Felt>::cryptostream),
+            ("hornerbase", opcodes::HORNERBASE, LookupOpFlags::<Felt>::hornerbase),
+            ("hornerext", opcodes::HORNEREXT, LookupOpFlags::<Felt>::hornerext),
+            ("u32and", opcodes::U32AND, LookupOpFlags::<Felt>::u32and),
+            ("u32xor", opcodes::U32XOR, LookupOpFlags::<Felt>::u32xor),
+            ("evalcircuit", opcodes::EVALCIRCUIT, LookupOpFlags::<Felt>::evalcircuit),
+            ("log_precompile", opcodes::LOGPRECOMPILE, LookupOpFlags::<Felt>::log_precompile),
+        ];
+
+        for (name, opcode, get_flag) in cases {
+            let row = generate_test_row(opcode.into());
+            let row_next = generate_test_row(0);
+            let polynomial =
+                LookupOpFlags::from_main_cols(&row.decoder, &row.stack, &row_next.decoder);
+            let boolean =
+                LookupOpFlags::from_boolean_row(&row.decoder, &row.stack, &row_next.decoder);
+
+            assert_eq!(get_flag(&polynomial), ONE, "{name} polynomial flag should be active");
+            assert_eq!(get_flag(&boolean), ONE, "{name} boolean flag should be active");
+            assert_flags_match(name, &boolean, &polynomial);
+        }
+    }
+
+    fn assert_flags_match(
+        name: &str,
+        actual: &LookupOpFlags<Felt>,
+        expected: &LookupOpFlags<Felt>,
+    ) {
+        macro_rules! check {
+            ($($field:ident),* $(,)?) => {
+                $(
+                    assert_eq!(
+                        actual.$field,
+                        expected.$field,
+                        "{}: {} flag mismatch",
+                        name,
+                        stringify!($field),
+                    );
+                )*
+            };
+        }
+
+        check!(
+            end,
+            repeat,
+            respan,
+            call,
+            syscall,
+            mrupdate,
+            cryptostream,
+            join,
+            split,
+            span,
+            loop_op,
+            dyn_op,
+            dyncall,
+            push,
+            hperm,
+            mpverify,
+            mstream,
+            pipe,
+            evalcircuit,
+            log_precompile,
+            hornerbase,
+            hornerext,
+            mload,
+            mstore,
+            mloadw,
+            mstorew,
+            u32and,
+            u32xor,
+            end_next,
+            repeat_next,
+            respan_next,
+            halt_next,
+            left_shift,
+            right_shift,
+            overflow,
+            u32_rc_op,
+        );
     }
 }

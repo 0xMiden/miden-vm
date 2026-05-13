@@ -50,7 +50,7 @@ impl ForestDigests {
     ///
     /// `bytes` and `layout` provide the already-scanned structural wire view. When
     /// `remaining_allocation_budget` is `Some`, helper allocations needed for untrusted validation
-    /// such as the slot table and rebuilt hash table are charged against that budget. Trusted
+    /// such as the rebuilt hash table are charged against that budget. Trusted
     /// structural views pass `None` here, which keeps the previous unbudgeted inspection behavior.
     fn new(
         bytes: &[u8],
@@ -246,9 +246,6 @@ fn build_digest_slot_by_node(
     layout: &ForestLayout,
     remaining_allocation_budget: Option<&mut usize>,
 ) -> Result<Vec<u32>, DeserializationError> {
-    // Digest sections are packed densely by node kind rather than by absolute node index.
-    // This scan records, for each node index, which slot to read from in the corresponding digest
-    // source.
     let mut slots = Vec::new();
     reserve_node_capacity(
         &mut slots,
@@ -261,18 +258,24 @@ fn build_digest_slot_by_node(
 
     for index in 0..layout.node_count {
         let entry = layout.read_node_entry_at(bytes, index)?;
-        if matches!(entry, MastNodeEntry::External) {
-            slots.push(external_slot);
+        let slot = if matches!(entry, MastNodeEntry::External) {
+            let slot = external_slot;
             external_slot = external_slot.checked_add(1).ok_or_else(|| {
                 DeserializationError::InvalidValue("external digest slot overflow".to_string())
             })?;
+            slot
         } else {
-            slots.push(node_hash_slot);
+            let slot = node_hash_slot;
             node_hash_slot = node_hash_slot.checked_add(1).ok_or_else(|| {
                 DeserializationError::InvalidValue("node hash slot overflow".to_string())
             })?;
-        }
+            slot
+        };
+        slots.push(slot);
     }
+
+    debug_assert_eq!(node_hash_slot as usize, layout.internal_node_count);
+    debug_assert_eq!(external_slot as usize, layout.external_node_count);
 
     Ok(slots)
 }
@@ -295,8 +298,7 @@ fn recompute_hash_table(
         "hash table",
         remaining_allocation_budget,
     )?;
-    let mut external_digest_index = 0usize;
-
+    let mut external_slot = 0usize;
     for index in 0..layout.node_count {
         let entry = layout.read_node_entry_at(bytes, index)?;
         let computed = match entry {
@@ -338,9 +340,9 @@ fn recompute_hash_table(
             MastNodeEntry::Dyncall => DynNode::DYNCALL_DEFAULT_DIGEST,
             MastNodeEntry::External => {
                 let digest =
-                    read_digest_entry(bytes, layout.external_digest_offset, external_digest_index)?;
-                external_digest_index = external_digest_index.checked_add(1).ok_or_else(|| {
-                    DeserializationError::InvalidValue("external digest index overflow".to_string())
+                    read_digest_entry(bytes, layout.external_digest_offset, external_slot)?;
+                external_slot = external_slot.checked_add(1).ok_or_else(|| {
+                    DeserializationError::InvalidValue("external digest slot overflow".to_string())
                 })?;
                 digest
             },

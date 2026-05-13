@@ -598,6 +598,7 @@ impl MastForestBuilder {
 
         let mut operations: Vec<Operation> = Vec::new();
         let mut decorators = DecoratorList::new();
+        let mut pending_after_exit = Vec::new();
         // Track asm_ops and debug_vars being accumulated for merged blocks, with adjusted indices
         let mut merged_asm_ops: Vec<(usize, AsmOpId)> = Vec::new();
         let mut merged_debug_vars: Vec<(usize, miden_core::mast::DebugVarId)> = Vec::new();
@@ -615,19 +616,29 @@ impl MastForestBuilder {
             ) {
                 // Collect decorators and operations from the block (while still borrowing)
                 // We need owned copies so we can drop the borrow before mutating self
-                let (block_decorators, block_ops) = {
+                let (block_decorators, block_before_enter, block_after_exit, block_ops) = {
                     let basic_block_node =
                         self.mast_forest[basic_block_id].get_basic_block().unwrap();
-                    let block_decorators: Vec<_> =
-                        basic_block_node.raw_decorator_iter(&self.mast_forest).collect();
+                    let block_decorators =
+                        basic_block_node.raw_op_indexed_decorators(&self.mast_forest);
+                    let block_before_enter =
+                        basic_block_node.before_enter(&self.mast_forest).to_vec();
+                    let block_after_exit = basic_block_node.after_exit(&self.mast_forest).to_vec();
                     let block_ops: Vec<Operation> = basic_block_node
                         .op_batches()
                         .iter()
                         .flat_map(|b| b.raw_ops().copied())
                         .collect();
-                    (block_decorators, block_ops)
+                    (block_decorators, block_before_enter, block_after_exit, block_ops)
                 };
                 let ops_offset = operations.len();
+
+                for decorator in core::mem::take(&mut pending_after_exit) {
+                    decorators.push((ops_offset, decorator));
+                }
+                for decorator in block_before_enter {
+                    decorators.push((ops_offset, decorator));
+                }
 
                 // Transfer any pending asm_ops and debug_vars for this block to the merged result
                 self.transfer_asm_ops_for_merge(basic_block_id, ops_offset, &mut merged_asm_ops);
@@ -637,10 +648,11 @@ impl MastForestBuilder {
                     &mut merged_debug_vars,
                 );
 
-                // Add decorators with adjusted indices
+                // Add operation-indexed decorators with adjusted indices.
                 for (op_idx, decorator) in block_decorators {
                     decorators.push((op_idx + ops_offset, decorator));
                 }
+                pending_after_exit.extend(block_after_exit);
                 operations.extend(block_ops);
             } else {
                 // If we don't want to merge this block, flush the buffer of operations into a
@@ -648,6 +660,7 @@ impl MastForestBuilder {
                 if !operations.is_empty() {
                     let block_ops = core::mem::take(&mut operations);
                     let block_decorators = core::mem::take(&mut decorators);
+                    let block_after_exit = core::mem::take(&mut pending_after_exit);
                     let block_asm_ops = core::mem::take(&mut merged_asm_ops);
                     let block_debug_vars = core::mem::take(&mut merged_debug_vars);
                     let merged_basic_block_id = self.ensure_block_with_asm_op_and_debug_var_ids(
@@ -656,7 +669,7 @@ impl MastForestBuilder {
                         block_asm_ops,
                         block_debug_vars,
                         vec![],
-                        vec![],
+                        block_after_exit,
                     )?;
 
                     merged_basic_blocks.push(merged_basic_block_id);
@@ -668,14 +681,14 @@ impl MastForestBuilder {
         // Mark the removed basic blocks as merged
         self.merged_basic_block_ids.extend(contiguous_basic_block_ids.iter());
 
-        if !operations.is_empty() || !decorators.is_empty() {
+        if !operations.is_empty() || !decorators.is_empty() || !pending_after_exit.is_empty() {
             let merged_basic_block = self.ensure_block_with_asm_op_and_debug_var_ids(
                 operations,
                 decorators,
                 merged_asm_ops,
                 merged_debug_vars,
                 vec![],
-                vec![],
+                pending_after_exit,
             )?;
             merged_basic_blocks.push(merged_basic_block);
         }
@@ -739,7 +752,8 @@ impl MastForestBuilder {
 
         let base_fingerprint = block
             .fingerprint_for_node(&self.mast_forest, &self.hash_by_node_id)
-            .expect("hash_by_node_id should contain the fingerprints of all children of `node`");
+            .into_diagnostic()
+            .wrap_err("assembler failed to fingerprint basic block")?;
         let dedup_fingerprint = self.maybe_augment(
             self.maybe_augment(
                 base_fingerprint,
@@ -1056,7 +1070,8 @@ impl MastForestBuilder {
         // builder itself.
         let base_fingerprint = block
             .fingerprint_for_node(&self.mast_forest, &self.hash_by_node_id)
-            .expect("hash_by_node_id should contain the fingerprints of all children of `node`");
+            .into_diagnostic()
+            .wrap_err("assembler failed to fingerprint basic block")?;
         let dedup_fingerprint = self.maybe_augment(
             self.maybe_augment(base_fingerprint, &serialize_asm_ops(&asm_ops)),
             &serialize_debug_vars(&self.mast_forest, &debug_vars),
@@ -1592,6 +1607,112 @@ mod tests {
         assert_eq!(merged_blocks.len(), 2);
         assert_eq!(merged_blocks[0], large_block_id);
         assert_eq!(merged_blocks[1], small_block_id);
+    }
+
+    #[test]
+    fn test_merge_basic_blocks_preserves_trailing_after_exit_decorator() {
+        let mut builder = MastForestBuilder::new(&[]).unwrap();
+
+        let first_block_id = builder
+            .ensure_block(vec![Operation::Add], Vec::new(), vec![], vec![], vec![], vec![])
+            .unwrap();
+        let after_exit_decorator = builder.ensure_decorator(Decorator::Trace(7)).unwrap();
+        let second_block_id = builder
+            .ensure_block(
+                vec![Operation::Mul],
+                Vec::new(),
+                vec![],
+                vec![],
+                vec![],
+                vec![after_exit_decorator],
+            )
+            .unwrap();
+
+        let merged_blocks = builder.merge_basic_blocks(&[first_block_id, second_block_id]).unwrap();
+
+        assert_eq!(merged_blocks.len(), 1);
+        let merged_block_id = merged_blocks[0];
+        let merged_block = builder.mast_forest[merged_block_id].unwrap_basic_block();
+
+        assert!(merged_block.indexed_decorator_iter(&builder.mast_forest).next().is_none());
+        assert_eq!(
+            builder.mast_forest.after_exit_decorators(merged_block_id),
+            &[after_exit_decorator],
+        );
+    }
+
+    #[test]
+    fn test_merge_basic_blocks_places_boundary_after_exit_before_next_before_enter() {
+        let mut builder = MastForestBuilder::new(&[]).unwrap();
+
+        let first_after_exit = builder.ensure_decorator(Decorator::Trace(1)).unwrap();
+        let first_block_id = builder
+            .ensure_block(
+                vec![Operation::Add],
+                Vec::new(),
+                vec![],
+                vec![],
+                vec![],
+                vec![first_after_exit],
+            )
+            .unwrap();
+
+        let second_before_enter = builder.ensure_decorator(Decorator::Trace(2)).unwrap();
+        let second_block_id = builder
+            .ensure_block(
+                vec![Operation::Mul],
+                Vec::new(),
+                vec![],
+                vec![],
+                vec![second_before_enter],
+                vec![],
+            )
+            .unwrap();
+
+        let merged_blocks = builder.merge_basic_blocks(&[first_block_id, second_block_id]).unwrap();
+
+        assert_eq!(merged_blocks.len(), 1);
+        let merged_block_id = merged_blocks[0];
+        let merged_block = builder.mast_forest[merged_block_id].unwrap_basic_block();
+        let decorators: Vec<_> =
+            merged_block.indexed_decorator_iter(&builder.mast_forest).collect();
+
+        assert_eq!(decorators, vec![(1, first_after_exit), (1, second_before_enter)]);
+        assert!(builder.mast_forest.after_exit_decorators(merged_block_id).is_empty());
+    }
+
+    #[test]
+    fn ensure_block_rejects_decorator_index_beyond_operation_count_without_panicking() {
+        let mut builder = MastForestBuilder::new(&[]).unwrap();
+        let decorator_id = builder.ensure_decorator(Decorator::Trace(42)).unwrap();
+
+        let result = builder.ensure_block(
+            vec![Operation::Add],
+            vec![(2, decorator_id)],
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+        );
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn ensure_block_rejects_post_last_decorator_index_without_panicking() {
+        let mut builder = MastForestBuilder::new(&[]).unwrap();
+        let decorator_id = builder.ensure_decorator(Decorator::Trace(42)).unwrap();
+
+        let result = builder.ensure_block(
+            vec![Operation::Add],
+            vec![(1, decorator_id)],
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+        );
+
+        assert!(result.is_err());
     }
 
     /// Cloning a block with debug vars via `to_builder().with_before_enter()` must

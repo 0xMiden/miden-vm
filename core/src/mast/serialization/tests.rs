@@ -341,8 +341,6 @@ fn serialize_deserialize_all_nodes() {
     let basic_block_id = {
         let operations = sample_basic_block_operations_all_variants();
 
-        let num_operations = operations.len();
-
         // Note: AssemblyOps are now stored separately in DebugInfo's asm_op storage,
         // not as decorators. See the asm_op module tests for AssemblyOp serialization.
         let decorators = vec![
@@ -352,8 +350,8 @@ fn serialize_deserialize_all_nodes() {
             (15, Decorator::Debug(DebugOptions::MemInterval(0, 16))),
             (17, Decorator::Debug(DebugOptions::LocalInterval(1, 2, 3))),
             (19, Decorator::Debug(DebugOptions::AdvStackTop(255))),
-            (num_operations, Decorator::Trace(55)),
         ];
+        let after_exit_decorator = Decorator::Trace(55);
 
         // Convert raw decorators to decorator list by adding them to the forest first
         let decorator_list: Vec<(usize, crate::mast::DecoratorId)> = decorators
@@ -363,8 +361,10 @@ fn serialize_deserialize_all_nodes() {
             })
             .collect::<Result<Vec<_>, MastForestError>>()
             .unwrap();
+        let after_exit = vec![mast_forest.add_decorator(after_exit_decorator).unwrap()];
 
         BasicBlockNodeBuilder::new(operations, decorator_list)
+            .with_after_exit(after_exit)
             .add_to_forest(&mut mast_forest)
             .unwrap()
     };
@@ -686,7 +686,8 @@ fn mast_forest_serialize_deserialize_with_child_ids_exceeding_parent_id() {
     let first = BasicBlockNodeBuilder::new(vec![Operation::U32add], vec![(0, deco0)])
         .add_to_forest(&mut forest)
         .unwrap();
-    let second = BasicBlockNodeBuilder::new(vec![Operation::U32and], vec![(1, deco1)])
+    let second = BasicBlockNodeBuilder::new(vec![Operation::U32and], Vec::new())
+        .with_after_exit(vec![deco1])
         .add_to_forest(&mut forest)
         .unwrap();
     JoinNodeBuilder::new([first, second]).add_to_forest(&mut forest).unwrap();
@@ -719,7 +720,8 @@ fn mast_forest_serialize_deserialize_with_overflowing_ids_fails() {
     let mut forest = MastForest::new();
     let deco0 = forest.add_decorator(Decorator::Trace(0)).unwrap();
     let deco1 = forest.add_decorator(Decorator::Trace(1)).unwrap();
-    BasicBlockNodeBuilder::new(vec![Operation::U32add], vec![(0, deco0), (1, deco1)])
+    BasicBlockNodeBuilder::new(vec![Operation::U32add], vec![(0, deco0)])
+        .with_after_exit(vec![deco1])
         .add_to_forest(&mut forest)
         .unwrap();
     // hack to force addition of a node which builder would return an error at runtime
@@ -800,7 +802,8 @@ fn mast_forest_serialize_deserialize_advice_map() {
     let first = BasicBlockNodeBuilder::new(vec![Operation::U32add], vec![(0, deco0)])
         .add_to_forest(&mut forest)
         .unwrap();
-    let second = BasicBlockNodeBuilder::new(vec![Operation::U32and], vec![(1, deco1)])
+    let second = BasicBlockNodeBuilder::new(vec![Operation::U32and], Vec::new())
+        .with_after_exit(vec![deco1])
         .add_to_forest(&mut forest)
         .unwrap();
     JoinNodeBuilder::new([first, second]).add_to_forest(&mut forest).unwrap();
@@ -895,7 +898,8 @@ fn mast_forest_deserialize_invalid_ops_offset_fails() {
     let mut reader = SliceReader::new(&serialized);
 
     let _: [u8; 8] = reader.read_array().unwrap(); // magic (4) + flags (1) + version (3)
-    let _node_count: usize = reader.read().unwrap();
+    let _internal_node_count: usize = reader.read().unwrap();
+    let _external_node_count: usize = reader.read().unwrap();
     let _roots: Vec<u32> = Deserializable::read_from(&mut reader).unwrap();
     let _basic_block_data: Vec<u8> = Deserializable::read_from(&mut reader).unwrap();
 
@@ -1244,6 +1248,13 @@ fn assert_header_flags(bytes: &[u8], expected_flags: u8) {
     assert_eq!(&bytes[5..8], &[0, 0, 3], "Version should be [0, 0, 3]");
 }
 
+fn read_header_counts(bytes: &[u8]) -> (usize, usize) {
+    let mut offset = 8;
+    let internal_node_count = read_usize_at(bytes, &mut offset).unwrap();
+    let external_node_count = read_usize_at(bytes, &mut offset).unwrap();
+    (internal_node_count, external_node_count)
+}
+
 #[test]
 fn test_header_flags_for_all_serialization_modes() {
     let mut forest = MastForest::new();
@@ -1263,6 +1274,23 @@ fn test_header_flags_for_all_serialization_modes() {
     assert_header_flags(&hashless_bytes, 0x03);
 }
 
+#[test]
+fn test_header_counts_match_node_kinds() {
+    let mut forest = MastForest::new();
+    let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let external_id = ExternalNodeBuilder::new(Word::default()).add_to_forest(&mut forest).unwrap();
+    let join_id = JoinNodeBuilder::new([block_id, external_id])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(join_id);
+
+    let (internal_node_count, external_node_count) = read_header_counts(&forest.to_bytes());
+    assert_eq!(internal_node_count, 2);
+    assert_eq!(external_node_count, 1);
+}
+
 /// Test that legacy version headers are rejected.
 #[test]
 fn test_legacy_version_is_rejected() {
@@ -1279,6 +1307,40 @@ fn test_legacy_version_is_rejected() {
     assert_matches!(
         result,
         Err(DeserializationError::InvalidValue(msg)) if msg.contains("Unsupported version")
+    );
+}
+
+#[test]
+fn test_deserialization_rejects_mismatched_header_counts() {
+    let mut forest = MastForest::new();
+    let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(block_id);
+
+    let mut bytes = forest.to_bytes();
+    let mut offset = 8;
+    let internal_count_offset = offset;
+    let _internal_node_count = read_usize_at(&bytes, &mut offset).unwrap();
+    let external_count_offset = offset;
+    let _external_node_count = read_usize_at(&bytes, &mut offset).unwrap();
+
+    let mut encoded_internal = Vec::new();
+    0usize.write_into(&mut encoded_internal);
+    let mut encoded_external = Vec::new();
+    1usize.write_into(&mut encoded_external);
+    assert_eq!(encoded_internal.len(), 1);
+    assert_eq!(encoded_external.len(), 1);
+    bytes[internal_count_offset..internal_count_offset + encoded_internal.len()]
+        .copy_from_slice(&encoded_internal);
+    bytes[external_count_offset..external_count_offset + encoded_external.len()]
+        .copy_from_slice(&encoded_external);
+
+    let result = SerializedMastForest::new(&bytes);
+    assert_matches!(
+        result,
+        Err(DeserializationError::InvalidValue(msg))
+            if msg.contains("header external node count 1 does not match 0 external node entries")
     );
 }
 
@@ -1701,7 +1763,6 @@ mod proptests {
                         );
                     }
                 }
-
             }
         }
 
@@ -1903,7 +1964,6 @@ mod proptests {
                 );
             }
 
-            // Verify debug info is empty
             prop_assert!(
                 restored.debug_info.is_empty(),
                 "DebugInfo should be empty after stripped roundtrip"
@@ -2309,8 +2369,10 @@ fn locate_single_block_indptr_and_digest_offsets(bytes: &[u8]) -> (usize, usize)
     // header: MAGIC (4) + FLAGS (1) + VERSION (3)
     let _header: [u8; 8] = cursor.read_array().unwrap();
 
-    let node_count: usize = cursor.read().unwrap();
-    assert_eq!(node_count, 1);
+    let internal_node_count: usize = cursor.read().unwrap();
+    assert_eq!(internal_node_count, 1);
+    let external_node_count: usize = cursor.read().unwrap();
+    assert_eq!(external_node_count, 0);
 
     let _roots: Vec<u32> = Deserializable::read_from(&mut cursor).unwrap();
 
@@ -2402,6 +2464,31 @@ fn test_untrusted_forest_accepts_full_prefix_batch() {
     let result = untrusted.validate();
 
     assert!(result.is_ok(), "full prefix batches should validate");
+}
+
+#[test]
+fn test_untrusted_forest_rejects_post_last_op_decorator_storage() {
+    let mut forest = MastForest::new();
+    let decorator_id = forest.add_decorator(Decorator::Trace(42)).unwrap();
+    let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.debug_info_mut().clear_mappings();
+    forest
+        .debug_info_mut()
+        .register_op_indexed_decorators(block_id, vec![(1, decorator_id)])
+        .unwrap();
+    forest.make_root(block_id);
+
+    let bytes = forest.to_bytes();
+
+    let parsed = MastForest::read_from_bytes(&bytes).unwrap();
+    let result = parsed.validate();
+
+    assert_matches!(
+        result,
+        Err(MastForestError::DecoratorOpIndexOutOfBounds { operation_idx: 1, num_operations: 1 })
+    );
 }
 
 #[test]
@@ -2581,9 +2668,10 @@ fn test_deserialization_rejects_excessive_node_count() {
     bytes.write_u8(0); // flags
     VERSION.write_into(&mut bytes);
 
-    // Write excessive node count (MAX_NODES + 1)
+    // Write excessive derived node count (MAX_NODES + 1 internal nodes)
     let excessive_count: usize = MastForest::MAX_NODES + 1;
     excessive_count.write_into(&mut bytes);
+    0usize.write_into(&mut bytes);
 
     // Attempt to deserialize - should fail before any large allocation
     let result = MastForest::read_from_bytes(&bytes);
@@ -2606,6 +2694,7 @@ fn test_untrusted_deserialization_rejects_node_count_above_budget_bound() {
     VERSION.write_into(&mut bytes);
 
     2usize.write_into(&mut bytes);
+    0usize.write_into(&mut bytes);
 
     let result = UntrustedMastForest::read_from_bytes_with_budget(&bytes, bytes.len());
     assert!(result.is_err());
