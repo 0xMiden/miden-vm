@@ -1558,65 +1558,32 @@ fn update_line_has_syntax_from_text(line_has_syntax: &mut bool, text: &str) {
 }
 
 fn needs_space(previous: &SyntaxToken, next: &SyntaxToken, style: SpacingStyle) -> bool {
-    use SyntaxKind::{
-        At, Colon, ColonColon, Comma, Dot, DotDot, Equal, LAngle, LBrace, LBracket, LParen, Minus,
-        Plus, RAngle, RArrow, RBrace, RBracket, RParen, Slash, SlashSlash, Star,
-    };
+    use SyntaxKind::*;
 
     let previous_kind = previous.kind();
     let next_kind = next.kind();
 
-    if previous_kind == At {
+    if matches!(previous_kind, At | Dot | ColonColon | LAngle | LParen | LBracket | LBrace) {
         return false;
     }
 
-    if matches!(previous_kind, Dot | ColonColon | LAngle | LParen | LBracket | LBrace) {
-        return false;
+    match next_kind {
+        Dot | ColonColon | DotDot | Comma | LAngle | RAngle | LParen | RParen | RBracket
+        | RBrace => false,
+        LBracket | Equal if matches!(style, SpacingStyle::CompactInstruction) => false,
+        Colon if matches!(style, SpacingStyle::TypeBodyItem) => false,
+        Tombstone | Error | SourceFile | Doc | Import | Constant | TypeDecl | AdviceMap
+        | BeginBlock | Procedure | Attribute | Visibility | Signature | Block | IfOp | WhileOp
+        | RepeatOp | Instruction | Path | Expr | TypeBody | Whitespace | Newline | Comment
+        | DocComment | Ident | SpecialIdent | Number | QuotedIdent | QuotedString | At | Bang
+        | Colon | Equal | LBrace | LBracket | Minus | Plus | RArrow | Semicolon | Slash
+        | SlashSlash | Star => match previous_kind {
+            Equal if matches!(style, SpacingStyle::CompactInstruction) => false,
+            DotDot => false,
+            Comma | Equal | RArrow | Colon | Plus | Minus | Star | Slash | SlashSlash => true,
+            _ => true,
+        },
     }
-
-    if matches!(
-        next_kind,
-        Dot | ColonColon | DotDot | Comma | LAngle | RAngle | RParen | RBracket | RBrace
-    ) {
-        return false;
-    }
-
-    if next_kind == LParen {
-        return false;
-    }
-
-    if matches!(style, SpacingStyle::CompactInstruction) && matches!(next_kind, LBracket | Equal) {
-        return false;
-    }
-
-    if matches!(style, SpacingStyle::CompactInstruction) && previous_kind == Equal {
-        return false;
-    }
-
-    if matches!(style, SpacingStyle::TypeBodyItem) && next_kind == Colon {
-        return false;
-    }
-
-    if previous_kind == DotDot {
-        return false;
-    }
-
-    if matches!(
-        previous_kind,
-        Comma | Equal | RArrow | Colon | Plus | Minus | Star | Slash | SlashSlash
-    ) {
-        return true;
-    }
-
-    if matches!(next_kind, Equal | RArrow | Colon | Plus | Minus | Star | Slash | SlashSlash) {
-        return true;
-    }
-
-    if next_kind == LBrace {
-        return true;
-    }
-
-    true
 }
 
 #[cfg(test)]
