@@ -4,9 +4,10 @@ use masm_decompiler::{Stmt, intrinsic_merkle_root_arg_range};
 
 use super::{
     domain::AdviceFact,
+    effect::AdviceEffect,
     shared::Env,
     summary::{AdviceDiagnosticContext, AdviceDiagnosticsMap, AdviceSummaryMap},
-    walker::{self, AdviceCapability, AdviceEffect},
+    walker::{self, AdviceCapability},
 };
 use crate::prepared::PreparedAnalysis;
 

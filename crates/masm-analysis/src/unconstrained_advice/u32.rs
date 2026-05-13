@@ -7,9 +7,10 @@ use masm_decompiler::{
 
 use super::{
     domain::AdviceFact,
+    effect::AdviceEffect,
     shared::{Env, collect_expr_sink_fact, expr_output_fact, expr_u32_validity, stmt_span},
     summary::{AdviceDiagnostic, AdviceDiagnosticContext, AdviceDiagnosticsMap, AdviceSummaryMap},
-    walker::{self, AdviceCapability, AdviceEffect},
+    walker::{self, AdviceCapability},
 };
 use crate::prepared::PreparedAnalysis;
 

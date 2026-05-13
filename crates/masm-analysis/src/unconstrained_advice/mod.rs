@@ -3,6 +3,7 @@
 mod address;
 mod call_transfer;
 mod domain;
+mod effect;
 mod env;
 mod expr;
 mod grouping;
