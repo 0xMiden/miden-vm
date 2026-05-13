@@ -448,6 +448,24 @@ pub(super) trait RepeatSlotSimulator {
     ) -> LiftingResult<()>;
 }
 
+/// Common block traversal surface for repeat slot stacks.
+trait RepeatBlockStack: RepeatSlotSimulator + Clone {
+    /// Simulate one instruction on the stack.
+    fn simulate_inst(
+        &mut self,
+        inst: &Instruction,
+        op_span: SourceSpan,
+        resolver: &SymbolResolver<'_>,
+        sigs: &SignatureMap,
+    ) -> LiftingResult<()>;
+
+    /// Return whether two branch-exit stacks can be merged.
+    fn branches_compatible(lhs: &Self, rhs: &Self) -> bool;
+
+    /// Build the error reported when branch exits cannot be merged.
+    fn incompatible_branches_error(span: SourceSpan) -> LiftingError;
+}
+
 impl RepeatSlotSimulator for SlotStack {
     fn swap(&mut self, depth: usize, span: SourceSpan, operation: String) -> LiftingResult<()> {
         SlotStack::swap(self, depth, span, operation)
@@ -483,6 +501,26 @@ impl RepeatSlotSimulator for SlotStack {
         operation: String,
     ) -> LiftingResult<()> {
         SlotStack::apply_effect(self, pops, pushes, required_depth, span, operation)
+    }
+}
+
+impl RepeatBlockStack for SlotStack {
+    fn simulate_inst(
+        &mut self,
+        inst: &Instruction,
+        op_span: SourceSpan,
+        resolver: &SymbolResolver<'_>,
+        sigs: &SignatureMap,
+    ) -> LiftingResult<()> {
+        simulate_inst_on_repeat_stack(inst, op_span, self, resolver, sigs)
+    }
+
+    fn branches_compatible(lhs: &Self, rhs: &Self) -> bool {
+        lhs.slots() == rhs.slots()
+    }
+
+    fn incompatible_branches_error(span: SourceSpan) -> LiftingError {
+        LiftingError::UnbalancedIf { span }
     }
 }
 
@@ -524,6 +562,37 @@ impl RepeatSlotSimulator for TaggedSlotStack {
     }
 }
 
+impl RepeatBlockStack for TaggedSlotStack {
+    fn simulate_inst(
+        &mut self,
+        inst: &Instruction,
+        op_span: SourceSpan,
+        resolver: &SymbolResolver<'_>,
+        sigs: &SignatureMap,
+    ) -> LiftingResult<()> {
+        let before = self.state_snapshot();
+        simulate_inst_on_repeat_stack(inst, op_span, self, resolver, sigs)?;
+        trace!(
+            "finished repeat tag simulation for {}: before={}, after={}",
+            inst,
+            before,
+            self.state_snapshot()
+        );
+        Ok(())
+    }
+
+    fn branches_compatible(lhs: &Self, rhs: &Self) -> bool {
+        lhs.same_state_as(rhs)
+    }
+
+    fn incompatible_branches_error(span: SourceSpan) -> LiftingError {
+        LiftingError::UnsupportedRepeatPattern {
+            span,
+            reason: "repeat loop contains if with incompatible branches".to_string(),
+        }
+    }
+}
+
 /// Simulate one instruction against a repeat slot stack.
 pub(super) fn simulate_inst_on_repeat_stack<S: RepeatSlotSimulator>(
     inst: &Instruction,
@@ -560,45 +629,7 @@ pub(super) fn simulate_block_slots(
     resolver: &SymbolResolver<'_>,
     sigs: &SignatureMap,
 ) -> LiftingResult<()> {
-    for op in block.iter() {
-        simulate_op_slots(op, stack, resolver, sigs)?;
-    }
-    Ok(())
-}
-
-/// Simulate a single operation on the slot stack.
-fn simulate_op_slots(
-    op: &Op,
-    stack: &mut SlotStack,
-    resolver: &SymbolResolver<'_>,
-    sigs: &SignatureMap,
-) -> LiftingResult<()> {
-    match op {
-        Op::Inst(inst) => {
-            simulate_inst_on_repeat_stack(inst.inner(), op.span(), stack, resolver, sigs)
-        },
-        Op::If { then_blk, else_blk, .. } => {
-            let mut then_stack = stack.clone();
-            let mut else_stack = stack.clone();
-            simulate_block_slots(then_blk, &mut then_stack, resolver, sigs)?;
-            simulate_block_slots(else_blk, &mut else_stack, resolver, sigs)?;
-            if then_stack.slots() != else_stack.slots() {
-                return Err(LiftingError::UnbalancedIf { span: op.span() });
-            }
-            *stack = then_stack;
-            Ok(())
-        },
-        Op::Repeat { count, body, .. } => {
-            for _ in 0..count.expect_value() {
-                simulate_block_slots(body, stack, resolver, sigs)?;
-            }
-            Ok(())
-        },
-        Op::While { .. } => Err(LiftingError::UnsupportedRepeatPattern {
-            span: op.span(),
-            reason: "repeat loop contains a while loop".to_string(),
-        }),
-    }
+    simulate_block(block, stack, resolver, sigs)
 }
 
 /// Simulate a block of operations on the tagged slot stack.
@@ -609,39 +640,47 @@ pub(super) fn simulate_block_tags(
     sigs: &SignatureMap,
 ) -> LiftingResult<()> {
     trace!("starting repeat tag simulation for block: {}", stack.state_snapshot());
-    for op in block.iter() {
-        simulate_op_tags(op, stack, resolver, sigs)?;
-    }
+    simulate_block(block, stack, resolver, sigs)?;
     trace!("finished repeat tag simulation for block: {}", stack.state_snapshot());
     Ok(())
 }
 
-/// Simulate a single operation on the tagged slot stack.
-fn simulate_op_tags(
+/// Simulate a block of operations on a repeat slot stack.
+fn simulate_block<S: RepeatBlockStack>(
+    block: &Block,
+    stack: &mut S,
+    resolver: &SymbolResolver<'_>,
+    sigs: &SignatureMap,
+) -> LiftingResult<()> {
+    for op in block.iter() {
+        simulate_op(op, stack, resolver, sigs)?;
+    }
+    Ok(())
+}
+
+/// Simulate a single operation on a repeat slot stack.
+fn simulate_op<S: RepeatBlockStack>(
     op: &Op,
-    stack: &mut TaggedSlotStack,
+    stack: &mut S,
     resolver: &SymbolResolver<'_>,
     sigs: &SignatureMap,
 ) -> LiftingResult<()> {
     match op {
-        Op::Inst(inst) => simulate_inst_tags(inst.inner(), op.span(), stack, resolver, sigs),
+        Op::Inst(inst) => stack.simulate_inst(inst.inner(), op.span(), resolver, sigs),
         Op::If { then_blk, else_blk, .. } => {
             let mut then_stack = stack.clone();
             let mut else_stack = stack.clone();
-            simulate_block_tags(then_blk, &mut then_stack, resolver, sigs)?;
-            simulate_block_tags(else_blk, &mut else_stack, resolver, sigs)?;
-            if !then_stack.same_state_as(&else_stack) {
-                return Err(LiftingError::UnsupportedRepeatPattern {
-                    span: op.span(),
-                    reason: "repeat loop contains if with incompatible branches".to_string(),
-                });
+            simulate_block(then_blk, &mut then_stack, resolver, sigs)?;
+            simulate_block(else_blk, &mut else_stack, resolver, sigs)?;
+            if !S::branches_compatible(&then_stack, &else_stack) {
+                return Err(S::incompatible_branches_error(op.span()));
             }
             *stack = then_stack;
             Ok(())
         },
         Op::Repeat { count, body, .. } => {
             for _ in 0..count.expect_value() {
-                simulate_block_tags(body, stack, resolver, sigs)?;
+                simulate_block(body, stack, resolver, sigs)?;
             }
             Ok(())
         },
@@ -650,23 +689,4 @@ fn simulate_op_tags(
             reason: "repeat loop contains a while loop".to_string(),
         }),
     }
-}
-
-/// Simulate a single instruction's stack effect for tagged slot tracking.
-fn simulate_inst_tags(
-    inst: &Instruction,
-    op_span: SourceSpan,
-    stack: &mut TaggedSlotStack,
-    resolver: &SymbolResolver<'_>,
-    sigs: &SignatureMap,
-) -> LiftingResult<()> {
-    let before = stack.state_snapshot();
-    simulate_inst_on_repeat_stack(inst, op_span, stack, resolver, sigs)?;
-    trace!(
-        "finished repeat tag simulation for {}: before={}, after={}",
-        inst,
-        before,
-        stack.state_snapshot()
-    );
-    Ok(())
 }
