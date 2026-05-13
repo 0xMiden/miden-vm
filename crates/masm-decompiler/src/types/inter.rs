@@ -7,11 +7,11 @@ use super::{
     summary::{TypeSummary, TypeSummaryMap},
 };
 use crate::{
-    SymbolPath,
     callgraph::CallGraph,
     frontend::{Program, Workspace},
     ir::Stmt,
     signature::{ProcSignature, SignatureMap},
+    symbol::path::SymbolPath,
 };
 
 /// Infer type summaries using procedures that have already been lifted.

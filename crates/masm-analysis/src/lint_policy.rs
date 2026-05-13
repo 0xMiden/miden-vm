@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use masm_decompiler::SymbolPath;
+use masm_decompiler::analysis::SymbolPath;
 use miden_debug_types::{SourceManager, SourceSpan};
 
 use crate::unconstrained_advice::AdviceDiagnostic;

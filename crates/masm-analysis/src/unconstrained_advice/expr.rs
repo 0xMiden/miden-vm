@@ -1,6 +1,6 @@
 //! Expression facts and traversal for unconstrained-advice analyses.
 
-use masm_decompiler::{BinOp, Expr, UnOp, Var, VarKey};
+use masm_decompiler::analysis::{BinOp, Expr, UnOp, Var, VarKey};
 
 use super::{
     domain::AdviceFact,

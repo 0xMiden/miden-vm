@@ -1,6 +1,6 @@
 //! Interprocedural provenance summaries for unconstrained advice.
 
-use masm_decompiler::{Stmt, Var};
+use masm_decompiler::analysis::{Stmt, Var};
 
 use super::{
     effect::AdviceEffect,

@@ -1,6 +1,6 @@
 //! Shared transfer helpers for unconstrained-advice analyses.
 
-use masm_decompiler::{Stmt, Var};
+use masm_decompiler::analysis::{Stmt, Var};
 
 use super::domain::AdviceFact;
 pub(super) use super::{

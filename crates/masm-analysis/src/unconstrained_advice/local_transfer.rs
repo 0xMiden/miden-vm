@@ -1,6 +1,6 @@
 //! Local-memory transfer helpers for unconstrained-advice analyses.
 
-use masm_decompiler::{LocalAccessKind, Var};
+use masm_decompiler::analysis::{LocalAccessKind, Var};
 
 use super::{domain::AdviceFact, env::Env, u32_domain::U32Validity};
 
