@@ -2,10 +2,11 @@ use alloc::vec::Vec;
 
 use miden_core::{
     Felt,
-    deferred::{DeferredError, DeferredTag, FIELD, FIELD_0, Payload, ValueType},
+    deferred::{DeferredError, DeferredTag, FIELD, FIELD_0, Node, Payload, TagKind, ValueType},
 };
 
 use super::DeferredTypeHandler;
+use crate::deferred::{schema::SchemaError, state::DeferredState, Schema};
 
 /// Handler for the first 256-bit non-native field, `Field0`.
 ///
@@ -16,6 +17,7 @@ use super::DeferredTypeHandler;
 /// not yet a prime field. The trait makes the concrete reduction pluggable; selecting the final
 /// modulus (e.g. secp256k1 base, p25519) is out of scope for v1 and will be a one-file change
 /// here. Tests pin the placeholder semantics explicitly.
+#[derive(Debug, Default, Clone, Copy)]
 pub struct Field0Handler;
 
 impl DeferredTypeHandler for Field0Handler {
@@ -55,6 +57,47 @@ impl DeferredTypeHandler for Field0Handler {
 
     fn encode_advice(&self, payload: &Payload) -> Result<Vec<Felt>, DeferredError> {
         Ok(payload.0.to_vec())
+    }
+}
+
+impl Schema for Field0Handler {
+    fn responds_to(&self, tag: [Felt; 4]) -> bool {
+        tag[0] == FIELD && tag[1] == FIELD_0
+    }
+
+    fn is_valid(&self, node: &Node) -> bool {
+        if !self.responds_to(node.tag.to_felts()) {
+            return false;
+        }
+        match node.tag.kind() {
+            // Leaf payloads must have u32-canonical limbs so they can be reduced.
+            TagKind::Leaf => decode_limbs(&node.payload).is_ok(),
+            // Op-node payloads are two child digests — opaque from this handler's POV.
+            TagKind::BinaryOp => true,
+            // AssertEq tags are dispatch markers, not storable nodes.
+            TagKind::AssertEq => false,
+        }
+    }
+
+    fn eval(&mut self, graph: &DeferredState, node: Node) -> Result<Node, SchemaError> {
+        match node.tag.kind() {
+            TagKind::Leaf => Ok(node),
+            TagKind::BinaryOp => {
+                let (lhs_digest, rhs_digest) =
+                    node.binary_op_children().ok_or(SchemaError::InvalidNode)?;
+                let lhs_node = *graph.get(&lhs_digest).ok_or(SchemaError::MissingNode)?;
+                let rhs_node = *graph.get(&rhs_digest).ok_or(SchemaError::MissingNode)?;
+                let lhs = self.eval(graph, lhs_node)?;
+                let rhs = self.eval(graph, rhs_node)?;
+                let (out_tag, out_payload) = self.eval_op(
+                    node.tag,
+                    (lhs.tag, lhs.payload),
+                    (rhs.tag, rhs.payload),
+                )?;
+                Ok(Node::new(out_tag, out_payload))
+            },
+            TagKind::AssertEq => Err(SchemaError::InvalidNode),
+        }
     }
 }
 

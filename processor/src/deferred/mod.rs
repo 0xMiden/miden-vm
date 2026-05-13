@@ -8,6 +8,7 @@
 mod events;
 mod handlers;
 mod registry;
+mod schema;
 mod state;
 mod transaction;
 mod witness;
@@ -20,6 +21,7 @@ pub use miden_core::deferred::{
 pub use events::{assert_eq, binary_op_payload, register_node};
 pub use handlers::{DeferredTypeHandler, Field0Handler};
 pub use registry::TypeHandlerRegistry;
+pub use schema::{NoopSchema, Schema, SchemaError};
 pub use state::DeferredState;
 pub use transaction::{DeferredMutation, HandlerTransaction, VmMutation};
 pub use witness::extract_witness;
