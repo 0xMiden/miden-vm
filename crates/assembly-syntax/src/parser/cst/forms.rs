@@ -98,9 +98,9 @@ fn extend_doc_group(context: &LoweringContext<'_>, items: &[CstItem], start: usi
     end
 }
 
-/// Returns true when `item` begins at byte offset 0 in the source file.
+/// Returns true when `item` begins on the first line in the source file.
 fn starts_at_file_beginning(context: &LoweringContext<'_>, item: &CstItem) -> bool {
-    item_span(context, item).start().to_usize() == 0
+    context.source_file().location(item_span(context, item)).line().to_u32() == 1
 }
 
 /// Returns true when the source text between `lhs` and `rhs` contains a blank line.
