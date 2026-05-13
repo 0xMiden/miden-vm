@@ -146,8 +146,7 @@ pub struct MastForest {
 ///
 /// This is intentionally hidden: builders, mergers, and deserializers may assemble mutable
 /// parts, but consumers should receive an immutable forest after construction.
-#[doc(hidden)]
-pub struct MastForestParts {
+pub(crate) struct MastForestParts {
     pub nodes: IndexVec<MastNodeId, MastNode>,
     pub roots: Vec<MastNodeId>,
     pub advice_map: AdviceMap,
@@ -169,7 +168,16 @@ impl MastForest {
     }
 
     #[doc(hidden)]
-    pub fn from_parts(parts: MastForestParts) -> Result<Self, MastForestError> {
+    pub fn from_raw_parts(
+        nodes: IndexVec<MastNodeId, MastNode>,
+        roots: Vec<MastNodeId>,
+        advice_map: AdviceMap,
+        debug_info: DebugInfo,
+    ) -> Result<Self, MastForestError> {
+        Self::from_parts(MastForestParts { nodes, roots, advice_map, debug_info })
+    }
+
+    pub(crate) fn from_parts(parts: MastForestParts) -> Result<Self, MastForestError> {
         if parts.nodes.len() > Self::MAX_NODES {
             return Err(MastForestError::TooManyNodes);
         }

@@ -15,9 +15,9 @@ use miden_core::{
         BasicBlockNode, BasicBlockNodeBuilder, CallNode, CallNodeBuilder, DebugInfo,
         DecoratorFingerprint, DecoratorId, DynNode, DynNodeBuilder, ExternalNodeBuilder, JoinNode,
         JoinNodeBuilder, LoopNode, LoopNodeBuilder, MastForest, MastForestContributor,
-        MastForestError, MastForestParts, MastForestRootMap, MastNode, MastNodeBuilder,
-        MastNodeExt, MastNodeFingerprint, MastNodeId, OpBatch, SplitNode, SplitNodeBuilder,
-        SubtreeIterator, error_code_from_msg, fingerprint_from_fingerprints,
+        MastForestError, MastForestRootMap, MastNode, MastNodeBuilder, MastNodeExt,
+        MastNodeFingerprint, MastNodeId, OpBatch, SplitNode, SplitNodeBuilder, SubtreeIterator,
+        error_code_from_msg, fingerprint_from_fingerprints,
     },
     operations::{AssemblyOp, DebugVarInfo, Decorator, DecoratorList, Operation},
     serde::Serializable,
@@ -526,13 +526,9 @@ impl MastForestFinalizer {
         }
 
         self.debug_info.extend_error_codes(error_codes);
-        let mast_forest = MastForest::from_parts(MastForestParts {
-            nodes: self.nodes,
-            roots,
-            advice_map,
-            debug_info: self.debug_info,
-        })
-        .map_err(|source| Report::new(MastForestBuilderError::FinalizeForest { source }))?;
+        let mast_forest =
+            MastForest::from_raw_parts(self.nodes, roots, advice_map, self.debug_info)
+                .map_err(|source| Report::new(MastForestBuilderError::FinalizeForest { source }))?;
 
         Ok(BuiltMastForest {
             mast_forest,
@@ -3363,12 +3359,12 @@ mod tests {
             )
             .unwrap();
         assert_eq!(inserted_node_id, static_block_id);
-        let static_forest = MastForest::from_parts(MastForestParts {
+        let static_forest = MastForest::from_raw_parts(
             nodes,
-            roots: vec![static_block_id],
-            advice_map: AdviceMap::default(),
+            vec![static_block_id],
+            AdviceMap::default(),
             debug_info,
-        })
+        )
         .unwrap();
 
         let mut builder = MastForestBuilder::new([&static_forest]).unwrap();
