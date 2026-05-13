@@ -7,7 +7,6 @@ use alloc::vec::Vec;
 use std::sync::Arc;
 
 use miden_assembly::Assembler;
-use miden_core::events::SystemEvent;
 use miden_processor::{
     DefaultHost, ExecutionOptions, FastProcessor, Felt, ProcessorState, StackInputs, Word, ZERO,
     advice::{AdviceInputs, AdviceMutation},
@@ -42,23 +41,26 @@ fn build_processor() -> FastProcessor {
 // EVENT-DRIVING MASM BUILDER
 // ================================================================================================
 
-/// Build a MASM `push.*; emit; drop * 13` block for one deferred event. `data_below_tag` is the
-/// 8-felt segment that sits at stack positions 5..13 — for a register event it is the payload,
-/// for an assert-eq event it is `lhs_digest || rhs_digest`.
-fn emit_event(src: &mut String, event_id: u64, tag: [Felt; 4], data_below_tag: [Felt; 8]) {
+/// Build a MASM block that pushes the data segment + tag, invokes the sugared deferred keyword,
+/// and cleans up the 12 felts left on the operand stack (the keyword itself drops the event ID).
+///
+/// `data_below_tag` is the 8-felt segment that sits at stack positions 5..13 once the tag is
+/// pushed — for a register event it is the payload, for an assert-eq event it is
+/// `lhs_digest || rhs_digest`.
+fn emit_event(src: &mut String, keyword: &str, tag: [Felt; 4], data_below_tag: [Felt; 8]) {
     use core::fmt::Write;
     // Push payload-equivalent felts in reverse so data_below_tag[0] ends up at position 5 once
-    // the tag and event_id sit above it.
+    // the tag sits above it.
     for f in data_below_tag.iter().rev() {
         writeln!(src, "    push.{}", f.as_int()).unwrap();
     }
     for f in tag.iter().rev() {
         writeln!(src, "    push.{}", f.as_int()).unwrap();
     }
-    writeln!(src, "    push.{event_id}").unwrap();
-    src.push_str("    emit\n");
-    // emit does not pop the event_id; drop the 13 felts we set up.
-    for _ in 0..13 {
+    writeln!(src, "    {keyword}").unwrap();
+    // The sugared keyword lowers to push.<id>; emit; drop, so the event_id is already gone;
+    // 12 felts (4 tag + 8 data) remain to be cleaned.
+    for _ in 0..12 {
         src.push_str("    drop\n");
     }
 }
@@ -109,19 +111,15 @@ fn deferred_end_to_end_register_eval_assert() {
     let mul_payload = binary_op_payload(add_digest, c_digest);
     let mul_digest = hash_node(mul_tag, &mul_payload);
 
-    let register_leaf_id = SystemEvent::DeferredRegisterLeaf.event_id().as_u64();
-    let register_op_id = SystemEvent::DeferredRegisterOp.event_id().as_u64();
-    let assert_eq_id = SystemEvent::DeferredAssertEq.event_id().as_u64();
-
     // Build the program.
     let mut src = String::from("begin\n");
     for payload in [&a_payload, &b_payload, &c_payload, &d_payload] {
-        emit_event(&mut src, register_leaf_id, leaf_tag.to_felts(), payload.0);
+        emit_event(&mut src, "deferred.register_leaf", leaf_tag.to_felts(), payload.0);
     }
-    emit_event(&mut src, register_op_id, add_tag.to_felts(), add_payload.0);
-    emit_event(&mut src, register_op_id, mul_tag.to_felts(), mul_payload.0);
+    emit_event(&mut src, "deferred.register_op", add_tag.to_felts(), add_payload.0);
+    emit_event(&mut src, "deferred.register_op", mul_tag.to_felts(), mul_payload.0);
     let assert_data = digests_concat(mul_digest, d_digest);
-    emit_event(&mut src, assert_eq_id, assert_tag.to_felts(), assert_data);
+    emit_event(&mut src, "deferred.assert_eq", assert_tag.to_felts(), assert_data);
     src.push_str("end\n");
 
     let program = Assembler::default().assemble_program(&src).expect("program must assemble");
@@ -173,15 +171,12 @@ fn deferred_assert_eq_mismatch_fails_execution() {
     let a_digest = hash_node(leaf_tag, &a_payload);
     let b_digest = hash_node(leaf_tag, &b_payload);
 
-    let register_leaf_id = SystemEvent::DeferredRegisterLeaf.event_id().as_u64();
-    let assert_eq_id = SystemEvent::DeferredAssertEq.event_id().as_u64();
-
     let mut src = String::from("begin\n");
-    emit_event(&mut src, register_leaf_id, leaf_tag.to_felts(), a_payload.0);
-    emit_event(&mut src, register_leaf_id, leaf_tag.to_felts(), b_payload.0);
+    emit_event(&mut src, "deferred.register_leaf", leaf_tag.to_felts(), a_payload.0);
+    emit_event(&mut src, "deferred.register_leaf", leaf_tag.to_felts(), b_payload.0);
     emit_event(
         &mut src,
-        assert_eq_id,
+        "deferred.assert_eq",
         assert_tag.to_felts(),
         digests_concat(a_digest, b_digest),
     );
@@ -220,7 +215,6 @@ fn legacy_event_handler_still_works_with_deferred_infrastructure() {
     // Mix a deferred RegisterLeaf with the legacy event in one program.
     let leaf_tag = DeferredTag::Field0Leaf;
     let payload = field0_leaf_payload(42);
-    let register_leaf_id = SystemEvent::DeferredRegisterLeaf.event_id().as_u64();
 
     let mut src = String::from("begin\n");
     // Legacy event: push event_id, emit, drop.
@@ -229,7 +223,7 @@ fn legacy_event_handler_still_works_with_deferred_infrastructure() {
     src.push_str("    emit\n");
     src.push_str("    drop\n");
     // Deferred event right after.
-    emit_event(&mut src, register_leaf_id, leaf_tag.to_felts(), payload.0);
+    emit_event(&mut src, "deferred.register_leaf", leaf_tag.to_felts(), payload.0);
     src.push_str("end\n");
 
     let program = Assembler::default().assemble_program(&src).expect("program must assemble");

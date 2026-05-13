@@ -35,7 +35,7 @@ pub use self::{
     form::Form,
     ident::{CaseKindError, Ident, IdentError},
     immediate::{ErrorMsg, ImmFelt, ImmU8, ImmU16, ImmU32, Immediate},
-    instruction::{DebugOptions, Instruction, SystemEventNode},
+    instruction::{DebugOptions, DeferredEventNode, Instruction, SystemEventNode},
     invocation_target::{InvocationTarget, Invoke, InvokeKind},
     item::*,
     module::{Module, ModuleKind},

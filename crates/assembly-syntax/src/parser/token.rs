@@ -507,6 +507,7 @@ pub enum Token<'input> {
     Cswap,
     Cswapw,
     Debug,
+    Deferred,
     Div,
     Drop,
     Dropw,
@@ -596,6 +597,8 @@ pub enum Token<'input> {
     Ptr,
     Pub,
     Push,
+    RegisterLeaf,
+    RegisterOp,
     Repeat,
     Reversew,
     Reversedw,
@@ -736,6 +739,7 @@ impl fmt::Display for Token<'_> {
             Token::Cswap => write!(f, "cswap"),
             Token::Cswapw => write!(f, "cswapw"),
             Token::Debug => write!(f, "debug"),
+            Token::Deferred => write!(f, "deferred"),
             Token::Div => write!(f, "div"),
             Token::Drop => write!(f, "drop"),
             Token::Dropw => write!(f, "dropw"),
@@ -825,6 +829,8 @@ impl fmt::Display for Token<'_> {
             Token::HornerBase => write!(f, "horner_eval_base"),
             Token::HornerExt => write!(f, "horner_eval_ext"),
             Token::LogPrecompile => write!(f, "log_precompile"),
+            Token::RegisterLeaf => write!(f, "register_leaf"),
+            Token::RegisterOp => write!(f, "register_op"),
             Token::Repeat => write!(f, "repeat"),
             Token::Reversew => write!(f, "reversew"),
             Token::Reversedw => write!(f, "reversedw"),
@@ -968,6 +974,7 @@ impl<'input> Token<'input> {
                 | Token::Cswap
                 | Token::Cswapw
                 | Token::Debug
+                | Token::Deferred
                 | Token::Div
                 | Token::Drop
                 | Token::Dropw
@@ -1039,6 +1046,8 @@ impl<'input> Token<'input> {
                 | Token::Pow2
                 | Token::Procref
                 | Token::Push
+                | Token::RegisterLeaf
+                | Token::RegisterOp
                 | Token::Repeat
                 | Token::Reversew
                 | Token::Reversedw
@@ -1158,6 +1167,7 @@ impl<'input> Token<'input> {
         ("cswap", Token::Cswap),
         ("cswapw", Token::Cswapw),
         ("debug", Token::Debug),
+        ("deferred", Token::Deferred),
         ("div", Token::Div),
         ("drop", Token::Drop),
         ("dropw", Token::Dropw),
@@ -1247,6 +1257,8 @@ impl<'input> Token<'input> {
         ("horner_eval_base", Token::HornerBase),
         ("horner_eval_ext", Token::HornerExt),
         ("log_precompile", Token::LogPrecompile),
+        ("register_leaf", Token::RegisterLeaf),
+        ("register_op", Token::RegisterOp),
         ("repeat", Token::Repeat),
         ("reversew", Token::Reversew),
         ("reversedw", Token::Reversedw),

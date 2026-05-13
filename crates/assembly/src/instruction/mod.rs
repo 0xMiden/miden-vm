@@ -519,6 +519,9 @@ impl Assembler {
             Instruction::SysEvent(system_event) => {
                 block_builder.push_system_event(system_event.into())
             },
+            Instruction::DeferredEvent(deferred_event) => {
+                block_builder.push_system_event(deferred_event.into())
+            },
 
             // ----- cryptographic instructions ---------------------------------------------------
             Instruction::Hash => crypto_ops::hash(block_builder),

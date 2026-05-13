@@ -133,6 +133,12 @@ pub trait Visit<T = ()> {
     fn visit_system_event(&mut self, sys_event: Span<&SystemEventNode>) -> ControlFlow<T> {
         visit_system_event(self, sys_event)
     }
+    fn visit_deferred_event(
+        &mut self,
+        deferred_event: Span<&DeferredEventNode>,
+    ) -> ControlFlow<T> {
+        visit_deferred_event(self, deferred_event)
+    }
     fn visit_debug_options(&mut self, options: Span<&DebugOptions>) -> ControlFlow<T> {
         visit_debug_options(self, options)
     }
@@ -231,6 +237,12 @@ where
     }
     fn visit_system_event(&mut self, sys_event: Span<&SystemEventNode>) -> ControlFlow<T> {
         (**self).visit_system_event(sys_event)
+    }
+    fn visit_deferred_event(
+        &mut self,
+        deferred_event: Span<&DeferredEventNode>,
+    ) -> ControlFlow<T> {
+        (**self).visit_deferred_event(deferred_event)
     }
     fn visit_debug_options(&mut self, options: Span<&DebugOptions>) -> ControlFlow<T> {
         (**self).visit_debug_options(options)
@@ -484,6 +496,9 @@ where
         | Trace(imm) => visitor.visit_immediate_u32(imm),
         EmitImm(imm) => visitor.visit_immediate_felt(imm),
         SysEvent(sys_event) => visitor.visit_system_event(Span::new(span, sys_event)),
+        DeferredEvent(deferred_event) => {
+            visitor.visit_deferred_event(Span::new(span, deferred_event))
+        },
         Exec(target) => visitor.visit_exec(target),
         Call(target) => visitor.visit_call(target),
         SysCall(target) => visitor.visit_syscall(target),
@@ -516,6 +531,16 @@ where
 }
 
 pub fn visit_system_event<V, T>(_visitor: &mut V, _node: Span<&SystemEventNode>) -> ControlFlow<T>
+where
+    V: ?Sized + Visit<T>,
+{
+    ControlFlow::Continue(())
+}
+
+pub fn visit_deferred_event<V, T>(
+    _visitor: &mut V,
+    _node: Span<&DeferredEventNode>,
+) -> ControlFlow<T>
 where
     V: ?Sized + Visit<T>,
 {
@@ -729,6 +754,12 @@ pub trait VisitMut<T = ()> {
     fn visit_mut_system_event(&mut self, sys_event: Span<&mut SystemEventNode>) -> ControlFlow<T> {
         visit_mut_system_event(self, sys_event)
     }
+    fn visit_mut_deferred_event(
+        &mut self,
+        deferred_event: Span<&mut DeferredEventNode>,
+    ) -> ControlFlow<T> {
+        visit_mut_deferred_event(self, deferred_event)
+    }
     fn visit_mut_debug_options(&mut self, options: Span<&mut DebugOptions>) -> ControlFlow<T> {
         visit_mut_debug_options(self, options)
     }
@@ -827,6 +858,12 @@ where
     }
     fn visit_mut_system_event(&mut self, sys_event: Span<&mut SystemEventNode>) -> ControlFlow<T> {
         (**self).visit_mut_system_event(sys_event)
+    }
+    fn visit_mut_deferred_event(
+        &mut self,
+        deferred_event: Span<&mut DeferredEventNode>,
+    ) -> ControlFlow<T> {
+        (**self).visit_mut_deferred_event(deferred_event)
     }
     fn visit_mut_debug_options(&mut self, options: Span<&mut DebugOptions>) -> ControlFlow<T> {
         (**self).visit_mut_debug_options(options)
@@ -1084,6 +1121,9 @@ where
         | Trace(imm) => visitor.visit_mut_immediate_u32(imm),
         EmitImm(imm) => visitor.visit_mut_immediate_felt(imm),
         SysEvent(sys_event) => visitor.visit_mut_system_event(Span::new(span, sys_event)),
+        DeferredEvent(deferred_event) => {
+            visitor.visit_mut_deferred_event(Span::new(span, deferred_event))
+        },
         Exec(target) => visitor.visit_mut_exec(target),
         Call(target) => visitor.visit_mut_call(target),
         SysCall(target) => visitor.visit_mut_syscall(target),
@@ -1118,6 +1158,16 @@ where
 pub fn visit_mut_system_event<V, T>(
     _visitor: &mut V,
     _node: Span<&mut SystemEventNode>,
+) -> ControlFlow<T>
+where
+    V: ?Sized + VisitMut<T>,
+{
+    ControlFlow::Continue(())
+}
+
+pub fn visit_mut_deferred_event<V, T>(
+    _visitor: &mut V,
+    _node: Span<&mut DeferredEventNode>,
 ) -> ControlFlow<T>
 where
     V: ?Sized + VisitMut<T>,
