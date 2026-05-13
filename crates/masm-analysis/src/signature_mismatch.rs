@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use masm_decompiler::{ProcSignature, SymbolPath, Workspace};
+use masm_decompiler::analysis::{ProcSignature, SymbolPath, Workspace};
 use miden_assembly_syntax::ast::{
     FunctionType, Module, SymbolResolutionError, TypeResolver, types::Type as AstType,
 };

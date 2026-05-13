@@ -2,7 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use masm_decompiler::{Var, VarKey};
+use masm_decompiler::analysis::{Var, VarKey};
 
 use super::{domain::AdviceFact, u32_domain::U32Validity};
 use crate::abstract_interp::JoinSemiLattice;
@@ -359,7 +359,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use masm_decompiler::Var;
+    use masm_decompiler::analysis::Var;
 
     use super::*;
 

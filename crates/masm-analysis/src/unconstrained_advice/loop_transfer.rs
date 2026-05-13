@@ -1,6 +1,6 @@
 //! Loop transfer helpers for unconstrained-advice analyses.
 
-use masm_decompiler::{LoopPhi, Var};
+use masm_decompiler::analysis::{LoopPhi, Var};
 
 use super::env::Env;
 use crate::abstract_interp::{FixpointConfig, JoinSemiLattice, iterate_to_fixpoint};

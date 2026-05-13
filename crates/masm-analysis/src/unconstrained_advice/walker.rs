@@ -1,6 +1,6 @@
 //! Generic statement walker for advice capabilities.
 
-use masm_decompiler::{Intrinsic, LocalAccessKind, LoopPhi, Stmt, SymbolPath};
+use masm_decompiler::analysis::{Intrinsic, LocalAccessKind, LoopPhi, Stmt, SymbolPath};
 
 use super::{
     call_transfer::assign_call_results,

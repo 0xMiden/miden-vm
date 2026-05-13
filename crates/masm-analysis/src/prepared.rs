@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use masm_decompiler::{
+use masm_decompiler::analysis::{
     CallGraph, ProcSignature, SignatureMap, Stmt, SymbolPath, TypeSummary, TypeSummaryMap,
     Workspace, create_resolver, infer_signatures, infer_type_summaries_from_lifted, lift_proc,
     refine_public_signature_inputs,

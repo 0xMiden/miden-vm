@@ -10,8 +10,8 @@ use std::{
     sync::Arc,
 };
 
-pub use masm_decompiler::LibraryRoot;
-use masm_decompiler::{SymbolPath, Workspace};
+pub use masm_decompiler::analysis::LibraryRoot;
+use masm_decompiler::analysis::{SymbolPath, Workspace};
 use miden_debug_types::{DefaultSourceManager, SourceManager, SourceSpan};
 
 use crate::{

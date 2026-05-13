@@ -1,6 +1,6 @@
 //! Intrinsic transfer helpers for unconstrained-advice analyses.
 
-use masm_decompiler::{
+use masm_decompiler::analysis::{
     Intrinsic, IntrinsicAdviceTransferShape, intrinsic_advice_transfer_shape, intrinsic_base_name,
 };
 
