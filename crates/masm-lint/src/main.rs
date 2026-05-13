@@ -9,7 +9,9 @@ use std::{
 };
 
 use clap::Parser;
-use masm_analysis::lint::{LibraryRoot, SymbolPath, Workspace, diagnostics_from_workspace};
+use masm_analysis::lint::{
+    LibraryRoot, LintAnalysisInput, UnresolvedDependencyReport, analyze_entries,
+};
 use miden_debug_types::DefaultSourceManager;
 
 // ── CLI ───────────────────────────────────────────────────────────────────────
@@ -95,44 +97,31 @@ fn run(cli: Cli) -> i32 {
     let mut roots = normalize_library_roots(&cli.libraries, &cwd);
     roots.push(LibraryRoot::new("", normalize_cli_path(&cwd, &cwd)));
 
-    // Build workspace using a shared source manager so spans resolve correctly
-    // across modules.
+    // Share one source manager with the analysis facade so rendered spans
+    // resolve across all loaded modules.
     let sources: Arc<DefaultSourceManager> = Arc::new(DefaultSourceManager::default());
-    let mut workspace = Workspace::with_source_manager(roots, sources.clone());
-    let mut error_count: usize = 0;
+    let report = analyze_entries(LintAnalysisInput {
+        entry_files: masm_files.into_iter().collect(),
+        roots,
+        sources: sources.clone(),
+        group_by_origin: cli.group_by_origin,
+    });
 
-    for file in &masm_files {
-        if let Err(e) = workspace.load_entry(file) {
-            eprintln!("masm-lint: failed to load {}: {e}", file.display());
-            error_count += 1;
-        }
+    for error in &report.load_errors {
+        eprintln!("masm-lint: failed to load {}: {}", error.path.display(), error.message);
     }
 
-    workspace.load_dependencies();
-    let unresolved = workspace.unresolved_module_paths();
-
-    let include_signature_mismatches = unresolved.is_empty();
-    if !include_signature_mismatches {
-        error_count += unresolved.len();
-        emit_unresolved_dependency_errors(&unresolved, &workspace);
+    if let Some(unresolved) = &report.unresolved_dependencies {
+        emit_unresolved_dependency_errors(unresolved);
     }
-
-    let diagnostics = diagnostics_from_workspace(
-        &workspace,
-        sources.clone(),
-        include_signature_mismatches,
-        cli.group_by_origin,
-    );
-
-    let warning_count = diagnostics.len();
 
     // Render.
-    for diag in &diagnostics {
+    for diag in &report.diagnostics {
         render::render_diagnostic(diag, sources.as_ref());
     }
 
     // Summary to stderr (cargo/clippy style).
-    emit_summary(warning_count, error_count)
+    emit_summary(report.warning_count(), report.error_count())
 }
 
 /// Emit a cargo/clippy-style summary and return the exit code.
@@ -166,19 +155,27 @@ fn emit_summary(warning_count: usize, error_count: usize) -> i32 {
 
 /// Emit errors about modules that could not be resolved, with guidance on
 /// how to configure the missing library roots.
-fn emit_unresolved_dependency_errors(unresolved: &[SymbolPath], workspace: &Workspace) {
+fn emit_unresolved_dependency_errors(unresolved: &UnresolvedDependencyReport) {
     use yansi::Paint as _;
 
-    let rendered_modules =
-        unresolved.iter().map(|m| m.as_str().to_string()).collect::<Vec<_>>().join(", ");
+    let rendered_modules = unresolved
+        .modules
+        .iter()
+        .map(|m| m.path.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
     eprintln!(
         "{}: unable to resolve {} referenced module(s): {rendered_modules}",
         "error".red().bold(),
-        unresolved.len(),
+        unresolved.modules.len(),
     );
 
-    let rendered_roots =
-        workspace.roots().iter().map(format_library_root).collect::<Vec<_>>().join(", ");
+    let rendered_roots = unresolved
+        .configured_roots
+        .iter()
+        .map(format_library_root)
+        .collect::<Vec<_>>()
+        .join(", ");
     eprintln!("  {} configured library roots: {rendered_roots}", "=".cyan().bold(),);
     eprintln!(
         "  {} signature mismatch checks are skipped when dependencies are unresolved",
@@ -187,36 +184,23 @@ fn emit_unresolved_dependency_errors(unresolved: &[SymbolPath], workspace: &Work
 
     let mut seen_configured: HashSet<String> = HashSet::new();
     let mut seen_unconfigured: HashSet<String> = HashSet::new();
-    for module in unresolved {
-        if let Some(ns) = configured_namespace_for_module(module, workspace.roots()) {
+    for module in &unresolved.modules {
+        if let Some(ns) = module.configured_namespace.as_deref() {
             if seen_configured.insert(ns.to_string()) {
                 eprintln!(
                     "  {} namespace `{ns}` is configured, but some referenced modules were not found under its roots",
                     "=".cyan().bold(),
                 );
             }
-        } else if seen_unconfigured.insert(module.as_str().to_string()) {
+        } else if seen_unconfigured.insert(module.path.clone()) {
             eprintln!(
                 "  {} add `--library <namespace>=<path>` for module `{}`",
                 "help".cyan().bold(),
-                module.as_str(),
+                module.path,
             );
         }
     }
     eprintln!();
-}
-
-/// Return the longest configured namespace that matches `module`.
-fn configured_namespace_for_module<'a>(
-    module: &SymbolPath,
-    roots: &'a [LibraryRoot],
-) -> Option<&'a str> {
-    roots
-        .iter()
-        .filter(|root| !root.namespace.is_empty())
-        .filter(|root| root.matches_module_path(module.as_str()))
-        .map(|root| root.namespace.as_str())
-        .max_by_key(|ns| ns.len())
 }
 
 // ── Filesystem helpers ────────────────────────────────────────────────────────
