@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     StarkConfig,
     domain::{Coset, LiftedDomain},
-    instance::{AirInstance, InstanceShapes, InstanceValidationError, validate_air_order},
+    instance::{AirInstance, InstanceShapes, validate_air_order},
     lmcs::Lmcs,
     pcs::proof::PcsTranscript,
     util::align::aligned_len,
@@ -210,12 +210,12 @@ where
 
         let log_blowup = config.pcs().log_blowup();
         proof.instance_shapes.validate_instance_data(&instances)?;
-        let log_max_trace_height = *proof
-            .instance_shapes
-            .log_trace_heights()
-            .last()
-            .ok_or(InstanceValidationError::Empty)?;
-        let max_lde_domain = LiftedDomain::<L::F>::try_canonical(log_max_trace_height, log_blowup)?;
+        let max_lde_domain = *LiftedDomain::<L::F>::try_many_from_ascending_heights(
+            proof.instance_shapes.log_trace_heights(),
+            log_blowup,
+        )?
+        .last()
+        .expect("non-empty: validated by try_many_from_ascending_heights");
         proof.instance_shapes.observe_heights::<L::F, _>(&mut challenger);
 
         let mut channel = VerifierTranscript::from_data(challenger, &proof.transcript);

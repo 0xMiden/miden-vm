@@ -10,12 +10,12 @@ use alloc::{vec, vec::Vec};
 
 use miden_lifted_air::{AirStructureError, LiftedAir, VarLenPublicInputs, log2_strict_u8};
 use p3_challenger::CanObserve;
-use p3_field::{Field, PrimeCharacteristicRing, TwoAdicField};
+use p3_field::{Field, PrimeCharacteristicRing};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::domain::{DomainError, LiftedDomain};
+use crate::domain::DomainError;
 
 // ============================================================================
 // Instance data
@@ -210,8 +210,6 @@ impl InstanceShapes {
 pub enum InstanceValidationError {
     #[error(transparent)]
     AirStructure(#[from] AirStructureError),
-    #[error("no instances provided")]
-    Empty,
     #[error("trace height {height} is not a power of two")]
     InvalidTraceHeight { height: usize },
     #[error("trace width mismatch: expected {expected}, got {actual}")]
@@ -235,8 +233,6 @@ pub enum InstanceValidationError {
     AirOrderLengthMismatch { instances: usize, air_order: usize },
     #[error("invalid air_order permutation for {count} instances")]
     InvalidAirOrder { count: usize },
-    #[error("log trace heights are not in ascending order")]
-    HeightsNotAscending,
     #[error(transparent)]
     Domain(#[from] DomainError),
 }
@@ -244,8 +240,7 @@ pub enum InstanceValidationError {
 impl InstanceShapes {
     /// Per-instance data checks: count match, AIR structural validity, public
     /// values length, var-len public inputs length, log_h platform bound, and
-    /// periodic column coverage. Independent of ordering — see
-    /// [`Self::ascending_subdomains`] for the ordering + subdomain build.
+    /// periodic column coverage. Independent of ordering.
     ///
     /// Instances and shapes must already be in the proof's AIR ordering.
     pub(crate) fn validate_instance_data<F, EF, A>(
@@ -297,38 +292,6 @@ impl InstanceShapes {
             }
         }
         Ok(())
-    }
-
-    /// Build per-instance [`LiftedDomain`]s by lifting each height `n_j` into
-    /// `max_lde_domain` with lift ratio `r_j = N / n_j` (the same ratio the
-    /// per-AIR quotient pipeline uses). Enforces ascending heights (canonical
-    /// for the proof) and that the max height ≥ 2 (required for the 2-row
-    /// transition window).
-    ///
-    /// Returns the subdomains in the same order as
-    /// [`Self::log_trace_heights`].
-    pub(crate) fn ascending_subdomains<F: TwoAdicField>(
-        &self,
-        max_lde_domain: &LiftedDomain<F>,
-    ) -> Result<Vec<LiftedDomain<F>>, InstanceValidationError> {
-        // First: ordering + transition-window check, so errors here surface as
-        // `HeightsNotAscending` / `Empty` rather than `DomainError` from a
-        // later out-of-bounds `try_sub_domain`.
-        let mut log_prev: u8 = 0;
-        for &log_h in self.log_trace_heights() {
-            if log_h < log_prev {
-                return Err(InstanceValidationError::HeightsNotAscending);
-            }
-            log_prev = log_h;
-        }
-        if log_prev == 0 {
-            return Err(InstanceValidationError::Empty);
-        }
-        // Then: build the subdomains.
-        self.log_trace_heights()
-            .iter()
-            .map(|&h| max_lde_domain.try_sub_domain(h).map_err(Into::into))
-            .collect()
     }
 }
 

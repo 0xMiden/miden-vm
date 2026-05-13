@@ -58,6 +58,15 @@ pub enum DomainError {
     /// Sub-domain construction with a trace height larger than the parent's.
     #[error("sub-domain trace log size {smaller} exceeds parent {parent}")]
     SubDomainTooLarge { smaller: u8, parent: u8 },
+    /// No heights supplied to a multi-height constructor.
+    #[error("no trace heights supplied")]
+    EmptyHeights,
+    /// Heights are not in non-decreasing order.
+    #[error("trace heights are not in non-decreasing order")]
+    HeightsNotAscending,
+    /// Max trace height is 1 (`log_h == 0`): no 2-row transition window.
+    #[error("max trace log height is 0; at least one trace must have height ≥ 2")]
+    MaxHeightTooSmall,
 }
 
 // ============================================================================
@@ -446,6 +455,39 @@ impl<F: TwoAdicField> LiftedDomain<F> {
         })
     }
 
+    /// Build the per-instance LDE domains for a batch of traces with
+    /// non-decreasing log heights. The largest entry — `log_trace_heights.last()`
+    /// — anchors a canonical max LDE domain at `last + log_blowup`; smaller
+    /// entries become sub-domains of that anchor, carrying the lift ratio used
+    /// downstream by the per-AIR quotient pipeline.
+    ///
+    /// Returns the domains in the input order (so `.last()` is the max).
+    pub fn try_many_from_ascending_heights(
+        log_trace_heights: &[u8],
+        log_blowup: u8,
+    ) -> Result<Vec<Self>, DomainError> {
+        let Some((&log_max, rest)) = log_trace_heights.split_last() else {
+            return Err(DomainError::EmptyHeights);
+        };
+        if log_max == 0 {
+            return Err(DomainError::MaxHeightTooSmall);
+        }
+        let mut log_prev: u8 = 0;
+        for &log_h in log_trace_heights {
+            if log_h < log_prev {
+                return Err(DomainError::HeightsNotAscending);
+            }
+            log_prev = log_h;
+        }
+        let max = Self::try_canonical(log_max, log_blowup)?;
+        let mut out = Vec::with_capacity(log_trace_heights.len());
+        for &log_h in rest {
+            out.push(max.try_sub_domain(log_h)?);
+        }
+        out.push(max);
+        Ok(out)
+    }
+
     // ============ Subgroup / coset accessors ============
 
     /// The trace domain `H` as a [`TwoAdicSubgroup`].
@@ -541,6 +583,10 @@ impl<F: TwoAdicField> LiftedDomain<F> {
     // ============ OOD point sampling ============
 
     /// Sample an OOD evaluation point outside both `H` and the LDE coset.
+    ///
+    /// Repeatedly draws candidates from `channel` until one falls outside both exclusion
+    /// sets. Terminates with overwhelming probability because `|H ∪ gK|` is negligible
+    /// relative to the extension field size.
     pub fn sample_ood_point<EF>(&self, channel: &mut impl Channel<F = F>) -> EF
     where
         EF: ExtensionField<F>,

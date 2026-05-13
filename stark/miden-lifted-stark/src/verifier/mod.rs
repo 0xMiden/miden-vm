@@ -160,12 +160,13 @@ where
 
     // Validate AIR/instance contracts.
     instance_shapes.validate_instance_data(&instances)?;
-    let log_max_trace_height = *instance_shapes
-        .log_trace_heights()
+    let instance_domains = LiftedDomain::<F>::try_many_from_ascending_heights(
+        instance_shapes.log_trace_heights(),
+        log_blowup,
+    )?;
+    let max_lde_domain = *instance_domains
         .last()
-        .ok_or(InstanceValidationError::Empty)?;
-    let max_lde_domain = LiftedDomain::<F>::try_canonical(log_max_trace_height, log_blowup)?;
-    let instance_domains = instance_shapes.ascending_subdomains(&max_lde_domain)?;
+        .expect("non-empty: validated by try_many_from_ascending_heights");
 
     instance_shapes.observe_heights::<F, _>(&mut challenger);
 

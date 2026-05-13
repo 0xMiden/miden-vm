@@ -76,11 +76,19 @@ impl FriParams {
     /// the domain size doesn't divide evenly by the folding factor.
     #[inline]
     pub fn num_rounds<F: TwoAdicField>(&self, domain: &LiftedDomain<F>) -> usize {
-        let log_max_final_size = self.log_final_degree + domain.log_blowup();
-        domain
-            .log_lde_height()
-            .saturating_sub(log_max_final_size)
-            .div_ceil(self.fold.log_arity()) as usize
+        // Maximum domain size needed to accommodate a degree-`2^log_final_degree` polynomial
+        // after folding `num_rounds` times.
+        let log_max_final_size = u16::from(self.log_final_degree) + u16::from(domain.log_blowup());
+        // Number of domain squarings required to reach a domain of size at most
+        // `log_max_final_size`. `saturating_sub` covers the degenerate "LDE already at or
+        // below target" case.
+        let num_steps = u16::from(domain.log_lde_height()).saturating_sub(log_max_final_size);
+        // Divide the number of steps by the folding factor to get the number of rounds.
+        // Round up so the final domain is ≤ `2^log_max_final_size` even when the
+        // folding factor doesn't divide `num_steps` evenly. The last round may
+        // overshoot, leaving the actual final degree strictly below the bound —
+        // see [`final_poly_degree`](Self::final_poly_degree).
+        num_steps.div_ceil(u16::from(self.fold.log_arity())) as usize
     }
 
     /// Compute the final polynomial degree after folding the codeword evaluated on `domain`.
@@ -94,9 +102,14 @@ impl FriParams {
     #[inline]
     pub fn final_poly_degree<F: TwoAdicField>(&self, domain: &LiftedDomain<F>) -> usize {
         let num_rounds = self.num_rounds(domain);
-        let log_final_size =
-            domain.log_lde_height() as usize - num_rounds * self.fold.log_arity() as usize;
-        1 << log_final_size.saturating_sub(domain.log_blowup() as usize)
+        // log of the final domain size: starting LDE shrunk by num_rounds folds of
+        // factor 2^log_arity.
+        let log_final_domain_size = (domain.log_lde_height() as usize)
+            .saturating_sub(num_rounds * self.fold.log_arity() as usize);
+        let log_final_poly_degree =
+            log_final_domain_size.saturating_sub(domain.log_blowup() as usize);
+        // Poly degree = final domain size / blowup.
+        1 << log_final_poly_degree
     }
 }
 
