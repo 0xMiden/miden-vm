@@ -3,10 +3,11 @@
 use masm_decompiler::{Stmt, Var};
 
 use super::{
+    effect::AdviceEffect,
     shared::Env,
     summary::{AdviceSummary, AdviceSummaryMap},
     u32_domain::U32Validity,
-    walker::{self, AdviceCapability, AdviceEffect},
+    walker::{self, AdviceCapability},
 };
 
 /// Analyze one lifted procedure and summarize which outputs may carry unconstrained advice.
