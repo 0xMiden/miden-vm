@@ -39,7 +39,7 @@ struct Cli {
 
     /// Set formatter options from the command line
     #[arg(long)]
-    config: Config,
+    config: Option<Config>,
 
     /// Paths to Miden Assembly source files.
     #[arg(value_name = "PATH")]
@@ -88,17 +88,20 @@ fn run() -> Result<(), CliError> {
     let cli = Cli::parse();
     let source_manager = Arc::new(DefaultSourceManager::default());
 
-    let mut config = if let Ok(cwd) = std::env::current_dir() {
+    let config = if let Ok(cwd) = std::env::current_dir() {
         let path = cwd.join("miden-format.toml");
         if path.try_exists().ok().is_some_and(|exists| exists) {
-            Config::load(path)?
+            let mut config = Config::load(path)?;
+            if let Some(cli_config) = cli.config.as_ref() {
+                config.merge(cli_config);
+            }
+            config
         } else {
-            Config::default()
+            cli.config.clone().unwrap_or_default()
         }
     } else {
-        Config::default()
+        cli.config.clone().unwrap_or_default()
     };
-    config.merge(&cli.config);
 
     let inputs = collect_inputs(&cli, &source_manager)?;
 
