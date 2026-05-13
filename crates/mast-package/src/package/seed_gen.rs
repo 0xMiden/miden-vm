@@ -13,8 +13,7 @@ use miden_assembly_syntax::{
 use miden_core::{
     advice::AdviceMap,
     mast::{
-        BasicBlockNodeBuilder, DebugInfo, MastForest, MastForestParts, MastNodeBuilder,
-        MastNodeExt, MastNodeId,
+        BasicBlockNodeBuilder, DebugInfo, MastForest, MastNodeBuilder, MastNodeExt, MastNodeId,
     },
     operations::Operation,
     serde::Serializable,
@@ -32,13 +31,9 @@ fn build_forest() -> (MastForest, MastNodeId) {
             .expect("failed to build basic block");
     let mut nodes = IndexVec::new();
     nodes.push(node).expect("failed to add MAST node");
-    let forest = MastForest::from_parts(MastForestParts {
-        nodes,
-        roots: vec![node_id],
-        advice_map: AdviceMap::default(),
-        debug_info: DebugInfo::new(),
-    })
-    .expect("failed to build MAST forest");
+    let forest =
+        MastForest::from_raw_parts(nodes, vec![node_id], AdviceMap::default(), DebugInfo::new())
+            .expect("failed to build MAST forest");
     (forest, node_id)
 }
 

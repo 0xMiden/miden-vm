@@ -9,7 +9,7 @@ use miden_core::{
     events::SystemEvent,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, DebugInfo, DecoratorId, ExternalNodeBuilder,
-        JoinNodeBuilder, MastForest, MastForestContributor, MastForestParts,
+        JoinNodeBuilder, MastForest, MastForestContributor,
     },
     operations::{Decorator, Operation},
     program::StackInputs,
@@ -35,13 +35,9 @@ fn mast_forest_with_decorator_ids(
         .into_iter()
         .map(|decorator| debug_info.add_decorator(decorator).unwrap())
         .collect();
-    let mast_forest = MastForest::from_parts(MastForestParts {
-        nodes: IndexVec::new(),
-        roots: Vec::new(),
-        advice_map: AdviceMap::default(),
-        debug_info,
-    })
-    .unwrap();
+    let mast_forest =
+        MastForest::from_raw_parts(IndexVec::new(), Vec::new(), AdviceMap::default(), debug_info)
+            .unwrap();
 
     (mast_forest, decorator_ids)
 }
