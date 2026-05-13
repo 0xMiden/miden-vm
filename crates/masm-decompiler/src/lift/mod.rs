@@ -12,7 +12,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 use log::trace;
 use miden_assembly_syntax::{
-    ast::{Block, Instruction, Op, Procedure},
+    ast::{Block, Immediate, Instruction, Op, Procedure},
     debuginfo::{SourceSpan, Spanned},
 };
 use repeat::{SlotIndex, TaggedSlotStack, plan_repeat_slots, simulate_block_tags};
@@ -101,6 +101,13 @@ pub enum LiftingError {
         /// Description of the unsupported pattern.
         reason: String,
     },
+    /// An immediate still refers to a named constant instead of a resolved value.
+    UnresolvedImmediateConstant {
+        /// Source span of the immediate.
+        span: SourceSpan,
+        /// Constant identifier as written in source.
+        name: String,
+    },
 }
 
 impl std::fmt::Display for LiftingError {
@@ -148,6 +155,9 @@ impl std::fmt::Display for LiftingError {
             LiftingError::UnsupportedRepeatPattern { reason, .. } => {
                 write!(f, "unsupported repeat loop pattern: {reason}")
             },
+            LiftingError::UnresolvedImmediateConstant { name, .. } => {
+                write!(f, "unresolved immediate constant `{name}`")
+            },
         }
     }
 }
@@ -156,6 +166,18 @@ impl std::error::Error for LiftingError {}
 
 /// Result type for lifting operations.
 pub type LiftingResult<T> = Result<T, LiftingError>;
+
+pub(super) fn resolved_immediate<T: Copy>(
+    imm: &Immediate<T>,
+    span: SourceSpan,
+) -> LiftingResult<T> {
+    match imm {
+        Immediate::Value(value) => Ok(value.into_inner()),
+        Immediate::Constant(name) => {
+            Err(LiftingError::UnresolvedImmediateConstant { span, name: name.to_string() })
+        },
+    }
+}
 
 /// Context for tracking loop nesting during lifting.
 #[derive(Debug, Clone, Default)]
@@ -258,15 +280,10 @@ fn lift_op(
         Op::If { then_blk, else_blk, .. } => {
             lift_if(op_span, then_blk, else_blk, stack, loop_ctx, resolver, sigs)
         },
-        Op::Repeat { count, body, .. } => lift_repeat(
-            op_span,
-            count.expect_value() as usize,
-            body,
-            stack,
-            loop_ctx,
-            resolver,
-            sigs,
-        ),
+        Op::Repeat { count, body, .. } => {
+            let count = resolved_immediate(count, op_span)? as usize;
+            lift_repeat(op_span, count, body, stack, loop_ctx, resolver, sigs)
+        },
         Op::While { body, .. } => lift_while(op_span, body, stack, loop_ctx, resolver, sigs),
     }
 }

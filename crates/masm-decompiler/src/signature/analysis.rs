@@ -1,5 +1,5 @@
 use log::debug;
-use miden_assembly_syntax::ast::{Block, Instruction, InvocationTarget, Op, Procedure};
+use miden_assembly_syntax::ast::{Block, Immediate, Instruction, InvocationTarget, Op, Procedure};
 
 use super::{ProcSignature, SignatureMap, domain::ProvenanceStack, effects::StackEffect};
 use crate::{
@@ -83,8 +83,11 @@ impl<'a> Analysis<'a> {
         match op {
             Op::Inst(inst) => self.visit_inst(inst.inner(), stack),
             Op::If { then_blk, else_blk, .. } => self.visit_if(then_blk, else_blk, stack),
-            Op::Repeat { count, body, .. } => {
-                self.visit_repeat(count.expect_value() as usize, body, stack)
+            Op::Repeat { count, body, .. } => match count {
+                Immediate::Value(count) => {
+                    self.visit_repeat(count.into_inner() as usize, body, stack)
+                },
+                Immediate::Constant(_) => OpResult::Unknown,
             },
             Op::While { body, .. } => self.visit_while(body, stack),
         }
@@ -95,7 +98,7 @@ impl<'a> Analysis<'a> {
 
         match inst {
             // Handle calls explicitly
-            Exec(target) => self.visit_call(target, stack),
+            Exec(target) | Call(target) | SysCall(target) => self.visit_call(target, stack),
             U32Assert | U32AssertWithError(_) => {
                 stack.apply_preserving_read(1);
                 OpResult::Known
@@ -112,8 +115,7 @@ impl<'a> Analysis<'a> {
                 stack.apply_side_effecting_read(1);
                 OpResult::Known
             },
-            // TODO: Handle call and syscall
-            Call(..) | SysCall(..) | DynCall | DynExec => OpResult::Unknown,
+            DynCall | DynExec => OpResult::Unknown,
             _ => match StackEffect::from(inst) {
                 StackEffect::Known { pops: 0, pushes: 0, required_depth } if required_depth > 0 => {
                     stack.apply_side_effecting_read(required_depth);
