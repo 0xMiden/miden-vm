@@ -3,7 +3,7 @@ use alloc::vec::Vec;
 use miden_core::{
     Felt, WORD_SIZE, Word, ZERO,
     crypto::hash::Poseidon2,
-    deferred::{DeferredError, DeferredTag, Payload, TagKind},
+    deferred::{DeferredTag, Payload, TagKind},
     events::SystemEvent,
     field::{BasedVectorSpace, Field, PrimeCharacteristicRing, QuadFelt},
 };
@@ -11,7 +11,7 @@ use miden_core::{
 use crate::{
     MemoryError,
     advice::AdviceError,
-    deferred::{assert_eq as deferred_assert_eq, register_node},
+    deferred::{SchemaError, assert_eq as deferred_assert_eq, register_node},
     errors::OperationError,
     fast::FastProcessor,
 };
@@ -39,7 +39,7 @@ pub enum SystemEventError {
     #[error(transparent)]
     Memory(#[from] MemoryError),
     #[error(transparent)]
-    Deferred(#[from] DeferredError),
+    Deferred(#[from] SchemaError),
 }
 
 // SYSTEM EVENT HANDLERS
@@ -553,10 +553,10 @@ const DEFERRED_TAG_OFFSET: usize = 1;
 /// Stack offset of the data segment (payload, or `lhs_digest || rhs_digest`) below the tag.
 const DEFERRED_DATA_OFFSET: usize = 5;
 
-/// Reads a 4-felt deferred tag from the stack starting at `start` and validates its kind.
-fn read_deferred_tag(processor: &FastProcessor, start: usize) -> Result<DeferredTag, DeferredError> {
+/// Reads a 4-felt deferred tag from the stack starting at `start`.
+fn read_deferred_tag(processor: &FastProcessor, start: usize) -> Result<DeferredTag, SchemaError> {
     let felts: [Felt; 4] = core::array::from_fn(|i| processor.stack_get(start + i));
-    DeferredTag::from_felts(felts)
+    DeferredTag::from_felts(felts).map_err(SchemaError::from)
 }
 
 /// Reads an 8-felt payload from the stack starting at `start`.
@@ -572,30 +572,36 @@ fn read_deferred_digest(processor: &FastProcessor, start: usize) -> Word {
 }
 
 /// Handles `SystemEvent::DeferredRegisterLeaf` and `DeferredRegisterOp`. Reads the tag and
-/// payload off the operand stack, validates the tag's kind, hashes the node, and inserts it into
-/// the DAG state on the advice provider. The operand stack is left untouched.
+/// payload off the operand stack and hands them to the installed schema, which validates and
+/// inserts the node. The leaf-vs-op distinction is preserved here as a sanity check against the
+/// caller's MASM-level intent; it will disappear in a later commit when the two keywords
+/// collapse into a single `deferred_register`.
 fn handle_deferred_register(
     processor: &mut FastProcessor,
     expected_kind: TagKind,
 ) -> Result<(), SystemEventError> {
     let tag = read_deferred_tag(processor, DEFERRED_TAG_OFFSET)?;
+    if tag.kind() != expected_kind {
+        return Err(SchemaError::InvalidNode.into());
+    }
     let payload = read_deferred_payload(processor, DEFERRED_DATA_OFFSET);
 
-    let (state, registry) = processor.deferred_view_mut();
-    register_node(state, registry, tag, payload, expected_kind)?;
+    let (state, schema) = processor.deferred_view_mut();
+    register_node(state, schema, tag, payload)?;
     Ok(())
 }
 
 /// Handles `SystemEvent::DeferredAssertEq`. Reads the tag and two digests off the operand stack,
-/// recursively evaluates both sides through the type handler, and records the assertion. The
-/// operand stack is left untouched; a mismatch surfaces as a `DeferredError::AssertionFailed`.
+/// asks the schema whether the two nodes evaluate equal, and records the assertion. The operand
+/// stack is left untouched; a schema-reported mismatch surfaces as
+/// `SchemaError::AssertionFailed`.
 fn handle_deferred_assert_eq(processor: &mut FastProcessor) -> Result<(), SystemEventError> {
     let tag = read_deferred_tag(processor, DEFERRED_TAG_OFFSET)?;
     let lhs_digest = read_deferred_digest(processor, DEFERRED_DATA_OFFSET);
     let rhs_digest = read_deferred_digest(processor, DEFERRED_DATA_OFFSET + 4);
 
-    let (state, registry) = processor.deferred_view_mut();
-    deferred_assert_eq(state, registry, tag, lhs_digest, rhs_digest)?;
+    let (state, schema) = processor.deferred_view_mut();
+    deferred_assert_eq(state, schema, tag, lhs_digest, rhs_digest)?;
     Ok(())
 }
 

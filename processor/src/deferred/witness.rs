@@ -41,23 +41,16 @@ pub fn extract_witness(state: &DeferredState) -> DeferredWitness {
 
 #[cfg(test)]
 mod tests {
-    use alloc::sync::Arc;
-
-    use miden_core::deferred::{DeferredTag, Payload};
+    use miden_core::{
+        Felt,
+        deferred::{DeferredTag, Payload},
+    };
 
     use super::*;
     use crate::deferred::{
         events::{assert_eq, binary_op_payload, register_node},
         handlers::Field0Handler,
-        registry::TypeHandlerRegistry,
     };
-    use miden_core::{Felt, deferred::TagKind};
-
-    fn make_registry() -> TypeHandlerRegistry {
-        let mut reg = TypeHandlerRegistry::new();
-        reg.register(Arc::new(Field0Handler)).unwrap();
-        reg
-    }
 
     fn field0_leaf(low: u64) -> (DeferredTag, Payload) {
         let mut limbs = [Felt::from_u32(0); 8];
@@ -79,13 +72,12 @@ mod tests {
         // Register two leaves; only assert one of them is equal to itself. The orphan stays in
         // the state but must not appear in the witness.
         let mut state = DeferredState::new();
-        let reg = make_registry();
+        let mut schema = Field0Handler;
         let (a_tag, a_payload) = field0_leaf(1);
         let (orphan_tag, orphan_payload) = field0_leaf(99);
-        let a = register_node(&mut state, &reg, a_tag, a_payload, TagKind::Leaf).unwrap();
-        let _orphan =
-            register_node(&mut state, &reg, orphan_tag, orphan_payload, TagKind::Leaf).unwrap();
-        assert_eq(&mut state, &reg, DeferredTag::Field0AssertEq, a, a).unwrap();
+        let a = register_node(&mut state, &mut schema, a_tag, a_payload).unwrap();
+        let _orphan = register_node(&mut state, &mut schema, orphan_tag, orphan_payload).unwrap();
+        assert_eq(&mut state, &mut schema, DeferredTag::Field0AssertEq, a, a).unwrap();
 
         let w = extract_witness(&state);
         assert_eq!(w.nodes.len(), 1);
@@ -97,33 +89,31 @@ mod tests {
     fn reachable_subgraph_includes_op_nodes_and_their_children() {
         // (a + b) * c == precomputed_35
         let mut state = DeferredState::new();
-        let reg = make_registry();
+        let mut schema = Field0Handler;
         let (a_tag, a_payload) = field0_leaf(3);
         let (b_tag, b_payload) = field0_leaf(4);
         let (c_tag, c_payload) = field0_leaf(5);
         let (expected_tag, expected_payload) = field0_leaf(35);
-        let a = register_node(&mut state, &reg, a_tag, a_payload, TagKind::Leaf).unwrap();
-        let b = register_node(&mut state, &reg, b_tag, b_payload, TagKind::Leaf).unwrap();
-        let c = register_node(&mut state, &reg, c_tag, c_payload, TagKind::Leaf).unwrap();
+        let a = register_node(&mut state, &mut schema, a_tag, a_payload).unwrap();
+        let b = register_node(&mut state, &mut schema, b_tag, b_payload).unwrap();
+        let c = register_node(&mut state, &mut schema, c_tag, c_payload).unwrap();
         let expected =
-            register_node(&mut state, &reg, expected_tag, expected_payload, TagKind::Leaf).unwrap();
+            register_node(&mut state, &mut schema, expected_tag, expected_payload).unwrap();
         let add = register_node(
             &mut state,
-            &reg,
+            &mut schema,
             DeferredTag::Field0Add,
             binary_op_payload(a, b),
-            TagKind::BinaryOp,
         )
         .unwrap();
         let mul = register_node(
             &mut state,
-            &reg,
+            &mut schema,
             DeferredTag::Field0Mul,
             binary_op_payload(add, c),
-            TagKind::BinaryOp,
         )
         .unwrap();
-        assert_eq(&mut state, &reg, DeferredTag::Field0AssertEq, mul, expected).unwrap();
+        assert_eq(&mut state, &mut schema, DeferredTag::Field0AssertEq, mul, expected).unwrap();
 
         let w = extract_witness(&state);
         // Six nodes: a, b, c, expected, add, mul.
@@ -137,14 +127,14 @@ mod tests {
     #[test]
     fn node_ordering_is_deterministic_by_digest() {
         let mut state = DeferredState::new();
-        let reg = make_registry();
+        let mut schema = Field0Handler;
         let (a_tag, a_payload) = field0_leaf(11);
         let (b_tag, b_payload) = field0_leaf(22);
-        let a = register_node(&mut state, &reg, a_tag, a_payload, TagKind::Leaf).unwrap();
-        let b = register_node(&mut state, &reg, b_tag, b_payload, TagKind::Leaf).unwrap();
+        let a = register_node(&mut state, &mut schema, a_tag, a_payload).unwrap();
+        let b = register_node(&mut state, &mut schema, b_tag, b_payload).unwrap();
         // Assert each leaf equal to itself so both digests show up in the witness.
-        assert_eq(&mut state, &reg, DeferredTag::Field0AssertEq, a, a).unwrap();
-        assert_eq(&mut state, &reg, DeferredTag::Field0AssertEq, b, b).unwrap();
+        assert_eq(&mut state, &mut schema, DeferredTag::Field0AssertEq, a, a).unwrap();
+        assert_eq(&mut state, &mut schema, DeferredTag::Field0AssertEq, b, b).unwrap();
 
         let w = extract_witness(&state);
         // Two adjacent extracts must produce identical, sorted ordering.
@@ -156,14 +146,14 @@ mod tests {
     #[test]
     fn assertions_preserve_insertion_order() {
         let mut state = DeferredState::new();
-        let reg = make_registry();
+        let mut schema = Field0Handler;
         let (a_tag, a_payload) = field0_leaf(1);
         let (b_tag, b_payload) = field0_leaf(2);
-        let a = register_node(&mut state, &reg, a_tag, a_payload, TagKind::Leaf).unwrap();
-        let b = register_node(&mut state, &reg, b_tag, b_payload, TagKind::Leaf).unwrap();
+        let a = register_node(&mut state, &mut schema, a_tag, a_payload).unwrap();
+        let b = register_node(&mut state, &mut schema, b_tag, b_payload).unwrap();
         // Self-equal each so both succeed.
-        assert_eq(&mut state, &reg, DeferredTag::Field0AssertEq, a, a).unwrap();
-        assert_eq(&mut state, &reg, DeferredTag::Field0AssertEq, b, b).unwrap();
+        assert_eq(&mut state, &mut schema, DeferredTag::Field0AssertEq, a, a).unwrap();
+        assert_eq(&mut state, &mut schema, DeferredTag::Field0AssertEq, b, b).unwrap();
 
         let w = extract_witness(&state);
         assert_eq!(w.assertions.len(), 2);

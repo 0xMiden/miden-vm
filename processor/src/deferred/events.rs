@@ -1,10 +1,10 @@
-//! Pure helpers driving the three deferred-DAG system event handlers.
+//! Schema-driven helpers backing the deferred-DAG system event handlers.
 //!
 //! [`register_node`] and [`assert_eq`] are called from the
 //! [`SystemEvent::DeferredRegisterLeaf`](miden_core::events::SystemEvent::DeferredRegisterLeaf) /
 //! `DeferredRegisterOp` / `DeferredAssertEq` dispatch arms in
 //! `processor::fast::basic_block::sys_event_handlers`. They are exposed as free functions so the
-//! handlers can split-borrow the deferred state and the type-handler registry from the processor.
+//! handlers can split-borrow the deferred state and the schema from the processor.
 //!
 //! v1 stack layout (position 0 is top, event_id already consumed by the caller):
 //! - `RegisterLeaf` / `RegisterOp`: positions `1..5` hold tag felts, positions `5..13` hold
@@ -16,39 +16,34 @@ use alloc::vec::Vec;
 
 use miden_core::{
     Felt,
-    deferred::{DeferredError, DeferredTag, Digest, Node, Payload, TagKind, hash_node},
+    deferred::{DeferredTag, Digest, Node, Payload, hash_node},
 };
 
 use super::{
-    registry::TypeHandlerRegistry,
+    schema::{Schema, SchemaError},
     state::DeferredState,
     transaction::{DeferredMutation, HandlerTransaction},
 };
 
-// REGISTER (LEAF | OP)
+// REGISTER
 // ================================================================================================
 
-/// Decode a (tag, payload) from the stack, insert the resulting node into the DAG, and return
-/// the digest so the caller can push it onto the advice stack.
+/// Decode a (tag, payload) from the stack, ask the schema to validate it, insert the resulting
+/// node into the DAG, and return its digest.
 ///
-/// `expected_kind` is `Leaf` for `RegisterLeaf` and `BinaryOp` for `RegisterOp`; a tag whose
-/// `kind()` does not match is rejected as `InvalidTag`. The handler does not validate payload
-/// well-formedness — that is the type-handler's job and only surfaces when an evaluator visits
-/// the node.
+/// The schema's `is_valid` is the only semantic gate. Tag-kind routing is no longer the
+/// processor's concern — the schema knows what tags it claims and what payload shapes are
+/// well-formed for each.
 pub fn register_node(
     state: &mut DeferredState,
-    registry: &TypeHandlerRegistry,
+    schema: &mut dyn Schema,
     tag: DeferredTag,
     payload: Payload,
-    expected_kind: TagKind,
-) -> Result<Digest, DeferredError> {
-    if tag.kind() != expected_kind {
-        return Err(DeferredError::InvalidTag);
-    }
-    // Routing-only check: an unknown prefix can never be evaluated, so reject at registration.
-    registry.get(tag.type_prefix())?;
-
+) -> Result<Digest, SchemaError> {
     let node = Node::new(tag, payload);
+    if !schema.is_valid(&node) {
+        return Err(SchemaError::InvalidNode);
+    }
     let digest = hash_node(tag, &payload);
 
     let txn = HandlerTransaction {
@@ -59,53 +54,24 @@ pub fn register_node(
     Ok(digest)
 }
 
-// ASSERT-EQ EVALUATION
+// ASSERT-EQ
 // ================================================================================================
 
-/// Recursively evaluate the node at `digest` to a canonical-leaf `(tag, payload)` pair.
-///
-/// Reduction is delegated to the value type's handler at every internal node — this function
-/// owns only the recursion plumbing. Cycles are impossible by construction (digests address
-/// children) so no visited-set is needed.
-fn evaluate(
-    state: &DeferredState,
-    registry: &TypeHandlerRegistry,
-    digest: Digest,
-) -> Result<(DeferredTag, Payload), DeferredError> {
-    let node = state.get(&digest).ok_or(DeferredError::MissingNode)?;
-    match node.tag.kind() {
-        TagKind::Leaf => Ok((node.tag, node.payload)),
-        TagKind::BinaryOp => {
-            let (lhs_digest, rhs_digest) =
-                node.binary_op_children().ok_or(DeferredError::InvalidTag)?;
-            let lhs = evaluate(state, registry, lhs_digest)?;
-            let rhs = evaluate(state, registry, rhs_digest)?;
-            let handler = registry.get(node.tag.type_prefix())?;
-            handler.eval_op(node.tag, lhs, rhs)
-        },
-        TagKind::AssertEq => Err(DeferredError::InvalidTag),
-    }
-}
-
-/// Drives an `AssertEq` event: evaluate both sides, compare via the type handler's equality,
-/// then record the assertion. The processor is not the verifier — recording is the point.
+/// Drives an `AssertEq` event: pull both nodes from the DAG, ask the schema whether they
+/// disagree, and record the assertion on success. A schema-reported mismatch surfaces as
+/// [`SchemaError::AssertionFailed`]; evaluation failures propagate as the schema returned them.
 pub fn assert_eq(
     state: &mut DeferredState,
-    registry: &TypeHandlerRegistry,
+    schema: &mut dyn Schema,
     tag: DeferredTag,
     lhs_digest: Digest,
     rhs_digest: Digest,
-) -> Result<(), DeferredError> {
-    if tag.kind() != TagKind::AssertEq {
-        return Err(DeferredError::InvalidTag);
-    }
-    let handler = registry.get(tag.type_prefix())?;
+) -> Result<(), SchemaError> {
+    let lhs_node = *state.get(&lhs_digest).ok_or(SchemaError::MissingNode)?;
+    let rhs_node = *state.get(&rhs_digest).ok_or(SchemaError::MissingNode)?;
 
-    let (_, lhs_value) = evaluate(state, registry, lhs_digest)?;
-    let (_, rhs_value) = evaluate(state, registry, rhs_digest)?;
-
-    if !handler.values_equal(&lhs_value, &rhs_value) {
-        return Err(DeferredError::AssertionFailed);
+    if schema.assert(state, lhs_node, rhs_node)? {
+        return Err(SchemaError::AssertionFailed);
     }
 
     let txn = HandlerTransaction {
@@ -114,7 +80,8 @@ pub fn assert_eq(
         )],
         vm: Vec::new(),
     };
-    state.apply(&txn)
+    state.apply(&txn)?;
+    Ok(())
 }
 
 // PAYLOAD HELPERS
@@ -130,8 +97,6 @@ pub fn binary_op_payload(lhs: Digest, rhs: Digest) -> Payload {
 
 #[cfg(test)]
 mod tests {
-    use alloc::sync::Arc;
-
     use miden_core::{
         Felt, Word,
         deferred::{DeferredTag, Payload},
@@ -139,12 +104,6 @@ mod tests {
 
     use super::*;
     use crate::deferred::handlers::Field0Handler;
-
-    fn make_registry() -> TypeHandlerRegistry {
-        let mut reg = TypeHandlerRegistry::new();
-        reg.register(Arc::new(Field0Handler)).unwrap();
-        reg
-    }
 
     fn field0_leaf(low: u64) -> (DeferredTag, Payload) {
         let mut limbs = [Felt::from_u32(0); 8];
@@ -156,39 +115,38 @@ mod tests {
     #[test]
     fn register_leaf_stores_node_and_returns_correct_digest() {
         let mut state = DeferredState::new();
-        let reg = make_registry();
+        let mut schema = Field0Handler;
         let (tag, payload) = field0_leaf(7);
 
-        let digest = register_node(&mut state, &reg, tag, payload, TagKind::Leaf).unwrap();
+        let digest = register_node(&mut state, &mut schema, tag, payload).unwrap();
 
         assert_eq!(digest, hash_node(tag, &payload));
         assert_eq!(state.get(&digest), Some(&Node::new(tag, payload)));
     }
 
     #[test]
-    fn register_with_wrong_kind_errors() {
+    fn register_with_unhandled_tag_errors() {
         let mut state = DeferredState::new();
-        let reg = make_registry();
-        let (tag, payload) = field0_leaf(1);
-
-        // Calling register_node with BinaryOp expectation on a Leaf tag must fail.
-        let err = register_node(&mut state, &reg, tag, payload, TagKind::BinaryOp);
-        assert!(matches!(err, Err(DeferredError::InvalidTag)));
+        let mut schema = Field0Handler;
+        // AssertEq-kind tag is structurally storable but the schema rejects it as InvalidNode.
+        let payload = Payload::new([Felt::from_u32(0); 8]);
+        let err =
+            register_node(&mut state, &mut schema, DeferredTag::Field0AssertEq, payload);
+        assert!(matches!(err, Err(SchemaError::InvalidNode)));
     }
 
     #[test]
     fn register_op_stores_op_node() {
         let mut state = DeferredState::new();
-        let reg = make_registry();
+        let mut schema = Field0Handler;
         let (a_tag, a_payload) = field0_leaf(3);
         let (b_tag, b_payload) = field0_leaf(4);
-        let a = register_node(&mut state, &reg, a_tag, a_payload, TagKind::Leaf).unwrap();
-        let b = register_node(&mut state, &reg, b_tag, b_payload, TagKind::Leaf).unwrap();
+        let a = register_node(&mut state, &mut schema, a_tag, a_payload).unwrap();
+        let b = register_node(&mut state, &mut schema, b_tag, b_payload).unwrap();
 
         let op_payload = binary_op_payload(a, b);
         let digest =
-            register_node(&mut state, &reg, DeferredTag::Field0Add, op_payload, TagKind::BinaryOp)
-                .unwrap();
+            register_node(&mut state, &mut schema, DeferredTag::Field0Add, op_payload).unwrap();
 
         assert!(state.contains(&digest));
     }
@@ -196,48 +154,45 @@ mod tests {
     #[test]
     fn assert_eq_succeeds_when_values_match() {
         let mut state = DeferredState::new();
-        let reg = make_registry();
+        let mut schema = Field0Handler;
         let (a_tag, a_payload) = field0_leaf(3);
         let (b_tag, b_payload) = field0_leaf(4);
         let (sum_tag, sum_payload) = field0_leaf(7);
-        let a = register_node(&mut state, &reg, a_tag, a_payload, TagKind::Leaf).unwrap();
-        let b = register_node(&mut state, &reg, b_tag, b_payload, TagKind::Leaf).unwrap();
-        let sum = register_node(&mut state, &reg, sum_tag, sum_payload, TagKind::Leaf).unwrap();
+        let a = register_node(&mut state, &mut schema, a_tag, a_payload).unwrap();
+        let b = register_node(&mut state, &mut schema, b_tag, b_payload).unwrap();
+        let sum = register_node(&mut state, &mut schema, sum_tag, sum_payload).unwrap();
         let add = register_node(
             &mut state,
-            &reg,
+            &mut schema,
             DeferredTag::Field0Add,
             binary_op_payload(a, b),
-            TagKind::BinaryOp,
         )
         .unwrap();
 
-        assert_eq(&mut state, &reg, DeferredTag::Field0AssertEq, add, sum).unwrap();
+        assert_eq(&mut state, &mut schema, DeferredTag::Field0AssertEq, add, sum).unwrap();
         assert_eq!(state.assertions().len(), 1);
     }
 
     #[test]
     fn assert_eq_fails_on_mismatch() {
         let mut state = DeferredState::new();
-        let reg = make_registry();
+        let mut schema = Field0Handler;
         let (a_tag, a_payload) = field0_leaf(3);
         let (b_tag, b_payload) = field0_leaf(4);
         let (wrong_tag, wrong_payload) = field0_leaf(99);
-        let a = register_node(&mut state, &reg, a_tag, a_payload, TagKind::Leaf).unwrap();
-        let b = register_node(&mut state, &reg, b_tag, b_payload, TagKind::Leaf).unwrap();
-        let wrong =
-            register_node(&mut state, &reg, wrong_tag, wrong_payload, TagKind::Leaf).unwrap();
+        let a = register_node(&mut state, &mut schema, a_tag, a_payload).unwrap();
+        let b = register_node(&mut state, &mut schema, b_tag, b_payload).unwrap();
+        let wrong = register_node(&mut state, &mut schema, wrong_tag, wrong_payload).unwrap();
         let add = register_node(
             &mut state,
-            &reg,
+            &mut schema,
             DeferredTag::Field0Add,
             binary_op_payload(a, b),
-            TagKind::BinaryOp,
         )
         .unwrap();
 
-        let err = assert_eq(&mut state, &reg, DeferredTag::Field0AssertEq, add, wrong);
-        assert!(matches!(err, Err(DeferredError::AssertionFailed)));
+        let err = assert_eq(&mut state, &mut schema, DeferredTag::Field0AssertEq, add, wrong);
+        assert!(matches!(err, Err(SchemaError::AssertionFailed)));
         // Failed assertion is not recorded.
         assert!(state.assertions().is_empty());
     }
@@ -245,58 +200,45 @@ mod tests {
     #[test]
     fn assert_eq_missing_node_errors() {
         let mut state = DeferredState::new();
-        let reg = make_registry();
+        let mut schema = Field0Handler;
         let (a_tag, a_payload) = field0_leaf(1);
-        let a = register_node(&mut state, &reg, a_tag, a_payload, TagKind::Leaf).unwrap();
+        let a = register_node(&mut state, &mut schema, a_tag, a_payload).unwrap();
         let dangling = Word::new([Felt::from_u32(0xdead); 4]);
 
-        let err = assert_eq(&mut state, &reg, DeferredTag::Field0AssertEq, a, dangling);
-        assert!(matches!(err, Err(DeferredError::MissingNode)));
-    }
-
-    #[test]
-    fn assert_eq_with_non_asserteq_tag_errors() {
-        let mut state = DeferredState::new();
-        let reg = make_registry();
-        let (a_tag, a_payload) = field0_leaf(1);
-        let a = register_node(&mut state, &reg, a_tag, a_payload, TagKind::Leaf).unwrap();
-
-        let err = assert_eq(&mut state, &reg, DeferredTag::Field0Add, a, a);
-        assert!(matches!(err, Err(DeferredError::InvalidTag)));
+        let err = assert_eq(&mut state, &mut schema, DeferredTag::Field0AssertEq, a, dangling);
+        assert!(matches!(err, Err(SchemaError::MissingNode)));
     }
 
     #[test]
     fn nested_evaluation_reduces_through_op_tree() {
         // Build (a + b) * c, then assert equal to a leaf holding (a + b) * c precomputed.
         let mut state = DeferredState::new();
-        let reg = make_registry();
+        let mut schema = Field0Handler;
         let (a_tag, a_payload) = field0_leaf(3);
         let (b_tag, b_payload) = field0_leaf(4);
         let (c_tag, c_payload) = field0_leaf(5);
         let (expected_tag, expected_payload) = field0_leaf(35); // (3 + 4) * 5
-        let a = register_node(&mut state, &reg, a_tag, a_payload, TagKind::Leaf).unwrap();
-        let b = register_node(&mut state, &reg, b_tag, b_payload, TagKind::Leaf).unwrap();
-        let c = register_node(&mut state, &reg, c_tag, c_payload, TagKind::Leaf).unwrap();
+        let a = register_node(&mut state, &mut schema, a_tag, a_payload).unwrap();
+        let b = register_node(&mut state, &mut schema, b_tag, b_payload).unwrap();
+        let c = register_node(&mut state, &mut schema, c_tag, c_payload).unwrap();
         let expected =
-            register_node(&mut state, &reg, expected_tag, expected_payload, TagKind::Leaf).unwrap();
+            register_node(&mut state, &mut schema, expected_tag, expected_payload).unwrap();
         let add = register_node(
             &mut state,
-            &reg,
+            &mut schema,
             DeferredTag::Field0Add,
             binary_op_payload(a, b),
-            TagKind::BinaryOp,
         )
         .unwrap();
         let mul = register_node(
             &mut state,
-            &reg,
+            &mut schema,
             DeferredTag::Field0Mul,
             binary_op_payload(add, c),
-            TagKind::BinaryOp,
         )
         .unwrap();
 
-        assert_eq(&mut state, &reg, DeferredTag::Field0AssertEq, mul, expected).unwrap();
+        assert_eq(&mut state, &mut schema, DeferredTag::Field0AssertEq, mul, expected).unwrap();
         assert_eq!(state.assertions().len(), 1);
     }
 }

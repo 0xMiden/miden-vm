@@ -10,10 +10,7 @@ use miden_assembly::Assembler;
 use miden_processor::{
     DefaultHost, ExecutionOptions, FastProcessor, Felt, ProcessorState, StackInputs, Word, ZERO,
     advice::{AdviceInputs, AdviceMutation},
-    deferred::{
-        DeferredTag, Field0Handler, Payload, TypeHandlerRegistry, binary_op_payload,
-        extract_witness, hash_node,
-    },
+    deferred::{DeferredTag, Field0Handler, Payload, binary_op_payload, extract_witness, hash_node},
     event::{EventError, EventHandler, EventName},
 };
 
@@ -23,19 +20,15 @@ extern crate alloc;
 // ================================================================================================
 
 /// Builds a `FastProcessor` configured for the deferred-DAG tests with the [`Field0Handler`]
-/// registered. The processor consumes itself when running the program.
+/// installed as the schema. The processor consumes itself when running the program.
 fn build_processor() -> FastProcessor {
-    let mut registry = TypeHandlerRegistry::new();
-    registry
-        .register(Arc::new(Field0Handler))
-        .expect("Field0Handler registration on empty registry");
     FastProcessor::new_with_options(
         StackInputs::default(),
         AdviceInputs::default(),
         ExecutionOptions::default(),
     )
     .expect("processor construction")
-    .with_deferred_registry(Arc::new(registry))
+    .with_schema(Box::new(Field0Handler))
 }
 
 // EVENT-DRIVING MASM BUILDER

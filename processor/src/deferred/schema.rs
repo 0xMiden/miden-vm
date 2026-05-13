@@ -35,6 +35,10 @@ pub enum SchemaError {
     #[error("node failed schema validation")]
     InvalidNode,
 
+    /// `Schema::assert` reported the two nodes disagree (the bool was true).
+    #[error("deferred assertion failed: values disagree")]
+    AssertionFailed,
+
     /// A schema-defined error (typically wrapping the type-specific error of the user's
     /// handler set).
     #[error(transparent)]

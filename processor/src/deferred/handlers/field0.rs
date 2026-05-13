@@ -1,11 +1,8 @@
-use alloc::vec::Vec;
-
 use miden_core::{
     Felt,
-    deferred::{DeferredError, DeferredTag, FIELD, FIELD_0, Node, Payload, TagKind, ValueType},
+    deferred::{DeferredError, DeferredTag, FIELD, FIELD_0, Node, Payload, TagKind},
 };
 
-use super::DeferredTypeHandler;
 use crate::deferred::{schema::SchemaError, state::DeferredState, Schema};
 
 /// Handler for the first 256-bit non-native field, `Field0`.
@@ -20,28 +17,17 @@ use crate::deferred::{schema::SchemaError, state::DeferredState, Schema};
 #[derive(Debug, Default, Clone, Copy)]
 pub struct Field0Handler;
 
-impl DeferredTypeHandler for Field0Handler {
-    fn value_type(&self) -> ValueType {
-        ValueType::Field0
-    }
-
-    fn type_prefix(&self) -> [Felt; 2] {
-        [FIELD, FIELD_0]
-    }
-
-    fn canonical_leaf_tag(&self) -> DeferredTag {
-        DeferredTag::Field0Leaf
-    }
-
+impl Field0Handler {
+    /// Reduce a binary op on two already-evaluated operands to a new canonical leaf.
+    ///
+    /// Both operands must be canonical Field0 leaves — the [`Schema`] impl below guarantees this
+    /// by recursing through the graph before invoking `eval_op`.
     fn eval_op(
         &self,
         op_tag: DeferredTag,
         lhs: (DeferredTag, Payload),
         rhs: (DeferredTag, Payload),
     ) -> Result<(DeferredTag, Payload), DeferredError> {
-        // Both operands must be canonical Field0 leaves. Anything else (an unevaluated op, a
-        // foreign value type) is an InvalidPayload at the handler boundary — the caller is
-        // expected to have evaluated children before invoking eval_op.
         if lhs.0 != DeferredTag::Field0Leaf || rhs.0 != DeferredTag::Field0Leaf {
             return Err(DeferredError::InvalidPayload);
         }
@@ -53,10 +39,6 @@ impl DeferredTypeHandler for Field0Handler {
             _ => return Err(DeferredError::Unsupported),
         };
         Ok((DeferredTag::Field0Leaf, encode_limbs(c)))
-    }
-
-    fn encode_advice(&self, payload: &Payload) -> Result<Vec<Felt>, DeferredError> {
-        Ok(payload.0.to_vec())
     }
 }
 
@@ -312,22 +294,5 @@ mod tests {
             (DeferredTag::Field0Leaf, b),
         );
         assert!(matches!(err, Err(DeferredError::Unsupported)));
-    }
-
-    #[test]
-    fn type_prefix_and_canonical_leaf() {
-        let h = Field0Handler;
-        assert_eq!(h.value_type(), ValueType::Field0);
-        assert_eq!(h.type_prefix(), [FIELD, FIELD_0]);
-        assert_eq!(h.canonical_leaf_tag(), DeferredTag::Field0Leaf);
-    }
-
-    #[test]
-    fn encode_advice_returns_payload_felts() {
-        let h = Field0Handler;
-        let p = leaf_from_low_u64(0xabcd_ef01_2345_6789);
-        let v = h.encode_advice(&p).unwrap();
-        assert_eq!(v.len(), 8);
-        assert_eq!(v.as_slice(), p.as_felts());
     }
 }

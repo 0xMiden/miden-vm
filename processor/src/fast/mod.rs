@@ -20,7 +20,7 @@ use crate::{
     ProcessorState,
     advice::AdviceError,
     continuation_stack::{Continuation, ContinuationStack},
-    deferred::TypeHandlerRegistry,
+    deferred::{NoopSchema, Schema},
     errors::MapExecErrNoCtx,
     tracer::{OperationHelperRegisters, Tracer},
 };
@@ -143,10 +143,11 @@ pub struct FastProcessor {
     /// Poseidon2 sponge).
     pc_transcript: PrecompileTranscript,
 
-    /// Registry of per-value-type handlers used by the deferred-DAG system events. The registry
-    /// is read-only during execution and shared via `Arc` so it can be cloned cheaply into nested
-    /// contexts.
-    deferred_registry: Arc<TypeHandlerRegistry>,
+    /// The deferred-DAG schema installed at processor construction. Owns the entire semantic
+    /// layer (tag recognition, validation, recursive evaluation, equality). Defaults to a
+    /// [`NoopSchema`] so programs that don't install a real schema fail loudly at the first
+    /// deferred event.
+    deferred_schema: Box<dyn Schema>,
 
     /// Tracks decorator retrieval calls for testing.
     #[cfg(test)]
@@ -267,13 +268,13 @@ impl FastProcessor {
         self
     }
 
-    /// Installs a [`TypeHandlerRegistry`] used by the deferred-DAG system events.
+    /// Installs the [`Schema`] used by the deferred-DAG system events.
     ///
-    /// The default registry is empty; programs that emit `SystemEvent::DeferredRegister*` or
-    /// `SystemEvent::DeferredAssertEq` must install a registry that resolves the value-type tags
-    /// they use, otherwise registration will fail with `DeferredError::UnknownTypePrefix`.
-    pub fn with_deferred_registry(mut self, registry: Arc<TypeHandlerRegistry>) -> Self {
-        self.deferred_registry = registry;
+    /// The default schema is [`NoopSchema`], which rejects every event with
+    /// `SchemaError::NoSchemaInstalled`. Programs emitting `SystemEvent::DeferredRegister*` or
+    /// `SystemEvent::DeferredAssertEq` must install a real schema that claims their tags.
+    pub fn with_schema(mut self, schema: Box<dyn Schema>) -> Self {
+        self.deferred_schema = schema;
         self
     }
 
@@ -311,7 +312,7 @@ impl FastProcessor {
             call_stack: Vec::new(),
             options,
             pc_transcript: PrecompileTranscript::new(),
-            deferred_registry: Arc::new(TypeHandlerRegistry::new()),
+            deferred_schema: Box::new(NoopSchema),
             #[cfg(test)]
             decorator_retrieval_count: Rc::new(Cell::new(0)),
         })
@@ -342,23 +343,23 @@ impl FastProcessor {
         self.options.enable_debugging()
     }
 
-    /// Returns the deferred-DAG type-handler registry.
+    /// Returns the deferred-DAG schema.
     #[inline(always)]
-    pub fn deferred_registry(&self) -> &TypeHandlerRegistry {
-        &self.deferred_registry
+    pub fn deferred_schema(&self) -> &dyn Schema {
+        &*self.deferred_schema
     }
 
-    /// Returns a mutable view onto the deferred-DAG state and an immutable reference to the
-    /// type-handler registry as a disjoint borrow pair.
+    /// Returns a mutable view onto the deferred-DAG state and the schema as a disjoint borrow
+    /// pair.
     ///
-    /// The advice provider and the registry live in different fields of the processor; this
+    /// The advice provider and the schema live in different fields of the processor; this
     /// helper exists so the deferred system-event handlers can borrow both simultaneously without
     /// running into the borrow checker.
     #[inline(always)]
     pub(crate) fn deferred_view_mut(
         &mut self,
-    ) -> (&mut crate::deferred::DeferredState, &TypeHandlerRegistry) {
-        (self.advice.deferred_state_mut(), &self.deferred_registry)
+    ) -> (&mut crate::deferred::DeferredState, &mut dyn Schema) {
+        (self.advice.deferred_state_mut(), &mut *self.deferred_schema)
     }
 
     /// Returns true if decorators should be executed.
