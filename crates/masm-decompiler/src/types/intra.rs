@@ -9,7 +9,8 @@ use super::{
 use crate::{
     ir::{BinOp, Constant, Expr, Stmt, UnOp, Var},
     semantics::{
-        intrinsic_asserts_u32_args, intrinsic_base_name, intrinsic_positional_u32_arg_range,
+        IntrinsicOutputTypeShape, intrinsic_asserts_u32_args, intrinsic_base_name,
+        intrinsic_output_type_shape, intrinsic_positional_u32_arg_range,
         intrinsic_requires_u32_precondition,
     },
     symbol::path::SymbolPath,
@@ -713,29 +714,26 @@ impl<'a> ProcTypeAnalyzer<'a> {
         output_count: usize,
         args: &[Var],
     ) -> TypeFact {
-        let base = intrinsic_base_name(name);
-        match base {
-            // Multi-output intrinsics with Bool carry/borrow flag as last output.
-            "u32overflowing_add" | "u32overflowing_sub" | "u32overflowing_add3" => {
-                if output_index == output_count - 1 {
+        match intrinsic_output_type_shape(name) {
+            IntrinsicOutputTypeShape::Felt => TypeFact::Felt,
+            IntrinsicOutputTypeShape::U32 => TypeFact::U32,
+            IntrinsicOutputTypeShape::Bool => TypeFact::Bool,
+            IntrinsicOutputTypeShape::U32WithTopBool => {
+                if output_index + 1 == output_count {
                     TypeFact::Bool
                 } else {
                     TypeFact::U32
                 }
             },
-            // `u32widening_add` leaves the low limb on top of the stack and the
-            // carry underneath it.
-            "u32widening_add" => {
-                if output_index == output_count - 1 {
+            IntrinsicOutputTypeShape::BoolWithTopU32 => {
+                if output_index + 1 == output_count {
                     TypeFact::U32
                 } else {
                     TypeFact::Bool
                 }
             },
-            // `u32widening_add3` also leaves the low limb on top. When the
-            // carry input is already known Bool, the carry output stays Bool.
-            "u32widening_add3" => {
-                if output_index == output_count - 1 {
+            IntrinsicOutputTypeShape::U32WideningAdd3 => {
+                if output_index + 1 == output_count {
                     TypeFact::U32
                 } else if args.iter().any(|arg| self.inferred_type_for_var(arg) == TypeFact::Bool) {
                     TypeFact::Bool
@@ -743,24 +741,6 @@ impl<'a> ProcTypeAnalyzer<'a> {
                     TypeFact::U32
                 }
             },
-            // Multi-output intrinsics where all outputs are U32.
-            "u32widening_mul" | "u32widening_madd" | "u32divmod" | "u32split" | "u32mod"
-            | "u32wrapping_add3" | "u32wrapping_madd" => TypeFact::U32,
-            // Word test leaves a boolean on top of the stack.
-            "u32testw" => TypeFact::Bool,
-            // Other u32 intrinsics and sdepth: all outputs U32.
-            _ if base.starts_with("u32") || name == "sdepth" => TypeFact::U32,
-            // locaddr: U32. Note: uses `name` (not `base`) because
-            // `intrinsic_base_name` strips at the first dot, turning
-            // `locaddr.0` into `locaddr`. The match on `base` above
-            // intentionally falls through to these wildcard arms for dotted
-            // intrinsics.
-            _ if name.starts_with("locaddr.") => TypeFact::U32,
-            // is_odd: Bool.
-            "is_odd" => TypeFact::Bool,
-            // All other intrinsics (crypto, extension field, mem_stream,
-            // adv_pipe, etc.): Felt.
-            _ => TypeFact::Felt,
         }
     }
 
