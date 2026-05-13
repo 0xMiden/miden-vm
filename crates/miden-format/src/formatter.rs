@@ -1588,9 +1588,138 @@ fn needs_space(previous: &SyntaxToken, next: &SyntaxToken, style: SpacingStyle) 
 
 #[cfg(test)]
 mod tests {
+    use std::{
+        fs,
+        path::{Path, PathBuf},
+    };
+
     use miden_assembly_syntax_cst::parse_text;
 
     use super::{Config, format_syntax};
+
+    fn repo_root() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(Path::parent)
+            .expect("workspace root should be two levels above crates/miden-format")
+            .to_path_buf()
+    }
+
+    fn checked_in_masm_corpus() -> Vec<PathBuf> {
+        let root = repo_root();
+        let mut files = Vec::new();
+        for relative in [
+            "crates/lib/core/asm",
+            "miden-vm/masm-examples",
+            "miden-vm/tests/integration/cli/data",
+        ] {
+            collect_masm_files(&root.join(relative), &mut files);
+        }
+        files.sort();
+        files
+    }
+
+    fn collect_masm_files(dir: &Path, files: &mut Vec<PathBuf>) {
+        let entries = fs::read_dir(dir)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", dir.display()));
+        for entry in entries {
+            let entry = entry.unwrap_or_else(|error| {
+                panic!("failed to read a directory entry under {}: {error}", dir.display())
+            });
+            let path = entry.path();
+            if path.is_dir() {
+                collect_masm_files(&path, files);
+            } else if path.extension().is_some_and(|ext| ext == "masm") {
+                files.push(path);
+            }
+        }
+    }
+
+    fn representative_formatter_sources() -> &'static [&'static str] {
+        &[
+            "\
+#! docs
+pub   use   miden::core::mem  ->  memory
+
+# const comment
+pub const EVENT=event(\"miden::event\")
+adv_map   TABLE=[0x01,0x02]
+type T   = struct {f:u32,   other: felt}
+begin
+ swap  dup.1 add
+ # branch
+ if.true
+  nop
+ else
+  mul
+ end
+end
+",
+            "\
+@inline # keep me
+# keep standalone
+@locals(1)
+pub proc foo  nop end
+",
+            "\
+pub proc println_debug_message_with_context(
+    # message
+    message: ptr<u8, addrspace(byte)>,
+    # context
+    context: ptr<u8, addrspace(byte)>
+) -> (
+    # result
+    result: ptr<u8, addrspace(byte)>,
+    status: i1 # status
+) # proc
+    nop
+end
+",
+        ]
+    }
+
+    fn assert_format_idempotent(input: &str, label: impl core::fmt::Display) {
+        let config = Config::default();
+        let parse = parse_text(input);
+        assert!(
+            !parse.has_errors(),
+            "unexpected parse diagnostics for {label}: {:?}",
+            parse.diagnostics()
+        );
+
+        let formatted = format_syntax(&config, &parse.syntax());
+        let reparsed = parse_text(&formatted);
+        assert!(
+            !reparsed.has_errors(),
+            "formatted output did not parse for {label}: {:?}",
+            reparsed.diagnostics()
+        );
+
+        let reformatted = format_syntax(&config, &reparsed.syntax());
+        assert_eq!(reformatted, formatted, "formatter was not idempotent for {label}");
+    }
+
+    #[test]
+    fn formatter_is_idempotent_for_representative_sources() {
+        for (index, source) in representative_formatter_sources().iter().enumerate() {
+            assert_format_idempotent(source, format_args!("representative source {index}"));
+        }
+    }
+
+    #[test]
+    fn formatter_is_idempotent_for_checked_in_masm_corpus() {
+        let files = checked_in_masm_corpus();
+        assert!(
+            !files.is_empty(),
+            "expected the checked-in MASM corpus to contain at least one source file"
+        );
+
+        for path in files {
+            let source = fs::read_to_string(&path)
+                .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()));
+            assert_format_idempotent(&source, path.display());
+        }
+    }
 
     #[test]
     fn formats_top_level_forms_and_anchors_comments() {
