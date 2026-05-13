@@ -11,7 +11,7 @@ use miden_core::{
 use crate::{
     MemoryError,
     advice::AdviceError,
-    deferred::{SchemaError, register_node},
+    deferred::SchemaError,
     errors::OperationError,
     fast::FastProcessor,
 };
@@ -572,7 +572,7 @@ fn handle_deferred_register(processor: &mut FastProcessor) -> Result<(), SystemE
     let payload = read_deferred_payload(processor, DEFERRED_PAYLOAD_OFFSET);
 
     let (state, schema) = processor.deferred_view_mut();
-    register_node(state, schema, tag, payload)?;
+    state.register(schema, tag, payload)?;
     Ok(())
 }
 

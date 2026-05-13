@@ -1,8 +1,6 @@
-use alloc::vec::Vec;
-
 use miden_core::{
     Felt, Word, ZERO,
-    deferred::{DeferredError, Digest, Node, Payload, Tag},
+    deferred::{DeferredError, Node, Payload, Tag},
 };
 
 use crate::deferred::{
@@ -77,21 +75,13 @@ impl Field0Handler {
 }
 
 impl Schema for Field0Handler {
-    fn responds_to(&self, tag: Tag) -> bool {
-        tag[0] == FIELD0_PREFIX[0] && tag[1] == FIELD0_PREFIX[1]
-    }
-
     fn is_valid(&self, node: &Node) -> Option<NodeType> {
-        if !self.responds_to(node.tag) {
+        if node.tag[0] != FIELD0_PREFIX[0] || node.tag[1] != FIELD0_PREFIX[1] {
             return None;
         }
         if node.tag == FIELD0_LEAF {
             // Leaf payloads must have u32-canonical limbs so they can be reduced.
-            if decode_limbs(&node.payload).is_ok() {
-                Some(NodeType::Expression)
-            } else {
-                None
-            }
+            decode_limbs(&node.payload).ok().map(|_| NodeType::Expression)
         } else if node.tag == FIELD0_ADD || node.tag == FIELD0_MUL {
             // Op-node payloads are two child digests — opaque from this handler's POV.
             Some(NodeType::Expression)
@@ -100,15 +90,6 @@ impl Schema for Field0Handler {
             Some(NodeType::Assertion)
         } else {
             None
-        }
-    }
-
-    fn children(&self, node: &Node) -> Vec<Digest> {
-        if node.tag == FIELD0_ADD || node.tag == FIELD0_MUL || node.tag == FIELD0_ASSERT_EQ {
-            let (lhs, rhs) = Self::binary_op_children(&node.payload);
-            alloc::vec![lhs, rhs]
-        } else {
-            Vec::new()
         }
     }
 
@@ -123,6 +104,17 @@ impl Schema for Field0Handler {
             let lhs = self.eval(graph, lhs_node)?;
             let rhs = self.eval(graph, rhs_node)?;
             return Ok(self.eval_op(node.tag, lhs, rhs)?);
+        }
+        if node.tag == FIELD0_ASSERT_EQ {
+            let (lhs_digest, rhs_digest) = Self::binary_op_children(&node.payload);
+            let lhs_node = *graph.get(&lhs_digest).ok_or(SchemaError::MissingNode)?;
+            let rhs_node = *graph.get(&rhs_digest).ok_or(SchemaError::MissingNode)?;
+            let lhs = self.eval(graph, lhs_node)?;
+            let rhs = self.eval(graph, rhs_node)?;
+            if lhs != rhs {
+                return Err(SchemaError::AssertionFailed);
+            }
+            return Ok(node);
         }
         Err(SchemaError::InvalidNode)
     }

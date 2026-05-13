@@ -132,8 +132,8 @@ fn deferred_end_to_end_register_eval_assert() {
     assert_eq!(state.transcript(), expected_transcript);
     assert_ne!(state.transcript(), Word::new([ZERO; 4]));
 
-    // Witness reachable subgraph + transcript.
-    let witness = extract_witness(state, &Field0Handler);
+    // Witness includes every registered expression node + the assertion + the transcript.
+    let witness = extract_witness(state);
     assert_eq!(witness.nodes.len(), 6);
     let witness_digests: Vec<_> = witness.nodes.iter().map(|(d, _)| *d).collect();
     assert!(witness_digests.windows(2).all(|p| p[0] < p[1]));

@@ -3,10 +3,13 @@ use alloc::{collections::BTreeMap, vec::Vec};
 use miden_core::{
     Word, ZERO,
     crypto::hash::Poseidon2,
-    deferred::{DeferredError, Digest, Node, hash_node},
+    deferred::{DeferredError, Digest, Node, Payload, Tag, hash_node},
 };
 
-use super::transaction::{DeferredMutation, HandlerTransaction};
+use super::{
+    schema::{NodeType, Schema, SchemaError},
+    transaction::{DeferredMutation, HandlerTransaction},
+};
 
 /// In-memory deferred-DAG state owned by the host.
 ///
@@ -62,6 +65,46 @@ impl DeferredState {
     /// `hash_node(node.tag, &node.payload)` via `Poseidon2::merge`.
     pub fn transcript(&self) -> Digest {
         self.transcript
+    }
+
+    /// Register an opaque `(tag, payload)` node, asking `schema` to classify and (for
+    /// assertions) verify it.
+    ///
+    /// - `is_valid(node) == None` → [`SchemaError::InvalidNode`].
+    /// - `Some(NodeType::Expression)` → inserted into the DAG. Idempotent re-insert; a different
+    ///   node at the same digest surfaces as [`DeferredError::ConflictingNode`].
+    /// - `Some(NodeType::Assertion)` → appended to the assertion list, folded into the running
+    ///   transcript, then `schema.eval` is called for verification. A schema-reported
+    ///   `AssertionFailed` propagates as-is; the transcript fold is committed regardless
+    ///   (execution dies on mismatch, post-mismatch state is unobservable, deterministic
+    ///   transcript is easier to reason about).
+    pub fn register(
+        &mut self,
+        schema: &mut dyn Schema,
+        tag: Tag,
+        payload: Payload,
+    ) -> Result<Digest, SchemaError> {
+        let node = Node::new(tag, payload);
+        let digest = hash_node(tag, &payload);
+        match schema.is_valid(&node) {
+            None => Err(SchemaError::InvalidNode),
+            Some(NodeType::Expression) => {
+                if let Some(existing) = self.nodes.get(&digest) {
+                    if existing != &node {
+                        return Err(SchemaError::Other(DeferredError::ConflictingNode));
+                    }
+                } else {
+                    self.nodes.insert(digest, node);
+                }
+                Ok(digest)
+            },
+            Some(NodeType::Assertion) => {
+                self.transcript = Poseidon2::merge(&[self.transcript, digest]);
+                self.assertions.push(node);
+                schema.eval(self, node)?;
+                Ok(digest)
+            },
+        }
     }
 
     /// Apply every deferred mutation in `txn` atomically.

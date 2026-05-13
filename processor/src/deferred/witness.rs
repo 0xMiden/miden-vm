@@ -1,42 +1,16 @@
-use alloc::{collections::BTreeSet, vec::Vec};
+use alloc::vec::Vec;
 
-use miden_core::deferred::{DeferredWitness, Digest};
+use miden_core::deferred::DeferredWitness;
 
-use super::{schema::Schema, state::DeferredState};
+use super::state::DeferredState;
 
-/// Extract the reachable subgraph of `state` as a [`DeferredWitness`].
+/// Snapshot the deferred state into a [`DeferredWitness`].
 ///
-/// Reachability is rooted at the child digests of each assertion node (extracted via
-/// [`Schema::children`]). A BFS follows expression-node children via the same method; digests
-/// that aren't in the state's node map are silently skipped (the verifier will surface the
-/// missing node as an evaluation failure if it matters).
-///
-/// Output ordering is deterministic: nodes sorted by digest, assertions in registration order,
-/// transcript copied from `state`.
-pub fn extract_witness(state: &DeferredState, schema: &dyn Schema) -> DeferredWitness {
-    let mut visited: BTreeSet<Digest> = BTreeSet::new();
-    let mut worklist: Vec<Digest> = Vec::new();
-
-    // Root the BFS at the operand digests of every assertion node.
-    for assertion in state.assertions() {
-        for child in schema.children(assertion) {
-            worklist.push(child);
-        }
-    }
-
-    while let Some(digest) = worklist.pop() {
-        if !visited.insert(digest) {
-            continue;
-        }
-        if let Some(node) = state.get(&digest) {
-            for child in schema.children(node) {
-                worklist.push(child);
-            }
-        }
-    }
-
-    let nodes: Vec<_> =
-        visited.into_iter().filter_map(|d| state.get(&d).map(|n| (d, *n))).collect();
+/// All registered expression nodes (in digest order, thanks to the `BTreeMap`) plus every
+/// assertion node (in registration order) plus the final transcript digest. No reachability
+/// filtering — if a program registers an orphan expression, it appears in the witness too.
+pub fn extract_witness(state: &DeferredState) -> DeferredWitness {
+    let nodes: Vec<_> = state.nodes().iter().map(|(d, n)| (*d, *n)).collect();
     DeferredWitness::new(nodes, state.assertions().to_vec(), state.transcript())
 }
 
@@ -46,7 +20,7 @@ mod tests {
 
     use super::*;
     use crate::deferred::{
-        events::{binary_op_payload, register_node},
+        binary_op_payload,
         handlers::{FIELD0_ADD, FIELD0_ASSERT_EQ, FIELD0_LEAF, FIELD0_MUL, Field0Handler},
     };
 
@@ -65,80 +39,37 @@ mod tests {
     #[test]
     fn empty_state_yields_empty_witness() {
         let state = DeferredState::new();
-        let schema = Field0Handler;
-        let w = extract_witness(&state, &schema);
+        let w = extract_witness(&state);
         assert!(w.nodes.is_empty());
         assert!(w.assertions.is_empty());
     }
 
     #[test]
-    fn unreachable_nodes_are_excluded() {
-        // Register two leaves; only assert one of them is equal to itself. The orphan stays in
-        // the state but must not appear in the witness.
-        let mut state = DeferredState::new();
-        let mut schema = Field0Handler;
-        let (a_tag, a_payload) = field0_leaf(1);
-        let (orphan_tag, orphan_payload) = field0_leaf(99);
-        let a = register_node(&mut state, &mut schema, a_tag, a_payload).unwrap();
-        let _orphan = register_node(&mut state, &mut schema, orphan_tag, orphan_payload).unwrap();
-        register_node(&mut state, &mut schema, FIELD0_ASSERT_EQ, binary_op_payload(a, a))
-            .unwrap();
-
-        let w = extract_witness(&state, &schema);
-        assert_eq!(w.nodes.len(), 1);
-        assert_eq!(w.nodes[0].0, a);
-        assert_eq!(w.assertions.len(), 1);
-    }
-
-    #[test]
-    fn reachable_subgraph_includes_op_nodes_and_their_children() {
-        // (a + b) * c == precomputed_35
+    fn witness_includes_all_registered_nodes() {
+        // Build (a + b) * c == precomputed_35 and assert it. Plus an orphan node that nothing
+        // references — without reachability filtering it shows up in the witness too.
         let mut state = DeferredState::new();
         let mut schema = Field0Handler;
         let (a_tag, a_payload) = field0_leaf(3);
         let (b_tag, b_payload) = field0_leaf(4);
         let (c_tag, c_payload) = field0_leaf(5);
         let (expected_tag, expected_payload) = field0_leaf(35);
-        let a = register_node(&mut state, &mut schema, a_tag, a_payload).unwrap();
-        let b = register_node(&mut state, &mut schema, b_tag, b_payload).unwrap();
-        let c = register_node(&mut state, &mut schema, c_tag, c_payload).unwrap();
-        let expected =
-            register_node(&mut state, &mut schema, expected_tag, expected_payload).unwrap();
-        let add =
-            register_node(&mut state, &mut schema, FIELD0_ADD, binary_op_payload(a, b)).unwrap();
-        let mul =
-            register_node(&mut state, &mut schema, FIELD0_MUL, binary_op_payload(add, c)).unwrap();
-        register_node(&mut state, &mut schema, FIELD0_ASSERT_EQ, binary_op_payload(mul, expected))
+        let (orphan_tag, orphan_payload) = field0_leaf(99);
+        let a = state.register(&mut schema, a_tag, a_payload).unwrap();
+        let b = state.register(&mut schema, b_tag, b_payload).unwrap();
+        let c = state.register(&mut schema, c_tag, c_payload).unwrap();
+        let expected = state.register(&mut schema, expected_tag, expected_payload).unwrap();
+        let _orphan = state.register(&mut schema, orphan_tag, orphan_payload).unwrap();
+        let add = state.register(&mut schema, FIELD0_ADD, binary_op_payload(a, b)).unwrap();
+        let mul = state.register(&mut schema, FIELD0_MUL, binary_op_payload(add, c)).unwrap();
+        state
+            .register(&mut schema, FIELD0_ASSERT_EQ, binary_op_payload(mul, expected))
             .unwrap();
 
-        let w = extract_witness(&state, &schema);
-        // Six expression nodes: a, b, c, expected, add, mul.
-        assert_eq!(w.nodes.len(), 6);
-        let digests: BTreeSet<_> = w.nodes.iter().map(|(d, _)| *d).collect();
-        for d in [a, b, c, expected, add, mul] {
-            assert!(digests.contains(&d));
-        }
-    }
-
-    #[test]
-    fn node_ordering_is_deterministic_by_digest() {
-        let mut state = DeferredState::new();
-        let mut schema = Field0Handler;
-        let (a_tag, a_payload) = field0_leaf(11);
-        let (b_tag, b_payload) = field0_leaf(22);
-        let a = register_node(&mut state, &mut schema, a_tag, a_payload).unwrap();
-        let b = register_node(&mut state, &mut schema, b_tag, b_payload).unwrap();
-        // Self-equal each so both digests show up in the witness.
-        register_node(&mut state, &mut schema, FIELD0_ASSERT_EQ, binary_op_payload(a, a))
-            .unwrap();
-        register_node(&mut state, &mut schema, FIELD0_ASSERT_EQ, binary_op_payload(b, b))
-            .unwrap();
-
-        let w = extract_witness(&state, &schema);
-        // Two adjacent extracts must produce identical, sorted ordering.
-        let w2 = extract_witness(&state, &schema);
-        assert_eq!(w.nodes, w2.nodes);
-        assert!(w.nodes.windows(2).all(|p| p[0].0 < p[1].0));
+        let w = extract_witness(&state);
+        assert_eq!(w.nodes.len(), 7, "all 7 registered expression nodes are in the witness");
+        assert!(w.nodes.windows(2).all(|p| p[0].0 < p[1].0), "sorted by digest");
+        assert_eq!(w.assertions.len(), 1);
     }
 
     #[test]
@@ -147,15 +78,12 @@ mod tests {
         let mut schema = Field0Handler;
         let (a_tag, a_payload) = field0_leaf(1);
         let (b_tag, b_payload) = field0_leaf(2);
-        let a = register_node(&mut state, &mut schema, a_tag, a_payload).unwrap();
-        let b = register_node(&mut state, &mut schema, b_tag, b_payload).unwrap();
-        // Self-equal each so both succeed.
-        register_node(&mut state, &mut schema, FIELD0_ASSERT_EQ, binary_op_payload(a, a))
-            .unwrap();
-        register_node(&mut state, &mut schema, FIELD0_ASSERT_EQ, binary_op_payload(b, b))
-            .unwrap();
+        let a = state.register(&mut schema, a_tag, a_payload).unwrap();
+        let b = state.register(&mut schema, b_tag, b_payload).unwrap();
+        state.register(&mut schema, FIELD0_ASSERT_EQ, binary_op_payload(a, a)).unwrap();
+        state.register(&mut schema, FIELD0_ASSERT_EQ, binary_op_payload(b, b)).unwrap();
 
-        let w = extract_witness(&state, &schema);
+        let w = extract_witness(&state);
         assert_eq!(w.assertions.len(), 2);
         assert_eq!(assertion_lhs(&w.assertions[0]), a);
         assert_eq!(assertion_lhs(&w.assertions[1]), b);

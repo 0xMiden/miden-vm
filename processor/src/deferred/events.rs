@@ -1,71 +1,10 @@
-//! Schema-driven helper backing the single deferred-DAG system event handler.
+//! Helpers and integration tests for the deferred-DAG event flow.
 //!
-//! [`register_node`] is called from the [`SystemEvent::DeferredRegister`](
-//! miden_core::events::SystemEvent::DeferredRegister) dispatch arm in
-//! `processor::fast::basic_block::sys_event_handlers`. It is exposed as a free function so the
-//! handler can split-borrow the deferred state and the schema from the processor.
-//!
-//! Stack layout (position 0 is top, event_id already consumed by the caller):
-//! positions `1..5` hold the tag felts, positions `5..13` hold the payload felts. The schema's
-//! `is_valid` classifies the resulting node as either an [`NodeType::Expression`] (inserted
-//! into the DAG) or an [`NodeType::Assertion`] (appended to the assertion list, folded into the
-//! transcript, and verified via [`Schema::assert`]).
+//! The actual register-and-classify flow lives on
+//! [`DeferredState::register`](super::DeferredState::register). This module just exposes a
+//! payload-construction helper and integration tests for the unified register path.
 
-use alloc::vec::Vec;
-
-use miden_core::{
-    Felt,
-    deferred::{Digest, Node, Payload, Tag, hash_node},
-};
-
-use super::{
-    schema::{NodeType, Schema, SchemaError},
-    state::DeferredState,
-    transaction::{DeferredMutation, HandlerTransaction},
-};
-
-// REGISTER
-// ================================================================================================
-
-/// Decode a `(tag, payload)` pair, ask the schema to classify the node, and route it accordingly.
-///
-/// - `Some(NodeType::Expression)` inserts the node into the DAG and returns its digest.
-/// - `Some(NodeType::Assertion)` appends the node to the assertion list (folding it into the
-///   running transcript), then asks the schema to verify it. A schema-reported mismatch
-///   surfaces as [`SchemaError::AssertionFailed`]; the assertion stays recorded (the
-///   transcript is committed regardless — execution dies on mismatch and post-mismatch state
-///   isn't observable).
-/// - `None` is rejected as [`SchemaError::InvalidNode`].
-pub fn register_node(
-    state: &mut DeferredState,
-    schema: &mut dyn Schema,
-    tag: Tag,
-    payload: Payload,
-) -> Result<Digest, SchemaError> {
-    let node = Node::new(tag, payload);
-    let digest = hash_node(tag, &payload);
-
-    match schema.is_valid(&node) {
-        None => Err(SchemaError::InvalidNode),
-        Some(NodeType::Expression) => {
-            state.apply(&HandlerTransaction {
-                deferred: alloc::vec![DeferredMutation::InsertNode { digest, node }],
-                vm: Vec::new(),
-            })?;
-            Ok(digest)
-        },
-        Some(NodeType::Assertion) => {
-            state.apply(&HandlerTransaction {
-                deferred: alloc::vec![DeferredMutation::AppendAssertion(node)],
-                vm: Vec::new(),
-            })?;
-            if schema.assert(state, tag, node)? {
-                return Err(SchemaError::AssertionFailed);
-            }
-            Ok(digest)
-        },
-    }
-}
+use miden_core::{Felt, deferred::{Digest, Payload}};
 
 // PAYLOAD HELPERS
 // ================================================================================================
@@ -83,10 +22,17 @@ pub fn binary_op_payload(lhs: Digest, rhs: Digest) -> Payload {
 
 #[cfg(test)]
 mod tests {
-    use miden_core::{Felt, Word, deferred::Payload};
+    use miden_core::{
+        Felt, Word,
+        deferred::{Node, Payload, Tag, hash_node},
+    };
 
     use super::*;
-    use crate::deferred::handlers::{FIELD0_ADD, FIELD0_ASSERT_EQ, FIELD0_LEAF, FIELD0_MUL, Field0Handler};
+    use crate::deferred::{
+        DeferredState,
+        handlers::{FIELD0_ADD, FIELD0_ASSERT_EQ, FIELD0_LEAF, FIELD0_MUL, Field0Handler},
+        schema::SchemaError,
+    };
 
     fn field0_leaf(low: u64) -> (Tag, Payload) {
         let mut limbs = [Felt::from_u32(0); 8];
@@ -101,7 +47,7 @@ mod tests {
         let mut schema = Field0Handler;
         let (tag, payload) = field0_leaf(7);
 
-        let digest = register_node(&mut state, &mut schema, tag, payload).unwrap();
+        let digest = state.register(&mut schema, tag, payload).unwrap();
 
         assert_eq!(digest, hash_node(tag, &payload));
         assert_eq!(state.get(&digest), Some(&Node::new(tag, payload)));
@@ -119,7 +65,7 @@ mod tests {
             Felt::from_u32(99),
             miden_core::ZERO,
         ];
-        let err = register_node(&mut state, &mut schema, bad_tag, payload);
+        let err = state.register(&mut schema, bad_tag, payload);
         assert!(matches!(err, Err(SchemaError::InvalidNode)));
     }
 
@@ -129,11 +75,11 @@ mod tests {
         let mut schema = Field0Handler;
         let (a_tag, a_payload) = field0_leaf(3);
         let (b_tag, b_payload) = field0_leaf(4);
-        let a = register_node(&mut state, &mut schema, a_tag, a_payload).unwrap();
-        let b = register_node(&mut state, &mut schema, b_tag, b_payload).unwrap();
+        let a = state.register(&mut schema, a_tag, a_payload).unwrap();
+        let b = state.register(&mut schema, b_tag, b_payload).unwrap();
 
         let op_payload = binary_op_payload(a, b);
-        let digest = register_node(&mut state, &mut schema, FIELD0_ADD, op_payload).unwrap();
+        let digest = state.register(&mut schema, FIELD0_ADD, op_payload).unwrap();
 
         assert!(state.contains(&digest));
     }
@@ -145,14 +91,14 @@ mod tests {
         let (a_tag, a_payload) = field0_leaf(3);
         let (b_tag, b_payload) = field0_leaf(4);
         let (sum_tag, sum_payload) = field0_leaf(7);
-        let a = register_node(&mut state, &mut schema, a_tag, a_payload).unwrap();
-        let b = register_node(&mut state, &mut schema, b_tag, b_payload).unwrap();
-        let sum = register_node(&mut state, &mut schema, sum_tag, sum_payload).unwrap();
+        let a = state.register(&mut schema, a_tag, a_payload).unwrap();
+        let b = state.register(&mut schema, b_tag, b_payload).unwrap();
+        let sum = state.register(&mut schema, sum_tag, sum_payload).unwrap();
         let add =
-            register_node(&mut state, &mut schema, FIELD0_ADD, binary_op_payload(a, b)).unwrap();
+            state.register(&mut schema, FIELD0_ADD, binary_op_payload(a, b)).unwrap();
 
         // Assert (a + b) == sum. Registered as an assertion-tagged node.
-        register_node(&mut state, &mut schema, FIELD0_ASSERT_EQ, binary_op_payload(add, sum))
+        state.register(&mut schema, FIELD0_ASSERT_EQ, binary_op_payload(add, sum))
             .unwrap();
         assert_eq!(state.assertions().len(), 1);
     }
@@ -164,18 +110,14 @@ mod tests {
         let (a_tag, a_payload) = field0_leaf(3);
         let (b_tag, b_payload) = field0_leaf(4);
         let (wrong_tag, wrong_payload) = field0_leaf(99);
-        let a = register_node(&mut state, &mut schema, a_tag, a_payload).unwrap();
-        let b = register_node(&mut state, &mut schema, b_tag, b_payload).unwrap();
-        let wrong = register_node(&mut state, &mut schema, wrong_tag, wrong_payload).unwrap();
+        let a = state.register(&mut schema, a_tag, a_payload).unwrap();
+        let b = state.register(&mut schema, b_tag, b_payload).unwrap();
+        let wrong = state.register(&mut schema, wrong_tag, wrong_payload).unwrap();
         let add =
-            register_node(&mut state, &mut schema, FIELD0_ADD, binary_op_payload(a, b)).unwrap();
+            state.register(&mut schema, FIELD0_ADD, binary_op_payload(a, b)).unwrap();
 
-        let err = register_node(
-            &mut state,
-            &mut schema,
-            FIELD0_ASSERT_EQ,
-            binary_op_payload(add, wrong),
-        );
+        let err =
+            state.register(&mut schema, FIELD0_ASSERT_EQ, binary_op_payload(add, wrong));
         assert!(matches!(err, Err(SchemaError::AssertionFailed)));
         // The assertion is still recorded (transcript folds eagerly; the mismatch is the only
         // observable consequence at this cycle).
@@ -187,15 +129,11 @@ mod tests {
         let mut state = DeferredState::new();
         let mut schema = Field0Handler;
         let (a_tag, a_payload) = field0_leaf(1);
-        let a = register_node(&mut state, &mut schema, a_tag, a_payload).unwrap();
+        let a = state.register(&mut schema, a_tag, a_payload).unwrap();
         let dangling = Word::new([Felt::from_u32(0xdead); 4]);
 
-        let err = register_node(
-            &mut state,
-            &mut schema,
-            FIELD0_ASSERT_EQ,
-            binary_op_payload(a, dangling),
-        );
+        let err =
+            state.register(&mut schema, FIELD0_ASSERT_EQ, binary_op_payload(a, dangling));
         assert!(matches!(err, Err(SchemaError::MissingNode)));
     }
 
@@ -208,23 +146,19 @@ mod tests {
         let (b_tag, b_payload) = field0_leaf(4);
         let (c_tag, c_payload) = field0_leaf(5);
         let (expected_tag, expected_payload) = field0_leaf(35); // (3 + 4) * 5
-        let a = register_node(&mut state, &mut schema, a_tag, a_payload).unwrap();
-        let b = register_node(&mut state, &mut schema, b_tag, b_payload).unwrap();
-        let c = register_node(&mut state, &mut schema, c_tag, c_payload).unwrap();
+        let a = state.register(&mut schema, a_tag, a_payload).unwrap();
+        let b = state.register(&mut schema, b_tag, b_payload).unwrap();
+        let c = state.register(&mut schema, c_tag, c_payload).unwrap();
         let expected =
-            register_node(&mut state, &mut schema, expected_tag, expected_payload).unwrap();
+            state.register(&mut schema, expected_tag, expected_payload).unwrap();
         let add =
-            register_node(&mut state, &mut schema, FIELD0_ADD, binary_op_payload(a, b)).unwrap();
+            state.register(&mut schema, FIELD0_ADD, binary_op_payload(a, b)).unwrap();
         let mul =
-            register_node(&mut state, &mut schema, FIELD0_MUL, binary_op_payload(add, c)).unwrap();
+            state.register(&mut schema, FIELD0_MUL, binary_op_payload(add, c)).unwrap();
 
-        register_node(
-            &mut state,
-            &mut schema,
-            FIELD0_ASSERT_EQ,
-            binary_op_payload(mul, expected),
-        )
-        .unwrap();
+        state
+            .register(&mut schema, FIELD0_ASSERT_EQ, binary_op_payload(mul, expected))
+            .unwrap();
         assert_eq!(state.assertions().len(), 1);
     }
 }
