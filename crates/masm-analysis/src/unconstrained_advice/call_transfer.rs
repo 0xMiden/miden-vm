@@ -66,6 +66,7 @@ pub(super) fn assign_call_results(
     }
     for result in results.iter().skip(summary.output_count()) {
         env.set_var_fact(result, AdviceFact::bottom());
+        env.set_var_u32_validity(result, U32Validity::Unknown);
         env.clear_var_metadata(result);
     }
 }
@@ -74,6 +75,7 @@ pub(super) fn assign_call_results(
 fn clear_call_results(env: &mut Env, results: &[Var]) {
     for result in results {
         env.set_var_fact(result, AdviceFact::bottom());
+        env.set_var_u32_validity(result, U32Validity::Unknown);
         env.clear_var_metadata(result);
     }
 }
@@ -88,4 +90,92 @@ fn substitute_output_fact(summary_fact: &AdviceFact, arg_facts: &[AdviceFact]) -
         }
     }
     substituted
+}
+
+#[cfg(test)]
+mod tests {
+    use masm_decompiler::{SymbolPath, Var};
+
+    use super::*;
+    use crate::unconstrained_advice::{
+        env::EqZeroWitness,
+        summary::{AdviceSummary, AdviceSummaryMap},
+    };
+
+    fn var(id: u64) -> Var {
+        Var::new(id.into(), id as usize)
+    }
+
+    #[test]
+    fn assign_call_results_substitutes_provenance_and_forwarded_metadata() {
+        let arg0 = var(0);
+        let arg1 = var(1);
+        let result0 = var(2);
+        let result1 = var(3);
+        let extra_result = var(4);
+
+        let mut env = Env::default();
+        env.set_var_fact(&arg0, AdviceFact::from_input(0));
+        env.set_var_fact(&arg1, AdviceFact::from_input(1));
+        env.set_var_u32_validity(&arg1, U32Validity::ProvenU32);
+        env.set_var_u32_validity(&extra_result, U32Validity::ProvenU32);
+        env.set_var_zero_test(
+            &arg1,
+            Some(EqZeroWitness {
+                value_identity: env.identity_for_var(&arg0),
+            }),
+        );
+
+        let mut summaries = AdviceSummaryMap::default();
+        summaries.insert(
+            SymbolPath::new("callee"),
+            AdviceSummary::with_forwarding(
+                vec![AdviceFact::from_input(1), AdviceFact::bottom()],
+                vec![U32Validity::Unknown, U32Validity::ProvenU32],
+                vec![Some(1), None],
+                vec![U32Validity::Unknown, U32Validity::ProvenU32],
+            ),
+        );
+
+        assign_call_results(
+            &mut env,
+            "callee",
+            &[arg0.clone(), arg1.clone()],
+            &[result0.clone(), result1.clone(), extra_result.clone()],
+            &summaries,
+        );
+
+        assert_eq!(env.fact_for_var(&result0), AdviceFact::from_input(1));
+        assert_eq!(env.identity_for_var(&result0), env.identity_for_var(&arg1));
+        assert_eq!(env.zero_test_for_var(&result0), env.zero_test_for_var(&arg1));
+        assert_eq!(env.u32_validity_for_var(&result0), U32Validity::ProvenU32);
+        assert_eq!(env.u32_validity_for_var(&arg1), U32Validity::ProvenU32);
+
+        assert_eq!(env.fact_for_var(&result1), AdviceFact::bottom());
+        assert_eq!(env.u32_validity_for_var(&result1), U32Validity::ProvenU32);
+        assert_eq!(env.zero_test_for_var(&result1), None);
+
+        assert_eq!(env.fact_for_var(&extra_result), AdviceFact::bottom());
+        assert_eq!(env.u32_validity_for_var(&extra_result), U32Validity::Unknown);
+        assert_eq!(env.zero_test_for_var(&extra_result), None);
+    }
+
+    #[test]
+    fn assign_call_results_clears_outputs_for_missing_summary() {
+        let result = var(0);
+        let mut env = Env::default();
+        env.set_var_fact(&result, AdviceFact::from_input(0));
+        env.set_var_u32_validity(&result, U32Validity::ProvenU32);
+
+        assign_call_results(
+            &mut env,
+            "missing",
+            &[],
+            std::slice::from_ref(&result),
+            &Default::default(),
+        );
+
+        assert_eq!(env.fact_for_var(&result), AdviceFact::bottom());
+        assert_eq!(env.u32_validity_for_var(&result), U32Validity::Unknown);
+    }
 }
