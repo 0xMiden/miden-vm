@@ -1,15 +1,21 @@
 //! Shared transfer helpers for unconstrained-advice analyses.
 
-use masm_decompiler::{BinOp, Expr, Intrinsic, LocalAccessKind, LoopPhi, Stmt, UnOp, Var, VarKey};
 pub(super) use masm_decompiler::{
     INTRINSIC_ADV_PIPE, INTRINSIC_ADV_PUSH, INTRINSIC_ADV_PUSHW, INTRINSIC_MEM_STREAM,
     intrinsic_base_name, intrinsic_memory_address_arg_index, intrinsic_merkle_root_arg_range,
     intrinsic_nonzero_arg_index, intrinsic_positional_u32_arg_range,
     intrinsic_requires_u32_precondition,
 };
+use masm_decompiler::{Intrinsic, LocalAccessKind, LoopPhi, Stmt, Var};
 
-pub(super) use super::env::{Env, EqZeroWitness};
 use super::{domain::AdviceFact, u32_domain::U32Validity};
+pub(super) use super::{
+    env::Env,
+    expr::{
+        assign_expr_metadata, collect_expr_sink_fact, expr_is_proven_nonzero, expr_output_fact,
+        expr_u32_validity, refine_if_envs,
+    },
+};
 use crate::abstract_interp::{FixpointConfig, JoinSemiLattice, iterate_to_fixpoint};
 
 /// Maximum number of loop-approximation passes.
@@ -24,17 +30,6 @@ pub(super) fn seed_input_env(input_count: usize) -> Env {
         env.set_var_fact(&var, AdviceFact::from_input(input_position));
     }
     env
-}
-
-/// Preserve alias and zero-test metadata across a fresh assignment.
-pub(super) fn assign_expr_metadata(dest: &Var, expr: &Expr, env: &mut Env) {
-    if let Some(identity) = expr_identity(expr, env) {
-        env.set_var_identity(dest, identity);
-    } else {
-        env.clear_var_identity(dest);
-    }
-    env.set_var_zero_test(dest, eq_zero_witness_for_expr(expr, env));
-    env.set_var_u32_validity(dest, expr_u32_validity(expr, env));
 }
 
 /// Preserve metadata across a phi only when both sides agree on the fact being preserved.
@@ -139,16 +134,6 @@ pub(super) fn stabilized_loop_head_env(
     .env()
 }
 
-/// Refine branch environments using an exact `eq.0` witness when available.
-pub(super) fn refine_if_envs(cond: &Expr, env: &Env) -> (Env, Env) {
-    let then_env = env.clone();
-    let mut else_env = env.clone();
-    if let Some(witness) = eq_zero_witness_for_expr(cond, env) {
-        else_env.mark_identity_nonzero(witness.value_identity);
-    }
-    (then_env, else_env)
-}
-
 /// Refine the environment after `assertz` proves an `eq.0` witness is zero.
 pub(super) fn refine_nonzero_from_intrinsic(intrinsic: &Intrinsic, env: &mut Env) {
     if intrinsic_base_name(&intrinsic.name) != "assertz" {
@@ -161,159 +146,6 @@ pub(super) fn refine_nonzero_from_intrinsic(intrinsic: &Intrinsic, env: &mut Env
         return;
     };
     env.mark_identity_nonzero(witness.value_identity);
-}
-
-/// Return the exact alias identity of an expression, when it is a simple copy.
-pub(super) fn expr_identity(expr: &Expr, env: &Env) -> Option<VarKey> {
-    match expr {
-        Expr::Var(var) => Some(env.identity_for_var(var)),
-        _ => None,
-    }
-}
-
-/// Return the exact `eq.0` witness carried by an expression, if any.
-pub(super) fn eq_zero_witness_for_expr(expr: &Expr, env: &Env) -> Option<EqZeroWitness> {
-    match expr {
-        Expr::Var(var) => env.zero_test_for_var(var),
-        Expr::Binary(BinOp::Eq, lhs, rhs) => {
-            zero_comparison_var(lhs, rhs).map(|var| EqZeroWitness {
-                value_identity: env.identity_for_var(var),
-            })
-        },
-        _ => None,
-    }
-}
-
-/// Traverse an expression and join sink facts produced at each expression node.
-pub(super) fn collect_expr_sink_fact(
-    expr: &Expr,
-    env: &Env,
-    sink_fact: &impl Fn(&Expr, &Env) -> AdviceFact,
-) -> AdviceFact {
-    let nested = match expr {
-        Expr::Var(_) | Expr::True | Expr::False | Expr::Constant(_) | Expr::EqW { .. } => {
-            AdviceFact::bottom()
-        },
-        Expr::Ternary { cond, then_expr, else_expr } => {
-            collect_expr_sink_fact(cond, env, sink_fact)
-                .join(&collect_expr_sink_fact(then_expr, env, sink_fact))
-                .join(&collect_expr_sink_fact(else_expr, env, sink_fact))
-        },
-        Expr::Unary(_, inner) => collect_expr_sink_fact(inner, env, sink_fact),
-        Expr::Binary(_, lhs, rhs) => collect_expr_sink_fact(lhs, env, sink_fact)
-            .join(&collect_expr_sink_fact(rhs, env, sink_fact)),
-    };
-
-    nested.join(&sink_fact(expr, env))
-}
-
-/// Return true when the expression is proven non-zero by the best-effort refinement.
-pub(super) fn expr_is_proven_nonzero(expr: &Expr, env: &Env) -> bool {
-    match expr {
-        Expr::Constant(constant) => !constant.is_zero(),
-        Expr::Var(var) => env.is_var_nonzero(var),
-        _ => false,
-    }
-}
-
-/// Compute the provenance fact for an expression result.
-pub(super) fn expr_output_fact(expr: &Expr, env: &Env) -> AdviceFact {
-    match expr {
-        Expr::Var(var) => env.fact_for_var(var),
-        Expr::Ternary { then_expr, else_expr, .. } => {
-            expr_output_fact(then_expr, env).join(&expr_output_fact(else_expr, env))
-        },
-        Expr::Unary(op, inner) => match op {
-            UnOp::Neg | UnOp::Inv | UnOp::Pow2 => expr_output_fact(inner, env),
-            UnOp::Not
-            | UnOp::U32Cast
-            | UnOp::U32Test
-            | UnOp::U32Not
-            | UnOp::U32Clz
-            | UnOp::U32Ctz
-            | UnOp::U32Clo
-            | UnOp::U32Cto => AdviceFact::bottom(),
-        },
-        Expr::Binary(op, lhs, rhs) => match op {
-            BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div => {
-                expr_output_fact(lhs, env).join(&expr_output_fact(rhs, env))
-            },
-            BinOp::And
-            | BinOp::Or
-            | BinOp::Xor
-            | BinOp::Eq
-            | BinOp::Neq
-            | BinOp::Lt
-            | BinOp::Lte
-            | BinOp::Gt
-            | BinOp::Gte
-            | BinOp::U32And
-            | BinOp::U32Or
-            | BinOp::U32Xor
-            | BinOp::U32Shl
-            | BinOp::U32Shr
-            | BinOp::U32Rotr
-            | BinOp::U32Lt
-            | BinOp::U32Lte
-            | BinOp::U32Gt
-            | BinOp::U32Gte
-            | BinOp::U32WrappingAdd
-            | BinOp::U32WrappingSub
-            | BinOp::U32WrappingMul
-            | BinOp::U32Exp => AdviceFact::bottom(),
-        },
-        Expr::EqW { .. } | Expr::True | Expr::False | Expr::Constant(_) => AdviceFact::bottom(),
-    }
-}
-
-/// Compute the `u32` validity of an expression result.
-pub(super) fn expr_u32_validity(expr: &Expr, env: &Env) -> U32Validity {
-    match expr {
-        Expr::Var(var) => env.u32_validity_for_var(var),
-        Expr::Ternary { then_expr, else_expr, .. } => {
-            expr_u32_validity(then_expr, env).join(expr_u32_validity(else_expr, env))
-        },
-        Expr::Unary(op, _) => match op {
-            UnOp::U32Cast
-            | UnOp::U32Test
-            | UnOp::U32Not
-            | UnOp::U32Clz
-            | UnOp::U32Ctz
-            | UnOp::U32Clo
-            | UnOp::U32Cto => U32Validity::ProvenU32,
-            UnOp::Neg | UnOp::Inv | UnOp::Pow2 | UnOp::Not => U32Validity::Unknown,
-        },
-        Expr::Binary(op, ..) => match op {
-            BinOp::U32And
-            | BinOp::U32Or
-            | BinOp::U32Xor
-            | BinOp::U32Shl
-            | BinOp::U32Shr
-            | BinOp::U32Rotr
-            | BinOp::U32Lt
-            | BinOp::U32Lte
-            | BinOp::U32Gt
-            | BinOp::U32Gte
-            | BinOp::U32WrappingAdd
-            | BinOp::U32WrappingSub
-            | BinOp::U32WrappingMul => U32Validity::ProvenU32,
-            BinOp::U32Exp
-            | BinOp::Add
-            | BinOp::Sub
-            | BinOp::Mul
-            | BinOp::Div
-            | BinOp::And
-            | BinOp::Or
-            | BinOp::Xor
-            | BinOp::Eq
-            | BinOp::Neq
-            | BinOp::Lt
-            | BinOp::Lte
-            | BinOp::Gt
-            | BinOp::Gte => U32Validity::Unknown,
-        },
-        Expr::EqW { .. } | Expr::True | Expr::False | Expr::Constant(_) => U32Validity::Unknown,
-    }
 }
 
 /// Apply the common provenance transfer semantics of one intrinsic statement.
@@ -468,15 +300,6 @@ pub(super) fn apply_local_load_word(
         env.set_var_fact(output, env.fact_for_local(slot));
         env.set_var_u32_validity(output, env.u32_validity_for_local(slot));
         env.clear_var_metadata(output);
-    }
-}
-
-/// Return the variable compared against zero in an `eq.0`-shaped expression.
-pub(super) fn zero_comparison_var<'a>(lhs: &'a Expr, rhs: &'a Expr) -> Option<&'a Var> {
-    match (lhs, rhs) {
-        (Expr::Var(var), Expr::Constant(constant)) if constant.is_zero() => Some(var),
-        (Expr::Constant(constant), Expr::Var(var)) if constant.is_zero() => Some(var),
-        _ => None,
     }
 }
 
