@@ -71,12 +71,10 @@ impl<S: AdviceSummaryContribution> AdviceEffect<S> {
     pub(super) fn push_diagnostic(&mut self, diagnostic: AdviceDiagnostic) {
         self.diagnostics.push(diagnostic);
     }
-}
 
-impl AdviceEffect<BTreeSet<usize>> {
-    /// Add required procedure input positions.
-    pub(super) fn extend_required_inputs(&mut self, inputs: impl IntoIterator<Item = usize>) {
-        self.summary.extend(inputs);
+    /// Merge capability-owned summary information into this effect.
+    pub(super) fn merge_summary(&mut self, summary: S) {
+        self.summary.merge(summary);
     }
 }
 

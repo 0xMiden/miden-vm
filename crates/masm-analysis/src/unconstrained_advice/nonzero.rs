@@ -87,7 +87,7 @@ impl<'a> NonZeroCapability<'a> {
         if fact.has_concrete_sources() {
             effect.push_diagnostic(self.diagnostics.diagnostic_for_fact(span, message, fact));
         }
-        effect.extend_required_inputs(fact.from_inputs.iter().copied());
+        add_required_inputs(effect, fact.from_inputs.iter().copied());
     }
 
     /// Emit call-site diagnostics and summary requirements for a callee non-zero precondition.
@@ -125,7 +125,7 @@ impl<'a> NonZeroCapability<'a> {
                 );
                 effect.push_diagnostic(diagnostic);
             }
-            effect.extend_required_inputs(arg_fact.from_inputs.iter().copied());
+            add_required_inputs(&mut effect, arg_fact.from_inputs.iter().copied());
         }
 
         effect
@@ -197,6 +197,14 @@ impl AdviceCapability for NonZeroCapability<'_> {
     fn before_intrinsic_transfer(&self, intrinsic: &Intrinsic, env: &mut Env) {
         refine_nonzero_from_intrinsic(intrinsic, env);
     }
+}
+
+/// Add procedure input positions required to be proven non-zero.
+fn add_required_inputs(
+    effect: &mut AdviceEffect<BTreeSet<usize>>,
+    inputs: impl IntoIterator<Item = usize>,
+) {
+    effect.merge_summary(inputs.into_iter().collect());
 }
 
 /// Return the advice fact feeding any intrinsic divisor input.
