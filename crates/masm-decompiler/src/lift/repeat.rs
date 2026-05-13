@@ -3,7 +3,10 @@
 use std::collections::{HashMap, HashSet};
 
 use log::trace;
-use miden_assembly_syntax::{ast::Instruction, debuginfo::SourceSpan};
+use miden_assembly_syntax::{
+    ast::{Block, Instruction, Op},
+    debuginfo::{SourceSpan, Spanned},
+};
 
 use super::{LiftingError, LiftingResult, inst, stack::SlotId};
 use crate::{
@@ -547,5 +550,123 @@ pub(super) fn simulate_inst_on_repeat_stack<S: RepeatSlotSimulator>(
             stack.apply_effect(pops, pushes, required_depth, op_span, operation)?;
         },
     }
+    Ok(())
+}
+
+/// Simulate a block of operations on the slot stack.
+pub(super) fn simulate_block_slots(
+    block: &Block,
+    stack: &mut SlotStack,
+    resolver: &SymbolResolver<'_>,
+    sigs: &SignatureMap,
+) -> LiftingResult<()> {
+    for op in block.iter() {
+        simulate_op_slots(op, stack, resolver, sigs)?;
+    }
+    Ok(())
+}
+
+/// Simulate a single operation on the slot stack.
+fn simulate_op_slots(
+    op: &Op,
+    stack: &mut SlotStack,
+    resolver: &SymbolResolver<'_>,
+    sigs: &SignatureMap,
+) -> LiftingResult<()> {
+    match op {
+        Op::Inst(inst) => {
+            simulate_inst_on_repeat_stack(inst.inner(), op.span(), stack, resolver, sigs)
+        },
+        Op::If { then_blk, else_blk, .. } => {
+            let mut then_stack = stack.clone();
+            let mut else_stack = stack.clone();
+            simulate_block_slots(then_blk, &mut then_stack, resolver, sigs)?;
+            simulate_block_slots(else_blk, &mut else_stack, resolver, sigs)?;
+            if then_stack.slots() != else_stack.slots() {
+                return Err(LiftingError::UnbalancedIf { span: op.span() });
+            }
+            *stack = then_stack;
+            Ok(())
+        },
+        Op::Repeat { count, body, .. } => {
+            for _ in 0..count.expect_value() {
+                simulate_block_slots(body, stack, resolver, sigs)?;
+            }
+            Ok(())
+        },
+        Op::While { .. } => Err(LiftingError::UnsupportedRepeatPattern {
+            span: op.span(),
+            reason: "repeat loop contains a while loop".to_string(),
+        }),
+    }
+}
+
+/// Simulate a block of operations on the tagged slot stack.
+pub(super) fn simulate_block_tags(
+    block: &Block,
+    stack: &mut TaggedSlotStack,
+    resolver: &SymbolResolver<'_>,
+    sigs: &SignatureMap,
+) -> LiftingResult<()> {
+    trace!("starting repeat tag simulation for block: {}", stack.state_snapshot());
+    for op in block.iter() {
+        simulate_op_tags(op, stack, resolver, sigs)?;
+    }
+    trace!("finished repeat tag simulation for block: {}", stack.state_snapshot());
+    Ok(())
+}
+
+/// Simulate a single operation on the tagged slot stack.
+fn simulate_op_tags(
+    op: &Op,
+    stack: &mut TaggedSlotStack,
+    resolver: &SymbolResolver<'_>,
+    sigs: &SignatureMap,
+) -> LiftingResult<()> {
+    match op {
+        Op::Inst(inst) => simulate_inst_tags(inst.inner(), op.span(), stack, resolver, sigs),
+        Op::If { then_blk, else_blk, .. } => {
+            let mut then_stack = stack.clone();
+            let mut else_stack = stack.clone();
+            simulate_block_tags(then_blk, &mut then_stack, resolver, sigs)?;
+            simulate_block_tags(else_blk, &mut else_stack, resolver, sigs)?;
+            if !then_stack.same_state_as(&else_stack) {
+                return Err(LiftingError::UnsupportedRepeatPattern {
+                    span: op.span(),
+                    reason: "repeat loop contains if with incompatible branches".to_string(),
+                });
+            }
+            *stack = then_stack;
+            Ok(())
+        },
+        Op::Repeat { count, body, .. } => {
+            for _ in 0..count.expect_value() {
+                simulate_block_tags(body, stack, resolver, sigs)?;
+            }
+            Ok(())
+        },
+        Op::While { .. } => Err(LiftingError::UnsupportedRepeatPattern {
+            span: op.span(),
+            reason: "repeat loop contains a while loop".to_string(),
+        }),
+    }
+}
+
+/// Simulate a single instruction's stack effect for tagged slot tracking.
+fn simulate_inst_tags(
+    inst: &Instruction,
+    op_span: SourceSpan,
+    stack: &mut TaggedSlotStack,
+    resolver: &SymbolResolver<'_>,
+    sigs: &SignatureMap,
+) -> LiftingResult<()> {
+    let before = stack.state_snapshot();
+    simulate_inst_on_repeat_stack(inst, op_span, stack, resolver, sigs)?;
+    trace!(
+        "finished repeat tag simulation for {}: before={}, after={}",
+        inst,
+        before,
+        stack.state_snapshot()
+    );
     Ok(())
 }
