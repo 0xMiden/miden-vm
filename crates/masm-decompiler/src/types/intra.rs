@@ -7,6 +7,7 @@ use super::{
     expr_defs::ExprDefs,
     origin::{self, Origin},
     summary::{TypeSummary, TypeSummaryMap},
+    summary_builder,
 };
 use crate::{
     ir::{BinOp, Constant, Expr, Stmt, UnOp, Var},
@@ -157,52 +158,14 @@ impl<'a> ProcTypeAnalyzer<'a> {
             }
         }
 
-        self.build_summary(stmts)
-    }
-
-    /// Build the final procedure summary from inferred state.
-    fn build_summary(&self, stmts: &[Stmt]) -> TypeSummary {
-        let mut inputs = Vec::with_capacity(self.input_count);
-        for index in (0..self.input_count).rev() {
-            let key = Self::input_var_key(index);
-            let req = self.required.get(&key).copied().unwrap_or(TypeFact::Felt);
-            inputs.push(req.to_requirement());
-        }
-
-        let mut outputs = Vec::with_capacity(self.output_count);
-        let mut output_input_map = Vec::with_capacity(self.output_count);
-        let return_values = Self::find_return_values(stmts);
-        for index in (0..self.output_count).rev() {
-            let (ty, origin_input) = return_values
-                .and_then(|values| values.get(index))
-                .map(|var| {
-                    let inferred = self.inferred_type_for_var(var);
-                    let key = VarKey::from_var(var);
-                    if let Some(Origin::Input(input_idx)) = self.origins.get(&key) {
-                        let input_key = Self::input_var_key(*input_idx);
-                        let input_req =
-                            self.required.get(&input_key).copied().unwrap_or(TypeFact::Felt);
-                        (inferred.glb(input_req), Some(*input_idx))
-                    } else {
-                        (inferred, None)
-                    }
-                })
-                .unwrap_or((TypeFact::Felt, None));
-            outputs.push(ty.to_inferred_type());
-            output_input_map.push(origin_input);
-        }
-
-        TypeSummary::new_with_map(inputs, outputs, output_input_map)
-    }
-
-    /// Find the top-level return statement values.
-    fn find_return_values(stmts: &[Stmt]) -> Option<&[Var]> {
-        for stmt in stmts {
-            if let Stmt::Return { values, .. } = stmt {
-                return Some(values);
-            }
-        }
-        None
+        summary_builder::build_summary(
+            self.input_count,
+            self.output_count,
+            stmts,
+            &self.inferred,
+            &self.required,
+            &self.origins,
+        )
     }
 
     /// Build the canonical key for an input variable by stack index.
