@@ -3,7 +3,7 @@ use alloc::vec::Vec;
 use miden_core::{
     Felt, WORD_SIZE, Word, ZERO,
     crypto::hash::Poseidon2,
-    deferred::{DeferredTag, Payload, TagKind},
+    deferred::{Payload, Tag},
     events::SystemEvent,
     field::{BasedVectorSpace, Field, PrimeCharacteristicRing, QuadFelt},
 };
@@ -72,8 +72,12 @@ pub fn handle_system_event(
         },
         SystemEvent::HqwordToMap => insert_hqword_into_adv_map(processor),
         SystemEvent::HpermToMap => insert_hperm_into_adv_map(processor),
-        SystemEvent::DeferredRegisterLeaf => handle_deferred_register(processor, TagKind::Leaf),
-        SystemEvent::DeferredRegisterOp => handle_deferred_register(processor, TagKind::BinaryOp),
+        // The leaf/op distinction is a MASM-level label; the schema decides what's valid based
+        // on the opaque tag bytes. Both arms run the same handler — the variant collapse moves
+        // into MASM in the next commit.
+        SystemEvent::DeferredRegisterLeaf | SystemEvent::DeferredRegisterOp => {
+            handle_deferred_register(processor)
+        },
         SystemEvent::DeferredAssertEq => handle_deferred_assert_eq(processor),
     }
 }
@@ -553,10 +557,10 @@ const DEFERRED_TAG_OFFSET: usize = 1;
 /// Stack offset of the data segment (payload, or `lhs_digest || rhs_digest`) below the tag.
 const DEFERRED_DATA_OFFSET: usize = 5;
 
-/// Reads a 4-felt deferred tag from the stack starting at `start`.
-fn read_deferred_tag(processor: &FastProcessor, start: usize) -> Result<DeferredTag, SchemaError> {
-    let felts: [Felt; 4] = core::array::from_fn(|i| processor.stack_get(start + i));
-    DeferredTag::from_felts(felts).map_err(SchemaError::from)
+/// Reads a 4-felt opaque tag from the stack starting at `start`. No validation — the schema
+/// rules on whether the tag is well-formed.
+fn read_deferred_tag(processor: &FastProcessor, start: usize) -> Tag {
+    core::array::from_fn(|i| processor.stack_get(start + i))
 }
 
 /// Reads an 8-felt payload from the stack starting at `start`.
@@ -571,19 +575,10 @@ fn read_deferred_digest(processor: &FastProcessor, start: usize) -> Word {
     Word::new(felts)
 }
 
-/// Handles `SystemEvent::DeferredRegisterLeaf` and `DeferredRegisterOp`. Reads the tag and
-/// payload off the operand stack and hands them to the installed schema, which validates and
-/// inserts the node. The leaf-vs-op distinction is preserved here as a sanity check against the
-/// caller's MASM-level intent; it will disappear in a later commit when the two keywords
-/// collapse into a single `deferred_register`.
-fn handle_deferred_register(
-    processor: &mut FastProcessor,
-    expected_kind: TagKind,
-) -> Result<(), SystemEventError> {
-    let tag = read_deferred_tag(processor, DEFERRED_TAG_OFFSET)?;
-    if tag.kind() != expected_kind {
-        return Err(SchemaError::InvalidNode.into());
-    }
+/// Handles the deferred-register event. Reads the tag and payload off the operand stack and
+/// hands them to the installed schema, which validates and inserts the node.
+fn handle_deferred_register(processor: &mut FastProcessor) -> Result<(), SystemEventError> {
+    let tag = read_deferred_tag(processor, DEFERRED_TAG_OFFSET);
     let payload = read_deferred_payload(processor, DEFERRED_DATA_OFFSET);
 
     let (state, schema) = processor.deferred_view_mut();
@@ -596,7 +591,7 @@ fn handle_deferred_register(
 /// stack is left untouched; a schema-reported mismatch surfaces as
 /// `SchemaError::AssertionFailed`.
 fn handle_deferred_assert_eq(processor: &mut FastProcessor) -> Result<(), SystemEventError> {
-    let tag = read_deferred_tag(processor, DEFERRED_TAG_OFFSET)?;
+    let tag = read_deferred_tag(processor, DEFERRED_TAG_OFFSET);
     let lhs_digest = read_deferred_digest(processor, DEFERRED_DATA_OFFSET);
     let rhs_digest = read_deferred_digest(processor, DEFERRED_DATA_OFFSET + 4);
 

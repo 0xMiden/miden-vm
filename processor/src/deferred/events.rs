@@ -16,7 +16,7 @@ use alloc::vec::Vec;
 
 use miden_core::{
     Felt,
-    deferred::{DeferredTag, Digest, Node, Payload, hash_node},
+    deferred::{Digest, Node, Payload, Tag, hash_node},
 };
 
 use super::{
@@ -37,7 +37,7 @@ use super::{
 pub fn register_node(
     state: &mut DeferredState,
     schema: &mut dyn Schema,
-    tag: DeferredTag,
+    tag: Tag,
     payload: Payload,
 ) -> Result<Digest, SchemaError> {
     let node = Node::new(tag, payload);
@@ -63,7 +63,7 @@ pub fn register_node(
 pub fn assert_eq(
     state: &mut DeferredState,
     schema: &mut dyn Schema,
-    tag: DeferredTag,
+    tag: Tag,
     lhs_digest: Digest,
     rhs_digest: Digest,
 ) -> Result<(), SchemaError> {
@@ -97,19 +97,16 @@ pub fn binary_op_payload(lhs: Digest, rhs: Digest) -> Payload {
 
 #[cfg(test)]
 mod tests {
-    use miden_core::{
-        Felt, Word,
-        deferred::{DeferredTag, Payload},
-    };
+    use miden_core::{Felt, Word, deferred::Payload};
 
     use super::*;
-    use crate::deferred::handlers::Field0Handler;
+    use crate::deferred::handlers::{FIELD0_ADD, FIELD0_ASSERT_EQ, FIELD0_LEAF, FIELD0_MUL, Field0Handler};
 
-    fn field0_leaf(low: u64) -> (DeferredTag, Payload) {
+    fn field0_leaf(low: u64) -> (Tag, Payload) {
         let mut limbs = [Felt::from_u32(0); 8];
         limbs[0] = Felt::from_u32(low as u32);
         limbs[1] = Felt::from_u32((low >> 32) as u32);
-        (DeferredTag::Field0Leaf, Payload::new(limbs))
+        (FIELD0_LEAF, Payload::new(limbs))
     }
 
     #[test]
@@ -128,10 +125,9 @@ mod tests {
     fn register_with_unhandled_tag_errors() {
         let mut state = DeferredState::new();
         let mut schema = Field0Handler;
-        // AssertEq-kind tag is structurally storable but the schema rejects it as InvalidNode.
+        // The AssertEq tag is in Field0's prefix but is_valid rejects it for storage.
         let payload = Payload::new([Felt::from_u32(0); 8]);
-        let err =
-            register_node(&mut state, &mut schema, DeferredTag::Field0AssertEq, payload);
+        let err = register_node(&mut state, &mut schema, FIELD0_ASSERT_EQ, payload);
         assert!(matches!(err, Err(SchemaError::InvalidNode)));
     }
 
@@ -145,8 +141,7 @@ mod tests {
         let b = register_node(&mut state, &mut schema, b_tag, b_payload).unwrap();
 
         let op_payload = binary_op_payload(a, b);
-        let digest =
-            register_node(&mut state, &mut schema, DeferredTag::Field0Add, op_payload).unwrap();
+        let digest = register_node(&mut state, &mut schema, FIELD0_ADD, op_payload).unwrap();
 
         assert!(state.contains(&digest));
     }
@@ -161,15 +156,10 @@ mod tests {
         let a = register_node(&mut state, &mut schema, a_tag, a_payload).unwrap();
         let b = register_node(&mut state, &mut schema, b_tag, b_payload).unwrap();
         let sum = register_node(&mut state, &mut schema, sum_tag, sum_payload).unwrap();
-        let add = register_node(
-            &mut state,
-            &mut schema,
-            DeferredTag::Field0Add,
-            binary_op_payload(a, b),
-        )
-        .unwrap();
+        let add =
+            register_node(&mut state, &mut schema, FIELD0_ADD, binary_op_payload(a, b)).unwrap();
 
-        assert_eq(&mut state, &mut schema, DeferredTag::Field0AssertEq, add, sum).unwrap();
+        assert_eq(&mut state, &mut schema, FIELD0_ASSERT_EQ, add, sum).unwrap();
         assert_eq!(state.assertions().len(), 1);
     }
 
@@ -183,15 +173,10 @@ mod tests {
         let a = register_node(&mut state, &mut schema, a_tag, a_payload).unwrap();
         let b = register_node(&mut state, &mut schema, b_tag, b_payload).unwrap();
         let wrong = register_node(&mut state, &mut schema, wrong_tag, wrong_payload).unwrap();
-        let add = register_node(
-            &mut state,
-            &mut schema,
-            DeferredTag::Field0Add,
-            binary_op_payload(a, b),
-        )
-        .unwrap();
+        let add =
+            register_node(&mut state, &mut schema, FIELD0_ADD, binary_op_payload(a, b)).unwrap();
 
-        let err = assert_eq(&mut state, &mut schema, DeferredTag::Field0AssertEq, add, wrong);
+        let err = assert_eq(&mut state, &mut schema, FIELD0_ASSERT_EQ, add, wrong);
         assert!(matches!(err, Err(SchemaError::AssertionFailed)));
         // Failed assertion is not recorded.
         assert!(state.assertions().is_empty());
@@ -205,7 +190,7 @@ mod tests {
         let a = register_node(&mut state, &mut schema, a_tag, a_payload).unwrap();
         let dangling = Word::new([Felt::from_u32(0xdead); 4]);
 
-        let err = assert_eq(&mut state, &mut schema, DeferredTag::Field0AssertEq, a, dangling);
+        let err = assert_eq(&mut state, &mut schema, FIELD0_ASSERT_EQ, a, dangling);
         assert!(matches!(err, Err(SchemaError::MissingNode)));
     }
 
@@ -223,22 +208,12 @@ mod tests {
         let c = register_node(&mut state, &mut schema, c_tag, c_payload).unwrap();
         let expected =
             register_node(&mut state, &mut schema, expected_tag, expected_payload).unwrap();
-        let add = register_node(
-            &mut state,
-            &mut schema,
-            DeferredTag::Field0Add,
-            binary_op_payload(a, b),
-        )
-        .unwrap();
-        let mul = register_node(
-            &mut state,
-            &mut schema,
-            DeferredTag::Field0Mul,
-            binary_op_payload(add, c),
-        )
-        .unwrap();
+        let add =
+            register_node(&mut state, &mut schema, FIELD0_ADD, binary_op_payload(a, b)).unwrap();
+        let mul =
+            register_node(&mut state, &mut schema, FIELD0_MUL, binary_op_payload(add, c)).unwrap();
 
-        assert_eq(&mut state, &mut schema, DeferredTag::Field0AssertEq, mul, expected).unwrap();
+        assert_eq(&mut state, &mut schema, FIELD0_ASSERT_EQ, mul, expected).unwrap();
         assert_eq!(state.assertions().len(), 1);
     }
 }

@@ -10,7 +10,10 @@ use miden_assembly::Assembler;
 use miden_processor::{
     DefaultHost, ExecutionOptions, FastProcessor, Felt, ProcessorState, StackInputs, Word, ZERO,
     advice::{AdviceInputs, AdviceMutation},
-    deferred::{DeferredTag, Field0Handler, Payload, binary_op_payload, extract_witness, hash_node},
+    deferred::{
+        FIELD0_ADD, FIELD0_ASSERT_EQ, FIELD0_LEAF, FIELD0_MUL, Field0Handler, Payload,
+        binary_op_payload, extract_witness, hash_node,
+    },
     event::{EventError, EventHandler, EventName},
 };
 
@@ -90,29 +93,24 @@ fn deferred_end_to_end_register_eval_assert() {
     let c_payload = field0_leaf_payload(5);
     let d_payload = field0_leaf_payload(35); // (3 + 4) * 5
 
-    let leaf_tag = DeferredTag::Field0Leaf;
-    let add_tag = DeferredTag::Field0Add;
-    let mul_tag = DeferredTag::Field0Mul;
-    let assert_tag = DeferredTag::Field0AssertEq;
-
-    let a_digest = hash_node(leaf_tag, &a_payload);
-    let b_digest = hash_node(leaf_tag, &b_payload);
-    let c_digest = hash_node(leaf_tag, &c_payload);
-    let d_digest = hash_node(leaf_tag, &d_payload);
+    let a_digest = hash_node(FIELD0_LEAF, &a_payload);
+    let b_digest = hash_node(FIELD0_LEAF, &b_payload);
+    let c_digest = hash_node(FIELD0_LEAF, &c_payload);
+    let d_digest = hash_node(FIELD0_LEAF, &d_payload);
     let add_payload = binary_op_payload(a_digest, b_digest);
-    let add_digest = hash_node(add_tag, &add_payload);
+    let add_digest = hash_node(FIELD0_ADD, &add_payload);
     let mul_payload = binary_op_payload(add_digest, c_digest);
-    let mul_digest = hash_node(mul_tag, &mul_payload);
+    let mul_digest = hash_node(FIELD0_MUL, &mul_payload);
 
     // Build the program.
     let mut src = String::from("begin\n");
     for payload in [&a_payload, &b_payload, &c_payload, &d_payload] {
-        emit_event(&mut src, "deferred.register_leaf", leaf_tag.to_felts(), payload.0);
+        emit_event(&mut src, "deferred.register_leaf", FIELD0_LEAF, payload.0);
     }
-    emit_event(&mut src, "deferred.register_op", add_tag.to_felts(), add_payload.0);
-    emit_event(&mut src, "deferred.register_op", mul_tag.to_felts(), mul_payload.0);
+    emit_event(&mut src, "deferred.register_op", FIELD0_ADD, add_payload.0);
+    emit_event(&mut src, "deferred.register_op", FIELD0_MUL, mul_payload.0);
     let assert_data = digests_concat(mul_digest, d_digest);
-    emit_event(&mut src, "deferred.assert_eq", assert_tag.to_felts(), assert_data);
+    emit_event(&mut src, "deferred.assert_eq", FIELD0_ASSERT_EQ, assert_data);
     src.push_str("end\n");
 
     let program = Assembler::default().assemble_program(&src).expect("program must assemble");
@@ -135,7 +133,7 @@ fn deferred_end_to_end_register_eval_assert() {
 
     // Witness should contain exactly the reachable subgraph, sorted by digest, and the single
     // assertion in insertion order.
-    let witness = extract_witness(state);
+    let witness = extract_witness(state, &Field0Handler);
     assert_eq!(witness.nodes.len(), 6);
     let witness_digests: Vec<_> = witness.nodes.iter().map(|(d, _)| *d).collect();
     assert!(witness_digests.windows(2).all(|p| p[0] < p[1]));
@@ -159,18 +157,16 @@ fn digests_concat(lhs: Word, rhs: Word) -> [Felt; 8] {
 fn deferred_assert_eq_mismatch_fails_execution() {
     let a_payload = field0_leaf_payload(7);
     let b_payload = field0_leaf_payload(8);
-    let leaf_tag = DeferredTag::Field0Leaf;
-    let assert_tag = DeferredTag::Field0AssertEq;
-    let a_digest = hash_node(leaf_tag, &a_payload);
-    let b_digest = hash_node(leaf_tag, &b_payload);
+    let a_digest = hash_node(FIELD0_LEAF, &a_payload);
+    let b_digest = hash_node(FIELD0_LEAF, &b_payload);
 
     let mut src = String::from("begin\n");
-    emit_event(&mut src, "deferred.register_leaf", leaf_tag.to_felts(), a_payload.0);
-    emit_event(&mut src, "deferred.register_leaf", leaf_tag.to_felts(), b_payload.0);
+    emit_event(&mut src, "deferred.register_leaf", FIELD0_LEAF, a_payload.0);
+    emit_event(&mut src, "deferred.register_leaf", FIELD0_LEAF, b_payload.0);
     emit_event(
         &mut src,
         "deferred.assert_eq",
-        assert_tag.to_felts(),
+        FIELD0_ASSERT_EQ,
         digests_concat(a_digest, b_digest),
     );
     src.push_str("end\n");
@@ -206,7 +202,6 @@ fn legacy_event_handler_still_works_with_deferred_infrastructure() {
         .expect("registration");
 
     // Mix a deferred RegisterLeaf with the legacy event in one program.
-    let leaf_tag = DeferredTag::Field0Leaf;
     let payload = field0_leaf_payload(42);
 
     let mut src = String::from("begin\n");
@@ -216,7 +211,7 @@ fn legacy_event_handler_still_works_with_deferred_infrastructure() {
     src.push_str("    emit\n");
     src.push_str("    drop\n");
     // Deferred event right after.
-    emit_event(&mut src, "deferred.register_leaf", leaf_tag.to_felts(), payload.0);
+    emit_event(&mut src, "deferred.register_leaf", FIELD0_LEAF, payload.0);
     src.push_str("end\n");
 
     let program = Assembler::default().assemble_program(&src).expect("program must assemble");

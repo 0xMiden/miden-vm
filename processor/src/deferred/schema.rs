@@ -13,7 +13,9 @@
 //! impl Schema for AppSchema { /* delegate each method to the variant that responds_to(tag) */ }
 //! ```
 
-use miden_core::{Felt, deferred::Node};
+use alloc::vec::Vec;
+
+use miden_core::{Felt, deferred::{Digest, Node}};
 
 use super::state::DeferredState;
 
@@ -72,6 +74,16 @@ pub trait Schema: core::fmt::Debug + Send {
     /// maps to [`SchemaError::InvalidNode`] at the processor level.
     fn is_valid(&self, node: &Node) -> bool;
 
+    /// Returns the child digests that `node`'s payload references.
+    ///
+    /// Used by the witness extractor to walk reachability from assertions. Leaf nodes return an
+    /// empty `Vec`; op nodes return the digests they would recurse on during `eval`. The default
+    /// implementation returns an empty `Vec`, which is correct for schemas with no internal
+    /// references.
+    fn children(&self, _node: &Node) -> Vec<Digest> {
+        Vec::new()
+    }
+
     /// Recursively reduces `node` to its canonical form.
     ///
     /// Child nodes are looked up by digest via `graph`. `&mut self` lets implementations
@@ -125,18 +137,24 @@ impl Schema for NoopSchema {
 
 #[cfg(test)]
 mod tests {
-    use miden_core::{Felt, deferred::DeferredTag};
+    use miden_core::Felt;
 
     use super::*;
+
+    const TEST_TAG: [Felt; 4] = [
+        Felt::new_unchecked(7),
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(0),
+    ];
 
     #[test]
     fn noop_schema_rejects_everything() {
         let mut schema = NoopSchema;
-        let tag = DeferredTag::Field0Leaf;
         let payload = miden_core::deferred::Payload::new([Felt::from_u32(0); 8]);
-        let node = Node::new(tag, payload);
+        let node = Node::new(TEST_TAG, payload);
 
-        assert!(!schema.responds_to(tag.to_felts()));
+        assert!(!schema.responds_to(TEST_TAG));
         assert!(!schema.is_valid(&node));
         let graph = DeferredState::new();
         let err = schema.eval(&graph, node).unwrap_err();
@@ -159,17 +177,16 @@ mod tests {
 
         let mut schema = Identity;
         let graph = DeferredState::new();
-        let tag = DeferredTag::Field0Leaf;
         let p_eq = miden_core::deferred::Payload::new([Felt::from_u32(0); 8]);
         let p_diff = miden_core::deferred::Payload::new([Felt::from_u32(1); 8]);
 
         let match_bool = schema
-            .assert(&graph, Node::new(tag, p_eq), Node::new(tag, p_eq))
+            .assert(&graph, Node::new(TEST_TAG, p_eq), Node::new(TEST_TAG, p_eq))
             .unwrap();
         assert!(!match_bool, "equal nodes should give bool=false (no mismatch)");
 
         let mismatch_bool = schema
-            .assert(&graph, Node::new(tag, p_eq), Node::new(tag, p_diff))
+            .assert(&graph, Node::new(TEST_TAG, p_eq), Node::new(TEST_TAG, p_diff))
             .unwrap();
         assert!(mismatch_bool, "different nodes should give bool=true (mismatch)");
     }

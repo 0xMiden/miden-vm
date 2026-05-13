@@ -20,7 +20,7 @@ pub use error::DeferredError;
 pub use hash::hash_node;
 pub use node::{Assertion, Node};
 pub use payload::Payload;
-pub use tag::{DeferredTag, FIELD, FIELD_0, TagKind, ValueType};
+pub use tag::Tag;
 pub use witness::DeferredWitness;
 
 /// Content-addressed digest of a [`Node`]. A 4-felt Poseidon2 output.

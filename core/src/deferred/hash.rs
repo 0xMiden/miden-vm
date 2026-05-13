@@ -1,6 +1,6 @@
 use miden_crypto::{ZERO, hash::poseidon2::Poseidon2};
 
-use super::{DeferredTag, Digest, Payload};
+use super::{Digest, Payload, Tag};
 use crate::{Felt, Word};
 
 /// Hashes a node `(tag, payload)` into its canonical 4-felt digest using Poseidon2.
@@ -9,13 +9,12 @@ use crate::{Felt, Word};
 /// occupies the rate, the 4-felt tag occupies the capacity. A single permutation produces the
 /// digest from the first 4 state elements. This matches the layout MASM uses when computing the
 /// same digest with one `hperm` instruction.
-pub fn hash_node(tag: DeferredTag, payload: &Payload) -> Digest {
-    let tag_felts = tag.to_felts();
+pub fn hash_node(tag: Tag, payload: &Payload) -> Digest {
     let payload_felts = payload.as_felts();
 
     let mut state: [Felt; 12] = [ZERO; 12];
     state[0..8].copy_from_slice(payload_felts);
-    state[8..12].copy_from_slice(&tag_felts);
+    state[8..12].copy_from_slice(&tag);
 
     Poseidon2::apply_permutation(&mut state);
 
@@ -25,6 +24,19 @@ pub fn hash_node(tag: DeferredTag, payload: &Payload) -> Digest {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const TAG_A: Tag = [
+        Felt::new_unchecked(1),
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(0),
+    ];
+    const TAG_B: Tag = [
+        Felt::new_unchecked(1),
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(1),
+        Felt::new_unchecked(0),
+    ];
 
     fn payload(seed: u64) -> Payload {
         Payload::new([
@@ -42,23 +54,23 @@ mod tests {
     #[test]
     fn deterministic() {
         let p = payload(42);
-        let a = hash_node(DeferredTag::Field0Leaf, &p);
-        let b = hash_node(DeferredTag::Field0Leaf, &p);
+        let a = hash_node(TAG_A, &p);
+        let b = hash_node(TAG_A, &p);
         assert_eq!(a, b);
     }
 
     #[test]
     fn tag_changes_digest() {
         let p = payload(7);
-        let leaf = hash_node(DeferredTag::Field0Leaf, &p);
-        let add = hash_node(DeferredTag::Field0Add, &p);
-        assert_ne!(leaf, add);
+        let a = hash_node(TAG_A, &p);
+        let b = hash_node(TAG_B, &p);
+        assert_ne!(a, b);
     }
 
     #[test]
     fn payload_changes_digest() {
-        let a = hash_node(DeferredTag::Field0Leaf, &payload(0));
-        let b = hash_node(DeferredTag::Field0Leaf, &payload(1));
+        let a = hash_node(TAG_A, &payload(0));
+        let b = hash_node(TAG_A, &payload(1));
         assert_ne!(a, b);
     }
 }

@@ -83,16 +83,24 @@ impl DeferredState {
 #[cfg(test)]
 mod tests {
     use miden_core::{
-        Felt, Word,
-        deferred::{Assertion, DeferredError, DeferredTag, Node, Payload},
+        Felt, Word, ZERO,
+        deferred::{Assertion, DeferredError, Node, Payload, Tag},
     };
 
     use super::*;
     use crate::deferred::transaction::{DeferredMutation, HandlerTransaction};
 
+    const TEST_LEAF_TAG: Tag = [Felt::new_unchecked(1), Felt::new_unchecked(0), ZERO, ZERO];
+    const TEST_ASSERT_TAG: Tag = [
+        Felt::new_unchecked(1),
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(3),
+        ZERO,
+    ];
+
     fn leaf(seed: u64) -> Node {
         let felts = core::array::from_fn(|i| Felt::new_unchecked(seed + i as u64));
-        Node::new(DeferredTag::Field0Leaf, Payload::new(felts))
+        Node::new(TEST_LEAF_TAG, Payload::new(felts))
     }
 
     fn digest(seed: u64) -> Word {
@@ -179,8 +187,8 @@ mod tests {
     #[test]
     fn append_assertion_preserves_order() {
         let mut state = DeferredState::new();
-        let a1 = Assertion::new(DeferredTag::Field0AssertEq, digest(1), digest(2));
-        let a2 = Assertion::new(DeferredTag::Field0AssertEq, digest(3), digest(4));
+        let a1 = Assertion::new(TEST_ASSERT_TAG, digest(1), digest(2));
+        let a2 = Assertion::new(TEST_ASSERT_TAG, digest(3), digest(4));
         state
             .apply(&HandlerTransaction {
                 deferred: vec![
@@ -198,7 +206,7 @@ mod tests {
         let mut state = DeferredState::new();
         let d = digest(1);
         let n = leaf(10);
-        let a = Assertion::new(DeferredTag::Field0AssertEq, digest(2), digest(3));
+        let a = Assertion::new(TEST_ASSERT_TAG, digest(2), digest(3));
         let txn = HandlerTransaction {
             deferred: vec![
                 DeferredMutation::InsertNode { digest: d, node: n },
