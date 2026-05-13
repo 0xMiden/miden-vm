@@ -1,21 +1,39 @@
 use alloc::{collections::BTreeMap, vec::Vec};
 
-use miden_core::deferred::{Assertion, DeferredError, Digest, Node};
+use miden_core::{
+    Word, ZERO,
+    crypto::hash::Poseidon2,
+    deferred::{DeferredError, Digest, Node, hash_node},
+};
 
 use super::transaction::{DeferredMutation, HandlerTransaction};
 
 /// In-memory deferred-DAG state owned by the host.
 ///
-/// Nodes are content-addressed by their Poseidon2 digest. The same digest may be re-inserted with
-/// an identical node (no-op); inserting a different node at the same digest is treated as a hash
-/// collision and surfaces as [`DeferredError::ConflictingNode`].
-///
-/// Assertions are kept in insertion order. The processor never executes the equality check —
-/// that is the verifier's job — it only records the digests that the program claims to be equal.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+/// Three pieces of state:
+/// - `nodes`: expression nodes content-addressed by their Poseidon2 digest. Re-inserting an
+///   identical node is a no-op; inserting a different node at the same digest surfaces as
+///   [`DeferredError::ConflictingNode`].
+/// - `assertions`: assertion nodes in registration order. The schema classifies a node as an
+///   assertion via `is_valid` returning `Some(NodeType::Assertion)`.
+/// - `transcript`: a single rolling Poseidon2 digest folded over each assertion's digest, in
+///   order. Mirrors [`miden_core::precompile::PrecompileTranscript`]. The verifier re-folds it
+///   from the witness assertions to bind their content and order.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DeferredState {
     nodes: BTreeMap<Digest, Node>,
-    assertions: Vec<Assertion>,
+    assertions: Vec<Node>,
+    transcript: Digest,
+}
+
+impl Default for DeferredState {
+    fn default() -> Self {
+        Self {
+            nodes: BTreeMap::new(),
+            assertions: Vec::new(),
+            transcript: Word::new([ZERO; 4]),
+        }
+    }
 }
 
 impl DeferredState {
@@ -31,12 +49,19 @@ impl DeferredState {
         self.nodes.contains_key(digest)
     }
 
-    pub fn assertions(&self) -> &[Assertion] {
+    pub fn assertions(&self) -> &[Node] {
         &self.assertions
     }
 
     pub fn nodes(&self) -> &BTreeMap<Digest, Node> {
         &self.nodes
+    }
+
+    /// Returns the running transcript digest folded over every assertion appended so far. Its
+    /// initial value is `[ZERO; 4]`; each `AppendAssertion(node)` mutation folds in
+    /// `hash_node(node.tag, &node.payload)` via `Poseidon2::merge`.
+    pub fn transcript(&self) -> Digest {
+        self.transcript
     }
 
     /// Apply every deferred mutation in `txn` atomically.
@@ -70,8 +95,10 @@ impl DeferredState {
                 DeferredMutation::InsertNode { digest, node } => {
                     self.nodes.insert(*digest, *node);
                 },
-                DeferredMutation::AppendAssertion(assertion) => {
-                    self.assertions.push(*assertion);
+                DeferredMutation::AppendAssertion(node) => {
+                    let digest = hash_node(node.tag, &node.payload);
+                    self.transcript = Poseidon2::merge(&[self.transcript, digest]);
+                    self.assertions.push(*node);
                 },
             }
         }
@@ -84,7 +111,7 @@ impl DeferredState {
 mod tests {
     use miden_core::{
         Felt, Word, ZERO,
-        deferred::{Assertion, DeferredError, Node, Payload, Tag},
+        deferred::{DeferredError, Node, Payload, Tag},
     };
 
     use super::*;
@@ -101,6 +128,11 @@ mod tests {
     fn leaf(seed: u64) -> Node {
         let felts = core::array::from_fn(|i| Felt::new_unchecked(seed + i as u64));
         Node::new(TEST_LEAF_TAG, Payload::new(felts))
+    }
+
+    fn assertion(seed: u64) -> Node {
+        let felts = core::array::from_fn(|i| Felt::new_unchecked(seed + i as u64));
+        Node::new(TEST_ASSERT_TAG, Payload::new(felts))
     }
 
     fn digest(seed: u64) -> Word {
@@ -187,8 +219,8 @@ mod tests {
     #[test]
     fn append_assertion_preserves_order() {
         let mut state = DeferredState::new();
-        let a1 = Assertion::new(TEST_ASSERT_TAG, digest(1), digest(2));
-        let a2 = Assertion::new(TEST_ASSERT_TAG, digest(3), digest(4));
+        let a1 = assertion(1);
+        let a2 = assertion(100);
         state
             .apply(&HandlerTransaction {
                 deferred: vec![
@@ -206,7 +238,7 @@ mod tests {
         let mut state = DeferredState::new();
         let d = digest(1);
         let n = leaf(10);
-        let a = Assertion::new(TEST_ASSERT_TAG, digest(2), digest(3));
+        let a = assertion(50);
         let txn = HandlerTransaction {
             deferred: vec![
                 DeferredMutation::InsertNode { digest: d, node: n },
@@ -217,5 +249,35 @@ mod tests {
         state.apply(&txn).unwrap();
         assert_eq!(state.get(&d), Some(&n));
         assert_eq!(state.assertions(), &[a]);
+    }
+
+    #[test]
+    fn transcript_folds_each_assertion_digest_in_order() {
+        let mut state = DeferredState::new();
+        assert_eq!(state.transcript(), Word::new([ZERO; 4]));
+
+        let a1 = assertion(1);
+        let a2 = assertion(100);
+
+        // Apply one by one and recompute the expected transcript manually.
+        state
+            .apply(&HandlerTransaction {
+                deferred: vec![DeferredMutation::AppendAssertion(a1)],
+                vm: vec![],
+            })
+            .unwrap();
+        let d1 = miden_core::deferred::hash_node(a1.tag, &a1.payload);
+        let expected1 = Poseidon2::merge(&[Word::new([ZERO; 4]), d1]);
+        assert_eq!(state.transcript(), expected1);
+
+        state
+            .apply(&HandlerTransaction {
+                deferred: vec![DeferredMutation::AppendAssertion(a2)],
+                vm: vec![],
+            })
+            .unwrap();
+        let d2 = miden_core::deferred::hash_node(a2.tag, &a2.payload);
+        let expected2 = Poseidon2::merge(&[expected1, d2]);
+        assert_eq!(state.transcript(), expected2);
     }
 }

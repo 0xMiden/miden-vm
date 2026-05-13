@@ -2,7 +2,7 @@ use alloc::vec::Vec;
 
 use miden_core::{
     Felt,
-    deferred::{Assertion, Digest, Node},
+    deferred::{Digest, Node},
 };
 
 /// A single mutation to apply to [`super::DeferredState`].
@@ -11,14 +11,15 @@ use miden_core::{
 /// atomically by [`super::DeferredState::apply`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DeferredMutation {
-    /// Insert a node into the DAG at the given digest.
+    /// Insert an expression node into the DAG at the given digest.
     ///
     /// Re-inserting an identical node at the same digest is a no-op. Inserting a different node
     /// at an already-occupied digest is rejected as a hash collision.
     InsertNode { digest: Digest, node: Node },
 
-    /// Append an equality assertion in insertion order.
-    AppendAssertion(Assertion),
+    /// Append an assertion node in insertion order. The state also folds the node's digest into
+    /// its running transcript when this mutation is applied.
+    AppendAssertion(Node),
 }
 
 /// A single VM-side side effect emitted by an event handler.

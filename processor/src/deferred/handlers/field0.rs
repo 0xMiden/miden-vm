@@ -5,7 +5,11 @@ use miden_core::{
     deferred::{DeferredError, Digest, Node, Payload, Tag},
 };
 
-use crate::deferred::{schema::SchemaError, state::DeferredState, Schema};
+use crate::deferred::{
+    schema::{NodeType, SchemaError},
+    state::DeferredState,
+    Schema,
+};
 
 /// Handler for the first 256-bit non-native field, `Field0`.
 ///
@@ -77,24 +81,30 @@ impl Schema for Field0Handler {
         tag[0] == FIELD0_PREFIX[0] && tag[1] == FIELD0_PREFIX[1]
     }
 
-    fn is_valid(&self, node: &Node) -> bool {
+    fn is_valid(&self, node: &Node) -> Option<NodeType> {
         if !self.responds_to(node.tag) {
-            return false;
+            return None;
         }
         if node.tag == FIELD0_LEAF {
             // Leaf payloads must have u32-canonical limbs so they can be reduced.
-            decode_limbs(&node.payload).is_ok()
+            if decode_limbs(&node.payload).is_ok() {
+                Some(NodeType::Expression)
+            } else {
+                None
+            }
         } else if node.tag == FIELD0_ADD || node.tag == FIELD0_MUL {
             // Op-node payloads are two child digests — opaque from this handler's POV.
-            true
+            Some(NodeType::Expression)
+        } else if node.tag == FIELD0_ASSERT_EQ {
+            // Assertion-node payloads are `lhs_digest || rhs_digest`.
+            Some(NodeType::Assertion)
         } else {
-            // AssertEq tags are dispatch markers, not storable nodes; unknown ops are rejected.
-            false
+            None
         }
     }
 
     fn children(&self, node: &Node) -> Vec<Digest> {
-        if node.tag == FIELD0_ADD || node.tag == FIELD0_MUL {
+        if node.tag == FIELD0_ADD || node.tag == FIELD0_MUL || node.tag == FIELD0_ASSERT_EQ {
             let (lhs, rhs) = Self::binary_op_children(&node.payload);
             alloc::vec![lhs, rhs]
         } else {

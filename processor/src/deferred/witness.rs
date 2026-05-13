@@ -6,19 +6,22 @@ use super::{schema::Schema, state::DeferredState};
 
 /// Extract the reachable subgraph of `state` as a [`DeferredWitness`].
 ///
-/// Reachability is rooted at the lhs/rhs digests of every assertion. A BFS follows op-node
-/// children via [`Schema::children`]; digests that aren't in the state's node map are silently
-/// skipped (the assertion still witnesses them — the verifier will surface the missing node as
-/// an evaluation failure if it matters).
+/// Reachability is rooted at the child digests of each assertion node (extracted via
+/// [`Schema::children`]). A BFS follows expression-node children via the same method; digests
+/// that aren't in the state's node map are silently skipped (the verifier will surface the
+/// missing node as an evaluation failure if it matters).
 ///
-/// Output ordering is deterministic: nodes sorted by digest, assertions in insertion order.
+/// Output ordering is deterministic: nodes sorted by digest, assertions in registration order,
+/// transcript copied from `state`.
 pub fn extract_witness(state: &DeferredState, schema: &dyn Schema) -> DeferredWitness {
     let mut visited: BTreeSet<Digest> = BTreeSet::new();
     let mut worklist: Vec<Digest> = Vec::new();
 
+    // Root the BFS at the operand digests of every assertion node.
     for assertion in state.assertions() {
-        worklist.push(assertion.lhs);
-        worklist.push(assertion.rhs);
+        for child in schema.children(assertion) {
+            worklist.push(child);
+        }
     }
 
     while let Some(digest) = worklist.pop() {
@@ -34,16 +37,16 @@ pub fn extract_witness(state: &DeferredState, schema: &dyn Schema) -> DeferredWi
 
     let nodes: Vec<_> =
         visited.into_iter().filter_map(|d| state.get(&d).map(|n| (d, *n))).collect();
-    DeferredWitness::new(nodes, state.assertions().to_vec())
+    DeferredWitness::new(nodes, state.assertions().to_vec(), state.transcript())
 }
 
 #[cfg(test)]
 mod tests {
-    use miden_core::{Felt, deferred::{Payload, Tag}};
+    use miden_core::{Felt, Word, deferred::{Payload, Tag}};
 
     use super::*;
     use crate::deferred::{
-        events::{assert_eq, binary_op_payload, register_node},
+        events::{binary_op_payload, register_node},
         handlers::{FIELD0_ADD, FIELD0_ASSERT_EQ, FIELD0_LEAF, FIELD0_MUL, Field0Handler},
     };
 
@@ -52,6 +55,11 @@ mod tests {
         limbs[0] = Felt::from_u32(low as u32);
         limbs[1] = Felt::from_u32((low >> 32) as u32);
         (FIELD0_LEAF, Payload::new(limbs))
+    }
+
+    /// Pulls the `lhs` digest out of an assertion node's payload (first 4 felts).
+    fn assertion_lhs(node: &super::super::Node) -> Word {
+        Word::new([node.payload.0[0], node.payload.0[1], node.payload.0[2], node.payload.0[3]])
     }
 
     #[test]
@@ -73,7 +81,8 @@ mod tests {
         let (orphan_tag, orphan_payload) = field0_leaf(99);
         let a = register_node(&mut state, &mut schema, a_tag, a_payload).unwrap();
         let _orphan = register_node(&mut state, &mut schema, orphan_tag, orphan_payload).unwrap();
-        assert_eq(&mut state, &mut schema, FIELD0_ASSERT_EQ, a, a).unwrap();
+        register_node(&mut state, &mut schema, FIELD0_ASSERT_EQ, binary_op_payload(a, a))
+            .unwrap();
 
         let w = extract_witness(&state, &schema);
         assert_eq!(w.nodes.len(), 1);
@@ -99,10 +108,11 @@ mod tests {
             register_node(&mut state, &mut schema, FIELD0_ADD, binary_op_payload(a, b)).unwrap();
         let mul =
             register_node(&mut state, &mut schema, FIELD0_MUL, binary_op_payload(add, c)).unwrap();
-        assert_eq(&mut state, &mut schema, FIELD0_ASSERT_EQ, mul, expected).unwrap();
+        register_node(&mut state, &mut schema, FIELD0_ASSERT_EQ, binary_op_payload(mul, expected))
+            .unwrap();
 
         let w = extract_witness(&state, &schema);
-        // Six nodes: a, b, c, expected, add, mul.
+        // Six expression nodes: a, b, c, expected, add, mul.
         assert_eq!(w.nodes.len(), 6);
         let digests: BTreeSet<_> = w.nodes.iter().map(|(d, _)| *d).collect();
         for d in [a, b, c, expected, add, mul] {
@@ -118,9 +128,11 @@ mod tests {
         let (b_tag, b_payload) = field0_leaf(22);
         let a = register_node(&mut state, &mut schema, a_tag, a_payload).unwrap();
         let b = register_node(&mut state, &mut schema, b_tag, b_payload).unwrap();
-        // Assert each leaf equal to itself so both digests show up in the witness.
-        assert_eq(&mut state, &mut schema, FIELD0_ASSERT_EQ, a, a).unwrap();
-        assert_eq(&mut state, &mut schema, FIELD0_ASSERT_EQ, b, b).unwrap();
+        // Self-equal each so both digests show up in the witness.
+        register_node(&mut state, &mut schema, FIELD0_ASSERT_EQ, binary_op_payload(a, a))
+            .unwrap();
+        register_node(&mut state, &mut schema, FIELD0_ASSERT_EQ, binary_op_payload(b, b))
+            .unwrap();
 
         let w = extract_witness(&state, &schema);
         // Two adjacent extracts must produce identical, sorted ordering.
@@ -138,12 +150,14 @@ mod tests {
         let a = register_node(&mut state, &mut schema, a_tag, a_payload).unwrap();
         let b = register_node(&mut state, &mut schema, b_tag, b_payload).unwrap();
         // Self-equal each so both succeed.
-        assert_eq(&mut state, &mut schema, FIELD0_ASSERT_EQ, a, a).unwrap();
-        assert_eq(&mut state, &mut schema, FIELD0_ASSERT_EQ, b, b).unwrap();
+        register_node(&mut state, &mut schema, FIELD0_ASSERT_EQ, binary_op_payload(a, a))
+            .unwrap();
+        register_node(&mut state, &mut schema, FIELD0_ASSERT_EQ, binary_op_payload(b, b))
+            .unwrap();
 
         let w = extract_witness(&state, &schema);
         assert_eq!(w.assertions.len(), 2);
-        assert_eq!(w.assertions[0].lhs, a);
-        assert_eq!(w.assertions[1].lhs, b);
+        assert_eq!(assertion_lhs(&w.assertions[0]), a);
+        assert_eq!(assertion_lhs(&w.assertions[1]), b);
     }
 }

@@ -1,18 +1,19 @@
-//! End-to-end test: drive the three deferred system events through a real `FastProcessor` run
-//! via `emit` instructions, then inspect the `DeferredState` accumulated on the advice provider
-//! and the extracted witness. Includes a legacy-smoke check that an unrelated `EventHandler`
-//! registered on the host still fires alongside the deferred infrastructure.
+//! End-to-end test: drive the unified `deferred_register` keyword through a real `FastProcessor`
+//! run, then inspect the `DeferredState` accumulated on the advice provider and the extracted
+//! witness. Includes a legacy-smoke check that an unrelated `EventHandler` registered on the
+//! host still fires alongside the deferred infrastructure.
 
 use alloc::vec::Vec;
 use std::sync::Arc;
 
 use miden_assembly::Assembler;
+use miden_core::{Word, ZERO, deferred::hash_node};
 use miden_processor::{
-    DefaultHost, ExecutionOptions, FastProcessor, Felt, ProcessorState, StackInputs, Word, ZERO,
+    DefaultHost, ExecutionOptions, FastProcessor, Felt, ProcessorState, StackInputs,
     advice::{AdviceInputs, AdviceMutation},
     deferred::{
         FIELD0_ADD, FIELD0_ASSERT_EQ, FIELD0_LEAF, FIELD0_MUL, Field0Handler, Payload,
-        binary_op_payload, extract_witness, hash_node,
+        binary_op_payload, extract_witness,
     },
     event::{EventError, EventHandler, EventName},
 };
@@ -34,28 +35,20 @@ fn build_processor() -> FastProcessor {
     .with_schema(Box::new(Field0Handler))
 }
 
-// EVENT-DRIVING MASM BUILDER
+// MASM BUILDER
 // ================================================================================================
 
-/// Build a MASM block that pushes the data segment + tag, invokes the sugared deferred keyword,
-/// and cleans up the 12 felts left on the operand stack (the keyword itself drops the event ID).
-///
-/// `data_below_tag` is the 8-felt segment that sits at stack positions 5..13 once the tag is
-/// pushed — for a register event it is the payload, for an assert-eq event it is
-/// `lhs_digest || rhs_digest`.
-fn emit_event(src: &mut String, keyword: &str, tag: [Felt; 4], data_below_tag: [Felt; 8]) {
+/// Build a MASM block that pushes the 8-felt payload then the 4-felt tag, invokes the unified
+/// `deferred_register` keyword, and cleans up the 12 felts left on the operand stack.
+fn emit_register(src: &mut String, tag: [Felt; 4], payload: [Felt; 8]) {
     use core::fmt::Write;
-    // Push payload-equivalent felts in reverse so data_below_tag[0] ends up at position 5 once
-    // the tag sits above it.
-    for f in data_below_tag.iter().rev() {
+    for f in payload.iter().rev() {
         writeln!(src, "    push.{}", f.as_int()).unwrap();
     }
     for f in tag.iter().rev() {
         writeln!(src, "    push.{}", f.as_int()).unwrap();
     }
-    writeln!(src, "    {keyword}").unwrap();
-    // The sugared keyword lowers to push.<id>; emit; drop, so the event_id is already gone;
-    // 12 felts (4 tag + 8 data) remain to be cleaned.
+    src.push_str("    deferred_register\n");
     for _ in 0..12 {
         src.push_str("    drop\n");
     }
@@ -85,9 +78,7 @@ fn field0_leaf_payload(low: u64) -> Payload {
 
 #[test]
 fn deferred_end_to_end_register_eval_assert() {
-    // Precompute every digest the program will use. The processor will recompute these via
-    // Poseidon2; if anything diverges between Rust and the in-host hash_node helper, the
-    // witness check below will catch it.
+    // Precompute every digest the program will use.
     let a_payload = field0_leaf_payload(3);
     let b_payload = field0_leaf_payload(4);
     let c_payload = field0_leaf_payload(5);
@@ -101,16 +92,16 @@ fn deferred_end_to_end_register_eval_assert() {
     let add_digest = hash_node(FIELD0_ADD, &add_payload);
     let mul_payload = binary_op_payload(add_digest, c_digest);
     let mul_digest = hash_node(FIELD0_MUL, &mul_payload);
+    let assert_payload = binary_op_payload(mul_digest, d_digest);
 
     // Build the program.
     let mut src = String::from("begin\n");
     for payload in [&a_payload, &b_payload, &c_payload, &d_payload] {
-        emit_event(&mut src, "deferred.register_leaf", FIELD0_LEAF, payload.0);
+        emit_register(&mut src, FIELD0_LEAF, payload.0);
     }
-    emit_event(&mut src, "deferred.register_op", FIELD0_ADD, add_payload.0);
-    emit_event(&mut src, "deferred.register_op", FIELD0_MUL, mul_payload.0);
-    let assert_data = digests_concat(mul_digest, d_digest);
-    emit_event(&mut src, "deferred.assert_eq", FIELD0_ASSERT_EQ, assert_data);
+    emit_register(&mut src, FIELD0_ADD, add_payload.0);
+    emit_register(&mut src, FIELD0_MUL, mul_payload.0);
+    emit_register(&mut src, FIELD0_ASSERT_EQ, assert_payload.0);
     src.push_str("end\n");
 
     let program = Assembler::default().assemble_program(&src).expect("program must assemble");
@@ -121,18 +112,27 @@ fn deferred_end_to_end_register_eval_assert() {
         .expect("execution must succeed");
 
     let state = output.advice.deferred_state();
-    // Six reachable nodes, one assertion.
+    // Six reachable expression nodes, one assertion node.
     let expected_digests = [a_digest, b_digest, c_digest, d_digest, add_digest, mul_digest];
     for d in expected_digests {
         assert!(state.contains(&d), "missing node for digest {:?}", d);
     }
     assert_eq!(state.assertions().len(), 1);
     let a0 = &state.assertions()[0];
-    assert_eq!(a0.lhs, mul_digest);
-    assert_eq!(a0.rhs, d_digest);
+    let lhs = Word::new([a0.payload.0[0], a0.payload.0[1], a0.payload.0[2], a0.payload.0[3]]);
+    let rhs = Word::new([a0.payload.0[4], a0.payload.0[5], a0.payload.0[6], a0.payload.0[7]]);
+    assert_eq!(lhs, mul_digest);
+    assert_eq!(rhs, d_digest);
 
-    // Witness should contain exactly the reachable subgraph, sorted by digest, and the single
-    // assertion in insertion order.
+    // Transcript must be non-zero and equal to the manual fold over the assertion's digest.
+    let expected_transcript = miden_core::crypto::hash::Poseidon2::merge(&[
+        Word::new([ZERO; 4]),
+        hash_node(a0.tag, &a0.payload),
+    ]);
+    assert_eq!(state.transcript(), expected_transcript);
+    assert_ne!(state.transcript(), Word::new([ZERO; 4]));
+
+    // Witness reachable subgraph + transcript.
     let witness = extract_witness(state, &Field0Handler);
     assert_eq!(witness.nodes.len(), 6);
     let witness_digests: Vec<_> = witness.nodes.iter().map(|(d, _)| *d).collect();
@@ -141,16 +141,10 @@ fn deferred_end_to_end_register_eval_assert() {
         assert!(witness_digests.contains(&d));
     }
     assert_eq!(witness.assertions.len(), 1);
+    assert_eq!(witness.transcript, expected_transcript);
 }
 
-fn digests_concat(lhs: Word, rhs: Word) -> [Felt; 8] {
-    let mut out = [ZERO; 8];
-    out[0..4].copy_from_slice(lhs.as_elements());
-    out[4..8].copy_from_slice(rhs.as_elements());
-    out
-}
-
-// E2E: AssertEq with mismatched values surfaces as an execution error.
+// E2E: assert_eq with mismatched values surfaces as an execution error.
 // ================================================================================================
 
 #[test]
@@ -159,16 +153,12 @@ fn deferred_assert_eq_mismatch_fails_execution() {
     let b_payload = field0_leaf_payload(8);
     let a_digest = hash_node(FIELD0_LEAF, &a_payload);
     let b_digest = hash_node(FIELD0_LEAF, &b_payload);
+    let mismatch_payload = binary_op_payload(a_digest, b_digest);
 
     let mut src = String::from("begin\n");
-    emit_event(&mut src, "deferred.register_leaf", FIELD0_LEAF, a_payload.0);
-    emit_event(&mut src, "deferred.register_leaf", FIELD0_LEAF, b_payload.0);
-    emit_event(
-        &mut src,
-        "deferred.assert_eq",
-        FIELD0_ASSERT_EQ,
-        digests_concat(a_digest, b_digest),
-    );
+    emit_register(&mut src, FIELD0_LEAF, a_payload.0);
+    emit_register(&mut src, FIELD0_LEAF, b_payload.0);
+    emit_register(&mut src, FIELD0_ASSERT_EQ, mismatch_payload.0);
     src.push_str("end\n");
 
     let program = Assembler::default().assemble_program(&src).expect("program must assemble");
@@ -201,7 +191,6 @@ fn legacy_event_handler_still_works_with_deferred_infrastructure() {
     host.register_handler(event, Arc::new(CountingHandler { counter: counter.clone() }))
         .expect("registration");
 
-    // Mix a deferred RegisterLeaf with the legacy event in one program.
     let payload = field0_leaf_payload(42);
 
     let mut src = String::from("begin\n");
@@ -211,7 +200,7 @@ fn legacy_event_handler_still_works_with_deferred_infrastructure() {
     src.push_str("    emit\n");
     src.push_str("    drop\n");
     // Deferred event right after.
-    emit_event(&mut src, "deferred.register_leaf", FIELD0_LEAF, payload.0);
+    emit_register(&mut src, FIELD0_LEAF, payload.0);
     src.push_str("end\n");
 
     let program = Assembler::default().assemble_program(&src).expect("program must assemble");

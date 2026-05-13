@@ -3606,8 +3606,8 @@ begin adv.has_mapkey assert end"
     Ok(())
 }
 
-/// Smoke-test that the three sugared deferred keywords parse and assemble. The semantics are
-/// exercised end-to-end in `processor/tests/deferred_e2e.rs`.
+/// Smoke-test that the unified `deferred_register` keyword parses and assembles. Semantics
+/// are exercised end-to-end in `processor/tests/deferred_e2e.rs`.
 #[test]
 fn test_deferred_keywords_assemble() -> TestResult {
     let context = TestContext::default();
@@ -3617,17 +3617,7 @@ fn test_deferred_keywords_assemble() -> TestResult {
 begin
     push.0 push.0 push.0 push.0 push.0 push.0 push.0 push.0
     push.0 push.0 push.0 push.0
-    deferred.register_leaf
-    dropw dropw dropw
-
-    push.0 push.0 push.0 push.0 push.0 push.0 push.0 push.0
-    push.0 push.0 push.0 push.0
-    deferred.register_op
-    dropw dropw dropw
-
-    push.0 push.0 push.0 push.0 push.0 push.0 push.0 push.0
-    push.0 push.0 push.0 push.0
-    deferred.assert_eq
+    deferred_register
     dropw dropw dropw
 end"
     );

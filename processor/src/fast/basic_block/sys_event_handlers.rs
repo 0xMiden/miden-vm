@@ -11,7 +11,7 @@ use miden_core::{
 use crate::{
     MemoryError,
     advice::AdviceError,
-    deferred::{SchemaError, assert_eq as deferred_assert_eq, register_node},
+    deferred::{SchemaError, register_node},
     errors::OperationError,
     fast::FastProcessor,
 };
@@ -72,13 +72,7 @@ pub fn handle_system_event(
         },
         SystemEvent::HqwordToMap => insert_hqword_into_adv_map(processor),
         SystemEvent::HpermToMap => insert_hperm_into_adv_map(processor),
-        // The leaf/op distinction is a MASM-level label; the schema decides what's valid based
-        // on the opaque tag bytes. Both arms run the same handler — the variant collapse moves
-        // into MASM in the next commit.
-        SystemEvent::DeferredRegisterLeaf | SystemEvent::DeferredRegisterOp => {
-            handle_deferred_register(processor)
-        },
-        SystemEvent::DeferredAssertEq => handle_deferred_assert_eq(processor),
+        SystemEvent::DeferredRegister => handle_deferred_register(processor),
     }
 }
 
@@ -549,13 +543,13 @@ fn push_transformed_stack_top(
     Ok(())
 }
 
-// DEFERRED-DAG SYSTEM EVENTS
+// DEFERRED-DAG SYSTEM EVENT
 // ================================================================================================
 
 /// Stack offset of the deferred tag relative to the event ID at position 0.
 const DEFERRED_TAG_OFFSET: usize = 1;
-/// Stack offset of the data segment (payload, or `lhs_digest || rhs_digest`) below the tag.
-const DEFERRED_DATA_OFFSET: usize = 5;
+/// Stack offset of the payload below the tag.
+const DEFERRED_PAYLOAD_OFFSET: usize = 5;
 
 /// Reads a 4-felt opaque tag from the stack starting at `start`. No validation — the schema
 /// rules on whether the tag is well-formed.
@@ -569,34 +563,16 @@ fn read_deferred_payload(processor: &FastProcessor, start: usize) -> Payload {
     Payload::new(felts)
 }
 
-/// Reads a 4-felt digest (a `Word`) from the stack starting at `start`.
-fn read_deferred_digest(processor: &FastProcessor, start: usize) -> Word {
-    let felts: [Felt; 4] = core::array::from_fn(|i| processor.stack_get(start + i));
-    Word::new(felts)
-}
-
-/// Handles the deferred-register event. Reads the tag and payload off the operand stack and
-/// hands them to the installed schema, which validates and inserts the node.
+/// Handles `SystemEvent::DeferredRegister`. Reads the tag and payload off the operand stack and
+/// hands them to the installed schema, which classifies the node as either an expression
+/// (inserted into the DAG) or an assertion (recorded + verified). A schema-reported mismatch
+/// surfaces as `SchemaError::AssertionFailed`.
 fn handle_deferred_register(processor: &mut FastProcessor) -> Result<(), SystemEventError> {
     let tag = read_deferred_tag(processor, DEFERRED_TAG_OFFSET);
-    let payload = read_deferred_payload(processor, DEFERRED_DATA_OFFSET);
+    let payload = read_deferred_payload(processor, DEFERRED_PAYLOAD_OFFSET);
 
     let (state, schema) = processor.deferred_view_mut();
     register_node(state, schema, tag, payload)?;
-    Ok(())
-}
-
-/// Handles `SystemEvent::DeferredAssertEq`. Reads the tag and two digests off the operand stack,
-/// asks the schema whether the two nodes evaluate equal, and records the assertion. The operand
-/// stack is left untouched; a schema-reported mismatch surfaces as
-/// `SchemaError::AssertionFailed`.
-fn handle_deferred_assert_eq(processor: &mut FastProcessor) -> Result<(), SystemEventError> {
-    let tag = read_deferred_tag(processor, DEFERRED_TAG_OFFSET);
-    let lhs_digest = read_deferred_digest(processor, DEFERRED_DATA_OFFSET);
-    let rhs_digest = read_deferred_digest(processor, DEFERRED_DATA_OFFSET + 4);
-
-    let (state, schema) = processor.deferred_view_mut();
-    deferred_assert_eq(state, schema, tag, lhs_digest, rhs_digest)?;
     Ok(())
 }
 

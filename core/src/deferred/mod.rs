@@ -18,7 +18,7 @@ mod witness;
 
 pub use error::DeferredError;
 pub use hash::hash_node;
-pub use node::{Assertion, Node};
+pub use node::Node;
 pub use payload::Payload;
 pub use tag::Tag;
 pub use witness::DeferredWitness;

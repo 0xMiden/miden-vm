@@ -295,38 +295,22 @@ pub enum SystemEvent {
 
     // DEFERRED-DAG SYSTEM EVENTS
     // --------------------------------------------------------------------------------------------
-    /// Registers a canonical-leaf node in the deferred-computation DAG. The node's tag and payload
-    /// are read from the operand stack; the host computes the digest internally and records the
-    /// node. No values are returned to MASM — the event is a pure side-effect.
+    /// Registers an opaque node `(tag, payload)` in the deferred-computation DAG.
+    ///
+    /// The installed schema classifies the node via its `is_valid` hook: nodes flagged as
+    /// expressions are inserted into the DAG; nodes flagged as assertions are appended to the
+    /// assertion list, folded into the running transcript, and verified before this event
+    /// returns. No values are returned to MASM.
     ///
     /// Inputs:
     ///   Operand stack: [event_id, TAG, PAYLOAD_LO, PAYLOAD_HI, ...]
-    ///     where TAG is a 4-felt deferred tag at positions 1..5,
+    ///     where TAG is a 4-felt tag at positions 1..5,
     ///     and PAYLOAD_LO || PAYLOAD_HI is an 8-felt payload at positions 5..13.
     ///
     /// Outputs:
     ///   Operand stack: [event_id, TAG, PAYLOAD_LO, PAYLOAD_HI, ...] (unchanged)
     ///   DAG state:     {... node(TAG, PAYLOAD)}
-    DeferredRegisterLeaf,
-
-    /// Registers a binary-op node in the deferred-computation DAG. Identical stack layout to
-    /// [`DeferredRegisterLeaf`]; the tag's kind must encode `BinaryOp` and the payload is two
-    /// child digests in `(lhs, rhs)` order.
-    DeferredRegisterOp,
-
-    /// Records a deferred equality assertion between two DAG nodes. The host evaluates both sides
-    /// recursively through the registered type handler and records the assertion. Returns nothing
-    /// to MASM; an evaluation mismatch surfaces as an execution error at this cycle.
-    ///
-    /// Inputs:
-    ///   Operand stack: [event_id, TAG, LHS_DIGEST, RHS_DIGEST, ...]
-    ///     where TAG is at positions 1..5,
-    ///     LHS_DIGEST at positions 5..9, RHS_DIGEST at positions 9..13.
-    ///
-    /// Outputs:
-    ///   Operand stack: [event_id, TAG, LHS_DIGEST, RHS_DIGEST, ...] (unchanged)
-    ///   DAG state:     {... assertion(TAG, LHS_DIGEST, RHS_DIGEST)}
-    DeferredAssertEq,
+    DeferredRegister,
 }
 
 impl SystemEvent {
@@ -399,9 +383,7 @@ impl SystemEvent {
             Self::HdwordToMapWithDomain,
             Self::HqwordToMap,
             Self::HpermToMap,
-            Self::DeferredRegisterLeaf,
-            Self::DeferredRegisterOp,
-            Self::DeferredAssertEq,
+            Self::DeferredRegister,
         ]
     }
 }
@@ -443,7 +425,7 @@ pub(crate) struct SystemEventEntry {
 
 impl SystemEvent {
     /// The total number of system events.
-    pub const COUNT: usize = 22;
+    pub const COUNT: usize = 20;
 
     /// Lookup table mapping system events to their metadata.
     ///
@@ -546,19 +528,9 @@ impl SystemEvent {
             name: "sys::hperm_to_map",
         },
         SystemEventEntry {
-            id: EventId::from_u64(14753199275783232649),
-            event: SystemEvent::DeferredRegisterLeaf,
-            name: "sys::deferred_register_leaf",
-        },
-        SystemEventEntry {
-            id: EventId::from_u64(13815750764634048910),
-            event: SystemEvent::DeferredRegisterOp,
-            name: "sys::deferred_register_op",
-        },
-        SystemEventEntry {
-            id: EventId::from_u64(12117696980871488033),
-            event: SystemEvent::DeferredAssertEq,
-            name: "sys::deferred_assert_eq",
+            id: EventId::from_u64(3200266522440553751),
+            event: SystemEvent::DeferredRegister,
+            name: "sys::deferred_register",
         },
     ];
 }
@@ -668,9 +640,7 @@ mod test {
                 | SystemEvent::HdwordToMapWithDomain
                 | SystemEvent::HqwordToMap
                 | SystemEvent::HpermToMap
-                | SystemEvent::DeferredRegisterLeaf
-                | SystemEvent::DeferredRegisterOp
-                | SystemEvent::DeferredAssertEq => {},
+                | SystemEvent::DeferredRegister => {},
             }
         }
     }

@@ -13,12 +13,12 @@ mod transaction;
 mod witness;
 
 pub use miden_core::deferred::{
-    Assertion, DeferredError, DeferredWitness, Digest, Node, Payload, Tag, hash_node,
+    DeferredError, DeferredWitness, Digest, Node, Payload, Tag, hash_node,
 };
 
-pub use events::{assert_eq, binary_op_payload, register_node};
+pub use events::{binary_op_payload, register_node};
 pub use handlers::{FIELD0_ADD, FIELD0_ASSERT_EQ, FIELD0_LEAF, FIELD0_MUL, Field0Handler};
-pub use schema::{NoopSchema, Schema, SchemaError};
+pub use schema::{NodeType, NoopSchema, Schema, SchemaError};
 pub use state::DeferredState;
 pub use transaction::{DeferredMutation, HandlerTransaction, VmMutation};
 pub use witness::extract_witness;
