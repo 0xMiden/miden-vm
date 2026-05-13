@@ -33,6 +33,10 @@ pub enum AdviceError {
     )]
     AdvMapElementBudgetExceeded { current: usize, added: usize, max: usize },
     #[error(
+        "advice provider element budget exceeded: adding {added} elements to the current {current} would exceed the maximum of {max}"
+    )]
+    AdvProviderElementBudgetExceeded { current: usize, added: usize, max: usize },
+    #[error(
         "provided merkle tree {depth} is out of bounds and cannot be represented as an unsigned 8-bit integer"
     )]
     InvalidMerkleTreeDepth { depth: Felt },

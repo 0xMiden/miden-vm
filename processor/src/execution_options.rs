@@ -20,6 +20,11 @@ pub struct ExecutionOptions {
     max_adv_map_value_size: usize,
     /// Maximum total number of field elements allowed in live advice map keys and values.
     max_adv_map_elements: usize,
+    /// Maximum total number of field elements allowed across the entire advice provider state.
+    ///
+    /// This includes advice stack elements, advice map elements (keys + values), and Merkle store
+    /// nodes converted into field-element units.
+    max_adv_provider_elements: usize,
     /// Maximum number of input bytes allowed for a single hash precompile invocation.
     max_hash_len_bytes: usize,
     /// Maximum number of continuations allowed on the continuation stack at any point during
@@ -40,6 +45,7 @@ impl Default for ExecutionOptions {
             enable_debugging: false,
             max_adv_map_value_size: Self::DEFAULT_MAX_ADV_MAP_VALUE_SIZE,
             max_adv_map_elements: Self::DEFAULT_MAX_ADV_MAP_ELEMENTS,
+            max_adv_provider_elements: Self::DEFAULT_MAX_ADV_PROVIDER_ELEMENTS,
             max_hash_len_bytes: Self::DEFAULT_MAX_HASH_LEN_BYTES,
             max_num_continuations: Self::DEFAULT_MAX_NUM_CONTINUATIONS,
             max_stack_depth: Self::DEFAULT_MAX_STACK_DEPTH,
@@ -66,6 +72,12 @@ impl ExecutionOptions {
     /// Set to 2^20 so the default allows multiple maximum-sized entries while still providing a
     /// finite host-memory backstop. Each entry contributes 4 key elements plus its value length.
     pub const DEFAULT_MAX_ADV_MAP_ELEMENTS: usize = 1 << 20;
+
+    /// Default maximum total number of field elements allowed across all advice-provider state.
+    ///
+    /// Set to `usize::MAX` to preserve current behavior unless the caller opts into a stricter
+    /// unified limit.
+    pub const DEFAULT_MAX_ADV_PROVIDER_ELEMENTS: usize = usize::MAX;
 
     /// Default maximum number of input bytes for a single hash precompile invocation (e.g.
     /// keccak256, sha512, etc.). Set to 2^20 (1 MB).
@@ -142,6 +154,7 @@ impl ExecutionOptions {
             enable_debugging,
             max_adv_map_value_size: Self::DEFAULT_MAX_ADV_MAP_VALUE_SIZE,
             max_adv_map_elements: Self::DEFAULT_MAX_ADV_MAP_ELEMENTS,
+            max_adv_provider_elements: Self::DEFAULT_MAX_ADV_PROVIDER_ELEMENTS,
             max_hash_len_bytes: Self::DEFAULT_MAX_HASH_LEN_BYTES,
             max_num_continuations: Self::DEFAULT_MAX_NUM_CONTINUATIONS,
             max_stack_depth: Self::DEFAULT_MAX_STACK_DEPTH,
@@ -228,6 +241,13 @@ impl ExecutionOptions {
         self.max_adv_map_elements
     }
 
+    /// Returns the maximum total number of field elements allowed across all advice-provider
+    /// state.
+    #[inline]
+    pub fn max_adv_provider_elements(&self) -> usize {
+        self.max_adv_provider_elements
+    }
+
     /// Returns the maximum number of input bytes allowed for a single hash precompile invocation.
     #[inline]
     pub fn max_hash_len_bytes(&self) -> usize {
@@ -243,6 +263,12 @@ impl ExecutionOptions {
     /// Sets the maximum total number of field elements allowed in live advice map keys and values.
     pub fn with_max_adv_map_elements(mut self, size: usize) -> Self {
         self.max_adv_map_elements = size;
+        self
+    }
+
+    /// Sets the maximum total number of field elements allowed across all advice-provider state.
+    pub fn with_max_adv_provider_elements(mut self, size: usize) -> Self {
+        self.max_adv_provider_elements = size;
         self
     }
 
@@ -381,5 +407,11 @@ mod tests {
         let result = ExecutionOptions::default().with_max_stack_depth(MIN_STACK_DEPTH);
         assert!(result.is_ok());
         assert_eq!(result.unwrap().max_stack_depth(), MIN_STACK_DEPTH);
+    }
+
+    #[test]
+    fn max_adv_provider_elements_roundtrip() {
+        let options = ExecutionOptions::default().with_max_adv_provider_elements(1234);
+        assert_eq!(options.max_adv_provider_elements(), 1234);
     }
 }

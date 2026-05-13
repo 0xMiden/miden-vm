@@ -19,6 +19,9 @@ use crate::{ExecutionOptions, host::AdviceMutation, processor::AdviceProviderInt
 
 /// Maximum number of elements allowed on the advice stack. Set to 2^17.
 const MAX_ADVICE_STACK_SIZE: usize = 1 << 17;
+/// Number of field elements represented by a single Merkle-store internal node:
+/// parent, left child, and right child (3 words total).
+const MERKLE_STORE_NODE_ELEMENTS: usize = 3 * WORD_SIZE;
 
 // ADVICE PROVIDER
 // ================================================================================================
@@ -56,6 +59,7 @@ pub struct AdviceProvider {
     map_element_count: usize,
     max_map_value_size: usize,
     max_map_elements: usize,
+    max_provider_elements: usize,
     store: MerkleStore,
     pc_requests: Vec<PrecompileRequest>,
 }
@@ -74,7 +78,7 @@ impl AdviceProvider {
         let AdviceInputs { stack, map, store } = inputs;
         let mut provider = Self::empty(options);
         provider.extend_stack(stack)?;
-        provider.extend_merkle_store(store.inner_nodes());
+        provider.extend_merkle_store(store.inner_nodes())?;
         provider.extend_map(&map)?;
         Ok(provider)
     }
@@ -86,6 +90,7 @@ impl AdviceProvider {
             map_element_count: 0,
             max_map_value_size: options.max_adv_map_value_size(),
             max_map_elements: options.max_adv_map_elements(),
+            max_provider_elements: options.max_adv_provider_elements(),
             store: MerkleStore::default(),
             pc_requests: Vec::new(),
         }
@@ -107,9 +112,32 @@ impl AdviceProvider {
             });
         }
 
+        let max_provider_elements = options.max_adv_provider_elements();
+        if max_provider_elements != usize::MAX {
+            let provider_element_count = self
+                .provider_element_count_with(
+                    self.stack.len(),
+                    map_element_count,
+                    self.store.num_internal_nodes(),
+                )
+                .ok_or(AdviceError::AdvProviderElementBudgetExceeded {
+                    current: usize::MAX,
+                    added: usize::MAX,
+                    max: max_provider_elements,
+                })?;
+            if provider_element_count > max_provider_elements {
+                return Err(AdviceError::AdvProviderElementBudgetExceeded {
+                    current: provider_element_count,
+                    added: 0,
+                    max: max_provider_elements,
+                });
+            }
+        }
+
         self.map_element_count = map_element_count;
         self.max_map_value_size = options.max_adv_map_value_size();
         self.max_map_elements = options.max_adv_map_elements();
+        self.max_provider_elements = options.max_adv_provider_elements();
         Ok(())
     }
 
@@ -136,7 +164,7 @@ impl AdviceProvider {
                 self.extend_map(&other)?;
             },
             AdviceMutation::ExtendMerkleStore { infos } => {
-                self.extend_merkle_store(infos);
+                self.extend_merkle_store(infos)?;
             },
             AdviceMutation::ExtendPrecompileRequests { data } => {
                 self.extend_precompile_requests(data);
@@ -242,6 +270,93 @@ impl AdviceProvider {
                 max: MAX_ADVICE_STACK_SIZE,
             });
         }
+        self.check_provider_element_budget_with_added(count)?;
+        Ok(())
+    }
+
+    fn merkle_store_element_count(store_node_count: usize) -> Option<usize> {
+        store_node_count.checked_mul(MERKLE_STORE_NODE_ELEMENTS)
+    }
+
+    fn provider_element_count_with(
+        &self,
+        stack_len: usize,
+        map_element_count: usize,
+        store_node_count: usize,
+    ) -> Option<usize> {
+        let store_elements = Self::merkle_store_element_count(store_node_count)?;
+        stack_len.checked_add(map_element_count)?.checked_add(store_elements)
+    }
+
+    fn provider_element_count(&self) -> Option<usize> {
+        self.provider_element_count_with(
+            self.stack.len(),
+            self.map_element_count,
+            self.store.num_internal_nodes(),
+        )
+    }
+
+    fn check_provider_element_budget_with_added(&self, added: usize) -> Result<(), AdviceError> {
+        if self.max_provider_elements == usize::MAX {
+            return Ok(());
+        }
+
+        let current =
+            self.provider_element_count()
+                .ok_or(AdviceError::AdvProviderElementBudgetExceeded {
+                    current: usize::MAX,
+                    added,
+                    max: self.max_provider_elements,
+                })?;
+        let new_total =
+            current
+                .checked_add(added)
+                .ok_or(AdviceError::AdvProviderElementBudgetExceeded {
+                    current,
+                    added,
+                    max: self.max_provider_elements,
+                })?;
+        if new_total > self.max_provider_elements {
+            return Err(AdviceError::AdvProviderElementBudgetExceeded {
+                current,
+                added,
+                max: self.max_provider_elements,
+            });
+        }
+
+        Ok(())
+    }
+
+    fn check_provider_element_budget_with_store_nodes(
+        &self,
+        store_node_count: usize,
+    ) -> Result<(), AdviceError> {
+        if self.max_provider_elements == usize::MAX {
+            return Ok(());
+        }
+
+        let current =
+            self.provider_element_count()
+                .ok_or(AdviceError::AdvProviderElementBudgetExceeded {
+                    current: usize::MAX,
+                    added: usize::MAX,
+                    max: self.max_provider_elements,
+                })?;
+        let new_total = self
+            .provider_element_count_with(self.stack.len(), self.map_element_count, store_node_count)
+            .ok_or(AdviceError::AdvProviderElementBudgetExceeded {
+                current,
+                added: usize::MAX,
+                max: self.max_provider_elements,
+            })?;
+        if new_total > self.max_provider_elements {
+            return Err(AdviceError::AdvProviderElementBudgetExceeded {
+                current,
+                added: new_total.saturating_sub(current),
+                max: self.max_provider_elements,
+            });
+        }
+
         Ok(())
     }
 
@@ -433,6 +548,7 @@ impl AdviceProvider {
                     },
                 )?;
                 self.check_map_element_budget(added)?;
+                self.check_provider_element_budget_with_added(added)?;
                 self.map.insert(key, values);
                 self.map_element_count += added;
             },
@@ -475,6 +591,7 @@ impl AdviceProvider {
             )?;
         }
         self.check_map_element_budget(added)?;
+        self.check_provider_element_budget_with_added(added)?;
 
         self.map.merge(other).map_err(|((key, prev_values), new_values)| {
             AdviceError::MapKeyAlreadyPresent {
@@ -566,10 +683,22 @@ impl AdviceProvider {
     ) -> Result<(MerklePath, Word), AdviceError> {
         let node_index = NodeIndex::from_elements(&depth, &index)
             .map_err(|_| AdviceError::InvalidMerkleTreeNodeIndex { depth, index })?;
-        self.store
+        if self.max_provider_elements == usize::MAX {
+            return self
+                .store
+                .set_node(root, node_index, value)
+                .map(|root| (root.path, root.root))
+                .map_err(AdviceError::MerkleStoreUpdateFailed);
+        }
+
+        let mut store = self.store.clone();
+        let result = store
             .set_node(root, node_index, value)
             .map(|root| (root.path, root.root))
-            .map_err(AdviceError::MerkleStoreUpdateFailed)
+            .map_err(AdviceError::MerkleStoreUpdateFailed)?;
+        self.check_provider_element_budget_with_store_nodes(store.num_internal_nodes())?;
+        self.store = store;
+        Ok(result)
     }
 
     /// Creates a new Merkle tree in the advice provider by combining Merkle trees with the
@@ -581,7 +710,15 @@ impl AdviceProvider {
     /// It is not checked whether a Merkle tree for either of the specified roots can be found in
     /// this advice provider.
     pub fn merge_roots(&mut self, lhs: Word, rhs: Word) -> Result<Word, AdviceError> {
-        self.store.merge_roots(lhs, rhs).map_err(AdviceError::MerkleStoreMergeFailed)
+        if self.max_provider_elements == usize::MAX {
+            return self.store.merge_roots(lhs, rhs).map_err(AdviceError::MerkleStoreMergeFailed);
+        }
+
+        let mut store = self.store.clone();
+        let result = store.merge_roots(lhs, rhs).map_err(AdviceError::MerkleStoreMergeFailed)?;
+        self.check_provider_element_budget_with_store_nodes(store.num_internal_nodes())?;
+        self.store = store;
+        Ok(result)
     }
 
     /// Returns true if the Merkle root exists for the advice provider Merkle store.
@@ -590,11 +727,20 @@ impl AdviceProvider {
     }
 
     /// Extends the [MerkleStore] with the given nodes.
-    pub fn extend_merkle_store<I>(&mut self, iter: I)
+    pub fn extend_merkle_store<I>(&mut self, iter: I) -> Result<(), AdviceError>
     where
         I: IntoIterator<Item = InnerNodeInfo>,
     {
-        self.store.extend(iter);
+        if self.max_provider_elements == usize::MAX {
+            self.store.extend(iter);
+            return Ok(());
+        }
+
+        let mut store = self.store.clone();
+        store.extend(iter);
+        self.check_provider_element_budget_with_store_nodes(store.num_internal_nodes())?;
+        self.store = store;
+        Ok(())
     }
 
     // PRECOMPILE REQUESTS
@@ -630,7 +776,7 @@ impl AdviceProvider {
     /// Extends the contents of this instance with the contents of an `AdviceInputs`.
     pub fn extend_from_inputs(&mut self, inputs: &AdviceInputs) -> Result<(), AdviceError> {
         self.extend_stack(inputs.stack.iter().cloned())?;
-        self.extend_merkle_store(inputs.store.inner_nodes());
+        self.extend_merkle_store(inputs.store.inner_nodes())?;
         self.extend_map(&inputs.map)
     }
 
@@ -808,6 +954,86 @@ mod tests {
         assert!(matches!(
             err,
             AdviceError::AdvMapElementBudgetExceeded { current: 0, added: 5, max: 4 }
+        ));
+    }
+
+    #[test]
+    fn advice_provider_budget_respects_stack_growth() {
+        let baseline = AdviceProvider::new(AdviceInputs::default(), &ExecutionOptions::default())
+            .unwrap()
+            .provider_element_count()
+            .unwrap();
+        let options = ExecutionOptions::default().with_max_adv_provider_elements(baseline + 1);
+        let mut provider = AdviceProvider::new(AdviceInputs::default(), &options).unwrap();
+
+        provider.push_stack(Felt::ONE).unwrap();
+
+        let err = provider.push_stack(Felt::ONE).unwrap_err();
+        assert!(matches!(
+            err,
+            AdviceError::AdvProviderElementBudgetExceeded {
+                current,
+                added: 1,
+                max,
+            } if current == baseline + 1 && max == baseline + 1
+        ));
+    }
+
+    #[test]
+    fn advice_provider_budget_respects_map_growth() {
+        let baseline = AdviceProvider::new(AdviceInputs::default(), &ExecutionOptions::default())
+            .unwrap()
+            .provider_element_count()
+            .unwrap();
+        let options =
+            ExecutionOptions::default().with_max_adv_provider_elements(baseline + WORD_SIZE);
+        let mut provider = AdviceProvider::new(AdviceInputs::default(), &options).unwrap();
+
+        let err = provider.insert_into_map(make_leaf(0), vec![Felt::ONE]).unwrap_err();
+        assert!(matches!(
+            err,
+            AdviceError::AdvProviderElementBudgetExceeded {
+                current,
+                added: 5,
+                max,
+            } if current == baseline && max == baseline + WORD_SIZE
+        ));
+    }
+
+    #[test]
+    fn advice_provider_budget_respects_merkle_store_growth() {
+        let baseline = AdviceProvider::new(AdviceInputs::default(), &ExecutionOptions::default())
+            .unwrap()
+            .provider_element_count()
+            .unwrap();
+        let options = ExecutionOptions::default().with_max_adv_provider_elements(baseline);
+        let mut provider = AdviceProvider::new(AdviceInputs::default(), &options).unwrap();
+        let tree = MerkleTree::new([make_leaf(100), make_leaf(200)]).unwrap();
+
+        let err = provider.extend_merkle_store(tree.inner_nodes()).unwrap_err();
+        assert!(matches!(
+            err,
+            AdviceError::AdvProviderElementBudgetExceeded { current, max, .. }
+                if current == baseline && max == baseline
+        ));
+    }
+
+    #[test]
+    fn set_options_rejects_too_small_provider_budget() {
+        let mut provider =
+            AdviceProvider::new(AdviceInputs::default(), &ExecutionOptions::default()).unwrap();
+        provider.push_stack(Felt::ONE).unwrap();
+        let current = provider.provider_element_count().unwrap();
+
+        let options = ExecutionOptions::default().with_max_adv_provider_elements(current - 1);
+        let err = provider.set_options(&options).unwrap_err();
+        assert!(matches!(
+            err,
+            AdviceError::AdvProviderElementBudgetExceeded {
+                current: usage,
+                added: 0,
+                max,
+            } if usage == current && max == current - 1
         ));
     }
 
