@@ -4,6 +4,7 @@ use std::collections::HashMap;
 
 use super::{
     domain::{TypeFact, VarKey},
+    expr_defs::ExprDefs,
     origin::{self, Origin},
     summary::{TypeSummary, TypeSummaryMap},
 };
@@ -101,10 +102,7 @@ struct ProcTypeAnalyzer<'a> {
     /// computed values that only happen to inherit a downstream requirement.
     origins: HashMap<VarKey, Origin>,
     /// Direct expression definitions for SSA assignments.
-    ///
-    /// This supports small sound structural refinements such as preserving the
-    /// `u32` result of bit-count operations through known-safe constant offsets.
-    expr_defs: HashMap<VarKey, Expr>,
+    expr_defs: ExprDefs,
 }
 
 impl<'a> ProcTypeAnalyzer<'a> {
@@ -122,14 +120,14 @@ impl<'a> ProcTypeAnalyzer<'a> {
             local_requirements: HashMap::new(),
             mem_requirements: HashMap::new(),
             origins: HashMap::new(),
-            expr_defs: HashMap::new(),
+            expr_defs: ExprDefs::default(),
         }
     }
 
     /// Run fixed-point inference and mismatch checks.
     fn analyze(&mut self, stmts: &[Stmt]) -> TypeSummary {
         self.origins = origin::compute_origins(stmts, self.input_count, self.callee_summaries);
-        self.expr_defs = Self::collect_expr_defs(stmts);
+        self.expr_defs = ExprDefs::collect(stmts);
 
         for _ in 0..MAX_TYPE_PASSES {
             let prev_inferred = self.inferred.clone();
@@ -160,32 +158,6 @@ impl<'a> ProcTypeAnalyzer<'a> {
         }
 
         self.build_summary(stmts)
-    }
-
-    /// Collect direct assignment expressions keyed by destination SSA variable.
-    fn collect_expr_defs(stmts: &[Stmt]) -> HashMap<VarKey, Expr> {
-        let mut defs = HashMap::new();
-        Self::collect_expr_defs_in_block(stmts, &mut defs);
-        defs
-    }
-
-    /// Collect direct assignment expressions in a structured statement block.
-    fn collect_expr_defs_in_block(stmts: &[Stmt], defs: &mut HashMap<VarKey, Expr>) {
-        for stmt in stmts {
-            match stmt {
-                Stmt::Assign { dest, expr, .. } => {
-                    defs.insert(VarKey::from_var(dest), expr.clone());
-                },
-                Stmt::If { then_body, else_body, .. } => {
-                    Self::collect_expr_defs_in_block(then_body, defs);
-                    Self::collect_expr_defs_in_block(else_body, defs);
-                },
-                Stmt::Repeat { body, .. } | Stmt::While { body, .. } => {
-                    Self::collect_expr_defs_in_block(body, defs);
-                },
-                _ => {},
-            }
-        }
     }
 
     /// Build the final procedure summary from inferred state.
@@ -651,19 +623,7 @@ impl<'a> ProcTypeAnalyzer<'a> {
         if offset > (u32::MAX as u64).saturating_sub(32) {
             return None;
         }
-        self.is_direct_u32_count_expr(count_expr).then_some(())
-    }
-
-    /// Return true when the expression is a `u32` count result, following local copy chains.
-    fn is_direct_u32_count_expr(&self, expr: &Expr) -> bool {
-        match expr {
-            Expr::Unary(UnOp::U32Clz | UnOp::U32Ctz | UnOp::U32Clo | UnOp::U32Cto, _) => true,
-            Expr::Var(var) => self
-                .expr_defs
-                .get(&VarKey::from_var(var))
-                .is_some_and(|def| self.is_direct_u32_count_expr(def)),
-            _ => false,
-        }
+        self.expr_defs.is_u32_count_expr(count_expr).then_some(())
     }
 
     /// Read inferred type for a variable.
