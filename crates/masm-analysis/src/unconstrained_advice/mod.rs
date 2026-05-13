@@ -4,6 +4,7 @@ mod address;
 mod call_transfer;
 mod domain;
 mod env;
+mod expr;
 mod grouping;
 mod inter;
 mod merkle;
