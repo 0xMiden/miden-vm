@@ -916,6 +916,41 @@ end
 }
 
 #[test]
+fn advice_provenance_survives_repeat_stack_swaps() {
+    let dir = temp_dir("repeat-advice-swap");
+    let file = dir.join("repeat_advice_swap.masm");
+    fs::write(
+        &file,
+        "\
+pub proc test(seed: felt) -> (felt, felt, felt, felt)
+    adv_push
+    repeat.2
+        push.1
+        swap.1
+    end
+    push.1
+    u32wrapping_add
+end
+",
+    )
+    .expect("failed to write MASM fixture");
+
+    let output = run_masm_lint(&dir, &file);
+
+    assert!(
+        !output.status.success(),
+        "repeat-carried swapped advice unexpectedly passed: {output:?}"
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let output_text = format!("{stdout}\n{stderr}");
+    assert!(
+        output_text.contains("unconstrained advice reaches a u32 operation"),
+        "repeat-carried swapped advice did not emit a u32 warning: {output_text}"
+    );
+}
+
+#[test]
 fn while_blocks_are_lifted_for_clean_inputs() {
     let dir = temp_dir("while-clean");
     let file = dir.join("while_clean.masm");
