@@ -3,11 +3,10 @@ use core::{fmt, iter::repeat_n};
 
 use crate::{
     Felt, Word, ZERO,
-    chiplets::hasher,
     crypto::hash::Blake3_256,
     mast::{
         DecoratedLinksIter, DecoratedOpLink, DecoratorId, DecoratorStore, MastForest,
-        MastForestError, MastNodeFingerprint, MastNodeId,
+        MastForestError, MastNodeFingerprint, MastNodeId, digest,
     },
     operations::{DecoratorList, Operation},
     prettier::PrettyPrint,
@@ -1403,8 +1402,7 @@ fn batch_and_hash_ops(ops: &[Operation]) -> (Vec<OpBatch>, Word) {
 }
 
 fn hash_op_batches(op_batches: &[OpBatch]) -> Word {
-    let op_groups: Vec<Felt> = op_batches.iter().flat_map(|batch| batch.groups).collect();
-    hasher::hash_elements(&op_groups)
+    digest::basic_block_digest(op_batches)
 }
 
 /// Groups the provided operations into batches as described in the docs for this module (i.e., up

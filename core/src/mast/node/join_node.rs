@@ -9,9 +9,9 @@ use super::{MastForestContributor, MastNodeExt};
 use crate::mast::MastNode;
 use crate::{
     Felt, Word,
-    chiplets::hasher,
     mast::{
         DecoratorId, DecoratorStore, MastForest, MastForestError, MastNodeFingerprint, MastNodeId,
+        digest,
     },
     operations::opcodes,
     prettier::PrettyPrint,
@@ -356,7 +356,7 @@ impl JoinNodeBuilder {
             let left_child_hash = mast_forest[self.children[0]].digest();
             let right_child_hash = mast_forest[self.children[1]].digest();
 
-            hasher::merge_in_domain(&[left_child_hash, right_child_hash], JoinNode::DOMAIN)
+            digest::join_digest(left_child_hash, right_child_hash)
         };
 
         Ok(JoinNode {
@@ -403,7 +403,7 @@ impl MastForestContributor for JoinNodeBuilder {
             let left_child_hash = forest[self.children[0]].digest();
             let right_child_hash = forest[self.children[1]].digest();
 
-            hasher::merge_in_domain(&[left_child_hash, right_child_hash], JoinNode::DOMAIN)
+            digest::join_digest(left_child_hash, right_child_hash)
         };
 
         // Determine the node ID that will be assigned
@@ -448,7 +448,7 @@ impl MastForestContributor for JoinNodeBuilder {
                 let left_child_hash = forest[self.children[0]].digest();
                 let right_child_hash = forest[self.children[1]].digest();
 
-                hasher::merge_in_domain(&[left_child_hash, right_child_hash], JoinNode::DOMAIN)
+                digest::join_digest(left_child_hash, right_child_hash)
             },
         )
     }

@@ -13,9 +13,9 @@ use super::{MastForestContributor, MastNodeExt};
 use crate::mast::MastNode;
 use crate::{
     Felt, Word,
-    chiplets::hasher,
     mast::{
         DecoratorId, DecoratorStore, MastForest, MastForestError, MastNodeFingerprint, MastNodeId,
+        digest,
     },
     operations::opcodes,
     utils::{Idx, LookupByIdx},
@@ -381,13 +381,8 @@ impl CallNodeBuilder {
             forced_digest
         } else {
             let callee_digest = mast_forest[self.callee].digest();
-            let domain = if self.is_syscall {
-                CallNode::SYSCALL_DOMAIN
-            } else {
-                CallNode::CALL_DOMAIN
-            };
 
-            hasher::merge_in_domain(&[callee_digest, Word::default()], domain)
+            digest::call_digest(callee_digest, self.is_syscall)
         };
 
         Ok(CallNode {
@@ -433,13 +428,8 @@ impl MastForestContributor for CallNodeBuilder {
             forced_digest
         } else {
             let callee_digest = forest[self.callee].digest();
-            let domain = if self.is_syscall {
-                CallNode::SYSCALL_DOMAIN
-            } else {
-                CallNode::CALL_DOMAIN
-            };
 
-            hasher::merge_in_domain(&[callee_digest, Word::default()], domain)
+            digest::call_digest(callee_digest, self.is_syscall)
         };
 
         // Store node-level decorators in the centralized NodeToDecoratorIds for efficient access
@@ -480,13 +470,8 @@ impl MastForestContributor for CallNodeBuilder {
                 forced_digest
             } else {
                 let callee_digest = forest[self.callee].digest();
-                let domain = if self.is_syscall {
-                    CallNode::SYSCALL_DOMAIN
-                } else {
-                    CallNode::CALL_DOMAIN
-                };
 
-                hasher::merge_in_domain(&[callee_digest, Word::default()], domain)
+                digest::call_digest(callee_digest, self.is_syscall)
             },
         )
     }

@@ -5,6 +5,7 @@ pub(super) use super::arbitrary::op_non_control_sequence_strategy;
 use super::*;
 use crate::{
     Felt, ONE, Word,
+    chiplets::hasher,
     mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, MastNodeExt},
     operations::Decorator,
     utils::IndexVec,
