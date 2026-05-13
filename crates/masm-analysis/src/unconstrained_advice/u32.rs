@@ -1,13 +1,13 @@
 //! Diagnostics for unconstrained advice reaching `U32` sinks.
 
-use masm_decompiler::{BinOp, Expr, Intrinsic, Stmt, SymbolPath, TypeRequirement, UnOp, Var};
+use masm_decompiler::{
+    BinOp, Expr, Intrinsic, Stmt, SymbolPath, TypeRequirement, UnOp, Var,
+    intrinsic_positional_u32_arg_range, intrinsic_requires_u32_precondition,
+};
 
 use super::{
     domain::AdviceFact,
-    shared::{
-        Env, collect_expr_sink_fact, expr_output_fact, expr_u32_validity,
-        intrinsic_positional_u32_arg_range, intrinsic_requires_u32_precondition, stmt_span,
-    },
+    shared::{Env, collect_expr_sink_fact, expr_output_fact, expr_u32_validity, stmt_span},
     summary::{AdviceDiagnostic, AdviceDiagnosticContext, AdviceDiagnosticsMap, AdviceSummaryMap},
     walker::{self, AdviceCapability, AdviceEffect},
 };

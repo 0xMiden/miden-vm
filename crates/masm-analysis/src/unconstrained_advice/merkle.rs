@@ -1,10 +1,10 @@
 //! Diagnostics for unconstrained advice reaching Merkle tree root arguments.
 
-use masm_decompiler::Stmt;
+use masm_decompiler::{Stmt, intrinsic_merkle_root_arg_range};
 
 use super::{
     domain::AdviceFact,
-    shared::{Env, intrinsic_merkle_root_arg_range},
+    shared::Env,
     summary::{AdviceDiagnosticContext, AdviceDiagnosticsMap, AdviceSummaryMap},
     walker::{self, AdviceCapability, AdviceEffect},
 };
