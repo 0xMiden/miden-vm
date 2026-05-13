@@ -77,6 +77,43 @@ pub fn intrinsic_nonzero_arg_index(name: &str) -> Option<usize> {
     }
 }
 
+/// Type shape for intrinsic outputs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum IntrinsicOutputTypeShape {
+    /// Every output is a felt unless another analysis proves more.
+    Felt,
+    /// Every output is a `U32`.
+    U32,
+    /// Every output is a boolean.
+    Bool,
+    /// Multi-output shape where non-top outputs are `U32` and the top output is boolean.
+    U32WithTopBool,
+    /// Multi-output shape where non-top outputs are boolean and the top output is `U32`.
+    BoolWithTopU32,
+    /// `u32widening_add3`, whose carry output depends on the carry input type.
+    U32WideningAdd3,
+}
+
+/// Return the intrinsic output type shape used by type inference.
+pub(crate) fn intrinsic_output_type_shape(name: &str) -> IntrinsicOutputTypeShape {
+    let base = intrinsic_base_name(name);
+    match base {
+        "u32overflowing_add" | "u32overflowing_sub" | "u32overflowing_add3" => {
+            IntrinsicOutputTypeShape::U32WithTopBool
+        },
+        "u32widening_add" => IntrinsicOutputTypeShape::BoolWithTopU32,
+        "u32widening_add3" => IntrinsicOutputTypeShape::U32WideningAdd3,
+        "u32widening_mul" | "u32widening_madd" | "u32divmod" | "u32split" | "u32mod"
+        | "u32wrapping_add3" | "u32wrapping_madd" => IntrinsicOutputTypeShape::U32,
+        "u32testw" => IntrinsicOutputTypeShape::Bool,
+        _ if base.starts_with("u32") || name == "sdepth" || name.starts_with("locaddr.") => {
+            IntrinsicOutputTypeShape::U32
+        },
+        "is_odd" => IntrinsicOutputTypeShape::Bool,
+        _ => IntrinsicOutputTypeShape::Felt,
+    }
+}
+
 /// Repetitive stack-operation families that carry a depth or word index.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum StackFamily {
@@ -230,8 +267,9 @@ mod tests {
     use miden_assembly_syntax::ast::Instruction;
 
     use super::{
-        intrinsic_asserts_u32_args, intrinsic_base_name, intrinsic_memory_address_arg_index,
-        intrinsic_merkle_root_arg_range, intrinsic_nonzero_arg_index,
+        IntrinsicOutputTypeShape, intrinsic_asserts_u32_args, intrinsic_base_name,
+        intrinsic_memory_address_arg_index, intrinsic_merkle_root_arg_range,
+        intrinsic_nonzero_arg_index, intrinsic_output_type_shape,
         intrinsic_positional_u32_arg_range, intrinsic_requires_u32_precondition, stack_family,
     };
 
@@ -305,6 +343,28 @@ mod tests {
         assert_eq!(intrinsic_nonzero_arg_index("u32div.4"), None);
         assert_eq!(intrinsic_nonzero_arg_index("u32mod.4"), None);
         assert_eq!(intrinsic_nonzero_arg_index("inv"), None);
+    }
+
+    #[test]
+    fn intrinsic_output_type_shapes_cover_type_inference_cases() {
+        assert_eq!(
+            intrinsic_output_type_shape("u32overflowing_add"),
+            IntrinsicOutputTypeShape::U32WithTopBool
+        );
+        assert_eq!(
+            intrinsic_output_type_shape("u32widening_add"),
+            IntrinsicOutputTypeShape::BoolWithTopU32
+        );
+        assert_eq!(
+            intrinsic_output_type_shape("u32widening_add3"),
+            IntrinsicOutputTypeShape::U32WideningAdd3
+        );
+        assert_eq!(intrinsic_output_type_shape("u32divmod"), IntrinsicOutputTypeShape::U32);
+        assert_eq!(intrinsic_output_type_shape("u32testw"), IntrinsicOutputTypeShape::Bool);
+        assert_eq!(intrinsic_output_type_shape("u32div.4"), IntrinsicOutputTypeShape::U32);
+        assert_eq!(intrinsic_output_type_shape("locaddr.0"), IntrinsicOutputTypeShape::U32);
+        assert_eq!(intrinsic_output_type_shape("is_odd"), IntrinsicOutputTypeShape::Bool);
+        assert_eq!(intrinsic_output_type_shape("adv_pipe"), IntrinsicOutputTypeShape::Felt);
     }
 
     #[test]
