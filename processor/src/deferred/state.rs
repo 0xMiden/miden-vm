@@ -12,7 +12,7 @@ use super::transaction::{DeferredMutation, HandlerTransaction};
 ///
 /// Assertions are kept in insertion order. The processor never executes the equality check —
 /// that is the verifier's job — it only records the digests that the program claims to be equal.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DeferredState {
     nodes: BTreeMap<Digest, Node>,
     assertions: Vec<Assertion>,
