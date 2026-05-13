@@ -63,6 +63,14 @@ pub fn handle_system_event(
         },
         SystemEvent::HqwordToMap => insert_hqword_into_adv_map(processor),
         SystemEvent::HpermToMap => insert_hperm_into_adv_map(processor),
+        SystemEvent::DeferredRegisterLeaf
+        | SystemEvent::DeferredRegisterOp
+        | SystemEvent::DeferredAssertEq => {
+            // Wired up in a follow-up commit; the host's on_event intercept currently handles
+            // these via the DefaultHost path.
+            let _ = processor;
+            Ok(())
+        },
     }
 }
 
