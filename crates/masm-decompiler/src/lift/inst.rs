@@ -6,7 +6,7 @@ use miden_assembly_syntax::{
     parser::PushValue,
 };
 
-use super::{LiftingError, LiftingResult, LoopContext, stack::SymbolicStack};
+use super::{LiftingError, LiftingResult, LoopContext, resolved_immediate, stack::SymbolicStack};
 use crate::{
     ir::{
         AdvLoad, BinOp, Call, Constant, Expr, Intrinsic, LocalAccessKind, LocalLoad, LocalStore,
@@ -801,6 +801,7 @@ fn lift_local_inst(
 ) -> LiftingResult<Option<Vec<Stmt>>> {
     match inst {
         Instruction::LocLoad(idx) => {
+            let index = resolved_immediate(idx, span)?;
             let effect = effect_for_inst(inst, span, resolver, sigs)?;
             let (_, pushed) = stack.apply_checked(
                 effect.pops(),
@@ -813,12 +814,13 @@ fn lift_local_inst(
                 span,
                 load: LocalLoad {
                     kind: LocalAccessKind::Element,
-                    index: idx.expect_value(),
+                    index,
                     outputs: pushed,
                 },
             }]))
         },
         Instruction::LocLoadWBe(idx) => {
+            let index = resolved_immediate(idx, span)?;
             let effect = effect_for_inst(inst, span, resolver, sigs)?;
             let (_, pushed) = stack.apply_checked(
                 effect.pops(),
@@ -831,12 +833,13 @@ fn lift_local_inst(
                 span,
                 load: LocalLoad {
                     kind: LocalAccessKind::WordBe,
-                    index: idx.expect_value(),
+                    index,
                     outputs: pushed,
                 },
             }]))
         },
         Instruction::LocLoadWLe(idx) => {
+            let index = resolved_immediate(idx, span)?;
             let effect = effect_for_inst(inst, span, resolver, sigs)?;
             let (_, pushed) = stack.apply_checked(
                 effect.pops(),
@@ -849,12 +852,13 @@ fn lift_local_inst(
                 span,
                 load: LocalLoad {
                     kind: LocalAccessKind::WordLe,
-                    index: idx.expect_value(),
+                    index,
                     outputs: pushed,
                 },
             }]))
         },
         Instruction::LocStore(idx) => {
+            let index = resolved_immediate(idx, span)?;
             let effect = effect_for_inst(inst, span, resolver, sigs)?;
             let (popped, _) = stack.apply_checked(
                 effect.pops(),
@@ -865,30 +869,29 @@ fn lift_local_inst(
             )?;
             Ok(Some(vec![Stmt::LocalStore {
                 span,
-                store: LocalStore {
-                    index: idx.expect_value(),
-                    values: popped,
-                },
+                store: LocalStore { index, values: popped },
             }]))
         },
         Instruction::LocStoreWBe(idx) => {
+            let index = resolved_immediate(idx, span)?;
             let values = stack.top_n_checked(4, span, inst.to_string())?;
             Ok(Some(vec![Stmt::LocalStoreW {
                 span,
                 store: LocalStoreW {
                     kind: LocalAccessKind::WordBe,
-                    index: idx.expect_value(),
+                    index,
                     values,
                 },
             }]))
         },
         Instruction::LocStoreWLe(idx) => {
+            let index = resolved_immediate(idx, span)?;
             let values = stack.top_n_checked(4, span, inst.to_string())?;
             Ok(Some(vec![Stmt::LocalStoreW {
                 span,
                 store: LocalStoreW {
                     kind: LocalAccessKind::WordLe,
-                    index: idx.expect_value(),
+                    index,
                     values,
                 },
             }]))
@@ -1057,11 +1060,12 @@ fn lift_push_inst(
             Ok(Some(stmts))
         },
         Instruction::Locaddr(index) => {
+            let index = resolved_immediate(index, span)?;
             let (_, pushed) = stack.apply_checked(0, 1, 0, span, "locaddr")?;
             Ok(Some(vec![Stmt::Intrinsic {
                 span,
                 intrinsic: Intrinsic {
-                    name: format!("locaddr.{}", index.expect_value()),
+                    name: format!("locaddr.{index}"),
                     args: Vec::new(),
                     results: pushed,
                 },

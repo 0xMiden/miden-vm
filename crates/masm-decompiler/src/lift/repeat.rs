@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 
 use log::trace;
 use miden_assembly_syntax::{
-    ast::{Block, Instruction, Op},
+    ast::{Block, Immediate, Instruction, Op},
     debuginfo::{SourceSpan, Spanned},
 };
 
@@ -849,7 +849,16 @@ fn simulate_op<S: RepeatBlockStack>(
             Ok(())
         },
         Op::Repeat { count, body, .. } => {
-            for _ in 0..count.expect_value() {
+            let count = match count {
+                Immediate::Value(count) => count.into_inner(),
+                Immediate::Constant(name) => {
+                    return Err(LiftingError::UnresolvedImmediateConstant {
+                        span: op.span(),
+                        name: name.to_string(),
+                    });
+                },
+            };
+            for _ in 0..count {
                 simulate_block(body, stack, resolver, sigs)?;
             }
             Ok(())
