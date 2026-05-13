@@ -3615,8 +3615,7 @@ fn test_deferred_keywords_assemble() -> TestResult {
         &context,
         "\
 begin
-    push.0 push.0 push.0 push.0 push.0 push.0 push.0 push.0
-    push.0 push.0 push.0 push.0
+    padw padw padw
     deferred_register
     dropw dropw dropw
 end"

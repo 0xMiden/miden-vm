@@ -1,12 +1,11 @@
 pub mod advice;
 pub mod debug;
-pub mod deferred;
 mod print;
 
 use alloc::vec::Vec;
 use core::ops::Range;
 
-pub use self::{advice::SystemEventNode, debug::DebugOptions, deferred::DeferredEventNode};
+pub use self::{advice::SystemEventNode, debug::DebugOptions};
 use crate::{
     Felt,
     ast::{InvocationTarget, immediate::*},
@@ -248,7 +247,8 @@ pub enum Instruction {
     AdvLoadW,
 
     SysEvent(SystemEventNode),
-    DeferredEvent(DeferredEventNode),
+    DeferredRegister,
+    DeferredEvaluate,
 
     // ----- cryptographic operations ------------------------------------------------------------
     Hash,

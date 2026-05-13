@@ -3,7 +3,7 @@ use alloc::vec::Vec;
 use miden_core::{
     Felt, WORD_SIZE, Word, ZERO,
     crypto::hash::Poseidon2,
-    deferred::{Payload, Tag},
+    deferred::{Node, Payload, Tag},
     events::SystemEvent,
     field::{BasedVectorSpace, Field, PrimeCharacteristicRing, QuadFelt},
 };
@@ -549,47 +549,45 @@ fn push_transformed_stack_top(
 
 /// Stack offset of the deferred tag relative to the event ID at position 0.
 const DEFERRED_TAG_OFFSET: usize = 1;
-/// Stack offset of the payload below the tag.
-const DEFERRED_PAYLOAD_OFFSET: usize = 5;
+/// Stack offset of the payload's low half below the tag.
+const DEFERRED_PAYLOAD_LO_OFFSET: usize = 5;
+/// Stack offset of the payload's high half (next word below the low half).
+const DEFERRED_PAYLOAD_HI_OFFSET: usize = 9;
 
-/// Reads a 4-felt opaque tag from the stack starting at `start`. No validation — the schema
-/// rules on whether the tag is well-formed.
-fn read_deferred_tag(processor: &FastProcessor, start: usize) -> Tag {
-    core::array::from_fn(|i| processor.stack_get(start + i))
+/// Reads a node off the operand stack: 4-felt tag followed by an 8-felt payload (two words).
+fn read_deferred_node(processor: &FastProcessor) -> Node {
+    let tag_word = processor.stack_get_word(DEFERRED_TAG_OFFSET);
+    let lo = processor.stack_get_word(DEFERRED_PAYLOAD_LO_OFFSET);
+    let hi = processor.stack_get_word(DEFERRED_PAYLOAD_HI_OFFSET);
+    let tag: Tag = [tag_word[0], tag_word[1], tag_word[2], tag_word[3]];
+    let payload = Payload::new([
+        lo[0], lo[1], lo[2], lo[3], hi[0], hi[1], hi[2], hi[3],
+    ]);
+    Node::new(tag, payload)
 }
 
-/// Reads an 8-felt payload from the stack starting at `start`.
-fn read_deferred_payload(processor: &FastProcessor, start: usize) -> Payload {
-    let felts: [Felt; 8] = core::array::from_fn(|i| processor.stack_get(start + i));
-    Payload::new(felts)
-}
-
-/// Handles `SystemEvent::DeferredRegister`. Reads the tag and payload off the operand stack and
-/// hands them to the installed schema, which classifies the node as either an expression
-/// (inserted into the DAG) or an assertion (recorded + verified). A schema-reported mismatch
-/// surfaces as `SchemaError::AssertionFailed`.
+/// Handles `SystemEvent::DeferredRegister`. Reads the node off the operand stack and hands it
+/// to the installed schema, which classifies it as either an expression (inserted into the DAG)
+/// or an assertion (recorded + verified). A schema-reported mismatch surfaces as
+/// `SchemaError::AssertionFailed`.
 fn handle_deferred_register(processor: &mut FastProcessor) -> Result<(), SystemEventError> {
-    let tag = read_deferred_tag(processor, DEFERRED_TAG_OFFSET);
-    let payload = read_deferred_payload(processor, DEFERRED_PAYLOAD_OFFSET);
-
+    let node = read_deferred_node(processor);
     let (state, schema) = processor.deferred_view_mut();
-    let _ = state.register(schema, tag, payload)?;
+    let _ = state.register(schema, node)?;
     Ok(())
 }
 
-/// Handles `SystemEvent::DeferredEvaluate`. Reads the tag and payload off the operand stack,
-/// asks the schema to evaluate the node, and pushes the 12 felts of the canonical
-/// `(tag, payload)` onto the advice stack so MASM can consume them via the `adv_push*` family.
+/// Handles `SystemEvent::DeferredEvaluate`. Reads the node off the operand stack, asks the
+/// schema to evaluate it, and pushes the 12 felts of the canonical `(tag, payload)` onto the
+/// advice stack so MASM can consume them via the `adv_push*` family.
 ///
 /// The advice stack is LIFO. Payload felts are pushed first (in reverse), then tag felts (in
 /// reverse), so the top of the advice stack is the tag's first felt — meaning an `adv_pushw`
 /// pulls the canonical tag back as a word.
 fn handle_deferred_evaluate(processor: &mut FastProcessor) -> Result<(), SystemEventError> {
-    let tag = read_deferred_tag(processor, DEFERRED_TAG_OFFSET);
-    let payload = read_deferred_payload(processor, DEFERRED_PAYLOAD_OFFSET);
-
+    let node = read_deferred_node(processor);
     let (state, schema) = processor.deferred_view_mut();
-    let canonical = state.evaluate(schema, tag, payload)?;
+    let canonical = state.evaluate(schema, node)?;
 
     // Push deeper words first so the tag word ends up on top — matching the convention used
     // by `copy_merkle_node_to_adv_stack` (push_stack_word handles the reverse-felt push so

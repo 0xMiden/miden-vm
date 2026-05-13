@@ -1,6 +1,6 @@
 use crate::{
     DisplayHex,
-    ast::{DeferredEventNode, Immediate, Instruction, InvocationTarget},
+    ast::{Immediate, Instruction, InvocationTarget},
     prettier::{Document, PrettyPrint},
 };
 
@@ -262,8 +262,8 @@ impl PrettyPrint for Instruction {
             Self::AdvLoadW => const_text("adv_loadw"),
 
             Self::SysEvent(sys_event) => inst_with_imm("adv", sys_event),
-            Self::DeferredEvent(DeferredEventNode::Register) => const_text("deferred_register"),
-            Self::DeferredEvent(DeferredEventNode::Evaluate) => const_text("deferred_evaluate"),
+            Self::DeferredRegister => const_text("deferred_register"),
+            Self::DeferredEvaluate => const_text("deferred_evaluate"),
 
             // ----- cryptographic operations -----------------------------------------------------
             Self::Hash => const_text("hash"),

@@ -3,7 +3,7 @@ use alloc::{collections::BTreeMap, vec::Vec};
 use miden_core::{
     Word, ZERO,
     crypto::hash::Poseidon2,
-    deferred::{DeferredWitness, Digest, Node, Payload, Tag, hash_node},
+    deferred::{DeferredWitness, Digest, Node},
 };
 
 use super::schema::{NodeType, Schema, SchemaError};
@@ -61,14 +61,13 @@ impl DeferredState {
     }
 
     /// Returns the running transcript digest folded over every assertion appended so far. Its
-    /// initial value is `[ZERO; 4]`; each `AppendAssertion(node)` mutation folds in
-    /// `hash_node(node.tag, &node.payload)` via `Poseidon2::merge`.
+    /// initial value is `[ZERO; 4]`; each assertion folds in `node.digest()` via
+    /// `Poseidon2::merge`.
     pub fn transcript(&self) -> Digest {
         self.transcript
     }
 
-    /// Register an opaque `(tag, payload)` node, asking `schema` to classify and (for
-    /// assertions) verify it.
+    /// Register an opaque node, asking `schema` to classify and (for assertions) verify it.
     ///
     /// - `is_valid(node) == None` → [`SchemaError::InvalidNode`].
     /// - `Some(NodeType::Expression)` → inserts the node into the DAG and returns its digest.
@@ -79,11 +78,9 @@ impl DeferredState {
     pub fn register(
         &mut self,
         schema: &mut dyn Schema,
-        tag: Tag,
-        payload: Payload,
+        node: Node,
     ) -> Result<Digest, SchemaError> {
-        let node = Node::new(tag, payload);
-        let digest = hash_node(tag, &payload);
+        let digest = node.digest();
         match schema.is_valid(&node) {
             None => Err(SchemaError::InvalidNode),
             Some(NodeType::Expression) => {
@@ -99,7 +96,7 @@ impl DeferredState {
         }
     }
 
-    /// Evaluate an opaque `(tag, payload)` node to its canonical form via the installed schema.
+    /// Evaluate an opaque node to its canonical form via the installed schema.
     ///
     /// The node must classify as `Expression` (assertions aren't values — they're checks).
     /// Children referenced in the payload must already be registered in the DAG. State is not
@@ -108,10 +105,8 @@ impl DeferredState {
     pub fn evaluate(
         &mut self,
         schema: &mut dyn Schema,
-        tag: Tag,
-        payload: Payload,
+        node: Node,
     ) -> Result<Node, SchemaError> {
-        let node = Node::new(tag, payload);
         match schema.is_valid(&node) {
             Some(NodeType::Expression) => schema.eval(self, node),
             // Assertions aren't evaluatable values; an `is_valid` rejection rejects here too.
@@ -125,26 +120,26 @@ impl DeferredState {
     /// assertion node (in registration order) plus the final transcript digest. No reachability
     /// filtering — if a program registers an orphan expression, it appears in the witness too.
     pub fn extract_witness(&self) -> DeferredWitness {
-        let nodes: alloc::vec::Vec<_> = self.nodes.iter().map(|(d, n)| (*d, *n)).collect();
+        let nodes: Vec<_> = self.nodes.iter().map(|(d, n)| (*d, *n)).collect();
         DeferredWitness::new(nodes, self.assertions.clone(), self.transcript)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use miden_core::{Felt, Word, ZERO, deferred::{Payload, Tag}};
-
-    use super::*;
-    use crate::deferred::{
-        binary_op_payload,
-        handlers::{FIELD0_ADD, FIELD0_ASSERT_EQ, FIELD0_LEAF, FIELD0_MUL, Field0Handler},
+    use miden_core::{
+        Felt, Word, ZERO,
+        deferred::{Node, Payload, Tag},
     };
 
-    fn field0_leaf_payload(low: u64) -> Payload {
+    use super::*;
+    use crate::deferred::handlers::Field0Handler;
+
+    fn field0_leaf_node(low: u64) -> Node {
         let mut limbs = [Felt::from_u32(0); 8];
         limbs[0] = Felt::from_u32(low as u32);
         limbs[1] = Felt::from_u32((low >> 32) as u32);
-        Payload::new(limbs)
+        Node::new(Field0Handler::LEAF, Payload::new(limbs))
     }
 
     fn assertion_lhs(node: &Node) -> Word {
@@ -174,18 +169,19 @@ mod tests {
     fn register_leaf_stores_it() {
         let mut state = DeferredState::new();
         let mut schema = Field0Handler;
-        let payload = field0_leaf_payload(7);
-        let digest = state.register(&mut schema, FIELD0_LEAF, payload).unwrap();
-        assert_eq!(state.get(&digest).unwrap(), &Node::new(FIELD0_LEAF, payload));
+        let node = field0_leaf_node(7);
+        let digest = state.register(&mut schema, node).unwrap();
+        assert_eq!(digest, node.digest());
+        assert_eq!(state.get(&digest).unwrap(), &node);
     }
 
     #[test]
     fn idempotent_reinsert_succeeds() {
         let mut state = DeferredState::new();
         let mut schema = Field0Handler;
-        let payload = field0_leaf_payload(7);
-        let d1 = state.register(&mut schema, FIELD0_LEAF, payload).unwrap();
-        let d2 = state.register(&mut schema, FIELD0_LEAF, payload).unwrap();
+        let node = field0_leaf_node(7);
+        let d1 = state.register(&mut schema, node).unwrap();
+        let d2 = state.register(&mut schema, node).unwrap();
         assert_eq!(d1, d2);
         assert_eq!(state.nodes().len(), 1);
     }
@@ -195,21 +191,36 @@ mod tests {
         let mut state = DeferredState::new();
         let mut schema = Field0Handler;
         // Field0 prefix + unknown op-suffix: schema returns None.
-        let bad_tag: Tag =
-            [FIELD0_LEAF[0], FIELD0_LEAF[1], Felt::from_u32(99), ZERO];
-        let err = state.register(&mut schema, bad_tag, field0_leaf_payload(0));
+        let bad_tag: Tag = [
+            Field0Handler::LEAF[0],
+            Field0Handler::LEAF[1],
+            Felt::from_u32(99),
+            ZERO,
+        ];
+        let bad = Node::new(bad_tag, Payload::new([Felt::from_u32(0); 8]));
+        let err = state.register(&mut schema, bad);
         assert!(matches!(err, Err(SchemaError::InvalidNode)));
+    }
+
+    #[test]
+    fn register_op_stores_op_node() {
+        let mut state = DeferredState::new();
+        let mut schema = Field0Handler;
+        let a = state.register(&mut schema, field0_leaf_node(3)).unwrap();
+        let b = state.register(&mut schema, field0_leaf_node(4)).unwrap();
+        let op = Node::new(Field0Handler::ADD, Payload::binary_op(a, b));
+        let digest = state.register(&mut schema, op).unwrap();
+        assert!(state.contains(&digest));
     }
 
     #[test]
     fn assertion_register_appends_node() {
         let mut state = DeferredState::new();
         let mut schema = Field0Handler;
-        let a = state.register(&mut schema, FIELD0_LEAF, field0_leaf_payload(1)).unwrap();
+        let a = state.register(&mut schema, field0_leaf_node(1)).unwrap();
         // Self-equal assertion (A == A) — passes eval.
-        state
-            .register(&mut schema, FIELD0_ASSERT_EQ, binary_op_payload(a, a))
-            .unwrap();
+        let assertion = Node::new(Field0Handler::ASSERT_EQ, Payload::binary_op(a, a));
+        state.register(&mut schema, assertion).unwrap();
         assert_eq!(state.assertions().len(), 1);
         assert_eq!(assertion_lhs(&state.assertions()[0]), a);
     }
@@ -218,10 +229,14 @@ mod tests {
     fn assertions_preserve_insertion_order() {
         let mut state = DeferredState::new();
         let mut schema = Field0Handler;
-        let a = state.register(&mut schema, FIELD0_LEAF, field0_leaf_payload(1)).unwrap();
-        let b = state.register(&mut schema, FIELD0_LEAF, field0_leaf_payload(2)).unwrap();
-        state.register(&mut schema, FIELD0_ASSERT_EQ, binary_op_payload(a, a)).unwrap();
-        state.register(&mut schema, FIELD0_ASSERT_EQ, binary_op_payload(b, b)).unwrap();
+        let a = state.register(&mut schema, field0_leaf_node(1)).unwrap();
+        let b = state.register(&mut schema, field0_leaf_node(2)).unwrap();
+        state
+            .register(&mut schema, Node::new(Field0Handler::ASSERT_EQ, Payload::binary_op(a, a)))
+            .unwrap();
+        state
+            .register(&mut schema, Node::new(Field0Handler::ASSERT_EQ, Payload::binary_op(b, b)))
+            .unwrap();
 
         assert_eq!(state.assertions().len(), 2);
         assert_eq!(assertion_lhs(&state.assertions()[0]), a);
@@ -234,22 +249,80 @@ mod tests {
         let mut schema = Field0Handler;
         assert_eq!(state.transcript(), Word::new([ZERO; 4]));
 
-        let a = state.register(&mut schema, FIELD0_LEAF, field0_leaf_payload(1)).unwrap();
-        let b = state.register(&mut schema, FIELD0_LEAF, field0_leaf_payload(2)).unwrap();
+        let a = state.register(&mut schema, field0_leaf_node(1)).unwrap();
+        let b = state.register(&mut schema, field0_leaf_node(2)).unwrap();
 
         // First assertion: A == A.
-        let assertion1_payload = binary_op_payload(a, a);
-        state.register(&mut schema, FIELD0_ASSERT_EQ, assertion1_payload).unwrap();
-        let d1 = hash_node(FIELD0_ASSERT_EQ, &assertion1_payload);
-        let expected1 = Poseidon2::merge(&[Word::new([ZERO; 4]), d1]);
+        let n1 = Node::new(Field0Handler::ASSERT_EQ, Payload::binary_op(a, a));
+        state.register(&mut schema, n1).unwrap();
+        let expected1 = Poseidon2::merge(&[Word::new([ZERO; 4]), n1.digest()]);
         assert_eq!(state.transcript(), expected1);
 
         // Second assertion: B == B.
-        let assertion2_payload = binary_op_payload(b, b);
-        state.register(&mut schema, FIELD0_ASSERT_EQ, assertion2_payload).unwrap();
-        let d2 = hash_node(FIELD0_ASSERT_EQ, &assertion2_payload);
-        let expected2 = Poseidon2::merge(&[expected1, d2]);
+        let n2 = Node::new(Field0Handler::ASSERT_EQ, Payload::binary_op(b, b));
+        state.register(&mut schema, n2).unwrap();
+        let expected2 = Poseidon2::merge(&[expected1, n2.digest()]);
         assert_eq!(state.transcript(), expected2);
+    }
+
+    #[test]
+    fn assert_eq_fails_on_mismatch() {
+        let mut state = DeferredState::new();
+        let mut schema = Field0Handler;
+        let a = state.register(&mut schema, field0_leaf_node(3)).unwrap();
+        let b = state.register(&mut schema, field0_leaf_node(4)).unwrap();
+        let wrong = state.register(&mut schema, field0_leaf_node(99)).unwrap();
+        let add = state
+            .register(&mut schema, Node::new(Field0Handler::ADD, Payload::binary_op(a, b)))
+            .unwrap();
+
+        let err = state.register(
+            &mut schema,
+            Node::new(Field0Handler::ASSERT_EQ, Payload::binary_op(add, wrong)),
+        );
+        assert!(matches!(err, Err(SchemaError::AssertionFailed)));
+        // The assertion is still recorded (transcript folds eagerly; the mismatch is the only
+        // observable consequence at this cycle).
+        assert_eq!(state.assertions().len(), 1);
+    }
+
+    #[test]
+    fn assert_eq_missing_node_errors() {
+        let mut state = DeferredState::new();
+        let mut schema = Field0Handler;
+        let a = state.register(&mut schema, field0_leaf_node(1)).unwrap();
+        let dangling = Word::new([Felt::from_u32(0xdead); 4]);
+
+        let err = state.register(
+            &mut schema,
+            Node::new(Field0Handler::ASSERT_EQ, Payload::binary_op(a, dangling)),
+        );
+        assert!(matches!(err, Err(SchemaError::MissingNode)));
+    }
+
+    #[test]
+    fn nested_evaluation_reduces_through_op_tree() {
+        // Build (a + b) * c, then assert equal to a leaf holding (a + b) * c precomputed.
+        let mut state = DeferredState::new();
+        let mut schema = Field0Handler;
+        let a = state.register(&mut schema, field0_leaf_node(3)).unwrap();
+        let b = state.register(&mut schema, field0_leaf_node(4)).unwrap();
+        let c = state.register(&mut schema, field0_leaf_node(5)).unwrap();
+        let expected = state.register(&mut schema, field0_leaf_node(35)).unwrap();
+        let add = state
+            .register(&mut schema, Node::new(Field0Handler::ADD, Payload::binary_op(a, b)))
+            .unwrap();
+        let mul = state
+            .register(&mut schema, Node::new(Field0Handler::MUL, Payload::binary_op(add, c)))
+            .unwrap();
+
+        state
+            .register(
+                &mut schema,
+                Node::new(Field0Handler::ASSERT_EQ, Payload::binary_op(mul, expected)),
+            )
+            .unwrap();
+        assert_eq!(state.assertions().len(), 1);
     }
 
     #[test]
@@ -258,15 +331,22 @@ mod tests {
         // nothing references — without reachability filtering it shows up in the witness.
         let mut state = DeferredState::new();
         let mut schema = Field0Handler;
-        let a = state.register(&mut schema, FIELD0_LEAF, field0_leaf_payload(3)).unwrap();
-        let b = state.register(&mut schema, FIELD0_LEAF, field0_leaf_payload(4)).unwrap();
-        let c = state.register(&mut schema, FIELD0_LEAF, field0_leaf_payload(5)).unwrap();
-        let expected = state.register(&mut schema, FIELD0_LEAF, field0_leaf_payload(35)).unwrap();
-        let _orphan = state.register(&mut schema, FIELD0_LEAF, field0_leaf_payload(99)).unwrap();
-        let add = state.register(&mut schema, FIELD0_ADD, binary_op_payload(a, b)).unwrap();
-        let mul = state.register(&mut schema, FIELD0_MUL, binary_op_payload(add, c)).unwrap();
+        let a = state.register(&mut schema, field0_leaf_node(3)).unwrap();
+        let b = state.register(&mut schema, field0_leaf_node(4)).unwrap();
+        let c = state.register(&mut schema, field0_leaf_node(5)).unwrap();
+        let expected = state.register(&mut schema, field0_leaf_node(35)).unwrap();
+        let _orphan = state.register(&mut schema, field0_leaf_node(99)).unwrap();
+        let add = state
+            .register(&mut schema, Node::new(Field0Handler::ADD, Payload::binary_op(a, b)))
+            .unwrap();
+        let mul = state
+            .register(&mut schema, Node::new(Field0Handler::MUL, Payload::binary_op(add, c)))
+            .unwrap();
         state
-            .register(&mut schema, FIELD0_ASSERT_EQ, binary_op_payload(mul, expected))
+            .register(
+                &mut schema,
+                Node::new(Field0Handler::ASSERT_EQ, Payload::binary_op(mul, expected)),
+            )
             .unwrap();
 
         let w = state.extract_witness();

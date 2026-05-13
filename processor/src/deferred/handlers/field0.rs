@@ -4,9 +4,9 @@ use miden_core::{
 };
 
 use crate::deferred::{
+    Schema,
     schema::{NodeType, SchemaError},
     state::DeferredState,
-    Schema,
 };
 
 /// Handler for the first 256-bit non-native field, `Field0`.
@@ -28,42 +28,34 @@ use crate::deferred::{
 #[derive(Debug, Default, Clone, Copy)]
 pub struct Field0Handler;
 
-// FIELD0 TAG CONSTANTS
-// ================================================================================================
-
-/// Type-family prefix shared by every Field0 tag.
-const FIELD0_PREFIX: [Felt; 2] = [Felt::new_unchecked(1), Felt::new_unchecked(0)];
-
-/// Tag for a canonical Field0 leaf.
-pub const FIELD0_LEAF: Tag = [FIELD0_PREFIX[0], FIELD0_PREFIX[1], Felt::new_unchecked(0), ZERO];
-/// Tag for a Field0 `add` op node.
-pub const FIELD0_ADD: Tag = [FIELD0_PREFIX[0], FIELD0_PREFIX[1], Felt::new_unchecked(1), ZERO];
-/// Tag for a Field0 `mul` op node.
-pub const FIELD0_MUL: Tag = [FIELD0_PREFIX[0], FIELD0_PREFIX[1], Felt::new_unchecked(2), ZERO];
-/// Tag for a Field0 `assert_eq` marker.
-pub const FIELD0_ASSERT_EQ: Tag = [FIELD0_PREFIX[0], FIELD0_PREFIX[1], Felt::new_unchecked(3), ZERO];
-
 impl Field0Handler {
+    /// Type-family prefix shared by every Field0 tag.
+    const PREFIX: [Felt; 2] = [Felt::new_unchecked(1), Felt::new_unchecked(0)];
+
+    /// Tag for a canonical Field0 leaf.
+    pub const LEAF: Tag = [Self::PREFIX[0], Self::PREFIX[1], Felt::new_unchecked(0), ZERO];
+    /// Tag for a Field0 `add` op node.
+    pub const ADD: Tag = [Self::PREFIX[0], Self::PREFIX[1], Felt::new_unchecked(1), ZERO];
+    /// Tag for a Field0 `mul` op node.
+    pub const MUL: Tag = [Self::PREFIX[0], Self::PREFIX[1], Felt::new_unchecked(2), ZERO];
+    /// Tag for a Field0 `assert_eq` marker.
+    pub const ASSERT_EQ: Tag = [Self::PREFIX[0], Self::PREFIX[1], Felt::new_unchecked(3), ZERO];
+
     /// Reduce a binary op on two already-evaluated leaf operands to a new canonical leaf.
-    fn eval_op(
-        &self,
-        op_tag: Tag,
-        lhs: Node,
-        rhs: Node,
-    ) -> Result<Node, DeferredError> {
-        if lhs.tag != FIELD0_LEAF || rhs.tag != FIELD0_LEAF {
+    fn eval_op(&self, op_tag: Tag, lhs: Node, rhs: Node) -> Result<Node, DeferredError> {
+        if lhs.tag != Self::LEAF || rhs.tag != Self::LEAF {
             return Err(DeferredError::InvalidPayload);
         }
         let a = decode_limbs(&lhs.payload)?;
         let b = decode_limbs(&rhs.payload)?;
-        let c = if op_tag == FIELD0_ADD {
+        let c = if op_tag == Self::ADD {
             add_mod_2_256(a, b)
-        } else if op_tag == FIELD0_MUL {
+        } else if op_tag == Self::MUL {
             mul_mod_2_256(a, b)
         } else {
             return Err(DeferredError::Unsupported);
         };
-        Ok(Node::new(FIELD0_LEAF, encode_limbs(c)))
+        Ok(Node::new(Self::LEAF, encode_limbs(c)))
     }
 
     /// Split a binary-op payload into its two child digests in `(lhs, rhs)` order.
@@ -76,16 +68,16 @@ impl Field0Handler {
 
 impl Schema for Field0Handler {
     fn is_valid(&self, node: &Node) -> Option<NodeType> {
-        if node.tag[0] != FIELD0_PREFIX[0] || node.tag[1] != FIELD0_PREFIX[1] {
+        if node.tag[0] != Self::PREFIX[0] || node.tag[1] != Self::PREFIX[1] {
             return None;
         }
-        if node.tag == FIELD0_LEAF {
+        if node.tag == Self::LEAF {
             // Leaf payloads must have u32-canonical limbs so they can be reduced.
             decode_limbs(&node.payload).ok().map(|_| NodeType::Expression)
-        } else if node.tag == FIELD0_ADD || node.tag == FIELD0_MUL {
+        } else if node.tag == Self::ADD || node.tag == Self::MUL {
             // Op-node payloads are two child digests — opaque from this handler's POV.
             Some(NodeType::Expression)
-        } else if node.tag == FIELD0_ASSERT_EQ {
+        } else if node.tag == Self::ASSERT_EQ {
             // Assertion-node payloads are `lhs_digest || rhs_digest`.
             Some(NodeType::Assertion)
         } else {
@@ -94,10 +86,10 @@ impl Schema for Field0Handler {
     }
 
     fn eval(&mut self, graph: &DeferredState, node: Node) -> Result<Node, SchemaError> {
-        if node.tag == FIELD0_LEAF {
+        if node.tag == Self::LEAF {
             return Ok(node);
         }
-        if node.tag == FIELD0_ADD || node.tag == FIELD0_MUL {
+        if node.tag == Self::ADD || node.tag == Self::MUL {
             let (lhs_digest, rhs_digest) = Self::binary_op_children(&node.payload);
             let lhs_node = *graph.get(&lhs_digest)?;
             let rhs_node = *graph.get(&rhs_digest)?;
@@ -105,7 +97,7 @@ impl Schema for Field0Handler {
             let rhs = self.eval(graph, rhs_node)?;
             return Ok(self.eval_op(node.tag, lhs, rhs)?);
         }
-        if node.tag == FIELD0_ASSERT_EQ {
+        if node.tag == Self::ASSERT_EQ {
             let (lhs_digest, rhs_digest) = Self::binary_op_children(&node.payload);
             let lhs_node = *graph.get(&lhs_digest)?;
             let rhs_node = *graph.get(&rhs_digest)?;
@@ -169,7 +161,7 @@ mod tests {
     use super::*;
 
     fn leaf_from_u32s(limbs: [u32; 8]) -> Node {
-        Node::new(FIELD0_LEAF, Payload::new(limbs.map(Felt::from_u32)))
+        Node::new(Field0Handler::LEAF, Payload::new(limbs.map(Felt::from_u32)))
     }
 
     fn leaf_from_low_u64(value: u64) -> Node {
@@ -182,8 +174,8 @@ mod tests {
     #[test]
     fn add_small_values() {
         let h = Field0Handler;
-        let out = h.eval_op(FIELD0_ADD, leaf_from_low_u64(3), leaf_from_low_u64(5)).unwrap();
-        assert_eq!(out.tag, FIELD0_LEAF);
+        let out = h.eval_op(Field0Handler::ADD, leaf_from_low_u64(3), leaf_from_low_u64(5)).unwrap();
+        assert_eq!(out.tag, Field0Handler::LEAF);
         assert_eq!(out, leaf_from_low_u64(8));
     }
 
@@ -194,7 +186,9 @@ mod tests {
         a_limbs[0] = u32::MAX;
         let mut b_limbs = [0u32; 8];
         b_limbs[0] = 1;
-        let out = h.eval_op(FIELD0_ADD, leaf_from_u32s(a_limbs), leaf_from_u32s(b_limbs)).unwrap();
+        let out = h
+            .eval_op(Field0Handler::ADD, leaf_from_u32s(a_limbs), leaf_from_u32s(b_limbs))
+            .unwrap();
         let mut expected = [0u32; 8];
         expected[1] = 1;
         assert_eq!(out, leaf_from_u32s(expected));
@@ -205,14 +199,14 @@ mod tests {
         let h = Field0Handler;
         let max = leaf_from_u32s([u32::MAX; 8]);
         let one = leaf_from_low_u64(1);
-        let out = h.eval_op(FIELD0_ADD, max, one).unwrap();
+        let out = h.eval_op(Field0Handler::ADD, max, one).unwrap();
         assert_eq!(out, leaf_from_u32s([0; 8]));
     }
 
     #[test]
     fn mul_small_values() {
         let h = Field0Handler;
-        let out = h.eval_op(FIELD0_MUL, leaf_from_low_u64(6), leaf_from_low_u64(7)).unwrap();
+        let out = h.eval_op(Field0Handler::MUL, leaf_from_low_u64(6), leaf_from_low_u64(7)).unwrap();
         assert_eq!(out, leaf_from_low_u64(42));
     }
 
@@ -223,7 +217,9 @@ mod tests {
         let mut a_limbs = [0u32; 8];
         a_limbs[1] = 1;
         let b_limbs = a_limbs;
-        let out = h.eval_op(FIELD0_MUL, leaf_from_u32s(a_limbs), leaf_from_u32s(b_limbs)).unwrap();
+        let out = h
+            .eval_op(Field0Handler::MUL, leaf_from_u32s(a_limbs), leaf_from_u32s(b_limbs))
+            .unwrap();
         let mut expected = [0u32; 8];
         expected[2] = 1;
         assert_eq!(out, leaf_from_u32s(expected));
@@ -236,7 +232,7 @@ mod tests {
         let mut a_limbs = [0u32; 8];
         a_limbs[7] = 1 << 31;
         let two = leaf_from_low_u64(2);
-        let out = h.eval_op(FIELD0_MUL, leaf_from_u32s(a_limbs), two).unwrap();
+        let out = h.eval_op(Field0Handler::MUL, leaf_from_u32s(a_limbs), two).unwrap();
         assert_eq!(out, leaf_from_u32s([0; 8]));
     }
 
@@ -246,7 +242,7 @@ mod tests {
         // u32::MAX + 1 = 2^32 is outside the u32 range but still a valid Felt — must surface as
         // InvalidPayload when eval_op decodes the limbs.
         let bad = Node::new(
-            FIELD0_LEAF,
+            Field0Handler::LEAF,
             Payload::new([
                 Felt::new_unchecked(1u64 << 32),
                 Felt::from_u32(0),
@@ -259,7 +255,7 @@ mod tests {
             ]),
         );
         let ok = leaf_from_low_u64(1);
-        let err = h.eval_op(FIELD0_ADD, bad, ok);
+        let err = h.eval_op(Field0Handler::ADD, bad, ok);
         assert!(matches!(err, Err(DeferredError::InvalidPayload)));
     }
 
@@ -267,9 +263,9 @@ mod tests {
     fn non_leaf_operand_errors() {
         let h = Field0Handler;
         // Passing an op-tag as an operand tag means the caller didn't evaluate this side first.
-        let a = Node::new(FIELD0_ADD, leaf_from_low_u64(1).payload);
+        let a = Node::new(Field0Handler::ADD, leaf_from_low_u64(1).payload);
         let b = leaf_from_low_u64(1);
-        let err = h.eval_op(FIELD0_ADD, a, b);
+        let err = h.eval_op(Field0Handler::ADD, a, b);
         assert!(matches!(err, Err(DeferredError::InvalidPayload)));
     }
 
@@ -278,8 +274,8 @@ mod tests {
         let h = Field0Handler;
         let a = leaf_from_low_u64(1);
         let b = leaf_from_low_u64(1);
-        // Passing FIELD0_LEAF as the op-tag is meaningless.
-        let err = h.eval_op(FIELD0_LEAF, a, b);
+        // Passing Field0Handler::LEAF as the op-tag is meaningless.
+        let err = h.eval_op(Field0Handler::LEAF, a, b);
         assert!(matches!(err, Err(DeferredError::Unsupported)));
     }
 }
