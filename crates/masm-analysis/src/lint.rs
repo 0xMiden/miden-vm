@@ -13,7 +13,6 @@ use miden_debug_types::{DefaultSourceManager, SourceManager, SourceSpan};
 
 use crate::{
     AnalysisSnapshot, SignatureMismatch, signature_mismatch_message,
-    signature_mismatches_from_snapshot,
     unconstrained_advice::{
         AdviceDiagnostic, AdviceRootCauseGroup, group_advice_diagnostics_by_origin,
     },
@@ -50,18 +49,15 @@ pub fn diagnostics_from_workspace(
     include_signature_mismatches: bool,
     group_by_origin: bool,
 ) -> Vec<LintDiagnostic> {
-    let snapshot = AnalysisSnapshot::from_workspace(workspace);
+    let snapshot =
+        AnalysisSnapshot::from_workspace(workspace, sources.clone(), include_signature_mismatches);
     let advice_diagnostics =
         filtered_advice_diagnostics(&snapshot.advice_diagnostics, sources.as_ref());
     let mut diagnostics = Vec::new();
 
     if include_signature_mismatches {
-        for program in workspace.modules() {
-            let module = program.module();
-            let mismatches =
-                signature_mismatches_from_snapshot(module, sources.clone(), &snapshot.signatures);
-            diagnostics.extend(mismatches.iter().filter_map(signature_mismatch_to_lint));
-        }
+        diagnostics
+            .extend(snapshot.signature_mismatches.iter().filter_map(signature_mismatch_to_lint));
     }
 
     if group_by_origin {
