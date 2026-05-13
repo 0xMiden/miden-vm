@@ -7,6 +7,7 @@ mod domain;
 mod expr_defs;
 mod inter;
 mod intra;
+mod locals;
 mod memory;
 mod origin;
 mod stdlib;

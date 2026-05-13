@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use super::{
     domain::{TypeFact, VarKey},
     expr_defs::ExprDefs,
+    locals::LocalState,
     memory::{MAX_MEMORY_ADDRESS, MemAddressKey, MemoryState},
     origin::{self, Origin},
     summary::{TypeSummary, TypeSummaryMap},
@@ -46,16 +47,10 @@ struct ProcTypeAnalyzer<'a> {
     inferred: HashMap<VarKey, TypeFact>,
     /// Inferred requirements for variables.
     required: HashMap<VarKey, TypeFact>,
-    /// Inferred types for local variable slots.
-    ///
-    /// Updated on `LocalStore`/`LocalStoreW` and read on `LocalLoad`.
-    /// The fixed-point loop ensures convergence when stored types change
-    /// across iterations.
-    local_types: HashMap<u16, TypeFact>,
+    /// Local slot types and requirements.
+    locals: LocalState,
     /// Memory address identities, memory types, and memory requirements.
     memory: MemoryState,
-    /// Requirements propagated backward to local variable slots.
-    local_requirements: HashMap<u16, TypeFact>,
     /// Input-backed provenance for SSA variables.
     ///
     /// This is computed once from the lifted body and callee passthrough maps.
@@ -75,9 +70,8 @@ impl<'a> ProcTypeAnalyzer<'a> {
             callee_summaries,
             inferred: HashMap::new(),
             required: HashMap::new(),
-            local_types: HashMap::new(),
+            locals: LocalState::default(),
             memory: MemoryState::default(),
-            local_requirements: HashMap::new(),
             origins: HashMap::new(),
             expr_defs: ExprDefs::default(),
         }
@@ -91,9 +85,8 @@ impl<'a> ProcTypeAnalyzer<'a> {
         for _ in 0..MAX_TYPE_PASSES {
             let prev_inferred = self.inferred.clone();
             let prev_required = self.required.clone();
-            let prev_local_types = self.local_types.clone();
+            let prev_locals = self.locals.clone();
             let prev_memory = self.memory.clone();
-            let prev_local_req = self.local_requirements.clone();
 
             // Return values are intentionally discarded: convergence is
             // detected by comparing full state snapshots (below), not by
@@ -104,9 +97,8 @@ impl<'a> ProcTypeAnalyzer<'a> {
 
             if self.inferred == prev_inferred
                 && self.required == prev_required
-                && self.local_types == prev_local_types
+                && self.locals == prev_locals
                 && self.memory == prev_memory
-                && self.local_requirements == prev_local_req
             {
                 break;
             }
@@ -185,8 +177,7 @@ impl<'a> ProcTypeAnalyzer<'a> {
                 changed
             },
             Stmt::LocalLoad { load, .. } => {
-                let stored_ty =
-                    self.local_types.get(&load.index).copied().unwrap_or(TypeFact::Felt);
+                let stored_ty = self.locals.type_for_slot(load.index);
                 let mut changed = false;
                 for output in &load.outputs {
                     changed |= self.set_inferred_type_for_var(output, stored_ty);
@@ -591,26 +582,16 @@ impl<'a> ProcTypeAnalyzer<'a> {
             .map(|v| self.inferred_type_for_var(v))
             .reduce(TypeFact::glb)
             .unwrap_or(TypeFact::Felt);
-        let current = self.local_types.get(&index).copied();
-        let updated = match current {
-            Some(existing) => existing.join(stored_ty),
-            None => stored_ty,
-        };
-        if current != Some(updated) {
-            self.local_types.insert(index, updated);
-            true
-        } else {
-            false
-        }
+        self.locals.record_store_type(index, stored_ty)
     }
 
     /// Propagate a local slot's accumulated requirement to stored values.
     ///
-    /// Looks up the requirement for `index` in [`local_requirements`] and
+    /// Looks up the requirement for `index` and
     /// applies it to each stored value. Returns `true` if any requirement
     /// changed.
     fn propagate_local_store_requirement(&mut self, index: u16, values: &[Var]) -> bool {
-        let req = self.local_requirements.get(&index).copied().unwrap_or(TypeFact::Felt);
+        let req = self.locals.requirement_for_slot(index);
         if req == TypeFact::Felt {
             return false;
         }
@@ -917,13 +898,7 @@ impl<'a> ProcTypeAnalyzer<'a> {
                     if req == TypeFact::Felt {
                         continue;
                     }
-                    let current =
-                        self.local_requirements.get(&load.index).copied().unwrap_or(TypeFact::Felt);
-                    let updated = current.glb(req);
-                    if updated != current {
-                        self.local_requirements.insert(load.index, updated);
-                        changed = true;
-                    }
+                    changed |= self.locals.require_slot(load.index, req);
                 }
                 changed
             },
