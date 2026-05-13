@@ -1370,14 +1370,15 @@ fn lower_push_instruction(
             return Ok(Some(vec![inst_op(instruction_span, Instruction::Push(push))]));
         }
 
-        if rest.get(consumed).is_some_and(|token| token.kind() == SyntaxKind::LBracket)
-            && let Some((range, used)) = parse_push_slice_range(context, rest, consumed)?
-            && consumed + used == rest.len()
-        {
-            return Ok(Some(vec![inst_op(
-                instruction_span,
-                Instruction::PushSlice(imm.with_span(imm_span), range),
-            )]));
+        if rest.get(consumed).is_some_and(|token| token.kind() == SyntaxKind::LBracket) {
+            let (range, used) = parse_push_slice_range(context, instruction_span, rest, consumed)?;
+            if consumed + used == rest.len() {
+                return Ok(Some(vec![inst_op(
+                    instruction_span,
+                    Instruction::PushSlice(imm.with_span(imm_span), range),
+                )]));
+            }
+            return Err(malformed_instruction_error(instruction_span, "push"));
         }
     }
 
@@ -1776,20 +1777,18 @@ fn lower_word_literal(
 
 fn parse_push_slice_range(
     context: &LoweringContext<'_>,
+    instruction_span: SourceSpan,
     tokens: &[SyntaxToken],
     start: usize,
-) -> Result<Option<(core::ops::Range<usize>, usize)>, ParsingError> {
+) -> Result<(core::ops::Range<usize>, usize), ParsingError> {
     if tokens.get(start).is_none_or(|token| token.kind() != SyntaxKind::LBracket) {
-        return Ok(None);
+        return Err(malformed_instruction_error(instruction_span, "push"));
     }
 
     let Some(first) = tokens.get(start + 1) else {
-        return Ok(None);
+        return Err(malformed_instruction_error(instruction_span, "push"));
     };
-    let Some(begin) = parse_decimal_u64(first.text()) else {
-        return Ok(None);
-    };
-    let begin = usize::try_from(begin).ok().unwrap_or(usize::MAX);
+    let begin = parse_push_slice_index(context, first)?;
 
     match (tokens.get(start + 2), tokens.get(start + 3), tokens.get(start + 4)) {
         (Some(rbracket), ..) if rbracket.kind() == SyntaxKind::RBracket => {
@@ -1800,18 +1799,63 @@ fn parse_push_slice_range(
                 ),
                 range: 0..usize::MAX,
             })?;
-            Ok(Some((core::ops::Range { start: begin, end }, 3)))
+            Ok((core::ops::Range { start: begin, end }, 3))
         },
         (Some(dotdot), Some(end), Some(rbracket))
             if dotdot.kind() == SyntaxKind::DotDot && rbracket.kind() == SyntaxKind::RBracket =>
         {
-            let Some(end) = parse_decimal_u64(end.text()) else {
-                return Ok(None);
-            };
-            let end = usize::try_from(end).ok().unwrap_or(usize::MAX);
-            Ok(Some((core::ops::Range { start: begin, end }, 5)))
+            let end = parse_push_slice_index(context, end)?;
+            Ok((core::ops::Range { start: begin, end }, 5))
         },
-        _ => Ok(None),
+        _ => Err(malformed_instruction_error(instruction_span, "push")),
+    }
+}
+
+fn parse_push_slice_index(
+    context: &LoweringContext<'_>,
+    token: &SyntaxToken,
+) -> Result<usize, ParsingError> {
+    if token.kind() != SyntaxKind::Number {
+        return Err(expected_integer_literal_error(context, token));
+    }
+    let Some(value) = parse_decimal_u64(token.text()) else {
+        return Err(expected_integer_literal_error(context, token));
+    };
+    Ok(usize::try_from(value).ok().unwrap_or(usize::MAX))
+}
+
+fn expected_integer_literal_error(
+    context: &LoweringContext<'_>,
+    token: &SyntaxToken,
+) -> ParsingError {
+    ParsingError::UnrecognizedToken {
+        span: context.parse().span_for_token(token),
+        token: legacy_token_name(token),
+        expected: vec!["integer literal".to_string()],
+    }
+}
+
+fn legacy_token_name(token: &SyntaxToken) -> String {
+    match token.kind() {
+        SyntaxKind::Number if token.text().starts_with("0x") || token.text().starts_with("0X") => {
+            "hex-encoded value".to_string()
+        },
+        SyntaxKind::Number if token.text().starts_with("0b") || token.text().starts_with("0B") => {
+            "bin-encoded value".to_string()
+        },
+        SyntaxKind::Number => "integer".to_string(),
+        SyntaxKind::Ident if token.text().chars().next().is_some_and(char::is_uppercase) => {
+            "constant identifier".to_string()
+        },
+        SyntaxKind::Ident => "identifier".to_string(),
+        _ => token.text().to_string(),
+    }
+}
+
+fn malformed_instruction_error(span: SourceSpan, instruction: &str) -> ParsingError {
+    ParsingError::InvalidSyntax {
+        span,
+        message: format!("invalid instruction `{instruction}` or malformed operands"),
     }
 }
 

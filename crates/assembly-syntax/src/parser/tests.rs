@@ -924,6 +924,31 @@ end
 }
 
 #[test]
+fn cst_backend_reports_direct_malformed_push_slice_ranges() {
+    for source in [
+        "\
+const X = [1, 2, 3, 4]
+begin
+    push.X[0xff..0xff]
+end
+",
+        "\
+begin
+    push.[1, 2, 3, 4][0xff..0xff]
+end
+",
+    ] {
+        let source = test_source_file(source);
+        let legacy = parse_forms_with_backend(source.clone(), ParserBackend::Legacy)
+            .expect_err("expected malformed push slice error");
+        let cst = parse_forms_with_backend(source, ParserBackend::Cst)
+            .expect_err("expected malformed push slice error");
+
+        assert_eq!(render_diagnostic(&legacy), render_diagnostic(&cst));
+    }
+}
+
+#[test]
 fn cst_backend_reports_direct_deprecated_memory_word_aliases() {
     let source = test_source_file(
         "\
