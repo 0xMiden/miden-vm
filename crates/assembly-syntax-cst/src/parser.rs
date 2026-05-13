@@ -1260,7 +1260,11 @@ fn is_reserved_block_keyword(text: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use std::{
+        fs,
+        path::{Path, PathBuf},
+        sync::Arc,
+    };
 
     use miden_debug_types::{
         SourceFile as ManagedSourceFile, SourceId, SourceLanguage, SourceSpan, Uri,
@@ -1272,6 +1276,111 @@ mod tests {
         parse_source_file, parse_text,
         syntax::SyntaxKind,
     };
+
+    fn repo_root() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(Path::parent)
+            .expect("workspace root should be two levels above crates/assembly-syntax-cst")
+            .to_path_buf()
+    }
+
+    fn checked_in_masm_corpus() -> Vec<PathBuf> {
+        let root = repo_root();
+        let mut files = Vec::new();
+        for relative in [
+            "crates/lib/core/asm",
+            "miden-vm/masm-examples",
+            "miden-vm/tests/integration/cli/data",
+        ] {
+            collect_masm_files(&root.join(relative), &mut files);
+        }
+        files.sort();
+        files
+    }
+
+    fn collect_masm_files(dir: &Path, files: &mut Vec<PathBuf>) {
+        let entries = fs::read_dir(dir)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", dir.display()));
+        for entry in entries {
+            let entry = entry.unwrap_or_else(|error| {
+                panic!("failed to read a directory entry under {}: {error}", dir.display())
+            });
+            let path = entry.path();
+            if path.is_dir() {
+                collect_masm_files(&path, files);
+            } else if path.extension().is_some_and(|ext| ext == "masm") {
+                files.push(path);
+            }
+        }
+    }
+
+    fn representative_round_trip_sources() -> &'static [&'static str] {
+        &[
+            "",
+            "# leading comment\n#! module docs\npub const X = [0x01, 0x02]\n",
+            "\
+@inline
+# keep standalone
+@locals(1)
+pub proc foo(a: felt)
+    # body
+    push.1
+end
+",
+            "\
+begin
+    if.true
+        repeat.4
+            swap dup.1 add
+        end
+    else
+        while.true
+            nop
+        end
+    end
+end
+",
+            "\
+pub type Account = struct { id: felt, vault: ptr<u8, addrspace(byte)> }
+adv_map TABLE = [
+    [1, 2],
+    event(foo(bar, baz)),
+]
+",
+        ]
+    }
+
+    fn assert_lossless_parse(input: &str, label: impl core::fmt::Display) {
+        let parse = parse_text(input);
+        assert_eq!(
+            parse.syntax().text().to_string(),
+            input,
+            "CST parse was not lossless for {label}"
+        );
+    }
+
+    #[test]
+    fn parse_text_is_lossless_for_representative_sources() {
+        for (index, source) in representative_round_trip_sources().iter().enumerate() {
+            assert_lossless_parse(source, format_args!("representative source {index}"));
+        }
+    }
+
+    #[test]
+    fn parse_text_is_lossless_for_checked_in_masm_corpus() {
+        let files = checked_in_masm_corpus();
+        assert!(
+            !files.is_empty(),
+            "expected the checked-in MASM corpus to contain at least one source file"
+        );
+
+        for path in files {
+            let source = fs::read_to_string(&path)
+                .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()));
+            assert_lossless_parse(&source, path.display());
+        }
+    }
 
     #[test]
     fn parses_top_level_forms_and_nested_structured_ops() {
