@@ -18,6 +18,7 @@ use stack::{SlotId, StackEntry, SymbolicStack};
 
 use crate::{
     ir::{Expr, IfPhi, IndexExpr, LoopPhi, LoopVar, Stmt, ValueId, Var, VarBase},
+    semantics::{StackFamily, stack_family},
     signature::{ProcSignature, SignatureMap, StackEffect},
     symbol::{path::SymbolPath, resolution::SymbolResolver},
 };
@@ -1369,66 +1370,7 @@ fn simulate_inst_slots(
     resolver: &SymbolResolver<'_>,
     sigs: &SignatureMap,
 ) -> LiftingResult<()> {
-    match inst {
-        Instruction::Swap1 => stack.swap(1, op_span, inst.to_string())?,
-        Instruction::Swap2 => stack.swap(2, op_span, inst.to_string())?,
-        Instruction::Swap3 => stack.swap(3, op_span, inst.to_string())?,
-        Instruction::Swap4 => stack.swap(4, op_span, inst.to_string())?,
-        Instruction::Swap5 => stack.swap(5, op_span, inst.to_string())?,
-        Instruction::Swap6 => stack.swap(6, op_span, inst.to_string())?,
-        Instruction::Swap7 => stack.swap(7, op_span, inst.to_string())?,
-        Instruction::Swap8 => stack.swap(8, op_span, inst.to_string())?,
-        Instruction::Swap9 => stack.swap(9, op_span, inst.to_string())?,
-        Instruction::Swap10 => stack.swap(10, op_span, inst.to_string())?,
-        Instruction::Swap11 => stack.swap(11, op_span, inst.to_string())?,
-        Instruction::Swap12 => stack.swap(12, op_span, inst.to_string())?,
-        Instruction::Swap13 => stack.swap(13, op_span, inst.to_string())?,
-        Instruction::Swap14 => stack.swap(14, op_span, inst.to_string())?,
-        Instruction::Swap15 => stack.swap(15, op_span, inst.to_string())?,
-        Instruction::SwapW1 => stack.swapw(1, op_span, inst.to_string())?,
-        Instruction::SwapW2 => stack.swapw(2, op_span, inst.to_string())?,
-        Instruction::SwapW3 => stack.swapw(3, op_span, inst.to_string())?,
-        Instruction::MovUp2 => stack.movup(2, op_span, inst.to_string())?,
-        Instruction::MovUp3 => stack.movup(3, op_span, inst.to_string())?,
-        Instruction::MovUp4 => stack.movup(4, op_span, inst.to_string())?,
-        Instruction::MovUp5 => stack.movup(5, op_span, inst.to_string())?,
-        Instruction::MovUp6 => stack.movup(6, op_span, inst.to_string())?,
-        Instruction::MovUp7 => stack.movup(7, op_span, inst.to_string())?,
-        Instruction::MovUp8 => stack.movup(8, op_span, inst.to_string())?,
-        Instruction::MovUp9 => stack.movup(9, op_span, inst.to_string())?,
-        Instruction::MovUp10 => stack.movup(10, op_span, inst.to_string())?,
-        Instruction::MovUp11 => stack.movup(11, op_span, inst.to_string())?,
-        Instruction::MovUp12 => stack.movup(12, op_span, inst.to_string())?,
-        Instruction::MovUp13 => stack.movup(13, op_span, inst.to_string())?,
-        Instruction::MovUp14 => stack.movup(14, op_span, inst.to_string())?,
-        Instruction::MovUp15 => stack.movup(15, op_span, inst.to_string())?,
-        Instruction::MovDn2 => stack.movdn(2, op_span, inst.to_string())?,
-        Instruction::MovDn3 => stack.movdn(3, op_span, inst.to_string())?,
-        Instruction::MovDn4 => stack.movdn(4, op_span, inst.to_string())?,
-        Instruction::MovDn5 => stack.movdn(5, op_span, inst.to_string())?,
-        Instruction::MovDn6 => stack.movdn(6, op_span, inst.to_string())?,
-        Instruction::MovDn7 => stack.movdn(7, op_span, inst.to_string())?,
-        Instruction::MovDn8 => stack.movdn(8, op_span, inst.to_string())?,
-        Instruction::MovDn9 => stack.movdn(9, op_span, inst.to_string())?,
-        Instruction::MovDn10 => stack.movdn(10, op_span, inst.to_string())?,
-        Instruction::MovDn11 => stack.movdn(11, op_span, inst.to_string())?,
-        Instruction::MovDn12 => stack.movdn(12, op_span, inst.to_string())?,
-        Instruction::MovDn13 => stack.movdn(13, op_span, inst.to_string())?,
-        Instruction::MovDn14 => stack.movdn(14, op_span, inst.to_string())?,
-        Instruction::MovDn15 => stack.movdn(15, op_span, inst.to_string())?,
-        Instruction::Reversew => stack.reversew(op_span, inst.to_string())?,
-        _ => {
-            let effect = inst::effect_for_inst(inst, op_span, resolver, sigs)?;
-            let (pops, pushes, required_depth) = match effect {
-                StackEffect::Known { pops, pushes, required_depth } => {
-                    (pops, pushes, required_depth)
-                },
-                StackEffect::Unknown => (0, 0, 0),
-            };
-            stack.apply_effect(pops, pushes, required_depth, op_span, inst.to_string())?;
-        },
-    }
-    Ok(())
+    simulate_inst_on_repeat_stack(inst, op_span, stack, resolver, sigs)
 }
 
 /// Lightweight slot-only stack used for repeat-loop simulation.
@@ -1597,6 +1539,77 @@ impl SlotStack {
     /// Return the stack contents from bottom to top.
     fn into_slots(self) -> Vec<SlotId> {
         self.slots
+    }
+}
+
+/// Common instruction simulation surface for repeat slot stacks.
+trait RepeatSlotSimulator {
+    /// Swap the top slot with the slot at the given depth.
+    fn swap(&mut self, depth: usize, span: SourceSpan, operation: String) -> LiftingResult<()>;
+
+    /// Swap the top word with a lower word.
+    fn swapw(
+        &mut self,
+        word_index: usize,
+        span: SourceSpan,
+        operation: String,
+    ) -> LiftingResult<()>;
+
+    /// Reverse the order of the top word.
+    fn reversew(&mut self, span: SourceSpan, operation: String) -> LiftingResult<()>;
+
+    /// Move the slot at the given depth to the top.
+    fn movup(&mut self, depth: usize, span: SourceSpan, operation: String) -> LiftingResult<()>;
+
+    /// Move the top slot down to the given depth.
+    fn movdn(&mut self, depth: usize, span: SourceSpan, operation: String) -> LiftingResult<()>;
+
+    /// Apply a generic stack effect.
+    fn apply_effect(
+        &mut self,
+        pops: usize,
+        pushes: usize,
+        required_depth: usize,
+        span: SourceSpan,
+        operation: String,
+    ) -> LiftingResult<()>;
+}
+
+impl RepeatSlotSimulator for SlotStack {
+    fn swap(&mut self, depth: usize, span: SourceSpan, operation: String) -> LiftingResult<()> {
+        SlotStack::swap(self, depth, span, operation)
+    }
+
+    fn swapw(
+        &mut self,
+        word_index: usize,
+        span: SourceSpan,
+        operation: String,
+    ) -> LiftingResult<()> {
+        SlotStack::swapw(self, word_index, span, operation)
+    }
+
+    fn reversew(&mut self, span: SourceSpan, operation: String) -> LiftingResult<()> {
+        SlotStack::reversew(self, span, operation)
+    }
+
+    fn movup(&mut self, depth: usize, span: SourceSpan, operation: String) -> LiftingResult<()> {
+        SlotStack::movup(self, depth, span, operation)
+    }
+
+    fn movdn(&mut self, depth: usize, span: SourceSpan, operation: String) -> LiftingResult<()> {
+        SlotStack::movdn(self, depth, span, operation)
+    }
+
+    fn apply_effect(
+        &mut self,
+        pops: usize,
+        pushes: usize,
+        required_depth: usize,
+        span: SourceSpan,
+        operation: String,
+    ) -> LiftingResult<()> {
+        SlotStack::apply_effect(self, pops, pushes, required_depth, span, operation)
     }
 }
 
@@ -1884,54 +1897,69 @@ fn simulate_inst_tags(
     sigs: &SignatureMap,
 ) -> LiftingResult<()> {
     let before = stack.state_snapshot();
-    match inst {
-        Instruction::Swap1 => stack.swap(1, op_span, inst.to_string())?,
-        Instruction::Swap2 => stack.swap(2, op_span, inst.to_string())?,
-        Instruction::Swap3 => stack.swap(3, op_span, inst.to_string())?,
-        Instruction::Swap4 => stack.swap(4, op_span, inst.to_string())?,
-        Instruction::Swap5 => stack.swap(5, op_span, inst.to_string())?,
-        Instruction::Swap6 => stack.swap(6, op_span, inst.to_string())?,
-        Instruction::Swap7 => stack.swap(7, op_span, inst.to_string())?,
-        Instruction::Swap8 => stack.swap(8, op_span, inst.to_string())?,
-        Instruction::Swap9 => stack.swap(9, op_span, inst.to_string())?,
-        Instruction::Swap10 => stack.swap(10, op_span, inst.to_string())?,
-        Instruction::Swap11 => stack.swap(11, op_span, inst.to_string())?,
-        Instruction::Swap12 => stack.swap(12, op_span, inst.to_string())?,
-        Instruction::Swap13 => stack.swap(13, op_span, inst.to_string())?,
-        Instruction::Swap14 => stack.swap(14, op_span, inst.to_string())?,
-        Instruction::Swap15 => stack.swap(15, op_span, inst.to_string())?,
-        Instruction::SwapW1 => stack.swapw(1, op_span, inst.to_string())?,
-        Instruction::SwapW2 => stack.swapw(2, op_span, inst.to_string())?,
-        Instruction::SwapW3 => stack.swapw(3, op_span, inst.to_string())?,
-        Instruction::MovUp2 => stack.movup(2, op_span, inst.to_string())?,
-        Instruction::MovUp3 => stack.movup(3, op_span, inst.to_string())?,
-        Instruction::MovUp4 => stack.movup(4, op_span, inst.to_string())?,
-        Instruction::MovUp5 => stack.movup(5, op_span, inst.to_string())?,
-        Instruction::MovUp6 => stack.movup(6, op_span, inst.to_string())?,
-        Instruction::MovUp7 => stack.movup(7, op_span, inst.to_string())?,
-        Instruction::MovUp8 => stack.movup(8, op_span, inst.to_string())?,
-        Instruction::MovUp9 => stack.movup(9, op_span, inst.to_string())?,
-        Instruction::MovUp10 => stack.movup(10, op_span, inst.to_string())?,
-        Instruction::MovUp11 => stack.movup(11, op_span, inst.to_string())?,
-        Instruction::MovUp12 => stack.movup(12, op_span, inst.to_string())?,
-        Instruction::MovUp13 => stack.movup(13, op_span, inst.to_string())?,
-        Instruction::MovUp14 => stack.movup(14, op_span, inst.to_string())?,
-        Instruction::MovUp15 => stack.movup(15, op_span, inst.to_string())?,
-        Instruction::MovDn2 => stack.movdn(2, op_span, inst.to_string())?,
-        Instruction::MovDn3 => stack.movdn(3, op_span, inst.to_string())?,
-        Instruction::MovDn4 => stack.movdn(4, op_span, inst.to_string())?,
-        Instruction::MovDn5 => stack.movdn(5, op_span, inst.to_string())?,
-        Instruction::MovDn6 => stack.movdn(6, op_span, inst.to_string())?,
-        Instruction::MovDn7 => stack.movdn(7, op_span, inst.to_string())?,
-        Instruction::MovDn8 => stack.movdn(8, op_span, inst.to_string())?,
-        Instruction::MovDn9 => stack.movdn(9, op_span, inst.to_string())?,
-        Instruction::MovDn10 => stack.movdn(10, op_span, inst.to_string())?,
-        Instruction::MovDn11 => stack.movdn(11, op_span, inst.to_string())?,
-        Instruction::MovDn12 => stack.movdn(12, op_span, inst.to_string())?,
-        Instruction::MovDn13 => stack.movdn(13, op_span, inst.to_string())?,
-        Instruction::MovDn14 => stack.movdn(14, op_span, inst.to_string())?,
-        Instruction::MovDn15 => stack.movdn(15, op_span, inst.to_string())?,
-        Instruction::Reversew => stack.reversew(op_span, inst.to_string())?,
+    simulate_inst_on_repeat_stack(inst, op_span, stack, resolver, sigs)?;
+    trace!(
+        "finished repeat tag simulation for {}: before={}, after={}",
+        inst,
+        before,
+        stack.state_snapshot()
+    );
+    Ok(())
+}
+
+impl RepeatSlotSimulator for TaggedSlotStack {
+    fn swap(&mut self, depth: usize, span: SourceSpan, operation: String) -> LiftingResult<()> {
+        TaggedSlotStack::swap(self, depth, span, operation)
+    }
+
+    fn swapw(
+        &mut self,
+        word_index: usize,
+        span: SourceSpan,
+        operation: String,
+    ) -> LiftingResult<()> {
+        TaggedSlotStack::swapw(self, word_index, span, operation)
+    }
+
+    fn reversew(&mut self, span: SourceSpan, operation: String) -> LiftingResult<()> {
+        TaggedSlotStack::reversew(self, span, operation)
+    }
+
+    fn movup(&mut self, depth: usize, span: SourceSpan, operation: String) -> LiftingResult<()> {
+        TaggedSlotStack::movup(self, depth, span, operation)
+    }
+
+    fn movdn(&mut self, depth: usize, span: SourceSpan, operation: String) -> LiftingResult<()> {
+        TaggedSlotStack::movdn(self, depth, span, operation)
+    }
+
+    fn apply_effect(
+        &mut self,
+        pops: usize,
+        pushes: usize,
+        required_depth: usize,
+        span: SourceSpan,
+        operation: String,
+    ) -> LiftingResult<()> {
+        TaggedSlotStack::apply_effect(self, pops, pushes, required_depth, span, operation)
+    }
+}
+
+/// Simulate one instruction against a repeat slot stack.
+fn simulate_inst_on_repeat_stack<S: RepeatSlotSimulator>(
+    inst: &Instruction,
+    op_span: SourceSpan,
+    stack: &mut S,
+    resolver: &SymbolResolver<'_>,
+    sigs: &SignatureMap,
+) -> LiftingResult<()> {
+    let operation = inst.to_string();
+    match stack_family(inst) {
+        Some(StackFamily::Swap(depth)) => stack.swap(depth, op_span, operation)?,
+        Some(StackFamily::SwapWord(index)) => stack.swapw(index, op_span, operation)?,
+        Some(StackFamily::MovUp(depth)) => stack.movup(depth, op_span, operation)?,
+        Some(StackFamily::MovDown(depth)) => stack.movdn(depth, op_span, operation)?,
+        _ if matches!(inst, Instruction::Reversew) => stack.reversew(op_span, operation)?,
         _ => {
             let effect = inst::effect_for_inst(inst, op_span, resolver, sigs)?;
             let (pops, pushes, required_depth) = match effect {
@@ -1940,15 +1968,9 @@ fn simulate_inst_tags(
                 },
                 StackEffect::Unknown => (0, 0, 0),
             };
-            stack.apply_effect(pops, pushes, required_depth, op_span, inst.to_string())?;
+            stack.apply_effect(pops, pushes, required_depth, op_span, operation)?;
         },
     }
-    trace!(
-        "finished repeat tag simulation for {}: before={}, after={}",
-        inst,
-        before,
-        stack.state_snapshot()
-    );
     Ok(())
 }
 
