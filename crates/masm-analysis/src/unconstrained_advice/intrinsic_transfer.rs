@@ -1,8 +1,7 @@
 //! Intrinsic transfer helpers for unconstrained-advice analyses.
 
 use masm_decompiler::{
-    INTRINSIC_ADV_PIPE, INTRINSIC_ADV_PUSH, INTRINSIC_ADV_PUSHW, INTRINSIC_MEM_STREAM, Intrinsic,
-    intrinsic_base_name, intrinsic_requires_u32_precondition,
+    Intrinsic, IntrinsicAdviceTransferShape, intrinsic_advice_transfer_shape, intrinsic_base_name,
 };
 
 use super::{domain::AdviceFact, env::Env, u32_domain::U32Validity};
@@ -27,21 +26,19 @@ pub(super) fn apply_intrinsic_effect(
     intrinsic: &Intrinsic,
     env: &mut Env,
 ) {
-    if matches!(intrinsic_base_name(&intrinsic.name), INTRINSIC_ADV_PUSH | INTRINSIC_ADV_PUSHW) {
-        for result in &intrinsic.results {
-            env.set_var_fact(result, AdviceFact::from_source(span));
-            env.clear_var_metadata(result);
-        }
-        return;
-    }
-
-    match intrinsic_base_name(&intrinsic.name) {
-        "u32assert" | "u32assert2" | "u32assertw" => {
+    match intrinsic_advice_transfer_shape(&intrinsic.name) {
+        IntrinsicAdviceTransferShape::AdviceSourceOutputs => {
+            for result in &intrinsic.results {
+                env.set_var_fact(result, AdviceFact::from_source(span));
+                env.clear_var_metadata(result);
+            }
+        },
+        IntrinsicAdviceTransferShape::SanitizeArguments => {
             for arg in &intrinsic.args {
                 env.sanitize_var(arg);
             }
         },
-        "u32split" => {
+        IntrinsicAdviceTransferShape::U32Split => {
             for (index, result) in intrinsic.results.iter().enumerate() {
                 env.set_var_fact(result, AdviceFact::bottom());
                 env.clear_var_metadata(result);
@@ -50,13 +47,7 @@ pub(super) fn apply_intrinsic_effect(
                 }
             }
         },
-        "is_odd" => {
-            for result in &intrinsic.results {
-                env.set_var_fact(result, AdviceFact::bottom());
-                env.clear_var_metadata(result);
-            }
-        },
-        "u32testw" => {
+        IntrinsicAdviceTransferShape::U32TestWord => {
             if let Some((flag, preserved)) = intrinsic.results.split_first() {
                 env.set_var_fact(flag, AdviceFact::bottom());
                 env.clear_var_metadata(flag);
@@ -69,32 +60,26 @@ pub(super) fn apply_intrinsic_effect(
                 }
             }
         },
-        INTRINSIC_ADV_PIPE => {
+        IntrinsicAdviceTransferShape::AdvicePipe => {
             apply_adv_pipe_effect(span, intrinsic, env);
         },
-        INTRINSIC_MEM_STREAM => {
+        IntrinsicAdviceTransferShape::MemoryStream => {
             apply_mem_stream_effect(intrinsic, env);
         },
-        "sdepth" => {
+        IntrinsicAdviceTransferShape::BottomOutputs => {
             for result in &intrinsic.results {
                 env.set_var_fact(result, AdviceFact::bottom());
                 env.clear_var_metadata(result);
             }
         },
-        name if name.starts_with("locaddr") => {
-            for result in &intrinsic.results {
-                env.set_var_fact(result, AdviceFact::bottom());
-                env.clear_var_metadata(result);
-            }
-        },
-        _ if intrinsic_requires_u32_precondition(&intrinsic.name) => {
+        IntrinsicAdviceTransferShape::U32Outputs => {
             for result in &intrinsic.results {
                 env.set_var_fact(result, AdviceFact::bottom());
                 env.clear_var_metadata(result);
                 env.set_var_u32_validity(result, U32Validity::ProvenU32);
             }
         },
-        _ => {
+        IntrinsicAdviceTransferShape::PropagateJoinedInputs => {
             let joined =
                 AdviceFact::join_all(intrinsic.args.iter().map(|arg| env.fact_for_var(arg)));
             for result in &intrinsic.results {

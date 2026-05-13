@@ -77,6 +77,50 @@ pub fn intrinsic_nonzero_arg_index(name: &str) -> Option<usize> {
     }
 }
 
+/// Advice transfer shape for intrinsics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IntrinsicAdviceTransferShape {
+    /// Outputs are direct advice sources.
+    AdviceSourceOutputs,
+    /// Arguments are sanitized by the intrinsic.
+    SanitizeArguments,
+    /// `u32split`, whose top result is known to be `u32`.
+    U32Split,
+    /// `u32testw`, whose flag is known to be `u32` and whose other outputs preserve inputs.
+    U32TestWord,
+    /// `adv_pipe`, whose sponge capacity is preserved and whose remaining outputs are advice.
+    AdvicePipe,
+    /// `mem_stream`, whose address is propagated and whose sponge capacity is preserved.
+    MemoryStream,
+    /// Outputs are unconstrained by advice and carry no metadata.
+    BottomOutputs,
+    /// Outputs are unconstrained by advice and known to be `u32`.
+    U32Outputs,
+    /// Outputs inherit joined advice provenance from all arguments.
+    PropagateJoinedInputs,
+}
+
+/// Return the intrinsic transfer shape used by unconstrained-advice analysis.
+pub fn intrinsic_advice_transfer_shape(name: &str) -> IntrinsicAdviceTransferShape {
+    let base = intrinsic_base_name(name);
+    match base {
+        INTRINSIC_ADV_PUSH | INTRINSIC_ADV_PUSHW => {
+            IntrinsicAdviceTransferShape::AdviceSourceOutputs
+        },
+        "u32assert" | "u32assert2" | "u32assertw" => {
+            IntrinsicAdviceTransferShape::SanitizeArguments
+        },
+        "u32split" => IntrinsicAdviceTransferShape::U32Split,
+        "u32testw" => IntrinsicAdviceTransferShape::U32TestWord,
+        INTRINSIC_ADV_PIPE => IntrinsicAdviceTransferShape::AdvicePipe,
+        INTRINSIC_MEM_STREAM => IntrinsicAdviceTransferShape::MemoryStream,
+        "is_odd" | "sdepth" => IntrinsicAdviceTransferShape::BottomOutputs,
+        _ if name.starts_with("locaddr") => IntrinsicAdviceTransferShape::BottomOutputs,
+        _ if intrinsic_requires_u32_precondition(name) => IntrinsicAdviceTransferShape::U32Outputs,
+        _ => IntrinsicAdviceTransferShape::PropagateJoinedInputs,
+    }
+}
+
 /// Type shape for intrinsic outputs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum IntrinsicOutputTypeShape {
@@ -267,9 +311,9 @@ mod tests {
     use miden_assembly_syntax::ast::Instruction;
 
     use super::{
-        IntrinsicOutputTypeShape, intrinsic_asserts_u32_args, intrinsic_base_name,
-        intrinsic_memory_address_arg_index, intrinsic_merkle_root_arg_range,
-        intrinsic_nonzero_arg_index, intrinsic_output_type_shape,
+        IntrinsicAdviceTransferShape, IntrinsicOutputTypeShape, intrinsic_advice_transfer_shape,
+        intrinsic_asserts_u32_args, intrinsic_base_name, intrinsic_memory_address_arg_index,
+        intrinsic_merkle_root_arg_range, intrinsic_nonzero_arg_index, intrinsic_output_type_shape,
         intrinsic_positional_u32_arg_range, intrinsic_requires_u32_precondition, stack_family,
     };
 
@@ -343,6 +387,46 @@ mod tests {
         assert_eq!(intrinsic_nonzero_arg_index("u32div.4"), None);
         assert_eq!(intrinsic_nonzero_arg_index("u32mod.4"), None);
         assert_eq!(intrinsic_nonzero_arg_index("inv"), None);
+    }
+
+    #[test]
+    fn intrinsic_advice_transfer_shapes_cover_advice_analysis_cases() {
+        assert_eq!(
+            intrinsic_advice_transfer_shape("adv_pushw"),
+            IntrinsicAdviceTransferShape::AdviceSourceOutputs
+        );
+        assert_eq!(
+            intrinsic_advice_transfer_shape("u32assert.err=123"),
+            IntrinsicAdviceTransferShape::SanitizeArguments
+        );
+        assert_eq!(
+            intrinsic_advice_transfer_shape("u32split"),
+            IntrinsicAdviceTransferShape::U32Split
+        );
+        assert_eq!(
+            intrinsic_advice_transfer_shape("u32testw"),
+            IntrinsicAdviceTransferShape::U32TestWord
+        );
+        assert_eq!(
+            intrinsic_advice_transfer_shape("adv_pipe"),
+            IntrinsicAdviceTransferShape::AdvicePipe
+        );
+        assert_eq!(
+            intrinsic_advice_transfer_shape("mem_stream"),
+            IntrinsicAdviceTransferShape::MemoryStream
+        );
+        assert_eq!(
+            intrinsic_advice_transfer_shape("locaddr.0"),
+            IntrinsicAdviceTransferShape::BottomOutputs
+        );
+        assert_eq!(
+            intrinsic_advice_transfer_shape("u32div"),
+            IntrinsicAdviceTransferShape::U32Outputs
+        );
+        assert_eq!(
+            intrinsic_advice_transfer_shape("assert_eq"),
+            IntrinsicAdviceTransferShape::PropagateJoinedInputs
+        );
     }
 
     #[test]
