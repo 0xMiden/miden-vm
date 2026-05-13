@@ -348,6 +348,43 @@ end
 }
 
 #[test]
+fn unresolved_dependencies_report_library_guidance() {
+    let dir = temp_dir("unresolved-dependency");
+    let file = dir.join("unresolved_dependency.masm");
+    fs::write(
+        &file,
+        "\
+use missing::dependency
+
+pub proc test
+    exec.dependency::foo
+end
+",
+    )
+    .expect("failed to write MASM fixture");
+
+    let output = run_masm_lint(&dir, &file);
+
+    assert!(
+        !output.status.success(),
+        "unresolved dependency unexpectedly passed: {output:?}"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("unable to resolve 1 referenced module(s): missing::dependency"),
+        "unresolved dependency message was missing: {stderr}"
+    );
+    assert!(
+        stderr.contains("signature mismatch checks are skipped when dependencies are unresolved"),
+        "unresolved dependency signature guidance was missing: {stderr}"
+    );
+    assert!(
+        stderr.contains("add `--library <namespace>=<path>` for module `missing::dependency`"),
+        "unresolved dependency library guidance was missing: {stderr}"
+    );
+}
+
+#[test]
 fn absolute_inputs_outside_cwd_do_not_share_fallback_module_path() {
     let cwd = temp_dir("fallback-cwd");
     let inputs_dir = temp_dir("fallback-inputs");

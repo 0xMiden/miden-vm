@@ -3,9 +3,10 @@
 //! Keep this surface narrow: it defines what the lint binary consumes from the
 //! vendored analysis/decompiler crates.
 
-use std::{collections::HashSet, sync::Arc};
+use std::{collections::HashSet, path::PathBuf, sync::Arc};
 
-pub use masm_decompiler::{LibraryRoot, SymbolPath, Workspace};
+pub use masm_decompiler::LibraryRoot;
+use masm_decompiler::{SymbolPath, Workspace};
 use miden_debug_types::{DefaultSourceManager, SourceManager, SourceSpan};
 
 use crate::{
@@ -39,8 +40,99 @@ pub struct RelatedSpan {
     pub message: String,
 }
 
+/// Inputs needed to run the lint analysis pipeline.
+pub struct LintAnalysisInput {
+    /// Entry MASM files to load into the workspace.
+    pub entry_files: Vec<PathBuf>,
+    /// Library roots used to resolve imported modules.
+    pub roots: Vec<LibraryRoot>,
+    /// Source manager shared with diagnostic rendering.
+    pub sources: Arc<DefaultSourceManager>,
+    /// Group advice warnings by origin instead of emitting sink-level warnings.
+    pub group_by_origin: bool,
+}
+
+/// Results of running the lint analysis pipeline.
+pub struct LintAnalysisReport {
+    /// Lint warnings ready for rendering.
+    pub diagnostics: Vec<LintDiagnostic>,
+    /// Entry files that failed to load.
+    pub load_errors: Vec<LintLoadError>,
+    /// Referenced modules that could not be resolved.
+    pub unresolved_dependencies: Option<UnresolvedDependencyReport>,
+}
+
+impl LintAnalysisReport {
+    /// Number of warning diagnostics in this report.
+    pub fn warning_count(&self) -> usize {
+        self.diagnostics.len()
+    }
+
+    /// Number of hard errors in this report.
+    pub fn error_count(&self) -> usize {
+        self.load_errors.len()
+            + self.unresolved_dependencies.as_ref().map_or(0, |report| report.modules.len())
+    }
+}
+
+/// Failure to load an entry MASM file.
+pub struct LintLoadError {
+    /// Entry file path.
+    pub path: PathBuf,
+    /// Loader error rendered without source coloring.
+    pub message: String,
+}
+
+/// Unresolved dependency information for CLI diagnostics.
+pub struct UnresolvedDependencyReport {
+    /// Unresolved module paths.
+    pub modules: Vec<UnresolvedModule>,
+    /// Library roots configured for the analysis run.
+    pub configured_roots: Vec<LibraryRoot>,
+}
+
+/// A referenced module that could not be resolved.
+pub struct UnresolvedModule {
+    /// Fully-qualified module path.
+    pub path: String,
+    /// Configured namespace that should contain this module, if any.
+    pub configured_namespace: Option<String>,
+}
+
+/// Load the requested entry files, resolve dependencies, and return lint diagnostics.
+pub fn analyze_entries(input: LintAnalysisInput) -> LintAnalysisReport {
+    let mut workspace = Workspace::with_source_manager(input.roots, input.sources.clone());
+    let mut load_errors = Vec::new();
+
+    for file in &input.entry_files {
+        if let Err(e) = workspace.load_entry(file) {
+            load_errors.push(LintLoadError {
+                path: file.clone(),
+                message: e.to_string(),
+            });
+        }
+    }
+
+    workspace.load_dependencies();
+    let unresolved_paths = workspace.unresolved_module_paths();
+    let include_signature_mismatches = unresolved_paths.is_empty();
+    let unresolved_dependencies = unresolved_dependency_report(&workspace, unresolved_paths);
+    let diagnostics = diagnostics_from_workspace(
+        &workspace,
+        input.sources,
+        include_signature_mismatches,
+        input.group_by_origin,
+    );
+
+    LintAnalysisReport {
+        diagnostics,
+        load_errors,
+        unresolved_dependencies,
+    }
+}
+
 /// Analyze a workspace and return sorted lint diagnostics.
-pub fn diagnostics_from_workspace(
+fn diagnostics_from_workspace(
     workspace: &Workspace,
     sources: Arc<DefaultSourceManager>,
     include_signature_mismatches: bool,
@@ -73,6 +165,42 @@ pub fn diagnostics_from_workspace(
 
     sort_diagnostics(&mut diagnostics, sources.as_ref());
     diagnostics
+}
+
+fn unresolved_dependency_report(
+    workspace: &Workspace,
+    unresolved_paths: Vec<SymbolPath>,
+) -> Option<UnresolvedDependencyReport> {
+    if unresolved_paths.is_empty() {
+        return None;
+    }
+
+    let modules = unresolved_paths
+        .into_iter()
+        .map(|path| UnresolvedModule {
+            configured_namespace: configured_namespace_for_module(&path, workspace.roots())
+                .map(str::to_string),
+            path: path.as_str().to_string(),
+        })
+        .collect();
+
+    Some(UnresolvedDependencyReport {
+        modules,
+        configured_roots: workspace.roots().to_vec(),
+    })
+}
+
+/// Return the longest configured namespace that matches `module`.
+fn configured_namespace_for_module<'a>(
+    module: &SymbolPath,
+    roots: &'a [LibraryRoot],
+) -> Option<&'a str> {
+    roots
+        .iter()
+        .filter(|root| !root.namespace.is_empty())
+        .filter(|root| root.matches_module_path(module.as_str()))
+        .map(|root| root.namespace.as_str())
+        .max_by_key(|ns| ns.len())
 }
 
 /// Convert a [`SignatureMismatch`] into a [`LintDiagnostic`].
