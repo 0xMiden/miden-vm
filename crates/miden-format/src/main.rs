@@ -136,10 +136,6 @@ fn run() -> Result<(), CliError> {
             return Ok(());
         }
 
-        for path in &mismatches {
-            eprintln!("would reformat {path}");
-        }
-
         return Err(CliError::CheckFailed(
             mismatches.iter().map(ToString::to_string).collect::<Vec<_>>().join("\n"),
         ));
