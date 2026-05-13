@@ -205,23 +205,58 @@ impl<EF> DeepPoly<EF> {
         // full-domain allocation and improving cache locality.
 
         let deep_evals = info_span!("DEEP reduce + assemble").in_scope(|| {
+            // Fast path: when every matrix has the same height (the common single-AIR /
+            // uniform-height case for `prove_*`), accumulate every group directly into one
+            // shared buffer.
+            let uniform_height =
+                matrices_groups.iter().flat_map(|g| g.iter()).all(|m| m.height() == n);
+
             let mut neg_column_coeffs_iter = neg_column_coeffs.iter();
-            let mut neg_f_reduced = zip(matrices_groups.iter(), &group_sizes)
-                .map(|(matrices_group, &size)| {
+            let mut neg_f_reduced = if uniform_height {
+                let mut acc = EF::zero_vec(n);
+                let mut packed_coeffs: Vec<EF::ExtensionPacking> = Vec::new();
+                for (matrices_group, &size) in zip(matrices_groups.iter(), &group_sizes) {
                     let group_coeffs: Vec<&Vec<EF>> =
                         neg_column_coeffs_iter.by_ref().take(size).collect();
-                    accumulate_matrices(matrices_group, &group_coeffs)
-                })
-                .reduce(|mut acc, next| {
-                    debug_assert_eq!(acc.len(), next.len());
-                    acc.par_chunks_mut(w).zip(next.par_chunks(w)).for_each(
-                        |(acc_chunk, next_chunk)| {
-                            EF::add_slices(acc_chunk, next_chunk);
-                        },
-                    );
-                    acc
-                })
-                .unwrap_or_else(|| EF::zero_vec(n));
+                    for (&matrix, coeffs) in zip(matrices_group, group_coeffs.iter()) {
+                        let active_coeffs = &coeffs[..matrix.width()];
+                        packed_coeffs.clear();
+                        packed_coeffs.extend(active_coeffs.chunks(w).map(|chunk| {
+                            if chunk.len() == w {
+                                EF::ExtensionPacking::from_ext_slice(chunk)
+                            } else {
+                                let mut padded = EF::zero_vec(w);
+                                padded[..chunk.len()].copy_from_slice(chunk);
+                                EF::ExtensionPacking::from_ext_slice(&padded)
+                            }
+                        }));
+                        matrix
+                            .rowwise_packed_dot_product::<EF>(&packed_coeffs)
+                            .zip(acc.par_iter_mut())
+                            .for_each(|(dot_result, acc_val)| {
+                                *acc_val += dot_result;
+                            });
+                    }
+                }
+                acc
+            } else {
+                zip(matrices_groups.iter(), &group_sizes)
+                    .map(|(matrices_group, &size)| {
+                        let group_coeffs: Vec<&Vec<EF>> =
+                            neg_column_coeffs_iter.by_ref().take(size).collect();
+                        accumulate_matrices(matrices_group, &group_coeffs)
+                    })
+                    .reduce(|mut acc, next| {
+                        debug_assert_eq!(acc.len(), next.len());
+                        acc.par_chunks_mut(w).zip(next.par_chunks(w)).for_each(
+                            |(acc_chunk, next_chunk)| {
+                                EF::add_slices(acc_chunk, next_chunk);
+                            },
+                        );
+                        acc
+                    })
+                    .unwrap_or_else(|| EF::zero_vec(n))
+            };
 
             // Pre-compute βʲ for all N points
             let point_coeffs: [EF; N] =
@@ -298,7 +333,11 @@ fn accumulate_matrices<F: Field, EF: ExtensionField<F>, M: Matrix<F>, C: AsRef<[
     let n = matrices.last().unwrap().height();
 
     let mut acc = EF::zero_vec(n);
-    let mut scratch = EF::zero_vec(n);
+    // When all matrices in this group share a single height,
+    // it is a tad more efficient to skip preallocating the buffer.
+    let mut scratch: Vec<EF> = Vec::new();
+    let w = F::Packing::WIDTH;
+    let mut packed_coeffs: Vec<EF::ExtensionPacking> = Vec::new();
 
     let mut active_height = matrices.first().unwrap().height();
 
@@ -315,6 +354,9 @@ fn accumulate_matrices<F: Field, EF: ExtensionField<F>, M: Matrix<F>, C: AsRef<[
 
         // Upsample: [a, b] → [a, a, b, b] when height doubles
         if height > active_height {
+            if scratch.len() < height {
+                scratch.resize(height, EF::ZERO);
+            }
             let scaling_factor = height / active_height;
             scratch[..height]
                 .par_chunks_mut(scaling_factor)
@@ -325,21 +367,18 @@ fn accumulate_matrices<F: Field, EF: ExtensionField<F>, M: Matrix<F>, C: AsRef<[
 
         // SIMD path using horizontal packing.
         // Slice to matrix width to avoid packing alignment-padding coefficients.
-        let w = F::Packing::WIDTH;
         let active_coeffs = &coeffs[..matrix.width()];
-        let packed_coeffs: Vec<EF::ExtensionPacking> = active_coeffs
-            .chunks(w)
-            .map(|chunk| {
-                if chunk.len() == w {
-                    EF::ExtensionPacking::from_ext_slice(chunk)
-                } else {
-                    // Pad with zeros for the last chunk
-                    let mut padded = EF::zero_vec(w);
-                    padded[..chunk.len()].copy_from_slice(chunk);
-                    EF::ExtensionPacking::from_ext_slice(&padded)
-                }
-            })
-            .collect();
+        packed_coeffs.clear();
+        packed_coeffs.extend(active_coeffs.chunks(w).map(|chunk| {
+            if chunk.len() == w {
+                EF::ExtensionPacking::from_ext_slice(chunk)
+            } else {
+                // Pad with zeros for the last chunk
+                let mut padded = EF::zero_vec(w);
+                padded[..chunk.len()].copy_from_slice(chunk);
+                EF::ExtensionPacking::from_ext_slice(&padded)
+            }
+        }));
 
         matrix
             .rowwise_packed_dot_product::<EF>(&packed_coeffs)
