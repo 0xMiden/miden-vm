@@ -577,8 +577,8 @@ impl<'input> Parser<'input> {
             "expected `)` to close procedure parameters",
         );
 
-        self.bump_non_comment_trivia();
-        if self.at_kind(SyntaxKind::RArrow) {
+        if self.peek_after_non_comment_trivia() == Some(SyntaxKind::RArrow) {
+            self.bump_non_comment_trivia();
             self.bump();
             self.bump_non_comment_trivia();
             if self.at_kind(SyntaxKind::LParen) {
@@ -1415,6 +1415,56 @@ end
             procedure.signature().is_some(),
             "expected procedure to retain its signature node"
         );
+    }
+
+    #[test]
+    fn no_result_signature_does_not_absorb_body_leading_trivia() {
+        let source = "\
+pub proc foo()
+    # body
+    nop
+end
+";
+
+        let parse = parse_text(source);
+        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+
+        let source_file = AstSourceFile::cast(parse.syntax()).expect("source file");
+        let items = source_file.items().collect::<Vec<_>>();
+        let Item::Procedure(procedure) = &items[0] else {
+            panic!("expected procedure, got {:?}", items[0]);
+        };
+
+        let signature = procedure.signature().expect("procedure signature");
+        assert_eq!(signature.syntax().text().to_string(), "()");
+
+        let block = procedure.block().expect("procedure block");
+        assert!(
+            block.syntax().text().to_string().contains("# body"),
+            "expected body-leading comment to remain in the block"
+        );
+    }
+
+    #[test]
+    fn multiline_result_arrow_stays_in_signature() {
+        let source = "\
+pub proc foo()
+    -> felt
+    nop
+end
+";
+
+        let parse = parse_text(source);
+        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+
+        let source_file = AstSourceFile::cast(parse.syntax()).expect("source file");
+        let items = source_file.items().collect::<Vec<_>>();
+        let Item::Procedure(procedure) = &items[0] else {
+            panic!("expected procedure, got {:?}", items[0]);
+        };
+
+        let signature = procedure.signature().expect("procedure signature");
+        assert_eq!(signature.syntax().text().to_string(), "()\n    -> felt");
     }
 
     #[test]
