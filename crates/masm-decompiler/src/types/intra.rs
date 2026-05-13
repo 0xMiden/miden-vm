@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use super::{
     domain::{TypeFact, VarKey},
     expr_defs::ExprDefs,
-    memory::{MAX_MEMORY_ADDRESS, MemAddressKey},
+    memory::{MAX_MEMORY_ADDRESS, MemAddressKey, MemoryState},
     origin::{self, Origin},
     summary::{TypeSummary, TypeSummaryMap},
     summary_builder,
@@ -52,19 +52,10 @@ struct ProcTypeAnalyzer<'a> {
     /// The fixed-point loop ensures convergence when stored types change
     /// across iterations.
     local_types: HashMap<u16, TypeFact>,
-    /// Maps SSA variables to their abstract memory address identity.
-    ///
-    /// Populated during inference when a variable is defined as a constant
-    /// (`Assign { expr: Constant(Felt(n)) }`) or a `locaddr.N` intrinsic
-    /// result. Also propagated through variable copies
-    /// (`Assign { expr: Var(src) }`).
-    var_address_keys: HashMap<VarKey, MemAddressKey>,
-    /// Inferred types for memory locations, keyed by abstract address.
-    mem_types: HashMap<MemAddressKey, TypeFact>,
+    /// Memory address identities, memory types, and memory requirements.
+    memory: MemoryState,
     /// Requirements propagated backward to local variable slots.
     local_requirements: HashMap<u16, TypeFact>,
-    /// Requirements propagated backward to memory locations.
-    mem_requirements: HashMap<MemAddressKey, TypeFact>,
     /// Input-backed provenance for SSA variables.
     ///
     /// This is computed once from the lifted body and callee passthrough maps.
@@ -85,10 +76,8 @@ impl<'a> ProcTypeAnalyzer<'a> {
             inferred: HashMap::new(),
             required: HashMap::new(),
             local_types: HashMap::new(),
-            var_address_keys: HashMap::new(),
-            mem_types: HashMap::new(),
+            memory: MemoryState::default(),
             local_requirements: HashMap::new(),
-            mem_requirements: HashMap::new(),
             origins: HashMap::new(),
             expr_defs: ExprDefs::default(),
         }
@@ -103,10 +92,8 @@ impl<'a> ProcTypeAnalyzer<'a> {
             let prev_inferred = self.inferred.clone();
             let prev_required = self.required.clone();
             let prev_local_types = self.local_types.clone();
-            let prev_mem_types = self.mem_types.clone();
+            let prev_memory = self.memory.clone();
             let prev_local_req = self.local_requirements.clone();
-            let prev_mem_req = self.mem_requirements.clone();
-            let prev_addr_keys = self.var_address_keys.clone();
 
             // Return values are intentionally discarded: convergence is
             // detected by comparing full state snapshots (below), not by
@@ -118,10 +105,8 @@ impl<'a> ProcTypeAnalyzer<'a> {
             if self.inferred == prev_inferred
                 && self.required == prev_required
                 && self.local_types == prev_local_types
-                && self.mem_types == prev_mem_types
+                && self.memory == prev_memory
                 && self.local_requirements == prev_local_req
-                && self.mem_requirements == prev_mem_req
-                && self.var_address_keys == prev_addr_keys
             {
                 break;
             }
@@ -159,14 +144,11 @@ impl<'a> ProcTypeAnalyzer<'a> {
                 // Track abstract address keys for memory type tracking.
                 match expr {
                     Expr::Constant(Constant::Felt(n)) if *n < MAX_MEMORY_ADDRESS => {
-                        self.var_address_keys
-                            .insert(VarKey::from_var(dest), MemAddressKey::Constant(*n as u32));
+                        self.memory.set_var_address_key(dest, MemAddressKey::Constant(*n as u32));
                     },
                     Expr::Var(src) => {
-                        if let Some(key) =
-                            self.var_address_keys.get(&VarKey::from_var(src)).copied()
-                        {
-                            self.var_address_keys.insert(VarKey::from_var(dest), key);
+                        if let Some(key) = self.memory.address_key_for_var(src) {
+                            self.memory.set_var_address_key(dest, key);
                         }
                     },
                     Expr::Binary(BinOp::Add, lhs, rhs) => {
@@ -182,7 +164,7 @@ impl<'a> ProcTypeAnalyzer<'a> {
                             .resolve_addr_offset_key(lhs, rhs)
                             .or(self.resolve_addr_offset_key(rhs, lhs));
                         if let Some(key) = key {
-                            self.var_address_keys.insert(VarKey::from_var(dest), key);
+                            self.memory.set_var_address_key(dest, key);
                         }
                     },
                     _ => {},
@@ -194,7 +176,7 @@ impl<'a> ProcTypeAnalyzer<'a> {
                     .address
                     .first()
                     .and_then(|v| self.mem_address_key_for_var(v))
-                    .and_then(|key| self.mem_types.get(&key).copied())
+                    .and_then(|key| self.memory.type_for_address(key))
                     .unwrap_or(TypeFact::Felt);
                 let mut changed = false;
                 for output in &load.outputs {
@@ -257,8 +239,7 @@ impl<'a> ProcTypeAnalyzer<'a> {
                     && let Ok(index) = index_str.parse::<u16>()
                 {
                     for result in &intrinsic.results {
-                        self.var_address_keys
-                            .insert(VarKey::from_var(result), MemAddressKey::LocalAddr(index));
+                        self.memory.set_var_address_key(result, MemAddressKey::LocalAddr(index));
                     }
                 }
                 changed
@@ -301,7 +282,7 @@ impl<'a> ProcTypeAnalyzer<'a> {
                     } else {
                         changed |= self.set_inferred_type_for_var(&phi.dest, init_ty);
                         if let Some(key) = self.mem_address_key_for_var(&phi.init) {
-                            self.var_address_keys.insert(VarKey::from_var(&phi.dest), key);
+                            self.memory.set_var_address_key(&phi.dest, key);
                         }
                     }
                 }
@@ -324,15 +305,7 @@ impl<'a> ProcTypeAnalyzer<'a> {
                         .map(|v| self.inferred_type_for_var(v))
                         .reduce(TypeFact::glb)
                         .unwrap_or(TypeFact::Felt);
-                    let current = self.mem_types.get(&addr_key).copied();
-                    let updated = match current {
-                        Some(existing) => existing.join(stored_ty),
-                        None => stored_ty,
-                    };
-                    if current != Some(updated) {
-                        self.mem_types.insert(addr_key, updated);
-                        changed = true;
-                    }
+                    changed |= self.memory.record_store_type(addr_key, stored_ty);
                 }
                 changed
             },
@@ -565,20 +538,14 @@ impl<'a> ProcTypeAnalyzer<'a> {
 
     /// Resolve the abstract memory address key for a variable, if known.
     fn mem_address_key_for_var(&self, var: &Var) -> Option<MemAddressKey> {
-        self.var_address_keys.get(&VarKey::from_var(var)).copied()
+        self.memory.address_key_for_var(var)
     }
 
     /// Propagate a `MemAddressKey` through a phi node when both incoming
     /// values share the same key. If the keys disagree or either is absent,
     /// no key is assigned (conservative).
     fn propagate_phi_address_key(&mut self, dest: &Var, lhs: &Var, rhs: &Var) {
-        let lhs_key = self.mem_address_key_for_var(lhs);
-        let rhs_key = self.mem_address_key_for_var(rhs);
-        if let (Some(lk), Some(rk)) = (lhs_key, rhs_key)
-            && lk == rk
-        {
-            self.var_address_keys.insert(VarKey::from_var(dest), lk);
-        }
+        self.memory.propagate_phi_address_key(dest, lhs, rhs);
     }
 
     /// Resolve a `MemAddressKey` for an address-plus-offset expression.
@@ -976,13 +943,7 @@ impl<'a> ProcTypeAnalyzer<'a> {
                         if req == TypeFact::Felt {
                             continue;
                         }
-                        let current =
-                            self.mem_requirements.get(&addr_key).copied().unwrap_or(TypeFact::Felt);
-                        let updated = current.glb(req);
-                        if updated != current {
-                            self.mem_requirements.insert(addr_key, updated);
-                            changed = true;
-                        }
+                        changed |= self.memory.require_address(addr_key, req);
                     }
                 }
                 changed
@@ -992,8 +953,7 @@ impl<'a> ProcTypeAnalyzer<'a> {
                 if let Some(addr_key) =
                     store.address.first().and_then(|v| self.mem_address_key_for_var(v))
                 {
-                    let req =
-                        self.mem_requirements.get(&addr_key).copied().unwrap_or(TypeFact::Felt);
+                    let req = self.memory.requirement_for_address(addr_key);
                     if req != TypeFact::Felt {
                         for value in &store.values {
                             changed |= self.apply_requirement_to_var(value, req);
