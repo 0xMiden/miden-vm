@@ -117,6 +117,12 @@ fn load_kernel(kernel_path: &PathBuf) -> Result<Kernel, Report> {
                 Package::read_from_bytes(&bytes).into_diagnostic().wrap_err_with(|| {
                     format!("Failed to deserialize kernel package `{}`", kernel_path.display())
                 })?;
+            if !package.is_kernel() {
+                return Err(Report::msg(format!(
+                    "invalid kernel package, package is of type {}",
+                    &package.kind,
+                )));
+            }
             Arc::new(package)
         },
         "masm" => {
