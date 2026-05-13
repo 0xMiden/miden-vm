@@ -9,6 +9,7 @@ mod grouping;
 mod inter;
 mod intrinsic_transfer;
 mod local_transfer;
+mod loop_transfer;
 mod merkle;
 mod nonzero;
 mod provenance;
