@@ -2,7 +2,7 @@
 
 use std::{collections::HashMap, sync::Arc};
 
-use masm_decompiler::{ProcSignature, SignatureMap, SymbolPath, Workspace};
+use masm_decompiler::{ProcSignature, SymbolPath, Workspace};
 use miden_assembly_syntax::ast::{
     FunctionType, Module, SymbolResolutionError, TypeResolver, types::Type as AstType,
 };
@@ -106,11 +106,7 @@ impl AnalysisCapability for SignatureMismatchCapability<'_> {
         self.workspace
             .modules()
             .flat_map(|program| {
-                signature_mismatches_for_module(
-                    program.module(),
-                    self.sources.clone(),
-                    prepared.signatures(),
-                )
+                signature_mismatches_for_module(program.module(), self.sources.clone(), prepared)
             })
             .collect()
     }
@@ -120,7 +116,7 @@ impl AnalysisCapability for SignatureMismatchCapability<'_> {
 fn signature_mismatches_for_module(
     module: &Module,
     sources: Arc<DefaultSourceManager>,
-    signatures: &SignatureMap,
+    prepared: &PreparedAnalysis,
 ) -> Vec<SignatureMismatch> {
     let mut findings = Vec::new();
     let Ok(mut resolver) = module.type_resolver(sources) else {
@@ -135,7 +131,7 @@ fn signature_mismatches_for_module(
         };
 
         let symbol_path = SymbolPath::from_module_and_name(module, proc.name().as_str());
-        let Some(inferred) = signatures.get(&symbol_path) else {
+        let Some(inferred) = prepared.signature(&symbol_path) else {
             continue;
         };
         let Some(StackSignature { inputs, outputs }) = inferred_stack_signature(inferred) else {
