@@ -265,7 +265,7 @@ where
         let tag = read_tag(process, 1)?;
         let payload = read_payload(process, 5);
 
-        let digest = register_node(
+        register_node(
             &mut self.deferred_state,
             &self.deferred_registry,
             tag,
@@ -274,9 +274,7 @@ where
         )
         .map_err(deferred_error_to_event_error)?;
 
-        // Push the digest onto the advice stack so MASM can read it back and check that the
-        // host-computed hash matches its own hperm.
-        Ok(vec![AdviceMutation::extend_stack(digest.as_elements().iter().copied())])
+        Ok(Vec::new())
     }
 
     fn handle_assert_eq(
