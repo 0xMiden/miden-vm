@@ -40,7 +40,7 @@ pub(super) fn lower_source_file(
     while index < items.len() {
         if let Some(is_module_doc) = doc_group_kind(context, &items, index) {
             let end = extend_doc_group(context, &items, index);
-            forms.push(lower_doc_group(context, &items[index..end], is_module_doc));
+            forms.push(lower_doc_group(context, &items[index..end], is_module_doc)?);
             index = end;
             continue;
         }
@@ -146,7 +146,7 @@ fn lower_doc_group(
     context: &LoweringContext<'_>,
     items: &[CstItem],
     is_module_doc: bool,
-) -> ast::Form {
+) -> Result<ast::Form, Report> {
     let first_span = item_span(context, &items[0]);
     let last_span = item_span(context, items.last().expect("non-empty doc group"));
     let span = SourceSpan::new(context.source_file().id(), first_span.start()..last_span.end());
@@ -161,11 +161,15 @@ fn lower_doc_group(
     }
 
     let docs = Span::new(span, text);
-    if is_module_doc {
+    if docs.len() > u16::MAX as usize {
+        return Err(ParsingError::DocsTooLarge { span }.into());
+    }
+
+    Ok(if is_module_doc {
         ast::Form::ModuleDoc(docs)
     } else {
         ast::Form::Doc(docs)
-    }
+    })
 }
 
 /// Extracts the normalized text payload for a single doc-comment item.

@@ -436,17 +436,4 @@ fn next_significant_token(node: &SyntaxNode, token: &SyntaxToken) -> Option<Synt
         .skip_while(|t| t != token)
         .skip(1)
         .find(|token| !token.kind().is_trivia())
-    /*
-    let mut seen = false;
-    for candidate in node.children_with_tokens().filter_map(rowan::NodeOrToken::into_token) {
-        if !seen {
-            seen = candidate == *token;
-            continue;
-        }
-        if !candidate.kind().is_trivia() {
-            return Some(candidate);
-        }
-    }
-    None
-     */
 }
