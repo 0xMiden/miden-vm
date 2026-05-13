@@ -26,6 +26,8 @@ struct MerkleCapability {
 }
 
 impl AdviceCapability for MerkleCapability {
+    type Summary = ();
+
     fn check_stmt(&self, stmt: &Stmt, env: &Env) -> AdviceEffect {
         let Stmt::Intrinsic { span, intrinsic } = stmt else {
             return AdviceEffect::new();

@@ -1,5 +1,7 @@
 //! Diagnostics and summaries for unconstrained advice reaching non-zero sinks.
 
+use std::collections::BTreeSet;
+
 use masm_decompiler::{BinOp, Expr, Intrinsic, Stmt, SymbolPath, UnOp, Var};
 
 use super::{
@@ -41,7 +43,7 @@ pub(super) fn infer_nonzero_summaries_and_diagnostics(
         if result.opaque {
             summary.set_nonzero_unknown();
         } else {
-            summary.set_nonzero_requirements(result.required_inputs);
+            summary.set_nonzero_requirements(result.summary);
         }
     }
 
@@ -74,7 +76,7 @@ impl<'a> NonZeroCapability<'a> {
     /// Add diagnostics and summary requirements for a non-zero sink fact.
     fn add_sink_fact(
         &self,
-        effect: &mut AdviceEffect,
+        effect: &mut AdviceEffect<BTreeSet<usize>>,
         span: miden_debug_types::SourceSpan,
         message: impl Into<String>,
         fact: &AdviceFact,
@@ -93,7 +95,7 @@ impl<'a> NonZeroCapability<'a> {
         target: &str,
         args: &[Var],
         env: &Env,
-    ) -> AdviceEffect {
+    ) -> AdviceEffect<BTreeSet<usize>> {
         let Some(summary) = self.callee_summaries.get(&SymbolPath::new(target.to_string())) else {
             return AdviceEffect::new();
         };
@@ -129,7 +131,9 @@ impl<'a> NonZeroCapability<'a> {
 }
 
 impl AdviceCapability for NonZeroCapability<'_> {
-    fn check_stmt(&self, stmt: &Stmt, env: &Env) -> AdviceEffect {
+    type Summary = BTreeSet<usize>;
+
+    fn check_stmt(&self, stmt: &Stmt, env: &Env) -> AdviceEffect<Self::Summary> {
         let mut effect = AdviceEffect::new();
         match stmt {
             Stmt::Assign { span, expr, .. } => {

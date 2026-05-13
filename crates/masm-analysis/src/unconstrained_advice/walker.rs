@@ -19,25 +19,44 @@ use crate::prepared::PreparedAnalysis;
 
 /// Trait for advice-specific semantic hooks that run inside the shared walker.
 pub(super) trait AdviceCapability {
+    /// Capability-owned summary contribution accumulated while walking.
+    type Summary: AdviceSummaryContribution;
+
     /// Inspect a statement before environment updates are applied.
     ///
-    /// Return any diagnostics or summary requirements detected in this statement.
-    fn check_stmt(&self, stmt: &Stmt, env: &Env) -> AdviceEffect;
+    /// Return any diagnostics or summary contribution detected in this statement.
+    fn check_stmt(&self, stmt: &Stmt, env: &Env) -> AdviceEffect<Self::Summary>;
 
     /// Refine the environment immediately before common intrinsic transfer is applied.
     fn before_intrinsic_transfer(&self, _intrinsic: &Intrinsic, _env: &mut Env) {}
 }
 
-/// Effects contributed by an advice capability while walking one statement.
-#[derive(Debug, Clone, Default)]
-pub(super) struct AdviceEffect {
-    /// Diagnostics detected by the capability.
-    diagnostics: Vec<AdviceDiagnostic>,
-    /// Procedure input positions required by this capability's summary.
-    required_inputs: BTreeSet<usize>,
+/// Capability-owned summary contribution accumulated by the shared walker.
+pub(super) trait AdviceSummaryContribution: Default {
+    /// Merge another contribution from the same capability into this one.
+    fn merge(&mut self, other: Self);
 }
 
-impl AdviceEffect {
+impl AdviceSummaryContribution for () {
+    fn merge(&mut self, _other: Self) {}
+}
+
+impl AdviceSummaryContribution for BTreeSet<usize> {
+    fn merge(&mut self, other: Self) {
+        self.extend(other);
+    }
+}
+
+/// Effects contributed by an advice capability while walking one statement.
+#[derive(Debug, Clone, Default)]
+pub(super) struct AdviceEffect<S: AdviceSummaryContribution = ()> {
+    /// Diagnostics detected by the capability.
+    diagnostics: Vec<AdviceDiagnostic>,
+    /// Summary contribution detected by the capability.
+    summary: S,
+}
+
+impl<S: AdviceSummaryContribution> AdviceEffect<S> {
     /// Create an empty effect.
     pub(super) fn new() -> Self {
         Self::default()
@@ -45,32 +64,31 @@ impl AdviceEffect {
 
     /// Create an effect containing diagnostics only.
     pub(super) fn diagnostics(diagnostics: Vec<AdviceDiagnostic>) -> Self {
-        Self {
-            diagnostics,
-            required_inputs: BTreeSet::new(),
-        }
+        Self { diagnostics, summary: S::default() }
     }
 
     /// Add one diagnostic.
     pub(super) fn push_diagnostic(&mut self, diagnostic: AdviceDiagnostic) {
         self.diagnostics.push(diagnostic);
     }
+}
 
+impl AdviceEffect<BTreeSet<usize>> {
     /// Add required procedure input positions.
     pub(super) fn extend_required_inputs(&mut self, inputs: impl IntoIterator<Item = usize>) {
-        self.required_inputs.extend(inputs);
+        self.summary.extend(inputs);
     }
 }
 
 /// Result of walking one procedure with an advice capability.
 #[derive(Debug, Clone, Default)]
-pub(super) struct AdviceWalkResult {
+pub(super) struct AdviceWalkResult<S: AdviceSummaryContribution = ()> {
     /// Environment after walking the procedure body.
     pub(super) env: Env,
     /// Diagnostics emitted while walking the procedure.
     pub(super) diagnostics: Vec<AdviceDiagnostic>,
-    /// Procedure input positions required by this capability's summary.
-    pub(super) required_inputs: BTreeSet<usize>,
+    /// Summary contribution accumulated by this capability.
+    pub(super) summary: S,
     /// Whether the walk encountered an opaque construct.
     pub(super) opaque: bool,
 }
@@ -103,22 +121,22 @@ pub(super) fn analyze_procedure<C: AdviceCapability>(
     provenance_summaries: &AdviceSummaryMap,
     input_count: usize,
     stmts: &[Stmt],
-) -> AdviceWalkResult {
+) -> AdviceWalkResult<C::Summary> {
     let env = seed_input_env(input_count);
     let result = eval_block(capability, provenance_summaries, stmts, env);
     AdviceWalkResult {
         env: result.env,
         diagnostics: result.diagnostics,
-        required_inputs: result.required_inputs,
+        summary: result.summary,
         opaque: result.opaque,
     }
 }
 
 /// Result of evaluating a statement block.
-struct EvalResult {
+struct EvalResult<S: AdviceSummaryContribution> {
     env: Env,
     diagnostics: Vec<AdviceDiagnostic>,
-    required_inputs: BTreeSet<usize>,
+    summary: S,
     opaque: bool,
 }
 
@@ -128,25 +146,20 @@ fn eval_block<C: AdviceCapability>(
     summaries: &AdviceSummaryMap,
     stmts: &[Stmt],
     mut env: Env,
-) -> EvalResult {
+) -> EvalResult<C::Summary> {
     let mut diagnostics = Vec::new();
-    let mut required_inputs = BTreeSet::new();
+    let mut summary = C::Summary::default();
     let mut opaque = false;
 
     for stmt in stmts {
         let result = eval_stmt(capability, summaries, stmt, env);
         env = result.env;
         diagnostics.extend(result.diagnostics);
-        required_inputs.extend(result.required_inputs);
+        summary.merge(result.summary);
         opaque |= result.opaque;
     }
 
-    EvalResult {
-        env,
-        diagnostics,
-        required_inputs,
-        opaque,
-    }
+    EvalResult { env, diagnostics, summary, opaque }
 }
 
 /// Evaluate a single statement: check capability diagnostics, then apply env updates.
@@ -155,10 +168,10 @@ fn eval_stmt<C: AdviceCapability>(
     summaries: &AdviceSummaryMap,
     stmt: &Stmt,
     mut env: Env,
-) -> EvalResult {
+) -> EvalResult<C::Summary> {
     let effect = capability.check_stmt(stmt, &env);
     let mut diagnostics = effect.diagnostics;
-    let mut required_inputs = effect.required_inputs;
+    let mut summary = effect.summary;
     let mut opaque = false;
 
     match stmt {
@@ -215,8 +228,8 @@ fn eval_stmt<C: AdviceCapability>(
             let else_result = eval_block(capability, summaries, else_body, else_env);
             diagnostics.extend(then_result.diagnostics);
             diagnostics.extend(else_result.diagnostics);
-            required_inputs.extend(then_result.required_inputs);
-            required_inputs.extend(else_result.required_inputs);
+            summary.merge(then_result.summary);
+            summary.merge(else_result.summary);
             opaque |= then_result.opaque || else_result.opaque;
 
             env = then_result.env.join(&else_result.env);
@@ -240,24 +253,19 @@ fn eval_stmt<C: AdviceCapability>(
             let loop_result = eval_loop_block(capability, summaries, body, phis, env);
             env = loop_result.env;
             diagnostics.extend(loop_result.diagnostics);
-            required_inputs.extend(loop_result.required_inputs);
+            summary.merge(loop_result.summary);
             opaque |= loop_result.opaque;
         },
         Stmt::Repeat { body, phis, .. } => {
             let loop_result = eval_loop_block(capability, summaries, body, phis, env);
             env = loop_result.env;
             diagnostics.extend(loop_result.diagnostics);
-            required_inputs.extend(loop_result.required_inputs);
+            summary.merge(loop_result.summary);
             opaque |= loop_result.opaque;
         },
     }
 
-    EvalResult {
-        env,
-        diagnostics,
-        required_inputs,
-        opaque,
-    }
+    EvalResult { env, diagnostics, summary, opaque }
 }
 
 /// Evaluate a structured loop body conservatively.
@@ -267,7 +275,7 @@ fn eval_loop_block<C: AdviceCapability>(
     body: &[Stmt],
     phis: &[LoopPhi],
     entry_env: Env,
-) -> EvalResult {
+) -> EvalResult<C::Summary> {
     let mut opaque = false;
     let loop_env = stabilized_loop_head_env(&entry_env, phis, |loop_env| {
         let body_result = eval_block(capability, summaries, body, loop_env);
@@ -277,14 +285,14 @@ fn eval_loop_block<C: AdviceCapability>(
 
     let body_result = eval_block(capability, summaries, body, loop_env.clone());
     let diagnostics = body_result.diagnostics;
-    let required_inputs = body_result.required_inputs;
+    let summary = body_result.summary;
     opaque |= body_result.opaque;
     let loop_env = join_loop_head_env(&loop_env, &entry_env, &body_result.env, phis);
 
     EvalResult {
         env: loop_env,
         diagnostics,
-        required_inputs,
+        summary,
         opaque,
     }
 }

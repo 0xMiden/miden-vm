@@ -31,6 +31,8 @@ struct U32Capability<'a> {
 }
 
 impl AdviceCapability for U32Capability<'_> {
+    type Summary = ();
+
     fn check_stmt(&self, stmt: &Stmt, env: &Env) -> AdviceEffect {
         let mut effect = AdviceEffect::new();
 

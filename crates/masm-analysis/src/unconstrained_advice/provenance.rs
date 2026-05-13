@@ -29,6 +29,8 @@ pub(super) fn analyze_proc_provenance(
 struct ProvenanceCapability;
 
 impl AdviceCapability for ProvenanceCapability {
+    type Summary = ();
+
     fn check_stmt(&self, _stmt: &Stmt, _env: &Env) -> AdviceEffect {
         AdviceEffect::new()
     }
