@@ -1,6 +1,6 @@
 //! Generic statement walker for advice capabilities.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::BTreeSet;
 
 use masm_decompiler::{Intrinsic, LocalAccessKind, LoopPhi, Stmt, SymbolPath};
 
@@ -15,7 +15,7 @@ use super::{
     },
     summary::{AdviceDiagnostic, AdviceDiagnosticsMap, AdviceSummaryMap},
 };
-use crate::prepared::PreparedProc;
+use crate::prepared::PreparedAnalysis;
 
 /// Trait for advice-specific semantic hooks that run inside the shared walker.
 pub(super) trait AdviceCapability {
@@ -77,18 +77,18 @@ pub(super) struct AdviceWalkResult {
 
 /// Collect diagnostics for all procedures using an advice capability.
 pub(super) fn collect_diagnostics<C: AdviceCapability>(
-    prepared: &HashMap<SymbolPath, PreparedProc>,
+    prepared: &PreparedAnalysis,
     provenance_summaries: &AdviceSummaryMap,
     make_capability: impl Fn(SymbolPath) -> C,
 ) -> AdviceDiagnosticsMap {
     let mut diagnostics = AdviceDiagnosticsMap::default();
 
-    for (proc_path, proc) in prepared {
-        let Some(stmts) = proc.stmts.as_deref() else {
+    for (proc_path, proc) in prepared.procs() {
+        let Some(stmts) = proc.stmts() else {
             continue;
         };
         let capability = make_capability(proc_path.clone());
-        let result = analyze_procedure(&capability, provenance_summaries, proc.inputs, stmts);
+        let result = analyze_procedure(&capability, provenance_summaries, proc.inputs(), stmts);
         if !result.diagnostics.is_empty() {
             diagnostics.insert(proc_path.clone(), result.diagnostics);
         }
