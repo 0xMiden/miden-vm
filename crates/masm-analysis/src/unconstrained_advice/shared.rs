@@ -1,11 +1,6 @@
 //! Shared transfer helpers for unconstrained-advice analyses.
 
 use masm_decompiler::{Stmt, Var};
-pub(super) use masm_decompiler::{
-    intrinsic_memory_address_arg_index, intrinsic_merkle_root_arg_range,
-    intrinsic_nonzero_arg_index, intrinsic_positional_u32_arg_range,
-    intrinsic_requires_u32_precondition,
-};
 
 use super::domain::AdviceFact;
 pub(super) use super::{

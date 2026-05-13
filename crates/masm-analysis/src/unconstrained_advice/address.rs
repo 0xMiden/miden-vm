@@ -1,9 +1,9 @@
 //! Diagnostics for unconstrained advice reaching memory address sinks.
 
-use masm_decompiler::Stmt;
+use masm_decompiler::{Stmt, intrinsic_memory_address_arg_index};
 
 use super::{
-    shared::{Env, intrinsic_memory_address_arg_index},
+    shared::Env,
     summary::{AdviceDiagnosticContext, AdviceDiagnosticsMap, AdviceSummaryMap},
     walker::{self, AdviceCapability, AdviceEffect},
 };
