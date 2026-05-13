@@ -3,8 +3,8 @@
 use std::collections::HashMap;
 
 use masm_decompiler::{
-    CallGraph, ProcSignature, SignatureMap, Stmt, SymbolPath, TypeSummaryMap, Workspace,
-    create_resolver, infer_signatures, infer_type_summaries_from_lifted, lift_proc,
+    CallGraph, ProcSignature, SignatureMap, Stmt, SymbolPath, TypeSummary, TypeSummaryMap,
+    Workspace, create_resolver, infer_signatures, infer_type_summaries_from_lifted, lift_proc,
     refine_public_signature_inputs,
 };
 
@@ -12,20 +12,37 @@ use masm_decompiler::{
 #[derive(Debug, Clone)]
 pub(crate) struct PreparedProc {
     /// Input arity inferred from the procedure signature.
-    pub(crate) inputs: usize,
+    inputs: usize,
     /// Output arity inferred from the procedure signature.
-    pub(crate) outputs: usize,
+    outputs: usize,
     /// Lifted SSA statements, when the procedure is analyzable.
-    pub(crate) stmts: Option<Vec<Stmt>>,
+    stmts: Option<Vec<Stmt>>,
+}
+
+impl PreparedProc {
+    /// Input arity inferred from the procedure signature.
+    pub(crate) fn inputs(&self) -> usize {
+        self.inputs
+    }
+
+    /// Output arity inferred from the procedure signature.
+    pub(crate) fn outputs(&self) -> usize {
+        self.outputs
+    }
+
+    /// Lifted SSA statements, when the procedure is analyzable.
+    pub(crate) fn stmts(&self) -> Option<&[Stmt]> {
+        self.stmts.as_deref()
+    }
 }
 
 /// Shared analysis products derived from a workspace.
 #[derive(Debug)]
 pub(crate) struct PreparedAnalysis {
-    pub(crate) callgraph: CallGraph,
-    pub(crate) signatures: SignatureMap,
-    pub(crate) type_summaries: TypeSummaryMap,
-    pub(crate) lifted_procs: HashMap<SymbolPath, PreparedProc>,
+    callgraph: CallGraph,
+    signatures: SignatureMap,
+    type_summaries: TypeSummaryMap,
+    lifted_procs: HashMap<SymbolPath, PreparedProc>,
 }
 
 impl PreparedAnalysis {
@@ -46,6 +63,31 @@ impl PreparedAnalysis {
             type_summaries,
             lifted_procs,
         }
+    }
+
+    /// Inferred procedure signatures keyed by fully qualified procedure path.
+    pub(crate) fn signatures(&self) -> &SignatureMap {
+        &self.signatures
+    }
+
+    /// Bottom-up callgraph used by interprocedural analyses.
+    pub(crate) fn callgraph(&self) -> &CallGraph {
+        &self.callgraph
+    }
+
+    /// Prepared procedure data for a procedure path.
+    pub(crate) fn proc(&self, proc_path: &SymbolPath) -> Option<&PreparedProc> {
+        self.lifted_procs.get(proc_path)
+    }
+
+    /// Prepared procedure data for all procedures.
+    pub(crate) fn procs(&self) -> impl Iterator<Item = (&SymbolPath, &PreparedProc)> {
+        self.lifted_procs.iter()
+    }
+
+    /// Type summary for one procedure path.
+    pub(crate) fn type_summary(&self, proc_path: &SymbolPath) -> Option<&TypeSummary> {
+        self.type_summaries.get(proc_path)
     }
 }
 

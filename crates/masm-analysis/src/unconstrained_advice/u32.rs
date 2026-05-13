@@ -1,10 +1,6 @@
 //! Diagnostics for unconstrained advice reaching `U32` sinks.
 
-use std::collections::HashMap;
-
-use masm_decompiler::{
-    BinOp, Expr, Intrinsic, Stmt, SymbolPath, TypeRequirement, TypeSummaryMap, UnOp, Var,
-};
+use masm_decompiler::{BinOp, Expr, Intrinsic, Stmt, SymbolPath, TypeRequirement, UnOp, Var};
 
 use super::{
     domain::AdviceFact,
@@ -15,24 +11,23 @@ use super::{
     summary::{AdviceDiagnostic, AdviceDiagnosticContext, AdviceDiagnosticsMap, AdviceSummaryMap},
     walker::{self, AdviceCapability, AdviceEffect},
 };
-use crate::prepared::PreparedProc;
+use crate::prepared::PreparedAnalysis;
 
 /// Collect U32 diagnostics for all procedures using already-computed provenance summaries.
 pub(super) fn collect_u32_diagnostics(
-    prepared: &HashMap<SymbolPath, PreparedProc>,
+    prepared: &PreparedAnalysis,
     provenance_summaries: &AdviceSummaryMap,
-    type_summaries: &TypeSummaryMap,
 ) -> AdviceDiagnosticsMap {
     walker::collect_diagnostics(prepared, provenance_summaries, |proc_path| U32Capability {
         diagnostics: AdviceDiagnosticContext::new(proc_path),
-        type_summaries,
+        prepared,
     })
 }
 
 /// Intraprocedural U32 diagnostic collector for one procedure.
 struct U32Capability<'a> {
     diagnostics: AdviceDiagnosticContext,
-    type_summaries: &'a TypeSummaryMap,
+    prepared: &'a PreparedAnalysis,
 }
 
 impl AdviceCapability for U32Capability<'_> {
@@ -112,7 +107,7 @@ impl U32Capability<'_> {
         args: &[Var],
         env: &Env,
     ) -> Vec<AdviceDiagnostic> {
-        let Some(summary) = self.type_summaries.get(&SymbolPath::new(target.to_string())) else {
+        let Some(summary) = self.prepared.type_summary(&SymbolPath::new(target.to_string())) else {
             return Vec::new();
         };
         let mut diagnostics = Vec::new();

@@ -1,8 +1,6 @@
 //! Diagnostics for unconstrained advice reaching Merkle tree root arguments.
 
-use std::collections::HashMap;
-
-use masm_decompiler::{Stmt, SymbolPath};
+use masm_decompiler::Stmt;
 
 use super::{
     domain::AdviceFact,
@@ -10,11 +8,11 @@ use super::{
     summary::{AdviceDiagnosticContext, AdviceDiagnosticsMap, AdviceSummaryMap},
     walker::{self, AdviceCapability, AdviceEffect},
 };
-use crate::prepared::PreparedProc;
+use crate::prepared::PreparedAnalysis;
 
 /// Collect Merkle-root diagnostics for all procedures.
 pub(super) fn collect_merkle_diagnostics(
-    prepared: &HashMap<SymbolPath, PreparedProc>,
+    prepared: &PreparedAnalysis,
     provenance_summaries: &AdviceSummaryMap,
 ) -> AdviceDiagnosticsMap {
     walker::collect_diagnostics(prepared, provenance_summaries, |proc_path| MerkleCapability {

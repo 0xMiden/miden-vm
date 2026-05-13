@@ -34,7 +34,7 @@ impl AnalysisSnapshot {
         let advice_diagnostics = UnconstrainedAdviceCapability.analyze(&prepared);
 
         Self {
-            signatures: prepared.signatures,
+            signatures: prepared.signatures().clone(),
             advice_diagnostics,
         }
     }
