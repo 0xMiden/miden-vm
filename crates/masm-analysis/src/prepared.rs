@@ -15,8 +15,17 @@ pub(crate) struct PreparedProc {
     inputs: usize,
     /// Output arity inferred from the procedure signature.
     outputs: usize,
-    /// Lifted SSA statements, when the procedure is analyzable.
-    stmts: Option<Vec<Stmt>>,
+    /// Procedure body prepared for analysis.
+    body: PreparedProcBody,
+}
+
+/// Prepared body state for one procedure.
+#[derive(Debug, Clone)]
+enum PreparedProcBody {
+    /// Lifted SSA statements for an analyzable procedure.
+    Lifted(Vec<Stmt>),
+    /// Procedure was unavailable or could not be lifted.
+    Opaque,
 }
 
 impl PreparedProc {
@@ -32,7 +41,10 @@ impl PreparedProc {
 
     /// Lifted SSA statements, when the procedure is analyzable.
     pub(crate) fn stmts(&self) -> Option<&[Stmt]> {
-        self.stmts.as_deref()
+        match &self.body {
+            PreparedProcBody::Lifted(stmts) => Some(stmts),
+            PreparedProcBody::Opaque => None,
+        }
     }
 }
 
@@ -54,7 +66,7 @@ impl PreparedAnalysis {
         let lifted_procs = prepare_procs(workspace, &callgraph, &signatures);
         let type_summaries =
             infer_type_summaries_from_lifted(workspace, &callgraph, &signatures, |proc_path| {
-                lifted_procs.get(proc_path).and_then(|proc| proc.stmts.as_deref())
+                lifted_procs.get(proc_path).and_then(PreparedProc::stmts)
             });
 
         Self {
@@ -65,14 +77,9 @@ impl PreparedAnalysis {
         }
     }
 
-    /// Inferred procedure signatures keyed by fully qualified procedure path.
-    pub(crate) fn signatures(&self) -> &SignatureMap {
-        &self.signatures
-    }
-
-    /// Bottom-up callgraph used by interprocedural analyses.
-    pub(crate) fn callgraph(&self) -> &CallGraph {
-        &self.callgraph
+    /// Inferred signature for one procedure path.
+    pub(crate) fn signature(&self, proc_path: &SymbolPath) -> Option<&ProcSignature> {
+        self.signatures.get(proc_path)
     }
 
     /// Prepared procedure data for a procedure path.
@@ -83,6 +90,16 @@ impl PreparedAnalysis {
     /// Prepared procedure data for all procedures.
     pub(crate) fn procs(&self) -> impl Iterator<Item = (&SymbolPath, &PreparedProc)> {
         self.lifted_procs.iter()
+    }
+
+    /// Prepared procedures in bottom-up callgraph order.
+    pub(crate) fn callgraph_procs(
+        &self,
+    ) -> impl Iterator<Item = (&SymbolPath, Option<&PreparedProc>)> {
+        self.callgraph.iter().map(|node| {
+            let proc_path = node.name();
+            (proc_path, self.proc(proc_path))
+        })
     }
 
     /// Type summary for one procedure path.
@@ -102,33 +119,53 @@ fn prepare_procs(
     for node in callgraph.iter() {
         let proc_path = node.name().clone();
         let Some(signature) = signatures.get(&proc_path) else {
-            prepared.insert(proc_path, PreparedProc { inputs: 0, outputs: 0, stmts: None });
+            prepared.insert(proc_path, PreparedProc::opaque(0, 0));
             continue;
         };
 
         let (inputs, outputs) = match signature {
             ProcSignature::Known { inputs, outputs, .. } => (*inputs, *outputs),
             ProcSignature::Unknown => {
-                prepared.insert(proc_path, PreparedProc { inputs: 0, outputs: 0, stmts: None });
+                prepared.insert(proc_path, PreparedProc::opaque(0, 0));
                 continue;
             },
         };
 
         let Some((program, proc)) = workspace.lookup_proc_entry(&proc_path) else {
-            prepared.insert(proc_path, PreparedProc { inputs, outputs, stmts: None });
+            prepared.insert(proc_path, PreparedProc::opaque(inputs, outputs));
             continue;
         };
 
         let resolver = create_resolver(program.module(), workspace.source_manager());
         let stmts = match lift_proc(proc, &proc_path, &resolver, signatures) {
-            Ok(stmts) => Some(stmts),
+            Ok(stmts) => stmts,
             Err(_) => {
-                prepared.insert(proc_path, PreparedProc { inputs, outputs, stmts: None });
+                prepared.insert(proc_path, PreparedProc::opaque(inputs, outputs));
                 continue;
             },
         };
-        prepared.insert(proc_path, PreparedProc { inputs, outputs, stmts });
+        prepared.insert(proc_path, PreparedProc::lifted(inputs, outputs, stmts));
     }
 
     prepared
+}
+
+impl PreparedProc {
+    /// Construct an analyzable prepared procedure.
+    fn lifted(inputs: usize, outputs: usize, stmts: Vec<Stmt>) -> Self {
+        Self {
+            inputs,
+            outputs,
+            body: PreparedProcBody::Lifted(stmts),
+        }
+    }
+
+    /// Construct an opaque prepared procedure.
+    fn opaque(inputs: usize, outputs: usize) -> Self {
+        Self {
+            inputs,
+            outputs,
+            body: PreparedProcBody::Opaque,
+        }
+    }
 }
