@@ -10,9 +10,9 @@ use masm_decompiler::{SymbolPath, Workspace};
 use miden_debug_types::{DefaultSourceManager, SourceManager, SourceSpan};
 
 use crate::{
-    AnalysisSnapshot, SignatureMismatch,
+    AnalysisSnapshot,
     lint_policy::filtered_advice_diagnostics,
-    signature_mismatch_message,
+    signature_mismatch::{SignatureMismatch, signature_mismatch_message},
     unconstrained_advice::{
         AdviceDiagnostic, AdviceRootCauseGroup, group_advice_diagnostics_by_origin,
     },
