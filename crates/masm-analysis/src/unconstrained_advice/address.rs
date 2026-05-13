@@ -25,6 +25,8 @@ struct AddressCapability {
 }
 
 impl AdviceCapability for AddressCapability {
+    type Summary = ();
+
     fn check_stmt(&self, stmt: &Stmt, env: &Env) -> AdviceEffect {
         let mut effect = AdviceEffect::new();
 
