@@ -9,10 +9,10 @@ use super::{MastForestContributor, MastNodeExt};
 use crate::mast::MastNode;
 use crate::{
     Felt, Word,
-    chiplets::hasher,
     mast::{
         DecoratorId, DecoratorStore, ExecutableMastForest, MastForest, MastForestError,
         MastNodeFingerprint, MastNodeId,
+        digest,
     },
     operations::opcodes,
     prettier::PrettyPrint,
@@ -313,7 +313,7 @@ impl LoopNodeBuilder {
         } else {
             let body_hash = mast_forest[self.body].digest();
 
-            hasher::merge_in_domain(&[body_hash, Word::default()], LoopNode::DOMAIN)
+            digest::loop_digest(body_hash)
         };
 
         Ok(LoopNode {
@@ -397,7 +397,7 @@ impl MastForestContributor for LoopNodeBuilder {
             } else {
                 let body_hash = forest[self.body].digest();
 
-                hasher::merge_in_domain(&[body_hash, Word::default()], LoopNode::DOMAIN)
+                digest::loop_digest(body_hash)
             },
         )
     }
