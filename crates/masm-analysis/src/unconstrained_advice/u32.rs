@@ -1,6 +1,6 @@
 //! Diagnostics for unconstrained advice reaching `U32` sinks.
 
-use masm_decompiler::{
+use masm_decompiler::analysis::{
     BinOp, Expr, Intrinsic, Stmt, SymbolPath, TypeRequirement, UnOp, Var,
     intrinsic_positional_u32_arg_range, intrinsic_requires_u32_precondition,
 };
@@ -206,7 +206,7 @@ fn u32_operand_fact(expr: &Expr, env: &Env) -> AdviceFact {
 
 #[cfg(test)]
 mod tests {
-    use masm_decompiler::{Constant, ValueId, Var};
+    use masm_decompiler::analysis::{Constant, ValueId, Var};
     use miden_debug_types::{SourceId, SourceSpan};
 
     use super::*;

@@ -1,6 +1,6 @@
 //! Interprocedural call-result transfer for advice summaries.
 
-use masm_decompiler::{SymbolPath, Var};
+use masm_decompiler::analysis::{SymbolPath, Var};
 
 use super::{domain::AdviceFact, shared::Env, summary::AdviceSummaryMap, u32_domain::U32Validity};
 
@@ -94,7 +94,7 @@ fn substitute_output_fact(summary_fact: &AdviceFact, arg_facts: &[AdviceFact]) -
 
 #[cfg(test)]
 mod tests {
-    use masm_decompiler::{SymbolPath, Var};
+    use masm_decompiler::analysis::{SymbolPath, Var};
 
     use super::*;
     use crate::unconstrained_advice::{

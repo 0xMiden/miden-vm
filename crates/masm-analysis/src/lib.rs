@@ -2,7 +2,7 @@
 
 use std::{collections::HashMap, sync::Arc};
 
-use masm_decompiler::{SymbolPath, Workspace};
+use masm_decompiler::analysis::{SymbolPath, Workspace};
 use miden_debug_types::DefaultSourceManager;
 
 mod abstract_interp;

@@ -5,8 +5,8 @@ use super::{
     summary::TypeSummary,
 };
 use crate::{
-    SymbolPath,
     frontend::{Program, Workspace},
+    symbol::path::SymbolPath,
 };
 
 /// Refine trusted stdlib helpers to keep exact declared limb inputs.

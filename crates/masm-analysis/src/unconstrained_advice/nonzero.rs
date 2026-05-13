@@ -2,7 +2,7 @@
 
 use std::collections::BTreeSet;
 
-use masm_decompiler::{
+use masm_decompiler::analysis::{
     BinOp, Expr, Intrinsic, Stmt, SymbolPath, UnOp, Var, intrinsic_nonzero_arg_index,
 };
 
@@ -243,7 +243,7 @@ fn nonzero_node_sink_fact(expr: &Expr, env: &Env) -> AdviceFact {
 
 #[cfg(test)]
 mod tests {
-    use masm_decompiler::{Constant, ValueId, Var};
+    use masm_decompiler::analysis::{Constant, ValueId, Var};
     use miden_debug_types::{SourceId, SourceSpan};
 
     use super::*;
