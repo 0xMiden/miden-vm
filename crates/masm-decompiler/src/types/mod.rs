@@ -4,6 +4,7 @@
 
 mod declared;
 mod domain;
+mod expr_defs;
 mod inter;
 mod intra;
 mod origin;
