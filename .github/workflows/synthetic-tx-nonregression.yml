@@ -56,6 +56,8 @@ on:
         default: ""
         type: string
 
+permissions: {}
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
@@ -430,17 +432,15 @@ jobs:
           exit 1
 
   comment:
-    name: Comment on pushed commit or associated PR
+    name: Comment on pushed commit
     runs-on: ubuntu-latest
     needs:
       - benchmark
     if: always() && github.event_name == 'push' && needs.benchmark.outputs.current_sha != '' && needs.benchmark.outputs.summary != ''
     permissions:
       contents: write
-      issues: write
-      pull-requests: read
     steps:
-      - name: Create or update benchmark comment
+      - name: Create or update commit comment
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b
         env:
           CURRENT_SHA: ${{ needs.benchmark.outputs.current_sha }}
@@ -459,51 +459,6 @@ jobs:
             const repo = context.repo.repo;
             const commitSha = process.env.CURRENT_SHA;
             const marker = process.env.MARKER;
-
-            const pulls = await github.paginate(
-              github.rest.repos.listPullRequestsAssociatedWithCommit,
-              {
-                owner,
-                repo,
-                commit_sha: commitSha,
-                per_page: 100,
-              },
-            );
-            const openPull = pulls.find(pull => pull.state === 'open') ?? pulls[0];
-
-            if (openPull) {
-              const comments = await github.paginate(
-                github.rest.issues.listComments,
-                {
-                  owner,
-                  repo,
-                  issue_number: openPull.number,
-                  per_page: 100,
-                },
-              );
-
-              const existing = comments.find(comment =>
-                comment.user?.type === 'Bot' && comment.body?.includes(marker)
-              );
-
-              if (existing) {
-                await github.rest.issues.updateComment({
-                  owner,
-                  repo,
-                  comment_id: existing.id,
-                  body,
-                });
-                return;
-              }
-
-              await github.rest.issues.createComment({
-                owner,
-                repo,
-                issue_number: openPull.number,
-                body,
-              });
-              return;
-            }
 
             const comments = await github.paginate(
               github.rest.repos.listCommentsForCommit,
