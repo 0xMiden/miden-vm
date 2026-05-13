@@ -17,10 +17,7 @@ pub use miden_core::deferred::{
     TagKind, ValueType, hash_node,
 };
 
-pub use events::{
-    EVENT_ASSERT_EQ, EVENT_REGISTER_LEAF, EVENT_REGISTER_OP, assert_eq, binary_op_payload,
-    register_node,
-};
+pub use events::{assert_eq, binary_op_payload, register_node};
 pub use handlers::{DeferredTypeHandler, Field0Handler};
 pub use registry::TypeHandlerRegistry;
 pub use state::DeferredState;

@@ -3,11 +3,18 @@ use alloc::vec::Vec;
 use miden_core::{
     Felt, WORD_SIZE, Word, ZERO,
     crypto::hash::Poseidon2,
+    deferred::{DeferredError, DeferredTag, Payload, TagKind},
     events::SystemEvent,
     field::{BasedVectorSpace, Field, PrimeCharacteristicRing, QuadFelt},
 };
 
-use crate::{MemoryError, advice::AdviceError, errors::OperationError, fast::FastProcessor};
+use crate::{
+    MemoryError,
+    advice::AdviceError,
+    deferred::{assert_eq as deferred_assert_eq, register_node},
+    errors::OperationError,
+    fast::FastProcessor,
+};
 
 // CONSTANTS
 // ================================================================================================
@@ -31,6 +38,8 @@ pub enum SystemEventError {
     Operation(#[from] OperationError),
     #[error(transparent)]
     Memory(#[from] MemoryError),
+    #[error(transparent)]
+    Deferred(#[from] DeferredError),
 }
 
 // SYSTEM EVENT HANDLERS
@@ -63,14 +72,9 @@ pub fn handle_system_event(
         },
         SystemEvent::HqwordToMap => insert_hqword_into_adv_map(processor),
         SystemEvent::HpermToMap => insert_hperm_into_adv_map(processor),
-        SystemEvent::DeferredRegisterLeaf
-        | SystemEvent::DeferredRegisterOp
-        | SystemEvent::DeferredAssertEq => {
-            // Wired up in a follow-up commit; the host's on_event intercept currently handles
-            // these via the DefaultHost path.
-            let _ = processor;
-            Ok(())
-        },
+        SystemEvent::DeferredRegisterLeaf => handle_deferred_register(processor, TagKind::Leaf),
+        SystemEvent::DeferredRegisterOp => handle_deferred_register(processor, TagKind::BinaryOp),
+        SystemEvent::DeferredAssertEq => handle_deferred_assert_eq(processor),
     }
 }
 
@@ -538,6 +542,60 @@ fn push_transformed_stack_top(
         .map_err(|_| OperationError::NotU32Values { values: vec![stack_top] })?;
     let transformed_stack_top = f(stack_top);
     processor.advice.push_stack(transformed_stack_top)?;
+    Ok(())
+}
+
+// DEFERRED-DAG SYSTEM EVENTS
+// ================================================================================================
+
+/// Stack offset of the deferred tag relative to the event ID at position 0.
+const DEFERRED_TAG_OFFSET: usize = 1;
+/// Stack offset of the data segment (payload, or `lhs_digest || rhs_digest`) below the tag.
+const DEFERRED_DATA_OFFSET: usize = 5;
+
+/// Reads a 4-felt deferred tag from the stack starting at `start` and validates its kind.
+fn read_deferred_tag(processor: &FastProcessor, start: usize) -> Result<DeferredTag, DeferredError> {
+    let felts: [Felt; 4] = core::array::from_fn(|i| processor.stack_get(start + i));
+    DeferredTag::from_felts(felts)
+}
+
+/// Reads an 8-felt payload from the stack starting at `start`.
+fn read_deferred_payload(processor: &FastProcessor, start: usize) -> Payload {
+    let felts: [Felt; 8] = core::array::from_fn(|i| processor.stack_get(start + i));
+    Payload::new(felts)
+}
+
+/// Reads a 4-felt digest (a `Word`) from the stack starting at `start`.
+fn read_deferred_digest(processor: &FastProcessor, start: usize) -> Word {
+    let felts: [Felt; 4] = core::array::from_fn(|i| processor.stack_get(start + i));
+    Word::new(felts)
+}
+
+/// Handles `SystemEvent::DeferredRegisterLeaf` and `DeferredRegisterOp`. Reads the tag and
+/// payload off the operand stack, validates the tag's kind, hashes the node, and inserts it into
+/// the DAG state on the advice provider. The operand stack is left untouched.
+fn handle_deferred_register(
+    processor: &mut FastProcessor,
+    expected_kind: TagKind,
+) -> Result<(), SystemEventError> {
+    let tag = read_deferred_tag(processor, DEFERRED_TAG_OFFSET)?;
+    let payload = read_deferred_payload(processor, DEFERRED_DATA_OFFSET);
+
+    let (state, registry) = processor.deferred_view_mut();
+    register_node(state, registry, tag, payload, expected_kind)?;
+    Ok(())
+}
+
+/// Handles `SystemEvent::DeferredAssertEq`. Reads the tag and two digests off the operand stack,
+/// recursively evaluates both sides through the type handler, and records the assertion. The
+/// operand stack is left untouched; a mismatch surfaces as a `DeferredError::AssertionFailed`.
+fn handle_deferred_assert_eq(processor: &mut FastProcessor) -> Result<(), SystemEventError> {
+    let tag = read_deferred_tag(processor, DEFERRED_TAG_OFFSET)?;
+    let lhs_digest = read_deferred_digest(processor, DEFERRED_DATA_OFFSET);
+    let rhs_digest = read_deferred_digest(processor, DEFERRED_DATA_OFFSET + 4);
+
+    let (state, registry) = processor.deferred_view_mut();
+    deferred_assert_eq(state, registry, tag, lhs_digest, rhs_digest)?;
     Ok(())
 }
 

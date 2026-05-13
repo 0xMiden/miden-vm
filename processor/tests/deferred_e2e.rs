@@ -1,21 +1,43 @@
 //! End-to-end test: drive the three deferred system events through a real `FastProcessor` run
-//! via `emit` instructions, then inspect the host-owned `DeferredState` and the extracted
-//! witness. Includes a legacy-smoke check that an unrelated `EventHandler` registered on the
-//! same `DefaultHost` still fires under the deferred infrastructure.
+//! via `emit` instructions, then inspect the `DeferredState` accumulated on the advice provider
+//! and the extracted witness. Includes a legacy-smoke check that an unrelated `EventHandler`
+//! registered on the host still fires alongside the deferred infrastructure.
 
 use alloc::vec::Vec;
 use std::sync::Arc;
 
 use miden_assembly::Assembler;
-use miden_processor::ProcessorState;
+use miden_core::events::SystemEvent;
 use miden_processor::{
-    DefaultHost, ExecutionOptions, Felt, StackInputs, Word, ZERO,
+    DefaultHost, ExecutionOptions, FastProcessor, Felt, ProcessorState, StackInputs, Word, ZERO,
     advice::{AdviceInputs, AdviceMutation},
-    deferred::{DeferredTag, Payload, binary_op_payload, extract_witness, hash_node},
+    deferred::{
+        DeferredTag, Field0Handler, Payload, TypeHandlerRegistry, binary_op_payload,
+        extract_witness, hash_node,
+    },
     event::{EventError, EventHandler, EventName},
 };
 
 extern crate alloc;
+
+// PROCESSOR FACTORY
+// ================================================================================================
+
+/// Builds a `FastProcessor` configured for the deferred-DAG tests with the [`Field0Handler`]
+/// registered. The processor consumes itself when running the program.
+fn build_processor() -> FastProcessor {
+    let mut registry = TypeHandlerRegistry::new();
+    registry
+        .register(Arc::new(Field0Handler))
+        .expect("Field0Handler registration on empty registry");
+    FastProcessor::new_with_options(
+        StackInputs::default(),
+        AdviceInputs::default(),
+        ExecutionOptions::default(),
+    )
+    .expect("processor construction")
+    .with_deferred_registry(Arc::new(registry))
+}
 
 // EVENT-DRIVING MASM BUILDER
 // ================================================================================================
@@ -65,8 +87,6 @@ fn field0_leaf_payload(low: u64) -> Payload {
 
 #[test]
 fn deferred_end_to_end_register_eval_assert() {
-    use miden_processor::event::EventName;
-
     // Precompute every digest the program will use. The processor will recompute these via
     // Poseidon2; if anything diverges between Rust and the in-host hash_node helper, the
     // witness check below will catch it.
@@ -89,16 +109,9 @@ fn deferred_end_to_end_register_eval_assert() {
     let mul_payload = binary_op_payload(add_digest, c_digest);
     let mul_digest = hash_node(mul_tag, &mul_payload);
 
-    // Cached event IDs.
-    let register_leaf_id = EventName::new(miden_processor::deferred::EVENT_REGISTER_LEAF)
-        .to_event_id()
-        .as_u64();
-    let register_op_id = EventName::new(miden_processor::deferred::EVENT_REGISTER_OP)
-        .to_event_id()
-        .as_u64();
-    let assert_eq_id = EventName::new(miden_processor::deferred::EVENT_ASSERT_EQ)
-        .to_event_id()
-        .as_u64();
+    let register_leaf_id = SystemEvent::DeferredRegisterLeaf.event_id().as_u64();
+    let register_op_id = SystemEvent::DeferredRegisterOp.event_id().as_u64();
+    let assert_eq_id = SystemEvent::DeferredAssertEq.event_id().as_u64();
 
     // Build the program.
     let mut src = String::from("begin\n");
@@ -114,16 +127,11 @@ fn deferred_end_to_end_register_eval_assert() {
     let program = Assembler::default().assemble_program(&src).expect("program must assemble");
 
     let mut host = DefaultHost::default();
-    miden_processor::execute_sync(
-        &program,
-        StackInputs::default(),
-        AdviceInputs::default(),
-        &mut host,
-        ExecutionOptions::default(),
-    )
-    .expect("execution must succeed");
+    let output = build_processor()
+        .execute_sync(&program, &mut host)
+        .expect("execution must succeed");
 
-    let state = host.deferred_state();
+    let state = output.advice.deferred_state();
     // Six reachable nodes, one assertion.
     let expected_digests = [a_digest, b_digest, c_digest, d_digest, add_digest, mul_digest];
     for d in expected_digests {
@@ -165,12 +173,8 @@ fn deferred_assert_eq_mismatch_fails_execution() {
     let a_digest = hash_node(leaf_tag, &a_payload);
     let b_digest = hash_node(leaf_tag, &b_payload);
 
-    let register_leaf_id = EventName::new(miden_processor::deferred::EVENT_REGISTER_LEAF)
-        .to_event_id()
-        .as_u64();
-    let assert_eq_id = EventName::new(miden_processor::deferred::EVENT_ASSERT_EQ)
-        .to_event_id()
-        .as_u64();
+    let register_leaf_id = SystemEvent::DeferredRegisterLeaf.event_id().as_u64();
+    let assert_eq_id = SystemEvent::DeferredAssertEq.event_id().as_u64();
 
     let mut src = String::from("begin\n");
     emit_event(&mut src, register_leaf_id, leaf_tag.to_felts(), a_payload.0);
@@ -186,13 +190,7 @@ fn deferred_assert_eq_mismatch_fails_execution() {
     let program = Assembler::default().assemble_program(&src).expect("program must assemble");
 
     let mut host = DefaultHost::default();
-    let result = miden_processor::execute_sync(
-        &program,
-        StackInputs::default(),
-        AdviceInputs::default(),
-        &mut host,
-        ExecutionOptions::default(),
-    );
+    let result = build_processor().execute_sync(&program, &mut host);
     assert!(result.is_err(), "mismatched assert_eq must fail execution");
 }
 
@@ -222,9 +220,7 @@ fn legacy_event_handler_still_works_with_deferred_infrastructure() {
     // Mix a deferred RegisterLeaf with the legacy event in one program.
     let leaf_tag = DeferredTag::Field0Leaf;
     let payload = field0_leaf_payload(42);
-    let register_leaf_id = EventName::new(miden_processor::deferred::EVENT_REGISTER_LEAF)
-        .to_event_id()
-        .as_u64();
+    let register_leaf_id = SystemEvent::DeferredRegisterLeaf.event_id().as_u64();
 
     let mut src = String::from("begin\n");
     // Legacy event: push event_id, emit, drop.
@@ -238,15 +234,9 @@ fn legacy_event_handler_still_works_with_deferred_infrastructure() {
 
     let program = Assembler::default().assemble_program(&src).expect("program must assemble");
 
-    miden_processor::execute_sync(
-        &program,
-        StackInputs::default(),
-        AdviceInputs::default(),
-        &mut host,
-        ExecutionOptions::default(),
-    )
-    .expect("execution must succeed");
+    let output =
+        build_processor().execute_sync(&program, &mut host).expect("execution must succeed");
 
     assert_eq!(counter.load(std::sync::atomic::Ordering::SeqCst), 1);
-    assert_eq!(host.deferred_state().nodes().len(), 1);
+    assert_eq!(output.advice.deferred_state().nodes().len(), 1);
 }

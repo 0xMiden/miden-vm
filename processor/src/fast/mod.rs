@@ -348,6 +348,19 @@ impl FastProcessor {
         &self.deferred_registry
     }
 
+    /// Returns a mutable view onto the deferred-DAG state and an immutable reference to the
+    /// type-handler registry as a disjoint borrow pair.
+    ///
+    /// The advice provider and the registry live in different fields of the processor; this
+    /// helper exists so the deferred system-event handlers can borrow both simultaneously without
+    /// running into the borrow checker.
+    #[inline(always)]
+    pub(crate) fn deferred_view_mut(
+        &mut self,
+    ) -> (&mut crate::deferred::DeferredState, &TypeHandlerRegistry) {
+        (self.advice.deferred_state_mut(), &self.deferred_registry)
+    }
+
     /// Returns true if decorators should be executed.
     ///
     /// This corresponds to either being in debug mode (for debug decorators) or having tracing

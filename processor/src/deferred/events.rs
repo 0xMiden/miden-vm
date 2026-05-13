@@ -1,9 +1,10 @@
-//! The three generic system event handlers for the deferred-DAG subsystem.
+//! Pure helpers driving the three deferred-DAG system event handlers.
 //!
-//! These are intercepted by [`DefaultHost`](crate::DefaultHost) before its event-registry
-//! dispatch (mirroring how the VM intercepts `SystemEvent`s): the [`EventHandler`] trait's
-//! `&self` signature precludes mutating the host-owned deferred state, so handlers live here as
-//! free functions with `&mut DeferredState` access.
+//! [`register_node`] and [`assert_eq`] are called from the
+//! [`SystemEvent::DeferredRegisterLeaf`](miden_core::events::SystemEvent::DeferredRegisterLeaf) /
+//! `DeferredRegisterOp` / `DeferredAssertEq` dispatch arms in
+//! `processor::fast::basic_block::sys_event_handlers`. They are exposed as free functions so the
+//! handlers can split-borrow the deferred state and the type-handler registry from the processor.
 //!
 //! v1 stack layout (position 0 is top, event_id already consumed by the caller):
 //! - `RegisterLeaf` / `RegisterOp`: positions `1..5` hold tag felts, positions `5..13` hold
@@ -23,16 +24,6 @@ use super::{
     state::DeferredState,
     transaction::{DeferredMutation, HandlerTransaction},
 };
-
-// EVENT NAMES
-// ================================================================================================
-
-/// Event name for the "register a canonical-leaf node" system event.
-pub const EVENT_REGISTER_LEAF: &str = "deferred::register_leaf";
-/// Event name for the "register a binary-op node" system event.
-pub const EVENT_REGISTER_OP: &str = "deferred::register_op";
-/// Event name for the "assert two DAG values evaluate equal" system event.
-pub const EVENT_ASSERT_EQ: &str = "deferred::assert_eq";
 
 // REGISTER (LEAF | OP)
 // ================================================================================================
