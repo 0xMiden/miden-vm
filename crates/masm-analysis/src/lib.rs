@@ -11,6 +11,7 @@ use miden_debug_types::{DefaultSourceManager, SourceSpan, Spanned};
 mod abstract_interp;
 mod capability;
 pub mod lint;
+mod lint_policy;
 mod prepared;
 mod unconstrained_advice;
 
