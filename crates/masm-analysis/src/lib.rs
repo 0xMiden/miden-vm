@@ -14,29 +14,35 @@ pub mod lint;
 mod prepared;
 mod unconstrained_advice;
 
-use capability::{AnalysisCapability, ModuleAnalysisCapability};
+use capability::AnalysisCapability;
 use prepared::PreparedAnalysis;
 use unconstrained_advice::{AdviceDiagnostic, UnconstrainedAdviceCapability};
 
 /// Results of running all analysis passes on a workspace.
 #[derive(Debug)]
 struct AnalysisSnapshot {
-    /// Inferred procedure signatures.
-    signatures: SignatureMap,
+    /// Declared-vs-inferred signature mismatch diagnostics.
+    signature_mismatches: Vec<SignatureMismatch>,
     /// Unconstrained advice flow diagnostics.
     advice_diagnostics: HashMap<SymbolPath, Vec<AdviceDiagnostic>>,
 }
 
 impl AnalysisSnapshot {
     /// Run all analysis passes on a workspace and return the combined results.
-    fn from_workspace(workspace: &Workspace) -> Self {
+    fn from_workspace(
+        workspace: &Workspace,
+        sources: Arc<DefaultSourceManager>,
+        include_signature_mismatches: bool,
+    ) -> Self {
         let prepared = PreparedAnalysis::new(workspace);
+        let signature_mismatches = if include_signature_mismatches {
+            SignatureMismatchCapability { workspace, sources }.analyze(&prepared)
+        } else {
+            Vec::new()
+        };
         let advice_diagnostics = UnconstrainedAdviceCapability.analyze(&prepared);
 
-        Self {
-            signatures: prepared.signatures().clone(),
-            advice_diagnostics,
-        }
+        Self { signature_mismatches, advice_diagnostics }
     }
 }
 
@@ -86,69 +92,74 @@ fn signature_mismatch_message(mismatch: &SignatureMismatch) -> String {
     }
 }
 
-/// Compute signature mismatches using a pre-computed signature map.
-///
-/// This avoids rebuilding the call graph and signatures from scratch. Use this
-/// when an [`AnalysisSnapshot`] is already available.
-fn signature_mismatches_from_snapshot(
+/// Analysis capability for declared-vs-inferred signature mismatches.
+struct SignatureMismatchCapability<'a> {
+    workspace: &'a Workspace,
+    sources: Arc<DefaultSourceManager>,
+}
+
+impl AnalysisCapability for SignatureMismatchCapability<'_> {
+    type Output = Vec<SignatureMismatch>;
+
+    fn analyze(&self, prepared: &PreparedAnalysis) -> Self::Output {
+        self.workspace
+            .modules()
+            .flat_map(|program| {
+                signature_mismatches_for_module(
+                    program.module(),
+                    self.sources.clone(),
+                    prepared.signatures(),
+                )
+            })
+            .collect()
+    }
+}
+
+/// Compute signature mismatches for a single module using prepared signatures.
+fn signature_mismatches_for_module(
     module: &Module,
     sources: Arc<DefaultSourceManager>,
     signatures: &SignatureMap,
 ) -> Vec<SignatureMismatch> {
-    SignatureMismatchCapability { sources, signatures }.analyze_module(module)
-}
-
-/// Module-level capability for declared-vs-inferred signature mismatches.
-struct SignatureMismatchCapability<'a> {
-    sources: Arc<DefaultSourceManager>,
-    signatures: &'a SignatureMap,
-}
-
-impl ModuleAnalysisCapability for SignatureMismatchCapability<'_> {
-    type Output = Vec<SignatureMismatch>;
-
-    fn analyze_module(&self, module: &Module) -> Self::Output {
-        let mut findings = Vec::new();
-        let Ok(mut resolver) = module.type_resolver(self.sources.clone()) else {
-            return findings;
+    let mut findings = Vec::new();
+    let Ok(mut resolver) = module.type_resolver(sources) else {
+        return findings;
+    };
+    for proc in module.procedures() {
+        let Some(signature) = proc.signature() else {
+            continue;
         };
-        for proc in module.procedures() {
-            let Some(signature) = proc.signature() else {
-                continue;
-            };
-            let Some(declared) = signature_stack_signature(signature, &mut resolver) else {
-                continue;
-            };
+        let Some(declared) = signature_stack_signature(signature, &mut resolver) else {
+            continue;
+        };
 
-            let symbol_path = SymbolPath::from_module_and_name(module, proc.name().as_str());
-            let Some(inferred) = self.signatures.get(&symbol_path) else {
-                continue;
-            };
-            let Some(StackSignature { inputs, outputs }) = inferred_stack_signature(inferred)
-            else {
-                continue;
-            };
+        let symbol_path = SymbolPath::from_module_and_name(module, proc.name().as_str());
+        let Some(inferred) = signatures.get(&symbol_path) else {
+            continue;
+        };
+        let Some(StackSignature { inputs, outputs }) = inferred_stack_signature(inferred) else {
+            continue;
+        };
 
-            if declared.inputs != inputs || declared.outputs != outputs {
-                let span = {
-                    let sig_span = signature.span();
-                    if sig_span == SourceSpan::UNKNOWN {
-                        proc.name().span()
-                    } else {
-                        sig_span
-                    }
-                };
-                findings.push(SignatureMismatch {
-                    proc_name: proc.name().as_str().to_string(),
-                    span,
-                    declared,
-                    inferred: StackSignature { inputs, outputs },
-                });
-            }
+        if declared.inputs != inputs || declared.outputs != outputs {
+            let span = {
+                let sig_span = signature.span();
+                if sig_span == SourceSpan::UNKNOWN {
+                    proc.name().span()
+                } else {
+                    sig_span
+                }
+            };
+            findings.push(SignatureMismatch {
+                proc_name: proc.name().as_str().to_string(),
+                span,
+                declared,
+                inferred: StackSignature { inputs, outputs },
+            });
         }
-
-        findings
     }
+
+    findings
 }
 
 fn signature_stack_signature<R>(
