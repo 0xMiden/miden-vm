@@ -3,7 +3,12 @@
 //! Keep this surface narrow: it defines what the lint binary consumes from the
 //! vendored analysis/decompiler crates.
 
-use std::{collections::HashSet, path::PathBuf, sync::Arc};
+use std::{
+    collections::{BTreeSet, HashSet},
+    fmt,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 pub use masm_decompiler::LibraryRoot;
 use masm_decompiler::{SymbolPath, Workspace};
@@ -46,6 +51,20 @@ pub struct LintAnalysisInput {
     pub entry_files: Vec<PathBuf>,
     /// Library roots used to resolve imported modules.
     pub roots: Vec<LibraryRoot>,
+    /// Source manager shared with diagnostic rendering.
+    pub sources: Arc<DefaultSourceManager>,
+    /// Group advice warnings by origin instead of emitting sink-level warnings.
+    pub group_by_origin: bool,
+}
+
+/// Filesystem-oriented inputs accepted by the `masm-lint` binary.
+pub struct LintPathAnalysisInput {
+    /// Source files or directories requested by the CLI.
+    pub inputs: Vec<PathBuf>,
+    /// User-supplied library roots.
+    pub libraries: Vec<LibraryRoot>,
+    /// Working directory used to resolve relative inputs and default imports.
+    pub cwd: PathBuf,
     /// Source manager shared with diagnostic rendering.
     pub sources: Arc<DefaultSourceManager>,
     /// Group advice warnings by origin instead of emitting sink-level warnings.
@@ -97,6 +116,77 @@ pub struct UnresolvedModule {
     pub path: String,
     /// Configured namespace that should contain this module, if any.
     pub configured_namespace: Option<String>,
+}
+
+/// Hard error encountered before MASM analysis can run.
+#[derive(Debug)]
+pub enum LintPathAnalysisError {
+    /// A configured library root does not exist.
+    MissingLibraryRoot {
+        /// Configured namespace.
+        namespace: String,
+        /// Configured filesystem path.
+        path: PathBuf,
+    },
+    /// A requested input path does not exist.
+    MissingInput {
+        /// CLI input path.
+        path: PathBuf,
+    },
+}
+
+impl fmt::Display for LintPathAnalysisError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            LintPathAnalysisError::MissingLibraryRoot { namespace, path } => write!(
+                f,
+                "library root path does not exist: {} (for namespace `{namespace}`)",
+                path.display()
+            ),
+            LintPathAnalysisError::MissingInput { path } => {
+                write!(f, "input path does not exist: {}", path.display())
+            },
+        }
+    }
+}
+
+impl std::error::Error for LintPathAnalysisError {}
+
+/// Discover MASM files, prepare roots, and run the lint analysis pipeline.
+///
+/// Returns `Ok(None)` when the requested inputs exist but contain no MASM files.
+pub fn analyze_paths(
+    input: LintPathAnalysisInput,
+) -> Result<Option<LintAnalysisReport>, LintPathAnalysisError> {
+    let mut roots = normalize_existing_library_roots(&input.libraries, &input.cwd)?;
+
+    let mut masm_files = BTreeSet::new();
+    for path in &input.inputs {
+        let abs = normalize_cli_path(path, &input.cwd);
+        if abs.is_dir() {
+            collect_masm_files(&abs, &mut masm_files);
+        } else if abs.is_file() {
+            masm_files.insert(abs);
+        } else {
+            return Err(LintPathAnalysisError::MissingInput { path: path.clone() });
+        }
+    }
+
+    if masm_files.is_empty() {
+        return Ok(None);
+    }
+
+    roots.push(LibraryRoot::new(
+        "",
+        normalize_cli_path(input.cwd.as_path(), input.cwd.as_path()),
+    ));
+
+    Ok(Some(analyze_entries(LintAnalysisInput {
+        entry_files: masm_files.into_iter().collect(),
+        roots,
+        sources: input.sources,
+        group_by_origin: input.group_by_origin,
+    })))
 }
 
 /// Load the requested entry files, resolve dependencies, and return lint diagnostics.
@@ -201,6 +291,58 @@ fn configured_namespace_for_module<'a>(
         .filter(|root| root.matches_module_path(module.as_str()))
         .map(|root| root.namespace.as_str())
         .max_by_key(|ns| ns.len())
+}
+
+fn normalize_existing_library_roots(
+    roots: &[LibraryRoot],
+    cwd: &Path,
+) -> Result<Vec<LibraryRoot>, LintPathAnalysisError> {
+    let mut normalized_roots = Vec::with_capacity(roots.len());
+    for root in roots {
+        let path = normalize_cli_path(&root.path, cwd);
+        if !path.exists() {
+            return Err(LintPathAnalysisError::MissingLibraryRoot {
+                namespace: root.namespace.clone(),
+                path: root.path.clone(),
+            });
+        }
+        let normalized = if root.trusted_stdlib {
+            LibraryRoot::trusted_stdlib(root.namespace.as_str(), path)
+        } else {
+            LibraryRoot::new(root.namespace.as_str(), path)
+        };
+        normalized_roots.push(normalized);
+    }
+    Ok(normalized_roots)
+}
+
+/// Recursively collect `.masm` files under `dir`.
+fn collect_masm_files(dir: &Path, out: &mut BTreeSet<PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_masm_files(&path, out);
+        } else if path.extension().and_then(|e| e.to_str()) == Some("masm") {
+            if let Ok(canonical) = std::fs::canonicalize(&path) {
+                out.insert(canonical);
+            } else {
+                out.insert(path);
+            }
+        }
+    }
+}
+
+/// Normalize a CLI path: resolve to absolute and canonicalize if possible.
+fn normalize_cli_path(path: &Path, cwd: &Path) -> PathBuf {
+    let abs = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        cwd.join(path)
+    };
+    std::fs::canonicalize(&abs).unwrap_or(abs)
 }
 
 /// Convert a [`SignatureMismatch`] into a [`LintDiagnostic`].
