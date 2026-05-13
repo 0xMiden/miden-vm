@@ -183,7 +183,7 @@ impl<'input> Lexer<'input> {
                     break;
                 },
                 _ => {
-                    identifier_like &= ch.is_ascii_alphanumeric() || ch.is_ascii_graphic();
+                    identifier_like &= ch.is_ascii_graphic();
                     self.advance_char();
                 },
             }
