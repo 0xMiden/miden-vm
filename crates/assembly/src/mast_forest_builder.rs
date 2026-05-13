@@ -479,15 +479,35 @@ impl MastForestBuilder {
         &self,
         draft: &PendingMastNodeDraft,
     ) -> MastNodeFingerprint {
+        let asm_ops_data = serialize_asm_op_refs(&self.asm_op_by_ref, &draft.asm_ops);
+        let debug_vars_data = serialize_debug_var_refs(&self.debug_vars, &draft.debug_vars);
+        self.dedup_fingerprint_for_pending_metadata_bytes(draft, &asm_ops_data, &debug_vars_data)
+    }
+
+    fn dedup_fingerprint_for_pending_metadata_bytes(
+        &self,
+        draft: &PendingMastNodeDraft,
+        asm_ops_data: &[u8],
+        debug_vars_data: &[u8],
+    ) -> MastNodeFingerprint {
         let base_fingerprint = self.fingerprint_for_pending_record(
             draft.digest,
             &draft.kind,
             &draft.child_refs,
             &draft.decorator_refs,
         );
-        let asm_ops_data = serialize_asm_op_refs(&self.asm_op_by_ref, &draft.asm_ops);
-        let debug_vars_data = serialize_debug_var_refs(&self.debug_vars, &draft.debug_vars);
-        self.maybe_augment(self.maybe_augment(base_fingerprint, &asm_ops_data), &debug_vars_data)
+        self.maybe_augment(self.maybe_augment(base_fingerprint, asm_ops_data), debug_vars_data)
+    }
+
+    fn dedup_fingerprint_for_pending_metadata_payloads<'a>(
+        &self,
+        draft: &PendingMastNodeDraft,
+        asm_ops: impl IntoIterator<Item = (usize, &'a AssemblyOp)>,
+        debug_vars: impl IntoIterator<Item = (usize, &'a DebugVarInfo)>,
+    ) -> MastNodeFingerprint {
+        let asm_ops_data = serialize_asm_ops(asm_ops);
+        let debug_vars_data = serialize_debug_vars(debug_vars);
+        self.dedup_fingerprint_for_pending_metadata_bytes(draft, &asm_ops_data, &debug_vars_data)
     }
 
     fn intern_pending_node(&mut self, draft: PendingMastNodeDraft) -> Result<MastNodeRef, Report> {
@@ -499,41 +519,21 @@ impl MastForestBuilder {
         }
     }
 
-    fn intern_pending_node_with_metadata_payloads(
+    fn insert_pending_node_with_allocated_metadata_refs(
         &mut self,
-        mut draft: PendingMastNodeDraft,
-        asm_ops: Vec<(usize, AssemblyOp)>,
-        debug_vars: Vec<(usize, DebugVarInfo)>,
+        dedup_fingerprint: MastNodeFingerprint,
+        draft: PendingMastNodeDraft,
+        asm_op_checkpoint: usize,
+        debug_var_checkpoint: usize,
     ) -> Result<MastNodeRef, Report> {
-        let base_fingerprint = self.fingerprint_for_pending_record(
-            draft.digest,
-            &draft.kind,
-            &draft.child_refs,
-            &draft.decorator_refs,
-        );
-        let asm_ops_data = serialize_asm_op_payloads(&asm_ops);
-        let debug_vars_data = serialize_debug_var_payloads(&debug_vars);
-        let dedup_fingerprint = self
-            .maybe_augment(self.maybe_augment(base_fingerprint, &asm_ops_data), &debug_vars_data);
-
-        if let Some(node_ref) = self.find_node_ref_by_fingerprint(&dedup_fingerprint) {
-            return Ok(node_ref);
+        match self.insert_pending_node_record_ref(dedup_fingerprint, draft) {
+            Ok(node_ref) => Ok(node_ref),
+            Err(err) => {
+                truncate_index_vec(&mut self.asm_op_by_ref, asm_op_checkpoint);
+                truncate_index_vec(&mut self.debug_vars, debug_var_checkpoint);
+                Err(err)
+            },
         }
-
-        draft.asm_ops = asm_ops
-            .into_iter()
-            .map(|(op_idx, asm_op)| {
-                self.add_asm_op_ref(asm_op).map(|asm_op_ref| (op_idx, asm_op_ref))
-            })
-            .collect::<Result<Vec<_>, Report>>()?;
-        draft.debug_vars = debug_vars
-            .into_iter()
-            .map(|(op_idx, debug_var)| {
-                self.add_debug_var_ref(debug_var).map(|debug_var_ref| (op_idx, debug_var_ref))
-            })
-            .collect::<Result<Vec<_>, Report>>()?;
-
-        self.insert_pending_node_record_ref(dedup_fingerprint, draft)
     }
 
     fn find_node_ref_by_fingerprint(
@@ -663,6 +663,53 @@ impl MastForestBuilder {
             .push(debug_var)
             .into_diagnostic()
             .wrap_err("assembler created too many debug variables")
+    }
+
+    fn indexed_asm_op_refs(
+        &mut self,
+        asm_ops: Vec<(usize, AssemblyOp)>,
+    ) -> Result<Vec<(usize, AsmOpRef)>, Report> {
+        asm_ops
+            .into_iter()
+            .map(|(op_idx, asm_op)| self.add_asm_op_ref(asm_op).map(|asm_ref| (op_idx, asm_ref)))
+            .collect()
+    }
+
+    fn indexed_debug_var_refs(
+        &mut self,
+        debug_vars: Vec<(usize, DebugVarInfo)>,
+    ) -> Result<Vec<(usize, DebugVarRef)>, Report> {
+        debug_vars
+            .into_iter()
+            .map(|(op_idx, debug_var)| {
+                self.add_debug_var_ref(debug_var).map(|debug_var_ref| (op_idx, debug_var_ref))
+            })
+            .collect()
+    }
+
+    fn intern_pending_node_with_asm_op(
+        &mut self,
+        mut draft: PendingMastNodeDraft,
+        asm_op: AssemblyOp,
+    ) -> Result<MastNodeRef, Report> {
+        let dedup_fingerprint = self.dedup_fingerprint_for_pending_metadata_payloads(
+            &draft,
+            core::iter::once((0, &asm_op)),
+            core::iter::empty(),
+        );
+        if let Some(node_ref) = self.find_node_ref_by_fingerprint(&dedup_fingerprint) {
+            return Ok(node_ref);
+        }
+
+        let asm_op_checkpoint = self.asm_op_by_ref.len();
+        let debug_var_checkpoint = self.debug_vars.len();
+        draft.asm_ops = self.indexed_asm_op_refs(vec![(0, asm_op)])?;
+        self.insert_pending_node_with_allocated_metadata_refs(
+            dedup_fingerprint,
+            draft,
+            asm_op_checkpoint,
+            debug_var_checkpoint,
+        )
     }
 
     /// Removes the unused nodes that were created as part of the assembly process, and returns the
@@ -1138,21 +1185,32 @@ fn append_serialized_asm_op(data: &mut Vec<u8>, op_idx: usize, asm_op: &Assembly
 }
 
 /// Serializes pending AssemblyOp content into bytes for fingerprint augmentation.
-fn serialize_asm_op_refs(
-    asm_op_by_ref: &IndexVec<AsmOpRef, AssemblyOp>,
-    asm_ops: &[(usize, AsmOpRef)],
-) -> Vec<u8> {
+fn serialize_asm_ops<'a>(asm_ops: impl IntoIterator<Item = (usize, &'a AssemblyOp)>) -> Vec<u8> {
     let mut data = Vec::new();
-    for (op_idx, asm_op_ref) in asm_ops {
-        append_serialized_asm_op(&mut data, *op_idx, &asm_op_by_ref[*asm_op_ref]);
+    for (op_idx, asm_op) in asm_ops {
+        append_serialized_asm_op(&mut data, op_idx, asm_op);
     }
     data
 }
 
-fn serialize_asm_op_payloads(asm_ops: &[(usize, AssemblyOp)]) -> Vec<u8> {
+fn serialize_asm_op_refs(
+    asm_op_by_ref: &IndexVec<AsmOpRef, AssemblyOp>,
+    asm_ops: &[(usize, AsmOpRef)],
+) -> Vec<u8> {
+    serialize_asm_ops(
+        asm_ops
+            .iter()
+            .map(|(op_idx, asm_op_ref)| (*op_idx, &asm_op_by_ref[*asm_op_ref])),
+    )
+}
+
+fn serialize_debug_vars<'a>(
+    debug_vars: impl IntoIterator<Item = (usize, &'a DebugVarInfo)>,
+) -> Vec<u8> {
     let mut data = Vec::new();
-    for (op_idx, asm_op) in asm_ops {
-        append_serialized_asm_op(&mut data, *op_idx, asm_op);
+    for (op_idx, debug_var) in debug_vars {
+        data.extend_from_slice(&op_idx.to_le_bytes());
+        debug_var.write_into(&mut data);
     }
     data
 }
@@ -1161,21 +1219,17 @@ fn serialize_debug_var_refs(
     debug_var_by_ref: &IndexVec<DebugVarRef, DebugVarInfo>,
     debug_vars: &[(usize, DebugVarRef)],
 ) -> Vec<u8> {
-    let mut data = Vec::new();
-    for (op_idx, debug_var_ref) in debug_vars {
-        data.extend_from_slice(&op_idx.to_le_bytes());
-        debug_var_by_ref[*debug_var_ref].write_into(&mut data);
-    }
-    data
+    serialize_debug_vars(
+        debug_vars
+            .iter()
+            .map(|(op_idx, debug_var_ref)| (*op_idx, &debug_var_by_ref[*debug_var_ref])),
+    )
 }
 
-fn serialize_debug_var_payloads(debug_vars: &[(usize, DebugVarInfo)]) -> Vec<u8> {
-    let mut data = Vec::new();
-    for (op_idx, debug_var) in debug_vars {
-        data.extend_from_slice(&op_idx.to_le_bytes());
-        debug_var.write_into(&mut data);
+fn truncate_index_vec<I: Idx, T>(items: &mut IndexVec<I, T>, len: usize) {
+    while items.len() > len {
+        items.swap_remove(items.len() - 1);
     }
-    data
 }
 
 /// Takes the set of MAST node refs (all basic blocks) that were merged as part of the assembly
@@ -1409,11 +1463,7 @@ impl MastForestBuilder {
                     decorator_refs,
                 );
                 let join_mast_node_ref = if let Some(ref asm_op) = asm_op {
-                    self.intern_pending_node_with_metadata_payloads(
-                        draft,
-                        vec![(0, asm_op.clone())],
-                        Vec::new(),
-                    )?
+                    self.intern_pending_node_with_asm_op(draft, asm_op.clone())?
                 } else {
                     self.intern_pending_node(draft)?
                 };
@@ -1439,15 +1489,14 @@ impl MastForestBuilder {
         let split_digest = hasher::merge_in_domain(&branch_digests, SplitNode::DOMAIN);
         let child_refs = Vec::from(branches);
 
-        self.intern_pending_node_with_metadata_payloads(
+        self.intern_pending_node_with_asm_op(
             PendingMastNodeDraft::new(
                 PendingMastNodeKind::Split,
                 split_digest,
                 child_refs,
                 pending_decorator_refs,
             ),
-            vec![(0, asm_op)],
-            Vec::new(),
+            asm_op,
         )
     }
 
@@ -1463,15 +1512,14 @@ impl MastForestBuilder {
             hasher::merge_in_domain(&[body_digest, Word::default()], LoopNode::DOMAIN);
         let child_refs = vec![body];
 
-        self.intern_pending_node_with_metadata_payloads(
+        self.intern_pending_node_with_asm_op(
             PendingMastNodeDraft::new(
                 PendingMastNodeKind::Loop,
                 loop_digest,
                 child_refs,
                 pending_decorator_refs,
             ),
-            vec![(0, asm_op)],
-            Vec::new(),
+            asm_op,
         )
     }
 
@@ -1490,15 +1538,14 @@ impl MastForestBuilder {
         let call_digest = hasher::merge_in_domain(&[callee_digest, Word::default()], call_domain);
         let child_refs = vec![callee];
         let decorator_refs = PendingDecoratorRefs::default();
-        self.intern_pending_node_with_metadata_payloads(
+        self.intern_pending_node_with_asm_op(
             PendingMastNodeDraft::new(
                 PendingMastNodeKind::Call { is_syscall },
                 call_digest,
                 child_refs,
                 decorator_refs,
             ),
-            vec![(0, asm_op)],
-            Vec::new(),
+            asm_op,
         )
     }
 
@@ -1514,15 +1561,14 @@ impl MastForestBuilder {
         };
         let child_refs = Vec::new();
         let decorator_refs = PendingDecoratorRefs::default();
-        self.intern_pending_node_with_metadata_payloads(
+        self.intern_pending_node_with_asm_op(
             PendingMastNodeDraft::new(
                 PendingMastNodeKind::Dyn { is_dyncall },
                 dyn_digest,
                 child_refs,
                 decorator_refs,
             ),
-            vec![(0, asm_op)],
-            Vec::new(),
+            asm_op,
         )
     }
 
@@ -1789,17 +1835,40 @@ impl MastForestBuilder {
             })
             .collect::<Vec<_>>();
 
-        self.intern_pending_node_with_metadata_payloads(
-            PendingMastNodeDraft {
-                kind,
-                digest,
-                child_refs,
-                decorator_refs,
-                asm_ops: Vec::new(),
-                debug_vars: Vec::new(),
+        let mut draft = PendingMastNodeDraft {
+            kind,
+            digest,
+            child_refs,
+            decorator_refs,
+            asm_ops: Vec::new(),
+            debug_vars: Vec::new(),
+        };
+        let dedup_fingerprint = self.dedup_fingerprint_for_pending_metadata_payloads(
+            &draft,
+            pending_asm_ops.iter().map(|(op_idx, asm_op)| (*op_idx, asm_op)),
+            pending_debug_vars.iter().map(|(op_idx, debug_var)| (*op_idx, debug_var)),
+        );
+        if let Some(node_ref) = self.find_node_ref_by_fingerprint(&dedup_fingerprint) {
+            return Ok(node_ref);
+        }
+
+        let asm_op_checkpoint = self.asm_op_by_ref.len();
+        let debug_var_checkpoint = self.debug_vars.len();
+        draft.asm_ops = self.indexed_asm_op_refs(pending_asm_ops)?;
+        draft.debug_vars = match self.indexed_debug_var_refs(pending_debug_vars) {
+            Ok(debug_vars) => debug_vars,
+            Err(err) => {
+                truncate_index_vec(&mut self.asm_op_by_ref, asm_op_checkpoint);
+                truncate_index_vec(&mut self.debug_vars, debug_var_checkpoint);
+                return Err(err);
             },
-            pending_asm_ops,
-            pending_debug_vars,
+        };
+
+        self.insert_pending_node_with_allocated_metadata_refs(
+            dedup_fingerprint,
+            draft,
+            asm_op_checkpoint,
+            debug_var_checkpoint,
         )
     }
 
