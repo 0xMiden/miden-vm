@@ -99,16 +99,16 @@ impl Schema for Field0Handler {
         }
         if node.tag == FIELD0_ADD || node.tag == FIELD0_MUL {
             let (lhs_digest, rhs_digest) = Self::binary_op_children(&node.payload);
-            let lhs_node = *graph.get(&lhs_digest).ok_or(SchemaError::MissingNode)?;
-            let rhs_node = *graph.get(&rhs_digest).ok_or(SchemaError::MissingNode)?;
+            let lhs_node = *graph.get(&lhs_digest)?;
+            let rhs_node = *graph.get(&rhs_digest)?;
             let lhs = self.eval(graph, lhs_node)?;
             let rhs = self.eval(graph, rhs_node)?;
             return Ok(self.eval_op(node.tag, lhs, rhs)?);
         }
         if node.tag == FIELD0_ASSERT_EQ {
             let (lhs_digest, rhs_digest) = Self::binary_op_children(&node.payload);
-            let lhs_node = *graph.get(&lhs_digest).ok_or(SchemaError::MissingNode)?;
-            let rhs_node = *graph.get(&rhs_digest).ok_or(SchemaError::MissingNode)?;
+            let lhs_node = *graph.get(&lhs_digest)?;
+            let rhs_node = *graph.get(&rhs_digest)?;
             let lhs = self.eval(graph, lhs_node)?;
             let rhs = self.eval(graph, rhs_node)?;
             if lhs != rhs {

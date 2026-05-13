@@ -13,7 +13,7 @@ use miden_processor::{
     advice::{AdviceInputs, AdviceMutation},
     deferred::{
         FIELD0_ADD, FIELD0_ASSERT_EQ, FIELD0_LEAF, FIELD0_MUL, Field0Handler, Payload,
-        binary_op_payload, extract_witness,
+        binary_op_payload,
     },
     event::{EventError, EventHandler, EventName},
 };
@@ -133,7 +133,7 @@ fn deferred_end_to_end_register_eval_assert() {
     assert_ne!(state.transcript(), Word::new([ZERO; 4]));
 
     // Witness includes every registered expression node + the assertion + the transcript.
-    let witness = extract_witness(state);
+    let witness = state.extract_witness();
     assert_eq!(witness.nodes.len(), 6);
     let witness_digests: Vec<_> = witness.nodes.iter().map(|(d, _)| *d).collect();
     assert!(witness_digests.windows(2).all(|p| p[0] < p[1]));

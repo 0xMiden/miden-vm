@@ -3,7 +3,7 @@ use alloc::{collections::BTreeMap, vec::Vec};
 use miden_core::{
     Word, ZERO,
     crypto::hash::Poseidon2,
-    deferred::{DeferredError, Digest, Node, Payload, Tag, hash_node},
+    deferred::{DeferredError, DeferredWitness, Digest, Node, Payload, Tag, hash_node},
 };
 
 use super::{
@@ -44,8 +44,11 @@ impl DeferredState {
         Self::default()
     }
 
-    pub fn get(&self, digest: &Digest) -> Option<&Node> {
-        self.nodes.get(digest)
+    /// Returns the node stored under `digest`, or [`SchemaError::MissingNode`] if no such node
+    /// has been registered. Returning a `Result` lets schema implementations propagate the
+    /// missing-node case with `?` instead of unwrapping an `Option`.
+    pub fn get(&self, digest: &Digest) -> Result<&Node, SchemaError> {
+        self.nodes.get(digest).ok_or(SchemaError::MissingNode)
     }
 
     pub fn contains(&self, digest: &Digest) -> bool {
@@ -71,13 +74,12 @@ impl DeferredState {
     /// assertions) verify it.
     ///
     /// - `is_valid(node) == None` → [`SchemaError::InvalidNode`].
-    /// - `Some(NodeType::Expression)` → inserted into the DAG. Idempotent re-insert; a different
-    ///   node at the same digest surfaces as [`DeferredError::ConflictingNode`].
-    /// - `Some(NodeType::Assertion)` → appended to the assertion list, folded into the running
-    ///   transcript, then `schema.eval` is called for verification. A schema-reported
-    ///   `AssertionFailed` propagates as-is; the transcript fold is committed regardless
-    ///   (execution dies on mismatch, post-mismatch state is unobservable, deterministic
-    ///   transcript is easier to reason about).
+    /// - `Some(NodeType::Expression)` → inserted into the DAG. Re-registering the same digest
+    ///   is silently idempotent (the node is content-addressed; the second insert is a no-op).
+    /// - `Some(NodeType::Assertion)` → appended to the assertion list (duplicates allowed —
+    ///   each registration counts as its own check), folded into the running transcript, then
+    ///   `schema.eval` is called for verification. A schema-reported `AssertionFailed`
+    ///   propagates as-is; the transcript fold is committed regardless.
     pub fn register(
         &mut self,
         schema: &mut dyn Schema,
@@ -89,13 +91,7 @@ impl DeferredState {
         match schema.is_valid(&node) {
             None => Err(SchemaError::InvalidNode),
             Some(NodeType::Expression) => {
-                if let Some(existing) = self.nodes.get(&digest) {
-                    if existing != &node {
-                        return Err(SchemaError::Other(DeferredError::ConflictingNode));
-                    }
-                } else {
-                    self.nodes.insert(digest, node);
-                }
+                self.nodes.insert(digest, node);
                 Ok(digest)
             },
             Some(NodeType::Assertion) => {
@@ -107,32 +103,21 @@ impl DeferredState {
         }
     }
 
-    /// Apply every deferred mutation in `txn` atomically.
+    /// Snapshot the current state into a [`DeferredWitness`].
     ///
-    /// Validates the full batch against the current state first; only commits if the entire
-    /// batch is consistent. On error the state is left untouched. VM mutations on `txn` are
-    /// ignored here — the host drains those through its own channel.
-    pub fn apply(&mut self, txn: &HandlerTransaction) -> Result<(), DeferredError> {
-        // Stage inserts to detect intra-batch conflicts and to validate against the existing map
-        // before mutating anything.
-        let mut staged: BTreeMap<Digest, Node> = BTreeMap::new();
-        for mutation in &txn.deferred {
-            if let DeferredMutation::InsertNode { digest, node } = mutation {
-                if let Some(existing) = self.nodes.get(digest)
-                    && existing != node
-                {
-                    return Err(DeferredError::ConflictingNode);
-                }
-                if let Some(staged_node) = staged.get(digest)
-                    && staged_node != node
-                {
-                    return Err(DeferredError::ConflictingNode);
-                }
-                staged.insert(*digest, *node);
-            }
-        }
+    /// All registered expression nodes (in digest order, thanks to the `BTreeMap`) plus every
+    /// assertion node (in registration order) plus the final transcript digest. No reachability
+    /// filtering — if a program registers an orphan expression, it appears in the witness too.
+    pub fn extract_witness(&self) -> DeferredWitness {
+        let nodes: alloc::vec::Vec<_> = self.nodes.iter().map(|(d, n)| (*d, *n)).collect();
+        DeferredWitness::new(nodes, self.assertions.clone(), self.transcript)
+    }
 
-        // Commit.
+    /// Apply every deferred mutation in `txn` in order.
+    ///
+    /// Inserts and appends are unconditional — re-registering an expression node overwrites
+    /// (idempotent under content-addressing), and assertion duplicates are allowed.
+    pub fn apply(&mut self, txn: &HandlerTransaction) -> Result<(), DeferredError> {
         for mutation in &txn.deferred {
             match mutation {
                 DeferredMutation::InsertNode { digest, node } => {
@@ -145,7 +130,6 @@ impl DeferredState {
                 },
             }
         }
-
         Ok(())
     }
 }
@@ -154,7 +138,7 @@ impl DeferredState {
 mod tests {
     use miden_core::{
         Felt, Word, ZERO,
-        deferred::{DeferredError, Node, Payload, Tag},
+        deferred::{Node, Payload, Tag},
     };
 
     use super::*;
@@ -199,7 +183,7 @@ mod tests {
             vm: vec![],
         };
         state.apply(&txn).unwrap();
-        assert_eq!(state.get(&d), Some(&n));
+        assert_eq!(state.get(&d).unwrap(), &n);
     }
 
     #[test]
@@ -212,51 +196,16 @@ mod tests {
             vm: vec![],
         };
         state.apply(&txn).unwrap();
-        // Same node, same digest — second apply must succeed and not duplicate.
+        // Same node, same digest — second apply is a silent no-op.
         state.apply(&txn).unwrap();
         assert_eq!(state.nodes().len(), 1);
     }
 
     #[test]
-    fn conflicting_insert_against_existing_errors() {
-        let mut state = DeferredState::new();
-        let d = digest(1);
-        let n1 = leaf(10);
-        let n2 = leaf(20);
-        state
-            .apply(&HandlerTransaction {
-                deferred: vec![DeferredMutation::InsertNode { digest: d, node: n1 }],
-                vm: vec![],
-            })
-            .unwrap();
-        let conflict = state.apply(&HandlerTransaction {
-            deferred: vec![DeferredMutation::InsertNode { digest: d, node: n2 }],
-            vm: vec![],
-        });
-        assert_eq!(conflict, Err(DeferredError::ConflictingNode));
-        assert_eq!(state.get(&d), Some(&n1));
-    }
-
-    #[test]
-    fn conflicting_insert_within_batch_errors_atomically() {
-        let mut state = DeferredState::new();
-        let d_ok = digest(1);
-        let d_dup = digest(2);
-        let n_ok = leaf(10);
-        let n_a = leaf(20);
-        let n_b = leaf(30);
-        let txn = HandlerTransaction {
-            deferred: vec![
-                DeferredMutation::InsertNode { digest: d_ok, node: n_ok },
-                DeferredMutation::InsertNode { digest: d_dup, node: n_a },
-                DeferredMutation::InsertNode { digest: d_dup, node: n_b },
-            ],
-            vm: vec![],
-        };
-        assert_eq!(state.apply(&txn), Err(DeferredError::ConflictingNode));
-        // Atomicity: the successful insert before the conflict must not be committed.
-        assert!(state.nodes().is_empty());
-        assert!(state.assertions().is_empty());
+    fn missing_node_get_returns_error() {
+        let state = DeferredState::new();
+        let err = state.get(&digest(1)).unwrap_err();
+        assert!(matches!(err, SchemaError::MissingNode));
     }
 
     #[test]
@@ -290,7 +239,7 @@ mod tests {
             vm: vec![],
         };
         state.apply(&txn).unwrap();
-        assert_eq!(state.get(&d), Some(&n));
+        assert_eq!(state.get(&d).unwrap(), &n);
         assert_eq!(state.assertions(), &[a]);
     }
 
@@ -322,5 +271,88 @@ mod tests {
         let d2 = miden_core::deferred::hash_node(a2.tag, &a2.payload);
         let expected2 = Poseidon2::merge(&[expected1, d2]);
         assert_eq!(state.transcript(), expected2);
+    }
+
+    // EXTRACT_WITNESS
+    // --------------------------------------------------------------------------------------------
+
+    mod witness_tests {
+        use super::*;
+        use crate::deferred::{
+            binary_op_payload,
+            handlers::{FIELD0_ADD, FIELD0_ASSERT_EQ, FIELD0_LEAF, FIELD0_MUL, Field0Handler},
+        };
+
+        fn field0_leaf(low: u64) -> (Tag, Payload) {
+            let mut limbs = [Felt::from_u32(0); 8];
+            limbs[0] = Felt::from_u32(low as u32);
+            limbs[1] = Felt::from_u32((low >> 32) as u32);
+            (FIELD0_LEAF, Payload::new(limbs))
+        }
+
+        fn assertion_lhs(node: &Node) -> Word {
+            Word::new([node.payload.0[0], node.payload.0[1], node.payload.0[2], node.payload.0[3]])
+        }
+
+        #[test]
+        fn empty_state_yields_empty_witness() {
+            let state = DeferredState::new();
+            let w = state.extract_witness();
+            assert!(w.nodes.is_empty());
+            assert!(w.assertions.is_empty());
+        }
+
+        #[test]
+        fn witness_includes_all_registered_nodes() {
+            // Build (a + b) * c == precomputed_35 and assert it. Plus an orphan node that
+            // nothing references — without reachability filtering it shows up in the witness.
+            let mut state = DeferredState::new();
+            let mut schema = Field0Handler;
+            let (a_tag, a_payload) = field0_leaf(3);
+            let (b_tag, b_payload) = field0_leaf(4);
+            let (c_tag, c_payload) = field0_leaf(5);
+            let (expected_tag, expected_payload) = field0_leaf(35);
+            let (orphan_tag, orphan_payload) = field0_leaf(99);
+            let a = state.register(&mut schema, a_tag, a_payload).unwrap();
+            let b = state.register(&mut schema, b_tag, b_payload).unwrap();
+            let c = state.register(&mut schema, c_tag, c_payload).unwrap();
+            let _expected =
+                state.register(&mut schema, expected_tag, expected_payload).unwrap();
+            let _orphan = state.register(&mut schema, orphan_tag, orphan_payload).unwrap();
+            let add =
+                state.register(&mut schema, FIELD0_ADD, binary_op_payload(a, b)).unwrap();
+            let mul =
+                state.register(&mut schema, FIELD0_MUL, binary_op_payload(add, c)).unwrap();
+            let _ = mul;
+            state
+                .register(
+                    &mut schema,
+                    FIELD0_ASSERT_EQ,
+                    binary_op_payload(mul, _expected),
+                )
+                .unwrap();
+
+            let w = state.extract_witness();
+            assert_eq!(w.nodes.len(), 7, "all 7 registered expression nodes are in witness");
+            assert!(w.nodes.windows(2).all(|p| p[0].0 < p[1].0), "sorted by digest");
+            assert_eq!(w.assertions.len(), 1);
+        }
+
+        #[test]
+        fn assertions_preserve_insertion_order() {
+            let mut state = DeferredState::new();
+            let mut schema = Field0Handler;
+            let (a_tag, a_payload) = field0_leaf(1);
+            let (b_tag, b_payload) = field0_leaf(2);
+            let a = state.register(&mut schema, a_tag, a_payload).unwrap();
+            let b = state.register(&mut schema, b_tag, b_payload).unwrap();
+            state.register(&mut schema, FIELD0_ASSERT_EQ, binary_op_payload(a, a)).unwrap();
+            state.register(&mut schema, FIELD0_ASSERT_EQ, binary_op_payload(b, b)).unwrap();
+
+            let w = state.extract_witness();
+            assert_eq!(w.assertions.len(), 2);
+            assert_eq!(assertion_lhs(&w.assertions[0]), a);
+            assert_eq!(assertion_lhs(&w.assertions[1]), b);
+        }
     }
 }

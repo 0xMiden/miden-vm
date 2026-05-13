@@ -50,7 +50,7 @@ mod tests {
         let digest = state.register(&mut schema, tag, payload).unwrap();
 
         assert_eq!(digest, hash_node(tag, &payload));
-        assert_eq!(state.get(&digest), Some(&Node::new(tag, payload)));
+        assert_eq!(state.get(&digest).unwrap(), &Node::new(tag, payload));
     }
 
     #[test]
