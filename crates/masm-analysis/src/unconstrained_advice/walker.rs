@@ -5,8 +5,8 @@ use std::collections::BTreeSet;
 use masm_decompiler::{Intrinsic, LocalAccessKind, LoopPhi, Stmt, SymbolPath};
 
 use super::{
+    call_transfer::assign_call_results,
     domain::AdviceFact,
-    provenance::assign_call_results,
     shared::{
         Env, apply_intrinsic_effect, apply_local_load_scalar, apply_local_load_word,
         apply_local_store, apply_local_store_word, assign_expr_metadata, assign_phi_metadata,
