@@ -4,7 +4,7 @@ use std::{
     sync::Arc,
 };
 
-use masm_analysis::lint::{LibraryRoot, Workspace, diagnostics_from_workspace};
+use masm_analysis::lint::{LibraryRoot, LintAnalysisInput, analyze_entries};
 use miden_debug_types::DefaultSourceManager;
 
 fn temp_module_dir(test_name: &str) -> PathBuf {
@@ -17,17 +17,24 @@ fn temp_module_dir(test_name: &str) -> PathBuf {
 
 fn signature_messages(dir: &Path, module_path: &Path) -> Vec<String> {
     let sources = Arc::new(DefaultSourceManager::default());
-    let mut workspace = Workspace::with_source_manager(
-        vec![LibraryRoot::new("", dir.to_path_buf())],
-        sources.clone(),
-    );
-    workspace.load_entry(module_path).expect("load MASM module");
-    workspace.load_dependencies();
+    let report = analyze_entries(LintAnalysisInput {
+        entry_files: vec![module_path.to_path_buf()],
+        roots: vec![LibraryRoot::new("", dir.to_path_buf())],
+        sources,
+        group_by_origin: false,
+    });
 
-    diagnostics_from_workspace(&workspace, sources, true, false)
-        .into_iter()
-        .map(|diagnostic| diagnostic.message)
-        .collect()
+    assert!(
+        report.load_errors.is_empty(),
+        "failed to load MASM module: {:?}",
+        report.load_errors.iter().map(|err| err.message.as_str()).collect::<Vec<_>>()
+    );
+    assert!(
+        report.unresolved_dependencies.is_none(),
+        "unexpected unresolved dependencies in signature mismatch fixture"
+    );
+
+    report.diagnostics.into_iter().map(|diagnostic| diagnostic.message).collect()
 }
 
 fn signature_messages_for_source(test_name: &str, source: &str) -> Vec<String> {
