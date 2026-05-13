@@ -2,15 +2,11 @@
 
 mod render;
 
-use std::{
-    collections::{BTreeSet, HashSet},
-    path::{Path, PathBuf},
-    sync::Arc,
-};
+use std::{collections::HashSet, path::PathBuf, sync::Arc};
 
 use clap::Parser;
 use masm_analysis::lint::{
-    LibraryRoot, LintAnalysisInput, UnresolvedDependencyReport, analyze_entries,
+    LibraryRoot, LintPathAnalysisInput, UnresolvedDependencyReport, analyze_paths,
 };
 use miden_debug_types::DefaultSourceManager;
 
@@ -62,50 +58,26 @@ fn run(cli: Cli) -> i32 {
         },
     };
 
-    // Validate library root paths before doing anything else.
-    for root in &cli.libraries {
-        if !root.path.exists() {
-            eprintln!(
-                "masm-lint: library root path does not exist: {} (for namespace `{}`)",
-                root.path.display(),
-                root.namespace
-            );
-            return 2;
-        }
-    }
-
-    // Collect .masm files from all inputs, canonicalized and deduplicated.
-    let mut masm_files: BTreeSet<PathBuf> = BTreeSet::new();
-    for input in &cli.inputs {
-        let abs = normalize_cli_path(input, &cwd);
-        if abs.is_dir() {
-            collect_masm_files(&abs, &mut masm_files);
-        } else if abs.is_file() {
-            masm_files.insert(abs);
-        } else {
-            eprintln!("masm-lint: input path does not exist: {}", input.display());
-            return 2;
-        }
-    }
-
-    if masm_files.is_empty() {
-        eprintln!("masm-lint: no .masm files found in the given inputs");
-        return 0;
-    }
-
-    // Build library roots: user-supplied + CWD as the default root.
-    let mut roots = normalize_library_roots(&cli.libraries, &cwd);
-    roots.push(LibraryRoot::new("", normalize_cli_path(&cwd, &cwd)));
-
     // Share one source manager with the analysis facade so rendered spans
     // resolve across all loaded modules.
     let sources: Arc<DefaultSourceManager> = Arc::new(DefaultSourceManager::default());
-    let report = analyze_entries(LintAnalysisInput {
-        entry_files: masm_files.into_iter().collect(),
-        roots,
+    let report = match analyze_paths(LintPathAnalysisInput {
+        inputs: cli.inputs,
+        libraries: cli.libraries,
+        cwd,
         sources: sources.clone(),
         group_by_origin: cli.group_by_origin,
-    });
+    }) {
+        Ok(Some(report)) => report,
+        Ok(None) => {
+            eprintln!("masm-lint: no .masm files found in the given inputs");
+            return 0;
+        },
+        Err(error) => {
+            eprintln!("masm-lint: {error}");
+            return 2;
+        },
+    };
 
     for error in &report.load_errors {
         eprintln!("masm-lint: failed to load {}: {}", error.path.display(), error.message);
@@ -201,52 +173,6 @@ fn emit_unresolved_dependency_errors(unresolved: &UnresolvedDependencyReport) {
         }
     }
     eprintln!();
-}
-
-// ── Filesystem helpers ────────────────────────────────────────────────────────
-
-/// Recursively collect `.masm` files under `dir`.
-fn collect_masm_files(dir: &Path, out: &mut BTreeSet<PathBuf>) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_dir() {
-            collect_masm_files(&path, out);
-        } else if path.extension().and_then(|e| e.to_str()) == Some("masm") {
-            if let Ok(canonical) = std::fs::canonicalize(&path) {
-                out.insert(canonical);
-            } else {
-                out.insert(path);
-            }
-        }
-    }
-}
-
-/// Normalize a CLI path: resolve to absolute and canonicalize if possible.
-fn normalize_cli_path(path: &Path, cwd: &Path) -> PathBuf {
-    let abs = if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        cwd.join(path)
-    };
-    std::fs::canonicalize(&abs).unwrap_or(abs)
-}
-
-/// Normalize user-supplied library roots to absolute, canonicalized paths.
-fn normalize_library_roots(roots: &[LibraryRoot], cwd: &Path) -> Vec<LibraryRoot> {
-    roots
-        .iter()
-        .map(|root| {
-            let path = normalize_cli_path(&root.path, cwd);
-            if root.trusted_stdlib {
-                LibraryRoot::trusted_stdlib(root.namespace.as_str(), path)
-            } else {
-                LibraryRoot::new(root.namespace.as_str(), path)
-            }
-        })
-        .collect()
 }
 
 /// Render a [`LibraryRoot`] for human-readable output.

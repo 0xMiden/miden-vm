@@ -35,6 +35,36 @@ fn run_masm_lint_with_inputs(cwd: &Path, args: &[&str], inputs: &[&Path]) -> Out
 }
 
 #[test]
+fn missing_input_path_returns_hard_error() {
+    let dir = temp_dir("missing-input");
+    let missing = dir.join("missing.masm");
+
+    let output = run_masm_lint(&dir, &missing);
+
+    assert_eq!(output.status.code(), Some(2), "missing input returned wrong status");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("masm-lint: input path does not exist"),
+        "stderr did not report missing input: {stderr}"
+    );
+}
+
+#[test]
+fn directory_without_masm_files_returns_success() {
+    let dir = temp_dir("empty-directory");
+    fs::write(dir.join("README.txt"), "not masm\n").expect("failed to write text fixture");
+
+    let output = run_masm_lint(&dir, &dir);
+
+    assert!(output.status.success(), "empty MASM directory failed: {output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("masm-lint: no .masm files found in the given inputs"),
+        "stderr did not report empty MASM input: {stderr}"
+    );
+}
+
+#[test]
 fn broken_input_file_returns_non_zero() {
     let dir = temp_dir("broken-input");
     let file = dir.join("broken.masm");
