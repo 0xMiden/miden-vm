@@ -8,7 +8,10 @@ use miden_assembly_syntax::{
     debuginfo::{SourceSpan, Spanned},
 };
 
-use super::{LiftingError, LiftingResult, inst, stack::SlotId};
+use super::{
+    LiftingError, LiftingResult, inst,
+    stack::{SlotId, StackEntry},
+};
 use crate::{
     semantics::{StackFamily, stack_family},
     signature::{SignatureMap, StackEffect},
@@ -222,6 +225,173 @@ impl SlotStack {
     pub(super) fn into_slots(self) -> Vec<SlotId> {
         self.slots
     }
+}
+
+/// Per-slot index parameters used for loop subscript rewriting.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct SlotIndex {
+    /// Linear shift applied per iteration.
+    #[allow(dead_code)]
+    pub(super) delta: i64,
+    /// Change in relative depth from the top of the stack per iteration.
+    pub(super) access_delta: i64,
+}
+
+/// Slot-level decisions needed by the repeat lifter.
+#[derive(Debug)]
+pub(super) struct RepeatSlotPlan {
+    /// Per-slot loop subscript adjustments.
+    pub(super) slot_indices: HashMap<SlotId, SlotIndex>,
+    /// Slots newly produced by one repeat-loop iteration.
+    pub(super) produced_slots: HashSet<SlotId>,
+}
+
+/// Build the slot-level plan for a repeat loop.
+pub(super) fn plan_repeat_slots(
+    op_span: SourceSpan,
+    body: &Block,
+    entry_entries: &[StackEntry],
+    exit_entries: &[StackEntry],
+    loop_count: usize,
+    resolver: &SymbolResolver<'_>,
+    sigs: &SignatureMap,
+) -> LiftingResult<RepeatSlotPlan> {
+    let exit2_slots = if loop_count > 1 {
+        Some(simulate_repeat_slots(body, exit_entries, resolver, sigs)?)
+    } else {
+        None
+    };
+    let slot_indices = compute_slot_indices(
+        op_span,
+        entry_entries,
+        exit_entries,
+        exit2_slots.as_deref(),
+        loop_count,
+    )?;
+    let produced_slots = collect_produced_slot_ids(entry_entries, exit_entries);
+
+    Ok(RepeatSlotPlan { slot_indices, produced_slots })
+}
+
+/// Identify slots that are newly produced by a repeat-loop iteration.
+fn collect_produced_slot_ids(
+    entry_entries: &[StackEntry],
+    exit_entries: &[StackEntry],
+) -> HashSet<SlotId> {
+    let entry_slots: HashSet<SlotId> = entry_entries.iter().map(|entry| entry.slot_id).collect();
+    let exit_slots: HashSet<SlotId> = exit_entries.iter().map(|entry| entry.slot_id).collect();
+    exit_slots.difference(&entry_slots).copied().collect()
+}
+
+/// Compute slot indices for loop subscripts, validating linear movement.
+fn compute_slot_indices(
+    op_span: SourceSpan,
+    entry_entries: &[StackEntry],
+    exit_entries: &[StackEntry],
+    exit2_slots: Option<&[SlotId]>,
+    loop_count: usize,
+) -> LiftingResult<HashMap<SlotId, SlotIndex>> {
+    let entry_pos = slot_positions(entry_entries);
+    let exit_pos = slot_positions(exit_entries);
+    let exit2_pos = exit2_slots.map(slot_positions_from_ids);
+
+    let entry_slots: HashSet<SlotId> = entry_entries.iter().map(|entry| entry.slot_id).collect();
+    let exit_slots: HashSet<SlotId> = exit_entries.iter().map(|entry| entry.slot_id).collect();
+    let consumed_stride =
+        entry_slots.iter().filter(|slot| !exit_slots.contains(slot)).count() as i64;
+
+    let mut slot_indices = HashMap::new();
+    for entry in entry_entries {
+        if let Some(exit_idx) = exit_pos.get(&entry.slot_id) {
+            let delta = if let Some(exit2_pos) = &exit2_pos {
+                if let Some(next) = exit2_pos.get(&entry.slot_id) {
+                    let base = *entry_pos.get(&entry.slot_id).expect("entry slot");
+                    let delta1 = *exit_idx - base;
+                    let delta2 = *next - *exit_idx;
+                    if loop_count > 1 && delta1 != delta2 {
+                        return Err(LiftingError::UnsupportedRepeatPattern {
+                            span: op_span,
+                            reason: "repeat loop permutes stack positions across iterations"
+                                .to_string(),
+                        });
+                    }
+                    let access_delta =
+                        (exit_entries.len() as i64 - entry_entries.len() as i64) - delta1;
+                    slot_indices.insert(entry.slot_id, SlotIndex { delta: delta1, access_delta });
+                    continue;
+                } else {
+                    -consumed_stride
+                }
+            } else {
+                -consumed_stride
+            };
+            slot_indices.insert(entry.slot_id, SlotIndex { delta, access_delta: delta });
+        } else {
+            let delta = -consumed_stride;
+            slot_indices.insert(entry.slot_id, SlotIndex { delta, access_delta: delta });
+        }
+    }
+
+    for exit in exit_entries {
+        if entry_slots.contains(&exit.slot_id) {
+            continue;
+        }
+        let delta = if let Some(exit2_pos) = &exit2_pos {
+            if let Some(next) = exit2_pos.get(&exit.slot_id) {
+                let base = *exit_pos.get(&exit.slot_id).expect("exit slot");
+                *next - base
+            } else if loop_count > 1 {
+                return Err(LiftingError::UnsupportedRepeatPattern {
+                    span: op_span,
+                    reason: "repeat loop does not reach a steady stack layout".to_string(),
+                });
+            } else {
+                0
+            }
+        } else {
+            0
+        };
+        slot_indices.insert(exit.slot_id, SlotIndex { delta, access_delta: delta });
+    }
+
+    Ok(slot_indices)
+}
+
+/// Map slot identifiers to their stack positions.
+fn slot_positions(entries: &[StackEntry]) -> HashMap<SlotId, i64> {
+    entries
+        .iter()
+        .enumerate()
+        .map(|(idx, entry)| (entry.slot_id, idx as i64))
+        .collect()
+}
+
+/// Map slot identifiers to positions from an ordered list.
+fn slot_positions_from_ids(ids: &[SlotId]) -> HashMap<SlotId, i64> {
+    ids.iter().enumerate().map(|(idx, slot_id)| (*slot_id, idx as i64)).collect()
+}
+
+/// Simulate the stack slot layout after one repeat-loop iteration.
+fn simulate_repeat_slots(
+    body: &Block,
+    entry_entries: &[StackEntry],
+    resolver: &SymbolResolver<'_>,
+    sigs: &SignatureMap,
+) -> LiftingResult<Vec<SlotId>> {
+    let entry_slots = entry_entries.iter().map(|entry| entry.slot_id).collect::<Vec<_>>();
+    simulate_repeat_slots_from_ids(body, &entry_slots, resolver, sigs)
+}
+
+/// Simulate the stack slot layout after one iteration using slot identifiers.
+fn simulate_repeat_slots_from_ids(
+    body: &Block,
+    entry_slots: &[SlotId],
+    resolver: &SymbolResolver<'_>,
+    sigs: &SignatureMap,
+) -> LiftingResult<Vec<SlotId>> {
+    let mut stack = SlotStack::new(entry_slots);
+    simulate_block_slots(body, &mut stack, resolver, sigs)?;
+    Ok(stack.into_slots())
 }
 
 /// Slot stack with loop-carried tag tracking for repeat loops.
