@@ -69,7 +69,7 @@ pub struct MainTraceRow<T> {
 
 impl<T> Borrow<MainTraceRow<T>> for [T] {
     fn borrow(&self) -> &MainTraceRow<T> {
-        debug_assert_eq!(self.len(), crate::TRACE_WIDTH);
+        debug_assert_eq!(self.len(), TRACE_WIDTH);
         let (prefix, shorts, suffix) = unsafe { self.align_to::<MainTraceRow<T>>() };
         debug_assert!(prefix.is_empty(), "Alignment should match");
         debug_assert!(suffix.is_empty(), "Alignment should match");
@@ -80,7 +80,7 @@ impl<T> Borrow<MainTraceRow<T>> for [T] {
 
 impl<T> BorrowMut<MainTraceRow<T>> for [T] {
     fn borrow_mut(&mut self) -> &mut MainTraceRow<T> {
-        debug_assert_eq!(self.len(), crate::TRACE_WIDTH);
+        debug_assert_eq!(self.len(), TRACE_WIDTH);
         let (prefix, shorts, suffix) = unsafe { self.align_to_mut::<MainTraceRow<T>>() };
         debug_assert!(prefix.is_empty(), "Alignment should match");
         debug_assert!(suffix.is_empty(), "Alignment should match");

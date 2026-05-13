@@ -21,6 +21,7 @@ ignored = ["serde_json"]
 default = ["std"]
 std = [
     "aho-corasick/std",
+    "miden-assembly-syntax-cst/std",
     "miden-core/std",
     "miden-debug-types/std",
     "miden-utils-diagnostics/std",
@@ -40,6 +41,7 @@ logging = ["dep:env_logger"]
 
 [dependencies]
 # Miden dependencies
+miden-assembly-syntax-cst = { workspace = true, default-features = false }
 miden-core.workspace = true
 miden-debug-types.workspace = true
 miden-utils-diagnostics.workspace = true

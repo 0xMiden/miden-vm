@@ -11,6 +11,7 @@
 
 - Implemented new lossless parser for Miden Assembly sources ([#2906](https://github.com/0xMiden/miden-vm/pull/2906))
 - Created new `miden-format` tool for formatting Miden Assembly sources while preserving comments and certain whitespace choices ([#2906](https://github.com/0xMiden/miden-vm/pull/2906))
+- Switched the default parser backend for Miden Assembly to use the new lossless parser ([#2907](https://github.com/0xMiden/miden-vm/pull/2907))
 
 #### Fixes
 
@@ -94,7 +95,7 @@
 ## 0.22.2 (2026-04-28)
 
 - Improve debug var loc tracking ([#2955](https://github.com/0xMiden/miden-vm/pull/2955)).
-
+ 
 ## 0.22.1 (2026-04-07)
 
 - Implemented project assembly ([#2877](https://github.com/0xMiden/miden-vm/pull/2877)).

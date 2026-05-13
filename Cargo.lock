@@ -963,12 +963,6 @@ dependencies = [
 
 [[package]]
 name = "hashbrown"
-version = "0.16.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "841d1cc9bed7f9236f321df977030373f4a4163ae1a7dbfe1a51a2c1a51d9100"
-
-[[package]]
-name = "hashbrown"
 version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4f467dd6dccf739c208452f8014c75c18bb8301b050ad1cfb27153803edb0f51"
@@ -1304,6 +1298,7 @@ dependencies = [
  "lalrpop",
  "lalrpop-util",
  "log",
+ "miden-assembly-syntax-cst",
  "miden-core",
  "miden-debug-types",
  "miden-test-serde-macros",
@@ -1330,7 +1325,6 @@ dependencies = [
  "miden-utils-diagnostics",
  "pretty_assertions",
  "thiserror",
- "ungrammar",
 ]
 
 [[package]]
@@ -1485,7 +1479,10 @@ dependencies = [
  "clap",
  "miden-assembly-syntax-cst",
  "miden-debug-types",
+ "serde",
  "thiserror",
+ "toml",
+ "walkdir",
 ]
 
 [[package]]
@@ -1676,11 +1673,11 @@ dependencies = [
 
 [[package]]
 name = "miden-rowan"
-version = "0.16.3"
+version = "0.16.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2aaf2ec18c4b049c917bc718072496f0c94fcb54c215fb296bd2308f7835d36e"
+checksum = "c13695bf99aabaa21d6572b807c66bb26251aa3d9b75e828b3c99b97a3b1ce7e"
 dependencies = [
- "hashbrown 0.16.1",
+ "hashbrown 0.17.0",
  "rustc-hash",
 ]
 
@@ -1758,7 +1755,6 @@ dependencies = [
 name = "miden-utils-diagnostics"
 version = "0.23.0"
 dependencies = [
- "miden-crypto",
  "miden-debug-types",
  "miden-miette",
  "tracing",
@@ -3330,12 +3326,6 @@ name = "unarray"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eaea85b334db583fe3274d12b4cd1880032beab409c0d774be044d4480ab9a94"
-
-[[package]]
-name = "ungrammar"
-version = "1.16.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a3e5df347f0bf3ec1d670aad6ca5c6a1859cd9ea61d2113125794654ccced68f"
 
 [[package]]
 name = "unicode-ident"
