@@ -4,17 +4,17 @@ use std::ops::Range;
 
 use miden_assembly_syntax::ast::Instruction;
 
-pub const INTRINSIC_ADV_PIPE: &str = "adv_pipe";
-pub const INTRINSIC_ADV_PUSH: &str = "adv_push";
-pub const INTRINSIC_ADV_PUSHW: &str = "adv_pushw";
-pub const INTRINSIC_MEM_STREAM: &str = "mem_stream";
-pub const INTRINSIC_MTREE_GET: &str = "mtree_get";
-pub const INTRINSIC_MTREE_MERGE: &str = "mtree_merge";
-pub const INTRINSIC_MTREE_SET: &str = "mtree_set";
-pub const INTRINSIC_MTREE_VERIFY: &str = "mtree_verify";
-pub const INTRINSIC_U32DIV: &str = "u32div";
-pub const INTRINSIC_U32DIVMOD: &str = "u32divmod";
-pub const INTRINSIC_U32MOD: &str = "u32mod";
+pub(crate) const INTRINSIC_ADV_PIPE: &str = "adv_pipe";
+pub(crate) const INTRINSIC_ADV_PUSH: &str = "adv_push";
+pub(crate) const INTRINSIC_ADV_PUSHW: &str = "adv_pushw";
+pub(crate) const INTRINSIC_MEM_STREAM: &str = "mem_stream";
+pub(crate) const INTRINSIC_MTREE_GET: &str = "mtree_get";
+pub(crate) const INTRINSIC_MTREE_MERGE: &str = "mtree_merge";
+pub(crate) const INTRINSIC_MTREE_SET: &str = "mtree_set";
+pub(crate) const INTRINSIC_MTREE_VERIFY: &str = "mtree_verify";
+pub(crate) const INTRINSIC_U32DIV: &str = "u32div";
+pub(crate) const INTRINSIC_U32DIVMOD: &str = "u32divmod";
+pub(crate) const INTRINSIC_U32MOD: &str = "u32mod";
 
 /// Return the base intrinsic name before immediates or `.err=*` suffixes.
 pub fn intrinsic_base_name(name: &str) -> &str {
