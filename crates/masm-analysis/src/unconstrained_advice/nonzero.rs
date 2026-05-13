@@ -8,12 +8,13 @@ use masm_decompiler::{
 
 use super::{
     domain::AdviceFact,
+    effect::AdviceEffect,
     shared::{
         Env, collect_expr_sink_fact, expr_is_proven_nonzero, expr_output_fact,
         refine_nonzero_from_intrinsic, stmt_span,
     },
     summary::{AdviceDiagnosticContext, AdviceDiagnosticsMap, AdviceSummary, AdviceSummaryMap},
-    walker::{self, AdviceCapability, AdviceEffect},
+    walker::{self, AdviceCapability},
 };
 use crate::prepared::PreparedAnalysis;
 

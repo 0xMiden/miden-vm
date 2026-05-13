@@ -3,9 +3,10 @@
 use masm_decompiler::{Stmt, intrinsic_memory_address_arg_index};
 
 use super::{
+    effect::AdviceEffect,
     shared::Env,
     summary::{AdviceDiagnosticContext, AdviceDiagnosticsMap, AdviceSummaryMap},
-    walker::{self, AdviceCapability, AdviceEffect},
+    walker::{self, AdviceCapability},
 };
 use crate::prepared::PreparedAnalysis;
 
