@@ -10,13 +10,19 @@
 //! [`Field0Handler`] reference schema — lives here in `miden-core`. The processor only contributes
 //! the system-event glue that bridges VM operand-stack reads to schema calls.
 
-mod field0;
 mod schema;
 mod state;
 
-pub use field0::Field0Handler;
 pub use schema::{ChildResolver, NodeType, NoopSchema, Schema, SchemaError};
 pub use state::DeferredState;
+
+// Reference `Field0Handler` schema — pinned in here to keep `core/tests/deferred_field0.rs` and
+// the unit tests in this crate exercising the public deferred API only. Gated so it isn't
+// part of the production surface.
+#[cfg(any(test, feature = "testing"))]
+mod field0;
+#[cfg(any(test, feature = "testing"))]
+pub use field0::Field0Handler;
 
 use alloc::vec::Vec;
 
