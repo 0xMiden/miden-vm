@@ -13,7 +13,7 @@ use itertools::Itertools;
 use crate::{
     EMPTY_WORD, Word,
     merkle::smt::{
-        Backend, BackendError, Smt, SmtForestUpdateBatch, SmtUpdateBatch, VersionId,
+        Backend, BackendError, BackendReader, Smt, SmtForestUpdateBatch, SmtUpdateBatch, VersionId,
         large_forest::{
             InMemoryBackend,
             backend::Result,

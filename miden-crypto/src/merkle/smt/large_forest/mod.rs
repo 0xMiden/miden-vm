@@ -314,10 +314,14 @@ mod utils;
 use alloc::vec::Vec;
 use core::num::NonZeroU8;
 
-pub use backend::{Backend, BackendError, memory::InMemoryBackend};
+pub use backend::{
+    Backend, BackendError, BackendReader,
+    memory::{InMemoryBackend, InMemoryBackendSnapshot},
+};
 #[cfg(feature = "persistent-forest")]
 pub use backend::{
-    persistent::PersistentBackend, persistent::config::Config as PersistentBackendConfig,
+    persistent::config::Config as PersistentBackendConfig,
+    persistent::{PersistentBackend, PersistentBackendReader},
 };
 pub use config::{Config, DEFAULT_MAX_HISTORY_VERSIONS, MIN_HISTORY_VERSIONS};
 pub use error::{LargeSmtForestError, Result};
@@ -346,8 +350,8 @@ use crate::{
 /// A high-performance forest of sparse merkle trees with pluggable storage backends.
 ///
 /// See the module documentation for more information.
-#[derive(Debug)]
-pub struct LargeSmtForest<B: Backend> {
+#[derive(Clone, Debug)]
+pub struct LargeSmtForest<B: BackendReader> {
     /// The configuration for how the forest functions.
     config: Config,
 
@@ -369,17 +373,6 @@ pub struct LargeSmtForest<B: Backend> {
     non_empty_histories: Set<LineageId>,
 }
 
-impl<B: Backend + Clone> Clone for LargeSmtForest<B> {
-    fn clone(&self) -> Self {
-        Self {
-            config: self.config.clone(),
-            backend: self.backend.clone(),
-            lineage_data: self.lineage_data.clone(),
-            non_empty_histories: self.non_empty_histories.clone(),
-        }
-    }
-}
-
 // CONSTRUCTION AND BASIC QUERIES
 // ================================================================================================
 
@@ -394,7 +387,7 @@ impl<B: Backend + Clone> Clone for LargeSmtForest<B> {
 ///
 /// Where anything more specific can be said about performance, the method documentation will
 /// contain more detail.
-impl<B: Backend> LargeSmtForest<B> {
+impl<B: BackendReader> LargeSmtForest<B> {
     /// Constructs a new forest backed by the provided `backend` using the default [`Config`] for
     /// the forest's behavior.
     ///
@@ -471,7 +464,7 @@ impl<B: Backend> LargeSmtForest<B> {
 /// All of these methods can be performed fully in-memory, and hence their performance is
 /// predictable on a given machine regardless of the choice of [`Backend`] instance being used by
 /// the forest.
-impl<B: Backend> LargeSmtForest<B> {
+impl<B: BackendReader> LargeSmtForest<B> {
     /// Returns an iterator that yields all the (uniquely identified) roots that the forest knows
     /// about, including those from historical versions.
     ///
@@ -576,7 +569,7 @@ impl<B: Backend> LargeSmtForest<B> {
 ///
 /// Where anything more specific can be said about performance, the method documentation will
 /// contain more detail.
-impl<B: Backend> LargeSmtForest<B> {
+impl<B: BackendReader> LargeSmtForest<B> {
     /// Returns an opening for the specified `key` in the specified `tree`, regardless of whether
     /// the `tree` has a value associated with `key` or not.
     ///
@@ -1127,7 +1120,7 @@ impl<B: Backend> LargeSmtForest<B> {
 
 /// This block contains internal functions that exist to de-duplicate or modularize functionality
 /// within the forest. These should not be exposed.
-impl<B: Backend> LargeSmtForest<B> {
+impl<B: BackendReader> LargeSmtForest<B> {
     /// Applies the history delta given by `history_view` on top of the provided `full_tree_leaf` to
     /// produce the correct leaf for a historical opening.
     ///
@@ -1230,6 +1223,22 @@ impl<B: Backend> LargeSmtForest<B> {
     }
 }
 
+impl<B: Backend> LargeSmtForest<B> {
+    /// Returns a read-only `LargeSmtForest` backed by a reader view of this forest's backend.
+    ///
+    /// The new forest shares the same config, lineage data, and history as `self`, and its backend
+    /// is a point-in-time snapshot produced by [`Backend::reader`]. The returned forest's backend
+    /// type is `B::Reader: BackendReader`, so it cannot be used for mutations.
+    pub fn reader(&self) -> Result<LargeSmtForest<B::Reader>> {
+        Ok(LargeSmtForest {
+            config: self.config.clone(),
+            backend: self.backend.reader()?,
+            lineage_data: self.lineage_data.clone(),
+            non_empty_histories: self.non_empty_histories.clone(),
+        })
+    }
+}
+
 // TESTING FUNCTIONALITY
 // ================================================================================================
 
@@ -1237,7 +1246,7 @@ impl<B: Backend> LargeSmtForest<B> {
 /// inspect the internal state of the forest that are unsafe to make part of the forest's public
 /// API.
 #[cfg(test)]
-impl<B: Backend> LargeSmtForest<B> {
+impl<B: BackendReader> LargeSmtForest<B> {
     /// Gets an immutable reference to the underlying backend of the forest.
     pub fn get_backend(&self) -> &B {
         &self.backend

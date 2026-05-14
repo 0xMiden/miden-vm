@@ -30,14 +30,18 @@ pub use large::{RocksDbConfig, RocksDbSnapshotStorage, RocksDbStorage};
 
 mod large_forest;
 pub use large_forest::{
-    Backend, BackendError, Config as ForestConfig,
+    Backend, BackendError, BackendReader, Config as ForestConfig,
     DEFAULT_MAX_HISTORY_VERSIONS as FOREST_DEFAULT_MAX_HISTORY_VERSIONS, ForestOperation,
-    InMemoryBackend as ForestInMemoryBackend, LargeSmtForest, LargeSmtForestError, LineageId,
-    MIN_HISTORY_VERSIONS as FOREST_MIN_HISTORY_VERSIONS, RootInfo, SmtForestUpdateBatch,
+    InMemoryBackend as ForestInMemoryBackend,
+    InMemoryBackendSnapshot as ForestInMemoryBackendReader, LargeSmtForest, LargeSmtForestError,
+    LineageId, MIN_HISTORY_VERSIONS as FOREST_MIN_HISTORY_VERSIONS, RootInfo, SmtForestUpdateBatch,
     SmtUpdateBatch, TreeEntry, TreeId, TreeWithRoot, VersionId,
 };
 #[cfg(feature = "persistent-forest")]
-pub use large_forest::{PersistentBackend as ForestPersistentBackend, PersistentBackendConfig};
+pub use large_forest::{
+    PersistentBackend as ForestPersistentBackend, PersistentBackendConfig,
+    PersistentBackendReader as ForestPersistentBackendReader,
+};
 
 mod simple;
 pub use simple::{SimpleSmt, SimpleSmtProof};

@@ -32,6 +32,7 @@ mod internal;
 mod iterator;
 mod keys;
 mod property_tests;
+mod snapshot;
 mod tests;
 mod tree_metadata;
 
@@ -43,14 +44,15 @@ use miden_serde_utils::{Deserializable, DeserializationError, Serializable};
 use num::Integer;
 use rayon::prelude::*;
 use rocksdb as db;
+pub use snapshot::PersistentBackendReader;
 
 use super::{BackendError, Result};
 use crate::{
     EMPTY_WORD, Map, Word,
     merkle::{
-        EmptySubtreeRoots, MerkleError, NodeIndex, SparseMerklePath,
+        EmptySubtreeRoots, MerkleError, NodeIndex,
         smt::{
-            Backend, InnerNode, LeafIndex, LineageId, NodeMutation, NodeMutations, SMT_DEPTH,
+            Backend, BackendReader, LeafIndex, LineageId, NodeMutation, NodeMutations, SMT_DEPTH,
             SmtForestUpdateBatch, SmtLeaf, SmtLeafError, SmtProof, SmtUpdateBatch,
             StorageUpdateParts, StorageUpdates, Subtree, SubtreeError, TreeEntry, TreeWithRoot,
             VersionId,
@@ -145,69 +147,10 @@ const MIN_LINEAGES_IN_BATCH_TO_PARALLELIZE: usize = 5;
 /// The minimum number of items per rayon chunk when parallelizing deserialization and extraction.
 const CHUNKING_UNIT: usize = 100;
 
-// PERSISTENT BACKEND
+// BACKEND READER TRAIT
 // ================================================================================================
 
-/// The persistent backend for the SMT forest, providing durable storage for the latest tree in each
-/// lineage in the forest.
-#[derive(Debug)]
-pub struct PersistentBackend {
-    /// The underlying database.
-    ///
-    /// # Layout
-    ///
-    /// The data on each tree is stored across a series of RocksDB column families, along with
-    /// additional metadata. The layout is fixed (for the moment), and has the following column
-    /// families.
-    ///
-    /// - [`LEAVES_CF`]: Stores the [`SmtLeaf`] data, keyed by a [`LeafKey`] instance.
-    /// - [`METADATA_CF`]: Stores a [`TreeMetadata`] instance for each tree, keyed by
-    ///   [`LineageId`]. This acts like a mirror of the in-memory `lineages` data, which exists to
-    ///   speed up common queries.
-    /// - `SUBTREE_XX_CF`: Stores the [`Subtree`]s with their root at level `XX` in the backend,
-    ///   keyed on the [`SubtreeKey`].
-    db: Arc<DB>,
-
-    /// An in-memory cache of the tree metadata enabling the more rapid servicing of certain kinds
-    /// of queries.
-    ///
-    /// Care must be taken that this is _always_ kept in sync with the on-disk copy in the
-    /// [`METADATA_CF`] column.
-    lineages: HashMap<LineageId, TreeMetadata>,
-
-    /// Whether writes should be synchronously flushed to disk.
-    ///
-    /// Setting this to true will result in reduced throughput but may result in higher durability
-    /// in the presence of crashes.
-    sync_writes: bool,
-}
-
-// CONSTRUCTION
-// ================================================================================================
-
-/// This block contains functions for the construction of the persistent backend.
-impl PersistentBackend {
-    /// Constructs an instance of the persistent backend, either opening or creating the data store
-    /// at the location specified in the `config`.
-    ///
-    /// # Errors
-    ///
-    /// - [`BackendError::CorruptedData`] if data corruption is encountered when loading the forest
-    ///   from disk.
-    /// - [`BackendError::Internal`] if the backend cannot be started up properly.
-    pub fn load(config: Config) -> Result<Self> {
-        let db = Arc::new(Self::build_db_with_options(&config)?);
-        let lineages = Self::read_all_metadata(db.clone())?;
-        let sync_writes = config.sync_writes;
-
-        Ok(Self { db, lineages, sync_writes })
-    }
-}
-
-// BACKEND TRAIT
-// ================================================================================================
-
-impl Backend for PersistentBackend {
+impl BackendReader for PersistentBackend {
     /// Returns an opening for the specified `key` in the SMT with the specified `lineage`.
     ///
     /// # Errors
@@ -215,44 +158,13 @@ impl Backend for PersistentBackend {
     /// - [`BackendError::UnknownLineage`] if the provided `lineage` is not known by the backend.
     /// - [`BackendError::Internal`] if the backing database cannot be accessed for some reason.
     fn open(&self, lineage: LineageId, key: Word) -> Result<SmtProof> {
-        // We fail early if we don't know about the lineage in question, as querying further could
-        // cause very strange behavior.
-        if !self.lineages.contains_key(&lineage) {
-            return Err(BackendError::UnknownLineage(lineage));
-        }
-
-        // We get our leaf first.
-        let leaf = self
-            .load_leaf_for(lineage, key)?
-            .unwrap_or_else(|| SmtLeaf::new_empty(LeafIndex::from(key)));
-
-        // We then have to load both the corresponding leaf, and the siblings for its path out of
-        // storage.
-        let leaf_index: NodeIndex = LeafIndex::from(key).into();
-
-        // We calculate the roots of the subtrees in order to know their keys for loading. As an
-        // opening only ever needs to retrieve 8 subtrees we just do this sequentially.
-        let subtree_roots = (0..SMT_DEPTH / SUBTREE_DEPTH)
-            .scan(leaf_index.parent(), |cursor, _| {
-                let subtree_root = Subtree::find_subtree_root(*cursor);
-                *cursor = subtree_root.parent();
-                Some(subtree_root)
-            })
-            .collect::<Vec<_>>();
-
-        // Doing this as a separate step exhibits better performance than loading these subtrees
-        // inline in the path creation. This appears to be due to better pipelining and
-        // branch-predictor behavior.
-        let mut subtree_cache = HashMap::<NodeIndex, Subtree>::new();
-        for root in subtree_roots {
-            let maybe_tree = self.load_subtree(SubtreeKey { lineage, index: root })?;
-            subtree_cache.insert(root, maybe_tree.unwrap_or_else(|| Subtree::new(root)));
-        }
-
-        let merkle_path = self.compute_path(leaf_index, &subtree_cache);
-
-        // This is safe to do unchecked as we ensure that the path is valid by construction.
-        Ok(SmtProof::new_unchecked(merkle_path, leaf))
+        snapshot::open_proof(
+            &self.lineages,
+            lineage,
+            key,
+            |l, k| self.load_leaf_for(l, k),
+            |k| self.load_subtree(k),
+        )
     }
 
     /// Returns the leaf stored at `leaf_index` in the SMT with the specified `lineage`.
@@ -366,6 +278,26 @@ impl Backend for PersistentBackend {
         // Data ownership concerns mean we cannot use this iterator directly even if we could change
         // its type, so we delegate to our custom entries iterator impl.
         Ok(PersistentBackendEntriesIterator::new(lineage, pfx_iterator))
+    }
+}
+
+// BACKEND TRAIT
+// ================================================================================================
+
+impl Backend for PersistentBackend {
+    type Reader = PersistentBackendReader;
+
+    fn reader(&self) -> Result<Self::Reader> {
+        let snapshot = self.db.snapshot();
+        // SAFETY: `SnapshotInner` holds both the snapshot and `Arc<DB>`, and its `Drop` impl
+        // drops the snapshot before decrementing the Arc. This guarantees the DB outlives the
+        // snapshot, making the 'static transmute sound.
+        let snapshot: db::Snapshot<'static> = unsafe { mem::transmute(snapshot) };
+        Ok(PersistentBackendReader::new(
+            Arc::clone(&self.db),
+            snapshot,
+            Arc::clone(&self.lineages),
+        ))
     }
 
     /// Adds the provided `lineage` to the forest with the provided `version` and sets the
@@ -652,37 +584,70 @@ impl Backend for PersistentBackend {
     }
 }
 
-// INTERNAL / UTILITY
+// PERSISTENT BACKEND
 // ================================================================================================
 
-/// This block contains methods for internal use only that provide useful functionality for the
-/// implementation of the backend.
+/// The persistent backend for the SMT forest, providing durable storage for the latest tree in each
+/// lineage in the forest.
+#[derive(Debug)]
+pub struct PersistentBackend {
+    /// The underlying database.
+    ///
+    /// # Layout
+    ///
+    /// The data on each tree is stored across a series of RocksDB column families, along with
+    /// additional metadata. The layout is fixed (for the moment), and has the following column
+    /// families.
+    ///
+    /// - [`LEAVES_CF`]: Stores the [`SmtLeaf`] data, keyed by a [`LeafKey`] instance.
+    /// - [`METADATA_CF`]: Stores a [`TreeMetadata`] instance for each tree, keyed by
+    ///   [`LineageId`]. This acts like a mirror of the in-memory `lineages` data, which exists to
+    ///   speed up common queries.
+    /// - `SUBTREE_XX_CF`: Stores the [`Subtree`]s with their root at level `XX` in the backend,
+    ///   keyed on the [`SubtreeKey`].
+    db: Arc<DB>,
+
+    /// An in-memory cache of the tree metadata enabling the more rapid servicing of certain kinds
+    /// of queries.
+    ///
+    /// Wrapped in an `Arc` for copy-on-write sharing with reader snapshots. Readers clone the
+    /// `Arc` cheaply; mutations use `Arc::make_mut` to fork a private copy only when needed.
+    ///
+    /// Care must be taken that this is _always_ kept in sync with the on-disk copy in the
+    /// [`METADATA_CF`] column.
+    lineages: Arc<HashMap<LineageId, TreeMetadata>>,
+
+    /// Whether writes should be synchronously flushed to disk.
+    ///
+    /// Setting this to true will result in reduced throughput but may result in higher durability
+    /// in the presence of crashes.
+    sync_writes: bool,
+}
+
 impl PersistentBackend {
-    /// Computes the merkle path for the provided `lineage` beginning at the provided `leaf_index`
-    /// using the pre-loaded `subtrees`.
-    fn compute_path(
-        &self,
-        mut leaf_index: NodeIndex,
-        subtrees: &HashMap<NodeIndex, Subtree>,
-    ) -> SparseMerklePath {
-        let mut path = Vec::with_capacity(SMT_DEPTH as usize);
+    /// Constructs an instance of the persistent backend, either opening or creating the data store
+    /// at the location specified in the `config`.
+    ///
+    /// # Errors
+    ///
+    /// - [`BackendError::CorruptedData`] if data corruption is encountered when loading the forest
+    ///   from disk.
+    /// - [`BackendError::Internal`] if the backend cannot be started up properly.
+    pub fn load(config: Config) -> Result<Self> {
+        let db = Arc::new(Self::build_db_with_options(&config)?);
+        let lineages = Arc::new(Self::read_all_metadata(db.clone())?);
+        let sync_writes = config.sync_writes;
 
-        while leaf_index.depth() > 0 {
-            let is_right = leaf_index.is_position_odd();
-            leaf_index = leaf_index.parent();
-
-            let root = Subtree::find_subtree_root(leaf_index);
-            let subtree = &subtrees[&root]; // Known to exist by construction.
-            let InnerNode { left, right } =
-                subtree.get_inner_node(leaf_index).unwrap_or_else(|| {
-                    EmptySubtreeRoots::get_inner_node(SMT_DEPTH, leaf_index.depth())
-                });
-
-            path.push(if is_right { left } else { right });
-        }
-
-        SparseMerklePath::from_sized_iter(path).expect("Always succeeds by construction")
+        Ok(Self { db, lineages, sync_writes })
     }
+
+    // Triggers copy-on-write: clones the shared lineages map only if other references exist.
+    pub(crate) fn lineages_mut(&mut self) -> &mut HashMap<LineageId, TreeMetadata> {
+        Arc::make_mut(&mut self.lineages)
+    }
+
+    // INTERNAL / UTILITY
+    // --------------------------------------------------------------------------------------------
 
     /// Performs `updates` on the tree in the specified lineage, assigning the new tree the
     /// provided `new_version`.
@@ -1363,14 +1328,10 @@ impl PersistentBackend {
 
         Ok(())
     }
-}
 
-// INTERNAL / STARTUP
-// ================================================================================================
+    // INTERNAL / STARTUP
+    // --------------------------------------------------------------------------------------------
 
-/// This impl block contains internal functionality to do with starting up the backend and
-/// performing its initialization work.
-impl PersistentBackend {
     /// Sets up the basic configuration for the underlying RocksDB database.
     fn build_db_with_options(config: &Config) -> Result<DB> {
         let mut db_opts = db::Options::default();
@@ -1495,7 +1456,7 @@ impl PersistentBackend {
         // If it hasn't errored, we can now safely update the in-memory metadata cache.
         Ok(metadata
             .map(|(l, d, r)| {
-                self.lineages.insert(l, d);
+                self.lineages_mut().insert(l, d);
                 (l, r)
             })
             .collect())

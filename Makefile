@@ -105,7 +105,7 @@ test-p3-parallel: ## Run Miden STARK crate tests with the parallel feature enabl
 
 .PHONY: test-large-smt
 test-large-smt: ## Run large SMT unit tests and RocksDB integration tests
-	cargo nextest run --success-output immediate --profile large-smt --cargo-profile test-release --features rocksdb
+	cargo nextest run --success-output immediate --profile large-smt --cargo-profile test-release --features persistent-forest
 
 .PHONY: test
 test: test-default test-no-std test-docs test-large-smt ## Run all tests except concurrent SMT tests

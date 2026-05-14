@@ -336,7 +336,7 @@ type MutatedLeaves = (MutatedSubtreeLeaves, Map<u64, SmtLeaf>, Map<Word, Word>, 
 ///
 /// `LargeSmt` implements [`Clone`] when its storage is cloneable. The in-memory top is shared and
 /// detaches on mutation.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct LargeSmt<S: SmtStorageReader> {
     storage: S,
     /// Shared flat array representation of in-memory nodes.
@@ -349,17 +349,6 @@ pub struct LargeSmt<S: SmtStorageReader> {
     /// Cached count of key-value entries across all leaves. Initialized from
     /// storage on load, updated after each mutation.
     entry_count: usize,
-}
-
-impl<S: SmtStorageReader + Clone> Clone for LargeSmt<S> {
-    fn clone(&self) -> Self {
-        Self {
-            storage: self.storage.clone(),
-            in_memory_nodes: self.in_memory_nodes.clone(),
-            leaf_count: self.leaf_count,
-            entry_count: self.entry_count,
-        }
-    }
 }
 
 impl<S: SmtStorageReader> LargeSmt<S> {
@@ -478,6 +467,7 @@ impl<S: SmtStorageReader> LargeSmt<S> {
         <Self as SparseMerkleTreeReader<SMT_DEPTH>>::get_inner_node(self, index)
     }
 
+    // Triggers copy-on-write: clones the shared node array only if other references exist.
     pub(crate) fn in_memory_nodes_mut(&mut self) -> &mut [Word] {
         Arc::make_mut(&mut self.in_memory_nodes)
     }
@@ -526,11 +516,6 @@ impl<S: SmtStorage> LargeSmt<S> {
             entry_count: self.entry_count,
         })
     }
-}
-
-impl<S: SmtStorage> LargeSmt<S> {
-    // STATE MUTATORS
-    // --------------------------------------------------------------------------------------------
 
     /// Inserts a value at the specified key, returning the previous value associated with that key.
     /// Recall that by definition, any key that hasn't been updated is associated with

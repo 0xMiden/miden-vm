@@ -4,6 +4,7 @@
 - [BREAKING] Upgraded direct `rand` dependencies to 0.10, updating RNG trait bounds and removing direct `rand_hc` usage ([#995](https://github.com/0xMiden/crypto/pull/995)).
 - perf: fuse per-group accumulator and defer allocations ([#1008](https://github.com/0xMiden/crypto/pull/1008))
 - [BREAKING] Reorganized `miden-lifted-stark` internals: consolidated `align`, `bitrev`, `horner`, and `packing` helpers under a new `util` module; moved `reconstruct_quotient` onto `LiftedCoset`; removed the legacy `fri::*` re-export facade ([#1000](https://github.com/0xMiden/crypto/pull/1000)).
+- [BREAKING] Extracted `BackendReader`, allowing `LargeSmtForest<S>` to work with read-only storage backends ([#986](https://github.com/0xMiden/crypto/pull/986)).
 
 ## 0.25.0 (2026-05-01)
 

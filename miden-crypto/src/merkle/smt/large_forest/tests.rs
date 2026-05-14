@@ -18,8 +18,9 @@ use crate::{
     merkle::{
         EmptySubtreeRoots,
         smt::{
-            Backend, ForestInMemoryBackend, ForestOperation, LargeSmtForest, LargeSmtForestError,
-            RootInfo, Smt, SmtForestUpdateBatch, SmtUpdateBatch, TreeId, VersionId,
+            BackendReader, ForestInMemoryBackend, ForestOperation, LargeSmtForest,
+            LargeSmtForestError, RootInfo, Smt, SmtForestUpdateBatch, SmtUpdateBatch, TreeId,
+            VersionId,
             large_forest::{
                 LineageData,
                 history::{ChangedKeys, History, NodeChanges},

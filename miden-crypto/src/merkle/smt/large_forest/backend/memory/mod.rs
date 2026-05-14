@@ -12,13 +12,58 @@ use crate::{
     merkle::smt::{
         LeafIndex, SMT_DEPTH, Smt, SmtLeaf, SmtProof, VersionId,
         large_forest::{
-            Backend,
+            Backend, BackendReader,
             backend::{BackendError, MutationSet, Result},
             operation::{SmtForestUpdateBatch, SmtUpdateBatch},
             root::{LineageId, TreeEntry, TreeWithRoot},
         },
     },
 };
+
+// IN-MEMORY BACKEND SNAPSHOT
+// ================================================================================================
+
+/// A read-only, point-in-time snapshot of an [`InMemoryBackend`].
+///
+/// This type intentionally implements only [`BackendReader`], not [`Backend`]. It is returned by
+/// [`InMemoryBackend::reader`] to hand out a detached copy of the backend state without exposing
+/// any mutation capabilities.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct InMemoryBackendSnapshot(InMemoryBackend);
+
+impl BackendReader for InMemoryBackendSnapshot {
+    fn open(&self, lineage: LineageId, key: Word) -> Result<SmtProof> {
+        self.0.open(lineage, key)
+    }
+
+    fn get_leaf(&self, lineage: LineageId, leaf_index: LeafIndex<SMT_DEPTH>) -> Result<SmtLeaf> {
+        self.0.get_leaf(lineage, leaf_index)
+    }
+
+    fn get(&self, lineage: LineageId, key: Word) -> Result<Option<Word>> {
+        self.0.get(lineage, key)
+    }
+
+    fn version(&self, lineage: LineageId) -> Result<VersionId> {
+        self.0.version(lineage)
+    }
+
+    fn lineages(&self) -> Result<impl Iterator<Item = LineageId>> {
+        self.0.lineages()
+    }
+
+    fn trees(&self) -> Result<impl Iterator<Item = TreeWithRoot>> {
+        self.0.trees()
+    }
+
+    fn entry_count(&self, lineage: LineageId) -> Result<usize> {
+        self.0.entry_count(lineage)
+    }
+
+    fn entries(&self, lineage: LineageId) -> Result<impl Iterator<Item = Result<TreeEntry>>> {
+        self.0.entries(lineage)
+    }
+}
 
 // IN-MEMORY BACKEND
 // ================================================================================================
@@ -37,12 +82,17 @@ impl InMemoryBackend {
         let trees = Map::default();
         Self { trees }
     }
+
+    /// Converts this backend into a read-only snapshot.
+    pub fn into_snapshot(self) -> InMemoryBackendSnapshot {
+        InMemoryBackendSnapshot(self)
+    }
 }
 
-// BACKEND TRAIT
+// BACKEND READER TRAIT
 // ================================================================================================
 
-impl Backend for InMemoryBackend {
+impl BackendReader for InMemoryBackend {
     /// Returns an opening for the specified `key` in the SMT with the specified `lineage`.
     ///
     /// # Errors
@@ -133,6 +183,17 @@ impl Backend for InMemoryBackend {
     fn entries(&self, lineage: LineageId) -> Result<impl Iterator<Item = Result<TreeEntry>>> {
         let tree = self.trees.get(&lineage).ok_or(BackendError::UnknownLineage(lineage))?;
         Ok(tree.tree.entries().map(|(k, v)| Ok(TreeEntry { key: *k, value: *v })))
+    }
+}
+
+// BACKEND TRAIT
+// ================================================================================================
+
+impl Backend for InMemoryBackend {
+    type Reader = InMemoryBackendSnapshot;
+
+    fn reader(&self) -> Result<Self::Reader> {
+        Ok(self.clone().into_snapshot())
     }
 
     /// Adds the provided `lineage` to the forest.

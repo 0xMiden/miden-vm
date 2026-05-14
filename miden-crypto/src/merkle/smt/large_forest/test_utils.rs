@@ -14,9 +14,9 @@ use proptest::prelude::*;
 use crate::{
     EMPTY_WORD, Map, ONE, ZERO,
     merkle::smt::{
-        Backend, ForestInMemoryBackend, ForestOperation, LargeSmtForest, LeafIndex, LineageId,
-        MAX_LEAF_ENTRIES, RootInfo, SMT_DEPTH, Smt, SmtForestUpdateBatch, SmtProof, SmtUpdateBatch,
-        TreeId, VersionId,
+        Backend, BackendReader, ForestInMemoryBackend, ForestOperation, LargeSmtForest, LeafIndex,
+        LineageId, MAX_LEAF_ENTRIES, RootInfo, SMT_DEPTH, Smt, SmtForestUpdateBatch, SmtProof,
+        SmtUpdateBatch, TreeId, VersionId,
         large_forest::{
             backend::{BackendError, Result as BackendResult},
             root::{TreeEntry, TreeWithRoot},
@@ -162,7 +162,7 @@ pub fn sorted_tree_entries(tree: &Smt) -> Vec<TreeEntry> {
 
 /// Sorts forest entries explicitly by `(key, value)` so tests compare observable contents rather
 /// than relying on unspecified iterator ordering.
-pub fn sorted_forest_entries<B: Backend>(
+pub fn sorted_forest_entries<B: BackendReader>(
     forest: &LargeSmtForest<B>,
     tree: TreeId,
 ) -> Result<Vec<TreeEntry>, TestCaseError> {
@@ -180,7 +180,7 @@ fn word_to_option(value: Word) -> Option<Word> {
 }
 
 /// Asserts that the forest and reference tree agree on entries, counts, key lookups, and openings.
-pub fn assert_tree_queries_match<B: Backend>(
+pub fn assert_tree_queries_match<B: BackendReader>(
     forest: &LargeSmtForest<B>,
     tree_id: TreeId,
     reference: &Smt,
@@ -207,7 +207,7 @@ pub fn assert_tree_queries_match<B: Backend>(
 }
 
 /// Asserts that the forest metadata for `lineage` matches the provided sequence of versions.
-pub fn assert_lineage_metadata<B: Backend>(
+pub fn assert_lineage_metadata<B: BackendReader>(
     forest: &LargeSmtForest<B>,
     lineage: LineageId,
     versions: &[(VersionId, Word)],
@@ -275,7 +275,7 @@ impl<I: Iterator<Item = BackendResult<TreeEntry>>> Iterator for FallibleIter<I> 
     }
 }
 
-impl Backend for FallibleEntriesBackend {
+impl BackendReader for FallibleEntriesBackend {
     fn open(&self, lineage: LineageId, key: Word) -> BackendResult<SmtProof> {
         self.inner.open(lineage, key)
     }
@@ -314,6 +314,14 @@ impl Backend for FallibleEntriesBackend {
     ) -> BackendResult<impl Iterator<Item = BackendResult<TreeEntry>>> {
         let inner_iter = self.inner.entries(lineage)?;
         Ok(FallibleIter { inner: inner_iter, count: 0 })
+    }
+}
+
+impl Backend for FallibleEntriesBackend {
+    type Reader = <ForestInMemoryBackend as Backend>::Reader;
+
+    fn reader(&self) -> BackendResult<Self::Reader> {
+        self.inner.reader()
     }
 
     fn add_lineage(

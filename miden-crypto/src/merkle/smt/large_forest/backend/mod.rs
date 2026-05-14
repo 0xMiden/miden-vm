@@ -25,17 +25,18 @@ use crate::{
     },
 };
 
-// BACKEND
+// BACKEND READER
 // ================================================================================================
 
-/// The backing storage for the SMT forest, providing the necessary high-level methods for
-/// performing operations on the full trees that make up the forest, while allowing the forest
-/// itself to be storage agnostic.
+/// The read-only interface for the SMT forest storage backend.
+///
+/// This trait provides the query operations necessary to read the full trees that make up the
+/// forest. It is a supertrait of [`Backend`], which extends it with write operations.
 ///
 /// # Backend Data Storage
 ///
-/// Having a generic [`Backend`] provides no guarantees to the user about how it stores data and
-/// what patterns are used for data access under the hood. It is, however, guaranteed to store
+/// Having a generic [`BackendReader`] provides no guarantees to the user about how it stores data
+/// and what patterns are used for data access under the hood. It is, however, guaranteed to store
 /// _only_ the data necessary to describe the latest state of each tree in the forest.
 ///
 /// # Error Handling
@@ -56,12 +57,6 @@ use crate::{
 ///
 /// # Expected Behavior
 ///
-/// Certain methods on this trait (e.g. [`Backend::update_tree`]) provide behaviors expected for
-/// that method. These combine with the following trait-level behavior requirements to become part
-/// of the contract of the method, but a portion that cannot be encoded in the type system. Any
-/// failure to conform to these expected behaviors is **considered a bug in the implementation** of
-/// the backend, and must be rectified.
-///
 /// The following behavior is expected of all methods in implementations of this trait:
 ///
 /// - For any failure derived from user input (see _User-Derived Errors_ above), the data and the
@@ -70,13 +65,10 @@ use crate::{
 ///   caller by returning a variant of [`BackendError`] that is **not [`BackendError::Internal`]**.
 ///   Methods may place additional constraints on which errors are used to signal certain failures.
 ///   Such failures should not lead to data corruption of any persistent data.
-pub trait Backend
+pub trait BackendReader
 where
     Self: Debug,
 {
-    // QUERIES
-    // ============================================================================================
-
     /// Returns an opening for the specified `key` in the SMT with the specified `lineage`.
     ///
     /// It is the responsibility of the forest to ensure lineage existence before querying the
@@ -148,6 +140,31 @@ where
     /// - `None` will be returned upon successful completion, or at any time after an error has been
     ///   returned.
     fn entries(&self, lineage: LineageId) -> Result<impl Iterator<Item = Result<TreeEntry>>>;
+}
+
+// BACKEND
+// ================================================================================================
+
+/// The full read-write interface for the SMT forest storage backend.
+///
+/// This trait extends [`BackendReader`] with mutation operations, allowing the forest to add new
+/// lineages and update existing ones.
+///
+/// # Implementation Contract
+///
+/// Method-level doc comments describe invariants that cannot be encoded in the type system.
+/// Implementations are responsible for upholding them.
+pub trait Backend: BackendReader {
+    /// The read-only view type returned by [`Self::reader`].
+    ///
+    /// The returned type implements [`BackendReader`] but not [`Backend`], providing a read-only
+    /// guarantee. Implementations may return either a point-in-time snapshot or a live view, but
+    /// the view must always reflect a consistent committed state (not partial writes). Holding the
+    /// reader must not block writes in any way.
+    type Reader: BackendReader;
+
+    /// Returns a read-only view of this backend that observes its current state.
+    fn reader(&self) -> Result<Self::Reader>;
 
     // SINGLE-TREE MODIFIERS
     // ============================================================================================
