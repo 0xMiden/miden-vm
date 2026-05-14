@@ -947,7 +947,6 @@ fn render_token_lines_with_style(
 
     if let Some((open_index, close_index)) =
         outer_group_indices(tokens, SyntaxKind::LParen, SyntaxKind::RParen)
-        && open_index > 0
     {
         return render_delimited_group(tokens, indent, open_index, close_index, style, config);
     }
@@ -1719,6 +1718,40 @@ end
                 .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()));
             assert_format_idempotent(&source, path.display());
         }
+    }
+
+    #[test]
+    fn wraps_root_parenthesized_value_expressions() {
+        let source = "const X = (alpha, beta, gamma, delta, epsilon, zeta)\n";
+
+        let parse = parse_text(source);
+        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+
+        let config = Config {
+            max_line_length: Some(40),
+            ..Config::default()
+        };
+        let formatted = format_syntax(&config, &parse.syntax());
+        let expected = "\
+const X =
+    (
+        alpha,
+        beta,
+        gamma,
+        delta,
+        epsilon,
+        zeta
+    )
+";
+
+        assert_eq!(formatted, expected);
+        assert!(formatted.lines().all(|line| line.len() <= config.max_line_length()));
+
+        let reparsed = parse_text(&formatted);
+        assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
+
+        let reformatted = format_syntax(&config, &reparsed.syntax());
+        assert_eq!(reformatted, formatted);
     }
 
     #[test]
