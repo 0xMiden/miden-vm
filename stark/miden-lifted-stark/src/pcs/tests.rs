@@ -131,7 +131,8 @@ fn test_pcs_cases() {
 
     let log_blowup = params.log_blowup;
     // Pass the LDE shift through `LiftedDomain` (the only sanctioned access path).
-    let lde_shift = LiftedDomain::<Felt>::canonical_lde_shift(6 + log_blowup);
+    let lde_shift = LiftedDomain::<Felt>::canonical_lde_shift(6 + log_blowup)
+        .expect("test parameters in range");
 
     // Case 1: single matrix, single tree.
     let rng = &mut SmallRng::seed_from_u64(42);

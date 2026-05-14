@@ -123,7 +123,8 @@ where
         let widths = [base_width];
 
         // Per-round state: the subgroup carries the working domain size as a typed
-        // value, and `g_inv` is squared in lockstep to avoid re-inverting each round.
+        // value, and `g_inv` is raised to the power `2^log_arity` in lockstep
+        // (matching `subgroup.shrink(log_arity)`) to avoid re-inverting each round.
         let mut subgroup = self.subgroup;
         let mut g_inv = subgroup.generator_inverse();
 

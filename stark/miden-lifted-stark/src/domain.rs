@@ -348,24 +348,18 @@ pub struct LiftedDomain<F: TwoAdicField> {
 }
 
 impl<F: TwoAdicField> LiftedDomain<F> {
-    /// The canonical LDE coset shift for an order-`2^log_lde_order` domain.
+    /// The canonical LDE coset shift `g^(2^(F::TWO_ADICITY − log_lde_order))`
+    /// for an order-`2^log_lde_order` domain.
     ///
-    /// Returns the shift that [`canonical(t, b)`](Self::canonical) would
-    /// produce for `log_lde_order = t + b`, without constructing a
-    /// [`LiftedDomain`]. Useful when callers only need the shift for a
-    /// `coset_lde_batch` / `coset_dft` call and have no other use for the
-    /// full domain object.
+    /// Equivalent to `canonical(t, b).lde_shift()` for `log_lde_order = t + b`,
+    /// without building a [`LiftedDomain`]. Returns `None` if
+    /// `log_lde_order > F::TWO_ADICITY`.
     ///
-    /// # Panics
-    ///
-    /// Panics if `log_lde_order` exceeds `F::TWO_ADICITY` (no `2^log`-th root
-    /// of unity exists in `F`).
+    /// Single source of `F::GENERATOR` in this crate.
     #[inline]
-    pub fn canonical_lde_shift(log_lde_order: u8) -> F {
-        // Single source of `F::GENERATOR` in this crate. The value depends only
-        // on the field and the LDE order — it is invariant of any surrounding
-        // batch context.
-        F::GENERATOR.exp_power_of_2(F::TWO_ADICITY - log_lde_order as usize)
+    pub fn canonical_lde_shift(log_lde_order: u8) -> Option<F> {
+        let exp = F::TWO_ADICITY.checked_sub(log_lde_order as usize)?;
+        Some(F::GENERATOR.exp_power_of_2(exp))
     }
 
     /// Create the canonical domain for `(trace, blowup)`: trace height
@@ -407,7 +401,8 @@ impl<F: TwoAdicField> LiftedDomain<F> {
         }
         // Bound check passed → both sub-sizes fit in u8 and inside F's two-adicity.
         let log_lde_height = log_lde_order as u8;
-        let shift = Self::canonical_lde_shift(log_lde_height);
+        let shift = Self::canonical_lde_shift(log_lde_height)
+            .expect("log_lde_order ≤ F::TWO_ADICITY validated above");
         Ok(Self {
             trace_subgroup: TwoAdicSubgroup::new(log_trace_height),
             lde_coset: TwoAdicCoset::new(TwoAdicSubgroup::new(log_lde_height), shift),
@@ -447,7 +442,8 @@ impl<F: TwoAdicField> LiftedDomain<F> {
         let log_lift_ratio_inc = log_trace - smaller_log_trace_height;
         let new_log_lift_ratio = self.log_lift_ratio + log_lift_ratio_inc;
         let new_log_lde = smaller_log_trace_height + log_blowup;
-        let shift = Self::canonical_lde_shift(new_log_lde);
+        let shift = Self::canonical_lde_shift(new_log_lde)
+            .expect("new_log_lde ≤ parent log_lde_height ≤ F::TWO_ADICITY");
         Ok(Self {
             trace_subgroup: TwoAdicSubgroup::new(smaller_log_trace_height),
             lde_coset: TwoAdicCoset::new(TwoAdicSubgroup::new(new_log_lde), shift),
@@ -566,6 +562,13 @@ impl<F: TwoAdicField> LiftedDomain<F> {
     /// - `is_transition = z' − ω_H⁻¹`
     ///
     /// where `Z_H(z') = z'^N_H − 1` and `ω_H` is the trace subgroup generator.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `z_lift ∈ {1, ω_H⁻¹}` (denominator zero in the row selectors).
+    /// For an OOD `z` sampled via [`sample_ood_point`](Self::sample_ood_point)
+    /// this is statistically impossible; callers passing arbitrary `z` must
+    /// avoid those two values.
     pub fn selectors_at<EF>(&self, z: EF) -> Selectors<EF>
     where
         EF: ExtensionField<F>,
@@ -767,8 +770,14 @@ impl<F: TwoAdicField> EvaluationDomain<F> {
     /// wₜ = ωₛᵗ / (u − ωₛᵗ)
     /// Q(z) = (Σₜ wₜ · qₜ(z)) / (Σₜ wₜ)
     /// ```
+    ///
+    /// # Panics
+    ///
+    /// Panics if `chunks.len() != self.quotient_degree()` — the verifier must
+    /// have unpacked exactly `D = 2^log_quotient_degree` quotient chunks
+    /// before calling this method.
     pub fn reconstruct_quotient<EF: ExtensionField<F>>(&self, z: EF, chunks: &[EF]) -> EF {
-        debug_assert_eq!(
+        assert_eq!(
             chunks.len(),
             self.quotient_degree(),
             "chunk count must equal quotient degree D"
@@ -991,9 +1000,15 @@ mod tests {
 
     #[test]
     fn canonical_lde_shift_matches_domain_shift() {
-        let from_static = LiftedDomain::<Felt>::canonical_lde_shift(13);
+        let from_static = LiftedDomain::<Felt>::canonical_lde_shift(13).unwrap();
         let from_domain = LiftedDomain::<Felt>::canonical(10, 3).lde_shift();
         assert_eq!(from_static, from_domain);
+    }
+
+    #[test]
+    fn canonical_lde_shift_out_of_range_returns_none() {
+        let bad = (Felt::TWO_ADICITY as u8) + 1;
+        assert!(LiftedDomain::<Felt>::canonical_lde_shift(bad).is_none());
     }
 
     #[test]
