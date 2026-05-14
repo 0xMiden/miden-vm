@@ -236,15 +236,36 @@ If you want a comment to be visually associated with the following construct:
 
 - separate it from the previous construct with a blank line
 
-## Hypothetical Future Configuration
+## Configuration
 
-`miden-format` does not currently read a configuration file. If we later introduce something like
-`miden-format.toml`, the current formatter behavior maps reasonably well to the following options:
+`miden-format` behavior can be configured, using either the `--config` flag, or via a `miden-format.toml` file in the current working directory. The two can be mixed: if `miden-format.toml` is present, then options passed via `--config` take precedence.
+
+### Configuration options and `miden-format.toml`
+
+The syntax of `miden-format.toml` is currently just a set of key/value pairs defined at the top level of the TOML file. The full set of options and their default values are shown in the example below:
+
+```toml
+# Wrap if the line length exceeds this value
+max_line_length = 100
+# The number of spaces used for indentation
+indent_width = 4
+```
+
+### Passing options via `--config`
+
+The same options supported in `miden-format.toml` are supported via `--config`, the only difference is the syntax used to provide them: `--config` options must be a comma-separated list of `key=value` pairs, as demonstrated below:
+
+
+```
+miden-format --config=max_line_length=80,indent_width=2
+```
+
+#### Hypothetical future configuration
+
+The following options are things we might add config for in the future:
 
 | Hypothetical option | Current value | Meaning |
 | --- | --- | --- |
-| `max_width` | `80` | Wrap when a formatted line would exceed this width |
-| `indent_width` | `4` | Indentation level for structured bodies and wrapped continuations |
 | `max_blank_lines` | `1` | Maximum number of blank lines preserved between sibling constructs |
 | `preserve_single_line_instruction_groups` | `true` | Keep same-line instruction groups when they fit |
 | `wrap_long_import_aliases` | `true` | Wrap long import aliases without breaking the import path |
