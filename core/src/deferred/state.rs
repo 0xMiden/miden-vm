@@ -90,20 +90,23 @@ impl DeferredState {
     /// Evaluate an opaque node via the installed schema.
     ///
     /// Accepts either classification:
-    /// - `Expression` → reduces to canonical form.
+    /// - `Expression` → reduces to canonical form. The input node and every canonical intermediate
+    ///   produced during the walk are interned into `self.nodes`, so callers may invoke `evaluate`
+    ///   on a fresh op node without pre-registering it.
     /// - `Assertion`  → verifies the assertion and returns the input node back; a mismatch surfaces
-    ///   as [`SchemaError::AssertionFailed`]. The advice-stack contract is uniform — either way the
-    ///   caller gets 12 felts back, which MASM can hash to recover the digest.
+    ///   as [`SchemaError::AssertionFailed`]. Assertions are *not* interned; they live in
+    ///   `self.assertions` when registered, and `evaluate` on an assertion is a pure verify.
     ///
-    /// Children referenced in the payload must already be registered in the DAG. The returned
-    /// `Node` is what the caller pushes onto the advice stack via the `deferred_evaluate`
-    /// opcode.
+    /// Transitively-referenced child digests must resolve through the DAG — an unknown child
+    /// digest surfaces as [`SchemaError::MissingNode`]. The advice-stack contract is enforced by
+    /// the processor-side handler: for expressions, MASM gets the 12 canonical felts back; for
+    /// assertions, nothing is pushed.
     ///
-    /// **Side effect — interning intermediates:** the depth-first walk interns each canonical
-    /// intermediate it computes (e.g. `add → leaf(7)` while reducing `(a+b)*c`) into
-    /// `self.nodes`. This is required for the resulting [`DeferredWitness`] to be checkable:
-    /// the verifier checks neighbors against each other rather than re-executing the DAG, so
-    /// the witness must include the whole reduction proof, not just the answer.
+    /// **Why intern aggressively:** the verifier checks neighbors against each other rather than
+    /// re-executing the DAG, so the witness must include the whole reduction proof — the input op,
+    /// every op visited during recursive reduction, and every canonical leaf produced — not just
+    /// the final answer. Missing any of these would leave a digest in the witness with no node
+    /// defining it.
     pub fn evaluate(&mut self, schema: &dyn Schema, node: Node) -> Result<Node, SchemaError> {
         if schema.is_valid(&node).is_none() {
             return Err(SchemaError::InvalidNode);
@@ -128,18 +131,26 @@ impl DeferredState {
 /// Bound the [`DeferredState`] and [`Schema`] together so [`ChildResolver::resolve`] can recurse
 /// through [`Schema::reduce`] without aliasing borrow problems: the schema is held by shared
 /// reference (Copy), the state by exclusive reference. Each `resolve` call looks the child up,
-/// recursively reduces it, and interns the canonical form when it differs from the input.
+/// recursively reduces it, and interns every expression node it visits.
 struct DfsResolver<'a> {
     state: &'a mut DeferredState,
     schema: &'a dyn Schema,
 }
 
 impl DfsResolver<'_> {
-    /// Reduce `node` to canonical form and intern the result if it changed.
+    /// Reduce `node` to canonical form, interning every expression node visited along the way
+    /// — the input, any expression intermediates the schema's `reduce` walks through, and the
+    /// canonical result if it differs from the input. Assertion nodes are not interned (they
+    /// live in `state.assertions` when registered, or are pure verify-only when evaluated).
     fn reduce_and_intern(&mut self, node: Node) -> Result<Node, SchemaError> {
         let schema = self.schema;
+        if matches!(schema.is_valid(&node), Some(NodeType::Expression)) {
+            self.state.intern(node);
+        }
         let canonical = schema.reduce(node, self)?;
-        if canonical != node {
+        if canonical != node
+            && matches!(schema.is_valid(&canonical), Some(NodeType::Expression))
+        {
             self.state.intern(canonical);
         }
         Ok(canonical)
@@ -431,5 +442,30 @@ mod tests {
         let leaf_35_digest = field0_leaf_node(35).digest();
         assert!(state.contains(&leaf_7_digest), "canonical(add) = leaf(7) must be interned");
         assert!(state.contains(&leaf_35_digest), "canonical(mul) = leaf(35) must be interned");
+    }
+
+    #[test]
+    fn evaluate_interns_unregistered_input_op() {
+        // Build (a+b)*c, but only pre-register the leaves and the inner `add` op. The outer `mul`
+        // is constructed on the fly and handed straight to `evaluate` — it must end up interned
+        // so the witness can link canonical(mul) back to its op-node parent.
+        let mut state = DeferredState::new();
+        let schema = Field0Handler;
+        let a = state.register(&schema, field0_leaf_node(3)).unwrap();
+        let b = state.register(&schema, field0_leaf_node(4)).unwrap();
+        let c = state.register(&schema, field0_leaf_node(5)).unwrap();
+        let add = Node::new(Field0Handler::ADD, Payload::binary_op(a, b));
+        let add_digest = state.register(&schema, add).unwrap();
+        let mul = Node::new(Field0Handler::MUL, Payload::binary_op(add_digest, c));
+
+        let mul_digest = mul.digest();
+        assert!(!state.contains(&mul_digest), "mul must not be pre-registered for this test");
+
+        let canonical = state.evaluate(&schema, mul).unwrap();
+        assert_eq!(canonical, field0_leaf_node(35));
+
+        assert!(state.contains(&mul_digest), "input op node must be interned by evaluate");
+        assert!(state.contains(&field0_leaf_node(7).digest()), "canonical(add) interned");
+        assert!(state.contains(&field0_leaf_node(35).digest()), "canonical(mul) interned");
     }
 }

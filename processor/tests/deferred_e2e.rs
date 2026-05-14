@@ -209,6 +209,40 @@ fn deferred_evaluate_pushes_canonical_form_to_advice() {
     }
 }
 
+// E2E: evaluating an assertion is a pure verify — nothing is pushed onto the advice stack.
+// ================================================================================================
+
+#[test]
+fn deferred_evaluate_on_assertion_pushes_nothing_to_advice() {
+    // Register one leaf, build a self-equal assertion (a == a), evaluate it. The assertion must
+    // verify successfully but nothing is pushed onto the advice stack — a trailing `adv_push.1`
+    // therefore underflows and fails execution.
+    let a = field0_leaf(7);
+    let a_eq_a =
+        Node::new(Field0Handler::ASSERT_EQ, Payload::binary_op(a.digest(), a.digest()));
+
+    let mut src = String::from("begin\n");
+    emit_register(&mut src, a);
+    push_node(&mut src, a_eq_a);
+    src.push_str("    adv.evaluate_deferred\n");
+    for _ in 0..12 {
+        src.push_str("    drop\n");
+    }
+    // Try to pop a single felt off the advice stack — must underflow because evaluate(assertion)
+    // pushed nothing.
+    src.push_str("    adv_push\n");
+    src.push_str("end\n");
+
+    let program = Assembler::default().assemble_program(&src).expect("program must assemble");
+
+    let mut host = DefaultHost::default();
+    let result = build_processor().execute_sync(&program, &mut host);
+    assert!(
+        result.is_err(),
+        "adv_push.1 after evaluate(assertion) must underflow because nothing was pushed"
+    );
+}
+
 // E2E: assert_eq with mismatched values surfaces as an execution error.
 // ================================================================================================
 

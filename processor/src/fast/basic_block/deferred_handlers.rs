@@ -6,7 +6,7 @@
 
 use miden_core::{
     Word,
-    deferred::{Node, Payload, Tag},
+    deferred::{Node, NodeType, Payload, Tag},
 };
 
 use super::SystemEventError;
@@ -45,20 +45,25 @@ pub(super) fn handle_deferred_register(
     Ok(())
 }
 
-/// Handles `SystemEvent::DeferredEvaluate`. Reads the node off the operand stack, asks the
-/// schema to evaluate it, and pushes the 12 felts of the canonical `(payload, tag)` onto the
-/// advice stack so MASM can consume them via the `adv_push*` family.
+/// Handles `SystemEvent::DeferredEvaluate`. Reads the node off the operand stack and asks the
+/// schema to evaluate it.
 ///
-/// The advice stack is LIFO. Tag felts are pushed first (in reverse), then payload-hi, then
-/// payload-lo, so the top of the advice stack is `payload_lo[0]` — the same `payload || tag`
-/// layout used on the operand stack input, so an `adv_pushw` sequence yields
-/// `PAYLOAD_LO`, `PAYLOAD_HI`, `TAG` in that order.
+/// - For expression nodes, the 12 felts of the canonical `(payload, tag)` are pushed onto the
+///   advice stack in `[PAYLOAD_LO, PAYLOAD_HI, TAG]` order (top-down), matching the operand-stack
+///   input layout — MASM can recover each word with `adv_pushw`.
+/// - For assertion nodes, evaluation is a pure verify: a mismatch surfaces as
+///   `SchemaError::AssertionFailed`, and nothing is pushed onto the advice stack on success.
 pub(super) fn handle_deferred_evaluate(
     processor: &mut FastProcessor,
 ) -> Result<(), SystemEventError> {
     let node = read_deferred_node(processor);
     let (state, schema) = processor.deferred_view_mut();
     let canonical = state.evaluate(schema, node)?;
+
+    // Assertion-evaluate is pure verify — no canonical value to surface to MASM.
+    if !matches!(schema.is_valid(&canonical), Some(NodeType::Expression)) {
+        return Ok(());
+    }
 
     let payload_hi = Word::new([
         canonical.payload.0[4],
