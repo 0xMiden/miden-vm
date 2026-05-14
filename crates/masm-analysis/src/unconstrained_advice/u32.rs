@@ -9,6 +9,7 @@ use super::{
     domain::AdviceFact,
     effect::AdviceEffect,
     shared::{Env, collect_expr_sink_fact, expr_output_fact, expr_u32_validity, stmt_span},
+    sink::push_fact_sink_diagnostic,
     summary::{AdviceDiagnostic, AdviceDiagnosticContext, AdviceDiagnosticsMap, AdviceSummaryMap},
     walker::{self, AdviceCapability},
 };
@@ -40,13 +41,13 @@ impl AdviceCapability for U32Capability<'_> {
         match stmt {
             Stmt::Assign { span, expr, .. } => {
                 let sink_fact = expr_u32_sink_fact(expr, env);
-                if sink_fact.has_concrete_sources() {
-                    effect.push_diagnostic(self.diagnostics.diagnostic_for_fact(
-                        *span,
-                        "unconstrained advice reaches a u32 operation",
-                        &sink_fact,
-                    ));
-                }
+                push_fact_sink_diagnostic(
+                    &mut effect,
+                    &self.diagnostics,
+                    *span,
+                    "unconstrained advice reaches a u32 operation",
+                    &sink_fact,
+                );
             },
             Stmt::Call { span, call }
             | Stmt::Exec { span, call }
@@ -57,33 +58,33 @@ impl AdviceCapability for U32Capability<'_> {
             },
             Stmt::Intrinsic { span, intrinsic } => {
                 let sink_fact = intrinsic_u32_sink_fact(intrinsic, env);
-                if sink_fact.has_concrete_sources() {
-                    effect.push_diagnostic(self.diagnostics.diagnostic_for_fact(
-                        *span,
-                        "unconstrained advice reaches a u32 intrinsic",
-                        &sink_fact,
-                    ));
-                }
+                push_fact_sink_diagnostic(
+                    &mut effect,
+                    &self.diagnostics,
+                    *span,
+                    "unconstrained advice reaches a u32 intrinsic",
+                    &sink_fact,
+                );
             },
             Stmt::If { cond, .. } => {
                 let sink_fact = expr_u32_sink_fact(cond, env);
-                if sink_fact.has_concrete_sources() {
-                    effect.push_diagnostic(self.diagnostics.diagnostic_for_fact(
-                        stmt_span(stmt),
-                        "unconstrained advice reaches a u32 operation",
-                        &sink_fact,
-                    ));
-                }
+                push_fact_sink_diagnostic(
+                    &mut effect,
+                    &self.diagnostics,
+                    stmt_span(stmt),
+                    "unconstrained advice reaches a u32 operation",
+                    &sink_fact,
+                );
             },
             Stmt::While { cond, .. } => {
                 let sink_fact = expr_u32_sink_fact(cond, env);
-                if sink_fact.has_concrete_sources() {
-                    effect.push_diagnostic(self.diagnostics.diagnostic_for_fact(
-                        stmt_span(stmt),
-                        "unconstrained advice reaches a u32 operation",
-                        &sink_fact,
-                    ));
-                }
+                push_fact_sink_diagnostic(
+                    &mut effect,
+                    &self.diagnostics,
+                    stmt_span(stmt),
+                    "unconstrained advice reaches a u32 operation",
+                    &sink_fact,
+                );
             },
             Stmt::AdvLoad { .. }
             | Stmt::AdvStore { .. }
