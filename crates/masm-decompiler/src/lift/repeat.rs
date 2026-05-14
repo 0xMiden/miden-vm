@@ -2,11 +2,11 @@
 
 use std::collections::{HashMap, HashSet};
 
-use log::trace;
 use miden_assembly_syntax::{
     ast::{Block, Immediate, Instruction, Op},
     debuginfo::{SourceSpan, Spanned},
 };
+use tracing::trace;
 
 use super::{
     LiftingError, LiftingResult, inst,
@@ -35,6 +35,59 @@ fn require_slot_depth(
         });
     }
     Ok(())
+}
+
+/// Result of applying a generic stack effect to a slot stack.
+struct SlotEffect {
+    popped: Vec<SlotId>,
+    reused: Vec<SlotId>,
+    produced: Vec<SlotId>,
+}
+
+/// Allocate a fresh slot identifier from a stack-local counter.
+fn alloc_slot(next_slot: &mut u64) -> SlotId {
+    let id = *next_slot;
+    *next_slot += 1;
+    SlotId::new(id)
+}
+
+/// Pop a slot identifier from the top of a slot stack.
+fn pop_slot(slots: &mut Vec<SlotId>) -> SlotId {
+    slots.pop().expect("slot stack underflow")
+}
+
+/// Apply a generic stack effect, reusing popped slots before allocating new slots.
+fn apply_slot_effect(
+    slots: &mut Vec<SlotId>,
+    next_slot: &mut u64,
+    pops: usize,
+    pushes: usize,
+    required_depth: usize,
+    span: SourceSpan,
+    operation: String,
+) -> LiftingResult<SlotEffect> {
+    require_slot_depth(slots, required_depth, span, operation)?;
+
+    let mut popped = Vec::with_capacity(pops);
+    for _ in 0..pops {
+        popped.push(pop_slot(slots));
+    }
+
+    let mut available = popped.iter().rev().copied().collect::<Vec<_>>();
+    let reuse_count = available.len().min(pushes);
+    let reused = available.drain(0..reuse_count).collect::<Vec<_>>();
+    let mut produced = Vec::with_capacity(pushes.saturating_sub(reuse_count));
+
+    for slot in &reused {
+        slots.push(*slot);
+    }
+    for _ in reuse_count..pushes {
+        let slot = alloc_slot(next_slot);
+        produced.push(slot);
+        slots.push(slot);
+    }
+
+    Ok(SlotEffect { popped, reused, produced })
 }
 
 /// Swap the top slot with the slot at the given depth.
@@ -85,7 +138,7 @@ fn movup_slot(slots: &mut Vec<SlotId>, depth: usize) {
 fn movdn_slot(slots: &mut Vec<SlotId>, depth: usize) {
     let len = slots.len();
     if depth > 0 && depth < len {
-        let slot = slots.pop().expect("slot stack underflow");
+        let slot = pop_slot(slots);
         let idx = len - 1 - depth;
         slots.insert(idx, slot);
     }
@@ -123,18 +176,6 @@ impl SlotStack {
         operation: impl Into<String>,
     ) -> LiftingResult<()> {
         require_slot_depth(&self.slots, required_depth, span, operation.into())
-    }
-
-    /// Allocate a fresh slot identifier.
-    fn alloc_slot(&mut self) -> SlotId {
-        let id = self.next_slot;
-        self.next_slot += 1;
-        SlotId::new(id)
-    }
-
-    /// Pop a slot identifier from the top of the stack.
-    fn pop(&mut self) -> SlotId {
-        self.slots.pop().expect("slot stack underflow")
     }
 
     /// Swap the top slot with the slot at the given depth.
@@ -204,20 +245,15 @@ impl SlotStack {
         span: SourceSpan,
         operation: impl Into<String>,
     ) -> LiftingResult<()> {
-        self.require_depth(required_depth, span, operation)?;
-        let mut popped = Vec::with_capacity(pops);
-        for _ in 0..pops {
-            popped.push(self.pop());
-        }
-        let mut reuse = popped.into_iter().rev().collect::<Vec<_>>();
-        let reuse_count = reuse.len().min(pushes);
-        for slot in reuse.drain(0..reuse_count) {
-            self.slots.push(slot);
-        }
-        for _ in reuse_count..pushes {
-            let slot = self.alloc_slot();
-            self.slots.push(slot);
-        }
+        let _ = apply_slot_effect(
+            &mut self.slots,
+            &mut self.next_slot,
+            pops,
+            pushes,
+            required_depth,
+            span,
+            operation.into(),
+        )?;
         Ok(())
     }
 
@@ -230,9 +266,6 @@ impl SlotStack {
 /// Per-slot index parameters used for loop subscript rewriting.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct SlotIndex {
-    /// Linear shift applied per iteration.
-    #[allow(dead_code)]
-    pub(super) delta: i64,
     /// Change in relative depth from the top of the stack per iteration.
     pub(super) access_delta: i64,
 }
@@ -317,7 +350,7 @@ fn compute_slot_indices(
                     }
                     let access_delta =
                         (exit_entries.len() as i64 - entry_entries.len() as i64) - delta1;
-                    slot_indices.insert(entry.slot_id, SlotIndex { delta: delta1, access_delta });
+                    slot_indices.insert(entry.slot_id, SlotIndex { access_delta });
                     continue;
                 } else {
                     -consumed_stride
@@ -325,10 +358,10 @@ fn compute_slot_indices(
             } else {
                 -consumed_stride
             };
-            slot_indices.insert(entry.slot_id, SlotIndex { delta, access_delta: delta });
+            slot_indices.insert(entry.slot_id, SlotIndex { access_delta: delta });
         } else {
             let delta = -consumed_stride;
-            slot_indices.insert(entry.slot_id, SlotIndex { delta, access_delta: delta });
+            slot_indices.insert(entry.slot_id, SlotIndex { access_delta: delta });
         }
     }
 
@@ -351,7 +384,7 @@ fn compute_slot_indices(
         } else {
             0
         };
-        slot_indices.insert(exit.slot_id, SlotIndex { delta, access_delta: delta });
+        slot_indices.insert(exit.slot_id, SlotIndex { access_delta: delta });
     }
 
     Ok(slot_indices)
@@ -469,18 +502,6 @@ impl TaggedSlotStack {
         require_slot_depth(&self.slots, required_depth, span, operation.into())
     }
 
-    /// Allocate a fresh slot identifier.
-    fn alloc_slot(&mut self) -> SlotId {
-        let id = self.next_slot;
-        self.next_slot += 1;
-        SlotId::new(id)
-    }
-
-    /// Pop a slot identifier from the top of the stack.
-    fn pop(&mut self) -> SlotId {
-        self.slots.pop().expect("slot stack underflow")
-    }
-
     /// Swap the top slot with the slot at the given depth.
     fn swap(
         &mut self,
@@ -549,32 +570,27 @@ impl TaggedSlotStack {
         operation: impl Into<String>,
     ) -> LiftingResult<()> {
         let before = self.state_snapshot();
-        self.require_depth(required_depth, span, operation)?;
-        let mut popped = Vec::with_capacity(pops);
-        let mut popped_tags = Vec::with_capacity(pops);
-        for _ in 0..pops {
-            let slot = self.pop();
-            let tags = self.tags.remove(&slot).unwrap_or_default();
-            popped.push(slot);
-            popped_tags.push(tags);
-        }
+        let effect = apply_slot_effect(
+            &mut self.slots,
+            &mut self.next_slot,
+            pops,
+            pushes,
+            required_depth,
+            span,
+            operation.into(),
+        )?;
         let mut merged_tags = HashSet::new();
-        for tags in popped_tags {
-            merged_tags.extend(tags);
+        for slot in effect.popped {
+            merged_tags.extend(self.tags.remove(&slot).unwrap_or_default());
         }
-        let mut reuse = popped.into_iter().rev().collect::<Vec<_>>();
-        let reuse_count = reuse.len().min(pushes);
-        for slot in reuse.drain(0..reuse_count) {
+        for slot in effect.reused {
             self.tags.insert(slot, merged_tags.clone());
-            self.slots.push(slot);
         }
-        for _ in reuse_count..pushes {
-            let slot = self.alloc_slot();
+        for slot in effect.produced {
             self.tags.entry(slot).or_default();
-            self.slots.push(slot);
         }
         trace!(
-            "repeat tag simulation effect: pops={}, pushes={}, requred_depth={}, before={}, after={}",
+            "repeat tag simulation effect: pops={}, pushes={}, required_depth={}, before={}, after={}",
             pops,
             pushes,
             required_depth,

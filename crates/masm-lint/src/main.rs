@@ -9,6 +9,7 @@ use masm_analysis::lint::{
     LibraryRoot, LintPathAnalysisInput, UnresolvedDependencyReport, analyze_paths,
 };
 use miden_debug_types::DefaultSourceManager;
+use tracing_subscriber::{EnvFilter, prelude::*};
 
 // ── CLI ───────────────────────────────────────────────────────────────────────
 
@@ -37,6 +38,8 @@ struct Cli {
 }
 
 fn main() {
+    initialize_tracing();
+
     let cli = Cli::parse();
 
     if cli.no_color {
@@ -44,6 +47,21 @@ fn main() {
     }
 
     std::process::exit(run(cli));
+}
+
+fn initialize_tracing() {
+    let _ = tracing_log::LogTracer::init();
+
+    let filter = EnvFilter::try_from_env("MIDEN_LOG").unwrap_or_else(|_| EnvFilter::new("warn"));
+    let format = tracing_subscriber::fmt::layer()
+        .with_writer(std::io::stderr)
+        .with_level(false)
+        .with_target(false)
+        .with_thread_names(false)
+        .with_ansi(false)
+        .compact();
+
+    let _ = tracing_subscriber::registry().with(filter).with(format).try_init();
 }
 
 // ── Driver ────────────────────────────────────────────────────────────────────
