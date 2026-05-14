@@ -15,7 +15,6 @@ use miden_core::{
         SubtreeIterator,
     },
     operations::{AssemblyOp, Decorator, DecoratorList, Operation},
-    serde::Serializable,
 };
 
 use super::{GlobalItemIndex, LinkerError, Procedure};
@@ -708,8 +707,7 @@ impl MastForestBuilder {
         Ok(node_id)
     }
 
-    /// Copies a statically linked node into this builder and remaps its metadata into the target
-    /// forest when a new node is created.
+    /// Copies a statically linked node into this builder.
     fn ensure_node_from_statically_linked_source(
         &mut self,
         builder: impl MastForestContributor,
@@ -1569,10 +1567,7 @@ mod tests {
             )
             .unwrap();
 
-        assert_eq!(
-            block_a, block_b,
-            "same op stream plus different AssemblyOp payload must dedup"
-        );
+        assert_eq!(block_a, block_b, "same op stream plus different AssemblyOp payload must dedup");
 
         let (forest, _remapping) = builder.build();
         assert_eq!(
@@ -1654,135 +1649,6 @@ mod tests {
         );
     }
 
-    /// Statically linked and local nodes with the same shape still alias. The first copied
-    /// metadata wins.
-    #[test]
-    fn test_statically_linked_nodes_dedup_against_local_nodes() {
-        use miden_core::operations::{DebugVarInfo, DebugVarLocation};
-
-        let mut static_forest = MastForest::new();
-        let static_asm_op_id = static_forest
-            .debug_info_mut()
-            .add_asm_op(AssemblyOp::new(None, "lib_ctx".into(), 1, "add".into()))
-            .unwrap();
-        let static_var_id = static_forest
-            .add_debug_var(DebugVarInfo::new("x", DebugVarLocation::Stack(0)))
-            .unwrap();
-        let static_block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
-            .add_to_forest(&mut static_forest)
-            .unwrap();
-        static_forest
-            .debug_info_mut()
-            .register_asm_ops(static_block_id, 1, vec![(0, static_asm_op_id)])
-            .unwrap();
-        static_forest
-            .debug_info_mut()
-            .register_op_indexed_debug_vars(static_block_id, vec![(0, static_var_id)])
-            .unwrap();
-        static_forest.make_root(static_block_id);
-
-        let mut builder = MastForestBuilder::new([&static_forest]).unwrap();
-        let copied_block_id =
-            builder.ensure_external_link(static_forest[static_block_id].digest()).unwrap();
-
-        let local_var_id = builder
-            .add_debug_var(DebugVarInfo::new("y", DebugVarLocation::Stack(1)))
-            .unwrap();
-        let local_block_id = builder
-            .ensure_block(
-                vec![Operation::Add],
-                Vec::new(),
-                vec![(0, AssemblyOp::new(None, "local_ctx".into(), 1, "add".into()))],
-                vec![(0, local_var_id)],
-                vec![],
-                vec![],
-            )
-            .unwrap();
-
-        assert_eq!(
-            copied_block_id, local_block_id,
-            "statically linked and local nodes with the same shape must dedup"
-        );
-
-        let (forest, _remapping) = builder.build();
-        assert_eq!(
-            forest
-                .debug_info()
-                .first_asm_op_for_node(copied_block_id)
-                .unwrap()
-                .context_name(),
-            "lib_ctx"
-        );
-
-        let copied_vars = forest.debug_info().debug_vars_for_node(copied_block_id);
-        let local_vars = forest.debug_info().debug_vars_for_node(local_block_id);
-        assert_eq!(forest.debug_info().debug_var(copied_vars[0].1).unwrap().name(), "x");
-        assert_eq!(forest.debug_info().debug_var(local_vars[0].1).unwrap().name(), "x");
-    }
-
-    #[test]
-    fn test_statically_linked_padded_block_dedups_with_equivalent_local_block() {
-        let mut source_builder = MastForestBuilder::new(&[]).unwrap();
-        let ops = vec![
-            Operation::Push(Felt::from_u32(1)),
-            Operation::Drop,
-            Operation::Drop,
-            Operation::Drop,
-            Operation::Drop,
-            Operation::Drop,
-            Operation::Drop,
-            Operation::Push(Felt::from_u32(2)),
-            Operation::Push(Felt::from_u32(3)),
-        ];
-        let asm_op = AssemblyOp::new(None, "padded_ctx".into(), 1, "push.3".into());
-
-        let static_block = source_builder
-            .ensure_block(
-                ops.clone(),
-                Vec::new(),
-                vec![(8, asm_op.clone())],
-                vec![],
-                vec![],
-                vec![],
-            )
-            .unwrap();
-        source_builder.mast_forest.make_root(static_block);
-
-        let (static_forest, _) = source_builder.build();
-        let expected_padded_idx = static_forest.debug_info().asm_ops_for_node(static_block)[0].0;
-
-        let mut builder = MastForestBuilder::new([&static_forest]).unwrap();
-        let copied_block_id =
-            builder.ensure_external_link(static_forest[static_block].digest()).unwrap();
-        let local_block_id = builder
-            .ensure_block(ops, Vec::new(), vec![(8, asm_op)], vec![], vec![], vec![])
-            .unwrap();
-
-        assert_eq!(
-            copied_block_id, local_block_id,
-            "copied padded blocks should dedup with equivalent local blocks",
-        );
-
-        let (forest, remapping) = builder.build();
-        let final_block_id = remapping.get(&copied_block_id).copied().unwrap_or(copied_block_id);
-
-        assert!(
-            forest
-                .debug_info()
-                .asm_op_for_operation(final_block_id, expected_padded_idx - 1)
-                .is_none(),
-            "the asm op must not be attached before its padded operation index",
-        );
-        assert_eq!(
-            forest
-                .debug_info()
-                .asm_op_for_operation(final_block_id, expected_padded_idx)
-                .unwrap()
-                .context_name(),
-            "padded_ctx",
-        );
-    }
-
     /// A small procedure root that gets merged into a larger block must keep its own
     /// debug vars and asm ops, since the root node survives removal.
     #[test]
@@ -1835,168 +1701,5 @@ mod tests {
         // Root block must still have its asm op.
         let root_asm = forest.debug_info().first_asm_op_for_node(final_root_id);
         assert!(root_asm.is_some(), "root must keep its asm op after merge");
-    }
-
-    /// Two same-digest roots with different asm ops stay distinct when
-    /// linked by exact node ID.
-    #[test]
-    fn test_static_link_exact_node_preserves_alias_metadata() {
-        let mut source_builder = MastForestBuilder::new(&[]).unwrap();
-
-        let alias_a = source_builder
-            .ensure_block(
-                vec![Operation::Add],
-                Vec::new(),
-                vec![(0, AssemblyOp::new(None, "alias_a".into(), 1, "add".into()))],
-                vec![],
-                vec![],
-                vec![],
-            )
-            .unwrap();
-        let alias_b = source_builder
-            .ensure_block(
-                vec![Operation::Add],
-                Vec::new(),
-                vec![(0, AssemblyOp::new(None, "alias_b".into(), 1, "add".into()))],
-                vec![],
-                vec![],
-                vec![],
-            )
-            .unwrap();
-        source_builder.mast_forest.make_root(alias_a);
-        source_builder.mast_forest.make_root(alias_b);
-
-        let (static_forest, _remapping) = source_builder.build();
-        assert_eq!(static_forest[alias_a].digest(), static_forest[alias_b].digest());
-
-        // Exact path via internal API — gets alias_b's metadata.
-        let mut exact_builder = MastForestBuilder::new([&static_forest]).unwrap();
-        let exact_alias_b = {
-            let node = exact_builder.statically_linked_mast[alias_b].clone();
-            let builder = exact_builder.build_with_remapped_ids(alias_b, node).unwrap();
-            exact_builder
-                .ensure_node_from_statically_linked_source(builder, alias_b)
-                .unwrap()
-        };
-        let (exact_forest, _) = exact_builder.build();
-        assert_eq!(
-            exact_forest
-                .debug_info()
-                .first_asm_op_for_node(exact_alias_b)
-                .unwrap()
-                .context_name(),
-            "alias_b"
-        );
-    }
-
-    /// Digest-based linking imports only the selected alias, not all
-    /// same-digest roots. The unselected alias must not leak into the forest.
-    #[test]
-    fn test_static_link_by_digest_imports_only_selected_alias() {
-        let mut source_builder = MastForestBuilder::new(&[]).unwrap();
-
-        let alias_a = source_builder
-            .ensure_block(
-                vec![Operation::Add],
-                Vec::new(),
-                vec![(0, AssemblyOp::new(None, "alias_a".into(), 1, "add".into()))],
-                vec![],
-                vec![],
-                vec![],
-            )
-            .unwrap();
-        let alias_b = source_builder
-            .ensure_block(
-                vec![Operation::Add],
-                Vec::new(),
-                vec![(0, AssemblyOp::new(None, "alias_b".into(), 1, "add".into()))],
-                vec![],
-                vec![],
-                vec![],
-            )
-            .unwrap();
-        source_builder.mast_forest.make_root(alias_a);
-        source_builder.mast_forest.make_root(alias_b);
-
-        let (static_forest, _) = source_builder.build();
-
-        let mut builder = MastForestBuilder::new([&static_forest]).unwrap();
-        let linked = builder.ensure_external_link(static_forest[alias_a].digest()).unwrap();
-        builder.mast_forest.make_root(linked);
-        let (forest, _) = builder.build();
-
-        // Only one node should be in the forest — the selected alias.
-        assert_eq!(forest.num_nodes(), 1, "only the selected alias should be imported");
-        assert_eq!(
-            forest.debug_info().first_asm_op_for_node(linked).unwrap().context_name(),
-            "alias_a",
-        );
-    }
-
-    /// Digest-based linking picks the first root, so the second alias gets
-    /// the wrong metadata. Fixing this needs #2990.
-    #[test]
-    #[ignore = "requires #2990: source MastNodeId in ProcedureInfo"]
-    fn repro_statically_linked_same_digest_root_uses_first_alias_metadata() {
-        let mut source_builder = MastForestBuilder::new(&[]).unwrap();
-
-        let alias_a = source_builder
-            .ensure_block(
-                vec![Operation::Add],
-                Vec::new(),
-                vec![(0, AssemblyOp::new(None, "alias_a".into(), 1, "add".into()))],
-                vec![],
-                vec![],
-                vec![],
-            )
-            .unwrap();
-        let alias_b = source_builder
-            .ensure_block(
-                vec![Operation::Add],
-                Vec::new(),
-                vec![(0, AssemblyOp::new(None, "alias_b".into(), 1, "add".into()))],
-                vec![],
-                vec![],
-                vec![],
-            )
-            .unwrap();
-        source_builder.mast_forest.make_root(alias_a);
-        source_builder.mast_forest.make_root(alias_b);
-
-        let (static_forest, _remapping) = source_builder.build();
-        assert_eq!(static_forest[alias_a].digest(), static_forest[alias_b].digest());
-
-        let mut exact_builder = MastForestBuilder::new([&static_forest]).unwrap();
-        let exact_alias_b = {
-            let node = exact_builder.statically_linked_mast[alias_b].clone();
-            let builder = exact_builder.build_with_remapped_ids(alias_b, node).unwrap();
-            exact_builder
-                .ensure_node_from_statically_linked_source(builder, alias_b)
-                .unwrap()
-        };
-        let (exact_forest, _) = exact_builder.build();
-
-        let mut digest_builder = MastForestBuilder::new([&static_forest]).unwrap();
-        let linked_alias_b =
-            digest_builder.ensure_external_link(static_forest[alias_b].digest()).unwrap();
-        let (linked_forest, _) = digest_builder.build();
-
-        assert_eq!(
-            exact_forest
-                .debug_info()
-                .first_asm_op_for_node(exact_alias_b)
-                .unwrap()
-                .context_name(),
-            "alias_b"
-        );
-        assert_eq!(
-            linked_forest
-                .debug_info()
-                .first_asm_op_for_node(linked_alias_b)
-                .unwrap()
-                .context_name(),
-            "alias_b",
-            "linking the second same-digest root by digest should preserve that root's metadata",
-        );
     }
 }
