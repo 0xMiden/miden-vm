@@ -1566,17 +1566,20 @@ fn needs_space(previous: &SyntaxToken, next: &SyntaxToken, style: SpacingStyle) 
         return false;
     }
 
+    if next_kind == LParen && matches!(previous_kind, Ident | SpecialIdent | QuotedIdent) {
+        return false;
+    }
+
     match next_kind {
-        Dot | ColonColon | DotDot | Comma | LAngle | RAngle | LParen | RParen | RBracket
-        | RBrace => false,
+        Dot | ColonColon | DotDot | Comma | LAngle | RAngle | RParen | RBracket | RBrace => false,
         LBracket | Equal if matches!(style, SpacingStyle::CompactInstruction) => false,
         Colon if matches!(style, SpacingStyle::TypeBodyItem) => false,
         Tombstone | Error | SourceFile | Doc | Import | Constant | TypeDecl | AdviceMap
         | BeginBlock | Procedure | Attribute | Visibility | Signature | Block | IfOp | WhileOp
         | RepeatOp | Instruction | Path | Expr | TypeBody | Whitespace | Newline | Comment
         | DocComment | Ident | SpecialIdent | Number | QuotedIdent | QuotedString | At | Bang
-        | Colon | Equal | LBrace | LBracket | Minus | Plus | RArrow | Semicolon | Slash
-        | SlashSlash | Star => match previous_kind {
+        | Colon | Equal | LBrace | LBracket | LParen | Minus | Plus | RArrow | Semicolon
+        | Slash | SlashSlash | Star => match previous_kind {
             Equal if matches!(style, SpacingStyle::CompactInstruction) => false,
             DotDot => false,
             Comma | Equal | RArrow | Colon | Plus | Minus | Star | Slash | SlashSlash => true,
@@ -1718,6 +1721,32 @@ end
                 .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()));
             assert_format_idempotent(&source, path.display());
         }
+    }
+
+    #[test]
+    fn preserves_space_before_parenthesized_value_expressions() {
+        let source = "\
+const X = (1)
+const Y = event(\"miden::event\")
+";
+
+        let parse = parse_text(source);
+        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+
+        let config = Config::default();
+        let formatted = format_syntax(&config, &parse.syntax());
+        let expected = "\
+const X = (1)
+const Y = event(\"miden::event\")
+";
+
+        assert_eq!(formatted, expected);
+
+        let reparsed = parse_text(&formatted);
+        assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
+
+        let reformatted = format_syntax(&config, &reparsed.syntax());
+        assert_eq!(reformatted, formatted);
     }
 
     #[test]
