@@ -33,12 +33,9 @@ pub(crate) const MIDEN_COLUMN_SHAPE: [usize; 7] = [
     CHIPLET_COLUMN_SHAPE[2],
 ];
 
-/// Number of committed final aux values published with a proof of `ProcessorAir`.
-///
-/// `ProcessorAir` (the legacy aggregator) has a single real LogUp accumulator; slot 1 is
-/// forced to zero so its layout matches the multi-AIR proof shape (Core final at slot 0,
-/// Chiplets final at slot 1). All paths that emit or consume the pair must preserve the
-/// zero in slot 1 for `ProcessorAir`.
+/// Number of committed final aux values in the multi-AIR proof shape: Core final at slot 0
+/// and Chiplets final at slot 1. `ProcessorAir` matches this shape by forcing its slot 1 to
+/// zero.
 pub const NUM_LOGUP_COMMITTED_FINALS: usize = 2;
 
 // BOUNDARY EMITTER

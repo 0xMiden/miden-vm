@@ -36,11 +36,6 @@ use crate::trace::{CHIPLETS_WIDTH, TRACE_WIDTH};
 ///
 /// The `s_perm` column is separated from the chiplets array because it is consumed
 /// exclusively by the chiplet selector system, not by any chiplet's constraint code.
-///
-/// `chip_clk` is the chiplet-trace row counter (value `row_index + 1`); it serves as the
-/// chiplet-side responder address for the hasher LogUp bus. Required for the multi-AIR
-/// split — eliminates the cross-trace `system.clk + 1` read that appeared in the legacy
-/// monolithic chiplet bus emitter.
 #[repr(C)]
 pub struct MainCols<T> {
     pub system: SystemCols<T>,
@@ -152,9 +147,6 @@ impl<T> MainCols<T> {
 
 impl<T> Borrow<MainCols<T>> for [T] {
     fn borrow(&self) -> &MainCols<T> {
-        // The prover stores rows at `PADDED_TRACE_WIDTH` (next multiple of 8) for
-        // `adv_pipe` rate-8 hashing. `MainCols` itself models only `TRACE_WIDTH` columns;
-        // any trailing padding is ignored.
         debug_assert!(self.len() >= TRACE_WIDTH);
         let (prefix, shorts, _suffix) = unsafe { self[..TRACE_WIDTH].align_to::<MainCols<T>>() };
         debug_assert!(prefix.is_empty() && shorts.len() == 1);

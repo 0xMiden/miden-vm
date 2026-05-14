@@ -207,7 +207,6 @@ pub fn build_trace_with_max_len(
             core_trace_data,
             chiplets_trace.trace,
             range_checker_trace.trace,
-            main_trace_len,
             core_height,
             chiplets_height,
             last_program_row,

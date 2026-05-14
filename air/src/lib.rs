@@ -745,8 +745,7 @@ where
 /// chiplet-trace LogUp accumulator columns. Counterpart to [`CoreAir`].
 ///
 /// `chip_clk` is the chiplet-trace row counter — it provides the responder address for the
-/// hasher LogUp bus, replacing the cross-trace `system.clk + 1` read used in the legacy
-/// monolithic chiplet bus emitter.
+/// hasher LogUp bus.
 #[derive(Copy, Clone, Debug, Default)]
 pub struct ChipletsAir;
 
@@ -893,20 +892,11 @@ where
     }
 
     fn eval(&self, builder: &mut LB) {
-        // The chiplet-side `chip_clk` column is the responder address for the hasher
-        // LogUp bus.
         let main = builder.main();
         let local: &ChipletCols<_> = main.current_slice().borrow();
         let next: &ChipletCols<_> = main.next_slice().borrow();
 
-        let clk_plus_one: LB::Expr = local.chip_clk.into();
-
-        constraints::lookup::chiplet_air::emit_chiplet_lookup_columns(
-            builder,
-            local,
-            next,
-            clk_plus_one,
-        );
+        constraints::lookup::chiplet_air::emit_chiplet_lookup_columns(builder, local, next);
     }
 
     fn eval_boundary<B>(&self, boundary: &mut B)

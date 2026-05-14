@@ -148,30 +148,24 @@ impl MainTrace {
     /// vectors.
     ///
     /// `core_rows` and `chiplets_rows` are the per-AIR padded heights returned by
-    /// `to_core_chiplets_matrices`. Both must be powers of two, both ≤ `num_rows`.
-    /// The data arrays are sized to `num_rows`; rows beyond each per-AIR height are
-    /// expected to be zero-padded.
+    /// `to_core_chiplets_matrices`. Both must be powers of two. The data arrays are sized to
+    /// `max(core_rows, chiplets_rows)`; rows beyond each per-AIR height are expected to be
+    /// zero-padded.
     pub fn from_parts(
         core_rm: Vec<Felt>,
         chiplets_rm: Vec<Felt>,
         range_checker_cols: [Vec<Felt>; 2],
-        num_rows: usize,
         core_rows: usize,
         chiplets_rows: usize,
         last_program_row: RowIndex,
     ) -> Self {
+        assert!(core_rows.is_power_of_two(), "core_rows must be a power of two");
+        assert!(chiplets_rows.is_power_of_two(), "chiplets_rows must be a power of two");
+        let num_rows = core_rows.max(chiplets_rows);
         assert_eq!(core_rm.len(), num_rows * CORE_WIDTH);
         assert_eq!(chiplets_rm.len(), num_rows * CHIPLETS_WIDTH);
         assert_eq!(range_checker_cols[0].len(), num_rows);
         assert_eq!(range_checker_cols[1].len(), num_rows);
-        assert!(core_rows.is_power_of_two(), "core_rows must be a power of two");
-        assert!(chiplets_rows.is_power_of_two(), "chiplets_rows must be a power of two");
-        assert!(core_rows <= num_rows && chiplets_rows <= num_rows);
-        assert_eq!(
-            core_rows.max(chiplets_rows),
-            num_rows,
-            "num_rows must equal max of per-AIR rows"
-        );
         Self {
             storage: TraceStorage::Parts {
                 core_rm,
@@ -310,11 +304,6 @@ impl MainTrace {
 
     /// Splits the trace into the per-AIR `(Core, Chiplets)` matrix pair used by the multi-AIR
     /// proving path.
-    ///
-    /// - **Core matrix** is `NUM_CORE_COLS = 51` wide and `core_rows` tall (the leading system +
-    ///   decoder + stack + range columns).
-    /// - **Chiplets matrix** is `CHIPLETS_WIDTH` wide and `chiplets_rows` tall (chiplet data +
-    ///   `s_perm` + `chip_clk`).
     ///
     /// Each matrix is sliced to its own per-AIR padded height: hash-heavy programs grow the
     /// chiplets trace while core stays small (and vice versa).
@@ -1088,7 +1077,6 @@ mod tests {
             core_rm,
             chiplets_rm,
             range_cols,
-            num_rows,
             num_rows,
             num_rows,
             RowIndex::from(0),

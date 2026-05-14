@@ -14,13 +14,14 @@
 
 pub mod ace;
 pub mod bitwise;
-pub mod chip_clk;
 pub mod columns;
 pub mod hasher_control;
 pub mod memory;
 pub mod permutation;
 pub mod selectors;
 
+use miden_core::field::PrimeCharacteristicRing;
+use miden_crypto::stark::air::AirBuilder;
 use selectors::ChipletSelectors;
 
 use crate::{ChipletCols, MidenAirBuilder};
@@ -40,8 +41,11 @@ pub fn enforce_main<AB>(
     // Selector constraints (including hasher internal selectors) are enforced in
     // build_chiplet_selectors (called from lib.rs).
 
-    // Chiplet-trace row counter (boundary + transition).
-    chip_clk::enforce_chip_clk_constraints(builder, local, next);
+    // Chiplet-trace row counter `chip_clk`: starts at 1 and increments by 1 each row.
+    builder.when_first_row().assert_eq(local.chip_clk, AB::Expr::ONE);
+    builder
+        .when_transition()
+        .assert_eq(next.chip_clk.into(), local.chip_clk.into() + AB::Expr::ONE);
 
     // Hasher sub-chiplets: permutation + controller.
     permutation::enforce_permutation_constraints(builder, local, next, &selectors.permutation);

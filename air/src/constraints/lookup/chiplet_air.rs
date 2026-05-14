@@ -64,13 +64,8 @@ pub(crate) trait ChipletLookupBuilder: LookupBuilder<F = Felt> {
 ///
 /// Holds the two-row window plus a single [`ChipletActiveFlags`] snapshot built once per
 /// `eval` through [`ChipletLookupBuilder::build_chiplet_active`]. Every emitter reads
-/// `ctx.local`, `ctx.next`, `ctx.chiplet_active.*`, and `ctx.clk_plus_one` directly — field
-/// access, no method indirection.
-///
-/// `clk_plus_one` is the chiplet-side response address used by every hasher response variant
-/// (linear-hash init, RESPAN, MR-update legs, HOUT, SOUT). Both callers (the legacy
-/// [`ChipletLookupAir`] aggregator and the standalone `ChipletsAir`) source it from the
-/// chiplet-trace `chip_clk` column.
+/// `ctx.local`, `ctx.next`, and `ctx.chiplet_active.*` directly — field access, no method
+/// indirection.
 pub(crate) struct ChipletBusContext<'a, LB>
 where
     LB: LookupBuilder<F = Felt>,
@@ -82,8 +77,6 @@ where
     /// Per-chiplet `is_active` flags, computed from `local`'s selector columns via the
     /// builder-provided hook.
     pub chiplet_active: ChipletActiveFlags<LB::Expr>,
-    /// Hasher response address, sourced from the chiplet-trace `chip_clk` column.
-    pub clk_plus_one: LB::Expr,
 }
 
 impl<'a, LB> ChipletBusContext<'a, LB>
@@ -91,22 +84,13 @@ where
     LB: ChipletLookupBuilder,
 {
     /// Build the shared chiplet-trace context for one `eval` call.
-    ///
-    /// Takes per-row `&ChipletCols` views and an externally-supplied `clk_plus_one` value
-    /// (the chiplet-trace `chip_clk` column).
     pub fn new(
         builder: &LB,
         local: &'a ChipletCols<LB::Var>,
         next: &'a ChipletCols<LB::Var>,
-        clk_plus_one: LB::Expr,
     ) -> Self {
         let chiplet_active = builder.build_chiplet_active(local);
-        Self {
-            local,
-            next,
-            chiplet_active,
-            clk_plus_one,
-        }
+        Self { local, next, chiplet_active }
     }
 }
 
@@ -159,33 +143,29 @@ where
 
     fn eval(&self, builder: &mut LB) {
         // Borrow the row buffer as `MainCols` (legacy 72-col aggregator path) and bridge to
-        // `ChipletCols`. Source the responder address from the chiplet-side `chip_clk`
-        // column — no cross-trace dependency.
+        // `ChipletCols`.
         let main = builder.main();
         let local_main: &MainCols<_> = main.current_slice().borrow();
         let next_main: &MainCols<_> = main.next_slice().borrow();
         let local_chiplet = local_main.as_chiplet_cols();
         let next_chiplet = next_main.as_chiplet_cols();
 
-        let clk_plus_one: LB::Expr = local_chiplet.chip_clk.into();
-
-        emit_chiplet_lookup_columns(builder, local_chiplet, next_chiplet, clk_plus_one);
+        emit_chiplet_lookup_columns(builder, local_chiplet, next_chiplet);
     }
 }
 
 /// Emit the three chiplet-trace LogUp columns (responses, hash-kernel virtual table,
-/// wiring) using a caller-supplied responder address.
+/// wiring).
 ///
 /// Shared between [`ChipletLookupAir`]'s [`LookupAir`] impl and `ChipletsAir`'s
-/// [`LookupAir`] impl. Both source `clk_plus_one` from the chiplet-trace `chip_clk` column;
-/// centralizing the three-emitter sequence keeps the two AIR types in lockstep.
+/// [`LookupAir`] impl; centralizing the three-emitter sequence keeps the two AIR types in
+/// lockstep.
 pub(crate) fn emit_chiplet_lookup_columns<LB: ChipletLookupBuilder>(
     builder: &mut LB,
     local: &ChipletCols<LB::Var>,
     next: &ChipletCols<LB::Var>,
-    clk_plus_one: LB::Expr,
 ) {
-    let ctx = ChipletBusContext::new(&*builder, local, next, clk_plus_one);
+    let ctx = ChipletBusContext::new(&*builder, local, next);
     emit_chiplet_responses::<LB>(builder, &ctx);
     emit_hash_kernel_table::<LB>(builder, &ctx);
     emit_v_wiring::<LB>(builder, &ctx);
