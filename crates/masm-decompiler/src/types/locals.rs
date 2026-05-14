@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 
 use super::domain::TypeFact;
+use crate::ir::Var;
 
 /// Local slot types and backward-propagated requirements for one procedure.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -18,6 +19,18 @@ pub(super) struct LocalState {
 }
 
 impl LocalState {
+    /// Compute the type fact represented by values written to one local slot.
+    pub(super) fn stored_values_type(
+        values: &[Var],
+        mut inferred_type_for_var: impl FnMut(&Var) -> TypeFact,
+    ) -> TypeFact {
+        values
+            .iter()
+            .map(&mut inferred_type_for_var)
+            .reduce(TypeFact::glb)
+            .unwrap_or(TypeFact::Felt)
+    }
+
     /// Read the inferred type for a local slot.
     pub(super) fn type_for_slot(&self, index: u16) -> TypeFact {
         self.types.get(&index).copied().unwrap_or(TypeFact::Felt)
@@ -53,6 +66,34 @@ impl LocalState {
         } else {
             false
         }
+    }
+
+    /// Accumulate output requirements from values loaded out of a local slot.
+    pub(super) fn require_slot_from_outputs(
+        &mut self,
+        index: u16,
+        requirements: impl IntoIterator<Item = TypeFact>,
+    ) -> bool {
+        requirements
+            .into_iter()
+            .filter(|req| *req != TypeFact::Felt)
+            .fold(false, |changed, req| self.require_slot(index, req) | changed)
+    }
+
+    /// Return requirements that must be pushed back to values stored in a slot.
+    pub(super) fn store_value_requirements<'a>(
+        &self,
+        index: u16,
+        values: &'a [Var],
+    ) -> impl Iterator<Item = (&'a Var, TypeFact)> {
+        let req = self.store_value_requirement(index);
+        values.iter().filter_map(move |value| req.map(|req| (value, req)))
+    }
+
+    /// Return the requirement that must be pushed back to values stored in a slot.
+    fn store_value_requirement(&self, index: u16) -> Option<TypeFact> {
+        let req = self.requirement_for_slot(index);
+        (req != TypeFact::Felt).then_some(req)
     }
 
     /// Join another local state into this one.

@@ -5,8 +5,10 @@ use std::{collections::HashMap, hash::Hash};
 use tracing::{debug, trace};
 
 use super::{
+    calls,
     domain::{TypeFact, VarKey},
     expr_defs::ExprDefs,
+    intrinsics,
     locals::LocalState,
     memory::{MAX_MEMORY_ADDRESS, MemAddressKey, MemoryState},
     origin::{self, Origin},
@@ -16,10 +18,7 @@ use super::{
 use crate::{
     abstract_interp::{FixpointConfig, FixpointOutcome, JoinSemiLattice, iterate_to_fixpoint},
     ir::{BinOp, Constant, Expr, Stmt, UnOp, Var},
-    semantics::{
-        IntrinsicOutputTypeShape, intrinsic_arg_requirements, intrinsic_asserts_u32_args,
-        intrinsic_base_name, intrinsic_output_type_shape,
-    },
+    semantics::intrinsic_asserts_u32_args,
     symbol::path::SymbolPath,
 };
 
@@ -191,36 +190,7 @@ impl<'a> ProcTypeAnalyzer<'a> {
         match stmt {
             Stmt::Assign { dest, expr, .. } => {
                 let changed = self.set_inferred_type_for_var(dest, self.infer_expr_type(expr));
-                // Track abstract address keys for memory type tracking.
-                match expr {
-                    Expr::Constant(Constant::Felt(n)) if *n < MAX_MEMORY_ADDRESS => {
-                        self.state
-                            .memory
-                            .set_var_address_key(dest, MemAddressKey::Constant(*n as u32));
-                    },
-                    Expr::Var(src) => {
-                        if let Some(key) = self.state.memory.address_key_for_var(src) {
-                            self.state.memory.set_var_address_key(dest, key);
-                        }
-                    },
-                    Expr::Binary(BinOp::Add, lhs, rhs) => {
-                        // Propagate MemAddressKey through locaddr + constant offset.
-                        // Try both operand orderings since addition is commutative.
-                        // Sub is excluded: field sub computes (a - b) mod p, which
-                        // wraps to addresses outside the procedure's local frame.
-                        //
-                        // Uses `or` (eager) instead of `or_else` (lazy) because
-                        // a closure capturing `&self` conflicts with the outer
-                        // `&mut self` borrow.
-                        let key = self
-                            .resolve_addr_offset_key(lhs, rhs)
-                            .or(self.resolve_addr_offset_key(rhs, lhs));
-                        if let Some(key) = key {
-                            self.state.memory.set_var_address_key(dest, key);
-                        }
-                    },
-                    _ => {},
-                }
+                self.state.memory.track_assignment_address_key(dest, expr);
                 changed
             },
             Stmt::MemLoad { load, .. } => {
@@ -264,13 +234,13 @@ impl<'a> ProcTypeAnalyzer<'a> {
             Stmt::Intrinsic { intrinsic, .. } => {
                 let output_count = intrinsic.results.len();
                 let mut changed = false;
-                for (idx, result) in intrinsic.results.iter().enumerate() {
-                    let result_ty = self.intrinsic_output_type(
-                        &intrinsic.name,
-                        idx,
-                        output_count,
-                        &intrinsic.args,
-                    );
+                let output_types = intrinsics::output_types(
+                    &intrinsic.name,
+                    output_count,
+                    &intrinsic.args,
+                    |arg| self.inferred_type_for_var(arg),
+                );
+                for (result, result_ty) in intrinsic.results.iter().zip(output_types) {
                     changed |= self.set_inferred_type_for_var(result, result_ty);
                 }
                 if allow_proof_narrowing && intrinsic_asserts_u32_args(&intrinsic.name) {
@@ -279,22 +249,16 @@ impl<'a> ProcTypeAnalyzer<'a> {
                     }
                 }
                 if allow_proof_narrowing
-                    && let Some(common_fact) = self.assert_eq_common_fact(intrinsic)
+                    && let Some(common_fact) =
+                        intrinsics::assert_eq_common_fact(&intrinsic.name, &intrinsic.args, |arg| {
+                            self.inferred_type_for_var(arg)
+                        })
                 {
                     for arg in &intrinsic.args {
                         changed |= self.set_inferred_type_for_var(arg, common_fact);
                     }
                 }
-                // Track locaddr results for memory address key mapping.
-                if let Some(index_str) = intrinsic.name.strip_prefix("locaddr.")
-                    && let Ok(index) = index_str.parse::<u16>()
-                {
-                    for result in &intrinsic.results {
-                        self.state
-                            .memory
-                            .set_var_address_key(result, MemAddressKey::LocalAddr(index));
-                    }
-                }
+                self.state.memory.track_locaddr_results(&intrinsic.name, &intrinsic.results);
                 changed
             },
             Stmt::If { then_body, else_body, phis, .. } => {
@@ -334,18 +298,22 @@ impl<'a> ProcTypeAnalyzer<'a> {
                         self.propagate_phi_address_key(&phi.dest, &phi.init, &phi.step);
                     } else {
                         changed |= self.set_inferred_type_for_var(&phi.dest, init_ty);
-                        if let Some(key) = self.mem_address_key_for_var(&phi.init) {
-                            self.state.memory.set_var_address_key(&phi.dest, key);
-                        }
+                        self.state.memory.copy_address_key(&phi.dest, &phi.init);
                     }
                 }
                 changed
             },
             Stmt::LocalStore { store, .. } => {
-                self.record_local_store_type(store.index, &store.values)
+                let stored_ty = LocalState::stored_values_type(&store.values, |v| {
+                    self.inferred_type_for_var(v)
+                });
+                self.state.locals.record_store_type(store.index, stored_ty)
             },
             Stmt::LocalStoreW { store, .. } => {
-                self.record_local_store_type(store.index, &store.values)
+                let stored_ty = LocalState::stored_values_type(&store.values, |v| {
+                    self.inferred_type_for_var(v)
+                });
+                self.state.locals.record_store_type(store.index, stored_ty)
             },
             Stmt::MemStore { store, .. } => {
                 let mut changed = false;
@@ -377,68 +345,13 @@ impl<'a> ProcTypeAnalyzer<'a> {
         let Some(summary) = self.summary_for_target(target).cloned() else {
             return false;
         };
-        for (idx, result) in results.iter().enumerate() {
-            let ty = if summary.is_opaque() {
-                TypeFact::Felt
-            } else if let Some(Some(input_idx)) = summary.output_input_map.get(idx) {
-                // Passthrough output: resolve type from the caller's argument.
-                // Origin::Input uses 0=deepest, but args uses 0=topmost (inverted).
-                args.len()
-                    .checked_sub(1 + *input_idx)
-                    .and_then(|i| args.get(i))
-                    .map(|arg| self.inferred_type_for_var(arg))
-                    .unwrap_or(TypeFact::Felt)
-            } else {
-                summary
-                    .outputs
-                    .get(idx)
-                    .map(|t| TypeFact::from_inferred_type(*t))
-                    .unwrap_or(TypeFact::Felt)
-            };
+        let result_types = calls::result_types(&summary, args, results.len(), |arg| {
+            self.inferred_type_for_var(arg)
+        });
+        for (result, ty) in results.iter().zip(result_types) {
             changed |= self.set_inferred_type_for_var(result, ty);
         }
         changed
-    }
-
-    /// Infer result type for an intrinsic output at a given position.
-    ///
-    /// Position 0 is the first pushed result (deepest on stack for multi-output
-    /// intrinsics). The last position is the topmost result on the stack.
-    fn intrinsic_output_type(
-        &self,
-        name: &str,
-        output_index: usize,
-        output_count: usize,
-        args: &[Var],
-    ) -> TypeFact {
-        match intrinsic_output_type_shape(name) {
-            IntrinsicOutputTypeShape::Felt => TypeFact::Felt,
-            IntrinsicOutputTypeShape::U32 => TypeFact::U32,
-            IntrinsicOutputTypeShape::Bool => TypeFact::Bool,
-            IntrinsicOutputTypeShape::U32WithTopBool => {
-                if output_index + 1 == output_count {
-                    TypeFact::Bool
-                } else {
-                    TypeFact::U32
-                }
-            },
-            IntrinsicOutputTypeShape::BoolWithTopU32 => {
-                if output_index + 1 == output_count {
-                    TypeFact::U32
-                } else {
-                    TypeFact::Bool
-                }
-            },
-            IntrinsicOutputTypeShape::U32WideningAdd3 => {
-                if output_index + 1 == output_count {
-                    TypeFact::U32
-                } else if args.iter().any(|arg| self.inferred_type_for_var(arg) == TypeFact::Bool) {
-                    TypeFact::Bool
-                } else {
-                    TypeFact::U32
-                }
-            },
-        }
     }
 
     /// Infer type for an expression.
@@ -606,69 +519,6 @@ impl<'a> ProcTypeAnalyzer<'a> {
         self.state.memory.propagate_phi_address_key(dest, lhs, rhs);
     }
 
-    /// Resolve a `MemAddressKey` for an address-plus-offset expression.
-    ///
-    /// Returns `Some(LocalAddrOffset(index, offset))` when `base_expr`
-    /// resolves to a `LocalAddr` or `LocalAddrOffset` key and `offset_expr`
-    /// is a constant in `[0, 2^32)`. Returns `None` if the accumulated
-    /// offset overflows `u32` or the base is not a local address.
-    fn resolve_addr_offset_key(
-        &self,
-        base_expr: &Expr,
-        offset_expr: &Expr,
-    ) -> Option<MemAddressKey> {
-        let base_key = match base_expr {
-            Expr::Var(v) => self.mem_address_key_for_var(v)?,
-            _ => return None,
-        };
-        let offset: u32 = match offset_expr {
-            Expr::Constant(Constant::Felt(n)) if *n < MAX_MEMORY_ADDRESS => *n as u32,
-            Expr::Var(v) => match self.mem_address_key_for_var(v)? {
-                MemAddressKey::Constant(n) => n,
-                _ => return None,
-            },
-            _ => return None,
-        };
-        match base_key {
-            MemAddressKey::LocalAddr(index) => Some(MemAddressKey::LocalAddrOffset(index, offset)),
-            MemAddressKey::LocalAddrOffset(index, base_offset) => {
-                let total = base_offset.checked_add(offset)?;
-                Some(MemAddressKey::LocalAddrOffset(index, total))
-            },
-            MemAddressKey::Constant(_) => None,
-        }
-    }
-
-    /// Record the inferred type for a local variable slot from stored values.
-    ///
-    /// Combines the types of all stored values via [`TypeFact::glb`] and
-    /// joins with the existing slot type. Returns `true` if the type changed.
-    fn record_local_store_type(&mut self, index: u16, values: &[Var]) -> bool {
-        let stored_ty = values
-            .iter()
-            .map(|v| self.inferred_type_for_var(v))
-            .reduce(TypeFact::glb)
-            .unwrap_or(TypeFact::Felt);
-        self.state.locals.record_store_type(index, stored_ty)
-    }
-
-    /// Propagate a local slot's accumulated requirement to stored values.
-    ///
-    /// Looks up the requirement for `index` and
-    /// applies it to each stored value. Returns `true` if any requirement
-    /// changed.
-    fn propagate_local_store_requirement(&mut self, index: u16, values: &[Var]) -> bool {
-        let req = self.state.locals.requirement_for_slot(index);
-        if req == TypeFact::Felt {
-            return false;
-        }
-        let mut changed = false;
-        for value in values {
-            changed |= self.apply_requirement_to_var(value, req);
-        }
-        changed
-    }
-
     /// Update inferred type for a variable.
     fn set_inferred_type_for_var(&mut self, var: &Var, new_type: TypeFact) -> bool {
         let key = VarKey::from_var(var);
@@ -680,21 +530,6 @@ impl<'a> ProcTypeAnalyzer<'a> {
         } else {
             false
         }
-    }
-
-    /// Return the common proven fact established by a scalar equality assertion.
-    ///
-    /// When `assert_eq(lhs, rhs)` succeeds, both operands must satisfy the
-    /// greatest lower bound of their already-proven facts.
-    fn assert_eq_common_fact(&self, intrinsic: &crate::ir::Intrinsic) -> Option<TypeFact> {
-        if intrinsic_base_name(&intrinsic.name) != "assert_eq" || intrinsic.args.len() != 2 {
-            return None;
-        }
-
-        let lhs = self.inferred_type_for_var(&intrinsic.args[0]);
-        let rhs = self.inferred_type_for_var(&intrinsic.args[1]);
-        let common = lhs.glb(rhs);
-        (common != TypeFact::Felt).then_some(common)
     }
 
     /// Seed type requirements from direct statement semantics.
@@ -769,12 +604,9 @@ impl<'a> ProcTypeAnalyzer<'a> {
         let Some(summary) = self.summary_for_target(target).cloned() else {
             return false;
         };
-        if summary.is_opaque() {
-            return false;
-        }
         let mut changed = false;
-        for (arg, expected) in args.iter().zip(summary.inputs.iter().copied()) {
-            changed |= self.apply_requirement_to_var(arg, TypeFact::from_requirement(expected));
+        for (arg, req) in calls::arg_requirements(&summary, args) {
+            changed |= self.apply_requirement_to_var(arg, req);
         }
         changed
     }
@@ -786,22 +618,15 @@ impl<'a> ProcTypeAnalyzer<'a> {
         allow_proof_narrowing: bool,
     ) -> bool {
         let mut changed = false;
-
-        let requirements = intrinsic_arg_requirements(
+        let requirements = intrinsics::arg_requirements(
             &intrinsic.name,
-            intrinsic.args.len(),
+            &intrinsic.args,
             intrinsic.results.len(),
+            allow_proof_narrowing,
+            |arg| self.inferred_type_for_var(arg),
         );
-        if let Some(range) = requirements.u32_args {
-            for arg in &intrinsic.args[range] {
-                changed |= self.require_u32_var_if_not_guaranteed(arg);
-            }
-        }
-
-        if allow_proof_narrowing && let Some(common_fact) = self.assert_eq_common_fact(intrinsic) {
-            for arg in &intrinsic.args {
-                changed |= self.apply_requirement_to_var(arg, common_fact);
-            }
+        for (arg, requirement) in requirements {
+            changed |= self.apply_requirement_to_var(arg, requirement);
         }
 
         changed
@@ -955,68 +780,50 @@ impl<'a> ProcTypeAnalyzer<'a> {
                 changed
             },
             Stmt::LocalLoad { load, .. } => {
-                let mut changed = false;
-                for output in &load.outputs {
-                    let req = self.requirement_for_var(output);
-                    if req == TypeFact::Felt {
-                        continue;
-                    }
-                    changed |= self.state.locals.require_slot(load.index, req);
-                }
-                changed
+                let requirements: Vec<_> =
+                    load.outputs.iter().map(|output| self.requirement_for_var(output)).collect();
+                self.state.locals.require_slot_from_outputs(load.index, requirements)
             },
             Stmt::LocalStore { store, .. } => {
-                self.propagate_local_store_requirement(store.index, &store.values)
+                self.propagate_local_store_value_requirements(store.index, &store.values)
             },
             Stmt::LocalStoreW { store, .. } => {
-                self.propagate_local_store_requirement(store.index, &store.values)
+                self.propagate_local_store_value_requirements(store.index, &store.values)
             },
             Stmt::MemLoad { load, .. } => {
-                let mut changed = false;
                 if let Some(addr_key) =
                     load.address.first().and_then(|v| self.mem_address_key_for_var(v))
                 {
-                    for output in &load.outputs {
-                        let req = self.requirement_for_var(output);
-                        if req == TypeFact::Felt {
-                            continue;
-                        }
-                        changed |= self.state.memory.require_address(addr_key, req);
-                    }
+                    let requirements: Vec<_> = load
+                        .outputs
+                        .iter()
+                        .map(|output| self.requirement_for_var(output))
+                        .collect();
+                    self.state.memory.require_address_from_outputs(addr_key, requirements)
+                } else {
+                    false
                 }
-                changed
             },
             Stmt::MemStore { store, .. } => {
-                let mut changed = false;
                 if let Some(addr_key) =
                     store.address.first().and_then(|v| self.mem_address_key_for_var(v))
                 {
-                    let req = self.state.memory.requirement_for_address(addr_key);
-                    if req != TypeFact::Felt {
-                        for value in &store.values {
-                            changed |= self.apply_requirement_to_var(value, req);
-                        }
-                    }
+                    self.propagate_memory_store_value_requirements(addr_key, &store.values)
+                } else {
+                    false
                 }
-                changed
             },
             Stmt::Call { call, .. } | Stmt::Exec { call, .. } | Stmt::SysCall { call, .. } => {
                 let mut changed = false;
                 if let Some(summary) = self.summary_for_target(&call.target).cloned() {
-                    for (idx, result) in call.results.iter().enumerate() {
-                        let req = self.requirement_for_var(result);
-                        if req == TypeFact::Felt {
-                            continue;
-                        }
-                        if let Some(Some(input_idx)) = summary.output_input_map.get(idx)
-                            && let Some(arg) = call
-                                .args
-                                .len()
-                                .checked_sub(1 + *input_idx)
-                                .and_then(|i| call.args.get(i))
-                        {
-                            changed |= self.apply_requirement_to_var(arg, req);
-                        }
+                    let requirements = calls::passthrough_result_requirements(
+                        &summary,
+                        &call.args,
+                        &call.results,
+                        |result| self.requirement_for_var(result),
+                    );
+                    for (arg, req) in requirements {
+                        changed |= self.apply_requirement_to_var(arg, req);
                     }
                 }
                 changed
@@ -1071,14 +878,30 @@ impl<'a> ProcTypeAnalyzer<'a> {
         }
     }
 
-    /// Require a variable to be u32 only if it is not already guaranteed u32.
-    fn require_u32_var_if_not_guaranteed(&mut self, var: &Var) -> bool {
-        let actual = self.inferred_type_for_var(var);
-        if actual.satisfies(TypeFact::U32) {
-            false
-        } else {
-            self.apply_requirement_to_var(var, TypeFact::U32)
+    /// Propagate local slot requirements to values stored in the slot.
+    fn propagate_local_store_value_requirements(&mut self, index: u16, values: &[Var]) -> bool {
+        let requirements: Vec<_> =
+            self.state.locals.store_value_requirements(index, values).collect();
+        let mut changed = false;
+        for (value, req) in requirements {
+            changed |= self.apply_requirement_to_var(value, req);
         }
+        changed
+    }
+
+    /// Propagate memory address requirements to values stored at the address.
+    fn propagate_memory_store_value_requirements(
+        &mut self,
+        addr_key: MemAddressKey,
+        values: &[Var],
+    ) -> bool {
+        let requirements: Vec<_> =
+            self.state.memory.store_value_requirements(addr_key, values).collect();
+        let mut changed = false;
+        for (value, req) in requirements {
+            changed |= self.apply_requirement_to_var(value, req);
+        }
+        changed
     }
 
     /// Require that an expression is boolean.

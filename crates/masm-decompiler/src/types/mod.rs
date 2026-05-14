@@ -2,11 +2,13 @@
 //!
 //! This module infers conservative type summaries for procedures.
 
+mod calls;
 mod declared;
 mod domain;
 mod expr_defs;
 mod inter;
 mod intra;
+mod intrinsics;
 mod locals;
 mod memory;
 mod origin;
