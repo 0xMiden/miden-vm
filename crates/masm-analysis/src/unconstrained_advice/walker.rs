@@ -38,10 +38,7 @@ pub(super) fn collect_diagnostics<C: AdviceCapability>(
 ) -> AdviceDiagnosticsMap {
     let mut diagnostics = AdviceDiagnosticsMap::default();
 
-    for (proc_path, proc) in prepared.procs() {
-        let Some(stmts) = proc.stmts() else {
-            continue;
-        };
+    for (proc_path, proc, stmts) in prepared.lifted_procs() {
         let capability = make_capability(proc_path.clone());
         let result = analyze_procedure(&capability, provenance_summaries, proc.inputs(), stmts);
         if !result.diagnostics.is_empty() {

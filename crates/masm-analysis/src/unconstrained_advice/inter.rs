@@ -32,12 +32,10 @@ fn infer_provenance_summaries(prepared: &PreparedAnalysis) -> AdviceSummaryMap {
     let mut summaries = AdviceSummaryMap::default();
 
     for (proc_path, proc) in prepared.callgraph_procs() {
-        let summary = match proc.stmts() {
-            Some(stmts) => {
-                analyze_proc_provenance(proc.inputs(), proc.outputs(), stmts, &summaries)
-            },
-            None => AdviceSummary::unknown_with_arity(proc.outputs()),
-        };
+        let summary = proc.map_body(
+            |inputs, outputs, stmts| analyze_proc_provenance(inputs, outputs, stmts, &summaries),
+            |_, outputs| AdviceSummary::unknown_with_arity(outputs),
+        );
         summaries.insert(proc_path.clone(), summary);
     }
 

@@ -34,13 +34,20 @@ impl PreparedProc {
         self.inputs
     }
 
-    /// Output arity inferred from the procedure signature.
-    pub(crate) fn outputs(&self) -> usize {
-        self.outputs
+    /// Map this procedure body according to whether it is lifted or opaque.
+    pub(crate) fn map_body<T>(
+        &self,
+        lifted: impl FnOnce(usize, usize, &[Stmt]) -> T,
+        opaque: impl FnOnce(usize, usize) -> T,
+    ) -> T {
+        match &self.body {
+            PreparedProcBody::Lifted(stmts) => lifted(self.inputs, self.outputs, stmts),
+            PreparedProcBody::Opaque => opaque(self.inputs, self.outputs),
+        }
     }
 
     /// Lifted SSA statements, when the procedure is analyzable.
-    pub(crate) fn stmts(&self) -> Option<&[Stmt]> {
+    fn stmts(&self) -> Option<&[Stmt]> {
         match &self.body {
             PreparedProcBody::Lifted(stmts) => Some(stmts),
             PreparedProcBody::Opaque => None,
@@ -87,9 +94,13 @@ impl PreparedAnalysis {
         self.lifted_procs.get(proc_path)
     }
 
-    /// Prepared procedure data for all procedures.
-    pub(crate) fn procs(&self) -> impl Iterator<Item = (&SymbolPath, &PreparedProc)> {
-        self.lifted_procs.iter()
+    /// Prepared procedure data and lifted statements for analyzable procedures.
+    pub(crate) fn lifted_procs(
+        &self,
+    ) -> impl Iterator<Item = (&SymbolPath, &PreparedProc, &[Stmt])> {
+        self.lifted_procs
+            .iter()
+            .filter_map(|(proc_path, proc)| proc.stmts().map(|stmts| (proc_path, proc, stmts)))
     }
 
     /// Prepared procedures in bottom-up callgraph order.
@@ -99,6 +110,21 @@ impl PreparedAnalysis {
             let proc = self.proc(proc_path).expect("every callgraph procedure should be prepared");
             (proc_path, proc)
         })
+    }
+
+    /// Lifted procedure data in bottom-up callgraph order.
+    pub(crate) fn callgraph_lifted_procs(
+        &self,
+    ) -> impl Iterator<Item = (&SymbolPath, &PreparedProc, &[Stmt])> {
+        self.callgraph_procs()
+            .filter_map(|(proc_path, proc)| proc.stmts().map(|stmts| (proc_path, proc, stmts)))
+    }
+
+    /// Opaque procedure data in bottom-up callgraph order.
+    pub(crate) fn callgraph_opaque_procs(
+        &self,
+    ) -> impl Iterator<Item = (&SymbolPath, &PreparedProc)> {
+        self.callgraph_procs().filter(|(_, proc)| proc.stmts().is_none())
     }
 
     /// Type summary for one procedure path.
