@@ -15,7 +15,7 @@ use crate::{
     semantics::{
         INTRINSIC_ADV_PIPE, INTRINSIC_ADV_PUSH, INTRINSIC_ADV_PUSHW, INTRINSIC_MEM_STREAM,
         INTRINSIC_MTREE_GET, INTRINSIC_MTREE_MERGE, INTRINSIC_MTREE_SET, INTRINSIC_MTREE_VERIFY,
-        StackFamily, stack_family,
+        StackFamily, StackFamilyMovement, stack_family,
     },
     signature::{SignatureMap, StackEffect},
     symbol::{path::SymbolPath, resolution::SymbolResolver},
@@ -353,36 +353,42 @@ fn lift_stack_family_inst(
     span: SourceSpan,
     stack: &mut SymbolicStack,
 ) -> LiftingResult<Vec<Stmt>> {
-    match family {
-        StackFamily::Dup(index) => lift_dup(span, index, stack),
-        StackFamily::DupWord(index) => lift_dupw(span, index, stack),
-        StackFamily::Swap(index) => {
+    match family.movement() {
+        StackFamilyMovement::Dup { index, width: 1 } => lift_dup(span, index, stack),
+        StackFamilyMovement::Dup { index, width: 4 } => lift_dupw(span, index, stack),
+        StackFamilyMovement::Swap { index, width: 1 } => {
             stack.swap(index, span, inst.to_string())?;
             Ok(Vec::new())
         },
-        StackFamily::SwapWord(index) => {
+        StackFamilyMovement::Swap { index, width: 4 } => {
             stack.swapw(index, span, inst.to_string())?;
             Ok(Vec::new())
         },
-        StackFamily::SwapDoubleWord => {
+        StackFamilyMovement::SwapDoubleWord => {
             stack.swapdw(span, inst.to_string())?;
             Ok(Vec::new())
         },
-        StackFamily::MovUp(index) => {
+        StackFamilyMovement::MovUp { index, width: 1 } => {
             stack.movup(index, span, inst.to_string())?;
             Ok(Vec::new())
         },
-        StackFamily::MovUpWord(index) => {
+        StackFamilyMovement::MovUp { index, width: 4 } => {
             stack.movupw(index, span, inst.to_string())?;
             Ok(Vec::new())
         },
-        StackFamily::MovDown(index) => {
+        StackFamilyMovement::MovDown { index, width: 1 } => {
             stack.movdn(index, span, inst.to_string())?;
             Ok(Vec::new())
         },
-        StackFamily::MovDownWord(index) => {
+        StackFamilyMovement::MovDown { index, width: 4 } => {
             stack.movdnw(index, span, inst.to_string())?;
             Ok(Vec::new())
+        },
+        StackFamilyMovement::Dup { width, .. }
+        | StackFamilyMovement::Swap { width, .. }
+        | StackFamilyMovement::MovUp { width, .. }
+        | StackFamilyMovement::MovDown { width, .. } => {
+            unreachable!("unsupported stack movement width {width}")
         },
     }
 }
