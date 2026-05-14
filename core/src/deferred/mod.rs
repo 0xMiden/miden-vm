@@ -6,8 +6,17 @@
 //! populate the DAG; an external prover later consumes a [`DeferredWitness`] containing the
 //! reachable nodes and equality assertions.
 //!
-//! This crate (`miden-core`) defines only the shared data model. The processor-side state, event
-//! handlers, and per-value-type semantics live in `miden-processor`.
+//! The full subsystem — data model, [`Schema`] trait, in-memory [`DeferredState`], and the
+//! [`Field0Handler`] reference schema — lives here in `miden-core`. The processor only contributes
+//! the system-event glue that bridges VM operand-stack reads to schema calls.
+
+mod field0;
+mod schema;
+mod state;
+
+pub use field0::Field0Handler;
+pub use schema::{ChildResolver, NodeType, NoopSchema, Schema, SchemaError};
+pub use state::DeferredState;
 
 use alloc::vec::Vec;
 

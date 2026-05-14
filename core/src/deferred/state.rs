@@ -1,11 +1,10 @@
 use alloc::{collections::BTreeMap, vec::Vec};
 
-use miden_core::{
-    crypto::hash::Poseidon2,
-    deferred::{DeferredWitness, Digest, Node},
-};
+use crate::crypto::hash::Poseidon2;
 
-use super::schema::{ChildResolver, NodeType, Schema, SchemaError};
+use super::{
+    ChildResolver, DeferredWitness, Digest, Node, NodeType, Schema, SchemaError,
+};
 
 /// In-memory deferred-DAG state owned by the host.
 ///
@@ -167,13 +166,11 @@ impl ChildResolver for DfsResolver<'_> {
 
 #[cfg(test)]
 mod tests {
-    use miden_core::{
-        Felt, Word, ZERO,
-        deferred::{Node, Payload, Tag},
-    };
-
     use super::*;
-    use crate::deferred::handlers::Field0Handler;
+    use crate::{
+        Felt, Word, ZERO,
+        deferred::{Field0Handler, Payload, Tag},
+    };
 
     fn field0_leaf_node(low: u64) -> Node {
         let mut limbs = [Felt::from_u32(0); 8];

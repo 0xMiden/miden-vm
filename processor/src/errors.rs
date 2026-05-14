@@ -3,9 +3,7 @@
 
 use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 
-use miden_core::program::MIN_STACK_DEPTH;
-
-use crate::deferred::SchemaError;
+use miden_core::{deferred::SchemaError, program::MIN_STACK_DEPTH};
 use miden_debug_types::{SourceFile, SourceSpan};
 use miden_utils_diagnostics::{Diagnostic, miette};
 

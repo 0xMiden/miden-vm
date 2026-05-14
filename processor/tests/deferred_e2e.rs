@@ -7,11 +7,13 @@ use alloc::vec::Vec;
 use std::sync::Arc;
 
 use miden_assembly::Assembler;
-use miden_core::{Word, ZERO};
+use miden_core::{
+    Word, ZERO,
+    deferred::{Field0Handler, Node, Payload},
+};
 use miden_processor::{
     DefaultHost, ExecutionOptions, FastProcessor, Felt, ProcessorState, StackInputs,
     advice::{AdviceInputs, AdviceMutation},
-    deferred::{Field0Handler, Node, Payload},
     event::{EventError, EventHandler, EventName},
 };
 

@@ -1,11 +1,6 @@
-use miden_core::{
+use crate::{
     Felt, Word, ZERO,
-    deferred::{DeferredError, Node, Payload, Tag},
-};
-
-use crate::deferred::{
-    Schema,
-    schema::{ChildResolver, NodeType, SchemaError},
+    deferred::{ChildResolver, DeferredError, Node, NodeType, Payload, Schema, SchemaError, Tag},
 };
 
 /// Handler for the first 256-bit non-native field, `Field0`.

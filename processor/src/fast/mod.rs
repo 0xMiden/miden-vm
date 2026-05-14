@@ -15,12 +15,13 @@ use miden_core::{
     utils::range,
 };
 
+use miden_core::deferred::{DeferredState, NoopSchema, Schema};
+
 use crate::{
     AdviceInputs, AdviceProvider, BaseHost, ContextId, ExecutionError, ExecutionOptions,
     ProcessorState,
     advice::AdviceError,
     continuation_stack::{Continuation, ContinuationStack},
-    deferred::{DeferredState, NoopSchema, Schema},
     errors::MapExecErrNoCtx,
     tracer::{OperationHelperRegisters, Tracer},
 };
@@ -361,6 +362,7 @@ impl FastProcessor {
     ) -> (&mut DeferredState, &dyn Schema) {
         (self.advice.deferred_state_mut(), &*self.deferred_schema)
     }
+
 
     /// Returns true if decorators should be executed.
     ///

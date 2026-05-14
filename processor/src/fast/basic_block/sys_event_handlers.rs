@@ -3,18 +3,13 @@ use alloc::vec::Vec;
 use miden_core::{
     Felt, WORD_SIZE, Word, ZERO,
     crypto::hash::Poseidon2,
+    deferred::SchemaError,
     events::SystemEvent,
     field::{BasedVectorSpace, Field, PrimeCharacteristicRing, QuadFelt},
 };
 
 use super::deferred_handlers::{handle_deferred_evaluate, handle_deferred_register};
-use crate::{
-    MemoryError,
-    advice::AdviceError,
-    deferred::SchemaError,
-    errors::OperationError,
-    fast::FastProcessor,
-};
+use crate::{MemoryError, advice::AdviceError, errors::OperationError, fast::FastProcessor};
 
 // CONSTANTS
 // ================================================================================================

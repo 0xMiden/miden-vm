@@ -13,7 +13,7 @@
 //! impl Schema for AppSchema { /* delegate is_valid + reduce to the right variant */ }
 //! ```
 
-use miden_core::deferred::{Digest, Node};
+use super::{Digest, Node};
 
 // SCHEMA ERROR
 // ================================================================================================
@@ -40,7 +40,7 @@ pub enum SchemaError {
     /// A schema-defined error (typically wrapping the type-specific error of the user's
     /// handler set).
     #[error(transparent)]
-    Other(#[from] miden_core::deferred::DeferredError),
+    Other(#[from] super::DeferredError),
 }
 
 // NODE TYPE
@@ -72,7 +72,7 @@ pub enum NodeType {
 /// resolver's implementation calls back into `Schema::reduce`. That requires a *named* type
 /// (a closure can't pass itself to a function it calls). The trait is also the seam between
 /// the prover-side store ([`crate::deferred::DeferredState`]) and a future verifier-side store
-/// backed by a [`miden_core::deferred::DeferredWitness`] — same schema, different backend.
+/// backed by a [`super::DeferredWitness`] — same schema, different backend.
 pub trait ChildResolver {
     fn resolve(&mut self, digest: Digest) -> Result<Node, SchemaError>;
 }
@@ -142,11 +142,10 @@ impl Schema for NoopSchema {
 
 #[cfg(test)]
 mod tests {
-    use miden_core::Felt;
-
     use super::*;
+    use crate::{Felt, deferred::{Payload, Tag}};
 
-    const TEST_TAG: miden_core::deferred::Tag = [
+    const TEST_TAG: Tag = [
         Felt::new_unchecked(7),
         Felt::new_unchecked(0),
         Felt::new_unchecked(0),
@@ -164,7 +163,7 @@ mod tests {
     #[test]
     fn noop_schema_rejects_everything() {
         let schema = NoopSchema;
-        let payload = miden_core::deferred::Payload::new([Felt::from_u32(0); 8]);
+        let payload = Payload::new([Felt::from_u32(0); 8]);
         let node = Node::new(TEST_TAG, payload);
 
         assert!(schema.is_valid(&node).is_none());

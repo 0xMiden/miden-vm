@@ -2,7 +2,7 @@
 //!
 //! Reads the `(payload, tag)` operand-stack layout used by `DeferredRegister` /
 //! `DeferredEvaluate` (see [`miden_core::events::sys_events`]) and dispatches into the installed
-//! [`crate::deferred::Schema`].
+//! [`miden_core::deferred::Schema`].
 
 use miden_core::{
     Word,

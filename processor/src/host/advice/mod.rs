@@ -4,6 +4,7 @@ use miden_core::{
     Felt, WORD_SIZE, Word,
     advice::{AdviceInputs, AdviceMap},
     crypto::merkle::{InnerNodeInfo, MerklePath, MerkleStore, NodeIndex},
+    deferred::DeferredState,
     precompile::PrecompileRequest,
 };
 #[cfg(test)]
@@ -12,10 +13,7 @@ use miden_core::{crypto::hash::Blake3_256, serde::Serializable};
 mod errors;
 pub use errors::AdviceError;
 
-use crate::{
-    ExecutionOptions, deferred::DeferredState, host::AdviceMutation,
-    processor::AdviceProviderInterface,
-};
+use crate::{ExecutionOptions, host::AdviceMutation, processor::AdviceProviderInterface};
 
 // CONSTANTS
 // ================================================================================================
