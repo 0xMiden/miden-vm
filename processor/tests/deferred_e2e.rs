@@ -35,7 +35,7 @@ fn build_processor() -> FastProcessor {
 // MASM BUILDERS
 // ================================================================================================
 
-/// Build a MASM block that pushes the 8-felt payload then the 4-felt tag, invokes the unified
+/// Build a MASM block that pushes the 4-felt tag then the 8-felt payload, invokes the unified
 /// `deferred_register` keyword, and cleans up the 12 felts left on the operand stack.
 fn emit_register(src: &mut String, node: Node) {
     push_node(src, node);
@@ -55,8 +55,8 @@ fn emit_evaluate_into_mem(src: &mut String, node: Node, out_base: u32) {
     for _ in 0..12 {
         src.push_str("    drop\n");
     }
-    // Advice stack: tag word (top) || payload first half || payload second half. Pull each
-    // word and write to memory in order.
+    // Advice stack top-to-bottom: PAYLOAD_LO || PAYLOAD_HI || TAG (matching the operand-stack
+    // input layout). Pull each word and write to memory in order.
     for word_idx in 0..3u32 {
         src.push_str("    adv_pushw\n");
         writeln!(src, "    mem_storew_le.{}", out_base + word_idx * 4).unwrap();
@@ -66,10 +66,13 @@ fn emit_evaluate_into_mem(src: &mut String, node: Node, out_base: u32) {
 
 fn push_node(src: &mut String, node: Node) {
     use core::fmt::Write;
-    for f in node.payload.0.iter().rev() {
+    // Push tag first (its 4 felts end up deepest), then payload (8 felts on top), so the stack
+    // layout under `event_id` becomes [PAYLOAD_LO, PAYLOAD_HI, TAG] — the Poseidon2 sponge layout
+    // used by `Node::digest`.
+    for f in node.tag.iter().rev() {
         writeln!(src, "    push.{}", f.as_int()).unwrap();
     }
-    for f in node.tag.iter().rev() {
+    for f in node.payload.0.iter().rev() {
         writeln!(src, "    push.{}", f.as_int()).unwrap();
     }
 }
@@ -187,8 +190,8 @@ fn deferred_evaluate_pushes_canonical_form_to_advice() {
         .execute_sync(&program, &mut host)
         .expect("execution must succeed");
 
-    // Memory layout: addresses 0..4 hold the canonical tag (Field0Handler::LEAF), 4..12 hold the
-    // canonical payload (a 256-bit u32-limbed integer of value 7).
+    // Memory layout: addresses 0..8 hold the canonical payload (a 256-bit u32-limbed integer of
+    // value 7), 8..12 hold the canonical tag (Field0Handler::LEAF).
     let ctx = 0u32.into();
     let mut mem = [Felt::from_u32(0); 12];
     for i in 0..12u32 {
@@ -197,11 +200,11 @@ fn deferred_evaluate_pushes_canonical_form_to_advice() {
             .read_element(ctx, Felt::from_u32(i))
             .expect("memory read");
     }
-    let canonical_tag = [mem[0], mem[1], mem[2], mem[3]];
+    let canonical_tag = [mem[8], mem[9], mem[10], mem[11]];
     assert_eq!(canonical_tag, Field0Handler::LEAF, "evaluate returns canonical leaf tag");
-    assert_eq!(mem[4].as_canonical_u64(), 7, "limb 0 of (3+4)");
-    for (limb_idx, felt) in mem.iter().enumerate().skip(5) {
-        assert_eq!(felt.as_canonical_u64(), 0, "limb {} of (3+4) must be zero", limb_idx - 4);
+    assert_eq!(mem[0].as_canonical_u64(), 7, "limb 0 of (3+4)");
+    for (limb_idx, felt) in mem[..8].iter().enumerate().skip(1) {
+        assert_eq!(felt.as_canonical_u64(), 0, "limb {} of (3+4) must be zero", limb_idx);
     }
 }
 

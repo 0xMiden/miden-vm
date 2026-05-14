@@ -303,29 +303,33 @@ pub enum SystemEvent {
     /// returns. No values are returned to MASM.
     ///
     /// Inputs:
-    ///   Operand stack: [event_id, TAG, PAYLOAD_LO, PAYLOAD_HI, ...]
-    ///     where TAG is a 4-felt tag at positions 1..5,
-    ///     and PAYLOAD_LO || PAYLOAD_HI is an 8-felt payload at positions 5..13.
+    ///   Operand stack: [event_id, PAYLOAD_LO, PAYLOAD_HI, TAG, ...]
+    ///     where PAYLOAD_LO || PAYLOAD_HI is an 8-felt payload at positions 1..9,
+    ///     and TAG is a 4-felt tag at positions 9..13.
+    ///
+    /// This layout matches the `[rate_lo, rate_hi, capacity]` Poseidon2 sponge state, so a MASM
+    /// caller can feed the 12 felts under `event_id` directly into one `hperm` instruction to
+    /// recover the node's digest without any rearrangement.
     ///
     /// Outputs:
-    ///   Operand stack: [event_id, TAG, PAYLOAD_LO, PAYLOAD_HI, ...] (unchanged)
+    ///   Operand stack: [event_id, PAYLOAD_LO, PAYLOAD_HI, TAG, ...] (unchanged)
     ///   DAG state:     {... node(TAG, PAYLOAD)}
     DeferredRegister,
 
     /// Evaluates an opaque node `(tag, payload)` to its canonical form and pushes the result's
-    /// 12 felts (`tag || payload`) onto the advice stack.
+    /// 12 felts (`payload || tag`) onto the advice stack.
     ///
     /// The schema's `is_valid` must classify the input as an expression. Children referenced
     /// in the payload must already be registered in the DAG. The state is not mutated.
     ///
     /// Inputs:
-    ///   Operand stack: [event_id, TAG, PAYLOAD_LO, PAYLOAD_HI, ...]
+    ///   Operand stack: [event_id, PAYLOAD_LO, PAYLOAD_HI, TAG, ...]
     ///   Advice stack:  [...]
     ///
     /// Outputs:
-    ///   Operand stack: [event_id, TAG, PAYLOAD_LO, PAYLOAD_HI, ...] (unchanged)
-    ///   Advice stack:  [CANONICAL_TAG, CANONICAL_PAYLOAD_LO, CANONICAL_PAYLOAD_HI, ...]
-    ///     (top of advice is `CANONICAL_TAG`)
+    ///   Operand stack: [event_id, PAYLOAD_LO, PAYLOAD_HI, TAG, ...] (unchanged)
+    ///   Advice stack:  [CANONICAL_PAYLOAD_LO, CANONICAL_PAYLOAD_HI, CANONICAL_TAG, ...]
+    ///     (top of advice is `CANONICAL_PAYLOAD_LO`, mirroring the input layout)
     DeferredEvaluate,
 }
 
