@@ -2,7 +2,7 @@
 
 use masm_decompiler::analysis::{
     BinOp, Expr, Intrinsic, Stmt, SymbolPath, TypeRequirement, UnOp, Var,
-    intrinsic_positional_u32_arg_range, intrinsic_requires_u32_precondition,
+    intrinsic_arg_requirements,
 };
 
 use super::{
@@ -178,18 +178,15 @@ fn u32_node_sink_fact(expr: &Expr, env: &Env) -> AdviceFact {
 
 /// Return the advice fact feeding a `U32` intrinsic sink.
 fn intrinsic_u32_sink_fact(intrinsic: &Intrinsic, env: &Env) -> AdviceFact {
-    let args: &[Var] = if intrinsic_requires_u32_precondition(&intrinsic.name) {
-        &intrinsic.args
-    } else if let Some(range) =
-        intrinsic_positional_u32_arg_range(&intrinsic.name, intrinsic.args.len())
-    {
-        &intrinsic.args[range]
-    } else {
+    let requirements =
+        intrinsic_arg_requirements(&intrinsic.name, intrinsic.args.len(), intrinsic.results.len());
+    let Some(range) = requirements.u32_args else {
         return AdviceFact::bottom();
     };
 
     AdviceFact::join_all(
-        args.iter()
+        intrinsic.args[range]
+            .iter()
             .filter(|&arg| !env.u32_validity_for_var(arg).is_proven())
             .map(|arg| env.fact_for_var(arg)),
     )
