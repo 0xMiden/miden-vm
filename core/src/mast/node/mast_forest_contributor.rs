@@ -7,8 +7,9 @@ use super::{
     LoopNodeBuilder, SplitNodeBuilder,
 };
 use crate::{
+    Word,
     mast::{DecoratorId, MastForest, MastForestError, MastNode, MastNodeFingerprint, MastNodeId},
-    utils::LookupByIdx,
+    utils::{Idx, LookupByIdx},
 };
 
 pub trait MastForestContributor {
@@ -52,7 +53,84 @@ pub trait MastForestContributor {
     ///
     /// When a digest is set, the builder will use this digest instead of computing
     /// the normal digest for the node during the build() operation.
-    fn with_digest(self, digest: crate::Word) -> Self;
+    fn with_digest(self, digest: Word) -> Self;
+}
+
+pub(super) struct NodeBuilderLifecycle<'a> {
+    before_enter: &'a [DecoratorId],
+    after_exit: &'a [DecoratorId],
+    digest: Option<Word>,
+}
+
+impl<'a> NodeBuilderLifecycle<'a> {
+    pub(super) fn new(
+        before_enter: &'a [DecoratorId],
+        after_exit: &'a [DecoratorId],
+        digest: Option<Word>,
+    ) -> Self {
+        Self { before_enter, after_exit, digest }
+    }
+
+    pub(super) fn validate_children(
+        forest: &MastForest,
+        children: &[MastNodeId],
+    ) -> Result<(), MastForestError> {
+        let forest_len = forest.nodes.len();
+        for child in children {
+            if child.to_usize() >= forest_len {
+                return Err(MastForestError::NodeIdOverflow(*child, forest_len));
+            }
+        }
+
+        Ok(())
+    }
+
+    pub(super) fn digest_or_compute(&self, compute: impl FnOnce() -> Word) -> Word {
+        self.digest.unwrap_or_else(compute)
+    }
+
+    pub(super) fn forced_digest(&self) -> Result<Word, MastForestError> {
+        self.digest.ok_or(MastForestError::DigestRequiredForDeserialization)
+    }
+
+    pub(super) fn fingerprint(
+        &self,
+        forest: &MastForest,
+        hash_by_node_id: &impl LookupByIdx<MastNodeId, MastNodeFingerprint>,
+        children: &[MastNodeId],
+        compute_digest: impl FnOnce() -> Word,
+    ) -> Result<MastNodeFingerprint, MastForestError> {
+        crate::mast::node_fingerprint::fingerprint_from_parts(
+            forest,
+            hash_by_node_id,
+            self.before_enter,
+            self.after_exit,
+            children,
+            self.digest_or_compute(compute_digest),
+        )
+    }
+
+    #[cfg(any(test, feature = "arbitrary", feature = "testing"))]
+    pub(super) fn add_linked_node(
+        &self,
+        forest: &mut MastForest,
+        make_node: impl FnOnce(MastNodeId) -> MastNode,
+    ) -> Result<MastNodeId, MastForestError> {
+        let future_node_id = MastNodeId::new_unchecked(forest.nodes.len() as u32);
+        forest.register_node_decorators(future_node_id, self.before_enter, self.after_exit);
+
+        forest
+            .nodes
+            .push(make_node(future_node_id))
+            .map_err(|_| MastForestError::TooManyNodes)
+    }
+}
+
+pub(super) fn remap_child_id(
+    child: MastNodeId,
+    remapping: &impl LookupByIdx<MastNodeId, MastNodeId>,
+) -> MastNodeId {
+    *remapping.get(child).unwrap_or(&child)
 }
 
 /// Enum of all MAST node builders that can be added to a forest.

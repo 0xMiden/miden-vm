@@ -4,7 +4,10 @@ use core::fmt;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use super::{MastForestContributor, MastNodeExt};
+use super::{
+    MastForestContributor, MastNodeExt,
+    mast_forest_contributor::{NodeBuilderLifecycle, remap_child_id},
+};
 #[cfg(debug_assertions)]
 use crate::mast::MastNode;
 use crate::{
@@ -16,7 +19,7 @@ use crate::{
     },
     operations::opcodes,
     prettier::PrettyPrint,
-    utils::{Idx, LookupByIdx},
+    utils::LookupByIdx,
 };
 
 // JOIN NODE
@@ -353,22 +356,16 @@ impl JoinNodeBuilder {
 
     /// Builds the JoinNode with the specified decorators.
     pub fn build(self, mast_forest: &MastForest) -> Result<JoinNode, MastForestError> {
-        let forest_len = mast_forest.nodes.len();
-        if self.children[0].to_usize() >= forest_len {
-            return Err(MastForestError::NodeIdOverflow(self.children[0], forest_len));
-        } else if self.children[1].to_usize() >= forest_len {
-            return Err(MastForestError::NodeIdOverflow(self.children[1], forest_len));
-        }
+        NodeBuilderLifecycle::validate_children(mast_forest, &self.children)?;
 
-        // Use the forced digest if provided, otherwise compute the digest
-        let digest = if let Some(forced_digest) = self.digest {
-            forced_digest
-        } else {
+        let lifecycle =
+            NodeBuilderLifecycle::new(&self.before_enter, &self.after_exit, self.digest);
+        let digest = lifecycle.digest_or_compute(|| {
             let left_child_hash = mast_forest[self.children[0]].digest();
             let right_child_hash = mast_forest[self.children[1]].digest();
 
             digest::join_digest(left_child_hash, right_child_hash)
-        };
+        });
 
         Ok(JoinNode {
             children: self.children,
@@ -381,9 +378,8 @@ impl JoinNodeBuilder {
     }
 
     pub(in crate::mast) fn build_with_forced_digest(self) -> Result<JoinNode, MastForestError> {
-        let Some(digest) = self.digest else {
-            return Err(MastForestError::DigestRequiredForDeserialization);
-        };
+        let digest = NodeBuilderLifecycle::new(&self.before_enter, &self.after_exit, self.digest)
+            .forced_digest()?;
 
         Ok(JoinNode {
             children: self.children,
@@ -399,45 +395,25 @@ impl JoinNodeBuilder {
 impl MastForestContributor for JoinNodeBuilder {
     #[cfg(any(test, feature = "arbitrary", feature = "testing"))]
     fn add_to_forest(self, forest: &mut MastForest) -> Result<MastNodeId, MastForestError> {
-        // Validate child node IDs
-        let forest_len = forest.nodes.len();
-        if self.children[0].to_usize() >= forest_len {
-            return Err(MastForestError::NodeIdOverflow(self.children[0], forest_len));
-        } else if self.children[1].to_usize() >= forest_len {
-            return Err(MastForestError::NodeIdOverflow(self.children[1], forest_len));
-        }
+        NodeBuilderLifecycle::validate_children(forest, &self.children)?;
 
-        // Use the forced digest if provided, otherwise compute the digest
-        let digest = if let Some(forced_digest) = self.digest {
-            forced_digest
-        } else {
+        let lifecycle =
+            NodeBuilderLifecycle::new(&self.before_enter, &self.after_exit, self.digest);
+        let digest = lifecycle.digest_or_compute(|| {
             let left_child_hash = forest[self.children[0]].digest();
             let right_child_hash = forest[self.children[1]].digest();
 
             digest::join_digest(left_child_hash, right_child_hash)
-        };
+        });
 
-        // Determine the node ID that will be assigned
-        let future_node_id = MastNodeId::new_unchecked(forest.nodes.len() as u32);
-
-        // Store node-level decorators in the centralized NodeToDecoratorIds for efficient access
-        forest.register_node_decorators(future_node_id, &self.before_enter, &self.after_exit);
-
-        // Create the node in the forest with Linked variant from the start
-        // Move the data directly without intermediate cloning
-        let node_id = forest
-            .nodes
-            .push(
-                JoinNode {
-                    children: self.children,
-                    digest,
-                    decorator_store: DecoratorStore::Linked { id: future_node_id },
-                }
-                .into(),
-            )
-            .map_err(|_| MastForestError::TooManyNodes)?;
-
-        Ok(node_id)
+        lifecycle.add_linked_node(forest, |future_node_id| {
+            JoinNode {
+                children: self.children,
+                digest,
+                decorator_store: DecoratorStore::Linked { id: future_node_id },
+            }
+            .into()
+        })
     }
 
     fn fingerprint_for_node(
@@ -445,17 +421,11 @@ impl MastForestContributor for JoinNodeBuilder {
         forest: &MastForest,
         hash_by_node_id: &impl LookupByIdx<MastNodeId, MastNodeFingerprint>,
     ) -> Result<MastNodeFingerprint, MastForestError> {
-        // Use the fingerprint_from_parts helper function
-        crate::mast::node_fingerprint::fingerprint_from_parts(
+        NodeBuilderLifecycle::new(&self.before_enter, &self.after_exit, self.digest).fingerprint(
             forest,
             hash_by_node_id,
-            &self.before_enter,
-            &self.after_exit,
             &self.children,
-            // Use the forced digest if available, otherwise compute the digest
-            if let Some(forced_digest) = self.digest {
-                forced_digest
-            } else {
+            || {
                 let left_child_hash = forest[self.children[0]].digest();
                 let right_child_hash = forest[self.children[1]].digest();
 
@@ -467,8 +437,8 @@ impl MastForestContributor for JoinNodeBuilder {
     fn remap_children(self, remapping: &impl LookupByIdx<MastNodeId, MastNodeId>) -> Self {
         JoinNodeBuilder {
             children: [
-                *remapping.get(self.children[0]).unwrap_or(&self.children[0]),
-                *remapping.get(self.children[1]).unwrap_or(&self.children[1]),
+                remap_child_id(self.children[0], remapping),
+                remap_child_id(self.children[1], remapping),
             ],
             before_enter: self.before_enter,
             after_exit: self.after_exit,

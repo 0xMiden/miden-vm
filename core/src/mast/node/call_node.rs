@@ -8,7 +8,10 @@ use miden_formatting::{
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use super::{MastForestContributor, MastNodeExt};
+use super::{
+    MastForestContributor, MastNodeExt,
+    mast_forest_contributor::{NodeBuilderLifecycle, remap_child_id},
+};
 #[cfg(debug_assertions)]
 use crate::mast::MastNode;
 use crate::{
@@ -19,7 +22,7 @@ use crate::{
         digest,
     },
     operations::opcodes,
-    utils::{Idx, LookupByIdx},
+    utils::LookupByIdx,
 };
 
 // CALL NODE
@@ -383,18 +386,15 @@ impl CallNodeBuilder {
 
     /// Builds the CallNode with the specified decorators.
     pub fn build(self, mast_forest: &MastForest) -> Result<CallNode, MastForestError> {
-        if self.callee.to_usize() >= mast_forest.nodes.len() {
-            return Err(MastForestError::NodeIdOverflow(self.callee, mast_forest.nodes.len()));
-        }
+        NodeBuilderLifecycle::validate_children(mast_forest, &[self.callee])?;
 
-        // Use the forced digest if provided, otherwise compute the digest
-        let digest = if let Some(forced_digest) = self.digest {
-            forced_digest
-        } else {
+        let lifecycle =
+            NodeBuilderLifecycle::new(&self.before_enter, &self.after_exit, self.digest);
+        let digest = lifecycle.digest_or_compute(|| {
             let callee_digest = mast_forest[self.callee].digest();
 
             digest::call_digest(callee_digest, self.is_syscall)
-        };
+        });
 
         Ok(CallNode {
             callee: self.callee,
@@ -408,9 +408,8 @@ impl CallNodeBuilder {
     }
 
     pub(in crate::mast) fn build_with_forced_digest(self) -> Result<CallNode, MastForestError> {
-        let Some(digest) = self.digest else {
-            return Err(MastForestError::DigestRequiredForDeserialization);
-        };
+        let digest = NodeBuilderLifecycle::new(&self.before_enter, &self.after_exit, self.digest)
+            .forced_digest()?;
 
         Ok(CallNode {
             callee: self.callee,
@@ -427,41 +426,25 @@ impl CallNodeBuilder {
 impl MastForestContributor for CallNodeBuilder {
     #[cfg(any(test, feature = "arbitrary", feature = "testing"))]
     fn add_to_forest(self, forest: &mut MastForest) -> Result<MastNodeId, MastForestError> {
-        if self.callee.to_usize() >= forest.nodes.len() {
-            return Err(MastForestError::NodeIdOverflow(self.callee, forest.nodes.len()));
-        }
+        NodeBuilderLifecycle::validate_children(forest, &[self.callee])?;
 
-        // Determine the node ID that will be assigned
-        let future_node_id = MastNodeId::new_unchecked(forest.nodes.len() as u32);
-
-        // Use the forced digest if provided, otherwise compute the digest directly
-        let digest = if let Some(forced_digest) = self.digest {
-            forced_digest
-        } else {
+        let lifecycle =
+            NodeBuilderLifecycle::new(&self.before_enter, &self.after_exit, self.digest);
+        let digest = lifecycle.digest_or_compute(|| {
             let callee_digest = forest[self.callee].digest();
 
             digest::call_digest(callee_digest, self.is_syscall)
-        };
+        });
 
-        // Store node-level decorators in the centralized NodeToDecoratorIds for efficient access
-        forest.register_node_decorators(future_node_id, &self.before_enter, &self.after_exit);
-
-        // Create the node in the forest with Linked variant from the start
-        // Move the data directly without intermediate Owned node creation
-        let node_id = forest
-            .nodes
-            .push(
-                CallNode {
-                    callee: self.callee,
-                    is_syscall: self.is_syscall,
-                    digest,
-                    decorator_store: DecoratorStore::Linked { id: future_node_id },
-                }
-                .into(),
-            )
-            .map_err(|_| MastForestError::TooManyNodes)?;
-
-        Ok(node_id)
+        lifecycle.add_linked_node(forest, |future_node_id| {
+            CallNode {
+                callee: self.callee,
+                is_syscall: self.is_syscall,
+                digest,
+                decorator_store: DecoratorStore::Linked { id: future_node_id },
+            }
+            .into()
+        })
     }
 
     fn fingerprint_for_node(
@@ -469,17 +452,11 @@ impl MastForestContributor for CallNodeBuilder {
         forest: &MastForest,
         hash_by_node_id: &impl LookupByIdx<MastNodeId, MastNodeFingerprint>,
     ) -> Result<MastNodeFingerprint, MastForestError> {
-        // Use the fingerprint_from_parts helper function
-        crate::mast::node_fingerprint::fingerprint_from_parts(
+        NodeBuilderLifecycle::new(&self.before_enter, &self.after_exit, self.digest).fingerprint(
             forest,
             hash_by_node_id,
-            &self.before_enter,
-            &self.after_exit,
             &[self.callee],
-            // Use the forced digest if available, otherwise compute the digest
-            if let Some(forced_digest) = self.digest {
-                forced_digest
-            } else {
+            || {
                 let callee_digest = forest[self.callee].digest();
 
                 digest::call_digest(callee_digest, self.is_syscall)
@@ -489,7 +466,7 @@ impl MastForestContributor for CallNodeBuilder {
 
     fn remap_children(self, remapping: &impl LookupByIdx<MastNodeId, MastNodeId>) -> Self {
         CallNodeBuilder {
-            callee: *remapping.get(self.callee).unwrap_or(&self.callee),
+            callee: remap_child_id(self.callee, remapping),
             is_syscall: self.is_syscall,
             before_enter: self.before_enter,
             after_exit: self.after_exit,
