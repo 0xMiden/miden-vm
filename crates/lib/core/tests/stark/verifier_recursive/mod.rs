@@ -27,7 +27,7 @@ use miden_crypto::{
         challenger::CanObserve,
         fri::PcsTranscript,
         lmcs::{Lmcs, proof::BatchProofView},
-        proof::StarkTranscript,
+        proof::{StarkProof, StarkTranscript},
         verifier::VerifierError as CryptoVerifierError,
     },
 };
@@ -40,6 +40,7 @@ use miden_utils_testing::crypto::{MerklePath, MerkleStore, PartialMerkleTree};
 type Challenge = QuadFelt;
 type P2Config = config::Poseidon2Config;
 type P2Lmcs = <P2Config as StarkConfig<Felt, Challenge>>::Lmcs;
+const MAX_STARK_PROOF_BYTES: usize = 64 * 1024 * 1024;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct VerifierData {
@@ -77,7 +78,12 @@ pub fn generate_advice_inputs(
     let config = config::poseidon2_config(params);
 
     // 1. Deserialize STARK proof bytes.
-    let transcript_data = bincode::deserialize(proof_bytes)
+    let proof_encoding_config = wincode::config::Configuration::default()
+        .with_preallocation_size_limit::<MAX_STARK_PROOF_BYTES>();
+    let transcript_data =
+        <serde_wincode::SerdeCompat<StarkProof<Felt, QuadFelt, P2Config>> as wincode::config::Deserialize<
+            _,
+        >>::deserialize(proof_bytes, proof_encoding_config)
         .map_err(|e| VerifierError::ProofDeserializationError(e.to_string()))?;
 
     // 2. Build domain-separated challenger, then observe public values.

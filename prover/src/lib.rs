@@ -10,12 +10,17 @@ use alloc::{string::ToString, vec::Vec};
 use ::serde::Serialize;
 use miden_core::{Felt, WORD_SIZE, field::QuadFelt, utils::RowMajorMatrix};
 use miden_crypto::stark::{
-    StarkConfig, air::VarLenPublicInputs, challenger::CanObserve, lmcs::Lmcs, proof::StarkOutput,
+    StarkConfig,
+    air::VarLenPublicInputs,
+    challenger::CanObserve,
+    lmcs::Lmcs,
+    proof::{StarkOutput, StarkProof},
 };
 use miden_processor::{
     FastProcessor, Program,
     trace::{ExecutionTrace, build_trace},
 };
+use serde_wincode::SerdeCompat;
 use tracing::instrument;
 
 mod proving_options;
@@ -196,8 +201,10 @@ where
         challenger,
     )
     .map_err(|e| ExecutionError::ProvingError(e.to_string()))?;
-    // Proof serialization via bincode; see https://github.com/0xMiden/miden-vm/issues/2550.
-    let proof_bytes = bincode::serialize(&output.proof)
-        .map_err(|e| ExecutionError::ProvingError(e.to_string()))?;
+    let proof_encoding_config = wincode::config::Configuration::default();
+    let proof_bytes = <SerdeCompat<StarkProof<Felt, QuadFelt, SC>> as wincode::config::Serialize<
+        _,
+    >>::serialize(&output.proof, proof_encoding_config)
+    .map_err(|e| ExecutionError::ProvingError(e.to_string()))?;
     Ok(proof_bytes)
 }

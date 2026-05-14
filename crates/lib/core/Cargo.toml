@@ -56,7 +56,8 @@ num = { version = "0.4" }
 rand = { version = "0.9", default-features = false }
 rand_chacha = { workspace = true }
 rstest = { workspace = true }
-bincode.workspace = true
+serde-wincode.workspace = true
+wincode.workspace = true
 
 [build-dependencies]
 env_logger.workspace = true
