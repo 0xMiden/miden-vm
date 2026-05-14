@@ -99,6 +99,8 @@ pub mod crypto {
 
         use crate::{Felt, Word, ZERO};
 
+        // Wrap the `miden-crypto` MMR types so this crate can bind MMR commitments to the
+        // leaf count while preserving the existing public API surface.
         pub mod mmr {
             pub use miden_crypto::merkle::mmr::{
                 Forest, InOrderIndex, MmrDelta, MmrError, MmrPath, MmrProof,

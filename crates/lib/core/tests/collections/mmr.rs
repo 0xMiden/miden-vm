@@ -371,7 +371,7 @@ fn test_mmr_unpack_invalid_hash() {
 }
 
 #[test]
-fn poc_mmr_unpack_peak_hash_does_not_bind_num_leaves() -> Result<(), MerkleError> {
+fn test_mmr_unpack_rejects_forged_num_leaves() -> Result<(), MerkleError> {
     let mmr_ptr = 1000_u32;
     let leaves = init_merkle_leaves(&[1, 2]);
     let merkle_tree = MerkleTree::new(leaves.clone())?;
