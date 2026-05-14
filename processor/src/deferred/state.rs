@@ -1,7 +1,6 @@
 use alloc::{collections::BTreeMap, vec::Vec};
 
 use miden_core::{
-    Word, ZERO,
     crypto::hash::Poseidon2,
     deferred::{DeferredWitness, Digest, Node},
 };
@@ -19,21 +18,11 @@ use super::schema::{ChildResolver, NodeType, Schema, SchemaError};
 /// - `transcript`: a single rolling Poseidon2 digest folded over each assertion's digest, in
 ///   order. Mirrors [`miden_core::precompile::PrecompileTranscript`]. The verifier re-folds it
 ///   from the witness assertions to bind their content and order.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct DeferredState {
     nodes: BTreeMap<Digest, Node>,
     assertions: Vec<Node>,
     transcript: Digest,
-}
-
-impl Default for DeferredState {
-    fn default() -> Self {
-        Self {
-            nodes: BTreeMap::new(),
-            assertions: Vec::new(),
-            transcript: Word::new([ZERO; 4]),
-        }
-    }
 }
 
 impl DeferredState {

@@ -20,7 +20,7 @@ use crate::{
     ProcessorState,
     advice::AdviceError,
     continuation_stack::{Continuation, ContinuationStack},
-    deferred::{NoopSchema, Schema},
+    deferred::{DeferredState, NoopSchema, Schema},
     errors::MapExecErrNoCtx,
     tracer::{OperationHelperRegisters, Tracer},
 };
@@ -358,7 +358,7 @@ impl FastProcessor {
     #[inline(always)]
     pub(crate) fn deferred_view_mut(
         &mut self,
-    ) -> (&mut crate::deferred::DeferredState, &dyn Schema) {
+    ) -> (&mut DeferredState, &dyn Schema) {
         (self.advice.deferred_state_mut(), &*self.deferred_schema)
     }
 
