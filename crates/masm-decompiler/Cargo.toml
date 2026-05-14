@@ -13,5 +13,5 @@ publish = false
 doctest = false
 
 [dependencies]
-log.workspace = true
 miden-assembly-syntax = { workspace = true, features = ["std", "arbitrary"] }
+tracing.workspace = true

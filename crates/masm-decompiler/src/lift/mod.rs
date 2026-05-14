@@ -10,13 +10,13 @@ mod stack;
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use log::trace;
 use miden_assembly_syntax::{
     ast::{Block, Immediate, Instruction, Op, Procedure},
     debuginfo::{SourceSpan, Spanned},
 };
 use repeat::{SlotIndex, TaggedSlotStack, plan_repeat_slots, simulate_block_tags};
 use stack::{SlotId, StackEntry, SymbolicStack};
+use tracing::trace;
 
 use crate::{
     ir::{Expr, IfPhi, IndexExpr, LoopPhi, LoopVar, Stmt, ValueId, Var, VarBase},
@@ -890,28 +890,6 @@ fn transform_expr_loop_subscripts(
     }
 }
 
-/// Adjust the constant term of an index expression while preserving loop terms.
-#[allow(dead_code)]
-fn adjust_subscript_base(expr: IndexExpr, new_base: i64) -> IndexExpr {
-    let current = constant_term(&expr);
-    let delta = new_base - current;
-    add_index_exprs(expr, IndexExpr::Const(delta))
-}
-
-/// Extract the constant term from a linear index expression.
-#[allow(dead_code)]
-fn constant_term(expr: &IndexExpr) -> i64 {
-    match expr {
-        IndexExpr::Const(value) => *value,
-        IndexExpr::LoopVar(_) => 0,
-        IndexExpr::Add(lhs, rhs) => constant_term(lhs) + constant_term(rhs),
-        IndexExpr::Mul(lhs, rhs) => match (&**lhs, &**rhs) {
-            (IndexExpr::Const(a), IndexExpr::Const(b)) => a * b,
-            _ => 0,
-        },
-    }
-}
-
 /// Identify entry values that must be treated as loop inputs.
 fn collect_loop_input_ids(
     entry_entries: &[StackEntry],
@@ -1386,4 +1364,85 @@ fn lift_while(
         body: body_stmts,
         phis,
     }])
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{fs, path::PathBuf, sync::Arc};
+
+    use miden_assembly_syntax::debuginfo::{DefaultSourceManager, SourceManager};
+
+    use super::*;
+    use crate::{
+        callgraph::CallGraph,
+        frontend::{LibraryRoot, Workspace},
+        signature::{infer_signatures, refine_public_signature_inputs},
+        symbol::resolution::create_resolver,
+    };
+
+    fn temp_dir(test_name: &str) -> PathBuf {
+        let mut dir = std::env::temp_dir();
+        dir.push(format!("masm_decompiler_lift_{test_name}_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("create temp module dir");
+        dir
+    }
+
+    fn lift_test_proc(test_name: &str, source: &str, proc_name: &str) -> Vec<Stmt> {
+        let dir = temp_dir(test_name);
+        let module_path = dir.join("test.masm");
+        fs::write(&module_path, source).expect("write MASM module");
+
+        let source_manager: Arc<dyn SourceManager> = Arc::new(DefaultSourceManager::default());
+        let mut workspace =
+            Workspace::with_source_manager(vec![LibraryRoot::new("", dir.clone())], source_manager);
+        workspace.load_entry(&module_path).expect("load test module");
+        workspace.load_dependencies();
+        assert!(workspace.unresolved_module_paths().is_empty());
+
+        let callgraph = CallGraph::from(&workspace);
+        let mut signatures = infer_signatures(&workspace, &callgraph);
+        refine_public_signature_inputs(&workspace, &mut signatures);
+        let proc_path = callgraph
+            .iter()
+            .find_map(|node| (node.name().name() == proc_name).then(|| node.name().clone()))
+            .expect("test procedure should exist");
+        let (program, proc) = workspace.lookup_proc_entry(&proc_path).expect("lookup proc");
+        let resolver = create_resolver(program.module(), workspace.source_manager());
+        let stmts = lift_proc(proc, &proc_path, &resolver, &signatures).expect("lift test proc");
+
+        fs::remove_dir_all(dir).expect("remove temp module dir");
+        stmts
+    }
+
+    #[test]
+    fn repeat_lifting_preserves_loop_count_and_body_shape() {
+        let stmts = lift_test_proc(
+            "repeat_push",
+            "\
+pub proc repeat_push() -> (felt, felt, felt)
+    repeat.3
+        push.0
+    end
+end
+",
+            "repeat_push",
+        );
+
+        let repeat = stmts
+            .iter()
+            .find_map(|stmt| match stmt {
+                Stmt::Repeat { loop_count, body, phis, .. } => {
+                    Some((*loop_count, body.as_slice(), phis.as_slice()))
+                },
+                _ => None,
+            })
+            .expect("repeat statement should be lifted");
+
+        assert_eq!(repeat.0, 3);
+        assert_eq!(repeat.1.len(), 1);
+        assert!(matches!(repeat.1[0], Stmt::Assign { .. }));
+        assert!(repeat.2.is_empty());
+        assert!(matches!(stmts.last(), Some(Stmt::Return { values, .. }) if values.len() == 3));
+    }
 }

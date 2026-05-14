@@ -71,6 +71,21 @@ impl<S> FixpointResult<S> {
     pub fn into_state(self) -> S {
         self.state
     }
+
+    /// Borrow the final abstract state.
+    pub fn state(&self) -> &S {
+        &self.state
+    }
+
+    /// Number of transfer evaluations performed by the engine.
+    pub fn iterations(&self) -> usize {
+        self.iterations
+    }
+
+    /// Outcome reported by the engine.
+    pub fn outcome(&self) -> FixpointOutcome {
+        self.outcome
+    }
 }
 
 /// Iterate `step` until joining the candidate state no longer changes the current state.
@@ -109,4 +124,50 @@ where
     };
 
     FixpointResult::new(state, steps, outcome)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    struct Counter(u8);
+
+    impl JoinSemiLattice for Counter {
+        fn join_assign(&mut self, other: &Self) -> bool {
+            let next = self.0.max(other.0);
+            let changed = next != self.0;
+            self.0 = next;
+            changed
+        }
+    }
+
+    #[test]
+    fn fixpoint_reports_convergence_when_join_stabilizes() {
+        let result = iterate_to_fixpoint(Counter(1), FixpointConfig::new(4), Clone::clone);
+
+        assert_eq!(result.state(), &Counter(1));
+        assert_eq!(result.iterations(), 1);
+        assert_eq!(result.outcome(), FixpointOutcome::Converged);
+    }
+
+    #[test]
+    fn fixpoint_reports_cutoff_after_final_change() {
+        let result =
+            iterate_to_fixpoint(Counter(0), FixpointConfig::new(2), |state| Counter(state.0 + 1));
+
+        assert_eq!(result.state(), &Counter(2));
+        assert_eq!(result.iterations(), 2);
+        assert_eq!(result.outcome(), FixpointOutcome::ReachedIterationLimitAfterChange);
+    }
+
+    #[test]
+    fn fixpoint_reports_empty_budget_cutoff() {
+        let result =
+            iterate_to_fixpoint(Counter(0), FixpointConfig::new(0), |state| Counter(state.0 + 1));
+
+        assert_eq!(result.state(), &Counter(0));
+        assert_eq!(result.iterations(), 0);
+        assert_eq!(result.outcome(), FixpointOutcome::ReachedIterationLimit);
+    }
 }

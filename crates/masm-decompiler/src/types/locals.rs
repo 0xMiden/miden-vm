@@ -54,4 +54,16 @@ impl LocalState {
             false
         }
     }
+
+    /// Join another local state into this one.
+    pub(super) fn join_assign(&mut self, other: &Self) -> bool {
+        let mut changed = false;
+        for (index, stored_ty) in &other.types {
+            changed |= self.record_store_type(*index, *stored_ty);
+        }
+        for (index, req) in &other.requirements {
+            changed |= self.require_slot(*index, *req);
+        }
+        changed
+    }
 }

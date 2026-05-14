@@ -1,3 +1,4 @@
+mod abstract_interp;
 mod callgraph;
 mod frontend;
 mod ir;
@@ -12,6 +13,9 @@ pub mod analysis {
     //! Internal analysis-facing surface consumed by `masm-analysis`.
 
     pub use crate::{
+        abstract_interp::{
+            FixpointConfig, FixpointOutcome, FixpointResult, JoinSemiLattice, iterate_to_fixpoint,
+        },
         callgraph::CallGraph,
         frontend::{LibraryRoot, Program, Workspace},
         ir::{

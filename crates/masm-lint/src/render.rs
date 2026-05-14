@@ -171,3 +171,66 @@ fn decimal_width(n: usize) -> usize {
     }
     width
 }
+
+#[cfg(test)]
+mod tests {
+    use masm_analysis::lint::{LintDiagnostic, RelatedSpan};
+    use miden_debug_types::{DefaultSourceManager, SourceLanguage, SourceManager, SourceSpan, Uri};
+
+    use super::*;
+
+    fn source_manager_with_fixture() -> (DefaultSourceManager, SourceSpan, SourceSpan) {
+        let sources = DefaultSourceManager::default();
+        let file = sources.load(
+            SourceLanguage::Masm,
+            Uri::new("file:///tmp/render_fixture.masm"),
+            "begin\n    adv_push\nend\n".to_string(),
+        );
+        let primary = SourceSpan::new(file.id(), 10..18);
+        let related = SourceSpan::new(file.id(), 0..5);
+        (sources, primary, related)
+    }
+
+    #[test]
+    fn render_diagnostic_to_string_strips_file_scheme_and_renders_related_spans() {
+        yansi::disable();
+        let (sources, primary, related) = source_manager_with_fixture();
+        let diagnostic = LintDiagnostic {
+            message: "unconstrained advice reaches a u32 operation".to_string(),
+            span: primary,
+            note: "in procedure `test`".to_string(),
+            related: vec![RelatedSpan {
+                span: related,
+                message: "advice value originates here".to_string(),
+            }],
+        };
+
+        let rendered = render_diagnostic_to_string(&diagnostic, &sources);
+
+        assert!(rendered.contains("warning: unconstrained advice reaches a u32 operation"));
+        assert!(rendered.contains("--> /tmp/render_fixture.masm:2:5"));
+        assert!(rendered.contains("adv_push"));
+        assert!(rendered.contains("^^^^^^^^"));
+        assert!(rendered.contains("::: /tmp/render_fixture.masm:1:1"));
+        assert!(rendered.contains("help: advice value originates here"));
+        assert!(rendered.contains("note: in procedure `test`"));
+    }
+
+    #[test]
+    fn render_diagnostic_to_string_handles_unknown_primary_span() {
+        yansi::disable();
+        let sources = DefaultSourceManager::default();
+        let diagnostic = LintDiagnostic {
+            message: "synthetic diagnostic".to_string(),
+            span: SourceSpan::UNKNOWN,
+            note: "no source location available".to_string(),
+            related: Vec::new(),
+        };
+
+        let rendered = render_diagnostic_to_string(&diagnostic, &sources);
+
+        assert!(rendered.contains("warning: synthetic diagnostic"));
+        assert!(!rendered.contains("-->"));
+        assert!(rendered.contains("note: no source location available"));
+    }
+}
