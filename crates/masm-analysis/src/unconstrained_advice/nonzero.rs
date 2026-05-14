@@ -3,7 +3,7 @@
 use std::collections::BTreeSet;
 
 use masm_decompiler::analysis::{
-    BinOp, Expr, Intrinsic, Stmt, SymbolPath, UnOp, Var, intrinsic_nonzero_arg_index,
+    BinOp, Expr, Intrinsic, Stmt, SymbolPath, UnOp, Var, intrinsic_arg_requirements,
 };
 
 use super::{
@@ -206,11 +206,14 @@ fn add_required_inputs(
 
 /// Return the advice fact feeding any intrinsic divisor input.
 fn intrinsic_nonzero_sink_fact(intrinsic: &Intrinsic, env: &Env) -> AdviceFact {
-    let Some(index) = intrinsic_nonzero_arg_index(&intrinsic.name) else {
+    let requirements =
+        intrinsic_arg_requirements(&intrinsic.name, intrinsic.args.len(), intrinsic.results.len());
+    let Some(index) = requirements.nonzero_arg else {
         return AdviceFact::bottom();
     };
 
-    let Some(divisor) = intrinsic.args.get(index).filter(|arg| !env.is_var_nonzero(arg)) else {
+    let divisor = &intrinsic.args[index];
+    if env.is_var_nonzero(divisor) {
         return AdviceFact::bottom();
     };
     env.fact_for_var(divisor)

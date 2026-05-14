@@ -1,6 +1,6 @@
 //! Diagnostics for unconstrained advice reaching Merkle tree root arguments.
 
-use masm_decompiler::analysis::{Stmt, intrinsic_merkle_root_arg_range};
+use masm_decompiler::analysis::{Stmt, intrinsic_arg_requirements};
 
 use super::{
     domain::AdviceFact,
@@ -34,11 +34,12 @@ impl AdviceCapability for MerkleCapability {
             return AdviceEffect::new();
         };
 
-        let Some(root_range) = intrinsic_merkle_root_arg_range(
+        let requirements = intrinsic_arg_requirements(
             &intrinsic.name,
             intrinsic.args.len(),
             intrinsic.results.len(),
-        ) else {
+        );
+        let Some(root_range) = requirements.merkle_root_args else {
             return AdviceEffect::new();
         };
 

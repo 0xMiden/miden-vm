@@ -77,6 +77,44 @@ pub fn intrinsic_nonzero_arg_index(name: &str) -> Option<usize> {
     }
 }
 
+/// Argument requirements imposed by one intrinsic invocation shape.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct IntrinsicArgRequirements {
+    /// Positional arguments that must satisfy the MASM `u32` precondition.
+    pub u32_args: Option<Range<usize>>,
+    /// Positional argument that must be proven non-zero.
+    pub nonzero_arg: Option<usize>,
+    /// Positional argument used as a memory address.
+    pub memory_address_arg: Option<usize>,
+    /// Positional arguments used as a Merkle root.
+    pub merkle_root_args: Option<Range<usize>>,
+}
+
+/// Return all argument requirements imposed by this intrinsic invocation shape.
+pub fn intrinsic_arg_requirements(
+    name: &str,
+    arg_count: usize,
+    result_count: usize,
+) -> IntrinsicArgRequirements {
+    let u32_args = if intrinsic_requires_u32_precondition(name) {
+        Some(0..arg_count)
+    } else {
+        intrinsic_positional_u32_arg_range(name, arg_count)
+    };
+    let nonzero_arg = intrinsic_nonzero_arg_index(name).filter(|index| *index < arg_count);
+    let memory_address_arg = (arg_count == 13 && result_count == 13)
+        .then(|| intrinsic_memory_address_arg_index(name, arg_count))
+        .flatten();
+    let merkle_root_args = intrinsic_merkle_root_arg_range(name, arg_count, result_count);
+
+    IntrinsicArgRequirements {
+        u32_args,
+        nonzero_arg,
+        memory_address_arg,
+        merkle_root_args,
+    }
+}
+
 /// Advice transfer shape for intrinsics.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IntrinsicAdviceTransferShape {
@@ -311,9 +349,10 @@ mod tests {
     use miden_assembly_syntax::ast::Instruction;
 
     use super::{
-        IntrinsicAdviceTransferShape, IntrinsicOutputTypeShape, intrinsic_advice_transfer_shape,
-        intrinsic_asserts_u32_args, intrinsic_base_name, intrinsic_memory_address_arg_index,
-        intrinsic_merkle_root_arg_range, intrinsic_nonzero_arg_index, intrinsic_output_type_shape,
+        IntrinsicAdviceTransferShape, IntrinsicArgRequirements, IntrinsicOutputTypeShape,
+        intrinsic_advice_transfer_shape, intrinsic_arg_requirements, intrinsic_asserts_u32_args,
+        intrinsic_base_name, intrinsic_memory_address_arg_index, intrinsic_merkle_root_arg_range,
+        intrinsic_nonzero_arg_index, intrinsic_output_type_shape,
         intrinsic_positional_u32_arg_range, intrinsic_requires_u32_precondition, stack_family,
     };
 
@@ -387,6 +426,55 @@ mod tests {
         assert_eq!(intrinsic_nonzero_arg_index("u32div.4"), None);
         assert_eq!(intrinsic_nonzero_arg_index("u32mod.4"), None);
         assert_eq!(intrinsic_nonzero_arg_index("inv"), None);
+    }
+
+    #[test]
+    fn intrinsic_arg_requirements_collects_instruction_semantics() {
+        assert_eq!(
+            intrinsic_arg_requirements("u32div", 2, 1),
+            IntrinsicArgRequirements {
+                u32_args: Some(0..2),
+                nonzero_arg: Some(0),
+                memory_address_arg: None,
+                merkle_root_args: None,
+            }
+        );
+        assert_eq!(
+            intrinsic_arg_requirements("u32div.4", 1, 1),
+            IntrinsicArgRequirements {
+                u32_args: Some(0..1),
+                nonzero_arg: None,
+                memory_address_arg: None,
+                merkle_root_args: None,
+            }
+        );
+        assert_eq!(
+            intrinsic_arg_requirements("mtree_verify", 10, 0),
+            IntrinsicArgRequirements {
+                u32_args: Some(4..6),
+                nonzero_arg: None,
+                memory_address_arg: None,
+                merkle_root_args: Some(6..10),
+            }
+        );
+        assert_eq!(
+            intrinsic_arg_requirements("adv_pipe", 13, 13),
+            IntrinsicArgRequirements {
+                u32_args: Some(12..13),
+                nonzero_arg: None,
+                memory_address_arg: Some(12),
+                merkle_root_args: None,
+            }
+        );
+        assert_eq!(
+            intrinsic_arg_requirements("mem_stream", 1, 1),
+            IntrinsicArgRequirements {
+                u32_args: Some(0..1),
+                nonzero_arg: None,
+                memory_address_arg: None,
+                merkle_root_args: None,
+            }
+        );
     }
 
     #[test]

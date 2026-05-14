@@ -1,6 +1,6 @@
 //! Diagnostics for unconstrained advice reaching memory address sinks.
 
-use masm_decompiler::analysis::{Stmt, intrinsic_memory_address_arg_index};
+use masm_decompiler::analysis::{Stmt, intrinsic_arg_requirements};
 
 use super::{
     effect::AdviceEffect,
@@ -57,11 +57,12 @@ impl AdviceCapability for AddressCapability {
                 }
             },
             Stmt::Intrinsic { span, intrinsic } => {
-                if intrinsic.args.len() == 13
-                    && intrinsic.results.len() == 13
-                    && let Some(addr_index) =
-                        intrinsic_memory_address_arg_index(&intrinsic.name, intrinsic.args.len())
-                {
+                let requirements = intrinsic_arg_requirements(
+                    &intrinsic.name,
+                    intrinsic.args.len(),
+                    intrinsic.results.len(),
+                );
+                if let Some(addr_index) = requirements.memory_address_arg {
                     let addr_fact = env.fact_for_var(&intrinsic.args[addr_index]);
                     if addr_fact.has_concrete_sources() {
                         effect.push_diagnostic(self.diagnostics.diagnostic_for_fact(
