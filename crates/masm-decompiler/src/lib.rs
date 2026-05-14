@@ -25,7 +25,8 @@ pub mod analysis {
         },
         lift::{LiftingError, LiftingResult, lift_proc},
         semantics::{
-            IntrinsicAdviceTransferShape, intrinsic_advice_transfer_shape,
+            IntrinsicAdviceTransferShape, IntrinsicArgRequirements,
+            intrinsic_advice_transfer_shape, intrinsic_arg_requirements,
             intrinsic_asserts_u32_args, intrinsic_base_name, intrinsic_memory_address_arg_index,
             intrinsic_merkle_root_arg_range, intrinsic_nonzero_arg_index,
             intrinsic_positional_u32_arg_range, intrinsic_requires_u32_precondition,

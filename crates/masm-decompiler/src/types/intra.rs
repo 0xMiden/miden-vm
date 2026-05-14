@@ -17,9 +17,8 @@ use crate::{
     abstract_interp::{FixpointConfig, FixpointOutcome, JoinSemiLattice, iterate_to_fixpoint},
     ir::{BinOp, Constant, Expr, Stmt, UnOp, Var},
     semantics::{
-        IntrinsicOutputTypeShape, intrinsic_asserts_u32_args, intrinsic_base_name,
-        intrinsic_output_type_shape, intrinsic_positional_u32_arg_range,
-        intrinsic_requires_u32_precondition,
+        IntrinsicOutputTypeShape, intrinsic_arg_requirements, intrinsic_asserts_u32_args,
+        intrinsic_base_name, intrinsic_output_type_shape,
     },
     symbol::path::SymbolPath,
 };
@@ -788,16 +787,12 @@ impl<'a> ProcTypeAnalyzer<'a> {
     ) -> bool {
         let mut changed = false;
 
-        // Blanket u32 precondition for u32 arithmetic intrinsics.
-        if intrinsic_requires_u32_precondition(&intrinsic.name) {
-            for arg in &intrinsic.args {
-                changed |= self.require_u32_var_if_not_guaranteed(arg);
-            }
-        }
-
-        if let Some(range) =
-            intrinsic_positional_u32_arg_range(&intrinsic.name, intrinsic.args.len())
-        {
+        let requirements = intrinsic_arg_requirements(
+            &intrinsic.name,
+            intrinsic.args.len(),
+            intrinsic.results.len(),
+        );
+        if let Some(range) = requirements.u32_args {
             for arg in &intrinsic.args[range] {
                 changed |= self.require_u32_var_if_not_guaranteed(arg);
             }
