@@ -4,7 +4,10 @@ use core::fmt;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use super::{MastForestContributor, MastNodeExt};
+use super::{
+    MastForestContributor, MastNodeExt,
+    mast_forest_contributor::{NodeBuilderLifecycle, remap_child_id},
+};
 #[cfg(debug_assertions)]
 use crate::mast::MastNode;
 use crate::{
@@ -16,7 +19,7 @@ use crate::{
     },
     operations::opcodes,
     prettier::PrettyPrint,
-    utils::{Idx, LookupByIdx},
+    utils::LookupByIdx,
 };
 
 // LOOP NODE
@@ -302,18 +305,15 @@ impl LoopNodeBuilder {
 
     /// Builds the LoopNode with the specified decorators.
     pub fn build(self, mast_forest: &MastForest) -> Result<LoopNode, MastForestError> {
-        if self.body.to_usize() >= mast_forest.nodes.len() {
-            return Err(MastForestError::NodeIdOverflow(self.body, mast_forest.nodes.len()));
-        }
+        NodeBuilderLifecycle::validate_children(mast_forest, &[self.body])?;
 
-        // Use the forced digest if provided, otherwise compute the digest
-        let digest = if let Some(forced_digest) = self.digest {
-            forced_digest
-        } else {
+        let lifecycle =
+            NodeBuilderLifecycle::new(&self.before_enter, &self.after_exit, self.digest);
+        let digest = lifecycle.digest_or_compute(|| {
             let body_hash = mast_forest[self.body].digest();
 
             digest::loop_digest(body_hash)
-        };
+        });
 
         Ok(LoopNode {
             body: self.body,
@@ -326,9 +326,8 @@ impl LoopNodeBuilder {
     }
 
     pub(in crate::mast) fn build_with_forced_digest(self) -> Result<LoopNode, MastForestError> {
-        let Some(digest) = self.digest else {
-            return Err(MastForestError::DigestRequiredForDeserialization);
-        };
+        let digest = NodeBuilderLifecycle::new(&self.before_enter, &self.after_exit, self.digest)
+            .forced_digest()?;
 
         Ok(LoopNode {
             body: self.body,
@@ -344,38 +343,24 @@ impl LoopNodeBuilder {
 impl MastForestContributor for LoopNodeBuilder {
     #[cfg(any(test, feature = "arbitrary", feature = "testing"))]
     fn add_to_forest(self, forest: &mut MastForest) -> Result<MastNodeId, MastForestError> {
-        let node = self.build(forest)?;
+        NodeBuilderLifecycle::validate_children(forest, &[self.body])?;
 
-        let LoopNode {
-            body,
-            digest,
-            decorator_store: DecoratorStore::Owned { before_enter, after_exit, .. },
-        } = node
-        else {
-            unreachable!("LoopNodeBuilder::build() should always return owned decorators");
-        };
+        let lifecycle =
+            NodeBuilderLifecycle::new(&self.before_enter, &self.after_exit, self.digest);
+        let digest = lifecycle.digest_or_compute(|| {
+            let body_hash = forest[self.body].digest();
 
-        // Determine the node ID that will be assigned
-        let future_node_id = MastNodeId::new_unchecked(forest.nodes.len() as u32);
+            digest::loop_digest(body_hash)
+        });
 
-        // Store node-level decorators in the centralized NodeToDecoratorIds for efficient access
-        forest.register_node_decorators(future_node_id, &before_enter, &after_exit);
-
-        // Create the node in the forest with Linked variant from the start
-        // Move the data directly without intermediate cloning
-        let node_id = forest
-            .nodes
-            .push(
-                LoopNode {
-                    body,
-                    digest,
-                    decorator_store: DecoratorStore::Linked { id: future_node_id },
-                }
-                .into(),
-            )
-            .map_err(|_| MastForestError::TooManyNodes)?;
-
-        Ok(node_id)
+        lifecycle.add_linked_node(forest, |future_node_id| {
+            LoopNode {
+                body: self.body,
+                digest,
+                decorator_store: DecoratorStore::Linked { id: future_node_id },
+            }
+            .into()
+        })
     }
 
     fn fingerprint_for_node(
@@ -383,17 +368,11 @@ impl MastForestContributor for LoopNodeBuilder {
         forest: &MastForest,
         hash_by_node_id: &impl LookupByIdx<MastNodeId, MastNodeFingerprint>,
     ) -> Result<MastNodeFingerprint, MastForestError> {
-        // Use the fingerprint_from_parts helper function
-        crate::mast::node_fingerprint::fingerprint_from_parts(
+        NodeBuilderLifecycle::new(&self.before_enter, &self.after_exit, self.digest).fingerprint(
             forest,
             hash_by_node_id,
-            &self.before_enter,
-            &self.after_exit,
             &[self.body],
-            // Use the forced digest if available, otherwise compute the digest
-            if let Some(forced_digest) = self.digest {
-                forced_digest
-            } else {
+            || {
                 let body_hash = forest[self.body].digest();
 
                 digest::loop_digest(body_hash)
@@ -403,7 +382,7 @@ impl MastForestContributor for LoopNodeBuilder {
 
     fn remap_children(self, remapping: &impl LookupByIdx<MastNodeId, MastNodeId>) -> Self {
         LoopNodeBuilder {
-            body: *remapping.get(self.body).unwrap_or(&self.body),
+            body: remap_child_id(self.body, remapping),
             before_enter: self.before_enter,
             after_exit: self.after_exit,
             digest: self.digest,
