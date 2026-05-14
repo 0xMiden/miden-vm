@@ -78,7 +78,7 @@ lint: clippy fix format toml typos-check shear cargo-deny ## Run all linting tas
 
 .PHONY: doc
 doc: ## Generate and check documentation for workspace crates only
-	rm -rf "${CARGO_TARGET_DIR:-target}/doc"
+	rm -rf "$${CARGO_TARGET_DIR:-target}/doc"
 	RUSTDOCFLAGS="--enable-index-page -Zunstable-options -D warnings" cargo +nightly doc --all-features --keep-going --release --no-deps
 
 # --- testing -------------------------------------------------------------------------------------

@@ -67,15 +67,17 @@ impl core::fmt::Debug for SnapshotInner {
 // PERSISTENT BACKEND READER
 // ================================================================================================
 
-/// A read-only, point-in-time snapshot of a [`PersistentBackend`].
+/// A read-only, point-in-time snapshot of a [`PersistentBackend`](super::PersistentBackend).
 ///
-/// This type intentionally implements only [`BackendReader`], not [`Backend`]. It is returned by
-/// [`PersistentBackend::reader`] to provide read-only access to a consistent snapshot of the
-/// backend state without exposing any mutation capabilities.
+/// This type intentionally implements only [`BackendReader`], not
+/// [`Backend`](crate::merkle::smt::Backend). It is returned by
+/// [`Backend::reader`](crate::merkle::smt::Backend::reader) for
+/// [`PersistentBackend`](super::PersistentBackend) to provide read-only access to a consistent
+/// snapshot of the backend state without exposing any mutation capabilities.
 ///
 /// All reads go through a RocksDB snapshot, so the view is frozen at the instant
-/// [`PersistentBackend::reader`] was called — concurrent writes to the underlying database are
-/// invisible to this reader.
+/// [`Backend::reader`](crate::merkle::smt::Backend::reader) was called; concurrent writes to the
+/// underlying database are invisible to this reader.
 ///
 /// Cloning is O(1): both the snapshot and the lineage metadata are owned by the inner `Arc`.
 #[derive(Clone, Debug)]

@@ -50,7 +50,7 @@ jobs:
           persist-credentials: false
       - name: Cleanup large tools for build space
         uses: ./.github/actions/cleanup-runner
-      # Added: LLVM/Clang for RocksDB/bindgen
+      # `make doc` uses --all-features, which enables RocksDB with bindgen.
       - name: Install LLVM/Clang
         uses: ./.github/actions/install-llvm
         with:
