@@ -15,6 +15,7 @@ mod merkle;
 mod nonzero;
 mod provenance;
 mod shared;
+mod sink;
 mod summary;
 mod u32;
 mod u32_domain;

@@ -35,11 +35,6 @@ impl<S: AdviceSummaryContribution> AdviceEffect<S> {
         Self::default()
     }
 
-    /// Create an effect containing diagnostics only.
-    pub(super) fn diagnostics(diagnostics: Vec<AdviceDiagnostic>) -> Self {
-        Self { diagnostics, summary: S::default() }
-    }
-
     /// Add one diagnostic.
     pub(super) fn push_diagnostic(&mut self, diagnostic: AdviceDiagnostic) {
         self.diagnostics.push(diagnostic);

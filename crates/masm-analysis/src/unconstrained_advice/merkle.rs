@@ -3,9 +3,9 @@
 use masm_decompiler::analysis::{Stmt, intrinsic_arg_requirements};
 
 use super::{
-    domain::AdviceFact,
     effect::AdviceEffect,
     shared::Env,
+    sink::{joined_var_fact, push_fact_sink_diagnostic},
     summary::{AdviceDiagnosticContext, AdviceDiagnosticsMap, AdviceSummaryMap},
     walker::{self, AdviceCapability},
 };
@@ -43,18 +43,15 @@ impl AdviceCapability for MerkleCapability {
             return AdviceEffect::new();
         };
 
-        let root_fact = AdviceFact::join_all(
-            intrinsic.args[root_range].iter().map(|var| env.fact_for_var(var)),
+        let root_fact = joined_var_fact(&intrinsic.args[root_range], env);
+        let mut effect = AdviceEffect::new();
+        push_fact_sink_diagnostic(
+            &mut effect,
+            &self.diagnostics,
+            *span,
+            "unconstrained advice used as Merkle tree root",
+            &root_fact,
         );
-
-        if root_fact.has_concrete_sources() {
-            AdviceEffect::diagnostics(vec![self.diagnostics.diagnostic_for_fact(
-                *span,
-                "unconstrained advice used as Merkle tree root",
-                &root_fact,
-            )])
-        } else {
-            AdviceEffect::new()
-        }
+        effect
     }
 }

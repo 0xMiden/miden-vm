@@ -5,6 +5,7 @@ use masm_decompiler::analysis::{Stmt, intrinsic_arg_requirements};
 use super::{
     effect::AdviceEffect,
     shared::Env,
+    sink::push_var_sink_diagnostic,
     summary::{AdviceDiagnosticContext, AdviceDiagnosticsMap, AdviceSummaryMap},
     walker::{self, AdviceCapability},
 };
@@ -34,26 +35,26 @@ impl AdviceCapability for AddressCapability {
         match stmt {
             Stmt::MemStore { span, store } => {
                 if let Some(addr_var) = store.address.first() {
-                    let addr_fact = env.fact_for_var(addr_var);
-                    if addr_fact.has_concrete_sources() {
-                        effect.push_diagnostic(self.diagnostics.diagnostic_for_fact(
-                            *span,
-                            "unconstrained advice used as memory address",
-                            &addr_fact,
-                        ));
-                    }
+                    push_var_sink_diagnostic(
+                        &mut effect,
+                        &self.diagnostics,
+                        *span,
+                        "unconstrained advice used as memory address",
+                        addr_var,
+                        env,
+                    );
                 }
             },
             Stmt::MemLoad { span, load } => {
                 if let Some(addr_var) = load.address.first() {
-                    let addr_fact = env.fact_for_var(addr_var);
-                    if addr_fact.has_concrete_sources() {
-                        effect.push_diagnostic(self.diagnostics.diagnostic_for_fact(
-                            *span,
-                            "unconstrained advice used as memory address",
-                            &addr_fact,
-                        ));
-                    }
+                    push_var_sink_diagnostic(
+                        &mut effect,
+                        &self.diagnostics,
+                        *span,
+                        "unconstrained advice used as memory address",
+                        addr_var,
+                        env,
+                    );
                 }
             },
             Stmt::Intrinsic { span, intrinsic } => {
@@ -63,14 +64,14 @@ impl AdviceCapability for AddressCapability {
                     intrinsic.results.len(),
                 );
                 if let Some(addr_index) = requirements.memory_address_arg {
-                    let addr_fact = env.fact_for_var(&intrinsic.args[addr_index]);
-                    if addr_fact.has_concrete_sources() {
-                        effect.push_diagnostic(self.diagnostics.diagnostic_for_fact(
-                            *span,
-                            "unconstrained advice used as memory address",
-                            &addr_fact,
-                        ));
-                    }
+                    push_var_sink_diagnostic(
+                        &mut effect,
+                        &self.diagnostics,
+                        *span,
+                        "unconstrained advice used as memory address",
+                        &intrinsic.args[addr_index],
+                        env,
+                    );
                 }
             },
             _ => {},
