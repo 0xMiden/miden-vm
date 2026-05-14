@@ -1,3 +1,5 @@
+use alloc::vec::Vec;
+
 use miden_debug_types::{SourceFile, SourceId, SourceSpan};
 
 use crate::syntax::SyntaxKind;
@@ -329,7 +331,7 @@ impl<'input> Iterator for Lexer<'input> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use std::{string::ToString, sync::Arc, vec::Vec};
 
     use miden_debug_types::{SourceFile, SourceId, SourceLanguage, SourceSpan, Uri};
     use pretty_assertions::assert_eq;

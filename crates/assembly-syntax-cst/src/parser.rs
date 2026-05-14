@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use alloc::{borrow::ToOwned, string::String, sync::Arc, vec::Vec};
 
 use miden_debug_types::{SourceFile, SourceId, SourceLanguage, SourceSpan, Uri};
 use rowan::{GreenNodeBuilder, NodeOrToken, TextRange};
@@ -1263,7 +1263,9 @@ mod tests {
     use std::{
         fs,
         path::{Path, PathBuf},
+        string::ToString,
         sync::Arc,
+        vec::Vec,
     };
 
     use miden_debug_types::{

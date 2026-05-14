@@ -4,6 +4,14 @@
 //! set of typed AST wrappers over that CST. The primary entry point for production use is
 //! [`parse_source_file`], which accepts an [`Arc<SourceFile>`][miden_debug_types::SourceFile] and
 //! retains source/span information for both diagnostics and downstream lowering.
+#![no_std]
+
+#[cfg(any(test, feature = "std"))]
+#[cfg_attr(test, macro_use)]
+extern crate std;
+
+#[macro_use]
+extern crate alloc;
 
 pub mod ast;
 pub mod lexer;
