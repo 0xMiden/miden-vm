@@ -547,6 +547,49 @@ end
 }
 
 #[test]
+fn cst_backend_matches_legacy_empty_else_block() {
+    let source = test_source_file(
+        "\
+begin
+    if.true
+        add
+    else
+    end
+end
+",
+    );
+
+    let legacy = parse_forms_with_backend(source.clone(), ParserBackend::Legacy)
+        .expect("legacy parser should accept an empty else block");
+    let cst = parse_forms_with_backend(source, ParserBackend::Cst)
+        .expect("cst backend should accept an empty else block");
+
+    assert_eq!(cst, legacy);
+}
+
+#[test]
+fn cst_backend_matches_legacy_if_false_with_else() {
+    let source = test_source_file(
+        "\
+begin
+    if.false
+        add
+    else
+        mul
+    end
+end
+",
+    );
+
+    let legacy = parse_forms_with_backend(source.clone(), ParserBackend::Legacy)
+        .expect("legacy parser should accept if.false with else");
+    let cst = parse_forms_with_backend(source, ParserBackend::Cst)
+        .expect("cst backend should accept if.false with else");
+
+    assert_eq!(cst, legacy);
+}
+
+#[test]
 fn cst_backend_matches_legacy_primitive_instruction_blocks() {
     let source = test_source_file(
         "\

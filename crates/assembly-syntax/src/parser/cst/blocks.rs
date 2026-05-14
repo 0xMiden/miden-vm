@@ -102,12 +102,10 @@ fn lower_if_op(context: &mut LoweringContext<'_>, op: &CstIfOp) -> Result<ast::O
     let else_blk = match else_node {
         Some(else_node) => {
             if !else_has_ops {
-                return Err(ParsingError::InvalidSyntax {
-                    span: context.parse().span_for_node(else_node.syntax()),
-                    message: "expected a non-empty `else` block".to_string(),
-                });
+                nop_block(span)
+            } else {
+                lower_block(context, &else_node)?
             }
-            lower_block(context, &else_node)?
         },
         None => nop_block(span),
     };
