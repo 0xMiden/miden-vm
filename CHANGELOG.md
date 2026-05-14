@@ -10,6 +10,7 @@
 #### Fixes
 
 - Preserved `AssemblyOp` source mappings when merging `MastForest`s, preventing source-location loss after node deduplication.
+- Replaced `bincode` proof serialization with `wincode` and bounded verifier-side STARK proof deserialization to 64 MiB ([#3148](https://github.com/0xMiden/miden-vm/pull/3148)).
 
 ## v0.23.0 (2026-05-07)
 
