@@ -1298,6 +1298,7 @@ dependencies = [
  "lalrpop",
  "lalrpop-util",
  "log",
+ "miden-assembly-syntax-cst",
  "miden-core",
  "miden-debug-types",
  "miden-test-serde-macros",
@@ -1312,6 +1313,17 @@ dependencies = [
  "serde",
  "serde_json",
  "smallvec",
+ "thiserror",
+]
+
+[[package]]
+name = "miden-assembly-syntax-cst"
+version = "0.24.0"
+dependencies = [
+ "miden-debug-types",
+ "miden-rowan",
+ "miden-utils-diagnostics",
+ "pretty_assertions",
  "thiserror",
 ]
 
@@ -1458,6 +1470,19 @@ dependencies = [
  "serde",
  "subtle",
  "thiserror",
+]
+
+[[package]]
+name = "miden-format"
+version = "0.24.0"
+dependencies = [
+ "clap",
+ "miden-assembly-syntax-cst",
+ "miden-debug-types",
+ "serde",
+ "thiserror",
+ "toml",
+ "walkdir",
 ]
 
 [[package]]
@@ -1647,6 +1672,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "miden-rowan"
+version = "0.16.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c13695bf99aabaa21d6572b807c66bb26251aa3d9b75e828b3c99b97a3b1ce7e"
+dependencies = [
+ "hashbrown 0.17.0",
+ "rustc-hash",
+]
+
+[[package]]
 name = "miden-serde-utils"
 version = "0.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1720,7 +1755,6 @@ dependencies = [
 name = "miden-utils-diagnostics"
 version = "0.24.0"
 dependencies = [
- "miden-crypto",
  "miden-debug-types",
  "miden-miette",
  "tracing",

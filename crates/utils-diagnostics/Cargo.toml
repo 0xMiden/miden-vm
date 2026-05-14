@@ -16,7 +16,7 @@ exclude.workspace = true
 
 [features]
 default = ["std"]
-std = ["miette/fancy-no-syscall", "miette/std", "miden-crypto/std", "miden-debug-types/std"]
+std = ["miette/fancy-no-syscall", "miette/std", "miden-debug-types/std"]
 
 [dependencies]
 miden-debug-types.workspace = true
@@ -24,5 +24,4 @@ miette = { workspace = true, features = [
     "fancy-no-syscall",
     "derive",
 ] }
-miden-crypto.workspace = true
 tracing.workspace = true
