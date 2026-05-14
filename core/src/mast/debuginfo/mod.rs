@@ -272,6 +272,12 @@ impl DebugInfo {
         self.debug_vars.get(debug_var_id)
     }
 
+    /// Returns all `(op_idx, DebugVarId)` pairs for the given node, or an empty vec if the
+    /// node has no debug vars.
+    pub fn debug_vars_for_node(&self, node_id: MastNodeId) -> Vec<(usize, DebugVarId)> {
+        self.op_debug_var_storage.debug_vars_for_node(node_id)
+    }
+
     /// Returns debug variable IDs for a specific operation within a node.
     pub fn debug_vars_for_operation(
         &self,
@@ -362,6 +368,11 @@ impl DebugInfo {
     pub fn first_asm_op_for_node(&self, node_id: MastNodeId) -> Option<&AssemblyOp> {
         let asm_op_id = self.asm_op_storage.first_asm_op_for_node(node_id)?;
         self.asm_ops.get(asm_op_id)
+    }
+
+    /// Returns all `(op_idx, AsmOpId)` pairs for the given node.
+    pub fn asm_ops_for_node(&self, node_id: MastNodeId) -> Vec<(usize, AsmOpId)> {
+        self.asm_op_storage.asm_ops_for_node(node_id)
     }
 
     // ASSEMBLY OP MUTATORS
