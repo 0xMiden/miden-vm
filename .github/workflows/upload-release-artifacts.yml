@@ -1,20 +1,65 @@
-name: Upload pre-compiled release artifacts
+name: Stage pre-compiled release artifacts (manual)
 
 on:
-  release:
-    types: [created]
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: 'Commit SHA to build from'
+        required: true
+        type: string
+      tag:
+        description: 'Tag name for the draft release (e.g. v0.12.0)'
+        required: true
+        type: string
 
 permissions:
   contents: read
 
 jobs:
-  # Upload the pre-compiled artifacts (miden-vm CLI and core.masp) to the
-  # GitHub release page while it is still a draft.
-  # **Releases must be created as drafts** so assets can be attached
-  # before publishing (immutable releases).
-  # Used by midenup to speed up installs.
+  # Create (or reuse) a draft release at the given SHA. The git tag itself is
+  # only created when the draft is published.
+  create-draft:
+    name: create draft release
+    if: ${{ github.repository_owner == '0xMiden' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Create or validate draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          RELEASE_SHA: ${{ inputs.sha }}
+        run: |
+          set -e
+          is_draft=$( { gh release view "${RELEASE_TAG}" --json isDraft | jq -r .isDraft; } 2>&1 )
+          echo "Draft existance query: ${is_draft}"
+          case "${is_draft}" in
+            true)
+              echo "Reusing existing draft ${RELEASE_TAG}."
+              ;;
+            false)
+              echo "Release ${RELEASE_TAG} already exists and is published. Refusing to touch it." >&2
+              exit 1
+              ;;
+            "release not found")
+              gh release create "${RELEASE_TAG}" \
+                --draft \
+                --target "${RELEASE_SHA}" \
+                --title "v${RELEASE_TAG}"
+              ;;
+            *)
+              echo "Unexpected output from gh release view: ${is_draft}" >&2
+              exit 1
+              ;;
+          esac
+
+  # Build and attach pre-compiled artifacts (miden-vm CLI and core.masp) to
+  # the draft release. Re-runs are safe: uploads use --clobber.
   upload-artifacts:
     name: upload pre-built miden-vm executable artifacts
+    needs: create-draft
     if: ${{ github.repository_owner == '0xMiden' }}
     environment: release  # Optional: for enhanced security
     permissions:
@@ -36,7 +81,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
-          ref: ${{ github.event.release.tag_name }}
+          ref: ${{ inputs.sha }}
           persist-credentials: false
       - uses: ./.github/actions/cleanup-runner
       - name: Install Rust
@@ -58,7 +103,7 @@ jobs:
           subject-path: miden-vm-${{ matrix.target }}
       - name: Upload
         env:
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_TAG: ${{ inputs.tag }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -e
@@ -84,7 +129,7 @@ jobs:
       - name: Upload core.masp
         if: matrix.os == 'ubuntu-latest' && matrix.target == 'x86_64-unknown-linux-gnu'
         env:
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_TAG: ${{ inputs.tag }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -e
