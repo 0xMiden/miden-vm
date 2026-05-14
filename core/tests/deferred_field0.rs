@@ -37,10 +37,7 @@ fn end_to_end_register_evaluate_assert_extract() {
     assert_eq!(canonical, leaf(35));
 
     state
-        .register(
-            &schema,
-            Node::new(Field0Handler::ASSERT_EQ, Payload::binary_op(mul, expected)),
-        )
+        .register(&schema, Node::new(Field0Handler::ASSERT_EQ, Payload::binary_op(mul, expected)))
         .unwrap();
 
     assert_eq!(state.assertions().len(), 1);
@@ -57,10 +54,8 @@ fn assertion_mismatch_surfaces_as_error() {
     let mut state = DeferredState::new();
     let a = state.register(&schema, leaf(7)).unwrap();
     let b = state.register(&schema, leaf(8)).unwrap();
-    let err = state.register(
-        &schema,
-        Node::new(Field0Handler::ASSERT_EQ, Payload::binary_op(a, b)),
-    );
+    let err =
+        state.register(&schema, Node::new(Field0Handler::ASSERT_EQ, Payload::binary_op(a, b)));
     assert!(matches!(err, Err(SchemaError::AssertionFailed)));
 }
 

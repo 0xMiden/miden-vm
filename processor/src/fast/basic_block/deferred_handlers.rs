@@ -28,9 +28,7 @@ fn read_deferred_node(processor: &FastProcessor) -> Node {
     let hi = processor.stack_get_word(DEFERRED_PAYLOAD_HI_OFFSET);
     let tag_word = processor.stack_get_word(DEFERRED_TAG_OFFSET);
     let tag: Tag = [tag_word[0], tag_word[1], tag_word[2], tag_word[3]];
-    let payload = Payload::new([
-        lo[0], lo[1], lo[2], lo[3], hi[0], hi[1], hi[2], hi[3],
-    ]);
+    let payload = Payload::new([lo[0], lo[1], lo[2], lo[3], hi[0], hi[1], hi[2], hi[3]]);
     Node::new(tag, payload)
 }
 

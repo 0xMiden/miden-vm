@@ -8,14 +8,13 @@ use core::{cmp::min, ops::ControlFlow};
 use miden_air::{Felt, trace::RowIndex};
 use miden_core::{
     EMPTY_WORD, WORD_SIZE, Word, ZERO,
+    deferred::{DeferredState, NoopSchema, Schema},
     mast::{MastForest, MastNodeExt, MastNodeId},
     operations::Decorator,
     precompile::PrecompileTranscript,
     program::{MIN_STACK_DEPTH, Program, StackInputs, StackOutputs},
     utils::range,
 };
-
-use miden_core::deferred::{DeferredState, NoopSchema, Schema};
 
 use crate::{
     AdviceInputs, AdviceProvider, BaseHost, ContextId, ExecutionError, ExecutionOptions,
@@ -357,12 +356,9 @@ impl FastProcessor {
     /// helper exists so the deferred system-event handlers can borrow both simultaneously without
     /// running into the borrow checker.
     #[inline(always)]
-    pub(crate) fn deferred_view_mut(
-        &mut self,
-    ) -> (&mut DeferredState, &dyn Schema) {
+    pub(crate) fn deferred_view_mut(&mut self) -> (&mut DeferredState, &dyn Schema) {
         (self.advice.deferred_state_mut(), &*self.deferred_schema)
     }
-
 
     /// Returns true if decorators should be executed.
     ///

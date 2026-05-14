@@ -117,8 +117,7 @@ fn deferred_end_to_end_register_eval_assert() {
     let add_digest = add.digest();
     let mul = Node::new(Field0Handler::MUL, Payload::binary_op(add_digest, c_digest));
     let mul_digest = mul.digest();
-    let assertion =
-        Node::new(Field0Handler::ASSERT_EQ, Payload::binary_op(mul_digest, d_digest));
+    let assertion = Node::new(Field0Handler::ASSERT_EQ, Payload::binary_op(mul_digest, d_digest));
 
     // Build the program.
     let mut src = String::from("begin\n");
@@ -200,10 +199,7 @@ fn deferred_evaluate_pushes_canonical_form_to_advice() {
     let ctx = 0u32.into();
     let mut mem = [Felt::from_u32(0); 12];
     for i in 0..12u32 {
-        mem[i as usize] = output
-            .memory
-            .read_element(ctx, Felt::from_u32(i))
-            .expect("memory read");
+        mem[i as usize] = output.memory.read_element(ctx, Felt::from_u32(i)).expect("memory read");
     }
     let canonical_tag = [mem[8], mem[9], mem[10], mem[11]];
     assert_eq!(canonical_tag, Field0Handler::LEAF, "evaluate returns canonical leaf tag");
@@ -220,8 +216,7 @@ fn deferred_evaluate_pushes_canonical_form_to_advice() {
 fn deferred_assert_eq_mismatch_fails_execution() {
     let a = field0_leaf(7);
     let b = field0_leaf(8);
-    let mismatch =
-        Node::new(Field0Handler::ASSERT_EQ, Payload::binary_op(a.digest(), b.digest()));
+    let mismatch = Node::new(Field0Handler::ASSERT_EQ, Payload::binary_op(a.digest(), b.digest()));
 
     let mut src = String::from("begin\n");
     emit_register(&mut src, a);
@@ -273,8 +268,9 @@ fn legacy_event_handler_still_works_with_deferred_infrastructure() {
 
     let program = Assembler::default().assemble_program(&src).expect("program must assemble");
 
-    let output =
-        build_processor().execute_sync(&program, &mut host).expect("execution must succeed");
+    let output = build_processor()
+        .execute_sync(&program, &mut host)
+        .expect("execution must succeed");
 
     assert_eq!(counter.load(std::sync::atomic::Ordering::SeqCst), 1);
     assert_eq!(output.advice.deferred_state().nodes().len(), 1);

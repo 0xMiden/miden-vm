@@ -79,11 +79,7 @@ impl Schema for Field0Handler {
         }
     }
 
-    fn reduce(
-        &self,
-        node: Node,
-        children: &mut dyn ChildResolver,
-    ) -> Result<Node, SchemaError> {
+    fn reduce(&self, node: Node, children: &mut dyn ChildResolver) -> Result<Node, SchemaError> {
         if node.tag == Self::LEAF {
             return Ok(node);
         }
@@ -165,7 +161,9 @@ mod tests {
     #[test]
     fn add_small_values() {
         let h = Field0Handler;
-        let out = h.eval_op(Field0Handler::ADD, leaf_from_low_u64(3), leaf_from_low_u64(5)).unwrap();
+        let out = h
+            .eval_op(Field0Handler::ADD, leaf_from_low_u64(3), leaf_from_low_u64(5))
+            .unwrap();
         assert_eq!(out.tag, Field0Handler::LEAF);
         assert_eq!(out, leaf_from_low_u64(8));
     }
@@ -197,7 +195,9 @@ mod tests {
     #[test]
     fn mul_small_values() {
         let h = Field0Handler;
-        let out = h.eval_op(Field0Handler::MUL, leaf_from_low_u64(6), leaf_from_low_u64(7)).unwrap();
+        let out = h
+            .eval_op(Field0Handler::MUL, leaf_from_low_u64(6), leaf_from_low_u64(7))
+            .unwrap();
         assert_eq!(out, leaf_from_low_u64(42));
     }
 

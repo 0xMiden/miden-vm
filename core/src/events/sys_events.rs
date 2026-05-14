@@ -320,7 +320,8 @@ pub enum SystemEvent {
     /// resulting 12 felts (`payload || tag`) onto the advice stack.
     ///
     /// For expression nodes the result is the canonical reduced form; for assertion nodes the
-    /// schema verifies the assertion (returning [`SchemaError::AssertionFailed`] on mismatch)
+    /// schema verifies the assertion (returning [`crate::deferred::SchemaError::AssertionFailed`]
+    /// on mismatch)
     /// and the result is the input node itself, so the advice-stack contract is uniform.
     /// Children referenced in the payload must already be registered in the DAG. The state is
     /// not mutated.

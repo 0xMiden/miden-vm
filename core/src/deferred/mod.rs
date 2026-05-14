@@ -21,11 +21,10 @@ pub use state::DeferredState;
 // part of the production surface.
 #[cfg(any(test, feature = "testing"))]
 mod field0;
-#[cfg(any(test, feature = "testing"))]
-pub use field0::Field0Handler;
-
 use alloc::vec::Vec;
 
+#[cfg(any(test, feature = "testing"))]
+pub use field0::Field0Handler;
 use miden_crypto::{ZERO, hash::poseidon2::Poseidon2};
 
 use crate::{Felt, Word};
@@ -109,18 +108,18 @@ impl Node {
 /// External witness consumed by the deferred-DAG verifier.
 ///
 /// Contains:
-/// - `nodes`: every expression-kind node the verifier needs to re-check the assertions, in
-///   digest order. This includes both the nodes the program explicitly registered **and** every
-///   canonical intermediate produced during `DeferredState::evaluate` (e.g. `(a+b) → leaf`).
-///   The verifier does not re-execute the DAG — it checks each node is locally consistent
-///   against its neighbors (an `ADD` op's payload digests, plus the canonical-leaf digest its
-///   reduction names, must satisfy `eval_op`). Missing intermediates would leave the witness
-///   referencing digests no node defines, so the prover must intern the whole reduction proof,
-///   not just the final canonical answer.
+/// - `nodes`: every expression-kind node the verifier needs to re-check the assertions, in digest
+///   order. This includes both the nodes the program explicitly registered **and** every canonical
+///   intermediate produced during `DeferredState::evaluate` (e.g. `(a+b) → leaf`). The verifier
+///   does not re-execute the DAG — it checks each node is locally consistent against its neighbors
+///   (an `ADD` op's payload digests, plus the canonical-leaf digest its reduction names, must
+///   satisfy `eval_op`). Missing intermediates would leave the witness referencing digests no node
+///   defines, so the prover must intern the whole reduction proof, not just the final canonical
+///   answer.
 /// - `assertions`: every assertion-kind node, in registration order.
 /// - `transcript`: a single rolling Poseidon2 digest over the assertion stream, mirroring
-///   [`crate::precompile::PrecompileTranscript`]. The verifier re-folds this from `assertions`
-///   to check that the witness is complete and ordered.
+///   [`crate::precompile::PrecompileTranscript`]. The verifier re-folds this from `assertions` to
+///   check that the witness is complete and ordered.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DeferredWitness {
     pub nodes: Vec<(Digest, Node)>,
@@ -199,9 +198,6 @@ mod tests {
 
     #[test]
     fn payload_changes_digest() {
-        assert_ne!(
-            Node::new(TAG_A, payload(0)).digest(),
-            Node::new(TAG_A, payload(1)).digest()
-        );
+        assert_ne!(Node::new(TAG_A, payload(0)).digest(), Node::new(TAG_A, payload(1)).digest());
     }
 }

@@ -14,8 +14,7 @@ use super::{
 };
 use crate::{
     BaseHost, DebugError, DebugHandler, ExecutionError, MastForestStore, MemMastForestStore,
-    ProcessorState, SyncHost, TraceError,
-    advice::AdviceMutation,
+    ProcessorState, SyncHost, TraceError, advice::AdviceMutation,
 };
 
 // DEFAULT HOST IMPLEMENTATION

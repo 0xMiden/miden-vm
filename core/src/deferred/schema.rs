@@ -85,13 +85,13 @@ pub trait ChildResolver {
 /// Two methods own the entire semantic surface:
 ///
 /// - [`is_valid`](Self::is_valid) classifies a node at register time. `None` rejects it.
-/// - [`reduce`](Self::reduce) reduces a node to its canonical form, using a [`ChildResolver`]
-///   to recursively reduce each child digest it references.
+/// - [`reduce`](Self::reduce) reduces a node to its canonical form, using a [`ChildResolver`] to
+///   recursively reduce each child digest it references.
 ///
 /// `reduce` takes `&self` only — the schema is stateless from the driver's perspective. Any
-/// per-schema memoization that ever becomes necessary should live in [`DeferredState`] (or
-/// the verifier's witness-side equivalent) as a `digest → canonical` cache, since the speedup
-/// is keyed on input digests and benefits any schema.
+/// per-schema memoization that ever becomes necessary should live in [`super::DeferredState`]
+/// (or the verifier's witness-side equivalent) as a `digest → canonical` cache, since the
+/// speedup is keyed on input digests and benefits any schema.
 pub trait Schema: core::fmt::Debug + Send {
     /// Classifies the node at register time.
     ///
@@ -108,11 +108,7 @@ pub trait Schema: core::fmt::Debug + Send {
     /// For expression nodes the return value is the canonical form. For assertion nodes the
     /// schema compares the resolved operands and returns either `node` itself (on success) or
     /// [`SchemaError::AssertionFailed`] (on mismatch).
-    fn reduce(
-        &self,
-        node: Node,
-        children: &mut dyn ChildResolver,
-    ) -> Result<Node, SchemaError>;
+    fn reduce(&self, node: Node, children: &mut dyn ChildResolver) -> Result<Node, SchemaError>;
 }
 
 // NOOP SCHEMA
@@ -120,8 +116,8 @@ pub trait Schema: core::fmt::Debug + Send {
 
 /// A schema that claims no tags.
 ///
-/// Installed by default on every [`crate::FastProcessor`]; any deferred event executed without
-/// first installing a real schema surfaces [`SchemaError::NoSchemaInstalled`] (via
+/// Installed by default on every `miden_processor::FastProcessor`; any deferred event executed
+/// without first installing a real schema surfaces [`SchemaError::NoSchemaInstalled`] (via
 /// `is_valid` returning `None`).
 #[derive(Debug, Default, Clone, Copy)]
 pub struct NoopSchema;
@@ -131,11 +127,7 @@ impl Schema for NoopSchema {
         None
     }
 
-    fn reduce(
-        &self,
-        _node: Node,
-        _children: &mut dyn ChildResolver,
-    ) -> Result<Node, SchemaError> {
+    fn reduce(&self, _node: Node, _children: &mut dyn ChildResolver) -> Result<Node, SchemaError> {
         Err(SchemaError::NoSchemaInstalled)
     }
 }
@@ -143,7 +135,10 @@ impl Schema for NoopSchema {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Felt, deferred::{Payload, Tag}};
+    use crate::{
+        Felt,
+        deferred::{Payload, Tag},
+    };
 
     const TEST_TAG: Tag = [
         Felt::new_unchecked(7),

@@ -1,22 +1,19 @@
 use alloc::{collections::BTreeMap, vec::Vec};
 
+use super::{ChildResolver, DeferredWitness, Digest, Node, NodeType, Schema, SchemaError};
 use crate::crypto::hash::Poseidon2;
-
-use super::{
-    ChildResolver, DeferredWitness, Digest, Node, NodeType, Schema, SchemaError,
-};
 
 /// In-memory deferred-DAG state owned by the host.
 ///
 /// Three pieces of state:
 /// - `nodes`: expression nodes content-addressed by their Poseidon2 digest. Re-inserting an
 ///   identical node is a no-op; inserting a different node at the same digest surfaces as
-///   [`DeferredError::ConflictingNode`].
+///   [`super::DeferredError::ConflictingNode`].
 /// - `assertions`: assertion nodes in registration order. The schema classifies a node as an
 ///   assertion via `is_valid` returning `Some(NodeType::Assertion)`.
-/// - `transcript`: a single rolling Poseidon2 digest folded over each assertion's digest, in
-///   order. Mirrors [`miden_core::precompile::PrecompileTranscript`]. The verifier re-folds it
-///   from the witness assertions to bind their content and order.
+/// - `transcript`: a single rolling Poseidon2 digest folded over each assertion's digest, in order.
+///   Mirrors [`crate::precompile::PrecompileTranscript`]. The verifier re-folds it from the witness
+///   assertions to bind their content and order.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct DeferredState {
     nodes: BTreeMap<Digest, Node>,
@@ -69,15 +66,11 @@ impl DeferredState {
     /// - `is_valid(node) == None` → [`SchemaError::InvalidNode`].
     /// - `Some(NodeType::Expression)` → inserts the node into the DAG and returns its digest.
     ///   Re-registering the same digest is silently idempotent.
-    /// - `Some(NodeType::Assertion)` → appends the node to the assertion list, folds it into
-    ///   the running transcript, then drives a depth-first reduction (see [`Self::evaluate`])
-    ///   to verify the assertion. A schema-reported `AssertionFailed` propagates as-is; the
-    ///   transcript fold is committed regardless.
-    pub fn register(
-        &mut self,
-        schema: &dyn Schema,
-        node: Node,
-    ) -> Result<Digest, SchemaError> {
+    /// - `Some(NodeType::Assertion)` → appends the node to the assertion list, folds it into the
+    ///   running transcript, then drives a depth-first reduction (see [`Self::evaluate`]) to verify
+    ///   the assertion. A schema-reported `AssertionFailed` propagates as-is; the transcript fold
+    ///   is committed regardless.
+    pub fn register(&mut self, schema: &dyn Schema, node: Node) -> Result<Digest, SchemaError> {
         let digest = node.digest();
         match schema.is_valid(&node) {
             None => Err(SchemaError::InvalidNode),
@@ -98,9 +91,9 @@ impl DeferredState {
     ///
     /// Accepts either classification:
     /// - `Expression` → reduces to canonical form.
-    /// - `Assertion`  → verifies the assertion and returns the input node back; a mismatch
-    ///   surfaces as [`SchemaError::AssertionFailed`]. The advice-stack contract is uniform —
-    ///   either way the caller gets 12 felts back, which MASM can hash to recover the digest.
+    /// - `Assertion`  → verifies the assertion and returns the input node back; a mismatch surfaces
+    ///   as [`SchemaError::AssertionFailed`]. The advice-stack contract is uniform — either way the
+    ///   caller gets 12 felts back, which MASM can hash to recover the digest.
     ///
     /// Children referenced in the payload must already be registered in the DAG. The returned
     /// `Node` is what the caller pushes onto the advice stack via the `deferred_evaluate`
@@ -111,11 +104,7 @@ impl DeferredState {
     /// `self.nodes`. This is required for the resulting [`DeferredWitness`] to be checkable:
     /// the verifier checks neighbors against each other rather than re-executing the DAG, so
     /// the witness must include the whole reduction proof, not just the answer.
-    pub fn evaluate(
-        &mut self,
-        schema: &dyn Schema,
-        node: Node,
-    ) -> Result<Node, SchemaError> {
+    pub fn evaluate(&mut self, schema: &dyn Schema, node: Node) -> Result<Node, SchemaError> {
         if schema.is_valid(&node).is_none() {
             return Err(SchemaError::InvalidNode);
         }
@@ -228,12 +217,8 @@ mod tests {
         let mut state = DeferredState::new();
         let schema = Field0Handler;
         // Field0 prefix + unknown op-suffix: schema returns None.
-        let bad_tag: Tag = [
-            Field0Handler::LEAF[0],
-            Field0Handler::LEAF[1],
-            Felt::from_u32(99),
-            ZERO,
-        ];
+        let bad_tag: Tag =
+            [Field0Handler::LEAF[0], Field0Handler::LEAF[1], Felt::from_u32(99), ZERO];
         let bad = Node::new(bad_tag, Payload::new([Felt::from_u32(0); 8]));
         let err = state.register(&schema, bad);
         assert!(matches!(err, Err(SchemaError::InvalidNode)));
@@ -313,10 +298,8 @@ mod tests {
             .register(&schema, Node::new(Field0Handler::ADD, Payload::binary_op(a, b)))
             .unwrap();
 
-        let err = state.register(
-            &schema,
-            Node::new(Field0Handler::ASSERT_EQ, Payload::binary_op(add, wrong)),
-        );
+        let err = state
+            .register(&schema, Node::new(Field0Handler::ASSERT_EQ, Payload::binary_op(add, wrong)));
         assert!(matches!(err, Err(SchemaError::AssertionFailed)));
         // The assertion is still recorded (transcript folds eagerly; the mismatch is the only
         // observable consequence at this cycle).
