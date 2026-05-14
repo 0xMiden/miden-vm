@@ -195,4 +195,68 @@ end
         assert_eq!(add_u32.outputs, vec![InferredType::U32]);
         assert_eq!(add_u32.output_input_map, vec![None]);
     }
+
+    #[test]
+    fn type_summaries_propagate_requirements_through_local_slots() {
+        let summaries = summaries_for_source(
+            "local_slot_requirements",
+            "\
+@locals(1)
+pub proc local_required_by_u32(x: felt) -> felt
+    loc_store.0
+    loc_load.0
+    push.1
+    u32wrapping_add
+end
+",
+        );
+
+        let summary = summary_by_name(&summaries, "local_required_by_u32");
+        assert_eq!(summary.inputs, vec![TypeRequirement::U32]);
+        assert_eq!(summary.outputs, vec![InferredType::U32]);
+        assert_eq!(summary.output_input_map, vec![None]);
+    }
+
+    #[test]
+    fn type_summaries_propagate_requirements_through_memory_slots() {
+        let summaries = summaries_for_source(
+            "memory_slot_requirements",
+            "\
+pub proc memory_required_by_u32(x: felt) -> felt
+    push.0
+    mem_store
+    push.0
+    mem_load
+    push.1
+    u32wrapping_add
+end
+",
+        );
+
+        let summary = summary_by_name(&summaries, "memory_required_by_u32");
+        assert_eq!(summary.inputs, vec![TypeRequirement::U32]);
+        assert_eq!(summary.outputs, vec![InferredType::U32]);
+        assert_eq!(summary.output_input_map, vec![None]);
+    }
+
+    #[test]
+    fn type_summaries_propagate_requirements_through_selectors() {
+        let summaries = summaries_for_source(
+            "selector_requirements",
+            "\
+pub proc selector_required_by_u32(x: felt, flag: felt) -> felt
+    push.1
+    swap.1
+    cdrop
+    push.1
+    u32wrapping_add
+end
+",
+        );
+
+        let summary = summary_by_name(&summaries, "selector_required_by_u32");
+        assert_eq!(summary.inputs, vec![TypeRequirement::Bool, TypeRequirement::U32]);
+        assert_eq!(summary.outputs, vec![InferredType::U32]);
+        assert_eq!(summary.output_input_map, vec![None]);
+    }
 }
