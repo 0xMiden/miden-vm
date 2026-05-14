@@ -13,7 +13,7 @@ use super::{
     stack::{SlotId, StackEntry},
 };
 use crate::{
-    semantics::{StackFamily, stack_family},
+    semantics::{StackFamily, StackFamilyMovement, stack_family},
     signature::{SignatureMap, StackEffect},
     symbol::resolution::SymbolResolver,
 };
@@ -788,11 +788,19 @@ pub(super) fn simulate_inst_on_repeat_stack<S: RepeatSlotSimulator>(
     sigs: &SignatureMap,
 ) -> LiftingResult<()> {
     let operation = inst.to_string();
-    match stack_family(inst) {
-        Some(StackFamily::Swap(depth)) => stack.swap(depth, op_span, operation)?,
-        Some(StackFamily::SwapWord(index)) => stack.swapw(index, op_span, operation)?,
-        Some(StackFamily::MovUp(depth)) => stack.movup(depth, op_span, operation)?,
-        Some(StackFamily::MovDown(depth)) => stack.movdn(depth, op_span, operation)?,
+    match stack_family(inst).map(StackFamily::movement) {
+        Some(StackFamilyMovement::Swap { index, width: 1 }) => {
+            stack.swap(index, op_span, operation)?;
+        },
+        Some(StackFamilyMovement::Swap { index, width: 4 }) => {
+            stack.swapw(index, op_span, operation)?;
+        },
+        Some(StackFamilyMovement::MovUp { index, width: 1 }) => {
+            stack.movup(index, op_span, operation)?;
+        },
+        Some(StackFamilyMovement::MovDown { index, width: 1 }) => {
+            stack.movdn(index, op_span, operation)?;
+        },
         _ if matches!(inst, Instruction::Reversew) => stack.reversew(op_span, operation)?,
         _ => {
             let effect = inst::effect_for_inst(inst, op_span, resolver, sigs)?;
