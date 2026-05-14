@@ -210,6 +210,16 @@ pub(crate) enum StackFamily {
     MovDownWord(usize),
 }
 
+/// Movement intent for a repetitive stack-operation family.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum StackFamilyMovement {
+    Dup { index: usize, width: usize },
+    Swap { index: usize, width: usize },
+    SwapDoubleWord,
+    MovUp { index: usize, width: usize },
+    MovDown { index: usize, width: usize },
+}
+
 /// Stack effect metadata for a repetitive stack-operation family.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct StackFamilyEffect {
@@ -219,6 +229,20 @@ pub(crate) struct StackFamilyEffect {
 }
 
 impl StackFamily {
+    pub(crate) const fn movement(self) -> StackFamilyMovement {
+        match self {
+            StackFamily::Dup(index) => StackFamilyMovement::Dup { index, width: 1 },
+            StackFamily::DupWord(index) => StackFamilyMovement::Dup { index, width: 4 },
+            StackFamily::Swap(index) => StackFamilyMovement::Swap { index, width: 1 },
+            StackFamily::SwapWord(index) => StackFamilyMovement::Swap { index, width: 4 },
+            StackFamily::SwapDoubleWord => StackFamilyMovement::SwapDoubleWord,
+            StackFamily::MovUp(index) => StackFamilyMovement::MovUp { index, width: 1 },
+            StackFamily::MovUpWord(index) => StackFamilyMovement::MovUp { index, width: 4 },
+            StackFamily::MovDown(index) => StackFamilyMovement::MovDown { index, width: 1 },
+            StackFamily::MovDownWord(index) => StackFamilyMovement::MovDown { index, width: 4 },
+        }
+    }
+
     pub(crate) const fn effect(self) -> StackFamilyEffect {
         match self {
             StackFamily::Dup(index) => StackFamilyEffect {
@@ -350,9 +374,9 @@ mod tests {
 
     use super::{
         IntrinsicAdviceTransferShape, IntrinsicArgRequirements, IntrinsicOutputTypeShape,
-        intrinsic_advice_transfer_shape, intrinsic_arg_requirements, intrinsic_asserts_u32_args,
-        intrinsic_base_name, intrinsic_memory_address_arg_index, intrinsic_merkle_root_arg_range,
-        intrinsic_nonzero_arg_index, intrinsic_output_type_shape,
+        StackFamilyMovement, intrinsic_advice_transfer_shape, intrinsic_arg_requirements,
+        intrinsic_asserts_u32_args, intrinsic_base_name, intrinsic_memory_address_arg_index,
+        intrinsic_merkle_root_arg_range, intrinsic_nonzero_arg_index, intrinsic_output_type_shape,
         intrinsic_positional_u32_arg_range, intrinsic_requires_u32_precondition, stack_family,
     };
 
@@ -546,18 +570,34 @@ mod tests {
 
         let effect = stack_family(&Instruction::DupW2).expect("dupw classified").effect();
         assert_eq!((effect.pops, effect.pushes, effect.required_depth), (0, 4, 12));
+        assert_eq!(
+            stack_family(&Instruction::DupW2).expect("dupw classified").movement(),
+            StackFamilyMovement::Dup { index: 2, width: 4 }
+        );
 
         let effect = stack_family(&Instruction::Swap4).expect("swap classified").effect();
         assert_eq!((effect.pops, effect.pushes, effect.required_depth), (5, 5, 5));
+        assert_eq!(
+            stack_family(&Instruction::Swap4).expect("swap classified").movement(),
+            StackFamilyMovement::Swap { index: 4, width: 1 }
+        );
 
         let effect = stack_family(&Instruction::MovUpW3).expect("movupw classified").effect();
         assert_eq!((effect.pops, effect.pushes, effect.required_depth), (16, 16, 16));
+        assert_eq!(
+            stack_family(&Instruction::MovUpW3).expect("movupw classified").movement(),
+            StackFamilyMovement::MovUp { index: 3, width: 4 }
+        );
 
         let effect = stack_family(&Instruction::MovDn15).expect("movdn classified").effect();
         assert_eq!((effect.pops, effect.pushes, effect.required_depth), (16, 16, 16));
 
         let effect = stack_family(&Instruction::SwapDw).expect("swapdw classified").effect();
         assert_eq!((effect.pops, effect.pushes, effect.required_depth), (16, 16, 16));
+        assert_eq!(
+            stack_family(&Instruction::SwapDw).expect("swapdw classified").movement(),
+            StackFamilyMovement::SwapDoubleWord
+        );
 
         assert!(stack_family(&Instruction::Drop).is_none());
     }
