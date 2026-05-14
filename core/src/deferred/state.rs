@@ -148,9 +148,7 @@ impl DfsResolver<'_> {
             self.state.intern(node);
         }
         let canonical = schema.reduce(node, self)?;
-        if canonical != node
-            && matches!(schema.is_valid(&canonical), Some(NodeType::Expression))
-        {
+        if canonical != node && matches!(schema.is_valid(&canonical), Some(NodeType::Expression)) {
             self.state.intern(canonical);
         }
         Ok(canonical)

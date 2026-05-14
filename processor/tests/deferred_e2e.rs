@@ -218,8 +218,7 @@ fn deferred_evaluate_on_assertion_pushes_nothing_to_advice() {
     // verify successfully but nothing is pushed onto the advice stack — a trailing `adv_push.1`
     // therefore underflows and fails execution.
     let a = field0_leaf(7);
-    let a_eq_a =
-        Node::new(Field0Handler::ASSERT_EQ, Payload::binary_op(a.digest(), a.digest()));
+    let a_eq_a = Node::new(Field0Handler::ASSERT_EQ, Payload::binary_op(a.digest(), a.digest()));
 
     let mut src = String::from("begin\n");
     emit_register(&mut src, a);
