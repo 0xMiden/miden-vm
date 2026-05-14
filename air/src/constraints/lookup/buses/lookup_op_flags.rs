@@ -591,7 +591,7 @@ mod tests {
         }
     }
 
-    fn flags_for_opcode(opcode: usize) -> LookupOpFlags<miden_core::Felt> {
+    fn flags_for_opcode(opcode: usize) -> LookupOpFlags<Felt> {
         let row = generate_test_row(opcode);
         let row_next = generate_test_row(0);
         LookupOpFlags::from_main_cols(&row.decoder, &row.stack, &row_next.decoder)

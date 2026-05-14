@@ -135,7 +135,7 @@ pub(super) fn mtree_set(block_builder: &mut BasicBlockBuilder) -> Result<(), Rep
     // stack: [d, i, R_old, V_new, ...]
 
     // stack: [V_old, R_new, ...] (30 cycles)
-    update_mtree(block_builder)
+    Ok(update_mtree(block_builder))
 }
 
 /// Creates a new Merkle tree in the advice provider by combining trees with the specified roots.
@@ -203,7 +203,7 @@ fn read_mtree_node(block_builder: &mut BasicBlockBuilder) {
 /// and perform the mutation on the copied tree.
 ///
 /// This operation takes 30 VM cycles.
-fn update_mtree(block_builder: &mut BasicBlockBuilder) -> Result<(), Report> {
+fn update_mtree(block_builder: &mut BasicBlockBuilder) {
     // stack: [d, i, R_old, V_new, ...]
     // output: [R_new, R_old, V_new, V_old, ...]
 
@@ -276,5 +276,4 @@ fn update_mtree(block_builder: &mut BasicBlockBuilder) -> Result<(), Report> {
     // stack: [V_old, R_new, ...] (25 cycles)
     block_builder.push_ops(ops);
 
-    Ok(())
 }

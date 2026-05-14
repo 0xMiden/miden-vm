@@ -221,7 +221,7 @@ impl Linker {
             self.callgraph.get_or_insert_node(gid);
             match &item {
                 ItemInfo::Procedure(item) => {
-                    self.register_procedure_root(gid, item.digest)?;
+                    self.register_procedure_root(gid, item.digest);
                 },
                 ItemInfo::Constant(_) | ItemInfo::Type(_) => (),
             }
@@ -594,7 +594,7 @@ impl Linker {
                             // calls/symbol refs
                             let proc = proc.borrow();
                             for invoke in proc.invoked() {
-                                log::debug!(target: "linker", "  | recording {} dependency on {}", invoke.kind, &invoke.target);
+                                log::debug!(target: "linker", "  | recording {} dependency on {}", invoke.kind, invoke.target);
 
                                 let context = SymbolResolutionContext {
                                     span: invoke.span(),
@@ -862,7 +862,7 @@ impl Linker {
         &mut self,
         id: GlobalItemIndex,
         procedure_mast_root: Word,
-    ) -> Result<(), LinkerError> {
+    ) {
         use alloc::collections::btree_map::Entry;
         match self.procedures_by_mast_root.entry(procedure_mast_root) {
             Entry::Occupied(ref mut entry) => {
@@ -877,7 +877,6 @@ impl Linker {
             },
         }
 
-        Ok(())
     }
 
     /// Resolve a [Path] to a [ModuleIndex] in this graph

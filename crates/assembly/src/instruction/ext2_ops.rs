@@ -115,7 +115,7 @@ pub fn ext2_neg(block_builder: &mut BasicBlockBuilder) {
 /// assert b  = (1, 0) | (1, 0) is the multiplicative identity of extension field.
 ///
 /// This operation takes 8 VM cycles.
-pub fn ext2_inv(block_builder: &mut BasicBlockBuilder) -> Result<(), Report> {
+pub fn ext2_inv(block_builder: &mut BasicBlockBuilder) {
     block_builder.push_system_event(Ext2Inv);
     #[rustfmt::skip]
     let ops = [
@@ -130,5 +130,4 @@ pub fn ext2_inv(block_builder: &mut BasicBlockBuilder) -> Result<(), Report> {
     ];
     block_builder.push_ops(ops);
 
-    Ok(())
 }
