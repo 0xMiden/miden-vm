@@ -12,8 +12,10 @@ use miden_crypto::stark::{
 
 use super::enforce_main;
 use crate::{
-    MainCols,
-    constraints::op_flags::{OpFlags, generate_test_row},
+    constraints::{
+        columns::CoreCols,
+        op_flags::{OpFlags, generate_test_row},
+    },
     trace::{AUX_TRACE_RAND_CHALLENGES, AUX_TRACE_WIDTH, TRACE_WIDTH},
 };
 
@@ -117,7 +119,7 @@ impl PeriodicAirBuilder for ConstraintEvalBuilder {
 }
 
 /// Sets the u32 helper registers (hasher_state[2..7]) in the decoder.
-fn set_u32_helpers(row: &mut MainCols<Felt>, lo: u32, hi: u32) {
+fn set_u32_helpers(row: &mut CoreCols<Felt>, lo: u32, hi: u32) {
     row.decoder.hasher_state[2] = Felt::new_unchecked(lo as u64 & 0xffff);
     row.decoder.hasher_state[3] = Felt::new_unchecked((lo as u64) >> 16);
     row.decoder.hasher_state[4] = Felt::new_unchecked(hi as u64 & 0xffff);
@@ -126,18 +128,18 @@ fn set_u32_helpers(row: &mut MainCols<Felt>, lo: u32, hi: u32) {
 }
 
 fn eval_stack_arith(
-    local: &MainCols<Felt>,
-    next: &MainCols<Felt>,
+    local: &CoreCols<Felt>,
+    next: &CoreCols<Felt>,
     op_flags: &OpFlags<Felt>,
 ) -> Vec<QuadFelt> {
     let mut builder = ConstraintEvalBuilder::new();
-    enforce_main(&mut builder, local.as_core_cols(), next.as_core_cols(), op_flags);
+    enforce_main(&mut builder, local, next, op_flags);
     builder.evaluations
 }
 
 fn assert_constraints_accept(
-    local: &MainCols<Felt>,
-    next: &MainCols<Felt>,
+    local: &CoreCols<Felt>,
+    next: &CoreCols<Felt>,
     op_flags: &OpFlags<Felt>,
     message: &str,
 ) {
@@ -146,8 +148,8 @@ fn assert_constraints_accept(
 }
 
 fn assert_constraints_reject(
-    local: &MainCols<Felt>,
-    next: &MainCols<Felt>,
+    local: &CoreCols<Felt>,
+    next: &CoreCols<Felt>,
     op_flags: &OpFlags<Felt>,
     message: &str,
 ) {

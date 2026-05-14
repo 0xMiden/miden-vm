@@ -21,8 +21,9 @@
 //! input gate is `chiplet_active.controller`, the ACE row gate is `chiplet_active.ace`, and
 //! the memory row gate is `chiplet_active.memory`. Hasher sub-selectors, hasher state,
 //! `node_index`, and `mrupdate_id` come from the typed
-//! [`local.controller()`](crate::constraints::columns::MainCols::controller) overlay;
-//! memory delta limbs come from [`local.memory()`](crate::constraints::columns::MainCols::memory).
+//! [`local.controller()`](crate::constraints::columns::ChipletCols::controller) overlay;
+//! memory delta limbs come from
+//! [`local.memory()`](crate::constraints::columns::ChipletCols::memory).
 //! `w0` / `w1` are not in the typed `MemoryCols` view (their physical columns live in
 //! `chiplets[18..20]`, past the end of the memory overlay, shared with the ACE chiplet
 //! column space), so they are read directly from the raw chiplet slice.

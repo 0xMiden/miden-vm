@@ -41,7 +41,7 @@ pub mod logup {
 }
 
 use constraints::{
-    columns::{ChipletCols, CoreCols, MainCols},
+    columns::{ChipletCols, CoreCols, NUM_CORE_COLS},
     lookup::{
         chiplet_air::{ChipletLookupAir, ChipletLookupBuilder},
         main_air::{MainLookupAir, MainLookupBuilder},
@@ -385,16 +385,16 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ProcessorAir {
     }
 
     fn eval<AB: MidenAirBuilder>(&self, builder: &mut AB) {
-        // Borrow the row buffer once as `MainCols`, then immediately bridge to the per-AIR
-        // views: `CoreCols` (system + decoder + stack + range) for the Core half, and
-        // `ChipletCols` (chiplets + s_perm) for the Chiplets half.
+        // Borrow the row buffer as the two per-AIR views: `CoreCols` (system + decoder +
+        // stack + range) for the Core half, and `ChipletCols` (chiplets + s_perm + chip_clk)
+        // for the Chiplets half.
         let main = builder.main();
-        let local_main: &MainCols<AB::Var> = (*main.current_slice()).borrow();
-        let next_main: &MainCols<AB::Var> = (*main.next_slice()).borrow();
-        let local_core = local_main.as_core_cols();
-        let next_core = next_main.as_core_cols();
-        let local_chiplet = local_main.as_chiplet_cols();
-        let next_chiplet = next_main.as_chiplet_cols();
+        let local_slice = main.current_slice();
+        let next_slice = main.next_slice();
+        let local_core: &CoreCols<AB::Var> = local_slice[..NUM_CORE_COLS].borrow();
+        let next_core: &CoreCols<AB::Var> = next_slice[..NUM_CORE_COLS].borrow();
+        let local_chiplet: &ChipletCols<AB::Var> = local_slice[NUM_CORE_COLS..].borrow();
+        let next_chiplet: &ChipletCols<AB::Var> = next_slice[NUM_CORE_COLS..].borrow();
 
         // Build chiplet selectors and op flags once, shared by main and bus constraints.
         let selectors = constraints::chiplets::selectors::build_chiplet_selectors(

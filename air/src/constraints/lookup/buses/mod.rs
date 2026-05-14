@@ -30,7 +30,7 @@
 //! prover-side override can replace the polynomial construction with a cheaper boolean fast
 //! path without touching any emitter code. [`ChipletActiveFlags`] itself lives in this
 //! module because it's the pure-compute helper both the default chiplet hook and any
-//! future override want to reach for; it does not depend on either `MainCols` context type.
+//! future override want to reach for; it does not depend on the chiplet bus context type.
 
 use miden_core::field::{Algebra, PrimeCharacteristicRing};
 

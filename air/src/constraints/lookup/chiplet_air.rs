@@ -29,7 +29,8 @@ use super::{
     },
 };
 use crate::{
-    ChipletCols, Felt, MainCols,
+    ChipletCols, Felt,
+    constraints::columns::NUM_CORE_COLS,
     lookup::{LookupAir, LookupBuilder},
 };
 
@@ -142,13 +143,12 @@ where
     }
 
     fn eval(&self, builder: &mut LB) {
-        // Borrow the row buffer as `MainCols` (legacy 72-col aggregator path) and bridge to
-        // `ChipletCols`.
+        // Borrow the trailing chiplet section of the unified row buffer as `ChipletCols`.
         let main = builder.main();
-        let local_main: &MainCols<_> = main.current_slice().borrow();
-        let next_main: &MainCols<_> = main.next_slice().borrow();
-        let local_chiplet = local_main.as_chiplet_cols();
-        let next_chiplet = next_main.as_chiplet_cols();
+        let local_slice = main.current_slice();
+        let next_slice = main.next_slice();
+        let local_chiplet: &ChipletCols<_> = local_slice[NUM_CORE_COLS..].borrow();
+        let next_chiplet: &ChipletCols<_> = next_slice[NUM_CORE_COLS..].borrow();
 
         emit_chiplet_lookup_columns(builder, local_chiplet, next_chiplet);
     }
