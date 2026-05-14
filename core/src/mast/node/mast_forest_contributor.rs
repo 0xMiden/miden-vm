@@ -358,16 +358,39 @@ mod fingerprint_invariant_tests {
 
 #[cfg(test)]
 mod round_trip_tests {
+    use alloc::collections::BTreeMap;
+
     use miden_crypto::Felt;
 
     use crate::{
         Word,
         mast::{
-            BasicBlockNodeBuilder, JoinNodeBuilder, MastForest, MastNode, MastNodeBuilder,
-            MastNodeExt, MastNodeId, node::mast_forest_contributor::MastForestContributor,
+            BasicBlockNodeBuilder, CallNodeBuilder, DecoratorId, JoinNodeBuilder, LoopNodeBuilder,
+            MastForest, MastForestError, MastNode, MastNodeBuilder, MastNodeExt,
+            MastNodeFingerprint, MastNodeId, SplitNodeBuilder,
+            node::mast_forest_contributor::MastForestContributor,
         },
-        operations::Operation,
+        operations::{Decorator, Operation},
     };
+
+    fn test_word(value: u64) -> Word {
+        Word::new([
+            Felt::new_unchecked(value),
+            Felt::new_unchecked(value + 1),
+            Felt::new_unchecked(value + 2),
+            Felt::new_unchecked(value + 3),
+        ])
+    }
+
+    fn add_block(forest: &mut MastForest, operation: Operation) -> MastNodeId {
+        BasicBlockNodeBuilder::new(vec![operation], vec![])
+            .add_to_forest(forest)
+            .expect("basic block should be added to test forest")
+    }
+
+    fn add_trace_decorator(forest: &mut MastForest, value: u8) -> DecoratorId {
+        forest.add_decorator(Decorator::Trace(value.into())).unwrap()
+    }
 
     #[test]
     fn test_join_node_builder_round_trip_with_digest() {
@@ -480,6 +503,113 @@ mod round_trip_tests {
                 .build_with_forced_digest()
                 .is_err(),
             "control-flow nodes require a forced digest when built without a forest"
+        );
+    }
+
+    #[test]
+    fn control_node_builders_reject_out_of_range_children() {
+        let mut forest = MastForest::new();
+        let valid_child = add_block(&mut forest, Operation::Add);
+        let missing_child = MastNodeId::new_unchecked(99);
+
+        assert!(matches!(
+            LoopNodeBuilder::new(missing_child).build(&forest),
+            Err(MastForestError::NodeIdOverflow(node_id, _)) if node_id == missing_child
+        ));
+        assert!(matches!(
+            CallNodeBuilder::new(missing_child).build(&forest),
+            Err(MastForestError::NodeIdOverflow(node_id, _)) if node_id == missing_child
+        ));
+        assert!(matches!(
+            JoinNodeBuilder::new([valid_child, missing_child]).build(&forest),
+            Err(MastForestError::NodeIdOverflow(node_id, _)) if node_id == missing_child
+        ));
+        assert!(matches!(
+            SplitNodeBuilder::new([missing_child, valid_child]).build(&forest),
+            Err(MastForestError::NodeIdOverflow(node_id, _)) if node_id == missing_child
+        ));
+    }
+
+    #[test]
+    fn add_to_forest_links_decorator_storage_to_inserted_node() {
+        let mut forest = MastForest::new();
+        let body = add_block(&mut forest, Operation::Mul);
+        let before = add_trace_decorator(&mut forest, 7);
+        let after = add_trace_decorator(&mut forest, 9);
+
+        let loop_id = LoopNodeBuilder::new(body)
+            .with_before_enter([before])
+            .with_after_exit([after])
+            .add_to_forest(&mut forest)
+            .expect("decorated loop should be added to the forest");
+
+        let loop_node = forest[loop_id].unwrap_loop();
+        assert_eq!(loop_node.linked_decorator_store_id(), Some(loop_id));
+        assert_eq!(loop_node.before_enter(&forest), &[before]);
+        assert_eq!(loop_node.after_exit(&forest), &[after]);
+    }
+
+    #[test]
+    fn remap_children_preserves_digest_and_node_decorators() {
+        let forced_digest = test_word(21);
+        let before = DecoratorId::new_unchecked(1);
+        let after = DecoratorId::new_unchecked(2);
+        let first = MastNodeId::new_unchecked(3);
+        let second = MastNodeId::new_unchecked(4);
+        let remapped_first = MastNodeId::new_unchecked(10);
+        let remapped_second = MastNodeId::new_unchecked(11);
+
+        let mut remapping = BTreeMap::new();
+        remapping.insert(first, remapped_first);
+        remapping.insert(second, remapped_second);
+
+        let builder = JoinNodeBuilder::new([first, second])
+            .with_before_enter([before])
+            .with_after_exit([after])
+            .with_digest(forced_digest)
+            .remap_children(&remapping);
+        let node = builder
+            .build_with_forced_digest()
+            .expect("forced-digest remapped join should build without a forest");
+
+        assert_eq!(node.first(), remapped_first);
+        assert_eq!(node.second(), remapped_second);
+        assert_eq!(node.digest(), forced_digest);
+        assert_eq!(node.before_enter(&MastForest::new()), &[before]);
+        assert_eq!(node.after_exit(&MastForest::new()), &[after]);
+    }
+
+    #[test]
+    fn control_node_fingerprint_is_sensitive_to_child_decorator_fingerprints() {
+        let forest = MastForest::new();
+        let first = MastNodeId::new_unchecked(0);
+        let second = MastNodeId::new_unchecked(1);
+        let forced_digest = test_word(41);
+
+        let mut child_fingerprints = BTreeMap::new();
+        child_fingerprints.insert(first, MastNodeFingerprint::new(test_word(101)));
+        child_fingerprints.insert(
+            second,
+            MastNodeFingerprint::new(test_word(201)).augment_with_data(b"child-decorator-a"),
+        );
+
+        let baseline = JoinNodeBuilder::new([first, second])
+            .with_digest(forced_digest)
+            .fingerprint_for_node(&forest, &child_fingerprints)
+            .expect("all child fingerprints are present");
+
+        child_fingerprints.insert(
+            second,
+            MastNodeFingerprint::new(test_word(201)).augment_with_data(b"child-decorator-b"),
+        );
+        let changed_child = JoinNodeBuilder::new([first, second])
+            .with_digest(forced_digest)
+            .fingerprint_for_node(&forest, &child_fingerprints)
+            .expect("all child fingerprints are present");
+
+        assert_ne!(
+            baseline, changed_child,
+            "same node digest must not hide a changed child decorator fingerprint"
         );
     }
 }
