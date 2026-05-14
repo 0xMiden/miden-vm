@@ -96,22 +96,26 @@ impl DeferredState {
         }
     }
 
-    /// Evaluate an opaque node to its canonical form via the installed schema.
+    /// Evaluate an opaque node via the installed schema.
     ///
-    /// The node must classify as `Expression` (assertions aren't values — they're checks).
+    /// Accepts either classification:
+    /// - `Expression` → reduces to canonical form.
+    /// - `Assertion`  → verifies the assertion and returns the input node back; a mismatch
+    ///   surfaces as [`SchemaError::AssertionFailed`]. The advice-stack contract is uniform —
+    ///   either way the caller gets 12 felts back, which MASM can hash to recover the digest.
+    ///
     /// Children referenced in the payload must already be registered in the DAG. State is not
-    /// mutated; the returned `Node` is what the caller pushes onto the advice stack via the
-    /// `deferred_evaluate` opcode.
+    /// mutated by this call; the returned `Node` is what the caller pushes onto the advice
+    /// stack via the `deferred_evaluate` opcode.
     pub fn evaluate(
         &mut self,
         schema: &mut dyn Schema,
         node: Node,
     ) -> Result<Node, SchemaError> {
-        match schema.is_valid(&node) {
-            Some(NodeType::Expression) => schema.eval(self, node),
-            // Assertions aren't evaluatable values; an `is_valid` rejection rejects here too.
-            _ => Err(SchemaError::InvalidNode),
+        if schema.is_valid(&node).is_none() {
+            return Err(SchemaError::InvalidNode);
         }
+        schema.eval(self, node)
     }
 
     /// Snapshot the current state into a [`DeferredWitness`].
@@ -323,6 +327,32 @@ mod tests {
             )
             .unwrap();
         assert_eq!(state.assertions().len(), 1);
+    }
+
+    #[test]
+    fn evaluate_assertion_verifies_and_returns_the_node() {
+        let mut state = DeferredState::new();
+        let mut schema = Field0Handler;
+        let a = state.register(&mut schema, field0_leaf_node(7)).unwrap();
+        // Self-equal assertion: passes eval. State should be unchanged by `evaluate`.
+        let assertion = Node::new(Field0Handler::ASSERT_EQ, Payload::binary_op(a, a));
+        let before_nodes = state.nodes().len();
+        let before_assertions = state.assertions().len();
+        let result = state.evaluate(&mut schema, assertion).unwrap();
+        assert_eq!(result, assertion, "evaluate returns the assertion node itself");
+        assert_eq!(state.nodes().len(), before_nodes, "state.nodes unchanged");
+        assert_eq!(state.assertions().len(), before_assertions, "no transcript fold");
+    }
+
+    #[test]
+    fn evaluate_assertion_mismatch_errors() {
+        let mut state = DeferredState::new();
+        let mut schema = Field0Handler;
+        let a = state.register(&mut schema, field0_leaf_node(3)).unwrap();
+        let b = state.register(&mut schema, field0_leaf_node(4)).unwrap();
+        let mismatch = Node::new(Field0Handler::ASSERT_EQ, Payload::binary_op(a, b));
+        let err = state.evaluate(&mut schema, mismatch);
+        assert!(matches!(err, Err(SchemaError::AssertionFailed)));
     }
 
     #[test]

@@ -316,11 +316,14 @@ pub enum SystemEvent {
     ///   DAG state:     {... node(TAG, PAYLOAD)}
     DeferredRegister,
 
-    /// Evaluates an opaque node `(tag, payload)` to its canonical form and pushes the result's
-    /// 12 felts (`payload || tag`) onto the advice stack.
+    /// Evaluates an opaque node `(tag, payload)` via the installed schema and pushes the
+    /// resulting 12 felts (`payload || tag`) onto the advice stack.
     ///
-    /// The schema's `is_valid` must classify the input as an expression. Children referenced
-    /// in the payload must already be registered in the DAG. The state is not mutated.
+    /// For expression nodes the result is the canonical reduced form; for assertion nodes the
+    /// schema verifies the assertion (returning [`SchemaError::AssertionFailed`] on mismatch)
+    /// and the result is the input node itself, so the advice-stack contract is uniform.
+    /// Children referenced in the payload must already be registered in the DAG. The state is
+    /// not mutated.
     ///
     /// Inputs:
     ///   Operand stack: [event_id, PAYLOAD_LO, PAYLOAD_HI, TAG, ...]
