@@ -30,6 +30,11 @@ use crate::{
     report,
 };
 
+mod asm_op_merge_policy;
+use asm_op_merge_policy::AsmOpMergePolicy;
+mod debug_metadata_merge_policy;
+use debug_metadata_merge_policy::DebugMetadataMergePolicy;
+
 // CONSTANTS
 // ================================================================================================
 
@@ -423,45 +428,20 @@ impl MastForestFinalizer {
         pending_nodes: &IndexVec<MastNodeRef, PendingMastNode>,
         asm_op_by_ref: &IndexVec<AsmOpRef, AssemblyOp>,
     ) -> Result<(), Report> {
-        let mut asm_op_id_by_ref = BTreeMap::new();
+        let mut asm_op_policy = AsmOpMergePolicy::new(asm_op_by_ref);
         for &node_ref in live_node_refs {
-            let asm_op_mappings = pending_nodes[node_ref].asm_ops.clone();
-            if asm_op_mappings.is_empty() {
+            let pending_node = &pending_nodes[node_ref];
+            if pending_node.asm_ops.is_empty() {
                 continue;
             }
 
             let node_id = self.node_id_by_ref[&node_ref];
-            let (num_operations, adjusted_mappings) =
-                compute_operations_and_adjust_mappings(&self.nodes[node_id], asm_op_mappings);
-            let adjusted_mappings = adjusted_mappings
-                .into_iter()
-                .map(|(op_idx, asm_op_ref)| {
-                    let asm_op_id = if let Some(asm_op_id) =
-                        asm_op_id_by_ref.get(&asm_op_ref).copied()
-                    {
-                        asm_op_id
-                    } else {
-                        let asm_op_id = self
-                            .debug_info
-                            .add_asm_op(asm_op_by_ref[asm_op_ref].clone())
-                            .map_err(|source| {
-                                Report::new(MastForestBuilderError::AddAsmOp { node_id, source })
-                            })?;
-                        asm_op_id_by_ref.insert(asm_op_ref, asm_op_id);
-                        asm_op_id
-                    };
-                    Ok((op_idx, asm_op_id))
-                })
-                .collect::<Result<Vec<_>, Report>>()?;
-
-            self.debug_info
-                .register_asm_ops(node_id, num_operations, adjusted_mappings)
-                .map_err(|source| {
-                    Report::new(MastForestBuilderError::RegisterAsmOps {
-                        node_id,
-                        source_msg: source.to_string(),
-                    })
-                })?;
+            asm_op_policy.register_node(
+                &mut self.debug_info,
+                &self.nodes[node_id],
+                node_id,
+                &pending_node.asm_ops,
+            )?;
         }
 
         Ok(())
@@ -473,38 +453,18 @@ impl MastForestFinalizer {
         pending_nodes: &IndexVec<MastNodeRef, PendingMastNode>,
         debug_vars: &IndexVec<DebugVarRef, DebugVarInfo>,
     ) -> Result<(), Report> {
-        let mut debug_var_id_by_ref = BTreeMap::new();
+        let mut debug_metadata_policy = DebugMetadataMergePolicy::new(debug_vars);
         for &node_ref in live_node_refs {
-            let pending_debug_vars = pending_nodes[node_ref].debug_vars.clone();
-            if pending_debug_vars.is_empty() {
+            let pending_node = &pending_nodes[node_ref];
+            if pending_node.debug_vars.is_empty() {
                 continue;
             }
 
             let node_id = self.node_id_by_ref[&node_ref];
-            let mut debug_var_ids = Vec::with_capacity(pending_debug_vars.len());
-            for (op_idx, debug_var_ref) in pending_debug_vars {
-                let debug_var_id =
-                    if let Some(debug_var_id) = debug_var_id_by_ref.get(&debug_var_ref).copied() {
-                        debug_var_id
-                    } else {
-                        let debug_var_id = self
-                            .debug_info
-                            .add_debug_var(debug_vars[debug_var_ref].clone())
-                            .map_err(|source| {
-                                Report::new(MastForestBuilderError::AddDebugVar { node_id, source })
-                            })?;
-                        debug_var_id_by_ref.insert(debug_var_ref, debug_var_id);
-                        debug_var_id
-                    };
-                debug_var_ids.push((op_idx, debug_var_id));
-            }
-            self.debug_info.register_op_indexed_debug_vars(node_id, debug_var_ids).map_err(
-                |source| {
-                    Report::new(MastForestBuilderError::RegisterDebugVars {
-                        node_id,
-                        source_msg: source.to_string(),
-                    })
-                },
+            debug_metadata_policy.register_node(
+                &mut self.debug_info,
+                node_id,
+                &pending_node.debug_vars,
             )?;
         }
 
