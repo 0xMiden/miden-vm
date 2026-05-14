@@ -392,10 +392,11 @@ impl Package {
             return Err(Report::msg("expected library but got an executable"));
         }
 
+        let entrypoint_namespace = entrypoint.namespace().to_absolute();
         let module = self
             .mast
             .module_infos()
-            .find(|info| info.path() == entrypoint.namespace())
+            .find(|info| info.path() == entrypoint_namespace.as_ref())
             .ok_or_else(|| {
                 Report::msg(format!(
                     "invalid entrypoint: library does not contain a module named '{}'",
