@@ -84,6 +84,10 @@
 - [BREAKING] Reject post-last operation-indexed decorators in block assembly and serialized MAST forests; use `after_exit` for decorators that run after a block exits ([#3114](https://github.com/0xMiden/miden-vm/pull/3114)).
 - [BREAKING] Removed `Continuation::AfterExitDecoratorsBasicBlock`. New MAST merges operation-indexed decorators at the post-last-op sentinel index into `after_exit` at build time; execution uses `AfterExitDecorators` only, with legacy forests still supported ([#2633](https://github.com/0xMiden/miden-vm/issues/2633)).
 
+## 0.22.4 (unreleased)
+
+- Restored metadata-neutral MAST node identity so public procedure roots match 0.22.1 again; this reopens debug metadata precision issues from #2955 and #3054 ([#3151](https://github.com/0xMiden/miden-vm/pull/3151)).
+
 ## 0.22.3 (2026-05-01)
 
 - Change value of `Path::MAX_COMPONENT_LENGTH` to `u16::MAX - 2` [#3087](https://github.com/0xMiden/miden-vm/pull/3087)
