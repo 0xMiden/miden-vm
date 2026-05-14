@@ -26,12 +26,11 @@ pub(super) fn infer_nonzero_summaries_and_diagnostics(
 ) -> AdviceDiagnosticsMap {
     let mut diagnostics = AdviceDiagnosticsMap::default();
 
-    for (proc_path, proc) in prepared.callgraph_procs() {
-        let Some(stmts) = proc.stmts() else {
-            mark_nonzero_unknown(summaries, proc_path);
-            continue;
-        };
+    for (proc_path, _) in prepared.callgraph_opaque_procs() {
+        mark_nonzero_unknown(summaries, proc_path);
+    }
 
+    for (proc_path, proc, stmts) in prepared.callgraph_lifted_procs() {
         let result = {
             let capability = NonZeroCapability::new(proc_path.clone(), summaries);
             walker::analyze_procedure(&capability, summaries, proc.inputs(), stmts)

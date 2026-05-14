@@ -117,3 +117,25 @@ end
         "expected only the unmarked advice origin to remain"
     );
 }
+
+#[test]
+fn lift_failures_are_opaque_without_stopping_lint_diagnostics() {
+    let diagnostics = diagnostics_for_source(
+        "opaque_lift_failure",
+        "\
+pub proc opaque_dynamic_call
+    dynexec
+end
+
+pub proc still_linted
+    adv_push
+    mem_load
+    drop
+end
+",
+        false,
+    );
+
+    assert_eq!(diagnostics.len(), 1, "expected diagnostic collection to continue");
+    assert_eq!(diagnostics[0].message, "unconstrained advice used as memory address");
+}
