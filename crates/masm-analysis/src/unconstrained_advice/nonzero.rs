@@ -13,6 +13,7 @@ use super::{
         Env, collect_expr_sink_fact, expr_is_proven_nonzero, expr_output_fact,
         refine_nonzero_from_intrinsic, stmt_span,
     },
+    sink::push_fact_sink_diagnostic,
     summary::{AdviceDiagnosticContext, AdviceDiagnosticsMap, AdviceSummary, AdviceSummaryMap},
     walker::{self, AdviceCapability},
 };
@@ -81,9 +82,7 @@ impl<'a> NonZeroCapability<'a> {
         fact: &AdviceFact,
     ) {
         let message = message.into();
-        if fact.has_concrete_sources() {
-            effect.push_diagnostic(self.diagnostics.diagnostic_for_fact(span, message, fact));
-        }
+        push_fact_sink_diagnostic(effect, &self.diagnostics, span, message, fact);
         add_required_inputs(effect, fact.from_inputs.iter().copied());
     }
 
@@ -111,17 +110,16 @@ impl<'a> NonZeroCapability<'a> {
                 continue;
             }
             let arg_fact = env.fact_for_var(arg);
-            if arg_fact.has_concrete_sources() {
-                let callee = SymbolPath::new(target.to_string());
-                let diagnostic = self.diagnostics.diagnostic_for_fact(
-                    span,
-                    format!(
-                        "argument {index} to `{callee}` may reach a divisor or `inv` input without a nearby non-zero check"
-                    ),
-                    &arg_fact,
-                );
-                effect.push_diagnostic(diagnostic);
-            }
+            let callee = SymbolPath::new(target.to_string());
+            push_fact_sink_diagnostic(
+                &mut effect,
+                &self.diagnostics,
+                span,
+                format!(
+                    "argument {index} to `{callee}` may reach a divisor or `inv` input without a nearby non-zero check"
+                ),
+                &arg_fact,
+            );
             add_required_inputs(&mut effect, arg_fact.from_inputs.iter().copied());
         }
 
