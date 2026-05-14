@@ -21,6 +21,7 @@ use p3_matrix::{Matrix, horizontally_truncated::HorizontallyTruncated};
 use thiserror::Error;
 
 use crate::{
+    domain::LiftedDomain,
     lmcs::{Lmcs, tree_indices::TreeIndices},
     pcs::{
         deep::{
@@ -57,7 +58,7 @@ pub fn verify<F, EF, L, Ch, const N: usize>(
     params: &PcsParams,
     lmcs: &L,
     commitments: &[(L::Commitment, Vec<usize>)],
-    log_lde_height: u8,
+    domain: &LiftedDomain<F>,
     eval_points: [EF; N],
     channel: &mut Ch,
 ) -> Result<OpenedValues<EF>, PcsError>
@@ -73,17 +74,19 @@ where
         return Err(PcsError::NoCommitments);
     }
 
+    let log_lde_height = domain.log_lde_height();
+
     // Construct verifier's DEEP oracle (observes evals, checks PoW, samples α/β)
     let (deep_oracle, evals) = DeepOracle::<F, EF, L>::new(
         params.deep,
         &eval_points,
         commitments.to_vec(),
-        log_lde_height,
+        domain,
         channel,
     )?;
 
     // Create FRI oracle (observes commitments + final poly, checks per-round PoW)
-    let fri_oracle = FriOracle::new(&params.fri, log_lde_height, channel)?;
+    let fri_oracle = FriOracle::new(&params.fri, domain, channel)?;
 
     // Check query PoW witness and sample query indices
     channel.grind(params.query_pow_bits())?;
@@ -114,7 +117,7 @@ pub fn verify_aligned<F, EF, L, Ch, const N: usize>(
     params: &PcsParams,
     lmcs: &L,
     commitments: &[(L::Commitment, Vec<usize>)],
-    log_lde_height: u8,
+    domain: &LiftedDomain<F>,
     eval_points: [EF; N],
     channel: &mut Ch,
 ) -> Result<OpenedValues<EF>, PcsError>
@@ -130,7 +133,7 @@ where
         .map(|(c, widths)| (c.clone(), aligned_widths(widths.clone(), alignment)))
         .collect();
 
-    let evals = verify(params, lmcs, &aligned_commitments, log_lde_height, eval_points, channel)?;
+    let evals = verify(params, lmcs, &aligned_commitments, domain, eval_points, channel)?;
 
     // Truncate each matrix back to original widths, removing alignment padding.
     let truncated = evals

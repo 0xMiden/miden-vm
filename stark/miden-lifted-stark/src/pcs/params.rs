@@ -7,9 +7,6 @@ use crate::pcs::{
     fri::{FriParams, fold::FriFold},
 };
 
-/// Maximum log₂ of any domain size. Domains cannot exceed 2⁶⁴ elements.
-pub const MAX_LOG_DOMAIN_SIZE: u8 = 64;
-
 /// Errors from invalid PCS parameter combinations.
 #[derive(Clone, Debug, Error)]
 pub enum PcsParamsError {
@@ -17,8 +14,6 @@ pub enum PcsParamsError {
     InvalidFoldingArity(u8),
     #[error("log_blowup must be > 0")]
     ZeroBlowup,
-    #[error("log_final_degree ({log_final_degree}) + log_blowup ({log_blowup}) exceeds 64")]
-    FinalDomainTooLarge { log_final_degree: u8, log_blowup: u8 },
     #[error("num_queries must be > 0")]
     ZeroQueries,
 }
@@ -29,6 +24,11 @@ pub enum PcsParamsError {
 /// Internal sub-parameters are accessible to crate-internal code only.
 #[derive(Clone, Copy, Debug)]
 pub struct PcsParams {
+    /// Log₂ of the LDE blowup factor (LDE domain size / trace size).
+    ///
+    /// Higher values increase soundness per query but also proof size and prover time
+    /// (LDE over a larger domain). Typical values: 2-4 (blowup factors of 4-16).
+    pub(crate) log_blowup: u8,
     /// DEEP quotient parameters.
     pub(crate) deep: DeepParams,
     /// FRI protocol parameters.
@@ -46,8 +46,11 @@ impl PcsParams {
     ///
     /// - [`PcsParamsError::InvalidFoldingArity`] if `log_folding_arity` is not 1, 2, or 3.
     /// - [`PcsParamsError::ZeroBlowup`] if `log_blowup` is 0.
-    /// - [`PcsParamsError::FinalDomainTooLarge`] if `log_final_degree + log_blowup > 64`.
     /// - [`PcsParamsError::ZeroQueries`] if `num_queries` is 0.
+    ///
+    /// Field-relative bound checking (`log_final_degree + log_blowup ≤ F::TWO_ADICITY`)
+    /// is deferred to [`crate::domain::TwoAdicSubgroup::new`] at the point a
+    /// concrete domain is constructed; `PcsParams` itself is field-agnostic.
     pub fn new(
         log_blowup: u8,
         log_folding_arity: u8,
@@ -62,20 +65,13 @@ impl PcsParams {
         if log_blowup == 0 {
             return Err(PcsParamsError::ZeroBlowup);
         }
-        if log_final_degree as u16 + log_blowup as u16 > MAX_LOG_DOMAIN_SIZE as u16 {
-            return Err(PcsParamsError::FinalDomainTooLarge { log_final_degree, log_blowup });
-        }
         if num_queries == 0 {
             return Err(PcsParamsError::ZeroQueries);
         }
         Ok(Self {
+            log_blowup,
             deep: DeepParams { deep_pow_bits },
-            fri: FriParams {
-                log_blowup,
-                fold,
-                log_final_degree,
-                folding_pow_bits,
-            },
+            fri: FriParams { fold, log_final_degree, folding_pow_bits },
             num_queries,
             query_pow_bits,
         })
@@ -84,7 +80,7 @@ impl PcsParams {
     /// Log₂ of the blowup factor.
     #[inline]
     pub fn log_blowup(&self) -> u8 {
-        self.fri.log_blowup
+        self.log_blowup
     }
 
     /// Number of query repetitions.

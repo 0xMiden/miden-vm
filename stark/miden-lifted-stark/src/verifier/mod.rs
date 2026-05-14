@@ -56,8 +56,8 @@ use thiserror::Error;
 
 use crate::{
     StarkConfig,
-    coset::LiftedCoset,
-    instance::{AirInstance, InstanceValidationError, validate_air_order, validate_inputs},
+    domain::{Coset, LiftedDomain},
+    instance::{AirInstance, InstanceValidationError, validate_air_order},
     pcs::verifier::{PcsError, verify_aligned},
     proof::{StarkDigest, StarkProof},
     util::packing::row_to_packed_ext,
@@ -68,6 +68,8 @@ use crate::{
 pub enum VerifierError {
     #[error("instance validation failed: {0}")]
     Instance(#[from] InstanceValidationError),
+    #[error("domain construction failed: {0}")]
+    Domain(#[from] crate::domain::DomainError),
     #[error("PCS verification failed: {0}")]
     Pcs(#[from] PcsError),
     #[error("transcript error: {0}")]
@@ -156,8 +158,15 @@ where
 
     let log_blowup = config.pcs().log_blowup();
 
-    let log_max_trace_height = validate_inputs(&instances, instance_shapes, log_blowup)?;
-    let log_trace_heights = instance_shapes.log_trace_heights();
+    // Validate AIR/instance contracts.
+    instance_shapes.validate_instance_data(&instances)?;
+    let instance_domains = LiftedDomain::<F>::try_many_from_ascending_heights(
+        instance_shapes.log_trace_heights(),
+        log_blowup,
+    )?;
+    let max_lde_domain = *instance_domains
+        .last()
+        .expect("non-empty: validated by try_many_from_ascending_heights");
 
     instance_shapes.observe_heights::<F, _>(&mut challenger);
 
@@ -170,23 +179,19 @@ where
     // Infer constraint degree from symbolic AIR analysis (max across all AIRs).
     // NOTE: `log_quotient_degree()` runs symbolic eval and may panic if the AIR is
     // invalid. Callers must ensure `validate_inputs` (above) passes first.
-    let log_constraint_degree =
-        instances.iter().map(|(air, _)| air.log_quotient_degree()).max().unwrap_or(1) as u8;
+    let log_quotient_degree =
+        instances.iter().map(|(air, _)| air.log_quotient_degree()).max().unwrap_or(1);
 
-    if log_constraint_degree > log_blowup {
-        return Err(VerifierError::ConstraintDegreeTooHigh {
-            log_quotient_degree: log_constraint_degree,
-            log_blowup,
-        });
+    if log_quotient_degree > log_blowup {
+        return Err(VerifierError::ConstraintDegreeTooHigh { log_quotient_degree, log_blowup });
     }
 
-    let constraint_degree = 1 << log_constraint_degree as usize;
+    // Pair the max LDE domain with the constraint degree for the constraint layer.
+    let max_eval_domain = max_lde_domain.evaluation_domain(log_quotient_degree);
 
-    let max_trace_height = 1 << log_max_trace_height as usize;
-    let log_lde_height = log_max_trace_height + log_blowup;
+    let quotient_degree = 1 << log_quotient_degree as usize;
 
-    // Max LDE coset (for the largest trace, no lifting)
-    let max_lde_coset = LiftedCoset::unlifted(log_max_trace_height, log_blowup);
+    let max_trace_height = max_lde_domain.trace_height();
 
     // 1. Receive main trace commitment
     let main_commit = channel.receive_commitment()?.clone();
@@ -222,15 +227,15 @@ where
     let quotient_commit = channel.receive_commitment()?.clone();
 
     // 6. Sample OOD point (outside max trace domain H and max LDE coset gK)
-    let z: EF = max_lde_coset.sample_ood_point(&mut channel);
-    let h = F::two_adic_generator(log_max_trace_height.into());
+    let z: EF = max_lde_domain.sample_ood_point(&mut channel);
+    let h = max_lde_domain.trace_subgroup().generator();
     let z_next = z * h;
 
     // 7. Widths per commitment group (unpadded data widths).
     let main_widths: Vec<usize> = instances.iter().map(|(air, _)| air.width()).collect();
     let aux_widths: Vec<usize> =
         instances.iter().map(|(air, _)| air.aux_width() * EF::DIMENSION).collect();
-    let quotient_widths: Vec<usize> = vec![constraint_degree * EF::DIMENSION];
+    let quotient_widths: Vec<usize> = vec![quotient_degree * EF::DIMENSION];
 
     // Build commitments with original (unpadded) widths.
     // The PCS aligned wrapper handles alignment and truncation internally.
@@ -245,7 +250,7 @@ where
         config.pcs(),
         config.lmcs(),
         &commitments,
-        log_lde_height,
+        &max_lde_domain,
         [z, z_next],
         &mut channel,
     )?;
@@ -266,7 +271,7 @@ where
     let mut reduced_aux = ReducedAuxValues::<EF>::identity();
 
     for (j, (air, inst)) in instances.iter().enumerate() {
-        let coset_j = LiftedCoset::new(log_trace_heights[j], log_blowup, log_max_trace_height);
+        let domain_j = instance_domains[j];
 
         // opened[main_g][j] is a 2-row RowMajorMatrix (local, next) already truncated.
         let main_window = RowWindow::from_view(&opened[main_g][j].as_view());
@@ -279,8 +284,8 @@ where
             .ok_or(VerifierError::InvalidAuxShape)?;
         let aux_window = RowWindow::from_two_rows(&aux_local, &aux_next);
 
-        // Selectors at the lifted OOD point yⱼ = z^{rⱼ} (encapsulated in LiftedCoset).
-        let selectors = coset_j.selectors_at::<F, _>(z);
+        // Selectors at the lifted OOD point yⱼ = z^{rⱼ} (encapsulated in LiftedDomain).
+        let selectors = domain_j.selectors_at(z);
 
         // Periodic values: for a column with period p, eval_at computes z^{n/p}.
         // Using (max_trace_height, z) gives z^{max_n / p}, which equals
@@ -327,9 +332,10 @@ where
     let quot_row = opened[quot_g][0].row_slice(0).expect("quotient row 0");
     let quotient_chunks =
         row_to_packed_ext::<F, EF>(&quot_row).ok_or(VerifierError::InvalidAuxShape)?;
-    let quotient_z = max_lde_coset.reconstruct_quotient::<F, _>(z, &quotient_chunks);
+    let quotient_z = max_eval_domain.reconstruct_quotient::<EF>(z, &quotient_chunks);
 
-    let vanishing = max_lde_coset.vanishing_at::<F, _>(z);
+    // `max_lde_domain` is the tallest (lift_ratio = 0), so lifted == unlifted here.
+    let vanishing = max_lde_domain.trace_subgroup().vanishing_at(z);
     if accumulated != quotient_z * vanishing {
         return Err(VerifierError::ConstraintMismatch);
     }

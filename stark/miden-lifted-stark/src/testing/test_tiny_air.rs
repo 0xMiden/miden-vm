@@ -7,7 +7,7 @@ use p3_field::PrimeCharacteristicRing;
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
 use crate::{
-    AirWitness, InstanceValidationError, ProverError, VerifierError,
+    AirWitness, DomainError, InstanceValidationError, ProverError, VerifierError,
     air::{
         AirBuilder, AuxBuilder, BaseAir, ExtensionBuilder, LiftedAir, LiftedAirBuilder,
         WindowAccess,
@@ -16,7 +16,7 @@ use crate::{
     testing::configs::goldilocks_poseidon2::{
         Felt, QuadFelt, generate_pow4_trace, prove_and_verify, test_challenger, test_config,
     },
-    transcript::TranscriptData,
+    transcript::{TranscriptData, TranscriptError},
     verify_single,
 };
 
@@ -182,10 +182,7 @@ fn malformed_transcript_is_rejected() {
 
     let err = verify_single(&config, &air, &public_values, &[], &bad_proof, test_challenger())
         .expect_err("extra transcript data should fail verification");
-    assert!(matches!(
-        err,
-        VerifierError::Transcript(crate::transcript::TranscriptError::TrailingData)
-    ));
+    assert!(matches!(err, VerifierError::Transcript(TranscriptError::TrailingData)));
 }
 
 #[test]
@@ -238,34 +235,26 @@ fn malformed_log_trace_heights_is_rejected() {
 
     // Out-of-range log height must surface as an error, not panic on
     // `1usize << log_h` or `two_adic_generator(log_h + log_blowup)`.
+    // log_h = 200 trips the `usize` overflow guard inside `InstanceShapes::validate`
+    // before any domain construction is attempted.
     let mut bad_proof = output.proof.clone();
     bad_proof.instance_shapes.log_trace_heights = vec![200];
     let err = verify_single(&config, &air, &public_values, &[], &bad_proof, test_challenger())
         .expect_err("oversized log trace height should fail verification");
     assert!(matches!(
         err,
-        VerifierError::Instance(InstanceValidationError::LdeDomainExceedsTwoAdicity {
-            log_h: 200,
-            ..
-        })
+        VerifierError::Instance(InstanceValidationError::LogTraceHeightTooLarge { log_h: 200, .. })
     ));
 
-    // Boundary case: `log_h` fits the raw bound (`log_h ≤ TWO_ADICITY`) but
-    // the LDE domain `log_h + log_blowup` does not. With `log_blowup = 3`
-    // from `TEST_PCS_PARAMS` and `Felt::TWO_ADICITY = 32`, `30 + 3 = 33 > 32`
-    // must be rejected before any `two_adic_generator` call on the LDE domain.
+    // the LDE domain `log_h + log_blowup` does not. With `log_blowup = 3` from
+    // `TEST_PCS_PARAMS` and `Felt::TWO_ADICITY = 32`, `30 + 3 = 33 > 32` must
+    // be rejected by `LiftedDomain::canonical` before any `two_adic_generator`
+    // call on the LDE domain.
     let mut bad_proof = output.proof;
     bad_proof.instance_shapes.log_trace_heights = vec![30];
     let err = verify_single(&config, &air, &public_values, &[], &bad_proof, test_challenger())
         .expect_err("log_h + log_blowup exceeding two-adicity should fail verification");
-    assert!(matches!(
-        err,
-        VerifierError::Instance(InstanceValidationError::LdeDomainExceedsTwoAdicity {
-            log_h: 30,
-            log_blowup: 3,
-            ..
-        })
-    ));
+    assert!(matches!(err, VerifierError::Domain(DomainError::LdeOrderTooLarge { .. })));
 }
 
 #[test]

@@ -51,8 +51,8 @@ extern crate alloc;
 // ============================================================================
 
 mod config;
-mod coset;
 pub mod debug;
+pub mod domain;
 pub mod instance;
 pub mod lmcs;
 mod pcs;
@@ -63,8 +63,10 @@ pub(crate) mod util;
 pub mod verifier;
 
 pub use config::{GenericStarkConfig, StarkConfig};
-pub use coset::LiftedCoset;
 pub use debug::{check_constraints, check_constraints_multi};
+pub use domain::{
+    Coset, DomainError, EvaluationDomain, LiftedDomain, TwoAdicCoset, TwoAdicSubgroup,
+};
 pub use instance::{AirInstance, AirWitness, InstanceShapes, InstanceValidationError};
 pub use lmcs::{
     Lmcs, LmcsError, LmcsTree, OpenedRows,
@@ -80,6 +82,7 @@ pub use lmcs::{
     row_list::RowList,
     tree_indices::{MissingSiblingsIter, TreeIndices},
 };
+pub use miden_lifted_air::{log2_ceil_u8, log2_strict_u8};
 pub use pcs::{
     deep::{
         proof::{DeepTranscript, OpenedValues as PcsOpenedValues},

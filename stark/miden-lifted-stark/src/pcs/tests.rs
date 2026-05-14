@@ -5,7 +5,6 @@ use alloc::{vec, vec::Vec};
 use miden_lifted_air::log2_strict_u8;
 use miden_stark_transcript::{ProverTranscript, VerifierTranscript};
 use p3_challenger::CanObserve;
-use p3_field::Field;
 use p3_matrix::{Matrix, bitrev::BitReversibleMatrix, dense::RowMajorMatrix};
 use params::PcsParams;
 use proof::PcsTranscript;
@@ -15,6 +14,7 @@ use verifier::{PcsError, verify_aligned};
 
 use super::*;
 use crate::{
+    domain::LiftedDomain,
     lmcs::{Lmcs, LmcsTree},
     testing::configs::goldilocks_poseidon2::{
         self as gl, Felt, Lmcs as BaseLmcs, QuadFelt, TestTree, random_lde_matrix, test_lmcs,
@@ -47,6 +47,9 @@ fn run_pcs_case(params: &PcsParams, trees: Vec<TestTree>, seed: u64) -> Result<(
 
     let lde_height = trees[0].leaves().last().map(Matrix::height).unwrap_or(0);
     let log_lde_height = log2_strict_u8(lde_height);
+    let log_blowup = params.log_blowup;
+    let max_domain: LiftedDomain<Felt> =
+        LiftedDomain::canonical(log_lde_height - log_blowup, log_blowup);
     let eval_points: [QuadFelt; 2] = [rng.sample(StandardUniform), rng.sample(StandardUniform)];
 
     let commitments: Vec<_> = trees.iter().map(|t| (t.root(), t.widths())).collect();
@@ -62,7 +65,7 @@ fn run_pcs_case(params: &PcsParams, trees: Vec<TestTree>, seed: u64) -> Result<(
     open_with_channel::<Felt, QuadFelt, _, _, _, 2>(
         params,
         &lmcs,
-        log_lde_height,
+        &max_domain,
         eval_points,
         &trace_trees,
         &mut prover_channel,
@@ -80,7 +83,7 @@ fn run_pcs_case(params: &PcsParams, trees: Vec<TestTree>, seed: u64) -> Result<(
         params,
         &lmcs,
         &commitments,
-        log_lde_height,
+        &max_domain,
         eval_points,
         &mut verifier_channel,
     );
@@ -107,7 +110,7 @@ fn run_pcs_case(params: &PcsParams, trees: Vec<TestTree>, seed: u64) -> Result<(
             params,
             &lmcs,
             &aligned_commitments,
-            log_lde_height,
+            &max_domain,
             eval_points,
             &mut reparse_channel,
         )
@@ -126,24 +129,29 @@ fn test_pcs_cases() {
     let lmcs = test_lmcs();
     let params = test_params();
 
+    let log_blowup = params.log_blowup;
+    // Pass the LDE shift through `LiftedDomain` (the only sanctioned access path).
+    let lde_shift = LiftedDomain::<Felt>::canonical_lde_shift(6 + log_blowup)
+        .expect("test parameters in range");
+
     // Case 1: single matrix, single tree.
     let rng = &mut SmallRng::seed_from_u64(42);
-    let matrix = random_lde_matrix(rng, 6, params.fri.log_blowup, 3, Felt::GENERATOR);
+    let matrix = random_lde_matrix(rng, 6, log_blowup, 3, lde_shift);
     let tree = lmcs.build_aligned_tree(vec![matrix.bit_reverse_rows()]);
     run_pcs_case(&params, vec![tree], 100).expect("single-tree roundtrip");
 
     // Case 2: two separate trees with different column counts.
     let rng = &mut SmallRng::seed_from_u64(24);
-    let mat_a = random_lde_matrix(rng, 6, params.fri.log_blowup, 2, Felt::GENERATOR);
-    let mat_b = random_lde_matrix(rng, 6, params.fri.log_blowup, 4, Felt::GENERATOR);
+    let mat_a = random_lde_matrix(rng, 6, log_blowup, 2, lde_shift);
+    let mat_b = random_lde_matrix(rng, 6, log_blowup, 4, lde_shift);
     let tree_a = lmcs.build_aligned_tree(vec![mat_a.bit_reverse_rows()]);
     let tree_b = lmcs.build_aligned_tree(vec![mat_b.bit_reverse_rows()]);
     run_pcs_case(&params, vec![tree_a, tree_b], 200).expect("multi-tree roundtrip");
 
     // Case 3: mixed heights in one commitment group (LMCS upsampling).
     let rng = &mut SmallRng::seed_from_u64(99);
-    let short = random_lde_matrix(rng, 4, params.fri.log_blowup, 2, Felt::GENERATOR);
-    let tall = random_lde_matrix(rng, 6, params.fri.log_blowup, 3, Felt::GENERATOR);
+    let short = random_lde_matrix(rng, 4, log_blowup, 2, lde_shift);
+    let tall = random_lde_matrix(rng, 6, log_blowup, 3, lde_shift);
     let tree = lmcs.build_aligned_tree(vec![short.bit_reverse_rows(), tall.bit_reverse_rows()]);
     run_pcs_case(&params, vec![tree], 300).expect("mixed-height roundtrip");
 

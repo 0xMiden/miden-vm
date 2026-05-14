@@ -205,7 +205,7 @@ mod tests {
     use alloc::vec;
 
     use p3_dft::{NaiveDft, TwoAdicSubgroupDft};
-    use p3_field::{Field, PrimeCharacteristicRing};
+    use p3_field::PrimeCharacteristicRing;
     use p3_interpolation::{interpolate_coset, interpolate_coset_with_precomputation};
     use p3_matrix::{bitrev::BitReversibleMatrix, dense::RowMajorMatrix};
     use p3_util::reverse_slice_index_bits;
@@ -213,8 +213,8 @@ mod tests {
 
     use super::*;
     use crate::{
+        domain::{Coset, LiftedDomain},
         testing::configs::goldilocks_poseidon2::{Felt, QuadFelt},
-        util::bitrev::bit_reversed_coset_points,
     };
 
     /// Verify `batch_eval_lifted` matches `interpolate_coset` for various lift factors.
@@ -229,10 +229,11 @@ mod tests {
         let log_blowup = 2;
         let log_n = 8; // Full LDE domain size = 256
         let n = 1 << log_n;
-        let shift = Felt::GENERATOR;
+        let domain = LiftedDomain::<Felt>::canonical(log_n, 0);
+        let shift = domain.lde_shift();
 
         // Coset points in bit-reversed order for our barycentric evaluation
-        let coset_points_br = bit_reversed_coset_points::<Felt>(log_n);
+        let coset_points_br = domain.lde_coset().bit_reversed_points();
 
         // Random out-of-domain evaluation point
         let z: QuadFelt = rng.sample(StandardUniform);
@@ -305,10 +306,11 @@ mod tests {
         let log_blowup = 2;
         let log_n = 8;
         let n = 1 << log_n;
-        let shift = Felt::GENERATOR;
+        let domain = LiftedDomain::<Felt>::canonical(log_n, 0);
+        let shift = domain.lde_shift();
 
         // Coset points in both orderings
-        let coset_points_br = bit_reversed_coset_points::<Felt>(log_n);
+        let coset_points_br = domain.lde_coset().bit_reversed_points();
         let mut coset_points_std = coset_points_br.clone();
         reverse_slice_index_bits(&mut coset_points_std); // Convert to standard order
 
@@ -371,10 +373,11 @@ mod tests {
         let log_blowup = 2;
         let log_n = 8;
         let n = 1 << log_n;
-        let shift = Felt::GENERATOR;
+        let domain = LiftedDomain::<Felt>::canonical(log_n, 0);
+        let shift = domain.lde_shift();
 
         // Coset points in bit-reversed order
-        let coset_points_br = bit_reversed_coset_points::<Felt>(log_n);
+        let coset_points_br = domain.lde_coset().bit_reversed_points();
 
         // Two random out-of-domain evaluation points
         let z1: QuadFelt = rng.sample(StandardUniform);
@@ -454,9 +457,10 @@ mod tests {
         let log_blowup = 2;
         let log_n = 8;
         let n = 1 << log_n;
-        let shift = Felt::GENERATOR;
+        let domain = LiftedDomain::<Felt>::canonical(log_n, 0);
+        let shift = domain.lde_shift();
 
-        let coset_points_br = bit_reversed_coset_points::<Felt>(log_n);
+        let coset_points_br = domain.lde_coset().bit_reversed_points();
 
         let z1: QuadFelt = rng.sample(StandardUniform);
         let z2: QuadFelt = rng.sample(StandardUniform);

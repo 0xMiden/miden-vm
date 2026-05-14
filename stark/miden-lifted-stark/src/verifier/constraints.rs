@@ -1,9 +1,7 @@
 //! Constraint evaluation for the verifier.
 //!
-//! This module provides [`ConstraintFolder`], a minimal EF-only folder for verifier
-//! constraint evaluation. Quotient reconstruction lives on
-//! [`LiftedCoset`](crate::coset::LiftedCoset); EF row reconstitution is handled
-//! by the internal `util::packing` helpers.
+//! Provides [`ConstraintFolder`], a minimal EF-only folder evaluating the AIR's
+//! constraints at a single OOD extension-field point.
 
 use core::marker::PhantomData;
 

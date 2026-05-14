@@ -18,7 +18,7 @@ mod util;
 pub use air::{AirStructureError, LiftedAir, TracePart};
 pub use auxiliary::{AuxBuilder, ReducedAuxValues, ReductionError, VarLenPublicInputs};
 pub use builder::LiftedAirBuilder;
-pub use util::log2_strict_u8;
+pub use util::{log2_ceil_u8, log2_strict_u8};
 
 mod empty_window;
 

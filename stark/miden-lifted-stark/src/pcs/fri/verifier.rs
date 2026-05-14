@@ -24,6 +24,7 @@ use p3_util::reverse_bits_len;
 use thiserror::Error;
 
 use crate::{
+    domain::{Coset, LiftedDomain, TwoAdicSubgroup},
     lmcs::{Lmcs, LmcsError, tree_indices::TreeIndices},
     pcs::fri::FriParams,
     util::horner::horner,
@@ -45,8 +46,8 @@ where
     EF: ExtensionField<F>,
     L: Lmcs<F = F>,
 {
-    /// Log₂ of the initial domain size.
-    log_domain_size: u8,
+    /// Initial round's domain (the LDE evaluation subgroup).
+    subgroup: TwoAdicSubgroup<F>,
     /// Per-round commitment and folding challenge.
     rounds: Vec<FriRoundOracle<L::Commitment, EF>>,
     /// Coefficients of the final low-degree polynomial in descending degree order
@@ -68,13 +69,14 @@ where
     /// Create oracle by reading from a verifier channel.
     pub fn new<Ch>(
         params: &FriParams,
-        log_domain_size: u8,
+        domain: &LiftedDomain<F>,
         channel: &mut Ch,
     ) -> Result<Self, FriError>
     where
         Ch: VerifierChannel<F = F, Commitment = L::Commitment>,
     {
-        let num_rounds = params.num_rounds(log_domain_size);
+        let subgroup = *domain.lde_coset().subgroup();
+        let num_rounds = params.num_rounds(domain);
         let mut rounds = Vec::with_capacity(num_rounds);
 
         for _ in 0..num_rounds {
@@ -86,10 +88,10 @@ where
             rounds.push(FriRoundOracle { commitment, beta });
         }
 
-        let final_degree = params.final_poly_degree(log_domain_size);
+        let final_degree = params.final_poly_degree(domain);
         let final_poly = channel.receive_algebra_slice(final_degree)?;
 
-        Ok(Self { log_domain_size, rounds, final_poly })
+        Ok(Self { subgroup, rounds, final_poly })
     }
 
     /// Test low-degree proximity by reading openings from a verifier channel.
@@ -120,11 +122,16 @@ where
         let base_width = arity * EF::DIMENSION;
         let widths = [base_width];
 
-        let mut log_domain_size = self.log_domain_size;
-        let mut g_inv = F::two_adic_generator(log_domain_size as usize).inverse();
+        // Per-round state: the subgroup carries the working domain size as a typed
+        // value, and `g_inv` is raised to the power `2^log_arity` in lockstep
+        // (matching `subgroup.shrink(log_arity)`) to avoid re-inverting each round.
+        let mut subgroup = self.subgroup;
+        let mut g_inv = subgroup.generator_inverse();
 
         for (round_idx, round) in self.rounds.iter().enumerate() {
-            let log_folded_domain_size = log_domain_size - log_arity;
+            let folded_subgroup = subgroup.shrink(log_arity);
+            let folded_size = folded_subgroup.size();
+            let log_folded_domain_size = folded_subgroup.log_size();
 
             // Shrink indices by log_arity to get this round's row indices.
             tree_indices.shrink_depth(log_arity);
@@ -147,7 +154,6 @@ where
             //
             // 3. The prover cannot provide different row data for the same row_idx. LMCS opens each
             //    row exactly once via `opened_rows[&row_idx]`.
-            let folded_size = 1usize << log_folded_domain_size;
             evals = evals
                 .into_iter()
                 .map(|(idx, eval)| {
@@ -183,19 +189,19 @@ where
                 })
                 .collect::<Result<_, _>>()?;
 
-            log_domain_size = log_folded_domain_size;
+            subgroup = folded_subgroup;
             g_inv = g_inv.exp_power_of_2(log_arity as usize);
         }
 
         // After all folding rounds, the polynomial has been reduced to degree < final_degree.
         // The prover sent this final polynomial's coefficients; we evaluate it at each
-        // folded query point on the final domain and check consistency with the folded
-        // values. This closes the FRI proximity argument: if the original codeword was
-        // far from low-degree, at least one query fails with high probability.
+        // folded query point on the final-round subgroup and check consistency with the
+        // folded values. This closes the FRI proximity argument: if the original codeword
+        // was far from low-degree, at least one query fails with high probability.
         //
         // `final_poly` is in descending degree order [cₙ, ..., c₁, c₀], which is
         // the native order for Horner evaluation.
-        let generator = F::two_adic_generator(log_domain_size as usize);
+        let generator = subgroup.generator();
         for (idx, eval) in evals {
             // Domain index directly gives the exponent (no bit-reversal needed).
             let x = generator.exp_u64(idx as u64);

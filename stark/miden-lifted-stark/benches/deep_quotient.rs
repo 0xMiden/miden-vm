@@ -18,9 +18,9 @@ use std::hint::black_box;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use miden_lifted_stark::{
-    Lmcs, LmcsTree,
+    Coset, LiftedDomain, Lmcs, LmcsTree,
     testing::{
-        LOG_HEIGHTS, PARALLEL_STR, PointQuotients, RELATIVE_SPECS, bit_reversed_coset_points,
+        LOG_HEIGHTS, PARALLEL_STR, PointQuotients, RELATIVE_SPECS,
         configs::goldilocks_poseidon2::{Felt, QuadFelt, test_lmcs},
         generate_matrices_from_specs, total_elements,
     },
@@ -53,7 +53,8 @@ fn bench_deep_quotient(c: &mut Criterion) {
             matrix_groups.iter().map(|matrices| lmcs.build_tree(matrices.clone())).collect();
 
         // Precompute coset points (LDE domain matches max matrix height)
-        let coset_points = bit_reversed_coset_points::<Felt>(log_lde_height);
+        let domain = LiftedDomain::<Felt>::canonical(log_lde_height, 0);
+        let coset_points = domain.lde_coset().bit_reversed_points();
 
         // Get matrix references from trees (stored as BitReversedMatrixView after build_tree)
         let matrices_refs: Vec<Vec<_>> =

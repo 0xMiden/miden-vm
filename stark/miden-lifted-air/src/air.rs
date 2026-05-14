@@ -25,13 +25,13 @@ use alloc::vec::Vec;
 use p3_air::{BaseAir, WindowAccess};
 use p3_field::{ExtensionField, Field};
 use p3_matrix::dense::RowMajorMatrix;
-use p3_util::log2_ceil_usize;
 use thiserror::Error;
 
 use crate::{
     LiftedAirBuilder,
     auxiliary::{ReducedAuxValues, ReductionError, VarLenPublicInputs},
     symbolic::{AirLayout, SymbolicAirBuilder, SymbolicExpression, SymbolicExpressionExt},
+    util::log2_ceil_u8,
 };
 
 /// Super-trait for AIR definitions used by the lifted STARK prover/verifier.
@@ -224,7 +224,7 @@ pub trait LiftedAir<F: Field, EF>: Sync + BaseAir<F> {
     /// We clamp M ≥ 2 so that D ≥ 1. If M = 1 then `deg(C) < N`, and divisibility by
     /// `Z_H` would force C(X) to be the zero polynomial (i.e. the constraint carries no
     /// information about the trace).
-    fn log_quotient_degree(&self) -> usize
+    fn log_quotient_degree(&self) -> u8
     where
         Self: Sized,
     {
@@ -246,15 +246,15 @@ pub trait LiftedAir<F: Field, EF>: Sync + BaseAir<F> {
             .unwrap_or(0);
         let constraint_degree = base_degree.max(ext_degree).max(2);
 
-        log2_ceil_usize(constraint_degree - 1)
+        log2_ceil_u8(constraint_degree - 1)
     }
 
     /// Number of quotient chunks: `2^log_quotient_degree()`.
-    fn constraint_degree(&self) -> usize
+    fn quotient_degree(&self) -> usize
     where
         Self: Sized,
     {
-        1 << self.log_quotient_degree()
+        1 << self.log_quotient_degree() as usize
     }
 
     /// Check that a builder's dimensions match this AIR.

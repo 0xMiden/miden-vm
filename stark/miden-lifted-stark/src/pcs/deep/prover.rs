@@ -11,12 +11,10 @@ use p3_maybe_rayon::prelude::*;
 use tracing::info_span;
 
 use crate::{
+    domain::{Coset, LiftedDomain},
     lmcs::{Lmcs, LmcsTree, row_list::RowList},
     pcs::deep::{DeepParams, interpolate::PointQuotients},
-    util::{
-        align::aligned_widths, bitrev::bit_reversed_coset_points, horner::horner,
-        packing::PackedFieldExtensionExt,
-    },
+    util::{align::aligned_widths, horner::horner, packing::PackedFieldExtensionExt},
 };
 
 /// The DEEP quotient `Q(X)` evaluated over the LDE domain.
@@ -45,16 +43,16 @@ pub struct DeepPoly<EF> {
 impl<EF> DeepPoly<EF> {
     /// Construct `Q(X)` by evaluating trace trees at the opening points.
     ///
-    /// This computes the LDE coset points from the trace tree height, evaluates the committed
+    /// This computes the LDE coset points from `domain`, evaluates the committed
     /// matrices at `eval_points`, and then calls [`Self::from_evals`].
     ///
     /// Preconditions: `eval_points` must be distinct and lie outside the trace subgroup `H`
     /// and LDE evaluation coset `gK`. The outer protocol is expected to enforce this.
     pub fn from_trees<L, M, const N: usize, Ch>(
         params: DeepParams,
+        domain: &LiftedDomain<L::F>,
         trace_trees: &[&L::Tree<M>],
         eval_points: [EF; N],
-        log_blowup: u8,
         channel: &mut Ch,
     ) -> Self
     where
@@ -69,9 +67,14 @@ impl<EF> DeepPoly<EF> {
             trace_trees.iter().all(|tree| tree.height() == lde_height),
             "mixed trace tree heights are not supported"
         );
+        debug_assert_eq!(
+            log2_strict_u8(lde_height),
+            domain.log_lde_height(),
+            "tree height must match domain log_lde_height"
+        );
 
-        let log_lde_height = log2_strict_u8(lde_height);
-        let coset_points = bit_reversed_coset_points::<L::F>(log_lde_height);
+        let coset_points = domain.lde_coset().bit_reversed_points();
+        let log_blowup = domain.log_blowup();
 
         let matrices_groups: Vec<Vec<&M>> =
             trace_trees.iter().map(|tree| tree.leaves().iter().collect()).collect();

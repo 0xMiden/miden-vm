@@ -1,6 +1,5 @@
 use alloc::vec::Vec;
 
-use miden_lifted_air::log2_strict_u8;
 use miden_stark_transcript::ProverChannel;
 use p3_dft::{Radix2DFTSmallBatch, TwoAdicSubgroupDft};
 use p3_field::{ExtensionField, TwoAdicField};
@@ -10,6 +9,7 @@ use p3_util::reverse_slice_index_bits;
 use tracing::{debug_span, info_span};
 
 use crate::{
+    domain::{Coset, LiftedDomain},
     lmcs::{Lmcs, LmcsTree, tree_indices::TreeIndices},
     pcs::fri::FriParams,
 };
@@ -90,19 +90,26 @@ where
     /// evaluations and sampling a random challenge `beta` — until the degree is small enough to
     /// send the polynomial directly. The query phase then spot-checks that each fold was
     /// performed correctly.
-    pub fn new<Ch>(params: &FriParams, lmcs: &L, evals: Vec<EF>, channel: &mut Ch) -> Self
+    pub fn new<Ch>(
+        params: &FriParams,
+        lmcs: &L,
+        domain: &LiftedDomain<F>,
+        evals: Vec<EF>,
+        channel: &mut Ch,
+    ) -> Self
     where
         Ch: ProverChannel<F = F, Commitment = L::Commitment>,
     {
         let log_arity = params.fold.log_arity();
         let arity = params.fold.arity();
+        let log_blowup = domain.log_blowup();
+        let mut subgroup = *domain.lde_coset().subgroup();
 
         let mut folded_trees = Vec::new();
 
-        let mut domain_size = evals.len();
-        let log_domain_size = log2_strict_u8(domain_size);
-        let final_poly_degree = params.final_poly_degree(log_domain_size);
-        let final_domain_size = final_poly_degree << params.log_blowup;
+        debug_assert_eq!(evals.len(), subgroup.size(), "evals length must match subgroup size");
+        let final_poly_degree = params.final_poly_degree(domain);
+        let final_domain_size = final_poly_degree << log_blowup;
 
         // ─────────────────────────────────────────────────────────────────────────
         // Precompute s_inv for all cosets
@@ -123,20 +130,28 @@ where
         // and g has order 2^log_domain_size.
         //
         // We generate sequential powers of g_inv and bit-reverse to get s_inv values
-        // in the correct order for each row.
-        let g_inv = F::two_adic_generator(log_domain_size as usize).inverse();
-        let mut s_invs: Vec<F> = g_inv.powers().take(domain_size >> log_arity as usize).collect();
+        // in the correct order for each row. Per-round we shrink `s_invs` by selecting
+        // every `arity`-th element and raising to the `arity`-th power, which is
+        // equivalent to using the next subgroup's `generator_inverse` without paying
+        // for an inversion.
+        let mut s_invs: Vec<F> = subgroup
+            .generator_inverse()
+            .powers()
+            .take(subgroup.size() >> log_arity as usize)
+            .collect();
         reverse_slice_index_bits(&mut s_invs);
 
         let mut folded_evals = evals;
-        while domain_size > final_domain_size {
+        while subgroup.size() > final_domain_size {
             let round = folded_trees.len();
+            let domain_size = subgroup.size();
+            let folded_subgroup = subgroup.shrink(log_arity);
+
             // ─────────────────────────────────────────────────────────────────────
             // Reshape into matrix and wrap with FlatMatrixView for commitment
             // ─────────────────────────────────────────────────────────────────────
-            // domain_size evaluations → matrix with folded_domain_size rows × arity columns.
+            // domain_size evaluations → matrix with folded_subgroup.size() rows × arity columns.
             // FlatMatrixView presents the EF matrix as F matrix without copying.
-            let folded_domain_size = domain_size >> log_arity as usize;
             let matrix = RowMajorMatrix::new(folded_evals, arity);
             let flat_view = FlatMatrixView::new(matrix);
             // FRI round commitments use `build_tree` (unaligned) rather than
@@ -173,7 +188,7 @@ where
             folded_trees.push(tree);
 
             // Output of folding becomes the input domain for the next round.
-            domain_size = folded_domain_size;
+            subgroup = folded_subgroup;
 
             // ─────────────────────────────────────────────────────────────────────
             // Update s⁻¹ for next round
@@ -188,7 +203,7 @@ where
             //             = s_inv[k·arity]^arity
             //
             // So we select every `arity`-th element and raise to power `arity`.
-            let next_folded_size = domain_size >> log_arity as usize;
+            let next_folded_size = subgroup.size() >> log_arity as usize;
             s_invs = (0..next_folded_size)
                 .into_par_iter()
                 .map(|k| s_invs[k * arity].exp_power_of_2(log_arity as usize))

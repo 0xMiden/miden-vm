@@ -192,14 +192,16 @@ at `y_j`, and the opened trace values already correspond to `p_j(y_j)`.
 | `AirInstance` | Verifier instance (public values + variable-length inputs) |
 | `Transcript` | Structured transcript view (alias for `proof::StarkTranscript`) |
 | `StarkConfig` | PCS params + LMCS + DFT configuration |
-| `coset::LiftedCoset` | Domain operations: selectors, vanishing, coset shifts |
+| `domain::LiftedDomain` | Domain operations: selectors, vanishing, coset shifts |
+| `domain::TwoAdicSubgroup` | Two-adic subgroup with generator, vanishing, membership |
+| `domain::TwoAdicCoset` | Coset of a two-adic subgroup, with shift |
 
 ## Modules
 
 | Path | Purpose |
 |------|---------|
 | `src/config.rs` | `StarkConfig` — wraps `PcsParams`, LMCS, and DFT |
-| `src/coset.rs` | `LiftedCoset` — domain queries, selector computation, vanishing |
+| `src/domain.rs` | `TwoAdicSubgroup`, `TwoAdicCoset`, `LiftedDomain` — the domain hierarchy |
 | `src/selectors.rs` | `Selectors<T>` — generic container for row selectors |
 | `src/prover/mod.rs` | `prove_single`, `prove_multi` — orchestration and protocol flow |
 | `src/prover/commit.rs` | `Committed` — LDE, bit-reverse, LMCS tree construction |

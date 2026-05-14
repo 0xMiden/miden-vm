@@ -4,23 +4,24 @@
 //!   constraint-degree axis: `D_j -> D_max`, same polynomial, denser evaluations).
 //! - [`cyclic_extend_and_accumulate`]: Lift the running accumulator along the trace-height axis
 //!   (`n_j -> N`) by cyclic repetition, and Horner-fold a new AIR's contribution in via beta.
-//! - [`compute_z_h_inverses`]: Precompute the distinct `1 / Z_H` values on a quotient coset.
 //! - [`commit_quotient`]: Decompose Q(gJ) into chunks and commit on gK.
 
 use alloc::{format, vec, vec::Vec};
 
 use p3_dft::TwoAdicSubgroupDft;
 use p3_field::{
-    BasedVectorSpace, ExtensionField, Field, TwoAdicField, batch_multiplicative_inverse,
-    par_add_scaled_slice_in_place, par_scale_slice_in_place,
+    BasedVectorSpace, ExtensionField, Field, TwoAdicField, par_add_scaled_slice_in_place,
+    par_scale_slice_in_place,
 };
 use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::*;
-use p3_util::log2_strict_usize;
 use tracing::info_span;
 
 use crate::{
-    StarkConfig, coset::LiftedCoset, lmcs::Lmcs, prover::commit::Committed,
+    StarkConfig,
+    domain::{Coset, EvaluationDomain},
+    lmcs::Lmcs,
+    prover::commit::Committed,
     util::bitrev::materialize_bitrev,
 };
 
@@ -110,34 +111,6 @@ pub fn cyclic_extend_and_accumulate<EF: Field>(
 }
 
 // ============================================================================
-// Vanishing-polynomial inverses
-// ============================================================================
-
-/// Compute the `D = 2^log_constraint_degree` distinct values of `1 / Z_H` on the
-/// quotient evaluation coset `gJ`.
-///
-/// On `gJ` of size `N*D`, `Z_H(X) = X^N - 1` takes only `D` distinct values
-/// indexed by `i mod D`, so `D` inverses suffice. The caller applies
-/// `inv_z_h[i & (D - 1)]` to the `i`-th output point.
-pub fn compute_z_h_inverses<F: TwoAdicField>(coset: &LiftedCoset) -> Vec<F> {
-    // For a quotient coset, `log_blowup` is exactly the `log_constraint_degree`.
-    let log_blowup = coset.log_blowup();
-    let num_distinct = 1 << log_blowup;
-
-    // Z_H(g*w_J^i) = s^N * w_D^i - 1 where s is the coset shift and w_D is a
-    // D-th root of unity.
-    let shift: F = coset.lde_shift();
-    let s_pow_n = shift.exp_power_of_2(coset.log_trace_height as usize);
-    let z_h_evals: Vec<F> = F::two_adic_generator(log_blowup)
-        .powers()
-        .take(num_distinct)
-        .map(|x| s_pow_n * x - F::ONE)
-        .collect();
-
-    batch_multiplicative_inverse(&z_h_evals)
-}
-
-// ============================================================================
 // Quotient decomposition + commitment
 // ============================================================================
 
@@ -170,21 +143,19 @@ pub fn compute_z_h_inverses<F: TwoAdicField>(coset: &LiftedCoset) -> Vec<F> {
 pub fn commit_quotient<F, EF, SC>(
     config: &SC,
     q_evals: Vec<EF>,
-    coset: &LiftedCoset,
+    domain: &EvaluationDomain<F>,
 ) -> Committed<F, RowMajorMatrix<F>, SC::Lmcs>
 where
     F: TwoAdicField,
     EF: ExtensionField<F>,
     SC: StarkConfig<F, EF>,
 {
-    let n = coset.trace_height();
-    let d = q_evals.len() / n;
-    let log_d = log2_strict_usize(d);
-    let log_blowup = config.pcs().log_blowup();
-    let b = 1usize << log_blowup;
+    let n = domain.trace_height();
+    let d = domain.quotient_degree();
+    let lde_height = domain.lifted().lde_height();
 
-    debug_assert_eq!(q_evals.len() % n, 0, "q_evals length must be divisible by N");
-    debug_assert!(b >= d, "blowup B must be >= constraint degree D");
+    debug_assert_eq!(q_evals.len(), n * d, "q_evals length must equal N · D");
+    // D ≤ B (i.e. lde_height ≥ N · D) is enforced by `EvaluationDomain::new`.
 
     // ═══════════════════════════════════════════════════════════════════════
     // Step 0: Reshape to N × D matrix
@@ -209,7 +180,7 @@ where
     // Multiply c_hat[t, k] by (ω_Jᵗ)⁻ᵏ → a[t, k]·gᵏ.
     // This removes the per-coset shift ω_Jᵗ while keeping gᵏ baked in.
     info_span!("quotient scaling", n).in_scope(|| {
-        let omega_j_inv = F::two_adic_generator(coset.log_trace_height as usize + log_d).inverse();
+        let omega_j_inv = domain.subgroup().generator_inverse();
 
         // Precompute ω_J⁻ᵏ for k = 0..N with sequential multiplications
         let row_bases: Vec<F> = omega_j_inv.powers().take(n).collect();
@@ -223,15 +194,15 @@ where
     });
 
     // ═══════════════════════════════════════════════════════════════════════
-    // Step 3: Flatten EF → F, zero-pad to N·B rows
+    // Step 3: Flatten EF → F, zero-pad to LDE height (N·B rows)
     // ═══════════════════════════════════════════════════════════════════════
     // We flatten before the DFT (rather than using dft_algebra_batch) because
     // we need base field for commitment anyway — this skips the reconstitute.
     //
-    // Zero-padding from N to N·B rows is needed because `dft_batch` expects
-    // the full target-size buffer. The extra rows are zero because each qₜ has
-    // degree < N. We pad here (after iDFT + scaling) so those two steps work
-    // on the smaller N-row buffer.
+    // Zero-padding from N to lde_height rows is needed because `dft_batch`
+    // expects the full target-size buffer. The extra rows are zero because each
+    // qₜ has degree < N. We pad here (after iDFT + scaling) so those two steps
+    // work on the smaller N-row buffer.
     //
     // PERF: the full N·B-size DFT processes N·(B−1) zero rows through every
     // butterfly stage, costing O(N·B·log(N·B)) instead of O(N·B·log N). For
@@ -251,7 +222,7 @@ where
     // already does internally after the iDFT phase.
     let base_width = d * EF::DIMENSION;
     let mut base_coeffs = <EF as BasedVectorSpace<F>>::flatten_to_base(coeffs.values);
-    base_coeffs.resize(n * b * base_width, F::ZERO);
+    base_coeffs.resize(lde_height * base_width, F::ZERO);
     let coeffs_padded = RowMajorMatrix::new(base_coeffs, base_width);
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -259,7 +230,7 @@ where
     // ═══════════════════════════════════════════════════════════════════════
     // Because gᵏ is baked into the coefficients, the plain DFT evaluates
     // on gK directly: entry (i, t) gives qₜ(g·ω_Kⁱ).
-    let quotient_matrix = info_span!("quotient DFT", dims = %format!("{}x{base_width}", n * b))
+    let quotient_matrix = info_span!("quotient DFT", dims = %format!("{lde_height}x{base_width}"))
         .in_scope(|| {
             let lde = config.dft().dft_batch(coeffs_padded);
 
@@ -271,7 +242,8 @@ where
 
     let tree = config.lmcs().build_aligned_tree(vec![quotient_matrix]);
 
-    Committed::new(tree, log_blowup)
+    // The quotient is committed on the same LDE coset as the trace commits.
+    Committed::new(tree)
 }
 
 #[cfg(test)]
@@ -279,14 +251,11 @@ mod tests {
     use alloc::vec::Vec;
 
     use p3_dft::{NaiveDft, TwoAdicSubgroupDft};
-    use p3_field::{Field, PrimeCharacteristicRing, TwoAdicField};
+    use p3_field::{Field, PrimeCharacteristicRing};
     use p3_matrix::dense::RowMajorMatrix;
 
-    use super::{compute_z_h_inverses, upsample_evals};
-    use crate::{
-        coset::LiftedCoset,
-        testing::configs::goldilocks_poseidon2::{Felt, QuadFelt},
-    };
+    use super::upsample_evals;
+    use crate::testing::configs::goldilocks_poseidon2::{Felt, QuadFelt};
 
     fn coeffs(height: usize) -> Vec<QuadFelt> {
         (0..height).map(|i| QuadFelt::from_u64((i as u64) + 1)).collect()
@@ -330,30 +299,5 @@ mod tests {
         let evals = coeffs(8);
         let out = upsample_evals::<Felt, QuadFelt, _>(&NaiveDft, evals.clone(), 0);
         assert_eq!(out, evals);
-    }
-
-    /// Verify that `compute_z_h_inverses` returns the true pointwise inverses of
-    /// `Z_H(x) = x^N - 1` at the `D` distinct values it takes on the quotient coset.
-    #[test]
-    fn compute_z_h_inverses_product_is_one() {
-        let log_trace_height = 5u8;
-        let log_blowup = 3u8;
-        let log_max_trace_height = 5u8;
-        let log_constraint_degree = 2u8; // D = 4
-
-        let lde = LiftedCoset::new(log_trace_height, log_blowup, log_max_trace_height);
-        let coset = lde.quotient_domain(log_constraint_degree);
-        let inv_z_h = compute_z_h_inverses::<Felt>(&coset);
-
-        assert_eq!(inv_z_h.len(), 1 << log_constraint_degree);
-
-        let n = 1u64 << log_trace_height;
-        let g: Felt = coset.lde_shift();
-        let w_j = Felt::two_adic_generator((log_trace_height + log_constraint_degree) as usize);
-        for (i, &inv) in inv_z_h.iter().enumerate() {
-            let x = g * w_j.exp_u64(i as u64);
-            let z_h_x = x.exp_u64(n) - Felt::ONE;
-            assert_eq!(z_h_x * inv, Felt::ONE, "point {i}");
-        }
     }
 }
