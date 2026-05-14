@@ -358,8 +358,8 @@ impl FastProcessor {
     #[inline(always)]
     pub(crate) fn deferred_view_mut(
         &mut self,
-    ) -> (&mut crate::deferred::DeferredState, &mut dyn Schema) {
-        (self.advice.deferred_state_mut(), &mut *self.deferred_schema)
+    ) -> (&mut crate::deferred::DeferredState, &dyn Schema) {
+        (self.advice.deferred_state_mut(), &*self.deferred_schema)
     }
 
     /// Returns true if decorators should be executed.

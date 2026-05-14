@@ -94,7 +94,14 @@ impl Node {
 /// External witness consumed by the deferred-DAG verifier.
 ///
 /// Contains:
-/// - `nodes`: the expression-kind nodes reachable from the assertions, sorted deterministically.
+/// - `nodes`: every expression-kind node the verifier needs to re-check the assertions, in
+///   digest order. This includes both the nodes the program explicitly registered **and** every
+///   canonical intermediate produced during `DeferredState::evaluate` (e.g. `(a+b) → leaf`).
+///   The verifier does not re-execute the DAG — it checks each node is locally consistent
+///   against its neighbors (an `ADD` op's payload digests, plus the canonical-leaf digest its
+///   reduction names, must satisfy `eval_op`). Missing intermediates would leave the witness
+///   referencing digests no node defines, so the prover must intern the whole reduction proof,
+///   not just the final canonical answer.
 /// - `assertions`: every assertion-kind node, in registration order.
 /// - `transcript`: a single rolling Poseidon2 digest over the assertion stream, mirroring
 ///   [`crate::precompile::PrecompileTranscript`]. The verifier re-folds this from `assertions`

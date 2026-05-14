@@ -10,12 +10,10 @@
 //!
 //! ```ignore
 //! enum AppSchema { Field0(Field0), Curve(Curve), Hash(Hash) }
-//! impl Schema for AppSchema { /* delegate is_valid + eval to the right variant */ }
+//! impl Schema for AppSchema { /* delegate is_valid + reduce to the right variant */ }
 //! ```
 
-use miden_core::deferred::Node;
-
-use super::state::DeferredState;
+use miden_core::deferred::{Digest, Node};
 
 // SCHEMA ERROR
 // ================================================================================================
@@ -57,8 +55,26 @@ pub enum NodeType {
     /// A storable computation node (leaf or op). Inserted into `DeferredState::nodes`.
     Expression,
     /// An equality-assertion record. Appended to `DeferredState::assertions`, folded into the
-    /// running transcript, and verified via [`Schema::eval`] before the handler returns.
+    /// running transcript, and verified via [`Schema::reduce`] before the handler returns.
     Assertion,
+}
+
+// CHILD RESOLVER
+// ================================================================================================
+
+/// Recursive resolver supplied to [`Schema::reduce`].
+///
+/// A schema impl calls [`Self::resolve`] on each child digest it discovers in `node.payload`.
+/// The resolver returns that child's *canonical* form — already fully reduced — letting
+/// `reduce` read like a depth-first recursive function: "resolve lhs, resolve rhs, combine."
+///
+/// Why a trait (vs. a closure): `reduce` is itself recursive through the resolver — the
+/// resolver's implementation calls back into `Schema::reduce`. That requires a *named* type
+/// (a closure can't pass itself to a function it calls). The trait is also the seam between
+/// the prover-side store ([`crate::deferred::DeferredState`]) and a future verifier-side store
+/// backed by a [`miden_core::deferred::DeferredWitness`] — same schema, different backend.
+pub trait ChildResolver {
+    fn resolve(&mut self, digest: Digest) -> Result<Node, SchemaError>;
 }
 
 // SCHEMA TRAIT
@@ -69,29 +85,34 @@ pub enum NodeType {
 /// Two methods own the entire semantic surface:
 ///
 /// - [`is_valid`](Self::is_valid) classifies a node at register time. `None` rejects it.
-/// - [`eval`](Self::eval) executes the node's semantics: for expressions it reduces to canonical
-///   form; for assertions it evaluates both operands, compares them, and returns
-///   [`SchemaError::AssertionFailed`] on mismatch. The processor uses `eval` for both purposes —
-///   "reduce this node" and "verify this assertion" are the same call.
+/// - [`reduce`](Self::reduce) reduces a node to its canonical form, using a [`ChildResolver`]
+///   to recursively reduce each child digest it references.
+///
+/// `reduce` takes `&self` only — the schema is stateless from the driver's perspective. Any
+/// per-schema memoization that ever becomes necessary should live in [`DeferredState`] (or
+/// the verifier's witness-side equivalent) as a `digest → canonical` cache, since the speedup
+/// is keyed on input digests and benefits any schema.
 pub trait Schema: core::fmt::Debug + Send {
     /// Classifies the node at register time.
     ///
     /// - `None` rejects the registration (maps to [`SchemaError::InvalidNode`]).
     /// - `Some(NodeType::Expression)` inserts the node into the DAG node map.
     /// - `Some(NodeType::Assertion)` appends the node to the assertion list, folds it into the
-    ///   running transcript, and triggers verification via [`Self::eval`].
+    ///   running transcript, and triggers verification via [`Self::reduce`].
     fn is_valid(&self, node: &Node) -> Option<NodeType>;
 
-    /// Executes the semantics of `node`.
+    /// Reduces `node` to its canonical form. The schema picks the child digests off
+    /// `node.payload` and calls `children.resolve(d)` on each to get the corresponding
+    /// canonical-form child node back.
     ///
-    /// For expression nodes this reduces `node` to its canonical form, recursing into children
-    /// via `graph` as needed. For assertion nodes this evaluates the two operands referenced in
-    /// `node.payload`, compares them, and returns [`SchemaError::AssertionFailed`] if they
-    /// disagree. The return value is the canonical form for expressions, or simply `node`
-    /// itself for assertions (the caller ignores it — verification is the side effect).
-    ///
-    /// `&mut self` lets implementations memoize evaluation across calls.
-    fn eval(&mut self, graph: &DeferredState, node: Node) -> Result<Node, SchemaError>;
+    /// For expression nodes the return value is the canonical form. For assertion nodes the
+    /// schema compares the resolved operands and returns either `node` itself (on success) or
+    /// [`SchemaError::AssertionFailed`] (on mismatch).
+    fn reduce(
+        &self,
+        node: Node,
+        children: &mut dyn ChildResolver,
+    ) -> Result<Node, SchemaError>;
 }
 
 // NOOP SCHEMA
@@ -110,7 +131,11 @@ impl Schema for NoopSchema {
         None
     }
 
-    fn eval(&mut self, _graph: &DeferredState, _node: Node) -> Result<Node, SchemaError> {
+    fn reduce(
+        &self,
+        _node: Node,
+        _children: &mut dyn ChildResolver,
+    ) -> Result<Node, SchemaError> {
         Err(SchemaError::NoSchemaInstalled)
     }
 }
@@ -128,15 +153,22 @@ mod tests {
         Felt::new_unchecked(0),
     ];
 
+    /// A child resolver that never gets called — used in schema-only tests.
+    struct NeverResolve;
+    impl ChildResolver for NeverResolve {
+        fn resolve(&mut self, _digest: Digest) -> Result<Node, SchemaError> {
+            panic!("NoopSchema must not request any children");
+        }
+    }
+
     #[test]
     fn noop_schema_rejects_everything() {
-        let mut schema = NoopSchema;
+        let schema = NoopSchema;
         let payload = miden_core::deferred::Payload::new([Felt::from_u32(0); 8]);
         let node = Node::new(TEST_TAG, payload);
 
         assert!(schema.is_valid(&node).is_none());
-        let graph = DeferredState::new();
-        let err = schema.eval(&graph, node).unwrap_err();
+        let err = schema.reduce(node, &mut NeverResolve).unwrap_err();
         assert!(matches!(err, SchemaError::NoSchemaInstalled));
     }
 }

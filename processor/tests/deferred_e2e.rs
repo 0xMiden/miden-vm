@@ -154,9 +154,12 @@ fn deferred_end_to_end_register_eval_assert() {
     assert_eq!(state.transcript(), expected_transcript);
     assert_ne!(state.transcript(), Word::new([ZERO; 4]));
 
-    // Witness includes every registered expression node + the assertion + the transcript.
+    // Witness includes every registered expression node + the assertion's interned
+    // intermediates + the transcript. The assertion's eval reduces (a+b) → leaf(7) and
+    // (a+b)*c → leaf(35). leaf(35) collides with the pre-registered `d`, so the witness
+    // gains one new node beyond the six originally registered: canonical(add) = leaf(7).
     let witness = state.extract_witness();
-    assert_eq!(witness.nodes.len(), 6);
+    assert_eq!(witness.nodes.len(), 7);
     let witness_digests: Vec<_> = witness.nodes.iter().map(|(d, _)| *d).collect();
     assert!(witness_digests.windows(2).all(|p| p[0] < p[1]));
     for d in expected_digests {

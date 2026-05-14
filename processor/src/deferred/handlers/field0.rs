@@ -5,8 +5,7 @@ use miden_core::{
 
 use crate::deferred::{
     Schema,
-    schema::{NodeType, SchemaError},
-    state::DeferredState,
+    schema::{ChildResolver, NodeType, SchemaError},
 };
 
 /// Handler for the first 256-bit non-native field, `Field0`.
@@ -85,24 +84,21 @@ impl Schema for Field0Handler {
         }
     }
 
-    fn eval(&mut self, graph: &DeferredState, node: Node) -> Result<Node, SchemaError> {
+    fn reduce(
+        &self,
+        node: Node,
+        children: &mut dyn ChildResolver,
+    ) -> Result<Node, SchemaError> {
         if node.tag == Self::LEAF {
             return Ok(node);
         }
+        let (lhs_digest, rhs_digest) = Self::binary_op_children(&node.payload);
+        let lhs = children.resolve(lhs_digest)?;
+        let rhs = children.resolve(rhs_digest)?;
         if node.tag == Self::ADD || node.tag == Self::MUL {
-            let (lhs_digest, rhs_digest) = Self::binary_op_children(&node.payload);
-            let lhs_node = *graph.get(&lhs_digest)?;
-            let rhs_node = *graph.get(&rhs_digest)?;
-            let lhs = self.eval(graph, lhs_node)?;
-            let rhs = self.eval(graph, rhs_node)?;
             return Ok(self.eval_op(node.tag, lhs, rhs)?);
         }
         if node.tag == Self::ASSERT_EQ {
-            let (lhs_digest, rhs_digest) = Self::binary_op_children(&node.payload);
-            let lhs_node = *graph.get(&lhs_digest)?;
-            let rhs_node = *graph.get(&rhs_digest)?;
-            let lhs = self.eval(graph, lhs_node)?;
-            let rhs = self.eval(graph, rhs_node)?;
             if lhs != rhs {
                 return Err(SchemaError::AssertionFailed);
             }
