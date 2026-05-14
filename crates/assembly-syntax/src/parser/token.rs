@@ -507,8 +507,6 @@ pub enum Token<'input> {
     Cswap,
     Cswapw,
     Debug,
-    DeferredEvaluate,
-    DeferredRegister,
     Div,
     Drop,
     Dropw,
@@ -522,6 +520,7 @@ pub enum Token<'input> {
     Enum,
     Eq,
     Eqw,
+    EvaluateDeferred,
     Ext2Add,
     Ext2Div,
     Ext2Inv,
@@ -598,6 +597,7 @@ pub enum Token<'input> {
     Ptr,
     Pub,
     Push,
+    RegisterDeferred,
     Repeat,
     Reversew,
     Reversedw,
@@ -738,8 +738,8 @@ impl fmt::Display for Token<'_> {
             Token::Cswap => write!(f, "cswap"),
             Token::Cswapw => write!(f, "cswapw"),
             Token::Debug => write!(f, "debug"),
-            Token::DeferredEvaluate => write!(f, "deferred_evaluate"),
-            Token::DeferredRegister => write!(f, "deferred_register"),
+            Token::EvaluateDeferred => write!(f, "evaluate_deferred"),
+            Token::RegisterDeferred => write!(f, "register_deferred"),
             Token::Div => write!(f, "div"),
             Token::Drop => write!(f, "drop"),
             Token::Dropw => write!(f, "dropw"),
@@ -972,8 +972,6 @@ impl<'input> Token<'input> {
                 | Token::Cswap
                 | Token::Cswapw
                 | Token::Debug
-                | Token::DeferredEvaluate
-                | Token::DeferredRegister
                 | Token::Div
                 | Token::Drop
                 | Token::Dropw
@@ -984,6 +982,7 @@ impl<'input> Token<'input> {
                 | Token::Emit
                 | Token::Eq
                 | Token::Eqw
+                | Token::EvaluateDeferred
                 | Token::Ext2Add
                 | Token::Ext2Div
                 | Token::Ext2Inv
@@ -1045,6 +1044,7 @@ impl<'input> Token<'input> {
                 | Token::Pow2
                 | Token::Procref
                 | Token::Push
+                | Token::RegisterDeferred
                 | Token::Repeat
                 | Token::Reversew
                 | Token::Reversedw
@@ -1133,11 +1133,13 @@ impl<'input> Token<'input> {
         ("adv", Token::Adv),
         ("adv_map", Token::AdvMap),
         ("eval_circuit", Token::EvalCircuit),
+        ("evaluate_deferred", Token::EvaluateDeferred),
         ("insert_hdword", Token::InsertHdword),
         ("insert_hdword_d", Token::InsertHdwordWithDomain),
         ("insert_hqword", Token::InsertHqword),
         ("insert_hperm", Token::InsertHperm),
         ("insert_mem", Token::InsertMem),
+        ("register_deferred", Token::RegisterDeferred),
         ("adv_loadw", Token::AdvLoadw),
         ("adv_pipe", Token::AdvPipe),
         ("adv_push", Token::AdvPush),
@@ -1164,8 +1166,6 @@ impl<'input> Token<'input> {
         ("cswap", Token::Cswap),
         ("cswapw", Token::Cswapw),
         ("debug", Token::Debug),
-        ("deferred_evaluate", Token::DeferredEvaluate),
-        ("deferred_register", Token::DeferredRegister),
         ("div", Token::Div),
         ("drop", Token::Drop),
         ("dropw", Token::Dropw),

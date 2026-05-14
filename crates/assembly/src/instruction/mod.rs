@@ -8,7 +8,6 @@ use miden_assembly_syntax::{
 };
 use miden_core::{
     Felt, WORD_SIZE, ZERO,
-    events::SystemEvent,
     mast::MastNodeId,
     operations::{AssemblyOp, Decorator, Operation},
 };
@@ -519,12 +518,6 @@ impl Assembler {
             },
             Instruction::SysEvent(system_event) => {
                 block_builder.push_system_event(system_event.into())
-            },
-            Instruction::DeferredRegister => {
-                block_builder.push_system_event(SystemEvent::DeferredRegister)
-            },
-            Instruction::DeferredEvaluate => {
-                block_builder.push_system_event(SystemEvent::DeferredEvaluate)
             },
 
             // ----- cryptographic instructions ---------------------------------------------------

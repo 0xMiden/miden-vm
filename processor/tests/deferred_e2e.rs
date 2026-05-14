@@ -1,4 +1,4 @@
-//! End-to-end test: drive the unified `deferred_register` keyword through a real `FastProcessor`
+//! End-to-end test: drive the `adv.register_deferred` keyword through a real `FastProcessor`
 //! run, then inspect the `DeferredState` accumulated on the advice provider and the extracted
 //! witness. Includes a legacy-smoke check that an unrelated `EventHandler` registered on the
 //! host still fires alongside the deferred infrastructure.
@@ -37,23 +37,23 @@ fn build_processor() -> FastProcessor {
 // MASM BUILDERS
 // ================================================================================================
 
-/// Build a MASM block that pushes the 4-felt tag then the 8-felt payload, invokes the unified
-/// `deferred_register` keyword, and cleans up the 12 felts left on the operand stack.
+/// Build a MASM block that pushes the 4-felt tag then the 8-felt payload, invokes the
+/// `adv.register_deferred` keyword, and cleans up the 12 felts left on the operand stack.
 fn emit_register(src: &mut String, node: Node) {
     push_node(src, node);
-    src.push_str("    deferred_register\n");
+    src.push_str("    adv.register_deferred\n");
     for _ in 0..12 {
         src.push_str("    drop\n");
     }
 }
 
-/// Build a MASM block that pushes the node, invokes `deferred_evaluate`, drops the 12 input
+/// Build a MASM block that pushes the node, invokes `adv.evaluate_deferred`, drops the 12 input
 /// felts, and pulls the canonical 12 felts off the advice stack into memory starting at
 /// `out_base` so the test can inspect them via `output.memory`.
 fn emit_evaluate_into_mem(src: &mut String, node: Node, out_base: u32) {
     use core::fmt::Write;
     push_node(src, node);
-    src.push_str("    deferred_evaluate\n");
+    src.push_str("    adv.evaluate_deferred\n");
     for _ in 0..12 {
         src.push_str("    drop\n");
     }
@@ -171,12 +171,12 @@ fn deferred_end_to_end_register_eval_assert() {
     assert_eq!(witness.transcript, expected_transcript);
 }
 
-// E2E: deferred_evaluate pushes the canonical (tag, payload) onto the advice stack.
+// E2E: adv.evaluate_deferred pushes the canonical (tag, payload) onto the advice stack.
 // ================================================================================================
 
 #[test]
 fn deferred_evaluate_pushes_canonical_form_to_advice() {
-    // Register two leaves a=3 and b=4, then ask `deferred_evaluate` for the canonical form of
+    // Register two leaves a=3 and b=4, then ask `adv.evaluate_deferred` for the canonical form of
     // (a + b). Confirm the advice-pop yields a leaf node with payload limb0 = 7.
     let a = field0_leaf(3);
     let b = field0_leaf(4);

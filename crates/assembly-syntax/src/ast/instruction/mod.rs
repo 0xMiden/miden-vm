@@ -247,8 +247,6 @@ pub enum Instruction {
     AdvLoadW,
 
     SysEvent(SystemEventNode),
-    DeferredRegister,
-    DeferredEvaluate,
 
     // ----- cryptographic operations ------------------------------------------------------------
     Hash,

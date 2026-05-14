@@ -554,12 +554,12 @@ impl SystemEvent {
         SystemEventEntry {
             id: EventId::from_u64(3200266522440553751),
             event: SystemEvent::DeferredRegister,
-            name: "sys::deferred_register",
+            name: "sys::adv::register_deferred",
         },
         SystemEventEntry {
             id: EventId::from_u64(12566028600487412345),
             event: SystemEvent::DeferredEvaluate,
-            name: "sys::deferred_evaluate",
+            name: "sys::adv::evaluate_deferred",
         },
     ];
 }

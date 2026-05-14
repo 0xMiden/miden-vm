@@ -262,8 +262,6 @@ impl PrettyPrint for Instruction {
             Self::AdvLoadW => const_text("adv_loadw"),
 
             Self::SysEvent(sys_event) => inst_with_imm("adv", sys_event),
-            Self::DeferredRegister => const_text("deferred_register"),
-            Self::DeferredEvaluate => const_text("deferred_evaluate"),
 
             // ----- cryptographic operations -----------------------------------------------------
             Self::Hash => const_text("hash"),

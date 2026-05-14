@@ -3606,7 +3606,7 @@ begin adv.has_mapkey assert end"
     Ok(())
 }
 
-/// Smoke-test that the unified `deferred_register` keyword parses and assembles. Semantics
+/// Smoke-test that the `adv.register_deferred` keyword parses and assembles. Semantics
 /// are exercised end-to-end in `processor/tests/deferred_e2e.rs`.
 #[test]
 fn test_deferred_keywords_assemble() -> TestResult {
@@ -3616,7 +3616,7 @@ fn test_deferred_keywords_assemble() -> TestResult {
         "\
 begin
     padw padw padw
-    deferred_register
+    adv.register_deferred
     dropw dropw dropw
 end"
     );
