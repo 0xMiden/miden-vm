@@ -74,9 +74,10 @@ where
             MastNodeBuilder::Call(builder)
         },
         MastNode::Block(basic_block_node) => {
-            // For BasicBlockNode, we need to remap op-indexed decorators as well
-            let builder = BasicBlockNodeBuilder::new(
-                basic_block_node.operations().copied().collect(),
+            // Preserve stored batches so copied blocks do not turn padding operations into raw
+            // operations.
+            let builder = BasicBlockNodeBuilder::from_op_batches(
+                basic_block_node.op_batches().to_vec(),
                 basic_block_node
                     .indexed_decorator_iter(source_forest)
                     .map(|(idx, decorator_id)| {
@@ -84,6 +85,7 @@ where
                         Ok((idx, mapped_decorator))
                     })
                     .collect::<Result<Vec<_>, _>>()?,
+                basic_block_node.digest(),
             )
             .with_before_enter(before_enter_decorators)
             .with_after_exit(after_exit_decorators);

@@ -365,15 +365,13 @@ fn library_procedure_collision() -> Result<(), Report> {
     // make sure lib2 has the expected exports (i.e., bar1 and bar2)
     assert_eq!(lib2.num_exports(), 2);
 
-    // AssemblyOp metadata now participates in assembler-side deduplication, so a re-exported
-    // procedure and a locally defined procedure with the same operations remain distinct when
-    // their source mappings differ.
+    // The re-exported procedure and the locally defined procedure have the same MAST shape, so
+    // they share the same node.
     let lib2_bar_bar1 = QualifiedProcedureName::from_str("lib2::bar::bar1").unwrap();
     let lib2_bar_bar2 = QualifiedProcedureName::from_str("lib2::bar::bar2").unwrap();
-    assert_ne!(lib2.get_export_node_id(&lib2_bar_bar1), lib2.get_export_node_id(&lib2_bar_bar2));
+    assert_eq!(lib2.get_export_node_id(&lib2_bar_bar1), lib2.get_export_node_id(&lib2_bar_bar2));
 
-    // Keeping those procedures distinct adds one more node to the library forest.
-    assert_eq!(lib2.mast_forest().num_nodes(), 6);
+    assert_eq!(lib2.mast_forest().num_nodes(), 5);
 
     Ok(())
 }
@@ -5065,10 +5063,9 @@ fn duplicate_procedure() {
     "#;
 
     let program = context.assemble(program_source).unwrap();
-    // AssemblyOp metadata now participates in assembler-side deduplication. Even though
-    // `foo` and `bar` have the same operations, they carry different source mappings and
-    // therefore must remain distinct procedures. The entrypoint is a third procedure.
-    assert_eq!(program.num_procedures(), 3);
+    // `foo` and `bar` have the same body, so they are deduplicated. The entrypoint is the second
+    // procedure.
+    assert_eq!(program.num_procedures(), 2);
 }
 
 #[test]
