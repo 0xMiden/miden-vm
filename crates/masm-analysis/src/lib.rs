@@ -5,7 +5,6 @@ use std::{collections::HashMap, sync::Arc};
 use masm_decompiler::analysis::{SymbolPath, Workspace};
 use miden_debug_types::DefaultSourceManager;
 
-mod abstract_interp;
 mod capability;
 pub mod lint;
 mod lint_policy;

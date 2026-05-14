@@ -1,6 +1,6 @@
 //! Abstract memory address identity used by local type inference.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use super::domain::{TypeFact, VarKey};
 use crate::ir::Var;
@@ -47,6 +47,11 @@ pub(super) struct MemoryState {
     /// result. Also propagated through variable copies
     /// (`Assign { expr: Var(src) }`).
     var_address_keys: HashMap<VarKey, MemAddressKey>,
+    /// Variables whose memory identity is known to be ambiguous.
+    ///
+    /// This prevents a conflict found during lattice merge from being re-added
+    /// as a concrete identity on the next join.
+    ambiguous_address_keys: HashSet<VarKey>,
     /// Inferred types for memory locations, keyed by abstract address.
     mem_types: HashMap<MemAddressKey, TypeFact>,
     /// Requirements propagated backward to memory locations.
@@ -56,12 +61,19 @@ pub(super) struct MemoryState {
 impl MemoryState {
     /// Resolve the abstract memory address key for a variable, if known.
     pub(super) fn address_key_for_var(&self, var: &Var) -> Option<MemAddressKey> {
-        self.var_address_keys.get(&VarKey::from_var(var)).copied()
+        let key = VarKey::from_var(var);
+        if self.ambiguous_address_keys.contains(&key) {
+            None
+        } else {
+            self.var_address_keys.get(&key).copied()
+        }
     }
 
     /// Associate a variable with an abstract memory address key.
     pub(super) fn set_var_address_key(&mut self, var: &Var, key: MemAddressKey) {
-        self.var_address_keys.insert(VarKey::from_var(var), key);
+        let var_key = VarKey::from_var(var);
+        self.ambiguous_address_keys.remove(&var_key);
+        self.var_address_keys.insert(var_key, key);
     }
 
     /// Read the inferred type for a memory address, if one has been stored.
@@ -110,5 +122,46 @@ impl MemoryState {
         {
             self.set_var_address_key(dest, lk);
         }
+    }
+
+    /// Join another memory state into this one.
+    pub(super) fn join_assign(&mut self, other: &Self) -> bool {
+        let mut changed = false;
+
+        for key in &other.ambiguous_address_keys {
+            changed |= self.mark_ambiguous_address_key(key.clone());
+        }
+
+        for (var_key, address_key) in &other.var_address_keys {
+            if self.ambiguous_address_keys.contains(var_key) {
+                continue;
+            }
+            match self.var_address_keys.get(var_key).copied() {
+                Some(existing) if existing == *address_key => {},
+                Some(_) => {
+                    changed |= self.mark_ambiguous_address_key(var_key.clone());
+                },
+                None => {
+                    self.var_address_keys.insert(var_key.clone(), *address_key);
+                    changed = true;
+                },
+            }
+        }
+
+        for (key, ty) in &other.mem_types {
+            changed |= self.record_store_type(*key, *ty);
+        }
+
+        for (key, req) in &other.mem_requirements {
+            changed |= self.require_address(*key, *req);
+        }
+
+        changed
+    }
+
+    fn mark_ambiguous_address_key(&mut self, key: VarKey) -> bool {
+        let removed = self.var_address_keys.remove(&key).is_some();
+        let inserted = self.ambiguous_address_keys.insert(key);
+        removed || inserted
     }
 }

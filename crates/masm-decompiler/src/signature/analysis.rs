@@ -1,5 +1,5 @@
-use log::debug;
 use miden_assembly_syntax::ast::{Block, Immediate, Instruction, InvocationTarget, Op, Procedure};
+use tracing::debug;
 
 use super::{ProcSignature, SignatureMap, domain::ProvenanceStack, effects::StackEffect};
 use crate::{

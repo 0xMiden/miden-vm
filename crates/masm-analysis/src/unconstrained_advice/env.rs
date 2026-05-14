@@ -2,10 +2,9 @@
 
 use std::collections::{HashMap, HashSet};
 
-use masm_decompiler::analysis::{Var, VarKey};
+use masm_decompiler::analysis::{JoinSemiLattice, Var, VarKey};
 
 use super::{domain::AdviceFact, u32_domain::U32Validity};
-use crate::abstract_interp::JoinSemiLattice;
 
 /// Exact witness that a boolean value was computed as `x == 0`.
 #[derive(Debug, Clone, PartialEq, Eq)]

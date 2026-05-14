@@ -1,9 +1,10 @@
 //! Loop transfer helpers for unconstrained-advice analyses.
 
-use masm_decompiler::analysis::{LoopPhi, Var};
+use masm_decompiler::analysis::{
+    FixpointConfig, JoinSemiLattice, LoopPhi, Var, iterate_to_fixpoint,
+};
 
 use super::env::Env;
-use crate::abstract_interp::{FixpointConfig, JoinSemiLattice, iterate_to_fixpoint};
 
 /// Maximum number of loop-approximation passes.
 const MAX_LOOP_PASSES: usize = 32;

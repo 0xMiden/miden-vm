@@ -46,6 +46,32 @@ end
 }
 
 #[test]
+fn clean_inputs_exit_with_code_zero_with_debug_tracing_enabled() {
+    let dir = temp_dir("clean-exit-debug-tracing");
+    let file = dir.join("clean.masm");
+    fs::write(
+        &file,
+        "\
+pub proc clean(seed: felt) -> felt
+    push.1
+    add
+end
+",
+    )
+    .expect("failed to write clean MASM fixture");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_masm-lint"))
+        .arg("--no-color")
+        .arg(&file)
+        .current_dir(&dir)
+        .env("MIDEN_LOG", "debug")
+        .output()
+        .expect("run masm-lint");
+
+    assert_eq!(output.status.code(), Some(0), "clean input with tracing output: {output:?}");
+}
+
+#[test]
 fn warning_inputs_exit_with_code_one() {
     let dir = temp_dir("warning-exit");
     let file = dir.join("warning.masm");

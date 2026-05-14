@@ -176,8 +176,6 @@ impl From<&Instruction> for StackEffect {
             Ext2Add | Ext2Sub | Ext2Mul | Ext2Div => StackEffect::known(4, 2),
             Ext2Neg | Ext2Inv => StackEffect::known(2, 2),
 
-            // TODO: Review remaining instruction effects.
-
             // Cryptographic operations
             Hash => StackEffect::known(4, 4),
             HMerge => StackEffect::known(8, 4),
