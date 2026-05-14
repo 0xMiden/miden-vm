@@ -20,10 +20,12 @@ pub struct ExecutionOptions {
     max_adv_map_value_size: usize,
     /// Maximum total number of field elements allowed in live advice map keys and values.
     max_adv_map_elements: usize,
-    /// Maximum total number of field elements allowed across the entire advice provider state.
+    /// Maximum total number of field elements allowed across budgeted advice-provider
+    /// components.
     ///
-    /// This includes advice stack elements, advice map elements (keys + values), and Merkle store
-    /// nodes converted into field-element units.
+    /// This includes advice stack elements, advice map elements (keys + values), and
+    /// Merkle-store nodes converted into field-element units. Deferred precompile requests are
+    /// not counted.
     max_adv_provider_elements: usize,
     /// Maximum number of input bytes allowed for a single hash precompile invocation.
     max_hash_len_bytes: usize,
@@ -73,7 +75,8 @@ impl ExecutionOptions {
     /// finite host-memory backstop. Each entry contributes 4 key elements plus its value length.
     pub const DEFAULT_MAX_ADV_MAP_ELEMENTS: usize = 1 << 20;
 
-    /// Default maximum total number of field elements allowed across all advice-provider state.
+    /// Default maximum total number of field elements allowed across budgeted advice-provider
+    /// components.
     ///
     /// Set to `usize::MAX` to preserve current behavior unless the caller opts into a stricter
     /// unified limit.
@@ -241,8 +244,8 @@ impl ExecutionOptions {
         self.max_adv_map_elements
     }
 
-    /// Returns the maximum total number of field elements allowed across all advice-provider
-    /// state.
+    /// Returns the maximum total number of field elements allowed across budgeted
+    /// advice-provider components.
     #[inline]
     pub fn max_adv_provider_elements(&self) -> usize {
         self.max_adv_provider_elements
@@ -266,7 +269,8 @@ impl ExecutionOptions {
         self
     }
 
-    /// Sets the maximum total number of field elements allowed across all advice-provider state.
+    /// Sets the maximum total number of field elements allowed across budgeted advice-provider
+    /// components.
     pub fn with_max_adv_provider_elements(mut self, size: usize) -> Self {
         self.max_adv_provider_elements = size;
         self

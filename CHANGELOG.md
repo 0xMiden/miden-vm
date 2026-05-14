@@ -6,6 +6,7 @@
 
 - Improved performances of auxiliary trace generation ([#3119](https://github.com/0xMiden/miden-vm/pull/3119)).
 - Aligned replay stack word access bounds with `StackInterface`, allowing the maximum valid start index for word reads and writes ([#3014](https://github.com/0xMiden/miden-vm/pull/3014)).
+- Added an optional unified advice-provider element budget via `ExecutionOptions::with_max_adv_provider_elements(...)`, enforced across advice stack, advice map, and Merkle store growth in `AdviceProvider` (deferred precompile requests are not counted by this budget) ([#3141](https://github.com/0xMiden/miden-vm/pull/3141)).
 
 #### Fixes
 
