@@ -129,5 +129,4 @@ pub fn ext2_inv(block_builder: &mut BasicBlockBuilder) {
         Assert(ZERO),   // [a0', a1', ...] (verify c0 is truthy, i.e. == 1)
     ];
     block_builder.push_ops(ops);
-
 }

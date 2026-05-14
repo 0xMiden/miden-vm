@@ -557,7 +557,7 @@ where
         &self,
         package_id: &PackageId,
         selected: &PackageVersion,
-    ) -> bool  {
+    ) -> bool {
         let Some(record) = self.store.get_by_semver(package_id, &selected.version) else {
             return true;
         };

@@ -170,7 +170,6 @@ impl BasicBlockBuilder<'_> {
             context_name: proc_ctx.path().to_string(),
             op: instruction.to_string(),
         });
-
     }
 
     /// Finalizes the pending AssemblyOp with the computed cycle count.

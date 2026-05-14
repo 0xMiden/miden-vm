@@ -275,5 +275,4 @@ fn update_mtree(block_builder: &mut BasicBlockBuilder) {
 
     // stack: [V_old, R_new, ...] (25 cycles)
     block_builder.push_ops(ops);
-
 }

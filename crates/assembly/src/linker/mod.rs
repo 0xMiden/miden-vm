@@ -876,7 +876,6 @@ impl Linker {
                 entry.insert(smallvec![id]);
             },
         }
-
     }
 
     /// Resolve a [Path] to a [ModuleIndex] in this graph

@@ -1,6 +1,6 @@
 use miden_core::WORD_SIZE;
 
-use crate::{ProcedureContext, ast::DebugOptions, diagnostics::Report};
+use crate::{ProcedureContext, ast::DebugOptions};
 
 /// Compiles the AST representation of a `debug` instruction into its VM representation.
 ///
