@@ -5,7 +5,7 @@ use crate::crypto::hash::Poseidon2;
 
 /// In-memory deferred-DAG state owned by the host.
 ///
-/// Three pieces of state:
+/// State fields:
 /// - `nodes`: expression and chunk nodes content-addressed by their Poseidon2 digest. Re-inserting
 ///   an identical node is a no-op (digests are collision-resistant, so same-key inserts are
 ///   same-value inserts in practice).
@@ -14,11 +14,16 @@ use crate::crypto::hash::Poseidon2;
 /// - `transcript`: a single rolling Poseidon2 digest folded over each assertion's digest, in order.
 ///   Mirrors [`crate::precompile::PrecompileTranscript`]. The verifier re-folds it from the witness
 ///   assertions to bind their content and order.
+/// - `root`: transcript root pointer (additive scaffolding from step 1 of the unified-transcript
+///   refactor). Initialized to [`super::TRUE_DIGEST`] (the zero word). In step 3 it will be
+///   updated in lockstep with `transcript` by `log_precompile`; in step 4 it replaces `transcript`
+///   entirely.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct DeferredState {
     nodes: BTreeMap<Digest, Node>,
     assertions: Vec<Node>,
     transcript: Digest,
+    root: Digest,
 }
 
 impl DeferredState {
@@ -59,6 +64,21 @@ impl DeferredState {
     /// `Poseidon2::merge`.
     pub fn transcript(&self) -> Digest {
         self.transcript
+    }
+
+    /// Returns the current transcript root pointer. Initial value is [`super::TRUE_DIGEST`].
+    ///
+    /// Scaffolding added in step 1 of the unified-transcript refactor; from step 3 onward this is
+    /// updated in lockstep with [`Self::transcript`] by `log_precompile`, and from step 4 onward
+    /// it replaces `transcript` as the precompile-transcript public input.
+    pub fn root(&self) -> Digest {
+        self.root
+    }
+
+    /// Sets the transcript root. Only `log_precompile`-style entry points should call this; the
+    /// host-hint register/evaluate paths must not touch the root.
+    pub fn set_root(&mut self, root: Digest) {
+        self.root = root;
     }
 
     /// Register an opaque node, asking `schema` to decode its tag and (for assertions) verify it.
@@ -222,6 +242,15 @@ mod tests {
         assert!(state.nodes().is_empty());
         assert!(state.assertions().is_empty());
         assert_eq!(state.transcript(), Word::new([ZERO; 4]));
+        assert_eq!(state.root(), crate::deferred::TRUE_DIGEST);
+    }
+
+    #[test]
+    fn set_root_persists() {
+        let mut state = DeferredState::new();
+        let d = dummy_digest(1);
+        state.set_root(d);
+        assert_eq!(state.root(), d);
     }
 
     #[test]

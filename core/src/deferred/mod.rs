@@ -14,7 +14,7 @@
 mod schema;
 mod state;
 
-pub use schema::{ChildResolver, NodeType, NoopSchema, Schema, SchemaError};
+pub use schema::{BodyShape, ChildResolver, NodeType, NoopSchema, Schema, SchemaError, TagInfo};
 pub use state::DeferredState;
 
 // Reference `Field0Handler` schema — pinned in here to keep `core/tests/deferred_field0.rs` and
@@ -42,6 +42,23 @@ pub type Tag = [Felt; 4];
 /// carries `n` chunks; its digest is the linear hash of those `8n` felts with the tag as the
 /// IV (capacity).
 pub type Chunk = [Felt; 8];
+
+/// Reserved framework-level tag carried by the canonical TRUE node and by AND nodes
+/// (transcript-step nodes). No schema may claim this tag — the framework owns it.
+///
+/// Structurally `[ZERO; 4]`. Paired with [`TRUE_DIGEST`].
+pub const TRUE_TAG: Tag = [ZERO; 4];
+
+/// Sentinel digest for the canonical TRUE node — the zero word. Returned by [`Node::digest`]
+/// for [`true_node`] (special-cased from step 2 of the refactor onward) and recognized by the
+/// verifier as the terminal of any predicate's reduction.
+pub const TRUE_DIGEST: Digest = Word::new([ZERO; 4]);
+
+/// Canonical TRUE node: zero tag, zero expression payload. Predicate-tag schemas return this
+/// from `reduce` on success. The verifier short-circuits on its digest ([`TRUE_DIGEST`]).
+pub fn true_node() -> Node {
+    Node::expression(TRUE_TAG, Payload::new([ZERO; 8]))
+}
 
 // PAYLOAD
 // ================================================================================================
@@ -322,5 +339,21 @@ mod tests {
         }
         let expected = Word::new([state[0], state[1], state[2], state[3]]);
         assert_eq!(chunk.digest(), expected);
+    }
+
+    #[test]
+    fn true_tag_and_digest_are_zero_word() {
+        assert_eq!(TRUE_TAG, [ZERO; 4]);
+        assert_eq!(TRUE_DIGEST, Word::new([ZERO; 4]));
+    }
+
+    #[test]
+    fn true_node_has_zero_tag_and_zero_expression_payload() {
+        let n = true_node();
+        assert_eq!(n.tag, TRUE_TAG);
+        match &n.payload {
+            NodePayload::Expression(p) => assert_eq!(p.0, [ZERO; 8]),
+            _ => panic!("true_node must be expression-bodied"),
+        }
     }
 }

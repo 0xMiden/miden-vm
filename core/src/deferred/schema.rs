@@ -64,6 +64,38 @@ pub enum NodeType {
     Assertion,
 }
 
+// BODY SHAPE
+// ================================================================================================
+
+/// Structural shape of a node's body. Distinguishes the fixed-size 8-felt expression payload
+/// from a variable-length chunk payload (`n` 8-felt blocks).
+///
+/// Carried inside [`TagInfo`] as part of the future replacement for [`NodeType`]; today it's
+/// also derivable from the existing enum.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BodyShape {
+    /// 8-felt expression payload — leaves and binary-op nodes.
+    Expression,
+    /// `n` 8-felt chunks — bulk-data leaves.
+    Chunk(u32),
+}
+
+// TAG INFO
+// ================================================================================================
+
+/// Type signature of a tag: what shape its body takes and what tag its canonical form
+/// carries. Future replacement for [`NodeType`] (see step 7 of the refactor plan).
+///
+/// - `evaluates_to == `[`super::TRUE_TAG`] marks the tag as a predicate — its `reduce` returns
+///   [`super::true_node`] on success.
+/// - `evaluates_to == self_tag` marks the tag as self-evaluating (a canonical leaf).
+/// - Otherwise the tag describes an op whose canonical form bears the given tag.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TagInfo {
+    pub body: BodyShape,
+    pub evaluates_to: super::Tag,
+}
+
 // CHILD RESOLVER
 // ================================================================================================
 
