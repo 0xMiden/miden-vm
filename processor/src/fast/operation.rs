@@ -9,7 +9,7 @@ use miden_core::{
     crypto::{hash::Poseidon2, merkle::MerklePath},
     deferred::{Node, Payload, TRUE_TAG},
     mast::{MastForest, MastNodeId},
-    precompile::{PrecompileTranscript, PrecompileTranscriptState},
+    precompile::PrecompileTranscriptState,
 };
 
 use super::step::BreakReason;
@@ -79,12 +79,12 @@ impl Processor for FastProcessor {
 
     #[inline(always)]
     fn precompile_transcript_state(&self) -> PrecompileTranscriptState {
-        self.pc_transcript.state()
+        self.advice.deferred_state().root()
     }
 
     #[inline(always)]
     fn set_precompile_transcript_state(&mut self, state: PrecompileTranscriptState) {
-        self.pc_transcript = PrecompileTranscript::from_state(state);
+        self.advice.deferred_state_mut().set_root(state);
     }
 
     #[inline(always)]
@@ -92,8 +92,8 @@ impl Processor for FastProcessor {
         let deferred = self.advice.deferred_state_mut();
         debug_assert_eq!(
             deferred.root(),
-            prev_root,
-            "DeferredState.root diverged from PrecompileTranscript.state at log_precompile entry",
+            new_root,
+            "DeferredState.root must equal new_root at AND-node intern time",
         );
         let and_node = Node::expression(TRUE_TAG, Payload::binary_op(prev_root, stmnt));
         debug_assert_eq!(
@@ -102,7 +102,6 @@ impl Processor for FastProcessor {
             "AND-node host-side digest must match the in-circuit log_precompile hasher",
         );
         deferred.intern(and_node);
-        deferred.set_root(new_root);
     }
 
     #[inline(always)]

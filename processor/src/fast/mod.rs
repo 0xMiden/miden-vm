@@ -139,10 +139,6 @@ pub struct FastProcessor {
     /// the size of core trace fragments during execution, etc.
     options: ExecutionOptions,
 
-    /// Transcript used to record commitments via `log_precompile` instruction (implemented via
-    /// Poseidon2 sponge).
-    pc_transcript: PrecompileTranscript,
-
     /// The deferred-DAG schema installed at processor construction. Owns the entire semantic
     /// layer (tag recognition, validation, recursive evaluation, equality). Defaults to a
     /// [`NoopSchema`] so programs that don't install a real schema fail loudly at the first
@@ -158,11 +154,13 @@ impl FastProcessor {
     /// Packages the processor state after successful execution into a public result type.
     #[inline(always)]
     fn into_execution_output(self, stack: StackOutputs) -> ExecutionOutput {
+        let final_precompile_transcript =
+            PrecompileTranscript::from_state(self.advice.deferred_state().root());
         ExecutionOutput {
             stack,
             advice: self.advice,
             memory: self.memory,
-            final_precompile_transcript: self.pc_transcript,
+            final_precompile_transcript,
         }
     }
 
@@ -311,7 +309,6 @@ impl FastProcessor {
             memory: Memory::new(),
             call_stack: Vec::new(),
             options,
-            pc_transcript: PrecompileTranscript::new(),
             deferred_schema: Box::new(NoopSchema),
             #[cfg(test)]
             decorator_retrieval_count: Rc::new(Cell::new(0)),
@@ -506,9 +503,11 @@ impl FastProcessor {
     }
 
     /// Consumes the processor and returns the advice provider, memory, and precompile
-    /// transcript.
+    /// transcript. The precompile transcript is reconstructed from `DeferredState.root` (the
+    /// single source of truth for the rolling transcript state from step 4 onward).
     pub fn into_parts(self) -> (AdviceProvider, Memory, PrecompileTranscript) {
-        (self.advice, self.memory, self.pc_transcript)
+        let root = self.advice.deferred_state().root();
+        (self.advice, self.memory, PrecompileTranscript::from_state(root))
     }
 
     /// Returns a reference to the execution options.
