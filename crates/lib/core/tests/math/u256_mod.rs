@@ -624,6 +624,27 @@ fn shift_panics_when_amount_out_of_range() {
     }
 }
 
+#[test]
+fn shift_panics_on_non_u32_amount() {
+    for &n in &[1u64 << 32, (1u64 << 32) + 1, 1u64 << 40, (1u64 << 63) + 7] {
+        for op in ["shl", "shr", "rotl", "rotr"] {
+            let source = format!(
+                "
+                use miden::core::math::u256
+                begin
+                    exec.u256::{op}
+                end"
+            );
+            let mut operands = vec![n];
+            operands.extend(U256::from_bit(0).to_le_limbs());
+            assert!(
+                build_test!(&source, &operands).execute().is_err(),
+                "{op} with non-u32 n={n} should panic"
+            );
+        }
+    }
+}
+
 proptest! {
     #[test]
     fn wrapping_mul_proptest(
@@ -1127,6 +1148,54 @@ proptest! {
         build_test!(&source, &operands).execute().map_err(|e| {
             TestCaseError::fail(format!("rotr(n={n}, a={a:?}) failed: {e:?}"))
         })?;
+    }
+
+    #[test]
+    fn and_proptest(
+        a in prop::array::uniform8(boundary_biased_u32()),
+        b in prop::array::uniform8(boundary_biased_u32()),
+    ) {
+        let a = U256::from_le_u32_limbs(a);
+        let b = U256::from_le_u32_limbs(b);
+        let source = "
+            use miden::core::math::u256
+            begin
+                exec.u256::and
+            end";
+        let operands = [b.to_le_limbs(), a.to_le_limbs()].concat();
+        build_test!(source, &operands).prop_expect_stack(&(a & b).to_le_limbs())?;
+    }
+
+    #[test]
+    fn or_proptest(
+        a in prop::array::uniform8(boundary_biased_u32()),
+        b in prop::array::uniform8(boundary_biased_u32()),
+    ) {
+        let a = U256::from_le_u32_limbs(a);
+        let b = U256::from_le_u32_limbs(b);
+        let source = "
+            use miden::core::math::u256
+            begin
+                exec.u256::or
+            end";
+        let operands = [b.to_le_limbs(), a.to_le_limbs()].concat();
+        build_test!(source, &operands).prop_expect_stack(&(a | b).to_le_limbs())?;
+    }
+
+    #[test]
+    fn xor_proptest(
+        a in prop::array::uniform8(boundary_biased_u32()),
+        b in prop::array::uniform8(boundary_biased_u32()),
+    ) {
+        let a = U256::from_le_u32_limbs(a);
+        let b = U256::from_le_u32_limbs(b);
+        let source = "
+            use miden::core::math::u256
+            begin
+                exec.u256::xor
+            end";
+        let operands = [b.to_le_limbs(), a.to_le_limbs()].concat();
+        build_test!(source, &operands).prop_expect_stack(&(a ^ b).to_le_limbs())?;
     }
 }
 

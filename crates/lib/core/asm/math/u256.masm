@@ -1018,8 +1018,7 @@ end
 # 2^(32-m) (shr); the carry between adjacent output limbs is the hi/lo half of the
 # widening product. m == 0 is special-cased inside each shr k-branch because pow2(32)
 # overflows u32; shl uses pow = 1 and the same code path. The k-dispatch is inlined
-# into shl/shr (rather than factored into helpers) so loc_load/loc_store address the
-# same @locals(16) frame as the stash.
+# in shl/shr so loc_load/loc_store address the same @locals(16) frame as the stash.
 
 #! Computes the left shift of an unsigned 256 bit integer.
 #! The input value is assumed to be represented using 32 bit limbs, but this is not checked.
@@ -1029,6 +1028,7 @@ end
 #! Panics if n is not in the range [0, 256).
 @locals(16)
 pub proc shl(n: u32, a: u256) -> u256
+    u32assert.err="shift amount must be a u32"
     dup u32lt.256 assert.err="shift amount must be in the range [0, 256)"
 
     dup eq.0
@@ -1148,6 +1148,7 @@ end
 #! Panics if n is not in the range [0, 256).
 @locals(16)
 pub proc shr(n: u32, a: u256) -> u256
+    u32assert.err="shift amount must be a u32"
     dup u32lt.256 assert.err="shift amount must be in the range [0, 256)"
 
     dup eq.0
@@ -1328,6 +1329,7 @@ pub proc rotl(n: u32, a: u256) -> u256
     # rotl(n, a) = (a << n) | (a >> (256 - n)). Stash shl's result in our own @locals(8)
     # frame (independent of shl/shr's @locals(16) inside) so we can call shr on a fresh
     # copy of (n, a) and OR limb-by-limb.
+    u32assert.err="rotation amount must be a u32"
     dup eq.0
     if.true
         drop
@@ -1360,6 +1362,7 @@ end
 @locals(8)
 pub proc rotr(n: u32, a: u256) -> u256
     # rotr(n, a) = (a >> n) | (a << (256 - n)). Mirrors rotl with shl/shr swapped.
+    u32assert.err="rotation amount must be a u32"
     dup eq.0
     if.true
         drop
