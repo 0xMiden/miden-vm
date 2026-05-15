@@ -49,13 +49,19 @@ pub type Chunk = [Felt; 8];
 /// Structurally `[ZERO; 4]`. Paired with [`TRUE_DIGEST`].
 pub const TRUE_TAG: Tag = [ZERO; 4];
 
-/// Sentinel digest for the canonical TRUE node — the zero word. Returned by [`Node::digest`]
-/// for [`true_node`] (special-cased from step 2 of the refactor onward) and recognized by the
-/// verifier as the terminal of any predicate's reduction.
+/// Verifier-side sentinel for "trivial transcript" / "empty AND" — the zero word.
+///
+/// This is the initial value of `DeferredState::root`, and the terminal the verifier
+/// short-circuits on when reducing the root. It is *not* the `.digest()` of any concrete
+/// [`Node`]: [`Node::digest`] always runs Poseidon2 (which does not fix zero), so a [`true_node`]
+/// hashes to a non-zero word. The framework distinguishes "TRUE the result" (structural — see
+/// [`Node::is_true_node`]) from "TRUE the transcript-terminal" (digest comparison against this
+/// sentinel) at different points in the verifier walk.
 pub const TRUE_DIGEST: Digest = Word::new([ZERO; 4]);
 
-/// Canonical TRUE node: zero tag, zero expression payload. Predicate-tag schemas return this
-/// from `reduce` on success. The verifier short-circuits on its digest ([`TRUE_DIGEST`]).
+/// Canonical TRUE node value: zero tag, zero expression payload. Predicate-tag schemas return
+/// this from `reduce` on success; framework code checks the result structurally via
+/// [`Node::is_true_node`], not by digest comparison.
 pub fn true_node() -> Node {
     Node::expression(TRUE_TAG, Payload::new([ZERO; 8]))
 }
@@ -172,8 +178,14 @@ impl Node {
         }
     }
 
-    /// Returns `true` iff this is the framework's canonical TRUE node: zero tag, zero expression
-    /// payload. [`Node::digest`] short-circuits to [`TRUE_DIGEST`] for this case.
+    /// Returns `true` iff this node has the structural shape of the canonical TRUE node: zero
+    /// tag and zero expression payload. Used by the verifier to accept a predicate `reduce`
+    /// result as "verified."
+    ///
+    /// Note this shape is also the shape of an AND-node both of whose children are
+    /// [`TRUE_DIGEST`] — the two are structurally identical and logically equivalent (AND of two
+    /// TRUEs *is* TRUE). The framework relies on contextual dispatch (predicate `reduce` results
+    /// vs. AND-node DAG walks) rather than on byte-level distinction.
     pub fn is_true_node(&self) -> bool {
         self.tag == TRUE_TAG
             && matches!(&self.payload, NodePayload::Expression(p) if p.0 == [ZERO; 8])
@@ -190,15 +202,13 @@ impl Node {
     /// For `n == 1` the chunk digest is byte-identical to the equivalent Expression digest with
     /// the same tag and payload.
     ///
-    /// **TRUE-node special case.** [`true_node`] (zero tag + zero expression payload) is the
-    /// framework's canonical "verified" sentinel; its digest is returned as [`TRUE_DIGEST`] (also
-    /// the zero word) directly, *without* running Poseidon2. This is necessary because Poseidon2
-    /// does not fix zero — `permute([ZERO; 12]) ≠ [ZERO; 12]` — so the sentinel would otherwise
-    /// hash to a non-zero word and break the verifier's "reduce root to TRUE" terminal check.
+    /// **TRUE-node digest.** [`true_node`] hashes through Poseidon2 like any other node — its
+    /// digest is *not* [`TRUE_DIGEST`]. That sentinel is purely a verifier-side handle for the
+    /// "trivial transcript" / "empty AND" terminal; it is never the `.digest()` of any concrete
+    /// `Node`. This keeps `Node::digest` honest to the in-circuit hasher, so AND-nodes interned
+    /// after `log_precompile` (whose digest is computed by the in-circuit permute) match what
+    /// callers compute here.
     pub fn digest(&self) -> Digest {
-        if self.is_true_node() {
-            return TRUE_DIGEST;
-        }
         let mut state = [ZERO; 12];
         state[8..12].copy_from_slice(&self.tag);
         match &self.payload {
@@ -375,21 +385,12 @@ mod tests {
     }
 
     #[test]
-    fn true_node_digest_is_special_cased_to_zero() {
-        // TRUE-node digest must be the zero word so the verifier's terminal check
-        // (`root == TRUE_DIGEST`) holds. This relies on the special case in `Node::digest`;
-        // running Poseidon2 over an all-zero rate + capacity does NOT produce zero — that fact
-        // is pinned by `poseidon2_does_not_fix_zero` below.
-        assert_eq!(true_node().digest(), TRUE_DIGEST);
-        assert_eq!(true_node().digest(), Word::new([ZERO; 4]));
-    }
-
-    #[test]
     fn poseidon2_does_not_fix_zero() {
-        // Load-bearing fact for the unified-transcript refactor: because Poseidon2's round
+        // Load-bearing for the unified-transcript refactor: because Poseidon2's round
         // constants are non-zero, applying the permutation to the all-zero state does NOT
-        // return all zeros. If this test ever flips, the TRUE-node special case in
-        // `Node::digest` could be removed.
+        // return all zeros. Consequence: `true_node().digest() != TRUE_DIGEST`, and the
+        // framework keeps these two concepts separate (see TRUE_DIGEST docs and
+        // `true_node_digest_matches_in_circuit_merge` below).
         let mut state = [ZERO; 12];
         Poseidon2::apply_permutation(&mut state);
         let rate0 = Word::new([state[0], state[1], state[2], state[3]]);
@@ -397,22 +398,22 @@ mod tests {
     }
 
     #[test]
-    fn non_true_node_with_zero_tag_still_hashes_normally() {
-        // A node with the TRUE tag but a non-zero payload is not the canonical TRUE node — it
-        // must hash through Poseidon2. (This shape would only arise from a bug today, but the
-        // special-case guard must be narrow to avoid colliding sentinels.)
-        let nonzero_payload = Payload::new([
-            Felt::new_unchecked(1),
-            ZERO,
-            ZERO,
-            ZERO,
-            ZERO,
-            ZERO,
-            ZERO,
-            ZERO,
-        ]);
-        let n = Node::expression(TRUE_TAG, nonzero_payload);
-        assert!(!n.is_true_node());
-        assert_ne!(n.digest(), TRUE_DIGEST);
+    fn true_node_hashes_normally_via_poseidon2() {
+        // TRUE-node is not digest-special-cased: it hashes through Poseidon2 like any other
+        // node, producing a specific non-zero word. This keeps `Node::digest()` honest to the
+        // in-circuit hasher — critical for AND-nodes interned by `log_precompile` (where the
+        // in-circuit hasher computes the same `merge(0, 0)` value).
+        assert_ne!(true_node().digest(), TRUE_DIGEST);
+    }
+
+    #[test]
+    fn true_node_digest_equals_and_of_true_true() {
+        // AND(TRUE, TRUE) and the TRUE sentinel share the structural shape
+        // `Node { tag: TRUE_TAG, payload: Expression([0; 8]) }`, so their digests are equal
+        // (both run the same Poseidon2 permutation). This is logically consistent (AND of two
+        // TRUEs IS TRUE) and load-bearing for the recursive-proof use case where the program
+        // logs a sub-proof's transcript whose root happens to be TRUE_DIGEST.
+        let and_true_true = Node::expression(TRUE_TAG, Payload::binary_op(TRUE_DIGEST, TRUE_DIGEST));
+        assert_eq!(and_true_true.digest(), true_node().digest());
     }
 }
