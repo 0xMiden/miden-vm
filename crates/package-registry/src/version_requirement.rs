@@ -97,7 +97,7 @@ impl From<Word> for VersionRequirement {
 impl From<Version> for VersionRequirement {
     fn from(value: Version) -> Self {
         if value.digest.is_none() {
-            Self::Semantic(Span::unknown(format!("={}", &value.version).parse().unwrap()))
+            Self::Semantic(Span::unknown(format!("={}", value.version).parse().unwrap()))
         } else {
             Self::Exact(value)
         }

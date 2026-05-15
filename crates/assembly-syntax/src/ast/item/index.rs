@@ -22,7 +22,7 @@ impl ItemIndex {
 
 impl core::fmt::Display for ItemIndex {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "{}", &self.as_usize())
+        write!(f, "{}", self.as_usize())
     }
 }
 
@@ -63,7 +63,7 @@ pub struct GlobalItemIndex {
 
 impl core::fmt::Display for GlobalItemIndex {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "{}:{}", &self.module, &self.index)
+        write!(f, "{}:{}", self.module, self.index)
     }
 }
 
@@ -96,6 +96,6 @@ impl core::ops::Add<ItemIndex> for ModuleIndex {
 
 impl core::fmt::Display for ModuleIndex {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "{}", &self.as_usize())
+        write!(f, "{}", self.as_usize())
     }
 }

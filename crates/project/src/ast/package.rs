@@ -260,7 +260,7 @@ impl ProjectFile {
                                 source_file: source,
                                 label: Label::new(
                                     dependency.span(),
-                                    format!("'{}' is not a workspace dependency", &dependency.name),
+                                    format!("'{}' is not a workspace dependency", dependency.name),
                                 ),
                             }
                             .into());

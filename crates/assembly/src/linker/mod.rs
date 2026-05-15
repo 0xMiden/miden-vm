@@ -556,7 +556,7 @@ impl Linker {
                         // refs
                         let proc = proc.borrow();
                         for invoke in proc.invoked() {
-                            log::debug!(target: "linker", "  | recording {} dependency on {}", invoke.kind, &invoke.target);
+                            log::debug!(target: "linker", "  | recording {} dependency on {}", invoke.kind, invoke.target);
 
                             let context = SymbolResolutionContext {
                                 span: invoke.span(),
