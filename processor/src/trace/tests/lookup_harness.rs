@@ -17,7 +17,7 @@
 use alloc::vec::Vec;
 
 use miden_air::{
-    ChipletsAir, CoreAir, LiftedAir,
+    LiftedAir, MidenAir,
     logup::{BusId, MIDEN_MAX_MESSAGE_WIDTH},
     lookup::{Challenges, LookupFractions, LookupMessage, build_lookup_fractions},
 };
@@ -51,7 +51,7 @@ impl InteractionLog {
     pub fn new(trace: &ExecutionTrace) -> Self {
         let (core_matrix, chip_matrix) = trace.main_trace().to_core_chiplets_matrices();
         // Core has no periodic columns; the hasher/bitwise periodics belong to Chiplets.
-        let chip_periodic = LiftedAir::<Felt, QuadFelt>::periodic_columns(&ChipletsAir);
+        let chip_periodic = LiftedAir::<Felt, QuadFelt>::periodic_columns(&MidenAir::CHIPLETS);
 
         // `QuadFelt` itself isn't `Randomizable`, so draw 4 base-field elements and pair them.
         let raw = rand_array::<Felt, 4>();
@@ -60,9 +60,10 @@ impl InteractionLog {
         let challenges =
             Challenges::<QuadFelt>::new(alpha, beta, MIDEN_MAX_MESSAGE_WIDTH, BusId::COUNT);
 
-        let core_fractions = build_lookup_fractions(&CoreAir, &core_matrix, &[], &challenges);
+        let core_fractions =
+            build_lookup_fractions(&MidenAir::CORE, &core_matrix, &[], &challenges);
         let chip_fractions =
-            build_lookup_fractions(&ChipletsAir, &chip_matrix, &chip_periodic, &challenges);
+            build_lookup_fractions(&MidenAir::CHIPLETS, &chip_matrix, &chip_periodic, &challenges);
         let rows = merge_rows(split_rows(&core_fractions), split_rows(&chip_fractions));
 
         Self { challenges, rows }

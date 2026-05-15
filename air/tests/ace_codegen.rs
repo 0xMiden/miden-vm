@@ -6,7 +6,7 @@ use miden_ace_codegen::{
         zps_for_chunk,
     },
 };
-use miden_air::{ChipletsAir, CoreAir, LiftedAir};
+use miden_air::{LiftedAir, MidenAir};
 use miden_core::{Felt, field::QuadFelt};
 use miden_crypto::{
     field::{Field, PrimeCharacteristicRing},
@@ -15,7 +15,7 @@ use miden_crypto::{
 
 #[test]
 fn core_air_dag_matches_manual_eval() {
-    let air = CoreAir;
+    let air = MidenAir::CORE;
     let config = AceConfig {
         num_quotient_chunks: 2,
         num_vlpi_groups: 0,
@@ -61,7 +61,7 @@ fn core_air_dag_matches_manual_eval() {
 
 #[test]
 fn core_air_dag_rejects_mismatched_layout() {
-    let air = CoreAir;
+    let air = MidenAir::CORE;
     let dag_config = AceConfig {
         num_quotient_chunks: 8,
         num_vlpi_groups: 0,
@@ -90,7 +90,7 @@ fn core_air_dag_rejects_mismatched_layout() {
 #[test]
 #[allow(clippy::print_stdout)]
 fn chiplets_air_ace_rows() {
-    let air = ChipletsAir;
+    let air = MidenAir::CHIPLETS;
     let config = AceConfig {
         num_quotient_chunks: 8,
         num_vlpi_groups: 1,
@@ -105,7 +105,7 @@ fn chiplets_air_ace_rows() {
     let total_rows = read_rows + eval_rows;
 
     println!(
-        "ACE chiplet rows (ChipletsAir): read={}, eval={}, total={}, inputs={}, constants={}, nodes={}",
+        "ACE chiplet rows (MidenAir::CHIPLETS): read={}, eval={}, total={}, inputs={}, constants={}, nodes={}",
         read_rows,
         eval_rows,
         total_rows,
@@ -124,7 +124,8 @@ fn synthetic_ood_adjusts_quotient_to_zero() {
         is_multi_air: false,
     };
 
-    let artifacts = build_ace_dag_for_air::<_, Felt, QuadFelt>(&CoreAir, config).expect("ace dag");
+    let artifacts =
+        build_ace_dag_for_air::<_, Felt, QuadFelt>(&MidenAir::CORE, config).expect("ace dag");
     let circuit = emit_circuit(&artifacts.dag, artifacts.layout.clone()).expect("ace circuit");
 
     let mut inputs: Vec<QuadFelt> = fill_inputs(&artifacts.layout);
@@ -154,7 +155,8 @@ fn quotient_next_inputs_do_not_affect_eval() {
         is_multi_air: false,
     };
 
-    let artifacts = build_ace_dag_for_air::<_, Felt, QuadFelt>(&CoreAir, config).expect("ace dag");
+    let artifacts =
+        build_ace_dag_for_air::<_, Felt, QuadFelt>(&MidenAir::CORE, config).expect("ace dag");
     let circuit = emit_circuit(&artifacts.dag, artifacts.layout.clone()).expect("ace circuit");
 
     let mut inputs: Vec<QuadFelt> = fill_inputs(&artifacts.layout);

@@ -191,9 +191,7 @@ mod tests {
     /// columns, 1 committed final, all periodic columns owned here.
     #[test]
     fn chiplets_air_lookup_validates() {
-        let num_periodic =
-            miden_crypto::stark::air::LiftedAir::<Felt, QuadFelt>::periodic_columns(&ChipletsAir)
-                .len();
+        let num_periodic = ChipletsAir.periodic_columns().len();
         let layout = ValidateLayout {
             trace_width: NUM_CHIPLETS_COLS,
             num_public_values: NUM_PUBLIC_VALUES,

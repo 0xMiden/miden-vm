@@ -21,7 +21,7 @@
 use alloc::vec::Vec;
 
 use miden_air::{
-    ChipletsAir, CoreAir, LiftedAir,
+    LiftedAir, MidenAir,
     logup::{BusId, MIDEN_MAX_MESSAGE_WIDTH},
     lookup::{Challenges, accumulate, build_lookup_fractions, debug::collect_column_oracle_folds},
 };
@@ -102,7 +102,7 @@ fn build_lookup_fractions_matches_constraint_path_oracle() {
     let (core_matrix, chip_matrix) = trace.main_trace().to_core_chiplets_matrices();
     let public_vals = trace.to_public_values();
     // Core has no periodic columns; the hasher/bitwise periodics belong to Chiplets.
-    let chip_periodic = LiftedAir::<Felt, QuadFelt>::periodic_columns(&ChipletsAir);
+    let chip_periodic = LiftedAir::<Felt, QuadFelt>::periodic_columns(&MidenAir::CHIPLETS);
 
     // QuadFelt challenges for LogUp, built from 4 random Felts (QuadFelt itself doesn't
     // implement Randomizable, so we draw base-field elements and pair them).
@@ -113,31 +113,31 @@ fn build_lookup_fractions_matches_constraint_path_oracle() {
         Challenges::<QuadFelt>::new(alpha, beta, MIDEN_MAX_MESSAGE_WIDTH, BusId::COUNT);
 
     // --- Core ---
-    let core_fractions = build_lookup_fractions(&CoreAir, &core_matrix, &[], &challenges);
+    let core_fractions = build_lookup_fractions(&MidenAir::CORE, &core_matrix, &[], &challenges);
     assert!(
         !core_fractions.fractions().is_empty(),
         "no Core fractions collected — trace is degenerate or emitters are broken",
     );
     let core_aux = accumulate(&core_fractions);
     let core_folds =
-        collect_column_oracle_folds(&CoreAir, &core_matrix, &[], &public_vals, &challenges);
+        collect_column_oracle_folds(&MidenAir::CORE, &core_matrix, &[], &public_vals, &challenges);
     assert_prover_matches_oracle(
         "Core",
         &core_aux,
         &core_folds,
-        LiftedAir::<Felt, QuadFelt>::aux_width(&CoreAir),
+        LiftedAir::<Felt, QuadFelt>::aux_width(&MidenAir::CORE),
     );
 
     // --- Chiplets ---
     let chip_fractions =
-        build_lookup_fractions(&ChipletsAir, &chip_matrix, &chip_periodic, &challenges);
+        build_lookup_fractions(&MidenAir::CHIPLETS, &chip_matrix, &chip_periodic, &challenges);
     assert!(
         !chip_fractions.fractions().is_empty(),
         "no Chiplets fractions collected — trace is degenerate or emitters are broken",
     );
     let chip_aux = accumulate(&chip_fractions);
     let chip_folds = collect_column_oracle_folds(
-        &ChipletsAir,
+        &MidenAir::CHIPLETS,
         &chip_matrix,
         &chip_periodic,
         &public_vals,
@@ -147,6 +147,6 @@ fn build_lookup_fractions_matches_constraint_path_oracle() {
         "Chiplets",
         &chip_aux,
         &chip_folds,
-        LiftedAir::<Felt, QuadFelt>::aux_width(&ChipletsAir),
+        LiftedAir::<Felt, QuadFelt>::aux_width(&MidenAir::CHIPLETS),
     );
 }

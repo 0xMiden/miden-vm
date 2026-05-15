@@ -31,10 +31,10 @@ pub mod trace;
 
 /// Miden VM-specific LogUp lookup argument: bus identifiers and bus message types.
 ///
-/// The `LookupAir` and `AuxBuilder` trait impls live directly on [`crate::CoreAir`] and
-/// [`crate::ChipletsAir`]. The generic LogUp framework this builds on lives in
-/// [`crate::lookup`] and is free of Miden-specific types so it can be extracted into its
-/// own crate.
+/// [`crate::MidenAir`] is the single `LiftedAir`/`AuxBuilder`/`LookupAir` for the multi-AIR
+/// instance; it dispatches per-trace work to [`crate::CoreAir`] / [`crate::ChipletsAir`].
+/// The generic LogUp framework this builds on lives in [`crate::lookup`] and is free of
+/// Miden-specific types so it can be extracted into its own crate.
 pub mod logup {
     pub use crate::constraints::lookup::{
         BusId, MIDEN_MAX_MESSAGE_WIDTH, messages::*, miden_air::NUM_LOGUP_COMMITTED_FINALS,
@@ -329,24 +329,14 @@ impl BaseAir<Felt> for CoreAir {
     }
 }
 
-impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for CoreAir {
+impl CoreAir {
     fn periodic_columns(&self) -> Vec<Vec<Felt>> {
         // Core has no periodic columns; all periodic columns serve the chiplets.
         Vec::new()
     }
 
-    fn num_randomness(&self) -> usize {
-        trace::AUX_TRACE_RAND_CHALLENGES
-    }
-
     fn aux_width(&self) -> usize {
         constraints::lookup::main_air::MAIN_COLUMN_SHAPE.len()
-    }
-
-    fn num_aux_values(&self) -> usize {
-        // One real committed final per AIR; each per-AIR `ReducedAuxValues` carries its
-        // own scalar.
-        1
     }
 
     fn num_var_len_public_inputs(&self) -> usize {
@@ -354,16 +344,13 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for CoreAir {
         0
     }
 
-    fn reduced_aux_values(
+    fn reduced_aux_values<EF: ExtensionField<Felt>>(
         &self,
         aux_values: &[EF],
         challenges: &[EF],
         public_values: &[Felt],
         var_len_public_inputs: VarLenPublicInputs<'_, Felt>,
-    ) -> Result<ReducedAuxValues<EF>, ReductionError>
-    where
-        EF: ExtensionField<Felt>,
-    {
+    ) -> Result<ReducedAuxValues<EF>, ReductionError> {
         if public_values.len() != NUM_PUBLIC_VALUES {
             return Err(format!(
                 "expected {} public values, got {}",
@@ -419,10 +406,7 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for CoreAir {
         <Self as LookupAir<_>>::eval(self, &mut lb);
     }
 
-    fn log_quotient_degree(&self) -> usize
-    where
-        Self: Sized,
-    {
+    fn log_quotient_degree(&self) -> usize {
         // Core dominates the combined quotient degree; override to avoid recomputing
         // through SymbolicAir.
         3
@@ -482,25 +466,15 @@ impl BaseAir<Felt> for ChipletsAir {
     }
 }
 
-impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ChipletsAir {
+impl ChipletsAir {
     fn periodic_columns(&self) -> Vec<Vec<Felt>> {
         // All periodic columns (hasher round constants, bitwise operation table) belong to
         // the chiplets trace.
         constraints::chiplets::columns::PeriodicCols::periodic_columns()
     }
 
-    fn num_randomness(&self) -> usize {
-        trace::AUX_TRACE_RAND_CHALLENGES
-    }
-
     fn aux_width(&self) -> usize {
         constraints::lookup::chiplet_air::CHIPLET_COLUMN_SHAPE.len()
-    }
-
-    fn num_aux_values(&self) -> usize {
-        // One real committed final per AIR; each per-AIR `ReducedAuxValues` carries its
-        // own scalar.
-        1
     }
 
     fn num_var_len_public_inputs(&self) -> usize {
@@ -509,16 +483,13 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ChipletsAir {
         1
     }
 
-    fn reduced_aux_values(
+    fn reduced_aux_values<EF: ExtensionField<Felt>>(
         &self,
         aux_values: &[EF],
         challenges: &[EF],
         public_values: &[Felt],
         var_len_public_inputs: VarLenPublicInputs<'_, Felt>,
-    ) -> Result<ReducedAuxValues<EF>, ReductionError>
-    where
-        EF: ExtensionField<Felt>,
-    {
+    ) -> Result<ReducedAuxValues<EF>, ReductionError> {
         if public_values.len() != NUM_PUBLIC_VALUES {
             return Err(format!(
                 "expected {} public values, got {}",
@@ -581,10 +552,7 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ChipletsAir {
         <Self as LookupAir<_>>::eval(self, &mut lb);
     }
 
-    fn log_quotient_degree(&self) -> usize
-    where
-        Self: Sized,
-    {
+    fn log_quotient_degree(&self) -> usize {
         // The chiplet hasher dominates this AIR's quotient degree at deg 9 / log_blowup 3;
         // override to avoid recomputing through SymbolicAir.
         3
@@ -675,42 +643,36 @@ impl BaseAir<Felt> for MidenAir {
 impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for MidenAir {
     fn periodic_columns(&self) -> Vec<Vec<Felt>> {
         match self {
-            Self::Core(a) => <CoreAir as LiftedAir<Felt, EF>>::periodic_columns(a),
-            Self::Chiplets(a) => <ChipletsAir as LiftedAir<Felt, EF>>::periodic_columns(a),
+            Self::Core(a) => a.periodic_columns(),
+            Self::Chiplets(a) => a.periodic_columns(),
         }
     }
 
     fn num_randomness(&self) -> usize {
-        // Instance-level: every AIR shares the same LogUp challenge set, so this is a
-        // single global value rather than a per-AIR quantity.
-        debug_assert_eq!(
-            <CoreAir as LiftedAir<Felt, EF>>::num_randomness(&CoreAir),
-            <ChipletsAir as LiftedAir<Felt, EF>>::num_randomness(&ChipletsAir),
-            "Core/Chiplets must share the same randomness count"
-        );
+        // Instance-level: every AIR shares the same LogUp challenge set.
         trace::AUX_TRACE_RAND_CHALLENGES
     }
 
     fn aux_width(&self) -> usize {
         match self {
-            Self::Core(a) => <CoreAir as LiftedAir<Felt, EF>>::aux_width(a),
-            Self::Chiplets(a) => <ChipletsAir as LiftedAir<Felt, EF>>::aux_width(a),
+            Self::Core(a) => a.aux_width(),
+            Self::Chiplets(a) => a.aux_width(),
         }
     }
 
     fn num_aux_values(&self) -> usize {
-        debug_assert_eq!(
-            <CoreAir as LiftedAir<Felt, EF>>::num_aux_values(&CoreAir),
-            <ChipletsAir as LiftedAir<Felt, EF>>::num_aux_values(&ChipletsAir),
-            "Core/Chiplets must share the same committed-final count"
-        );
-        <CoreAir as LiftedAir<Felt, EF>>::num_aux_values(&CoreAir)
+        // One real committed LogUp final per AIR instance.
+        1
     }
 
     fn num_var_len_public_inputs(&self) -> usize {
+        // Conceptually instance-level, but the count is still per-trace today (Core 0,
+        // Chiplets 1): the only VLPI — the kernel-digest group — boundary-cancels against
+        // a Chiplets column. Collapses to a single instance-level value once the
+        // `Instance`/`PublicInputs` trait lands.
         match self {
-            Self::Core(a) => <CoreAir as LiftedAir<Felt, EF>>::num_var_len_public_inputs(a),
-            Self::Chiplets(a) => <ChipletsAir as LiftedAir<Felt, EF>>::num_var_len_public_inputs(a),
+            Self::Core(a) => a.num_var_len_public_inputs(),
+            Self::Chiplets(a) => a.num_var_len_public_inputs(),
         }
     }
 
@@ -725,27 +687,19 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for MidenAir {
         EF: ExtensionField<Felt>,
     {
         match self {
-            Self::Core(a) => <CoreAir as LiftedAir<Felt, EF>>::reduced_aux_values(
-                a,
-                aux_values,
-                challenges,
-                public_values,
-                var_len_public_inputs,
-            ),
-            Self::Chiplets(a) => <ChipletsAir as LiftedAir<Felt, EF>>::reduced_aux_values(
-                a,
-                aux_values,
-                challenges,
-                public_values,
-                var_len_public_inputs,
-            ),
+            Self::Core(a) => {
+                a.reduced_aux_values(aux_values, challenges, public_values, var_len_public_inputs)
+            },
+            Self::Chiplets(a) => {
+                a.reduced_aux_values(aux_values, challenges, public_values, var_len_public_inputs)
+            },
         }
     }
 
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
         match self {
-            Self::Core(a) => <CoreAir as LiftedAir<Felt, EF>>::eval(a, builder),
-            Self::Chiplets(a) => <ChipletsAir as LiftedAir<Felt, EF>>::eval(a, builder),
+            Self::Core(a) => a.eval(builder),
+            Self::Chiplets(a) => a.eval(builder),
         }
     }
 
@@ -754,8 +708,58 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for MidenAir {
         Self: Sized,
     {
         match self {
-            Self::Core(a) => <CoreAir as LiftedAir<Felt, EF>>::log_quotient_degree(a),
-            Self::Chiplets(a) => <ChipletsAir as LiftedAir<Felt, EF>>::log_quotient_degree(a),
+            Self::Core(a) => a.log_quotient_degree(),
+            Self::Chiplets(a) => a.log_quotient_degree(),
+        }
+    }
+}
+
+impl<LB> LookupAir<LB> for MidenAir
+where
+    LB: MainLookupBuilder + ChipletLookupBuilder,
+{
+    fn num_columns(&self) -> usize {
+        match self {
+            Self::Core(a) => <CoreAir as LookupAir<LB>>::num_columns(a),
+            Self::Chiplets(a) => <ChipletsAir as LookupAir<LB>>::num_columns(a),
+        }
+    }
+
+    fn column_shape(&self) -> &[usize] {
+        match self {
+            Self::Core(a) => <CoreAir as LookupAir<LB>>::column_shape(a),
+            Self::Chiplets(a) => <ChipletsAir as LookupAir<LB>>::column_shape(a),
+        }
+    }
+
+    fn max_message_width(&self) -> usize {
+        match self {
+            Self::Core(a) => <CoreAir as LookupAir<LB>>::max_message_width(a),
+            Self::Chiplets(a) => <ChipletsAir as LookupAir<LB>>::max_message_width(a),
+        }
+    }
+
+    fn num_bus_ids(&self) -> usize {
+        match self {
+            Self::Core(a) => <CoreAir as LookupAir<LB>>::num_bus_ids(a),
+            Self::Chiplets(a) => <ChipletsAir as LookupAir<LB>>::num_bus_ids(a),
+        }
+    }
+
+    fn eval(&self, builder: &mut LB) {
+        match self {
+            Self::Core(a) => <CoreAir as LookupAir<LB>>::eval(a, builder),
+            Self::Chiplets(a) => <ChipletsAir as LookupAir<LB>>::eval(a, builder),
+        }
+    }
+
+    fn eval_boundary<B>(&self, boundary: &mut B)
+    where
+        B: BoundaryBuilder<F = LB::F, EF = LB::EF>,
+    {
+        match self {
+            Self::Core(a) => <CoreAir as LookupAir<LB>>::eval_boundary(a, boundary),
+            Self::Chiplets(a) => <ChipletsAir as LookupAir<LB>>::eval_boundary(a, boundary),
         }
     }
 }
@@ -769,10 +773,7 @@ where
         main: &RowMajorMatrix<Felt>,
         challenges: &[EF],
     ) -> (RowMajorMatrix<EF>, Vec<EF>) {
-        let (aux_trace, committed) = match self {
-            Self::Core(a) => build_logup_aux_trace(a, main, challenges),
-            Self::Chiplets(a) => build_logup_aux_trace(a, main, challenges),
-        };
+        let (aux_trace, committed) = build_logup_aux_trace(self, main, challenges);
         debug_assert_eq!(
             committed.len(),
             1,

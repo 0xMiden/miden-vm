@@ -31,7 +31,7 @@ use miden_crypto::{
     stark::air::{BaseAir, LiftedAir, symbolic::SymbolicExpressionExt},
 };
 
-use crate::{ChipletsAir, CoreAir, PV_PROGRAM_HASH, PV_TRANSCRIPT_STATE};
+use crate::{MidenAir, PV_PROGRAM_HASH, PV_TRANSCRIPT_STATE};
 
 // BATCHING TYPES
 // ================================================================================================
@@ -231,21 +231,21 @@ where
 
     use miden_ace_codegen::{InputCounts, InputLayout};
 
-    let core_air = CoreAir;
-    let chip_air = ChipletsAir;
+    let core_air = MidenAir::CORE;
+    let chip_air = MidenAir::CHIPLETS;
 
     // Step 1: per-AIR sub-DAGs. Each is built with its OWN single-AIR layout (no
     // multi-air slot) so the symbolic eval references plain `InputKey` variants.
     let sub_config = AceConfig { is_multi_air: false, ..config };
-    let core_artifacts = build_ace_dag_for_air::<CoreAir, Felt, EF>(&core_air, sub_config)?;
-    let chip_artifacts = build_ace_dag_for_air::<ChipletsAir, Felt, EF>(&chip_air, sub_config)?;
+    let core_artifacts = build_ace_dag_for_air::<MidenAir, Felt, EF>(&core_air, sub_config)?;
+    let chip_artifacts = build_ace_dag_for_air::<MidenAir, Felt, EF>(&chip_air, sub_config)?;
 
-    let core_main_w = <CoreAir as BaseAir<Felt>>::width(&core_air);
-    let core_aux_w = <CoreAir as LiftedAir<Felt, EF>>::aux_width(&core_air);
-    let core_aux_n = <CoreAir as LiftedAir<Felt, EF>>::num_aux_values(&core_air);
-    let chip_main_w = <ChipletsAir as BaseAir<Felt>>::width(&chip_air);
-    let chip_aux_w = <ChipletsAir as LiftedAir<Felt, EF>>::aux_width(&chip_air);
-    let chip_aux_n = <ChipletsAir as LiftedAir<Felt, EF>>::num_aux_values(&chip_air);
+    let core_main_w = <MidenAir as BaseAir<Felt>>::width(&core_air);
+    let core_aux_w = <MidenAir as LiftedAir<Felt, EF>>::aux_width(&core_air);
+    let core_aux_n = <MidenAir as LiftedAir<Felt, EF>>::num_aux_values(&core_air);
+    let chip_main_w = <MidenAir as BaseAir<Felt>>::width(&chip_air);
+    let chip_aux_w = <MidenAir as LiftedAir<Felt, EF>>::aux_width(&chip_air);
+    let chip_aux_n = <MidenAir as LiftedAir<Felt, EF>>::num_aux_values(&chip_air);
 
     // LMCS commits each per-AIR matrix as a stack and aligns each matrix's column
     // count to the LMCS rate (8 for Poseidon2). The wire OOD opens carry data in
