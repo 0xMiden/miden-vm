@@ -172,6 +172,13 @@ impl Node {
         }
     }
 
+    /// Returns `true` iff this is the framework's canonical TRUE node: zero tag, zero expression
+    /// payload. [`Node::digest`] short-circuits to [`TRUE_DIGEST`] for this case.
+    pub fn is_true_node(&self) -> bool {
+        self.tag == TRUE_TAG
+            && matches!(&self.payload, NodePayload::Expression(p) if p.0 == [ZERO; 8])
+    }
+
     /// Canonical 4-felt Poseidon2 digest of this node.
     ///
     /// Sponge state is laid out as `[rate || tag]` — the tag occupies the 4-felt capacity. For
@@ -182,7 +189,16 @@ impl Node {
     ///
     /// For `n == 1` the chunk digest is byte-identical to the equivalent Expression digest with
     /// the same tag and payload.
+    ///
+    /// **TRUE-node special case.** [`true_node`] (zero tag + zero expression payload) is the
+    /// framework's canonical "verified" sentinel; its digest is returned as [`TRUE_DIGEST`] (also
+    /// the zero word) directly, *without* running Poseidon2. This is necessary because Poseidon2
+    /// does not fix zero — `permute([ZERO; 12]) ≠ [ZERO; 12]` — so the sentinel would otherwise
+    /// hash to a non-zero word and break the verifier's "reduce root to TRUE" terminal check.
     pub fn digest(&self) -> Digest {
+        if self.is_true_node() {
+            return TRUE_DIGEST;
+        }
         let mut state = [ZERO; 12];
         state[8..12].copy_from_slice(&self.tag);
         match &self.payload {
@@ -355,5 +371,48 @@ mod tests {
             NodePayload::Expression(p) => assert_eq!(p.0, [ZERO; 8]),
             _ => panic!("true_node must be expression-bodied"),
         }
+        assert!(n.is_true_node());
+    }
+
+    #[test]
+    fn true_node_digest_is_special_cased_to_zero() {
+        // TRUE-node digest must be the zero word so the verifier's terminal check
+        // (`root == TRUE_DIGEST`) holds. This relies on the special case in `Node::digest`;
+        // running Poseidon2 over an all-zero rate + capacity does NOT produce zero — that fact
+        // is pinned by `poseidon2_does_not_fix_zero` below.
+        assert_eq!(true_node().digest(), TRUE_DIGEST);
+        assert_eq!(true_node().digest(), Word::new([ZERO; 4]));
+    }
+
+    #[test]
+    fn poseidon2_does_not_fix_zero() {
+        // Load-bearing fact for the unified-transcript refactor: because Poseidon2's round
+        // constants are non-zero, applying the permutation to the all-zero state does NOT
+        // return all zeros. If this test ever flips, the TRUE-node special case in
+        // `Node::digest` could be removed.
+        let mut state = [ZERO; 12];
+        Poseidon2::apply_permutation(&mut state);
+        let rate0 = Word::new([state[0], state[1], state[2], state[3]]);
+        assert_ne!(rate0, Word::new([ZERO; 4]));
+    }
+
+    #[test]
+    fn non_true_node_with_zero_tag_still_hashes_normally() {
+        // A node with the TRUE tag but a non-zero payload is not the canonical TRUE node — it
+        // must hash through Poseidon2. (This shape would only arise from a bug today, but the
+        // special-case guard must be narrow to avoid colliding sentinels.)
+        let nonzero_payload = Payload::new([
+            Felt::new_unchecked(1),
+            ZERO,
+            ZERO,
+            ZERO,
+            ZERO,
+            ZERO,
+            ZERO,
+            ZERO,
+        ]);
+        let n = Node::expression(TRUE_TAG, nonzero_payload);
+        assert!(!n.is_true_node());
+        assert_ne!(n.digest(), TRUE_DIGEST);
     }
 }
