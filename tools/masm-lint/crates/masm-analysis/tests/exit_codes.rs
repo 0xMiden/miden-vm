@@ -72,6 +72,18 @@ end
 }
 
 #[test]
+fn version_reports_cli_package_version() {
+    let output = Command::new(env!("CARGO_BIN_EXE_masm-lint"))
+        .arg("--version")
+        .output()
+        .expect("run masm-lint");
+
+    assert_eq!(output.status.code(), Some(0), "--version output: {output:?}");
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "masm-lint 0.3.0\n");
+    assert!(output.stderr.is_empty(), "--version stderr: {output:?}");
+}
+
+#[test]
 fn warning_inputs_exit_with_code_one() {
     let dir = temp_dir("warning-exit");
     let file = dir.join("warning.masm");

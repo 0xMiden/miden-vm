@@ -1,6 +1,6 @@
 [package]
-name = "masm-lint"
-version = "0.3.0"
+name = "masm-analysis"
+version = "0.1.0"
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
@@ -9,14 +9,18 @@ repository.workspace = true
 rust-version.workspace = true
 publish = false
 
+[lib]
+doctest = false
+
 [[bin]]
 name = "masm-lint"
-path = "src/main.rs"
+path = "src/bin/masm-lint/main.rs"
 test = false
 
 [dependencies]
 clap.workspace = true
-masm-analysis = { path = "../masm-analysis" }
+masm-decompiler = { path = "../masm-decompiler" }
+miden-assembly-syntax = { workspace = true, features = ["std"] }
 miden-debug-types = { workspace = true, features = ["std"] }
 tracing-log.workspace = true
 tracing-subscriber.workspace = true
