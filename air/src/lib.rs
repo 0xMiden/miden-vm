@@ -463,27 +463,6 @@ where
     }
 }
 
-// --- AuxBuilder impl ---
-
-impl<EF> AuxBuilder<Felt, EF> for CoreAir
-where
-    EF: ExtensionField<Felt>,
-{
-    fn build_aux_trace(
-        &self,
-        main: &RowMajorMatrix<Felt>,
-        challenges: &[EF],
-    ) -> (RowMajorMatrix<EF>, Vec<EF>) {
-        let (aux_trace, committed) = build_logup_aux_trace(self, main, challenges);
-        debug_assert_eq!(
-            committed.len(),
-            1,
-            "build_logup_aux_trace returns one committed final per AIR (col 0's terminal sum)"
-        );
-        (aux_trace, committed)
-    }
-}
-
 // CHIPLETS AIR
 // ================================================================================================
 
@@ -650,27 +629,6 @@ where
     }
 }
 
-// --- AuxBuilder impl ---
-
-impl<EF> AuxBuilder<Felt, EF> for ChipletsAir
-where
-    EF: ExtensionField<Felt>,
-{
-    fn build_aux_trace(
-        &self,
-        main: &RowMajorMatrix<Felt>,
-        challenges: &[EF],
-    ) -> (RowMajorMatrix<EF>, Vec<EF>) {
-        let (aux_trace, committed) = build_logup_aux_trace(self, main, challenges);
-        debug_assert_eq!(
-            committed.len(),
-            1,
-            "build_logup_aux_trace returns one committed final per AIR (col 0's terminal sum)"
-        );
-        (aux_trace, committed)
-    }
-}
-
 // MIDEN AIR (multi-AIR enum wrapper)
 // ================================================================================================
 
@@ -811,13 +769,15 @@ where
         main: &RowMajorMatrix<Felt>,
         challenges: &[EF],
     ) -> (RowMajorMatrix<EF>, Vec<EF>) {
-        match self {
-            Self::Core(a) => {
-                <CoreAir as AuxBuilder<Felt, EF>>::build_aux_trace(a, main, challenges)
-            },
-            Self::Chiplets(a) => {
-                <ChipletsAir as AuxBuilder<Felt, EF>>::build_aux_trace(a, main, challenges)
-            },
-        }
+        let (aux_trace, committed) = match self {
+            Self::Core(a) => build_logup_aux_trace(a, main, challenges),
+            Self::Chiplets(a) => build_logup_aux_trace(a, main, challenges),
+        };
+        debug_assert_eq!(
+            committed.len(),
+            1,
+            "build_logup_aux_trace returns one committed final per AIR (col 0's terminal sum)"
+        );
+        (aux_trace, committed)
     }
 }
