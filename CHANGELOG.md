@@ -143,6 +143,7 @@
 - Fixed `FastProcessor` stack growth so operand stack depth is bounded by `ExecutionOptions::max_stack_depth` instead of the internal buffer size ([#3086](https://github.com/0xMiden/miden-vm/pull/3086)).
 - Hardened MAST forest and package byte-slice deserialization against fuzzed length fields ([#3088](https://github.com/0xMiden/miden-vm/pull/3088)).
 - [BREAKING] Fixed project artifact reuse to ignore unrelated manifest fields, rejected private cross-module imports, and kept signature-only type imports live ([#3091](https://github.com/0xMiden/miden-vm/pull/3091)).
+- Rejected private type references in exported procedure signatures, including transitive aliases and same-module absolute paths ([#3092](https://github.com/0xMiden/miden-vm/issues/3092)).
 - Fixed stale `ReplayProcessor` doc comment links to `ExecutionTracer` after module-structure refactors.
 
 #### Changes
