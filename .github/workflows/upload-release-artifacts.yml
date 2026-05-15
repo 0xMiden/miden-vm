@@ -37,7 +37,13 @@ jobs:
           echo "Draft existance query: ${is_draft}"
           case "${is_draft}" in
             true)
-              echo "Reusing existing draft ${RELEASE_TAG}."
+              draft_sha=$( { gh release view "${RELEASE_TAG}" --json targetCommitish | jq -r .targetCommitish; } )
+              if [[ "${RELEASE_SHA}" != "${draft_sha}" ]]; then
+                  echo "Commit sha given as input differs from the draft's SHA ${draft_sha}. Exiting"
+                  exit 1
+              else
+                  echo "Reusing existing draft ${RELEASE_TAG}."
+              fi
               ;;
             false)
               echo "Release ${RELEASE_TAG} already exists and is published. Refusing to touch it." >&2
