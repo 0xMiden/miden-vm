@@ -478,6 +478,7 @@ pub(super) fn op_log_precompile<P: Processor, T: Tracer>(
     let out_cap: Word = output_state[Hasher::CAPACITY_RANGE].try_into().unwrap();
 
     processor.set_precompile_transcript_state(state_new);
+    processor.record_log_precompile_node(state_prev, stmnt, state_new);
 
     processor.stack_mut().set_word(0, &state_new);
     processor.stack_mut().set_word(4, &out_rate1);

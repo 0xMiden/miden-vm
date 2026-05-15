@@ -66,6 +66,21 @@ pub(crate) trait Processor: Sized {
     /// Called by `log_precompile` after recording a new commitment.
     fn set_precompile_transcript_state(&mut self, state: PrecompileTranscriptState);
 
+    /// Records a `log_precompile` step into the deferred-DAG: interns the AND-node
+    /// `{tag: TRUE_TAG, payload: prev_root || stmnt}` and advances `DeferredState.root` from
+    /// `prev_root` to `new_root`.
+    ///
+    /// `new_root` must equal `Poseidon2::merge(prev_root, stmnt)` — i.e. what the in-circuit
+    /// hasher just computed and what `set_precompile_transcript_state` was called with. This
+    /// runs alongside `set_precompile_transcript_state` during the dual-write phase (step 3 of
+    /// the unified-transcript refactor) so the two views can be cross-checked before the old
+    /// transcript path is retired.
+    ///
+    /// Replay processors that don't carry a [`miden_core::deferred::DeferredState`] (e.g. trace
+    /// regeneration) implement this as a no-op — the DAG is built once during the main
+    /// processing pass.
+    fn record_log_precompile_node(&mut self, prev_root: Word, stmnt: Word, new_root: Word);
+
     /// Executes the decorators that should be executed before entering a node.
     fn execute_before_enter_decorators(
         &self,

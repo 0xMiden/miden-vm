@@ -451,6 +451,12 @@ impl Processor for ReplayProcessor {
         self.system.pc_transcript_state = state;
     }
 
+    fn record_log_precompile_node(&mut self, _prev_root: Word, _stmnt: Word, _new_root: Word) {
+        // ReplayProcessor doesn't carry a DeferredState — the DAG is fully built during the main
+        // FastProcessor pass. Trace regeneration only needs to thread the rolling state through
+        // `set_precompile_transcript_state`, which already happened above.
+    }
+
     fn execute_before_enter_decorators(
         &self,
         _node_id: MastNodeId,
