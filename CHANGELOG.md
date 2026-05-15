@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.22.4 (2026-05-15)
+
+- Reverted debug metadata dedup changes from [#2955](https://github.com/0xMiden/miden-vm/pull/2955) to restore the public `miden-standards` account component procedure roots from v0.22.1.
+
 ## 0.22.3 (2026-05-01)
 
 - Change value of `Path::MAX_COMPONENT_LENGTH` to `u16::MAX - 2` [#3087](https://github.com/0xMiden/miden-vm/pull/3087)
