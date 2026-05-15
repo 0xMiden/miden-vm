@@ -1,7 +1,6 @@
 use alloc::{collections::BTreeMap, vec::Vec};
 
-use super::{ChildResolver, DeferredWitness, Digest, Node, NodePayload, NodeType, Schema, SchemaError};
-use crate::crypto::hash::Poseidon2;
+use super::{BodyShape, ChildResolver, DeferredWitness, Digest, Node, NodePayload, Schema, SchemaError};
 
 /// In-memory deferred-DAG state owned by the host.
 ///
@@ -9,20 +8,12 @@ use crate::crypto::hash::Poseidon2;
 /// - `nodes`: expression and chunk nodes content-addressed by their Poseidon2 digest. Re-inserting
 ///   an identical node is a no-op (digests are collision-resistant, so same-key inserts are
 ///   same-value inserts in practice).
-/// - `assertions`: assertion nodes in registration order. The schema classifies a node as an
-///   assertion via `decode(tag)` returning `Ok(NodeType::Assertion)`.
-/// - `transcript`: a single rolling Poseidon2 digest folded over each assertion's digest, in order.
-///   Mirrors [`crate::precompile::PrecompileTranscript`]. The verifier re-folds it from the witness
-///   assertions to bind their content and order.
-/// - `root`: transcript root pointer (additive scaffolding from step 1 of the unified-transcript
-///   refactor). Initialized to [`super::TRUE_DIGEST`] (the zero word). In step 3 it will be
-///   updated in lockstep with `transcript` by `log_precompile`; in step 4 it replaces `transcript`
-///   entirely.
+/// - `root`: the transcript root pointer. Initial value [`super::TRUE_DIGEST`]; advanced by
+///   `log_precompile`, which interns an AND-node `{tag: TRUE_TAG, payload: prev_root || stmnt}`
+///   and updates the root pointer. Reducing root to TRUE is the verifier's single check.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct DeferredState {
     nodes: BTreeMap<Digest, Node>,
-    assertions: Vec<Node>,
-    transcript: Digest,
     root: Digest,
 }
 
@@ -51,26 +42,12 @@ impl DeferredState {
         self.nodes.insert(digest, node);
     }
 
-    pub fn assertions(&self) -> &[Node] {
-        &self.assertions
-    }
-
     pub fn nodes(&self) -> &BTreeMap<Digest, Node> {
         &self.nodes
     }
 
-    /// Returns the running transcript digest folded over every assertion appended so far. Its
-    /// initial value is `[ZERO; 4]`; each assertion folds in `node.digest()` via
-    /// `Poseidon2::merge`.
-    pub fn transcript(&self) -> Digest {
-        self.transcript
-    }
-
     /// Returns the current transcript root pointer. Initial value is [`super::TRUE_DIGEST`].
-    ///
-    /// Scaffolding added in step 1 of the unified-transcript refactor; from step 3 onward this is
-    /// updated in lockstep with [`Self::transcript`] by `log_precompile`, and from step 4 onward
-    /// it replaces `transcript` as the precompile-transcript public input.
+    /// Advanced by `log_precompile` via [`Self::set_root`] in concert with AND-node interning.
     pub fn root(&self) -> Digest {
         self.root
     }
@@ -81,64 +58,49 @@ impl DeferredState {
         self.root = root;
     }
 
-    /// Register an opaque node, asking `schema` to decode its tag and (for assertions) verify it.
+    /// Register an opaque node, asking `schema` to decode its tag.
     ///
-    /// The node's payload variant must match what `decode(tag)` returns, otherwise
-    /// [`SchemaError::InvalidNode`] is surfaced — the processor handlers enforce this by
-    /// construction, so a mismatch here means the caller built the node by hand with disagreeing
-    /// tag and variant.
+    /// The node's payload variant must match `decode(tag).body`, otherwise
+    /// [`SchemaError::InvalidNode`] is surfaced. The node is interned into the DAG by its
+    /// Poseidon2 digest. Re-registering an identical `(digest, node)` pair is silently
+    /// idempotent.
     ///
-    /// - `Expression` / `Chunk(_)` → inserts the node into the DAG and returns its digest.
-    ///   Re-registering the same digest is silently idempotent.
-    /// - `Assertion` → appends the node to the assertion list, folds it into the running
-    ///   transcript, then drives a depth-first reduction (see [`Self::evaluate`]) to verify the
-    ///   assertion. A schema-reported `AssertionFailed` propagates as-is; the transcript fold is
-    ///   committed regardless.
+    /// Predicates (tags whose `evaluates_to == TRUE_TAG`) are *not* verified at registration —
+    /// register is a pure host hint that only populates the DAG. Verification is explicit:
+    /// either host-side via [`Self::evaluate`], or constrained via `log_precompile`.
     pub fn register(&mut self, schema: &dyn Schema, node: Node) -> Result<Digest, SchemaError> {
-        let role = schema.decode(node.tag)?;
-        if !payload_matches_role(&role, &node.payload) {
+        let info = schema.decode(node.tag)?;
+        if !payload_matches_body(info.body, &node.payload) {
             return Err(SchemaError::InvalidNode);
         }
         let digest = node.digest();
-        match role {
-            NodeType::Expression | NodeType::Chunk(_) => {
-                self.nodes.insert(digest, node);
-                Ok(digest)
-            },
-            NodeType::Assertion => {
-                self.transcript = Poseidon2::merge(&[self.transcript, digest]);
-                self.assertions.push(node.clone());
-                DfsResolver { state: self, schema }.reduce_and_intern(node)?;
-                Ok(digest)
-            },
-        }
+        self.nodes.insert(digest, node);
+        Ok(digest)
     }
 
     /// Evaluate an opaque node via the installed schema.
     ///
-    /// Accepts any classification:
-    /// - `Expression` → reduces to canonical form. The input node and every canonical intermediate
-    ///   produced during the walk are interned into `self.nodes`, so callers may invoke `evaluate`
-    ///   on a fresh op node without pre-registering it.
-    /// - `Chunk(_)` → reduces to canonical form via the schema's chunk handler (typically a
-    ///   digest-leaf expression). Both the input chunk and the canonical result are interned.
-    /// - `Assertion` → verifies the assertion and returns the input node back; a mismatch surfaces
-    ///   as [`SchemaError::AssertionFailed`]. Assertions are *not* interned; they live in
-    ///   `self.assertions` when registered, and `evaluate` on an assertion is a pure verify.
+    /// Reduces to canonical form per `schema.reduce`. The input node and every canonical
+    /// intermediate produced during the walk are interned into `self.nodes`, so callers may
+    /// invoke `evaluate` on a fresh op node without pre-registering it.
+    ///
+    /// For a predicate (`decode(tag).evaluates_to == TRUE_TAG`), success returns
+    /// [`super::true_node`] and a mismatch surfaces as [`SchemaError::AssertionFailed`].
     ///
     /// Transitively-referenced child digests must resolve through the DAG — an unknown child
-    /// digest surfaces as [`SchemaError::MissingNode`]. The advice-stack contract is enforced by
-    /// the processor-side handler: for expressions the canonical 12 felts are pushed; for
-    /// chunks and assertions, nothing is pushed.
+    /// digest surfaces as [`SchemaError::MissingNode`]. The advice-stack contract is enforced
+    /// by the processor-side handler: for non-predicates the canonical 12 felts are pushed; for
+    /// predicates (whose canonical is the TRUE node), nothing is pushed.
     ///
     /// **Why intern aggressively:** the verifier checks neighbors against each other rather than
-    /// re-executing the DAG, so the witness must include the whole reduction proof — the input op,
-    /// every op visited during recursive reduction, and every canonical leaf produced — not just
-    /// the final answer. Missing any of these would leave a digest in the witness with no node
-    /// defining it.
+    /// re-executing the DAG, so the witness must include the whole reduction proof — the input
+    /// op, every op visited during recursive reduction, and every canonical leaf produced — not
+    /// just the final answer. Missing any of these would leave a digest in the witness with no
+    /// node defining it. The TRUE node is the one exception: it's a structural sentinel that the
+    /// verifier accepts directly, so we don't waste DAG space on copies of it.
     pub fn evaluate(&mut self, schema: &dyn Schema, node: Node) -> Result<Node, SchemaError> {
-        let role = schema.decode(node.tag)?;
-        if !payload_matches_role(&role, &node.payload) {
+        let info = schema.decode(node.tag)?;
+        if !payload_matches_body(info.body, &node.payload) {
             return Err(SchemaError::InvalidNode);
         }
         DfsResolver { state: self, schema }.reduce_and_intern(node)
@@ -146,24 +108,22 @@ impl DeferredState {
 
     /// Snapshot the current state into a [`DeferredWitness`].
     ///
-    /// All registered expression and chunk nodes (in digest order, thanks to the `BTreeMap`) plus
-    /// every assertion node (in registration order) plus the final transcript digest. No
-    /// reachability filtering — if a program registers an orphan node, it appears in the witness
-    /// too.
+    /// All registered expression and chunk nodes (in digest order, thanks to the `BTreeMap`)
+    /// plus the final transcript root. No reachability filtering — if a program registers an
+    /// orphan node, it appears in the witness too.
     pub fn extract_witness(&self) -> DeferredWitness {
         let nodes: Vec<_> = self.nodes.iter().map(|(d, n)| (*d, n.clone())).collect();
-        DeferredWitness::new(nodes, self.assertions.clone(), self.transcript)
+        DeferredWitness::new(nodes, self.root)
     }
 }
 
-/// Returns `true` when the variant of `payload` agrees with the role the schema decoded for the
-/// node's tag. Construction-time invariant — handlers always build the matching variant, but a
-/// hand-constructed `Node` may disagree.
-fn payload_matches_role(role: &NodeType, payload: &NodePayload) -> bool {
-    match (role, payload) {
-        (NodeType::Expression, NodePayload::Expression(_)) => true,
-        (NodeType::Assertion, NodePayload::Assertion(_)) => true,
-        (NodeType::Chunk(n), NodePayload::Chunk(chunks)) => chunks.len() == *n as usize,
+/// Returns `true` when the variant of `payload` agrees with the body shape the schema decoded
+/// for the node's tag. Construction-time invariant — handlers always build the matching variant,
+/// but a hand-constructed `Node` may disagree.
+fn payload_matches_body(body: BodyShape, payload: &NodePayload) -> bool {
+    match (body, payload) {
+        (BodyShape::Expression, NodePayload::Expression(_)) => true,
+        (BodyShape::Chunk(n), NodePayload::Chunk(chunks)) => chunks.len() == n as usize,
         _ => false,
     }
 }
@@ -174,29 +134,24 @@ fn payload_matches_role(role: &NodeType, payload: &NodePayload) -> bool {
 /// Bound the [`DeferredState`] and [`Schema`] together so [`ChildResolver::resolve`] can recurse
 /// through [`Schema::reduce`] without aliasing borrow problems: the schema is held by shared
 /// reference, the state by exclusive reference. Each `resolve` call looks the child up,
-/// recursively reduces it, and interns every expression/chunk node it visits.
+/// recursively reduces it, and interns every node it visits (except the TRUE sentinel).
 struct DfsResolver<'a> {
     state: &'a mut DeferredState,
     schema: &'a dyn Schema,
 }
 
 impl DfsResolver<'_> {
-    /// Reduce `node` to canonical form, interning every expression/chunk node visited along the
-    /// way — the input, any expression intermediates the schema's `reduce` walks through, and the
-    /// canonical result. Assertion nodes are not interned (they live in `state.assertions` when
-    /// registered, or are pure verify-only when evaluated).
+    /// Reduce `node` to canonical form, interning every node visited along the way — the input
+    /// and the canonical result — except the TRUE sentinel (which is a structural marker, not a
+    /// load-bearing DAG node).
     ///
     /// `node` is passed to `schema.reduce` by reference so we can intern it by-move afterwards,
     /// avoiding a chunk-sized clone on every reduction.
     fn reduce_and_intern(&mut self, node: Node) -> Result<Node, SchemaError> {
         let schema = self.schema;
-        let role = schema.decode(node.tag)?;
         let canonical = schema.reduce(&node, self)?;
-        if matches!(role, NodeType::Expression | NodeType::Chunk(_)) {
-            self.state.intern(node);
-        }
-        let canonical_role = schema.decode(canonical.tag)?;
-        if matches!(canonical_role, NodeType::Expression | NodeType::Chunk(_)) {
+        self.state.intern(node);
+        if !canonical.is_true_node() {
             self.state.intern(canonical.clone());
         }
         Ok(canonical)
@@ -215,7 +170,7 @@ mod tests {
     use super::*;
     use crate::{
         Felt, Word, ZERO,
-        deferred::{Field0Handler, Payload, Tag},
+        deferred::{Field0Handler, Payload, TRUE_DIGEST, Tag},
     };
 
     fn field0_leaf_node(low: u64) -> Node {
@@ -225,24 +180,15 @@ mod tests {
         Node::expression(Field0Handler::LEAF, Payload::new(limbs))
     }
 
-    fn assertion_lhs(node: &Node) -> Word {
-        match &node.payload {
-            NodePayload::Assertion(p) => Word::new([p.0[0], p.0[1], p.0[2], p.0[3]]),
-            _ => panic!("expected an assertion node"),
-        }
-    }
-
     fn dummy_digest(seed: u64) -> Word {
         Word::new(core::array::from_fn(|i| Felt::new_unchecked(seed + i as u64)))
     }
 
     #[test]
-    fn empty_state_has_no_nodes_or_assertions() {
+    fn empty_state_has_no_nodes_and_root_is_true() {
         let state = DeferredState::new();
         assert!(state.nodes().is_empty());
-        assert!(state.assertions().is_empty());
-        assert_eq!(state.transcript(), Word::new([ZERO; 4]));
-        assert_eq!(state.root(), crate::deferred::TRUE_DIGEST);
+        assert_eq!(state.root(), TRUE_DIGEST);
     }
 
     #[test]
@@ -305,95 +251,59 @@ mod tests {
     }
 
     #[test]
-    fn assertion_register_appends_node() {
-        let mut state = DeferredState::new();
-        let schema = Field0Handler;
-        let a = state.register(&schema, field0_leaf_node(1)).unwrap();
-        // Self-equal assertion (A == A) — passes eval.
-        let assertion = Node::assertion(Field0Handler::ASSERT_EQ, Payload::binary_op(a, a));
-        state.register(&schema, assertion).unwrap();
-        assert_eq!(state.assertions().len(), 1);
-        assert_eq!(assertion_lhs(&state.assertions()[0]), a);
-    }
-
-    #[test]
-    fn assertions_preserve_insertion_order() {
-        let mut state = DeferredState::new();
-        let schema = Field0Handler;
-        let a = state.register(&schema, field0_leaf_node(1)).unwrap();
-        let b = state.register(&schema, field0_leaf_node(2)).unwrap();
-        state
-            .register(&schema, Node::assertion(Field0Handler::ASSERT_EQ, Payload::binary_op(a, a)))
-            .unwrap();
-        state
-            .register(&schema, Node::assertion(Field0Handler::ASSERT_EQ, Payload::binary_op(b, b)))
-            .unwrap();
-
-        assert_eq!(state.assertions().len(), 2);
-        assert_eq!(assertion_lhs(&state.assertions()[0]), a);
-        assert_eq!(assertion_lhs(&state.assertions()[1]), b);
-    }
-
-    #[test]
-    fn transcript_folds_each_assertion_digest_in_order() {
-        let mut state = DeferredState::new();
-        let schema = Field0Handler;
-        assert_eq!(state.transcript(), Word::new([ZERO; 4]));
-
-        let a = state.register(&schema, field0_leaf_node(1)).unwrap();
-        let b = state.register(&schema, field0_leaf_node(2)).unwrap();
-
-        // First assertion: A == A.
-        let n1 = Node::assertion(Field0Handler::ASSERT_EQ, Payload::binary_op(a, a));
-        state.register(&schema, n1.clone()).unwrap();
-        let expected1 = Poseidon2::merge(&[Word::new([ZERO; 4]), n1.digest()]);
-        assert_eq!(state.transcript(), expected1);
-
-        // Second assertion: B == B.
-        let n2 = Node::assertion(Field0Handler::ASSERT_EQ, Payload::binary_op(b, b));
-        state.register(&schema, n2.clone()).unwrap();
-        let expected2 = Poseidon2::merge(&[expected1, n2.digest()]);
-        assert_eq!(state.transcript(), expected2);
-    }
-
-    #[test]
-    fn assert_eq_fails_on_mismatch() {
+    fn register_predicate_does_not_verify_eagerly() {
+        // Under the unified design, `register` is a pure host hint — it interns the predicate
+        // node but does NOT drive reduce. Programs that want host-side verification call
+        // `evaluate`; programs that want constrained verification call `log_precompile`.
         let mut state = DeferredState::new();
         let schema = Field0Handler;
         let a = state.register(&schema, field0_leaf_node(3)).unwrap();
         let b = state.register(&schema, field0_leaf_node(4)).unwrap();
-        let wrong = state.register(&schema, field0_leaf_node(99)).unwrap();
-        let add = state
-            .register(&schema, Node::expression(Field0Handler::ADD, Payload::binary_op(a, b)))
-            .unwrap();
-
-        let err = state.register(
-            &schema,
-            Node::assertion(Field0Handler::ASSERT_EQ, Payload::binary_op(add, wrong)),
-        );
+        // A mismatched predicate — would fail if eagerly verified.
+        let bad = Node::expression(Field0Handler::ASSERT_EQ, Payload::binary_op(a, b));
+        let bad_digest = state.register(&schema, bad.clone()).unwrap();
+        assert!(state.contains(&bad_digest), "predicate interned even when it doesn't hold");
+        // Verification surfaces the mismatch only when explicitly invoked.
+        let err = state.evaluate(&schema, bad);
         assert!(matches!(err, Err(SchemaError::AssertionFailed)));
-        // The assertion is still recorded (transcript folds eagerly; the mismatch is the only
-        // observable consequence at this cycle).
-        assert_eq!(state.assertions().len(), 1);
     }
 
     #[test]
-    fn assert_eq_missing_node_errors() {
+    fn evaluate_predicate_succeeds_returns_true_node() {
+        let mut state = DeferredState::new();
+        let schema = Field0Handler;
+        let a = state.register(&schema, field0_leaf_node(7)).unwrap();
+        let assertion = Node::expression(Field0Handler::ASSERT_EQ, Payload::binary_op(a, a));
+        let result = state.evaluate(&schema, assertion).unwrap();
+        assert!(result.is_true_node(), "predicate success returns the canonical TRUE node");
+    }
+
+    #[test]
+    fn evaluate_predicate_mismatch_errors() {
+        let mut state = DeferredState::new();
+        let schema = Field0Handler;
+        let a = state.register(&schema, field0_leaf_node(3)).unwrap();
+        let b = state.register(&schema, field0_leaf_node(4)).unwrap();
+        let mismatch = Node::expression(Field0Handler::ASSERT_EQ, Payload::binary_op(a, b));
+        let err = state.evaluate(&schema, mismatch);
+        assert!(matches!(err, Err(SchemaError::AssertionFailed)));
+    }
+
+    #[test]
+    fn evaluate_predicate_missing_node_errors() {
         let mut state = DeferredState::new();
         let schema = Field0Handler;
         let a = state.register(&schema, field0_leaf_node(1)).unwrap();
         let dangling = Word::new([Felt::from_u32(0xdead); 4]);
-
-        let err = state.register(
-            &schema,
-            Node::assertion(Field0Handler::ASSERT_EQ, Payload::binary_op(a, dangling)),
-        );
+        let assertion =
+            Node::expression(Field0Handler::ASSERT_EQ, Payload::binary_op(a, dangling));
+        let err = state.evaluate(&schema, assertion);
         assert!(matches!(err, Err(SchemaError::MissingNode)));
     }
 
     #[test]
     fn nested_evaluation_reduces_through_op_tree() {
-        // Build (a + b) * c, then assert equal to a leaf holding (a + b) * c precomputed.
+        // Build (a + b) * c, then verify equal to a pre-computed leaf via evaluate.
         let mut state = DeferredState::new();
         let schema = Field0Handler;
         let a = state.register(&schema, field0_leaf_node(3)).unwrap();
@@ -406,49 +316,18 @@ mod tests {
         let mul = state
             .register(&schema, Node::expression(Field0Handler::MUL, Payload::binary_op(add, c)))
             .unwrap();
-
-        state
-            .register(
-                &schema,
-                Node::assertion(Field0Handler::ASSERT_EQ, Payload::binary_op(mul, expected)),
-            )
-            .unwrap();
-        assert_eq!(state.assertions().len(), 1);
-    }
-
-    #[test]
-    fn evaluate_assertion_verifies_and_returns_the_node() {
-        let mut state = DeferredState::new();
-        let schema = Field0Handler;
-        let a = state.register(&schema, field0_leaf_node(7)).unwrap();
-        // Self-equal assertion: passes eval. State should be unchanged by `evaluate`.
-        let assertion = Node::assertion(Field0Handler::ASSERT_EQ, Payload::binary_op(a, a));
-        let before_nodes = state.nodes().len();
-        let before_assertions = state.assertions().len();
-        let result = state.evaluate(&schema, assertion.clone()).unwrap();
-        assert_eq!(result, assertion, "evaluate returns the assertion node itself");
-        assert_eq!(state.nodes().len(), before_nodes, "state.nodes unchanged");
-        assert_eq!(state.assertions().len(), before_assertions, "no transcript fold");
-    }
-
-    #[test]
-    fn evaluate_assertion_mismatch_errors() {
-        let mut state = DeferredState::new();
-        let schema = Field0Handler;
-        let a = state.register(&schema, field0_leaf_node(3)).unwrap();
-        let b = state.register(&schema, field0_leaf_node(4)).unwrap();
-        let mismatch = Node::assertion(Field0Handler::ASSERT_EQ, Payload::binary_op(a, b));
-        let err = state.evaluate(&schema, mismatch);
-        assert!(matches!(err, Err(SchemaError::AssertionFailed)));
+        let assertion =
+            Node::expression(Field0Handler::ASSERT_EQ, Payload::binary_op(mul, expected));
+        let result = state.evaluate(&schema, assertion).unwrap();
+        assert!(result.is_true_node());
     }
 
     #[test]
     fn witness_includes_all_registered_nodes() {
-        // Build (a + b) * c == precomputed_35 and assert it. Plus an orphan node that
-        // nothing references — without reachability filtering it shows up in the witness.
-        // The assertion's eval interns one intermediate (canonical(add) = leaf(7)). The other
-        // intermediate (canonical(mul) = leaf(35)) collides with the pre-registered `expected`,
-        // so net new nodes = 1.
+        // Build (a + b) * c, assert it equals leaf(35), evaluate to drive the canonical
+        // intermediates into the DAG, then snapshot the witness. The TRUE node is interned
+        // *during* reduce but the DfsResolver skips it (sentinel, not load-bearing), so it
+        // does not appear in the witness.
         let mut state = DeferredState::new();
         let schema = Field0Handler;
         let a = state.register(&schema, field0_leaf_node(3)).unwrap();
@@ -462,22 +341,21 @@ mod tests {
         let mul = state
             .register(&schema, Node::expression(Field0Handler::MUL, Payload::binary_op(add, c)))
             .unwrap();
-        state
-            .register(
-                &schema,
-                Node::assertion(Field0Handler::ASSERT_EQ, Payload::binary_op(mul, expected)),
-            )
-            .unwrap();
+        let assertion =
+            Node::expression(Field0Handler::ASSERT_EQ, Payload::binary_op(mul, expected));
+        state.evaluate(&schema, assertion).unwrap();
 
         let w = state.extract_witness();
-        assert_eq!(w.nodes.len(), 8, "7 registered expression nodes + 1 interned intermediate");
+        // 7 registered + 1 interned intermediate (canonical(add) = leaf(7)) +
+        // 1 interned assertion-input (the ASSERT_EQ node, deposited by evaluate's reduce_and_intern).
+        assert_eq!(w.nodes.len(), 9);
         let leaf_7_digest = field0_leaf_node(7).digest();
         assert!(
             w.nodes.iter().any(|(d, _)| *d == leaf_7_digest),
             "canonical(add) must appear in the witness"
         );
         assert!(w.nodes.windows(2).all(|p| p[0].0 < p[1].0), "sorted by digest");
-        assert_eq!(w.assertions.len(), 1);
+        assert_eq!(w.root, TRUE_DIGEST, "no log_precompile called, root is still TRUE");
     }
 
     #[test]

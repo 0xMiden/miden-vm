@@ -1,6 +1,9 @@
 use crate::{
     Felt, ZERO,
-    deferred::{ChildResolver, DeferredError, Node, NodeType, Payload, Schema, SchemaError, Tag},
+    deferred::{
+        BodyShape, ChildResolver, DeferredError, Node, Payload, Schema, SchemaError, TRUE_TAG,
+        Tag, TagInfo, true_node,
+    },
 };
 
 /// Handler for the first 256-bit non-native field, `Field0`.
@@ -15,10 +18,11 @@ use crate::{
 ///
 /// **Tag layout (Field0-specific, opaque to the processor):**
 /// - `[1, 0, op, 0]` where `op` selects the operation:
-///   - `0` — canonical leaf (payload is 8 u32-limbs)
-///   - `1` — `add` op node (payload is `lhs_digest || rhs_digest`)
-///   - `2` — `mul` op node (payload is `lhs_digest || rhs_digest`)
-///   - `3` — equality-assertion marker (not storable as a node body)
+///   - `0` — canonical leaf (payload is 8 u32-limbs); self-evaluating.
+///   - `1` — `add` op node (payload is `lhs_digest || rhs_digest`); reduces to `LEAF`.
+///   - `2` — `mul` op node (payload is `lhs_digest || rhs_digest`); reduces to `LEAF`.
+///   - `3` — equality predicate (payload is `lhs_digest || rhs_digest`); reduces to TRUE on
+///     match, errors `AssertionFailed` on mismatch.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct Field0Handler;
 
@@ -56,14 +60,21 @@ impl Field0Handler {
 }
 
 impl Schema for Field0Handler {
-    fn decode(&self, tag: Tag) -> Result<NodeType, SchemaError> {
+    fn decode(&self, tag: Tag) -> Result<TagInfo, SchemaError> {
         if tag[0] != Self::PREFIX[0] || tag[1] != Self::PREFIX[1] {
             return Err(SchemaError::InvalidNode);
         }
-        if tag == Self::LEAF || tag == Self::ADD || tag == Self::MUL {
-            Ok(NodeType::Expression)
+        // Field0 has no chunk-bodied tags; everything is expression-shaped.
+        let body = BodyShape::Expression;
+        if tag == Self::LEAF {
+            // Self-evaluating leaf.
+            Ok(TagInfo { body, evaluates_to: Self::LEAF })
+        } else if tag == Self::ADD || tag == Self::MUL {
+            // Producing op: reduces to a canonical LEAF.
+            Ok(TagInfo { body, evaluates_to: Self::LEAF })
         } else if tag == Self::ASSERT_EQ {
-            Ok(NodeType::Assertion)
+            // Predicate: reduces to TRUE.
+            Ok(TagInfo { body, evaluates_to: TRUE_TAG })
         } else {
             Err(SchemaError::InvalidNode)
         }
@@ -89,7 +100,8 @@ impl Schema for Field0Handler {
             if lhs != rhs {
                 return Err(SchemaError::AssertionFailed);
             }
-            return Ok(node.clone());
+            // Predicate-success: return the canonical TRUE node.
+            return Ok(true_node());
         }
         Err(SchemaError::InvalidNode)
     }

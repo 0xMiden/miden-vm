@@ -1,21 +1,22 @@
 //! Canary integration test for the chunk-node variant of the deferred-DAG public API.
 //!
 //! Defines a tiny test schema that:
-//! - Decodes a 2-byte tag prefix to pick between "preimage chunk" and "digest leaf" roles,
-//!   reading `n` for chunks out of the tag's third felt.
+//! - Decodes a 2-byte tag prefix to pick between "preimage chunk", "digest leaf", and "assert
+//!   equal" roles, reading `n` for chunks out of the tag's fourth felt.
 //! - `reduce` for a chunk computes a tiny "rolling sum" hash (definitely not a real hash —
 //!   the framework doesn't care, the schema picks the function) and returns an expression
 //!   digest-leaf.
-//! - `reduce` for an assertion compares the two operands canonically.
+//! - `reduce` for the assertion predicate compares the two operands canonically and returns
+//!   `true_node()` on match.
 //!
 //! This is the canonical demonstration that `Schema::decode + Schema::reduce + ChunkNode` are
-//! sufficient to model "preimage hashes to digest" as an assertion in the deferred DAG.
+//! sufficient to model "preimage hashes to digest" as a predicate in the deferred DAG.
 
 use miden_core::{
     Felt, ZERO,
-    crypto::hash::Poseidon2,
     deferred::{
-        ChildResolver, DeferredState, Node, NodeType, Payload, Schema, SchemaError, Tag,
+        BodyShape, ChildResolver, DeferredState, Node, Payload, Schema, SchemaError, TRUE_TAG,
+        Tag, TagInfo, true_node,
     },
 };
 
@@ -61,35 +62,49 @@ impl TestSchema {
 }
 
 impl Schema for TestSchema {
-    fn decode(&self, tag: Tag) -> Result<NodeType, SchemaError> {
+    fn decode(&self, tag: Tag) -> Result<TagInfo, SchemaError> {
         if tag[0] != TEST_PREFIX[0] || tag[1] != TEST_PREFIX[1] {
             return Err(SchemaError::InvalidNode);
         }
         match tag[2] {
-            r if r == PREIMAGE_ROLE => Ok(NodeType::Chunk(tag[3].as_canonical_u64() as u32)),
-            r if r == DIGEST_ROLE => Ok(NodeType::Expression),
-            r if r == ASSERT_ROLE => Ok(NodeType::Assertion),
+            // Preimage chunk reduces to a digest leaf.
+            r if r == PREIMAGE_ROLE => Ok(TagInfo {
+                body: BodyShape::Chunk(tag[3].as_canonical_u64() as u32),
+                evaluates_to: digest_tag(),
+            }),
+            // Digest leaf is self-evaluating.
+            r if r == DIGEST_ROLE => Ok(TagInfo {
+                body: BodyShape::Expression,
+                evaluates_to: digest_tag(),
+            }),
+            // Assertion is a predicate: evaluates to TRUE.
+            r if r == ASSERT_ROLE => Ok(TagInfo {
+                body: BodyShape::Expression,
+                evaluates_to: TRUE_TAG,
+            }),
             _ => Err(SchemaError::InvalidNode),
         }
     }
 
     fn reduce(&self, node: &Node, children: &mut dyn ChildResolver) -> Result<Node, SchemaError> {
         use miden_core::deferred::NodePayload;
+        if node.tag == assert_tag() {
+            let p = node.expression_payload().ok_or(SchemaError::InvalidNode)?;
+            let (lhs, rhs) = p.binary_op_children();
+            let lhs_canonical = children.resolve(lhs)?;
+            let rhs_canonical = children.resolve(rhs)?;
+            if lhs_canonical != rhs_canonical {
+                return Err(SchemaError::AssertionFailed);
+            }
+            return Ok(true_node());
+        }
         match &node.payload {
             // Preimage chunk reduces to its digest leaf.
-            NodePayload::Chunk(chunks) => Ok(Node::expression(digest_tag(), Self::fake_hash(chunks))),
+            NodePayload::Chunk(chunks) => {
+                Ok(Node::expression(digest_tag(), Self::fake_hash(chunks)))
+            },
             // Digest leaf is already canonical.
             NodePayload::Expression(_) => Ok(node.clone()),
-            // Assertion: resolve both digests, compare canonical forms.
-            NodePayload::Assertion(p) => {
-                let (lhs, rhs) = p.binary_op_children();
-                let lhs_canonical = children.resolve(lhs)?;
-                let rhs_canonical = children.resolve(rhs)?;
-                if lhs_canonical != rhs_canonical {
-                    return Err(SchemaError::AssertionFailed);
-                }
-                Ok(node.clone())
-            },
         }
     }
 }
@@ -99,9 +114,7 @@ impl Schema for TestSchema {
 
 fn chunk_data(n: u32) -> Vec<[Felt; 8]> {
     (0..n)
-        .map(|i| {
-            core::array::from_fn(|j| Felt::from_u32(1 + i * 8 + j as u32))
-        })
+        .map(|i| core::array::from_fn(|j| Felt::from_u32(1 + i * 8 + j as u32)))
         .collect()
 }
 
@@ -113,10 +126,6 @@ fn chunk_digest_for_n1_matches_equivalent_expression() {
     // Sanity check: an `n=1` chunk and an expression with the same tag and same 8 felts should
     // have identical digests. The chunk-digest body reduces to "fill rate, one permutation" for
     // n=1, which is exactly the standard expression digest body.
-    //
-    // Note: these two nodes can't co-exist under the same schema because `decode(tag)` returns
-    // only one role per tag — this test reaches under the framework just to verify the digest
-    // math.
     let tag = preimage_tag(1);
     let data = chunk_data(1);
     let chunk = Node::chunk(tag, data.clone());
@@ -144,7 +153,7 @@ fn register_chunk_with_mismatched_length_fails() {
 }
 
 #[test]
-fn assertion_preimage_equals_digest_succeeds() {
+fn predicate_preimage_equals_digest_succeeds() {
     let schema = TestSchema;
     let mut state = DeferredState::new();
 
@@ -157,23 +166,17 @@ fn assertion_preimage_equals_digest_succeeds() {
     let digest_leaf = Node::expression(digest_tag(), TestSchema::fake_hash(&chunks));
     let digest_leaf_digest = state.register(&schema, digest_leaf).unwrap();
 
-    // Assert preimage's digest == precomputed digest leaf's digest. The schema's reduce will:
-    // 1. Resolve preimage_digest → canonical form via `reduce(Chunk)` → Expression{digest_tag,
-    //    fake_hash(chunks)}
-    // 2. Resolve digest_leaf_digest → already canonical Expression.
-    // 3. Compare — must be equal.
-    state
-        .register(
-            &schema,
-            Node::assertion(assert_tag(), Payload::binary_op(preimage_digest, digest_leaf_digest)),
-        )
-        .unwrap();
-
-    assert_eq!(state.assertions().len(), 1);
+    // Predicate: preimage's digest == precomputed digest leaf. Reduce drives the chunk's hash
+    // and compares against the precomputed leaf, returning the TRUE node on match.
+    let assertion =
+        Node::expression(assert_tag(), Payload::binary_op(preimage_digest, digest_leaf_digest));
+    state.register(&schema, assertion.clone()).unwrap();
+    let result = state.evaluate(&schema, assertion).unwrap();
+    assert!(result.is_true_node());
 }
 
 #[test]
-fn assertion_preimage_mismatch_fails() {
+fn predicate_preimage_mismatch_fails_on_evaluate() {
     let schema = TestSchema;
     let mut state = DeferredState::new();
 
@@ -181,14 +184,15 @@ fn assertion_preimage_mismatch_fails() {
     let preimage = Node::chunk(preimage_tag(2), chunks);
     let preimage_digest = state.register(&schema, preimage).unwrap();
 
-    // A digest leaf with the wrong content — assertion must fail.
+    // A digest leaf with the wrong content — predicate must fail when verified.
     let wrong_leaf = Node::expression(digest_tag(), Payload::new([Felt::from_u32(99); 8]));
     let wrong_leaf_digest = state.register(&schema, wrong_leaf).unwrap();
 
-    let err = state.register(
-        &schema,
-        Node::assertion(assert_tag(), Payload::binary_op(preimage_digest, wrong_leaf_digest)),
-    );
+    let assertion =
+        Node::expression(assert_tag(), Payload::binary_op(preimage_digest, wrong_leaf_digest));
+    // Register is a pure hint — succeeds even when the predicate doesn't hold.
+    state.register(&schema, assertion.clone()).unwrap();
+    let err = state.evaluate(&schema, assertion);
     assert!(matches!(err, Err(SchemaError::AssertionFailed)));
 }
 
@@ -214,24 +218,4 @@ fn extract_witness_includes_chunk_nodes() {
         witness.nodes.iter().any(|(d, n)| *d == preimage_digest && *n == preimage),
         "chunk node must appear in the extracted witness"
     );
-}
-
-#[test]
-fn assertion_transcript_folds_chunk_assertions_in_order() {
-    let schema = TestSchema;
-    let mut state = DeferredState::new();
-    assert_eq!(state.transcript(), miden_core::Word::new([ZERO; 4]));
-
-    let chunks = chunk_data(2);
-    let preimage = Node::chunk(preimage_tag(2), chunks.clone());
-    let preimage_digest = state.register(&schema, preimage).unwrap();
-    let leaf = Node::expression(digest_tag(), TestSchema::fake_hash(&chunks));
-    let leaf_digest = state.register(&schema, leaf).unwrap();
-
-    let assertion =
-        Node::assertion(assert_tag(), Payload::binary_op(preimage_digest, leaf_digest));
-    state.register(&schema, assertion.clone()).unwrap();
-    let expected =
-        Poseidon2::merge(&[miden_core::Word::new([ZERO; 4]), assertion.digest()]);
-    assert_eq!(state.transcript(), expected);
 }

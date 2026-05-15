@@ -8,10 +8,10 @@ use std::sync::Arc;
 
 use miden_assembly::Assembler;
 use miden_core::{
-    Word, ZERO,
+    ZERO,
     deferred::{
-        ChildResolver, Field0Handler, Node, NodePayload, NodeType, Payload, Schema, SchemaError,
-        Tag,
+        BodyShape, ChildResolver, Field0Handler, Node, NodePayload, Payload, Schema, SchemaError,
+        TRUE_DIGEST, Tag, TagInfo,
     },
 };
 use miden_processor::{
@@ -69,6 +69,17 @@ fn emit_evaluate_into_mem(src: &mut String, node: Node, out_base: u32) {
     }
 }
 
+/// Build a MASM block that pushes the node and invokes `adv.evaluate_deferred` without consuming
+/// any advice output — used for predicates whose canonical form is the TRUE node (no advice
+/// push) or for cases where we just want to surface the verification error.
+fn emit_evaluate_for_side_effect(src: &mut String, node: Node) {
+    push_node(src, node);
+    src.push_str("    adv.evaluate_deferred\n");
+    for _ in 0..12 {
+        src.push_str("    drop\n");
+    }
+}
+
 fn push_node(src: &mut String, node: Node) {
     use core::fmt::Write;
     // Push tag first (its 4 felts end up deepest), then payload (8 felts on top), so the stack
@@ -79,7 +90,7 @@ fn push_node(src: &mut String, node: Node) {
     }
     let payload = node
         .payload_felts()
-        .expect("push_node only handles expression/assertion variants");
+        .expect("push_node only handles expression-bodied nodes");
     for f in payload.0.iter().rev() {
         writeln!(src, "    push.{}", f.as_int()).unwrap();
     }
@@ -123,17 +134,20 @@ fn deferred_end_to_end_register_eval_assert() {
     let add_digest = add.digest();
     let mul = Node::expression(Field0Handler::MUL, Payload::binary_op(add_digest, c_digest));
     let mul_digest = mul.digest();
+    // Predicate node: same shape as a binary op (expression body, two child digests), just with
+    // ASSERT_EQ as the tag.
     let assertion =
-        Node::assertion(Field0Handler::ASSERT_EQ, Payload::binary_op(mul_digest, d_digest));
+        Node::expression(Field0Handler::ASSERT_EQ, Payload::binary_op(mul_digest, d_digest));
 
-    // Build the program.
+    // Build the program: register every node, then evaluate the predicate to verify it.
     let mut src = String::from("begin\n");
     for n in [a, b, c, d] {
         emit_register(&mut src, n);
     }
     emit_register(&mut src, add);
     emit_register(&mut src, mul);
-    emit_register(&mut src, assertion);
+    emit_register(&mut src, assertion.clone());
+    emit_evaluate_for_side_effect(&mut src, assertion.clone());
     src.push_str("end\n");
 
     let program = Assembler::default().assemble_program(&src).expect("program must assemble");
@@ -144,37 +158,30 @@ fn deferred_end_to_end_register_eval_assert() {
         .expect("execution must succeed");
 
     let state = output.advice.deferred_state();
-    // Six reachable expression nodes, one assertion node.
+    // Six reachable expression nodes, plus the predicate node, all interned by register.
     let expected_digests = [a_digest, b_digest, c_digest, d_digest, add_digest, mul_digest];
     for digest in expected_digests {
         assert!(state.contains(&digest), "missing node for digest {:?}", digest);
     }
-    assert_eq!(state.assertions().len(), 1);
-    let a0 = &state.assertions()[0];
-    let a0_payload = a0.payload_felts().expect("assertion has fixed-size payload");
-    let (lhs, rhs) = a0_payload.binary_op_children();
-    assert_eq!(lhs, mul_digest);
-    assert_eq!(rhs, d_digest);
+    assert!(state.contains(&assertion.digest()), "predicate node must be interned");
 
-    // Transcript must be non-zero and equal to the manual fold over the assertion's digest.
-    let expected_transcript =
-        miden_core::crypto::hash::Poseidon2::merge(&[Word::new([ZERO; 4]), a0.digest()]);
-    assert_eq!(state.transcript(), expected_transcript);
-    assert_ne!(state.transcript(), Word::new([ZERO; 4]));
+    // No `log_precompile` calls, so the transcript root is still the TRUE sentinel.
+    assert_eq!(state.root(), TRUE_DIGEST);
 
-    // Witness includes every registered expression node + the assertion's interned
-    // intermediates + the transcript. The assertion's eval reduces (a+b) → leaf(7) and
-    // (a+b)*c → leaf(35). leaf(35) collides with the pre-registered `d`, so the witness
-    // gains one new node beyond the six originally registered: canonical(add) = leaf(7).
+    // Witness includes every registered node plus the predicate's reduce intermediates. The
+    // evaluate of the predicate reduces (a+b) → leaf(7) and (a+b)*c → leaf(35). leaf(35)
+    // collides with the pre-registered `d`, so the witness gains one new node beyond the seven
+    // originally registered: canonical(add) = leaf(7). The TRUE node from the predicate
+    // reduction is not interned (it's a structural sentinel, not a load-bearing DAG node).
     let witness = state.extract_witness();
-    assert_eq!(witness.nodes.len(), 7);
+    assert_eq!(witness.nodes.len(), 8);
     let witness_digests: Vec<_> = witness.nodes.iter().map(|(d, _)| *d).collect();
     assert!(witness_digests.windows(2).all(|p| p[0] < p[1]));
     for d in expected_digests {
         assert!(witness_digests.contains(&d));
     }
-    assert_eq!(witness.assertions.len(), 1);
-    assert_eq!(witness.transcript, expected_transcript);
+    assert!(witness_digests.contains(&assertion.digest()));
+    assert_eq!(witness.root, TRUE_DIGEST);
 }
 
 // E2E: adv.evaluate_deferred pushes the canonical (tag, payload) onto the advice stack.
@@ -216,17 +223,17 @@ fn deferred_evaluate_pushes_canonical_form_to_advice() {
     }
 }
 
-// E2E: evaluating an assertion is a pure verify — nothing is pushed onto the advice stack.
+// E2E: evaluating a predicate is a pure verify — nothing is pushed onto the advice stack.
 // ================================================================================================
 
 #[test]
-fn deferred_evaluate_on_assertion_pushes_nothing_to_advice() {
-    // Register one leaf, build a self-equal assertion (a == a), evaluate it. The assertion must
-    // verify successfully but nothing is pushed onto the advice stack — a trailing `adv_push.1`
+fn deferred_evaluate_on_predicate_pushes_nothing_to_advice() {
+    // Register one leaf, build a self-equal predicate (a == a), evaluate it. The predicate must
+    // verify successfully but nothing is pushed onto the advice stack — a trailing `adv_push`
     // therefore underflows and fails execution.
     let a = field0_leaf(7);
     let a_eq_a =
-        Node::assertion(Field0Handler::ASSERT_EQ, Payload::binary_op(a.digest(), a.digest()));
+        Node::expression(Field0Handler::ASSERT_EQ, Payload::binary_op(a.digest(), a.digest()));
 
     let mut src = String::from("begin\n");
     emit_register(&mut src, a);
@@ -235,7 +242,7 @@ fn deferred_evaluate_on_assertion_pushes_nothing_to_advice() {
     for _ in 0..12 {
         src.push_str("    drop\n");
     }
-    // Try to pop a single felt off the advice stack — must underflow because evaluate(assertion)
+    // Try to pop a single felt off the advice stack — must underflow because evaluate(predicate)
     // pushed nothing.
     src.push_str("    adv_push\n");
     src.push_str("end\n");
@@ -246,31 +253,57 @@ fn deferred_evaluate_on_assertion_pushes_nothing_to_advice() {
     let result = build_processor().execute_sync(&program, &mut host);
     assert!(
         result.is_err(),
-        "adv_push.1 after evaluate(assertion) must underflow because nothing was pushed"
+        "adv_push.1 after evaluate(predicate) must underflow because nothing was pushed"
     );
 }
 
-// E2E: assert_eq with mismatched values surfaces as an execution error.
+// E2E: a predicate is just a host hint — `adv.register_deferred` does NOT verify it. The
+// mismatch only surfaces when the program explicitly evaluates the predicate.
 // ================================================================================================
 
 #[test]
-fn deferred_assert_eq_mismatch_fails_execution() {
+fn deferred_register_predicate_does_not_verify() {
     let a = field0_leaf(7);
     let b = field0_leaf(8);
     let mismatch =
-        Node::assertion(Field0Handler::ASSERT_EQ, Payload::binary_op(a.digest(), b.digest()));
+        Node::expression(Field0Handler::ASSERT_EQ, Payload::binary_op(a.digest(), b.digest()));
+
+    // Just register — execution must succeed because register is a pure host hint.
+    let mut src = String::from("begin\n");
+    emit_register(&mut src, a.clone());
+    emit_register(&mut src, b.clone());
+    emit_register(&mut src, mismatch.clone());
+    src.push_str("end\n");
+
+    let program = Assembler::default().assemble_program(&src).expect("program must assemble");
+    let mut host = DefaultHost::default();
+    let output = build_processor()
+        .execute_sync(&program, &mut host)
+        .expect("register-only execution must succeed even with a bad predicate");
+    assert!(output.advice.deferred_state().contains(&mismatch.digest()));
+}
+
+#[test]
+fn deferred_evaluate_predicate_mismatch_fails_execution() {
+    let a = field0_leaf(7);
+    let b = field0_leaf(8);
+    let mismatch =
+        Node::expression(Field0Handler::ASSERT_EQ, Payload::binary_op(a.digest(), b.digest()));
 
     let mut src = String::from("begin\n");
     emit_register(&mut src, a);
     emit_register(&mut src, b);
-    emit_register(&mut src, mismatch);
+    emit_evaluate_for_side_effect(&mut src, mismatch);
     src.push_str("end\n");
 
     let program = Assembler::default().assemble_program(&src).expect("program must assemble");
 
     let mut host = DefaultHost::default();
     let result = build_processor().execute_sync(&program, &mut host);
-    assert!(result.is_err(), "mismatched assert_eq must fail execution");
+    assert!(
+        result.is_err(),
+        "evaluating a mismatched predicate must fail execution"
+    );
 }
 
 // LEGACY SMOKE: registered EventHandler still works alongside the deferred infrastructure.
@@ -341,13 +374,19 @@ fn digest_tag() -> Tag {
 struct ChunkTestSchema;
 
 impl Schema for ChunkTestSchema {
-    fn decode(&self, tag: Tag) -> Result<NodeType, SchemaError> {
+    fn decode(&self, tag: Tag) -> Result<TagInfo, SchemaError> {
         if tag[0] != TEST_PREFIX[0] || tag[1] != TEST_PREFIX[1] {
             return Err(SchemaError::InvalidNode);
         }
         match tag[2] {
-            r if r == PREIMAGE_ROLE => Ok(NodeType::Chunk(tag[3].as_canonical_u64() as u32)),
-            r if r == DIGEST_ROLE => Ok(NodeType::Expression),
+            r if r == PREIMAGE_ROLE => Ok(TagInfo {
+                body: BodyShape::Chunk(tag[3].as_canonical_u64() as u32),
+                evaluates_to: digest_tag(),
+            }),
+            r if r == DIGEST_ROLE => Ok(TagInfo {
+                body: BodyShape::Expression,
+                evaluates_to: digest_tag(),
+            }),
             _ => Err(SchemaError::InvalidNode),
         }
     }
@@ -364,7 +403,6 @@ impl Schema for ChunkTestSchema {
                 Ok(Node::expression(digest_tag(), Payload::new(acc)))
             },
             NodePayload::Expression(_) => Ok(node.clone()),
-            NodePayload::Assertion(_) => Err(SchemaError::InvalidNode),
         }
     }
 }

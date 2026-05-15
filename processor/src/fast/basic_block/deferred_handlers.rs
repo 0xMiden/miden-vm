@@ -8,7 +8,7 @@ use alloc::vec::Vec;
 
 use miden_core::{
     Felt, Word, ZERO,
-    deferred::{Node, NodePayload, NodeType, Payload, SchemaError, Tag},
+    deferred::{BodyShape, Node, NodePayload, Payload, SchemaError, TRUE_TAG, Tag},
 };
 
 use super::SystemEventError;
@@ -47,30 +47,29 @@ fn read_tag_and_payload(processor: &FastProcessor) -> (Tag, Payload) {
     (tag, payload)
 }
 
-/// Builds the typed `Node` matching the schema's verdict for the given `(tag, payload)`. Returns
-/// `SchemaError::InvalidNode` if the tag decodes to a chunk role — chunks must be registered via
+/// Builds an expression-bodied `Node` for the given `(tag, payload)`. Returns
+/// `SchemaError::InvalidNode` if the tag decodes to a chunk body — chunks must be registered via
 /// `adv.register_deferred_chunk`, not `adv.register_deferred`.
 fn build_standard_node(
-    role: NodeType,
+    body: BodyShape,
     tag: Tag,
     payload: Payload,
 ) -> Result<Node, SchemaError> {
-    match role {
-        NodeType::Expression => Ok(Node::expression(tag, payload)),
-        NodeType::Assertion => Ok(Node::assertion(tag, payload)),
-        NodeType::Chunk(_) => Err(SchemaError::InvalidNode),
+    match body {
+        BodyShape::Expression => Ok(Node::expression(tag, payload)),
+        BodyShape::Chunk(_) => Err(SchemaError::InvalidNode),
     }
 }
 
 /// Handles `SystemEvent::DeferredRegister`. Reads `(tag, payload)` off the operand stack, asks the
-/// schema to decode the tag, constructs the matching `Node` variant, and registers it.
+/// schema to decode the tag, constructs the matching `Node`, and registers it.
 pub(super) fn handle_deferred_register(
     processor: &mut FastProcessor,
 ) -> Result<(), SystemEventError> {
     let (tag, payload) = read_tag_and_payload(processor);
     let (state, schema) = processor.deferred_view_mut();
-    let role = schema.decode(tag)?;
-    let node = build_standard_node(role, tag, payload)?;
+    let info = schema.decode(tag)?;
+    let node = build_standard_node(info.body, tag, payload)?;
     let _ = state.register(schema, node)?;
     Ok(())
 }
@@ -78,26 +77,33 @@ pub(super) fn handle_deferred_register(
 /// Handles `SystemEvent::DeferredEvaluate`. Reads `(tag, payload)` off the operand stack and asks
 /// the schema to reduce it.
 ///
-/// - For expression canonicals, the 12 felts of the canonical `(payload, tag)` are pushed onto the
-///   advice stack in `[PAYLOAD_LO, PAYLOAD_HI, TAG]` order (top-down), matching the operand-stack
+/// Advice-stack contract, driven by `decode(tag).evaluates_to`:
+/// - **Predicates** (`evaluates_to == TRUE_TAG`): canonical is the TRUE node — nothing is pushed.
+///   A mismatch surfaces as `SchemaError::AssertionFailed`.
+/// - **Producing tags** (everything else): the 12 felts of the canonical `(payload, tag)` are
+///   pushed in `[PAYLOAD_LO, PAYLOAD_HI, TAG]` order (top-down), matching the operand-stack
 ///   input layout — MASM can recover each word with `adv_pushw`.
-/// - For assertion canonicals, evaluation is a pure verify: a mismatch surfaces as
-///   `SchemaError::AssertionFailed`, and nothing is pushed onto the advice stack on success.
-/// - For chunk canonicals, nothing is pushed (chunk-shaped advice output is out of scope for v1;
-///   schemas should canonicalise chunks to expression digest-leaves inside their `reduce` so this
-///   arm is unreachable in practice).
+/// - **Chunk canonicals**: out of scope for v1; schemas canonicalise chunks to expression
+///   digest-leaves inside their `reduce`, so this arm is unreachable in practice.
 pub(super) fn handle_deferred_evaluate(
     processor: &mut FastProcessor,
 ) -> Result<(), SystemEventError> {
     let (tag, payload) = read_tag_and_payload(processor);
     let (state, schema) = processor.deferred_view_mut();
-    let role = schema.decode(tag)?;
-    let node = build_standard_node(role, tag, payload)?;
+    let info = schema.decode(tag)?;
+    let node = build_standard_node(info.body, tag, payload)?;
     let canonical = state.evaluate(schema, node)?;
+
+    // Predicates reduce to the TRUE node — by contract the advice stack is untouched.
+    if info.evaluates_to == TRUE_TAG {
+        return Ok(());
+    }
 
     let payload = match &canonical.payload {
         NodePayload::Expression(p) => p,
-        NodePayload::Assertion(_) | NodePayload::Chunk(_) => return Ok(()),
+        // Chunk-as-canonical: out of scope (schemas should canonicalise chunks to expression
+        // digest-leaves inside their `reduce`).
+        NodePayload::Chunk(_) => return Ok(()),
     };
 
     let payload_hi = Word::new([payload.0[4], payload.0[5], payload.0[6], payload.0[7]]);
@@ -131,9 +137,9 @@ pub(super) fn handle_deferred_register_chunk(
     // chunk length, and reading otherwise would let a malformed tag waste work.
     let n = {
         let (_state, schema) = processor.deferred_view_mut();
-        match schema.decode(tag)? {
-            NodeType::Chunk(n) => n,
-            NodeType::Expression | NodeType::Assertion => return Err(SchemaError::InvalidNode.into()),
+        match schema.decode(tag)?.body {
+            BodyShape::Chunk(n) => n,
+            BodyShape::Expression => return Err(SchemaError::InvalidNode.into()),
         }
     };
 

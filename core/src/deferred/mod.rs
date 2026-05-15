@@ -14,7 +14,7 @@
 mod schema;
 mod state;
 
-pub use schema::{BodyShape, ChildResolver, NodeType, NoopSchema, Schema, SchemaError, TagInfo};
+pub use schema::{BodyShape, ChildResolver, NoopSchema, Schema, SchemaError, TagInfo};
 pub use state::DeferredState;
 
 // Reference `Field0Handler` schema — pinned in here to keep `core/tests/deferred_field0.rs` and
@@ -110,46 +110,37 @@ impl Payload {
 /// A DAG node identified by its [`Digest`].
 ///
 /// The tag is opaque at this layer — the installed [`Schema`] decodes it. The payload comes in
-/// three shapes ([`NodePayload`]):
-/// - `Expression(Payload)` — leaves and op-nodes that live in `DeferredState::nodes`.
+/// two shapes ([`NodePayload`]):
+/// - `Expression(Payload)` — leaves, op-nodes, predicates, and AND-nodes. All carry an 8-felt
+///   payload.
 /// - `Chunk(Arc<[Chunk]>)` — bulk-data leaves; `n` (number of 8-felt chunks) is `chunks.len()`
 ///   and is also encoded into the tag, so the digest binds it. Stored behind an `Arc` so cloning
-///   a chunk node (when interning, resolving children, or extracting the witness) is an atomic
-///   ref-count bump rather than a deep copy of the bulk data.
-/// - `Assertion(Payload)` — equality / verification records that live in
-///   `DeferredState::assertions`.
+///   a chunk node (when interning or resolving children) is an atomic ref-count bump rather than
+///   a deep copy of the bulk data.
 ///
-/// The role (Expression / Chunk / Assertion) is determined by the tag via [`Schema::decode`].
-/// The variant in the constructed [`Node`] must match what `decode(tag)` returns; mismatches are
-/// rejected at register time.
+/// Predicate nodes (those whose tag decodes with `evaluates_to == TRUE_TAG`) are structurally
+/// indistinguishable from regular expression-bodied nodes; their "predicate-ness" is a property
+/// of the *tag*, not the *node*, and is communicated by `Schema::decode`'s [`TagInfo`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Node {
     pub tag: Tag,
     pub payload: NodePayload,
 }
 
-/// Variant of a [`Node`]'s body. The variant tag *is* the structural role.
+/// Variant of a [`Node`]'s body.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NodePayload {
-    /// Leaves and op-nodes. 8-felt payload.
+    /// Leaves, op-nodes, predicates, AND-nodes. 8-felt payload.
     Expression(Payload),
     /// Bulk-data leaves. `n = chunks.len()`, also encoded in the tag. `Arc`-shared so the bulk
     /// data is never deep-copied during interning or resolution.
     Chunk(Arc<[Chunk]>),
-    /// Equality / verification records. 8-felt payload, same `lhs_digest || rhs_digest` shape as
-    /// binary-op expressions.
-    Assertion(Payload),
 }
 
 impl Node {
-    /// Build an expression node (leaf or op).
+    /// Build an expression node (leaf, op-node, predicate, or AND-node).
     pub fn expression(tag: Tag, payload: Payload) -> Self {
         Self { tag, payload: NodePayload::Expression(payload) }
-    }
-
-    /// Build an assertion node.
-    pub fn assertion(tag: Tag, payload: Payload) -> Self {
-        Self { tag, payload: NodePayload::Assertion(payload) }
     }
 
     /// Build a chunk node from `n = chunks.len()` rate-sized blocks of bulk data. Accepts
@@ -159,22 +150,22 @@ impl Node {
         Self { tag, payload: NodePayload::Chunk(chunks.into()) }
     }
 
-    /// Returns the 8-felt payload for expression and assertion nodes. Returns `None` for chunk
-    /// nodes, which don't have a fixed-size payload.
+    /// Returns the 8-felt payload for expression-bodied nodes. Returns `None` for chunk nodes,
+    /// which don't have a fixed-size payload.
     pub fn payload_felts(&self) -> Option<&Payload> {
         match &self.payload {
-            NodePayload::Expression(p) | NodePayload::Assertion(p) => Some(p),
+            NodePayload::Expression(p) => Some(p),
             NodePayload::Chunk(_) => None,
         }
     }
 
-    /// Returns the 8-felt payload of an expression node. Returns `None` for chunk and assertion
-    /// nodes. Useful for schema `reduce` arms that operate on leaf or op-node payloads
-    /// specifically.
+    /// Returns the 8-felt payload of an expression node. Returns `None` for chunk nodes.
+    /// Equivalent to [`Self::payload_felts`] now that predicates share the Expression body
+    /// shape; kept as a separate method for readability at call sites.
     pub fn expression_payload(&self) -> Option<&Payload> {
         match &self.payload {
             NodePayload::Expression(p) => Some(p),
-            NodePayload::Chunk(_) | NodePayload::Assertion(_) => None,
+            NodePayload::Chunk(_) => None,
         }
     }
 
@@ -212,7 +203,7 @@ impl Node {
         let mut state = [ZERO; 12];
         state[8..12].copy_from_slice(&self.tag);
         match &self.payload {
-            NodePayload::Expression(p) | NodePayload::Assertion(p) => {
+            NodePayload::Expression(p) => {
                 state[0..8].copy_from_slice(p.as_felts());
                 Poseidon2::apply_permutation(&mut state);
             },
@@ -237,28 +228,22 @@ impl Node {
 /// External witness consumed by the deferred-DAG verifier.
 ///
 /// Contains:
-/// - `nodes`: every expression-kind and chunk-kind node the verifier needs to re-check the
-///   assertions, in digest order. This includes both the nodes the program explicitly registered
-///   **and** every canonical intermediate produced during `DeferredState::evaluate` (e.g.
-///   `(a+b) → leaf`). The verifier does not re-execute the DAG — it checks each node is locally
-///   consistent against its neighbors (an `ADD` op's payload digests, plus the canonical-leaf
-///   digest its reduction names, must satisfy `eval_op`). Missing intermediates would leave the
-///   witness referencing digests no node defines, so the prover must intern the whole reduction
-///   proof, not just the final canonical answer.
-/// - `assertions`: every assertion-kind node, in registration order.
-/// - `transcript`: a single rolling Poseidon2 digest over the assertion stream, mirroring
-///   [`crate::precompile::PrecompileTranscript`]. The verifier re-folds this from `assertions` to
-///   check that the witness is complete and ordered.
+/// - `nodes`: every expression and chunk node the verifier needs to re-check the transcript,
+///   in digest order. Includes nodes the program explicitly registered, canonical intermediates
+///   produced during `DeferredState::evaluate` (e.g. `(a+b) → leaf`), and AND-nodes interned
+///   by `log_precompile` along the transcript chain. The verifier does not re-execute the DAG
+///   — it walks the chain rooted at `root`, recursively reducing each child to TRUE.
+/// - `root`: the final transcript root pointer. Reducing it to [`TRUE_DIGEST`] is the verifier's
+///   single termination check.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DeferredWitness {
     pub nodes: Vec<(Digest, Node)>,
-    pub assertions: Vec<Node>,
-    pub transcript: Digest,
+    pub root: Digest,
 }
 
 impl DeferredWitness {
-    pub fn new(nodes: Vec<(Digest, Node)>, assertions: Vec<Node>, transcript: Digest) -> Self {
-        Self { nodes, assertions, transcript }
+    pub fn new(nodes: Vec<(Digest, Node)>, root: Digest) -> Self {
+        Self { nodes, root }
     }
 }
 

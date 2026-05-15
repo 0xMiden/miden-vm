@@ -5,8 +5,7 @@
 //! change to that surface will break this test — exactly the early-warning signal we want.
 
 use miden_core::{
-    Felt, Word, ZERO,
-    crypto::hash::Poseidon2,
+    Felt,
     deferred::{DeferredState, Field0Handler, Node, NoopSchema, Payload, SchemaError},
 };
 
@@ -36,48 +35,33 @@ fn end_to_end_register_evaluate_assert_extract() {
     let canonical = state.evaluate(&schema, state.get(&mul).unwrap().clone()).unwrap();
     assert_eq!(canonical, leaf(35));
 
-    state
-        .register(
-            &schema,
-            Node::assertion(Field0Handler::ASSERT_EQ, Payload::binary_op(mul, expected)),
-        )
-        .unwrap();
+    // Predicate verification: register interns the ASSERT_EQ node; evaluate returns true_node().
+    let assertion =
+        Node::expression(Field0Handler::ASSERT_EQ, Payload::binary_op(mul, expected));
+    state.register(&schema, assertion.clone()).unwrap();
+    let result = state.evaluate(&schema, assertion).unwrap();
+    assert!(result.is_true_node());
 
-    assert_eq!(state.assertions().len(), 1);
     let witness = state.extract_witness();
-    // 6 registered expression nodes + 1 interned intermediate canonical(add) = leaf(7).
-    // canonical(mul) collides with the pre-registered `expected` (both leaf(35)), so net new = 1.
-    assert_eq!(witness.nodes.len(), 7);
+    // 6 registered expression nodes + 1 ASSERT_EQ predicate node + 1 interned intermediate
+    // canonical(add) = leaf(7). canonical(mul) collides with the pre-registered `expected`
+    // (both leaf(35)), so net new from evaluate is 1 (leaf(7)).
+    assert_eq!(witness.nodes.len(), 8);
     assert!(witness.nodes.iter().any(|(d, _)| *d == leaf(7).digest()));
 }
 
 #[test]
-fn assertion_mismatch_surfaces_as_error() {
+fn predicate_mismatch_surfaces_as_error_on_evaluate() {
     let schema = Field0Handler;
     let mut state = DeferredState::new();
     let a = state.register(&schema, leaf(7)).unwrap();
     let b = state.register(&schema, leaf(8)).unwrap();
-    let err = state
-        .register(&schema, Node::assertion(Field0Handler::ASSERT_EQ, Payload::binary_op(a, b)));
+    let assertion = Node::expression(Field0Handler::ASSERT_EQ, Payload::binary_op(a, b));
+    // Register is a pure hint — succeeds even when the predicate doesn't hold.
+    state.register(&schema, assertion.clone()).unwrap();
+    // The mismatch surfaces only when we explicitly verify.
+    let err = state.evaluate(&schema, assertion);
     assert!(matches!(err, Err(SchemaError::AssertionFailed)));
-}
-
-#[test]
-fn transcript_folds_assertion_digests_in_order() {
-    let schema = Field0Handler;
-    let mut state = DeferredState::new();
-    assert_eq!(state.transcript(), Word::new([ZERO; 4]));
-
-    let a = state.register(&schema, leaf(1)).unwrap();
-    let a_eq_a = Node::assertion(Field0Handler::ASSERT_EQ, Payload::binary_op(a, a));
-    state.register(&schema, a_eq_a.clone()).unwrap();
-    let after_first = Poseidon2::merge(&[Word::new([ZERO; 4]), a_eq_a.digest()]);
-    assert_eq!(state.transcript(), after_first);
-
-    let b = state.register(&schema, leaf(2)).unwrap();
-    let b_eq_b = Node::assertion(Field0Handler::ASSERT_EQ, Payload::binary_op(b, b));
-    state.register(&schema, b_eq_b.clone()).unwrap();
-    assert_eq!(state.transcript(), Poseidon2::merge(&[after_first, b_eq_b.digest()]));
 }
 
 #[test]
