@@ -4,6 +4,7 @@ use miden_core::utils::IndexVec;
 
 use super::{DecoratorRef, MastNodeRef, PendingMastNode};
 
+/// Finalization plan that decides which builder-local records become final forest nodes.
 pub(super) struct FinalForestLayout {
     pub(super) procedure_root_refs: Vec<MastNodeRef>,
     pub(super) live_node_refs: Vec<MastNodeRef>,
@@ -33,6 +34,17 @@ impl FinalForestLayout {
         procedure_root_refs: &[MastNodeRef],
         nodes: &IndexVec<MastNodeRef, PendingMastNode>,
     ) -> BTreeSet<MastNodeRef> {
+        // Pruning is intentionally candidate-based. A reachability sweep is only equivalent if it
+        // starts from every procedure root in the final forest, not just from the entrypoint or
+        // static call graph. `dynexec`/`dyncall` nodes do not have child edges to their runtime
+        // targets; the processor resolves the target digest by looking it up among procedure
+        // roots. Therefore, a procedure used only dynamically is live because it remains a
+        // procedure root even though no static child edge points to it.
+        //
+        // The builder already knows which refs were made obsolete by local rewrites, such as
+        // basic-block merging or decorator cloning. Finalization removes only those candidates,
+        // and only after filtering out candidates that are still procedure roots or children of
+        // another retained node.
         let mut nodes_to_remove: BTreeSet<MastNodeRef> = candidate_node_refs
             .iter()
             .filter(|&&node_ref| !procedure_root_refs.contains(&node_ref))

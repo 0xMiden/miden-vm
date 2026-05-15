@@ -9,6 +9,7 @@ use miden_core::{
 use super::{DebugVarRef, MastForestBuilderError};
 use crate::diagnostics::Report;
 
+/// Registers live debug-variable metadata while preserving ref-level deduplication.
 pub(super) struct DebugMetadataMergePolicy<'a> {
     debug_vars: &'a IndexVec<DebugVarRef, DebugVarInfo>,
     debug_var_id_by_ref: BTreeMap<DebugVarRef, DebugVarId>,

@@ -29,12 +29,14 @@
 //! ```
 //!
 //! This recomputes all node hashes and checks structural invariants before returning a usable
-//! `MastForest`. Direct deserialization via `MastForest::read_from_bytes` trusts the serialized
-//! hashes and should only be used for data from trusted sources (e.g. compiled locally).
+//! `MastForest`. Direct deserialization via `MastForest::read_from_bytes` should only be used for
+//! data from trusted sources (e.g. compiled locally). "Trusted" means that serialized node hashes
+//! are accepted as the content commitments for non-external nodes. The trusted path still performs
+//! cheap well-formedness checks needed for safe indexing, such as node-count and root bounds.
 //!
 //! In practice, the public entry points split into three policies:
-//! - [`MastForest::read_from_bytes`]: trusted full deserialization; rejects hashless payloads and
-//!   trusts serialized non-external digests.
+//! - [`MastForest::read_from_bytes`]: trusted full deserialization; rejects hashless payloads,
+//!   checks basic bounds, and trusts serialized non-external digests.
 //! - [`MastForestWireView::new`]: trusted wire-backed cache access; scans only the layout needed
 //!   for random access and rejects hashless payloads.
 //! - [`UntrustedMastForest::read_from_bytes`] and
@@ -212,6 +214,9 @@ impl MastForest {
     pub(in crate::mast) fn from_trusted_deserialization_parts(
         parts: MastForestParts,
     ) -> Result<Self, MastForestError> {
+        // Trusted deserialization accepts the wire hashes as authoritative, so it does not
+        // recompute node hashes or run full debug/forest validation here. It still rejects counts
+        // and roots that would make later indexing invalid.
         if parts.nodes.len() > Self::MAX_NODES {
             return Err(MastForestError::TooManyNodes);
         }

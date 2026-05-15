@@ -9,6 +9,7 @@ use miden_core::{
 use super::{AsmOpRef, MastForestBuilderError, compute_operations_and_adjust_mappings};
 use crate::diagnostics::Report;
 
+/// Registers live assembly-op metadata while preserving ref-level deduplication.
 pub(super) struct AsmOpMergePolicy<'a> {
     asm_op_by_ref: &'a IndexVec<AsmOpRef, AssemblyOp>,
     asm_op_id_by_ref: BTreeMap<AsmOpRef, AsmOpId>,
