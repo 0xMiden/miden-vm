@@ -47,7 +47,7 @@ jobs:
               gh release create "${RELEASE_TAG}" \
                 --draft \
                 --target "${RELEASE_SHA}" \
-                --title "v${RELEASE_TAG}"
+                --title "${RELEASE_TAG}"
               ;;
             *)
               echo "Unexpected output from gh release view: ${is_draft}" >&2
