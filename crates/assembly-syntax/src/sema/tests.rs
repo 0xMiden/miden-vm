@@ -266,6 +266,80 @@ pub const ACCOUNT_ID_SUFFIX_OFFSET = ACCOUNT_ID_AND_NONCE_OFFSET + 2
 }
 
 #[test]
+fn exported_proc_signature_rejects_private_local_type() {
+    let context = SyntaxTestContext::default();
+    let error = context
+        .parse_module(
+            "
+type PrivateType = felt
+
+pub proc check(value: PrivateType)
+    nop
+end
+",
+        )
+        .expect_err("expected exported procedure signature to reject private local type");
+    let rendered = format!("{}", PrintDiagnostic::new_without_color(&error));
+    assert!(rendered.contains("private type in exported procedure signature"));
+}
+
+#[test]
+fn exported_proc_signature_rejects_private_type_via_public_alias() {
+    let context = SyntaxTestContext::default();
+    let error = context
+        .parse_module(
+            "
+type PrivateType = felt
+pub type PublicAlias = PrivateType
+
+pub proc check(value: PublicAlias)
+    nop
+end
+",
+        )
+        .expect_err("expected exported procedure signature to reject transitive private type");
+    let rendered = format!("{}", PrintDiagnostic::new_without_color(&error));
+    assert!(rendered.contains("private type in exported procedure signature"));
+}
+
+#[test]
+fn exported_proc_signature_rejects_private_local_type_via_absolute_path() {
+    let context = SyntaxTestContext::default();
+    let error = context
+        .parse_module_with_path(
+            "wallet::memory",
+            "
+type PrivateType = felt
+
+pub proc check(value: ::wallet::memory::PrivateType)
+    nop
+end
+",
+        )
+        .expect_err(
+            "expected exported procedure signature to reject private local type via absolute path",
+        );
+    let rendered = format!("{}", PrintDiagnostic::new_without_color(&error));
+    assert!(rendered.contains("private type in exported procedure signature"));
+}
+
+#[test]
+fn private_proc_signature_allows_private_local_type() {
+    let context = SyntaxTestContext::default();
+    context
+        .parse_module(
+            "
+type PrivateType = felt
+
+proc check(value: PrivateType)
+    nop
+end
+",
+        )
+        .expect("expected private procedure signature to allow private local type");
+}
+
+#[test]
 fn define_items_detect_cross_kind_duplicates_for_all_pairs_and_orders() {
     let kinds = [
         DefinitionKind::Alias,

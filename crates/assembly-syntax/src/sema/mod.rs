@@ -161,6 +161,8 @@ pub fn analyze(
         analyzer.error(SemanticAnalysisError::MissingEntrypoint);
     }
 
+    verify_exported_signature_type_visibility(&module, &mut analyzer);
+
     analyzer.has_failed()?;
 
     // Run item checks
@@ -174,6 +176,115 @@ pub fn analyze(
     }
 
     analyzer.into_result().map(move |_| module)
+}
+
+fn verify_exported_signature_type_visibility(module: &Module, analyzer: &mut AnalysisContext) {
+    for procedure in module.procedures() {
+        if !procedure.visibility().is_public() {
+            continue;
+        }
+
+        let Some(signature) = procedure.signature() else {
+            continue;
+        };
+
+        for ty in signature.args.iter().chain(signature.results.iter()) {
+            let mut visiting_types = BTreeSet::default();
+            verify_exported_signature_type_expr(module, analyzer, ty, &mut visiting_types);
+        }
+    }
+}
+
+fn verify_exported_signature_type_expr(
+    module: &Module,
+    analyzer: &mut AnalysisContext,
+    ty: &TypeExpr,
+    visiting_types: &mut BTreeSet<ItemIndex>,
+) {
+    match ty {
+        TypeExpr::Primitive(_) => (),
+        TypeExpr::Ptr(ty) => {
+            verify_exported_signature_type_expr(module, analyzer, &ty.pointee, visiting_types);
+        },
+        TypeExpr::Array(ty) => {
+            verify_exported_signature_type_expr(module, analyzer, &ty.elem, visiting_types);
+        },
+        TypeExpr::Struct(ty) => {
+            for field in ty.fields.iter() {
+                verify_exported_signature_type_expr(
+                    module,
+                    analyzer,
+                    &field.ty,
+                    visiting_types,
+                );
+            }
+        },
+        TypeExpr::Ref(path) => {
+            let resolution = match module.resolve_path(path.as_deref(), analyzer.source_manager()) {
+                Ok(resolution) => resolution,
+                Err(_) => return,
+            };
+            let item = match resolution {
+                SymbolResolution::Local(item) => Some(item.into_inner()),
+                SymbolResolution::External(path)
+                    if path.parent().is_some_and(|parent| parent == module.path()) =>
+                {
+                    let Some(local_name) = path.last() else {
+                        return;
+                    };
+                    module.index_of(|item| item.name().as_str() == local_name)
+                },
+                SymbolResolution::External(_)
+                | SymbolResolution::MastRoot(_)
+                | SymbolResolution::Exact { .. }
+                | SymbolResolution::Module { .. } => None,
+            };
+            let Some(item) = item else {
+                return;
+            };
+            let Some(export) = module.get(item) else {
+                return;
+            };
+            let Export::Type(type_decl) = export else {
+                return;
+            };
+
+            if !type_decl.visibility().is_public() {
+                analyzer.error(SemanticAnalysisError::PrivateTypeInExportedSignature {
+                    span: path.span(),
+                    defined: type_decl.name().span(),
+                });
+                return;
+            }
+
+            if !visiting_types.insert(item) {
+                return;
+            }
+
+            match type_decl {
+                TypeDecl::Alias(alias) => verify_exported_signature_type_expr(
+                    module,
+                    analyzer,
+                    &alias.ty,
+                    visiting_types,
+                ),
+                TypeDecl::Enum(ty) => {
+                    for variant in ty.variants() {
+                        if let Some(payload_ty) = variant.value_ty.as_ref() {
+                            verify_exported_signature_type_expr(
+                                module,
+                                analyzer,
+                                payload_ty,
+                                visiting_types,
+                            );
+                        }
+                    }
+                },
+            }
+
+            visiting_types.remove(&item);
+        },
+    }
 }
 
 /// Visit all of the items of the current analysis context, and apply various transformation and
