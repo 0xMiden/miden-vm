@@ -79,6 +79,26 @@ jobs:
       - name: Run crypto tests
         run: make test-crypto
 
+  masm-lint-tool-tests:
+    name: test masm-lint tool workspace
+    runs-on: warp-ubuntu-latest-x64-8x
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - name: Cleanup large tools for build space
+        uses: ./.github/actions/cleanup-runner
+      - uses: WarpBuilds/rust-cache@9d0cc3090d9c87de74ea67617b246e978735b1a1 # v2.9.1
+        with:
+          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/next' }}
+          workspaces: |
+            .
+            tools/masm-lint
+      - name: Install rust
+        run: rustup update --no-self-update
+      - name: Test masm-lint tool workspace
+        run: make masm-lint-test
+
   doc-tests:
     name: doc-tests
     needs: diffs

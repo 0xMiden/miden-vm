@@ -43,6 +43,8 @@ jobs:
         run: cargo install cargo-deny --version 0.19.1 --locked
       - name: Check dependencies with cargo-deny
         run: cargo deny check
+      - name: Check masm-lint tool dependencies with cargo-deny
+        run: make masm-lint-deny
 
   cargo-shear:
     name: cargo-shear on ubuntu-latest
@@ -89,13 +91,13 @@ jobs:
       - name: Cleanup large tools for build space
         uses: ./.github/actions/cleanup-runner
       - name: Install rust
-        run: rustup update --no-self-update
+        run: |
+          rustup update --no-self-update
+          rustup component add clippy
+      - name: Clippy masm-lint tool workspace
+        run: make masm-lint-clippy
       - name: Lint MASM core library
-        run: >
-          cargo run --locked -p masm-lint --
-          --no-color
-          --library miden::core=crates/lib/core/asm
-          crates/lib/core/asm
+        run: make masm-lint-core
 
   clippy:
     name: clippy stable on ubuntu-latest

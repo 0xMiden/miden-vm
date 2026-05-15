@@ -34,6 +34,7 @@ help:
 BACKTRACE                := RUST_BACKTRACE=1
 BUILDDOCS                := MIDEN_BUILD_LIB_DOCS=1
 DOCS_NIGHTLY_TOOLCHAIN   ?= nightly
+MASM_LINT_MANIFEST       := tools/masm-lint/Cargo.toml
 
 # -- feature configuration ------------------------------------------------------------------------
 ALL_FEATURES             := --all-features
@@ -100,20 +101,43 @@ xclippy-fix: ## Runs Clippy with --fix using the same lints as xclippy
 
 
 .PHONY: format
-format: ## Runs Format using nightly toolchain
+format: masm-lint-format ## Runs Format using nightly toolchain
 	cargo +nightly fmt --all
 
 
+.PHONY: masm-lint-format-check
+masm-lint-format-check: ## Checks formatting for the standalone MASM lint tool workspace
+	cargo +nightly fmt --manifest-path $(MASM_LINT_MANIFEST) --all --check
+
 .PHONY: format-check
-format-check: ## Runs Format using nightly toolchain but only in check mode
+format-check: masm-lint-format-check ## Runs Format using nightly toolchain but only in check mode
 	cargo +nightly fmt --all --check
 
 .PHONY: shear
 shear: ## Runs cargo-shear to find unused or misplaced dependencies
 	cargo shear
 
+.PHONY: masm-lint-deny
+masm-lint-deny: ## Runs cargo-deny for the standalone MASM lint tool workspace
+	cargo deny --manifest-path $(MASM_LINT_MANIFEST) check
+
+.PHONY: masm-lint-clippy
+masm-lint-clippy: ## Runs Clippy for the standalone MASM lint tool workspace
+	cargo clippy --manifest-path $(MASM_LINT_MANIFEST) --locked --workspace --all-targets -- -D warnings
+
+.PHONY: masm-lint-format
+masm-lint-format: ## Formats the standalone MASM lint tool workspace
+	cargo +nightly fmt --manifest-path $(MASM_LINT_MANIFEST) --all
+
+.PHONY: masm-lint-core
+masm-lint-core: ## Runs the MASM lint tool over the core library
+	cargo run --manifest-path $(MASM_LINT_MANIFEST) --locked -p masm-analysis --bin masm-lint -- \
+		--no-color \
+		--library miden::core=crates/lib/core/asm \
+		crates/lib/core/asm
+
 .PHONY: lint
-lint: xclippy format-check shear ## Runs all lint checks without modifying files
+lint: xclippy format-check shear masm-lint-clippy masm-lint-core ## Runs all lint checks without modifying files
 
 # --- docs ----------------------------------------------------------------------------------------
 
@@ -206,7 +230,7 @@ test-docs: ## Run documentation tests (cargo test - nextest doesn't support doct
 # -- filtered test runs ---------------------------------------------------------------------------
 
 .PHONY: test-fast
-test-fast: ## Runs fast tests (excludes all CLI tests and proptests)
+test-fast: masm-lint-test-fast ## Runs fast tests (excludes all CLI tests and proptests)
 	$(MAKE) core-test \
 		FEATURES="$(FAST_TEST_FEATURES)" \
 		EXPR="-E 'not test(#*proptest) and not test(cli_)'"
@@ -226,8 +250,24 @@ test-loom: ## Runs all loom-based tests
 
 # --- checking ------------------------------------------------------------------------------------
 
+.PHONY: masm-lint-test
+masm-lint-test: ## Runs tests for the standalone MASM lint tool workspace
+	cargo test --manifest-path $(MASM_LINT_MANIFEST) --locked --workspace
+
+.PHONY: masm-lint-test-fast
+masm-lint-test-fast: ## Runs non-CLI tests for the standalone MASM lint tool workspace
+	cargo test --manifest-path $(MASM_LINT_MANIFEST) --locked --workspace --lib
+	cargo test --manifest-path $(MASM_LINT_MANIFEST) --locked -p masm-analysis \
+		--test lint_paths \
+		--test lint_policy \
+		--test signature_mismatch
+
+.PHONY: masm-lint-check
+masm-lint-check: ## Checks the standalone MASM lint tool workspace
+	cargo check --manifest-path $(MASM_LINT_MANIFEST) --locked --workspace --all-targets
+
 .PHONY: check
-check: ## Checks all targets and features for errors without code generation
+check: masm-lint-check ## Checks all targets and features for errors without code generation
 	$(BUILDDOCS) cargo check --all-targets ${ALL_FEATURES}
 
 .PHONY: check-features

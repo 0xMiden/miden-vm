@@ -16,7 +16,7 @@ use tracing_subscriber::{EnvFilter, prelude::*};
 #[derive(Parser, Debug)]
 #[command(
     name = "masm-lint",
-    version,
+    version = "0.3.0",
     about = "Static analysis linter for Miden Assembly (MASM) files"
 )]
 struct Cli {

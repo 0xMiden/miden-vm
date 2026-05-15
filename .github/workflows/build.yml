@@ -103,3 +103,24 @@ jobs:
             tools/miden-serde-utils-fuzz
       - name: Check fuzz workspaces
         run: make check-fuzz
+
+  masm-lint-tool-check:
+    name: Check masm-lint tool workspace
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - name: Cleanup large tools for build space
+        uses: ./.github/actions/cleanup-runner
+      - name: Install Rust toolchain
+        run: rustup toolchain install --no-self-update
+      - uses: WarpBuilds/rust-cache@9d0cc3090d9c87de74ea67617b246e978735b1a1 # v2.9.1
+        with:
+          # We need to explicitly cache the masm-lint tool workspace, as only the root workspace
+          # is cached by default.
+          workspaces: |
+            .
+            tools/masm-lint
+      - name: Check masm-lint tool workspace
+        run: make masm-lint-check
