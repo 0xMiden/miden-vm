@@ -126,12 +126,12 @@ pub const TRACE_WIDTH: usize = CHIPLETS_OFFSET + CHIPLETS_WIDTH;
 // AUXILIARY COLUMNS LAYOUT
 // ------------------------------------------------------------------------------------------------
 //
-// The auxiliary trace is the LogUp lookup-argument segment built by
-// [`crate::ProcessorAir`]'s `AuxBuilder` impl. It has 7 columns: 4 main-trace LogUp
-// columns followed by 3 chiplet-trace LogUp columns. See
+// The auxiliary trace is the LogUp lookup-argument segment built per-AIR by `CoreAir`'s
+// and `ChipletsAir`'s `AuxBuilder` impls: 4 main-trace LogUp columns for Core and 3
+// chiplet-trace LogUp columns for Chiplets. See
 // [`crate::constraints::lookup::main_air::MainLookupAir`] and
-// [`crate::constraints::lookup::chiplet_air::ChipletLookupAir`] for the per-column
-// contents.
+// [`crate::constraints::lookup::chiplet_air::emit_chiplet_lookup_columns`] for the
+// per-column contents.
 
 /// Auxiliary trace segment width — see the LogUp aux trace layout above.
 pub const AUX_TRACE_WIDTH: usize = crate::LOGUP_AUX_TRACE_WIDTH;

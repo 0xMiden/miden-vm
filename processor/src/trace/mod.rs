@@ -3,7 +3,7 @@ use alloc::vec::Vec;
 use core::ops::Range;
 
 use miden_air::{
-    AirWitness, ProcessorAir, PublicInputs, debug,
+    AirWitness, MidenAir, PublicInputs, debug,
     trace::{
         DECODER_TRACE_OFFSET, MainTrace, TRACE_WIDTH,
         decoder::{NUM_USER_OP_HELPERS, USER_OP_HELPERS_OFFSET},
@@ -334,10 +334,10 @@ impl ExecutionTrace {
     /// Panics if any AIR constraint evaluates to nonzero.
     pub fn check_constraints(&self) {
         let public_inputs = self.public_inputs();
-        let trace_matrix = self.to_row_major_matrix();
+        let (core_matrix, chiplets_matrix) = self.main_trace.to_core_chiplets_matrices();
 
         let (public_values, kernel_felts) = public_inputs.to_air_inputs();
-        let var_len_public_inputs: &[&[Felt]] = &[&kernel_felts];
+        let chiplets_var_len: &[&[Felt]] = &[&kernel_felts];
 
         // Derive deterministic challenges by hashing public values with Poseidon2.
         // The 4-element digest maps directly to 2 QuadFelt challenges.
@@ -345,8 +345,17 @@ impl ExecutionTrace {
         let challenges =
             [QuadFelt::new([digest[0], digest[1]]), QuadFelt::new([digest[2], digest[3]])];
 
-        let witness = AirWitness::new(&trace_matrix, &public_values, var_len_public_inputs);
-        debug::check_constraints(&ProcessorAir, witness, &ProcessorAir, &challenges);
+        let core_witness = AirWitness::new(&core_matrix, &public_values, &[]);
+        let chiplets_witness = AirWitness::new(&chiplets_matrix, &public_values, chiplets_var_len);
+        let core_air = MidenAir::CORE;
+        let chiplets_air = MidenAir::CHIPLETS;
+        debug::check_constraints_multi(
+            &[
+                (&core_air, core_witness, &core_air),
+                (&chiplets_air, chiplets_witness, &chiplets_air),
+            ],
+            &challenges,
+        );
     }
 
     /// Returns the main trace as a row-major matrix for proving.

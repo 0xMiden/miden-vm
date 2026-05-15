@@ -1,59 +1,22 @@
-//! Miden-specific LogUp pieces consumed by `ProcessorAir`'s trait impls: the combined
-//! 7-column fraction stride, the committed-finals count, and the
-//! [`emit_miden_boundary`] helper.
-//!
-//! The `LookupAir` and `AuxBuilder` trait impls themselves live on [`crate::ProcessorAir`]
-//! in `air/src/lib.rs`; this module just supplies the constants and the boundary emitter
-//! they share.
+//! Per-AIR LogUp boundary emitters ([`emit_core_boundary`], [`emit_chiplets_boundary`])
+//! plus the committed-finals count for the multi-AIR proof shape.
 
 use alloc::vec::Vec;
 
 use miden_core::{WORD_SIZE, field::PrimeCharacteristicRing};
 
-use super::{
-    chiplet_air::CHIPLET_COLUMN_SHAPE,
-    main_air::MAIN_COLUMN_SHAPE,
-    messages::{BlockHashMsg, KernelRomMsg, LogCapacityMsg},
-};
+use super::messages::{BlockHashMsg, KernelRomMsg, LogCapacityMsg};
 use crate::{PV_PROGRAM_HASH, PV_TRANSCRIPT_STATE, lookup::BoundaryBuilder};
 
-// COLUMN SHAPE AND COMMITTED-FINALS COUNT
+// COMMITTED-FINALS COUNT
 // ================================================================================================
-
-/// Full 7-column fraction stride: 4 main + 3 chiplet, in `ProcessorAir::eval` order (main
-/// columns first, then chiplet columns — see the per-half docs in
-/// [`super::main_air::MainLookupAir`] and [`super::chiplet_air::ChipletLookupAir`]).
-pub(crate) const MIDEN_COLUMN_SHAPE: [usize; 7] = [
-    MAIN_COLUMN_SHAPE[0],
-    MAIN_COLUMN_SHAPE[1],
-    MAIN_COLUMN_SHAPE[2],
-    MAIN_COLUMN_SHAPE[3],
-    CHIPLET_COLUMN_SHAPE[0],
-    CHIPLET_COLUMN_SHAPE[1],
-    CHIPLET_COLUMN_SHAPE[2],
-];
 
 /// Number of committed final aux values in the multi-AIR proof shape: Core final at slot 0
-/// and Chiplets final at slot 1. `ProcessorAir` matches this shape by forcing its slot 1 to
-/// zero.
+/// and Chiplets final at slot 1.
 pub const NUM_LOGUP_COMMITTED_FINALS: usize = 2;
 
-// BOUNDARY EMITTER
+// BOUNDARY EMITTERS
 // ================================================================================================
-
-/// Emits all Miden-AIR boundary correction terms (block-hash seed, log-precompile transcript
-/// terminals, kernel ROM init) into any [`BoundaryBuilder`].
-///
-/// Thin wrapper around [`emit_core_boundary`] + [`emit_chiplets_boundary`]; used by
-/// `ProcessorAir::reduced_aux_values` and the debug walker. Per-AIR `reduced_aux_values`
-/// impls call only their half (see the per-bus partition in the helpers below).
-///
-/// See `program_hash_message`, `transcript_messages`, and `kernel_proc_message` in
-/// `air/src/lib.rs` for the canonical formulas this mirrors.
-pub(crate) fn emit_miden_boundary<B: BoundaryBuilder>(boundary: &mut B) {
-    emit_core_boundary(boundary);
-    emit_chiplets_boundary(boundary);
-}
 
 /// Emits the Core-trace boundary corrections.
 ///
@@ -139,11 +102,9 @@ mod tests {
         field::{PrimeCharacteristicRing, QuadFelt},
         utils::RowMajorMatrix,
     };
-    use miden_crypto::stark::air::LiftedAir;
 
-    use super::NUM_LOGUP_COMMITTED_FINALS;
     use crate::{
-        ChipletsAir, CoreAir, Felt, NUM_PUBLIC_VALUES, ProcessorAir,
+        ChipletsAir, CoreAir, Felt, NUM_PUBLIC_VALUES,
         constraints::{
             columns::{NUM_CHIPLETS_COLS, NUM_CORE_COLS},
             lookup::{
@@ -155,23 +116,8 @@ mod tests {
             Challenges,
             debug::{ValidateLayout, ValidateLookupAir, check_trace_balance},
         },
-        trace::{AUX_TRACE_RAND_CHALLENGES, AUX_TRACE_WIDTH, TRACE_WIDTH},
+        trace::AUX_TRACE_RAND_CHALLENGES,
     };
-
-    fn num_periodic() -> usize {
-        LiftedAir::<Felt, QuadFelt>::periodic_columns(&ProcessorAir).len()
-    }
-
-    fn validate_layout() -> ValidateLayout {
-        ValidateLayout {
-            trace_width: TRACE_WIDTH,
-            num_public_values: NUM_PUBLIC_VALUES,
-            num_periodic_columns: num_periodic(),
-            permutation_width: AUX_TRACE_WIDTH,
-            num_permutation_challenges: AUX_TRACE_RAND_CHALLENGES,
-            num_permutation_values: NUM_LOGUP_COMMITTED_FINALS,
-        }
-    }
 
     /// Pin the `BlockHashMsg::End → Child` boundary collapse: at the root END row, the
     /// algebra forces `is_first_child = 0`, `is_loop_body = 0`, `parent = 0`, and
@@ -223,18 +169,8 @@ mod tests {
         );
     }
 
-    /// One self-check that covers num_columns consistency, per-group / per-column
-    /// declared-vs-observed degree, cached-encoding canonical/encoded equivalence,
-    /// and simple-group scope (no `insert_encoded` outside cached-encoding groups).
-    #[test]
-    fn processor_air_lookup_validates() {
-        ValidateLookupAir::validate(&ProcessorAir, validate_layout())
-            .unwrap_or_else(|err| panic!("ProcessorAir LookupAir validation failed: {err}"));
-    }
-
     /// Lookup-structure validation for `CoreAir` — the standalone Core-half AIR used by the
-    /// multi-AIR proving path. Same shape check as `ProcessorAir` but on the Core slice:
-    /// 51-col main trace, 4 LogUp accumulator columns, 1 committed final.
+    /// multi-AIR proving path.
     #[test]
     fn core_air_lookup_validates() {
         let layout = ValidateLayout {
@@ -270,17 +206,17 @@ mod tests {
             .unwrap_or_else(|err| panic!("ChipletsAir LookupAir validation failed: {err}"));
     }
 
-    /// Smoke test: the trace-balance checker runs to completion on a tiny zero-valued trace
-    /// against `ProcessorAir` without panicking. A zero-valued trace is not a valid program
-    /// execution so the report is expected to contain unmatched entries; this test only
-    /// asserts that the checker produces a report (instead of crashing).
+    /// Smoke test: the trace-balance checker runs to completion on a tiny zero-valued
+    /// Core trace without panicking. A zero-valued trace is not a valid program execution
+    /// so the report is expected to contain unmatched entries; this test only asserts that
+    /// the checker produces a report (instead of crashing).
     #[test]
     fn trace_balance_runs_on_zero_trace() {
         const NUM_ROWS: usize = 4;
-        let data = vec![Felt::ZERO; TRACE_WIDTH * NUM_ROWS];
-        let main_trace = RowMajorMatrix::new(data, TRACE_WIDTH);
-        let periodic: Vec<Vec<Felt>> =
-            (0..num_periodic()).map(|_| vec![Felt::ZERO; NUM_ROWS]).collect();
+        // CoreAir has no periodic columns.
+        let data = vec![Felt::ZERO; NUM_CORE_COLS * NUM_ROWS];
+        let main_trace = RowMajorMatrix::new(data, NUM_CORE_COLS);
+        let periodic: Vec<Vec<Felt>> = Vec::new();
         let publics: Vec<Felt> = vec![Felt::ZERO; NUM_PUBLIC_VALUES];
         let challenges = Challenges::<QuadFelt>::new(
             QuadFelt::ONE,
@@ -289,7 +225,6 @@ mod tests {
             BusId::COUNT,
         );
 
-        let _ =
-            check_trace_balance(&ProcessorAir, &main_trace, &periodic, &publics, &[], &challenges);
+        let _ = check_trace_balance(&CoreAir, &main_trace, &periodic, &publics, &[], &challenges);
     }
 }

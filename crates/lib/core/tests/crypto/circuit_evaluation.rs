@@ -6,13 +6,6 @@ use miden_core::{
 };
 use miden_utils_testing::rand::rand_quad_felt;
 
-/// Build the batched ACE circuit for the Miden VM ProcessorAir.
-fn build_batched_circuit(config: AceConfig) -> AceCircuit<QuadFelt> {
-    let air = miden_air::ProcessorAir;
-    let batch_config = miden_air::ace::logup_boundary_config();
-    miden_air::ace::build_batched_ace_circuit::<_, QuadFelt>(&air, config, &batch_config).unwrap()
-}
-
 #[test]
 fn circuit_evaluation_prove_verify() {
     let num_repetitions = 20;
@@ -92,78 +85,12 @@ fn circuit_evaluation_prove_verify() {
 }
 
 #[test]
-fn processor_air_eval_circuit_masm() {
-    let config = AceConfig {
-        num_quotient_chunks: 8,
-        num_vlpi_groups: 1,
-        layout: LayoutKind::Masm,
-        is_multi_air: false,
-    };
-    let circuit = build_batched_circuit(config);
-    let layout = circuit.layout().clone();
-
-    let mut inputs = fill_inputs(&layout);
-    // The ACE output is linear in each quotient coordinate. We can zero the circuit by
-    // nudging a single quotient coordinate by delta = -root / slope.
-    adjust_quotient_to_zero(&circuit, &layout, &mut inputs);
-    assert_eq!(circuit.eval(&inputs).expect("circuit eval"), QuadFelt::ZERO);
-
-    // Encode the circuit.
-    let encoded = circuit.to_ace().unwrap();
-    let mut memory_felts = Vec::with_capacity(inputs.len() * 2 + encoded.size_in_felt());
-    for value in &inputs {
-        memory_felts.extend_from_slice(value.as_basis_coefficients_slice());
-    }
-    memory_felts.extend_from_slice(encoded.instructions());
-
-    let padded_len = memory_felts.len().next_multiple_of(8);
-    memory_felts.resize(padded_len, ZERO);
-    let num_adv_pipe = padded_len / 8;
-
-    let mut advice_builder = AdviceStackBuilder::new();
-    advice_builder.push_for_adv_pipe(&memory_felts);
-    let adv_stack = advice_builder.build_vec_u64();
-
-    // Place the circuit in memory at a fixed address.
-    let pointer = 1 << 16;
-    let num_vars = encoded.num_vars();
-    let num_eval = encoded.num_eval_rows();
-    let source = format!(
-        "
-    const NUM_ADV_PIPE = {num_adv_pipe}
-    const NUM_VARS = {num_vars}
-    const NUM_EVAL = {num_eval}
-
-    begin
-        push.{pointer}
-        padw padw padw
-
-        repeat.NUM_ADV_PIPE
-            adv_pipe
-        end
-
-        push.NUM_EVAL push.NUM_VARS push.{pointer}
-        eval_circuit
-
-        drop drop drop
-        repeat.3 dropw end
-        drop
-    end
-    "
-    );
-
-    let test = miden_utils_testing::build_test!(source, &[], &adv_stack);
-    test.expect_stack(&[]);
-    test.check_constraints()
-}
-
-#[test]
 fn multi_air_eval_circuit_masm() {
-    // Mirrors `processor_air_eval_circuit_masm` but for the combined CoreAir +
-    // ChipletsAir multi-AIR circuit. If this test passes the codegen + MASM ACE
-    // chip are consistent for the multi-AIR shape; any failure in the recursive
-    // verifier (`test_poseidon2_prove_verify`) is then in the input plumbing
-    // (memory layout, advice ordering, transcript binding), not in the circuit.
+    // Exercises the combined CoreAir + ChipletsAir multi-AIR circuit. If this test
+    // passes, the codegen + MASM ACE chip are consistent for the multi-AIR shape; any
+    // failure in the recursive verifier (`test_poseidon2_prove_verify`) is then in the
+    // input plumbing (memory layout, advice ordering, transcript binding), not in the
+    // circuit.
     let config = AceConfig {
         num_quotient_chunks: 8,
         num_vlpi_groups: 1,

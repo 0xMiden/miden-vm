@@ -9,8 +9,8 @@
 //! - ACE chiplet main-trace constraints
 //!
 //! Chiplet LogUp lookup-argument constraints are emitted by
-//! [`crate::constraints::lookup::chiplet_air::ChipletLookupAir`] and wired through
-//! `ProcessorAir`'s `LookupAir` impl from `ProcessorAir::eval`.
+//! [`crate::constraints::lookup::chiplet_air::emit_chiplet_lookup_columns`] and wired
+//! through [`crate::ChipletsAir`]'s `LookupAir` impl from `ChipletsAir::eval`.
 
 pub mod ace;
 pub mod bitwise;

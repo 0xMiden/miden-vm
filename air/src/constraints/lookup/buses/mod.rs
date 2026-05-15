@@ -8,13 +8,11 @@
 //! interactions via [`super::LookupColumn::group`] or
 //! [`super::LookupColumn::group_with_cached_encoding`].
 //!
-//! The emitters are routed through two separate [`super::LookupAir`] implementors:
-//! - [`super::main_air::MainLookupAir`] for the main-trace columns.
-//! - [`super::chiplet_air::ChipletLookupAir`] for the chiplet-trace columns.
-//!
-//! [`crate::ProcessorAir`]'s `LookupAir` impl is a thin aggregator that calls both in sequence,
-//! preserving the `enforce_main` / `enforce_chiplet` column order for downstream consumers
-//! that want the full 7-column picture in a single `eval` call.
+//! The emitters are routed per-AIR:
+//! - [`super::main_air::MainLookupAir`] for the main-trace columns, driven by [`crate::CoreAir`]'s
+//!   `LookupAir` impl.
+//! - [`super::chiplet_air::emit_chiplet_lookup_columns`] for the chiplet-trace columns, driven by
+//!   [`crate::ChipletsAir`]'s `LookupAir` impl.
 //!
 //! ## Shared precompute contexts
 //!

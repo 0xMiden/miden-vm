@@ -139,10 +139,9 @@ where
     }
 
     fn max_message_width(&self) -> usize {
-        // Must match `ProcessorAir::max_message_width` since this sub-AIR shares the
-        // aggregator's bus-prefix table. The widest main-trace payload is
-        // `HasherMsg::State` (linear_hash_init / return_state) at 15 slots, but the
-        // aggregator's `MIDEN_MAX_MESSAGE_WIDTH = 16` is kept for MASM transcript alignment.
+        // The widest main-trace payload is `HasherMsg::State` (linear_hash_init /
+        // return_state) at 15 slots, but `MIDEN_MAX_MESSAGE_WIDTH = 16` is kept for MASM
+        // transcript alignment.
         super::messages::MIDEN_MAX_MESSAGE_WIDTH
     }
 
@@ -158,9 +157,8 @@ where
         // Hold the `MainWindow` as an owned value so its borrow on the underlying builder is
         // released by the time we grab the `&mut builder` for the per-column emitters.
         //
-        // Borrow the leading `NUM_CORE_COLS` of the row as a `CoreCols`. This works whether the
-        // host AIR's declared width is `NUM_CORE_COLS` (multi-AIR `CoreAir`) or `TRACE_WIDTH`
-        // (legacy `ProcessorAir`); in both cases the prefix is the Core half of the trace.
+        // Borrow the leading `NUM_CORE_COLS` of the row as a `CoreCols` — the Core half of
+        // the trace.
         let main = builder.main();
         let local_slice = main.current_slice();
         let next_slice = main.next_slice();

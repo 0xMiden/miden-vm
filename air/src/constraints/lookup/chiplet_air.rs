@@ -15,24 +15,13 @@
 //! polynomial products in [`ChipletActiveFlags::from_chiplet_cols`]. For now the default
 //! body is the polynomial path and every adapter picks it up via an empty `impl` block.
 
-use core::borrow::Borrow;
-
-use miden_crypto::stark::air::WindowAccess;
-
-use super::{
-    BusId,
-    buses::{
-        ChipletActiveFlags,
-        chiplet_responses::{self, emit_chiplet_responses},
-        hash_kernel::{self, emit_hash_kernel_table},
-        wiring::{self, emit_v_wiring},
-    },
+use super::buses::{
+    ChipletActiveFlags,
+    chiplet_responses::{self, emit_chiplet_responses},
+    hash_kernel::{self, emit_hash_kernel_table},
+    wiring::{self, emit_v_wiring},
 };
-use crate::{
-    ChipletCols, Felt,
-    constraints::columns::NUM_CORE_COLS,
-    lookup::{LookupAir, LookupBuilder},
-};
+use crate::{ChipletCols, Felt, lookup::LookupBuilder};
 
 // CHIPLET LOOKUP BUILDER
 // ================================================================================================
@@ -95,71 +84,20 @@ where
     }
 }
 
-// CHIPLET LOOKUP AIR
+// CHIPLET LOOKUP COLUMNS
 // ================================================================================================
 
-/// LogUp lookup argument over the chiplet trace.
-///
-/// Zero-sized. Emits three permutation columns (see module docs for per-column contents),
-/// matching the aggregated `LookupAir` impl on [`crate::ProcessorAir`]. The main-trace half
-/// of the argument lives in [`super::main_air::MainLookupAir`].
-#[derive(Copy, Clone, Debug, Default)]
-pub(crate) struct ChipletLookupAir;
-
-/// Per-column fraction stride, in emission order (see [`ChipletLookupAir`] docs).
+/// Per-column fraction stride, in emission order (see [`emit_chiplet_lookup_columns`]).
 pub(crate) const CHIPLET_COLUMN_SHAPE: [usize; 3] = [
     chiplet_responses::MAX_INTERACTIONS_PER_ROW,
     hash_kernel::MAX_INTERACTIONS_PER_ROW,
     wiring::MAX_INTERACTIONS_PER_ROW,
 ];
 
-impl<LB> LookupAir<LB> for ChipletLookupAir
-where
-    LB: ChipletLookupBuilder,
-{
-    fn num_columns(&self) -> usize {
-        CHIPLET_COLUMN_SHAPE.len()
-    }
-
-    fn column_shape(&self) -> &[usize] {
-        &CHIPLET_COLUMN_SHAPE
-    }
-
-    fn max_message_width(&self) -> usize {
-        // Must match `ProcessorAir::max_message_width` since this sub-AIR shares the
-        // aggregator's bus-prefix table. The widest chiplet-trace payload is
-        // `HasherMsg::State` on the responses column at 15 slots, but the aggregator's
-        // `MIDEN_MAX_MESSAGE_WIDTH = 16` is kept for MASM transcript alignment.
-        super::messages::MIDEN_MAX_MESSAGE_WIDTH
-    }
-
-    fn num_bus_ids(&self) -> usize {
-        // Chiplet-trace emitters touch the shared chiplet responses column plus
-        // `BusId::{SiblingTable, RangeCheck, AceWiring, HasherPermLinkInput,
-        // HasherPermLinkOutput}`. The adapter's bus-prefix table is shared
-        // across every LookupAir it runs, so returning `BusId::COUNT` (the total bus-type
-        // count) is the safe upper bound.
-        BusId::COUNT
-    }
-
-    fn eval(&self, builder: &mut LB) {
-        // Borrow the trailing chiplet section of the unified row buffer as `ChipletCols`.
-        let main = builder.main();
-        let local_slice = main.current_slice();
-        let next_slice = main.next_slice();
-        let local_chiplet: &ChipletCols<_> = local_slice[NUM_CORE_COLS..].borrow();
-        let next_chiplet: &ChipletCols<_> = next_slice[NUM_CORE_COLS..].borrow();
-
-        emit_chiplet_lookup_columns(builder, local_chiplet, next_chiplet);
-    }
-}
-
 /// Emit the three chiplet-trace LogUp columns (responses, hash-kernel virtual table,
 /// wiring).
 ///
-/// Shared between [`ChipletLookupAir`]'s [`LookupAir`] impl and `ChipletsAir`'s
-/// [`LookupAir`] impl; centralizing the three-emitter sequence keeps the two AIR types in
-/// lockstep.
+/// Driven by `ChipletsAir`'s [`LookupAir`] impl.
 pub(crate) fn emit_chiplet_lookup_columns<LB: ChipletLookupBuilder>(
     builder: &mut LB,
     local: &ChipletCols<LB::Var>,

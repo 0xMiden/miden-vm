@@ -7,8 +7,8 @@
 //! - **Main trace constraints** are evaluated by [`enforce_main`] and cover system / range / stack
 //!   / decoder / chiplets transitions.
 //! - **LogUp lookup-argument constraints** are evaluated separately through the closure-based
-//!   `LookupAir` impl on [`crate::ProcessorAir`], wired in from `ProcessorAir::eval` via
-//!   [`crate::lookup::ConstraintLookupBuilder`].
+//!   `LookupAir` impls on [`crate::CoreAir`] and [`crate::ChipletsAir`], wired in from each AIR's
+//!   `eval` via [`crate::lookup::ConstraintLookupBuilder`].
 
 use chiplets::selectors::ChipletSelectors;
 
@@ -31,9 +31,8 @@ pub mod utils;
 // ================================================================================================
 //
 // Main trace constraints are partitioned by AIR: `enforce_core` runs the Core half (system,
-// range, stack, decoder) and `enforce_chiplets` runs the Chiplets half. `ProcessorAir::eval`
-// calls both at the top level. Per-AIR `LiftedAir` impls (`CoreAir`, `ChipletsAir`) each call
-// only their share.
+// range, stack, decoder) and `enforce_chiplets` runs the Chiplets half. The per-AIR
+// `LiftedAir` impls (`CoreAir`, `ChipletsAir`) each call only their share.
 
 /// Enforces the Core-trace main constraints: system, range, stack, decoder.
 ///

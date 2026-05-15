@@ -1,4 +1,4 @@
-//! ACE circuit integration for ProcessorAir.
+//! ACE circuit integration for the multi-AIR (CoreAir + ChipletsAir) proof.
 //!
 //! This module extends the constraint-evaluation DAG produced by
 //! `build_ace_dag_for_air` with the LogUp auxiliary-trace boundary check:
@@ -69,17 +69,13 @@ pub struct BusFraction {
 
 /// Configuration for the LogUp auxiliary-trace boundary batching.
 ///
-/// Consumed by [`batch_logup_boundary`] to extend the constraint-check DAG with
-/// the boundary identity checked by `ProcessorAir::reduced_aux_values`.
+/// Consumed by [`batch_logup_boundary_into_builder`] to extend the constraint-check DAG
+/// with the per-AIR LogUp boundary identity (the same one checked at runtime by
+/// `CoreAir`/`ChipletsAir`'s `reduced_aux_values`).
 #[derive(Debug, Clone)]
 pub struct LogUpBoundaryConfig {
     /// Aux-bus-boundary column indices summed as `Σ aux_bound[col]`.
     pub sum_columns: Vec<usize>,
-    /// Aux-bus-boundary columns that must individually equal zero. Absorbed at
-    /// an independent γ power from the accumulator sum so a malicious prover
-    /// cannot cancel them against `sum_columns` or the rational corrections.
-    /// Mirrors the native runtime check in `ProcessorAir::reduced_aux_values`.
-    pub zero_columns: Vec<usize>,
     /// Rational `(±1, d_i)` fractions folded into the running rational `(N, D)`.
     pub fractions: Vec<BusFraction>,
     /// Scalar EF inputs added directly to the aux-boundary sum. Trusted from
@@ -91,38 +87,17 @@ pub struct LogUpBoundaryConfig {
 // BATCHING FUNCTIONS
 // ================================================================================================
 
-/// Extend a constraint DAG with the LogUp auxiliary-trace boundary check.
+/// Appends the LogUp auxiliary-trace boundary check into an existing [`DagBuilder`].
 ///
 /// Builds:
 ///
 ///   `sum_aux   = Σ AuxBusBoundary(col)  +  Σ scalar_corrections`
 ///   `(N, D)    = fold((0, 1), fractions)` via `(N', D') = (N·d_i + D·n_i, D·d_i)`
 ///   `boundary  = sum_aux · D  +  N`
-///   `zero_sum  = Σ AuxBusBoundary(col)` for `col` in `zero_columns`
-///   `root      = constraint_check  +  γ · boundary  +  γ² · zero_sum`
+///   `root      = constraint_check  +  γ · boundary`
 ///
-/// Returns the new DAG with the batched root. The zero-columns identity lives at
-/// γ² so a nonzero padding slot cannot cancel against the γ¹-batched boundary
-/// accumulator.
-pub fn batch_logup_boundary<EF>(
-    constraint_dag: AceDag<EF>,
-    config: &LogUpBoundaryConfig,
-) -> AceDag<EF>
-where
-    EF: ExtensionField<Felt>,
-{
-    let constraint_root = constraint_dag.root;
-    let mut builder = DagBuilder::from_dag(constraint_dag);
-    let root = batch_logup_boundary_into_builder(&mut builder, constraint_root, config);
-    builder.build(root)
-}
-
-/// Same as [`batch_logup_boundary`], but appends the boundary-batched check into an
-/// existing [`DagBuilder`].
-///
-/// Useful when the caller is already composing nodes into a larger DAG (e.g. the
-/// multi-AIR combined builder, where two per-AIR constraint roots are β-folded
-/// before the shared boundary check is appended).
+/// Used by the multi-AIR combined builder, where the two per-AIR constraint roots are
+/// β-folded before this shared boundary check is appended.
 pub fn batch_logup_boundary_into_builder<EF>(
     builder: &mut DagBuilder<EF>,
     constraint_root: NodeId,
@@ -164,39 +139,12 @@ where
     let sum_times_den = builder.mul(sum_aux, den);
     let boundary = builder.add(sum_times_den, num);
 
-    // Batch with the constraint root using gamma.
+    // Batch with the constraint root using gamma. SAFETY-CRITICAL invariant: this final
+    // `add` must be the *last* operation emitted into the builder, since the MASM ACE
+    // chip's "is the last op zero?" check evaluates that node as the root.
     let gamma = builder.input(InputKey::Gamma);
     let gamma_boundary = builder.mul(gamma, boundary);
-    let constraint_plus_boundary = builder.add(constraint_root, gamma_boundary);
-
-    if config.zero_columns.is_empty() {
-        // SAFETY-CRITICAL invariant: the DAG's root must be the *last* operation
-        // emitted into the builder so the MASM ACE chip's "is the last op zero?"
-        // check evaluates the right node. With no zero_columns the γ² batch
-        // collapses (`zero_sum = 0`, `γ_sq_zero = 0`), and the final
-        // `add(constraint_plus_boundary, 0)` constant-folds to
-        // `constraint_plus_boundary`. But `gamma_sq = gamma * gamma` would still
-        // be emitted as a real op, putting it after the root in the operation
-        // stream. So we just skip the γ² batch entirely when there's nothing to
-        // batch.
-        return constraint_plus_boundary;
-    }
-
-    // zero_sum = Σ aux_bound[col]  for col in zero_columns. Each column's identity
-    // `aux_bound[col] = 0` is batched at γ² so it cannot cancel against boundary
-    // terms at γ¹ or against other zero columns in the same sum (the whole sum is
-    // the coefficient of a single γ power, which forces the sum to zero — and since
-    // the boundary check is linear in each slot, each slot is independently zero with
-    // high probability over γ).
-    let mut zero_sum = builder.constant(EF::ZERO);
-    for &col in &config.zero_columns {
-        let node = builder.input(InputKey::AuxBusBoundary(col));
-        zero_sum = builder.add(zero_sum, node);
-    }
-
-    let gamma_sq = builder.mul(gamma, gamma);
-    let gamma_sq_zero = builder.mul(gamma_sq, zero_sum);
-    builder.add(constraint_plus_boundary, gamma_sq_zero)
+    builder.add(constraint_root, gamma_boundary)
 }
 
 /// Encode a bus message as `bus_prefix[bus] + sum(beta^i * elements[i])`.
@@ -246,122 +194,13 @@ where
     acc
 }
 
-// AIR-SPECIFIC CONFIG
-// ================================================================================================
-
-/// Build the [`LogUpBoundaryConfig`] for the Miden VM ProcessorAir.
-///
-/// This mirrors `ProcessorAir::reduced_aux_values` in `air/src/lib.rs`: it sums
-/// the sole accumulator column's committed final value, adds the scalar kernel-ROM
-/// correction supplied by MASM via `VlpiReduction(0)`, and folds the two open-
-/// bus corrections `c_block_hash` and `c_log_precompile` as rational fractions
-/// whose denominators are rebuilt from public inputs inside the DAG.
-///
-/// The three fractions are:
-///   1. `c_bh  = +1 / encode(BLOCK_HASH_TABLE, [ph[0..4], 0, 0, 0])`
-///   2. `c_lp_init  = +1 / encode(LOG_PRECOMPILE, [0, 0, 0, 0])`
-///   3. `c_lp_final = −1 / encode(LOG_PRECOMPILE, ts[0..4])`
-///
-/// `c_lp_init − c_lp_final` matches `transcript_messages` in `lib.rs` (initial
-/// minus final contribution). Splitting it into two rationals keeps the code
-/// uniform at the cost of two extra mul gates.
-pub fn logup_boundary_config() -> LogUpBoundaryConfig {
-    use MessageElement::{Constant, PublicInput};
-
-    use crate::constraints::lookup::messages::BusId;
-
-    // ph_msg = encode([ph[0], ph[1], ph[2], ph[3], 0, 0, 0])
-    // Matches `program_hash_message` in lib.rs.
-    let ph_msg = vec![
-        PublicInput(PV_PROGRAM_HASH),
-        PublicInput(PV_PROGRAM_HASH + 1),
-        PublicInput(PV_PROGRAM_HASH + 2),
-        PublicInput(PV_PROGRAM_HASH + 3),
-        Constant(Felt::ZERO), // parent_id = 0 (root block)
-        Constant(Felt::ZERO), // is_first_child = false
-        Constant(Felt::ZERO), // is_loop_body = false
-    ];
-
-    // default_lp_msg = encode([0, 0, 0, 0])
-    // Matches `transcript_messages(..).0` (initial default state).
-    let default_lp_msg = vec![
-        Constant(Felt::ZERO),
-        Constant(Felt::ZERO),
-        Constant(Felt::ZERO),
-        Constant(Felt::ZERO),
-    ];
-
-    // final_lp_msg = encode(ts[0..4])
-    // Matches `transcript_messages(..).1` (final public-input state).
-    let final_lp_msg = vec![
-        PublicInput(PV_TRANSCRIPT_STATE),
-        PublicInput(PV_TRANSCRIPT_STATE + 1),
-        PublicInput(PV_TRANSCRIPT_STATE + 2),
-        PublicInput(PV_TRANSCRIPT_STATE + 3),
-    ];
-
-    // ProcessorAir (legacy aggregator) has one real accumulator at col 0; slot 1 is a
-    // forced-zero pad. It's in `zero_columns` so the recursive verifier independently
-    // rejects any nonzero value, matching the runtime check in
-    // `ProcessorAir::reduced_aux_values`.
-    LogUpBoundaryConfig {
-        sum_columns: vec![0],
-        zero_columns: vec![1],
-        fractions: vec![
-            BusFraction {
-                sign: Sign::Plus,
-                bus: BusId::BlockHashTable as usize,
-                message: ph_msg,
-            },
-            BusFraction {
-                sign: Sign::Plus,
-                bus: BusId::LogPrecompileTranscript as usize,
-                message: default_lp_msg,
-            },
-            BusFraction {
-                sign: Sign::Minus,
-                bus: BusId::LogPrecompileTranscript as usize,
-                message: final_lp_msg,
-            },
-        ],
-        scalar_corrections: vec![InputKey::VlpiReduction(0)],
-    }
-}
-
-// CONVENIENCE FUNCTION
-// ================================================================================================
-
-/// Build a batched ACE circuit for the provided AIR.
-///
-/// Builds the constraint-evaluation DAG, extends it with the LogUp auxiliary
-/// trace boundary check via [`batch_logup_boundary`], and emits the off-VM
-/// circuit representation.
-///
-/// The output circuit checks `constraint_check + γ · boundary = 0`, where
-/// `boundary = (Σ aux_bound + c_kr) · D + N` and `(N, D)` is the rational sum
-/// of the in-DAG open-bus corrections.
-pub fn build_batched_ace_circuit<A, EF>(
-    air: &A,
-    config: AceConfig,
-    boundary_config: &LogUpBoundaryConfig,
-) -> Result<AceCircuit<EF>, AceError>
-where
-    A: LiftedAir<Felt, EF>,
-    EF: ExtensionField<Felt>,
-    SymbolicExpressionExt<Felt, EF>: Algebra<EF>,
-{
-    let artifacts = build_ace_dag_for_air::<A, Felt, EF>(air, config)?;
-    let batched_dag = batch_logup_boundary(artifacts.dag, boundary_config);
-    miden_ace_codegen::emit_circuit(&batched_dag, artifacts.layout)
-}
-
 // MULTI-AIR ACE CIRCUIT
 // ================================================================================================
 
 /// Build the combined ACE circuit for the (CoreAir, ChipletsAir) multi-AIR proof.
 ///
 /// The output circuit evaluates
-///   `combined + γ · boundary + γ² · zero_sum = 0`
+///   `combined + γ · boundary = 0`
 /// where `combined = chip_acc · β_multi + core_acc` is the β-folded sum of the per-AIR
 /// alpha-folded constraint roots, and `boundary` is the cross-AIR LogUp identity built
 /// over both AIRs' aux-bus-boundary slots plus the open-bus rational corrections plus
@@ -594,9 +433,8 @@ where
 
 /// Build the [`LogUpBoundaryConfig`] for the combined multi-AIR ACE circuit.
 ///
-/// Mirrors [`logup_boundary_config`] but adapts the column indices to the combined
-/// layout: Core's LogUp final lives at slot `0..core_aux_n`, Chiplets's at
-/// `core_aux_n..core_aux_n + chip_aux_n`.
+/// Column indices are mapped into the combined layout: Core's LogUp final lives at slot
+/// `0..core_aux_n`, Chiplets's at `core_aux_n..core_aux_n + chip_aux_n`.
 pub fn multi_air_logup_boundary_config(
     core_aux_n: usize,
     chip_aux_n: usize,
@@ -638,7 +476,6 @@ pub fn multi_air_logup_boundary_config(
 
     LogUpBoundaryConfig {
         sum_columns,
-        zero_columns: vec![],
         fractions: vec![
             BusFraction {
                 sign: Sign::Plus,

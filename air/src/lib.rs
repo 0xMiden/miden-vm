@@ -31,9 +31,10 @@ pub mod trace;
 
 /// Miden VM-specific LogUp lookup argument: bus identifiers and bus message types.
 ///
-/// The `LookupAir` and `AuxBuilder` trait impls live directly on [`crate::ProcessorAir`].
-/// The generic LogUp framework this builds on lives in [`crate::lookup`] and is free of
-/// Miden-specific types so it can be extracted into its own crate.
+/// The `LookupAir` and `AuxBuilder` trait impls live directly on [`crate::CoreAir`] and
+/// [`crate::ChipletsAir`]. The generic LogUp framework this builds on lives in
+/// [`crate::lookup`] and is free of Miden-specific types so it can be extracted into its
+/// own crate.
 pub mod logup {
     pub use crate::constraints::lookup::{
         BusId, MIDEN_MAX_MESSAGE_WIDTH, messages::*, miden_air::NUM_LOGUP_COMMITTED_FINALS,
@@ -41,20 +42,18 @@ pub mod logup {
 }
 
 use constraints::{
-    columns::{ChipletCols, CoreCols, NUM_CORE_COLS},
+    columns::{ChipletCols, CoreCols},
     lookup::{
-        chiplet_air::{ChipletLookupAir, ChipletLookupBuilder},
+        chiplet_air::ChipletLookupBuilder,
         main_air::{MainLookupAir, MainLookupBuilder},
-        miden_air::{MIDEN_COLUMN_SHAPE, emit_miden_boundary},
     },
 };
-use logup::{BusId, MIDEN_MAX_MESSAGE_WIDTH, NUM_LOGUP_COMMITTED_FINALS};
+use logup::{BusId, MIDEN_MAX_MESSAGE_WIDTH};
 use lookup::{
     BoundaryBuilder, Challenges, ConstraintLookupBuilder, LookupAir, LookupMessage,
     build_logup_aux_trace,
 };
 use miden_core::utils::RowMajorMatrix;
-use trace::TRACE_WIDTH;
 
 // RE-EXPORTS
 // ================================================================================================
@@ -249,255 +248,6 @@ pub const LOGUP_AUX_TRACE_WIDTH: usize = 7;
 const PV_PROGRAM_HASH: usize = 0;
 const PV_TRANSCRIPT_STATE: usize = NUM_PUBLIC_VALUES - WORD_SIZE;
 
-/// Miden VM Processor AIR implementation.
-///
-/// Auxiliary trace building is handled separately via [`AuxBuilder`].
-///
-/// Public-input-dependent boundary checks are performed in [`LiftedAir::reduced_aux_values`].
-/// Aux columns are NOT initialized with boundary terms -- they start at identity. The verifier
-/// independently computes expected boundary messages from variable length public values and checks
-/// them against the final column values.
-#[derive(Copy, Clone, Debug, Default)]
-pub struct ProcessorAir;
-
-// --- Upstream trait impls for ProcessorAir ---
-
-impl BaseAir<Felt> for ProcessorAir {
-    fn width(&self) -> usize {
-        TRACE_WIDTH
-    }
-
-    fn num_public_values(&self) -> usize {
-        NUM_PUBLIC_VALUES
-    }
-}
-
-// --- LiftedAir impl ---
-
-impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ProcessorAir {
-    fn periodic_columns(&self) -> Vec<Vec<Felt>> {
-        constraints::chiplets::columns::PeriodicCols::periodic_columns()
-    }
-
-    fn num_randomness(&self) -> usize {
-        trace::AUX_TRACE_RAND_CHALLENGES
-    }
-
-    fn aux_width(&self) -> usize {
-        // 4 main-trace + 3 chiplet-trace = 7 LogUp columns. Matches
-        // `ProcessorAir::num_columns()` (LookupAir impl) and the per-row shape returned by
-        // `ProcessorAir::build_aux_trace` (AuxBuilder impl).
-        LOGUP_AUX_TRACE_WIDTH
-    }
-
-    fn num_aux_values(&self) -> usize {
-        NUM_LOGUP_COMMITTED_FINALS
-    }
-
-    /// Returns the number of variable-length public input slices.
-    ///
-    /// The Miden VM AIR uses a single variable-length slice that contains all kernel
-    /// procedure digests as concatenated field elements (each digest is `WORD_SIZE`
-    /// elements). The verifier framework uses this count to validate that the correct
-    /// number of slices is provided.
-    fn num_var_len_public_inputs(&self) -> usize {
-        1
-    }
-
-    fn reduced_aux_values(
-        &self,
-        aux_values: &[EF],
-        challenges: &[EF],
-        public_values: &[Felt],
-        var_len_public_inputs: VarLenPublicInputs<'_, Felt>,
-    ) -> Result<ReducedAuxValues<EF>, ReductionError>
-    where
-        EF: ExtensionField<Felt>,
-    {
-        // LogUp boundary identity. The verifier checks `is_identity()` — i.e.
-        // `prod == ONE && sum == ZERO` — on the accumulated `ReducedAuxValues`
-        // across every AIR. There are no multiplicative bus checks under LogUp, so
-        // `prod = ONE`. The boundary equation lives in `sum`:
-        //
-        //   sum = Σ aux_finals[col]  +  total_correction
-        //
-        // `total_correction` cancels the unmatched-fraction contributions from the
-        // three open buses (block hash, log precompile, kernel ROM init). Rather
-        // than spelling those out here, we drive the shared
-        // `emit_miden_boundary` emitter — the same source `LookupAir::eval_boundary`
-        // uses for the debug walker — through a reducer that accumulates
-        // `Σ multiplicity · encode(msg)⁻¹` into an `EF`.
-        if public_values.len() != NUM_PUBLIC_VALUES {
-            return Err(format!(
-                "expected {} public values, got {}",
-                NUM_PUBLIC_VALUES,
-                public_values.len()
-            )
-            .into());
-        }
-        if var_len_public_inputs.len() != 1 {
-            return Err(format!(
-                "expected 1 var-len public input slice, got {}",
-                var_len_public_inputs.len()
-            )
-            .into());
-        }
-        if !var_len_public_inputs[0].len().is_multiple_of(WORD_SIZE) {
-            return Err(format!(
-                "kernel digest felts length {} is not a multiple of {}",
-                var_len_public_inputs[0].len(),
-                WORD_SIZE
-            )
-            .into());
-        }
-
-        let challenges = Challenges::<EF>::new(
-            challenges[0],
-            challenges[1],
-            MIDEN_MAX_MESSAGE_WIDTH,
-            BusId::COUNT,
-        );
-
-        let mut reducer = ReduceBoundaryBuilder {
-            challenges: &challenges,
-            public_values,
-            var_len_public_inputs,
-            sum: EF::ZERO,
-            error: None,
-        };
-        emit_miden_boundary(&mut reducer);
-        let total_correction = reducer.finalize()?;
-
-        // ProcessorAir has one real LogUp final at col 0; slot 1 is a forced-zero pad
-        // (see `NUM_LOGUP_COMMITTED_FINALS`). The recursive verifier rejects nonzero pads
-        // via `LogUpBoundaryConfig::zero_columns`; mirror that check here.
-        for unused_aux in aux_values.iter().skip(1) {
-            if !unused_aux.is_zero() {
-                return Err("padding aux value is non-zero".into());
-            }
-        }
-        let aux_sum: EF = aux_values.iter().copied().sum();
-
-        Ok(ReducedAuxValues {
-            prod: EF::ONE,
-            sum: aux_sum + total_correction,
-        })
-    }
-
-    fn eval<AB: MidenAirBuilder>(&self, builder: &mut AB) {
-        // Borrow the row buffer as the two per-AIR views: `CoreCols` (system + decoder +
-        // stack + range) for the Core half, and `ChipletCols` (chiplets + s_perm + chip_clk)
-        // for the Chiplets half.
-        let main = builder.main();
-        let local_slice = main.current_slice();
-        let next_slice = main.next_slice();
-        let local_core: &CoreCols<AB::Var> = local_slice[..NUM_CORE_COLS].borrow();
-        let next_core: &CoreCols<AB::Var> = next_slice[..NUM_CORE_COLS].borrow();
-        let local_chiplet: &ChipletCols<AB::Var> = local_slice[NUM_CORE_COLS..].borrow();
-        let next_chiplet: &ChipletCols<AB::Var> = next_slice[NUM_CORE_COLS..].borrow();
-
-        // Build chiplet selectors and op flags once, shared by main and bus constraints.
-        let selectors = constraints::chiplets::selectors::build_chiplet_selectors(
-            builder,
-            local_chiplet,
-            next_chiplet,
-        );
-        let op_flags = constraints::op_flags::OpFlags::new(
-            &local_core.decoder,
-            &local_core.stack,
-            &next_core.decoder,
-        );
-
-        // Main trace constraints — partitioned at the call site so the per-AIR shape is
-        // visible at the top level. Each helper takes only its segment's view.
-        constraints::enforce_core(builder, local_core, next_core, &op_flags);
-        constraints::enforce_chiplets(builder, local_chiplet, next_chiplet, &selectors);
-
-        // LogUp lookup-argument constraints. Both halves are aggregated by ProcessorAir's
-        // `LookupAir::eval` which dispatches to `MainLookupAir.eval` + `ChipletLookupAir.eval`.
-        {
-            let mut lb = ConstraintLookupBuilder::new(builder, self);
-            <Self as LookupAir<_>>::eval(self, &mut lb);
-        }
-
-        // Public input boundary constraints (Core-only).
-        constraints::public_inputs::enforce_main(builder, local_core);
-    }
-
-    fn log_quotient_degree(&self) -> usize
-    where
-        Self: Sized,
-    {
-        // override to avoid recomputing through the SymbolicAir
-        3
-    }
-}
-
-// --- LookupAir impl (7-column aggregator over main + chiplet sub-AIRs) ---
-
-impl<LB> LookupAir<LB> for ProcessorAir
-where
-    LB: MainLookupBuilder + ChipletLookupBuilder,
-{
-    fn num_columns(&self) -> usize {
-        MIDEN_COLUMN_SHAPE.len()
-    }
-
-    fn column_shape(&self) -> &[usize] {
-        &MIDEN_COLUMN_SHAPE
-    }
-
-    fn max_message_width(&self) -> usize {
-        // Width of the `beta_powers` table precomputed by `Challenges::new`, also equal
-        // to the exponent of `gamma = beta^MIDEN_MAX_MESSAGE_WIDTH` used in the per-bus
-        // prefix. Must match the MASM recursive verifier's Poseidon2 absorption loop.
-        // `HasherMsg::State` is the widest live payload at 15 slots (label@β⁰, addr@β¹,
-        // node_index@β², state[0..12]@β³..β¹⁴); the 16th slot is unused slack kept for
-        // MASM transcript alignment.
-        MIDEN_MAX_MESSAGE_WIDTH
-    }
-
-    fn num_bus_ids(&self) -> usize {
-        BusId::COUNT
-    }
-
-    fn eval(&self, builder: &mut LB) {
-        MainLookupAir.eval(builder);
-        ChipletLookupAir.eval(builder);
-    }
-
-    fn eval_boundary<B>(&self, boundary: &mut B)
-    where
-        B: BoundaryBuilder<F = LB::F, EF = LB::EF>,
-    {
-        emit_miden_boundary(boundary);
-    }
-}
-
-// --- AuxBuilder impl (stateless LogUp aux-trace construction) ---
-
-impl<EF> AuxBuilder<Felt, EF> for ProcessorAir
-where
-    EF: ExtensionField<Felt>,
-{
-    fn build_aux_trace(
-        &self,
-        main: &RowMajorMatrix<Felt>,
-        challenges: &[EF],
-    ) -> (RowMajorMatrix<EF>, Vec<EF>) {
-        let (aux_trace, mut committed) = build_logup_aux_trace(self, main, challenges);
-        // Pad the second slot to zero — `ProcessorAir` has one real final but the proof
-        // layout reserves two (see `NUM_LOGUP_COMMITTED_FINALS`).
-        debug_assert_eq!(
-            committed.len(),
-            1,
-            "build_logup_aux_trace should return exactly one real committed final"
-        );
-        committed.push(EF::ZERO);
-        (aux_trace, committed)
-    }
-}
-
 // REDUCED-AUX BOUNDARY BUILDER
 // ================================================================================================
 
@@ -564,9 +314,8 @@ impl<'a, EF: ExtensionField<Felt>> BoundaryBuilder for ReduceBoundaryBuilder<'a,
 
 /// Core-trace AIR.
 ///
-/// Owns the system, decoder, stack, and range-check segments — `NUM_CORE_COLS = 51` columns
-/// of main trace and `MAIN_COLUMN_SHAPE.len() = 4` LogUp accumulator columns. Paired with
-/// [`ChipletsAir`] for the two-AIR proving path.
+/// Owns the system, decoder, stack, and range-check segments. Paired with [`ChipletsAir`]
+/// for the two-AIR proving path.
 #[derive(Copy, Clone, Debug, Default)]
 pub struct CoreAir;
 
@@ -595,9 +344,8 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for CoreAir {
     }
 
     fn num_aux_values(&self) -> usize {
-        // One real committed final per AIR; the unified `ProcessorAir`'s extra
-        // `NUM_LOGUP_COMMITTED_FINALS` slot is not needed once each per-AIR
-        // `ReducedAuxValues` carries its own scalar.
+        // One real committed final per AIR; each per-AIR `ReducedAuxValues` carries its
+        // own scalar.
         1
     }
 
@@ -675,8 +423,8 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for CoreAir {
     where
         Self: Sized,
     {
-        // Same constraint degree as ProcessorAir today (Core dominates the AIR's quotient
-        // degree); override to avoid recomputing through SymbolicAir.
+        // Core dominates the combined quotient degree; override to avoid recomputing
+        // through SymbolicAir.
         3
     }
 }
@@ -741,11 +489,7 @@ where
 
 /// Chiplets-trace AIR for the multi-AIR proving path.
 ///
-/// Owns the 22-column chiplet section (chiplets data + s_perm + chip_clk) and the three
-/// chiplet-trace LogUp accumulator columns. Counterpart to [`CoreAir`].
-///
-/// `chip_clk` is the chiplet-trace row counter — it provides the responder address for the
-/// hasher LogUp bus.
+/// Owns the chiplet section and its LogUp accumulator columns. Counterpart to [`CoreAir`].
 #[derive(Copy, Clone, Debug, Default)]
 pub struct ChipletsAir;
 
@@ -775,8 +519,8 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ChipletsAir {
     }
 
     fn num_aux_values(&self) -> usize {
-        // One real committed final per AIR; `ProcessorAir`'s placeholder slot is not needed
-        // once each per-AIR `ReducedAuxValues` carries its own scalar.
+        // One real committed final per AIR; each per-AIR `ReducedAuxValues` carries its
+        // own scalar.
         1
     }
 
@@ -862,9 +606,8 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ChipletsAir {
     where
         Self: Sized,
     {
-        // Same constraint degree as ProcessorAir today (chiplet hasher dominates the AIR's
-        // quotient degree at deg 9 / log_blowup 3); override to avoid recomputing through
-        // SymbolicAir.
+        // The chiplet hasher dominates this AIR's quotient degree at deg 9 / log_blowup 3;
+        // override to avoid recomputing through SymbolicAir.
         3
     }
 }
@@ -955,10 +698,19 @@ impl BaseAir<Felt> for MidenAir {
     }
 
     fn num_public_values(&self) -> usize {
-        match self {
-            Self::Core(a) => BaseAir::<Felt>::num_public_values(a),
-            Self::Chiplets(a) => BaseAir::<Felt>::num_public_values(a),
-        }
+        // Every AIR in a multi-AIR instance shares one list of public inputs, so both
+        // sub-AIRs must agree on its length.
+        debug_assert_eq!(
+            BaseAir::<Felt>::num_public_values(&CoreAir),
+            NUM_PUBLIC_VALUES,
+            "CoreAir public-input count must equal NUM_PUBLIC_VALUES"
+        );
+        debug_assert_eq!(
+            BaseAir::<Felt>::num_public_values(&ChipletsAir),
+            NUM_PUBLIC_VALUES,
+            "ChipletsAir public-input count must equal NUM_PUBLIC_VALUES"
+        );
+        NUM_PUBLIC_VALUES
     }
 }
 
@@ -971,10 +723,14 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for MidenAir {
     }
 
     fn num_randomness(&self) -> usize {
-        match self {
-            Self::Core(a) => <CoreAir as LiftedAir<Felt, EF>>::num_randomness(a),
-            Self::Chiplets(a) => <ChipletsAir as LiftedAir<Felt, EF>>::num_randomness(a),
-        }
+        // Instance-level: every AIR shares the same LogUp challenge set, so this is a
+        // single global value rather than a per-AIR quantity.
+        debug_assert_eq!(
+            <CoreAir as LiftedAir<Felt, EF>>::num_randomness(&CoreAir),
+            <ChipletsAir as LiftedAir<Felt, EF>>::num_randomness(&ChipletsAir),
+            "Core/Chiplets must share the same randomness count"
+        );
+        trace::AUX_TRACE_RAND_CHALLENGES
     }
 
     fn aux_width(&self) -> usize {
@@ -985,10 +741,12 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for MidenAir {
     }
 
     fn num_aux_values(&self) -> usize {
-        match self {
-            Self::Core(a) => <CoreAir as LiftedAir<Felt, EF>>::num_aux_values(a),
-            Self::Chiplets(a) => <ChipletsAir as LiftedAir<Felt, EF>>::num_aux_values(a),
-        }
+        debug_assert_eq!(
+            <CoreAir as LiftedAir<Felt, EF>>::num_aux_values(&CoreAir),
+            <ChipletsAir as LiftedAir<Felt, EF>>::num_aux_values(&ChipletsAir),
+            "Core/Chiplets must share the same committed-final count"
+        );
+        <CoreAir as LiftedAir<Felt, EF>>::num_aux_values(&CoreAir)
     }
 
     fn num_var_len_public_inputs(&self) -> usize {
