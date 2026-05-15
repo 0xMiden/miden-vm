@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.23.1 (unreleased)
+
+- Restored metadata-neutral MAST node identity so public procedure roots do not depend on debug/decorator metadata shape; this reopens debug metadata precision issues from #2955 and #3054.
+
 ## v0.23.0 (2026-05-07)
 
 #### Features
