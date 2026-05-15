@@ -335,6 +335,23 @@ pub enum SystemEvent {
     ///   Advice stack:  [CANONICAL_PAYLOAD_LO, CANONICAL_PAYLOAD_HI, CANONICAL_TAG, ...]
     ///     (top of advice is `CANONICAL_PAYLOAD_LO`, mirroring the input layout)
     DeferredEvaluate,
+
+    /// Registers a chunk node in the deferred-computation DAG.
+    ///
+    /// A chunk is a leaf carrying `n` blocks of 8 field elements (the Poseidon2 rate). The
+    /// installed schema decodes `n` from the tag (no `n` on the stack — the tag is the
+    /// length's source of truth, which means the digest binds `n` for free). The processor
+    /// reads `8n` felts from memory at `ptr` (word-aligned, `ptr % 4 == 0`), constructs the
+    /// chunk node, and registers it. No values are returned to MASM.
+    ///
+    /// Inputs:
+    ///   Operand stack: [event_id, TAG, ptr, ...]
+    ///     where TAG is 4 felts at positions 1..5 and `ptr` is a single felt at position 5.
+    ///
+    /// Outputs:
+    ///   Operand stack: [event_id, TAG, ptr, ...] (unchanged)
+    ///   DAG state:     {... chunk(TAG, [data[ptr..ptr+8n]])}
+    DeferredRegisterChunk,
 }
 
 impl SystemEvent {
@@ -409,6 +426,7 @@ impl SystemEvent {
             Self::HpermToMap,
             Self::DeferredRegister,
             Self::DeferredEvaluate,
+            Self::DeferredRegisterChunk,
         ]
     }
 }
@@ -450,7 +468,7 @@ pub(crate) struct SystemEventEntry {
 
 impl SystemEvent {
     /// The total number of system events.
-    pub const COUNT: usize = 21;
+    pub const COUNT: usize = 22;
 
     /// Lookup table mapping system events to their metadata.
     ///
@@ -562,6 +580,11 @@ impl SystemEvent {
             event: SystemEvent::DeferredEvaluate,
             name: "sys::adv::evaluate_deferred",
         },
+        SystemEventEntry {
+            id: EventId::from_u64(17356669416957691043),
+            event: SystemEvent::DeferredRegisterChunk,
+            name: "sys::adv::register_deferred_chunk",
+        },
     ];
 }
 
@@ -671,7 +694,8 @@ mod test {
                 | SystemEvent::HqwordToMap
                 | SystemEvent::HpermToMap
                 | SystemEvent::DeferredRegister
-                | SystemEvent::DeferredEvaluate => {},
+                | SystemEvent::DeferredEvaluate
+                | SystemEvent::DeferredRegisterChunk => {},
             }
         }
     }

@@ -3624,6 +3624,25 @@ end"
     Ok(())
 }
 
+/// Smoke-test that the `adv.register_deferred_chunk` keyword parses and assembles. Stack layout
+/// is `[TAG, ptr]` — 5 felts under the event ID. End-to-end semantics live in
+/// `processor/tests/deferred_e2e.rs`.
+#[test]
+fn test_register_deferred_chunk_keyword_assembles() -> TestResult {
+    let context = TestContext::default();
+    let source = source_file!(
+        &context,
+        "\
+begin
+    push.0 push.0 push.0 push.0 push.0
+    adv.register_deferred_chunk
+    drop drop drop drop drop
+end"
+    );
+    context.assemble(source)?;
+    Ok(())
+}
+
 // ERRORS
 // ================================================================================================
 

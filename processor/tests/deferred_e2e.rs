@@ -9,7 +9,10 @@ use std::sync::Arc;
 use miden_assembly::Assembler;
 use miden_core::{
     Word, ZERO,
-    deferred::{Field0Handler, Node, Payload},
+    deferred::{
+        ChildResolver, Field0Handler, Node, NodePayload, NodeType, Payload, Schema, SchemaError,
+        Tag,
+    },
 };
 use miden_processor::{
     DefaultHost, ExecutionOptions, FastProcessor, Felt, ProcessorState, StackInputs,
@@ -74,7 +77,10 @@ fn push_node(src: &mut String, node: Node) {
     for f in node.tag.iter().rev() {
         writeln!(src, "    push.{}", f.as_int()).unwrap();
     }
-    for f in node.payload.0.iter().rev() {
+    let payload = node
+        .payload_felts()
+        .expect("push_node only handles expression/assertion variants");
+    for f in payload.0.iter().rev() {
         writeln!(src, "    push.{}", f.as_int()).unwrap();
     }
 }
@@ -95,7 +101,7 @@ fn field0_leaf(low: u64) -> Node {
     let mut limbs = [Felt::from_u32(0); 8];
     limbs[0] = Felt::from_u32(low as u32);
     limbs[1] = Felt::from_u32((low >> 32) as u32);
-    Node::new(Field0Handler::LEAF, Payload::new(limbs))
+    Node::expression(Field0Handler::LEAF, Payload::new(limbs))
 }
 
 // END-TO-END: (a + b) * c == 35  (with a=3, b=4, c=5)
@@ -113,11 +119,12 @@ fn deferred_end_to_end_register_eval_assert() {
     let b_digest = b.digest();
     let c_digest = c.digest();
     let d_digest = d.digest();
-    let add = Node::new(Field0Handler::ADD, Payload::binary_op(a_digest, b_digest));
+    let add = Node::expression(Field0Handler::ADD, Payload::binary_op(a_digest, b_digest));
     let add_digest = add.digest();
-    let mul = Node::new(Field0Handler::MUL, Payload::binary_op(add_digest, c_digest));
+    let mul = Node::expression(Field0Handler::MUL, Payload::binary_op(add_digest, c_digest));
     let mul_digest = mul.digest();
-    let assertion = Node::new(Field0Handler::ASSERT_EQ, Payload::binary_op(mul_digest, d_digest));
+    let assertion =
+        Node::assertion(Field0Handler::ASSERT_EQ, Payload::binary_op(mul_digest, d_digest));
 
     // Build the program.
     let mut src = String::from("begin\n");
@@ -144,8 +151,8 @@ fn deferred_end_to_end_register_eval_assert() {
     }
     assert_eq!(state.assertions().len(), 1);
     let a0 = &state.assertions()[0];
-    let lhs = Word::new([a0.payload.0[0], a0.payload.0[1], a0.payload.0[2], a0.payload.0[3]]);
-    let rhs = Word::new([a0.payload.0[4], a0.payload.0[5], a0.payload.0[6], a0.payload.0[7]]);
+    let a0_payload = a0.payload_felts().expect("assertion has fixed-size payload");
+    let (lhs, rhs) = a0_payload.binary_op_children();
     assert_eq!(lhs, mul_digest);
     assert_eq!(rhs, d_digest);
 
@@ -179,7 +186,7 @@ fn deferred_evaluate_pushes_canonical_form_to_advice() {
     // (a + b). Confirm the advice-pop yields a leaf node with payload limb0 = 7.
     let a = field0_leaf(3);
     let b = field0_leaf(4);
-    let add = Node::new(Field0Handler::ADD, Payload::binary_op(a.digest(), b.digest()));
+    let add = Node::expression(Field0Handler::ADD, Payload::binary_op(a.digest(), b.digest()));
 
     let mut src = String::from("begin\n");
     emit_register(&mut src, a);
@@ -218,7 +225,8 @@ fn deferred_evaluate_on_assertion_pushes_nothing_to_advice() {
     // verify successfully but nothing is pushed onto the advice stack — a trailing `adv_push.1`
     // therefore underflows and fails execution.
     let a = field0_leaf(7);
-    let a_eq_a = Node::new(Field0Handler::ASSERT_EQ, Payload::binary_op(a.digest(), a.digest()));
+    let a_eq_a =
+        Node::assertion(Field0Handler::ASSERT_EQ, Payload::binary_op(a.digest(), a.digest()));
 
     let mut src = String::from("begin\n");
     emit_register(&mut src, a);
@@ -249,7 +257,8 @@ fn deferred_evaluate_on_assertion_pushes_nothing_to_advice() {
 fn deferred_assert_eq_mismatch_fails_execution() {
     let a = field0_leaf(7);
     let b = field0_leaf(8);
-    let mismatch = Node::new(Field0Handler::ASSERT_EQ, Payload::binary_op(a.digest(), b.digest()));
+    let mismatch =
+        Node::assertion(Field0Handler::ASSERT_EQ, Payload::binary_op(a.digest(), b.digest()));
 
     let mut src = String::from("begin\n");
     emit_register(&mut src, a);
@@ -307,4 +316,168 @@ fn legacy_event_handler_still_works_with_deferred_infrastructure() {
 
     assert_eq!(counter.load(std::sync::atomic::Ordering::SeqCst), 1);
     assert_eq!(output.advice.deferred_state().nodes().len(), 1);
+}
+
+// CHUNK REGISTER E2E
+// ================================================================================================
+//
+// A minimal chunk-aware test schema, mirroring `core/tests/deferred_chunk.rs::TestSchema`:
+// `decode` reads role from tag[2] and (for chunks) `n` from tag[3]; `reduce` for a chunk
+// returns an expression digest-leaf via a fake limb-sum hash.
+
+const TEST_PREFIX: [Felt; 2] = [Felt::new_unchecked(0x73), Felt::new_unchecked(0x68)];
+const PREIMAGE_ROLE: Felt = Felt::new_unchecked(0);
+const DIGEST_ROLE: Felt = Felt::new_unchecked(1);
+
+fn preimage_tag(n: u32) -> Tag {
+    [TEST_PREFIX[0], TEST_PREFIX[1], PREIMAGE_ROLE, Felt::from_u32(n)]
+}
+
+fn digest_tag() -> Tag {
+    [TEST_PREFIX[0], TEST_PREFIX[1], DIGEST_ROLE, ZERO]
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+struct ChunkTestSchema;
+
+impl Schema for ChunkTestSchema {
+    fn decode(&self, tag: Tag) -> Result<NodeType, SchemaError> {
+        if tag[0] != TEST_PREFIX[0] || tag[1] != TEST_PREFIX[1] {
+            return Err(SchemaError::InvalidNode);
+        }
+        match tag[2] {
+            r if r == PREIMAGE_ROLE => Ok(NodeType::Chunk(tag[3].as_canonical_u64() as u32)),
+            r if r == DIGEST_ROLE => Ok(NodeType::Expression),
+            _ => Err(SchemaError::InvalidNode),
+        }
+    }
+
+    fn reduce(&self, node: &Node, _children: &mut dyn ChildResolver) -> Result<Node, SchemaError> {
+        match &node.payload {
+            NodePayload::Chunk(chunks) => {
+                let mut acc = [ZERO; 8];
+                for c in chunks.iter() {
+                    for (a, x) in acc.iter_mut().zip(c.iter()) {
+                        *a += *x;
+                    }
+                }
+                Ok(Node::expression(digest_tag(), Payload::new(acc)))
+            },
+            NodePayload::Expression(_) => Ok(node.clone()),
+            NodePayload::Assertion(_) => Err(SchemaError::InvalidNode),
+        }
+    }
+}
+
+fn build_chunk_processor() -> FastProcessor {
+    FastProcessor::new_with_options(
+        StackInputs::default(),
+        AdviceInputs::default(),
+        ExecutionOptions::default(),
+    )
+    .expect("processor construction")
+    .with_schema(Box::new(ChunkTestSchema))
+}
+
+#[test]
+fn chunk_register_reads_bulk_data_from_memory_and_interns_node() {
+    use core::fmt::Write;
+
+    // Lay out two 8-felt chunks in MASM memory starting at address 0:
+    //   chunk 0: limbs (1, 2, 3, 4, 5, 6, 7, 8)
+    //   chunk 1: limbs (9, 10, 11, 12, 13, 14, 15, 16)
+    let chunks: Vec<[Felt; 8]> = (0..2u32)
+        .map(|i| core::array::from_fn(|j| Felt::from_u32(1 + i * 8 + j as u32)))
+        .collect();
+    let tag = preimage_tag(2);
+    let ptr: u32 = 0;
+    let expected_digest = Node::chunk(tag, chunks.clone()).digest();
+
+    // MASM: write the 16 felts to memory at addresses 0..16, then push (ptr, TAG, deepest-first)
+    // and invoke `adv.register_deferred_chunk`. After the event, drop the 5 felts left on the
+    // operand stack.
+    let mut src = String::from("begin\n");
+    for (i, felt) in chunks.iter().flatten().enumerate() {
+        writeln!(&mut src, "    push.{}", felt.as_canonical_u64()).unwrap();
+        writeln!(&mut src, "    mem_store.{}", ptr + i as u32).unwrap();
+    }
+    // Push ptr, then tag (deepest first so tag[0] ends up on top under event_id).
+    writeln!(&mut src, "    push.{}", ptr).unwrap();
+    for f in tag.iter().rev() {
+        writeln!(&mut src, "    push.{}", f.as_canonical_u64()).unwrap();
+    }
+    src.push_str("    adv.register_deferred_chunk\n");
+    for _ in 0..5 {
+        src.push_str("    drop\n");
+    }
+    src.push_str("end\n");
+
+    let program = Assembler::default().assemble_program(&src).expect("program must assemble");
+
+    let mut host = DefaultHost::default();
+    let output = build_chunk_processor()
+        .execute_sync(&program, &mut host)
+        .expect("execution must succeed");
+
+    let state = output.advice.deferred_state();
+    assert!(
+        state.contains(&expected_digest),
+        "chunk node must be stored under its linear-hash digest"
+    );
+    let stored = state.get(&expected_digest).expect("chunk node lookup");
+    match &stored.payload {
+        NodePayload::Chunk(c) => {
+            assert_eq!(c.as_ref(), chunks.as_slice(), "bulk data must match memory contents")
+        },
+        _ => panic!("expected chunk variant in deferred state"),
+    }
+    assert_eq!(stored.tag, tag);
+}
+
+#[test]
+fn chunk_register_rejects_unaligned_pointer() {
+    use core::fmt::Write;
+    let tag = preimage_tag(1);
+    let ptr: u32 = 1; // not word-aligned
+
+    let mut src = String::from("begin\n");
+    writeln!(&mut src, "    push.{}", ptr).unwrap();
+    for f in tag.iter().rev() {
+        writeln!(&mut src, "    push.{}", f.as_canonical_u64()).unwrap();
+    }
+    src.push_str("    adv.register_deferred_chunk\n");
+    src.push_str("end\n");
+
+    let program = Assembler::default().assemble_program(&src).expect("program must assemble");
+    let mut host = DefaultHost::default();
+    let result = build_chunk_processor().execute_sync(&program, &mut host);
+    assert!(result.is_err(), "unaligned ptr must surface as an execution error");
+}
+
+#[test]
+fn chunk_register_with_zero_chunks_still_interns_a_node() {
+    // n=0 — no memory reads. The digest still depends on the tag (one permutation runs even
+    // for empty chunks), so the resulting node lives in the state map.
+    use core::fmt::Write;
+    let tag = preimage_tag(0);
+    let ptr: u32 = 0;
+    let expected_digest = Node::chunk(tag, vec![]).digest();
+
+    let mut src = String::from("begin\n");
+    writeln!(&mut src, "    push.{}", ptr).unwrap();
+    for f in tag.iter().rev() {
+        writeln!(&mut src, "    push.{}", f.as_canonical_u64()).unwrap();
+    }
+    src.push_str("    adv.register_deferred_chunk\n");
+    for _ in 0..5 {
+        src.push_str("    drop\n");
+    }
+    src.push_str("end\n");
+
+    let program = Assembler::default().assemble_program(&src).expect("program must assemble");
+    let mut host = DefaultHost::default();
+    let output = build_chunk_processor()
+        .execute_sync(&program, &mut host)
+        .expect("execution must succeed");
+    assert!(output.advice.deferred_state().contains(&expected_digest));
 }

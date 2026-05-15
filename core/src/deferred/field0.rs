@@ -1,5 +1,5 @@
 use crate::{
-    Felt, Word, ZERO,
+    Felt, ZERO,
     deferred::{ChildResolver, DeferredError, Node, NodeType, Payload, Schema, SchemaError, Tag},
 };
 
@@ -40,8 +40,10 @@ impl Field0Handler {
         if lhs.tag != Self::LEAF || rhs.tag != Self::LEAF {
             return Err(DeferredError::InvalidPayload);
         }
-        let a = decode_limbs(&lhs.payload)?;
-        let b = decode_limbs(&rhs.payload)?;
+        let lhs_payload = lhs.expression_payload().ok_or(DeferredError::InvalidPayload)?;
+        let rhs_payload = rhs.expression_payload().ok_or(DeferredError::InvalidPayload)?;
+        let a = decode_limbs(lhs_payload)?;
+        let b = decode_limbs(rhs_payload)?;
         let c = if op_tag == Self::ADD {
             add_mod_2_256(a, b)
         } else if op_tag == Self::MUL {
@@ -49,41 +51,35 @@ impl Field0Handler {
         } else {
             return Err(DeferredError::Unsupported);
         };
-        Ok(Node::new(Self::LEAF, encode_limbs(c)))
-    }
-
-    /// Split a binary-op payload into its two child digests in `(lhs, rhs)` order.
-    fn binary_op_children(payload: &Payload) -> (Word, Word) {
-        let lhs = Word::new([payload.0[0], payload.0[1], payload.0[2], payload.0[3]]);
-        let rhs = Word::new([payload.0[4], payload.0[5], payload.0[6], payload.0[7]]);
-        (lhs, rhs)
+        Ok(Node::expression(Self::LEAF, encode_limbs(c)))
     }
 }
 
 impl Schema for Field0Handler {
-    fn is_valid(&self, node: &Node) -> Option<NodeType> {
-        if node.tag[0] != Self::PREFIX[0] || node.tag[1] != Self::PREFIX[1] {
-            return None;
+    fn decode(&self, tag: Tag) -> Result<NodeType, SchemaError> {
+        if tag[0] != Self::PREFIX[0] || tag[1] != Self::PREFIX[1] {
+            return Err(SchemaError::InvalidNode);
         }
-        if node.tag == Self::LEAF {
-            // Leaf payloads must have u32-canonical limbs so they can be reduced.
-            decode_limbs(&node.payload).ok().map(|_| NodeType::Expression)
-        } else if node.tag == Self::ADD || node.tag == Self::MUL {
-            // Op-node payloads are two child digests — opaque from this handler's POV.
-            Some(NodeType::Expression)
-        } else if node.tag == Self::ASSERT_EQ {
-            // Assertion-node payloads are `lhs_digest || rhs_digest`.
-            Some(NodeType::Assertion)
+        if tag == Self::LEAF || tag == Self::ADD || tag == Self::MUL {
+            Ok(NodeType::Expression)
+        } else if tag == Self::ASSERT_EQ {
+            Ok(NodeType::Assertion)
         } else {
-            None
+            Err(SchemaError::InvalidNode)
         }
     }
 
-    fn reduce(&self, node: Node, children: &mut dyn ChildResolver) -> Result<Node, SchemaError> {
+    fn reduce(&self, node: &Node, children: &mut dyn ChildResolver) -> Result<Node, SchemaError> {
         if node.tag == Self::LEAF {
-            return Ok(node);
+            // Leaf canonicality check: every limb must be u32-canonical. This is deferred from
+            // register-time to reduce-time — malformed leaves are interned silently but error
+            // out the moment something reduces them or uses them as a child.
+            let payload = node.expression_payload().ok_or(DeferredError::InvalidPayload)?;
+            decode_limbs(payload)?;
+            return Ok(node.clone());
         }
-        let (lhs_digest, rhs_digest) = Self::binary_op_children(&node.payload);
+        let payload = node.payload_felts().ok_or(DeferredError::InvalidPayload)?;
+        let (lhs_digest, rhs_digest) = payload.binary_op_children();
         let lhs = children.resolve(lhs_digest)?;
         let rhs = children.resolve(rhs_digest)?;
         if node.tag == Self::ADD || node.tag == Self::MUL {
@@ -93,7 +89,7 @@ impl Schema for Field0Handler {
             if lhs != rhs {
                 return Err(SchemaError::AssertionFailed);
             }
-            return Ok(node);
+            return Ok(node.clone());
         }
         Err(SchemaError::InvalidNode)
     }
@@ -148,7 +144,7 @@ mod tests {
     use super::*;
 
     fn leaf_from_u32s(limbs: [u32; 8]) -> Node {
-        Node::new(Field0Handler::LEAF, Payload::new(limbs.map(Felt::from_u32)))
+        Node::expression(Field0Handler::LEAF, Payload::new(limbs.map(Felt::from_u32)))
     }
 
     fn leaf_from_low_u64(value: u64) -> Node {
@@ -232,7 +228,7 @@ mod tests {
         let h = Field0Handler;
         // u32::MAX + 1 = 2^32 is outside the u32 range but still a valid Felt — must surface as
         // InvalidPayload when eval_op decodes the limbs.
-        let bad = Node::new(
+        let bad = Node::expression(
             Field0Handler::LEAF,
             Payload::new([
                 Felt::new_unchecked(1u64 << 32),
@@ -254,7 +250,7 @@ mod tests {
     fn non_leaf_operand_errors() {
         let h = Field0Handler;
         // Passing an op-tag as an operand tag means the caller didn't evaluate this side first.
-        let a = Node::new(Field0Handler::ADD, leaf_from_low_u64(1).payload);
+        let a = Node::expression(Field0Handler::ADD, Payload::new([Felt::from_u32(0); 8]));
         let b = leaf_from_low_u64(1);
         let err = h.eval_op(Field0Handler::ADD, a, b);
         assert!(matches!(err, Err(DeferredError::InvalidPayload)));

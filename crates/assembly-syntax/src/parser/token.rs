@@ -598,6 +598,7 @@ pub enum Token<'input> {
     Pub,
     Push,
     RegisterDeferred,
+    RegisterDeferredChunk,
     Repeat,
     Reversew,
     Reversedw,
@@ -740,6 +741,7 @@ impl fmt::Display for Token<'_> {
             Token::Debug => write!(f, "debug"),
             Token::EvaluateDeferred => write!(f, "evaluate_deferred"),
             Token::RegisterDeferred => write!(f, "register_deferred"),
+            Token::RegisterDeferredChunk => write!(f, "register_deferred_chunk"),
             Token::Div => write!(f, "div"),
             Token::Drop => write!(f, "drop"),
             Token::Dropw => write!(f, "dropw"),
@@ -1045,6 +1047,7 @@ impl<'input> Token<'input> {
                 | Token::Procref
                 | Token::Push
                 | Token::RegisterDeferred
+                | Token::RegisterDeferredChunk
                 | Token::Repeat
                 | Token::Reversew
                 | Token::Reversedw
@@ -1140,6 +1143,7 @@ impl<'input> Token<'input> {
         ("insert_hperm", Token::InsertHperm),
         ("insert_mem", Token::InsertMem),
         ("register_deferred", Token::RegisterDeferred),
+        ("register_deferred_chunk", Token::RegisterDeferredChunk),
         ("adv_loadw", Token::AdvLoadw),
         ("adv_pipe", Token::AdvPipe),
         ("adv_push", Token::AdvPush),

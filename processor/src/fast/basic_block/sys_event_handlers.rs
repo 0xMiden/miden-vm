@@ -8,7 +8,9 @@ use miden_core::{
     field::{BasedVectorSpace, Field, PrimeCharacteristicRing, QuadFelt},
 };
 
-use super::deferred_handlers::{handle_deferred_evaluate, handle_deferred_register};
+use super::deferred_handlers::{
+    handle_deferred_evaluate, handle_deferred_register, handle_deferred_register_chunk,
+};
 use crate::{MemoryError, advice::AdviceError, errors::OperationError, fast::FastProcessor};
 
 // CONSTANTS
@@ -69,6 +71,7 @@ pub fn handle_system_event(
         SystemEvent::HpermToMap => insert_hperm_into_adv_map(processor),
         SystemEvent::DeferredRegister => handle_deferred_register(processor),
         SystemEvent::DeferredEvaluate => handle_deferred_evaluate(processor),
+        SystemEvent::DeferredRegisterChunk => handle_deferred_register_chunk(processor),
     }
 }
 

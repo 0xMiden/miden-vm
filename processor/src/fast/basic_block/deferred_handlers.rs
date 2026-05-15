@@ -1,16 +1,23 @@
 //! System-event glue for the deferred-DAG subsystem.
 //!
-//! Reads the `(payload, tag)` operand-stack layout used by `DeferredRegister` /
-//! `DeferredEvaluate` (see [`miden_core::events::sys_events`]) and dispatches into the installed
-//! [`miden_core::deferred::Schema`].
+//! Reads operand-stack inputs for `DeferredRegister`, `DeferredEvaluate` and
+//! `DeferredRegisterChunk` (see [`miden_core::events::sys_events`]) and dispatches into the
+//! installed [`miden_core::deferred::Schema`].
+
+use alloc::vec::Vec;
 
 use miden_core::{
-    Word,
-    deferred::{Node, NodeType, Payload, Tag},
+    Felt, Word, ZERO,
+    deferred::{Node, NodePayload, NodeType, Payload, SchemaError, Tag},
 };
 
 use super::SystemEventError;
-use crate::fast::FastProcessor;
+use crate::{MemoryError, advice::AdviceError, fast::FastProcessor};
+
+// STACK LAYOUT — `DeferredRegister` and `DeferredEvaluate`
+// ================================================================================================
+// `[event_id, PAYLOAD_LO, PAYLOAD_HI, TAG, ...]` — Poseidon2 sponge layout so MASM can feed the
+// 12 felts directly into one `hperm` to compute the node's digest.
 
 /// Stack offset of the payload's low half — the topmost word below the event ID.
 const DEFERRED_PAYLOAD_LO_OFFSET: usize = 1;
@@ -19,68 +26,155 @@ const DEFERRED_PAYLOAD_HI_OFFSET: usize = 5;
 /// Stack offset of the deferred tag — the third word below the event ID.
 const DEFERRED_TAG_OFFSET: usize = 9;
 
-/// Reads a node off the operand stack: 8-felt payload (two words) followed by a 4-felt tag.
-///
-/// This layout mirrors the Poseidon2 sponge state used by [`Node::digest`] (`payload || tag`),
-/// letting MASM callers feed the stack directly into `hperm` to recover the digest.
-fn read_deferred_node(processor: &FastProcessor) -> Node {
+// STACK LAYOUT — `DeferredRegisterChunk`
+// ================================================================================================
+// `[event_id, TAG, ptr, ...]` — no payload (`n` is decoded out of the tag, so the chunk's bulk
+// content size is fully determined by the schema's tag layout).
+
+/// Stack offset of the chunk tag (4-felt word at positions 1..5).
+const CHUNK_TAG_OFFSET: usize = 1;
+/// Stack offset of the chunk pointer (single felt at position 5).
+const CHUNK_PTR_OFFSET: usize = 5;
+
+/// Reads `(tag, payload)` from the operand stack at the `DeferredRegister` / `DeferredEvaluate`
+/// layout.
+fn read_tag_and_payload(processor: &FastProcessor) -> (Tag, Payload) {
     let lo = processor.stack_get_word(DEFERRED_PAYLOAD_LO_OFFSET);
     let hi = processor.stack_get_word(DEFERRED_PAYLOAD_HI_OFFSET);
     let tag_word = processor.stack_get_word(DEFERRED_TAG_OFFSET);
     let tag: Tag = [tag_word[0], tag_word[1], tag_word[2], tag_word[3]];
     let payload = Payload::new([lo[0], lo[1], lo[2], lo[3], hi[0], hi[1], hi[2], hi[3]]);
-    Node::new(tag, payload)
+    (tag, payload)
 }
 
-/// Handles `SystemEvent::DeferredRegister`. Reads the node off the operand stack and hands it
-/// to the installed schema, which classifies it as either an expression (inserted into the DAG)
-/// or an assertion (recorded + verified). A schema-reported mismatch surfaces as
-/// `SchemaError::AssertionFailed`.
+/// Builds the typed `Node` matching the schema's verdict for the given `(tag, payload)`. Returns
+/// `SchemaError::InvalidNode` if the tag decodes to a chunk role — chunks must be registered via
+/// `adv.register_deferred_chunk`, not `adv.register_deferred`.
+fn build_standard_node(
+    role: NodeType,
+    tag: Tag,
+    payload: Payload,
+) -> Result<Node, SchemaError> {
+    match role {
+        NodeType::Expression => Ok(Node::expression(tag, payload)),
+        NodeType::Assertion => Ok(Node::assertion(tag, payload)),
+        NodeType::Chunk(_) => Err(SchemaError::InvalidNode),
+    }
+}
+
+/// Handles `SystemEvent::DeferredRegister`. Reads `(tag, payload)` off the operand stack, asks the
+/// schema to decode the tag, constructs the matching `Node` variant, and registers it.
 pub(super) fn handle_deferred_register(
     processor: &mut FastProcessor,
 ) -> Result<(), SystemEventError> {
-    let node = read_deferred_node(processor);
+    let (tag, payload) = read_tag_and_payload(processor);
     let (state, schema) = processor.deferred_view_mut();
+    let role = schema.decode(tag)?;
+    let node = build_standard_node(role, tag, payload)?;
     let _ = state.register(schema, node)?;
     Ok(())
 }
 
-/// Handles `SystemEvent::DeferredEvaluate`. Reads the node off the operand stack and asks the
-/// schema to evaluate it.
+/// Handles `SystemEvent::DeferredEvaluate`. Reads `(tag, payload)` off the operand stack and asks
+/// the schema to reduce it.
 ///
-/// - For expression nodes, the 12 felts of the canonical `(payload, tag)` are pushed onto the
+/// - For expression canonicals, the 12 felts of the canonical `(payload, tag)` are pushed onto the
 ///   advice stack in `[PAYLOAD_LO, PAYLOAD_HI, TAG]` order (top-down), matching the operand-stack
 ///   input layout — MASM can recover each word with `adv_pushw`.
-/// - For assertion nodes, evaluation is a pure verify: a mismatch surfaces as
+/// - For assertion canonicals, evaluation is a pure verify: a mismatch surfaces as
 ///   `SchemaError::AssertionFailed`, and nothing is pushed onto the advice stack on success.
+/// - For chunk canonicals, nothing is pushed (chunk-shaped advice output is out of scope for v1;
+///   schemas should canonicalise chunks to expression digest-leaves inside their `reduce` so this
+///   arm is unreachable in practice).
 pub(super) fn handle_deferred_evaluate(
     processor: &mut FastProcessor,
 ) -> Result<(), SystemEventError> {
-    let node = read_deferred_node(processor);
+    let (tag, payload) = read_tag_and_payload(processor);
     let (state, schema) = processor.deferred_view_mut();
+    let role = schema.decode(tag)?;
+    let node = build_standard_node(role, tag, payload)?;
     let canonical = state.evaluate(schema, node)?;
 
-    // Assertion-evaluate is pure verify — no canonical value to surface to MASM.
-    if !matches!(schema.is_valid(&canonical), Some(NodeType::Expression)) {
-        return Ok(());
-    }
+    let payload = match &canonical.payload {
+        NodePayload::Expression(p) => p,
+        NodePayload::Assertion(_) | NodePayload::Chunk(_) => return Ok(()),
+    };
 
-    let payload_hi = Word::new([
-        canonical.payload.0[4],
-        canonical.payload.0[5],
-        canonical.payload.0[6],
-        canonical.payload.0[7],
-    ]);
-    let payload_lo = Word::new([
-        canonical.payload.0[0],
-        canonical.payload.0[1],
-        canonical.payload.0[2],
-        canonical.payload.0[3],
-    ]);
+    let payload_hi = Word::new([payload.0[4], payload.0[5], payload.0[6], payload.0[7]]);
+    let payload_lo = Word::new([payload.0[0], payload.0[1], payload.0[2], payload.0[3]]);
     // Push deepest first so `payload_lo` ends up on top. `push_stack_word` reverses element
     // order so an `adv_pushw` on the MASM side recovers each word in structural order.
     processor.advice.push_stack_word(&Word::new(canonical.tag))?;
     processor.advice.push_stack_word(&payload_hi)?;
     processor.advice.push_stack_word(&payload_lo)?;
+    Ok(())
+}
+
+/// Handles `SystemEvent::DeferredRegisterChunk`. Reads `(tag, ptr)` off the operand stack, asks
+/// the schema to decode `n` from the tag, reads `8n` felts from memory at `ptr`, and registers a
+/// chunk node carrying that bulk data.
+///
+/// Validation:
+/// - `ptr` must fit in `u32`.
+/// - `ptr` must be word-aligned (`ptr % 4 == 0`).
+/// - `ptr + 8n` must not overflow `u32`.
+/// - `8n` must not exceed the processor's `max_adv_map_value_size` (re-used as the bulk-data cap
+///   for now; sized for the same "do not let a single event explode memory" concern).
+pub(super) fn handle_deferred_register_chunk(
+    processor: &mut FastProcessor,
+) -> Result<(), SystemEventError> {
+    let tag_word = processor.stack_get_word(CHUNK_TAG_OFFSET);
+    let tag: Tag = [tag_word[0], tag_word[1], tag_word[2], tag_word[3]];
+    let ptr = processor.stack_get(CHUNK_PTR_OFFSET).as_canonical_u64();
+
+    // Decode `n` from the tag before any memory reads — the schema is the source of truth for
+    // chunk length, and reading otherwise would let a malformed tag waste work.
+    let n = {
+        let (_state, schema) = processor.deferred_view_mut();
+        match schema.decode(tag)? {
+            NodeType::Chunk(n) => n,
+            NodeType::Expression | NodeType::Assertion => return Err(SchemaError::InvalidNode.into()),
+        }
+    };
+
+    // Bounds + alignment validation.
+    if ptr > u32::MAX as u64 {
+        return Err(MemoryError::AddressOutOfBounds { addr: ptr }.into());
+    }
+    if !ptr.is_multiple_of(4) {
+        return Err(MemoryError::UnalignedWordAccess {
+            addr: ptr as u32,
+            ctx: processor.ctx,
+        }
+        .into());
+    }
+    let total = 8u64 * n as u64;
+    let end = ptr + total;
+    if end > u32::MAX as u64 {
+        return Err(MemoryError::AddressOutOfBounds { addr: end }.into());
+    }
+    let max_value_size = processor.options.max_adv_map_value_size();
+    if total as usize > max_value_size {
+        return Err(AdviceError::AdvMapValueSizeExceeded {
+            size: total as usize,
+            max: max_value_size,
+        }
+        .into());
+    }
+
+    // Read `n` rate-sized chunks from memory.
+    let ctx = processor.ctx;
+    let mut chunks: Vec<[Felt; 8]> = Vec::with_capacity(n as usize);
+    for k in 0..n {
+        let base = ptr as u32 + k * 8;
+        let mut chunk = [ZERO; 8];
+        for (i, felt) in chunk.iter_mut().enumerate() {
+            *felt = processor.memory().read_element_impl(ctx, base + i as u32).unwrap_or(ZERO);
+        }
+        chunks.push(chunk);
+    }
+
+    let (state, schema) = processor.deferred_view_mut();
+    let _ = state.register(schema, Node::chunk(tag, chunks))?;
     Ok(())
 }
