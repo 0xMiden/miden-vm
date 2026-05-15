@@ -1,7 +1,7 @@
 use miden_core::{events::SystemEvent::Ext2Inv, operations::Operation::*};
 
 use super::BasicBlockBuilder;
-use crate::{Report, ZERO};
+use crate::ZERO;
 
 /// Given a stack in the following initial configuration [b0, b1, a0, a1, ...] where a = (a0, a1)
 /// and b = (b0, b1) represent elements in the extension field of degree 2, this series
