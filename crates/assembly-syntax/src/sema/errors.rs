@@ -140,6 +140,16 @@ pub enum SemanticAnalysisError {
         #[label("previously defined here")]
         prev_span: SourceSpan,
     },
+    #[error("private type in exported procedure signature")]
+    #[diagnostic(help(
+        "exported procedure signatures may only reference public types, including nested type dependencies"
+    ))]
+    PrivateTypeInExportedSignature {
+        #[label("this exported procedure signature references a private type")]
+        span: SourceSpan,
+        #[label("this type is private")]
+        defined: SourceSpan,
+    },
     #[error("unused import")]
     #[diagnostic(severity(Warning), help("this import is never used and can be safely removed"))]
     UnusedImport {
