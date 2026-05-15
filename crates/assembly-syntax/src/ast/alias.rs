@@ -134,7 +134,7 @@ impl crate::prettier::PrettyPrint for Alias {
             target => {
                 let prefix = if self.is_absolute() { "::" } else { "" };
                 if self.is_renamed() {
-                    display(format_args!("{}{}->{}", prefix, target, &self.name))
+                    display(format_args!("{}{}->{}", prefix, target, self.name))
                 } else {
                     display(format_args!("{prefix}{target}"))
                 }

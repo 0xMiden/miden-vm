@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.22.4 (2026-05-15)
+
+- Reverted debug metadata dedup changes from [#2955](https://github.com/0xMiden/miden-vm/pull/2955) to restore the public `miden-standards` account component procedure roots from v0.22.1.
+
 ## 0.22.3 (2026-05-01)
 
 - Change value of `Path::MAX_COMPONENT_LENGTH` to `u16::MAX - 2` [#3087](https://github.com/0xMiden/miden-vm/pull/3087)
@@ -12,7 +16,6 @@
 
 - Implemented project assembly ([#2877](https://github.com/0xMiden/miden-vm/pull/2877)).
 - Added `FastProcessor::into_parts()` to extract advice provider, memory, and precompile transcript after step-based execution ([#2901](https://github.com/0xMiden/miden-vm/pull/2901)).
-- Added `FrameBase` variant to `DebugVarLocation` and `set_value_location` to `DebugVarInfo` for frame-pointer-relative debug variable locations ([#2955](https://github.com/0xMiden/miden-vm/pull/2955)).
 
 ## 0.22.0 (2026-03-18)
 

@@ -102,7 +102,7 @@ impl Package {
                 self.lib = Some(Span::unknown(target));
             } else {
                 if self.bins.iter().any(|t| t.name == target.name) {
-                    panic!("duplicate definitions of the same target '{}'", &target.name);
+                    panic!("duplicate definitions of the same target '{}'", target.name);
                 }
                 self.bins.push(Span::unknown(target));
             }

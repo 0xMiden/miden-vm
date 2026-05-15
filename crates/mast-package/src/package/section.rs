@@ -105,7 +105,7 @@ impl fmt::Debug for Section {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let verbose = f.alternate();
         let mut builder = f.debug_struct("Section");
-        builder.field("id", &format_args!("{}", &self.id));
+        builder.field("id", &format_args!("{}", self.id));
         if verbose {
             builder.field("data", &format_args!("{}", DisplayHex(&self.data))).finish()
         } else {

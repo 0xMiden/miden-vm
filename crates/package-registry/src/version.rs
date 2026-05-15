@@ -152,7 +152,7 @@ impl Borrow<SemVer> for Version {
 impl fmt::Display for Version {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if let Some(digest) = self.digest.as_ref() {
-            write!(f, "{}#{}", &self.version, digest.inner())
+            write!(f, "{}#{}", self.version, digest.inner())
         } else {
             fmt::Display::fmt(&self.version, f)
         }

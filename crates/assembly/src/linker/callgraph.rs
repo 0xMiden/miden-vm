@@ -105,7 +105,7 @@ impl CallGraph {
         // Build the set of roots by finding all nodes
         // that have no predecessors
         let mut has_preds = BTreeSet::default();
-        for (_node, out_edges) in graph.nodes.iter() {
+        for out_edges in graph.nodes.values() {
             for succ in out_edges.iter() {
                 has_preds.insert(*succ);
             }
