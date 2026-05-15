@@ -135,7 +135,8 @@ pub(super) fn mtree_set(block_builder: &mut BasicBlockBuilder) -> Result<(), Rep
     // stack: [d, i, R_old, V_new, ...]
 
     // stack: [V_old, R_new, ...] (30 cycles)
-    Ok(update_mtree(block_builder))
+    update_mtree(block_builder);
+    Ok(())
 }
 
 /// Creates a new Merkle tree in the advice provider by combining trees with the specified roots.

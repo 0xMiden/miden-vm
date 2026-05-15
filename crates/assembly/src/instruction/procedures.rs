@@ -113,7 +113,8 @@ impl Assembler {
                 .digest()
         };
 
-        Ok(self.procref_mast_root(mast_root, block_builder))
+        self.procref_mast_root(mast_root, block_builder);
+        Ok(())
     }
 
     fn procref_mast_root(&self, mast_root: Word, block_builder: &mut BasicBlockBuilder) {
