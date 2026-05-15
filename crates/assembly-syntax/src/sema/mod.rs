@@ -51,10 +51,17 @@ pub fn analyze(
     let mut forms = VecDeque::from(forms);
     let mut enums = SmallVec::<[EnumType; 1]>::new_const();
     let mut docs = None;
+    let mut module_docs = None;
+    let mut has_doc_anchor = false;
     while let Some(form) = forms.pop_front() {
+        if !matches!(form, Form::ModuleDoc(_) | Form::Doc(_)) {
+            has_doc_anchor = true;
+        }
+
         match form {
             Form::ModuleDoc(docstring) => {
                 assert!(docs.is_none());
+                module_docs = Some(docstring.span());
                 module.set_docs(Some(docstring));
             },
             Form::Doc(docstring) => {
@@ -130,8 +137,12 @@ pub fn analyze(
         }
     }
 
+    if !has_doc_anchor && let Some(span) = module_docs.take() {
+        analyzer.error(SemanticAnalysisError::TrailingDocstring { span });
+    }
+
     if let Some(unused) = docs.take() {
-        analyzer.error(SemanticAnalysisError::UnusedDocstring { span: unused.span() });
+        analyzer.error(SemanticAnalysisError::TrailingDocstring { span: unused.span() });
     }
 
     // Simplify all constant declarations

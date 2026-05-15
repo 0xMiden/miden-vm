@@ -147,15 +147,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2af50177e190e07a26ab74f8b1efbfe2ef87da2116221318cb1c2e82baf7de06"
 
 [[package]]
-name = "bincode"
-version = "1.3.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b1f45e9417d87227c7a56d22e471c6206462cba514c7590c09aff4cf6d1ddcad"
-dependencies = [
- "serde",
-]
-
-[[package]]
 name = "bit-set"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1246,7 +1237,7 @@ checksum = "f8ca58f447f06ed17d5fc4043ce1b10dd205e060fb3ce5b979b8ed8e59ff3f79"
 
 [[package]]
 name = "miden-ace-codegen"
-version = "0.23.0"
+version = "0.24.0"
 dependencies = [
  "miden-core",
  "miden-crypto",
@@ -1255,7 +1246,7 @@ dependencies = [
 
 [[package]]
 name = "miden-air"
-version = "0.23.0"
+version = "0.24.0"
 dependencies = [
  "insta",
  "miden-ace-codegen",
@@ -1271,7 +1262,7 @@ dependencies = [
 
 [[package]]
 name = "miden-assembly"
-version = "0.23.0"
+version = "0.24.0"
 dependencies = [
  "env_logger",
  "insta",
@@ -1291,13 +1282,14 @@ dependencies = [
 
 [[package]]
 name = "miden-assembly-syntax"
-version = "0.23.0"
+version = "0.24.0"
 dependencies = [
  "aho-corasick",
  "env_logger",
  "lalrpop",
  "lalrpop-util",
  "log",
+ "miden-assembly-syntax-cst",
  "miden-core",
  "miden-debug-types",
  "miden-test-serde-macros",
@@ -1316,8 +1308,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "miden-assembly-syntax-cst"
+version = "0.24.0"
+dependencies = [
+ "miden-debug-types",
+ "miden-rowan",
+ "miden-utils-diagnostics",
+ "pretty_assertions",
+ "thiserror",
+]
+
+[[package]]
 name = "miden-core"
-version = "0.23.0"
+version = "0.24.0"
 dependencies = [
  "criterion",
  "derive_more",
@@ -1343,9 +1346,8 @@ dependencies = [
 
 [[package]]
 name = "miden-core-lib"
-version = "0.23.0"
+version = "0.24.0"
 dependencies = [
- "bincode",
  "criterion",
  "env_logger",
  "fs-err",
@@ -1365,7 +1367,9 @@ dependencies = [
  "rand 0.9.4",
  "rand_chacha",
  "rstest",
+ "serde-wincode",
  "thiserror",
+ "wincode",
 ]
 
 [[package]]
@@ -1424,7 +1428,7 @@ dependencies = [
 
 [[package]]
 name = "miden-debug-types"
-version = "0.23.0"
+version = "0.24.0"
 dependencies = [
  "memchr",
  "miden-crypto",
@@ -1458,6 +1462,19 @@ dependencies = [
  "serde",
  "subtle",
  "thiserror",
+]
+
+[[package]]
+name = "miden-format"
+version = "0.24.0"
+dependencies = [
+ "clap",
+ "miden-assembly-syntax-cst",
+ "miden-debug-types",
+ "serde",
+ "thiserror",
+ "toml",
+ "walkdir",
 ]
 
 [[package]]
@@ -1507,7 +1524,7 @@ dependencies = [
 
 [[package]]
 name = "miden-mast-package"
-version = "0.23.0"
+version = "0.24.0"
 dependencies = [
  "miden-assembly-syntax",
  "miden-core",
@@ -1558,7 +1575,7 @@ dependencies = [
 
 [[package]]
 name = "miden-package-registry"
-version = "0.23.0"
+version = "0.24.0"
 dependencies = [
  "miden-assembly-syntax",
  "miden-core",
@@ -1574,7 +1591,7 @@ dependencies = [
 
 [[package]]
 name = "miden-package-registry-local"
-version = "0.23.0"
+version = "0.24.0"
 dependencies = [
  "clap",
  "miden-assembly-syntax",
@@ -1590,7 +1607,7 @@ dependencies = [
 
 [[package]]
 name = "miden-processor"
-version = "0.23.0"
+version = "0.24.0"
 dependencies = [
  "insta",
  "itertools 0.14.0",
@@ -1613,7 +1630,7 @@ dependencies = [
 
 [[package]]
 name = "miden-project"
-version = "0.23.0"
+version = "0.24.0"
 dependencies = [
  "miden-assembly-syntax",
  "miden-core",
@@ -1632,9 +1649,8 @@ dependencies = [
 
 [[package]]
 name = "miden-prover"
-version = "0.23.0"
+version = "0.24.0"
 dependencies = [
- "bincode",
  "miden-air",
  "miden-assembly",
  "miden-core",
@@ -1642,8 +1658,20 @@ dependencies = [
  "miden-debug-types",
  "miden-processor",
  "serde",
+ "serde-wincode",
  "tokio",
  "tracing",
+ "wincode",
+]
+
+[[package]]
+name = "miden-rowan"
+version = "0.16.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c13695bf99aabaa21d6572b807c66bb26251aa3d9b75e828b3c99b97a3b1ce7e"
+dependencies = [
+ "hashbrown 0.17.0",
+ "rustc-hash",
 ]
 
 [[package]]
@@ -1709,7 +1737,7 @@ dependencies = [
 
 [[package]]
 name = "miden-utils-core-derive"
-version = "0.23.0"
+version = "0.24.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1718,9 +1746,8 @@ dependencies = [
 
 [[package]]
 name = "miden-utils-diagnostics"
-version = "0.23.0"
+version = "0.24.0"
 dependencies = [
- "miden-crypto",
  "miden-debug-types",
  "miden-miette",
  "tracing",
@@ -1728,7 +1755,7 @@ dependencies = [
 
 [[package]]
 name = "miden-utils-indexing"
-version = "0.23.0"
+version = "0.24.0"
 dependencies = [
  "miden-crypto",
  "miden-test-serde-macros",
@@ -1740,7 +1767,7 @@ dependencies = [
 
 [[package]]
 name = "miden-utils-sync"
-version = "0.23.0"
+version = "0.24.0"
 dependencies = [
  "lock_api",
  "loom",
@@ -1750,23 +1777,23 @@ dependencies = [
 
 [[package]]
 name = "miden-verifier"
-version = "0.23.0"
+version = "0.24.0"
 dependencies = [
- "bincode",
  "miden-air",
  "miden-core",
  "miden-crypto",
  "serde",
+ "serde-wincode",
  "thiserror",
  "tracing",
+ "wincode",
 ]
 
 [[package]]
 name = "miden-vm"
-version = "0.23.0"
+version = "0.24.0"
 dependencies = [
  "assert_cmd",
- "bincode",
  "clap",
  "criterion",
  "escargot",
@@ -1786,17 +1813,19 @@ dependencies = [
  "predicates",
  "proptest",
  "serde",
+ "serde-wincode",
  "serde_json",
  "tokio",
  "tracing",
  "tracing-forest",
  "tracing-subscriber",
  "walkdir",
+ "wincode",
 ]
 
 [[package]]
 name = "miden-vm-synthetic-bench"
-version = "0.23.0"
+version = "0.24.0"
 dependencies = [
  "criterion",
  "miden-processor",
@@ -2203,6 +2232,12 @@ name = "paste"
 version = "1.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
+
+[[package]]
+name = "pastey"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c5a797f0e07bdf071d15742978fc3128ec6c22891c31a3a931513263904c982a"
 
 [[package]]
 name = "petgraph"
@@ -2745,6 +2780,17 @@ dependencies = [
  "serde",
  "serde_core",
  "typeid",
+]
+
+[[package]]
+name = "serde-wincode"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4a62dfa6ae65cb073dfe001fb076eaf827fd4267fcba7eb3be2fee4f1e69ccb5"
+dependencies = [
+ "serde",
+ "thiserror",
+ "wincode",
 ]
 
 [[package]]
@@ -3531,6 +3577,18 @@ name = "winapi-x86_64-pc-windows-gnu"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"
+
+[[package]]
+name = "wincode"
+version = "0.4.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "657690780ce23e6f66576a782ffd88eb353512381817029cc1d7a99154bb6d1f"
+dependencies = [
+ "pastey",
+ "proc-macro2",
+ "quote",
+ "thiserror",
+]
 
 [[package]]
 name = "windows-link"

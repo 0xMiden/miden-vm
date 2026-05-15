@@ -202,11 +202,17 @@ pub enum SemanticAnalysisError {
     #[diagnostic(
         severity(Warning),
         help(
-            "this docstring is immediately followed by at least one empty line, then another docstring,\
+            "this docstring is immediately followed by at least one empty line, then another docstring, \
             if you intended these to be a single docstring, you should remove the empty lines"
         )
     )]
     UnusedDocstring {
+        #[label]
+        span: SourceSpan,
+    },
+    #[error("unused docstring")]
+    #[diagnostic(severity(Warning), help("trailing docstrings are useless"))]
+    TrailingDocstring {
         #[label]
         span: SourceSpan,
     },
