@@ -144,6 +144,7 @@ impl BuiltMastForest {
     }
 }
 
+/// Errors raised while converting builder-owned records into a finalized [`MastForest`].
 #[derive(Debug, thiserror::Error, Diagnostic)]
 enum MastForestBuilderError {
     #[error("failed to add decorator {decorator_ref:?} while finalizing MAST forest: {source}")]
@@ -217,6 +218,10 @@ enum MastForestBuilderError {
     RegisterDecorators { node_id: MastNodeId, source_msg: String },
 }
 
+/// Builder-owned node record used before final [`MastNodeId`]s exist.
+///
+/// The record keeps the node content, child/decorator refs, and debug metadata refs together so
+/// cloning, merging, and finalization do not need to coordinate side tables.
 #[derive(Clone, Debug)]
 struct PendingMastNode {
     fingerprint: MastNodeFingerprint,
@@ -241,6 +246,10 @@ impl PendingMastNode {
     }
 }
 
+/// Compact representation of a pending node's structural variant.
+///
+/// Child and metadata references live on [`PendingMastNode`]; this enum stores only the data
+/// needed to materialize the final node variant.
 #[derive(Clone, Debug)]
 enum PendingMastNodeKind {
     BasicBlock { op_batches: Vec<OpBatch> },
@@ -293,6 +302,9 @@ impl PendingMastNodeKind {
     }
 }
 
+/// Mutable node record used while deriving a new pending node from an existing one.
+///
+/// A draft becomes immutable once it is interned as a [`PendingMastNode`].
 struct PendingMastNodeDraft {
     digest: Word,
     kind: PendingMastNodeKind,
@@ -320,6 +332,7 @@ impl PendingMastNodeDraft {
     }
 }
 
+/// Builder-local decorator references grouped by their placement around or within a node.
 #[derive(Clone, Debug, Default)]
 struct PendingDecoratorRefs {
     before_enter: Vec<DecoratorRef>,
@@ -344,6 +357,16 @@ impl PendingDecoratorRefs {
     }
 }
 
+/// Stateful finalization helper for converting live builder records into a [`MastForest`].
+///
+/// Methods are called in finalization order:
+/// 1. register live decorators,
+/// 2. materialize live nodes using those decorator IDs,
+/// 3. register asm-op and debug-variable metadata for materialized node IDs,
+/// 4. assemble the final forest.
+///
+/// The helper is private to finalization; keeping the order documented is sufficient because it is
+/// not exposed as a reusable API.
 struct MastForestFinalizer {
     debug_info: DebugInfo,
     nodes: IndexVec<MastNodeId, MastNode>,
@@ -877,6 +900,14 @@ impl MastForestBuilder {
     /// Removes the unused nodes that were created as part of the assembly process, and returns the
     /// resulting MAST forest.
     ///
+    /// Finalization preserves every recorded procedure root and every node still referenced by a
+    /// live node. It only removes builder-marked merge/decorator predecessors that became
+    /// unreachable through those references.
+    ///
+    /// External nodes are emitted before non-external nodes. This preserves the positional
+    /// convention used by externally linked procedure roots while still keeping final node IDs
+    /// local to the resulting forest.
+    ///
     /// It also returns the map from assembly-time node refs to final node IDs. Any [`MastNodeRef`]
     /// used in reference to this builder should be resolved using this map.
     pub(crate) fn build(mut self) -> Result<BuiltMastForest, Report> {
@@ -1042,11 +1073,13 @@ fn build_pending_node_with_final_ids(
     Ok(MaterializedPendingNode { builder, decorators })
 }
 
+/// Pending node after its builder-local refs have been resolved to final IDs.
 struct MaterializedPendingNode {
     builder: MastNodeBuilder,
     decorators: FinalDecoratorIds,
 }
 
+/// Final decorator IDs grouped by their placement on a materialized node.
 struct FinalDecoratorIds {
     before_enter: Vec<DecoratorId>,
     indexed: DecoratorList,
@@ -2248,6 +2281,10 @@ mod tests {
         }
     }
 
+    /// Stresses finalization with many aliases, deep control nodes, repeated metadata, and
+    /// superseded decorator clones. The assertions check that only live refs materialize, metadata
+    /// is deduplicated, and final IDs still satisfy the same invariants as smaller generated
+    /// forests.
     #[test]
     fn deterministic_stress_builds_deep_repeated_metadata_forest() {
         let mut builder = MastForestBuilder::new(&[]).unwrap();
