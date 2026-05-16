@@ -1690,5 +1690,26 @@ mod proptests {
                 );
             }
         }
+
+        /// In the free kernel case (`kernel_procedures = None`) the co-generated kernel must
+        /// be non-empty and every entry must equal the digest of some procedure root in the
+        /// same forest.
+        #[test]
+        fn free_kernel_is_derived_from_forest_roots(
+            (forest, kernel) in mast_forest_and_kernel_strategy(MastForestParams::default())
+        ) {
+            let root_digests: BTreeSet<_> = forest
+                .procedure_roots()
+                .iter()
+                .map(|&root| forest[root].digest())
+                .collect();
+            prop_assert!(!kernel.proc_hashes().is_empty(), "free kernel must be non-empty");
+            for h in kernel.proc_hashes() {
+                prop_assert!(
+                    root_digests.contains(h),
+                    "kernel hash does not match any procedure root in the forest",
+                );
+            }
+        }
     }
 }
