@@ -208,6 +208,12 @@ impl Node {
     /// `Node`. This keeps `Node::digest` honest to the in-circuit hasher, so AND-nodes interned
     /// after `log_precompile` (whose digest is computed by the in-circuit permute) match what
     /// callers compute here.
+    ///
+    /// **TODO (perf):** memoise the digest on `Node` (e.g. via a `OnceLockCompat<Digest>` field)
+    /// once a real workload makes the hot path visible. Today repeated `.digest()` calls — and
+    /// the resolve/intern pair in [`crate::deferred::DeferredState`]'s reduction driver —
+    /// recompute Poseidon2 every time. A node-local cache turns those into a one-time cost
+    /// without changing any public API.
     pub fn digest(&self) -> Digest {
         let mut state = [ZERO; 12];
         state[8..12].copy_from_slice(&self.tag);

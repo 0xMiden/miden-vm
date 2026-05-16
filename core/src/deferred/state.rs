@@ -40,12 +40,26 @@ impl DeferredState {
         self.nodes.contains_key(digest)
     }
 
-    /// Inserts `node` into the DAG keyed by its Poseidon2 digest. Idempotent on identical
-    /// `(digest, node)` pairs. The depth-first driver in [`Self::evaluate`] uses this to
-    /// persist canonical intermediates reached during evaluation, so the eventual witness
+    /// Inserts `node` into the DAG keyed by its Poseidon2 digest. Returns the digest. Idempotent
+    /// on identical `(digest, node)` pairs. The depth-first driver in [`Self::evaluate`] uses
+    /// this to persist canonical intermediates reached during evaluation, so the eventual witness
     /// contains the full reduction proof.
-    pub fn intern(&mut self, node: Node) {
+    pub fn intern(&mut self, node: Node) -> Digest {
         let digest = node.digest();
+        self.nodes.insert(digest, node);
+        digest
+    }
+
+    /// Insert `node` under a caller-supplied `digest`, skipping the Poseidon2 hash. Useful on
+    /// the resolve-then-intern path where the digest is already known from the resolver's
+    /// lookup. A `debug_assert!` cross-checks the hint against the recomputed digest in debug
+    /// builds — release builds trust the caller.
+    pub fn intern_with_digest(&mut self, digest: Digest, node: Node) {
+        debug_assert_eq!(
+            digest,
+            node.digest(),
+            "intern_with_digest: hint must match node.digest()"
+        );
         self.nodes.insert(digest, node);
     }
 
@@ -110,7 +124,10 @@ impl DeferredState {
         if !payload_matches_body(info.body, &node.payload) {
             return Err(SchemaError::InvalidNode);
         }
-        DfsResolver { state: self, schema }.reduce_and_intern(node)
+        // Compute the input digest once at the entry; the resolver threads it through so the
+        // post-reduce intern of the input doesn't hash it again.
+        let digest = node.digest();
+        DfsResolver { state: self, schema }.reduce_and_intern(node, digest)
     }
 
 }
@@ -172,15 +189,19 @@ struct DfsResolver<'a> {
 
 impl DfsResolver<'_> {
     /// Reduce `node` to canonical form, interning every node visited along the way — the input
-    /// and the canonical result — except the TRUE sentinel (which is a structural marker, not a
-    /// load-bearing DAG node).
+    /// (under the caller-supplied `input_digest`, no re-hash) and the canonical result — except
+    /// the TRUE sentinel (which is a structural marker, not a load-bearing DAG node).
     ///
     /// `node` is passed to `schema.reduce` by reference so we can intern it by-move afterwards,
     /// avoiding a chunk-sized clone on every reduction.
-    fn reduce_and_intern(&mut self, node: Node) -> Result<Node, SchemaError> {
+    fn reduce_and_intern(
+        &mut self,
+        node: Node,
+        input_digest: Digest,
+    ) -> Result<Node, SchemaError> {
         let schema = self.schema;
         let canonical = schema.reduce(&node, self)?;
-        self.state.intern(node);
+        self.state.intern_with_digest(input_digest, node);
         if !canonical.is_true_node() {
             self.state.intern(canonical.clone());
         }
@@ -191,13 +212,12 @@ impl DfsResolver<'_> {
 impl ReduceCtx for DfsResolver<'_> {
     fn resolve(&mut self, digest: Digest) -> Result<Node, SchemaError> {
         let child = self.state.get(&digest)?.clone();
-        self.reduce_and_intern(child)
+        // Pass the known digest through so the post-reduce intern of `child` skips Poseidon2.
+        self.reduce_and_intern(child, digest)
     }
 
     fn intern(&mut self, node: Node) -> Digest {
-        let digest = node.digest();
-        self.state.intern(node);
-        digest
+        self.state.intern(node)
     }
 }
 
