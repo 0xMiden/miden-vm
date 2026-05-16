@@ -319,17 +319,11 @@ impl<'a, EF: ExtensionField<Felt>> BoundaryBuilder for ReduceBoundaryBuilder<'a,
 #[derive(Copy, Clone, Debug, Default)]
 pub struct CoreAir;
 
-impl BaseAir<Felt> for CoreAir {
+impl CoreAir {
     fn width(&self) -> usize {
         constraints::columns::NUM_CORE_COLS
     }
 
-    fn num_public_values(&self) -> usize {
-        NUM_PUBLIC_VALUES
-    }
-}
-
-impl CoreAir {
     fn periodic_columns(&self) -> Vec<Vec<Felt>> {
         // Core has no periodic columns; all periodic columns serve the chiplets.
         Vec::new()
@@ -402,8 +396,8 @@ impl CoreAir {
         constraints::enforce_core(builder, local, next, &op_flags);
         constraints::public_inputs::enforce_main(builder, local);
 
-        let mut lb = ConstraintLookupBuilder::new(builder, self);
-        <Self as LookupAir<_>>::eval(self, &mut lb);
+        let mut lb = ConstraintLookupBuilder::new(builder, &MidenAir::CORE);
+        self.lookup_eval(&mut lb);
     }
 
     fn log_quotient_degree(&self) -> usize {
@@ -411,38 +405,28 @@ impl CoreAir {
         // through SymbolicAir.
         3
     }
-}
 
-// --- LookupAir impl: delegates to MainLookupAir ---
-
-impl<LB> LookupAir<LB> for CoreAir
-where
-    LB: MainLookupBuilder,
-{
-    fn num_columns(&self) -> usize {
+    fn lookup_num_columns(&self) -> usize {
         constraints::lookup::main_air::MAIN_COLUMN_SHAPE.len()
     }
 
-    fn column_shape(&self) -> &[usize] {
+    fn lookup_column_shape(&self) -> &'static [usize] {
         &constraints::lookup::main_air::MAIN_COLUMN_SHAPE
     }
 
-    fn max_message_width(&self) -> usize {
+    fn lookup_max_message_width(&self) -> usize {
         MIDEN_MAX_MESSAGE_WIDTH
     }
 
-    fn num_bus_ids(&self) -> usize {
+    fn lookup_num_bus_ids(&self) -> usize {
         BusId::COUNT
     }
 
-    fn eval(&self, builder: &mut LB) {
+    fn lookup_eval<LB: MainLookupBuilder>(&self, builder: &mut LB) {
         MainLookupAir.eval(builder);
     }
 
-    fn eval_boundary<B>(&self, boundary: &mut B)
-    where
-        B: BoundaryBuilder<F = LB::F, EF = LB::EF>,
-    {
+    fn lookup_eval_boundary<B: BoundaryBuilder>(&self, boundary: &mut B) {
         constraints::lookup::miden_air::emit_core_boundary(boundary);
     }
 }
@@ -456,17 +440,13 @@ where
 #[derive(Copy, Clone, Debug, Default)]
 pub struct ChipletsAir;
 
-impl BaseAir<Felt> for ChipletsAir {
+/// Per-trace AIR logic. Like [`CoreAir`], `ChipletsAir` is not an AIR trait impl itself —
+/// [`MidenAir`] dispatches to these inherent (struct) methods for per-trace concerns.
+impl ChipletsAir {
     fn width(&self) -> usize {
         constraints::columns::NUM_CHIPLETS_COLS
     }
 
-    fn num_public_values(&self) -> usize {
-        NUM_PUBLIC_VALUES
-    }
-}
-
-impl ChipletsAir {
     fn periodic_columns(&self) -> Vec<Vec<Felt>> {
         // All periodic columns (hasher round constants, bitwise operation table) belong to
         // the chiplets trace.
@@ -548,8 +528,8 @@ impl ChipletsAir {
 
         constraints::enforce_chiplets(builder, local, next, &selectors);
 
-        let mut lb = ConstraintLookupBuilder::new(builder, self);
-        <Self as LookupAir<_>>::eval(self, &mut lb);
+        let mut lb = ConstraintLookupBuilder::new(builder, &MidenAir::CHIPLETS);
+        self.lookup_eval(&mut lb);
     }
 
     fn log_quotient_degree(&self) -> usize {
@@ -557,31 +537,24 @@ impl ChipletsAir {
         // override to avoid recomputing through SymbolicAir.
         3
     }
-}
 
-// --- LookupAir impl: delegates to ChipletLookupAir with a placeholder responder address ---
-
-impl<LB> LookupAir<LB> for ChipletsAir
-where
-    LB: ChipletLookupBuilder,
-{
-    fn num_columns(&self) -> usize {
+    fn lookup_num_columns(&self) -> usize {
         constraints::lookup::chiplet_air::CHIPLET_COLUMN_SHAPE.len()
     }
 
-    fn column_shape(&self) -> &[usize] {
+    fn lookup_column_shape(&self) -> &'static [usize] {
         &constraints::lookup::chiplet_air::CHIPLET_COLUMN_SHAPE
     }
 
-    fn max_message_width(&self) -> usize {
+    fn lookup_max_message_width(&self) -> usize {
         MIDEN_MAX_MESSAGE_WIDTH
     }
 
-    fn num_bus_ids(&self) -> usize {
+    fn lookup_num_bus_ids(&self) -> usize {
         BusId::COUNT
     }
 
-    fn eval(&self, builder: &mut LB) {
+    fn lookup_eval<LB: ChipletLookupBuilder>(&self, builder: &mut LB) {
         let main = builder.main();
         let local: &ChipletCols<_> = main.current_slice().borrow();
         let next: &ChipletCols<_> = main.next_slice().borrow();
@@ -589,10 +562,7 @@ where
         constraints::lookup::chiplet_air::emit_chiplet_lookup_columns(builder, local, next);
     }
 
-    fn eval_boundary<B>(&self, boundary: &mut B)
-    where
-        B: BoundaryBuilder<F = LB::F, EF = LB::EF>,
-    {
+    fn lookup_eval_boundary<B: BoundaryBuilder>(&self, boundary: &mut B) {
         constraints::lookup::miden_air::emit_chiplets_boundary(boundary);
     }
 }
@@ -618,24 +588,12 @@ impl MidenAir {
 impl BaseAir<Felt> for MidenAir {
     fn width(&self) -> usize {
         match self {
-            Self::Core(a) => BaseAir::<Felt>::width(a),
-            Self::Chiplets(a) => BaseAir::<Felt>::width(a),
+            Self::Core(a) => a.width(),
+            Self::Chiplets(a) => a.width(),
         }
     }
 
     fn num_public_values(&self) -> usize {
-        // Every AIR in a multi-AIR instance shares one list of public inputs, so both
-        // sub-AIRs must agree on its length.
-        debug_assert_eq!(
-            BaseAir::<Felt>::num_public_values(&CoreAir),
-            NUM_PUBLIC_VALUES,
-            "CoreAir public-input count must equal NUM_PUBLIC_VALUES"
-        );
-        debug_assert_eq!(
-            BaseAir::<Felt>::num_public_values(&ChipletsAir),
-            NUM_PUBLIC_VALUES,
-            "ChipletsAir public-input count must equal NUM_PUBLIC_VALUES"
-        );
         NUM_PUBLIC_VALUES
     }
 }
@@ -720,36 +678,36 @@ where
 {
     fn num_columns(&self) -> usize {
         match self {
-            Self::Core(a) => <CoreAir as LookupAir<LB>>::num_columns(a),
-            Self::Chiplets(a) => <ChipletsAir as LookupAir<LB>>::num_columns(a),
+            Self::Core(a) => a.lookup_num_columns(),
+            Self::Chiplets(a) => a.lookup_num_columns(),
         }
     }
 
     fn column_shape(&self) -> &[usize] {
         match self {
-            Self::Core(a) => <CoreAir as LookupAir<LB>>::column_shape(a),
-            Self::Chiplets(a) => <ChipletsAir as LookupAir<LB>>::column_shape(a),
+            Self::Core(a) => a.lookup_column_shape(),
+            Self::Chiplets(a) => a.lookup_column_shape(),
         }
     }
 
     fn max_message_width(&self) -> usize {
         match self {
-            Self::Core(a) => <CoreAir as LookupAir<LB>>::max_message_width(a),
-            Self::Chiplets(a) => <ChipletsAir as LookupAir<LB>>::max_message_width(a),
+            Self::Core(a) => a.lookup_max_message_width(),
+            Self::Chiplets(a) => a.lookup_max_message_width(),
         }
     }
 
     fn num_bus_ids(&self) -> usize {
         match self {
-            Self::Core(a) => <CoreAir as LookupAir<LB>>::num_bus_ids(a),
-            Self::Chiplets(a) => <ChipletsAir as LookupAir<LB>>::num_bus_ids(a),
+            Self::Core(a) => a.lookup_num_bus_ids(),
+            Self::Chiplets(a) => a.lookup_num_bus_ids(),
         }
     }
 
     fn eval(&self, builder: &mut LB) {
         match self {
-            Self::Core(a) => <CoreAir as LookupAir<LB>>::eval(a, builder),
-            Self::Chiplets(a) => <ChipletsAir as LookupAir<LB>>::eval(a, builder),
+            Self::Core(a) => a.lookup_eval(builder),
+            Self::Chiplets(a) => a.lookup_eval(builder),
         }
     }
 
@@ -758,8 +716,8 @@ where
         B: BoundaryBuilder<F = LB::F, EF = LB::EF>,
     {
         match self {
-            Self::Core(a) => <CoreAir as LookupAir<LB>>::eval_boundary(a, boundary),
-            Self::Chiplets(a) => <ChipletsAir as LookupAir<LB>>::eval_boundary(a, boundary),
+            Self::Core(a) => a.lookup_eval_boundary(boundary),
+            Self::Chiplets(a) => a.lookup_eval_boundary(boundary),
         }
     }
 }

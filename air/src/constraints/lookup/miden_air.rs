@@ -72,10 +72,6 @@ pub(crate) fn emit_core_boundary<B: BoundaryBuilder>(boundary: &mut B) {
 }
 
 /// Emits the Chiplets-trace boundary corrections.
-///
-/// Kernel ROM init cancels against the kernel-rom bus on `CHIPLET_COLUMN_SHAPE[0]`
-/// (chiplet_responses), so the fraction belongs to `ChipletsAir::reduced_aux_values`
-/// post-split.
 pub(crate) fn emit_chiplets_boundary<B: BoundaryBuilder>(boundary: &mut B) {
     let kernel_digests: Vec<[B::F; 4]> = boundary
         .var_len_public_inputs()
@@ -104,7 +100,7 @@ mod tests {
     };
 
     use crate::{
-        ChipletsAir, CoreAir, Felt, NUM_PUBLIC_VALUES,
+        ChipletsAir, Felt, MidenAir, NUM_PUBLIC_VALUES,
         constraints::{
             columns::{NUM_CHIPLETS_COLS, NUM_CORE_COLS},
             lookup::{
@@ -182,7 +178,7 @@ mod tests {
             num_permutation_challenges: AUX_TRACE_RAND_CHALLENGES,
             num_permutation_values: 1,
         };
-        ValidateLookupAir::validate(&CoreAir, layout)
+        ValidateLookupAir::validate(&MidenAir::CORE, layout)
             .unwrap_or_else(|err| panic!("CoreAir LookupAir validation failed: {err}"));
     }
 
@@ -200,7 +196,7 @@ mod tests {
             num_permutation_challenges: AUX_TRACE_RAND_CHALLENGES,
             num_permutation_values: 1,
         };
-        ValidateLookupAir::validate(&ChipletsAir, layout)
+        ValidateLookupAir::validate(&MidenAir::CHIPLETS, layout)
             .unwrap_or_else(|err| panic!("ChipletsAir LookupAir validation failed: {err}"));
     }
 
@@ -223,6 +219,13 @@ mod tests {
             BusId::COUNT,
         );
 
-        let _ = check_trace_balance(&CoreAir, &main_trace, &periodic, &publics, &[], &challenges);
+        let _ = check_trace_balance(
+            &MidenAir::CORE,
+            &main_trace,
+            &periodic,
+            &publics,
+            &[],
+            &challenges,
+        );
     }
 }
