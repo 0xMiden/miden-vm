@@ -3,7 +3,10 @@ use alloc::collections::BTreeMap;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use super::{BodyShape, Digest, Node, NodePayload, ReduceCtx, Schema, SchemaError};
+use super::{
+    BodyShape, DeferredError, Digest, Node, NodePayload, Payload, ReduceCtx, Schema, SchemaError,
+    TRUE_TAG,
+};
 use crate::serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable};
 
 /// In-memory deferred-DAG state — the verifier's witness.
@@ -47,7 +50,11 @@ impl DeferredState {
     ///
     /// `node.digest()` populates the memoisation cache as a side effect, so subsequent reads of
     /// the interned node (and its clones, post-priming) skip Poseidon2.
-    pub fn intern(&mut self, node: Node) -> Digest {
+    ///
+    /// Internal: external callers go through the schema-aware [`Self::register`] / [`Self::evaluate`]
+    /// / [`Self::log`] entry points, which preserve the type invariants. Raw `intern` bypasses
+    /// tag-validation and root-shape checks.
+    pub(crate) fn intern(&mut self, node: Node) -> Digest {
         let digest = node.digest();
         self.nodes.insert(digest, node);
         digest
@@ -58,7 +65,10 @@ impl DeferredState {
     /// lookup. The hint is primed into the node's digest cache so subsequent reads are O(1).
     /// A `debug_assert!` cross-checks the hint against the recomputed digest in debug
     /// builds — release builds trust the caller.
-    pub fn intern_with_digest(&mut self, digest: Digest, node: Node) {
+    ///
+    /// Internal: only the `DfsResolver` reduction driver invokes this. The hint is trusted in
+    /// release builds, so it must not be exposed to external code.
+    pub(crate) fn intern_with_digest(&mut self, digest: Digest, node: Node) {
         debug_assert_eq!(
             digest,
             node.compute_digest(),
@@ -73,15 +83,36 @@ impl DeferredState {
     }
 
     /// Returns the current transcript root pointer. Initial value is [`super::TRUE_DIGEST`].
-    /// Advanced by `log_precompile` via [`Self::set_root`] in concert with AND-node interning.
+    /// Advanced exclusively by [`Self::log`] — no external API mutates this field directly.
     pub fn root(&self) -> Digest {
         self.root
     }
 
-    /// Sets the transcript root. Only `log_precompile`-style entry points should call this; the
-    /// host-hint register/evaluate paths must not touch the root.
-    pub fn set_root(&mut self, root: Digest) {
-        self.root = root;
+    /// Advance the transcript root by one AND-step.
+    ///
+    /// Interns `AND(self.root, stmt_digest)` and updates `root` to its digest. The caller passes
+    /// `expected_new_root` so the host-side and in-circuit hashers can be cross-checked: if they
+    /// disagree the call fails with [`super::DeferredError::InvalidPayload`] and the state is
+    /// left untouched (no node interned, root unchanged).
+    ///
+    /// The caller is responsible for having previously `evaluate`-d the statement (the prover does
+    /// this via `DeferredEvaluate`); this method does not re-run reduce. Statement-validity is
+    /// re-established on the verifier side by `DeferredState::rehydrate` (introduced in a later
+    /// step), which walks the chain and evaluates each statement.
+    pub fn log(
+        &mut self,
+        stmt_digest: Digest,
+        expected_new_root: Digest,
+    ) -> Result<(), DeferredError> {
+        let and_node = Node::expression(TRUE_TAG, Payload::binary_op(self.root, stmt_digest));
+        let actual = and_node.digest();
+        if actual != expected_new_root {
+            return Err(DeferredError::InvalidPayload);
+        }
+        // Side effect: primes the AND-node's digest cache via `node.digest()`.
+        self.nodes.insert(actual, and_node);
+        self.root = actual;
+        Ok(())
     }
 
     /// Register an opaque node, asking `schema` to decode its tag.
@@ -253,11 +284,40 @@ mod tests {
     }
 
     #[test]
-    fn set_root_persists() {
+    fn log_advances_root_with_and_node() {
+        // Logging interns AND(prev_root, stmt) and sets root to its digest.
         let mut state = DeferredState::new();
-        let d = dummy_digest(1);
-        state.set_root(d);
-        assert_eq!(state.root(), d);
+        let schema = Uint256;
+        let a = state.register(&schema, uint256_leaf_node(7)).unwrap();
+        let pred =
+            Node::expression(Uint256::eq_tag(), Payload::binary_op(a, a));
+        let stmt = state.evaluate(&schema, pred).unwrap();
+        // The canonical of an `eq` predicate is `true_node()`. Use the predicate's *digest* —
+        // which we recover from the original node — as `stmt_digest`.
+        let _ = stmt; // canonical, discarded
+        let stmt_digest =
+            Node::expression(Uint256::eq_tag(), Payload::binary_op(a, a)).digest();
+
+        let expected = Node::expression(TRUE_TAG, Payload::binary_op(TRUE_DIGEST, stmt_digest))
+            .digest();
+        state.log(stmt_digest, expected).unwrap();
+        assert_eq!(state.root(), expected);
+        // The newly-minted AND-node must be in the map keyed by its digest.
+        assert!(state.contains(&expected));
+    }
+
+    #[test]
+    fn log_rejects_wrong_expected_root() {
+        // A wrong `expected_new_root` makes `log` fail without mutating the state.
+        let mut state = DeferredState::new();
+        let stmt_digest = dummy_digest(7);
+        let bogus_root = dummy_digest(42);
+        let pre_root = state.root();
+        let pre_node_count = state.nodes().len();
+        let err = state.log(stmt_digest, bogus_root);
+        assert!(matches!(err, Err(super::super::DeferredError::InvalidPayload)));
+        assert_eq!(state.root(), pre_root, "root must remain unchanged on failure");
+        assert_eq!(state.nodes().len(), pre_node_count, "no node interned on failure");
     }
 
     #[test]

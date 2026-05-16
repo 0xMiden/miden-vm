@@ -7,7 +7,6 @@ use miden_air::{
 use miden_core::{
     WORD_SIZE, Word, ZERO,
     crypto::{hash::Poseidon2, merkle::MerklePath},
-    deferred::{Node, Payload, TRUE_TAG},
     mast::{MastForest, MastNodeId},
 };
 
@@ -88,14 +87,12 @@ impl Processor for FastProcessor {
             prev_root,
             "DeferredState.root must equal prev_root at log_precompile time",
         );
-        let and_node = Node::expression(TRUE_TAG, Payload::binary_op(prev_root, stmnt));
-        debug_assert_eq!(
-            and_node.digest(),
-            new_root,
-            "AND-node host-side digest must match the in-circuit log_precompile hasher",
-        );
-        self.deferred_state.intern(and_node);
-        self.deferred_state.set_root(new_root);
+        // `log` interns the AND-node and advances root in one step, asserting that the
+        // host-computed AND-node digest matches the in-circuit `new_root`. A divergence here
+        // would indicate a constraint-system bug; the prover-side assertion is fatal.
+        self.deferred_state
+            .log(stmnt, new_root)
+            .expect("AND-node host-side digest must match the in-circuit log_precompile hasher");
     }
 
     #[inline(always)]
