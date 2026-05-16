@@ -7,11 +7,13 @@ extern crate std;
 
 use alloc::{boxed::Box, vec, vec::Vec};
 
-use bincode::Options;
 use miden_air::{AirInstance, InstanceShapes, MidenAir, PublicInputs, config};
 use miden_core::{Felt, WORD_SIZE, field::QuadFelt};
 use miden_crypto::stark::{StarkConfig, challenger::CanObserve, lmcs::Lmcs, proof::StarkProof};
 use serde::de::DeserializeOwned;
+use serde_wincode::SerdeCompat;
+
+const MAX_STARK_PROOF_BYTES: usize = 64 * 1024 * 1024;
 
 // RE-EXPORTS
 // ================================================================================================
@@ -186,7 +188,9 @@ pub enum VerificationError {
 #[derive(Debug, thiserror::Error)]
 pub enum StarkVerificationError {
     #[error("failed to deserialize proof: {0}")]
-    Deserialization(#[from] bincode::Error),
+    Deserialization(#[from] wincode::error::ReadError),
+    #[error("STARK proof is too large: {size} bytes exceeds the {max} byte limit")]
+    ProofTooLarge { size: usize, max: usize },
     #[error("log_trace_height {0} exceeds the two-adic order of the field")]
     InvalidTraceHeight(u8),
     #[error(
@@ -212,8 +216,20 @@ where
     SC: StarkConfig<Felt, QuadFelt>,
     <SC::Lmcs as Lmcs>::Commitment: DeserializeOwned,
 {
-    // Proof deserialization via bincode; see https://github.com/0xMiden/miden-vm/issues/2550.
-    let proof: StarkProof<Felt, QuadFelt, SC> = bincode::deserialize(proof_bytes)?;
+    if proof_bytes.len() > MAX_STARK_PROOF_BYTES {
+        return Err(StarkVerificationError::ProofTooLarge {
+            size: proof_bytes.len(),
+            max: MAX_STARK_PROOF_BYTES,
+        });
+    }
+
+    let proof_encoding_config = wincode::config::Configuration::default()
+        .with_preallocation_size_limit::<MAX_STARK_PROOF_BYTES>();
+    let proof: StarkProof<Felt, QuadFelt, SC> =
+        <SerdeCompat<StarkProof<Felt, QuadFelt, SC>> as wincode::config::Deserialize<_>>::deserialize(
+            proof_bytes,
+            proof_encoding_config,
+        )?;
     validate_canonical_air_order(proof_bytes)?;
 
     let mut challenger = config.challenger();
@@ -241,10 +257,16 @@ where
 }
 
 fn validate_canonical_air_order(proof_bytes: &[u8]) -> Result<(), StarkVerificationError> {
-    let proof_shapes: InstanceShapes = bincode::DefaultOptions::new()
-        .with_fixint_encoding()
-        .allow_trailing_bytes()
-        .deserialize(proof_bytes)?;
+    // `StarkProof` serializes `instance_shapes` first, so decoding `InstanceShapes` from
+    // the proof-byte prefix yields the shape metadata; wincode reads exactly what the type
+    // needs and ignores the trailing transcript bytes.
+    let proof_encoding_config = wincode::config::Configuration::default()
+        .with_preallocation_size_limit::<MAX_STARK_PROOF_BYTES>();
+    let proof_shapes: InstanceShapes =
+        <SerdeCompat<InstanceShapes> as wincode::config::Deserialize<_>>::deserialize(
+            proof_bytes,
+            proof_encoding_config,
+        )?;
 
     let proof_air_order = proof_shapes.air_order();
     let log_trace_heights = proof_shapes.log_trace_heights();
@@ -282,4 +304,60 @@ fn validate_canonical_air_order(proof_bytes: &[u8]) -> Result<(), StarkVerificat
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use alloc::vec::Vec;
+
+    use super::*;
+
+    #[test]
+    fn proof_encoding_config_rejects_oversized_native_vec_preallocation() {
+        let proof_encoding_config = wincode::config::Configuration::default()
+            .with_preallocation_size_limit::<MAX_STARK_PROOF_BYTES>();
+        let element_count = MAX_STARK_PROOF_BYTES + 1;
+        let mut length_prefix = Vec::new();
+
+        <usize as wincode::config::Serialize<_>>::serialize_into(
+            &mut length_prefix,
+            &element_count,
+            proof_encoding_config,
+        )
+        .unwrap();
+        let err = <Vec<u8> as wincode::config::Deserialize<_>>::deserialize(
+            &length_prefix,
+            proof_encoding_config,
+        )
+        .unwrap_err();
+
+        assert!(
+            matches!(
+                err,
+                wincode::error::ReadError::PreallocationSizeLimit { needed, limit }
+                    if needed == element_count && limit == MAX_STARK_PROOF_BYTES
+            ),
+            "expected proof encoding config to reject oversized allocation, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn verify_stark_proof_rejects_oversized_proof_bytes() {
+        let params = config::pcs_params();
+        let config = config::poseidon2_config(params);
+        let proof_bytes = Vec::from_iter(core::iter::repeat_n(0, MAX_STARK_PROOF_BYTES + 1));
+
+        let err = verify_stark_proof(&config, &[], &[], &proof_bytes).unwrap_err();
+
+        assert!(
+            matches!(
+                err,
+                StarkVerificationError::ProofTooLarge {
+                    size,
+                    max: MAX_STARK_PROOF_BYTES,
+                } if size == proof_bytes.len()
+            ),
+            "expected explicit proof byte limit to reject oversized proof, got {err:?}"
+        );
+    }
 }

@@ -833,7 +833,7 @@ impl IntoIterator for AceReplay {
 /// This currently only records
 #[derive(Debug, Default)]
 pub struct RangeCheckerReplay {
-    range_checks_u32_ops: VecDeque<(RowIndex, [u16; 4])>,
+    range_checks_u32_ops: VecDeque<[u16; 4]>,
 }
 
 impl RangeCheckerReplay {
@@ -841,14 +841,14 @@ impl RangeCheckerReplay {
     // --------------------------------------------------------------------------------
 
     /// Records the set of range checks which result from a u32 operation.
-    pub fn record_range_check_u32(&mut self, row_index: RowIndex, u16_limbs: [u16; 4]) {
-        self.range_checks_u32_ops.push_back((row_index, u16_limbs));
+    pub fn record_range_check_u32(&mut self, u16_limbs: [u16; 4]) {
+        self.range_checks_u32_ops.push_back(u16_limbs);
     }
 }
 
 impl IntoIterator for RangeCheckerReplay {
-    type Item = (RowIndex, [u16; 4]);
-    type IntoIter = <VecDeque<(RowIndex, [u16; 4])> as IntoIterator>::IntoIter;
+    type Item = [u16; 4];
+    type IntoIter = <VecDeque<[u16; 4]> as IntoIterator>::IntoIter;
 
     /// Returns an iterator over all recorded range checks resulting from u32 operations.
     fn into_iter(self) -> Self::IntoIter {

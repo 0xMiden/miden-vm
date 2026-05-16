@@ -2,7 +2,6 @@
 
 use alloc::sync::Arc;
 
-use bincode::Options;
 use miden_assembly::{Assembler, DefaultSourceManager};
 use miden_core::{precompile::PrecompileTranscriptState, proof::ExecutionProof};
 use miden_core_lib::CoreLibrary;
@@ -13,6 +12,7 @@ use miden_prover::{
 };
 use miden_verifier::verify;
 use miden_vm::{DefaultHost, HashFunction};
+use serde_wincode::SerdeCompat;
 
 fn assert_prove_verify(
     source: &str,
@@ -229,18 +229,35 @@ fn test_hash_heavy_divergent_heights() {
 }
 
 fn flip_serialized_air_order(proof_bytes: &mut [u8]) {
-    let shapes: InstanceShapes = bincode::DefaultOptions::new()
-        .with_fixint_encoding()
-        .allow_trailing_bytes()
-        .deserialize(proof_bytes)
+    // `StarkProof` serializes `instance_shapes` first, so the wincode encoding of
+    // `InstanceShapes` is a byte-exact prefix of the proof; surgically flip the embedded
+    // `air_order` from the canonical `[0, 1]` to `[1, 0]`.
+    let shapes: InstanceShapes =
+        <SerdeCompat<InstanceShapes> as wincode::config::Deserialize<_>>::deserialize(
+            proof_bytes,
+            wincode::config::Configuration::default(),
+        )
         .expect("instance shapes prefix");
     assert_eq!(shapes.air_order(), &[0, 1], "test assumes canonical caller order");
 
-    let serialized_shapes = bincode::serialize(&shapes).expect("serialized shapes");
+    let serialized_shapes =
+        <SerdeCompat<InstanceShapes> as wincode::config::Serialize<_>>::serialize(
+            &shapes,
+            wincode::config::Configuration::default(),
+        )
+        .expect("serialized shapes");
     assert!(proof_bytes.starts_with(&serialized_shapes));
 
-    let canonical_order = bincode::serialize(&vec![0u32, 1]).expect("canonical order");
-    let tampered_order = bincode::serialize(&vec![1u32, 0]).expect("tampered order");
+    let canonical_order = <SerdeCompat<Vec<u32>> as wincode::config::Serialize<_>>::serialize(
+        &vec![0u32, 1],
+        wincode::config::Configuration::default(),
+    )
+    .expect("canonical order");
+    let tampered_order = <SerdeCompat<Vec<u32>> as wincode::config::Serialize<_>>::serialize(
+        &vec![1u32, 0],
+        wincode::config::Configuration::default(),
+    )
+    .expect("tampered order");
     let offset = serialized_shapes
         .windows(canonical_order.len())
         .position(|window| window == canonical_order)

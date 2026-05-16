@@ -462,7 +462,9 @@ where
         | U32AssertWWithError(code)
         | MTreeVerifyWithError(code) => visitor.visit_immediate_error_message(code),
         AddImm(imm) | SubImm(imm) | MulImm(imm) | DivImm(imm) | ExpImm(imm) | EqImm(imm)
-        | NeqImm(imm) => visitor.visit_immediate_felt(imm),
+        | NeqImm(imm) | LtImm(imm) | LteImm(imm) | GtImm(imm) | GteImm(imm) => {
+            visitor.visit_immediate_felt(imm)
+        },
         Push(imm) => visitor.visit_immediate_push_value(imm),
         PushSlice(imm, _) => visitor.visit_immediate_word_value(imm),
         U32WrappingAddImm(imm)
@@ -1062,7 +1064,9 @@ where
         | U32AssertWWithError(code)
         | MTreeVerifyWithError(code) => visitor.visit_mut_immediate_error_message(code),
         AddImm(imm) | SubImm(imm) | MulImm(imm) | DivImm(imm) | ExpImm(imm) | EqImm(imm)
-        | NeqImm(imm) => visitor.visit_mut_immediate_felt(imm),
+        | NeqImm(imm) | LtImm(imm) | LteImm(imm) | GtImm(imm) | GteImm(imm) => {
+            visitor.visit_mut_immediate_felt(imm)
+        },
         Push(imm) => visitor.visit_mut_immediate_push_value(imm),
         PushSlice(imm, _) => visitor.visit_mut_immediate_word_value(imm),
         U32WrappingAddImm(imm)

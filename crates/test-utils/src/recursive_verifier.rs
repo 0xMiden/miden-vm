@@ -31,7 +31,7 @@ use miden_crypto::{
         challenger::CanObserve,
         fri::PcsTranscript,
         lmcs::{Lmcs, proof::BatchProofView},
-        proof::StarkTranscript,
+        proof::{StarkProof, StarkTranscript},
         verifier::VerifierError as CryptoVerifierError,
     },
 };
@@ -44,6 +44,7 @@ use crate::crypto::{MerklePath, MerkleStore, PartialMerkleTree};
 type Challenge = QuadFelt;
 type P2Config = config::Poseidon2Config;
 type P2Lmcs = <P2Config as StarkConfig<Felt, Challenge>>::Lmcs;
+const MAX_STARK_PROOF_BYTES: usize = 64 * 1024 * 1024;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct VerifierData {
@@ -81,8 +82,14 @@ pub fn generate_advice_inputs(
     let config = config::poseidon2_config(params);
 
     // 1. Deserialize STARK proof bytes.
-    let transcript_data = bincode::deserialize(proof_bytes)
-        .map_err(|e| VerifierError::ProofDeserializationError(e.to_string()))?;
+    let proof_encoding_config = wincode::config::Configuration::default()
+        .with_preallocation_size_limit::<MAX_STARK_PROOF_BYTES>();
+    let proof: StarkProof<Felt, QuadFelt, P2Config> = <serde_wincode::SerdeCompat<
+        StarkProof<Felt, QuadFelt, P2Config>,
+    > as wincode::config::Deserialize<_>>::deserialize(
+        proof_bytes, proof_encoding_config
+    )
+    .map_err(|e| VerifierError::ProofDeserializationError(e.to_string()))?;
 
     // 2. Build domain-separated challenger, then observe public values.
     let (public_values, kernel_felts) = pub_inputs.to_air_inputs();
@@ -92,9 +99,6 @@ pub fn generate_advice_inputs(
     let var_len_public_inputs: &[&[Felt]] = &[&kernel_felts];
     config::observe_var_len_public_inputs(&mut challenger, var_len_public_inputs, &[WORD_SIZE]);
 
-    let proof: miden_crypto::stark::proof::StarkProof<Felt, Challenge, P2Config> =
-        bincode::deserialize(proof_bytes)
-            .map_err(|e| VerifierError::ProofDeserializationError(e.to_string()))?;
     config::observe_air_order(&mut challenger, proof.air_order());
 
     // 3. Build AIR instances.
@@ -113,7 +117,7 @@ pub fn generate_advice_inputs(
     let (stark, _digest) = StarkTranscript::from_proof(
         &config,
         &[(&core_air, core_instance), (&chiplets_air, chiplets_instance)],
-        &transcript_data,
+        &proof,
         challenger,
     )?;
 

@@ -7,6 +7,10 @@
 - Improved performances of auxiliary trace generation ([#3119](https://github.com/0xMiden/miden-vm/pull/3119)).
 - Aligned replay stack word access bounds with `StackInterface`, allowing the maximum valid start index for word reads and writes ([#3014](https://github.com/0xMiden/miden-vm/pull/3014)).
 
+#### Fixes
+
+- Preserved `AssemblyOp` source mappings when merging `MastForest`s, preventing source-location loss after node deduplication.
+- Replaced `bincode` proof serialization with `wincode` and bounded verifier-side STARK proof deserialization to 64 MiB ([#3148](https://github.com/0xMiden/miden-vm/pull/3148)).
 
 ## v0.23.0 (2026-05-07)
 
@@ -14,6 +18,12 @@
 
 - Added the `miden-vm-synthetic-bench` crate for VM-level proving regression detection driven by row-count snapshots from an external producer ([#3024](https://github.com/0xMiden/miden-vm/pull/3024)).
 - Implemented the `miden-registry` tool for managing a local filesystem-based package registry. This is intended to help us explore what package management in Miden projects might look like with a central registry for sharing packages, without needing to go all-in on implementing one. [#2881](https://github.com/0xMiden/miden-vm/pull/2881).
+
+#### Enhancements
+
+- Implemented new lossless parser for Miden Assembly sources ([#2906](https://github.com/0xMiden/miden-vm/pull/2906))
+- Created new `miden-format` tool for formatting Miden Assembly sources while preserving comments and certain whitespace choices ([#2906](https://github.com/0xMiden/miden-vm/pull/2906))
+- Switched the default parser backend for Miden Assembly to use the new lossless parser ([#2907](https://github.com/0xMiden/miden-vm/pull/2907))
 
 #### Fixes
 
@@ -107,6 +117,7 @@
 - [BREAKING] Reject post-last operation-indexed decorators in block assembly and serialized MAST forests; use `after_exit` for decorators that run after a block exits ([#3114](https://github.com/0xMiden/miden-vm/pull/3114)).
 - [BREAKING] Split the execution AIR into Core + Chiplets AIRs ([#3115](https://github.com/0xMiden/miden-vm/pull/3115)).
 - [BREAKING] Removed `Continuation::AfterExitDecoratorsBasicBlock`. New MAST merges operation-indexed decorators at the post-last-op sentinel index into `after_exit` at build time; execution uses `AfterExitDecorators` only, with legacy forests still supported ([#2633](https://github.com/0xMiden/miden-vm/issues/2633)).
+- Drop dead `clk` argument from u32 range-check ([#3135](https://github.com/0xMiden/miden-vm/issues/3135)).
 
 ## 0.22.3 (2026-05-01)
 
@@ -115,7 +126,7 @@
 ## 0.22.2 (2026-04-28)
 
 - Improve debug var loc tracking ([#2955](https://github.com/0xMiden/miden-vm/pull/2955)).
-
+ 
 ## 0.22.1 (2026-04-07)
 
 - Implemented project assembly ([#2877](https://github.com/0xMiden/miden-vm/pull/2877)).
