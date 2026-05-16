@@ -179,18 +179,18 @@ pub enum GenerationMode {
 /// following invariants on every emitted sample:
 ///
 /// 1. **No dyn nodes.** No `DynNode` instances are emitted, regardless of `max_dyns`. The
-///    MAST-level generator cannot synthesise valid operand-stack preconditions for dyn
-///    targets (see *Future work* below).
-/// 2. **External resolution.** Every external node's digest equals the MAST root of a
-///    procedure root already present in the same forest, so the VM can resolve the call
-///    locally without additional forest registration.
-/// 3. **External acyclicity.** The directed graph induced by `external -> resolved root` is
-///    a DAG. Because externals are emitted in topological order and reference only roots
-///    that already exist at emission time, this is automatic; the property test
-///    `externals_form_a_dag` verifies the invariant on every sample.
-/// 4. **Kernel closure.** Every syscall's callee is a procedure root whose MAST root is a
-///    member of the paired kernel's procedure hashes; the generator never falls back to a
-///    plain `Call` when a kernel-eligible callee is unavailable.
+///    MAST-level generator cannot synthesise valid operand-stack preconditions for dyn targets (see
+///    *Future work* below).
+/// 2. **External resolution.** Every external node's digest equals the MAST root of a procedure
+///    root already present in the same forest, so the VM can resolve the call locally without
+///    additional forest registration.
+/// 3. **External acyclicity.** The directed graph induced by `external -> resolved root` is a DAG.
+///    Because externals are emitted in topological order and reference only roots that already
+///    exist at emission time, this is automatic; the property test `externals_form_a_dag` verifies
+///    the invariant on every sample.
+/// 4. **Kernel closure.** Every syscall's callee is a procedure root whose MAST root is a member of
+///    the paired kernel's procedure hashes; the generator never falls back to a plain `Call` when a
+///    kernel-eligible callee is unavailable.
 ///
 /// # What "structural" means here
 ///
@@ -347,8 +347,8 @@ pub(crate) enum ExternalPick {
 /// - `dyn_selectors.len() == counts.num_dyns`
 /// - `root_selection.len() >= basic_blocks.len() + counts.num_joins + counts.num_splits
 ///   + counts.num_loops + counts.num_calls`
-/// - `kernel_inclusion.len()` is sized to cover all procedure roots that may be committed
-///   during generation
+/// - `kernel_inclusion.len()` is sized to cover all procedure roots that may be committed during
+///   generation
 #[derive(Clone, Debug)]
 pub(crate) struct ForestSeeds {
     /// Basic block nodes to be added in Phase 1.
@@ -486,11 +486,11 @@ impl KernelPool {
 /// 1. Basic blocks and decorators are sampled first (independent of everything else).
 /// 2. Control-flow node counts (`num_joins`, `num_splits`, `num_loops`, `num_calls`,
 ///    `num_syscalls`, `num_externals`, `num_dyns`) are sampled next.
-/// 3. Pair / index vectors (`join_pairs`, `split_pairs`, `loop_indices`, `call_indices`) are
-///    sized by those counts.
+/// 3. Pair / index vectors (`join_pairs`, `split_pairs`, `loop_indices`, `call_indices`) are sized
+///    by those counts.
 /// 4. Finally, the selection vectors (`syscall_picks`, `external_picks`, `dyn_selectors`,
-///    `root_selection`, `kernel_inclusion`) are sampled with lengths derived from the counts
-///    and the total number of nodes that may be committed.
+///    `root_selection`, `kernel_inclusion`) are sampled with lengths derived from the counts and
+///    the total number of nodes that may be committed.
 ///
 /// Later choices depend on earlier samples only through length invariants, so each
 /// individual sample can be shrunk independently once the counts have been minimised.
@@ -652,7 +652,7 @@ fn validate_kernel_procedures(kernel_procedures: &Option<Vec<Word>>) -> Result<(
 
 /// Strategy yielding `(MastForest, Kernel)` pairs for proptest.
 ///
-/// Dispatches to either [`build_executable_forest`] or [`build_structure_only_forest`]
+/// Dispatches to either `build_executable_forest` or `build_structure_only_forest`
 /// depending on `params.mode`.
 ///
 /// # Panics
@@ -665,9 +665,7 @@ fn validate_kernel_procedures(kernel_procedures: &Option<Vec<Word>>) -> Result<(
 ///
 /// See the module-level docs on [`MastForestParams`] for the full list of structural
 /// closure invariants this strategy enforces in `Executable` mode.
-pub fn forest_kernel_strategy(
-    params: MastForestParams,
-) -> BoxedStrategy<(MastForest, Kernel)> {
+pub fn forest_kernel_strategy(params: MastForestParams) -> BoxedStrategy<(MastForest, Kernel)> {
     if let Err(err) = validate_kernel_procedures(&params.kernel_procedures) {
         panic!("MastForestParams::kernel_procedures is invalid: {err}");
     }
@@ -701,17 +699,15 @@ struct ForestSkeleton {
 ///
 /// Performs four phases identically for both generation modes:
 ///
-/// 1. **Decorators.** Registers every decorator in `seeds.decorators` on a fresh
-///    [`MastForest`].
+/// 1. **Decorators.** Registers every decorator in `seeds.decorators` on a fresh [`MastForest`].
 /// 2. **Basic blocks.** Appends every block in `seeds.basic_blocks` and records its ID.
-/// 3. **Control-flow nodes.** Appends joins, splits, loops, and calls using the index
-///    vectors in `seeds`. Each count is clamped against the number of basic blocks so the
-///    generator emits a contiguous prefix even when proptest samples a count that exceeds
-///    the available children.
-/// 4. **Initial roots.** Marks a subset of the committed nodes as procedure roots according
-///    to `seeds.root_selection`. If no node was selected and at least one basic block
-///    exists, the first basic block becomes the fallback root so externals and syscalls
-///    have something to target.
+/// 3. **Control-flow nodes.** Appends joins, splits, loops, and calls using the index vectors in
+///    `seeds`. Each count is clamped against the number of basic blocks so the generator emits a
+///    contiguous prefix even when proptest samples a count that exceeds the available children.
+/// 4. **Initial roots.** Marks a subset of the committed nodes as procedure roots according to
+///    `seeds.root_selection`. If no node was selected and at least one basic block exists, the
+///    first basic block becomes the fallback root so externals and syscalls have something to
+///    target.
 fn build_skeleton(seeds: &SkeletonInput<'_>) -> ForestSkeleton {
     let SkeletonInput {
         basic_blocks,
@@ -1101,9 +1097,7 @@ impl Arbitrary for MastForest {
     /// Callers that also need the paired [`Kernel`] should use
     /// [`forest_kernel_strategy`] directly.
     fn arbitrary_with(params: Self::Parameters) -> Self::Strategy {
-        forest_kernel_strategy(params)
-            .prop_map(|(forest, _kernel)| forest)
-            .boxed()
+        forest_kernel_strategy(params).prop_map(|(forest, _kernel)| forest).boxed()
     }
 }
 
@@ -1497,11 +1491,8 @@ mod tests {
                 TestRng::from_seed(RngAlgorithm::ChaCha, &seed),
             );
 
-            let strat_exec =
-                forest_kernel_strategy(make_params(GenerationMode::Executable));
-            let strat_so = forest_kernel_strategy(make_params(
-                GenerationMode::StructureOnly,
-            ));
+            let strat_exec = forest_kernel_strategy(make_params(GenerationMode::Executable));
+            let strat_so = forest_kernel_strategy(make_params(GenerationMode::StructureOnly));
 
             let (forest_exec, _) =
                 strat_exec.new_tree(&mut runner_a).expect("exec strategy").current();
