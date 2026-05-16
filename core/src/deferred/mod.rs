@@ -30,6 +30,7 @@ pub use app::{
     App, AppTag, FieldOps, MockGroup, MockHash, MockSig, PrecompileSchema, Uint256, app_id_from,
 };
 use miden_crypto::{ZERO, hash::poseidon2::Poseidon2};
+use miden_utils_sync::OnceLockCompat;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -130,12 +131,30 @@ impl Payload {
 /// Predicate nodes (those whose tag decodes with `evaluates_to == TRUE_TAG`) are structurally
 /// indistinguishable from regular expression-bodied nodes; their "predicate-ness" is a property
 /// of the *tag*, not the *node*, and is communicated by `Schema::decode`'s [`TagInfo`].
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// Carries a lazily-populated digest cache (`OnceLockCompat<Digest>`) so repeated `.digest()`
+/// calls on a node — and on its clones — amortise to one Poseidon2 invocation. The cache is
+/// populated either on the first `.digest()` call, or eagerly by `DeferredState::intern*`
+/// (which know the digest already). The cache is *not* part of structural identity: equality,
+/// serialization, and the wire format ignore it.
+#[derive(Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Node {
     pub tag: Tag,
     pub payload: NodePayload,
+    /// Memoised Poseidon2 digest. Cloning a node may yield a fresh empty cache (depends on the
+    /// `OnceLockCompat` impl); the first `.digest()` call on the clone re-populates it.
+    #[cfg_attr(feature = "serde", serde(skip, default = "OnceLockCompat::new"))]
+    digest_cache: OnceLockCompat<Digest>,
 }
+
+impl PartialEq for Node {
+    fn eq(&self, other: &Self) -> bool {
+        // Digest cache is derived data — exclude from structural equality.
+        self.tag == other.tag && self.payload == other.payload
+    }
+}
+impl Eq for Node {}
 
 /// Variant of a [`Node`]'s body.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -151,14 +170,22 @@ pub enum NodePayload {
 impl Node {
     /// Build an expression node (leaf, op-node, predicate, or AND-node).
     pub fn expression(tag: Tag, payload: Payload) -> Self {
-        Self { tag, payload: NodePayload::Expression(payload) }
+        Self {
+            tag,
+            payload: NodePayload::Expression(payload),
+            digest_cache: OnceLockCompat::new(),
+        }
     }
 
     /// Build a chunk node from `n = chunks.len()` rate-sized blocks of bulk data. Accepts
     /// anything that converts into `Arc<[Chunk]>` — typically a `Vec<Chunk>` from the processor
     /// handler, or a slice literal in tests.
     pub fn chunk(tag: Tag, chunks: impl Into<Arc<[Chunk]>>) -> Self {
-        Self { tag, payload: NodePayload::Chunk(chunks.into()) }
+        Self {
+            tag,
+            payload: NodePayload::Chunk(chunks.into()),
+            digest_cache: OnceLockCompat::new(),
+        }
     }
 
     /// Returns the 8-felt payload for expression-bodied nodes. Returns `None` for chunk nodes,
@@ -211,12 +238,25 @@ impl Node {
     /// after `log_precompile` (whose digest is computed by the in-circuit permute) match what
     /// callers compute here.
     ///
-    /// **TODO (perf):** memoise the digest on `Node` (e.g. via a `OnceLockCompat<Digest>` field)
-    /// once a real workload makes the hot path visible. Today repeated `.digest()` calls — and
-    /// the resolve/intern pair in [`crate::deferred::DeferredState`]'s reduction driver —
-    /// recompute Poseidon2 every time. A node-local cache turns those into a one-time cost
-    /// without changing any public API.
+    /// Memoised on first call via [`Self::digest_cache`]. Subsequent calls are O(1).
+    /// `DeferredState::intern*` paths prime the cache eagerly via [`Self::prime_digest`].
     pub fn digest(&self) -> Digest {
+        *self.digest_cache.get_or_init(|| self.compute_digest())
+    }
+
+    /// Populate the digest cache with a pre-computed value, skipping Poseidon2. Used by
+    /// the `DeferredState` reduction driver, which knows each node's digest before insertion.
+    /// Idempotent: if the cache is already populated, the hint is dropped silently. There is
+    /// no debug-assert that `hint == self.compute_digest()` here — the resolver's contract
+    /// guarantees the match, and a runtime check would defeat the purpose of priming.
+    pub(crate) fn prime_digest(&self, hint: Digest) {
+        let _ = self.digest_cache.get_or_init(|| hint);
+    }
+
+    /// Recompute the digest from scratch, bypassing the cache. Crate-visible so the
+    /// `DeferredState` debug assertions in `intern_with_digest` can re-verify the resolver's
+    /// hint without depending on cache state.
+    pub(crate) fn compute_digest(&self) -> Digest {
         let mut state = [ZERO; 12];
         state[8..12].copy_from_slice(&self.tag);
         match &self.payload {
@@ -329,7 +369,7 @@ impl Deserializable for Node {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let tag = read_tag(source)?;
         let payload = NodePayload::read_from(source)?;
-        Ok(Self { tag, payload })
+        Ok(Self { tag, payload, digest_cache: OnceLockCompat::new() })
     }
 }
 
@@ -486,5 +526,50 @@ mod tests {
         // logs a sub-proof's transcript whose root happens to be TRUE_DIGEST.
         let and_true_true = Node::expression(TRUE_TAG, Payload::binary_op(TRUE_DIGEST, TRUE_DIGEST));
         assert_eq!(and_true_true.digest(), true_node().digest());
+    }
+
+    #[test]
+    fn cached_digest_matches_recomputed_digest() {
+        // After `digest()` populates the cache, the cached value must equal `compute_digest()`.
+        let n = Node::expression(TAG_A, payload(11));
+        let cached = n.digest();
+        assert_eq!(cached, n.compute_digest());
+        assert_eq!(cached, n.digest(), "repeated digest() is stable");
+    }
+
+    #[test]
+    fn primed_digest_skips_recomputation() {
+        // `prime_digest` populates the cache with a user-supplied value. Subsequent `.digest()`
+        // calls return the primed value without recomputation. Use a deliberately-wrong hint
+        // to prove the cached path is taken (in production the resolver primes with a value it
+        // computed correctly; this test is white-box).
+        let n = Node::expression(TAG_A, payload(22));
+        let bogus = Word::new([Felt::from_u32(0xdead); 4]);
+        n.prime_digest(bogus);
+        assert_eq!(n.digest(), bogus, "primed cache short-circuits digest()");
+        // compute_digest still bypasses the cache.
+        assert_ne!(n.compute_digest(), bogus);
+    }
+
+    #[test]
+    fn clone_yields_consistent_digest() {
+        // Cloning a node may yield a fresh empty cache (no_std) or a populated one (std).
+        // Either way, the digest must equal the source's digest — the cache is derived data.
+        let n = Node::expression(TAG_A, payload(33));
+        let d1 = n.digest();
+        let cloned = n.clone();
+        let d2 = cloned.digest();
+        assert_eq!(d1, d2);
+    }
+
+    #[test]
+    fn equality_ignores_digest_cache_state() {
+        // Two structurally-identical nodes must compare equal regardless of whether either
+        // has populated its digest cache.
+        let a = Node::expression(TAG_A, payload(44));
+        let b = Node::expression(TAG_A, payload(44));
+        // Populate `a`'s cache; leave `b`'s empty.
+        let _ = a.digest();
+        assert_eq!(a, b, "equality compares tag + payload, not cache state");
     }
 }

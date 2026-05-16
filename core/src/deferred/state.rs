@@ -44,6 +44,9 @@ impl DeferredState {
     /// on identical `(digest, node)` pairs. The depth-first driver in [`Self::evaluate`] uses
     /// this to persist canonical intermediates reached during evaluation, so the eventual witness
     /// contains the full reduction proof.
+    ///
+    /// `node.digest()` populates the memoisation cache as a side effect, so subsequent reads of
+    /// the interned node (and its clones, post-priming) skip Poseidon2.
     pub fn intern(&mut self, node: Node) -> Digest {
         let digest = node.digest();
         self.nodes.insert(digest, node);
@@ -52,14 +55,16 @@ impl DeferredState {
 
     /// Insert `node` under a caller-supplied `digest`, skipping the Poseidon2 hash. Useful on
     /// the resolve-then-intern path where the digest is already known from the resolver's
-    /// lookup. A `debug_assert!` cross-checks the hint against the recomputed digest in debug
+    /// lookup. The hint is primed into the node's digest cache so subsequent reads are O(1).
+    /// A `debug_assert!` cross-checks the hint against the recomputed digest in debug
     /// builds — release builds trust the caller.
     pub fn intern_with_digest(&mut self, digest: Digest, node: Node) {
         debug_assert_eq!(
             digest,
-            node.digest(),
+            node.compute_digest(),
             "intern_with_digest: hint must match node.digest()"
         );
+        node.prime_digest(digest);
         self.nodes.insert(digest, node);
     }
 
