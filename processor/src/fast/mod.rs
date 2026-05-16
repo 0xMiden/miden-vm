@@ -11,7 +11,6 @@ use miden_core::{
     deferred::{DeferredState, NoopSchema, Schema},
     mast::{MastForest, MastNodeExt, MastNodeId},
     operations::Decorator,
-    precompile::PrecompileTranscript,
     program::{MIN_STACK_DEPTH, Program, StackInputs, StackOutputs},
     utils::range,
 };
@@ -154,13 +153,12 @@ impl FastProcessor {
     /// Packages the processor state after successful execution into a public result type.
     #[inline(always)]
     fn into_execution_output(self, stack: StackOutputs) -> ExecutionOutput {
-        let final_precompile_transcript =
-            PrecompileTranscript::from_state(self.advice.deferred_state().root());
+        let final_deferred_root = self.advice.deferred_state().root();
         ExecutionOutput {
             stack,
             advice: self.advice,
             memory: self.memory,
-            final_precompile_transcript,
+            final_deferred_root,
         }
     }
 
@@ -502,12 +500,12 @@ impl FastProcessor {
         &self.memory
     }
 
-    /// Consumes the processor and returns the advice provider, memory, and precompile
-    /// transcript. The precompile transcript is reconstructed from `DeferredState.root` (the
-    /// single source of truth for the rolling transcript state from step 4 onward).
-    pub fn into_parts(self) -> (AdviceProvider, Memory, PrecompileTranscript) {
+    /// Consumes the processor and returns the advice provider, memory, and the final deferred-DAG
+    /// root (the rolling state produced by `log_precompile` — equivalent to the precompile
+    /// transcript digest).
+    pub fn into_parts(self) -> (AdviceProvider, Memory, Word) {
         let root = self.advice.deferred_state().root();
-        (self.advice, self.memory, PrecompileTranscript::from_state(root))
+        (self.advice, self.memory, root)
     }
 
     /// Returns a reference to the execution options.
@@ -767,13 +765,13 @@ impl FastProcessor {
 // ===============================================================================================
 
 /// The output of a program execution, containing the state of the stack, advice provider,
-/// memory, and final precompile transcript at the end of execution.
+/// memory, and the final deferred-DAG root at the end of execution.
 #[derive(Debug)]
 pub struct ExecutionOutput {
     pub stack: StackOutputs,
     pub advice: AdviceProvider,
     pub memory: Memory,
-    pub final_precompile_transcript: PrecompileTranscript,
+    pub final_deferred_root: Word,
 }
 
 // EXECUTION CONTEXT INFO

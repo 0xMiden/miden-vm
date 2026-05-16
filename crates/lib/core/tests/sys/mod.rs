@@ -3,9 +3,10 @@ use std::sync::Arc;
 use miden_assembly::Assembler;
 use miden_core::{
     Felt, WORD_SIZE, Word,
+    crypto::hash::Poseidon2,
     events::{EventId, EventName},
     precompile::{
-        PrecompileCommitment, PrecompileError, PrecompileRequest, PrecompileTranscript,
+        PrecompileCommitment, PrecompileError, PrecompileRequest, PrecompileTranscriptState,
         PrecompileVerifier, PrecompileVerifierRegistry,
     },
     program::ProgramInfo,
@@ -143,13 +144,15 @@ fn log_precompile_request_procedure() {
 
     let verifier_registry = PrecompileVerifierRegistry::new()
         .with_verifier(&EVENT_NAME, Arc::new(DummyLogPrecompileVerifier { commitment }));
-    let transcript = verifier_registry
-        .requests_transcript(requests)
+    let transcript_state = verifier_registry
+        .recompute_transcript_state(requests)
         .expect("failed to recompute deferred commitment");
 
-    let mut expected_transcript = PrecompileTranscript::new();
-    expected_transcript.record(commitment);
-    assert_eq!(expected_transcript, transcript);
+    let expected_transcript_state = Poseidon2::merge(&[
+        PrecompileTranscriptState::default(),
+        commitment.statement(),
+    ]);
+    assert_eq!(expected_transcript_state, transcript_state);
 
     // Prove/verify the same program to ensure deferred requests are handled in the STARK proof.
     let program: Program = Assembler::default()
@@ -182,20 +185,20 @@ fn log_precompile_request_procedure() {
 
     let verifier_registry = PrecompileVerifierRegistry::new()
         .with_verifier(&EVENT_NAME, Arc::new(DummyLogPrecompileVerifier { commitment }));
-    let verifier_transcript = verifier_registry
-        .requests_transcript(proof.precompile_requests())
+    let verifier_transcript_state = verifier_registry
+        .recompute_transcript_state(proof.precompile_requests())
         .expect("failed to recompute deferred commitment (proof)");
     assert_eq!(
-        verifier_transcript.state(),
-        transcript.state(),
+        verifier_transcript_state, transcript_state,
         "deferred commitment mismatch in proof"
     );
 
-    let mut expected_proof_transcript = PrecompileTranscript::new();
-    expected_proof_transcript.record(commitment);
+    let expected_proof_transcript_state = Poseidon2::merge(&[
+        PrecompileTranscriptState::default(),
+        commitment.statement(),
+    ]);
     assert_eq!(
-        expected_proof_transcript.state(),
-        transcript.state(),
+        expected_proof_transcript_state, transcript_state,
         "deferred commitment mismatch in proof"
     );
 
@@ -208,7 +211,7 @@ fn log_precompile_request_procedure() {
         &verifier_registry,
     )
     .expect("proof verification with precompiles failed");
-    assert_eq!(transcript.state(), pc_transcript_state);
+    assert_eq!(transcript_state, pc_transcript_state);
 }
 
 #[derive(Clone)]

@@ -17,19 +17,19 @@
 //!    - Computes the result non-deterministically using the host
 //!    - Creates a [`PrecompileCommitment`] binding inputs and outputs together
 //!    - Stores a [`PrecompileRequest`] containing the raw input data for later verification
-//!    - Records the commitment into a [`PrecompileTranscript`]
+//!    - Folds the commitment's per-call statement into the rolling deferred-DAG root via the
+//!      constrained `log_precompile` opcode
 //!
 //! 2. **Request Storage**: All precompile requests are collected and included in the execution
 //!    proof.
 //!
 //! 3. **Proof Generation**: The prover generates a STARK proof of the VM execution. The final
-//!    [`PrecompileTranscript`] state (the rolling digest of all recorded commitments) is a public
-//!    input. The verifier enforces the initial (empty) and final state via variable‑length public
-//!    inputs.
+//!    deferred-DAG root (the rolling digest of all recorded commitments) is a public input. The
+//!    verifier enforces the initial (empty) and final state via variable‑length public inputs.
 //!
 //! 4. **Verification**: The verifier:
 //!    - Recomputes each precompile commitment using the stored requests via [`PrecompileVerifier`]
-//!    - Reconstructs the [`PrecompileTranscript`] by recording all commitments in order
+//!    - Folds the recomputed per-call statements into a rolling digest in the same order
 //!    - Verifies the STARK proof with the final transcript state as public input.
 //!    - Accepts the proof only if precompile verification succeeds and the STARK proof is valid
 //!
@@ -40,8 +40,6 @@
 //!   a tag (with event ID and metadata) and a commitment to the request's calldata.
 //! - [`PrecompileVerifier`]: Trait for implementing verification logic for specific precompiles
 //! - [`PrecompileVerifierRegistry`]: Registry mapping event IDs to their verifier implementations
-//! - [`PrecompileTranscript`]: A linear hash tree over Poseidon2 that produces a rolling digest of
-//!   all recorded precompile statements; the state is itself a complete digest at every step.
 //!
 //! # Example Implementation
 //!
@@ -128,11 +126,11 @@ impl Deserializable for PrecompileRequest {
 // PRECOMPILE TRANSCRIPT STATE
 // ================================================================================================
 
-/// The current state of a [`PrecompileTranscript`].
+/// The rolling deferred-DAG root produced by the `log_precompile` opcode.
 ///
-/// The transcript is a linear hash tree: this state is the rolling digest of all per-call
-/// statements absorbed so far. After every `record` call the state is itself a complete digest —
-/// no separate finalization step is required.
+/// Each `log_precompile` step folds a per-call statement into the rolling state via
+/// `state' = Poseidon2::merge(state, STMNT)`. The state is itself a complete digest at every
+/// step — no separate finalization step is required.
 pub type PrecompileTranscriptState = Word;
 
 // PRECOMPILE COMMITMENT
@@ -261,18 +259,18 @@ impl PrecompileVerifierRegistry {
         }
     }
 
-    /// Verifies all precompile requests and returns the resulting precompile transcript state after
-    /// recording all commitments.
+    /// Verifies all precompile requests and returns the resulting deferred-DAG root after folding
+    /// every per-call statement into the rolling state in order.
     ///
     /// # Errors
     /// Returns a [`PrecompileVerificationError`] if:
     /// - No verifier is registered for a request's event ID
     /// - A verifier fails to verify its request
-    pub fn requests_transcript(
+    pub fn recompute_transcript_state(
         &self,
         requests: &[PrecompileRequest],
-    ) -> Result<PrecompileTranscript, PrecompileVerificationError> {
-        let mut transcript = PrecompileTranscript::new();
+    ) -> Result<PrecompileTranscriptState, PrecompileVerificationError> {
+        let mut state = PrecompileTranscriptState::default();
         for (index, PrecompileRequest { event_id, calldata }) in requests.iter().enumerate() {
             let (event_name, verifier) = self.verifiers.get(event_id).ok_or(
                 PrecompileVerificationError::VerifierNotFound { index, event_id: *event_id },
@@ -285,9 +283,9 @@ impl PrecompileVerifierRegistry {
                     error,
                 }
             })?;
-            transcript.record(precompile_commitment);
+            state = Poseidon2::merge(&[state, precompile_commitment.statement()]);
         }
-        Ok(transcript)
+        Ok(state)
     }
 }
 
@@ -317,53 +315,6 @@ pub trait PrecompileVerifier: Send + Sync {
     /// # Errors
     /// Returns an error if the verification fails.
     fn verify(&self, calldata: &[u8]) -> Result<PrecompileCommitment, PrecompileError>;
-}
-
-// PRECOMPILE TRANSCRIPT
-// ================================================================================================
-
-/// Precompile transcript implemented as a linear hash tree over Poseidon2.
-///
-/// # Structure
-/// The transcript holds a single 4-element [`Word`] — the rolling state. After each `record` call,
-/// the state is itself a complete digest of every commitment absorbed so far.
-///
-/// # Operation
-/// For each commitment, the transcript first computes the per-call statement
-/// `STMNT = Poseidon2::merge(COMM, TAG)` (see [`PrecompileCommitment::statement`]), then folds the
-/// statement into the rolling state via the 2-to-1 hash
-/// `state' = Poseidon2::merge(state, STMNT)`. The state is exposed directly as the transcript
-/// digest — no finalization step is required.
-#[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
-pub struct PrecompileTranscript {
-    /// The rolling transcript digest.
-    state: PrecompileTranscriptState,
-}
-
-impl PrecompileTranscript {
-    /// Creates a new transcript with the zero word as initial state.
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Creates a transcript from an existing state (for VM operations like `log_precompile`).
-    pub fn from_state(state: PrecompileTranscriptState) -> Self {
-        Self { state }
-    }
-
-    /// Returns the current transcript state (also the rolling digest of all recorded commitments).
-    pub fn state(&self) -> PrecompileTranscriptState {
-        self.state
-    }
-
-    /// Records a precompile commitment into the transcript, updating the state.
-    ///
-    /// Folds the per-call statement `STMNT = Poseidon2::merge(COMM, TAG)` into the rolling state
-    /// via `state' = Poseidon2::merge(state, STMNT)`.
-    pub fn record(&mut self, commitment: PrecompileCommitment) {
-        let stmnt = commitment.statement();
-        self.state = Poseidon2::merge(&[self.state, stmnt]);
-    }
 }
 
 // PRECOMPILE ERROR

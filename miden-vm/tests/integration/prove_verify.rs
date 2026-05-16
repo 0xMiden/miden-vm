@@ -423,7 +423,7 @@ mod fast_parallel {
         Felt, Word,
         events::{EventId, EventName},
         precompile::{
-            PrecompileCommitment, PrecompileError, PrecompileRequest, PrecompileTranscript,
+            PrecompileCommitment, PrecompileError, PrecompileRequest, PrecompileTranscriptState,
             PrecompileVerifier, PrecompileVerifierRegistry,
         },
         proof::{ExecutionProof, HashFunction},
@@ -562,7 +562,7 @@ mod fast_parallel {
             &verifier_registry,
         )
         .expect("proof verification with precompiles failed");
-        assert_eq!(expected_transcript.state(), pc_transcript_state);
+        assert_eq!(expected_transcript, pc_transcript_state);
     }
 
     #[test]
@@ -580,7 +580,7 @@ mod fast_parallel {
             program.to_info(),
             stack_inputs,
             stack_outputs,
-            expected_transcript.state(),
+            expected_transcript,
             &proof,
         );
 
@@ -657,14 +657,17 @@ mod fast_parallel {
                     Arc::new(DummyLogPrecompileVerifier::new(fixture)),
                 )
             });
-        let transcript = verifier_registry
-            .requests_transcript(proof.precompile_requests())
+        let transcript_state = verifier_registry
+            .recompute_transcript_state(proof.precompile_requests())
             .expect("failed to recompute deferred commitment");
-        let mut expected_transcript = PrecompileTranscript::new();
+        let mut expected_transcript = PrecompileTranscriptState::default();
         for fixture in &fixtures {
-            expected_transcript.record(fixture.commitment);
+            expected_transcript = miden_core::crypto::hash::Poseidon2::merge(&[
+                expected_transcript,
+                fixture.commitment.statement(),
+            ]);
         }
-        assert_eq!(transcript.state(), expected_transcript.state());
+        assert_eq!(transcript_state, expected_transcript);
 
         LoggedPrecompileProofFixture {
             program,
@@ -682,7 +685,7 @@ mod fast_parallel {
         stack_outputs: StackOutputs,
         proof: ExecutionProof,
         verifier_registry: PrecompileVerifierRegistry,
-        expected_transcript: PrecompileTranscript,
+        expected_transcript: PrecompileTranscriptState,
     }
 
     fn logged_precompile_fixtures(num_iterations: usize) -> Vec<LoggedPrecompileFixture> {

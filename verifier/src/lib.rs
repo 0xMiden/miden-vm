@@ -98,14 +98,12 @@ pub fn verify_with_precompiles(
 
     let (hash_fn, proof_bytes, precompile_requests) = proof.into_parts();
 
-    // Recompute the precompile transcript by verifying all precompile requests and recording the
-    // commitments.
-    // If no verifiers were provided (e.g. when this function was called from `verify()`),
-    // but the proof contained requests anyway, returns a `NoVerifierFound` error.
-    let recomputed_transcript = precompile_verifiers
-        .requests_transcript(&precompile_requests)
+    // Recompute the rolling deferred-DAG root by verifying all precompile requests and folding
+    // their per-call statements in order. If no verifiers were provided (e.g. when called from
+    // `verify()`) but the proof contained requests, returns a `NoVerifierFound` error.
+    let pc_transcript_state = precompile_verifiers
+        .recompute_transcript_state(&precompile_requests)
         .map_err(VerificationError::PrecompileVerificationError)?;
-    let pc_transcript_state = recomputed_transcript.state();
 
     verify_stark(
         program_info,
