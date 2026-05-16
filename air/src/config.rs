@@ -110,11 +110,13 @@ pub fn observe_protocol_params(challenger: &mut impl CanObserve<Felt>) {
 }
 
 /// Absorbs the multi-AIR `air_order` permutation into the challenger.
-/// Required by `miden-lifted-stark`: its `observe_heights` binds per-AIR heights but
-/// not the proof_order permutation, so the caller must bind it.
 pub fn observe_air_order<C: CanObserve<Felt>>(challenger: &mut C, air_order: &[u32]) {
-    for &caller_idx in air_order {
+    let padded_len = air_order.len().next_multiple_of(SPONGE_RATE);
+    for &caller_idx in air_order.iter() {
         challenger.observe(Felt::new_unchecked(caller_idx as u64));
+    }
+    for _ in air_order.len()..padded_len {
+        challenger.observe(Felt::ZERO);
     }
 }
 

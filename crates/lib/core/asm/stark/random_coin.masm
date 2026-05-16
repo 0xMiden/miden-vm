@@ -283,9 +283,13 @@ end
 #! Observe the multi-AIR instance shape (air_order + heights) and discard the
 #! instance challenge.
 #!
-#! Rust side: caller observes `air_order` then `prove_multi`/`verify_multi` invoke
-#! `observe_heights`. The DuplexChallenger buffers all four felts and absorbs them
-#! in a single permutation as the rate prefix `[a0, a1, log_min, log_max]`.
+#! Rust side: the caller observes `air_order` (zero-padded to a full `SPONGE_RATE`
+#! block), then `prove_multi`/`verify_multi` invoke `observe_heights`. The
+#! DuplexChallenger therefore performs TWO permutations:
+#!   1. air_order block: rate = `[a0, a1, 0, 0, 0, 0, 0, 0]` (full-rate overwrite).
+#!   2. heights block: rate[0..2] = `[log_min, log_max]`; the DuplexChallenger only
+#!      overwrites the buffered prefix, so rate[2..8] and the capacity keep the
+#!      permuted output of step 1.
 #! `air_order` is reconstructed locally from per-AIR heights in memory; ties
 #! break to caller-order (a0 = 0) per Rust's `InstanceShapes::from_trace_heights`.
 #!
@@ -315,13 +319,32 @@ pub proc observe_trace_height_and_discard_instance_challenge
     dup not swap
     # => [a0, a1, ...]
 
-    # Write rate[0..4] = [a0, a1, log_min, log_max].
+    # --- Permutation 1: rate-aligned air_order block ---
+    # rate = [a0, a1, 0, 0, 0, 0, 0, 0]; the caller zero-pads air_order to a full
+    # SPONGE_RATE block, so this is a clean full-rate overwrite.
     exec.constants::r1_ptr mem_store
     exec.constants::r1_ptr add.1 mem_store
-    exec.constants::tmp2 mem_load
-    exec.constants::r1_ptr add.2 mem_store
-    exec.constants::tmp1 mem_load
-    exec.constants::r1_ptr add.3 mem_store
+    push.0 exec.constants::r1_ptr add.2 mem_store
+    push.0 exec.constants::r1_ptr add.3 mem_store
+    push.0 exec.constants::r1_ptr add.4 mem_store
+    push.0 exec.constants::r1_ptr add.5 mem_store
+    push.0 exec.constants::r1_ptr add.6 mem_store
+    push.0 exec.constants::r1_ptr add.7 mem_store
+    # => [...]
+
+    exec.load_random_coin_state
+    # => [R1, R2, C, ...]
+    exec.poseidon2::permute
+    # => [R1', R2', C', ...]
+    exec.store_random_coin_state
+    # => [...]   (coin state is now the air_order-block permutation output)
+
+    # --- Permutation 2: heights block over carried state ---
+    # Only rate[0..2] = [log_min, log_max] is overwritten; rate[2..8] and the
+    # capacity keep the permutation-1 output (already in memory from the store above),
+    # mirroring the DuplexChallenger's partial-prefix absorption.
+    exec.constants::tmp2 mem_load exec.constants::r1_ptr mem_store
+    exec.constants::tmp1 mem_load exec.constants::r1_ptr add.1 mem_store
     # => [...]
 
     exec.load_random_coin_state
@@ -333,9 +356,8 @@ pub proc observe_trace_height_and_discard_instance_challenge
 
     push.0 exec.constants::random_coin_input_len_ptr mem_store
     # => [...]
-    # The next 4 rate slots (rate[4..7]) are unconsumed by this absorption (they
-    # carried prior state). The instance_challenge (1 EF) sample consumes rate[7] and
-    # rate[6], leaving 6 elements valid in the output buffer.
+    # The instance_challenge (1 EF) sample consumes rate[7] and rate[6] of the
+    # permutation-2 output, leaving 6 elements valid in the output buffer.
     push.6 exec.constants::random_coin_output_len_ptr mem_store
     # => [...]
 end
