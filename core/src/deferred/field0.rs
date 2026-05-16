@@ -1,8 +1,8 @@
 use crate::{
     Felt, ZERO,
     deferred::{
-        BodyShape, ChildResolver, DeferredError, Node, Payload, Schema, SchemaError, TRUE_TAG,
-        Tag, TagInfo, true_node,
+        BodyShape, ChildResolver, DeferredError, Digest, Node, Payload, Schema, SchemaError,
+        TRUE_TAG, Tag, TagInfo, true_node,
     },
 };
 
@@ -38,73 +38,129 @@ impl Field0Handler {
     pub const MUL: Tag = [Self::PREFIX[0], Self::PREFIX[1], Felt::new_unchecked(2), ZERO];
     /// Tag for a Field0 `assert_eq` marker.
     pub const ASSERT_EQ: Tag = [Self::PREFIX[0], Self::PREFIX[1], Felt::new_unchecked(3), ZERO];
-
-    /// Reduce a binary op on two already-evaluated leaf operands to a new canonical leaf.
-    fn eval_op(&self, op_tag: Tag, lhs: Node, rhs: Node) -> Result<Node, DeferredError> {
-        if lhs.tag != Self::LEAF || rhs.tag != Self::LEAF {
-            return Err(DeferredError::InvalidPayload);
-        }
-        let lhs_payload = lhs.expression_payload().ok_or(DeferredError::InvalidPayload)?;
-        let rhs_payload = rhs.expression_payload().ok_or(DeferredError::InvalidPayload)?;
-        let a = decode_limbs(lhs_payload)?;
-        let b = decode_limbs(rhs_payload)?;
-        let c = if op_tag == Self::ADD {
-            add_mod_2_256(a, b)
-        } else if op_tag == Self::MUL {
-            mul_mod_2_256(a, b)
-        } else {
-            return Err(DeferredError::Unsupported);
-        };
-        Ok(Node::expression(Self::LEAF, encode_limbs(c)))
-    }
 }
 
 impl Schema for Field0Handler {
     fn decode(&self, tag: Tag) -> Result<TagInfo, SchemaError> {
-        if tag[0] != Self::PREFIX[0] || tag[1] != Self::PREFIX[1] {
-            return Err(SchemaError::InvalidNode);
-        }
+        let kind = Field0TagKind::classify(tag).ok_or(SchemaError::InvalidNode)?;
         // Field0 has no chunk-bodied tags; everything is expression-shaped.
         let body = BodyShape::Expression;
-        if tag == Self::LEAF {
-            // Self-evaluating leaf.
-            Ok(TagInfo { body, evaluates_to: Self::LEAF })
-        } else if tag == Self::ADD || tag == Self::MUL {
-            // Producing op: reduces to a canonical LEAF.
-            Ok(TagInfo { body, evaluates_to: Self::LEAF })
-        } else if tag == Self::ASSERT_EQ {
-            // Predicate: reduces to TRUE.
-            Ok(TagInfo { body, evaluates_to: TRUE_TAG })
-        } else {
-            Err(SchemaError::InvalidNode)
-        }
+        let evaluates_to = match kind {
+            Field0TagKind::Leaf | Field0TagKind::BinaryOp(_) => Self::LEAF,
+            Field0TagKind::AssertEq => TRUE_TAG,
+        };
+        Ok(TagInfo { body, evaluates_to })
     }
 
     fn reduce(&self, node: &Node, children: &mut dyn ChildResolver) -> Result<Node, SchemaError> {
-        if node.tag == Self::LEAF {
-            // Leaf canonicality check: every limb must be u32-canonical. This is deferred from
-            // register-time to reduce-time — malformed leaves are interned silently but error
-            // out the moment something reduces them or uses them as a child.
-            let payload = node.expression_payload().ok_or(DeferredError::InvalidPayload)?;
-            decode_limbs(payload)?;
-            return Ok(node.clone());
+        match Field0Node::parse(node)? {
+            // Leaf canonicality is checked at parse-time, deferred from register-time so that
+            // malformed leaves are interned silently and only error out when used.
+            Field0Node::Leaf => Ok(node.clone()),
+            Field0Node::BinaryOp { op, lhs, rhs } => {
+                let a = leaf_limbs(&children.resolve(lhs)?)?;
+                let b = leaf_limbs(&children.resolve(rhs)?)?;
+                Ok(Node::expression(Self::LEAF, encode_limbs(op.apply(a, b))))
+            },
+            Field0Node::AssertEq { lhs, rhs } => {
+                if children.resolve(lhs)? != children.resolve(rhs)? {
+                    return Err(SchemaError::AssertionFailed);
+                }
+                Ok(true_node())
+            },
         }
-        let payload = node.payload_felts().ok_or(DeferredError::InvalidPayload)?;
-        let (lhs_digest, rhs_digest) = payload.binary_op_children();
-        let lhs = children.resolve(lhs_digest)?;
-        let rhs = children.resolve(rhs_digest)?;
-        if node.tag == Self::ADD || node.tag == Self::MUL {
-            return Ok(self.eval_op(node.tag, lhs, rhs)?);
-        }
-        if node.tag == Self::ASSERT_EQ {
-            if lhs != rhs {
-                return Err(SchemaError::AssertionFailed);
-            }
-            // Predicate-success: return the canonical TRUE node.
-            return Ok(true_node());
-        }
-        Err(SchemaError::InvalidNode)
     }
+}
+
+// TYPED TAG / NODE
+// ================================================================================================
+
+/// Decoded view of a recognized Field0 tag. Pure classification — variants carry no data.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Field0TagKind {
+    Leaf,
+    BinaryOp(BinaryOp),
+    AssertEq,
+}
+
+impl Field0TagKind {
+    /// Classify `tag`, returning `None` for tags outside the Field0 family or with a
+    /// malformed op-slot. The framework maps `None` to [`SchemaError::InvalidNode`].
+    fn classify(tag: Tag) -> Option<Self> {
+        if tag[0] != Field0Handler::PREFIX[0]
+            || tag[1] != Field0Handler::PREFIX[1]
+            || tag[3] != ZERO
+        {
+            return None;
+        }
+        match tag[2].as_canonical_u64() {
+            0 => Some(Self::Leaf),
+            1 => Some(Self::BinaryOp(BinaryOp::Add)),
+            2 => Some(Self::BinaryOp(BinaryOp::Mul)),
+            3 => Some(Self::AssertEq),
+            _ => None,
+        }
+    }
+}
+
+/// Producing binary op on two canonical leaves.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BinaryOp {
+    Add,
+    Mul,
+}
+
+impl BinaryOp {
+    fn apply(self, a: [u32; 8], b: [u32; 8]) -> [u32; 8] {
+        match self {
+            Self::Add => add_mod_2_256(a, b),
+            Self::Mul => mul_mod_2_256(a, b),
+        }
+    }
+}
+
+/// A Field0 node with both tag *and* payload decoded. Consumed by `reduce`'s match —
+/// eliminates the tag-equality ladders in `decode` and `reduce` and folds leaf-canonicality
+/// validation into a single `parse` step.
+enum Field0Node {
+    Leaf,
+    BinaryOp { op: BinaryOp, lhs: Digest, rhs: Digest },
+    AssertEq { lhs: Digest, rhs: Digest },
+}
+
+impl Field0Node {
+    fn parse(node: &Node) -> Result<Self, SchemaError> {
+        let kind = Field0TagKind::classify(node.tag).ok_or(SchemaError::InvalidNode)?;
+        let payload = node.expression_payload().ok_or(DeferredError::InvalidPayload)?;
+        Ok(match kind {
+            Field0TagKind::Leaf => {
+                // Canonicality check; limbs themselves are unused here — `reduce` returns the
+                // node by-clone, and the binary-op arm decodes its operands via `leaf_limbs`.
+                decode_limbs(payload)?;
+                Self::Leaf
+            },
+            Field0TagKind::BinaryOp(op) => {
+                let (lhs, rhs) = payload.binary_op_children();
+                Self::BinaryOp { op, lhs, rhs }
+            },
+            Field0TagKind::AssertEq => {
+                let (lhs, rhs) = payload.binary_op_children();
+                Self::AssertEq { lhs, rhs }
+            },
+        })
+    }
+}
+
+// HELPERS
+// ================================================================================================
+
+/// Extract `[u32; 8]` from a canonical-leaf child node, erroring if the resolved child is
+/// not a Field0 leaf or has a non-canonical limb.
+fn leaf_limbs(node: &Node) -> Result<[u32; 8], DeferredError> {
+    if Field0TagKind::classify(node.tag) != Some(Field0TagKind::Leaf) {
+        return Err(DeferredError::InvalidPayload);
+    }
+    decode_limbs(node.expression_payload().ok_or(DeferredError::InvalidPayload)?)
 }
 
 /// Decode a payload as eight u32-canonical limbs. A limb whose felt is outside `[0, u32::MAX]`
@@ -155,6 +211,15 @@ fn mul_mod_2_256(a: [u32; 8], b: [u32; 8]) -> [u32; 8] {
 mod tests {
     use super::*;
 
+    /// Apply a binary op to two already-canonical leaves. Mirrors the `BinaryOp` arm of
+    /// `Schema::reduce` without going through a `ChildResolver`, so unit tests can exercise the
+    /// arithmetic kernels and the leaf-operand guard directly.
+    fn eval_binary(op: BinaryOp, lhs: Node, rhs: Node) -> Result<Node, DeferredError> {
+        let a = leaf_limbs(&lhs)?;
+        let b = leaf_limbs(&rhs)?;
+        Ok(Node::expression(Field0Handler::LEAF, encode_limbs(op.apply(a, b))))
+    }
+
     fn leaf_from_u32s(limbs: [u32; 8]) -> Node {
         Node::expression(Field0Handler::LEAF, Payload::new(limbs.map(Felt::from_u32)))
     }
@@ -168,24 +233,19 @@ mod tests {
 
     #[test]
     fn add_small_values() {
-        let h = Field0Handler;
-        let out = h
-            .eval_op(Field0Handler::ADD, leaf_from_low_u64(3), leaf_from_low_u64(5))
-            .unwrap();
+        let out = eval_binary(BinaryOp::Add, leaf_from_low_u64(3), leaf_from_low_u64(5)).unwrap();
         assert_eq!(out.tag, Field0Handler::LEAF);
         assert_eq!(out, leaf_from_low_u64(8));
     }
 
     #[test]
     fn add_propagates_carry_across_limbs() {
-        let h = Field0Handler;
         let mut a_limbs = [0u32; 8];
         a_limbs[0] = u32::MAX;
         let mut b_limbs = [0u32; 8];
         b_limbs[0] = 1;
-        let out = h
-            .eval_op(Field0Handler::ADD, leaf_from_u32s(a_limbs), leaf_from_u32s(b_limbs))
-            .unwrap();
+        let out =
+            eval_binary(BinaryOp::Add, leaf_from_u32s(a_limbs), leaf_from_u32s(b_limbs)).unwrap();
         let mut expected = [0u32; 8];
         expected[1] = 1;
         assert_eq!(out, leaf_from_u32s(expected));
@@ -193,32 +253,26 @@ mod tests {
 
     #[test]
     fn add_wraps_at_2_to_256() {
-        let h = Field0Handler;
         let max = leaf_from_u32s([u32::MAX; 8]);
         let one = leaf_from_low_u64(1);
-        let out = h.eval_op(Field0Handler::ADD, max, one).unwrap();
+        let out = eval_binary(BinaryOp::Add, max, one).unwrap();
         assert_eq!(out, leaf_from_u32s([0; 8]));
     }
 
     #[test]
     fn mul_small_values() {
-        let h = Field0Handler;
-        let out = h
-            .eval_op(Field0Handler::MUL, leaf_from_low_u64(6), leaf_from_low_u64(7))
-            .unwrap();
+        let out = eval_binary(BinaryOp::Mul, leaf_from_low_u64(6), leaf_from_low_u64(7)).unwrap();
         assert_eq!(out, leaf_from_low_u64(42));
     }
 
     #[test]
     fn mul_propagates_across_limbs() {
-        let h = Field0Handler;
         // (2^32) * (2^32) = 2^64 — should land entirely in limb[2].
         let mut a_limbs = [0u32; 8];
         a_limbs[1] = 1;
         let b_limbs = a_limbs;
-        let out = h
-            .eval_op(Field0Handler::MUL, leaf_from_u32s(a_limbs), leaf_from_u32s(b_limbs))
-            .unwrap();
+        let out =
+            eval_binary(BinaryOp::Mul, leaf_from_u32s(a_limbs), leaf_from_u32s(b_limbs)).unwrap();
         let mut expected = [0u32; 8];
         expected[2] = 1;
         assert_eq!(out, leaf_from_u32s(expected));
@@ -226,20 +280,18 @@ mod tests {
 
     #[test]
     fn mul_truncates_overflow_above_2_to_256() {
-        let h = Field0Handler;
         // 2^255 * 2 = 2^256 → 0 mod 2^256.
         let mut a_limbs = [0u32; 8];
         a_limbs[7] = 1 << 31;
         let two = leaf_from_low_u64(2);
-        let out = h.eval_op(Field0Handler::MUL, leaf_from_u32s(a_limbs), two).unwrap();
+        let out = eval_binary(BinaryOp::Mul, leaf_from_u32s(a_limbs), two).unwrap();
         assert_eq!(out, leaf_from_u32s([0; 8]));
     }
 
     #[test]
     fn non_canonical_limb_errors() {
-        let h = Field0Handler;
         // u32::MAX + 1 = 2^32 is outside the u32 range but still a valid Felt — must surface as
-        // InvalidPayload when eval_op decodes the limbs.
+        // InvalidPayload when the leaf is decoded as an operand.
         let bad = Node::expression(
             Field0Handler::LEAF,
             Payload::new([
@@ -254,27 +306,16 @@ mod tests {
             ]),
         );
         let ok = leaf_from_low_u64(1);
-        let err = h.eval_op(Field0Handler::ADD, bad, ok);
+        let err = eval_binary(BinaryOp::Add, bad, ok);
         assert!(matches!(err, Err(DeferredError::InvalidPayload)));
     }
 
     #[test]
     fn non_leaf_operand_errors() {
-        let h = Field0Handler;
         // Passing an op-tag as an operand tag means the caller didn't evaluate this side first.
         let a = Node::expression(Field0Handler::ADD, Payload::new([Felt::from_u32(0); 8]));
         let b = leaf_from_low_u64(1);
-        let err = h.eval_op(Field0Handler::ADD, a, b);
+        let err = eval_binary(BinaryOp::Add, a, b);
         assert!(matches!(err, Err(DeferredError::InvalidPayload)));
-    }
-
-    #[test]
-    fn unsupported_op_tag_errors() {
-        let h = Field0Handler;
-        let a = leaf_from_low_u64(1);
-        let b = leaf_from_low_u64(1);
-        // Passing Field0Handler::LEAF as the op-tag is meaningless.
-        let err = h.eval_op(Field0Handler::LEAF, a, b);
-        assert!(matches!(err, Err(DeferredError::Unsupported)));
     }
 }
