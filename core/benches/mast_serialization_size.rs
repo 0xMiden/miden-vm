@@ -4,7 +4,10 @@ use std::hint::black_box;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use miden_core::{
-    mast::{MastForest, arbitrary::MastForestParams},
+    mast::{
+        MastForest,
+        arbitrary::{GenerationMode, MastForestParams},
+    },
     serde::Serializable,
 };
 use proptest::{
@@ -52,6 +55,7 @@ fn bench_serialization_sizes(c: &mut Criterion) {
             max_syscalls: 0,
             max_externals: blocks_per_forest.min(2),
             max_dyns: blocks_per_forest.min(2),
+            mode: GenerationMode::StructureOnly,
             ..Default::default()
         };
 

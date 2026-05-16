@@ -1685,9 +1685,11 @@ mod proptests {
 
     use super::*;
     use crate::{
-        mast::{BasicBlockNodeBuilder, MastForest, MastNode, arbitrary::MastForestParams},
+        mast::{BasicBlockNodeBuilder, MastForest, MastNode, arbitrary},
         operations::Decorator,
     };
+
+    use arbitrary::MastForestParams;
 
     proptest! {
         /// Property test: any MastForest should round-trip through serialization
@@ -1703,6 +1705,7 @@ mod proptests {
                 max_syscalls: 0, // Avoid syscalls in roundtrip tests
                 max_externals: 1,
                 max_dyns: 1,
+                mode: arbitrary::GenerationMode::StructureOnly,
                 ..Default::default()
             })
         ) {
@@ -1936,6 +1939,7 @@ mod proptests {
                 max_syscalls: 0,
                 max_externals: 1,
                 max_dyns: 1,
+                mode: arbitrary::GenerationMode::StructureOnly,
                 ..Default::default()
             })
         ) {

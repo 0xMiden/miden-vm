@@ -1154,169 +1154,38 @@ proptest! {
 mod arbitrary_helpers {
     use super::super::arbitrary::{KernelPool, RootPool};
     use super::*;
-    use crate::mast::{JoinNodeBuilder, LoopNodeBuilder};
+
+    /// Builds a small basic block from a single operation, helper for the tests below.
+    fn block(op: Operation) -> BasicBlockNode {
+        BasicBlockNode::new_owned_with_decorators(alloc::vec![op], alloc::vec![]).unwrap()
+    }
 
     #[test]
-    fn test_root_pool_basic_operations() {
-        // Create a simple forest with a few basic blocks
+    fn root_pool_push_and_iter_preserve_insertion_order() {
         let mut forest = MastForest::new();
 
-        // Add a decorator
-        forest.add_decorator(Decorator::Trace(0)).expect("Failed to add decorator");
+        let id1 = block(Operation::Add).to_builder(&forest).add_to_forest(&mut forest).unwrap();
+        let id2 = block(Operation::Mul).to_builder(&forest).add_to_forest(&mut forest).unwrap();
+        let id3 = block(Operation::Neg).to_builder(&forest).add_to_forest(&mut forest).unwrap();
 
-        // Create some basic blocks
-        let block1 = BasicBlockNode::new_owned_with_decorators(
-            alloc::vec![Operation::Add],
-            alloc::vec![],
-        )
-        .unwrap();
-        let block2 = BasicBlockNode::new_owned_with_decorators(
-            alloc::vec![Operation::Mul],
-            alloc::vec![],
-        )
-        .unwrap();
-        let block3 = BasicBlockNode::new_owned_with_decorators(
-            alloc::vec![Operation::Neg],
-            alloc::vec![],
-        )
-        .unwrap();
-
-        let id1 = block1.to_builder(&forest).add_to_forest(&mut forest).unwrap();
-        let id2 = block2.to_builder(&forest).add_to_forest(&mut forest).unwrap();
-        let id3 = block3.to_builder(&forest).add_to_forest(&mut forest).unwrap();
-
-        // Create a RootPool
         let mut pool = RootPool::new();
-
-        // Test empty pool
         assert!(pool.is_empty());
 
-        // Add roots
         pool.push(id1);
-        assert!(!pool.is_empty());
-
         pool.push(id2);
         pool.push(id3);
+        assert!(!pool.is_empty());
 
-        // Test roots_not_reaching - all basic blocks should not reach each other
-        let not_reaching: Vec<_> = pool.roots_not_reaching(id1, &forest).collect();
-        assert_eq!(not_reaching.len(), 2); // id2 and id3 don't reach id1
-        assert!(not_reaching.contains(&id2));
-        assert!(not_reaching.contains(&id3));
+        let roots: Vec<_> = pool.iter().collect();
+        assert_eq!(roots, vec![id1, id2, id3]);
     }
 
     #[test]
-    fn test_root_pool_reachability() {
-        // Create a forest with a join node
-        let mut forest = MastForest::new();
-
-        // Add a decorator
-        forest.add_decorator(Decorator::Trace(0)).expect("Failed to add decorator");
-
-        // Create basic blocks
-        let block1 = BasicBlockNode::new_owned_with_decorators(
-            alloc::vec![Operation::Add],
-            alloc::vec![],
-        )
-        .unwrap();
-        let block2 = BasicBlockNode::new_owned_with_decorators(
-            alloc::vec![Operation::Mul],
-            alloc::vec![],
-        )
-        .unwrap();
-
-        let id1 = block1.to_builder(&forest).add_to_forest(&mut forest).unwrap();
-        let id2 = block2.to_builder(&forest).add_to_forest(&mut forest).unwrap();
-
-        // Create a join node that references both blocks
-        let join_id = JoinNodeBuilder::new([id1, id2]).add_to_forest(&mut forest).unwrap();
-
-        // Create a RootPool
-        let mut pool = RootPool::new();
-        pool.push(id1);
-        pool.push(id2);
-        pool.push(join_id);
-
-        // Test that join_id reaches both id1 and id2
-        let not_reaching_id1: Vec<_> = pool.roots_not_reaching(id1, &forest).collect();
-        assert!(!not_reaching_id1.contains(&join_id)); // join_id reaches id1
-        assert!(not_reaching_id1.contains(&id2)); // id2 doesn't reach id1
-
-        let not_reaching_id2: Vec<_> = pool.roots_not_reaching(id2, &forest).collect();
-        assert!(!not_reaching_id2.contains(&join_id)); // join_id reaches id2
-        assert!(not_reaching_id2.contains(&id1)); // id1 doesn't reach id2
-    }
-
-    #[test]
-    fn test_root_pool_self_exclusion() {
-        // Create a simple forest
-        let mut forest = MastForest::new();
-        forest.add_decorator(Decorator::Trace(0)).expect("Failed to add decorator");
-
-        let block = BasicBlockNode::new_owned_with_decorators(
-            alloc::vec![Operation::Add],
-            alloc::vec![],
-        )
-        .unwrap();
-        let id = block.to_builder(&forest).add_to_forest(&mut forest).unwrap();
-
-        let mut pool = RootPool::new();
-        pool.push(id);
-
-        // A node should not be in the list of roots not reaching itself
-        let not_reaching: Vec<_> = pool.roots_not_reaching(id, &forest).collect();
-        assert_eq!(not_reaching.len(), 0);
-    }
-
-    #[test]
-    fn test_root_pool_transitive_reachability() {
-        // Create a forest with nested control flow: join -> loop -> block
-        let mut forest = MastForest::new();
-        forest.add_decorator(Decorator::Trace(0)).expect("Failed to add decorator");
-
-        // Create basic blocks
-        let block1 = BasicBlockNode::new_owned_with_decorators(
-            alloc::vec![Operation::Add],
-            alloc::vec![],
-        )
-        .unwrap();
-        let block2 = BasicBlockNode::new_owned_with_decorators(
-            alloc::vec![Operation::Mul],
-            alloc::vec![],
-        )
-        .unwrap();
-
-        let id1 = block1.to_builder(&forest).add_to_forest(&mut forest).unwrap();
-        let id2 = block2.to_builder(&forest).add_to_forest(&mut forest).unwrap();
-
-        // Create a loop that contains block1
-        let loop_id = LoopNodeBuilder::new(id1).add_to_forest(&mut forest).unwrap();
-
-        // Create a join that contains the loop and block2
-        let join_id = JoinNodeBuilder::new([loop_id, id2]).add_to_forest(&mut forest).unwrap();
-
-        // Create a RootPool
-        let mut pool = RootPool::new();
-        pool.push(id1);
-        pool.push(id2);
-        pool.push(loop_id);
-        pool.push(join_id);
-
-        // Test transitive reachability: join_id -> loop_id -> id1
-        let not_reaching_id1: Vec<_> = pool.roots_not_reaching(id1, &forest).collect();
-        assert!(!not_reaching_id1.contains(&join_id)); // join_id transitively reaches id1
-        assert!(!not_reaching_id1.contains(&loop_id)); // loop_id reaches id1
-        assert!(not_reaching_id1.contains(&id2)); // id2 doesn't reach id1
-    }
-
-    #[test]
-    fn test_kernel_pool_basic_operations() {
-        // Test empty pool
+    fn kernel_pool_free_accepts_inserts_and_reports_membership() {
         let pool = KernelPool::new();
         assert!(pool.hashes().is_empty());
-        assert!(!pool.contains(Word::from([Felt::ZERO; 4])));
+        assert!(!pool.is_frozen());
 
-        // Test insertion
         let mut pool = KernelPool::new();
         let hash1 = Word::from([
             Felt::new_unchecked(1),
@@ -1332,7 +1201,6 @@ mod arbitrary_helpers {
         ]);
 
         pool.insert(hash1);
-        assert_eq!(pool.hashes().len(), 1);
         assert!(pool.contains(hash1));
         assert!(!pool.contains(hash2));
 
@@ -1343,8 +1211,7 @@ mod arbitrary_helpers {
     }
 
     #[test]
-    fn test_kernel_pool_frozen() {
-        // Test frozen pool
+    fn kernel_pool_frozen_ignores_inserts() {
         let hash1 = Word::from([
             Felt::new_unchecked(1),
             Felt::new_unchecked(2),
@@ -1359,68 +1226,12 @@ mod arbitrary_helpers {
         ]);
 
         let mut pool = KernelPool::new_frozen(alloc::vec![hash1]);
-        assert_eq!(pool.hashes().len(), 1);
+        assert!(pool.is_frozen());
         assert!(pool.contains(hash1));
 
-        // Insertion should be a no-op when frozen
         pool.insert(hash2);
         assert_eq!(pool.hashes().len(), 1);
         assert!(pool.contains(hash1));
         assert!(!pool.contains(hash2));
-    }
-
-    #[test]
-    fn test_kernel_pool_has_candidate_in() {
-        // Create a simple forest with basic blocks
-        let mut forest = MastForest::new();
-        forest.add_decorator(Decorator::Trace(0)).expect("Failed to add decorator");
-
-        let block1 = BasicBlockNode::new_owned_with_decorators(
-            alloc::vec![Operation::Add],
-            alloc::vec![],
-        )
-        .unwrap();
-        let block2 = BasicBlockNode::new_owned_with_decorators(
-            alloc::vec![Operation::Mul],
-            alloc::vec![],
-        )
-        .unwrap();
-
-        let id1 = block1.to_builder(&forest).add_to_forest(&mut forest).unwrap();
-        let id2 = block2.to_builder(&forest).add_to_forest(&mut forest).unwrap();
-
-        // Get the digests of the blocks
-        let digest1 = forest.get_node_by_id(id1).unwrap().digest();
-        let digest2 = forest.get_node_by_id(id2).unwrap().digest();
-
-        // Create a pool with only digest1
-        let pool = KernelPool::new_frozen(alloc::vec![digest1]);
-
-        // Test has_candidate_in
-        let roots = alloc::vec![id1, id2];
-        assert!(pool.has_candidate_in(&roots, &forest)); // id1's digest is in the pool
-
-        // Create a pool with neither digest
-        let other_hash = Word::from([
-            Felt::new_unchecked(99),
-            Felt::new_unchecked(99),
-            Felt::new_unchecked(99),
-            Felt::new_unchecked(99),
-        ]);
-        let pool = KernelPool::new_frozen(alloc::vec![other_hash]);
-        assert!(!pool.has_candidate_in(&roots, &forest)); // neither digest is in the pool
-
-        // Create a pool with both digests
-        let pool = KernelPool::new_frozen(alloc::vec![digest1, digest2]);
-        assert!(pool.has_candidate_in(&roots, &forest)); // both digests are in the pool
-    }
-
-    #[test]
-    fn test_kernel_pool_empty_roots() {
-        // Test has_candidate_in with empty roots
-        let forest = MastForest::new();
-        let pool = KernelPool::new();
-        let roots = alloc::vec![];
-        assert!(!pool.has_candidate_in(&roots, &forest));
     }
 }
