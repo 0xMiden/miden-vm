@@ -1,127 +1,169 @@
 # Multi-app precompile schema — design notes
 
-*Living scratchpad. Status: aligning on shape before any code.*
+*Living scratchpad. Status: shape converging; minting model is the live open question.*
 
 ## Goal
 
-Replace the current monolithic `Schema` (one trait impl owns the entire 4-felt
-tag space) with a **composite of apps**, where each app is a self-contained
-semantic module (Field, Curve, Keccak, …) that claims a slice of the tag
-space. The framework dispatches; apps own their kinds.
+Replace the current monolithic `Schema` with a **composite of apps**. Each app
+is a self-contained semantic module (Field, Group, Keccak, Sha512, Sig …)
+that claims a slice of the tag space. The composite dispatches; apps own their
+node kinds.
 
-This is the substrate to migrate existing precompiles (256-bit field, future
-curves, hashes, signature verification) into a uniform framework.
+Substrate to migrate every existing precompile (256-bit field, future curves,
+hashes, signature verification) into one uniform framework.
 
-## What currently exists (anchor)
+## Anchor: what exists today
 
 - `core/src/deferred/schema.rs`: `Schema` trait — `decode(Tag) -> TagInfo` and
   `reduce(&Node, &mut dyn ChildResolver) -> Node`. Single impl per processor.
 - `core/src/deferred/mod.rs`: `Node { tag: [Felt; 4], payload: Expression(8 felts) | Chunk(Arc<[Chunk]>) }`.
-  Digest is Poseidon2 over tag (capacity) + payload (rate).
+  Digest = Poseidon2 over tag (capacity) + payload (rate).
 - `core/src/deferred/field0.rs` (`feature = "testing"`): reference handler.
-  Tag layout `[1, 0, op, 0]`; op ∈ {0=leaf, 1=add, 2=mul, 3=assert_eq}.
-- `core/src/deferred/state.rs`: `DeferredState` (DAG + root). Carried through
-  `ExecutionOutput`/`TraceBuildOutput` and the verifier's transcript walk.
-- Processor: `FastProcessor` holds a single `deferred_schema: Box<dyn Schema>`,
-  defaults to `NoopSchema`.
+- `core/src/deferred/state.rs`: `DeferredState` (DAG + root), now carried
+  through `ExecutionOutput` / `TraceBuildOutput` and the verifier's transcript
+  walk.
 
-## Proposal (as understood from user, pending grill answers)
+## Decisions so far
 
-### Terminology
-
-- **App** — a self-contained semantic module (Field, Curve, Keccak, …).
-  Owns a small enum of *node discriminants* and an optional *immediate* per
-  tag. Parameterised: `Field<P>` over a prime, `Curve<C>` over curve params.
-- **App ID** — felt derived by hashing `(app_name, params, discriminant_list)`
-  with a weak hash (Blake3 → felt). Two instances of `Field` with different
-  primes have different IDs.
-- **Schema ID** — felt derived by hashing `(version_domsep, sorted_app_ids…)`.
-  Commits to the exact composition.
-- **AppTag** — the per-app 2-felt portion of the global tag: `(node_disc, imm)`.
-- **PrecompileSchema** — the composite installed on the processor. Holds a
-  `Vec<Box<dyn App>>` (open question: dyn vs static tuple). Implements the
-  existing `Schema` trait by strip-and-forward.
-
-### Tag layout (Option A, current preference)
+### Tag layout
 
 ```
-[schema_id, app_id, node_disc, imm]
+[app_id, node_disc, imm, ZERO]
 ```
 
-Alt (Option B): `[schema_app_id, node_disc, imm0, imm1]` if we ever need two
-immediates. Defer until forced.
+- `schema_id` dropped. Versioning rolls into `app_id` (the app's ID hash mixes
+  in a version felt). Two schemas sharing an app safely share its app_id; if
+  the app changes shape, the version bumps and the id moves.
+- One immediate is enough. Chunk apps use `imm = n_bytes` (covers both number
+  of chunks and last-chunk padding). Sigs have no imm. Field/Group ops have no
+  imm.
+- 4th felt reserved zero for now. Keep available; promote to `imm1` if a
+  future app needs two.
 
-### Catalogue of apps (initial set)
+### Apps (initial set, scoped down)
 
-- `Field<P>`: `add`, `sub`, `mul`, `value` (leaf), `eq` (predicate).
-- `Curve<C>`: `combine [Field<C::Base>.leaf; 2]`, `add`, `sub`, `eq`.
-  Requires `Field<C::Base>` and `Field<C::Scalar>`.
-- `Keccak`: chunk `preimage(n_bytes)`, leaf `digest`, `eq`.
-- `Sha512`: chunk `preimage(n_bytes)`, chunk-2 `digest`, `eq`.
-- `Ecdsa`: chunk `sig` (predicate; verifies against embedded msg+pubkey).
-- `Eddsa`: chunk `sig` (predicate; ditto).
+- **`Uint256`** — promote `Field0` to a properly-app-shaped handler with
+  wrapping (mod 2^256) semantics. Discriminants: `value` (leaf), `add`,
+  `sub`, `mul`, `eq`.
+- **`MockGroup<F>`** (over `Uint256`) — minimal "group-element" app to
+  exercise inter-app composition. Discriminants: `combine` (self-evaluating
+  bin-op: payload = `digest(x) || digest(y)`, x and y are `F` nodes),
+  `add`, `sub`, `eq`. Group arithmetic is fake/placeholder — just enough
+  to exercise the framework.
+- Later: `Keccak`, `Sha512`, `Ecdsa`/`Eddsa`-style sigs.
 
-### Existing reference
+### Composite
 
-`Field0Handler` stays as-is for now (legacy single-schema reference), retired
-once `Field<P>` lands as an app.
+- `PrecompileSchema { apps: BTreeMap<Felt /* app_id */, Box<dyn App> }`.
+  Order doesn't matter (no schema_id binds it).
+- Implements `Schema` by `tag[0]` lookup → forward to the app's local
+  `decode` / `reduce`.
 
-## Open questions (block design before they're answered)
+### Dependency declaration: dropped
 
-**Q1. What is `schema_id` for, given one schema is installed at a time?**
-Candidates: cross-context binding (program binaries committing to schema),
-recursive proofs (parent commits to child's schema). If neither matters, drop
-it from the on-wire tag and reclaim the felt.
+No "requires" mechanism. Apps that consume another app's tags (Group reading
+Field digests) hold the other app's `app_id` as a constructor arg, so they
+can mint correctly-tagged children and recognise resolved-child tags.
+Mis-composition fails at runtime.
 
-**Q2. App dependencies — runtime invocation, or static assertion?**
-Likely (a)+(b): composite refuses to build without declared deps; deps are
-expressed as IDs that the dependent app is constructed with (so e.g. `Curve`
-knows how to mint a `Field` leaf tag).
+### `Field0Handler` lifecycle
 
-**Q3. Tag-minting from one app to another.** `curve.add` outputs a curve point
-whose coordinates are field leaves. The curve app must construct field-tagged
-nodes during canonicalisation → it must hold the field's app_id.
+Repurpose into `Uint256` as the very first concrete app. No legacy keep-around.
 
-**Q4. Curve-point data model.** Is a curve point an expression node with two
-field-leaf digests in its payload, or a chunk with 16 inline felts, or
-something else? Affects degree/witness size.
-
-**Q5. Immediate slot usage.** Only `keccak.preimage` / `sha512.preimage` seem
-to need it (n_bytes). Confirm no other app needs two. If confirmed, lock in
-Option A.
-
-**Q6. ID hash strength.** Weak hash (Blake3→felt) gives ~32-bit birthday
-security per ID. Fine for ~tens of apps; check whether the design ever scales
-to hundreds of parameter-instantiated apps.
-
-**Q7. App trait shape.** Strawman:
+## App trait — strawman
 
 ```rust
-trait App {
-    fn id_inputs(&self) -> AppIdInputs;
-    fn decode(&self, local: AppTag) -> Result<TagInfo, _>;
-    fn reduce(&self, node: &Node, children: &mut dyn ChildResolver) -> Result<Node, _>;
+struct AppTag {
+    pub node_disc: Felt,
+    pub imm: Felt,
+}
+
+trait App: core::fmt::Debug + Send {
+    /// Stable ID derived from (name, version, params, discriminant list).
+    /// Returned pre-computed; app caches it at construction.
+    fn id(&self) -> Felt;
+
+    /// Decode the app-local tag (the bits the composite hasn't claimed).
+    fn decode(&self, local: AppTag) -> Result<TagInfo, SchemaError>;
+
+    /// Reduce a node owned by this app.
+    fn reduce(
+        &self,
+        node: &Node,
+        children: &mut dyn ChildResolver,
+        interner: &mut dyn NodeInterner,  // OPEN — see Q-mint
+    ) -> Result<Node, SchemaError>;
+}
+
+trait NodeInterner {
+    fn intern(&mut self, node: Node) -> Digest;
 }
 ```
 
-Confirm — does the app see only `AppTag` (composite strips schema_id/app_id)
-or does it see the full `Tag`?
+## Open: the minting problem (Q-mint, top priority)
 
-**Q8. `Field0Handler` lifecycle.** Keep as legacy reference until `Field<P>`
-exists? Or migrate it first as the smallest possible app to prove the
-framework works?
+`Group::add(g1, g2)` resolves two `Group::combine` leaves, recurses into their
+field digests to get coords, computes `(x3, y3) = ec_add(x1, y1, x2, y2)`, and
+must canonicalise to a `Group::combine` leaf whose payload is two field
+digests — i.e. it must **mint two new field leaves and reference them by
+digest**. Today's `reduce` returns a single node; the framework interns it
+post-call. There's no way to intern auxiliary nodes mid-reduce.
 
-**Q9. Crate location.** Confirm: everything new lives in `core/src/deferred/`,
-no new crate.
+Three approaches:
 
-**Q10. Sig verification semantics.** A sig is a chunk-shaped predicate node.
-Pubkey + message — embedded in the chunk, or referenced by child digests?
-Affects whether `Ecdsa`/`Eddsa` fit the chunk-app mold or need extra structure.
+1. **Extend `reduce` with a `NodeInterner`.** Reduce calls
+   `interner.intern(field_leaf(x3))` to get `h_x3`, same for `y3`, then
+   returns the group leaf with payload `h_x3 || h_y3`. Clean, but ripples
+   through `Schema::reduce`'s signature.
+2. **Group leaves carry raw 16-felt coords**, not digests. No minting; reduce
+   self-contained. Loses sharing of field elements across group points and
+   diverges from "everything is a digest" uniformity.
+3. **Group::add doesn't produce a canonical leaf** — it's a predicate
+   (`add_eq(g1, g2, g3)`): the user supplies the expected sum and the app
+   verifies. Side-steps minting entirely. Changes the user-facing API
+   significantly.
 
-## Alternatives sketched
+**Leaning toward (1)** because it preserves uniformity and the change is
+local. (2) is the simpler v1 if we want to defer the framework change. (3) is
+viable but changes the programming model — every producing op becomes a
+check, and the user has to supply expected outputs from off-chip.
 
-- **Static composition (`tuple`-based) instead of `Vec<Box<dyn App>>`.** Faster
-  dispatch, compile-time dep-checking via trait bounds, but every schema is its
-  own concrete type. Reasonable v2; v1 stays dyn for ergonomics.
-- **Drop `schema_id` from tag if Q1 says we don't need it.** Frees the felt
-  for a second immediate (Option B collapses into Option A's slot count).
+## Open questions
+
+**Q-mint** — which approach above? Decides whether v1 needs a framework change.
+
+**Q-app-cross-read** — when `Group::add` resolves a child, it gets back a
+canonical `Group::combine` leaf. To dig into its field-leaf children, it
+recurses through `children.resolve(h_x)`. That works as-is: the resolver is
+schema-wide and dispatches by tag. App doesn't need extra access. Confirm — or
+do we want apps to be able to call into other apps directly (typed)?
+
+**Q-id-derivation** — concrete inputs to `app_id` hash:
+`H(framework_version, app_name, app_version, params_bytes, [discriminant_names…])`?
+Treat `framework_version` as the single domain separator we bump if we ever
+change the hashing convention itself; `app_version` for per-app evolution.
+Use Blake3-to-felt (extract 64 bits of the digest).
+
+**Q-reduce-of-self-evaluating-group** — when reduce gets a `Group::combine`
+leaf, what does it return? Just clones the node (its payload's field digests
+are already canonical addresses)? Or also walks the resolver to confirm the
+referenced field digests resolve (and resolve to field leaves of the right
+app)? Cheapest: return the clone, let consumers (Group::add) do the recursion
+when they actually need coords. Confirm.
+
+**Q-v1-scope** — `Uint256` + `MockGroup<Uint256>` enough for v1? Or also a
+single-discriminant chunk-predicate app (the sig stub) to prove chunk-bodied
+apps work end-to-end?
+
+**Q-resolved-tag-validation** — when `Group::add` resolves a child and expects
+"a `Group::combine` leaf of *my* group", how does it verify? `node.tag[0]`
+should equal the group's `app_id` (held internally) and `node.tag[1]` should
+equal the `combine` discriminant. Worth a small helper on the app side. Any
+appetite for a typed view (`AppNode<G>` wrapper) instead of raw tag checks?
+
+## Alternatives parked
+
+- Static-tuple composition (compile-time-known apps). Faster, no allocation,
+  but every schema is its own concrete type. Defer; dyn map is fine for v1.
+- 4-slot `[schema_id, app_id, node, imm]` tag (the original Option A).
+  Dropped per Q1 answer.
