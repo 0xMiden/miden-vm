@@ -4,7 +4,6 @@ use miden_core::{
     Felt, WORD_SIZE, Word,
     advice::{AdviceInputs, AdviceMap},
     crypto::merkle::{InnerNodeInfo, MerklePath, MerkleStore, NodeIndex},
-    deferred::DeferredState,
     precompile::PrecompileRequest,
 };
 #[cfg(test)]
@@ -59,7 +58,6 @@ pub struct AdviceProvider {
     max_map_elements: usize,
     store: MerkleStore,
     pc_requests: Vec<PrecompileRequest>,
-    deferred_state: DeferredState,
 }
 
 impl Default for AdviceProvider {
@@ -90,7 +88,6 @@ impl AdviceProvider {
             max_map_elements: options.max_adv_map_elements(),
             store: MerkleStore::default(),
             pc_requests: Vec::new(),
-            deferred_state: DeferredState::new(),
         }
     }
 
@@ -625,26 +622,6 @@ impl AdviceProvider {
     /// needed in the provider after consumption.
     pub fn take_precompile_requests(&mut self) -> Vec<PrecompileRequest> {
         core::mem::take(&mut self.pc_requests)
-    }
-
-    // DEFERRED-DAG STATE
-    // --------------------------------------------------------------------------------------------
-
-    /// Returns a reference to the deferred-DAG state accumulated during execution.
-    ///
-    /// Nodes are inserted by the `SystemEvent::DeferredRegister{Leaf,Op}` handlers; assertions are
-    /// recorded by `SystemEvent::DeferredAssertEq`. The state is consumed post-execution via
-    /// `extract_witness` to produce the prover-side witness.
-    pub fn deferred_state(&self) -> &DeferredState {
-        &self.deferred_state
-    }
-
-    /// Returns a mutable reference to the deferred-DAG state.
-    ///
-    /// Intended for the deferred-event system-event handlers, which read tag/payload from the
-    /// operand stack and mutate this state through the `register_node` / `assert_eq` helpers.
-    pub fn deferred_state_mut(&mut self) -> &mut DeferredState {
-        &mut self.deferred_state
     }
 
     // MUTATORS

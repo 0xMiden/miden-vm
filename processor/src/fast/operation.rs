@@ -9,7 +9,6 @@ use miden_core::{
     crypto::{hash::Poseidon2, merkle::MerklePath},
     deferred::{Node, Payload, TRUE_TAG},
     mast::{MastForest, MastNodeId},
-    precompile::PrecompileTranscriptState,
 };
 
 use super::step::BreakReason;
@@ -78,22 +77,16 @@ impl Processor for FastProcessor {
     }
 
     #[inline(always)]
-    fn precompile_transcript_state(&self) -> PrecompileTranscriptState {
-        self.advice.deferred_state().root()
+    fn deferred_root(&self) -> Word {
+        self.deferred_state.root()
     }
 
     #[inline(always)]
-    fn set_precompile_transcript_state(&mut self, state: PrecompileTranscriptState) {
-        self.advice.deferred_state_mut().set_root(state);
-    }
-
-    #[inline(always)]
-    fn record_log_precompile_node(&mut self, prev_root: Word, stmnt: Word, new_root: Word) {
-        let deferred = self.advice.deferred_state_mut();
+    fn advance_deferred_root(&mut self, prev_root: Word, stmnt: Word, new_root: Word) {
         debug_assert_eq!(
-            deferred.root(),
-            new_root,
-            "DeferredState.root must equal new_root at AND-node intern time",
+            self.deferred_state.root(),
+            prev_root,
+            "DeferredState.root must equal prev_root at log_precompile time",
         );
         let and_node = Node::expression(TRUE_TAG, Payload::binary_op(prev_root, stmnt));
         debug_assert_eq!(
@@ -101,7 +94,8 @@ impl Processor for FastProcessor {
             new_root,
             "AND-node host-side digest must match the in-circuit log_precompile hasher",
         );
-        deferred.intern(and_node);
+        self.deferred_state.intern(and_node);
+        self.deferred_state.set_root(new_root);
     }
 
     #[inline(always)]

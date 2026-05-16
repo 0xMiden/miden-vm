@@ -412,8 +412,8 @@ fn test_trace_generation_at_fragment_boundaries(
         trace_from_single_fragment.precompile_requests(),
     );
     assert_eq!(
-        trace_from_fragments.final_deferred_root,
-        trace_from_single_fragment.final_deferred_root,
+        trace_from_fragments.deferred_state,
+        trace_from_single_fragment.deferred_state,
     );
 
     // Compare deterministic traces as a compact sanity check and to keep the snapshot stable.
@@ -1291,7 +1291,7 @@ impl core::fmt::Debug for DeterministicTrace<'_> {
             .field("program_info", &trace.program_info())
             .field("stack_outputs", &trace.stack_outputs())
             .field("precompile_requests", &trace.precompile_requests())
-            .field("final_deferred_root", &trace.final_deferred_root)
+            .field("deferred_state", &trace.deferred_state)
             .field("trace_len_summary", &trace.trace_len_summary())
             .finish()
     }

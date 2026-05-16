@@ -138,6 +138,11 @@ pub struct FastProcessor {
     /// the size of core trace fragments during execution, etc.
     options: ExecutionOptions,
 
+    /// The deferred-DAG state accumulated during execution. Nodes are interned by the
+    /// `SystemEvent::DeferredRegister{,Chunk}` handlers and by the `log_precompile` opcode (which
+    /// interns AND-nodes). Threaded out through [`ExecutionOutput`] for the verifier to walk.
+    deferred_state: DeferredState,
+
     /// The deferred-DAG schema installed at processor construction. Owns the entire semantic
     /// layer (tag recognition, validation, recursive evaluation, equality). Defaults to a
     /// [`NoopSchema`] so programs that don't install a real schema fail loudly at the first
@@ -153,12 +158,11 @@ impl FastProcessor {
     /// Packages the processor state after successful execution into a public result type.
     #[inline(always)]
     fn into_execution_output(self, stack: StackOutputs) -> ExecutionOutput {
-        let final_deferred_root = self.advice.deferred_state().root();
         ExecutionOutput {
             stack,
             advice: self.advice,
             memory: self.memory,
-            final_deferred_root,
+            deferred_state: self.deferred_state,
         }
     }
 
@@ -307,6 +311,7 @@ impl FastProcessor {
             memory: Memory::new(),
             call_stack: Vec::new(),
             options,
+            deferred_state: DeferredState::new(),
             deferred_schema: Box::new(NoopSchema),
             #[cfg(test)]
             decorator_retrieval_count: Rc::new(Cell::new(0)),
@@ -344,15 +349,18 @@ impl FastProcessor {
         &*self.deferred_schema
     }
 
-    /// Returns a mutable view onto the deferred-DAG state and the schema as a disjoint borrow
-    /// pair.
-    ///
-    /// The advice provider and the schema live in different fields of the processor; this
-    /// helper exists so the deferred system-event handlers can borrow both simultaneously without
-    /// running into the borrow checker.
+    /// Returns the deferred-DAG state and the schema as a disjoint borrow pair so the deferred
+    /// system-event handlers can borrow both simultaneously without running into the borrow
+    /// checker.
     #[inline(always)]
     pub(crate) fn deferred_view_mut(&mut self) -> (&mut DeferredState, &dyn Schema) {
-        (self.advice.deferred_state_mut(), &*self.deferred_schema)
+        (&mut self.deferred_state, &*self.deferred_schema)
+    }
+
+    /// Returns a reference to the deferred-DAG state accumulated during execution.
+    #[inline(always)]
+    pub fn deferred_state(&self) -> &DeferredState {
+        &self.deferred_state
     }
 
     /// Returns true if decorators should be executed.
@@ -500,12 +508,10 @@ impl FastProcessor {
         &self.memory
     }
 
-    /// Consumes the processor and returns the advice provider, memory, and the final deferred-DAG
-    /// root (the rolling state produced by `log_precompile` — equivalent to the precompile
-    /// transcript digest).
-    pub fn into_parts(self) -> (AdviceProvider, Memory, Word) {
-        let root = self.advice.deferred_state().root();
-        (self.advice, self.memory, root)
+    /// Consumes the processor and returns the advice provider, memory, and the full deferred-DAG
+    /// state (interned nodes + rolling root produced by `log_precompile`).
+    pub fn into_parts(self) -> (AdviceProvider, Memory, DeferredState) {
+        (self.advice, self.memory, self.deferred_state)
     }
 
     /// Returns a reference to the execution options.
@@ -765,13 +771,13 @@ impl FastProcessor {
 // ===============================================================================================
 
 /// The output of a program execution, containing the state of the stack, advice provider,
-/// memory, and the final deferred-DAG root at the end of execution.
+/// memory, and the deferred-DAG state (interned nodes + rolling root) at the end of execution.
 #[derive(Debug)]
 pub struct ExecutionOutput {
     pub stack: StackOutputs,
     pub advice: AdviceProvider,
     pub memory: Memory,
-    pub final_deferred_root: Word,
+    pub deferred_state: DeferredState,
 }
 
 // EXECUTION CONTEXT INFO

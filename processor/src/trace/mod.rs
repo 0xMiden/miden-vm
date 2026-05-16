@@ -9,7 +9,7 @@ use miden_air::{
         decoder::{NUM_USER_OP_HELPERS, USER_OP_HELPERS_OFFSET},
     },
 };
-use miden_core::{crypto::hash::Blake3_256, serde::Serializable};
+use miden_core::{crypto::hash::Blake3_256, deferred::DeferredState, serde::Serializable};
 
 use crate::{
     Felt, MIN_STACK_DEPTH, Program, ProgramInfo, StackInputs, StackOutputs, Word, ZERO,
@@ -53,7 +53,7 @@ pub struct TraceBuildInputs {
 #[derive(Debug)]
 pub(crate) struct TraceBuildOutput {
     stack_outputs: StackOutputs,
-    final_deferred_root: Word,
+    deferred_state: DeferredState,
     precompile_requests: Vec<PrecompileRequest>,
     precompile_requests_digest: [u8; 32],
 }
@@ -64,12 +64,12 @@ impl TraceBuildOutput {
             stack,
             mut advice,
             memory: _,
-            final_deferred_root,
+            deferred_state,
         } = execution_output;
 
         Self {
             stack_outputs: stack,
-            final_deferred_root,
+            deferred_state,
             precompile_requests: advice.take_precompile_requests(),
             precompile_requests_digest: [0; 32],
         }
@@ -114,10 +114,10 @@ impl TraceBuildInputs {
         &self.trace_output.precompile_requests
     }
 
-    /// Returns the final deferred-DAG root observed during execution (equivalent to the rolling
-    /// precompile-transcript digest).
-    pub fn final_deferred_root(&self) -> Word {
-        self.trace_output.final_deferred_root
+    /// Returns the deferred-DAG state captured at the end of execution (interned nodes + rolling
+    /// root).
+    pub fn deferred_state(&self) -> &DeferredState {
+        &self.trace_output.deferred_state
     }
 
     /// Returns the program info captured for the execution being replayed.
@@ -168,7 +168,7 @@ impl TraceBuildInputs {
 /// - Main traces of System, Decoder, Operand Stack, Range Checker, and Chiplets.
 /// - Information about the program (program hash and the kernel).
 /// - Information about execution outputs (stack state, deferred precompile requests, and the final
-///   deferred-DAG root).
+///   deferred-DAG state).
 /// - Summary of trace lengths of the main trace components.
 #[derive(Debug)]
 pub struct ExecutionTrace {
@@ -176,7 +176,7 @@ pub struct ExecutionTrace {
     program_info: ProgramInfo,
     stack_outputs: StackOutputs,
     precompile_requests: Vec<PrecompileRequest>,
-    final_deferred_root: Word,
+    deferred_state: DeferredState,
     trace_len_summary: TraceLenSummary,
 }
 
@@ -192,7 +192,7 @@ impl ExecutionTrace {
     ) -> Self {
         let TraceBuildOutput {
             stack_outputs,
-            final_deferred_root,
+            deferred_state,
             precompile_requests,
             ..
         } = trace_output;
@@ -202,7 +202,7 @@ impl ExecutionTrace {
             program_info,
             stack_outputs,
             precompile_requests,
-            final_deferred_root,
+            deferred_state,
             trace_len_summary,
         }
     }
@@ -231,7 +231,7 @@ impl ExecutionTrace {
             self.program_info.clone(),
             self.init_stack_state(),
             self.stack_outputs,
-            self.final_deferred_root,
+            self.deferred_state.root(),
         )
     }
 
@@ -255,15 +255,15 @@ impl ExecutionTrace {
         &self.precompile_requests
     }
 
-    /// Returns the final deferred-DAG root observed during execution (equivalent to the rolling
-    /// precompile-transcript digest).
-    pub fn final_deferred_root(&self) -> Word {
-        self.final_deferred_root
+    /// Returns the deferred-DAG state captured at the end of execution (interned nodes + rolling
+    /// root).
+    pub fn deferred_state(&self) -> &DeferredState {
+        &self.deferred_state
     }
 
     /// Returns the owned execution outputs required for proof packaging.
-    pub fn into_outputs(self) -> (StackOutputs, Vec<PrecompileRequest>, Word) {
-        (self.stack_outputs, self.precompile_requests, self.final_deferred_root)
+    pub fn into_outputs(self) -> (StackOutputs, Vec<PrecompileRequest>, DeferredState) {
+        (self.stack_outputs, self.precompile_requests, self.deferred_state)
     }
 
     /// Returns the initial state of the top 16 stack registers.

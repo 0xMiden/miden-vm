@@ -6,7 +6,6 @@ use miden_core::{
     WORD_SIZE, Word, ZERO,
     field::PrimeField64,
     mast::{MastForest, MastNodeId},
-    precompile::PrecompileTranscriptState,
     program::{Kernel, MIN_STACK_DEPTH},
     utils::range,
 };
@@ -443,18 +442,14 @@ impl Processor for ReplayProcessor {
         Ok(())
     }
 
-    fn precompile_transcript_state(&self) -> PrecompileTranscriptState {
-        self.system.pc_transcript_state
+    fn deferred_root(&self) -> Word {
+        self.system.deferred_root
     }
 
-    fn set_precompile_transcript_state(&mut self, state: PrecompileTranscriptState) {
-        self.system.pc_transcript_state = state;
-    }
-
-    fn record_log_precompile_node(&mut self, _prev_root: Word, _stmnt: Word, _new_root: Word) {
+    fn advance_deferred_root(&mut self, _prev_root: Word, _stmnt: Word, new_root: Word) {
         // ReplayProcessor doesn't carry a DeferredState — the DAG is fully built during the main
-        // FastProcessor pass. Trace regeneration only needs to thread the rolling state through
-        // `set_precompile_transcript_state`, which already happened above.
+        // FastProcessor pass. Trace regeneration only threads the rolling scalar root.
+        self.system.deferred_root = new_root;
     }
 
     fn execute_before_enter_decorators(

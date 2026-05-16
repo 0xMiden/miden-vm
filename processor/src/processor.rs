@@ -8,7 +8,6 @@ use crate::{
     crypto::merkle::MerklePath,
     errors::OperationError,
     mast::{MastForest, MastNodeId},
-    precompile::PrecompileTranscriptState,
 };
 
 // PROCESSOR
@@ -55,31 +54,19 @@ pub(crate) trait Processor: Sized {
     /// `dyncall. This includes restoring the overflow stack and the system parameters.
     fn restore_context(&mut self) -> Result<(), OperationError>;
 
-    /// Returns the current precompile-transcript state (the rolling digest of all recorded
-    /// commitments).
-    ///
-    /// Used by `log_precompile` to thread the transcript across invocations.
-    fn precompile_transcript_state(&self) -> PrecompileTranscriptState;
+    /// Returns the current rolling deferred-DAG root (the rolling digest of all recorded
+    /// commitments produced by `log_precompile`).
+    fn deferred_root(&self) -> Word;
 
-    /// Sets the precompile-transcript state to a new value.
-    ///
-    /// Called by `log_precompile` after recording a new commitment.
-    fn set_precompile_transcript_state(&mut self, state: PrecompileTranscriptState);
-
-    /// Records a `log_precompile` step into the deferred-DAG: interns the AND-node
-    /// `{tag: TRUE_TAG, payload: prev_root || stmnt}` and advances `DeferredState.root` from
-    /// `prev_root` to `new_root`.
+    /// Advances the rolling deferred-DAG root from `prev_root` to `new_root` and, on processors
+    /// that own a [`miden_core::deferred::DeferredState`], interns the AND-node
+    /// `{tag: TRUE_TAG, payload: prev_root || stmnt}` for verifier-side reduction.
     ///
     /// `new_root` must equal `Poseidon2::merge(prev_root, stmnt)` — i.e. what the in-circuit
-    /// hasher just computed and what `set_precompile_transcript_state` was called with. This
-    /// runs alongside `set_precompile_transcript_state` during the dual-write phase (step 3 of
-    /// the unified-transcript refactor) so the two views can be cross-checked before the old
-    /// transcript path is retired.
-    ///
-    /// Replay processors that don't carry a [`miden_core::deferred::DeferredState`] (e.g. trace
-    /// regeneration) implement this as a no-op — the DAG is built once during the main
-    /// processing pass.
-    fn record_log_precompile_node(&mut self, prev_root: Word, stmnt: Word, new_root: Word);
+    /// `log_precompile` hasher just computed. Replay processors that don't carry a
+    /// `DeferredState` (e.g. trace regeneration) only update the scalar root; the DAG is built
+    /// once during the main processing pass.
+    fn advance_deferred_root(&mut self, prev_root: Word, stmnt: Word, new_root: Word);
 
     /// Executes the decorators that should be executed before entering a node.
     fn execute_before_enter_decorators(

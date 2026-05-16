@@ -464,7 +464,7 @@ pub(super) fn op_log_precompile<P: Processor, T: Tracer>(
     tracer: &mut T,
 ) -> Result<OperationHelperRegisters, OperationError> {
     let stmnt: Word = processor.stack().get_word(4);
-    let state_prev = processor.precompile_transcript_state();
+    let state_prev = processor.deferred_root();
 
     // Hasher input: [RATE0 = STATE_PREV, RATE1 = STMNT, CAPACITY = ZERO].
     let mut hasher_state: [Felt; STATE_WIDTH] = [ZERO; 12];
@@ -477,8 +477,7 @@ pub(super) fn op_log_precompile<P: Processor, T: Tracer>(
     let out_rate1: Word = output_state[Hasher::RATE1_RANGE].try_into().unwrap();
     let out_cap: Word = output_state[Hasher::CAPACITY_RANGE].try_into().unwrap();
 
-    processor.set_precompile_transcript_state(state_new);
-    processor.record_log_precompile_node(state_prev, stmnt, state_new);
+    processor.advance_deferred_root(state_prev, stmnt, state_new);
 
     processor.stack_mut().set_word(0, &state_new);
     processor.stack_mut().set_word(4, &out_rate1);

@@ -157,7 +157,7 @@ fn deferred_end_to_end_register_eval_assert() {
         .execute_sync(&program, &mut host)
         .expect("execution must succeed");
 
-    let state = output.advice.deferred_state();
+    let state = &output.deferred_state;
     // Six reachable expression nodes, plus the predicate node, all interned by register.
     let expected_digests = [a_digest, b_digest, c_digest, d_digest, add_digest, mul_digest];
     for digest in expected_digests {
@@ -280,7 +280,7 @@ fn deferred_register_predicate_does_not_verify() {
     let output = build_processor()
         .execute_sync(&program, &mut host)
         .expect("register-only execution must succeed even with a bad predicate");
-    assert!(output.advice.deferred_state().contains(&mismatch.digest()));
+    assert!(output.deferred_state.contains(&mismatch.digest()));
 }
 
 #[test]
@@ -348,7 +348,7 @@ fn legacy_event_handler_still_works_with_deferred_infrastructure() {
         .expect("execution must succeed");
 
     assert_eq!(counter.load(std::sync::atomic::Ordering::SeqCst), 1);
-    assert_eq!(output.advice.deferred_state().nodes().len(), 1);
+    assert_eq!(output.deferred_state.nodes().len(), 1);
 }
 
 // CHUNK REGISTER E2E
@@ -457,7 +457,7 @@ fn chunk_register_reads_bulk_data_from_memory_and_interns_node() {
         .execute_sync(&program, &mut host)
         .expect("execution must succeed");
 
-    let state = output.advice.deferred_state();
+    let state = &output.deferred_state;
     assert!(
         state.contains(&expected_digest),
         "chunk node must be stored under its linear-hash digest"
@@ -517,5 +517,5 @@ fn chunk_register_with_zero_chunks_still_interns_a_node() {
     let output = build_chunk_processor()
         .execute_sync(&program, &mut host)
         .expect("execution must succeed");
-    assert!(output.advice.deferred_state().contains(&expected_digest));
+    assert!(output.deferred_state.contains(&expected_digest));
 }
