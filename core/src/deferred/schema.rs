@@ -81,25 +81,38 @@ impl TagInfo {
     }
 }
 
-// CHILD RESOLVER
+// REDUCE CTX
 // ================================================================================================
 
-/// Recursive resolver supplied to [`Schema::reduce`].
+/// Recursive context supplied to [`Schema::reduce`].
 ///
-/// A schema impl calls [`Self::resolve`] on each child digest it discovers in `node.payload`.
-/// The resolver returns that child's *canonical* form — already fully reduced — letting
-/// `reduce` read like a depth-first recursive function: "resolve lhs, resolve rhs, combine."
+/// Two capabilities:
 ///
-/// Because chunk-handling schemas canonicalise chunks to a digest-leaf expression in their
-/// `reduce`, parent op/assertion schemas only ever see expression-shaped canonical forms — they
-/// never have to pattern-match on chunk payloads themselves.
+/// - [`resolve`](Self::resolve) — walk a child digest to its canonical form. The framework
+///   reduces the child via `Schema::reduce` and interns both the input and the canonical along
+///   the way, so `reduce` reads as a depth-first recursive function: "resolve lhs, resolve rhs,
+///   combine." Because chunk-handling schemas canonicalise chunks to a digest-leaf expression,
+///   parent op/assertion schemas only ever see expression-shaped canonical forms.
+/// - [`intern`](Self::intern) — mint a brand-new canonical node into the DAG mid-`reduce`, and
+///   get its digest back so the returned canonical can reference it by child digest. Required
+///   for compound canonicals (e.g. a group element whose payload contains coordinate-leaf
+///   digests that were just computed). Idempotent by digest; the framework does NOT re-reduce
+///   the interned node, so it's the schema's responsibility to pass a node that is already in
+///   canonical form (e.g. a self-evaluating leaf).
 ///
-/// Why a trait (vs. a closure): `reduce` is itself recursive through the resolver — the
-/// resolver's implementation calls back into `Schema::reduce`. That requires a *named* type
-/// (a closure can't pass itself to a function it calls). The trait is the seam between
-/// prover-side and verifier-side resolvers — both back onto [`crate::deferred::DeferredState`].
-pub trait ChildResolver {
+/// Why a trait (vs. a closure): `reduce` is itself recursive through `resolve` — the context's
+/// implementation calls back into `Schema::reduce`. That requires a *named* type (a closure
+/// can't pass itself to a function it calls). The trait is the seam between prover-side and
+/// verifier-side reducers — both back onto [`crate::deferred::DeferredState`].
+pub trait ReduceCtx {
+    /// Walk `digest` to its canonical form. Errors with [`SchemaError::MissingNode`] if the
+    /// digest is not in the DAG.
     fn resolve(&mut self, digest: Digest) -> Result<Node, SchemaError>;
+
+    /// Intern `node` into the DAG and return its digest. `node` is assumed already canonical
+    /// — the framework does not re-reduce it. Idempotent: interning the same node twice is a
+    /// no-op.
+    fn intern(&mut self, node: Node) -> Digest;
 }
 
 // SCHEMA TRAIT
@@ -113,10 +126,11 @@ pub trait ChildResolver {
 ///   ([`NodeType`]). The tag alone fully determines this — payload is opaque to the schema at
 ///   classification time. A schema chooses its own tag encoding (e.g. `[type_prefix, role_marker,
 ///   length, …]`) and `decode` is the inverse.
-/// - [`reduce`](Self::reduce) reduces a node to its canonical form, using a [`ChildResolver`] to
-///   recursively reduce each child digest it references. Schema-defined payload-validity checks
-///   (e.g. "leaf limbs must be u32-canonical") live inside `reduce` — they fire when the node is
-///   actually used, which keeps the trait surface to two methods.
+/// - [`reduce`](Self::reduce) reduces a node to its canonical form, using a [`ReduceCtx`] to
+///   recursively reduce each child digest it references and (if needed) mint canonical
+///   auxiliary nodes whose digests appear in the returned canonical's payload. Schema-defined
+///   payload-validity checks (e.g. "leaf limbs must be u32-canonical") live inside `reduce` —
+///   they fire when the node is actually used, which keeps the trait surface to two methods.
 ///
 /// `reduce` takes `&self` only — the schema is stateless from the driver's perspective. Any
 /// per-schema memoization that ever becomes necessary should live in [`super::DeferredState`]
@@ -134,14 +148,17 @@ pub trait Schema: core::fmt::Debug + Send {
     fn decode(&self, tag: Tag) -> Result<TagInfo, SchemaError>;
 
     /// Reduces `node` to its canonical form. The schema picks the child digests off
-    /// `node.payload` and calls `children.resolve(d)` on each to get the corresponding
-    /// canonical-form child node back.
+    /// `node.payload` and calls `ctx.resolve(d)` on each to get the corresponding canonical-form
+    /// child node back. If the canonical form references *new* child digests (e.g. a producing
+    /// op on a compound-canonical app), the schema calls `ctx.intern(child)` to mint them.
     ///
     /// Output type must match `decode(node.tag).evaluates_to`:
     /// - **Self-evaluating leaf** (`evaluates_to == node.tag`): the schema returns a clone of
     ///   the node, optionally first validating the payload (e.g. limb canonicality).
     /// - **Producing op** (`evaluates_to == some_canonical_tag`): the schema resolves its
-    ///   children and combines them, returning a new node with the canonical tag.
+    ///   children and combines them, returning a new node with the canonical tag. Compound
+    ///   canonicals (those whose payload contains by-digest children) mint those children via
+    ///   `ctx.intern`.
     /// - **Predicate** (`evaluates_to == TRUE_TAG`): the schema resolves its operands, checks
     ///   the predicate, and returns [`super::true_node`] on success or
     ///   [`SchemaError::AssertionFailed`] on mismatch.
@@ -150,7 +167,7 @@ pub trait Schema: core::fmt::Debug + Send {
     ///
     /// `node` is borrowed (not consumed) so the framework can intern it by-move after this call
     /// returns — saving a chunk-sized clone on every reduction.
-    fn reduce(&self, node: &Node, children: &mut dyn ChildResolver) -> Result<Node, SchemaError>;
+    fn reduce(&self, node: &Node, ctx: &mut dyn ReduceCtx) -> Result<Node, SchemaError>;
 }
 
 // NOOP SCHEMA
@@ -169,11 +186,7 @@ impl Schema for NoopSchema {
         Err(SchemaError::NoSchemaInstalled)
     }
 
-    fn reduce(
-        &self,
-        _node: &Node,
-        _children: &mut dyn ChildResolver,
-    ) -> Result<Node, SchemaError> {
+    fn reduce(&self, _node: &Node, _ctx: &mut dyn ReduceCtx) -> Result<Node, SchemaError> {
         Err(SchemaError::NoSchemaInstalled)
     }
 }
@@ -193,11 +206,14 @@ mod tests {
         Felt::new_unchecked(0),
     ];
 
-    /// A child resolver that never gets called — used in schema-only tests.
-    struct NeverResolve;
-    impl ChildResolver for NeverResolve {
+    /// A reduce-context that never gets called — used in schema-only tests.
+    struct NeverCtx;
+    impl ReduceCtx for NeverCtx {
         fn resolve(&mut self, _digest: Digest) -> Result<Node, SchemaError> {
             panic!("NoopSchema must not request any children");
+        }
+        fn intern(&mut self, _node: Node) -> Digest {
+            panic!("NoopSchema must not mint any nodes");
         }
     }
 
@@ -208,7 +224,7 @@ mod tests {
         let node = Node::expression(TEST_TAG, payload);
 
         assert!(matches!(schema.decode(node.tag), Err(SchemaError::NoSchemaInstalled)));
-        let err = schema.reduce(&node, &mut NeverResolve).unwrap_err();
+        let err = schema.reduce(&node, &mut NeverCtx).unwrap_err();
         assert!(matches!(err, SchemaError::NoSchemaInstalled));
     }
 }

@@ -4,7 +4,7 @@ use alloc::{boxed::Box, collections::BTreeMap, vec::Vec};
 
 use crate::{
     Felt, ZERO,
-    deferred::{ChildResolver, DeferredState, Node, Schema, SchemaError, Tag, TagInfo},
+    deferred::{DeferredState, Node, ReduceCtx, Schema, SchemaError, Tag, TagInfo},
 };
 
 use super::{App, AppTag};
@@ -66,9 +66,9 @@ impl Schema for PrecompileSchema {
         app.decode(AppTag { node_disc: tag[1], imm: tag[2] })
     }
 
-    fn reduce(&self, node: &Node, children: &mut dyn ChildResolver) -> Result<Node, SchemaError> {
+    fn reduce(&self, node: &Node, ctx: &mut dyn ReduceCtx) -> Result<Node, SchemaError> {
         let app = self.apps.get(&node.tag[0]).ok_or(SchemaError::InvalidNode)?;
-        app.reduce(node, children)
+        app.reduce(node, ctx)
     }
 }
 
@@ -104,11 +104,7 @@ mod tests {
                 evaluates_to: self.tag(),
             })
         }
-        fn reduce(
-            &self,
-            node: &Node,
-            _children: &mut dyn ChildResolver,
-        ) -> Result<Node, SchemaError> {
+        fn reduce(&self, node: &Node, _ctx: &mut dyn ReduceCtx) -> Result<Node, SchemaError> {
             Ok(node.clone())
         }
     }

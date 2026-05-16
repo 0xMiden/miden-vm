@@ -18,7 +18,7 @@
 
 use blake3::Hasher;
 
-use super::{ChildResolver, DeferredState, Node, SchemaError, TagInfo};
+use super::{DeferredError, DeferredState, Node, ReduceCtx, SchemaError, Tag, TagInfo};
 use crate::Felt;
 
 mod composite;
@@ -26,6 +26,9 @@ pub use composite::PrecompileSchema;
 
 mod uint256;
 pub use uint256::Uint256;
+
+mod mock_group;
+pub use mock_group::MockGroup;
 
 // APP TAG
 // ================================================================================================
@@ -63,7 +66,27 @@ pub trait App: core::fmt::Debug + Send + Sync {
 
     /// Reduce a node owned by this app to canonical form. Same contract as
     /// [`super::Schema::reduce`] — see its docs for the leaf / op / predicate / chunk variants.
-    fn reduce(&self, node: &Node, children: &mut dyn ChildResolver) -> Result<Node, SchemaError>;
+    fn reduce(&self, node: &Node, ctx: &mut dyn ReduceCtx) -> Result<Node, SchemaError>;
+}
+
+// FIELD OPS
+// ================================================================================================
+
+/// Small surface a 256-bit field [`App`] exposes to consumers (e.g. [`MockGroup`]) that need to
+/// mint and decode field leaves without going through the schema's `reduce`. Intentionally
+/// minimal — extend as concrete cross-app needs arise.
+pub trait FieldOps: App {
+    /// Tag of a canonical field leaf.
+    fn leaf_tag() -> Tag;
+    /// Build a canonical field leaf node from `[u32; 8]` limbs (little-endian).
+    fn leaf_node(limbs: [u32; 8]) -> Node;
+    /// Decode `[u32; 8]` limbs from a canonical field leaf node. Errors if `node` is not a
+    /// canonical leaf of this field app.
+    fn limbs_of(node: &Node) -> Result<[u32; 8], DeferredError>;
+    /// Wrapping 256-bit add (mod 2^256).
+    fn wrap_add(a: [u32; 8], b: [u32; 8]) -> [u32; 8];
+    /// Wrapping 256-bit sub (mod 2^256).
+    fn wrap_sub(a: [u32; 8], b: [u32; 8]) -> [u32; 8];
 }
 
 // APP ID DERIVATION

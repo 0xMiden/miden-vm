@@ -3,7 +3,7 @@ use alloc::collections::BTreeMap;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use super::{BodyShape, ChildResolver, Digest, Node, NodePayload, Schema, SchemaError};
+use super::{BodyShape, Digest, Node, NodePayload, ReduceCtx, Schema, SchemaError};
 use crate::serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable};
 
 /// In-memory deferred-DAG state — the verifier's witness.
@@ -160,10 +160,11 @@ fn payload_matches_body(body: BodyShape, payload: &NodePayload) -> bool {
 // REDUCTION DRIVER
 // ================================================================================================
 
-/// Bound the [`DeferredState`] and [`Schema`] together so [`ChildResolver::resolve`] can recurse
+/// Bound the [`DeferredState`] and [`Schema`] together so [`ReduceCtx::resolve`] can recurse
 /// through [`Schema::reduce`] without aliasing borrow problems: the schema is held by shared
 /// reference, the state by exclusive reference. Each `resolve` call looks the child up,
-/// recursively reduces it, and interns every node it visits (except the TRUE sentinel).
+/// recursively reduces it, and interns every node it visits (except the TRUE sentinel); each
+/// `intern` call deposits a freshly-minted canonical node directly into the DAG.
 struct DfsResolver<'a> {
     state: &'a mut DeferredState,
     schema: &'a dyn Schema,
@@ -187,10 +188,16 @@ impl DfsResolver<'_> {
     }
 }
 
-impl ChildResolver for DfsResolver<'_> {
+impl ReduceCtx for DfsResolver<'_> {
     fn resolve(&mut self, digest: Digest) -> Result<Node, SchemaError> {
         let child = self.state.get(&digest)?.clone();
         self.reduce_and_intern(child)
+    }
+
+    fn intern(&mut self, node: Node) -> Digest {
+        let digest = node.digest();
+        self.state.intern(node);
+        digest
     }
 }
 

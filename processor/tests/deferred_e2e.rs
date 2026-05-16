@@ -10,8 +10,8 @@ use miden_assembly::Assembler;
 use miden_core::{
     ZERO,
     deferred::{
-        BodyShape, ChildResolver, Node, NodePayload, Payload, Schema, SchemaError, TRUE_DIGEST,
-        Tag, TagInfo, Uint256,
+        BodyShape, Node, NodePayload, Payload, ReduceCtx, Schema, SchemaError, TRUE_DIGEST, Tag,
+        TagInfo, Uint256,
     },
 };
 use miden_processor::{
@@ -388,7 +388,7 @@ impl Schema for ChunkTestSchema {
         }
     }
 
-    fn reduce(&self, node: &Node, _children: &mut dyn ChildResolver) -> Result<Node, SchemaError> {
+    fn reduce(&self, node: &Node, _ctx: &mut dyn ReduceCtx) -> Result<Node, SchemaError> {
         match &node.payload {
             NodePayload::Chunk(chunks) => {
                 let mut acc = [ZERO; 8];

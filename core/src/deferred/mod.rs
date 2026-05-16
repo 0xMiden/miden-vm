@@ -15,7 +15,7 @@
 mod schema;
 mod state;
 
-pub use schema::{BodyShape, ChildResolver, NoopSchema, Schema, SchemaError, TagInfo};
+pub use schema::{BodyShape, NoopSchema, ReduceCtx, Schema, SchemaError, TagInfo};
 pub use state::DeferredState;
 
 // Multi-app composite layer. The `App` trait + `PrecompileSchema` substrate is gated behind the
@@ -26,7 +26,7 @@ mod app;
 use alloc::{sync::Arc, vec::Vec};
 
 #[cfg(any(test, feature = "testing"))]
-pub use app::{App, AppTag, PrecompileSchema, Uint256, app_id_from};
+pub use app::{App, AppTag, FieldOps, MockGroup, PrecompileSchema, Uint256, app_id_from};
 use miden_crypto::{ZERO, hash::poseidon2::Poseidon2};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};

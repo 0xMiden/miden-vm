@@ -9,12 +9,12 @@
 use crate::{
     Felt, ZERO,
     deferred::{
-        BodyShape, ChildResolver, DeferredError, DeferredState, Digest, Node, Payload, Schema,
+        BodyShape, DeferredError, DeferredState, Digest, Node, Payload, ReduceCtx, Schema,
         SchemaError, TRUE_TAG, Tag, TagInfo, true_node,
     },
 };
 
-use super::{App, AppTag, app_id_from};
+use super::{App, AppTag, FieldOps, app_id_from};
 
 // PUBLIC APP TYPE
 // ================================================================================================
@@ -118,6 +118,24 @@ impl Uint256 {
     }
 }
 
+impl FieldOps for Uint256 {
+    fn leaf_tag() -> Tag {
+        Self::leaf_tag()
+    }
+    fn leaf_node(limbs: [u32; 8]) -> Node {
+        Self::leaf_node(limbs)
+    }
+    fn limbs_of(node: &Node) -> Result<[u32; 8], DeferredError> {
+        Self::limbs_of(node)
+    }
+    fn wrap_add(a: [u32; 8], b: [u32; 8]) -> [u32; 8] {
+        Self::wrap_add(a, b)
+    }
+    fn wrap_sub(a: [u32; 8], b: [u32; 8]) -> [u32; 8] {
+        Self::wrap_sub(a, b)
+    }
+}
+
 impl App for Uint256 {
     fn id(&self) -> Felt {
         Self::app_id()
@@ -146,18 +164,18 @@ impl App for Uint256 {
         Ok(TagInfo { body, evaluates_to })
     }
 
-    fn reduce(&self, node: &Node, children: &mut dyn ChildResolver) -> Result<Node, SchemaError> {
+    fn reduce(&self, node: &Node, ctx: &mut dyn ReduceCtx) -> Result<Node, SchemaError> {
         match Uint256Node::parse(node)? {
             // Leaf canonicality is checked at parse-time, deferred from register-time so that
             // malformed leaves are interned silently and only error out when used.
             Uint256Node::Leaf => Ok(node.clone()),
             Uint256Node::BinaryOp { op, lhs, rhs } => {
-                let a = leaf_limbs(&children.resolve(lhs)?)?;
-                let b = leaf_limbs(&children.resolve(rhs)?)?;
+                let a = leaf_limbs(&ctx.resolve(lhs)?)?;
+                let b = leaf_limbs(&ctx.resolve(rhs)?)?;
                 Ok(Self::leaf_node(op.apply(a, b)))
             },
             Uint256Node::Eq { lhs, rhs } => {
-                if children.resolve(lhs)? != children.resolve(rhs)? {
+                if ctx.resolve(lhs)? != ctx.resolve(rhs)? {
                     return Err(SchemaError::AssertionFailed);
                 }
                 Ok(true_node())
@@ -176,11 +194,11 @@ impl Schema for Uint256 {
         App::decode(self, AppTag { node_disc: tag[1], imm: tag[2] })
     }
 
-    fn reduce(&self, node: &Node, children: &mut dyn ChildResolver) -> Result<Node, SchemaError> {
+    fn reduce(&self, node: &Node, ctx: &mut dyn ReduceCtx) -> Result<Node, SchemaError> {
         if node.tag[0] != Self::app_id() {
             return Err(SchemaError::InvalidNode);
         }
-        App::reduce(self, node, children)
+        App::reduce(self, node, ctx)
     }
 }
 
