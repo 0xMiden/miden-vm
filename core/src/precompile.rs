@@ -259,19 +259,34 @@ impl PrecompileVerifierRegistry {
         }
     }
 
-    /// Verifies all precompile requests and returns the resulting deferred-DAG root after folding
-    /// every per-call statement into the rolling state in order.
+    /// Verifies each precompile request and checks its recomputed statement against the
+    /// corresponding entry in `expected_statements` (paired by index — `requests[i]` must
+    /// produce a commitment whose statement equals `expected_statements[i]`).
+    ///
+    /// Intended for the verifier path: the expected statements come from walking the
+    /// deferred-DAG's AND-chain, and this method confirms each one is backed by a valid
+    /// precompile call.
     ///
     /// # Errors
     /// Returns a [`PrecompileVerificationError`] if:
+    /// - The two slices have different lengths
     /// - No verifier is registered for a request's event ID
     /// - A verifier fails to verify its request
-    pub fn recompute_transcript_state(
+    /// - A request's recomputed statement does not match the expected statement
+    pub fn verify_against_statements(
         &self,
         requests: &[PrecompileRequest],
-    ) -> Result<PrecompileTranscriptState, PrecompileVerificationError> {
-        let mut state = PrecompileTranscriptState::default();
-        for (index, PrecompileRequest { event_id, calldata }) in requests.iter().enumerate() {
+        expected_statements: &[Word],
+    ) -> Result<(), PrecompileVerificationError> {
+        if requests.len() != expected_statements.len() {
+            return Err(PrecompileVerificationError::RequestCountMismatch {
+                expected: expected_statements.len(),
+                actual: requests.len(),
+            });
+        }
+        for (index, (PrecompileRequest { event_id, calldata }, expected)) in
+            requests.iter().zip(expected_statements.iter()).enumerate()
+        {
             let (event_name, verifier) = self.verifiers.get(event_id).ok_or(
                 PrecompileVerificationError::VerifierNotFound { index, event_id: *event_id },
             )?;
@@ -283,9 +298,11 @@ impl PrecompileVerifierRegistry {
                     error,
                 }
             })?;
-            state = Poseidon2::merge(&[state, precompile_commitment.statement()]);
+            if precompile_commitment.statement() != *expected {
+                return Err(PrecompileVerificationError::StatementMismatch { index });
+            }
         }
-        Ok(state)
+        Ok(())
     }
 }
 
@@ -338,6 +355,14 @@ pub enum PrecompileVerificationError {
         #[source]
         error: PrecompileError,
     },
+
+    #[error("expected {expected} precompile requests but got {actual}")]
+    RequestCountMismatch { expected: usize, actual: usize },
+
+    #[error(
+        "recomputed statement for request #{index} does not match the deferred-DAG transcript"
+    )]
+    StatementMismatch { index: usize },
 }
 
 // TESTS

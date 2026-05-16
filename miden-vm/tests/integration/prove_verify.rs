@@ -663,9 +663,8 @@ mod fast_parallel {
                     Arc::new(DummyLogPrecompileVerifier::new(fixture)),
                 )
             });
-        let transcript_state = verifier_registry
-            .recompute_transcript_state(proof.precompile_requests())
-            .expect("failed to recompute deferred commitment");
+        // Compute the expected rolling transcript root by folding each fixture's statement in
+        // the order they were emitted. The verifier walks the same chain inside the proof.
         let mut expected_transcript = PrecompileTranscriptState::default();
         for fixture in &fixtures {
             expected_transcript = miden_core::crypto::hash::Poseidon2::merge(&[
@@ -673,7 +672,11 @@ mod fast_parallel {
                 fixture.commitment.statement(),
             ]);
         }
-        assert_eq!(transcript_state, expected_transcript);
+        assert_eq!(
+            proof.deferred_state().root(),
+            expected_transcript,
+            "proof's deferred-DAG root must match the locally-folded transcript state",
+        );
 
         LoggedPrecompileProofFixture {
             program,

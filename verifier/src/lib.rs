@@ -8,7 +8,11 @@ extern crate std;
 use alloc::{boxed::Box, vec::Vec};
 
 use miden_air::{ProcessorAir, PublicInputs, config};
-use miden_core::{Felt, WORD_SIZE, field::QuadFelt};
+use miden_core::{
+    Felt, WORD_SIZE,
+    deferred::{Digest, DeferredState, TRUE_DIGEST, TRUE_TAG},
+    field::QuadFelt,
+};
 use miden_crypto::stark::{
     StarkConfig, air::VarLenPublicInputs, challenger::CanObserve, lmcs::Lmcs, proof::StarkProof,
 };
@@ -77,11 +81,11 @@ pub fn verify(
 /// against the commitment computed by the VM.
 ///
 /// # Returns
-/// Returns a tuple `(security_level, transcript_state)` where:
+/// Returns a tuple `(security_level, deferred_root)` where:
 /// - `security_level`: The security level (in bits) of the verified proof.
-/// - `transcript_state`: A [`Word`] containing the rolling commitment to all precompile requests,
-///   computed by recomputing and recording each precompile commitment in a transcript. The state is
-///   itself a complete digest — no separate finalization step is needed.
+/// - `deferred_root`: A [`Word`] containing the rolling commitment to all precompile requests
+///   (the final root of the deferred-DAG transcript chain, recovered from the proof and checked
+///   against the AND-chain walk).
 ///
 /// # Errors
 /// Returns any error produced by [`verify`], as well as any errors resulting from precompile
@@ -96,14 +100,22 @@ pub fn verify_with_precompiles(
 ) -> Result<(u32, PrecompileTranscriptState), VerificationError> {
     let security_level = proof.security_level();
 
-    let (hash_fn, proof_bytes, precompile_requests, _deferred_state) = proof.into_parts();
+    let (hash_fn, proof_bytes, precompile_requests, deferred_state) = proof.into_parts();
 
-    // Recompute the rolling deferred-DAG root by verifying all precompile requests and folding
-    // their per-call statements in order. If no verifiers were provided (e.g. when called from
-    // `verify()`) but the proof contained requests, returns a `NoVerifierFound` error.
-    let pc_transcript_state = precompile_verifiers
-        .recompute_transcript_state(&precompile_requests)
+    // Walk the deferred-DAG's AND-chain from `root` down to `TRUE_DIGEST`, collecting each
+    // `log_precompile` statement (oldest first). Every AND-node is structurally re-validated:
+    // its own digest must equal Poseidon2::merge(prev_root, stmnt), its tag must be TRUE_TAG,
+    // and the chain must terminate at TRUE_DIGEST.
+    let statements = walk_deferred_and_chain(&deferred_state)?;
+
+    // Each statement must match the commitment of the corresponding PrecompileRequest. If no
+    // verifiers were registered but the proof carries requests, the registry returns
+    // `VerifierNotFound` at the first request.
+    precompile_verifiers
+        .verify_against_statements(&precompile_requests, &statements)
         .map_err(VerificationError::PrecompileVerificationError)?;
+
+    let pc_transcript_state = deferred_state.root();
 
     verify_stark(
         program_info,
@@ -119,6 +131,47 @@ pub fn verify_with_precompiles(
 
 // HELPER FUNCTIONS
 // ================================================================================================
+
+/// Walks the AND-chain rooted at `deferred_state.root()` down to [`TRUE_DIGEST`], returning the
+/// per-step `log_precompile` statements in execution order (oldest first).
+///
+/// Each AND-node is structurally re-validated: its key in the map must equal its content-addressed
+/// digest, its tag must be [`TRUE_TAG`], and its 8-felt payload decodes as `(prev_root || stmnt)`.
+/// A broken chain (missing node, wrong tag, digest mismatch) surfaces as
+/// [`VerificationError::DeferredChainCorrupt`].
+fn walk_deferred_and_chain(
+    deferred_state: &DeferredState,
+) -> Result<Vec<Digest>, VerificationError> {
+    let mut statements = Vec::new();
+    let mut current = deferred_state.root();
+    while current != TRUE_DIGEST {
+        let node = deferred_state
+            .get(&current)
+            .map_err(|_| VerificationError::DeferredChainCorrupt {
+                reason: DeferredChainErrorReason::MissingNode { digest: current },
+            })?;
+        if node.tag != TRUE_TAG {
+            return Err(VerificationError::DeferredChainCorrupt {
+                reason: DeferredChainErrorReason::NonAndNode { digest: current },
+            });
+        }
+        if node.digest() != current {
+            return Err(VerificationError::DeferredChainCorrupt {
+                reason: DeferredChainErrorReason::DigestMismatch { expected: current },
+            });
+        }
+        let payload = node.expression_payload().ok_or(
+            VerificationError::DeferredChainCorrupt {
+                reason: DeferredChainErrorReason::NonExpressionPayload { digest: current },
+            },
+        )?;
+        let (prev_root, stmnt) = payload.binary_op_children();
+        statements.push(stmnt);
+        current = prev_root;
+    }
+    statements.reverse();
+    Ok(statements)
+}
 
 fn verify_stark(
     program_info: ProgramInfo,
@@ -173,6 +226,21 @@ pub enum VerificationError {
     StarkVerificationError(Word, #[source] Box<StarkVerificationError>),
     #[error("failed to verify precompile calls")]
     PrecompileVerificationError(#[source] PrecompileVerificationError),
+    #[error("deferred-DAG transcript chain is corrupt: {reason}")]
+    DeferredChainCorrupt { reason: DeferredChainErrorReason },
+}
+
+/// Specific failure mode encountered while walking the deferred-DAG AND-chain.
+#[derive(Debug, thiserror::Error)]
+pub enum DeferredChainErrorReason {
+    #[error("expected AND-node {digest} is not present in the deferred state")]
+    MissingNode { digest: Digest },
+    #[error("node {digest} is reachable from the transcript root but is not an AND-node")]
+    NonAndNode { digest: Digest },
+    #[error("node keyed by {expected} does not hash to its key")]
+    DigestMismatch { expected: Digest },
+    #[error("AND-node {digest} has a chunk-bodied payload (expected expression body)")]
+    NonExpressionPayload { digest: Digest },
 }
 
 // STARK PROOF VERIFICATION

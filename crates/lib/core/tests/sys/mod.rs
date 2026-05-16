@@ -142,17 +142,20 @@ fn log_precompile_request_procedure() {
     assert_eq!(requests[0].event_id(), event_id);
     assert_eq!(requests[0].calldata(), calldata.as_slice());
 
-    let verifier_registry = PrecompileVerifierRegistry::new()
-        .with_verifier(&EVENT_NAME, Arc::new(DummyLogPrecompileVerifier { commitment }));
-    let transcript_state = verifier_registry
-        .recompute_transcript_state(requests)
-        .expect("failed to recompute deferred commitment");
-
+    // Compute the expected rolling root locally: folding `commitment.statement()` into the
+    // initial TRUE_DIGEST yields the deferred-DAG root after one log_precompile call.
     let expected_transcript_state = Poseidon2::merge(&[
         PrecompileTranscriptState::default(),
         commitment.statement(),
     ]);
-    assert_eq!(expected_transcript_state, transcript_state);
+
+    // The verifier-side registry now exposes a stmnt-checked path; exercise it directly to
+    // confirm the recorded request → commitment → statement chain holds.
+    let verifier_registry = PrecompileVerifierRegistry::new()
+        .with_verifier(&EVENT_NAME, Arc::new(DummyLogPrecompileVerifier { commitment }));
+    verifier_registry
+        .verify_against_statements(requests, &[commitment.statement()])
+        .expect("registered request must verify against its statement");
 
     // Prove/verify the same program to ensure deferred requests are handled in the STARK proof.
     let program: Program = Assembler::default()
@@ -183,25 +186,15 @@ fn log_precompile_request_procedure() {
     // Proof should include the single deferred request that we expect.
     assert_eq!(proof.precompile_requests().len(), 1);
 
+    // The proof carries the deferred-DAG root directly; it must match what we computed locally.
+    assert_eq!(
+        proof.deferred_state().root(),
+        expected_transcript_state,
+        "proof's deferred-DAG root must match the locally-computed transcript state",
+    );
+
     let verifier_registry = PrecompileVerifierRegistry::new()
         .with_verifier(&EVENT_NAME, Arc::new(DummyLogPrecompileVerifier { commitment }));
-    let verifier_transcript_state = verifier_registry
-        .recompute_transcript_state(proof.precompile_requests())
-        .expect("failed to recompute deferred commitment (proof)");
-    assert_eq!(
-        verifier_transcript_state, transcript_state,
-        "deferred commitment mismatch in proof"
-    );
-
-    let expected_proof_transcript_state = Poseidon2::merge(&[
-        PrecompileTranscriptState::default(),
-        commitment.statement(),
-    ]);
-    assert_eq!(
-        expected_proof_transcript_state, transcript_state,
-        "deferred commitment mismatch in proof"
-    );
-
     let program_info = ProgramInfo::from(program);
     let (_, pc_transcript_state) = miden_verifier::verify_with_precompiles(
         program_info,
@@ -211,7 +204,7 @@ fn log_precompile_request_procedure() {
         &verifier_registry,
     )
     .expect("proof verification with precompiles failed");
-    assert_eq!(transcript_state, pc_transcript_state);
+    assert_eq!(expected_transcript_state, pc_transcript_state);
 }
 
 #[derive(Clone)]
