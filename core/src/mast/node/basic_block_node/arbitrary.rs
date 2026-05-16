@@ -1622,3 +1622,170 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod proptests {
+    use alloc::{collections::BTreeSet, vec, vec::Vec};
+
+    use proptest::prelude::*;
+
+    use super::{MastForestParams, mast_forest_and_kernel_strategy};
+    use crate::mast::{MastForest, MastNode, MastNodeExt, MastNodeId};
+
+    /// Returns the IDs of the immediate children of `id` in `forest`.
+    ///
+    /// Mirrors the child layout used by [`super::RootPool::roots_not_reaching`]: structural
+    /// children for control-flow nodes, the callee for `Call`, and no children for leaves
+    /// (`Block`, `External`, `Dyn`).
+    fn children_of(forest: &MastForest, id: MastNodeId) -> Vec<MastNodeId> {
+        match &forest[id] {
+            MastNode::Block(_) | MastNode::External(_) | MastNode::Dyn(_) => Vec::new(),
+            MastNode::Join(j) => vec![j.first(), j.second()],
+            MastNode::Split(s) => vec![s.on_true(), s.on_false()],
+            MastNode::Loop(l) => vec![l.body()],
+            MastNode::Call(c) => vec![c.callee()],
+        }
+    }
+
+    /// Returns the procedure root that contains `id` in its reachable subtree, or `None` if
+    /// no root reaches it.
+    fn containing_root(forest: &MastForest, id: MastNodeId) -> Option<MastNodeId> {
+        forest.procedure_roots().iter().copied().find(|&root| {
+            let mut stack = vec![root];
+            let mut seen = BTreeSet::new();
+            while let Some(n) = stack.pop() {
+                if n == id {
+                    return true;
+                }
+                if !seen.insert(n) {
+                    continue;
+                }
+                stack.extend(children_of(forest, n));
+            }
+            false
+        })
+    }
+
+    // --- property tests -------------------------------------------------------------------------
+
+    proptest! {
+        #![proptest_config(ProptestConfig { cases: 100, ..ProptestConfig::default() })]
+
+        /// In `Executable` mode the generator must never emit a Dyn node, even when
+        /// `max_dyns` is non-zero.
+        #[test]
+        fn no_dyn_nodes_in_executable_mode(
+            forest in any_with::<MastForest>(MastForestParams {
+                max_dyns: 6,
+                ..Default::default()
+            })
+        ) {
+            for node in forest.nodes() {
+                prop_assert!(!matches!(node, MastNode::Dyn(_)), "Executable forest contains a Dyn node");
+            }
+        }
+
+        /// Every external node must have its digest match the digest of some procedure root
+        /// in the same forest, so the VM can resolve the call locally.
+        #[test]
+        fn externals_resolve_to_a_local_root(
+            forest in any_with::<MastForest>(MastForestParams::default())
+        ) {
+            let root_digests: BTreeSet<_> = forest
+                .procedure_roots()
+                .iter()
+                .map(|&root| forest[root].digest())
+                .collect();
+            for node in forest.nodes() {
+                if let MastNode::External(ext) = node {
+                    prop_assert!(
+                        root_digests.contains(&ext.digest()),
+                        "external digest does not match any procedure root in the forest",
+                    );
+                }
+            }
+        }
+
+        /// The directed graph induced by `external -> resolved root` must be acyclic across
+        /// procedure roots, so external chains cannot loop back on themselves.
+        #[test]
+        fn externals_form_a_dag(
+            forest in any_with::<MastForest>(MastForestParams {
+                max_externals: 6,
+                ..Default::default()
+            })
+        ) {
+            // Build adjacency: for each external, the source procedure root that contains it
+            // points to the target procedure root whose digest the external matches.
+            let mut edges: Vec<(MastNodeId, MastNodeId)> = Vec::new();
+            for (idx, node) in forest.nodes().iter().enumerate() {
+                let MastNode::External(ext) = node else { continue };
+                let id = MastNodeId::new_unchecked(idx as u32);
+                let Some(src_root) = containing_root(&forest, id) else { continue };
+                let target_digest = ext.digest();
+                let Some(tgt_root) = forest
+                    .procedure_roots()
+                    .iter()
+                    .copied()
+                    .find(|&r| forest[r].digest() == target_digest)
+                else {
+                    continue;
+                };
+                edges.push((src_root, tgt_root));
+            }
+
+            // DFS with white/gray/black coloring to detect a back-edge.
+            #[derive(Clone, Copy, PartialEq, Eq)]
+            enum Color { White, Gray, Black }
+            let mut color: alloc::collections::BTreeMap<MastNodeId, Color> =
+                forest.procedure_roots().iter().map(|&r| (r, Color::White)).collect();
+
+            fn visit(
+                node: MastNodeId,
+                edges: &[(MastNodeId, MastNodeId)],
+                color: &mut alloc::collections::BTreeMap<MastNodeId, Color>,
+            ) -> bool {
+                color.insert(node, Color::Gray);
+                for &(src, tgt) in edges.iter().filter(|(s, _)| *s == node) {
+                    let _ = src;
+                    match color.get(&tgt).copied().unwrap_or(Color::White) {
+                        Color::Gray => return false,
+                        Color::White => {
+                            if !visit(tgt, edges, color) {
+                                return false;
+                            }
+                        },
+                        Color::Black => {},
+                    }
+                }
+                color.insert(node, Color::Black);
+                true
+            }
+
+            let roots: Vec<MastNodeId> = forest.procedure_roots().to_vec();
+            for r in roots {
+                if color.get(&r).copied().unwrap_or(Color::White) == Color::White {
+                    prop_assert!(visit(r, &edges, &mut color), "external graph contains a cycle");
+                }
+            }
+        }
+
+        /// Every syscall's callee digest must be present in the paired kernel.
+        #[test]
+        fn syscalls_target_a_kernel_procedure(
+            (forest, kernel) in mast_forest_and_kernel_strategy(MastForestParams::default())
+        ) {
+            for node in forest.nodes() {
+                let MastNode::Call(call) = node else { continue };
+                if !call.is_syscall() {
+                    continue;
+                }
+                let callee_digest = forest[call.callee()].digest();
+                prop_assert!(
+                    kernel.contains_proc(callee_digest),
+                    "syscall callee digest is not present in the paired kernel",
+                );
+            }
+        }
+    }
+}
