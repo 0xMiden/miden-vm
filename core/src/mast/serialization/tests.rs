@@ -1681,6 +1681,7 @@ fn test_untrusted_hashless_external_parse_and_validate() {
 }
 
 mod proptests {
+    use arbitrary::MastForestParams;
     use proptest::{prelude::*, strategy::Just};
 
     use super::*;
@@ -1688,8 +1689,6 @@ mod proptests {
         mast::{BasicBlockNodeBuilder, MastForest, MastNode, arbitrary},
         operations::Decorator,
     };
-
-    use arbitrary::MastForestParams;
 
     proptest! {
         /// Property test: any MastForest should round-trip through serialization

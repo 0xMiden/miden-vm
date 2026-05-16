@@ -1152,8 +1152,10 @@ proptest! {
 
 #[cfg(test)]
 mod arbitrary_helpers {
-    use super::super::arbitrary::{KernelPool, RootPool};
-    use super::*;
+    use super::{
+        super::arbitrary::{KernelPool, RootPool},
+        *,
+    };
 
     /// Builds a small basic block from a single operation, helper for the tests below.
     fn block(op: Operation) -> BasicBlockNode {
