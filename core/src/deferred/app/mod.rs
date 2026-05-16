@@ -30,6 +30,9 @@ pub use uint256::Uint256;
 mod mock_group;
 pub use mock_group::MockGroup;
 
+mod mock_hash;
+pub use mock_hash::MockHash;
+
 // APP TAG
 // ================================================================================================
 

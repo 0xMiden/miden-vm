@@ -26,7 +26,7 @@ mod app;
 use alloc::{sync::Arc, vec::Vec};
 
 #[cfg(any(test, feature = "testing"))]
-pub use app::{App, AppTag, FieldOps, MockGroup, PrecompileSchema, Uint256, app_id_from};
+pub use app::{App, AppTag, FieldOps, MockGroup, MockHash, PrecompileSchema, Uint256, app_id_from};
 use miden_crypto::{ZERO, hash::poseidon2::Poseidon2};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
