@@ -1389,3 +1389,236 @@ impl Arbitrary for Kernel {
             .boxed()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use alloc::{vec, vec::Vec};
+
+    use proptest::{
+        strategy::{BoxedStrategy, Strategy},
+        test_runner::{Config as ProptestConfig, Reason, TestRunner},
+    };
+
+    use super::{MastForestGenerationMode, MastForestParams, mast_forest_and_kernel_strategy};
+    use crate::{Felt, Word, mast::{MastForest, MastNode}, program::Kernel};
+
+    /// Returns a deterministic [`Word`] built from `seed`.
+    fn word(seed: u64) -> Word {
+        Word::new([
+            Felt::new_unchecked(seed),
+            Felt::new_unchecked(seed.wrapping_add(1)),
+            Felt::new_unchecked(seed.wrapping_add(2)),
+            Felt::new_unchecked(seed.wrapping_add(3)),
+        ])
+    }
+
+    /// Returns a [`TestRunner`] with `max_local_rejects = 1`.
+    ///
+    /// The validity predicate in [`mast_forest_and_kernel_strategy`] is seed-invariant, so
+    /// one rejection is enough to confirm a malformed precondition without exhausting the
+    /// default 65,536-retry budget.
+    fn rejection_runner() -> TestRunner {
+        TestRunner::new(ProptestConfig { max_local_rejects: 1, ..Default::default() })
+    }
+
+    /// Draws one concrete sample from `strategy`.
+    fn sample(strategy: &BoxedStrategy<(MastForest, Kernel)>) -> (MastForest, Kernel) {
+        let mut runner = TestRunner::default();
+        strategy.new_tree(&mut runner).expect("strategy must not reject a default seed").current()
+    }
+
+    /// Asserts that `result` is `Err(Reason)`.
+    fn assert_rejected<T>(result: Result<T, Reason>) {
+        match result {
+            Err(_) => {},
+            Ok(_) => panic!("expected Err(Reason), got Ok"),
+        }
+    }
+
+    // --- compile-time surface check -------------------------------------------------------------
+
+    /// Fails to compile if any field of [`MastForestParams`] or the signature of
+    /// [`mast_forest_and_kernel_strategy`] changes without a corresponding update here.
+    #[allow(dead_code, clippy::no_effect_underscore_binding)]
+    fn _compile_test_api_shape() {
+        let MastForestParams {
+            decorators,
+            blocks,
+            max_joins,
+            max_splits,
+            max_loops,
+            max_calls,
+            max_syscalls,
+            max_externals,
+            max_dyns,
+            mode,
+            kernel_procedures,
+        } = MastForestParams::default();
+
+        let _strategy: BoxedStrategy<(MastForest, Kernel)> =
+            mast_forest_and_kernel_strategy(MastForestParams::default());
+
+        let _: MastForestGenerationMode = mode;
+        let _ = (
+            decorators,
+            &blocks,
+            max_joins,
+            max_splits,
+            max_loops,
+            max_calls,
+            max_syscalls,
+            max_externals,
+            max_dyns,
+            &kernel_procedures,
+        );
+    }
+
+    // --- unit tests -----------------------------------------------------------------------------
+
+    /// Verifies that [`MastForestParams::default()`] produces the expected field values.
+    #[test]
+    fn mast_forest_params_default_values() {
+        let p = MastForestParams::default();
+
+        assert_eq!(p.mode, MastForestGenerationMode::Executable);
+        assert_eq!(p.kernel_procedures, None);
+        assert_eq!(p.max_dyns, 0);
+        assert_eq!(p.max_syscalls, 1);
+        assert_eq!(p.max_externals, 1);
+        assert_eq!(p.decorators, 3);
+        assert_eq!(p.blocks, 1..=3);
+        assert_eq!(p.max_joins, 1);
+        assert_eq!(p.max_splits, 1);
+        assert_eq!(p.max_loops, 1);
+        assert_eq!(p.max_calls, 1);
+    }
+
+    /// Verifies that duplicate `kernel_procedures` entries are rejected by the strategy.
+    #[test]
+    fn kernel_procedures_with_duplicates_is_rejected() {
+        let dup = word(0);
+        let params = MastForestParams {
+            kernel_procedures: Some(vec![dup, dup]),
+            ..Default::default()
+        };
+        let result = mast_forest_and_kernel_strategy(params).new_tree(&mut rejection_runner());
+        assert_rejected(result);
+    }
+
+    /// Verifies that a `kernel_procedures` list longer than [`Kernel::MAX_NUM_PROCEDURES`]
+    /// is rejected by the strategy.
+    #[test]
+    fn kernel_procedures_over_max_is_rejected() {
+        let params = MastForestParams {
+            kernel_procedures: Some(
+                (0u64..=Kernel::MAX_NUM_PROCEDURES as u64).map(word).collect(),
+            ),
+            ..Default::default()
+        };
+        let result = mast_forest_and_kernel_strategy(params).new_tree(&mut rejection_runner());
+        assert_rejected(result);
+    }
+
+    /// Verifies that a `kernel_procedures` list that is both too long and contains a
+    /// duplicate is rejected by the strategy.
+    #[test]
+    fn kernel_procedures_with_duplicates_and_over_max_is_rejected() {
+        let params = MastForestParams {
+            kernel_procedures: Some(
+                (0u64..Kernel::MAX_NUM_PROCEDURES as u64)
+                    .map(word)
+                    .chain(core::iter::once(word(0)))
+                    .collect(),
+            ),
+            ..Default::default()
+        };
+        let result = mast_forest_and_kernel_strategy(params).new_tree(&mut rejection_runner());
+        assert_rejected(result);
+    }
+
+    /// Verifies that [`MastForestGenerationMode::StructureOnly`] emits dyn, external, and
+    /// syscall nodes when their caps are non-zero.
+    #[test]
+    fn structure_only_generates_dyn_external_and_syscall_nodes() {
+        let params = MastForestParams {
+            mode: MastForestGenerationMode::StructureOnly,
+            max_syscalls: 3,
+            max_externals: 3,
+            max_dyns: 3,
+            ..Default::default()
+        };
+        let strategy = mast_forest_and_kernel_strategy(params);
+
+        let (mut saw_dyn, mut saw_external, mut saw_syscall) = (false, false, false);
+        for _ in 0..256 {
+            let (forest, _) = sample(&strategy);
+            for node in forest.nodes() {
+                match node {
+                    MastNode::Dyn(_) => saw_dyn = true,
+                    MastNode::External(_) => saw_external = true,
+                    MastNode::Call(c) if c.is_syscall() => saw_syscall = true,
+                    _ => {},
+                }
+            }
+            if saw_dyn && saw_external && saw_syscall {
+                break;
+            }
+        }
+
+        assert!(saw_dyn, "no Dyn node observed across 256 samples");
+        assert!(saw_external, "no External node observed across 256 samples");
+        assert!(saw_syscall, "no syscall node observed across 256 samples");
+    }
+
+    /// Verifies that [`MastForestGenerationMode::StructureOnly`] emits both `new_dyn` and
+    /// `new_dyncall` variants when `max_dyns` is non-zero.
+    #[test]
+    fn structure_only_emits_both_dyn_variants() {
+        let params = MastForestParams {
+            mode: MastForestGenerationMode::StructureOnly,
+            max_dyns: 6,
+            ..Default::default()
+        };
+        let strategy = mast_forest_and_kernel_strategy(params);
+
+        let (mut saw_dynexec, mut saw_dyncall) = (false, false);
+        for _ in 0..256 {
+            let (forest, _) = sample(&strategy);
+            for node in forest.nodes() {
+                if let MastNode::Dyn(d) = node {
+                    if d.is_dyncall() { saw_dyncall = true; } else { saw_dynexec = true; }
+                }
+            }
+            if saw_dynexec && saw_dyncall {
+                break;
+            }
+        }
+
+        assert!(saw_dynexec, "no dynexec node observed across 256 samples");
+        assert!(saw_dyncall, "no dyncall node observed across 256 samples");
+    }
+
+    /// Verifies that an empty user supplied kernel causes all syscalls to be skipped and
+    /// no `Call` nodes are emitted when `max_calls = 0`.
+    #[test]
+    fn empty_user_kernel_skips_syscalls_without_call_fallback() {
+        let params = MastForestParams {
+            kernel_procedures: Some(Vec::new()),
+            max_syscalls: 5,
+            max_calls: 0,
+            ..Default::default()
+        };
+        let strategy = mast_forest_and_kernel_strategy(params);
+
+        for _ in 0..64 {
+            let (forest, kernel) = sample(&strategy);
+            assert!(kernel.proc_hashes().is_empty());
+            for node in forest.nodes() {
+                assert!(
+                    !matches!(node, MastNode::Call(_)),
+                    "unexpected Call node with empty kernel and max_calls=0"
+                );
+            }
+        }
+    }
+}
