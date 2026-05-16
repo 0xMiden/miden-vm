@@ -33,6 +33,9 @@ pub use mock_group::MockGroup;
 mod mock_hash;
 pub use mock_hash::MockHash;
 
+mod mock_sig;
+pub use mock_sig::MockSig;
+
 // APP TAG
 // ================================================================================================
 
