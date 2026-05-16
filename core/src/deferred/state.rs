@@ -199,14 +199,14 @@ mod tests {
     use super::*;
     use crate::{
         Felt, Word, ZERO,
-        deferred::{Field0Handler, Payload, TRUE_DIGEST, Tag},
+        deferred::{Payload, TRUE_DIGEST, Tag, Uint256},
     };
 
-    fn field0_leaf_node(low: u64) -> Node {
-        let mut limbs = [Felt::from_u32(0); 8];
-        limbs[0] = Felt::from_u32(low as u32);
-        limbs[1] = Felt::from_u32((low >> 32) as u32);
-        Node::expression(Field0Handler::LEAF, Payload::new(limbs))
+    fn uint256_leaf_node(low: u64) -> Node {
+        let mut limbs = [0u32; 8];
+        limbs[0] = low as u32;
+        limbs[1] = (low >> 32) as u32;
+        Uint256::leaf_node(limbs)
     }
 
     fn dummy_digest(seed: u64) -> Word {
@@ -238,8 +238,8 @@ mod tests {
     #[test]
     fn register_leaf_stores_it() {
         let mut state = DeferredState::new();
-        let schema = Field0Handler;
-        let node = field0_leaf_node(7);
+        let schema = Uint256;
+        let node = uint256_leaf_node(7);
         let digest = state.register(&schema, node.clone()).unwrap();
         assert_eq!(digest, node.digest());
         assert_eq!(state.get(&digest).unwrap(), &node);
@@ -248,8 +248,8 @@ mod tests {
     #[test]
     fn idempotent_reinsert_succeeds() {
         let mut state = DeferredState::new();
-        let schema = Field0Handler;
-        let node = field0_leaf_node(7);
+        let schema = Uint256;
+        let node = uint256_leaf_node(7);
         let d1 = state.register(&schema, node.clone()).unwrap();
         let d2 = state.register(&schema, node).unwrap();
         assert_eq!(d1, d2);
@@ -259,10 +259,9 @@ mod tests {
     #[test]
     fn register_with_unhandled_tag_errors() {
         let mut state = DeferredState::new();
-        let schema = Field0Handler;
-        // Field0 prefix + unknown op-suffix: schema decode returns Err.
-        let bad_tag: Tag =
-            [Field0Handler::LEAF[0], Field0Handler::LEAF[1], Felt::from_u32(99), ZERO];
+        let schema = Uint256;
+        // Uint256 app_id + unknown discriminant: schema decode returns Err.
+        let bad_tag: Tag = [Uint256::app_id(), Felt::from_u32(99), ZERO, ZERO];
         let bad = Node::expression(bad_tag, Payload::new([Felt::from_u32(0); 8]));
         let err = state.register(&schema, bad);
         assert!(matches!(err, Err(SchemaError::InvalidNode)));
@@ -271,10 +270,10 @@ mod tests {
     #[test]
     fn register_op_stores_op_node() {
         let mut state = DeferredState::new();
-        let schema = Field0Handler;
-        let a = state.register(&schema, field0_leaf_node(3)).unwrap();
-        let b = state.register(&schema, field0_leaf_node(4)).unwrap();
-        let op = Node::expression(Field0Handler::ADD, Payload::binary_op(a, b));
+        let schema = Uint256;
+        let a = state.register(&schema, uint256_leaf_node(3)).unwrap();
+        let b = state.register(&schema, uint256_leaf_node(4)).unwrap();
+        let op = Node::expression(Uint256::add_tag(), Payload::binary_op(a, b));
         let digest = state.register(&schema, op).unwrap();
         assert!(state.contains(&digest));
     }
@@ -285,11 +284,11 @@ mod tests {
         // node but does NOT drive reduce. Programs that want host-side verification call
         // `evaluate`; programs that want constrained verification call `log_precompile`.
         let mut state = DeferredState::new();
-        let schema = Field0Handler;
-        let a = state.register(&schema, field0_leaf_node(3)).unwrap();
-        let b = state.register(&schema, field0_leaf_node(4)).unwrap();
+        let schema = Uint256;
+        let a = state.register(&schema, uint256_leaf_node(3)).unwrap();
+        let b = state.register(&schema, uint256_leaf_node(4)).unwrap();
         // A mismatched predicate — would fail if eagerly verified.
-        let bad = Node::expression(Field0Handler::ASSERT_EQ, Payload::binary_op(a, b));
+        let bad = Node::expression(Uint256::eq_tag(), Payload::binary_op(a, b));
         let bad_digest = state.register(&schema, bad.clone()).unwrap();
         assert!(state.contains(&bad_digest), "predicate interned even when it doesn't hold");
         // Verification surfaces the mismatch only when explicitly invoked.
@@ -300,9 +299,9 @@ mod tests {
     #[test]
     fn evaluate_predicate_succeeds_returns_true_node() {
         let mut state = DeferredState::new();
-        let schema = Field0Handler;
-        let a = state.register(&schema, field0_leaf_node(7)).unwrap();
-        let assertion = Node::expression(Field0Handler::ASSERT_EQ, Payload::binary_op(a, a));
+        let schema = Uint256;
+        let a = state.register(&schema, uint256_leaf_node(7)).unwrap();
+        let assertion = Node::expression(Uint256::eq_tag(), Payload::binary_op(a, a));
         let result = state.evaluate(&schema, assertion).unwrap();
         assert!(result.is_true_node(), "predicate success returns the canonical TRUE node");
     }
@@ -310,10 +309,10 @@ mod tests {
     #[test]
     fn evaluate_predicate_mismatch_errors() {
         let mut state = DeferredState::new();
-        let schema = Field0Handler;
-        let a = state.register(&schema, field0_leaf_node(3)).unwrap();
-        let b = state.register(&schema, field0_leaf_node(4)).unwrap();
-        let mismatch = Node::expression(Field0Handler::ASSERT_EQ, Payload::binary_op(a, b));
+        let schema = Uint256;
+        let a = state.register(&schema, uint256_leaf_node(3)).unwrap();
+        let b = state.register(&schema, uint256_leaf_node(4)).unwrap();
+        let mismatch = Node::expression(Uint256::eq_tag(), Payload::binary_op(a, b));
         let err = state.evaluate(&schema, mismatch);
         assert!(matches!(err, Err(SchemaError::AssertionFailed)));
     }
@@ -321,11 +320,11 @@ mod tests {
     #[test]
     fn evaluate_predicate_missing_node_errors() {
         let mut state = DeferredState::new();
-        let schema = Field0Handler;
-        let a = state.register(&schema, field0_leaf_node(1)).unwrap();
+        let schema = Uint256;
+        let a = state.register(&schema, uint256_leaf_node(1)).unwrap();
         let dangling = Word::new([Felt::from_u32(0xdead); 4]);
         let assertion =
-            Node::expression(Field0Handler::ASSERT_EQ, Payload::binary_op(a, dangling));
+            Node::expression(Uint256::eq_tag(), Payload::binary_op(a, dangling));
         let err = state.evaluate(&schema, assertion);
         assert!(matches!(err, Err(SchemaError::MissingNode)));
     }
@@ -334,19 +333,19 @@ mod tests {
     fn nested_evaluation_reduces_through_op_tree() {
         // Build (a + b) * c, then verify equal to a pre-computed leaf via evaluate.
         let mut state = DeferredState::new();
-        let schema = Field0Handler;
-        let a = state.register(&schema, field0_leaf_node(3)).unwrap();
-        let b = state.register(&schema, field0_leaf_node(4)).unwrap();
-        let c = state.register(&schema, field0_leaf_node(5)).unwrap();
-        let expected = state.register(&schema, field0_leaf_node(35)).unwrap();
+        let schema = Uint256;
+        let a = state.register(&schema, uint256_leaf_node(3)).unwrap();
+        let b = state.register(&schema, uint256_leaf_node(4)).unwrap();
+        let c = state.register(&schema, uint256_leaf_node(5)).unwrap();
+        let expected = state.register(&schema, uint256_leaf_node(35)).unwrap();
         let add = state
-            .register(&schema, Node::expression(Field0Handler::ADD, Payload::binary_op(a, b)))
+            .register(&schema, Node::expression(Uint256::add_tag(), Payload::binary_op(a, b)))
             .unwrap();
         let mul = state
-            .register(&schema, Node::expression(Field0Handler::MUL, Payload::binary_op(add, c)))
+            .register(&schema, Node::expression(Uint256::mul_tag(), Payload::binary_op(add, c)))
             .unwrap();
         let assertion =
-            Node::expression(Field0Handler::ASSERT_EQ, Payload::binary_op(mul, expected));
+            Node::expression(Uint256::eq_tag(), Payload::binary_op(mul, expected));
         let result = state.evaluate(&schema, assertion).unwrap();
         assert!(result.is_true_node());
     }
@@ -358,26 +357,26 @@ mod tests {
         // *during* reduce but the DfsResolver skips it (sentinel, not load-bearing), so it
         // does not appear in the witness.
         let mut state = DeferredState::new();
-        let schema = Field0Handler;
-        let a = state.register(&schema, field0_leaf_node(3)).unwrap();
-        let b = state.register(&schema, field0_leaf_node(4)).unwrap();
-        let c = state.register(&schema, field0_leaf_node(5)).unwrap();
-        let expected = state.register(&schema, field0_leaf_node(35)).unwrap();
-        let _orphan = state.register(&schema, field0_leaf_node(99)).unwrap();
+        let schema = Uint256;
+        let a = state.register(&schema, uint256_leaf_node(3)).unwrap();
+        let b = state.register(&schema, uint256_leaf_node(4)).unwrap();
+        let c = state.register(&schema, uint256_leaf_node(5)).unwrap();
+        let expected = state.register(&schema, uint256_leaf_node(35)).unwrap();
+        let _orphan = state.register(&schema, uint256_leaf_node(99)).unwrap();
         let add = state
-            .register(&schema, Node::expression(Field0Handler::ADD, Payload::binary_op(a, b)))
+            .register(&schema, Node::expression(Uint256::add_tag(), Payload::binary_op(a, b)))
             .unwrap();
         let mul = state
-            .register(&schema, Node::expression(Field0Handler::MUL, Payload::binary_op(add, c)))
+            .register(&schema, Node::expression(Uint256::mul_tag(), Payload::binary_op(add, c)))
             .unwrap();
         let assertion =
-            Node::expression(Field0Handler::ASSERT_EQ, Payload::binary_op(mul, expected));
+            Node::expression(Uint256::eq_tag(), Payload::binary_op(mul, expected));
         state.evaluate(&schema, assertion).unwrap();
 
         // 7 registered + 1 interned intermediate (canonical(add) = leaf(7)) +
         // 1 interned assertion-input (the ASSERT_EQ node, deposited by evaluate's reduce_and_intern).
         assert_eq!(state.nodes().len(), 9);
-        let leaf_7_digest = field0_leaf_node(7).digest();
+        let leaf_7_digest = uint256_leaf_node(7).digest();
         assert!(
             state.contains(&leaf_7_digest),
             "canonical(add) must appear in the state"
@@ -391,20 +390,20 @@ mod tests {
         // leaf(7) and canonical(mul)=leaf(35) into state.nodes so the witness covers the
         // whole reduction proof, not just the final answer.
         let mut state = DeferredState::new();
-        let schema = Field0Handler;
-        let a = state.register(&schema, field0_leaf_node(3)).unwrap();
-        let b = state.register(&schema, field0_leaf_node(4)).unwrap();
-        let c = state.register(&schema, field0_leaf_node(5)).unwrap();
-        let add = Node::expression(Field0Handler::ADD, Payload::binary_op(a, b));
+        let schema = Uint256;
+        let a = state.register(&schema, uint256_leaf_node(3)).unwrap();
+        let b = state.register(&schema, uint256_leaf_node(4)).unwrap();
+        let c = state.register(&schema, uint256_leaf_node(5)).unwrap();
+        let add = Node::expression(Uint256::add_tag(), Payload::binary_op(a, b));
         let add_digest = state.register(&schema, add).unwrap();
-        let mul = Node::expression(Field0Handler::MUL, Payload::binary_op(add_digest, c));
+        let mul = Node::expression(Uint256::mul_tag(), Payload::binary_op(add_digest, c));
         state.register(&schema, mul.clone()).unwrap();
 
         let canonical = state.evaluate(&schema, mul).unwrap();
-        assert_eq!(canonical, field0_leaf_node(35));
+        assert_eq!(canonical, uint256_leaf_node(35));
 
-        let leaf_7_digest = field0_leaf_node(7).digest();
-        let leaf_35_digest = field0_leaf_node(35).digest();
+        let leaf_7_digest = uint256_leaf_node(7).digest();
+        let leaf_35_digest = uint256_leaf_node(35).digest();
         assert!(state.contains(&leaf_7_digest), "canonical(add) = leaf(7) must be interned");
         assert!(state.contains(&leaf_35_digest), "canonical(mul) = leaf(35) must be interned");
     }
@@ -415,22 +414,22 @@ mod tests {
         // is constructed on the fly and handed straight to `evaluate` — it must end up interned
         // so the witness can link canonical(mul) back to its op-node parent.
         let mut state = DeferredState::new();
-        let schema = Field0Handler;
-        let a = state.register(&schema, field0_leaf_node(3)).unwrap();
-        let b = state.register(&schema, field0_leaf_node(4)).unwrap();
-        let c = state.register(&schema, field0_leaf_node(5)).unwrap();
-        let add = Node::expression(Field0Handler::ADD, Payload::binary_op(a, b));
+        let schema = Uint256;
+        let a = state.register(&schema, uint256_leaf_node(3)).unwrap();
+        let b = state.register(&schema, uint256_leaf_node(4)).unwrap();
+        let c = state.register(&schema, uint256_leaf_node(5)).unwrap();
+        let add = Node::expression(Uint256::add_tag(), Payload::binary_op(a, b));
         let add_digest = state.register(&schema, add).unwrap();
-        let mul = Node::expression(Field0Handler::MUL, Payload::binary_op(add_digest, c));
+        let mul = Node::expression(Uint256::mul_tag(), Payload::binary_op(add_digest, c));
 
         let mul_digest = mul.digest();
         assert!(!state.contains(&mul_digest), "mul must not be pre-registered for this test");
 
         let canonical = state.evaluate(&schema, mul).unwrap();
-        assert_eq!(canonical, field0_leaf_node(35));
+        assert_eq!(canonical, uint256_leaf_node(35));
 
         assert!(state.contains(&mul_digest), "input op node must be interned by evaluate");
-        assert!(state.contains(&field0_leaf_node(7).digest()), "canonical(add) interned");
-        assert!(state.contains(&field0_leaf_node(35).digest()), "canonical(mul) interned");
+        assert!(state.contains(&uint256_leaf_node(7).digest()), "canonical(add) interned");
+        assert!(state.contains(&uint256_leaf_node(35).digest()), "canonical(mul) interned");
     }
 }

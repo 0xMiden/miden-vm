@@ -8,8 +8,9 @@
 //! the root to TRUE.
 //!
 //! The full subsystem — data model, [`Schema`] trait, in-memory [`DeferredState`], and the
-//! [`Field0Handler`] reference schema — lives here in `miden-core`. The processor only contributes
-//! the system-event glue that bridges VM operand-stack reads to schema calls.
+//! [`Uint256`] reference app — lives here in `miden-core`. The processor only contributes the
+//! system-event glue that bridges VM operand-stack reads to schema calls. User-defined precompile
+//! sets are composed via the [`App`] trait and the [`PrecompileSchema`] composite.
 
 mod schema;
 mod state;
@@ -17,15 +18,15 @@ mod state;
 pub use schema::{BodyShape, ChildResolver, NoopSchema, Schema, SchemaError, TagInfo};
 pub use state::DeferredState;
 
-// Reference `Field0Handler` schema — pinned in here to keep `core/tests/deferred_field0.rs` and
-// the unit tests in this crate exercising the public deferred API only. Gated so it isn't
-// part of the production surface.
+// Multi-app composite layer. The `App` trait + `PrecompileSchema` substrate is gated behind the
+// `testing` feature for now alongside the reference `Uint256` app; promoting to the production
+// surface is a follow-up.
 #[cfg(any(test, feature = "testing"))]
-mod field0;
+mod app;
 use alloc::{sync::Arc, vec::Vec};
 
 #[cfg(any(test, feature = "testing"))]
-pub use field0::Field0Handler;
+pub use app::{App, AppTag, PrecompileSchema, Uint256, app_id_from};
 use miden_crypto::{ZERO, hash::poseidon2::Poseidon2};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
