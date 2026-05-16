@@ -100,70 +100,114 @@ trait NodeInterner {
 }
 ```
 
-## Open: the minting problem (Q-mint, top priority)
+## Minting model (decided: M1)
 
-`Group::add(g1, g2)` resolves two `Group::combine` leaves, recurses into their
-field digests to get coords, computes `(x3, y3) = ec_add(x1, y1, x2, y2)`, and
-must canonicalise to a `Group::combine` leaf whose payload is two field
-digests — i.e. it must **mint two new field leaves and reference them by
-digest**. Today's `reduce` returns a single node; the framework interns it
-post-call. There's no way to intern auxiliary nodes mid-reduce.
+`Group::add(g1, g2)` reduces by:
 
-Three approaches:
+1. Resolve `g1` and `g2` to canonical `Group::combine(h_x, h_y)` leaves.
+2. Resolve each field digest to a field leaf, decode limbs.
+3. Compute `(x3, y3)` via the group op.
+4. **Mint** new field leaves `Field::leaf(x3)`, `Field::leaf(y3)`, getting back
+   `h_x3` and `h_y3`.
+5. Return `Group::combine(h_x3, h_y3)`.
 
-1. **Extend `reduce` with a `NodeInterner`.** Reduce calls
-   `interner.intern(field_leaf(x3))` to get `h_x3`, same for `y3`, then
-   returns the group leaf with payload `h_x3 || h_y3`. Clean, but ripples
-   through `Schema::reduce`'s signature.
-2. **Group leaves carry raw 16-felt coords**, not digests. No minting; reduce
-   self-contained. Loses sharing of field elements across group points and
-   diverges from "everything is a digest" uniformity.
-3. **Group::add doesn't produce a canonical leaf** — it's a predicate
-   (`add_eq(g1, g2, g3)`): the user supplies the expected sum and the app
-   verifies. Side-steps minting entirely. Changes the user-facing API
-   significantly.
+This requires extending the `reduce` API with a `NodeInterner` so apps can
+intern auxiliary canonical nodes mid-reduce. Both prover-side
+(`DeferredState`) and verifier-side reducers implement it. Determinism of
+reduce ensures both sides mint identical digests.
 
-**Leaning toward (1)** because it preserves uniformity and the change is
-local. (2) is the simpler v1 if we want to defer the framework change. (3) is
-viable but changes the programming model — every producing op becomes a
-check, and the user has to supply expected outputs from off-chip.
+## Group::combine reduce semantics (decided)
 
-## Open questions
+`Group::combine(h_x, h_y)` recurses: resolve `h_x` and `h_y`, take the canonical
+forms' digests, return `Group::combine(h_x_canon, h_y_canon)`. This guarantees
+any canonical group element references field **leaves** (not field
+expressions) — `Group::add` and friends can therefore trust that resolved
+group children's payload digests are already field-leaf digests, no further
+canonicalisation needed inside the math kernel.
 
-**Q-mint** — which approach above? Decides whether v1 needs a framework change.
+## App cross-read (decided)
 
-**Q-app-cross-read** — when `Group::add` resolves a child, it gets back a
-canonical `Group::combine` leaf. To dig into its field-leaf children, it
-recurses through `children.resolve(h_x)`. That works as-is: the resolver is
-schema-wide and dispatches by tag. App doesn't need extra access. Confirm — or
-do we want apps to be able to call into other apps directly (typed)?
+Apps don't need typed access to other apps. `ChildResolver::resolve` dispatches
+on `tag[0]` (`app_id`) and forwards to the right app's `reduce`, so a Group app
+reading a field-leaf digest just calls `children.resolve(h_x)` and gets back a
+canonical field-leaf node. The Group app holds the Field app's `app_id` as a
+constructor arg so it can (a) mint correctly-tagged field leaves and (b)
+sanity-check resolved-child tags.
 
-**Q-id-derivation** — concrete inputs to `app_id` hash:
-`H(framework_version, app_name, app_version, params_bytes, [discriminant_names…])`?
-Treat `framework_version` as the single domain separator we bump if we ever
-change the hashing convention itself; `app_version` for per-app evolution.
-Use Blake3-to-felt (extract 64 bits of the digest).
+Coupling on payload encoding (group app knowing field leaves are 8 u32-limbs
+little-endian) is handled by exposing constructor/decoder helpers from the
+field app's module — e.g. `Uint256::leaf_node(limbs) -> Node`,
+`Uint256::limbs_of(&Node) -> Result<[u32; 8]>`. Not a trait method, just public
+helpers on the concrete app type.
 
-**Q-reduce-of-self-evaluating-group** — when reduce gets a `Group::combine`
-leaf, what does it return? Just clones the node (its payload's field digests
-are already canonical addresses)? Or also walks the resolver to confirm the
-referenced field digests resolve (and resolve to field leaves of the right
-app)? Cheapest: return the clone, let consumers (Group::add) do the recursion
-when they actually need coords. Confirm.
+## v1 scope (decided)
 
-**Q-v1-scope** — `Uint256` + `MockGroup<Uint256>` enough for v1? Or also a
-single-discriminant chunk-predicate app (the sig stub) to prove chunk-bodied
-apps work end-to-end?
+Four apps:
 
-**Q-resolved-tag-validation** — when `Group::add` resolves a child and expects
-"a `Group::combine` leaf of *my* group", how does it verify? `node.tag[0]`
-should equal the group's `app_id` (held internally) and `node.tag[1]` should
-equal the `combine` discriminant. Worth a small helper on the app side. Any
-appetite for a typed view (`AppNode<G>` wrapper) instead of raw tag checks?
+- **`Uint256`** — promote Field0 with wrapping semantics. No minting needed.
+- **`MockGroup<F>`** — exercises minting + cross-app composition.
+- **`MockHash`** — chunk preimage → digest leaf (mint), `digest` leaf
+  (self-evaluating), `eq` predicate. Mock hash function (e.g. linear-hash via
+  Poseidon2 over chunks, or even simpler XOR-fold for v1). Exercises
+  chunk-bodied input → expression-bodied output.
+- **`MockSig`** — single discriminant `verify` (chunk-bodied predicate; payload
+  is opaque `sig || pk || msg`). Reduces to TRUE on a stub check (e.g. n>0).
+  Exercises chunk-bodied predicate. No imm.
+
+## Open questions (next round)
+
+**Q-interner-api** — strawman:
+
+```rust
+trait NodeInterner {
+    /// Intern `node` (idempotent by digest). Returns the node's digest.
+    /// Caller is responsible for ensuring `node` is in canonical form.
+    fn intern(&mut self, node: Node) -> Digest;
+}
+```
+
+Both `DeferredState` (prover) and the verifier's witness-side store implement
+it. Reduce's signature becomes:
+
+```rust
+fn reduce(
+    &self,
+    node: &Node,
+    children: &mut dyn ChildResolver,
+    interner: &mut dyn NodeInterner,
+) -> Result<Node, SchemaError>;
+```
+
+Concern: the `Schema` trait gets a third resolver-ish parameter. Could combine
+into a single `ReduceCtx` trait that bundles both, but at the cost of one more
+indirection. Vote one way.
+
+**Q-chunk-tag-imm-binding** — chunk-app tags must encode `n` somehow so
+`decode(tag)` can return `BodyShape::Chunk(n)`. Options:
+- (a) `imm = n_bytes` (or `n_chunks`). The decode reads `imm` into `BodyShape::Chunk`.
+- (b) Fixed-size chunks per discriminant (e.g. `MockSig::verify` always 5 chunks).
+  `imm` unused; decode returns the fixed constant.
+
+For `MockHash::preimage`: variable, so (a). For `MockSig::verify`: you said no
+imm, so (b) — hardcode n. Confirm.
+
+**Q-impl-order** — three options:
+- (a) Build the `App` trait + composite + extend `Schema::reduce` first, then
+  migrate Field0 → Uint256, then add MockGroup with minting, then mocks.
+- (b) Migrate Field0 → Uint256 first (no minting needed — proves the trait
+  works on the simplest case without framework changes), then introduce the
+  interner extension together with MockGroup, then add the mocks.
+- (c) Top-down: scaffold all four apps with stubs, then fill in semantics.
+
+I'd vote (b): minimum disruption per step, each step shippable
+independently. The interner change rides in with the first app that needs it
+(MockGroup), so it isn't speculative.
 
 ## Alternatives parked
 
 - Static-tuple composition (compile-time-known apps). Faster, no allocation,
   but every schema is its own concrete type. Defer; dyn map is fine for v1.
-- 4-slot `[schema_id, app_id, node, imm]` tag (the original Option A).
-  Dropped per Q1 answer.
+- 4-slot `[schema_id, app_id, node, imm]` tag — dropped (version rolls into
+  `app_id`).
+- Bundled `ReduceCtx` instead of separate `children` + `interner` —
+  consider only if the parameter list gets unwieldy.
