@@ -1,8 +1,12 @@
-use alloc::{collections::BTreeMap, vec::Vec};
+use alloc::collections::BTreeMap;
 
-use super::{BodyShape, ChildResolver, DeferredWitness, Digest, Node, NodePayload, Schema, SchemaError};
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
-/// In-memory deferred-DAG state owned by the host.
+use super::{BodyShape, ChildResolver, Digest, Node, NodePayload, Schema, SchemaError};
+use crate::serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable};
+
+/// In-memory deferred-DAG state — the verifier's witness.
 ///
 /// State fields:
 /// - `nodes`: expression and chunk nodes content-addressed by their Poseidon2 digest. Re-inserting
@@ -11,7 +15,10 @@ use super::{BodyShape, ChildResolver, DeferredWitness, Digest, Node, NodePayload
 /// - `root`: the transcript root pointer. Initial value [`super::TRUE_DIGEST`]; advanced by
 ///   `log_precompile`, which interns an AND-node `{tag: TRUE_TAG, payload: prev_root || stmnt}`
 ///   and updates the root pointer. Reducing root to TRUE is the verifier's single check.
+///
+/// Ships as-is in `ExecutionProof`; the verifier consumes `(nodes, root)` directly.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct DeferredState {
     nodes: BTreeMap<Digest, Node>,
     root: Digest,
@@ -106,14 +113,36 @@ impl DeferredState {
         DfsResolver { state: self, schema }.reduce_and_intern(node)
     }
 
-    /// Snapshot the current state into a [`DeferredWitness`].
-    ///
-    /// All registered expression and chunk nodes (in digest order, thanks to the `BTreeMap`)
-    /// plus the final transcript root. No reachability filtering — if a program registers an
-    /// orphan node, it appears in the witness too.
-    pub fn extract_witness(&self) -> DeferredWitness {
-        let nodes: Vec<_> = self.nodes.iter().map(|(d, n)| (*d, n.clone())).collect();
-        DeferredWitness::new(nodes, self.root)
+}
+
+// SERIALIZATION
+// ================================================================================================
+// The serialized layout iterates `nodes` in `BTreeMap` digest order, then writes the rolling
+// root. Deserialization reconstructs the map by inserting in the same order; idempotent on
+// content-addressed inserts.
+
+impl Serializable for DeferredState {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        target.write_usize(self.nodes.len());
+        for (digest, node) in self.nodes.iter() {
+            digest.write_into(target);
+            node.write_into(target);
+        }
+        self.root.write_into(target);
+    }
+}
+
+impl Deserializable for DeferredState {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let count = source.read_usize()?;
+        let mut nodes = BTreeMap::new();
+        for _ in 0..count {
+            let digest = Digest::read_from(source)?;
+            let node = Node::read_from(source)?;
+            nodes.insert(digest, node);
+        }
+        let root = Digest::read_from(source)?;
+        Ok(Self { nodes, root })
     }
 }
 
@@ -345,17 +374,15 @@ mod tests {
             Node::expression(Field0Handler::ASSERT_EQ, Payload::binary_op(mul, expected));
         state.evaluate(&schema, assertion).unwrap();
 
-        let w = state.extract_witness();
         // 7 registered + 1 interned intermediate (canonical(add) = leaf(7)) +
         // 1 interned assertion-input (the ASSERT_EQ node, deposited by evaluate's reduce_and_intern).
-        assert_eq!(w.nodes.len(), 9);
+        assert_eq!(state.nodes().len(), 9);
         let leaf_7_digest = field0_leaf_node(7).digest();
         assert!(
-            w.nodes.iter().any(|(d, _)| *d == leaf_7_digest),
-            "canonical(add) must appear in the witness"
+            state.contains(&leaf_7_digest),
+            "canonical(add) must appear in the state"
         );
-        assert!(w.nodes.windows(2).all(|p| p[0].0 < p[1].0), "sorted by digest");
-        assert_eq!(w.root, TRUE_DIGEST, "no log_precompile called, root is still TRUE");
+        assert_eq!(state.root(), TRUE_DIGEST, "no log_precompile called, root is still TRUE");
     }
 
     #[test]

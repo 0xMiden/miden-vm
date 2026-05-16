@@ -96,7 +96,7 @@ pub fn verify_with_precompiles(
 ) -> Result<(u32, PrecompileTranscriptState), VerificationError> {
     let security_level = proof.security_level();
 
-    let (hash_fn, proof_bytes, precompile_requests) = proof.into_parts();
+    let (hash_fn, proof_bytes, precompile_requests, _deferred_state) = proof.into_parts();
 
     // Recompute the rolling deferred-DAG root by verifying all precompile requests and folding
     // their per-call statements in order. If no verifiers were provided (e.g. when called from

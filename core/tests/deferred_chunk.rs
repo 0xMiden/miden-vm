@@ -206,16 +206,16 @@ fn empty_chunk_digest_binds_tag() {
 }
 
 #[test]
-fn extract_witness_includes_chunk_nodes() {
+fn deferred_state_includes_chunk_nodes() {
     let schema = TestSchema;
     let mut state = DeferredState::new();
 
     let preimage = Node::chunk(preimage_tag(2), chunk_data(2));
     let preimage_digest = state.register(&schema, preimage.clone()).unwrap();
 
-    let witness = state.extract_witness();
-    assert!(
-        witness.nodes.iter().any(|(d, n)| *d == preimage_digest && *n == preimage),
-        "chunk node must appear in the extracted witness"
+    assert_eq!(
+        state.get(&preimage_digest).unwrap(),
+        &preimage,
+        "chunk node must be present in the deferred state"
     );
 }

@@ -42,12 +42,11 @@ fn end_to_end_register_evaluate_assert_extract() {
     let result = state.evaluate(&schema, assertion).unwrap();
     assert!(result.is_true_node());
 
-    let witness = state.extract_witness();
     // 6 registered expression nodes + 1 ASSERT_EQ predicate node + 1 interned intermediate
     // canonical(add) = leaf(7). canonical(mul) collides with the pre-registered `expected`
     // (both leaf(35)), so net new from evaluate is 1 (leaf(7)).
-    assert_eq!(witness.nodes.len(), 8);
-    assert!(witness.nodes.iter().any(|(d, _)| *d == leaf(7).digest()));
+    assert_eq!(state.nodes().len(), 8);
+    assert!(state.contains(&leaf(7).digest()));
 }
 
 #[test]

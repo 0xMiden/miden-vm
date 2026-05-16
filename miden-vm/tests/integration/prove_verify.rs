@@ -509,8 +509,14 @@ mod fast_parallel {
                 .expect("Proving failed");
 
         let precompile_requests = trace.precompile_requests().to_vec();
+        let deferred_state = trace.deferred_state().clone();
 
-        let proof = ExecutionProof::new(proof_bytes, HashFunction::Blake3_256, precompile_requests);
+        let proof = ExecutionProof::new(
+            proof_bytes,
+            HashFunction::Blake3_256,
+            precompile_requests,
+            deferred_state,
+        );
 
         // Verify the proof
         verify(program.into(), stack_inputs, fast_stack_outputs, proof)

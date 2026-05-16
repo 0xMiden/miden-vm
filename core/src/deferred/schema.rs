@@ -96,9 +96,8 @@ impl TagInfo {
 ///
 /// Why a trait (vs. a closure): `reduce` is itself recursive through the resolver — the
 /// resolver's implementation calls back into `Schema::reduce`. That requires a *named* type
-/// (a closure can't pass itself to a function it calls). The trait is also the seam between
-/// the prover-side store ([`crate::deferred::DeferredState`]) and a future verifier-side store
-/// backed by a [`super::DeferredWitness`] — same schema, different backend.
+/// (a closure can't pass itself to a function it calls). The trait is the seam between
+/// prover-side and verifier-side resolvers — both back onto [`crate::deferred::DeferredState`].
 pub trait ChildResolver {
     fn resolve(&mut self, digest: Digest) -> Result<Node, SchemaError>;
 }

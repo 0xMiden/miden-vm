@@ -124,7 +124,7 @@ pub fn generate_recursive_verifier_data(
         stack_outputs,
         PrecompileTranscriptState::default(),
     );
-    let (_, proof_bytes, _precompile_requests) = proof.into_parts();
+    let (_, proof_bytes, _precompile_requests, _deferred_state) = proof.into_parts();
     let data = generate_advice_inputs(&proof_bytes, pub_inputs).unwrap();
     Ok(data)
 }

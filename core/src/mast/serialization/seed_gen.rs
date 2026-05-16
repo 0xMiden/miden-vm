@@ -269,7 +269,12 @@ fn generate_fuzz_seeds() {
     // Execution proof seed (minimal)
     {
         let request = PrecompileRequest::new(EventId::from_u64(1), vec![1, 2, 3, 4]);
-        let proof = ExecutionProof::new(Vec::new(), HashFunction::Rpo256, vec![request]);
+        let proof = ExecutionProof::new(
+            Vec::new(),
+            HashFunction::Rpo256,
+            vec![request],
+            crate::deferred::DeferredState::default(),
+        );
         write_seed("execution_proof_deserialize", "minimal_proof.bin", &proof.to_bytes());
     }
 
@@ -295,7 +300,12 @@ fn generate_fuzz_seeds() {
         let pc_requests = (0..64)
             .map(|event_id| PrecompileRequest::new(EventId::from_u64(event_id), Vec::new()))
             .collect();
-        let proof = ExecutionProof::new(vec![1, 2, 3], HashFunction::Blake3_256, pc_requests);
+        let proof = ExecutionProof::new(
+            vec![1, 2, 3],
+            HashFunction::Blake3_256,
+            pc_requests,
+            crate::deferred::DeferredState::default(),
+        );
         write_seed(
             "execution_proof_deserialize",
             "many_minimal_precompile_requests.bin",

@@ -3,9 +3,9 @@
 //! The deferred subsystem represents expensive precompile work (e.g. 256-bit non-native field
 //! arithmetic, future curve ops, non-native hashes over bulk data) as a DAG of typed [`Node`]s
 //! addressed by their 4-felt Poseidon2 digest. The VM uses three generic system events
-//! (`DeferredRegister`, `DeferredRegisterChunk`, `DeferredEvaluate`) to populate the DAG; an
-//! external prover later consumes a [`DeferredWitness`] containing the reachable nodes and
-//! equality assertions.
+//! (`DeferredRegister`, `DeferredRegisterChunk`, `DeferredEvaluate`) to populate the DAG; the
+//! verifier later consumes the resulting [`DeferredState`] (nodes + rolling root) and reduces
+//! the root to TRUE.
 //!
 //! The full subsystem — data model, [`Schema`] trait, in-memory [`DeferredState`], and the
 //! [`Field0Handler`] reference schema — lives here in `miden-core`. The processor only contributes
@@ -27,8 +27,13 @@ use alloc::{sync::Arc, vec::Vec};
 #[cfg(any(test, feature = "testing"))]
 pub use field0::Field0Handler;
 use miden_crypto::{ZERO, hash::poseidon2::Poseidon2};
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
-use crate::{Felt, Word};
+use crate::{
+    Felt, Word,
+    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+};
 
 /// Content-addressed digest of a [`Node`]. A 4-felt Poseidon2 output.
 pub type Digest = Word;
@@ -73,6 +78,7 @@ pub fn true_node() -> Node {
 /// binary op, the first 4 felts are the lhs child digest and the last 4 are the rhs child digest.
 /// Assertion payloads follow the same `lhs_digest || rhs_digest` convention as binary ops.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Payload(pub [Felt; 8]);
 
 impl Payload {
@@ -122,6 +128,7 @@ impl Payload {
 /// indistinguishable from regular expression-bodied nodes; their "predicate-ness" is a property
 /// of the *tag*, not the *node*, and is communicated by `Schema::decode`'s [`TagInfo`].
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Node {
     pub tag: Tag,
     pub payload: NodePayload,
@@ -129,6 +136,7 @@ pub struct Node {
 
 /// Variant of a [`Node`]'s body.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum NodePayload {
     /// Leaves, op-nodes, predicates, AND-nodes. 8-felt payload.
     Expression(Payload),
@@ -222,28 +230,97 @@ impl Node {
     }
 }
 
-// WITNESS
+// SERIALIZATION
 // ================================================================================================
 
-/// External witness consumed by the deferred-DAG verifier.
-///
-/// Contains:
-/// - `nodes`: every expression and chunk node the verifier needs to re-check the transcript,
-///   in digest order. Includes nodes the program explicitly registered, canonical intermediates
-///   produced during `DeferredState::evaluate` (e.g. `(a+b) → leaf`), and AND-nodes interned
-///   by `log_precompile` along the transcript chain. The verifier does not re-execute the DAG
-///   — it walks the chain rooted at `root`, recursively reducing each child to TRUE.
-/// - `root`: the final transcript root pointer. Reducing it to [`TRUE_DIGEST`] is the verifier's
-///   single termination check.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct DeferredWitness {
-    pub nodes: Vec<(Digest, Node)>,
-    pub root: Digest,
+fn read_tag<R: ByteReader>(source: &mut R) -> Result<Tag, DeserializationError> {
+    Ok([
+        Felt::read_from(source)?,
+        Felt::read_from(source)?,
+        Felt::read_from(source)?,
+        Felt::read_from(source)?,
+    ])
 }
 
-impl DeferredWitness {
-    pub fn new(nodes: Vec<(Digest, Node)>, root: Digest) -> Self {
-        Self { nodes, root }
+fn read_chunk<R: ByteReader>(source: &mut R) -> Result<Chunk, DeserializationError> {
+    let mut chunk = [ZERO; 8];
+    for felt in &mut chunk {
+        *felt = Felt::read_from(source)?;
+    }
+    Ok(chunk)
+}
+
+impl Serializable for Payload {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        for felt in &self.0 {
+            felt.write_into(target);
+        }
+    }
+}
+
+impl Deserializable for Payload {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let mut felts = [ZERO; 8];
+        for felt in &mut felts {
+            *felt = Felt::read_from(source)?;
+        }
+        Ok(Self(felts))
+    }
+}
+
+impl Serializable for NodePayload {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        match self {
+            NodePayload::Expression(payload) => {
+                target.write_u8(0);
+                payload.write_into(target);
+            },
+            NodePayload::Chunk(chunks) => {
+                target.write_u8(1);
+                target.write_usize(chunks.len());
+                for chunk in chunks.iter() {
+                    for felt in chunk {
+                        felt.write_into(target);
+                    }
+                }
+            },
+        }
+    }
+}
+
+impl Deserializable for NodePayload {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        match source.read_u8()? {
+            0 => Ok(NodePayload::Expression(Payload::read_from(source)?)),
+            1 => {
+                let n = source.read_usize()?;
+                let mut chunks: Vec<Chunk> = Vec::with_capacity(n);
+                for _ in 0..n {
+                    chunks.push(read_chunk(source)?);
+                }
+                Ok(NodePayload::Chunk(Arc::from(chunks)))
+            },
+            tag => Err(DeserializationError::InvalidValue(alloc::format!(
+                "invalid NodePayload discriminant: {tag}"
+            ))),
+        }
+    }
+}
+
+impl Serializable for Node {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        for felt in &self.tag {
+            felt.write_into(target);
+        }
+        self.payload.write_into(target);
+    }
+}
+
+impl Deserializable for Node {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let tag = read_tag(source)?;
+        let payload = NodePayload::read_from(source)?;
+        Ok(Self { tag, payload })
     }
 }
 

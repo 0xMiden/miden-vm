@@ -127,6 +127,7 @@ fn prove_execution_trace(
 
     let stack_outputs = *trace.stack_outputs();
     let precompile_requests = trace.precompile_requests().to_vec();
+    let deferred_state = trace.deferred_state().clone();
     let hash_fn = options.hash_fn();
 
     let trace_matrix = {
@@ -161,7 +162,8 @@ fn prove_execution_trace(
         },
     }?;
 
-    let proof = ExecutionProof::new(proof_bytes, hash_fn, precompile_requests);
+    let proof =
+        ExecutionProof::new(proof_bytes, hash_fn, precompile_requests, deferred_state);
 
     Ok((stack_outputs, proof))
 }
