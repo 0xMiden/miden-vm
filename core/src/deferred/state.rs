@@ -165,51 +165,76 @@ impl DeferredState {
         DfsResolver { state: self, schema }.reduce_and_intern(node, digest)
     }
 
-    /// Serialize this state to its wire form. Walks reachable nodes from `root` and emits only
-    /// those — `register`-then-never-referenced orphans plus canonical intermediates that
-    /// nothing references are trimmed at the wire boundary. The verifier rehydrates the trimmed
-    /// wire; phase-2 reduce re-mints any canonical intermediates as a side effect of
+    /// Serialize this state to its wire form. Walks reachable nodes from `root` in DFS
+    /// post-order, assigning each visited node a `u32` index in emission order. `Binary`-shape
+    /// entries encode their children as indices into the earlier wire entries (or [`TRUE_INDEX`]
+    /// for the [`TRUE_DIGEST`] terminal). `register`-then-never-referenced orphans plus
+    /// canonical intermediates that nothing references are trimmed at the wire boundary;
+    /// rehydrate's phase-2 reduce re-mints any canonical intermediates as a side effect of
     /// re-evaluating each predicate.
     ///
     /// Reachability is computed *structurally*, without consulting the schema: for any node
-    /// with an `Expression` payload, interpret the 8 felts as `(lhs_digest, rhs_digest)` and
-    /// follow each child whose digest resolves in `self.nodes` (or is [`TRUE_DIGEST`]). Values
-    /// and chunk-bodied leaves whose payload felts happen to coincide with an interned digest
-    /// will follow that false reference, which is harmless — we may over-include but cannot
-    /// under-include real Binary children (those are always interned). Coincidental matches
-    /// are vanishingly unlikely at Poseidon2 collision resistance.
+    /// with an `Expression` payload, interpret the 8 felts as `(lhs_digest, rhs_digest)`. If
+    /// both digests resolve in `self.nodes` (or are [`TRUE_DIGEST`]), the encoder treats the
+    /// node as Binary and emits indices; otherwise it falls back to `Value` (raw felts). Real
+    /// Binary children are always interned (registers and op-evaluates intern them
+    /// transitively), so the heuristic never misses one. False positives — a `Value` leaf whose
+    /// 8 payload felts happen to coincide with the digests of two interned nodes — round-trip
+    /// safely because the reconstructed payload bytes are byte-identical.
     pub fn to_wire(&self) -> DeferredStateWire {
-        let mut visited = alloc::collections::BTreeSet::new();
-        let mut nodes = Vec::new();
-        let mut stack = alloc::vec::Vec::new();
-        stack.push(self.root);
+        let mut by_digest = BTreeMap::<Digest, u32>::new();
+        let mut entries = Vec::<super::WireEntry>::new();
+        self.dfs_post_order(self.root, &mut by_digest, &mut entries);
+        DeferredStateWire { entries, root: self.root }
+    }
 
-        while let Some(d) = stack.pop() {
-            if d == TRUE_DIGEST {
-                continue;
-            }
-            if !visited.insert(d) {
-                continue;
-            }
-            let Some(node) = self.nodes.get(&d) else {
-                // Reachable digest with no interned node. Normal for production-style bare
-                // statement commitments (a `log_precompile` stmnt that's just a hash-fold and
-                // was never interned as a `Node`). The wire doesn't carry it; the precompile
-                // registry validates it externally.
-                continue;
-            };
-            nodes.push(node.clone());
+    /// Internal DFS post-order helper for [`Self::to_wire`]. Recursive; for the DAG shapes
+    /// produced by `register`/`evaluate`/`log` this is bounded by the depth of the expression
+    /// tree, which is well within Rust's default stack budget.
+    fn dfs_post_order(
+        &self,
+        d: Digest,
+        by_digest: &mut BTreeMap<Digest, u32>,
+        entries: &mut Vec<super::WireEntry>,
+    ) {
+        if d == TRUE_DIGEST || by_digest.contains_key(&d) {
+            return;
+        }
+        let Some(node) = self.nodes.get(&d) else {
+            // Reachable digest with no interned node — bare statement commitment in the
+            // production precompile-transcript model. The wire doesn't carry it; the precompile
+            // verifier registry validates it externally.
+            return;
+        };
 
-            // Push potential children for any Expression-shaped node. Push rhs first so lhs
-            // is visited first (DFS post-order is a nicety, not load-bearing).
-            if let Some(payload) = node.expression_payload() {
-                let (lhs, rhs) = payload.binary_op_children();
-                stack.push(rhs);
-                stack.push(lhs);
+        // Determine whether this is a real Binary node (children resolve) or a Value-shaped
+        // node. For Chunk bodies, no children to recurse into.
+        let mut binary_indices: Option<(Digest, Digest)> = None;
+        if let Some(payload) = node.expression_payload() {
+            let (lhs, rhs) = payload.binary_op_children();
+            let lhs_ok = lhs == TRUE_DIGEST || self.nodes.contains_key(&lhs);
+            let rhs_ok = rhs == TRUE_DIGEST || self.nodes.contains_key(&rhs);
+            if lhs_ok && rhs_ok {
+                // Recurse into children first so they receive lower indices.
+                self.dfs_post_order(lhs, by_digest, entries);
+                self.dfs_post_order(rhs, by_digest, entries);
+                binary_indices = Some((lhs, rhs));
             }
         }
 
-        DeferredStateWire { nodes, root: self.root }
+        let idx = entries.len() as u32;
+        by_digest.insert(d, idx);
+
+        let body = match (&node.payload, binary_indices) {
+            (NodePayload::Chunk(chunks), _) => super::WireBody::Chunks(chunks.clone()),
+            (NodePayload::Expression(payload), None) => super::WireBody::Value(*payload),
+            (NodePayload::Expression(_), Some((lhs, rhs))) => {
+                let lhs_idx = if lhs == TRUE_DIGEST { super::TRUE_INDEX } else { by_digest[&lhs] };
+                let rhs_idx = if rhs == TRUE_DIGEST { super::TRUE_INDEX } else { by_digest[&rhs] };
+                super::WireBody::Binary { lhs: lhs_idx, rhs: rhs_idx }
+            },
+        };
+        entries.push(super::WireEntry { tag: node.tag, body });
     }
 
     /// Construct a verified [`DeferredState`] from a wire-format value under the installed
@@ -218,54 +243,51 @@ impl DeferredState {
     /// module.
     ///
     /// The two phases:
-    /// - **Phase 1 (structural):** intern every wire entry under its recomputed digest, after
-    ///   `schema.decode` accepts the tag and `payload_matches_type` accepts the body shape.
-    ///   Then sweep again to verify every `Binary` node's child digests resolve.
-    /// - **Phase 2 (semantic):** walk the AND-chain from `wire.root` down to [`super::TRUE_DIGEST`],
-    ///   asserting each step has `tag == TRUE_TAG`, and re-evaluating each predicate statement
-    ///   via [`Self::evaluate`]. The walk surfaces tampered AND-payloads, missing statements,
-    ///   non-predicate statements, and failed equalities.
+    /// - **Phase 1 (structural):** read each wire entry in order, reconstruct the digest-form
+    ///   [`Node`] (translating `Binary` indices to the digests of earlier entries), `schema.decode`
+    ///   the tag, and intern. Index bounds and chunk arities are validated; `payload_matches_type`
+    ///   confirms the schema-declared [`NodeType`] is compatible with the in-memory shape.
+    /// - **Phase 2 (semantic):** walk the AND-chain from `wire.root` down to
+    ///   [`super::TRUE_DIGEST`], asserting each step has `tag == TRUE_TAG` and re-evaluating each
+    ///   predicate statement via [`Self::evaluate`]. The walk surfaces tampered AND-payloads,
+    ///   missing statements, non-predicate statements, and failed equalities.
     pub fn rehydrate(
         wire: DeferredStateWire,
         schema: &dyn Schema,
     ) -> Result<Self, IntegrityError> {
         let mut state = Self::new();
+        // Parallel to `wire.entries`: the recomputed digest at each index. `Binary` entries at
+        // position `i` reconstruct their payload by reading earlier `digests[lhs/rhs]` (or
+        // `TRUE_DIGEST` when the index is `TRUE_INDEX`).
+        let mut digests: Vec<Digest> = Vec::with_capacity(wire.entries.len());
 
-        // Phase 1a — schema-validate and intern. AND-nodes (framework-owned `TRUE_TAG`) are
-        // handled specially: the user schema doesn't claim that tag, so we validate them
-        // structurally as Binary-shaped expression nodes.
-        // `intern` keys by `node.digest()`, which populates the memoisation cache as a side
-        // effect. Content-addressing follows trivially: same node ⇒ same digest ⇒ same key.
-        for node in wire.nodes {
+        for (i, entry) in wire.entries.into_iter().enumerate() {
+            let node = match entry.body {
+                super::WireBody::Value(payload) => Node::expression(entry.tag, payload),
+                super::WireBody::Chunks(chunks) => Node::chunk(entry.tag, chunks),
+                super::WireBody::Binary { lhs, rhs } => {
+                    let lhs_d = resolve_index(lhs, i, &digests)?;
+                    let rhs_d = resolve_index(rhs, i, &digests)?;
+                    Node::expression(entry.tag, Payload::binary_op(lhs_d, rhs_d))
+                },
+            };
+
+            // Schema-validate. `decode_node_type` handles AND-nodes (framework-owned `TRUE_TAG`)
+            // without invoking the user schema, then defers to `schema.decode` for everything
+            // else. `payload_matches_type` enforces the Expression-vs-Chunk distinction (and
+            // chunk count for Chunks tags).
             let node_type = decode_node_type(schema, &node)?;
             if !payload_matches_type(node_type, &node.payload) {
                 return Err(IntegrityError::ShapeMismatch);
             }
+
+            let d = node.digest();
+            digests.push(d);
             state.intern(node);
         }
 
-        // Phase 1b — Binary closure check. Each Binary node's payload encodes two child digests;
-        // both must point to nodes we just interned. Catches reordered / forged child references
-        // before phase 2 walks the chain.
-        for node in state.nodes.values() {
-            let node_type = decode_node_type(schema, node)?;
-            if matches!(node_type, NodeType::Binary) {
-                let (lhs, rhs) = node
-                    .expression_payload()
-                    .ok_or(IntegrityError::ShapeMismatch)?
-                    .binary_op_children();
-                // Children of an AND-node may legitimately be `TRUE_DIGEST` (the trivial-empty
-                // predecessor at the chain's root); that sentinel is not interned in `nodes`.
-                let lhs_ok = lhs == TRUE_DIGEST || state.nodes.contains_key(&lhs);
-                let rhs_ok = rhs == TRUE_DIGEST || state.nodes.contains_key(&rhs);
-                if !lhs_ok || !rhs_ok {
-                    return Err(IntegrityError::DanglingChild);
-                }
-            }
-        }
-
         // Validate root pointer's existence before walking. `TRUE_DIGEST` is the trivial-empty
-        // root and is allowed even when `nodes` is empty.
+        // root and is allowed even when `entries` is empty.
         if wire.root != TRUE_DIGEST && !state.nodes.contains_key(&wire.root) {
             return Err(IntegrityError::MissingRoot);
         }
@@ -337,6 +359,24 @@ impl DeferredState {
 // goes through [`DeferredStateWire`]; in-memory construction from bytes goes through
 // `DeferredState::rehydrate(wire, schema)`. This keeps the only path from untrusted bytes to
 // an in-memory state through the schema-validated, chain-walked rehydrate constructor.
+
+/// Resolve a wire `Binary` child index against the digest table built so far during phase 1 of
+/// rehydrate. [`super::TRUE_INDEX`] maps to [`TRUE_DIGEST`]; any other value must be a valid
+/// position strictly less than the current entry (topological invariant).
+fn resolve_index(
+    idx: u32,
+    current: usize,
+    digests: &[Digest],
+) -> Result<Digest, IntegrityError> {
+    if idx == super::TRUE_INDEX {
+        return Ok(TRUE_DIGEST);
+    }
+    let i = idx as usize;
+    if i >= current || i >= digests.len() {
+        return Err(IntegrityError::BadIndex);
+    }
+    Ok(digests[i])
+}
 
 /// Decode a node's [`NodeType`] for `rehydrate`. Framework-owned `TRUE_TAG` AND-nodes are
 /// classified as `Binary` directly (user schemas don't claim that tag); everything else routes
@@ -731,22 +771,27 @@ mod tests {
 
     #[test]
     fn rehydrate_rejects_missing_root() {
-        // Empty nodes but a non-TRUE root: phase 1 succeeds (nothing to do), phase 2's chain walk
-        // hits a missing AND-node and bails out.
-        let wire = DeferredStateWire { nodes: alloc::vec::Vec::new(), root: dummy_digest(7) };
+        // Empty entries but a non-TRUE root: phase 1 succeeds (nothing to do), then the root
+        // validation catches the dangling pointer.
+        let wire =
+            DeferredStateWire { entries: alloc::vec::Vec::new(), root: dummy_digest(7) };
         let err = DeferredState::rehydrate(wire, &Uint256);
         assert!(matches!(err, Err(IntegrityError::MissingRoot)));
     }
 
     #[test]
-    fn rehydrate_rejects_dangling_child() {
-        // An op node whose lhs references a digest not present in the wire's node list.
-        let dangling = dummy_digest(99);
-        let bogus_op =
-            Node::expression(Uint256::add_tag(), Payload::binary_op(dangling, dangling));
-        let wire = DeferredStateWire { nodes: alloc::vec![bogus_op], root: TRUE_DIGEST };
+    fn rehydrate_rejects_bad_index() {
+        // A Binary entry whose lhs index points past the (empty) digest table: index 0 is not
+        // < its own position 0 → BadIndex.
+        let wire = DeferredStateWire {
+            entries: alloc::vec![crate::deferred::WireEntry {
+                tag: Uint256::add_tag(),
+                body: crate::deferred::WireBody::Binary { lhs: 0, rhs: 0 },
+            }],
+            root: TRUE_DIGEST,
+        };
         let err = DeferredState::rehydrate(wire, &Uint256);
-        assert!(matches!(err, Err(IntegrityError::DanglingChild)));
+        assert!(matches!(err, Err(IntegrityError::BadIndex)));
     }
 
     #[test]
@@ -754,8 +799,13 @@ mod tests {
         // A tag the schema rejects — its app_id doesn't match Uint256.
         let bogus_tag: Tag =
             [Felt::new_unchecked(0xdead), ZERO, ZERO, ZERO];
-        let bogus = Node::expression(bogus_tag, Payload::new([ZERO; 8]));
-        let wire = DeferredStateWire { nodes: alloc::vec![bogus], root: TRUE_DIGEST };
+        let wire = DeferredStateWire {
+            entries: alloc::vec![crate::deferred::WireEntry {
+                tag: bogus_tag,
+                body: crate::deferred::WireBody::Value(Payload::new([ZERO; 8])),
+            }],
+            root: TRUE_DIGEST,
+        };
         let err = DeferredState::rehydrate(wire, &Uint256);
         assert!(matches!(err, Err(IntegrityError::UnknownTag)));
     }
@@ -779,14 +829,18 @@ mod tests {
         state.log(stmt_digest, new_root).unwrap();
 
         let wire = state.to_wire();
-        let wire_digests: alloc::collections::BTreeSet<_> =
-            wire.nodes.iter().map(|n| n.digest()).collect();
+        // Rehydrate and read back the digest set — the wire's bytes don't carry digests, but
+        // rehydration recomputes them, so we exercise the round-trip identity here.
+        let rehydrated = DeferredState::rehydrate(wire, &Uint256).unwrap();
         let orphan_digest = uint256_leaf_node(99).digest();
-        assert!(!wire_digests.contains(&orphan_digest), "orphan must be trimmed from wire");
-        // The chain and its closure must still ship.
-        assert!(wire_digests.contains(&new_root), "AND-node must be in wire");
-        assert!(wire_digests.contains(&stmt_digest), "stmt predicate must be in wire");
-        assert!(wire_digests.contains(&a), "stmt's operand must be in wire");
+        assert!(
+            !rehydrated.contains(&orphan_digest),
+            "orphan must be trimmed from wire and absent after rehydrate"
+        );
+        // The chain and its closure must still ship and rehydrate.
+        assert!(rehydrated.contains(&new_root), "AND-node must be in rehydrated state");
+        assert!(rehydrated.contains(&stmt_digest), "stmt predicate must be in rehydrated state");
+        assert!(rehydrated.contains(&a), "stmt's operand must be in rehydrated state");
     }
 
     #[test]

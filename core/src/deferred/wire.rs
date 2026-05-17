@@ -1,42 +1,89 @@
 //! Wire format for [`DeferredState`].
 //!
-//! The wire form is the passive bytes-shape that travels in proofs: a flat list of nodes plus
-//! the transcript root. It deliberately does *not* carry the digest column (digests are
-//! recomputed on the verifier side), and it does *not* carry any pre-checked invariant — the
-//! `Deserializable` impl just reads bytes, never validates schema-validity or chain integrity.
+//! The wire form is the passive bytes-shape that travels in proofs: a topologically-ordered
+//! list of entries plus the transcript root. Binary entries reference their children by *index*
+//! into earlier entries, not by digest — Poseidon2 digests are recomputed on the verifier side
+//! during rehydration. The wire deliberately carries no validated invariants; `Deserializable`
+//! just reads bytes, and the trusted bytes→state path runs through
+//! [`super::DeferredState::rehydrate`].
 //!
-//! The single trusted path from wire bytes to a usable [`DeferredState`] is
-//! [`DeferredState::rehydrate`]: it re-runs the schema-validation, content-addressing, and
-//! AND-chain walk that the prover did, so a hydrated `DeferredState` value satisfies the
-//! invariants laid out in `state.rs`'s module docs.
+//! Compared to a flat `Vec<Node>` layout, the index encoding shrinks every Binary entry from a
+//! 64-byte payload (two child digests as felts) to 8 bytes (two `u32` indices) — meaningful
+//! savings for op-heavy programs and AND-chain–heavy proofs.
 
-use alloc::vec::Vec;
+use alloc::{sync::Arc, vec::Vec};
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use super::{Digest, Node};
-use crate::serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable};
+use super::{Chunk, Digest, Payload, Tag};
+use crate::{
+    Felt, ZERO,
+    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+};
+
+// CONSTANTS
+// ================================================================================================
+
+/// Reserved index sentinel mapping to [`super::TRUE_DIGEST`]. Appears as a child slot in the
+/// first AND-node of a chain (whose `prev_root` is the trivial-empty transcript terminal that has
+/// no corresponding wire entry).
+pub const TRUE_INDEX: u32 = u32::MAX;
+
+// WIRE BODY
+// ================================================================================================
+
+/// Wire-format body of a [`WireEntry`]. The variant is discriminated by a single byte on the
+/// wire (0/1/2). Validation of the body against the schema-declared
+/// [`super::NodeType`] for the entry's tag happens during rehydration, not at the bytes layer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum WireBody {
+    /// 8 raw felts as the payload. Used for self-evaluating value leaves (Uint256 leaf,
+    /// MockHash digest, ...) and, per the structural heuristic in
+    /// [`super::DeferredState::to_wire`], any Expression-bodied node whose two would-be child
+    /// digests don't both resolve.
+    Value(Payload),
+    /// Two indices into earlier wire entries. Each is either a valid index `< current_idx` or
+    /// [`TRUE_INDEX`] for the transcript terminal. Rehydration reconstructs the digest-form
+    /// payload as `Payload::binary_op(digests[lhs], digests[rhs])`.
+    Binary { lhs: u32, rhs: u32 },
+    /// `n` chunks of bulk data. Self-describing on the wire (length-prefixed) so deserialization
+    /// doesn't depend on the schema for chunk counts.
+    Chunks(Arc<[Chunk]>),
+}
+
+// WIRE ENTRY
+// ================================================================================================
+
+/// A single wire-format node: tag plus body. Multiple entries form a topologically-ordered
+/// sequence (child indices reference earlier entries).
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct WireEntry {
+    pub tag: Tag,
+    pub body: WireBody,
+}
+
+// DEFERRED STATE WIRE
+// ================================================================================================
 
 /// Wire-format representation of a [`super::DeferredState`].
 ///
-/// Contains the flat node list and the root digest. Node order is not constrained — rehydration
-/// uses a two-pass approach (intern then check closure) so it tolerates any ordering, including
-/// the `BTreeMap` digest-order produced by [`super::DeferredState::to_wire`].
+/// `entries` are topologically ordered: each `Binary` entry's child indices are strictly less
+/// than its own index (or equal to [`TRUE_INDEX`]). [`super::DeferredState::to_wire`] produces
+/// such an ordering via DFS post-order from `root`.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct DeferredStateWire {
-    /// All nodes the prover wishes to ship to the verifier. Includes the AND-chain transcript
-    /// nodes, every predicate stmt referenced in the chain, and the transitive closure of
-    /// children each stmt's `reduce` walk visits.
-    pub nodes: Vec<Node>,
+    pub entries: Vec<WireEntry>,
     /// The transcript root pointer. Either [`super::TRUE_DIGEST`] (trivial transcript) or the
-    /// digest of an AND-node in `nodes`.
+    /// digest produced by the last AND-node in `entries`.
     pub root: Digest,
 }
 
 impl DeferredStateWire {
-    /// Construct an empty wire (`root == TRUE_DIGEST`, no nodes). Convenience for tests and for
+    /// Construct an empty wire (`root == TRUE_DIGEST`, no entries). Convenience for tests and
     /// the no-precompile proof path.
     pub fn empty() -> Self {
         Self::default()
@@ -46,11 +93,86 @@ impl DeferredStateWire {
 // SERIALIZATION
 // ================================================================================================
 
+impl Serializable for WireBody {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        match self {
+            WireBody::Value(payload) => {
+                target.write_u8(0);
+                payload.write_into(target);
+            },
+            WireBody::Binary { lhs, rhs } => {
+                target.write_u8(1);
+                target.write_u32(*lhs);
+                target.write_u32(*rhs);
+            },
+            WireBody::Chunks(chunks) => {
+                target.write_u8(2);
+                target.write_usize(chunks.len());
+                for chunk in chunks.iter() {
+                    for felt in chunk {
+                        felt.write_into(target);
+                    }
+                }
+            },
+        }
+    }
+}
+
+impl Deserializable for WireBody {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        match source.read_u8()? {
+            0 => Ok(WireBody::Value(Payload::read_from(source)?)),
+            1 => {
+                let lhs = source.read_u32()?;
+                let rhs = source.read_u32()?;
+                Ok(WireBody::Binary { lhs, rhs })
+            },
+            2 => {
+                let n = source.read_usize()?;
+                let mut chunks: Vec<Chunk> = Vec::with_capacity(n);
+                for _ in 0..n {
+                    let mut chunk = [ZERO; 8];
+                    for felt in &mut chunk {
+                        *felt = Felt::read_from(source)?;
+                    }
+                    chunks.push(chunk);
+                }
+                Ok(WireBody::Chunks(Arc::from(chunks)))
+            },
+            disc => Err(DeserializationError::InvalidValue(alloc::format!(
+                "invalid WireBody discriminant: {disc}"
+            ))),
+        }
+    }
+}
+
+impl Serializable for WireEntry {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        for felt in &self.tag {
+            felt.write_into(target);
+        }
+        self.body.write_into(target);
+    }
+}
+
+impl Deserializable for WireEntry {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let tag: Tag = [
+            Felt::read_from(source)?,
+            Felt::read_from(source)?,
+            Felt::read_from(source)?,
+            Felt::read_from(source)?,
+        ];
+        let body = WireBody::read_from(source)?;
+        Ok(Self { tag, body })
+    }
+}
+
 impl Serializable for DeferredStateWire {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        target.write_usize(self.nodes.len());
-        for node in &self.nodes {
-            node.write_into(target);
+        target.write_usize(self.entries.len());
+        for entry in &self.entries {
+            entry.write_into(target);
         }
         self.root.write_into(target);
     }
@@ -59,12 +181,12 @@ impl Serializable for DeferredStateWire {
 impl Deserializable for DeferredStateWire {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let count = source.read_usize()?;
-        let mut nodes = Vec::with_capacity(count);
+        let mut entries = Vec::with_capacity(count);
         for _ in 0..count {
-            nodes.push(Node::read_from(source)?);
+            entries.push(WireEntry::read_from(source)?);
         }
         let root = Digest::read_from(source)?;
-        Ok(Self { nodes, root })
+        Ok(Self { entries, root })
     }
 }
 
@@ -81,17 +203,20 @@ impl Deserializable for DeferredStateWire {
 /// (wraps `DeferredError`). Tests should `matches!` on variants, not `assert_eq!` whole values.
 #[derive(Debug, thiserror::Error)]
 pub enum IntegrityError {
+    /// A `Binary`-body entry's child index is out of range (≥ its own position and not
+    /// [`TRUE_INDEX`]).
+    #[error("wire Binary entry references an out-of-range child index")]
+    BadIndex,
     /// A node's tag is not claimed by the installed schema.
     #[error("wire contains a node with a tag the installed schema does not recognise")]
     UnknownTag,
-    /// A node's in-memory payload shape disagrees with `schema.decode(tag).node_type`.
+    /// A node's reconstructed payload shape disagrees with `schema.decode(tag).node_type`. In
+    /// practice this fires when a `Chunks` entry's chunk count doesn't match the schema-declared
+    /// arity, or when a tag declared `NodeType::Chunks(n)` is encoded as `Value`/`Binary`.
     #[error("wire contains a node whose payload shape disagrees with its tag's declared NodeType")]
     ShapeMismatch,
-    /// A `Binary`-typed node references a child digest that's not in the wire.
-    #[error("wire contains a Binary node whose child digest is not present in the node set")]
-    DanglingChild,
-    /// `wire.root` is not [`super::TRUE_DIGEST`] and not the digest of any node in the wire.
-    #[error("wire root points to a node that is not present in the node set")]
+    /// `wire.root` is not [`super::TRUE_DIGEST`] and doesn't match any rehydrated entry's digest.
+    #[error("wire root points to a digest not present in the rehydrated entries")]
     MissingRoot,
     /// An AND-chain step does not have `tag == TRUE_TAG` (corrupt transcript).
     #[error("AND-chain walk encountered a node whose tag is not TRUE_TAG")]

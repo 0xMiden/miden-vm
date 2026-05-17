@@ -10,7 +10,9 @@ use alloc::{boxed::Box, collections::BTreeMap, vec::Vec};
 use miden_air::{ProcessorAir, PublicInputs, config};
 use miden_core::{
     Felt, WORD_SIZE,
-    deferred::{DeferredStateWire, Digest, Node, TRUE_DIGEST, TRUE_TAG},
+    deferred::{
+        DeferredStateWire, Digest, Node, Payload, TRUE_DIGEST, TRUE_INDEX, TRUE_TAG, WireBody,
+    },
     field::QuadFelt,
 };
 use miden_crypto::stark::{
@@ -135,20 +137,34 @@ pub fn verify_with_precompiles(
 /// Walks the AND-chain rooted at `wire.root` down to [`TRUE_DIGEST`], returning the per-step
 /// `log_precompile` statements in execution order (oldest first).
 ///
-/// First builds a digest-indexed lookup over `wire.nodes` (each node's key is its recomputed
-/// [`Node::digest`], so this pass also verifies content-addressing). Then walks AND-nodes:
-/// each step's tag must be [`TRUE_TAG`] and its 8-felt payload decodes as `(prev_root || stmnt)`.
-/// A broken chain (missing node, wrong tag, non-expression body) surfaces as
-/// [`VerificationError::DeferredChainCorrupt`].
+/// First materialises each wire entry into a digest-form `Node` by recomputing its digest
+/// (Binary entries reconstruct their payload from earlier entries' digests via the indices).
+/// Each entry's recomputed digest is keyed into a lookup map; a tampered entry ends up under
+/// the digest its bytes actually hash to, so a forged chain child reference fails to find
+/// anything in this map. Then walks AND-nodes via the lookup.
 fn walk_deferred_and_chain(
     wire: &DeferredStateWire,
 ) -> Result<Vec<Digest>, VerificationError> {
-    // Build a digest-keyed lookup. Recomputing each digest exercises content-addressing: a
-    // forged node ends up under the digest its bytes actually hash to, so a tampered chain
-    // child reference fails to find anything in this map.
-    let by_digest: BTreeMap<Digest, &Node> =
-        wire.nodes.iter().map(|n| (n.digest(), n)).collect();
+    // Phase 1: materialise. Each entry's payload is reconstructed using only earlier entries
+    // (`Binary` indices resolve into the `digests` vector built so far).
+    let mut digests: Vec<Digest> = Vec::with_capacity(wire.entries.len());
+    let mut by_digest: BTreeMap<Digest, Node> = BTreeMap::new();
+    for (i, entry) in wire.entries.iter().enumerate() {
+        let node = match &entry.body {
+            WireBody::Value(payload) => Node::expression(entry.tag, *payload),
+            WireBody::Chunks(chunks) => Node::chunk(entry.tag, chunks.clone()),
+            WireBody::Binary { lhs, rhs } => {
+                let lhs_d = resolve_wire_index(*lhs, i, &digests)?;
+                let rhs_d = resolve_wire_index(*rhs, i, &digests)?;
+                Node::expression(entry.tag, Payload::binary_op(lhs_d, rhs_d))
+            },
+        };
+        let d = node.digest();
+        digests.push(d);
+        by_digest.insert(d, node);
+    }
 
+    // Phase 2: walk the AND-chain.
     let mut statements = Vec::new();
     let mut current = wire.root;
     while current != TRUE_DIGEST {
@@ -171,6 +187,21 @@ fn walk_deferred_and_chain(
     }
     statements.reverse();
     Ok(statements)
+}
+
+/// Same semantics as `core::deferred::state::resolve_index`, copied here because the helper is
+/// `pub(crate)` to its origin module.
+fn resolve_wire_index(idx: u32, current: usize, digests: &[Digest]) -> Result<Digest, VerificationError> {
+    if idx == TRUE_INDEX {
+        return Ok(TRUE_DIGEST);
+    }
+    let i = idx as usize;
+    if i >= current || i >= digests.len() {
+        return Err(VerificationError::DeferredChainCorrupt {
+            reason: DeferredChainErrorReason::BadIndex { idx },
+        });
+    }
+    Ok(digests[i])
 }
 
 fn verify_stark(
@@ -244,6 +275,8 @@ pub enum DeferredChainErrorReason {
     NonAndNode { digest: Digest },
     #[error("AND-node {digest} has a chunk-bodied payload (expected expression body)")]
     NonExpressionPayload { digest: Digest },
+    #[error("wire Binary entry references out-of-range child index {idx}")]
+    BadIndex { idx: u32 },
 }
 
 // STARK PROOF VERIFICATION
