@@ -45,4 +45,4 @@ trace.EVENT_ID_1
 trace.2
 ```
 
-To make use of the `trace` instruction, programs should be ran with tracing flag (`-t` or `--trace`), otherwise these instructions will be ignored.
+To make use of the `trace` instruction, programs should be run with tracing flag (`-t` or `--trace`), otherwise these instructions will be ignored.
