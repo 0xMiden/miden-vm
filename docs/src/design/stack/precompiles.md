@@ -10,7 +10,7 @@ coordinate to maintain a sequential commitment to every precompile invocation.
 | ------- | ----------- |
 | `PrecompileRequest` | Minimal calldata for a precompile, recorded by the host when the event handler runs. It contains exactly the information needed to deterministically recompute the result and the commitment. Requests are included in the proof artifact. |
 | `PrecompileCommitment` | A word pair `(TAG, COMM)` computed by the MASM wrapper, and deterministically recomputable from the corresponding `PrecompileRequest`. `COMM` typically commits to inputs, and may also include outputs for long results; the three free elements in `TAG` carry metadata and/or simple results. Together `(TAG, COMM)` represent the full request (inputs + outputs). |
-| `PrecompileTranscript` | A sequential commitment to all precompile requests. Implemented with an Poseidon2 sponge; the VM stores only the capacity (4 elements). The verifier reconstructs the same transcript by re‑evaluating requests and their commitments. Finalizing yields a transcript digest. |
+| `PrecompileTranscript` | A sequential commitment to all precompile requests. Implemented with a Poseidon2 sponge; the VM stores only the capacity (4 elements). The verifier reconstructs the same transcript by re‑evaluating requests and their commitments. Finalizing yields a transcript digest. |
 
 ## Lifecycle overview
 
