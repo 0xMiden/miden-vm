@@ -27,7 +27,7 @@ push.0x341200000000000078560000000000001290000000000000cdab000000000000
 push.4660.22136.36882.43981
 ```
 
-In both case the values must still encode valid field elements.
+In both cases the values must still encode valid field elements.
 
 #### Word literal syntax
 
@@ -62,7 +62,7 @@ push.WORD[0..4]   # is equivalent to push.[5,6,7,8]
 
 ### Nondeterministic inputs
 
-As mentioned above, nondeterministic inputs are provided to the VM via the advice provider. Instructs which access the advice provider fall into two categories. The first category consists of instructions which move data from the advice stack onto the operand stack and/or memory.
+As mentioned above, nondeterministic inputs are provided to the VM via the advice provider. Instructions which access the advice provider fall into two categories. The first category consists of instructions which move data from the advice stack onto the operand stack and/or memory.
 
 | Instruction                         | Stack_input        | Stack_output        | Notes                                                                                                                                                                                                                                                                                                                          |
 | ----------------------------------- | ------------------ | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
