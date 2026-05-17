@@ -1,8 +1,7 @@
 use miden_core::{
     FMP_INIT_VALUE,
     mast::{
-        BasicBlockNodeBuilder, CallNodeBuilder, MastForest, MastForestContributor, MastNode,
-        MastNodeExt,
+        BasicBlockNodeBuilder, CallNodeBuilder, MastForest, MastForestContributor, MastNodeExt,
     },
     operations::Operation,
 };
@@ -199,9 +198,10 @@ fn build_bar_hash() -> [u64; 4] {
         .add_to_forest(&mut mast_forest)
         .unwrap();
 
-    let bar_root: MastNode =
-        CallNodeBuilder::new_syscall(foo_root_id).build(&mast_forest).unwrap().into();
-    let bar_hash: Word = bar_root.digest();
+    let bar_root_id = CallNodeBuilder::new_syscall(foo_root_id)
+        .add_to_forest(&mut mast_forest)
+        .unwrap();
+    let bar_hash: Word = mast_forest[bar_root_id].digest();
     [
         bar_hash[0].as_canonical_u64(),
         bar_hash[1].as_canonical_u64(),

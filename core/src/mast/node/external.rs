@@ -31,7 +31,6 @@ use crate::{
 /// node can be swapped with the actual subtree that it represents without changing the MAST root.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
 pub struct ExternalNode {
     digest: Word,
     decorator_store: DecoratorStore,
@@ -225,31 +224,6 @@ impl MastNodeExt for ExternalNode {
     }
 }
 
-// ARBITRARY IMPLEMENTATION
-// ================================================================================================
-
-#[cfg(all(feature = "arbitrary", test))]
-impl proptest::prelude::Arbitrary for ExternalNode {
-    type Parameters = ();
-
-    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        use proptest::prelude::*;
-
-        use crate::Felt;
-
-        // Generate a random Word to use as the procedure hash/digest
-        any::<[u64; 4]>()
-            .prop_map(|[a, b, c, d]| {
-                let word = Word::from([Felt::new_unchecked(a), Felt::new_unchecked(b), Felt::new_unchecked(c), Felt::new_unchecked(d)]);
-                ExternalNodeBuilder::new(word).build()
-            })
-            .no_shrink()  // Pure random values, no meaningful shrinking pattern
-            .boxed()
-    }
-
-    type Strategy = proptest::prelude::BoxedStrategy<Self>;
-}
-
 // ------------------------------------------------------------------------------------------------
 /// Builder for creating [`ExternalNode`] instances with decorators.
 #[derive(Debug)]
@@ -266,17 +240,6 @@ impl ExternalNodeBuilder {
             digest,
             before_enter: Vec::new(),
             after_exit: Vec::new(),
-        }
-    }
-
-    /// Builds the ExternalNode with the specified decorators.
-    pub fn build(self) -> ExternalNode {
-        ExternalNode {
-            digest: self.digest,
-            decorator_store: DecoratorStore::new_owned_with_decorators(
-                self.before_enter,
-                self.after_exit,
-            ),
         }
     }
 

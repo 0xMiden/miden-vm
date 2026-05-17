@@ -35,7 +35,6 @@ use crate::{
 /// - A syscall: the callee is executed in the root context.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
 pub struct CallNode {
     callee: MastNodeId,
     is_syscall: bool,
@@ -293,38 +292,6 @@ impl MastNodeExt for CallNode {
     }
 }
 
-// ARBITRARY IMPLEMENTATION
-// ================================================================================================
-
-#[cfg(all(feature = "arbitrary", test))]
-impl proptest::prelude::Arbitrary for CallNode {
-    type Parameters = ();
-
-    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        use proptest::prelude::*;
-
-        use crate::Felt;
-
-        // Generate callee, digest, and whether it's a syscall
-        (any::<MastNodeId>(), any::<[u64; 4]>(), any::<bool>())
-            .prop_map(|(callee, digest_array, is_syscall)| {
-                // Generate a random digest
-                let digest = Word::from(digest_array.map(Felt::new_unchecked));
-                // Construct directly to avoid MastForest validation for arbitrary data
-                CallNode {
-                    callee,
-                    is_syscall,
-                    digest,
-                    decorator_store: DecoratorStore::default(),
-                }
-            })
-            .no_shrink()  // Pure random values, no meaningful shrinking pattern
-            .boxed()
-    }
-
-    type Strategy = proptest::prelude::BoxedStrategy<Self>;
-}
-
 // ------------------------------------------------------------------------------------------------
 /// Builder for creating [`CallNode`] instances with decorators.
 #[derive(Debug)]
@@ -357,44 +324,6 @@ impl CallNodeBuilder {
             after_exit: Vec::new(),
             digest: None,
         }
-    }
-
-    /// Builds the CallNode with the specified decorators.
-    pub fn build(self, mast_forest: &MastForest) -> Result<CallNode, MastForestError> {
-        NodeBuilderLifecycle::validate_children(mast_forest, &[self.callee])?;
-
-        let lifecycle =
-            NodeBuilderLifecycle::new(&self.before_enter, &self.after_exit, self.digest);
-        let digest = lifecycle.digest_or_compute(|| {
-            let callee_digest = mast_forest[self.callee].digest();
-
-            digest::call_digest(callee_digest, self.is_syscall)
-        });
-
-        Ok(CallNode {
-            callee: self.callee,
-            is_syscall: self.is_syscall,
-            digest,
-            decorator_store: DecoratorStore::new_owned_with_decorators(
-                self.before_enter,
-                self.after_exit,
-            ),
-        })
-    }
-
-    pub(in crate::mast) fn build_with_forced_digest(self) -> Result<CallNode, MastForestError> {
-        let digest = NodeBuilderLifecycle::new(&self.before_enter, &self.after_exit, self.digest)
-            .forced_digest()?;
-
-        Ok(CallNode {
-            callee: self.callee,
-            is_syscall: self.is_syscall,
-            digest,
-            decorator_store: DecoratorStore::new_owned_with_decorators(
-                self.before_enter,
-                self.after_exit,
-            ),
-        })
     }
 
     pub(in crate::mast) fn build_linked_with_decorators(

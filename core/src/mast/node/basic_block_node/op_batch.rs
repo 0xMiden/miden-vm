@@ -624,7 +624,7 @@ mod op_batch_tests {
     use proptest::prelude::*;
 
     use super::*;
-    use crate::mast::{BasicBlockNode, arbitrary::BasicBlockNodeParams};
+    use crate::mast::{BasicBlockNodeBuilder, arbitrary::op_non_control_sequence_strategy};
 
     #[test]
     fn test_op_idx_in_batch_to_group() {
@@ -760,18 +760,17 @@ mod op_batch_tests {
     proptest! {
         #[test]
         fn test_op_batch_iterator_arbitrary_large_block(
-            // Generate BasicBlockNodes with 73-200 operations to ensure multiple batches
-            basic_block in any_with::<BasicBlockNode>(BasicBlockNodeParams {
-                max_ops_len: 200,        // Generate blocks with up to 200 operations
-                max_pairs: 30,           // Allow more decorators
-                max_decorator_id_u32: 100,
-            })
+            // Generate operation sequences large enough to exercise multiple batches.
+            ops in op_non_control_sequence_strategy(200)
         ) {
-            // Verify that we actually have a multi-batch block
-            prop_assume!(basic_block.num_operations() > 72, "Need multiple batches for meaningful testing");
+            prop_assume!(ops.len() > 72, "Need multiple batches for meaningful testing");
+
+            let (op_batches, _) = BasicBlockNodeBuilder::new(ops, Vec::new())
+                .into_op_batches_and_digest()
+                .expect("non-empty generated operations should build");
 
             // Test all batches in the basic block
-            for batch in basic_block.op_batches() {
+            for batch in &op_batches {
                 // Verify iterator results match op_idx_in_batch_to_group for every operation
                 for (op_idx_in_batch, (group_idx, op_idx_in_group, _op)) in
                     batch.iter_with_groups().enumerate()

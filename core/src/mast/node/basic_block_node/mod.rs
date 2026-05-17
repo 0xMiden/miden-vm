@@ -103,43 +103,6 @@ impl BasicBlockNode {
 // ------------------------------------------------------------------------------------------------
 /// Constructors
 impl BasicBlockNode {
-    /// Returns a new [`BasicBlockNode`] instantiated with the specified operations and decorators.
-    ///
-    /// Raw decorator indices are adjusted for padding, matching
-    /// [`BasicBlockNodeBuilder::build`].
-    ///
-    /// Returns an error if:
-    /// - `operations` vector is empty.
-    #[cfg(any(test, feature = "arbitrary"))]
-    pub(crate) fn new_owned_with_decorators(
-        operations: Vec<Operation>,
-        decorators: DecoratorList,
-    ) -> Result<Self, MastForestError> {
-        if operations.is_empty() {
-            return Err(MastForestError::EmptyBasicBlock);
-        }
-        validate_decorator_indices_within_ops(operations.len(), &decorators)?;
-
-        // Validate decorators list (only in debug mode).
-        #[cfg(debug_assertions)]
-        validate_decorators(operations.len(), &decorators);
-
-        let (op_batches, digest) = batch_and_hash_ops(&operations);
-        // the prior line may have inserted some padding Noops in the op_batches
-        // the decorator mapping should still point to the correct operation when that happens
-        let padded_decorators = BasicBlockNode::adjust_decorators(decorators, &op_batches);
-
-        Ok(Self {
-            op_batches,
-            digest,
-            decorators: DecoratorStore::Owned {
-                decorators: padded_decorators,
-                before_enter: Vec::new(),
-                after_exit: Vec::new(),
-            },
-        })
-    }
-
     // Takes a `DecoratorList` which operation indexes are defined against un-padded operations, and
     // adjusts those indexes to point into the padded `&[OpBatches]` passed as argument.
     //
@@ -1421,7 +1384,7 @@ fn batch_ops(ops: &[Operation]) -> Vec<OpBatch> {
 /// decorator indices match the format of the operations:
 /// - `Raw`: decorators have raw (unpadded) indices
 /// - `Batched`: decorators have padded indices
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum OperationData {
     /// Raw operations with raw decorator indices
     Raw {
@@ -1436,7 +1399,7 @@ enum OperationData {
 }
 
 /// Builder for creating [`BasicBlockNode`] instances with decorators.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BasicBlockNodeBuilder {
     operation_data: OperationData,
     before_enter: Vec<DecoratorId>,
@@ -1565,21 +1528,6 @@ impl BasicBlockNodeBuilder {
     pub fn into_op_batches_and_digest(self) -> Result<(Vec<OpBatch>, Word), MastForestError> {
         let parts = self.into_build_parts()?;
         Ok((parts.op_batches, parts.digest))
-    }
-
-    /// Builds the BasicBlockNode with the specified decorators.
-    pub fn build(self) -> Result<BasicBlockNode, MastForestError> {
-        let parts = self.into_build_parts()?;
-
-        Ok(BasicBlockNode {
-            op_batches: parts.op_batches,
-            digest: parts.digest,
-            decorators: DecoratorStore::Owned {
-                decorators: parts.padded_decorators,
-                before_enter: parts.before_enter,
-                after_exit: parts.after_exit,
-            },
-        })
     }
 
     pub(in crate::mast) fn build_linked_with_decorators(

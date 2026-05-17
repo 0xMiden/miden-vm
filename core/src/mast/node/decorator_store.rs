@@ -40,18 +40,6 @@ impl Default for DecoratorStore {
 }
 
 impl DecoratorStore {
-    /// Create a new Owned decorator store with the specified before/after decorators
-    pub fn new_owned_with_decorators(
-        before_enter: Vec<DecoratorId>,
-        after_exit: Vec<DecoratorId>,
-    ) -> Self {
-        Self::Owned {
-            decorators: DecoratorList::new(),
-            before_enter,
-            after_exit,
-        }
-    }
-
     /// Get the before_enter decorators, borrowing from the forest if linked
     pub fn before_enter<'a, F>(&'a self, forest: &'a F) -> &'a [DecoratorId]
     where

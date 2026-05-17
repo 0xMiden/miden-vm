@@ -140,51 +140,6 @@ pub fn decorator_id_strategy(max_id: u32) -> impl Strategy<Value = DecoratorId> 
     (0..upper).prop_map(DecoratorId::new_unchecked)
 }
 
-// ---------- Decorator pairs strategy ----------
-
-/// Strategy for generating decorator pairs (usize, DecoratorId)
-pub fn decorator_pairs_strategy(
-    ops_len: usize,
-    max_id: u32,
-    max_pairs: usize,
-) -> impl Strategy<Value = Vec<(usize, DecoratorId)>> {
-    // indices in [0, ops_len); size 0..=max_pairs
-    // Generate, then sort by index to match validation expectations
-    prop::collection::vec((0..ops_len, decorator_id_strategy(max_id)), 0..=max_pairs).prop_map(
-        |mut v| {
-            v.sort_by_key(|(i, _)| *i);
-            v
-        },
-    )
-}
-
-// ---------- Arbitrary for BasicBlockNode ----------
-
-impl Arbitrary for BasicBlockNode {
-    type Parameters = BasicBlockNodeParams;
-    type Strategy = BoxedStrategy<Self>;
-
-    fn arbitrary_with(p: Self::Parameters) -> Self::Strategy {
-        // ensure at least 1 op to satisfy BasicBlockNode::new
-        (op_non_control_sequence_strategy(p.max_ops_len),)
-            .prop_flat_map(move |(ops,)| {
-                let ops_len = ops.len().max(1); // defensive; strategy should ensure ≥1
-                decorator_pairs_strategy(ops_len, p.max_decorator_id_u32, p.max_pairs)
-                    .prop_map(move |decorators| (ops.clone(), decorators))
-            })
-            .prop_filter_map("non-empty ops", |(ops, decorators)| {
-                if ops.is_empty() { None } else { Some((ops, decorators)) }
-            })
-            .prop_map(|(ops, decorators)| {
-                // BasicBlockNode::new_owned_with_decorators will adjust indices for padding and set
-                // be/ae empty.
-                BasicBlockNode::new_owned_with_decorators(ops, decorators)
-                    .expect("non-empty ops; new() only errs on empty ops")
-            })
-            .boxed()
-    }
-}
-
 // ---------- Optional: MastForest strategy (behind feature gate) ----------
 
 /// Parameters for generating MastForest instances
@@ -309,7 +264,7 @@ impl Arbitrary for MastForest {
     /// let forest = MastForest::arbitrary_with(params);
     /// ```
     fn arbitrary_with(params: Self::Parameters) -> Self::Strategy {
-        // BasicBlockNode generation must reference decorator IDs in [0, decorators)
+        // BasicBlockNodeBuilder generation must reference decorator IDs in [0, decorators)
         let bb_params = BasicBlockNodeParams {
             max_decorator_id_u32: params.decorators,
             ..Default::default()
@@ -317,8 +272,11 @@ impl Arbitrary for MastForest {
 
         // Generate nodes in a way that respects topological ordering
         (
-            // Generate basic blocks first (they have no dependencies)
-            prop::collection::vec(any_with::<BasicBlockNode>(bb_params), 1..=*params.blocks.end()),
+            // Generate basic block builders first (they have no dependencies)
+            prop::collection::vec(
+                any_with::<BasicBlockNodeBuilder>(bb_params),
+                1..=*params.blocks.end(),
+            ),
             // Generate decorators
             prop::collection::vec(
                 any::<Decorator>(),
@@ -468,8 +426,7 @@ impl Arbitrary for MastForest {
 
                     // 2) Add basic blocks and collect their IDs
                     let mut basic_block_ids = Vec::new();
-                    for block in basic_blocks {
-                        let builder = block.to_builder(&forest);
+                    for builder in basic_blocks {
                         let node_id =
                             builder.add_to_forest(&mut forest).expect("Failed to add block");
                         basic_block_ids.push(node_id);
@@ -681,13 +638,14 @@ impl Arbitrary for Program {
     type Strategy = BoxedStrategy<Self>;
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        // Create a simple strategy that generates a basic block and creates a program from it
-        any_with::<BasicBlockNode>(BasicBlockNodeParams {
+        // Create a simple strategy that generates a basic block builder and creates a program
+        // from it.
+        any_with::<BasicBlockNodeBuilder>(BasicBlockNodeParams {
             max_ops_len: 4, // Keep it small
             max_pairs: 1,   // Fewer decorators
             max_decorator_id_u32: 2,
         })
-        .prop_map(|node| {
+        .prop_map(|builder| {
             // Create a new MastForest
             let mut forest = MastForest::new();
 
@@ -697,8 +655,6 @@ impl Arbitrary for Program {
                 forest.add_decorator(decorator).expect("Failed to add decorator");
             }
 
-            // Add the node to the forest using builder
-            let builder = node.to_builder(&forest);
             let node_id = builder.add_to_forest(&mut forest).expect("Failed to add node");
 
             // Since we added a node, it should be available as a procedure root

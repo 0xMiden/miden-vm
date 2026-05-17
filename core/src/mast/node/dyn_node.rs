@@ -24,7 +24,6 @@ use crate::{
 /// A Dyn node specifies that the node to be executed next is defined dynamically via the stack.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
 pub struct DynNode {
     is_dyncall: bool,
     digest: Word,
@@ -269,32 +268,6 @@ impl MastNodeExt for DynNode {
     }
 }
 
-// ARBITRARY IMPLEMENTATION
-// ================================================================================================
-
-#[cfg(all(feature = "arbitrary", test))]
-impl proptest::prelude::Arbitrary for DynNode {
-    type Parameters = ();
-
-    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        use proptest::prelude::*;
-
-        // Generate whether it's a dyncall or dynexec
-        any::<bool>()
-            .prop_map(|is_dyncall| {
-                if is_dyncall {
-                    DynNodeBuilder::new_dyncall().build()
-                } else {
-                    DynNodeBuilder::new_dyn().build()
-                }
-            })
-            .no_shrink()  // Pure random values, no meaningful shrinking pattern
-            .boxed()
-    }
-
-    type Strategy = proptest::prelude::BoxedStrategy<Self>;
-}
-
 // ------------------------------------------------------------------------------------------------
 /// Builder for creating [`DynNode`] instances with decorators.
 #[derive(Debug)]
@@ -323,25 +296,6 @@ impl DynNodeBuilder {
             before_enter: Vec::new(),
             after_exit: Vec::new(),
             digest: None,
-        }
-    }
-
-    /// Builds the DynNode with the specified decorators.
-    pub fn build(self) -> DynNode {
-        // Use the forced digest if provided, otherwise use the default digest
-        let digest = if let Some(forced_digest) = self.digest {
-            forced_digest
-        } else {
-            digest::dyn_digest(self.is_dyncall)
-        };
-
-        DynNode {
-            is_dyncall: self.is_dyncall,
-            digest,
-            decorator_store: DecoratorStore::new_owned_with_decorators(
-                self.before_enter,
-                self.after_exit,
-            ),
         }
     }
 

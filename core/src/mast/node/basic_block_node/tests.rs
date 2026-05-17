@@ -6,7 +6,7 @@ use super::*;
 use crate::{
     Felt, ONE, Word,
     chiplets::hasher,
-    mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, MastNodeExt},
+    mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, MastNodeExt, MastNodeId},
     operations::Decorator,
     utils::IndexVec,
 };
@@ -358,7 +358,7 @@ fn basic_block_from_batch(batch: OpBatch) -> BasicBlockNode {
     BasicBlockNode {
         op_batches,
         digest,
-        decorators: DecoratorStore::default(),
+        decorators: DecoratorStore::Linked { id: MastNodeId::new_unchecked(0) },
     }
 }
 
@@ -366,11 +366,7 @@ fn basic_block_from_batches(op_batches: Vec<OpBatch>) -> BasicBlockNode {
     BasicBlockNode {
         op_batches,
         digest: Word::default(),
-        decorators: DecoratorStore::Owned {
-            decorators: DecoratorList::new(),
-            before_enter: Vec::new(),
-            after_exit: Vec::new(),
-        },
+        decorators: DecoratorStore::Linked { id: MastNodeId::new_unchecked(0) },
     }
 }
 

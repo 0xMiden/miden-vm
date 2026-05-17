@@ -47,19 +47,6 @@ fn forest_parts_with_node_and_debug_info(node: MastNode, debug_info: DebugInfo) 
 }
 
 #[test]
-fn from_parts_rejects_unlinked_decorator_store() {
-    let node = BasicBlockNodeBuilder::new(vec![Operation::Push(Felt::new_unchecked(1))], vec![])
-        .build()
-        .unwrap()
-        .into();
-
-    assert_eq!(
-        MastForest::from_parts(forest_parts_with_node(node)),
-        Err(MastForestError::UnlinkedDecoratorStore(MastNodeId::new_unchecked(0)))
-    );
-}
-
-#[test]
 fn from_parts_rejects_mislinked_decorator_store() {
     let node = MastNodeBuilder::BasicBlock(BasicBlockNodeBuilder::new(
         vec![Operation::Push(Felt::new_unchecked(1))],

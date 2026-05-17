@@ -6,11 +6,13 @@ use super::{
     BasicBlockNodeBuilder, CallNodeBuilder, DynNodeBuilder, ExternalNodeBuilder, JoinNodeBuilder,
     LoopNodeBuilder, SplitNodeBuilder,
 };
+#[cfg(any(test, feature = "arbitrary", feature = "testing"))]
+use crate::utils::Idx;
 use crate::{
     Word,
     mast::{DecoratorId, MastForest, MastForestError, MastNode, MastNodeFingerprint, MastNodeId},
     operations::DecoratorList,
-    utils::{Idx, LookupByIdx},
+    utils::LookupByIdx,
 };
 
 pub trait MastForestContributor {
@@ -72,6 +74,7 @@ impl<'a> NodeBuilderLifecycle<'a> {
         Self { before_enter, after_exit, digest }
     }
 
+    #[cfg(any(test, feature = "arbitrary", feature = "testing"))]
     pub(super) fn validate_children(
         forest: &MastForest,
         children: &[MastNodeId],
@@ -155,39 +158,6 @@ pub(in crate::mast) struct LinkedMastNodeBuild {
 }
 
 impl MastNodeBuilder {
-    /// Build the node from this builder.
-    ///
-    /// For nodes that depend on a MastForest (Call, Join, Loop, Split), the forest is required.
-    /// For nodes that don't depend on a MastForest (BasicBlock, Dyn, External), the forest is
-    /// ignored.
-    pub fn build(self, mast_forest: &MastForest) -> Result<MastNode, MastForestError> {
-        match self {
-            MastNodeBuilder::BasicBlock(builder) => Ok(builder.build()?.into()),
-            MastNodeBuilder::Call(builder) => Ok(builder.build(mast_forest)?.into()),
-            MastNodeBuilder::Dyn(builder) => Ok(builder.build().into()),
-            MastNodeBuilder::External(builder) => Ok(builder.build().into()),
-            MastNodeBuilder::Join(builder) => Ok(builder.build(mast_forest)?.into()),
-            MastNodeBuilder::Loop(builder) => Ok(builder.build(mast_forest)?.into()),
-            MastNodeBuilder::Split(builder) => Ok(builder.build(mast_forest)?.into()),
-        }
-    }
-
-    /// Build the node from this builder without reading child nodes from a forest.
-    ///
-    /// Forest-dependent node kinds require a forced digest. This is intended for assembly-time
-    /// builders that already computed the digest from builder-local child references.
-    pub fn build_with_forced_digest(self) -> Result<MastNode, MastForestError> {
-        match self {
-            MastNodeBuilder::BasicBlock(builder) => Ok(builder.build()?.into()),
-            MastNodeBuilder::Call(builder) => Ok(builder.build_with_forced_digest()?.into()),
-            MastNodeBuilder::Dyn(builder) => Ok(builder.build().into()),
-            MastNodeBuilder::External(builder) => Ok(builder.build().into()),
-            MastNodeBuilder::Join(builder) => Ok(builder.build_with_forced_digest()?.into()),
-            MastNodeBuilder::Loop(builder) => Ok(builder.build_with_forced_digest()?.into()),
-            MastNodeBuilder::Split(builder) => Ok(builder.build_with_forced_digest()?.into()),
-        }
-    }
-
     #[doc(hidden)]
     pub fn build_linked(self, node_id: MastNodeId) -> Result<MastNode, MastForestError> {
         self.build_linked_with_decorators(node_id).map(|build| build.node)
@@ -572,13 +542,16 @@ mod round_trip_tests {
         let join_id = join_builder1.add_to_forest(&mut forest).unwrap();
 
         // perform round-trip
-        let join_node = forest.get_node_by_id(join_id).unwrap();
-        let rebuilt_node = join_node.clone().to_builder(&forest).build(&forest).unwrap();
+        let join_node = forest.get_node_by_id(join_id).unwrap().clone();
+        let rebuilt_id = join_node.to_builder(&forest).add_to_forest(&mut forest).unwrap();
+        let original_node = forest.get_node_by_id(join_id).unwrap();
+        let rebuilt_node = forest.get_node_by_id(rebuilt_id).unwrap();
 
-        // Use semantic equality to handle decorator store state differences
-        match (join_node, &rebuilt_node) {
+        match (original_node, rebuilt_node) {
             (MastNode::Join(original), MastNode::Join(rebuilt)) => {
-                assert!(original.semantic_eq(rebuilt, &forest));
+                assert_eq!(original.first(), rebuilt.first());
+                assert_eq!(original.second(), rebuilt.second());
+                assert_eq!(original.digest(), rebuilt.digest());
             },
             _ => panic!("Both nodes should be Join nodes"),
         }
@@ -652,9 +625,10 @@ mod round_trip_tests {
             Felt::new_unchecked(16),
         ]);
         let children = [MastNodeId::new_unchecked(10), MastNodeId::new_unchecked(11)];
+        let node_id = MastNodeId::new_unchecked(0);
 
         let node = MastNodeBuilder::Join(JoinNodeBuilder::new(children).with_digest(forced_digest))
-            .build_with_forced_digest()
+            .build_linked(node_id)
             .expect("forced-digest join should build without reading a forest");
 
         let MastNode::Join(node) = node else {
@@ -665,7 +639,7 @@ mod round_trip_tests {
 
         assert!(
             MastNodeBuilder::Join(JoinNodeBuilder::new(children))
-                .build_with_forced_digest()
+                .build_linked(node_id)
                 .is_err(),
             "control-flow nodes require a forced digest when built without a forest"
         );
@@ -678,19 +652,19 @@ mod round_trip_tests {
         let missing_child = MastNodeId::new_unchecked(99);
 
         assert!(matches!(
-            LoopNodeBuilder::new(missing_child).build(&forest),
+            LoopNodeBuilder::new(missing_child).add_to_forest(&mut forest),
             Err(MastForestError::NodeIdOverflow(node_id, _)) if node_id == missing_child
         ));
         assert!(matches!(
-            CallNodeBuilder::new(missing_child).build(&forest),
+            CallNodeBuilder::new(missing_child).add_to_forest(&mut forest),
             Err(MastForestError::NodeIdOverflow(node_id, _)) if node_id == missing_child
         ));
         assert!(matches!(
-            JoinNodeBuilder::new([valid_child, missing_child]).build(&forest),
+            JoinNodeBuilder::new([valid_child, missing_child]).add_to_forest(&mut forest),
             Err(MastForestError::NodeIdOverflow(node_id, _)) if node_id == missing_child
         ));
         assert!(matches!(
-            SplitNodeBuilder::new([missing_child, valid_child]).build(&forest),
+            SplitNodeBuilder::new([missing_child, valid_child]).add_to_forest(&mut forest),
             Err(MastForestError::NodeIdOverflow(node_id, _)) if node_id == missing_child
         ));
     }
@@ -733,15 +707,15 @@ mod round_trip_tests {
             .with_after_exit([after])
             .with_digest(forced_digest)
             .remap_children(&remapping);
-        let node = builder
-            .build_with_forced_digest()
+        let (node, before_enter, after_exit) = builder
+            .build_linked_with_decorators(MastNodeId::new_unchecked(0))
             .expect("forced-digest remapped join should build without a forest");
 
         assert_eq!(node.first(), remapped_first);
         assert_eq!(node.second(), remapped_second);
         assert_eq!(node.digest(), forced_digest);
-        assert_eq!(node.before_enter(&MastForest::new()), &[before]);
-        assert_eq!(node.after_exit(&MastForest::new()), &[after]);
+        assert_eq!(before_enter, &[before]);
+        assert_eq!(after_exit, &[after]);
     }
 
     #[test]

@@ -32,7 +32,6 @@ use crate::{
 /// the value is neither `0` nor `1`, the execution fails.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
 pub struct SplitNode {
     branches: [MastNodeId; 2],
     digest: Word,
@@ -240,37 +239,6 @@ impl MastNodeExt for SplitNode {
     }
 }
 
-// ARBITRARY IMPLEMENTATION
-// ================================================================================================
-
-#[cfg(all(feature = "arbitrary", test))]
-impl proptest::prelude::Arbitrary for SplitNode {
-    type Parameters = ();
-
-    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        use proptest::prelude::*;
-
-        use crate::Felt;
-
-        // Generate two MastNodeId values and digest for the children
-        (any::<MastNodeId>(), any::<MastNodeId>(), any::<[u64; 4]>())
-            .prop_map(|(true_branch, false_branch, digest_array)| {
-                // Generate a random digest
-                let digest = Word::from(digest_array.map(Felt::new_unchecked));
-                // Construct directly to avoid MastForest validation for arbitrary data
-                SplitNode {
-                    branches: [true_branch, false_branch],
-                    digest,
-                    decorator_store: DecoratorStore::default(),
-                }
-            })
-            .no_shrink()  // Pure random values, no meaningful shrinking pattern
-            .boxed()
-    }
-
-    type Strategy = proptest::prelude::BoxedStrategy<Self>;
-}
-
 // ------------------------------------------------------------------------------------------------
 /// Builder for creating [`SplitNode`] instances with decorators.
 #[derive(Debug)]
@@ -290,43 +258,6 @@ impl SplitNodeBuilder {
             after_exit: Vec::new(),
             digest: None,
         }
-    }
-
-    /// Builds the SplitNode with the specified decorators.
-    pub fn build(self, mast_forest: &MastForest) -> Result<SplitNode, MastForestError> {
-        NodeBuilderLifecycle::validate_children(mast_forest, &self.branches)?;
-
-        let lifecycle =
-            NodeBuilderLifecycle::new(&self.before_enter, &self.after_exit, self.digest);
-        let digest = lifecycle.digest_or_compute(|| {
-            let true_branch_hash = mast_forest[self.branches[0]].digest();
-            let false_branch_hash = mast_forest[self.branches[1]].digest();
-
-            digest::split_digest(true_branch_hash, false_branch_hash)
-        });
-
-        Ok(SplitNode {
-            branches: self.branches,
-            digest,
-            decorator_store: DecoratorStore::new_owned_with_decorators(
-                self.before_enter,
-                self.after_exit,
-            ),
-        })
-    }
-
-    pub(in crate::mast) fn build_with_forced_digest(self) -> Result<SplitNode, MastForestError> {
-        let digest = NodeBuilderLifecycle::new(&self.before_enter, &self.after_exit, self.digest)
-            .forced_digest()?;
-
-        Ok(SplitNode {
-            branches: self.branches,
-            digest,
-            decorator_store: DecoratorStore::new_owned_with_decorators(
-                self.before_enter,
-                self.after_exit,
-            ),
-        })
     }
 
     pub(in crate::mast) fn build_linked_with_decorators(
