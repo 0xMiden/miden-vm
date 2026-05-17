@@ -8,13 +8,13 @@ use alloc::vec::Vec;
 
 use miden_core::{
     Felt, Word, ZERO,
-    deferred::{Node, NodePayload, NodeType, Payload, SchemaError, TRUE_TAG, Tag},
+    deferred::{Digest, Node, NodePayload, NodeType, Payload, SchemaError, TRUE_TAG, Tag},
 };
 
 use super::SystemEventError;
 use crate::{MemoryError, advice::AdviceError, fast::FastProcessor};
 
-// STACK LAYOUT — `DeferredRegister` and `DeferredEvaluate`
+// STACK LAYOUT — `DeferredRegister`
 // ================================================================================================
 // `[event_id, PAYLOAD_LO, PAYLOAD_HI, TAG, ...]` — Poseidon2 sponge layout so MASM can feed the
 // 12 felts directly into one `hperm` to compute the node's digest.
@@ -25,6 +25,14 @@ const DEFERRED_PAYLOAD_LO_OFFSET: usize = 1;
 const DEFERRED_PAYLOAD_HI_OFFSET: usize = 5;
 /// Stack offset of the deferred tag — the third word below the event ID.
 const DEFERRED_TAG_OFFSET: usize = 9;
+
+// STACK LAYOUT — `DeferredEvaluate`
+// ================================================================================================
+// `[event_id, NODE_DIGEST, ...]` — the node must already be registered in `DeferredState`; the
+// handler looks it up by digest and runs `schema.reduce` on it.
+
+/// Stack offset of the node digest (4-felt word at positions 1..5).
+const DEFERRED_NODE_DIGEST_OFFSET: usize = 1;
 
 // STACK LAYOUT — `DeferredRegisterChunk`
 // ================================================================================================
@@ -66,6 +74,10 @@ fn build_standard_node(
 
 /// Handles `SystemEvent::DeferredRegister`. Reads `(tag, payload)` off the operand stack, asks the
 /// schema to decode the tag, constructs the matching `Node`, and registers it.
+///
+/// Pushes the registered node's digest onto the advice stack so MASM can chain it into
+/// downstream nodes (e.g. as a child digest of a Binary op) or into `log_precompile` without
+/// having to recompute the digest in-circuit.
 pub(super) fn handle_deferred_register(
     processor: &mut FastProcessor,
 ) -> Result<(), SystemEventError> {
@@ -73,28 +85,37 @@ pub(super) fn handle_deferred_register(
     let (state, schema) = processor.deferred_view_mut();
     let info = schema.decode(tag)?;
     let node = build_standard_node(info.node_type, tag, payload)?;
-    let _ = state.register(schema, node)?;
+    let digest = state.register(schema, node)?;
+    processor.advice.push_stack_word(&digest)?;
     Ok(())
 }
 
-/// Handles `SystemEvent::DeferredEvaluate`. Reads `(tag, payload)` off the operand stack and asks
-/// the schema to reduce it.
+/// Handles `SystemEvent::DeferredEvaluate`. Reads a node digest off the operand stack, looks
+/// the node up in `DeferredState`, asks the schema to reduce it, and pushes the canonical onto
+/// the advice stack.
+///
+/// The referenced node must already be interned — programs typically call
+/// `adv.register_deferred` / `adv.register_deferred_chunk` first to register the node and
+/// obtain its digest from the advice stack.
 ///
 /// Advice-stack contract, driven by `decode(tag).evaluates_to`:
 /// - **Predicates** (`evaluates_to == TRUE_TAG`): canonical is the TRUE node — nothing is pushed.
 ///   A mismatch surfaces as `SchemaError::AssertionFailed`.
-/// - **Producing tags** (everything else): the 12 felts of the canonical `(payload, tag)` are
-///   pushed in `[PAYLOAD_LO, PAYLOAD_HI, TAG]` order (top-down), matching the operand-stack
-///   input layout — MASM can recover each word with `adv_pushw`.
-/// - **Chunk canonicals**: out of scope for v1; schemas canonicalise chunks to expression
-///   digest-leaves inside their `reduce`, so this arm is unreachable in practice.
+/// - **Expression canonicals**: the 12 felts of the canonical `(payload, tag)` are pushed in
+///   `[PAYLOAD_LO, PAYLOAD_HI, TAG]` order (top-down). MASM recovers each word with `adv_pushw`.
+/// - **Chunk canonicals** (e.g. self-evaluating chunk leaves like a 16-felt digest): all `n`
+///   chunks are pushed in `[chunk[0]_LO, chunk[0]_HI, chunk[1]_LO, ..., TAG]` order (top-down)
+///   so MASM recovers each word in natural sequence.
 pub(super) fn handle_deferred_evaluate(
     processor: &mut FastProcessor,
 ) -> Result<(), SystemEventError> {
-    let (tag, payload) = read_tag_and_payload(processor);
+    let digest_word = processor.stack_get_word(DEFERRED_NODE_DIGEST_OFFSET);
+    let digest: Digest =
+        Word::new([digest_word[0], digest_word[1], digest_word[2], digest_word[3]]);
+
     let (state, schema) = processor.deferred_view_mut();
-    let info = schema.decode(tag)?;
-    let node = build_standard_node(info.node_type, tag, payload)?;
+    let node = state.get(&digest)?.clone();
+    let info = schema.decode(node.tag)?;
     let canonical = state.evaluate(schema, node)?;
 
     // Predicates reduce to the TRUE node — by contract the advice stack is untouched.
@@ -102,26 +123,35 @@ pub(super) fn handle_deferred_evaluate(
         return Ok(());
     }
 
-    let payload = match &canonical.payload {
-        NodePayload::Expression(p) => p,
-        // Chunk-as-canonical: out of scope (schemas should canonicalise chunks to expression
-        // digest-leaves inside their `reduce`).
-        NodePayload::Chunk(_) => return Ok(()),
-    };
-
-    let payload_hi = Word::new([payload.0[4], payload.0[5], payload.0[6], payload.0[7]]);
-    let payload_lo = Word::new([payload.0[0], payload.0[1], payload.0[2], payload.0[3]]);
-    // Push deepest first so `payload_lo` ends up on top. `push_stack_word` reverses element
-    // order so an `adv_pushw` on the MASM side recovers each word in structural order.
+    // Push canonical body: TAG deepest, then payload words so the natural-order word is on top.
     processor.advice.push_stack_word(&Word::new(canonical.tag))?;
-    processor.advice.push_stack_word(&payload_hi)?;
-    processor.advice.push_stack_word(&payload_lo)?;
+    match &canonical.payload {
+        NodePayload::Expression(p) => {
+            let hi = Word::new([p.0[4], p.0[5], p.0[6], p.0[7]]);
+            let lo = Word::new([p.0[0], p.0[1], p.0[2], p.0[3]]);
+            processor.advice.push_stack_word(&hi)?;
+            processor.advice.push_stack_word(&lo)?;
+        },
+        NodePayload::Chunk(chunks) => {
+            // Push chunks deepest-last so chunk[0]_LO ends up on top of the advice stack.
+            for chunk in chunks.iter().rev() {
+                let hi = Word::new([chunk[4], chunk[5], chunk[6], chunk[7]]);
+                let lo = Word::new([chunk[0], chunk[1], chunk[2], chunk[3]]);
+                processor.advice.push_stack_word(&hi)?;
+                processor.advice.push_stack_word(&lo)?;
+            }
+        },
+    }
     Ok(())
 }
 
 /// Handles `SystemEvent::DeferredRegisterChunk`. Reads `(tag, ptr)` off the operand stack, asks
 /// the schema to decode `n` from the tag, reads `8n` felts from memory at `ptr`, and registers a
 /// chunk node carrying that bulk data.
+///
+/// Pushes the registered node's digest onto the advice stack so MASM can chain it into
+/// downstream nodes or into `log_precompile` without having to recompute the chunk-linear-hash
+/// digest in-circuit (which would be `n` Poseidon2 permutations).
 ///
 /// Validation:
 /// - `ptr` must fit in `u32`.
@@ -184,6 +214,7 @@ pub(super) fn handle_deferred_register_chunk(
     }
 
     let (state, schema) = processor.deferred_view_mut();
-    let _ = state.register(schema, Node::chunk(tag, chunks))?;
+    let digest = state.register(schema, Node::chunk(tag, chunks))?;
+    processor.advice.push_stack_word(&digest)?;
     Ok(())
 }

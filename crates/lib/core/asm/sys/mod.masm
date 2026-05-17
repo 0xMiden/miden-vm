@@ -55,3 +55,54 @@ pub proc log_precompile_request
     # => [STATE_NEW, OUT_RATE1, OUT_CAP, ...]
     dropw dropw dropw
 end
+
+# ===== DEFERRED-DAG HELPERS =======================================================================
+
+#! Registers an expression-bodied node `(tag, payload)` in the deferred-computation DAG and
+#! returns its content-addressed digest on top of the operand stack.
+#!
+#! Thin wrapper around `adv.register_deferred`: invokes the sys event (which leaves the operand
+#! stack unchanged and pushes NODE_DIGEST onto the advice stack), drops the 12 input felts, and
+#! pulls NODE_DIGEST back onto the operand stack.
+#!
+#! Input:  `[PAYLOAD_LO, PAYLOAD_HI, TAG, ...]`
+#! Output: `[NODE_DIGEST, ...]`
+pub proc register_expr
+    adv.register_deferred
+    # operand stack unchanged; advice stack now has [NODE_DIGEST]
+    dropw dropw dropw
+    # => [...]
+    adv_pushw
+    # => [NODE_DIGEST, ...]
+end
+
+#! Registers a chunk-bodied node in the deferred-computation DAG and returns its
+#! content-addressed digest on top of the operand stack.
+#!
+#! Thin wrapper around `adv.register_deferred_chunk`: invokes the sys event (which reads `8n`
+#! felts from memory at `ptr`, leaves the operand stack unchanged, and pushes NODE_DIGEST onto
+#! the advice stack), drops the 5 input felts, and pulls NODE_DIGEST back onto the operand stack.
+#!
+#! Input:  `[TAG, ptr, ...]`
+#! Output: `[NODE_DIGEST, ...]`
+pub proc register_chunk
+    adv.register_deferred_chunk
+    # operand stack unchanged; advice stack now has [NODE_DIGEST]
+    dropw drop
+    # => [...]
+    adv_pushw
+    # => [NODE_DIGEST, ...]
+end
+
+#! Evaluates a previously-registered node identified by its digest. The schema's `reduce`
+#! pushes the canonical body (or nothing, for predicates) onto the advice stack; this helper
+#! just consumes the input digest.
+#!
+#! Input:  `[NODE_DIGEST, ...]`
+#! Output: `[...]`
+#! Advice stack: depends on canonical (see `adv.evaluate_deferred` docs).
+pub proc evaluate
+    adv.evaluate_deferred
+    # operand stack unchanged; advice stack now has the canonical body
+    dropw
+end

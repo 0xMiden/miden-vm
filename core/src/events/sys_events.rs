@@ -297,10 +297,9 @@ pub enum SystemEvent {
     // --------------------------------------------------------------------------------------------
     /// Registers an opaque node `(tag, payload)` in the deferred-computation DAG.
     ///
-    /// The installed schema classifies the node via its `is_valid` hook: nodes flagged as
-    /// expressions are inserted into the DAG; nodes flagged as assertions are appended to the
-    /// assertion list, folded into the running transcript, and verified before this event
-    /// returns. No values are returned to MASM.
+    /// The installed schema validates the node's tag and shape; the node is interned into the
+    /// DAG keyed by its Poseidon2 digest. Pure host hint — predicates are NOT eagerly verified
+    /// here.
     ///
     /// Inputs:
     ///   Operand stack: [event_id, PAYLOAD_LO, PAYLOAD_HI, TAG, ...]
@@ -313,27 +312,38 @@ pub enum SystemEvent {
     ///
     /// Outputs:
     ///   Operand stack: [event_id, PAYLOAD_LO, PAYLOAD_HI, TAG, ...] (unchanged)
+    ///   Advice stack:  [NODE_DIGEST, ...] (pushed; top of advice is NODE_DIGEST[0])
     ///   DAG state:     {... node(TAG, PAYLOAD)}
+    ///
+    /// The advice-pushed digest lets MASM use the registered node as a child reference in a
+    /// downstream binary node, or feed it into `log_precompile`, without recomputing the digest
+    /// in-circuit.
     DeferredRegister,
 
-    /// Evaluates an opaque node `(tag, payload)` via the installed schema and pushes the
-    /// resulting 12 felts (`payload || tag`) onto the advice stack.
+    /// Evaluates a node identified by its 4-felt digest via the installed schema and pushes the
+    /// canonical's body (`payload || tag` or `chunks || tag`) onto the advice stack.
     ///
-    /// For expression nodes the result is the canonical reduced form; for assertion nodes the
-    /// schema verifies the assertion (returning [`crate::deferred::SchemaError::AssertionFailed`]
-    /// on mismatch)
-    /// and the result is the input node itself, so the advice-stack contract is uniform.
-    /// Children referenced in the payload must already be registered in the DAG. The state is
-    /// not mutated.
+    /// The node must already be interned in `DeferredState` — programs typically obtain the
+    /// digest from `adv.register_deferred` / `adv.register_deferred_chunk` (which push it to
+    /// advice as their output) immediately before calling this event.
+    ///
+    /// For expression nodes the canonical is the reduced form; for predicate tags
+    /// (`evaluates_to == TRUE_TAG`) the schema verifies the assertion (returning
+    /// [`crate::deferred::SchemaError::AssertionFailed`] on mismatch) and pushes nothing.
+    /// Children referenced in the payload must already be registered in the DAG.
     ///
     /// Inputs:
-    ///   Operand stack: [event_id, PAYLOAD_LO, PAYLOAD_HI, TAG, ...]
-    ///   Advice stack:  [...]
+    ///   Operand stack: [event_id, NODE_DIGEST, ...]
+    ///     where NODE_DIGEST is a 4-felt word at positions 1..5.
     ///
     /// Outputs:
-    ///   Operand stack: [event_id, PAYLOAD_LO, PAYLOAD_HI, TAG, ...] (unchanged)
-    ///   Advice stack:  [CANONICAL_PAYLOAD_LO, CANONICAL_PAYLOAD_HI, CANONICAL_TAG, ...]
-    ///     (top of advice is `CANONICAL_PAYLOAD_LO`, mirroring the input layout)
+    ///   Operand stack: [event_id, NODE_DIGEST, ...] (unchanged)
+    ///   Advice stack:  depends on canonical:
+    ///     - expression: [CANONICAL_PAYLOAD_LO, CANONICAL_PAYLOAD_HI, CANONICAL_TAG, ...]
+    ///       (top is `CANONICAL_PAYLOAD_LO`)
+    ///     - chunk:      [chunk[0]_LO, chunk[0]_HI, chunk[1]_LO, ..., CANONICAL_TAG, ...]
+    ///       (top is `chunk[0]_LO`; `n` chunks ⇒ `2n + 1` advice words)
+    ///     - predicate:  nothing pushed (assertion fires or errors)
     DeferredEvaluate,
 
     /// Registers a chunk node in the deferred-computation DAG.
@@ -342,7 +352,7 @@ pub enum SystemEvent {
     /// installed schema decodes `n` from the tag (no `n` on the stack — the tag is the
     /// length's source of truth, which means the digest binds `n` for free). The processor
     /// reads `8n` felts from memory at `ptr` (word-aligned, `ptr % 4 == 0`), constructs the
-    /// chunk node, and registers it. No values are returned to MASM.
+    /// chunk node, and registers it.
     ///
     /// Inputs:
     ///   Operand stack: [event_id, TAG, ptr, ...]
@@ -350,7 +360,11 @@ pub enum SystemEvent {
     ///
     /// Outputs:
     ///   Operand stack: [event_id, TAG, ptr, ...] (unchanged)
+    ///   Advice stack:  [NODE_DIGEST, ...] (pushed; top of advice is NODE_DIGEST[0])
     ///   DAG state:     {... chunk(TAG, [data[ptr..ptr+8n]])}
+    ///
+    /// The advice-pushed digest spares MASM the cost of computing the chunk's linear-hash
+    /// digest in-circuit (which would be `n` Poseidon2 permutations).
     DeferredRegisterChunk,
 }
 

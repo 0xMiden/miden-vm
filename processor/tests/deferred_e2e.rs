@@ -42,22 +42,30 @@ fn build_processor() -> FastProcessor {
 
 /// Build a MASM block that pushes the 4-felt tag then the 8-felt payload, invokes the
 /// `adv.register_deferred` keyword, and cleans up the 12 felts left on the operand stack.
+/// Also discards the NODE_DIGEST that `adv.register_deferred` pushes onto the advice stack —
+/// tests that want to consume the digest should build their MASM inline rather than going
+/// through this helper.
 fn emit_register(src: &mut String, node: Node) {
     push_node(src, node);
     src.push_str("    adv.register_deferred\n");
     for _ in 0..12 {
         src.push_str("    drop\n");
     }
+    // Pop the advice-pushed NODE_DIGEST so subsequent advice consumers see a clean stack.
+    src.push_str("    adv_pushw\n");
+    src.push_str("    dropw\n");
 }
 
-/// Build a MASM block that pushes the node, invokes `adv.evaluate_deferred`, drops the 12 input
-/// felts, and pulls the canonical 12 felts off the advice stack into memory starting at
-/// `out_base` so the test can inspect them via `output.memory`.
+/// Build a MASM block that pushes the node's digest (4 felts), invokes `adv.evaluate_deferred`,
+/// drops the 4 input felts, and pulls the canonical 12 felts off the advice stack into memory
+/// starting at `out_base` so the test can inspect them via `output.memory`.
+///
+/// The node MUST already be interned in `DeferredState` — call `emit_register` first.
 fn emit_evaluate_into_mem(src: &mut String, node: Node, out_base: u32) {
     use core::fmt::Write;
-    push_node(src, node);
+    push_digest(src, node.digest());
     src.push_str("    adv.evaluate_deferred\n");
-    for _ in 0..12 {
+    for _ in 0..4 {
         src.push_str("    drop\n");
     }
     // Advice stack top-to-bottom: PAYLOAD_LO || PAYLOAD_HI || TAG (matching the operand-stack
@@ -69,14 +77,24 @@ fn emit_evaluate_into_mem(src: &mut String, node: Node, out_base: u32) {
     }
 }
 
-/// Build a MASM block that pushes the node and invokes `adv.evaluate_deferred` without consuming
-/// any advice output — used for predicates whose canonical form is the TRUE node (no advice
-/// push) or for cases where we just want to surface the verification error.
+/// Build a MASM block that pushes the node's digest and invokes `adv.evaluate_deferred` without
+/// consuming any advice output — used for predicates whose canonical form is the TRUE node (no
+/// advice push) or for cases where we just want to surface the verification error.
+///
+/// The node MUST already be interned in `DeferredState`.
 fn emit_evaluate_for_side_effect(src: &mut String, node: Node) {
-    push_node(src, node);
+    push_digest(src, node.digest());
     src.push_str("    adv.evaluate_deferred\n");
-    for _ in 0..12 {
+    for _ in 0..4 {
         src.push_str("    drop\n");
+    }
+}
+
+/// Push a 4-felt digest onto the operand stack, deepest felt first so the top is `digest[0]`.
+fn push_digest(src: &mut String, digest: miden_core::Word) {
+    use core::fmt::Write;
+    for f in digest.as_elements().iter().rev() {
+        writeln!(src, "    push.{}", f.as_int()).unwrap();
     }
 }
 
@@ -195,6 +213,7 @@ fn deferred_evaluate_pushes_canonical_form_to_advice() {
     let mut src = String::from("begin\n");
     emit_register(&mut src, a);
     emit_register(&mut src, b);
+    emit_register(&mut src, add.clone());
     emit_evaluate_into_mem(&mut src, add, 0);
     src.push_str("end\n");
 
@@ -234,9 +253,10 @@ fn deferred_evaluate_on_predicate_pushes_nothing_to_advice() {
 
     let mut src = String::from("begin\n");
     emit_register(&mut src, a);
-    push_node(&mut src, a_eq_a);
+    emit_register(&mut src, a_eq_a.clone());
+    push_digest(&mut src, a_eq_a.digest());
     src.push_str("    adv.evaluate_deferred\n");
-    for _ in 0..12 {
+    for _ in 0..4 {
         src.push_str("    drop\n");
     }
     // Try to pop a single felt off the advice stack — must underflow because evaluate(predicate)
@@ -290,6 +310,7 @@ fn deferred_evaluate_predicate_mismatch_fails_execution() {
     let mut src = String::from("begin\n");
     emit_register(&mut src, a);
     emit_register(&mut src, b);
+    emit_register(&mut src, mismatch.clone());
     emit_evaluate_for_side_effect(&mut src, mismatch);
     src.push_str("end\n");
 
@@ -301,6 +322,87 @@ fn deferred_evaluate_predicate_mismatch_fails_execution() {
         result.is_err(),
         "evaluating a mismatched predicate must fail execution"
     );
+}
+
+// E2E: adv.register_deferred pushes the registered node's digest onto the advice stack.
+// ================================================================================================
+
+#[test]
+fn deferred_register_pushes_node_digest_to_advice() {
+    // Register a leaf, then pull the advice-pushed digest into memory and assert it matches the
+    // node's content-addressed digest.
+    let leaf = uint256_leaf(42);
+    let expected = leaf.digest();
+
+    let mut src = String::from("begin\n");
+    push_node(&mut src, leaf);
+    src.push_str("    adv.register_deferred\n");
+    for _ in 0..12 {
+        src.push_str("    drop\n");
+    }
+    // Pull the NODE_DIGEST off advice and stash to memory[0..4].
+    src.push_str("    adv_pushw\n");
+    src.push_str("    mem_storew_le.0\n");
+    src.push_str("    dropw\n");
+    src.push_str("end\n");
+
+    let program = Assembler::default().assemble_program(&src).expect("program must assemble");
+    let mut host = DefaultHost::default();
+    let output = build_processor()
+        .execute_sync(&program, &mut host)
+        .expect("execution must succeed");
+
+    let ctx = 0u32.into();
+    let observed: [Felt; 4] = core::array::from_fn(|i| {
+        output
+            .memory
+            .read_element(ctx, Felt::from_u32(i as u32))
+            .expect("memory read")
+    });
+    assert_eq!(observed, *expected.as_elements(), "register must push the node's digest");
+}
+
+#[test]
+fn deferred_register_chunk_pushes_node_digest_to_advice() {
+    use core::fmt::Write;
+    // Lay out one 8-felt chunk in memory at addresses 0..8, register the chunk node, then pull
+    // the advice-pushed digest into memory[8..12] and assert it equals the chunk node's digest.
+    let chunk: [Felt; 8] = core::array::from_fn(|i| Felt::from_u32(101 + i as u32));
+    let tag = preimage_tag(1);
+    let expected = Node::chunk(tag, vec![chunk]).digest();
+
+    let mut src = String::from("begin\n");
+    for (i, felt) in chunk.iter().enumerate() {
+        writeln!(&mut src, "    push.{}", felt.as_canonical_u64()).unwrap();
+        writeln!(&mut src, "    mem_store.{}", i as u32).unwrap();
+    }
+    writeln!(&mut src, "    push.{}", 0u32).unwrap(); // ptr
+    for f in tag.iter().rev() {
+        writeln!(&mut src, "    push.{}", f.as_canonical_u64()).unwrap();
+    }
+    src.push_str("    adv.register_deferred_chunk\n");
+    for _ in 0..5 {
+        src.push_str("    drop\n");
+    }
+    src.push_str("    adv_pushw\n");
+    src.push_str("    mem_storew_le.8\n");
+    src.push_str("    dropw\n");
+    src.push_str("end\n");
+
+    let program = Assembler::default().assemble_program(&src).expect("program must assemble");
+    let mut host = DefaultHost::default();
+    let output = build_chunk_processor()
+        .execute_sync(&program, &mut host)
+        .expect("execution must succeed");
+
+    let ctx = 0u32.into();
+    let observed: [Felt; 4] = core::array::from_fn(|i| {
+        output
+            .memory
+            .read_element(ctx, Felt::from_u32(8 + i as u32))
+            .expect("memory read")
+    });
+    assert_eq!(observed, *expected.as_elements(), "register_chunk must push the node's digest");
 }
 
 // LEGACY SMOKE: registered EventHandler still works alongside the deferred infrastructure.
@@ -445,6 +547,9 @@ fn chunk_register_reads_bulk_data_from_memory_and_interns_node() {
     for _ in 0..5 {
         src.push_str("    drop\n");
     }
+    // Discard the advice-pushed NODE_DIGEST so any later advice consumer sees a clean stack.
+    src.push_str("    adv_pushw\n");
+    src.push_str("    dropw\n");
     src.push_str("end\n");
 
     let program = Assembler::default().assemble_program(&src).expect("program must assemble");
@@ -507,6 +612,9 @@ fn chunk_register_with_zero_chunks_still_interns_a_node() {
     for _ in 0..5 {
         src.push_str("    drop\n");
     }
+    // Discard the advice-pushed NODE_DIGEST.
+    src.push_str("    adv_pushw\n");
+    src.push_str("    dropw\n");
     src.push_str("end\n");
 
     let program = Assembler::default().assemble_program(&src).expect("program must assemble");
