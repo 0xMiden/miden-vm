@@ -3,7 +3,7 @@
 use alloc::sync::Arc;
 
 use miden_assembly::{Assembler, DefaultSourceManager};
-use miden_core::{precompile::PrecompileTranscriptState, proof::ExecutionProof};
+use miden_core::{Word, proof::ExecutionProof};
 use miden_core_lib::CoreLibrary;
 use miden_processor::ExecutionOptions;
 use miden_prover::{
@@ -47,13 +47,13 @@ fn assert_prove_verify(
             program.to_info(),
             stack_inputs,
             stack_outputs,
-            PrecompileTranscriptState::default(),
+            Word::empty(),
             &proof,
         );
     }
 
     println!("Verifying proof...");
-    let security_level =
+    let (security_level, _deferred_root) =
         verify(program.into(), stack_inputs, stack_outputs, proof).expect("Verification failed");
 
     println!("Verification successful! Security level: {security_level}");
@@ -63,7 +63,7 @@ fn assert_recursive_verify(
     program_info: ProgramInfo,
     stack_inputs: StackInputs,
     stack_outputs: StackOutputs,
-    pc_transcript_state: PrecompileTranscriptState,
+    pc_transcript_state: Word,
     proof: &ExecutionProof,
 ) {
     assert_eq!(proof.hash_fn(), HashFunction::Poseidon2);
@@ -497,15 +497,10 @@ mod fast_parallel {
             prove_stark(&blake3_config, &trace_matrix, &public_values, var_len_public_inputs)
                 .expect("Proving failed");
 
-        let precompile_requests = trace.precompile_requests().to_vec();
         let deferred_state = trace.deferred_state().clone();
 
-        let proof = ExecutionProof::new(
-            proof_bytes,
-            HashFunction::Blake3_256,
-            precompile_requests,
-            deferred_state.to_wire(),
-        );
+        let proof =
+            ExecutionProof::new(proof_bytes, HashFunction::Blake3_256, deferred_state.to_wire());
 
         // Verify the proof
         verify(program.into(), stack_inputs, fast_stack_outputs, proof)

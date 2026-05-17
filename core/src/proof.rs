@@ -11,7 +11,6 @@ use serde::{Deserialize, Serialize};
 use crate::{
     crypto::hash::{Blake3_256, Poseidon2, Rpo256, Rpx256},
     deferred::DeferredStateWire,
-    precompile::PrecompileRequest,
     serde::{
         BudgetedReader, ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
         SliceReader,
@@ -23,20 +22,20 @@ use crate::{
 
 /// A proof of correct execution of Miden VM.
 ///
-/// The proof contains the STARK proof, the hash function used during proof generation, the set
-/// of precompile requests deferred during proof generation, and the deferred-DAG state in its
-/// wire form (untrusted bytes-shape; the verifier validates it). The proof does not
-/// contain public inputs needed to verify the proof.
+/// The proof contains the STARK proof, the hash function used during proof generation, and the
+/// deferred-DAG state in its wire form (untrusted bytes-shape; the verifier validates it). The
+/// proof does not contain public inputs needed to verify the proof.
 ///
 /// The deferred-DAG state ships as [`DeferredStateWire`] — a passive value with no validated
-/// invariants. The verifier consumes it via `DeferredState::rehydrate` (when it has a schema)
-/// or via a structural chain walk (when it doesn't), depending on the verification path.
+/// invariants. The verifier consumes it via `DeferredState::rehydrate` with the installed
+/// schema. All precompile semantics (keccak256, sha512, ecdsa, eddsa, plus any user app) live
+/// in the schema, so the proof no longer needs to carry a separate precompile-request list —
+/// the deferred state IS the precompile witness.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ExecutionProof {
     pub proof: Vec<u8>,
     pub hash_fn: HashFunction,
-    pub pc_requests: Vec<PrecompileRequest>,
     pub deferred_state: DeferredStateWire,
 }
 
@@ -45,14 +44,13 @@ impl ExecutionProof {
     // --------------------------------------------------------------------------------------------
 
     /// Creates a new instance of [ExecutionProof] from the specified STARK proof, hash function,
-    /// list of deferred [PrecompileRequest]s, and the deferred-DAG wire state.
+    /// and deferred-DAG wire state.
     pub const fn new(
         proof: Vec<u8>,
         hash_fn: HashFunction,
-        pc_requests: Vec<PrecompileRequest>,
         deferred_state: DeferredStateWire,
     ) -> Self {
-        Self { proof, hash_fn, pc_requests, deferred_state }
+        Self { proof, hash_fn, deferred_state }
     }
 
     // PUBLIC ACCESSORS
@@ -66,11 +64,6 @@ impl ExecutionProof {
     /// Returns the hash function used during proof generation process.
     pub const fn hash_fn(&self) -> HashFunction {
         self.hash_fn
-    }
-
-    /// Returns the list of precompile requests made during the execution of the program.
-    pub fn precompile_requests(&self) -> &[PrecompileRequest] {
-        &self.pc_requests
     }
 
     /// Returns the deferred-DAG state in wire form. To obtain a validated, in-memory
@@ -110,9 +103,9 @@ impl ExecutionProof {
     // DESTRUCTOR
     // --------------------------------------------------------------------------------------------
 
-    /// Returns the hash function, proof bytes, precompile requests, and deferred-DAG wire state.
-    pub fn into_parts(self) -> (HashFunction, Vec<u8>, Vec<PrecompileRequest>, DeferredStateWire) {
-        (self.hash_fn, self.proof, self.pc_requests, self.deferred_state)
+    /// Returns the hash function, proof bytes, and deferred-DAG wire state.
+    pub fn into_parts(self) -> (HashFunction, Vec<u8>, DeferredStateWire) {
+        (self.hash_fn, self.proof, self.deferred_state)
     }
 }
 
@@ -222,7 +215,6 @@ impl Serializable for ExecutionProof {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         self.proof.write_into(target);
         self.hash_fn.write_into(target);
-        self.pc_requests.write_into(target);
         self.deferred_state.write_into(target);
     }
 }
@@ -231,10 +223,9 @@ impl Deserializable for ExecutionProof {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let proof = Vec::<u8>::read_from(source)?;
         let hash_fn = HashFunction::read_from(source)?;
-        let pc_requests = Vec::<PrecompileRequest>::read_from(source)?;
         let deferred_state = DeferredStateWire::read_from(source)?;
 
-        Ok(ExecutionProof { proof, hash_fn, pc_requests, deferred_state })
+        Ok(ExecutionProof { proof, hash_fn, deferred_state })
     }
 
     fn read_from_bytes(bytes: &[u8]) -> Result<Self, DeserializationError> {
@@ -267,7 +258,6 @@ impl ExecutionProof {
         ExecutionProof {
             proof: Vec::new(),
             hash_fn: HashFunction::Blake3_256,
-            pc_requests: Vec::new(),
             deferred_state: DeferredStateWire::empty(),
         }
     }
@@ -276,10 +266,7 @@ impl ExecutionProof {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        events::EventId,
-        serde::{BudgetedReader, ByteWriter, DeserializationError, SliceReader},
-    };
+    use crate::serde::{BudgetedReader, ByteWriter, DeserializationError, SliceReader};
 
     #[test]
     fn execution_proof_from_bytes_rejects_unbounded_proof_len() {
@@ -308,23 +295,6 @@ mod tests {
     }
 
     #[test]
-    fn execution_proof_from_bytes_accepts_many_minimal_precompile_requests() {
-        let pc_requests = (0..64)
-            .map(|event_id| PrecompileRequest::new(EventId::from_u64(event_id), Vec::new()))
-            .collect();
-        let proof = ExecutionProof::new(
-            vec![1, 2, 3],
-            HashFunction::Blake3_256,
-            pc_requests,
-            DeferredStateWire::empty(),
-        );
-
-        let decoded = ExecutionProof::from_bytes(&proof.to_bytes()).unwrap();
-
-        assert_eq!(decoded, proof);
-    }
-
-    #[test]
     fn execution_proof_rejects_over_budget_proof_len() {
         let mut bytes = Vec::new();
         bytes.write_usize(5);
@@ -336,21 +306,5 @@ mod tests {
             panic!("expected InvalidValue error");
         };
         assert!(message.contains("requested 5 elements"));
-    }
-
-    #[test]
-    fn execution_proof_rejects_over_budget_pc_requests_len() {
-        let mut bytes = Vec::new();
-        bytes.write_usize(0);
-        bytes.write_u8(HashFunction::Blake3_256 as u8);
-        bytes.write_usize(2);
-
-        let budget = bytes.len() + 1;
-        let mut reader = BudgetedReader::new(SliceReader::new(&bytes), budget);
-        let err = ExecutionProof::read_from(&mut reader).unwrap_err();
-        let DeserializationError::InvalidValue(message) = err else {
-            panic!("expected InvalidValue error");
-        };
-        assert!(message.contains("requested 2 elements"));
     }
 }

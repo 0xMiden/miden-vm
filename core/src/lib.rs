@@ -66,7 +66,6 @@ pub mod deferred;
 pub mod events;
 pub mod mast;
 pub mod operations;
-pub mod precompile;
 pub mod program;
 pub mod proof;
 pub mod utils;

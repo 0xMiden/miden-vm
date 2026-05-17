@@ -3,9 +3,8 @@ use std::array;
 use miden_air::PublicInputs;
 use miden_assembly::Assembler;
 use miden_core::{
-    Felt, WORD_SIZE,
+    Felt, WORD_SIZE, Word,
     field::{BasedVectorSpace, Field, PrimeCharacteristicRing, QuadFelt},
-    precompile::PrecompileTranscriptState,
     proof::HashFunction,
 };
 use miden_processor::{DefaultHost, ExecutionOptions, Program, ProgramInfo};
@@ -122,9 +121,9 @@ pub fn generate_recursive_verifier_data(
         program_info,
         stack_inputs,
         stack_outputs,
-        PrecompileTranscriptState::default(),
+        Word::empty(),
     );
-    let (_, proof_bytes, _precompile_requests, _deferred_state) = proof.into_parts();
+    let (_, proof_bytes, _deferred_state) = proof.into_parts();
     let data = generate_advice_inputs(&proof_bytes, pub_inputs).unwrap();
     Ok(data)
 }

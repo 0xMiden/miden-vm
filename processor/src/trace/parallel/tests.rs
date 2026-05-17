@@ -11,7 +11,6 @@ use miden_air::{
 };
 use miden_core::{
     Felt, Word,
-    events::EventId,
     field::QuadFelt,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, DynNodeBuilder, ExternalNodeBuilder,
@@ -19,7 +18,6 @@ use miden_core::{
         SplitNodeBuilder,
     },
     operations::{Operation, opcodes},
-    precompile::PrecompileRequest,
     program::{Kernel, Program, StackInputs},
 };
 use miden_utils_testing::{get_column_name, rand::rand_array};
@@ -28,7 +26,7 @@ use rstest::{fixture, rstest};
 
 use super::*;
 use crate::{
-    AdviceInputs, DefaultHost, ExecutionOptions, FastProcessor, HostLibrary, TraceBuildInputs,
+    AdviceInputs, DefaultHost, ExecutionOptions, FastProcessor, HostLibrary,
     trace::trace_state::MemoryReadsReplay,
 };
 
@@ -406,11 +404,7 @@ fn test_trace_generation_at_fragment_boundaries(
         trace_from_single_fragment.trace_len_summary(),
     );
 
-    // Verify deferred precompile data match deterministically.
-    assert_eq!(
-        trace_from_fragments.precompile_requests(),
-        trace_from_single_fragment.precompile_requests(),
-    );
+    // Verify deferred-DAG state matches deterministically across fragmentation.
     assert_eq!(
         trace_from_fragments.deferred_state,
         trace_from_single_fragment.deferred_state,
@@ -998,47 +992,10 @@ fn test_build_trace_returns_err_on_bad_node_id_in_hasher_replay() {
     );
 }
 
-/// Verifies that `build_trace` rejects compatibility bundles that reuse matching public outputs
-/// but carry different deferred precompile requests.
-#[test]
-fn test_build_trace_rejects_mismatched_precompile_requests() {
-    const MAX_FRAGMENT_SIZE: usize = 1 << 20;
-
-    let program = basic_block_program_small();
-
-    let processor = FastProcessor::new_with_options(
-        StackInputs::new(DEFAULT_STACK).unwrap(),
-        AdviceInputs::default(),
-        ExecutionOptions::default()
-            .with_core_trace_fragment_size(MAX_FRAGMENT_SIZE)
-            .unwrap(),
-    )
-    .expect("processor advice inputs should fit advice map limits");
-    let mut host = DefaultHost::default();
-    let trace_inputs = processor.execute_trace_inputs_sync(&program, &mut host).unwrap();
-    let (trace_output, trace_generation_context, program_info) = trace_inputs.into_parts();
-
-    let mut other_trace_output = trace_output;
-    other_trace_output
-        .precompile_requests
-        .push(PrecompileRequest::new(EventId::from_u64(7), vec![1, 2, 3]));
-
-    let result = build_trace(TraceBuildInputs::from_parts(
-        other_trace_output,
-        trace_generation_context,
-        program_info,
-    ));
-
-    assert!(
-        matches!(
-            result,
-            Err(ExecutionError::Internal(
-                "trace inputs do not match deferred precompile requests"
-            ))
-        ),
-        "expected deferred-precompile-request mismatch error, got: {result:?}"
-    );
-}
+// (test_build_trace_rejects_mismatched_precompile_requests removed: precompile requests are no
+// longer carried alongside the trace inputs — the deferred-DAG state is the sole precompile
+// witness, and its mismatch detection happens at proof verification time via
+// DeferredState::rehydrate.)
 
 /// Tests `build_trace_with_max_len` behavior at various `max_trace_len` boundaries relative to the
 /// core trace length. `core_trace_len` is the number of core trace rows including the HALT row
@@ -1290,7 +1247,6 @@ impl core::fmt::Debug for DeterministicTrace<'_> {
             .field("main_trace", trace.main_trace())
             .field("program_info", &trace.program_info())
             .field("stack_outputs", &trace.stack_outputs())
-            .field("precompile_requests", &trace.precompile_requests())
             .field("deferred_state", &trace.deferred_state)
             .field("trace_len_summary", &trace.trace_len_summary())
             .finish()

@@ -25,9 +25,6 @@ use serde::de::DeserializeOwned;
 mod exports {
     pub use miden_core::{
         Word,
-        precompile::{
-            PrecompileTranscriptState, PrecompileVerificationError, PrecompileVerifierRegistry,
-        },
         program::{Kernel, ProgramInfo, StackInputs, StackOutputs},
         proof::{ExecutionProof, HashFunction},
     };
@@ -40,82 +37,37 @@ pub use exports::*;
 // VERIFIER
 // ================================================================================================
 
-/// Returns the security level of the proof if the specified program was executed correctly against
-/// the specified inputs and outputs.
-///
-/// Specifically, verifies that if a program with the specified `program_hash` is executed against
-/// the provided `stack_inputs` and some secret inputs, the result is equal to the `stack_outputs`.
+/// Verifies a STARK proof of correct VM execution.
 ///
 /// Stack inputs are expected to be ordered as if they would be pushed onto the stack one by one.
-/// Thus, their expected order on the stack will be the reverse of the order in which they are
-/// provided, and the last value in the `stack_inputs` slice is expected to be the value at the top
-/// of the stack.
+/// Stack outputs are expected in the order they appear at the top of the stack (reverse of inputs).
 ///
-/// Stack outputs are expected to be ordered as if they would be popped off the stack one by one.
-/// Thus, the value at the top of the stack is expected to be in the first position of the
-/// `stack_outputs` slice, and the order of the rest of the output elements will also match the
-/// order on the stack. This is the reverse of the order of the `stack_inputs` slice.
+/// Returns the security level (in bits) and the deferred-DAG root (`Word`) that the proof
+/// commits to. Callers verifying precompile-bearing programs should additionally cross-check
+/// the proof's deferred state by calling `DeferredState::rehydrate(proof.deferred_state(), schema)`
+/// with the schema they expect — `rehydrate` validates every AND-chain step by re-evaluating its
+/// predicate.
 ///
 /// # Errors
-/// Returns an error if:
-/// - The provided proof does not prove a correct execution of the program.
-/// - The proof contains one or more precompile requests. When precompile requests are present, use
-///   [`verify_with_precompiles`] instead with an appropriate [`PrecompileVerifierRegistry`] to
-///   verify the precompile computations.
+/// Returns an error if the proof does not prove a correct execution of the program, or if the
+/// deferred-DAG transcript chain inside the proof is structurally corrupt.
+#[tracing::instrument("verify_program", skip_all)]
 pub fn verify(
     program_info: ProgramInfo,
     stack_inputs: StackInputs,
     stack_outputs: StackOutputs,
     proof: ExecutionProof,
-) -> Result<u32, VerificationError> {
-    let (security_level, _commitment) = verify_with_precompiles(
-        program_info,
-        stack_inputs,
-        stack_outputs,
-        proof,
-        &PrecompileVerifierRegistry::new(),
-    )?;
-    Ok(security_level)
-}
-
-/// Identical to [`verify`], with additional verification of any precompile requests made during the
-/// VM execution. The resulting aggregated precompile commitment is returned, which can be compared
-/// against the commitment computed by the VM.
-///
-/// # Returns
-/// Returns a tuple `(security_level, deferred_root)` where:
-/// - `security_level`: The security level (in bits) of the verified proof.
-/// - `deferred_root`: A [`Word`] containing the rolling commitment to all precompile requests
-///   (the final root of the deferred-DAG transcript chain, recovered from the proof and checked
-///   against the AND-chain walk).
-///
-/// # Errors
-/// Returns any error produced by [`verify`], as well as any errors resulting from precompile
-/// verification.
-#[tracing::instrument("verify_program", skip_all)]
-pub fn verify_with_precompiles(
-    program_info: ProgramInfo,
-    stack_inputs: StackInputs,
-    stack_outputs: StackOutputs,
-    proof: ExecutionProof,
-    precompile_verifiers: &PrecompileVerifierRegistry,
-) -> Result<(u32, PrecompileTranscriptState), VerificationError> {
+) -> Result<(u32, Word), VerificationError> {
     let security_level = proof.security_level();
 
-    let (hash_fn, proof_bytes, precompile_requests, deferred_wire) = proof.into_parts();
+    let (hash_fn, proof_bytes, deferred_wire) = proof.into_parts();
 
-    // Walk the deferred-DAG's AND-chain on the wire from `root` down to `TRUE_DIGEST`, collecting
-    // each `log_precompile` statement (oldest first). Every AND-node is structurally
-    // re-validated: its own digest must equal Poseidon2::merge(prev_root, stmnt), its tag must
-    // be TRUE_TAG, and the chain must terminate at TRUE_DIGEST.
-    let statements = walk_deferred_and_chain(&deferred_wire)?;
-
-    // Each statement must match the commitment of the corresponding PrecompileRequest. If no
-    // verifiers were registered but the proof carries requests, the registry returns
-    // `VerifierNotFound` at the first request.
-    precompile_verifiers
-        .verify_against_statements(&precompile_requests, &statements)
-        .map_err(VerificationError::PrecompileVerificationError)?;
+    // Walk the deferred-DAG's AND-chain on the wire from `root` down to `TRUE_DIGEST`. This is
+    // a purely-structural check: every AND-node's own digest must equal
+    // Poseidon2::merge(prev_root, stmnt), its tag must be TRUE_TAG, and the chain must terminate
+    // at TRUE_DIGEST. Schema-level semantic validation (each statement reduces to TRUE) is the
+    // caller's responsibility via `DeferredState::rehydrate`.
+    let _statements = walk_deferred_and_chain(&deferred_wire)?;
 
     let pc_transcript_state = deferred_wire.root;
 
@@ -135,7 +87,7 @@ pub fn verify_with_precompiles(
 // ================================================================================================
 
 /// Walks the AND-chain rooted at `wire.root` down to [`TRUE_DIGEST`], returning the per-step
-/// `log_precompile` statements in execution order (oldest first).
+/// statements in execution order (oldest first).
 ///
 /// First materialises each wire entry into a digest-form `Node` by recomputing its digest
 /// (Binary entries reconstruct their payload from earlier entries' digests via the indices).
@@ -191,7 +143,11 @@ fn walk_deferred_and_chain(
 
 /// Same semantics as `core::deferred::state::resolve_index`, copied here because the helper is
 /// `pub(crate)` to its origin module.
-fn resolve_wire_index(idx: u32, current: usize, digests: &[Digest]) -> Result<Digest, VerificationError> {
+fn resolve_wire_index(
+    idx: u32,
+    current: usize,
+    digests: &[Digest],
+) -> Result<Digest, VerificationError> {
     if idx == TRUE_INDEX {
         return Ok(TRUE_DIGEST);
     }
@@ -208,7 +164,7 @@ fn verify_stark(
     program_info: ProgramInfo,
     stack_inputs: StackInputs,
     stack_outputs: StackOutputs,
-    pc_transcript_state: PrecompileTranscriptState,
+    pc_transcript_state: Word,
     hash_fn: HashFunction,
     proof_bytes: Vec<u8>,
 ) -> Result<(), VerificationError> {
@@ -255,18 +211,11 @@ fn verify_stark(
 pub enum VerificationError {
     #[error("failed to verify STARK proof for program with hash {0}")]
     StarkVerificationError(Word, #[source] Box<StarkVerificationError>),
-    #[error("failed to verify precompile calls")]
-    PrecompileVerificationError(#[source] PrecompileVerificationError),
     #[error("deferred-DAG transcript chain is corrupt: {reason}")]
     DeferredChainCorrupt { reason: DeferredChainErrorReason },
 }
 
 /// Specific failure mode encountered while walking the deferred-DAG AND-chain.
-///
-/// Content-addressing is verified implicitly when building the wire's digest-keyed lookup map
-/// (a tampered node ends up under the digest its bytes hash to, so it can't be reached via a
-/// forged child reference). The variants below cover the structural failures that survive that
-/// implicit check.
 #[derive(Debug, thiserror::Error)]
 pub enum DeferredChainErrorReason {
     #[error("expected AND-node {digest} is not present in the deferred state")]
@@ -294,9 +243,6 @@ pub enum StarkVerificationError {
 }
 
 /// Verifies a STARK proof for the given public values.
-///
-/// Pre-seeds the challenger with `public_values`, then delegates to the lifted
-/// verifier.
 fn verify_stark_proof<SC>(
     config: &SC,
     public_values: &[Felt],
@@ -307,7 +253,6 @@ where
     SC: StarkConfig<Felt, QuadFelt>,
     <SC::Lmcs as Lmcs>::Commitment: DeserializeOwned,
 {
-    // Proof deserialization via bincode; see https://github.com/0xMiden/miden-vm/issues/2550.
     let proof: StarkProof<Felt, QuadFelt, SC> = bincode::deserialize(proof_bytes)?;
 
     let mut challenger = config.challenger();

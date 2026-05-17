@@ -13,9 +13,7 @@ extern crate alloc;
 use alloc::{sync::Arc, vec, vec::Vec};
 
 use miden_assembly::{Library, mast::MastForest};
-use miden_core::{
-    events::EventName, precompile::PrecompileVerifierRegistry, serde::Deserializable,
-};
+use miden_core::{events::EventName, serde::Deserializable};
 use miden_processor::{HostLibrary, event::EventHandler};
 use miden_utils_sync::LazyLock;
 
@@ -138,13 +136,6 @@ impl CoreLibrary {
         ]
     }
 
-    /// Returns a [`PrecompileVerifierRegistry`] — empty after the precompile migration; all four
-    /// precompiles (keccak256, sha512, ecdsa, eddsa) are now served by the `LegacyPrecompile`
-    /// schema installed on the processor. Kept as a stable API surface; deletion of the
-    /// `PrecompileVerifierRegistry` framework itself is tracked separately (D2).
-    pub fn verifier_registry(&self) -> PrecompileVerifierRegistry {
-        PrecompileVerifierRegistry::new()
-    }
 }
 
 impl Default for CoreLibrary {
