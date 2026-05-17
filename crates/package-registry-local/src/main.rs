@@ -118,3 +118,22 @@ fn main() -> Result<ExitCode, Box<dyn std::error::Error>> {
 
     Ok(ExitCode::SUCCESS)
 }
+
+#[cfg(test)]
+mod tests {
+    use clap::CommandFactory;
+
+    use super::*;
+
+    #[test]
+    fn help_uses_public_binary_name() {
+        let mut command = Cli::command();
+        assert_eq!(command.get_name(), "miden-registry");
+
+        let help = command.render_help().to_string();
+        assert!(
+            help.contains("Usage: miden-registry"),
+            "help should advertise the public binary name:\n{help}",
+        );
+    }
+}
