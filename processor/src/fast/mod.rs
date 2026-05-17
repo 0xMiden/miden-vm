@@ -311,7 +311,10 @@ impl FastProcessor {
 
         Ok(ResumeContext {
             current_forest: program.mast_forest().clone(),
-            continuation_stack: ContinuationStack::new(program),
+            continuation_stack: ContinuationStack::new(
+                program,
+                self.options.max_num_continuations(),
+            ),
             kernel: program.kernel().clone(),
         })
     }

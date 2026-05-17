@@ -5,8 +5,12 @@ use miden_core::{
     program::Program,
 };
 
+use crate::errors::ExecutionError;
+
 /// A hint for the initial size of the continuation stack.
 const CONTINUATION_STACK_SIZE_HINT: usize = 64;
+const CONTINUATION_STACK_LIMIT_EXCEEDED: &str =
+    "continuation stack size exceeded the allowed maximum";
 
 // CONTINUATION
 // ================================================================================================
@@ -96,9 +100,19 @@ impl Continuation {
 /// This allows the processor to execute a program iteratively in a loop rather than recursively
 /// traversing the nodes. It also allows the processor to pass the state of execution to another
 /// processor for further processing, which is useful for parallel execution of MAST forests.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct ContinuationStack {
     stack: Vec<Continuation>,
+    max_len: usize,
+}
+
+impl Default for ContinuationStack {
+    fn default() -> Self {
+        Self {
+            stack: Vec::default(),
+            max_len: usize::MAX,
+        }
+    }
 }
 
 impl ContinuationStack {
@@ -106,11 +120,12 @@ impl ContinuationStack {
     ///
     /// # Arguments
     /// * `program` - The program whose execution will be managed by this continuation stack
-    pub fn new(program: &Program) -> Self {
+    /// * `max_len` - The maximum number of continuations allowed on the stack
+    pub fn new(program: &Program, max_len: usize) -> Self {
         let mut stack = Vec::with_capacity(CONTINUATION_STACK_SIZE_HINT);
         stack.push(Continuation::StartNode(program.entrypoint()));
 
-        Self { stack }
+        Self { stack, max_len }
     }
 
     // STATE MUTATORS
@@ -179,6 +194,15 @@ impl ContinuationStack {
     /// Returns the number of continuations on the stack.
     pub fn len(&self) -> usize {
         self.stack.len()
+    }
+
+    /// Checks that the continuation stack does not exceed its configured size limit.
+    pub fn check_size(&self) -> Result<(), ExecutionError> {
+        if self.stack.len() > self.max_len {
+            Err(ExecutionError::Internal(CONTINUATION_STACK_LIMIT_EXCEEDED))
+        } else {
+            Ok(())
+        }
     }
 
     /// Peeks at the next continuation to execute without removing it.

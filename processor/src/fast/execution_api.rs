@@ -106,7 +106,8 @@ impl FastProcessor {
     where
         T: Tracer<Processor = Self>,
     {
-        let mut continuation_stack = ContinuationStack::new(program);
+        let mut continuation_stack =
+            ContinuationStack::new(program, self.options.max_num_continuations());
         let mut current_forest = program.mast_forest().clone();
 
         self.advice.extend_map(current_forest.advice_map()).map_exec_err_no_ctx()?;
@@ -133,7 +134,8 @@ impl FastProcessor {
     where
         T: Tracer<Processor = Self>,
     {
-        let mut continuation_stack = ContinuationStack::new(program);
+        let mut continuation_stack =
+            ContinuationStack::new(program, self.options.max_num_continuations());
         let mut current_forest = program.mast_forest().clone();
 
         self.advice.extend_map(current_forest.advice_map()).map_exec_err_no_ctx()?;
@@ -227,6 +229,7 @@ impl FastProcessor {
                     if let Some(continuation) = maybe_continuation {
                         continuation_stack.push_continuation(continuation);
                     }
+                    continuation_stack.check_size()?;
 
                     Ok(Some(ResumeContext {
                         current_forest,
@@ -576,7 +579,8 @@ impl FastProcessor {
         program: &Program,
         host: &mut impl SyncHost,
     ) -> Result<StackOutputs, ExecutionError> {
-        let mut continuation_stack = ContinuationStack::new(program);
+        let mut continuation_stack =
+            ContinuationStack::new(program, self.options.max_num_continuations());
         let mut current_forest = program.mast_forest().clone();
 
         self.advice.extend_map(current_forest.advice_map()).map_exec_err_no_ctx()?;
@@ -600,7 +604,8 @@ impl FastProcessor {
         program: &Program,
         host: &mut impl Host,
     ) -> Result<StackOutputs, ExecutionError> {
-        let mut continuation_stack = ContinuationStack::new(program);
+        let mut continuation_stack =
+            ContinuationStack::new(program, self.options.max_num_continuations());
         let mut current_forest = program.mast_forest().clone();
 
         self.advice.extend_map(current_forest.advice_map()).map_exec_err_no_ctx()?;

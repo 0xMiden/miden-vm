@@ -150,7 +150,14 @@ where
         stopper,
     };
 
-    while let Some(continuation) = state.continuation_stack.pop_continuation() {
+    loop {
+        check_continuation_stack_size(state.continuation_stack)
+            .map_break(InternalBreakReason::from)?;
+
+        let Some(continuation) = state.continuation_stack.pop_continuation() else {
+            break;
+        };
+
         match continuation {
             Continuation::StartNode(node_id) => {
                 let node = current_forest.get_node_by_id(node_id).unwrap();
@@ -438,7 +445,19 @@ where
     // Increment the processor clock.
     processor.system_mut().increment_clock();
 
+    check_continuation_stack_size(continuation_stack)?;
     stopper.should_stop(processor, continuation_stack, continuation_after_stop)
+}
+
+/// Checks that the continuation stack is within its configured size limit.
+#[inline(always)]
+fn check_continuation_stack_size(
+    continuation_stack: &ContinuationStack,
+) -> ControlFlow<BreakReason> {
+    match continuation_stack.check_size() {
+        Ok(()) => ControlFlow::Continue(()),
+        Err(err) => ControlFlow::Break(BreakReason::Err(err)),
+    }
 }
 
 /// Returns the next context ID that would be created given the current state.

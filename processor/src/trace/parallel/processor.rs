@@ -515,11 +515,46 @@ impl Stopper for ReplayStopper {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::trace::trace_state::{
-        AdviceReplay, ExecutionContextReplay, HasherResponseReplay, MastForestResolutionReplay,
-        MemoryReadsReplay, StackOverflowReplay, StackState, SystemState,
+    use alloc::{vec, vec::Vec};
+
+    use miden_core::{
+        assert_matches,
+        mast::{BasicBlockNodeBuilder, MastForestContributor},
+        operations::Operation,
+        program::Program,
     };
+
+    use super::*;
+    use crate::{
+        trace::trace_state::{
+            AdviceReplay, ExecutionContextReplay, HasherResponseReplay, MastForestResolutionReplay,
+            MemoryReadsReplay, StackOverflowReplay, StackState, SystemState,
+        },
+        tracer::OperationHelperRegisters,
+    };
+
+    struct ReplayNoopTracer;
+
+    impl Tracer for ReplayNoopTracer {
+        type Processor = ReplayProcessor;
+
+        fn start_clock_cycle(
+            &mut self,
+            _processor: &Self::Processor,
+            _continuation: Continuation,
+            _continuation_stack: &ContinuationStack,
+            _current_forest: &Arc<MastForest>,
+        ) {
+        }
+
+        fn finalize_clock_cycle(
+            &mut self,
+            _processor: &Self::Processor,
+            _op_helper_registers: OperationHelperRegisters,
+            _current_forest: &Arc<MastForest>,
+        ) {
+        }
+    }
 
     fn build_replay_processor() -> ReplayProcessor {
         let system = SystemState {
@@ -558,5 +593,27 @@ mod tests {
         processor.set_word(start_idx, &word);
 
         assert_eq!(processor.get_word(start_idx), word);
+    }
+
+    #[test]
+    fn replay_processor_enforces_continuation_stack_limit() {
+        let mut processor = build_replay_processor();
+        let program = {
+            let mut forest = MastForest::new();
+            let root = BasicBlockNodeBuilder::new(vec![Operation::Noop], Vec::new())
+                .add_to_forest(&mut forest)
+                .unwrap();
+            forest.make_root(root);
+            Program::new(forest.into(), root)
+        };
+        let mut continuation_stack = ContinuationStack::new(&program, 0);
+        let mut current_forest = program.mast_forest().clone();
+        let mut tracer = ReplayNoopTracer;
+
+        let err = processor
+            .execute(&mut continuation_stack, &mut current_forest, program.kernel(), &mut tracer)
+            .unwrap_err();
+
+        assert_matches!(err, ExecutionError::Internal(msg) if msg.contains("continuation stack"));
     }
 }
