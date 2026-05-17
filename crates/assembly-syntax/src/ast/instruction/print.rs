@@ -56,9 +56,13 @@ impl PrettyPrint for Instruction {
             Self::NeqImm(value) => inst_with_felt_imm("neq", value),
             Self::Eqw => const_text("eqw"),
             Self::Lt => const_text("lt"),
+            Self::LtImm(value) => inst_with_felt_imm("lt", value),
             Self::Lte => const_text("lte"),
+            Self::LteImm(value) => inst_with_felt_imm("lte", value),
             Self::Gt => const_text("gt"),
+            Self::GtImm(value) => inst_with_felt_imm("gt", value),
             Self::Gte => const_text("gte"),
+            Self::GteImm(value) => inst_with_felt_imm("gte", value),
             Self::IsOdd => const_text("is_odd"),
 
             // ----- ext2 operations --------------------------------------------------------------

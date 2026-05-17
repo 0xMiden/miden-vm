@@ -28,7 +28,8 @@ miden-core.workspace = true
 miden-crypto.workspace = true
 
 # External dependencies
-bincode.workspace = true
 serde.workspace = true
+serde-wincode.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
+wincode.workspace = true

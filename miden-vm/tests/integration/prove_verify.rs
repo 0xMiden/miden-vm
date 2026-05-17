@@ -174,7 +174,7 @@ mod recursive_verifier {
         challenger::CanObserve,
         fri::PcsTranscript,
         lmcs::{Lmcs, proof::BatchProofView},
-        proof::StarkTranscript,
+        proof::{StarkProof, StarkTranscript},
     };
     use miden_lifted_stark::AirInstance;
     use miden_prover::{ProcessorAir, PublicInputs, config};
@@ -183,6 +183,7 @@ mod recursive_verifier {
     type Challenge = QuadFelt;
     type P2Config = config::Poseidon2Config;
     type P2Lmcs = <P2Config as StarkConfig<Felt, Challenge>>::Lmcs;
+    const MAX_STARK_PROOF_BYTES: usize = 64 * 1024 * 1024;
 
     pub struct VerifierInputs {
         pub initial_stack: Vec<u64>,
@@ -194,8 +195,12 @@ mod recursive_verifier {
     pub fn generate_advice_inputs(proof_bytes: &[u8], pub_inputs: PublicInputs) -> VerifierInputs {
         let params = config::pcs_params();
         let config = config::poseidon2_config(params);
-        let transcript_data =
-            bincode::deserialize(proof_bytes).expect("failed to deserialize proof bytes");
+        let proof_encoding_config = wincode::config::Configuration::default()
+            .with_preallocation_size_limit::<MAX_STARK_PROOF_BYTES>();
+        let transcript_data = <serde_wincode::SerdeCompat<StarkProof<Felt, QuadFelt, P2Config>> as wincode::config::Deserialize<
+            _,
+        >>::deserialize(proof_bytes, proof_encoding_config)
+        .expect("failed to deserialize proof bytes");
 
         let (public_values, kernel_felts) = pub_inputs.to_air_inputs();
         let mut challenger = config.challenger();
