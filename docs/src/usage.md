@@ -74,7 +74,7 @@ Currently, Miden VM can be executed with the following subcommands:
 - `run` - this will execute a Miden assembly program and output the result, but will not generate a proof of execution.
 - `prove` - this will execute a Miden assembly program, and will also generate a STARK proof of execution.
 - `verify` - this will verify a previously generated proof of execution for a given program.
-- `compile` - this will compile a Miden assembly program (i.e., build a program [MAST](./design/programs.md)) and outputs stats about the compilation process.
+- `compile` - this will compile a Miden assembly program (i.e., build a program [MAST](./design/programs.md)) and output stats about the compilation process.
 - `example` - this will execute a Miden assembly example program, generate a STARK proof of execution and verify it. Currently, it is possible to run `blake3` and `fibonacci` examples.
 
 All of the above subcommands require various parameters to be provided. To get more detailed help on what is needed for a given subcommand, you can run the following:
@@ -120,7 +120,7 @@ As described [here](https://docs.miden.xyz/miden-vm/overview#inputs-and-outputs)
 - Secret (or nondeterministic) inputs:
   - `advice_stack` - can be supplied to the VM. There is no limit on how much data the advice provider can hold. This is provided as a string array where each string entry represents a field element.
   - `advice_map` - is supplied as a map of 64-character hex keys, each mapped to an array of numbers. The hex keys are interpreted as 4 field elements and the arrays of numbers are interpreted as arrays of field elements.
-  - `merkle_store` - the Merkle store is container that allows the user to define `merkle_tree`, `sparse_merkle_tree` and `partial_merkle_tree` data structures.
+  - `merkle_store` - the Merkle store is a container that allows the user to define `merkle_tree`, `sparse_merkle_tree` and `partial_merkle_tree` data structures.
     - `merkle_tree` - is supplied as an array of 64-character hex values where each value represents a leaf (4 elements) in the tree.
     - `sparse_merkle_tree` - is supplied as an array of tuples of the form (number, 64-character hex string). The number represents the leaf index and the hex string represents the leaf value (4 elements).
     - `partial_merkle_tree` - is supplied as an array of tuples of the form ((number, number), 64-character hex string). The internal tuple represents the leaf depth and index at this depth, and the hex string represents the leaf value (4 elements).
