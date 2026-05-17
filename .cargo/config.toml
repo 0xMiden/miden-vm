@@ -92,7 +92,7 @@ xclippy = [
     # -Wclippy::cast_lossless              (603 warnings)
     # -Wclippy::manual_assert              (17 warnings)
     # -Wclippy::needless_pass_by_value     (43 warnings)
-    # -Wclippy::unnecessary_wraps          (40 warnings)
+    "-Wclippy::unnecessary_wraps",
     # -Wrust_2018_idioms                   (190 warnings)
     # -Wunreachable_pub                    (545 warnings)
 ]
@@ -156,6 +156,7 @@ xclippy-fix = [
     "-Wunexpected_cfgs",
     "-Wunused_lifetimes",
     "-Wunused_qualifications",
+    "-Wclippy::unnecessary_wraps",
 ]
 
 [target.wasm32-unknown-unknown]

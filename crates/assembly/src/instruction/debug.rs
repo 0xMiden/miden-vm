@@ -1,6 +1,6 @@
 use miden_core::WORD_SIZE;
 
-use crate::{ProcedureContext, ast::DebugOptions, diagnostics::Report};
+use crate::{ProcedureContext, ast::DebugOptions};
 
 /// Compiles the AST representation of a `debug` instruction into its VM representation.
 ///
@@ -10,7 +10,7 @@ use crate::{ProcedureContext, ast::DebugOptions, diagnostics::Report};
 pub fn compile_options(
     options: &DebugOptions,
     proc_ctx: &ProcedureContext,
-) -> Result<miden_core::operations::DebugOptions, Report> {
+) -> miden_core::operations::DebugOptions {
     type Ast = DebugOptions;
     type Vm = miden_core::operations::DebugOptions;
 
@@ -39,5 +39,5 @@ pub fn compile_options(
         Ast::AdvStackTop(n) => Vm::AdvStackTop(n.expect_value()),
     };
 
-    Ok(compiled)
+    compiled
 }

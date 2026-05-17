@@ -113,14 +113,11 @@ impl Assembler {
                 .digest()
         };
 
-        self.procref_mast_root(mast_root, block_builder)
+        self.procref_mast_root(mast_root, block_builder);
+        Ok(())
     }
 
-    fn procref_mast_root(
-        &self,
-        mast_root: Word,
-        block_builder: &mut BasicBlockBuilder,
-    ) -> Result<(), Report> {
+    fn procref_mast_root(&self, mast_root: Word, block_builder: &mut BasicBlockBuilder) {
         // Create an array with `Push` operations containing root elements.
         // Push in reverse order so that mast_root[0] ends up on top.
         let ops = mast_root
@@ -129,6 +126,5 @@ impl Assembler {
             .map(|elem| Operation::Push(*elem))
             .collect::<SmallVec<[_; 4]>>();
         block_builder.push_ops(ops);
-        Ok(())
     }
 }

@@ -69,7 +69,7 @@ impl BundleCmd {
                 println!(
                     "Built kernel module {} with library {}",
                     kernel.display(),
-                    &self.dir.display()
+                    self.dir.display()
                 );
             },
             None => {
