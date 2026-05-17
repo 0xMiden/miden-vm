@@ -1,0 +1,55 @@
+name: codspeed blake3
+
+on:
+  push:
+    branches:
+      - main
+      - next
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  codspeed:
+    name: Run Blake3 CodSpeed benchmark
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          toolchain="$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)"
+          rustup toolchain install "${toolchain}" --profile minimal --target wasm32-unknown-unknown
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+
+      - name: Install cargo-codspeed
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo install cargo-codspeed --version 4.6.0 --locked
+
+      - name: Build benchmark
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo codspeed build --profile optimized -p miden-vm --bench blake3_1to1_codspeed
+
+      - name: Run benchmark
+        uses: CodSpeedHQ/action@3194d9a39c4d46684cb44bf7207fc56626aad8fd # v4.15.1
+        with:
+          mode: simulation
+          run: cargo codspeed run -p miden-vm --bench blake3_1to1_codspeed
