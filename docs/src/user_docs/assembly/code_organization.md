@@ -256,7 +256,7 @@ end
 
 #### Word constants
 
-Along with the regular value constants a _word_ constants could be used. They could be declared as an array of four elements or as a long hex value, and then could be used in the `push` instructions referenced by their name. Notice that a word constant can not be used in a constant expression.
+Along with the regular value constants a _word_ constants can be used. They could be declared as an array of four elements or as a long hex value, and then could be used in the `push` instructions referenced by their name. Notice that a word constant can not be used in a constant expression.
 
 ```
 const SAMPLE_WORD = [1,2,3,4]
