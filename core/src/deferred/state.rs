@@ -1,11 +1,11 @@
-use alloc::collections::BTreeMap;
+use alloc::{collections::BTreeMap, vec::Vec};
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
 use super::{
-    DeferredError, Digest, Node, NodePayload, NodeType, Payload, ReduceCtx, Schema, SchemaError,
-    TRUE_TAG,
+    DeferredError, DeferredStateWire, Digest, IntegrityError, Node, NodePayload, NodeType, Payload,
+    ReduceCtx, Schema, SchemaError, TRUE_DIGEST, TRUE_TAG,
 };
 use crate::serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable};
 
@@ -166,6 +166,138 @@ impl DeferredState {
         DfsResolver { state: self, schema }.reduce_and_intern(node, digest)
     }
 
+    /// Serialize this state to its wire form. The wire carries the same `(nodes, root)` shape as
+    /// the in-memory state — no digest column (digests are recomputed during rehydrate) and no
+    /// ordering guarantee (rehydrate uses a two-pass design that tolerates any ordering).
+    ///
+    /// Note: this currently ships *every* registered node, including those unreachable from
+    /// `root`. The trim-on-serialize optimisation belongs to the upcoming index-based wire-format
+    /// step and is intentionally not done here.
+    pub fn to_wire(&self) -> DeferredStateWire {
+        let mut nodes = Vec::with_capacity(self.nodes.len());
+        for node in self.nodes.values() {
+            nodes.push(node.clone());
+        }
+        DeferredStateWire { nodes, root: self.root }
+    }
+
+    /// Construct a verified [`DeferredState`] from a wire-format value under the installed
+    /// `schema`. Re-runs the prover's schema-validation, content-addressing, and AND-chain walk;
+    /// the returned state therefore satisfies the invariants documented at the top of this
+    /// module.
+    ///
+    /// The two phases:
+    /// - **Phase 1 (structural):** intern every wire entry under its recomputed digest, after
+    ///   `schema.decode` accepts the tag and `payload_matches_type` accepts the body shape.
+    ///   Then sweep again to verify every `Binary` node's child digests resolve.
+    /// - **Phase 2 (semantic):** walk the AND-chain from `wire.root` down to [`super::TRUE_DIGEST`],
+    ///   asserting each step has `tag == TRUE_TAG`, and re-evaluating each predicate statement
+    ///   via [`Self::evaluate`]. The walk surfaces tampered AND-payloads, missing statements,
+    ///   non-predicate statements, and failed equalities.
+    pub fn rehydrate(
+        wire: DeferredStateWire,
+        schema: &dyn Schema,
+    ) -> Result<Self, IntegrityError> {
+        let mut state = Self::new();
+
+        // Phase 1a — schema-validate and intern. AND-nodes (framework-owned `TRUE_TAG`) are
+        // handled specially: the user schema doesn't claim that tag, so we validate them
+        // structurally as Binary-shaped expression nodes.
+        // `intern` keys by `node.digest()`, which populates the memoisation cache as a side
+        // effect. Content-addressing follows trivially: same node ⇒ same digest ⇒ same key.
+        for node in wire.nodes {
+            let node_type = decode_node_type(schema, &node)?;
+            if !payload_matches_type(node_type, &node.payload) {
+                return Err(IntegrityError::ShapeMismatch);
+            }
+            state.intern(node);
+        }
+
+        // Phase 1b — Binary closure check. Each Binary node's payload encodes two child digests;
+        // both must point to nodes we just interned. Catches reordered / forged child references
+        // before phase 2 walks the chain.
+        for node in state.nodes.values() {
+            let node_type = decode_node_type(schema, node)?;
+            if matches!(node_type, NodeType::Binary) {
+                let (lhs, rhs) = node
+                    .expression_payload()
+                    .ok_or(IntegrityError::ShapeMismatch)?
+                    .binary_op_children();
+                // Children of an AND-node may legitimately be `TRUE_DIGEST` (the trivial-empty
+                // predecessor at the chain's root); that sentinel is not interned in `nodes`.
+                let lhs_ok = lhs == TRUE_DIGEST || state.nodes.contains_key(&lhs);
+                let rhs_ok = rhs == TRUE_DIGEST || state.nodes.contains_key(&rhs);
+                if !lhs_ok || !rhs_ok {
+                    return Err(IntegrityError::DanglingChild);
+                }
+            }
+        }
+
+        // Validate root pointer's existence before walking. `TRUE_DIGEST` is the trivial-empty
+        // root and is allowed even when `nodes` is empty.
+        if wire.root != TRUE_DIGEST && !state.nodes.contains_key(&wire.root) {
+            return Err(IntegrityError::MissingRoot);
+        }
+        state.root = wire.root;
+
+        // Phase 2 — chain walk + per-statement re-evaluation. AND-nodes share TRUE_TAG and a
+        // `(prev_root, stmt_digest)` payload; statements must reduce to `true_node` under the
+        // schema.
+        let mut cur = wire.root;
+        while cur != TRUE_DIGEST {
+            let and_node = state
+                .nodes
+                .get(&cur)
+                .ok_or(IntegrityError::MissingRoot)?
+                .clone();
+            if and_node.tag != TRUE_TAG {
+                return Err(IntegrityError::NonAndNode);
+            }
+            let (prev_root, stmt_digest) = and_node
+                .expression_payload()
+                .ok_or(IntegrityError::BadAndPayload)?
+                .binary_op_children();
+            let stmt = state
+                .nodes
+                .get(&stmt_digest)
+                .ok_or(IntegrityError::MissingStatement)?
+                .clone();
+            let canonical = state.evaluate(schema, stmt)?;
+            if !canonical.is_true_node() {
+                return Err(IntegrityError::PredicateNotTrue);
+            }
+            cur = prev_root;
+        }
+
+        Ok(state)
+    }
+
+    /// Walk the AND-chain from `self.root` down to [`super::TRUE_DIGEST`] and return each
+    /// statement digest in execution order (oldest first). Assumes the state's chain integrity
+    /// has already been established (e.g. by `rehydrate`); panics on a missing or non-AND node
+    /// because that situation can't arise on a value produced by the supported constructors.
+    pub fn statements(&self) -> Vec<Digest> {
+        let mut out = Vec::new();
+        let mut cur = self.root;
+        while cur != TRUE_DIGEST {
+            let and_node = self
+                .nodes
+                .get(&cur)
+                .expect("statements(): AND-chain references a node not in state");
+            debug_assert_eq!(
+                and_node.tag, TRUE_TAG,
+                "statements(): AND-chain step is not tagged TRUE_TAG"
+            );
+            let (prev_root, stmt_digest) = and_node
+                .expression_payload()
+                .expect("statements(): AND-node has non-expression body")
+                .binary_op_children();
+            out.push(stmt_digest);
+            cur = prev_root;
+        }
+        out.reverse();
+        out
+    }
 }
 
 // SERIALIZATION
@@ -197,6 +329,19 @@ impl Deserializable for DeferredState {
         let root = Digest::read_from(source)?;
         Ok(Self { nodes, root })
     }
+}
+
+/// Decode a node's [`NodeType`] for `rehydrate`. Framework-owned `TRUE_TAG` AND-nodes are
+/// classified as `Binary` directly (user schemas don't claim that tag); everything else routes
+/// through `schema.decode`.
+fn decode_node_type(schema: &dyn Schema, node: &Node) -> Result<NodeType, IntegrityError> {
+    if node.tag == TRUE_TAG {
+        return Ok(NodeType::Binary);
+    }
+    schema
+        .decode(node.tag)
+        .map(|info| info.node_type)
+        .map_err(|_| IntegrityError::UnknownTag)
 }
 
 /// Returns `true` when the variant of `payload` agrees with the [`NodeType`] the schema decoded
@@ -527,5 +672,111 @@ mod tests {
         assert!(state.contains(&mul_digest), "input op node must be interned by evaluate");
         assert!(state.contains(&uint256_leaf_node(7).digest()), "canonical(add) interned");
         assert!(state.contains(&uint256_leaf_node(35).digest()), "canonical(mul) interned");
+    }
+
+    // REHYDRATE TESTS
+    // ============================================================================================
+
+    /// Build a fresh state that evaluates `(a+b)*c == 35` and then `log`s the assertion as a
+    /// transcript step. Returns the populated state for round-trip tests.
+    fn built_state_with_logged_predicate() -> DeferredState {
+        let mut state = DeferredState::new();
+        let schema = Uint256;
+        let a = state.register(&schema, uint256_leaf_node(3)).unwrap();
+        let b = state.register(&schema, uint256_leaf_node(4)).unwrap();
+        let c = state.register(&schema, uint256_leaf_node(5)).unwrap();
+        let expected = state.register(&schema, uint256_leaf_node(35)).unwrap();
+        let add = state
+            .register(&schema, Node::expression(Uint256::add_tag(), Payload::binary_op(a, b)))
+            .unwrap();
+        let mul = state
+            .register(&schema, Node::expression(Uint256::mul_tag(), Payload::binary_op(add, c)))
+            .unwrap();
+        let assertion =
+            Node::expression(Uint256::eq_tag(), Payload::binary_op(mul, expected));
+        let stmt_digest = assertion.digest();
+        state.evaluate(&schema, assertion).unwrap();
+        let new_root =
+            Node::expression(TRUE_TAG, Payload::binary_op(state.root(), stmt_digest)).digest();
+        state.log(stmt_digest, new_root).unwrap();
+        state
+    }
+
+    #[test]
+    fn rehydrate_round_trips_simple_chain() {
+        let original = built_state_with_logged_predicate();
+        let wire = original.to_wire();
+        let rehydrated = DeferredState::rehydrate(wire, &Uint256).unwrap();
+        assert_eq!(rehydrated.root(), original.root());
+        // After rehydrate phase 2, additional canonical intermediates from the predicate's
+        // re-evaluation may be present. So we only assert the root is preserved and the chain
+        // walks the same statements.
+        assert_eq!(rehydrated.statements(), original.statements());
+    }
+
+    #[test]
+    fn rehydrate_empty_state_succeeds() {
+        let wire = DeferredStateWire::empty();
+        let state = DeferredState::rehydrate(wire, &Uint256).unwrap();
+        assert_eq!(state.root(), TRUE_DIGEST);
+        assert!(state.nodes().is_empty());
+    }
+
+    #[test]
+    fn rehydrate_rejects_missing_root() {
+        // Empty nodes but a non-TRUE root: phase 1 succeeds (nothing to do), phase 2's chain walk
+        // hits a missing AND-node and bails out.
+        let wire = DeferredStateWire { nodes: alloc::vec::Vec::new(), root: dummy_digest(7) };
+        let err = DeferredState::rehydrate(wire, &Uint256);
+        assert!(matches!(err, Err(IntegrityError::MissingRoot)));
+    }
+
+    #[test]
+    fn rehydrate_rejects_dangling_child() {
+        // An op node whose lhs references a digest not present in the wire's node list.
+        let dangling = dummy_digest(99);
+        let bogus_op =
+            Node::expression(Uint256::add_tag(), Payload::binary_op(dangling, dangling));
+        let wire = DeferredStateWire { nodes: alloc::vec![bogus_op], root: TRUE_DIGEST };
+        let err = DeferredState::rehydrate(wire, &Uint256);
+        assert!(matches!(err, Err(IntegrityError::DanglingChild)));
+    }
+
+    #[test]
+    fn rehydrate_rejects_unknown_tag() {
+        // A tag the schema rejects — its app_id doesn't match Uint256.
+        let bogus_tag: Tag =
+            [Felt::new_unchecked(0xdead), ZERO, ZERO, ZERO];
+        let bogus = Node::expression(bogus_tag, Payload::new([ZERO; 8]));
+        let wire = DeferredStateWire { nodes: alloc::vec![bogus], root: TRUE_DIGEST };
+        let err = DeferredState::rehydrate(wire, &Uint256);
+        assert!(matches!(err, Err(IntegrityError::UnknownTag)));
+    }
+
+    #[test]
+    fn rehydrate_rejects_failed_predicate() {
+        // Build a chain whose statement is `eq(leaf(3), leaf(4))` — disagreeing leaves.
+        // Phase 2's evaluate returns AssertionFailed, surfaced as `PredicateFailed`.
+        let mut state = DeferredState::new();
+        let schema = Uint256;
+        let a = state.register(&schema, uint256_leaf_node(3)).unwrap();
+        let b = state.register(&schema, uint256_leaf_node(4)).unwrap();
+        // Hand-roll a chain that points to a failing predicate without going through `log`'s
+        // schema gate (which evaluate-rejects ahead of time).
+        let bad_pred = Node::expression(Uint256::eq_tag(), Payload::binary_op(a, b));
+        let bad_digest = bad_pred.digest();
+        state.intern(bad_pred);
+        let and_node =
+            Node::expression(TRUE_TAG, Payload::binary_op(TRUE_DIGEST, bad_digest));
+        let and_digest = and_node.digest();
+        state.intern(and_node);
+        state.root = and_digest;
+
+        let wire = state.to_wire();
+        let err = DeferredState::rehydrate(wire, &Uint256);
+        assert!(
+            matches!(err, Err(IntegrityError::PredicateFailed(_))),
+            "expected PredicateFailed, got {err:?}"
+        );
     }
 }

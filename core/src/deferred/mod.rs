@@ -14,9 +14,11 @@
 
 mod schema;
 mod state;
+mod wire;
 
 pub use schema::{NodeType, NoopSchema, ReduceCtx, Schema, SchemaError, TagInfo};
 pub use state::DeferredState;
+pub use wire::{DeferredStateWire, IntegrityError};
 
 // Multi-app composite layer. The `App` trait + `PrecompileSchema` substrate is gated behind the
 // `testing` feature for now alongside the reference `Uint256` app; promoting to the production
