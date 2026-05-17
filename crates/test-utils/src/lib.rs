@@ -463,13 +463,12 @@ impl Test {
             let _ = env_logger::Builder::from_env("MIDEN_LOG").format_timestamp(None).try_init();
         }
 
-        let (assembler, kernel_lib) = if let Some(kernel) = self.kernel_source.clone() {
+        let (mut assembler, kernel_lib) = if let Some(kernel) = self.kernel_source.clone() {
             let mut parser = Module::parser(Some(ModuleKind::Kernel));
             let kernel = parser.parse(Some(Path::KERNEL), kernel, self.source_manager.clone())?;
             let kernel_lib = Assembler::new(self.source_manager.clone())
                 .assemble_kernel("kernel", kernel, None)
-                .map(Arc::<Package>::from)
-                .unwrap();
+                .map(Arc::<Package>::from)?;
 
             (
                 Assembler::with_kernel(self.source_manager.clone(), kernel_lib.clone())?,
@@ -479,17 +478,17 @@ impl Test {
             (Assembler::new(self.source_manager.clone()), None)
         };
 
-        let mut assembler =
-            self.add_modules.iter().fold(assembler, |mut assembler, (path, source)| {
-                let module = Module::parser(None)
-                    .parse_str(Some(path.as_ref()), source, self.source_manager.clone())
-                    .expect("invalid masm source code");
-                assembler.compile_and_statically_link(module).expect("failed to link module");
-                assembler
-            });
+        for (path, source) in &self.add_modules {
+            let module = Module::parser(None).parse_str(
+                Some(path.as_ref()),
+                source,
+                self.source_manager.clone(),
+            )?;
+            assembler.compile_and_statically_link(module)?;
+        }
         // Debug mode is now always enabled
         for package in &self.libraries {
-            assembler.link_package(package.clone(), Linkage::Dynamic).unwrap();
+            assembler.link_package(package.clone(), Linkage::Dynamic)?;
         }
 
         let result = (
@@ -760,6 +759,35 @@ impl Test {
                 .collect(),
             library_digests: self.libraries.iter().map(|library| library.digest()).collect(),
         }
+    }
+}
+
+#[cfg(all(test, feature = "std", not(target_family = "wasm")))]
+mod tests {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    use super::*;
+
+    #[test]
+    fn compile_returns_error_for_invalid_kernel_without_panicking() {
+        let test = Test::new("main", "begin push.1 end", false)
+            .with_kernel_source("kernel", "export.invalid begin push.1");
+
+        let result = catch_unwind(AssertUnwindSafe(|| test.compile()));
+
+        assert!(result.is_ok(), "invalid kernel source caused Test::compile() to panic");
+        assert!(result.unwrap().is_err(), "invalid kernel source should return an error");
+    }
+
+    #[test]
+    fn compile_returns_error_for_invalid_extra_module_without_panicking() {
+        let test = Test::new("main", "use.foo::bar\nbegin\n    exec.foo::bar\nend", false)
+            .with_module("foo", "export.bar begin push.1");
+
+        let result = catch_unwind(AssertUnwindSafe(|| test.compile()));
+
+        assert!(result.is_ok(), "invalid extra module source caused Test::compile() to panic");
+        assert!(result.unwrap().is_err(), "invalid extra module source should return an error");
     }
 }
 
