@@ -10,7 +10,7 @@ use miden_assembly::Assembler;
 use miden_core::{
     ZERO,
     deferred::{
-        BodyShape, Node, NodePayload, Payload, ReduceCtx, Schema, SchemaError, TRUE_DIGEST, Tag,
+        Node, NodePayload, NodeType, Payload, ReduceCtx, Schema, SchemaError, TRUE_DIGEST, Tag,
         TagInfo, Uint256,
     },
 };
@@ -377,11 +377,11 @@ impl Schema for ChunkTestSchema {
         }
         match tag[2] {
             r if r == PREIMAGE_ROLE => Ok(TagInfo {
-                body: BodyShape::Chunk(tag[3].as_canonical_u64() as u32),
+                node_type: NodeType::Chunks(tag[3].as_canonical_u64() as u32),
                 evaluates_to: digest_tag(),
             }),
             r if r == DIGEST_ROLE => Ok(TagInfo {
-                body: BodyShape::Expression,
+                node_type: NodeType::Value,
                 evaluates_to: digest_tag(),
             }),
             _ => Err(SchemaError::InvalidNode),

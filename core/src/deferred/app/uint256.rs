@@ -9,7 +9,7 @@
 use crate::{
     Felt, ZERO,
     deferred::{
-        BodyShape, DeferredError, DeferredState, Digest, Node, Payload, ReduceCtx, Schema,
+        DeferredError, DeferredState, Digest, Node, NodeType, Payload, ReduceCtx, Schema,
         SchemaError, TRUE_TAG, Tag, TagInfo, true_node,
     },
 };
@@ -154,14 +154,18 @@ impl App for Uint256 {
         if local.imm != ZERO {
             return Err(SchemaError::InvalidNode);
         }
-        let body = BodyShape::Expression;
-        let evaluates_to = match Discriminant::classify(local.node_disc)
-            .ok_or(SchemaError::InvalidNode)?
-        {
+        let kind = Discriminant::classify(local.node_disc).ok_or(SchemaError::InvalidNode)?;
+        // Leaf is a `Value` (8 raw u32 limbs); op-nodes and the eq predicate are `Binary`
+        // (children encoded as `lhs_digest || rhs_digest`).
+        let node_type = match kind {
+            Discriminant::Leaf => NodeType::Value,
+            Discriminant::BinaryOp(_) | Discriminant::Eq => NodeType::Binary,
+        };
+        let evaluates_to = match kind {
             Discriminant::Leaf | Discriminant::BinaryOp(_) => Self::leaf_tag(),
             Discriminant::Eq => TRUE_TAG,
         };
-        Ok(TagInfo { body, evaluates_to })
+        Ok(TagInfo { node_type, evaluates_to })
     }
 
     fn reduce(&self, node: &Node, ctx: &mut dyn ReduceCtx) -> Result<Node, SchemaError> {

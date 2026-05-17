@@ -45,17 +45,30 @@ pub enum SchemaError {
     Other(#[from] super::DeferredError),
 }
 
-// BODY SHAPE
+// NODE TYPE
 // ================================================================================================
 
-/// Structural shape of a node's body. Distinguishes the fixed-size 8-felt expression payload
-/// from a variable-length chunk payload (`n` 8-felt blocks).
+/// Structural classification of a node, returned by [`Schema::decode`].
+///
+/// Captures both the in-memory body shape (Expression vs Chunk) AND, for the Expression case,
+/// whether the 8 felts encode raw payload data or two child digests packed via
+/// [`super::Payload::binary_op`]. This is the unit the wire format and rehydrate logic
+/// dispatch on.
+///
+/// `NodeType` and `TagInfo::evaluates_to` are orthogonal: a `Binary` node can be either an
+/// op (`evaluates_to == some_canonical_tag`), a predicate (`evaluates_to == TRUE_TAG`), or a
+/// self-evaluating compound canonical such as `MockGroup::combine` (`evaluates_to == own_tag`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BodyShape {
-    /// 8-felt expression payload — leaves, op-nodes, and predicates.
-    Expression,
-    /// `n` 8-felt chunks — bulk-data leaves.
-    Chunk(u32),
+pub enum NodeType {
+    /// 8 felts of raw payload data, no child digests. Self-evaluating value leaves (e.g.
+    /// `Uint256` leaf, `MockHash` digest).
+    Value,
+    /// 8 felts encoding `lhs_digest || rhs_digest` — two child references. Covers binary ops,
+    /// binary predicates, AND-nodes, and compound-canonical `combine`-style leaves.
+    Binary,
+    /// `n` 8-felt chunks of bulk data, no child digests. Chunk-bodied leaves (e.g.
+    /// `MockHash` preimage, `MockSig` verify).
+    Chunks(u32),
 }
 
 // TAG INFO
@@ -69,7 +82,7 @@ pub enum BodyShape {
 /// - Otherwise the tag describes an op whose canonical form bears the given tag.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TagInfo {
-    pub body: BodyShape,
+    pub node_type: NodeType,
     pub evaluates_to: super::Tag,
 }
 
@@ -137,11 +150,12 @@ pub trait ReduceCtx {
 /// (or the verifier's witness-side equivalent) as a `digest → canonical` cache, since the
 /// speedup is keyed on input digests and benefits any schema.
 pub trait Schema: core::fmt::Debug + Send {
-    /// Decodes the tag to its type signature: body shape and canonical-form tag.
+    /// Decodes the tag to its type signature: structural [`NodeType`] and canonical-form tag.
     ///
     /// Returning `Err(SchemaError::InvalidNode)` rejects the tag entirely. Otherwise the
     /// returned [`TagInfo`] tells the framework (1) how to parse this tag's body
-    /// ([`BodyShape::Expression`] for 8 felts vs [`BodyShape::Chunk`] for `n` 8-felt blocks),
+    /// ([`NodeType::Value`] for 8 raw felts, [`NodeType::Binary`] for two child digests packed
+    /// as `lhs_digest || rhs_digest`, [`NodeType::Chunks`] for `n` 8-felt chunks of bulk data),
     /// and (2) what tag this node's canonical form will bear after `reduce` — used both for
     /// the advice-push policy on evaluate (no push for predicates) and as a post-`reduce`
     /// sanity check.

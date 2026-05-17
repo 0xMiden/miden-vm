@@ -75,7 +75,7 @@ impl Schema for PrecompileSchema {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::deferred::{BodyShape, Payload};
+    use crate::deferred::{NodeType, Payload};
 
     /// A fake app with a single self-evaluating leaf discriminant — enough to exercise the
     /// composite's dispatch surface without depending on Uint256.
@@ -100,7 +100,7 @@ mod tests {
                 return Err(SchemaError::InvalidNode);
             }
             Ok(TagInfo {
-                body: BodyShape::Expression,
+                node_type: NodeType::Value,
                 evaluates_to: self.tag(),
             })
         }

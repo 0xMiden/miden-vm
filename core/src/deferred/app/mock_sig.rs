@@ -11,7 +11,7 @@
 use crate::{
     Felt, ZERO,
     deferred::{
-        BodyShape, Node, NodePayload, ReduceCtx, SchemaError, TRUE_TAG, Tag, TagInfo, true_node,
+        Node, NodePayload, NodeType, ReduceCtx, SchemaError, TRUE_TAG, Tag, TagInfo, true_node,
     },
 };
 
@@ -60,7 +60,7 @@ impl App for MockSig {
         }
         match Discriminant::classify(local.node_disc).ok_or(SchemaError::InvalidNode)? {
             Discriminant::Verify => Ok(TagInfo {
-                body: BodyShape::Chunk(Self::SIG_CHUNKS),
+                node_type: NodeType::Chunks(Self::SIG_CHUNKS),
                 evaluates_to: TRUE_TAG,
             }),
         }
@@ -125,7 +125,7 @@ mod tests {
         let info = MockSig
             .decode(AppTag { node_disc: MockSig::D_VERIFY, imm: ZERO })
             .unwrap();
-        assert!(matches!(info.body, BodyShape::Chunk(3)));
+        assert!(matches!(info.node_type, NodeType::Chunks(3)));
         assert_eq!(info.evaluates_to, TRUE_TAG);
     }
 

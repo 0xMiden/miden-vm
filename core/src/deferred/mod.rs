@@ -15,7 +15,7 @@
 mod schema;
 mod state;
 
-pub use schema::{BodyShape, NoopSchema, ReduceCtx, Schema, SchemaError, TagInfo};
+pub use schema::{NodeType, NoopSchema, ReduceCtx, Schema, SchemaError, TagInfo};
 pub use state::DeferredState;
 
 // Multi-app composite layer. The `App` trait + `PrecompileSchema` substrate is gated behind the

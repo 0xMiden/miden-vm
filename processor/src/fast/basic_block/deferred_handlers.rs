@@ -8,7 +8,7 @@ use alloc::vec::Vec;
 
 use miden_core::{
     Felt, Word, ZERO,
-    deferred::{BodyShape, Node, NodePayload, Payload, SchemaError, TRUE_TAG, Tag},
+    deferred::{Node, NodePayload, NodeType, Payload, SchemaError, TRUE_TAG, Tag},
 };
 
 use super::SystemEventError;
@@ -51,13 +51,16 @@ fn read_tag_and_payload(processor: &FastProcessor) -> (Tag, Payload) {
 /// `SchemaError::InvalidNode` if the tag decodes to a chunk body — chunks must be registered via
 /// `adv.register_deferred_chunk`, not `adv.register_deferred`.
 fn build_standard_node(
-    body: BodyShape,
+    node_type: NodeType,
     tag: Tag,
     payload: Payload,
 ) -> Result<Node, SchemaError> {
-    match body {
-        BodyShape::Expression => Ok(Node::expression(tag, payload)),
-        BodyShape::Chunk(_) => Err(SchemaError::InvalidNode),
+    match node_type {
+        // Both Value and Binary live in `NodePayload::Expression` at the in-memory level — the
+        // 8-felt payload is the same; the schema decides whether the bytes encode raw data
+        // (Value) or two child digests (Binary) when it reduces.
+        NodeType::Value | NodeType::Binary => Ok(Node::expression(tag, payload)),
+        NodeType::Chunks(_) => Err(SchemaError::InvalidNode),
     }
 }
 
@@ -69,7 +72,7 @@ pub(super) fn handle_deferred_register(
     let (tag, payload) = read_tag_and_payload(processor);
     let (state, schema) = processor.deferred_view_mut();
     let info = schema.decode(tag)?;
-    let node = build_standard_node(info.body, tag, payload)?;
+    let node = build_standard_node(info.node_type, tag, payload)?;
     let _ = state.register(schema, node)?;
     Ok(())
 }
@@ -91,7 +94,7 @@ pub(super) fn handle_deferred_evaluate(
     let (tag, payload) = read_tag_and_payload(processor);
     let (state, schema) = processor.deferred_view_mut();
     let info = schema.decode(tag)?;
-    let node = build_standard_node(info.body, tag, payload)?;
+    let node = build_standard_node(info.node_type, tag, payload)?;
     let canonical = state.evaluate(schema, node)?;
 
     // Predicates reduce to the TRUE node — by contract the advice stack is untouched.
@@ -137,9 +140,9 @@ pub(super) fn handle_deferred_register_chunk(
     // chunk length, and reading otherwise would let a malformed tag waste work.
     let n = {
         let (_state, schema) = processor.deferred_view_mut();
-        match schema.decode(tag)?.body {
-            BodyShape::Chunk(n) => n,
-            BodyShape::Expression => return Err(SchemaError::InvalidNode.into()),
+        match schema.decode(tag)?.node_type {
+            NodeType::Chunks(n) => n,
+            NodeType::Value | NodeType::Binary => return Err(SchemaError::InvalidNode.into()),
         }
     };
 

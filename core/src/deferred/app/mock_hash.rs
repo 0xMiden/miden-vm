@@ -19,7 +19,7 @@
 use crate::{
     Felt, ZERO,
     deferred::{
-        BodyShape, DeferredError, Digest, Node, NodePayload, Payload, ReduceCtx, SchemaError,
+        DeferredError, Digest, Node, NodePayload, NodeType, Payload, ReduceCtx, SchemaError,
         TRUE_TAG, Tag, TagInfo, true_node,
     },
 };
@@ -120,21 +120,23 @@ impl App for MockHash {
                 let n_bytes = u32::try_from(local.imm.as_canonical_u64())
                     .map_err(|_| SchemaError::InvalidNode)?;
                 Ok(TagInfo {
-                    body: BodyShape::Chunk(Self::n_chunks(n_bytes)),
+                    node_type: NodeType::Chunks(Self::n_chunks(n_bytes)),
                     evaluates_to: Self::digest_tag(),
                 })
             },
             Discriminant::Digest => {
+                // Self-evaluating leaf carrying 8 raw felts of digest data.
                 if local.imm != ZERO {
                     return Err(SchemaError::InvalidNode);
                 }
-                Ok(TagInfo { body: BodyShape::Expression, evaluates_to: Self::digest_tag() })
+                Ok(TagInfo { node_type: NodeType::Value, evaluates_to: Self::digest_tag() })
             },
             Discriminant::Eq => {
+                // Binary predicate over two child digests.
                 if local.imm != ZERO {
                     return Err(SchemaError::InvalidNode);
                 }
-                Ok(TagInfo { body: BodyShape::Expression, evaluates_to: TRUE_TAG })
+                Ok(TagInfo { node_type: NodeType::Binary, evaluates_to: TRUE_TAG })
             },
         }
     }
@@ -234,24 +236,25 @@ mod tests {
             node_disc: MockHash::D_PREIMAGE,
             imm: Felt::from_u32(65),
         }).unwrap();
-        assert!(matches!(info.body, BodyShape::Chunk(3)));
+        assert!(matches!(info.node_type, NodeType::Chunks(3)));
         assert_eq!(info.evaluates_to, MockHash::digest_tag());
     }
 
     #[test]
-    fn decode_digest_is_self_evaluating_expression() {
+    fn decode_digest_is_self_evaluating_value() {
         let info = MockHash
             .decode(AppTag { node_disc: MockHash::D_DIGEST, imm: ZERO })
             .unwrap();
-        assert!(matches!(info.body, BodyShape::Expression));
+        assert!(matches!(info.node_type, NodeType::Value));
         assert_eq!(info.evaluates_to, MockHash::digest_tag());
     }
 
     #[test]
-    fn decode_eq_is_predicate() {
+    fn decode_eq_is_binary_predicate() {
         let info = MockHash
             .decode(AppTag { node_disc: MockHash::D_EQ, imm: ZERO })
             .unwrap();
+        assert!(matches!(info.node_type, NodeType::Binary));
         assert_eq!(info.evaluates_to, TRUE_TAG);
     }
 

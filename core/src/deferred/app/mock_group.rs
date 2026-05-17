@@ -15,7 +15,7 @@ use core::marker::PhantomData;
 use crate::{
     Felt, ZERO,
     deferred::{
-        BodyShape, DeferredState, Digest, Node, Payload, ReduceCtx, SchemaError, TRUE_TAG, Tag,
+        DeferredState, Digest, Node, NodeType, Payload, ReduceCtx, SchemaError, TRUE_TAG, Tag,
         TagInfo, true_node,
     },
 };
@@ -99,13 +99,16 @@ impl<F: FieldOps> App for MockGroup<F> {
         if local.imm != ZERO {
             return Err(SchemaError::InvalidNode);
         }
+        // All MockGroup nodes pack two child digests in their payload — `combine` references
+        // the coordinate leaves, `add`/`sub` reference the group operands, `eq` references the
+        // two compared group elements. So every tag is `NodeType::Binary`.
         let evaluates_to = match Discriminant::classify(local.node_disc)
             .ok_or(SchemaError::InvalidNode)?
         {
             Discriminant::Combine | Discriminant::Add | Discriminant::Sub => Self::combine_tag(),
             Discriminant::Eq => TRUE_TAG,
         };
-        Ok(TagInfo { body: BodyShape::Expression, evaluates_to })
+        Ok(TagInfo { node_type: NodeType::Binary, evaluates_to })
     }
 
     fn reduce(&self, node: &Node, ctx: &mut dyn ReduceCtx) -> Result<Node, SchemaError> {

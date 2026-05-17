@@ -15,7 +15,7 @@
 use miden_core::{
     Felt, ZERO,
     deferred::{
-        BodyShape, DeferredState, Node, Payload, ReduceCtx, Schema, SchemaError, TRUE_TAG, Tag,
+        DeferredState, Node, NodeType, Payload, ReduceCtx, Schema, SchemaError, TRUE_TAG, Tag,
         TagInfo, true_node,
     },
 };
@@ -69,17 +69,17 @@ impl Schema for TestSchema {
         match tag[2] {
             // Preimage chunk reduces to a digest leaf.
             r if r == PREIMAGE_ROLE => Ok(TagInfo {
-                body: BodyShape::Chunk(tag[3].as_canonical_u64() as u32),
+                node_type: NodeType::Chunks(tag[3].as_canonical_u64() as u32),
                 evaluates_to: digest_tag(),
             }),
-            // Digest leaf is self-evaluating.
+            // Digest leaf is self-evaluating with 8 raw felts.
             r if r == DIGEST_ROLE => Ok(TagInfo {
-                body: BodyShape::Expression,
+                node_type: NodeType::Value,
                 evaluates_to: digest_tag(),
             }),
-            // Assertion is a predicate: evaluates to TRUE.
+            // Assertion is a binary predicate (two child digests, evaluates to TRUE).
             r if r == ASSERT_ROLE => Ok(TagInfo {
-                body: BodyShape::Expression,
+                node_type: NodeType::Binary,
                 evaluates_to: TRUE_TAG,
             }),
             _ => Err(SchemaError::InvalidNode),

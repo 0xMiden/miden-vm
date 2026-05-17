@@ -4,7 +4,7 @@ use alloc::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use super::{
-    BodyShape, DeferredError, Digest, Node, NodePayload, Payload, ReduceCtx, Schema, SchemaError,
+    DeferredError, Digest, Node, NodePayload, NodeType, Payload, ReduceCtx, Schema, SchemaError,
     TRUE_TAG,
 };
 use crate::serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable};
@@ -127,7 +127,7 @@ impl DeferredState {
     /// either host-side via [`Self::evaluate`], or constrained via `log_precompile`.
     pub fn register(&mut self, schema: &dyn Schema, node: Node) -> Result<Digest, SchemaError> {
         let info = schema.decode(node.tag)?;
-        if !payload_matches_body(info.body, &node.payload) {
+        if !payload_matches_type(info.node_type, &node.payload) {
             return Err(SchemaError::InvalidNode);
         }
         let digest = node.digest();
@@ -157,7 +157,7 @@ impl DeferredState {
     /// verifier accepts directly, so we don't waste DAG space on copies of it.
     pub fn evaluate(&mut self, schema: &dyn Schema, node: Node) -> Result<Node, SchemaError> {
         let info = schema.decode(node.tag)?;
-        if !payload_matches_body(info.body, &node.payload) {
+        if !payload_matches_type(info.node_type, &node.payload) {
             return Err(SchemaError::InvalidNode);
         }
         // Compute the input digest once at the entry; the resolver threads it through so the
@@ -199,13 +199,17 @@ impl Deserializable for DeferredState {
     }
 }
 
-/// Returns `true` when the variant of `payload` agrees with the body shape the schema decoded
+/// Returns `true` when the variant of `payload` agrees with the [`NodeType`] the schema decoded
 /// for the node's tag. Construction-time invariant — handlers always build the matching variant,
 /// but a hand-constructed `Node` may disagree.
-fn payload_matches_body(body: BodyShape, payload: &NodePayload) -> bool {
-    match (body, payload) {
-        (BodyShape::Expression, NodePayload::Expression(_)) => true,
-        (BodyShape::Chunk(n), NodePayload::Chunk(chunks)) => chunks.len() == n as usize,
+///
+/// `Value` and `Binary` both map to `NodePayload::Expression` at the in-memory level — the schema
+/// is the source of truth for whether the 8 felts encode raw data or two child digests, and
+/// rejects payload-semantic violations inside `reduce`.
+fn payload_matches_type(nt: NodeType, payload: &NodePayload) -> bool {
+    match (nt, payload) {
+        (NodeType::Value | NodeType::Binary, NodePayload::Expression(_)) => true,
+        (NodeType::Chunks(n), NodePayload::Chunk(chunks)) => chunks.len() == n as usize,
         _ => false,
     }
 }
