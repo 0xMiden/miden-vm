@@ -17,7 +17,7 @@ use crate::mast::MastNode;
 use crate::{
     Felt, Word,
     mast::{
-        DecoratorId, DecoratorStore, ExecutableMastForest, MastForest, MastForestError,
+        DecoratorId, ExecutableMastForest, LinkedDecoratorStore, MastForest, MastForestError,
         MastNodeFingerprint, MastNodeId, digest,
     },
     operations::opcodes,
@@ -39,11 +39,11 @@ pub struct CallNode {
     callee: MastNodeId,
     is_syscall: bool,
     digest: Word,
-    decorator_store: DecoratorStore,
+    decorator_store: LinkedDecoratorStore,
 }
 
 impl CallNode {
-    pub(crate) fn linked_decorator_store_id(&self) -> Option<MastNodeId> {
+    pub(crate) fn linked_decorator_store_id(&self) -> MastNodeId {
         self.decorator_store.linked_id()
     }
 }
@@ -274,21 +274,19 @@ impl MastNodeExt for CallNode {
     where
         F: ExecutableMastForest + ?Sized,
     {
-        if let Some(id) = self.decorator_store.linked_id() {
-            // Verify that this node is the one stored at the given ID in the forest
-            let self_ptr = self as *const Self;
-            let forest_node =
-                forest.get_node_by_id(id).expect("linked node id must be present in forest");
-            let forest_node_ptr = match forest_node {
-                MastNode::Call(call_node) => call_node as *const CallNode as *const (),
-                _ => panic!("Node type mismatch at {id:?}"),
-            };
-            let self_as_void = self_ptr as *const ();
-            debug_assert_eq!(
-                self_as_void, forest_node_ptr,
-                "Node pointer mismatch: expected node at {id:?} to be self"
-            );
-        }
+        let id = self.decorator_store.linked_id();
+        // Verify that this node is the one stored at the given ID in the forest
+        let self_ptr = self as *const Self;
+        let forest_node = forest.get_node_by_id(id).expect("linked node id must be present in forest");
+        let forest_node_ptr = match forest_node {
+            MastNode::Call(call_node) => call_node as *const CallNode as *const (),
+            _ => panic!("Node type mismatch at {id:?}"),
+        };
+        let self_as_void = self_ptr as *const ();
+        debug_assert_eq!(
+            self_as_void, forest_node_ptr,
+            "Node pointer mismatch: expected node at {id:?} to be self"
+        );
     }
 }
 
@@ -345,7 +343,7 @@ impl CallNodeBuilder {
                 callee,
                 is_syscall,
                 digest,
-                decorator_store: DecoratorStore::Linked { id: node_id },
+                decorator_store: LinkedDecoratorStore::linked(node_id),
             },
             before_enter,
             after_exit,
@@ -371,7 +369,7 @@ impl MastForestContributor for CallNodeBuilder {
                 callee: self.callee,
                 is_syscall: self.is_syscall,
                 digest,
-                decorator_store: DecoratorStore::Linked { id: future_node_id },
+                decorator_store: LinkedDecoratorStore::linked(future_node_id),
             }
             .into()
         })

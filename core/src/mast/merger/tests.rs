@@ -523,7 +523,7 @@ fn mast_forest_merge_decorators() {
 
     // Test basic block decorators using new MastForest API
     // The basic block should have Trace(1) and Trace(2) as before-enter decorators at index 0
-    let merged_foo_block_id = merged_foo_block.linked_id().unwrap();
+    let merged_foo_block_id = merged_foo_block.linked_id();
 
     // For basic blocks, we need to combine before_enter, operation-indexed, and after_exit
     // decorators using the helper method

@@ -251,9 +251,7 @@ where
     let batch = &basic_block.op_batches()[batch_index];
 
     // Get the node ID once since it doesn't change within the loop
-    let node_id = basic_block
-        .linked_id()
-        .expect("basic block node should be linked when executing operations");
+    let node_id = basic_block.linked_id();
 
     // Execute operations in the batch one by one
     for (op_idx_in_batch, op) in batch.ops().iter().enumerate().skip(start_op_idx) {

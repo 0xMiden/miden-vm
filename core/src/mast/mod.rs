@@ -58,10 +58,10 @@ pub use node::arbitrary;
 pub(crate) use node::collect_immediate_placements;
 pub use node::{
     BasicBlockNode, BasicBlockNodeBuilder, CallNode, CallNodeBuilder, DecoratedOpLink,
-    DecoratorOpLinkIterator, DecoratorStore, DynNode, DynNodeBuilder, ExternalNode,
-    ExternalNodeBuilder, JoinNode, JoinNodeBuilder, LoopNode, LoopNodeBuilder,
-    MastForestContributor, MastNode, MastNodeBuilder, MastNodeExt, OP_BATCH_SIZE, OP_GROUP_SIZE,
-    OpBatch, OperationOrDecorator, SplitNode, SplitNodeBuilder,
+    DecoratorOpLinkIterator, DynNode, DynNodeBuilder, ExternalNode, ExternalNodeBuilder, JoinNode,
+    JoinNodeBuilder, LinkedDecoratorStore, LoopNode, LoopNodeBuilder, MastForestContributor,
+    MastNode, MastNodeBuilder, MastNodeExt, OP_BATCH_SIZE, OP_GROUP_SIZE, OpBatch,
+    OperationOrDecorator, SplitNode, SplitNodeBuilder,
 };
 
 #[cfg(feature = "serde")]
@@ -1495,8 +1495,6 @@ pub enum MastForestError {
     TooManyNodes,
     #[error("node id {0} is greater than or equal to forest length {1}")]
     NodeIdOverflow(MastNodeId, usize),
-    #[error("node {0:?} has an unlinked decorator store")]
-    UnlinkedDecoratorStore(MastNodeId),
     #[error("node {node_id:?} has a decorator store linked to {linked_node_id:?}")]
     InvalidDecoratorStoreLink {
         node_id: MastNodeId,
@@ -1547,16 +1545,14 @@ pub enum MastForestError {
     Deserialization(DeserializationError),
 }
 
-// Custom serde implementations for MastForest that handle linked decorators properly
-// by delegating to the existing miden-crypto serialization which already handles
-// the conversion between linked and owned decorator formats.
+// Custom serde implementations for MastForest delegate to the existing miden-crypto
+// serialization, preserving the linked decorator representation.
 #[cfg(feature = "serde")]
 impl Serialize for MastForest {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
     {
-        // Use the existing miden-crypto serialization which already handles linked decorators
         let bytes = Serializable::to_bytes(self);
         serializer.serialize_bytes(&bytes)
     }

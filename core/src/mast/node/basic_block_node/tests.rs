@@ -358,7 +358,7 @@ fn basic_block_from_batch(batch: OpBatch) -> BasicBlockNode {
     BasicBlockNode {
         op_batches,
         digest,
-        decorators: DecoratorStore::Linked { id: MastNodeId::new_unchecked(0) },
+        decorators: LinkedDecoratorStore::linked(MastNodeId::new_unchecked(0)),
     }
 }
 
@@ -366,7 +366,7 @@ fn basic_block_from_batches(op_batches: Vec<OpBatch>) -> BasicBlockNode {
     BasicBlockNode {
         op_batches,
         digest: Word::default(),
-        decorators: DecoratorStore::Linked { id: MastNodeId::new_unchecked(0) },
+        decorators: LinkedDecoratorStore::linked(MastNodeId::new_unchecked(0)),
     }
 }
 

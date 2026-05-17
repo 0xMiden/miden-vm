@@ -36,7 +36,7 @@ mod mast_forest_contributor;
 pub use mast_forest_contributor::{MastForestContributor, MastNodeBuilder};
 
 mod decorator_store;
-pub use decorator_store::DecoratorStore;
+pub use decorator_store::LinkedDecoratorStore;
 
 use super::DecoratorId;
 use crate::mast::{ExecutableMastForest, MastForest, MastForestError, MastNodeId};
@@ -222,12 +222,10 @@ impl MastNode {
             Self::External(node) => node.linked_decorator_store_id(),
         };
 
-        match linked_node_id {
-            Some(linked_node_id) if linked_node_id == node_id => Ok(()),
-            Some(linked_node_id) => {
-                Err(MastForestError::InvalidDecoratorStoreLink { node_id, linked_node_id })
-            },
-            None => Err(MastForestError::UnlinkedDecoratorStore(node_id)),
+        if linked_node_id == node_id {
+            Ok(())
+        } else {
+            Err(MastForestError::InvalidDecoratorStoreLink { node_id, linked_node_id })
         }
     }
 }

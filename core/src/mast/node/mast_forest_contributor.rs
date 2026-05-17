@@ -683,7 +683,7 @@ mod round_trip_tests {
             .expect("decorated loop should be added to the forest");
 
         let loop_node = forest[loop_id].unwrap_loop();
-        assert_eq!(loop_node.linked_decorator_store_id(), Some(loop_id));
+        assert_eq!(loop_node.linked_decorator_store_id(), loop_id);
         assert_eq!(loop_node.before_enter(&forest), &[before]);
         assert_eq!(loop_node.after_exit(&forest), &[after]);
     }

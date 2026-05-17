@@ -522,7 +522,7 @@ fn test_mast_forest_roundtrip_with_basic_blocks_and_decorators() {
 
 #[test]
 #[cfg(feature = "serde")]
-fn test_mast_forest_serde_converts_linked_to_owned_decorators() {
+fn test_mast_forest_serde_preserves_linked_decorators() {
     let mut forest = MastForest::new();
 
     // Create decorators
@@ -611,7 +611,7 @@ fn test_mast_forest_serde_converts_linked_to_owned_decorators() {
 }
 
 #[test]
-fn test_mast_forest_serializable_converts_linked_to_owned_decorators() {
+fn test_mast_forest_serializable_preserves_linked_decorators() {
     let mut forest = MastForest::new();
 
     // Create decorators
@@ -681,7 +681,7 @@ fn test_mast_forest_serializable_converts_linked_to_owned_decorators() {
         original_block.indexed_decorator_iter(&forest).collect::<Vec<_>>();
     assert_eq!(
         original_decorators_final, deserialized_decorators,
-        "Decorators should be functionally equal despite different storage representations"
+        "Decorators should be functionally equal after round-trip serialization"
     );
 
     // Final verification: check that the deserialized forest still works correctly

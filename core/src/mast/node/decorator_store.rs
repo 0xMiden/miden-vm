@@ -8,106 +8,62 @@ use crate::{
     operations::DecoratorList,
 };
 
-/// A data structure for storing decorators for MAST nodes, including both
-/// operation-level decorators and node-level decorators (before_enter/after_exit).
+/// A link from a MAST node to its forest-owned operation-level and node-level decorators.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub enum DecoratorStore {
-    /// The decorators are owned by this node. This is the case for nodes
-    /// which have not yet been inserted into a MAST forest.
-    Owned {
-        /// Operation-level decorators indexed by operation position
-        /// (Note: Only used by BasicBlockNode, other nodes will have empty decorators)
-        decorators: DecoratorList,
-        /// Node-level decorators executed before entering the node
-        before_enter: Vec<DecoratorId>,
-        /// Node-level decorators executed after exiting the node
-        after_exit: Vec<DecoratorId>,
-    },
+pub struct LinkedDecoratorStore {
     /// The decorators are stored in a MAST forest and can be accessed via
     /// this node's ID. All decorator reads borrow from the forest's storage.
-    Linked { id: MastNodeId },
+    id: MastNodeId,
 }
 
-impl Default for DecoratorStore {
-    fn default() -> Self {
-        Self::Owned {
-            decorators: DecoratorList::new(),
-            before_enter: Vec::new(),
-            after_exit: Vec::new(),
-        }
+impl LinkedDecoratorStore {
+    pub(crate) const fn linked(id: MastNodeId) -> Self {
+        Self { id }
     }
-}
 
-impl DecoratorStore {
-    /// Get the before_enter decorators, borrowing from the forest if linked
+    /// Get the before_enter decorators, borrowing from the forest.
     pub fn before_enter<'a, F>(&'a self, forest: &'a F) -> &'a [DecoratorId]
     where
         F: ExecutableMastForest + ?Sized,
     {
-        match self {
-            DecoratorStore::Owned { before_enter, .. } => before_enter,
-            DecoratorStore::Linked { id } => forest.linked_before_enter_decorators(*id),
-        }
+        forest.linked_before_enter_decorators(self.id)
     }
 
-    /// Get the after_exit decorators, borrowing from the forest if linked
+    /// Get the after_exit decorators, borrowing from the forest.
     pub fn after_exit<'a, F>(&'a self, forest: &'a F) -> &'a [DecoratorId]
     where
         F: ExecutableMastForest + ?Sized,
     {
-        match self {
-            DecoratorStore::Owned { after_exit, .. } => after_exit,
-            DecoratorStore::Linked { id } => forest.linked_after_exit_decorators(*id),
-        }
+        forest.linked_after_exit_decorators(self.id)
     }
 
     pub(crate) fn into_node_level_decorators(
         self,
         forest: &MastForest,
     ) -> (Vec<DecoratorId>, Vec<DecoratorId>) {
-        match self {
-            DecoratorStore::Owned { before_enter, after_exit, .. } => (before_enter, after_exit),
-            DecoratorStore::Linked { id } => (
-                forest.before_enter_decorators(id).to_vec(),
-                forest.after_exit_decorators(id).to_vec(),
-            ),
-        }
+        (
+            forest.before_enter_decorators(self.id).to_vec(),
+            forest.after_exit_decorators(self.id).to_vec(),
+        )
     }
 
     pub(crate) fn into_parts(
         self,
         forest: &MastForest,
     ) -> (DecoratorList, Vec<DecoratorId>, Vec<DecoratorId>) {
-        match self {
-            DecoratorStore::Owned { decorators, before_enter, after_exit } => {
-                (decorators, before_enter, after_exit)
-            },
-            DecoratorStore::Linked { id } => {
-                let decorators = forest
-                    .decorator_links_for_node(id)
-                    .expect(
-                        "linked node decorators should be available; forest may be inconsistent",
-                    )
-                    .into_iter()
-                    .collect();
-                let before_enter = forest.before_enter_decorators(id).to_vec();
-                let after_exit = forest.after_exit_decorators(id).to_vec();
-                (decorators, before_enter, after_exit)
-            },
-        }
+        let decorators = forest
+            .decorator_links_for_node(self.id)
+            .expect("linked node decorators should be available; forest may be inconsistent")
+            .into_iter()
+            .collect();
+        let before_enter = forest.before_enter_decorators(self.id).to_vec();
+        let after_exit = forest.after_exit_decorators(self.id).to_vec();
+        (decorators, before_enter, after_exit)
     }
 
-    /// Check if this store is in the Linked state
-    pub fn is_linked(&self) -> bool {
-        matches!(self, DecoratorStore::Linked { .. })
-    }
-
-    /// Get the node ID if this store is in the Linked state
-    pub fn linked_id(&self) -> Option<MastNodeId> {
-        match self {
-            DecoratorStore::Linked { id } => Some(*id),
-            DecoratorStore::Owned { .. } => None,
-        }
+    /// Get the node ID that links this store to its MAST forest.
+    pub fn linked_id(&self) -> MastNodeId {
+        self.id
     }
 }
