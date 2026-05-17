@@ -36,6 +36,9 @@ pub use mock_hash::MockHash;
 mod mock_sig;
 pub use mock_sig::MockSig;
 
+mod legacy_precompile;
+pub use legacy_precompile::LegacyPrecompile;
+
 // APP TAG
 // ================================================================================================
 

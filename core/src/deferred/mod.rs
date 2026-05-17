@@ -29,7 +29,8 @@ use alloc::{sync::Arc, vec::Vec};
 
 #[cfg(any(test, feature = "testing"))]
 pub use app::{
-    App, AppTag, FieldOps, MockGroup, MockHash, MockSig, PrecompileSchema, Uint256, app_id_from,
+    App, AppTag, FieldOps, LegacyPrecompile, MockGroup, MockHash, MockSig, PrecompileSchema,
+    Uint256, app_id_from,
 };
 use miden_crypto::{ZERO, hash::poseidon2::Poseidon2};
 use miden_utils_sync::OnceLockCompat;
