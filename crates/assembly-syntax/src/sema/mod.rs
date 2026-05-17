@@ -329,12 +329,7 @@ fn verify_exported_signature_type_expr(
         },
         TypeExpr::Struct(ty) => {
             for field in ty.fields.iter() {
-                verify_exported_signature_type_expr(
-                    module,
-                    analyzer,
-                    &field.ty,
-                    visiting_types,
-                );
+                verify_exported_signature_type_expr(module, analyzer, &field.ty, visiting_types);
             }
         },
         TypeExpr::Ref(path) => {
@@ -380,12 +375,9 @@ fn verify_exported_signature_type_expr(
             }
 
             match type_decl {
-                TypeDecl::Alias(alias) => verify_exported_signature_type_expr(
-                    module,
-                    analyzer,
-                    &alias.ty,
-                    visiting_types,
-                ),
+                TypeDecl::Alias(alias) => {
+                    verify_exported_signature_type_expr(module, analyzer, &alias.ty, visiting_types)
+                },
                 TypeDecl::Enum(ty) => {
                     for variant in ty.variants() {
                         if let Some(payload_ty) = variant.value_ty.as_ref() {
