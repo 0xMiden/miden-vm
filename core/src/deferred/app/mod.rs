@@ -18,26 +18,36 @@
 
 use blake3::Hasher;
 
-use super::{DeferredError, DeferredState, Node, ReduceCtx, SchemaError, Tag, TagInfo};
+use super::{DeferredState, Node, ReduceCtx, SchemaError, TagInfo};
+#[cfg(any(test, feature = "testing"))]
+use super::{DeferredError, Tag};
 use crate::Felt;
 
 mod composite;
 pub use composite::PrecompileSchema;
 
-mod uint256;
-pub use uint256::Uint256;
-
-mod mock_group;
-pub use mock_group::MockGroup;
-
-mod mock_hash;
-pub use mock_hash::MockHash;
-
-mod mock_sig;
-pub use mock_sig::MockSig;
-
 mod legacy_precompile;
 pub use legacy_precompile::LegacyPrecompile;
+
+#[cfg(any(test, feature = "testing"))]
+mod uint256;
+#[cfg(any(test, feature = "testing"))]
+pub use uint256::Uint256;
+
+#[cfg(any(test, feature = "testing"))]
+mod mock_group;
+#[cfg(any(test, feature = "testing"))]
+pub use mock_group::MockGroup;
+
+#[cfg(any(test, feature = "testing"))]
+mod mock_hash;
+#[cfg(any(test, feature = "testing"))]
+pub use mock_hash::MockHash;
+
+#[cfg(any(test, feature = "testing"))]
+mod mock_sig;
+#[cfg(any(test, feature = "testing"))]
+pub use mock_sig::MockSig;
 
 // APP TAG
 // ================================================================================================
@@ -84,6 +94,10 @@ pub trait App: core::fmt::Debug + Send + Sync {
 /// Small surface a 256-bit field [`App`] exposes to consumers (e.g. [`MockGroup`]) that need to
 /// mint and decode field leaves without going through the schema's `reduce`. Intentionally
 /// minimal — extend as concrete cross-app needs arise.
+///
+/// Test-only — only [`MockGroup`] consumes it today. Gated alongside the reference field app
+/// `Uint256`.
+#[cfg(any(test, feature = "testing"))]
 pub trait FieldOps: App {
     /// Tag of a canonical field leaf.
     fn leaf_tag() -> Tag;

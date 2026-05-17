@@ -1,5 +1,4 @@
 use miden::core::sys
-use miden::core::crypto::hashes::poseidon2
 
 # ENCODING CONVENTIONS
 # ================================================================================================
@@ -8,10 +7,15 @@ use miden::core::crypto::hashes::poseidon2
 # - DIGEST_U32[16] = [d_0, ..., d_15] with d_i = u32::from_le_bytes([b_{4i}, ..., b_{4i+3}])
 # - SHA512 digest is represented as 16 u32 limbs
 
-# CONSTANTS
+# CONSTANTS — LegacyPrecompile schema tag fields
 # ================================================================================================
+# Pinned to the Rust-side LegacyPrecompile constants (see
+# core/src/deferred/app/legacy_precompile.rs `masm_constants_pinned_to_rust_values`).
 
-const SHA512_HASH_BYTES_EVENT = event("miden::core::hash::sha512::hash_bytes")
+const LP_APP_ID = 18269343673680090362
+const LP_D_SHA512_PREIMAGE = 3
+const LP_D_SHA512_DIGEST = 4
+const LP_D_SHA512_EQ = 5
 
 # PROCEDURES
 # ================================================================================================
@@ -20,64 +24,77 @@ const SHA512_HASH_BYTES_EVENT = event("miden::core::hash::sha512::hash_bytes")
 #!
 #! Input:  [ptr, len_bytes, ...]
 #! Output: [DIGEST_U32[16], ...]
-pub proc hash_bytes
-    exec.hash_bytes_impl
-    # => [COMM, TAG, DIGEST_U32[16], ...]
-
-    exec.sys::log_precompile_request
-    # => [DIGEST_U32[16], ...]
-end
-
-# INTERNAL PROCEDURES
-# ================================================================================================
-
-#! Internal implementation of memory-based SHA512 computation via deferred computation.
 #!
-#! Emits an event to populate the advice stack with the digest and store the preimage for deferred
-#! verification. Returns the commitment to the calldata and its tag.
+#! Where:
+#! - ptr: word-aligned memory address containing INPUT_U32[len_u32] where len_u32=⌈len_bytes/4⌉
+#! - len_bytes: number of bytes to hash
+#! - DIGEST_U32[16] = SHA-512(INPUT_U8[len_bytes])
 #!
-#! Input:  [ptr, len_bytes, ...]
-#! Output: [COMM, TAG, DIGEST_U32[16], ...]
+#! Local memory layout (element addresses):
+#!   loc[0..16]   DIGEST  (16 felts, used as both schema-output buffer and caller-return)
+#!   loc[16..20]  PREIMAGE_DIGEST
+#!   loc[20..24]  LEAF_DIGEST
+#!
+#! Flow mirrors keccak256::hash_bytes — see that file for the high-level explanation. The only
+#! structural difference is that the SHA-512 digest leaf is a `Chunks(2)` self-evaluating chunk
+#! node (16 felts) rather than a `Value` leaf, so the leaf registration uses register_chunk
+#! against the digest buffer materialized in local memory.
 @locals(24)
-proc hash_bytes_impl
-    emit.SHA512_HASH_BYTES_EVENT
-    # => [ptr, len_bytes, ...]
+pub proc hash_bytes
+    # ---- Step 1: Register preimage chunk ----
+    push.0
+    movup.2
+    push.LP_D_SHA512_PREIMAGE
+    push.LP_APP_ID
+    # => [LP_APP_ID, D_PREIMAGE, len_bytes, 0, ptr, ...]
+    exec.sys::register_chunk
+    # => [PREIMAGE_DIGEST, ...]
 
-    # Compute len_u32 = ceil(len_bytes / 4)
-    dup.1 add.3 u32shr.2 swap
-    # => [ptr, len_u32, len_bytes, ...]
+    # ---- Step 2: Save PREIMAGE_DIGEST, then evaluate ----
+    dupw
+    loc_storew_le.16 dropw              # loc[16..20] = PREIMAGE_DIGEST
+    exec.sys::evaluate
+    # advice top→bottom: digest[0..4], digest[4..8], digest[8..12], digest[12..16], LEAF_TAG
 
-    # Load digest from advice stack (16 u32 limbs) and write to digest_ptr = locaddr.0
-    # simultaneously compute COMM_DIGEST = Poseidon2(DIGEST[0..16])
+    # ---- Step 3: Pull 4 digest words from advice, save to loc[0..16] ----
+    adv_pushw loc_storew_le.0 dropw     # loc[0..4]  = digest[0..4]
+    adv_pushw loc_storew_le.4 dropw     # loc[4..8]  = digest[4..8]
+    adv_pushw loc_storew_le.8 dropw     # loc[8..12] = digest[8..12]
+    adv_pushw loc_storew_le.12 dropw    # loc[12..16] = digest[12..16]
+    adv_pushw                           # => [LEAF_TAG, ...]
+
+    # ---- Step 4: Register digest chunk leaf via register_chunk ----
+    # Need stack: [LEAF_TAG, ptr, ...]   (ptr = locaddr.0 — base of digest buffer)
     locaddr.0
-    exec.poseidon2::init_no_padding
-    # => [R0, R1, C, digest_ptr, ptr, len_u32, len_bytes, ...]
-    repeat.2
-        adv_pipe
-        exec.poseidon2::permute
-    end
-    exec.poseidon2::squeeze_digest
-    # => [COMM_DIGEST, digest_ptr, ptr, len_u32, len_bytes, ...]
+    # => [ptr, LEAF_TAG, ...]
+    movdn.4
+    # => [LEAF_TAG, ptr, ...]
+    exec.sys::register_chunk
+    # => [LEAF_DIGEST, ...]
 
-    movup.4 drop
-    # => [COMM_DIGEST, ptr, len_u32, len_bytes, ...]
+    # ---- Step 5: Save LEAF_DIGEST, build Eq node ----
+    loc_storew_le.20 dropw              # loc[20..24] = LEAF_DIGEST
 
-    # Compute COMM_INPUT = poseidon2::hash_elements(ptr, len_u32)
-    movup.5 movup.5 exec.poseidon2::hash_elements
-    # => [COMM_INPUT, COMM_DIGEST, len_bytes, ...]
+    push.0.0
+    push.LP_D_SHA512_EQ
+    push.LP_APP_ID
+    # => [EQ_TAG, ...]
 
-    # Compute COMM = hash(COMM_INPUT || COMM_DIGEST)
-    exec.poseidon2::merge
-    # => [COMM, len_bytes, ...]
+    padw loc_loadw_le.20
+    # => [LEAF_DIGEST, EQ_TAG, ...]
+    padw loc_loadw_le.16
+    # => [PREIMAGE_DIGEST, LEAF_DIGEST, EQ_TAG, ...]
+    exec.sys::register_expr
+    # => [EQ_DIGEST, ...]
 
-    # Prepare TAG = [SHA512_HASH_BYTES_EVENT, len_bytes, 0, 0]
-    push.0.0 movup.6 push.SHA512_HASH_BYTES_EVENT swapw
-    # => [COMM, TAG, ...]
+    # ---- Step 6: Evaluate the Eq predicate (early assertion), then log ----
+    dupw
+    exec.sys::evaluate
+    exec.sys::log_node_digest
 
-    # Reload digest limbs from locals
-    padw loc_loadw_le.12 movdnw.2
-    padw loc_loadw_le.8 movdnw.2
-    padw loc_loadw_le.4 movdnw.2
-    padw loc_loadw_le.0 movdnw.2
-    # => [COMM, TAG, DIGEST_U32[16], ...]
+    # ---- Step 7: Restore DIGEST[16] for caller (4 words; top is digest[0..4]) ----
+    padw loc_loadw_le.12
+    padw loc_loadw_le.8
+    padw loc_loadw_le.4
+    padw loc_loadw_le.0
 end

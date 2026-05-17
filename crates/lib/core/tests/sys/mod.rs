@@ -1,24 +1,3 @@
-use std::sync::Arc;
-
-use miden_assembly::Assembler;
-use miden_core::{
-    Felt, WORD_SIZE, Word,
-    crypto::hash::Poseidon2,
-    events::{EventId, EventName},
-    precompile::{
-        PrecompileCommitment, PrecompileError, PrecompileRequest, PrecompileTranscriptState,
-        PrecompileVerifier, PrecompileVerifierRegistry,
-    },
-    program::ProgramInfo,
-    proof::HashFunction,
-};
-use miden_core_lib::CoreLibrary;
-use miden_processor::{
-    DefaultHost, ExecutionOptions, ProcessorState, Program, StackInputs,
-    advice::{AdviceInputs, AdviceMutation},
-    event::{EventError, EventHandler},
-};
-use miden_prover::ProvingOptions;
 use miden_utils_testing::{MIN_STACK_DEPTH, proptest::prelude::*, rand::rand_vector};
 
 #[test]
@@ -58,6 +37,7 @@ fn reduce_kernel_digests_upper_bound() {
         end
     ";
 
+    use miden_core::WORD_SIZE;
     let num_kernel_proc_digests = 1024_usize;
     let num_elements_kernel_proc_digests = num_kernel_proc_digests * WORD_SIZE.next_multiple_of(8);
     let fixed_length_public_inputs = vec![0_u64; 40];
@@ -91,144 +71,5 @@ proptest! {
         expected_values.extend(test_values.iter());
         expected_values.truncate(MIN_STACK_DEPTH);
         build_test!(&source, &test_values).prop_expect_stack(&expected_values)?;
-    }
-}
-
-#[test]
-fn log_precompile_request_procedure() {
-    // This test ensures that `exec.sys::log_precompile_request` correctly invokes the
-    // `log_precompile` instruction, records the deferred request, and yields the expected
-    // precompile sponge update. We run both direct execution (debug test) and a full
-    // prove/verify cycle to exercise the deferred-request commitment path end-to-end.
-    const EVENT_NAME: EventName = EventName::new("test::sys::log_precompile");
-    let event_id = EventId::from_name(EVENT_NAME);
-    let calldata = vec![1u8, 2, 3, 4];
-
-    let tag = Word::from([
-        event_id.as_felt(),
-        Felt::new_unchecked(1),
-        Felt::new_unchecked(0),
-        Felt::new_unchecked(7),
-    ]);
-    let comm = Word::from([
-        Felt::new_unchecked(43),
-        Felt::new_unchecked(62),
-        Felt::new_unchecked(24),
-        Felt::new_unchecked(1),
-    ]);
-    let commitment = PrecompileCommitment::new(tag, comm);
-
-    let source = format!(
-        "
-            use miden::core::sys
-
-            begin
-                emit.event(\"{EVENT_NAME}\")
-
-                push.{tag} push.{comm}
-                exec.sys::log_precompile_request
-            end
-        ",
-    );
-
-    let handler = DummyLogPrecompileHandler { event_id, calldata: calldata.clone() };
-
-    let test = build_debug_test!(&source, &[]).with_event_handler(EVENT_NAME, handler.clone());
-
-    let trace = test.execute().expect("failed to execute log_precompile test");
-
-    let requests = trace.precompile_requests();
-    assert_eq!(requests.len(), 1);
-    assert_eq!(requests[0].event_id(), event_id);
-    assert_eq!(requests[0].calldata(), calldata.as_slice());
-
-    // Compute the expected rolling root locally: folding `commitment.statement()` into the
-    // initial TRUE_DIGEST yields the deferred-DAG root after one log_precompile call.
-    let expected_transcript_state = Poseidon2::merge(&[
-        PrecompileTranscriptState::default(),
-        commitment.statement(),
-    ]);
-
-    // The verifier-side registry now exposes a stmnt-checked path; exercise it directly to
-    // confirm the recorded request → commitment → statement chain holds.
-    let verifier_registry = PrecompileVerifierRegistry::new()
-        .with_verifier(&EVENT_NAME, Arc::new(DummyLogPrecompileVerifier { commitment }));
-    verifier_registry
-        .verify_against_statements(requests, &[commitment.statement()])
-        .expect("registered request must verify against its statement");
-
-    // Prove/verify the same program to ensure deferred requests are handled in the STARK proof.
-    let program: Program = Assembler::default()
-        .with_dynamic_library(CoreLibrary::default())
-        .expect("failed to load core library")
-        .assemble_program(source)
-        .expect("failed to assemble log_precompile fixture");
-
-    let stack_inputs = StackInputs::default();
-    let advice_inputs = AdviceInputs::default();
-    let mut host = DefaultHost::default();
-    let core_lib = CoreLibrary::default();
-    host.load_library(&core_lib).expect("failed to load core library into host");
-    host.register_handler(EVENT_NAME, Arc::new(handler))
-        .expect("failed to register dummy handler");
-
-    let options = ProvingOptions::with_96_bit_security(HashFunction::Blake3_256);
-    let (stack_outputs, proof) = miden_utils_testing::prove_sync(
-        &program,
-        stack_inputs,
-        advice_inputs,
-        &mut host,
-        ExecutionOptions::default(),
-        options,
-    )
-    .expect("failed to generate proof for log_precompile helper");
-
-    // Proof should include the single deferred request that we expect.
-    assert_eq!(proof.precompile_requests().len(), 1);
-
-    // The proof carries the deferred-DAG root directly; it must match what we computed locally.
-    assert_eq!(
-        proof.deferred_state().root,
-        expected_transcript_state,
-        "proof's deferred-DAG root must match the locally-computed transcript state",
-    );
-
-    let verifier_registry = PrecompileVerifierRegistry::new()
-        .with_verifier(&EVENT_NAME, Arc::new(DummyLogPrecompileVerifier { commitment }));
-    let program_info = ProgramInfo::from(program);
-    let (_, pc_transcript_state) = miden_verifier::verify_with_precompiles(
-        program_info,
-        stack_inputs,
-        stack_outputs,
-        proof,
-        &verifier_registry,
-    )
-    .expect("proof verification with precompiles failed");
-    assert_eq!(expected_transcript_state, pc_transcript_state);
-}
-
-#[derive(Clone)]
-struct DummyLogPrecompileHandler {
-    event_id: EventId,
-    calldata: Vec<u8>,
-}
-
-impl EventHandler for DummyLogPrecompileHandler {
-    fn on_event(&self, _process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
-        Ok(vec![AdviceMutation::extend_precompile_requests([PrecompileRequest::new(
-            self.event_id,
-            self.calldata.clone(),
-        )])])
-    }
-}
-
-#[derive(Clone)]
-struct DummyLogPrecompileVerifier {
-    commitment: PrecompileCommitment,
-}
-
-impl PrecompileVerifier for DummyLogPrecompileVerifier {
-    fn verify(&self, _calldata: &[u8]) -> Result<PrecompileCommitment, PrecompileError> {
-        Ok(self.commitment)
     }
 }

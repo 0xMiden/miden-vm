@@ -21,11 +21,7 @@ use miden_utils_sync::LazyLock;
 
 use crate::handlers::{
     aead_decrypt::{AEAD_DECRYPT_EVENT_NAME, handle_aead_decrypt},
-    ecdsa::{ECDSA_VERIFY_EVENT_NAME, EcdsaPrecompile},
-    eddsa_ed25519::{EDDSA25519_VERIFY_EVENT_NAME, EddsaPrecompile},
     falcon_div::{FALCON_DIV_EVENT_NAME, handle_falcon_div},
-    keccak256::{KECCAK_HASH_BYTES_EVENT_NAME, KeccakPrecompile},
-    sha512::{SHA512_HASH_BYTES_EVENT_NAME, Sha512Precompile},
     smt_peek::{SMT_PEEK_EVENT_NAME, handle_smt_peek},
     sorted_array::{
         LOWERBOUND_ARRAY_EVENT_NAME, LOWERBOUND_KEY_VALUE_EVENT_NAME, handle_lowerbound_array,
@@ -132,10 +128,6 @@ impl CoreLibrary {
     /// List of all `EventHandlers` required to run all of the core library.
     pub fn handlers(&self) -> Vec<(EventName, Arc<dyn EventHandler>)> {
         vec![
-            (KECCAK_HASH_BYTES_EVENT_NAME, Arc::new(KeccakPrecompile)),
-            (SHA512_HASH_BYTES_EVENT_NAME, Arc::new(Sha512Precompile)),
-            (ECDSA_VERIFY_EVENT_NAME, Arc::new(EcdsaPrecompile)),
-            (EDDSA25519_VERIFY_EVENT_NAME, Arc::new(EddsaPrecompile)),
             (SMT_PEEK_EVENT_NAME, Arc::new(handle_smt_peek)),
             (U64_DIV_EVENT_NAME, Arc::new(handle_u64_div)),
             (U128_DIV_EVENT_NAME, Arc::new(handle_u128_div)),
@@ -146,14 +138,12 @@ impl CoreLibrary {
         ]
     }
 
-    /// Returns a [`PrecompileVerifierRegistry`] containing all verifiers required to validate
-    /// core library precompile requests.
+    /// Returns a [`PrecompileVerifierRegistry`] — empty after the precompile migration; all four
+    /// precompiles (keccak256, sha512, ecdsa, eddsa) are now served by the `LegacyPrecompile`
+    /// schema installed on the processor. Kept as a stable API surface; deletion of the
+    /// `PrecompileVerifierRegistry` framework itself is tracked separately (D2).
     pub fn verifier_registry(&self) -> PrecompileVerifierRegistry {
         PrecompileVerifierRegistry::new()
-            .with_verifier(&KECCAK_HASH_BYTES_EVENT_NAME, Arc::new(KeccakPrecompile))
-            .with_verifier(&SHA512_HASH_BYTES_EVENT_NAME, Arc::new(Sha512Precompile))
-            .with_verifier(&ECDSA_VERIFY_EVENT_NAME, Arc::new(EcdsaPrecompile))
-            .with_verifier(&EDDSA25519_VERIFY_EVENT_NAME, Arc::new(EddsaPrecompile))
     }
 }
 

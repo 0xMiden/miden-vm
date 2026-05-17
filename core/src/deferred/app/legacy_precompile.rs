@@ -191,12 +191,25 @@ impl LegacyPrecompile {
     // NODE CONSTRUCTORS — ECDSA
     // --------------------------------------------------------------------------------------------
 
-    /// Bytes-per-field-component for ecdsa: pk=33, digest=32, sig=65 ⇒ total 130 bytes.
-    /// Packed as ceil(130/4)=33 u32 felts → 5 chunks of 8 felts with 7 felts of zero padding
-    /// in the final chunk. (Schema unpack uses the offsets to slice each component out.)
+    /// Bytes-per-field-component for ecdsa: pk=33, digest=32, sig=65.
+    ///
+    /// Each component is placed at a word-aligned felt boundary inside the chunk so MASM can
+    /// store each piece with `loc_storew_le.N` (N divisible by 4):
+    ///   felts[0..9]    pk      → bytes[0..33] real + bytes[33..36] zero pad inside felt[8]
+    ///   felts[9..12]   zero    → bytes[36..48] zero pad (aligns digest to felt[12])
+    ///   felts[12..20]  digest  → bytes[48..80]
+    ///   felts[20..37]  sig     → bytes[80..145] real + bytes[145..148] zero pad inside felt[36]
+    ///   felts[37..40]  zero    → bytes[148..160] trailing zero pad
+    ///
+    /// 40 felts × 4 bytes/felt = 160 bytes total = 5 chunks. The kernel slices by known offsets
+    /// and validates all pad regions are zero.
     pub const ECDSA_PK_BYTES: usize = 33;
     pub const ECDSA_DIGEST_BYTES: usize = 32;
     pub const ECDSA_SIG_BYTES: usize = 65;
+    /// Byte offset where the digest component starts in the unpacked chunk.
+    pub const ECDSA_DIGEST_OFFSET: usize = 48;
+    /// Byte offset where the signature component starts in the unpacked chunk.
+    pub const ECDSA_SIG_OFFSET: usize = 80;
 
     /// Build an `ecdsa_k256_keccak_verify` chunk-bodied predicate from caller-supplied chunks.
     /// The caller must pack `pk || digest || sig` (u32-LE) contiguously and zero-pad to the
@@ -489,16 +502,9 @@ fn reduce_sha512_eq(node: &Node, ctx: &mut dyn ReduceCtx) -> Result<Node, Schema
 // ECDSA KERNEL
 // ================================================================================================
 
-/// Reduce an `ecdsa_k256_keccak_verify` chunk predicate: unpack pk/digest/sig from the chunks,
-/// deserialize via the `miden-crypto` types, and run `PublicKey::verify_prehash`. Returns
-/// `true_node()` on success or `AssertionFailed` on signature mismatch / deserialization
-/// failure.
-///
-/// Chunk layout: 5 chunks = 40 felts = 160 bytes.
-///   bytes[0..33]   = pk     (compressed secp256k1, 33 bytes)
-///   bytes[33..65]  = digest (keccak256 prehash, 32 bytes)
-///   bytes[65..130] = sig    (r || s || v, 65 bytes)
-///   bytes[130..]   = zero padding (validated as zero)
+/// Reduce an `ecdsa_k256_keccak_verify` chunk predicate. See `LegacyPrecompile::ECDSA_*`
+/// constants for the chunk byte layout. Validates all pad regions are zero, deserialises
+/// pk/digest/sig via `miden-crypto`, runs `PublicKey::verify_prehash`.
 fn reduce_ecdsa_verify(node: &Node) -> Result<Node, SchemaError> {
     if node.tag[2] != ZERO {
         return Err(SchemaError::InvalidNode);
@@ -510,23 +516,27 @@ fn reduce_ecdsa_verify(node: &Node) -> Result<Node, SchemaError> {
     let total_bytes = 5 * LegacyPrecompile::BYTES_PER_CHUNK as usize; // 160
     let bytes = chunks_to_bytes(chunks, total_bytes)?;
 
-    let pk_end = LegacyPrecompile::ECDSA_PK_BYTES;
-    let digest_end = pk_end + LegacyPrecompile::ECDSA_DIGEST_BYTES;
-    let sig_end = digest_end + LegacyPrecompile::ECDSA_SIG_BYTES;
+    let pk_end = LegacyPrecompile::ECDSA_PK_BYTES; // 33
+    let digest_start = LegacyPrecompile::ECDSA_DIGEST_OFFSET; // 48
+    let digest_end = digest_start + LegacyPrecompile::ECDSA_DIGEST_BYTES; // 80
+    let sig_start = LegacyPrecompile::ECDSA_SIG_OFFSET; // 80
+    let sig_end = sig_start + LegacyPrecompile::ECDSA_SIG_BYTES; // 145
 
-    // Tail bytes after the meaningful payload must be zero — they're zero-padding for the
-    // chunk boundary, and a non-zero tail would let the prover smuggle data through the
-    // digest binding without affecting the kernel result.
+    // Three pad regions must all be zero. A non-zero pad would let the prover smuggle data
+    // through the chunk-digest binding without affecting the kernel result.
+    if bytes[pk_end..digest_start].iter().any(|&b| b != 0) {
+        return Err(SchemaError::InvalidNode);
+    }
     if bytes[sig_end..].iter().any(|&b| b != 0) {
         return Err(SchemaError::InvalidNode);
     }
 
     let pk = EcdsaPublicKey::read_from_bytes(&bytes[..pk_end])
         .map_err(|_| SchemaError::AssertionFailed)?;
-    let digest: [u8; 32] = bytes[pk_end..digest_end]
+    let digest: [u8; 32] = bytes[digest_start..digest_end]
         .try_into()
         .expect("ECDSA_DIGEST_BYTES sliced to 32 bytes");
-    let sig = EcdsaSignature::read_from_bytes(&bytes[digest_end..sig_end])
+    let sig = EcdsaSignature::read_from_bytes(&bytes[sig_start..sig_end])
         .map_err(|_| SchemaError::AssertionFailed)?;
 
     if pk.verify_prehash(digest, &sig) {
@@ -999,17 +1009,17 @@ mod tests {
 
     use crate::serde::Serializable;
 
-    /// Pack the ecdsa concatenation `pk || digest || sig` into 5 chunks (40 felts), zero-padded
-    /// in the tail. Mirrors what MASM writes to memory before invoking register_chunk.
+    /// Pack the ecdsa concatenation into 5 chunks (40 felts) with the word-aligned layout the
+    /// schema expects: pk (33B) at bytes[0..33] + 15B pad + digest (32B) at bytes[48..80] +
+    /// sig (65B) at bytes[80..145] + 15B trailing pad.
     fn pack_ecdsa(pk: &[u8], digest: &[u8], sig: &[u8]) -> Vec<[Felt; 8]> {
         assert_eq!(pk.len(), 33);
         assert_eq!(digest.len(), 32);
         assert_eq!(sig.len(), 65);
-        let mut buf = Vec::with_capacity(160);
-        buf.extend_from_slice(pk);
-        buf.extend_from_slice(digest);
-        buf.extend_from_slice(sig);
-        buf.resize(160, 0);
+        let mut buf = vec![0u8; 160];
+        buf[0..33].copy_from_slice(pk);
+        buf[48..80].copy_from_slice(digest);
+        buf[80..145].copy_from_slice(sig);
         pack_chunks(&buf)
     }
 
@@ -1059,17 +1069,34 @@ mod tests {
     }
 
     #[test]
-    fn ecdsa_verify_rejects_nonzero_padding_tail() {
+    fn ecdsa_verify_rejects_nonzero_padding_after_pk() {
+        // bytes[33..48] is pad after the 33-byte pk (15 bytes; 3 inside felt[8] + 12 from
+        // the 3 alignment felts). Any non-zero byte must trip the schema's zero-pad check.
         let (schema, mut state) = fresh_state();
         let digest = [7u8; 32];
         let (pk_bytes, sig_bytes) = ecdsa_keypair_and_sig(digest);
-        let mut buf = Vec::with_capacity(160);
-        buf.extend_from_slice(&pk_bytes);
-        buf.extend_from_slice(&digest);
-        buf.extend_from_slice(&sig_bytes);
-        // Tail bytes 130..160 should be zero; set one to non-zero.
-        buf.resize(160, 0);
-        buf[140] = 0xaa;
+        let mut buf = vec![0u8; 160];
+        buf[0..33].copy_from_slice(&pk_bytes);
+        buf[40] = 0xaa; // in the pad region
+        buf[48..80].copy_from_slice(&digest);
+        buf[80..145].copy_from_slice(&sig_bytes);
+        let chunks = pack_chunks(&buf);
+        let node = LegacyPrecompile::ecdsa_verify_node(chunks);
+        let err = state.evaluate(&schema, node);
+        assert!(matches!(err, Err(SchemaError::InvalidNode)));
+    }
+
+    #[test]
+    fn ecdsa_verify_rejects_nonzero_trailing_padding() {
+        // bytes[145..160] is the trailing pad after sig.
+        let (schema, mut state) = fresh_state();
+        let digest = [7u8; 32];
+        let (pk_bytes, sig_bytes) = ecdsa_keypair_and_sig(digest);
+        let mut buf = vec![0u8; 160];
+        buf[0..33].copy_from_slice(&pk_bytes);
+        buf[48..80].copy_from_slice(&digest);
+        buf[80..145].copy_from_slice(&sig_bytes);
+        buf[150] = 0xaa;
         let chunks = pack_chunks(&buf);
         let node = LegacyPrecompile::ecdsa_verify_node(chunks);
         let err = state.evaluate(&schema, node);

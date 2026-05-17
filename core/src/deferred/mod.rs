@@ -20,18 +20,16 @@ pub use schema::{NodeType, NoopSchema, ReduceCtx, Schema, SchemaError, TagInfo};
 pub use state::DeferredState;
 pub use wire::{DeferredStateWire, IntegrityError, TRUE_INDEX, WireBody, WireEntry};
 
-// Multi-app composite layer. The `App` trait + `PrecompileSchema` substrate is gated behind the
-// `testing` feature for now alongside the reference `Uint256` app; promoting to the production
-// surface is a follow-up.
-#[cfg(any(test, feature = "testing"))]
+// Multi-app composite layer. The `App` trait + `PrecompileSchema` substrate + the production
+// `LegacyPrecompile` app are part of the public surface; the reference / mock apps
+// (`Uint256`, `MockGroup`, `MockHash`, `MockSig`) remain `testing`-gated.
 mod app;
 use alloc::{sync::Arc, vec::Vec};
 
+pub use app::{App, AppTag, LegacyPrecompile, PrecompileSchema, app_id_from};
+
 #[cfg(any(test, feature = "testing"))]
-pub use app::{
-    App, AppTag, FieldOps, LegacyPrecompile, MockGroup, MockHash, MockSig, PrecompileSchema,
-    Uint256, app_id_from,
-};
+pub use app::{FieldOps, MockGroup, MockHash, MockSig, Uint256};
 use miden_crypto::{ZERO, hash::poseidon2::Poseidon2};
 use miden_utils_sync::OnceLockCompat;
 #[cfg(feature = "serde")]
