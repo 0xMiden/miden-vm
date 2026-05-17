@@ -48,7 +48,7 @@ impl Assembler {
         // Start tracking the instruction about to be executed; this will allow us to map the
         // instruction to the sequence of operations which were executed as a part of this
         // instruction.
-        block_builder.track_instruction(instruction, proc_ctx)?;
+        block_builder.track_instruction(instruction, proc_ctx);
 
         // For node-creating instructions, finalize the AssemblyOp now (it will have 0 cycles
         // since no operations have been added yet for this instruction).
@@ -165,7 +165,7 @@ impl Assembler {
             Instruction::Ext2Mul => ext2_ops::ext2_mul(block_builder),
             Instruction::Ext2Div => ext2_ops::ext2_div(block_builder),
             Instruction::Ext2Neg => ext2_ops::ext2_neg(block_builder),
-            Instruction::Ext2Inv => ext2_ops::ext2_inv(block_builder)?,
+            Instruction::Ext2Inv => ext2_ops::ext2_inv(block_builder),
 
             // ----- u32 manipulation -------------------------------------------------------------
             Instruction::U32Test => block_builder.push_ops([Dup0, U32split, Drop, Eqz]),
@@ -601,7 +601,7 @@ impl Assembler {
             // ----- debug decorators -------------------------------------------------------------
             Instruction::Debug(options) => {
                 block_builder
-                    .push_decorator(Decorator::Debug(debug::compile_options(options, proc_ctx)?))?;
+                    .push_decorator(Decorator::Debug(debug::compile_options(options, proc_ctx)))?;
             },
 
             Instruction::DebugVar(debug_var_info) => {
