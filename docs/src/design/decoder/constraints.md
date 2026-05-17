@@ -364,7 +364,7 @@ v_{callorsyscall} &= (f_{call} + f_{syscall}) \cdot (\alpha_0 + \alpha_1 \cdot a
 \end{align*}
 $$
 
-When `END` operation is executed, how we construct the row will depend on whether the `IS_CALL` or `IS_SYSCALL` values are set (stored in registers $h_6$ and $h_7$ respectively). If they are not set, then row $(a, a', h_5)$ is removed from the block span table (where $h_5$ contains the `is_loop` flag); otherwise, row $(a ,a', 0, ctx', b_0', b_1', \mathrm{fnhash}'[0..3])$.
+When `END` operation is executed, how we construct the row will depend on whether the `IS_CALL` or `IS_SYSCALL` values are set (stored in registers $h_6$ and $h_7$ respectively). If they are not set, then row $(a, a', h_5)$ is removed from the block stack table (where $h_5$ contains the `is_loop` flag); otherwise, row $(a ,a', 0, ctx', b_0', b_1', \mathrm{fnhash}'[0..3])$.
 
 $$
 \begin{align*}
@@ -659,7 +659,7 @@ These columns are used to define the following 4 flags:
 * $f_{g8} = bc_0$: there are 8 operation groups in the batch.
 * $f_{g4} = (1 - bc_0) \cdot bc_1 \cdot (1 - bc_2)$:  there are 4 operation groups in the batch.
 * $f_{g2} = (1 - bc_0) \cdot (1 - bc_1) \cdot bc_2$: there are 2 operation groups in the batch.
-* $f_{g1} = (1 - bc_0) \cdot bc_1 \cdot bc_2$: there is only 1 operation groups in the batch.
+* $f_{g1} = (1 - bc_0) \cdot bc_1 \cdot bc_2$: there is only 1 operation group in the batch.
 
 Notice that the degree of $f_{g8}$ is $1$, while the degree of the remaining flags is $3$.
 
