@@ -175,6 +175,22 @@ impl Project {
                 Report::msg(format!("could not parse {}: {err}", workspace_manifest.display()))
             })?;
             if contents.contains_key("workspace") {
+                let workspace_file = ast::WorkspaceFile::parse(source.clone())?;
+                let is_workspace_manifest = manifest_path == workspace_manifest;
+
+                if !is_workspace_manifest
+                    && !workspace_declares_member(
+                        &workspace_file,
+                        &workspace_manifest,
+                        manifest_path,
+                    )
+                {
+                    break;
+                }
+                if is_workspace_manifest && name.is_none() {
+                    break;
+                }
+
                 let workspace = Workspace::load(source, source_manager)?;
                 let package = if let Some(package) = workspace
                     .members()
@@ -207,6 +223,27 @@ impl Project {
         let package = Package::load(source)?;
         Ok(Self::Package(package.into()))
     }
+}
+
+#[cfg(all(feature = "std", feature = "serde"))]
+fn workspace_declares_member(
+    workspace: &ast::WorkspaceFile,
+    workspace_manifest: &std::path::Path,
+    manifest_path: &std::path::Path,
+) -> bool {
+    let Some(workspace_root) = workspace_manifest.parent() else {
+        return false;
+    };
+
+    workspace.workspace.members.iter().any(|member| {
+        let member_dir =
+            match absolutize_path(std::path::Path::new(member.inner().path()), workspace_root) {
+                Ok(member_dir) => member_dir,
+                Err(_) => return false,
+            };
+
+        member_dir.join("miden-project.toml") == manifest_path
+    })
 }
 
 /// A utility function for making a path absolute and canonical.

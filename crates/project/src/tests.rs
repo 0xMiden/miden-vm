@@ -275,6 +275,45 @@ path = "lib.masm"
 }
 
 #[test]
+fn load_package_ignores_broken_workspace_members_when_not_a_member() -> Result<(), Report> {
+    let tempdir = TempDir::new().unwrap();
+    let root = tempdir.path().join("workspace");
+    let vendor_dir = root.join("vendor").join("dep");
+    fs::create_dir_all(&vendor_dir).unwrap();
+
+    fs::write(
+        root.join("miden-project.toml"),
+        r#"[workspace]
+members = ["missing"]
+"#,
+    )
+    .unwrap();
+
+    let vendor_manifest = vendor_dir.join("miden-project.toml");
+    fs::write(
+        &vendor_manifest,
+        r#"[package]
+name = "dep"
+version = "9.0.0"
+
+[lib]
+path = "lib.masm"
+"#,
+    )
+    .unwrap();
+    fs::write(vendor_dir.join("lib.masm"), "export.foo\nend\n").unwrap();
+    let vendor_manifest = vendor_manifest.canonicalize().unwrap();
+
+    let context = TestContext::default();
+    let project = Project::load(&vendor_manifest, &context.source_manager)?;
+
+    assert!(!project.is_workspace_member());
+    assert_eq!(project.manifest_path(), Some(vendor_manifest.as_path()));
+
+    Ok(())
+}
+
+#[test]
 fn load_project_reference_resolves_workspace_manifest_file_inputs() -> Result<(), Report> {
     let tempdir = TempDir::new().unwrap();
     let root = tempdir.path().join("workspace");
