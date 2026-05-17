@@ -1518,9 +1518,11 @@ dependencies = [
  "miden-assembly-syntax-cst",
  "miden-debug-types",
  "serde",
+ "tempfile",
  "thiserror",
  "toml",
  "walkdir",
+ "windows-sys",
 ]
 
 [[package]]

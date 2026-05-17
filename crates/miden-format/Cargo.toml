@@ -27,3 +27,9 @@ serde.workspace = true
 thiserror = { workspace = true, features = ["std"] }
 toml = { workspace = true, features = ["display", "parse", "serde", "std"] }
 walkdir.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Storage_FileSystem"] }
+
+[dev-dependencies]
+tempfile.workspace = true
