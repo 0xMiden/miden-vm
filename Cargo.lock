@@ -1652,6 +1652,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "toml",
+ "windows-sys",
 ]
 
 [[package]]
