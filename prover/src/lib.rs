@@ -162,8 +162,12 @@ fn prove_execution_trace(
         },
     }?;
 
-    let proof =
-        ExecutionProof::new(proof_bytes, hash_fn, precompile_requests, deferred_state);
+    let proof = ExecutionProof::new(
+        proof_bytes,
+        hash_fn,
+        precompile_requests,
+        deferred_state.to_wire(),
+    );
 
     Ok((stack_outputs, proof))
 }

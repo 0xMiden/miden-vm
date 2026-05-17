@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     crypto::hash::{Blake3_256, Poseidon2, Rpo256, Rpx256},
-    deferred::DeferredState,
+    deferred::DeferredStateWire,
     precompile::PrecompileRequest,
     serde::{
         BudgetedReader, ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
@@ -24,16 +24,20 @@ use crate::{
 /// A proof of correct execution of Miden VM.
 ///
 /// The proof contains the STARK proof, the hash function used during proof generation, the set
-/// of precompile requests deferred during proof generation, and the deferred-DAG state (interned
-/// nodes + rolling root) the verifier walks to reduce the transcript to TRUE. The proof does not
+/// of precompile requests deferred during proof generation, and the deferred-DAG state in its
+/// wire form (untrusted bytes-shape; the verifier validates it). The proof does not
 /// contain public inputs needed to verify the proof.
+///
+/// The deferred-DAG state ships as [`DeferredStateWire`] — a passive value with no validated
+/// invariants. The verifier consumes it via `DeferredState::rehydrate` (when it has a schema)
+/// or via a structural chain walk (when it doesn't), depending on the verification path.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ExecutionProof {
     pub proof: Vec<u8>,
     pub hash_fn: HashFunction,
     pub pc_requests: Vec<PrecompileRequest>,
-    pub deferred_state: DeferredState,
+    pub deferred_state: DeferredStateWire,
 }
 
 impl ExecutionProof {
@@ -41,12 +45,12 @@ impl ExecutionProof {
     // --------------------------------------------------------------------------------------------
 
     /// Creates a new instance of [ExecutionProof] from the specified STARK proof, hash function,
-    /// list of deferred [PrecompileRequest]s, and the deferred-DAG state.
+    /// list of deferred [PrecompileRequest]s, and the deferred-DAG wire state.
     pub const fn new(
         proof: Vec<u8>,
         hash_fn: HashFunction,
         pc_requests: Vec<PrecompileRequest>,
-        deferred_state: DeferredState,
+        deferred_state: DeferredStateWire,
     ) -> Self {
         Self { proof, hash_fn, pc_requests, deferred_state }
     }
@@ -69,9 +73,9 @@ impl ExecutionProof {
         &self.pc_requests
     }
 
-    /// Returns the deferred-DAG state (interned nodes + rolling root) captured at the end of
-    /// execution. The verifier walks this state to reduce the rolling root to TRUE.
-    pub fn deferred_state(&self) -> &DeferredState {
+    /// Returns the deferred-DAG state in wire form. To obtain a validated, in-memory
+    /// [`crate::deferred::DeferredState`], call `DeferredState::rehydrate(wire.clone(), schema)`.
+    pub fn deferred_state(&self) -> &DeferredStateWire {
         &self.deferred_state
     }
 
@@ -106,8 +110,8 @@ impl ExecutionProof {
     // DESTRUCTOR
     // --------------------------------------------------------------------------------------------
 
-    /// Returns the hash function, proof bytes, precompile requests, and deferred-DAG state.
-    pub fn into_parts(self) -> (HashFunction, Vec<u8>, Vec<PrecompileRequest>, DeferredState) {
+    /// Returns the hash function, proof bytes, precompile requests, and deferred-DAG wire state.
+    pub fn into_parts(self) -> (HashFunction, Vec<u8>, Vec<PrecompileRequest>, DeferredStateWire) {
         (self.hash_fn, self.proof, self.pc_requests, self.deferred_state)
     }
 }
@@ -228,7 +232,7 @@ impl Deserializable for ExecutionProof {
         let proof = Vec::<u8>::read_from(source)?;
         let hash_fn = HashFunction::read_from(source)?;
         let pc_requests = Vec::<PrecompileRequest>::read_from(source)?;
-        let deferred_state = DeferredState::read_from(source)?;
+        let deferred_state = DeferredStateWire::read_from(source)?;
 
         Ok(ExecutionProof { proof, hash_fn, pc_requests, deferred_state })
     }
@@ -264,7 +268,7 @@ impl ExecutionProof {
             proof: Vec::new(),
             hash_fn: HashFunction::Blake3_256,
             pc_requests: Vec::new(),
-            deferred_state: DeferredState::default(),
+            deferred_state: DeferredStateWire::empty(),
         }
     }
 }
@@ -312,7 +316,7 @@ mod tests {
             vec![1, 2, 3],
             HashFunction::Blake3_256,
             pc_requests,
-            DeferredState::default(),
+            DeferredStateWire::empty(),
         );
 
         let decoded = ExecutionProof::from_bytes(&proof.to_bytes()).unwrap();

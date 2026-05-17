@@ -188,7 +188,7 @@ fn log_precompile_request_procedure() {
 
     // The proof carries the deferred-DAG root directly; it must match what we computed locally.
     assert_eq!(
-        proof.deferred_state().root(),
+        proof.deferred_state().root,
         expected_transcript_state,
         "proof's deferred-DAG root must match the locally-computed transcript state",
     );

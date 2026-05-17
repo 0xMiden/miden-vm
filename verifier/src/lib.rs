@@ -5,12 +5,12 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
-use alloc::{boxed::Box, vec::Vec};
+use alloc::{boxed::Box, collections::BTreeMap, vec::Vec};
 
 use miden_air::{ProcessorAir, PublicInputs, config};
 use miden_core::{
     Felt, WORD_SIZE,
-    deferred::{Digest, DeferredState, TRUE_DIGEST, TRUE_TAG},
+    deferred::{DeferredStateWire, Digest, Node, TRUE_DIGEST, TRUE_TAG},
     field::QuadFelt,
 };
 use miden_crypto::stark::{
@@ -100,13 +100,13 @@ pub fn verify_with_precompiles(
 ) -> Result<(u32, PrecompileTranscriptState), VerificationError> {
     let security_level = proof.security_level();
 
-    let (hash_fn, proof_bytes, precompile_requests, deferred_state) = proof.into_parts();
+    let (hash_fn, proof_bytes, precompile_requests, deferred_wire) = proof.into_parts();
 
-    // Walk the deferred-DAG's AND-chain from `root` down to `TRUE_DIGEST`, collecting each
-    // `log_precompile` statement (oldest first). Every AND-node is structurally re-validated:
-    // its own digest must equal Poseidon2::merge(prev_root, stmnt), its tag must be TRUE_TAG,
-    // and the chain must terminate at TRUE_DIGEST.
-    let statements = walk_deferred_and_chain(&deferred_state)?;
+    // Walk the deferred-DAG's AND-chain on the wire from `root` down to `TRUE_DIGEST`, collecting
+    // each `log_precompile` statement (oldest first). Every AND-node is structurally
+    // re-validated: its own digest must equal Poseidon2::merge(prev_root, stmnt), its tag must
+    // be TRUE_TAG, and the chain must terminate at TRUE_DIGEST.
+    let statements = walk_deferred_and_chain(&deferred_wire)?;
 
     // Each statement must match the commitment of the corresponding PrecompileRequest. If no
     // verifiers were registered but the proof carries requests, the registry returns
@@ -115,7 +115,7 @@ pub fn verify_with_precompiles(
         .verify_against_statements(&precompile_requests, &statements)
         .map_err(VerificationError::PrecompileVerificationError)?;
 
-    let pc_transcript_state = deferred_state.root();
+    let pc_transcript_state = deferred_wire.root;
 
     verify_stark(
         program_info,
@@ -132,32 +132,32 @@ pub fn verify_with_precompiles(
 // HELPER FUNCTIONS
 // ================================================================================================
 
-/// Walks the AND-chain rooted at `deferred_state.root()` down to [`TRUE_DIGEST`], returning the
-/// per-step `log_precompile` statements in execution order (oldest first).
+/// Walks the AND-chain rooted at `wire.root` down to [`TRUE_DIGEST`], returning the per-step
+/// `log_precompile` statements in execution order (oldest first).
 ///
-/// Each AND-node is structurally re-validated: its key in the map must equal its content-addressed
-/// digest, its tag must be [`TRUE_TAG`], and its 8-felt payload decodes as `(prev_root || stmnt)`.
-/// A broken chain (missing node, wrong tag, digest mismatch) surfaces as
+/// First builds a digest-indexed lookup over `wire.nodes` (each node's key is its recomputed
+/// [`Node::digest`], so this pass also verifies content-addressing). Then walks AND-nodes:
+/// each step's tag must be [`TRUE_TAG`] and its 8-felt payload decodes as `(prev_root || stmnt)`.
+/// A broken chain (missing node, wrong tag, non-expression body) surfaces as
 /// [`VerificationError::DeferredChainCorrupt`].
 fn walk_deferred_and_chain(
-    deferred_state: &DeferredState,
+    wire: &DeferredStateWire,
 ) -> Result<Vec<Digest>, VerificationError> {
+    // Build a digest-keyed lookup. Recomputing each digest exercises content-addressing: a
+    // forged node ends up under the digest its bytes actually hash to, so a tampered chain
+    // child reference fails to find anything in this map.
+    let by_digest: BTreeMap<Digest, &Node> =
+        wire.nodes.iter().map(|n| (n.digest(), n)).collect();
+
     let mut statements = Vec::new();
-    let mut current = deferred_state.root();
+    let mut current = wire.root;
     while current != TRUE_DIGEST {
-        let node = deferred_state
-            .get(&current)
-            .map_err(|_| VerificationError::DeferredChainCorrupt {
-                reason: DeferredChainErrorReason::MissingNode { digest: current },
-            })?;
+        let node = by_digest.get(&current).ok_or(VerificationError::DeferredChainCorrupt {
+            reason: DeferredChainErrorReason::MissingNode { digest: current },
+        })?;
         if node.tag != TRUE_TAG {
             return Err(VerificationError::DeferredChainCorrupt {
                 reason: DeferredChainErrorReason::NonAndNode { digest: current },
-            });
-        }
-        if node.digest() != current {
-            return Err(VerificationError::DeferredChainCorrupt {
-                reason: DeferredChainErrorReason::DigestMismatch { expected: current },
             });
         }
         let payload = node.expression_payload().ok_or(
@@ -231,14 +231,17 @@ pub enum VerificationError {
 }
 
 /// Specific failure mode encountered while walking the deferred-DAG AND-chain.
+///
+/// Content-addressing is verified implicitly when building the wire's digest-keyed lookup map
+/// (a tampered node ends up under the digest its bytes hash to, so it can't be reached via a
+/// forged child reference). The variants below cover the structural failures that survive that
+/// implicit check.
 #[derive(Debug, thiserror::Error)]
 pub enum DeferredChainErrorReason {
     #[error("expected AND-node {digest} is not present in the deferred state")]
     MissingNode { digest: Digest },
     #[error("node {digest} is reachable from the transcript root but is not an AND-node")]
     NonAndNode { digest: Digest },
-    #[error("node keyed by {expected} does not hash to its key")]
-    DigestMismatch { expected: Digest },
     #[error("AND-node {digest} has a chunk-bodied payload (expected expression body)")]
     NonExpressionPayload { digest: Digest },
 }

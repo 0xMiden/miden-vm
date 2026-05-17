@@ -273,7 +273,7 @@ fn generate_fuzz_seeds() {
             Vec::new(),
             HashFunction::Rpo256,
             vec![request],
-            crate::deferred::DeferredState::default(),
+            crate::deferred::DeferredStateWire::empty(),
         );
         write_seed("execution_proof_deserialize", "minimal_proof.bin", &proof.to_bytes());
     }
@@ -304,7 +304,7 @@ fn generate_fuzz_seeds() {
             vec![1, 2, 3],
             HashFunction::Blake3_256,
             pc_requests,
-            crate::deferred::DeferredState::default(),
+            crate::deferred::DeferredStateWire::empty(),
         );
         write_seed(
             "execution_proof_deserialize",

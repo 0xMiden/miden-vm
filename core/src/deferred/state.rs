@@ -7,7 +7,6 @@ use super::{
     DeferredError, DeferredStateWire, Digest, IntegrityError, Node, NodePayload, NodeType, Payload,
     ReduceCtx, Schema, SchemaError, TRUE_DIGEST, TRUE_TAG,
 };
-use crate::serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable};
 
 /// In-memory deferred-DAG state — the verifier's witness.
 ///
@@ -302,34 +301,10 @@ impl DeferredState {
 
 // SERIALIZATION
 // ================================================================================================
-// The serialized layout iterates `nodes` in `BTreeMap` digest order, then writes the rolling
-// root. Deserialization reconstructs the map by inserting in the same order; idempotent on
-// content-addressed inserts.
-
-impl Serializable for DeferredState {
-    fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        target.write_usize(self.nodes.len());
-        for (digest, node) in self.nodes.iter() {
-            digest.write_into(target);
-            node.write_into(target);
-        }
-        self.root.write_into(target);
-    }
-}
-
-impl Deserializable for DeferredState {
-    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let count = source.read_usize()?;
-        let mut nodes = BTreeMap::new();
-        for _ in 0..count {
-            let digest = Digest::read_from(source)?;
-            let node = Node::read_from(source)?;
-            nodes.insert(digest, node);
-        }
-        let root = Digest::read_from(source)?;
-        Ok(Self { nodes, root })
-    }
-}
+// `DeferredState` is intentionally NOT `Serializable` / `Deserializable`. Wire-level transit
+// goes through [`DeferredStateWire`]; in-memory construction from bytes goes through
+// `DeferredState::rehydrate(wire, schema)`. This keeps the only path from untrusted bytes to
+// an in-memory state through the schema-validated, chain-walked rehydrate constructor.
 
 /// Decode a node's [`NodeType`] for `rehydrate`. Framework-owned `TRUE_TAG` AND-nodes are
 /// classified as `Binary` directly (user schemas don't claim that tag); everything else routes

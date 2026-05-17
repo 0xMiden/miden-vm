@@ -515,7 +515,7 @@ mod fast_parallel {
             proof_bytes,
             HashFunction::Blake3_256,
             precompile_requests,
-            deferred_state,
+            deferred_state.to_wire(),
         );
 
         // Verify the proof
@@ -673,7 +673,7 @@ mod fast_parallel {
             ]);
         }
         assert_eq!(
-            proof.deferred_state().root(),
+            proof.deferred_state().root,
             expected_transcript,
             "proof's deferred-DAG root must match the locally-folded transcript state",
         );
