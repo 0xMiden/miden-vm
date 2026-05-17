@@ -32,11 +32,6 @@ pub struct DynNode {
 }
 
 impl DynNode {
-    pub(super) fn into_linked_decorator_store(mut self, node_id: MastNodeId) -> Self {
-        self.decorator_store = DecoratorStore::Linked { id: node_id };
-        self
-    }
-
     pub(crate) fn linked_decorator_store_id(&self) -> Option<MastNodeId> {
         self.decorator_store.linked_id()
     }
@@ -238,36 +233,17 @@ impl MastNodeExt for DynNode {
     type Builder = DynNodeBuilder;
 
     fn to_builder(self, forest: &MastForest) -> Self::Builder {
-        // Extract decorators from decorator_store if in Owned state
-        match self.decorator_store {
-            DecoratorStore::Owned { before_enter, after_exit, .. } => {
-                let mut builder = if self.is_dyncall {
-                    DynNodeBuilder::new_dyncall()
-                } else {
-                    DynNodeBuilder::new_dyn()
-                };
-                builder = builder
-                    .with_before_enter(before_enter)
-                    .with_after_exit(after_exit)
-                    .with_digest(self.digest);
-                builder
-            },
-            DecoratorStore::Linked { id } => {
-                // Extract decorators from forest storage when in Linked state
-                let before_enter = forest.before_enter_decorators(id).to_vec();
-                let after_exit = forest.after_exit_decorators(id).to_vec();
-                let mut builder = if self.is_dyncall {
-                    DynNodeBuilder::new_dyncall()
-                } else {
-                    DynNodeBuilder::new_dyn()
-                };
-                builder = builder
-                    .with_before_enter(before_enter)
-                    .with_after_exit(after_exit)
-                    .with_digest(self.digest);
-                builder
-            },
-        }
+        let (before_enter, after_exit) = self.decorator_store.into_node_level_decorators(forest);
+        let builder = if self.is_dyncall {
+            DynNodeBuilder::new_dyncall()
+        } else {
+            DynNodeBuilder::new_dyn()
+        };
+
+        builder
+            .with_before_enter(before_enter)
+            .with_after_exit(after_exit)
+            .with_digest(self.digest)
     }
 
     #[cfg(debug_assertions)]
@@ -367,6 +343,33 @@ impl DynNodeBuilder {
                 self.after_exit,
             ),
         }
+    }
+
+    pub(in crate::mast) fn build_linked_with_decorators(
+        self,
+        node_id: MastNodeId,
+    ) -> (DynNode, Vec<DecoratorId>, Vec<DecoratorId>) {
+        let Self {
+            is_dyncall,
+            before_enter,
+            after_exit,
+            digest,
+        } = self;
+        let digest = if let Some(forced_digest) = digest {
+            forced_digest
+        } else {
+            digest::dyn_digest(is_dyncall)
+        };
+
+        (
+            DynNode {
+                is_dyncall,
+                digest,
+                decorator_store: DecoratorStore::Linked { id: node_id },
+            },
+            before_enter,
+            after_exit,
+        )
     }
 }
 

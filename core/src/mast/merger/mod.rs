@@ -651,45 +651,31 @@ impl MastForestMerger {
         let new_node_id = MastNodeId::new_unchecked(
             self.nodes.len().try_into().map_err(|_| MastForestError::TooManyNodes)?,
         );
-        let owned_node = builder.build_with_forced_digest()?;
+        let linked_build = builder.build_linked_with_decorators(new_node_id)?;
 
         let mut children = Vec::new();
-        owned_node.append_children_to(&mut children);
+        linked_build.node.append_children_to(&mut children);
         for child_id in children {
             if child_id.to_usize() >= self.nodes.len() {
                 return Err(MastForestError::NodeIdOverflow(child_id, self.nodes.len()));
             }
         }
 
-        let (before_enter, after_exit, op_indexed_decorators) = {
-            let decorator_lookup_forest = self
-                .decorator_lookup_forest
-                .as_ref()
-                .expect("decorator lookup forest should be initialized before merging nodes");
-            let before_enter = owned_node.before_enter(decorator_lookup_forest).to_vec();
-            let after_exit = owned_node.after_exit(decorator_lookup_forest).to_vec();
-            let op_indexed_decorators = match &owned_node {
-                MastNode::Block(block) => {
-                    block.indexed_decorator_iter(decorator_lookup_forest).collect()
-                },
-                _ => Vec::new(),
-            };
-            (before_enter, after_exit, op_indexed_decorators)
-        };
-
-        if !before_enter.is_empty() || !after_exit.is_empty() {
-            self.debug_info
-                .register_node_decorators(new_node_id, &before_enter, &after_exit);
+        if !linked_build.before_enter.is_empty() || !linked_build.after_exit.is_empty() {
+            self.debug_info.register_node_decorators(
+                new_node_id,
+                &linked_build.before_enter,
+                &linked_build.after_exit,
+            );
         }
-        if matches!(owned_node, MastNode::Block(_)) {
+        if matches!(&linked_build.node, MastNode::Block(_)) {
             self.debug_info
-                .register_op_indexed_decorators(new_node_id, op_indexed_decorators)
+                .register_op_indexed_decorators(new_node_id, linked_build.op_indexed_decorators)
                 .map_err(MastForestError::DecoratorError)?;
         }
 
-        let linked_node = owned_node.into_linked_decorator_store(new_node_id);
         let inserted_id =
-            self.nodes.push(linked_node).map_err(|_| MastForestError::TooManyNodes)?;
+            self.nodes.push(linked_build.node).map_err(|_| MastForestError::TooManyNodes)?;
         debug_assert_eq!(inserted_id, new_node_id);
 
         Ok(new_node_id)

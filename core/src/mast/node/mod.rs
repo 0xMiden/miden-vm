@@ -208,18 +208,6 @@ impl MastNode {
         }
     }
 
-    pub(in crate::mast) fn into_linked_decorator_store(self, node_id: MastNodeId) -> Self {
-        match self {
-            Self::Block(node) => Self::Block(node.into_linked_decorator_store(node_id)),
-            Self::Join(node) => Self::Join(node.into_linked_decorator_store(node_id)),
-            Self::Split(node) => Self::Split(node.into_linked_decorator_store(node_id)),
-            Self::Loop(node) => Self::Loop(node.into_linked_decorator_store(node_id)),
-            Self::Call(node) => Self::Call(node.into_linked_decorator_store(node_id)),
-            Self::Dyn(node) => Self::Dyn(node.into_linked_decorator_store(node_id)),
-            Self::External(node) => Self::External(node.into_linked_decorator_store(node_id)),
-        }
-    }
-
     pub(crate) fn validate_decorator_store_link(
         &self,
         node_id: MastNodeId,

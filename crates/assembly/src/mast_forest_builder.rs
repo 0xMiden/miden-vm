@@ -947,11 +947,10 @@ fn compute_operations_and_adjust_mappings(
 fn batch_basic_block_operations(
     operations: Vec<Operation>,
 ) -> Result<(Vec<OpBatch>, Word), Report> {
-    let block = BasicBlockNodeBuilder::new(operations, Vec::new())
-        .build()
+    BasicBlockNodeBuilder::new(operations, Vec::new())
+        .into_op_batches_and_digest()
         .into_diagnostic()
-        .wrap_err("assembler failed to build new basic block")?;
-    Ok((block.op_batches().to_vec(), block.digest()))
+        .wrap_err("assembler failed to build new basic block")
 }
 
 fn build_pending_node_with_final_ids(

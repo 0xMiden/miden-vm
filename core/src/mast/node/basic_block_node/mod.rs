@@ -84,11 +84,6 @@ pub struct BasicBlockNode {
 }
 
 impl BasicBlockNode {
-    pub(super) fn into_linked_decorator_store(mut self, node_id: MastNodeId) -> Self {
-        self.decorators = DecoratorStore::Linked { id: node_id };
-        self
-    }
-
     pub(crate) fn linked_decorator_store_id(&self) -> Option<MastNodeId> {
         self.decorators.linked_id()
     }
@@ -743,30 +738,24 @@ impl MastNodeExt for BasicBlockNode {
     where
         F: ExecutableMastForest + ?Sized,
     {
-        match &self.decorators {
-            DecoratorStore::Owned { before_enter, .. } => before_enter,
-            DecoratorStore::Linked { id } => {
-                // For linked nodes, get the decorators from the forest's NodeToDecoratorIds
-                #[cfg(debug_assertions)]
-                self.verify_node_in_forest(forest);
-                forest.linked_before_enter_decorators(*id)
-            },
+        #[cfg(debug_assertions)]
+        if self.decorators.linked_id().is_some() {
+            self.verify_node_in_forest(forest);
         }
+
+        self.decorators.before_enter(forest)
     }
 
     fn after_exit<'a, F>(&'a self, forest: &'a F) -> &'a [DecoratorId]
     where
         F: ExecutableMastForest + ?Sized,
     {
-        match &self.decorators {
-            DecoratorStore::Owned { after_exit, .. } => after_exit,
-            DecoratorStore::Linked { id } => {
-                // For linked nodes, get the decorators from the forest's NodeToDecoratorIds
-                #[cfg(debug_assertions)]
-                self.verify_node_in_forest(forest);
-                forest.linked_after_exit_decorators(*id)
-            },
+        #[cfg(debug_assertions)]
+        if self.decorators.linked_id().is_some() {
+            self.verify_node_in_forest(forest);
         }
+
+        self.decorators.after_exit(forest)
     }
 
     fn to_display<'a>(&'a self, mast_forest: &'a MastForest) -> Box<dyn fmt::Display + 'a> {
@@ -799,26 +788,7 @@ impl MastNodeExt for BasicBlockNode {
     type Builder = BasicBlockNodeBuilder;
 
     fn to_builder(self, forest: &MastForest) -> Self::Builder {
-        // Extract padded decorators and before_enter/after_exit based on storage type
-        let (padded_decorators, before_enter, after_exit) = match self.decorators {
-            DecoratorStore::Owned { decorators, before_enter, after_exit } => {
-                // Decorators are already padded in Owned storage
-                (decorators, before_enter, after_exit)
-            },
-            DecoratorStore::Linked { id } => {
-                // For linked nodes, get decorators from forest's centralized storage
-                // The decorators are already padded in the centralized storage
-                let padded_decorators: DecoratorList = forest
-                    .debug_info
-                    .decorator_links_for_node(id)
-                    .expect("node must exist in forest")
-                    .into_iter()
-                    .collect();
-                let before_enter = forest.before_enter_decorators(id).to_vec();
-                let after_exit = forest.after_exit_decorators(id).to_vec();
-                (padded_decorators, before_enter, after_exit)
-            },
-        };
+        let (padded_decorators, before_enter, after_exit) = self.decorators.into_parts(forest);
 
         // Preserve the stored batches and digest. Existing nodes may have a forced digest.
         BasicBlockNodeBuilder::from_op_batches_preserving_digest(
@@ -1474,6 +1444,14 @@ pub struct BasicBlockNodeBuilder {
     digest: Option<Word>,
 }
 
+struct BasicBlockBuildParts {
+    op_batches: Vec<OpBatch>,
+    digest: Word,
+    padded_decorators: DecoratorList,
+    before_enter: Vec<DecoratorId>,
+    after_exit: Vec<DecoratorId>,
+}
+
 impl BasicBlockNodeBuilder {
     /// Creates a new builder for a BasicBlockNode with the specified operations and decorators.
     ///
@@ -1539,8 +1517,7 @@ impl BasicBlockNodeBuilder {
         }
     }
 
-    /// Builds the BasicBlockNode with the specified decorators.
-    pub fn build(self) -> Result<BasicBlockNode, MastForestError> {
+    fn into_build_parts(self) -> Result<BasicBlockBuildParts, MastForestError> {
         let (op_batches, digest, padded_decorators) = match self.operation_data {
             OperationData::Raw { operations, decorators } => {
                 if operations.is_empty() {
@@ -1575,15 +1552,50 @@ impl BasicBlockNodeBuilder {
             },
         };
 
-        Ok(BasicBlockNode {
+        Ok(BasicBlockBuildParts {
             op_batches,
             digest,
+            padded_decorators,
+            before_enter: self.before_enter,
+            after_exit: self.after_exit,
+        })
+    }
+
+    /// Returns the padded operation batches and digest without materializing a node.
+    pub fn into_op_batches_and_digest(self) -> Result<(Vec<OpBatch>, Word), MastForestError> {
+        let parts = self.into_build_parts()?;
+        Ok((parts.op_batches, parts.digest))
+    }
+
+    /// Builds the BasicBlockNode with the specified decorators.
+    pub fn build(self) -> Result<BasicBlockNode, MastForestError> {
+        let parts = self.into_build_parts()?;
+
+        Ok(BasicBlockNode {
+            op_batches: parts.op_batches,
+            digest: parts.digest,
             decorators: DecoratorStore::Owned {
-                decorators: padded_decorators,
-                before_enter: self.before_enter.clone(),
-                after_exit: self.after_exit.clone(),
+                decorators: parts.padded_decorators,
+                before_enter: parts.before_enter,
+                after_exit: parts.after_exit,
             },
         })
+    }
+
+    pub(in crate::mast) fn build_linked_with_decorators(
+        self,
+        node_id: MastNodeId,
+    ) -> Result<(BasicBlockNode, Vec<DecoratorId>, Vec<DecoratorId>, DecoratorList), MastForestError>
+    {
+        let parts = self.into_build_parts()?;
+
+        let node = BasicBlockNode {
+            op_batches: parts.op_batches,
+            digest: parts.digest,
+            decorators: DecoratorStore::Linked { id: node_id },
+        };
+
+        Ok((node, parts.before_enter, parts.after_exit, parts.padded_decorators))
     }
 }
 

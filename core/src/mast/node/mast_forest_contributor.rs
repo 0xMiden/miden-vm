@@ -9,6 +9,7 @@ use super::{
 use crate::{
     Word,
     mast::{DecoratorId, MastForest, MastForestError, MastNode, MastNodeFingerprint, MastNodeId},
+    operations::DecoratorList,
     utils::{Idx, LookupByIdx},
 };
 
@@ -146,6 +147,13 @@ pub enum MastNodeBuilder {
     Split(SplitNodeBuilder),
 }
 
+pub(in crate::mast) struct LinkedMastNodeBuild {
+    pub node: MastNode,
+    pub before_enter: Vec<DecoratorId>,
+    pub after_exit: Vec<DecoratorId>,
+    pub op_indexed_decorators: DecoratorList,
+}
+
 impl MastNodeBuilder {
     /// Build the node from this builder.
     ///
@@ -182,7 +190,85 @@ impl MastNodeBuilder {
 
     #[doc(hidden)]
     pub fn build_linked(self, node_id: MastNodeId) -> Result<MastNode, MastForestError> {
-        Ok(self.build_with_forced_digest()?.into_linked_decorator_store(node_id))
+        self.build_linked_with_decorators(node_id).map(|build| build.node)
+    }
+
+    pub(in crate::mast) fn build_linked_with_decorators(
+        self,
+        node_id: MastNodeId,
+    ) -> Result<LinkedMastNodeBuild, MastForestError> {
+        match self {
+            MastNodeBuilder::BasicBlock(builder) => {
+                let (node, before_enter, after_exit, op_indexed_decorators) =
+                    builder.build_linked_with_decorators(node_id)?;
+                Ok(LinkedMastNodeBuild {
+                    node: node.into(),
+                    before_enter,
+                    after_exit,
+                    op_indexed_decorators,
+                })
+            },
+            MastNodeBuilder::Call(builder) => {
+                let (node, before_enter, after_exit) =
+                    builder.build_linked_with_decorators(node_id)?;
+                Ok(LinkedMastNodeBuild {
+                    node: node.into(),
+                    before_enter,
+                    after_exit,
+                    op_indexed_decorators: DecoratorList::new(),
+                })
+            },
+            MastNodeBuilder::Dyn(builder) => {
+                let (node, before_enter, after_exit) =
+                    builder.build_linked_with_decorators(node_id);
+                Ok(LinkedMastNodeBuild {
+                    node: node.into(),
+                    before_enter,
+                    after_exit,
+                    op_indexed_decorators: DecoratorList::new(),
+                })
+            },
+            MastNodeBuilder::External(builder) => {
+                let (node, before_enter, after_exit) =
+                    builder.build_linked_with_decorators(node_id);
+                Ok(LinkedMastNodeBuild {
+                    node: node.into(),
+                    before_enter,
+                    after_exit,
+                    op_indexed_decorators: DecoratorList::new(),
+                })
+            },
+            MastNodeBuilder::Join(builder) => {
+                let (node, before_enter, after_exit) =
+                    builder.build_linked_with_decorators(node_id)?;
+                Ok(LinkedMastNodeBuild {
+                    node: node.into(),
+                    before_enter,
+                    after_exit,
+                    op_indexed_decorators: DecoratorList::new(),
+                })
+            },
+            MastNodeBuilder::Loop(builder) => {
+                let (node, before_enter, after_exit) =
+                    builder.build_linked_with_decorators(node_id)?;
+                Ok(LinkedMastNodeBuild {
+                    node: node.into(),
+                    before_enter,
+                    after_exit,
+                    op_indexed_decorators: DecoratorList::new(),
+                })
+            },
+            MastNodeBuilder::Split(builder) => {
+                let (node, before_enter, after_exit) =
+                    builder.build_linked_with_decorators(node_id)?;
+                Ok(LinkedMastNodeBuild {
+                    node: node.into(),
+                    before_enter,
+                    after_exit,
+                    op_indexed_decorators: DecoratorList::new(),
+                })
+            },
+        }
     }
 }
 

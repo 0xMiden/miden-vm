@@ -4,7 +4,7 @@ use alloc::vec::Vec;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    mast::{DecoratorId, ExecutableMastForest, MastNodeId},
+    mast::{DecoratorId, ExecutableMastForest, MastForest, MastNodeId},
     operations::DecoratorList,
 };
 
@@ -71,6 +71,42 @@ impl DecoratorStore {
         match self {
             DecoratorStore::Owned { after_exit, .. } => after_exit,
             DecoratorStore::Linked { id } => forest.linked_after_exit_decorators(*id),
+        }
+    }
+
+    pub(crate) fn into_node_level_decorators(
+        self,
+        forest: &MastForest,
+    ) -> (Vec<DecoratorId>, Vec<DecoratorId>) {
+        match self {
+            DecoratorStore::Owned { before_enter, after_exit, .. } => (before_enter, after_exit),
+            DecoratorStore::Linked { id } => (
+                forest.before_enter_decorators(id).to_vec(),
+                forest.after_exit_decorators(id).to_vec(),
+            ),
+        }
+    }
+
+    pub(crate) fn into_parts(
+        self,
+        forest: &MastForest,
+    ) -> (DecoratorList, Vec<DecoratorId>, Vec<DecoratorId>) {
+        match self {
+            DecoratorStore::Owned { decorators, before_enter, after_exit } => {
+                (decorators, before_enter, after_exit)
+            },
+            DecoratorStore::Linked { id } => {
+                let decorators = forest
+                    .decorator_links_for_node(id)
+                    .expect(
+                        "linked node decorators should be available; forest may be inconsistent",
+                    )
+                    .into_iter()
+                    .collect();
+                let before_enter = forest.before_enter_decorators(id).to_vec();
+                let after_exit = forest.after_exit_decorators(id).to_vec();
+                (decorators, before_enter, after_exit)
+            },
         }
     }
 

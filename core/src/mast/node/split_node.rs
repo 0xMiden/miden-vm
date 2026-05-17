@@ -40,11 +40,6 @@ pub struct SplitNode {
 }
 
 impl SplitNode {
-    pub(super) fn into_linked_decorator_store(mut self, node_id: MastNodeId) -> Self {
-        self.decorator_store = DecoratorStore::Linked { id: node_id };
-        self
-    }
-
     pub(crate) fn linked_decorator_store_id(&self) -> Option<MastNodeId> {
         self.decorator_store.linked_id()
     }
@@ -214,28 +209,12 @@ impl MastNodeExt for SplitNode {
     type Builder = SplitNodeBuilder;
 
     fn to_builder(self, forest: &MastForest) -> Self::Builder {
-        // Extract decorators from decorator_store if in Owned state
-        match self.decorator_store {
-            DecoratorStore::Owned { before_enter, after_exit, .. } => {
-                let mut builder = SplitNodeBuilder::new(self.branches);
-                builder = builder
-                    .with_before_enter(before_enter)
-                    .with_after_exit(after_exit)
-                    .with_digest(self.digest);
-                builder
-            },
-            DecoratorStore::Linked { id } => {
-                // Extract decorators from forest storage when in Linked state
-                let before_enter = forest.before_enter_decorators(id).to_vec();
-                let after_exit = forest.after_exit_decorators(id).to_vec();
-                let mut builder = SplitNodeBuilder::new(self.branches);
-                builder = builder
-                    .with_before_enter(before_enter)
-                    .with_after_exit(after_exit)
-                    .with_digest(self.digest);
-                builder
-            },
-        }
+        let (before_enter, after_exit) = self.decorator_store.into_node_level_decorators(forest);
+
+        SplitNodeBuilder::new(self.branches)
+            .with_before_enter(before_enter)
+            .with_after_exit(after_exit)
+            .with_digest(self.digest)
     }
 
     #[cfg(debug_assertions)]
@@ -348,6 +327,30 @@ impl SplitNodeBuilder {
                 self.after_exit,
             ),
         })
+    }
+
+    pub(in crate::mast) fn build_linked_with_decorators(
+        self,
+        node_id: MastNodeId,
+    ) -> Result<(SplitNode, Vec<DecoratorId>, Vec<DecoratorId>), MastForestError> {
+        let Self {
+            branches,
+            before_enter,
+            after_exit,
+            digest,
+        } = self;
+        let digest =
+            NodeBuilderLifecycle::new(&before_enter, &after_exit, digest).forced_digest()?;
+
+        Ok((
+            SplitNode {
+                branches,
+                digest,
+                decorator_store: DecoratorStore::Linked { id: node_id },
+            },
+            before_enter,
+            after_exit,
+        ))
     }
 }
 

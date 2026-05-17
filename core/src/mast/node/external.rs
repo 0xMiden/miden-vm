@@ -38,11 +38,6 @@ pub struct ExternalNode {
 }
 
 impl ExternalNode {
-    pub(super) fn into_linked_decorator_store(mut self, node_id: MastNodeId) -> Self {
-        self.decorator_store = DecoratorStore::Linked { id: node_id };
-        self
-    }
-
     pub(crate) fn linked_decorator_store_id(&self) -> Option<MastNodeId> {
         self.decorator_store.linked_id()
     }
@@ -198,22 +193,11 @@ impl MastNodeExt for ExternalNode {
     type Builder = ExternalNodeBuilder;
 
     fn to_builder(self, forest: &MastForest) -> Self::Builder {
-        // Extract decorators from decorator_store if in Owned state
-        match self.decorator_store {
-            DecoratorStore::Owned { before_enter, after_exit, .. } => {
-                let mut builder = ExternalNodeBuilder::new(self.digest);
-                builder = builder.with_before_enter(before_enter).with_after_exit(after_exit);
-                builder
-            },
-            DecoratorStore::Linked { id } => {
-                // Extract decorators from forest storage when in Linked state
-                let before_enter = forest.before_enter_decorators(id).to_vec();
-                let after_exit = forest.after_exit_decorators(id).to_vec();
-                let mut builder = ExternalNodeBuilder::new(self.digest);
-                builder = builder.with_before_enter(before_enter).with_after_exit(after_exit);
-                builder
-            },
-        }
+        let (before_enter, after_exit) = self.decorator_store.into_node_level_decorators(forest);
+
+        ExternalNodeBuilder::new(self.digest)
+            .with_before_enter(before_enter)
+            .with_after_exit(after_exit)
     }
 
     #[cfg(debug_assertions)]
@@ -294,6 +278,20 @@ impl ExternalNodeBuilder {
                 self.after_exit,
             ),
         }
+    }
+
+    pub(in crate::mast) fn build_linked_with_decorators(
+        self,
+        node_id: MastNodeId,
+    ) -> (ExternalNode, Vec<DecoratorId>, Vec<DecoratorId>) {
+        (
+            ExternalNode {
+                digest: self.digest,
+                decorator_store: DecoratorStore::Linked { id: node_id },
+            },
+            self.before_enter,
+            self.after_exit,
+        )
     }
 }
 
