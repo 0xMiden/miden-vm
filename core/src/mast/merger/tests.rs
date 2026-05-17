@@ -36,6 +36,10 @@ fn block_qux() -> BasicBlockNodeBuilder {
     )
 }
 
+fn block_digest(builder: BasicBlockNodeBuilder) -> Word {
+    builder.into_op_batches_and_digest().unwrap().1
+}
+
 fn register_asm_ops_for_node(
     forest: &mut MastForest,
     node_id: MastNodeId,
@@ -287,8 +291,7 @@ fn mast_forest_merge_duplicate() {
 #[test]
 fn mast_forest_merge_replace_external() {
     let mut forest_a = MastForest::new();
-    let foo_block_a = block_foo().build().unwrap();
-    let id_foo_a = ExternalNodeBuilder::new(foo_block_a.digest())
+    let id_foo_a = ExternalNodeBuilder::new(block_digest(block_foo()))
         .add_to_forest(&mut forest_a)
         .unwrap();
     let id_call_a = CallNodeBuilder::new(id_foo_a).add_to_forest(&mut forest_a).unwrap();
@@ -585,7 +588,7 @@ fn mast_forest_merge_external_node_reference_with_decorator() {
     let deco = forest_a.add_decorator(trace).unwrap();
 
     let foo_node_a = block_foo_with_decorators(&[deco], &[]);
-    let foo_node_digest = block_foo_with_decorators(&[deco], &[]).build().unwrap().digest();
+    let foo_node_digest = block_digest(block_foo_with_decorators(&[deco], &[]));
     let id_foo_a = foo_node_a.add_to_forest(&mut forest_a).unwrap();
 
     forest_a.make_root(id_foo_a);
@@ -648,8 +651,7 @@ fn mast_forest_merge_external_node_with_decorator() {
     let deco1 = forest_a.add_decorator(trace1).unwrap();
     let deco2 = forest_a.add_decorator(trace2).unwrap();
 
-    let external_node_a =
-        external_with_decorators(block_foo().build().unwrap().digest(), &[deco1], &[deco2]);
+    let external_node_a = external_with_decorators(block_digest(block_foo()), &[deco1], &[deco2]);
     let id_external_a = external_node_a.add_to_forest(&mut forest_a).unwrap();
 
     forest_a.make_root(id_external_a);
@@ -712,8 +714,7 @@ fn mast_forest_merge_external_node_and_referenced_node_have_decorators() {
     // Build Forest A
     let deco1_a = forest_a.add_decorator(trace1).unwrap();
 
-    let external_node_a =
-        external_with_decorators(block_foo().build().unwrap().digest(), &[deco1_a], &[]);
+    let external_node_a = external_with_decorators(block_digest(block_foo()), &[deco1_a], &[]);
     let id_external_a = external_node_a.add_to_forest(&mut forest_a).unwrap();
 
     forest_a.make_root(id_external_a);
@@ -783,11 +784,10 @@ fn mast_forest_merge_multiple_external_nodes_with_decorator() {
     let deco2_a = forest_a.add_decorator(trace2).unwrap();
 
     let external_node_a =
-        external_with_decorators(block_foo().build().unwrap().digest(), &[deco1_a], &[deco2_a]);
+        external_with_decorators(block_digest(block_foo()), &[deco1_a], &[deco2_a]);
     let id_external_a = external_node_a.add_to_forest(&mut forest_a).unwrap();
 
-    let external_node_b =
-        external_with_decorators(block_foo().build().unwrap().digest(), &[deco1_a], &[]);
+    let external_node_b = external_with_decorators(block_digest(block_foo()), &[deco1_a], &[]);
     let id_external_b = external_node_b.add_to_forest(&mut forest_a).unwrap();
 
     forest_a.make_root(id_external_a);
@@ -835,7 +835,7 @@ fn mast_forest_merge_multiple_external_nodes_with_decorator() {
 #[test]
 fn mast_forest_merge_preserves_asm_op_mappings_from_external_replacement() {
     let mut forest_with_external = MastForest::new();
-    let foo_digest = block_foo().build().unwrap().digest();
+    let foo_digest = block_digest(block_foo());
     let external_id = ExternalNodeBuilder::new(foo_digest)
         .add_to_forest(&mut forest_with_external)
         .unwrap();
@@ -886,7 +886,7 @@ fn mast_forest_merge_preserves_asm_op_mappings_from_external_replacement() {
 #[test]
 fn mast_forest_merge_external_dependencies() {
     let mut forest_a = MastForest::new();
-    let id_foo_a = ExternalNodeBuilder::new(block_qux().build().unwrap().digest())
+    let id_foo_a = ExternalNodeBuilder::new(block_digest(block_qux()))
         .add_to_forest(&mut forest_a)
         .unwrap();
     let id_call_a = CallNodeBuilder::new(id_foo_a).add_to_forest(&mut forest_a).unwrap();

@@ -897,9 +897,9 @@ fn test_mast_forest_compaction_comprehensive() {
 
     // === External nodes with after-exit decorators ===
     let external_digest = BasicBlockNodeBuilder::new(vec![Operation::Neg], Vec::new())
-        .build()
+        .into_op_batches_and_digest()
         .unwrap()
-        .digest();
+        .1;
     let external_no_deco = crate::mast::ExternalNodeBuilder::new(external_digest)
         .add_to_forest(&mut forest)
         .unwrap();

@@ -349,10 +349,17 @@ fn build_group_chunks(batches: &[OpBatch]) -> impl Iterator<Item = &[Operation]>
 
 fn basic_block_from_batch(batch: OpBatch) -> BasicBlockNode {
     let digest = hasher::hash_elements(batch.groups());
-    BasicBlockNodeBuilder::from_op_batches(vec![batch], Vec::new(), digest)
-        .expect("digest must match batched operations")
-        .build()
-        .expect("basic block should build")
+    let (op_batches, digest) =
+        BasicBlockNodeBuilder::from_op_batches(vec![batch], Vec::new(), digest)
+            .expect("digest must match batched operations")
+            .into_op_batches_and_digest()
+            .expect("basic block should build");
+
+    BasicBlockNode {
+        op_batches,
+        digest,
+        decorators: DecoratorStore::default(),
+    }
 }
 
 fn basic_block_from_batches(op_batches: Vec<OpBatch>) -> BasicBlockNode {
@@ -1058,7 +1065,7 @@ fn test_basic_block_fingerprint_uses_forced_digest() {
     );
 }
 
-/// Test that BasicBlockNode -> to_builder -> build preserves structure and decorators
+/// Test that BasicBlockNode -> to_builder preserves structure and decorators.
 #[test]
 fn test_to_builder_identity() {
     let ops = vec![
@@ -1073,17 +1080,6 @@ fn test_to_builder_identity() {
     let deco2 = forest.add_decorator(Decorator::Trace(2)).unwrap();
     let decorators = vec![(0, deco1), (2, deco2)];
 
-    // Test Owned storage: node -> builder -> node
-    let owned = BasicBlockNodeBuilder::new(ops.clone(), decorators.clone())
-        .with_before_enter(vec![deco1])
-        .with_after_exit(vec![deco2])
-        .build()
-        .unwrap();
-    let owned_rt = owned.clone().to_builder(&forest).build().unwrap();
-    assert_eq!(owned.op_batches, owned_rt.op_batches);
-    assert_eq!(owned.digest, owned_rt.digest);
-
-    // Test Linked storage: node in forest -> builder -> node
     let node_id = BasicBlockNodeBuilder::new(ops, decorators)
         .with_before_enter(vec![deco1])
         .with_after_exit(vec![deco2])
@@ -1093,13 +1089,14 @@ fn test_to_builder_identity() {
         crate::mast::MastNode::Block(block) => block.clone(),
         _ => panic!("Expected BasicBlockNode"),
     };
-    let linked_rt = linked.clone().to_builder(&forest).build().unwrap();
-    assert_eq!(linked.op_batches, linked_rt.op_batches);
-    assert_eq!(linked.digest, linked_rt.digest);
+    let (roundtrip_batches, roundtrip_digest) =
+        linked.clone().to_builder(&forest).into_op_batches_and_digest().unwrap();
+    assert_eq!(linked.op_batches, roundtrip_batches);
+    assert_eq!(linked.digest, roundtrip_digest);
 }
 
 proptest! {
-    /// Proptest: verify to_builder identity for arbitrary BasicBlockNodes
+    /// Proptest: verify to_builder identity for arbitrary linked BasicBlockNodes.
     #[test]
     fn proptest_to_builder_identity(ops in op_non_control_sequence_strategy(20)) {
         let mut forest = MastForest::new();
@@ -1119,18 +1116,6 @@ proptest! {
             .map(|((idx, _), &dec_id)| (idx, dec_id))
             .collect();
 
-        // Test with Owned storage
-        let original = BasicBlockNodeBuilder::new(ops.clone(), decorators.clone())
-            .build()
-            .unwrap();
-
-        let builder = original.clone().to_builder(&forest);
-        let roundtrip = builder.build().unwrap();
-
-        prop_assert_eq!(original.op_batches, roundtrip.op_batches);
-        prop_assert_eq!(original.digest, roundtrip.digest);
-
-        // Test with Linked storage
         let node_id = BasicBlockNodeBuilder::new(ops, decorators)
             .add_to_forest(&mut forest)
             .unwrap();
@@ -1140,10 +1125,13 @@ proptest! {
             _ => panic!("Expected BasicBlockNode"),
         };
 
-        let builder2 = linked_node.clone().to_builder(&forest);
-        let roundtrip2 = builder2.build().unwrap();
+        let (roundtrip_batches, roundtrip_digest) = linked_node
+            .clone()
+            .to_builder(&forest)
+            .into_op_batches_and_digest()
+            .unwrap();
 
-        prop_assert_eq!(linked_node.op_batches, roundtrip2.op_batches);
-        prop_assert_eq!(linked_node.digest, roundtrip2.digest);
+        prop_assert_eq!(linked_node.op_batches, roundtrip_batches);
+        prop_assert_eq!(linked_node.digest, roundtrip_digest);
     }
 }
