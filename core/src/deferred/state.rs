@@ -165,18 +165,50 @@ impl DeferredState {
         DfsResolver { state: self, schema }.reduce_and_intern(node, digest)
     }
 
-    /// Serialize this state to its wire form. The wire carries the same `(nodes, root)` shape as
-    /// the in-memory state — no digest column (digests are recomputed during rehydrate) and no
-    /// ordering guarantee (rehydrate uses a two-pass design that tolerates any ordering).
+    /// Serialize this state to its wire form. Walks reachable nodes from `root` and emits only
+    /// those — `register`-then-never-referenced orphans plus canonical intermediates that
+    /// nothing references are trimmed at the wire boundary. The verifier rehydrates the trimmed
+    /// wire; phase-2 reduce re-mints any canonical intermediates as a side effect of
+    /// re-evaluating each predicate.
     ///
-    /// Note: this currently ships *every* registered node, including those unreachable from
-    /// `root`. The trim-on-serialize optimisation belongs to the upcoming index-based wire-format
-    /// step and is intentionally not done here.
+    /// Reachability is computed *structurally*, without consulting the schema: for any node
+    /// with an `Expression` payload, interpret the 8 felts as `(lhs_digest, rhs_digest)` and
+    /// follow each child whose digest resolves in `self.nodes` (or is [`TRUE_DIGEST`]). Values
+    /// and chunk-bodied leaves whose payload felts happen to coincide with an interned digest
+    /// will follow that false reference, which is harmless — we may over-include but cannot
+    /// under-include real Binary children (those are always interned). Coincidental matches
+    /// are vanishingly unlikely at Poseidon2 collision resistance.
     pub fn to_wire(&self) -> DeferredStateWire {
-        let mut nodes = Vec::with_capacity(self.nodes.len());
-        for node in self.nodes.values() {
+        let mut visited = alloc::collections::BTreeSet::new();
+        let mut nodes = Vec::new();
+        let mut stack = alloc::vec::Vec::new();
+        stack.push(self.root);
+
+        while let Some(d) = stack.pop() {
+            if d == TRUE_DIGEST {
+                continue;
+            }
+            if !visited.insert(d) {
+                continue;
+            }
+            let Some(node) = self.nodes.get(&d) else {
+                // Reachable digest with no interned node. Normal for production-style bare
+                // statement commitments (a `log_precompile` stmnt that's just a hash-fold and
+                // was never interned as a `Node`). The wire doesn't carry it; the precompile
+                // registry validates it externally.
+                continue;
+            };
             nodes.push(node.clone());
+
+            // Push potential children for any Expression-shaped node. Push rhs first so lhs
+            // is visited first (DFS post-order is a nicety, not load-bearing).
+            if let Some(payload) = node.expression_payload() {
+                let (lhs, rhs) = payload.binary_op_children();
+                stack.push(rhs);
+                stack.push(lhs);
+            }
         }
+
         DeferredStateWire { nodes, root: self.root }
     }
 
@@ -726,6 +758,46 @@ mod tests {
         let wire = DeferredStateWire { nodes: alloc::vec![bogus], root: TRUE_DIGEST };
         let err = DeferredState::rehydrate(wire, &Uint256);
         assert!(matches!(err, Err(IntegrityError::UnknownTag)));
+    }
+
+    #[test]
+    fn to_wire_drops_unreachable_orphan_leaves() {
+        // Register an orphan that no one references; build a logged-predicate chain. The wire
+        // must contain the chain's reachable closure but NOT the orphan.
+        let mut state = DeferredState::new();
+        let schema = Uint256;
+        let _orphan = state.register(&schema, uint256_leaf_node(99)).unwrap();
+        let a = state.register(&schema, uint256_leaf_node(7)).unwrap();
+        let pred = Node::expression(Uint256::eq_tag(), Payload::binary_op(a, a));
+        let stmt_digest = pred.digest();
+        state.evaluate(&schema, pred).unwrap();
+        let new_root = Node::expression(
+            TRUE_TAG,
+            Payload::binary_op(state.root(), stmt_digest),
+        )
+        .digest();
+        state.log(stmt_digest, new_root).unwrap();
+
+        let wire = state.to_wire();
+        let wire_digests: alloc::collections::BTreeSet<_> =
+            wire.nodes.iter().map(|n| n.digest()).collect();
+        let orphan_digest = uint256_leaf_node(99).digest();
+        assert!(!wire_digests.contains(&orphan_digest), "orphan must be trimmed from wire");
+        // The chain and its closure must still ship.
+        assert!(wire_digests.contains(&new_root), "AND-node must be in wire");
+        assert!(wire_digests.contains(&stmt_digest), "stmt predicate must be in wire");
+        assert!(wire_digests.contains(&a), "stmt's operand must be in wire");
+    }
+
+    #[test]
+    fn to_wire_trimmed_round_trips_through_rehydrate() {
+        // Trimmed wire must still round-trip via rehydrate (phase 2's evaluate re-mints any
+        // canonical intermediates that the trim dropped).
+        let original = built_state_with_logged_predicate();
+        let wire = original.to_wire();
+        let rehydrated = DeferredState::rehydrate(wire, &Uint256).unwrap();
+        assert_eq!(rehydrated.root(), original.root());
+        assert_eq!(rehydrated.statements(), original.statements());
     }
 
     #[test]
