@@ -176,17 +176,28 @@ macro_rules! expect_exec_error_matches {
 /// Like [miden_assembly::testing::assert_diagnostic], but matches each non-empty line of the
 /// rendered output to a corresponding pattern.
 ///
-/// So if the output has 3 lines, the second of which is empty, and you provide 2 patterns, the
-/// assertion passes if the first line matches the first pattern, and the third line matches the
-/// second pattern - the second line is ignored because it is empty.
+/// Empty lines are ignored, but the remaining line count must match the number of patterns.
 #[cfg(not(target_family = "wasm"))]
 #[macro_export]
 macro_rules! assert_diagnostic_lines {
     ($diagnostic:expr, $($expected:expr),+) => {{
         use miden_assembly::testing::Pattern;
         let actual = format!("{}", miden_assembly::diagnostics::reporting::PrintDiagnostic::new_without_color($diagnostic));
-        let lines = actual.lines().filter(|l| !l.trim().is_empty()).zip([$(Pattern::from($expected)),*].into_iter());
-        for (actual_line, expected) in lines {
+        let expected = [$(Pattern::from($expected)),*];
+        let actual_line_count = actual.lines().filter(|line| !line.trim().is_empty()).count();
+        ::core::assert_eq!(
+            actual_line_count,
+            expected.len(),
+            "diagnostic line count mismatch: expected {} non-empty lines, got {}\nactual diagnostic:\n{}",
+            expected.len(),
+            actual_line_count,
+            actual,
+        );
+        for (actual_line, expected) in actual
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .zip(expected.into_iter())
+        {
             expected.assert_match_with_context(actual_line, &actual);
         }
     }};
@@ -788,6 +799,26 @@ mod tests {
 
         assert!(result.is_ok(), "invalid extra module source caused Test::compile() to panic");
         assert!(result.unwrap().is_err(), "invalid extra module source should return an error");
+    }
+
+    #[test]
+    #[should_panic(expected = "diagnostic line count mismatch")]
+    fn assert_diagnostic_lines_rejects_missing_actual_lines() {
+        crate::assert_diagnostic_lines!(
+            miden_assembly::report!("the error string"),
+            "the error string",
+            "other",
+            "lines"
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "diagnostic line count mismatch")]
+    fn assert_diagnostic_lines_rejects_extra_actual_lines() {
+        crate::assert_diagnostic_lines!(
+            miden_assembly::report!("the first line\nthe second line"),
+            "the first line"
+        );
     }
 }
 

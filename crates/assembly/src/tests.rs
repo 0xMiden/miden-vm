@@ -3943,11 +3943,16 @@ fn emit_const_must_be_event_hash() {
 }
 
 #[test]
-#[should_panic]
-fn test_assert_diagnostic_lines() {
+#[should_panic(expected = "expected 3 lines, but got 1")]
+fn assert_diagnostic_lines_rejects_missing_actual_lines() {
     assert_diagnostic_lines!(report!("the error string"), "the error string", "other", "lines");
 }
 
+#[test]
+#[should_panic(expected = "expected 1 lines, but got 2")]
+fn assert_diagnostic_lines_rejects_extra_actual_lines() {
+    assert_diagnostic_lines!(report!("the first line\nthe second line"), "the first line");
+}
 // MAST TESTS
 // ================================================================================================
 

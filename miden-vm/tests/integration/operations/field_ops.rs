@@ -384,8 +384,7 @@ fn exp_bits_length_fail() {
             "12 |",
             "13 | begin exp.u65 exec.truncate_stack end",
             "   :            ^^",
-            "   `----",
-            r#" help: expected primitive opcode (e.g. "add"), or "end", or control flow opcode (e.g. "if.true")"#
+            "   `----"
         );
     }
 }
