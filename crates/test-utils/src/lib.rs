@@ -24,7 +24,7 @@ use miden_core::program::ProgramInfo;
 pub use miden_core::{
     EMPTY_WORD, Felt, ONE, WORD_SIZE, Word, ZERO,
     chiplets::hasher::{STATE_WIDTH, hash_elements},
-    deferred::PrecompileSchema,
+    deferred::NoopSchema,
     field::{Field, PrimeCharacteristicRing, PrimeField64, QuadFelt},
     program::{MIN_STACK_DEPTH, StackInputs, StackOutputs},
     utils::{IntoBytes, ToElements, group_slice_elements},
@@ -256,7 +256,7 @@ impl Test {
             libraries: Vec::default(),
             handlers: Vec::new(),
             add_modules: Vec::default(),
-            schema: Arc::new(PrecompileSchema::new([])),
+            schema: Arc::new(NoopSchema),
         }
     }
 
@@ -296,8 +296,8 @@ impl Test {
         self
     }
 
-    /// Installs the deferred-DAG [`Schema`] used by the test's `FastProcessor`. Defaults to an
-    /// empty [`PrecompileSchema`] — programs that emit precompile tags must install one (e.g.
+    /// Installs the deferred-DAG [`Schema`] used by the test's `FastProcessor`. Defaults to
+    /// [`NoopSchema`] — programs that emit precompile tags must install one (e.g.
     /// `miden_core_lib::CoreLibrary::precompile_schema()`).
     pub fn with_schema(mut self, schema: Arc<dyn Schema>) -> Self {
         self.schema = schema;
