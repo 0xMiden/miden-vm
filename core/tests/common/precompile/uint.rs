@@ -1,29 +1,47 @@
-//! `Uint256` — 256-bit wrapping integer arithmetic as a first reference [`App`].
+//! `Uint` — 256-bit wrapping integer arithmetic as a first reference precompile.
 //!
-//! Promotes the legacy `Field0Handler` to the multi-app substrate. Semantics are unchanged
-//! (operations are mod 2^256, limbs are u32 little-endian); the differences from `Field0Handler`
-//! are structural: tags route through [`super::PrecompileSchema`] by `app_id`, a `sub` op joins
-//! `add`/`mul`, and the app pre-registers `ZERO` / `ONE` / `P_MINUS_1` (`[u32::MAX; 8]`) leaves
-//! via [`App::init`].
+//! Semantics: operations are mod 2^256, limbs are u32 little-endian. Tags route through
+//! [`PrecompileSchema`] by `app_id`; a `sub` op joins `add`/`mul`, and the app pre-registers
+//! `ZERO` / `ONE` / `P_MINUS_1` (`[u32::MAX; 8]`) leaves via [`App::init`].
+//!
+//! [`PrecompileSchema`]: miden_core::deferred::PrecompileSchema
 
-use crate::{
+use miden_core::{
     Felt, ZERO,
     deferred::{
-        DeferredError, DeferredState, Digest, Node, NodeType, Payload, ReduceCtx, Schema,
-        SchemaError, TRUE_TAG, Tag, TagInfo, true_node,
+        App, AppTag, DeferredError, DeferredState, Digest, Node, NodeType, Payload, ReduceCtx,
+        Schema, SchemaError, TRUE_TAG, Tag, TagInfo, app_id_from, true_node,
     },
 };
 
-use super::{App, AppTag, FieldOps, app_id_from};
+// FIELD OPS
+// ================================================================================================
+
+/// Small surface a 256-bit field app exposes to consumers (e.g. [`super::Group`]) that need to
+/// mint and decode field leaves without going through the schema's `reduce`. Intentionally
+/// minimal — extend as concrete cross-app needs arise.
+pub trait FieldOps: App {
+    /// Tag of a canonical field leaf.
+    fn leaf_tag() -> Tag;
+    /// Build a canonical field leaf node from `[u32; 8]` limbs (little-endian).
+    fn leaf_node(limbs: [u32; 8]) -> Node;
+    /// Decode `[u32; 8]` limbs from a canonical field leaf node. Errors if `node` is not a
+    /// canonical leaf of this field app.
+    fn limbs_of(node: &Node) -> Result<[u32; 8], DeferredError>;
+    /// Wrapping 256-bit add (mod 2^256).
+    fn wrap_add(a: [u32; 8], b: [u32; 8]) -> [u32; 8];
+    /// Wrapping 256-bit sub (mod 2^256).
+    fn wrap_sub(a: [u32; 8], b: [u32; 8]) -> [u32; 8];
+}
 
 // PUBLIC APP TYPE
 // ================================================================================================
 
-/// Zero-sized handle for the `Uint256` app.
+/// Zero-sized handle for the `Uint` app.
 #[derive(Debug, Default, Clone, Copy)]
-pub struct Uint256;
+pub struct Uint;
 
-impl Uint256 {
+impl Uint {
     /// App name — hashed into `app_id`. Don't change without bumping [`Self::VERSION`].
     pub const NAME: &'static str = "uint256";
     /// App version — bump on incompatible discriminant changes.
@@ -38,12 +56,12 @@ impl Uint256 {
     pub const D_MUL: Felt = Felt::new_unchecked(3);
     pub const D_EQ: Felt = Felt::new_unchecked(4);
 
-    /// Derive `app_id`. Pure function over `Uint256`'s metadata.
+    /// Derive `app_id`. Pure function over `Uint`'s metadata.
     pub fn app_id() -> Felt {
         app_id_from(Self::NAME, Self::VERSION, &[], Self::DISCS)
     }
 
-    /// Tag for a canonical Uint256 leaf.
+    /// Tag for a canonical Uint leaf.
     pub fn leaf_tag() -> Tag {
         [Self::app_id(), Self::D_LEAF, ZERO, ZERO]
     }
@@ -69,7 +87,7 @@ impl Uint256 {
         Node::expression(Self::leaf_tag(), encode_limbs(limbs))
     }
 
-    /// Extract `[u32; 8]` limbs from a canonical leaf node, erroring if it isn't a `Uint256` leaf
+    /// Extract `[u32; 8]` limbs from a canonical leaf node, erroring if it isn't a `Uint` leaf
     /// or if any limb is non-canonical (felt > `u32::MAX`).
     pub fn limbs_of(node: &Node) -> Result<[u32; 8], DeferredError> {
         if node.tag != Self::leaf_tag() {
@@ -79,7 +97,7 @@ impl Uint256 {
     }
 
     /// 256-bit wrapping add (mod 2^256). Limbs are little-endian u32. Exposed for consumers
-    /// (e.g. future `MockGroup`) that want to perform arithmetic without going through `reduce`.
+    /// (e.g. [`super::Group`]) that want to perform arithmetic without going through `reduce`.
     pub fn wrap_add(a: [u32; 8], b: [u32; 8]) -> [u32; 8] {
         let mut out = [0u32; 8];
         let mut carry: u64 = 0;
@@ -118,7 +136,7 @@ impl Uint256 {
     }
 }
 
-impl FieldOps for Uint256 {
+impl FieldOps for Uint {
     fn leaf_tag() -> Tag {
         Self::leaf_tag()
     }
@@ -136,18 +154,22 @@ impl FieldOps for Uint256 {
     }
 }
 
-impl App for Uint256 {
+impl App for Uint {
     fn id(&self) -> Felt {
         Self::app_id()
     }
 
     fn init(&self, state: &mut DeferredState) {
         // ZERO, ONE, P_MINUS_1 — useful baseline constants. Idempotent re-interns are safe.
-        state.intern(Self::leaf_node([0; 8]));
+        // Registered via the public `Schema` API (`Uint: Schema`) since `DeferredState::intern`
+        // is crate-private to `miden-core`.
+        state.register(self, Self::leaf_node([0; 8])).expect("uint ZERO const");
         let mut one = [0u32; 8];
         one[0] = 1;
-        state.intern(Self::leaf_node(one));
-        state.intern(Self::leaf_node([u32::MAX; 8]));
+        state.register(self, Self::leaf_node(one)).expect("uint ONE const");
+        state
+            .register(self, Self::leaf_node([u32::MAX; 8]))
+            .expect("uint P_MINUS_1 const");
     }
 
     fn decode(&self, local: AppTag) -> Result<TagInfo, SchemaError> {
@@ -169,16 +191,16 @@ impl App for Uint256 {
     }
 
     fn reduce(&self, node: &Node, ctx: &mut dyn ReduceCtx) -> Result<Node, SchemaError> {
-        match Uint256Node::parse(node)? {
+        match UintNode::parse(node)? {
             // Leaf canonicality is checked at parse-time, deferred from register-time so that
             // malformed leaves are interned silently and only error out when used.
-            Uint256Node::Leaf => Ok(node.clone()),
-            Uint256Node::BinaryOp { op, lhs, rhs } => {
+            UintNode::Leaf => Ok(node.clone()),
+            UintNode::BinaryOp { op, lhs, rhs } => {
                 let a = leaf_limbs(&ctx.resolve(lhs)?)?;
                 let b = leaf_limbs(&ctx.resolve(rhs)?)?;
                 Ok(Self::leaf_node(op.apply(a, b)))
             },
-            Uint256Node::Eq { lhs, rhs } => {
+            UintNode::Eq { lhs, rhs } => {
                 if ctx.resolve(lhs)? != ctx.resolve(rhs)? {
                     return Err(SchemaError::AssertionFailed);
                 }
@@ -188,9 +210,9 @@ impl App for Uint256 {
     }
 }
 
-// Convenience: let callers use `Uint256` directly as a single-app `Schema` in places where they
-// don't need the composite. Equivalent to `PrecompileSchema::single(Uint256)`, just cheaper.
-impl Schema for Uint256 {
+// Convenience: let callers use `Uint` directly as a single-app `Schema` in places where they
+// don't need the composite. Equivalent to `PrecompileSchema::single(Uint)`, just cheaper.
+impl Schema for Uint {
     fn decode(&self, tag: Tag) -> Result<TagInfo, SchemaError> {
         if tag[0] != Self::app_id() || tag[3] != ZERO {
             return Err(SchemaError::InvalidNode);
@@ -209,7 +231,7 @@ impl Schema for Uint256 {
 // TYPED TAG / NODE
 // ================================================================================================
 
-/// Decoded view of a recognised `Uint256` tag.
+/// Decoded view of a recognised `Uint` tag.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Discriminant {
     Leaf,
@@ -240,24 +262,24 @@ enum BinaryOp {
 impl BinaryOp {
     fn apply(self, a: [u32; 8], b: [u32; 8]) -> [u32; 8] {
         match self {
-            Self::Add => Uint256::wrap_add(a, b),
-            Self::Sub => Uint256::wrap_sub(a, b),
-            Self::Mul => Uint256::wrap_mul(a, b),
+            Self::Add => Uint::wrap_add(a, b),
+            Self::Sub => Uint::wrap_sub(a, b),
+            Self::Mul => Uint::wrap_mul(a, b),
         }
     }
 }
 
-/// A `Uint256` node with both tag and payload decoded.
-enum Uint256Node {
+/// A `Uint` node with both tag and payload decoded.
+enum UintNode {
     Leaf,
     BinaryOp { op: BinaryOp, lhs: Digest, rhs: Digest },
     Eq { lhs: Digest, rhs: Digest },
 }
 
-impl Uint256Node {
+impl UintNode {
     fn parse(node: &Node) -> Result<Self, SchemaError> {
         let tag = node.tag;
-        if tag[0] != Uint256::app_id() || tag[2] != ZERO || tag[3] != ZERO {
+        if tag[0] != Uint::app_id() || tag[2] != ZERO || tag[3] != ZERO {
             return Err(SchemaError::InvalidNode);
         }
         let kind = Discriminant::classify(tag[1]).ok_or(SchemaError::InvalidNode)?;
@@ -283,7 +305,7 @@ impl Uint256Node {
 // ================================================================================================
 
 fn leaf_limbs(node: &Node) -> Result<[u32; 8], DeferredError> {
-    if node.tag != Uint256::leaf_tag() {
+    if node.tag != Uint::leaf_tag() {
         return Err(DeferredError::InvalidPayload);
     }
     decode_limbs(node.expression_payload().ok_or(DeferredError::InvalidPayload)?)
@@ -303,159 +325,4 @@ fn decode_limbs(payload: &Payload) -> Result<[u32; 8], DeferredError> {
 
 fn encode_limbs(limbs: [u32; 8]) -> Payload {
     Payload::new(limbs.map(Felt::from_u32))
-}
-
-// TESTS
-// ================================================================================================
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn leaf_from_u32s(limbs: [u32; 8]) -> Node {
-        Uint256::leaf_node(limbs)
-    }
-
-    fn leaf_from_low_u64(value: u64) -> Node {
-        let mut limbs = [0u32; 8];
-        limbs[0] = value as u32;
-        limbs[1] = (value >> 32) as u32;
-        leaf_from_u32s(limbs)
-    }
-
-    fn eval_binary(op: BinaryOp, lhs: Node, rhs: Node) -> Result<Node, DeferredError> {
-        let a = leaf_limbs(&lhs)?;
-        let b = leaf_limbs(&rhs)?;
-        Ok(Uint256::leaf_node(op.apply(a, b)))
-    }
-
-    #[test]
-    fn add_small_values() {
-        let out = eval_binary(BinaryOp::Add, leaf_from_low_u64(3), leaf_from_low_u64(5)).unwrap();
-        assert_eq!(out.tag, Uint256::leaf_tag());
-        assert_eq!(out, leaf_from_low_u64(8));
-    }
-
-    #[test]
-    fn add_propagates_carry_across_limbs() {
-        let mut a_limbs = [0u32; 8];
-        a_limbs[0] = u32::MAX;
-        let mut b_limbs = [0u32; 8];
-        b_limbs[0] = 1;
-        let out =
-            eval_binary(BinaryOp::Add, leaf_from_u32s(a_limbs), leaf_from_u32s(b_limbs)).unwrap();
-        let mut expected = [0u32; 8];
-        expected[1] = 1;
-        assert_eq!(out, leaf_from_u32s(expected));
-    }
-
-    #[test]
-    fn add_wraps_at_2_to_256() {
-        let max = leaf_from_u32s([u32::MAX; 8]);
-        let one = leaf_from_low_u64(1);
-        let out = eval_binary(BinaryOp::Add, max, one).unwrap();
-        assert_eq!(out, leaf_from_u32s([0; 8]));
-    }
-
-    #[test]
-    fn sub_small_values() {
-        let out = eval_binary(BinaryOp::Sub, leaf_from_low_u64(10), leaf_from_low_u64(3)).unwrap();
-        assert_eq!(out, leaf_from_low_u64(7));
-    }
-
-    #[test]
-    fn sub_borrows_across_limbs() {
-        let mut a_limbs = [0u32; 8];
-        a_limbs[1] = 1; // a = 2^32
-        let mut b_limbs = [0u32; 8];
-        b_limbs[0] = 1;
-        let out =
-            eval_binary(BinaryOp::Sub, leaf_from_u32s(a_limbs), leaf_from_u32s(b_limbs)).unwrap();
-        // 2^32 - 1 = 0xffffffff in limb 0, zero elsewhere.
-        let mut expected = [0u32; 8];
-        expected[0] = u32::MAX;
-        assert_eq!(out, leaf_from_u32s(expected));
-    }
-
-    #[test]
-    fn sub_wraps_below_zero() {
-        let zero = leaf_from_low_u64(0);
-        let one = leaf_from_low_u64(1);
-        // 0 - 1 = 2^256 - 1 = [u32::MAX; 8].
-        let out = eval_binary(BinaryOp::Sub, zero, one).unwrap();
-        assert_eq!(out, leaf_from_u32s([u32::MAX; 8]));
-    }
-
-    #[test]
-    fn mul_small_values() {
-        let out = eval_binary(BinaryOp::Mul, leaf_from_low_u64(6), leaf_from_low_u64(7)).unwrap();
-        assert_eq!(out, leaf_from_low_u64(42));
-    }
-
-    #[test]
-    fn mul_propagates_across_limbs() {
-        let mut a_limbs = [0u32; 8];
-        a_limbs[1] = 1;
-        let b_limbs = a_limbs;
-        let out =
-            eval_binary(BinaryOp::Mul, leaf_from_u32s(a_limbs), leaf_from_u32s(b_limbs)).unwrap();
-        let mut expected = [0u32; 8];
-        expected[2] = 1;
-        assert_eq!(out, leaf_from_u32s(expected));
-    }
-
-    #[test]
-    fn mul_truncates_overflow_above_2_to_256() {
-        let mut a_limbs = [0u32; 8];
-        a_limbs[7] = 1 << 31;
-        let two = leaf_from_low_u64(2);
-        let out = eval_binary(BinaryOp::Mul, leaf_from_u32s(a_limbs), two).unwrap();
-        assert_eq!(out, leaf_from_u32s([0; 8]));
-    }
-
-    #[test]
-    fn non_canonical_limb_errors() {
-        let bad = Node::expression(
-            Uint256::leaf_tag(),
-            Payload::new([
-                Felt::new_unchecked(1u64 << 32),
-                Felt::from_u32(0),
-                Felt::from_u32(0),
-                Felt::from_u32(0),
-                Felt::from_u32(0),
-                Felt::from_u32(0),
-                Felt::from_u32(0),
-                Felt::from_u32(0),
-            ]),
-        );
-        let ok = leaf_from_low_u64(1);
-        let err = eval_binary(BinaryOp::Add, bad, ok);
-        assert!(matches!(err, Err(DeferredError::InvalidPayload)));
-    }
-
-    #[test]
-    fn non_leaf_operand_errors() {
-        let a = Node::expression(Uint256::add_tag(), Payload::new([Felt::from_u32(0); 8]));
-        let b = leaf_from_low_u64(1);
-        let err = eval_binary(BinaryOp::Add, a, b);
-        assert!(matches!(err, Err(DeferredError::InvalidPayload)));
-    }
-
-    #[test]
-    fn app_id_is_stable_across_calls() {
-        assert_eq!(Uint256::app_id(), Uint256::app_id());
-    }
-
-    #[test]
-    fn boot_interns_zero_one_pminus1() {
-        use super::super::PrecompileSchema;
-        let schema = PrecompileSchema::single(Uint256);
-        let mut state = DeferredState::new();
-        schema.boot(&mut state);
-        assert!(state.contains(&Uint256::leaf_node([0; 8]).digest()));
-        let mut one = [0u32; 8];
-        one[0] = 1;
-        assert!(state.contains(&Uint256::leaf_node(one).digest()));
-        assert!(state.contains(&Uint256::leaf_node([u32::MAX; 8]).digest()));
-    }
 }

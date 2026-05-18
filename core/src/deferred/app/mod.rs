@@ -1,6 +1,6 @@
 //! Multi-app composite-schema substrate.
 //!
-//! An [`App`] is a self-contained semantic module (e.g. `Uint256`, future curve / hash apps)
+//! An [`App`] is a self-contained semantic module (e.g. a hash, signature, or field app)
 //! that claims a slice of the 4-felt tag space identified by a stable [`Felt`] `app_id`. The
 //! [`PrecompileSchema`] composite dispatches each tag to the right app by `tag[0]`, hands the
 //! remaining bits to the app as an [`AppTag`], and forwards `decode` / `reduce`.
@@ -19,32 +19,10 @@
 use blake3::Hasher;
 
 use super::{DeferredState, Node, ReduceCtx, SchemaError, TagInfo};
-#[cfg(any(test, feature = "testing"))]
-use super::{DeferredError, Tag};
 use crate::Felt;
 
 mod composite;
 pub use composite::PrecompileSchema;
-
-#[cfg(any(test, feature = "testing"))]
-mod uint256;
-#[cfg(any(test, feature = "testing"))]
-pub use uint256::Uint256;
-
-#[cfg(any(test, feature = "testing"))]
-mod mock_group;
-#[cfg(any(test, feature = "testing"))]
-pub use mock_group::MockGroup;
-
-#[cfg(any(test, feature = "testing"))]
-mod mock_hash;
-#[cfg(any(test, feature = "testing"))]
-pub use mock_hash::MockHash;
-
-#[cfg(any(test, feature = "testing"))]
-mod mock_sig;
-#[cfg(any(test, feature = "testing"))]
-pub use mock_sig::MockSig;
 
 // APP TAG
 // ================================================================================================
@@ -83,30 +61,6 @@ pub trait App: core::fmt::Debug + Send + Sync {
     /// Reduce a node owned by this app to canonical form. Same contract as
     /// [`super::Schema::reduce`] — see its docs for the leaf / op / predicate / chunk variants.
     fn reduce(&self, node: &Node, ctx: &mut dyn ReduceCtx) -> Result<Node, SchemaError>;
-}
-
-// FIELD OPS
-// ================================================================================================
-
-/// Small surface a 256-bit field [`App`] exposes to consumers (e.g. [`MockGroup`]) that need to
-/// mint and decode field leaves without going through the schema's `reduce`. Intentionally
-/// minimal — extend as concrete cross-app needs arise.
-///
-/// Test-only — only [`MockGroup`] consumes it today. Gated alongside the reference field app
-/// `Uint256`.
-#[cfg(any(test, feature = "testing"))]
-pub trait FieldOps: App {
-    /// Tag of a canonical field leaf.
-    fn leaf_tag() -> Tag;
-    /// Build a canonical field leaf node from `[u32; 8]` limbs (little-endian).
-    fn leaf_node(limbs: [u32; 8]) -> Node;
-    /// Decode `[u32; 8]` limbs from a canonical field leaf node. Errors if `node` is not a
-    /// canonical leaf of this field app.
-    fn limbs_of(node: &Node) -> Result<[u32; 8], DeferredError>;
-    /// Wrapping 256-bit add (mod 2^256).
-    fn wrap_add(a: [u32; 8], b: [u32; 8]) -> [u32; 8];
-    /// Wrapping 256-bit sub (mod 2^256).
-    fn wrap_sub(a: [u32; 8], b: [u32; 8]) -> [u32; 8];
 }
 
 // APP ID DERIVATION

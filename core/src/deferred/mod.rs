@@ -8,9 +8,10 @@
 //! the root to TRUE.
 //!
 //! The full subsystem — data model, [`Schema`] trait, in-memory [`DeferredState`], and the
-//! [`Uint256`] reference app — lives here in `miden-core`. The processor only contributes the
-//! system-event glue that bridges VM operand-stack reads to schema calls. User-defined precompile
-//! sets are composed via the [`App`] trait and the [`PrecompileSchema`] composite.
+//! [`App`] / [`PrecompileSchema`] composite substrate — lives here in `miden-core`. The
+//! processor only contributes the system-event glue that bridges VM operand-stack reads to
+//! schema calls. Reference precompiles that exercise this public surface live in `miden-core`'s
+//! integration tests (`core/tests/common/precompile/`), not on the crate's public surface.
 
 mod schema;
 mod state;
@@ -20,17 +21,20 @@ pub use schema::{NodeType, NoopSchema, ReduceCtx, Schema, SchemaError, TagInfo};
 pub use state::DeferredState;
 pub use wire::{DeferredStateWire, IntegrityError, TRUE_INDEX, WireBody, WireEntry};
 
-// Multi-app composite layer. The `App` trait + `PrecompileSchema` substrate are part of the
-// public surface; the reference / mock apps (`Uint256`, `MockGroup`, `MockHash`, `MockSig`)
-// remain `testing`-gated. Production precompile apps (keccak256, sha512, ecdsa_k256_keccak,
-// eddsa_ed25519) live in `miden-core-lib::precompiles`, next to their MASM wrappers.
+// Multi-app composite layer. The `App` trait + `PrecompileSchema` substrate are the public
+// surface. Production precompile apps (keccak256, sha512, ecdsa_k256_keccak, eddsa_ed25519)
+// live in `miden-core-lib::precompiles`, next to their MASM wrappers; reference precompiles
+// live in `core/tests/common/precompile/`.
 mod app;
+
+// Minimal `#[cfg(test)]` schema fixture for the engine's own unit tests (state.rs et al.).
+// Not exported, not on the `testing` surface — scaffolding only.
+#[cfg(test)]
+pub(crate) mod test_precompile;
+
 use alloc::{sync::Arc, vec::Vec};
 
 pub use app::{App, AppTag, PrecompileSchema, app_id_from};
-
-#[cfg(any(test, feature = "testing"))]
-pub use app::{FieldOps, MockGroup, MockHash, MockSig, Uint256};
 use miden_crypto::{ZERO, hash::poseidon2::Poseidon2};
 use miden_utils_sync::OnceLockCompat;
 #[cfg(feature = "serde")]

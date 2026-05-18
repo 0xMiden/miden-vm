@@ -1,11 +1,11 @@
-//! `MockHash` — chunk-bodied preimage → expression-bodied digest leaf [`App`].
+//! `Hash` — chunk-bodied preimage → expression-bodied digest leaf reference precompile.
 //!
 //! Exercises chunk-bodied inputs and the chunk-to-expression reduction shape without
 //! introducing a real hash implementation. The "hash" is a coordinate-wise sum of all preimage
 //! chunks into an 8-felt accumulator — deterministic, trivially testable, definitely not
 //! collision-resistant. A real `Keccak` / `Sha512` app would slot in by swapping the kernel.
 //!
-//! Tag layout (`MockHash`-specific, opaque to the framework):
+//! Tag layout (`Hash`-specific, opaque to the framework):
 //!
 //! ```text
 //! [app_id, node_disc, imm, ZERO]
@@ -16,24 +16,24 @@
 //! - `digest`   (disc 1) — expression-bodied (8-felt digest); self-evaluating.
 //! - `eq`       (disc 2) — expression-bodied predicate over two child digests.
 
-use crate::{
+use std::sync::Arc;
+
+use miden_core::{
     Felt, ZERO,
     deferred::{
-        DeferredError, Digest, Node, NodePayload, NodeType, Payload, ReduceCtx, SchemaError,
-        TRUE_TAG, Tag, TagInfo, true_node,
+        App, AppTag, DeferredError, Digest, Node, NodePayload, NodeType, Payload, ReduceCtx,
+        SchemaError, TRUE_TAG, Tag, TagInfo, app_id_from, true_node,
     },
 };
-
-use super::{App, AppTag, app_id_from};
 
 // PUBLIC APP TYPE
 // ================================================================================================
 
-/// Zero-sized handle for the `MockHash` app.
+/// Zero-sized handle for the `Hash` app.
 #[derive(Debug, Default, Clone, Copy)]
-pub struct MockHash;
+pub struct Hash;
 
-impl MockHash {
+impl Hash {
     pub const NAME: &'static str = "mock_hash";
     pub const VERSION: u32 = 1;
     pub const DISCS: &'static [&'static str] = &["preimage", "digest", "eq"];
@@ -67,7 +67,7 @@ impl MockHash {
     /// Build a `preimage` chunk node from caller-supplied 8-felt chunks. The caller is
     /// responsible for zero-padding the last chunk to `BYTES_PER_CHUNK` and for matching
     /// `chunks.len() == ceil(n_bytes / BYTES_PER_CHUNK)`.
-    pub fn preimage_node(n_bytes: u32, chunks: impl Into<alloc::sync::Arc<[[Felt; 8]]>>) -> Node {
+    pub fn preimage_node(n_bytes: u32, chunks: impl Into<Arc<[[Felt; 8]]>>) -> Node {
         Node::chunk(Self::preimage_tag(n_bytes), chunks)
     }
 
@@ -82,7 +82,7 @@ impl MockHash {
     }
 
     /// Decode `[Felt; 8]` digest contents from a canonical `digest` leaf. Errors if `node`
-    /// isn't tagged as a `MockHash` digest leaf.
+    /// isn't tagged as a `Hash` digest leaf.
     pub fn digest_felts(node: &Node) -> Result<[Felt; 8], DeferredError> {
         if node.tag != Self::digest_tag() {
             return Err(DeferredError::InvalidPayload);
@@ -108,7 +108,7 @@ impl MockHash {
     }
 }
 
-impl App for MockHash {
+impl App for Hash {
     fn id(&self) -> Felt {
         Self::app_id()
     }
@@ -194,144 +194,5 @@ impl Discriminant {
             2 => Some(Self::Eq),
             _ => None,
         }
-    }
-}
-
-// TESTS
-// ================================================================================================
-
-#[cfg(test)]
-mod tests {
-    use alloc::boxed::Box;
-    use alloc::vec::Vec;
-
-    use super::*;
-    use crate::deferred::{DeferredState, PrecompileSchema};
-
-    fn chunk_data(n_chunks: u32) -> Vec<[Felt; 8]> {
-        (0..n_chunks)
-            .map(|i| core::array::from_fn(|j| Felt::from_u32(1 + i * 8 + j as u32)))
-            .collect()
-    }
-
-    fn fresh() -> (PrecompileSchema, DeferredState) {
-        let schema = PrecompileSchema::single(MockHash);
-        (schema, DeferredState::new())
-    }
-
-    #[test]
-    fn n_chunks_rounds_up() {
-        assert_eq!(MockHash::n_chunks(0), 0);
-        assert_eq!(MockHash::n_chunks(1), 1);
-        assert_eq!(MockHash::n_chunks(31), 1);
-        assert_eq!(MockHash::n_chunks(32), 1);
-        assert_eq!(MockHash::n_chunks(33), 2);
-        assert_eq!(MockHash::n_chunks(64), 2);
-        assert_eq!(MockHash::n_chunks(65), 3);
-    }
-
-    #[test]
-    fn decode_preimage_extracts_chunk_count_from_imm() {
-        let info = MockHash.decode(AppTag {
-            node_disc: MockHash::D_PREIMAGE,
-            imm: Felt::from_u32(65),
-        }).unwrap();
-        assert!(matches!(info.node_type, NodeType::Chunks(3)));
-        assert_eq!(info.evaluates_to, MockHash::digest_tag());
-    }
-
-    #[test]
-    fn decode_digest_is_self_evaluating_value() {
-        let info = MockHash
-            .decode(AppTag { node_disc: MockHash::D_DIGEST, imm: ZERO })
-            .unwrap();
-        assert!(matches!(info.node_type, NodeType::Value));
-        assert_eq!(info.evaluates_to, MockHash::digest_tag());
-    }
-
-    #[test]
-    fn decode_eq_is_binary_predicate() {
-        let info = MockHash
-            .decode(AppTag { node_disc: MockHash::D_EQ, imm: ZERO })
-            .unwrap();
-        assert!(matches!(info.node_type, NodeType::Binary));
-        assert_eq!(info.evaluates_to, TRUE_TAG);
-    }
-
-    #[test]
-    fn decode_unknown_discriminant_rejected() {
-        let err = MockHash.decode(AppTag { node_disc: Felt::from_u32(99), imm: ZERO });
-        assert!(matches!(err, Err(SchemaError::InvalidNode)));
-    }
-
-    #[test]
-    fn decode_rejects_imm_on_non_preimage() {
-        let err = MockHash
-            .decode(AppTag { node_disc: MockHash::D_DIGEST, imm: Felt::from_u32(1) });
-        assert!(matches!(err, Err(SchemaError::InvalidNode)));
-        let err = MockHash
-            .decode(AppTag { node_disc: MockHash::D_EQ, imm: Felt::from_u32(1) });
-        assert!(matches!(err, Err(SchemaError::InvalidNode)));
-    }
-
-    #[test]
-    fn preimage_reduces_to_digest_leaf() {
-        let (schema, mut state) = fresh();
-        let chunks = chunk_data(2);
-        let expected = MockHash::digest_node(MockHash::hash(&chunks));
-        let node = MockHash::preimage_node(64, chunks);
-        let canonical = state.evaluate(&schema, node).unwrap();
-        assert_eq!(canonical, expected);
-        assert!(state.contains(&expected.digest()));
-    }
-
-    #[test]
-    fn digest_leaf_is_self_evaluating() {
-        let (schema, mut state) = fresh();
-        let leaf = MockHash::digest_node([Felt::from_u32(7); 8]);
-        let h = state.register(&schema, leaf.clone()).unwrap();
-        let canonical = state.evaluate(&schema, state.get(&h).unwrap().clone()).unwrap();
-        assert_eq!(canonical, leaf);
-    }
-
-    #[test]
-    fn eq_predicate_matches_preimage_against_known_digest() {
-        let (schema, mut state) = fresh();
-        let chunks = chunk_data(2);
-        let known = MockHash::digest_node(MockHash::hash(&chunks));
-        let h_known = state.register(&schema, known).unwrap();
-        let h_preimage = state.register(&schema, MockHash::preimage_node(64, chunks)).unwrap();
-        let result = state.evaluate(&schema, MockHash::eq_node(h_preimage, h_known)).unwrap();
-        assert!(result.is_true_node());
-    }
-
-    #[test]
-    fn eq_predicate_errors_on_mismatch() {
-        let (schema, mut state) = fresh();
-        let chunks = chunk_data(1);
-        let wrong = MockHash::digest_node([Felt::from_u32(0xdead); 8]);
-        let h_wrong = state.register(&schema, wrong).unwrap();
-        let h_preimage = state.register(&schema, MockHash::preimage_node(32, chunks)).unwrap();
-        let err = state.evaluate(&schema, MockHash::eq_node(h_preimage, h_wrong));
-        assert!(matches!(err, Err(SchemaError::AssertionFailed)));
-    }
-
-    #[test]
-    fn empty_preimage_reduces_to_zero_digest() {
-        // n_bytes=0 means n_chunks=0; mock-hash of zero chunks is the zero accumulator.
-        let (schema, mut state) = fresh();
-        let node = MockHash::preimage_node(0, Vec::new());
-        let canonical = state.evaluate(&schema, node).unwrap();
-        assert_eq!(canonical, MockHash::digest_node([ZERO; 8]));
-    }
-
-    #[test]
-    fn composite_with_mock_hash_dispatches() {
-        // Sanity: app_id-based routing works in a composite holding only MockHash.
-        let schema = PrecompileSchema::new([Box::new(MockHash) as Box<dyn App>]);
-        let mut state = DeferredState::new();
-        let chunks = chunk_data(1);
-        let canonical = state.evaluate(&schema, MockHash::preimage_node(32, chunks.clone())).unwrap();
-        assert_eq!(canonical, MockHash::digest_node(MockHash::hash(&chunks)));
     }
 }

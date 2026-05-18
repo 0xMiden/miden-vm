@@ -11,7 +11,7 @@ use miden_core::{
     ZERO,
     deferred::{
         Node, NodePayload, NodeType, Payload, ReduceCtx, Schema, SchemaError, TRUE_DIGEST, Tag,
-        TagInfo, Uint256,
+        TagInfo, true_node,
     },
 };
 use miden_processor::{
@@ -25,7 +25,7 @@ extern crate alloc;
 // PROCESSOR FACTORY
 // ================================================================================================
 
-/// Builds a `FastProcessor` configured for the deferred-DAG tests with [`Uint256`] installed as
+/// Builds a `FastProcessor` configured for the deferred-DAG tests with [`ArithTestSchema`] installed as
 /// the schema. The processor consumes itself when running the program.
 fn build_processor() -> FastProcessor {
     FastProcessor::new_with_options(
@@ -34,7 +34,7 @@ fn build_processor() -> FastProcessor {
         ExecutionOptions::default(),
     )
     .expect("processor construction")
-    .with_schema(Arc::new(Uint256))
+    .with_schema(Arc::new(ArithTestSchema))
 }
 
 // MASM BUILDERS
@@ -123,14 +123,134 @@ impl FeltExt for Felt {
     }
 }
 
-// UINT256 LEAF HELPER
+// ARITH TEST SCHEMA
 // ================================================================================================
+//
+// In-file fixture schema for the processor sys-event tests: an 8×u32 little-endian value leaf
+// plus `add` / `mul` wrapping binary ops and an `eq` predicate. Self-contained (mirrors the
+// existing `ChunkTestSchema` idiom) so the processor crate's tests need no reference impl from
+// `miden-core`'s surface.
 
-fn uint256_leaf(low: u64) -> Node {
+#[derive(Debug, Default, Clone, Copy)]
+struct ArithTestSchema;
+
+impl ArithTestSchema {
+    const APP_ID: Felt = Felt::new_unchecked(0xA21D_0001);
+    const D_LEAF: Felt = Felt::new_unchecked(0);
+    const D_ADD: Felt = Felt::new_unchecked(1);
+    const D_MUL: Felt = Felt::new_unchecked(2);
+    const D_EQ: Felt = Felt::new_unchecked(3);
+
+    fn leaf_tag() -> Tag {
+        [Self::APP_ID, Self::D_LEAF, ZERO, ZERO]
+    }
+    fn add_tag() -> Tag {
+        [Self::APP_ID, Self::D_ADD, ZERO, ZERO]
+    }
+    fn mul_tag() -> Tag {
+        [Self::APP_ID, Self::D_MUL, ZERO, ZERO]
+    }
+    fn eq_tag() -> Tag {
+        [Self::APP_ID, Self::D_EQ, ZERO, ZERO]
+    }
+
+    fn leaf_node(limbs: [u32; 8]) -> Node {
+        Node::expression(Self::leaf_tag(), Payload::new(limbs.map(Felt::from_u32)))
+    }
+
+    fn limbs_of(node: &Node) -> Result<[u32; 8], SchemaError> {
+        if node.tag != Self::leaf_tag() {
+            return Err(SchemaError::InvalidNode);
+        }
+        let payload = node.expression_payload().ok_or(SchemaError::InvalidNode)?;
+        let mut limbs = [0u32; 8];
+        for (i, felt) in payload.0.iter().enumerate() {
+            let v = felt.as_canonical_u64();
+            if v > u32::MAX as u64 {
+                return Err(SchemaError::InvalidNode);
+            }
+            limbs[i] = v as u32;
+        }
+        Ok(limbs)
+    }
+
+    fn wrap_add(a: [u32; 8], b: [u32; 8]) -> [u32; 8] {
+        let mut out = [0u32; 8];
+        let mut carry: u64 = 0;
+        for i in 0..8 {
+            let s = a[i] as u64 + b[i] as u64 + carry;
+            out[i] = s as u32;
+            carry = s >> 32;
+        }
+        out
+    }
+
+    fn wrap_mul(a: [u32; 8], b: [u32; 8]) -> [u32; 8] {
+        let mut out = [0u32; 8];
+        for i in 0..8 {
+            let mut carry: u64 = 0;
+            for j in 0..(8 - i) {
+                let cur = out[i + j] as u64 + a[i] as u64 * b[j] as u64 + carry;
+                out[i + j] = cur as u32;
+                carry = cur >> 32;
+            }
+        }
+        out
+    }
+}
+
+impl Schema for ArithTestSchema {
+    fn decode(&self, tag: Tag) -> Result<TagInfo, SchemaError> {
+        if tag[0] != Self::APP_ID || tag[2] != ZERO || tag[3] != ZERO {
+            return Err(SchemaError::InvalidNode);
+        }
+        let (node_type, evaluates_to) = match tag[1] {
+            d if d == Self::D_LEAF => (NodeType::Value, Self::leaf_tag()),
+            d if d == Self::D_ADD || d == Self::D_MUL => (NodeType::Binary, Self::leaf_tag()),
+            d if d == Self::D_EQ => (NodeType::Binary, miden_core::deferred::TRUE_TAG),
+            _ => return Err(SchemaError::InvalidNode),
+        };
+        Ok(TagInfo { node_type, evaluates_to })
+    }
+
+    fn reduce(&self, node: &Node, ctx: &mut dyn ReduceCtx) -> Result<Node, SchemaError> {
+        if node.tag[0] != Self::APP_ID || node.tag[2] != ZERO || node.tag[3] != ZERO {
+            return Err(SchemaError::InvalidNode);
+        }
+        let payload = node.expression_payload().ok_or(SchemaError::InvalidNode)?;
+        match node.tag[1] {
+            d if d == Self::D_LEAF => {
+                Self::limbs_of(node)?;
+                Ok(node.clone())
+            },
+            d if d == Self::D_ADD || d == Self::D_MUL => {
+                let (lhs, rhs) = payload.binary_op_children();
+                let a = Self::limbs_of(&ctx.resolve(lhs)?)?;
+                let b = Self::limbs_of(&ctx.resolve(rhs)?)?;
+                let out = if d == Self::D_ADD {
+                    Self::wrap_add(a, b)
+                } else {
+                    Self::wrap_mul(a, b)
+                };
+                Ok(Self::leaf_node(out))
+            },
+            d if d == Self::D_EQ => {
+                let (lhs, rhs) = payload.binary_op_children();
+                if ctx.resolve(lhs)? != ctx.resolve(rhs)? {
+                    return Err(SchemaError::AssertionFailed);
+                }
+                Ok(true_node())
+            },
+            _ => Err(SchemaError::InvalidNode),
+        }
+    }
+}
+
+fn arith_leaf(low: u64) -> Node {
     let mut limbs = [0u32; 8];
     limbs[0] = low as u32;
     limbs[1] = (low >> 32) as u32;
-    Uint256::leaf_node(limbs)
+    ArithTestSchema::leaf_node(limbs)
 }
 
 // END-TO-END: (a + b) * c == 35  (with a=3, b=4, c=5)
@@ -139,23 +259,23 @@ fn uint256_leaf(low: u64) -> Node {
 #[test]
 fn deferred_end_to_end_register_eval_assert() {
     // Precompute every node and digest the program will use.
-    let a = uint256_leaf(3);
-    let b = uint256_leaf(4);
-    let c = uint256_leaf(5);
-    let d = uint256_leaf(35); // (3 + 4) * 5
+    let a = arith_leaf(3);
+    let b = arith_leaf(4);
+    let c = arith_leaf(5);
+    let d = arith_leaf(35); // (3 + 4) * 5
 
     let a_digest = a.digest();
     let b_digest = b.digest();
     let c_digest = c.digest();
     let d_digest = d.digest();
-    let add = Node::expression(Uint256::add_tag(), Payload::binary_op(a_digest, b_digest));
+    let add = Node::expression(ArithTestSchema::add_tag(), Payload::binary_op(a_digest, b_digest));
     let add_digest = add.digest();
-    let mul = Node::expression(Uint256::mul_tag(), Payload::binary_op(add_digest, c_digest));
+    let mul = Node::expression(ArithTestSchema::mul_tag(), Payload::binary_op(add_digest, c_digest));
     let mul_digest = mul.digest();
     // Predicate node: same shape as a binary op (expression body, two child digests), just with
     // ASSERT_EQ as the tag.
     let assertion =
-        Node::expression(Uint256::eq_tag(), Payload::binary_op(mul_digest, d_digest));
+        Node::expression(ArithTestSchema::eq_tag(), Payload::binary_op(mul_digest, d_digest));
 
     // Build the program: register every node, then evaluate the predicate to verify it.
     let mut src = String::from("begin\n");
@@ -206,9 +326,9 @@ fn deferred_end_to_end_register_eval_assert() {
 fn deferred_evaluate_pushes_canonical_form_to_advice() {
     // Register two leaves a=3 and b=4, then ask `adv.evaluate_deferred` for the canonical form of
     // (a + b). Confirm the advice-pop yields a leaf node with payload limb0 = 7.
-    let a = uint256_leaf(3);
-    let b = uint256_leaf(4);
-    let add = Node::expression(Uint256::add_tag(), Payload::binary_op(a.digest(), b.digest()));
+    let a = arith_leaf(3);
+    let b = arith_leaf(4);
+    let add = Node::expression(ArithTestSchema::add_tag(), Payload::binary_op(a.digest(), b.digest()));
 
     let mut src = String::from("begin\n");
     emit_register(&mut src, a);
@@ -225,14 +345,14 @@ fn deferred_evaluate_pushes_canonical_form_to_advice() {
         .expect("execution must succeed");
 
     // Memory layout: addresses 0..8 hold the canonical payload (a 256-bit u32-limbed integer of
-    // value 7), 8..12 hold the canonical tag (Uint256::leaf_tag()).
+    // value 7), 8..12 hold the canonical tag (ArithTestSchema::leaf_tag()).
     let ctx = 0u32.into();
     let mut mem = [Felt::from_u32(0); 12];
     for i in 0..12u32 {
         mem[i as usize] = output.memory.read_element(ctx, Felt::from_u32(i)).expect("memory read");
     }
     let canonical_tag = [mem[8], mem[9], mem[10], mem[11]];
-    assert_eq!(canonical_tag, Uint256::leaf_tag(), "evaluate returns canonical leaf tag");
+    assert_eq!(canonical_tag, ArithTestSchema::leaf_tag(), "evaluate returns canonical leaf tag");
     assert_eq!(mem[0].as_canonical_u64(), 7, "limb 0 of (3+4)");
     for (limb_idx, felt) in mem[..8].iter().enumerate().skip(1) {
         assert_eq!(felt.as_canonical_u64(), 0, "limb {} of (3+4) must be zero", limb_idx);
@@ -247,9 +367,9 @@ fn deferred_evaluate_on_predicate_pushes_nothing_to_advice() {
     // Register one leaf, build a self-equal predicate (a == a), evaluate it. The predicate must
     // verify successfully but nothing is pushed onto the advice stack — a trailing `adv_push`
     // therefore underflows and fails execution.
-    let a = uint256_leaf(7);
+    let a = arith_leaf(7);
     let a_eq_a =
-        Node::expression(Uint256::eq_tag(), Payload::binary_op(a.digest(), a.digest()));
+        Node::expression(ArithTestSchema::eq_tag(), Payload::binary_op(a.digest(), a.digest()));
 
     let mut src = String::from("begin\n");
     emit_register(&mut src, a);
@@ -280,10 +400,10 @@ fn deferred_evaluate_on_predicate_pushes_nothing_to_advice() {
 
 #[test]
 fn deferred_register_predicate_does_not_verify() {
-    let a = uint256_leaf(7);
-    let b = uint256_leaf(8);
+    let a = arith_leaf(7);
+    let b = arith_leaf(8);
     let mismatch =
-        Node::expression(Uint256::eq_tag(), Payload::binary_op(a.digest(), b.digest()));
+        Node::expression(ArithTestSchema::eq_tag(), Payload::binary_op(a.digest(), b.digest()));
 
     // Just register — execution must succeed because register is a pure host hint.
     let mut src = String::from("begin\n");
@@ -302,10 +422,10 @@ fn deferred_register_predicate_does_not_verify() {
 
 #[test]
 fn deferred_evaluate_predicate_mismatch_fails_execution() {
-    let a = uint256_leaf(7);
-    let b = uint256_leaf(8);
+    let a = arith_leaf(7);
+    let b = arith_leaf(8);
     let mismatch =
-        Node::expression(Uint256::eq_tag(), Payload::binary_op(a.digest(), b.digest()));
+        Node::expression(ArithTestSchema::eq_tag(), Payload::binary_op(a.digest(), b.digest()));
 
     let mut src = String::from("begin\n");
     emit_register(&mut src, a);
@@ -331,7 +451,7 @@ fn deferred_evaluate_predicate_mismatch_fails_execution() {
 fn deferred_register_pushes_node_digest_to_advice() {
     // Register a leaf, then pull the advice-pushed digest into memory and assert it matches the
     // node's content-addressed digest.
-    let leaf = uint256_leaf(42);
+    let leaf = arith_leaf(42);
     let expected = leaf.digest();
 
     let mut src = String::from("begin\n");
@@ -428,7 +548,7 @@ fn legacy_event_handler_still_works_with_deferred_infrastructure() {
     host.register_handler(event, Arc::new(CountingHandler { counter: counter.clone() }))
         .expect("registration");
 
-    let leaf = uint256_leaf(42);
+    let leaf = arith_leaf(42);
 
     let mut src = String::from("begin\n");
     // Legacy event: push event_id, emit, drop.

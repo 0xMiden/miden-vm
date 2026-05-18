@@ -458,14 +458,14 @@ mod tests {
     use super::*;
     use crate::{
         Felt, Word, ZERO,
-        deferred::{Payload, TRUE_DIGEST, Tag, Uint256},
+        deferred::{Payload, TRUE_DIGEST, Tag, test_precompile::TestPrecompile},
     };
 
-    fn uint256_leaf_node(low: u64) -> Node {
+    fn test_leaf(low: u64) -> Node {
         let mut limbs = [0u32; 8];
         limbs[0] = low as u32;
         limbs[1] = (low >> 32) as u32;
-        Uint256::leaf_node(limbs)
+        TestPrecompile::leaf_node(limbs)
     }
 
     fn dummy_digest(seed: u64) -> Word {
@@ -483,16 +483,16 @@ mod tests {
     fn log_advances_root_with_and_node() {
         // Logging interns AND(prev_root, stmt) and sets root to its digest.
         let mut state = DeferredState::new();
-        let schema = Uint256;
-        let a = state.register(&schema, uint256_leaf_node(7)).unwrap();
+        let schema = TestPrecompile;
+        let a = state.register(&schema, test_leaf(7)).unwrap();
         let pred =
-            Node::expression(Uint256::eq_tag(), Payload::binary_op(a, a));
+            Node::expression(TestPrecompile::eq_tag(), Payload::binary_op(a, a));
         let stmt = state.evaluate(&schema, pred).unwrap();
         // The canonical of an `eq` predicate is `true_node()`. Use the predicate's *digest* —
         // which we recover from the original node — as `stmt_digest`.
         let _ = stmt; // canonical, discarded
         let stmt_digest =
-            Node::expression(Uint256::eq_tag(), Payload::binary_op(a, a)).digest();
+            Node::expression(TestPrecompile::eq_tag(), Payload::binary_op(a, a)).digest();
 
         let expected = Node::expression(TRUE_TAG, Payload::binary_op(TRUE_DIGEST, stmt_digest))
             .digest();
@@ -526,8 +526,8 @@ mod tests {
     #[test]
     fn register_leaf_stores_it() {
         let mut state = DeferredState::new();
-        let schema = Uint256;
-        let node = uint256_leaf_node(7);
+        let schema = TestPrecompile;
+        let node = test_leaf(7);
         let digest = state.register(&schema, node.clone()).unwrap();
         assert_eq!(digest, node.digest());
         assert_eq!(state.get(&digest).unwrap(), &node);
@@ -536,8 +536,8 @@ mod tests {
     #[test]
     fn idempotent_reinsert_succeeds() {
         let mut state = DeferredState::new();
-        let schema = Uint256;
-        let node = uint256_leaf_node(7);
+        let schema = TestPrecompile;
+        let node = test_leaf(7);
         let d1 = state.register(&schema, node.clone()).unwrap();
         let d2 = state.register(&schema, node).unwrap();
         assert_eq!(d1, d2);
@@ -547,9 +547,9 @@ mod tests {
     #[test]
     fn register_with_unhandled_tag_errors() {
         let mut state = DeferredState::new();
-        let schema = Uint256;
-        // Uint256 app_id + unknown discriminant: schema decode returns Err.
-        let bad_tag: Tag = [Uint256::app_id(), Felt::from_u32(99), ZERO, ZERO];
+        let schema = TestPrecompile;
+        // TestPrecompile app_id + unknown discriminant: schema decode returns Err.
+        let bad_tag: Tag = [TestPrecompile::app_id(), Felt::from_u32(99), ZERO, ZERO];
         let bad = Node::expression(bad_tag, Payload::new([Felt::from_u32(0); 8]));
         let err = state.register(&schema, bad);
         assert!(matches!(err, Err(SchemaError::InvalidNode)));
@@ -558,10 +558,10 @@ mod tests {
     #[test]
     fn register_op_stores_op_node() {
         let mut state = DeferredState::new();
-        let schema = Uint256;
-        let a = state.register(&schema, uint256_leaf_node(3)).unwrap();
-        let b = state.register(&schema, uint256_leaf_node(4)).unwrap();
-        let op = Node::expression(Uint256::add_tag(), Payload::binary_op(a, b));
+        let schema = TestPrecompile;
+        let a = state.register(&schema, test_leaf(3)).unwrap();
+        let b = state.register(&schema, test_leaf(4)).unwrap();
+        let op = Node::expression(TestPrecompile::add_tag(), Payload::binary_op(a, b));
         let digest = state.register(&schema, op).unwrap();
         assert!(state.contains(&digest));
     }
@@ -572,11 +572,11 @@ mod tests {
         // node but does NOT drive reduce. Programs that want host-side verification call
         // `evaluate`; programs that want constrained verification call `log_precompile`.
         let mut state = DeferredState::new();
-        let schema = Uint256;
-        let a = state.register(&schema, uint256_leaf_node(3)).unwrap();
-        let b = state.register(&schema, uint256_leaf_node(4)).unwrap();
+        let schema = TestPrecompile;
+        let a = state.register(&schema, test_leaf(3)).unwrap();
+        let b = state.register(&schema, test_leaf(4)).unwrap();
         // A mismatched predicate — would fail if eagerly verified.
-        let bad = Node::expression(Uint256::eq_tag(), Payload::binary_op(a, b));
+        let bad = Node::expression(TestPrecompile::eq_tag(), Payload::binary_op(a, b));
         let bad_digest = state.register(&schema, bad.clone()).unwrap();
         assert!(state.contains(&bad_digest), "predicate interned even when it doesn't hold");
         // Verification surfaces the mismatch only when explicitly invoked.
@@ -587,9 +587,9 @@ mod tests {
     #[test]
     fn evaluate_predicate_succeeds_returns_true_node() {
         let mut state = DeferredState::new();
-        let schema = Uint256;
-        let a = state.register(&schema, uint256_leaf_node(7)).unwrap();
-        let assertion = Node::expression(Uint256::eq_tag(), Payload::binary_op(a, a));
+        let schema = TestPrecompile;
+        let a = state.register(&schema, test_leaf(7)).unwrap();
+        let assertion = Node::expression(TestPrecompile::eq_tag(), Payload::binary_op(a, a));
         let result = state.evaluate(&schema, assertion).unwrap();
         assert!(result.is_true_node(), "predicate success returns the canonical TRUE node");
     }
@@ -597,10 +597,10 @@ mod tests {
     #[test]
     fn evaluate_predicate_mismatch_errors() {
         let mut state = DeferredState::new();
-        let schema = Uint256;
-        let a = state.register(&schema, uint256_leaf_node(3)).unwrap();
-        let b = state.register(&schema, uint256_leaf_node(4)).unwrap();
-        let mismatch = Node::expression(Uint256::eq_tag(), Payload::binary_op(a, b));
+        let schema = TestPrecompile;
+        let a = state.register(&schema, test_leaf(3)).unwrap();
+        let b = state.register(&schema, test_leaf(4)).unwrap();
+        let mismatch = Node::expression(TestPrecompile::eq_tag(), Payload::binary_op(a, b));
         let err = state.evaluate(&schema, mismatch);
         assert!(matches!(err, Err(SchemaError::AssertionFailed)));
     }
@@ -608,11 +608,11 @@ mod tests {
     #[test]
     fn evaluate_predicate_missing_node_errors() {
         let mut state = DeferredState::new();
-        let schema = Uint256;
-        let a = state.register(&schema, uint256_leaf_node(1)).unwrap();
+        let schema = TestPrecompile;
+        let a = state.register(&schema, test_leaf(1)).unwrap();
         let dangling = Word::new([Felt::from_u32(0xdead); 4]);
         let assertion =
-            Node::expression(Uint256::eq_tag(), Payload::binary_op(a, dangling));
+            Node::expression(TestPrecompile::eq_tag(), Payload::binary_op(a, dangling));
         let err = state.evaluate(&schema, assertion);
         assert!(matches!(err, Err(SchemaError::MissingNode)));
     }
@@ -621,19 +621,19 @@ mod tests {
     fn nested_evaluation_reduces_through_op_tree() {
         // Build (a + b) * c, then verify equal to a pre-computed leaf via evaluate.
         let mut state = DeferredState::new();
-        let schema = Uint256;
-        let a = state.register(&schema, uint256_leaf_node(3)).unwrap();
-        let b = state.register(&schema, uint256_leaf_node(4)).unwrap();
-        let c = state.register(&schema, uint256_leaf_node(5)).unwrap();
-        let expected = state.register(&schema, uint256_leaf_node(35)).unwrap();
+        let schema = TestPrecompile;
+        let a = state.register(&schema, test_leaf(3)).unwrap();
+        let b = state.register(&schema, test_leaf(4)).unwrap();
+        let c = state.register(&schema, test_leaf(5)).unwrap();
+        let expected = state.register(&schema, test_leaf(35)).unwrap();
         let add = state
-            .register(&schema, Node::expression(Uint256::add_tag(), Payload::binary_op(a, b)))
+            .register(&schema, Node::expression(TestPrecompile::add_tag(), Payload::binary_op(a, b)))
             .unwrap();
         let mul = state
-            .register(&schema, Node::expression(Uint256::mul_tag(), Payload::binary_op(add, c)))
+            .register(&schema, Node::expression(TestPrecompile::mul_tag(), Payload::binary_op(add, c)))
             .unwrap();
         let assertion =
-            Node::expression(Uint256::eq_tag(), Payload::binary_op(mul, expected));
+            Node::expression(TestPrecompile::eq_tag(), Payload::binary_op(mul, expected));
         let result = state.evaluate(&schema, assertion).unwrap();
         assert!(result.is_true_node());
     }
@@ -645,26 +645,26 @@ mod tests {
         // *during* reduce but the DfsResolver skips it (sentinel, not load-bearing), so it
         // does not appear in the witness.
         let mut state = DeferredState::new();
-        let schema = Uint256;
-        let a = state.register(&schema, uint256_leaf_node(3)).unwrap();
-        let b = state.register(&schema, uint256_leaf_node(4)).unwrap();
-        let c = state.register(&schema, uint256_leaf_node(5)).unwrap();
-        let expected = state.register(&schema, uint256_leaf_node(35)).unwrap();
-        let _orphan = state.register(&schema, uint256_leaf_node(99)).unwrap();
+        let schema = TestPrecompile;
+        let a = state.register(&schema, test_leaf(3)).unwrap();
+        let b = state.register(&schema, test_leaf(4)).unwrap();
+        let c = state.register(&schema, test_leaf(5)).unwrap();
+        let expected = state.register(&schema, test_leaf(35)).unwrap();
+        let _orphan = state.register(&schema, test_leaf(99)).unwrap();
         let add = state
-            .register(&schema, Node::expression(Uint256::add_tag(), Payload::binary_op(a, b)))
+            .register(&schema, Node::expression(TestPrecompile::add_tag(), Payload::binary_op(a, b)))
             .unwrap();
         let mul = state
-            .register(&schema, Node::expression(Uint256::mul_tag(), Payload::binary_op(add, c)))
+            .register(&schema, Node::expression(TestPrecompile::mul_tag(), Payload::binary_op(add, c)))
             .unwrap();
         let assertion =
-            Node::expression(Uint256::eq_tag(), Payload::binary_op(mul, expected));
+            Node::expression(TestPrecompile::eq_tag(), Payload::binary_op(mul, expected));
         state.evaluate(&schema, assertion).unwrap();
 
         // 7 registered + 1 interned intermediate (canonical(add) = leaf(7)) +
         // 1 interned assertion-input (the ASSERT_EQ node, deposited by evaluate's reduce_and_intern).
         assert_eq!(state.nodes().len(), 9);
-        let leaf_7_digest = uint256_leaf_node(7).digest();
+        let leaf_7_digest = test_leaf(7).digest();
         assert!(
             state.contains(&leaf_7_digest),
             "canonical(add) must appear in the state"
@@ -678,20 +678,20 @@ mod tests {
         // leaf(7) and canonical(mul)=leaf(35) into state.nodes so the witness covers the
         // whole reduction proof, not just the final answer.
         let mut state = DeferredState::new();
-        let schema = Uint256;
-        let a = state.register(&schema, uint256_leaf_node(3)).unwrap();
-        let b = state.register(&schema, uint256_leaf_node(4)).unwrap();
-        let c = state.register(&schema, uint256_leaf_node(5)).unwrap();
-        let add = Node::expression(Uint256::add_tag(), Payload::binary_op(a, b));
+        let schema = TestPrecompile;
+        let a = state.register(&schema, test_leaf(3)).unwrap();
+        let b = state.register(&schema, test_leaf(4)).unwrap();
+        let c = state.register(&schema, test_leaf(5)).unwrap();
+        let add = Node::expression(TestPrecompile::add_tag(), Payload::binary_op(a, b));
         let add_digest = state.register(&schema, add).unwrap();
-        let mul = Node::expression(Uint256::mul_tag(), Payload::binary_op(add_digest, c));
+        let mul = Node::expression(TestPrecompile::mul_tag(), Payload::binary_op(add_digest, c));
         state.register(&schema, mul.clone()).unwrap();
 
         let canonical = state.evaluate(&schema, mul).unwrap();
-        assert_eq!(canonical, uint256_leaf_node(35));
+        assert_eq!(canonical, test_leaf(35));
 
-        let leaf_7_digest = uint256_leaf_node(7).digest();
-        let leaf_35_digest = uint256_leaf_node(35).digest();
+        let leaf_7_digest = test_leaf(7).digest();
+        let leaf_35_digest = test_leaf(35).digest();
         assert!(state.contains(&leaf_7_digest), "canonical(add) = leaf(7) must be interned");
         assert!(state.contains(&leaf_35_digest), "canonical(mul) = leaf(35) must be interned");
     }
@@ -702,23 +702,23 @@ mod tests {
         // is constructed on the fly and handed straight to `evaluate` — it must end up interned
         // so the witness can link canonical(mul) back to its op-node parent.
         let mut state = DeferredState::new();
-        let schema = Uint256;
-        let a = state.register(&schema, uint256_leaf_node(3)).unwrap();
-        let b = state.register(&schema, uint256_leaf_node(4)).unwrap();
-        let c = state.register(&schema, uint256_leaf_node(5)).unwrap();
-        let add = Node::expression(Uint256::add_tag(), Payload::binary_op(a, b));
+        let schema = TestPrecompile;
+        let a = state.register(&schema, test_leaf(3)).unwrap();
+        let b = state.register(&schema, test_leaf(4)).unwrap();
+        let c = state.register(&schema, test_leaf(5)).unwrap();
+        let add = Node::expression(TestPrecompile::add_tag(), Payload::binary_op(a, b));
         let add_digest = state.register(&schema, add).unwrap();
-        let mul = Node::expression(Uint256::mul_tag(), Payload::binary_op(add_digest, c));
+        let mul = Node::expression(TestPrecompile::mul_tag(), Payload::binary_op(add_digest, c));
 
         let mul_digest = mul.digest();
         assert!(!state.contains(&mul_digest), "mul must not be pre-registered for this test");
 
         let canonical = state.evaluate(&schema, mul).unwrap();
-        assert_eq!(canonical, uint256_leaf_node(35));
+        assert_eq!(canonical, test_leaf(35));
 
         assert!(state.contains(&mul_digest), "input op node must be interned by evaluate");
-        assert!(state.contains(&uint256_leaf_node(7).digest()), "canonical(add) interned");
-        assert!(state.contains(&uint256_leaf_node(35).digest()), "canonical(mul) interned");
+        assert!(state.contains(&test_leaf(7).digest()), "canonical(add) interned");
+        assert!(state.contains(&test_leaf(35).digest()), "canonical(mul) interned");
     }
 
     // REHYDRATE TESTS
@@ -728,19 +728,19 @@ mod tests {
     /// transcript step. Returns the populated state for round-trip tests.
     fn built_state_with_logged_predicate() -> DeferredState {
         let mut state = DeferredState::new();
-        let schema = Uint256;
-        let a = state.register(&schema, uint256_leaf_node(3)).unwrap();
-        let b = state.register(&schema, uint256_leaf_node(4)).unwrap();
-        let c = state.register(&schema, uint256_leaf_node(5)).unwrap();
-        let expected = state.register(&schema, uint256_leaf_node(35)).unwrap();
+        let schema = TestPrecompile;
+        let a = state.register(&schema, test_leaf(3)).unwrap();
+        let b = state.register(&schema, test_leaf(4)).unwrap();
+        let c = state.register(&schema, test_leaf(5)).unwrap();
+        let expected = state.register(&schema, test_leaf(35)).unwrap();
         let add = state
-            .register(&schema, Node::expression(Uint256::add_tag(), Payload::binary_op(a, b)))
+            .register(&schema, Node::expression(TestPrecompile::add_tag(), Payload::binary_op(a, b)))
             .unwrap();
         let mul = state
-            .register(&schema, Node::expression(Uint256::mul_tag(), Payload::binary_op(add, c)))
+            .register(&schema, Node::expression(TestPrecompile::mul_tag(), Payload::binary_op(add, c)))
             .unwrap();
         let assertion =
-            Node::expression(Uint256::eq_tag(), Payload::binary_op(mul, expected));
+            Node::expression(TestPrecompile::eq_tag(), Payload::binary_op(mul, expected));
         let stmt_digest = assertion.digest();
         state.evaluate(&schema, assertion).unwrap();
         let new_root =
@@ -753,7 +753,7 @@ mod tests {
     fn rehydrate_round_trips_simple_chain() {
         let original = built_state_with_logged_predicate();
         let wire = original.to_wire();
-        let rehydrated = DeferredState::rehydrate(&wire, &Uint256).unwrap();
+        let rehydrated = DeferredState::rehydrate(&wire, &TestPrecompile).unwrap();
         assert_eq!(rehydrated.root(), original.root());
         // After rehydrate phase 2, additional canonical intermediates from the predicate's
         // re-evaluation may be present. So we only assert the root is preserved and the chain
@@ -764,7 +764,7 @@ mod tests {
     #[test]
     fn rehydrate_empty_state_succeeds() {
         let wire = DeferredStateWire::empty();
-        let state = DeferredState::rehydrate(&wire, &Uint256).unwrap();
+        let state = DeferredState::rehydrate(&wire, &TestPrecompile).unwrap();
         assert_eq!(state.root(), TRUE_DIGEST);
         assert!(state.nodes().is_empty());
     }
@@ -775,7 +775,7 @@ mod tests {
         // validation catches the dangling pointer.
         let wire =
             DeferredStateWire { entries: alloc::vec::Vec::new(), root: dummy_digest(7) };
-        let err = DeferredState::rehydrate(&wire, &Uint256);
+        let err = DeferredState::rehydrate(&wire, &TestPrecompile);
         assert!(matches!(err, Err(IntegrityError::MissingRoot)));
     }
 
@@ -785,18 +785,18 @@ mod tests {
         // < its own position 0 → BadIndex.
         let wire = DeferredStateWire {
             entries: alloc::vec![crate::deferred::WireEntry {
-                tag: Uint256::add_tag(),
+                tag: TestPrecompile::add_tag(),
                 body: crate::deferred::WireBody::Binary { lhs: 0, rhs: 0 },
             }],
             root: TRUE_DIGEST,
         };
-        let err = DeferredState::rehydrate(&wire, &Uint256);
+        let err = DeferredState::rehydrate(&wire, &TestPrecompile);
         assert!(matches!(err, Err(IntegrityError::BadIndex)));
     }
 
     #[test]
     fn rehydrate_rejects_unknown_tag() {
-        // A tag the schema rejects — its app_id doesn't match Uint256.
+        // A tag the schema rejects — its app_id doesn't match TestPrecompile.
         let bogus_tag: Tag =
             [Felt::new_unchecked(0xdead), ZERO, ZERO, ZERO];
         let wire = DeferredStateWire {
@@ -806,7 +806,7 @@ mod tests {
             }],
             root: TRUE_DIGEST,
         };
-        let err = DeferredState::rehydrate(&wire, &Uint256);
+        let err = DeferredState::rehydrate(&wire, &TestPrecompile);
         assert!(matches!(err, Err(IntegrityError::UnknownTag)));
     }
 
@@ -815,10 +815,10 @@ mod tests {
         // Register an orphan that no one references; build a logged-predicate chain. The wire
         // must contain the chain's reachable closure but NOT the orphan.
         let mut state = DeferredState::new();
-        let schema = Uint256;
-        let _orphan = state.register(&schema, uint256_leaf_node(99)).unwrap();
-        let a = state.register(&schema, uint256_leaf_node(7)).unwrap();
-        let pred = Node::expression(Uint256::eq_tag(), Payload::binary_op(a, a));
+        let schema = TestPrecompile;
+        let _orphan = state.register(&schema, test_leaf(99)).unwrap();
+        let a = state.register(&schema, test_leaf(7)).unwrap();
+        let pred = Node::expression(TestPrecompile::eq_tag(), Payload::binary_op(a, a));
         let stmt_digest = pred.digest();
         state.evaluate(&schema, pred).unwrap();
         let new_root = Node::expression(
@@ -831,8 +831,8 @@ mod tests {
         let wire = state.to_wire();
         // Rehydrate and read back the digest set — the wire's bytes don't carry digests, but
         // rehydration recomputes them, so we exercise the round-trip identity here.
-        let rehydrated = DeferredState::rehydrate(&wire, &Uint256).unwrap();
-        let orphan_digest = uint256_leaf_node(99).digest();
+        let rehydrated = DeferredState::rehydrate(&wire, &TestPrecompile).unwrap();
+        let orphan_digest = test_leaf(99).digest();
         assert!(
             !rehydrated.contains(&orphan_digest),
             "orphan must be trimmed from wire and absent after rehydrate"
@@ -849,7 +849,7 @@ mod tests {
         // canonical intermediates that the trim dropped).
         let original = built_state_with_logged_predicate();
         let wire = original.to_wire();
-        let rehydrated = DeferredState::rehydrate(&wire, &Uint256).unwrap();
+        let rehydrated = DeferredState::rehydrate(&wire, &TestPrecompile).unwrap();
         assert_eq!(rehydrated.root(), original.root());
         assert_eq!(rehydrated.statements(), original.statements());
     }
@@ -859,12 +859,12 @@ mod tests {
         // Build a chain whose statement is `eq(leaf(3), leaf(4))` — disagreeing leaves.
         // Phase 2's evaluate returns AssertionFailed, surfaced as `PredicateFailed`.
         let mut state = DeferredState::new();
-        let schema = Uint256;
-        let a = state.register(&schema, uint256_leaf_node(3)).unwrap();
-        let b = state.register(&schema, uint256_leaf_node(4)).unwrap();
+        let schema = TestPrecompile;
+        let a = state.register(&schema, test_leaf(3)).unwrap();
+        let b = state.register(&schema, test_leaf(4)).unwrap();
         // Hand-roll a chain that points to a failing predicate without going through `log`'s
         // schema gate (which evaluate-rejects ahead of time).
-        let bad_pred = Node::expression(Uint256::eq_tag(), Payload::binary_op(a, b));
+        let bad_pred = Node::expression(TestPrecompile::eq_tag(), Payload::binary_op(a, b));
         let bad_digest = bad_pred.digest();
         state.intern(bad_pred);
         let and_node =
@@ -874,7 +874,7 @@ mod tests {
         state.root = and_digest;
 
         let wire = state.to_wire();
-        let err = DeferredState::rehydrate(&wire, &Uint256);
+        let err = DeferredState::rehydrate(&wire, &TestPrecompile);
         assert!(
             matches!(err, Err(IntegrityError::PredicateFailed(_))),
             "expected PredicateFailed, got {err:?}"
