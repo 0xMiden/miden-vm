@@ -28,7 +28,7 @@ impl EcdsaK256KeccakPrecompile {
     pub const NAME: &'static str = "ecdsa_k256_keccak";
     pub const VERSION: u32 = 1;
 
-    pub const D_VERIFY: Felt = Felt::new_unchecked(0);
+    pub const VERIFY_TAG_ID: u32 = 0;
 
     /// Bytes-per-field-component: pk=33, digest=32, sig=65.
     ///
@@ -55,7 +55,7 @@ impl EcdsaK256KeccakPrecompile {
     }
 
     pub fn verify_tag() -> Tag {
-        [Self::app_id(), Self::D_VERIFY, ZERO, ZERO]
+        [Self::app_id(), Felt::from_u32(Self::VERIFY_TAG_ID), ZERO, ZERO]
     }
 
     /// Build a `verify` chunk-bodied predicate from caller-supplied chunks.
@@ -84,8 +84,9 @@ impl Precompile for EcdsaK256KeccakPrecompile {
         if reserved != ZERO {
             return Err(SchemaError::InvalidNode);
         }
+        let disc = u32::try_from(disc.as_canonical_u64()).map_err(|_| SchemaError::InvalidNode)?;
         match disc {
-            d if d == Self::D_VERIFY => {
+            Self::VERIFY_TAG_ID => {
                 if imm != ZERO {
                     return Err(SchemaError::InvalidNode);
                 }
@@ -100,8 +101,8 @@ impl Precompile for EcdsaK256KeccakPrecompile {
         if node.tag[0] != Self::app_id() || node.tag[3] != ZERO {
             return Err(SchemaError::InvalidNode);
         }
-        match node.tag[1] {
-            d if d == Self::D_VERIFY => reduce_verify(node),
+        match u32::try_from(node.tag[1].as_canonical_u64()) {
+            Ok(Self::VERIFY_TAG_ID) => reduce_verify(node),
             _ => Err(SchemaError::InvalidNode),
         }
     }
@@ -178,7 +179,11 @@ mod tests {
     #[test]
     fn decode_verify_is_5_chunk_predicate() {
         let info = EcdsaK256KeccakPrecompile
-            .decode(PrecompileTag([EcdsaK256KeccakPrecompile::D_VERIFY, ZERO, ZERO]))
+            .decode(PrecompileTag([
+                Felt::from_u32(EcdsaK256KeccakPrecompile::VERIFY_TAG_ID),
+                ZERO,
+                ZERO,
+            ]))
             .unwrap();
         assert!(matches!(info.node_type, NodeType::Chunks(5)));
         assert_eq!(info.evaluates_to, TRUE_TAG);

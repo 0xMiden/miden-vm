@@ -29,10 +29,10 @@ impl Group {
     pub const VERSION: u32 = 1;
 
     /// Discriminant indices.
-    pub const D_COMBINE: Felt = Felt::new_unchecked(0);
-    pub const D_ADD: Felt = Felt::new_unchecked(1);
-    pub const D_SUB: Felt = Felt::new_unchecked(2);
-    pub const D_EQ: Felt = Felt::new_unchecked(3);
+    pub const COMBINE_TAG_ID: u32 = 0;
+    pub const ADD_TAG_ID: u32 = 1;
+    pub const SUB_TAG_ID: u32 = 2;
+    pub const EQ_TAG_ID: u32 = 3;
 
     /// Derive the precompile id. Pure function over `Group`'s metadata.
     pub fn app_id() -> Felt {
@@ -40,16 +40,16 @@ impl Group {
     }
 
     pub fn combine_tag() -> Tag {
-        [Self::app_id(), Self::D_COMBINE, ZERO, ZERO]
+        [Self::app_id(), Felt::from_u32(Self::COMBINE_TAG_ID), ZERO, ZERO]
     }
     pub fn add_tag() -> Tag {
-        [Self::app_id(), Self::D_ADD, ZERO, ZERO]
+        [Self::app_id(), Felt::from_u32(Self::ADD_TAG_ID), ZERO, ZERO]
     }
     pub fn sub_tag() -> Tag {
-        [Self::app_id(), Self::D_SUB, ZERO, ZERO]
+        [Self::app_id(), Felt::from_u32(Self::SUB_TAG_ID), ZERO, ZERO]
     }
     pub fn eq_tag() -> Tag {
-        [Self::app_id(), Self::D_EQ, ZERO, ZERO]
+        [Self::app_id(), Felt::from_u32(Self::EQ_TAG_ID), ZERO, ZERO]
     }
 
     /// Build a `combine` node referencing two field-leaf digests.

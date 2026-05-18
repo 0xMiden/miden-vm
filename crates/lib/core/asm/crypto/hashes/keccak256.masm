@@ -17,9 +17,9 @@ use miden::core::sys
 # Changing VERSION / DISCS / NAME in Rust must update these values in lockstep.
 
 const APP_ID = 12495655595326449568
-const D_PREIMAGE = 0
-const D_DIGEST = 1
-const D_EQ = 2
+const PREIMAGE_TAG_ID = 0
+const DIGEST_TAG_ID = 1
+const EQ_TAG_ID = 2
 
 # PROCEDURES
 # ================================================================================================
@@ -60,16 +60,16 @@ const D_EQ = 2
 @locals(16)
 pub proc hash_bytes
     # ---- Step 1: Register preimage chunk → PREIMAGE_DIGEST ----
-    # Build PREIMAGE_TAG = [APP_ID, D_PREIMAGE, len_bytes, 0] on top, with ptr beneath.
+    # Build PREIMAGE_TAG = [APP_ID, PREIMAGE_TAG_ID, len_bytes, 0] on top, with ptr beneath.
     # Stack before:   [ptr, len_bytes, ...]
-    # Stack after:    [APP_ID, D_PREIMAGE, len_bytes, 0, ptr, ...]
+    # Stack after:    [APP_ID, PREIMAGE_TAG_ID, len_bytes, 0, ptr, ...]
     push.0
     # => [0, ptr, len_bytes, ...]
     movup.2
     # => [len_bytes, 0, ptr, ...]
-    push.D_PREIMAGE
+    push.PREIMAGE_TAG_ID
     push.APP_ID
-    # => [APP_ID, D_PREIMAGE, len_bytes, 0, ptr, ...]
+    # => [APP_ID, PREIMAGE_TAG_ID, len_bytes, 0, ptr, ...]
     exec.sys::register_chunk
     # => [PREIMAGE_DIGEST, ...]
 
@@ -99,9 +99,9 @@ pub proc hash_bytes
     # ---- Step 5: Save LEAF_DIGEST, build eq node ----
     loc_storew_le.12 dropw              # loc[12..16] = LEAF_DIGEST
 
-    # Build EQ_TAG = [APP_ID, D_EQ, 0, 0] on top.
+    # Build EQ_TAG = [APP_ID, EQ_TAG_ID, 0, 0] on top.
     push.0.0
-    push.D_EQ
+    push.EQ_TAG_ID
     push.APP_ID
     # => [EQ_TAG, ...]
 

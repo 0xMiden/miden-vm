@@ -54,7 +54,7 @@ mod tests {
     use super::*;
 
     /// Pin the felt values that the per-precompile MASM files hardcode as
-    /// `const APP_ID = ...` / `const D_* = ...`. `app_id()` returns a hardcoded literal; this
+    /// `const APP_ID = ...` / `const *_TAG_ID = ...`. `app_id()` returns a hardcoded literal; this
     /// test asserts it equals both the MASM mirror (`EXPECTED_*`) and the live
     /// [`precompile_id`] derivation (NAME + VERSION), so MASM, the Rust literal, and the
     /// derivation never diverge silently. (`PrecompileSchema::new` also enforces the
@@ -109,16 +109,16 @@ mod tests {
             );
         }
 
-        // Discriminant indices map 1:1 to the MASM `const D_* = ...` declarations; pin them so
+        // Tag-id indices map 1:1 to the MASM `const *_TAG_ID = ...` declarations; pin them so
         // a reorder is caught.
-        assert_eq!(Keccak256Precompile::D_PREIMAGE.as_canonical_u64(), 0);
-        assert_eq!(Keccak256Precompile::D_DIGEST.as_canonical_u64(), 1);
-        assert_eq!(Keccak256Precompile::D_EQ.as_canonical_u64(), 2);
-        assert_eq!(Sha512Precompile::D_PREIMAGE.as_canonical_u64(), 0);
-        assert_eq!(Sha512Precompile::D_DIGEST.as_canonical_u64(), 1);
-        assert_eq!(Sha512Precompile::D_EQ.as_canonical_u64(), 2);
-        assert_eq!(EcdsaK256KeccakPrecompile::D_VERIFY.as_canonical_u64(), 0);
-        assert_eq!(EddsaEd25519Precompile::D_VERIFY.as_canonical_u64(), 0);
+        assert_eq!(Keccak256Precompile::PREIMAGE_TAG_ID, 0);
+        assert_eq!(Keccak256Precompile::DIGEST_TAG_ID, 1);
+        assert_eq!(Keccak256Precompile::EQ_TAG_ID, 2);
+        assert_eq!(Sha512Precompile::PREIMAGE_TAG_ID, 0);
+        assert_eq!(Sha512Precompile::DIGEST_TAG_ID, 1);
+        assert_eq!(Sha512Precompile::EQ_TAG_ID, 2);
+        assert_eq!(EcdsaK256KeccakPrecompile::VERIFY_TAG_ID, 0);
+        assert_eq!(EddsaEd25519Precompile::VERIFY_TAG_ID, 0);
     }
 
     #[test]

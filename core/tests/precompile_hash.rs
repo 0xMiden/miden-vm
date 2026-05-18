@@ -93,7 +93,11 @@ fn n_chunks_rounds_up() {
 #[test]
 fn decode_preimage_extracts_chunk_count_from_imm() {
     let info = Hash
-        .decode(PrecompileTag([Hash::D_PREIMAGE, Felt::from_u32(65), ZERO]))
+        .decode(PrecompileTag([
+            Felt::from_u32(Hash::PREIMAGE_TAG_ID),
+            Felt::from_u32(65),
+            ZERO,
+        ]))
         .unwrap();
     assert!(matches!(info.node_type, NodeType::Chunks(3)));
     assert_eq!(info.evaluates_to, Hash::digest_tag());
@@ -101,14 +105,14 @@ fn decode_preimage_extracts_chunk_count_from_imm() {
 
 #[test]
 fn decode_digest_is_self_evaluating_value() {
-    let info = Hash.decode(PrecompileTag([Hash::D_DIGEST, ZERO, ZERO])).unwrap();
+    let info = Hash.decode(PrecompileTag([Felt::from_u32(Hash::DIGEST_TAG_ID), ZERO, ZERO])).unwrap();
     assert!(matches!(info.node_type, NodeType::Value));
     assert_eq!(info.evaluates_to, Hash::digest_tag());
 }
 
 #[test]
 fn decode_eq_is_binary_predicate() {
-    let info = Hash.decode(PrecompileTag([Hash::D_EQ, ZERO, ZERO])).unwrap();
+    let info = Hash.decode(PrecompileTag([Felt::from_u32(Hash::EQ_TAG_ID), ZERO, ZERO])).unwrap();
     assert!(matches!(info.node_type, NodeType::Binary));
     assert_eq!(info.evaluates_to, TRUE_TAG);
 }
@@ -121,9 +125,9 @@ fn decode_unknown_discriminant_rejected() {
 
 #[test]
 fn decode_rejects_imm_on_non_preimage() {
-    let err = Hash.decode(PrecompileTag([Hash::D_DIGEST, Felt::from_u32(1), ZERO]));
+    let err = Hash.decode(PrecompileTag([Felt::from_u32(Hash::DIGEST_TAG_ID), Felt::from_u32(1), ZERO]));
     assert!(matches!(err, Err(SchemaError::InvalidNode)));
-    let err = Hash.decode(PrecompileTag([Hash::D_EQ, Felt::from_u32(1), ZERO]));
+    let err = Hash.decode(PrecompileTag([Felt::from_u32(Hash::EQ_TAG_ID), Felt::from_u32(1), ZERO]));
     assert!(matches!(err, Err(SchemaError::InvalidNode)));
 }
 

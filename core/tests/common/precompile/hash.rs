@@ -37,9 +37,9 @@ impl Hash {
     pub const NAME: &'static str = "mock_hash";
     pub const VERSION: u32 = 1;
 
-    pub const D_PREIMAGE: Felt = Felt::new_unchecked(0);
-    pub const D_DIGEST: Felt = Felt::new_unchecked(1);
-    pub const D_EQ: Felt = Felt::new_unchecked(2);
+    pub const PREIMAGE_TAG_ID: u32 = 0;
+    pub const DIGEST_TAG_ID: u32 = 1;
+    pub const EQ_TAG_ID: u32 = 2;
 
     /// Bytes packed per 8-felt chunk: each felt carries a u32 (4 bytes) little-endian limb.
     pub const BYTES_PER_CHUNK: u32 = 32;
@@ -50,17 +50,17 @@ impl Hash {
 
     /// Tag of a `preimage` chunk node for a `n_bytes`-byte payload.
     pub fn preimage_tag(n_bytes: u32) -> Tag {
-        [Self::app_id(), Self::D_PREIMAGE, Felt::from_u32(n_bytes), ZERO]
+        [Self::app_id(), Felt::from_u32(Self::PREIMAGE_TAG_ID), Felt::from_u32(n_bytes), ZERO]
     }
 
     /// Tag of a canonical `digest` leaf.
     pub fn digest_tag() -> Tag {
-        [Self::app_id(), Self::D_DIGEST, ZERO, ZERO]
+        [Self::app_id(), Felt::from_u32(Self::DIGEST_TAG_ID), ZERO, ZERO]
     }
 
     /// Tag of an `eq` predicate node.
     pub fn eq_tag() -> Tag {
-        [Self::app_id(), Self::D_EQ, ZERO, ZERO]
+        [Self::app_id(), Felt::from_u32(Self::EQ_TAG_ID), ZERO, ZERO]
     }
 
     /// Build a `preimage` chunk node from caller-supplied 8-felt chunks. The caller is

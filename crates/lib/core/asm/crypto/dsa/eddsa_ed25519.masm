@@ -15,7 +15,7 @@ use miden::core::word
 # ================================================================================================
 
 const APP_ID = 17524510362207076881
-const D_VERIFY = 0
+const VERIFY_TAG_ID = 0
 
 const PK_LEN_FELTS = 8        # 32.div_ceil(4)
 
@@ -116,9 +116,9 @@ end
 #! Input:  `[buf_ptr, ...]`
 #! Output: `[...]`
 pub proc verify_prehash
-    # Build VERIFY_TAG = [APP_ID, D_VERIFY, 0, 0]
+    # Build VERIFY_TAG = [APP_ID, VERIFY_TAG_ID, 0, 0]
     push.0.0
-    push.D_VERIFY
+    push.VERIFY_TAG_ID
     push.APP_ID
     # => [VERIFY_TAG, buf_ptr, ...]
 

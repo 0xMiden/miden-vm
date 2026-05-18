@@ -28,11 +28,11 @@ impl Uint {
     pub const VERSION: u32 = 1;
 
     /// Discriminant indices.
-    pub const D_LEAF: Felt = Felt::new_unchecked(0);
-    pub const D_ADD: Felt = Felt::new_unchecked(1);
-    pub const D_SUB: Felt = Felt::new_unchecked(2);
-    pub const D_MUL: Felt = Felt::new_unchecked(3);
-    pub const D_EQ: Felt = Felt::new_unchecked(4);
+    pub const LEAF_TAG_ID: u32 = 0;
+    pub const ADD_TAG_ID: u32 = 1;
+    pub const SUB_TAG_ID: u32 = 2;
+    pub const MUL_TAG_ID: u32 = 3;
+    pub const EQ_TAG_ID: u32 = 4;
 
     /// Derive the precompile id. Pure function over `Uint`'s metadata.
     pub fn app_id() -> Felt {
@@ -41,23 +41,23 @@ impl Uint {
 
     /// Tag for a canonical Uint leaf.
     pub fn leaf_tag() -> Tag {
-        [Self::app_id(), Self::D_LEAF, ZERO, ZERO]
+        [Self::app_id(), Felt::from_u32(Self::LEAF_TAG_ID), ZERO, ZERO]
     }
     /// Tag for an `add` op node.
     pub fn add_tag() -> Tag {
-        [Self::app_id(), Self::D_ADD, ZERO, ZERO]
+        [Self::app_id(), Felt::from_u32(Self::ADD_TAG_ID), ZERO, ZERO]
     }
     /// Tag for a `sub` op node.
     pub fn sub_tag() -> Tag {
-        [Self::app_id(), Self::D_SUB, ZERO, ZERO]
+        [Self::app_id(), Felt::from_u32(Self::SUB_TAG_ID), ZERO, ZERO]
     }
     /// Tag for a `mul` op node.
     pub fn mul_tag() -> Tag {
-        [Self::app_id(), Self::D_MUL, ZERO, ZERO]
+        [Self::app_id(), Felt::from_u32(Self::MUL_TAG_ID), ZERO, ZERO]
     }
     /// Tag for an equality predicate.
     pub fn eq_tag() -> Tag {
-        [Self::app_id(), Self::D_EQ, ZERO, ZERO]
+        [Self::app_id(), Felt::from_u32(Self::EQ_TAG_ID), ZERO, ZERO]
     }
 
     /// Build a canonical leaf node from u32 limbs (little-endian).

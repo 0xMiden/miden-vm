@@ -13,9 +13,9 @@ use miden::core::sys
 # crates/lib/core/src/precompiles/mod.rs `masm_constants_pinned_to_rust_values`).
 
 const APP_ID = 5915489169965270201
-const D_PREIMAGE = 0
-const D_DIGEST = 1
-const D_EQ = 2
+const PREIMAGE_TAG_ID = 0
+const DIGEST_TAG_ID = 1
+const EQ_TAG_ID = 2
 
 # PROCEDURES
 # ================================================================================================
@@ -44,9 +44,9 @@ pub proc hash_bytes
     # ---- Step 1: Register preimage chunk ----
     push.0
     movup.2
-    push.D_PREIMAGE
+    push.PREIMAGE_TAG_ID
     push.APP_ID
-    # => [APP_ID, D_PREIMAGE, len_bytes, 0, ptr, ...]
+    # => [APP_ID, PREIMAGE_TAG_ID, len_bytes, 0, ptr, ...]
     exec.sys::register_chunk
     # => [PREIMAGE_DIGEST, ...]
 
@@ -76,7 +76,7 @@ pub proc hash_bytes
     loc_storew_le.20 dropw              # loc[20..24] = LEAF_DIGEST
 
     push.0.0
-    push.D_EQ
+    push.EQ_TAG_ID
     push.APP_ID
     # => [EQ_TAG, ...]
 

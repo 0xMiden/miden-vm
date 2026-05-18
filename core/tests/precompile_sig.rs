@@ -58,14 +58,14 @@ fn verify_fails_for_zeroed_placeholder_sig() {
 
 #[test]
 fn decode_verify_is_chunk3_predicate() {
-    let info = Sig.decode(PrecompileTag([Sig::D_VERIFY, ZERO, ZERO])).unwrap();
+    let info = Sig.decode(PrecompileTag([Felt::from_u32(Sig::VERIFY_TAG_ID), ZERO, ZERO])).unwrap();
     assert!(matches!(info.node_type, NodeType::Chunks(3)));
     assert_eq!(info.evaluates_to, TRUE_TAG);
 }
 
 #[test]
 fn decode_rejects_imm() {
-    let err = Sig.decode(PrecompileTag([Sig::D_VERIFY, Felt::from_u32(1), ZERO]));
+    let err = Sig.decode(PrecompileTag([Felt::from_u32(Sig::VERIFY_TAG_ID), Felt::from_u32(1), ZERO]));
     assert!(matches!(err, Err(SchemaError::InvalidNode)));
 }
 

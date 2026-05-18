@@ -29,7 +29,7 @@ impl Sig {
     pub const NAME: &'static str = "mock_sig";
     pub const VERSION: u32 = 1;
 
-    pub const D_VERIFY: Felt = Felt::new_unchecked(0);
+    pub const VERIFY_TAG_ID: u32 = 0;
 
     /// Number of 8-felt chunks in a mock signature blob. Hardcoded — there is no immediate, so
     /// the framework derives the chunk count from this constant at `decode` time.
@@ -40,7 +40,7 @@ impl Sig {
     }
 
     pub fn verify_tag() -> Tag {
-        [Self::app_id(), Self::D_VERIFY, ZERO, ZERO]
+        [Self::app_id(), Felt::from_u32(Self::VERIFY_TAG_ID), ZERO, ZERO]
     }
 
     /// Build a `verify` predicate node from `SIG_CHUNKS` 8-felt chunks.

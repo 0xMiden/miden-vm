@@ -24,26 +24,26 @@ impl TestPrecompile {
     const NAME: &'static str = "test_precompile";
     const VERSION: u32 = 1;
 
-    const D_LEAF: Felt = Felt::new_unchecked(0);
-    const D_ADD: Felt = Felt::new_unchecked(1);
-    const D_MUL: Felt = Felt::new_unchecked(2);
-    const D_EQ: Felt = Felt::new_unchecked(3);
+    const LEAF_TAG_ID: u32 = 0;
+    const ADD_TAG_ID: u32 = 1;
+    const MUL_TAG_ID: u32 = 2;
+    const EQ_TAG_ID: u32 = 3;
 
     pub(crate) fn app_id() -> Felt {
         precompile_id(&TestPrecompile)
     }
 
     pub(crate) fn leaf_tag() -> Tag {
-        [Self::app_id(), Self::D_LEAF, ZERO, ZERO]
+        [Self::app_id(), Felt::from_u32(Self::LEAF_TAG_ID), ZERO, ZERO]
     }
     pub(crate) fn add_tag() -> Tag {
-        [Self::app_id(), Self::D_ADD, ZERO, ZERO]
+        [Self::app_id(), Felt::from_u32(Self::ADD_TAG_ID), ZERO, ZERO]
     }
     pub(crate) fn mul_tag() -> Tag {
-        [Self::app_id(), Self::D_MUL, ZERO, ZERO]
+        [Self::app_id(), Felt::from_u32(Self::MUL_TAG_ID), ZERO, ZERO]
     }
     pub(crate) fn eq_tag() -> Tag {
-        [Self::app_id(), Self::D_EQ, ZERO, ZERO]
+        [Self::app_id(), Felt::from_u32(Self::EQ_TAG_ID), ZERO, ZERO]
     }
 
     /// Build a canonical value leaf from `[u32; 8]` limbs (little-endian).
