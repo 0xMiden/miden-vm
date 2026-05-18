@@ -316,24 +316,12 @@ impl Chiplets {
                 }
             }
 
-            // Fill all chiplets in parallel.
-            rayon::scope(|s| {
-                s.spawn(move |_| {
-                    hasher.fill_trace(&mut hasher_fragment);
-                });
-                s.spawn(move |_| {
-                    bitwise.fill_trace(&mut bitwise_fragment);
-                });
-                s.spawn(move |_| {
-                    memory.fill_trace(&mut memory_fragment);
-                });
-                s.spawn(move |_| {
-                    kernel_rom.fill_trace(&mut kernel_rom_fragment);
-                });
-                s.spawn(move |_| {
-                    ace.fill_trace(&mut ace_fragment);
-                });
-            });
+            // Sequential — rayon::scope removed for build-time experiment.
+            hasher.fill_trace(&mut hasher_fragment);
+            bitwise.fill_trace(&mut bitwise_fragment);
+            memory.fill_trace(&mut memory_fragment);
+            kernel_rom.fill_trace(&mut kernel_rom_fragment);
+            ace.fill_trace(&mut ace_fragment);
         }
     }
 }

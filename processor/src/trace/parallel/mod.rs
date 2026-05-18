@@ -20,7 +20,8 @@ use miden_core::{
     operations::opcodes,
     program::{Kernel, MIN_STACK_DEPTH},
 };
-use rayon::prelude::*;
+// rayon::prelude removed: validating build-time hypothesis (issue 0xMiden/protocol#2643).
+// Parallel iterators replaced with sequential equivalents below.
 use tracing::instrument;
 
 use crate::{
@@ -171,15 +172,10 @@ pub fn build_trace_with_max_len(
     let main_trace_len =
         compute_main_trace_length(core_trace_len, range_table_len, chiplets.trace_len());
 
-    let ((range_checker_trace, chiplets_trace), ()) = rayon::join(
-        || {
-            rayon::join(
-                || range_checker.into_trace_with_table(range_table_len, main_trace_len),
-                || chiplets.into_trace(main_trace_len),
-            )
-        },
-        || pad_core_row_major(&mut core_trace_data, main_trace_len),
-    );
+    let range_checker_trace =
+        range_checker.into_trace_with_table(range_table_len, main_trace_len);
+    let chiplets_trace = chiplets.into_trace(main_trace_len);
+    pad_core_row_major(&mut core_trace_data, main_trace_len);
 
     // Create the MainTrace
     let main_trace = {
@@ -241,10 +237,10 @@ fn generate_core_trace_row_major(
         .map(|chunk| RowMajorTraceWriter::new(chunk, CORE_TRACE_WIDTH))
         .collect();
 
-    // Build the core trace fragments in parallel
+    // Build the core trace fragments (sequential — rayon removed for build-time experiment).
     let fragment_results: Result<Vec<_>, ExecutionError> = core_trace_contexts
-        .into_par_iter()
-        .zip(writers.into_par_iter())
+        .into_iter()
+        .zip(writers.into_iter())
         .map(|(trace_state, writer)| {
             let (mut processor, mut tracer, mut continuation_stack, mut current_forest) =
                 split_trace_fragment_context(trace_state, writer, fragment_size, max_stack_depth);
@@ -287,7 +283,7 @@ fn generate_core_trace_row_major(
         let h0_col_offset = STACK_TRACE_OFFSET + H0_COL_IDX;
         let w = CORE_TRACE_WIDTH;
         core_trace_data[..total_core_trace_rows * w]
-            .par_chunks_mut(fragment_size * w)
+            .chunks_mut(fragment_size * w)
             .for_each(|fragment_chunk| {
                 let num_rows = fragment_chunk.len() / w;
                 let mut h0_vals: Vec<Felt> =
@@ -655,7 +651,7 @@ fn pad_core_row_major(core_trace_data: &mut Vec<Felt>, main_trace_len: usize) {
     let pad_start = total_program_rows * w;
     core_trace_data.resize(pad_start + num_padding_rows * w, ZERO);
     core_trace_data[pad_start..]
-        .par_chunks_mut(w)
+        .chunks_mut(w)
         .enumerate()
         .for_each(|(idx, row)| {
             row.copy_from_slice(&template);
