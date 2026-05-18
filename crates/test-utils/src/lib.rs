@@ -353,6 +353,24 @@ impl Test {
     // TEST METHODS
     // --------------------------------------------------------------------------------------------
 
+    /// Builds a [`FastProcessor`] wired with this test's advice inputs and deferred [`Schema`],
+    /// the same way every `FastProcessor::new` execution path needs. Centralised so a new path
+    /// can't silently forget `.with_schema(...)`. Returns the advice-setup error so callers
+    /// keep their prior behaviour — propagate via `?` or panic via `.expect`.
+    #[cfg(not(target_family = "wasm"))]
+    fn build_processor(
+        &self,
+        stack_inputs: StackInputs,
+        debug: bool,
+    ) -> Result<FastProcessor, ExecutionError> {
+        Ok(FastProcessor::new(stack_inputs)
+            .with_advice(self.advice_inputs.clone())
+            .map_err(ExecutionError::advice_error_no_context)?
+            .with_debugging(debug)
+            .with_tracing(debug)
+            .with_schema(self.schema.clone()))
+    }
+
     /// Builds a final stack from the provided stack-ordered array and asserts that executing the
     /// test will result in the expected final stack state.
     #[cfg(not(target_family = "wasm"))]
@@ -379,12 +397,9 @@ impl Test {
         let mut host = host.with_source_manager(self.source_manager.clone());
 
         // execute the test
-        let processor = FastProcessor::new(self.stack_inputs)
-            .with_advice(self.advice_inputs.clone())
-            .expect("test advice inputs should fit default advice map limits")
-            .with_debugging(self.in_debug_mode)
-            .with_tracing(self.in_debug_mode)
-            .with_schema(self.schema.clone());
+        let processor = self
+            .build_processor(self.stack_inputs, self.in_debug_mode)
+            .expect("test advice inputs should fit default advice map limits");
         let execution_output = processor.execute_sync(&program, &mut host).unwrap();
 
         // validate the memory state
@@ -585,12 +600,7 @@ impl Test {
         let (program, host) = self.get_program_and_host();
         let mut host = host.with_source_manager(self.source_manager.clone());
 
-        let processor = FastProcessor::new(self.stack_inputs)
-            .with_advice(self.advice_inputs.clone())
-            .map_err(ExecutionError::advice_error_no_context)?
-            .with_debugging(true)
-            .with_tracing(true)
-            .with_schema(self.schema.clone());
+        let processor = self.build_processor(self.stack_inputs, true)?;
 
         processor.execute_sync(&program, &mut host).map(|output| (output, host))
     }
@@ -608,12 +618,7 @@ impl Test {
             .with_source_manager(self.source_manager.clone())
             .with_debug_handler(debug_handler);
 
-        let processor = FastProcessor::new(self.stack_inputs)
-            .with_advice(self.advice_inputs.clone())
-            .map_err(ExecutionError::advice_error_no_context)?
-            .with_debugging(true)
-            .with_tracing(true)
-            .with_schema(self.schema.clone());
+        let processor = self.build_processor(self.stack_inputs, true)?;
 
         let stack_result = processor.execute_sync(&program, &mut host);
 
@@ -775,12 +780,9 @@ impl Test {
         let mut host = host.with_source_manager(self.source_manager.clone());
 
         let fast_result_by_step = {
-            let fast_process = FastProcessor::new(stack_inputs)
-                .with_advice(self.advice_inputs.clone())
-                .expect("test advice inputs should fit default advice map limits")
-                .with_debugging(self.in_debug_mode)
-                .with_tracing(self.in_debug_mode)
-                .with_schema(self.schema.clone());
+            let fast_process = self
+                .build_processor(stack_inputs, self.in_debug_mode)
+                .expect("test advice inputs should fit default advice map limits");
             fast_process.execute_by_step_sync(&program, &mut host)
         };
 
