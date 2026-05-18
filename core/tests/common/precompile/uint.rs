@@ -26,10 +26,8 @@ impl Uint {
     pub const NAME: &'static str = "uint256";
     /// App version — bump on incompatible discriminant changes.
     pub const VERSION: u32 = 1;
-    /// Discriminant names — hashed into `app_id`; renaming changes the id.
-    pub const DISCS: &'static [&'static str] = &["leaf", "add", "sub", "mul", "eq"];
 
-    /// Discriminant indices, matching positions in [`Self::DISCS`].
+    /// Discriminant indices.
     pub const D_LEAF: Felt = Felt::new_unchecked(0);
     pub const D_ADD: Felt = Felt::new_unchecked(1);
     pub const D_SUB: Felt = Felt::new_unchecked(2);
@@ -123,10 +121,6 @@ impl Precompile for Uint {
 
     fn version(&self) -> u32 {
         Self::VERSION
-    }
-
-    fn discriminants(&self) -> &'static [&'static str] {
-        Self::DISCS
     }
 
     fn id(&self) -> Felt {

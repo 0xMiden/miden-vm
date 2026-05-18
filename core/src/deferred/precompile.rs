@@ -51,12 +51,6 @@ pub trait Precompile: core::fmt::Debug + Send + Sync {
     /// Hashed into the precompile id. Bump on incompatible decode/reduce changes.
     fn version(&self) -> u32;
 
-    /// Discriminant names hashed into the precompile id.
-    ///
-    /// Transitional: removed at step 4, when [`precompile_id`] drops to hashing only
-    /// `(name, version)`.
-    fn discriminants(&self) -> &'static [&'static str];
-
     /// Pinned id (the first felt of every tag belonging to this precompile). Implementors
     /// return the precomputed value; [`crate::deferred::PrecompileSchema::new`] validates it
     /// equals [`precompile_id`], panicking on drift. No default — the value/derivation bridge
@@ -84,7 +78,7 @@ pub trait Precompile: core::fmt::Debug + Send + Sync {
 /// `version` method.
 const APP_ID_DOMSEP: &[u8] = b"miden-deferred-app/v1";
 
-/// Derive a precompile's canonical id from its metadata.
+/// Derive a precompile's canonical id from `(name, version)`.
 ///
 /// Inputs are hashed with Blake3; the first 8 bytes of the digest are interpreted as a
 /// little-endian `u64` and reduced modulo the Goldilocks prime — giving ~32 bits of
@@ -92,22 +86,14 @@ const APP_ID_DOMSEP: &[u8] = b"miden-deferred-app/v1";
 /// composite schema is expected to host. Used by [`crate::deferred::PrecompileSchema::new`] to
 /// validate each precompile's declared [`Precompile::id`].
 pub fn precompile_id(p: &dyn Precompile) -> Felt {
-    derive_app_id(p.name(), p.version(), &[], p.discriminants())
+    derive(p.name(), p.version())
 }
 
-/// Internal byte-exact derivation shared by [`precompile_id`]. The `params` slice is currently
-/// always empty (no precompile mixes parameter bytes); kept as an argument so the hashed byte
-/// layout is unchanged from the pre-refactor `app_id_from`.
-fn derive_app_id(name: &str, version: u32, params: &[u8], discriminants: &[&str]) -> Felt {
+fn derive(name: &str, version: u32) -> Felt {
     let mut hasher = Hasher::new();
     hasher.update(APP_ID_DOMSEP);
     hash_bytes(&mut hasher, name.as_bytes());
     hasher.update(&version.to_le_bytes());
-    hash_bytes(&mut hasher, params);
-    hasher.update(&(discriminants.len() as u32).to_le_bytes());
-    for d in discriminants {
-        hash_bytes(&mut hasher, d.as_bytes());
-    }
     let digest = hasher.finalize();
     let raw = u64::from_le_bytes(digest.as_bytes()[..8].try_into().expect("8 bytes"));
     Felt::new_unchecked(raw % Felt::ORDER)
@@ -123,26 +109,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn app_id_is_deterministic() {
-        let a = derive_app_id("foo", 1, b"params", &["x", "y"]);
-        let b = derive_app_id("foo", 1, b"params", &["x", "y"]);
-        assert_eq!(a, b);
+    fn id_is_deterministic() {
+        assert_eq!(derive("foo", 1), derive("foo", 1));
     }
 
     #[test]
-    fn app_id_changes_with_each_input() {
-        let base = derive_app_id("foo", 1, b"params", &["x", "y"]);
-        assert_ne!(base, derive_app_id("bar", 1, b"params", &["x", "y"]));
-        assert_ne!(base, derive_app_id("foo", 2, b"params", &["x", "y"]));
-        assert_ne!(base, derive_app_id("foo", 1, b"params2", &["x", "y"]));
-        assert_ne!(base, derive_app_id("foo", 1, b"params", &["x"]));
-        assert_ne!(base, derive_app_id("foo", 1, b"params", &["x", "z"]));
+    fn id_changes_with_name_and_version() {
+        let base = derive("foo", 1);
+        assert_ne!(base, derive("bar", 1));
+        assert_ne!(base, derive("foo", 2));
     }
 
     #[test]
-    fn app_id_lies_in_field() {
+    fn id_lies_in_field() {
         // `new_unchecked` is sound only if the value < Felt::ORDER.
-        let id = derive_app_id("anything", 0, &[], &[]);
-        assert!(id.as_canonical_u64() < Felt::ORDER);
+        assert!(derive("anything", 0).as_canonical_u64() < Felt::ORDER);
     }
 }

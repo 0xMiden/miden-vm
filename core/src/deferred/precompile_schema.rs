@@ -110,9 +110,6 @@ mod tests {
         fn version(&self) -> u32 {
             1
         }
-        fn discriminants(&self) -> &'static [&'static str] {
-            &["leaf"]
-        }
         fn id(&self) -> Felt {
             precompile_id(self)
         }

@@ -36,7 +36,6 @@ pub struct Hash;
 impl Hash {
     pub const NAME: &'static str = "mock_hash";
     pub const VERSION: u32 = 1;
-    pub const DISCS: &'static [&'static str] = &["preimage", "digest", "eq"];
 
     pub const D_PREIMAGE: Felt = Felt::new_unchecked(0);
     pub const D_DIGEST: Felt = Felt::new_unchecked(1);
@@ -115,10 +114,6 @@ impl Precompile for Hash {
 
     fn version(&self) -> u32 {
         Self::VERSION
-    }
-
-    fn discriminants(&self) -> &'static [&'static str] {
-        Self::DISCS
     }
 
     fn id(&self) -> Felt {

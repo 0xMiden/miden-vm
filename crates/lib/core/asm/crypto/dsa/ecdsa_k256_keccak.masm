@@ -14,7 +14,7 @@ use miden::core::word
 # CONSTANTS — EcdsaK256KeccakPrecompile schema tag fields
 # ================================================================================================
 
-const APP_ID = 6573419657329570818
+const APP_ID = 11898598695480032786
 const D_VERIFY = 0
 
 const PK_LEN_FELTS = 9     # 33.div_ceil(4)

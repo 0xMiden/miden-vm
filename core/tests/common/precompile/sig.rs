@@ -28,7 +28,6 @@ pub struct Sig;
 impl Sig {
     pub const NAME: &'static str = "mock_sig";
     pub const VERSION: u32 = 1;
-    pub const DISCS: &'static [&'static str] = &["verify"];
 
     pub const D_VERIFY: Felt = Felt::new_unchecked(0);
 
@@ -57,10 +56,6 @@ impl Precompile for Sig {
 
     fn version(&self) -> u32 {
         Self::VERSION
-    }
-
-    fn discriminants(&self) -> &'static [&'static str] {
-        Self::DISCS
     }
 
     fn id(&self) -> Felt {

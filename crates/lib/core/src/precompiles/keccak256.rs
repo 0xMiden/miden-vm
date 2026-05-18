@@ -18,7 +18,7 @@ use miden_core::{
     Felt, ZERO,
     deferred::{
         Digest, Node, NodePayload, NodeType, Payload, Precompile, PrecompileTag, ReduceCtx,
-        SchemaError, TRUE_TAG, Tag, TagInfo, precompile_id, true_node,
+        SchemaError, TRUE_TAG, Tag, TagInfo, true_node,
     },
 };
 use miden_crypto::hash::keccak::Keccak256;
@@ -34,8 +34,6 @@ impl Keccak256Precompile {
     pub const NAME: &'static str = "keccak256";
     /// App version — bump on incompatible discriminant changes.
     pub const VERSION: u32 = 1;
-    /// Discriminant names — hashed into `app_id`; renaming changes the id.
-    pub const DISCS: &'static [&'static str] = &["preimage", "digest", "eq"];
 
     pub const D_PREIMAGE: Felt = Felt::new_unchecked(0);
     pub const D_DIGEST: Felt = Felt::new_unchecked(1);
@@ -43,7 +41,7 @@ impl Keccak256Precompile {
 
     /// Derive `app_id`. Pure function over the app's metadata.
     pub fn app_id() -> Felt {
-        precompile_id(&Keccak256Precompile)
+        Felt::new_unchecked(12_495_655_595_326_449_568)
     }
 
     /// Tag for a `preimage` chunk node for an `n_bytes`-byte payload.
@@ -89,10 +87,6 @@ impl Precompile for Keccak256Precompile {
 
     fn version(&self) -> u32 {
         Self::VERSION
-    }
-
-    fn discriminants(&self) -> &'static [&'static str] {
-        Self::DISCS
     }
 
     fn id(&self) -> Felt {

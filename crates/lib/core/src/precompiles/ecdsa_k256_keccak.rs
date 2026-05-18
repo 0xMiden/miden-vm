@@ -10,7 +10,7 @@ use miden_core::{
     Felt, ZERO,
     deferred::{
         Node, NodePayload, NodeType, Precompile, PrecompileTag, ReduceCtx, SchemaError, TRUE_TAG,
-        Tag, TagInfo, precompile_id, true_node,
+        Tag, TagInfo, true_node,
     },
     serde::Deserializable,
 };
@@ -27,7 +27,6 @@ pub struct EcdsaK256KeccakPrecompile;
 impl EcdsaK256KeccakPrecompile {
     pub const NAME: &'static str = "ecdsa_k256_keccak";
     pub const VERSION: u32 = 1;
-    pub const DISCS: &'static [&'static str] = &["verify"];
 
     pub const D_VERIFY: Felt = Felt::new_unchecked(0);
 
@@ -52,7 +51,7 @@ impl EcdsaK256KeccakPrecompile {
     pub const SIG_OFFSET: usize = 80;
 
     pub fn app_id() -> Felt {
-        precompile_id(&EcdsaK256KeccakPrecompile)
+        Felt::new_unchecked(11_898_598_695_480_032_786)
     }
 
     pub fn verify_tag() -> Tag {
@@ -74,10 +73,6 @@ impl Precompile for EcdsaK256KeccakPrecompile {
 
     fn version(&self) -> u32 {
         Self::VERSION
-    }
-
-    fn discriminants(&self) -> &'static [&'static str] {
-        Self::DISCS
     }
 
     fn id(&self) -> Felt {

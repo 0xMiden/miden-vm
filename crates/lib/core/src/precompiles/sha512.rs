@@ -12,7 +12,7 @@ use miden_core::{
     Felt, ZERO,
     deferred::{
         Digest, Node, NodePayload, NodeType, Payload, Precompile, PrecompileTag, ReduceCtx,
-        SchemaError, TRUE_TAG, Tag, TagInfo, precompile_id, true_node,
+        SchemaError, TRUE_TAG, Tag, TagInfo, true_node,
     },
 };
 use miden_crypto::hash::sha2::Sha512;
@@ -26,14 +26,13 @@ pub struct Sha512Precompile;
 impl Sha512Precompile {
     pub const NAME: &'static str = "sha512";
     pub const VERSION: u32 = 1;
-    pub const DISCS: &'static [&'static str] = &["preimage", "digest", "eq"];
 
     pub const D_PREIMAGE: Felt = Felt::new_unchecked(0);
     pub const D_DIGEST: Felt = Felt::new_unchecked(1);
     pub const D_EQ: Felt = Felt::new_unchecked(2);
 
     pub fn app_id() -> Felt {
-        precompile_id(&Sha512Precompile)
+        Felt::new_unchecked(5_915_489_169_965_270_201)
     }
 
     pub fn preimage_tag(n_bytes: u32) -> Tag {
@@ -73,10 +72,6 @@ impl Precompile for Sha512Precompile {
 
     fn version(&self) -> u32 {
         Self::VERSION
-    }
-
-    fn discriminants(&self) -> &'static [&'static str] {
-        Self::DISCS
     }
 
     fn id(&self) -> Felt {

@@ -49,55 +49,68 @@ pub fn schema() -> PrecompileSchema {
 mod tests {
     use alloc::vec::Vec;
 
-    use miden_core::Felt;
+    use miden_core::{Felt, deferred::precompile_id};
 
     use super::*;
 
     /// Pin the felt values that the per-precompile MASM files hardcode as
-    /// `const APP_ID = ...` etc. Any change to the underlying app_id derivation (NAME, VERSION,
-    /// params, DISCS) or to discriminant ordering will fail this test, forcing a matching update
-    /// to the four precompile MASM files (keccak256.masm, sha512.masm, ecdsa_k256_keccak.masm,
-    /// eddsa_ed25519.masm) so MASM and Rust never diverge silently.
+    /// `const APP_ID = ...` / `const D_* = ...`. `app_id()` returns a hardcoded literal; this
+    /// test asserts it equals both the MASM mirror (`EXPECTED_*`) and the live
+    /// [`precompile_id`] derivation (NAME + VERSION), so MASM, the Rust literal, and the
+    /// derivation never diverge silently. (`PrecompileSchema::new` also enforces the
+    /// literal-vs-derivation half at composite-construction time.)
     ///
-    /// Update procedure on intentional change: bump VERSION (or rename a discriminant), re-run
-    /// this test, copy the printed values into the `expected_*` constants below AND into the
-    /// `const APP_ID` / `const D_*` declarations in each precompile MASM file.
+    /// Update procedure on intentional change: bump VERSION, run this test, copy each printed
+    /// `got` value into the precompile's `app_id()` literal, the `EXPECTED_*` constant below,
+    /// AND the `const APP_ID` line of the matching `.masm` file.
     #[test]
     fn masm_constants_pinned_to_rust_values() {
-        // Re-derived via `precompile_id` (NAME + VERSION + DISCS) for each precompile. Pinned
-        // here so any drift surfaces at CI time. Discriminant indices are positional in DISCS.
-        const EXPECTED_KECCAK256_APP_ID: u64 = 15_236_188_148_055_918_137;
-        const EXPECTED_SHA512_APP_ID: u64 = 3_974_822_377_943_316_543;
-        const EXPECTED_ECDSA_K256_KECCAK_APP_ID: u64 = 6_573_419_657_329_570_818;
-        const EXPECTED_EDDSA_ED25519_APP_ID: u64 = 12_237_732_355_729_770_957;
+        const EXPECTED_KECCAK256_APP_ID: u64 = 12_495_655_595_326_449_568;
+        const EXPECTED_SHA512_APP_ID: u64 = 5_915_489_169_965_270_201;
+        const EXPECTED_ECDSA_K256_KECCAK_APP_ID: u64 = 11_898_598_695_480_032_786;
+        const EXPECTED_EDDSA_ED25519_APP_ID: u64 = 17_524_510_362_207_076_881;
 
-        assert_eq!(
-            Keccak256Precompile::app_id().as_canonical_u64(),
-            EXPECTED_KECCAK256_APP_ID,
-            "keccak256 APP_ID drift — update keccak256.masm to match (got {})",
-            Keccak256Precompile::app_id().as_canonical_u64(),
-        );
-        assert_eq!(
-            Sha512Precompile::app_id().as_canonical_u64(),
-            EXPECTED_SHA512_APP_ID,
-            "sha512 APP_ID drift — update sha512.masm to match (got {})",
-            Sha512Precompile::app_id().as_canonical_u64(),
-        );
-        assert_eq!(
-            EcdsaK256KeccakPrecompile::app_id().as_canonical_u64(),
-            EXPECTED_ECDSA_K256_KECCAK_APP_ID,
-            "ecdsa_k256_keccak APP_ID drift — update ecdsa_k256_keccak.masm to match (got {})",
-            EcdsaK256KeccakPrecompile::app_id().as_canonical_u64(),
-        );
-        assert_eq!(
-            EddsaEd25519Precompile::app_id().as_canonical_u64(),
-            EXPECTED_EDDSA_ED25519_APP_ID,
-            "eddsa_ed25519 APP_ID drift — update eddsa_ed25519.masm to match (got {})",
-            EddsaEd25519Precompile::app_id().as_canonical_u64(),
-        );
+        for (name, app_id, expected, derived) in [
+            (
+                "keccak256",
+                Keccak256Precompile::app_id(),
+                EXPECTED_KECCAK256_APP_ID,
+                precompile_id(&Keccak256Precompile),
+            ),
+            (
+                "sha512",
+                Sha512Precompile::app_id(),
+                EXPECTED_SHA512_APP_ID,
+                precompile_id(&Sha512Precompile),
+            ),
+            (
+                "ecdsa_k256_keccak",
+                EcdsaK256KeccakPrecompile::app_id(),
+                EXPECTED_ECDSA_K256_KECCAK_APP_ID,
+                precompile_id(&EcdsaK256KeccakPrecompile),
+            ),
+            (
+                "eddsa_ed25519",
+                EddsaEd25519Precompile::app_id(),
+                EXPECTED_EDDSA_ED25519_APP_ID,
+                precompile_id(&EddsaEd25519Precompile),
+            ),
+        ] {
+            assert_eq!(
+                app_id, derived,
+                "{name} app_id() literal != precompile_id derivation (got {})",
+                app_id.as_canonical_u64(),
+            );
+            assert_eq!(
+                app_id.as_canonical_u64(),
+                expected,
+                "{name} APP_ID drift — update {name}.masm `const APP_ID` to match (got {})",
+                app_id.as_canonical_u64(),
+            );
+        }
 
-        // Per-app discriminant indices are positional in DISCS; pin them explicitly so a
-        // reorder is caught.
+        // Discriminant indices map 1:1 to the MASM `const D_* = ...` declarations; pin them so
+        // a reorder is caught.
         assert_eq!(Keccak256Precompile::D_PREIMAGE.as_canonical_u64(), 0);
         assert_eq!(Keccak256Precompile::D_DIGEST.as_canonical_u64(), 1);
         assert_eq!(Keccak256Precompile::D_EQ.as_canonical_u64(), 2);

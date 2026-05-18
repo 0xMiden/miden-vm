@@ -23,7 +23,6 @@ pub(crate) struct TestPrecompile;
 impl TestPrecompile {
     const NAME: &'static str = "test_precompile";
     const VERSION: u32 = 1;
-    const DISCS: &'static [&'static str] = &["leaf", "add", "mul", "eq"];
 
     const D_LEAF: Felt = Felt::new_unchecked(0);
     const D_ADD: Felt = Felt::new_unchecked(1);
@@ -120,10 +119,6 @@ impl Precompile for TestPrecompile {
 
     fn version(&self) -> u32 {
         Self::VERSION
-    }
-
-    fn discriminants(&self) -> &'static [&'static str] {
-        Self::DISCS
     }
 
     fn id(&self) -> Felt {

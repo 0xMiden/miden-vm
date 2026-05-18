@@ -16,7 +16,7 @@ use miden::core::sys
 # crates/lib/core/src/precompiles/mod.rs `masm_constants_pinned_to_rust_values`).
 # Changing VERSION / DISCS / NAME in Rust must update these values in lockstep.
 
-const APP_ID = 15236188148055918137
+const APP_ID = 12495655595326449568
 const D_PREIMAGE = 0
 const D_DIGEST = 1
 const D_EQ = 2

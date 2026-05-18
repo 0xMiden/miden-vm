@@ -10,7 +10,7 @@ use miden_core::{
     Felt, ZERO,
     deferred::{
         Node, NodePayload, NodeType, Precompile, PrecompileTag, ReduceCtx, SchemaError, TRUE_TAG,
-        Tag, TagInfo, precompile_id, true_node,
+        Tag, TagInfo, true_node,
     },
     serde::Deserializable,
 };
@@ -27,7 +27,6 @@ pub struct EddsaEd25519Precompile;
 impl EddsaEd25519Precompile {
     pub const NAME: &'static str = "eddsa_ed25519";
     pub const VERSION: u32 = 1;
-    pub const DISCS: &'static [&'static str] = &["verify"];
 
     pub const D_VERIFY: Felt = Felt::new_unchecked(0);
 
@@ -39,7 +38,7 @@ impl EddsaEd25519Precompile {
     pub const SIG_BYTES: usize = 64;
 
     pub fn app_id() -> Felt {
-        precompile_id(&EddsaEd25519Precompile)
+        Felt::new_unchecked(17_524_510_362_207_076_881)
     }
 
     pub fn verify_tag() -> Tag {
@@ -60,10 +59,6 @@ impl Precompile for EddsaEd25519Precompile {
 
     fn version(&self) -> u32 {
         Self::VERSION
-    }
-
-    fn discriminants(&self) -> &'static [&'static str] {
-        Self::DISCS
     }
 
     fn id(&self) -> Felt {

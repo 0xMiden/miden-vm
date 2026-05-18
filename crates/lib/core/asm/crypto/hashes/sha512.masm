@@ -12,7 +12,7 @@ use miden::core::sys
 # Pinned to the Rust-side Sha512Precompile constants (see
 # crates/lib/core/src/precompiles/mod.rs `masm_constants_pinned_to_rust_values`).
 
-const APP_ID = 3974822377943316543
+const APP_ID = 5915489169965270201
 const D_PREIMAGE = 0
 const D_DIGEST = 1
 const D_EQ = 2
