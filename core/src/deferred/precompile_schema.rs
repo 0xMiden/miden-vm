@@ -7,7 +7,7 @@ use crate::{
     deferred::{DeferredState, Node, ReduceCtx, Schema, SchemaError, Tag, TagInfo},
 };
 
-use super::{App, AppTag};
+use super::precompile::{App, AppTag};
 
 /// A [`Schema`] that dispatches each tag to an [`App`] selected by `tag[0]` (`app_id`).
 ///

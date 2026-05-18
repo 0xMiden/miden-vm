@@ -25,7 +25,8 @@ pub use wire::{DeferredStateWire, IntegrityError, TRUE_INDEX, WireBody, WireEntr
 // surface. Production precompile apps (keccak256, sha512, ecdsa_k256_keccak, eddsa_ed25519)
 // live in `miden-core-lib::precompiles`, next to their MASM wrappers; reference precompiles
 // live in `core/tests/common/precompile/`.
-mod app;
+mod precompile;
+mod precompile_schema;
 
 // Minimal `#[cfg(test)]` schema fixture for the engine's own unit tests (state.rs et al.).
 // Not exported, not on the `testing` surface — scaffolding only.
@@ -34,7 +35,8 @@ pub(crate) mod test_precompile;
 
 use alloc::{sync::Arc, vec::Vec};
 
-pub use app::{App, AppTag, PrecompileSchema, app_id_from};
+pub use precompile::{App, AppTag, app_id_from};
+pub use precompile_schema::PrecompileSchema;
 use miden_crypto::{ZERO, hash::poseidon2::Poseidon2};
 use miden_utils_sync::OnceLockCompat;
 #[cfg(feature = "serde")]

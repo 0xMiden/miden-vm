@@ -2,8 +2,9 @@
 //!
 //! An [`App`] is a self-contained semantic module (e.g. a hash, signature, or field app)
 //! that claims a slice of the 4-felt tag space identified by a stable [`Felt`] `app_id`. The
-//! [`PrecompileSchema`] composite dispatches each tag to the right app by `tag[0]`, hands the
-//! remaining bits to the app as an [`AppTag`], and forwards `decode` / `reduce`.
+//! [`crate::deferred::PrecompileSchema`] composite dispatches each tag to the right app by
+//! `tag[0]`, hands the remaining bits to the app as an [`AppTag`], and forwards
+//! `decode` / `reduce`.
 //!
 //! Tag layout (locked for v1):
 //!
@@ -21,14 +22,11 @@ use blake3::Hasher;
 use super::{DeferredState, Node, ReduceCtx, SchemaError, TagInfo};
 use crate::Felt;
 
-mod composite;
-pub use composite::PrecompileSchema;
-
 // APP TAG
 // ================================================================================================
 
-/// The app-local portion of a tag — the slice [`PrecompileSchema`] hands to an app after
-/// stripping the leading `app_id`. Apps never see `tag[0]` or the reserved `tag[3]`.
+/// The app-local portion of a tag — the slice [`crate::deferred::PrecompileSchema`] hands to an
+/// app after stripping the leading `app_id`. Apps never see `tag[0]` or the reserved `tag[3]`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AppTag {
     /// App-local discriminant index. Maps to the app's internal node-kind enum.
@@ -43,7 +41,7 @@ pub struct AppTag {
 /// A single semantic module of a composite schema.
 ///
 /// Apps own a small enum of node-kinds and (optionally) one immediate per tag. They are stitched
-/// together into a [`PrecompileSchema`] which implements the framework's
+/// together into a [`crate::deferred::PrecompileSchema`] which implements the framework's
 /// [`super::Schema`] trait.
 pub trait App: core::fmt::Debug + Send + Sync {
     /// Stable identifier (the first felt of every tag belonging to this app). Derived once from
@@ -51,7 +49,8 @@ pub trait App: core::fmt::Debug + Send + Sync {
     fn id(&self) -> Felt;
 
     /// Pre-register canonical constants this app provides (e.g. `ZERO`, `ONE`, generator).
-    /// Called by [`PrecompileSchema::boot`]. Default is a no-op for apps without constants.
+    /// Called by [`crate::deferred::PrecompileSchema::boot`]. Default is a no-op for apps
+    /// without constants.
     fn init(&self, _state: &mut DeferredState) {}
 
     /// Decode the app-local tag to its [`TagInfo`]. Returning `Err(SchemaError::InvalidNode)`
