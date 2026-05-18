@@ -248,67 +248,6 @@ pub const LOGUP_AUX_TRACE_WIDTH: usize = 7;
 const PV_PROGRAM_HASH: usize = 0;
 const PV_TRANSCRIPT_STATE: usize = NUM_PUBLIC_VALUES - WORD_SIZE;
 
-// REDUCED-AUX BOUNDARY BUILDER
-// ================================================================================================
-
-/// `BoundaryBuilder` impl that reduces each emitted interaction to its LogUp
-/// denominator contribution `multiplicity · encode(msg)⁻¹` and sums them into a
-/// running `EF` accumulator.
-///
-/// Lets `reduced_aux_values` reuse the structured boundary emissions from
-/// [`emit_miden_boundary`] — the same source consumed by the debug walker —
-/// instead of open-coding the three corrections a second time.
-///
-/// Denominators are `α + Σ βⁱ · field_i` with random `α, β`; on any legitimate proof they
-/// are non-zero with overwhelming probability. A malformed/adversarial proof can still
-/// drive a denominator to zero, so the reducer captures the first failure and surfaces it
-/// to `reduced_aux_values`, which bubbles a [`ReductionError`] to the verifier rather than
-/// panicking.
-struct ReduceBoundaryBuilder<'a, EF: ExtensionField<Felt>> {
-    challenges: &'a Challenges<EF>,
-    public_values: &'a [Felt],
-    var_len_public_inputs: VarLenPublicInputs<'a, Felt>,
-    sum: EF,
-    error: Option<ReductionError>,
-}
-
-impl<'a, EF: ExtensionField<Felt>> ReduceBoundaryBuilder<'a, EF> {
-    fn finalize(self) -> Result<EF, ReductionError> {
-        match self.error {
-            Some(err) => Err(err),
-            None => Ok(self.sum),
-        }
-    }
-}
-
-impl<'a, EF: ExtensionField<Felt>> BoundaryBuilder for ReduceBoundaryBuilder<'a, EF> {
-    type F = Felt;
-    type EF = EF;
-
-    fn public_values(&self) -> &[Felt] {
-        self.public_values
-    }
-
-    fn var_len_public_inputs(&self) -> &[&[Felt]] {
-        self.var_len_public_inputs
-    }
-
-    fn insert<M>(&mut self, _name: &'static str, multiplicity: Felt, msg: M)
-    where
-        M: LookupMessage<Felt, EF>,
-    {
-        if self.error.is_some() {
-            return;
-        }
-        match msg.encode(self.challenges).try_inverse() {
-            Some(inv) => self.sum += inv * multiplicity,
-            None => {
-                self.error = Some("LogUp boundary denominator was zero".into());
-            },
-        }
-    }
-}
-
 // CORE AIR
 // ================================================================================================
 
@@ -738,5 +677,66 @@ where
             "build_logup_aux_trace returns one committed final per AIR (col 0's terminal sum)"
         );
         (aux_trace, committed)
+    }
+}
+
+// REDUCED-AUX BOUNDARY BUILDER
+// ================================================================================================
+
+/// `BoundaryBuilder` impl that reduces each emitted interaction to its LogUp
+/// denominator contribution `multiplicity · encode(msg)⁻¹` and sums them into a
+/// running `EF` accumulator.
+///
+/// Lets `reduced_aux_values` reuse the structured boundary emissions from
+/// [`emit_miden_boundary`] — the same source consumed by the debug walker —
+/// instead of open-coding the three corrections a second time.
+///
+/// Denominators are `α + Σ βⁱ · field_i` with random `α, β`; on any legitimate proof they
+/// are non-zero with overwhelming probability. A malformed/adversarial proof can still
+/// drive a denominator to zero, so the reducer captures the first failure and surfaces it
+/// to `reduced_aux_values`, which bubbles a [`ReductionError`] to the verifier rather than
+/// panicking.
+struct ReduceBoundaryBuilder<'a, EF: ExtensionField<Felt>> {
+    challenges: &'a Challenges<EF>,
+    public_values: &'a [Felt],
+    var_len_public_inputs: VarLenPublicInputs<'a, Felt>,
+    sum: EF,
+    error: Option<ReductionError>,
+}
+
+impl<'a, EF: ExtensionField<Felt>> ReduceBoundaryBuilder<'a, EF> {
+    fn finalize(self) -> Result<EF, ReductionError> {
+        match self.error {
+            Some(err) => Err(err),
+            None => Ok(self.sum),
+        }
+    }
+}
+
+impl<'a, EF: ExtensionField<Felt>> BoundaryBuilder for ReduceBoundaryBuilder<'a, EF> {
+    type F = Felt;
+    type EF = EF;
+
+    fn public_values(&self) -> &[Felt] {
+        self.public_values
+    }
+
+    fn var_len_public_inputs(&self) -> &[&[Felt]] {
+        self.var_len_public_inputs
+    }
+
+    fn insert<M>(&mut self, _name: &'static str, multiplicity: Felt, msg: M)
+    where
+        M: LookupMessage<Felt, EF>,
+    {
+        if self.error.is_some() {
+            return;
+        }
+        match msg.encode(self.challenges).try_inverse() {
+            Some(inv) => self.sum += inv * multiplicity,
+            None => {
+                self.error = Some("LogUp boundary denominator was zero".into());
+            },
+        }
     }
 }
