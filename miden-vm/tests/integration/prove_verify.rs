@@ -174,7 +174,7 @@ mod recursive_verifier {
         challenger::CanObserve,
         fri::PcsTranscript,
         lmcs::{Lmcs, proof::BatchProofView},
-        proof::StarkTranscript,
+        proof::{StarkProof, StarkTranscript},
     };
     use miden_lifted_stark::AirInstance;
     use miden_prover::{ProcessorAir, PublicInputs, config};
@@ -183,6 +183,7 @@ mod recursive_verifier {
     type Challenge = QuadFelt;
     type P2Config = config::Poseidon2Config;
     type P2Lmcs = <P2Config as StarkConfig<Felt, Challenge>>::Lmcs;
+    const MAX_STARK_PROOF_BYTES: usize = 64 * 1024 * 1024;
 
     pub struct VerifierInputs {
         pub initial_stack: Vec<u64>,
@@ -194,8 +195,12 @@ mod recursive_verifier {
     pub fn generate_advice_inputs(proof_bytes: &[u8], pub_inputs: PublicInputs) -> VerifierInputs {
         let params = config::pcs_params();
         let config = config::poseidon2_config(params);
-        let transcript_data =
-            bincode::deserialize(proof_bytes).expect("failed to deserialize proof bytes");
+        let proof_encoding_config = wincode::config::Configuration::default()
+            .with_preallocation_size_limit::<MAX_STARK_PROOF_BYTES>();
+        let transcript_data = <serde_wincode::SerdeCompat<StarkProof<Felt, QuadFelt, P2Config>> as wincode::config::Deserialize<
+            _,
+        >>::deserialize(proof_bytes, proof_encoding_config)
+        .expect("failed to deserialize proof bytes");
 
         let (public_values, kernel_felts) = pub_inputs.to_air_inputs();
         let mut challenger = config.challenger();
@@ -554,7 +559,7 @@ mod fast_parallel {
             expected_transcript,
         } = prove_logged_precompile_fixture(HashFunction::Blake3_256);
 
-        let (_, pc_transcript_digest) = verify_with_precompiles(
+        let (_, pc_transcript_state) = verify_with_precompiles(
             program.into(),
             stack_inputs,
             stack_outputs,
@@ -562,7 +567,7 @@ mod fast_parallel {
             &verifier_registry,
         )
         .expect("proof verification with precompiles failed");
-        assert_eq!(expected_transcript.finalize(), pc_transcript_digest);
+        assert_eq!(expected_transcript.state(), pc_transcript_state);
     }
 
     #[test]
@@ -664,7 +669,7 @@ mod fast_parallel {
         for fixture in &fixtures {
             expected_transcript.record(fixture.commitment);
         }
-        assert_eq!(transcript.finalize(), expected_transcript.finalize());
+        assert_eq!(transcript.state(), expected_transcript.state());
 
         LoggedPrecompileProofFixture {
             program,

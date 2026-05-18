@@ -162,7 +162,7 @@ impl BasicBlockBuilder<'_> {
         &mut self,
         instruction: &Span<Instruction>,
         proc_ctx: &ProcedureContext,
-    ) -> Result<(), Report> {
+    ) {
         let span = instruction.span();
         self.pending_asm_op = Some(PendingAsmOp {
             op_start: self.ops.len(),
@@ -170,8 +170,6 @@ impl BasicBlockBuilder<'_> {
             context_name: proc_ctx.path().to_string(),
             op: instruction.to_string(),
         });
-
-        Ok(())
     }
 
     /// Finalizes the pending AssemblyOp with the computed cycle count.

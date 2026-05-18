@@ -385,7 +385,7 @@ impl Assembler {
                 if !self.kernel().is_empty() {
                     return Err(Report::msg(format!(
                         "duplicate kernels present in the dependency graph: '{}@{}' conflicts with another kernel we've already linked",
-                        &package.name, &package.version
+                        package.name, package.version
                     )));
                 }
 
@@ -616,7 +616,7 @@ impl Assembler {
         };
 
         let (mast_forest, id_remappings) = mast_forest_builder.build();
-        for (_proc_name, export) in exports.iter_mut() {
+        for export in exports.values_mut() {
             match export {
                 LibraryExport::Procedure(export) => {
                     if let Some(&new_node_id) = id_remappings.get(&export.node) {
@@ -687,7 +687,7 @@ impl Assembler {
                 );
 
                 let procedure = pctx.into_procedure(digest, node);
-                self.linker.register_procedure_root(gid, digest)?;
+                self.linker.register_procedure_root(gid, digest);
                 mast_forest_builder.insert_procedure(gid, procedure)?;
                 LibraryExport::Procedure(ProcedureExport {
                     node,
@@ -765,7 +765,7 @@ impl Assembler {
                     self.source_manager.clone(),
                 );
                 let procedure = pctx.into_procedure(digest, node);
-                self.linker.register_procedure_root(gid, digest)?;
+                self.linker.register_procedure_root(gid, digest);
                 mast_forest_builder.insert_procedure(gid, procedure)?;
 
                 return Ok(LibraryExport::Procedure(ProcedureExport {
@@ -797,7 +797,7 @@ impl Assembler {
         let program = source.parse_with_options(self.source_manager.clone(), options)?;
         assert!(program.is_executable());
 
-        self.assemble_executable_modules(program, [])?.into_program()
+        Ok(self.assemble_executable_modules(program, [])?.into_program())
     }
 
     pub(crate) fn assemble_library_modules(
@@ -997,7 +997,7 @@ impl Assembler {
         while let Some(procedure_gid) = worklist.pop() {
             // If we have already compiled this procedure, do not recompile
             if let Some(proc) = mast_forest_builder.get_procedure(procedure_gid) {
-                self.linker.register_procedure_root(procedure_gid, proc.mast_root())?;
+                self.linker.register_procedure_root(procedure_gid, proc.mast_root());
                 continue;
             }
             // Fetch procedure metadata from the graph
@@ -1040,7 +1040,7 @@ impl Assembler {
 
                     // Cache the compiled procedure
                     drop(proc);
-                    self.linker.register_procedure_root(procedure_gid, procedure.mast_root())?;
+                    self.linker.register_procedure_root(procedure_gid, procedure.mast_root());
                     mast_forest_builder.insert_procedure(procedure_gid, procedure)?;
                 },
                 SymbolItem::Alias { alias, resolved } => {
@@ -1100,7 +1100,7 @@ impl Assembler {
                     let procedure = pctx.into_procedure(proc_mast_root, proc_node_id);
 
                     // Make the MAST root available to all dependents
-                    self.linker.register_procedure_root(procedure_gid, proc_mast_root)?;
+                    self.linker.register_procedure_root(procedure_gid, proc_mast_root);
                     mast_forest_builder.insert_procedure(procedure_gid, procedure)?;
                 },
                 SymbolItem::Compiled(_) | SymbolItem::Constant(_) | SymbolItem::Type(_) => {

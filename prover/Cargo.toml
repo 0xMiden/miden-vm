@@ -26,9 +26,10 @@ miden-processor.workspace = true
 miden-crypto.workspace = true
 
 # External dependencies
-bincode.workspace = true
 serde.workspace = true
+serde-wincode.workspace = true
 tracing.workspace = true
+wincode.workspace = true
 
 [dev-dependencies]
 miden-assembly.workspace = true

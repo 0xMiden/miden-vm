@@ -2,7 +2,7 @@
 //!
 //! - Block-stack table: control-flow block nesting.
 //! - u32 range-check removes: gated by u32 opcodes.
-//! - Log-precompile capacity: gated by the log precompile opcode.
+//! - Log-precompile transcript-state: gated by the log precompile opcode.
 //! - Range-table response: always active and isolated in its own group.
 //!
 //! Soundness of the merge relies on the three buses using distinct `bus_prefix[bus]` bases
@@ -18,7 +18,7 @@
 //!   - Block-stack table: JOIN/SPLIT/SPAN/DYN, LOOP, DYNCALL, CALL/SYSCALL, two END cases, RESPAN
 //!     batch (7 branches, mutually exclusive via decoder opcode flags).
 //!   - u32 range-check batch: 4 removes gated by `u32_rc_op`.
-//!   - Log-precompile capacity batch: 1 remove + 1 add gated by `log_precompile`.
+//!   - Log-precompile transcript-state batch: 1 remove + 1 add gated by `log_precompile`.
 //! - **Sibling group** (always on):
 //!   - Range-table response: a single insert with runtime multiplicity `range_m`, gated by `ONE` so
 //!     it fires on every row. Lives in its own group because it overlaps (row-wise) with every
@@ -53,7 +53,7 @@
 //! | END call/syscall remove (Full msg) | 5 | Full, denom 1 | 6 | 5 |
 //! | RESPAN batch (k=2, f=respan deg 4) | — | Simple | 6 | 5 |
 //! | u32rc batch (k=4, f=u32_rc_op deg 3) | — | Range, denom 1 | **7** | **6** |
-//! | logpre batch (k=2, f=log_precompile deg 5) | — | LogCap, denom 1 | **7** | **6** |
+//! | logpre batch (k=2, f=log_precompile deg 5) | — | LogPrecompile, denom 1 | **7** | **6** |
 //!
 //! Main group max: `U_g = 7, V_g = 6`.
 //!
@@ -73,10 +73,10 @@ use miden_core::field::PrimeCharacteristicRing;
 use crate::{
     constraints::lookup::{
         main_air::{MainBusContext, MainLookupBuilder},
-        messages::{BlockStackMsg, LogCapacityMsg, RangeMsg},
+        messages::{BlockStackMsg, LogPrecompileMsg, RangeMsg},
     },
     lookup::{Deg, LookupBatch, LookupColumn, LookupGroup},
-    trace::log_precompile::{HELPER_CAP_PREV_RANGE, STACK_CAP_NEXT_RANGE},
+    trace::log_precompile::{HELPER_STATE_PREV_RANGE, STACK_STATE_NEW_RANGE},
 };
 
 /// Upper bound on fractions this emitter pushes into its column per row.
@@ -145,9 +145,10 @@ pub(in crate::constraints::lookup) fn emit_block_stack_and_range_logcap<LB>(
     // u32rc helpers: first 4 of the 6 user_op_helpers.
     let u32rc_helpers: [LB::Var; 4] = array::from_fn(|i| user_helpers[i]);
 
-    // LOGPRECOMPILE capacity add/remove payloads.
-    let cap_prev: [LB::Var; 4] = array::from_fn(|i| user_helpers[HELPER_CAP_PREV_RANGE.start + i]);
-    let cap_next: [LB::Var; 4] = array::from_fn(|i| stk_next.get(STACK_CAP_NEXT_RANGE.start + i));
+    // LOGPRECOMPILE transcript-state add/remove payloads.
+    let state_prev: [LB::Var; 4] =
+        array::from_fn(|i| user_helpers[HELPER_STATE_PREV_RANGE.start + i]);
+    let state_new: [LB::Var; 4] = array::from_fn(|i| stk_next.get(STACK_STATE_NEW_RANGE.start + i));
 
     builder.next_column(
         |col| {
@@ -327,23 +328,23 @@ pub(in crate::constraints::lookup) fn emit_block_stack_and_range_logcap<LB>(
                         Deg { v: 6, u: 7 }, // (V, U) = (3 + 3, 4 + 3)
                     );
 
-                    // ---- Log-precompile capacity update (BusId::LogPrecompileTranscript) ----
-                    // Remove the previous capacity, add the next. Mutually exclusive with all
-                    // block-stack branches and with u32rc.
+                    // ---- Log-precompile transcript-state update (BusId::LogPrecompileTranscript)
+                    // ---- Remove the previous transcript state, add the next. Mutually
+                    // exclusive with all block-stack branches and with u32rc.
                     g.batch(
-                        "log_precompile_capacity",
+                        "log_precompile_state",
                         f_log_precompile,
                         move |b| {
-                            let capacity_prev = cap_prev.map(LB::Expr::from);
+                            let state_prev_expr = state_prev.map(LB::Expr::from);
                             b.remove(
-                                "logpre_cap_remove",
-                                LogCapacityMsg { capacity: capacity_prev },
+                                "logpre_state_remove",
+                                LogPrecompileMsg { state: state_prev_expr },
                                 Deg { v: 5, u: 6 },
                             );
-                            let capacity_next = cap_next.map(LB::Expr::from);
+                            let state_new_expr = state_new.map(LB::Expr::from);
                             b.add(
-                                "logpre_cap_add",
-                                LogCapacityMsg { capacity: capacity_next },
+                                "logpre_state_add",
+                                LogPrecompileMsg { state: state_new_expr },
                                 Deg { v: 5, u: 6 },
                             );
                         },
