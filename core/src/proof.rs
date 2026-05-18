@@ -67,7 +67,7 @@ impl ExecutionProof {
     }
 
     /// Returns the deferred-DAG state in wire form. To obtain a validated, in-memory
-    /// [`crate::deferred::DeferredState`], call `DeferredState::rehydrate(wire.clone(), schema)`.
+    /// [`crate::deferred::DeferredState`], call `DeferredState::rehydrate(wire, schema)`.
     pub fn deferred_state(&self) -> &DeferredStateWire {
         &self.deferred_state
     }

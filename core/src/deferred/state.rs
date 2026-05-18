@@ -252,7 +252,7 @@ impl DeferredState {
     ///   predicate statement via [`Self::evaluate`]. The walk surfaces tampered AND-payloads,
     ///   missing statements, non-predicate statements, and failed equalities.
     pub fn rehydrate(
-        wire: DeferredStateWire,
+        wire: &DeferredStateWire,
         schema: &dyn Schema,
     ) -> Result<Self, IntegrityError> {
         let mut state = Self::new();
@@ -261,13 +261,13 @@ impl DeferredState {
         // `TRUE_DIGEST` when the index is `TRUE_INDEX`).
         let mut digests: Vec<Digest> = Vec::with_capacity(wire.entries.len());
 
-        for (i, entry) in wire.entries.into_iter().enumerate() {
-            let node = match entry.body {
-                super::WireBody::Value(payload) => Node::expression(entry.tag, payload),
-                super::WireBody::Chunks(chunks) => Node::chunk(entry.tag, chunks),
+        for (i, entry) in wire.entries.iter().enumerate() {
+            let node = match &entry.body {
+                super::WireBody::Value(payload) => Node::expression(entry.tag, *payload),
+                super::WireBody::Chunks(chunks) => Node::chunk(entry.tag, chunks.clone()),
                 super::WireBody::Binary { lhs, rhs } => {
-                    let lhs_d = resolve_index(lhs, i, &digests)?;
-                    let rhs_d = resolve_index(rhs, i, &digests)?;
+                    let lhs_d = resolve_index(*lhs, i, &digests)?;
+                    let rhs_d = resolve_index(*rhs, i, &digests)?;
                     Node::expression(entry.tag, Payload::binary_op(lhs_d, rhs_d))
                 },
             };
@@ -357,7 +357,7 @@ impl DeferredState {
 // ================================================================================================
 // `DeferredState` is intentionally NOT `Serializable` / `Deserializable`. Wire-level transit
 // goes through [`DeferredStateWire`]; in-memory construction from bytes goes through
-// `DeferredState::rehydrate(wire, schema)`. This keeps the only path from untrusted bytes to
+// `DeferredState::rehydrate(&wire, schema)`. This keeps the only path from untrusted bytes to
 // an in-memory state through the schema-validated, chain-walked rehydrate constructor.
 
 /// Resolve a wire `Binary` child index against the digest table built so far during phase 1 of
@@ -753,7 +753,7 @@ mod tests {
     fn rehydrate_round_trips_simple_chain() {
         let original = built_state_with_logged_predicate();
         let wire = original.to_wire();
-        let rehydrated = DeferredState::rehydrate(wire, &Uint256).unwrap();
+        let rehydrated = DeferredState::rehydrate(&wire, &Uint256).unwrap();
         assert_eq!(rehydrated.root(), original.root());
         // After rehydrate phase 2, additional canonical intermediates from the predicate's
         // re-evaluation may be present. So we only assert the root is preserved and the chain
@@ -764,7 +764,7 @@ mod tests {
     #[test]
     fn rehydrate_empty_state_succeeds() {
         let wire = DeferredStateWire::empty();
-        let state = DeferredState::rehydrate(wire, &Uint256).unwrap();
+        let state = DeferredState::rehydrate(&wire, &Uint256).unwrap();
         assert_eq!(state.root(), TRUE_DIGEST);
         assert!(state.nodes().is_empty());
     }
@@ -775,7 +775,7 @@ mod tests {
         // validation catches the dangling pointer.
         let wire =
             DeferredStateWire { entries: alloc::vec::Vec::new(), root: dummy_digest(7) };
-        let err = DeferredState::rehydrate(wire, &Uint256);
+        let err = DeferredState::rehydrate(&wire, &Uint256);
         assert!(matches!(err, Err(IntegrityError::MissingRoot)));
     }
 
@@ -790,7 +790,7 @@ mod tests {
             }],
             root: TRUE_DIGEST,
         };
-        let err = DeferredState::rehydrate(wire, &Uint256);
+        let err = DeferredState::rehydrate(&wire, &Uint256);
         assert!(matches!(err, Err(IntegrityError::BadIndex)));
     }
 
@@ -806,7 +806,7 @@ mod tests {
             }],
             root: TRUE_DIGEST,
         };
-        let err = DeferredState::rehydrate(wire, &Uint256);
+        let err = DeferredState::rehydrate(&wire, &Uint256);
         assert!(matches!(err, Err(IntegrityError::UnknownTag)));
     }
 
@@ -831,7 +831,7 @@ mod tests {
         let wire = state.to_wire();
         // Rehydrate and read back the digest set — the wire's bytes don't carry digests, but
         // rehydration recomputes them, so we exercise the round-trip identity here.
-        let rehydrated = DeferredState::rehydrate(wire, &Uint256).unwrap();
+        let rehydrated = DeferredState::rehydrate(&wire, &Uint256).unwrap();
         let orphan_digest = uint256_leaf_node(99).digest();
         assert!(
             !rehydrated.contains(&orphan_digest),
@@ -849,7 +849,7 @@ mod tests {
         // canonical intermediates that the trim dropped).
         let original = built_state_with_logged_predicate();
         let wire = original.to_wire();
-        let rehydrated = DeferredState::rehydrate(wire, &Uint256).unwrap();
+        let rehydrated = DeferredState::rehydrate(&wire, &Uint256).unwrap();
         assert_eq!(rehydrated.root(), original.root());
         assert_eq!(rehydrated.statements(), original.statements());
     }
@@ -874,7 +874,7 @@ mod tests {
         state.root = and_digest;
 
         let wire = state.to_wire();
-        let err = DeferredState::rehydrate(wire, &Uint256);
+        let err = DeferredState::rehydrate(&wire, &Uint256);
         assert!(
             matches!(err, Err(IntegrityError::PredicateFailed(_))),
             "expected PredicateFailed, got {err:?}"
