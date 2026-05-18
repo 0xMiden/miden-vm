@@ -175,13 +175,15 @@ impl MainTrace {
         assert!(col < TRACE_WIDTH, "main trace column index in bounds");
 
         if col < CORE_WIDTH {
-            core_rm.values[r * CORE_WIDTH + col]
+            core_rm.get(r, col).expect("Accessed element is in bounds")
         } else {
             let nc = col - CORE_WIDTH;
             if nc < RANGE_CHECK_TRACE_WIDTH {
                 range_checker_cols[nc][r]
             } else {
-                chiplets_rm.values[r * CHIPLETS_WIDTH + (nc - RANGE_CHECK_TRACE_WIDTH)]
+                chiplets_rm
+                    .get(r, nc - RANGE_CHECK_TRACE_WIDTH)
+                    .expect("Accessed element is in bounds")
             }
         }
     }
