@@ -185,7 +185,10 @@ impl DeferredState {
         let mut by_digest = BTreeMap::<Digest, u32>::new();
         let mut entries = Vec::<super::WireEntry>::new();
         self.dfs_post_order(self.root, &mut by_digest, &mut entries);
-        DeferredStateWire { entries, root: self.root }
+        // DFS post-order from `self.root` emits the AND-node digesting to `self.root` last (or
+        // emits nothing when root is `TRUE_DIGEST`). The deferred commitment is therefore
+        // recoverable as `entries.last().digest()` — no need to ship it as a field.
+        DeferredStateWire { entries }
     }
 
     /// Internal DFS post-order helper for [`Self::to_wire`]. Recursive; for the DAG shapes
@@ -286,22 +289,21 @@ impl DeferredState {
             state.intern(node);
         }
 
-        // Validate root pointer's existence before walking. `TRUE_DIGEST` is the trivial-empty
-        // root and is allowed even when `entries` is empty.
-        if wire.root != TRUE_DIGEST && !state.nodes.contains_key(&wire.root) {
-            return Err(IntegrityError::MissingRoot);
-        }
-        state.root = wire.root;
+        // Derive the deferred commitment from phase 1's last digest. DFS post-order from the
+        // prover's `self.root` puts the topmost AND-node at the end of `entries`, so its digest
+        // is the chain's head. Empty entries → trivial-empty transcript (`TRUE_DIGEST`).
+        state.root = digests.last().copied().unwrap_or(TRUE_DIGEST);
 
         // Phase 2 — chain walk + per-statement re-evaluation. AND-nodes share TRUE_TAG and a
         // `(prev_root, stmt_digest)` payload; statements must reduce to `true_node` under the
-        // schema.
-        let mut cur = wire.root;
+        // schema. An interior AND-node whose `prev_root` doesn't resolve in `state.nodes` (and
+        // isn't `TRUE_DIGEST`) surfaces as `BrokenChain` — a tampered or corrupt transcript.
+        let mut cur = state.root;
         while cur != TRUE_DIGEST {
             let and_node = state
                 .nodes
                 .get(&cur)
-                .ok_or(IntegrityError::MissingRoot)?
+                .ok_or(IntegrityError::BrokenChain)?
                 .clone();
             if and_node.tag != TRUE_TAG {
                 return Err(IntegrityError::NonAndNode);
@@ -770,16 +772,6 @@ mod tests {
     }
 
     #[test]
-    fn rehydrate_rejects_missing_root() {
-        // Empty entries but a non-TRUE root: phase 1 succeeds (nothing to do), then the root
-        // validation catches the dangling pointer.
-        let wire =
-            DeferredStateWire { entries: alloc::vec::Vec::new(), root: dummy_digest(7) };
-        let err = DeferredState::rehydrate(&wire, &TestPrecompile);
-        assert!(matches!(err, Err(IntegrityError::MissingRoot)));
-    }
-
-    #[test]
     fn rehydrate_rejects_bad_index() {
         // A Binary entry whose lhs index points past the (empty) digest table: index 0 is not
         // < its own position 0 → BadIndex.
@@ -788,7 +780,6 @@ mod tests {
                 tag: TestPrecompile::add_tag(),
                 body: crate::deferred::WireBody::Binary { lhs: 0, rhs: 0 },
             }],
-            root: TRUE_DIGEST,
         };
         let err = DeferredState::rehydrate(&wire, &TestPrecompile);
         assert!(matches!(err, Err(IntegrityError::BadIndex)));
@@ -804,7 +795,6 @@ mod tests {
                 tag: bogus_tag,
                 body: crate::deferred::WireBody::Value(Payload::new([ZERO; 8])),
             }],
-            root: TRUE_DIGEST,
         };
         let err = DeferredState::rehydrate(&wire, &TestPrecompile);
         assert!(matches!(err, Err(IntegrityError::UnknownTag)));
@@ -878,6 +868,52 @@ mod tests {
         assert!(
             matches!(err, Err(IntegrityError::PredicateFailed(_))),
             "expected PredicateFailed, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn rehydrate_rejects_broken_chain() {
+        // An AND-node whose `prev_root` references a digest not present in the wire entries.
+        // Hand-construct the wire so phase 1 succeeds (all entries hash correctly, indices are
+        // in range), but the chain walk in phase 2 steps to `prev_root` and finds it missing →
+        // `BrokenChain`.
+        //
+        // Entries (DFS post-order):
+        //   [0] leaf `a` = test_leaf(7)                              — Value
+        //   [1] predicate eq(a, a)                                   — Binary (lhs=rhs=0)
+        //   [2] AND-node { TRUE_TAG, payload: (bogus_prev, pred) }   — Value (raw felts; the
+        //       AND-node's `prev_root` can't be encoded as a wire index because it intentionally
+        //       doesn't appear in the entries)
+        let a = test_leaf(7);
+        let a_payload = *a
+            .expression_payload()
+            .expect("leaf is expression-bodied");
+        let pred =
+            Node::expression(TestPrecompile::eq_tag(), Payload::binary_op(a.digest(), a.digest()));
+        let pred_digest = pred.digest();
+        let bogus_prev = dummy_digest(42);
+        let and_payload = Payload::binary_op(bogus_prev, pred_digest);
+
+        let wire = DeferredStateWire {
+            entries: alloc::vec![
+                crate::deferred::WireEntry {
+                    tag: a.tag,
+                    body: crate::deferred::WireBody::Value(a_payload),
+                },
+                crate::deferred::WireEntry {
+                    tag: pred.tag,
+                    body: crate::deferred::WireBody::Binary { lhs: 0, rhs: 0 },
+                },
+                crate::deferred::WireEntry {
+                    tag: TRUE_TAG,
+                    body: crate::deferred::WireBody::Value(and_payload),
+                },
+            ],
+        };
+        let err = DeferredState::rehydrate(&wire, &TestPrecompile);
+        assert!(
+            matches!(err, Err(IntegrityError::BrokenChain)),
+            "expected BrokenChain, got {err:?}"
         );
     }
 }

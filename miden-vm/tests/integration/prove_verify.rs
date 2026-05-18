@@ -208,7 +208,6 @@ fn test_verify_rejects_tampered_deferred_wire() {
             tag: bogus_tag,
             body: WireBody::Value(Payload::new([ZERO; 8])),
         }],
-        root: miden_core::deferred::TRUE_DIGEST,
     };
 
     let schema = CoreLibrary::default().precompile_schema();

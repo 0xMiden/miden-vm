@@ -16,7 +16,7 @@ use alloc::{sync::Arc, vec::Vec};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use super::{Chunk, Digest, Payload, Tag};
+use super::{Chunk, Payload, Tag};
 use crate::{
     Felt, ZERO,
     serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
@@ -72,19 +72,19 @@ pub struct WireEntry {
 ///
 /// `entries` are topologically ordered: each `Binary` entry's child indices are strictly less
 /// than its own index (or equal to [`TRUE_INDEX`]). [`super::DeferredState::to_wire`] produces
-/// such an ordering via DFS post-order from `root`.
+/// such an ordering via DFS post-order from `root`. The deferred commitment is *derived* from
+/// the wire — specifically, the digest of the last entry (which is structurally the topmost
+/// AND-node of the transcript) — and is therefore not carried as a separate field. Callers that
+/// need the commitment go through [`super::DeferredState::rehydrate`].
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct DeferredStateWire {
     pub entries: Vec<WireEntry>,
-    /// The transcript root pointer. Either [`super::TRUE_DIGEST`] (trivial transcript) or the
-    /// digest produced by the last AND-node in `entries`.
-    pub root: Digest,
 }
 
 impl DeferredStateWire {
-    /// Construct an empty wire (`root == TRUE_DIGEST`, no entries). Convenience for tests and
-    /// the no-precompile proof path.
+    /// Construct an empty wire. The derived commitment is [`super::TRUE_DIGEST`] (trivial
+    /// transcript).
     pub fn empty() -> Self {
         Self::default()
     }
@@ -174,7 +174,6 @@ impl Serializable for DeferredStateWire {
         for entry in &self.entries {
             entry.write_into(target);
         }
-        self.root.write_into(target);
     }
 }
 
@@ -185,8 +184,7 @@ impl Deserializable for DeferredStateWire {
         for _ in 0..count {
             entries.push(WireEntry::read_from(source)?);
         }
-        let root = Digest::read_from(source)?;
-        Ok(Self { entries, root })
+        Ok(Self { entries })
     }
 }
 
@@ -215,9 +213,10 @@ pub enum IntegrityError {
     /// arity, or when a tag declared `NodeType::Chunks(n)` is encoded as `Value`/`Binary`.
     #[error("wire contains a node whose payload shape disagrees with its tag's declared NodeType")]
     ShapeMismatch,
-    /// `wire.root` is not [`super::TRUE_DIGEST`] and doesn't match any rehydrated entry's digest.
-    #[error("wire root points to a digest not present in the rehydrated entries")]
-    MissingRoot,
+    /// An AND-chain step's `prev_root` references a digest not present in the wire entries —
+    /// the chain doesn't bottom out cleanly at [`super::TRUE_DIGEST`].
+    #[error("AND-chain walk encountered a prev_root digest not present in the wire entries")]
+    BrokenChain,
     /// An AND-chain step does not have `tag == TRUE_TAG` (corrupt transcript).
     #[error("AND-chain walk encountered a node whose tag is not TRUE_TAG")]
     NonAndNode,
