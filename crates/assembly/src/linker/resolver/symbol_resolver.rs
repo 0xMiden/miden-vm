@@ -601,7 +601,7 @@ impl<'a> SymbolResolver<'a> {
     ) -> Result<SymbolResolution, Box<SymbolResolutionError>> {
         let module = &self.graph[module];
         log::debug!(target: "name-resolver::local", "resolving '{symbol}' in module {}", module.path());
-        log::debug!(target: "name-resolver::local", "module status: {:?}", &module.status());
+        log::debug!(target: "name-resolver::local", "module status: {:?}", module.status());
         module.resolve(symbol, self)
     }
 

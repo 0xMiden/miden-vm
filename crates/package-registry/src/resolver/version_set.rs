@@ -176,8 +176,8 @@ impl From<SemverPubgrub> for VersionSet {
 impl fmt::Display for VersionSet {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.digests.as_slice() {
-            [] => write!(f, "{}", &self.range),
-            [digest] => write!(f, "{digest} in {}", &self.range),
+            [] => write!(f, "{}", self.range),
+            [digest] => write!(f, "{digest} in {}", self.range),
             digests => {
                 f.write_str("any of ")?;
                 for (i, digest) in digests.iter().enumerate() {
@@ -186,7 +186,7 @@ impl fmt::Display for VersionSet {
                     }
                     write!(f, "{digest}")?;
                 }
-                write!(f, " in {}", &self.range)
+                write!(f, " in {}", self.range)
             },
         }
     }

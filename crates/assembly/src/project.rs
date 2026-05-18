@@ -430,7 +430,7 @@ where
                     *kind,
                     requirements,
                 )?;
-                let should_cache = self.should_cache_preassembled_package(package_id, selected)?;
+                let should_cache = self.should_cache_preassembled_package(package_id, selected);
                 (
                     ResolvedPackage {
                         linked_kernel_package: self
@@ -557,43 +557,37 @@ where
         &self,
         package_id: &PackageId,
         selected: &PackageVersion,
-    ) -> Result<bool, Report> {
+    ) -> bool {
         let Some(record) = self.store.get_by_semver(package_id, &selected.version) else {
-            return Ok(true);
+            return true;
         };
         if record.version() != selected {
-            return Ok(false);
+            return false;
         }
 
-        match self.store.load_package(package_id, selected) {
-            Ok(_) => Ok(false),
-            Err(_) => Ok(true),
-        }
+        self.store.load_package(package_id, selected).is_err()
     }
 
     fn cache_resolved_package(&mut self, package: &ResolvedPackage) -> Result<(), Report> {
         self.cache_package(package.package.clone())?;
         if let Some(kernel_package) = package.linked_kernel_package.clone()
-            && self.should_cache_linked_kernel_package(kernel_package.as_ref())?
+            && self.should_cache_linked_kernel_package(kernel_package.as_ref())
         {
             self.cache_package(kernel_package)?;
         }
         Ok(())
     }
 
-    fn should_cache_linked_kernel_package(&self, package: &MastPackage) -> Result<bool, Report> {
+    fn should_cache_linked_kernel_package(&self, package: &MastPackage) -> bool {
         let version = PackageVersion::new(package.version.clone(), package.digest());
         let Some(record) = self.store.get_by_semver(&package.name, &package.version) else {
-            return Ok(true);
+            return true;
         };
         if record.version() != &version {
-            return Ok(false);
+            return false;
         }
 
-        match self.store.load_package(&package.name, &version) {
-            Ok(_) => Ok(false),
-            Err(_) => Ok(true),
-        }
+        self.store.load_package(&package.name, &version).is_err()
     }
 
     fn cache_package(&mut self, package: Arc<MastPackage>) -> Result<(), Report> {
