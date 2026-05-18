@@ -55,12 +55,13 @@ pub(crate) trait Processor: Sized {
     /// `dyncall. This includes restoring the overflow stack and the system parameters.
     fn restore_context(&mut self) -> Result<(), OperationError>;
 
-    /// Returns the current precompile transcript state (sponge capacity).
+    /// Returns the current precompile-transcript state (the rolling digest of all recorded
+    /// commitments).
     ///
     /// Used by `log_precompile` to thread the transcript across invocations.
     fn precompile_transcript_state(&self) -> PrecompileTranscriptState;
 
-    /// Sets the precompile transcript state (sponge capacity) to a new value.
+    /// Sets the precompile-transcript state to a new value.
     ///
     /// Called by `log_precompile` after recording a new commitment.
     fn set_precompile_transcript_state(&mut self, state: PrecompileTranscriptState);
