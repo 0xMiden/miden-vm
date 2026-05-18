@@ -65,10 +65,14 @@ impl Precompile for EddsaEd25519Precompile {
         Self::app_id()
     }
 
-    fn decode(&self, local: PrecompileTag) -> Result<TagInfo, SchemaError> {
-        match local.node_disc {
+    fn decode(&self, sub: PrecompileTag) -> Result<TagInfo, SchemaError> {
+        let [disc, imm, reserved] = sub.0;
+        if reserved != ZERO {
+            return Err(SchemaError::InvalidNode);
+        }
+        match disc {
             d if d == Self::D_VERIFY => {
-                if local.imm != ZERO {
+                if imm != ZERO {
                     return Err(SchemaError::InvalidNode);
                 }
                 // pk[8] || k_digest[16] || sig[16] = 40 felts = 5 chunks.
@@ -156,7 +160,7 @@ mod tests {
     #[test]
     fn decode_verify_is_5_chunk_predicate() {
         let info = EddsaEd25519Precompile
-            .decode(PrecompileTag { node_disc: EddsaEd25519Precompile::D_VERIFY, imm: ZERO })
+            .decode(PrecompileTag([EddsaEd25519Precompile::D_VERIFY, ZERO, ZERO]))
             .unwrap();
         assert!(matches!(info.node_type, NodeType::Chunks(5)));
         assert_eq!(info.evaluates_to, TRUE_TAG);

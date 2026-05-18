@@ -3,7 +3,7 @@
 use alloc::{boxed::Box, collections::BTreeMap, vec::Vec};
 
 use crate::{
-    Felt, ZERO,
+    Felt,
     deferred::{DeferredState, Node, ReduceCtx, Schema, SchemaError, Tag, TagInfo},
 };
 
@@ -67,11 +67,8 @@ impl PrecompileSchema {
 
 impl Schema for PrecompileSchema {
     fn decode(&self, tag: Tag) -> Result<TagInfo, SchemaError> {
-        if tag[3] != ZERO {
-            return Err(SchemaError::InvalidNode);
-        }
         let p = self.precompiles.get(&tag[0]).ok_or(SchemaError::InvalidNode)?;
-        p.decode(PrecompileTag { node_disc: tag[1], imm: tag[2] })
+        p.decode(PrecompileTag([tag[1], tag[2], tag[3]]))
     }
 
     fn reduce(&self, node: &Node, ctx: &mut dyn ReduceCtx) -> Result<Node, SchemaError> {
@@ -83,7 +80,7 @@ impl Schema for PrecompileSchema {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::deferred::{NodeType, Payload};
+    use crate::{ZERO, deferred::{NodeType, Payload}};
 
     /// An honest minimal precompile fixture — its `id()` *is* its `precompile_id`, so it always
     /// passes the `new` validator. Distinct `name`s yield distinct ids; identical names collide
@@ -113,8 +110,8 @@ mod tests {
         fn id(&self) -> Felt {
             precompile_id(self)
         }
-        fn decode(&self, local: PrecompileTag) -> Result<TagInfo, SchemaError> {
-            if local.imm != ZERO || local.node_disc != ZERO {
+        fn decode(&self, sub: PrecompileTag) -> Result<TagInfo, SchemaError> {
+            if sub.0 != [ZERO; 3] {
                 return Err(SchemaError::InvalidNode);
             }
             Ok(TagInfo {

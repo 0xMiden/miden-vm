@@ -79,10 +79,14 @@ impl Precompile for EcdsaK256KeccakPrecompile {
         Self::app_id()
     }
 
-    fn decode(&self, local: PrecompileTag) -> Result<TagInfo, SchemaError> {
-        match local.node_disc {
+    fn decode(&self, sub: PrecompileTag) -> Result<TagInfo, SchemaError> {
+        let [disc, imm, reserved] = sub.0;
+        if reserved != ZERO {
+            return Err(SchemaError::InvalidNode);
+        }
+        match disc {
             d if d == Self::D_VERIFY => {
-                if local.imm != ZERO {
+                if imm != ZERO {
                     return Err(SchemaError::InvalidNode);
                 }
                 // pk[9] || digest[8] || sig[17] || pad[6] = 40 felts = 5 chunks.
@@ -174,7 +178,7 @@ mod tests {
     #[test]
     fn decode_verify_is_5_chunk_predicate() {
         let info = EcdsaK256KeccakPrecompile
-            .decode(PrecompileTag { node_disc: EcdsaK256KeccakPrecompile::D_VERIFY, imm: ZERO })
+            .decode(PrecompileTag([EcdsaK256KeccakPrecompile::D_VERIFY, ZERO, ZERO]))
             .unwrap();
         assert!(matches!(info.node_type, NodeType::Chunks(5)));
         assert_eq!(info.evaluates_to, TRUE_TAG);

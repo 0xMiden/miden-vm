@@ -140,11 +140,12 @@ impl Precompile for Uint {
             .expect("uint P_MINUS_1 const");
     }
 
-    fn decode(&self, local: PrecompileTag) -> Result<TagInfo, SchemaError> {
-        if local.imm != ZERO {
+    fn decode(&self, sub: PrecompileTag) -> Result<TagInfo, SchemaError> {
+        let [disc, imm, reserved] = sub.0;
+        if imm != ZERO || reserved != ZERO {
             return Err(SchemaError::InvalidNode);
         }
-        let kind = Discriminant::classify(local.node_disc).ok_or(SchemaError::InvalidNode)?;
+        let kind = Discriminant::classify(disc).ok_or(SchemaError::InvalidNode)?;
         // Leaf is a `Value` (8 raw u32 limbs); op-nodes and the eq predicate are `Binary`
         // (children encoded as `lhs_digest || rhs_digest`).
         let node_type = match kind {
@@ -182,10 +183,10 @@ impl Precompile for Uint {
 // don't need the composite. Equivalent to `PrecompileSchema::single(Uint)`, just cheaper.
 impl Schema for Uint {
     fn decode(&self, tag: Tag) -> Result<TagInfo, SchemaError> {
-        if tag[0] != Self::app_id() || tag[3] != ZERO {
+        if tag[0] != Self::app_id() {
             return Err(SchemaError::InvalidNode);
         }
-        Precompile::decode(self, PrecompileTag { node_disc: tag[1], imm: tag[2] })
+        Precompile::decode(self, PrecompileTag([tag[1], tag[2], tag[3]]))
     }
 
     fn reduce(&self, node: &Node, ctx: &mut dyn ReduceCtx) -> Result<Node, SchemaError> {

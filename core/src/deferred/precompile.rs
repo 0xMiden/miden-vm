@@ -25,16 +25,11 @@ use crate::Felt;
 // PRECOMPILE TAG
 // ================================================================================================
 
-/// The precompile-local portion of a tag — the slice [`crate::deferred::PrecompileSchema`] hands
-/// to a precompile after stripping the leading id. Precompiles never see `tag[0]` or the
-/// reserved `tag[3]`.
+/// The 3 felts after `tag[0]` (the precompile id): `[tag[1], tag[2], tag[3]]`. Opaque to the
+/// framework — each precompile decodes its own layout (typically `[node_disc, imm, reserved]`,
+/// rejecting a non-`ZERO` reserved felt itself, since the composite no longer enforces it).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct PrecompileTag {
-    /// Precompile-local discriminant index. Maps to the precompile's internal node-kind enum.
-    pub node_disc: Felt,
-    /// Precompile-local immediate. Precompiles without an immediate ignore this and require `ZERO`.
-    pub imm: Felt,
-}
+pub struct PrecompileTag(pub [Felt; 3]);
 
 // PRECOMPILE TRAIT
 // ================================================================================================
@@ -61,9 +56,10 @@ pub trait Precompile: core::fmt::Debug + Send + Sync {
     /// generator). Called by [`crate::deferred::PrecompileSchema::boot`]. Default is a no-op.
     fn init(&self, _state: &mut DeferredState) {}
 
-    /// Decode the precompile-local tag to its [`TagInfo`]. Returning
-    /// `Err(SchemaError::InvalidNode)` rejects the tag.
-    fn decode(&self, local: PrecompileTag) -> Result<TagInfo, SchemaError>;
+    /// Decode the precompile-local sub-tag to its [`TagInfo`]. Returning
+    /// `Err(SchemaError::InvalidNode)` rejects the tag. The precompile owns validation of all
+    /// three felts, including rejecting a non-`ZERO` reserved felt.
+    fn decode(&self, sub: PrecompileTag) -> Result<TagInfo, SchemaError>;
 
     /// Reduce a node owned by this precompile to canonical form. Same contract as
     /// [`super::Schema::reduce`] — see its docs for the leaf / op / predicate / chunk variants.

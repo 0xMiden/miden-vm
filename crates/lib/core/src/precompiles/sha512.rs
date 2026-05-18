@@ -78,10 +78,14 @@ impl Precompile for Sha512Precompile {
         Self::app_id()
     }
 
-    fn decode(&self, local: PrecompileTag) -> Result<TagInfo, SchemaError> {
-        match local.node_disc {
+    fn decode(&self, sub: PrecompileTag) -> Result<TagInfo, SchemaError> {
+        let [disc, imm, reserved] = sub.0;
+        if reserved != ZERO {
+            return Err(SchemaError::InvalidNode);
+        }
+        match disc {
             d if d == Self::D_PREIMAGE => {
-                let n_bytes = u32::try_from(local.imm.as_canonical_u64())
+                let n_bytes = u32::try_from(imm.as_canonical_u64())
                     .map_err(|_| SchemaError::InvalidNode)?;
                 Ok(TagInfo {
                     node_type: NodeType::Chunks(n_chunks(n_bytes)),
@@ -89,14 +93,14 @@ impl Precompile for Sha512Precompile {
                 })
             },
             d if d == Self::D_DIGEST => {
-                if local.imm != ZERO {
+                if imm != ZERO {
                     return Err(SchemaError::InvalidNode);
                 }
                 // 64-byte SHA-512 digest packed as 16 u32 felts → 2 chunks of 8 felts.
                 Ok(TagInfo { node_type: NodeType::Chunks(2), evaluates_to: Self::digest_tag() })
             },
             d if d == Self::D_EQ => {
-                if local.imm != ZERO {
+                if imm != ZERO {
                     return Err(SchemaError::InvalidNode);
                 }
                 Ok(TagInfo { node_type: NodeType::Binary, evaluates_to: TRUE_TAG })
@@ -187,10 +191,7 @@ mod tests {
     #[test]
     fn decode_preimage_carries_n_bytes_in_imm() {
         let info = Sha512Precompile
-            .decode(PrecompileTag {
-                node_disc: Sha512Precompile::D_PREIMAGE,
-                imm: Felt::from_u32(100),
-            })
+            .decode(PrecompileTag([Sha512Precompile::D_PREIMAGE, Felt::from_u32(100), ZERO]))
             .unwrap();
         // 100 bytes → ceil(100/32) = 4 chunks.
         assert!(matches!(info.node_type, NodeType::Chunks(4)));
@@ -200,7 +201,7 @@ mod tests {
     #[test]
     fn decode_digest_is_2_chunk_self_eval() {
         let info = Sha512Precompile
-            .decode(PrecompileTag { node_disc: Sha512Precompile::D_DIGEST, imm: ZERO })
+            .decode(PrecompileTag([Sha512Precompile::D_DIGEST, ZERO, ZERO]))
             .unwrap();
         // 64-byte digest = 16 u32 felts = 2 chunks of 8.
         assert!(matches!(info.node_type, NodeType::Chunks(2)));
@@ -210,7 +211,7 @@ mod tests {
     #[test]
     fn decode_eq_is_binary_predicate() {
         let info = Sha512Precompile
-            .decode(PrecompileTag { node_disc: Sha512Precompile::D_EQ, imm: ZERO })
+            .decode(PrecompileTag([Sha512Precompile::D_EQ, ZERO, ZERO]))
             .unwrap();
         assert!(matches!(info.node_type, NodeType::Binary));
         assert_eq!(info.evaluates_to, TRUE_TAG);
