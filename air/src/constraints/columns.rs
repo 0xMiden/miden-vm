@@ -312,6 +312,6 @@ mod tests {
     /// `NUM_CHIPLETS_COLS` matches the chiplets segment width.
     #[test]
     fn chiplet_cols_width() {
-        assert_eq!(NUM_CHIPLETS_COLS, crate::trace::CHIPLETS_WIDTH);
+        assert_eq!(NUM_CHIPLETS_COLS, CHIPLETS_WIDTH);
     }
 }

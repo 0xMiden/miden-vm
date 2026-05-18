@@ -112,10 +112,8 @@ fn assert_root_mapping(
 
 /// Asserts that all children of nodes in the given forest have an id that is less than the parent's
 /// ID.
-///
-/// Returns a Result which can be unwrapped in the calling test function to assert. This way, if
-/// this assertion fails it'll be clear which exact call failed.
-fn assert_child_id_lt_parent_id(forest: &MastForest) -> Result<(), &str> {
+#[track_caller]
+fn assert_child_id_lt_parent_id(forest: &MastForest) {
     for (mast_node_id, node) in forest.nodes().iter().enumerate() {
         node.for_each_child(|child_id| {
             if child_id.to_usize() >= mast_node_id {
@@ -123,8 +121,6 @@ fn assert_child_id_lt_parent_id(forest: &MastForest) -> Result<(), &str> {
             }
         });
     }
-
-    Ok(())
 }
 
 #[test]
@@ -233,7 +229,7 @@ fn mast_forest_merge_remap() {
     assert_eq!(u32::from(root_maps.map_root(0, &id_call_a).unwrap()), 1u32);
     assert_eq!(u32::from(root_maps.map_root(1, &id_call_b).unwrap()), 3u32);
 
-    assert_child_id_lt_parent_id(&merged).unwrap();
+    assert_child_id_lt_parent_id(&merged);
 }
 
 /// Tests that Forest_A + Forest_A = Forest_A (i.e. duplicates are removed).
@@ -273,7 +269,7 @@ fn mast_forest_merge_duplicate() {
         assert!(forest_a.decorators().contains(merged_decorator));
     }
 
-    assert_child_id_lt_parent_id(&merged).unwrap();
+    assert_child_id_lt_parent_id(&merged);
 }
 
 /// Tests that External(foo) is replaced by Block(foo) whether it is in forest A or B, and the
@@ -322,7 +318,7 @@ fn mast_forest_merge_replace_external() {
         assert_eq!(merged.roots.len(), 1);
         assert_eq!(root_map.map_root(0, &id_call_a).unwrap().to_usize(), 1);
         assert_eq!(root_map.map_root(1, &id_call_b).unwrap().to_usize(), 1);
-        assert_child_id_lt_parent_id(&merged).unwrap();
+        assert_child_id_lt_parent_id(&merged);
     }
 }
 
@@ -368,7 +364,7 @@ fn mast_forest_merge_roots() {
 
     assert_root_mapping(&root_maps, vec![&forest_a.roots, &forest_b.roots], &merged.roots).unwrap();
 
-    assert_child_id_lt_parent_id(&merged).unwrap();
+    assert_child_id_lt_parent_id(&merged);
 }
 
 /// Test that multiple trees can be merged when the same merger is reused.
@@ -431,7 +427,7 @@ fn mast_forest_merge_multiple() {
     )
     .unwrap();
 
-    assert_child_id_lt_parent_id(&merged).unwrap();
+    assert_child_id_lt_parent_id(&merged);
 }
 
 /// Tests that decorators are merged and that nodes who are identical except for their
@@ -565,7 +561,7 @@ fn mast_forest_merge_decorators() {
 
     assert_root_mapping(&root_maps, vec![&forest_a.roots, &forest_b.roots], &merged.roots).unwrap();
 
-    assert_child_id_lt_parent_id(&merged).unwrap();
+    assert_child_id_lt_parent_id(&merged);
 }
 
 /// Tests that an external node without decorators is replaced by its referenced node which has
@@ -626,7 +622,7 @@ fn mast_forest_merge_external_node_reference_with_decorator() {
                 .unwrap();
         }
 
-        assert_child_id_lt_parent_id(&merged).unwrap();
+        assert_child_id_lt_parent_id(&merged);
     }
 }
 
@@ -691,7 +687,7 @@ fn mast_forest_merge_external_node_with_decorator() {
                 .unwrap();
         }
 
-        assert_child_id_lt_parent_id(&merged).unwrap();
+        assert_child_id_lt_parent_id(&merged);
     }
 }
 
@@ -758,7 +754,7 @@ fn mast_forest_merge_external_node_and_referenced_node_have_decorators() {
                 .unwrap();
         }
 
-        assert_child_id_lt_parent_id(&merged).unwrap();
+        assert_child_id_lt_parent_id(&merged);
     }
 }
 
@@ -832,7 +828,7 @@ fn mast_forest_merge_multiple_external_nodes_with_decorator() {
                 .unwrap();
         }
 
-        assert_child_id_lt_parent_id(&merged).unwrap();
+        assert_child_id_lt_parent_id(&merged);
     }
 }
 
@@ -920,7 +916,7 @@ fn mast_forest_merge_external_dependencies() {
         assert!(digests.contains(&forest_b[id_qux_b].digest()));
         assert_eq!(merged.nodes().iter().filter(|node| node.is_external()).count(), 0);
 
-        assert_child_id_lt_parent_id(&merged).unwrap();
+        assert_child_id_lt_parent_id(&merged);
     }
 }
 

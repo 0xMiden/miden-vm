@@ -529,7 +529,7 @@ impl Assembler {
             Instruction::HPerm => block_builder.push_op(HPerm),
             Instruction::HMerge => crypto_ops::hmerge(block_builder),
             Instruction::MTreeGet => crypto_ops::mtree_get(block_builder),
-            Instruction::MTreeSet => crypto_ops::mtree_set(block_builder)?,
+            Instruction::MTreeSet => crypto_ops::mtree_set(block_builder),
             Instruction::MTreeMerge => crypto_ops::mtree_merge(block_builder),
             Instruction::MTreeVerify => block_builder.push_op(MpVerify(ZERO)),
             Instruction::MTreeVerifyWithError(err_msg) => {

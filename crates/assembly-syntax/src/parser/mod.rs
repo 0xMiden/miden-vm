@@ -12,6 +12,7 @@ lalrpop_util::lalrpop_mod!(
     #[expect(clippy::all)]
     #[expect(clippy::redundant_closure_for_method_calls)]
     #[expect(clippy::trivially_copy_pass_by_ref)]
+    #[expect(clippy::unnecessary_wraps)]
     #[expect(unused_lifetimes)]
     #[expect(unused_qualifications)]
     grammar,

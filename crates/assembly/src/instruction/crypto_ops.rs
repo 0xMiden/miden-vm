@@ -1,7 +1,6 @@
 use miden_core::{Felt, ZERO, events::SystemEvent, operations::Operation::*};
 
 use super::BasicBlockBuilder;
-use crate::Report;
 
 // HASHING
 // ================================================================================================
@@ -131,12 +130,11 @@ pub(super) fn mtree_get(block_builder: &mut BasicBlockBuilder) {
 /// - new root of the tree after the update, 4 elements
 ///
 /// This operation takes 30 VM cycles.
-pub(super) fn mtree_set(block_builder: &mut BasicBlockBuilder) -> Result<(), Report> {
+pub(super) fn mtree_set(block_builder: &mut BasicBlockBuilder) {
     // stack: [d, i, R_old, V_new, ...]
 
     // stack: [V_old, R_new, ...] (30 cycles)
     update_mtree(block_builder);
-    Ok(())
 }
 
 /// Creates a new Merkle tree in the advice provider by combining trees with the specified roots.
