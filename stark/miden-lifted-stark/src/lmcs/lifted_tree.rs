@@ -12,7 +12,7 @@ use tracing::info_span;
 
 use crate::{
     lmcs::{LmcsTree, proof::LeafOpening, row_list::RowList, tree_indices::TreeIndices},
-    util::{bitrev::BitReversibleMatrix, packing::PackedValueExt},
+    util::bitrev::BitReversibleMatrix,
 };
 
 /// A uniform binary Merkle tree whose leaves are constructed from matrices with power-of-two

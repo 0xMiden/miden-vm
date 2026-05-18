@@ -6,25 +6,6 @@ use core::array;
 
 use p3_field::{ExtensionField, Field, PackedFieldExtension, PackedValue};
 
-/// Extension trait for [`PackedValue`] providing columnar pack/unpack operations.
-///
-/// These methods perform transpose operations on packed data, useful for
-/// SIMD-parallelized Merkle tree construction.
-pub trait PackedValueExt: PackedValue {
-    /// Pack columns from `WIDTH` rows of scalar values.
-    ///
-    /// Given `WIDTH` rows of `N` scalar values, extract each column and pack it
-    /// into a single packed value. This performs a transpose operation.
-    #[inline]
-    #[must_use]
-    fn pack_columns<const N: usize>(rows: &[[Self::Value; N]]) -> [Self; N] {
-        assert_eq!(rows.len(), Self::WIDTH);
-        array::from_fn(|col| Self::from_fn(|lane| rows[lane][col]))
-    }
-}
-
-impl<T: PackedValue> PackedValueExt for T {}
-
 /// Extension trait for [`PackedFieldExtension`] adding `pack_ext_columns` and
 /// `to_ext_slice` methods for column-wise SIMD operations on extension field elements.
 pub trait PackedFieldExtensionExt<
