@@ -1,38 +1,18 @@
 //! `Uint` — 256-bit wrapping integer arithmetic as a first reference precompile.
 //!
 //! Semantics: operations are mod 2^256, limbs are u32 little-endian. Tags route through
-//! [`PrecompileSchema`] by `app_id`; a `sub` op joins `add`/`mul`, and the app pre-registers
-//! `ZERO` / `ONE` / `P_MINUS_1` (`[u32::MAX; 8]`) leaves via [`App::init`].
+//! [`PrecompileSchema`] by id; a `sub` op joins `add`/`mul`, and the precompile pre-registers
+//! `ZERO` / `ONE` / `P_MINUS_1` (`[u32::MAX; 8]`) leaves via [`Precompile::init`].
 //!
 //! [`PrecompileSchema`]: miden_core::deferred::PrecompileSchema
 
 use miden_core::{
     Felt, ZERO,
     deferred::{
-        App, AppTag, DeferredError, DeferredState, Digest, Node, NodeType, Payload, ReduceCtx,
-        Schema, SchemaError, TRUE_TAG, Tag, TagInfo, app_id_from, true_node,
+        DeferredError, DeferredState, Digest, Node, NodeType, Payload, Precompile, PrecompileTag,
+        ReduceCtx, Schema, SchemaError, TRUE_TAG, Tag, TagInfo, precompile_id, true_node,
     },
 };
-
-// FIELD OPS
-// ================================================================================================
-
-/// Small surface a 256-bit field app exposes to consumers (e.g. [`super::Group`]) that need to
-/// mint and decode field leaves without going through the schema's `reduce`. Intentionally
-/// minimal — extend as concrete cross-app needs arise.
-pub trait FieldOps: App {
-    /// Tag of a canonical field leaf.
-    fn leaf_tag() -> Tag;
-    /// Build a canonical field leaf node from `[u32; 8]` limbs (little-endian).
-    fn leaf_node(limbs: [u32; 8]) -> Node;
-    /// Decode `[u32; 8]` limbs from a canonical field leaf node. Errors if `node` is not a
-    /// canonical leaf of this field app.
-    fn limbs_of(node: &Node) -> Result<[u32; 8], DeferredError>;
-    /// Wrapping 256-bit add (mod 2^256).
-    fn wrap_add(a: [u32; 8], b: [u32; 8]) -> [u32; 8];
-    /// Wrapping 256-bit sub (mod 2^256).
-    fn wrap_sub(a: [u32; 8], b: [u32; 8]) -> [u32; 8];
-}
 
 // PUBLIC APP TYPE
 // ================================================================================================
@@ -56,9 +36,9 @@ impl Uint {
     pub const D_MUL: Felt = Felt::new_unchecked(3);
     pub const D_EQ: Felt = Felt::new_unchecked(4);
 
-    /// Derive `app_id`. Pure function over `Uint`'s metadata.
+    /// Derive the precompile id. Pure function over `Uint`'s metadata.
     pub fn app_id() -> Felt {
-        app_id_from(Self::NAME, Self::VERSION, &[], Self::DISCS)
+        precompile_id(&Uint)
     }
 
     /// Tag for a canonical Uint leaf.
@@ -136,25 +116,19 @@ impl Uint {
     }
 }
 
-impl FieldOps for Uint {
-    fn leaf_tag() -> Tag {
-        Self::leaf_tag()
+impl Precompile for Uint {
+    fn name(&self) -> &'static str {
+        Self::NAME
     }
-    fn leaf_node(limbs: [u32; 8]) -> Node {
-        Self::leaf_node(limbs)
-    }
-    fn limbs_of(node: &Node) -> Result<[u32; 8], DeferredError> {
-        Self::limbs_of(node)
-    }
-    fn wrap_add(a: [u32; 8], b: [u32; 8]) -> [u32; 8] {
-        Self::wrap_add(a, b)
-    }
-    fn wrap_sub(a: [u32; 8], b: [u32; 8]) -> [u32; 8] {
-        Self::wrap_sub(a, b)
-    }
-}
 
-impl App for Uint {
+    fn version(&self) -> u32 {
+        Self::VERSION
+    }
+
+    fn discriminants(&self) -> &'static [&'static str] {
+        Self::DISCS
+    }
+
     fn id(&self) -> Felt {
         Self::app_id()
     }
@@ -172,7 +146,7 @@ impl App for Uint {
             .expect("uint P_MINUS_1 const");
     }
 
-    fn decode(&self, local: AppTag) -> Result<TagInfo, SchemaError> {
+    fn decode(&self, local: PrecompileTag) -> Result<TagInfo, SchemaError> {
         if local.imm != ZERO {
             return Err(SchemaError::InvalidNode);
         }
@@ -217,14 +191,14 @@ impl Schema for Uint {
         if tag[0] != Self::app_id() || tag[3] != ZERO {
             return Err(SchemaError::InvalidNode);
         }
-        App::decode(self, AppTag { node_disc: tag[1], imm: tag[2] })
+        Precompile::decode(self, PrecompileTag { node_disc: tag[1], imm: tag[2] })
     }
 
     fn reduce(&self, node: &Node, ctx: &mut dyn ReduceCtx) -> Result<Node, SchemaError> {
         if node.tag[0] != Self::app_id() {
             return Err(SchemaError::InvalidNode);
         }
-        App::reduce(self, node, ctx)
+        Precompile::reduce(self, node, ctx)
     }
 }
 

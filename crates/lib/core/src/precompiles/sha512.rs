@@ -11,8 +11,8 @@ use alloc::sync::Arc;
 use miden_core::{
     Felt, ZERO,
     deferred::{
-        App, AppTag, Digest, Node, NodePayload, NodeType, Payload, ReduceCtx, SchemaError,
-        TRUE_TAG, Tag, TagInfo, app_id_from, true_node,
+        Digest, Node, NodePayload, NodeType, Payload, Precompile, PrecompileTag, ReduceCtx,
+        SchemaError, TRUE_TAG, Tag, TagInfo, precompile_id, true_node,
     },
 };
 use miden_crypto::hash::sha2::Sha512;
@@ -33,7 +33,7 @@ impl Sha512Precompile {
     pub const D_EQ: Felt = Felt::new_unchecked(2);
 
     pub fn app_id() -> Felt {
-        app_id_from(Self::NAME, Self::VERSION, &[], Self::DISCS)
+        precompile_id(&Sha512Precompile)
     }
 
     pub fn preimage_tag(n_bytes: u32) -> Tag {
@@ -66,12 +66,24 @@ impl Sha512Precompile {
     }
 }
 
-impl App for Sha512Precompile {
+impl Precompile for Sha512Precompile {
+    fn name(&self) -> &'static str {
+        Self::NAME
+    }
+
+    fn version(&self) -> u32 {
+        Self::VERSION
+    }
+
+    fn discriminants(&self) -> &'static [&'static str] {
+        Self::DISCS
+    }
+
     fn id(&self) -> Felt {
         Self::app_id()
     }
 
-    fn decode(&self, local: AppTag) -> Result<TagInfo, SchemaError> {
+    fn decode(&self, local: PrecompileTag) -> Result<TagInfo, SchemaError> {
         match local.node_disc {
             d if d == Self::D_PREIMAGE => {
                 let n_bytes = u32::try_from(local.imm.as_canonical_u64())
@@ -180,7 +192,7 @@ mod tests {
     #[test]
     fn decode_preimage_carries_n_bytes_in_imm() {
         let info = Sha512Precompile
-            .decode(AppTag {
+            .decode(PrecompileTag {
                 node_disc: Sha512Precompile::D_PREIMAGE,
                 imm: Felt::from_u32(100),
             })
@@ -193,7 +205,7 @@ mod tests {
     #[test]
     fn decode_digest_is_2_chunk_self_eval() {
         let info = Sha512Precompile
-            .decode(AppTag { node_disc: Sha512Precompile::D_DIGEST, imm: ZERO })
+            .decode(PrecompileTag { node_disc: Sha512Precompile::D_DIGEST, imm: ZERO })
             .unwrap();
         // 64-byte digest = 16 u32 felts = 2 chunks of 8.
         assert!(matches!(info.node_type, NodeType::Chunks(2)));
@@ -203,7 +215,7 @@ mod tests {
     #[test]
     fn decode_eq_is_binary_predicate() {
         let info = Sha512Precompile
-            .decode(AppTag { node_disc: Sha512Precompile::D_EQ, imm: ZERO })
+            .decode(PrecompileTag { node_disc: Sha512Precompile::D_EQ, imm: ZERO })
             .unwrap();
         assert!(matches!(info.node_type, NodeType::Binary));
         assert_eq!(info.evaluates_to, TRUE_TAG);

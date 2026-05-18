@@ -6,7 +6,10 @@ mod common;
 use common::precompile::{hash::Hash, sig::Sig, uint::Uint};
 use miden_core::{
     Felt, ZERO,
-    deferred::{App, AppTag, DeferredState, Node, NodeType, PrecompileSchema, SchemaError, TRUE_TAG},
+    deferred::{
+        DeferredState, Node, NodeType, Precompile, PrecompileSchema, PrecompileTag, SchemaError,
+        TRUE_TAG,
+    },
 };
 
 fn three_chunks(first_first_felt: Felt) -> Vec<[Felt; 8]> {
@@ -29,9 +32,9 @@ fn non_zero_chunks() -> [[Felt; 8]; 3] {
 #[test]
 fn verify_passes_in_multi_app_schema() {
     let schema = PrecompileSchema::new([
-        Box::new(Uint) as Box<dyn App>,
-        Box::new(Hash) as Box<dyn App>,
-        Box::new(Sig) as Box<dyn App>,
+        Box::new(Uint) as Box<dyn Precompile>,
+        Box::new(Hash) as Box<dyn Precompile>,
+        Box::new(Sig) as Box<dyn Precompile>,
     ]);
     let mut state = DeferredState::new();
     schema.boot(&mut state);
@@ -55,20 +58,20 @@ fn verify_fails_for_zeroed_placeholder_sig() {
 
 #[test]
 fn decode_verify_is_chunk3_predicate() {
-    let info = Sig.decode(AppTag { node_disc: Sig::D_VERIFY, imm: ZERO }).unwrap();
+    let info = Sig.decode(PrecompileTag { node_disc: Sig::D_VERIFY, imm: ZERO }).unwrap();
     assert!(matches!(info.node_type, NodeType::Chunks(3)));
     assert_eq!(info.evaluates_to, TRUE_TAG);
 }
 
 #[test]
 fn decode_rejects_imm() {
-    let err = Sig.decode(AppTag { node_disc: Sig::D_VERIFY, imm: Felt::from_u32(1) });
+    let err = Sig.decode(PrecompileTag { node_disc: Sig::D_VERIFY, imm: Felt::from_u32(1) });
     assert!(matches!(err, Err(SchemaError::InvalidNode)));
 }
 
 #[test]
 fn decode_unknown_discriminant_rejected() {
-    let err = Sig.decode(AppTag { node_disc: Felt::from_u32(1), imm: ZERO });
+    let err = Sig.decode(PrecompileTag { node_disc: Felt::from_u32(1), imm: ZERO });
     assert!(matches!(err, Err(SchemaError::InvalidNode)));
 }
 

@@ -1,37 +1,30 @@
-//! `Group<F>` — compound-canonical reference precompile, demonstrating mid-`reduce` minting.
+//! `Group` — compound-canonical reference precompile, demonstrating mid-`reduce` minting.
 //!
-//! A group element is represented as a self-evaluating `combine` bin-op node whose payload is
-//! two field-leaf digests `(h_x, h_y)`. The two **producing** ops (`add`, `sub`) reduce by
-//! pulling limbs from both operands' coordinates, performing **mock** coordinate-wise wrapping
-//! arithmetic (NOT a real curve), minting new field leaves for the resulting `(x3, y3)` via
-//! [`ReduceCtx::intern`], and returning a `combine` leaf that references those minted digests.
-//!
-//! Parameterised over a [`FieldOps`] implementor — `Group<Uint>` is the only intended
-//! instantiation, but the bound makes the dependency explicit and exercises the planned
-//! `Field<P>` → `Curve<C>` cross-app linkage pattern.
-
-use core::marker::PhantomData;
+//! A mock group over [`Uint`] (NOT a real curve). A group element is a self-evaluating
+//! `combine` bin-op node whose payload is two `Uint` field-leaf digests `(h_x, h_y)`. The two
+//! **producing** ops (`add`, `sub`) reduce by pulling limbs from both operands' coordinates,
+//! performing coordinate-wise wrapping arithmetic, minting new field leaves for the resulting
+//! `(x3, y3)` via [`ReduceCtx::intern`], and returning a `combine` leaf referencing those
+//! minted digests.
 
 use miden_core::{
     Felt, ZERO,
     deferred::{
-        App, AppTag, Digest, Node, NodeType, Payload, ReduceCtx, SchemaError, TRUE_TAG, Tag,
-        TagInfo, app_id_from, true_node,
+        Digest, Node, NodeType, Payload, Precompile, PrecompileTag, ReduceCtx, SchemaError,
+        TRUE_TAG, Tag, TagInfo, precompile_id, true_node,
     },
 };
 
-use super::uint::FieldOps;
+use super::uint::Uint;
 
 // PUBLIC APP TYPE
 // ================================================================================================
 
-/// Mock group app over a [`FieldOps`] implementor. Default-constructible; carries no state.
+/// Zero-sized handle for the `Group` app (mock group over [`Uint`]).
 #[derive(Debug, Default, Clone, Copy)]
-pub struct Group<F: FieldOps> {
-    _phantom: PhantomData<F>,
-}
+pub struct Group;
 
-impl<F: FieldOps> Group<F> {
+impl Group {
     pub const NAME: &'static str = "mock_group";
     pub const VERSION: u32 = 1;
     pub const DISCS: &'static [&'static str] = &["combine", "add", "sub", "eq"];
@@ -42,16 +35,9 @@ impl<F: FieldOps> Group<F> {
     pub const D_SUB: Felt = Felt::new_unchecked(2);
     pub const D_EQ: Felt = Felt::new_unchecked(3);
 
-    /// App identifier. Mixes the underlying field's leaf-tag into the params bytes so that
-    /// `Group<F1>` and `Group<F2>` get distinct ids.
+    /// Derive the precompile id. Pure function over `Group`'s metadata.
     pub fn app_id() -> Felt {
-        let field_tag = F::leaf_tag();
-        let mut params = [0u8; 32];
-        for (i, f) in field_tag.iter().enumerate() {
-            let bytes = f.as_canonical_u64().to_le_bytes();
-            params[i * 8..i * 8 + 8].copy_from_slice(&bytes);
-        }
-        app_id_from(Self::NAME, Self::VERSION, &params, Self::DISCS)
+        precompile_id(&Group)
     }
 
     pub fn combine_tag() -> Tag {
@@ -85,12 +71,24 @@ impl<F: FieldOps> Group<F> {
     }
 }
 
-impl<F: FieldOps> App for Group<F> {
+impl Precompile for Group {
+    fn name(&self) -> &'static str {
+        Self::NAME
+    }
+
+    fn version(&self) -> u32 {
+        Self::VERSION
+    }
+
+    fn discriminants(&self) -> &'static [&'static str] {
+        Self::DISCS
+    }
+
     fn id(&self) -> Felt {
         Self::app_id()
     }
 
-    fn decode(&self, local: AppTag) -> Result<TagInfo, SchemaError> {
+    fn decode(&self, local: PrecompileTag) -> Result<TagInfo, SchemaError> {
         if local.imm != ZERO {
             return Err(SchemaError::InvalidNode);
         }
@@ -117,11 +115,11 @@ impl<F: FieldOps> App for Group<F> {
         match kind {
             Discriminant::Combine => {
                 // Canonicalise the two coordinates to field leaves; reject if either child
-                // resolves to something that isn't a field leaf.
+                // resolves to something that isn't a `Uint` field leaf.
                 let x_leaf = ctx.resolve(h_lhs)?;
                 let y_leaf = ctx.resolve(h_rhs)?;
-                F::limbs_of(&x_leaf).map_err(SchemaError::from)?;
-                F::limbs_of(&y_leaf).map_err(SchemaError::from)?;
+                Uint::limbs_of(&x_leaf).map_err(SchemaError::from)?;
+                Uint::limbs_of(&y_leaf).map_err(SchemaError::from)?;
                 Ok(Self::combine_node(x_leaf.digest(), y_leaf.digest()))
             },
             Discriminant::Add | Discriminant::Sub => {
@@ -132,19 +130,19 @@ impl<F: FieldOps> App for Group<F> {
                 };
                 let g1 = ctx.resolve(h_lhs)?;
                 let g2 = ctx.resolve(h_rhs)?;
-                let (h_x1, h_y1) = combine_coords::<F>(&g1)?;
-                let (h_x2, h_y2) = combine_coords::<F>(&g2)?;
-                let x1 = F::limbs_of(&ctx.resolve(h_x1)?).map_err(SchemaError::from)?;
-                let y1 = F::limbs_of(&ctx.resolve(h_y1)?).map_err(SchemaError::from)?;
-                let x2 = F::limbs_of(&ctx.resolve(h_x2)?).map_err(SchemaError::from)?;
-                let y2 = F::limbs_of(&ctx.resolve(h_y2)?).map_err(SchemaError::from)?;
+                let (h_x1, h_y1) = combine_coords(&g1)?;
+                let (h_x2, h_y2) = combine_coords(&g2)?;
+                let x1 = Uint::limbs_of(&ctx.resolve(h_x1)?).map_err(SchemaError::from)?;
+                let y1 = Uint::limbs_of(&ctx.resolve(h_y1)?).map_err(SchemaError::from)?;
+                let x2 = Uint::limbs_of(&ctx.resolve(h_x2)?).map_err(SchemaError::from)?;
+                let y2 = Uint::limbs_of(&ctx.resolve(h_y2)?).map_err(SchemaError::from)?;
                 let (x3, y3) = match op {
-                    BinaryOp::Add => (F::wrap_add(x1, x2), F::wrap_add(y1, y2)),
-                    BinaryOp::Sub => (F::wrap_sub(x1, x2), F::wrap_sub(y1, y2)),
+                    BinaryOp::Add => (Uint::wrap_add(x1, x2), Uint::wrap_add(y1, y2)),
+                    BinaryOp::Sub => (Uint::wrap_sub(x1, x2), Uint::wrap_sub(y1, y2)),
                 };
                 // *** MINT ***  new field leaves for the result coordinates.
-                let h_x3 = ctx.intern(F::leaf_node(x3));
-                let h_y3 = ctx.intern(F::leaf_node(y3));
+                let h_x3 = ctx.intern(Uint::leaf_node(x3));
+                let h_y3 = ctx.intern(Uint::leaf_node(y3));
                 Ok(Self::combine_node(h_x3, h_y3))
             },
             Discriminant::Eq => {
@@ -161,9 +159,9 @@ impl<F: FieldOps> App for Group<F> {
 // ================================================================================================
 
 /// Extract the two field-leaf child digests from a canonical `combine` node. Errors if `node`
-/// isn't tagged as `Group<F>::combine_tag()`.
-fn combine_coords<F: FieldOps>(node: &Node) -> Result<(Digest, Digest), SchemaError> {
-    if node.tag != Group::<F>::combine_tag() {
+/// isn't tagged as `Group::combine_tag()`.
+fn combine_coords(node: &Node) -> Result<(Digest, Digest), SchemaError> {
+    if node.tag != Group::combine_tag() {
         return Err(SchemaError::InvalidNode);
     }
     let payload = node.expression_payload().ok_or(SchemaError::InvalidNode)?;

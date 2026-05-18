@@ -17,8 +17,8 @@ use alloc::sync::Arc;
 use miden_core::{
     Felt, ZERO,
     deferred::{
-        App, AppTag, Digest, Node, NodePayload, NodeType, Payload, ReduceCtx, SchemaError,
-        TRUE_TAG, Tag, TagInfo, app_id_from, true_node,
+        Digest, Node, NodePayload, NodeType, Payload, Precompile, PrecompileTag, ReduceCtx,
+        SchemaError, TRUE_TAG, Tag, TagInfo, precompile_id, true_node,
     },
 };
 use miden_crypto::hash::keccak::Keccak256;
@@ -43,7 +43,7 @@ impl Keccak256Precompile {
 
     /// Derive `app_id`. Pure function over the app's metadata.
     pub fn app_id() -> Felt {
-        app_id_from(Self::NAME, Self::VERSION, &[], Self::DISCS)
+        precompile_id(&Keccak256Precompile)
     }
 
     /// Tag for a `preimage` chunk node for an `n_bytes`-byte payload.
@@ -82,12 +82,24 @@ impl Keccak256Precompile {
     }
 }
 
-impl App for Keccak256Precompile {
+impl Precompile for Keccak256Precompile {
+    fn name(&self) -> &'static str {
+        Self::NAME
+    }
+
+    fn version(&self) -> u32 {
+        Self::VERSION
+    }
+
+    fn discriminants(&self) -> &'static [&'static str] {
+        Self::DISCS
+    }
+
     fn id(&self) -> Felt {
         Self::app_id()
     }
 
-    fn decode(&self, local: AppTag) -> Result<TagInfo, SchemaError> {
+    fn decode(&self, local: PrecompileTag) -> Result<TagInfo, SchemaError> {
         match local.node_disc {
             d if d == Self::D_PREIMAGE => {
                 let n_bytes = u32::try_from(local.imm.as_canonical_u64())
@@ -209,7 +221,7 @@ mod tests {
     #[test]
     fn decode_preimage_carries_n_bytes_in_imm() {
         let info = Keccak256Precompile
-            .decode(AppTag { node_disc: Keccak256Precompile::D_PREIMAGE, imm: Felt::from_u32(65) })
+            .decode(PrecompileTag { node_disc: Keccak256Precompile::D_PREIMAGE, imm: Felt::from_u32(65) })
             .unwrap();
         // 65 bytes → ceil(65/32) = 3 chunks.
         assert!(matches!(info.node_type, NodeType::Chunks(3)));
@@ -219,7 +231,7 @@ mod tests {
     #[test]
     fn decode_digest_is_self_evaluating_value() {
         let info = Keccak256Precompile
-            .decode(AppTag { node_disc: Keccak256Precompile::D_DIGEST, imm: ZERO })
+            .decode(PrecompileTag { node_disc: Keccak256Precompile::D_DIGEST, imm: ZERO })
             .unwrap();
         assert!(matches!(info.node_type, NodeType::Value));
         assert_eq!(info.evaluates_to, Keccak256Precompile::digest_tag());
@@ -228,7 +240,7 @@ mod tests {
     #[test]
     fn decode_eq_is_binary_predicate() {
         let info = Keccak256Precompile
-            .decode(AppTag { node_disc: Keccak256Precompile::D_EQ, imm: ZERO })
+            .decode(PrecompileTag { node_disc: Keccak256Precompile::D_EQ, imm: ZERO })
             .unwrap();
         assert!(matches!(info.node_type, NodeType::Binary));
         assert_eq!(info.evaluates_to, TRUE_TAG);
@@ -237,7 +249,7 @@ mod tests {
     #[test]
     fn decode_unknown_discriminant_rejected() {
         let err = Keccak256Precompile
-            .decode(AppTag { node_disc: Felt::from_u32(99), imm: ZERO });
+            .decode(PrecompileTag { node_disc: Felt::from_u32(99), imm: ZERO });
         assert!(matches!(err, Err(SchemaError::InvalidNode)));
     }
 
@@ -245,7 +257,7 @@ mod tests {
     fn decode_rejects_imm_on_non_preimage_discs() {
         for disc in [Keccak256Precompile::D_DIGEST, Keccak256Precompile::D_EQ] {
             let err = Keccak256Precompile
-                .decode(AppTag { node_disc: disc, imm: Felt::from_u32(1) });
+                .decode(PrecompileTag { node_disc: disc, imm: Felt::from_u32(1) });
             assert!(
                 matches!(err, Err(SchemaError::InvalidNode)),
                 "disc {} must reject non-zero imm",

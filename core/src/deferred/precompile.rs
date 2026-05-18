@@ -1,20 +1,20 @@
-//! Multi-app composite-schema substrate.
+//! Multi-precompile composite-schema substrate.
 //!
-//! An [`App`] is a self-contained semantic module (e.g. a hash, signature, or field app)
-//! that claims a slice of the 4-felt tag space identified by a stable [`Felt`] `app_id`. The
-//! [`crate::deferred::PrecompileSchema`] composite dispatches each tag to the right app by
-//! `tag[0]`, hands the remaining bits to the app as an [`AppTag`], and forwards
+//! A [`Precompile`] is a self-contained semantic module (e.g. a hash, signature, or field
+//! app) that claims a slice of the 4-felt tag space identified by a stable [`Felt`] id. The
+//! [`crate::deferred::PrecompileSchema`] composite dispatches each tag to the right precompile
+//! by `tag[0]`, hands the remaining bits to it as a [`PrecompileTag`], and forwards
 //! `decode` / `reduce`.
 //!
 //! Tag layout (locked for v1):
 //!
 //! ```text
-//! [app_id, node_disc, imm, ZERO]
+//! [precompile_id, node_disc, imm, ZERO]
 //! ```
 //!
-//! - `app_id` (felt 0) — derived via [`app_id_from`] from app metadata.
-//! - `node_disc` (felt 1) — app-local discriminant index (small integer).
-//! - `imm` (felt 2) — app-local immediate (e.g. `n_bytes` for chunk apps); `ZERO` if unused.
+//! - `precompile_id` (felt 0) — the precompile's pinned id; validated against [`precompile_id`].
+//! - `node_disc` (felt 1) — precompile-local discriminant index (small integer).
+//! - `imm` (felt 2) — precompile-local immediate (e.g. `n_bytes` for chunk apps); `ZERO` if unused.
 //! - `tag[3]` — reserved; must be `ZERO` in v1.
 
 use blake3::Hasher;
@@ -22,68 +22,83 @@ use blake3::Hasher;
 use super::{DeferredState, Node, ReduceCtx, SchemaError, TagInfo};
 use crate::Felt;
 
-// APP TAG
+// PRECOMPILE TAG
 // ================================================================================================
 
-/// The app-local portion of a tag — the slice [`crate::deferred::PrecompileSchema`] hands to an
-/// app after stripping the leading `app_id`. Apps never see `tag[0]` or the reserved `tag[3]`.
+/// The precompile-local portion of a tag — the slice [`crate::deferred::PrecompileSchema`] hands
+/// to a precompile after stripping the leading id. Precompiles never see `tag[0]` or the
+/// reserved `tag[3]`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct AppTag {
-    /// App-local discriminant index. Maps to the app's internal node-kind enum.
+pub struct PrecompileTag {
+    /// Precompile-local discriminant index. Maps to the precompile's internal node-kind enum.
     pub node_disc: Felt,
-    /// App-local immediate. Apps without an immediate ignore this and require `ZERO`.
+    /// Precompile-local immediate. Precompiles without an immediate ignore this and require `ZERO`.
     pub imm: Felt,
 }
 
-// APP TRAIT
+// PRECOMPILE TRAIT
 // ================================================================================================
 
 /// A single semantic module of a composite schema.
 ///
-/// Apps own a small enum of node-kinds and (optionally) one immediate per tag. They are stitched
-/// together into a [`crate::deferred::PrecompileSchema`] which implements the framework's
-/// [`super::Schema`] trait.
-pub trait App: core::fmt::Debug + Send + Sync {
-    /// Stable identifier (the first felt of every tag belonging to this app). Derived once from
-    /// the app's metadata via [`app_id_from`]; implementations typically memoise the result.
+/// Precompiles own a small enum of node-kinds and (optionally) one immediate per tag. They are
+/// stitched together into a [`crate::deferred::PrecompileSchema`] which implements the
+/// framework's [`super::Schema`] trait.
+pub trait Precompile: core::fmt::Debug + Send + Sync {
+    /// Hashed into the precompile id. Renaming breaks the schema for existing programs.
+    fn name(&self) -> &'static str;
+
+    /// Hashed into the precompile id. Bump on incompatible decode/reduce changes.
+    fn version(&self) -> u32;
+
+    /// Discriminant names hashed into the precompile id.
+    ///
+    /// Transitional: removed at step 4, when [`precompile_id`] drops to hashing only
+    /// `(name, version)`.
+    fn discriminants(&self) -> &'static [&'static str];
+
+    /// Pinned id (the first felt of every tag belonging to this precompile). Implementors
+    /// return the precomputed value; [`crate::deferred::PrecompileSchema::new`] validates it
+    /// equals [`precompile_id`], panicking on drift. No default — the value/derivation bridge
+    /// is the validator's hook.
     fn id(&self) -> Felt;
 
-    /// Pre-register canonical constants this app provides (e.g. `ZERO`, `ONE`, generator).
-    /// Called by [`crate::deferred::PrecompileSchema::boot`]. Default is a no-op for apps
-    /// without constants.
+    /// Pre-register canonical constants this precompile provides (e.g. `ZERO`, `ONE`,
+    /// generator). Called by [`crate::deferred::PrecompileSchema::boot`]. Default is a no-op.
     fn init(&self, _state: &mut DeferredState) {}
 
-    /// Decode the app-local tag to its [`TagInfo`]. Returning `Err(SchemaError::InvalidNode)`
-    /// rejects the tag.
-    fn decode(&self, local: AppTag) -> Result<TagInfo, SchemaError>;
+    /// Decode the precompile-local tag to its [`TagInfo`]. Returning
+    /// `Err(SchemaError::InvalidNode)` rejects the tag.
+    fn decode(&self, local: PrecompileTag) -> Result<TagInfo, SchemaError>;
 
-    /// Reduce a node owned by this app to canonical form. Same contract as
+    /// Reduce a node owned by this precompile to canonical form. Same contract as
     /// [`super::Schema::reduce`] — see its docs for the leaf / op / predicate / chunk variants.
     fn reduce(&self, node: &Node, ctx: &mut dyn ReduceCtx) -> Result<Node, SchemaError>;
 }
 
-// APP ID DERIVATION
+// PRECOMPILE ID DERIVATION
 // ================================================================================================
 
 /// Domain separator pinned to the v1 framework hashing convention. Bump iff the *derivation*
-/// changes (different hash, different input layout). Per-app evolution is handled by the
-/// `version` parameter of [`app_id_from`].
+/// changes (different hash, different input layout). Per-precompile evolution is handled by the
+/// `version` method.
 const APP_ID_DOMSEP: &[u8] = b"miden-deferred-app/v1";
 
-/// Derive an app's `app_id` from its metadata.
+/// Derive a precompile's canonical id from its metadata.
 ///
 /// Inputs are hashed with Blake3; the first 8 bytes of the digest are interpreted as a
 /// little-endian `u64` and reduced modulo the Goldilocks prime — giving ~32 bits of
-/// birthday-collision resistance, which is comfortably sufficient for the handful of apps a
-/// composite schema is expected to host. The hash mixes:
-///
-/// - [`APP_ID_DOMSEP`]
-/// - `name` — UTF-8 string, length-prefixed.
-/// - `version` — `u32`, little-endian; bump on incompatible discriminant changes within an app.
-/// - `params` — opaque parameter bytes (e.g. a prime modulus or curve descriptor).
-/// - `discriminants` — list of discriminant names, length-prefixed and individually
-///   length-prefixed; renaming a discriminant changes the id.
-pub fn app_id_from(name: &str, version: u32, params: &[u8], discriminants: &[&str]) -> Felt {
+/// birthday-collision resistance, comfortably sufficient for the handful of precompiles a
+/// composite schema is expected to host. Used by [`crate::deferred::PrecompileSchema::new`] to
+/// validate each precompile's declared [`Precompile::id`].
+pub fn precompile_id(p: &dyn Precompile) -> Felt {
+    derive_app_id(p.name(), p.version(), &[], p.discriminants())
+}
+
+/// Internal byte-exact derivation shared by [`precompile_id`]. The `params` slice is currently
+/// always empty (no precompile mixes parameter bytes); kept as an argument so the hashed byte
+/// layout is unchanged from the pre-refactor `app_id_from`.
+fn derive_app_id(name: &str, version: u32, params: &[u8], discriminants: &[&str]) -> Felt {
     let mut hasher = Hasher::new();
     hasher.update(APP_ID_DOMSEP);
     hash_bytes(&mut hasher, name.as_bytes());
@@ -109,25 +124,25 @@ mod tests {
 
     #[test]
     fn app_id_is_deterministic() {
-        let a = app_id_from("foo", 1, b"params", &["x", "y"]);
-        let b = app_id_from("foo", 1, b"params", &["x", "y"]);
+        let a = derive_app_id("foo", 1, b"params", &["x", "y"]);
+        let b = derive_app_id("foo", 1, b"params", &["x", "y"]);
         assert_eq!(a, b);
     }
 
     #[test]
     fn app_id_changes_with_each_input() {
-        let base = app_id_from("foo", 1, b"params", &["x", "y"]);
-        assert_ne!(base, app_id_from("bar", 1, b"params", &["x", "y"]));
-        assert_ne!(base, app_id_from("foo", 2, b"params", &["x", "y"]));
-        assert_ne!(base, app_id_from("foo", 1, b"params2", &["x", "y"]));
-        assert_ne!(base, app_id_from("foo", 1, b"params", &["x"]));
-        assert_ne!(base, app_id_from("foo", 1, b"params", &["x", "z"]));
+        let base = derive_app_id("foo", 1, b"params", &["x", "y"]);
+        assert_ne!(base, derive_app_id("bar", 1, b"params", &["x", "y"]));
+        assert_ne!(base, derive_app_id("foo", 2, b"params", &["x", "y"]));
+        assert_ne!(base, derive_app_id("foo", 1, b"params2", &["x", "y"]));
+        assert_ne!(base, derive_app_id("foo", 1, b"params", &["x"]));
+        assert_ne!(base, derive_app_id("foo", 1, b"params", &["x", "z"]));
     }
 
     #[test]
     fn app_id_lies_in_field() {
         // `new_unchecked` is sound only if the value < Felt::ORDER.
-        let id = app_id_from("anything", 0, &[], &[]);
+        let id = derive_app_id("anything", 0, &[], &[]);
         assert!(id.as_canonical_u64() < Felt::ORDER);
     }
 }

@@ -1,15 +1,12 @@
-//! Integration coverage for the `Group<Uint>` reference precompile: the compound-canonical /
-//! mid-`reduce` minting capability of the framework, plus the cross-app `FieldOps` linkage.
+//! Integration coverage for the `Group` reference precompile: the compound-canonical /
+//! mid-`reduce` minting capability of the framework (mock group over `Uint`).
 
 mod common;
 
-use common::precompile::{group, uint::Uint};
-use miden_core::{
-    Felt,
-    deferred::{App, DeferredState, Digest, Node, Payload, SchemaError, PrecompileSchema, app_id_from},
+use common::precompile::{group::Group, uint::Uint};
+use miden_core::deferred::{
+    DeferredState, Digest, Node, Payload, Precompile, PrecompileSchema, SchemaError,
 };
-
-type Group = group::Group<Uint>;
 
 fn leaf(low: u64) -> Node {
     let mut limbs = [0u32; 8];
@@ -21,8 +18,8 @@ fn leaf(low: u64) -> Node {
 /// Two-app schema with `Uint`'s constants pre-registered.
 fn schema_and_state() -> (PrecompileSchema, DeferredState) {
     let schema = PrecompileSchema::new([
-        Box::new(Uint) as Box<dyn App>,
-        Box::new(Group::default()) as Box<dyn App>,
+        Box::new(Uint) as Box<dyn Precompile>,
+        Box::new(Group::default()) as Box<dyn Precompile>,
     ]);
     let mut state = DeferredState::new();
     schema.boot(&mut state);
@@ -32,8 +29,8 @@ fn schema_and_state() -> (PrecompileSchema, DeferredState) {
 /// Two-app schema without booting (some tests assert exact node counts).
 fn fresh() -> (PrecompileSchema, DeferredState) {
     let schema = PrecompileSchema::new([
-        Box::new(Uint) as Box<dyn App>,
-        Box::new(Group::default()) as Box<dyn App>,
+        Box::new(Uint) as Box<dyn Precompile>,
+        Box::new(Group::default()) as Box<dyn Precompile>,
     ]);
     (schema, DeferredState::new())
 }
@@ -109,22 +106,6 @@ fn combine_canonicalises_field_expression_children_end_to_end() {
 
 // CAPABILITY UNIT TESTS (relocated from the old in-lib `mock_group` unit tests)
 // ================================================================================================
-
-#[test]
-fn app_id_depends_on_field_param() {
-    // Reusing a field's leaf tag must propagate into Group's id. We don't have a second
-    // FieldOps impl here, so verify the params encoding actually changes the result by hashing
-    // a different (synthetic) tag and observing a different id.
-    let real_id = Group::app_id();
-    let mut perturbed_tag = Uint::leaf_tag();
-    perturbed_tag[0] = Felt::new_unchecked(perturbed_tag[0].as_canonical_u64() ^ 1);
-    let mut params = [0u8; 32];
-    for (i, f) in perturbed_tag.iter().enumerate() {
-        params[i * 8..i * 8 + 8].copy_from_slice(&f.as_canonical_u64().to_le_bytes());
-    }
-    let perturbed = app_id_from(Group::NAME, Group::VERSION, &params, Group::DISCS);
-    assert_ne!(real_id, perturbed);
-}
 
 #[test]
 fn combine_self_evaluates_when_children_are_leaves() {

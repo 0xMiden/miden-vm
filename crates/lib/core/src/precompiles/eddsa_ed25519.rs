@@ -9,8 +9,8 @@ use alloc::sync::Arc;
 use miden_core::{
     Felt, ZERO,
     deferred::{
-        App, AppTag, Node, NodePayload, NodeType, ReduceCtx, SchemaError, TRUE_TAG, Tag, TagInfo,
-        app_id_from, true_node,
+        Node, NodePayload, NodeType, Precompile, PrecompileTag, ReduceCtx, SchemaError, TRUE_TAG,
+        Tag, TagInfo, precompile_id, true_node,
     },
     serde::Deserializable,
 };
@@ -39,7 +39,7 @@ impl EddsaEd25519Precompile {
     pub const SIG_BYTES: usize = 64;
 
     pub fn app_id() -> Felt {
-        app_id_from(Self::NAME, Self::VERSION, &[], Self::DISCS)
+        precompile_id(&EddsaEd25519Precompile)
     }
 
     pub fn verify_tag() -> Tag {
@@ -53,12 +53,24 @@ impl EddsaEd25519Precompile {
     }
 }
 
-impl App for EddsaEd25519Precompile {
+impl Precompile for EddsaEd25519Precompile {
+    fn name(&self) -> &'static str {
+        Self::NAME
+    }
+
+    fn version(&self) -> u32 {
+        Self::VERSION
+    }
+
+    fn discriminants(&self) -> &'static [&'static str] {
+        Self::DISCS
+    }
+
     fn id(&self) -> Felt {
         Self::app_id()
     }
 
-    fn decode(&self, local: AppTag) -> Result<TagInfo, SchemaError> {
+    fn decode(&self, local: PrecompileTag) -> Result<TagInfo, SchemaError> {
         match local.node_disc {
             d if d == Self::D_VERIFY => {
                 if local.imm != ZERO {
@@ -149,7 +161,7 @@ mod tests {
     #[test]
     fn decode_verify_is_5_chunk_predicate() {
         let info = EddsaEd25519Precompile
-            .decode(AppTag { node_disc: EddsaEd25519Precompile::D_VERIFY, imm: ZERO })
+            .decode(PrecompileTag { node_disc: EddsaEd25519Precompile::D_VERIFY, imm: ZERO })
             .unwrap();
         assert!(matches!(info.node_type, NodeType::Chunks(5)));
         assert_eq!(info.evaluates_to, TRUE_TAG);

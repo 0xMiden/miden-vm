@@ -35,7 +35,7 @@ pub(crate) mod test_precompile;
 
 use alloc::{sync::Arc, vec::Vec};
 
-pub use precompile::{App, AppTag, app_id_from};
+pub use precompile::{Precompile, PrecompileTag, precompile_id};
 pub use precompile_schema::PrecompileSchema;
 use miden_crypto::{ZERO, hash::poseidon2::Poseidon2};
 use miden_utils_sync::OnceLockCompat;

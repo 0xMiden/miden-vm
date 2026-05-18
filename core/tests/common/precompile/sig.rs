@@ -13,8 +13,8 @@ use std::sync::Arc;
 use miden_core::{
     Felt, ZERO,
     deferred::{
-        App, AppTag, Node, NodePayload, NodeType, ReduceCtx, SchemaError, TRUE_TAG, Tag, TagInfo,
-        app_id_from, true_node,
+        Node, NodePayload, NodeType, Precompile, PrecompileTag, ReduceCtx, SchemaError, TRUE_TAG,
+        Tag, TagInfo, precompile_id, true_node,
     },
 };
 
@@ -37,7 +37,7 @@ impl Sig {
     pub const SIG_CHUNKS: u32 = 3;
 
     pub fn app_id() -> Felt {
-        app_id_from(Self::NAME, Self::VERSION, &[], Self::DISCS)
+        precompile_id(&Sig)
     }
 
     pub fn verify_tag() -> Tag {
@@ -50,12 +50,24 @@ impl Sig {
     }
 }
 
-impl App for Sig {
+impl Precompile for Sig {
+    fn name(&self) -> &'static str {
+        Self::NAME
+    }
+
+    fn version(&self) -> u32 {
+        Self::VERSION
+    }
+
+    fn discriminants(&self) -> &'static [&'static str] {
+        Self::DISCS
+    }
+
     fn id(&self) -> Felt {
         Self::app_id()
     }
 
-    fn decode(&self, local: AppTag) -> Result<TagInfo, SchemaError> {
+    fn decode(&self, local: PrecompileTag) -> Result<TagInfo, SchemaError> {
         if local.imm != ZERO {
             return Err(SchemaError::InvalidNode);
         }

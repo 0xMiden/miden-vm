@@ -11,8 +11,8 @@
 use crate::{
     Felt, ZERO,
     deferred::{
-        App, AppTag, DeferredError, Node, NodeType, Payload, ReduceCtx, Schema, SchemaError,
-        TRUE_TAG, Tag, TagInfo, app_id_from, true_node,
+        DeferredError, Node, NodeType, Payload, Precompile, PrecompileTag, ReduceCtx, Schema,
+        SchemaError, TRUE_TAG, Tag, TagInfo, precompile_id, true_node,
     },
 };
 
@@ -31,7 +31,7 @@ impl TestPrecompile {
     const D_EQ: Felt = Felt::new_unchecked(3);
 
     pub(crate) fn app_id() -> Felt {
-        app_id_from(Self::NAME, Self::VERSION, &[], Self::DISCS)
+        precompile_id(&TestPrecompile)
     }
 
     pub(crate) fn leaf_tag() -> Tag {
@@ -113,12 +113,24 @@ impl Disc {
     }
 }
 
-impl App for TestPrecompile {
+impl Precompile for TestPrecompile {
+    fn name(&self) -> &'static str {
+        Self::NAME
+    }
+
+    fn version(&self) -> u32 {
+        Self::VERSION
+    }
+
+    fn discriminants(&self) -> &'static [&'static str] {
+        Self::DISCS
+    }
+
     fn id(&self) -> Felt {
         Self::app_id()
     }
 
-    fn decode(&self, local: AppTag) -> Result<TagInfo, SchemaError> {
+    fn decode(&self, local: PrecompileTag) -> Result<TagInfo, SchemaError> {
         if local.imm != ZERO {
             return Err(SchemaError::InvalidNode);
         }
@@ -175,13 +187,13 @@ impl Schema for TestPrecompile {
         if tag[0] != Self::app_id() || tag[3] != ZERO {
             return Err(SchemaError::InvalidNode);
         }
-        App::decode(self, AppTag { node_disc: tag[1], imm: tag[2] })
+        Precompile::decode(self, PrecompileTag { node_disc: tag[1], imm: tag[2] })
     }
 
     fn reduce(&self, node: &Node, ctx: &mut dyn ReduceCtx) -> Result<Node, SchemaError> {
         if node.tag[0] != Self::app_id() {
             return Err(SchemaError::InvalidNode);
         }
-        App::reduce(self, node, ctx)
+        Precompile::reduce(self, node, ctx)
     }
 }

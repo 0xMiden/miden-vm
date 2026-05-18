@@ -1,16 +1,16 @@
 //! Core precompile apps that back the MASM wrappers in `asm/crypto/`.
 //!
-//! Each precompile is a self-contained [`App`] implementation in its own file, paired with the
-//! MASM wrapper that emits its tags via the deferred-DAG `sys::register_*` / `sys::evaluate`
-//! events. The composite [`PrecompileSchema`] returned by [`schema`] routes tags to the right
-//! app by `app_id`.
+//! Each precompile is a self-contained [`Precompile`] implementation in its own file, paired
+//! with the MASM wrapper that emits its tags via the deferred-DAG `sys::register_*` /
+//! `sys::evaluate` events. The composite [`PrecompileSchema`] returned by [`schema`] routes
+//! tags to the right precompile by id.
 //!
 //! - [`keccak256`] — Keccak256 preimage / digest / eq.
 //! - [`sha512`] — SHA-512 preimage / digest / eq.
 //! - [`ecdsa_k256_keccak`] — ECDSA secp256k1 / Keccak256 prehash verify.
 //! - [`eddsa_ed25519`] — Ed25519 / SHA-512 verify (with externally supplied `k_digest`).
 //!
-//! [`App`]: miden_core::deferred::App
+//! [`Precompile`]: miden_core::deferred::Precompile
 //! [`PrecompileSchema`]: miden_core::deferred::PrecompileSchema
 
 mod codec;
@@ -28,7 +28,7 @@ pub use sha512::Sha512Precompile;
 
 use alloc::boxed::Box;
 
-use miden_core::deferred::{App, PrecompileSchema};
+use miden_core::deferred::{Precompile, PrecompileSchema};
 
 /// Build the composite [`PrecompileSchema`] hosting all four core precompile apps. Callers wire
 /// it into a [`FastProcessor`] via [`FastProcessor::with_schema`] when running programs that use
@@ -38,7 +38,7 @@ use miden_core::deferred::{App, PrecompileSchema};
 /// [`FastProcessor::with_schema`]: miden_processor::FastProcessor::with_schema
 pub fn schema() -> PrecompileSchema {
     PrecompileSchema::new([
-        Box::new(Keccak256Precompile) as Box<dyn App>,
+        Box::new(Keccak256Precompile) as Box<dyn Precompile>,
         Box::new(Sha512Precompile),
         Box::new(EcdsaK256KeccakPrecompile),
         Box::new(EddsaEd25519Precompile),
@@ -64,8 +64,8 @@ mod tests {
     /// `const APP_ID` / `const D_*` declarations in each precompile MASM file.
     #[test]
     fn masm_constants_pinned_to_rust_values() {
-        // Re-derived via `app_id_from(NAME, 1, b"", DISCS)` for each app. Pinned here so any
-        // drift surfaces at CI time. Discriminant indices are positional in DISCS.
+        // Re-derived via `precompile_id` (NAME + VERSION + DISCS) for each precompile. Pinned
+        // here so any drift surfaces at CI time. Discriminant indices are positional in DISCS.
         const EXPECTED_KECCAK256_APP_ID: u64 = 15_236_188_148_055_918_137;
         const EXPECTED_SHA512_APP_ID: u64 = 3_974_822_377_943_316_543;
         const EXPECTED_ECDSA_K256_KECCAK_APP_ID: u64 = 6_573_419_657_329_570_818;
