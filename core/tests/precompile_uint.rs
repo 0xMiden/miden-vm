@@ -77,10 +77,10 @@ fn noop_schema_rejects_all_uint_nodes() {
 }
 
 #[test]
-fn boot_pre_registers_uint_constants() {
+fn init_pre_registers_uint_constants() {
     let schema = PrecompileSchema::single(Uint);
     let mut state = DeferredState::new();
-    schema.boot(&mut state);
+    schema.init(&mut state).unwrap();
     // Three constants: ZERO, ONE, P_MINUS_1.
     assert_eq!(state.nodes().len(), 3);
     assert!(state.contains(&leaf(0).digest()));
@@ -225,10 +225,10 @@ fn app_id_is_stable_across_calls() {
 }
 
 #[test]
-fn boot_interns_zero_one_pminus1() {
+fn init_interns_zero_one_pminus1() {
     let schema = PrecompileSchema::single(Uint);
     let mut state = DeferredState::new();
-    schema.boot(&mut state);
+    schema.init(&mut state).unwrap();
     assert!(state.contains(&Uint::leaf_node([0; 8]).digest()));
     let mut one = [0u32; 8];
     one[0] = 1;

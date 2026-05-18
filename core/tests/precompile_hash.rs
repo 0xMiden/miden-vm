@@ -32,7 +32,7 @@ fn preimage_reduces_to_known_digest_and_eq_predicate_passes() {
         Box::new(Hash) as Box<dyn Precompile>,
     ]);
     let mut state = DeferredState::new();
-    schema.boot(&mut state);
+    schema.init(&mut state).unwrap();
 
     // Build a 64-byte preimage (two 32-byte chunks) and the digest the mock hash should yield.
     let preimage_chunks = chunks(2);

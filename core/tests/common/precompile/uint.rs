@@ -9,8 +9,8 @@
 use miden_core::{
     Felt, ZERO,
     deferred::{
-        DeferredError, DeferredState, Digest, Node, NodeType, Payload, Precompile, PrecompileTag,
-        ReduceCtx, Schema, SchemaError, TRUE_TAG, Tag, TagInfo, precompile_id, true_node,
+        DeferredError, Digest, Node, NodeType, Payload, Precompile, PrecompileTag, ReduceCtx,
+        Schema, SchemaError, TRUE_TAG, Tag, TagInfo, precompile_id, true_node,
     },
 };
 
@@ -127,17 +127,15 @@ impl Precompile for Uint {
         Self::app_id()
     }
 
-    fn init(&self, state: &mut DeferredState) {
-        // ZERO, ONE, P_MINUS_1 — useful baseline constants. Idempotent re-interns are safe.
-        // Registered via the public `Schema` API (`Uint: Schema`) since `DeferredState::intern`
-        // is crate-private to `miden-core`.
-        state.register(self, Self::leaf_node([0; 8])).expect("uint ZERO const");
+    fn init(&self) -> Vec<Node> {
+        // ZERO, ONE, P_MINUS_1 — useful baseline constants.
         let mut one = [0u32; 8];
         one[0] = 1;
-        state.register(self, Self::leaf_node(one)).expect("uint ONE const");
-        state
-            .register(self, Self::leaf_node([u32::MAX; 8]))
-            .expect("uint P_MINUS_1 const");
+        vec![
+            Self::leaf_node([0; 8]),
+            Self::leaf_node(one),
+            Self::leaf_node([u32::MAX; 8]),
+        ]
     }
 
     fn decode(&self, sub: PrecompileTag) -> Result<TagInfo, SchemaError> {

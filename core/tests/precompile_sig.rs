@@ -37,7 +37,7 @@ fn verify_passes_in_multi_app_schema() {
         Box::new(Sig) as Box<dyn Precompile>,
     ]);
     let mut state = DeferredState::new();
-    schema.boot(&mut state);
+    schema.init(&mut state).unwrap();
 
     let node = Sig::verify_node(three_chunks(Felt::from_u32(7)));
     let result = state.evaluate(&schema, node).unwrap();

@@ -17,9 +17,11 @@
 //! - `imm` (felt 2) — precompile-local immediate (e.g. `n_bytes` for chunk apps); `ZERO` if unused.
 //! - `tag[3]` — reserved; must be `ZERO` in v1.
 
+use alloc::vec::Vec;
+
 use blake3::Hasher;
 
-use super::{DeferredState, Node, ReduceCtx, SchemaError, TagInfo};
+use super::{Node, ReduceCtx, SchemaError, TagInfo};
 use crate::Felt;
 
 // PRECOMPILE TAG
@@ -52,9 +54,12 @@ pub trait Precompile: core::fmt::Debug + Send + Sync {
     /// is the validator's hook.
     fn id(&self) -> Felt;
 
-    /// Pre-register canonical constants this precompile provides (e.g. `ZERO`, `ONE`,
-    /// generator). Called by [`crate::deferred::PrecompileSchema::boot`]. Default is a no-op.
-    fn init(&self, _state: &mut DeferredState) {}
+    /// Canonical constant leaves this precompile contributes at schema-init time (e.g. `ZERO`,
+    /// `ONE`, a generator). [`crate::deferred::PrecompileSchema::init`] collects these, interns
+    /// them, and errors on a cross-precompile digest collision. Default: contributes nothing.
+    fn init(&self) -> Vec<Node> {
+        Vec::new()
+    }
 
     /// Decode the precompile-local sub-tag to its [`TagInfo`]. Returning
     /// `Err(SchemaError::InvalidNode)` rejects the tag. The precompile owns validation of all

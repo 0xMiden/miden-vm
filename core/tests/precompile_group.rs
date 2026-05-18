@@ -22,7 +22,7 @@ fn schema_and_state() -> (PrecompileSchema, DeferredState) {
         Box::new(Group::default()) as Box<dyn Precompile>,
     ]);
     let mut state = DeferredState::new();
-    schema.boot(&mut state);
+    schema.init(&mut state).unwrap();
     (schema, state)
 }
 

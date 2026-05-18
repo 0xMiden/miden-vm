@@ -4,7 +4,9 @@ use alloc::{boxed::Box, collections::BTreeMap, vec::Vec};
 
 use crate::{
     Felt,
-    deferred::{DeferredState, Node, ReduceCtx, Schema, SchemaError, Tag, TagInfo},
+    deferred::{
+        DeferredError, DeferredState, Digest, Node, ReduceCtx, Schema, SchemaError, Tag, TagInfo,
+    },
 };
 
 use super::precompile::{Precompile, PrecompileTag, precompile_id};
@@ -48,14 +50,29 @@ impl PrecompileSchema {
         Self::new([Box::new(precompile) as Box<dyn Precompile>])
     }
 
-    /// Pre-register every precompile's canonical constants into `state` via [`Precompile::init`].
+    /// Collect every precompile's canonical constant leaves ([`Precompile::init`]) and intern
+    /// them into `state`. Errors with [`DeferredError::ConflictingNode`] if two *different*
+    /// precompiles contribute the same node digest (ambiguous canonical-leaf ownership).
+    ///
     /// Caller is responsible for invoking this — it is not implicit in [`Self::new`] because
-    /// callers may want to attach the schema before building the state, or to skip booting in
-    /// tests where determinism of node counts matters.
-    pub fn boot(&self, state: &mut DeferredState) {
+    /// callers may want to attach the schema before building the state, or to skip it in tests
+    /// where determinism of node counts matters.
+    pub fn init(&self, state: &mut DeferredState) -> Result<(), SchemaError> {
+        let mut seen: Vec<Digest> = Vec::new();
         for p in self.precompiles.values() {
-            p.init(state);
+            let nodes = p.init();
+            // Cross-precompile collision: a digest already contributed by a *prior*
+            // precompile. Idempotent re-interns within one precompile are harmless.
+            let local: Vec<Digest> = nodes.iter().map(Node::digest).collect();
+            if local.iter().any(|d| seen.contains(d)) {
+                return Err(DeferredError::ConflictingNode.into());
+            }
+            for node in nodes {
+                state.intern(node);
+            }
+            seen.extend(local);
         }
+        Ok(())
     }
 
     /// Returns the ids present in this composite, in `BTreeMap` order. Mainly for tests and
