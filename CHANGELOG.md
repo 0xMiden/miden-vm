@@ -11,6 +11,7 @@
 #### Fixes
 
 - Preserved `AssemblyOp` source mappings when merging `MastForest`s, preventing source-location loss after node deduplication.
+- Enforced `max_num_continuations` from shared continuation-stack execution paths so fast execution, step resume, and replay use the same bound ([#3160](https://github.com/0xMiden/miden-vm/pull/3160)).
 - Replaced `bincode` proof serialization with `wincode` and bounded verifier-side STARK proof deserialization to 64 MiB ([#3148](https://github.com/0xMiden/miden-vm/pull/3148)).
 
 ## v0.23.0 (2026-05-07)
