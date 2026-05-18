@@ -659,9 +659,12 @@ impl Test {
         let program_info = ProgramInfo::from(program);
         if test_fail {
             stack_outputs.as_mut()[0] += ONE;
-            assert!(verify(program_info, stack_inputs, stack_outputs, proof).is_err());
+            assert!(
+                verify(program_info, stack_inputs, stack_outputs, &*self.schema, proof).is_err()
+            );
         } else {
-            let result = verify(program_info, stack_inputs, stack_outputs, proof);
+            let result =
+                verify(program_info, stack_inputs, stack_outputs, &*self.schema, proof);
             assert!(result.is_ok(), "error: {result:?}");
         }
     }

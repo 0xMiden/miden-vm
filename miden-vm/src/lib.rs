@@ -29,16 +29,26 @@ pub use miden_verifier::VerificationError;
 #[cfg(feature = "internal")]
 pub mod internal;
 
-/// Verifies a Miden proof.
+/// Verifies a Miden proof using the production `CoreLibrary` precompile schema.
 ///
-/// See [miden_verifier::verify] for more details.
+/// This is **L3** of the layered verifier API — a default-schema convenience wrapper around
+/// [`miden_verifier::verify`]. Programs that use the core library's precompile MASM wrappers
+/// (keccak256, sha512, ecdsa_k256_keccak, eddsa_ed25519) are verified end-to-end through this
+/// entry-point. For non-default schemas or callers that want the deferred commitment
+/// separately, call `miden_verifier::verify` directly.
 pub fn verify(
     program_info: ProgramInfo,
     stack_inputs: StackInputs,
     stack_outputs: StackOutputs,
     proof: ExecutionProof,
 ) -> Result<u32, VerificationError> {
-    let (security_level, _) =
-        miden_verifier::verify(program_info, stack_inputs, stack_outputs, proof)?;
+    let schema = miden_core_lib::CoreLibrary::default().precompile_schema();
+    let (security_level, _commitment) = miden_verifier::verify(
+        program_info,
+        stack_inputs,
+        stack_outputs,
+        &schema,
+        proof,
+    )?;
     Ok(security_level)
 }

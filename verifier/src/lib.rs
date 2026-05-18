@@ -5,14 +5,12 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
-use alloc::{boxed::Box, collections::BTreeMap, vec::Vec};
+use alloc::{boxed::Box, vec::Vec};
 
 use miden_air::{ProcessorAir, PublicInputs, config};
 use miden_core::{
     Felt, WORD_SIZE,
-    deferred::{
-        DeferredStateWire, Digest, Node, Payload, TRUE_DIGEST, TRUE_INDEX, TRUE_TAG, WireBody,
-    },
+    deferred::{DeferredState, IntegrityError, Schema},
     field::QuadFelt,
 };
 use miden_crypto::stark::{
@@ -37,141 +35,80 @@ pub use exports::*;
 // VERIFIER
 // ================================================================================================
 
-/// Verifies a STARK proof of correct VM execution.
+/// Verifies a STARK proof of correct VM execution under the supplied deferred-DAG `schema`.
 ///
 /// Stack inputs are expected to be ordered as if they would be pushed onto the stack one by one.
 /// Stack outputs are expected in the order they appear at the top of the stack (reverse of inputs).
 ///
-/// Returns the security level (in bits) and the deferred-DAG root (`Word`) that the proof
-/// commits to. Callers verifying precompile-bearing programs should additionally cross-check
-/// the proof's deferred state by calling `DeferredState::rehydrate(proof.deferred_state(), schema)`
-/// with the schema they expect — `rehydrate` validates every AND-chain step by re-evaluating its
-/// predicate.
+/// This is **L2** of the layered verifier API:
+/// 1. Rehydrate the proof's deferred-DAG wire under `schema`. This re-runs every reachable
+///    predicate's `reduce`, validates content-addressing, and walks the AND-chain. The hydrated
+///    state's `root` is the canonical *deferred commitment*.
+/// 2. Verify the STARK proof with that commitment as a public input (delegating to
+///    [`verify_stark`], the L1 raw-STARK entry-point).
+///
+/// Returns the security level (in bits) and the deferred commitment that the proof commits to.
 ///
 /// # Errors
-/// Returns an error if the proof does not prove a correct execution of the program, or if the
-/// deferred-DAG transcript chain inside the proof is structurally corrupt.
+/// Returns an error if the deferred-DAG wire fails any rehydration check
+/// ([`VerificationError::DeferredIntegrity`]) or if the STARK proof fails to verify under that
+/// commitment ([`VerificationError::StarkVerificationError`]). Rehydration runs first; a tampered
+/// wire fails fast before any STARK work happens.
 #[tracing::instrument("verify_program", skip_all)]
 pub fn verify(
     program_info: ProgramInfo,
     stack_inputs: StackInputs,
     stack_outputs: StackOutputs,
+    schema: &dyn Schema,
     proof: ExecutionProof,
 ) -> Result<(u32, Word), VerificationError> {
     let security_level = proof.security_level();
 
     let (hash_fn, proof_bytes, deferred_wire) = proof.into_parts();
 
-    // Walk the deferred-DAG's AND-chain on the wire from `root` down to `TRUE_DIGEST`. This is
-    // a purely-structural check: every AND-node's own digest must equal
-    // Poseidon2::merge(prev_root, stmnt), its tag must be TRUE_TAG, and the chain must terminate
-    // at TRUE_DIGEST. Schema-level semantic validation (each statement reduces to TRUE) is the
-    // caller's responsibility via `DeferredState::rehydrate`.
-    let _statements = walk_deferred_and_chain(&deferred_wire)?;
-
-    let pc_transcript_state = deferred_wire.root;
+    // Rehydrate the wire under the installed schema. This validates content-addressing, the
+    // AND-chain shape, AND re-evaluates every reachable predicate. The hydrated state's root
+    // is the canonical deferred commitment used as a public input to the STARK proof below.
+    let state = DeferredState::rehydrate(&deferred_wire, schema)
+        .map_err(VerificationError::DeferredIntegrity)?;
+    let deferred_commitment = state.root();
 
     verify_stark(
         program_info,
         stack_inputs,
         stack_outputs,
-        pc_transcript_state,
+        deferred_commitment,
         hash_fn,
         proof_bytes,
     )?;
 
-    Ok((security_level, pc_transcript_state))
+    Ok((security_level, deferred_commitment))
 }
 
 // HELPER FUNCTIONS
 // ================================================================================================
 
-/// Walks the AND-chain rooted at `wire.root` down to [`TRUE_DIGEST`], returning the per-step
-/// statements in execution order (oldest first).
+/// **L1 of the layered verifier API.** Verifies a STARK proof against the supplied public inputs,
+/// including the `deferred_commitment` (the deferred-DAG root) as a verifier-supplied public
+/// input.
 ///
-/// First materialises each wire entry into a digest-form `Node` by recomputing its digest
-/// (Binary entries reconstruct their payload from earlier entries' digests via the indices).
-/// Each entry's recomputed digest is keyed into a lookup map; a tampered entry ends up under
-/// the digest its bytes actually hash to, so a forged chain child reference fails to find
-/// anything in this map. Then walks AND-nodes via the lookup.
-fn walk_deferred_and_chain(
-    wire: &DeferredStateWire,
-) -> Result<Vec<Digest>, VerificationError> {
-    // Phase 1: materialise. Each entry's payload is reconstructed using only earlier entries
-    // (`Binary` indices resolve into the `digests` vector built so far).
-    let mut digests: Vec<Digest> = Vec::with_capacity(wire.entries.len());
-    let mut by_digest: BTreeMap<Digest, Node> = BTreeMap::new();
-    for (i, entry) in wire.entries.iter().enumerate() {
-        let node = match &entry.body {
-            WireBody::Value(payload) => Node::expression(entry.tag, *payload),
-            WireBody::Chunks(chunks) => Node::chunk(entry.tag, chunks.clone()),
-            WireBody::Binary { lhs, rhs } => {
-                let lhs_d = resolve_wire_index(*lhs, i, &digests)?;
-                let rhs_d = resolve_wire_index(*rhs, i, &digests)?;
-                Node::expression(entry.tag, Payload::binary_op(lhs_d, rhs_d))
-            },
-        };
-        let d = node.digest();
-        digests.push(d);
-        by_digest.insert(d, node);
-    }
-
-    // Phase 2: walk the AND-chain.
-    let mut statements = Vec::new();
-    let mut current = wire.root;
-    while current != TRUE_DIGEST {
-        let node = by_digest.get(&current).ok_or(VerificationError::DeferredChainCorrupt {
-            reason: DeferredChainErrorReason::MissingNode { digest: current },
-        })?;
-        if node.tag != TRUE_TAG {
-            return Err(VerificationError::DeferredChainCorrupt {
-                reason: DeferredChainErrorReason::NonAndNode { digest: current },
-            });
-        }
-        let payload = node.expression_payload().ok_or(
-            VerificationError::DeferredChainCorrupt {
-                reason: DeferredChainErrorReason::NonExpressionPayload { digest: current },
-            },
-        )?;
-        let (prev_root, stmnt) = payload.binary_op_children();
-        statements.push(stmnt);
-        current = prev_root;
-    }
-    statements.reverse();
-    Ok(statements)
-}
-
-/// Same semantics as `core::deferred::state::resolve_index`, copied here because the helper is
-/// `pub(crate)` to its origin module.
-fn resolve_wire_index(
-    idx: u32,
-    current: usize,
-    digests: &[Digest],
-) -> Result<Digest, VerificationError> {
-    if idx == TRUE_INDEX {
-        return Ok(TRUE_DIGEST);
-    }
-    let i = idx as usize;
-    if i >= current || i >= digests.len() {
-        return Err(VerificationError::DeferredChainCorrupt {
-            reason: DeferredChainErrorReason::BadIndex { idx },
-        });
-    }
-    Ok(digests[i])
-}
-
-fn verify_stark(
+/// Pure STARK verification — no schema, no deferred-DAG walk. The caller is responsible for
+/// computing `deferred_commitment` honestly; typically by calling
+/// [`DeferredState::rehydrate`] on the proof's wire. The schema-aware [`verify`] does both
+/// steps; this entry-point is exposed for callers that derive the commitment by other means
+/// (e.g. a recursive precompile-VM proof that proves the wire's correctness independently).
+pub fn verify_stark(
     program_info: ProgramInfo,
     stack_inputs: StackInputs,
     stack_outputs: StackOutputs,
-    pc_transcript_state: Word,
+    deferred_commitment: Word,
     hash_fn: HashFunction,
     proof_bytes: Vec<u8>,
 ) -> Result<(), VerificationError> {
     let program_hash = *program_info.program_hash();
 
     let pub_inputs =
-        PublicInputs::new(program_info, stack_inputs, stack_outputs, pc_transcript_state);
+        PublicInputs::new(program_info, stack_inputs, stack_outputs, deferred_commitment);
     let (public_values, kernel_felts) = pub_inputs.to_air_inputs();
     let var_len_public_inputs: &[&[Felt]] = &[&kernel_felts];
 
@@ -211,21 +148,8 @@ fn verify_stark(
 pub enum VerificationError {
     #[error("failed to verify STARK proof for program with hash {0}")]
     StarkVerificationError(Word, #[source] Box<StarkVerificationError>),
-    #[error("deferred-DAG transcript chain is corrupt: {reason}")]
-    DeferredChainCorrupt { reason: DeferredChainErrorReason },
-}
-
-/// Specific failure mode encountered while walking the deferred-DAG AND-chain.
-#[derive(Debug, thiserror::Error)]
-pub enum DeferredChainErrorReason {
-    #[error("expected AND-node {digest} is not present in the deferred state")]
-    MissingNode { digest: Digest },
-    #[error("node {digest} is reachable from the transcript root but is not an AND-node")]
-    NonAndNode { digest: Digest },
-    #[error("AND-node {digest} has a chunk-bodied payload (expected expression body)")]
-    NonExpressionPayload { digest: Digest },
-    #[error("wire Binary entry references out-of-range child index {idx}")]
-    BadIndex { idx: u32 },
+    #[error("deferred-DAG integrity check failed: {0}")]
+    DeferredIntegrity(#[from] IntegrityError),
 }
 
 // STARK PROOF VERIFICATION

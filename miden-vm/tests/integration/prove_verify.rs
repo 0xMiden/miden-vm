@@ -53,8 +53,10 @@ fn assert_prove_verify(
     }
 
     println!("Verifying proof...");
-    let (security_level, _deferred_root) =
-        verify(program.into(), stack_inputs, stack_outputs, proof).expect("Verification failed");
+    let schema = CoreLibrary::default().precompile_schema();
+    let (security_level, _deferred_commitment) =
+        verify(program.into(), stack_inputs, stack_outputs, &schema, proof)
+            .expect("Verification failed");
 
     println!("Verification successful! Security level: {security_level}");
 }
@@ -160,6 +162,67 @@ fn test_rpx_prove_verify() {
     ";
 
     assert_prove_verify(source, HashFunction::Rpx256, "RPX", true, false);
+}
+
+/// Soundness regression: a proof whose deferred-DAG wire fails rehydration must be rejected by
+/// `miden_verifier::verify` BEFORE any STARK work happens. Tampers a valid proof's wire to
+/// include an entry with an unrecognized tag, then asserts the verifier surfaces
+/// `DeferredIntegrity(UnknownTag)`.
+#[test]
+fn test_verify_rejects_tampered_deferred_wire() {
+    use miden_core::{
+        Felt, ZERO,
+        deferred::{DeferredStateWire, Payload, WireBody, WireEntry},
+    };
+    use miden_verifier::VerificationError;
+
+    // Build a trivial valid proof first — anything that proves cleanly under Blake3_256.
+    let source = "
+        begin
+            push.1 push.2 add drop
+        end
+    ";
+    let program = Assembler::new(Arc::new(DefaultSourceManager::default()))
+        .assemble_program(source)
+        .expect("failed to assemble");
+    let stack_inputs = StackInputs::default();
+    let mut host = DefaultHost::default();
+    let options = ProvingOptions::with_96_bit_security(HashFunction::Blake3_256);
+    let (stack_outputs, mut proof) = prove_sync(
+        &program,
+        stack_inputs.clone(),
+        AdviceInputs::default(),
+        &mut host,
+        ExecutionOptions::default(),
+        options,
+    )
+    .expect("prove failed");
+
+    // Tamper: replace the deferred wire with one containing an entry whose tag has an unknown
+    // app_id. `CoreLibrary::default().precompile_schema()` rejects unknown app_ids inside
+    // `Schema::decode` → rehydrate surfaces `IntegrityError::UnknownTag` →
+    // `VerificationError::DeferredIntegrity`.
+    let bogus_tag = [Felt::new_unchecked(0xdeadbeef), ZERO, ZERO, ZERO];
+    proof.deferred_state = DeferredStateWire {
+        entries: alloc::vec![WireEntry {
+            tag: bogus_tag,
+            body: WireBody::Value(Payload::new([ZERO; 8])),
+        }],
+        root: miden_core::deferred::TRUE_DIGEST,
+    };
+
+    let schema = CoreLibrary::default().precompile_schema();
+    let result = miden_verifier::verify(
+        program.into(),
+        stack_inputs,
+        stack_outputs,
+        &schema,
+        proof,
+    );
+    assert!(
+        matches!(result, Err(VerificationError::DeferredIntegrity(_))),
+        "expected DeferredIntegrity rejection, got {result:?}"
+    );
 }
 
 mod recursive_verifier {
@@ -420,6 +483,7 @@ mod fast_parallel {
 
     use miden_assembly::{Assembler, DefaultSourceManager};
     use miden_core::{Felt, proof::{ExecutionProof, HashFunction}};
+    use miden_core_lib::CoreLibrary;
     use miden_processor::{
         DefaultHost, ExecutionOptions, FastProcessor, StackInputs, advice::AdviceInputs,
         trace::build_trace,
@@ -503,7 +567,8 @@ mod fast_parallel {
             ExecutionProof::new(proof_bytes, HashFunction::Blake3_256, deferred_state.to_wire());
 
         // Verify the proof
-        verify(program.into(), stack_inputs, fast_stack_outputs, proof)
+        let schema = CoreLibrary::default().precompile_schema();
+        verify(program.into(), stack_inputs, fast_stack_outputs, &schema, proof)
             .expect("Verification failed");
     }
 
@@ -530,7 +595,9 @@ mod fast_parallel {
         ))
         .expect("prove_from_trace_sync failed");
 
-        verify(program.into(), stack_inputs, stack_outputs, proof).expect("Verification failed");
+        let schema = CoreLibrary::default().precompile_schema();
+        verify(program.into(), stack_inputs, stack_outputs, &schema, proof)
+            .expect("Verification failed");
     }
 
     // NOTE: precompile-fixture tests (test_prove_from_trace_sync_preserves_precompile_requests,
