@@ -1379,6 +1379,227 @@ fn bn_p() -> BigUint {
     BigUint::from_slice(&secp256k1_base_prime().to_le_u32_limbs())
 }
 
+// VERIFY_PRECOMP PROPTESTS
+// ================================================================================================
+//
+// Each case builds the full 176,128-entry joint comb table off-host (~1s + ~16MB Merkle store)
+// and runs `verify_precomp` through the MASM proc, so cases are deliberately few. The intent
+// is to give random coverage over the bit-buffer + leaf-index path -- the four hand-picked
+// boundary cases above (zero/identity scalars, small combinations, full 256-bit) cover the
+// algebraic edges; this proptest covers everything in between.
+
+/// Strategy that generates a secp256k1 scalar in `[1, n)`. Built from a uniform 32-byte
+/// buffer reduced mod n; zero is clamped to one so the resulting point is never the identity.
+fn arb_scalar_lt_n() -> impl Strategy<Value = BigUint> {
+    any::<[u8; 32]>().prop_map(|bytes| {
+        let n = BigUint::from_slice(&secp256k1_scalar_order().to_le_u32_limbs());
+        (BigUint::from_bytes_be(&bytes) % &n).max(BigUint::from(1u32))
+    })
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(4))]
+
+    #[test]
+    fn k1_verify_precomp_proptest(
+        q_scalar in arb_scalar_lt_n(),
+        u1 in arb_scalar_lt_n(),
+        u2 in arb_scalar_lt_n(),
+    ) {
+        let p = bn_p();
+        let g = AffinePoint::generator();
+        let q = scalar_mul_reference(&g, &q_scalar, &p);
+        let expected_g = scalar_mul_reference(&g, &u1, &p);
+        let expected_q = scalar_mul_reference(&q, &u2, &p);
+        let expected = affine_add(&expected_g, &expected_q, &p);
+        assert_verify_precomp(&q, &u1, &u2, &expected);
+    }
+}
+
+/// Reference scalar multiplication using the off-host affine doubling/addition, used to
+/// generate test vectors. NOT wired through MASM — this is purely for test-vector generation.
+
+// STREAMING-HASH SANITY CHECK
+// ================================================================================================
+
+/// Streaming N felts from the advice stack via `adv_pipe + hperm` must produce the same
+/// digest as off-host `Poseidon2::hash_elements`. Pins the digest-extraction tail used by
+/// `verify_precomp` so a subtle stack-shuffle change (e.g. wrong drop ordering) gets
+/// caught at this layer rather than as an opaque digest mismatch in the full driver.
+#[test]
+fn k1_streaming_hash_sanity_16_felts() {
+    use miden_core::Felt;
+    use miden_core::crypto::hash::Poseidon2;
+
+    let elements: Vec<Felt> = (1u64..=16).map(Felt::new_unchecked).collect();
+    let expected = *Poseidon2::hash_elements(&elements);
+    let expected_u64: [u64; 4] = std::array::from_fn(|i| expected[i].as_canonical_u64());
+
+    let advice: Vec<u64> = elements.iter().map(|f| f.as_canonical_u64()).collect();
+    let source = "
+        use miden::core::crypto::hashes::poseidon2
+
+        begin
+            push.0xE0050000
+            padw padw padw
+            repeat.2
+                adv_pipe exec.poseidon2::permute
+            end
+            # Stack: [R0, R1, C, ptr_end, <16 init zeros>]. Keep R0; drop the rest.
+            swapw dropw      # drop R1
+            swapw dropw      # drop C
+            movup.4 drop     # drop ptr_end (sits below R0 now)
+            swapdw dropw dropw  # drop trailing init zeros to satisfy stack-depth cap
+        end";
+    build_test!(source, &[], &advice).expect_stack(&expected_u64);
+}
+
+// VERIFY_PRECOMP -- joint-comb scalar mult driver
+// ================================================================================================
+
+#[test]
+fn k1_verify_precomp_u1_one_u2_zero() {
+    // R = 1*G + 0*Q = G.
+    let g = AffinePoint::generator();
+    let q = scalar_mul_reference(&g, &BigUint::from(7u32), &bn_p());
+    assert_verify_precomp(&q, &BigUint::from(1u32), &BigUint::zero(), &g);
+}
+
+#[test]
+fn k1_verify_precomp_u1_zero_u2_one() {
+    // R = 0*G + 1*Q = Q.
+    let g = AffinePoint::generator();
+    let q = scalar_mul_reference(&g, &BigUint::from(7u32), &bn_p());
+    assert_verify_precomp(&q, &BigUint::zero(), &BigUint::from(1u32), &q);
+}
+
+#[test]
+fn k1_verify_precomp_small_combination() {
+    // R = 3*G + 5*Q where Q = 7G; so R = 3G + 35G = 38G.
+    let p = bn_p();
+    let g = AffinePoint::generator();
+    let q = scalar_mul_reference(&g, &BigUint::from(7u32), &p);
+    let expected = scalar_mul_reference(&g, &BigUint::from(38u32), &p);
+    assert_verify_precomp(&q, &BigUint::from(3u32), &BigUint::from(5u32), &expected);
+}
+
+#[test]
+fn k1_verify_precomp_full_256_bit_scalars() {
+    let p = bn_p();
+    let n = BigUint::from_slice(&secp256k1_scalar_order().to_le_u32_limbs());
+    let g = AffinePoint::generator();
+    let q = scalar_mul_reference(&g, &BigUint::from(0xdeadbeef_u32), &p);
+    let u1 = BigUint::parse_bytes(
+        b"5e3a1b3a8c00c5d6c0a4afde7f8e0c5b9a2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e",
+        16,
+    )
+    .unwrap()
+        % &n;
+    let u2 = BigUint::parse_bytes(
+        b"7f8e9d0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8e9d0a1b2c3d4e5f6a7b8c",
+        16,
+    )
+    .unwrap()
+        % &n;
+    let expected_g = scalar_mul_reference(&g, &u1, &p);
+    let expected_q = scalar_mul_reference(&q, &u2, &p);
+    let expected = affine_add(&expected_g, &expected_q, &p);
+    assert_verify_precomp(&q, &u1, &u2, &expected);
+}
+
+fn assert_verify_precomp(q: &AffinePoint, u1: &BigUint, u2: &BigUint, expected: &AffinePoint) {
+    use miden_core::{
+        Felt,
+        advice::AdviceInputs,
+        crypto::{hash::Poseidon2, merkle::MerkleStore},
+    };
+    use miden_core_lib::handlers::comb_k1::{
+        AffinePoint as HandlerPoint, FELTS_PER_MERKLE_ENTRY, MERKLE_TREE_DEPTH,
+        build_left_aligned_padded_tree, entries_in_window_order, joint_comb_padded_entries,
+        merkle_leaf_hashes,
+    };
+
+    let n = BigUint::from_slice(&secp256k1_scalar_order().to_le_u32_limbs());
+    assert!(u1 < &n, "u1 must be < n");
+    assert!(u2 < &n, "u2 must be < n");
+
+    // Off-host: build the joint comb table as 24-felt padded entries, hash each entry to
+    // form Merkle leaves, build the depth-18 tree (left-aligned with the 86,016-leaf empty
+    // padding handled via `build_left_aligned_padded_tree`'s precomputed empty subtrees),
+    // and select the per-window entries the verifier will look up (in window order) onto
+    // the advice stack. The Merkle root is passed via the wrapper stack as the trusted
+    // commitment.
+    let g_handler = HandlerPoint {
+        x: AffinePoint::generator().x,
+        y: AffinePoint::generator().y,
+        is_infinity: false,
+    };
+    let q_handler = HandlerPoint {
+        x: q.x.clone(),
+        y: q.y.clone(),
+        is_infinity: q.is_infinity,
+    };
+    let entries = joint_comb_padded_entries(&g_handler, &q_handler);
+    let leaves = merkle_leaf_hashes(&entries);
+    let empty_leaf = Poseidon2::hash_elements(&[Felt::from_u32(0); FELTS_PER_MERKLE_ENTRY]);
+    let (root_word, inner_nodes) =
+        build_left_aligned_padded_tree(&leaves, MERKLE_TREE_DEPTH, empty_leaf);
+    let root: [Felt; 4] = (*root_word).into();
+    let entry_advice = entries_in_window_order(&entries, u1, u2);
+
+    let mut store = MerkleStore::new();
+    store.extend(inner_nodes.into_iter());
+
+    // Stack at wrapper entry (top to deep, 20 felts):
+    //   [u_1 (8), u_2 (8), merkle_root (4), ...]
+    let mut stack: Vec<u64> = Vec::with_capacity(20);
+    stack.extend(bn_to_u32_limbs(u1).iter().map(|&l| l as u64));
+    stack.extend(bn_to_u32_limbs(u2).iter().map(|&l| l as u64));
+    for f in root.iter() {
+        stack.push(f.as_canonical_u64());
+    }
+
+    let source = format!(
+        "
+        use miden::core::math::k1_point
+
+        @locals(48)
+        proc test_wrapper_verify_precomp
+            # Save u_1 (8 felts) to mem[0..8] and u_2 (8 felts) to mem[8..16].
+            loc_storew_le.0  dropw
+            loc_storew_le.4  dropw
+            loc_storew_le.8  dropw
+            loc_storew_le.12 dropw
+
+            # Save merkle_root (4 felts) to mem[16..20].
+            loc_storew_le.16 dropw
+
+            # Stack convention: [out_addr, u_2_addr, u_1_addr, merkle_root_addr, ...].
+            locaddr.16  locaddr.0  locaddr.8  locaddr.20
+            exec.k1_point::verify_precomp
+
+            # Read result at mem[20..40] in reverse address order so X[0..4] ends on top.
+            padw loc_loadw_le.36
+            padw loc_loadw_le.32
+            padw loc_loadw_le.28
+            padw loc_loadw_le.24
+            padw loc_loadw_le.20
+        end
+
+        begin
+            {pushes}
+            exec.test_wrapper_verify_precomp
+            {asserts}
+        end",
+        pushes = push_masm_felt_sequence(&stack),
+        asserts = expected_point_assertions(expected),
+    );
+
+    let mut test = build_test!(&source, &[]);
+    test.advice_inputs = AdviceInputs::default().with_stack(entry_advice).with_merkle_store(store);
+    test.execute().unwrap();
+}
+
 // CYCLE BENCHMARKS
 // ================================================================================================
 

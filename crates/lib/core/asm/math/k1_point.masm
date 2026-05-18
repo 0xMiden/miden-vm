@@ -1,3 +1,4 @@
+use miden::core::crypto::hashes::poseidon2
 use miden::core::math::f_k1
 use miden::core::math::k1_scalar
 
@@ -1183,4 +1184,189 @@ pub proc verify_glv_hinted
     loc_load.97                                          # sign_b_u1
     loc_load.96                                          # sign_a_u1
     exec.msm_4_128_glv_k1
+end
+
+# ===== PRECOMP-COMB VERIFY ======================================================================
+
+#! Computes `R = [u_1] * G + [u_2] * Q` against a Merkle-committed joint comb table for
+#! `(G, Q)` at width `w = 6`. The host populates the Merkle store and pre-pushes the 43
+#! entries (in window order, 24 felts per entry = 1,032 felts total) onto the advice stack.
+#!
+#! Per window the driver pulls one entry into a local scratch slot, hashes it, runs
+#! `mtree_verify` against the Merkle root, and adds the entry to the running accumulator
+#! via `point_add`. `ceil(256 / 6) = 43` windows, one `point_add` per window; no
+#! `point_double`.
+#!
+#! Per-window 6-bit extraction via a per-scalar bit buffer. At each window position: if
+#! the buffer holds fewer than 6 bits, refill from the next u32 limb of the scalar; then
+#! peel the low 6 bits via `u32split + u32divmod.64`.
+#!
+#! The 43rd (final) window covers bits 252..258, past the end of a 256-bit scalar. When
+#! the next-limb index reaches 8 (all 8 u32 limbs consumed), the refill substitutes a
+#! synthetic zero limb. This is sound: canonical scalars are `< 2^256`, so bits at or
+#! above bit 256 are zero.
+#!
+#! Caller responsibility:
+#! - The advice stack must hold the 1,032-felt sequence `entries_in_window_order(table,
+#!   u_1, u_2)` at entry. Typical setup: host pre-computes the 43 windows from `(u_1, u_2)`
+#!   and pushes the corresponding entries onto the advice stack via
+#!   `AdviceInputs::with_stack`.
+#! - `merkle_root_addr` must point at the 4-felt root, and that root must already be bound to
+#!   `Q` via an outer commitment (e.g., the augmented-PK design used by
+#!   `ecdsa_k256_keccak::verify_prehash_native_precomp`).
+#! - The host's Merkle store must contain the depth-18 tree whose root matches
+#!   `merkle_root_addr`.
+#!
+#! Trap profile: this proc is NOT no-trap.
+#!   1. `mtree_verify` traps when the host-pushed entry doesn't hash to the leaf at the
+#!      computed index under the given root -- i.e., when the host-pushed entries don't
+#!      match the committed tree. An honest host always satisfies this; avoiding the trap
+#!      would require a Poseidon2 second-preimage on the committed leaf (the honest entry
+#!      that hashes to that leaf is fixed by the published `merkle_root`, so the attacker
+#!      must find a different 24-felt entry that hashes to the same value).
+#!   2. `point_add` traps on entries with non-canonical X/Y limbs (`f_k1::mul` rejects
+#!      quotient overflow). Same second-preimage argument applies (the malformed entry
+#!      would have to hash to the same value as the honest one).
+#!   3. `adv_pipe` traps if fewer than 1,032 felts are queued on the advice stack.
+#! A no-trap wrapper (one that returns 0 instead of trapping on bad operand-stack inputs)
+#! must validate those inputs first and only call this when validation passes. See
+#! `verify_prehash_native_precomp` for the canonical pattern: it multiplicatively ANDs
+#! per-input validity flags and gates `exec.verify_precomp` on the combined flag.
+#!
+#! Stack transition:
+#!   [out_addr, u_2_addr, u_1_addr, merkle_root_addr, ...]  ->  [...]
+#!
+#! Local memory layout (mem[0..40]):
+#!   0..4   : merkle_root cache (4 felts, word-aligned)
+#!   4      : out_addr cache (caller-supplied accum address)
+#!   5      : u_1_addr cache
+#!   6      : u_2_addr cache
+#!   7      : block counter (0..43)
+#!   8      : u_1 buffer (pending low-order bits of u_1; bounded above by 2^37)
+#!   9      : u_1 bits-in-buffer (number of valid bits remaining in slot 8)
+#!   10     : u_1 next-limb index (next u32 limb of u_1 to load; in 0..9)
+#!   11     : u_2 buffer
+#!   12     : u_2 bits-in-buffer
+#!   13     : u_2 next-limb index
+#!   16..40 : entry scratch (24 felts, word-aligned at 16; first 20 are the point payload
+#!            consumed by point_add, last 4 are zero pad to align the hash input to 24 felts)
+@locals(40)
+pub proc verify_precomp
+    # Stack: [out_addr, u_2_addr, u_1_addr, merkle_root_addr, ...]
+    loc_store.4                                           # cache out_addr
+    loc_store.6                                           # cache u_2_addr
+    loc_store.5                                           # cache u_1_addr
+    # Stack: [merkle_root_addr, ...]
+
+    # Cache merkle_root into local mem[0..4].
+    padw  movup.4  mem_loadw_le  loc_storew_le.0  dropw
+
+    # accum = identity (X=0, Y=0, is_infinity=1, pad=0) at caller's out_addr.
+    padw
+    loc_load.4               mem_storew_le    # X[0..4] = 0
+    loc_load.4  add.4        mem_storew_le    # X[4..8] = 0
+    loc_load.4  add.8        mem_storew_le    # Y[0..4] = 0
+    loc_load.4  add.12       mem_storew_le    # Y[4..8] = 0
+    dropw
+    push.0.0.0.1  loc_load.4  add.16       mem_storew_le  dropw    # is_infinity = 1, pad = 0
+
+    # Prime per-scalar bit buffers from limb 0 (slot meanings: see locals layout above).
+    loc_load.5  mem_load    loc_store.8       # u_1 buffer = u_1[0]
+    push.32                 loc_store.9       # 32 valid bits
+    push.1                  loc_store.10      # next limb to load is u_1[1]
+    loc_load.6  mem_load    loc_store.11      # u_2 buffer = u_2[0]
+    push.32                 loc_store.12
+    push.1                  loc_store.13
+
+    push.0  loc_store.7                       # block counter = 0
+
+    repeat.43
+        # ----- Refill u_1 buffer if it holds fewer than 6 bits -----
+        loc_load.9  u32lt.6
+        if.true
+            # next_val = u_1[next_limb_idx] if next_limb_idx < 8 else 0 (synthetic zero
+            # for windows past the high end of a 256-bit scalar).
+            loc_load.10  u32lt.8
+            if.true
+                loc_load.5  loc_load.10  add  mem_load   # [u_1[next_idx], ...]
+            else
+                push.0                                    # [0, ...]
+            end
+            # Stack: [next_val, ...]
+            # buffer += next_val * 2^bits_in_buf  (shift next_val into the empty high bits).
+            loc_load.9  pow2  mul                         # [next_val << bits, ...]
+            loc_load.8  add  loc_store.8                  # buffer += that
+
+            loc_load.9   add.32  loc_store.9              # bits += 32
+            loc_load.10  add.1   loc_store.10             # next_limb_idx += 1
+        end
+
+        # ----- Refill u_2 buffer (mirror of u_1) -----
+        loc_load.12  u32lt.6
+        if.true
+            loc_load.13  u32lt.8
+            if.true
+                loc_load.6  loc_load.13  add  mem_load    # [u_2[next_idx], ...]
+            else
+                push.0                                     # [0, ...]
+            end
+            # Stack: [next_val, ...]
+
+            loc_load.12  pow2  mul                         # [next_val << bits, ...]
+            loc_load.11  add  loc_store.11                 # buffer += that
+
+            loc_load.12  add.32  loc_store.12              # bits += 32
+            loc_load.13  add.1   loc_store.13              # next_limb_idx += 1
+        end
+
+        # ----- Peel b_bits then a_bits (low 6 bits of each buffer); shift each right by 6 -----
+        # u32split + u32divmod.64 produces [bits, lo32 >> 6, hi32, ...]; new buffer is
+        # `(lo32 >> 6) + hi32 * 2^26`.
+        loc_load.11  u32split  u32divmod.64
+        movdn.2  swap  mul.0x4000000  add  loc_store.11
+        loc_load.12  sub.6  loc_store.12
+        # Stack: [b_bits, ...]
+
+        loc_load.8  u32split  u32divmod.64
+        movdn.2  swap  mul.0x4000000  add  loc_store.8
+        loc_load.9  sub.6  loc_store.9
+        # Stack: [a_bits, b_bits, ...]
+
+        # ----- leaf_idx = block * 4096 + a_bits * 64 + b_bits -----
+        mul.64  add                           # [a_bits * 64 + b_bits, ...]
+        loc_load.7  mul.4096  add             # [leaf_idx, ...]
+
+        # Stage [d=18, leaf_idx, R(4), ...] in the order `mtree_verify` expects.
+        padw  loc_loadw_le.0                  # [R, leaf_idx, ...]
+        movup.4                               # [leaf_idx, R, ...]
+        push.18                               # [d=18, leaf_idx, R, ...]
+
+        # Stream-hash the 24-felt entry from advice into mem[16..40]; final R0 is the
+        # entry digest V.
+        locaddr.16                            # [ptr, d, leaf_idx, R, ...]
+        padw padw padw                        # [pads(12), ptr, d, leaf_idx, R, ...]
+        repeat.3
+            adv_pipe exec.poseidon2::permute
+        end
+        # Stack: [R0', R1', C', ptr+24, d, leaf_idx, R, ...]; R0' = V.
+
+        # Extract V = R0' and drop the trailing ptr+24.
+        exec.poseidon2::squeeze_digest    # [V, ptr+24, d, leaf_idx, R, ...]
+        movup.4 drop                      # [V, d, leaf_idx, R, ...]
+
+        # Stack: [V, d, leaf_idx, R, ...]
+        mtree_verify.err="merkle leaf mismatch"
+
+        # Drop V (4), d (1), leaf_idx (1), R (4).
+        dropw  drop  drop  dropw
+
+        # accum = accum + entry. point_add reuses out_addr as p1_addr (in-place write
+        # works because point_add caches inputs to its own local mem before writing out).
+        locaddr.16                            # p2_addr = scratch entry
+        loc_load.4                            # p1_addr = caller's accum
+        loc_load.4                            # out_addr = caller's accum
+        exec.point_add
+
+        loc_load.7  add.1  loc_store.7        # block += 1
+    end
 end

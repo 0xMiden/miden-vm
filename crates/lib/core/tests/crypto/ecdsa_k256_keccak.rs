@@ -1024,3 +1024,684 @@ fn parse_compressed_pk_invalid_prefix_yields_zero_flag() {
     let source = parse_compressed_pk_source(0x66be7904, asserts);
     build_test!(&source, &[]).execute().unwrap();
 }
+
+// VERIFY_PREHASH_NATIVE_PRECOMP -- Merkle-committed comb-table verifier
+// ================================================================================================
+
+/// Decompress a 33-byte SEC1 compressed secp256k1 public key into its affine `(x, y)` BigUint
+/// coordinates. Uses `y = (x^3 + 7)^((p+1)/4) mod p`, valid because `p == 3 (mod 4)`.
+fn decompress_pk_to_xy(pk_bytes: &[u8]) -> (num::BigUint, num::BigUint) {
+    use num::BigUint;
+    assert_eq!(pk_bytes.len(), 33, "compressed pk must be 33 bytes");
+    let prefix = pk_bytes[0];
+    assert!(prefix == 0x02 || prefix == 0x03, "compressed pk prefix must be 0x02 or 0x03");
+
+    let p = BigUint::from_slice(&SECP_P_LIMBS);
+    let x = BigUint::from_bytes_be(&pk_bytes[1..33]);
+    let rhs = (x.modpow(&BigUint::from(3u32), &p) + BigUint::from(7u32)) % &p;
+    let exp = (&p + BigUint::from(1u32)) / BigUint::from(4u32);
+    let y_candidate = rhs.modpow(&exp, &p);
+
+    let want_odd = prefix == 0x03;
+    let candidate_odd = (&y_candidate % BigUint::from(2u32)) == BigUint::from(1u32);
+    let y = if want_odd == candidate_odd {
+        y_candidate
+    } else {
+        &p - y_candidate
+    };
+    (x, y)
+}
+
+/// Witness bundle for `verify_prehash_native_precomp` under the Merkle-committed table
+/// design. Holds:
+///   - `pk_aug`: 4-felt augmented public-key commitment (the trusted on-chain value).
+///   - `pk_aug_value`: 16-felt advice-map value at key `pk_aug`, defined as
+///     `compressed_PK_9 || zeros_3 || merkle_root_4`.
+///   - `entries`: 176,128-entry joint comb table as 24-felt padded entries.
+///   - `merkle_inner_nodes`: the minimal set of inner-node triples needed to populate the
+///     verifier's `MerkleStore`. Produced by `build_left_aligned_padded_tree`, which skips
+///     the all-empty subtrees in the right-side padding. The tree's root matches the
+///     `merkle_root_4` portion of `pk_aug_value`.
+///   - `u_1`, `u_2`: ECDSA scalars derived from `(digest, sig)`; the host needs them to
+///     pre-push the per-window entries the verifier will look up, in window order.
+struct PrecompWitness {
+    pk_aug: [Felt; 4],
+    pk_aug_value: Vec<Felt>,
+    entries: Vec<Felt>,
+    merkle_inner_nodes: Vec<miden_core::crypto::merkle::InnerNodeInfo>,
+    u_1: num::BigUint,
+    u_2: num::BigUint,
+}
+
+/// Compute `pk_aug` (= `Poseidon2::hash_elements(compressed_PK || zeros || merkle_root)`),
+/// the joint comb table as 24-felt padded entries, the Merkle tree over the per-entry
+/// hashes, and the scalars `(u_1, u_2)` the verifier will derive from this signature.
+fn precomp_witness(request: &EcdsaRequest) -> PrecompWitness {
+    use miden_core::crypto::hash::Poseidon2;
+    use miden_core_lib::handlers::comb_k1::{
+        AffinePoint, FELTS_PER_MERKLE_ENTRY, MERKLE_TREE_DEPTH, build_left_aligned_padded_tree,
+        joint_comb_padded_entries, merkle_leaf_hashes,
+    };
+    use num::BigUint;
+
+    let pk_bytes = request.pk().to_bytes();
+    let (q_x, q_y) = decompress_pk_to_xy(&pk_bytes);
+    let g = AffinePoint {
+        x: BigUint::from_slice(&SECP_GX_LIMBS),
+        y: BigUint::from_slice(&SECP_GY_LIMBS),
+        is_infinity: false,
+    };
+    let q = AffinePoint { x: q_x, y: q_y, is_infinity: false };
+    let entries = joint_comb_padded_entries(&g, &q);
+    let leaves = merkle_leaf_hashes(&entries);
+    // Build the depth-18 tree without redundantly hashing the 86,016-leaf empty padding:
+    // `build_left_aligned_padded_tree` reuses the per-height empty-subtree digest (built by
+    // self-merging `Poseidon2([0; 24])`) for the all-empty right side.
+    let empty_leaf = Poseidon2::hash_elements(&[Felt::ZERO; FELTS_PER_MERKLE_ENTRY]);
+    let (root_word, merkle_inner_nodes) =
+        build_left_aligned_padded_tree(&leaves, MERKLE_TREE_DEPTH, empty_leaf);
+    let merkle_root: [Felt; 4] = (*root_word).into();
+
+    let pk_felts = bytes_to_packed_u32_elements(&pk_bytes);
+    assert_eq!(pk_felts.len(), 9);
+    let mut pk_aug_value: Vec<Felt> = Vec::with_capacity(16);
+    pk_aug_value.extend_from_slice(&pk_felts);
+    pk_aug_value.extend([Felt::ZERO, Felt::ZERO, Felt::ZERO]);
+    pk_aug_value.extend_from_slice(&merkle_root);
+    let pk_aug: [Felt; 4] = (*Poseidon2::hash_elements(&pk_aug_value)).into();
+
+    let (u_1, u_2) = derive_u1_u2(request);
+    PrecompWitness {
+        pk_aug,
+        pk_aug_value,
+        entries,
+        merkle_inner_nodes,
+        u_1,
+        u_2,
+    }
+}
+
+/// Off-host derivation of `(u_1, u_2)` from the signed request, mirroring the on-VM
+/// computation in `ecdsa_k256_keccak::verify_prehash_native_precomp`:
+///     e      = digest mod n
+///     s_inv  = s^-1 mod n
+///     u_1    = e * s_inv mod n
+///     u_2    = r * s_inv mod n
+fn derive_u1_u2(request: &EcdsaRequest) -> (num::BigUint, num::BigUint) {
+    use num::BigUint;
+    let n = BigUint::from_slice(&secp256k1_scalar_order());
+    let r = BigUint::from_bytes_be(request.sig().r());
+    let s = BigUint::from_bytes_be(request.sig().s());
+    let e = BigUint::from_bytes_be(request.digest()) % &n;
+    let s_inv = s.modpow(&(&n - 2u32), &n);
+    let u_1 = (&e * &s_inv) % &n;
+    let u_2 = (&r * &s_inv) % &n;
+    (u_1, u_2)
+}
+
+/// Local copy of the secp256k1 scalar order as 8 u32 LE limbs (low to high). Mirrors the
+/// `_push_n_k1` constant in the MASM-side ECDSA proc.
+fn secp256k1_scalar_order() -> [u32; 8] {
+    [
+        0xD036_4141,
+        0xBFD2_5E8C,
+        0xAF48_A03B,
+        0xBAAE_DCE6,
+        0xFFFF_FFFE,
+        0xFFFF_FFFF,
+        0xFFFF_FFFF,
+        0xFFFF_FFFF,
+    ]
+}
+
+/// Build a populated `AdviceInputs` for the precomp-path tests: inserts the `pk_aug ->
+/// [compressed_PK || zeros || merkle_root]` advice-map entry, the 43 padded entries the
+/// verifier will look up (in window order) onto the advice stack, and the Merkle tree into
+/// the `MerkleStore`.
+fn precomp_advice_inputs(witness: &PrecompWitness) -> miden_core::advice::AdviceInputs {
+    use miden_core::{Word, advice::AdviceInputs, crypto::merkle::MerkleStore};
+    use miden_core_lib::handlers::comb_k1::entries_in_window_order;
+
+    let entry_advice = entries_in_window_order(&witness.entries, &witness.u_1, &witness.u_2);
+    let mut store = MerkleStore::new();
+    store.extend(witness.merkle_inner_nodes.iter().cloned());
+
+    AdviceInputs::default()
+        .with_map([(Word::new(witness.pk_aug), witness.pk_aug_value.clone())])
+        .with_stack(entry_advice)
+        .with_merkle_store(store)
+}
+
+/// Render the MASM literal that pushes a 4-felt word so it lands on the operand stack with
+/// `word[0]` on top.
+fn push_word_inline(word: &[Felt; 4]) -> String {
+    format!(
+        "push.{}.{}.{}.{}",
+        word[3].as_canonical_u64(),
+        word[2].as_canonical_u64(),
+        word[1].as_canonical_u64(),
+        word[0].as_canonical_u64(),
+    )
+}
+
+// PRECOMP-PATH HAPPY PATH
+// ================================================================================================
+
+/// Baseline acceptance: an unmodified honest witness produced by `precomp_witness` must
+/// verify to 1. The trust-boundary positive test (`_accepts_self_consistent_wrong_root`)
+/// covers a deliberately-decoupled `(compressed_PK, merkle_root)` pair, so this is the
+/// only non-ignored test that pins the "everything consistent" happy path.
+#[test]
+fn ecdsa_verify_prehash_native_precomp_valid_signature_returns_one() {
+    let request = generate_valid_signature();
+    let memory_stores = generate_memory_store_masm(&request);
+    let witness = precomp_witness(&request);
+    let pk_aug_push = push_word_inline(&witness.pk_aug);
+
+    let source = format!(
+        "
+            use miden::core::crypto::dsa::ecdsa_k256_keccak
+            use miden::core::sys
+
+            begin
+                {memory_stores}
+
+                push.{SIG_ADDR}.{DIGEST_ADDR}  {pk_aug_push}
+                exec.ecdsa_k256_keccak::verify_prehash_native_precomp
+                exec.sys::truncate_stack
+            end
+        ",
+    );
+
+    let mut test = build_debug_test!(&source, &[]);
+    test.advice_inputs = precomp_advice_inputs(&witness);
+    let (output, _) = test.execute_for_output().unwrap();
+    let result = output.stack.get_element(0).unwrap();
+    assert_eq!(result, Felt::ONE, "honest precomp witness must verify to 1 (got {:?})", result);
+}
+
+// PRECOMP-PATH CYCLES BENCHMARK
+// ================================================================================================
+
+#[test]
+#[ignore = "benchmark; run with --ignored to print cycle count"]
+fn ecdsa_verify_prehash_native_precomp_cycles() {
+    use miden_processor::ContextId;
+
+    let request = generate_valid_signature();
+    let memory_stores = generate_memory_store_masm(&request);
+    let witness = precomp_witness(&request);
+    let pk_aug_push = push_word_inline(&witness.pk_aug);
+
+    let source = format!(
+        "
+            use miden::core::crypto::dsa::ecdsa_k256_keccak
+            use miden::core::sys
+
+            begin
+                {memory_stores}
+
+                clk
+                push.{SIG_ADDR}.{DIGEST_ADDR}  {pk_aug_push}
+                exec.ecdsa_k256_keccak::verify_prehash_native_precomp
+                # => [result, t0, ...]
+                clk                                          # [t1, result, t0, ...]
+                movup.2 sub                                  # [t1 - t0, result, ...]
+                push.5000 mem_store                          # mem[5000] = cycle delta
+                push.5001 mem_store                          # mem[5001] = result
+                exec.sys::truncate_stack
+            end
+        ",
+    );
+
+    let mut test = build_debug_test!(&source, &[]);
+    test.advice_inputs = precomp_advice_inputs(&witness);
+    let (output, _) = test.execute_for_output().unwrap();
+    let cycles = output
+        .memory
+        .read_element(ContextId::root(), Felt::from_u32(5000))
+        .unwrap()
+        .as_canonical_u64();
+    let result = output
+        .memory
+        .read_element(ContextId::root(), Felt::from_u32(5001))
+        .unwrap()
+        .as_canonical_u64();
+    assert_eq!(result, 1, "verify_prehash_native_precomp should accept the valid signature");
+    eprintln!("verify_prehash_native_precomp cycles (valid sig): {cycles}");
+}
+
+#[test]
+#[ignore = "benchmark; run with --ignored to print trace lengths"]
+fn ecdsa_verify_prehash_native_precomp_trace_lengths() {
+    let request = generate_valid_signature();
+    let memory_stores = generate_memory_store_masm(&request);
+    let witness = precomp_witness(&request);
+    let pk_aug_push = push_word_inline(&witness.pk_aug);
+
+    let source = format!(
+        "
+            use miden::core::crypto::dsa::ecdsa_k256_keccak
+            use miden::core::sys
+
+            begin
+                {memory_stores}
+                push.{SIG_ADDR}.{DIGEST_ADDR}  {pk_aug_push}
+                exec.ecdsa_k256_keccak::verify_prehash_native_precomp
+                exec.sys::truncate_stack
+            end
+        ",
+    );
+
+    let mut test = build_debug_test!(&source, &[]);
+    test.advice_inputs = precomp_advice_inputs(&witness);
+    let trace = test.execute().unwrap();
+    let summary = trace.trace_len_summary();
+    let chiplets = summary.chiplets_trace_len();
+
+    eprintln!("verify_prehash_native_precomp trace lengths (valid sig):");
+    eprintln!("  main trace          : {}", summary.main_trace_len());
+    eprintln!("  range checker trace : {}", summary.range_trace_len());
+    eprintln!("  chiplets trace total: {}", chiplets.trace_len());
+    eprintln!("    hash chiplet      : {}", chiplets.hash_chiplet_len());
+    eprintln!("    bitwise chiplet   : {}", chiplets.bitwise_chiplet_len());
+    eprintln!("    memory chiplet    : {}", chiplets.memory_chiplet_len());
+    eprintln!("    ACE chiplet       : {}", chiplets.ace_chiplet_len());
+    eprintln!("    kernel ROM        : {}", chiplets.kernel_rom_len());
+    eprintln!("  max(main, range, chiplets): {}", summary.trace_len());
+    eprintln!("  padded (next power of 2)  : {}", summary.padded_trace_len());
+    eprintln!("  padding                   : {}%", summary.padding_percentage());
+}
+
+// PRECOMP-PATH SOUNDNESS REGRESSIONS
+// ================================================================================================
+
+/// A tampered `pk_aug` -- one that doesn't match the honest `Poseidon2(compressed_PK ||
+/// zeros || h_T)` -- must cause verification to return 0 without trapping. The advice-map
+/// entries are honest; the caller-supplied commitment is not. This exercises the gating
+/// that closes the augmented-PK soundness gap.
+#[test]
+fn ecdsa_verify_prehash_native_precomp_rejects_tampered_pk_aug() {
+    let request = generate_valid_signature();
+    let memory_stores = generate_memory_store_masm(&request);
+    let witness = precomp_witness(&request);
+
+    let mut pk_aug_tampered = witness.pk_aug;
+    pk_aug_tampered[0] = Felt::new_unchecked(witness.pk_aug[0].as_canonical_u64() ^ 1);
+    let pk_aug_push = push_word_inline(&pk_aug_tampered);
+
+    let source = format!(
+        "
+            use miden::core::crypto::dsa::ecdsa_k256_keccak
+            use miden::core::sys
+
+            begin
+                {memory_stores}
+
+                push.{SIG_ADDR}.{DIGEST_ADDR}  {pk_aug_push}
+                exec.ecdsa_k256_keccak::verify_prehash_native_precomp
+                exec.sys::truncate_stack
+            end
+        ",
+    );
+
+    let mut test = build_debug_test!(&source, &[]);
+    test.advice_inputs = precomp_advice_inputs(&witness);
+    let (output, _) = test.execute_for_output().unwrap();
+    let result = output.stack.get_element(0).unwrap();
+    assert_eq!(result, Felt::ZERO, "tampered pk_aug must be rejected (returned {:?})", result);
+}
+
+/// A host that publishes a tampered `pk_aug` advice-map entry (one whose stored values
+/// don't hash to the caller-supplied `pk_aug`) must cause verification to return 0
+/// without trapping. Same gating as the previous test, but the inconsistency is on the
+/// witness side rather than on the public-input side.
+#[test]
+fn ecdsa_verify_prehash_native_precomp_rejects_tampered_advice_witness() {
+    let request = generate_valid_signature();
+    let memory_stores = generate_memory_store_masm(&request);
+    let mut witness = precomp_witness(&request);
+
+    // Flip one bit in compressed_PK in the advice-map value. The caller still supplies the
+    // honest pk_aug, so the on-VM hash check catches the mismatch.
+    witness.pk_aug_value[0] = Felt::new_unchecked(witness.pk_aug_value[0].as_canonical_u64() ^ 1);
+    let pk_aug_push = push_word_inline(&witness.pk_aug);
+
+    let source = format!(
+        "
+            use miden::core::crypto::dsa::ecdsa_k256_keccak
+            use miden::core::sys
+
+            begin
+                {memory_stores}
+
+                push.{SIG_ADDR}.{DIGEST_ADDR}  {pk_aug_push}
+                exec.ecdsa_k256_keccak::verify_prehash_native_precomp
+                exec.sys::truncate_stack
+            end
+        ",
+    );
+
+    let mut test = build_debug_test!(&source, &[]);
+    test.advice_inputs = precomp_advice_inputs(&witness);
+    let (output, _) = test.execute_for_output().unwrap();
+    let result = output.stack.get_element(0).unwrap();
+    assert_eq!(
+        result,
+        Felt::ZERO,
+        "tampered advice witness must be rejected (returned {:?})",
+        result
+    );
+}
+
+/// A witness whose 3 pad felts in the augmented-PK preimage are non-zero must be
+/// rejected, even when the hash binding is internally consistent (i.e. `pk_aug` is
+/// recomputed from the tampered preimage). This pins the proc's contract to the literal
+/// shape `compressed_PK_9 || 0,0,0 || merkle_root_4` rather than "any 16-felt preimage
+/// that hashes to pk_aug".
+#[test]
+fn ecdsa_verify_prehash_native_precomp_rejects_nonzero_preimage_pad() {
+    use miden_core::crypto::hash::Poseidon2;
+
+    let request = generate_valid_signature();
+    let memory_stores = generate_memory_store_masm(&request);
+    let mut witness = precomp_witness(&request);
+
+    // Flip one pad felt; recompute pk_aug from the modified preimage so the hash binding
+    // check still passes. Only the new pad-zero check should reject this.
+    witness.pk_aug_value[9] = Felt::ONE;
+    witness.pk_aug = (*Poseidon2::hash_elements(&witness.pk_aug_value)).into();
+    let pk_aug_push = push_word_inline(&witness.pk_aug);
+
+    let source = format!(
+        "
+            use miden::core::crypto::dsa::ecdsa_k256_keccak
+            use miden::core::sys
+
+            begin
+                {memory_stores}
+
+                push.{SIG_ADDR}.{DIGEST_ADDR}  {pk_aug_push}
+                exec.ecdsa_k256_keccak::verify_prehash_native_precomp
+                exec.sys::truncate_stack
+            end
+        ",
+    );
+
+    let mut test = build_debug_test!(&source, &[]);
+    test.advice_inputs = precomp_advice_inputs(&witness);
+    let (output, _) = test.execute_for_output().unwrap();
+    let result = output.stack.get_element(0).unwrap();
+    assert_eq!(
+        result,
+        Felt::ZERO,
+        "non-zero preimage pad must be rejected (returned {:?})",
+        result
+    );
+}
+
+/// A host that pushes a Merkle-inconsistent entry onto the advice stack must cause
+/// `mtree_verify` inside `verify_precomp` to trap. (Unlike `pk_aug` mismatch, an
+/// individual entry mismatch is not no-trap: catching it would require either an extra
+/// non-trapping path verifier or a Poseidon2 second-preimage on the committed leaf to
+/// evade. The augmented-PK commitment ensures this trap is not reachable by caller-
+/// controlled inputs alone -- only by a malicious or buggy host.)
+#[test]
+fn ecdsa_verify_prehash_native_precomp_traps_on_tampered_merkle_entry() {
+    use miden_core::{Word, advice::AdviceInputs, crypto::merkle::MerkleStore};
+    use miden_core_lib::handlers::comb_k1::entries_in_window_order;
+
+    let request = generate_valid_signature();
+    let memory_stores = generate_memory_store_masm(&request);
+    let witness = precomp_witness(&request);
+    let pk_aug_push = push_word_inline(&witness.pk_aug);
+
+    // Build the honest entry advice, then flip one bit in the very first felt of the
+    // first window's entry. `mtree_verify` at window 0 will see a hash that doesn't
+    // match the leaf at that window's `(u_1, u_2)`-derived index under the bound root.
+    let mut entry_advice = entries_in_window_order(&witness.entries, &witness.u_1, &witness.u_2);
+    let original = entry_advice[0].as_canonical_u64();
+    entry_advice[0] = Felt::new_unchecked(original ^ 1);
+
+    let mut store = MerkleStore::new();
+    store.extend(witness.merkle_inner_nodes.iter().cloned());
+    let advice = AdviceInputs::default()
+        .with_map([(Word::new(witness.pk_aug), witness.pk_aug_value.clone())])
+        .with_stack(entry_advice)
+        .with_merkle_store(store);
+
+    let source = format!(
+        "
+            use miden::core::crypto::dsa::ecdsa_k256_keccak
+            use miden::core::sys
+
+            begin
+                {memory_stores}
+
+                push.{SIG_ADDR}.{DIGEST_ADDR}  {pk_aug_push}
+                exec.ecdsa_k256_keccak::verify_prehash_native_precomp
+                exec.sys::truncate_stack
+            end
+        ",
+    );
+
+    let mut test = build_debug_test!(&source, &[]);
+    test.advice_inputs = advice;
+    let result = test.execute_for_output();
+    assert!(
+        result.is_err(),
+        "tampered merkle entry must trap; got Ok with stack {:?}",
+        result.ok().map(|(o, _)| o.stack.get_element(0)),
+    );
+}
+
+/// Mirror of `ecdsa_verify_prehash_native_invalid_v_returns_zero` for the precomp path.
+/// The `_parse_sig`-derived validity flag must be ANDed into the running flag so a
+/// malformed `v` byte rejects even when the ECDSA equation passes.
+#[test]
+fn ecdsa_verify_prehash_native_precomp_invalid_v_returns_zero() {
+    // `pk_aug` is computed from (compressed_PK, root) only; the sig has no effect on the
+    // witness. Build witness from the honest request and store tampered sig bytes to
+    // memory, the same shape as the native-path counterpart.
+    let request = generate_valid_signature();
+    let mut sig_bytes = request.sig().to_bytes();
+    sig_bytes[64] = 0x1B;
+    let memory_stores =
+        generate_memory_store_masm_raw(&request.pk().to_bytes(), request.digest(), &sig_bytes);
+    let witness = precomp_witness(&request);
+    let pk_aug_push = push_word_inline(&witness.pk_aug);
+
+    let source = format!(
+        "
+            use miden::core::crypto::dsa::ecdsa_k256_keccak
+            use miden::core::sys
+
+            begin
+                {memory_stores}
+
+                push.{SIG_ADDR}.{DIGEST_ADDR}  {pk_aug_push}
+                exec.ecdsa_k256_keccak::verify_prehash_native_precomp
+                exec.sys::truncate_stack
+            end
+        ",
+    );
+
+    let mut test = build_debug_test!(&source, &[]);
+    test.advice_inputs = precomp_advice_inputs(&witness);
+    let (output, _) = test.execute_for_output().unwrap();
+    let result = output.stack.get_element(0).unwrap();
+    assert_eq!(result, Felt::ZERO, "invalid v must be rejected (returned {:?})", result);
+}
+
+/// Mirror of `ecdsa_verify_prehash_native_nonzero_sig_padding_returns_zero` for the
+/// precomp path. The `_parse_sig` validity flag covers padding bytes too; without the
+/// gating fix the malformed felt could still produce a `1` result.
+#[test]
+fn ecdsa_verify_prehash_native_precomp_nonzero_sig_padding_returns_zero() {
+    let request = generate_valid_signature();
+    let pk_words = bytes_to_packed_u32_elements(&request.pk().to_bytes());
+    let digest_words = bytes_to_packed_u32_elements(request.digest());
+    let mut sig_words = bytes_to_packed_u32_elements(&request.sig().to_bytes());
+    // v = 0 (low byte) but byte 3 nonzero. sig[16] = 0x01000000 = 16,777,216 > 4, fails.
+    sig_words[16] = Felt::new_unchecked(0x0100_0000);
+
+    let memory_stores = [
+        masm_store_felts(&pk_words, PK_ADDR),
+        masm_store_felts(&digest_words, DIGEST_ADDR),
+        masm_store_felts(&sig_words, SIG_ADDR),
+    ]
+    .join(" ");
+
+    let witness = precomp_witness(&request);
+    let pk_aug_push = push_word_inline(&witness.pk_aug);
+
+    let source = format!(
+        "
+            use miden::core::crypto::dsa::ecdsa_k256_keccak
+            use miden::core::sys
+
+            begin
+                {memory_stores}
+
+                push.{SIG_ADDR}.{DIGEST_ADDR}  {pk_aug_push}
+                exec.ecdsa_k256_keccak::verify_prehash_native_precomp
+                exec.sys::truncate_stack
+            end
+        ",
+    );
+
+    let mut test = build_debug_test!(&source, &[]);
+    test.advice_inputs = precomp_advice_inputs(&witness);
+    let (output, _) = test.execute_for_output().unwrap();
+    let result = output.stack.get_element(0).unwrap();
+    assert_eq!(
+        result,
+        Felt::ZERO,
+        "nonzero sig padding must be rejected (returned {:?})",
+        result
+    );
+}
+
+/// Helper used by the invalid-v test: same shape as `generate_memory_store_masm` but
+/// takes raw bytes (not an `EcdsaRequest`) so we can store a sig that wouldn't survive
+/// `Signature::read_from_bytes`.
+fn generate_memory_store_masm_raw(pk_bytes: &[u8], digest: &[u8], sig_bytes: &[u8]) -> String {
+    let pk_words = bytes_to_packed_u32_elements(pk_bytes);
+    let digest_words = bytes_to_packed_u32_elements(digest);
+    let sig_words = bytes_to_packed_u32_elements(sig_bytes);
+
+    [
+        masm_store_felts(&pk_words, PK_ADDR),
+        masm_store_felts(&digest_words, DIGEST_ADDR),
+        masm_store_felts(&sig_words, SIG_ADDR),
+    ]
+    .join(" ")
+}
+
+/// Documents the trust boundary of `verify_prehash_native_precomp`.
+///
+/// The proc binds `pk_aug` to `(compressed_PK, merkle_root)` via the augmented-PK hash check
+/// but does NOT prove that `merkle_root` was built for `decompress(compressed_PK)`. A caller
+/// that controls `pk_aug` can publish a self-consistent commitment whose root is for a
+/// different public key Q' than the one the caller claims is the signer. In that case the
+/// proc accepts the signature (it verifies the ECDSA equation for Q', the true signer),
+/// even though the claimed PK is Q.
+///
+/// This test asserts the proc returns 1 in that scenario, documenting that this path is
+/// sound only when `pk_aug` originates from a trusted setup or authoritative state (e.g.
+/// an account-bound commitment). The proc's docstring carries the full trust-model
+/// statement.
+#[test]
+fn ecdsa_verify_prehash_native_precomp_accepts_self_consistent_wrong_root() {
+    use miden_core::crypto::hash::Poseidon2;
+    use miden_core_lib::handlers::comb_k1::{
+        AffinePoint, FELTS_PER_MERKLE_ENTRY, MERKLE_TREE_DEPTH, build_left_aligned_padded_tree,
+        joint_comb_padded_entries, merkle_leaf_hashes,
+    };
+    use num::BigUint;
+
+    // Honest signer Q'. The sig + digest must verify against Q', which is what the table
+    // is built for, so the on-VM ECDSA equation check passes.
+    let actual = generate_valid_signature();
+
+    // Decoy public key Q (different seed). `compressed_PK` in pk_aug binds Q, but the
+    // table root binds Q'. A trusted-setup pk_aug would never have this shape.
+    let decoy = {
+        let mut rng = StdRng::seed_from_u64(123);
+        let sk = SecretKey::with_rng(&mut rng);
+        let pk = sk.public_key();
+        let digest = [1u8; 32];
+        let sig = sk.sign_prehash(digest);
+        EcdsaRequest::new(pk, digest, sig)
+    };
+
+    // Build the witness "by hand": compressed_PK from decoy, root from actual.
+    let g = AffinePoint {
+        x: BigUint::from_slice(&SECP_GX_LIMBS),
+        y: BigUint::from_slice(&SECP_GY_LIMBS),
+        is_infinity: false,
+    };
+    let (q_actual_x, q_actual_y) = decompress_pk_to_xy(&actual.pk().to_bytes());
+    let q_actual = AffinePoint {
+        x: q_actual_x,
+        y: q_actual_y,
+        is_infinity: false,
+    };
+    let entries = joint_comb_padded_entries(&g, &q_actual);
+    let leaves = merkle_leaf_hashes(&entries);
+    let empty_leaf = Poseidon2::hash_elements(&[Felt::ZERO; FELTS_PER_MERKLE_ENTRY]);
+    let (root_word, merkle_inner_nodes) =
+        build_left_aligned_padded_tree(&leaves, MERKLE_TREE_DEPTH, empty_leaf);
+    let merkle_root: [Felt; 4] = (*root_word).into();
+
+    let decoy_pk_felts = bytes_to_packed_u32_elements(&decoy.pk().to_bytes());
+    let mut pk_aug_value: Vec<Felt> = Vec::with_capacity(16);
+    pk_aug_value.extend_from_slice(&decoy_pk_felts);
+    pk_aug_value.extend([Felt::ZERO, Felt::ZERO, Felt::ZERO]);
+    pk_aug_value.extend_from_slice(&merkle_root);
+    let pk_aug: [Felt; 4] = (*Poseidon2::hash_elements(&pk_aug_value)).into();
+    let (u_1, u_2) = derive_u1_u2(&actual);
+
+    let witness = PrecompWitness {
+        pk_aug,
+        pk_aug_value,
+        entries,
+        merkle_inner_nodes,
+        u_1,
+        u_2,
+    };
+
+    // Memory layout: caller publishes decoy's compressed_PK and the actual sig/digest.
+    let memory_stores = generate_memory_store_masm_raw(
+        &decoy.pk().to_bytes(),
+        actual.digest(),
+        &actual.sig().to_bytes(),
+    );
+    let pk_aug_push = push_word_inline(&witness.pk_aug);
+
+    let source = format!(
+        "
+            use miden::core::crypto::dsa::ecdsa_k256_keccak
+            use miden::core::sys
+
+            begin
+                {memory_stores}
+
+                push.{SIG_ADDR}.{DIGEST_ADDR}  {pk_aug_push}
+                exec.ecdsa_k256_keccak::verify_prehash_native_precomp
+                exec.sys::truncate_stack
+            end
+        ",
+    );
+
+    let mut test = build_debug_test!(&source, &[]);
+    test.advice_inputs = precomp_advice_inputs(&witness);
+    let (output, _) = test.execute_for_output().unwrap();
+    let result = output.stack.get_element(0).unwrap();
+    assert_eq!(
+        result,
+        Felt::ONE,
+        "self-consistent wrong-root pk_aug is accepted under current trust model (got {:?})",
+        result
+    );
+}

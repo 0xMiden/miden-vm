@@ -521,7 +521,6 @@ end
 #!   96..104  : s_inv
 #!   104..112 : u1
 #!   112..120 : u2
-#!   120..128 : R.x mod n
 #!   128      : validity flag (initialised to 1, multiplicatively ANDed with each check)
 #!   129..132 : pk_ptr / digest_ptr / sig_ptr caches
 @locals(144)
@@ -535,21 +534,25 @@ pub proc verify_prehash_native
     push.1 loc_store.128
 
     # ----- Parse pk into x_pk (mem[0..8]) and parity (mem[8]) -----
-    loc_load.129  locaddr.8  locaddr.0   # [dest_x, dest_parity, pk_ptr]
+    loc_load.129  locaddr.8  locaddr.0
+    # Stack: [dest_x_addr=0, dest_parity_addr=8, pk_ptr, ...]
     exec._parse_compressed_pk                            # [pk_flag, ...]
     loc_load.128  mul  loc_store.128
 
     # ----- Parse signature into r (mem[32..40]) and s (mem[40..48]); validate v + padding -----
-    loc_load.131  locaddr.40  locaddr.32   # [dest_r, dest_s, sig_ptr]
+    loc_load.131  locaddr.40  locaddr.32
+    # Stack: [dest_r_addr=32, dest_s_addr=40, sig_ptr, ...]
     exec._parse_sig                                      # [sig_flag, ...]
     loc_load.128  mul  loc_store.128
 
     # ----- Parse digest into e (mem[48..56]) -----
     loc_load.130  locaddr.48
+    # Stack: [dest_addr=48, src_ptr, ...]
     exec._parse_be_u256
 
     # ----- Decompress pk into Q (mem[12..32]) -----
     locaddr.8  locaddr.0  locaddr.12
+    # Stack: [dest_pt_addr=12, x_addr=0, parity_addr=8, ...]
     exec._decompress_no_trap                             # [decompress_flag, ...]
     loc_load.128  mul  loc_store.128
 
@@ -627,24 +630,272 @@ pub proc verify_prehash_native
 
     # ----- rx_mod = R.x mod n_k1 -----
     # R.x is at mem[76..84]. If R.x < n_k1, rx_mod = R.x; else rx_mod = R.x - n_k1.
+    # Leave rx_mod on stack for the downstream eq check (no need to write to mem).
     padw loc_loadw_le.80  padw loc_loadw_le.76           # R.x (a)
     exec._push_n_k1                                       # n_k1 (b)
     exec.::miden::core::math::u256::lt                   # [Rx<n, ...]
     if.true
-        # R.x < n_k1: rx_mod = R.x.
+        # rx_mod = R.x.
         padw loc_loadw_le.80  padw loc_loadw_le.76
-        loc_storew_le.120  dropw  loc_storew_le.124  dropw
     else
-        # R.x >= n_k1: rx_mod = R.x - n_k1.
+        # rx_mod = R.x - n_k1.
         padw loc_loadw_le.80  padw loc_loadw_le.76
         exec._push_n_k1
         exec.::miden::core::math::u256::wrapping_sub
-        loc_storew_le.120  dropw  loc_storew_le.124  dropw
     end
+    # Stack: [rx_mod, ...]
 
     # ----- Validate rx_mod == r -----
-    padw loc_loadw_le.124  padw loc_loadw_le.120         # rx_mod (a)
-    padw loc_loadw_le.36   padw loc_loadw_le.32          # r (b)
+    padw loc_loadw_le.36  padw loc_loadw_le.32           # [r, rx_mod, ...]
     exec.::miden::core::math::u256::eq
     loc_load.128  mul                                    # final validity flag, returned on stack
+end
+
+# ===== PRECOMP-COMB NATIVE ENTRY POINT ==========================================================
+
+
+#! Same contract as `verify_prehash_native`, except `R = u1*G + u2*Q` is computed via
+#! `k1_point::verify_precomp` against a Merkle-committed joint comb table fetched per-window
+#! from the advice stack. The caller passes only the trusted `pk_aug` commitment; the
+#! compressed PK, the Merkle root over the table, and the per-window entries are all
+#! witness data fetched from the advice provider.
+#!
+#! Stack: [pk_aug_word (4 felts), digest_ptr, sig_ptr, ...]  ->  [result, ...]
+#!
+#! `pk_aug` is the 4-felt augmented public-key commitment, defined as
+#!   pk_aug = Poseidon2::hash_elements(compressed_PK_9 || zeros_3 || merkle_root_4)
+#! The 3 zero felts pad the 9-felt compressed PK to a 12-felt boundary so the hash input is
+#! aligned to 16 felts. See "Soundness boundary" below for where `pk_aug` must come from.
+#!
+#! Advice preconditions (host responsibility):
+#!   - Advice map: `pk_aug -> [compressed_PK_9, zeros_3, merkle_root_4]` (16 felts).
+#!   - Advice stack: 43 padded entries (24 felts each = 1,032 felts total), in window
+#!     order (LSB-first), selected by the verifier's per-window indices into the joint
+#!     comb table for `(G, Q)` at width `w = 6`.
+#!   - Merkle store: populated with the depth-18 tree (262,144 leaves: 176,128 real
+#!     Poseidon2 entry hashes followed by 86,016 fixed empty-leaf digests) whose root
+#!     matches `merkle_root`; each real leaf is `Poseidon2::hash_elements(padded_entry_24)`.
+#!
+#! Soundness boundary. The on-VM proc binds `pk_aug` to `(compressed_PK, merkle_root)` via
+#! the augmented-PK hash check, but it does NOT prove that `merkle_root` is the comb table
+#! for `decompress(compressed_PK)`. A caller that can choose `pk_aug` freely could commit a
+#! root for a different point and still pass verification against that other point.
+#!
+#! Account-bound `pk_aug` (sound). In the protocol's account model, `pk_aug` lives in
+#! account storage and is transitively bound to the AccountId via the storage commitment.
+#! The account creator's commitment is the trust anchor -- the same trust assumption the
+#! protocol already operates under for `Poseidon2(PK)`. Self-custody, multi-sig, delegated
+#! keys, cross-account verification, and recursive composition all fall in this category.
+#!
+#! Caller-supplied `pk_aug` (NOT sufficient alone). For open-recovery flows (e.g. verify a
+#! MetaMask sig from an arbitrary address) no pre-registered `pk_aug` exists, and a
+#! validity bit alone is meaningless. Such flows must additionally check the recovered
+#! point against an out-of-band identifier (e.g. an Eth address derived from the recovered
+#! PK), which this proc does not return. Use a separate entry point for that case.
+#!
+#! No-trap behavior. Within the packed-u32 calldata contract (i.e. all calldata felts are
+#! valid u32 values), semantically invalid inputs return 0 without trapping: a wrong
+#! `pk_aug`, an unprepared `pk_aug` (the advice-map lookup is gated on `adv.has_mapkey`),
+#! a non-zero preimage pad, a malformed digest or signature payload, an off-curve PK, a
+#! non-canonical r or s, or an ECDSA equation that doesn't hold. Outside that contract --
+#! a caller that writes non-u32 felts into the calldata memory regions -- the u32* ops in
+#! `_parse_be_u256`, `_parse_sig`, and `_parse_compressed_pk` will trap.
+#!
+#! The proc IS NOT no-trap against host-misconfigured witness:
+#!   1. A pre-pushed advice entry whose hash doesn't match the leaf at the corresponding
+#!      tree index traps `verify_precomp`'s `mtree_verify`. Avoiding the trap would require
+#!      a Poseidon2 second-preimage on the committed leaf (the honest entry that hashes to
+#!      that leaf is fixed by the published `merkle_root`, so the attacker must find a
+#!      different 24-felt entry that hashes to the same value).
+#!   2. `point_add` traps on entries with non-canonical X/Y limbs that survive the leaf
+#!      check.
+#!   3. Fewer than 1,032 entry felts on the advice stack traps `adv_pipe` mid-stream.
+#!   4. The `pk_aug` map value must be exactly 16 well-formed felts: a shorter value traps
+#!      `adv_pushw`; non-u32 felts in the compressed-PK region trap `_parse_compressed_pk`;
+#!      a longer value perturbs subsequent advice-stack consumption.
+#! All four are host bugs (the prover failed to set up its own witness consistently); they
+#! are not reachable by any caller-controlled input alone.
+#!
+#! Local memory layout matches `verify_prehash_native`. Additional slots:
+#!   136..145 : compressed_PK scratch (9 felts, streamed from advice map by adv_pipe)
+#!   145..148 : zero pad scratch (3 felts, streamed from advice map)
+#!   148..152 : merkle_root scratch (4 felts, word-aligned, streamed from advice map)
+#! `pk_aug` stays on the operand stack across the binding check rather than going to a
+#! cache slot.
+@locals(160)
+pub proc verify_prehash_native_precomp
+    # Stack: [pk_aug, digest_ptr, sig_ptr, ...]; cache the two pointers while keeping
+    # pk_aug on the stack (overflow ok) so we can use it as both the advice-map key and
+    # the hash-comparison target without round-tripping it through memory.
+    movup.4  loc_store.130                                # cache digest_ptr
+    movup.4  loc_store.131                                # cache sig_ptr
+    # Stack: [pk_aug, ...]
+
+    # Initialise validity flag = 1.
+    push.1 loc_store.128
+
+    # ----- Pull (compressed_PK || zero_pad || h_T) from advice map at key pk_aug -----
+    # Gate the lookup on `adv.has_mapkey` so a missing key returns `validity = 0` instead of
+    # trapping `adv.push_mapval`.
+    adv.has_mapkey
+    adv_push
+    dup  loc_load.128  mul  loc_store.128                 # validity &= present
+    if.true
+        # Stack: [pk_aug, ...]
+        adv.push_mapval                                   # queues 16 felts on advice
+
+        # Stream-hash the 16 felts (compressed_PK_9 || zeros_3 || h_T_4) from advice into
+        # mem[136..152] in one pass: each `adv_pipe + permute` absorbs 8 felts and writes
+        # them to memory. Avoids a separate adv-load loop + hash_elements call.
+        locaddr.136                                       # [136, pk_aug, ...]
+        padw padw padw                                    # sponge state: [R0=R1=C=0, 136, pk_aug, ...]
+        adv_pipe exec.poseidon2::permute                  # absorb felts 0..8 -> mem[136..144]
+        adv_pipe exec.poseidon2::permute                  # absorb felts 8..16 -> mem[144..152]
+        # Stack: [R0', R1', C', 152, pk_aug, ...]; R0' is the Poseidon2 hash.
+
+        exec.poseidon2::squeeze_digest                    # [HASH, 152, pk_aug, ...]
+        movup.4  drop                                     # drop ptr=152
+        # Stack: [HASH, pk_aug, ...]
+
+        # Augmented-PK binding: HASH == pk_aug.
+        eqw                                               # [is_match, HASH, pk_aug, ...]
+        movdn.8  dropw  dropw                             # [is_match, ...]
+        loc_load.128  mul  loc_store.128
+
+        # Pad felts must be zero (preimage shape: compressed_PK_9 || 0,0,0 || h_T_4).
+        loc_load.145  eq.0
+        loc_load.146  eq.0  mul
+        loc_load.147  eq.0  mul
+        loc_load.128  mul  loc_store.128
+    else
+        dropw                                             # drop pk_aug
+    end
+
+    # ----- Parse pk into x_pk (mem[0..8]) and parity (mem[8]) -----
+    locaddr.136  locaddr.8  locaddr.0
+    # Stack: [dest_x_addr=0, dest_parity_addr=8, pk_ptr=136, ...]
+    exec._parse_compressed_pk
+    loc_load.128  mul  loc_store.128
+
+    # ----- Parse signature into r (mem[32..40]) and s (mem[40..48]); validate v + padding -----
+    loc_load.131  locaddr.40  locaddr.32
+    # Stack: [dest_r_addr=32, dest_s_addr=40, sig_ptr, ...]
+    exec._parse_sig                                       # [sig_flag, ...]
+    loc_load.128  mul  loc_store.128
+
+    # ----- Parse digest into e (mem[48..56]) -----
+    loc_load.130  locaddr.48
+    # Stack: [dest_addr=48, src_ptr, ...]
+    exec._parse_be_u256
+
+    # ----- Decompress pk into Q (mem[12..32]) -----
+    locaddr.8  locaddr.0  locaddr.12
+    # Stack: [dest_pt_addr=12, x_addr=0, parity_addr=8, ...]
+    exec._decompress_no_trap
+    loc_load.128  mul  loc_store.128
+
+    # ----- Validate r in (0, n_k1); substitute r = 1 if not -----
+    padw loc_loadw_le.36  padw loc_loadw_le.32
+    exec.::miden::core::math::u256::eqz  not
+    padw loc_loadw_le.36  padw loc_loadw_le.32
+    exec._push_n_k1
+    exec.::miden::core::math::u256::lt
+    mul
+    dup  loc_load.128  mul  loc_store.128
+    not
+    if.true
+        padw  loc_storew_le.36  dropw
+        push.0.0.0.1  loc_storew_le.32  dropw
+    end
+
+    # ----- Validate s in (0, n_k1); substitute s = 1 if not -----
+    padw loc_loadw_le.44  padw loc_loadw_le.40
+    exec.::miden::core::math::u256::eqz  not
+    padw loc_loadw_le.44  padw loc_loadw_le.40
+    exec._push_n_k1
+    exec.::miden::core::math::u256::lt
+    mul
+    dup  loc_load.128  mul  loc_store.128
+    not
+    if.true
+        padw  loc_storew_le.44  dropw
+        push.0.0.0.1  loc_storew_le.40  dropw
+    end
+
+    # ----- Reduce e mod n_k1 -----
+    padw loc_loadw_le.52  padw loc_loadw_le.48
+    exec._push_n_k1
+    exec.::miden::core::math::u256::lt
+    not
+    if.true
+        padw loc_loadw_le.52  padw loc_loadw_le.48
+        exec._push_n_k1
+        exec.::miden::core::math::u256::wrapping_sub
+        loc_storew_le.48  dropw  loc_storew_le.52  dropw
+    end
+
+    # ----- s_inv = inv(s) -----
+    padw loc_loadw_le.44  padw loc_loadw_le.40
+    exec.k1_scalar::inv
+    loc_storew_le.96  swapw  loc_storew_le.100  swapw
+
+    # ----- u1 = e * s_inv mod n_k1 -----
+    padw loc_loadw_le.52  padw loc_loadw_le.48                # [e, s_inv, ...]
+    exec.k1_scalar::mul
+    loc_storew_le.104  dropw  loc_storew_le.108  dropw
+
+    # ----- u2 = r * s_inv mod n_k1 -----
+    padw loc_loadw_le.36  padw loc_loadw_le.32
+    padw loc_loadw_le.100  padw loc_loadw_le.96
+    exec.k1_scalar::mul
+    loc_storew_le.112  dropw  loc_storew_le.116  dropw
+
+    # ----- R = u1*G + u2*Q via verify_precomp (gated for no-trap behavior) -----
+    # If the validity flag is 1, every preceding check passed (incl. augmented-PK binding),
+    # so we can run verify_precomp safely. The host has pre-pushed 43 padded entries
+    # (1,032 felts) onto the advice stack in window order; verify_precomp consumes them
+    # one per window and Merkle-verifies each against `merkle_root`. Otherwise skip the
+    # call, emit R = identity, and let the downstream rx_mod check reject.
+    #
+    # TODO: investigate how this witness-dependent branch interacts with zero-knowledge.
+    loc_load.128
+    if.true
+        locaddr.148  locaddr.104  locaddr.112  locaddr.76
+        # Stack: [out_addr=76, u_2_addr=112, u_1_addr=104, merkle_root_addr=148, ...]
+        exec.k1_point::verify_precomp
+    else
+        # 4 zero-word writes share a single padw (storew leaves the word; just push the
+        # next dest addr each time).
+        padw
+        locaddr.76  mem_storew_le             # X = 0
+        locaddr.80  mem_storew_le
+        locaddr.84  mem_storew_le             # Y = 0
+        locaddr.88  mem_storew_le
+        dropw
+        push.0.0.0.1  locaddr.92  mem_storew_le dropw     # is_infinity = 1
+    end
+
+    # ----- Validate R != identity -----
+    loc_load.92  not  loc_load.128  mul  loc_store.128
+
+    # ----- rx_mod = R.x mod n_k1 -----
+    # Leave rx_mod on stack for the downstream eq check (no need to write to mem).
+    padw loc_loadw_le.80  padw loc_loadw_le.76
+    exec._push_n_k1
+    exec.::miden::core::math::u256::lt
+    if.true
+        # rx_mod = R.x.
+        padw loc_loadw_le.80  padw loc_loadw_le.76
+    else
+        # rx_mod = R.x - n_k1.
+        padw loc_loadw_le.80  padw loc_loadw_le.76
+        exec._push_n_k1
+        exec.::miden::core::math::u256::wrapping_sub
+    end
+    # Stack: [rx_mod, ...]
+
+    # ----- Validate rx_mod == r -----
+    padw loc_loadw_le.36   padw loc_loadw_le.32        # [r, rx_mod, ...]
+    exec.::miden::core::math::u256::eq
+    loc_load.128  mul                                  # final validity flag on stack
 end
