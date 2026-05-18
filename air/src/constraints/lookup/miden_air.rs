@@ -5,7 +5,7 @@ use alloc::vec::Vec;
 
 use miden_core::{WORD_SIZE, field::PrimeCharacteristicRing};
 
-use super::messages::{BlockHashMsg, KernelRomMsg, LogCapacityMsg};
+use super::messages::{BlockHashMsg, KernelRomMsg, LogPrecompileMsg};
 use crate::{PV_PROGRAM_HASH, PV_TRANSCRIPT_STATE, lookup::BoundaryBuilder};
 
 // COMMITTED-FINALS COUNT
@@ -67,8 +67,8 @@ pub(crate) fn emit_core_boundary<B: BoundaryBuilder>(boundary: &mut B) {
     );
 
     // Log-precompile transcript terminals: +1 / d_initial − 1 / d_final.
-    boundary.add("log_precompile_initial", LogCapacityMsg { capacity: [B::F::ZERO; 4] });
-    boundary.remove("log_precompile_final", LogCapacityMsg { capacity: final_state });
+    boundary.add("log_precompile_initial", LogPrecompileMsg { state: [B::F::ZERO; 4] });
+    boundary.remove("log_precompile_final", LogPrecompileMsg { state: final_state });
 }
 
 /// Emits the Chiplets-trace boundary corrections.
