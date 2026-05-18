@@ -7,6 +7,7 @@ extern crate std;
 pub mod constraints_regen;
 pub mod dsa;
 pub mod handlers;
+pub mod keccak256_native;
 
 extern crate alloc;
 

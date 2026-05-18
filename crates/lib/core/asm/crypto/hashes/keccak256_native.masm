@@ -1,0 +1,1244 @@
+use miden::core::sys
+
+# ===== KECCAK-256 ================================================================================
+#
+# AUDIT BASIS
+# -----------
+#
+# Trusting that this MASM port computes Keccak-256 correctly is a two-step
+# argument:
+#
+#   1. Read the Rust reference at
+#        crates/lib/core/src/keccak256_native/reference.rs
+#      against FIPS 202 (NIST, August 2015). The Rust is written to mirror the
+#      pseudocode line-for-line: variable names, loop structure, and step order
+#      all match the spec. As an additional cross-check, the same Rust
+#      reference is differentially tested against
+#      `miden_core::crypto::hash::Keccak256` (an independent production
+#      implementation) in `tests/crypto/keccak256_native.rs`, so a typo in the
+#      Rust mirror gets caught.
+#
+#   2. Trust that the MASM in this file matches the Rust reference, on the
+#      strength of the differential tests at
+#        crates/lib/core/tests/crypto/keccak256_native_masm.rs
+#      They run MASM `keccak256_bytes` and Rust `keccak256` on the same input
+#      and compare the 32-byte digest: every padding/block-loop boundary length
+#      (0, 1, 2, 31, 32, 60, 135, 136, 137, 270, 271, 272), five published NIST
+#      and Ethereum KATs, and a random-input proptest over 0..=300 bytes.
+#
+# The internal MASM procs are named after the FIPS 202 algorithm they
+# implement (theta, rho-pi, chi, iota, permute, absorb_block), so an auditor
+# reading the MASM line-by-line can cross-reference the Rust function and the
+# FIPS section by the same name.
+#
+# All section references below are to NIST FIPS 202 (August 2015).
+#
+# STATE LAYOUT
+# ------------
+#
+# Keccak-f[1600] state is 25 lanes of 64 bits = 1600 bits. Stored in memory as 50
+# contiguous u32 felts in lane-pair order: lane (x, y) lives at offset
+# `2 * (5*y + x)` from `state_ptr`. The two felts at that offset are the lane's
+# little-endian halves: the felt at offset `2*(5*y+x) + 0` holds bits 0..32 (the
+# "lo" half), and the felt at offset `2*(5*y+x) + 1` holds bits 32..64 (the "hi"
+# half). Concretely:
+#
+#   lane (0, 0): state[0] = lo, state[1] = hi
+#   lane (1, 0): state[2] = lo, state[3] = hi
+#   ...
+#   lane (4, 4): state[48] = lo, state[49] = hi
+#
+# All round-step procs take only a `state_ptr` argument on the operand stack
+# and return nothing -- the 50-felt state stays in memory throughout. They
+# read in-place and write in-place (with internal scratch where needed -- e.g.
+# pi requires an out-of-place stage). Individual lane halves get pulled to the
+# operand stack one felt at a time for the u32 arithmetic ops.
+#
+# CONVENTIONS WITHIN A PROC
+# -------------------------
+#
+# - `state_ptr` is cached in proc-local memory on entry; sub-steps reload it
+#   from a single known slot.
+# - Lane addresses are computed as `loc_load.<state_slot> add.<offset>` where
+#   `<offset> = 2*(5*y + x)` is a build-time constant per lane.
+# - Scratch storage uses proc-local slots immediately after the cached pointer.
+
+# ===== THETA STEP ===============================================================================
+
+#! Applies the theta step (FIPS 202, sec. 3.2.1, Algorithm 1) to the state at
+#! `state_ptr`, in place.
+#!
+#! Spec:
+#!   C[x]      = XOR over y of A[x, y]                    for x in 0..5
+#!   D[x]      = C[x-1 mod 5] XOR ROT(C[x+1 mod 5], 1)    for x in 0..5
+#!   A[x, y] ^= D[x]                                       for all (x, y)
+#!
+#! Implementation walks the spec in three phases:
+#!   Phase 1: compute C[0..5] (5 columns, each XOR-folding 5 lanes), staged as
+#!            10 felts (lo, hi pairs) in proc-local scratch.
+#!   Phase 2: compute D[0..5] from C[0..5], staged as 10 more felts.
+#!   Phase 3: XOR D[x] into every lane of column x, in place. 25 lanes.
+#!
+#! Stack transition:
+#!   [state_ptr, ...]  ->  [...]
+#!
+#! Local memory layout (24 felts):
+#!   0       : state_ptr cache
+#!   4..14   : C[0..5] as (lo, hi) pairs. C[x] at slots 4 + 2*x, 4 + 2*x + 1.
+#!   14..24  : D[0..5] as (lo, hi) pairs. D[x] at slots 14 + 2*x, 14 + 2*x + 1.
+@locals(24)
+proc theta
+    loc_store.0                                          # cache state_ptr at slot 0
+
+    # ----- Phase 1: C[x] = XOR over y of A[x, y] -----
+    # For each column x, fold five 64-bit lanes via 4 pairwise u32xors per half.
+    # Each lane (x, y) lives at state_ptr + 2*(5*y + x); the lo half is at that
+    # offset, the hi half at offset + 1.
+
+    # --- C[0] ---
+    loc_load.0  add.0   mem_load                         # A[0, 0].lo
+    loc_load.0  add.10  mem_load   u32xor                # ^= A[0, 1].lo
+    loc_load.0  add.20  mem_load   u32xor                # ^= A[0, 2].lo
+    loc_load.0  add.30  mem_load   u32xor                # ^= A[0, 3].lo
+    loc_load.0  add.40  mem_load   u32xor                # ^= A[0, 4].lo
+    loc_store.4                                          # C[0].lo at slot 4
+    loc_load.0  add.1   mem_load                         # A[0, 0].hi
+    loc_load.0  add.11  mem_load   u32xor                # ^= A[0, 1].hi
+    loc_load.0  add.21  mem_load   u32xor                # ^= A[0, 2].hi
+    loc_load.0  add.31  mem_load   u32xor                # ^= A[0, 3].hi
+    loc_load.0  add.41  mem_load   u32xor                # ^= A[0, 4].hi
+    loc_store.5                                          # C[0].hi at slot 5
+
+    # --- C[1] ---
+    loc_load.0  add.2   mem_load
+    loc_load.0  add.12  mem_load   u32xor
+    loc_load.0  add.22  mem_load   u32xor
+    loc_load.0  add.32  mem_load   u32xor
+    loc_load.0  add.42  mem_load   u32xor
+    loc_store.6
+    loc_load.0  add.3   mem_load
+    loc_load.0  add.13  mem_load   u32xor
+    loc_load.0  add.23  mem_load   u32xor
+    loc_load.0  add.33  mem_load   u32xor
+    loc_load.0  add.43  mem_load   u32xor
+    loc_store.7
+
+    # --- C[2] ---
+    loc_load.0  add.4   mem_load
+    loc_load.0  add.14  mem_load   u32xor
+    loc_load.0  add.24  mem_load   u32xor
+    loc_load.0  add.34  mem_load   u32xor
+    loc_load.0  add.44  mem_load   u32xor
+    loc_store.8
+    loc_load.0  add.5   mem_load
+    loc_load.0  add.15  mem_load   u32xor
+    loc_load.0  add.25  mem_load   u32xor
+    loc_load.0  add.35  mem_load   u32xor
+    loc_load.0  add.45  mem_load   u32xor
+    loc_store.9
+
+    # --- C[3] ---
+    loc_load.0  add.6   mem_load
+    loc_load.0  add.16  mem_load   u32xor
+    loc_load.0  add.26  mem_load   u32xor
+    loc_load.0  add.36  mem_load   u32xor
+    loc_load.0  add.46  mem_load   u32xor
+    loc_store.10
+    loc_load.0  add.7   mem_load
+    loc_load.0  add.17  mem_load   u32xor
+    loc_load.0  add.27  mem_load   u32xor
+    loc_load.0  add.37  mem_load   u32xor
+    loc_load.0  add.47  mem_load   u32xor
+    loc_store.11
+
+    # --- C[4] ---
+    loc_load.0  add.8   mem_load
+    loc_load.0  add.18  mem_load   u32xor
+    loc_load.0  add.28  mem_load   u32xor
+    loc_load.0  add.38  mem_load   u32xor
+    loc_load.0  add.48  mem_load   u32xor
+    loc_store.12
+    loc_load.0  add.9   mem_load
+    loc_load.0  add.19  mem_load   u32xor
+    loc_load.0  add.29  mem_load   u32xor
+    loc_load.0  add.39  mem_load   u32xor
+    loc_load.0  add.49  mem_load   u32xor
+    loc_store.13
+
+    # ----- Phase 2: D[x] = C[(x+4) mod 5] XOR ROT(C[(x+1) mod 5], 1) -----
+    # The rotation is a 64-bit rotate-LEFT by 1, expressed on (lo, hi) halves as:
+    #   new_lo = (lo << 1) | (hi >> 31)
+    #   new_hi = (hi << 1) | (lo >> 31)
+    # We compute ROT(C[(x+1) mod 5], 1) inline per x, XOR with C[(x+4) mod 5]
+    # already in scratch.
+
+    # --- D[0] = C[4] XOR ROT(C[1], 1) ---
+    # Rotate C[1] left by 1: C[1] is at slots (6, 7) = (lo, hi).
+    loc_load.7   u32shr.31              # hi >> 31
+    loc_load.6   u32shl.1               # lo << 1
+    u32xor                              # rot_lo
+    loc_load.6   u32shr.31              # lo >> 31
+    loc_load.7   u32shl.1               # hi << 1
+    u32xor                              # rot_hi
+    # Stack: [rot_hi, rot_lo, ...]
+    # XOR with C[4] = (slot 12, slot 13).
+    loc_load.13  u32xor                 # rot_hi XOR C[4].hi = D[0].hi
+    loc_store.15                        # D[0].hi at slot 15
+    loc_load.12  u32xor                 # rot_lo XOR C[4].lo = D[0].lo
+    loc_store.14                        # D[0].lo at slot 14
+
+    # --- D[1] = C[0] XOR ROT(C[2], 1) ---
+    loc_load.9   u32shr.31
+    loc_load.8   u32shl.1
+    u32xor
+    loc_load.8   u32shr.31
+    loc_load.9   u32shl.1
+    u32xor
+    loc_load.5   u32xor   loc_store.17                    # D[1].hi at slot 17
+    loc_load.4   u32xor   loc_store.16                    # D[1].lo at slot 16
+
+    # --- D[2] = C[1] XOR ROT(C[3], 1) ---
+    loc_load.11  u32shr.31
+    loc_load.10  u32shl.1
+    u32xor
+    loc_load.10  u32shr.31
+    loc_load.11  u32shl.1
+    u32xor
+    loc_load.7   u32xor   loc_store.19                    # D[2].hi at slot 19
+    loc_load.6   u32xor   loc_store.18                    # D[2].lo at slot 18
+
+    # --- D[3] = C[2] XOR ROT(C[4], 1) ---
+    loc_load.13  u32shr.31
+    loc_load.12  u32shl.1
+    u32xor
+    loc_load.12  u32shr.31
+    loc_load.13  u32shl.1
+    u32xor
+    loc_load.9   u32xor   loc_store.21                    # D[3].hi at slot 21
+    loc_load.8   u32xor   loc_store.20                    # D[3].lo at slot 20
+
+    # --- D[4] = C[3] XOR ROT(C[0], 1) ---
+    loc_load.5   u32shr.31
+    loc_load.4   u32shl.1
+    u32xor
+    loc_load.4   u32shr.31
+    loc_load.5   u32shl.1
+    u32xor
+    loc_load.11  u32xor   loc_store.23                    # D[4].hi at slot 23
+    loc_load.10  u32xor   loc_store.22                    # D[4].lo at slot 22
+
+    # ----- Phase 3: A[x, y] ^= D[x] for all (x, y) -----
+    # 25 lanes; for each, XOR D[x].lo into the lo half and D[x].hi into the hi half.
+    # D[x] is at slots (14 + 2*x, 15 + 2*x).
+
+    # --- Row y = 0 ---
+    # x = 0:
+    loc_load.0  add.0   dup    mem_load   loc_load.14  u32xor   swap   mem_store
+    loc_load.0  add.1   dup    mem_load   loc_load.15  u32xor   swap   mem_store
+    # x = 1:
+    loc_load.0  add.2   dup    mem_load   loc_load.16  u32xor   swap   mem_store
+    loc_load.0  add.3   dup    mem_load   loc_load.17  u32xor   swap   mem_store
+    # x = 2:
+    loc_load.0  add.4   dup    mem_load   loc_load.18  u32xor   swap   mem_store
+    loc_load.0  add.5   dup    mem_load   loc_load.19  u32xor   swap   mem_store
+    # x = 3:
+    loc_load.0  add.6   dup    mem_load   loc_load.20  u32xor   swap   mem_store
+    loc_load.0  add.7   dup    mem_load   loc_load.21  u32xor   swap   mem_store
+    # x = 4:
+    loc_load.0  add.8   dup    mem_load   loc_load.22  u32xor   swap   mem_store
+    loc_load.0  add.9   dup    mem_load   loc_load.23  u32xor   swap   mem_store
+
+    # --- Row y = 1 ---
+    loc_load.0  add.10  dup    mem_load   loc_load.14  u32xor   swap   mem_store
+    loc_load.0  add.11  dup    mem_load   loc_load.15  u32xor   swap   mem_store
+    loc_load.0  add.12  dup    mem_load   loc_load.16  u32xor   swap   mem_store
+    loc_load.0  add.13  dup    mem_load   loc_load.17  u32xor   swap   mem_store
+    loc_load.0  add.14  dup    mem_load   loc_load.18  u32xor   swap   mem_store
+    loc_load.0  add.15  dup    mem_load   loc_load.19  u32xor   swap   mem_store
+    loc_load.0  add.16  dup    mem_load   loc_load.20  u32xor   swap   mem_store
+    loc_load.0  add.17  dup    mem_load   loc_load.21  u32xor   swap   mem_store
+    loc_load.0  add.18  dup    mem_load   loc_load.22  u32xor   swap   mem_store
+    loc_load.0  add.19  dup    mem_load   loc_load.23  u32xor   swap   mem_store
+
+    # --- Row y = 2 ---
+    loc_load.0  add.20  dup    mem_load   loc_load.14  u32xor   swap   mem_store
+    loc_load.0  add.21  dup    mem_load   loc_load.15  u32xor   swap   mem_store
+    loc_load.0  add.22  dup    mem_load   loc_load.16  u32xor   swap   mem_store
+    loc_load.0  add.23  dup    mem_load   loc_load.17  u32xor   swap   mem_store
+    loc_load.0  add.24  dup    mem_load   loc_load.18  u32xor   swap   mem_store
+    loc_load.0  add.25  dup    mem_load   loc_load.19  u32xor   swap   mem_store
+    loc_load.0  add.26  dup    mem_load   loc_load.20  u32xor   swap   mem_store
+    loc_load.0  add.27  dup    mem_load   loc_load.21  u32xor   swap   mem_store
+    loc_load.0  add.28  dup    mem_load   loc_load.22  u32xor   swap   mem_store
+    loc_load.0  add.29  dup    mem_load   loc_load.23  u32xor   swap   mem_store
+
+    # --- Row y = 3 ---
+    loc_load.0  add.30  dup    mem_load   loc_load.14  u32xor   swap   mem_store
+    loc_load.0  add.31  dup    mem_load   loc_load.15  u32xor   swap   mem_store
+    loc_load.0  add.32  dup    mem_load   loc_load.16  u32xor   swap   mem_store
+    loc_load.0  add.33  dup    mem_load   loc_load.17  u32xor   swap   mem_store
+    loc_load.0  add.34  dup    mem_load   loc_load.18  u32xor   swap   mem_store
+    loc_load.0  add.35  dup    mem_load   loc_load.19  u32xor   swap   mem_store
+    loc_load.0  add.36  dup    mem_load   loc_load.20  u32xor   swap   mem_store
+    loc_load.0  add.37  dup    mem_load   loc_load.21  u32xor   swap   mem_store
+    loc_load.0  add.38  dup    mem_load   loc_load.22  u32xor   swap   mem_store
+    loc_load.0  add.39  dup    mem_load   loc_load.23  u32xor   swap   mem_store
+
+    # --- Row y = 4 ---
+    loc_load.0  add.40  dup    mem_load   loc_load.14  u32xor   swap   mem_store
+    loc_load.0  add.41  dup    mem_load   loc_load.15  u32xor   swap   mem_store
+    loc_load.0  add.42  dup    mem_load   loc_load.16  u32xor   swap   mem_store
+    loc_load.0  add.43  dup    mem_load   loc_load.17  u32xor   swap   mem_store
+    loc_load.0  add.44  dup    mem_load   loc_load.18  u32xor   swap   mem_store
+    loc_load.0  add.45  dup    mem_load   loc_load.19  u32xor   swap   mem_store
+    loc_load.0  add.46  dup    mem_load   loc_load.20  u32xor   swap   mem_store
+    loc_load.0  add.47  dup    mem_load   loc_load.21  u32xor   swap   mem_store
+    loc_load.0  add.48  dup    mem_load   loc_load.22  u32xor   swap   mem_store
+    loc_load.0  add.49  dup    mem_load   loc_load.23  u32xor   swap   mem_store
+end
+
+# ===== RHO + PI (FUSED) =========================================================================
+
+#! Applies rho (FIPS 202, sec. 3.2.2) and pi (FIPS 202, sec. 3.2.3) as a single
+#! fused step:
+#!
+#!   A'[(y, (2x + 3y) mod 5)] = ROT(A[(x, y)], RHO[(x, y)])    for all (x, y)
+#!
+#! The fusion saves one full state-traversal compared to running rho then pi as
+#! separate steps. For each source lane (x, y), the rotated value is written to
+#! its pi destination directly.
+#!
+#! pi rearranges all 25 lanes, so the writes cannot be done in place: a source
+#! lane's old value is needed by some other source's rotation step. We stage the
+#! 25 rotated lanes in proc-local scratch (50 felts), then copy back to the
+#! caller's state at the end.
+#!
+#! Stack transition:
+#!   [state_ptr, ...]  ->  [...]
+#!
+#! Local memory layout (56 felts):
+#!   0       : state_ptr cache
+#!   1       : SLO -- per-lane rotation scratch (lo half of source)
+#!   2       : SHI -- per-lane rotation scratch (hi half of source)
+#!   3       : unused (padding for slot 4 word-alignment)
+#!   4..54   : scratch state. Destination lane d at slots 4 + 2*d (lo) and
+#!             4 + 2*d + 1 (hi). After all 25 source lanes are rotated and
+#!             written to their pi destinations, this entire region is copied
+#!             back to caller's state in 12 word transfers + 2 single-felt
+#!             writes (50 felts = 12 words plus a 2-felt tail).
+#!
+#! Each per-lane rotation block is one of three shapes:
+#!   - n = 0 (lane (0, 0) only): identity; load and store directly.
+#!   - 1 <= n <= 31:
+#!       new_lo = (lo << n) | (hi >> (32 - n))
+#!       new_hi = (hi << n) | (lo >> (32 - n))
+#!   - 33 <= n <= 63:  (let m = n - 32)
+#!       new_lo = (hi << m) | (lo >> (32 - m))
+#!       new_hi = (lo << m) | (hi >> (32 - m))
+#!     (= equivalent to swap-halves-then-rotate-by-m; derived from
+#!     rotl(x, 32+m) = rotl(swap_halves(x), m).)
+#!
+#! Lane order in the body below mirrors the natural index order src = 0..25;
+#! the (src, dst, RHO[src]) triples were generated from the spec table and
+#! double-checked against the Rust reference's `pi` and `rho` functions.
+@locals(56)
+proc rho_pi
+    loc_store.0                                          # cache state_ptr at slot 0
+
+    # src lane 0 (RHO=0) -> dst lane 0
+    loc_load.0  add.0   mem_load
+    loc_load.0  add.1   mem_load          # [hi, lo]
+    loc_store.5                           # store hi at scratch[1]
+    loc_store.4                           # store lo at scratch[0]
+
+    # src lane 1 (RHO=1) -> dst lane 10
+    loc_load.0  add.2   mem_load
+    loc_load.0  add.3   mem_load
+    loc_store.2                           # save hi (SHI)
+    loc_store.1                           # save lo (SLO)
+    loc_load.1  u32shl.1
+    loc_load.2  u32shr.31
+    u32xor                                # new_lo
+    loc_load.2  u32shl.1
+    loc_load.1  u32shr.31
+    u32xor                                # new_hi
+    loc_store.25                          # scratch[2*10 + 1] = scratch dst hi
+    loc_store.24                          # scratch[2*10]     = scratch dst lo
+
+    # src lane 2 (RHO=62) -> dst lane 20  (m = 30)
+    loc_load.0  add.4   mem_load
+    loc_load.0  add.5   mem_load
+    loc_store.2
+    loc_store.1
+    loc_load.2  u32shl.30
+    loc_load.1  u32shr.2
+    u32xor
+    loc_load.1  u32shl.30
+    loc_load.2  u32shr.2
+    u32xor
+    loc_store.45
+    loc_store.44
+
+    # src lane 3 (RHO=28) -> dst lane 5
+    loc_load.0  add.6   mem_load
+    loc_load.0  add.7   mem_load
+    loc_store.2
+    loc_store.1
+    loc_load.1  u32shl.28
+    loc_load.2  u32shr.4
+    u32xor
+    loc_load.2  u32shl.28
+    loc_load.1  u32shr.4
+    u32xor
+    loc_store.15
+    loc_store.14
+
+    # src lane 4 (RHO=27) -> dst lane 15
+    loc_load.0  add.8   mem_load
+    loc_load.0  add.9   mem_load
+    loc_store.2
+    loc_store.1
+    loc_load.1  u32shl.27
+    loc_load.2  u32shr.5
+    u32xor
+    loc_load.2  u32shl.27
+    loc_load.1  u32shr.5
+    u32xor
+    loc_store.35
+    loc_store.34
+
+    # src lane 5 (RHO=36) -> dst lane 16  (m = 4)
+    loc_load.0  add.10  mem_load
+    loc_load.0  add.11  mem_load
+    loc_store.2
+    loc_store.1
+    loc_load.2  u32shl.4
+    loc_load.1  u32shr.28
+    u32xor
+    loc_load.1  u32shl.4
+    loc_load.2  u32shr.28
+    u32xor
+    loc_store.37
+    loc_store.36
+
+    # src lane 6 (RHO=44) -> dst lane 1   (m = 12)
+    loc_load.0  add.12  mem_load
+    loc_load.0  add.13  mem_load
+    loc_store.2
+    loc_store.1
+    loc_load.2  u32shl.12
+    loc_load.1  u32shr.20
+    u32xor
+    loc_load.1  u32shl.12
+    loc_load.2  u32shr.20
+    u32xor
+    loc_store.7
+    loc_store.6
+
+    # src lane 7 (RHO=6) -> dst lane 11
+    loc_load.0  add.14  mem_load
+    loc_load.0  add.15  mem_load
+    loc_store.2
+    loc_store.1
+    loc_load.1  u32shl.6
+    loc_load.2  u32shr.26
+    u32xor
+    loc_load.2  u32shl.6
+    loc_load.1  u32shr.26
+    u32xor
+    loc_store.27
+    loc_store.26
+
+    # src lane 8 (RHO=55) -> dst lane 21  (m = 23)
+    loc_load.0  add.16  mem_load
+    loc_load.0  add.17  mem_load
+    loc_store.2
+    loc_store.1
+    loc_load.2  u32shl.23
+    loc_load.1  u32shr.9
+    u32xor
+    loc_load.1  u32shl.23
+    loc_load.2  u32shr.9
+    u32xor
+    loc_store.47
+    loc_store.46
+
+    # src lane 9 (RHO=20) -> dst lane 6
+    loc_load.0  add.18  mem_load
+    loc_load.0  add.19  mem_load
+    loc_store.2
+    loc_store.1
+    loc_load.1  u32shl.20
+    loc_load.2  u32shr.12
+    u32xor
+    loc_load.2  u32shl.20
+    loc_load.1  u32shr.12
+    u32xor
+    loc_store.17
+    loc_store.16
+
+    # src lane 10 (RHO=3) -> dst lane 7
+    loc_load.0  add.20  mem_load
+    loc_load.0  add.21  mem_load
+    loc_store.2
+    loc_store.1
+    loc_load.1  u32shl.3
+    loc_load.2  u32shr.29
+    u32xor
+    loc_load.2  u32shl.3
+    loc_load.1  u32shr.29
+    u32xor
+    loc_store.19
+    loc_store.18
+
+    # src lane 11 (RHO=10) -> dst lane 17
+    loc_load.0  add.22  mem_load
+    loc_load.0  add.23  mem_load
+    loc_store.2
+    loc_store.1
+    loc_load.1  u32shl.10
+    loc_load.2  u32shr.22
+    u32xor
+    loc_load.2  u32shl.10
+    loc_load.1  u32shr.22
+    u32xor
+    loc_store.39
+    loc_store.38
+
+    # src lane 12 (RHO=43) -> dst lane 2   (m = 11)
+    loc_load.0  add.24  mem_load
+    loc_load.0  add.25  mem_load
+    loc_store.2
+    loc_store.1
+    loc_load.2  u32shl.11
+    loc_load.1  u32shr.21
+    u32xor
+    loc_load.1  u32shl.11
+    loc_load.2  u32shr.21
+    u32xor
+    loc_store.9
+    loc_store.8
+
+    # src lane 13 (RHO=25) -> dst lane 12
+    loc_load.0  add.26  mem_load
+    loc_load.0  add.27  mem_load
+    loc_store.2
+    loc_store.1
+    loc_load.1  u32shl.25
+    loc_load.2  u32shr.7
+    u32xor
+    loc_load.2  u32shl.25
+    loc_load.1  u32shr.7
+    u32xor
+    loc_store.29
+    loc_store.28
+
+    # src lane 14 (RHO=39) -> dst lane 22  (m = 7)
+    loc_load.0  add.28  mem_load
+    loc_load.0  add.29  mem_load
+    loc_store.2
+    loc_store.1
+    loc_load.2  u32shl.7
+    loc_load.1  u32shr.25
+    u32xor
+    loc_load.1  u32shl.7
+    loc_load.2  u32shr.25
+    u32xor
+    loc_store.49
+    loc_store.48
+
+    # src lane 15 (RHO=41) -> dst lane 23  (m = 9)
+    loc_load.0  add.30  mem_load
+    loc_load.0  add.31  mem_load
+    loc_store.2
+    loc_store.1
+    loc_load.2  u32shl.9
+    loc_load.1  u32shr.23
+    u32xor
+    loc_load.1  u32shl.9
+    loc_load.2  u32shr.23
+    u32xor
+    loc_store.51
+    loc_store.50
+
+    # src lane 16 (RHO=45) -> dst lane 8   (m = 13)
+    loc_load.0  add.32  mem_load
+    loc_load.0  add.33  mem_load
+    loc_store.2
+    loc_store.1
+    loc_load.2  u32shl.13
+    loc_load.1  u32shr.19
+    u32xor
+    loc_load.1  u32shl.13
+    loc_load.2  u32shr.19
+    u32xor
+    loc_store.21
+    loc_store.20
+
+    # src lane 17 (RHO=15) -> dst lane 18
+    loc_load.0  add.34  mem_load
+    loc_load.0  add.35  mem_load
+    loc_store.2
+    loc_store.1
+    loc_load.1  u32shl.15
+    loc_load.2  u32shr.17
+    u32xor
+    loc_load.2  u32shl.15
+    loc_load.1  u32shr.17
+    u32xor
+    loc_store.41
+    loc_store.40
+
+    # src lane 18 (RHO=21) -> dst lane 3
+    loc_load.0  add.36  mem_load
+    loc_load.0  add.37  mem_load
+    loc_store.2
+    loc_store.1
+    loc_load.1  u32shl.21
+    loc_load.2  u32shr.11
+    u32xor
+    loc_load.2  u32shl.21
+    loc_load.1  u32shr.11
+    u32xor
+    loc_store.11
+    loc_store.10
+
+    # src lane 19 (RHO=8) -> dst lane 13
+    loc_load.0  add.38  mem_load
+    loc_load.0  add.39  mem_load
+    loc_store.2
+    loc_store.1
+    loc_load.1  u32shl.8
+    loc_load.2  u32shr.24
+    u32xor
+    loc_load.2  u32shl.8
+    loc_load.1  u32shr.24
+    u32xor
+    loc_store.31
+    loc_store.30
+
+    # src lane 20 (RHO=18) -> dst lane 14
+    loc_load.0  add.40  mem_load
+    loc_load.0  add.41  mem_load
+    loc_store.2
+    loc_store.1
+    loc_load.1  u32shl.18
+    loc_load.2  u32shr.14
+    u32xor
+    loc_load.2  u32shl.18
+    loc_load.1  u32shr.14
+    u32xor
+    loc_store.33
+    loc_store.32
+
+    # src lane 21 (RHO=2) -> dst lane 24
+    loc_load.0  add.42  mem_load
+    loc_load.0  add.43  mem_load
+    loc_store.2
+    loc_store.1
+    loc_load.1  u32shl.2
+    loc_load.2  u32shr.30
+    u32xor
+    loc_load.2  u32shl.2
+    loc_load.1  u32shr.30
+    u32xor
+    loc_store.53
+    loc_store.52
+
+    # src lane 22 (RHO=61) -> dst lane 9   (m = 29)
+    loc_load.0  add.44  mem_load
+    loc_load.0  add.45  mem_load
+    loc_store.2
+    loc_store.1
+    loc_load.2  u32shl.29
+    loc_load.1  u32shr.3
+    u32xor
+    loc_load.1  u32shl.29
+    loc_load.2  u32shr.3
+    u32xor
+    loc_store.23
+    loc_store.22
+
+    # src lane 23 (RHO=56) -> dst lane 19  (m = 24)
+    loc_load.0  add.46  mem_load
+    loc_load.0  add.47  mem_load
+    loc_store.2
+    loc_store.1
+    loc_load.2  u32shl.24
+    loc_load.1  u32shr.8
+    u32xor
+    loc_load.1  u32shl.24
+    loc_load.2  u32shr.8
+    u32xor
+    loc_store.43
+    loc_store.42
+
+    # src lane 24 (RHO=14) -> dst lane 4
+    loc_load.0  add.48  mem_load
+    loc_load.0  add.49  mem_load
+    loc_store.2
+    loc_store.1
+    loc_load.1  u32shl.14
+    loc_load.2  u32shr.18
+    u32xor
+    loc_load.2  u32shl.14
+    loc_load.1  u32shr.18
+    u32xor
+    loc_store.13
+    loc_store.12
+
+    # ----- Copy scratch state back to caller's mem[state_ptr..state_ptr+50] -----
+    # 12 word transfers (slots 4..52 = 48 felts) plus 2 individual felts at the tail.
+    padw  loc_loadw_le.4    loc_load.0  add.0    mem_storew_le  dropw
+    padw  loc_loadw_le.8    loc_load.0  add.4    mem_storew_le  dropw
+    padw  loc_loadw_le.12   loc_load.0  add.8    mem_storew_le  dropw
+    padw  loc_loadw_le.16   loc_load.0  add.12   mem_storew_le  dropw
+    padw  loc_loadw_le.20   loc_load.0  add.16   mem_storew_le  dropw
+    padw  loc_loadw_le.24   loc_load.0  add.20   mem_storew_le  dropw
+    padw  loc_loadw_le.28   loc_load.0  add.24   mem_storew_le  dropw
+    padw  loc_loadw_le.32   loc_load.0  add.28   mem_storew_le  dropw
+    padw  loc_loadw_le.36   loc_load.0  add.32   mem_storew_le  dropw
+    padw  loc_loadw_le.40   loc_load.0  add.36   mem_storew_le  dropw
+    padw  loc_loadw_le.44   loc_load.0  add.40   mem_storew_le  dropw
+    padw  loc_loadw_le.48   loc_load.0  add.44   mem_storew_le  dropw
+    loc_load.52  loc_load.0  add.48   mem_store
+    loc_load.53  loc_load.0  add.49   mem_store
+end
+
+# ===== CHI STEP =================================================================================
+
+#! Applies the chi step (FIPS 202, sec. 3.2.4, Algorithm 4) to the state at
+#! `state_ptr`, in place.
+#!
+#! Spec: A'[x, y] = A[x, y] XOR ((NOT A[x+1, y]) AND A[x+2, y])    (x mod 5)
+#!
+#! Each row y is processed independently: load the row's 5 lanes (lo, hi each)
+#! into proc-local scratch, then compute the 5 new lanes and write them back to
+#! the state. The pre-step row snapshot is required because chi reads three
+#! lanes per output and writes one; in-place reads after writes would corrupt.
+#!
+#! Stack transition:
+#!   [state_ptr, ...]  ->  [...]
+#!
+#! Local memory layout (16 felts):
+#!   0       : state_ptr cache
+#!   4..14   : per-row scratch. Row[i] at slots 4 + 2*i (lo) and 4 + 2*i + 1 (hi).
+@locals(16)
+proc chi
+    loc_store.0                                          # cache state_ptr at slot 0
+
+    # ----- Row y = 0 -----
+    padw  loc_load.0  add.0  mem_loadw_le                # state[0..3] on stack, top = state[0]
+    loc_store.4   loc_store.5   loc_store.6   loc_store.7
+    padw  loc_load.0  add.4  mem_loadw_le                # state[4..7]
+    loc_store.8   loc_store.9   loc_store.10  loc_store.11
+    loc_load.0  add.8    mem_load  loc_store.12          # row[4].lo
+    loc_load.0  add.9    mem_load  loc_store.13          # row[4].hi
+
+    # x = 0: new = row[0] ^ (~row[1] & row[2])
+    loc_load.6   push.4294967295  u32xor  loc_load.8    u32and   loc_load.4    u32xor   loc_load.0  add.0    mem_store
+    loc_load.7   push.4294967295  u32xor  loc_load.9    u32and   loc_load.5    u32xor   loc_load.0  add.1    mem_store
+    # x = 1: new = row[1] ^ (~row[2] & row[3])
+    loc_load.8   push.4294967295  u32xor  loc_load.10   u32and   loc_load.6    u32xor   loc_load.0  add.2    mem_store
+    loc_load.9   push.4294967295  u32xor  loc_load.11   u32and   loc_load.7    u32xor   loc_load.0  add.3    mem_store
+    # x = 2: new = row[2] ^ (~row[3] & row[4])
+    loc_load.10  push.4294967295  u32xor  loc_load.12   u32and   loc_load.8    u32xor   loc_load.0  add.4    mem_store
+    loc_load.11  push.4294967295  u32xor  loc_load.13   u32and   loc_load.9    u32xor   loc_load.0  add.5    mem_store
+    # x = 3: new = row[3] ^ (~row[4] & row[0])
+    loc_load.12  push.4294967295  u32xor  loc_load.4    u32and   loc_load.10   u32xor   loc_load.0  add.6    mem_store
+    loc_load.13  push.4294967295  u32xor  loc_load.5    u32and   loc_load.11   u32xor   loc_load.0  add.7    mem_store
+    # x = 4: new = row[4] ^ (~row[0] & row[1])
+    loc_load.4   push.4294967295  u32xor  loc_load.6    u32and   loc_load.12   u32xor   loc_load.0  add.8    mem_store
+    loc_load.5   push.4294967295  u32xor  loc_load.7    u32and   loc_load.13   u32xor   loc_load.0  add.9    mem_store
+
+    # ----- Row y = 1 -----
+    # state[10..11] are misaligned leftovers from word state[8..11]; load singly.
+    loc_load.0  add.10   mem_load  loc_store.4
+    loc_load.0  add.11   mem_load  loc_store.5
+    padw  loc_load.0  add.12  mem_loadw_le               # state[12..15]
+    loc_store.6  loc_store.7  loc_store.8  loc_store.9
+    padw  loc_load.0  add.16  mem_loadw_le               # state[16..19]
+    loc_store.10 loc_store.11 loc_store.12 loc_store.13
+
+    loc_load.6   push.4294967295  u32xor  loc_load.8    u32and   loc_load.4    u32xor   loc_load.0  add.10   mem_store
+    loc_load.7   push.4294967295  u32xor  loc_load.9    u32and   loc_load.5    u32xor   loc_load.0  add.11   mem_store
+    loc_load.8   push.4294967295  u32xor  loc_load.10   u32and   loc_load.6    u32xor   loc_load.0  add.12   mem_store
+    loc_load.9   push.4294967295  u32xor  loc_load.11   u32and   loc_load.7    u32xor   loc_load.0  add.13   mem_store
+    loc_load.10  push.4294967295  u32xor  loc_load.12   u32and   loc_load.8    u32xor   loc_load.0  add.14   mem_store
+    loc_load.11  push.4294967295  u32xor  loc_load.13   u32and   loc_load.9    u32xor   loc_load.0  add.15   mem_store
+    loc_load.12  push.4294967295  u32xor  loc_load.4    u32and   loc_load.10   u32xor   loc_load.0  add.16   mem_store
+    loc_load.13  push.4294967295  u32xor  loc_load.5    u32and   loc_load.11   u32xor   loc_load.0  add.17   mem_store
+    loc_load.4   push.4294967295  u32xor  loc_load.6    u32and   loc_load.12   u32xor   loc_load.0  add.18   mem_store
+    loc_load.5   push.4294967295  u32xor  loc_load.7    u32and   loc_load.13   u32xor   loc_load.0  add.19   mem_store
+
+    # ----- Row y = 2 -----
+    padw  loc_load.0  add.20  mem_loadw_le               # state[20..23]
+    loc_store.4   loc_store.5   loc_store.6   loc_store.7
+    padw  loc_load.0  add.24  mem_loadw_le               # state[24..27]
+    loc_store.8   loc_store.9   loc_store.10  loc_store.11
+    loc_load.0  add.28   mem_load  loc_store.12
+    loc_load.0  add.29   mem_load  loc_store.13
+
+    loc_load.6   push.4294967295  u32xor  loc_load.8    u32and   loc_load.4    u32xor   loc_load.0  add.20   mem_store
+    loc_load.7   push.4294967295  u32xor  loc_load.9    u32and   loc_load.5    u32xor   loc_load.0  add.21   mem_store
+    loc_load.8   push.4294967295  u32xor  loc_load.10   u32and   loc_load.6    u32xor   loc_load.0  add.22   mem_store
+    loc_load.9   push.4294967295  u32xor  loc_load.11   u32and   loc_load.7    u32xor   loc_load.0  add.23   mem_store
+    loc_load.10  push.4294967295  u32xor  loc_load.12   u32and   loc_load.8    u32xor   loc_load.0  add.24   mem_store
+    loc_load.11  push.4294967295  u32xor  loc_load.13   u32and   loc_load.9    u32xor   loc_load.0  add.25   mem_store
+    loc_load.12  push.4294967295  u32xor  loc_load.4    u32and   loc_load.10   u32xor   loc_load.0  add.26   mem_store
+    loc_load.13  push.4294967295  u32xor  loc_load.5    u32and   loc_load.11   u32xor   loc_load.0  add.27   mem_store
+    loc_load.4   push.4294967295  u32xor  loc_load.6    u32and   loc_load.12   u32xor   loc_load.0  add.28   mem_store
+    loc_load.5   push.4294967295  u32xor  loc_load.7    u32and   loc_load.13   u32xor   loc_load.0  add.29   mem_store
+
+    # ----- Row y = 3 -----
+    # state[30..31] are misaligned leftovers from word state[28..31]; load singly.
+    loc_load.0  add.30   mem_load  loc_store.4
+    loc_load.0  add.31   mem_load  loc_store.5
+    padw  loc_load.0  add.32  mem_loadw_le               # state[32..35]
+    loc_store.6  loc_store.7  loc_store.8  loc_store.9
+    padw  loc_load.0  add.36  mem_loadw_le               # state[36..39]
+    loc_store.10 loc_store.11 loc_store.12 loc_store.13
+
+    loc_load.6   push.4294967295  u32xor  loc_load.8    u32and   loc_load.4    u32xor   loc_load.0  add.30   mem_store
+    loc_load.7   push.4294967295  u32xor  loc_load.9    u32and   loc_load.5    u32xor   loc_load.0  add.31   mem_store
+    loc_load.8   push.4294967295  u32xor  loc_load.10   u32and   loc_load.6    u32xor   loc_load.0  add.32   mem_store
+    loc_load.9   push.4294967295  u32xor  loc_load.11   u32and   loc_load.7    u32xor   loc_load.0  add.33   mem_store
+    loc_load.10  push.4294967295  u32xor  loc_load.12   u32and   loc_load.8    u32xor   loc_load.0  add.34   mem_store
+    loc_load.11  push.4294967295  u32xor  loc_load.13   u32and   loc_load.9    u32xor   loc_load.0  add.35   mem_store
+    loc_load.12  push.4294967295  u32xor  loc_load.4    u32and   loc_load.10   u32xor   loc_load.0  add.36   mem_store
+    loc_load.13  push.4294967295  u32xor  loc_load.5    u32and   loc_load.11   u32xor   loc_load.0  add.37   mem_store
+    loc_load.4   push.4294967295  u32xor  loc_load.6    u32and   loc_load.12   u32xor   loc_load.0  add.38   mem_store
+    loc_load.5   push.4294967295  u32xor  loc_load.7    u32and   loc_load.13   u32xor   loc_load.0  add.39   mem_store
+
+    # ----- Row y = 4 -----
+    padw  loc_load.0  add.40  mem_loadw_le               # state[40..43]
+    loc_store.4   loc_store.5   loc_store.6   loc_store.7
+    padw  loc_load.0  add.44  mem_loadw_le               # state[44..47]
+    loc_store.8   loc_store.9   loc_store.10  loc_store.11
+    loc_load.0  add.48   mem_load  loc_store.12
+    loc_load.0  add.49   mem_load  loc_store.13
+
+    loc_load.6   push.4294967295  u32xor  loc_load.8    u32and   loc_load.4    u32xor   loc_load.0  add.40   mem_store
+    loc_load.7   push.4294967295  u32xor  loc_load.9    u32and   loc_load.5    u32xor   loc_load.0  add.41   mem_store
+    loc_load.8   push.4294967295  u32xor  loc_load.10   u32and   loc_load.6    u32xor   loc_load.0  add.42   mem_store
+    loc_load.9   push.4294967295  u32xor  loc_load.11   u32and   loc_load.7    u32xor   loc_load.0  add.43   mem_store
+    loc_load.10  push.4294967295  u32xor  loc_load.12   u32and   loc_load.8    u32xor   loc_load.0  add.44   mem_store
+    loc_load.11  push.4294967295  u32xor  loc_load.13   u32and   loc_load.9    u32xor   loc_load.0  add.45   mem_store
+    loc_load.12  push.4294967295  u32xor  loc_load.4    u32and   loc_load.10   u32xor   loc_load.0  add.46   mem_store
+    loc_load.13  push.4294967295  u32xor  loc_load.5    u32and   loc_load.11   u32xor   loc_load.0  add.47   mem_store
+    loc_load.4   push.4294967295  u32xor  loc_load.6    u32and   loc_load.12   u32xor   loc_load.0  add.48   mem_store
+    loc_load.5   push.4294967295  u32xor  loc_load.7    u32and   loc_load.13   u32xor   loc_load.0  add.49   mem_store
+end
+
+# ===== IOTA STEP ================================================================================
+
+#! Applies the iota step (FIPS 202, sec. 3.2.5, Algorithm 6) to the state:
+#!
+#!   A'[(0, 0)] = A[(0, 0)] XOR RC
+#!
+#! `RC` is the per-round constant from FIPS 202 Table 2; each round of `permute`
+#! supplies a different one. Stack convention takes RC as a (lo, hi) pair so the
+#! constant doesn't need to leave the operand stack via memory.
+#!
+#! Stack transition:
+#!   [rc_hi, rc_lo, state_ptr, ...]  ->  [...]
+#!
+#! Local memory layout (4 felts):
+#!   0 : state_ptr
+#!   1 : rc_lo
+#!   2 : rc_hi
+@locals(4)
+proc iota
+    loc_store.2                                          # save rc_hi
+    loc_store.1                                          # save rc_lo
+    loc_store.0                                          # save state_ptr
+
+    # XOR rc_lo into mem[state_ptr + 0].
+    loc_load.0   dup    mem_load                          # [val, addr]
+    loc_load.1   u32xor                                   # [val ^ rc_lo, addr]
+    swap                                                  # [addr, val ^ rc_lo]
+    mem_store
+
+    # XOR rc_hi into mem[state_ptr + 1].
+    loc_load.0   add.1  dup    mem_load                   # [val, addr]
+    loc_load.2   u32xor                                   # [val ^ rc_hi, addr]
+    swap                                                  # [addr, val ^ rc_hi]
+    mem_store
+end
+
+# ===== KECCAK-F[1600] PERMUTATION ===============================================================
+
+#! Applies the full Keccak-f[1600] permutation (FIPS 202, sec. 3.3): 24 rounds
+#! of (theta, rho-pi, chi, iota) applied in sequence. Operates in place on the
+#! state at `state_ptr`.
+#!
+#! Stack transition:
+#!   [state_ptr, ...]  ->  [...]
+#!
+#! The body unrolls all 24 rounds rather than looping, so each round's iota
+#! constant is pushed inline as a (lo, hi) pair from FIPS 202 Table 2. This
+#! keeps the unique-constants-per-round requirement straightforward and avoids
+#! any runtime constant-table lookup.
+#!
+#! Local memory layout (4 felts):
+#!   0 : state_ptr cache
+@locals(4)
+proc permute
+    loc_store.0
+
+    # Round 0: RC = 0x0000000000000001
+    loc_load.0  exec.theta
+    loc_load.0  exec.rho_pi
+    loc_load.0  exec.chi
+    loc_load.0  push.1            push.0            exec.iota
+
+    # Round 1: RC = 0x0000000000008082
+    loc_load.0  exec.theta
+    loc_load.0  exec.rho_pi
+    loc_load.0  exec.chi
+    loc_load.0  push.32898        push.0            exec.iota
+
+    # Round 2: RC = 0x800000000000808a
+    loc_load.0  exec.theta
+    loc_load.0  exec.rho_pi
+    loc_load.0  exec.chi
+    loc_load.0  push.32906        push.2147483648   exec.iota
+
+    # Round 3: RC = 0x8000000080008000
+    loc_load.0  exec.theta
+    loc_load.0  exec.rho_pi
+    loc_load.0  exec.chi
+    loc_load.0  push.2147516416   push.2147483648   exec.iota
+
+    # Round 4: RC = 0x000000000000808b
+    loc_load.0  exec.theta
+    loc_load.0  exec.rho_pi
+    loc_load.0  exec.chi
+    loc_load.0  push.32907        push.0            exec.iota
+
+    # Round 5: RC = 0x0000000080000001
+    loc_load.0  exec.theta
+    loc_load.0  exec.rho_pi
+    loc_load.0  exec.chi
+    loc_load.0  push.2147483649   push.0            exec.iota
+
+    # Round 6: RC = 0x8000000080008081
+    loc_load.0  exec.theta
+    loc_load.0  exec.rho_pi
+    loc_load.0  exec.chi
+    loc_load.0  push.2147516545   push.2147483648   exec.iota
+
+    # Round 7: RC = 0x8000000000008009
+    loc_load.0  exec.theta
+    loc_load.0  exec.rho_pi
+    loc_load.0  exec.chi
+    loc_load.0  push.32777        push.2147483648   exec.iota
+
+    # Round 8: RC = 0x000000000000008a
+    loc_load.0  exec.theta
+    loc_load.0  exec.rho_pi
+    loc_load.0  exec.chi
+    loc_load.0  push.138          push.0            exec.iota
+
+    # Round 9: RC = 0x0000000000000088
+    loc_load.0  exec.theta
+    loc_load.0  exec.rho_pi
+    loc_load.0  exec.chi
+    loc_load.0  push.136          push.0            exec.iota
+
+    # Round 10: RC = 0x0000000080008009
+    loc_load.0  exec.theta
+    loc_load.0  exec.rho_pi
+    loc_load.0  exec.chi
+    loc_load.0  push.2147516425   push.0            exec.iota
+
+    # Round 11: RC = 0x000000008000000a
+    loc_load.0  exec.theta
+    loc_load.0  exec.rho_pi
+    loc_load.0  exec.chi
+    loc_load.0  push.2147483658   push.0            exec.iota
+
+    # Round 12: RC = 0x000000008000808b
+    loc_load.0  exec.theta
+    loc_load.0  exec.rho_pi
+    loc_load.0  exec.chi
+    loc_load.0  push.2147516555   push.0            exec.iota
+
+    # Round 13: RC = 0x800000000000008b
+    loc_load.0  exec.theta
+    loc_load.0  exec.rho_pi
+    loc_load.0  exec.chi
+    loc_load.0  push.139          push.2147483648   exec.iota
+
+    # Round 14: RC = 0x8000000000008089
+    loc_load.0  exec.theta
+    loc_load.0  exec.rho_pi
+    loc_load.0  exec.chi
+    loc_load.0  push.32905        push.2147483648   exec.iota
+
+    # Round 15: RC = 0x8000000000008003
+    loc_load.0  exec.theta
+    loc_load.0  exec.rho_pi
+    loc_load.0  exec.chi
+    loc_load.0  push.32771        push.2147483648   exec.iota
+
+    # Round 16: RC = 0x8000000000008002
+    loc_load.0  exec.theta
+    loc_load.0  exec.rho_pi
+    loc_load.0  exec.chi
+    loc_load.0  push.32770        push.2147483648   exec.iota
+
+    # Round 17: RC = 0x8000000000000080
+    loc_load.0  exec.theta
+    loc_load.0  exec.rho_pi
+    loc_load.0  exec.chi
+    loc_load.0  push.128          push.2147483648   exec.iota
+
+    # Round 18: RC = 0x000000000000800a
+    loc_load.0  exec.theta
+    loc_load.0  exec.rho_pi
+    loc_load.0  exec.chi
+    loc_load.0  push.32778        push.0            exec.iota
+
+    # Round 19: RC = 0x800000008000000a
+    loc_load.0  exec.theta
+    loc_load.0  exec.rho_pi
+    loc_load.0  exec.chi
+    loc_load.0  push.2147483658   push.2147483648   exec.iota
+
+    # Round 20: RC = 0x8000000080008081
+    loc_load.0  exec.theta
+    loc_load.0  exec.rho_pi
+    loc_load.0  exec.chi
+    loc_load.0  push.2147516545   push.2147483648   exec.iota
+
+    # Round 21: RC = 0x8000000000008080
+    loc_load.0  exec.theta
+    loc_load.0  exec.rho_pi
+    loc_load.0  exec.chi
+    loc_load.0  push.32896        push.2147483648   exec.iota
+
+    # Round 22: RC = 0x0000000080000001
+    loc_load.0  exec.theta
+    loc_load.0  exec.rho_pi
+    loc_load.0  exec.chi
+    loc_load.0  push.2147483649   push.0            exec.iota
+
+    # Round 23: RC = 0x8000000080008008
+    loc_load.0  exec.theta
+    loc_load.0  exec.rho_pi
+    loc_load.0  exec.chi
+    loc_load.0  push.2147516424   push.2147483648   exec.iota
+end
+
+# ===== ABSORB BLOCK =============================================================================
+
+#! XORs one rate-sized block (17 lanes = 34 u32 felts = 136 bytes) of `src`
+#! into the rate portion of `state`. Per FIPS 202, sec. B.2: each rate lane is
+#! a 64-bit little-endian-packed value taken from 8 consecutive input bytes.
+#! Within the lane, the lo half (bits 0..32) lives at the lower address; this
+#! matches the rest of the state layout.
+#!
+#! Stack transition:
+#!   [state_ptr, src_ptr, ...]  ->  [...]
+#!
+#! Local memory layout (4 felts):
+#!   0 : state_ptr cache
+#!   1 : src_ptr cache
+@locals(4)
+proc absorb_block
+    loc_store.0                                          # cache state_ptr
+    loc_store.1                                          # cache src_ptr
+
+    # For each i in 0..34: state[i] ^= src[i]. (34 unrolled iterations.)
+    loc_load.0  add.0    dup   mem_load     loc_load.1  add.0    mem_load   u32xor   swap   mem_store
+    loc_load.0  add.1    dup   mem_load     loc_load.1  add.1    mem_load   u32xor   swap   mem_store
+    loc_load.0  add.2    dup   mem_load     loc_load.1  add.2    mem_load   u32xor   swap   mem_store
+    loc_load.0  add.3    dup   mem_load     loc_load.1  add.3    mem_load   u32xor   swap   mem_store
+    loc_load.0  add.4    dup   mem_load     loc_load.1  add.4    mem_load   u32xor   swap   mem_store
+    loc_load.0  add.5    dup   mem_load     loc_load.1  add.5    mem_load   u32xor   swap   mem_store
+    loc_load.0  add.6    dup   mem_load     loc_load.1  add.6    mem_load   u32xor   swap   mem_store
+    loc_load.0  add.7    dup   mem_load     loc_load.1  add.7    mem_load   u32xor   swap   mem_store
+    loc_load.0  add.8    dup   mem_load     loc_load.1  add.8    mem_load   u32xor   swap   mem_store
+    loc_load.0  add.9    dup   mem_load     loc_load.1  add.9    mem_load   u32xor   swap   mem_store
+    loc_load.0  add.10   dup   mem_load     loc_load.1  add.10   mem_load   u32xor   swap   mem_store
+    loc_load.0  add.11   dup   mem_load     loc_load.1  add.11   mem_load   u32xor   swap   mem_store
+    loc_load.0  add.12   dup   mem_load     loc_load.1  add.12   mem_load   u32xor   swap   mem_store
+    loc_load.0  add.13   dup   mem_load     loc_load.1  add.13   mem_load   u32xor   swap   mem_store
+    loc_load.0  add.14   dup   mem_load     loc_load.1  add.14   mem_load   u32xor   swap   mem_store
+    loc_load.0  add.15   dup   mem_load     loc_load.1  add.15   mem_load   u32xor   swap   mem_store
+    loc_load.0  add.16   dup   mem_load     loc_load.1  add.16   mem_load   u32xor   swap   mem_store
+    loc_load.0  add.17   dup   mem_load     loc_load.1  add.17   mem_load   u32xor   swap   mem_store
+    loc_load.0  add.18   dup   mem_load     loc_load.1  add.18   mem_load   u32xor   swap   mem_store
+    loc_load.0  add.19   dup   mem_load     loc_load.1  add.19   mem_load   u32xor   swap   mem_store
+    loc_load.0  add.20   dup   mem_load     loc_load.1  add.20   mem_load   u32xor   swap   mem_store
+    loc_load.0  add.21   dup   mem_load     loc_load.1  add.21   mem_load   u32xor   swap   mem_store
+    loc_load.0  add.22   dup   mem_load     loc_load.1  add.22   mem_load   u32xor   swap   mem_store
+    loc_load.0  add.23   dup   mem_load     loc_load.1  add.23   mem_load   u32xor   swap   mem_store
+    loc_load.0  add.24   dup   mem_load     loc_load.1  add.24   mem_load   u32xor   swap   mem_store
+    loc_load.0  add.25   dup   mem_load     loc_load.1  add.25   mem_load   u32xor   swap   mem_store
+    loc_load.0  add.26   dup   mem_load     loc_load.1  add.26   mem_load   u32xor   swap   mem_store
+    loc_load.0  add.27   dup   mem_load     loc_load.1  add.27   mem_load   u32xor   swap   mem_store
+    loc_load.0  add.28   dup   mem_load     loc_load.1  add.28   mem_load   u32xor   swap   mem_store
+    loc_load.0  add.29   dup   mem_load     loc_load.1  add.29   mem_load   u32xor   swap   mem_store
+    loc_load.0  add.30   dup   mem_load     loc_load.1  add.30   mem_load   u32xor   swap   mem_store
+    loc_load.0  add.31   dup   mem_load     loc_load.1  add.31   mem_load   u32xor   swap   mem_store
+    loc_load.0  add.32   dup   mem_load     loc_load.1  add.32   mem_load   u32xor   swap   mem_store
+    loc_load.0  add.33   dup   mem_load     loc_load.1  add.33   mem_load   u32xor   swap   mem_store
+end
+
+# ===== KECCAK-256 (FULL SPONGE) =================================================================
+
+#! Computes Keccak-256 of a byte buffer stored as u32-packed little-endian
+#! felts in memory. Input convention matches the precompile path
+#! (`hash_bytes` in `keccak256.masm`):
+#!
+#! - `src_ptr` points to `ceil(len_bytes / 4)` u32 felts.
+#! - Each u32 packs four little-endian bytes: u32[k] = b[4k] | (b[4k+1] << 8) | ...
+#! - If `len_bytes` is not a multiple of 4, the trailing bytes of the final
+#!   u32 must be zero (the proc relies on this when ORing the domain byte in).
+#!
+#! Stack transition:
+#!   [src_ptr, len_bytes, ...]  ->  [d_0, d_1, ..., d_7, ...]
+#!
+#! Where `d_0..d_7` are 8 u32 felts forming the 32-byte digest in little-endian
+#! lane order (`d_k = state[k]` after the final permutation): bytes 0..32 of the
+#! digest correspond to (d_0 bytes 0..4) || (d_1 bytes 0..4) || ... || (d_7
+#! bytes 0..4), matching `Keccak256::hash` output.
+#!
+#! Local memory layout (96 felts):
+#!   0..50   : sponge state (50 felts).
+#!   50, 51  : unused (alignment padding before scratch).
+#!   52..86  : final-block scratch (34 felts; word-aligned at 52).
+#!   86..96  : runtime counters --
+#!     86 : src_ptr (current; advanced by 34 per absorbed block)
+#!     87 : remaining bytes (decremented by 136 per absorbed block)
+#!     88 : final-block u32 count (= ceil(remaining / 4))
+#!     89 : copy-loop counter i
+#!     90 : final-block q = remaining / 4
+#!     91 : final-block r = remaining mod 4
+#!     92..96 : unused
+@locals(96)
+pub proc keccak256_bytes
+    # ----- Phase 1: cache args and zero the state -----
+    u32assert2                                           # range-check len_bytes (and src_ptr, free)
+    loc_store.86                                         # src_ptr (current)
+    loc_store.87                                         # remaining bytes
+
+    # Zero state slots 0..50. One shared `padw`; each `loc_storew_le` writes the zero
+    # word and leaves it on stack for the next store; final `dropw` clears it.
+    padw
+    loc_storew_le.0
+    loc_storew_le.4
+    loc_storew_le.8
+    loc_storew_le.12
+    loc_storew_le.16
+    loc_storew_le.20
+    loc_storew_le.24
+    loc_storew_le.28
+    loc_storew_le.32
+    loc_storew_le.36
+    loc_storew_le.40
+    loc_storew_le.44
+    dropw
+    push.0  loc_store.48
+    push.0  loc_store.49
+
+    # ----- Phase 2: absorb full blocks while remaining >= 136 -----
+    loc_load.87  u32gte.136
+    while.true
+        # absorb_block(state_ptr = locaddr.0, src_ptr = mem[86]).
+        loc_load.86   locaddr.0   exec.absorb_block
+        locaddr.0     exec.permute
+        # Advance src_ptr by 34 (u32 indices), remaining by -136 (bytes).
+        loc_load.86   add.34    loc_store.86
+        loc_load.87   sub.136   loc_store.87
+        # Recompute loop condition.
+        loc_load.87   u32gte.136
+    end
+
+    # ----- Phase 3: final block -----
+    # Zero scratch[52..86] so subsequent partial copy + OR yields the canonical
+    # padded block.
+    padw
+    loc_storew_le.52
+    loc_storew_le.56
+    loc_storew_le.60
+    loc_storew_le.64
+    loc_storew_le.68
+    loc_storew_le.72
+    loc_storew_le.76
+    loc_storew_le.80
+    dropw
+    push.0  loc_store.84
+    push.0  loc_store.85
+
+    # num_u32s = ceil(remaining / 4) = (remaining + 3) >> 2.
+    loc_load.87  add.3   u32shr.2   loc_store.88
+
+    # Copy src[0..num_u32s] into scratch[52..52+num_u32s].
+    push.0  loc_store.89                                  # i = 0
+    loc_load.89   loc_load.88   u32lt                     # i < num_u32s ?
+    while.true
+        # scratch[52 + i] = src[src_ptr + i].
+        loc_load.86  loc_load.89  add   mem_load          # [src[i]]
+        locaddr.52   loc_load.89   add                    # [scratch_addr, src[i]]
+        mem_store
+        # i += 1.
+        loc_load.89  add.1  loc_store.89
+        loc_load.89  loc_load.88   u32lt
+    end
+
+    # Apply padding to scratch:
+    #   scratch[q]  |= 0x01 << (8 * r)      (domain byte)
+    #   scratch[33] |= 0x80000000           (final-bit flag)
+    # where q = remaining / 4, r = remaining mod 4.
+    loc_load.87   u32shr.2          loc_store.90          # q
+    loc_load.87   push.3   u32and   loc_store.91          # r
+
+    # pad_mask = 0x01 << (8 * r). r in {0, 1, 2, 3} => mask in {1, 0x100, 0x10000, 0x1000000}.
+    loc_load.91   eq.0
+    if.true
+        push.1
+    else
+        loc_load.91   eq.1
+        if.true
+            push.256                                       # 0x100
+        else
+            loc_load.91   eq.2
+            if.true
+                push.65536                                  # 0x10000
+            else
+                push.16777216                               # 0x1000000
+            end
+        end
+    end
+    # Stack: [pad_mask]
+
+    # scratch[q] |= pad_mask.
+    locaddr.52   loc_load.90   add        # [scratch_q_addr, pad_mask]
+    dup   mem_load                        # [val, addr, pad_mask]
+    movup.2   u32or                       # [val | pad_mask, addr]
+    swap   mem_store
+
+    # scratch[33] |= 0x80000000.
+    locaddr.85   dup   mem_load           # [val, addr]   (slot 52 + 33 = 85)
+    push.2147483648   u32or               # [val | 0x80000000, addr]
+    swap   mem_store
+
+    # Absorb scratch into state, permute.
+    locaddr.52   locaddr.0   exec.absorb_block
+    locaddr.0    exec.permute
+
+    # ----- Phase 4: squeeze -----
+    # Push state[0..8] onto stack so that state[0] (= d_0) ends up on top
+    # and state[7] (= d_7) is deepest.
+    loc_load.7
+    loc_load.6
+    loc_load.5
+    loc_load.4
+    loc_load.3
+    loc_load.2
+    loc_load.1
+    loc_load.0
+end
