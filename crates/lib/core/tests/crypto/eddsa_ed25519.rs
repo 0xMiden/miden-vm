@@ -1,9 +1,9 @@
 //! Tests for the EdDSA Ed25519 / SHA-512 precompile MASM wrappers.
 //!
-//! After the LegacyPrecompile migration, EdDSA verification runs entirely inside the schema's
-//! `reduce` (no host-side event handler). The MASM wrappers register the chunk node, evaluate
-//! the predicate (which traps on signature failure), and fold the chunk digest into the
-//! precompile transcript.
+//! EdDSA verification runs entirely inside the `EddsaEd25519Precompile` schema's `reduce` (no
+//! host-side event handler). The MASM wrappers register the chunk node, evaluate the predicate
+//! (which traps on signature failure), and fold the chunk digest into the precompile
+//! transcript.
 
 use miden_core::{
     Felt, Word,

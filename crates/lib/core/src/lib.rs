@@ -7,13 +7,14 @@ extern crate std;
 pub mod constraints_regen;
 pub mod dsa;
 pub mod handlers;
+pub mod precompiles;
 
 extern crate alloc;
 
 use alloc::{sync::Arc, vec, vec::Vec};
 
 use miden_assembly::{Library, mast::MastForest};
-use miden_core::{events::EventName, serde::Deserializable};
+use miden_core::{deferred::PrecompileSchema, events::EventName, serde::Deserializable};
 use miden_processor::{HostLibrary, event::EventHandler};
 use miden_utils_sync::LazyLock;
 
@@ -136,6 +137,17 @@ impl CoreLibrary {
         ]
     }
 
+    /// Composite [`PrecompileSchema`] hosting all four core precompile apps (keccak256, sha512,
+    /// ecdsa_k256_keccak, eddsa_ed25519). Wire into a [`FastProcessor`] via
+    /// [`FastProcessor::with_schema`] when running programs that use the precompile MASM
+    /// wrappers; programs that don't touch precompiles can run with the processor's empty
+    /// default.
+    ///
+    /// [`FastProcessor`]: miden_processor::FastProcessor
+    /// [`FastProcessor::with_schema`]: miden_processor::FastProcessor::with_schema
+    pub fn precompile_schema(&self) -> PrecompileSchema {
+        precompiles::schema()
+    }
 }
 
 impl Default for CoreLibrary {

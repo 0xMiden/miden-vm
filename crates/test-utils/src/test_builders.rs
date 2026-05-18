@@ -163,6 +163,7 @@ macro_rules! build_test_by_mode {
             libraries: ::alloc::vec::Vec::default(),
             handlers: ::alloc::vec::Vec::new(),
             add_modules: ::alloc::vec::Vec::default(),
+            schema: ::alloc::sync::Arc::new($crate::PrecompileSchema::new([])),
         }
     }};
     ($in_debug_mode:expr, $source:expr, $stack_inputs:expr, $advice_stack:expr) => {{
@@ -194,6 +195,7 @@ macro_rules! build_test_by_mode {
             libraries: ::alloc::vec::Vec::default(),
             handlers: ::alloc::vec::Vec::new(),
             add_modules: ::alloc::vec::Vec::default(),
+            schema: ::alloc::sync::Arc::new($crate::PrecompileSchema::new([])),
         }
     }};
     (
@@ -230,6 +232,7 @@ macro_rules! build_test_by_mode {
             libraries: ::alloc::vec::Vec::default(),
             handlers: ::alloc::vec::Vec::new(),
             add_modules: ::alloc::vec::Vec::default(),
+            schema: ::alloc::sync::Arc::new($crate::PrecompileSchema::new([])),
         }
     }};
     (
@@ -268,6 +271,7 @@ macro_rules! build_test_by_mode {
             libraries: ::alloc::vec::Vec::default(),
             handlers: ::alloc::vec::Vec::new(),
             add_modules: ::alloc::vec::Vec::default(),
+            schema: ::alloc::sync::Arc::new($crate::PrecompileSchema::new([])),
         }
     }};
 }

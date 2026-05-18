@@ -10,16 +10,16 @@ use miden::core::sys
 # - Fixed-size examples: DIGEST_U32[8] = [d_0, ..., d_7], INPUT_U8[32] = [b_0, ..., b_31]
 # - DIGEST_U32[8] = [d_0, ..., d_7] = Keccak256(INPUT_U8[..])
 
-# CONSTANTS — LegacyPrecompile schema tag fields
+# CONSTANTS — Keccak256Precompile schema tag fields
 # ================================================================================================
-# Pinned to the Rust-side LegacyPrecompile constants (see
-# core/src/deferred/app/legacy_precompile.rs `masm_constants_pinned_to_rust_values`).
+# Pinned to the Rust-side Keccak256Precompile constants (see
+# crates/lib/core/src/precompiles/mod.rs `masm_constants_pinned_to_rust_values`).
 # Changing VERSION / DISCS / NAME in Rust must update these values in lockstep.
 
-const LP_APP_ID = 18269343673680090362
-const LP_D_KECCAK_PREIMAGE = 0
-const LP_D_KECCAK_DIGEST = 1
-const LP_D_KECCAK_EQ = 2
+const APP_ID = 15236188148055918137
+const D_PREIMAGE = 0
+const D_DIGEST = 1
+const D_EQ = 2
 
 # PROCEDURES
 # ================================================================================================
@@ -44,7 +44,7 @@ const LP_D_KECCAK_EQ = 2
 #! Flow:
 #!   1. Register the preimage chunk node (`Keccak256::preimage` tag at app_id) referencing the
 #!      bytes already in memory at `ptr`.
-#!   2. Evaluate that chunk → the installed LegacyPrecompile schema runs Keccak256::hash and
+#!   2. Evaluate that chunk → the installed Keccak256Precompile schema runs Keccak256::hash and
 #!      pushes the canonical Digest leaf (PAYLOAD_LO || PAYLOAD_HI || LEAF_TAG) onto the
 #!      advice stack.
 #!   3. Save the digest words to locals (for the caller's return) and register the digest leaf,
@@ -60,16 +60,16 @@ const LP_D_KECCAK_EQ = 2
 @locals(16)
 pub proc hash_bytes
     # ---- Step 1: Register preimage chunk → PREIMAGE_DIGEST ----
-    # Build PREIMAGE_TAG = [LP_APP_ID, D_KECCAK_PREIMAGE, len_bytes, 0] on top, with ptr beneath.
+    # Build PREIMAGE_TAG = [APP_ID, D_PREIMAGE, len_bytes, 0] on top, with ptr beneath.
     # Stack before:   [ptr, len_bytes, ...]
-    # Stack after:    [LP_APP_ID, D_PREIMAGE, len_bytes, 0, ptr, ...]
+    # Stack after:    [APP_ID, D_PREIMAGE, len_bytes, 0, ptr, ...]
     push.0
     # => [0, ptr, len_bytes, ...]
     movup.2
     # => [len_bytes, 0, ptr, ...]
-    push.LP_D_KECCAK_PREIMAGE
-    push.LP_APP_ID
-    # => [LP_APP_ID, D_PREIMAGE, len_bytes, 0, ptr, ...]
+    push.D_PREIMAGE
+    push.APP_ID
+    # => [APP_ID, D_PREIMAGE, len_bytes, 0, ptr, ...]
     exec.sys::register_chunk
     # => [PREIMAGE_DIGEST, ...]
 
@@ -99,10 +99,10 @@ pub proc hash_bytes
     # ---- Step 5: Save LEAF_DIGEST, build eq node ----
     loc_storew_le.12 dropw              # loc[12..16] = LEAF_DIGEST
 
-    # Build EQ_TAG = [LP_APP_ID, D_KECCAK_EQ, 0, 0] on top.
+    # Build EQ_TAG = [APP_ID, D_EQ, 0, 0] on top.
     push.0.0
-    push.LP_D_KECCAK_EQ
-    push.LP_APP_ID
+    push.D_EQ
+    push.APP_ID
     # => [EQ_TAG, ...]
 
     # Stage [PREIMAGE_DIGEST, LEAF_DIGEST, EQ_TAG] for register_expr.

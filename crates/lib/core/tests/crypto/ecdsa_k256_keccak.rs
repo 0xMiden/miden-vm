@@ -1,9 +1,9 @@
 //! Tests for the ECDSA secp256k1 / Keccak256 precompile MASM wrappers.
 //!
-//! After the LegacyPrecompile migration, ECDSA verification is performed entirely inside the
-//! schema's `reduce` (no host-side event handler). The MASM wrappers register the chunk node,
-//! evaluate the predicate (which traps on signature failure), and fold the chunk digest into
-//! the precompile transcript.
+//! ECDSA verification is performed entirely inside the `EcdsaK256KeccakPrecompile` schema's
+//! `reduce` (no host-side event handler). The MASM wrappers register the chunk node, evaluate
+//! the predicate (which traps on signature failure), and fold the chunk digest into the
+//! precompile transcript.
 
 use miden_core::{
     Felt, Word,

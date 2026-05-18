@@ -1,8 +1,7 @@
 //! Tests for the SHA-512 precompile MASM wrappers.
 //!
-//! After the LegacyPrecompile migration, the sha512 precompile no longer has a host-side event
-//! handler — `crypto/hashes/sha512.masm` drives the deferred-DAG sys events directly, and the
-//! installed schema's `reduce` runs `Sha512::hash` at evaluation time.
+//! `crypto/hashes/sha512.masm` drives the deferred-DAG sys events directly, and the installed
+//! `Sha512Precompile` schema's `reduce` runs `Sha512::hash` at evaluation time.
 
 use core::array;
 

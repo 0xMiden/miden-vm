@@ -24,12 +24,14 @@ use miden_core::program::ProgramInfo;
 pub use miden_core::{
     EMPTY_WORD, Felt, ONE, WORD_SIZE, Word, ZERO,
     chiplets::hasher::{STATE_WIDTH, hash_elements},
+    deferred::PrecompileSchema,
     field::{Field, PrimeCharacteristicRing, PrimeField64, QuadFelt},
     program::{MIN_STACK_DEPTH, StackInputs, StackOutputs},
     utils::{IntoBytes, ToElements, group_slice_elements},
 };
 use miden_core::{
     chiplets::hasher::apply_permutation,
+    deferred::Schema,
     events::{EventName, SystemEvent},
 };
 pub use miden_processor::{
@@ -217,6 +219,7 @@ pub struct Test {
     pub libraries: Vec<Library>,
     pub handlers: Vec<(EventName, Arc<dyn EventHandler>)>,
     pub add_modules: Vec<(Arc<Path>, String)>,
+    pub schema: Arc<dyn Schema>,
 }
 
 // BUFFER WRITER FOR TESTING
@@ -253,6 +256,7 @@ impl Test {
             libraries: Vec::default(),
             handlers: Vec::new(),
             add_modules: Vec::default(),
+            schema: Arc::new(PrecompileSchema::new([])),
         }
     }
 
@@ -289,6 +293,14 @@ impl Test {
     /// Adds a library to link in during assembly.
     pub fn with_library(mut self, library: impl Into<Library>) -> Self {
         self.libraries.push(library.into());
+        self
+    }
+
+    /// Installs the deferred-DAG [`Schema`] used by the test's `FastProcessor`. Defaults to an
+    /// empty [`PrecompileSchema`] — programs that emit precompile tags must install one (e.g.
+    /// `miden_core_lib::CoreLibrary::precompile_schema()`).
+    pub fn with_schema(mut self, schema: Arc<dyn Schema>) -> Self {
+        self.schema = schema;
         self
     }
 
@@ -371,7 +383,8 @@ impl Test {
             .with_advice(self.advice_inputs.clone())
             .expect("test advice inputs should fit default advice map limits")
             .with_debugging(self.in_debug_mode)
-            .with_tracing(self.in_debug_mode);
+            .with_tracing(self.in_debug_mode)
+            .with_schema(self.schema.clone());
         let execution_output = processor.execute_sync(&program, &mut host).unwrap();
 
         // validate the memory state
@@ -548,7 +561,8 @@ impl Test {
                     .with_core_trace_fragment_size(FRAGMENT_SIZE)
                     .unwrap(),
             )
-            .map_err(ExecutionError::advice_error_no_context)?;
+            .map_err(ExecutionError::advice_error_no_context)?
+            .with_schema(self.schema.clone());
             fast_processor.execute_trace_inputs_sync(&program, &mut host)
         };
 
@@ -575,7 +589,8 @@ impl Test {
             .with_advice(self.advice_inputs.clone())
             .map_err(ExecutionError::advice_error_no_context)?
             .with_debugging(true)
-            .with_tracing(true);
+            .with_tracing(true)
+            .with_schema(self.schema.clone());
 
         processor.execute_sync(&program, &mut host).map(|output| (output, host))
     }
@@ -597,7 +612,8 @@ impl Test {
             .with_advice(self.advice_inputs.clone())
             .map_err(ExecutionError::advice_error_no_context)?
             .with_debugging(true)
-            .with_tracing(true);
+            .with_tracing(true)
+            .with_schema(self.schema.clone());
 
         let stack_result = processor.execute_sync(&program, &mut host);
 
@@ -763,7 +779,8 @@ impl Test {
                 .with_advice(self.advice_inputs.clone())
                 .expect("test advice inputs should fit default advice map limits")
                 .with_debugging(self.in_debug_mode)
-                .with_tracing(self.in_debug_mode);
+                .with_tracing(self.in_debug_mode)
+                .with_schema(self.schema.clone());
             fast_process.execute_by_step_sync(&program, &mut host)
         };
 

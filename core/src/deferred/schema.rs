@@ -149,7 +149,7 @@ pub trait ReduceCtx {
 /// per-schema memoization that ever becomes necessary should live in [`super::DeferredState`]
 /// (or the verifier's witness-side equivalent) as a `digest → canonical` cache, since the
 /// speedup is keyed on input digests and benefits any schema.
-pub trait Schema: core::fmt::Debug + Send {
+pub trait Schema: core::fmt::Debug + Send + Sync {
     /// Decodes the tag to its type signature: structural [`NodeType`] and canonical-form tag.
     ///
     /// Returning `Err(SchemaError::InvalidNode)` rejects the tag entirely. Otherwise the

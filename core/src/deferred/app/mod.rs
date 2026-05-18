@@ -26,9 +26,6 @@ use crate::Felt;
 mod composite;
 pub use composite::PrecompileSchema;
 
-mod legacy_precompile;
-pub use legacy_precompile::LegacyPrecompile;
-
 #[cfg(any(test, feature = "testing"))]
 mod uint256;
 #[cfg(any(test, feature = "testing"))]

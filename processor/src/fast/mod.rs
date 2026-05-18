@@ -8,7 +8,7 @@ use core::{cmp::min, ops::ControlFlow};
 use miden_air::{Felt, trace::RowIndex};
 use miden_core::{
     EMPTY_WORD, WORD_SIZE, Word, ZERO,
-    deferred::{DeferredState, LegacyPrecompile, PrecompileSchema, Schema},
+    deferred::{DeferredState, PrecompileSchema, Schema},
     mast::{MastForest, MastNodeExt, MastNodeId},
     operations::Decorator,
     program::{MIN_STACK_DEPTH, Program, StackInputs, StackOutputs},
@@ -144,10 +144,11 @@ pub struct FastProcessor {
     deferred_state: DeferredState,
 
     /// The deferred-DAG schema installed at processor construction. Owns the entire semantic
-    /// layer (tag recognition, validation, recursive evaluation, equality). Defaults to a
-    /// [`PrecompileSchema`] hosting [`LegacyPrecompile`] so programs that use the production
-    /// keccak/sha512/ecdsa/eddsa precompile MASM work without explicit schema setup.
-    deferred_schema: Box<dyn Schema>,
+    /// layer (tag recognition, validation, recursive evaluation, equality). Defaults to an
+    /// empty [`PrecompileSchema`] — callers running programs that emit precompile tags must
+    /// install a schema (typically `miden_core_lib::CoreLibrary::precompile_schema()`) via
+    /// [`Self::with_schema`].
+    deferred_schema: Arc<dyn Schema>,
 
     /// Tracks decorator retrieval calls for testing.
     #[cfg(test)]
@@ -270,11 +271,11 @@ impl FastProcessor {
 
     /// Installs the [`Schema`] used by the deferred-DAG system events.
     ///
-    /// The default schema is a [`PrecompileSchema`] holding [`LegacyPrecompile`] — the
-    /// production app covering keccak256, sha512, ecdsa_k256_keccak, and eddsa_ed25519. Programs
-    /// emitting tags outside that app's claimed `app_id` must install their own schema (or a
-    /// composite that includes the legacy app).
-    pub fn with_schema(mut self, schema: Box<dyn Schema>) -> Self {
+    /// The default is an empty [`PrecompileSchema`] — any precompile tag will be rejected. To
+    /// run programs that use the core library's precompile MASM wrappers, install
+    /// `miden_core_lib::CoreLibrary::precompile_schema()` (or a composite that includes the
+    /// keccak256 / sha512 / ecdsa_k256_keccak / eddsa_ed25519 apps).
+    pub fn with_schema(mut self, schema: Arc<dyn Schema>) -> Self {
         self.deferred_schema = schema;
         self
     }
@@ -313,7 +314,7 @@ impl FastProcessor {
             call_stack: Vec::new(),
             options,
             deferred_state: DeferredState::new(),
-            deferred_schema: Box::new(PrecompileSchema::single(LegacyPrecompile)),
+            deferred_schema: Arc::new(PrecompileSchema::new([])),
             #[cfg(test)]
             decorator_retrieval_count: Rc::new(Cell::new(0)),
         })

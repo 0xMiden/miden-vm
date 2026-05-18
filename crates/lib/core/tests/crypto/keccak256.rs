@@ -1,8 +1,7 @@
 //! Tests for the Keccak256 precompile MASM wrappers.
 //!
-//! After the LegacyPrecompile migration, the keccak precompile no longer has a host-side event
-//! handler — the MASM wrappers in `crypto/hashes/keccak256.masm` drive the deferred-DAG sys
-//! events directly, and the installed `LegacyPrecompile` schema's `reduce` runs `Keccak256::hash`
+//! The MASM wrappers in `crypto/hashes/keccak256.masm` drive the deferred-DAG sys events
+//! directly, and the installed `Keccak256Precompile` schema's `reduce` runs `Keccak256::hash`
 //! at evaluation time.
 //!
 //! These tests cover the public surface:

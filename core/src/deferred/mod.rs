@@ -20,13 +20,14 @@ pub use schema::{NodeType, NoopSchema, ReduceCtx, Schema, SchemaError, TagInfo};
 pub use state::DeferredState;
 pub use wire::{DeferredStateWire, IntegrityError, TRUE_INDEX, WireBody, WireEntry};
 
-// Multi-app composite layer. The `App` trait + `PrecompileSchema` substrate + the production
-// `LegacyPrecompile` app are part of the public surface; the reference / mock apps
-// (`Uint256`, `MockGroup`, `MockHash`, `MockSig`) remain `testing`-gated.
+// Multi-app composite layer. The `App` trait + `PrecompileSchema` substrate are part of the
+// public surface; the reference / mock apps (`Uint256`, `MockGroup`, `MockHash`, `MockSig`)
+// remain `testing`-gated. Production precompile apps (keccak256, sha512, ecdsa_k256_keccak,
+// eddsa_ed25519) live in `miden-core-lib::precompiles`, next to their MASM wrappers.
 mod app;
 use alloc::{sync::Arc, vec::Vec};
 
-pub use app::{App, AppTag, LegacyPrecompile, PrecompileSchema, app_id_from};
+pub use app::{App, AppTag, PrecompileSchema, app_id_from};
 
 #[cfg(any(test, feature = "testing"))]
 pub use app::{FieldOps, MockGroup, MockHash, MockSig, Uint256};

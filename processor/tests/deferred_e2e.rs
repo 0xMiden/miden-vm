@@ -34,7 +34,7 @@ fn build_processor() -> FastProcessor {
         ExecutionOptions::default(),
     )
     .expect("processor construction")
-    .with_schema(Box::new(Uint256))
+    .with_schema(Arc::new(Uint256))
 }
 
 // MASM BUILDERS
@@ -513,7 +513,7 @@ fn build_chunk_processor() -> FastProcessor {
         ExecutionOptions::default(),
     )
     .expect("processor construction")
-    .with_schema(Box::new(ChunkTestSchema))
+    .with_schema(Arc::new(ChunkTestSchema))
 }
 
 #[test]

@@ -11,11 +11,11 @@ use miden::core::word
 # - Unused bytes in the final u32 must be zero
 # - Memory addresses supplied to this module must be word-aligned (divisible by 4)
 
-# CONSTANTS — LegacyPrecompile schema tag fields
+# CONSTANTS — EddsaEd25519Precompile schema tag fields
 # ================================================================================================
 
-const LP_APP_ID = 18269343673680090362
-const LP_D_EDDSA_VERIFY = 7
+const APP_ID = 12237732355729770957
+const D_VERIFY = 0
 
 const PK_LEN_FELTS = 8        # 32.div_ceil(4)
 
@@ -25,7 +25,7 @@ const PK_LEN_FELTS = 8        # 32.div_ceil(4)
 #! Verifies an Ed25519 EdDSA signature compatible with `miden-crypto::eddsa_25519_sha512`.
 #!
 #! Given a public key commitment and the original message, reconstructs the calldata expected by
-#! the LegacyPrecompile schema's eddsa_verify chunk (pk, SHA512(R || PK || MSG), signature) into
+#! the EddsaEd25519Precompile schema's verify chunk (pk, SHA512(R || PK || MSG), signature) into
 #! a single 40-felt local-memory buffer at locaddr.0, then dispatches to `verify_prehash`.
 #!
 #! Inputs:
@@ -108,7 +108,7 @@ end
 #!   bytes[32..96]   k_digest = SHA-512(R || A || message)
 #!   bytes[96..160]  sig
 #!
-#! Registers the buffer as the LegacyPrecompile eddsa_verify chunk node, evaluates the predicate
+#! Registers the buffer as the EddsaEd25519Precompile verify chunk node, evaluates the predicate
 #! (which runs `PublicKey::verify_with_unchecked_k` inside the schema's reduce), and folds the
 #! chunk's digest into the precompile transcript. Traps with `SchemaError::AssertionFailed` if
 #! verification fails.
@@ -116,10 +116,10 @@ end
 #! Input:  `[buf_ptr, ...]`
 #! Output: `[...]`
 pub proc verify_prehash
-    # Build VERIFY_TAG = [LP_APP_ID, D_EDDSA_VERIFY, 0, 0]
+    # Build VERIFY_TAG = [APP_ID, D_VERIFY, 0, 0]
     push.0.0
-    push.LP_D_EDDSA_VERIFY
-    push.LP_APP_ID
+    push.D_VERIFY
+    push.APP_ID
     # => [VERIFY_TAG, buf_ptr, ...]
 
     exec.sys::register_chunk
