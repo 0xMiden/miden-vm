@@ -362,6 +362,12 @@ impl ExecutionTrace {
         self.main_trace.to_core_chiplets_matrices()
     }
 
+    /// Consuming variant for the proving hot path: moves the chiplets row-major buffer
+    /// instead of copying it. See [`MainTrace::into_core_chiplets_matrices`].
+    pub fn into_core_chiplets_matrices(self) -> (RowMajorMatrix<Felt>, RowMajorMatrix<Felt>) {
+        self.main_trace.into_core_chiplets_matrices()
+    }
+
     // HELPER METHODS
     // --------------------------------------------------------------------------------------------
 

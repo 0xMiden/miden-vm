@@ -245,26 +245,37 @@ impl MainTrace {
 
     /// Splits the trace into the per-AIR `(Core, Chiplets)` matrix pair used by the multi-AIR
     /// proving path.
-    ///
-    /// Each matrix is sliced to its own per-AIR padded height: hash-heavy programs grow the
-    /// chiplets trace while core stays small (and vice versa).
     pub fn to_core_chiplets_matrices(&self) -> (RowMajorMatrix<Felt>, RowMajorMatrix<Felt>) {
+        let core = self.build_core_matrix();
+        // Chiplets data is already row-major in storage; copy and slice to the per-AIR height.
+        let chip_h = self.storage.chiplets_rows;
+        let chiplets_data = self.storage.chiplets_rm.values[..chip_h * CHIPLETS_WIDTH].to_vec();
+        (core, RowMajorMatrix::new(chiplets_data, CHIPLETS_WIDTH))
+    }
+
+    /// Consuming variant of [`Self::to_core_chiplets_matrices`] for the proving hot path.
+    ///
+    /// Moves the chiplets row-major buffer.
+    pub fn into_core_chiplets_matrices(self) -> (RowMajorMatrix<Felt>, RowMajorMatrix<Felt>) {
+        let core = self.build_core_matrix();
+        let chip_h = self.storage.chiplets_rows;
+        let mut chiplets_data = self.storage.chiplets_rm.values;
+        chiplets_data.truncate(chip_h * CHIPLETS_WIDTH);
+        (core, RowMajorMatrix::new(chiplets_data, CHIPLETS_WIDTH))
+    }
+
+    /// Builds the per-AIR Core matrix: `core_rm` (width `CORE_WIDTH`) with the two
+    /// column-major range-checker columns spliced in at `CORE_WIDTH`, sliced to `core_rows`.
+    fn build_core_matrix(&self) -> RowMajorMatrix<Felt> {
         const CORE_W: usize = crate::constraints::columns::NUM_CORE_COLS;
-        const CHIP_W: usize = CHIPLETS_WIDTH;
         // Sanity: Core covers system + decoder + stack + range, exactly the span of the
         // monolithic trace before the chiplet section.
         const _: () = assert!(CORE_W == CORE_WIDTH + RANGE_CHECK_TRACE_WIDTH);
 
         let TraceStorage {
-            core_rm,
-            chiplets_rm,
-            range_checker_cols,
-            core_rows,
-            chiplets_rows,
-            ..
+            core_rm, range_checker_cols, core_rows, ..
         } = &self.storage;
         let core_h = *core_rows;
-        let chip_h = *chiplets_rows;
         let mut core_data = Vec::with_capacity(core_h * CORE_W);
         // SAFETY: the loop below writes exactly `core_h * CORE_W` elements.
         #[allow(clippy::uninit_vec)]
@@ -298,13 +309,7 @@ impl MainTrace {
             );
         }
 
-        // Chiplets data is already row-major in storage; slice to the per-AIR height.
-        let chiplets_data = chiplets_rm.values[..chip_h * CHIP_W].to_vec();
-
-        (
-            RowMajorMatrix::new(core_data, CORE_W),
-            RowMajorMatrix::new(chiplets_data, CHIP_W),
-        )
+        RowMajorMatrix::new(core_data, CORE_W)
     }
 
     pub fn num_rows(&self) -> usize {

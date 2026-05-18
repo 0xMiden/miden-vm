@@ -134,12 +134,13 @@ fn prove_execution_trace(
     let precompile_requests = trace.precompile_requests().to_vec();
     let hash_fn = options.hash_fn();
 
+    // Extract public inputs before consuming the trace for the per-AIR matrices.
+    let (public_values, kernel_felts) = trace.public_inputs().to_air_inputs();
+
     let (core_matrix, chiplets_matrix) = {
         let _span = tracing::info_span!("to_core_chiplets_matrices").entered();
-        trace.to_core_chiplets_matrices()
+        trace.into_core_chiplets_matrices()
     };
-
-    let (public_values, kernel_felts) = trace.public_inputs().to_air_inputs();
 
     let params = config::pcs_params();
     let proof_bytes = match hash_fn {
