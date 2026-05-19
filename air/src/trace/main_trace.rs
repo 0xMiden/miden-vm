@@ -123,7 +123,7 @@ fn core_pad_cell(core_rm: &RowMajorMatrix<Felt>, core_h: usize, r: usize, col: u
     if col == CLK_COL_IDX {
         Felt::from_u32(r as u32)
     } else {
-        core_rm.values[(core_h - 1) * CORE_WIDTH + col]
+        core_rm.get(core_h - 1, col).expect("Accessed element is in bounds")
     }
 }
 
@@ -236,28 +236,30 @@ impl MainTrace {
             data.set_len(total);
         }
 
-        let core_last = &core_rm.values[(core_h - 1) * CORE_WIDTH..core_h * CORE_WIDTH];
+        let core_last = core_rm.row_slice(core_h - 1).expect("Accessed row is in bounds");
         let fill_rows = |chunk: &mut [Felt], start_row: usize| {
             let chunk_rows = chunk.len() / w;
             for i in 0..chunk_rows {
                 let row = start_row + i;
                 let dst = &mut chunk[i * w..(i + 1) * w];
                 if row < core_h {
-                    dst[..CORE_WIDTH]
-                        .copy_from_slice(&core_rm.values[row * CORE_WIDTH..(row + 1) * CORE_WIDTH]);
+                    dst[..CORE_WIDTH].copy_from_slice(
+                        &core_rm.row_slice(row).expect("Accessed row is in bounds"),
+                    );
                     dst[CORE_WIDTH] = range_checker_cols[0][row];
                     dst[CORE_WIDTH + 1] = range_checker_cols[1][row];
                 } else {
                     // Replicate the last Core row (HALT continuation; carries the final
                     // stack), CLK = row index; range M -> ZERO, V -> 65535.
-                    dst[..CORE_WIDTH].copy_from_slice(core_last);
+                    dst[..CORE_WIDTH].copy_from_slice(&core_last);
                     dst[CLK_COL_IDX] = Felt::from_u32(row as u32);
                     dst[CORE_WIDTH] = ZERO;
                     dst[CORE_WIDTH + 1] = RANGE_V_PAD;
                 }
                 if row < chip_h {
-                    dst[CORE_WIDTH + 2..CORE_WIDTH + 2 + cw]
-                        .copy_from_slice(&chiplets_rm.values[row * cw..(row + 1) * cw]);
+                    dst[CORE_WIDTH + 2..CORE_WIDTH + 2 + cw].copy_from_slice(
+                        &chiplets_rm.row_slice(row).expect("Accessed row is in bounds"),
+                    );
                 } else {
                     dst[CORE_WIDTH + 2..CORE_WIDTH + 2 + cw].fill(ZERO);
                 }
@@ -318,7 +320,7 @@ impl MainTrace {
                 let row = start_row + i;
                 let dst = &mut chunk[i * CORE_W..(i + 1) * CORE_W];
                 dst[..CORE_WIDTH]
-                    .copy_from_slice(&core_rm.values[row * CORE_WIDTH..(row + 1) * CORE_WIDTH]);
+                    .copy_from_slice(&core_rm.row_slice(row).expect("Accessed row is in bounds"));
                 dst[CORE_WIDTH] = range_checker_cols[0][row];
                 dst[CORE_WIDTH + 1] = range_checker_cols[1][row];
             }
@@ -361,20 +363,21 @@ impl MainTrace {
         let chip_h = chiplets_rm.height();
         if row_idx < core_h {
             row[..CORE_WIDTH]
-                .copy_from_slice(&core_rm.values[row_idx * CORE_WIDTH..(row_idx + 1) * CORE_WIDTH]);
+                .copy_from_slice(&core_rm.row_slice(row_idx).expect("Accessed row is in bounds"));
             row[CORE_WIDTH] = range_checker_cols[0][row_idx];
             row[CORE_WIDTH + 1] = range_checker_cols[1][row_idx];
         } else {
             // Replicate the last Core row (HALT continuation), CLK = row index.
-            row[..CORE_WIDTH]
-                .copy_from_slice(&core_rm.values[(core_h - 1) * CORE_WIDTH..core_h * CORE_WIDTH]);
+            row[..CORE_WIDTH].copy_from_slice(
+                &core_rm.row_slice(core_h - 1).expect("Accessed row is in bounds"),
+            );
             row[CLK_COL_IDX] = Felt::from_u32(row_idx as u32);
             row[CORE_WIDTH] = ZERO;
             row[CORE_WIDTH + 1] = RANGE_V_PAD;
         }
         if row_idx < chip_h {
             row[CORE_WIDTH + 2..CORE_WIDTH + 2 + CHIPLETS_WIDTH].copy_from_slice(
-                &chiplets_rm.values[row_idx * CHIPLETS_WIDTH..(row_idx + 1) * CHIPLETS_WIDTH],
+                &chiplets_rm.row_slice(row_idx).expect("Accessed row is in bounds"),
             );
         } else {
             row[CORE_WIDTH + 2..CORE_WIDTH + 2 + CHIPLETS_WIDTH].fill(ZERO);
@@ -394,7 +397,7 @@ impl MainTrace {
             (0..h)
                 .map(|r| {
                     if r < core_h {
-                        core_rm.values[r * CORE_WIDTH + col_idx]
+                        core_rm.get(r, col_idx).expect("Accessed element is in bounds")
                     } else {
                         core_pad_cell(core_rm, core_h, r, col_idx)
                     }
@@ -412,7 +415,7 @@ impl MainTrace {
                 (0..h)
                     .map(|r| {
                         if r < chip_h {
-                            chiplets_rm.values[r * CHIPLETS_WIDTH + cc]
+                            chiplets_rm.get(r, cc).expect("Accessed element is in bounds")
                         } else {
                             ZERO
                         }
