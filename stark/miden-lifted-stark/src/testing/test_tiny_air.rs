@@ -7,23 +7,26 @@ use p3_field::PrimeCharacteristicRing;
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
 use crate::{
-    AirWitness, DomainError, InstanceValidationError, ProverError, VerifierError,
-    air::{
-        AirBuilder, AuxBuilder, BaseAir, ExtensionBuilder, LiftedAir, LiftedAirBuilder,
-        WindowAccess,
-    },
-    prove_multi, prove_single,
+    DomainError, Instance, InstanceValidationError, ProverError, ProverInstance, ShapeError,
+    TraceOrder, VerifierError,
+    air::{AirBuilder, BaseAir, ExtensionBuilder, LiftedAir, LiftedAirBuilder, WindowAccess},
+    prove,
     testing::configs::goldilocks_poseidon2::{
         Felt, QuadFelt, generate_pow4_trace, prove_and_verify, test_challenger, test_config,
     },
     transcript::{TranscriptData, TranscriptError},
-    verify_single,
+    verify,
 };
 
 // ---------------------------------------------------------------------------
 // TinyAir: main[0] starts at public_values[0], each row is previous^4.
 // Optional periodic columns with pattern [1, 0, ..., 0, 1] per period.
+//
+// All AIRs in a proof share the same public_values, so multi-trace tests
+// give every instance an identical starting value.
 // ---------------------------------------------------------------------------
+
+const START: u64 = 2;
 
 #[derive(Clone, Debug)]
 struct TinyAir {
@@ -73,10 +76,6 @@ impl LiftedAir<Felt, QuadFelt> for TinyAir {
         1
     }
 
-    fn num_var_len_public_inputs(&self) -> usize {
-        0
-    }
-
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
         let main = builder.main();
         let start = builder.public_values()[0];
@@ -111,35 +110,73 @@ impl LiftedAir<Felt, QuadFelt> for TinyAir {
     }
 }
 
-/// AuxBuilder for TinyAir: aux column = challenge^{4^row}.
-struct TinyAuxBuilder;
+/// Aux build for TinyAir: aux column = challenge^{4^row}.
+fn tiny_aux(
+    main: &RowMajorMatrix<Felt>,
+    challenges: &[QuadFelt],
+) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
+    let height = main.height();
+    let challenge = challenges[0];
 
-impl AuxBuilder<Felt, QuadFelt> for TinyAuxBuilder {
-    fn build_aux_trace(
-        &self,
-        main: &RowMajorMatrix<Felt>,
-        challenges: &[QuadFelt],
-    ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-        let height = main.height();
-        let challenge = challenges[0];
+    let mut col_values = Vec::with_capacity(height);
+    let mut current = challenge;
+    for _ in 0..height {
+        col_values.push(current);
+        current = current.exp_power_of_2(2);
+    }
 
-        let mut col_values = Vec::with_capacity(height);
-        let mut current = challenge;
-        for _ in 0..height {
-            col_values.push(current);
-            current = current.exp_power_of_2(2);
-        }
+    let aux_values = vec![col_values[height - 1]];
+    let aux_trace = RowMajorMatrix::new(col_values, 1);
+    (aux_trace, aux_values)
+}
 
-        let aux_trace = RowMajorMatrix::new(col_values.clone(), 1);
-        let aux_values = vec![col_values[height - 1]];
-        (aux_trace, aux_values)
+/// Inputs struct that produces tiny aux traces for one or more main traces.
+struct TinyInputs<'a> {
+    airs: Vec<&'a TinyAir>,
+    traces: Vec<&'a RowMajorMatrix<Felt>>,
+    air_inputs: &'a [Felt],
+}
+
+impl Instance<Felt, QuadFelt> for TinyInputs<'_> {
+    type Air = TinyAir;
+
+    fn airs(&self) -> &[&Self::Air] {
+        &self.airs
+    }
+
+    fn air_inputs(&self) -> &[Felt] {
+        self.air_inputs
     }
 }
 
-/// Build a (trace, public_values) pair for instance `idx`.
-fn instance(idx: usize, height: usize) -> (RowMajorMatrix<Felt>, Vec<Felt>) {
-    let start = Felt::from_u64((idx + 2) as u64);
-    (generate_pow4_trace(start, height), vec![start])
+impl<'a> ProverInstance<Felt, QuadFelt> for TinyInputs<'a> {
+    type Instance = Self;
+
+    fn instance(&self) -> &Self {
+        self
+    }
+
+    fn traces(&self) -> &[&RowMajorMatrix<Felt>] {
+        &self.traces
+    }
+
+    fn build_aux_traces(
+        &self,
+        challenges: &[QuadFelt],
+    ) -> (Vec<RowMajorMatrix<QuadFelt>>, Vec<Vec<QuadFelt>>) {
+        let mut traces = Vec::with_capacity(self.traces.len());
+        let mut values = Vec::with_capacity(self.traces.len());
+        for &t in &self.traces {
+            let (a, v) = tiny_aux(t, challenges);
+            traces.push(a);
+            values.push(v);
+        }
+        (traces, values)
+    }
+}
+
+fn trace_of_height(height: usize) -> RowMajorMatrix<Felt> {
+    generate_pow4_trace(Felt::from_u64(START), height)
 }
 
 // ---------------------------------------------------------------------------
@@ -148,7 +185,8 @@ fn instance(idx: usize, height: usize) -> (RowMajorMatrix<Felt>, Vec<Felt>) {
 
 #[test]
 fn single_trace() {
-    prove_and_verify(&TinyAir::new(vec![]), &TinyAuxBuilder, &[instance(0, 8)]);
+    let pv = vec![Felt::from_u64(START)];
+    prove_and_verify(&TinyAir::new(vec![]), tiny_aux, &pv, &[trace_of_height(8)]);
 }
 
 #[test]
@@ -156,23 +194,19 @@ fn malformed_transcript_is_rejected() {
     let config = test_config();
     let air = TinyAir::new(vec![]);
 
-    let (trace, public_values) = instance(0, 4);
+    let trace = trace_of_height(4);
+    let air_inputs = vec![Felt::from_u64(START)];
+    let inputs = TinyInputs {
+        airs: vec![&air],
+        traces: vec![&trace],
+        air_inputs: &air_inputs,
+    };
 
-    let output = prove_single(
-        &config,
-        &air,
-        &trace,
-        &public_values,
-        &[],
-        &TinyAuxBuilder,
-        test_challenger(),
-    )
-    .expect("proving should succeed");
+    let output = prove(&config, &inputs, test_challenger()).expect("proving should succeed");
 
     // Baseline should verify
-    let _digest =
-        verify_single(&config, &air, &public_values, &[], &output.proof, test_challenger())
-            .expect("baseline proof should verify");
+    let _digest = verify(&config, &inputs, &output.proof, test_challenger())
+        .expect("baseline proof should verify");
 
     // Extra field element should cause rejection
     let mut bad_proof = output.proof;
@@ -180,7 +214,7 @@ fn malformed_transcript_is_rejected() {
     fields.push(Felt::ONE);
     bad_proof.transcript = TranscriptData::new(fields, commitments);
 
-    let err = verify_single(&config, &air, &public_values, &[], &bad_proof, test_challenger())
+    let err = verify(&config, &inputs, &bad_proof, test_challenger())
         .expect_err("extra transcript data should fail verification");
     assert!(matches!(err, VerifierError::Transcript(TranscriptError::TrailingData)));
 }
@@ -190,93 +224,89 @@ fn malformed_log_trace_heights_is_rejected() {
     let config = test_config();
     let air = TinyAir::new(vec![]);
 
-    let (trace, public_values) = instance(0, 4);
+    let trace = trace_of_height(4);
+    let air_inputs = vec![Felt::from_u64(START)];
+    let inputs = TinyInputs {
+        airs: vec![&air],
+        traces: vec![&trace],
+        air_inputs: &air_inputs,
+    };
 
-    let output = prove_single(
-        &config,
-        &air,
-        &trace,
-        &public_values,
-        &[],
-        &TinyAuxBuilder,
-        test_challenger(),
-    )
-    .expect("proving should succeed");
+    let output = prove(&config, &inputs, test_challenger()).expect("proving should succeed");
 
-    // Push straight to the `pub(crate)` field to bypass
-    // `InstanceShapes::from_trace_heights` and exercise the verifier-path
-    // bound check in `validate_inputs`.
+    // Push straight to the `pub(crate)` `log_trace_heights` field to bypass
+    // shape construction and exercise the verifier-side `validate_instance`
+    // count check.
     let mut bad_proof = output.proof.clone();
-    bad_proof.instance_shapes.log_trace_heights.push(2);
-    bad_proof.instance_shapes.air_order.push(1);
-    let err = verify_single(&config, &air, &public_values, &[], &bad_proof, test_challenger())
+    bad_proof.log_trace_heights.push(2);
+    let err = verify(&config, &inputs, &bad_proof, test_challenger())
         .expect_err("extra log trace height should fail verification");
     assert!(matches!(
         err,
-        VerifierError::Instance(InstanceValidationError::AirOrderLengthMismatch {
-            instances: 1,
-            air_order: 2,
+        VerifierError::Instance(InstanceValidationError::AirTraceCountMismatch {
+            airs: 1,
+            traces: 2,
         })
     ));
 
-    // Empty heights → air_order / instance count mismatch.
+    // Empty heights → `TraceOrder::from_log_heights` rejects with
+    // `ShapeError::Empty` before the per-AIR check runs.
     let mut bad_proof = output.proof.clone();
-    bad_proof.instance_shapes.log_trace_heights.clear();
-    bad_proof.instance_shapes.air_order.clear();
-    let err = verify_single(&config, &air, &public_values, &[], &bad_proof, test_challenger())
+    bad_proof.log_trace_heights.clear();
+    let err = verify(&config, &inputs, &bad_proof, test_challenger())
         .expect_err("empty log trace heights should fail verification");
     assert!(matches!(
         err,
-        VerifierError::Instance(InstanceValidationError::AirOrderLengthMismatch {
-            instances: 1,
-            air_order: 0,
-        })
+        VerifierError::Instance(InstanceValidationError::Shape(ShapeError::Empty))
     ));
 
     // Out-of-range log height must surface as an error, not panic on
-    // `1usize << log_h` or `two_adic_generator(log_h + log_blowup)`.
-    // log_h = 200 trips the `usize` overflow guard inside `InstanceShapes::validate`
-    // before any domain construction is attempted.
+    // `1usize << log_h` or `two_adic_generator(log_h + log_blowup)`. log_h
+    // = 200 trips the `usize` overflow guard inside
+    // `TraceOrder::from_log_heights` before any domain construction.
     let mut bad_proof = output.proof.clone();
-    bad_proof.instance_shapes.log_trace_heights = vec![200];
-    let err = verify_single(&config, &air, &public_values, &[], &bad_proof, test_challenger())
+    bad_proof.log_trace_heights = vec![200];
+    let err = verify(&config, &inputs, &bad_proof, test_challenger())
         .expect_err("oversized log trace height should fail verification");
     assert!(matches!(
         err,
-        VerifierError::Instance(InstanceValidationError::LogTraceHeightTooLarge { log_h: 200, .. })
+        VerifierError::Instance(InstanceValidationError::Shape(
+            ShapeError::LogTraceHeightTooLarge { log_h: 200, .. }
+        ))
     ));
 
-    // the LDE domain `log_h + log_blowup` does not. With `log_blowup = 3` from
-    // `TEST_PCS_PARAMS` and `Felt::TWO_ADICITY = 32`, `30 + 3 = 33 > 32` must
-    // be rejected by `LiftedDomain::canonical` before any `two_adic_generator`
-    // call on the LDE domain.
+    // The LDE domain `log_h + log_blowup` overflow case. With `log_blowup = 3`
+    // from `TEST_PCS_PARAMS` and `Felt::TWO_ADICITY = 32`, `30 + 3 = 33 > 32`
+    // must be rejected by `LiftedDomain::canonical` before any
+    // `two_adic_generator` call on the LDE domain.
     let mut bad_proof = output.proof;
-    bad_proof.instance_shapes.log_trace_heights = vec![30];
-    let err = verify_single(&config, &air, &public_values, &[], &bad_proof, test_challenger())
+    bad_proof.log_trace_heights = vec![30];
+    let err = verify(&config, &inputs, &bad_proof, test_challenger())
         .expect_err("log_h + log_blowup exceeding two-adicity should fail verification");
     assert!(matches!(err, VerifierError::Domain(DomainError::LdeOrderTooLarge { .. })));
 }
 
 #[test]
 fn prover_rejects_non_power_of_two_trace_height() {
-    // Build the witness directly (via `pub` fields) to skip the
-    // power-of-two assertion in `AirWitness::new`. `InstanceShapes::from_trace_heights`
+    // Use a non-power-of-two height directly — `TraceOrder::from_trace_heights`
     // must reject it rather than panicking inside `log2_strict_u8`.
     let config = test_config();
     let air = TinyAir::new(vec![]);
 
     let trace =
         RowMajorMatrix::new(vec![Felt::from_u64(2), Felt::from_u64(16), Felt::from_u64(65536)], 1);
-    let public_values = vec![Felt::from_u64(2)];
-    let bad_witness = AirWitness {
-        trace: &trace,
-        public_values: &public_values,
-        var_len_public_inputs: &[],
+    let air_inputs = vec![Felt::from_u64(2)];
+    let inputs = TinyInputs {
+        airs: vec![&air],
+        traces: vec![&trace],
+        air_inputs: &air_inputs,
     };
 
-    let result = prove_multi(&config, &[(&air, bad_witness, &TinyAuxBuilder)], test_challenger());
+    let result = prove(&config, &inputs, test_challenger());
     match result {
-        Err(ProverError::Instance(InstanceValidationError::InvalidTraceHeight { height: 3 })) => {},
+        Err(ProverError::Instance(InstanceValidationError::Shape(
+            ShapeError::InvalidTraceHeight { height: 3 },
+        ))) => {},
         Err(other) => panic!("expected InvalidTraceHeight {{ height: 3 }}, got {other:?}"),
         Ok(_) => panic!("non-power-of-two trace height should fail proving"),
     }
@@ -288,20 +318,34 @@ fn prover_rejects_non_power_of_two_trace_height() {
 
 #[test]
 fn two_traces_same_height() {
-    prove_and_verify(&TinyAir::new(vec![]), &TinyAuxBuilder, &[instance(0, 8), instance(1, 8)]);
+    let pv = vec![Felt::from_u64(START)];
+    prove_and_verify(
+        &TinyAir::new(vec![]),
+        tiny_aux,
+        &pv,
+        &[trace_of_height(8), trace_of_height(8)],
+    );
 }
 
 #[test]
 fn two_traces_different_heights() {
-    prove_and_verify(&TinyAir::new(vec![]), &TinyAuxBuilder, &[instance(0, 4), instance(1, 8)]);
+    let pv = vec![Felt::from_u64(START)];
+    prove_and_verify(
+        &TinyAir::new(vec![]),
+        tiny_aux,
+        &pv,
+        &[trace_of_height(4), trace_of_height(8)],
+    );
 }
 
 #[test]
 fn three_traces_ascending_heights() {
+    let pv = vec![Felt::from_u64(START)];
     prove_and_verify(
         &TinyAir::new(vec![]),
-        &TinyAuxBuilder,
-        &[instance(0, 4), instance(1, 8), instance(2, 16)],
+        tiny_aux,
+        &pv,
+        &[trace_of_height(4), trace_of_height(8), trace_of_height(16)],
     );
 }
 
@@ -311,30 +355,46 @@ fn three_traces_ascending_heights() {
 
 #[test]
 fn two_traces_reversed_order() {
-    prove_and_verify(&TinyAir::new(vec![]), &TinyAuxBuilder, &[instance(1, 8), instance(0, 4)]);
+    let pv = vec![Felt::from_u64(START)];
+    prove_and_verify(
+        &TinyAir::new(vec![]),
+        tiny_aux,
+        &pv,
+        &[trace_of_height(8), trace_of_height(4)],
+    );
 }
 
 #[test]
 fn three_traces_descending_heights() {
+    let pv = vec![Felt::from_u64(START)];
     prove_and_verify(
         &TinyAir::new(vec![]),
-        &TinyAuxBuilder,
-        &[instance(2, 16), instance(1, 8), instance(0, 4)],
+        tiny_aux,
+        &pv,
+        &[trace_of_height(16), trace_of_height(8), trace_of_height(4)],
     );
 }
 
 #[test]
 fn three_traces_shuffled_order() {
+    let pv = vec![Felt::from_u64(START)];
     prove_and_verify(
         &TinyAir::new(vec![]),
-        &TinyAuxBuilder,
-        &[instance(1, 8), instance(2, 16), instance(0, 4)],
+        tiny_aux,
+        &pv,
+        &[trace_of_height(8), trace_of_height(16), trace_of_height(4)],
     );
 }
 
 #[test]
 fn periodic_columns_reversed_order() {
-    prove_and_verify(&TinyAir::new(vec![2, 4]), &TinyAuxBuilder, &[instance(1, 8), instance(0, 4)]);
+    let pv = vec![Felt::from_u64(START)];
+    prove_and_verify(
+        &TinyAir::new(vec![2, 4]),
+        tiny_aux,
+        &pv,
+        &[trace_of_height(8), trace_of_height(4)],
+    );
 }
 
 #[test]
@@ -342,33 +402,37 @@ fn air_order_reflects_caller_order() {
     let config = test_config();
     let air = TinyAir::new(vec![]);
 
-    // Pass instances in reverse height order: [height=8, height=4].
-    let (t0, pv0) = instance(0, 8);
-    let (t1, pv1) = instance(1, 4);
+    // Pass traces in reverse height order: [height=8, height=4].
+    let t0 = trace_of_height(8);
+    let t1 = trace_of_height(4);
+    let air_inputs = vec![Felt::from_u64(START)];
+    let inputs = TinyInputs {
+        airs: vec![&air, &air],
+        traces: vec![&t0, &t1],
+        air_inputs: &air_inputs,
+    };
 
-    let w0 = AirWitness::new(&t0, &pv0, &[]);
-    let w1 = AirWitness::new(&t1, &pv1, &[]);
+    let output = prove(&config, &inputs, test_challenger()).expect("proving should succeed");
 
-    let output = prove_multi(
-        &config,
-        &[(&air, w0, &TinyAuxBuilder), (&air, w1, &TinyAuxBuilder)],
-        test_challenger(),
-    )
-    .expect("proving should succeed");
-
-    // Proof ordering is ascending height: [height=4, height=8].
-    // Caller index 1 (height=4) is at position 0 in the proof's ordering.
-    // Caller index 0 (height=8) is at position 1 in the proof's ordering.
-    let air_order = output.proof.instance_shapes.air_order();
+    // The proof carries heights in instance order: [height=8, height=4]
+    // → [log_h=3, log_h=2]. The proof's AIR ordering itself is implicit
+    // (recomputed from the heights via TraceOrder).
     assert_eq!(
-        air_order,
-        &[1, 0],
-        "air_order should map ascending-height position → caller index"
+        output.proof.log_trace_heights.as_slice(),
+        &[3, 2],
+        "log heights should be in instance order (8=2^3, 4=2^2)"
     );
 
-    // Log trace heights should be in ascending order.
-    let log_heights = output.proof.instance_shapes.log_trace_heights();
-    assert_eq!(log_heights, &[2, 3], "log heights should be ascending (4=2^2, 8=2^3)");
+    // The derived proof ordering is ascending height: instance index 1
+    // (log_h=2) ends up at proof position 0, instance index 0 (log_h=3) at
+    // position 1.
+    let trace_order =
+        TraceOrder::from_log_heights(output.proof.log_trace_heights).expect("valid heights");
+    assert_eq!(
+        trace_order.instance_indices(),
+        &[1, 0],
+        "trace order should map ascending-height position → instance index"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -377,34 +441,51 @@ fn air_order_reflects_caller_order() {
 
 #[test]
 fn single_periodic_column() {
-    prove_and_verify(&TinyAir::new(vec![2]), &TinyAuxBuilder, &[instance(0, 8)]);
+    let pv = vec![Felt::from_u64(START)];
+    prove_and_verify(&TinyAir::new(vec![2]), tiny_aux, &pv, &[trace_of_height(8)]);
 }
 
 #[test]
 fn periodic_column_period_4() {
-    prove_and_verify(&TinyAir::new(vec![4]), &TinyAuxBuilder, &[instance(0, 8)]);
+    let pv = vec![Felt::from_u64(START)];
+    prove_and_verify(&TinyAir::new(vec![4]), tiny_aux, &pv, &[trace_of_height(8)]);
 }
 
 #[test]
 fn multiple_periodic_columns() {
-    prove_and_verify(&TinyAir::new(vec![2, 4]), &TinyAuxBuilder, &[instance(0, 8)]);
+    let pv = vec![Felt::from_u64(START)];
+    prove_and_verify(&TinyAir::new(vec![2, 4]), tiny_aux, &pv, &[trace_of_height(8)]);
 }
 
 #[test]
 fn periodic_columns_multi_trace_same_height() {
-    prove_and_verify(&TinyAir::new(vec![2]), &TinyAuxBuilder, &[instance(0, 8), instance(1, 8)]);
+    let pv = vec![Felt::from_u64(START)];
+    prove_and_verify(
+        &TinyAir::new(vec![2]),
+        tiny_aux,
+        &pv,
+        &[trace_of_height(8), trace_of_height(8)],
+    );
 }
 
 #[test]
 fn periodic_columns_multi_trace_different_heights() {
-    prove_and_verify(&TinyAir::new(vec![2, 4]), &TinyAuxBuilder, &[instance(0, 4), instance(1, 8)]);
+    let pv = vec![Felt::from_u64(START)];
+    prove_and_verify(
+        &TinyAir::new(vec![2, 4]),
+        tiny_aux,
+        &pv,
+        &[trace_of_height(4), trace_of_height(8)],
+    );
 }
 
 #[test]
 fn periodic_columns_three_traces() {
+    let pv = vec![Felt::from_u64(START)];
     prove_and_verify(
         &TinyAir::new(vec![2, 4]),
-        &TinyAuxBuilder,
-        &[instance(0, 4), instance(1, 8), instance(2, 16)],
+        tiny_aux,
+        &pv,
+        &[trace_of_height(4), trace_of_height(8), trace_of_height(16)],
     );
 }

@@ -12,7 +12,7 @@
 //! [`periodic_values()`](crate::PeriodicAirBuilder::periodic_values) — which return
 //! matrices or slices.
 //!
-//! If the symbolic evaluation in [`LiftedAir::log_quotient_degree`] succeeds (i.e.
+//! If the symbolic evaluation in [`LiftedAir::constraint_degree`] succeeds (i.e.
 //! does not panic), it proves that the AIR's `eval()` only accesses indices within
 //! the declared dimensions. Any concrete builder constructed with matching dimensions
 //! is therefore safe from out-of-bounds panics.
@@ -23,15 +23,13 @@
 use alloc::vec::Vec;
 
 use p3_air::{BaseAir, WindowAccess};
-use p3_field::{ExtensionField, Field};
+use p3_field::Field;
 use p3_matrix::dense::RowMajorMatrix;
 use thiserror::Error;
 
 use crate::{
     LiftedAirBuilder,
-    auxiliary::{ReducedAuxValues, ReductionError, VarLenPublicInputs},
     symbolic::{AirLayout, SymbolicAirBuilder, SymbolicExpression, SymbolicExpressionExt},
-    util::log2_ceil_u8,
 };
 
 /// Super-trait for AIR definitions used by the lifted STARK prover/verifier.
@@ -88,60 +86,13 @@ pub trait LiftedAir<F: Field, EF>: Sync + BaseAir<F> {
     /// Number of extension-field aux values committed to the Fiat-Shamir transcript.
     ///
     /// These are the values returned by
-    /// [`AuxBuilder::build_aux_trace`](crate::AuxBuilder::build_aux_trace) alongside the aux
-    /// trace matrix. Their count may differ from [`aux_width`](Self::aux_width) (the number of
-    /// aux trace columns).
+    /// [`ProverInstance::build_aux_traces`](crate::ProverInstance::build_aux_traces)
+    /// alongside the aux trace matrix. Their count may differ from
+    /// [`aux_width`](Self::aux_width) (the number of aux trace columns).
     ///
     /// These values are exposed to AIR constraints as *permutation values* via
     /// [`PermutationAirBuilder::permutation_values`](crate::PermutationAirBuilder::permutation_values).
     fn num_aux_values(&self) -> usize;
-
-    /// Number of variable-length public inputs this AIR expects.
-    ///
-    /// Each input is a slice of base-field elements that
-    /// [`reduced_aux_values`](Self::reduced_aux_values) reduces to a single value.
-    /// The prover validates that witnesses provide exactly this many slices.
-    ///
-    /// Implementors of [`reduced_aux_values`](Self::reduced_aux_values) should verify
-    /// that `var_len_public_inputs` contains exactly this many slices, returning
-    /// [`ReductionError`] otherwise.
-    fn num_var_len_public_inputs(&self) -> usize;
-
-    /// Reduce this AIR's aux values to a [`ReducedAuxValues`] contribution.
-    ///
-    /// Called by the verifier (with concrete field values, not symbolic expressions)
-    /// to compute each AIR's contribution to the global cross-AIR bus identity check.
-    /// The verifier accumulates contributions across all AIRs and checks that the
-    /// combined result is identity (prod=1, sum=0).
-    ///
-    /// # Arguments
-    /// - `aux_values`: prover-supplied aux values (from the proof)
-    /// - `challenges`: extension-field challenges (same as used for aux trace building)
-    /// - `public_values`: this AIR's public values (base field)
-    /// - `var_len_public_inputs`: reducible inputs for the cross-AIR identity check
-    ///
-    /// # Errors
-    ///
-    /// The verifier validates instance dimensions (public values length,
-    /// var-len public inputs count) before calling this method, so
-    /// implementations can assume correct input counts. However, the
-    /// *length of each individual var-len slice* is not validated upfront —
-    /// implementations that index into these slices must check lengths
-    /// themselves or use the `Result` return type to report errors.
-    ///
-    /// Default: returns identity (correct for AIRs without buses).
-    fn reduced_aux_values(
-        &self,
-        _aux_values: &[EF],
-        _challenges: &[EF],
-        _public_values: &[F],
-        _var_len_public_inputs: VarLenPublicInputs<'_, F>,
-    ) -> Result<ReducedAuxValues<EF>, ReductionError>
-    where
-        EF: ExtensionField<F>,
-    {
-        Ok(ReducedAuxValues::identity())
-    }
 
     /// Return the [`AirLayout`] describing this AIR's dimensions.
     ///
@@ -159,102 +110,28 @@ pub trait LiftedAir<F: Field, EF>: Sync + BaseAir<F> {
         }
     }
 
-    /// Validate that this AIR satisfies the [`LiftedAir`] contract.
-    ///
-    /// The lifted STARK protocol relies on several structural properties of the AIR
-    /// that can be checked statically (i.e. without a witness). This method verifies
-    /// the subset that is machine-checkable; the full list of trust assumptions is
-    /// documented in the module docs of `miden-lifted-stark`. Both the prover and
-    /// verifier call this before proceeding, so a malformed AIR is caught early.
-    ///
-    /// # Checked properties
-    ///
-    /// - **No preprocessed trace** — the lifted STARK protocol does not support preprocessed
-    ///   (fixed) columns; their presence is an error.
-    /// - **Positive auxiliary width** — every lifted AIR must declare at least one auxiliary column
-    ///   (`aux_width() > 0`).
-    /// - **Well-formed periodic columns** — each periodic column must be non-empty and have a
-    ///   power-of-two length.
-    fn validate(&self) -> Result<(), AirStructureError> {
-        if self.preprocessed_trace().is_some() {
-            return Err(AirStructureError::PreprocessedTrace);
-        }
-        if self.aux_width() == 0 {
-            return Err(AirStructureError::ZeroAuxWidth);
-        }
-        for (i, col) in self.periodic_columns().iter().enumerate() {
-            if col.is_empty() || !col.len().is_power_of_two() {
-                return Err(AirStructureError::InvalidPeriodicColumn {
-                    index: i,
-                    length: col.len(),
-                });
-            }
-        }
-        Ok(())
-    }
-
     /// Evaluate all AIR constraints using the provided builder.
     fn eval<AB: LiftedAirBuilder<F = F>>(&self, builder: &mut AB);
 
-    /// Log₂ of the number of quotient chunks, inferred from symbolic constraint analysis.
+    /// Symbolic constraint degree multiples, split into base-field and
+    /// extension-field maxima (see [`ConstraintDegrees`]).
     ///
-    /// Evaluates the AIR on a [`SymbolicAirBuilder`](crate::symbolic::SymbolicAirBuilder) to
-    /// determine the maximum constraint degree M, then returns `log2_ceil(M - 1)` (padded so M
-    /// ≥ 2).
+    /// The default evaluates the AIR on a
+    /// [`SymbolicAirBuilder`](crate::symbolic::SymbolicAirBuilder) — using
+    /// `SymbolicAirBuilder<F>` (i.e. `EF = F`), sufficient for degree computation
+    /// since extension-field operations have the same degree structure. Override
+    /// this when the split is known statically so a per-AIR bound can be sharp
+    /// without redoing the symbolic pass.
     ///
-    /// Uses `SymbolicAirBuilder<F>` (i.e. `EF = F`) which is sufficient for degree
-    /// computation since extension-field operations have the same degree structure.
-    ///
-    /// # Why `M − 1` chunks?
-    ///
-    /// Let N be the trace height (so trace columns are polynomials of degree < N).
-    /// Symbolic evaluation assigns each constraint a *degree multiple* M, meaning the
-    /// resulting numerator polynomial C(X) has degree bounded by roughly M·(N − 1).
-    ///
-    /// In a STARK, the constraint numerator is divisible by the trace vanishing
-    /// polynomial `Z_H(X) = Xᴺ − 1`, so the quotient polynomial
-    /// `Q(X) = C(X) / Z_H(X)` has
-    ///
-    /// `deg(Q) ≤ deg(C) − N ≤ M·(N − 1) − N < (M − 1)·N`.
-    ///
-    /// We commit to Q(X) by splitting it into D chunks of degree < N. The bound above
-    /// shows that D = M − 1 chunks suffice; we then round D up to a power of two and
-    /// return `log2(D)`.
-    ///
-    /// We clamp M ≥ 2 so that D ≥ 1. If M = 1 then `deg(C) < N`, and divisibility by
-    /// `Z_H` would force C(X) to be the zero polynomial (i.e. the constraint carries no
-    /// information about the trace).
-    fn log_quotient_degree(&self) -> u8
+    /// These are the raw symbolic degree multiples — no minimum is imposed and
+    /// no clamping is applied. A degenerate AIR whose constraints all vanish
+    /// under `Z_H` (combined degree `< 2`) is the prover/verifier's concern,
+    /// not an air-crate structural check.
+    fn constraint_degree(&self) -> ConstraintDegrees
     where
         Self: Sized,
     {
-        let mut builder = SymbolicAirBuilder::<F>::new(self.air_layout());
-        self.eval(&mut builder);
-
-        let base_degree_multiple =
-            |constraint: &SymbolicExpression<F>| constraint.degree_multiple();
-        let ext_degree_multiple =
-            |constraint: &SymbolicExpressionExt<F, F>| constraint.degree_multiple();
-
-        let base_degree =
-            builder.base_constraints().iter().map(base_degree_multiple).max().unwrap_or(0);
-        let ext_degree = builder
-            .extension_constraints()
-            .iter()
-            .map(ext_degree_multiple)
-            .max()
-            .unwrap_or(0);
-        let constraint_degree = base_degree.max(ext_degree).max(2);
-
-        log2_ceil_u8(constraint_degree - 1)
-    }
-
-    /// Number of quotient chunks: `2^log_quotient_degree()`.
-    fn quotient_degree(&self) -> usize
-    where
-        Self: Sized,
-    {
-        1 << self.log_quotient_degree() as usize
+        raw_constraint_degree::<F, EF, Self>(self)
     }
 
     /// Check that a builder's dimensions match this AIR.
@@ -264,7 +141,7 @@ pub trait LiftedAir<F: Field, EF>: Sync + BaseAir<F> {
     /// periodic values.
     ///
     /// This guards the invariant that makes [`eval`](Self::eval) panic-free: if
-    /// the symbolic evaluation in [`log_quotient_degree`](Self::log_quotient_degree)
+    /// the symbolic evaluation in [`constraint_degree`](Self::constraint_degree)
     /// succeeds and this check passes, then `eval()` cannot panic from
     /// out-of-bounds access on the builder's accessors.
     fn is_valid_builder<AB: LiftedAirBuilder<F = F>>(
@@ -317,8 +194,126 @@ pub enum TracePart {
     PeriodicValues,
 }
 
-/// Errors intrinsic to a single AIR definition, independent of any instance
-/// data. Returned by [`LiftedAir::validate`] and [`LiftedAir::is_valid_builder`].
+/// Symbolic constraint degree multiples, split by constraint kind.
+///
+/// `base` is the maximum degree multiple over the base-field constraints and
+/// `ext` over the extension-field constraints (each `0` if the AIR has none of
+/// that kind). Consumers that need a single value take `base.max(ext)`; the
+/// split is exposed via [`LiftedAir::constraint_degree`] so a per-AIR override
+/// can be sharp without redoing the symbolic pass.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct ConstraintDegrees {
+    /// Max degree multiple over base-field constraints (`0` if there are none).
+    pub base: usize,
+    /// Max degree multiple over extension-field constraints (`0` if there are none).
+    pub ext: usize,
+}
+
+/// Raw constraint degree multiples from symbolic evaluation, before any
+/// clamping. A combined value `< 2` (`base.max(ext) < 2`) means every
+/// constraint is constant or linear in the trace variables, which forces the
+/// constraint polynomial to zero after division by `Z_H` — i.e. the AIR
+/// encodes no information about the trace.
+fn raw_constraint_degree<F, EF, A>(air: &A) -> ConstraintDegrees
+where
+    F: Field,
+    A: LiftedAir<F, EF>,
+{
+    let mut builder = SymbolicAirBuilder::<F>::new(air.air_layout());
+    air.eval(&mut builder);
+
+    let base = builder
+        .base_constraints()
+        .iter()
+        .map(SymbolicExpression::degree_multiple)
+        .max()
+        .unwrap_or(0);
+    let ext = builder
+        .extension_constraints()
+        .iter()
+        .map(SymbolicExpressionExt::degree_multiple)
+        .max()
+        .unwrap_or(0);
+    ConstraintDegrees { base, ext }
+}
+
+/// Check that an AIR satisfies the structural contract assumed by the rest of
+/// the protocol.
+///
+/// This is a debug/testing helper. The prover and verifier hot paths assume
+/// the AIR is well-formed; passing a malformed AIR is undefined behaviour.
+/// Call this from tests or local sanity checks when authoring a new AIR.
+///
+/// # Checked properties
+///
+/// - **No preprocessed trace** — the lifted STARK protocol does not support preprocessed (fixed)
+///   columns; their presence is an error.
+/// - **Positive auxiliary width** — every lifted AIR must declare at least one auxiliary column
+///   (`aux_width() > 0`).
+/// - **Well-formed periodic columns** — each periodic column must be non-empty and have a
+///   power-of-two length.
+///
+/// A degenerate AIR whose constraints all vanish under `Z_H` (combined degree
+/// `< 2`) is *not* checked here — that is a concern for the prover/verifier, not
+/// a structural property of the air description.
+pub fn validate_air<F, EF, A>(air: &A) -> Result<(), AirStructureError>
+where
+    F: Field,
+    A: LiftedAir<F, EF>,
+{
+    if air.preprocessed_trace().is_some() {
+        return Err(AirStructureError::PreprocessedTrace);
+    }
+    if air.aux_width() == 0 {
+        return Err(AirStructureError::ZeroAuxWidth);
+    }
+    for (i, col) in air.periodic_columns().iter().enumerate() {
+        if col.is_empty() || !col.len().is_power_of_two() {
+            return Err(AirStructureError::InvalidPeriodicColumn { index: i, length: col.len() });
+        }
+    }
+    Ok(())
+}
+
+/// Validate every AIR in `airs` via [`validate_air`], plus the list-level
+/// invariant that every AIR declares the same
+/// [`num_public_values`](BaseAir::num_public_values).
+///
+/// The list of AIRs is the air-crate-level "statement": this is the right
+/// granularity for "is this set of AIRs structurally well-formed?". The
+/// stark crate assumes this check has passed and only validates
+/// instance-level data (the supplied public-input slice has the agreed
+/// length, trace heights are compatible with periodic columns, …).
+pub fn validate_airs<F, EF, A>(airs: &[&A]) -> Result<(), AirStructureError>
+where
+    F: Field,
+    A: LiftedAir<F, EF>,
+{
+    let mut expected_pv: Option<usize> = None;
+    for (idx, air) in airs.iter().enumerate() {
+        validate_air::<F, EF, _>(*air)?;
+        let pv = air.num_public_values();
+        match expected_pv {
+            None => expected_pv = Some(pv),
+            Some(prev) if prev != pv => {
+                return Err(AirStructureError::InconsistentPublicValues {
+                    first: prev,
+                    index: idx,
+                    found: pv,
+                });
+            },
+            _ => {},
+        }
+    }
+    Ok(())
+}
+
+/// Errors raised by the AIR-structure validators ([`validate_air`],
+/// [`validate_airs`]) and by [`LiftedAir::is_valid_builder`].
+///
+/// Most variants describe a single AIR; [`Self::InconsistentPublicValues`]
+/// describes a relation between two AIRs in a list passed to
+/// [`validate_airs`].
 #[derive(Debug, Error)]
 pub enum AirStructureError {
     #[error("periodic column {index}: length must be positive power of two, got {length}")]
@@ -333,4 +328,16 @@ pub enum AirStructureError {
     },
     #[error("aux width must be positive")]
     ZeroAuxWidth,
+    #[error(
+        "num_public_values mismatch across AIRs: first AIR declares {first}, \
+         AIR {index} declares {found}"
+    )]
+    InconsistentPublicValues {
+        /// `num_public_values` declared by AIR 0 (the first in the list).
+        first: usize,
+        /// Position of the first AIR whose `num_public_values` disagrees.
+        index: usize,
+        /// `num_public_values` declared by that AIR.
+        found: usize,
+    },
 }

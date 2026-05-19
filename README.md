@@ -131,7 +131,7 @@ Messages sealed as one type must be unsealed using the corresponding method, oth
 
 - AIR traits and builders for defining algebraic constraints.
 - A Lifted Merkle commitment scheme and FRI-based polynomial commitments.
-- Prover and verifier for single and multi-trace STARKs (`prove_single`/`prove_multi`, `verify_single`/`verify_multi`).
+- Prover and verifier for multi-trace STARKs (`prove_multi` / `verify_multi`).
 - Fiat-Shamir transcript and challenge generation.
 - A debug constraint checker for development.
 

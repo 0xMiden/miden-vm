@@ -26,8 +26,9 @@
 use alloc::vec::Vec;
 use core::marker::PhantomData;
 
+use miden_lifted_air::{LiftedAir, log2_ceil_u8};
 use miden_stark_transcript::Channel;
-use p3_field::{ExtensionField, TwoAdicField, batch_multiplicative_inverse};
+use p3_field::{ExtensionField, Field, TwoAdicField, batch_multiplicative_inverse};
 use p3_maybe_rayon::prelude::*;
 use p3_util::reverse_slice_index_bits;
 use thiserror::Error;
@@ -604,6 +605,48 @@ impl<F: TwoAdicField> LiftedDomain<F> {
 }
 
 // ============================================================================
+// Quotient degree
+// ============================================================================
+
+/// Log₂ of the number of quotient chunks for `air`, clamped so the quotient
+/// degree `D = 2^log_quotient_degree` is always ≥ 2.
+///
+/// # Why `M − 1` chunks?
+///
+/// Let N be the trace height (so trace columns are polynomials of degree < N).
+/// Symbolic evaluation assigns each constraint a *degree multiple* M
+/// (the AIR's combined
+/// [`constraint_degree().base.max(ext)`](miden_lifted_air::LiftedAir::constraint_degree)),
+/// so the numerator polynomial C(X) has degree bounded by roughly M·(N − 1).
+///
+/// In a STARK, the constraint numerator is divisible by the trace vanishing
+/// polynomial `Z_H(X) = Xᴺ − 1`, so the quotient polynomial
+/// `Q(X) = C(X) / Z_H(X)` has
+///
+/// `deg(Q) ≤ deg(C) − N ≤ M·(N − 1) − N < (M − 1)·N`.
+///
+/// We commit to Q(X) by splitting it into D chunks of degree < N; D = M − 1
+/// suffices, rounded up to a power of two.
+///
+/// # Degenerate AIRs
+///
+/// A trivial or linear AIR — combined degree `< 2`, whose constraints all
+/// vanish under `Z_H` — is **supported, not rejected**. The prover and verifier
+/// clamp the quotient degree to `D = 2` (`log_quotient_degree ≥ 1`) and proceed
+/// normally. The air crate imposes no minimum and applies no clamping; this is
+/// the single place the clamp lives.
+pub fn log_quotient_degree<F, EF, A>(air: &A) -> u8
+where
+    F: Field,
+    A: LiftedAir<F, EF>,
+{
+    let d = air.constraint_degree();
+    let combined = d.base.max(d.ext);
+    // Clamp to D = 2^result ≥ 2 so degenerate/linear AIRs stay well-defined.
+    log2_ceil_u8(combined.saturating_sub(1).max(2))
+}
+
+// ============================================================================
 // EvaluationDomain
 // ============================================================================
 
@@ -624,7 +667,7 @@ impl<F: TwoAdicField> LiftedDomain<F> {
 /// `log_quotient_degree ≤ lifted.log_blowup()` (enforced at construction).
 /// The "quotient degree" `D = 2^log_quotient_degree` is the number of chunks
 /// the quotient polynomial Q is decomposed into; the value comes from
-/// [`miden_lifted_air::LiftedAir::log_quotient_degree`].
+/// [`log_quotient_degree`].
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct EvaluationDomain<F: TwoAdicField> {
     domain: LiftedDomain<F>,

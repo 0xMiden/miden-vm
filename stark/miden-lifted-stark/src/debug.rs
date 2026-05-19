@@ -3,102 +3,77 @@
 //! Evaluates constraints row-by-row on concrete trace values and panics if any constraint
 //! is nonzero. This avoids the full STARK pipeline (DFT, commitment, FRI) and provides
 //! immediate feedback on constraint violations during development.
-//!
-//! # Usage
-//!
-//! ```ignore
-//! use miden_lifted_stark::AirWitness;
-//!
-//! // Single instance
-//! let witness = AirWitness::new(&trace, &public_values, &[]);
-//! check_constraints(&air, &witness, &aux_builder, &challenges);
-//!
-//! // Multiple instances
-//! check_constraints_multi(
-//!     &[(&air_a, witness_a, &builder_a), (&air_b, witness_b, &builder_b)],
-//!     &challenges,
-//! );
-//! ```
 
 extern crate alloc;
 
 use alloc::vec::Vec;
 
 use miden_lifted_air::{
-    AirBuilder, AuxBuilder, EmptyWindow, ExtensionBuilder, LiftedAir, PeriodicAirBuilder,
+    AirBuilder, BaseAir, EmptyWindow, ExtensionBuilder, Instance, LiftedAir, PeriodicAirBuilder,
     PermutationAirBuilder, RowWindow,
 };
+use p3_challenger::{CanObserve, CanSample};
 use p3_field::{ExtensionField, Field};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
-use crate::instance::AirWitness;
+use crate::ProverInstance;
 
 // ============================================================================
 // Public API
 // ============================================================================
 
-/// Evaluate every AIR constraint against a concrete trace and panic on failure.
+/// Evaluate AIR constraints against concrete trace values and panic on failure.
 ///
-/// Convenience wrapper around [`check_constraints_multi`] for a single instance.
+/// Constraints are checked row-by-row using the trace + aux trace built by
+/// [`ProverInstance`]. All AIRs see the same `air_inputs` from `instance`.
 ///
-/// # Panics
-///
-/// - If the AIR fails validation
-/// - If trace dimensions don't match the AIR
-/// - If challenges are insufficient
-/// - If any constraint evaluates to nonzero on any row
-pub fn check_constraints<F, EF, A, B>(
-    air: &A,
-    witness: AirWitness<'_, F>,
-    aux_builder: &B,
-    challenges: &[EF],
-) where
-    F: Field,
-    EF: ExtensionField<F>,
-    A: LiftedAir<F, EF>,
-    B: AuxBuilder<F, EF>,
-{
-    check_constraints_multi(&[(air, witness, aux_builder)], challenges);
-}
-
-/// Evaluate constraints for multiple AIR instances and panic on failure.
-///
-/// Each instance is a tuple of `(air, witness, aux_builder)`.
-///
-/// Builds the auxiliary trace for each instance and checks constraints row by row.
-/// Uses shared challenges across all instances (caller samples from RNG in test code).
+/// Derives auxiliary-trace challenges from the supplied challenger by
+/// observing the instance first, mirroring how the prover's challenger is
+/// seeded — so tests don't need to keep a separate RNG handle in sync.
 ///
 /// # Panics
 ///
-/// - If any AIR fails validation
 /// - If trace dimensions don't match their AIR
-/// - If challenges are insufficient
 /// - If any constraint evaluates to nonzero on any row
-pub fn check_constraints_multi<F, EF, A, B>(
-    instances: &[(&A, AirWitness<'_, F>, &B)],
-    challenges: &[EF],
-) where
+pub fn check_constraints<F, EF, P, Ch>(prover_instance: &P, mut challenger: Ch)
+where
     F: Field,
     EF: ExtensionField<F>,
-    A: LiftedAir<F, EF>,
-    B: AuxBuilder<F, EF>,
+    P: ProverInstance<F, EF>,
+    Ch: CanObserve<F> + CanSample<F>,
 {
-    assert!(!instances.is_empty(), "no instances provided");
+    let instance = prover_instance.instance();
+    let airs = instance.airs();
+    let traces = prover_instance.traces();
+    let air_inputs = instance.air_inputs();
+    assert!(!airs.is_empty(), "no instances provided");
+    assert_eq!(airs.len(), traces.len(), "airs and traces counts must match");
 
-    // Sort by (trace_height, caller_index) to match InstanceShapes::from_trace_heights.
-    let mut perm: Vec<usize> = (0..instances.len()).collect();
-    perm.sort_by_key(|&i| (instances[i].1.trace.height(), i));
+    // Mirror the prover's Fiat-Shamir seeding so challenges line up with what
+    // `prove` would produce for the same instance.
+    let log_heights: Vec<u8> = traces.iter().map(|t| log_height(t.height())).collect();
+    instance.observe(&mut challenger, &log_heights);
+    let max_num_randomness = airs.iter().map(|a| a.num_randomness()).max().unwrap_or(0);
+    let challenges: Vec<EF> = (0..max_num_randomness)
+        .map(|_| EF::from_basis_coefficients_fn(|_| challenger.sample()))
+        .collect();
 
-    for (i, &orig_idx) in perm.iter().enumerate() {
-        let &(air, ref witness, aux_builder) = &instances[orig_idx];
+    let (aux_traces, aux_values_per_air) = prover_instance.build_aux_traces(&challenges);
+    assert_eq!(aux_traces.len(), airs.len(), "build_aux_traces returned wrong number of traces");
+    assert_eq!(
+        aux_values_per_air.len(),
+        airs.len(),
+        "build_aux_traces returned wrong number of aux values"
+    );
 
-        air.validate()
-            .unwrap_or_else(|e| panic!("AIR validation failed for instance {i}: {e}"));
-
-        let main = witness.trace;
+    for (i, ((air, main), (aux_trace, aux_values))) in airs
+        .iter()
+        .copied()
+        .zip(traces.iter().copied())
+        .zip(aux_traces.iter().zip(aux_values_per_air.iter()))
+        .enumerate()
+    {
         let height = main.height();
-
-        // Main trace dimensions.
         assert!(
             height.is_power_of_two(),
             "instance {i}: trace height {height} is not a power of two"
@@ -111,31 +86,12 @@ pub fn check_constraints_multi<F, EF, A, B>(
             main.width
         );
         assert_eq!(
-            witness.public_values.len(),
+            air_inputs.len(),
             air.num_public_values(),
             "instance {i}: public values length mismatch: expected {}, got {}",
             air.num_public_values(),
-            witness.public_values.len()
+            air_inputs.len()
         );
-        assert_eq!(
-            witness.var_len_public_inputs.len(),
-            air.num_var_len_public_inputs(),
-            "instance {i}: var-len public inputs count mismatch: expected {}, got {}",
-            air.num_var_len_public_inputs(),
-            witness.var_len_public_inputs.len()
-        );
-        assert!(
-            challenges.len() >= air.num_randomness(),
-            "instance {i}: not enough challenges: need {}, got {}",
-            air.num_randomness(),
-            challenges.len()
-        );
-
-        // Build auxiliary trace.
-        let (aux_trace, aux_values) =
-            aux_builder.build_aux_trace(main, &challenges[..air.num_randomness()]);
-
-        // Auxiliary trace dimensions.
         assert_eq!(
             aux_trace.height(),
             height,
@@ -157,16 +113,13 @@ pub fn check_constraints_multi<F, EF, A, B>(
             aux_values.len()
         );
 
-        check_single_trace(
-            air,
-            main,
-            &aux_trace,
-            &aux_values,
-            witness.public_values,
-            challenges,
-            i,
-        );
+        check_single_trace(air, main, aux_trace, aux_values, air_inputs, &challenges, i);
     }
+}
+
+fn log_height(h: usize) -> u8 {
+    assert!(h.is_power_of_two(), "trace height {h} is not a power of two");
+    h.trailing_zeros() as u8
 }
 
 /// Check constraints for one instance's traces row by row.

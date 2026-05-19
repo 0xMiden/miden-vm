@@ -14,7 +14,7 @@ use p3_symmetric::{Hash, TruncatedPermutation};
 use rand::{SeedableRng, rngs::SmallRng};
 
 pub use super::{Felt, PackedFelt, QuadFelt};
-use crate::{AirWitness, testing::TEST_SEED};
+use crate::{Instance, ProverInstance, testing::TEST_SEED};
 
 // =============================================================================
 // Base field/hash configuration
@@ -136,35 +136,25 @@ pub fn generate_pow4_trace(start: Felt, height: usize) -> RowMajorMatrix<Felt> {
     RowMajorMatrix::new(values, 1)
 }
 
-/// Prove and verify from pre-built prover instances.
-///
-/// Runs the full prove → verify → transcript-reparse cycle.
-pub fn prove_and_verify_instances<A, B>(instances: &[(&A, AirWitness<'_, Felt>, &B)])
+/// Run the full prove → verify → transcript-reparse cycle.
+pub fn prove_and_verify_instance<P>(instance: &P)
 where
-    A: crate::air::LiftedAir<Felt, QuadFelt>,
-    B: crate::air::AuxBuilder<Felt, QuadFelt>,
+    P: ProverInstance<Felt, QuadFelt>,
 {
     let config = test_config();
 
-    let output = crate::prover::prove_multi(&config, instances, test_challenger())
-        .expect("proving should succeed");
+    let output =
+        crate::prover::prove(&config, instance, test_challenger()).expect("proving should succeed");
 
-    let verifier_instances: Vec<_> =
-        instances.iter().map(|(a, w, _)| (*a, w.to_instance())).collect();
-
-    let verifier_digest = crate::verifier::verify_multi(
-        &config,
-        &verifier_instances,
-        &output.proof,
-        test_challenger(),
-    )
-    .expect("verification should succeed");
+    let verifier_digest =
+        crate::verifier::verify(&config, instance.instance(), &output.proof, test_challenger())
+            .expect("verification should succeed");
     assert_eq!(output.digest, verifier_digest);
 
     // Re-parse transcript from a fresh challenger and verify digest agreement.
     let (_, reparse_digest) = crate::proof::StarkTranscript::from_proof(
         &config,
-        &verifier_instances,
+        instance.instance(),
         &output.proof,
         test_challenger(),
     )
@@ -172,21 +162,74 @@ where
     assert_eq!(output.digest, reparse_digest);
 }
 
-/// Prove and verify multiple traces, each with its own public values.
+/// Generic [`ProverInstance`] / [`Instance`] impl driven by a closure.
 ///
-/// `instances` is a slice of `(trace, public_values)` pairs.
-pub fn prove_and_verify<A, B>(
+/// `aux_fn` is called once per AIR with `(main_trace, challenges)` and returns
+/// `(aux_trace, aux_values)` for that AIR.
+pub struct TestProverInstance<'a, A, AuxFn> {
+    pub airs: Vec<&'a A>,
+    pub traces: Vec<&'a RowMajorMatrix<Felt>>,
+    pub air_inputs: &'a [Felt],
+    pub aux_fn: AuxFn,
+}
+
+impl<A, AuxFn> Instance<Felt, QuadFelt> for TestProverInstance<'_, A, AuxFn>
+where
+    A: crate::air::LiftedAir<Felt, QuadFelt>,
+{
+    type Air = A;
+
+    fn airs(&self) -> &[&Self::Air] {
+        &self.airs
+    }
+
+    fn air_inputs(&self) -> &[Felt] {
+        self.air_inputs
+    }
+}
+
+impl<A, AuxFn> ProverInstance<Felt, QuadFelt> for TestProverInstance<'_, A, AuxFn>
+where
+    A: crate::air::LiftedAir<Felt, QuadFelt>,
+    AuxFn: Fn(&RowMajorMatrix<Felt>, &[QuadFelt]) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>),
+{
+    type Instance = Self;
+
+    fn instance(&self) -> &Self {
+        self
+    }
+
+    fn traces(&self) -> &[&RowMajorMatrix<Felt>] {
+        &self.traces
+    }
+
+    fn build_aux_traces(
+        &self,
+        challenges: &[QuadFelt],
+    ) -> (Vec<RowMajorMatrix<QuadFelt>>, Vec<Vec<QuadFelt>>) {
+        let mut traces_out = Vec::with_capacity(self.traces.len());
+        let mut values_out = Vec::with_capacity(self.traces.len());
+        for &trace in &self.traces {
+            let (aux, vals) = (self.aux_fn)(trace, challenges);
+            traces_out.push(aux);
+            values_out.push(vals);
+        }
+        (traces_out, values_out)
+    }
+}
+
+/// Prove and verify multiple traces sharing one AIR and one aux-build closure.
+pub fn prove_and_verify<A, AuxFn>(
     air: &A,
-    aux_builder: &B,
-    instances: &[(RowMajorMatrix<Felt>, Vec<Felt>)],
+    aux_fn: AuxFn,
+    air_inputs: &[Felt],
+    traces: &[RowMajorMatrix<Felt>],
 ) where
     A: crate::air::LiftedAir<Felt, QuadFelt>,
-    B: crate::air::AuxBuilder<Felt, QuadFelt>,
+    AuxFn: Fn(&RowMajorMatrix<Felt>, &[QuadFelt]) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>),
 {
-    let prover_instances: Vec<_> = instances
-        .iter()
-        .map(|(t, pv)| (air, AirWitness::new(t, pv, &[]), aux_builder))
-        .collect();
-
-    prove_and_verify_instances(&prover_instances);
+    let traces: Vec<&RowMajorMatrix<Felt>> = traces.iter().collect();
+    let airs: Vec<&A> = core::iter::repeat_n(air, traces.len()).collect();
+    let instance = TestProverInstance { airs, traces, air_inputs, aux_fn };
+    prove_and_verify_instance(&instance);
 }

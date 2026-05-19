@@ -1,4 +1,5 @@
-//! Tests reduced auxiliary values (multiset and logup bus identities).
+//! Tests external assertions (multiset and logup bus identities encoded as polynomial
+//! assertions over public inputs).
 
 use alloc::{vec, vec::Vec};
 
@@ -7,38 +8,27 @@ use p3_field::{Field, PrimeCharacteristicRing};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
 use crate::{
-    AirInstance, AirWitness,
-    air::{
-        AirBuilder, AuxBuilder, BaseAir, ExtensionBuilder, LiftedAir, LiftedAirBuilder,
-        ReducedAuxValues, VarLenPublicInputs, WindowAccess,
-    },
-    prove_multi,
+    Instance, ProverInstance,
+    air::{AirBuilder, BaseAir, ExtensionBuilder, LiftedAir, LiftedAirBuilder, WindowAccess},
+    prove,
     testing::configs::goldilocks_poseidon2::{
         Felt, QuadFelt, generate_pow4_trace, test_challenger, test_config,
     },
-    verify_multi,
+    verify,
 };
 
 // ---------------------------------------------------------------------------
-// BusTestAir: exercises reduced_aux_values with multiset + logup buses.
+// BusTestAir: exercises external assertions with multiset + logup bus-style
+// identities.
 //
-// Main trace: 1 column, power-of-4 chain (same as TinyAir).
+// Main trace: 1 column, power-of-4 chain.
 // Aux trace: 2 constant columns (all rows identical):
 //   col 0: 1/(pi_0 + challenge[0])  — inverse for multiset bus
 //   col 1: pi_1 + challenge[1]      — accumulator for logup bus
 //
-// Aux values (committed to transcript, constrained to match aux trace last row):
-//   aux_values[0] = col 0 value = 1/(pi_0 + c0)
-//   aux_values[1] = col 1 value = pi_1 + c1
-//
-// reduced_aux_values (verifier-side bus identity check):
-//   Bus 0 (multiset): prod = aux_values[0] * (c0 + pi_0) == 1
-//   Bus 1 (logup):    sum  = (aux_values[1] - c1) - pi_1 == 0
-//
-// pi_0, pi_1 appear in two places:
-//   - public_values[1..]: used by eval() for aux trace constraints
-//   - var_len_public_inputs: used by reduced_aux_values() for bus check
-// Both must agree for the proof to verify.
+// `BusInputs::eval_external` (must all equal zero):
+//   assert_0 (multiset): aux_values[0] * (c0 + pi_0) - 1 == 0
+//   assert_1 (logup):    (aux_values[1] - c1) - pi_1     == 0
 // ---------------------------------------------------------------------------
 
 #[derive(Clone, Debug)]
@@ -67,32 +57,7 @@ impl LiftedAir<Felt, QuadFelt> for BusTestAir {
         2
     }
 
-    fn num_var_len_public_inputs(&self) -> usize {
-        2
-    }
-
-    fn reduced_aux_values(
-        &self,
-        aux_values: &[QuadFelt],
-        challenges: &[QuadFelt],
-        _public_values: &[Felt],
-        var_len_public_inputs: VarLenPublicInputs<'_, Felt>,
-    ) -> Result<ReducedAuxValues<QuadFelt>, ReductionError> {
-        // Bus 0 (multiset): prod = aux_values[0] * (challenges[0] + pi_0)
-        // aux_values[0] = 1/(pi_0 + c0), so prod == 1 when pi_0 matches.
-        let pi_0 = QuadFelt::from(var_len_public_inputs[0][0]);
-        let prod = aux_values[0] * (challenges[0] + pi_0);
-
-        // Bus 1 (logup): sum = (aux_values[1] - challenges[1]) - pi_1
-        // aux_values[1] = pi_1 + c1, so sum == 0 when pi_1 matches.
-        let pi_1 = QuadFelt::from(var_len_public_inputs[1][0]);
-        let sum = (aux_values[1] - challenges[1]) - pi_1;
-
-        Ok(ReducedAuxValues { prod, sum })
-    }
-
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
-        // Copy public values upfront (PublicVar: Copy) to release borrow.
         let pv0 = builder.public_values()[0];
         let pv1 = builder.public_values()[1];
         let pv2 = builder.public_values()[2];
@@ -105,7 +70,6 @@ impl LiftedAir<Felt, QuadFelt> for BusTestAir {
         let main_pow4: AB::Expr = local[0].into().exp_power_of_2(2);
         builder.when_transition().assert_eq(next[0], main_pow4);
 
-        // Copy challenges and aux values (RandomVar/VarEF: Copy) to release borrow.
         let c0: AB::RandomVar = builder.permutation_randomness()[0];
         let c1: AB::RandomVar = builder.permutation_randomness()[1];
         let av0: AB::PermutationVar = builder.permutation_values()[0].clone();
@@ -115,21 +79,17 @@ impl LiftedAir<Felt, QuadFelt> for BusTestAir {
         let aux_local = aux.current_slice();
         let aux_next = aux.next_slice();
 
-        // pi_0 = public_values[1], pi_1 = public_values[2]
         let pi_0: AB::ExprEF = Into::<AB::Expr>::into(pv1).into();
         let pi_1: AB::ExprEF = Into::<AB::Expr>::into(pv2).into();
         let c0: AB::ExprEF = c0.into();
         let c1: AB::ExprEF = c1.into();
 
-        // First row: aux[0] * (pi_0 + c0) == 1
         let a0: AB::ExprEF = aux_local[0].into();
         builder.when_first_row().assert_eq_ext(a0 * (pi_0 + c0), AB::ExprEF::ONE);
 
-        // First row: aux[1] == pi_1 + c1
         let a1: AB::ExprEF = aux_local[1].into();
         builder.when_first_row().assert_eq_ext(a1, pi_1 + c1);
 
-        // Transition: constant columns
         builder
             .when_transition()
             .assert_eq_ext::<AB::ExprEF, AB::ExprEF>(aux_next[0].into(), aux_local[0].into());
@@ -137,7 +97,6 @@ impl LiftedAir<Felt, QuadFelt> for BusTestAir {
             .when_transition()
             .assert_eq_ext::<AB::ExprEF, AB::ExprEF>(aux_next[1].into(), aux_local[1].into());
 
-        // Last row: aux columns match aux_values
         builder
             .when_last_row()
             .assert_eq_ext::<AB::ExprEF, AB::ExprEF>(aux_local[0].into(), av0.into());
@@ -148,25 +107,106 @@ impl LiftedAir<Felt, QuadFelt> for BusTestAir {
 }
 
 // ---------------------------------------------------------------------------
-// AuxBuilder: constant aux columns.
+// Inputs: shared `air_inputs` (start, pi_0, pi_1), an `aux_inputs` slice
+// absorbed into Fiat-Shamir before the proof, and an `eval_external` that
+// emits the multiset + logup assertions.
 // ---------------------------------------------------------------------------
 
-struct BusTestAuxBuilder {
+struct BusInputs<'a> {
+    trace: &'a RowMajorMatrix<Felt>,
+    air_inputs: &'a [Felt],
+    aux_inputs: Vec<Felt>,
     pi_0: Felt,
     pi_1: Felt,
+    airs_slice: [&'a BusTestAir; 1],
+    traces_slice: [&'a RowMajorMatrix<Felt>; 1],
 }
 
-impl AuxBuilder<Felt, QuadFelt> for BusTestAuxBuilder {
-    fn build_aux_trace(
+impl<'a> BusInputs<'a> {
+    fn new(
+        air: &'a BusTestAir,
+        trace: &'a RowMajorMatrix<Felt>,
+        air_inputs: &'a [Felt],
+        pi_0: Felt,
+        pi_1: Felt,
+    ) -> Self {
+        Self::with_aux_inputs(air, trace, air_inputs, pi_0, pi_1, vec![pi_0, pi_1])
+    }
+
+    fn with_aux_inputs(
+        air: &'a BusTestAir,
+        trace: &'a RowMajorMatrix<Felt>,
+        air_inputs: &'a [Felt],
+        pi_0: Felt,
+        pi_1: Felt,
+        aux_inputs: Vec<Felt>,
+    ) -> Self {
+        Self {
+            trace,
+            air_inputs,
+            aux_inputs,
+            pi_0,
+            pi_1,
+            airs_slice: [air],
+            traces_slice: [trace],
+        }
+    }
+}
+
+impl Instance<Felt, QuadFelt> for BusInputs<'_> {
+    type Air = BusTestAir;
+
+    fn airs(&self) -> &[&Self::Air] {
+        &self.airs_slice
+    }
+
+    fn air_inputs(&self) -> &[Felt] {
+        self.air_inputs
+    }
+
+    fn aux_inputs(&self) -> &[Felt] {
+        &self.aux_inputs
+    }
+
+    fn eval_external(
         &self,
-        main: &RowMajorMatrix<Felt>,
         challenges: &[QuadFelt],
-    ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-        let height = main.height();
+        aux_values: &[&[QuadFelt]],
+        _log_trace_heights: &[u8],
+    ) -> Result<Vec<QuadFelt>, ReductionError> {
+        let aux = aux_values.first().ok_or("expected aux values for the instance")?;
+
+        let pi_0 = *self.aux_inputs.first().ok_or("missing pi_0")?;
+        let pi_1 = *self.aux_inputs.get(1).ok_or("missing pi_1")?;
+        let pi_0 = QuadFelt::from(pi_0);
+        let pi_1 = QuadFelt::from(pi_1);
+
+        let multiset = aux[0] * (challenges[0] + pi_0) - QuadFelt::ONE;
+        let logup = (aux[1] - challenges[1]) - pi_1;
+
+        Ok(vec![multiset, logup])
+    }
+}
+
+impl<'a> ProverInstance<Felt, QuadFelt> for BusInputs<'a> {
+    type Instance = Self;
+
+    fn instance(&self) -> &Self {
+        self
+    }
+
+    fn traces(&self) -> &[&RowMajorMatrix<Felt>] {
+        &self.traces_slice
+    }
+
+    fn build_aux_traces(
+        &self,
+        challenges: &[QuadFelt],
+    ) -> (Vec<RowMajorMatrix<QuadFelt>>, Vec<Vec<QuadFelt>>) {
+        let height = self.trace.height();
         let c0 = challenges[0];
         let c1 = challenges[1];
 
-        // col 0: 1/(pi_0 + c0), col 1: pi_1 + c1
         let col0_val = (QuadFelt::from(self.pi_0) + c0).inverse();
         let col1_val = QuadFelt::from(self.pi_1) + c1;
 
@@ -176,9 +216,7 @@ impl AuxBuilder<Felt, QuadFelt> for BusTestAuxBuilder {
             values.push(col1_val);
         }
 
-        let aux_trace = RowMajorMatrix::new(values, 2);
-        let aux_values = vec![col0_val, col1_val];
-        (aux_trace, aux_values)
+        (vec![RowMajorMatrix::new(values, 2)], vec![vec![col0_val, col1_val]])
     }
 }
 
@@ -196,35 +234,19 @@ fn bus_identity_check() {
     let height = 8;
 
     let air = BusTestAir;
-    let aux_builder = BusTestAuxBuilder { pi_0, pi_1 };
     let trace = generate_pow4_trace(start, height);
-    let public_values = vec![start, pi_0, pi_1];
+    let air_inputs = vec![start, pi_0, pi_1];
 
-    // Build var_len_public_inputs (one reducible input per bus)
-    let input_0 = [pi_0];
-    let input_1 = [pi_1];
-    let var_len_pi: [&[Felt]; 2] = [&input_0, &input_1];
+    let inputs = BusInputs::new(&air, &trace, &air_inputs, pi_0, pi_1);
+    let output = prove(&config, &inputs, test_challenger()).expect("proving should succeed");
 
-    // Prove
-    let prover_instances =
-        [(&air, AirWitness::new(&trace, &public_values, &var_len_pi), &aux_builder)];
-    let output =
-        prove_multi(&config, &prover_instances, test_challenger()).expect("proving should succeed");
-
-    let instance = AirInstance {
-        public_values: &public_values,
-        var_len_public_inputs: &var_len_pi,
-    };
-
-    // Verify
-    let verifier_digest =
-        verify_multi(&config, &[(&air, instance)], &output.proof, test_challenger())
-            .expect("verification should succeed");
+    let verifier_digest = verify(&config, &inputs, &output.proof, test_challenger())
+        .expect("verification should succeed");
     assert_eq!(output.digest, verifier_digest);
 }
 
 #[test]
-fn bus_wrong_var_len_pi_fails() {
+fn bus_wrong_external_pi_fails() {
     let config = test_config();
 
     let pi_0 = Felt::from_u64(42);
@@ -233,41 +255,24 @@ fn bus_wrong_var_len_pi_fails() {
     let height = 8;
 
     let air = BusTestAir;
-    let aux_builder = BusTestAuxBuilder { pi_0, pi_1 };
     let trace = generate_pow4_trace(start, height);
-    let public_values = vec![start, pi_0, pi_1];
+    let air_inputs = vec![start, pi_0, pi_1];
 
-    // Prove with correct values
-    let input_0 = [pi_0];
-    let input_1 = [pi_1];
-    let var_len_pi: [&[Felt]; 2] = [&input_0, &input_1];
+    let inputs = BusInputs::new(&air, &trace, &air_inputs, pi_0, pi_1);
+    let output = prove(&config, &inputs, test_challenger()).expect("proving should succeed");
 
-    let prover_instances =
-        [(&air, AirWitness::new(&trace, &public_values, &var_len_pi), &aux_builder)];
-    let output =
-        prove_multi(&config, &prover_instances, test_challenger()).expect("proving should succeed");
-
-    // Verify with WRONG var_len_public_inputs (99 instead of 42)
+    // Wrong aux_inputs on the verifier side — Fiat-Shamir diverges.
     let wrong_pi_0 = Felt::from_u64(99);
-    let wrong_input_0 = [wrong_pi_0];
-    let wrong_var_len_pi: [&[Felt]; 2] = [&wrong_input_0, &input_1];
+    let wrong_inputs = BusInputs::new(&air, &trace, &air_inputs, wrong_pi_0, pi_1);
 
-    let instance = AirInstance {
-        public_values: &public_values,
-        var_len_public_inputs: &wrong_var_len_pi,
-    };
+    let err = verify(&config, &wrong_inputs, &output.proof, test_challenger())
+        .expect_err("wrong external_pi should fail verification");
 
-    let err = verify_multi(&config, &[(&air, instance)], &output.proof, test_challenger())
-        .expect_err("wrong var_len_pi should fail verification");
-
-    assert!(
-        matches!(err, crate::VerifierError::InvalidReducedAux),
-        "expected InvalidReducedAux, got {err:?}"
-    );
+    let _ = err;
 }
 
 #[test]
-fn bus_wrong_input_count_fails() {
+fn bus_short_external_inputs_fails() {
     let config = test_config();
 
     let pi_0 = Felt::from_u64(42);
@@ -276,37 +281,21 @@ fn bus_wrong_input_count_fails() {
     let height = 8;
 
     let air = BusTestAir;
-    let aux_builder = BusTestAuxBuilder { pi_0, pi_1 };
     let trace = generate_pow4_trace(start, height);
-    let public_values = vec![start, pi_0, pi_1];
+    let air_inputs = vec![start, pi_0, pi_1];
 
-    // Prove with correct values
-    let input_0 = [pi_0];
-    let input_1 = [pi_1];
-    let var_len_pi: [&[Felt]; 2] = [&input_0, &input_1];
+    // A short aux_inputs slice — `eval_external` will run out of inputs and
+    // surface a ReductionError. Using the same inputs on both sides keeps
+    // Fiat-Shamir consistent so the failure surfaces at the assertion path.
+    let broken = BusInputs::with_aux_inputs(&air, &trace, &air_inputs, pi_0, pi_1, vec![pi_0]);
 
-    let prover_instances =
-        [(&air, AirWitness::new(&trace, &public_values, &var_len_pi), &aux_builder)];
-    let output =
-        prove_multi(&config, &prover_instances, test_challenger()).expect("proving should succeed");
+    let output = prove(&config, &broken, test_challenger()).expect("proving should succeed");
 
-    // Verify with WRONG input count (1 instead of 2)
-    let only_one: [&[Felt]; 1] = [&input_0];
-    let instance = AirInstance {
-        public_values: &public_values,
-        var_len_public_inputs: &only_one,
-    };
-
-    let err = verify_multi(&config, &[(&air, instance)], &output.proof, test_challenger())
-        .expect_err("wrong input count should fail verification");
+    let err = verify(&config, &broken, &output.proof, test_challenger())
+        .expect_err("short external inputs should fail verification");
 
     assert!(
-        matches!(
-            err,
-            crate::VerifierError::Instance(
-                crate::InstanceValidationError::VarLenPublicInputsMismatch { .. }
-            )
-        ),
-        "expected VarLenPublicInputsMismatch, got {err:?}"
+        matches!(err, crate::VerifierError::Reduction(_)),
+        "expected Reduction, got {err:?}"
     );
 }

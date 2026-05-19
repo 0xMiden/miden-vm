@@ -115,7 +115,7 @@ at the outer protocol layer.
 
 ## What To Review First (Suggested Order)
 
-1. `miden-lifted-stark/src/verifier/mod.rs` (`verify_multi`)
+1. `miden-lifted-stark/src/verifier/mod.rs` (`verify`)
 2. `miden-lifted-stark/src/pcs/verifier.rs` (`verify`)
 3. `miden-lifted-stark/src/lmcs/mod.rs` (`Lmcs::open_batch`)
 4. `miden-lifted-stark/src/pcs/deep/verifier.rs` (DEEP reduction + quotient eval)

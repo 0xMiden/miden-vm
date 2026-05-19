@@ -74,10 +74,6 @@ impl<F: Field, EF: Field> LiftedAir<F, EF> for DummyMidenAir {
         self.num_aux_cols
     }
 
-    fn num_var_len_public_inputs(&self) -> usize {
-        0
-    }
-
     fn eval<AB: LiftedAirBuilder<F = F>>(&self, builder: &mut AB) {
         eval_miden_constraints(builder);
     }

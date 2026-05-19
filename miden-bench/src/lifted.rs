@@ -3,17 +3,17 @@
 use std::fmt;
 
 use miden_lifted_stark::{
-    AirInstance, AirWitness, StarkConfig,
+    Instance, ProverInstance, StarkConfig,
     air::{BaseAir, LiftedAir, LiftedAirBuilder},
-    prove_multi,
+    prove,
     testing::airs::{
-        ZeroAuxBuilder, blake3::LiftedBlake3Air, keccak::LiftedKeccakAir, miden::DummyMidenAir,
+        blake3::LiftedBlake3Air, keccak::LiftedKeccakAir, miden::DummyMidenAir,
         poseidon2::LiftedPoseidon2Air,
     },
-    verify_multi,
+    verify,
 };
-use p3_field::Field;
-use p3_matrix::dense::RowMajorMatrix;
+use p3_field::{Field, PrimeCharacteristicRing};
+use p3_matrix::{Matrix, dense::RowMajorMatrix};
 use tracing::info_span;
 
 use crate::{
@@ -65,10 +65,6 @@ impl<EF: Field> LiftedAir<Felt, EF> for LiftedBenchAir {
         }
     }
 
-    fn num_var_len_public_inputs(&self) -> usize {
-        0
-    }
-
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
         match self {
             Self::Keccak(a) => LiftedAir::<Felt, EF>::eval(a, builder),
@@ -76,6 +72,57 @@ impl<EF: Field> LiftedAir<Felt, EF> for LiftedBenchAir {
             Self::Blake3(a) => LiftedAir::<Felt, EF>::eval(a, builder),
             Self::Miden(a) => LiftedAir::<Felt, EF>::eval(a, builder),
         }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Inputs: per-AIR all-zero aux trace, empty public inputs.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+struct BenchInputs<'a> {
+    airs: Vec<&'a LiftedBenchAir>,
+    traces: Vec<&'a RowMajorMatrix<Felt>>,
+    /// `(num_aux_cols, num_aux_values)` per AIR.
+    aux_shape: Vec<(usize, usize)>,
+}
+
+impl Instance<Felt, QuadFelt> for BenchInputs<'_> {
+    type Air = LiftedBenchAir;
+
+    fn airs(&self) -> &[&Self::Air] {
+        &self.airs
+    }
+
+    fn air_inputs(&self) -> &[Felt] {
+        &[]
+    }
+}
+
+impl<'a> ProverInstance<Felt, QuadFelt> for BenchInputs<'a> {
+    type Instance = Self;
+
+    fn instance(&self) -> &Self {
+        self
+    }
+
+    fn traces(&self) -> &[&RowMajorMatrix<Felt>] {
+        &self.traces
+    }
+
+    fn build_aux_traces(
+        &self,
+        _challenges: &[QuadFelt],
+    ) -> (Vec<RowMajorMatrix<QuadFelt>>, Vec<Vec<QuadFelt>>) {
+        let mut traces_out = Vec::with_capacity(self.traces.len());
+        let mut values_out = Vec::with_capacity(self.traces.len());
+        for (i, &t) in self.traces.iter().enumerate() {
+            let height = t.height();
+            let (num_aux_cols, num_aux_values) = self.aux_shape[i];
+            let values = QuadFelt::zero_vec(height * num_aux_cols);
+            traces_out.push(RowMajorMatrix::new(values, num_aux_cols));
+            values_out.push(vec![QuadFelt::ZERO; num_aux_values]);
+        }
+        (traces_out, values_out)
     }
 }
 
@@ -109,26 +156,22 @@ where
         })
         .collect();
 
-    let aux_builders: Vec<ZeroAuxBuilder> = specs
+    let aux_shape: Vec<(usize, usize)> = specs
         .iter()
         .map(|spec| match spec.air_type {
-            AirType::Miden => ZeroAuxBuilder {
-                num_aux_cols: spec.num_aux_cols,
-                num_aux_values: spec.num_aux_cols,
-            },
-            _ => ZeroAuxBuilder::dummy(),
+            AirType::Miden => (spec.num_aux_cols, spec.num_aux_cols),
+            _ => (1, 0),
         })
         .collect();
 
-    let instances: Vec<_> = airs
-        .iter()
-        .zip(traces)
-        .zip(&aux_builders)
-        .map(|((air, trace), aux)| (air, AirWitness::new(trace, &[], &[]), aux))
-        .collect();
+    let inputs = BenchInputs {
+        airs: airs.iter().collect(),
+        traces: traces.iter().collect(),
+        aux_shape,
+    };
 
     let output = info_span!("prove")
-        .in_scope(|| prove_multi(config, &instances, config.challenger()).expect("proving failed"));
+        .in_scope(|| prove(config, &inputs, config.challenger()).expect("proving failed"));
 
     let result = RunResult {
         proof_size_bytes: output.proof.size_in_bytes(),
@@ -138,21 +181,8 @@ where
 
     if !cli.no_verify {
         info_span!("verify").in_scope(|| {
-            let verifier_instances: Vec<_> = airs
-                .iter()
-                .map(|air| {
-                    (
-                        air,
-                        AirInstance {
-                            public_values: &[],
-                            var_len_public_inputs: &[],
-                        },
-                    )
-                })
-                .collect();
-            let digest =
-                verify_multi(config, &verifier_instances, &output.proof, config.challenger())
-                    .expect("verification failed");
+            let digest = verify(config, &inputs, &output.proof, config.challenger())
+                .expect("verification failed");
             assert_eq!(output.digest, digest);
         });
     }

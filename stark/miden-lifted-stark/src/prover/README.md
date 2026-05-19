@@ -10,27 +10,40 @@ Protocol-level overview lives in `miden-lifted-stark/README.md`.
 
 | Item | Purpose |
 |------|---------|
-| `prove_single` | Prove a single-AIR STARK |
-| `prove_multi` | Prove a multi-trace STARK |
-| `AirWitness` | Bundle a trace with its public values |
+| `prove` | Prove one or more AIR instances |
+| `ProverInstance` | Trait wrapping an `Instance` (associated type + accessor) with per-AIR traces and aux construction |
+| `Instance` | Statement description — AIRs (`type Air`/`fn airs`), shared `air_inputs`, optional `aux_inputs`, the cross-AIR `eval_external`, and a Fiat-Shamir `observe` hook |
 
 ```text
-prove_single(config, air, trace, public_values, var_len_public_inputs, aux_builder, challenger)
-prove_multi(config, &[(air, witness, aux_builder), ...], challenger)
+prove(config, &prover_instance, challenger)
 ```
+
+An `Instance` impl exposes its AIRs via `type Air` + `fn airs() -> &[&Self::Air]`,
+plus `air_inputs()` (public values shared by every AIR), and optionally overrides
+`aux_inputs()`, `eval_external(...)`, and `observe(challenger, log_heights)`
+(defaults: empty `aux_inputs`, no assertions, observe `air_inputs` then
+`aux_inputs` then `log_heights`). `ProverInstance` *contains* an `Instance` (via
+`type Instance` + `fn instance(&self) -> &Self::Instance`) and adds `traces()`
+(per-AIR main traces in instance order) plus `build_aux_traces(challenges)`
+(returns `(Vec<aux_trace>, Vec<aux_values>)` in the same order). Callers either
+implement both traits on one struct or write a thin prover wrapper that points
+at an existing verifier-side `Instance`.
 
 The proof is written into the provided transcript channel. This crate does not
 prescribe the *initial* challenger state used for Fiat-Shamir.
 
 ## Fiat-Shamir / transcript binding
 
-The caller must bind protocol parameters, public values, variable-length
-public inputs, AIR configurations, and `air_order` into the challenger
-before calling `prove_multi`. See the Rust module-level docs for the full contract
-and code examples.
+The caller must bind protocol parameters and AIR configurations into the
+challenger before calling `prove`. The wire-format AIR ordering is derived
+deterministically from the trace heights (no explicit `air_order` to bind).
+The proof's `air_inputs`, `aux_inputs`, and log trace heights are absorbed
+automatically by `Instance::observe`. See the Rust module-level docs for
+the full contract and code examples.
 
 ## Protocol flow
 
+0. Absorb caller-supplied inputs via `Instance::observe` and the per-instance log trace heights into the challenger.
 1. Validate trace dimensions against AIR definition.
 2. Commit main trace LDE on nested coset (bit-reversed), observe commitment.
 3. Sample aux randomness, build aux trace, commit aux LDE.

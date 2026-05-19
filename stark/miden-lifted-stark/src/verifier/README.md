@@ -10,15 +10,19 @@ Protocol-level overview lives in `miden-lifted-stark/README.md`.
 
 | Item | Purpose |
 |------|---------|
-| `verify_single` | Verify a single-AIR proof |
-| `verify_multi` | Verify a multi-trace proof |
-| `AirInstance` | Public values + variable-length inputs for one AIR |
+| `verify` | Verify the statement described by an `Instance` |
+| `Instance` | Statement description — AIRs (`type Air`/`fn airs`), shared `air_inputs`, optional `aux_inputs`, `eval_external`, `observe` |
 | `StarkProof` | Log trace heights + raw transcript data |
 
 ```text
-verify_single(config, air, public_values, var_len_public_inputs, proof, challenger)
-verify_multi(config, &[(air, instance), ...], proof, challenger)
+verify(config, &instance, proof, challenger)
 ```
+
+The `instance` impl carries the AIRs, the proof's `air_inputs` and (if any)
+`aux_inputs`, and defines the cross-AIR `eval_external` check. The
+framework absorbs both `air_inputs` and `aux_inputs` into Fiat-Shamir
+automatically via `Instance::observe` — callers must pass `instance`
+carrying the same data on prover and verifier sides.
 
 The proof is read from the provided transcript channel. This crate does not
 prescribe the *initial* challenger state used for Fiat-Shamir.
@@ -30,13 +34,13 @@ prover module-level docs for the full binding contract.
 
 ## Transcript boundaries
 
-`verify_multi` rejects trailing transcript data (`TranscriptNotConsumed`). If you
+`verify` rejects trailing transcript data (`TranscriptNotConsumed`). If you
 bundle extra data in the same transcript, you must manage boundaries yourself.
 
 ## Protocol flow
 
-0. Validate `air_order` from the proof and reorder caller instances to match.
-1. Observe log trace heights into the challenger (from proof, not transcript).
+0. Reconstruct `TraceOrder` from the proof's log trace heights and reorder caller AIRs into the proof's ascending-height ordering.
+1. Absorb the caller-supplied instance via `Instance::observe` (which itself absorbs the heights) into the challenger.
 2. Receive main trace commitment.
 3. Sample aux randomness.
 4. Receive aux trace commitment.
@@ -47,8 +51,9 @@ bundle extra data in the same transcript, you must manage boundaries yourself.
 9. Reconstruct `Q(z)` from the opened quotient chunks.
 10. For each trace instance j, set `y_j = z^{r_j}` and evaluate folded constraints at `y_j`.
 11. Accumulate across traces with `beta`.
-12. Check quotient identity: `accumulated == Q(z) * (z^N - 1)`.
-13. Ensure transcript is fully consumed.
+12. Call `instance.eval_external(...)` once with the global view (challenges, all aux values in instance order, log heights in instance order) and check each returned EF value is zero.
+13. Check quotient identity: `accumulated == Q(z) * (z^N - 1)`.
+14. Ensure transcript is fully consumed.
 
 ## Mathematical background
 

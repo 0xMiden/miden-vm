@@ -1,203 +1,234 @@
-//! Protocol-level instance types for the lifted STARK prover and verifier.
+//! Stark-side instance utilities: [`TraceOrder`] and [`validate_instance`].
 //!
-//! - [`AirInstance`]: Verifier instance — public values + variable-length inputs
-//! - [`AirWitness`]: Prover witness — trace + public values
-//! - [`InstanceShapes`]: Per-instance trace heights carried on [`StarkProof`](crate::StarkProof)
+//! The air crate's [`Instance`] trait is order-agnostic: every list it
+//! exposes is in **instance order** (the position returned by
+//! [`Instance::airs`]). The stark crate is the only place that needs the
+//! proof's wire-format AIR ordering (a deterministic stable sort of the
+//! per-AIR heights). [`TraceOrder`] is the type that carries the
+//! permutation between **instance order** and **proof order**; nothing
+//! about it leaks into the air crate.
+//!
+//! - [`TraceOrder`]: built from instance-order trace heights. Owns the permutation between instance
+//!   order and proof order, plus the heights themselves. Both prover and verifier construct one and
+//!   pass it to [`validate_instance`].
+//! - [`validate_instance`]: instance-level checks against a [`TraceOrder`] (count match,
+//!   public-values length matches the shared declaration, trace height ≥ max periodic period). The
+//!   AIR list itself is assumed structurally valid via [`miden_lifted_air::validate_airs`].
 
 extern crate alloc;
 
-use alloc::{vec, vec::Vec};
+use alloc::vec::Vec;
 
-use miden_lifted_air::{AirStructureError, LiftedAir, VarLenPublicInputs, log2_strict_u8};
-use p3_challenger::CanObserve;
-use p3_field::{Field, PrimeCharacteristicRing};
-use p3_matrix::{Matrix, dense::RowMajorMatrix};
-use serde::{Deserialize, Serialize};
+use miden_lifted_air::{BaseAir, Instance, LiftedAir, log2_strict_u8};
+use p3_field::{ExtensionField, Field};
 use thiserror::Error;
 
-use crate::domain::DomainError;
-
 // ============================================================================
-// Instance data
+// Errors
 // ============================================================================
 
-/// Verifier instance: public values and variable-length inputs.
-///
-/// Both the prover and verifier carry `var_len_public_inputs`. The verifier uses
-/// them in [`LiftedAir::reduced_aux_values`] for the cross-AIR identity check.
-///
-/// Log trace heights are not part of the instance — they are carried on the
-/// [`StarkProof`](crate::StarkProof) as [`InstanceShapes`] and absorbed into
-/// the Fiat-Shamir state.
-#[derive(Clone, Copy, Debug)]
-pub struct AirInstance<'a, F> {
-    /// Public values for this AIR.
-    pub public_values: &'a [F],
-    /// Reducible inputs for the cross-AIR identity check. Empty slice if no buses.
-    pub var_len_public_inputs: VarLenPublicInputs<'a, F>,
+/// Errors from parsing or validating proof shape metadata (the
+/// caller-order `&[u8]` of log trace heights carried on the proof).
+#[derive(Debug, Error)]
+pub enum ShapeError {
+    #[error("no instances provided")]
+    Empty,
+    #[error("trace height {height} is not a power of two")]
+    InvalidTraceHeight { height: usize },
+    #[error("log trace height {log_h} exceeds {max} (would overflow usize on this target)")]
+    LogTraceHeightTooLarge { log_h: u8, max: u8 },
+    #[error("more than 256 instances ({count}) — exceeds the u8 caller-index limit")]
+    TooManyInstances { count: usize },
 }
 
-/// Prover witness: trace matrix, public values, and variable-length public inputs.
+/// Errors from validating an [`Instance`] against a [`TraceOrder`].
 ///
-/// Validates on construction that the trace height is a power of two.
-///
-/// **Commitment:** callers **must** bind both `public_values` and
-/// `var_len_public_inputs` to the Fiat-Shamir challenger state before proving.
-#[derive(Clone, Copy, Debug)]
-pub struct AirWitness<'a, F> {
-    /// Main trace matrix.
-    pub trace: &'a RowMajorMatrix<F>,
-    /// Public values for this AIR.
-    pub public_values: &'a [F],
-    /// Variable-length public inputs (reducible inputs for bus identity checks).
-    pub var_len_public_inputs: VarLenPublicInputs<'a, F>,
+/// The AIR's structural contract (no preprocessed trace, positive aux
+/// width, power-of-two periodic columns) is the air-crate's domain — call
+/// [`miden_lifted_air::validate_airs`] for that. This enum only covers
+/// checks that depend on caller-supplied data the AIR trait cannot
+/// validate on its own.
+#[derive(Debug, Error)]
+pub enum InstanceValidationError {
+    #[error(transparent)]
+    Shape(#[from] ShapeError),
+    #[error("public values length mismatch: expected {expected}, got {actual}")]
+    PublicValuesMismatch { expected: usize, actual: usize },
+    #[error("trace height {trace_height} is less than max periodic column length {max_period}")]
+    TraceHeightBelowPeriod { trace_height: usize, max_period: usize },
+    #[error("prover input count mismatch: {airs} AIRs but {traces} traces")]
+    AirTraceCountMismatch { airs: usize, traces: usize },
+    #[error("trace width mismatch: expected {expected}, got {actual}")]
+    WidthMismatch { expected: usize, actual: usize },
 }
 
-impl<'a, F> AirWitness<'a, F> {
-    /// Create a new prover witness with validation.
+// ============================================================================
+// TraceOrder
+// ============================================================================
+
+/// The permutation between **instance order** (the AIR positions as
+/// returned by [`Instance::airs`]) and **proof order** (the wire-format
+/// ordering used inside the prover/verifier), derived deterministically
+/// from per-AIR trace heights.
+///
+/// Proof order is defined as the stable sort of instance indices by
+/// `(log_trace_height, instance_index)`. Both prover and verifier compute
+/// the same ordering from the same heights, so the proof commits to heights
+/// only and the ordering is reconstructed locally.
+///
+/// Heights are stored in instance order (matching [`Instance::airs`]).
+/// Use [`Self::to_proof_order`] / [`Self::to_instance_order`] (or
+/// [`Self::reorder_to_proof_in_place`]) to move data between the two views.
+#[derive(Clone, Debug)]
+pub struct TraceOrder {
+    log_heights_instance: Vec<u8>,
+    /// `instance_indices[j]` = instance index at proof position `j`. Length
+    /// matches `log_heights_instance`.
+    instance_indices: Vec<u8>,
+}
+
+impl TraceOrder {
+    /// Build from raw (non-log) trace heights in instance order.
     ///
-    /// # Panics
-    ///
-    /// - If `trace.height()` is not a power of two
-    pub fn new(
-        trace: &'a RowMajorMatrix<F>,
-        public_values: &'a [F],
-        var_len_public_inputs: VarLenPublicInputs<'a, F>,
-    ) -> Self
-    where
-        F: Field,
-    {
-        assert!(
-            trace.height().is_power_of_two(),
-            "trace height must be power of two, got {}",
-            trace.height()
-        );
-        Self {
-            trace,
-            public_values,
-            var_len_public_inputs,
+    /// Validates that every height is a non-zero power of two, that the
+    /// log-height fits in `u8` and within the host's `usize` width, and that
+    /// the number of instances fits in `u8`.
+    pub fn from_trace_heights(trace_heights: &[usize]) -> Result<Self, ShapeError> {
+        if trace_heights.is_empty() {
+            return Err(ShapeError::Empty);
         }
-    }
-
-    /// Convert to a verifier instance (drops the trace).
-    pub fn to_instance(&self) -> AirInstance<'a, F> {
-        AirInstance {
-            public_values: self.public_values,
-            var_len_public_inputs: self.var_len_public_inputs,
+        if trace_heights.len() > u8::MAX as usize + 1 {
+            return Err(ShapeError::TooManyInstances { count: trace_heights.len() });
         }
-    }
-}
-
-// ============================================================================
-// Shape metadata
-// ============================================================================
-
-/// Per-instance shape metadata carried on [`StarkProof`](crate::StarkProof).
-///
-/// Stores log₂ trace heights (absorbed into the Fiat-Shamir challenger)
-/// and the AIR ordering (not absorbed — see [`air_order`](Self::air_order)).
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct InstanceShapes {
-    // `pub(crate)` so in-crate tests can construct malformed shapes to
-    // exercise the verifier-path validation in `validate_inputs`. External
-    // callers go through `InstanceShapes::from_trace_heights`.
-    pub(crate) log_trace_heights: Vec<u8>,
-    /// The AIR ordering: `air_order[j]` is the caller's original index of
-    /// the instance at position `j` in the proof's ordering.
-    pub(crate) air_order: Vec<u32>,
-}
-
-impl InstanceShapes {
-    /// Construct from raw trace heights (must be powers of two).
-    ///
-    /// Determines the proof's AIR ordering by sorting instances by
-    /// `(log_trace_height, caller_index)`. The resulting
-    /// [`air_order`](Self::air_order) maps each position in the proof's
-    /// ordering back to the caller's original index.
-    pub fn from_trace_heights(trace_heights: Vec<usize>) -> Result<Self, InstanceValidationError> {
         let log_heights: Vec<u8> = trace_heights
             .iter()
             .map(|&h| {
                 if !h.is_power_of_two() {
-                    return Err(InstanceValidationError::InvalidTraceHeight { height: h });
+                    return Err(ShapeError::InvalidTraceHeight { height: h });
                 }
                 Ok(log2_strict_u8(h))
             })
             .collect::<Result<_, _>>()?;
-
-        // Sort by (log_height, caller_index) for a canonical ordering.
-        let mut perm: Vec<usize> = (0..log_heights.len()).collect();
-        perm.sort_by_key(|&i| (log_heights[i], i));
-
-        let sorted_log_heights: Vec<u8> = perm.iter().map(|&i| log_heights[i]).collect();
-        let air_order: Vec<u32> = perm.iter().map(|&i| i as u32).collect();
-
-        Ok(Self {
-            log_trace_heights: sorted_log_heights,
-            air_order,
-        })
+        Self::from_log_heights(log_heights)
     }
 
-    /// Log₂ of the trace height for each instance, in the proof's AIR
-    /// ordering.
-    pub fn log_trace_heights(&self) -> &[u8] {
-        &self.log_trace_heights
-    }
-
-    /// The AIR ordering used by the proof: `air_order()[j]` is the caller's
-    /// original index of the instance at position `j` in the proof's
-    /// ordering. Not absorbed into the Fiat-Shamir transcript.
-    pub fn air_order(&self) -> &[u32] {
-        &self.air_order
-    }
-
-    pub(crate) fn len(&self) -> usize {
-        self.log_trace_heights.len()
-    }
-
-    /// Reorder `data` from the caller's natural order to the proof's AIR
-    /// ordering. Returns a `Vec` where position `j` holds
-    /// `data[air_order[j]]`.
+    /// Build from instance-order log trace heights.
     ///
-    /// Validates that `air_order` is a valid permutation before applying it.
-    /// Returns an error if lengths mismatch or if `air_order` is malformed.
-    pub(crate) fn reorder<T>(&self, mut data: Vec<T>) -> Result<Vec<T>, InstanceValidationError> {
-        let n = data.len();
-        validate_air_order(&self.air_order, n)?;
-        let mut placed = vec![false; n];
+    /// Used on the verifier side, where heights are read straight off the
+    /// proof as `u8`s. Power-of-two-ness is automatic (heights are stored
+    /// as log₂); the only checks are non-emptiness, host-`usize` bound, and
+    /// the u8 instance-count limit.
+    pub fn from_log_heights(log_heights_instance: Vec<u8>) -> Result<Self, ShapeError> {
+        if log_heights_instance.is_empty() {
+            return Err(ShapeError::Empty);
+        }
+        if log_heights_instance.len() > u8::MAX as usize + 1 {
+            return Err(ShapeError::TooManyInstances { count: log_heights_instance.len() });
+        }
+        let max_log = (usize::BITS - 1) as u8;
+        for &h in &log_heights_instance {
+            if h > max_log {
+                return Err(ShapeError::LogTraceHeightTooLarge { log_h: h, max: max_log });
+            }
+        }
+        let n = log_heights_instance.len();
+        let mut instance_indices: Vec<u8> = (0..n as u8).collect();
+        instance_indices.sort_by_key(|&i| (log_heights_instance[i as usize], i));
+        Ok(Self { log_heights_instance, instance_indices })
+    }
+
+    /// Number of AIR instances.
+    pub fn len(&self) -> usize {
+        self.log_heights_instance.len()
+    }
+
+    /// Whether the order contains any instances.
+    pub fn is_empty(&self) -> bool {
+        self.log_heights_instance.is_empty()
+    }
+
+    /// Log trace heights in instance order. Matches [`Instance::airs`].
+    pub fn log_heights_instance(&self) -> &[u8] {
+        &self.log_heights_instance
+    }
+
+    /// Instance indices in proof order: `instance_indices()[j]` is the
+    /// instance index of the AIR at proof position `j`.
+    pub fn instance_indices(&self) -> &[u8] {
+        &self.instance_indices
+    }
+
+    /// Log trace heights in proof order (ascending by construction).
+    pub fn log_heights_proof(&self) -> Vec<u8> {
+        self.instance_indices
+            .iter()
+            .map(|&i| self.log_heights_instance[i as usize])
+            .collect()
+    }
+
+    /// The largest log trace height (= last entry of [`Self::log_heights_proof`]).
+    pub fn max_log_height(&self) -> u8 {
+        // `instance_indices` is non-empty (constructor rejects empty input).
+        let last = *self.instance_indices.last().expect("TraceOrder is non-empty");
+        self.log_heights_instance[last as usize]
+    }
+
+    /// Reorder instance-order data to proof order, cloning.
+    ///
+    /// Returns a `Vec` of length [`Self::len`] where position `j` holds
+    /// `instance_data[instance_indices()[j]]`.
+    pub fn to_proof_order<T: Clone>(&self, instance_data: &[T]) -> Vec<T> {
+        debug_assert_eq!(instance_data.len(), self.len());
+        self.instance_indices
+            .iter()
+            .map(|&i| instance_data[i as usize].clone())
+            .collect()
+    }
+
+    /// Permute `data` in place from instance order to proof order.
+    ///
+    /// After the call, `data[j] == data_original[instance_indices()[j]]`.
+    /// Avoids the clone in [`Self::to_proof_order`] for owned data like
+    /// `RowMajorMatrix`.
+    pub fn reorder_to_proof_in_place<T>(&self, data: &mut [T]) {
+        assert_eq!(data.len(), self.len());
+        let n = self.len();
+        let perm = &self.instance_indices;
+        let mut visited = alloc::vec![false; n];
+        // Cycle decomposition: each cycle of the permutation is rotated in
+        // place via swaps along the cycle.
         for start in 0..n {
-            if placed[start] {
+            if visited[start] {
                 continue;
             }
-            let mut j = start;
+            visited[start] = true;
+            let mut current = start;
             loop {
-                let src = self.air_order[j] as usize;
-                placed[j] = true;
-                if src == start {
+                let next = perm[current] as usize;
+                if next == start {
                     break;
                 }
-                data.swap(j, src);
-                j = src;
+                data.swap(current, next);
+                visited[next] = true;
+                current = next;
             }
         }
-        Ok(data)
     }
 
-    pub fn size_in_bytes(&self) -> usize {
-        size_of_val(self.log_trace_heights.as_slice()) + size_of_val(self.air_order.as_slice())
-    }
-
-    /// Absorb the log trace heights into a Fiat-Shamir challenger as one
-    /// base field element per `log_h`. The `air_order` values are **not**
-    /// absorbed.
-    pub(crate) fn observe_heights<F, C>(&self, challenger: &mut C)
-    where
-        F: Field + PrimeCharacteristicRing,
-        C: CanObserve<F>,
-    {
-        for &h in &self.log_trace_heights {
-            challenger.observe(F::from_u8(h));
+    /// Reorder proof-order data back to instance order, cloning.
+    ///
+    /// Returns a `Vec` of length [`Self::len`] where position `i` holds the
+    /// element at the proof position whose instance index is `i`.
+    pub fn to_instance_order<T: Clone>(&self, proof_data: &[T]) -> Vec<T> {
+        debug_assert_eq!(proof_data.len(), self.len());
+        let n = self.len();
+        let mut out: Vec<Option<T>> = (0..n).map(|_| None).collect();
+        for (j, &i) in self.instance_indices.iter().enumerate() {
+            out[i as usize] = Some(proof_data[j].clone());
         }
+        out.into_iter()
+            .map(|o| o.expect("instance_indices is a permutation of 0..n"))
+            .collect()
     }
 }
 
@@ -205,115 +236,121 @@ impl InstanceShapes {
 // Validation
 // ============================================================================
 
-/// Errors from validating instance- and protocol-level inputs.
-#[derive(Debug, Error)]
-pub enum InstanceValidationError {
-    #[error(transparent)]
-    AirStructure(#[from] AirStructureError),
-    #[error("trace height {height} is not a power of two")]
-    InvalidTraceHeight { height: usize },
-    #[error("trace width mismatch: expected {expected}, got {actual}")]
-    WidthMismatch { expected: usize, actual: usize },
-    #[error("public values length mismatch: expected {expected}, got {actual}")]
-    PublicValuesMismatch { expected: usize, actual: usize },
-    #[error("var-len public inputs count mismatch: expected {expected}, got {actual}")]
-    VarLenPublicInputsMismatch { expected: usize, actual: usize },
-    #[error("trace height {trace_height} is less than max periodic column length {max_period}")]
-    TraceHeightBelowPeriod { trace_height: usize, max_period: usize },
-    #[error("log trace height {log_h} exceeds {max} (would overflow usize on this target)")]
-    LogTraceHeightTooLarge { log_h: u8, max: u8 },
-    #[error(
-        "instance count {instances} does not match log trace heights count {log_trace_heights}"
-    )]
-    HeightCountMismatch {
-        instances: usize,
-        log_trace_heights: usize,
-    },
-    #[error("air_order length {air_order} does not match instance count {instances}")]
-    AirOrderLengthMismatch { instances: usize, air_order: usize },
-    #[error("invalid air_order permutation for {count} instances")]
-    InvalidAirOrder { count: usize },
-    #[error(transparent)]
-    Domain(#[from] DomainError),
-}
-
-impl InstanceShapes {
-    /// Per-instance data checks: count match, AIR structural validity, public
-    /// values length, var-len public inputs length, log_h platform bound, and
-    /// periodic column coverage. Independent of ordering.
-    ///
-    /// Instances and shapes must already be in the proof's AIR ordering.
-    pub(crate) fn validate_instance_data<F, EF, A>(
-        &self,
-        instances: &[(&A, AirInstance<'_, F>)],
-    ) -> Result<(), InstanceValidationError>
-    where
-        F: Field,
-        A: LiftedAir<F, EF>,
-    {
-        if instances.len() != self.len() {
-            return Err(InstanceValidationError::HeightCountMismatch {
-                instances: instances.len(),
-                log_trace_heights: self.len(),
-            });
-        }
-        // Bound `log_h` so `1usize << log_h` cannot overflow on this target.
-        // Field-relative bounds live in [`LiftedDomain::canonical`].
-        let max_log_trace_height = (usize::BITS - 1) as u8;
-        for ((air, inst), &log_h) in instances.iter().zip(self.log_trace_heights()) {
-            if log_h > max_log_trace_height {
-                return Err(InstanceValidationError::LogTraceHeightTooLarge {
-                    log_h,
-                    max: max_log_trace_height,
-                });
-            }
-            air.validate()?;
-            let expected_pv = air.num_public_values();
-            if inst.public_values.len() != expected_pv {
-                return Err(InstanceValidationError::PublicValuesMismatch {
-                    expected: expected_pv,
-                    actual: inst.public_values.len(),
-                });
-            }
-            let expected_vl = air.num_var_len_public_inputs();
-            if inst.var_len_public_inputs.len() != expected_vl {
-                return Err(InstanceValidationError::VarLenPublicInputsMismatch {
-                    expected: expected_vl,
-                    actual: inst.var_len_public_inputs.len(),
-                });
-            }
-            let trace_height = 1usize << log_h as usize;
-            let max_period = air.periodic_columns().iter().map(Vec::len).max().unwrap_or(0);
-            if trace_height < max_period {
-                return Err(InstanceValidationError::TraceHeightBelowPeriod {
-                    trace_height,
-                    max_period,
-                });
-            }
-        }
-        Ok(())
-    }
-}
-
-/// Validate that `air_order` is a valid permutation of `0..n`.
+/// Per-AIR contract checks driven by [`Instance::airs`] against a
+/// pre-built [`TraceOrder`].
 ///
-/// Called on the verifier side where `air_order` comes from an untrusted proof.
-pub(crate) fn validate_air_order(
-    air_order: &[u32],
-    n: usize,
-) -> Result<(), InstanceValidationError> {
-    if air_order.len() != n {
-        return Err(InstanceValidationError::AirOrderLengthMismatch {
-            instances: n,
-            air_order: air_order.len(),
+/// Assumes the AIR list itself is structurally valid (the air-crate's
+/// [`validate_airs`](miden_lifted_air::validate_airs) is the right check
+/// for that). This function only validates instance-level data the AIR
+/// cannot check on its own:
+///
+/// - `airs.len() == trace_order.len()`
+/// - for each AIR: `num_public_values() == air_inputs().len()`
+/// - for each AIR: `trace_height ≥ max periodic column length`
+///
+/// Shape well-formedness (non-empty, `u8` instance count, `usize` bound on
+/// `log_h`) is already enforced by [`TraceOrder::from_log_heights`].
+pub fn validate_instance<F, EF, I>(
+    instance: &I,
+    trace_order: &TraceOrder,
+) -> Result<(), InstanceValidationError>
+where
+    F: Field,
+    EF: ExtensionField<F>,
+    I: Instance<F, EF>,
+{
+    let airs = instance.airs();
+    let log_heights_instance = trace_order.log_heights_instance();
+    if airs.len() != log_heights_instance.len() {
+        return Err(InstanceValidationError::AirTraceCountMismatch {
+            airs: airs.len(),
+            traces: log_heights_instance.len(),
         });
     }
-    let mut seen = vec![false; n];
-    for &idx in air_order {
-        let Some(slot @ false) = seen.get_mut(idx as usize) else {
-            return Err(InstanceValidationError::InvalidAirOrder { count: n });
-        };
-        *slot = true;
+    let air_inputs = instance.air_inputs();
+    for (air, &log_h) in airs.iter().zip(log_heights_instance) {
+        let expected_pv = air.num_public_values();
+        if expected_pv != air_inputs.len() {
+            return Err(InstanceValidationError::PublicValuesMismatch {
+                expected: expected_pv,
+                actual: air_inputs.len(),
+            });
+        }
+        let trace_height = 1usize << log_h as usize;
+        let max_period = air.periodic_columns().iter().map(Vec::len).max().unwrap_or(0);
+        if trace_height < max_period {
+            return Err(InstanceValidationError::TraceHeightBelowPeriod {
+                trace_height,
+                max_period,
+            });
+        }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use alloc::vec;
+
+    use super::*;
+
+    #[test]
+    fn trace_order_canonical_ordering() {
+        // Instance order: heights [8, 2, 8, 4]. Sort by (log_h, idx) →
+        // [1 (log=1), 3 (log=2), 0 (log=3), 2 (log=3)].
+        let order = TraceOrder::from_trace_heights(&[8, 2, 8, 4]).unwrap();
+        assert_eq!(order.instance_indices(), &[1, 3, 0, 2]);
+        assert_eq!(order.log_heights_instance(), &[3, 1, 3, 2]);
+        assert_eq!(order.log_heights_proof(), vec![1, 2, 3, 3]);
+        assert_eq!(order.max_log_height(), 3);
+    }
+
+    #[test]
+    fn trace_order_roundtrip() {
+        let order = TraceOrder::from_trace_heights(&[8, 2, 8, 4]).unwrap();
+        let instance_data = vec!["a", "b", "c", "d"];
+        let proof_data = order.to_proof_order(&instance_data);
+        assert_eq!(proof_data, vec!["b", "d", "a", "c"]);
+        let back = order.to_instance_order(&proof_data);
+        assert_eq!(back, instance_data);
+    }
+
+    #[test]
+    fn trace_order_reorder_in_place_matches_clone() {
+        // Mix of singletons and longer cycles in the permutation, plus
+        // ties broken by instance index.
+        let cases: &[&[usize]] = &[
+            &[8, 2, 8, 4],
+            &[2, 4, 8, 16],    // already sorted (identity permutation)
+            &[16, 8, 4, 2],    // reverse-sorted
+            &[4, 4, 4, 4],     // all equal (identity by tiebreak)
+            &[8, 2, 4, 16, 4], // mixed
+        ];
+        for &heights in cases {
+            let order = TraceOrder::from_trace_heights(heights).unwrap();
+            let instance_data: Vec<usize> = (0..heights.len()).collect();
+            let expected = order.to_proof_order(&instance_data);
+            let mut data = instance_data;
+            order.reorder_to_proof_in_place(&mut data);
+            assert_eq!(data, expected, "in-place mismatch for heights {heights:?}");
+        }
+    }
+
+    #[test]
+    fn trace_order_rejects_non_pow2() {
+        let err = TraceOrder::from_trace_heights(&[3]).unwrap_err();
+        assert!(matches!(err, ShapeError::InvalidTraceHeight { height: 3 }));
+    }
+
+    #[test]
+    fn trace_order_rejects_empty() {
+        let err = TraceOrder::from_trace_heights(&[]).unwrap_err();
+        assert!(matches!(err, ShapeError::Empty));
+    }
+
+    #[test]
+    fn trace_order_rejects_oversized_log_h() {
+        let err = TraceOrder::from_log_heights(vec![200]).unwrap_err();
+        assert!(matches!(err, ShapeError::LogTraceHeightTooLarge { log_h: 200, .. }));
+    }
 }

@@ -37,10 +37,6 @@ impl<F: PrimeField64, EF: Field> LiftedAir<F, EF> for LiftedKeccakAir {
         0
     }
 
-    fn num_var_len_public_inputs(&self) -> usize {
-        0
-    }
-
     fn eval<AB: LiftedAirBuilder<F = F>>(&self, builder: &mut AB) {
         Air::eval(&KeccakAir {}, builder);
     }

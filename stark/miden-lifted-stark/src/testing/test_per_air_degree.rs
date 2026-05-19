@@ -3,9 +3,6 @@
 //! Exercises the branch in the prover loop where an AIR's native quotient degree
 //! `D_j` is strictly less than the global `D_max`, so the prover divides on the
 //! native domain and then `upsample_evals` lifts the resulting quotient evaluations.
-//! The unit tests on `upsample_evals` itself verify the helper matches a direct
-//! coset DFT; the tests here verify the **integration** path: that a proof built
-//! via the upsample branch round-trips correctly through the verifier.
 
 use alloc::{vec, vec::Vec};
 
@@ -13,15 +10,13 @@ use p3_field::PrimeCharacteristicRing;
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
 use crate::{
-    AirWitness,
-    air::{AirBuilder, AuxBuilder, BaseAir, LiftedAir, LiftedAirBuilder, WindowAccess},
-    testing::configs::goldilocks_poseidon2::{Felt, QuadFelt, prove_and_verify_instances},
+    Instance, ProverInstance,
+    air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder, WindowAccess},
+    testing::configs::goldilocks_poseidon2::{Felt, QuadFelt, prove_and_verify_instance},
 };
 
 // ---------------------------------------------------------------------------
 // PowerAir: single-column AIR with `next[0] = local[0]^power`.
-//
-// Powers {2, 5, 9} give natural `log_qd` of {0, 2, 3}.
 // ---------------------------------------------------------------------------
 
 #[derive(Clone, Copy)]
@@ -45,10 +40,6 @@ impl LiftedAir<Felt, QuadFelt> for PowerAir {
     }
 
     fn num_aux_values(&self) -> usize {
-        0
-    }
-
-    fn num_var_len_public_inputs(&self) -> usize {
         0
     }
 
@@ -76,10 +67,7 @@ impl LiftedAir<Felt, QuadFelt> for PowerAir {
 }
 
 // ---------------------------------------------------------------------------
-// PeriodicPowerAir: same recurrence as PowerAir plus a single period-2 periodic
-// column with a first-row boundary constraint. Used to exercise
-// `PeriodicLde::build` on the native quotient domain alongside the upsample
-// path.
+// PeriodicPowerAir
 // ---------------------------------------------------------------------------
 
 #[derive(Clone, Copy)]
@@ -111,10 +99,6 @@ impl LiftedAir<Felt, QuadFelt> for PeriodicPowerAir {
         0
     }
 
-    fn num_var_len_public_inputs(&self) -> usize {
-        0
-    }
-
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
         let main = builder.main();
         let (local, next) = (main.current_slice().to_vec(), main.next_slice().to_vec());
@@ -143,20 +127,56 @@ impl LiftedAir<Felt, QuadFelt> for PeriodicPowerAir {
 }
 
 // ---------------------------------------------------------------------------
-// Aux builder (trivial constant-challenge column).
+// Inputs: trivial constant-challenge aux column for each trace.
 // ---------------------------------------------------------------------------
 
-struct TrivialAuxBuilder;
+struct TwoTraceInputs<'a, A> {
+    airs: Vec<&'a A>,
+    traces: Vec<&'a RowMajorMatrix<Felt>>,
+}
 
-impl AuxBuilder<Felt, QuadFelt> for TrivialAuxBuilder {
-    fn build_aux_trace(
+impl<A> Instance<Felt, QuadFelt> for TwoTraceInputs<'_, A>
+where
+    A: LiftedAir<Felt, QuadFelt>,
+{
+    type Air = A;
+
+    fn airs(&self) -> &[&Self::Air] {
+        &self.airs
+    }
+
+    fn air_inputs(&self) -> &[Felt] {
+        &[]
+    }
+}
+
+impl<A> ProverInstance<Felt, QuadFelt> for TwoTraceInputs<'_, A>
+where
+    A: LiftedAir<Felt, QuadFelt>,
+{
+    type Instance = Self;
+
+    fn instance(&self) -> &Self {
+        self
+    }
+
+    fn traces(&self) -> &[&RowMajorMatrix<Felt>] {
+        &self.traces
+    }
+
+    fn build_aux_traces(
         &self,
-        main: &RowMajorMatrix<Felt>,
         challenges: &[QuadFelt],
-    ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-        let height = main.height();
-        let column = vec![challenges[0]; height];
-        (RowMajorMatrix::new(column, 1), vec![])
+    ) -> (Vec<RowMajorMatrix<QuadFelt>>, Vec<Vec<QuadFelt>>) {
+        let mut traces_out = Vec::with_capacity(self.traces.len());
+        let mut values_out = Vec::with_capacity(self.traces.len());
+        for &t in &self.traces {
+            let height = t.height();
+            let column = vec![challenges[0]; height];
+            traces_out.push(RowMajorMatrix::new(column, 1));
+            values_out.push(vec![]);
+        }
+        (traces_out, values_out)
     }
 }
 
@@ -178,8 +198,6 @@ fn generate_pow_trace(power: u64, start: Felt, height: usize) -> RowMajorMatrix<
 // Tests
 // ---------------------------------------------------------------------------
 
-/// Runs a two-AIR prove+verify round-trip with a `PowerAir` of each given power
-/// and trace height. Shared body for the `PowerAir` upsample-path tests below.
 fn run_upsample_case(low_power: u64, low_height: usize, high_power: u64, high_height: usize) {
     let low = PowerAir { power: low_power };
     let high = PowerAir { power: high_power };
@@ -187,36 +205,28 @@ fn run_upsample_case(low_power: u64, low_height: usize, high_power: u64, high_he
     let t_low = generate_pow_trace(low_power, Felt::from_u64(7), low_height);
     let t_high = generate_pow_trace(high_power, Felt::from_u64(11), high_height);
 
-    let w_low = AirWitness::new(&t_low, &[], &[]);
-    let w_high = AirWitness::new(&t_high, &[], &[]);
-
-    let builder = TrivialAuxBuilder;
-    prove_and_verify_instances(&[(&low, w_low, &builder), (&high, w_high, &builder)]);
+    let inputs = TwoTraceInputs {
+        airs: vec![&low, &high],
+        traces: vec![&t_low, &t_high],
+    };
+    prove_and_verify_instance(&inputs);
 }
 
-/// `d = 5` (log_qd = 2) upsampled to log_qd = 3 alongside a `d = 9` AIR at
-/// equal trace heights.
 #[test]
 fn upsample_fires_on_d5_under_d9() {
     run_upsample_case(5, 16, 9, 16);
 }
 
-/// Low-degree AIR on the taller trace. The `log_qd = 0` AIR is processed last
-/// (tallest) and gets upsampled by 3 bits onto the final accumulator height.
 #[test]
 fn upsample_fires_low_degree_on_taller_trace() {
     run_upsample_case(2, 64, 9, 16);
 }
 
-/// Complementary: high-degree AIR on the taller trace. Upsample fires on the
-/// shorter, lower-degree one; the tall AIR skips upsample.
 #[test]
 fn upsample_fires_high_degree_on_taller_trace() {
     run_upsample_case(2, 16, 9, 64);
 }
 
-/// Mixed-degree upsample path with periodic columns on both AIRs. Exercises
-/// `PeriodicLde::build` on the native quotient domain.
 #[test]
 fn upsample_fires_with_periodic_columns() {
     let low = PeriodicPowerAir { power: 3 };
@@ -225,9 +235,9 @@ fn upsample_fires_with_periodic_columns() {
     let t_low = generate_pow_trace(3, Felt::from_u64(7), 16);
     let t_high = generate_pow_trace(5, Felt::from_u64(11), 16);
 
-    let w_low = AirWitness::new(&t_low, &[], &[]);
-    let w_high = AirWitness::new(&t_high, &[], &[]);
-
-    let builder = TrivialAuxBuilder;
-    prove_and_verify_instances(&[(&low, w_low, &builder), (&high, w_high, &builder)]);
+    let inputs = TwoTraceInputs {
+        airs: vec![&low, &high],
+        traces: vec![&t_low, &t_high],
+    };
+    prove_and_verify_instance(&inputs);
 }

@@ -44,7 +44,7 @@ where
     ///
     /// Composes [`DeepTranscript`], [`FriTranscript`], and per-query LMCS batch proofs.
     /// Does not verify any claims; validation happens in
-    /// [`verify_multi`](crate::verify_multi).
+    /// [`verify`](crate::verify).
     /// Commitment widths must match the committed rows (including any alignment padding),
     /// and all commitments are expected to be lifted to `coset.lde_height()`.
     pub fn from_verifier_channel<Ch, const N: usize>(

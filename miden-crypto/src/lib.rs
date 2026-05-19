@@ -52,8 +52,8 @@ pub mod stark {
     //! - [`lmcs`] — Lifted Merkle commitment scheme
     //! - [`transcript`] — Fiat-Shamir channels and transcript data
     //! - [`hasher`] — Stateful hasher primitives
-    //! - [`prover`] — `prove_single` / `prove_multi`
-    //! - [`verifier`] — `verify_single` / `verify_multi`
+    //! - [`prover`] — `prove`
+    //! - [`verifier`] — `verify`
     //! - [`debug`] — Debug constraint checker for lifted AIRs
     //!
     //! Sub-modules from upstream Plonky3:

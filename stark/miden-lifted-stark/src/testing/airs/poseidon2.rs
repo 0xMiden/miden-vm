@@ -67,10 +67,6 @@ impl<EF: Field> LiftedAir<Goldilocks, EF> for LiftedPoseidon2Air {
         0
     }
 
-    fn num_var_len_public_inputs(&self) -> usize {
-        0
-    }
-
     fn eval<AB: LiftedAirBuilder<F = Goldilocks>>(&self, builder: &mut AB) {
         Air::eval(&self.inner, builder);
     }

@@ -52,7 +52,7 @@ See `docs/lifting.md` for a deeper discussion and sufficient conditions.
 
 ## Protocol Summary
 
-### Prover (`prove_multi`)
+### Prover (`prove`)
 
 1. **Commit main traces** — LDE each trace on its lifted coset, bit-reverse
    rows, build LMCS tree. Send root.
@@ -73,7 +73,7 @@ See `docs/lifting.md` for a deeper discussion and sufficient conditions.
    coset.
 9. **Open via PCS** — Delegate to the internal `pcs` modules.
 
-### Verifier (`verify_multi`)
+### Verifier (`verify`)
 
 1. **Receive commitments** — Main, auxiliary, and quotient roots from transcript.
 2. **Re-derive challenges** — Same `alpha`, `beta`, `z` via Fiat-Shamir.
@@ -83,8 +83,14 @@ See `docs/lifting.md` for a deeper discussion and sufficient conditions.
 5. **Evaluate constraints at OOD** — For each AIR at the lifted OOD point
    `y_j = z^{r_j}`: compute selectors, evaluate periodic polynomials,
    fold constraints with alpha, accumulate with beta.
-6. **Check identity** — `accumulated == Q(z) * Z_H(z)`.
-7. **Ensure transcript is fully consumed** — Canonicality enforcement.
+6. **Evaluate external assertions** — Call `Instance::eval_external`
+   once with the global view (challenges, all aux values, log heights);
+   each returned EF value must equal zero. `Instance` owns both the
+   shared `air_inputs` and the optional `aux_inputs`; prover and verifier
+   absorb both into Fiat-Shamir via `Instance::observe` before the
+   rest of the protocol.
+7. **Check identity** — `accumulated == Q(z) * Z_H(z)`.
+8. **Ensure transcript is fully consumed** — Canonicality enforcement.
 
 ## Math Sketch
 
@@ -184,12 +190,12 @@ at `y_j`, and the opened trace values already correspond to `p_j(y_j)`.
 
 | Item | Purpose |
 |------|---------|
-| `prover::prove_single` | Prove a single-AIR STARK |
-| `prover::prove_multi` | Prove a multi-trace STARK |
-| `AirWitness` | Prover witness (trace + public values) |
-| `verifier::verify_single` | Verify a single-AIR proof |
-| `verifier::verify_multi` | Verify a multi-trace proof |
-| `AirInstance` | Verifier instance (public values + variable-length inputs) |
+| `prover::prove` | Prove one or more AIR instances |
+| `ProverInstance` | Prover-side trait wrapping an `Instance` with per-AIR traces and aux construction |
+| `Instance` | Statement description — AIRs (`type Air`/`fn airs`), shared `air_inputs`, optional `aux_inputs`, `eval_external`, `observe` |
+| `verifier::verify` | Verify a multi-trace proof |
+| `Instance::eval_external` | Cross-AIR external-assertions hook on `Instance` (default: no assertions) |
+| `Instance::aux_inputs` | Auxiliary public inputs consumed only by `eval_external` (default: empty) |
 | `Transcript` | Structured transcript view (alias for `proof::StarkTranscript`) |
 | `StarkConfig` | PCS params + LMCS + DFT configuration |
 | `domain::LiftedDomain` | Domain operations: selectors, vanishing, coset shifts |
@@ -203,23 +209,25 @@ at `y_j`, and the opened trace values already correspond to `p_j(y_j)`.
 | `src/config.rs` | `StarkConfig` — wraps `PcsParams`, LMCS, and DFT |
 | `src/domain.rs` | `TwoAdicSubgroup`, `TwoAdicCoset`, `LiftedDomain` — the domain hierarchy |
 | `src/selectors.rs` | `Selectors<T>` — generic container for row selectors |
-| `src/prover/mod.rs` | `prove_single`, `prove_multi` — orchestration and protocol flow |
+| `src/prover/mod.rs` | `prove` — orchestration and protocol flow |
 | `src/prover/commit.rs` | `Committed` — LDE, bit-reverse, LMCS tree construction |
 | `src/prover/constraints/` | Constraint evaluation (SIMD) and layout discovery |
 | `src/prover/periodic.rs` | `PeriodicLde` — precomputed periodic column LDEs |
 | `src/prover/quotient.rs` | Quotient construction, cyclic extension, vanishing division |
-| `src/verifier/mod.rs` | `verify_single`, `verify_multi` — orchestration and identity check |
+| `src/verifier/mod.rs` | `verify` — orchestration and identity check |
 | `src/verifier/constraints.rs` | `ConstraintFolder` — OOD constraint evaluation, quotient reconstruction |
 | `src/verifier/periodic.rs` | `PeriodicPolys` — polynomial coefficients for OOD evaluation |
 | `src/proof.rs` | `StarkProof`, `StarkTranscript` — proof artifact and structured transcript view |
-| `src/instance.rs` | `AirInstance`, `AirWitness`, `InstanceShapes` — protocol-level instance types |
+| `src/instance.rs` | `TraceOrder`, `validate_instance`, `ShapeError`, `InstanceValidationError` — shape metadata and validation |
 
 ## Conventions & Assumptions
 
 - **AIR ordering** — The proof defines an ordering of AIR instances
-  (queryable via `InstanceShapes::air_order`). The caller must bind AIR
-  configurations and `air_order` into the Fiat-Shamir challenger. See the
-  prover module-level docs.
+  derived deterministically from trace heights (stable sort on
+  `(log_trace_height, caller_index)`) — `TraceOrder` materialises this from
+  the caller-order heights stored on `StarkProof`. The caller must bind
+  the AIR list into the Fiat-Shamir challenger; the ordering itself is
+  implicit in the heights. See the prover module-level docs.
 - **Power-of-two heights** — All trace heights are powers of two.
 - **Bit-reversed storage** — All evaluation matrices are in bit-reversed order.
 - **Constraint degree** — Fixed at `D = 4` (`LOG_CONSTRAINT_DEGREE = 2`).

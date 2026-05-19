@@ -6,8 +6,9 @@ use p3_field::PrimeCharacteristicRing;
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
 use crate::{
-    air::{AuxBuilder, BaseAir, LiftedAir, LiftedAirBuilder},
-    prove_single,
+    Instance, ProverInstance,
+    air::{BaseAir, LiftedAir, LiftedAirBuilder},
+    prove,
     testing::configs::goldilocks_poseidon2::{Felt, QuadFelt, test_challenger, test_config},
 };
 
@@ -33,26 +34,52 @@ impl LiftedAir<Felt, QuadFelt> for BadAuxWidthAir {
         0
     }
 
-    fn num_var_len_public_inputs(&self) -> usize {
-        0
-    }
-
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, _builder: &mut AB) {}
 }
 
-/// AuxBuilder that returns 2 EF columns when BadAuxWidthAir declares 1.
-struct BadAuxBuilder;
+/// Inputs that return 2 EF aux columns when BadAuxWidthAir declares 1.
+struct BadInputs<'a> {
+    airs: Vec<&'a BadAuxWidthAir>,
+    traces: Vec<&'a RowMajorMatrix<Felt>>,
+}
 
-impl AuxBuilder<Felt, QuadFelt> for BadAuxBuilder {
-    fn build_aux_trace(
+impl Instance<Felt, QuadFelt> for BadInputs<'_> {
+    type Air = BadAuxWidthAir;
+
+    fn airs(&self) -> &[&Self::Air] {
+        &self.airs
+    }
+
+    fn air_inputs(&self) -> &[Felt] {
+        &[]
+    }
+}
+
+impl<'a> ProverInstance<Felt, QuadFelt> for BadInputs<'a> {
+    type Instance = Self;
+
+    fn instance(&self) -> &Self {
+        self
+    }
+
+    fn traces(&self) -> &[&RowMajorMatrix<Felt>] {
+        &self.traces
+    }
+
+    fn build_aux_traces(
         &self,
-        main: &RowMajorMatrix<Felt>,
         _challenges: &[QuadFelt],
-    ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-        let height = main.height();
-        // Return 2 QuadFelt columns when aux_width() declares 1
-        let aux = RowMajorMatrix::new(vec![QuadFelt::ZERO; height * 2], 2);
-        (aux, vec![QuadFelt::ZERO, QuadFelt::ZERO])
+    ) -> (Vec<RowMajorMatrix<QuadFelt>>, Vec<Vec<QuadFelt>>) {
+        let mut traces_out = Vec::with_capacity(self.traces.len());
+        let mut values_out = Vec::with_capacity(self.traces.len());
+        for &t in &self.traces {
+            let height = t.height();
+            // Return 2 columns when aux_width() declares 1
+            let aux = RowMajorMatrix::new(vec![QuadFelt::ZERO; height * 2], 2);
+            traces_out.push(aux);
+            values_out.push(vec![QuadFelt::ZERO, QuadFelt::ZERO]);
+        }
+        (traces_out, values_out)
     }
 }
 
@@ -63,8 +90,7 @@ fn aux_width_mismatch_panics() {
     let air = BadAuxWidthAir;
 
     let trace = RowMajorMatrix::new(vec![Felt::ZERO, Felt::ONE, Felt::ONE, Felt::ZERO], 1);
-    let public_values = vec![];
+    let inputs = BadInputs { airs: vec![&air], traces: vec![&trace] };
 
-    let _result =
-        prove_single(&config, &air, &trace, &public_values, &[], &BadAuxBuilder, test_challenger());
+    let _result = prove(&config, &inputs, test_challenger());
 }
