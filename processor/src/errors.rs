@@ -3,7 +3,7 @@
 
 use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 
-use miden_core::program::MIN_STACK_DEPTH;
+use miden_core::{deferred::SchemaError, program::MIN_STACK_DEPTH};
 use miden_debug_types::{SourceFile, SourceSpan};
 use miden_utils_diagnostics::{Diagnostic, miette};
 
@@ -55,6 +55,16 @@ pub enum ExecutionError {
         event_name: Option<EventName>,
         #[source]
         error: EventError,
+    },
+    /// Deferred-DAG system event (register/assert-eq) failed.
+    #[error("{err}")]
+    #[diagnostic()]
+    DeferredError {
+        #[label]
+        label: SourceSpan,
+        #[source_code]
+        source_file: Option<Arc<SourceFile>>,
+        err: SchemaError,
     },
     #[error("failed to execute the program for internal reason: {0}")]
     Internal(&'static str),
@@ -694,6 +704,9 @@ impl<T> MapExecErr<T> for Result<T, SystemEventError> {
                     SystemEventError::Memory(err) => {
                         ExecutionError::MemoryError { label, source_file, err }
                     },
+                    SystemEventError::Deferred(err) => {
+                        ExecutionError::DeferredError { label, source_file, err }
+                    },
                 })
             },
         }
@@ -726,6 +739,9 @@ impl<T> MapExecErrWithOpIdx<T> for Result<T, SystemEventError> {
                     },
                     SystemEventError::Memory(err) => {
                         ExecutionError::MemoryError { label, source_file, err }
+                    },
+                    SystemEventError::Deferred(err) => {
+                        ExecutionError::DeferredError { label, source_file, err }
                     },
                 })
             },

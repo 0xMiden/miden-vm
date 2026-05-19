@@ -1,0 +1,184 @@
+//! Integration coverage for the `Group` reference precompile: the compound-canonical /
+//! mid-`reduce` minting capability of the framework (mock group over `Uint`).
+
+mod common;
+
+use common::precompile::{group::Group, uint::Uint};
+use miden_core::deferred::{
+    DeferredState, Digest, Node, Payload, Precompile, PrecompileSchema, SchemaError,
+};
+
+fn leaf(low: u64) -> Node {
+    let mut limbs = [0u32; 8];
+    limbs[0] = low as u32;
+    limbs[1] = (low >> 32) as u32;
+    Uint::leaf_node(limbs)
+}
+
+/// Two-app schema with `Uint`'s constants pre-registered.
+fn schema_and_state() -> (PrecompileSchema, DeferredState) {
+    let schema = PrecompileSchema::new([
+        Box::new(Uint) as Box<dyn Precompile>,
+        Box::new(Group::default()) as Box<dyn Precompile>,
+    ]);
+    let mut state = DeferredState::new();
+    schema.init(&mut state).unwrap();
+    (schema, state)
+}
+
+/// Two-app schema without booting (some tests assert exact node counts).
+fn fresh() -> (PrecompileSchema, DeferredState) {
+    let schema = PrecompileSchema::new([
+        Box::new(Uint) as Box<dyn Precompile>,
+        Box::new(Group::default()) as Box<dyn Precompile>,
+    ]);
+    (schema, DeferredState::new())
+}
+
+fn register_group(schema: &PrecompileSchema, state: &mut DeferredState, x: u64, y: u64) -> Digest {
+    let h_x = state.register(schema, leaf(x)).unwrap();
+    let h_y = state.register(schema, leaf(y)).unwrap();
+    state.register(schema, Group::combine_node(h_x, h_y)).unwrap()
+}
+
+// END-TO-END (relocated from deferred_mock_group.rs)
+// ================================================================================================
+
+#[test]
+fn add_produces_minted_combine_and_passes_eq_against_expected() {
+    let (schema, mut state) = schema_and_state();
+
+    let h_g1 = register_group(&schema, &mut state, 3, 4);
+    let h_g2 = register_group(&schema, &mut state, 10, 20);
+
+    // Evaluate add: returns combine(h_x3_leaf, h_y3_leaf) where leaves are minted.
+    let add_canonical = state.evaluate(&schema, Group::add_node(h_g1, h_g2)).unwrap();
+    let expected = Group::combine_node(leaf(13).digest(), leaf(24).digest());
+    assert_eq!(add_canonical, expected);
+
+    // Both minted field leaves must be in the DAG.
+    assert!(state.contains(&leaf(13).digest()));
+    assert!(state.contains(&leaf(24).digest()));
+
+    // Build expected group element via registration, then assert eq.
+    let h_expected = register_group(&schema, &mut state, 13, 24);
+    let h_add = state.register(&schema, Group::add_node(h_g1, h_g2)).unwrap();
+    let eq_result = state.evaluate(&schema, Group::eq_node(h_add, h_expected)).unwrap();
+    assert!(eq_result.is_true_node());
+}
+
+#[test]
+fn sub_chains_through_add_with_mint_at_every_step() {
+    let (schema, mut state) = schema_and_state();
+
+    // ((g1 + g2) - g1)  should equal g2 under coord-wise mock arithmetic.
+    let h_g1 = register_group(&schema, &mut state, 7, 11);
+    let h_g2 = register_group(&schema, &mut state, 100, 200);
+
+    let h_sum = state.register(&schema, Group::add_node(h_g1, h_g2)).unwrap();
+    let h_diff = state.register(&schema, Group::sub_node(h_sum, h_g1)).unwrap();
+
+    let canonical = state.evaluate(&schema, state.get(&h_diff).unwrap().clone()).unwrap();
+    assert_eq!(canonical, Group::combine_node(leaf(100).digest(), leaf(200).digest()));
+}
+
+#[test]
+fn combine_canonicalises_field_expression_children_end_to_end() {
+    let (schema, mut state) = schema_and_state();
+    // x as field expression leaf(3)+leaf(4), y as a plain leaf.
+    let h_3 = state.register(&schema, leaf(3)).unwrap();
+    let h_4 = state.register(&schema, leaf(4)).unwrap();
+    let h_x_expr = state
+        .register(&schema, Node::expression(Uint::add_tag(), Payload::binary_op(h_3, h_4)))
+        .unwrap();
+    let h_y = state.register(&schema, leaf(5)).unwrap();
+    let h_combine = state.register(&schema, Group::combine_node(h_x_expr, h_y)).unwrap();
+
+    let canonical = state.evaluate(&schema, state.get(&h_combine).unwrap().clone()).unwrap();
+    let expected = Group::combine_node(leaf(7).digest(), leaf(5).digest());
+    assert_eq!(canonical, expected);
+}
+
+// CAPABILITY UNIT TESTS (relocated from the old in-lib `mock_group` unit tests)
+// ================================================================================================
+
+#[test]
+fn combine_self_evaluates_when_children_are_leaves() {
+    let (schema, mut state) = fresh();
+    let h_g = register_group(&schema, &mut state, 3, 4);
+    let g = state.get(&h_g).unwrap().clone();
+    let canonical = state.evaluate(&schema, g.clone()).unwrap();
+    assert_eq!(canonical, g, "combine over field leaves is self-evaluating");
+}
+
+#[test]
+fn combine_canonicalises_field_expression_children() {
+    let (schema, mut state) = fresh();
+    let h_3 = state.register(&schema, leaf(3)).unwrap();
+    let h_4 = state.register(&schema, leaf(4)).unwrap();
+    let h_x_expr = state
+        .register(&schema, Node::expression(Uint::add_tag(), Payload::binary_op(h_3, h_4)))
+        .unwrap();
+    let h_y = state.register(&schema, leaf(5)).unwrap();
+    let combine_over_expr = Group::combine_node(h_x_expr, h_y);
+    let h_combine = state.register(&schema, combine_over_expr).unwrap();
+
+    let canonical = state.evaluate(&schema, state.get(&h_combine).unwrap().clone()).unwrap();
+    let expected = Group::combine_node(leaf(7).digest(), leaf(5).digest());
+    assert_eq!(canonical, expected);
+    // The minted x-leaf (leaf(7)) must have been interned by the field expression's reduce.
+    assert!(state.contains(&leaf(7).digest()));
+}
+
+#[test]
+fn add_mints_new_field_leaves_and_returns_combine() {
+    let (schema, mut state) = fresh();
+    let h_g1 = register_group(&schema, &mut state, 3, 4);
+    let h_g2 = register_group(&schema, &mut state, 10, 20);
+
+    let canonical = state.evaluate(&schema, Group::add_node(h_g1, h_g2)).unwrap();
+    let expected = Group::combine_node(leaf(13).digest(), leaf(24).digest());
+    assert_eq!(canonical, expected);
+    assert!(state.contains(&leaf(13).digest()), "minted x-coord leaf must be interned");
+    assert!(state.contains(&leaf(24).digest()), "minted y-coord leaf must be interned");
+}
+
+#[test]
+fn sub_mints_new_field_leaves_and_returns_combine() {
+    let (schema, mut state) = fresh();
+    let h_g1 = register_group(&schema, &mut state, 100, 50);
+    let h_g2 = register_group(&schema, &mut state, 30, 20);
+
+    let canonical = state.evaluate(&schema, Group::sub_node(h_g1, h_g2)).unwrap();
+    let expected = Group::combine_node(leaf(70).digest(), leaf(30).digest());
+    assert_eq!(canonical, expected);
+}
+
+#[test]
+fn eq_predicate_matches_on_canonical_equality() {
+    let (schema, mut state) = fresh();
+    let h_g = register_group(&schema, &mut state, 7, 11);
+    let result = state.evaluate(&schema, Group::eq_node(h_g, h_g)).unwrap();
+    assert!(result.is_true_node());
+}
+
+#[test]
+fn eq_predicate_errors_on_mismatch() {
+    let (schema, mut state) = fresh();
+    let h_g1 = register_group(&schema, &mut state, 7, 11);
+    let h_g2 = register_group(&schema, &mut state, 7, 12);
+    let err = state.evaluate(&schema, Group::eq_node(h_g1, h_g2));
+    assert!(matches!(err, Err(SchemaError::AssertionFailed)));
+}
+
+#[test]
+fn reduce_rejects_combine_with_non_field_leaf_children() {
+    // Children resolve to canonical leaves but their tag is *not* the field leaf tag —
+    // combine must reject.
+    let (schema, mut state) = fresh();
+    let h_g = register_group(&schema, &mut state, 1, 1);
+    let h_y = state.register(&schema, leaf(2)).unwrap();
+    let bad_combine = Group::combine_node(h_g, h_y);
+    let err = state.evaluate(&schema, bad_combine);
+    assert!(matches!(err, Err(SchemaError::Other(_)) | Err(SchemaError::InvalidNode)));
+}

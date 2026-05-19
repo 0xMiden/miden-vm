@@ -62,6 +62,7 @@ pub const WORD_SIZE: usize = Word::NUM_ELEMENTS;
 
 pub mod advice;
 pub mod chiplets;
+pub mod deferred;
 pub mod events;
 pub mod mast;
 pub mod operations;
