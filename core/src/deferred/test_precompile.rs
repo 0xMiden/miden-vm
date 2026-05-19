@@ -120,12 +120,12 @@ impl Precompile for TestPrecompile {
         Self::id()
     }
 
-    fn decode(&self, sub: PrecompileTag) -> Result<TagInfo, SchemaError> {
+    fn decode(&self, sub: PrecompileTag) -> Option<TagInfo> {
         let [disc, imm, reserved] = sub.0;
         if imm != ZERO || reserved != ZERO {
-            return Err(SchemaError::InvalidNode);
+            return None;
         }
-        let kind = Disc::classify(disc).ok_or(SchemaError::InvalidNode)?;
+        let kind = Disc::classify(disc)?;
         let node_type = match kind {
             Disc::Leaf => NodeType::Value,
             Disc::Add | Disc::Mul | Disc::Eq => NodeType::Binary,
@@ -134,7 +134,7 @@ impl Precompile for TestPrecompile {
             Disc::Leaf | Disc::Add | Disc::Mul => Self::leaf_tag(),
             Disc::Eq => TRUE_TAG,
         };
-        Ok(TagInfo { node_type, evaluates_to })
+        Some(TagInfo { node_type, evaluates_to })
     }
 
     fn reduce(&self, node: &Node, ctx: &mut dyn ReduceCtx) -> Result<Node, SchemaError> {
@@ -179,6 +179,7 @@ impl Schema for TestPrecompile {
             return Err(SchemaError::InvalidNode);
         }
         Precompile::decode(self, PrecompileTag([tag[1], tag[2], tag[3]]))
+            .ok_or(SchemaError::InvalidNode)
     }
 
     fn reduce(&self, node: &Node, ctx: &mut dyn ReduceCtx) -> Result<Node, SchemaError> {
