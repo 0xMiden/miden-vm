@@ -167,6 +167,8 @@ impl MainTrace {
             if r < core_h {
                 core_rm.get(r, col).expect("Accessed element is in bounds")
             } else if col == CLK_COL_IDX {
+                // `clk` stays strictly monotone across the projection; the rest of the row
+                // replicates the last Core row.
                 Felt::from_u32(r as u32)
             } else {
                 core_rm.get(core_h - 1, col).expect("Accessed element is in bounds")
@@ -186,6 +188,36 @@ impl MainTrace {
         TRACE_WIDTH
     }
 
+    /// Writes the unified row `row` into `dst` (`dst.len()` must be [`TRACE_WIDTH`]).
+    ///
+    /// This is a *projection* of the two independently-sized per-AIR matrices into one
+    /// row, not a constraint-satisfying unified trace: rows past the Core height replicate
+    /// the last Core row (with `clk` kept monotone), and **Chiplets columns past the
+    /// Chiplets height are zero** — so the projection does not satisfy the Chiplets AIR's
+    /// `chip_clk`/padding rules when the two AIRs differ in height. The authoritative,
+    /// constraint-satisfying matrices are [`Self::to_core_chiplets_matrices`].
+    fn project_row(&self, row: usize, dst: &mut [Felt]) {
+        const NCC: usize = CORE_STORAGE_WIDTH;
+        const CW: usize = CHIPLETS_WIDTH;
+        let TraceStorage { core_rm, chiplets_rm, .. } = &self.storage;
+
+        let core_h = core_rm.height();
+        if row < core_h {
+            dst[..NCC].copy_from_slice(&core_rm.values[row * NCC..(row + 1) * NCC]);
+        } else {
+            let last = core_h - 1;
+            dst[..NCC].copy_from_slice(&core_rm.values[last * NCC..(last + 1) * NCC]);
+            dst[CLK_COL_IDX] = Felt::from_u32(row as u32);
+        }
+
+        let chip_h = chiplets_rm.height();
+        if row < chip_h {
+            dst[NCC..NCC + CW].copy_from_slice(&chiplets_rm.values[row * CW..(row + 1) * CW]);
+        } else {
+            dst[NCC..NCC + CW].fill(ZERO);
+        }
+    }
+
     /// Row-major matrix of this trace.
     pub fn to_row_major(&self) -> RowMajorMatrix<Felt> {
         let h = self.num_rows();
@@ -203,10 +235,7 @@ impl MainTrace {
             let chunk_rows = chunk.len() / w;
             for i in 0..chunk_rows {
                 let row = start_row + i;
-                let dst = &mut chunk[i * w..(i + 1) * w];
-                for (col, cell) in dst.iter_mut().enumerate() {
-                    *cell = self.get(RowIndex::from(row as u32), col);
-                }
+                self.project_row(row, &mut chunk[i * w..(i + 1) * w]);
             }
         };
 
@@ -251,20 +280,22 @@ impl MainTrace {
     /// Copies one logical row into `row` (must be at least as long as the stored width).
     pub fn read_row_into(&self, row_idx: usize, row: &mut [Felt]) {
         let w = self.width();
+        assert!(row_idx < self.num_rows(), "main trace row index in bounds");
         assert!(row.len() >= w, "row buffer too small for main trace");
-        for (col, cell) in row[..w].iter_mut().enumerate() {
-            *cell = self.get(RowIndex::from(row_idx as u32), col);
-        }
+        self.project_row(row_idx, &mut row[..w]);
     }
 
     /// Returns one column as a new vector.
+    // Test/debug-only, the proving path never materializes columns.
+    #[cfg(any(test, feature = "testing"))]
     pub fn get_column(&self, col_idx: usize) -> Vec<Felt> {
         (0..self.num_rows())
             .map(|r| self.get(RowIndex::from(r as u32), col_idx))
             .collect()
     }
 
-    /// Iterates over all columns (materialises each one).
+    /// Iterates over all columns (materialises each one). Test/debug-only.
+    #[cfg(any(test, feature = "testing"))]
     pub fn columns(&self) -> impl Iterator<Item = Vec<Felt>> + '_ {
         (0..self.width()).map(|c| self.get_column(c))
     }
@@ -917,5 +948,70 @@ mod tests {
         assert_eq!(ref_chip.width(), moved_chip.width());
         assert_eq!(ref_core.values, moved_core.values);
         assert_eq!(ref_chip.values, moved_chip.values);
+    }
+
+    /// Builds a Parts-form `MainTrace` with independent (power-of-two) Core and Chiplets
+    /// heights; every cell is a distinct non-zero value so the projection tail (zeros) is
+    /// distinguishable from real data.
+    fn parts_trace_with_heights(core_rows: usize, chip_rows: usize) -> MainTrace {
+        let mut core_rm = Vec::with_capacity(core_rows * CORE_STORAGE_WIDTH);
+        for row in 0..core_rows {
+            for col in 0..CORE_STORAGE_WIDTH {
+                core_rm.push(Felt::from_u32((row * CORE_STORAGE_WIDTH + col + 1) as u32));
+            }
+        }
+        let mut chiplets_rm = Vec::with_capacity(chip_rows * CHIPLETS_WIDTH);
+        for row in 0..chip_rows {
+            for c in 0..CHIPLETS_WIDTH {
+                chiplets_rm.push(Felt::from_u32((row * CHIPLETS_WIDTH + c + 1) as u32));
+            }
+        }
+        MainTrace::from_parts(core_rm, chiplets_rm, RowIndex::from(0))
+    }
+
+    /// Pins the documented `to_row_major` contract: it is a *projection* of the two
+    /// independently-sized per-AIR matrices, not a constraint-satisfying unified trace.
+    #[test]
+    fn to_row_major_is_a_projection_when_heights_differ() {
+        const NCC: usize = CORE_STORAGE_WIDTH;
+        const CW: usize = CHIPLETS_WIDTH;
+
+        // Core taller than Chiplets: Chiplets columns past the Chiplets height are ZERO,
+        // i.e. the projection does not satisfy the Chiplets `chip_clk`/padding rules.
+        {
+            let trace = parts_trace_with_heights(8, 4);
+            assert_eq!(trace.num_rows(), 8);
+            let unified = trace.to_row_major();
+            let (core, chiplets) = trace.to_core_chiplets_matrices();
+            for row in 0..8 {
+                let u = unified.row_slice(row).expect("row in bounds");
+                assert_eq!(&u[..NCC], &core.row_slice(row).unwrap()[..]);
+                if row < 4 {
+                    assert_eq!(&u[NCC..NCC + CW], &chiplets.row_slice(row).unwrap()[..]);
+                } else {
+                    assert!(u[NCC..NCC + CW].iter().all(|&v| v == ZERO));
+                }
+            }
+        }
+
+        // Chiplets taller than Core: Core tail replicates the last Core row, but `clk`
+        // stays strictly monotone across the projection.
+        {
+            let trace = parts_trace_with_heights(4, 8);
+            assert_eq!(trace.num_rows(), 8);
+            let unified = trace.to_row_major();
+            let (core, _chiplets) = trace.to_core_chiplets_matrices();
+            let last_core = core.row_slice(3).unwrap().to_vec();
+            for row in 4..8 {
+                let u = unified.row_slice(row).expect("row in bounds");
+                for (col, &cell) in u[..NCC].iter().enumerate() {
+                    if col == CLK_COL_IDX {
+                        assert_eq!(cell, Felt::from_u32(row as u32));
+                    } else {
+                        assert_eq!(cell, last_core[col]);
+                    }
+                }
+            }
+        }
     }
 }

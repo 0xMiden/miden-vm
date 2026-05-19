@@ -105,12 +105,14 @@ impl<'a> TraceFragment<'a> {
     /// Updates a single cell in this fragment with provided value.
     #[inline(always)]
     pub fn set(&mut self, row_idx: RowIndex, col_idx: usize, value: Felt) {
+        assert!(col_idx < self.num_cols, "fragment column index out of bounds");
         let row = row_idx.as_usize();
         self.band[row * self.stride + self.col_start + col_idx] = value;
     }
 
     /// Writes one chiplet-local column from a contiguous source (`src.len()` == row count).
     pub fn fill_column(&mut self, col_idx: usize, src: &[Felt]) {
+        assert!(col_idx < self.num_cols, "fragment column index out of bounds");
         debug_assert_eq!(src.len(), self.num_rows, "column length mismatch");
         let g = self.col_start + col_idx;
         for (r, &v) in src.iter().enumerate() {
