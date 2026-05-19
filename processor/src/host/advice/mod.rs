@@ -144,7 +144,6 @@ impl AdviceProvider {
     }
 
     #[cfg(test)]
-    #[expect(dead_code)]
     pub(crate) fn merkle_store(&self) -> &MerkleStore {
         &self.store
     }
@@ -744,14 +743,21 @@ impl AdviceProvider {
     where
         I: IntoIterator<Item = InnerNodeInfo>,
     {
-        if self.max_provider_elements == usize::MAX {
+        if !Self::unified_provider_budget_enabled(self.max_provider_elements) {
             self.store.extend(iter);
             return Ok(());
         }
 
         let mut store = self.store.clone();
-        store.extend(iter);
-        self.check_provider_element_budget_with_store_nodes(store.num_internal_nodes())?;
+        let mut store_node_count = store.num_internal_nodes();
+        for info in iter {
+            store.extend(core::iter::once(info));
+            let new_store_node_count = store.num_internal_nodes();
+            if new_store_node_count != store_node_count {
+                self.check_provider_element_budget_with_store_nodes(new_store_node_count)?;
+                store_node_count = new_store_node_count;
+            }
+        }
         self.store = store;
         Ok(())
     }
@@ -1048,6 +1054,7 @@ mod tests {
         let options = ExecutionOptions::default().with_max_adv_provider_elements(baseline);
         let mut provider = AdviceProvider::new(AdviceInputs::default(), &options).unwrap();
         let tree = MerkleTree::new([make_leaf(100), make_leaf(200)]).unwrap();
+        let store_before = provider.merkle_store().clone();
 
         let err = provider.extend_merkle_store(tree.inner_nodes()).unwrap_err();
         assert!(matches!(
@@ -1055,6 +1062,21 @@ mod tests {
             AdviceError::AdvProviderElementBudgetExceeded { current, max, .. }
                 if current == baseline && max == baseline
         ));
+        assert_eq!(provider.merkle_store(), &store_before);
+    }
+
+    #[test]
+    fn extend_merkle_store_allows_existing_nodes_at_provider_cap() {
+        let mut provider =
+            AdviceProvider::new(AdviceInputs::default(), &ExecutionOptions::default()).unwrap();
+        let tree = MerkleTree::new([make_leaf(10), make_leaf(20)]).unwrap();
+        provider.extend_merkle_store(tree.inner_nodes()).unwrap();
+
+        let current = provider.provider_element_count().unwrap();
+        let options = ExecutionOptions::default().with_max_adv_provider_elements(current);
+        provider.set_options(&options).unwrap();
+
+        provider.extend_merkle_store(tree.inner_nodes()).unwrap();
     }
 
     #[test]
