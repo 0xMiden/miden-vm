@@ -25,17 +25,59 @@ use std::{
 type Exports = BTreeMap<String, ExportInfo>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct ExportInfo {
+enum ExportInfo {
+    Procedure(ProcedureInfo),
+    Type(TypeInfo),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ProcedureInfo {
     digest: String,
-    signature: String,
-    attributes: String,
+    signature: Option<String>,
+    abi_attributes: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TypeInfo {
+    ty: String,
 }
 
 impl ExportInfo {
     fn describe(&self) -> String {
-        let Self { digest, signature, attributes } = self;
-        format!("digest={digest}, signature={signature}, attributes={attributes}")
+        match self {
+            Self::Procedure(procedure) => procedure.describe(),
+            Self::Type(ty) => ty.describe(),
+        }
     }
+}
+
+impl ProcedureInfo {
+    fn describe(&self) -> String {
+        let Self { digest, signature, abi_attributes } = self;
+        format!(
+            "procedure digest={digest}, signature={}, abi_attributes={}",
+            signature.as_deref().unwrap_or("None"),
+            format_attributes(abi_attributes),
+        )
+    }
+}
+
+impl TypeInfo {
+    fn describe(&self) -> String {
+        format!("type={}", self.ty)
+    }
+}
+
+fn format_attributes(attributes: &BTreeMap<String, String>) -> String {
+    if attributes.is_empty() {
+        return "None".to_string();
+    }
+
+    attributes
+        .iter()
+        .map(|(name, value)| format!("{name}={value}"))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn main() {
@@ -72,25 +114,9 @@ fn compare_exports(previous: Exports, current: Exports) -> Result<(), String> {
                 println!("{name} {}", current_export.describe());
             },
             (Some(previous_export), Some(current_export)) => {
-                if previous_export.digest != current_export.digest {
-                    eprintln!(
-                        "::error::export digest changed for {name}: previous={}, current={}",
-                        previous_export.digest, current_export.digest,
-                    );
+                if compare_export(&name, previous_export, current_export) {
+                    status = Err("exports changed".to_string());
                 }
-                if previous_export.signature != current_export.signature {
-                    eprintln!(
-                        "::error::export signature changed for {name}: previous={}, current={}",
-                        previous_export.signature, current_export.signature,
-                    );
-                }
-                if previous_export.attributes != current_export.attributes {
-                    eprintln!(
-                        "::error::export attributes changed for {name}: previous={}, current={}",
-                        previous_export.attributes, current_export.attributes,
-                    );
-                }
-                status = Err("procedure exports changed".to_string());
             },
             (Some(previous_export), None) => {
                 eprintln!(
@@ -99,15 +125,88 @@ fn compare_exports(previous: Exports, current: Exports) -> Result<(), String> {
                 );
                 status = Err("procedure exports changed".to_string());
             },
-            (None, Some(current_export)) => {
-                eprintln!("::error::export added: {name} current={}", current_export.describe());
-                status = Err("procedure exports changed".to_string());
+            (None, Some(current_export)) => match current_export {
+                ExportInfo::Procedure(_) => {
+                    eprintln!(
+                        "::error::export added: {name} current={}",
+                        current_export.describe()
+                    );
+                    status = Err("procedure exports changed".to_string());
+                },
+                ExportInfo::Type(_) => {
+                    println!("{name} {}", current_export.describe());
+                },
             },
             (None, None) => unreachable!("name came from at least one side"),
         }
     }
 
     status
+}
+
+fn compare_export(name: &str, previous: &ExportInfo, current: &ExportInfo) -> bool {
+    match (previous, current) {
+        (ExportInfo::Procedure(previous), ExportInfo::Procedure(current)) => {
+            compare_procedure(name, previous, current)
+        },
+        (ExportInfo::Type(previous), ExportInfo::Type(current)) => {
+            if previous.ty == current.ty {
+                false
+            } else {
+                eprintln!(
+                    "::error::exported type changed for {name}: previous={}, current={}",
+                    previous.ty, current.ty,
+                );
+                true
+            }
+        },
+        _ => {
+            eprintln!(
+                "::error::export kind changed for {name}: previous={}, current={}",
+                previous.describe(),
+                current.describe(),
+            );
+            true
+        },
+    }
+}
+
+fn compare_procedure(name: &str, previous: &ProcedureInfo, current: &ProcedureInfo) -> bool {
+    let mut changed = false;
+
+    if previous.digest != current.digest {
+        eprintln!(
+            "::error::export digest changed for {name}: previous={}, current={}",
+            previous.digest, current.digest,
+        );
+        changed = true;
+    }
+
+    if previous.signature.is_some() && previous.signature != current.signature {
+        eprintln!(
+            "::error::export signature changed for {name}: previous={}, current={}",
+            previous.signature.as_deref().unwrap_or("None"),
+            current.signature.as_deref().unwrap_or("None"),
+        );
+        changed = true;
+    }
+
+    // Adding ABI metadata is non-breaking; removing or changing previously published ABI metadata is not.
+    for (attr, previous_value) in &previous.abi_attributes {
+        let current_value = current.abi_attributes.get(attr).map(String::as_str).unwrap_or("None");
+        if previous_value != current_value {
+            eprintln!(
+                "::error::export ABI attribute changed for {name}: {attr} previous={previous_value}, current={current_value}",
+            );
+            changed = true;
+        }
+    }
+
+    changed
+}
+
+fn is_abi_attribute(name: &str) -> bool {
+    matches!(name, "auth_script" | "callconv")
 }
 
 mod current {
@@ -138,22 +237,22 @@ mod current {
             .filter_map(|export| match export {
                 PackageExport::Procedure(procedure) => Some((
                     procedure.path.to_string(),
-                    ExportInfo {
+                    ExportInfo::Procedure(ProcedureInfo {
                         digest: procedure.digest.to_string(),
-                        signature: procedure
-                            .signature
-                            .as_ref()
-                            .map(PrettyPrint::to_pretty_string)
-                            .unwrap_or_else(|| "None".to_string()),
-                        attributes: procedure
+                        signature: procedure.signature.as_ref().map(PrettyPrint::to_pretty_string),
+                        abi_attributes: procedure
                             .attributes
                             .iter()
-                            .map(ToString::to_string)
-                            .collect::<Vec<_>>()
-                            .join(" "),
-                    },
+                            .filter(|attr| is_abi_attribute(attr.name()))
+                            .map(|attr| (attr.name().to_string(), attr.to_string()))
+                            .collect(),
+                    }),
                 )),
-                PackageExport::Constant(_) | PackageExport::Type(_) => None,
+                PackageExport::Type(ty) => Some((
+                    ty.path.to_string(),
+                    ExportInfo::Type(TypeInfo { ty: ty.ty.to_pretty_string() }),
+                )),
+                PackageExport::Constant(_) => None,
             })
             .collect())
     }
@@ -187,22 +286,22 @@ mod previous {
             .filter_map(|export| match export {
                 PackageExport::Procedure(procedure) => Some((
                     procedure.path.to_string(),
-                    ExportInfo {
+                    ExportInfo::Procedure(ProcedureInfo {
                         digest: procedure.digest.to_string(),
-                        signature: procedure
-                            .signature
-                            .as_ref()
-                            .map(PrettyPrint::to_pretty_string)
-                            .unwrap_or_else(|| "None".to_string()),
-                        attributes: procedure
+                        signature: procedure.signature.as_ref().map(PrettyPrint::to_pretty_string),
+                        abi_attributes: procedure
                             .attributes
                             .iter()
-                            .map(ToString::to_string)
-                            .collect::<Vec<_>>()
-                            .join(" "),
-                    },
+                            .filter(|attr| is_abi_attribute(attr.name()))
+                            .map(|attr| (attr.name().to_string(), attr.to_string()))
+                            .collect(),
+                    }),
                 )),
-                PackageExport::Constant(_) | PackageExport::Type(_) => None,
+                PackageExport::Type(ty) => Some((
+                    ty.path.to_string(),
+                    ExportInfo::Type(TypeInfo { ty: ty.ty.to_pretty_string() }),
+                )),
+                PackageExport::Constant(_) => None,
             })
             .collect())
     }
