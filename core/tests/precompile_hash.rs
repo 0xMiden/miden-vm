@@ -6,9 +6,7 @@ mod common;
 use common::precompile::{hash::Hash, uint::Uint};
 use miden_core::{
     Felt, ZERO,
-    deferred::{
-        DeferredState, NodeType, Precompile, PrecompileSchema, PrecompileTag, SchemaError, TRUE_TAG,
-    },
+    deferred::{DeferredState, NodeType, Precompile, PrecompileError, Precompiles, TRUE_TAG},
 };
 
 fn chunks(n: u32) -> Vec<[Felt; 8]> {
@@ -17,8 +15,8 @@ fn chunks(n: u32) -> Vec<[Felt; 8]> {
         .collect()
 }
 
-fn fresh() -> (PrecompileSchema, DeferredState) {
-    (PrecompileSchema::single(Hash).unwrap(), DeferredState::new())
+fn fresh() -> (Precompiles, DeferredState) {
+    (Precompiles::single(Hash).unwrap(), DeferredState::new())
 }
 
 // END-TO-END (relocated from deferred_mock_hash.rs)
@@ -26,7 +24,7 @@ fn fresh() -> (PrecompileSchema, DeferredState) {
 
 #[test]
 fn preimage_reduces_to_known_digest_and_eq_predicate_passes() {
-    let schema = PrecompileSchema::new([
+    let schema = Precompiles::new([
         Box::new(Uint) as Box<dyn Precompile>,
         Box::new(Hash) as Box<dyn Precompile>,
     ])
@@ -81,7 +79,7 @@ fn n_chunks_rounds_up() {
 #[test]
 fn decode_preimage_extracts_chunk_count_from_imm() {
     let info = Hash
-        .decode(PrecompileTag([Felt::from_u32(Hash::PREIMAGE_TAG_ID), Felt::from_u32(65), ZERO]))
+        .decode([Felt::from_u32(Hash::PREIMAGE_TAG_ID), Felt::from_u32(65), ZERO])
         .unwrap();
     assert!(matches!(info.node_type, NodeType::Chunks(3)));
     assert_eq!(info.evaluates_to, Hash::digest_tag());
@@ -89,35 +87,29 @@ fn decode_preimage_extracts_chunk_count_from_imm() {
 
 #[test]
 fn decode_digest_is_self_evaluating_value() {
-    let info = Hash
-        .decode(PrecompileTag([Felt::from_u32(Hash::DIGEST_TAG_ID), ZERO, ZERO]))
-        .unwrap();
+    let info = Hash.decode([Felt::from_u32(Hash::DIGEST_TAG_ID), ZERO, ZERO]).unwrap();
     assert!(matches!(info.node_type, NodeType::Value));
     assert_eq!(info.evaluates_to, Hash::digest_tag());
 }
 
 #[test]
 fn decode_eq_is_binary_predicate() {
-    let info = Hash
-        .decode(PrecompileTag([Felt::from_u32(Hash::EQ_TAG_ID), ZERO, ZERO]))
-        .unwrap();
+    let info = Hash.decode([Felt::from_u32(Hash::EQ_TAG_ID), ZERO, ZERO]).unwrap();
     assert!(matches!(info.node_type, NodeType::Binary));
     assert_eq!(info.evaluates_to, TRUE_TAG);
 }
 
 #[test]
 fn decode_unknown_discriminant_rejected() {
-    let info = Hash.decode(PrecompileTag([Felt::from_u32(99), ZERO, ZERO]));
+    let info = Hash.decode([Felt::from_u32(99), ZERO, ZERO]);
     assert!(info.is_none());
 }
 
 #[test]
 fn decode_rejects_imm_on_non_preimage() {
-    let info =
-        Hash.decode(PrecompileTag([Felt::from_u32(Hash::DIGEST_TAG_ID), Felt::from_u32(1), ZERO]));
+    let info = Hash.decode([Felt::from_u32(Hash::DIGEST_TAG_ID), Felt::from_u32(1), ZERO]);
     assert!(info.is_none());
-    let info =
-        Hash.decode(PrecompileTag([Felt::from_u32(Hash::EQ_TAG_ID), Felt::from_u32(1), ZERO]));
+    let info = Hash.decode([Felt::from_u32(Hash::EQ_TAG_ID), Felt::from_u32(1), ZERO]);
     assert!(info.is_none());
 }
 
@@ -160,7 +152,7 @@ fn eq_predicate_errors_on_mismatch() {
     let h_wrong = state.register(&schema, wrong).unwrap();
     let h_preimage = state.register(&schema, Hash::preimage_node(32, data)).unwrap();
     let err = state.evaluate(&schema, Hash::eq_node(h_preimage, h_wrong));
-    assert!(matches!(err.unwrap_err().root(), SchemaError::AssertionFailed));
+    assert!(matches!(err.unwrap_err().root(), PrecompileError::AssertionFailed));
 }
 
 #[test]
@@ -175,7 +167,7 @@ fn empty_preimage_reduces_to_zero_digest() {
 #[test]
 fn composite_with_hash_dispatches() {
     // Sanity: id-based routing works in a composite holding only Hash.
-    let schema = PrecompileSchema::new([Box::new(Hash) as Box<dyn Precompile>]).unwrap();
+    let schema = Precompiles::new([Box::new(Hash) as Box<dyn Precompile>]).unwrap();
     let mut state = DeferredState::new();
     let data = chunks(1);
     let canonical = state.evaluate(&schema, Hash::preimage_node(32, data.clone())).unwrap();

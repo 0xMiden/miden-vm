@@ -3,7 +3,7 @@ use alloc::vec::Vec;
 use miden_core::{
     Felt, WORD_SIZE, Word, ZERO,
     crypto::hash::Poseidon2,
-    deferred::SchemaError,
+    deferred::PrecompileError,
     events::SystemEvent,
     field::{BasedVectorSpace, Field, PrimeCharacteristicRing, QuadFelt},
 };
@@ -36,7 +36,7 @@ pub enum SystemEventError {
     #[error(transparent)]
     Memory(#[from] MemoryError),
     #[error(transparent)]
-    Deferred(#[from] SchemaError),
+    Deferred(#[from] PrecompileError),
 }
 
 // SYSTEM EVENT HANDLERS

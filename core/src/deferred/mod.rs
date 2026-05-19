@@ -7,28 +7,28 @@
 //! verifier later consumes the resulting [`DeferredState`] (nodes + rolling root) and reduces
 //! the root to TRUE.
 //!
-//! The full subsystem — data model, [`Schema`] trait, in-memory [`DeferredState`], and the
-//! [`Precompile`] / [`PrecompileSchema`] composite substrate — lives here in `miden-core`. The
-//! processor only contributes the system-event glue that bridges VM operand-stack reads to
-//! schema calls. Reference precompiles that exercise this public surface live in `miden-core`'s
-//! integration tests (`core/tests/common/precompile/`), not on the crate's public surface.
+//! The full subsystem — data model, in-memory [`DeferredState`], and the [`Precompile`] /
+//! [`Precompiles`] registry substrate — lives here in `miden-core`. The processor only
+//! contributes the system-event glue that bridges VM operand-stack reads to precompile calls.
+//! Reference precompiles that exercise this public surface live in `miden-core`'s integration
+//! tests (`core/tests/common/precompile/`), not on the crate's public surface.
 
 mod schema;
 mod state;
 mod wire;
 
-pub use schema::{NodeType, NoopSchema, Schema, SchemaError, TagInfo};
+pub use schema::{NodeType, PrecompileError, TagInfo};
 pub use state::{DeferredState, WitnessBuilder};
 pub use wire::{DeferredStateWire, IntegrityError, TRUE_INDEX, WireBody, WireEntry};
 
-// Multi-precompile composite layer. The `Precompile` trait + `PrecompileSchema` substrate are
-// the public surface. Production precompiles (keccak256, sha512, ecdsa_k256_keccak,
-// eddsa_ed25519) live in `miden-core-lib::precompiles`, next to their MASM wrappers; reference
-// precompiles live in `core/tests/common/precompile/`.
+// Multi-precompile registry layer. The `Precompile` trait + `Precompiles` substrate are the
+// public surface. Production precompiles (keccak256, sha512, ecdsa_k256_keccak, eddsa_ed25519)
+// live in `miden-core-lib::precompiles`, next to their MASM wrappers; reference precompiles
+// live in `core/tests/common/precompile/`.
 mod precompile;
 mod precompile_schema;
 
-// Minimal `#[cfg(test)]` schema fixture for the engine's own unit tests (state.rs et al.).
+// Minimal `#[cfg(test)]` precompile fixture for the engine's own unit tests (state.rs et al.).
 // Not exported, not on the `testing` surface — scaffolding only.
 #[cfg(test)]
 pub(crate) mod test_precompile;
@@ -37,8 +37,8 @@ use alloc::sync::Arc;
 
 use miden_crypto::{ZERO, hash::poseidon2::Poseidon2};
 use miden_utils_sync::OnceLockCompat;
-pub use precompile::{Precompile, PrecompileTag, precompile_id};
-pub use precompile_schema::PrecompileSchema;
+pub use precompile::{Precompile, precompile_id};
+pub use precompile_schema::Precompiles;
 
 use crate::{
     Felt, Word,
@@ -48,10 +48,40 @@ use crate::{
 /// Content-addressed digest of a [`Node`]. A 4-felt Poseidon2 output.
 pub type Digest = Word;
 
-/// A 4-felt opaque tag identifying a deferred node. Tags are not interpreted by `miden-core` or
-/// by the processor — the installed schema decodes any structure (type prefix, op suffix, kind,
-/// chunk length, …) it needs out of the tag's four felts.
-pub type Tag = [Felt; 4];
+/// A tag identifying a deferred node: a precompile `id` plus three precompile-local immediate
+/// felts.
+///
+/// `id == ZERO` is reserved for the framework — it tags the canonical TRUE node and the AND
+/// (transcript-step) nodes. No [`Precompile`] may derive id `ZERO`; [`Precompiles::new`]
+/// rejects one that does. The `imm` felts are opaque to `miden-core` and the processor: each
+/// precompile decodes whatever structure (discriminant, chunk length, …) it needs out of them.
+///
+/// Laid out as `[id, imm0, imm1, imm2]` in the Poseidon2 capacity and on the wire — see
+/// [`Tag::as_capacity`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Tag {
+    pub id: Felt,
+    pub imm: [Felt; 3],
+}
+
+impl Tag {
+    /// Build a tag from a precompile id and its three immediate felts.
+    pub const fn new(id: Felt, imm: [Felt; 3]) -> Self {
+        Self { id, imm }
+    }
+
+    /// The 4-felt capacity layout `[id, imm0, imm1, imm2]` fed to Poseidon2 and written to the
+    /// wire.
+    pub const fn as_capacity(&self) -> [Felt; 4] {
+        [self.id, self.imm[0], self.imm[1], self.imm[2]]
+    }
+
+    /// Inverse of [`Self::as_capacity`]: split a 4-felt capacity word into `id` and `imm`. Used
+    /// by the processor (operand-stack reads) and the wire decoder.
+    pub const fn from_capacity(c: [Felt; 4]) -> Self {
+        Self { id: c[0], imm: [c[1], c[2], c[3]] }
+    }
+}
 
 /// An 8-felt block — the Poseidon2 rate, and the bulk-data unit of a chunk node. A `ChunkNode`
 /// carries `n` chunks; its digest is the linear hash of those `8n` felts with the tag as the
@@ -59,10 +89,10 @@ pub type Tag = [Felt; 4];
 pub type Chunk = [Felt; 8];
 
 /// Reserved framework-level tag carried by the canonical TRUE node and by AND nodes
-/// (transcript-step nodes). No schema may claim this tag — the framework owns it.
+/// (transcript-step nodes). No precompile may claim id `ZERO` — the framework owns it.
 ///
-/// Structurally `[ZERO; 4]`. Paired with [`TRUE_DIGEST`].
-pub const TRUE_TAG: Tag = [ZERO; 4];
+/// Structurally `Tag { id: ZERO, imm: [ZERO; 3] }`. Paired with [`TRUE_DIGEST`].
+pub const TRUE_TAG: Tag = Tag { id: ZERO, imm: [ZERO; 3] };
 
 /// Verifier-side sentinel for "trivial transcript" / "empty AND" — the zero word.
 ///
@@ -124,8 +154,8 @@ impl Payload {
 
 /// A DAG node identified by its [`Digest`].
 ///
-/// The tag is opaque at this layer — the installed [`Schema`] decodes it. The payload comes in
-/// two shapes ([`NodePayload`]):
+/// The tag is opaque at this layer — the [`Precompiles`] registry decodes it. The payload comes
+/// in two shapes ([`NodePayload`]):
 /// - `Expression(Payload)` — leaves, op-nodes, predicates, and AND-nodes. All carry an 8-felt
 ///   payload.
 /// - `Chunk(Arc<[Chunk]>)` — bulk-data leaves; `n` (number of 8-felt chunks) is `chunks.len()` and
@@ -135,7 +165,7 @@ impl Payload {
 ///
 /// Predicate nodes (those whose tag decodes with `evaluates_to == TRUE_TAG`) are structurally
 /// indistinguishable from regular expression-bodied nodes; their "predicate-ness" is a property
-/// of the *tag*, not the *node*, and is communicated by `Schema::decode`'s [`TagInfo`].
+/// of the *tag*, not the *node*, and is communicated by `Precompile::decode`'s [`TagInfo`].
 ///
 /// Carries a lazily-populated digest cache (`OnceLockCompat<Digest>`) so repeated `.digest()`
 /// calls on a node — and on its clones — amortise to one Poseidon2 invocation. The cache is
@@ -250,7 +280,7 @@ impl Node {
     /// hint without depending on cache state.
     pub(crate) fn compute_digest(&self) -> Digest {
         let mut state = [ZERO; 12];
-        state[8..12].copy_from_slice(&self.tag);
+        state[8..12].copy_from_slice(&self.tag.as_capacity());
         match &self.payload {
             NodePayload::Expression(p) => {
                 state[0..8].copy_from_slice(p.as_felts());
@@ -323,18 +353,14 @@ mod tests {
 
     use super::*;
 
-    const TAG_A: Tag = [
-        Felt::new_unchecked(1),
-        Felt::new_unchecked(0),
-        Felt::new_unchecked(0),
-        Felt::new_unchecked(0),
-    ];
-    const TAG_B: Tag = [
-        Felt::new_unchecked(1),
-        Felt::new_unchecked(0),
-        Felt::new_unchecked(1),
-        Felt::new_unchecked(0),
-    ];
+    const TAG_A: Tag = Tag {
+        id: Felt::new_unchecked(1),
+        imm: [Felt::new_unchecked(0); 3],
+    };
+    const TAG_B: Tag = Tag {
+        id: Felt::new_unchecked(1),
+        imm: [Felt::new_unchecked(0), Felt::new_unchecked(1), Felt::new_unchecked(0)],
+    };
 
     fn payload(seed: u64) -> Payload {
         Payload::new([
@@ -394,7 +420,7 @@ mod tests {
 
         // Manual computation: capacity = tag, iterate over chunks overwriting rate.
         let mut state = [ZERO; 12];
-        state[8..12].copy_from_slice(&TAG_A);
+        state[8..12].copy_from_slice(&TAG_A.as_capacity());
         for c in &chunks {
             state[0..8].copy_from_slice(c);
             Poseidon2::apply_permutation(&mut state);
@@ -405,7 +431,7 @@ mod tests {
 
     #[test]
     fn true_tag_and_digest_are_zero_word() {
-        assert_eq!(TRUE_TAG, [ZERO; 4]);
+        assert_eq!(TRUE_TAG, Tag { id: ZERO, imm: [ZERO; 3] });
         assert_eq!(TRUE_DIGEST, Word::new([ZERO; 4]));
     }
 

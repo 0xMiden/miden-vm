@@ -1,54 +1,47 @@
 //! Canary integration test for the chunk-node variant of the deferred-DAG public API.
 //!
-//! Defines a tiny test schema that:
-//! - Decodes a 2-byte tag prefix to pick between "preimage chunk", "digest leaf", and "assert
-//!   equal" roles, reading `n` for chunks out of the tag's fourth felt.
+//! Defines a tiny reference precompile that:
+//! - Decodes its immediate felts to pick between "preimage chunk", "digest leaf", and "assert
+//!   equal" roles, reading `n` for chunks out of the second immediate felt.
 //! - `reduce` for a chunk computes a tiny "rolling sum" hash (definitely not a real hash — the
-//!   framework doesn't care, the schema picks the function) and returns an expression digest-leaf.
+//!   framework doesn't care, the precompile picks the function) and returns an expression
+//!   digest-leaf.
 //! - `reduce` for the assertion predicate compares the two operands canonically and returns
 //!   `true_node()` on match.
 //!
-//! This is the canonical demonstration that `Schema::decode + Schema::reduce + ChunkNode` are
-//! sufficient to model "preimage hashes to digest" as a predicate in the deferred DAG.
+//! This is the canonical demonstration that `Precompile::decode + Precompile::reduce + ChunkNode`
+//! are sufficient to model "preimage hashes to digest" as a predicate in the deferred DAG.
 
 use miden_core::{
     Felt, ZERO,
     deferred::{
-        DeferredState, Node, NodeType, Payload, Schema, SchemaError, TRUE_TAG, Tag, TagInfo,
-        WitnessBuilder, true_node,
+        DeferredState, Node, NodeType, Payload, Precompile, PrecompileError, Precompiles, TRUE_TAG,
+        Tag, TagInfo, WitnessBuilder, precompile_id, true_node,
     },
 };
 
-// TEST SCHEMA — non-native "rolling sum" hash
+// TEST PRECOMPILE — non-native "rolling sum" hash
 // ================================================================================================
 
-/// Tag prefix shared by every test-schema tag.
-const TEST_PREFIX: [Felt; 2] = [Felt::new_unchecked(0x73), Felt::new_unchecked(0x68)];
-/// Role marker for chunk preimage. The third tag felt holds `n` (the chunk count).
+/// Role marker for chunk preimage. The second immediate felt holds `n` (the chunk count).
 const PREIMAGE_ROLE: Felt = Felt::new_unchecked(0);
 /// Role marker for digest leaf.
 const DIGEST_ROLE: Felt = Felt::new_unchecked(1);
 /// Role marker for an assertion equating two digests.
 const ASSERT_ROLE: Felt = Felt::new_unchecked(2);
 
-fn preimage_tag(n: u32) -> Tag {
-    [TEST_PREFIX[0], TEST_PREFIX[1], PREIMAGE_ROLE, Felt::from_u32(n)]
-}
-
-fn digest_tag() -> Tag {
-    [TEST_PREFIX[0], TEST_PREFIX[1], DIGEST_ROLE, ZERO]
-}
-
-fn assert_tag() -> Tag {
-    [TEST_PREFIX[0], TEST_PREFIX[1], ASSERT_ROLE, ZERO]
-}
-
 #[derive(Debug, Default, Clone, Copy)]
-struct TestSchema;
+struct ChunkTestPrecompile;
 
-impl TestSchema {
+impl ChunkTestPrecompile {
+    const NAME: &'static str = "chunk_test";
+
+    fn id() -> Felt {
+        precompile_id(&ChunkTestPrecompile)
+    }
+
     /// "Hash" `chunks` by summing every felt limb-wise into an 8-felt accumulator. Replace with
-    /// a real non-native hash in production schemas — the framework doesn't constrain this.
+    /// a real non-native hash in production precompiles — the framework doesn't constrain this.
     fn fake_hash(chunks: &[[Felt; 8]]) -> Payload {
         let mut acc = [ZERO; 8];
         for c in chunks {
@@ -60,40 +53,74 @@ impl TestSchema {
     }
 }
 
-impl Schema for TestSchema {
-    fn decode(&self, tag: Tag) -> Result<TagInfo, SchemaError> {
-        if tag[0] != TEST_PREFIX[0] || tag[1] != TEST_PREFIX[1] {
-            return Err(SchemaError::InvalidNode);
+fn preimage_tag(n: u32) -> Tag {
+    Tag {
+        id: ChunkTestPrecompile::id(),
+        imm: [PREIMAGE_ROLE, Felt::from_u32(n), ZERO],
+    }
+}
+
+fn digest_tag() -> Tag {
+    Tag {
+        id: ChunkTestPrecompile::id(),
+        imm: [DIGEST_ROLE, ZERO, ZERO],
+    }
+}
+
+fn assert_tag() -> Tag {
+    Tag {
+        id: ChunkTestPrecompile::id(),
+        imm: [ASSERT_ROLE, ZERO, ZERO],
+    }
+}
+
+impl Precompile for ChunkTestPrecompile {
+    fn name(&self) -> &'static str {
+        Self::NAME
+    }
+
+    fn id(&self) -> Felt {
+        Self::id()
+    }
+
+    fn decode(&self, imm: [Felt; 3]) -> Option<TagInfo> {
+        let [role, n, reserved] = imm;
+        if reserved != ZERO {
+            return None;
         }
-        match tag[2] {
-            // Preimage chunk reduces to a digest leaf.
-            r if r == PREIMAGE_ROLE => Ok(TagInfo {
-                node_type: NodeType::Chunks(tag[3].as_canonical_u64() as u32),
+        match role {
+            // Preimage chunk reduces to a digest leaf; `n` is the chunk count.
+            r if r == PREIMAGE_ROLE => Some(TagInfo {
+                node_type: NodeType::Chunks(n.as_canonical_u64() as u32),
                 evaluates_to: digest_tag(),
             }),
             // Digest leaf is self-evaluating with 8 raw felts.
-            r if r == DIGEST_ROLE => Ok(TagInfo {
+            r if r == DIGEST_ROLE && n == ZERO => Some(TagInfo {
                 node_type: NodeType::Value,
                 evaluates_to: digest_tag(),
             }),
             // Assertion is a binary predicate (two child digests, evaluates to TRUE).
-            r if r == ASSERT_ROLE => Ok(TagInfo {
+            r if r == ASSERT_ROLE && n == ZERO => Some(TagInfo {
                 node_type: NodeType::Binary,
                 evaluates_to: TRUE_TAG,
             }),
-            _ => Err(SchemaError::InvalidNode),
+            _ => None,
         }
     }
 
-    fn reduce(&self, node: &Node, witness: &mut WitnessBuilder<'_>) -> Result<Node, SchemaError> {
+    fn reduce(
+        &self,
+        node: &Node,
+        witness: &mut WitnessBuilder<'_>,
+    ) -> Result<Node, PrecompileError> {
         use miden_core::deferred::NodePayload;
         if node.tag == assert_tag() {
-            let p = node.expression_payload().ok_or(SchemaError::InvalidNode)?;
+            let p = node.expression_payload().ok_or(PrecompileError::InvalidNode)?;
             let (lhs, rhs) = p.binary_op_children();
             let lhs_canonical = witness.resolve(lhs)?;
             let rhs_canonical = witness.resolve(rhs)?;
             if lhs_canonical != rhs_canonical {
-                return Err(SchemaError::AssertionFailed);
+                return Err(PrecompileError::AssertionFailed);
             }
             return Ok(true_node());
         }
@@ -134,7 +161,7 @@ fn chunk_digest_for_n1_matches_equivalent_expression() {
 
 #[test]
 fn register_chunk_stores_node() {
-    let schema = TestSchema;
+    let schema = Precompiles::single(ChunkTestPrecompile).unwrap();
     let mut state = DeferredState::new();
     let chunk = Node::chunk(preimage_tag(3), chunk_data(3));
     let digest = state.register(&schema, chunk.clone()).unwrap();
@@ -144,16 +171,16 @@ fn register_chunk_stores_node() {
 
 #[test]
 fn register_chunk_with_mismatched_length_fails() {
-    let schema = TestSchema;
+    let schema = Precompiles::single(ChunkTestPrecompile).unwrap();
     let mut state = DeferredState::new();
     // Tag declares n=3 but we hand it 2 chunks of data.
     let bad = Node::chunk(preimage_tag(3), chunk_data(2));
-    assert!(matches!(state.register(&schema, bad), Err(SchemaError::InvalidNode)));
+    assert!(matches!(state.register(&schema, bad), Err(PrecompileError::InvalidNode)));
 }
 
 #[test]
 fn predicate_preimage_equals_digest_succeeds() {
-    let schema = TestSchema;
+    let schema = Precompiles::single(ChunkTestPrecompile).unwrap();
     let mut state = DeferredState::new();
 
     // Register a 3-chunk preimage.
@@ -162,7 +189,7 @@ fn predicate_preimage_equals_digest_succeeds() {
     let preimage_digest = state.register(&schema, preimage).unwrap();
 
     // Pre-compute and register the matching digest leaf.
-    let digest_leaf = Node::expression(digest_tag(), TestSchema::fake_hash(&chunks));
+    let digest_leaf = Node::expression(digest_tag(), ChunkTestPrecompile::fake_hash(&chunks));
     let digest_leaf_digest = state.register(&schema, digest_leaf).unwrap();
 
     // Predicate: preimage's digest == precomputed digest leaf. Reduce drives the chunk's hash
@@ -176,7 +203,7 @@ fn predicate_preimage_equals_digest_succeeds() {
 
 #[test]
 fn predicate_preimage_mismatch_fails_on_evaluate() {
-    let schema = TestSchema;
+    let schema = Precompiles::single(ChunkTestPrecompile).unwrap();
     let mut state = DeferredState::new();
 
     let chunks = chunk_data(2);
@@ -192,7 +219,8 @@ fn predicate_preimage_mismatch_fails_on_evaluate() {
     // Register is a pure hint — succeeds even when the predicate doesn't hold.
     state.register(&schema, assertion.clone()).unwrap();
     let err = state.evaluate(&schema, assertion);
-    assert!(matches!(err, Err(SchemaError::AssertionFailed)));
+    // The registry name-wraps the precompile's failure; assert the root cause.
+    assert!(matches!(err.unwrap_err().root(), PrecompileError::AssertionFailed));
 }
 
 #[test]
@@ -200,13 +228,13 @@ fn empty_chunk_digest_binds_tag() {
     // n=0 is allowed. The empty digest must still depend on the tag (one permutation runs even
     // for n=0). Two distinct tags should produce distinct empty-chunk digests.
     let a = Node::chunk(preimage_tag(0), vec![]);
-    let b = Node::chunk([TEST_PREFIX[0], TEST_PREFIX[1], PREIMAGE_ROLE, Felt::from_u32(1)], vec![]);
+    let b = Node::chunk(preimage_tag(1), vec![]);
     assert_ne!(a.digest(), b.digest());
 }
 
 #[test]
 fn deferred_state_includes_chunk_nodes() {
-    let schema = TestSchema;
+    let schema = Precompiles::single(ChunkTestPrecompile).unwrap();
     let mut state = DeferredState::new();
 
     let preimage = Node::chunk(preimage_tag(2), chunk_data(2));

@@ -10,8 +10,8 @@ use miden_assembly::Assembler;
 use miden_core::{
     ZERO,
     deferred::{
-        Node, NodePayload, NodeType, Payload, Schema, SchemaError, TRUE_DIGEST, Tag, TagInfo,
-        WitnessBuilder, true_node,
+        Node, NodePayload, NodeType, Payload, Precompile, PrecompileError, TRUE_DIGEST, Tag,
+        TagInfo, WitnessBuilder, precompile_id, true_node,
     },
 };
 use miden_processor::{
@@ -25,8 +25,8 @@ extern crate alloc;
 // PROCESSOR FACTORY
 // ================================================================================================
 
-/// Builds a `FastProcessor` configured for the deferred-DAG tests with [`ArithTestSchema`]
-/// installed as the schema. The processor consumes itself when running the program.
+/// Builds a `FastProcessor` configured for the deferred-DAG tests with [`ArithTestPrecompile`]
+/// installed. The processor consumes itself when running the program.
 fn build_processor() -> FastProcessor {
     FastProcessor::new_with_options(
         StackInputs::default(),
@@ -34,7 +34,7 @@ fn build_processor() -> FastProcessor {
         ExecutionOptions::default(),
     )
     .expect("processor construction")
-    .with_schema(Arc::new(ArithTestSchema))
+    .with_precompile(ArithTestPrecompile)
 }
 
 // MASM BUILDERS
@@ -103,7 +103,7 @@ fn push_node(src: &mut String, node: Node) {
     // Push tag first (its 4 felts end up deepest), then payload (8 felts on top), so the stack
     // layout under `event_id` becomes [PAYLOAD_LO, PAYLOAD_HI, TAG] — the Poseidon2 sponge layout
     // used by `Node::digest`.
-    for f in node.tag.iter().rev() {
+    for f in node.tag.as_capacity().iter().rev() {
         writeln!(src, "    push.{}", f.as_int()).unwrap();
     }
     let payload = node
@@ -123,51 +123,67 @@ impl FeltExt for Felt {
     }
 }
 
-// ARITH TEST SCHEMA
+// ARITH TEST PRECOMPILE
 // ================================================================================================
 //
-// In-file fixture schema for the processor sys-event tests: an 8×u32 little-endian value leaf
-// plus `add` / `mul` wrapping binary ops and an `eq` predicate. Self-contained (mirrors the
-// existing `ChunkTestSchema` idiom) so the processor crate's tests need no reference impl from
+// In-file fixture precompile for the processor sys-event tests: an 8×u32 little-endian value
+// leaf plus `add` / `mul` wrapping binary ops and an `eq` predicate. Self-contained (mirrors the
+// `ChunkTestPrecompile` idiom) so the processor crate's tests need no reference impl from
 // `miden-core`'s surface.
 
 #[derive(Debug, Default, Clone, Copy)]
-struct ArithTestSchema;
+struct ArithTestPrecompile;
 
-impl ArithTestSchema {
-    const PRECOMPILE_ID: Felt = Felt::new_unchecked(0xa21d_0001);
+impl ArithTestPrecompile {
+    const NAME: &'static str = "arith_test";
     const D_LEAF: Felt = Felt::new_unchecked(0);
     const D_ADD: Felt = Felt::new_unchecked(1);
     const D_MUL: Felt = Felt::new_unchecked(2);
     const D_EQ: Felt = Felt::new_unchecked(3);
 
+    fn id() -> Felt {
+        precompile_id(&ArithTestPrecompile)
+    }
+
     fn leaf_tag() -> Tag {
-        [Self::PRECOMPILE_ID, Self::D_LEAF, ZERO, ZERO]
+        Tag {
+            id: Self::id(),
+            imm: [Self::D_LEAF, ZERO, ZERO],
+        }
     }
     fn add_tag() -> Tag {
-        [Self::PRECOMPILE_ID, Self::D_ADD, ZERO, ZERO]
+        Tag {
+            id: Self::id(),
+            imm: [Self::D_ADD, ZERO, ZERO],
+        }
     }
     fn mul_tag() -> Tag {
-        [Self::PRECOMPILE_ID, Self::D_MUL, ZERO, ZERO]
+        Tag {
+            id: Self::id(),
+            imm: [Self::D_MUL, ZERO, ZERO],
+        }
     }
     fn eq_tag() -> Tag {
-        [Self::PRECOMPILE_ID, Self::D_EQ, ZERO, ZERO]
+        Tag {
+            id: Self::id(),
+            imm: [Self::D_EQ, ZERO, ZERO],
+        }
     }
 
     fn leaf_node(limbs: [u32; 8]) -> Node {
         Node::expression(Self::leaf_tag(), Payload::new(limbs.map(Felt::from_u32)))
     }
 
-    fn limbs_of(node: &Node) -> Result<[u32; 8], SchemaError> {
+    fn limbs_of(node: &Node) -> Result<[u32; 8], PrecompileError> {
         if node.tag != Self::leaf_tag() {
-            return Err(SchemaError::InvalidNode);
+            return Err(PrecompileError::InvalidNode);
         }
-        let payload = node.expression_payload().ok_or(SchemaError::InvalidNode)?;
+        let payload = node.expression_payload().ok_or(PrecompileError::InvalidNode)?;
         let mut limbs = [0u32; 8];
         for (i, felt) in payload.0.iter().enumerate() {
             let v = felt.as_canonical_u64();
             if v > u32::MAX as u64 {
-                return Err(SchemaError::InvalidNode);
+                return Err(PrecompileError::InvalidNode);
             }
             limbs[i] = v as u32;
         }
@@ -199,26 +215,39 @@ impl ArithTestSchema {
     }
 }
 
-impl Schema for ArithTestSchema {
-    fn decode(&self, tag: Tag) -> Result<TagInfo, SchemaError> {
-        if tag[0] != Self::PRECOMPILE_ID || tag[2] != ZERO || tag[3] != ZERO {
-            return Err(SchemaError::InvalidNode);
+impl Precompile for ArithTestPrecompile {
+    fn name(&self) -> &'static str {
+        Self::NAME
+    }
+
+    fn id(&self) -> Felt {
+        Self::id()
+    }
+
+    fn decode(&self, imm: [Felt; 3]) -> Option<TagInfo> {
+        let [disc, m1, m2] = imm;
+        if m1 != ZERO || m2 != ZERO {
+            return None;
         }
-        let (node_type, evaluates_to) = match tag[1] {
+        let (node_type, evaluates_to) = match disc {
             d if d == Self::D_LEAF => (NodeType::Value, Self::leaf_tag()),
             d if d == Self::D_ADD || d == Self::D_MUL => (NodeType::Binary, Self::leaf_tag()),
             d if d == Self::D_EQ => (NodeType::Binary, miden_core::deferred::TRUE_TAG),
-            _ => return Err(SchemaError::InvalidNode),
+            _ => return None,
         };
-        Ok(TagInfo { node_type, evaluates_to })
+        Some(TagInfo { node_type, evaluates_to })
     }
 
-    fn reduce(&self, node: &Node, witness: &mut WitnessBuilder<'_>) -> Result<Node, SchemaError> {
-        if node.tag[0] != Self::PRECOMPILE_ID || node.tag[2] != ZERO || node.tag[3] != ZERO {
-            return Err(SchemaError::InvalidNode);
+    fn reduce(
+        &self,
+        node: &Node,
+        witness: &mut WitnessBuilder<'_>,
+    ) -> Result<Node, PrecompileError> {
+        if node.tag.id != Self::id() || node.tag.imm[1] != ZERO || node.tag.imm[2] != ZERO {
+            return Err(PrecompileError::InvalidNode);
         }
-        let payload = node.expression_payload().ok_or(SchemaError::InvalidNode)?;
-        match node.tag[1] {
+        let payload = node.expression_payload().ok_or(PrecompileError::InvalidNode)?;
+        match node.tag.imm[0] {
             d if d == Self::D_LEAF => {
                 Self::limbs_of(node)?;
                 Ok(node.clone())
@@ -237,11 +266,11 @@ impl Schema for ArithTestSchema {
             d if d == Self::D_EQ => {
                 let (lhs, rhs) = payload.binary_op_children();
                 if witness.resolve(lhs)? != witness.resolve(rhs)? {
-                    return Err(SchemaError::AssertionFailed);
+                    return Err(PrecompileError::AssertionFailed);
                 }
                 Ok(true_node())
             },
-            _ => Err(SchemaError::InvalidNode),
+            _ => Err(PrecompileError::InvalidNode),
         }
     }
 }
@@ -250,7 +279,7 @@ fn arith_leaf(low: u64) -> Node {
     let mut limbs = [0u32; 8];
     limbs[0] = low as u32;
     limbs[1] = (low >> 32) as u32;
-    ArithTestSchema::leaf_node(limbs)
+    ArithTestPrecompile::leaf_node(limbs)
 }
 
 // END-TO-END: (a + b) * c == 35  (with a=3, b=4, c=5)
@@ -268,15 +297,16 @@ fn deferred_end_to_end_register_eval_assert() {
     let b_digest = b.digest();
     let c_digest = c.digest();
     let d_digest = d.digest();
-    let add = Node::expression(ArithTestSchema::add_tag(), Payload::binary_op(a_digest, b_digest));
+    let add =
+        Node::expression(ArithTestPrecompile::add_tag(), Payload::binary_op(a_digest, b_digest));
     let add_digest = add.digest();
     let mul =
-        Node::expression(ArithTestSchema::mul_tag(), Payload::binary_op(add_digest, c_digest));
+        Node::expression(ArithTestPrecompile::mul_tag(), Payload::binary_op(add_digest, c_digest));
     let mul_digest = mul.digest();
     // Predicate node: same shape as a binary op (expression body, two child digests), just with
     // ASSERT_EQ as the tag.
     let assertion =
-        Node::expression(ArithTestSchema::eq_tag(), Payload::binary_op(mul_digest, d_digest));
+        Node::expression(ArithTestPrecompile::eq_tag(), Payload::binary_op(mul_digest, d_digest));
 
     // Build the program: register every node, then evaluate the predicate to verify it.
     let mut src = String::from("begin\n");
@@ -329,8 +359,10 @@ fn deferred_evaluate_pushes_canonical_form_to_advice() {
     // (a + b). Confirm the advice-pop yields a leaf node with payload limb0 = 7.
     let a = arith_leaf(3);
     let b = arith_leaf(4);
-    let add =
-        Node::expression(ArithTestSchema::add_tag(), Payload::binary_op(a.digest(), b.digest()));
+    let add = Node::expression(
+        ArithTestPrecompile::add_tag(),
+        Payload::binary_op(a.digest(), b.digest()),
+    );
 
     let mut src = String::from("begin\n");
     emit_register(&mut src, a);
@@ -347,7 +379,7 @@ fn deferred_evaluate_pushes_canonical_form_to_advice() {
         .expect("execution must succeed");
 
     // Memory layout: addresses 0..8 hold the canonical payload (a 256-bit u32-limbed integer of
-    // value 7), 8..12 hold the canonical tag (ArithTestSchema::leaf_tag()).
+    // value 7), 8..12 hold the canonical tag (ArithTestPrecompile::leaf_tag()).
     let ctx = 0u32.into();
     let mut mem = [Felt::from_u32(0); 12];
     for i in 0..12u32 {
@@ -356,7 +388,7 @@ fn deferred_evaluate_pushes_canonical_form_to_advice() {
     let canonical_tag = [mem[8], mem[9], mem[10], mem[11]];
     assert_eq!(
         canonical_tag,
-        ArithTestSchema::leaf_tag(),
+        ArithTestPrecompile::leaf_tag().as_capacity(),
         "evaluate returns canonical leaf tag"
     );
     assert_eq!(mem[0].as_canonical_u64(), 7, "limb 0 of (3+4)");
@@ -375,7 +407,7 @@ fn deferred_evaluate_on_predicate_pushes_nothing_to_advice() {
     // therefore underflows and fails execution.
     let a = arith_leaf(7);
     let a_eq_a =
-        Node::expression(ArithTestSchema::eq_tag(), Payload::binary_op(a.digest(), a.digest()));
+        Node::expression(ArithTestPrecompile::eq_tag(), Payload::binary_op(a.digest(), a.digest()));
 
     let mut src = String::from("begin\n");
     emit_register(&mut src, a);
@@ -409,7 +441,7 @@ fn deferred_register_predicate_does_not_verify() {
     let a = arith_leaf(7);
     let b = arith_leaf(8);
     let mismatch =
-        Node::expression(ArithTestSchema::eq_tag(), Payload::binary_op(a.digest(), b.digest()));
+        Node::expression(ArithTestPrecompile::eq_tag(), Payload::binary_op(a.digest(), b.digest()));
 
     // Just register — execution must succeed because register is a pure host hint.
     let mut src = String::from("begin\n");
@@ -431,7 +463,7 @@ fn deferred_evaluate_predicate_mismatch_fails_execution() {
     let a = arith_leaf(7);
     let b = arith_leaf(8);
     let mismatch =
-        Node::expression(ArithTestSchema::eq_tag(), Payload::binary_op(a.digest(), b.digest()));
+        Node::expression(ArithTestPrecompile::eq_tag(), Payload::binary_op(a.digest(), b.digest()));
 
     let mut src = String::from("begin\n");
     emit_register(&mut src, a);
@@ -497,7 +529,7 @@ fn deferred_register_chunk_pushes_node_digest_to_advice() {
         writeln!(&mut src, "    mem_store.{}", i as u32).unwrap();
     }
     writeln!(&mut src, "    push.{}", 0u32).unwrap(); // ptr
-    for f in tag.iter().rev() {
+    for f in tag.as_capacity().iter().rev() {
         writeln!(&mut src, "    push.{}", f.as_canonical_u64()).unwrap();
     }
     src.push_str("    adv.register_deferred_chunk\n");
@@ -573,44 +605,71 @@ fn legacy_event_handler_still_works_with_deferred_infrastructure() {
 // CHUNK REGISTER E2E
 // ================================================================================================
 //
-// A minimal chunk-aware test schema, mirroring `core/tests/deferred_chunk.rs::TestSchema`:
-// `decode` reads role from tag[2] and (for chunks) `n` from tag[3]; `reduce` for a chunk
-// returns an expression digest-leaf via a fake limb-sum hash.
+// A minimal chunk-aware test precompile, mirroring
+// `core/tests/deferred_chunk.rs::ChunkTestPrecompile`: `decode` reads the role from `imm[0]` and
+// (for chunks) `n` from `imm[1]`; `reduce` for a chunk returns an expression digest-leaf via a
+// fake limb-sum hash.
 
-const TEST_PREFIX: [Felt; 2] = [Felt::new_unchecked(0x73), Felt::new_unchecked(0x68)];
 const PREIMAGE_ROLE: Felt = Felt::new_unchecked(0);
 const DIGEST_ROLE: Felt = Felt::new_unchecked(1);
 
+#[derive(Debug, Default, Clone, Copy)]
+struct ChunkTestPrecompile;
+
+impl ChunkTestPrecompile {
+    const NAME: &'static str = "chunk_test";
+
+    fn id() -> Felt {
+        precompile_id(&ChunkTestPrecompile)
+    }
+}
+
 fn preimage_tag(n: u32) -> Tag {
-    [TEST_PREFIX[0], TEST_PREFIX[1], PREIMAGE_ROLE, Felt::from_u32(n)]
+    Tag {
+        id: ChunkTestPrecompile::id(),
+        imm: [PREIMAGE_ROLE, Felt::from_u32(n), ZERO],
+    }
 }
 
 fn digest_tag() -> Tag {
-    [TEST_PREFIX[0], TEST_PREFIX[1], DIGEST_ROLE, ZERO]
+    Tag {
+        id: ChunkTestPrecompile::id(),
+        imm: [DIGEST_ROLE, ZERO, ZERO],
+    }
 }
 
-#[derive(Debug, Default, Clone, Copy)]
-struct ChunkTestSchema;
+impl Precompile for ChunkTestPrecompile {
+    fn name(&self) -> &'static str {
+        Self::NAME
+    }
 
-impl Schema for ChunkTestSchema {
-    fn decode(&self, tag: Tag) -> Result<TagInfo, SchemaError> {
-        if tag[0] != TEST_PREFIX[0] || tag[1] != TEST_PREFIX[1] {
-            return Err(SchemaError::InvalidNode);
+    fn id(&self) -> Felt {
+        Self::id()
+    }
+
+    fn decode(&self, imm: [Felt; 3]) -> Option<TagInfo> {
+        let [role, n, reserved] = imm;
+        if reserved != ZERO {
+            return None;
         }
-        match tag[2] {
-            r if r == PREIMAGE_ROLE => Ok(TagInfo {
-                node_type: NodeType::Chunks(tag[3].as_canonical_u64() as u32),
+        match role {
+            r if r == PREIMAGE_ROLE => Some(TagInfo {
+                node_type: NodeType::Chunks(n.as_canonical_u64() as u32),
                 evaluates_to: digest_tag(),
             }),
-            r if r == DIGEST_ROLE => Ok(TagInfo {
+            r if r == DIGEST_ROLE && n == ZERO => Some(TagInfo {
                 node_type: NodeType::Value,
                 evaluates_to: digest_tag(),
             }),
-            _ => Err(SchemaError::InvalidNode),
+            _ => None,
         }
     }
 
-    fn reduce(&self, node: &Node, _witness: &mut WitnessBuilder<'_>) -> Result<Node, SchemaError> {
+    fn reduce(
+        &self,
+        node: &Node,
+        _witness: &mut WitnessBuilder<'_>,
+    ) -> Result<Node, PrecompileError> {
         match &node.payload {
             NodePayload::Chunk(chunks) => {
                 let mut acc = [ZERO; 8];
@@ -633,7 +692,7 @@ fn build_chunk_processor() -> FastProcessor {
         ExecutionOptions::default(),
     )
     .expect("processor construction")
-    .with_schema(Arc::new(ChunkTestSchema))
+    .with_precompile(ChunkTestPrecompile)
 }
 
 #[test]
@@ -660,7 +719,7 @@ fn chunk_register_reads_bulk_data_from_memory_and_interns_node() {
     }
     // Push ptr, then tag (deepest first so tag[0] ends up on top under event_id).
     writeln!(&mut src, "    push.{ptr}").unwrap();
-    for f in tag.iter().rev() {
+    for f in tag.as_capacity().iter().rev() {
         writeln!(&mut src, "    push.{}", f.as_canonical_u64()).unwrap();
     }
     src.push_str("    adv.register_deferred_chunk\n");
@@ -702,7 +761,7 @@ fn chunk_register_rejects_unaligned_pointer() {
 
     let mut src = String::from("begin\n");
     writeln!(&mut src, "    push.{ptr}").unwrap();
-    for f in tag.iter().rev() {
+    for f in tag.as_capacity().iter().rev() {
         writeln!(&mut src, "    push.{}", f.as_canonical_u64()).unwrap();
     }
     src.push_str("    adv.register_deferred_chunk\n");
@@ -725,7 +784,7 @@ fn chunk_register_with_zero_chunks_still_interns_a_node() {
 
     let mut src = String::from("begin\n");
     writeln!(&mut src, "    push.{ptr}").unwrap();
-    for f in tag.iter().rev() {
+    for f in tag.as_capacity().iter().rev() {
         writeln!(&mut src, "    push.{}", f.as_canonical_u64()).unwrap();
     }
     src.push_str("    adv.register_deferred_chunk\n");
