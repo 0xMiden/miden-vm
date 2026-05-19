@@ -135,23 +135,23 @@ impl FeltExt for Felt {
 struct ArithTestSchema;
 
 impl ArithTestSchema {
-    const APP_ID: Felt = Felt::new_unchecked(0xa21d_0001);
+    const PRECOMPILE_ID: Felt = Felt::new_unchecked(0xa21d_0001);
     const D_LEAF: Felt = Felt::new_unchecked(0);
     const D_ADD: Felt = Felt::new_unchecked(1);
     const D_MUL: Felt = Felt::new_unchecked(2);
     const D_EQ: Felt = Felt::new_unchecked(3);
 
     fn leaf_tag() -> Tag {
-        [Self::APP_ID, Self::D_LEAF, ZERO, ZERO]
+        [Self::PRECOMPILE_ID, Self::D_LEAF, ZERO, ZERO]
     }
     fn add_tag() -> Tag {
-        [Self::APP_ID, Self::D_ADD, ZERO, ZERO]
+        [Self::PRECOMPILE_ID, Self::D_ADD, ZERO, ZERO]
     }
     fn mul_tag() -> Tag {
-        [Self::APP_ID, Self::D_MUL, ZERO, ZERO]
+        [Self::PRECOMPILE_ID, Self::D_MUL, ZERO, ZERO]
     }
     fn eq_tag() -> Tag {
-        [Self::APP_ID, Self::D_EQ, ZERO, ZERO]
+        [Self::PRECOMPILE_ID, Self::D_EQ, ZERO, ZERO]
     }
 
     fn leaf_node(limbs: [u32; 8]) -> Node {
@@ -201,7 +201,7 @@ impl ArithTestSchema {
 
 impl Schema for ArithTestSchema {
     fn decode(&self, tag: Tag) -> Result<TagInfo, SchemaError> {
-        if tag[0] != Self::APP_ID || tag[2] != ZERO || tag[3] != ZERO {
+        if tag[0] != Self::PRECOMPILE_ID || tag[2] != ZERO || tag[3] != ZERO {
             return Err(SchemaError::InvalidNode);
         }
         let (node_type, evaluates_to) = match tag[1] {
@@ -214,7 +214,7 @@ impl Schema for ArithTestSchema {
     }
 
     fn reduce(&self, node: &Node, ctx: &mut dyn ReduceCtx) -> Result<Node, SchemaError> {
-        if node.tag[0] != Self::APP_ID || node.tag[2] != ZERO || node.tag[3] != ZERO {
+        if node.tag[0] != Self::PRECOMPILE_ID || node.tag[2] != ZERO || node.tag[3] != ZERO {
             return Err(SchemaError::InvalidNode);
         }
         let payload = node.expression_payload().ok_or(SchemaError::InvalidNode)?;

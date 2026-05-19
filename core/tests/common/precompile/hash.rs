@@ -3,12 +3,12 @@
 //! Exercises chunk-bodied inputs and the chunk-to-expression reduction shape without
 //! introducing a real hash implementation. The "hash" is a coordinate-wise sum of all preimage
 //! chunks into an 8-felt accumulator — deterministic, trivially testable, definitely not
-//! collision-resistant. A real `Keccak` / `Sha512` app would slot in by swapping the kernel.
+//! collision-resistant. A real `Keccak` / `Sha512` precompile would slot in by swapping the kernel.
 //!
 //! Tag layout (`Hash`-specific, opaque to the framework):
 //!
 //! ```text
-//! [app_id, node_disc, imm, ZERO]
+//! [precompile_id, node_disc, imm, ZERO]
 //! ```
 //!
 //! - `preimage` (disc 0) — chunk-bodied; `imm = n_bytes`; body is `Chunk(ceil(n_bytes / 32))`.
@@ -26,10 +26,10 @@ use miden_core::{
     },
 };
 
-// PUBLIC APP TYPE
+// PUBLIC PRECOMPILE TYPE
 // ================================================================================================
 
-/// Zero-sized handle for the `Hash` app.
+/// Zero-sized handle for the `Hash` precompile.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct Hash;
 
@@ -43,28 +43,23 @@ impl Hash {
     /// Bytes packed per 8-felt chunk: each felt carries a u32 (4 bytes) little-endian limb.
     pub const BYTES_PER_CHUNK: u32 = 32;
 
-    pub fn app_id() -> Felt {
+    pub fn id() -> Felt {
         precompile_id(&Hash)
     }
 
     /// Tag of a `preimage` chunk node for a `n_bytes`-byte payload.
     pub fn preimage_tag(n_bytes: u32) -> Tag {
-        [
-            Self::app_id(),
-            Felt::from_u32(Self::PREIMAGE_TAG_ID),
-            Felt::from_u32(n_bytes),
-            ZERO,
-        ]
+        [Self::id(), Felt::from_u32(Self::PREIMAGE_TAG_ID), Felt::from_u32(n_bytes), ZERO]
     }
 
     /// Tag of a canonical `digest` leaf.
     pub fn digest_tag() -> Tag {
-        [Self::app_id(), Felt::from_u32(Self::DIGEST_TAG_ID), ZERO, ZERO]
+        [Self::id(), Felt::from_u32(Self::DIGEST_TAG_ID), ZERO, ZERO]
     }
 
     /// Tag of an `eq` predicate node.
     pub fn eq_tag() -> Tag {
-        [Self::app_id(), Felt::from_u32(Self::EQ_TAG_ID), ZERO, ZERO]
+        [Self::id(), Felt::from_u32(Self::EQ_TAG_ID), ZERO, ZERO]
     }
 
     /// Build a `preimage` chunk node from caller-supplied 8-felt chunks. The caller is
@@ -117,7 +112,7 @@ impl Precompile for Hash {
     }
 
     fn id(&self) -> Felt {
-        Self::app_id()
+        Self::id()
     }
 
     fn decode(&self, sub: PrecompileTag) -> Result<TagInfo, SchemaError> {
@@ -159,7 +154,7 @@ impl Precompile for Hash {
     }
 
     fn reduce(&self, node: &Node, ctx: &mut dyn ReduceCtx) -> Result<Node, SchemaError> {
-        if node.tag[0] != Self::app_id() || node.tag[3] != ZERO {
+        if node.tag[0] != Self::id() || node.tag[3] != ZERO {
             return Err(SchemaError::InvalidNode);
         }
         let kind = Discriminant::classify(node.tag[1]).ok_or(SchemaError::InvalidNode)?;

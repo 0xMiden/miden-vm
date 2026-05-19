@@ -14,15 +14,15 @@ use miden_core::{
     },
 };
 
-// PUBLIC APP TYPE
+// PUBLIC PRECOMPILE TYPE
 // ================================================================================================
 
-/// Zero-sized handle for the `Uint` app.
+/// Zero-sized handle for the `Uint` precompile.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct Uint;
 
 impl Uint {
-    /// App name — hashed into `app_id`. Renaming breaks the schema for existing programs.
+    /// Precompile name — hashed into the id. Renaming breaks the schema for existing programs.
     pub const NAME: &'static str = "uint256";
 
     /// Discriminant indices.
@@ -33,29 +33,29 @@ impl Uint {
     pub const EQ_TAG_ID: u32 = 4;
 
     /// Derive the precompile id. Pure function over `Uint`'s metadata.
-    pub fn app_id() -> Felt {
+    pub fn id() -> Felt {
         precompile_id(&Uint)
     }
 
     /// Tag for a canonical Uint leaf.
     pub fn leaf_tag() -> Tag {
-        [Self::app_id(), Felt::from_u32(Self::LEAF_TAG_ID), ZERO, ZERO]
+        [Self::id(), Felt::from_u32(Self::LEAF_TAG_ID), ZERO, ZERO]
     }
     /// Tag for an `add` op node.
     pub fn add_tag() -> Tag {
-        [Self::app_id(), Felt::from_u32(Self::ADD_TAG_ID), ZERO, ZERO]
+        [Self::id(), Felt::from_u32(Self::ADD_TAG_ID), ZERO, ZERO]
     }
     /// Tag for a `sub` op node.
     pub fn sub_tag() -> Tag {
-        [Self::app_id(), Felt::from_u32(Self::SUB_TAG_ID), ZERO, ZERO]
+        [Self::id(), Felt::from_u32(Self::SUB_TAG_ID), ZERO, ZERO]
     }
     /// Tag for a `mul` op node.
     pub fn mul_tag() -> Tag {
-        [Self::app_id(), Felt::from_u32(Self::MUL_TAG_ID), ZERO, ZERO]
+        [Self::id(), Felt::from_u32(Self::MUL_TAG_ID), ZERO, ZERO]
     }
     /// Tag for an equality predicate.
     pub fn eq_tag() -> Tag {
-        [Self::app_id(), Felt::from_u32(Self::EQ_TAG_ID), ZERO, ZERO]
+        [Self::id(), Felt::from_u32(Self::EQ_TAG_ID), ZERO, ZERO]
     }
 
     /// Build a canonical leaf node from u32 limbs (little-endian).
@@ -118,7 +118,7 @@ impl Precompile for Uint {
     }
 
     fn id(&self) -> Felt {
-        Self::app_id()
+        Self::id()
     }
 
     fn init(&self) -> Vec<Node> {
@@ -167,18 +167,18 @@ impl Precompile for Uint {
     }
 }
 
-// Convenience: let callers use `Uint` directly as a single-app `Schema` in places where they
+// Convenience: let callers use `Uint` directly as a single-precompile `Schema` in places where they
 // don't need the composite. Equivalent to `PrecompileSchema::single(Uint)`, just cheaper.
 impl Schema for Uint {
     fn decode(&self, tag: Tag) -> Result<TagInfo, SchemaError> {
-        if tag[0] != Self::app_id() {
+        if tag[0] != Self::id() {
             return Err(SchemaError::InvalidNode);
         }
         Precompile::decode(self, PrecompileTag([tag[1], tag[2], tag[3]]))
     }
 
     fn reduce(&self, node: &Node, ctx: &mut dyn ReduceCtx) -> Result<Node, SchemaError> {
-        if node.tag[0] != Self::app_id() {
+        if node.tag[0] != Self::id() {
             return Err(SchemaError::InvalidNode);
         }
         Precompile::reduce(self, node, ctx)
@@ -236,7 +236,7 @@ enum UintNode {
 impl UintNode {
     fn parse(node: &Node) -> Result<Self, SchemaError> {
         let tag = node.tag;
-        if tag[0] != Uint::app_id() || tag[2] != ZERO || tag[3] != ZERO {
+        if tag[0] != Uint::id() || tag[2] != ZERO || tag[3] != ZERO {
             return Err(SchemaError::InvalidNode);
         }
         let kind = Discriminant::classify(tag[1]).ok_or(SchemaError::InvalidNode)?;

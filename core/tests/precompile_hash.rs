@@ -1,5 +1,5 @@
 //! Integration coverage for the `Hash` reference precompile: chunk-bodied preimage → digest
-//! leaf, the `eq` predicate, and multi-app composition with `Uint`.
+//! leaf, the `eq` predicate, and multi-precompile composition with `Uint`.
 
 mod common;
 
@@ -175,7 +175,7 @@ fn empty_preimage_reduces_to_zero_digest() {
 
 #[test]
 fn composite_with_hash_dispatches() {
-    // Sanity: app_id-based routing works in a composite holding only Hash.
+    // Sanity: id-based routing works in a composite holding only Hash.
     let schema = PrecompileSchema::new([Box::new(Hash) as Box<dyn Precompile>]);
     let mut state = DeferredState::new();
     let data = chunks(1);

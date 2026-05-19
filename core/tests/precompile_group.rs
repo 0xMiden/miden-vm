@@ -15,7 +15,7 @@ fn leaf(low: u64) -> Node {
     Uint::leaf_node(limbs)
 }
 
-/// Two-app schema with `Uint`'s constants pre-registered.
+/// Two-precompile schema with `Uint`'s constants pre-registered.
 fn schema_and_state() -> (PrecompileSchema, DeferredState) {
     let schema = PrecompileSchema::new([
         Box::new(Uint) as Box<dyn Precompile>,
@@ -26,7 +26,7 @@ fn schema_and_state() -> (PrecompileSchema, DeferredState) {
     (schema, state)
 }
 
-/// Two-app schema without booting (some tests assert exact node counts).
+/// Two-precompile schema without booting (some tests assert exact node counts).
 fn fresh() -> (PrecompileSchema, DeferredState) {
     let schema = PrecompileSchema::new([
         Box::new(Uint) as Box<dyn Precompile>,
