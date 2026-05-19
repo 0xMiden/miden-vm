@@ -6,7 +6,7 @@ miden-assembly = { path = "../crates/assembly" }
 miden-package-registry = { path = "../crates/package-registry" }
 ---
 
-use std::{env};
+use std::env;
 
 use miden_assembly::{Assembler, ProjectTargetSelector, Report, diagnostics::IntoDiagnostic};
 use miden_package_registry::InMemoryPackageRegistry;
@@ -21,8 +21,9 @@ fn main() -> Result<(), Report> {
 
     let target_dir = workspace_root.join("target");
     let packages_dir = target_dir.join("packages");
-    std::fs::create_dir_all(&packages_dir)
-        .unwrap_or_else(|_| panic!("could not create packages/ directory in {}", packages_dir.display()));
+    std::fs::create_dir_all(&packages_dir).unwrap_or_else(|_| {
+        panic!("could not create packages/ directory in {}", packages_dir.display())
+    });
 
     let assembler = Assembler::default();
     let mut registry = InMemoryPackageRegistry::default();
