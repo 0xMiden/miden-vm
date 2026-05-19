@@ -96,20 +96,11 @@ impl<T> BorrowMut<MainTraceRow<T>> for [T] {
 #[derive(Debug)]
 struct TraceStorage {
     /// Core (system + decoder + stack + range) row-major matrix, `CORE_WIDTH` columns.
-    /// Its height is the unified storage height `max(core_rows, chiplets_rows)`.
     core_rm: RowMajorMatrix<Felt>,
     /// Chiplets row-major matrix, `CHIPLETS_WIDTH` columns.
-    /// Its height is the unified storage height `max(core_rows, chiplets_rows)`.
     chiplets_rm: RowMajorMatrix<Felt>,
+    /// Range-checker `[M, V]` columns; length equals the Core height (`core_rm.height()`).
     range_checker_cols: [Vec<Felt>; 2],
-    /// Per-AIR height for the Core (system + decoder + stack + range) matrix in
-    /// `to_core_chiplets_matrices`. `core_rows ≤` the stored height; rows beyond
-    /// `core_rows` in `core_rm` and `range_checker_cols` are zero-padded.
-    core_rows: usize,
-    /// Per-AIR height for the Chiplets matrix in `to_core_chiplets_matrices`.
-    /// `chiplets_rows ≤` the stored height; rows beyond `chiplets_rows` in `chiplets_rm`
-    /// are zero-padded.
-    chiplets_rows: usize,
 }
 
 #[derive(Debug)]
@@ -121,6 +112,21 @@ pub struct MainTrace {
 /// Number of columns in the core (row-major) part of [`TraceStorage`].
 const CORE_WIDTH: usize = RANGE_CHECK_TRACE_OFFSET;
 
+// Synthetic padding value for the range-checker `V` column in the unified view,
+// for rows beyond the Core height.
+const RANGE_V_PAD: Felt = Felt::new_unchecked(u16::MAX as u64);
+
+// Synthetic Core-column value for a unified-view row `r` beyond the Core height.
+// This is purely for unified debug/inspection view.
+#[inline]
+fn core_pad_cell(core_rm: &RowMajorMatrix<Felt>, core_h: usize, r: usize, col: usize) -> Felt {
+    if col == CLK_COL_IDX {
+        Felt::from_u32(r as u32)
+    } else {
+        core_rm.values[(core_h - 1) * CORE_WIDTH + col]
+    }
+}
+
 // TODO: Could be tailored more efficiently?
 #[cfg(feature = "concurrent")]
 const ROW_MAJOR_CHUNK_SIZE: usize = 512;
@@ -129,32 +135,32 @@ impl MainTrace {
     /// Builds from `build_trace` outputs: core and chiplets row-major, range checker column
     /// vectors.
     ///
-    /// `core_rows` and `chiplets_rows` are the per-AIR padded heights returned by
-    /// `to_core_chiplets_matrices`. Both must be powers of two. The data arrays are sized to
-    /// `max(core_rows, chiplets_rows)`; rows beyond each per-AIR height are expected to be
-    /// zero-padded.
+    /// Both core and chiplets lengths must be powers of two. The lengths of `range_checker_cols`
+    /// match the one of the core matrix.
     pub fn from_parts(
         core_rm: Vec<Felt>,
         chiplets_rm: Vec<Felt>,
         range_checker_cols: [Vec<Felt>; 2],
-        core_rows: usize,
-        chiplets_rows: usize,
         last_program_row: RowIndex,
     ) -> Self {
-        assert!(core_rows.is_power_of_two(), "core_rows must be a power of two");
-        assert!(chiplets_rows.is_power_of_two(), "chiplets_rows must be a power of two");
-        let num_rows = core_rows.max(chiplets_rows);
-        assert_eq!(core_rm.len(), num_rows * CORE_WIDTH);
-        assert_eq!(chiplets_rm.len(), num_rows * CHIPLETS_WIDTH);
-        assert_eq!(range_checker_cols[0].len(), num_rows);
-        assert_eq!(range_checker_cols[1].len(), num_rows);
+        assert_eq!(core_rm.len() % CORE_WIDTH, 0, "core buffer not a multiple of CORE_WIDTH");
+        assert_eq!(
+            chiplets_rm.len() % CHIPLETS_WIDTH,
+            0,
+            "chiplets buffer not a multiple of CHIPLETS_WIDTH"
+        );
+        let core_rows = core_rm.len() / CORE_WIDTH;
+        let chiplets_rows = chiplets_rm.len() / CHIPLETS_WIDTH;
+        assert!(core_rows.is_power_of_two(), "core height must be a power of two");
+        assert!(chiplets_rows.is_power_of_two(), "chiplets height must be a power of two");
+        assert_eq!(range_checker_cols[0].len(), core_rows);
+        assert_eq!(range_checker_cols[1].len(), core_rows);
+
         Self {
             storage: TraceStorage {
                 core_rm: RowMajorMatrix::new(core_rm, CORE_WIDTH),
                 chiplets_rm: RowMajorMatrix::new(chiplets_rm, CHIPLETS_WIDTH),
                 range_checker_cols,
-                core_rows,
-                chiplets_rows,
             },
             last_program_row,
         }
@@ -170,20 +176,36 @@ impl MainTrace {
         let TraceStorage {
             core_rm, chiplets_rm, range_checker_cols, ..
         } = &self.storage;
+        let core_h = core_rm.height();
+        let chip_h = chiplets_rm.height();
 
-        assert!(r < core_rm.height(), "main trace row index in bounds");
+        assert!(r < core_h.max(chip_h), "main trace row index in bounds");
         assert!(col < TRACE_WIDTH, "main trace column index in bounds");
 
         if col < CORE_WIDTH {
-            core_rm.get(r, col).expect("Accessed element is in bounds")
+            // Core columns: replicate the HALT continuation beyond the Core height.
+            if r < core_h {
+                core_rm.get(r, col).expect("Accessed element is in bounds")
+            } else {
+                core_pad_cell(core_rm, core_h, r, col)
+            }
         } else {
             let nc = col - CORE_WIDTH;
             if nc < RANGE_CHECK_TRACE_WIDTH {
-                range_checker_cols[nc][r]
-            } else {
+                // Range-checker columns belong to Core: M -> ZERO, V -> 65535 beyond it.
+                if r < core_h {
+                    range_checker_cols[nc][r]
+                } else if nc == 0 {
+                    ZERO
+                } else {
+                    RANGE_V_PAD
+                }
+            } else if r < chip_h {
                 chiplets_rm
                     .get(r, nc - RANGE_CHECK_TRACE_WIDTH)
                     .expect("Accessed element is in bounds")
+            } else {
+                ZERO
             }
         }
     }
@@ -200,7 +222,9 @@ impl MainTrace {
             core_rm, chiplets_rm, range_checker_cols, ..
         } = &self.storage;
 
-        let h = core_rm.height();
+        let core_h = core_rm.height();
+        let chip_h = chiplets_rm.height();
+        let h = core_h.max(chip_h);
         let w = TRACE_WIDTH;
         let cw = CHIPLETS_WIDTH;
 
@@ -212,17 +236,31 @@ impl MainTrace {
             data.set_len(total);
         }
 
+        let core_last = &core_rm.values[(core_h - 1) * CORE_WIDTH..core_h * CORE_WIDTH];
         let fill_rows = |chunk: &mut [Felt], start_row: usize| {
             let chunk_rows = chunk.len() / w;
             for i in 0..chunk_rows {
                 let row = start_row + i;
                 let dst = &mut chunk[i * w..(i + 1) * w];
-                dst[..CORE_WIDTH]
-                    .copy_from_slice(&core_rm.values[row * CORE_WIDTH..(row + 1) * CORE_WIDTH]);
-                dst[CORE_WIDTH] = range_checker_cols[0][row];
-                dst[CORE_WIDTH + 1] = range_checker_cols[1][row];
-                dst[CORE_WIDTH + 2..CORE_WIDTH + 2 + cw]
-                    .copy_from_slice(&chiplets_rm.values[row * cw..(row + 1) * cw]);
+                if row < core_h {
+                    dst[..CORE_WIDTH]
+                        .copy_from_slice(&core_rm.values[row * CORE_WIDTH..(row + 1) * CORE_WIDTH]);
+                    dst[CORE_WIDTH] = range_checker_cols[0][row];
+                    dst[CORE_WIDTH + 1] = range_checker_cols[1][row];
+                } else {
+                    // Replicate the last Core row (HALT continuation; carries the final
+                    // stack), CLK = row index; range M -> ZERO, V -> 65535.
+                    dst[..CORE_WIDTH].copy_from_slice(core_last);
+                    dst[CLK_COL_IDX] = Felt::from_u32(row as u32);
+                    dst[CORE_WIDTH] = ZERO;
+                    dst[CORE_WIDTH + 1] = RANGE_V_PAD;
+                }
+                if row < chip_h {
+                    dst[CORE_WIDTH + 2..CORE_WIDTH + 2 + cw]
+                        .copy_from_slice(&chiplets_rm.values[row * cw..(row + 1) * cw]);
+                } else {
+                    dst[CORE_WIDTH + 2..CORE_WIDTH + 2 + cw].fill(ZERO);
+                }
             }
         };
 
@@ -246,22 +284,15 @@ impl MainTrace {
     /// Splits the trace into the per-AIR `(Core, Chiplets)` matrix pair used by the multi-AIR
     /// proving path.
     pub fn to_core_chiplets_matrices(&self) -> (RowMajorMatrix<Felt>, RowMajorMatrix<Felt>) {
-        let core = self.build_core_matrix();
-        // Chiplets data is already row-major in storage; copy and slice to the per-AIR height.
-        let chip_h = self.storage.chiplets_rows;
-        let chiplets_data = self.storage.chiplets_rm.values[..chip_h * CHIPLETS_WIDTH].to_vec();
-        (core, RowMajorMatrix::new(chiplets_data, CHIPLETS_WIDTH))
+        // `chiplets_rm` is already stored at exactly the per-AIR Chiplets height.
+        (self.build_core_matrix(), self.storage.chiplets_rm.clone())
     }
 
-    /// Consuming variant of [`Self::to_core_chiplets_matrices`] for the proving hot path.
-    ///
-    /// Moves the chiplets row-major buffer.
+    /// Consuming variant of [`Self::to_core_chiplets_matrices`] for the proving hot path:
+    /// moves the chiplets row-major buffer instead of cloning it.
     pub fn into_core_chiplets_matrices(self) -> (RowMajorMatrix<Felt>, RowMajorMatrix<Felt>) {
         let core = self.build_core_matrix();
-        let chip_h = self.storage.chiplets_rows;
-        let mut chiplets_data = self.storage.chiplets_rm.values;
-        chiplets_data.truncate(chip_h * CHIPLETS_WIDTH);
-        (core, RowMajorMatrix::new(chiplets_data, CHIPLETS_WIDTH))
+        (core, self.storage.chiplets_rm)
     }
 
     /// Builds the per-AIR Core matrix: `core_rm` (width `CORE_WIDTH`) with the two
@@ -272,10 +303,8 @@ impl MainTrace {
         // monolithic trace before the chiplet section.
         const _: () = assert!(CORE_W == CORE_WIDTH + RANGE_CHECK_TRACE_WIDTH);
 
-        let TraceStorage {
-            core_rm, range_checker_cols, core_rows, ..
-        } = &self.storage;
-        let core_h = *core_rows;
+        let TraceStorage { core_rm, range_checker_cols, .. } = &self.storage;
+        let core_h = core_rm.height();
         let mut core_data = Vec::with_capacity(core_h * CORE_W);
         // SAFETY: the loop below writes exactly `core_h * CORE_W` elements.
         #[allow(clippy::uninit_vec)]
@@ -312,8 +341,9 @@ impl MainTrace {
         RowMajorMatrix::new(core_data, CORE_W)
     }
 
+    /// Unified trace length: the max of the per-AIR Core and Chiplets heights.
     pub fn num_rows(&self) -> usize {
-        self.storage.core_rm.height()
+        self.storage.core_rm.height().max(self.storage.chiplets_rm.height())
     }
 
     pub fn last_program_row(&self) -> RowIndex {
@@ -327,13 +357,28 @@ impl MainTrace {
         let TraceStorage {
             core_rm, chiplets_rm, range_checker_cols, ..
         } = &self.storage;
-        row[..CORE_WIDTH]
-            .copy_from_slice(&core_rm.values[row_idx * CORE_WIDTH..(row_idx + 1) * CORE_WIDTH]);
-        row[CORE_WIDTH] = range_checker_cols[0][row_idx];
-        row[CORE_WIDTH + 1] = range_checker_cols[1][row_idx];
-        row[CORE_WIDTH + 2..CORE_WIDTH + 2 + CHIPLETS_WIDTH].copy_from_slice(
-            &chiplets_rm.values[row_idx * CHIPLETS_WIDTH..(row_idx + 1) * CHIPLETS_WIDTH],
-        );
+        let core_h = core_rm.height();
+        let chip_h = chiplets_rm.height();
+        if row_idx < core_h {
+            row[..CORE_WIDTH]
+                .copy_from_slice(&core_rm.values[row_idx * CORE_WIDTH..(row_idx + 1) * CORE_WIDTH]);
+            row[CORE_WIDTH] = range_checker_cols[0][row_idx];
+            row[CORE_WIDTH + 1] = range_checker_cols[1][row_idx];
+        } else {
+            // Replicate the last Core row (HALT continuation), CLK = row index.
+            row[..CORE_WIDTH]
+                .copy_from_slice(&core_rm.values[(core_h - 1) * CORE_WIDTH..core_h * CORE_WIDTH]);
+            row[CLK_COL_IDX] = Felt::from_u32(row_idx as u32);
+            row[CORE_WIDTH] = ZERO;
+            row[CORE_WIDTH + 1] = RANGE_V_PAD;
+        }
+        if row_idx < chip_h {
+            row[CORE_WIDTH + 2..CORE_WIDTH + 2 + CHIPLETS_WIDTH].copy_from_slice(
+                &chiplets_rm.values[row_idx * CHIPLETS_WIDTH..(row_idx + 1) * CHIPLETS_WIDTH],
+            );
+        } else {
+            row[CORE_WIDTH + 2..CORE_WIDTH + 2 + CHIPLETS_WIDTH].fill(ZERO);
+        }
     }
 
     /// Returns one column as a new vector.
@@ -341,17 +386,38 @@ impl MainTrace {
         let TraceStorage {
             core_rm, chiplets_rm, range_checker_cols, ..
         } = &self.storage;
-        let h = core_rm.height();
+        let core_h = core_rm.height();
+        let chip_h = chiplets_rm.height();
+        let h = core_h.max(chip_h);
         assert!(col_idx < TRACE_WIDTH, "main trace column index in bounds");
         if col_idx < CORE_WIDTH {
-            (0..h).map(|r| core_rm.values[r * CORE_WIDTH + col_idx]).collect()
+            (0..h)
+                .map(|r| {
+                    if r < core_h {
+                        core_rm.values[r * CORE_WIDTH + col_idx]
+                    } else {
+                        core_pad_cell(core_rm, core_h, r, col_idx)
+                    }
+                })
+                .collect()
         } else {
             let nc = col_idx - CORE_WIDTH;
             if nc < RANGE_CHECK_TRACE_WIDTH {
-                range_checker_cols[nc].clone()
+                let pad = if nc == 0 { ZERO } else { RANGE_V_PAD };
+                (0..h)
+                    .map(|r| if r < core_h { range_checker_cols[nc][r] } else { pad })
+                    .collect()
             } else {
                 let cc = nc - RANGE_CHECK_TRACE_WIDTH;
-                (0..h).map(|r| chiplets_rm.values[r * CHIPLETS_WIDTH + cc]).collect()
+                (0..h)
+                    .map(|r| {
+                        if r < chip_h {
+                            chiplets_rm.values[r * CHIPLETS_WIDTH + cc]
+                        } else {
+                            ZERO
+                        }
+                    })
+                    .collect()
             }
         }
     }
@@ -972,14 +1038,7 @@ mod tests {
             }
         }
 
-        MainTrace::from_parts(
-            core_rm,
-            chiplets_rm,
-            range_cols,
-            num_rows,
-            num_rows,
-            RowIndex::from(0),
-        )
+        MainTrace::from_parts(core_rm, chiplets_rm, range_cols, RowIndex::from(0))
     }
 
     /// `to_core_chiplets_matrices` from a `Parts`-form trace produces the same data that the

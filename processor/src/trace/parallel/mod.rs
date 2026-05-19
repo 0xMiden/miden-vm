@@ -184,20 +184,11 @@ pub fn build_trace_with_max_len(
     let ((range_checker_trace, chiplets_trace), ()) = rayon::join(
         || {
             rayon::join(
-                || {
-                    let mut rc = range_checker.into_trace_with_table(range_table_len, core_height);
-                    // Extend (M=0, V=65535) so the legacy unified view also satisfies
-                    // `V[last] = 65535` and `V_next - V` ∈ {0, 1, 3, …, 2187}.
-                    if core_height < main_trace_len {
-                        rc.trace[0].resize(main_trace_len, ZERO);
-                        rc.trace[1].resize(main_trace_len, Felt::new_unchecked(u16::MAX as u64));
-                    }
-                    rc
-                },
-                || chiplets.into_trace(main_trace_len),
+                || range_checker.into_trace_with_table(range_table_len, core_height),
+                || chiplets.into_trace(chiplets_height),
             )
         },
-        || pad_core_row_major(&mut core_trace_data, main_trace_len),
+        || pad_core_row_major(&mut core_trace_data, core_height),
     );
 
     // Create the MainTrace
@@ -207,8 +198,6 @@ pub fn build_trace_with_max_len(
             core_trace_data,
             chiplets_trace.trace,
             range_checker_trace.trace,
-            core_height,
-            chiplets_height,
             last_program_row,
         )
     };
