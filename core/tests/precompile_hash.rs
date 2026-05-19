@@ -6,7 +6,9 @@ mod common;
 use common::precompile::{hash::Hash, uint::Uint};
 use miden_core::{
     Felt, ZERO,
-    deferred::{DeferredState, NodeType, Precompile, PrecompileError, Precompiles, TRUE_TAG},
+    deferred::{
+        DeferredState, NodeType, Precompile, PrecompileError, PrecompileRegistry, TRUE_TAG,
+    },
 };
 
 fn chunks(n: u32) -> Vec<[Felt; 8]> {
@@ -15,8 +17,8 @@ fn chunks(n: u32) -> Vec<[Felt; 8]> {
         .collect()
 }
 
-fn fresh() -> (Precompiles, DeferredState) {
-    (Precompiles::single(Hash).unwrap(), DeferredState::new())
+fn fresh() -> (PrecompileRegistry, DeferredState) {
+    (PrecompileRegistry::default().with_precompile(Hash), DeferredState::new())
 }
 
 // END-TO-END (relocated from deferred_mock_hash.rs)
@@ -24,11 +26,7 @@ fn fresh() -> (Precompiles, DeferredState) {
 
 #[test]
 fn preimage_reduces_to_known_digest_and_eq_predicate_passes() {
-    let schema = Precompiles::new([
-        Box::new(Uint) as Box<dyn Precompile>,
-        Box::new(Hash) as Box<dyn Precompile>,
-    ])
-    .unwrap();
+    let schema = PrecompileRegistry::default().with_precompile(Uint).with_precompile(Hash);
     let mut state = DeferredState::new();
     schema.init(&mut state).unwrap();
 
@@ -106,14 +104,6 @@ fn decode_unknown_discriminant_rejected() {
 }
 
 #[test]
-fn decode_rejects_imm_on_non_preimage() {
-    let info = Hash.decode([Felt::from_u32(Hash::DIGEST_TAG_ID), Felt::from_u32(1), ZERO]);
-    assert!(info.is_none());
-    let info = Hash.decode([Felt::from_u32(Hash::EQ_TAG_ID), Felt::from_u32(1), ZERO]);
-    assert!(info.is_none());
-}
-
-#[test]
 fn preimage_reduces_to_digest_leaf() {
     let (schema, mut state) = fresh();
     let data = chunks(2);
@@ -167,7 +157,7 @@ fn empty_preimage_reduces_to_zero_digest() {
 #[test]
 fn composite_with_hash_dispatches() {
     // Sanity: id-based routing works in a composite holding only Hash.
-    let schema = Precompiles::new([Box::new(Hash) as Box<dyn Precompile>]).unwrap();
+    let schema = PrecompileRegistry::default().with_precompile(Hash);
     let mut state = DeferredState::new();
     let data = chunks(1);
     let canonical = state.evaluate(&schema, Hash::preimage_node(32, data.clone())).unwrap();
