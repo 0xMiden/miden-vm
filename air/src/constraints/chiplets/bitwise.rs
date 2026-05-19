@@ -27,7 +27,7 @@ use miden_core::field::PrimeCharacteristicRing;
 
 use super::selectors::ChipletFlags;
 use crate::{
-    AirBuilder, MainCols, MidenAirBuilder,
+    AirBuilder, ChipletCols, MidenAirBuilder,
     constraints::{
         chiplets::columns::{BitwiseCols, PeriodicCols},
         constants::F_16,
@@ -46,8 +46,8 @@ use crate::{
 /// 3. Output aggregation constraints
 pub fn enforce_bitwise_constraints<AB>(
     builder: &mut AB,
-    local: &MainCols<AB::Var>,
-    next: &MainCols<AB::Var>,
+    local: &ChipletCols<AB::Var>,
+    next: &ChipletCols<AB::Var>,
     flags: &ChipletFlags<AB::Expr>,
 ) where
     AB: MidenAirBuilder,

@@ -30,7 +30,7 @@ use miden_core::field::PrimeCharacteristicRing;
 use miden_crypto::stark::air::AirBuilder;
 
 use crate::{
-    MainCols, MidenAirBuilder,
+    CoreCols, MidenAirBuilder,
     constraints::{constants::*, op_flags::OpFlags, utils::BoolNot},
 };
 
@@ -46,8 +46,8 @@ use crate::{
 /// 4. Last stack item is zeroed on left shift when depth = 16
 pub fn enforce_main<AB>(
     builder: &mut AB,
-    local: &MainCols<AB::Var>,
-    next: &MainCols<AB::Var>,
+    local: &CoreCols<AB::Var>,
+    next: &CoreCols<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
 ) where
     AB: MidenAirBuilder,
@@ -85,8 +85,8 @@ pub fn enforce_main<AB>(
 /// The END operation exiting a CALL/SYSCALL block is handled separately via multiset constraints.
 fn enforce_stack_depth_constraints<AB>(
     builder: &mut AB,
-    local: &MainCols<AB::Var>,
-    next: &MainCols<AB::Var>,
+    local: &CoreCols<AB::Var>,
+    next: &CoreCols<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
 ) where
     AB: MidenAirBuilder,
@@ -151,8 +151,8 @@ fn enforce_stack_depth_constraints<AB>(
 /// 2. On left shift with depth = 16: stack[15]' = 0 (no item to restore from overflow)
 fn enforce_overflow_index_constraints<AB>(
     builder: &mut AB,
-    local: &MainCols<AB::Var>,
-    next: &MainCols<AB::Var>,
+    local: &CoreCols<AB::Var>,
+    next: &CoreCols<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
 ) where
     AB: MidenAirBuilder,

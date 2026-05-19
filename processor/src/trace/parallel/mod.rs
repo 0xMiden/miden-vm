@@ -164,17 +164,36 @@ pub fn build_trace_with_max_len(
     // Get the number of rows for the range checker
     let range_table_len = range_checker.get_number_range_checker_rows();
 
-    let trace_len_summary =
-        TraceLenSummary::new(core_trace_len, range_table_len, ChipletsLengths::new(&chiplets));
+    let core_height = pad_to_trace_length(core_trace_len.max(range_table_len));
+    let chiplets_height = pad_to_trace_length(chiplets.trace_len());
+    let main_trace_len = core_height.max(chiplets_height);
 
-    // Compute the final main trace length
-    let main_trace_len =
-        compute_main_trace_length(core_trace_len, range_table_len, chiplets.trace_len());
+    // Cap check against the padded height: pad-up can push over MAX_TRACE_LEN even
+    // when the unpadded check above passed.
+    if main_trace_len > max_trace_len {
+        return Err(ExecutionError::TraceLenExceeded(max_trace_len));
+    }
+
+    let trace_len_summary = TraceLenSummary::new_with_padded(
+        core_trace_len,
+        range_table_len,
+        ChipletsLengths::new(&chiplets),
+        main_trace_len,
+    );
 
     let ((range_checker_trace, chiplets_trace), ()) = rayon::join(
         || {
             rayon::join(
-                || range_checker.into_trace_with_table(range_table_len, main_trace_len),
+                || {
+                    let mut rc = range_checker.into_trace_with_table(range_table_len, core_height);
+                    // Extend (M=0, V=65535) so the legacy unified view also satisfies
+                    // `V[last] = 65535` and `V_next - V` ∈ {0, 1, 3, …, 2187}.
+                    if core_height < main_trace_len {
+                        rc.trace[0].resize(main_trace_len, ZERO);
+                        rc.trace[1].resize(main_trace_len, Felt::new_unchecked(u16::MAX as u64));
+                    }
+                    rc
+                },
                 || chiplets.into_trace(main_trace_len),
             )
         },
@@ -188,7 +207,8 @@ pub fn build_trace_with_max_len(
             core_trace_data,
             chiplets_trace.trace,
             range_checker_trace.trace,
-            main_trace_len,
+            core_height,
+            chiplets_height,
             last_program_row,
         )
     };
@@ -204,17 +224,9 @@ pub fn build_trace_with_max_len(
 // HELPERS
 // ================================================================================================
 
-fn compute_main_trace_length(
-    core_trace_len: usize,
-    range_table_len: usize,
-    chiplets_trace_len: usize,
-) -> usize {
-    // Get the trace length required to hold all execution trace steps
-    let max_len = range_table_len.max(core_trace_len).max(chiplets_trace_len);
-
-    // Pad the trace length to the next power of two
-    let trace_len = max_len.next_power_of_two();
-    core::cmp::max(trace_len, MIN_TRACE_LEN)
+/// Pad a logical row count to a valid trace length: next power of two, clamped to `MIN_TRACE_LEN`.
+fn pad_to_trace_length(logical_len: usize) -> usize {
+    logical_len.next_power_of_two().max(MIN_TRACE_LEN)
 }
 
 /// Generates row-major core trace in parallel from the provided trace fragment contexts.

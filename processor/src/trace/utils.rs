@@ -120,6 +120,9 @@ pub struct TraceLenSummary {
     main_trace_len: usize,
     range_trace_len: usize,
     chiplets_trace_len: ChipletsLengths,
+    /// Set by the trace builder when known. `None` falls back to deriving from the
+    /// unpadded component lengths via `next_power_of_two`.
+    padded_trace_len: Option<usize>,
 }
 
 impl TraceLenSummary {
@@ -132,6 +135,24 @@ impl TraceLenSummary {
             main_trace_len,
             range_trace_len,
             chiplets_trace_len,
+            padded_trace_len: None,
+        }
+    }
+
+    /// Like `new` but with the actual padded trace length supplied by the trace builder
+    /// (under per-AIR heights this is `max(core_height, chiplets_height)`, not a
+    /// single `next_power_of_two(max(...))`).
+    pub fn new_with_padded(
+        main_trace_len: usize,
+        range_trace_len: usize,
+        chiplets_trace_len: ChipletsLengths,
+        padded_trace_len: usize,
+    ) -> Self {
+        TraceLenSummary {
+            main_trace_len,
+            range_trace_len,
+            chiplets_trace_len,
+            padded_trace_len: Some(padded_trace_len),
         }
     }
 
@@ -159,7 +180,8 @@ impl TraceLenSummary {
 
     /// Returns `trace_len` rounded up to the next power of two, clamped to `MIN_TRACE_LEN`.
     pub fn padded_trace_len(&self) -> usize {
-        self.trace_len().next_power_of_two().max(MIN_TRACE_LEN)
+        self.padded_trace_len
+            .unwrap_or_else(|| self.trace_len().next_power_of_two().max(MIN_TRACE_LEN))
     }
 
     /// Returns the percent (0 - 100) of the steps that were added to the trace to pad it to the

@@ -12,8 +12,10 @@ use miden_crypto::stark::{
 
 use super::enforce_main;
 use crate::{
-    MainCols,
-    constraints::op_flags::{OpFlags, generate_test_row},
+    constraints::{
+        columns::CoreCols,
+        op_flags::{OpFlags, generate_test_row},
+    },
     trace::{AUX_TRACE_RAND_CHALLENGES, AUX_TRACE_WIDTH, TRACE_WIDTH},
 };
 
@@ -117,7 +119,7 @@ impl PeriodicAirBuilder for ConstraintEvalBuilder {
 }
 
 /// Sets the u32 helper registers (hasher_state[2..7]) in the decoder.
-fn set_u32_helpers(row: &mut MainCols<Felt>, lo: u32, hi: u32) {
+fn set_u32_helpers(row: &mut CoreCols<Felt>, lo: u32, hi: u32) {
     row.decoder.hasher_state[2] = Felt::new_unchecked(lo as u64 & 0xffff);
     row.decoder.hasher_state[3] = Felt::new_unchecked((lo as u64) >> 16);
     row.decoder.hasher_state[4] = Felt::new_unchecked(hi as u64 & 0xffff);
@@ -125,20 +127,33 @@ fn set_u32_helpers(row: &mut MainCols<Felt>, lo: u32, hi: u32) {
     row.decoder.hasher_state[6] = Felt::ZERO;
 }
 
-fn eval_stack_arith(local: &MainCols<Felt>, next: &MainCols<Felt>) -> Vec<QuadFelt> {
+fn eval_stack_arith(
+    local: &CoreCols<Felt>,
+    next: &CoreCols<Felt>,
+    op_flags: &OpFlags<Felt>,
+) -> Vec<QuadFelt> {
     let mut builder = ConstraintEvalBuilder::new();
-    let op_flags = OpFlags::new(&local.decoder, &local.stack, &next.decoder);
-    enforce_main(&mut builder, local, next, &op_flags);
+    enforce_main(&mut builder, local, next, op_flags);
     builder.evaluations
 }
 
-fn assert_constraints_accept(local: &MainCols<Felt>, next: &MainCols<Felt>, message: &str) {
-    let evaluations = eval_stack_arith(local, next);
+fn assert_constraints_accept(
+    local: &CoreCols<Felt>,
+    next: &CoreCols<Felt>,
+    op_flags: &OpFlags<Felt>,
+    message: &str,
+) {
+    let evaluations = eval_stack_arith(local, next, op_flags);
     assert!(evaluations.iter().all(|value| *value == QuadFelt::ZERO), "{message}");
 }
 
-fn assert_constraints_reject(local: &MainCols<Felt>, next: &MainCols<Felt>, message: &str) {
-    let evaluations = eval_stack_arith(local, next);
+fn assert_constraints_reject(
+    local: &CoreCols<Felt>,
+    next: &CoreCols<Felt>,
+    op_flags: &OpFlags<Felt>,
+    message: &str,
+) {
+    let evaluations = eval_stack_arith(local, next, op_flags);
     assert!(evaluations.iter().any(|value| *value != QuadFelt::ZERO), "{message}");
 }
 
@@ -161,6 +176,7 @@ fn stack_arith_u32add_constraints_allow_non_u32_operands() {
     assert_constraints_accept(
         &local,
         &next,
+        &op_flags,
         "expected U32ADD constraints to accept a non-u32 operand with forged u32 outputs",
     );
 }
@@ -182,6 +198,7 @@ fn stack_arith_u32add_constraints_reject_forged_high_carry_limb() {
     assert_constraints_reject(
         &local,
         &next,
+        &op_flags,
         "expected U32ADD constraints to reject carry values with a nonzero high limb",
     );
 }
@@ -204,6 +221,7 @@ fn stack_arith_u32add3_constraints_reject_forged_high_carry_limb() {
     assert_constraints_reject(
         &local,
         &next,
+        &op_flags,
         "expected U32ADD3 constraints to reject carry values with a nonzero high limb",
     );
 }
@@ -232,14 +250,21 @@ fn stack_arith_u64_overflowing_add_rejects_forged_low_limb_carry() {
     add3_next.stack.top[0] = Felt::new_unchecked(1 << 16);
     add3_next.stack.top[1] = Felt::ZERO;
 
+    let add_op_flags: OpFlags<Felt> =
+        OpFlags::new(&add_local.decoder, &add_local.stack, &add_next.decoder);
+    let add3_op_flags: OpFlags<Felt> =
+        OpFlags::new(&add3_local.decoder, &add3_local.stack, &add3_next.decoder);
+
     assert_constraints_reject(
         &add_local,
         &add_next,
+        &add_op_flags,
         "expected the forged low-limb carry in u64::overflowing_add to be rejected at U32ADD",
     );
     assert_constraints_accept(
         &add3_local,
         &add3_next,
+        &add3_op_flags,
         "expected U32ADD3 to accept honest propagation of a 65536 carry once it is on the stack",
     );
 }
@@ -266,6 +291,7 @@ fn stack_arith_u32sub_constraints_allow_non_u32_operands() {
     assert_constraints_accept(
         &local,
         &next,
+        &op_flags,
         "expected U32SUB constraints to accept a non-u32 operand with forged u32 outputs",
     );
 }
@@ -296,6 +322,7 @@ fn stack_arith_u32mul_constraints_allow_non_u32_sha256_rotr_operand() {
     assert_constraints_accept(
         &local,
         &next,
+        &op_flags,
         "expected U32MUL constraints to accept a non-u32 operand with forged rotr outputs",
     );
 }
@@ -326,6 +353,7 @@ fn stack_arith_u32div_constraints_allow_non_u32_sha256_shr_operand() {
     assert_constraints_accept(
         &local,
         &next,
+        &op_flags,
         "expected U32DIV constraints to accept a non-u32 operand with forged shr outputs",
     );
 }

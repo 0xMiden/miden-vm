@@ -92,7 +92,10 @@ pub const RANGE_CHECK_TRACE_RANGE: Range<usize> =
 
 // Chiplets trace
 pub const CHIPLETS_OFFSET: usize = RANGE_CHECK_TRACE_RANGE.end;
-pub const CHIPLETS_WIDTH: usize = 21;
+// 5 selectors + 15 shared chiplet data columns + s_perm + chip_clk = 22.
+// `chip_clk` is the chiplet-trace row counter (value `row_index + 1`); it sources the
+// hasher responder address on the chiplet side.
+pub const CHIPLETS_WIDTH: usize = 22;
 pub const CHIPLETS_RANGE: Range<usize> = range(CHIPLETS_OFFSET, CHIPLETS_WIDTH);
 
 /// Shared chiplet selector columns at the start of the chiplets segment.
@@ -108,12 +111,12 @@ pub const TRACE_WIDTH: usize = CHIPLETS_OFFSET + CHIPLETS_WIDTH;
 // AUXILIARY COLUMNS LAYOUT
 // ------------------------------------------------------------------------------------------------
 //
-// The auxiliary trace is the LogUp lookup-argument segment built by
-// [`crate::ProcessorAir`]'s `AuxBuilder` impl. It has 7 columns: 4 main-trace LogUp
-// columns followed by 3 chiplet-trace LogUp columns. See
+// The auxiliary trace is the LogUp lookup-argument segment built per-AIR by `CoreAir`'s
+// and `ChipletsAir`'s `AuxBuilder` impls: 4 main-trace LogUp columns for Core and 3
+// chiplet-trace LogUp columns for Chiplets. See
 // [`crate::constraints::lookup::main_air::MainLookupAir`] and
-// [`crate::constraints::lookup::chiplet_air::ChipletLookupAir`] for the per-column
-// contents.
+// [`crate::constraints::lookup::chiplet_air::emit_chiplet_lookup_columns`] for the
+// per-column contents.
 
 /// Auxiliary trace segment width — see the LogUp aux trace layout above.
 pub const AUX_TRACE_WIDTH: usize = crate::LOGUP_AUX_TRACE_WIDTH;

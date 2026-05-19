@@ -65,6 +65,8 @@ pub mod crypto;
 #[cfg(not(target_family = "wasm"))]
 pub mod rand;
 
+pub mod recursive_verifier;
+
 mod test_builders;
 
 #[cfg(not(target_family = "wasm"))]

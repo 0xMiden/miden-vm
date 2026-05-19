@@ -14,6 +14,8 @@
 - Preserved `AssemblyOp` source mappings when merging `MastForest`s, preventing source-location loss after node deduplication.
 - Replaced `bincode` proof serialization with `wincode` and bounded verifier-side STARK proof deserialization to 64 MiB ([#3148](https://github.com/0xMiden/miden-vm/pull/3148)).
 - [BREAKING] Replaced the Poseidon2 sponge precompile transcript with a 2-to-1 hash folding scheme; the rolling state is itself a complete digest at every step, removing `finalize()` and `PrecompileTranscriptDigest`. The `log_precompile` opcode is reshaped accordingly (helper/stack rename, STMNT placed at stack[4..8]) and the MASM `log_precompile_request` wrapper now computes STMNT via `hmerge`. RELATION_DIGEST bumped ([#3100](https://github.com/0xMiden/miden-vm/pull/3100)).
+- Preserved `AssemblyOp` source mappings when merging `MastForest`s, preventing source-location loss after node deduplication ([#2958](https://github.com/0xMiden/miden-vm/pull/2958)).
+- Made AEAD decrypt verify the input ciphertext as well as the tag ([#3147](https://github.com/0xMiden/miden-vm/pull/3147)).
 
 ## v0.23.0 (2026-05-07)
 
@@ -118,6 +120,7 @@
 - Made all internal `core::math` procedures natively little-endian ([#3084](https://github.com/0xMiden/miden-vm/pull/3084)).
 - [BREAKING] Updated the Miden crypto stack to `miden-crypto` v0.25, and switched SMT leaf hashing to use Poseidon2 domain separation so masm-side leaf digests match `SmtLeaf::hash()` ([#3095](https://github.com/0xMiden/miden-vm/pull/3095)).
 - [BREAKING] Reject post-last operation-indexed decorators in block assembly and serialized MAST forests; use `after_exit` for decorators that run after a block exits ([#3114](https://github.com/0xMiden/miden-vm/pull/3114)).
+- [BREAKING] Split the execution AIR into Core + Chiplets AIRs ([#3115](https://github.com/0xMiden/miden-vm/pull/3115)).
 - [BREAKING] Removed `Continuation::AfterExitDecoratorsBasicBlock`. New MAST merges operation-indexed decorators at the post-last-op sentinel index into `after_exit` at build time; execution uses `AfterExitDecorators` only, with legacy forests still supported ([#2633](https://github.com/0xMiden/miden-vm/issues/2633)).
 - Drop dead `clk` argument from u32 range-check ([#3135](https://github.com/0xMiden/miden-vm/issues/3135)).
 
