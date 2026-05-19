@@ -1369,7 +1369,6 @@ dependencies = [
 name = "miden-core"
 version = "0.24.0"
 dependencies = [
- "blake3",
  "criterion",
  "derive_more",
  "insta",
