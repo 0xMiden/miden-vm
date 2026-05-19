@@ -12,6 +12,56 @@ use alloc::boxed::Box;
 
 use super::Tag;
 
+// NODE TYPE
+// ================================================================================================
+
+/// Structural classification of a node, returned by
+/// [`Precompile::decode`](super::Precompile::decode).
+///
+/// Captures both the in-memory body shape (Expression vs Chunk) AND, for the Expression case,
+/// whether the 8 felts encode raw payload data or two child digests packed via
+/// [`super::Payload::binary_op`]. This is the unit the wire format and rehydrate logic
+/// dispatch on.
+///
+/// `NodeType` and `TagInfo::evaluates_to` are orthogonal: a `Binary` node can be either an
+/// op (`evaluates_to == some_canonical_tag`), a predicate (`evaluates_to == TRUE_TAG`), or a
+/// self-evaluating compound canonical such as `Group`'s `new` element (`evaluates_to == own_tag`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NodeType {
+    /// 8 felts of raw payload data, no child digests. Self-evaluating value leaves (e.g.
+    /// `Uint256` leaf, `MockHash` digest).
+    Value,
+    /// 8 felts encoding `lhs_digest || rhs_digest` — two child references. Covers binary ops,
+    /// binary predicates, AND-nodes, and compound-canonical `new`-style leaves.
+    Binary,
+    /// `n` 8-felt chunks of bulk data, no child digests. Chunk-bodied leaves (e.g.
+    /// `MockHash` preimage, `MockSig` verify).
+    Chunks(u32),
+}
+
+// TAG INFO
+// ================================================================================================
+
+/// Type signature of a tag: what shape its body takes and what tag its canonical form carries.
+///
+/// - `evaluates_to == `[`super::TRUE_TAG`] marks the tag as a predicate — its `reduce` returns
+///   [`super::true_node`] on success and [`PrecompileError::AssertionFailed`] on mismatch.
+/// - `evaluates_to == self_tag` marks the tag as self-evaluating (a canonical leaf).
+/// - Otherwise the tag describes an op whose canonical form bears the given tag.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TagInfo {
+    pub node_type: NodeType,
+    pub evaluates_to: Tag,
+}
+
+impl TagInfo {
+    /// Returns `true` iff this tag's canonical form is the TRUE sentinel — i.e. the tag
+    /// describes a predicate.
+    pub fn is_predicate(&self) -> bool {
+        self.evaluates_to == super::TRUE_TAG
+    }
+}
+
 // PRECOMPILE ERROR
 // ================================================================================================
 
@@ -61,55 +111,5 @@ impl PrecompileError {
             PrecompileError::Precompile { source, .. } => source.root(),
             other => other,
         }
-    }
-}
-
-// NODE TYPE
-// ================================================================================================
-
-/// Structural classification of a node, returned by
-/// [`Precompile::decode`](super::Precompile::decode).
-///
-/// Captures both the in-memory body shape (Expression vs Chunk) AND, for the Expression case,
-/// whether the 8 felts encode raw payload data or two child digests packed via
-/// [`super::Payload::binary_op`]. This is the unit the wire format and rehydrate logic
-/// dispatch on.
-///
-/// `NodeType` and `TagInfo::evaluates_to` are orthogonal: a `Binary` node can be either an
-/// op (`evaluates_to == some_canonical_tag`), a predicate (`evaluates_to == TRUE_TAG`), or a
-/// self-evaluating compound canonical such as `Group`'s `new` element (`evaluates_to == own_tag`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum NodeType {
-    /// 8 felts of raw payload data, no child digests. Self-evaluating value leaves (e.g.
-    /// `Uint256` leaf, `MockHash` digest).
-    Value,
-    /// 8 felts encoding `lhs_digest || rhs_digest` — two child references. Covers binary ops,
-    /// binary predicates, AND-nodes, and compound-canonical `new`-style leaves.
-    Binary,
-    /// `n` 8-felt chunks of bulk data, no child digests. Chunk-bodied leaves (e.g.
-    /// `MockHash` preimage, `MockSig` verify).
-    Chunks(u32),
-}
-
-// TAG INFO
-// ================================================================================================
-
-/// Type signature of a tag: what shape its body takes and what tag its canonical form carries.
-///
-/// - `evaluates_to == `[`super::TRUE_TAG`] marks the tag as a predicate — its `reduce` returns
-///   [`super::true_node`] on success and [`PrecompileError::AssertionFailed`] on mismatch.
-/// - `evaluates_to == self_tag` marks the tag as self-evaluating (a canonical leaf).
-/// - Otherwise the tag describes an op whose canonical form bears the given tag.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct TagInfo {
-    pub node_type: NodeType,
-    pub evaluates_to: Tag,
-}
-
-impl TagInfo {
-    /// Returns `true` iff this tag's canonical form is the TRUE sentinel — i.e. the tag
-    /// describes a predicate.
-    pub fn is_predicate(&self) -> bool {
-        self.evaluates_to == super::TRUE_TAG
     }
 }
