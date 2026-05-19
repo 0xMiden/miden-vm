@@ -16,6 +16,7 @@
 - [BREAKING] Removed MASM `trace` decorators, remaining decorator execution scaffolding, the CLI `--trace` flag, trace-specific processor and host APIs, and decorator wire slots from the unreleased MAST format `0.0.4` ([#3208](https://github.com/0xMiden/miden-vm/pull/3208)).
 - [BREAKING] Changed semantics of `LoopNode` to unconditionally enter loops ([#3187](https://github.com/0xMiden/miden-vm/pull/3187)).
 - Removed the legacy LALRPOP parser backend
+- Added the content-addressed deferred-DAG framework (`miden_core::deferred`): data model, `Schema` seam, wire format, `Precompile`/`PrecompileSchema`, the `adv.*_deferred` system events and MASM grammar, plus reference/composite test apps. Purely additive substrate with no behavioral change; the precompile proof-model migrates onto it in a follow-up ([#3170](https://github.com/0xMiden/miden-vm/pull/3170)).
 
 #### Fixes
 

@@ -292,6 +292,80 @@ pub enum SystemEvent {
     /// Where KEY is computed by extracting the digest elements from hperm([C, A, B]). For example,
     /// if C is [0, d, 0, 0], KEY will be set as hash(A || B, d).
     HpermToMap,
+
+    // DEFERRED-DAG SYSTEM EVENTS
+    // --------------------------------------------------------------------------------------------
+    /// Registers an opaque node `(tag, payload)` in the deferred-computation DAG.
+    ///
+    /// The installed schema validates the node's tag and shape; the node is interned into the
+    /// DAG keyed by its Poseidon2 digest. Pure host hint — predicates are NOT eagerly verified
+    /// here.
+    ///
+    /// Inputs:
+    ///   Operand stack: [event_id, PAYLOAD_LO, PAYLOAD_HI, TAG, ...]
+    ///     where PAYLOAD_LO || PAYLOAD_HI is an 8-felt payload at positions 1..9,
+    ///     and TAG is a 4-felt tag at positions 9..13.
+    ///
+    /// This layout matches the `[rate_lo, rate_hi, capacity]` Poseidon2 sponge state, so a MASM
+    /// caller can feed the 12 felts under `event_id` directly into one `hperm` instruction to
+    /// recover the node's digest without any rearrangement.
+    ///
+    /// Outputs:
+    ///   Operand stack: [event_id, PAYLOAD_LO, PAYLOAD_HI, TAG, ...] (unchanged)
+    ///   Advice stack:  [NODE_DIGEST, ...] (pushed; top of advice is `NODE_DIGEST[0]`)
+    ///   DAG state:     {... node(TAG, PAYLOAD)}
+    ///
+    /// The advice-pushed digest lets MASM use the registered node as a child reference in a
+    /// downstream binary node, or feed it into `log_precompile`, without recomputing the digest
+    /// in-circuit.
+    DeferredRegister,
+
+    /// Evaluates a node identified by its 4-felt digest via the installed schema and pushes the
+    /// canonical's body (`payload || tag` or `chunks || tag`) onto the advice stack.
+    ///
+    /// The node must already be interned in `DeferredState` — programs typically obtain the
+    /// digest from `adv.register_deferred` / `adv.register_deferred_chunk` (which push it to
+    /// advice as their output) immediately before calling this event.
+    ///
+    /// For expression nodes the canonical is the reduced form; for predicate tags
+    /// (`evaluates_to == TRUE_TAG`) the schema verifies the assertion (returning
+    /// [`crate::deferred::SchemaError::AssertionFailed`] on mismatch) and pushes nothing.
+    /// Children referenced in the payload must already be registered in the DAG.
+    ///
+    /// Inputs:
+    ///   Operand stack: [event_id, NODE_DIGEST, ...]
+    ///     where NODE_DIGEST is a 4-felt word at positions 1..5.
+    ///
+    /// Outputs:
+    ///   Operand stack: [event_id, NODE_DIGEST, ...] (unchanged)
+    ///   Advice stack:  depends on canonical:
+    ///     - expression: [CANONICAL_PAYLOAD_LO, CANONICAL_PAYLOAD_HI, CANONICAL_TAG, ...] (top is
+    ///       `CANONICAL_PAYLOAD_LO`)
+    ///     - chunk:      `[chunk[0]_LO, chunk[0]_HI, chunk[1]_LO, ..., CANONICAL_TAG, ...]` (top is
+    ///       `chunk[0]_LO`; `n` chunks ⇒ `2n + 1` advice words)
+    ///     - predicate:  nothing pushed (assertion fires or errors)
+    DeferredEvaluate,
+
+    /// Registers a chunk node in the deferred-computation DAG.
+    ///
+    /// A chunk is a leaf carrying `n` blocks of 8 field elements (the Poseidon2 rate). The
+    /// installed schema decodes `n` from the tag (no `n` on the stack — the tag is the
+    /// length's source of truth, which means the digest binds `n` for free). The processor
+    /// reads `8n` felts from memory at `ptr` (word-aligned, `ptr % 4 == 0`), constructs the
+    /// chunk node, and registers it.
+    ///
+    /// Inputs:
+    ///   Operand stack: [event_id, TAG, ptr, ...]
+    ///     where TAG is 4 felts at positions 1..5 and `ptr` is a single felt at position 5.
+    ///
+    /// Outputs:
+    ///   Operand stack: [event_id, TAG, ptr, ...] (unchanged)
+    ///   Advice stack:  [NODE_DIGEST, ...] (pushed; top of advice is `NODE_DIGEST[0]`)
+    ///   DAG state:     {... chunk(TAG, [data[ptr..ptr+8n]])}
+    ///
+    /// The advice-pushed digest spares MASM the cost of computing the chunk's linear-hash
+    /// digest in-circuit (which would be `n` Poseidon2 permutations).
+    DeferredRegisterChunk,
 }
 
 impl SystemEvent {
@@ -364,6 +438,9 @@ impl SystemEvent {
             Self::HdwordToMapWithDomain,
             Self::HqwordToMap,
             Self::HpermToMap,
+            Self::DeferredRegister,
+            Self::DeferredEvaluate,
+            Self::DeferredRegisterChunk,
         ]
     }
 }
@@ -405,7 +482,7 @@ pub(crate) struct SystemEventEntry {
 
 impl SystemEvent {
     /// The total number of system events.
-    pub const COUNT: usize = 19;
+    pub const COUNT: usize = 22;
 
     /// Lookup table mapping system events to their metadata.
     ///
@@ -506,6 +583,21 @@ impl SystemEvent {
             id: EventId::from_u64(6190830263511605775),
             event: SystemEvent::HpermToMap,
             name: "sys::hperm_to_map",
+        },
+        SystemEventEntry {
+            id: EventId::from_u64(3200266522440553751),
+            event: SystemEvent::DeferredRegister,
+            name: "sys::adv::register_deferred",
+        },
+        SystemEventEntry {
+            id: EventId::from_u64(12566028600487412345),
+            event: SystemEvent::DeferredEvaluate,
+            name: "sys::adv::evaluate_deferred",
+        },
+        SystemEventEntry {
+            id: EventId::from_u64(17356669416957691043),
+            event: SystemEvent::DeferredRegisterChunk,
+            name: "sys::adv::register_deferred_chunk",
         },
     ];
 }
@@ -614,7 +706,10 @@ mod test {
                 | SystemEvent::HdwordToMap
                 | SystemEvent::HdwordToMapWithDomain
                 | SystemEvent::HqwordToMap
-                | SystemEvent::HpermToMap => {},
+                | SystemEvent::HpermToMap
+                | SystemEvent::DeferredRegister
+                | SystemEvent::DeferredEvaluate
+                | SystemEvent::DeferredRegisterChunk => {},
             }
         }
     }
