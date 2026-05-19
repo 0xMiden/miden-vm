@@ -61,11 +61,7 @@ impl Precompile for Sig {
     }
 
     fn decode(&self, imm: [Felt; 3]) -> Option<TagInfo> {
-        let [disc, immediate, reserved] = imm;
-        if immediate != ZERO || reserved != ZERO {
-            return None;
-        }
-        match Discriminant::classify(disc)? {
+        match Discriminant::classify(imm[0])? {
             Discriminant::Verify => Some(TagInfo {
                 node_type: NodeType::Chunks(Self::SIG_CHUNKS),
                 evaluates_to: TRUE_TAG,
@@ -75,13 +71,13 @@ impl Precompile for Sig {
 
     fn reduce(
         &self,
-        node: &Node,
+        imm: [Felt; 3],
+        payload: &NodePayload,
         _witness: &mut WitnessBuilder<'_>,
     ) -> Result<Node, PrecompileError> {
-        if node.tag != Self::verify_tag() {
-            return Err(PrecompileError::InvalidNode);
-        }
-        match &node.payload {
+        // `decode` already gated this; `Verify` is the only discriminant.
+        Discriminant::classify(imm[0]).ok_or(PrecompileError::InvalidNode)?;
+        match payload {
             NodePayload::Chunk(chunks) => {
                 if chunks.len() != Self::SIG_CHUNKS as usize {
                     return Err(PrecompileError::InvalidNode);

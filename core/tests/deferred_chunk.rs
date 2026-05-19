@@ -15,8 +15,8 @@
 use miden_core::{
     Felt, ZERO,
     deferred::{
-        DeferredState, Node, NodeType, Payload, Precompile, PrecompileError, Precompiles, TRUE_TAG,
-        Tag, TagInfo, WitnessBuilder, precompile_id, true_node,
+        DeferredState, Node, NodePayload, NodeType, Payload, Precompile, PrecompileError,
+        PrecompileRegistry, TRUE_TAG, Tag, TagInfo, WitnessBuilder, precompile_id, true_node,
     },
 };
 
@@ -84,10 +84,7 @@ impl Precompile for ChunkTestPrecompile {
     }
 
     fn decode(&self, imm: [Felt; 3]) -> Option<TagInfo> {
-        let [role, n, reserved] = imm;
-        if reserved != ZERO {
-            return None;
-        }
+        let [role, n, _] = imm;
         match role {
             // Preimage chunk reduces to a digest leaf; `n` is the chunk count.
             r if r == PREIMAGE_ROLE => Some(TagInfo {
@@ -110,27 +107,28 @@ impl Precompile for ChunkTestPrecompile {
 
     fn reduce(
         &self,
-        node: &Node,
+        imm: [Felt; 3],
+        payload: &NodePayload,
         witness: &mut WitnessBuilder<'_>,
     ) -> Result<Node, PrecompileError> {
-        use miden_core::deferred::NodePayload;
-        if node.tag == assert_tag() {
-            let p = node.expression_payload().ok_or(PrecompileError::InvalidNode)?;
+        let [role, ..] = imm;
+        if role == ASSERT_ROLE {
+            let NodePayload::Expression(p) = payload else {
+                return Err(PrecompileError::InvalidNode);
+            };
             let (lhs, rhs) = p.binary_op_children();
-            let lhs_canonical = witness.resolve(lhs)?;
-            let rhs_canonical = witness.resolve(rhs)?;
-            if lhs_canonical != rhs_canonical {
+            if witness.resolve(lhs)? != witness.resolve(rhs)? {
                 return Err(PrecompileError::AssertionFailed);
             }
             return Ok(true_node());
         }
-        match &node.payload {
+        match payload {
             // Preimage chunk reduces to its digest leaf.
             NodePayload::Chunk(chunks) => {
                 Ok(Node::expression(digest_tag(), Self::fake_hash(chunks)))
             },
-            // Digest leaf is already canonical.
-            NodePayload::Expression(_) => Ok(node.clone()),
+            // Digest leaf is self-evaluating.
+            NodePayload::Expression(p) => Ok(Node::expression(Tag::new(Self::id(), imm), *p)),
         }
     }
 }
@@ -161,7 +159,7 @@ fn chunk_digest_for_n1_matches_equivalent_expression() {
 
 #[test]
 fn register_chunk_stores_node() {
-    let schema = Precompiles::single(ChunkTestPrecompile).unwrap();
+    let schema = PrecompileRegistry::default().with_precompile(ChunkTestPrecompile);
     let mut state = DeferredState::new();
     let chunk = Node::chunk(preimage_tag(3), chunk_data(3));
     let digest = state.register(&schema, chunk.clone()).unwrap();
@@ -171,7 +169,7 @@ fn register_chunk_stores_node() {
 
 #[test]
 fn register_chunk_with_mismatched_length_fails() {
-    let schema = Precompiles::single(ChunkTestPrecompile).unwrap();
+    let schema = PrecompileRegistry::default().with_precompile(ChunkTestPrecompile);
     let mut state = DeferredState::new();
     // Tag declares n=3 but we hand it 2 chunks of data.
     let bad = Node::chunk(preimage_tag(3), chunk_data(2));
@@ -180,7 +178,7 @@ fn register_chunk_with_mismatched_length_fails() {
 
 #[test]
 fn predicate_preimage_equals_digest_succeeds() {
-    let schema = Precompiles::single(ChunkTestPrecompile).unwrap();
+    let schema = PrecompileRegistry::default().with_precompile(ChunkTestPrecompile);
     let mut state = DeferredState::new();
 
     // Register a 3-chunk preimage.
@@ -203,7 +201,7 @@ fn predicate_preimage_equals_digest_succeeds() {
 
 #[test]
 fn predicate_preimage_mismatch_fails_on_evaluate() {
-    let schema = Precompiles::single(ChunkTestPrecompile).unwrap();
+    let schema = PrecompileRegistry::default().with_precompile(ChunkTestPrecompile);
     let mut state = DeferredState::new();
 
     let chunks = chunk_data(2);
@@ -234,7 +232,7 @@ fn empty_chunk_digest_binds_tag() {
 
 #[test]
 fn deferred_state_includes_chunk_nodes() {
-    let schema = Precompiles::single(ChunkTestPrecompile).unwrap();
+    let schema = PrecompileRegistry::default().with_precompile(ChunkTestPrecompile);
     let mut state = DeferredState::new();
 
     let preimage = Node::chunk(preimage_tag(2), chunk_data(2));

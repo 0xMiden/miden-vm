@@ -9,7 +9,7 @@ mod common;
 
 use common::precompile::uint::Uint;
 use miden_core::deferred::{
-    DeferredError, DeferredState, Node, Payload, PrecompileError, Precompiles,
+    DeferredError, DeferredState, Node, Payload, PrecompileError, PrecompileRegistry,
 };
 
 fn leaf(low: u64) -> Node {
@@ -24,7 +24,7 @@ fn leaf(low: u64) -> Node {
 
 #[test]
 fn end_to_end_register_evaluate_assert_extract() {
-    let schema = Precompiles::single(Uint).unwrap();
+    let schema = PrecompileRegistry::default().with_precompile(Uint);
     let mut state = DeferredState::new();
 
     let a = state.register(&schema, leaf(3)).unwrap();
@@ -56,7 +56,7 @@ fn end_to_end_register_evaluate_assert_extract() {
 
 #[test]
 fn predicate_mismatch_surfaces_as_error_on_evaluate() {
-    let schema = Precompiles::single(Uint).unwrap();
+    let schema = PrecompileRegistry::default().with_precompile(Uint);
     let mut state = DeferredState::new();
     let a = state.register(&schema, leaf(7)).unwrap();
     let b = state.register(&schema, leaf(8)).unwrap();
@@ -71,7 +71,7 @@ fn predicate_mismatch_surfaces_as_error_on_evaluate() {
 
 #[test]
 fn empty_registry_rejects_all_uint_nodes() {
-    let schema = Precompiles::default();
+    let schema = PrecompileRegistry::default();
     let mut state = DeferredState::new();
     let err = state.register(&schema, leaf(0));
     assert!(matches!(err, Err(PrecompileError::InvalidNode)));
@@ -79,7 +79,7 @@ fn empty_registry_rejects_all_uint_nodes() {
 
 #[test]
 fn init_pre_registers_uint_constants() {
-    let schema = Precompiles::single(Uint).unwrap();
+    let schema = PrecompileRegistry::default().with_precompile(Uint);
     let mut state = DeferredState::new();
     schema.init(&mut state).unwrap();
     // Three constants: ZERO, ONE, P_MINUS_1.
@@ -231,7 +231,7 @@ fn id_is_stable_across_calls() {
 
 #[test]
 fn init_interns_zero_one_pminus1() {
-    let schema = Precompiles::single(Uint).unwrap();
+    let schema = PrecompileRegistry::default().with_precompile(Uint);
     let mut state = DeferredState::new();
     schema.init(&mut state).unwrap();
     assert!(state.contains(&Uint::leaf_node([0; 8]).digest()));

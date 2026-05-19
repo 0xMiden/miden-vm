@@ -4,7 +4,7 @@ use core::{cmp::min, ops::ControlFlow};
 use miden_air::{Felt, trace::RowIndex};
 use miden_core::{
     EMPTY_WORD, WORD_SIZE, Word, ZERO,
-    deferred::{DeferredState, Precompile, Precompiles},
+    deferred::{DeferredState, Precompile, PrecompileRegistry},
     mast::{ExecutableMastForest, MastForest},
     precompile::PrecompileTranscript,
     program::{MIN_STACK_DEPTH, Program, StackInputs, StackOutputs},
@@ -148,10 +148,10 @@ pub struct FastProcessor {
 
     /// The deferred-DAG precompile registry installed at processor construction. Owns the
     /// entire semantic layer (tag recognition, validation, recursive evaluation, equality).
-    /// Defaults to an empty [`Precompiles`] — any precompile tag is rejected. Callers running
-    /// programs that emit precompile tags add the precompiles they need (typically
-    /// `miden_core_lib::CoreLibrary::precompiles()`) via [`Self::with_precompiles`].
-    deferred_precompiles: Arc<Precompiles>,
+    /// Defaults to an empty [`PrecompileRegistry`] — any precompile tag is rejected. Callers
+    /// running programs that emit precompile tags add the precompiles they need (typically
+    /// `miden_core_lib::CoreLibrary::precompiles()`) via [`Self::with_precompile`].
+    deferred_precompiles: Arc<PrecompileRegistry>,
 }
 
 impl FastProcessor {
@@ -248,28 +248,21 @@ impl FastProcessor {
         Ok(self)
     }
 
-    /// Installs the [`Precompile`]s used by the deferred-DAG system events.
+    /// Installs a [`Precompile`] for the deferred-DAG system events, chainable
+    /// (`FastProcessor::new(...).with_precompile(a).with_precompile(b)`).
     ///
     /// The default registry is empty — any precompile tag is rejected. To run programs that use
     /// the core library's precompile MASM wrappers, add the relevant precompiles (typically
     /// `miden_core_lib::CoreLibrary::precompiles()`, covering keccak256 / sha512 /
     /// ecdsa_k256_keccak / eddsa_ed25519).
     ///
-    /// Panics if the precompiles are misconfigured (an id inconsistent with its name
-    /// derivation, the framework-reserved `ZERO` id, or a duplicate id) — a setup-time
-    /// programming error. Use [`Precompiles::new`] directly for the fallible form.
-    pub fn with_precompiles<I>(mut self, precompiles: I) -> Self
-    where
-        I: IntoIterator<Item = Box<dyn Precompile>>,
-    {
-        self.deferred_precompiles =
-            Arc::new(Precompiles::new(precompiles).expect("misconfigured precompiles"));
+    /// Panics if the precompile is misconfigured (an id inconsistent with its name derivation,
+    /// the framework-reserved `ZERO` id, or a duplicate id) — a setup-time programming error.
+    pub fn with_precompile<P: Precompile + 'static>(mut self, precompile: P) -> Self {
+        let registry = Arc::try_unwrap(self.deferred_precompiles)
+            .expect("configure precompiles before running the program");
+        self.deferred_precompiles = Arc::new(registry.with_precompile(precompile));
         self
-    }
-
-    /// Convenience over [`Self::with_precompiles`] for the common single-precompile case.
-    pub fn with_precompile<P: Precompile + 'static>(self, precompile: P) -> Self {
-        self.with_precompiles([Box::new(precompile) as Box<dyn Precompile>])
     }
 
     /// Constructor for creating a `FastProcessor` with all options specified at once.
@@ -308,7 +301,7 @@ impl FastProcessor {
             options,
             pc_transcript: PrecompileTranscript::new(),
             deferred_state: DeferredState::new(),
-            deferred_precompiles: Arc::new(Precompiles::default()),
+            deferred_precompiles: Arc::new(PrecompileRegistry::default()),
         })
     }
 
@@ -335,7 +328,7 @@ impl FastProcessor {
     /// deferred system-event handlers can borrow both simultaneously without running into the
     /// borrow checker.
     #[inline(always)]
-    pub(crate) fn deferred_view_mut(&mut self) -> (&mut DeferredState, &Precompiles) {
+    pub(crate) fn deferred_view_mut(&mut self) -> (&mut DeferredState, &PrecompileRegistry) {
         (&mut self.deferred_state, &self.deferred_precompiles)
     }
 

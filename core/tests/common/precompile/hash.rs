@@ -122,72 +122,52 @@ impl Precompile for Hash {
     }
 
     fn decode(&self, imm: [Felt; 3]) -> Option<TagInfo> {
-        let [disc, immediate, reserved] = imm;
-        if reserved != ZERO {
-            return None;
-        }
-        match Discriminant::classify(disc)? {
+        match Discriminant::classify(imm[0])? {
             Discriminant::Preimage => {
-                // `immediate` carries n_bytes; the chunk count is derived.
-                let n_bytes = u32::try_from(immediate.as_canonical_u64()).ok()?;
+                // `imm[1]` carries n_bytes; the chunk count is derived.
+                let n_bytes = u32::try_from(imm[1].as_canonical_u64()).ok()?;
                 Some(TagInfo {
                     node_type: NodeType::Chunks(Self::n_chunks(n_bytes)),
                     evaluates_to: Self::digest_tag(),
                 })
             },
-            Discriminant::Digest => {
-                // Self-evaluating leaf carrying 8 raw felts of digest data.
-                if immediate != ZERO {
-                    return None;
-                }
-                Some(TagInfo {
-                    node_type: NodeType::Value,
-                    evaluates_to: Self::digest_tag(),
-                })
-            },
-            Discriminant::Eq => {
-                // Binary predicate over two child digests.
-                if immediate != ZERO {
-                    return None;
-                }
-                Some(TagInfo {
-                    node_type: NodeType::Binary,
-                    evaluates_to: TRUE_TAG,
-                })
-            },
+            // Self-evaluating leaf carrying 8 raw felts of digest data.
+            Discriminant::Digest => Some(TagInfo {
+                node_type: NodeType::Value,
+                evaluates_to: Self::digest_tag(),
+            }),
+            // Binary predicate over two child digests.
+            Discriminant::Eq => Some(TagInfo {
+                node_type: NodeType::Binary,
+                evaluates_to: TRUE_TAG,
+            }),
         }
     }
 
     fn reduce(
         &self,
-        node: &Node,
+        imm: [Felt; 3],
+        payload: &NodePayload,
         witness: &mut WitnessBuilder<'_>,
     ) -> Result<Node, PrecompileError> {
-        if node.tag.id != Self::id() || node.tag.imm[2] != ZERO {
-            return Err(PrecompileError::InvalidNode);
-        }
-        let kind = Discriminant::classify(node.tag.imm[0]).ok_or(PrecompileError::InvalidNode)?;
-        match kind {
-            Discriminant::Preimage => match &node.payload {
-                NodePayload::Chunk(chunks) => {
-                    // Inline hash → canonical digest leaf. No minting needed: the digest IS the
-                    // canonical payload.
-                    Ok(Self::digest_node(Self::hash(chunks)))
-                },
+        match Discriminant::classify(imm[0]).ok_or(PrecompileError::InvalidNode)? {
+            Discriminant::Preimage => match payload {
+                // Inline hash → canonical digest leaf. No minting needed: the digest IS the
+                // canonical payload.
+                NodePayload::Chunk(chunks) => Ok(Self::digest_node(Self::hash(chunks))),
                 NodePayload::Expression(_) => Err(PrecompileError::InvalidNode),
             },
             Discriminant::Digest => {
-                if node.tag.imm[1] != ZERO {
+                let NodePayload::Expression(p) = payload else {
                     return Err(PrecompileError::InvalidNode);
-                }
-                Ok(node.clone())
+                };
+                Ok(Node::expression(Tag::new(Self::id(), imm), *p))
             },
             Discriminant::Eq => {
-                if node.tag.imm[1] != ZERO {
+                let NodePayload::Expression(p) = payload else {
                     return Err(PrecompileError::InvalidNode);
-                }
-                let payload = node.expression_payload().ok_or(PrecompileError::InvalidNode)?;
-                let (h_lhs, h_rhs) = payload.binary_op_children();
+                };
+                let (h_lhs, h_rhs) = p.binary_op_children();
                 if witness.resolve(h_lhs)? != witness.resolve(h_rhs)? {
                     return Err(PrecompileError::AssertionFailed);
                 }

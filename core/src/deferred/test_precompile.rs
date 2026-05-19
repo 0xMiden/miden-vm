@@ -10,8 +10,8 @@
 use crate::{
     Felt, ZERO,
     deferred::{
-        DeferredError, Node, NodeType, Payload, Precompile, PrecompileError, TRUE_TAG, Tag,
-        TagInfo, WitnessBuilder, precompile_id, true_node,
+        DeferredError, Node, NodePayload, NodeType, Payload, Precompile, PrecompileError, TRUE_TAG,
+        Tag, TagInfo, WitnessBuilder, precompile_id, true_node,
     },
 };
 
@@ -61,11 +61,9 @@ impl TestPrecompile {
         Node::expression(Self::leaf_tag(), Payload::new(limbs.map(Felt::from_u32)))
     }
 
-    fn limbs_of(node: &Node) -> Result<[u32; 8], DeferredError> {
-        if node.tag != Self::leaf_tag() {
-            return Err(DeferredError::InvalidPayload);
-        }
-        let payload = node.expression_payload().ok_or(DeferredError::InvalidPayload)?;
+    /// Decode `[u32; 8]` limbs from a raw 8-felt payload (used for the input leaf, where only
+    /// the body is in hand).
+    fn decode_limbs(payload: &Payload) -> Result<[u32; 8], DeferredError> {
         let mut limbs = [0u32; 8];
         for (i, felt) in payload.0.iter().enumerate() {
             let v = felt.as_canonical_u64();
@@ -75,6 +73,14 @@ impl TestPrecompile {
             limbs[i] = v as u32;
         }
         Ok(limbs)
+    }
+
+    /// Decode limbs from a *resolved child* node, rejecting if it isn't a canonical leaf.
+    fn limbs_of(node: &Node) -> Result<[u32; 8], DeferredError> {
+        if node.tag != Self::leaf_tag() {
+            return Err(DeferredError::InvalidPayload);
+        }
+        Self::decode_limbs(node.expression_payload().ok_or(DeferredError::InvalidPayload)?)
     }
 
     fn wrap_add(a: [u32; 8], b: [u32; 8]) -> [u32; 8] {
@@ -132,11 +138,7 @@ impl Precompile for TestPrecompile {
     }
 
     fn decode(&self, imm: [Felt; 3]) -> Option<TagInfo> {
-        let [disc, immediate, reserved] = imm;
-        if immediate != ZERO || reserved != ZERO {
-            return None;
-        }
-        let kind = Disc::classify(disc)?;
+        let kind = Disc::classify(imm[0])?;
         let node_type = match kind {
             Disc::Leaf => NodeType::Value,
             Disc::Add | Disc::Mul | Disc::Eq => NodeType::Binary,
@@ -150,33 +152,33 @@ impl Precompile for TestPrecompile {
 
     fn reduce(
         &self,
-        node: &Node,
+        imm: [Felt; 3],
+        payload: &NodePayload,
         witness: &mut WitnessBuilder<'_>,
     ) -> Result<Node, PrecompileError> {
-        if node.tag.id != Self::id() || node.tag.imm[1] != ZERO || node.tag.imm[2] != ZERO {
+        // Every kind here is expression-bodied; `decode` already gated the discriminant.
+        let NodePayload::Expression(p) = payload else {
             return Err(PrecompileError::InvalidNode);
-        }
-        let kind = Disc::classify(node.tag.imm[0]).ok_or(PrecompileError::InvalidNode)?;
-        let payload = node.expression_payload().ok_or(PrecompileError::InvalidNode)?;
-        match kind {
+        };
+        match Disc::classify(imm[0]).ok_or(PrecompileError::InvalidNode)? {
             // Leaf canonicality is checked here, deferred from register-time.
             Disc::Leaf => {
-                Self::limbs_of(node).map_err(PrecompileError::from)?;
-                Ok(node.clone())
+                Self::decode_limbs(p).map_err(PrecompileError::from)?;
+                Ok(Node::expression(Tag::new(Self::id(), imm), *p))
             },
-            Disc::Add | Disc::Mul => {
-                let (lhs, rhs) = payload.binary_op_children();
+            kind @ (Disc::Add | Disc::Mul) => {
+                let (lhs, rhs) = p.binary_op_children();
                 let a = Self::limbs_of(&witness.resolve(lhs)?).map_err(PrecompileError::from)?;
                 let b = Self::limbs_of(&witness.resolve(rhs)?).map_err(PrecompileError::from)?;
-                let out = match kind {
-                    Disc::Add => Self::wrap_add(a, b),
-                    Disc::Mul => Self::wrap_mul(a, b),
-                    _ => unreachable!(),
+                let out = if kind == Disc::Add {
+                    Self::wrap_add(a, b)
+                } else {
+                    Self::wrap_mul(a, b)
                 };
                 Ok(Self::leaf_node(out))
             },
             Disc::Eq => {
-                let (lhs, rhs) = payload.binary_op_children();
+                let (lhs, rhs) = p.binary_op_children();
                 if witness.resolve(lhs)? != witness.resolve(rhs)? {
                     return Err(PrecompileError::AssertionFailed);
                 }

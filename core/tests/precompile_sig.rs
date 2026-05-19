@@ -1,12 +1,14 @@
 //! Integration coverage for the `Sig` reference precompile: single chunk-bodied predicate,
-//! standalone and inside a multi-precompile `Precompiles` registry (alongside `Uint` and `Hash`).
+//! standalone and inside a multi-precompile `PrecompileRegistry` (alongside `Uint` and `Hash`).
 
 mod common;
 
 use common::precompile::{hash::Hash, sig::Sig, uint::Uint};
 use miden_core::{
     Felt, ZERO,
-    deferred::{DeferredState, Node, NodeType, Precompile, PrecompileError, Precompiles, TRUE_TAG},
+    deferred::{
+        DeferredState, Node, NodeType, Precompile, PrecompileError, PrecompileRegistry, TRUE_TAG,
+    },
 };
 use proptest::prelude::*;
 
@@ -21,12 +23,10 @@ fn three_chunks(first_first_felt: Felt) -> Vec<[Felt; 8]> {
 
 #[test]
 fn verify_passes_in_multi_precompile_schema() {
-    let schema = Precompiles::new([
-        Box::new(Uint) as Box<dyn Precompile>,
-        Box::new(Hash) as Box<dyn Precompile>,
-        Box::new(Sig) as Box<dyn Precompile>,
-    ])
-    .unwrap();
+    let schema = PrecompileRegistry::default()
+        .with_precompile(Uint)
+        .with_precompile(Hash)
+        .with_precompile(Sig);
     let mut state = DeferredState::new();
     schema.init(&mut state).unwrap();
 
@@ -37,7 +37,7 @@ fn verify_passes_in_multi_precompile_schema() {
 
 #[test]
 fn verify_fails_for_zeroed_placeholder_sig() {
-    let schema = Precompiles::single(Sig).unwrap();
+    let schema = PrecompileRegistry::default().with_precompile(Sig);
     let mut state = DeferredState::new();
     let node = Sig::verify_node(three_chunks(ZERO));
     let err = state.evaluate(&schema, node);
@@ -52,12 +52,6 @@ fn decode_verify_is_chunk3_predicate() {
     let info = Sig.decode([Felt::from_u32(Sig::VERIFY_TAG_ID), ZERO, ZERO]).unwrap();
     assert!(matches!(info.node_type, NodeType::Chunks(3)));
     assert_eq!(info.evaluates_to, TRUE_TAG);
-}
-
-#[test]
-fn decode_rejects_imm() {
-    let info = Sig.decode([Felt::from_u32(Sig::VERIFY_TAG_ID), Felt::from_u32(1), ZERO]);
-    assert!(info.is_none());
 }
 
 #[test]
@@ -85,7 +79,7 @@ proptest! {
             flat[8..16].try_into().unwrap(),
             flat[16..24].try_into().unwrap(),
         ];
-        let schema = Precompiles::single(Sig).unwrap();
+        let schema = PrecompileRegistry::default().with_precompile(Sig);
         let mut state = DeferredState::new();
         let result = state.evaluate(&schema, Sig::verify_node(chunks));
         if f0 != 0 {
@@ -102,7 +96,7 @@ proptest! {
         n in (0usize..=8).prop_filter("must differ from SIG_CHUNKS", |n| *n != 3),
     ) {
         let chunks: Vec<[Felt; 8]> = vec![[Felt::from_u32(1); 8]; n];
-        let schema = Precompiles::single(Sig).unwrap();
+        let schema = PrecompileRegistry::default().with_precompile(Sig);
         let mut state = DeferredState::new();
         let node = Node::chunk(Sig::verify_tag(), chunks);
         prop_assert!(matches!(

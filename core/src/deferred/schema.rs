@@ -3,10 +3,10 @@
 //!
 //! The processor maintains an opaque content-addressed store of nodes plus a single transcript
 //! root pointer. Everything else — what tags exist, how to decode them, how to evaluate — lives
-//! in the [`Precompile`](super::Precompile)s held by a [`Precompiles`](super::Precompiles)
-//! registry. The processor itself does not interpret tag bytes; the registry dispatches on
-//! [`Tag::id`](super::Tag) and each precompile decodes its own [`Tag::imm`](super::Tag) and
-//! drives recursive evaluation.
+//! in the [`Precompile`](super::Precompile)s held by a
+//! [`PrecompileRegistry`](super::PrecompileRegistry). The processor itself does not interpret
+//! tag bytes; the registry dispatches on [`Tag::id`](super::Tag) and each precompile decodes
+//! its own [`Tag::imm`](super::Tag) and drives recursive evaluation.
 
 use alloc::boxed::Box;
 
@@ -38,23 +38,19 @@ pub enum PrecompileError {
     #[error(transparent)]
     Other(#[from] super::DeferredError),
 
-    /// A precompile in a [`Precompiles`](super::Precompiles) registry rejected a tag or failed
-    /// to reduce a node it owns. Wraps the underlying cause with the offending precompile's name
-    /// so dispatch failures are attributable.
+    /// A precompile in a [`PrecompileRegistry`](super::PrecompileRegistry) rejected a tag or
+    /// failed to reduce a node it owns. Wraps the underlying cause with the offending
+    /// precompile's name so dispatch failures are attributable.
+    ///
+    /// Registry *construction* errors (id-derivation drift, framework-reserved `ZERO` id,
+    /// duplicate id) are not in this enum: they are setup-time programming errors and
+    /// [`PrecompileRegistry::with_precompile`](super::PrecompileRegistry::with_precompile)
+    /// panics on them.
     #[error("precompile `{name}`: {source}")]
     Precompile {
         name: &'static str,
         source: Box<PrecompileError>,
     },
-
-    /// A precompile's declared [`Precompile::id`](super::Precompile::id) is inconsistent with
-    /// the id derived from its name. Registry construction-time programming error.
-    #[error("precompile `{0}` declares an id inconsistent with its name derivation")]
-    PrecompileIdMismatch(&'static str),
-
-    /// Two precompiles in a registry resolve to the same id.
-    #[error("duplicate precompile id in registry (`{0}` and `{1}`)")]
-    DuplicatePrecompileId(&'static str, &'static str),
 }
 
 impl PrecompileError {

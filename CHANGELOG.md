@@ -19,6 +19,7 @@
 - [BREAKING] Cleaned up `Processor` trait by moving methods into their corresponding sub-interface ([#3202](https://github.com/0xMiden/miden-vm/pull/3202)).
 - Added the content-addressed deferred-DAG framework (`miden_core::deferred`): data model, `Schema` seam, wire format, `Precompile`/`PrecompileSchema`, the `adv.*_deferred` system events and MASM grammar, plus reference/composite test apps. Purely additive substrate with no behavioral change; the precompile proof-model migrates onto it in a follow-up ([#3170](https://github.com/0xMiden/miden-vm/pull/3170)).
 - Added the content-addressed deferred-DAG framework (`miden_core::deferred`): data model with a structured `Tag { id, imm }`, wire format, the `Precompile` trait + `Precompiles` registry, the `adv.*_deferred` system events and MASM grammar, plus reference test precompiles. Purely additive substrate with no behavioral change; the precompile proof-model migrates onto it in a follow-up ([#3170](https://github.com/0xMiden/miden-vm/pull/3170)).
+- Added the content-addressed deferred-DAG framework (`miden_core::deferred`): data model with a structured `Tag { id, imm }`, wire format, the `Precompile` trait + `PrecompileRegistry`, the `adv.*_deferred` system events and MASM grammar, plus reference test precompiles. Purely additive substrate with no behavioral change; the precompile proof-model migrates onto it in a follow-up ([#3170](https://github.com/0xMiden/miden-vm/pull/3170)).
 
 #### Fixes
 

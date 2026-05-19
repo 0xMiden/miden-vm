@@ -174,11 +174,7 @@ impl ArithTestPrecompile {
         Node::expression(Self::leaf_tag(), Payload::new(limbs.map(Felt::from_u32)))
     }
 
-    fn limbs_of(node: &Node) -> Result<[u32; 8], PrecompileError> {
-        if node.tag != Self::leaf_tag() {
-            return Err(PrecompileError::InvalidNode);
-        }
-        let payload = node.expression_payload().ok_or(PrecompileError::InvalidNode)?;
+    fn decode_limbs(payload: &Payload) -> Result<[u32; 8], PrecompileError> {
         let mut limbs = [0u32; 8];
         for (i, felt) in payload.0.iter().enumerate() {
             let v = felt.as_canonical_u64();
@@ -188,6 +184,13 @@ impl ArithTestPrecompile {
             limbs[i] = v as u32;
         }
         Ok(limbs)
+    }
+
+    fn limbs_of(node: &Node) -> Result<[u32; 8], PrecompileError> {
+        if node.tag != Self::leaf_tag() {
+            return Err(PrecompileError::InvalidNode);
+        }
+        Self::decode_limbs(node.expression_payload().ok_or(PrecompileError::InvalidNode)?)
     }
 
     fn wrap_add(a: [u32; 8], b: [u32; 8]) -> [u32; 8] {
@@ -225,11 +228,7 @@ impl Precompile for ArithTestPrecompile {
     }
 
     fn decode(&self, imm: [Felt; 3]) -> Option<TagInfo> {
-        let [disc, m1, m2] = imm;
-        if m1 != ZERO || m2 != ZERO {
-            return None;
-        }
-        let (node_type, evaluates_to) = match disc {
+        let (node_type, evaluates_to) = match imm[0] {
             d if d == Self::D_LEAF => (NodeType::Value, Self::leaf_tag()),
             d if d == Self::D_ADD || d == Self::D_MUL => (NodeType::Binary, Self::leaf_tag()),
             d if d == Self::D_EQ => (NodeType::Binary, miden_core::deferred::TRUE_TAG),
@@ -240,20 +239,20 @@ impl Precompile for ArithTestPrecompile {
 
     fn reduce(
         &self,
-        node: &Node,
+        imm: [Felt; 3],
+        payload: &NodePayload,
         witness: &mut WitnessBuilder<'_>,
     ) -> Result<Node, PrecompileError> {
-        if node.tag.id != Self::id() || node.tag.imm[1] != ZERO || node.tag.imm[2] != ZERO {
+        let NodePayload::Expression(p) = payload else {
             return Err(PrecompileError::InvalidNode);
-        }
-        let payload = node.expression_payload().ok_or(PrecompileError::InvalidNode)?;
-        match node.tag.imm[0] {
+        };
+        match imm[0] {
             d if d == Self::D_LEAF => {
-                Self::limbs_of(node)?;
-                Ok(node.clone())
+                Self::decode_limbs(p)?;
+                Ok(Node::expression(Tag::new(Self::id(), imm), *p))
             },
             d if d == Self::D_ADD || d == Self::D_MUL => {
-                let (lhs, rhs) = payload.binary_op_children();
+                let (lhs, rhs) = p.binary_op_children();
                 let a = Self::limbs_of(&witness.resolve(lhs)?)?;
                 let b = Self::limbs_of(&witness.resolve(rhs)?)?;
                 let out = if d == Self::D_ADD {
@@ -264,7 +263,7 @@ impl Precompile for ArithTestPrecompile {
                 Ok(Self::leaf_node(out))
             },
             d if d == Self::D_EQ => {
-                let (lhs, rhs) = payload.binary_op_children();
+                let (lhs, rhs) = p.binary_op_children();
                 if witness.resolve(lhs)? != witness.resolve(rhs)? {
                     return Err(PrecompileError::AssertionFailed);
                 }
@@ -648,10 +647,7 @@ impl Precompile for ChunkTestPrecompile {
     }
 
     fn decode(&self, imm: [Felt; 3]) -> Option<TagInfo> {
-        let [role, n, reserved] = imm;
-        if reserved != ZERO {
-            return None;
-        }
+        let [role, n, _] = imm;
         match role {
             r if r == PREIMAGE_ROLE => Some(TagInfo {
                 node_type: NodeType::Chunks(n.as_canonical_u64() as u32),
@@ -667,10 +663,11 @@ impl Precompile for ChunkTestPrecompile {
 
     fn reduce(
         &self,
-        node: &Node,
+        imm: [Felt; 3],
+        payload: &NodePayload,
         _witness: &mut WitnessBuilder<'_>,
     ) -> Result<Node, PrecompileError> {
-        match &node.payload {
+        match payload {
             NodePayload::Chunk(chunks) => {
                 let mut acc = [ZERO; 8];
                 for c in chunks.iter() {
@@ -680,7 +677,7 @@ impl Precompile for ChunkTestPrecompile {
                 }
                 Ok(Node::expression(digest_tag(), Payload::new(acc)))
             },
-            NodePayload::Expression(_) => Ok(node.clone()),
+            NodePayload::Expression(p) => Ok(Node::expression(Tag::new(Self::id(), imm), *p)),
         }
     }
 }
