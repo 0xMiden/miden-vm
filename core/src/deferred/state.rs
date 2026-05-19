@@ -359,7 +359,7 @@ impl DeferredState {
     /// because that situation can't arise on a value produced by the supported constructors.
     ///
     /// Test-only: the chain walk currently has no production caller (the verifier consumes the
-    /// rehydrated state directly). Gated so it isn't dead public surface in PR A.
+    /// rehydrated state directly). Gated so it isn't dead public surface.
     #[cfg(test)]
     pub fn statements(&self) -> Vec<Digest> {
         let mut out = Vec::new();
