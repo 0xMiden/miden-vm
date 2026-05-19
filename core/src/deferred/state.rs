@@ -5,7 +5,7 @@ use alloc::{
 
 use super::{
     DeferredError, DeferredStateWire, Digest, IntegrityError, Node, NodePayload, NodeType, Payload,
-    ReduceCtx, Schema, SchemaError, TRUE_DIGEST, TRUE_TAG,
+    Schema, SchemaError, TRUE_DIGEST, TRUE_TAG,
 };
 
 /// In-memory deferred-DAG state — the verifier's witness.
@@ -63,13 +63,13 @@ impl DeferredState {
     }
 
     /// Insert `node` under a caller-supplied `digest`, skipping the Poseidon2 hash. Useful on
-    /// the resolve-then-intern path where the digest is already known from the resolver's
-    /// lookup. The hint is primed into the node's digest cache so subsequent reads are O(1).
-    /// A `debug_assert!` cross-checks the hint against the recomputed digest in debug
-    /// builds — release builds trust the caller.
+    /// the resolve-then-intern path where the digest is already known from
+    /// [`WitnessBuilder::resolve`]'s lookup. The hint is primed into the node's digest cache so
+    /// subsequent reads are O(1). A `debug_assert!` cross-checks the hint against the recomputed
+    /// digest in debug builds — release builds trust the caller.
     ///
-    /// Internal: only the `DfsResolver` reduction driver invokes this. The hint is trusted in
-    /// release builds, so it must not be exposed to external code.
+    /// Internal: only the [`WitnessBuilder`] driver invokes this. The hint is trusted in release
+    /// builds, so it must not be exposed to external code.
     pub(crate) fn intern_with_digest(&mut self, digest: Digest, node: Node) {
         debug_assert_eq!(
             digest,
@@ -165,7 +165,7 @@ impl DeferredState {
         // Compute the input digest once at the entry; the resolver threads it through so the
         // post-reduce intern of the input doesn't hash it again.
         let digest = node.digest();
-        DfsResolver { state: self, schema }.reduce_and_intern(node, digest)
+        WitnessBuilder::new(self, schema).reduce_and_intern(node, digest)
     }
 
     /// Serialize this state to its wire form. Walks reachable nodes from `root` in DFS
@@ -453,27 +453,77 @@ fn reachable_closure(nodes: &BTreeMap<Digest, Node>, root: Digest) -> BTreeSet<D
     seen
 }
 
-// REDUCTION DRIVER
+// WITNESS BUILDER
 // ================================================================================================
 
-/// Bound the [`DeferredState`] and [`Schema`] together so [`ReduceCtx::resolve`] can recurse
-/// through [`Schema::reduce`] without aliasing borrow problems: the schema is held by shared
-/// reference, the state by exclusive reference. Each `resolve` call looks the child up,
-/// recursively reduces it, and interns every node it visits (except the TRUE sentinel); each
-/// `intern` call deposits a freshly-minted canonical node directly into the DAG.
-struct DfsResolver<'a> {
+/// Assembles the verifier's reduction witness while a [`Schema::reduce`] (or, via the composite,
+/// a [`crate::deferred::Precompile::reduce`]) runs.
+///
+/// A schema only supplies *per-node* semantics; it does not own the DAG. This handle is what
+/// threads the [`DeferredState`] and the installed [`Schema`] through that call — the schema by
+/// shared reference, the state by exclusive reference, bundled together so
+/// [`resolve`](Self::resolve) can recurse back through `Schema::reduce` without an aliasing-borrow
+/// problem. A schema's `reduce` therefore reads as a depth-first recursive function: "resolve lhs,
+/// resolve rhs, combine."
+///
+/// The two capabilities, and why every touched node is recorded:
+///
+/// - [`resolve`](Self::resolve) walks a child digest to its canonical form, recursively reducing it
+///   and interning every node visited (the input op and its canonical) along the way.
+/// - [`intern`](Self::intern) deposits a freshly-minted canonical node directly into the DAG —
+///   needed for compound canonicals whose payload references just-computed child digests.
+///
+/// The interning is the point, not a side effect: the verifier checks neighbors against each
+/// other rather than re-executing the DAG, so the witness must contain the *whole* reduction
+/// proof — every op visited and every canonical produced, not just the final answer (see
+/// [`DeferredState::evaluate`]). The sole exception is the TRUE sentinel, a structural marker the
+/// verifier accepts directly.
+///
+/// There is exactly one of these: the prover builds the witness through it, and the verifier's
+/// [`DeferredState::rehydrate`] re-runs the identical path to re-establish it — so no trait
+/// abstraction over "kinds of builder" is warranted. Construction is crate-private; a schema
+/// only ever receives a `&mut WitnessBuilder` from the framework and cannot fabricate one.
+pub struct WitnessBuilder<'a> {
     state: &'a mut DeferredState,
     schema: &'a dyn Schema,
 }
 
-impl DfsResolver<'_> {
+impl<'a> WitnessBuilder<'a> {
+    /// Bind a state and schema into a witness builder. Crate-private; the public entry point is
+    /// [`DeferredState::evaluate`], which hands the resulting `&mut WitnessBuilder` to
+    /// `Schema::reduce`.
+    pub(crate) fn new(state: &'a mut DeferredState, schema: &'a dyn Schema) -> Self {
+        Self { state, schema }
+    }
+
+    /// Walk `digest` to its canonical form, recursively reducing it via the installed schema.
+    /// Errors with [`SchemaError::MissingNode`] if the digest is not in the DAG. Every node
+    /// visited along the way is interned (the input and the canonical result) except the TRUE
+    /// sentinel.
+    pub fn resolve(&mut self, digest: Digest) -> Result<Node, SchemaError> {
+        let child = self.state.get(&digest)?.clone();
+        // Pass the known digest through so the post-reduce intern of `child` skips Poseidon2.
+        self.reduce_and_intern(child, digest)
+    }
+
+    /// Intern `node` into the DAG and return its digest. `node` is assumed already canonical —
+    /// the framework does not re-reduce it. Idempotent: interning the same node twice is a
+    /// no-op. Required for compound canonicals whose payload references just-minted child digests.
+    pub fn intern(&mut self, node: Node) -> Digest {
+        self.state.intern(node)
+    }
+
     /// Reduce `node` to canonical form, interning every node visited along the way — the input
     /// (under the caller-supplied `input_digest`, no re-hash) and the canonical result — except
     /// the TRUE sentinel (which is a structural marker, not a load-bearing DAG node).
     ///
     /// `node` is passed to `schema.reduce` by reference so we can intern it by-move afterwards,
     /// avoiding a chunk-sized clone on every reduction.
-    fn reduce_and_intern(&mut self, node: Node, input_digest: Digest) -> Result<Node, SchemaError> {
+    pub(crate) fn reduce_and_intern(
+        &mut self,
+        node: Node,
+        input_digest: Digest,
+    ) -> Result<Node, SchemaError> {
         let schema = self.schema;
         let canonical = schema.reduce(&node, self)?;
         self.state.intern_with_digest(input_digest, node);
@@ -481,18 +531,6 @@ impl DfsResolver<'_> {
             self.state.intern(canonical.clone());
         }
         Ok(canonical)
-    }
-}
-
-impl ReduceCtx for DfsResolver<'_> {
-    fn resolve(&mut self, digest: Digest) -> Result<Node, SchemaError> {
-        let child = self.state.get(&digest)?.clone();
-        // Pass the known digest through so the post-reduce intern of `child` skips Poseidon2.
-        self.reduce_and_intern(child, digest)
-    }
-
-    fn intern(&mut self, node: Node) -> Digest {
-        self.state.intern(node)
     }
 }
 
@@ -553,7 +591,7 @@ mod tests {
         let pre_root = state.root();
         let pre_node_count = state.nodes().len();
         let err = state.log(stmt_digest, bogus_root);
-        assert!(matches!(err, Err(super::super::DeferredError::InvalidPayload)));
+        assert!(matches!(err, Err(DeferredError::InvalidPayload)));
         assert_eq!(state.root(), pre_root, "root must remain unchanged on failure");
         assert_eq!(state.nodes().len(), pre_node_count, "no node interned on failure");
     }
@@ -689,7 +727,7 @@ mod tests {
     fn witness_includes_all_registered_nodes() {
         // Build (a + b) * c, assert it equals leaf(35), evaluate to drive the canonical
         // intermediates into the DAG, then snapshot the witness. The TRUE node is interned
-        // *during* reduce but the DfsResolver skips it (sentinel, not load-bearing), so it
+        // *during* reduce but the WitnessBuilder skips it (sentinel, not load-bearing), so it
         // does not appear in the witness.
         let mut state = DeferredState::new();
         let schema = TestPrecompile;

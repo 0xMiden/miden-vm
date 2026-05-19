@@ -9,8 +9,8 @@
 use miden_core::{
     Felt, ZERO,
     deferred::{
-        DeferredError, Digest, Node, NodeType, Payload, Precompile, PrecompileTag, ReduceCtx,
-        Schema, SchemaError, TRUE_TAG, Tag, TagInfo, precompile_id, true_node,
+        DeferredError, Digest, Node, NodeType, Payload, Precompile, PrecompileTag, Schema,
+        SchemaError, TRUE_TAG, Tag, TagInfo, WitnessBuilder, precompile_id, true_node,
     },
 };
 
@@ -147,18 +147,18 @@ impl Precompile for Uint {
         Some(TagInfo { node_type, evaluates_to })
     }
 
-    fn reduce(&self, node: &Node, ctx: &mut dyn ReduceCtx) -> Result<Node, SchemaError> {
+    fn reduce(&self, node: &Node, witness: &mut WitnessBuilder<'_>) -> Result<Node, SchemaError> {
         match UintNode::parse(node)? {
             // Leaf canonicality is checked at parse-time, deferred from register-time so that
             // malformed leaves are interned silently and only error out when used.
             UintNode::Leaf => Ok(node.clone()),
             UintNode::BinaryOp { op, lhs, rhs } => {
-                let a = leaf_limbs(&ctx.resolve(lhs)?)?;
-                let b = leaf_limbs(&ctx.resolve(rhs)?)?;
+                let a = leaf_limbs(&witness.resolve(lhs)?)?;
+                let b = leaf_limbs(&witness.resolve(rhs)?)?;
                 Ok(Self::leaf_node(op.apply(a, b)))
             },
             UintNode::Eq { lhs, rhs } => {
-                if ctx.resolve(lhs)? != ctx.resolve(rhs)? {
+                if witness.resolve(lhs)? != witness.resolve(rhs)? {
                     return Err(SchemaError::AssertionFailed);
                 }
                 Ok(true_node())
@@ -178,11 +178,11 @@ impl Schema for Uint {
             .ok_or(SchemaError::InvalidNode)
     }
 
-    fn reduce(&self, node: &Node, ctx: &mut dyn ReduceCtx) -> Result<Node, SchemaError> {
+    fn reduce(&self, node: &Node, witness: &mut WitnessBuilder<'_>) -> Result<Node, SchemaError> {
         if node.tag[0] != Self::id() {
             return Err(SchemaError::InvalidNode);
         }
-        Precompile::reduce(self, node, ctx)
+        Precompile::reduce(self, node, witness)
     }
 }
 

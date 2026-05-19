@@ -22,7 +22,7 @@ use miden_core::{
     Felt, ZERO,
     deferred::{
         DeferredError, Digest, Node, NodePayload, NodeType, Payload, Precompile, PrecompileTag,
-        ReduceCtx, SchemaError, TRUE_TAG, Tag, TagInfo, precompile_id, true_node,
+        SchemaError, TRUE_TAG, Tag, TagInfo, WitnessBuilder, precompile_id, true_node,
     },
 };
 
@@ -152,7 +152,7 @@ impl Precompile for Hash {
         }
     }
 
-    fn reduce(&self, node: &Node, ctx: &mut dyn ReduceCtx) -> Result<Node, SchemaError> {
+    fn reduce(&self, node: &Node, witness: &mut WitnessBuilder<'_>) -> Result<Node, SchemaError> {
         if node.tag[0] != Self::id() || node.tag[3] != ZERO {
             return Err(SchemaError::InvalidNode);
         }
@@ -178,7 +178,7 @@ impl Precompile for Hash {
                 }
                 let payload = node.expression_payload().ok_or(SchemaError::InvalidNode)?;
                 let (h_lhs, h_rhs) = payload.binary_op_children();
-                if ctx.resolve(h_lhs)? != ctx.resolve(h_rhs)? {
+                if witness.resolve(h_lhs)? != witness.resolve(h_rhs)? {
                     return Err(SchemaError::AssertionFailed);
                 }
                 Ok(true_node())

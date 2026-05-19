@@ -10,8 +10,8 @@ use miden_assembly::Assembler;
 use miden_core::{
     ZERO,
     deferred::{
-        Node, NodePayload, NodeType, Payload, ReduceCtx, Schema, SchemaError, TRUE_DIGEST, Tag,
-        TagInfo, true_node,
+        Node, NodePayload, NodeType, Payload, Schema, SchemaError, TRUE_DIGEST, Tag, TagInfo,
+        WitnessBuilder, true_node,
     },
 };
 use miden_processor::{
@@ -213,7 +213,7 @@ impl Schema for ArithTestSchema {
         Ok(TagInfo { node_type, evaluates_to })
     }
 
-    fn reduce(&self, node: &Node, ctx: &mut dyn ReduceCtx) -> Result<Node, SchemaError> {
+    fn reduce(&self, node: &Node, witness: &mut WitnessBuilder<'_>) -> Result<Node, SchemaError> {
         if node.tag[0] != Self::PRECOMPILE_ID || node.tag[2] != ZERO || node.tag[3] != ZERO {
             return Err(SchemaError::InvalidNode);
         }
@@ -225,8 +225,8 @@ impl Schema for ArithTestSchema {
             },
             d if d == Self::D_ADD || d == Self::D_MUL => {
                 let (lhs, rhs) = payload.binary_op_children();
-                let a = Self::limbs_of(&ctx.resolve(lhs)?)?;
-                let b = Self::limbs_of(&ctx.resolve(rhs)?)?;
+                let a = Self::limbs_of(&witness.resolve(lhs)?)?;
+                let b = Self::limbs_of(&witness.resolve(rhs)?)?;
                 let out = if d == Self::D_ADD {
                     Self::wrap_add(a, b)
                 } else {
@@ -236,7 +236,7 @@ impl Schema for ArithTestSchema {
             },
             d if d == Self::D_EQ => {
                 let (lhs, rhs) = payload.binary_op_children();
-                if ctx.resolve(lhs)? != ctx.resolve(rhs)? {
+                if witness.resolve(lhs)? != witness.resolve(rhs)? {
                     return Err(SchemaError::AssertionFailed);
                 }
                 Ok(true_node())
@@ -300,7 +300,7 @@ fn deferred_end_to_end_register_eval_assert() {
     // Six reachable expression nodes, plus the predicate node, all interned by register.
     let expected_digests = [a_digest, b_digest, c_digest, d_digest, add_digest, mul_digest];
     for digest in expected_digests {
-        assert!(state.contains(&digest), "missing node for digest {:?}", digest);
+        assert!(state.contains(&digest), "missing node for digest {digest:?}");
     }
     assert!(state.contains(&assertion.digest()), "predicate node must be interned");
 
@@ -361,7 +361,7 @@ fn deferred_evaluate_pushes_canonical_form_to_advice() {
     );
     assert_eq!(mem[0].as_canonical_u64(), 7, "limb 0 of (3+4)");
     for (limb_idx, felt) in mem[..8].iter().enumerate().skip(1) {
-        assert_eq!(felt.as_canonical_u64(), 0, "limb {} of (3+4) must be zero", limb_idx);
+        assert_eq!(felt.as_canonical_u64(), 0, "limb {limb_idx} of (3+4) must be zero");
     }
 }
 
@@ -413,8 +413,8 @@ fn deferred_register_predicate_does_not_verify() {
 
     // Just register — execution must succeed because register is a pure host hint.
     let mut src = String::from("begin\n");
-    emit_register(&mut src, a.clone());
-    emit_register(&mut src, b.clone());
+    emit_register(&mut src, a);
+    emit_register(&mut src, b);
     emit_register(&mut src, mismatch.clone());
     src.push_str("end\n");
 
@@ -610,7 +610,7 @@ impl Schema for ChunkTestSchema {
         }
     }
 
-    fn reduce(&self, node: &Node, _ctx: &mut dyn ReduceCtx) -> Result<Node, SchemaError> {
+    fn reduce(&self, node: &Node, _witness: &mut WitnessBuilder<'_>) -> Result<Node, SchemaError> {
         match &node.payload {
             NodePayload::Chunk(chunks) => {
                 let mut acc = [ZERO; 8];
@@ -659,7 +659,7 @@ fn chunk_register_reads_bulk_data_from_memory_and_interns_node() {
         writeln!(&mut src, "    mem_store.{}", ptr + i as u32).unwrap();
     }
     // Push ptr, then tag (deepest first so tag[0] ends up on top under event_id).
-    writeln!(&mut src, "    push.{}", ptr).unwrap();
+    writeln!(&mut src, "    push.{ptr}").unwrap();
     for f in tag.iter().rev() {
         writeln!(&mut src, "    push.{}", f.as_canonical_u64()).unwrap();
     }
@@ -701,7 +701,7 @@ fn chunk_register_rejects_unaligned_pointer() {
     let ptr: u32 = 1; // not word-aligned
 
     let mut src = String::from("begin\n");
-    writeln!(&mut src, "    push.{}", ptr).unwrap();
+    writeln!(&mut src, "    push.{ptr}").unwrap();
     for f in tag.iter().rev() {
         writeln!(&mut src, "    push.{}", f.as_canonical_u64()).unwrap();
     }
@@ -724,7 +724,7 @@ fn chunk_register_with_zero_chunks_still_interns_a_node() {
     let expected_digest = Node::chunk(tag, vec![]).digest();
 
     let mut src = String::from("begin\n");
-    writeln!(&mut src, "    push.{}", ptr).unwrap();
+    writeln!(&mut src, "    push.{ptr}").unwrap();
     for f in tag.iter().rev() {
         writeln!(&mut src, "    push.{}", f.as_canonical_u64()).unwrap();
     }

@@ -17,8 +17,8 @@ mod schema;
 mod state;
 mod wire;
 
-pub use schema::{NodeType, NoopSchema, ReduceCtx, Schema, SchemaError, TagInfo};
-pub use state::DeferredState;
+pub use schema::{NodeType, NoopSchema, Schema, SchemaError, TagInfo};
+pub use state::{DeferredState, WitnessBuilder};
 pub use wire::{DeferredStateWire, IntegrityError, TRUE_INDEX, WireBody, WireEntry};
 
 // Multi-precompile composite layer. The `Precompile` trait + `PrecompileSchema` substrate are
@@ -483,7 +483,7 @@ mod tests {
         // Either way, the digest must equal the source's digest — the cache is derived data.
         let n = Node::expression(TAG_A, payload(33));
         let d1 = n.digest();
-        let cloned = n.clone();
+        let cloned = n;
         let d2 = cloned.digest();
         assert_eq!(d1, d2);
     }
