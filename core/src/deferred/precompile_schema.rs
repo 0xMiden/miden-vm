@@ -123,9 +123,6 @@ mod tests {
         fn name(&self) -> &'static str {
             self.name
         }
-        fn version(&self) -> u32 {
-            1
-        }
         fn id(&self) -> Felt {
             precompile_id(self)
         }

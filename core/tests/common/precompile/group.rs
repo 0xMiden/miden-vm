@@ -26,7 +26,6 @@ pub struct Group;
 
 impl Group {
     pub const NAME: &'static str = "mock_group";
-    pub const VERSION: u32 = 1;
 
     /// Discriminant indices.
     pub const COMBINE_TAG_ID: u32 = 0;
@@ -73,10 +72,6 @@ impl Group {
 impl Precompile for Group {
     fn name(&self) -> &'static str {
         Self::NAME
-    }
-
-    fn version(&self) -> u32 {
-        Self::VERSION
     }
 
     fn id(&self) -> Felt {
