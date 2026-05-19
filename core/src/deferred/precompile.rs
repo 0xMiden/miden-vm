@@ -93,16 +93,13 @@ pub fn precompile_id(p: &dyn Precompile) -> Felt {
 fn derive(name: &str, version: u32) -> Felt {
     let mut hasher = Hasher::new();
     hasher.update(APP_ID_DOMSEP);
-    hash_bytes(&mut hasher, name.as_bytes());
+    // Length-prefix the name so it is domain-separated from the version suffix.
+    hasher.update(&(name.len() as u32).to_le_bytes());
+    hasher.update(name.as_bytes());
     hasher.update(&version.to_le_bytes());
     let digest = hasher.finalize();
     let raw = u64::from_le_bytes(digest.as_bytes()[..8].try_into().expect("8 bytes"));
     Felt::new_unchecked(raw % Felt::ORDER)
-}
-
-fn hash_bytes(hasher: &mut Hasher, bytes: &[u8]) {
-    hasher.update(&(bytes.len() as u32).to_le_bytes());
-    hasher.update(bytes);
 }
 
 #[cfg(test)]

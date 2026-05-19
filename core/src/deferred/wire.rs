@@ -13,9 +13,6 @@
 
 use alloc::{sync::Arc, vec::Vec};
 
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
-
 use super::{Chunk, Payload, Tag};
 use crate::{
     Felt, ZERO,
@@ -37,7 +34,6 @@ pub const TRUE_INDEX: u32 = u32::MAX;
 /// wire (0/1/2). Validation of the body against the schema-declared
 /// [`super::NodeType`] for the entry's tag happens during rehydration, not at the bytes layer.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum WireBody {
     /// 8 raw felts as the payload. Used for self-evaluating value leaves (Uint256 leaf,
     /// MockHash digest, ...) and, per the structural heuristic in
@@ -59,7 +55,6 @@ pub enum WireBody {
 /// A single wire-format node: tag plus body. Multiple entries form a topologically-ordered
 /// sequence (child indices reference earlier entries).
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct WireEntry {
     pub tag: Tag,
     pub body: WireBody,
@@ -77,17 +72,8 @@ pub struct WireEntry {
 /// AND-node of the transcript) — and is therefore not carried as a separate field. Callers that
 /// need the commitment go through [`super::DeferredState::rehydrate`].
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct DeferredStateWire {
     pub entries: Vec<WireEntry>,
-}
-
-impl DeferredStateWire {
-    /// Construct an empty wire. The derived commitment is [`super::TRUE_DIGEST`] (trivial
-    /// transcript).
-    pub fn empty() -> Self {
-        Self::default()
-    }
 }
 
 // SERIALIZATION
@@ -233,4 +219,42 @@ pub enum IntegrityError {
     /// A statement reduced successfully but its canonical is not the TRUE node.
     #[error("AND-chain statement reduced to a non-TRUE canonical form")]
     PredicateNotTrue,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Felt;
+
+    fn felts(seed: u64) -> [Felt; 8] {
+        core::array::from_fn(|i| Felt::new_unchecked(seed + i as u64))
+    }
+
+    /// `DeferredStateWire` is the proof-transit unit; its hand-written `Serializable` /
+    /// `Deserializable` must round-trip byte-for-byte across all three `WireBody` variants
+    /// (including the `TRUE_INDEX` child sentinel) and the empty wire.
+    #[test]
+    fn wire_serialize_round_trip_all_bodies() {
+        let wire = DeferredStateWire {
+            entries: alloc::vec![
+                WireEntry {
+                    tag: felts(1)[..4].try_into().unwrap(),
+                    body: WireBody::Value(Payload::new(felts(10)))
+                },
+                WireEntry {
+                    tag: felts(2)[..4].try_into().unwrap(),
+                    body: WireBody::Chunks(Arc::from(alloc::vec![felts(20), felts(30)])),
+                },
+                WireEntry {
+                    tag: felts(3)[..4].try_into().unwrap(),
+                    body: WireBody::Binary { lhs: 0, rhs: TRUE_INDEX },
+                },
+            ],
+        };
+        let decoded = DeferredStateWire::read_from_bytes(&wire.to_bytes()).unwrap();
+        assert_eq!(decoded, wire);
+
+        let empty = DeferredStateWire::default();
+        assert_eq!(DeferredStateWire::read_from_bytes(&empty.to_bytes()).unwrap(), empty);
+    }
 }

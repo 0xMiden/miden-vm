@@ -33,14 +33,12 @@ mod precompile_schema;
 #[cfg(test)]
 pub(crate) mod test_precompile;
 
-use alloc::{sync::Arc, vec::Vec};
+use alloc::sync::Arc;
 
 use miden_crypto::{ZERO, hash::poseidon2::Poseidon2};
 use miden_utils_sync::OnceLockCompat;
 pub use precompile::{Precompile, PrecompileTag, precompile_id};
 pub use precompile_schema::PrecompileSchema;
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
 
 use crate::{
     Felt, Word,
@@ -90,7 +88,6 @@ pub fn true_node() -> Node {
 /// binary op, the first 4 felts are the lhs child digest and the last 4 are the rhs child digest.
 /// Assertion payloads follow the same `lhs_digest || rhs_digest` convention as binary ops.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Payload(pub [Felt; 8]);
 
 impl Payload {
@@ -146,13 +143,11 @@ impl Payload {
 /// (which know the digest already). The cache is *not* part of structural identity: equality,
 /// serialization, and the wire format ignore it.
 #[derive(Clone, Debug)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Node {
     pub tag: Tag,
     pub payload: NodePayload,
     /// Memoised Poseidon2 digest. Cloning a node may yield a fresh empty cache (depends on the
     /// `OnceLockCompat` impl); the first `.digest()` call on the clone re-populates it.
-    #[cfg_attr(feature = "serde", serde(skip, default = "OnceLockCompat::new"))]
     digest_cache: OnceLockCompat<Digest>,
 }
 
@@ -166,7 +161,6 @@ impl Eq for Node {}
 
 /// Variant of a [`Node`]'s body.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum NodePayload {
     /// Leaves, op-nodes, predicates, AND-nodes. 8-felt payload.
     Expression(Payload),
@@ -196,18 +190,8 @@ impl Node {
         }
     }
 
-    /// Returns the 8-felt payload for expression-bodied nodes. Returns `None` for chunk nodes,
+    /// Returns the 8-felt payload of an expression node. Returns `None` for chunk nodes,
     /// which don't have a fixed-size payload.
-    pub fn payload_felts(&self) -> Option<&Payload> {
-        match &self.payload {
-            NodePayload::Expression(p) => Some(p),
-            NodePayload::Chunk(_) => None,
-        }
-    }
-
-    /// Returns the 8-felt payload of an expression node. Returns `None` for chunk nodes.
-    /// Equivalent to [`Self::payload_felts`] now that predicates share the Expression body
-    /// shape; kept as a separate method for readability at call sites.
     pub fn expression_payload(&self) -> Option<&Payload> {
         match &self.payload {
             NodePayload::Expression(p) => Some(p),
@@ -290,23 +274,10 @@ impl Node {
 // SERIALIZATION
 // ================================================================================================
 
-fn read_tag<R: ByteReader>(source: &mut R) -> Result<Tag, DeserializationError> {
-    Ok([
-        Felt::read_from(source)?,
-        Felt::read_from(source)?,
-        Felt::read_from(source)?,
-        Felt::read_from(source)?,
-    ])
-}
-
-fn read_chunk<R: ByteReader>(source: &mut R) -> Result<Chunk, DeserializationError> {
-    let mut chunk = [ZERO; 8];
-    for felt in &mut chunk {
-        *felt = Felt::read_from(source)?;
-    }
-    Ok(chunk)
-}
-
+// `Payload` is the only deferred node-body type with a hand-written `Serializable` /
+// `Deserializable`: the wire format ([`wire`]) reuses it for `WireBody::Value`. `Node` and
+// `NodePayload` are never serialized directly — wire entries are the transit unit — so they
+// carry no custom serde, and no `serde` derives exist on the deferred types either.
 impl Serializable for Payload {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         for felt in &self.0 {
@@ -322,66 +293,6 @@ impl Deserializable for Payload {
             *felt = Felt::read_from(source)?;
         }
         Ok(Self(felts))
-    }
-}
-
-impl Serializable for NodePayload {
-    fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        match self {
-            NodePayload::Expression(payload) => {
-                target.write_u8(0);
-                payload.write_into(target);
-            },
-            NodePayload::Chunk(chunks) => {
-                target.write_u8(1);
-                target.write_usize(chunks.len());
-                for chunk in chunks.iter() {
-                    for felt in chunk {
-                        felt.write_into(target);
-                    }
-                }
-            },
-        }
-    }
-}
-
-impl Deserializable for NodePayload {
-    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        match source.read_u8()? {
-            0 => Ok(NodePayload::Expression(Payload::read_from(source)?)),
-            1 => {
-                let n = source.read_usize()?;
-                let mut chunks: Vec<Chunk> = Vec::with_capacity(n);
-                for _ in 0..n {
-                    chunks.push(read_chunk(source)?);
-                }
-                Ok(NodePayload::Chunk(Arc::from(chunks)))
-            },
-            tag => Err(DeserializationError::InvalidValue(alloc::format!(
-                "invalid NodePayload discriminant: {tag}"
-            ))),
-        }
-    }
-}
-
-impl Serializable for Node {
-    fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        for felt in &self.tag {
-            felt.write_into(target);
-        }
-        self.payload.write_into(target);
-    }
-}
-
-impl Deserializable for Node {
-    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let tag = read_tag(source)?;
-        let payload = NodePayload::read_from(source)?;
-        Ok(Self {
-            tag,
-            payload,
-            digest_cache: OnceLockCompat::new(),
-        })
     }
 }
 
@@ -408,6 +319,8 @@ pub enum DeferredError {
 
 #[cfg(test)]
 mod tests {
+    use alloc::vec::Vec;
+
     use super::*;
 
     const TAG_A: Tag = [

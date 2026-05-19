@@ -106,7 +106,9 @@ fn push_node(src: &mut String, node: Node) {
     for f in node.tag.iter().rev() {
         writeln!(src, "    push.{}", f.as_int()).unwrap();
     }
-    let payload = node.payload_felts().expect("push_node only handles expression-bodied nodes");
+    let payload = node
+        .expression_payload()
+        .expect("push_node only handles expression-bodied nodes");
     for f in payload.0.iter().rev() {
         writeln!(src, "    push.{}", f.as_int()).unwrap();
     }
