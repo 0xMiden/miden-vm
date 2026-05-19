@@ -1,4 +1,4 @@
-name: codspeed synthetic tx
+name: codspeed
 
 on:
   push:
@@ -17,9 +17,9 @@ concurrency:
 
 jobs:
   codspeed:
-    name: Run synthetic transaction CodSpeed benchmark
+    name: Run CodSpeed benchmarks
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 300
     env:
       RAYON_NUM_THREADS: "8"
       SYNTH_BENCH_AXES: exec,trace_prep,prove,verify
@@ -45,14 +45,15 @@ jobs:
           set -euo pipefail
           cargo install cargo-codspeed --version 4.6.0 --locked
 
-      - name: Build benchmark
+      - name: Build benchmarks
         shell: bash
         run: |
           set -euo pipefail
+          cargo codspeed build --profile optimized -p miden-vm --bench blake3_1to1_codspeed --features concurrent
           cargo codspeed build --profile optimized -p miden-vm-synthetic-bench --bench synthetic_codspeed
 
-      - name: Run benchmark
+      - name: Run benchmarks
         uses: CodSpeedHQ/action@3194d9a39c4d46684cb44bf7207fc56626aad8fd # v4.15.1
         with:
           mode: simulation
-          run: cargo codspeed run -p miden-vm-synthetic-bench --bench synthetic_codspeed
+          run: cargo codspeed run
