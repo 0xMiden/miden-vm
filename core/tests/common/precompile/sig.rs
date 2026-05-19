@@ -27,7 +27,6 @@ pub struct Sig;
 
 impl Sig {
     pub const NAME: &'static str = "mock_sig";
-    pub const VERSION: u32 = 1;
 
     pub const VERIFY_TAG_ID: u32 = 0;
 
@@ -52,10 +51,6 @@ impl Sig {
 impl Precompile for Sig {
     fn name(&self) -> &'static str {
         Self::NAME
-    }
-
-    fn version(&self) -> u32 {
-        Self::VERSION
     }
 
     fn id(&self) -> Felt {

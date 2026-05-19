@@ -35,7 +35,6 @@ pub struct Hash;
 
 impl Hash {
     pub const NAME: &'static str = "mock_hash";
-    pub const VERSION: u32 = 1;
 
     pub const PREIMAGE_TAG_ID: u32 = 0;
     pub const DIGEST_TAG_ID: u32 = 1;
@@ -115,10 +114,6 @@ impl Hash {
 impl Precompile for Hash {
     fn name(&self) -> &'static str {
         Self::NAME
-    }
-
-    fn version(&self) -> u32 {
-        Self::VERSION
     }
 
     fn id(&self) -> Felt {

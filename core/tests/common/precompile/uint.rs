@@ -22,10 +22,8 @@ use miden_core::{
 pub struct Uint;
 
 impl Uint {
-    /// App name — hashed into `app_id`. Don't change without bumping [`Self::VERSION`].
+    /// App name — hashed into `app_id`. Renaming breaks the schema for existing programs.
     pub const NAME: &'static str = "uint256";
-    /// App version — bump on incompatible discriminant changes.
-    pub const VERSION: u32 = 1;
 
     /// Discriminant indices.
     pub const LEAF_TAG_ID: u32 = 0;
@@ -117,10 +115,6 @@ impl Uint {
 impl Precompile for Uint {
     fn name(&self) -> &'static str {
         Self::NAME
-    }
-
-    fn version(&self) -> u32 {
-        Self::VERSION
     }
 
     fn id(&self) -> Felt {
