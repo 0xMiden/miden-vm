@@ -6,7 +6,8 @@ use super::precompile::{Precompile, PrecompileTag, precompile_id};
 use crate::{
     Felt,
     deferred::{
-        DeferredError, DeferredState, Digest, Node, ReduceCtx, Schema, SchemaError, Tag, TagInfo,
+        DeferredError, DeferredState, Digest, Node, Schema, SchemaError, Tag, TagInfo,
+        WitnessBuilder,
     },
 };
 
@@ -92,9 +93,9 @@ impl Schema for PrecompileSchema {
             })
     }
 
-    fn reduce(&self, node: &Node, ctx: &mut dyn ReduceCtx) -> Result<Node, SchemaError> {
+    fn reduce(&self, node: &Node, witness: &mut WitnessBuilder<'_>) -> Result<Node, SchemaError> {
         let p = self.precompiles.get(&node.tag[0]).ok_or(SchemaError::InvalidNode)?;
-        p.reduce(node, ctx)
+        p.reduce(node, witness)
             .map_err(|source| SchemaError::Precompile { name: p.name(), source: Box::new(source) })
     }
 }
@@ -141,7 +142,11 @@ mod tests {
                 evaluates_to: self.tag(),
             })
         }
-        fn reduce(&self, node: &Node, _ctx: &mut dyn ReduceCtx) -> Result<Node, SchemaError> {
+        fn reduce(
+            &self,
+            node: &Node,
+            _witness: &mut WitnessBuilder<'_>,
+        ) -> Result<Node, SchemaError> {
             Ok(node.clone())
         }
     }

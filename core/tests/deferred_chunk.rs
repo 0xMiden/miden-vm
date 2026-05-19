@@ -14,8 +14,8 @@
 use miden_core::{
     Felt, ZERO,
     deferred::{
-        DeferredState, Node, NodeType, Payload, ReduceCtx, Schema, SchemaError, TRUE_TAG, Tag,
-        TagInfo, true_node,
+        DeferredState, Node, NodeType, Payload, Schema, SchemaError, TRUE_TAG, Tag, TagInfo,
+        WitnessBuilder, true_node,
     },
 };
 
@@ -85,13 +85,13 @@ impl Schema for TestSchema {
         }
     }
 
-    fn reduce(&self, node: &Node, ctx: &mut dyn ReduceCtx) -> Result<Node, SchemaError> {
+    fn reduce(&self, node: &Node, witness: &mut WitnessBuilder<'_>) -> Result<Node, SchemaError> {
         use miden_core::deferred::NodePayload;
         if node.tag == assert_tag() {
             let p = node.expression_payload().ok_or(SchemaError::InvalidNode)?;
             let (lhs, rhs) = p.binary_op_children();
-            let lhs_canonical = ctx.resolve(lhs)?;
-            let rhs_canonical = ctx.resolve(rhs)?;
+            let lhs_canonical = witness.resolve(lhs)?;
+            let rhs_canonical = witness.resolve(rhs)?;
             if lhs_canonical != rhs_canonical {
                 return Err(SchemaError::AssertionFailed);
             }

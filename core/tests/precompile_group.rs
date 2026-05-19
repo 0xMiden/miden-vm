@@ -19,7 +19,7 @@ fn leaf(low: u64) -> Node {
 fn schema_and_state() -> (PrecompileSchema, DeferredState) {
     let schema = PrecompileSchema::new([
         Box::new(Uint) as Box<dyn Precompile>,
-        Box::new(Group::default()) as Box<dyn Precompile>,
+        Box::new(Group) as Box<dyn Precompile>,
     ])
     .unwrap();
     let mut state = DeferredState::new();
@@ -31,7 +31,7 @@ fn schema_and_state() -> (PrecompileSchema, DeferredState) {
 fn fresh() -> (PrecompileSchema, DeferredState) {
     let schema = PrecompileSchema::new([
         Box::new(Uint) as Box<dyn Precompile>,
-        Box::new(Group::default()) as Box<dyn Precompile>,
+        Box::new(Group) as Box<dyn Precompile>,
     ])
     .unwrap();
     (schema, DeferredState::new())

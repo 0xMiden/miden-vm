@@ -4,14 +4,14 @@
 //! `new` bin-op node whose payload is two `Uint` field-leaf digests `(h_x, h_y)`. The two
 //! **producing** ops (`add`, `sub`) reduce by pulling limbs from both operands' coordinates,
 //! performing coordinate-wise wrapping arithmetic, minting new field leaves for the resulting
-//! `(x3, y3)` via [`ReduceCtx::intern`], and returning a `new` leaf referencing those
+//! `(x3, y3)` via [`WitnessBuilder::intern`], and returning a `new` leaf referencing those
 //! minted digests.
 
 use miden_core::{
     Felt, ZERO,
     deferred::{
-        Digest, Node, NodeType, Payload, Precompile, PrecompileTag, ReduceCtx, SchemaError,
-        TRUE_TAG, Tag, TagInfo, precompile_id, true_node,
+        Digest, Node, NodeType, Payload, Precompile, PrecompileTag, SchemaError, TRUE_TAG, Tag,
+        TagInfo, WitnessBuilder, precompile_id, true_node,
     },
 };
 
@@ -96,7 +96,7 @@ impl Precompile for Group {
         })
     }
 
-    fn reduce(&self, node: &Node, ctx: &mut dyn ReduceCtx) -> Result<Node, SchemaError> {
+    fn reduce(&self, node: &Node, witness: &mut WitnessBuilder<'_>) -> Result<Node, SchemaError> {
         let kind = Discriminant::classify(node.tag[1]).ok_or(SchemaError::InvalidNode)?;
         if node.tag[0] != Self::id() || node.tag[2] != ZERO || node.tag[3] != ZERO {
             return Err(SchemaError::InvalidNode);
@@ -108,8 +108,8 @@ impl Precompile for Group {
             Discriminant::New => {
                 // Canonicalise the two coordinates to field leaves; reject if either child
                 // resolves to something that isn't a `Uint` field leaf.
-                let x_leaf = ctx.resolve(h_lhs)?;
-                let y_leaf = ctx.resolve(h_rhs)?;
+                let x_leaf = witness.resolve(h_lhs)?;
+                let y_leaf = witness.resolve(h_rhs)?;
                 Uint::limbs_of(&x_leaf).map_err(SchemaError::from)?;
                 Uint::limbs_of(&y_leaf).map_err(SchemaError::from)?;
                 Ok(Self::new_node(x_leaf.digest(), y_leaf.digest()))
@@ -120,25 +120,25 @@ impl Precompile for Group {
                     Discriminant::Sub => BinaryOp::Sub,
                     _ => unreachable!(),
                 };
-                let g1 = ctx.resolve(h_lhs)?;
-                let g2 = ctx.resolve(h_rhs)?;
+                let g1 = witness.resolve(h_lhs)?;
+                let g2 = witness.resolve(h_rhs)?;
                 let (h_x1, h_y1) = new_coords(&g1)?;
                 let (h_x2, h_y2) = new_coords(&g2)?;
-                let x1 = Uint::limbs_of(&ctx.resolve(h_x1)?).map_err(SchemaError::from)?;
-                let y1 = Uint::limbs_of(&ctx.resolve(h_y1)?).map_err(SchemaError::from)?;
-                let x2 = Uint::limbs_of(&ctx.resolve(h_x2)?).map_err(SchemaError::from)?;
-                let y2 = Uint::limbs_of(&ctx.resolve(h_y2)?).map_err(SchemaError::from)?;
+                let x1 = Uint::limbs_of(&witness.resolve(h_x1)?).map_err(SchemaError::from)?;
+                let y1 = Uint::limbs_of(&witness.resolve(h_y1)?).map_err(SchemaError::from)?;
+                let x2 = Uint::limbs_of(&witness.resolve(h_x2)?).map_err(SchemaError::from)?;
+                let y2 = Uint::limbs_of(&witness.resolve(h_y2)?).map_err(SchemaError::from)?;
                 let (x3, y3) = match op {
                     BinaryOp::Add => (Uint::wrap_add(x1, x2), Uint::wrap_add(y1, y2)),
                     BinaryOp::Sub => (Uint::wrap_sub(x1, x2), Uint::wrap_sub(y1, y2)),
                 };
                 // *** MINT ***  new field leaves for the result coordinates.
-                let h_x3 = ctx.intern(Uint::leaf_node(x3));
-                let h_y3 = ctx.intern(Uint::leaf_node(y3));
+                let h_x3 = witness.intern(Uint::leaf_node(x3));
+                let h_y3 = witness.intern(Uint::leaf_node(y3));
                 Ok(Self::new_node(h_x3, h_y3))
             },
             Discriminant::Eq => {
-                if ctx.resolve(h_lhs)? != ctx.resolve(h_rhs)? {
+                if witness.resolve(h_lhs)? != witness.resolve(h_rhs)? {
                     return Err(SchemaError::AssertionFailed);
                 }
                 Ok(true_node())

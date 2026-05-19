@@ -11,8 +11,8 @@
 use crate::{
     Felt, ZERO,
     deferred::{
-        DeferredError, Node, NodeType, Payload, Precompile, PrecompileTag, ReduceCtx, Schema,
-        SchemaError, TRUE_TAG, Tag, TagInfo, precompile_id, true_node,
+        DeferredError, Node, NodeType, Payload, Precompile, PrecompileTag, Schema, SchemaError,
+        TRUE_TAG, Tag, TagInfo, WitnessBuilder, precompile_id, true_node,
     },
 };
 
@@ -137,7 +137,7 @@ impl Precompile for TestPrecompile {
         Some(TagInfo { node_type, evaluates_to })
     }
 
-    fn reduce(&self, node: &Node, ctx: &mut dyn ReduceCtx) -> Result<Node, SchemaError> {
+    fn reduce(&self, node: &Node, witness: &mut WitnessBuilder<'_>) -> Result<Node, SchemaError> {
         if node.tag[0] != Self::id() || node.tag[2] != ZERO || node.tag[3] != ZERO {
             return Err(SchemaError::InvalidNode);
         }
@@ -151,8 +151,8 @@ impl Precompile for TestPrecompile {
             },
             Disc::Add | Disc::Mul => {
                 let (lhs, rhs) = payload.binary_op_children();
-                let a = Self::limbs_of(&ctx.resolve(lhs)?).map_err(SchemaError::from)?;
-                let b = Self::limbs_of(&ctx.resolve(rhs)?).map_err(SchemaError::from)?;
+                let a = Self::limbs_of(&witness.resolve(lhs)?).map_err(SchemaError::from)?;
+                let b = Self::limbs_of(&witness.resolve(rhs)?).map_err(SchemaError::from)?;
                 let out = match kind {
                     Disc::Add => Self::wrap_add(a, b),
                     Disc::Mul => Self::wrap_mul(a, b),
@@ -162,7 +162,7 @@ impl Precompile for TestPrecompile {
             },
             Disc::Eq => {
                 let (lhs, rhs) = payload.binary_op_children();
-                if ctx.resolve(lhs)? != ctx.resolve(rhs)? {
+                if witness.resolve(lhs)? != witness.resolve(rhs)? {
                     return Err(SchemaError::AssertionFailed);
                 }
                 Ok(true_node())
@@ -182,10 +182,10 @@ impl Schema for TestPrecompile {
             .ok_or(SchemaError::InvalidNode)
     }
 
-    fn reduce(&self, node: &Node, ctx: &mut dyn ReduceCtx) -> Result<Node, SchemaError> {
+    fn reduce(&self, node: &Node, witness: &mut WitnessBuilder<'_>) -> Result<Node, SchemaError> {
         if node.tag[0] != Self::id() {
             return Err(SchemaError::InvalidNode);
         }
-        Precompile::reduce(self, node, ctx)
+        Precompile::reduce(self, node, witness)
     }
 }
