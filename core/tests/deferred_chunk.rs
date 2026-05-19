@@ -15,8 +15,8 @@
 use miden_core::{
     Felt, ZERO,
     deferred::{
-        DeferredState, Node, NodePayload, NodeType, Payload, Precompile, PrecompileError,
-        PrecompileRegistry, TRUE_TAG, Tag, TagInfo, WitnessBuilder, precompile_id, true_node,
+        DeferredState, Node, NodeType, Payload, Precompile, PrecompileError, PrecompileRegistry,
+        TRUE_TAG, Tag, TagInfo, WitnessBuilder, precompile_id, true_node,
     },
 };
 
@@ -108,15 +108,12 @@ impl Precompile for ChunkTestPrecompile {
     fn reduce(
         &self,
         imm: [Felt; 3],
-        payload: &NodePayload,
+        payload: &Payload,
         witness: &mut WitnessBuilder<'_>,
     ) -> Result<Node, PrecompileError> {
         let [role, ..] = imm;
         if role == ASSERT_ROLE {
-            let NodePayload::Expression(p) = payload else {
-                return Err(PrecompileError::InvalidNode);
-            };
-            let (lhs, rhs) = p.binary_op_children();
+            let (lhs, rhs) = payload.binary_op_children()?;
             if witness.resolve(lhs)? != witness.resolve(rhs)? {
                 return Err(PrecompileError::AssertionFailed);
             }
@@ -124,11 +121,11 @@ impl Precompile for ChunkTestPrecompile {
         }
         match payload {
             // Preimage chunk reduces to its digest leaf.
-            NodePayload::Chunk(chunks) => {
-                Ok(Node::expression(digest_tag(), Self::fake_hash(chunks)))
-            },
+            Payload::Chunk(chunks) => Ok(Node::expression(digest_tag(), Self::fake_hash(chunks))),
             // Digest leaf is self-evaluating.
-            NodePayload::Expression(p) => Ok(Node::expression(Tag::new(Self::id(), imm), *p)),
+            Payload::Expression(f) => {
+                Ok(Node::expression(Tag::new(Self::id(), imm), Payload::new(*f)))
+            },
         }
     }
 }

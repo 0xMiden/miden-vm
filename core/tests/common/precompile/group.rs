@@ -10,8 +10,8 @@
 use miden_core::{
     Felt, ZERO,
     deferred::{
-        Digest, Node, NodePayload, NodeType, Payload, Precompile, PrecompileError, TRUE_TAG, Tag,
-        TagInfo, WitnessBuilder, precompile_id, true_node,
+        Digest, Node, NodeType, Payload, Precompile, PrecompileError, TRUE_TAG, Tag, TagInfo,
+        WitnessBuilder, precompile_id, true_node,
     },
 };
 
@@ -107,14 +107,11 @@ impl Precompile for Group {
     fn reduce(
         &self,
         imm: [Felt; 3],
-        payload: &NodePayload,
+        payload: &Payload,
         witness: &mut WitnessBuilder<'_>,
     ) -> Result<Node, PrecompileError> {
-        let NodePayload::Expression(p) = payload else {
-            return Err(PrecompileError::InvalidNode);
-        };
         let kind = Discriminant::classify(imm[0]).ok_or(PrecompileError::InvalidNode)?;
-        let (h_lhs, h_rhs) = p.binary_op_children();
+        let (h_lhs, h_rhs) = payload.binary_op_children()?;
 
         match kind {
             Discriminant::New => {
@@ -168,8 +165,7 @@ fn new_coords(node: &Node) -> Result<(Digest, Digest), PrecompileError> {
     if node.tag != Group::new_tag() {
         return Err(PrecompileError::InvalidNode);
     }
-    let payload = node.expression_payload().ok_or(PrecompileError::InvalidNode)?;
-    Ok(payload.binary_op_children())
+    Ok(node.payload.binary_op_children()?)
 }
 
 // TYPED DISCRIMINANT
