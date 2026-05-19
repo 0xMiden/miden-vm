@@ -103,7 +103,7 @@ fn push_node(src: &mut String, node: Node) {
     // Push tag first (its 4 felts end up deepest), then payload (8 felts on top), so the stack
     // layout under `event_id` becomes [PAYLOAD_LO, PAYLOAD_HI, TAG] — the Poseidon2 sponge layout
     // used by `Node::digest`.
-    for f in node.tag.as_capacity().iter().rev() {
+    for f in node.tag.as_word().iter().rev() {
         writeln!(src, "    push.{}", f.as_int()).unwrap();
     }
     let payload = node.payload.as_felts().expect("push_node only handles expression-bodied nodes");
@@ -383,7 +383,7 @@ fn deferred_evaluate_pushes_canonical_form_to_advice() {
     let canonical_tag = [mem[8], mem[9], mem[10], mem[11]];
     assert_eq!(
         canonical_tag,
-        ArithTestPrecompile::leaf_tag().as_capacity(),
+        ArithTestPrecompile::leaf_tag().as_word(),
         "evaluate returns canonical leaf tag"
     );
     assert_eq!(mem[0].as_canonical_u64(), 7, "limb 0 of (3+4)");
@@ -524,7 +524,7 @@ fn deferred_register_chunk_pushes_node_digest_to_advice() {
         writeln!(&mut src, "    mem_store.{}", i as u32).unwrap();
     }
     writeln!(&mut src, "    push.{}", 0u32).unwrap(); // ptr
-    for f in tag.as_capacity().iter().rev() {
+    for f in tag.as_word().iter().rev() {
         writeln!(&mut src, "    push.{}", f.as_canonical_u64()).unwrap();
     }
     src.push_str("    adv.register_deferred_chunk\n");
@@ -714,7 +714,7 @@ fn chunk_register_reads_bulk_data_from_memory_and_interns_node() {
     }
     // Push ptr, then tag (deepest first so tag[0] ends up on top under event_id).
     writeln!(&mut src, "    push.{ptr}").unwrap();
-    for f in tag.as_capacity().iter().rev() {
+    for f in tag.as_word().iter().rev() {
         writeln!(&mut src, "    push.{}", f.as_canonical_u64()).unwrap();
     }
     src.push_str("    adv.register_deferred_chunk\n");
@@ -756,7 +756,7 @@ fn chunk_register_rejects_unaligned_pointer() {
 
     let mut src = String::from("begin\n");
     writeln!(&mut src, "    push.{ptr}").unwrap();
-    for f in tag.as_capacity().iter().rev() {
+    for f in tag.as_word().iter().rev() {
         writeln!(&mut src, "    push.{}", f.as_canonical_u64()).unwrap();
     }
     src.push_str("    adv.register_deferred_chunk\n");
@@ -779,7 +779,7 @@ fn chunk_register_with_zero_chunks_still_interns_a_node() {
 
     let mut src = String::from("begin\n");
     writeln!(&mut src, "    push.{ptr}").unwrap();
-    for f in tag.as_capacity().iter().rev() {
+    for f in tag.as_word().iter().rev() {
         writeln!(&mut src, "    push.{}", f.as_canonical_u64()).unwrap();
     }
     src.push_str("    adv.register_deferred_chunk\n");

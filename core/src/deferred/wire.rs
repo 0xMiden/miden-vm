@@ -144,7 +144,7 @@ impl Serializable for WireEntry {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         // Wire layout is the 4-felt capacity `[id, imm0, imm1, imm2]` — byte-identical to the
         // pre-`Tag`-struct format.
-        for felt in &self.tag.as_capacity() {
+        for felt in &self.tag.as_word() {
             felt.write_into(target);
         }
         self.body.write_into(target);
@@ -153,7 +153,7 @@ impl Serializable for WireEntry {
 
 impl Deserializable for WireEntry {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let tag = Tag::from_capacity([
+        let tag = Tag::from_word([
             Felt::read_from(source)?,
             Felt::read_from(source)?,
             Felt::read_from(source)?,
@@ -255,15 +255,15 @@ mod tests {
         let wire = DeferredStateWire {
             entries: alloc::vec![
                 WireEntry {
-                    tag: Tag::from_capacity(felts(1)[..4].try_into().unwrap()),
+                    tag: Tag::from_word(felts(1)[..4].try_into().unwrap()),
                     body: WireBody::Value(felts(10))
                 },
                 WireEntry {
-                    tag: Tag::from_capacity(felts(2)[..4].try_into().unwrap()),
+                    tag: Tag::from_word(felts(2)[..4].try_into().unwrap()),
                     body: WireBody::Chunks(Arc::from(alloc::vec![felts(20), felts(30)])),
                 },
                 WireEntry {
-                    tag: Tag::from_capacity(felts(3)[..4].try_into().unwrap()),
+                    tag: Tag::from_word(felts(3)[..4].try_into().unwrap()),
                     body: WireBody::Binary { lhs: 0, rhs: TRUE_INDEX },
                 },
             ],

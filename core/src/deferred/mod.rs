@@ -55,7 +55,7 @@ pub type Digest = Word;
 /// precompile decodes whatever structure (discriminant, chunk length, …) it needs out of them.
 ///
 /// Laid out as `[id, imm0, imm1, imm2]` in the Poseidon2 capacity and on the wire — see
-/// [`Tag::as_capacity`].
+/// [`Tag::as_word`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Tag {
     pub id: Felt,
@@ -68,16 +68,16 @@ impl Tag {
         Self { id, imm }
     }
 
-    /// The 4-felt capacity layout `[id, imm0, imm1, imm2]` fed to Poseidon2 and written to the
-    /// wire.
-    pub const fn as_capacity(&self) -> [Felt; 4] {
+    /// The 4-felt word `[id, imm0, imm1, imm2]` — the layout fed to the Poseidon2 capacity and
+    /// written to the wire.
+    pub const fn as_word(&self) -> [Felt; 4] {
         [self.id, self.imm[0], self.imm[1], self.imm[2]]
     }
 
-    /// Inverse of [`Self::as_capacity`]: split a 4-felt capacity word into `id` and `imm`. Used
-    /// by the processor (operand-stack reads) and the wire decoder.
-    pub const fn from_capacity(c: [Felt; 4]) -> Self {
-        Self { id: c[0], imm: [c[1], c[2], c[3]] }
+    /// Inverse of [`Self::as_word`]: split a 4-felt word into `id` and `imm`. Used by the
+    /// processor (operand-stack reads) and the wire decoder.
+    pub const fn from_word(w: [Felt; 4]) -> Self {
+        Self { id: w[0], imm: [w[1], w[2], w[3]] }
     }
 }
 
@@ -286,7 +286,7 @@ impl Node {
     /// hint without depending on cache state.
     pub(crate) fn compute_digest(&self) -> Digest {
         let mut state = [ZERO; 12];
-        state[8..12].copy_from_slice(&self.tag.as_capacity());
+        state[8..12].copy_from_slice(&self.tag.as_word());
         match &self.payload {
             Payload::Expression(f) => {
                 state[0..8].copy_from_slice(f);
@@ -406,7 +406,7 @@ mod tests {
 
         // Manual computation: capacity = tag, iterate over chunks overwriting rate.
         let mut state = [ZERO; 12];
-        state[8..12].copy_from_slice(&TAG_A.as_capacity());
+        state[8..12].copy_from_slice(&TAG_A.as_word());
         for c in &chunks {
             state[0..8].copy_from_slice(c);
             Poseidon2::apply_permutation(&mut state);
