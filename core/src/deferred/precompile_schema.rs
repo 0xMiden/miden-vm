@@ -19,9 +19,20 @@ use crate::{
 ///
 /// Build it with [`Default`] + [`with_precompile`](Self::with_precompile); the default empty
 /// registry rejects every tag (the processor's out-of-the-box state).
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct PrecompileRegistry {
     precompiles: BTreeMap<Felt, Box<dyn Precompile>>,
+}
+
+impl core::fmt::Debug for PrecompileRegistry {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("PrecompileRegistry")
+            .field(
+                "precompiles",
+                &self.precompiles.iter().map(|(id, p)| (id, p.name())).collect::<Vec<_>>(),
+            )
+            .finish()
+    }
 }
 
 impl PrecompileRegistry {
