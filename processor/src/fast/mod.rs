@@ -253,7 +253,7 @@ impl FastProcessor {
     /// The default is [`NoopSchema`] — any precompile tag will be rejected. To
     /// run programs that use the core library's precompile MASM wrappers, install
     /// `miden_core_lib::CoreLibrary::precompile_schema()` (or a composite that includes the
-    /// keccak256 / sha512 / ecdsa_k256_keccak / eddsa_ed25519 apps).
+    /// keccak256 / sha512 / ecdsa_k256_keccak / eddsa_ed25519 precompiles).
     pub fn with_schema(mut self, schema: Arc<dyn Schema>) -> Self {
         self.deferred_schema = schema;
         self

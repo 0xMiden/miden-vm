@@ -164,7 +164,7 @@ pub trait Schema: core::fmt::Debug + Send + Sync {
     /// Reduces `node` to its canonical form. The schema picks the child digests off
     /// `node.payload` and calls `ctx.resolve(d)` on each to get the corresponding canonical-form
     /// child node back. If the canonical form references *new* child digests (e.g. a producing
-    /// op on a compound-canonical app), the schema calls `ctx.intern(child)` to mint them.
+    /// op on a compound-canonical precompile), the schema calls `ctx.intern(child)` to mint them.
     ///
     /// Output type must match `decode(node.tag).evaluates_to`:
     /// - **Self-evaluating leaf** (`evaluates_to == node.tag`): the schema returns a clone of the

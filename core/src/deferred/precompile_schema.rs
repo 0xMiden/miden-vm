@@ -76,7 +76,7 @@ impl PrecompileSchema {
 
     /// Returns the ids present in this composite, in `BTreeMap` order. Mainly for tests and
     /// diagnostics.
-    pub fn app_ids(&self) -> Vec<Felt> {
+    pub fn precompile_ids(&self) -> Vec<Felt> {
         self.precompiles.keys().copied().collect()
     }
 }
@@ -104,7 +104,7 @@ mod tests {
     /// An honest minimal precompile fixture — its `id()` *is* its `precompile_id`, so it always
     /// passes the `new` validator. Distinct `name`s yield distinct ids; identical names collide
     /// (exercises the duplicate-id panic). Enough to exercise the composite's dispatch surface
-    /// without depending on a reference app.
+    /// without depending on a reference precompile.
     #[derive(Debug, Clone, Copy)]
     struct Fixture {
         name: &'static str,
