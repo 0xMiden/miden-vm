@@ -104,7 +104,10 @@ impl AdviceProvider {
                 added: usize::MAX,
                 max: options.max_adv_map_elements(),
             })?;
-        if map_element_count > options.max_adv_map_elements() {
+        let max_provider_elements = options.max_adv_provider_elements();
+        if !Self::unified_provider_budget_enabled(max_provider_elements)
+            && map_element_count > options.max_adv_map_elements()
+        {
             return Err(AdviceError::AdvMapElementBudgetExceeded {
                 current: 0,
                 added: map_element_count,
@@ -112,8 +115,7 @@ impl AdviceProvider {
             });
         }
 
-        let max_provider_elements = options.max_adv_provider_elements();
-        if max_provider_elements != usize::MAX {
+        if Self::unified_provider_budget_enabled(max_provider_elements) {
             let provider_element_count = self
                 .provider_element_count_with(
                     self.stack.len(),
@@ -296,8 +298,13 @@ impl AdviceProvider {
         )
     }
 
+    #[inline(always)]
+    fn unified_provider_budget_enabled(max_provider_elements: usize) -> bool {
+        max_provider_elements != usize::MAX
+    }
+
     fn check_provider_element_budget_with_added(&self, added: usize) -> Result<(), AdviceError> {
-        if self.max_provider_elements == usize::MAX {
+        if !Self::unified_provider_budget_enabled(self.max_provider_elements) {
             return Ok(());
         }
 
@@ -331,7 +338,7 @@ impl AdviceProvider {
         &self,
         store_node_count: usize,
     ) -> Result<(), AdviceError> {
-        if self.max_provider_elements == usize::MAX {
+        if !Self::unified_provider_budget_enabled(self.max_provider_elements) {
             return Ok(());
         }
 
@@ -502,6 +509,12 @@ impl AdviceProvider {
     }
 
     fn check_map_element_budget(&self, added: usize) -> Result<(), AdviceError> {
+        // In unified mode, advice-map growth is bounded by `max_provider_elements` together with
+        // stack/store growth, so we skip the dedicated map-element cap.
+        if Self::unified_provider_budget_enabled(self.max_provider_elements) {
+            return Ok(());
+        }
+
         let Some(new_total) = self.map_element_count.checked_add(added) else {
             return Err(AdviceError::AdvMapElementBudgetExceeded {
                 current: self.map_element_count,
@@ -1001,6 +1014,32 @@ mod tests {
     }
 
     #[test]
+    fn unified_provider_budget_replaces_map_element_budget() {
+        let baseline = AdviceProvider::new(AdviceInputs::default(), &ExecutionOptions::default())
+            .unwrap()
+            .provider_element_count()
+            .unwrap();
+        let options = ExecutionOptions::default()
+            .with_max_adv_map_elements(WORD_SIZE)
+            .with_max_adv_provider_elements(baseline + WORD_SIZE + 1);
+        let mut provider = AdviceProvider::new(AdviceInputs::default(), &options).unwrap();
+
+        provider.insert_into_map(make_leaf(0), vec![Felt::ONE]).unwrap();
+
+        let err = provider.insert_into_map(make_leaf(1), vec![Felt::ONE]).unwrap_err();
+        assert!(matches!(
+            err,
+            AdviceError::AdvProviderElementBudgetExceeded {
+                current,
+                added,
+                max,
+            } if current == baseline + WORD_SIZE + 1
+                && added == WORD_SIZE + 1
+                && max == baseline + WORD_SIZE + 1
+        ));
+    }
+
+    #[test]
     fn advice_provider_budget_respects_merkle_store_growth() {
         let baseline = AdviceProvider::new(AdviceInputs::default(), &ExecutionOptions::default())
             .unwrap()
@@ -1035,6 +1074,19 @@ mod tests {
                 max,
             } if usage == current && max == current - 1
         ));
+    }
+
+    #[test]
+    fn set_options_with_unified_budget_ignores_map_element_budget() {
+        let mut provider =
+            AdviceProvider::new(AdviceInputs::default(), &ExecutionOptions::default()).unwrap();
+        provider.insert_into_map(make_leaf(0), vec![Felt::ONE]).unwrap();
+        let current = provider.provider_element_count().unwrap();
+
+        let options = ExecutionOptions::default()
+            .with_max_adv_map_elements(WORD_SIZE)
+            .with_max_adv_provider_elements(current);
+        provider.set_options(&options).unwrap();
     }
 
     fn advice_map_from_entries(keys: impl Iterator<Item = u64>, value_len: usize) -> AdviceMap {

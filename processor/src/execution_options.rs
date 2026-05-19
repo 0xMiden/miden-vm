@@ -19,6 +19,9 @@ pub struct ExecutionOptions {
     /// `adv.insert_mem` operation.
     max_adv_map_value_size: usize,
     /// Maximum total number of field elements allowed in live advice map keys and values.
+    ///
+    /// This cap is enforced only when [`ExecutionOptions::max_adv_provider_elements`] is
+    /// unbounded (`usize::MAX`).
     max_adv_map_elements: usize,
     /// Maximum total number of field elements allowed across budgeted advice-provider
     /// components.
@@ -73,6 +76,9 @@ impl ExecutionOptions {
     ///
     /// Set to 2^20 so the default allows multiple maximum-sized entries while still providing a
     /// finite host-memory backstop. Each entry contributes 4 key elements plus its value length.
+    ///
+    /// This cap applies in the legacy map-budget mode (i.e., when
+    /// [`ExecutionOptions::max_adv_provider_elements`] remains `usize::MAX`).
     pub const DEFAULT_MAX_ADV_MAP_ELEMENTS: usize = 1 << 20;
 
     /// Default maximum total number of field elements allowed across budgeted advice-provider
@@ -239,6 +245,9 @@ impl ExecutionOptions {
 
     /// Returns the maximum total number of field elements allowed in live advice map keys and
     /// values.
+    ///
+    /// This cap is used only when [`ExecutionOptions::max_adv_provider_elements`] is
+    /// `usize::MAX`.
     #[inline]
     pub fn max_adv_map_elements(&self) -> usize {
         self.max_adv_map_elements
@@ -264,6 +273,9 @@ impl ExecutionOptions {
     }
 
     /// Sets the maximum total number of field elements allowed in live advice map keys and values.
+    ///
+    /// This cap is used only when [`ExecutionOptions::max_adv_provider_elements`] is
+    /// `usize::MAX`.
     pub fn with_max_adv_map_elements(mut self, size: usize) -> Self {
         self.max_adv_map_elements = size;
         self
