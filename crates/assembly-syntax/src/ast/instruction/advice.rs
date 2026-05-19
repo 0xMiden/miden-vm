@@ -24,9 +24,9 @@ pub enum SystemEventNode {
     InsertHdwordWithDomain,
     InsertHqword,
     InsertHperm,
-    RegisterDeferred,
-    RegisterDeferredChunk,
-    EvaluateDeferred,
+    DeferredRegister,
+    DeferredRegisterChunk,
+    DeferredEvaluate,
 }
 
 impl From<&SystemEventNode> for SystemEvent {
@@ -45,9 +45,9 @@ impl From<&SystemEventNode> for SystemEvent {
             InsertHdwordWithDomain => Self::HdwordToMapWithDomain,
             InsertHqword => Self::HqwordToMap,
             InsertHperm => Self::HpermToMap,
-            RegisterDeferred => Self::DeferredRegister,
-            RegisterDeferredChunk => Self::DeferredRegisterChunk,
-            EvaluateDeferred => Self::DeferredEvaluate,
+            DeferredRegister => Self::DeferredRegister,
+            DeferredRegisterChunk => Self::DeferredRegisterChunk,
+            DeferredEvaluate => Self::DeferredEvaluate,
         }
     }
 }
@@ -73,9 +73,9 @@ impl fmt::Display for SystemEventNode {
             Self::InsertHdwordWithDomain => write!(f, "insert_hdword_d"),
             Self::InsertHqword => write!(f, "insert_hqword"),
             Self::InsertHperm => writeln!(f, "insert_hperm"),
-            Self::RegisterDeferred => write!(f, "register_deferred"),
-            Self::RegisterDeferredChunk => write!(f, "register_deferred_chunk"),
-            Self::EvaluateDeferred => write!(f, "evaluate_deferred"),
+            Self::DeferredRegister => write!(f, "register_deferred"),
+            Self::DeferredRegisterChunk => write!(f, "register_deferred_chunk"),
+            Self::DeferredEvaluate => write!(f, "evaluate_deferred"),
         }
     }
 }
