@@ -12,7 +12,7 @@
 //! `(max(6, 7), max(8, 8)) = (7, 8)`, giving a column transition of
 //! `max(1 + 8, 7) = 9` — the same saturated cost the two original columns had
 //! individually, but using **one** column instead of two, saving one accumulator column in
-//! `ProcessorAir::num_columns` (LookupAir impl).
+//! `CoreAir`'s LogUp column count.
 //!
 //! The emitter uses the plain `col.group` path (no cached encoding) for both buses; the
 //! merged group's degree is unchanged under either mode. The cached-encoding optimization

@@ -8,13 +8,11 @@
 //! interactions via [`super::LookupColumn::group`] or
 //! [`super::LookupColumn::group_with_cached_encoding`].
 //!
-//! The emitters are routed through two separate [`super::LookupAir`] implementors:
-//! - [`super::main_air::MainLookupAir`] for the main-trace columns.
-//! - [`super::chiplet_air::ChipletLookupAir`] for the chiplet-trace columns.
-//!
-//! [`crate::ProcessorAir`]'s `LookupAir` impl is a thin aggregator that calls both in sequence,
-//! preserving the `enforce_main` / `enforce_chiplet` column order for downstream consumers
-//! that want the full 7-column picture in a single `eval` call.
+//! The emitters are routed per-AIR:
+//! - [`super::main_air::MainLookupAir`] for the main-trace columns, driven by [`crate::CoreAir`]'s
+//!   `LookupAir` impl.
+//! - [`super::chiplet_air::emit_chiplet_lookup_columns`] for the chiplet-trace columns, driven by
+//!   [`crate::ChipletsAir`]'s `LookupAir` impl.
 //!
 //! ## Shared precompute contexts
 //!
@@ -30,11 +28,11 @@
 //! prover-side override can replace the polynomial construction with a cheaper boolean fast
 //! path without touching any emitter code. [`ChipletActiveFlags`] itself lives in this
 //! module because it's the pure-compute helper both the default chiplet hook and any
-//! future override want to reach for; it does not depend on either `MainCols` context type.
+//! future override want to reach for; it does not depend on the chiplet bus context type.
 
 use miden_core::field::{Algebra, PrimeCharacteristicRing};
 
-use crate::MainCols;
+use crate::ChipletCols;
 
 pub(in crate::constraints::lookup) mod block_hash_and_op_group;
 pub(in crate::constraints::lookup) mod block_stack_and_range_logcap;
@@ -79,7 +77,7 @@ impl<E> ChipletActiveFlags<E>
 where
     E: PrimeCharacteristicRing + Clone,
 {
-    /// Build the chiplet active-flag snapshot from a `MainCols` borrow.
+    /// Build the chiplet active-flag snapshot from a `ChipletCols` borrow.
     ///
     /// Mirrors the active-flag block of
     /// [`build_chiplet_selectors`](super::super::chiplets::selectors::build_chiplet_selectors):
@@ -88,7 +86,7 @@ where
     /// - prefix chain `s01 / s012 / s0123 / s01234`
     /// - `is_bitwise = s0 - s01`, `is_memory = s01 - s012`, `is_ace = s012 - s0123`, `is_kernel_rom
     ///   = s0123 - s01234`
-    pub fn from_main_cols<V>(local: &MainCols<V>) -> Self
+    pub fn from_chiplet_cols<V>(local: &ChipletCols<V>) -> Self
     where
         V: Copy,
         E: Algebra<V>,

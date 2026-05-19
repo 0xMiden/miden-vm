@@ -25,7 +25,7 @@
 
 use miden_crypto::stark::air::AirBuilder;
 
-use crate::{MainCols, MidenAirBuilder, constraints::op_flags::OpFlags};
+use crate::{CoreCols, MidenAirBuilder, constraints::op_flags::OpFlags};
 
 // ENTRY POINTS
 // ================================================================================================
@@ -36,8 +36,8 @@ use crate::{MainCols, MidenAirBuilder, constraints::op_flags::OpFlags};
 /// - 16 constraints for stack item transitions at each position
 pub fn enforce_main<AB>(
     builder: &mut AB,
-    local: &MainCols<AB::Var>,
-    next: &MainCols<AB::Var>,
+    local: &CoreCols<AB::Var>,
+    next: &CoreCols<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
 ) where
     AB: MidenAirBuilder,

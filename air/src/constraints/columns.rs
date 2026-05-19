@@ -22,37 +22,73 @@ use super::{
 };
 use crate::trace::{CHIPLETS_WIDTH, TRACE_WIDTH};
 
-// MAIN TRACE COLUMN STRUCT
+// CORE TRACE COLUMN STRUCT
 // ================================================================================================
 
-/// Column layout of the main execution trace (71 columns).
+/// Column layout of the core execution trace.
 ///
-/// This `#[repr(C)]` struct provides typed, named access to every column. It can be
-/// borrowed zero-copy from a raw `[T; TRACE_WIDTH]` slice via `Borrow<MainCols<T>>`.
-///
-/// Chiplet columns are not public because the 20 columns are a union — their interpretation
-/// depends on which chiplet is active. Access goes through typed accessors like
-/// [`MainCols::permutation()`], [`MainCols::controller()`], [`MainCols::bitwise()`], etc.
-///
-/// The `s_perm` column is separated from the chiplets array because it is consumed
-/// exclusively by the chiplet selector system, not by any chiplet's constraint code.
+/// `CoreCols` covers the system, decoder, stack, and range-check segments — the columns owned
+/// by `CoreAir`. It is also the layout of the leading `NUM_CORE_COLS` columns of the unified
+/// `TRACE_WIDTH`-wide main trace, so it can be borrowed from either a per-AIR
+/// `[T; NUM_CORE_COLS]` slice or the prefix of a `[T; TRACE_WIDTH]` row via
+/// `Borrow<CoreCols<T>>`.
 #[repr(C)]
-pub struct MainCols<T> {
+pub struct CoreCols<T> {
     pub system: SystemCols<T>,
     pub decoder: DecoderCols<T>,
     pub stack: StackCols<T>,
     pub range: RangeCols<T>,
-    pub(crate) chiplets: [T; CHIPLETS_WIDTH - 1],
-    /// Permutation segment selector: consumed by `build_chiplet_selectors`.
-    pub s_perm: T,
 }
 
-impl<T> MainCols<T> {
+/// Number of columns in the core trace (51), derived from the struct layout.
+pub const NUM_CORE_COLS: usize = size_of::<CoreCols<u8>>();
+
+impl<T> Borrow<CoreCols<T>> for [T] {
+    fn borrow(&self) -> &CoreCols<T> {
+        debug_assert_eq!(self.len(), NUM_CORE_COLS);
+        let (prefix, shorts, suffix) = unsafe { self.align_to::<CoreCols<T>>() };
+        debug_assert!(prefix.is_empty() && suffix.is_empty() && shorts.len() == 1);
+        &shorts[0]
+    }
+}
+
+impl<T> BorrowMut<CoreCols<T>> for [T] {
+    fn borrow_mut(&mut self) -> &mut CoreCols<T> {
+        debug_assert_eq!(self.len(), NUM_CORE_COLS);
+        let (prefix, shorts, suffix) = unsafe { self.align_to_mut::<CoreCols<T>>() };
+        debug_assert!(prefix.is_empty() && suffix.is_empty() && shorts.len() == 1);
+        &mut shorts[0]
+    }
+}
+
+// CHIPLETS TRACE COLUMN STRUCT
+// ================================================================================================
+
+/// Column layout of the chiplets execution trace.
+///
+/// `ChipletCols` covers the 20 shared chiplet data columns + `s_perm` + `chip_clk` — the
+/// columns owned by `ChipletsAir`. It is also the layout of the trailing `NUM_CHIPLETS_COLS`
+/// columns of the unified main trace, so it can be borrowed from either a per-AIR
+/// `[T; NUM_CHIPLETS_COLS]` slice or the suffix of a `[T; TRACE_WIDTH]` row via
+/// `Borrow<ChipletCols<T>>`.
+#[repr(C)]
+pub struct ChipletCols<T> {
+    pub(crate) chiplets: [T; CHIPLETS_WIDTH - 2],
+    /// Permutation segment selector: consumed by `build_chiplet_selectors`.
+    pub s_perm: T,
+    /// Chiplet-trace row counter: starts at 1 on the first row, increments by 1 each row.
+    pub chip_clk: T,
+}
+
+/// Number of columns in the chiplets trace (21), derived from the struct layout.
+pub const NUM_CHIPLETS_COLS: usize = size_of::<ChipletCols<u8>>();
+
+impl<T> ChipletCols<T> {
     /// Returns the 6 chiplet selector columns `[s_ctrl, s_perm, s1, s2, s3, s4]`.
     ///
-    /// `s_ctrl = chiplets[0]` and `s_perm` are the two physical selectors
-    /// for the controller and permutation sub-chiplets. `s1..s4` subdivide the
-    /// remaining chiplets under the virtual `s0 = 1 - (s_ctrl + s_perm)`.
+    /// `s_ctrl = chiplets[0]` and `s_perm` are the two physical selectors for the controller
+    /// and permutation sub-chiplets. `s1..s4` subdivide the remaining chiplets under the
+    /// virtual `s0 = 1 - (s_ctrl + s_perm)`.
     pub fn chiplet_selectors(&self) -> [T; 6]
     where
         T: Copy,
@@ -78,9 +114,6 @@ impl<T> MainCols<T> {
     }
 
     /// Returns a typed borrow of the ACE chiplet columns (chiplets\[4..20\]).
-    ///
-    /// Spans `chiplets[4..20]` (16 cols). Since `chiplets` has 20 elements (indices
-    /// 0..19), this is `chiplets[4..20]` = `chiplets[4..]` (all 16 remaining).
     pub fn ace(&self) -> &AceCols<T> {
         borrow_chiplet(&self.chiplets[4..])
     }
@@ -101,25 +134,28 @@ impl<T> MainCols<T> {
     }
 }
 
-impl<T> Borrow<MainCols<T>> for [T] {
-    fn borrow(&self) -> &MainCols<T> {
-        debug_assert_eq!(self.len(), TRACE_WIDTH);
-        let (prefix, shorts, suffix) = unsafe { self.align_to::<MainCols<T>>() };
+impl<T> Borrow<ChipletCols<T>> for [T] {
+    fn borrow(&self) -> &ChipletCols<T> {
+        debug_assert_eq!(self.len(), NUM_CHIPLETS_COLS);
+        let (prefix, shorts, suffix) = unsafe { self.align_to::<ChipletCols<T>>() };
         debug_assert!(prefix.is_empty() && suffix.is_empty() && shorts.len() == 1);
         &shorts[0]
     }
 }
 
-impl<T> BorrowMut<MainCols<T>> for [T] {
-    fn borrow_mut(&mut self) -> &mut MainCols<T> {
-        debug_assert_eq!(self.len(), TRACE_WIDTH);
-        let (prefix, shorts, suffix) = unsafe { self.align_to_mut::<MainCols<T>>() };
+impl<T> BorrowMut<ChipletCols<T>> for [T] {
+    fn borrow_mut(&mut self) -> &mut ChipletCols<T> {
+        debug_assert_eq!(self.len(), NUM_CHIPLETS_COLS);
+        let (prefix, shorts, suffix) = unsafe { self.align_to_mut::<ChipletCols<T>>() };
         debug_assert!(prefix.is_empty() && suffix.is_empty() && shorts.len() == 1);
         &mut shorts[0]
     }
 }
 
-// CONST INDEX MAP
+// Compile-time invariant: the two halves cover the full main trace exactly.
+const _: () = assert!(NUM_CORE_COLS + NUM_CHIPLETS_COLS == TRACE_WIDTH);
+
+// CONST HELPERS
 // ================================================================================================
 
 /// Generates an array `[0, 1, 2, ..., N-1]` at compile time.
@@ -133,24 +169,12 @@ pub const fn indices_arr<const N: usize>() -> [usize; N] {
     arr
 }
 
-/// Number of columns in the main trace (71), derived from the struct layout.
-pub const NUM_MAIN_COLS: usize = size_of::<MainCols<u8>>();
-
-/// Compile-time index map: each field holds its column index.
-///
-/// Example: `MAIN_COL_MAP.decoder.addr == 6`, `MAIN_COL_MAP.stack.top[0] == 30`.
-#[allow(dead_code)]
-pub const MAIN_COL_MAP: MainCols<usize> = {
-    assert!(NUM_MAIN_COLS == TRACE_WIDTH);
-    unsafe { core::mem::transmute(indices_arr::<NUM_MAIN_COLS>()) }
-};
-
 // COLUMN COUNTS
 // ================================================================================================
 //
-// The auxiliary trace is the LogUp lookup-argument segment built by
-// [`crate::ProcessorAir`]'s `AuxBuilder` impl (see `air/src/constraints/lookup/`).
-// Its 7-column layout is described entirely by `ProcessorAir::column_shape`.
+// The auxiliary trace is the LogUp lookup-argument segment built per-AIR by `CoreAir`'s
+// and `ChipletsAir`'s `AuxBuilder` impls (see `air/src/constraints/lookup/`): 4 Core
+// columns + 3 Chiplets columns.
 
 pub const NUM_SYSTEM_COLS: usize = size_of::<SystemCols<u8>>();
 pub const NUM_DECODER_COLS: usize = size_of::<DecoderCols<u8>>();
@@ -163,7 +187,6 @@ pub const NUM_ACE_READ_COLS: usize = size_of::<AceReadCols<u8>>();
 pub const NUM_ACE_EVAL_COLS: usize = size_of::<AceEvalCols<u8>>();
 pub const NUM_KERNEL_ROM_COLS: usize = size_of::<KernelRomCols<u8>>();
 
-const _: () = assert!(NUM_MAIN_COLS == TRACE_WIDTH);
 const _: () = assert!(NUM_SYSTEM_COLS == 6);
 const _: () = assert!(NUM_DECODER_COLS == 24);
 const _: () = assert!(NUM_STACK_COLS == 19);
@@ -186,64 +209,109 @@ mod tests {
         STACK_TRACE_OFFSET, decoder, range, stack,
     };
 
-    // --- Main trace column map vs offset constants -----------------------------------------------
+    /// Per-AIR index maps used only by the column-layout tests below. Each field holds its
+    /// column index inside its own AIR. `CORE_COL_MAP` lines up with unified-trace offsets
+    /// since `CoreCols` sits at offset 0; `CHIPLET_COL_MAP` is 0-based within `ChipletCols`.
+    const CORE_COL_MAP: CoreCols<usize> = unsafe {
+        core::mem::transmute::<[usize; NUM_CORE_COLS], CoreCols<usize>>(
+            indices_arr::<NUM_CORE_COLS>(),
+        )
+    };
+
+    const CHIPLET_COL_MAP: ChipletCols<usize> = unsafe {
+        core::mem::transmute::<[usize; NUM_CHIPLETS_COLS], ChipletCols<usize>>(indices_arr::<
+            NUM_CHIPLETS_COLS,
+        >())
+    };
+
+    // --- Core trace column map vs offset constants -------------------------------------------
+    //
+    // `CoreCols` starts at offset 0 of the unified main trace, so its per-AIR indices match
+    // the unified trace offsets one-for-one.
 
     #[test]
     fn col_map_system() {
-        assert_eq!(MAIN_COL_MAP.system.clk, CLK_COL_IDX);
-        assert_eq!(MAIN_COL_MAP.system.ctx, CTX_COL_IDX);
-        assert_eq!(MAIN_COL_MAP.system.fn_hash[0], FN_HASH_OFFSET);
-        assert_eq!(MAIN_COL_MAP.system.fn_hash[3], FN_HASH_OFFSET + 3);
+        assert_eq!(CORE_COL_MAP.system.clk, CLK_COL_IDX);
+        assert_eq!(CORE_COL_MAP.system.ctx, CTX_COL_IDX);
+        assert_eq!(CORE_COL_MAP.system.fn_hash[0], FN_HASH_OFFSET);
+        assert_eq!(CORE_COL_MAP.system.fn_hash[3], FN_HASH_OFFSET + 3);
     }
 
     #[test]
     fn col_map_decoder() {
-        assert_eq!(MAIN_COL_MAP.decoder.addr, DECODER_TRACE_OFFSET + decoder::ADDR_COL_IDX);
-        assert_eq!(MAIN_COL_MAP.decoder.op_bits[0], DECODER_TRACE_OFFSET + decoder::OP_BITS_OFFSET);
+        assert_eq!(CORE_COL_MAP.decoder.addr, DECODER_TRACE_OFFSET + decoder::ADDR_COL_IDX);
+        assert_eq!(CORE_COL_MAP.decoder.op_bits[0], DECODER_TRACE_OFFSET + decoder::OP_BITS_OFFSET);
         assert_eq!(
-            MAIN_COL_MAP.decoder.op_bits[6],
+            CORE_COL_MAP.decoder.op_bits[6],
             DECODER_TRACE_OFFSET + decoder::OP_BITS_OFFSET + 6
         );
         assert_eq!(
-            MAIN_COL_MAP.decoder.hasher_state[0],
+            CORE_COL_MAP.decoder.hasher_state[0],
             DECODER_TRACE_OFFSET + decoder::HASHER_STATE_OFFSET
         );
-        assert_eq!(MAIN_COL_MAP.decoder.in_span, DECODER_TRACE_OFFSET + decoder::IN_SPAN_COL_IDX);
+        assert_eq!(CORE_COL_MAP.decoder.in_span, DECODER_TRACE_OFFSET + decoder::IN_SPAN_COL_IDX);
         assert_eq!(
-            MAIN_COL_MAP.decoder.group_count,
+            CORE_COL_MAP.decoder.group_count,
             DECODER_TRACE_OFFSET + decoder::GROUP_COUNT_COL_IDX
         );
-        assert_eq!(MAIN_COL_MAP.decoder.op_index, DECODER_TRACE_OFFSET + decoder::OP_INDEX_COL_IDX);
+        assert_eq!(CORE_COL_MAP.decoder.op_index, DECODER_TRACE_OFFSET + decoder::OP_INDEX_COL_IDX);
         assert_eq!(
-            MAIN_COL_MAP.decoder.batch_flags[0],
+            CORE_COL_MAP.decoder.batch_flags[0],
             DECODER_TRACE_OFFSET + decoder::OP_BATCH_FLAGS_OFFSET
         );
         assert_eq!(
-            MAIN_COL_MAP.decoder.extra[0],
+            CORE_COL_MAP.decoder.extra[0],
             DECODER_TRACE_OFFSET + decoder::OP_BITS_EXTRA_COLS_OFFSET
         );
     }
 
     #[test]
     fn col_map_stack() {
-        assert_eq!(MAIN_COL_MAP.stack.top[0], STACK_TRACE_OFFSET + stack::STACK_TOP_OFFSET);
-        assert_eq!(MAIN_COL_MAP.stack.top[15], STACK_TRACE_OFFSET + 15);
-        assert_eq!(MAIN_COL_MAP.stack.b0, STACK_TRACE_OFFSET + stack::B0_COL_IDX);
-        assert_eq!(MAIN_COL_MAP.stack.b1, STACK_TRACE_OFFSET + stack::B1_COL_IDX);
-        assert_eq!(MAIN_COL_MAP.stack.h0, STACK_TRACE_OFFSET + stack::H0_COL_IDX);
+        assert_eq!(CORE_COL_MAP.stack.top[0], STACK_TRACE_OFFSET + stack::STACK_TOP_OFFSET);
+        assert_eq!(CORE_COL_MAP.stack.top[15], STACK_TRACE_OFFSET + 15);
+        assert_eq!(CORE_COL_MAP.stack.b0, STACK_TRACE_OFFSET + stack::B0_COL_IDX);
+        assert_eq!(CORE_COL_MAP.stack.b1, STACK_TRACE_OFFSET + stack::B1_COL_IDX);
+        assert_eq!(CORE_COL_MAP.stack.h0, STACK_TRACE_OFFSET + stack::H0_COL_IDX);
     }
 
     #[test]
     fn col_map_range() {
-        assert_eq!(MAIN_COL_MAP.range.multiplicity, range::M_COL_IDX);
-        assert_eq!(MAIN_COL_MAP.range.value, range::V_COL_IDX);
+        assert_eq!(CORE_COL_MAP.range.multiplicity, range::M_COL_IDX);
+        assert_eq!(CORE_COL_MAP.range.value, range::V_COL_IDX);
     }
+
+    // --- Chiplet trace column map -------------------------------------------------------------
+    //
+    // `CHIPLET_COL_MAP` is 0-based within `ChipletCols`. Adding `NUM_CORE_COLS` (=
+    // `CHIPLETS_OFFSET`) recovers the unified-trace offset.
 
     #[test]
     fn col_map_chiplets() {
-        assert_eq!(MAIN_COL_MAP.chiplets[0], CHIPLETS_OFFSET);
-        assert_eq!(MAIN_COL_MAP.chiplets[19], CHIPLETS_OFFSET + 19);
-        // s_perm is a separate field after chiplets[0..20]
-        assert_eq!(MAIN_COL_MAP.s_perm, CHIPLETS_OFFSET + 20);
+        assert_eq!(CHIPLET_COL_MAP.chiplets[0], 0);
+        assert_eq!(CHIPLET_COL_MAP.chiplets[19], 19);
+        assert_eq!(CHIPLET_COL_MAP.s_perm, 20);
+        assert_eq!(CHIPLET_COL_MAP.chip_clk, 21);
+        // Sanity: NUM_CORE_COLS lines up with the unified-trace chiplets offset.
+        assert_eq!(NUM_CORE_COLS, CHIPLETS_OFFSET);
+    }
+
+    // --- Multi-AIR split: CoreCols + ChipletCols widths ---------------------------------------
+
+    /// `NUM_CORE_COLS` matches the sum of the segment widths it covers.
+    #[test]
+    fn core_cols_width() {
+        assert_eq!(
+            NUM_CORE_COLS,
+            NUM_SYSTEM_COLS + NUM_DECODER_COLS + NUM_STACK_COLS + NUM_RANGE_COLS,
+        );
+        // The core trace covers everything from the start of the system segment up to the
+        // chiplets boundary.
+        assert_eq!(NUM_CORE_COLS, CHIPLETS_OFFSET);
+    }
+
+    /// `NUM_CHIPLETS_COLS` matches the chiplets segment width.
+    #[test]
+    fn chiplet_cols_width() {
+        assert_eq!(NUM_CHIPLETS_COLS, crate::trace::CHIPLETS_WIDTH);
     }
 }

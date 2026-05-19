@@ -5,7 +5,7 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
-use alloc::{string::ToString, vec::Vec};
+use alloc::{string::ToString, vec, vec::Vec};
 
 use ::serde::Serialize;
 use miden_core::{Felt, WORD_SIZE, field::QuadFelt, utils::RowMajorMatrix};
@@ -27,7 +27,7 @@ mod proving_options;
 
 // EXPORTS
 // ================================================================================================
-pub use miden_air::{DeserializationError, ProcessorAir, PublicInputs, config};
+pub use miden_air::{DeserializationError, MidenAir, PublicInputs, config};
 pub use miden_core::proof::{ExecutionProof, HashFunction};
 pub use miden_processor::{
     ExecutionError, ExecutionOptions, ExecutionOutput, FutureMaybeSend, Host, InputError,
@@ -134,35 +134,35 @@ fn prove_execution_trace(
     let precompile_requests = trace.precompile_requests().to_vec();
     let hash_fn = options.hash_fn();
 
-    let trace_matrix = {
-        let _span = tracing::info_span!("to_row_major_matrix").entered();
-        trace.to_row_major_matrix()
-    };
-
+    // Extract public inputs before consuming the trace for the per-AIR matrices.
     let (public_values, kernel_felts) = trace.public_inputs().to_air_inputs();
-    let var_len_public_inputs: &[&[Felt]] = &[&kernel_felts];
+
+    let (core_matrix, chiplets_matrix) = {
+        let _span = tracing::info_span!("to_core_chiplets_matrices").entered();
+        trace.into_core_chiplets_matrices()
+    };
 
     let params = config::pcs_params();
     let proof_bytes = match hash_fn {
         HashFunction::Blake3_256 => {
             let config = config::blake3_256_config(params);
-            prove_stark(&config, &trace_matrix, &public_values, var_len_public_inputs)
+            prove_stark(&config, &core_matrix, &chiplets_matrix, &public_values, &kernel_felts)
         },
         HashFunction::Keccak => {
             let config = config::keccak_config(params);
-            prove_stark(&config, &trace_matrix, &public_values, var_len_public_inputs)
+            prove_stark(&config, &core_matrix, &chiplets_matrix, &public_values, &kernel_felts)
         },
         HashFunction::Rpo256 => {
             let config = config::rpo_config(params);
-            prove_stark(&config, &trace_matrix, &public_values, var_len_public_inputs)
+            prove_stark(&config, &core_matrix, &chiplets_matrix, &public_values, &kernel_felts)
         },
         HashFunction::Poseidon2 => {
             let config = config::poseidon2_config(params);
-            prove_stark(&config, &trace_matrix, &public_values, var_len_public_inputs)
+            prove_stark(&config, &core_matrix, &chiplets_matrix, &public_values, &kernel_felts)
         },
         HashFunction::Rpx256 => {
             let config = config::rpx_config(params);
-            prove_stark(&config, &trace_matrix, &public_values, var_len_public_inputs)
+            prove_stark(&config, &core_matrix, &chiplets_matrix, &public_values, &kernel_felts)
         },
     }?;
 
@@ -173,15 +173,17 @@ fn prove_execution_trace(
 // STARK PROOF GENERATION
 // ================================================================================================
 
-/// Generates a STARK proof for the given trace and public values.
+/// Generates a multi-AIR STARK proof for the (Core, Chiplets) trace pair and public values.
 ///
-/// Pre-seeds the challenger with `public_values`, then delegates to the lifted
-/// prover. Returns the serialized proof bytes.
+/// Pre-seeds the challenger with the protocol parameters, public values, and the
+/// concatenated kernel-procedure digests (the only variable-length public input today,
+/// owned by the Chiplets AIR). Then delegates to the lifted multi-AIR prover.
 pub fn prove_stark<SC>(
     config: &SC,
-    trace: &RowMajorMatrix<Felt>,
+    core_trace: &RowMajorMatrix<Felt>,
+    chiplets_trace: &RowMajorMatrix<Felt>,
     public_values: &[Felt],
-    var_len_public_inputs: VarLenPublicInputs<'_, Felt>,
+    kernel_felts: &[Felt],
 ) -> Result<Vec<u8>, ExecutionError>
 where
     SC: StarkConfig<Felt, QuadFelt>,
@@ -190,17 +192,33 @@ where
     let mut challenger = config.challenger();
     config::observe_protocol_params(&mut challenger);
     challenger.observe_slice(public_values);
-    config::observe_var_len_public_inputs(&mut challenger, var_len_public_inputs, &[WORD_SIZE]);
-    let output: StarkOutput<Felt, QuadFelt, SC> = miden_crypto::stark::prover::prove_single(
-        config,
-        &ProcessorAir,
-        trace,
-        public_values,
-        var_len_public_inputs,
-        &ProcessorAir,
-        challenger,
-    )
-    .map_err(|e| ExecutionError::ProvingError(e.to_string()))?;
+    let chiplets_var_len: VarLenPublicInputs<'_, Felt> = &[kernel_felts];
+    config::observe_var_len_public_inputs(&mut challenger, chiplets_var_len, &[WORD_SIZE]);
+
+    // Bind air_order into Fiat-Shamir before `prove_multi` (it absorbs heights but not
+    // the air_order permutation, so the caller must).
+    let trace_heights = vec![
+        core_trace.values.len() / core_trace.width,
+        chiplets_trace.values.len() / chiplets_trace.width,
+    ];
+    let shapes = miden_air::InstanceShapes::from_trace_heights(trace_heights)
+        .map_err(|e| ExecutionError::ProvingError(e.to_string()))?;
+    config::observe_air_order(&mut challenger, shapes.air_order());
+
+    let core_witness = miden_air::AirWitness::new(core_trace, public_values, &[]);
+    let chiplets_witness =
+        miden_air::AirWitness::new(chiplets_trace, public_values, chiplets_var_len);
+
+    let core_air = MidenAir::CORE;
+    let chiplets_air = MidenAir::CHIPLETS;
+    let instances = [
+        (&core_air, core_witness, &core_air),
+        (&chiplets_air, chiplets_witness, &chiplets_air),
+    ];
+
+    let output: StarkOutput<Felt, QuadFelt, SC> =
+        miden_crypto::stark::prover::prove_multi(config, &instances, challenger)
+            .map_err(|e| ExecutionError::ProvingError(e.to_string()))?;
     let proof_encoding_config = wincode::config::Configuration::default();
     let proof_bytes = <SerdeCompat<StarkProof<Felt, QuadFelt, SC>> as wincode::config::Serialize<
         _,

@@ -13,7 +13,15 @@ use miden::core::crypto::hashes::poseidon2
 #!
 #! Cycles: 78
 pub proc process_row_ood_evaluations
-    repeat.26
+    # Per-row OOD layout matches the LMCS aligned wire format (alignment = 8 for
+    # Poseidon2). Multi-AIR (CoreAir + ChipletsAir, after combined-circuit codegen
+    # uses LMCS-aligned per-AIR widths):
+    #   main:  ceil(51/8)·8 + ceil(22/8)·8     = 56 + 24      = 80  EFs
+    #   aux:   ceil(8/8)·8 + ceil(6/8)·8       = 8 + 8        = 16  EFs
+    #   quot:  16                                              = 16  EFs
+    #   total per row                                          = 112 EFs = 224 felts
+    # 224 / 8 = 28 iterations.
+    repeat.28
         adv_pipe
         horner_eval_ext
         exec.poseidon2::permute

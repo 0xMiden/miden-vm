@@ -125,9 +125,9 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
 
     // --- Emit everything into a single LogUp column ---
 
-    // All hasher response variants encode their row at `clk + 1` (so they cancel against
-    // the matching request at `clk`).
-    let clk_plus_one: LB::Expr = local.system.clk.into() + LB::Expr::ONE;
+    // All hasher response variants encode their row at the chiplet-trace row counter
+    // (`chip_clk`) so they cancel against the matching request.
+    let clk_plus_one: LB::Expr = local.chip_clk.into();
 
     // Local helpers: convert the copied Var arrays into Expr arrays.
     let full_state = || -> [LB::Expr; 12] { state.map(Into::into) };

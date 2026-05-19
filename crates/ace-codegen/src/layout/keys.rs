@@ -10,8 +10,16 @@ pub enum InputKey {
     AuxRandAlpha,
     /// Aux randomness β supplied as an input.
     AuxRandBeta,
+    /// Multi-AIR β coefficient for Core. Set to β if Core is at proof_order position 0
+    /// (`core_height ≤ chiplets_height`), else 1. Only present in `is_multi_air = true`.
+    MultiAirBetaCore,
+    /// Multi-AIR β coefficient for Chiplets. Complement of `MultiAirBetaCore`.
+    MultiAirBetaChip,
     /// Main trace value at (offset, index).
-    Main { offset: usize, index: usize },
+    Main {
+        offset: usize,
+        index: usize,
+    },
     /// Base-field coordinate for an aux trace column.
     AuxCoord {
         offset: usize,
@@ -37,6 +45,16 @@ pub enum InputKey {
     IsLast,
     /// Precomputed transition selector: `z - g^{-1}`.
     IsTransition,
+    /// Per-AIR lifted selectors for Core at `z^{r_core}` (`r_core = n_max / n_core`).
+    /// Equal to the canonical `IsFirst`/`IsLast`/`IsTransition` when Core is at log_max.
+    /// Only present in `is_multi_air = true`.
+    IsFirstCore,
+    IsLastCore,
+    IsTransitionCore,
+    /// Per-AIR lifted selectors for Chiplets at `z^{r_chip}`. Mirror of `*Core`.
+    IsFirstChip,
+    IsLastChip,
+    IsTransitionChip,
     /// First barycentric weight for quotient recomposition.
     Weight0,
     /// `f = h^N`, the chunk shift ratio between cosets.
@@ -66,6 +84,8 @@ impl InputKeyMapper<'_> {
             InputKey::Public(i) => layout.regions.public_values.index(i),
             InputKey::AuxRandAlpha => Some(layout.aux_rand_alpha),
             InputKey::AuxRandBeta => Some(layout.aux_rand_beta),
+            InputKey::MultiAirBetaCore => layout.stark.multi_air_beta_core,
+            InputKey::MultiAirBetaChip => layout.stark.multi_air_beta_chip,
             InputKey::Main { offset, index } => match offset {
                 0 => layout.regions.main_curr.index(index),
                 1 => layout.regions.main_next.index(index),
@@ -94,6 +114,12 @@ impl InputKeyMapper<'_> {
             InputKey::IsFirst => Some(layout.stark.is_first),
             InputKey::IsLast => Some(layout.stark.is_last),
             InputKey::IsTransition => Some(layout.stark.is_transition),
+            InputKey::IsFirstCore => layout.stark.is_first_core,
+            InputKey::IsLastCore => layout.stark.is_last_core,
+            InputKey::IsTransitionCore => layout.stark.is_transition_core,
+            InputKey::IsFirstChip => layout.stark.is_first_chip,
+            InputKey::IsLastChip => layout.stark.is_last_chip,
+            InputKey::IsTransitionChip => layout.stark.is_transition_chip,
             InputKey::Gamma => Some(layout.stark.gamma),
             // Base-field stark vars (stored as (val, 0) in the EF slot).
             InputKey::Weight0 => Some(layout.stark.weight0),

@@ -6,7 +6,6 @@ use miden::core::stark::random_coin
 #!
 #! Draws auxiliary randomness, reseeds the transcript with the auxiliary trace commitment,
 #! and absorbs the boundary values (2 extension field elements = 4 base field elements = 1 word).
-#! TODO(#3032): the second value is always zero (placeholder for trace splitting).
 #!
 #! The advice provider must supply exactly 2 words in order:
 #!   [commitment, W0]

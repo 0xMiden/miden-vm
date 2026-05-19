@@ -1356,7 +1356,6 @@ dependencies = [
  "miden-assembly",
  "miden-core",
  "miden-crypto",
- "miden-lifted-stark",
  "miden-package-registry",
  "miden-processor",
  "miden-prover",
@@ -1367,9 +1366,7 @@ dependencies = [
  "rand 0.9.4",
  "rand_chacha",
  "rstest",
- "serde-wincode",
  "thiserror",
- "wincode",
 ]
 
 [[package]]
@@ -1732,7 +1729,10 @@ dependencies = [
  "miden-verifier",
  "pretty_assertions",
  "proptest",
+ "serde-wincode",
  "test-case",
+ "thiserror",
+ "wincode",
 ]
 
 [[package]]
@@ -1801,7 +1801,6 @@ dependencies = [
  "miden-assembly",
  "miden-core",
  "miden-core-lib",
- "miden-crypto",
  "miden-debug-types",
  "miden-lifted-stark",
  "miden-mast-package",

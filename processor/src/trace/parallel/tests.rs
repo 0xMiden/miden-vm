@@ -1,7 +1,7 @@
 use alloc::{string::String, sync::Arc};
 
 use miden_air::{
-    ProcessorAir,
+    MidenAir,
     lookup::build_logup_aux_trace,
     trace::{
         DECODER_TRACE_OFFSET,
@@ -428,20 +428,32 @@ fn test_trace_generation_at_fragment_boundaries(
     // lookup collection that `DeterministicTrace` (main-trace only) would miss.
     let raw = rand_array::<Felt, 4>();
     let challenges = [QuadFelt::new([raw[0], raw[1]]), QuadFelt::new([raw[2], raw[3]])];
-    let main_from_fragments = trace_from_fragments.main_trace().to_row_major();
-    let main_from_single = trace_from_single_fragment.main_trace().to_row_major();
-    let (aux_from_fragments, committed_from_fragments) =
-        build_logup_aux_trace(&ProcessorAir, &main_from_fragments, &challenges);
-    let (aux_from_single, committed_from_single) =
-        build_logup_aux_trace(&ProcessorAir, &main_from_single, &challenges);
-    assert_eq!(
-        aux_from_fragments.values, aux_from_single.values,
-        "LogUp aux trace mismatch between fragments and single fragment"
-    );
-    assert_eq!(
-        committed_from_fragments, committed_from_single,
-        "LogUp committed finals mismatch between fragments and single fragment"
-    );
+    let (core_from_fragments, chip_from_fragments) =
+        trace_from_fragments.main_trace().to_core_chiplets_matrices();
+    let (core_from_single, chip_from_single) =
+        trace_from_single_fragment.main_trace().to_core_chiplets_matrices();
+    for (label, air_frag, air_single) in [
+        ("Core", &core_from_fragments, &core_from_single),
+        ("Chiplets", &chip_from_fragments, &chip_from_single),
+    ] {
+        let (aux_frag, committed_frag, aux_single, committed_single) = if label == "Core" {
+            let (a, c) = build_logup_aux_trace(&MidenAir::CORE, air_frag, &challenges);
+            let (b, d) = build_logup_aux_trace(&MidenAir::CORE, air_single, &challenges);
+            (a, c, b, d)
+        } else {
+            let (a, c) = build_logup_aux_trace(&MidenAir::CHIPLETS, air_frag, &challenges);
+            let (b, d) = build_logup_aux_trace(&MidenAir::CHIPLETS, air_single, &challenges);
+            (a, c, b, d)
+        };
+        assert_eq!(
+            aux_frag.values, aux_single.values,
+            "{label} LogUp aux trace mismatch between fragments and single fragment"
+        );
+        assert_eq!(
+            committed_frag, committed_single,
+            "{label} LogUp committed finals mismatch between fragments and single fragment"
+        );
+    }
 
     // Snapshot testing to ensure that future changes don't unexpectedly change the trace.
     // We use DeterministicTrace to produce stable Debug output, since ExecutionTrace contains
