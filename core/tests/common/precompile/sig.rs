@@ -13,7 +13,7 @@ use std::sync::Arc;
 use miden_core::{
     Felt, ZERO,
     deferred::{
-        Node, NodePayload, NodeType, Precompile, PrecompileError, TRUE_TAG, Tag, TagInfo,
+        Node, NodeType, Payload, Precompile, PrecompileError, TRUE_TAG, Tag, TagInfo,
         WitnessBuilder, precompile_id, true_node,
     },
 };
@@ -72,25 +72,21 @@ impl Precompile for Sig {
     fn reduce(
         &self,
         imm: [Felt; 3],
-        payload: &NodePayload,
+        payload: &Payload,
         _witness: &mut WitnessBuilder<'_>,
     ) -> Result<Node, PrecompileError> {
         // `decode` already gated this; `Verify` is the only discriminant.
         Discriminant::classify(imm[0]).ok_or(PrecompileError::InvalidNode)?;
-        match payload {
-            NodePayload::Chunk(chunks) => {
-                if chunks.len() != Self::SIG_CHUNKS as usize {
-                    return Err(PrecompileError::InvalidNode);
-                }
-                // Stub check: signature passes iff the first felt of the first chunk is non-zero.
-                // Stand-in for "this isn't a zeroed-out placeholder signature."
-                if chunks[0][0] == ZERO {
-                    return Err(PrecompileError::AssertionFailed);
-                }
-                Ok(true_node())
-            },
-            NodePayload::Expression(_) => Err(PrecompileError::InvalidNode),
+        let chunks = payload.as_chunks()?;
+        if chunks.len() != Self::SIG_CHUNKS as usize {
+            return Err(PrecompileError::InvalidNode);
         }
+        // Stub check: signature passes iff the first felt of the first chunk is non-zero.
+        // Stand-in for "this isn't a zeroed-out placeholder signature."
+        if chunks[0][0] == ZERO {
+            return Err(PrecompileError::AssertionFailed);
+        }
+        Ok(true_node())
     }
 }
 

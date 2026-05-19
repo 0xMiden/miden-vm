@@ -10,8 +10,8 @@ use miden_assembly::Assembler;
 use miden_core::{
     ZERO,
     deferred::{
-        Node, NodePayload, NodeType, Payload, Precompile, PrecompileError, TRUE_DIGEST, Tag,
-        TagInfo, WitnessBuilder, precompile_id, true_node,
+        Node, NodeType, Payload, Precompile, PrecompileError, TRUE_DIGEST, Tag, TagInfo,
+        WitnessBuilder, precompile_id, true_node,
     },
 };
 use miden_processor::{
@@ -106,10 +106,8 @@ fn push_node(src: &mut String, node: Node) {
     for f in node.tag.as_capacity().iter().rev() {
         writeln!(src, "    push.{}", f.as_int()).unwrap();
     }
-    let payload = node
-        .expression_payload()
-        .expect("push_node only handles expression-bodied nodes");
-    for f in payload.0.iter().rev() {
+    let payload = node.payload.as_felts().expect("push_node only handles expression-bodied nodes");
+    for f in payload.iter().rev() {
         writeln!(src, "    push.{}", f.as_int()).unwrap();
     }
 }
@@ -174,9 +172,9 @@ impl ArithTestPrecompile {
         Node::expression(Self::leaf_tag(), Payload::new(limbs.map(Felt::from_u32)))
     }
 
-    fn decode_limbs(payload: &Payload) -> Result<[u32; 8], PrecompileError> {
+    fn decode_limbs(felts: &[Felt; 8]) -> Result<[u32; 8], PrecompileError> {
         let mut limbs = [0u32; 8];
-        for (i, felt) in payload.0.iter().enumerate() {
+        for (i, felt) in felts.iter().enumerate() {
             let v = felt.as_canonical_u64();
             if v > u32::MAX as u64 {
                 return Err(PrecompileError::InvalidNode);
@@ -190,7 +188,7 @@ impl ArithTestPrecompile {
         if node.tag != Self::leaf_tag() {
             return Err(PrecompileError::InvalidNode);
         }
-        Self::decode_limbs(node.expression_payload().ok_or(PrecompileError::InvalidNode)?)
+        Self::decode_limbs(node.payload.as_felts()?)
     }
 
     fn wrap_add(a: [u32; 8], b: [u32; 8]) -> [u32; 8] {
@@ -240,19 +238,17 @@ impl Precompile for ArithTestPrecompile {
     fn reduce(
         &self,
         imm: [Felt; 3],
-        payload: &NodePayload,
+        payload: &Payload,
         witness: &mut WitnessBuilder<'_>,
     ) -> Result<Node, PrecompileError> {
-        let NodePayload::Expression(p) = payload else {
-            return Err(PrecompileError::InvalidNode);
-        };
         match imm[0] {
             d if d == Self::D_LEAF => {
-                Self::decode_limbs(p)?;
-                Ok(Node::expression(Tag::new(Self::id(), imm), *p))
+                let felts = payload.as_felts()?;
+                Self::decode_limbs(felts)?;
+                Ok(Node::expression(Tag::new(Self::id(), imm), Payload::new(*felts)))
             },
             d if d == Self::D_ADD || d == Self::D_MUL => {
-                let (lhs, rhs) = p.binary_op_children();
+                let (lhs, rhs) = payload.binary_op_children()?;
                 let a = Self::limbs_of(&witness.resolve(lhs)?)?;
                 let b = Self::limbs_of(&witness.resolve(rhs)?)?;
                 let out = if d == Self::D_ADD {
@@ -263,7 +259,7 @@ impl Precompile for ArithTestPrecompile {
                 Ok(Self::leaf_node(out))
             },
             d if d == Self::D_EQ => {
-                let (lhs, rhs) = p.binary_op_children();
+                let (lhs, rhs) = payload.binary_op_children()?;
                 if witness.resolve(lhs)? != witness.resolve(rhs)? {
                     return Err(PrecompileError::AssertionFailed);
                 }
@@ -664,11 +660,11 @@ impl Precompile for ChunkTestPrecompile {
     fn reduce(
         &self,
         imm: [Felt; 3],
-        payload: &NodePayload,
+        payload: &Payload,
         _witness: &mut WitnessBuilder<'_>,
     ) -> Result<Node, PrecompileError> {
         match payload {
-            NodePayload::Chunk(chunks) => {
+            Payload::Chunk(chunks) => {
                 let mut acc = [ZERO; 8];
                 for c in chunks.iter() {
                     for (a, x) in acc.iter_mut().zip(c.iter()) {
@@ -677,7 +673,9 @@ impl Precompile for ChunkTestPrecompile {
                 }
                 Ok(Node::expression(digest_tag(), Payload::new(acc)))
             },
-            NodePayload::Expression(p) => Ok(Node::expression(Tag::new(Self::id(), imm), *p)),
+            Payload::Expression(f) => {
+                Ok(Node::expression(Tag::new(Self::id(), imm), Payload::new(*f)))
+            },
         }
     }
 }
@@ -742,10 +740,10 @@ fn chunk_register_reads_bulk_data_from_memory_and_interns_node() {
     );
     let stored = state.get(&expected_digest).expect("chunk node lookup");
     match &stored.payload {
-        NodePayload::Chunk(c) => {
+        Payload::Chunk(c) => {
             assert_eq!(c.as_ref(), chunks.as_slice(), "bulk data must match memory contents")
         },
-        _ => panic!("expected chunk variant in deferred state"),
+        Payload::Expression(_) => panic!("expected chunk variant in deferred state"),
     }
     assert_eq!(stored.tag, tag);
 }
