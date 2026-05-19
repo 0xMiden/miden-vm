@@ -1,8 +1,5 @@
 use alloc::{collections::BTreeMap, vec::Vec};
 
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
-
 use super::{
     DeferredError, DeferredStateWire, Digest, IntegrityError, Node, NodePayload, NodeType, Payload,
     ReduceCtx, Schema, SchemaError, TRUE_DIGEST, TRUE_TAG,
@@ -20,7 +17,6 @@ use super::{
 ///
 /// Ships as-is in `ExecutionProof`; the verifier consumes `(nodes, root)` directly.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct DeferredState {
     nodes: BTreeMap<Digest, Node>,
     root: Digest,
@@ -333,6 +329,10 @@ impl DeferredState {
     /// statement digest in execution order (oldest first). Assumes the state's chain integrity
     /// has already been established (e.g. by `rehydrate`); panics on a missing or non-AND node
     /// because that situation can't arise on a value produced by the supported constructors.
+    ///
+    /// Test-only: the chain walk currently has no production caller (the verifier consumes the
+    /// rehydrated state directly). Gated so it isn't dead public surface in PR A.
+    #[cfg(test)]
     pub fn statements(&self) -> Vec<Digest> {
         let mut out = Vec::new();
         let mut cur = self.root;
@@ -773,7 +773,7 @@ mod tests {
 
     #[test]
     fn rehydrate_empty_state_succeeds() {
-        let wire = DeferredStateWire::empty();
+        let wire = DeferredStateWire::default();
         let state = DeferredState::rehydrate(&wire, &TestPrecompile).unwrap();
         assert_eq!(state.root(), TRUE_DIGEST);
         assert!(state.nodes().is_empty());
