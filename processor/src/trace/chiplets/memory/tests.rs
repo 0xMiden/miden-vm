@@ -8,7 +8,10 @@ use miden_air::trace::{
         MEMORY_WRITE, TRACE_WIDTH as MEMORY_TRACE_WIDTH,
     },
 };
-use miden_core::{ONE, WORD_SIZE, Word, ZERO, assert_matches, field::Field};
+use miden_core::{
+    ONE, WORD_SIZE, Word, ZERO, assert_matches,
+    field::{Field, PrimeCharacteristicRing},
+};
 
 use super::{
     CLK_COL_IDX, CTX_COL_IDX, D_INV_COL_IDX, D0_COL_IDX, D1_COL_IDX, EMPTY_WORD, Felt, Memory,
@@ -506,11 +509,14 @@ impl MemoryAccess {
 
 /// Builds a trace of the specified length and fills it with data from the provided Memory instance.
 fn build_trace(mem: Memory, num_rows: usize) -> Vec<Vec<Felt>> {
-    let mut trace = (0..MEMORY_TRACE_WIDTH).map(|_| vec![ZERO; num_rows]).collect::<Vec<_>>();
-    let mut fragment = TraceFragment::trace_to_fragment(&mut trace);
+    let mut band = Felt::zero_vec(MEMORY_TRACE_WIDTH * num_rows);
+    let mut fragment =
+        TraceFragment::row_major(&mut band, MEMORY_TRACE_WIDTH, 0, MEMORY_TRACE_WIDTH);
     mem.fill_trace(&mut fragment);
 
-    trace
+    (0..MEMORY_TRACE_WIDTH)
+        .map(|c| (0..num_rows).map(|r| band[r * MEMORY_TRACE_WIDTH + c]).collect())
+        .collect()
 }
 
 fn read_trace_row(trace: &[Vec<Felt>], step: usize) -> [Felt; MEMORY_TRACE_WIDTH] {

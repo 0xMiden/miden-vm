@@ -4,7 +4,7 @@ use miden_air::trace::chiplets::bitwise::{
     A_COL_IDX, A_COL_RANGE, B_COL_IDX, B_COL_RANGE, BITWISE_AND, BITWISE_XOR, OP_CYCLE_LEN,
     OUTPUT_COL_IDX, PREV_OUTPUT_COL_IDX, TRACE_WIDTH,
 };
-use miden_core::ZERO;
+use miden_core::{ZERO, field::PrimeCharacteristicRing};
 use miden_utils_testing::rand::rand_value;
 
 use super::{Bitwise, Felt, TraceFragment};
@@ -204,11 +204,13 @@ fn bitwise_multiple() {
 /// Builds a trace of the specified length and fills it with data from the provided Bitwise
 /// instance.
 fn build_trace(bitwise: Bitwise, num_rows: usize) -> Vec<Vec<Felt>> {
-    let mut trace = (0..TRACE_WIDTH).map(|_| vec![ZERO; num_rows]).collect::<Vec<_>>();
-    let mut fragment = TraceFragment::trace_to_fragment(&mut trace);
+    let mut band = Felt::zero_vec(TRACE_WIDTH * num_rows);
+    let mut fragment = TraceFragment::row_major(&mut band, TRACE_WIDTH, 0, TRACE_WIDTH);
     bitwise.fill_trace(&mut fragment);
 
-    trace
+    (0..TRACE_WIDTH)
+        .map(|c| (0..num_rows).map(|r| band[r * TRACE_WIDTH + c]).collect())
+        .collect()
 }
 
 fn check_decomposition(trace: &[Vec<Felt>], start: usize, a: u64, b: u64) {

@@ -158,16 +158,6 @@ impl RangeChecker {
     pub fn trace_len(&self) -> usize {
         self.get_number_range_checker_rows()
     }
-
-    /// Converts this [RangeChecker] into an execution trace with 2 columns and the number of rows
-    /// specified by the `target_len` parameter.
-    ///
-    /// Wrapper for [`RangeChecker::into_trace_with_table`].
-    #[cfg(test)]
-    pub fn into_trace(self, target_len: usize) -> RangeCheckTrace {
-        let table_len = self.get_number_range_checker_rows();
-        self.into_trace_with_table(table_len, target_len)
-    }
 }
 
 impl Default for RangeChecker {

@@ -1,7 +1,7 @@
 use alloc::{collections::BTreeMap, vec::Vec};
 
 use miden_air::trace::{RowIndex, chiplets::ace::ACE_CHIPLET_NUM_COLS};
-use miden_core::{Felt, ZERO};
+use miden_core::{Felt, field::PrimeCharacteristicRing};
 
 use crate::trace::TraceFragment;
 

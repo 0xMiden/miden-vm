@@ -15,7 +15,7 @@ use miden_air::{
 };
 use miden_core::{
     ONE, Word, ZERO,
-    field::batch_inversion_allow_zeros,
+    field::{PrimeCharacteristicRing, batch_inversion_allow_zeros},
     mast::{MastForest, MastNode},
     operations::opcodes,
     program::{Kernel, MIN_STACK_DEPTH},
@@ -188,9 +188,10 @@ pub fn build_trace_with_max_len(
         main_trace_len,
     );
 
+    // Each segment is built at its own per-AIR height (no cross-padding to the unified max).
     let (chiplets_trace, ()) = rayon::join(
-        || chiplets.into_trace(main_trace_len),
-        || pad_core_row_major(&mut core_trace_data, main_trace_len),
+        || chiplets.into_trace(chiplets_height),
+        || pad_core_row_major(&mut core_trace_data, core_height),
     );
 
     // The range checker occupies the two trailing columns of the core buffer.
@@ -201,19 +202,13 @@ pub fn build_trace_with_max_len(
         CORE_TRACE_WIDTH + 1,
         range_table_len,
         core_height,
-        main_trace_len,
+        core_height,
     );
 
     // Create the MainTrace
     let main_trace = {
         let last_program_row = RowIndex::from((core_trace_len as u32).saturating_sub(1));
-        MainTrace::from_parts(
-            core_trace_data,
-            chiplets_trace.trace,
-            core_height,
-            chiplets_height,
-            last_program_row,
-        )
+        MainTrace::from_parts(core_trace_data, chiplets_trace.trace, last_program_row)
     };
 
     Ok(ExecutionTrace::new_from_parts(
@@ -242,7 +237,7 @@ fn generate_core_trace_row_major(
     let num_fragments = core_trace_contexts.len();
     let total_allocated_rows = num_fragments * fragment_size;
 
-    let mut core_trace_data: Vec<Felt> = vec![ZERO; total_allocated_rows * CORE_STORAGE_WIDTH];
+    let mut core_trace_data = Felt::zero_vec(total_allocated_rows * CORE_STORAGE_WIDTH);
 
     // Save the first stack top for initialization
     let first_stack_top = if let Some(first_context) = core_trace_contexts.first() {

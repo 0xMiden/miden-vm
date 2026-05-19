@@ -8,6 +8,7 @@ use miden_core::{
     ONE, ZERO,
     chiplets::hasher,
     crypto::merkle::{MerkleTree, NodeIndex},
+    field::PrimeCharacteristicRing,
     mast::OpBatch,
 };
 use miden_utils_testing::rand::rand_array;
@@ -536,10 +537,12 @@ fn hash_memoization_basic_blocks_check() {
 /// Builds the full hasher trace (controller + perm segment).
 fn build_trace(hasher: Hasher) -> Vec<Vec<Felt>> {
     let trace_len = hasher.trace_len();
-    let mut trace = (0..TRACE_WIDTH).map(|_| vec![ZERO; trace_len]).collect::<Vec<_>>();
-    let mut fragment = TraceFragment::trace_to_fragment(&mut trace);
+    let mut band = Felt::zero_vec(TRACE_WIDTH * trace_len);
+    let mut fragment = TraceFragment::row_major(&mut band, TRACE_WIDTH, 0, TRACE_WIDTH);
     hasher.fill_trace(&mut fragment);
-    trace
+    (0..TRACE_WIDTH)
+        .map(|c| (0..trace_len).map(|r| band[r * TRACE_WIDTH + c]).collect())
+        .collect()
 }
 
 /// Checks a controller input row.

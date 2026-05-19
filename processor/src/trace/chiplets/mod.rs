@@ -1,6 +1,15 @@
 use alloc::vec::Vec;
 
-use miden_air::trace::{CHIPLETS_WIDTH, chiplets::hasher::HasherState};
+use miden_air::trace::{
+    CHIPLETS_WIDTH,
+    chiplets::{
+        KERNEL_ROM_TRACE_WIDTH,
+        ace::ACE_CHIPLET_NUM_COLS,
+        bitwise::TRACE_WIDTH as BITWISE_WIDTH,
+        hasher::{HasherState, TRACE_WIDTH as HASHER_WIDTH},
+        memory::TRACE_WIDTH as MEMORY_WIDTH,
+    },
+};
 use miden_core::{mast::OpBatch, program::Kernel};
 
 use crate::{

@@ -1,3 +1,4 @@
+#[cfg(test)]
 use alloc::vec::Vec;
 
 use miden_air::trace::MIN_TRACE_LEN;
