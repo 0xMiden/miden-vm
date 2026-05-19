@@ -57,13 +57,13 @@ impl Precompile for Sig {
         Self::id()
     }
 
-    fn decode(&self, sub: PrecompileTag) -> Result<TagInfo, SchemaError> {
+    fn decode(&self, sub: PrecompileTag) -> Option<TagInfo> {
         let [disc, imm, reserved] = sub.0;
         if imm != ZERO || reserved != ZERO {
-            return Err(SchemaError::InvalidNode);
+            return None;
         }
-        match Discriminant::classify(disc).ok_or(SchemaError::InvalidNode)? {
-            Discriminant::Verify => Ok(TagInfo {
+        match Discriminant::classify(disc)? {
+            Discriminant::Verify => Some(TagInfo {
                 node_type: NodeType::Chunks(Self::SIG_CHUNKS),
                 evaluates_to: TRUE_TAG,
             }),

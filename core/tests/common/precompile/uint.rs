@@ -128,12 +128,12 @@ impl Precompile for Uint {
         vec![Self::leaf_node([0; 8]), Self::leaf_node(one), Self::leaf_node([u32::MAX; 8])]
     }
 
-    fn decode(&self, sub: PrecompileTag) -> Result<TagInfo, SchemaError> {
+    fn decode(&self, sub: PrecompileTag) -> Option<TagInfo> {
         let [disc, imm, reserved] = sub.0;
         if imm != ZERO || reserved != ZERO {
-            return Err(SchemaError::InvalidNode);
+            return None;
         }
-        let kind = Discriminant::classify(disc).ok_or(SchemaError::InvalidNode)?;
+        let kind = Discriminant::classify(disc)?;
         // Leaf is a `Value` (8 raw u32 limbs); op-nodes and the eq predicate are `Binary`
         // (children encoded as `lhs_digest || rhs_digest`).
         let node_type = match kind {
@@ -144,7 +144,7 @@ impl Precompile for Uint {
             Discriminant::Leaf | Discriminant::BinaryOp(_) => Self::leaf_tag(),
             Discriminant::Eq => TRUE_TAG,
         };
-        Ok(TagInfo { node_type, evaluates_to })
+        Some(TagInfo { node_type, evaluates_to })
     }
 
     fn reduce(&self, node: &Node, ctx: &mut dyn ReduceCtx) -> Result<Node, SchemaError> {
@@ -175,6 +175,7 @@ impl Schema for Uint {
             return Err(SchemaError::InvalidNode);
         }
         Precompile::decode(self, PrecompileTag([tag[1], tag[2], tag[3]]))
+            .ok_or(SchemaError::InvalidNode)
     }
 
     fn reduce(&self, node: &Node, ctx: &mut dyn ReduceCtx) -> Result<Node, SchemaError> {

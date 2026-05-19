@@ -26,12 +26,13 @@ fn non_zero_chunks() -> [[Felt; 8]; 3] {
 // ================================================================================================
 
 #[test]
-fn verify_passes_in_multi_app_schema() {
+fn verify_passes_in_multi_precompile_schema() {
     let schema = PrecompileSchema::new([
         Box::new(Uint) as Box<dyn Precompile>,
         Box::new(Hash) as Box<dyn Precompile>,
         Box::new(Sig) as Box<dyn Precompile>,
-    ]);
+    ])
+    .unwrap();
     let mut state = DeferredState::new();
     schema.init(&mut state).unwrap();
 
@@ -42,11 +43,11 @@ fn verify_passes_in_multi_app_schema() {
 
 #[test]
 fn verify_fails_for_zeroed_placeholder_sig() {
-    let schema = PrecompileSchema::single(Sig);
+    let schema = PrecompileSchema::single(Sig).unwrap();
     let mut state = DeferredState::new();
     let node = Sig::verify_node(three_chunks(ZERO));
     let err = state.evaluate(&schema, node);
-    assert!(matches!(err, Err(SchemaError::AssertionFailed)));
+    assert!(matches!(err.unwrap_err().root(), SchemaError::AssertionFailed));
 }
 
 // CAPABILITY UNIT TESTS (relocated from the old in-lib `mock_sig` unit tests)
@@ -63,20 +64,20 @@ fn decode_verify_is_chunk3_predicate() {
 
 #[test]
 fn decode_rejects_imm() {
-    let err =
+    let info =
         Sig.decode(PrecompileTag([Felt::from_u32(Sig::VERIFY_TAG_ID), Felt::from_u32(1), ZERO]));
-    assert!(matches!(err, Err(SchemaError::InvalidNode)));
+    assert!(info.is_none());
 }
 
 #[test]
 fn decode_unknown_discriminant_rejected() {
-    let err = Sig.decode(PrecompileTag([Felt::from_u32(1), ZERO, ZERO]));
-    assert!(matches!(err, Err(SchemaError::InvalidNode)));
+    let info = Sig.decode(PrecompileTag([Felt::from_u32(1), ZERO, ZERO]));
+    assert!(info.is_none());
 }
 
 #[test]
 fn verify_passes_when_first_felt_nonzero() {
-    let schema = PrecompileSchema::single(Sig);
+    let schema = PrecompileSchema::single(Sig).unwrap();
     let mut state = DeferredState::new();
     let node = Sig::verify_node(non_zero_chunks().to_vec());
     let result = state.evaluate(&schema, node).unwrap();
@@ -85,20 +86,20 @@ fn verify_passes_when_first_felt_nonzero() {
 
 #[test]
 fn verify_fails_when_first_felt_is_zero() {
-    let schema = PrecompileSchema::single(Sig);
+    let schema = PrecompileSchema::single(Sig).unwrap();
     let mut state = DeferredState::new();
     let mut chunks = non_zero_chunks();
     chunks[0][0] = ZERO;
     let node = Sig::verify_node(chunks.to_vec());
     let err = state.evaluate(&schema, node);
-    assert!(matches!(err, Err(SchemaError::AssertionFailed)));
+    assert!(matches!(err.unwrap_err().root(), SchemaError::AssertionFailed));
 }
 
 #[test]
 fn verify_with_wrong_chunk_count_rejected() {
     // Hand-built chunk node with the wrong number of chunks. Register's payload_matches_body
     // check catches this before reduce ever runs.
-    let schema = PrecompileSchema::single(Sig);
+    let schema = PrecompileSchema::single(Sig).unwrap();
     let mut state = DeferredState::new();
     let too_few = vec![[Felt::from_u32(1); 8], [Felt::from_u32(2); 8]];
     let node = Node::chunk(Sig::verify_tag(), too_few);

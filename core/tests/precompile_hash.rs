@@ -18,7 +18,7 @@ fn chunks(n: u32) -> Vec<[Felt; 8]> {
 }
 
 fn fresh() -> (PrecompileSchema, DeferredState) {
-    (PrecompileSchema::single(Hash), DeferredState::new())
+    (PrecompileSchema::single(Hash).unwrap(), DeferredState::new())
 }
 
 // END-TO-END (relocated from deferred_mock_hash.rs)
@@ -29,7 +29,8 @@ fn preimage_reduces_to_known_digest_and_eq_predicate_passes() {
     let schema = PrecompileSchema::new([
         Box::new(Uint) as Box<dyn Precompile>,
         Box::new(Hash) as Box<dyn Precompile>,
-    ]);
+    ])
+    .unwrap();
     let mut state = DeferredState::new();
     schema.init(&mut state).unwrap();
 
@@ -108,18 +109,18 @@ fn decode_eq_is_binary_predicate() {
 
 #[test]
 fn decode_unknown_discriminant_rejected() {
-    let err = Hash.decode(PrecompileTag([Felt::from_u32(99), ZERO, ZERO]));
-    assert!(matches!(err, Err(SchemaError::InvalidNode)));
+    let info = Hash.decode(PrecompileTag([Felt::from_u32(99), ZERO, ZERO]));
+    assert!(info.is_none());
 }
 
 #[test]
 fn decode_rejects_imm_on_non_preimage() {
-    let err =
+    let info =
         Hash.decode(PrecompileTag([Felt::from_u32(Hash::DIGEST_TAG_ID), Felt::from_u32(1), ZERO]));
-    assert!(matches!(err, Err(SchemaError::InvalidNode)));
-    let err =
+    assert!(info.is_none());
+    let info =
         Hash.decode(PrecompileTag([Felt::from_u32(Hash::EQ_TAG_ID), Felt::from_u32(1), ZERO]));
-    assert!(matches!(err, Err(SchemaError::InvalidNode)));
+    assert!(info.is_none());
 }
 
 #[test]
@@ -161,7 +162,7 @@ fn eq_predicate_errors_on_mismatch() {
     let h_wrong = state.register(&schema, wrong).unwrap();
     let h_preimage = state.register(&schema, Hash::preimage_node(32, data)).unwrap();
     let err = state.evaluate(&schema, Hash::eq_node(h_preimage, h_wrong));
-    assert!(matches!(err, Err(SchemaError::AssertionFailed)));
+    assert!(matches!(err.unwrap_err().root(), SchemaError::AssertionFailed));
 }
 
 #[test]
@@ -176,7 +177,7 @@ fn empty_preimage_reduces_to_zero_digest() {
 #[test]
 fn composite_with_hash_dispatches() {
     // Sanity: id-based routing works in a composite holding only Hash.
-    let schema = PrecompileSchema::new([Box::new(Hash) as Box<dyn Precompile>]);
+    let schema = PrecompileSchema::new([Box::new(Hash) as Box<dyn Precompile>]).unwrap();
     let mut state = DeferredState::new();
     let data = chunks(1);
     let canonical = state.evaluate(&schema, Hash::preimage_node(32, data.clone())).unwrap();

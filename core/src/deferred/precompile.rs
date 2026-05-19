@@ -59,10 +59,11 @@ pub trait Precompile: core::fmt::Debug + Send + Sync {
         Vec::new()
     }
 
-    /// Decode the precompile-local sub-tag to its [`TagInfo`]. Returning
-    /// `Err(SchemaError::InvalidNode)` rejects the tag. The precompile owns validation of all
-    /// three felts, including rejecting a non-`ZERO` reserved felt.
-    fn decode(&self, sub: PrecompileTag) -> Result<TagInfo, SchemaError>;
+    /// Decode the precompile-local sub-tag to its [`TagInfo`]. Returning `None` rejects the tag;
+    /// the composite [`crate::deferred::PrecompileSchema`] wraps that into the framework error,
+    /// tagged with this precompile's name. The precompile owns validation of all three felts,
+    /// including rejecting a non-`ZERO` reserved felt.
+    fn decode(&self, sub: PrecompileTag) -> Option<TagInfo>;
 
     /// Reduce a node owned by this precompile to canonical form. Same contract as
     /// [`super::Schema::reduce`] — see its docs for the leaf / op / predicate / chunk variants.

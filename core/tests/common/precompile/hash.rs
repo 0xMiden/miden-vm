@@ -115,17 +115,16 @@ impl Precompile for Hash {
         Self::id()
     }
 
-    fn decode(&self, sub: PrecompileTag) -> Result<TagInfo, SchemaError> {
+    fn decode(&self, sub: PrecompileTag) -> Option<TagInfo> {
         let [disc, imm, reserved] = sub.0;
         if reserved != ZERO {
-            return Err(SchemaError::InvalidNode);
+            return None;
         }
-        match Discriminant::classify(disc).ok_or(SchemaError::InvalidNode)? {
+        match Discriminant::classify(disc)? {
             Discriminant::Preimage => {
                 // `imm` carries n_bytes; the chunk count is derived.
-                let n_bytes =
-                    u32::try_from(imm.as_canonical_u64()).map_err(|_| SchemaError::InvalidNode)?;
-                Ok(TagInfo {
+                let n_bytes = u32::try_from(imm.as_canonical_u64()).ok()?;
+                Some(TagInfo {
                     node_type: NodeType::Chunks(Self::n_chunks(n_bytes)),
                     evaluates_to: Self::digest_tag(),
                 })
@@ -133,9 +132,9 @@ impl Precompile for Hash {
             Discriminant::Digest => {
                 // Self-evaluating leaf carrying 8 raw felts of digest data.
                 if imm != ZERO {
-                    return Err(SchemaError::InvalidNode);
+                    return None;
                 }
-                Ok(TagInfo {
+                Some(TagInfo {
                     node_type: NodeType::Value,
                     evaluates_to: Self::digest_tag(),
                 })
@@ -143,9 +142,9 @@ impl Precompile for Hash {
             Discriminant::Eq => {
                 // Binary predicate over two child digests.
                 if imm != ZERO {
-                    return Err(SchemaError::InvalidNode);
+                    return None;
                 }
-                Ok(TagInfo {
+                Some(TagInfo {
                     node_type: NodeType::Binary,
                     evaluates_to: TRUE_TAG,
                 })
