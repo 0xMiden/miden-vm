@@ -8,6 +8,7 @@
 - Aligned replay stack word access bounds with `StackInterface`, allowing the maximum valid start index for word reads and writes ([#3014](https://github.com/0xMiden/miden-vm/pull/3014)).
 - [BREAKING] Enabled `clippy::unnecessary_wraps` lint and removed all unnecessary `Option`/`Result` wrappings across the workspace ([#3143](https://github.com/0xMiden/miden-vm/pull/3143)).
 - [BREAKING] Simplified `MastForestBuilder` around builder-local refs and immutable finalized `MastForest`s ([#3139](https://github.com/0xMiden/miden-vm/pull/3139)).
+- [BREAKING] Removed owned decorator storage from MAST nodes; nodes now reference decorators stored in their containing `MastForest` ([#3174](https://github.com/0xMiden/miden-vm/pull/3174)).
 
 #### Fixes
 
