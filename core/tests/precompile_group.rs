@@ -5,7 +5,7 @@ mod common;
 
 use common::precompile::{group::Group, uint::Uint};
 use miden_core::deferred::{
-    DeferredState, Digest, Node, Payload, Precompile, PrecompileSchema, SchemaError,
+    DeferredState, Digest, Node, Payload, Precompile, PrecompileError, Precompiles,
 };
 
 fn leaf(low: u64) -> Node {
@@ -16,8 +16,8 @@ fn leaf(low: u64) -> Node {
 }
 
 /// Two-precompile schema with `Uint`'s constants pre-registered.
-fn schema_and_state() -> (PrecompileSchema, DeferredState) {
-    let schema = PrecompileSchema::new([
+fn schema_and_state() -> (Precompiles, DeferredState) {
+    let schema = Precompiles::new([
         Box::new(Uint) as Box<dyn Precompile>,
         Box::new(Group) as Box<dyn Precompile>,
     ])
@@ -28,8 +28,8 @@ fn schema_and_state() -> (PrecompileSchema, DeferredState) {
 }
 
 /// Two-precompile schema without booting (some tests assert exact node counts).
-fn fresh() -> (PrecompileSchema, DeferredState) {
-    let schema = PrecompileSchema::new([
+fn fresh() -> (Precompiles, DeferredState) {
+    let schema = Precompiles::new([
         Box::new(Uint) as Box<dyn Precompile>,
         Box::new(Group) as Box<dyn Precompile>,
     ])
@@ -37,7 +37,7 @@ fn fresh() -> (PrecompileSchema, DeferredState) {
     (schema, DeferredState::new())
 }
 
-fn register_group(schema: &PrecompileSchema, state: &mut DeferredState, x: u64, y: u64) -> Digest {
+fn register_group(schema: &Precompiles, state: &mut DeferredState, x: u64, y: u64) -> Digest {
     let h_x = state.register(schema, leaf(x)).unwrap();
     let h_y = state.register(schema, leaf(y)).unwrap();
     state.register(schema, Group::new_node(h_x, h_y)).unwrap()
@@ -170,7 +170,7 @@ fn eq_predicate_errors_on_mismatch() {
     let h_g1 = register_group(&schema, &mut state, 7, 11);
     let h_g2 = register_group(&schema, &mut state, 7, 12);
     let err = state.evaluate(&schema, Group::eq_node(h_g1, h_g2));
-    assert!(matches!(err.unwrap_err().root(), SchemaError::AssertionFailed));
+    assert!(matches!(err.unwrap_err().root(), PrecompileError::AssertionFailed));
 }
 
 #[test]
@@ -184,6 +184,6 @@ fn reduce_rejects_new_with_non_field_leaf_children() {
     let err = state.evaluate(&schema, bad_new);
     assert!(matches!(
         err.unwrap_err().root(),
-        SchemaError::Other(_) | SchemaError::InvalidNode
+        PrecompileError::Other(_) | PrecompileError::InvalidNode
     ));
 }

@@ -9,7 +9,7 @@ mod common;
 
 use common::precompile::uint::Uint;
 use miden_core::deferred::{
-    DeferredError, DeferredState, Node, NoopSchema, Payload, PrecompileSchema, SchemaError,
+    DeferredError, DeferredState, Node, Payload, PrecompileError, Precompiles,
 };
 
 fn leaf(low: u64) -> Node {
@@ -24,7 +24,7 @@ fn leaf(low: u64) -> Node {
 
 #[test]
 fn end_to_end_register_evaluate_assert_extract() {
-    let schema = PrecompileSchema::single(Uint).unwrap();
+    let schema = Precompiles::single(Uint).unwrap();
     let mut state = DeferredState::new();
 
     let a = state.register(&schema, leaf(3)).unwrap();
@@ -56,7 +56,7 @@ fn end_to_end_register_evaluate_assert_extract() {
 
 #[test]
 fn predicate_mismatch_surfaces_as_error_on_evaluate() {
-    let schema = PrecompileSchema::single(Uint).unwrap();
+    let schema = Precompiles::single(Uint).unwrap();
     let mut state = DeferredState::new();
     let a = state.register(&schema, leaf(7)).unwrap();
     let b = state.register(&schema, leaf(8)).unwrap();
@@ -65,21 +65,21 @@ fn predicate_mismatch_surfaces_as_error_on_evaluate() {
     state.register(&schema, assertion.clone()).unwrap();
     // The mismatch surfaces only when we explicitly verify.
     let err = state.evaluate(&schema, assertion);
-    // Composite wraps the precompile's error with its name; assert the root cause.
-    assert!(matches!(err.unwrap_err().root(), SchemaError::AssertionFailed));
+    // The registry wraps the precompile's error with its name; assert the root cause.
+    assert!(matches!(err.unwrap_err().root(), PrecompileError::AssertionFailed));
 }
 
 #[test]
-fn noop_schema_rejects_all_uint_nodes() {
-    let schema = NoopSchema;
+fn empty_registry_rejects_all_uint_nodes() {
+    let schema = Precompiles::default();
     let mut state = DeferredState::new();
     let err = state.register(&schema, leaf(0));
-    assert!(matches!(err, Err(SchemaError::NoSchemaInstalled)));
+    assert!(matches!(err, Err(PrecompileError::InvalidNode)));
 }
 
 #[test]
 fn init_pre_registers_uint_constants() {
-    let schema = PrecompileSchema::single(Uint).unwrap();
+    let schema = Precompiles::single(Uint).unwrap();
     let mut state = DeferredState::new();
     schema.init(&mut state).unwrap();
     // Three constants: ZERO, ONE, P_MINUS_1.
@@ -231,7 +231,7 @@ fn id_is_stable_across_calls() {
 
 #[test]
 fn init_interns_zero_one_pminus1() {
-    let schema = PrecompileSchema::single(Uint).unwrap();
+    let schema = Precompiles::single(Uint).unwrap();
     let mut state = DeferredState::new();
     schema.init(&mut state).unwrap();
     assert!(state.contains(&Uint::leaf_node([0; 8]).digest()));

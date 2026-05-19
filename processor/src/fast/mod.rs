@@ -4,7 +4,7 @@ use core::{cmp::min, ops::ControlFlow};
 use miden_air::{Felt, trace::RowIndex};
 use miden_core::{
     EMPTY_WORD, WORD_SIZE, Word, ZERO,
-    deferred::{DeferredState, NoopSchema, Schema},
+    deferred::{DeferredState, Precompile, Precompiles},
     mast::{ExecutableMastForest, MastForest},
     precompile::PrecompileTranscript,
     program::{MIN_STACK_DEPTH, Program, StackInputs, StackOutputs},
@@ -142,12 +142,12 @@ pub struct FastProcessor {
     /// interns AND-nodes). Threaded out through [`ExecutionOutput`] for the verifier to walk.
     deferred_state: DeferredState,
 
-    /// The deferred-DAG schema installed at processor construction. Owns the entire semantic
-    /// layer (tag recognition, validation, recursive evaluation, equality). Defaults to
-    /// [`NoopSchema`] — callers running programs that emit precompile tags must
-    /// install a schema (typically `miden_core_lib::CoreLibrary::precompile_schema()`) via
-    /// [`Self::with_schema`].
-    deferred_schema: Arc<dyn Schema>,
+    /// The deferred-DAG precompile registry installed at processor construction. Owns the
+    /// entire semantic layer (tag recognition, validation, recursive evaluation, equality).
+    /// Defaults to an empty [`Precompiles`] — any precompile tag is rejected. Callers running
+    /// programs that emit precompile tags add the precompiles they need (typically
+    /// `miden_core_lib::CoreLibrary::precompiles()`) via [`Self::with_precompiles`].
+    deferred_precompiles: Arc<Precompiles>,
 }
 
 impl FastProcessor {
@@ -244,15 +244,28 @@ impl FastProcessor {
         Ok(self)
     }
 
-    /// Installs the [`Schema`] used by the deferred-DAG system events.
+    /// Installs the [`Precompile`]s used by the deferred-DAG system events.
     ///
-    /// The default is [`NoopSchema`] — any precompile tag will be rejected. To
-    /// run programs that use the core library's precompile MASM wrappers, install
-    /// `miden_core_lib::CoreLibrary::precompile_schema()` (or a composite that includes the
-    /// keccak256 / sha512 / ecdsa_k256_keccak / eddsa_ed25519 precompiles).
-    pub fn with_schema(mut self, schema: Arc<dyn Schema>) -> Self {
-        self.deferred_schema = schema;
+    /// The default registry is empty — any precompile tag is rejected. To run programs that use
+    /// the core library's precompile MASM wrappers, add the relevant precompiles (typically
+    /// `miden_core_lib::CoreLibrary::precompiles()`, covering keccak256 / sha512 /
+    /// ecdsa_k256_keccak / eddsa_ed25519).
+    ///
+    /// Panics if the precompiles are misconfigured (an id inconsistent with its name
+    /// derivation, the framework-reserved `ZERO` id, or a duplicate id) — a setup-time
+    /// programming error. Use [`Precompiles::new`] directly for the fallible form.
+    pub fn with_precompiles<I>(mut self, precompiles: I) -> Self
+    where
+        I: IntoIterator<Item = Box<dyn Precompile>>,
+    {
+        self.deferred_precompiles =
+            Arc::new(Precompiles::new(precompiles).expect("misconfigured precompiles"));
         self
+    }
+
+    /// Convenience over [`Self::with_precompiles`] for the common single-precompile case.
+    pub fn with_precompile<P: Precompile + 'static>(self, precompile: P) -> Self {
+        self.with_precompiles([Box::new(precompile) as Box<dyn Precompile>])
     }
 
     /// Constructor for creating a `FastProcessor` with all options specified at once.
@@ -290,7 +303,7 @@ impl FastProcessor {
             options,
             pc_transcript: PrecompileTranscript::new(),
             deferred_state: DeferredState::new(),
-            deferred_schema: Arc::new(NoopSchema),
+            deferred_precompiles: Arc::new(Precompiles::default()),
         })
     }
 
@@ -313,18 +326,12 @@ impl FastProcessor {
     // ACCESSORS
     // -------------------------------------------------------------------------------------------
 
-    /// Returns the deferred-DAG schema.
+    /// Returns the deferred-DAG state and precompile registry as a disjoint borrow pair so the
+    /// deferred system-event handlers can borrow both simultaneously without running into the
+    /// borrow checker.
     #[inline(always)]
-    pub fn deferred_schema(&self) -> &dyn Schema {
-        &*self.deferred_schema
-    }
-
-    /// Returns the deferred-DAG state and the schema as a disjoint borrow pair so the deferred
-    /// system-event handlers can borrow both simultaneously without running into the borrow
-    /// checker.
-    #[inline(always)]
-    pub(crate) fn deferred_view_mut(&mut self) -> (&mut DeferredState, &dyn Schema) {
-        (&mut self.deferred_state, &*self.deferred_schema)
+    pub(crate) fn deferred_view_mut(&mut self) -> (&mut DeferredState, &Precompiles) {
+        (&mut self.deferred_state, &self.deferred_precompiles)
     }
 
     /// Returns a reference to the deferred-DAG state accumulated during execution.

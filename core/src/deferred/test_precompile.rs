@@ -1,18 +1,17 @@
-//! Minimal `#[cfg(test)]` schema fixture for exercising the deferred engine
-//! (`DeferredState` register/evaluate/log/rehydrate, composite dispatch) without leaning on
-//! a reference *precompile*'s semantics.
+//! Minimal `#[cfg(test)]` precompile fixture for exercising the deferred engine
+//! (`DeferredState` register/evaluate/log/rehydrate, registry dispatch) without leaning on a
+//! reference precompile's semantics.
 //!
-//! Deliberately tiny: an 8×`u32` little-endian value leaf, `add`/`mul` wrapping binary ops,
-//! and an `eq` predicate. Not exported, not on any public / `testing` surface — engine
-//! scaffolding only, the same category as `NoopSchema`'s `NeverCtx` and the composite's
-//! `FakeApp`. Reference precompiles that exercise the *public* surface live in
+//! Deliberately tiny: an 8×`u32` little-endian value leaf, `add`/`mul` wrapping binary ops, and
+//! an `eq` predicate. Not exported, not on any public / `testing` surface — engine scaffolding
+//! only. Reference precompiles that exercise the *public* surface live in
 //! `core/tests/common/precompile/` instead.
 
 use crate::{
     Felt, ZERO,
     deferred::{
-        DeferredError, Node, NodeType, Payload, Precompile, PrecompileTag, Schema, SchemaError,
-        TRUE_TAG, Tag, TagInfo, WitnessBuilder, precompile_id, true_node,
+        DeferredError, Node, NodeType, Payload, Precompile, PrecompileError, TRUE_TAG, Tag,
+        TagInfo, WitnessBuilder, precompile_id, true_node,
     },
 };
 
@@ -33,16 +32,28 @@ impl TestPrecompile {
     }
 
     pub(crate) fn leaf_tag() -> Tag {
-        [Self::id(), Felt::from_u32(Self::LEAF_TAG_ID), ZERO, ZERO]
+        Tag {
+            id: Self::id(),
+            imm: [Felt::from_u32(Self::LEAF_TAG_ID), ZERO, ZERO],
+        }
     }
     pub(crate) fn add_tag() -> Tag {
-        [Self::id(), Felt::from_u32(Self::ADD_TAG_ID), ZERO, ZERO]
+        Tag {
+            id: Self::id(),
+            imm: [Felt::from_u32(Self::ADD_TAG_ID), ZERO, ZERO],
+        }
     }
     pub(crate) fn mul_tag() -> Tag {
-        [Self::id(), Felt::from_u32(Self::MUL_TAG_ID), ZERO, ZERO]
+        Tag {
+            id: Self::id(),
+            imm: [Felt::from_u32(Self::MUL_TAG_ID), ZERO, ZERO],
+        }
     }
     pub(crate) fn eq_tag() -> Tag {
-        [Self::id(), Felt::from_u32(Self::EQ_TAG_ID), ZERO, ZERO]
+        Tag {
+            id: Self::id(),
+            imm: [Felt::from_u32(Self::EQ_TAG_ID), ZERO, ZERO],
+        }
     }
 
     /// Build a canonical value leaf from `[u32; 8]` limbs (little-endian).
@@ -120,9 +131,9 @@ impl Precompile for TestPrecompile {
         Self::id()
     }
 
-    fn decode(&self, sub: PrecompileTag) -> Option<TagInfo> {
-        let [disc, imm, reserved] = sub.0;
-        if imm != ZERO || reserved != ZERO {
+    fn decode(&self, imm: [Felt; 3]) -> Option<TagInfo> {
+        let [disc, immediate, reserved] = imm;
+        if immediate != ZERO || reserved != ZERO {
             return None;
         }
         let kind = Disc::classify(disc)?;
@@ -137,22 +148,26 @@ impl Precompile for TestPrecompile {
         Some(TagInfo { node_type, evaluates_to })
     }
 
-    fn reduce(&self, node: &Node, witness: &mut WitnessBuilder<'_>) -> Result<Node, SchemaError> {
-        if node.tag[0] != Self::id() || node.tag[2] != ZERO || node.tag[3] != ZERO {
-            return Err(SchemaError::InvalidNode);
+    fn reduce(
+        &self,
+        node: &Node,
+        witness: &mut WitnessBuilder<'_>,
+    ) -> Result<Node, PrecompileError> {
+        if node.tag.id != Self::id() || node.tag.imm[1] != ZERO || node.tag.imm[2] != ZERO {
+            return Err(PrecompileError::InvalidNode);
         }
-        let kind = Disc::classify(node.tag[1]).ok_or(SchemaError::InvalidNode)?;
-        let payload = node.expression_payload().ok_or(SchemaError::InvalidNode)?;
+        let kind = Disc::classify(node.tag.imm[0]).ok_or(PrecompileError::InvalidNode)?;
+        let payload = node.expression_payload().ok_or(PrecompileError::InvalidNode)?;
         match kind {
             // Leaf canonicality is checked here, deferred from register-time.
             Disc::Leaf => {
-                Self::limbs_of(node).map_err(SchemaError::from)?;
+                Self::limbs_of(node).map_err(PrecompileError::from)?;
                 Ok(node.clone())
             },
             Disc::Add | Disc::Mul => {
                 let (lhs, rhs) = payload.binary_op_children();
-                let a = Self::limbs_of(&witness.resolve(lhs)?).map_err(SchemaError::from)?;
-                let b = Self::limbs_of(&witness.resolve(rhs)?).map_err(SchemaError::from)?;
+                let a = Self::limbs_of(&witness.resolve(lhs)?).map_err(PrecompileError::from)?;
+                let b = Self::limbs_of(&witness.resolve(rhs)?).map_err(PrecompileError::from)?;
                 let out = match kind {
                     Disc::Add => Self::wrap_add(a, b),
                     Disc::Mul => Self::wrap_mul(a, b),
@@ -163,29 +178,10 @@ impl Precompile for TestPrecompile {
             Disc::Eq => {
                 let (lhs, rhs) = payload.binary_op_children();
                 if witness.resolve(lhs)? != witness.resolve(rhs)? {
-                    return Err(SchemaError::AssertionFailed);
+                    return Err(PrecompileError::AssertionFailed);
                 }
                 Ok(true_node())
             },
         }
-    }
-}
-
-/// Single-precompile convenience `Schema` so tests can use `&TestPrecompile` directly without the
-/// `PrecompileSchema` composite.
-impl Schema for TestPrecompile {
-    fn decode(&self, tag: Tag) -> Result<TagInfo, SchemaError> {
-        if tag[0] != Self::id() {
-            return Err(SchemaError::InvalidNode);
-        }
-        Precompile::decode(self, PrecompileTag([tag[1], tag[2], tag[3]]))
-            .ok_or(SchemaError::InvalidNode)
-    }
-
-    fn reduce(&self, node: &Node, witness: &mut WitnessBuilder<'_>) -> Result<Node, SchemaError> {
-        if node.tag[0] != Self::id() {
-            return Err(SchemaError::InvalidNode);
-        }
-        Precompile::reduce(self, node, witness)
     }
 }

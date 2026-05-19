@@ -5,11 +5,8 @@
 //! chunks into an 8-felt accumulator — deterministic, trivially testable, definitely not
 //! collision-resistant. A real `Keccak` / `Sha512` precompile would slot in by swapping the kernel.
 //!
-//! Tag layout (`Hash`-specific, opaque to the framework):
-//!
-//! ```text
-//! [precompile_id, node_disc, imm, ZERO]
-//! ```
+//! Tag layout (`Hash`-specific, opaque to the framework) — `Tag { id, imm: [node_disc, imm,
+//! ZERO] }`:
 //!
 //! - `preimage` (disc 0) — chunk-bodied; `imm = n_bytes`; body is `Chunk(ceil(n_bytes / 32))`.
 //!   Reduces to a `digest` leaf.
@@ -21,8 +18,8 @@ use std::sync::Arc;
 use miden_core::{
     Felt, ZERO,
     deferred::{
-        DeferredError, Digest, Node, NodePayload, NodeType, Payload, Precompile, PrecompileTag,
-        SchemaError, TRUE_TAG, Tag, TagInfo, WitnessBuilder, precompile_id, true_node,
+        DeferredError, Digest, Node, NodePayload, NodeType, Payload, Precompile, PrecompileError,
+        TRUE_TAG, Tag, TagInfo, WitnessBuilder, precompile_id, true_node,
     },
 };
 
@@ -49,17 +46,26 @@ impl Hash {
 
     /// Tag of a `preimage` chunk node for a `n_bytes`-byte payload.
     pub fn preimage_tag(n_bytes: u32) -> Tag {
-        [Self::id(), Felt::from_u32(Self::PREIMAGE_TAG_ID), Felt::from_u32(n_bytes), ZERO]
+        Tag {
+            id: Self::id(),
+            imm: [Felt::from_u32(Self::PREIMAGE_TAG_ID), Felt::from_u32(n_bytes), ZERO],
+        }
     }
 
     /// Tag of a canonical `digest` leaf.
     pub fn digest_tag() -> Tag {
-        [Self::id(), Felt::from_u32(Self::DIGEST_TAG_ID), ZERO, ZERO]
+        Tag {
+            id: Self::id(),
+            imm: [Felt::from_u32(Self::DIGEST_TAG_ID), ZERO, ZERO],
+        }
     }
 
     /// Tag of an `eq` predicate node.
     pub fn eq_tag() -> Tag {
-        [Self::id(), Felt::from_u32(Self::EQ_TAG_ID), ZERO, ZERO]
+        Tag {
+            id: Self::id(),
+            imm: [Felt::from_u32(Self::EQ_TAG_ID), ZERO, ZERO],
+        }
     }
 
     /// Build a `preimage` chunk node from caller-supplied 8-felt chunks. The caller is
@@ -115,15 +121,15 @@ impl Precompile for Hash {
         Self::id()
     }
 
-    fn decode(&self, sub: PrecompileTag) -> Option<TagInfo> {
-        let [disc, imm, reserved] = sub.0;
+    fn decode(&self, imm: [Felt; 3]) -> Option<TagInfo> {
+        let [disc, immediate, reserved] = imm;
         if reserved != ZERO {
             return None;
         }
         match Discriminant::classify(disc)? {
             Discriminant::Preimage => {
-                // `imm` carries n_bytes; the chunk count is derived.
-                let n_bytes = u32::try_from(imm.as_canonical_u64()).ok()?;
+                // `immediate` carries n_bytes; the chunk count is derived.
+                let n_bytes = u32::try_from(immediate.as_canonical_u64()).ok()?;
                 Some(TagInfo {
                     node_type: NodeType::Chunks(Self::n_chunks(n_bytes)),
                     evaluates_to: Self::digest_tag(),
@@ -131,7 +137,7 @@ impl Precompile for Hash {
             },
             Discriminant::Digest => {
                 // Self-evaluating leaf carrying 8 raw felts of digest data.
-                if imm != ZERO {
+                if immediate != ZERO {
                     return None;
                 }
                 Some(TagInfo {
@@ -141,7 +147,7 @@ impl Precompile for Hash {
             },
             Discriminant::Eq => {
                 // Binary predicate over two child digests.
-                if imm != ZERO {
+                if immediate != ZERO {
                     return None;
                 }
                 Some(TagInfo {
@@ -152,11 +158,15 @@ impl Precompile for Hash {
         }
     }
 
-    fn reduce(&self, node: &Node, witness: &mut WitnessBuilder<'_>) -> Result<Node, SchemaError> {
-        if node.tag[0] != Self::id() || node.tag[3] != ZERO {
-            return Err(SchemaError::InvalidNode);
+    fn reduce(
+        &self,
+        node: &Node,
+        witness: &mut WitnessBuilder<'_>,
+    ) -> Result<Node, PrecompileError> {
+        if node.tag.id != Self::id() || node.tag.imm[2] != ZERO {
+            return Err(PrecompileError::InvalidNode);
         }
-        let kind = Discriminant::classify(node.tag[1]).ok_or(SchemaError::InvalidNode)?;
+        let kind = Discriminant::classify(node.tag.imm[0]).ok_or(PrecompileError::InvalidNode)?;
         match kind {
             Discriminant::Preimage => match &node.payload {
                 NodePayload::Chunk(chunks) => {
@@ -164,22 +174,22 @@ impl Precompile for Hash {
                     // canonical payload.
                     Ok(Self::digest_node(Self::hash(chunks)))
                 },
-                NodePayload::Expression(_) => Err(SchemaError::InvalidNode),
+                NodePayload::Expression(_) => Err(PrecompileError::InvalidNode),
             },
             Discriminant::Digest => {
-                if node.tag[2] != ZERO {
-                    return Err(SchemaError::InvalidNode);
+                if node.tag.imm[1] != ZERO {
+                    return Err(PrecompileError::InvalidNode);
                 }
                 Ok(node.clone())
             },
             Discriminant::Eq => {
-                if node.tag[2] != ZERO {
-                    return Err(SchemaError::InvalidNode);
+                if node.tag.imm[1] != ZERO {
+                    return Err(PrecompileError::InvalidNode);
                 }
-                let payload = node.expression_payload().ok_or(SchemaError::InvalidNode)?;
+                let payload = node.expression_payload().ok_or(PrecompileError::InvalidNode)?;
                 let (h_lhs, h_rhs) = payload.binary_op_children();
                 if witness.resolve(h_lhs)? != witness.resolve(h_rhs)? {
-                    return Err(SchemaError::AssertionFailed);
+                    return Err(PrecompileError::AssertionFailed);
                 }
                 Ok(true_node())
             },
