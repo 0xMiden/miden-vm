@@ -559,11 +559,8 @@ mod tests {
         PrecompileRegistry::default().with_precompile(TestPrecompile)
     }
 
-    fn test_leaf(low: u64) -> Node {
-        let mut limbs = [0u32; 8];
-        limbs[0] = low as u32;
-        limbs[1] = (low >> 32) as u32;
-        TestPrecompile::leaf_node(limbs)
+    fn test_leaf(value: u32) -> Node {
+        TestPrecompile::leaf_node(Felt::from_u32(value))
     }
 
     fn dummy_digest(seed: u64) -> Word {
