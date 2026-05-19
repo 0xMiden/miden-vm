@@ -110,13 +110,14 @@ impl<'a> TraceFragment<'a> {
         self.band[row * self.stride + self.col_start + col_idx] = value;
     }
 
-    /// Writes one chiplet-local column from a contiguous source (`src.len()` == row count).
-    pub fn fill_column(&mut self, col_idx: usize, src: &[Felt]) {
-        assert!(col_idx < self.num_cols, "fragment column index out of bounds");
-        debug_assert_eq!(src.len(), self.num_rows, "column length mismatch");
-        let g = self.col_start + col_idx;
-        for (r, &v) in src.iter().enumerate() {
-            self.band[r * self.stride + g] = v;
+    /// Copies a chiplet's row-major buffer (`num_cols` contiguous cells per row) into this
+    /// fragment's band, one contiguous row segment at a time.
+    pub fn copy_rows_from(&mut self, src: &[Felt]) {
+        debug_assert_eq!(src.len(), self.num_rows * self.num_cols, "source buffer size mismatch");
+        for r in 0..self.num_rows {
+            let dst = r * self.stride + self.col_start;
+            self.band[dst..dst + self.num_cols]
+                .copy_from_slice(&src[r * self.num_cols..(r + 1) * self.num_cols]);
         }
     }
 }

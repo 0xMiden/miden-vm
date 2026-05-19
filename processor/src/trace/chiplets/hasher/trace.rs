@@ -1,7 +1,10 @@
 use alloc::vec::Vec;
 use core::ops::Range;
 
-use miden_air::trace::chiplets::hasher::{HASH_CYCLE_LEN, TRACE_WIDTH};
+use miden_air::trace::chiplets::hasher::{
+    DIRECTION_BIT_COL_IDX, HASH_CYCLE_LEN, IS_BOUNDARY_COL_IDX, MRUPDATE_ID_COL_IDX,
+    NODE_INDEX_COL_IDX, NUM_SELECTORS, S_PERM_COL_IDX, STATE_COL_RANGE, TRACE_WIDTH,
+};
 use miden_core::chiplets::hasher::Hasher;
 
 use super::{Felt, HasherState, ONE, STATE_WIDTH, Selectors, TraceFragment, ZERO};
@@ -26,13 +29,8 @@ use super::{Felt, HasherState, ONE, STATE_WIDTH, Selectors, TraceFragment, ZERO}
 /// - Permutation segment (s_perm=1): one 16-row cycle per unique input state.
 #[derive(Debug, Default)]
 pub struct HasherTrace {
-    selectors: [Vec<Felt>; 3],
-    hasher_state: [Vec<Felt>; STATE_WIDTH],
-    node_index: Vec<Felt>,
-    mrupdate_id: Vec<Felt>,
-    is_boundary: Vec<Felt>,
-    direction_bit: Vec<Felt>,
-    s_perm: Vec<Felt>,
+    /// Row-major trace buffer: `TRACE_WIDTH` contiguous cells per row.
+    trace: Vec<Felt>,
 }
 
 impl HasherTrace {
@@ -41,7 +39,7 @@ impl HasherTrace {
 
     /// Returns current length of this execution trace.
     pub fn trace_len(&self) -> usize {
-        self.selectors[0].len()
+        self.trace.len() / TRACE_WIDTH
     }
 
     /// Returns the next row address. The address is equal to the current trace length + 1.
@@ -66,17 +64,15 @@ impl HasherTrace {
         is_boundary: Felt,
         direction_bit: Felt,
     ) {
-        for (trace_col, selector_val) in self.selectors.iter_mut().zip(selectors) {
-            trace_col.push(selector_val);
-        }
-        for (trace_col, &state_val) in self.hasher_state.iter_mut().zip(state) {
-            trace_col.push(state_val);
-        }
-        self.node_index.push(node_index);
-        self.mrupdate_id.push(mrupdate_id);
-        self.is_boundary.push(is_boundary);
-        self.direction_bit.push(direction_bit);
-        self.s_perm.push(ZERO);
+        let mut row = [ZERO; TRACE_WIDTH];
+        row[..NUM_SELECTORS].copy_from_slice(&selectors);
+        row[STATE_COL_RANGE.start..STATE_COL_RANGE.end].copy_from_slice(state);
+        row[NODE_INDEX_COL_IDX] = node_index;
+        row[MRUPDATE_ID_COL_IDX] = mrupdate_id;
+        row[IS_BOUNDARY_COL_IDX] = is_boundary;
+        row[DIRECTION_BIT_COL_IDX] = direction_bit;
+        row[S_PERM_COL_IDX] = ZERO;
+        self.trace.extend_from_slice(&row);
     }
 
     // PERMUTATION SEGMENT METHODS
@@ -162,17 +158,15 @@ impl HasherTrace {
         multiplicity: Felt,
         witnesses: [Felt; 3],
     ) {
-        self.selectors[0].push(witnesses[0]);
-        self.selectors[1].push(witnesses[1]);
-        self.selectors[2].push(witnesses[2]);
-        for (trace_col, &state_val) in self.hasher_state.iter_mut().zip(state) {
-            trace_col.push(state_val);
-        }
-        self.node_index.push(multiplicity);
-        self.mrupdate_id.push(ZERO);
-        self.is_boundary.push(ZERO);
-        self.direction_bit.push(ZERO);
-        self.s_perm.push(ONE);
+        let mut row = [ZERO; TRACE_WIDTH];
+        row[..NUM_SELECTORS].copy_from_slice(&witnesses);
+        row[STATE_COL_RANGE.start..STATE_COL_RANGE.end].copy_from_slice(state);
+        row[NODE_INDEX_COL_IDX] = multiplicity;
+        row[MRUPDATE_ID_COL_IDX] = ZERO;
+        row[IS_BOUNDARY_COL_IDX] = ZERO;
+        row[DIRECTION_BIT_COL_IDX] = ZERO;
+        row[S_PERM_COL_IDX] = ONE;
+        self.trace.extend_from_slice(&row);
     }
 
     /// Appends padding rows to fill the controller region to a multiple of HASH_CYCLE_LEN.
@@ -211,14 +205,15 @@ impl HasherTrace {
     /// A controller input row is identified by s0 == ONE and s_perm == ZERO.
     /// Returns the hasher state for each such row.
     pub fn input_states_in_range(&self, range: Range<usize>) -> Vec<HasherState> {
+        const W: usize = TRACE_WIDTH;
         let mut states = Vec::new();
         for row in range {
-            // Controller input row: s0 = ONE and s_perm = ZERO
-            if self.selectors[0][row] == ONE && self.s_perm[row] == ZERO {
+            // Controller input row: s0 (column 0) = ONE and s_perm = ZERO
+            if self.trace[row * W] == ONE && self.trace[row * W + S_PERM_COL_IDX] == ZERO {
                 let mut state = [ZERO; STATE_WIDTH];
-                for (col, hasher) in self.hasher_state.iter().enumerate() {
-                    state[col] = hasher[row];
-                }
+                state.copy_from_slice(
+                    &self.trace[row * W + STATE_COL_RANGE.start..row * W + STATE_COL_RANGE.end],
+                );
                 states.push(state);
             }
         }
@@ -228,28 +223,21 @@ impl HasherTrace {
     /// Copies a section of the controller trace from the given range to the end of the trace.
     /// Updates the provided state with the hasher state from the last row of the copied range.
     pub fn copy_trace(&mut self, state: &mut [Felt; STATE_WIDTH], range: Range<usize>) {
-        for selector in self.selectors.iter_mut() {
-            selector.extend_from_within(range.clone());
-        }
-        for hasher in self.hasher_state.iter_mut() {
-            hasher.extend_from_within(range.clone());
-        }
-        self.node_index.extend_from_within(range.clone());
-        self.mrupdate_id.extend_from_within(range.clone());
-        self.is_boundary.extend_from_within(range.clone());
-        self.direction_bit.extend_from_within(range.clone());
-        self.s_perm.extend_from_within(range.clone());
+        const W: usize = TRACE_WIDTH;
+        self.trace.extend_from_within(range.start * W..range.end * W);
 
         // copy the latest hasher state to the provided state slice
-        for (col, hasher) in self.hasher_state.iter().enumerate() {
-            state[col] = hasher[range.end - 1];
-        }
+        let last = range.end - 1;
+        state.copy_from_slice(
+            &self.trace[last * W + STATE_COL_RANGE.start..last * W + STATE_COL_RANGE.end],
+        );
     }
 
     /// Overwrites mrupdate_id values in the given range.
     pub fn overwrite_mrupdate_id_in_range(&mut self, range: Range<usize>, mrupdate_id: Felt) {
+        const W: usize = TRACE_WIDTH;
         for row in range {
-            self.mrupdate_id[row] = mrupdate_id;
+            self.trace[row * W + MRUPDATE_ID_COL_IDX] = mrupdate_id;
         }
     }
 
@@ -261,17 +249,6 @@ impl HasherTrace {
         debug_assert_eq!(self.trace_len(), trace.len(), "inconsistent trace lengths");
         debug_assert_eq!(TRACE_WIDTH, trace.width(), "inconsistent trace widths");
 
-        let mut columns = Vec::new();
-        self.selectors.into_iter().for_each(|c| columns.push(c));
-        self.hasher_state.into_iter().for_each(|c| columns.push(c));
-        columns.push(self.node_index);
-        columns.push(self.mrupdate_id);
-        columns.push(self.is_boundary);
-        columns.push(self.direction_bit);
-        columns.push(self.s_perm);
-
-        for (local_col, column) in columns.into_iter().enumerate() {
-            trace.fill_column(local_col, &column);
-        }
+        trace.copy_rows_from(&self.trace);
     }
 }

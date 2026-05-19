@@ -275,9 +275,12 @@ fn generate_memory(circuit: &EncodedCircuit, inputs: &[QuadFelt]) -> Vec<Word> {
 /// Given an EvaluationContext
 fn verify_trace(context: &CircuitEvaluation, num_read_rows: usize, num_eval_rows: usize) {
     let num_rows = num_read_rows + num_eval_rows;
-    let mut columns: Vec<_> = (0..ACE_CHIPLET_NUM_COLS).map(|_| vec![ZERO; num_rows]).collect();
-
-    context.fill(0, &mut columns);
+    let mut flat = Felt::zero_vec(num_rows * ACE_CHIPLET_NUM_COLS);
+    context.fill(0, &mut flat);
+    // Re-expand the row-major buffer into per-column vectors for the assertions below.
+    let columns: Vec<Vec<Felt>> = (0..ACE_CHIPLET_NUM_COLS)
+        .map(|c| (0..num_rows).map(|r| flat[r * ACE_CHIPLET_NUM_COLS + c]).collect())
+        .collect();
 
     let num_wires = num_read_rows * 2 + num_eval_rows;
 

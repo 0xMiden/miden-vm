@@ -4,9 +4,9 @@ use core::ops::Range;
 use miden_air::trace::{
     RowIndex,
     chiplets::ace::{
-        CLK_IDX, CTX_IDX, EVAL_OP_IDX, ID_0_IDX, ID_1_IDX, ID_2_IDX, M_0_IDX, M_1_IDX, PTR_IDX,
-        READ_NUM_EVAL_IDX, SELECTOR_BLOCK_IDX, SELECTOR_START_IDX, V_0_0_IDX, V_0_1_IDX, V_1_0_IDX,
-        V_1_1_IDX, V_2_0_IDX, V_2_1_IDX,
+        ACE_CHIPLET_NUM_COLS, CLK_IDX, CTX_IDX, EVAL_OP_IDX, ID_0_IDX, ID_1_IDX, ID_2_IDX, M_0_IDX,
+        M_1_IDX, PTR_IDX, READ_NUM_EVAL_IDX, SELECTOR_BLOCK_IDX, SELECTOR_START_IDX, V_0_0_IDX,
+        V_0_1_IDX, V_1_0_IDX, V_1_1_IDX, V_2_0_IDX, V_2_1_IDX,
     },
 };
 use miden_core::{
@@ -155,7 +155,11 @@ impl CircuitEvaluation {
         Ok(())
     }
 
-    pub fn fill(&self, offset: usize, columns: &mut [Vec<Felt>]) {
+    /// Writes this circuit evaluation's rows into the row-major buffer `out`
+    /// (`ACE_CHIPLET_NUM_COLS` contiguous cells per row), starting at row `offset`. `out`
+    /// is assumed zero-initialized, so columns that are zero on a row are left untouched.
+    pub fn fill(&self, offset: usize, out: &mut [Felt]) {
+        const W: usize = ACE_CHIPLET_NUM_COLS;
         let num_read_rows = self.num_read_rows as usize;
         let num_eval_rows = self.num_eval_rows as usize;
         let num_rows = num_read_rows + num_eval_rows;
@@ -168,52 +172,55 @@ impl CircuitEvaluation {
             end: read_range.end + num_eval_rows,
         };
 
-        // Fill start selector
-        columns[SELECTOR_START_IDX][offset] = Felt::ONE;
-        columns[SELECTOR_START_IDX][(offset + 1)..].fill(Felt::ZERO);
+        // Writes one column over an absolute row range from a per-row source slice.
+        let put = |out: &mut [Felt], col: usize, start: usize, src: &[Felt]| {
+            for (i, &v) in src.iter().enumerate() {
+                out[(start + i) * W + col] = v;
+            }
+        };
 
-        // Block flag column
-        let f_read = Felt::ZERO;
-        let f_eval = Felt::ONE;
-        columns[SELECTOR_BLOCK_IDX][read_range.clone()].fill(f_read);
-        columns[SELECTOR_BLOCK_IDX][eval_range.clone()].fill(f_eval);
+        // Start selector: ONE on the section's first row (ZERO elsewhere via zero-init).
+        out[offset * W + SELECTOR_START_IDX] = Felt::ONE;
 
-        // Fill ctx column which is constant across the section
-        let ctx_felt = self.ctx.into();
-        columns[CTX_IDX][offset..offset + num_rows].fill(ctx_felt);
+        // Block flag: ZERO on READ rows (zero-init), ONE on EVAL rows.
+        for r in eval_range.clone() {
+            out[r * W + SELECTOR_BLOCK_IDX] = Felt::ONE;
+        }
 
-        // Fill ptr column.
-        columns[PTR_IDX][offset..offset + num_rows].copy_from_slice(&self.col_ptr);
+        // ctx / clk are constant across the section.
+        let ctx_felt: Felt = self.ctx.into();
+        let clk_felt: Felt = self.clk.into();
+        for r in offset..offset + num_rows {
+            out[r * W + CTX_IDX] = ctx_felt;
+            out[r * W + CLK_IDX] = clk_felt;
+        }
 
-        // Fill clk column which is constant across the section
-        let clk_felt = self.clk.into();
-        columns[CLK_IDX][offset..offset + num_rows].fill(clk_felt);
+        put(out, PTR_IDX, offset, &self.col_ptr);
 
-        // Fill n_eval which is constant across the read block
+        // n_eval is constant across the READ block.
         let eval_section_first_idx = Felt::from_u32(self.num_eval_rows - 1);
-        columns[READ_NUM_EVAL_IDX][read_range.clone()].fill(eval_section_first_idx);
+        for r in read_range.clone() {
+            out[r * W + READ_NUM_EVAL_IDX] = eval_section_first_idx;
+        }
 
-        // Fill OP column for EVAL rows
-        columns[EVAL_OP_IDX][eval_range.clone()].copy_from_slice(&self.col_op);
+        // OP column for EVAL rows.
+        put(out, EVAL_OP_IDX, eval_range.start, &self.col_op);
 
-        // Fill wire 0 columns for all rows
-        columns[ID_0_IDX][offset..offset + num_rows].copy_from_slice(&self.col_wire_out.id);
-        columns[V_0_0_IDX][offset..offset + num_rows].copy_from_slice(&self.col_wire_out.v_0);
-        columns[V_0_1_IDX][offset..offset + num_rows].copy_from_slice(&self.col_wire_out.v_1);
+        // Wire 0 / wire 1 columns for all rows.
+        put(out, ID_0_IDX, offset, &self.col_wire_out.id);
+        put(out, V_0_0_IDX, offset, &self.col_wire_out.v_0);
+        put(out, V_0_1_IDX, offset, &self.col_wire_out.v_1);
+        put(out, ID_1_IDX, offset, &self.col_wire_left.id);
+        put(out, V_1_0_IDX, offset, &self.col_wire_left.v_0);
+        put(out, V_1_1_IDX, offset, &self.col_wire_left.v_1);
 
-        // Fill wire 1 columns for all rows
-        columns[ID_1_IDX][offset..offset + num_rows].copy_from_slice(&self.col_wire_left.id);
-        columns[V_1_0_IDX][offset..offset + num_rows].copy_from_slice(&self.col_wire_left.v_0);
-        columns[V_1_1_IDX][offset..offset + num_rows].copy_from_slice(&self.col_wire_left.v_1);
+        // Wire 2 columns for EVAL rows.
+        put(out, ID_2_IDX, eval_range.start, &self.col_wire_right.id);
+        put(out, V_2_0_IDX, eval_range.start, &self.col_wire_right.v_0);
+        put(out, V_2_1_IDX, eval_range.start, &self.col_wire_right.v_1);
 
-        // Fill wire 2 columns for EVAL rows
-        columns[ID_2_IDX][eval_range.clone()].copy_from_slice(&self.col_wire_right.id);
-        columns[V_2_0_IDX][eval_range.clone()].copy_from_slice(&self.col_wire_right.v_0);
-        columns[V_2_1_IDX][eval_range.clone()].copy_from_slice(&self.col_wire_right.v_1);
-
-        // Fill multiplicity 0 column for all rows
+        // Multiplicity columns, consumed in row order: 2 per READ row, 1 per EVAL row.
         let mut multiplicities_iter = self.wire_bus.wires.iter().map(|(_v, m)| Felt::from_u32(*m));
-        // In the READ block, we inserted wires w_0 and w_1
         for row_index in read_range {
             let m_0 = multiplicities_iter
                 .next()
@@ -221,15 +228,14 @@ impl CircuitEvaluation {
             let m_1 = multiplicities_iter
                 .next()
                 .expect("the m1 multiplicities were not constructed properly");
-            columns[M_0_IDX][row_index] = m_0;
-            columns[M_1_IDX][row_index] = m_1;
+            out[row_index * W + M_0_IDX] = m_0;
+            out[row_index * W + M_1_IDX] = m_1;
         }
-        // In the EVAL block, we inserted wire w_0
         for row_index in eval_range {
             let m_0 = multiplicities_iter
                 .next()
                 .expect("the m0 multiplicities were not constructed properly");
-            columns[M_0_IDX][row_index] = m_0;
+            out[row_index * W + M_0_IDX] = m_0;
         }
 
         debug_assert!(multiplicities_iter.next().is_none());
