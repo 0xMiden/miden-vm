@@ -9,8 +9,9 @@ use crate::{
     chiplets::hasher,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, DebugInfo, DecoratorId, DynNode, DynNodeBuilder,
-        JoinNodeBuilder, MastForest, MastForestContributor, MastForestError, MastForestParts,
-        MastNode, MastNodeBuilder, MastNodeExt, MastNodeId, SplitNodeBuilder,
+        ExternalNodeBuilder, JoinNodeBuilder, LoopNodeBuilder, MastForest, MastForestContributor,
+        MastForestError, MastForestParts, MastNode, MastNodeBuilder, MastNodeExt, MastNodeId,
+        SplitNodeBuilder,
     },
     operations::{AssemblyOp, DebugOptions, Decorator, Operation},
     program::{Kernel, ProgramInfo},
@@ -81,6 +82,70 @@ fn from_parts_rejects_invalid_debug_info() {
         MastForest::from_parts(forest_parts_with_node_and_debug_info(node, debug_info)),
         Err(MastForestError::InvalidDebugInfo(_))
     ));
+}
+
+#[test]
+fn linked_decorator_store_reads_node_level_decorators_for_non_basic_nodes() {
+    let mut forest = MastForest::new();
+    let before = forest.add_decorator(Decorator::Trace(10)).unwrap();
+    let after = forest.add_decorator(Decorator::Trace(20)).unwrap();
+    let expected_before = [before];
+    let expected_after = [after];
+
+    let left = BasicBlockNodeBuilder::new(vec![Operation::Push(Felt::new_unchecked(1))], vec![])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let right = BasicBlockNodeBuilder::new(vec![Operation::Push(Felt::new_unchecked(2))], vec![])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let body = BasicBlockNodeBuilder::new(vec![Operation::Add], vec![])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let external_digest = BasicBlockNodeBuilder::new(vec![Operation::Mul], vec![])
+        .into_op_batches_and_digest()
+        .unwrap()
+        .1;
+
+    let node_ids = [
+        JoinNodeBuilder::new([left, right])
+            .with_before_enter(expected_before)
+            .with_after_exit(expected_after)
+            .add_to_forest(&mut forest)
+            .unwrap(),
+        SplitNodeBuilder::new([left, right])
+            .with_before_enter(expected_before)
+            .with_after_exit(expected_after)
+            .add_to_forest(&mut forest)
+            .unwrap(),
+        LoopNodeBuilder::new(body)
+            .with_before_enter(expected_before)
+            .with_after_exit(expected_after)
+            .add_to_forest(&mut forest)
+            .unwrap(),
+        CallNodeBuilder::new(body)
+            .with_before_enter(expected_before)
+            .with_after_exit(expected_after)
+            .add_to_forest(&mut forest)
+            .unwrap(),
+        DynNodeBuilder::new_dyn()
+            .with_before_enter(expected_before)
+            .with_after_exit(expected_after)
+            .add_to_forest(&mut forest)
+            .unwrap(),
+        ExternalNodeBuilder::new(external_digest)
+            .with_before_enter(expected_before)
+            .with_after_exit(expected_after)
+            .add_to_forest(&mut forest)
+            .unwrap(),
+    ];
+
+    for node_id in node_ids {
+        let node = &forest[node_id];
+        assert_eq!(node.before_enter(&forest), expected_before);
+        assert_eq!(node.after_exit(&forest), expected_after);
+        assert_eq!(forest.before_enter_decorators(node_id), expected_before);
+        assert_eq!(forest.after_exit_decorators(node_id), expected_after);
+    }
 }
 
 proptest! {
@@ -852,9 +917,8 @@ fn test_mast_forest_compaction_comprehensive() {
     let loop_body = BasicBlockNodeBuilder::new(vec![Operation::Add, Operation::Add], Vec::new())
         .add_to_forest(&mut forest)
         .unwrap();
-    let loop_no_deco =
-        crate::mast::LoopNodeBuilder::new(loop_body).add_to_forest(&mut forest).unwrap();
-    let loop_with_before_deco = crate::mast::LoopNodeBuilder::new(loop_body)
+    let loop_no_deco = LoopNodeBuilder::new(loop_body).add_to_forest(&mut forest).unwrap();
+    let loop_with_before_deco = LoopNodeBuilder::new(loop_body)
         .with_before_enter(vec![debug_deco])
         .add_to_forest(&mut forest)
         .unwrap();
@@ -887,10 +951,9 @@ fn test_mast_forest_compaction_comprehensive() {
         .into_op_batches_and_digest()
         .unwrap()
         .1;
-    let external_no_deco = crate::mast::ExternalNodeBuilder::new(external_digest)
-        .add_to_forest(&mut forest)
-        .unwrap();
-    let external_with_after_deco = crate::mast::ExternalNodeBuilder::new(external_digest)
+    let external_no_deco =
+        ExternalNodeBuilder::new(external_digest).add_to_forest(&mut forest).unwrap();
+    let external_with_after_deco = ExternalNodeBuilder::new(external_digest)
         .with_after_exit(vec![trace_deco])
         .add_to_forest(&mut forest)
         .unwrap();

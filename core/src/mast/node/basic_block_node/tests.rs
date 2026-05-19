@@ -618,13 +618,29 @@ fn decorator_strategy(
     nops: usize,
     max_decorators: usize,
 ) -> BoxedStrategy<Vec<(usize, DecoratorId)>> {
+    decorator_strategy_with_min_len(nops, max_decorators, 0)
+}
+
+fn non_empty_decorator_strategy(
+    nops: usize,
+    max_decorators: usize,
+) -> BoxedStrategy<Vec<(usize, DecoratorId)>> {
+    decorator_strategy_with_min_len(nops, max_decorators, 1)
+}
+
+fn decorator_strategy_with_min_len(
+    nops: usize,
+    max_decorators: usize,
+    min_decorators: usize,
+) -> BoxedStrategy<Vec<(usize, DecoratorId)>> {
     if nops == 0 {
         return Just(Vec::new()).boxed();
     }
 
+    let min_decorators = min_decorators.min(max_decorators);
     prop::collection::vec(
         (0..nops, any::<u32>().prop_map(DecoratorId::new_unchecked)),
-        0..=max_decorators,
+        min_decorators..=max_decorators,
     )
     .prop_map(move |mut decorators| {
         // Sort decorators by index to satisfy the BasicBlockNode requirement
@@ -643,23 +659,41 @@ fn decorator_list_strategy(
         .prop_flat_map(|ops| (Just(ops.clone()), decorator_strategy(ops.len(), ops.len())))
 }
 
+fn non_empty_decorator_list_strategy(
+    ops_num: usize,
+) -> impl Strategy<Value = (Vec<Operation>, Vec<(usize, DecoratorId)>)> {
+    op_non_control_sequence_strategy(ops_num).prop_flat_map(|ops| {
+        (Just(ops.clone()), non_empty_decorator_strategy(ops.len(), ops.len()))
+    })
+}
+
+fn add_decorators_to_forest(
+    forest: &mut MastForest,
+    decorators: &[(usize, DecoratorId)],
+) -> Vec<(usize, DecoratorId)> {
+    decorators
+        .iter()
+        .map(|(idx, decorator_id)| {
+            let value = u32::from(*decorator_id);
+            let decorator_id = forest.add_decorator(Decorator::Trace(value)).unwrap();
+            (*idx, decorator_id)
+        })
+        .collect()
+}
+
 proptest! {
     /// Test that the raw_decorator_iter() method correctly preserves the original decorator list.
     /// Given random operations and decorators with indices in the valid range,
     /// creating a BasicBlock and then collecting its raw decorators should yield the original list.
     #[test]
     fn test_raw_decorator_iter_preserves_decorators(
-        (ops, decs) in decorator_list_strategy(20)
+        (ops, decs) in non_empty_decorator_list_strategy(20)
     ) {
         // Create a basic block with the generated operations and decorators using linked storage
         let mut dummy_forest = MastForest::new();
 
-        // Convert decorators to use forest's decorator IDs
-        let forest_decorators: Vec<(usize, DecoratorId)> = decs
-            .iter()
-            .map(|(idx, decorator_id)| (*idx, *decorator_id))
-            .collect();
-
+        let forest_decorators = add_decorators_to_forest(&mut dummy_forest, &decs);
+        let expected_decorators = forest_decorators.clone();
         let node_id = BasicBlockNodeBuilder::new(ops, forest_decorators)
             .add_to_forest(&mut dummy_forest)
             .unwrap();
@@ -669,7 +703,7 @@ proptest! {
         let collected_decorators: Vec<(usize, DecoratorId)> = block.raw_decorator_iter(&dummy_forest).collect();
 
         // The collected decorators should match the original decorators
-        prop_assert_eq!(collected_decorators, decs);
+        prop_assert_eq!(collected_decorators, expected_decorators);
     }
 }
 
@@ -867,11 +901,7 @@ proptest! {
 
         // Build BasicBlockNode using linked storage (this applies padding)
         let mut forest = MastForest::new();
-        // Convert decorators to use forest's decorator IDs
-        let forest_decorators: Vec<(usize, DecoratorId)> = decorators
-            .iter()
-            .map(|(idx, decorator_id)| (*idx, *decorator_id))
-            .collect();
+        let forest_decorators = add_decorators_to_forest(&mut forest, &decorators);
         let node_id = BasicBlockNodeBuilder::new(ops.clone(), forest_decorators)
             .add_to_forest(&mut forest)
             .unwrap();
@@ -930,16 +960,13 @@ proptest! {
     #[test]
     fn proptest_decorator_iterator_invertibility(
         (ops, decorators) in
-        decorator_list_strategy(72)
+        non_empty_decorator_list_strategy(72)
     ) {
         // Build BasicBlockNode using linked storage
         let mut forest = MastForest::new();
-        // Convert decorators to use forest's decorator IDs
-        let forest_decorators: Vec<(usize, DecoratorId)> = decorators
-            .iter()
-            .map(|(idx, decorator_id)| (*idx, *decorator_id))
-            .collect();
-        let node_id = BasicBlockNodeBuilder::new(ops.clone(), forest_decorators)
+        let forest_decorators = add_decorators_to_forest(&mut forest, &decorators);
+        let expected_decorators = forest_decorators.clone();
+        let node_id = BasicBlockNodeBuilder::new(ops, forest_decorators)
             .add_to_forest(&mut forest)
             .unwrap();
         let block = forest.get_node_by_id(node_id).unwrap().unwrap_basic_block();
@@ -950,14 +977,7 @@ proptest! {
         // Collect all decorators from the iterator
         let collected_decorators: Vec<_> = raw_iter.collect();
 
-        // Verify decorators maintain order with corrected indices
-        for (collected_idx, &(_expected_raw_idx, expected_id)) in decorators.iter().enumerate() {
-            if collected_idx < collected_decorators.len() {
-                let (actual_raw_idx, actual_id) = collected_decorators[collected_idx];
-                prop_assert_eq!(actual_id, expected_id);
-                prop_assert!(actual_raw_idx <= ops.len()); // Should be a valid raw index
-            }
-        }
+        prop_assert_eq!(collected_decorators, expected_decorators);
     }
 }
 
