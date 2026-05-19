@@ -18,8 +18,8 @@ use std::sync::Arc;
 use miden_core::{
     Felt, ZERO,
     deferred::{
-        DeferredError, Digest, Node, NodePayload, NodeType, Payload, Precompile, PrecompileError,
-        TRUE_TAG, Tag, TagInfo, WitnessBuilder, precompile_id, true_node,
+        DeferredError, Digest, Node, NodeType, Payload, Precompile, PrecompileError, TRUE_TAG, Tag,
+        TagInfo, WitnessBuilder, precompile_id, true_node,
     },
 };
 
@@ -91,7 +91,7 @@ impl Hash {
         if node.tag != Self::digest_tag() {
             return Err(DeferredError::InvalidPayload);
         }
-        Ok(*node.expression_payload().ok_or(DeferredError::InvalidPayload)?.as_felts())
+        Ok(*node.payload.as_felts()?)
     }
 
     /// Mock hash kernel: coordinate-wise sum of all chunks. Not collision-resistant; placeholder
@@ -147,27 +147,20 @@ impl Precompile for Hash {
     fn reduce(
         &self,
         imm: [Felt; 3],
-        payload: &NodePayload,
+        payload: &Payload,
         witness: &mut WitnessBuilder<'_>,
     ) -> Result<Node, PrecompileError> {
         match Discriminant::classify(imm[0]).ok_or(PrecompileError::InvalidNode)? {
-            Discriminant::Preimage => match payload {
+            Discriminant::Preimage => {
                 // Inline hash → canonical digest leaf. No minting needed: the digest IS the
                 // canonical payload.
-                NodePayload::Chunk(chunks) => Ok(Self::digest_node(Self::hash(chunks))),
-                NodePayload::Expression(_) => Err(PrecompileError::InvalidNode),
+                Ok(Self::digest_node(Self::hash(payload.as_chunks()?)))
             },
             Discriminant::Digest => {
-                let NodePayload::Expression(p) = payload else {
-                    return Err(PrecompileError::InvalidNode);
-                };
-                Ok(Node::expression(Tag::new(Self::id(), imm), *p))
+                Ok(Node::expression(Tag::new(Self::id(), imm), Payload::new(*payload.as_felts()?)))
             },
             Discriminant::Eq => {
-                let NodePayload::Expression(p) = payload else {
-                    return Err(PrecompileError::InvalidNode);
-                };
-                let (h_lhs, h_rhs) = p.binary_op_children();
+                let (h_lhs, h_rhs) = payload.binary_op_children()?;
                 if witness.resolve(h_lhs)? != witness.resolve(h_rhs)? {
                     return Err(PrecompileError::AssertionFailed);
                 }

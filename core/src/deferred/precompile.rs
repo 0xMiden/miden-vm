@@ -15,7 +15,7 @@ use alloc::vec::Vec;
 
 use blake3::Hasher;
 
-use super::{Node, NodePayload, PrecompileError, TagInfo, WitnessBuilder};
+use super::{Node, Payload, PrecompileError, TagInfo, WitnessBuilder};
 use crate::Felt;
 
 // PRECOMPILE TRAIT
@@ -59,9 +59,12 @@ pub trait Precompile: core::fmt::Debug + Send + Sync {
     /// (`decode` having succeeded means that classification cannot fail here), then walks the
     /// `payload`. To emit a node, rebuild the tag as `Tag::new(self.id(), imm)`.
     ///
-    /// Child digests live in an `Expression` payload; call `witness.resolve(d)` on each to get
-    /// the canonical child back, and `witness.intern(child)` to mint a freshly-computed child
-    /// (compound canonicals).
+    /// `payload` is a [`Payload`](super::Payload): use `payload.binary_op_children()?` to pull
+    /// the two child digests of an op/predicate, `payload.as_felts()?` for a value leaf, or
+    /// `payload.as_chunks()?` for bulk data (the `?` surfaces a wrong-shape body as a
+    /// [`PrecompileError`]). Call `witness.resolve(d)` on each child digest to get the canonical
+    /// child back, and `witness.intern(child)` to mint a freshly-computed child (compound
+    /// canonicals).
     ///
     /// Output must match `decode(imm).evaluates_to`:
     /// - **Self-evaluating leaf** (`evaluates_to == own tag`): return the node rebuilt from
@@ -78,7 +81,7 @@ pub trait Precompile: core::fmt::Debug + Send + Sync {
     fn reduce(
         &self,
         imm: [Felt; 3],
-        payload: &NodePayload,
+        payload: &Payload,
         witness: &mut WitnessBuilder<'_>,
     ) -> Result<Node, PrecompileError>;
 }

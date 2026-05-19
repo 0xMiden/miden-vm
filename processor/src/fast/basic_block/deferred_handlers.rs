@@ -8,7 +8,7 @@ use alloc::vec::Vec;
 
 use miden_core::{
     Felt, Word, ZERO,
-    deferred::{Digest, Node, NodePayload, NodeType, Payload, PrecompileError, TRUE_TAG, Tag},
+    deferred::{Digest, Node, NodeType, Payload, PrecompileError, TRUE_TAG, Tag},
 };
 
 use super::SystemEventError;
@@ -64,7 +64,7 @@ fn build_standard_node(
     payload: Payload,
 ) -> Result<Node, PrecompileError> {
     match node_type {
-        // Both Value and Binary live in `NodePayload::Expression` at the in-memory level — the
+        // Both Value and Binary live in `Payload::Expression` at the in-memory level — the
         // 8-felt payload is the same; the precompile decides whether the bytes encode raw data
         // (Value) or two child digests (Binary) when it reduces.
         NodeType::Value | NodeType::Binary => Ok(Node::expression(tag, payload)),
@@ -126,13 +126,13 @@ pub(super) fn handle_deferred_evaluate(
     // Push canonical body: TAG deepest, then payload words so the natural-order word is on top.
     processor.advice.push_stack_word(&Word::new(canonical.tag.as_capacity()))?;
     match &canonical.payload {
-        NodePayload::Expression(p) => {
-            let hi = Word::new([p.0[4], p.0[5], p.0[6], p.0[7]]);
-            let lo = Word::new([p.0[0], p.0[1], p.0[2], p.0[3]]);
+        Payload::Expression(f) => {
+            let hi = Word::new([f[4], f[5], f[6], f[7]]);
+            let lo = Word::new([f[0], f[1], f[2], f[3]]);
             processor.advice.push_stack_word(&hi)?;
             processor.advice.push_stack_word(&lo)?;
         },
-        NodePayload::Chunk(chunks) => {
+        Payload::Chunk(chunks) => {
             // Push chunks deepest-last so chunk[0]_LO ends up on top of the advice stack.
             for chunk in chunks.iter().rev() {
                 let hi = Word::new([chunk[4], chunk[5], chunk[6], chunk[7]]);

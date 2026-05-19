@@ -4,7 +4,7 @@ use alloc::{
 };
 
 use super::{
-    DeferredError, DeferredStateWire, Digest, IntegrityError, Node, NodePayload, NodeType, Payload,
+    DeferredError, DeferredStateWire, Digest, IntegrityError, Node, NodeType, Payload,
     PrecompileError, PrecompileRegistry, TRUE_DIGEST, TRUE_TAG,
 };
 
@@ -225,8 +225,7 @@ impl DeferredState {
         // Determine whether this is a real Binary node (children resolve) or a Value-shaped
         // node. For Chunk bodies, no children to recurse into.
         let mut binary_indices: Option<(Digest, Digest)> = None;
-        if let Some(payload) = node.expression_payload() {
-            let (lhs, rhs) = payload.binary_op_children();
+        if let Ok((lhs, rhs)) = node.payload.binary_op_children() {
             let lhs_ok = lhs == TRUE_DIGEST || self.nodes.contains_key(&lhs);
             let rhs_ok = rhs == TRUE_DIGEST || self.nodes.contains_key(&rhs);
             if lhs_ok && rhs_ok {
@@ -241,9 +240,9 @@ impl DeferredState {
         by_digest.insert(d, idx);
 
         let body = match (&node.payload, binary_indices) {
-            (NodePayload::Chunk(chunks), _) => super::WireBody::Chunks(chunks.clone()),
-            (NodePayload::Expression(payload), None) => super::WireBody::Value(*payload),
-            (NodePayload::Expression(_), Some((lhs, rhs))) => {
+            (Payload::Chunk(chunks), _) => super::WireBody::Chunks(chunks.clone()),
+            (Payload::Expression(felts), None) => super::WireBody::Value(*felts),
+            (Payload::Expression(_), Some((lhs, rhs))) => {
                 let lhs_idx = if lhs == TRUE_DIGEST {
                     super::TRUE_INDEX
                 } else {
@@ -292,7 +291,7 @@ impl DeferredState {
 
         for (i, entry) in wire.entries.iter().enumerate() {
             let node = match &entry.body {
-                super::WireBody::Value(payload) => Node::expression(entry.tag, *payload),
+                super::WireBody::Value(felts) => Node::expression(entry.tag, Payload::new(*felts)),
                 super::WireBody::Chunks(chunks) => Node::chunk(entry.tag, chunks.clone()),
                 super::WireBody::Binary { lhs, rhs } => {
                     let lhs_d = resolve_index(*lhs, i, &digests)?;
@@ -339,9 +338,9 @@ impl DeferredState {
                 return Err(IntegrityError::NonAndNode);
             }
             let (prev_root, stmt_digest) = and_node
-                .expression_payload()
-                .ok_or(IntegrityError::BadAndPayload)?
-                .binary_op_children();
+                .payload
+                .binary_op_children()
+                .map_err(|_| IntegrityError::BadAndPayload)?;
             let stmt =
                 state.nodes.get(&stmt_digest).ok_or(IntegrityError::MissingStatement)?.clone();
             let canonical = state.evaluate(precompiles, stmt)?;
@@ -375,9 +374,9 @@ impl DeferredState {
                 "statements(): AND-chain step is not tagged TRUE_TAG"
             );
             let (prev_root, stmt_digest) = and_node
-                .expression_payload()
-                .expect("statements(): AND-node has non-expression body")
-                .binary_op_children();
+                .payload
+                .binary_op_children()
+                .expect("statements(): AND-node has non-expression body");
             out.push(stmt_digest);
             cur = prev_root;
         }
@@ -427,13 +426,13 @@ fn decode_node_type(
 /// for the node's tag. Construction-time invariant — handlers always build the matching variant,
 /// but a hand-constructed `Node` may disagree.
 ///
-/// `Value` and `Binary` both map to `NodePayload::Expression` at the in-memory level — the schema
-/// is the source of truth for whether the 8 felts encode raw data or two child digests, and
-/// rejects payload-semantic violations inside `reduce`.
-fn payload_matches_type(nt: NodeType, payload: &NodePayload) -> bool {
+/// `Value` and `Binary` both map to `Payload::Expression` at the in-memory level — the tag is
+/// the source of truth for whether the 8 felts encode raw data or two child digests, and the
+/// precompile rejects payload-semantic violations inside `reduce`.
+fn payload_matches_type(nt: NodeType, payload: &Payload) -> bool {
     match (nt, payload) {
-        (NodeType::Value | NodeType::Binary, NodePayload::Expression(_)) => true,
-        (NodeType::Chunks(n), NodePayload::Chunk(chunks)) => chunks.len() == n as usize,
+        (NodeType::Value | NodeType::Binary, Payload::Expression(_)) => true,
+        (NodeType::Chunks(n), Payload::Chunk(chunks)) => chunks.len() == n as usize,
         _ => false,
     }
 }
@@ -451,8 +450,7 @@ fn reachable_closure(nodes: &BTreeMap<Digest, Node>, root: Digest) -> BTreeSet<D
             continue;
         }
         let Some(node) = nodes.get(&d) else { continue };
-        if let Some(payload) = node.expression_payload() {
-            let (lhs, rhs) = payload.binary_op_children();
+        if let Ok((lhs, rhs)) = node.payload.binary_op_children() {
             let lhs_ok = lhs == TRUE_DIGEST || nodes.contains_key(&lhs);
             let rhs_ok = rhs == TRUE_DIGEST || nodes.contains_key(&rhs);
             if lhs_ok && rhs_ok {
@@ -910,7 +908,7 @@ mod tests {
         let wire = DeferredStateWire {
             entries: alloc::vec![crate::deferred::WireEntry {
                 tag: bogus_tag,
-                body: crate::deferred::WireBody::Value(Payload::new([ZERO; 8])),
+                body: crate::deferred::WireBody::Value([ZERO; 8]),
             }],
         };
         let err = DeferredState::rehydrate(&wire, &precompiles());
@@ -1000,12 +998,14 @@ mod tests {
         //       AND-node's `prev_root` can't be encoded as a wire index because it intentionally
         //       doesn't appear in the entries)
         let a = test_leaf(7);
-        let a_payload = *a.expression_payload().expect("leaf is expression-bodied");
+        let a_payload = *a.payload.as_felts().expect("leaf is expression-bodied");
         let pred =
             Node::expression(TestPrecompile::eq_tag(), Payload::binary_op(a.digest(), a.digest()));
         let pred_digest = pred.digest();
         let bogus_prev = dummy_digest(42);
-        let and_payload = Payload::binary_op(bogus_prev, pred_digest);
+        let and_payload = *Payload::binary_op(bogus_prev, pred_digest)
+            .as_felts()
+            .expect("binary_op is expression-bodied");
 
         let wire = DeferredStateWire {
             entries: alloc::vec![
@@ -1042,9 +1042,9 @@ mod tests {
         //   [2] predicate eq(a, a)               — Binary { lhs: 0, rhs: 0 }
         //   [3] AND { TRUE_TAG, (TRUE, pred) }   — Binary { lhs: TRUE_INDEX, rhs: 2 }
         let a = test_leaf(7);
-        let a_payload = *a.expression_payload().expect("leaf is expression-bodied");
+        let a_payload = *a.payload.as_felts().expect("leaf is expression-bodied");
         let orphan = test_leaf(99);
-        let orphan_payload = *orphan.expression_payload().expect("leaf is expression-bodied");
+        let orphan_payload = *orphan.payload.as_felts().expect("leaf is expression-bodied");
         let pred =
             Node::expression(TestPrecompile::eq_tag(), Payload::binary_op(a.digest(), a.digest()));
 

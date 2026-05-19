@@ -106,7 +106,7 @@ impl PrecompileRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::deferred::{NodePayload, NodeType, Payload};
+    use crate::deferred::{NodeType, Payload};
 
     /// An honest minimal precompile fixture — its `id()` *is* its `precompile_id`, so it always
     /// passes the builder validator. Distinct `name`s yield distinct ids; identical names
@@ -145,13 +145,11 @@ mod tests {
         fn reduce(
             &self,
             imm: [Felt; 3],
-            payload: &NodePayload,
+            payload: &Payload,
             _witness: &mut WitnessBuilder<'_>,
         ) -> Result<Node, PrecompileError> {
-            let NodePayload::Expression(p) = payload else {
-                return Err(PrecompileError::InvalidNode);
-            };
-            Ok(Node::expression(Tag::new(self.id(), imm), *p))
+            let felts = payload.as_felts()?;
+            Ok(Node::expression(Tag::new(self.id(), imm), Payload::new(*felts)))
         }
     }
 

@@ -13,7 +13,7 @@
 
 use alloc::{sync::Arc, vec::Vec};
 
-use super::{Chunk, Payload, Tag};
+use super::{Chunk, Tag};
 use crate::{
     Felt, ZERO,
     serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
@@ -39,7 +39,7 @@ pub enum WireBody {
     /// MockHash digest, ...) and, per the structural heuristic in
     /// [`super::DeferredState::to_wire`], any Expression-bodied node whose two would-be child
     /// digests don't both resolve.
-    Value(Payload),
+    Value([Felt; 8]),
     /// Two indices into earlier wire entries. Each is either a valid index `< current_idx` or
     /// [`TRUE_INDEX`] for the transcript terminal. Rehydration reconstructs the digest-form
     /// payload as `Payload::binary_op(digests[lhs], digests[rhs])`.
@@ -82,9 +82,11 @@ pub struct DeferredStateWire {
 impl Serializable for WireBody {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         match self {
-            WireBody::Value(payload) => {
+            WireBody::Value(felts) => {
                 target.write_u8(0);
-                payload.write_into(target);
+                for felt in felts {
+                    felt.write_into(target);
+                }
             },
             WireBody::Binary { lhs, rhs } => {
                 target.write_u8(1);
@@ -107,7 +109,13 @@ impl Serializable for WireBody {
 impl Deserializable for WireBody {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         match source.read_u8()? {
-            0 => Ok(WireBody::Value(Payload::read_from(source)?)),
+            0 => {
+                let mut felts = [ZERO; 8];
+                for felt in &mut felts {
+                    *felt = Felt::read_from(source)?;
+                }
+                Ok(WireBody::Value(felts))
+            },
             1 => {
                 let lhs = source.read_u32()?;
                 let rhs = source.read_u32()?;
@@ -248,7 +256,7 @@ mod tests {
             entries: alloc::vec![
                 WireEntry {
                     tag: Tag::from_capacity(felts(1)[..4].try_into().unwrap()),
-                    body: WireBody::Value(Payload::new(felts(10)))
+                    body: WireBody::Value(felts(10))
                 },
                 WireEntry {
                     tag: Tag::from_capacity(felts(2)[..4].try_into().unwrap()),

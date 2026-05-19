@@ -10,8 +10,8 @@
 use crate::{
     Felt, ZERO,
     deferred::{
-        DeferredError, Node, NodePayload, NodeType, Payload, Precompile, PrecompileError, TRUE_TAG,
-        Tag, TagInfo, WitnessBuilder, precompile_id, true_node,
+        DeferredError, Node, NodeType, Payload, Precompile, PrecompileError, TRUE_TAG, Tag,
+        TagInfo, WitnessBuilder, precompile_id, true_node,
     },
 };
 
@@ -61,11 +61,10 @@ impl TestPrecompile {
         Node::expression(Self::leaf_tag(), Payload::new(limbs.map(Felt::from_u32)))
     }
 
-    /// Decode `[u32; 8]` limbs from a raw 8-felt payload (used for the input leaf, where only
-    /// the body is in hand).
-    fn decode_limbs(payload: &Payload) -> Result<[u32; 8], DeferredError> {
+    /// Decode `[u32; 8]` limbs from a raw 8-felt block.
+    fn decode_limbs(felts: &[Felt; 8]) -> Result<[u32; 8], DeferredError> {
         let mut limbs = [0u32; 8];
-        for (i, felt) in payload.0.iter().enumerate() {
+        for (i, felt) in felts.iter().enumerate() {
             let v = felt.as_canonical_u64();
             if v > u32::MAX as u64 {
                 return Err(DeferredError::InvalidPayload);
@@ -80,7 +79,7 @@ impl TestPrecompile {
         if node.tag != Self::leaf_tag() {
             return Err(DeferredError::InvalidPayload);
         }
-        Self::decode_limbs(node.expression_payload().ok_or(DeferredError::InvalidPayload)?)
+        Self::decode_limbs(node.payload.as_felts()?)
     }
 
     fn wrap_add(a: [u32; 8], b: [u32; 8]) -> [u32; 8] {
@@ -153,21 +152,18 @@ impl Precompile for TestPrecompile {
     fn reduce(
         &self,
         imm: [Felt; 3],
-        payload: &NodePayload,
+        payload: &Payload,
         witness: &mut WitnessBuilder<'_>,
     ) -> Result<Node, PrecompileError> {
-        // Every kind here is expression-bodied; `decode` already gated the discriminant.
-        let NodePayload::Expression(p) = payload else {
-            return Err(PrecompileError::InvalidNode);
-        };
         match Disc::classify(imm[0]).ok_or(PrecompileError::InvalidNode)? {
             // Leaf canonicality is checked here, deferred from register-time.
             Disc::Leaf => {
-                Self::decode_limbs(p).map_err(PrecompileError::from)?;
-                Ok(Node::expression(Tag::new(Self::id(), imm), *p))
+                let felts = payload.as_felts()?;
+                Self::decode_limbs(felts).map_err(PrecompileError::from)?;
+                Ok(Node::expression(Tag::new(Self::id(), imm), Payload::new(*felts)))
             },
             kind @ (Disc::Add | Disc::Mul) => {
-                let (lhs, rhs) = p.binary_op_children();
+                let (lhs, rhs) = payload.binary_op_children()?;
                 let a = Self::limbs_of(&witness.resolve(lhs)?).map_err(PrecompileError::from)?;
                 let b = Self::limbs_of(&witness.resolve(rhs)?).map_err(PrecompileError::from)?;
                 let out = if kind == Disc::Add {
@@ -178,7 +174,7 @@ impl Precompile for TestPrecompile {
                 Ok(Self::leaf_node(out))
             },
             Disc::Eq => {
-                let (lhs, rhs) = p.binary_op_children();
+                let (lhs, rhs) = payload.binary_op_children()?;
                 if witness.resolve(lhs)? != witness.resolve(rhs)? {
                     return Err(PrecompileError::AssertionFailed);
                 }

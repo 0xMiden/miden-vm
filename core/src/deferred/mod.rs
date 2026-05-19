@@ -40,10 +40,7 @@ use miden_utils_sync::OnceLockCompat;
 pub use precompile::{Precompile, precompile_id};
 pub use precompile_schema::PrecompileRegistry;
 
-use crate::{
-    Felt, Word,
-    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
-};
+use crate::{Felt, Word};
 
 /// Content-addressed digest of a [`Node`]. A 4-felt Poseidon2 output.
 pub type Digest = Word;
@@ -115,38 +112,69 @@ pub fn true_node() -> Node {
 // PAYLOAD
 // ================================================================================================
 
-/// 8-felt body of an expression or assertion node. For a leaf, this is the value data; for a
-/// binary op, the first 4 felts are the lhs child digest and the last 4 are the rhs child digest.
-/// Assertion payloads follow the same `lhs_digest || rhs_digest` convention as binary ops.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct Payload(pub [Felt; 8]);
+/// The body of a [`Node`], in one of two shapes:
+///
+/// - [`Expression`](Payload::Expression) — exactly 8 felts (one Poseidon2 rate block): value
+///   leaves, binary ops, predicates, AND-nodes. For a leaf the 8 felts are raw value data; for a
+///   binary op / assertion they are `lhs_digest || rhs_digest` (see [`Payload::binary_op`]).
+/// - [`Chunk`](Payload::Chunk) — bulk-data leaves: `n` 8-felt blocks. `n = chunks.len()` is also
+///   encoded in the tag, so the digest binds it. `Arc`-shared so cloning a chunk node (when
+///   interning or resolving children) is a ref-count bump, not a deep copy.
+///
+/// Accessors that only make sense for one shape return [`DeferredError::InvalidPayload`] when
+/// called on the other.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Payload {
+    Expression([Felt; 8]),
+    Chunk(Arc<[Chunk]>),
+}
 
 impl Payload {
+    /// An [`Expression`](Payload::Expression) payload from 8 raw felts.
     pub const fn new(felts: [Felt; 8]) -> Self {
-        Self(felts)
+        Self::Expression(felts)
     }
 
-    pub fn as_felts(&self) -> &[Felt; 8] {
-        &self.0
-    }
-
-    /// Builds a binary-op payload from two child digests in `(lhs, rhs)` order. Same convention
-    /// is reused by assertion nodes, which encode `lhs_digest || rhs_digest` in their 8-felt
-    /// payload.
+    /// An [`Expression`](Payload::Expression) payload packing two child digests as `lhs || rhs`.
+    /// Reused by assertion nodes, which encode `lhs_digest || rhs_digest` the same way.
     pub fn binary_op(lhs: Digest, rhs: Digest) -> Self {
         let mut felts = [ZERO; 8];
         felts[0..4].copy_from_slice(lhs.as_elements());
         felts[4..8].copy_from_slice(rhs.as_elements());
-        Self(felts)
+        Self::Expression(felts)
     }
 
-    /// Splits a binary-op or assertion payload into its two child digests in `(lhs, rhs)` order.
-    /// Inverse of [`Self::binary_op`]; convenient for schema `reduce` implementations that walk
-    /// children.
-    pub fn binary_op_children(&self) -> (Digest, Digest) {
-        let lhs = Word::new([self.0[0], self.0[1], self.0[2], self.0[3]]);
-        let rhs = Word::new([self.0[4], self.0[5], self.0[6], self.0[7]]);
-        (lhs, rhs)
+    /// A [`Chunk`](Payload::Chunk) payload from `n` rate-sized blocks of bulk data.
+    pub fn chunks(chunks: impl Into<Arc<[Chunk]>>) -> Self {
+        Self::Chunk(chunks.into())
+    }
+
+    /// The 8 felts of an [`Expression`](Payload::Expression) payload. Errors with
+    /// [`DeferredError::InvalidPayload`] on a [`Chunk`](Payload::Chunk) payload.
+    pub fn as_felts(&self) -> Result<&[Felt; 8], DeferredError> {
+        match self {
+            Self::Expression(felts) => Ok(felts),
+            Self::Chunk(_) => Err(DeferredError::InvalidPayload),
+        }
+    }
+
+    /// The bulk blocks of a [`Chunk`](Payload::Chunk) payload. Errors with
+    /// [`DeferredError::InvalidPayload`] on an [`Expression`](Payload::Expression) payload.
+    pub fn as_chunks(&self) -> Result<&[Chunk], DeferredError> {
+        match self {
+            Self::Chunk(chunks) => Ok(chunks),
+            Self::Expression(_) => Err(DeferredError::InvalidPayload),
+        }
+    }
+
+    /// Splits an [`Expression`](Payload::Expression) payload into its two child digests in
+    /// `(lhs, rhs)` order — inverse of [`Self::binary_op`]. Errors with
+    /// [`DeferredError::InvalidPayload`] on a [`Chunk`](Payload::Chunk) payload.
+    pub fn binary_op_children(&self) -> Result<(Digest, Digest), DeferredError> {
+        let f = self.as_felts()?;
+        let lhs = Word::new([f[0], f[1], f[2], f[3]]);
+        let rhs = Word::new([f[4], f[5], f[6], f[7]]);
+        Ok((lhs, rhs))
     }
 }
 
@@ -155,14 +183,9 @@ impl Payload {
 
 /// A DAG node identified by its [`Digest`].
 ///
-/// The tag is opaque at this layer — the [`PrecompileRegistry`] decodes it. The payload comes
-/// in two shapes ([`NodePayload`]):
-/// - `Expression(Payload)` — leaves, op-nodes, predicates, and AND-nodes. All carry an 8-felt
-///   payload.
-/// - `Chunk(Arc<[Chunk]>)` — bulk-data leaves; `n` (number of 8-felt chunks) is `chunks.len()` and
-///   is also encoded into the tag, so the digest binds it. Stored behind an `Arc` so cloning a
-///   chunk node (when interning or resolving children) is an atomic ref-count bump rather than a
-///   deep copy of the bulk data.
+/// The tag is opaque at this layer — the [`PrecompileRegistry`] decodes it. The body is a
+/// [`Payload`], either an 8-felt [`Expression`](Payload::Expression) (leaves, op-nodes,
+/// predicates, AND-nodes) or bulk [`Chunk`](Payload::Chunk) data.
 ///
 /// Predicate nodes (those whose tag decodes with `evaluates_to == TRUE_TAG`) are structurally
 /// indistinguishable from regular expression-bodied nodes; their "predicate-ness" is a property
@@ -176,7 +199,7 @@ impl Payload {
 #[derive(Clone, Debug)]
 pub struct Node {
     pub tag: Tag,
-    pub payload: NodePayload,
+    pub payload: Payload,
     /// Memoised Poseidon2 digest. Cloning a node may yield a fresh empty cache (depends on the
     /// `OnceLockCompat` impl); the first `.digest()` call on the clone re-populates it.
     digest_cache: OnceLockCompat<Digest>,
@@ -190,22 +213,14 @@ impl PartialEq for Node {
 }
 impl Eq for Node {}
 
-/// Variant of a [`Node`]'s body.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum NodePayload {
-    /// Leaves, op-nodes, predicates, AND-nodes. 8-felt payload.
-    Expression(Payload),
-    /// Bulk-data leaves. `n = chunks.len()`, also encoded in the tag. `Arc`-shared so the bulk
-    /// data is never deep-copied during interning or resolution.
-    Chunk(Arc<[Chunk]>),
-}
-
 impl Node {
-    /// Build an expression node (leaf, op-node, predicate, or AND-node).
+    /// Build a node from an 8-felt [`Expression`](Payload::Expression) body (leaf, op-node,
+    /// predicate, or AND-node). Takes the [`Payload`] directly — callers typically pass
+    /// `Payload::new(..)` or `Payload::binary_op(..)`.
     pub fn expression(tag: Tag, payload: Payload) -> Self {
         Self {
             tag,
-            payload: NodePayload::Expression(payload),
+            payload,
             digest_cache: OnceLockCompat::new(),
         }
     }
@@ -216,17 +231,8 @@ impl Node {
     pub fn chunk(tag: Tag, chunks: impl Into<Arc<[Chunk]>>) -> Self {
         Self {
             tag,
-            payload: NodePayload::Chunk(chunks.into()),
+            payload: Payload::Chunk(chunks.into()),
             digest_cache: OnceLockCompat::new(),
-        }
-    }
-
-    /// Returns the 8-felt payload of an expression node. Returns `None` for chunk nodes,
-    /// which don't have a fixed-size payload.
-    pub fn expression_payload(&self) -> Option<&Payload> {
-        match &self.payload {
-            NodePayload::Expression(p) => Some(p),
-            NodePayload::Chunk(_) => None,
         }
     }
 
@@ -239,8 +245,7 @@ impl Node {
     /// TRUEs *is* TRUE). The framework relies on contextual dispatch (predicate `reduce` results
     /// vs. AND-node DAG walks) rather than on byte-level distinction.
     pub fn is_true_node(&self) -> bool {
-        self.tag == TRUE_TAG
-            && matches!(&self.payload, NodePayload::Expression(p) if p.0 == [ZERO; 8])
+        self.tag == TRUE_TAG && matches!(&self.payload, Payload::Expression(f) if *f == [ZERO; 8])
     }
 
     /// Canonical 4-felt Poseidon2 digest of this node.
@@ -283,15 +288,15 @@ impl Node {
         let mut state = [ZERO; 12];
         state[8..12].copy_from_slice(&self.tag.as_capacity());
         match &self.payload {
-            NodePayload::Expression(p) => {
-                state[0..8].copy_from_slice(p.as_felts());
+            Payload::Expression(f) => {
+                state[0..8].copy_from_slice(f);
                 Poseidon2::apply_permutation(&mut state);
             },
-            NodePayload::Chunk(chunks) if chunks.is_empty() => {
+            Payload::Chunk(chunks) if chunks.is_empty() => {
                 // n=0: one permutation so the empty digest still binds to the tag.
                 Poseidon2::apply_permutation(&mut state);
             },
-            NodePayload::Chunk(chunks) => {
+            Payload::Chunk(chunks) => {
                 for c in chunks.iter() {
                     state[0..8].copy_from_slice(c);
                     Poseidon2::apply_permutation(&mut state);
@@ -299,31 +304,6 @@ impl Node {
             },
         }
         Word::new([state[0], state[1], state[2], state[3]])
-    }
-}
-
-// SERIALIZATION
-// ================================================================================================
-
-// `Payload` is the only deferred node-body type with a hand-written `Serializable` /
-// `Deserializable`: the wire format ([`wire`]) reuses it for `WireBody::Value`. `Node` and
-// `NodePayload` are never serialized directly — wire entries are the transit unit — so they
-// carry no custom serde, and no `serde` derives exist on the deferred types either.
-impl Serializable for Payload {
-    fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        for felt in &self.0 {
-            felt.write_into(target);
-        }
-    }
-}
-
-impl Deserializable for Payload {
-    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let mut felts = [ZERO; 8];
-        for felt in &mut felts {
-            *felt = Felt::read_from(source)?;
-        }
-        Ok(Self(felts))
     }
 }
 
@@ -385,7 +365,10 @@ mod tests {
     #[test]
     fn tag_changes_digest() {
         let p = payload(7);
-        assert_ne!(Node::expression(TAG_A, p).digest(), Node::expression(TAG_B, p).digest());
+        assert_ne!(
+            Node::expression(TAG_A, p.clone()).digest(),
+            Node::expression(TAG_B, p).digest()
+        );
     }
 
     #[test]
@@ -401,8 +384,9 @@ mod tests {
         // Single-chunk digest is the same body as Expression: rate := payload, capacity := tag,
         // one permutation, take state[0..4].
         let p = payload(123);
+        let felts = *p.as_felts().unwrap();
         let expr = Node::expression(TAG_A, p);
-        let chunk = Node::chunk(TAG_A, vec![p.0]);
+        let chunk = Node::chunk(TAG_A, vec![felts]);
         assert_eq!(expr.digest(), chunk.digest());
     }
 
@@ -416,7 +400,8 @@ mod tests {
 
     #[test]
     fn chunk_n3_matches_manual_linear_hash() {
-        let chunks: Vec<Chunk> = (0..3).map(|i| payload(100 + i * 8).0).collect();
+        let chunks: Vec<Chunk> =
+            (0..3).map(|i| *payload(100 + i * 8).as_felts().unwrap()).collect();
         let chunk = Node::chunk(TAG_A, chunks.clone());
 
         // Manual computation: capacity = tag, iterate over chunks overwriting rate.
@@ -441,8 +426,8 @@ mod tests {
         let n = true_node();
         assert_eq!(n.tag, TRUE_TAG);
         match &n.payload {
-            NodePayload::Expression(p) => assert_eq!(p.0, [ZERO; 8]),
-            _ => panic!("true_node must be expression-bodied"),
+            Payload::Expression(f) => assert_eq!(*f, [ZERO; 8]),
+            Payload::Chunk(_) => panic!("true_node must be expression-bodied"),
         }
         assert!(n.is_true_node());
     }

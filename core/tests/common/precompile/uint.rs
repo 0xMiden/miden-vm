@@ -9,8 +9,8 @@
 use miden_core::{
     Felt, ZERO,
     deferred::{
-        DeferredError, Digest, Node, NodePayload, NodeType, Payload, Precompile, PrecompileError,
-        TRUE_TAG, Tag, TagInfo, WitnessBuilder, precompile_id, true_node,
+        DeferredError, Digest, Node, NodeType, Payload, Precompile, PrecompileError, TRUE_TAG, Tag,
+        TagInfo, WitnessBuilder, precompile_id, true_node,
     },
 };
 
@@ -84,7 +84,7 @@ impl Uint {
         if node.tag != Self::leaf_tag() {
             return Err(DeferredError::InvalidPayload);
         }
-        decode_limbs(node.expression_payload().ok_or(DeferredError::InvalidPayload)?)
+        decode_limbs(node.payload.as_felts()?)
     }
 
     /// 256-bit wrapping add (mod 2^256). Limbs are little-endian u32. Exposed for consumers
@@ -161,16 +161,15 @@ impl Precompile for Uint {
     fn reduce(
         &self,
         imm: [Felt; 3],
-        payload: &NodePayload,
+        payload: &Payload,
         witness: &mut WitnessBuilder<'_>,
     ) -> Result<Node, PrecompileError> {
-        let NodePayload::Expression(p) = payload else {
-            return Err(PrecompileError::InvalidNode);
-        };
-        match UintNode::parse(imm, p)? {
+        match UintNode::parse(imm, payload)? {
             // Leaf canonicality is checked at parse-time, deferred from register-time so that
             // malformed leaves are interned silently and only error out when used.
-            UintNode::Leaf => Ok(Node::expression(Tag::new(Self::id(), imm), *p)),
+            UintNode::Leaf => {
+                Ok(Node::expression(Tag::new(Self::id(), imm), Payload::new(*payload.as_felts()?)))
+            },
             UintNode::BinaryOp { op, lhs, rhs } => {
                 let a = leaf_limbs(&witness.resolve(lhs)?)?;
                 let b = leaf_limbs(&witness.resolve(rhs)?)?;
@@ -241,15 +240,15 @@ impl UintNode {
         let kind = Discriminant::classify(imm[0]).ok_or(PrecompileError::InvalidNode)?;
         Ok(match kind {
             Discriminant::Leaf => {
-                decode_limbs(payload)?;
+                decode_limbs(payload.as_felts()?)?;
                 Self::Leaf
             },
             Discriminant::BinaryOp(op) => {
-                let (lhs, rhs) = payload.binary_op_children();
+                let (lhs, rhs) = payload.binary_op_children()?;
                 Self::BinaryOp { op, lhs, rhs }
             },
             Discriminant::Eq => {
-                let (lhs, rhs) = payload.binary_op_children();
+                let (lhs, rhs) = payload.binary_op_children()?;
                 Self::Eq { lhs, rhs }
             },
         })
@@ -263,12 +262,12 @@ fn leaf_limbs(node: &Node) -> Result<[u32; 8], DeferredError> {
     if node.tag != Uint::leaf_tag() {
         return Err(DeferredError::InvalidPayload);
     }
-    decode_limbs(node.expression_payload().ok_or(DeferredError::InvalidPayload)?)
+    decode_limbs(node.payload.as_felts()?)
 }
 
-fn decode_limbs(payload: &Payload) -> Result<[u32; 8], DeferredError> {
+fn decode_limbs(felts: &[Felt; 8]) -> Result<[u32; 8], DeferredError> {
     let mut limbs = [0u32; 8];
-    for (i, felt) in payload.0.iter().enumerate() {
+    for (i, felt) in felts.iter().enumerate() {
         let v = felt.as_canonical_u64();
         if v > u32::MAX as u64 {
             return Err(DeferredError::InvalidPayload);
