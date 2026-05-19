@@ -20,7 +20,8 @@ fn schema_and_state() -> (PrecompileSchema, DeferredState) {
     let schema = PrecompileSchema::new([
         Box::new(Uint) as Box<dyn Precompile>,
         Box::new(Group::default()) as Box<dyn Precompile>,
-    ]);
+    ])
+    .unwrap();
     let mut state = DeferredState::new();
     schema.init(&mut state).unwrap();
     (schema, state)
@@ -31,7 +32,8 @@ fn fresh() -> (PrecompileSchema, DeferredState) {
     let schema = PrecompileSchema::new([
         Box::new(Uint) as Box<dyn Precompile>,
         Box::new(Group::default()) as Box<dyn Precompile>,
-    ]);
+    ])
+    .unwrap();
     (schema, DeferredState::new())
 }
 
@@ -168,7 +170,7 @@ fn eq_predicate_errors_on_mismatch() {
     let h_g1 = register_group(&schema, &mut state, 7, 11);
     let h_g2 = register_group(&schema, &mut state, 7, 12);
     let err = state.evaluate(&schema, Group::eq_node(h_g1, h_g2));
-    assert!(matches!(err, Err(SchemaError::AssertionFailed)));
+    assert!(matches!(err.unwrap_err().root(), SchemaError::AssertionFailed));
 }
 
 #[test]
@@ -180,5 +182,8 @@ fn reduce_rejects_new_with_non_field_leaf_children() {
     let h_y = state.register(&schema, leaf(2)).unwrap();
     let bad_new = Group::new_node(h_g, h_y);
     let err = state.evaluate(&schema, bad_new);
-    assert!(matches!(err, Err(SchemaError::Other(_)) | Err(SchemaError::InvalidNode)));
+    assert!(matches!(
+        err.unwrap_err().root(),
+        SchemaError::Other(_) | SchemaError::InvalidNode
+    ));
 }

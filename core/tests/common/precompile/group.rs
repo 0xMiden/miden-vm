@@ -78,19 +78,19 @@ impl Precompile for Group {
         Self::id()
     }
 
-    fn decode(&self, sub: PrecompileTag) -> Result<TagInfo, SchemaError> {
+    fn decode(&self, sub: PrecompileTag) -> Option<TagInfo> {
         let [disc, imm, reserved] = sub.0;
         if imm != ZERO || reserved != ZERO {
-            return Err(SchemaError::InvalidNode);
+            return None;
         }
         // All Group nodes pack two child digests in their payload — `new` references the
         // coordinate leaves, `add`/`sub` reference the group operands, `eq` references the two
         // compared group elements. So every tag is `NodeType::Binary`.
-        let evaluates_to = match Discriminant::classify(disc).ok_or(SchemaError::InvalidNode)? {
+        let evaluates_to = match Discriminant::classify(disc)? {
             Discriminant::New | Discriminant::Add | Discriminant::Sub => Self::new_tag(),
             Discriminant::Eq => TRUE_TAG,
         };
-        Ok(TagInfo {
+        Some(TagInfo {
             node_type: NodeType::Binary,
             evaluates_to,
         })

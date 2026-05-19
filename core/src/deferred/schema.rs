@@ -13,6 +13,8 @@
 //! impl Schema for AppSchema { /* delegate decode + reduce to the right variant */ }
 //! ```
 
+use alloc::boxed::Box;
+
 use super::{Digest, Node, Tag};
 
 // SCHEMA ERROR
@@ -43,6 +45,35 @@ pub enum SchemaError {
     /// handler set).
     #[error(transparent)]
     Other(#[from] super::DeferredError),
+
+    /// A precompile in a [`super::PrecompileSchema`] composite rejected a tag or failed to
+    /// reduce a node it owns. Wraps the underlying cause with the offending precompile's name
+    /// so dispatch failures are attributable.
+    #[error("precompile `{name}`: {source}")]
+    Precompile {
+        name: &'static str,
+        source: Box<SchemaError>,
+    },
+
+    /// A precompile's declared [`super::Precompile::id`] is inconsistent with the id derived
+    /// from its name. Composite construction-time programming error.
+    #[error("precompile `{0}` declares an id inconsistent with its name derivation")]
+    PrecompileIdMismatch(&'static str),
+
+    /// Two precompiles in a composite resolve to the same id.
+    #[error("duplicate precompile id in composite (`{0}` and `{1}`)")]
+    DuplicatePrecompileId(&'static str, &'static str),
+}
+
+impl SchemaError {
+    /// Peel any [`SchemaError::Precompile`] wrappers and return the underlying cause. Useful in
+    /// `matches!` assertions that care about the root failure, not which precompile raised it.
+    pub fn root(&self) -> &SchemaError {
+        match self {
+            SchemaError::Precompile { source, .. } => source.root(),
+            other => other,
+        }
+    }
 }
 
 // NODE TYPE
