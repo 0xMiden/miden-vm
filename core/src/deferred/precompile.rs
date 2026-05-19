@@ -13,7 +13,7 @@
 
 use alloc::vec::Vec;
 
-use blake3::Hasher;
+use miden_crypto::hash::blake::Blake3_256;
 
 use super::{Node, Payload, PrecompileError, TagInfo, WitnessBuilder};
 use crate::Felt;
@@ -106,12 +106,12 @@ pub fn precompile_id(p: &dyn Precompile) -> Felt {
 }
 
 fn derive(name: &str) -> Felt {
-    let mut hasher = Hasher::new();
-    hasher.update(PRECOMPILE_ID_DOMSEP);
     // Length-prefix the name so it is domain-separated from the digest tail.
-    hasher.update(&(name.len() as u32).to_le_bytes());
-    hasher.update(name.as_bytes());
-    let digest = hasher.finalize();
+    let mut buf = Vec::with_capacity(PRECOMPILE_ID_DOMSEP.len() + 4 + name.len());
+    buf.extend_from_slice(PRECOMPILE_ID_DOMSEP);
+    buf.extend_from_slice(&(name.len() as u32).to_le_bytes());
+    buf.extend_from_slice(name.as_bytes());
+    let digest = Blake3_256::hash(&buf);
     let raw = u64::from_le_bytes(digest.as_bytes()[..8].try_into().expect("8 bytes"));
     Felt::new_unchecked(raw % Felt::ORDER)
 }

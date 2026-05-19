@@ -58,7 +58,6 @@ miden-utils-indexing.workspace = true
 miden-utils-sync.workspace = true
 
 # External dependencies
-blake3 = { version = "1.5", default-features = false }
 derive_more.workspace = true
 log.workspace = true
 num-derive = { version = "0.4", default-features = false }
