@@ -4,6 +4,7 @@ use core::{cmp::min, ops::ControlFlow};
 use miden_air::{Felt, trace::RowIndex};
 use miden_core::{
     EMPTY_WORD, WORD_SIZE, Word, ZERO,
+    deferred::{DeferredState, NoopSchema, Schema},
     mast::{ExecutableMastForest, MastForest},
     precompile::PrecompileTranscript,
     program::{MIN_STACK_DEPTH, Program, StackInputs, StackOutputs},
@@ -139,6 +140,18 @@ pub struct FastProcessor {
     /// Transcript used to record commitments via `log_precompile` instruction (implemented via
     /// Poseidon2 sponge).
     pc_transcript: PrecompileTranscript,
+
+    /// The deferred-DAG state accumulated during execution. Nodes are interned by the
+    /// `SystemEvent::DeferredRegister{,Chunk}` handlers and by the `log_precompile` opcode (which
+    /// interns AND-nodes). Threaded out through [`ExecutionOutput`] for the verifier to walk.
+    deferred_state: DeferredState,
+
+    /// The deferred-DAG schema installed at processor construction. Owns the entire semantic
+    /// layer (tag recognition, validation, recursive evaluation, equality). Defaults to
+    /// [`NoopSchema`] — callers running programs that emit precompile tags must
+    /// install a schema (typically `miden_core_lib::CoreLibrary::precompile_schema()`) via
+    /// [`Self::with_schema`].
+    deferred_schema: Arc<dyn Schema>,
 }
 
 impl FastProcessor {
@@ -150,6 +163,7 @@ impl FastProcessor {
             advice: self.advice,
             memory: self.memory,
             final_precompile_transcript: self.pc_transcript,
+            deferred_state: self.deferred_state,
         }
     }
 
@@ -234,6 +248,17 @@ impl FastProcessor {
         Ok(self)
     }
 
+    /// Installs the [`Schema`] used by the deferred-DAG system events.
+    ///
+    /// The default is [`NoopSchema`] — any precompile tag will be rejected. To
+    /// run programs that use the core library's precompile MASM wrappers, install
+    /// `miden_core_lib::CoreLibrary::precompile_schema()` (or a composite that includes the
+    /// keccak256 / sha512 / ecdsa_k256_keccak / eddsa_ed25519 apps).
+    pub fn with_schema(mut self, schema: Arc<dyn Schema>) -> Self {
+        self.deferred_schema = schema;
+        self
+    }
+
     /// Constructor for creating a `FastProcessor` with all options specified at once.
     ///
     /// For a more fluent API, consider using `FastProcessor::new()` with builder methods.
@@ -269,6 +294,8 @@ impl FastProcessor {
             stack_overflow_save_stack: Vec::new(),
             options,
             pc_transcript: PrecompileTranscript::new(),
+            deferred_state: DeferredState::new(),
+            deferred_schema: Arc::new(NoopSchema),
         })
     }
 
@@ -290,6 +317,26 @@ impl FastProcessor {
 
     // ACCESSORS
     // -------------------------------------------------------------------------------------------
+
+    /// Returns the deferred-DAG schema.
+    #[inline(always)]
+    pub fn deferred_schema(&self) -> &dyn Schema {
+        &*self.deferred_schema
+    }
+
+    /// Returns the deferred-DAG state and the schema as a disjoint borrow pair so the deferred
+    /// system-event handlers can borrow both simultaneously without running into the borrow
+    /// checker.
+    #[inline(always)]
+    pub(crate) fn deferred_view_mut(&mut self) -> (&mut DeferredState, &dyn Schema) {
+        (&mut self.deferred_state, &*self.deferred_schema)
+    }
+
+    /// Returns a reference to the deferred-DAG state accumulated during execution.
+    #[inline(always)]
+    pub fn deferred_state(&self) -> &DeferredState {
+        &self.deferred_state
+    }
 
     /// Returns the size of the stack.
     #[inline(always)]
@@ -606,6 +653,7 @@ pub struct ExecutionOutput {
     pub advice: AdviceProvider,
     pub memory: Memory,
     pub final_precompile_transcript: PrecompileTranscript,
+    pub deferred_state: DeferredState,
 }
 
 // SYSTEM CALL STATE
