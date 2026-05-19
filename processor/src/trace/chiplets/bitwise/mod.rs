@@ -157,10 +157,10 @@ impl Bitwise {
         debug_assert_eq!(self.trace_len(), trace.len(), "inconsistent trace lengths");
         debug_assert_eq!(TRACE_WIDTH, trace.width(), "inconsistent trace widths");
 
-        // copy trace into the fragment column-by-column
+        // write columns into the fragment
         // TODO: this can be parallelized to copy columns in multiple threads (#2163)
-        for (out_column, column) in trace.columns().zip(self.trace) {
-            out_column.copy_from_slice(&column);
+        for (local_col, column) in self.trace.into_iter().enumerate() {
+            trace.fill_column(local_col, &column);
         }
     }
 

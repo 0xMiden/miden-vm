@@ -4,8 +4,8 @@ use itertools::Itertools;
 use miden_air::{
     Felt,
     trace::{
-        CLK_COL_IDX, DECODER_TRACE_OFFSET, DECODER_TRACE_WIDTH, MIN_TRACE_LEN, MainTrace, RowIndex,
-        STACK_TRACE_OFFSET, STACK_TRACE_WIDTH, SYS_TRACE_WIDTH,
+        CLK_COL_IDX, DECODER_TRACE_OFFSET, DECODER_TRACE_WIDTH, MIN_TRACE_LEN, MainTrace,
+        RANGE_CHECK_TRACE_WIDTH, RowIndex, STACK_TRACE_OFFSET, STACK_TRACE_WIDTH, SYS_TRACE_WIDTH,
         decoder::{
             HASHER_STATE_OFFSET, NUM_HASHER_COLUMNS, NUM_OP_BITS, OP_BITS_EXTRA_COLS_OFFSET,
             OP_BITS_OFFSET,
@@ -35,7 +35,14 @@ use crate::{
     },
 };
 
+/// Per-row payload written by the core tracer (system + decoder + stack).
 pub const CORE_TRACE_WIDTH: usize = SYS_TRACE_WIDTH + DECODER_TRACE_WIDTH + STACK_TRACE_WIDTH;
+
+/// Physical row width of the core buffer: the [`CORE_TRACE_WIDTH`] payload plus the two
+/// trailing range-checker columns, which together form the per-AIR Core matrix
+/// (`NUM_CORE_COLS`) consumed directly by proving. The range columns are filled in-place
+/// after padding (see `write_range_into_core`).
+pub const CORE_STORAGE_WIDTH: usize = CORE_TRACE_WIDTH + RANGE_CHECK_TRACE_WIDTH;
 
 /// `build_trace()` uses this as a hard cap on trace rows.
 ///
@@ -159,7 +166,7 @@ pub fn build_trace_with_max_len(
         max_stack_depth,
     )?;
 
-    let core_trace_len = core_trace_data.len() / CORE_TRACE_WIDTH;
+    let core_trace_len = core_trace_data.len() / CORE_STORAGE_WIDTH;
 
     // Get the number of rows for the range checker
     let range_table_len = range_checker.get_number_range_checker_rows();
@@ -181,14 +188,20 @@ pub fn build_trace_with_max_len(
         main_trace_len,
     );
 
-    let ((range_checker_trace, chiplets_trace), ()) = rayon::join(
-        || {
-            rayon::join(
-                || range_checker.into_trace_with_table(range_table_len, core_height),
-                || chiplets.into_trace(chiplets_height),
-            )
-        },
-        || pad_core_row_major(&mut core_trace_data, core_height),
+    let (chiplets_trace, ()) = rayon::join(
+        || chiplets.into_trace(main_trace_len),
+        || pad_core_row_major(&mut core_trace_data, main_trace_len),
+    );
+
+    // The range checker occupies the two trailing columns of the core buffer.
+    range_checker.write_range_into_core(
+        &mut core_trace_data,
+        CORE_STORAGE_WIDTH,
+        CORE_TRACE_WIDTH,
+        CORE_TRACE_WIDTH + 1,
+        range_table_len,
+        core_height,
+        main_trace_len,
     );
 
     // Create the MainTrace
@@ -197,7 +210,8 @@ pub fn build_trace_with_max_len(
         MainTrace::from_parts(
             core_trace_data,
             chiplets_trace.trace,
-            range_checker_trace.trace,
+            core_height,
+            chiplets_height,
             last_program_row,
         )
     };
@@ -228,7 +242,7 @@ fn generate_core_trace_row_major(
     let num_fragments = core_trace_contexts.len();
     let total_allocated_rows = num_fragments * fragment_size;
 
-    let mut core_trace_data: Vec<Felt> = vec![ZERO; total_allocated_rows * CORE_TRACE_WIDTH];
+    let mut core_trace_data: Vec<Felt> = vec![ZERO; total_allocated_rows * CORE_STORAGE_WIDTH];
 
     // Save the first stack top for initialization
     let first_stack_top = if let Some(first_context) = core_trace_contexts.first() {
@@ -238,8 +252,8 @@ fn generate_core_trace_row_major(
     };
 
     let writers: Vec<RowMajorTraceWriter<'_, Felt>> = core_trace_data
-        .chunks_exact_mut(fragment_size * CORE_TRACE_WIDTH)
-        .map(|chunk| RowMajorTraceWriter::new(chunk, CORE_TRACE_WIDTH))
+        .chunks_exact_mut(fragment_size * CORE_STORAGE_WIDTH)
+        .map(|chunk| RowMajorTraceWriter::with_stride(chunk, CORE_TRACE_WIDTH, CORE_STORAGE_WIDTH))
         .collect();
 
     // Build the core trace fragments in parallel
@@ -286,7 +300,7 @@ fn generate_core_trace_row_major(
     // row of each fragment with non-inverted values.
     {
         let h0_col_offset = STACK_TRACE_OFFSET + H0_COL_IDX;
-        let w = CORE_TRACE_WIDTH;
+        let w = CORE_STORAGE_WIDTH;
         core_trace_data[..total_core_trace_rows * w]
             .par_chunks_mut(fragment_size * w)
             .for_each(|fragment_chunk| {
@@ -301,7 +315,7 @@ fn generate_core_trace_row_major(
     }
 
     // Truncate the core trace columns to the actual number of rows written.
-    core_trace_data.truncate(total_core_trace_rows * CORE_TRACE_WIDTH);
+    core_trace_data.truncate(total_core_trace_rows * CORE_STORAGE_WIDTH);
 
     push_halt_opcode_row(
         &mut core_trace_data,
@@ -331,7 +345,7 @@ fn fixup_stack_and_system_rows(
     first_stack_top: &[Felt],
 ) {
     const MIN_STACK_DEPTH_FELT: Felt = Felt::new_unchecked(MIN_STACK_DEPTH as u64);
-    let w = CORE_TRACE_WIDTH;
+    let w = CORE_STORAGE_WIDTH;
 
     {
         let row = &mut core_trace_data[..w];
@@ -372,8 +386,8 @@ fn push_halt_opcode_row(
     last_system_state: &[Felt; SYS_TRACE_WIDTH],
     last_stack_state: &[Felt; STACK_TRACE_WIDTH],
 ) {
-    let w = CORE_TRACE_WIDTH;
-    let mut row = [ZERO; CORE_TRACE_WIDTH];
+    let w = CORE_STORAGE_WIDTH;
+    let mut row = [ZERO; CORE_STORAGE_WIDTH];
 
     // system columns
     // ---------------------------------------------------------------------------------------
@@ -596,7 +610,7 @@ fn initialize_chiplets(
 
 /// Pads the core trace to `main_trace_len` rows (HALT template, CLK incremented per row).
 fn pad_core_row_major(core_trace_data: &mut Vec<Felt>, main_trace_len: usize) {
-    let w = CORE_TRACE_WIDTH;
+    let w = CORE_STORAGE_WIDTH;
     let total_program_rows = core_trace_data.len() / w;
     assert!(total_program_rows <= main_trace_len);
     assert!(total_program_rows > 0);
@@ -610,7 +624,7 @@ fn pad_core_row_major(core_trace_data: &mut Vec<Felt>, main_trace_len: usize) {
     // Decoder columns
     // ------------------------
 
-    let mut template = [ZERO; CORE_TRACE_WIDTH];
+    let mut template = [ZERO; CORE_STORAGE_WIDTH];
     // Pad op_bits columns with HALT opcode bits
     let halt_opcode = opcodes::HALT;
     for i in 0..NUM_OP_BITS {

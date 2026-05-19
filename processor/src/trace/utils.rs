@@ -1,5 +1,4 @@
 use alloc::vec::Vec;
-use core::slice;
 
 use miden_air::trace::MIN_TRACE_LEN;
 
@@ -12,44 +11,77 @@ use crate::{operation::Operation, utils::ToElements};
 // ================================================================================================
 
 /// Row-major flat buffer writer (`write_row` is a single `copy_from_slice`).
+///
+/// `payload` is the number of leading columns written per row; `stride` is the physical row
+/// width of the backing buffer. When `stride > payload`, the trailing `stride - payload`
+/// columns of each row are left untouched (callers rely on them staying zero-initialized).
 #[derive(Debug)]
 pub struct RowMajorTraceWriter<'a, E> {
     data: &'a mut [E],
-    width: usize,
+    payload: usize,
+    stride: usize,
 }
 
 impl<'a, E: Copy> RowMajorTraceWriter<'a, E> {
+    /// Creates a writer whose physical row width equals the per-row payload.
+    #[cfg(test)]
     pub fn new(data: &'a mut [E], width: usize) -> Self {
-        debug_assert_eq!(data.len() % width, 0, "buffer length must be a multiple of width");
-        Self { data, width }
+        Self::with_stride(data, width, width)
     }
 
-    /// Writes one row; `values.len()` must equal `width`.
+    /// Creates a writer that writes `payload` columns per row into a buffer with physical row
+    /// width `stride` (`stride >= payload`).
+    pub fn with_stride(data: &'a mut [E], payload: usize, stride: usize) -> Self {
+        debug_assert!(stride >= payload, "stride must be >= payload");
+        debug_assert_eq!(data.len() % stride, 0, "buffer length must be a multiple of stride");
+        Self { data, payload, stride }
+    }
+
+    /// Writes one row's payload; `values.len()` must equal `payload`.
     #[inline(always)]
     pub fn write_row(&mut self, row: usize, values: &[E]) {
-        debug_assert_eq!(values.len(), self.width);
-        let start = row * self.width;
-        self.data[start..start + self.width].copy_from_slice(values);
+        debug_assert_eq!(values.len(), self.payload);
+        let start = row * self.stride;
+        self.data[start..start + self.payload].copy_from_slice(values);
     }
 }
 
 // TRACE FRAGMENT
 // ================================================================================================
 
-/// TODO: add docs
+/// A writable, row-major view over one chiplet's region of the chiplets trace.
+///
+/// A chiplet occupies a contiguous band of rows and a contiguous band of columns
+/// `[col_start, col_start + num_cols)`, so chiplet-local column `c` maps to global column
+/// `col_start + c`. Writes land directly in that band of the shared row-major buffer.
 pub struct TraceFragment<'a> {
-    data: Vec<&'a mut [Felt]>,
+    /// Contiguous `num_rows * stride` row-major slice (this chiplet's rows).
+    band: &'a mut [Felt],
+    stride: usize,
+    col_start: usize,
     num_rows: usize,
+    num_cols: usize,
 }
 
 impl<'a> TraceFragment<'a> {
-    /// Creates a new [TraceFragment] with the expected number of columns and rows.
-    ///
-    /// The memory needed to hold the trace fragment data is not allocated during construction.
-    pub fn new(num_columns: usize, num_rows: usize) -> Self {
-        TraceFragment {
-            data: Vec::with_capacity(num_columns),
+    /// Creates a row-major fragment over `band` (a contiguous `num_rows * stride` slice)
+    /// whose `num_cols` chiplet-local columns map to global columns
+    /// `[col_start, col_start + num_cols)`.
+    pub fn row_major(
+        band: &'a mut [Felt],
+        stride: usize,
+        col_start: usize,
+        num_cols: usize,
+    ) -> Self {
+        debug_assert_eq!(band.len() % stride, 0, "band length must be a multiple of stride");
+        debug_assert!(col_start + num_cols <= stride, "column band overruns the row stride");
+        let num_rows = band.len() / stride;
+        Self {
+            band,
+            stride,
+            col_start,
             num_rows,
+            num_cols,
         }
     }
 
@@ -58,7 +90,7 @@ impl<'a> TraceFragment<'a> {
 
     /// Returns the number of columns in this execution trace fragment.
     pub fn width(&self) -> usize {
-        self.data.len()
+        self.num_cols
     }
 
     /// Returns the number of rows in this execution trace fragment.
@@ -72,37 +104,17 @@ impl<'a> TraceFragment<'a> {
     /// Updates a single cell in this fragment with provided value.
     #[inline(always)]
     pub fn set(&mut self, row_idx: RowIndex, col_idx: usize, value: Felt) {
-        self.data[col_idx][row_idx] = value;
+        let row = row_idx.as_usize();
+        self.band[row * self.stride + self.col_start + col_idx] = value;
     }
 
-    /// Returns a mutable iterator to the columns of this fragment.
-    pub fn columns(&mut self) -> slice::IterMut<'_, &'a mut [Felt]> {
-        self.data.iter_mut()
-    }
-
-    /// Adds a new column to this fragment by pushing a mutable slice with the first `self.len()`
-    /// elements of the provided column.
-    ///
-    /// Returns the rest of the provided column as a separate mutable slice.
-    pub fn push_column_slice(&mut self, column: &'a mut [Felt]) -> &'a mut [Felt] {
-        let (column_fragment, rest) = column.split_at_mut(self.num_rows);
-        self.data.push(column_fragment);
-        rest
-    }
-
-    // TEST METHODS
-    // --------------------------------------------------------------------------------------------
-
-    #[cfg(test)]
-    pub fn trace_to_fragment(trace: &'a mut [Vec<Felt>]) -> Self {
-        assert!(!trace.is_empty(), "expected trace to have at least one column");
-        let mut data = Vec::new();
-        for column in trace.iter_mut() {
-            data.push(column.as_mut_slice());
+    /// Writes one chiplet-local column from a contiguous source (`src.len()` == row count).
+    pub fn fill_column(&mut self, col_idx: usize, src: &[Felt]) {
+        debug_assert_eq!(src.len(), self.num_rows, "column length mismatch");
+        let g = self.col_start + col_idx;
+        for (r, &v) in src.iter().enumerate() {
+            self.band[r * self.stride + g] = v;
         }
-
-        let num_rows = data[0].len();
-        Self { data, num_rows }
     }
 }
 

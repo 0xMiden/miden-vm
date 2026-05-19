@@ -52,8 +52,8 @@ impl Ace {
             offset += eval_ctx.num_rows();
         }
 
-        for (out_column, column) in trace.columns().zip(gen_trace) {
-            out_column.copy_from_slice(&column);
+        for (local_col, column) in gen_trace.into_iter().enumerate() {
+            trace.fill_column(local_col, &column);
         }
     }
 

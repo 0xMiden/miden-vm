@@ -202,20 +202,10 @@ impl Chiplets {
     pub fn into_trace(self, trace_len: usize) -> ChipletsTrace {
         assert!(self.trace_len() <= trace_len, "target trace length too small");
 
-        // Allocate columns for the trace of the chiplets.
-        let mut trace = (0..CHIPLETS_WIDTH)
-            .map(|_| vec![Felt::ZERO; trace_len])
-            .collect::<Vec<_>>()
-            .try_into()
-            .expect("failed to convert vector to array");
-        self.fill_trace(&mut trace);
+        let mut trace = vec![Felt::ZERO; CHIPLETS_WIDTH * trace_len];
+        self.fill_trace(&mut trace, trace_len);
 
-        let mut row_flat = Vec::with_capacity(CHIPLETS_WIDTH * trace_len);
-        for row_idx in 0..trace_len {
-            row_flat.extend(trace.iter().map(|column| column[row_idx]));
-        }
-
-        ChipletsTrace { trace: row_flat }
+        ChipletsTrace { trace }
     }
 
     // HELPER METHODS
@@ -225,8 +215,11 @@ impl Chiplets {
     /// Hasher, Bitwise, Memory, ACE, and kernel ROM chiplets along with selector columns
     /// to identify each individual chiplet trace in addition to padding to fill the rest of
     /// the trace.
-    fn fill_trace(self, trace: &mut [Vec<Felt>; CHIPLETS_WIDTH]) {
-        // s_ctrl (trace[0]) is 1 on the hasher's controller rows and 0 elsewhere.
+    fn fill_trace(self, trace: &mut [Felt], trace_len: usize) {
+        const W: usize = CHIPLETS_WIDTH;
+        debug_assert_eq!(trace.len(), W * trace_len);
+
+        // s_ctrl (column 0) is 1 on the hasher's controller rows and 0 elsewhere.
         // The controller region is the padded prefix of the hasher region; `region_lengths`
         // returns the same padded length that `finalize_trace` will materialize later.
         let (hasher_ctrl_len, _hasher_perm_len) = self.hasher.region_lengths();
@@ -237,115 +230,74 @@ impl Chiplets {
 
         let Chiplets { hasher, bitwise, memory, kernel_rom, ace } = self;
 
-        // Populate external selector columns. Each is a contiguous 0/1 indicator; the trace
-        // is zero-initialized, so we only memset the regions where the selector is ONE.
-        // s_perm (trace[20]) is written row-by-row by the hasher itself during fragment fill.
-        trace[0][..hasher_ctrl_len].fill(ONE); // s_ctrl: hasher controller rows
-        trace[1][memory_start..].fill(ONE);
-        trace[2][ace_start..].fill(ONE);
-        trace[3][kernel_rom_start..].fill(ONE);
-        trace[4][padding_start..].fill(ONE);
+        // Per-chiplet row counts. Chiplets are stacked vertically, so each one's region is a
+        // contiguous band of rows: hasher [0, h), bitwise [h, h+b), and so on.
+        let hasher_len = hasher.trace_len();
+        let bitwise_len = bitwise.trace_len();
+        let memory_len = memory.trace_len();
+        let ace_len = ace.trace_len();
+        let kernel_rom_len = kernel_rom.trace_len();
 
-        // Fill the chip_clk column (last column in the chiplets segment) with the
-        // chiplet-trace row counter [1, 2, 3, ...]. This serves as the chiplet-side
-        // responder address for the hasher LogUp bus — see
-        // `air/src/constraints/chiplets/chip_clk.rs`.
-        for (row, slot) in trace[CHIPLETS_WIDTH - 1].iter_mut().enumerate() {
-            *slot = Felt::from_u32((row + 1) as u32);
-        }
-
-        // Fill chiplet traces via fragments. The block scopes the fragment borrows.
-        {
-            // allocate fragments to be filled with the respective execution traces of each chiplet
-            let mut hasher_fragment = TraceFragment::new(CHIPLETS_WIDTH, hasher.trace_len());
-            let mut bitwise_fragment = TraceFragment::new(CHIPLETS_WIDTH, bitwise.trace_len());
-            let mut memory_fragment = TraceFragment::new(CHIPLETS_WIDTH, memory.trace_len());
-            let mut ace_fragment = TraceFragment::new(CHIPLETS_WIDTH, ace.trace_len());
-            let mut kernel_rom_fragment =
-                TraceFragment::new(CHIPLETS_WIDTH, kernel_rom.trace_len());
-
-            // add the hasher, bitwise, memory, ACE, and kernel ROM segments to their respective
-            // fragments so they can be filled with the chiplet traces
-            for (column_num, column) in trace.iter_mut().enumerate().skip(1) {
-                match column_num {
-                    1 => {
-                        // column 1 is relevant only for the hasher
-                        hasher_fragment.push_column_slice(column);
-                    },
-                    2 => {
-                        // column 2 is relevant to the hasher and to bitwise chiplet
-                        let rest = hasher_fragment.push_column_slice(column);
-                        bitwise_fragment.push_column_slice(rest);
-                    },
-                    3 => {
-                        // column 3 is relevant for hasher, bitwise, and memory chiplets
-                        let rest = hasher_fragment.push_column_slice(column);
-                        let rest = bitwise_fragment.push_column_slice(rest);
-                        memory_fragment.push_column_slice(rest);
-                    },
-                    4 | 10..=14 => {
-                        // columns 4 - 10 to 14 are relevant for hasher, bitwise, memory chiplets
-                        // and ace chiplet
-                        let rest = hasher_fragment.push_column_slice(column);
-                        let rest = bitwise_fragment.push_column_slice(rest);
-                        let rest = memory_fragment.push_column_slice(rest);
-                        ace_fragment.push_column_slice(rest);
-                    },
-                    5..=9 => {
-                        // columns 5 - 9 are relevant to all chiplets
-                        let rest = hasher_fragment.push_column_slice(column);
-                        let rest = bitwise_fragment.push_column_slice(rest);
-                        let rest = memory_fragment.push_column_slice(rest);
-                        let rest = ace_fragment.push_column_slice(rest);
-                        kernel_rom_fragment.push_column_slice(rest);
-                    },
-                    15 | 16 => {
-                        // columns 15 and 16 are relevant for the hasher, memory and ace chiplets
-                        let rest = hasher_fragment.push_column_slice(column);
-                        // skip bitwise chiplet
-                        let (_, rest) = rest.split_at_mut(bitwise.trace_len());
-                        let rest = memory_fragment.push_column_slice(rest);
-                        ace_fragment.push_column_slice(rest);
-                    },
-                    17..=19 => {
-                        // columns 17-19 are relevant for hasher, memory, and ace chiplets
-                        // (hasher: mrupdate_id/is_start/is_final; memory: f_scw/w0/w1; ace cols)
-                        let rest = hasher_fragment.push_column_slice(column);
-                        // skip bitwise chiplet
-                        let (_, rest) = rest.split_at_mut(bitwise.trace_len());
-                        let rest = memory_fragment.push_column_slice(rest);
-                        ace_fragment.push_column_slice(rest);
-                    },
-                    20 => {
-                        // column 20 is relevant only for the hasher chiplet (s_perm)
-                        hasher_fragment.push_column_slice(column);
-                    },
-                    21 => {
-                        // column 21 (chip_clk) is filled at the master level above; skip.
-                    },
-                    _ => panic!("invalid column index"),
-                }
+        // Populate the external selector columns. Each is a contiguous 0/1 indicator over a
+        // row range; the buffer is zero-initialized, so we only write the ONE regions.
+        // s_perm (column 20) is written by the hasher itself during its band fill.
+        let set_col_ones = |trace: &mut [Felt], col: usize, rows: core::ops::Range<usize>| {
+            for r in rows {
+                trace[r * W + col] = ONE;
             }
+        };
+        set_col_ones(trace, 0, 0..hasher_ctrl_len); // s_ctrl: hasher controller rows
+        set_col_ones(trace, 1, memory_start..trace_len);
+        set_col_ones(trace, 2, ace_start..trace_len);
+        set_col_ones(trace, 3, kernel_rom_start..trace_len);
+        set_col_ones(trace, 4, padding_start..trace_len);
 
-            // Fill all chiplets in parallel.
-            rayon::scope(|s| {
-                s.spawn(move |_| {
-                    hasher.fill_trace(&mut hasher_fragment);
-                });
-                s.spawn(move |_| {
-                    bitwise.fill_trace(&mut bitwise_fragment);
-                });
-                s.spawn(move |_| {
-                    memory.fill_trace(&mut memory_fragment);
-                });
-                s.spawn(move |_| {
-                    kernel_rom.fill_trace(&mut kernel_rom_fragment);
-                });
-                s.spawn(move |_| {
-                    ace.fill_trace(&mut ace_fragment);
-                });
-            });
+        // Fill the chip_clk column (last column) with the chiplet-trace row counter
+        // [1, 2, 3, ...]. This is the chiplet-side responder address for the hasher LogUp
+        // bus — see `air/src/constraints/chiplets/chip_clk.rs`.
+        for row in 0..trace_len {
+            trace[row * W + (W - 1)] = Felt::from_u32((row + 1) as u32);
         }
+
+        // Each chiplet occupies a contiguous column band `[col_start, col_start + width)` of
+        // the row. `col_start` is the chiplet's nesting position: column 0 is `s_ctrl`, then
+        // the chiplets nest hasher ⊃ bitwise ⊃ memory ⊃ ace ⊃ kernel_rom, so they begin at
+        // columns 1, 2, 3, 4, 5 respectively; the widest (hasher) fills every data column up
+        // to `chip_clk` (the final column).
+        const _: () = assert!(1 + HASHER_WIDTH == CHIPLETS_WIDTH - 1);
+
+        // Carve `trace` into the per-chiplet contiguous row bands. The padding rows after the
+        // kernel ROM region carry only the (already written) s4 selector.
+        let (hasher_band, rest) = trace.split_at_mut(hasher_len * W);
+        let (bitwise_band, rest) = rest.split_at_mut(bitwise_len * W);
+        let (memory_band, rest) = rest.split_at_mut(memory_len * W);
+        let (ace_band, rest) = rest.split_at_mut(ace_len * W);
+        let (kernel_band, _padding) = rest.split_at_mut(kernel_rom_len * W);
+
+        let mut hasher_fragment = TraceFragment::row_major(hasher_band, W, 1, HASHER_WIDTH);
+        let mut bitwise_fragment = TraceFragment::row_major(bitwise_band, W, 2, BITWISE_WIDTH);
+        let mut memory_fragment = TraceFragment::row_major(memory_band, W, 3, MEMORY_WIDTH);
+        let mut ace_fragment = TraceFragment::row_major(ace_band, W, 4, ACE_CHIPLET_NUM_COLS);
+        let mut kernel_rom_fragment =
+            TraceFragment::row_major(kernel_band, W, 5, KERNEL_ROM_TRACE_WIDTH);
+
+        rayon::scope(|s| {
+            s.spawn(move |_| {
+                hasher.fill_trace(&mut hasher_fragment);
+            });
+            s.spawn(move |_| {
+                bitwise.fill_trace(&mut bitwise_fragment);
+            });
+            s.spawn(move |_| {
+                memory.fill_trace(&mut memory_fragment);
+            });
+            s.spawn(move |_| {
+                kernel_rom.fill_trace(&mut kernel_rom_fragment);
+            });
+            s.spawn(move |_| {
+                ace.fill_trace(&mut ace_fragment);
+            });
+        });
     }
 }
 
