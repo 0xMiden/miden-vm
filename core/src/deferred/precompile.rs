@@ -26,7 +26,7 @@ use crate::Felt;
 /// A precompile owns a slice of the tag space identified by its [`Tag::id`](crate::deferred::Tag).
 /// The framework imposes *nothing* on the three immediate felts: each precompile decides which
 /// of them are meaningful and what they mean.
-pub trait Precompile: core::fmt::Debug + Send + Sync {
+pub trait Precompile: Send + Sync {
     /// Hashed into the precompile id. Renaming breaks decoding for existing programs.
     fn name(&self) -> &'static str;
 
