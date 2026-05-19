@@ -36,7 +36,7 @@ fn bin_under_test() -> escargot::CargoRun {
 #[test]
 // Tt test might be an overkill to test only that the 'run' cli command
 // outputs steps and ms.
-fn cli_run() -> Result<(), Box<dyn std::error::Error>> {
+fn cli_run() {
     let mut cmd = bin_under_test().command();
 
     cmd.arg("run")
@@ -54,8 +54,6 @@ fn cli_run() -> Result<(), Box<dyn std::error::Error>> {
     // However we the X and the Y can change in future versions.
     // There is no other 'steps in' in the output
     output.assert().stdout(predicate::str::contains("VM cycles"));
-
-    Ok(())
 }
 
 use miden_assembly::Library;
@@ -133,7 +131,7 @@ fn cli_bundle_output() {
 
 // First compile a library to a .masl file, then run a program that uses it.
 #[test]
-fn cli_run_with_lib() -> Result<(), Box<dyn std::error::Error>> {
+fn cli_run_with_lib() {
     let mut cmd = bin_under_test().command();
     cmd.arg("bundle")
         .arg("./tests/integration/cli/data/lib")
@@ -149,13 +147,11 @@ fn cli_run_with_lib() -> Result<(), Box<dyn std::error::Error>> {
     cmd.assert().success();
 
     fs::remove_file("cli_run_with_lib.masl").unwrap();
-    Ok(())
 }
 
 #[test]
-fn test_advmap_cli() -> Result<(), Box<dyn std::error::Error>> {
+fn test_advmap_cli() {
     let mut cmd = bin_under_test().command();
     cmd.arg("run").arg("./tests/integration/cli/data/adv_map.masm");
     cmd.assert().success();
-    Ok(())
 }

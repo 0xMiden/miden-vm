@@ -1,3 +1,8 @@
+// Folders below share a uniform `fn(_, _) -> Result<Vec<ast::Op>, ParsingError>` signature so they
+// can be stored in the `CompactSuffixKind` enum as function pointers. Some folders genuinely need
+// to fail (e.g. division by zero), so the others wrap their value in `Ok` to match.
+#![allow(clippy::unnecessary_wraps)]
+
 use alloc::vec::Vec;
 
 use super::instructions::{inst_op, push_u32_op, push_zero_op};

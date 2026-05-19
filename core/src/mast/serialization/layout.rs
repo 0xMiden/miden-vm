@@ -96,8 +96,8 @@ impl ForestLayout {
     }
 
     #[cfg(test)]
-    pub(super) fn advice_map_offset(&self) -> Result<usize, DeserializationError> {
-        Ok(self.advice_map_offset)
+    pub(super) fn advice_map_offset(&self) -> usize {
+        self.advice_map_offset
     }
 }
 

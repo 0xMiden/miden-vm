@@ -11,7 +11,7 @@ use miden_core::{
 use miden_processor::{DefaultHost, ExecutionOptions, Program, ProgramInfo};
 use miden_utils_testing::{
     AdviceInputs, ProvingOptions, StackInputs, prove_sync,
-    recursive_verifier::{VerifierData, VerifierError, generate_advice_inputs},
+    recursive_verifier::{VerifierData, generate_advice_inputs},
 };
 use rand::{Rng, RngCore, SeedableRng};
 use rand_chacha::ChaCha20Rng;
@@ -27,14 +27,14 @@ mod batch_query_gen;
 #[test]
 fn stark_verifier_e2f4_small() {
     let inputs = fib_stack_inputs();
-    let data = generate_recursive_verifier_data(EXAMPLE_FIB_SMALL, inputs, None).unwrap();
+    let data = generate_recursive_verifier_data(EXAMPLE_FIB_SMALL, inputs, None);
     run_recursive_verifier(&data);
 }
 
 #[test]
 fn stark_verifier_e2f4_large() {
     let inputs = fib_stack_inputs();
-    let data = generate_recursive_verifier_data(EXAMPLE_FIB_LARGE, inputs, None).unwrap();
+    let data = generate_recursive_verifier_data(EXAMPLE_FIB_LARGE, inputs, None);
     run_recursive_verifier(&data);
 }
 
@@ -45,8 +45,7 @@ fn stark_verifier_e2f4_with_kernel_even() {
         EXAMPLE_FIB_KERNEL_SMALL,
         inputs,
         Some(KERNEL_EVEN_NUM_PROC),
-    )
-    .unwrap();
+    );
     run_recursive_verifier(&data);
 }
 
@@ -57,8 +56,7 @@ fn stark_verifier_e2f4_with_kernel_odd() {
         EXAMPLE_FIB_KERNEL_SMALL,
         inputs,
         Some(KERNEL_ODD_NUM_PROC),
-    )
-    .unwrap();
+    );
     run_recursive_verifier(&data);
 }
 
@@ -69,8 +67,7 @@ fn stark_verifier_e2f4_with_kernel_single() {
         EXAMPLE_FIB_KERNEL_SMALL,
         inputs,
         Some(KERNEL_SINGLE_PROC),
-    )
-    .unwrap();
+    );
     run_recursive_verifier(&data);
 }
 
@@ -79,7 +76,7 @@ pub fn generate_recursive_verifier_data(
     source: &str,
     stack_inputs: Vec<u64>,
     kernel: Option<&str>,
-) -> Result<VerifierData, VerifierError> {
+) -> VerifierData {
     let (program, kernel_lib) = {
         match kernel {
             Some(kernel) => {
@@ -126,8 +123,7 @@ pub fn generate_recursive_verifier_data(
         PrecompileTranscriptState::default(),
     );
     let (_, proof_bytes, _precompile_requests) = proof.into_parts();
-    let data = generate_advice_inputs(&proof_bytes, pub_inputs).unwrap();
-    Ok(data)
+    generate_advice_inputs(&proof_bytes, pub_inputs).unwrap()
 }
 
 /// Run the recursive verifier MASM program with the given VerifierData.

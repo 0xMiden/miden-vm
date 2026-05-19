@@ -132,7 +132,7 @@ pub fn analyze(
                 analyzer.error(SemanticAnalysisError::UnexpectedEntrypoint { span: body.span() });
             },
             Form::AdviceMapEntry(entry) => {
-                add_advice_map_entry(&mut module, entry.with_docs(docs.take()), &mut analyzer)?;
+                add_advice_map_entry(&mut module, entry.with_docs(docs.take()), &mut analyzer);
             },
         }
     }
@@ -175,7 +175,7 @@ pub fn analyze(
     analyzer.has_failed()?;
 
     // Run item checks
-    visit_items(&mut module, &mut analyzer)?;
+    visit_items(&mut module, &mut analyzer);
 
     // Check unused imports
     for import in module.aliases() {
@@ -192,7 +192,7 @@ pub fn analyze(
 ///
 /// When this function returns, all local analysis is complete, and all that remains is construction
 /// of a module graph and global program analysis to perform any remaining transformations.
-fn visit_items(module: &mut Module, analyzer: &mut AnalysisContext) -> Result<(), SyntaxError> {
+fn visit_items(module: &mut Module, analyzer: &mut AnalysisContext) {
     let is_kernel = module.is_kernel();
     let locals = BTreeMap::from_iter(
         module
@@ -306,8 +306,6 @@ fn visit_items(module: &mut Module, analyzer: &mut AnalysisContext) -> Result<()
             alias.uses = 1;
         }
     }
-
-    Ok(())
 }
 
 fn define_alias(
@@ -362,13 +360,7 @@ fn define_procedure(
 
 /// Inserts a new entry in the Advice Map and defines a constant corresposnding to the entry's
 /// key.
-///
-/// Returns `Err` if the symbol is already defined
-fn add_advice_map_entry(
-    module: &mut Module,
-    entry: AdviceMapEntry,
-    context: &mut AnalysisContext,
-) -> Result<(), SyntaxError> {
+fn add_advice_map_entry(module: &mut Module, entry: AdviceMapEntry, context: &mut AnalysisContext) {
     let key = match entry.key {
         Some(key) => Word::from(key.inner().0),
         None => Poseidon2::hash_elements(&entry.value),
@@ -388,5 +380,4 @@ fn add_advice_map_entry(
             module.advice_map.insert(key, entry.value);
         },
     }
-    Ok(())
 }

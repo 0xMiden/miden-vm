@@ -588,7 +588,7 @@ fn test_serialized_mast_forest_large_counts() {
 
 fn debug_info_offset_after_advice_map(bytes: &[u8]) -> usize {
     let view = SerializedMastForest::new(bytes).unwrap();
-    let mut offset = view.advice_map_offset().unwrap();
+    let mut offset = view.advice_map_offset();
     let entry_count = read_usize_at(bytes, &mut offset).unwrap();
     for _ in 0..entry_count {
         for _ in 0..4 {
