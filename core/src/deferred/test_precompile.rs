@@ -22,7 +22,6 @@ pub(crate) struct TestPrecompile;
 
 impl TestPrecompile {
     const NAME: &'static str = "test_precompile";
-    const VERSION: u32 = 1;
 
     const LEAF_TAG_ID: u32 = 0;
     const ADD_TAG_ID: u32 = 1;
@@ -115,10 +114,6 @@ impl Disc {
 impl Precompile for TestPrecompile {
     fn name(&self) -> &'static str {
         Self::NAME
-    }
-
-    fn version(&self) -> u32 {
-        Self::VERSION
     }
 
     fn id(&self) -> Felt {

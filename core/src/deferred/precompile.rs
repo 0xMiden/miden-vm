@@ -45,9 +45,6 @@ pub trait Precompile: core::fmt::Debug + Send + Sync {
     /// Hashed into the precompile id. Renaming breaks the schema for existing programs.
     fn name(&self) -> &'static str;
 
-    /// Hashed into the precompile id. Bump on incompatible decode/reduce changes.
-    fn version(&self) -> u32;
-
     /// Pinned id (the first felt of every tag belonging to this precompile). Implementors
     /// return the precomputed value; [`crate::deferred::PrecompileSchema::new`] validates it
     /// equals [`precompile_id`], panicking on drift. No default — the value/derivation bridge
@@ -75,28 +72,26 @@ pub trait Precompile: core::fmt::Debug + Send + Sync {
 // ================================================================================================
 
 /// Domain separator pinned to the v1 framework hashing convention. Bump iff the *derivation*
-/// changes (different hash, different input layout). Per-precompile evolution is handled by the
-/// `version` method.
-const APP_ID_DOMSEP: &[u8] = b"miden-deferred-app/v1";
+/// changes (different hash, different input layout).
+const PRECOMPILE_ID_DOMSEP: &[u8] = b"miden-deferred-precompile/v1";
 
-/// Derive a precompile's canonical id from `(name, version)`.
+/// Derive a precompile's canonical id from its `name`.
 ///
-/// Inputs are hashed with Blake3; the first 8 bytes of the digest are interpreted as a
+/// The name is hashed with Blake3; the first 8 bytes of the digest are interpreted as a
 /// little-endian `u64` and reduced modulo the Goldilocks prime — giving ~32 bits of
 /// birthday-collision resistance, comfortably sufficient for the handful of precompiles a
 /// composite schema is expected to host. Used by [`crate::deferred::PrecompileSchema::new`] to
 /// validate each precompile's declared [`Precompile::id`].
 pub fn precompile_id(p: &dyn Precompile) -> Felt {
-    derive(p.name(), p.version())
+    derive(p.name())
 }
 
-fn derive(name: &str, version: u32) -> Felt {
+fn derive(name: &str) -> Felt {
     let mut hasher = Hasher::new();
-    hasher.update(APP_ID_DOMSEP);
-    // Length-prefix the name so it is domain-separated from the version suffix.
+    hasher.update(PRECOMPILE_ID_DOMSEP);
+    // Length-prefix the name so it is domain-separated from the digest tail.
     hasher.update(&(name.len() as u32).to_le_bytes());
     hasher.update(name.as_bytes());
-    hasher.update(&version.to_le_bytes());
     let digest = hasher.finalize();
     let raw = u64::from_le_bytes(digest.as_bytes()[..8].try_into().expect("8 bytes"));
     Felt::new_unchecked(raw % Felt::ORDER)
@@ -108,19 +103,17 @@ mod tests {
 
     #[test]
     fn id_is_deterministic() {
-        assert_eq!(derive("foo", 1), derive("foo", 1));
+        assert_eq!(derive("foo"), derive("foo"));
     }
 
     #[test]
-    fn id_changes_with_name_and_version() {
-        let base = derive("foo", 1);
-        assert_ne!(base, derive("bar", 1));
-        assert_ne!(base, derive("foo", 2));
+    fn id_changes_with_name() {
+        assert_ne!(derive("foo"), derive("bar"));
     }
 
     #[test]
     fn id_lies_in_field() {
         // `new_unchecked` is sound only if the value < Felt::ORDER.
-        assert!(derive("anything", 0).as_canonical_u64() < Felt::ORDER);
+        assert!(derive("anything").as_canonical_u64() < Felt::ORDER);
     }
 }
