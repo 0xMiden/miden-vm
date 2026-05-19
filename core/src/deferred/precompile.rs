@@ -22,7 +22,7 @@ use alloc::vec::Vec;
 
 use blake3::Hasher;
 
-use super::{Node, ReduceCtx, SchemaError, TagInfo};
+use super::{Node, SchemaError, TagInfo, WitnessBuilder};
 use crate::Felt;
 
 // PRECOMPILE TAG
@@ -67,7 +67,7 @@ pub trait Precompile: core::fmt::Debug + Send + Sync {
 
     /// Reduce a node owned by this precompile to canonical form. Same contract as
     /// [`super::Schema::reduce`] — see its docs for the leaf / op / predicate / chunk variants.
-    fn reduce(&self, node: &Node, ctx: &mut dyn ReduceCtx) -> Result<Node, SchemaError>;
+    fn reduce(&self, node: &Node, witness: &mut WitnessBuilder<'_>) -> Result<Node, SchemaError>;
 }
 
 // PRECOMPILE ID DERIVATION

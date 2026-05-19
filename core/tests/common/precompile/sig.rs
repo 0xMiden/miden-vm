@@ -13,8 +13,8 @@ use std::sync::Arc;
 use miden_core::{
     Felt, ZERO,
     deferred::{
-        Node, NodePayload, NodeType, Precompile, PrecompileTag, ReduceCtx, SchemaError, TRUE_TAG,
-        Tag, TagInfo, precompile_id, true_node,
+        Node, NodePayload, NodeType, Precompile, PrecompileTag, SchemaError, TRUE_TAG, Tag,
+        TagInfo, WitnessBuilder, precompile_id, true_node,
     },
 };
 
@@ -70,7 +70,7 @@ impl Precompile for Sig {
         }
     }
 
-    fn reduce(&self, node: &Node, _ctx: &mut dyn ReduceCtx) -> Result<Node, SchemaError> {
+    fn reduce(&self, node: &Node, _witness: &mut WitnessBuilder<'_>) -> Result<Node, SchemaError> {
         if node.tag != Self::verify_tag() {
             return Err(SchemaError::InvalidNode);
         }

@@ -40,9 +40,7 @@ fn preimage_reduces_to_known_digest_and_eq_predicate_passes() {
     let expected_digest = Hash::digest_node(expected_digest_felts);
 
     let h_expected = state.register(&schema, expected_digest.clone()).unwrap();
-    let h_preimage = state
-        .register(&schema, Hash::preimage_node(64, preimage_chunks.clone()))
-        .unwrap();
+    let h_preimage = state.register(&schema, Hash::preimage_node(64, preimage_chunks)).unwrap();
 
     // Evaluating the preimage produces the digest leaf.
     let canonical = state.evaluate(&schema, state.get(&h_preimage).unwrap().clone()).unwrap();
