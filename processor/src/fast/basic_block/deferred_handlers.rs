@@ -50,7 +50,7 @@ fn read_tag_and_payload(processor: &FastProcessor) -> (Tag, Payload) {
     let lo = processor.stack_get_word(DEFERRED_PAYLOAD_LO_OFFSET);
     let hi = processor.stack_get_word(DEFERRED_PAYLOAD_HI_OFFSET);
     let tag_word = processor.stack_get_word(DEFERRED_TAG_OFFSET);
-    let tag = Tag::from_capacity([tag_word[0], tag_word[1], tag_word[2], tag_word[3]]);
+    let tag = Tag::from_word([tag_word[0], tag_word[1], tag_word[2], tag_word[3]]);
     let payload = Payload::new([lo[0], lo[1], lo[2], lo[3], hi[0], hi[1], hi[2], hi[3]]);
     (tag, payload)
 }
@@ -124,7 +124,7 @@ pub(super) fn handle_deferred_evaluate(
     }
 
     // Push canonical body: TAG deepest, then payload words so the natural-order word is on top.
-    processor.advice.push_stack_word(&Word::new(canonical.tag.as_capacity()))?;
+    processor.advice.push_stack_word(&Word::new(canonical.tag.as_word()))?;
     match &canonical.payload {
         Payload::Expression(f) => {
             let hi = Word::new([f[4], f[5], f[6], f[7]]);
@@ -163,7 +163,7 @@ pub(super) fn handle_deferred_register_chunk(
     processor: &mut FastProcessor,
 ) -> Result<(), SystemEventError> {
     let tag_word = processor.stack_get_word(CHUNK_TAG_OFFSET);
-    let tag = Tag::from_capacity([tag_word[0], tag_word[1], tag_word[2], tag_word[3]]);
+    let tag = Tag::from_word([tag_word[0], tag_word[1], tag_word[2], tag_word[3]]);
     let ptr = processor.stack_get(CHUNK_PTR_OFFSET).as_canonical_u64();
 
     // Decode `n` from the tag before any memory reads — the precompile is the source of truth
