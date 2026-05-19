@@ -57,14 +57,14 @@ pub enum SchemaError {
 ///
 /// `NodeType` and `TagInfo::evaluates_to` are orthogonal: a `Binary` node can be either an
 /// op (`evaluates_to == some_canonical_tag`), a predicate (`evaluates_to == TRUE_TAG`), or a
-/// self-evaluating compound canonical such as `MockGroup::combine` (`evaluates_to == own_tag`).
+/// self-evaluating compound canonical such as `Group`'s `new` element (`evaluates_to == own_tag`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NodeType {
     /// 8 felts of raw payload data, no child digests. Self-evaluating value leaves (e.g.
     /// `Uint256` leaf, `MockHash` digest).
     Value,
     /// 8 felts encoding `lhs_digest || rhs_digest` — two child references. Covers binary ops,
-    /// binary predicates, AND-nodes, and compound-canonical `combine`-style leaves.
+    /// binary predicates, AND-nodes, and compound-canonical `new`-style leaves.
     Binary,
     /// `n` 8-felt chunks of bulk data, no child digests. Chunk-bodied leaves (e.g.
     /// `MockHash` preimage, `MockSig` verify).
