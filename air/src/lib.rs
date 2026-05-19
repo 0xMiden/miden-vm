@@ -14,7 +14,6 @@ use miden_core::program::Kernel;
 use miden_core::{
     WORD_SIZE, Word,
     field::ExtensionField,
-    precompile::PrecompileTranscriptState,
     program::{MIN_STACK_DEPTH, ProgramInfo, StackInputs, StackOutputs},
 };
 use miden_crypto::stark::air::{
@@ -97,7 +96,7 @@ pub struct PublicInputs {
     program_info: ProgramInfo,
     stack_inputs: StackInputs,
     stack_outputs: StackOutputs,
-    pc_transcript_state: PrecompileTranscriptState,
+    pc_transcript_state: Word,
 }
 
 impl PublicInputs {
@@ -107,7 +106,7 @@ impl PublicInputs {
         program_info: ProgramInfo,
         stack_inputs: StackInputs,
         stack_outputs: StackOutputs,
-        pc_transcript_state: PrecompileTranscriptState,
+        pc_transcript_state: Word,
     ) -> Self {
         Self {
             program_info,
@@ -130,7 +129,7 @@ impl PublicInputs {
     }
 
     /// Returns the precompile transcript state.
-    pub fn pc_transcript_state(&self) -> PrecompileTranscriptState {
+    pub fn pc_transcript_state(&self) -> Word {
         self.pc_transcript_state
     }
 
@@ -218,7 +217,7 @@ impl Deserializable for PublicInputs {
         let program_info = ProgramInfo::read_from(source)?;
         let stack_inputs = StackInputs::read_from(source)?;
         let stack_outputs = StackOutputs::read_from(source)?;
-        let pc_transcript_state = PrecompileTranscriptState::read_from(source)?;
+        let pc_transcript_state = Word::read_from(source)?;
 
         Ok(PublicInputs {
             program_info,

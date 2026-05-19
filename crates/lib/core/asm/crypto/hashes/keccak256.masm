@@ -1,5 +1,4 @@
 use miden::core::sys
-use miden::core::crypto::hashes::poseidon2
 
 # ENCODING CONVENTIONS
 # ================================================================================================
@@ -11,10 +10,17 @@ use miden::core::crypto::hashes::poseidon2
 # - Fixed-size examples: DIGEST_U32[8] = [d_0, ..., d_7], INPUT_U8[32] = [b_0, ..., b_31]
 # - DIGEST_U32[8] = [d_0, ..., d_7] = Keccak256(INPUT_U8[..])
 
-# CONSTANTS
+# CONSTANTS — Keccak256Precompile schema tag fields
 # ================================================================================================
+# Pinned to the Rust-side Keccak256Precompile constants. PRECOMPILE_ID is the Blake3-derived
+# `precompile_id(&Keccak256Precompile)` over NAME ("keccak256"); changing the NAME in Rust must
+# update this literal in lockstep. Print the current value via
+# `cargo test -p miden-core-lib emit_masm_pinned_ids -- --nocapture`.
 
-const KECCAK_HASH_BYTES_EVENT = event("miden::core::hash::keccak256::hash_bytes")
+const PRECOMPILE_ID = 1416710563871706399
+const PREIMAGE_TAG_ID = 0
+const DIGEST_TAG_ID = 1
+const EQ_TAG_ID = 2
 
 # PROCEDURES
 # ================================================================================================
@@ -29,13 +35,102 @@ const KECCAK_HASH_BYTES_EVENT = event("miden::core::hash::keccak256::hash_bytes"
 #! - len_bytes: number of bytes to hash
 #! - INPUT_U32[len_u32] ~ INPUT_U8[len_bytes] with u32 packing (unused bytes in final u32 must be 0)
 #! - DIGEST_U32[8] = [d_0, ..., d_7] = Keccak256(INPUT_U8[len_bytes])
+#!
+#! Local memory layout (element addresses):
+#!   loc[0..4]   DIGEST_LO  (computed by schema, returned to caller)
+#!   loc[4..8]   DIGEST_HI  (computed by schema, returned to caller)
+#!   loc[8..12]  PREIMAGE_DIGEST  (held until eq node construction)
+#!   loc[12..16] LEAF_DIGEST      (held until eq node construction)
+#!
+#! Flow:
+#!   1. Register the preimage chunk node (`Keccak256::preimage` tag at precompile_id) over the bytes
+#!      in memory at `ptr`. `register_chunk` derives PREIMAGE_DIGEST in-circuit (a linear hash of the
+#!      `8*n_chunks` felts), binding it to the caller's memory. `n_chunks = max(1, ceil(len_bytes/32))`
+#!      — empty input is one zero chunk (empty chunk bodies are banned).
+#!   2. `adv.evaluate_deferred` runs the schema's Keccak256::hash host-side, interns the canonical
+#!      Digest leaf, and pushes its `LEAF_TAG || DIGEST_LO || DIGEST_HI` onto the advice stack
+#!      (TAG first). The advice digest is untrusted; it is bound by step 4.
+#!   3. Save DIGEST_LO/HI to locals (caller return) and register the Digest leaf in-circuit
+#!      (`register_expr` over the read payload), yielding LEAF_DIGEST.
+#!   4. Build & register an Eq predicate node `(PREIMAGE_DIGEST, LEAF_DIGEST)` and fold its digest
+#!      into the transcript via `log_node_digest`. The verifier's rehydrate recomputes
+#!      Keccak256(preimage) and rejects a forged digest, so the eq is logged, not eagerly evaluated.
+#!   5. Restore DIGEST_LO/HI from locals for the caller.
+#!
+#! In-circuit hashing per call: the node digests are derived in-circuit by the `register_*` helpers
+#! (`n_chunks` permutations for the preimage chunk, one each for the digest leaf and the eq node),
+#! plus the `log_precompile` fold. The Keccak256 preimage hash itself runs only inside the schema's
+#! reduce (host-side).
+@locals(16)
 pub proc hash_bytes
-    exec.hash_bytes_impl
-    # => [COMM, TAG, DIGEST_U32[8], ...]
+    # ---- Step 1: Register preimage chunk → PREIMAGE_DIGEST ----
+    # Compute n_chunks = max(1, ceil(len_bytes/32)), then stage [PREIMAGE_TAG, ptr, n_chunks] with
+    # PREIMAGE_TAG = [PRECOMPILE_ID, PREIMAGE_TAG_ID, len_bytes, 0].
+    # Stack before: [ptr, len_bytes, ...]
+    dup.1
+    # => [len_bytes, ptr, len_bytes, ...]
+    add.31 u32div.32
+    # => [ceil(len_bytes/32), ptr, len_bytes, ...]
+    dup eq.0 add
+    # => [n_chunks, ptr, len_bytes, ...]  (clamp to >= 1)
+    movdn.2
+    # => [ptr, len_bytes, n_chunks, ...]
+    swap push.0 swap
+    # => [len_bytes, 0, ptr, n_chunks, ...]
+    push.PREIMAGE_TAG_ID
+    push.PRECOMPILE_ID
+    # => [PRECOMPILE_ID, PREIMAGE_TAG_ID, len_bytes, 0, ptr, n_chunks, ...]
+    exec.sys::register_chunk
+    # => [PREIMAGE_DIGEST, ...]
 
-    # Log the precompile request for deferred verification
-    exec.sys::log_precompile_request
-    # => [DIGEST_U32[8], ...]
+    # ---- Step 2: Save PREIMAGE_DIGEST, evaluate (canonical body → advice stack, TAG first) ----
+    dupw
+    loc_storew_le.8 dropw
+    # => [PREIMAGE_DIGEST, ...]  (loc[8..12] = PREIMAGE_DIGEST)
+    adv.evaluate_deferred
+    # operand unchanged; advice top→bottom: [LEAF_TAG, DIGEST_LO, DIGEST_HI]
+    dropw
+    # => [...]  (PREIMAGE_DIGEST consumed off operand; held in loc[8])
+
+    # ---- Step 3: Read canonical body from advice; save DIGEST_LO/HI for caller return ----
+    adv_pushw dropw                     # drop LEAF_TAG (rebuilt from constants below)
+    adv_pushw loc_storew_le.0 dropw     # loc[0..4] = DIGEST_LO
+    adv_pushw loc_storew_le.4 dropw     # loc[4..8] = DIGEST_HI
+
+    # ---- Step 4: Register the digest leaf (DIGEST_TAG, DIGEST_LO || DIGEST_HI) → LEAF_DIGEST ----
+    push.0.0
+    push.DIGEST_TAG_ID
+    push.PRECOMPILE_ID
+    # => [DIGEST_TAG, ...]
+    padw loc_loadw_le.4
+    # => [DIGEST_HI, DIGEST_TAG, ...]
+    padw loc_loadw_le.0
+    # => [DIGEST_LO, DIGEST_HI, DIGEST_TAG, ...]
+    exec.sys::register_expr
+    # => [LEAF_DIGEST, ...]
+    loc_storew_le.12 dropw              # loc[12..16] = LEAF_DIGEST
+
+    # ---- Step 5: Build & register eq(PREIMAGE_DIGEST, LEAF_DIGEST) → EQ_DIGEST ----
+    push.0.0
+    push.EQ_TAG_ID
+    push.PRECOMPILE_ID
+    # => [EQ_TAG, ...]
+    padw loc_loadw_le.12
+    # => [LEAF_DIGEST, EQ_TAG, ...]
+    padw loc_loadw_le.8
+    # => [PREIMAGE_DIGEST, LEAF_DIGEST, EQ_TAG, ...]
+    exec.sys::register_expr
+    # => [EQ_DIGEST, ...]
+
+    # ---- Step 6: Fold the eq predicate into the transcript (verifier re-checks via rehydrate) ----
+    exec.sys::log_node_digest
+    # => [...]
+
+    # ---- Step 7: Restore DIGEST[8] for caller ----
+    padw loc_loadw_le.4
+    # => [DIGEST_HI, ...]
+    padw loc_loadw_le.0
+    # => [DIGEST_LO, DIGEST_HI, ...]
 end
 
 #! Computes Keccak256 hash of a single 256-bit input.
@@ -79,62 +174,4 @@ pub proc merge
     # => [ptr, 64]
 
     exec.hash_bytes
-end
-
-# INTERNAL PROCEDURES
-# ================================================================================================
-
-#! Internal implementation of memory-based Keccak256 computation via deferred computation.
-#!
-#! Emits an event to populate the advice stack with digest and store the preimage for deferred verification.
-#! Returns the commitment to the precompile call and its tag.
-#!
-#! Input: [ptr, len_bytes, ...]
-#! Output: [COMM, TAG, DIGEST_U32[8], ...]
-#!
-#! Where:
-#! - ptr: word-aligned memory address containing INPUT_U32[len_u32] where len_u32=⌈len_bytes/4⌉
-#! - len_bytes: number of bytes to hash
-#! - COMM: the calldata commitment `Poseidon2(Poseidon2(INPUT_U32[..]) || Poseidon2(DIGEST_U32[..]))` consumed by `log_precompile`
-#! - TAG = [KECCAK_HASH_BYTES_EVENT, len_bytes, 0, 0] encodes the precompile identifier and the byte length as metadata
-#! - DIGEST_U32[8] = [d_0, ..., d_7] = Keccak256(INPUT_U8[len_bytes])
-@locals(8)
-proc hash_bytes_impl
-    emit.KECCAK_HASH_BYTES_EVENT
-    # => [ptr, len_bytes, ...]
-
-    # Compute len_u32 = ceil(len_bytes / 4)
-    dup.1 add.3 u32shr.2 swap
-    # => [ptr, len_u32, len_bytes, ...]
-
-    # Load digest from advice stack (8 u32 limbs) and write to digest_ptr = locaddr.0
-    # simultaneously compute COMM_DIGEST = Poseidon2(DIGEST[0..8])
-    locaddr.0
-    exec.poseidon2::init_no_padding
-    # => [R0, R1, C, digest_ptr, ptr, len_u32, len_bytes, ...]
-    adv_pipe
-    exec.poseidon2::permute
-    exec.poseidon2::squeeze_digest
-    # => [COMM_DIGEST, digest_ptr, ptr, len_u32, len_bytes, ...]
-
-    movup.4 drop
-    # => [COMM_DIGEST, ptr, len_u32, len_bytes, ...]
-
-    # Compute COMM_INPUT = poseidon2::hash_elements(ptr, len_u32)
-    movup.5 movup.5 exec.poseidon2::hash_elements
-    # => [COMM_INPUT, COMM_DIGEST, len_bytes, ...]
-
-    # Compute COMM = hash(COMM_INPUT || COMM_DIGEST)
-    exec.poseidon2::merge
-    # => [COMM, len_bytes, ...]
-
-    # Prepare TAG = [KECCAK_HASH_BYTES_EVENT, len_bytes, 0, 0]
-    push.0.0 movup.6 push.KECCAK_HASH_BYTES_EVENT swapw
-    # => [COMM, TAG, ...]
-
-    # Reload digest limbs from locals
-    padw loc_loadw_le.4
-    padw loc_loadw_le.0
-    swapdw
-    # => [COMM, TAG, DIGEST_U32[8], ...]
 end

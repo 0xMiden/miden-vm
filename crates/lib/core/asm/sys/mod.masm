@@ -35,27 +35,6 @@ pub proc drop_stack_top()
     dropw dropw dropw dropw
 end
 
-#! Folds a precompile commitment into the rolling transcript via `log_precompile` and removes
-#! the helper words produced by the instruction.
-#!
-#! Computes the per-call statement word `STMNT = Poseidon2::merge(COMM, TAG)` from the supplied
-#! commitment halves, seats it at stack[4..8] (the HPERM rate1 lanes), and lets the underlying
-#! `log_precompile` opcode fold it into the transcript state using framework AND capacity
-#! `[1, 0, 0, 0]`. Pads stack[0..4] and stack[8..12] with zero words so the opcode's writes there
-#! don't clobber data deeper in the stack.
-#!
-#! Input: `[COMM, TAG, ...]`
-#! Output: Stack with `COMM` and `TAG` consumed and the three helper words produced by
-#!         `log_precompile` dropped.
-pub proc log_precompile_request
-    hmerge
-    # => [STMNT, ...]
-    padw padw movdnw.2
-    # => [_, STMNT, _, ...]
-    log_precompile
-    # => [STATE_NEW, OUT_RATE1, OUT_CAP, ...]
-    dropw dropw dropw
-end
 
 # ===== DEFERRED-DAG HELPERS =======================================================================
 #

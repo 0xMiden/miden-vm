@@ -153,7 +153,8 @@ fn run_masp_program(params: &RunCmd) -> Result<(ExecutionTrace, [u8; 32]), Repor
     .map_err(|err| Report::msg(format!("{err}")))?;
 
     let processor = FastProcessor::new_with_options(stack_inputs, advice_inputs, exec_options)
-        .map_err(|err| Report::msg(format!("{err}")))?;
+        .map_err(|err| Report::msg(format!("{err}")))?
+        .with_precompiles(std::sync::Arc::new(CoreLibrary::default().precompile_schema()));
 
     let trace_inputs = processor
         .execute_trace_inputs_sync(&program, &mut host)
@@ -219,7 +220,8 @@ fn run_masm_program(params: &RunCmd) -> Result<(ExecutionTrace, [u8; 32]), Repor
     .map_err(|err| Report::msg(format!("{err}")))?;
 
     let processor = FastProcessor::new_with_options(stack_inputs, advice_inputs, exec_options)
-        .map_err(|err| Report::msg(format!("{err}")))?;
+        .map_err(|err| Report::msg(format!("{err}")))?
+        .with_precompiles(std::sync::Arc::new(CoreLibrary::default().precompile_schema()));
 
     let trace_inputs = processor
         .execute_trace_inputs_sync(&program, &mut host)

@@ -7,26 +7,20 @@ extern crate std;
 pub mod constraints_regen;
 pub mod dsa;
 pub mod handlers;
+pub mod precompiles;
 
 extern crate alloc;
 
 use alloc::{sync::Arc, vec, vec::Vec};
 
 use miden_assembly::{Library, mast::MastForest};
-use miden_core::{
-    deferred::PrecompileRegistry, events::EventName, precompile::PrecompileVerifierRegistry,
-    serde::Deserializable,
-};
+use miden_core::{deferred::PrecompileRegistry, events::EventName, serde::Deserializable};
 use miden_processor::{HostLibrary, event::EventHandler};
 use miden_utils_sync::LazyLock;
 
 use crate::handlers::{
     aead_decrypt::{AEAD_DECRYPT_EVENT_NAME, handle_aead_decrypt},
-    ecdsa::{ECDSA_VERIFY_EVENT_NAME, EcdsaPrecompile},
-    eddsa_ed25519::{EDDSA25519_VERIFY_EVENT_NAME, EddsaPrecompile},
     falcon_div::{FALCON_DIV_EVENT_NAME, handle_falcon_div},
-    keccak256::{KECCAK_HASH_BYTES_EVENT_NAME, KeccakPrecompile},
-    sha512::{SHA512_HASH_BYTES_EVENT_NAME, Sha512Precompile},
     smt_peek::{SMT_PEEK_EVENT_NAME, handle_smt_peek},
     sorted_array::{
         LOWERBOUND_ARRAY_EVENT_NAME, LOWERBOUND_KEY_VALUE_EVENT_NAME, handle_lowerbound_array,
@@ -86,8 +80,8 @@ use crate::handlers::{
 /// // Register handlers with your host...
 /// ```
 ///
-/// For proof verification, use [`verifier_registry()`](Self::verifier_registry) to get the
-/// precompile verifiers required to validate core library precompile requests.
+/// For proof verification, use [`precompiles()`](Self::precompiles) to get the
+/// deferred-DAG registry required to validate core library precompile computations.
 ///
 /// [`Library`]: miden_assembly::Library
 /// [`Assembler`]: miden_assembly::Assembler
@@ -134,10 +128,6 @@ impl CoreLibrary {
     /// List of all `EventHandlers` required to run all of the core library.
     pub fn handlers(&self) -> Vec<(EventName, Arc<dyn EventHandler>)> {
         vec![
-            (KECCAK_HASH_BYTES_EVENT_NAME, Arc::new(KeccakPrecompile)),
-            (SHA512_HASH_BYTES_EVENT_NAME, Arc::new(Sha512Precompile)),
-            (ECDSA_VERIFY_EVENT_NAME, Arc::new(EcdsaPrecompile)),
-            (EDDSA25519_VERIFY_EVENT_NAME, Arc::new(EddsaPrecompile)),
             (SMT_PEEK_EVENT_NAME, Arc::new(handle_smt_peek)),
             (U64_DIV_EVENT_NAME, Arc::new(handle_u64_div)),
             (U128_DIV_EVENT_NAME, Arc::new(handle_u128_div)),
@@ -150,19 +140,11 @@ impl CoreLibrary {
 
     /// Returns the deferred precompile registry exported by this library.
     ///
-    /// The framework branch has not migrated the core precompiles yet, so this is currently empty.
+    /// The registry hosts all four core precompiles (`keccak256`, `sha512`,
+    /// `ecdsa_k256_keccak`, and `eddsa_ed25519`). Loading this library into a host installs the
+    /// registry alongside its MAST forest and event handlers.
     pub fn precompiles(&self) -> PrecompileRegistry {
-        PrecompileRegistry::default()
-    }
-
-    /// Returns a [`PrecompileVerifierRegistry`] containing all verifiers required to validate
-    /// core library precompile requests.
-    pub fn verifier_registry(&self) -> PrecompileVerifierRegistry {
-        PrecompileVerifierRegistry::new()
-            .with_verifier(&KECCAK_HASH_BYTES_EVENT_NAME, Arc::new(KeccakPrecompile))
-            .with_verifier(&SHA512_HASH_BYTES_EVENT_NAME, Arc::new(Sha512Precompile))
-            .with_verifier(&ECDSA_VERIFY_EVENT_NAME, Arc::new(EcdsaPrecompile))
-            .with_verifier(&EDDSA25519_VERIFY_EVENT_NAME, Arc::new(EddsaPrecompile))
+        precompiles::registry()
     }
 }
 

@@ -101,12 +101,6 @@ pub fn build_trace_with_max_len(
         program_info,
     } = inputs;
 
-    if !trace_output.has_matching_precompile_requests_digest() {
-        return Err(ExecutionError::Internal(
-            "trace inputs do not match deferred precompile requests",
-        ));
-    }
-
     let TraceGenerationContext {
         core_trace_contexts,
         mast_forest_store,

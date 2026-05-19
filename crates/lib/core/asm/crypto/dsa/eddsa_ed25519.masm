@@ -11,24 +11,22 @@ use miden::core::word
 # - Unused bytes in the final u32 must be zero
 # - Memory addresses supplied to this module must be word-aligned (divisible by 4)
 
-# CONSTANTS
+# CONSTANTS — EddsaEd25519Precompile schema tag fields
 # ================================================================================================
 
-const EDDSA_VERIFY_EVENT = event("miden::core::dsa::eddsa_ed25519::verify")
+const PRECOMPILE_ID = 7694585564767061637
+const VERIFY_TAG_ID = 0
 
 const PK_LEN_FELTS = 8        # 32.div_ceil(4)
-const K_DIGEST_LEN_FELTS = 16 # 64.div_ceil(4)
-const SIG_LEN_FELTS = 16      # 64.div_ceil(4)
 
 # PROCEDURES
 # ================================================================================================
 
 #! Verifies an Ed25519 EdDSA signature compatible with `miden-crypto::eddsa_25519_sha512`.
 #!
-#! This wrapper mirrors the materialization performed in `miden-crypto::eddsa_25519_sha512`: given
-#! a public key commitment and the original message, it reconstructs the calldata expected by the
-#! precompile (public key bytes, SHA512(R || PK || MSG), signature). The public key and signature
-#! are supplied via the advice stack, and can be obtained with the `eddsa_sign` function.
+#! Given a public key commitment and the original message, reconstructs the calldata expected by
+#! the EddsaEd25519Precompile schema's verify chunk (pk, SHA512(R || PK || MSG), signature) into
+#! a single 40-felt local-memory buffer at locaddr.0, then dispatches to `verify_prehash`.
 #!
 #! Inputs:
 #!   Operand stack: [PK_COMM, MSG, ...]
@@ -40,110 +38,103 @@ const SIG_LEN_FELTS = 16      # 64.div_ceil(4)
 #! Where:
 #! - `PK_COMM`: Poseidon2 hash commitment of the 32-byte Ed25519 public key
 #! - `MSG`: single word (4 field elements) representing the message to verify
-#! - `PK[8]`: 32-byte public key packed as 8 field elements on advice stack
-#! - `SIG[16]`: 64-byte signature packed as 16 field elements on advice stack
+#! - `PK[8]`: 32-byte public key packed as 8 felts on advice stack
+#! - `SIG[16]`: 64-byte signature packed as 16 felts on advice stack
 #!
-#! Local memory layout (element addresses):
-#!   - locaddr[0..8]:   public key (32 bytes packed as 8 felts)
-#!   - locaddr[8..16]:  message (32 bytes = 8 felts)
-#!   - locaddr[16..32]: signature (64 bytes packed as 16 felts)
-#!   - locaddr[32..56]: SHA512 input buffer (R || PK || MSG = 96 bytes = 24 felts)
-#!   - locaddr[56..72]: k_digest = SHA512(R || PK || MSG) (64 bytes = 16 felts)
+#! Local memory layout — the chunk buffer at locaddr.0..40 is naturally word-aligned because all
+#! three component byte-sizes (32, 64, 64) are multiples of 4:
+#!   locaddr[0..8]    pk       (32 bytes packed as 8 felts)
+#!   locaddr[8..24]   k_digest (SHA-512 output, 16 felts)
+#!   locaddr[24..40]  sig      (64 bytes packed as 16 felts)
+#!   locaddr[40..48]  msg bytes scratch (transient)
+#!   locaddr[48..72]  sha512 input scratch (24 felts = R || PK || MSG)
 #!
-#! The procedure traps if:
-#! - The public key does not hash to `PK_COMM` (invalid commitment)
-#! - The signature verification fails
+#! Traps if the public key does not hash to `PK_COMM`, or if signature verification fails
+#! inside the schema kernel.
 @locals(72)
 pub proc verify
-    # Load the public key (8 felts = 32 bytes) from advice into locaddr[0..8]
+    # Load the public key (8 felts) into locaddr[0..8]
     adv_pushw loc_storew_le.0
     adv_loadw loc_storew_le.4 dropw
-    # => [PK_COMM, MSG, ...]
 
-    # Compute the Poseidon2 hash of the public key and verify it matches PK_COMM
+    # Verify the supplied PK_COMM matches Poseidon2 hash of pk
     push.PK_LEN_FELTS locaddr.0 exec.poseidon2::hash_elements
     assert_eqw.err="invalid public key commitment"
     # => [MSG, ...]
 
-    # Store the message at locaddr[8..16]
-    locaddr.8 movdn.4 exec.word::store_word_u32s_le
-    # => [...]
+    # Store message bytes in scratch region at locaddr[40..48]
+    locaddr.40 movdn.4 exec.word::store_word_u32s_le
 
-    # Load the signature (16 felts = 64 bytes) from advice into locaddr[16..32]
-    adv_pushw loc_storew_le.16
-    adv_loadw loc_storew_le.20
-    adv_loadw loc_storew_le.24
-    adv_loadw loc_storew_le.28 dropw
-    # => [...]
+    # Load signature (16 felts) into locaddr[24..40] (final chunk-buffer slot)
+    adv_pushw loc_storew_le.24
+    adv_loadw loc_storew_le.28
+    adv_loadw loc_storew_le.32
+    adv_loadw loc_storew_le.36 dropw
 
-    # Build the SHA512 input: R || PK || MSG at locaddr[32..56] (96 bytes/24 felts total)
-    # Copy R (first 32 bytes of signature = 8 felts) from locaddr[16..24] to locaddr[32..40]
-    locaddr.32 locaddr.16
-    exec.copy_two_words_from_memory
-    drop
-    # => [...]
+    # Build SHA-512 input R || PK || MSG (24 felts = 96 bytes) at locaddr[48..72].
+    #   R = first 32 bytes of sig = locaddr[24..32]  →  copied to locaddr[48..56]
+    #   PK = locaddr[0..8]                            →  copied to locaddr[56..64]
+    #   MSG = locaddr[40..48]                         →  copied to locaddr[64..72]
+    locaddr.48 locaddr.24
+    exec.copy_two_words_from_memory drop
 
-    # Copy PK (8 felts) from locaddr[0..8] to locaddr[40..48]
-    locaddr.40 locaddr.0
-    exec.copy_two_words_from_memory
-    drop
-    # => [...]
+    locaddr.56 locaddr.0
+    exec.copy_two_words_from_memory drop
 
-    # Copy MSG (8 felts) from locaddr[8..16] to locaddr[48..56]
-    locaddr.48 locaddr.8
-    exec.copy_two_words_from_memory
-    drop
-    # => [...]
+    locaddr.64 locaddr.40
+    exec.copy_two_words_from_memory drop
 
-    # Compute k_digest = SHA512(R || PK || MSG) over 96 bytes
-    push.96 locaddr.32 exec.sha512::hash_bytes
+    # Compute k_digest = SHA-512(R || PK || MSG) over 96 bytes
+    push.96 locaddr.48 exec.sha512::hash_bytes
     # => [DIGEST[16], ...]
 
-    # Store the digest at locaddr[56..72] (16 felts = 64 bytes)
-    loc_storew_le.56 dropw
-    loc_storew_le.60 dropw
-    loc_storew_le.64 dropw
-    loc_storew_le.68 dropw
-    # => [...]
+    # Store k_digest at locaddr[8..24]
+    loc_storew_le.8 dropw
+    loc_storew_le.12 dropw
+    loc_storew_le.16 dropw
+    loc_storew_le.20 dropw
 
-    # Call the low-level verifier with [pk_ptr, k_digest_ptr, sig_ptr]
-    locaddr.16  # sig_ptr
-    locaddr.56  # k_digest_ptr
-    locaddr.0   # pk_ptr
+    # Invoke deferred verification on the pre-packed buffer at locaddr.0
+    locaddr.0
     exec.verify_prehash
-    # => [result, ...]
-
-    # Trap if verification failed
-    assert.err="EdDSA signature verification failed"
-    # => []
 end
 
-#! Verifies an EdDSA (Ed25519) signature with a pre-computed nonce digest.
+#! Verifies an EdDSA (Ed25519) signature with a pre-computed nonce digest via the deferred-DAG
+#! framework.
 #!
-#! This procedure is intended for manual signature verification where the caller
-#! has already computed the message digest.
+#! The caller provides a single pointer to a contiguous 40-felt buffer with the schema layout:
 #!
-#! This procedure uses deferred verification via a precompile. The actual cryptographic
-#! verification is performed by the host, and the result is provided via the advice stack.
+#!   bytes[0..32]    pk
+#!   bytes[32..96]   k_digest = SHA-512(R || A || message)
+#!   bytes[96..160]  sig
 #!
-#! Input:  `[pk_ptr, k_digest_ptr, sig_ptr, ...]`
-#! Output: `[result, ...]`
+#! Registers the buffer as the EddsaEd25519Precompile verify chunk node, evaluates the predicate
+#! (which runs `PublicKey::verify_with_unchecked_k` inside the precompile's reduce), and folds
+#! the chunk's digest into the deferred-DAG transcript. Traps with
+#! `PrecompileError::AssertionFailed` if verification fails.
 #!
-#! Where:
-#! - `pk_ptr`:  word-aligned memory address containing the 32-byte Ed25519 public key
-#! - `k_digest_ptr`: word-aligned memory address containing the 64-byte challenge hash `k`
-#! - `sig_ptr`: word-aligned memory address containing the 64-byte Ed25519 signature
-#! - `result`:  1 if the signature is valid, 0 otherwise
-#!
-#! All data must be stored in memory as packed u32 field elements (little-endian), with unused limbs
-#! in the final word set to zero.
+#! Input:  `[buf_ptr, ...]`
+#! Output: `[...]`
 pub proc verify_prehash
-    exec.verify_prehash_impl
-    # => [COMM, TAG, result, ...]
+    # Stage [VERIFY_TAG, buf_ptr, n_chunks] for register_chunk. The verify buffer is 40 felts =
+    # 5 chunks. VERIFY_TAG = [PRECOMPILE_ID, VERIFY_TAG_ID, 0, 0].
+    push.5 swap
+    # => [buf_ptr, 5, ...]
+    push.0.0
+    push.VERIFY_TAG_ID
+    push.PRECOMPILE_ID
+    # => [VERIFY_TAG, buf_ptr, 5, ...]
 
-    # Log the precompile request for deferred verification.
-    exec.sys::log_precompile_request
-    # => [result, ...]
+    exec.sys::register_chunk
+    # => [VERIFY_DIGEST, ...]   (digest derived in-circuit, bound to the buffer in memory)
+
+    # Eager assertion: reduce runs the Ed25519 verification and traps on a bad signature.
+    adv.evaluate_deferred
+    # operand unchanged [VERIFY_DIGEST]; advice now holds the TRUE canonical (12 felts) — drain it.
+    adv_pushw dropw adv_pushw dropw adv_pushw dropw
+
+    exec.sys::log_node_digest
+    # => [...]   (fold VERIFY_DIGEST into the transcript; verifier re-checks the predicate)
 end
 
 # INTERNAL PROCEDURES
@@ -154,25 +145,17 @@ end
 #! Input:  `[PAD, PAD, [ptr_out, 0, 0, 0], ptr_in, ...]`
 #! Output: `[PAD, PAD, [ptr_out + 8, 0, 0, 0], ptr_in + 8, ...]`
 proc write_mem_stream_pair
-    # Read two words from memory starting at `ptr_in`.
-    # mem_stream returns [MEM[ptr_in], MEM[ptr_in+4], ...]
     mem_stream
     # => [MEM[ptr_in], MEM[ptr_in+4], [ptr_out, 0, 0, 0], ptr_in + 8, ...]
 
-    # Store the first word at `ptr_out`.
     dup.8
     mem_storew_le
     swapw
-    # => [MEM[ptr_in+4], MEM[ptr_in], [ptr_out, 0, 0, 0], ptr_in + 8, ...]
 
-    # Store the second word at `ptr_out + 4`.
     dup.8 add.4
     mem_storew_le
-    # => [MEM[ptr_in], [ptr_out, 0, 0, 0], ptr_in + 8, ...]
 
-    # Advance `ptr_out` by 8 and restore the padding words.
     movup.8 add.8 movdn.8
-    # => [PAD, PAD, [ptr_out + 8, 0, 0, 0], ptr_in + 8, ...]
 end
 
 #! Copies two 4-element words from memory into another region using `write_mem_stream_pair`.
@@ -180,83 +163,21 @@ end
 #! Input:  `[ptr_out, ptr_in, ...]`
 #! Output: `[ptr_out + 8, ...]`
 proc copy_two_words_from_memory
-    # Arrange arguments so `ptr_in` stays directly beneath the pointer word.
     swap
     dup.1
-    # => [ptr_out, ptr_in, ptr_out, ...]
 
-    # Build `[ptr_out, 0, 0, 0]` and prepend two padding words.
     padw
     drop
     movup.4
     padw
     padw
-    # => [PAD, PAD, [ptr_out, 0, 0, 0], ptr_in, ptr_out, ...]
 
-    # Stream two words from `ptr_in` into `ptr_out`.
     exec.write_mem_stream_pair
-    # => [PAD, PAD, [ptr_out + 8, 0, 0, 0], ptr_in + 8, ptr_out, ...]
 
-    # Drop helper scaffolding and restore `ptr_out` to the top.
     dropw
     dropw
     drop
     dropw
-    # => [ptr_out, ...]
 
-    # Advance the write pointer by two words (eight field elements).
     push.8 add
-    # => [ptr_out + 8, ...]
-end
-
-#! Internal implementation of EdDSA verification via deferred computation.
-#!
-#! Emits an event to trigger the host precompile, reads the verification result from the
-#! advice stack, and computes the commitment/tag pair used for deferred verification.
-#!
-#! Input:  `[pk_ptr, k_digest_ptr, sig_ptr, ...]`
-#! Output: `[COMM, TAG, result, ...]`
-#!
-#! Where:
-#! - `COMM`: `Poseidon2(Poseidon2(Poseidon2(pk) || Poseidon2(k_digest)) || Poseidon2(sig))`
-#! - `TAG`:  `[EDDSA_VERIFY_EVENT, result, 0, 0]`
-#! - `result`: host verification result (1 or 0)
-proc verify_prehash_impl
-    emit.EDDSA_VERIFY_EVENT
-    # => [pk_ptr, k_digest_ptr, sig_ptr, ...]
-
-    # Read verification result from advice stack (provided by the host).
-    adv_push
-    # => [result, pk_ptr, k_digest_ptr, sig_ptr, ...]
-
-    # Compute COMM_PK = poseidon2::hash_memory(pk_ptr, PK_LEN_FELTS)
-    push.PK_LEN_FELTS movup.2 exec.poseidon2::hash_elements
-    # => [COMM_PK, result, k_digest_ptr, sig_ptr]
-
-    # Compute COMM_K = poseidon2::hash_memory(k_digest_ptr, K_DIGEST_LEN_FELTS)
-    push.K_DIGEST_LEN_FELTS movup.6 exec.poseidon2::hash_elements
-    # => [COMM_K, COMM_PK, result, sig_ptr]
-
-    # Merge COMM_PK and COMM_K into COMM_PK_K = poseidon2::merge(COMM_PK, COMM_K)
-    # hmerge([A, B]) computes merge(&[A, B]), so we need COMM_PK on top
-    swapw
-    # => [COMM_PK, COMM_K, result, sig_ptr]
-    exec.poseidon2::merge
-    # => [COMM_PK_K, result, sig_ptr]
-
-    # Compute COMM_SIG = poseidon2::hash_memory(sig_ptr, SIG_LEN_FELTS)
-    push.SIG_LEN_FELTS movup.6 exec.poseidon2::hash_elements
-    # => [COMM_SIG, COMM_PK_K, result]
-
-    # Merge into final commitment COMM = poseidon2::merge(COMM_PK_K, COMM_SIG)
-    # hmerge([A, B]) computes merge(&[A, B]), so we need COMM_PK_K on top
-    swapw
-    # => [COMM_PK_K, COMM_SIG, result]
-    exec.poseidon2::merge
-    # => [COMM, result]
-
-    # Create TAG = [EDDSA_VERIFY_EVENT, result, 0, 0] on stack
-    # Stack positions 4-7 should have [event_id, result, 0, 0] for get_stack_word(4)
-    push.0.0 dup.6 push.EDDSA_VERIFY_EVENT swapw
-    # => [COMM, TAG, result]
 end

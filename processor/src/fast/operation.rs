@@ -8,7 +8,6 @@ use miden_core::{
     WORD_SIZE, Word, ZERO,
     crypto::{hash::Poseidon2, merkle::MerklePath},
     mast::{ExecutableMastForest, MastNodeId},
-    precompile::{PrecompileTranscript, PrecompileTranscriptState},
 };
 
 use super::step::BreakReason;
@@ -77,13 +76,23 @@ impl Processor for FastProcessor {
     }
 
     #[inline(always)]
-    fn precompile_transcript_state(&self) -> PrecompileTranscriptState {
-        self.pc_transcript.state()
+    fn deferred_root(&self) -> Word {
+        self.deferred_state.root()
     }
 
     #[inline(always)]
-    fn set_precompile_transcript_state(&mut self, state: PrecompileTranscriptState) {
-        self.pc_transcript = PrecompileTranscript::from_state(state);
+    fn advance_deferred_root(&mut self, prev_root: Word, stmnt: Word, new_root: Word) {
+        debug_assert_eq!(
+            self.deferred_state.root(),
+            prev_root,
+            "DeferredState.root must equal prev_root at log_precompile time",
+        );
+        // `log` interns the AND-node and advances root in one step, asserting that the
+        // host-computed AND-node digest matches the in-circuit `new_root`. A divergence here
+        // would indicate a constraint-system bug; the prover-side assertion is fatal.
+        self.deferred_state
+            .log(stmnt, new_root)
+            .expect("AND-node host-side digest must match the in-circuit log_precompile hasher");
     }
 
     #[inline(always)]

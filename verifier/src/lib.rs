@@ -8,7 +8,11 @@ extern crate std;
 use alloc::{boxed::Box, vec, vec::Vec};
 
 use miden_air::{AirInstance, InstanceShapes, MidenAir, PublicInputs, config};
-use miden_core::{Felt, WORD_SIZE, field::QuadFelt};
+use miden_core::{
+    Felt, WORD_SIZE,
+    deferred::{DeferredState, IntegrityError, PrecompileRegistry},
+    field::QuadFelt,
+};
 use miden_crypto::stark::{StarkConfig, challenger::CanObserve, lmcs::Lmcs, proof::StarkProof};
 use serde::de::DeserializeOwned;
 use serde_wincode::SerdeCompat;
@@ -20,9 +24,6 @@ const MAX_STARK_PROOF_BYTES: usize = 64 * 1024 * 1024;
 mod exports {
     pub use miden_core::{
         Word,
-        precompile::{
-            PrecompileTranscriptState, PrecompileVerificationError, PrecompileVerifierRegistry,
-        },
         program::{Kernel, ProgramInfo, StackInputs, StackOutputs},
         proof::{ExecutionProof, HashFunction},
     };
@@ -35,106 +36,80 @@ pub use exports::*;
 // VERIFIER
 // ================================================================================================
 
-/// Returns the security level of the proof if the specified program was executed correctly against
-/// the specified inputs and outputs.
-///
-/// Specifically, verifies that if a program with the specified `program_hash` is executed against
-/// the provided `stack_inputs` and some secret inputs, the result is equal to the `stack_outputs`.
+/// Verifies a STARK proof of correct VM execution under the supplied deferred-DAG `schema`.
 ///
 /// Stack inputs are expected to be ordered as if they would be pushed onto the stack one by one.
-/// Thus, their expected order on the stack will be the reverse of the order in which they are
-/// provided, and the last value in the `stack_inputs` slice is expected to be the value at the top
-/// of the stack.
+/// Stack outputs are expected in the order they appear at the top of the stack (reverse of inputs).
 ///
-/// Stack outputs are expected to be ordered as if they would be popped off the stack one by one.
-/// Thus, the value at the top of the stack is expected to be in the first position of the
-/// `stack_outputs` slice, and the order of the rest of the output elements will also match the
-/// order on the stack. This is the reverse of the order of the `stack_inputs` slice.
+/// This is **L2** of the layered verifier API:
+/// 1. Rehydrate the proof's deferred-DAG wire under `schema`. This re-runs every reachable
+///    predicate's `reduce`, validates content-addressing, and walks the AND-chain. The hydrated
+///    state's `root` is the canonical *deferred commitment*.
+/// 2. Verify the STARK proof with that commitment as a public input (delegating to
+///    [`verify_stark`], the L1 raw-STARK entry-point).
+///
+/// Returns the security level (in bits) and the deferred commitment that the proof commits to.
 ///
 /// # Errors
-/// Returns an error if:
-/// - The provided proof does not prove a correct execution of the program.
-/// - The proof contains one or more precompile requests. When precompile requests are present, use
-///   [`verify_with_precompiles`] instead with an appropriate [`PrecompileVerifierRegistry`] to
-///   verify the precompile computations.
+/// Returns an error if the deferred-DAG wire fails any rehydration check
+/// ([`VerificationError::DeferredIntegrity`]) or if the STARK proof fails to verify under that
+/// commitment ([`VerificationError::StarkVerificationError`]). Rehydration runs first; a tampered
+/// wire fails fast before any STARK work happens.
+#[tracing::instrument("verify_program", skip_all)]
 pub fn verify(
     program_info: ProgramInfo,
     stack_inputs: StackInputs,
     stack_outputs: StackOutputs,
+    schema: &PrecompileRegistry,
     proof: ExecutionProof,
-) -> Result<u32, VerificationError> {
-    let (security_level, _commitment) = verify_with_precompiles(
-        program_info,
-        stack_inputs,
-        stack_outputs,
-        proof,
-        &PrecompileVerifierRegistry::new(),
-    )?;
-    Ok(security_level)
-}
-
-/// Identical to [`verify`], with additional verification of any precompile requests made during the
-/// VM execution. The resulting aggregated precompile commitment is returned, which can be compared
-/// against the commitment computed by the VM.
-///
-/// # Returns
-/// Returns a tuple `(security_level, transcript_state)` where:
-/// - `security_level`: The security level (in bits) of the verified proof.
-/// - `transcript_state`: A [`Word`] containing the rolling commitment to all precompile requests,
-///   computed by recomputing and recording each precompile commitment in a transcript. The state is
-///   itself a complete digest — no separate finalization step is needed.
-///
-/// # Errors
-/// Returns any error produced by [`verify`], as well as any errors resulting from precompile
-/// verification.
-#[tracing::instrument("verify_program", skip_all)]
-pub fn verify_with_precompiles(
-    program_info: ProgramInfo,
-    stack_inputs: StackInputs,
-    stack_outputs: StackOutputs,
-    proof: ExecutionProof,
-    precompile_verifiers: &PrecompileVerifierRegistry,
-) -> Result<(u32, PrecompileTranscriptState), VerificationError> {
+) -> Result<(u32, Word), VerificationError> {
     let security_level = proof.security_level();
 
-    let (hash_fn, proof_bytes, precompile_requests) = proof.into_parts();
+    let (hash_fn, proof_bytes, deferred_wire) = proof.into_parts();
 
-    // Recompute the precompile transcript by verifying all precompile requests and recording the
-    // commitments.
-    // If no verifiers were provided (e.g. when this function was called from `verify()`),
-    // but the proof contained requests anyway, returns a `NoVerifierFound` error.
-    let recomputed_transcript = precompile_verifiers
-        .requests_transcript(&precompile_requests)
-        .map_err(VerificationError::PrecompileVerificationError)?;
-    let pc_transcript_state = recomputed_transcript.state();
+    // Rehydrate the wire under the installed schema. This validates content-addressing, the
+    // AND-chain shape, AND re-evaluates every reachable predicate. The hydrated state's root
+    // is the canonical deferred commitment used as a public input to the STARK proof below.
+    let state = DeferredState::rehydrate(&deferred_wire, schema)
+        .map_err(VerificationError::DeferredIntegrity)?;
+    let deferred_commitment = state.root();
 
     verify_stark(
         program_info,
         stack_inputs,
         stack_outputs,
-        pc_transcript_state,
+        deferred_commitment,
         hash_fn,
         proof_bytes,
     )?;
 
-    Ok((security_level, pc_transcript_state))
+    Ok((security_level, deferred_commitment))
 }
 
 // HELPER FUNCTIONS
 // ================================================================================================
 
-fn verify_stark(
+/// **L1 of the layered verifier API.** Verifies a STARK proof against the supplied public inputs,
+/// including the `deferred_commitment` (the deferred-DAG root) as a verifier-supplied public
+/// input.
+///
+/// Pure STARK verification — no schema, no deferred-DAG walk. The caller is responsible for
+/// computing `deferred_commitment` honestly; typically by calling
+/// [`DeferredState::rehydrate`] on the proof's wire. The schema-aware [`verify`] does both
+/// steps; this entry-point is exposed for callers that derive the commitment by other means
+/// (e.g. a recursive precompile-VM proof that proves the wire's correctness independently).
+pub fn verify_stark(
     program_info: ProgramInfo,
     stack_inputs: StackInputs,
     stack_outputs: StackOutputs,
-    pc_transcript_state: PrecompileTranscriptState,
+    deferred_commitment: Word,
     hash_fn: HashFunction,
     proof_bytes: Vec<u8>,
 ) -> Result<(), VerificationError> {
     let program_hash = *program_info.program_hash();
 
     let pub_inputs =
-        PublicInputs::new(program_info, stack_inputs, stack_outputs, pc_transcript_state);
+        PublicInputs::new(program_info, stack_inputs, stack_outputs, deferred_commitment);
     let (public_values, kernel_felts) = pub_inputs.to_air_inputs();
 
     let params = config::pcs_params();
@@ -173,8 +148,8 @@ fn verify_stark(
 pub enum VerificationError {
     #[error("failed to verify STARK proof for program with hash {0}")]
     StarkVerificationError(Word, #[source] Box<StarkVerificationError>),
-    #[error("failed to verify precompile calls")]
-    PrecompileVerificationError(#[source] PrecompileVerificationError),
+    #[error("deferred-DAG integrity check failed: {0}")]
+    DeferredIntegrity(#[from] IntegrityError),
 }
 
 // STARK PROOF VERIFICATION

@@ -9,10 +9,8 @@ use crate::{
     Felt, Word,
     advice::{AdviceInputs, AdviceMap},
     deferred::{DeferredStateWire, TRUE_INDEX, Tag, WireNode},
-    events::EventId,
     mast::{BasicBlockNodeBuilder, JoinNodeBuilder, MastForest, MastForestContributor},
     operations::Operation,
-    precompile::PrecompileRequest,
     program::{Kernel, Program, StackInputs, StackOutputs},
     proof::{ExecutionProof, HashFunction},
     serde::{ByteWriter, Serializable},
@@ -261,14 +259,7 @@ fn generate_fuzz_seeds() {
         write_seed("operation_deserialize", "op_add.bin", &op.to_bytes());
     }
 
-    // Precompile request seed
-    {
-        let request = PrecompileRequest::new(EventId::from_u64(1), vec![1, 2, 3, 4]);
-        write_seed("precompile_request_deserialize", "precompile_request.bin", &request.to_bytes());
-    }
-
-    // Deferred-state wire seeds. These are standalone compact-wire witnesses; ExecutionProof still
-    // carries legacy PrecompileRequest values on this branch.
+    // Deferred-state wire seeds.
     {
         let empty = DeferredStateWire::default();
         write_seed("deferred_state_wire_deserialize", "empty_wire.bin", &empty.to_bytes());
@@ -312,41 +303,21 @@ fn generate_fuzz_seeds() {
         }
     }
 
-    // Execution proof seed (minimal)
+    // Execution proof seed (minimal) — used by both the binary `execution_proof_deserialize`
+    // fuzz target and, as a JSON payload, by `execution_proof_serde_deserialize`.
     {
-        let request = PrecompileRequest::new(EventId::from_u64(1), vec![1, 2, 3, 4]);
-        let proof = ExecutionProof::new(Vec::new(), HashFunction::Rpo256, vec![request]);
+        let proof =
+            ExecutionProof::new(Vec::new(), HashFunction::Rpo256, DeferredStateWire::default());
         write_seed("execution_proof_deserialize", "minimal_proof.bin", &proof.to_bytes());
+        let proof_json = serde_json::to_vec(&proof).expect("failed to serialize minimal_proof");
+        write_seed("execution_proof_serde_deserialize", "minimal_proof.json", &proof_json);
     }
 
-    // Execution proof seeds for malicious length-prefix deserialization.
+    // Execution proof seed for malicious length-prefix deserialization.
     {
         let mut oversized_proof_len = Vec::new();
         oversized_proof_len.write_usize(usize::MAX);
         write_seed("execution_proof_deserialize", "oversized_proof_len.bin", &oversized_proof_len);
-
-        let mut oversized_pc_requests_len = Vec::new();
-        oversized_pc_requests_len.write_usize(0);
-        oversized_pc_requests_len.write_u8(HashFunction::Blake3_256 as u8);
-        oversized_pc_requests_len.write_usize(usize::MAX);
-        write_seed(
-            "execution_proof_deserialize",
-            "oversized_pc_requests_len.bin",
-            &oversized_pc_requests_len,
-        );
-    }
-
-    // Execution proof seed with many small precompile requests.
-    {
-        let pc_requests = (0..64)
-            .map(|event_id| PrecompileRequest::new(EventId::from_u64(event_id), Vec::new()))
-            .collect();
-        let proof = ExecutionProof::new(vec![1, 2, 3], HashFunction::Blake3_256, pc_requests);
-        write_seed(
-            "execution_proof_deserialize",
-            "many_minimal_precompile_requests.bin",
-            &proof.to_bytes(),
-        );
     }
 
     println!("\nSeed corpus generated in ../miden-core-fuzz/corpus");

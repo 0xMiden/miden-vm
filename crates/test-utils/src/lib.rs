@@ -24,6 +24,7 @@ use miden_core::program::ProgramInfo;
 pub use miden_core::{
     EMPTY_WORD, Felt, ONE, WORD_SIZE, Word, ZERO,
     chiplets::hasher::{STATE_WIDTH, hash_elements},
+    deferred::PrecompileRegistry,
     field::{Field, PrimeCharacteristicRing, PrimeField64, QuadFelt},
     program::{MIN_STACK_DEPTH, StackInputs, StackOutputs},
     utils::{IntoBytes, ToElements, group_slice_elements},
@@ -219,6 +220,7 @@ pub struct Test {
     pub libraries: Vec<Library>,
     pub handlers: Vec<(EventName, Arc<dyn EventHandler>)>,
     pub add_modules: Vec<(Arc<Path>, String)>,
+    pub schema: Arc<PrecompileRegistry>,
 }
 
 // BUFFER WRITER FOR TESTING
@@ -255,6 +257,7 @@ impl Test {
             libraries: Vec::default(),
             handlers: Vec::new(),
             add_modules: Vec::default(),
+            schema: Arc::new(PrecompileRegistry::default()),
         }
     }
 
@@ -291,6 +294,14 @@ impl Test {
     /// Adds a library to link in during assembly.
     pub fn with_library(mut self, library: impl Into<Library>) -> Self {
         self.libraries.push(library.into());
+        self
+    }
+
+    /// Installs the deferred-DAG [`PrecompileRegistry`] used by the test's `FastProcessor`.
+    /// Defaults to the empty registry — programs that emit precompile tags must install one
+    /// (e.g. `miden_core_lib::CoreLibrary::precompile_schema()`).
+    pub fn with_schema(mut self, schema: Arc<PrecompileRegistry>) -> Self {
+        self.schema = schema;
         self
     }
 
@@ -343,6 +354,25 @@ impl Test {
     // TEST METHODS
     // --------------------------------------------------------------------------------------------
 
+    /// Builds a [`FastProcessor`] wired with this test's advice inputs and the deferred-DAG
+    /// [`PrecompileRegistry`], the same way every `FastProcessor::new` execution path needs.
+    /// Centralised so a new path can't silently forget `.with_precompiles(...)`. Returns the
+    /// advice-setup error so callers keep their prior behaviour — propagate via `?` or panic via
+    /// `.expect`.
+    #[cfg(not(target_family = "wasm"))]
+    fn build_processor(
+        &self,
+        stack_inputs: StackInputs,
+        debug: bool,
+    ) -> Result<FastProcessor, ExecutionError> {
+        Ok(FastProcessor::new(stack_inputs)
+            .with_advice(self.advice_inputs.clone())
+            .map_err(ExecutionError::advice_error_no_context)?
+            .with_debugging(debug)
+            .with_tracing(debug)
+            .with_precompiles(self.schema.clone()))
+    }
+
     /// Builds a final stack from the provided stack-ordered array and asserts that executing the
     /// test will result in the expected final stack state.
     #[cfg(not(target_family = "wasm"))]
@@ -369,11 +399,9 @@ impl Test {
         let mut host = host.with_source_manager(self.source_manager.clone());
 
         // execute the test
-        let processor = FastProcessor::new(self.stack_inputs)
-            .with_advice(self.advice_inputs.clone())
-            .expect("test advice inputs should fit default advice map limits")
-            .with_debugging(self.in_debug_mode)
-            .with_tracing(self.in_debug_mode);
+        let processor = self
+            .build_processor(self.stack_inputs, self.in_debug_mode)
+            .expect("test advice inputs should fit default advice map limits");
         let execution_output = processor.execute_sync(&program, &mut host).unwrap();
 
         // validate the memory state
@@ -550,7 +578,8 @@ impl Test {
                     .with_core_trace_fragment_size(FRAGMENT_SIZE)
                     .unwrap(),
             )
-            .map_err(ExecutionError::advice_error_no_context)?;
+            .map_err(ExecutionError::advice_error_no_context)?
+            .with_precompiles(self.schema.clone());
             fast_processor.execute_trace_inputs_sync(&program, &mut host)
         };
 
@@ -573,11 +602,7 @@ impl Test {
         let (program, host) = self.get_program_and_host();
         let mut host = host.with_source_manager(self.source_manager.clone());
 
-        let processor = FastProcessor::new(self.stack_inputs)
-            .with_advice(self.advice_inputs.clone())
-            .map_err(ExecutionError::advice_error_no_context)?
-            .with_debugging(true)
-            .with_tracing(true);
+        let processor = self.build_processor(self.stack_inputs, true)?;
 
         processor.execute_sync(&program, &mut host).map(|output| (output, host))
     }
@@ -595,11 +620,7 @@ impl Test {
             .with_source_manager(self.source_manager.clone())
             .with_debug_handler(debug_handler);
 
-        let processor = FastProcessor::new(self.stack_inputs)
-            .with_advice(self.advice_inputs.clone())
-            .map_err(ExecutionError::advice_error_no_context)?
-            .with_debugging(true)
-            .with_tracing(true);
+        let processor = self.build_processor(self.stack_inputs, true)?;
 
         let stack_result = processor.execute_sync(&program, &mut host);
 
@@ -640,9 +661,11 @@ impl Test {
         let program_info = ProgramInfo::from(program);
         if test_fail {
             stack_outputs.as_mut()[0] += ONE;
-            assert!(verify(program_info, stack_inputs, stack_outputs, proof).is_err());
+            assert!(
+                verify(program_info, stack_inputs, stack_outputs, &self.schema, proof).is_err()
+            );
         } else {
-            let result = verify(program_info, stack_inputs, stack_outputs, proof);
+            let result = verify(program_info, stack_inputs, stack_outputs, &self.schema, proof);
             assert!(result.is_ok(), "error: {result:?}");
         }
     }
@@ -761,11 +784,9 @@ impl Test {
         let mut host = host.with_source_manager(self.source_manager.clone());
 
         let fast_result_by_step = {
-            let fast_process = FastProcessor::new(stack_inputs)
-                .with_advice(self.advice_inputs.clone())
-                .expect("test advice inputs should fit default advice map limits")
-                .with_debugging(self.in_debug_mode)
-                .with_tracing(self.in_debug_mode);
+            let fast_process = self
+                .build_processor(stack_inputs, self.in_debug_mode)
+                .expect("test advice inputs should fit default advice map limits");
             fast_process.execute_by_step_sync(&program, &mut host)
         };
 

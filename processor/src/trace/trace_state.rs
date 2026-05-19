@@ -12,7 +12,6 @@ use crate::{
     crypto::merkle::MerklePath,
     errors::OperationError,
     mast::{MastForestId, MastNodeId},
-    precompile::PrecompileTranscriptState,
     processor::{
         AdviceProviderInterface, HasherInterface, MemoryInterface, Processor, SystemInterface,
     },
@@ -83,10 +82,10 @@ pub struct SystemState {
     /// - For SYSCALL contexts: hash remains from the calling function
     pub fn_hash: Word,
 
-    /// Precompile-transcript state (rolling digest) used for recording `log_precompile` calls
+    /// Rolling deferred-DAG root used for recording `log_precompile` calls
     /// - Initially [ZERO; 4]
     /// - Updated with each `log_precompile` invocation
-    pub pc_transcript_state: PrecompileTranscriptState,
+    pub deferred_root: Word,
 }
 
 impl SystemState {
@@ -96,7 +95,7 @@ impl SystemState {
             clk: processor.system().clock(),
             ctx: processor.system().ctx(),
             fn_hash: processor.system().caller_hash(),
-            pc_transcript_state: processor.precompile_transcript_state(),
+            deferred_root: processor.deferred_root(),
         }
     }
 }

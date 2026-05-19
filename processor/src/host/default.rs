@@ -188,6 +188,7 @@ where
         process: &ProcessorState<'_>,
     ) -> Result<Vec<AdviceMutation>, EventError> {
         let event_id = EventId::from_felt(process.get_stack_item(0));
+
         match self.event_handlers.handle_event(event_id, process) {
             Ok(Some(mutations)) => Ok(mutations),
             Ok(None) => {

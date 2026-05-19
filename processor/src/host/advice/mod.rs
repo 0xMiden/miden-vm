@@ -4,7 +4,6 @@ use miden_core::{
     Felt, WORD_SIZE, Word,
     advice::{AdviceInputs, AdviceMap},
     crypto::merkle::{InnerNodeInfo, MerklePath, MerkleStore, NodeIndex},
-    precompile::PrecompileRequest,
 };
 #[cfg(test)]
 use miden_core::{crypto::hash::Blake3_256, serde::Serializable};
@@ -41,14 +40,6 @@ const MAX_ADVICE_STACK_SIZE: usize = 1 << 17;
 /// 3. Merkle store, which contains structured data reducible to Merkle paths. The VM can request
 ///    Merkle paths from the store, as well as mutate it by updating or merging nodes contained in
 ///    the store.
-/// 4. Deferred precompile requests containing the calldata of any precompile requests made by the
-///    VM. The VM computes a commitment to the calldata of all the precompiles it requests. When
-///    verifying each call, this commitment must be recomputed and should match the one computed by
-///    the VM. After executing a program, the data in these requests can either
-///    - be included in the proof of the VM execution and verified natively alongside the VM proof,
-///      or,
-///    - used to produce a STARK proof using a precompile VM, which can be verified in the epilog of
-///      the program.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AdviceProvider {
     stack: VecDeque<Felt>,
@@ -57,7 +48,6 @@ pub struct AdviceProvider {
     max_map_value_size: usize,
     max_map_elements: usize,
     store: MerkleStore,
-    pc_requests: Vec<PrecompileRequest>,
 }
 
 impl Default for AdviceProvider {
@@ -87,7 +77,6 @@ impl AdviceProvider {
             max_map_value_size: options.max_adv_map_value_size(),
             max_map_elements: options.max_adv_map_elements(),
             store: MerkleStore::default(),
-            pc_requests: Vec::new(),
         }
     }
 
@@ -138,9 +127,6 @@ impl AdviceProvider {
             AdviceMutation::ExtendMerkleStore { infos } => {
                 self.extend_merkle_store(infos);
             },
-            AdviceMutation::ExtendPrecompileRequests { data } => {
-                self.extend_precompile_requests(data);
-            },
         }
         Ok(())
     }
@@ -148,7 +134,7 @@ impl AdviceProvider {
     /// Returns a stable fingerprint of the advice state.
     ///
     /// The fingerprint is insensitive to advice-map insertion order and Merkle-store insertion
-    /// order, but it still reflects advice-stack order and precompile-request order.
+    /// order, but it still reflects advice-stack order.
     #[cfg(test)]
     #[must_use]
     pub(crate) fn fingerprint(&self) -> [u8; 32] {
@@ -170,17 +156,8 @@ impl AdviceProvider {
             .flat_map(|(value, left, right)| [value, left, right])
             .collect::<Vec<_>>()
             .to_bytes();
-        let precompile_requests = self.pc_requests.to_bytes();
-        Blake3_256::hash_iter(
-            [
-                stack.as_slice(),
-                map.as_slice(),
-                store.as_slice(),
-                precompile_requests.as_slice(),
-            ]
-            .into_iter(),
-        )
-        .into()
+        Blake3_256::hash_iter([stack.as_slice(), map.as_slice(), store.as_slice()].into_iter())
+            .into()
     }
 
     // ADVICE STACK
@@ -597,33 +574,6 @@ impl AdviceProvider {
         self.store.extend(iter);
     }
 
-    // PRECOMPILE REQUESTS
-    // --------------------------------------------------------------------------------------------
-
-    /// Returns a reference to the precompile requests.
-    ///
-    /// Ordering is the same as the order in which requests are issued during execution. This
-    /// ordering is relied upon when recomputing the precompile sponge during verification.
-    pub fn precompile_requests(&self) -> &[PrecompileRequest] {
-        &self.pc_requests
-    }
-
-    /// Extends the precompile requests with the given entries.
-    pub fn extend_precompile_requests<I>(&mut self, iter: I)
-    where
-        I: IntoIterator<Item = PrecompileRequest>,
-    {
-        self.pc_requests.extend(iter);
-    }
-
-    /// Moves all accumulated precompile requests out of this provider, leaving it empty.
-    ///
-    /// Intended for proof packaging, where requests are serialized into the proof and no longer
-    /// needed in the provider after consumption.
-    pub fn take_precompile_requests(&mut self) -> Vec<PrecompileRequest> {
-        core::mem::take(&mut self.pc_requests)
-    }
-
     // MUTATORS
     // --------------------------------------------------------------------------------------------
 
@@ -634,11 +584,11 @@ impl AdviceProvider {
         self.extend_map(&inputs.map)
     }
 
-    /// Consumes `self` and return its parts (stack, map, store, precompile_requests).
+    /// Consumes `self` and return its parts (stack, map, store).
     ///
     /// The returned stack vector is ordered from top (index 0) to bottom.
-    pub fn into_parts(self) -> (Vec<Felt>, AdviceMap, MerkleStore, Vec<PrecompileRequest>) {
-        (self.stack.into_iter().collect(), self.map, self.store, self.pc_requests)
+    pub fn into_parts(self) -> (Vec<Felt>, AdviceMap, MerkleStore) {
+        (self.stack.into_iter().collect(), self.map, self.store)
     }
 }
 

@@ -56,7 +56,7 @@ pub use host::{
     handlers::{DebugError, DebugHandler, TraceError},
 };
 pub use miden_core::{
-    EMPTY_WORD, Felt, ONE, WORD_SIZE, Word, ZERO, crypto, field, mast, precompile,
+    EMPTY_WORD, Felt, ONE, WORD_SIZE, Word, ZERO, crypto, field, mast,
     program::{
         InputError, Kernel, MIN_STACK_DEPTH, Program, ProgramInfo, StackInputs, StackOutputs,
     },
