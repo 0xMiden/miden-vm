@@ -5,8 +5,8 @@
 //! (`SIG_CHUNKS = 3` chunks, conceptually `sig || pk || msg`). The chunk count is hardcoded per
 //! discriminant — no immediate. Reduce performs a stub check: succeeds iff the very first felt
 //! of the first chunk is non-zero, mirroring the shape of "this signature isn't an all-zero
-//! placeholder." Real `Ecdsa`/`Eddsa` apps would slot in by swapping the stub for a non-native
-//! verification kernel.
+//! placeholder." Real `Ecdsa`/`Eddsa` precompiles would slot in by swapping the stub for a
+//! non-native verification kernel.
 
 use std::sync::Arc;
 
@@ -18,10 +18,10 @@ use miden_core::{
     },
 };
 
-// PUBLIC APP TYPE
+// PUBLIC PRECOMPILE TYPE
 // ================================================================================================
 
-/// Zero-sized handle for the `Sig` app.
+/// Zero-sized handle for the `Sig` precompile.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct Sig;
 
@@ -34,12 +34,12 @@ impl Sig {
     /// the framework derives the chunk count from this constant at `decode` time.
     pub const SIG_CHUNKS: u32 = 3;
 
-    pub fn app_id() -> Felt {
+    pub fn id() -> Felt {
         precompile_id(&Sig)
     }
 
     pub fn verify_tag() -> Tag {
-        [Self::app_id(), Felt::from_u32(Self::VERIFY_TAG_ID), ZERO, ZERO]
+        [Self::id(), Felt::from_u32(Self::VERIFY_TAG_ID), ZERO, ZERO]
     }
 
     /// Build a `verify` predicate node from `SIG_CHUNKS` 8-felt chunks.
@@ -54,7 +54,7 @@ impl Precompile for Sig {
     }
 
     fn id(&self) -> Felt {
-        Self::app_id()
+        Self::id()
     }
 
     fn decode(&self, sub: PrecompileTag) -> Result<TagInfo, SchemaError> {

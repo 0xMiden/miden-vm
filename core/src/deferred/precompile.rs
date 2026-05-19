@@ -1,7 +1,7 @@
 //! Multi-precompile composite-schema substrate.
 //!
 //! A [`Precompile`] is a self-contained semantic module (e.g. a hash, signature, or field
-//! app) that claims a slice of the 4-felt tag space identified by a stable [`Felt`] id. The
+//! precompile) that claims a slice of the 4-felt tag space identified by a stable [`Felt`] id. The
 //! [`crate::deferred::PrecompileSchema`] composite dispatches each tag to the right precompile
 //! by `tag[0]`, hands the remaining bits to it as a [`PrecompileTag`], and forwards
 //! `decode` / `reduce`.
@@ -14,7 +14,8 @@
 //!
 //! - `precompile_id` (felt 0) — the precompile's pinned id; validated against [`precompile_id`].
 //! - `node_disc` (felt 1) — precompile-local discriminant index (small integer).
-//! - `imm` (felt 2) — precompile-local immediate (e.g. `n_bytes` for chunk apps); `ZERO` if unused.
+//! - `imm` (felt 2) — precompile-local immediate (e.g. `n_bytes` for chunk precompiles); `ZERO` if
+//!   unused.
 //! - `tag[3]` — reserved; must be `ZERO` in v1.
 
 use alloc::vec::Vec;

@@ -543,8 +543,8 @@ mod tests {
     fn register_with_unhandled_tag_errors() {
         let mut state = DeferredState::new();
         let schema = TestPrecompile;
-        // TestPrecompile app_id + unknown discriminant: schema decode returns Err.
-        let bad_tag: Tag = [TestPrecompile::app_id(), Felt::from_u32(99), ZERO, ZERO];
+        // TestPrecompile id + unknown discriminant: schema decode returns Err.
+        let bad_tag: Tag = [TestPrecompile::id(), Felt::from_u32(99), ZERO, ZERO];
         let bad = Node::expression(bad_tag, Payload::new([Felt::from_u32(0); 8]));
         let err = state.register(&schema, bad);
         assert!(matches!(err, Err(SchemaError::InvalidNode)));
@@ -795,7 +795,7 @@ mod tests {
 
     #[test]
     fn rehydrate_rejects_unknown_tag() {
-        // A tag the schema rejects — its app_id doesn't match TestPrecompile.
+        // A tag the schema rejects — its id doesn't match TestPrecompile.
         let bogus_tag: Tag = [Felt::new_unchecked(0xdead), ZERO, ZERO, ZERO];
         let wire = DeferredStateWire {
             entries: alloc::vec![crate::deferred::WireEntry {

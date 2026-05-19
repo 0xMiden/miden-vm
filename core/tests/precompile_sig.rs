@@ -1,5 +1,5 @@
 //! Integration coverage for the `Sig` reference precompile: single chunk-bodied predicate,
-//! standalone and inside a multi-app `PrecompileSchema` (alongside `Uint` and `Hash`).
+//! standalone and inside a multi-precompile `PrecompileSchema` (alongside `Uint` and `Hash`).
 
 mod common;
 

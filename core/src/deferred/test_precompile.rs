@@ -1,6 +1,6 @@
 //! Minimal `#[cfg(test)]` schema fixture for exercising the deferred engine
 //! (`DeferredState` register/evaluate/log/rehydrate, composite dispatch) without leaning on
-//! a reference *app*'s semantics.
+//! a reference *precompile*'s semantics.
 //!
 //! Deliberately tiny: an 8×`u32` little-endian value leaf, `add`/`mul` wrapping binary ops,
 //! and an `eq` predicate. Not exported, not on any public / `testing` surface — engine
@@ -28,21 +28,21 @@ impl TestPrecompile {
     const MUL_TAG_ID: u32 = 2;
     const EQ_TAG_ID: u32 = 3;
 
-    pub(crate) fn app_id() -> Felt {
+    pub(crate) fn id() -> Felt {
         precompile_id(&TestPrecompile)
     }
 
     pub(crate) fn leaf_tag() -> Tag {
-        [Self::app_id(), Felt::from_u32(Self::LEAF_TAG_ID), ZERO, ZERO]
+        [Self::id(), Felt::from_u32(Self::LEAF_TAG_ID), ZERO, ZERO]
     }
     pub(crate) fn add_tag() -> Tag {
-        [Self::app_id(), Felt::from_u32(Self::ADD_TAG_ID), ZERO, ZERO]
+        [Self::id(), Felt::from_u32(Self::ADD_TAG_ID), ZERO, ZERO]
     }
     pub(crate) fn mul_tag() -> Tag {
-        [Self::app_id(), Felt::from_u32(Self::MUL_TAG_ID), ZERO, ZERO]
+        [Self::id(), Felt::from_u32(Self::MUL_TAG_ID), ZERO, ZERO]
     }
     pub(crate) fn eq_tag() -> Tag {
-        [Self::app_id(), Felt::from_u32(Self::EQ_TAG_ID), ZERO, ZERO]
+        [Self::id(), Felt::from_u32(Self::EQ_TAG_ID), ZERO, ZERO]
     }
 
     /// Build a canonical value leaf from `[u32; 8]` limbs (little-endian).
@@ -117,7 +117,7 @@ impl Precompile for TestPrecompile {
     }
 
     fn id(&self) -> Felt {
-        Self::app_id()
+        Self::id()
     }
 
     fn decode(&self, sub: PrecompileTag) -> Result<TagInfo, SchemaError> {
@@ -138,7 +138,7 @@ impl Precompile for TestPrecompile {
     }
 
     fn reduce(&self, node: &Node, ctx: &mut dyn ReduceCtx) -> Result<Node, SchemaError> {
-        if node.tag[0] != Self::app_id() || node.tag[2] != ZERO || node.tag[3] != ZERO {
+        if node.tag[0] != Self::id() || node.tag[2] != ZERO || node.tag[3] != ZERO {
             return Err(SchemaError::InvalidNode);
         }
         let kind = Disc::classify(node.tag[1]).ok_or(SchemaError::InvalidNode)?;
@@ -171,18 +171,18 @@ impl Precompile for TestPrecompile {
     }
 }
 
-/// Single-app convenience `Schema` so tests can use `&TestPrecompile` directly without the
+/// Single-precompile convenience `Schema` so tests can use `&TestPrecompile` directly without the
 /// `PrecompileSchema` composite.
 impl Schema for TestPrecompile {
     fn decode(&self, tag: Tag) -> Result<TagInfo, SchemaError> {
-        if tag[0] != Self::app_id() {
+        if tag[0] != Self::id() {
             return Err(SchemaError::InvalidNode);
         }
         Precompile::decode(self, PrecompileTag([tag[1], tag[2], tag[3]]))
     }
 
     fn reduce(&self, node: &Node, ctx: &mut dyn ReduceCtx) -> Result<Node, SchemaError> {
-        if node.tag[0] != Self::app_id() {
+        if node.tag[0] != Self::id() {
             return Err(SchemaError::InvalidNode);
         }
         Precompile::reduce(self, node, ctx)

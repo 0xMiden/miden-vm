@@ -17,10 +17,10 @@ use miden_core::{
 
 use super::uint::Uint;
 
-// PUBLIC APP TYPE
+// PUBLIC PRECOMPILE TYPE
 // ================================================================================================
 
-/// Zero-sized handle for the `Group` app (mock group over [`Uint`]).
+/// Zero-sized handle for the `Group` precompile (mock group over [`Uint`]).
 #[derive(Debug, Default, Clone, Copy)]
 pub struct Group;
 
@@ -34,21 +34,21 @@ impl Group {
     pub const EQ_TAG_ID: u32 = 3;
 
     /// Derive the precompile id. Pure function over `Group`'s metadata.
-    pub fn app_id() -> Felt {
+    pub fn id() -> Felt {
         precompile_id(&Group)
     }
 
     pub fn new_tag() -> Tag {
-        [Self::app_id(), Felt::from_u32(Self::NEW_TAG_ID), ZERO, ZERO]
+        [Self::id(), Felt::from_u32(Self::NEW_TAG_ID), ZERO, ZERO]
     }
     pub fn add_tag() -> Tag {
-        [Self::app_id(), Felt::from_u32(Self::ADD_TAG_ID), ZERO, ZERO]
+        [Self::id(), Felt::from_u32(Self::ADD_TAG_ID), ZERO, ZERO]
     }
     pub fn sub_tag() -> Tag {
-        [Self::app_id(), Felt::from_u32(Self::SUB_TAG_ID), ZERO, ZERO]
+        [Self::id(), Felt::from_u32(Self::SUB_TAG_ID), ZERO, ZERO]
     }
     pub fn eq_tag() -> Tag {
-        [Self::app_id(), Felt::from_u32(Self::EQ_TAG_ID), ZERO, ZERO]
+        [Self::id(), Felt::from_u32(Self::EQ_TAG_ID), ZERO, ZERO]
     }
 
     /// Build a `new` node referencing two field-leaf digests.
@@ -75,7 +75,7 @@ impl Precompile for Group {
     }
 
     fn id(&self) -> Felt {
-        Self::app_id()
+        Self::id()
     }
 
     fn decode(&self, sub: PrecompileTag) -> Result<TagInfo, SchemaError> {
@@ -98,7 +98,7 @@ impl Precompile for Group {
 
     fn reduce(&self, node: &Node, ctx: &mut dyn ReduceCtx) -> Result<Node, SchemaError> {
         let kind = Discriminant::classify(node.tag[1]).ok_or(SchemaError::InvalidNode)?;
-        if node.tag[0] != Self::app_id() || node.tag[2] != ZERO || node.tag[3] != ZERO {
+        if node.tag[0] != Self::id() || node.tag[2] != ZERO || node.tag[3] != ZERO {
             return Err(SchemaError::InvalidNode);
         }
         let payload = node.expression_payload().ok_or(SchemaError::InvalidNode)?;

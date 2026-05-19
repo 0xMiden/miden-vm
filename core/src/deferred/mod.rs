@@ -21,10 +21,10 @@ pub use schema::{NodeType, NoopSchema, ReduceCtx, Schema, SchemaError, TagInfo};
 pub use state::DeferredState;
 pub use wire::{DeferredStateWire, IntegrityError, TRUE_INDEX, WireBody, WireEntry};
 
-// Multi-app composite layer. The `App` trait + `PrecompileSchema` substrate are the public
-// surface. Production precompile apps (keccak256, sha512, ecdsa_k256_keccak, eddsa_ed25519)
-// live in `miden-core-lib::precompiles`, next to their MASM wrappers; reference precompiles
-// live in `core/tests/common/precompile/`.
+// Multi-precompile composite layer. The `Precompile` trait + `PrecompileSchema` substrate are
+// the public surface. Production precompiles (keccak256, sha512, ecdsa_k256_keccak,
+// eddsa_ed25519) live in `miden-core-lib::precompiles`, next to their MASM wrappers; reference
+// precompiles live in `core/tests/common/precompile/`.
 mod precompile;
 mod precompile_schema;
 

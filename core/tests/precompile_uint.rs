@@ -224,8 +224,8 @@ fn non_leaf_operand_errors() {
 }
 
 #[test]
-fn app_id_is_stable_across_calls() {
-    assert_eq!(Uint::app_id(), Uint::app_id());
+fn id_is_stable_across_calls() {
+    assert_eq!(Uint::id(), Uint::id());
 }
 
 #[test]
