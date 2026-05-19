@@ -5,7 +5,7 @@ use alloc::{
 
 use super::{
     DeferredError, DeferredStateWire, Digest, IntegrityError, Node, NodePayload, NodeType, Payload,
-    PrecompileError, Precompiles, TRUE_DIGEST, TRUE_TAG,
+    PrecompileError, PrecompileRegistry, TRUE_DIGEST, TRUE_TAG,
 };
 
 /// In-memory deferred-DAG state — the verifier's witness.
@@ -129,7 +129,7 @@ impl DeferredState {
     /// either host-side via [`Self::evaluate`], or constrained via `log_precompile`.
     pub fn register(
         &mut self,
-        precompiles: &Precompiles,
+        precompiles: &PrecompileRegistry,
         node: Node,
     ) -> Result<Digest, PrecompileError> {
         let info = precompiles.decode(node.tag)?;
@@ -143,9 +143,9 @@ impl DeferredState {
 
     /// Evaluate an opaque node via the precompile registry.
     ///
-    /// Reduces to canonical form per `Precompiles::reduce`. The input node and every canonical
-    /// intermediate produced during the walk are interned into `self.nodes`, so callers may
-    /// invoke `evaluate` on a fresh op node without pre-registering it.
+    /// Reduces to canonical form per `PrecompileRegistry::reduce`. The input node and every
+    /// canonical intermediate produced during the walk are interned into `self.nodes`, so
+    /// callers may invoke `evaluate` on a fresh op node without pre-registering it.
     ///
     /// For a predicate (`decode(tag).evaluates_to == TRUE_TAG`), success returns
     /// [`super::true_node`] and a mismatch surfaces as [`PrecompileError::AssertionFailed`].
@@ -163,7 +163,7 @@ impl DeferredState {
     /// verifier accepts directly, so we don't waste DAG space on copies of it.
     pub fn evaluate(
         &mut self,
-        precompiles: &Precompiles,
+        precompiles: &PrecompileRegistry,
         node: Node,
     ) -> Result<Node, PrecompileError> {
         let info = precompiles.decode(node.tag)?;
@@ -282,7 +282,7 @@ impl DeferredState {
     ///   missing statements, non-predicate statements, and failed equalities.
     pub fn rehydrate(
         wire: &DeferredStateWire,
-        precompiles: &Precompiles,
+        precompiles: &PrecompileRegistry,
     ) -> Result<Self, IntegrityError> {
         let mut state = Self::new();
         // Parallel to `wire.entries`: the recomputed digest at each index. `Binary` entries at
@@ -410,7 +410,10 @@ fn resolve_index(idx: u32, current: usize, digests: &[Digest]) -> Result<Digest,
 /// Decode a node's [`NodeType`] for `rehydrate`. Framework-owned `TRUE_TAG` AND-nodes are
 /// classified as `Binary` directly (no precompile claims id `ZERO`); everything else routes
 /// through `precompiles.decode`.
-fn decode_node_type(precompiles: &Precompiles, node: &Node) -> Result<NodeType, IntegrityError> {
+fn decode_node_type(
+    precompiles: &PrecompileRegistry,
+    node: &Node,
+) -> Result<NodeType, IntegrityError> {
     if node.tag == TRUE_TAG {
         return Ok(NodeType::Binary);
     }
@@ -469,9 +472,9 @@ fn reachable_closure(nodes: &BTreeMap<Digest, Node>, root: Digest) -> BTreeSet<D
 /// [`Precompile::reduce`](crate::deferred::Precompile::reduce) runs.
 ///
 /// A precompile only supplies *per-node* semantics; it does not own the DAG. This handle is what
-/// threads the [`DeferredState`] and the [`Precompiles`] registry through that call — the
+/// threads the [`DeferredState`] and the [`PrecompileRegistry`] registry through that call — the
 /// registry by shared reference, the state by exclusive reference, bundled together so
-/// [`resolve`](Self::resolve) can recurse back through `Precompiles::reduce` without an
+/// [`resolve`](Self::resolve) can recurse back through `PrecompileRegistry::reduce` without an
 /// aliasing-borrow problem. A precompile's `reduce` therefore reads as a depth-first recursive
 /// function: "resolve lhs, resolve rhs, combine."
 ///
@@ -494,14 +497,14 @@ fn reachable_closure(nodes: &BTreeMap<Digest, Node>, root: Digest) -> BTreeSet<D
 /// only ever receives a `&mut WitnessBuilder` from the framework and cannot fabricate one.
 pub struct WitnessBuilder<'a> {
     state: &'a mut DeferredState,
-    precompiles: &'a Precompiles,
+    precompiles: &'a PrecompileRegistry,
 }
 
 impl<'a> WitnessBuilder<'a> {
     /// Bind a state and the precompile registry into a witness builder. Crate-private; the
     /// public entry point is [`DeferredState::evaluate`], which hands the resulting
-    /// `&mut WitnessBuilder` to `Precompiles::reduce`.
-    pub(crate) fn new(state: &'a mut DeferredState, precompiles: &'a Precompiles) -> Self {
+    /// `&mut WitnessBuilder` to `PrecompileRegistry::reduce`.
+    pub(crate) fn new(state: &'a mut DeferredState, precompiles: &'a PrecompileRegistry) -> Self {
         Self { state, precompiles }
     }
 
@@ -526,7 +529,7 @@ impl<'a> WitnessBuilder<'a> {
     /// (under the caller-supplied `input_digest`, no re-hash) and the canonical result — except
     /// the TRUE sentinel (which is a structural marker, not a load-bearing DAG node).
     ///
-    /// `node` is passed to `Precompiles::reduce` by reference so we can intern it by-move
+    /// `node` is passed to `PrecompileRegistry::reduce` by reference so we can intern it by-move
     /// afterwards, avoiding a chunk-sized clone on every reduction.
     pub(crate) fn reduce_and_intern(
         &mut self,
@@ -548,12 +551,14 @@ mod tests {
     use super::*;
     use crate::{
         Felt, Word, ZERO,
-        deferred::{Payload, Precompiles, TRUE_DIGEST, Tag, test_precompile::TestPrecompile},
+        deferred::{
+            Payload, PrecompileRegistry, TRUE_DIGEST, Tag, test_precompile::TestPrecompile,
+        },
     };
 
     /// The single-precompile registry every engine test runs against.
-    fn precompiles() -> Precompiles {
-        Precompiles::single(TestPrecompile).unwrap()
+    fn precompiles() -> PrecompileRegistry {
+        PrecompileRegistry::default().with_precompile(TestPrecompile)
     }
 
     fn test_leaf(low: u64) -> Node {

@@ -1,16 +1,16 @@
 //! `Uint` — 256-bit wrapping integer arithmetic as a first reference precompile.
 //!
 //! Semantics: operations are mod 2^256, limbs are u32 little-endian. Tags route through
-//! [`Precompiles`] by id; a `sub` op joins `add`/`mul`, and the precompile pre-registers
+//! [`PrecompileRegistry`] by id; a `sub` op joins `add`/`mul`, and the precompile pre-registers
 //! `ZERO` / `ONE` / `P_MINUS_1` (`[u32::MAX; 8]`) leaves via [`Precompile::init`].
 //!
-//! [`Precompiles`]: miden_core::deferred::Precompiles
+//! [`PrecompileRegistry`]: miden_core::deferred::PrecompileRegistry
 
 use miden_core::{
     Felt, ZERO,
     deferred::{
-        DeferredError, Digest, Node, NodeType, Payload, Precompile, PrecompileError, TRUE_TAG, Tag,
-        TagInfo, WitnessBuilder, precompile_id, true_node,
+        DeferredError, Digest, Node, NodePayload, NodeType, Payload, Precompile, PrecompileError,
+        TRUE_TAG, Tag, TagInfo, WitnessBuilder, precompile_id, true_node,
     },
 };
 
@@ -144,11 +144,7 @@ impl Precompile for Uint {
     }
 
     fn decode(&self, imm: [Felt; 3]) -> Option<TagInfo> {
-        let [disc, immediate, reserved] = imm;
-        if immediate != ZERO || reserved != ZERO {
-            return None;
-        }
-        let kind = Discriminant::classify(disc)?;
+        let kind = Discriminant::classify(imm[0])?;
         // Leaf is a `Value` (8 raw u32 limbs); op-nodes and the eq predicate are `Binary`
         // (children encoded as `lhs_digest || rhs_digest`).
         let node_type = match kind {
@@ -164,13 +160,17 @@ impl Precompile for Uint {
 
     fn reduce(
         &self,
-        node: &Node,
+        imm: [Felt; 3],
+        payload: &NodePayload,
         witness: &mut WitnessBuilder<'_>,
     ) -> Result<Node, PrecompileError> {
-        match UintNode::parse(node)? {
+        let NodePayload::Expression(p) = payload else {
+            return Err(PrecompileError::InvalidNode);
+        };
+        match UintNode::parse(imm, p)? {
             // Leaf canonicality is checked at parse-time, deferred from register-time so that
             // malformed leaves are interned silently and only error out when used.
-            UintNode::Leaf => Ok(node.clone()),
+            UintNode::Leaf => Ok(Node::expression(Tag::new(Self::id(), imm), *p)),
             UintNode::BinaryOp { op, lhs, rhs } => {
                 let a = leaf_limbs(&witness.resolve(lhs)?)?;
                 let b = leaf_limbs(&witness.resolve(rhs)?)?;
@@ -235,13 +235,10 @@ enum UintNode {
 }
 
 impl UintNode {
-    fn parse(node: &Node) -> Result<Self, PrecompileError> {
-        let tag = node.tag;
-        if tag.id != Uint::id() || tag.imm[1] != ZERO || tag.imm[2] != ZERO {
-            return Err(PrecompileError::InvalidNode);
-        }
-        let kind = Discriminant::classify(tag.imm[0]).ok_or(PrecompileError::InvalidNode)?;
-        let payload = node.expression_payload().ok_or(DeferredError::InvalidPayload)?;
+    /// `imm[0]` is the discriminant; the registry already matched `Uint`'s id, and `Uint`
+    /// ignores `imm[1..3]`.
+    fn parse(imm: [Felt; 3], payload: &Payload) -> Result<Self, PrecompileError> {
+        let kind = Discriminant::classify(imm[0]).ok_or(PrecompileError::InvalidNode)?;
         Ok(match kind {
             Discriminant::Leaf => {
                 decode_limbs(payload)?;

@@ -10,8 +10,8 @@
 use miden_core::{
     Felt, ZERO,
     deferred::{
-        Digest, Node, NodeType, Payload, Precompile, PrecompileError, TRUE_TAG, Tag, TagInfo,
-        WitnessBuilder, precompile_id, true_node,
+        Digest, Node, NodePayload, NodeType, Payload, Precompile, PrecompileError, TRUE_TAG, Tag,
+        TagInfo, WitnessBuilder, precompile_id, true_node,
     },
 };
 
@@ -91,14 +91,10 @@ impl Precompile for Group {
     }
 
     fn decode(&self, imm: [Felt; 3]) -> Option<TagInfo> {
-        let [disc, immediate, reserved] = imm;
-        if immediate != ZERO || reserved != ZERO {
-            return None;
-        }
         // All Group nodes pack two child digests in their payload — `new` references the
         // coordinate leaves, `add`/`sub` reference the group operands, `eq` references the two
         // compared group elements. So every tag is `NodeType::Binary`.
-        let evaluates_to = match Discriminant::classify(disc)? {
+        let evaluates_to = match Discriminant::classify(imm[0])? {
             Discriminant::New | Discriminant::Add | Discriminant::Sub => Self::new_tag(),
             Discriminant::Eq => TRUE_TAG,
         };
@@ -110,15 +106,15 @@ impl Precompile for Group {
 
     fn reduce(
         &self,
-        node: &Node,
+        imm: [Felt; 3],
+        payload: &NodePayload,
         witness: &mut WitnessBuilder<'_>,
     ) -> Result<Node, PrecompileError> {
-        let kind = Discriminant::classify(node.tag.imm[0]).ok_or(PrecompileError::InvalidNode)?;
-        if node.tag.id != Self::id() || node.tag.imm[1] != ZERO || node.tag.imm[2] != ZERO {
+        let NodePayload::Expression(p) = payload else {
             return Err(PrecompileError::InvalidNode);
-        }
-        let payload = node.expression_payload().ok_or(PrecompileError::InvalidNode)?;
-        let (h_lhs, h_rhs) = payload.binary_op_children();
+        };
+        let kind = Discriminant::classify(imm[0]).ok_or(PrecompileError::InvalidNode)?;
+        let (h_lhs, h_rhs) = p.binary_op_children();
 
         match kind {
             Discriminant::New => {

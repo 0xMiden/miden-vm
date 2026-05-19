@@ -5,7 +5,7 @@ mod common;
 
 use common::precompile::{group::Group, uint::Uint};
 use miden_core::deferred::{
-    DeferredState, Digest, Node, Payload, Precompile, PrecompileError, Precompiles,
+    DeferredState, Digest, Node, Payload, PrecompileError, PrecompileRegistry,
 };
 
 fn leaf(low: u64) -> Node {
@@ -16,28 +16,25 @@ fn leaf(low: u64) -> Node {
 }
 
 /// Two-precompile schema with `Uint`'s constants pre-registered.
-fn schema_and_state() -> (Precompiles, DeferredState) {
-    let schema = Precompiles::new([
-        Box::new(Uint) as Box<dyn Precompile>,
-        Box::new(Group) as Box<dyn Precompile>,
-    ])
-    .unwrap();
+fn schema_and_state() -> (PrecompileRegistry, DeferredState) {
+    let schema = PrecompileRegistry::default().with_precompile(Uint).with_precompile(Group);
     let mut state = DeferredState::new();
     schema.init(&mut state).unwrap();
     (schema, state)
 }
 
 /// Two-precompile schema without booting (some tests assert exact node counts).
-fn fresh() -> (Precompiles, DeferredState) {
-    let schema = Precompiles::new([
-        Box::new(Uint) as Box<dyn Precompile>,
-        Box::new(Group) as Box<dyn Precompile>,
-    ])
-    .unwrap();
+fn fresh() -> (PrecompileRegistry, DeferredState) {
+    let schema = PrecompileRegistry::default().with_precompile(Uint).with_precompile(Group);
     (schema, DeferredState::new())
 }
 
-fn register_group(schema: &Precompiles, state: &mut DeferredState, x: u64, y: u64) -> Digest {
+fn register_group(
+    schema: &PrecompileRegistry,
+    state: &mut DeferredState,
+    x: u64,
+    y: u64,
+) -> Digest {
     let h_x = state.register(schema, leaf(x)).unwrap();
     let h_y = state.register(schema, leaf(y)).unwrap();
     state.register(schema, Group::new_node(h_x, h_y)).unwrap()

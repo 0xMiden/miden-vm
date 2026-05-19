@@ -8,7 +8,7 @@
 //! the root to TRUE.
 //!
 //! The full subsystem — data model, in-memory [`DeferredState`], and the [`Precompile`] /
-//! [`Precompiles`] registry substrate — lives here in `miden-core`. The processor only
+//! [`PrecompileRegistry`] substrate — lives here in `miden-core`. The processor only
 //! contributes the system-event glue that bridges VM operand-stack reads to precompile calls.
 //! Reference precompiles that exercise this public surface live in `miden-core`'s integration
 //! tests (`core/tests/common/precompile/`), not on the crate's public surface.
@@ -21,8 +21,8 @@ pub use schema::{NodeType, PrecompileError, TagInfo};
 pub use state::{DeferredState, WitnessBuilder};
 pub use wire::{DeferredStateWire, IntegrityError, TRUE_INDEX, WireBody, WireEntry};
 
-// Multi-precompile registry layer. The `Precompile` trait + `Precompiles` substrate are the
-// public surface. Production precompiles (keccak256, sha512, ecdsa_k256_keccak, eddsa_ed25519)
+// Multi-precompile registry layer. The `Precompile` trait + `PrecompileRegistry` substrate are
+// the public surface. Production precompiles (keccak256, sha512, ecdsa_k256_keccak, eddsa_ed25519)
 // live in `miden-core-lib::precompiles`, next to their MASM wrappers; reference precompiles
 // live in `core/tests/common/precompile/`.
 mod precompile;
@@ -38,7 +38,7 @@ use alloc::sync::Arc;
 use miden_crypto::{ZERO, hash::poseidon2::Poseidon2};
 use miden_utils_sync::OnceLockCompat;
 pub use precompile::{Precompile, precompile_id};
-pub use precompile_schema::Precompiles;
+pub use precompile_schema::PrecompileRegistry;
 
 use crate::{
     Felt, Word,
@@ -52,8 +52,9 @@ pub type Digest = Word;
 /// felts.
 ///
 /// `id == ZERO` is reserved for the framework — it tags the canonical TRUE node and the AND
-/// (transcript-step) nodes. No [`Precompile`] may derive id `ZERO`; [`Precompiles::new`]
-/// rejects one that does. The `imm` felts are opaque to `miden-core` and the processor: each
+/// (transcript-step) nodes. No [`Precompile`] may derive id `ZERO`;
+/// [`PrecompileRegistry::with_precompile`] rejects one that does. The `imm` felts are opaque to
+/// `miden-core` and the processor: each
 /// precompile decodes whatever structure (discriminant, chunk length, …) it needs out of them.
 ///
 /// Laid out as `[id, imm0, imm1, imm2]` in the Poseidon2 capacity and on the wire — see
@@ -154,7 +155,7 @@ impl Payload {
 
 /// A DAG node identified by its [`Digest`].
 ///
-/// The tag is opaque at this layer — the [`Precompiles`] registry decodes it. The payload comes
+/// The tag is opaque at this layer — the [`PrecompileRegistry`] decodes it. The payload comes
 /// in two shapes ([`NodePayload`]):
 /// - `Expression(Payload)` — leaves, op-nodes, predicates, and AND-nodes. All carry an 8-felt
 ///   payload.

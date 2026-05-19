@@ -2,7 +2,7 @@
 //!
 //! Reads operand-stack inputs for `DeferredRegister`, `DeferredEvaluate` and
 //! `DeferredRegisterChunk` (see [`miden_core::events::sys_events`]) and dispatches into the
-//! installed [`miden_core::deferred::Precompiles`].
+//! installed [`miden_core::deferred::PrecompileRegistry`].
 
 use alloc::vec::Vec;
 
