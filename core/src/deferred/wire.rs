@@ -200,7 +200,9 @@ pub enum IntegrityError {
     #[error("wire contains a node whose payload shape disagrees with its tag's declared NodeType")]
     ShapeMismatch,
     /// An AND-chain step's `prev_root` references a digest not present in the wire entries —
-    /// the chain doesn't bottom out cleanly at [`super::TRUE_DIGEST`].
+    /// the chain doesn't bottom out cleanly at [`super::TRUE_DIGEST`]. In practice the
+    /// reachability gate ([`Self::DanglingNode`]) preempts this for hand-built wires (a missing
+    /// `prev_root` also strands entries); kept as a phase-2 backstop guarding the chain walk.
     #[error("AND-chain walk encountered a prev_root digest not present in the wire entries")]
     BrokenChain,
     /// An AND-chain step does not have `tag == TRUE_TAG` (corrupt transcript).
@@ -219,6 +221,11 @@ pub enum IntegrityError {
     /// A statement reduced successfully but its canonical is not the TRUE node.
     #[error("AND-chain statement reduced to a non-TRUE canonical form")]
     PredicateNotTrue,
+    /// The wire carries an entry that is not in the structural closure of the transcript root.
+    /// [`super::DeferredState::to_wire`] emits exactly that closure, so a faithful wire never
+    /// trips this; it rejects bloat / hidden-data entries in an adversarial wire.
+    #[error("wire contains an entry not reachable from the transcript root")]
+    DanglingNode,
 }
 
 #[cfg(test)]

@@ -1,4 +1,7 @@
-use alloc::{collections::BTreeMap, vec::Vec};
+use alloc::{
+    collections::{BTreeMap, BTreeSet},
+    vec::Vec,
+};
 
 use super::{
     DeferredError, DeferredStateWire, Digest, IntegrityError, Node, NodePayload, NodeType, Payload,
@@ -15,7 +18,11 @@ use super::{
 ///   `log_precompile`, which interns an AND-node `{tag: TRUE_TAG, payload: prev_root || stmnt}` and
 ///   updates the root pointer. Reducing root to TRUE is the verifier's single check.
 ///
-/// Ships as-is in `ExecutionProof`; the verifier consumes `(nodes, root)` directly.
+/// This in-memory form does **not** travel in the proof. [`Self::to_wire`] lowers it to the
+/// passive [`DeferredStateWire`] (index-encoded, root derived from the last entry); that wire is
+/// what ships, and the verifier reconstructs a validated `DeferredState` from it via
+/// [`Self::rehydrate`]. Untrusted bytes therefore only ever become a state through the
+/// schema-checked, chain-walked rehydrate path.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct DeferredState {
     nodes: BTreeMap<Digest, Node>,
@@ -255,6 +262,11 @@ impl DeferredState {
     ///   [`Node`] (translating `Binary` indices to the digests of earlier entries), `schema.decode`
     ///   the tag, and intern. Index bounds and chunk arities are validated; `payload_matches_type`
     ///   confirms the schema-declared [`NodeType`] is compatible with the in-memory shape.
+    /// - **Reachability:** between the phases, reject any interned entry that is not in the
+    ///   structural closure of the root ([`IntegrityError::DanglingNode`]). `to_wire` emits exactly
+    ///   that closure, so a faithful wire passes; this trims bloat / hidden-data entries an
+    ///   adversarial wire might smuggle in. Checked before phase 2 so it sees only the wire
+    ///   entries, not the canonical intermediates phase 2's re-evaluation re-mints.
     /// - **Phase 2 (semantic):** walk the AND-chain from `wire.root` down to
     ///   [`super::TRUE_DIGEST`], asserting each step has `tag == TRUE_TAG` and re-evaluating each
     ///   predicate statement via [`Self::evaluate`]. The walk surfaces tampered AND-payloads,
@@ -298,6 +310,14 @@ impl DeferredState {
         // prover's `self.root` puts the topmost AND-node at the end of `entries`, so its digest
         // is the chain's head. Empty entries → trivial-empty transcript (`TRUE_DIGEST`).
         state.root = digests.last().copied().unwrap_or(TRUE_DIGEST);
+
+        // Reachability — every interned entry must lie in the structural closure of `root`.
+        // `to_wire` emits exactly that closure (DFS post-order from root), so a faithful wire
+        // passes; an entry outside it is bloat or hidden data and is rejected. Done here, before
+        // phase 2's evaluate re-mints canonical intermediates into `state.nodes`.
+        if reachable_closure(&state.nodes, state.root).len() != state.nodes.len() {
+            return Err(IntegrityError::DanglingNode);
+        }
 
         // Phase 2 — chain walk + per-statement re-evaluation. AND-nodes share TRUE_TAG and a
         // `(prev_root, stmt_digest)` payload; statements must reduce to `true_node` under the
@@ -404,6 +424,33 @@ fn payload_matches_type(nt: NodeType, payload: &NodePayload) -> bool {
         (NodeType::Chunks(n), NodePayload::Chunk(chunks)) => chunks.len() == n as usize,
         _ => false,
     }
+}
+
+/// Digests structurally reachable from `root` in `nodes`, using the *same* heuristic as
+/// [`DeferredState::to_wire`]'s `dfs_post_order`: an Expression payload is treated as
+/// `(lhs, rhs)` child digests iff both resolve in `nodes` (or are [`TRUE_DIGEST`]). AND-chain
+/// links (`prev_root || stmt`) fall out of this since AND-nodes are Expression-bodied. Used by
+/// [`DeferredState::rehydrate`] to reject wire entries outside the root's closure.
+fn reachable_closure(nodes: &BTreeMap<Digest, Node>, root: Digest) -> BTreeSet<Digest> {
+    let mut seen = BTreeSet::new();
+    let mut stack = alloc::vec![root];
+    while let Some(d) = stack.pop() {
+        if d == TRUE_DIGEST || !seen.insert(d) {
+            continue;
+        }
+        let Some(node) = nodes.get(&d) else { continue };
+        if let Some(payload) = node.expression_payload() {
+            let (lhs, rhs) = payload.binary_op_children();
+            let lhs_ok = lhs == TRUE_DIGEST || nodes.contains_key(&lhs);
+            let rhs_ok = rhs == TRUE_DIGEST || nodes.contains_key(&rhs);
+            if lhs_ok && rhs_ok {
+                stack.push(lhs);
+                stack.push(rhs);
+            }
+        }
+    }
+    seen.remove(&TRUE_DIGEST);
+    seen
 }
 
 // REDUCTION DRIVER
@@ -877,9 +924,11 @@ mod tests {
     #[test]
     fn rehydrate_rejects_broken_chain() {
         // An AND-node whose `prev_root` references a digest not present in the wire entries.
-        // Hand-construct the wire so phase 1 succeeds (all entries hash correctly, indices are
-        // in range), but the chain walk in phase 2 steps to `prev_root` and finds it missing →
-        // `BrokenChain`.
+        // Because the structural heuristic only follows a node's `(lhs, rhs)` when *both*
+        // resolve, the missing `prev_root` makes the AND-node opaque, leaving `a`/`pred`
+        // outside the root's closure — so the reachability gate (before phase 2) rejects this
+        // with `DanglingNode`, preempting the phase-2 `BrokenChain` backstop. Both are valid
+        // rejections of the same malformed wire.
         //
         // Entries (DFS post-order):
         //   [0] leaf `a` = test_leaf(7)                              — Value
@@ -913,8 +962,56 @@ mod tests {
         };
         let err = DeferredState::rehydrate(&wire, &TestPrecompile);
         assert!(
-            matches!(err, Err(IntegrityError::BrokenChain)),
-            "expected BrokenChain, got {err:?}"
+            matches!(err, Err(IntegrityError::DanglingNode)),
+            "expected DanglingNode (reachability gate preempts BrokenChain), got {err:?}"
+        );
+    }
+
+    #[test]
+    fn rehydrate_rejects_dangling_entry() {
+        // A faithful chain (leaf a → eq(a, a) predicate → AND-node) plus an orphan leaf that
+        // nothing references. Phase 1 interns all four; the reachability check (before phase 2)
+        // finds the orphan outside the root's structural closure and rejects it.
+        //
+        // Entries:
+        //   [0] leaf a = test_leaf(7)            — Value
+        //   [1] orphan = test_leaf(99)           — Value (dangling: unreferenced)
+        //   [2] predicate eq(a, a)               — Binary { lhs: 0, rhs: 0 }
+        //   [3] AND { TRUE_TAG, (TRUE, pred) }   — Binary { lhs: TRUE_INDEX, rhs: 2 }
+        let a = test_leaf(7);
+        let a_payload = *a.expression_payload().expect("leaf is expression-bodied");
+        let orphan = test_leaf(99);
+        let orphan_payload = *orphan.expression_payload().expect("leaf is expression-bodied");
+        let pred =
+            Node::expression(TestPrecompile::eq_tag(), Payload::binary_op(a.digest(), a.digest()));
+
+        let wire = DeferredStateWire {
+            entries: alloc::vec![
+                crate::deferred::WireEntry {
+                    tag: a.tag,
+                    body: crate::deferred::WireBody::Value(a_payload),
+                },
+                crate::deferred::WireEntry {
+                    tag: orphan.tag,
+                    body: crate::deferred::WireBody::Value(orphan_payload),
+                },
+                crate::deferred::WireEntry {
+                    tag: pred.tag,
+                    body: crate::deferred::WireBody::Binary { lhs: 0, rhs: 0 },
+                },
+                crate::deferred::WireEntry {
+                    tag: TRUE_TAG,
+                    body: crate::deferred::WireBody::Binary {
+                        lhs: crate::deferred::TRUE_INDEX,
+                        rhs: 2,
+                    },
+                },
+            ],
+        };
+        let err = DeferredState::rehydrate(&wire, &TestPrecompile);
+        assert!(
+            matches!(err, Err(IntegrityError::DanglingNode)),
+            "expected DanglingNode, got {err:?}"
         );
     }
 }
