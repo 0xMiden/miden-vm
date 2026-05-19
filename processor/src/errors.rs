@@ -3,7 +3,7 @@
 
 use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 
-use miden_core::{deferred::SchemaError, program::MIN_STACK_DEPTH};
+use miden_core::{deferred::PrecompileError, program::MIN_STACK_DEPTH};
 use miden_debug_types::{SourceFile, SourceSpan};
 use miden_utils_diagnostics::{Diagnostic, miette};
 
@@ -64,7 +64,7 @@ pub enum ExecutionError {
         label: SourceSpan,
         #[source_code]
         source_file: Option<Arc<SourceFile>>,
-        err: SchemaError,
+        err: PrecompileError,
     },
     #[error("failed to execute the program for internal reason: {0}")]
     Internal(&'static str),

@@ -1,76 +1,68 @@
-//! The [`Schema`] trait — the entire semantic layer of the deferred-DAG subsystem.
+//! Vocabulary shared by the precompile layer: the [`PrecompileError`] type and the
+//! [`NodeType`] / [`TagInfo`] tag-signature pair.
 //!
 //! The processor maintains an opaque content-addressed store of nodes plus a single transcript
 //! root pointer. Everything else — what tags exist, how to decode them, how to evaluate — lives
-//! in a [`Schema`] impl that the user installs at processor construction. The processor itself
-//! does not interpret tag bytes; the schema is responsible for tag decoding and recursive
-//! evaluation.
-//!
-//! Composition is the user's job. Typically:
-//!
-//! ```ignore
-//! enum AppSchema { Field0(Field0), Curve(Curve), Hash(Hash) }
-//! impl Schema for AppSchema { /* delegate decode + reduce to the right variant */ }
-//! ```
+//! in the [`Precompile`](super::Precompile)s held by a [`Precompiles`](super::Precompiles)
+//! registry. The processor itself does not interpret tag bytes; the registry dispatches on
+//! [`Tag::id`](super::Tag) and each precompile decodes its own [`Tag::imm`](super::Tag) and
+//! drives recursive evaluation.
 
 use alloc::boxed::Box;
 
-use super::{Node, Tag, WitnessBuilder};
+use super::Tag;
 
-// SCHEMA ERROR
+// PRECOMPILE ERROR
 // ================================================================================================
 
-/// Errors returned by [`Schema`] implementations and the helpers that drive them.
+/// Errors returned by [`Precompile`](super::Precompile)s and the helpers that drive them.
 #[derive(Debug, thiserror::Error)]
-pub enum SchemaError {
-    /// No schema was installed on the processor; deferred events cannot be handled.
-    #[error("no deferred-DAG schema installed on the processor")]
-    NoSchemaInstalled,
-
+pub enum PrecompileError {
     /// A digest referenced by an op-node payload is not in the DAG.
     #[error("deferred DAG is missing a node referenced during evaluation")]
     MissingNode,
 
-    /// The node failed schema validation: the tag did not decode, or the constructed
-    /// payload variant disagrees with what `decode(tag)` returned.
-    #[error("node failed schema validation")]
+    /// The node failed validation: the tag did not decode, or the constructed payload variant
+    /// disagrees with what `decode(tag)` returned. Also covers a tag whose `id` matches no
+    /// registered precompile — including the empty registry, which rejects every tag.
+    #[error("node failed precompile validation")]
     InvalidNode,
 
     /// A predicate node's two operands evaluated to disagreeing canonical forms (or some other
-    /// schema-defined predicate-evaluation failure).
+    /// precompile-defined predicate-evaluation failure).
     #[error("deferred assertion failed: values disagree")]
     AssertionFailed,
 
-    /// A schema-defined error (typically wrapping the type-specific error of the user's
-    /// handler set).
+    /// A precompile-defined error (typically wrapping the type-specific error of the
+    /// precompile's reducer).
     #[error(transparent)]
     Other(#[from] super::DeferredError),
 
-    /// A precompile in a [`super::PrecompileSchema`] composite rejected a tag or failed to
-    /// reduce a node it owns. Wraps the underlying cause with the offending precompile's name
+    /// A precompile in a [`Precompiles`](super::Precompiles) registry rejected a tag or failed
+    /// to reduce a node it owns. Wraps the underlying cause with the offending precompile's name
     /// so dispatch failures are attributable.
     #[error("precompile `{name}`: {source}")]
     Precompile {
         name: &'static str,
-        source: Box<SchemaError>,
+        source: Box<PrecompileError>,
     },
 
-    /// A precompile's declared [`super::Precompile::id`] is inconsistent with the id derived
-    /// from its name. Composite construction-time programming error.
+    /// A precompile's declared [`Precompile::id`](super::Precompile::id) is inconsistent with
+    /// the id derived from its name. Registry construction-time programming error.
     #[error("precompile `{0}` declares an id inconsistent with its name derivation")]
     PrecompileIdMismatch(&'static str),
 
-    /// Two precompiles in a composite resolve to the same id.
-    #[error("duplicate precompile id in composite (`{0}` and `{1}`)")]
+    /// Two precompiles in a registry resolve to the same id.
+    #[error("duplicate precompile id in registry (`{0}` and `{1}`)")]
     DuplicatePrecompileId(&'static str, &'static str),
 }
 
-impl SchemaError {
-    /// Peel any [`SchemaError::Precompile`] wrappers and return the underlying cause. Useful in
-    /// `matches!` assertions that care about the root failure, not which precompile raised it.
-    pub fn root(&self) -> &SchemaError {
+impl PrecompileError {
+    /// Peel any [`PrecompileError::Precompile`] wrappers and return the underlying cause. Useful
+    /// in `matches!` assertions that care about the root failure, not which precompile raised it.
+    pub fn root(&self) -> &PrecompileError {
         match self {
-            SchemaError::Precompile { source, .. } => source.root(),
+            PrecompileError::Precompile { source, .. } => source.root(),
             other => other,
         }
     }
@@ -79,7 +71,8 @@ impl SchemaError {
 // NODE TYPE
 // ================================================================================================
 
-/// Structural classification of a node, returned by [`Schema::decode`].
+/// Structural classification of a node, returned by
+/// [`Precompile::decode`](super::Precompile::decode).
 ///
 /// Captures both the in-memory body shape (Expression vs Chunk) AND, for the Expression case,
 /// whether the 8 felts encode raw payload data or two child digests packed via
@@ -108,7 +101,7 @@ pub enum NodeType {
 /// Type signature of a tag: what shape its body takes and what tag its canonical form carries.
 ///
 /// - `evaluates_to == `[`super::TRUE_TAG`] marks the tag as a predicate — its `reduce` returns
-///   [`super::true_node`] on success and [`SchemaError::AssertionFailed`] on mismatch.
+///   [`super::true_node`] on success and [`PrecompileError::AssertionFailed`] on mismatch.
 /// - `evaluates_to == self_tag` marks the tag as self-evaluating (a canonical leaf).
 /// - Otherwise the tag describes an op whose canonical form bears the given tag.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -122,113 +115,5 @@ impl TagInfo {
     /// describes a predicate.
     pub fn is_predicate(&self) -> bool {
         self.evaluates_to == super::TRUE_TAG
-    }
-}
-
-// SCHEMA TRAIT
-// ================================================================================================
-
-/// The user-installed schema driving the deferred-DAG subsystem.
-///
-/// Two methods own the entire semantic surface:
-///
-/// - [`decode`](Self::decode) inspects the 4-felt tag and returns the node's role ([`NodeType`]).
-///   The tag alone fully determines this — payload is opaque to the schema at classification time.
-///   A schema chooses its own tag encoding (e.g. `[type_prefix, role_marker, length, …]`) and
-///   `decode` is the inverse.
-/// - [`reduce`](Self::reduce) reduces a node to its canonical form, using a [`WitnessBuilder`] to
-///   recursively reduce each child digest it references and (if needed) mint canonical auxiliary
-///   nodes whose digests appear in the returned canonical's payload. Schema-defined
-///   payload-validity checks (e.g. "leaf limbs must be u32-canonical") live inside `reduce` — they
-///   fire when the node is actually used, which keeps the trait surface to two methods.
-///
-/// `reduce` takes `&self` only — the schema is stateless from the driver's perspective. Any
-/// per-schema memoization that ever becomes necessary should live in [`super::DeferredState`]
-/// (or the verifier's witness-side equivalent) as a `digest → canonical` cache, since the
-/// speedup is keyed on input digests and benefits any schema.
-pub trait Schema: core::fmt::Debug + Send + Sync {
-    /// Decodes the tag to its type signature: structural [`NodeType`] and canonical-form tag.
-    ///
-    /// Returning `Err(SchemaError::InvalidNode)` rejects the tag entirely. Otherwise the
-    /// returned [`TagInfo`] tells the framework (1) how to parse this tag's body
-    /// ([`NodeType::Value`] for 8 raw felts, [`NodeType::Binary`] for two child digests packed
-    /// as `lhs_digest || rhs_digest`, [`NodeType::Chunks`] for `n` 8-felt chunks of bulk data),
-    /// and (2) what tag this node's canonical form will bear after `reduce` — used both for
-    /// the advice-push policy on evaluate (no push for predicates) and as a post-`reduce`
-    /// sanity check.
-    fn decode(&self, tag: Tag) -> Result<TagInfo, SchemaError>;
-
-    /// Reduces `node` to its canonical form. The schema picks the child digests off
-    /// `node.payload` and calls `witness.resolve(d)` on each to get the corresponding
-    /// canonical-form child node back. If the canonical form references *new* child digests (e.g.
-    /// a producing op on a compound-canonical precompile), the schema calls
-    /// `witness.intern(child)` to mint them.
-    ///
-    /// Output type must match `decode(node.tag).evaluates_to`:
-    /// - **Self-evaluating leaf** (`evaluates_to == node.tag`): the schema returns a clone of the
-    ///   node, optionally first validating the payload (e.g. limb canonicality).
-    /// - **Producing op** (`evaluates_to == some_canonical_tag`): the schema resolves its children
-    ///   and combines them, returning a new node with the canonical tag. Compound canonicals (those
-    ///   whose payload contains by-digest children) mint those children via `witness.intern`.
-    /// - **Predicate** (`evaluates_to == TRUE_TAG`): the schema resolves its operands, checks the
-    ///   predicate, and returns [`super::true_node`] on success or [`SchemaError::AssertionFailed`]
-    ///   on mismatch.
-    /// - **Chunk body**: typically reduces to a digest-leaf expression so chunk-as-child appears to
-    ///   parent ops as a normal expression after canonicalisation.
-    ///
-    /// `node` is borrowed (not consumed) so the framework can intern it by-move after this call
-    /// returns — saving a chunk-sized clone on every reduction.
-    fn reduce(&self, node: &Node, witness: &mut WitnessBuilder<'_>) -> Result<Node, SchemaError>;
-}
-
-// NOOP SCHEMA
-// ================================================================================================
-
-/// A schema that claims no tags.
-///
-/// Installed by default on every `miden_processor::FastProcessor`; any deferred event executed
-/// without first installing a real schema surfaces [`SchemaError::NoSchemaInstalled`] (via
-/// `decode` returning `Err`).
-#[derive(Debug, Default, Clone, Copy)]
-pub struct NoopSchema;
-
-impl Schema for NoopSchema {
-    fn decode(&self, _tag: Tag) -> Result<TagInfo, SchemaError> {
-        Err(SchemaError::NoSchemaInstalled)
-    }
-
-    fn reduce(&self, _node: &Node, _witness: &mut WitnessBuilder<'_>) -> Result<Node, SchemaError> {
-        Err(SchemaError::NoSchemaInstalled)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::{
-        Felt,
-        deferred::{DeferredState, Payload, Tag},
-    };
-
-    const TEST_TAG: Tag = [
-        Felt::new_unchecked(7),
-        Felt::new_unchecked(0),
-        Felt::new_unchecked(0),
-        Felt::new_unchecked(0),
-    ];
-
-    #[test]
-    fn noop_schema_rejects_everything() {
-        let schema = NoopSchema;
-        let payload = Payload::new([Felt::from_u32(0); 8]);
-        let node = Node::expression(TEST_TAG, payload);
-
-        assert!(matches!(schema.decode(node.tag), Err(SchemaError::NoSchemaInstalled)));
-        // `NoopSchema::reduce` rejects before it could ever touch the witness builder, so
-        // binding a throwaway state/schema here is sufficient — `resolve`/`intern` never run.
-        let mut state = DeferredState::new();
-        let mut witness = WitnessBuilder::new(&mut state, &schema);
-        let err = schema.reduce(&node, &mut witness).unwrap_err();
-        assert!(matches!(err, SchemaError::NoSchemaInstalled));
     }
 }

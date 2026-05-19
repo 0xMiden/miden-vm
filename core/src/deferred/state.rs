@@ -5,7 +5,7 @@ use alloc::{
 
 use super::{
     DeferredError, DeferredStateWire, Digest, IntegrityError, Node, NodePayload, NodeType, Payload,
-    Schema, SchemaError, TRUE_DIGEST, TRUE_TAG,
+    PrecompileError, Precompiles, TRUE_DIGEST, TRUE_TAG,
 };
 
 /// In-memory deferred-DAG state — the verifier's witness.
@@ -34,11 +34,11 @@ impl DeferredState {
         Self::default()
     }
 
-    /// Returns the node stored under `digest`, or [`SchemaError::MissingNode`] if no such node
-    /// has been registered. Returning a `Result` lets schema implementations propagate the
+    /// Returns the node stored under `digest`, or [`PrecompileError::MissingNode`] if no such
+    /// node has been registered. Returning a `Result` lets precompile reducers propagate the
     /// missing-node case with `?` instead of unwrapping an `Option`.
-    pub fn get(&self, digest: &Digest) -> Result<&Node, SchemaError> {
-        self.nodes.get(digest).ok_or(SchemaError::MissingNode)
+    pub fn get(&self, digest: &Digest) -> Result<&Node, PrecompileError> {
+        self.nodes.get(digest).ok_or(PrecompileError::MissingNode)
     }
 
     pub fn contains(&self, digest: &Digest) -> bool {
@@ -117,37 +117,41 @@ impl DeferredState {
         Ok(())
     }
 
-    /// Register an opaque node, asking `schema` to decode its tag.
+    /// Register an opaque node, asking `precompiles` to decode its tag.
     ///
     /// The node's payload variant must match `decode(tag).body`, otherwise
-    /// [`SchemaError::InvalidNode`] is surfaced. The node is interned into the DAG by its
+    /// [`PrecompileError::InvalidNode`] is surfaced. The node is interned into the DAG by its
     /// Poseidon2 digest. Re-registering an identical `(digest, node)` pair is silently
     /// idempotent.
     ///
     /// Predicates (tags whose `evaluates_to == TRUE_TAG`) are *not* verified at registration —
     /// register is a pure host hint that only populates the DAG. Verification is explicit:
     /// either host-side via [`Self::evaluate`], or constrained via `log_precompile`.
-    pub fn register(&mut self, schema: &dyn Schema, node: Node) -> Result<Digest, SchemaError> {
-        let info = schema.decode(node.tag)?;
+    pub fn register(
+        &mut self,
+        precompiles: &Precompiles,
+        node: Node,
+    ) -> Result<Digest, PrecompileError> {
+        let info = precompiles.decode(node.tag)?;
         if !payload_matches_type(info.node_type, &node.payload) {
-            return Err(SchemaError::InvalidNode);
+            return Err(PrecompileError::InvalidNode);
         }
         let digest = node.digest();
         self.nodes.insert(digest, node);
         Ok(digest)
     }
 
-    /// Evaluate an opaque node via the installed schema.
+    /// Evaluate an opaque node via the precompile registry.
     ///
-    /// Reduces to canonical form per `schema.reduce`. The input node and every canonical
+    /// Reduces to canonical form per `Precompiles::reduce`. The input node and every canonical
     /// intermediate produced during the walk are interned into `self.nodes`, so callers may
     /// invoke `evaluate` on a fresh op node without pre-registering it.
     ///
     /// For a predicate (`decode(tag).evaluates_to == TRUE_TAG`), success returns
-    /// [`super::true_node`] and a mismatch surfaces as [`SchemaError::AssertionFailed`].
+    /// [`super::true_node`] and a mismatch surfaces as [`PrecompileError::AssertionFailed`].
     ///
     /// Transitively-referenced child digests must resolve through the DAG — an unknown child
-    /// digest surfaces as [`SchemaError::MissingNode`]. The advice-stack contract is enforced
+    /// digest surfaces as [`PrecompileError::MissingNode`]. The advice-stack contract is enforced
     /// by the processor-side handler: for non-predicates the canonical 12 felts are pushed; for
     /// predicates (whose canonical is the TRUE node), nothing is pushed.
     ///
@@ -157,15 +161,19 @@ impl DeferredState {
     /// just the final answer. Missing any of these would leave a digest in the witness with no
     /// node defining it. The TRUE node is the one exception: it's a structural sentinel that the
     /// verifier accepts directly, so we don't waste DAG space on copies of it.
-    pub fn evaluate(&mut self, schema: &dyn Schema, node: Node) -> Result<Node, SchemaError> {
-        let info = schema.decode(node.tag)?;
+    pub fn evaluate(
+        &mut self,
+        precompiles: &Precompiles,
+        node: Node,
+    ) -> Result<Node, PrecompileError> {
+        let info = precompiles.decode(node.tag)?;
         if !payload_matches_type(info.node_type, &node.payload) {
-            return Err(SchemaError::InvalidNode);
+            return Err(PrecompileError::InvalidNode);
         }
         // Compute the input digest once at the entry; the resolver threads it through so the
         // post-reduce intern of the input doesn't hash it again.
         let digest = node.digest();
-        WitnessBuilder::new(self, schema).reduce_and_intern(node, digest)
+        WitnessBuilder::new(self, precompiles).reduce_and_intern(node, digest)
     }
 
     /// Serialize this state to its wire form. Walks reachable nodes from `root` in DFS
@@ -252,16 +260,17 @@ impl DeferredState {
         entries.push(super::WireEntry { tag: node.tag, body });
     }
 
-    /// Construct a verified [`DeferredState`] from a wire-format value under the installed
-    /// `schema`. Re-runs the prover's schema-validation, content-addressing, and AND-chain walk;
+    /// Construct a verified [`DeferredState`] from a wire-format value under the supplied
+    /// `precompiles`. Re-runs the prover's validation, content-addressing, and AND-chain walk;
     /// the returned state therefore satisfies the invariants documented at the top of this
     /// module.
     ///
     /// The two phases:
     /// - **Phase 1 (structural):** read each wire entry in order, reconstruct the digest-form
-    ///   [`Node`] (translating `Binary` indices to the digests of earlier entries), `schema.decode`
-    ///   the tag, and intern. Index bounds and chunk arities are validated; `payload_matches_type`
-    ///   confirms the schema-declared [`NodeType`] is compatible with the in-memory shape.
+    ///   [`Node`] (translating `Binary` indices to the digests of earlier entries),
+    ///   `precompiles.decode` the tag, and intern. Index bounds and chunk arities are validated;
+    ///   `payload_matches_type` confirms the decoded [`NodeType`] is compatible with the in-memory
+    ///   shape.
     /// - **Reachability:** between the phases, reject any interned entry that is not in the
     ///   structural closure of the root ([`IntegrityError::DanglingNode`]). `to_wire` emits exactly
     ///   that closure, so a faithful wire passes; this trims bloat / hidden-data entries an
@@ -273,7 +282,7 @@ impl DeferredState {
     ///   missing statements, non-predicate statements, and failed equalities.
     pub fn rehydrate(
         wire: &DeferredStateWire,
-        schema: &dyn Schema,
+        precompiles: &Precompiles,
     ) -> Result<Self, IntegrityError> {
         let mut state = Self::new();
         // Parallel to `wire.entries`: the recomputed digest at each index. `Binary` entries at
@@ -292,11 +301,11 @@ impl DeferredState {
                 },
             };
 
-            // Schema-validate. `decode_node_type` handles AND-nodes (framework-owned `TRUE_TAG`)
-            // without invoking the user schema, then defers to `schema.decode` for everything
+            // Validate. `decode_node_type` handles AND-nodes (framework-owned `TRUE_TAG`)
+            // without invoking a precompile, then defers to `precompiles.decode` for everything
             // else. `payload_matches_type` enforces the Expression-vs-Chunk distinction (and
             // chunk count for Chunks tags).
-            let node_type = decode_node_type(schema, &node)?;
+            let node_type = decode_node_type(precompiles, &node)?;
             if !payload_matches_type(node_type, &node.payload) {
                 return Err(IntegrityError::ShapeMismatch);
             }
@@ -321,7 +330,7 @@ impl DeferredState {
 
         // Phase 2 — chain walk + per-statement re-evaluation. AND-nodes share TRUE_TAG and a
         // `(prev_root, stmt_digest)` payload; statements must reduce to `true_node` under the
-        // schema. An interior AND-node whose `prev_root` doesn't resolve in `state.nodes` (and
+        // precompiles. An interior AND-node whose `prev_root` doesn't resolve in `state.nodes` (and
         // isn't `TRUE_DIGEST`) surfaces as `BrokenChain` — a tampered or corrupt transcript.
         let mut cur = state.root;
         while cur != TRUE_DIGEST {
@@ -335,7 +344,7 @@ impl DeferredState {
                 .binary_op_children();
             let stmt =
                 state.nodes.get(&stmt_digest).ok_or(IntegrityError::MissingStatement)?.clone();
-            let canonical = state.evaluate(schema, stmt)?;
+            let canonical = state.evaluate(precompiles, stmt)?;
             if !canonical.is_true_node() {
                 return Err(IntegrityError::PredicateNotTrue);
             }
@@ -399,13 +408,13 @@ fn resolve_index(idx: u32, current: usize, digests: &[Digest]) -> Result<Digest,
 }
 
 /// Decode a node's [`NodeType`] for `rehydrate`. Framework-owned `TRUE_TAG` AND-nodes are
-/// classified as `Binary` directly (user schemas don't claim that tag); everything else routes
-/// through `schema.decode`.
-fn decode_node_type(schema: &dyn Schema, node: &Node) -> Result<NodeType, IntegrityError> {
+/// classified as `Binary` directly (no precompile claims id `ZERO`); everything else routes
+/// through `precompiles.decode`.
+fn decode_node_type(precompiles: &Precompiles, node: &Node) -> Result<NodeType, IntegrityError> {
     if node.tag == TRUE_TAG {
         return Ok(NodeType::Binary);
     }
-    schema
+    precompiles
         .decode(node.tag)
         .map(|info| info.node_type)
         .map_err(|_| IntegrityError::UnknownTag)
@@ -456,15 +465,15 @@ fn reachable_closure(nodes: &BTreeMap<Digest, Node>, root: Digest) -> BTreeSet<D
 // WITNESS BUILDER
 // ================================================================================================
 
-/// Assembles the verifier's reduction witness while a [`Schema::reduce`] (or, via the composite,
-/// a [`crate::deferred::Precompile::reduce`]) runs.
+/// Assembles the verifier's reduction witness while a
+/// [`Precompile::reduce`](crate::deferred::Precompile::reduce) runs.
 ///
-/// A schema only supplies *per-node* semantics; it does not own the DAG. This handle is what
-/// threads the [`DeferredState`] and the installed [`Schema`] through that call — the schema by
-/// shared reference, the state by exclusive reference, bundled together so
-/// [`resolve`](Self::resolve) can recurse back through `Schema::reduce` without an aliasing-borrow
-/// problem. A schema's `reduce` therefore reads as a depth-first recursive function: "resolve lhs,
-/// resolve rhs, combine."
+/// A precompile only supplies *per-node* semantics; it does not own the DAG. This handle is what
+/// threads the [`DeferredState`] and the [`Precompiles`] registry through that call — the
+/// registry by shared reference, the state by exclusive reference, bundled together so
+/// [`resolve`](Self::resolve) can recurse back through `Precompiles::reduce` without an
+/// aliasing-borrow problem. A precompile's `reduce` therefore reads as a depth-first recursive
+/// function: "resolve lhs, resolve rhs, combine."
 ///
 /// The two capabilities, and why every touched node is recorded:
 ///
@@ -481,26 +490,26 @@ fn reachable_closure(nodes: &BTreeMap<Digest, Node>, root: Digest) -> BTreeSet<D
 ///
 /// There is exactly one of these: the prover builds the witness through it, and the verifier's
 /// [`DeferredState::rehydrate`] re-runs the identical path to re-establish it — so no trait
-/// abstraction over "kinds of builder" is warranted. Construction is crate-private; a schema
+/// abstraction over "kinds of builder" is warranted. Construction is crate-private; a precompile
 /// only ever receives a `&mut WitnessBuilder` from the framework and cannot fabricate one.
 pub struct WitnessBuilder<'a> {
     state: &'a mut DeferredState,
-    schema: &'a dyn Schema,
+    precompiles: &'a Precompiles,
 }
 
 impl<'a> WitnessBuilder<'a> {
-    /// Bind a state and schema into a witness builder. Crate-private; the public entry point is
-    /// [`DeferredState::evaluate`], which hands the resulting `&mut WitnessBuilder` to
-    /// `Schema::reduce`.
-    pub(crate) fn new(state: &'a mut DeferredState, schema: &'a dyn Schema) -> Self {
-        Self { state, schema }
+    /// Bind a state and the precompile registry into a witness builder. Crate-private; the
+    /// public entry point is [`DeferredState::evaluate`], which hands the resulting
+    /// `&mut WitnessBuilder` to `Precompiles::reduce`.
+    pub(crate) fn new(state: &'a mut DeferredState, precompiles: &'a Precompiles) -> Self {
+        Self { state, precompiles }
     }
 
-    /// Walk `digest` to its canonical form, recursively reducing it via the installed schema.
-    /// Errors with [`SchemaError::MissingNode`] if the digest is not in the DAG. Every node
+    /// Walk `digest` to its canonical form, recursively reducing it via the precompile registry.
+    /// Errors with [`PrecompileError::MissingNode`] if the digest is not in the DAG. Every node
     /// visited along the way is interned (the input and the canonical result) except the TRUE
     /// sentinel.
-    pub fn resolve(&mut self, digest: Digest) -> Result<Node, SchemaError> {
+    pub fn resolve(&mut self, digest: Digest) -> Result<Node, PrecompileError> {
         let child = self.state.get(&digest)?.clone();
         // Pass the known digest through so the post-reduce intern of `child` skips Poseidon2.
         self.reduce_and_intern(child, digest)
@@ -517,15 +526,15 @@ impl<'a> WitnessBuilder<'a> {
     /// (under the caller-supplied `input_digest`, no re-hash) and the canonical result — except
     /// the TRUE sentinel (which is a structural marker, not a load-bearing DAG node).
     ///
-    /// `node` is passed to `schema.reduce` by reference so we can intern it by-move afterwards,
-    /// avoiding a chunk-sized clone on every reduction.
+    /// `node` is passed to `Precompiles::reduce` by reference so we can intern it by-move
+    /// afterwards, avoiding a chunk-sized clone on every reduction.
     pub(crate) fn reduce_and_intern(
         &mut self,
         node: Node,
         input_digest: Digest,
-    ) -> Result<Node, SchemaError> {
-        let schema = self.schema;
-        let canonical = schema.reduce(&node, self)?;
+    ) -> Result<Node, PrecompileError> {
+        let precompiles = self.precompiles;
+        let canonical = precompiles.reduce(&node, self)?;
         self.state.intern_with_digest(input_digest, node);
         if !canonical.is_true_node() {
             self.state.intern(canonical.clone());
@@ -539,8 +548,13 @@ mod tests {
     use super::*;
     use crate::{
         Felt, Word, ZERO,
-        deferred::{Payload, TRUE_DIGEST, Tag, test_precompile::TestPrecompile},
+        deferred::{Payload, Precompiles, TRUE_DIGEST, Tag, test_precompile::TestPrecompile},
     };
+
+    /// The single-precompile registry every engine test runs against.
+    fn precompiles() -> Precompiles {
+        Precompiles::single(TestPrecompile).unwrap()
+    }
 
     fn test_leaf(low: u64) -> Node {
         let mut limbs = [0u32; 8];
@@ -564,7 +578,7 @@ mod tests {
     fn log_advances_root_with_and_node() {
         // Logging interns AND(prev_root, stmt) and sets root to its digest.
         let mut state = DeferredState::new();
-        let schema = TestPrecompile;
+        let schema = precompiles();
         let a = state.register(&schema, test_leaf(7)).unwrap();
         let pred = Node::expression(TestPrecompile::eq_tag(), Payload::binary_op(a, a));
         let stmt = state.evaluate(&schema, pred).unwrap();
@@ -600,13 +614,13 @@ mod tests {
     fn missing_node_get_returns_error() {
         let state = DeferredState::new();
         let err = state.get(&dummy_digest(1)).unwrap_err();
-        assert!(matches!(err, SchemaError::MissingNode));
+        assert!(matches!(err, PrecompileError::MissingNode));
     }
 
     #[test]
     fn register_leaf_stores_it() {
         let mut state = DeferredState::new();
-        let schema = TestPrecompile;
+        let schema = precompiles();
         let node = test_leaf(7);
         let digest = state.register(&schema, node.clone()).unwrap();
         assert_eq!(digest, node.digest());
@@ -616,7 +630,7 @@ mod tests {
     #[test]
     fn idempotent_reinsert_succeeds() {
         let mut state = DeferredState::new();
-        let schema = TestPrecompile;
+        let schema = precompiles();
         let node = test_leaf(7);
         let d1 = state.register(&schema, node.clone()).unwrap();
         let d2 = state.register(&schema, node).unwrap();
@@ -627,18 +641,21 @@ mod tests {
     #[test]
     fn register_with_unhandled_tag_errors() {
         let mut state = DeferredState::new();
-        let schema = TestPrecompile;
+        let schema = precompiles();
         // TestPrecompile id + unknown discriminant: schema decode returns Err.
-        let bad_tag: Tag = [TestPrecompile::id(), Felt::from_u32(99), ZERO, ZERO];
+        let bad_tag = Tag {
+            id: TestPrecompile::id(),
+            imm: [Felt::from_u32(99), ZERO, ZERO],
+        };
         let bad = Node::expression(bad_tag, Payload::new([Felt::from_u32(0); 8]));
         let err = state.register(&schema, bad);
-        assert!(matches!(err, Err(SchemaError::InvalidNode)));
+        assert!(matches!(err.unwrap_err().root(), PrecompileError::InvalidNode));
     }
 
     #[test]
     fn register_op_stores_op_node() {
         let mut state = DeferredState::new();
-        let schema = TestPrecompile;
+        let schema = precompiles();
         let a = state.register(&schema, test_leaf(3)).unwrap();
         let b = state.register(&schema, test_leaf(4)).unwrap();
         let op = Node::expression(TestPrecompile::add_tag(), Payload::binary_op(a, b));
@@ -652,7 +669,7 @@ mod tests {
         // node but does NOT drive reduce. Programs that want host-side verification call
         // `evaluate`; programs that want constrained verification call `log_precompile`.
         let mut state = DeferredState::new();
-        let schema = TestPrecompile;
+        let schema = precompiles();
         let a = state.register(&schema, test_leaf(3)).unwrap();
         let b = state.register(&schema, test_leaf(4)).unwrap();
         // A mismatched predicate — would fail if eagerly verified.
@@ -661,13 +678,13 @@ mod tests {
         assert!(state.contains(&bad_digest), "predicate interned even when it doesn't hold");
         // Verification surfaces the mismatch only when explicitly invoked.
         let err = state.evaluate(&schema, bad);
-        assert!(matches!(err, Err(SchemaError::AssertionFailed)));
+        assert!(matches!(err.unwrap_err().root(), PrecompileError::AssertionFailed));
     }
 
     #[test]
     fn evaluate_predicate_succeeds_returns_true_node() {
         let mut state = DeferredState::new();
-        let schema = TestPrecompile;
+        let schema = precompiles();
         let a = state.register(&schema, test_leaf(7)).unwrap();
         let assertion = Node::expression(TestPrecompile::eq_tag(), Payload::binary_op(a, a));
         let result = state.evaluate(&schema, assertion).unwrap();
@@ -677,30 +694,30 @@ mod tests {
     #[test]
     fn evaluate_predicate_mismatch_errors() {
         let mut state = DeferredState::new();
-        let schema = TestPrecompile;
+        let schema = precompiles();
         let a = state.register(&schema, test_leaf(3)).unwrap();
         let b = state.register(&schema, test_leaf(4)).unwrap();
         let mismatch = Node::expression(TestPrecompile::eq_tag(), Payload::binary_op(a, b));
         let err = state.evaluate(&schema, mismatch);
-        assert!(matches!(err, Err(SchemaError::AssertionFailed)));
+        assert!(matches!(err.unwrap_err().root(), PrecompileError::AssertionFailed));
     }
 
     #[test]
     fn evaluate_predicate_missing_node_errors() {
         let mut state = DeferredState::new();
-        let schema = TestPrecompile;
+        let schema = precompiles();
         let a = state.register(&schema, test_leaf(1)).unwrap();
         let dangling = Word::new([Felt::from_u32(0xdead); 4]);
         let assertion = Node::expression(TestPrecompile::eq_tag(), Payload::binary_op(a, dangling));
         let err = state.evaluate(&schema, assertion);
-        assert!(matches!(err, Err(SchemaError::MissingNode)));
+        assert!(matches!(err.unwrap_err().root(), PrecompileError::MissingNode));
     }
 
     #[test]
     fn nested_evaluation_reduces_through_op_tree() {
         // Build (a + b) * c, then verify equal to a pre-computed leaf via evaluate.
         let mut state = DeferredState::new();
-        let schema = TestPrecompile;
+        let schema = precompiles();
         let a = state.register(&schema, test_leaf(3)).unwrap();
         let b = state.register(&schema, test_leaf(4)).unwrap();
         let c = state.register(&schema, test_leaf(5)).unwrap();
@@ -730,7 +747,7 @@ mod tests {
         // *during* reduce but the WitnessBuilder skips it (sentinel, not load-bearing), so it
         // does not appear in the witness.
         let mut state = DeferredState::new();
-        let schema = TestPrecompile;
+        let schema = precompiles();
         let a = state.register(&schema, test_leaf(3)).unwrap();
         let b = state.register(&schema, test_leaf(4)).unwrap();
         let c = state.register(&schema, test_leaf(5)).unwrap();
@@ -767,7 +784,7 @@ mod tests {
         // leaf(7) and canonical(mul)=leaf(35) into state.nodes so the witness covers the
         // whole reduction proof, not just the final answer.
         let mut state = DeferredState::new();
-        let schema = TestPrecompile;
+        let schema = precompiles();
         let a = state.register(&schema, test_leaf(3)).unwrap();
         let b = state.register(&schema, test_leaf(4)).unwrap();
         let c = state.register(&schema, test_leaf(5)).unwrap();
@@ -791,7 +808,7 @@ mod tests {
         // is constructed on the fly and handed straight to `evaluate` — it must end up interned
         // so the witness can link canonical(mul) back to its op-node parent.
         let mut state = DeferredState::new();
-        let schema = TestPrecompile;
+        let schema = precompiles();
         let a = state.register(&schema, test_leaf(3)).unwrap();
         let b = state.register(&schema, test_leaf(4)).unwrap();
         let c = state.register(&schema, test_leaf(5)).unwrap();
@@ -817,7 +834,7 @@ mod tests {
     /// transcript step. Returns the populated state for round-trip tests.
     fn built_state_with_logged_predicate() -> DeferredState {
         let mut state = DeferredState::new();
-        let schema = TestPrecompile;
+        let schema = precompiles();
         let a = state.register(&schema, test_leaf(3)).unwrap();
         let b = state.register(&schema, test_leaf(4)).unwrap();
         let c = state.register(&schema, test_leaf(5)).unwrap();
@@ -848,7 +865,7 @@ mod tests {
     fn rehydrate_round_trips_simple_chain() {
         let original = built_state_with_logged_predicate();
         let wire = original.to_wire();
-        let rehydrated = DeferredState::rehydrate(&wire, &TestPrecompile).unwrap();
+        let rehydrated = DeferredState::rehydrate(&wire, &precompiles()).unwrap();
         assert_eq!(rehydrated.root(), original.root());
         // After rehydrate phase 2, additional canonical intermediates from the predicate's
         // re-evaluation may be present. So we only assert the root is preserved and the chain
@@ -859,7 +876,7 @@ mod tests {
     #[test]
     fn rehydrate_empty_state_succeeds() {
         let wire = DeferredStateWire::default();
-        let state = DeferredState::rehydrate(&wire, &TestPrecompile).unwrap();
+        let state = DeferredState::rehydrate(&wire, &precompiles()).unwrap();
         assert_eq!(state.root(), TRUE_DIGEST);
         assert!(state.nodes().is_empty());
     }
@@ -874,21 +891,24 @@ mod tests {
                 body: crate::deferred::WireBody::Binary { lhs: 0, rhs: 0 },
             }],
         };
-        let err = DeferredState::rehydrate(&wire, &TestPrecompile);
+        let err = DeferredState::rehydrate(&wire, &precompiles());
         assert!(matches!(err, Err(IntegrityError::BadIndex)));
     }
 
     #[test]
     fn rehydrate_rejects_unknown_tag() {
         // A tag the schema rejects — its id doesn't match TestPrecompile.
-        let bogus_tag: Tag = [Felt::new_unchecked(0xdead), ZERO, ZERO, ZERO];
+        let bogus_tag = Tag {
+            id: Felt::new_unchecked(0xdead),
+            imm: [ZERO; 3],
+        };
         let wire = DeferredStateWire {
             entries: alloc::vec![crate::deferred::WireEntry {
                 tag: bogus_tag,
                 body: crate::deferred::WireBody::Value(Payload::new([ZERO; 8])),
             }],
         };
-        let err = DeferredState::rehydrate(&wire, &TestPrecompile);
+        let err = DeferredState::rehydrate(&wire, &precompiles());
         assert!(matches!(err, Err(IntegrityError::UnknownTag)));
     }
 
@@ -897,7 +917,7 @@ mod tests {
         // Register an orphan that no one references; build a logged-predicate chain. The wire
         // must contain the chain's reachable closure but NOT the orphan.
         let mut state = DeferredState::new();
-        let schema = TestPrecompile;
+        let schema = precompiles();
         let _orphan = state.register(&schema, test_leaf(99)).unwrap();
         let a = state.register(&schema, test_leaf(7)).unwrap();
         let pred = Node::expression(TestPrecompile::eq_tag(), Payload::binary_op(a, a));
@@ -910,7 +930,7 @@ mod tests {
         let wire = state.to_wire();
         // Rehydrate and read back the digest set — the wire's bytes don't carry digests, but
         // rehydration recomputes them, so we exercise the round-trip identity here.
-        let rehydrated = DeferredState::rehydrate(&wire, &TestPrecompile).unwrap();
+        let rehydrated = DeferredState::rehydrate(&wire, &precompiles()).unwrap();
         let orphan_digest = test_leaf(99).digest();
         assert!(
             !rehydrated.contains(&orphan_digest),
@@ -928,7 +948,7 @@ mod tests {
         // canonical intermediates that the trim dropped).
         let original = built_state_with_logged_predicate();
         let wire = original.to_wire();
-        let rehydrated = DeferredState::rehydrate(&wire, &TestPrecompile).unwrap();
+        let rehydrated = DeferredState::rehydrate(&wire, &precompiles()).unwrap();
         assert_eq!(rehydrated.root(), original.root());
         assert_eq!(rehydrated.statements(), original.statements());
     }
@@ -938,7 +958,7 @@ mod tests {
         // Build a chain whose statement is `eq(leaf(3), leaf(4))` — disagreeing leaves.
         // Phase 2's evaluate returns AssertionFailed, surfaced as `PredicateFailed`.
         let mut state = DeferredState::new();
-        let schema = TestPrecompile;
+        let schema = precompiles();
         let a = state.register(&schema, test_leaf(3)).unwrap();
         let b = state.register(&schema, test_leaf(4)).unwrap();
         // Hand-roll a chain that points to a failing predicate without going through `log`'s
@@ -952,7 +972,7 @@ mod tests {
         state.root = and_digest;
 
         let wire = state.to_wire();
-        let err = DeferredState::rehydrate(&wire, &TestPrecompile);
+        let err = DeferredState::rehydrate(&wire, &precompiles());
         assert!(
             matches!(err, Err(IntegrityError::PredicateFailed(_))),
             "expected PredicateFailed, got {err:?}"
@@ -998,7 +1018,7 @@ mod tests {
                 },
             ],
         };
-        let err = DeferredState::rehydrate(&wire, &TestPrecompile);
+        let err = DeferredState::rehydrate(&wire, &precompiles());
         assert!(
             matches!(err, Err(IntegrityError::DanglingNode)),
             "expected DanglingNode (reachability gate preempts BrokenChain), got {err:?}"
@@ -1046,7 +1066,7 @@ mod tests {
                 },
             ],
         };
-        let err = DeferredState::rehydrate(&wire, &TestPrecompile);
+        let err = DeferredState::rehydrate(&wire, &precompiles());
         assert!(
             matches!(err, Err(IntegrityError::DanglingNode)),
             "expected DanglingNode, got {err:?}"

@@ -10,8 +10,8 @@
 use miden_core::{
     Felt, ZERO,
     deferred::{
-        Digest, Node, NodeType, Payload, Precompile, PrecompileTag, SchemaError, TRUE_TAG, Tag,
-        TagInfo, WitnessBuilder, precompile_id, true_node,
+        Digest, Node, NodeType, Payload, Precompile, PrecompileError, TRUE_TAG, Tag, TagInfo,
+        WitnessBuilder, precompile_id, true_node,
     },
 };
 
@@ -39,16 +39,28 @@ impl Group {
     }
 
     pub fn new_tag() -> Tag {
-        [Self::id(), Felt::from_u32(Self::NEW_TAG_ID), ZERO, ZERO]
+        Tag {
+            id: Self::id(),
+            imm: [Felt::from_u32(Self::NEW_TAG_ID), ZERO, ZERO],
+        }
     }
     pub fn add_tag() -> Tag {
-        [Self::id(), Felt::from_u32(Self::ADD_TAG_ID), ZERO, ZERO]
+        Tag {
+            id: Self::id(),
+            imm: [Felt::from_u32(Self::ADD_TAG_ID), ZERO, ZERO],
+        }
     }
     pub fn sub_tag() -> Tag {
-        [Self::id(), Felt::from_u32(Self::SUB_TAG_ID), ZERO, ZERO]
+        Tag {
+            id: Self::id(),
+            imm: [Felt::from_u32(Self::SUB_TAG_ID), ZERO, ZERO],
+        }
     }
     pub fn eq_tag() -> Tag {
-        [Self::id(), Felt::from_u32(Self::EQ_TAG_ID), ZERO, ZERO]
+        Tag {
+            id: Self::id(),
+            imm: [Felt::from_u32(Self::EQ_TAG_ID), ZERO, ZERO],
+        }
     }
 
     /// Build a `new` node referencing two field-leaf digests.
@@ -78,9 +90,9 @@ impl Precompile for Group {
         Self::id()
     }
 
-    fn decode(&self, sub: PrecompileTag) -> Option<TagInfo> {
-        let [disc, imm, reserved] = sub.0;
-        if imm != ZERO || reserved != ZERO {
+    fn decode(&self, imm: [Felt; 3]) -> Option<TagInfo> {
+        let [disc, immediate, reserved] = imm;
+        if immediate != ZERO || reserved != ZERO {
             return None;
         }
         // All Group nodes pack two child digests in their payload — `new` references the
@@ -96,12 +108,16 @@ impl Precompile for Group {
         })
     }
 
-    fn reduce(&self, node: &Node, witness: &mut WitnessBuilder<'_>) -> Result<Node, SchemaError> {
-        let kind = Discriminant::classify(node.tag[1]).ok_or(SchemaError::InvalidNode)?;
-        if node.tag[0] != Self::id() || node.tag[2] != ZERO || node.tag[3] != ZERO {
-            return Err(SchemaError::InvalidNode);
+    fn reduce(
+        &self,
+        node: &Node,
+        witness: &mut WitnessBuilder<'_>,
+    ) -> Result<Node, PrecompileError> {
+        let kind = Discriminant::classify(node.tag.imm[0]).ok_or(PrecompileError::InvalidNode)?;
+        if node.tag.id != Self::id() || node.tag.imm[1] != ZERO || node.tag.imm[2] != ZERO {
+            return Err(PrecompileError::InvalidNode);
         }
-        let payload = node.expression_payload().ok_or(SchemaError::InvalidNode)?;
+        let payload = node.expression_payload().ok_or(PrecompileError::InvalidNode)?;
         let (h_lhs, h_rhs) = payload.binary_op_children();
 
         match kind {
@@ -110,8 +126,8 @@ impl Precompile for Group {
                 // resolves to something that isn't a `Uint` field leaf.
                 let x_leaf = witness.resolve(h_lhs)?;
                 let y_leaf = witness.resolve(h_rhs)?;
-                Uint::limbs_of(&x_leaf).map_err(SchemaError::from)?;
-                Uint::limbs_of(&y_leaf).map_err(SchemaError::from)?;
+                Uint::limbs_of(&x_leaf).map_err(PrecompileError::from)?;
+                Uint::limbs_of(&y_leaf).map_err(PrecompileError::from)?;
                 Ok(Self::new_node(x_leaf.digest(), y_leaf.digest()))
             },
             Discriminant::Add | Discriminant::Sub => {
@@ -124,10 +140,10 @@ impl Precompile for Group {
                 let g2 = witness.resolve(h_rhs)?;
                 let (h_x1, h_y1) = new_coords(&g1)?;
                 let (h_x2, h_y2) = new_coords(&g2)?;
-                let x1 = Uint::limbs_of(&witness.resolve(h_x1)?).map_err(SchemaError::from)?;
-                let y1 = Uint::limbs_of(&witness.resolve(h_y1)?).map_err(SchemaError::from)?;
-                let x2 = Uint::limbs_of(&witness.resolve(h_x2)?).map_err(SchemaError::from)?;
-                let y2 = Uint::limbs_of(&witness.resolve(h_y2)?).map_err(SchemaError::from)?;
+                let x1 = Uint::limbs_of(&witness.resolve(h_x1)?).map_err(PrecompileError::from)?;
+                let y1 = Uint::limbs_of(&witness.resolve(h_y1)?).map_err(PrecompileError::from)?;
+                let x2 = Uint::limbs_of(&witness.resolve(h_x2)?).map_err(PrecompileError::from)?;
+                let y2 = Uint::limbs_of(&witness.resolve(h_y2)?).map_err(PrecompileError::from)?;
                 let (x3, y3) = match op {
                     BinaryOp::Add => (Uint::wrap_add(x1, x2), Uint::wrap_add(y1, y2)),
                     BinaryOp::Sub => (Uint::wrap_sub(x1, x2), Uint::wrap_sub(y1, y2)),
@@ -139,7 +155,7 @@ impl Precompile for Group {
             },
             Discriminant::Eq => {
                 if witness.resolve(h_lhs)? != witness.resolve(h_rhs)? {
-                    return Err(SchemaError::AssertionFailed);
+                    return Err(PrecompileError::AssertionFailed);
                 }
                 Ok(true_node())
             },
@@ -152,11 +168,11 @@ impl Precompile for Group {
 
 /// Extract the two field-leaf child digests from a canonical `new` node. Errors if `node`
 /// isn't tagged as `Group::new_tag()`.
-fn new_coords(node: &Node) -> Result<(Digest, Digest), SchemaError> {
+fn new_coords(node: &Node) -> Result<(Digest, Digest), PrecompileError> {
     if node.tag != Group::new_tag() {
-        return Err(SchemaError::InvalidNode);
+        return Err(PrecompileError::InvalidNode);
     }
-    let payload = node.expression_payload().ok_or(SchemaError::InvalidNode)?;
+    let payload = node.expression_payload().ok_or(PrecompileError::InvalidNode)?;
     Ok(payload.binary_op_children())
 }
 

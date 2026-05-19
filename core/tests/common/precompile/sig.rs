@@ -13,8 +13,8 @@ use std::sync::Arc;
 use miden_core::{
     Felt, ZERO,
     deferred::{
-        Node, NodePayload, NodeType, Precompile, PrecompileTag, SchemaError, TRUE_TAG, Tag,
-        TagInfo, WitnessBuilder, precompile_id, true_node,
+        Node, NodePayload, NodeType, Precompile, PrecompileError, TRUE_TAG, Tag, TagInfo,
+        WitnessBuilder, precompile_id, true_node,
     },
 };
 
@@ -39,7 +39,10 @@ impl Sig {
     }
 
     pub fn verify_tag() -> Tag {
-        [Self::id(), Felt::from_u32(Self::VERIFY_TAG_ID), ZERO, ZERO]
+        Tag {
+            id: Self::id(),
+            imm: [Felt::from_u32(Self::VERIFY_TAG_ID), ZERO, ZERO],
+        }
     }
 
     /// Build a `verify` predicate node from `SIG_CHUNKS` 8-felt chunks.
@@ -57,9 +60,9 @@ impl Precompile for Sig {
         Self::id()
     }
 
-    fn decode(&self, sub: PrecompileTag) -> Option<TagInfo> {
-        let [disc, imm, reserved] = sub.0;
-        if imm != ZERO || reserved != ZERO {
+    fn decode(&self, imm: [Felt; 3]) -> Option<TagInfo> {
+        let [disc, immediate, reserved] = imm;
+        if immediate != ZERO || reserved != ZERO {
             return None;
         }
         match Discriminant::classify(disc)? {
@@ -70,23 +73,27 @@ impl Precompile for Sig {
         }
     }
 
-    fn reduce(&self, node: &Node, _witness: &mut WitnessBuilder<'_>) -> Result<Node, SchemaError> {
+    fn reduce(
+        &self,
+        node: &Node,
+        _witness: &mut WitnessBuilder<'_>,
+    ) -> Result<Node, PrecompileError> {
         if node.tag != Self::verify_tag() {
-            return Err(SchemaError::InvalidNode);
+            return Err(PrecompileError::InvalidNode);
         }
         match &node.payload {
             NodePayload::Chunk(chunks) => {
                 if chunks.len() != Self::SIG_CHUNKS as usize {
-                    return Err(SchemaError::InvalidNode);
+                    return Err(PrecompileError::InvalidNode);
                 }
                 // Stub check: signature passes iff the first felt of the first chunk is non-zero.
                 // Stand-in for "this isn't a zeroed-out placeholder signature."
                 if chunks[0][0] == ZERO {
-                    return Err(SchemaError::AssertionFailed);
+                    return Err(PrecompileError::AssertionFailed);
                 }
                 Ok(true_node())
             },
-            NodePayload::Expression(_) => Err(SchemaError::InvalidNode),
+            NodePayload::Expression(_) => Err(PrecompileError::InvalidNode),
         }
     }
 }

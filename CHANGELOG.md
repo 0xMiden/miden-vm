@@ -7,7 +7,7 @@
 - Improved performances of auxiliary trace generation ([#3119](https://github.com/0xMiden/miden-vm/pull/3119)).
 - Aligned replay stack word access bounds with `StackInterface`, allowing the maximum valid start index for word reads and writes ([#3014](https://github.com/0xMiden/miden-vm/pull/3014)).
 - [BREAKING] Enabled `clippy::unnecessary_wraps` lint and removed all unnecessary `Option`/`Result` wrappings across the workspace ([#3143](https://github.com/0xMiden/miden-vm/pull/3143)).
-- Added the content-addressed deferred-DAG framework (`miden_core::deferred`): data model, `Schema` seam, wire format, `Precompile`/`PrecompileSchema`, the `adv.*_deferred` system events and MASM grammar, plus reference/composite test apps. Purely additive substrate with no behavioral change; the precompile proof-model migrates onto it in a follow-up ([#3170](https://github.com/0xMiden/miden-vm/pull/3170)).
+- Added the content-addressed deferred-DAG framework (`miden_core::deferred`): data model with a structured `Tag { id, imm }`, wire format, the `Precompile` trait + `Precompiles` registry, the `adv.*_deferred` system events and MASM grammar, plus reference test precompiles. Purely additive substrate with no behavioral change; the precompile proof-model migrates onto it in a follow-up ([#3170](https://github.com/0xMiden/miden-vm/pull/3170)).
 
 #### Fixes
 

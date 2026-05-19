@@ -2,13 +2,13 @@
 //!
 //! Reads operand-stack inputs for `DeferredRegister`, `DeferredEvaluate` and
 //! `DeferredRegisterChunk` (see [`miden_core::events::sys_events`]) and dispatches into the
-//! installed [`miden_core::deferred::Schema`].
+//! installed [`miden_core::deferred::Precompiles`].
 
 use alloc::vec::Vec;
 
 use miden_core::{
     Felt, Word, ZERO,
-    deferred::{Digest, Node, NodePayload, NodeType, Payload, SchemaError, TRUE_TAG, Tag},
+    deferred::{Digest, Node, NodePayload, NodeType, Payload, PrecompileError, TRUE_TAG, Tag},
 };
 
 use super::SystemEventError;
@@ -29,7 +29,7 @@ const DEFERRED_TAG_OFFSET: usize = 9;
 // STACK LAYOUT — `DeferredEvaluate`
 // ================================================================================================
 // `[event_id, NODE_DIGEST, ...]` — the node must already be registered in `DeferredState`; the
-// handler looks it up by digest and runs `schema.reduce` on it.
+// handler looks it up by digest and reduces it via the precompile registry.
 
 /// Stack offset of the node digest (4-felt word at positions 1..5).
 const DEFERRED_NODE_DIGEST_OFFSET: usize = 1;
@@ -37,7 +37,7 @@ const DEFERRED_NODE_DIGEST_OFFSET: usize = 1;
 // STACK LAYOUT — `DeferredRegisterChunk`
 // ================================================================================================
 // `[event_id, TAG, ptr, ...]` — no payload (`n` is decoded out of the tag, so the chunk's bulk
-// content size is fully determined by the schema's tag layout).
+// content size is fully determined by the precompile's tag layout).
 
 /// Stack offset of the chunk tag (4-felt word at positions 1..5).
 const CHUNK_TAG_OFFSET: usize = 1;
@@ -50,30 +50,30 @@ fn read_tag_and_payload(processor: &FastProcessor) -> (Tag, Payload) {
     let lo = processor.stack_get_word(DEFERRED_PAYLOAD_LO_OFFSET);
     let hi = processor.stack_get_word(DEFERRED_PAYLOAD_HI_OFFSET);
     let tag_word = processor.stack_get_word(DEFERRED_TAG_OFFSET);
-    let tag: Tag = [tag_word[0], tag_word[1], tag_word[2], tag_word[3]];
+    let tag = Tag::from_capacity([tag_word[0], tag_word[1], tag_word[2], tag_word[3]]);
     let payload = Payload::new([lo[0], lo[1], lo[2], lo[3], hi[0], hi[1], hi[2], hi[3]]);
     (tag, payload)
 }
 
 /// Builds an expression-bodied `Node` for the given `(tag, payload)`. Returns
-/// `SchemaError::InvalidNode` if the tag decodes to a chunk body — chunks must be registered via
-/// `adv.register_deferred_chunk`, not `adv.register_deferred`.
+/// `PrecompileError::InvalidNode` if the tag decodes to a chunk body — chunks must be registered
+/// via `adv.register_deferred_chunk`, not `adv.register_deferred`.
 fn build_standard_node(
     node_type: NodeType,
     tag: Tag,
     payload: Payload,
-) -> Result<Node, SchemaError> {
+) -> Result<Node, PrecompileError> {
     match node_type {
         // Both Value and Binary live in `NodePayload::Expression` at the in-memory level — the
-        // 8-felt payload is the same; the schema decides whether the bytes encode raw data
+        // 8-felt payload is the same; the precompile decides whether the bytes encode raw data
         // (Value) or two child digests (Binary) when it reduces.
         NodeType::Value | NodeType::Binary => Ok(Node::expression(tag, payload)),
-        NodeType::Chunks(_) => Err(SchemaError::InvalidNode),
+        NodeType::Chunks(_) => Err(PrecompileError::InvalidNode),
     }
 }
 
-/// Handles `SystemEvent::DeferredRegister`. Reads `(tag, payload)` off the operand stack, asks the
-/// schema to decode the tag, constructs the matching `Node`, and registers it.
+/// Handles `SystemEvent::DeferredRegister`. Reads `(tag, payload)` off the operand stack, asks
+/// the precompile registry to decode the tag, constructs the matching `Node`, and registers it.
 ///
 /// Pushes the registered node's digest onto the advice stack so MASM can chain it into
 /// downstream nodes (e.g. as a child digest of a Binary op) or into `log_precompile` without
@@ -82,17 +82,17 @@ pub(super) fn handle_deferred_register(
     processor: &mut FastProcessor,
 ) -> Result<(), SystemEventError> {
     let (tag, payload) = read_tag_and_payload(processor);
-    let (state, schema) = processor.deferred_view_mut();
-    let info = schema.decode(tag)?;
+    let (state, precompiles) = processor.deferred_view_mut();
+    let info = precompiles.decode(tag)?;
     let node = build_standard_node(info.node_type, tag, payload)?;
-    let digest = state.register(schema, node)?;
+    let digest = state.register(precompiles, node)?;
     processor.advice.push_stack_word(&digest)?;
     Ok(())
 }
 
 /// Handles `SystemEvent::DeferredEvaluate`. Reads a node digest off the operand stack, looks
-/// the node up in `DeferredState`, asks the schema to reduce it, and pushes the canonical onto
-/// the advice stack.
+/// the node up in `DeferredState`, reduces it via the precompile registry, and pushes the
+/// canonical onto the advice stack.
 ///
 /// The referenced node must already be interned — programs typically call
 /// `adv.register_deferred` / `adv.register_deferred_chunk` first to register the node and
@@ -100,7 +100,7 @@ pub(super) fn handle_deferred_register(
 ///
 /// Advice-stack contract, driven by `decode(tag).evaluates_to`:
 /// - **Predicates** (`evaluates_to == TRUE_TAG`): canonical is the TRUE node — nothing is pushed. A
-///   mismatch surfaces as `SchemaError::AssertionFailed`.
+///   mismatch surfaces as `PrecompileError::AssertionFailed`.
 /// - **Expression canonicals**: the 12 felts of the canonical `(payload, tag)` are pushed in
 ///   `[PAYLOAD_LO, PAYLOAD_HI, TAG]` order (top-down). MASM recovers each word with `adv_pushw`.
 /// - **Chunk canonicals** (e.g. self-evaluating chunk leaves like a 16-felt digest): all `n` chunks
@@ -113,10 +113,10 @@ pub(super) fn handle_deferred_evaluate(
     let digest: Digest =
         Word::new([digest_word[0], digest_word[1], digest_word[2], digest_word[3]]);
 
-    let (state, schema) = processor.deferred_view_mut();
+    let (state, precompiles) = processor.deferred_view_mut();
     let node = state.get(&digest)?.clone();
-    let info = schema.decode(node.tag)?;
-    let canonical = state.evaluate(schema, node)?;
+    let info = precompiles.decode(node.tag)?;
+    let canonical = state.evaluate(precompiles, node)?;
 
     // Predicates reduce to the TRUE node — by contract the advice stack is untouched.
     if info.evaluates_to == TRUE_TAG {
@@ -124,7 +124,7 @@ pub(super) fn handle_deferred_evaluate(
     }
 
     // Push canonical body: TAG deepest, then payload words so the natural-order word is on top.
-    processor.advice.push_stack_word(&Word::new(canonical.tag))?;
+    processor.advice.push_stack_word(&Word::new(canonical.tag.as_capacity()))?;
     match &canonical.payload {
         NodePayload::Expression(p) => {
             let hi = Word::new([p.0[4], p.0[5], p.0[6], p.0[7]]);
@@ -146,8 +146,8 @@ pub(super) fn handle_deferred_evaluate(
 }
 
 /// Handles `SystemEvent::DeferredRegisterChunk`. Reads `(tag, ptr)` off the operand stack, asks
-/// the schema to decode `n` from the tag, reads `8n` felts from memory at `ptr`, and registers a
-/// chunk node carrying that bulk data.
+/// the precompile registry to decode `n` from the tag, reads `8n` felts from memory at `ptr`,
+/// and registers a chunk node carrying that bulk data.
 ///
 /// Pushes the registered node's digest onto the advice stack so MASM can chain it into
 /// downstream nodes or into `log_precompile` without having to recompute the chunk-linear-hash
@@ -163,16 +163,18 @@ pub(super) fn handle_deferred_register_chunk(
     processor: &mut FastProcessor,
 ) -> Result<(), SystemEventError> {
     let tag_word = processor.stack_get_word(CHUNK_TAG_OFFSET);
-    let tag: Tag = [tag_word[0], tag_word[1], tag_word[2], tag_word[3]];
+    let tag = Tag::from_capacity([tag_word[0], tag_word[1], tag_word[2], tag_word[3]]);
     let ptr = processor.stack_get(CHUNK_PTR_OFFSET).as_canonical_u64();
 
-    // Decode `n` from the tag before any memory reads — the schema is the source of truth for
-    // chunk length, and reading otherwise would let a malformed tag waste work.
+    // Decode `n` from the tag before any memory reads — the precompile is the source of truth
+    // for chunk length, and reading otherwise would let a malformed tag waste work.
     let n = {
-        let (_state, schema) = processor.deferred_view_mut();
-        match schema.decode(tag)?.node_type {
+        let (_state, precompiles) = processor.deferred_view_mut();
+        match precompiles.decode(tag)?.node_type {
             NodeType::Chunks(n) => n,
-            NodeType::Value | NodeType::Binary => return Err(SchemaError::InvalidNode.into()),
+            NodeType::Value | NodeType::Binary => {
+                return Err(PrecompileError::InvalidNode.into());
+            },
         }
     };
 
@@ -211,8 +213,8 @@ pub(super) fn handle_deferred_register_chunk(
         chunks.push(chunk);
     }
 
-    let (state, schema) = processor.deferred_view_mut();
-    let digest = state.register(schema, Node::chunk(tag, chunks))?;
+    let (state, precompiles) = processor.deferred_view_mut();
+    let digest = state.register(precompiles, Node::chunk(tag, chunks))?;
     processor.advice.push_stack_word(&digest)?;
     Ok(())
 }

@@ -1,16 +1,16 @@
 //! `Uint` — 256-bit wrapping integer arithmetic as a first reference precompile.
 //!
 //! Semantics: operations are mod 2^256, limbs are u32 little-endian. Tags route through
-//! [`PrecompileSchema`] by id; a `sub` op joins `add`/`mul`, and the precompile pre-registers
+//! [`Precompiles`] by id; a `sub` op joins `add`/`mul`, and the precompile pre-registers
 //! `ZERO` / `ONE` / `P_MINUS_1` (`[u32::MAX; 8]`) leaves via [`Precompile::init`].
 //!
-//! [`PrecompileSchema`]: miden_core::deferred::PrecompileSchema
+//! [`Precompiles`]: miden_core::deferred::Precompiles
 
 use miden_core::{
     Felt, ZERO,
     deferred::{
-        DeferredError, Digest, Node, NodeType, Payload, Precompile, PrecompileTag, Schema,
-        SchemaError, TRUE_TAG, Tag, TagInfo, WitnessBuilder, precompile_id, true_node,
+        DeferredError, Digest, Node, NodeType, Payload, Precompile, PrecompileError, TRUE_TAG, Tag,
+        TagInfo, WitnessBuilder, precompile_id, true_node,
     },
 };
 
@@ -39,23 +39,38 @@ impl Uint {
 
     /// Tag for a canonical Uint leaf.
     pub fn leaf_tag() -> Tag {
-        [Self::id(), Felt::from_u32(Self::LEAF_TAG_ID), ZERO, ZERO]
+        Tag {
+            id: Self::id(),
+            imm: [Felt::from_u32(Self::LEAF_TAG_ID), ZERO, ZERO],
+        }
     }
     /// Tag for an `add` op node.
     pub fn add_tag() -> Tag {
-        [Self::id(), Felt::from_u32(Self::ADD_TAG_ID), ZERO, ZERO]
+        Tag {
+            id: Self::id(),
+            imm: [Felt::from_u32(Self::ADD_TAG_ID), ZERO, ZERO],
+        }
     }
     /// Tag for a `sub` op node.
     pub fn sub_tag() -> Tag {
-        [Self::id(), Felt::from_u32(Self::SUB_TAG_ID), ZERO, ZERO]
+        Tag {
+            id: Self::id(),
+            imm: [Felt::from_u32(Self::SUB_TAG_ID), ZERO, ZERO],
+        }
     }
     /// Tag for a `mul` op node.
     pub fn mul_tag() -> Tag {
-        [Self::id(), Felt::from_u32(Self::MUL_TAG_ID), ZERO, ZERO]
+        Tag {
+            id: Self::id(),
+            imm: [Felt::from_u32(Self::MUL_TAG_ID), ZERO, ZERO],
+        }
     }
     /// Tag for an equality predicate.
     pub fn eq_tag() -> Tag {
-        [Self::id(), Felt::from_u32(Self::EQ_TAG_ID), ZERO, ZERO]
+        Tag {
+            id: Self::id(),
+            imm: [Felt::from_u32(Self::EQ_TAG_ID), ZERO, ZERO],
+        }
     }
 
     /// Build a canonical leaf node from u32 limbs (little-endian).
@@ -128,9 +143,9 @@ impl Precompile for Uint {
         vec![Self::leaf_node([0; 8]), Self::leaf_node(one), Self::leaf_node([u32::MAX; 8])]
     }
 
-    fn decode(&self, sub: PrecompileTag) -> Option<TagInfo> {
-        let [disc, imm, reserved] = sub.0;
-        if imm != ZERO || reserved != ZERO {
+    fn decode(&self, imm: [Felt; 3]) -> Option<TagInfo> {
+        let [disc, immediate, reserved] = imm;
+        if immediate != ZERO || reserved != ZERO {
             return None;
         }
         let kind = Discriminant::classify(disc)?;
@@ -147,7 +162,11 @@ impl Precompile for Uint {
         Some(TagInfo { node_type, evaluates_to })
     }
 
-    fn reduce(&self, node: &Node, witness: &mut WitnessBuilder<'_>) -> Result<Node, SchemaError> {
+    fn reduce(
+        &self,
+        node: &Node,
+        witness: &mut WitnessBuilder<'_>,
+    ) -> Result<Node, PrecompileError> {
         match UintNode::parse(node)? {
             // Leaf canonicality is checked at parse-time, deferred from register-time so that
             // malformed leaves are interned silently and only error out when used.
@@ -159,30 +178,11 @@ impl Precompile for Uint {
             },
             UintNode::Eq { lhs, rhs } => {
                 if witness.resolve(lhs)? != witness.resolve(rhs)? {
-                    return Err(SchemaError::AssertionFailed);
+                    return Err(PrecompileError::AssertionFailed);
                 }
                 Ok(true_node())
             },
         }
-    }
-}
-
-// Convenience: let callers use `Uint` directly as a single-precompile `Schema` in places where they
-// don't need the composite. Equivalent to `PrecompileSchema::single(Uint)`, just cheaper.
-impl Schema for Uint {
-    fn decode(&self, tag: Tag) -> Result<TagInfo, SchemaError> {
-        if tag[0] != Self::id() {
-            return Err(SchemaError::InvalidNode);
-        }
-        Precompile::decode(self, PrecompileTag([tag[1], tag[2], tag[3]]))
-            .ok_or(SchemaError::InvalidNode)
-    }
-
-    fn reduce(&self, node: &Node, witness: &mut WitnessBuilder<'_>) -> Result<Node, SchemaError> {
-        if node.tag[0] != Self::id() {
-            return Err(SchemaError::InvalidNode);
-        }
-        Precompile::reduce(self, node, witness)
     }
 }
 
@@ -235,12 +235,12 @@ enum UintNode {
 }
 
 impl UintNode {
-    fn parse(node: &Node) -> Result<Self, SchemaError> {
+    fn parse(node: &Node) -> Result<Self, PrecompileError> {
         let tag = node.tag;
-        if tag[0] != Uint::id() || tag[2] != ZERO || tag[3] != ZERO {
-            return Err(SchemaError::InvalidNode);
+        if tag.id != Uint::id() || tag.imm[1] != ZERO || tag.imm[2] != ZERO {
+            return Err(PrecompileError::InvalidNode);
         }
-        let kind = Discriminant::classify(tag[1]).ok_or(SchemaError::InvalidNode)?;
+        let kind = Discriminant::classify(tag.imm[0]).ok_or(PrecompileError::InvalidNode)?;
         let payload = node.expression_payload().ok_or(DeferredError::InvalidPayload)?;
         Ok(match kind {
             Discriminant::Leaf => {
