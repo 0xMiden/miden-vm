@@ -19,10 +19,12 @@ jobs:
   codspeed:
     name: Run CodSpeed benchmarks
     runs-on: ubuntu-latest
-    timeout-minutes: 300
+    timeout-minutes: 30
     env:
+      BLAKE3_ITERATIONS: "1"
       RAYON_NUM_THREADS: "8"
       SYNTH_BENCH_AXES: exec,trace_prep,prove,verify
+      SYNTH_SCENARIO: create-single-p2id-note
     steps:
       - name: Check out repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1

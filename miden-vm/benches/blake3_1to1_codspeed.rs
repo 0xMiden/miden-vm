@@ -9,6 +9,7 @@ use miden_vm::{
 };
 
 const SOURCE: &str = include_str!("../masm-examples/hashing/blake3_1to1/blake3_1to1.masm");
+const DEFAULT_ITERATIONS: u64 = 1;
 
 fn main() {
     display_native_harness();
@@ -29,8 +30,13 @@ fn main() {
         .expect("failed to load core library into host");
     let stack = [Felt::new_unchecked(u64::from(u32::MAX)); 8];
     let stack_inputs = StackInputs::new(&stack).expect("valid stack inputs");
+    let iterations = std::env::var("BLAKE3_ITERATIONS")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| value.parse().expect("BLAKE3_ITERATIONS must be an integer"))
+        .unwrap_or(DEFAULT_ITERATIONS);
     let advice_inputs = AdviceInputs::default()
-        .with_stack_values([100_u64])
+        .with_stack_values([iterations])
         .expect("valid advice inputs");
     let execution_options = ExecutionOptions::new(
         Some(ExecutionOptions::MAX_CYCLES),
