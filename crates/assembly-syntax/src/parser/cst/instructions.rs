@@ -1199,7 +1199,7 @@ fn lower_stack_index_instruction(
     spec: &StackIndexSpec,
 ) -> Result<Option<Vec<ast::Op>>, ParsingError> {
     let immediate_span = context.parse().span_for_token(token);
-    let Some(index) = lower_decimal_u8_literal(token)? else {
+    let Some(index) = lower_decimal_u8_literal(token) else {
         return Ok(None);
     };
     let Some(instruction) = spec.instruction(index) else {
@@ -2043,7 +2043,7 @@ fn lower_push_mapvaln(
     token: &SyntaxToken,
 ) -> Result<Option<Vec<ast::Op>>, ParsingError> {
     let immediate_span = context.parse().span_for_token(token);
-    let Some(padding) = lower_decimal_u8_literal(token)? else {
+    let Some(padding) = lower_decimal_u8_literal(token) else {
         return Ok(None);
     };
     let event = match padding {
@@ -2109,7 +2109,7 @@ fn lower_u16_immediate(
             Ok(Some(Immediate::Constant(context.lower_constant_ident_token(token)?)))
         },
         SyntaxKind::Number => {
-            let Some(value) = lower_decimal_u64_literal(token)? else {
+            let Some(value) = lower_decimal_u64_literal(token) else {
                 return Ok(None);
             };
             let Ok(value) = u16::try_from(value) else {
@@ -2134,7 +2134,7 @@ fn lower_shift32_immediate(
             Ok(Some(Immediate::Constant(context.lower_constant_ident_token(token)?)))
         },
         SyntaxKind::Number => {
-            let Some(value) = lower_decimal_u64_literal(token)? else {
+            let Some(value) = lower_decimal_u64_literal(token) else {
                 return Ok(None);
             };
             let Ok(value) = u8::try_from(value) else {
@@ -2150,11 +2150,9 @@ fn lower_shift32_immediate(
 }
 
 /// Parses a decimal `u8` literal token without accepting non-decimal spellings.
-fn lower_decimal_u8_literal(token: &SyntaxToken) -> Result<Option<u8>, ParsingError> {
-    let Some(value) = lower_decimal_u64_literal(token)? else {
-        return Ok(None);
-    };
-    Ok(u8::try_from(value).ok())
+fn lower_decimal_u8_literal(token: &SyntaxToken) -> Option<u8> {
+    let value = lower_decimal_u64_literal(token)?;
+    u8::try_from(value).ok()
 }
 
 /// Returns the suffix subspan of a token span, used for diagnostics like `exp.u65 -> 65`.
@@ -2163,11 +2161,11 @@ fn token_suffix_span(span: SourceSpan, prefix_len: u32) -> SourceSpan {
 }
 
 /// Parses a decimal `u64` from a number token if the token is decimal-shaped.
-fn lower_decimal_u64_literal(token: &SyntaxToken) -> Result<Option<u64>, ParsingError> {
+fn lower_decimal_u64_literal(token: &SyntaxToken) -> Option<u64> {
     if token.kind() != SyntaxKind::Number {
-        return Ok(None);
+        return None;
     }
-    Ok(parse_decimal_u64(token.text()))
+    parse_decimal_u64(token.text())
 }
 
 /// Wraps an instruction in an AST op at `span`.

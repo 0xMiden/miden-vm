@@ -597,12 +597,10 @@ mod tests {
         LookupOpFlags::from_main_cols(&row.decoder, &row.stack, &row_next.decoder)
     }
 
-    type FlagGetter = fn(&LookupOpFlags<Felt>) -> Felt;
-    type FlagCase = (&'static str, u8, FlagGetter);
-
     #[test]
     fn boolean_row_matches_polynomial_for_chiplet_request_ops() {
-        let cases: [FlagCase; 26] = [
+        type FlagAccessor = fn(&LookupOpFlags<Felt>) -> Felt;
+        let cases: [(&str, u8, FlagAccessor); 26] = [
             ("join", opcodes::JOIN, LookupOpFlags::<Felt>::join),
             ("split", opcodes::SPLIT, LookupOpFlags::<Felt>::split),
             ("loop", opcodes::LOOP, LookupOpFlags::<Felt>::loop_op),

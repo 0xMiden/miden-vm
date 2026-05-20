@@ -356,6 +356,8 @@ fn test_mod_12289_rejects_forged_remainder_zero(#[case] a_hi: u64, #[case] a_lo:
     const M_INV: u64 = 15010777177727684609;
 
     // Malicious event handler that always returns remainder = 0.
+    // Signature matches the event-handler callback contract.
+    #[allow(clippy::unnecessary_wraps)]
     fn malicious_falcon_div(process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
         let a_hi = process.get_stack_item(1).as_canonical_u64();
         let a_lo = process.get_stack_item(2).as_canonical_u64();
@@ -412,6 +414,7 @@ fn test_mod_12289_rejects_forged_addition_overflow() {
     const FORGED_R: u64 = 5_664;
 
     // Malicious event handler that forges q/r to trigger the addition-overflow assertion.
+    #[allow(clippy::unnecessary_wraps)]
     fn malicious_falcon_div(_process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
         let q_hi = Felt::new_unchecked(FORGED_Q >> 32);
         let q_lo = Felt::new_unchecked(FORGED_Q & 0xffff_ffff);
@@ -452,6 +455,7 @@ fn test_mod_12289_rejects_non_u32_remainder_advice() {
     const FALCON_DIV: EventName =
         EventName::new("miden::core::crypto::dsa::falcon512_poseidon2::falcon_div");
 
+    #[allow(clippy::unnecessary_wraps)]
     fn malicious_falcon_div(process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
         let a_hi = process.get_stack_item(1).as_canonical_u64();
         let a_lo = process.get_stack_item(2).as_canonical_u64();
