@@ -257,7 +257,6 @@ $$
 \begin{align*}
     \alpha^2 &= (\alpha^2_0, \alpha^2_1) = (\alpha_0^2 + 7 \alpha_1^2, 2 \alpha_0 \alpha_1) \\
     \alpha^3 &= (\alpha^3_0, \alpha^3_1) = (\alpha_0^3 + 21 \alpha_0 \alpha_1^2, 3 \alpha_0^2 \alpha_1 + 7 \alpha_1^3) \\
-    \\
     \mathsf{tmp0}_0 &= \mathsf{acc}_0 \cdot \alpha^2_0 + \mathsf{acc}_1 \cdot (7 \alpha^2_1) + c_0 \alpha_0 + c_1 \\
     \mathsf{tmp0}_1 &= \mathsf{acc}_0 \cdot \alpha^2_1 + \mathsf{acc}_1 \cdot \alpha^2_0 + c_0 \alpha_1 \\
     \\
@@ -325,7 +324,6 @@ Here $\alpha = (\alpha_0, \alpha_1)$ is an element of $\mathbb{F}_{p^2}$ with $u
 $$
 \begin{align*}
 \alpha^2 &= (\alpha^2_0, \alpha^2_1) = (\alpha_0^2 + 7 \alpha_1^2, 2 \alpha_0 \alpha_1) \\
-\\
 \mathsf{tmp}_0 &= \mathsf{acc}_0 \cdot \alpha^2_0 + \mathsf{acc}_1 \cdot (7 \alpha^2_1)
     + c_{0,0} \alpha_0 + 7 c_{0,1} \alpha_1 + c_{1,0} \\
 \mathsf{tmp}_1 &= \mathsf{acc}_0 \cdot \alpha^2_1 + \mathsf{acc}_1 \cdot \alpha^2_0
