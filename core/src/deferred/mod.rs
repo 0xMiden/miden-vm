@@ -228,7 +228,9 @@ impl Node {
     /// expression and assertion nodes, the 8-felt payload fills the rate and a single permutation
     /// produces the digest. For chunk nodes, each 8-felt chunk overwrites the rate and the
     /// permutation iterates `n` times (linear hash); the empty `n == 0` case still applies one
-    /// permutation so the digest binds the tag.
+    /// permutation so the digest binds the tag. The in-circuit chunk verifier (when added) must
+    /// mirror this — including the one-permutation rule for `n == 0`, which is unusual for a
+    /// "linear hash of zero elements" but matches what `Node::digest` computes here.
     ///
     /// For `n == 1` the chunk digest is byte-identical to the equivalent Expression digest with
     /// the same tag and payload.
