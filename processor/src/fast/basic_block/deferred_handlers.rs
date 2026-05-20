@@ -8,7 +8,7 @@ use alloc::vec::Vec;
 
 use miden_core::{
     Felt, Word, ZERO,
-    deferred::{Digest, Node, NodeType, Payload, PrecompileError, TRUE_TAG, Tag},
+    deferred::{Digest, Node, NodeType, Payload, PrecompileError, Tag},
 };
 
 use super::SystemEventError;
@@ -83,8 +83,8 @@ pub(super) fn handle_deferred_register(
 ) -> Result<(), SystemEventError> {
     let (tag, payload) = read_tag_and_payload(processor);
     let (state, precompiles) = processor.deferred_view_mut();
-    let info = precompiles.decode(tag)?;
-    let node = build_standard_node(info.node_type, tag, payload)?;
+    let node_type = precompiles.decode(tag)?;
+    let node = build_standard_node(node_type, tag, payload)?;
     let digest = state.register(precompiles, node)?;
     processor.advice.push_stack_word(&digest)?;
     Ok(())
@@ -98,9 +98,10 @@ pub(super) fn handle_deferred_register(
 /// `adv.register_deferred` / `adv.register_deferred_chunk` first to register the node and
 /// obtain its digest from the advice stack.
 ///
-/// Advice-stack contract, driven by `decode(tag).evaluates_to`:
-/// - **Predicates** (`evaluates_to == TRUE_TAG`): canonical is the TRUE node — nothing is pushed. A
-///   mismatch surfaces as `PrecompileError::AssertionFailed`.
+/// Advice-stack contract, driven by the canonical's shape:
+/// - **Predicate result** (canonical is the TRUE node, detected via [`Node::is_true_node`]):
+///   nothing is pushed. A failed predicate surfaces as `PrecompileError::AssertionFailed` before
+///   this point.
 /// - **Expression canonicals**: the 12 felts of the canonical `(payload, tag)` are pushed in
 ///   `[PAYLOAD_LO, PAYLOAD_HI, TAG]` order (top-down). MASM recovers each word with `adv_pushw`.
 /// - **Chunk canonicals** (e.g. self-evaluating chunk leaves like a 16-felt digest): all `n` chunks
@@ -115,11 +116,10 @@ pub(super) fn handle_deferred_evaluate(
 
     let (state, precompiles) = processor.deferred_view_mut();
     let node = state.get(&digest)?.clone();
-    let info = precompiles.decode(node.tag)?;
     let canonical = state.evaluate(precompiles, node)?;
 
     // Predicates reduce to the TRUE node — by contract the advice stack is untouched.
-    if info.evaluates_to == TRUE_TAG {
+    if canonical.is_true_node() {
         return Ok(());
     }
 
@@ -170,7 +170,7 @@ pub(super) fn handle_deferred_register_chunk(
     // for chunk length, and reading otherwise would let a malformed tag waste work.
     let n = {
         let (_state, precompiles) = processor.deferred_view_mut();
-        match precompiles.decode(tag)?.node_type {
+        match precompiles.decode(tag)? {
             NodeType::Chunks(n) => n,
             NodeType::Value | NodeType::Binary => {
                 return Err(PrecompileError::InvalidNode.into());

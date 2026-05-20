@@ -17,7 +17,7 @@ mod schema;
 mod state;
 mod wire;
 
-pub use schema::{NodeType, PrecompileError, TagInfo};
+pub use schema::{NodeType, PrecompileError};
 pub use state::{DeferredState, WitnessBuilder};
 pub use wire::{DeferredStateWire, IntegrityError, TRUE_INDEX, WireBody, WireEntry};
 
@@ -187,9 +187,10 @@ impl Payload {
 /// [`Payload`], either an 8-felt [`Expression`](Payload::Expression) (leaves, op-nodes,
 /// predicates, AND-nodes) or bulk [`Chunk`](Payload::Chunk) data.
 ///
-/// Predicate nodes (those whose tag decodes with `evaluates_to == TRUE_TAG`) are structurally
-/// indistinguishable from regular expression-bodied nodes; their "predicate-ness" is a property
-/// of the *tag*, not the *node*, and is communicated by `Precompile::decode`'s [`TagInfo`].
+/// Predicate nodes — those whose precompile-defined `reduce` returns the [`true_node`] on
+/// success — are structurally indistinguishable from regular expression-bodied nodes; their
+/// "predicate-ness" surfaces as a property of the *reduce result*, not the tag, detected by the
+/// framework via [`Node::is_true_node`] on the canonical.
 ///
 /// Carries a lazily-populated digest cache (`OnceLockCompat<Digest>`) so repeated `.digest()`
 /// calls on a node — and on its clones — amortise to one Poseidon2 invocation. The cache is

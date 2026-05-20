@@ -327,10 +327,11 @@ pub enum SystemEvent {
     /// digest from `adv.register_deferred` / `adv.register_deferred_chunk` (which push it to
     /// advice as their output) immediately before calling this event.
     ///
-    /// For expression nodes the canonical is the reduced form; for predicate tags
-    /// (`evaluates_to == TRUE_TAG`) the precompile verifies the assertion (returning
-    /// [`crate::deferred::PrecompileError::AssertionFailed`] on mismatch) and pushes nothing.
-    /// Children referenced in the payload must already be registered in the DAG.
+    /// For expression nodes the canonical is the reduced form; for predicate tags whose
+    /// `reduce` returns the [`crate::deferred::true_node`] on success, the precompile verifies
+    /// the assertion (returning [`crate::deferred::PrecompileError::AssertionFailed`] on
+    /// mismatch) and pushes nothing. Children referenced in the payload must already be
+    /// registered in the DAG.
     ///
     /// Inputs:
     ///   Operand stack: [event_id, NODE_DIGEST, ...]

@@ -124,16 +124,16 @@ impl DeferredState {
     /// Poseidon2 digest. Re-registering an identical `(digest, node)` pair is silently
     /// idempotent.
     ///
-    /// Predicates (tags whose `evaluates_to == TRUE_TAG`) are *not* verified at registration —
-    /// register is a pure host hint that only populates the DAG. Verification is explicit:
-    /// either host-side via [`Self::evaluate`], or constrained via `log_precompile`.
+    /// Predicate tags are *not* verified at registration — register is a pure host hint that
+    /// only populates the DAG. Verification is explicit: either host-side via [`Self::evaluate`],
+    /// or constrained via `log_precompile`.
     pub fn register(
         &mut self,
         precompiles: &PrecompileRegistry,
         node: Node,
     ) -> Result<Digest, PrecompileError> {
-        let info = precompiles.decode(node.tag)?;
-        if !payload_matches_type(info.node_type, &node.payload) {
+        let node_type = precompiles.decode(node.tag)?;
+        if !payload_matches_type(node_type, &node.payload) {
             return Err(PrecompileError::InvalidNode);
         }
         let digest = node.digest();
@@ -147,8 +147,8 @@ impl DeferredState {
     /// canonical intermediate produced during the walk are interned into `self.nodes`, so
     /// callers may invoke `evaluate` on a fresh op node without pre-registering it.
     ///
-    /// For a predicate (`decode(tag).evaluates_to == TRUE_TAG`), success returns
-    /// [`super::true_node`] and a mismatch surfaces as [`PrecompileError::AssertionFailed`].
+    /// For a predicate tag, success returns [`super::true_node`] (detectable via
+    /// [`Node::is_true_node`]) and a mismatch surfaces as [`PrecompileError::AssertionFailed`].
     ///
     /// Transitively-referenced child digests must resolve through the DAG — an unknown child
     /// digest surfaces as [`PrecompileError::MissingNode`]. The advice-stack contract is enforced
@@ -166,8 +166,8 @@ impl DeferredState {
         precompiles: &PrecompileRegistry,
         node: Node,
     ) -> Result<Node, PrecompileError> {
-        let info = precompiles.decode(node.tag)?;
-        if !payload_matches_type(info.node_type, &node.payload) {
+        let node_type = precompiles.decode(node.tag)?;
+        if !payload_matches_type(node_type, &node.payload) {
             return Err(PrecompileError::InvalidNode);
         }
         // Compute the input digest once at the entry; the resolver threads it through so the
@@ -416,10 +416,7 @@ fn decode_node_type(
     if node.tag == TRUE_TAG {
         return Ok(NodeType::Binary);
     }
-    precompiles
-        .decode(node.tag)
-        .map(|info| info.node_type)
-        .map_err(|_| IntegrityError::UnknownTag)
+    precompiles.decode(node.tag).map_err(|_| IntegrityError::UnknownTag)
 }
 
 /// Returns `true` when the variant of `payload` agrees with the [`NodeType`] the schema decoded

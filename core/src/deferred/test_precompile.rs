@@ -10,8 +10,8 @@
 use crate::{
     Felt, ZERO,
     deferred::{
-        Node, NodeType, Payload, Precompile, PrecompileError, TRUE_TAG, Tag, TagInfo,
-        WitnessBuilder, precompile_id, true_node,
+        Node, NodeType, Payload, Precompile, PrecompileError, Tag, WitnessBuilder, precompile_id,
+        true_node,
     },
 };
 
@@ -96,17 +96,11 @@ impl Precompile for TestPrecompile {
         Self::id()
     }
 
-    fn decode(&self, imm: [Felt; 3]) -> Option<TagInfo> {
-        let kind = Disc::classify(imm[0])?;
-        let node_type = match kind {
+    fn decode(&self, imm: [Felt; 3]) -> Option<NodeType> {
+        Some(match Disc::classify(imm[0])? {
             Disc::Leaf => NodeType::Value,
             Disc::Add | Disc::Mul | Disc::Eq => NodeType::Binary,
-        };
-        let evaluates_to = match kind {
-            Disc::Leaf | Disc::Add | Disc::Mul => Self::leaf_tag(),
-            Disc::Eq => TRUE_TAG,
-        };
-        Some(TagInfo { node_type, evaluates_to })
+        })
     }
 
     fn reduce(

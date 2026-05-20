@@ -6,9 +6,7 @@ mod common;
 use common::precompile::{hash::Hash, uint::Uint};
 use miden_core::{
     Felt, ZERO,
-    deferred::{
-        DeferredState, NodeType, Precompile, PrecompileError, PrecompileRegistry, TRUE_TAG,
-    },
+    deferred::{DeferredState, NodeType, Precompile, PrecompileError, PrecompileRegistry},
 };
 
 fn chunks(n: u32) -> Vec<[Felt; 8]> {
@@ -76,31 +74,28 @@ fn n_chunks_rounds_up() {
 
 #[test]
 fn decode_preimage_extracts_chunk_count_from_imm() {
-    let info = Hash
+    let node_type = Hash
         .decode([Felt::from_u32(Hash::PREIMAGE_TAG_ID), Felt::from_u32(65), ZERO])
         .unwrap();
-    assert!(matches!(info.node_type, NodeType::Chunks(3)));
-    assert_eq!(info.evaluates_to, Hash::digest_tag());
+    assert!(matches!(node_type, NodeType::Chunks(3)));
 }
 
 #[test]
-fn decode_digest_is_self_evaluating_value() {
-    let info = Hash.decode([Felt::from_u32(Hash::DIGEST_TAG_ID), ZERO, ZERO]).unwrap();
-    assert!(matches!(info.node_type, NodeType::Value));
-    assert_eq!(info.evaluates_to, Hash::digest_tag());
+fn decode_digest_is_value() {
+    let node_type = Hash.decode([Felt::from_u32(Hash::DIGEST_TAG_ID), ZERO, ZERO]).unwrap();
+    assert!(matches!(node_type, NodeType::Value));
 }
 
 #[test]
-fn decode_eq_is_binary_predicate() {
-    let info = Hash.decode([Felt::from_u32(Hash::EQ_TAG_ID), ZERO, ZERO]).unwrap();
-    assert!(matches!(info.node_type, NodeType::Binary));
-    assert_eq!(info.evaluates_to, TRUE_TAG);
+fn decode_eq_is_binary() {
+    let node_type = Hash.decode([Felt::from_u32(Hash::EQ_TAG_ID), ZERO, ZERO]).unwrap();
+    assert!(matches!(node_type, NodeType::Binary));
 }
 
 #[test]
 fn decode_unknown_discriminant_rejected() {
-    let info = Hash.decode([Felt::from_u32(99), ZERO, ZERO]);
-    assert!(info.is_none());
+    let node_type = Hash.decode([Felt::from_u32(99), ZERO, ZERO]);
+    assert!(node_type.is_none());
 }
 
 #[test]
