@@ -13,11 +13,11 @@
 //! Reference precompiles that exercise this public surface live in `miden-core`'s integration
 //! tests (`core/tests/common/precompile/`), not on the crate's public surface.
 
-mod schema;
+mod node;
 mod state;
 mod wire;
 
-pub use schema::{NodeType, PrecompileError};
+pub use node::{NodeType, PrecompileError};
 pub use state::{DeferredState, WitnessBuilder};
 pub use wire::{DeferredStateWire, IntegrityError, TRUE_INDEX, WireBody, WireEntry};
 
