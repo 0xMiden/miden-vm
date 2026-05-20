@@ -108,7 +108,7 @@ pub const TRUE_DIGEST: Digest = Word::new([ZERO; 4]);
 ///
 /// - [`Expression`](Payload::Expression) — exactly 8 felts (one Poseidon2 rate block): value
 ///   leaves, binary ops, predicates, AND-nodes. For a leaf the 8 felts are raw value data; for a
-///   binary op / assertion they are `lhs_digest || rhs_digest` (see [`Payload::binary_op`]).
+///   binary op / assertion they are `lhs_digest || rhs_digest` (see [`Payload::join`]).
 /// - [`Chunk`](Payload::Chunk) — bulk-data leaves: `n` 8-felt blocks. `n = chunks.len()` is also
 ///   encoded in the tag, so the digest binds it. `Arc`-shared so cloning a chunk node (when
 ///   interning or resolving children) is a ref-count bump, not a deep copy.
@@ -129,7 +129,7 @@ impl Payload {
 
     /// An [`Expression`](Payload::Expression) payload packing two child digests as `lhs || rhs`.
     /// Reused by assertion nodes, which encode `lhs_digest || rhs_digest` the same way.
-    pub fn binary_op(lhs: Digest, rhs: Digest) -> Self {
+    pub fn join(lhs: Digest, rhs: Digest) -> Self {
         let mut felts = [ZERO; 8];
         felts[0..4].copy_from_slice(lhs.as_elements());
         felts[4..8].copy_from_slice(rhs.as_elements());
@@ -160,9 +160,9 @@ impl Payload {
     }
 
     /// Splits an [`Expression`](Payload::Expression) payload into its two child digests in
-    /// `(lhs, rhs)` order — inverse of [`Self::binary_op`]. Errors with
+    /// `(lhs, rhs)` order — inverse of [`Self::join`]. Errors with
     /// [`DeferredError::InvalidPayload`] on a [`Chunk`](Payload::Chunk) payload.
-    pub fn binary_op_children(&self) -> Result<(Digest, Digest), DeferredError> {
+    pub fn join_children(&self) -> Result<(Digest, Digest), DeferredError> {
         let f = self.as_felts()?;
         let lhs = Word::new([f[0], f[1], f[2], f[3]]);
         let rhs = Word::new([f[4], f[5], f[6], f[7]]);
@@ -200,7 +200,7 @@ impl Node {
 
     /// Build a node from an 8-felt [`Expression`](Payload::Expression) body (leaf, op-node,
     /// predicate, or AND-node). Takes the [`Payload`] directly — callers typically pass
-    /// `Payload::new(..)` or `Payload::binary_op(..)`.
+    /// `Payload::new(..)` or `Payload::join(..)`.
     pub fn expression(tag: Tag, payload: Payload) -> Self {
         Self { tag, payload }
     }
@@ -421,8 +421,7 @@ mod tests {
         // (both run the same Poseidon2 permutation). This is logically consistent (AND of two
         // TRUEs IS TRUE) and load-bearing for the recursive-proof use case where the program
         // logs a sub-proof's transcript whose root happens to be TRUE_DIGEST.
-        let and_true_true =
-            Node::expression(Tag::TRUE, Payload::binary_op(TRUE_DIGEST, TRUE_DIGEST));
+        let and_true_true = Node::expression(Tag::TRUE, Payload::join(TRUE_DIGEST, TRUE_DIGEST));
         assert_eq!(and_true_true.digest(), Node::TRUE.digest());
     }
 

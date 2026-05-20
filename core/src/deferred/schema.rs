@@ -18,7 +18,7 @@ use alloc::boxed::Box;
 ///
 /// Captures both the in-memory body shape (Expression vs Chunk) AND, for the Expression case,
 /// whether the 8 felts encode raw payload data or two child digests packed via
-/// [`super::Payload::binary_op`]. This is the unit the wire format and rehydrate logic
+/// [`super::Payload::join`]. This is the unit the wire format and rehydrate logic
 /// dispatch on.
 ///
 /// Predicate-ness is *not* encoded here — it is a property of a `reduce` outcome

@@ -88,7 +88,7 @@ fn new_canonicalises_field_expression_children_end_to_end() {
     let h_3 = state.register(&schema, leaf(3)).unwrap();
     let h_4 = state.register(&schema, leaf(4)).unwrap();
     let h_x_expr = state
-        .register(&schema, Node::expression(Uint::add_tag(), Payload::binary_op(h_3, h_4)))
+        .register(&schema, Node::expression(Uint::add_tag(), Payload::join(h_3, h_4)))
         .unwrap();
     let h_y = state.register(&schema, leaf(5)).unwrap();
     let h_new = state.register(&schema, Group::new_node(h_x_expr, h_y)).unwrap();
@@ -116,7 +116,7 @@ fn new_canonicalises_field_expression_children() {
     let h_3 = state.register(&schema, leaf(3)).unwrap();
     let h_4 = state.register(&schema, leaf(4)).unwrap();
     let h_x_expr = state
-        .register(&schema, Node::expression(Uint::add_tag(), Payload::binary_op(h_3, h_4)))
+        .register(&schema, Node::expression(Uint::add_tag(), Payload::join(h_3, h_4)))
         .unwrap();
     let h_y = state.register(&schema, leaf(5)).unwrap();
     let new_over_expr = Group::new_node(h_x_expr, h_y);

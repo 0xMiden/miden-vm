@@ -82,7 +82,7 @@ impl Hash {
 
     /// Build an `eq` predicate over two child digests.
     pub fn eq_node(h_lhs: Digest, h_rhs: Digest) -> Node {
-        Node::expression(Self::eq_tag(), Payload::binary_op(h_lhs, h_rhs))
+        Node::expression(Self::eq_tag(), Payload::join(h_lhs, h_rhs))
     }
 
     /// Decode `[Felt; 8]` digest contents from a canonical `digest` leaf. Errors if `node`
@@ -151,7 +151,7 @@ impl Precompile for Hash {
                 Ok(Node::expression(Tag::new(Self::id(), imm), Payload::new(*payload.as_felts()?)))
             },
             Discriminant::Eq => {
-                let (h_lhs, h_rhs) = payload.binary_op_children()?;
+                let (h_lhs, h_rhs) = payload.join_children()?;
                 if witness.resolve(h_lhs)? != witness.resolve(h_rhs)? {
                     return Err(PrecompileError::AssertionFailed);
                 }

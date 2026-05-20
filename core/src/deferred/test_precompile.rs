@@ -113,14 +113,14 @@ impl Precompile for TestPrecompile {
                 Ok(Node::expression(Tag::new(Self::id(), imm), Payload::new(*payload.as_felts()?)))
             },
             kind @ (Disc::Add | Disc::Mul) => {
-                let (lhs, rhs) = payload.binary_op_children()?;
+                let (lhs, rhs) = payload.join_children()?;
                 let a = Self::value_of(&witness.resolve(lhs)?)?;
                 let b = Self::value_of(&witness.resolve(rhs)?)?;
                 let out = if kind == Disc::Add { a + b } else { a * b };
                 Ok(Self::leaf_node(out))
             },
             Disc::Eq => {
-                let (lhs, rhs) = payload.binary_op_children()?;
+                let (lhs, rhs) = payload.join_children()?;
                 if witness.resolve(lhs)? != witness.resolve(rhs)? {
                     return Err(PrecompileError::AssertionFailed);
                 }

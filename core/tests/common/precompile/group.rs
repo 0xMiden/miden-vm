@@ -65,19 +65,19 @@ impl Group {
 
     /// Build a `new` node referencing two field-leaf digests.
     pub fn new_node(h_x: Digest, h_y: Digest) -> Node {
-        Node::expression(Self::new_tag(), Payload::binary_op(h_x, h_y))
+        Node::expression(Self::new_tag(), Payload::join(h_x, h_y))
     }
     /// Build an `add` op node referencing two group-element digests.
     pub fn add_node(h_g1: Digest, h_g2: Digest) -> Node {
-        Node::expression(Self::add_tag(), Payload::binary_op(h_g1, h_g2))
+        Node::expression(Self::add_tag(), Payload::join(h_g1, h_g2))
     }
     /// Build a `sub` op node referencing two group-element digests.
     pub fn sub_node(h_g1: Digest, h_g2: Digest) -> Node {
-        Node::expression(Self::sub_tag(), Payload::binary_op(h_g1, h_g2))
+        Node::expression(Self::sub_tag(), Payload::join(h_g1, h_g2))
     }
     /// Build an `eq` predicate referencing two group-element digests.
     pub fn eq_node(h_g1: Digest, h_g2: Digest) -> Node {
-        Node::expression(Self::eq_tag(), Payload::binary_op(h_g1, h_g2))
+        Node::expression(Self::eq_tag(), Payload::join(h_g1, h_g2))
     }
 }
 
@@ -105,7 +105,7 @@ impl Precompile for Group {
         witness: &mut WitnessBuilder<'_>,
     ) -> Result<Node, PrecompileError> {
         let kind = Discriminant::classify(imm[0]).ok_or(PrecompileError::InvalidNode)?;
-        let (h_lhs, h_rhs) = payload.binary_op_children()?;
+        let (h_lhs, h_rhs) = payload.join_children()?;
 
         match kind {
             Discriminant::New => {
@@ -159,7 +159,7 @@ fn new_coords(node: &Node) -> Result<(Digest, Digest), PrecompileError> {
     if node.tag != Group::new_tag() {
         return Err(PrecompileError::InvalidNode);
     }
-    Ok(node.payload.binary_op_children()?)
+    Ok(node.payload.join_children()?)
 }
 
 // TYPED DISCRIMINANT

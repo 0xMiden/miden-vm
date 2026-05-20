@@ -103,7 +103,7 @@ impl DeferredState {
         stmt_digest: Digest,
         expected_new_root: Digest,
     ) -> Result<(), DeferredError> {
-        let and_node = Node::expression(Tag::TRUE, Payload::binary_op(self.root, stmt_digest));
+        let and_node = Node::expression(Tag::TRUE, Payload::join(self.root, stmt_digest));
         let actual = and_node.digest();
         if actual != expected_new_root {
             return Err(DeferredError::InvalidPayload);
@@ -211,7 +211,7 @@ impl DeferredState {
         // Determine whether this is a real Binary node (children resolve) or a Value-shaped
         // node. For Chunk bodies, no children to recurse into.
         let mut binary_indices: Option<(Digest, Digest)> = None;
-        if let Ok((lhs, rhs)) = node.payload.binary_op_children() {
+        if let Ok((lhs, rhs)) = node.payload.join_children() {
             let lhs_ok = lhs == TRUE_DIGEST || self.nodes.contains_key(&lhs);
             let rhs_ok = rhs == TRUE_DIGEST || self.nodes.contains_key(&rhs);
             if lhs_ok && rhs_ok {
@@ -282,7 +282,7 @@ impl DeferredState {
                 super::WireBody::Binary { lhs, rhs } => {
                     let lhs_d = resolve_index(*lhs, i, &digests)?;
                     let rhs_d = resolve_index(*rhs, i, &digests)?;
-                    Node::expression(entry.tag, Payload::binary_op(lhs_d, rhs_d))
+                    Node::expression(entry.tag, Payload::join(lhs_d, rhs_d))
                 },
             };
 
@@ -322,10 +322,8 @@ impl DeferredState {
             if and_node.tag != Tag::TRUE {
                 return Err(IntegrityError::NonAndNode);
             }
-            let (prev_root, stmt_digest) = and_node
-                .payload
-                .binary_op_children()
-                .map_err(|_| IntegrityError::BadAndPayload)?;
+            let (prev_root, stmt_digest) =
+                and_node.payload.join_children().map_err(|_| IntegrityError::BadAndPayload)?;
             let stmt =
                 state.nodes.get(&stmt_digest).ok_or(IntegrityError::MissingStatement)?.clone();
             let canonical = state.evaluate(precompiles, stmt)?;
@@ -361,7 +359,7 @@ impl DeferredState {
             );
             let (prev_root, stmt_digest) = and_node
                 .payload
-                .binary_op_children()
+                .join_children()
                 .expect("statements(): AND-node has non-expression body");
             out.push(stmt_digest);
             cur = prev_root;
@@ -433,7 +431,7 @@ fn reachable_closure(nodes: &BTreeMap<Digest, Node>, root: Digest) -> BTreeSet<D
             continue;
         }
         let Some(node) = nodes.get(&d) else { continue };
-        if let Ok((lhs, rhs)) = node.payload.binary_op_children() {
+        if let Ok((lhs, rhs)) = node.payload.join_children() {
             let lhs_ok = lhs == TRUE_DIGEST || nodes.contains_key(&lhs);
             let rhs_ok = rhs == TRUE_DIGEST || nodes.contains_key(&rhs);
             if lhs_ok && rhs_ok {
@@ -574,16 +572,15 @@ mod tests {
         let mut state = DeferredState::new();
         let schema = precompiles();
         let a = state.register(&schema, test_leaf(7)).unwrap();
-        let pred = Node::expression(TestPrecompile::eq_tag(), Payload::binary_op(a, a));
+        let pred = Node::expression(TestPrecompile::eq_tag(), Payload::join(a, a));
         let stmt = state.evaluate(&schema, pred).unwrap();
         // The canonical of an `eq` predicate is `Node::TRUE`. Use the predicate's *digest* —
         // which we recover from the original node — as `stmt_digest`.
         let _ = stmt; // canonical, discarded
-        let stmt_digest =
-            Node::expression(TestPrecompile::eq_tag(), Payload::binary_op(a, a)).digest();
+        let stmt_digest = Node::expression(TestPrecompile::eq_tag(), Payload::join(a, a)).digest();
 
         let expected =
-            Node::expression(Tag::TRUE, Payload::binary_op(TRUE_DIGEST, stmt_digest)).digest();
+            Node::expression(Tag::TRUE, Payload::join(TRUE_DIGEST, stmt_digest)).digest();
         state.log(stmt_digest, expected).unwrap();
         assert_eq!(state.root(), expected);
         // The newly-minted AND-node must be in the map keyed by its digest.
@@ -652,7 +649,7 @@ mod tests {
         let schema = precompiles();
         let a = state.register(&schema, test_leaf(3)).unwrap();
         let b = state.register(&schema, test_leaf(4)).unwrap();
-        let op = Node::expression(TestPrecompile::add_tag(), Payload::binary_op(a, b));
+        let op = Node::expression(TestPrecompile::add_tag(), Payload::join(a, b));
         let digest = state.register(&schema, op).unwrap();
         assert!(state.contains(&digest));
     }
@@ -667,7 +664,7 @@ mod tests {
         let a = state.register(&schema, test_leaf(3)).unwrap();
         let b = state.register(&schema, test_leaf(4)).unwrap();
         // A mismatched predicate — would fail if eagerly verified.
-        let bad = Node::expression(TestPrecompile::eq_tag(), Payload::binary_op(a, b));
+        let bad = Node::expression(TestPrecompile::eq_tag(), Payload::join(a, b));
         let bad_digest = state.register(&schema, bad.clone()).unwrap();
         assert!(state.contains(&bad_digest), "predicate interned even when it doesn't hold");
         // Verification surfaces the mismatch only when explicitly invoked.
@@ -680,7 +677,7 @@ mod tests {
         let mut state = DeferredState::new();
         let schema = precompiles();
         let a = state.register(&schema, test_leaf(7)).unwrap();
-        let assertion = Node::expression(TestPrecompile::eq_tag(), Payload::binary_op(a, a));
+        let assertion = Node::expression(TestPrecompile::eq_tag(), Payload::join(a, a));
         let result = state.evaluate(&schema, assertion).unwrap();
         assert!(result.is_true_node(), "predicate success returns the canonical TRUE node");
     }
@@ -691,7 +688,7 @@ mod tests {
         let schema = precompiles();
         let a = state.register(&schema, test_leaf(3)).unwrap();
         let b = state.register(&schema, test_leaf(4)).unwrap();
-        let mismatch = Node::expression(TestPrecompile::eq_tag(), Payload::binary_op(a, b));
+        let mismatch = Node::expression(TestPrecompile::eq_tag(), Payload::join(a, b));
         let err = state.evaluate(&schema, mismatch);
         assert!(matches!(err.unwrap_err().root(), PrecompileError::AssertionFailed));
     }
@@ -702,7 +699,7 @@ mod tests {
         let schema = precompiles();
         let a = state.register(&schema, test_leaf(1)).unwrap();
         let dangling = Word::new([Felt::from_u32(0xdead); 4]);
-        let assertion = Node::expression(TestPrecompile::eq_tag(), Payload::binary_op(a, dangling));
+        let assertion = Node::expression(TestPrecompile::eq_tag(), Payload::join(a, dangling));
         let err = state.evaluate(&schema, assertion);
         assert!(matches!(err.unwrap_err().root(), PrecompileError::MissingNode));
     }
@@ -717,19 +714,12 @@ mod tests {
         let c = state.register(&schema, test_leaf(5)).unwrap();
         let expected = state.register(&schema, test_leaf(35)).unwrap();
         let add = state
-            .register(
-                &schema,
-                Node::expression(TestPrecompile::add_tag(), Payload::binary_op(a, b)),
-            )
+            .register(&schema, Node::expression(TestPrecompile::add_tag(), Payload::join(a, b)))
             .unwrap();
         let mul = state
-            .register(
-                &schema,
-                Node::expression(TestPrecompile::mul_tag(), Payload::binary_op(add, c)),
-            )
+            .register(&schema, Node::expression(TestPrecompile::mul_tag(), Payload::join(add, c)))
             .unwrap();
-        let assertion =
-            Node::expression(TestPrecompile::eq_tag(), Payload::binary_op(mul, expected));
+        let assertion = Node::expression(TestPrecompile::eq_tag(), Payload::join(mul, expected));
         let result = state.evaluate(&schema, assertion).unwrap();
         assert!(result.is_true_node());
     }
@@ -748,19 +738,12 @@ mod tests {
         let expected = state.register(&schema, test_leaf(35)).unwrap();
         let _orphan = state.register(&schema, test_leaf(99)).unwrap();
         let add = state
-            .register(
-                &schema,
-                Node::expression(TestPrecompile::add_tag(), Payload::binary_op(a, b)),
-            )
+            .register(&schema, Node::expression(TestPrecompile::add_tag(), Payload::join(a, b)))
             .unwrap();
         let mul = state
-            .register(
-                &schema,
-                Node::expression(TestPrecompile::mul_tag(), Payload::binary_op(add, c)),
-            )
+            .register(&schema, Node::expression(TestPrecompile::mul_tag(), Payload::join(add, c)))
             .unwrap();
-        let assertion =
-            Node::expression(TestPrecompile::eq_tag(), Payload::binary_op(mul, expected));
+        let assertion = Node::expression(TestPrecompile::eq_tag(), Payload::join(mul, expected));
         let assertion_digest = assertion.digest();
         state.evaluate(&schema, assertion).unwrap();
 
@@ -783,9 +766,9 @@ mod tests {
         let a = state.register(&schema, test_leaf(3)).unwrap();
         let b = state.register(&schema, test_leaf(4)).unwrap();
         let c = state.register(&schema, test_leaf(5)).unwrap();
-        let add = Node::expression(TestPrecompile::add_tag(), Payload::binary_op(a, b));
+        let add = Node::expression(TestPrecompile::add_tag(), Payload::join(a, b));
         let add_digest = state.register(&schema, add).unwrap();
-        let mul = Node::expression(TestPrecompile::mul_tag(), Payload::binary_op(add_digest, c));
+        let mul = Node::expression(TestPrecompile::mul_tag(), Payload::join(add_digest, c));
         let mul_digest = mul.digest();
 
         let canonical = state.evaluate(&schema, mul).unwrap();
@@ -815,13 +798,12 @@ mod tests {
         let b = state.register(&schema, test_leaf(4)).unwrap();
         let c = state.register(&schema, test_leaf(5)).unwrap();
         let expected = state.register(&schema, test_leaf(35)).unwrap();
-        let add_node = Node::expression(TestPrecompile::add_tag(), Payload::binary_op(a, b));
+        let add_node = Node::expression(TestPrecompile::add_tag(), Payload::join(a, b));
         let add_digest = add_node.digest();
-        let mul_node =
-            Node::expression(TestPrecompile::mul_tag(), Payload::binary_op(add_digest, c));
+        let mul_node = Node::expression(TestPrecompile::mul_tag(), Payload::join(add_digest, c));
         let mul_digest = mul_node.digest();
         let assertion =
-            Node::expression(TestPrecompile::eq_tag(), Payload::binary_op(mul_digest, expected));
+            Node::expression(TestPrecompile::eq_tag(), Payload::join(mul_digest, expected));
         let assertion_digest = assertion.digest();
         state.register(&schema, add_node).unwrap();
         state.register(&schema, mul_node).unwrap();
@@ -844,9 +826,9 @@ mod tests {
         let a = state.register(&schema, test_leaf(3)).unwrap();
         let b = state.register(&schema, test_leaf(4)).unwrap();
         let c = state.register(&schema, test_leaf(5)).unwrap();
-        let add = Node::expression(TestPrecompile::add_tag(), Payload::binary_op(a, b));
+        let add = Node::expression(TestPrecompile::add_tag(), Payload::join(a, b));
         let add_digest = state.register(&schema, add).unwrap();
-        let mul = Node::expression(TestPrecompile::mul_tag(), Payload::binary_op(add_digest, c));
+        let mul = Node::expression(TestPrecompile::mul_tag(), Payload::join(add_digest, c));
         let mul_digest = mul.digest();
         state.register(&schema, mul.clone()).unwrap();
         state.evaluate(&schema, mul.clone()).unwrap();
@@ -871,25 +853,18 @@ mod tests {
         let c = state.register(&schema, test_leaf(5)).unwrap();
         let expected = state.register(&schema, test_leaf(35)).unwrap();
         let add = state
-            .register(
-                &schema,
-                Node::expression(TestPrecompile::add_tag(), Payload::binary_op(a, b)),
-            )
+            .register(&schema, Node::expression(TestPrecompile::add_tag(), Payload::join(a, b)))
             .unwrap();
         let mul = state
-            .register(
-                &schema,
-                Node::expression(TestPrecompile::mul_tag(), Payload::binary_op(add, c)),
-            )
+            .register(&schema, Node::expression(TestPrecompile::mul_tag(), Payload::join(add, c)))
             .unwrap();
-        let assertion =
-            Node::expression(TestPrecompile::eq_tag(), Payload::binary_op(mul, expected));
+        let assertion = Node::expression(TestPrecompile::eq_tag(), Payload::join(mul, expected));
         // `log` references the predicate node by digest; pre-register so the wire embeds it as
         // a Binary entry rather than a bare-commitment Value.
         let stmt_digest = state.register(&schema, assertion.clone()).unwrap();
         state.evaluate(&schema, assertion).unwrap();
         let new_root =
-            Node::expression(Tag::TRUE, Payload::binary_op(state.root(), stmt_digest)).digest();
+            Node::expression(Tag::TRUE, Payload::join(state.root(), stmt_digest)).digest();
         state.log(stmt_digest, new_root).unwrap();
         state
     }
@@ -950,11 +925,11 @@ mod tests {
         let schema = precompiles();
         let _orphan = state.register(&schema, test_leaf(99)).unwrap();
         let a = state.register(&schema, test_leaf(7)).unwrap();
-        let pred = Node::expression(TestPrecompile::eq_tag(), Payload::binary_op(a, a));
+        let pred = Node::expression(TestPrecompile::eq_tag(), Payload::join(a, a));
         let stmt_digest = state.register(&schema, pred.clone()).unwrap();
         state.evaluate(&schema, pred).unwrap();
         let new_root =
-            Node::expression(Tag::TRUE, Payload::binary_op(state.root(), stmt_digest)).digest();
+            Node::expression(Tag::TRUE, Payload::join(state.root(), stmt_digest)).digest();
         state.log(stmt_digest, new_root).unwrap();
 
         let wire = state.to_wire();
@@ -992,10 +967,10 @@ mod tests {
         let b = state.register(&schema, test_leaf(4)).unwrap();
         // Hand-roll a chain that points to a failing predicate without going through `log`'s
         // schema gate (which evaluate-rejects ahead of time).
-        let bad_pred = Node::expression(TestPrecompile::eq_tag(), Payload::binary_op(a, b));
+        let bad_pred = Node::expression(TestPrecompile::eq_tag(), Payload::join(a, b));
         let bad_digest = bad_pred.digest();
         state.intern(bad_pred);
-        let and_node = Node::expression(Tag::TRUE, Payload::binary_op(TRUE_DIGEST, bad_digest));
+        let and_node = Node::expression(Tag::TRUE, Payload::join(TRUE_DIGEST, bad_digest));
         let and_digest = and_node.digest();
         state.intern(and_node);
         state.root = and_digest;
@@ -1026,12 +1001,12 @@ mod tests {
         let a = test_leaf(7);
         let a_payload = *a.payload.as_felts().expect("leaf is expression-bodied");
         let pred =
-            Node::expression(TestPrecompile::eq_tag(), Payload::binary_op(a.digest(), a.digest()));
+            Node::expression(TestPrecompile::eq_tag(), Payload::join(a.digest(), a.digest()));
         let pred_digest = pred.digest();
         let bogus_prev = dummy_digest(42);
-        let and_payload = *Payload::binary_op(bogus_prev, pred_digest)
+        let and_payload = *Payload::join(bogus_prev, pred_digest)
             .as_felts()
-            .expect("binary_op is expression-bodied");
+            .expect("join is expression-bodied");
 
         let wire = DeferredStateWire {
             entries: alloc::vec![
@@ -1072,7 +1047,7 @@ mod tests {
         let orphan = test_leaf(99);
         let orphan_payload = *orphan.payload.as_felts().expect("leaf is expression-bodied");
         let pred =
-            Node::expression(TestPrecompile::eq_tag(), Payload::binary_op(a.digest(), a.digest()));
+            Node::expression(TestPrecompile::eq_tag(), Payload::join(a.digest(), a.digest()));
 
         let wire = DeferredStateWire {
             entries: alloc::vec![
