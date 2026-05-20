@@ -1,13 +1,19 @@
 use alloc::vec::Vec;
+use core::ops::Range;
 
-use miden_air::trace::chiplets::bitwise::{
-    A_COL_IDX, A_COL_RANGE, B_COL_IDX, B_COL_RANGE, BITWISE_AND, BITWISE_XOR, OP_CYCLE_LEN,
-    OUTPUT_COL_IDX, PREV_OUTPUT_COL_IDX, TRACE_WIDTH,
-};
+use miden_air::trace::chiplets::bitwise::{BITWISE_AND, BITWISE_XOR, OP_CYCLE_LEN, TRACE_WIDTH};
 use miden_core::{ZERO, field::PrimeCharacteristicRing};
 use miden_utils_testing::rand::rand_value;
 
 use super::{Bitwise, Felt, TraceFragment};
+
+// Chiplet-local column indices for assertions in the bitwise trace tests.
+const A_COL_IDX: usize = 1;
+const B_COL_IDX: usize = 2;
+const A_COL_RANGE: Range<usize> = 3..7;
+const B_COL_RANGE: Range<usize> = 7..11;
+const PREV_OUTPUT_COL_IDX: usize = 11;
+const OUTPUT_COL_IDX: usize = 12;
 
 #[test]
 fn bitwise_init() {

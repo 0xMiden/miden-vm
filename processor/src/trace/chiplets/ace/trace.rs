@@ -1,13 +1,8 @@
 use alloc::vec::Vec;
-use core::ops::Range;
 
-use miden_air::trace::{
-    RowIndex,
-    chiplets::ace::{
-        ACE_CHIPLET_NUM_COLS, CLK_IDX, CTX_IDX, EVAL_OP_IDX, ID_0_IDX, ID_1_IDX, ID_2_IDX, M_0_IDX,
-        M_1_IDX, PTR_IDX, READ_NUM_EVAL_IDX, SELECTOR_BLOCK_IDX, SELECTOR_START_IDX, V_0_0_IDX,
-        V_0_1_IDX, V_1_0_IDX, V_1_1_IDX, V_2_0_IDX, V_2_1_IDX,
-    },
+use miden_air::{
+    AceCols, QuadFeltExpr, borrow_chiplet_mut,
+    trace::{RowIndex, chiplets::ace::ACE_CHIPLET_NUM_COLS},
 };
 use miden_core::{
     Felt, Word,
@@ -162,80 +157,68 @@ impl CircuitEvaluation {
         const W: usize = ACE_CHIPLET_NUM_COLS;
         let num_read_rows = self.num_read_rows as usize;
         let num_eval_rows = self.num_eval_rows as usize;
-        let num_rows = num_read_rows + num_eval_rows;
-        let read_range = Range {
-            start: offset,
-            end: offset + num_read_rows,
-        };
-        let eval_range = Range {
-            start: read_range.end,
-            end: read_range.end + num_eval_rows,
-        };
 
-        // Writes one column over an absolute row range from a per-row source slice.
-        let put = |out: &mut [Felt], col: usize, start: usize, src: &[Felt]| {
-            for (i, &v) in src.iter().enumerate() {
-                out[(start + i) * W + col] = v;
-            }
-        };
-
-        // Start selector: ONE on the section's first row (ZERO elsewhere via zero-init).
-        out[offset * W + SELECTOR_START_IDX] = Felt::ONE;
-
-        // Block flag: ZERO on READ rows (zero-init), ONE on EVAL rows.
-        for r in eval_range.clone() {
-            out[r * W + SELECTOR_BLOCK_IDX] = Felt::ONE;
-        }
-
-        // ctx / clk are constant across the section.
         let ctx_felt: Felt = self.ctx.into();
         let clk_felt: Felt = self.clk.into();
-        for r in offset..offset + num_rows {
-            out[r * W + CTX_IDX] = ctx_felt;
-            out[r * W + CLK_IDX] = clk_felt;
-        }
-
-        put(out, PTR_IDX, offset, &self.col_ptr);
-
-        // n_eval is constant across the READ block.
         let eval_section_first_idx = Felt::from_u32(self.num_eval_rows - 1);
-        for r in read_range.clone() {
-            out[r * W + READ_NUM_EVAL_IDX] = eval_section_first_idx;
-        }
-
-        // OP column for EVAL rows.
-        put(out, EVAL_OP_IDX, eval_range.start, &self.col_op);
-
-        // Wire 0 / wire 1 columns for all rows.
-        put(out, ID_0_IDX, offset, &self.col_wire_out.id);
-        put(out, V_0_0_IDX, offset, &self.col_wire_out.v_0);
-        put(out, V_0_1_IDX, offset, &self.col_wire_out.v_1);
-        put(out, ID_1_IDX, offset, &self.col_wire_left.id);
-        put(out, V_1_0_IDX, offset, &self.col_wire_left.v_0);
-        put(out, V_1_1_IDX, offset, &self.col_wire_left.v_1);
-
-        // Wire 2 columns for EVAL rows.
-        put(out, ID_2_IDX, eval_range.start, &self.col_wire_right.id);
-        put(out, V_2_0_IDX, eval_range.start, &self.col_wire_right.v_0);
-        put(out, V_2_1_IDX, eval_range.start, &self.col_wire_right.v_1);
-
-        // Multiplicity columns, consumed in row order: 2 per READ row, 1 per EVAL row.
         let mut multiplicities_iter = self.wire_bus.wires.iter().map(|(_v, m)| Felt::from_u32(*m));
-        for row_index in read_range {
+
+        // READ rows.
+        for i in 0..num_read_rows {
+            let r = offset + i;
+            let cols: &mut AceCols<Felt> = borrow_chiplet_mut(&mut out[r * W..(r + 1) * W]);
+            cols.s_start = if i == 0 { Felt::ONE } else { Felt::ZERO };
+            cols.s_block = Felt::ZERO;
+            cols.ctx = ctx_felt;
+            cols.clk = clk_felt;
+            cols.ptr = self.col_ptr[i];
+            cols.id_0 = self.col_wire_out.id[i];
+            cols.v_0 = QuadFeltExpr(self.col_wire_out.v_0[i], self.col_wire_out.v_1[i]);
+            cols.id_1 = self.col_wire_left.id[i];
+            cols.v_1 = QuadFeltExpr(self.col_wire_left.v_0[i], self.col_wire_left.v_1[i]);
+
             let m_0 = multiplicities_iter
                 .next()
                 .expect("the m0 multiplicities were not constructed properly");
             let m_1 = multiplicities_iter
                 .next()
                 .expect("the m1 multiplicities were not constructed properly");
-            out[row_index * W + M_0_IDX] = m_0;
-            out[row_index * W + M_1_IDX] = m_1;
+
+            let read = cols.read_mut();
+            read.num_eval = eval_section_first_idx;
+            read.m_0 = m_0;
+            read.m_1 = m_1;
         }
-        for row_index in eval_range {
+
+        // EVAL rows.
+        for i in 0..num_eval_rows {
+            let r = offset + num_read_rows + i;
+            let cols: &mut AceCols<Felt> = borrow_chiplet_mut(&mut out[r * W..(r + 1) * W]);
+            cols.s_start = Felt::ZERO;
+            cols.s_block = Felt::ONE;
+            cols.ctx = ctx_felt;
+            cols.clk = clk_felt;
+            cols.ptr = self.col_ptr[num_read_rows + i];
+            cols.eval_op = self.col_op[i];
+            cols.id_0 = self.col_wire_out.id[num_read_rows + i];
+            cols.v_0 = QuadFeltExpr(
+                self.col_wire_out.v_0[num_read_rows + i],
+                self.col_wire_out.v_1[num_read_rows + i],
+            );
+            cols.id_1 = self.col_wire_left.id[num_read_rows + i];
+            cols.v_1 = QuadFeltExpr(
+                self.col_wire_left.v_0[num_read_rows + i],
+                self.col_wire_left.v_1[num_read_rows + i],
+            );
+
             let m_0 = multiplicities_iter
                 .next()
                 .expect("the m0 multiplicities were not constructed properly");
-            out[row_index * W + M_0_IDX] = m_0;
+
+            let eval = cols.eval_mut();
+            eval.id_2 = self.col_wire_right.id[i];
+            eval.v_2 = QuadFeltExpr(self.col_wire_right.v_0[i], self.col_wire_right.v_1[i]);
+            eval.m_0 = m_0;
         }
 
         debug_assert!(multiplicities_iter.next().is_none());

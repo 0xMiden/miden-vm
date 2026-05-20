@@ -1,13 +1,16 @@
 use alloc::vec::Vec;
 use core::ops::Range;
 
-use miden_air::trace::chiplets::hasher::{
-    DIRECTION_BIT_COL_IDX, HASH_CYCLE_LEN, IS_BOUNDARY_COL_IDX, MRUPDATE_ID_COL_IDX,
-    NODE_INDEX_COL_IDX, NUM_SELECTORS, S_PERM_COL_IDX, STATE_COL_RANGE, TRACE_WIDTH,
+use miden_air::{
+    ControllerCols, PermutationCols, borrow_chiplet, borrow_chiplet_mut,
+    trace::chiplets::hasher::{HASH_CYCLE_LEN, TRACE_WIDTH},
 };
 use miden_core::chiplets::hasher::Hasher;
 
 use super::{Felt, HasherState, ONE, STATE_WIDTH, Selectors, TraceFragment, ZERO};
+
+// The unified hasher row is wider than the typed overlay by one column (s_perm).
+const S_PERM_OFFSET: usize = TRACE_WIDTH - 1;
 
 // HASHER TRACE
 // ================================================================================================
@@ -65,13 +68,19 @@ impl HasherTrace {
         direction_bit: Felt,
     ) {
         let mut row = [ZERO; TRACE_WIDTH];
-        row[..NUM_SELECTORS].copy_from_slice(&selectors);
-        row[STATE_COL_RANGE.start..STATE_COL_RANGE.end].copy_from_slice(state);
-        row[NODE_INDEX_COL_IDX] = node_index;
-        row[MRUPDATE_ID_COL_IDX] = mrupdate_id;
-        row[IS_BOUNDARY_COL_IDX] = is_boundary;
-        row[DIRECTION_BIT_COL_IDX] = direction_bit;
-        row[S_PERM_COL_IDX] = ZERO;
+        {
+            let (overlay, tail) = row.split_at_mut(S_PERM_OFFSET);
+            let cols: &mut ControllerCols<Felt> = borrow_chiplet_mut(overlay);
+            cols.s0 = selectors[0];
+            cols.s1 = selectors[1];
+            cols.s2 = selectors[2];
+            cols.state = *state;
+            cols.node_index = node_index;
+            cols.mrupdate_id = mrupdate_id;
+            cols.is_boundary = is_boundary;
+            cols.direction_bit = direction_bit;
+            tail[0] = ZERO;
+        }
         self.trace.extend_from_slice(&row);
     }
 
@@ -159,13 +168,14 @@ impl HasherTrace {
         witnesses: [Felt; 3],
     ) {
         let mut row = [ZERO; TRACE_WIDTH];
-        row[..NUM_SELECTORS].copy_from_slice(&witnesses);
-        row[STATE_COL_RANGE.start..STATE_COL_RANGE.end].copy_from_slice(state);
-        row[NODE_INDEX_COL_IDX] = multiplicity;
-        row[MRUPDATE_ID_COL_IDX] = ZERO;
-        row[IS_BOUNDARY_COL_IDX] = ZERO;
-        row[DIRECTION_BIT_COL_IDX] = ZERO;
-        row[S_PERM_COL_IDX] = ONE;
+        {
+            let (overlay, tail) = row.split_at_mut(S_PERM_OFFSET);
+            let cols: &mut PermutationCols<Felt> = borrow_chiplet_mut(overlay);
+            cols.witnesses = witnesses;
+            cols.state = *state;
+            cols.multiplicity = multiplicity;
+            tail[0] = ONE;
+        }
         self.trace.extend_from_slice(&row);
     }
 
@@ -209,12 +219,10 @@ impl HasherTrace {
         let mut states = Vec::new();
         for row in range {
             // Controller input row: s0 (column 0) = ONE and s_perm = ZERO
-            if self.trace[row * W] == ONE && self.trace[row * W + S_PERM_COL_IDX] == ZERO {
-                let mut state = [ZERO; STATE_WIDTH];
-                state.copy_from_slice(
-                    &self.trace[row * W + STATE_COL_RANGE.start..row * W + STATE_COL_RANGE.end],
-                );
-                states.push(state);
+            if self.trace[row * W] == ONE && self.trace[row * W + S_PERM_OFFSET] == ZERO {
+                let cols: &ControllerCols<Felt> =
+                    borrow_chiplet(&self.trace[row * W..row * W + S_PERM_OFFSET]);
+                states.push(cols.state);
             }
         }
         states
@@ -228,16 +236,18 @@ impl HasherTrace {
 
         // copy the latest hasher state to the provided state slice
         let last = range.end - 1;
-        state.copy_from_slice(
-            &self.trace[last * W + STATE_COL_RANGE.start..last * W + STATE_COL_RANGE.end],
-        );
+        let cols: &ControllerCols<Felt> =
+            borrow_chiplet(&self.trace[last * W..last * W + S_PERM_OFFSET]);
+        *state = cols.state;
     }
 
     /// Overwrites mrupdate_id values in the given range.
     pub fn overwrite_mrupdate_id_in_range(&mut self, range: Range<usize>, mrupdate_id: Felt) {
         const W: usize = TRACE_WIDTH;
         for row in range {
-            self.trace[row * W + MRUPDATE_ID_COL_IDX] = mrupdate_id;
+            let cols: &mut ControllerCols<Felt> =
+                borrow_chiplet_mut(&mut self.trace[row * W..row * W + S_PERM_OFFSET]);
+            cols.mrupdate_id = mrupdate_id;
         }
     }
 

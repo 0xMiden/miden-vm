@@ -21,6 +21,13 @@ pub fn borrow_chiplet<T, S>(slice: &[T]) -> &S {
     &cols[0]
 }
 
+/// Zero-copy mutable cast from a slice to a `#[repr(C)]` chiplet column struct.
+pub fn borrow_chiplet_mut<T, S>(slice: &mut [T]) -> &mut S {
+    let (prefix, cols, suffix) = unsafe { slice.align_to_mut::<S>() };
+    debug_assert!(prefix.is_empty() && suffix.is_empty() && cols.len() == 1);
+    &mut cols[0]
+}
+
 // PERMUTATION COLUMNS
 // ================================================================================================
 
@@ -327,6 +334,16 @@ impl<T> AceCols<T> {
     /// Returns an EVAL-mode overlay of the mode-dependent columns.
     pub fn eval(&self) -> &AceEvalCols<T> {
         borrow_chiplet(&self.mode)
+    }
+
+    /// Returns a mutable READ-mode overlay of the mode-dependent columns.
+    pub fn read_mut(&mut self) -> &mut AceReadCols<T> {
+        borrow_chiplet_mut(&mut self.mode)
+    }
+
+    /// Returns a mutable EVAL-mode overlay of the mode-dependent columns.
+    pub fn eval_mut(&mut self) -> &mut AceEvalCols<T> {
+        borrow_chiplet_mut(&mut self.mode)
     }
 }
 

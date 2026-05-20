@@ -1,12 +1,12 @@
 use alloc::vec::Vec;
 
 use miden_air::trace::{
-    CHIPLETS_RANGE, CHIPLETS_WIDTH,
+    CHIPLETS_WIDTH, TRACE_WIDTH,
     chiplets::{
         KERNEL_ROM_TRACE_WIDTH, NUM_BITWISE_SELECTORS, NUM_KERNEL_ROM_SELECTORS,
         NUM_MEMORY_SELECTORS,
         bitwise::{self, BITWISE_XOR, OP_CYCLE_LEN},
-        hasher::{CONTROLLER_ROWS_PER_PERMUTATION, HASH_CYCLE_LEN, LINEAR_HASH, S_PERM_COL_IDX},
+        hasher::{CONTROLLER_ROWS_PER_PERMUTATION, HASH_CYCLE_LEN, LINEAR_HASH},
         memory,
     },
 };
@@ -201,7 +201,7 @@ fn build_trace(
     let trace_len = trace.get_trace_len();
     (
         trace
-            .get_column_range(CHIPLETS_RANGE)
+            .get_column_range((TRACE_WIDTH - CHIPLETS_WIDTH)..TRACE_WIDTH)
             .try_into()
             .expect("failed to convert vector to array"),
         trace_len,
@@ -230,7 +230,7 @@ fn validate_hasher_trace(
     let s0_col = 1; // hasher selector s0
     let s1_col = 2; // hasher selector s1
     let s2_col = 3; // hasher selector s2
-    let s_perm_col = 1 + S_PERM_COL_IDX; // s_perm in chiplets trace (= column 20)
+    let s_perm_col = 20; // s_perm in chiplets trace
 
     let controller_padded = controller_rows.next_multiple_of(HASH_CYCLE_LEN);
     let perm_segment_start = controller_padded;

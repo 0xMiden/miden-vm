@@ -1,8 +1,8 @@
 use alloc::vec::Vec;
 
-use miden_air::trace::chiplets::bitwise::{
-    A_COL_IDX, A_COL_RANGE, B_COL_IDX, B_COL_RANGE, BITWISE_AND, BITWISE_XOR, OUTPUT_COL_IDX,
-    PREV_OUTPUT_COL_IDX, TRACE_WIDTH,
+use miden_air::{
+    BitwiseCols, borrow_chiplet_mut,
+    trace::chiplets::bitwise::{BITWISE_AND, BITWISE_XOR, TRACE_WIDTH},
 };
 
 use crate::{Felt, ZERO, operation::OperationError, trace::TraceFragment};
@@ -147,32 +147,29 @@ impl Bitwise {
     // HELPER METHODS
     // --------------------------------------------------------------------------------------------
 
-    /// Appends one full row (in column order) to the row-major trace buffer:
-    /// - Column 0: the selector value for the bitwise operation being executed.
-    /// - Column `A_COL_IDX`: the current value of `a`.
-    /// - Column `B_COL_IDX`: the current value of `b`.
-    /// - `A_COL_RANGE`: the 4 least-significant bits of `a`.
-    /// - `B_COL_RANGE`: the 4 least-significant bits of `b`.
-    /// - `PREV_OUTPUT_COL_IDX` / `OUTPUT_COL_IDX`: the previous and current accumulated output.
+    /// Appends one full row (in column order) to the row-major trace buffer.
     fn push_bitwise_row(&mut self, selector: Felt, a: u64, b: u64, prev_output: u64, output: u64) {
         let mut row = [ZERO; TRACE_WIDTH];
-        row[0] = selector;
-        row[A_COL_IDX] = Felt::new_unchecked(a);
-        row[B_COL_IDX] = Felt::new_unchecked(b);
-
-        row[A_COL_RANGE.start] = Felt::new_unchecked(a & 1);
-        row[A_COL_RANGE.start + 1] = Felt::new_unchecked((a >> 1) & 1);
-        row[A_COL_RANGE.start + 2] = Felt::new_unchecked((a >> 2) & 1);
-        row[A_COL_RANGE.start + 3] = Felt::new_unchecked((a >> 3) & 1);
-
-        row[B_COL_RANGE.start] = Felt::new_unchecked(b & 1);
-        row[B_COL_RANGE.start + 1] = Felt::new_unchecked((b >> 1) & 1);
-        row[B_COL_RANGE.start + 2] = Felt::new_unchecked((b >> 2) & 1);
-        row[B_COL_RANGE.start + 3] = Felt::new_unchecked((b >> 3) & 1);
-
-        row[PREV_OUTPUT_COL_IDX] = Felt::new_unchecked(prev_output);
-        row[OUTPUT_COL_IDX] = Felt::new_unchecked(output);
-
+        {
+            let cols: &mut BitwiseCols<Felt> = borrow_chiplet_mut(&mut row);
+            cols.op_flag = selector;
+            cols.a = Felt::new_unchecked(a);
+            cols.b = Felt::new_unchecked(b);
+            cols.a_bits = [
+                Felt::new_unchecked(a & 1),
+                Felt::new_unchecked((a >> 1) & 1),
+                Felt::new_unchecked((a >> 2) & 1),
+                Felt::new_unchecked((a >> 3) & 1),
+            ];
+            cols.b_bits = [
+                Felt::new_unchecked(b & 1),
+                Felt::new_unchecked((b >> 1) & 1),
+                Felt::new_unchecked((b >> 2) & 1),
+                Felt::new_unchecked((b >> 3) & 1),
+            ];
+            cols.prev_output = Felt::new_unchecked(prev_output);
+            cols.output = Felt::new_unchecked(output);
+        }
         self.trace.extend_from_slice(&row);
     }
 }

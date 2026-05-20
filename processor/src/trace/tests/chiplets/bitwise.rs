@@ -9,7 +9,7 @@
 
 use alloc::vec::Vec;
 
-use miden_air::{logup::BitwiseMsg, trace::chiplets::BITWISE_SELECTOR_COL_IDX};
+use miden_air::logup::BitwiseMsg;
 use miden_core::{
     Felt,
     operations::{Operation, opcodes},
@@ -118,7 +118,7 @@ fn bitwise_chiplet_bus_emits_per_request_row() {
         }
         response_rows_seen += 1;
 
-        let op = main.get(idx, BITWISE_SELECTOR_COL_IDX);
+        let op = main.chiplet_cols(idx).bitwise().op_flag;
         let a = main.chiplet_bitwise_a(idx);
         let b = main.chiplet_bitwise_b(idx);
         let z = main.chiplet_bitwise_z(idx);

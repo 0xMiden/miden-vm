@@ -4,10 +4,7 @@ use core::ops::Range;
 
 use miden_air::{
     AirWitness, MidenAir, PublicInputs, debug,
-    trace::{
-        DECODER_TRACE_OFFSET, MainTrace,
-        decoder::{NUM_USER_OP_HELPERS, USER_OP_HELPERS_OFFSET},
-    },
+    trace::{MainTrace, decoder::NUM_USER_OP_HELPERS},
 };
 use miden_core::{crypto::hash::Blake3_256, serde::Serializable};
 
@@ -289,7 +286,7 @@ impl ExecutionTrace {
         let mut result = [ZERO; NUM_USER_OP_HELPERS];
         let row = RowIndex::from(clk);
         for (i, result) in result.iter_mut().enumerate() {
-            *result = self.main_trace.get(row, DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET + i);
+            *result = self.main_trace.helper_register(i, row);
         }
         result
     }

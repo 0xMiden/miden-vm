@@ -1,11 +1,11 @@
 use alloc::vec::Vec;
+use core::ops::Range;
 
 use miden_air::trace::{
     RowIndex,
     chiplets::memory::{
-        FLAG_SAME_CONTEXT_AND_WORD, IDX0_COL_IDX, IDX1_COL_IDX, IS_READ_COL_IDX,
-        IS_WORD_ACCESS_COL_IDX, MEMORY_ACCESS_ELEMENT, MEMORY_ACCESS_WORD, MEMORY_READ,
-        MEMORY_WRITE, TRACE_WIDTH as MEMORY_TRACE_WIDTH,
+        MEMORY_ACCESS_ELEMENT, MEMORY_ACCESS_WORD, MEMORY_READ, MEMORY_WRITE,
+        TRACE_WIDTH as MEMORY_TRACE_WIDTH,
     },
 };
 use miden_core::{
@@ -14,11 +14,26 @@ use miden_core::{
 };
 
 use super::{
-    CLK_COL_IDX, CTX_COL_IDX, D_INV_COL_IDX, D0_COL_IDX, D1_COL_IDX, EMPTY_WORD, Felt, Memory,
-    TraceFragment, V_COL_RANGE, WORD_ADDR_HI_COL_IDX, WORD_ADDR_LO_COL_IDX, WORD_COL_IDX,
+    EMPTY_WORD, Felt, Memory, TraceFragment,
     segment::{MemoryAccessType, MemoryOperation},
 };
 use crate::{ContextId, MemoryAddress, MemoryError, trace::range::RangeChecker};
+
+// Chiplet-local column indices used by the memory trace tests.
+const IS_READ_COL_IDX: usize = 0;
+const IS_WORD_ACCESS_COL_IDX: usize = 1;
+const CTX_COL_IDX: usize = 2;
+const WORD_COL_IDX: usize = 3;
+const IDX0_COL_IDX: usize = 4;
+const IDX1_COL_IDX: usize = 5;
+const CLK_COL_IDX: usize = 6;
+const V_COL_RANGE: Range<usize> = 7..11;
+const D0_COL_IDX: usize = 11;
+const D1_COL_IDX: usize = 12;
+const D_INV_COL_IDX: usize = 13;
+const FLAG_SAME_CONTEXT_AND_WORD: usize = 14;
+const WORD_ADDR_LO_COL_IDX: usize = 15;
+const WORD_ADDR_HI_COL_IDX: usize = 16;
 
 #[test]
 fn mem_init() {

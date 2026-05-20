@@ -1,9 +1,15 @@
 use alloc::vec::Vec;
+use core::ops::Range;
 
-use miden_air::trace::chiplets::hasher::{
-    DIRECTION_BIT_COL_IDX, HASH_CYCLE_LEN, IS_BOUNDARY_COL_IDX, MRUPDATE_ID_COL_IDX,
-    NODE_INDEX_COL_IDX, S_PERM_COL_IDX, STATE_COL_RANGE, TRACE_WIDTH,
-};
+use miden_air::trace::chiplets::hasher::{HASH_CYCLE_LEN, TRACE_WIDTH};
+
+// Chiplet-local column indices used by the hasher trace tests.
+const STATE_COL_RANGE: Range<usize> = 3..15;
+const NODE_INDEX_COL_IDX: usize = 15;
+const MRUPDATE_ID_COL_IDX: usize = 16;
+const IS_BOUNDARY_COL_IDX: usize = 17;
+const DIRECTION_BIT_COL_IDX: usize = 18;
+const S_PERM_COL_IDX: usize = 19;
 use miden_core::{
     ONE, ZERO,
     chiplets::hasher,

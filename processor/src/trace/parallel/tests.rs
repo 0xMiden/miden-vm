@@ -3,11 +3,7 @@ use alloc::{string::String, sync::Arc};
 use miden_air::{
     MidenAir,
     lookup::build_logup_aux_trace,
-    trace::{
-        DECODER_TRACE_OFFSET,
-        chiplets::hasher::HASH_CYCLE_LEN,
-        decoder::{HASHER_STATE_OFFSET, NUM_OP_BITS, OP_BITS_OFFSET},
-    },
+    trace::{RowIndex, chiplets::hasher::HASH_CYCLE_LEN},
 };
 use miden_core::{
     Felt, Word,
@@ -1255,20 +1251,9 @@ fn collect_end_flags(trace: &ExecutionTrace) -> Vec<Word> {
 
     (0..main_trace.num_rows())
         .filter_map(|row_idx| {
-            if read_opcode(main_trace, row_idx) == opcodes::END {
-                Some(
-                    [
-                        main_trace.get_column(DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + 4)
-                            [row_idx],
-                        main_trace.get_column(DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + 5)
-                            [row_idx],
-                        main_trace.get_column(DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + 6)
-                            [row_idx],
-                        main_trace.get_column(DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + 7)
-                            [row_idx],
-                    ]
-                    .into(),
-                )
+            let idx = RowIndex::from(row_idx);
+            if read_opcode(main_trace, idx) == opcodes::END {
+                Some(main_trace.decoder_hasher_state_second_half(idx))
             } else {
                 None
             }
@@ -1276,15 +1261,10 @@ fn collect_end_flags(trace: &ExecutionTrace) -> Vec<Word> {
         .collect()
 }
 
-fn read_opcode(main_trace: &MainTrace, row_idx: usize) -> u8 {
-    let mut result = 0;
-    for i in 0..NUM_OP_BITS {
-        let op_bit = main_trace.get_column(DECODER_TRACE_OFFSET + OP_BITS_OFFSET + i)[row_idx]
-            .as_canonical_u64();
-        assert!(op_bit <= 1, "invalid op bit");
-        result += op_bit << i;
-    }
-    result as u8
+fn read_opcode(main_trace: &MainTrace, row_idx: RowIndex) -> u8 {
+    let opcode = main_trace.get_op_code(row_idx).as_canonical_u64();
+    assert!(opcode <= u8::MAX as u64, "invalid opcode");
+    opcode as u8
 }
 
 /// Wrapper around `ExecutionTrace` that produces deterministic `Debug` output.

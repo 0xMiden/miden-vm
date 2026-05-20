@@ -115,6 +115,29 @@ impl<T> ChipletCols<T> {
         borrow_chiplet(&self.chiplets[3..18])
     }
 
+    /// Returns the lower 16-bit limb of the memory word address (chiplets\[18\]).
+    ///
+    /// Range-check auxiliary column populated by the trace builder for the lookup-bus
+    /// emitter; not part of [`MemoryCols`] because the memory AIR's own transition
+    /// constraints don't act on it.
+    pub fn memory_word_addr_lo(&self) -> T
+    where
+        T: Copy,
+    {
+        self.chiplets[18]
+    }
+
+    /// Returns the upper 16-bit limb of the memory word address (chiplets\[19\]).
+    ///
+    /// See [`Self::memory_word_addr_lo`] for the same caveat about the range-check
+    /// auxiliary columns living outside [`MemoryCols`].
+    pub fn memory_word_addr_hi(&self) -> T
+    where
+        T: Copy,
+    {
+        self.chiplets[19]
+    }
+
     /// Returns a typed borrow of the ACE chiplet columns (chiplets\[4..20\]).
     pub fn ace(&self) -> &AceCols<T> {
         borrow_chiplet(&self.chiplets[4..])
@@ -206,10 +229,7 @@ const _: () = assert!(NUM_KERNEL_ROM_COLS == 5);
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::trace::{
-        CHIPLETS_OFFSET, CLK_COL_IDX, CTX_COL_IDX, DECODER_TRACE_OFFSET, FN_HASH_OFFSET,
-        STACK_TRACE_OFFSET, decoder, range, stack,
-    };
+    use crate::trace::{DECODER_TRACE_WIDTH, STACK_TRACE_WIDTH, SYS_TRACE_WIDTH};
 
     /// Per-AIR index maps used only by the column-layout tests below. Each field holds its
     /// column index inside its own AIR. `CORE_COL_MAP` lines up with unified-trace offsets
@@ -226,6 +246,13 @@ mod tests {
         >())
     };
 
+    /// Column offset of the decoder section within the unified main trace.
+    const DECODER_OFFSET: usize = SYS_TRACE_WIDTH;
+    /// Column offset of the stack section within the unified main trace.
+    const STACK_OFFSET: usize = SYS_TRACE_WIDTH + DECODER_TRACE_WIDTH;
+    /// Column offset of the range-check section within the unified main trace.
+    const RANGE_OFFSET: usize = STACK_OFFSET + STACK_TRACE_WIDTH;
+
     // --- Core trace column map vs offset constants -------------------------------------------
     //
     // `CoreCols` starts at offset 0 of the unified main trace, so its per-AIR indices match
@@ -233,59 +260,43 @@ mod tests {
 
     #[test]
     fn col_map_system() {
-        assert_eq!(CORE_COL_MAP.system.clk, CLK_COL_IDX);
-        assert_eq!(CORE_COL_MAP.system.ctx, CTX_COL_IDX);
-        assert_eq!(CORE_COL_MAP.system.fn_hash[0], FN_HASH_OFFSET);
-        assert_eq!(CORE_COL_MAP.system.fn_hash[3], FN_HASH_OFFSET + 3);
+        assert_eq!(CORE_COL_MAP.system.clk, 0);
+        assert_eq!(CORE_COL_MAP.system.ctx, 1);
+        assert_eq!(CORE_COL_MAP.system.fn_hash[0], 2);
+        assert_eq!(CORE_COL_MAP.system.fn_hash[3], 5);
     }
 
     #[test]
     fn col_map_decoder() {
-        assert_eq!(CORE_COL_MAP.decoder.addr, DECODER_TRACE_OFFSET + decoder::ADDR_COL_IDX);
-        assert_eq!(CORE_COL_MAP.decoder.op_bits[0], DECODER_TRACE_OFFSET + decoder::OP_BITS_OFFSET);
-        assert_eq!(
-            CORE_COL_MAP.decoder.op_bits[6],
-            DECODER_TRACE_OFFSET + decoder::OP_BITS_OFFSET + 6
-        );
-        assert_eq!(
-            CORE_COL_MAP.decoder.hasher_state[0],
-            DECODER_TRACE_OFFSET + decoder::HASHER_STATE_OFFSET
-        );
-        assert_eq!(CORE_COL_MAP.decoder.in_span, DECODER_TRACE_OFFSET + decoder::IN_SPAN_COL_IDX);
-        assert_eq!(
-            CORE_COL_MAP.decoder.group_count,
-            DECODER_TRACE_OFFSET + decoder::GROUP_COUNT_COL_IDX
-        );
-        assert_eq!(CORE_COL_MAP.decoder.op_index, DECODER_TRACE_OFFSET + decoder::OP_INDEX_COL_IDX);
-        assert_eq!(
-            CORE_COL_MAP.decoder.batch_flags[0],
-            DECODER_TRACE_OFFSET + decoder::OP_BATCH_FLAGS_OFFSET
-        );
-        assert_eq!(
-            CORE_COL_MAP.decoder.extra[0],
-            DECODER_TRACE_OFFSET + decoder::OP_BITS_EXTRA_COLS_OFFSET
-        );
+        assert_eq!(CORE_COL_MAP.decoder.addr, DECODER_OFFSET);
+        assert_eq!(CORE_COL_MAP.decoder.op_bits[0], DECODER_OFFSET + 1);
+        assert_eq!(CORE_COL_MAP.decoder.op_bits[6], DECODER_OFFSET + 7);
+        assert_eq!(CORE_COL_MAP.decoder.hasher_state[0], DECODER_OFFSET + 8);
+        assert_eq!(CORE_COL_MAP.decoder.in_span, DECODER_OFFSET + 16);
+        assert_eq!(CORE_COL_MAP.decoder.group_count, DECODER_OFFSET + 17);
+        assert_eq!(CORE_COL_MAP.decoder.op_index, DECODER_OFFSET + 18);
+        assert_eq!(CORE_COL_MAP.decoder.batch_flags[0], DECODER_OFFSET + 19);
+        assert_eq!(CORE_COL_MAP.decoder.extra[0], DECODER_OFFSET + 22);
     }
 
     #[test]
     fn col_map_stack() {
-        assert_eq!(CORE_COL_MAP.stack.top[0], STACK_TRACE_OFFSET + stack::STACK_TOP_OFFSET);
-        assert_eq!(CORE_COL_MAP.stack.top[15], STACK_TRACE_OFFSET + 15);
-        assert_eq!(CORE_COL_MAP.stack.b0, STACK_TRACE_OFFSET + stack::B0_COL_IDX);
-        assert_eq!(CORE_COL_MAP.stack.b1, STACK_TRACE_OFFSET + stack::B1_COL_IDX);
-        assert_eq!(CORE_COL_MAP.stack.h0, STACK_TRACE_OFFSET + stack::H0_COL_IDX);
+        assert_eq!(CORE_COL_MAP.stack.top[0], STACK_OFFSET);
+        assert_eq!(CORE_COL_MAP.stack.top[15], STACK_OFFSET + 15);
+        assert_eq!(CORE_COL_MAP.stack.b0, STACK_OFFSET + 16);
+        assert_eq!(CORE_COL_MAP.stack.b1, STACK_OFFSET + 17);
+        assert_eq!(CORE_COL_MAP.stack.h0, STACK_OFFSET + 18);
     }
 
     #[test]
     fn col_map_range() {
-        assert_eq!(CORE_COL_MAP.range.multiplicity, range::M_COL_IDX);
-        assert_eq!(CORE_COL_MAP.range.value, range::V_COL_IDX);
+        assert_eq!(CORE_COL_MAP.range.multiplicity, RANGE_OFFSET);
+        assert_eq!(CORE_COL_MAP.range.value, RANGE_OFFSET + 1);
     }
 
     // --- Chiplet trace column map -------------------------------------------------------------
     //
-    // `CHIPLET_COL_MAP` is 0-based within `ChipletCols`. Adding `NUM_CORE_COLS` (=
-    // `CHIPLETS_OFFSET`) recovers the unified-trace offset.
+    // `CHIPLET_COL_MAP` is 0-based within `ChipletCols`.
 
     #[test]
     fn col_map_chiplets() {
@@ -293,8 +304,6 @@ mod tests {
         assert_eq!(CHIPLET_COL_MAP.chiplets[19], 19);
         assert_eq!(CHIPLET_COL_MAP.s_perm, 20);
         assert_eq!(CHIPLET_COL_MAP.chip_clk, 21);
-        // Sanity: NUM_CORE_COLS lines up with the unified-trace chiplets offset.
-        assert_eq!(NUM_CORE_COLS, CHIPLETS_OFFSET);
     }
 
     // --- Multi-AIR split: CoreCols + ChipletCols widths ---------------------------------------
@@ -306,9 +315,6 @@ mod tests {
             NUM_CORE_COLS,
             NUM_SYSTEM_COLS + NUM_DECODER_COLS + NUM_STACK_COLS + NUM_RANGE_COLS,
         );
-        // The core trace covers everything from the start of the system segment up to the
-        // chiplets boundary.
-        assert_eq!(NUM_CORE_COLS, CHIPLETS_OFFSET);
     }
 
     /// `NUM_CHIPLETS_COLS` matches the chiplets segment width.

@@ -104,7 +104,7 @@ impl SystemState {
 /// The subset of the decoder state required to build the trace.
 #[derive(Debug)]
 pub struct DecoderState {
-    /// The value of the [miden_air::trace::decoder::ADDR_COL_IDX] column
+    /// The value of the decoder's `addr` column.
     pub current_addr: Felt,
     /// The address of the current MAST node's parent.
     pub parent_addr: Felt,

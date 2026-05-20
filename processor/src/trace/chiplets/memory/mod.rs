@@ -1,13 +1,14 @@
 use alloc::{collections::BTreeMap, vec::Vec};
 use core::fmt::Debug;
 
-use miden_air::trace::{
-    RowIndex,
-    chiplets::memory::{
-        CLK_COL_IDX, CTX_COL_IDX, D_INV_COL_IDX, D0_COL_IDX, D1_COL_IDX,
-        FLAG_SAME_CONTEXT_AND_WORD, IDX0_COL_IDX, IDX1_COL_IDX, IS_READ_COL_IDX,
-        IS_WORD_ACCESS_COL_IDX, MEMORY_ACCESS_ELEMENT, MEMORY_ACCESS_WORD, MEMORY_READ,
-        MEMORY_WRITE, V_COL_RANGE, WORD_ADDR_HI_COL_IDX, WORD_ADDR_LO_COL_IDX, WORD_COL_IDX,
+use miden_air::{
+    MemoryCols, borrow_chiplet_mut,
+    trace::{
+        RowIndex,
+        chiplets::memory::{
+            MEMORY_ACCESS_ELEMENT, MEMORY_ACCESS_WORD, MEMORY_READ, MEMORY_WRITE,
+            TRACE_WIDTH as MEMORY_TRACE_WIDTH,
+        },
     },
 };
 
@@ -315,9 +316,9 @@ impl Memory {
             None => return,
         };
 
-        // iterate through addresses in ascending order, and write trace row for each memory access
-        // into the trace. we expect the trace to be 17 columns wide.
-        let mut row: RowIndex = 0.into();
+        let num_rows = self.trace_len();
+        let mut buffer = vec![ZERO; num_rows * MEMORY_TRACE_WIDTH];
+        let mut row: usize = 0;
 
         for (ctx, segment) in self.trace {
             let ctx = Felt::from(ctx);
@@ -329,14 +330,18 @@ impl Memory {
                     let clk = memory_access.clk();
                     let value = memory_access.word();
 
-                    match memory_access.operation() {
-                        MemoryOperation::Read => trace.set(row, IS_READ_COL_IDX, MEMORY_READ),
-                        MemoryOperation::Write => trace.set(row, IS_READ_COL_IDX, MEMORY_WRITE),
-                    }
+                    let row_slice =
+                        &mut buffer[row * MEMORY_TRACE_WIDTH..(row + 1) * MEMORY_TRACE_WIDTH];
+                    let (mem_slice, aux_slice) = row_slice.split_at_mut(MEMORY_TRACE_WIDTH - 2);
+                    let cols: &mut MemoryCols<Felt> = borrow_chiplet_mut(mem_slice);
+
+                    cols.is_read = match memory_access.operation() {
+                        MemoryOperation::Read => MEMORY_READ,
+                        MemoryOperation::Write => MEMORY_WRITE,
+                    };
                     let (idx1, idx0) = match memory_access.access_type() {
                         segment::MemoryAccessType::Element { addr_idx_in_word } => {
-                            trace.set(row, IS_WORD_ACCESS_COL_IDX, MEMORY_ACCESS_ELEMENT);
-
+                            cols.is_word = MEMORY_ACCESS_ELEMENT;
                             match addr_idx_in_word {
                                 0 => (ZERO, ZERO),
                                 1 => (ZERO, ONE),
@@ -346,18 +351,16 @@ impl Memory {
                             }
                         },
                         segment::MemoryAccessType::Word => {
-                            trace.set(row, IS_WORD_ACCESS_COL_IDX, MEMORY_ACCESS_WORD);
+                            cols.is_word = MEMORY_ACCESS_WORD;
                             (ZERO, ZERO)
                         },
                     };
-                    trace.set(row, CTX_COL_IDX, ctx);
-                    trace.set(row, WORD_COL_IDX, felt_addr);
-                    trace.set(row, IDX0_COL_IDX, idx0);
-                    trace.set(row, IDX1_COL_IDX, idx1);
-                    trace.set(row, CLK_COL_IDX, clk);
-                    for (idx, col) in V_COL_RANGE.enumerate() {
-                        trace.set(row, col, value[idx]);
-                    }
+                    cols.ctx = ctx;
+                    cols.word_addr = felt_addr;
+                    cols.idx0 = idx0;
+                    cols.idx1 = idx1;
+                    cols.clk = clk;
+                    cols.values = *value;
 
                     // compute delta as difference between context IDs, addresses, or clock cycles
                     let delta = if prev_ctx != ctx {
@@ -369,31 +372,30 @@ impl Memory {
                     };
 
                     let (delta_hi, delta_lo) = split_element_u32_into_u16(delta);
-                    trace.set(row, D0_COL_IDX, delta_lo);
-                    trace.set(row, D1_COL_IDX, delta_hi);
-                    trace.set(row, D_INV_COL_IDX, delta.try_inverse().unwrap_or(ZERO));
-
-                    if prev_ctx == ctx && prev_addr == felt_addr {
-                        trace.set(row, FLAG_SAME_CONTEXT_AND_WORD, ONE);
+                    cols.d0 = delta_lo;
+                    cols.d1 = delta_hi;
+                    cols.d_inv = delta.try_inverse().unwrap_or(ZERO);
+                    cols.is_same_ctx_and_addr = if prev_ctx == ctx && prev_addr == felt_addr {
+                        ONE
                     } else {
-                        trace.set(row, FLAG_SAME_CONTEXT_AND_WORD, ZERO);
+                        ZERO
                     };
 
                     // decompose word address into 16-bit limbs of word index
                     let word_index = addr / WORD_SIZE as u32;
-                    let w0 = (word_index & 0xffff) as u16;
-                    let w1 = (word_index >> 16) as u16;
-                    trace.set(row, WORD_ADDR_LO_COL_IDX, Felt::from_u16(w0));
-                    trace.set(row, WORD_ADDR_HI_COL_IDX, Felt::from_u16(w1));
+                    aux_slice[0] = Felt::from_u16((word_index & 0xffff) as u16);
+                    aux_slice[1] = Felt::from_u16((word_index >> 16) as u16);
 
                     // update values for the next iteration of the loop
                     prev_ctx = ctx;
                     prev_addr = felt_addr;
                     prev_clk = clk;
-                    row += 1_u32;
+                    row += 1;
                 }
             }
         }
+
+        trace.copy_rows_from(&buffer);
     }
 
     // HELPER METHODS

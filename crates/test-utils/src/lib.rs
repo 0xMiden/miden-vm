@@ -871,74 +871,86 @@ pub fn push_inputs(inputs: &[u64]) -> String {
 /// Helper function to get column name for debugging
 pub fn get_column_name(col_idx: usize) -> String {
     use miden_air::trace::{
-        CLK_COL_IDX, CTX_COL_IDX, DECODER_TRACE_OFFSET, FN_HASH_OFFSET, RANGE_CHECK_TRACE_OFFSET,
-        STACK_TRACE_OFFSET,
-        decoder::{
-            ADDR_COL_IDX, GROUP_COUNT_COL_IDX, HASHER_STATE_OFFSET, IN_SPAN_COL_IDX,
-            NUM_HASHER_COLUMNS, NUM_OP_BATCH_FLAGS, NUM_OP_BITS, NUM_OP_BITS_EXTRA_COLS,
-            OP_BATCH_FLAGS_OFFSET, OP_BITS_EXTRA_COLS_OFFSET, OP_BITS_OFFSET, OP_INDEX_COL_IDX,
-        },
-        stack::{B0_COL_IDX, B1_COL_IDX, H0_COL_IDX, STACK_TOP_OFFSET},
+        DECODER_TRACE_WIDTH, STACK_TRACE_WIDTH, SYS_TRACE_WIDTH,
+        decoder::{NUM_HASHER_COLUMNS, NUM_OP_BATCH_FLAGS, NUM_OP_BITS, NUM_OP_BITS_EXTRA_COLS},
     };
+
+    // System columns sit at the start of the unified trace (clk, ctx, fn_hash[0..4]).
+    const FN_HASH_START: usize = 2;
+    // Decoder section starts after the 6 system columns.
+    const DECODER_OFFSET: usize = SYS_TRACE_WIDTH;
+    // Stack section follows the decoder section.
+    const STACK_OFFSET: usize = SYS_TRACE_WIDTH + DECODER_TRACE_WIDTH;
+    // Range-check section follows the stack section.
+    const RANGE_OFFSET: usize = STACK_OFFSET + STACK_TRACE_WIDTH;
+
+    // Decoder-local field positions within `DecoderCols`.
+    const DEC_ADDR: usize = 0;
+    const DEC_OP_BITS: usize = 1;
+    const DEC_HASHER_STATE: usize = 8;
+    const DEC_IN_SPAN: usize = 16;
+    const DEC_GROUP_COUNT: usize = 17;
+    const DEC_OP_INDEX: usize = 18;
+    const DEC_OP_BATCH_FLAGS: usize = 19;
+    const DEC_OP_BITS_EXTRA: usize = 22;
+
+    // Stack-local field positions within `StackCols`.
+    const STACK_TOP_OFFSET: usize = 0;
+    const B0_COL_IDX: usize = MIN_STACK_DEPTH;
+    const B1_COL_IDX: usize = MIN_STACK_DEPTH + 1;
+    const H0_COL_IDX: usize = MIN_STACK_DEPTH + 2;
 
     match col_idx {
         // System columns
-        CLK_COL_IDX => "clk".to_string(),
-        CTX_COL_IDX => "ctx".to_string(),
-        i if (FN_HASH_OFFSET..FN_HASH_OFFSET + 4).contains(&i) => {
-            format!("fn_hash[{}]", i - FN_HASH_OFFSET)
+        0 => "clk".to_string(),
+        1 => "ctx".to_string(),
+        i if (FN_HASH_START..FN_HASH_START + 4).contains(&i) => {
+            format!("fn_hash[{}]", i - FN_HASH_START)
         },
 
         // Decoder columns
-        i if i == DECODER_TRACE_OFFSET + ADDR_COL_IDX => "decoder_addr".to_string(),
-        i if (DECODER_TRACE_OFFSET + OP_BITS_OFFSET
-            ..DECODER_TRACE_OFFSET + OP_BITS_OFFSET + NUM_OP_BITS)
+        i if i == DECODER_OFFSET + DEC_ADDR => "decoder_addr".to_string(),
+        i if (DECODER_OFFSET + DEC_OP_BITS..DECODER_OFFSET + DEC_OP_BITS + NUM_OP_BITS)
             .contains(&i) =>
         {
-            format!("op_bits[{}]", i - (DECODER_TRACE_OFFSET + OP_BITS_OFFSET))
+            format!("op_bits[{}]", i - (DECODER_OFFSET + DEC_OP_BITS))
         },
-        i if (DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET
-            ..DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + NUM_HASHER_COLUMNS)
+        i if (DECODER_OFFSET + DEC_HASHER_STATE
+            ..DECODER_OFFSET + DEC_HASHER_STATE + NUM_HASHER_COLUMNS)
             .contains(&i) =>
         {
-            format!("hasher_state[{}]", i - (DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET))
+            format!("hasher_state[{}]", i - (DECODER_OFFSET + DEC_HASHER_STATE))
         },
-        i if i == DECODER_TRACE_OFFSET + IN_SPAN_COL_IDX => "in_span".to_string(),
-        i if i == DECODER_TRACE_OFFSET + GROUP_COUNT_COL_IDX => "group_count".to_string(),
-        i if i == DECODER_TRACE_OFFSET + OP_INDEX_COL_IDX => "op_index".to_string(),
-        i if (DECODER_TRACE_OFFSET + OP_BATCH_FLAGS_OFFSET
-            ..DECODER_TRACE_OFFSET + OP_BATCH_FLAGS_OFFSET + NUM_OP_BATCH_FLAGS)
+        i if i == DECODER_OFFSET + DEC_IN_SPAN => "in_span".to_string(),
+        i if i == DECODER_OFFSET + DEC_GROUP_COUNT => "group_count".to_string(),
+        i if i == DECODER_OFFSET + DEC_OP_INDEX => "op_index".to_string(),
+        i if (DECODER_OFFSET + DEC_OP_BATCH_FLAGS
+            ..DECODER_OFFSET + DEC_OP_BATCH_FLAGS + NUM_OP_BATCH_FLAGS)
             .contains(&i) =>
         {
-            format!("op_batch_flag[{}]", i - (DECODER_TRACE_OFFSET + OP_BATCH_FLAGS_OFFSET))
+            format!("op_batch_flag[{}]", i - (DECODER_OFFSET + DEC_OP_BATCH_FLAGS))
         },
-        i if (DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET
-            ..DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET + NUM_OP_BITS_EXTRA_COLS)
+        i if (DECODER_OFFSET + DEC_OP_BITS_EXTRA
+            ..DECODER_OFFSET + DEC_OP_BITS_EXTRA + NUM_OP_BITS_EXTRA_COLS)
             .contains(&i) =>
         {
-            format!("op_bits_extra[{}]", i - (DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET))
-        },
-        i if (DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET
-            ..DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET + NUM_OP_BITS_EXTRA_COLS)
-            .contains(&i) =>
-        {
-            format!("op_bits_extra[{}]", i - (DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET))
+            format!("op_bits_extra[{}]", i - (DECODER_OFFSET + DEC_OP_BITS_EXTRA))
         },
 
         // Stack columns
-        i if (STACK_TRACE_OFFSET + STACK_TOP_OFFSET
-            ..STACK_TRACE_OFFSET + STACK_TOP_OFFSET + MIN_STACK_DEPTH)
+        i if (STACK_OFFSET + STACK_TOP_OFFSET
+            ..STACK_OFFSET + STACK_TOP_OFFSET + MIN_STACK_DEPTH)
             .contains(&i) =>
         {
-            format!("stack[{}]", i - (STACK_TRACE_OFFSET + STACK_TOP_OFFSET))
+            format!("stack[{}]", i - (STACK_OFFSET + STACK_TOP_OFFSET))
         },
-        i if i == STACK_TRACE_OFFSET + B0_COL_IDX => "stack_b0".to_string(),
-        i if i == STACK_TRACE_OFFSET + B1_COL_IDX => "stack_b1".to_string(),
-        i if i == STACK_TRACE_OFFSET + H0_COL_IDX => "stack_h0".to_string(),
+        i if i == STACK_OFFSET + B0_COL_IDX => "stack_b0".to_string(),
+        i if i == STACK_OFFSET + B1_COL_IDX => "stack_b1".to_string(),
+        i if i == STACK_OFFSET + H0_COL_IDX => "stack_h0".to_string(),
 
         // Range check columns
-        i if i >= RANGE_CHECK_TRACE_OFFSET => {
-            format!("range_check[{}]", i - RANGE_CHECK_TRACE_OFFSET)
+        i if i >= RANGE_OFFSET => {
+            format!("range_check[{}]", i - RANGE_OFFSET)
         },
 
         // Default case

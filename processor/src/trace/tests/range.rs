@@ -9,13 +9,7 @@
 
 use alloc::vec::Vec;
 
-use miden_air::{
-    logup::RangeMsg,
-    trace::{
-        MainTrace, RANGE_CHECK_TRACE_OFFSET,
-        chiplets::{MEMORY_D0_COL_IDX, MEMORY_D1_COL_IDX},
-    },
-};
+use miden_air::{logup::RangeMsg, trace::MainTrace};
 use miden_core::{Felt, operations::Operation};
 use miden_utils_testing::stack;
 
@@ -89,8 +83,9 @@ fn memory_chiplet_row_emits_range_check_removes() {
     let mut exp = Expectations::new(&log);
     for mem_row in &mem_rows {
         let row = usize::from(*mem_row);
-        let d0 = main.get(*mem_row, MEMORY_D0_COL_IDX);
-        let d1 = main.get(*mem_row, MEMORY_D1_COL_IDX);
+        let mem = main.chiplet_cols(*mem_row).memory();
+        let d0 = mem.d0;
+        let d1 = mem.d1;
         let w0 = main.chiplet_memory_word_addr_lo(*mem_row);
         let w1 = main.chiplet_memory_word_addr_hi(*mem_row);
         let four_w1 = w1 * Felt::from_u8(4);
@@ -125,15 +120,13 @@ fn range_checker_table_emits_per_row_adds() {
     let log = InteractionLog::new(&trace);
     let main = trace.main_trace();
 
-    const M_COL_IDX: usize = RANGE_CHECK_TRACE_OFFSET;
-    const V_COL_IDX: usize = RANGE_CHECK_TRACE_OFFSET + 1;
-
     let mut nonzero_mult_rows = 0usize;
     let mut exp = Expectations::new(&log);
     for row in 0..main.num_rows() {
         let idx = RowIndex::from(row);
-        let m = main.get(idx, M_COL_IDX);
-        let v = main.get(idx, V_COL_IDX);
+        let range = &main.core_row_projected(idx).range;
+        let m = range.multiplicity;
+        let v = range.value;
         exp.push(row, m, &RangeMsg { value: v });
         if m != Felt::from_u8(0) {
             nonzero_mult_rows += 1;
