@@ -1,32 +1,29 @@
-//! Content-addressed DAG of *deferred algebraic operations*.
+//! A precompile VM, content-addressed.
 //!
-//! The deferred subsystem represents expensive precompile work (e.g. 256-bit non-native field
-//! arithmetic, future curve ops, non-native hashes over bulk data) as a DAG of typed [`Node`]s
-//! addressed by their 4-felt Poseidon2 digest. The VM uses three generic system events
-//! (`DeferredRegister`, `DeferredRegisterChunk`, `DeferredEvaluate`) to populate the DAG; the
-//! verifier later consumes the resulting [`DeferredState`] (nodes + rolling root) and reduces
-//! the root to TRUE.
+//! Each [`Precompile`] is a small interpreter for a slice of tag space — a specific hash,
+//! signature, or non-native arithmetic. The VM emits `DeferredRegister` /
+//! `DeferredRegisterChunk` / `DeferredEvaluate` system events to build a DAG of [`Node`]s, each
+//! addressed by its 4-felt Poseidon2 digest. The [`PrecompileRegistry`] dispatches every
+//! [`Tag::id`] to the right precompile, which decodes the immediate felts and reduces the node
+//! to its canonical form. `log_precompile` extends a rolling AND-chain whose head — the
+//! transcript root — is the verifier's single fixed point: reduce the root to TRUE and every
+//! logged statement holds.
 //!
-//! The full subsystem — data model, in-memory [`DeferredState`], and the [`Precompile`] /
-//! [`PrecompileRegistry`] substrate — lives here in `miden-core`. The processor only
-//! contributes the system-event glue that bridges VM operand-stack reads to precompile calls.
-//! Reference precompiles that exercise this public surface live in `miden-core`'s integration
-//! tests (`core/tests/common/precompile/`), not on the crate's public surface.
+//! The framework data model + [`DeferredState`] + [`PrecompileRegistry`] live here in
+//! `miden-core`; the processor only contributes the system-event glue. Reference precompiles
+//! that exercise the public surface live in `core/tests/common/precompile/`.
 
 mod node;
+mod precompile;
+mod precompile_schema;
 mod state;
 mod wire;
 
 pub use node::{NodeType, PrecompileError};
+pub use precompile::{Precompile, precompile_id};
+pub use precompile_schema::PrecompileRegistry;
 pub use state::{DeferredState, WitnessBuilder};
 pub use wire::{DeferredStateWire, IntegrityError, TRUE_INDEX, WireBody, WireEntry};
-
-// Multi-precompile registry layer. The `Precompile` trait + `PrecompileRegistry` substrate are
-// the public surface. Production precompiles (keccak256, sha512, ecdsa_k256_keccak, eddsa_ed25519)
-// live in `miden-core-lib::precompiles`, next to their MASM wrappers; reference precompiles
-// live in `core/tests/common/precompile/`.
-mod precompile;
-mod precompile_schema;
 
 // Minimal `#[cfg(test)]` precompile fixture for the engine's own unit tests (state.rs et al.).
 // Not exported, not on the `testing` surface — scaffolding only.
@@ -36,8 +33,6 @@ pub(crate) mod test_precompile;
 use alloc::sync::Arc;
 
 use miden_crypto::{ZERO, hash::poseidon2::Poseidon2};
-pub use precompile::{Precompile, precompile_id};
-pub use precompile_schema::PrecompileRegistry;
 
 use crate::{Felt, Word};
 
@@ -173,16 +168,16 @@ impl Payload {
 // NODE
 // ================================================================================================
 
-/// A DAG node identified by its [`Digest`].
+/// A DAG node: a [`Tag`] and a [`Payload`], addressed by its Poseidon2 [`Digest`].
 ///
-/// The tag is opaque at this layer — the [`PrecompileRegistry`] decodes it. The body is a
-/// [`Payload`], either an 8-felt [`Expression`](Payload::Expression) (leaves, op-nodes,
-/// predicates, AND-nodes) or bulk [`Chunk`](Payload::Chunk) data.
+/// What a node *means* (value leaf? binary op? predicate? AND-step?) is up to the precompile
+/// that owns its `tag.id` — the precompile decodes the immediate felts via
+/// [`Precompile::decode`] and `reduce`s the payload via [`Precompile::reduce`]. The framework
+/// only enforces the structural shape declared by [`NodeType`].
 ///
-/// Predicate nodes — those whose precompile-defined `reduce` returns [`Node::TRUE`] on success —
-/// are structurally indistinguishable from regular expression-bodied nodes; their
-/// "predicate-ness" surfaces as a property of the *reduce result*, not the tag, detected by the
-/// framework via [`Node::is_true_node`] on the canonical.
+/// Predicate nodes have no distinguished shape: a precompile signals "predicate verified" by
+/// returning [`Node::TRUE`] from `reduce`. The framework detects this via [`Node::is_true_node`]
+/// on the canonical and skips the advice-stack push that non-predicate canonicals get.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Node {
     pub tag: Tag,
