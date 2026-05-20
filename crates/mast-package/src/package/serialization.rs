@@ -900,7 +900,10 @@ mod tests {
 
     #[test]
     fn package_manifest_add_dependency_rejects_duplicate_dependencies() {
-        let mut manifest = PackageManifest::default();
+        let mut manifest = PackageManifest {
+            exports: Default::default(),
+            dependencies: Default::default(),
+        };
         let dependency = build_dependency();
 
         manifest

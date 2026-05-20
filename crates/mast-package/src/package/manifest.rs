@@ -26,7 +26,7 @@ use crate::{Dependency, PackageId};
 ///
 /// Dependencies must each specify a unique package identifier, i.e. it is not allowed to have
 /// multiple dependencies on the same package identifier, even if they are different versions.
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(proptest_derive::Arbitrary))]
 #[cfg_attr(
     all(feature = "arbitrary", test),

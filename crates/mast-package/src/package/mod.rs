@@ -745,7 +745,10 @@ mod tests {
     #[test]
     fn to_kernel_rejects_empty_kernel_exports() {
         let mut package = build_package("kernel", TargetType::Kernel, "$kernel::boot", [], vec![]);
-        package.manifest = PackageManifest::default();
+        package.manifest = PackageManifest {
+            exports: Default::default(),
+            dependencies: Default::default(),
+        };
 
         let error = package
             .to_kernel()
