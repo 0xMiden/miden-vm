@@ -60,6 +60,12 @@ impl DeferredState {
         self.nodes.get(digest).ok_or(PrecompileError::MissingNode)
     }
 
+    /// Returns whether `digest` names a wire-committed node — i.e. one that ships in `to_wire`.
+    /// Cache hits are *not* counted: the cache is a host-only evaluation memo, never on the wire,
+    /// and a digest known only through the cache is not part of the verifier's witness.
+    /// [`TRUE_DIGEST`] is the framework sentinel and is never materialized in `nodes`, so this
+    /// returns `false` for it; call sites that need to treat TRUE as a virtual member explicitly
+    /// short-circuit on `d == TRUE_DIGEST` first.
     pub fn contains(&self, digest: &Digest) -> bool {
         self.nodes.contains_key(digest)
     }
@@ -119,6 +125,13 @@ impl DeferredState {
     /// [`PrecompileError::InvalidNode`] is surfaced. The node is interned into the DAG by its
     /// Poseidon2 digest. Re-registering an identical `(digest, node)` pair is silently
     /// idempotent.
+    ///
+    /// Paired with [`Self::evaluate`] — together they back the `DeferredRegister` and
+    /// `DeferredEvaluate` system events. `register` is the cheap "commit this node to the wire"
+    /// step that returns a digest the caller can chain into downstream nodes (as an operand of
+    /// a Binary op, or as a statement passed to `log_precompile`); `evaluate` is the recursive
+    /// reduce on an already-registered node. Splitting them lets the caller declare children
+    /// without forcing a reduce, and lets the verifier re-run identical paths during rehydrate.
     ///
     /// Predicate tags are *not* verified at registration — register is a pure host hint that
     /// only populates the DAG. Verification is explicit: either host-side via [`Self::evaluate`],
@@ -423,6 +436,10 @@ fn payload_matches_type(nt: NodeType, payload: &Payload) -> bool {
 /// `(lhs, rhs)` child digests iff both resolve in `nodes` (or are [`TRUE_DIGEST`]). AND-chain
 /// links (`prev_root || stmt`) fall out of this since AND-nodes are Expression-bodied. Used by
 /// [`DeferredState::rehydrate`] to reject wire entries outside the root's closure.
+///
+/// [`TRUE_DIGEST`] is treated as a virtual edge terminal — reachable but not materialized — so
+/// the closure size matches `nodes.len()` for a faithful wire (no TRUE entry is ever emitted by
+/// `to_wire`, so rehydrate must not require one in `nodes`).
 fn reachable_closure(nodes: &BTreeMap<Digest, Node>, root: Digest) -> BTreeSet<Digest> {
     let mut seen = BTreeSet::new();
     let mut stack = alloc::vec![root];
