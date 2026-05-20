@@ -68,8 +68,10 @@ pub trait Precompile: Send + Sync {
     ///
     /// Canonical-form conventions (per-precompile intent — not enforced by the framework, which
     /// only requires the result to be a valid `Node`):
-    /// - **Self-evaluating leaf**: return the node rebuilt from `(Tag::new(self.id(), imm),
-    ///   payload)`, optionally first validating the payload.
+    /// - **Already-canonical input**: when the input node is its own canonical (e.g. a validated
+    ///   value leaf, or a compound canonical that some other reduce produced via `witness.intern`),
+    ///   return a clone of it. "Canonical" is a per-precompile property of the `(tag, payload)`
+    ///   pair — there is no framework-level tag-equality check for it.
     /// - **Producing op**: resolve the children, combine, return a new node with the canonical tag
     ///   (minting compound-canonical children via `witness.intern`).
     /// - **Predicate**: resolve the operands, check the predicate, return [`Node::TRUE`] on success
