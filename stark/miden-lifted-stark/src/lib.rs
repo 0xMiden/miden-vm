@@ -68,6 +68,7 @@ mod pcs;
 pub mod proof;
 pub mod prover;
 mod selectors;
+pub mod setup;
 pub(crate) mod util;
 pub mod verifier;
 
@@ -93,7 +94,8 @@ pub use lmcs::{
     tree_indices::{MissingSiblingsIter, TreeIndices},
 };
 pub use miden_lifted_air::{
-    Instance, ProverInstance, ReductionError, log2_ceil_u8, log2_strict_u8,
+    Instance, InstanceError, ProverInstance, ReductionError, log2_ceil_u8, log2_strict_u8,
+    validate_inputs, validate_instance, validate_prover_instance, validate_with_heights,
 };
 pub use pcs::{
     deep::{
@@ -110,6 +112,7 @@ pub use pcs::{
 };
 pub use proof::{StarkDigest, StarkOutput, StarkProof, StarkTranscript};
 pub use prover::{ProverError, prove};
+pub use setup::{CompatError, validate_compatible};
 pub use util::bitrev::{BitReversibleMatrix, materialize_bitrev};
 pub use verifier::{VerifierError, verify};
 

@@ -1,8 +1,15 @@
-//! Debug constraint checker for lifted AIRs.
+//! Debug helpers for lifted AIRs.
 //!
-//! Evaluates constraints row-by-row on concrete trace values and panics if any constraint
-//! is nonzero. This avoids the full STARK pipeline (DFT, commitment, FRI) and provides
-//! immediate feedback on constraint violations during development.
+//! Two flavours of helpers live here:
+//!
+//! - **Structural assertions** ([`assert_airs_valid`], [`assert_valid`], [`assert_prover_valid`],
+//!   [`assert_compatible`], [`assert_prover_setup`], [`assert_aux_traces_shape`]) — thin wrappers
+//!   over [`miden_lifted_air::debug`] and [`crate::setup::validate_compatible`] that panic with a
+//!   `BUG:` prefix on contract violation. Call them from tests / setup; the prover and verifier hot
+//!   paths trust their inputs.
+//! - **Constraint checker** ([`check_constraints`]) — evaluates the AIR constraints row-by-row on
+//!   concrete trace values and panics on the first nonzero constraint. Avoids the full STARK
+//!   pipeline so failures surface immediately.
 
 extern crate alloc;
 
@@ -16,7 +23,149 @@ use p3_challenger::{CanObserve, CanSample};
 use p3_field::{ExtensionField, Field};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
-use crate::ProverInstance;
+use crate::{ProverInstance, pcs::params::PcsParams, setup::validate_compatible};
+
+// ============================================================================
+// Structural assertions (thin wrappers over miden_lifted_air::debug + setup)
+// ============================================================================
+
+/// Assert every AIR in `airs` satisfies the structural contract.
+pub fn assert_airs_valid<F, EF, A>(airs: &[&A])
+where
+    F: Field,
+    EF: ExtensionField<F>,
+    A: LiftedAir<F, EF>,
+{
+    miden_lifted_air::debug::assert_airs_valid::<F, EF, A>(airs);
+}
+
+/// Assert `instance` is valid: runtime instance contract + AIR structural
+/// contract.
+pub fn assert_valid<F, EF, I>(instance: &I)
+where
+    F: Field,
+    EF: ExtensionField<F>,
+    I: Instance<F, EF>,
+{
+    miden_lifted_air::debug::assert_valid::<F, EF, I>(instance);
+}
+
+/// Prover-side analogue of [`assert_valid`]: validates trace shape too.
+pub fn assert_prover_valid<F, EF, P>(pi: &P)
+where
+    F: Field,
+    EF: ExtensionField<F>,
+    P: ProverInstance<F, EF>,
+{
+    miden_lifted_air::debug::assert_prover_valid::<F, EF, P>(pi);
+}
+
+/// Assert per-AIR `log_quotient_degree <= params.log_blowup()`.
+pub fn assert_compatible<F, EF, A>(airs: &[&A], params: &PcsParams)
+where
+    F: Field,
+    EF: ExtensionField<F>,
+    A: LiftedAir<F, EF>,
+{
+    validate_compatible::<F, EF, A>(airs, params).expect("BUG: AIR ↔ PCS compatibility");
+}
+
+/// One-shot prover-setup check: bundles [`assert_prover_valid`] and
+/// [`assert_compatible`].
+///
+/// TODO(adr1anh/preprocessed): also call `assert_preprocessed(pi)` once the
+/// preprocessed branch lands.
+pub fn assert_prover_setup<F, EF, P>(pi: &P, params: &PcsParams)
+where
+    F: Field,
+    EF: ExtensionField<F>,
+    P: ProverInstance<F, EF>,
+{
+    assert_prover_valid::<F, EF, P>(pi);
+    assert_compatible::<F, EF, <P::Instance as Instance<F, EF>>::Air>(pi.instance().airs(), params);
+}
+
+/// Drive [`ProverInstance::build_aux_traces`] and assert the returned
+/// shapes match the AIR contract.
+///
+/// This contract is **trusted** by [`crate::prover::prove`] — the prover
+/// will silently consume malformed aux traces and panic deep inside the
+/// LDE pipeline (or produce an unsound proof). Call this helper from
+/// tests to surface the contract violation up-front.
+///
+/// Fiat-Shamir seeding mirrors [`check_constraints`] so the returned aux
+/// values match what `prove` would derive for the same instance.
+pub fn assert_aux_traces_shape<F, EF, P, Ch>(prover_instance: &P, mut challenger: Ch)
+where
+    F: Field,
+    EF: ExtensionField<F>,
+    P: ProverInstance<F, EF>,
+    Ch: CanObserve<F> + CanSample<F>,
+{
+    let instance = prover_instance.instance();
+    let airs = instance.airs();
+    let traces = prover_instance.traces();
+    assert_eq!(
+        airs.len(),
+        traces.len(),
+        "BUG: airs.len() = {} but traces.len() = {}",
+        airs.len(),
+        traces.len(),
+    );
+
+    let log_heights: Vec<u8> = traces.iter().map(|t| log_height(t.height())).collect();
+    instance.observe(&mut challenger, &log_heights);
+    let max_num_randomness = airs.iter().map(|a| a.num_randomness()).max().unwrap_or(0);
+    let challenges: Vec<EF> = (0..max_num_randomness)
+        .map(|_| EF::from_basis_coefficients_fn(|_| challenger.sample()))
+        .collect();
+
+    let (aux_traces, aux_values) = prover_instance.build_aux_traces(&challenges);
+    assert_eq!(
+        aux_traces.len(),
+        airs.len(),
+        "BUG: build_aux_traces returned {} aux traces, expected {}",
+        aux_traces.len(),
+        airs.len(),
+    );
+    assert_eq!(
+        aux_values.len(),
+        airs.len(),
+        "BUG: build_aux_traces returned {} aux value vectors, expected {}",
+        aux_values.len(),
+        airs.len(),
+    );
+
+    for (i, ((air, main), (aux_trace, aux_vals))) in airs
+        .iter()
+        .copied()
+        .zip(traces.iter().copied())
+        .zip(aux_traces.iter().zip(aux_values.iter()))
+        .enumerate()
+    {
+        assert_eq!(
+            aux_trace.width(),
+            air.aux_width(),
+            "BUG: AIR {i}: aux trace width = {}, but air.aux_width() = {}",
+            aux_trace.width(),
+            air.aux_width(),
+        );
+        assert_eq!(
+            aux_trace.height(),
+            main.height(),
+            "BUG: AIR {i}: aux trace height = {}, but main trace height = {}",
+            aux_trace.height(),
+            main.height(),
+        );
+        assert_eq!(
+            aux_vals.len(),
+            air.num_aux_values(),
+            "BUG: AIR {i}: aux_values.len() = {}, but air.num_aux_values() = {}",
+            aux_vals.len(),
+            air.num_aux_values(),
+        );
+    }
+}
 
 // ============================================================================
 // Public API

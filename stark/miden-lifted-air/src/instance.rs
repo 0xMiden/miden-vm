@@ -40,6 +40,8 @@ pub type ReductionError = Box<dyn core::error::Error + Send + Sync>;
 /// - [`Self::air_inputs`]: the public values seen by every AIR. Each AIR's
 ///   [`num_public_values`](crate::BaseAir::num_public_values) must equal `air_inputs().len()`.
 /// - [`Self::aux_inputs`]: extra public data consumed only by [`Self::eval_external`].
+/// - [`Self::max_aux_inputs`]: upper bound on `aux_inputs().len()`, validated at runtime before any
+///   cryptographic work. Default 0 — overriders that consume `aux_inputs` must declare a budget.
 /// - [`Self::eval_external`]: cross-AIR external assertions (bus protocols, multiset equalities,
 ///   …). The default emits no assertions and refuses to be called with non-empty
 ///   [`Self::aux_inputs`].
@@ -76,6 +78,20 @@ where
     /// silently ignore caller-supplied data.
     fn aux_inputs(&self) -> &[F] {
         &[]
+    }
+
+    /// Upper bound on the length of [`Self::aux_inputs`] this instance will
+    /// accept.
+    ///
+    /// The framework rejects any proof whose `aux_inputs().len()` exceeds
+    /// this bound at validation time, before any cryptographic work runs.
+    ///
+    /// Default: 0. This pairs with the default [`Self::eval_external`],
+    /// which rejects any non-empty `aux_inputs`. Implementations that
+    /// consume `aux_inputs` **must** override this so the budget reflects
+    /// the schema their `eval_external` decodes.
+    fn max_aux_inputs(&self) -> usize {
+        0
     }
 
     /// Evaluate cross-AIR external assertions.

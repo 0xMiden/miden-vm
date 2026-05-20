@@ -1175,6 +1175,7 @@ dependencies = [
  "p3-air",
  "p3-challenger",
  "p3-field",
+ "p3-goldilocks",
  "p3-matrix",
  "p3-util",
  "thiserror 2.0.18",

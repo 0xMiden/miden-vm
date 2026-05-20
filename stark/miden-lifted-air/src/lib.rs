@@ -9,8 +9,10 @@
 //!   `observe` hook
 //! - [`ProverInstance`]: prover-only companion to [`Instance`] adding per-AIR main traces and an
 //!   aux-trace builder
-//! - [`validate_air`]: debug/testing helper that checks an AIR satisfies the structural contract
-//!   (the prover/verifier hot path assumes AIRs are correct)
+//! - [`validate`]: runtime checks returned as typed [`validate::InstanceError`] from `prove` and
+//!   `verify`
+//! - [`debug`]: panic-based structural checks for tests / setup ([`debug::assert_airs_valid`],
+//!   [`debug::check_builder_shape`], …)
 
 #![no_std]
 
@@ -18,8 +20,10 @@ extern crate alloc;
 
 mod air;
 mod builder;
+pub mod debug;
 mod instance;
 mod util;
+pub mod validate;
 
 pub use air::{
     AirStructureError, ConstraintDegrees, LiftedAir, TracePart, validate_air, validate_airs,
@@ -27,6 +31,10 @@ pub use air::{
 pub use builder::LiftedAirBuilder;
 pub use instance::{Instance, ProverInstance, ReductionError};
 pub use util::{log2_ceil_u8, log2_strict_u8};
+pub use validate::{
+    InstanceError, validate_inputs, validate_instance, validate_prover_instance,
+    validate_with_heights,
+};
 
 mod empty_window;
 
