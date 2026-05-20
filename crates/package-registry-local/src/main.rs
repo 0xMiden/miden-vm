@@ -5,13 +5,7 @@ use miden_package_registry::{PackageId, PackageRegistry, Version};
 use miden_package_registry_local::LocalPackageRegistry;
 
 #[derive(Debug, Parser)]
-#[command(
-    name = "miden-registry",
-    version,
-    about,
-    rename_all = "kebab-case",
-    arg_required_else_help(true)
-)]
+#[command(version, about, rename_all = "kebab-case", arg_required_else_help(true))]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -139,8 +133,6 @@ fn run(
 
 #[cfg(test)]
 mod tests {
-    use clap::CommandFactory;
-
     use super::*;
 
     fn empty_test_registry() -> (tempfile::TempDir, LocalPackageRegistry) {
@@ -152,18 +144,6 @@ mod tests {
         .unwrap();
 
         (tempdir, registry)
-    }
-
-    #[test]
-    fn help_uses_public_binary_name() {
-        let mut command = Cli::command();
-        assert_eq!(command.get_name(), "miden-registry");
-
-        let help = command.render_help().to_string();
-        assert!(
-            help.contains("Usage: miden-registry"),
-            "help should advertise the public binary name:\n{help}",
-        );
     }
 
     #[test]
