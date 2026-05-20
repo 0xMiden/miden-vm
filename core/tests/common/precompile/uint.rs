@@ -10,7 +10,7 @@ use miden_core::{
     Felt, ZERO,
     deferred::{
         DeferredError, Digest, Node, NodeType, Payload, Precompile, PrecompileError, Tag,
-        WitnessBuilder, precompile_id, true_node,
+        WitnessBuilder, precompile_id,
     },
 };
 
@@ -173,7 +173,7 @@ impl Precompile for Uint {
                 if witness.resolve(lhs)? != witness.resolve(rhs)? {
                     return Err(PrecompileError::AssertionFailed);
                 }
-                Ok(true_node())
+                Ok(Node::TRUE)
             },
         }
     }

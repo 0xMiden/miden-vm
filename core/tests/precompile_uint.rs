@@ -41,7 +41,7 @@ fn end_to_end_register_evaluate_assert_extract() {
     let canonical = state.evaluate(&schema, state.get(&mul).unwrap().clone()).unwrap();
     assert_eq!(canonical, leaf(35));
 
-    // Predicate verification: register interns the eq node; evaluate returns true_node().
+    // Predicate verification: register interns the eq node; evaluate returns Node::TRUE.
     let assertion = Node::expression(Uint::eq_tag(), Payload::binary_op(mul, expected));
     state.register(&schema, assertion.clone()).unwrap();
     let result = state.evaluate(&schema, assertion).unwrap();

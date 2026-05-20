@@ -11,7 +11,7 @@ use miden_core::{
     ZERO,
     deferred::{
         Node, NodeType, Payload, Precompile, PrecompileError, TRUE_DIGEST, Tag, WitnessBuilder,
-        precompile_id, true_node,
+        precompile_id,
     },
 };
 use miden_processor::{
@@ -262,7 +262,7 @@ impl Precompile for ArithTestPrecompile {
                 if witness.resolve(lhs)? != witness.resolve(rhs)? {
                     return Err(PrecompileError::AssertionFailed);
                 }
-                Ok(true_node())
+                Ok(Node::TRUE)
             },
             _ => Err(PrecompileError::InvalidNode),
         }

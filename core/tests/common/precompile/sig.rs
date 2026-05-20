@@ -14,7 +14,6 @@ use miden_core::{
     Felt, ZERO,
     deferred::{
         Node, NodeType, Payload, Precompile, PrecompileError, Tag, WitnessBuilder, precompile_id,
-        true_node,
     },
 };
 
@@ -83,7 +82,7 @@ impl Precompile for Sig {
         if chunks[0][0] == ZERO {
             return Err(PrecompileError::AssertionFailed);
         }
-        Ok(true_node())
+        Ok(Node::TRUE)
     }
 }
 

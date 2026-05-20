@@ -11,7 +11,7 @@ use miden_core::{
     Felt, ZERO,
     deferred::{
         Digest, Node, NodeType, Payload, Precompile, PrecompileError, Tag, WitnessBuilder,
-        precompile_id, true_node,
+        precompile_id,
     },
 };
 
@@ -144,7 +144,7 @@ impl Precompile for Group {
                 if witness.resolve(h_lhs)? != witness.resolve(h_rhs)? {
                     return Err(PrecompileError::AssertionFailed);
                 }
-                Ok(true_node())
+                Ok(Node::TRUE)
             },
         }
     }
