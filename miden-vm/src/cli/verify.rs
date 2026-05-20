@@ -120,7 +120,7 @@ fn load_kernel(kernel_path: &PathBuf) -> Result<Kernel, Report> {
             if !package.is_kernel() {
                 return Err(Report::msg(format!(
                     "invalid kernel package, package is of type {}",
-                    &package.kind,
+                    package.kind,
                 )));
             }
             Arc::new(package)

@@ -53,7 +53,7 @@ impl AssemblyProduct {
                 {
                     return Err(Report::msg(format!(
                         "unable to register kernel dependency: '{}' already exists as a dependency, but with different metadata than the actual kernel package",
-                        &kernel_package.name
+                        kernel_package.name
                     )));
                 }
             } else {

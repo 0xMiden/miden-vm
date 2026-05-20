@@ -341,7 +341,7 @@ impl Linker {
         source_manager: Arc<dyn SourceManager>,
         kernel_package: Arc<MastPackage>,
     ) -> Result<Self, Report> {
-        log::debug!(target: "linker", "instantiating linker with kernel package {}@{}", &kernel_package.name, &kernel_package.version);
+        log::debug!(target: "linker", "instantiating linker with kernel package {}@{}", kernel_package.name, kernel_package.version);
 
         let mut linker = Self::new(source_manager);
         linker.link_with_kernel(kernel_package)?;
@@ -370,7 +370,7 @@ impl Linker {
         assert!(self.kernel.is_empty());
         assert!(self.kernel_package.is_none());
 
-        log::debug!(target: "linker", "modifying linker with kernel package {}@{}", &kernel_package.name, &kernel_package.version);
+        log::debug!(target: "linker", "modifying linker with kernel package {}@{}", kernel_package.name, kernel_package.version);
 
         let mut kernel_index = None;
         for module_info in kernel_package.module_infos() {
