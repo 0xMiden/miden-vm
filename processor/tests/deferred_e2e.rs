@@ -331,12 +331,10 @@ fn deferred_end_to_end_register_eval_assert() {
     // No `log_precompile` calls, so the transcript root is still the TRUE sentinel.
     assert_eq!(state.root(), TRUE_DIGEST);
 
-    // State includes every registered node plus the predicate's reduce intermediates. The
-    // evaluate of the predicate reduces (a+b) → leaf(7) and (a+b)*c → leaf(35). leaf(35)
-    // collides with the pre-registered `d`, so the DAG gains one new node beyond the seven
-    // originally registered: canonical(add) = leaf(7). The TRUE node from the predicate
-    // reduction is not interned (it's a structural sentinel, not a load-bearing DAG node).
-    assert_eq!(state.nodes().len(), 8);
+    // `state.nodes` is host-side committed storage: exactly what `register` / `register_chunk` /
+    // `log` wrote. `evaluate` populates only the cache, so canonical(add) = leaf(7) does NOT
+    // appear here — leaf(35) is in `nodes` solely because the program pre-registered it as `d`.
+    assert_eq!(state.nodes().len(), 7);
     for d in expected_digests {
         assert!(state.contains(&d));
     }

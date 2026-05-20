@@ -47,11 +47,10 @@ fn end_to_end_register_evaluate_assert_extract() {
     let result = state.evaluate(&schema, assertion).unwrap();
     assert!(result.is_true_node());
 
-    // 6 registered expression nodes + 1 eq predicate node + 1 interned intermediate
-    // canonical(add) = leaf(7). canonical(mul) collides with the pre-registered `expected`
-    // (both leaf(35)), so net new from evaluate is 1 (leaf(7)).
-    assert_eq!(state.nodes().len(), 8);
-    assert!(state.contains(&leaf(7).digest()));
+    // 6 registered expression nodes + 1 registered eq predicate. evaluate writes only to the
+    // canonical_of cache, so canonical(add) = leaf(7) does not appear in `nodes`.
+    assert_eq!(state.nodes().len(), 7);
+    assert!(!state.contains(&leaf(7).digest()));
 }
 
 #[test]
