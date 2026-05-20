@@ -13,10 +13,8 @@
 
 use alloc::vec::Vec;
 
-use miden_crypto::hash::blake::Blake3_256;
-
 use super::{Node, NodeType, Payload, PrecompileError, WitnessBuilder};
-use crate::Felt;
+use crate::{Felt, utils::hash_string_to_word};
 
 // PRECOMPILE TRAIT
 // ================================================================================================
@@ -93,16 +91,11 @@ pub trait Precompile: Send + Sync {
 // PRECOMPILE ID DERIVATION
 // ================================================================================================
 
-/// Domain separator pinned to the v1 framework hashing convention. Bump iff the *derivation*
-/// changes (different hash, different input layout).
-const PRECOMPILE_ID_DOMSEP: &[u8] = b"miden-deferred-precompile/v1";
-
 /// Derive a precompile's canonical id from its `name`.
 ///
-/// The name is hashed with Blake3; the first 8 bytes of the digest are interpreted as a
-/// little-endian `u64` and reduced modulo the Goldilocks prime — giving ~32 bits of
-/// birthday-collision resistance, comfortably sufficient for the handful of precompiles a
-/// registry is expected to host. Used by
+/// Mirrors [`EventId::from_name`](crate::events::EventId::from_name): the name is hashed with
+/// Blake3 and the first felt of the resulting [`Word`](crate::Word) becomes the id. Same
+/// derivation convention, distinct namespace from event handlers. Used by
 /// [`PrecompileRegistry::with_precompile`](crate::deferred::PrecompileRegistry::with_precompile)
 /// to validate each precompile's declared [`Precompile::id`].
 pub fn precompile_id(p: &dyn Precompile) -> Felt {
@@ -110,14 +103,7 @@ pub fn precompile_id(p: &dyn Precompile) -> Felt {
 }
 
 fn derive(name: &str) -> Felt {
-    // Length-prefix the name so it is domain-separated from the digest tail.
-    let mut buf = Vec::with_capacity(PRECOMPILE_ID_DOMSEP.len() + 4 + name.len());
-    buf.extend_from_slice(PRECOMPILE_ID_DOMSEP);
-    buf.extend_from_slice(&(name.len() as u32).to_le_bytes());
-    buf.extend_from_slice(name.as_bytes());
-    let digest = Blake3_256::hash(&buf);
-    let raw = u64::from_le_bytes(digest.as_bytes()[..8].try_into().expect("8 bytes"));
-    Felt::new_unchecked(raw % Felt::ORDER)
+    hash_string_to_word(name)[0]
 }
 
 #[cfg(test)]
@@ -135,8 +121,11 @@ mod tests {
     }
 
     #[test]
-    fn id_lies_in_field() {
-        // `new_unchecked` is sound only if the value < Felt::ORDER.
-        assert!(derive("anything").as_canonical_u64() < Felt::ORDER);
+    fn matches_event_id_derivation() {
+        // The two id-derivation paths must agree byte-for-byte: precompile_id uses the
+        // first felt of hash_string_to_word(name); EventId::from_name pulls the same felt
+        // via the same helper. Renaming or reordering that helper must keep this in sync.
+        let name = "my_precompile";
+        assert_eq!(derive(name), crate::events::EventId::from_name(name).as_felt());
     }
 }
