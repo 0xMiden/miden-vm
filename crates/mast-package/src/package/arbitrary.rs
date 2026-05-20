@@ -46,6 +46,8 @@ impl proptest::arbitrary::Arbitrary for Package {
     type Parameters = ArbitraryPackageParams;
 
     fn arbitrary_with(params: Self::Parameters) -> Self::Strategy {
+        use alloc::vec;
+
         use miden_core::{
             mast::{BasicBlockNodeBuilder, MastForestContributor, MastNodeExt},
             operations::Operation,
@@ -58,8 +60,15 @@ impl proptest::arbitrary::Arbitrary for Package {
         // unconditionally, and then generate an arbitrary number of other exports to fill out
         // the package with random items
         (any::<ProcedureExport>(), prop::collection::vec(any::<PackageExport>(), 0..5))
-            .prop_map(move |(proc, mut exports)| {
-                exports.push(PackageExport::Procedure(proc));
+            .prop_map(move |(proc, extra_exports)| {
+                let mut exports = vec![PackageExport::Procedure(proc)];
+                for export in extra_exports {
+                    // Ignore duplicate exports
+                    if exports.iter().any(|existing| existing.path() == export.path()) {
+                        continue;
+                    }
+                    exports.push(export);
+                }
 
                 // Create a MastForest with actual nodes for the exports
                 let mut mast_forest = Box::new(MastForest::new());
