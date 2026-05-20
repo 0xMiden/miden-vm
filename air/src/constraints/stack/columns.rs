@@ -2,6 +2,7 @@ use miden_core::program::MIN_STACK_DEPTH;
 
 /// Stack columns in the main execution trace (19 columns).
 #[repr(C)]
+#[derive(Debug)]
 pub struct StackCols<T> {
     /// Top 16 stack elements s0-s15.
     pub(crate) top: [T; MIN_STACK_DEPTH],

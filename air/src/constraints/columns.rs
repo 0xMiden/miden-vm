@@ -33,6 +33,7 @@ use crate::trace::{CHIPLETS_WIDTH, TRACE_WIDTH};
 /// `[T; NUM_CORE_COLS]` slice or the prefix of a `[T; TRACE_WIDTH]` row via
 /// `Borrow<CoreCols<T>>`.
 #[repr(C)]
+#[derive(Debug)]
 pub struct CoreCols<T> {
     pub system: SystemCols<T>,
     pub decoder: DecoderCols<T>,
@@ -72,6 +73,7 @@ impl<T> BorrowMut<CoreCols<T>> for [T] {
 /// `[T; NUM_CHIPLETS_COLS]` slice or the suffix of a `[T; TRACE_WIDTH]` row via
 /// `Borrow<ChipletCols<T>>`.
 #[repr(C)]
+#[derive(Debug)]
 pub struct ChipletCols<T> {
     pub(crate) chiplets: [T; CHIPLETS_WIDTH - 2],
     /// Permutation segment selector: consumed by `build_chiplet_selectors`.
@@ -313,5 +315,72 @@ mod tests {
     #[test]
     fn chiplet_cols_width() {
         assert_eq!(NUM_CHIPLETS_COLS, CHIPLETS_WIDTH);
+    }
+
+    // --- Layout snapshots ---------------------------------------------------------------------
+    //
+    // These pin the resolved column-index maps of each `Cols<T>` view to `.snap` files,
+    // so any layout change surfaces as a snapshot diff in PR review.
+    // Regenerate with `cargo insta review` (or `INSTA_UPDATE=auto cargo test -p miden-air`).
+
+    /// Builds a `$cols<usize>` index map by reinterpreting `[0, 1, …, N-1]` through the
+    /// struct's `#[repr(C)]` layout, where `N = size_of::<$cols<u8>>()`.
+    macro_rules! col_map {
+        ($cols:ident) => {{
+            const N: usize = core::mem::size_of::<$cols<u8>>();
+            const M: $cols<usize> =
+                unsafe { core::mem::transmute::<[usize; N], $cols<usize>>(indices_arr::<N>()) };
+            M
+        }};
+    }
+
+    #[test]
+    fn core_col_map_layout() {
+        insta::assert_debug_snapshot!(CORE_COL_MAP);
+    }
+
+    #[test]
+    fn chiplet_col_map_layout() {
+        insta::assert_debug_snapshot!(CHIPLET_COL_MAP);
+    }
+
+    #[test]
+    fn bitwise_col_map_layout() {
+        insta::assert_debug_snapshot!(col_map!(BitwiseCols));
+    }
+
+    #[test]
+    fn memory_col_map_layout() {
+        insta::assert_debug_snapshot!(col_map!(MemoryCols));
+    }
+
+    #[test]
+    fn ace_col_map_layout() {
+        insta::assert_debug_snapshot!(col_map!(AceCols));
+    }
+
+    #[test]
+    fn ace_read_col_map_layout() {
+        insta::assert_debug_snapshot!(col_map!(AceReadCols));
+    }
+
+    #[test]
+    fn ace_eval_col_map_layout() {
+        insta::assert_debug_snapshot!(col_map!(AceEvalCols));
+    }
+
+    #[test]
+    fn kernel_rom_col_map_layout() {
+        insta::assert_debug_snapshot!(col_map!(KernelRomCols));
+    }
+
+    #[test]
+    fn hasher_controller_col_map_layout() {
+        insta::assert_debug_snapshot!(col_map!(ControllerCols));
+    }
+
+    #[test]
+    fn hasher_permutation_col_map_layout() {
+        insta::assert_debug_snapshot!(col_map!(PermutationCols));
     }
 }

@@ -1,0 +1,77 @@
+---
+source: air/src/constraints/columns.rs
+expression: CORE_COL_MAP
+---
+CoreCols {
+    system: SystemCols {
+        clk: 0,
+        ctx: 1,
+        fn_hash: [
+            2,
+            3,
+            4,
+            5,
+        ],
+    },
+    decoder: DecoderCols {
+        addr: 6,
+        op_bits: [
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+        ],
+        hasher_state: [
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+        ],
+        in_span: 22,
+        group_count: 23,
+        op_index: 24,
+        batch_flags: [
+            25,
+            26,
+            27,
+        ],
+        extra: [
+            28,
+            29,
+        ],
+    },
+    stack: StackCols {
+        top: [
+            30,
+            31,
+            32,
+            33,
+            34,
+            35,
+            36,
+            37,
+            38,
+            39,
+            40,
+            41,
+            42,
+            43,
+            44,
+            45,
+        ],
+        b0: 46,
+        b1: 47,
+        h0: 48,
+    },
+    range: RangeCols {
+        multiplicity: 49,
+        value: 50,
+    },
+}

@@ -5,6 +5,7 @@ use miden_core::WORD_SIZE;
 /// These columns track global execution state: clock cycle, execution context, and
 /// the function hash (digest) of the currently executing function.
 #[repr(C)]
+#[derive(Debug)]
 pub struct SystemCols<T> {
     /// Clock cycle counter.
     pub clk: T,
