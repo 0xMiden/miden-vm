@@ -1,5 +1,5 @@
-//! Tests that `ProverInstance::build_aux_traces` shape mismatches surface
-//! via [`crate::debug::assert_aux_traces_shape`].
+//! Tests that `MultiAir::build_aux_traces` shape mismatches surface via
+//! [`crate::debug::assert_aux_traces_shape`].
 //!
 //! The prover proper trusts the output of `build_aux_traces` — the
 //! contract is enforced (in debug builds / tests) by calling
@@ -11,7 +11,7 @@ use p3_field::PrimeCharacteristicRing;
 use p3_matrix::dense::RowMajorMatrix;
 
 use crate::{
-    Instance, ProverInstance,
+    MultiAir, ProverStatement, Statement,
     air::{BaseAir, LiftedAir, LiftedAirBuilder},
     debug::assert_aux_traces_shape,
     testing::configs::goldilocks_poseidon2::{Felt, QuadFelt, test_challenger},
@@ -42,42 +42,23 @@ impl LiftedAir<Felt, QuadFelt> for BadAuxWidthAir {
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, _builder: &mut AB) {}
 }
 
-/// Inputs that return 2 EF aux columns when `BadAuxWidthAir` declares 1.
-struct BadInputs<'a> {
-    airs: Vec<&'a BadAuxWidthAir>,
-    traces: Vec<&'a RowMajorMatrix<Felt>>,
-}
+/// `MultiAir` that returns 2 EF aux columns when `BadAuxWidthAir` declares 1.
+struct BadMa;
 
-impl Instance<Felt, QuadFelt> for BadInputs<'_> {
+impl MultiAir<Felt, QuadFelt> for BadMa {
     type Air = BadAuxWidthAir;
-
-    fn airs(&self) -> &[&Self::Air] {
-        &self.airs
-    }
-
-    fn air_inputs(&self) -> &[Felt] {
-        &[]
-    }
-}
-
-impl<'a> ProverInstance<Felt, QuadFelt> for BadInputs<'a> {
-    type Instance = Self;
-
-    fn instance(&self) -> &Self {
-        self
-    }
-
-    fn traces(&self) -> &[&RowMajorMatrix<Felt>] {
-        &self.traces
-    }
 
     fn build_aux_traces(
         &self,
+        _airs: &[Self::Air],
+        traces: &[&RowMajorMatrix<Felt>],
+        _air_inputs: &[Felt],
+        _aux_inputs: &[Felt],
         _challenges: &[QuadFelt],
     ) -> (Vec<RowMajorMatrix<QuadFelt>>, Vec<Vec<QuadFelt>>) {
-        let mut traces_out = Vec::with_capacity(self.traces.len());
-        let mut values_out = Vec::with_capacity(self.traces.len());
-        for &t in &self.traces {
+        let mut traces_out = Vec::with_capacity(traces.len());
+        let mut values_out = Vec::with_capacity(traces.len());
+        for &t in traces {
             let height = p3_matrix::Matrix::height(t);
             // Return 2 columns when aux_width() declares 1.
             let aux = RowMajorMatrix::new(vec![QuadFelt::ZERO; height * 2], 2);
@@ -91,9 +72,9 @@ impl<'a> ProverInstance<Felt, QuadFelt> for BadInputs<'a> {
 #[test]
 #[should_panic(expected = "BUG: AIR 0: aux trace width = 2, but air.aux_width() = 1")]
 fn aux_width_mismatch_panics_in_debug_check() {
-    let air = BadAuxWidthAir;
     let trace = RowMajorMatrix::new(vec![Felt::ZERO, Felt::ONE, Felt::ONE, Felt::ZERO], 1);
-    let inputs = BadInputs { airs: vec![&air], traces: vec![&trace] };
+    let statement = Statement::new(BadMa, vec![BadAuxWidthAir], Vec::new(), Vec::new()).unwrap();
+    let prover_statement = ProverStatement::new(statement, vec![trace]).unwrap();
 
-    assert_aux_traces_shape(&inputs, test_challenger());
+    assert_aux_traces_shape(&prover_statement, test_challenger());
 }

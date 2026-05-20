@@ -98,8 +98,8 @@ pub use lmcs::{
     tree_indices::{MissingSiblingsIter, TreeIndices},
 };
 pub use miden_lifted_air::{
-    Instance, InstanceError, ProverInstance, ReductionError, log2_ceil_u8, log2_strict_u8,
-    validate_inputs, validate_instance, validate_prover_instance, validate_with_heights,
+    InstanceError, MultiAir, ProverStatement, ReductionError, Statement, log2_ceil_u8,
+    log2_strict_u8, validate_inputs, validate_log_heights, validate_prover_traces,
 };
 pub use pcs::{
     deep::{
@@ -140,15 +140,16 @@ pub mod air {
         EmptyWindow,
         ExtensionBuilder,
         FilteredAirBuilder,
-        Instance,
         // Lifted AIR types
         LiftedAir,
         LiftedAirBuilder,
+        MultiAir,
         PeriodicAirBuilder,
         PermutationAirBuilder,
-        ProverInstance,
+        ProverStatement,
         ReductionError,
         RowWindow,
+        Statement,
         WindowAccess,
         // New surface (Commit 1):
         debug,

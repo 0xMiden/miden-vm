@@ -70,7 +70,7 @@ use alloc::{vec, vec::Vec};
 
 use commit::commit_traces;
 use constraints::{evaluate_constraints_into, layout::get_constraint_layout};
-use miden_lifted_air::{Instance, InstanceError, LiftedAir, validate_prover_instance};
+use miden_lifted_air::{InstanceError, LiftedAir, MultiAir, ProverStatement};
 use miden_stark_transcript::{Channel, ProverChannel, ProverTranscript};
 use p3_field::{BasedVectorSpace, ExtensionField, TwoAdicField};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
@@ -79,7 +79,7 @@ use thiserror::Error;
 use tracing::{info_span, instrument};
 
 use crate::{
-    ProverInstance, StarkConfig,
+    StarkConfig,
     domain::{Coset, LiftedDomain, log_quotient_degree},
     instance::TraceOrder,
     pcs::prover::open_with_channel,
@@ -143,32 +143,35 @@ pub enum ProverError {
 /// # Returns
 /// `Ok(StarkOutput { digest, proof })` on success, or a `ProverError` if validation fails.
 #[instrument(name = "prove", skip_all)]
-pub fn prove<F, EF, P, SC>(
+pub fn prove<F, EF, MA, SC>(
     config: &SC,
-    prover_instance: &P,
+    prover_statement: &ProverStatement<F, EF, MA>,
     mut challenger: SC::Challenger,
 ) -> Result<StarkOutput<F, EF, SC>, ProverError>
 where
     F: TwoAdicField,
     EF: ExtensionField<F>,
     SC: StarkConfig<F, EF>,
-    P: ProverInstance<F, EF>,
+    MA: MultiAir<F, EF>,
 {
     // --- Trust boundary (see doc-block above). -------------------------------
-    validate_prover_instance(prover_instance)?;
-    let instance = prover_instance.instance();
-    let airs = instance.airs();
+    let statement = prover_statement.statement();
+    let airs = statement.airs();
     validate_compatible::<F, EF, _>(airs, config.pcs())?;
 
-    let traces = prover_instance.traces();
-    let air_inputs = instance.air_inputs();
+    let traces = prover_statement.traces();
+    let air_inputs = statement.air_inputs();
     let trace_heights: Vec<usize> = traces.iter().map(|t| t.height()).collect();
     let trace_order = TraceOrder::from_trace_heights(&trace_heights)
-        .expect("BUG: validate_prover_instance should reject malformed heights");
+        .expect("BUG: ProverStatement::new should reject malformed heights");
 
-    // Per-position views in the proof's ascending AIR ordering.
-    let proof_ordered_airs = trace_order.to_proof_order(airs);
-    let proof_ordered_traces = trace_order.to_proof_order(traces);
+    // Borrow each AIR and trace, then reorder both into ascending-height (proof)
+    // order. AIRs are passed as `&MA::Air` (the existing constraint code expects
+    // a reference); traces likewise via `&RowMajorMatrix<F>`.
+    let air_refs: Vec<&MA::Air> = airs.iter().collect();
+    let trace_refs: Vec<&RowMajorMatrix<F>> = traces.iter().collect();
+    let proof_ordered_airs = trace_order.to_proof_order(&air_refs);
+    let proof_ordered_traces = trace_order.to_proof_order(&trace_refs);
     let proof_ordered: Vec<_> = proof_ordered_airs
         .iter()
         .copied()
@@ -184,9 +187,9 @@ where
         .map(|&log_h| max_lde_domain.try_sub_domain(log_h))
         .collect::<Result<_, _>>()?;
 
-    // Absorb the instance (the default observe also covers each AIR's log
+    // Absorb the statement (the default observe also covers each AIR's log
     // trace height in instance order). Verifier mirrors the same call.
-    instance.observe(&mut challenger, trace_order.log_heights_instance());
+    statement.observe(&mut challenger, trace_order.log_heights_instance());
 
     let mut channel = ProverTranscript::new(challenger);
 
@@ -251,7 +254,7 @@ where
     // The output shapes are trusted (see trust contract above). Tests can
     // surface contract violations via `crate::debug::assert_aux_traces_shape`.
     let (mut aux_traces_ef, mut all_aux_values) =
-        info_span!("build aux traces").in_scope(|| prover_instance.build_aux_traces(&randomness));
+        info_span!("build aux traces").in_scope(|| prover_statement.build_aux_traces(&randomness));
     trace_order.reorder_to_proof_in_place(&mut aux_traces_ef);
     trace_order.reorder_to_proof_in_place(&mut all_aux_values);
 

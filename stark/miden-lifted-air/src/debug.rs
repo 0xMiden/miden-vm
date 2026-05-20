@@ -9,21 +9,23 @@
 //! - [`assert_airs_valid`] / [`check_air_structure`] / [`check_one_air`]: verify an AIR (or AIR
 //!   list) satisfies the structural contract assumed by the rest of the protocol — no preprocessed
 //!   trace, positive auxiliary width, power-of-two periodic columns.
+//! - [`assert_valid`] / [`assert_prover_valid`]: structural contract plus the runtime contract
+//!   baked into [`Statement`] / [`ProverStatement`].
 //! - [`check_builder_shape`]: verify a concrete builder's accessor dimensions match an AIR before
 //!   calling [`LiftedAir::eval`]. Used as a `cfg(debug_assertions)` belt-and-suspenders inside the
 //!   prover and verifier loops.
 
-use p3_field::Field;
+use p3_field::{ExtensionField, Field};
 
 use crate::{
-    Instance, LiftedAir, LiftedAirBuilder, ProverInstance, WindowAccess,
-    validate::{validate_instance, validate_prover_instance},
+    LiftedAir, LiftedAirBuilder, MultiAir, ProverStatement, Statement, WindowAccess,
+    validate::{validate_inputs, validate_prover_traces},
 };
 
 /// Assert every AIR in `airs` satisfies the structural contract.
 ///
 /// Convenience entry point: equivalent to [`check_air_structure`].
-pub fn assert_airs_valid<F, EF, A>(airs: &[&A])
+pub fn assert_airs_valid<F, EF, A>(airs: &[A])
 where
     F: Field,
     A: LiftedAir<F, EF>,
@@ -31,45 +33,59 @@ where
     check_air_structure::<F, EF, A>(airs);
 }
 
-/// Assert an instance is fully valid: the runtime instance contract via
-/// [`validate_instance`] plus the AIR structural contract via
-/// [`check_air_structure`].
-pub fn assert_valid<F, EF, I>(instance: &I)
+/// Assert a statement is fully valid: the runtime inputs contract plus the
+/// AIR structural contract.
+pub fn assert_valid<F, EF, MA>(statement: &Statement<F, EF, MA>)
 where
     F: Field,
-    EF: p3_field::ExtensionField<F>,
-    I: Instance<F, EF>,
+    EF: ExtensionField<F>,
+    MA: MultiAir<F, EF>,
 {
-    validate_instance(instance).expect("BUG: instance invalid (debug)");
-    check_air_structure::<F, EF, I::Air>(instance.airs());
+    validate_inputs::<F, EF, MA>(
+        statement.multi_air(),
+        statement.airs(),
+        statement.air_inputs(),
+        statement.aux_inputs(),
+    )
+    .expect("BUG: statement invalid (debug)");
+    check_air_structure::<F, EF, MA::Air>(statement.airs());
 }
 
 /// Prover-side analogue of [`assert_valid`]: validates trace shape too via
-/// [`validate_prover_instance`].
-pub fn assert_prover_valid<F, EF, P>(pi: &P)
+/// [`validate_prover_traces`].
+pub fn assert_prover_valid<F, EF, MA>(prover_statement: &ProverStatement<F, EF, MA>)
 where
     F: Field,
-    EF: p3_field::ExtensionField<F>,
-    P: ProverInstance<F, EF>,
+    EF: ExtensionField<F>,
+    MA: MultiAir<F, EF>,
 {
-    validate_prover_instance(pi).expect("BUG: prover instance invalid (debug)");
-    check_air_structure::<F, EF, <P::Instance as Instance<F, EF>>::Air>(pi.instance().airs());
+    let statement = prover_statement.statement();
+    validate_inputs::<F, EF, MA>(
+        statement.multi_air(),
+        statement.airs(),
+        statement.air_inputs(),
+        statement.aux_inputs(),
+    )
+    .expect("BUG: statement invalid (debug)");
+    validate_prover_traces::<F, EF, MA>(statement, prover_statement.traces())
+        .expect("BUG: prover traces invalid (debug)");
+    check_air_structure::<F, EF, MA::Air>(statement.airs());
 }
 
 /// Assert every AIR in `airs` is structurally well-formed.
 ///
 /// Loops [`check_one_air`] over the list. The list-level invariant that
 /// every AIR declares the same `num_public_values` is *not* checked here;
-/// the runtime
-/// [`validate_inputs`](crate::validate::validate_inputs) enforces the
-/// stronger per-AIR equality `num_public_values == air_inputs.len()`.
-pub fn check_air_structure<F, EF, A>(airs: &[&A])
+/// the runtime [`validate_inputs`](crate::validate::validate_inputs)
+/// enforces the stronger per-AIR equality
+/// `num_public_values == air_inputs.len()`.
+pub fn check_air_structure<F, EF, A>(airs: &[A])
 where
     F: Field,
     A: LiftedAir<F, EF>,
 {
     for (idx, air) in airs.iter().enumerate() {
-        check_one_air::<F, EF, _>(idx, *air);
+        check_one_air::<F, EF, _>(idx, air);
     }
 }
 

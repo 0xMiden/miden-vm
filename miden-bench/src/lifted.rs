@@ -3,7 +3,7 @@
 use std::fmt;
 
 use miden_lifted_stark::{
-    Instance, ProverInstance, StarkConfig,
+    MultiAir, ProverStatement, StarkConfig, Statement,
     air::{BaseAir, LiftedAir, LiftedAirBuilder},
     prove,
     testing::airs::{
@@ -76,46 +76,28 @@ impl<EF: Field> LiftedAir<Felt, EF> for LiftedBenchAir {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Inputs: per-AIR all-zero aux trace, empty public inputs.
+// MultiAir: per-AIR all-zero aux trace, empty public inputs.
 // ═══════════════════════════════════════════════════════════════════════════════
 
-struct BenchInputs<'a> {
-    airs: Vec<&'a LiftedBenchAir>,
-    traces: Vec<&'a RowMajorMatrix<Felt>>,
+struct BenchMa {
     /// `(num_aux_cols, num_aux_values)` per AIR.
     aux_shape: Vec<(usize, usize)>,
 }
 
-impl Instance<Felt, QuadFelt> for BenchInputs<'_> {
+impl MultiAir<Felt, QuadFelt> for BenchMa {
     type Air = LiftedBenchAir;
-
-    fn airs(&self) -> &[&Self::Air] {
-        &self.airs
-    }
-
-    fn air_inputs(&self) -> &[Felt] {
-        &[]
-    }
-}
-
-impl<'a> ProverInstance<Felt, QuadFelt> for BenchInputs<'a> {
-    type Instance = Self;
-
-    fn instance(&self) -> &Self {
-        self
-    }
-
-    fn traces(&self) -> &[&RowMajorMatrix<Felt>] {
-        &self.traces
-    }
 
     fn build_aux_traces(
         &self,
+        _airs: &[Self::Air],
+        traces: &[&RowMajorMatrix<Felt>],
+        _air_inputs: &[Felt],
+        _aux_inputs: &[Felt],
         _challenges: &[QuadFelt],
     ) -> (Vec<RowMajorMatrix<QuadFelt>>, Vec<Vec<QuadFelt>>) {
-        let mut traces_out = Vec::with_capacity(self.traces.len());
-        let mut values_out = Vec::with_capacity(self.traces.len());
-        for (i, &t) in self.traces.iter().enumerate() {
+        let mut traces_out = Vec::with_capacity(traces.len());
+        let mut values_out = Vec::with_capacity(traces.len());
+        for (i, &t) in traces.iter().enumerate() {
             let height = t.height();
             let (num_aux_cols, num_aux_values) = self.aux_shape[i];
             let values = QuadFelt::zero_vec(height * num_aux_cols);
@@ -164,14 +146,14 @@ where
         })
         .collect();
 
-    let inputs = BenchInputs {
-        airs: airs.iter().collect(),
-        traces: traces.iter().collect(),
-        aux_shape,
-    };
+    let traces_owned: Vec<RowMajorMatrix<Felt>> = traces.to_vec();
+    let statement =
+        Statement::new(BenchMa { aux_shape }, airs, Vec::new(), Vec::new()).expect("statement");
+    let prover_statement = ProverStatement::new(statement, traces_owned).expect("prover statement");
 
-    let output = info_span!("prove")
-        .in_scope(|| prove(config, &inputs, config.challenger()).expect("proving failed"));
+    let output = info_span!("prove").in_scope(|| {
+        prove(config, &prover_statement, config.challenger()).expect("proving failed")
+    });
 
     let result = RunResult {
         proof_size_bytes: output.proof.size_in_bytes(),
@@ -181,8 +163,9 @@ where
 
     if !cli.no_verify {
         info_span!("verify").in_scope(|| {
-            let digest = verify(config, &inputs, &output.proof, config.challenger())
-                .expect("verification failed");
+            let digest =
+                verify(config, prover_statement.statement(), &output.proof, config.challenger())
+                    .expect("verification failed");
             assert_eq!(output.digest, digest);
         });
     }

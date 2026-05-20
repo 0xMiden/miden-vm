@@ -46,7 +46,7 @@ use core::marker::PhantomData;
 
 use constraints::ConstraintFolder;
 use miden_lifted_air::{
-    BaseAir, Instance, InstanceError, LiftedAir, ReductionError, RowWindow, validate_with_heights,
+    BaseAir, InstanceError, LiftedAir, MultiAir, ReductionError, RowWindow, Statement,
 };
 use miden_stark_transcript::{Channel, TranscriptError, VerifierChannel, VerifierTranscript};
 use p3_field::{ExtensionField, TwoAdicField};
@@ -146,9 +146,9 @@ pub enum VerifierError {
 ///
 /// ## Trusted (NOT validated)
 /// - AIR structural shape (same list as in [`crate::prove`])
-pub fn verify<F, EF, I, SC>(
+pub fn verify<F, EF, MA, SC>(
     config: &SC,
-    instance: &I,
+    statement: &Statement<F, EF, MA>,
     proof: &StarkProof<F, EF, SC>,
     mut challenger: SC::Challenger,
 ) -> Result<StarkDigest<F, EF, SC>, VerifierError>
@@ -156,20 +156,26 @@ where
     F: TwoAdicField,
     EF: ExtensionField<F>,
     SC: StarkConfig<F, EF>,
-    I: Instance<F, EF>,
+    MA: MultiAir<F, EF>,
 {
     // --- Trust boundary (see doc-block above). -------------------------------
     //
     // `TraceOrder::from_log_heights` runs first because it bounds `log_h`
-    // within the host's `usize` width; `validate_with_heights` later
-    // dereferences `1usize << log_h` and would otherwise overflow on a
-    // malicious proof.
+    // within the host's `usize` width; later code dereferences
+    // `1usize << log_h` and would otherwise overflow on a malicious proof.
+    // Per-AIR periodic-height feasibility is checked here on the heights
+    // carried by the (untrusted) proof; Statement::new already enforced the
+    // input-side contracts before construction.
     let trace_order = TraceOrder::from_log_heights(proof.log_trace_heights.clone())?;
-    validate_with_heights(instance, trace_order.log_heights_instance())?;
-    validate_compatible::<F, EF, _>(instance.airs(), config.pcs())?;
+    miden_lifted_air::validate_log_heights::<F, EF, MA>(
+        statement,
+        trace_order.log_heights_instance(),
+    )?;
+    validate_compatible::<F, EF, _>(statement.airs(), config.pcs())?;
 
-    let proof_ordered_airs = trace_order.to_proof_order(instance.airs());
-    let air_inputs = instance.air_inputs();
+    let air_refs: Vec<&MA::Air> = statement.airs().iter().collect();
+    let proof_ordered_airs = trace_order.to_proof_order(&air_refs);
+    let air_inputs = statement.air_inputs();
 
     let log_blowup = config.pcs().log_blowup();
     let log_max_trace_height = trace_order.max_log_height();
@@ -180,10 +186,10 @@ where
         .map(|&log_h| max_lde_domain.try_sub_domain(log_h))
         .collect::<Result<_, _>>()?;
 
-    // Absorb the instance (the default observe also covers each AIR's log
+    // Absorb the statement (the default observe also covers each AIR's log
     // trace height in instance order). Both prover and verifier mirror this
     // call.
-    instance.observe(&mut challenger, trace_order.log_heights_instance());
+    statement.observe(&mut challenger, trace_order.log_heights_instance());
 
     let mut channel = VerifierTranscript::from_data(challenger, &proof.transcript);
 
@@ -349,7 +355,7 @@ where
     // defined in instance-order terms.
     let aux_instance = trace_order.to_instance_order(&all_aux_values);
     let aux_views: Vec<&[EF]> = aux_instance.iter().map(Vec::as_slice).collect();
-    let assertions = instance
+    let assertions = statement
         .eval_external(&randomness, &aux_views, trace_order.log_heights_instance())
         .map_err(VerifierError::Reduction)?;
     for (k, assertion) in assertions.iter().enumerate() {

@@ -7,7 +7,7 @@ use p3_field::PrimeCharacteristicRing;
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
 use crate::{
-    DomainError, Instance, InstanceError, ProverError, ProverInstance, ShapeError, TraceOrder,
+    DomainError, InstanceError, MultiAir, ProverStatement, ShapeError, Statement, TraceOrder,
     VerifierError,
     air::{AirBuilder, BaseAir, ExtensionBuilder, LiftedAir, LiftedAirBuilder, WindowAccess},
     prove,
@@ -130,49 +130,41 @@ fn tiny_aux(
     (aux_trace, aux_values)
 }
 
-/// Inputs struct that produces tiny aux traces for one or more main traces.
-struct TinyInputs<'a> {
-    airs: Vec<&'a TinyAir>,
-    traces: Vec<&'a RowMajorMatrix<Felt>>,
-    air_inputs: &'a [Felt],
-}
+/// `MultiAir` that runs [`tiny_aux`] per AIR.
+struct TinyMa;
 
-impl Instance<Felt, QuadFelt> for TinyInputs<'_> {
+impl MultiAir<Felt, QuadFelt> for TinyMa {
     type Air = TinyAir;
-
-    fn airs(&self) -> &[&Self::Air] {
-        &self.airs
-    }
-
-    fn air_inputs(&self) -> &[Felt] {
-        self.air_inputs
-    }
-}
-
-impl<'a> ProverInstance<Felt, QuadFelt> for TinyInputs<'a> {
-    type Instance = Self;
-
-    fn instance(&self) -> &Self {
-        self
-    }
-
-    fn traces(&self) -> &[&RowMajorMatrix<Felt>] {
-        &self.traces
-    }
 
     fn build_aux_traces(
         &self,
+        _airs: &[Self::Air],
+        traces: &[&RowMajorMatrix<Felt>],
+        _air_inputs: &[Felt],
+        _aux_inputs: &[Felt],
         challenges: &[QuadFelt],
     ) -> (Vec<RowMajorMatrix<QuadFelt>>, Vec<Vec<QuadFelt>>) {
-        let mut traces = Vec::with_capacity(self.traces.len());
-        let mut values = Vec::with_capacity(self.traces.len());
-        for &t in &self.traces {
+        let mut traces_out = Vec::with_capacity(traces.len());
+        let mut values_out = Vec::with_capacity(traces.len());
+        for &t in traces {
             let (a, v) = tiny_aux(t, challenges);
-            traces.push(a);
-            values.push(v);
+            traces_out.push(a);
+            values_out.push(v);
         }
-        (traces, values)
+        (traces_out, values_out)
     }
+}
+
+/// Build a [`ProverStatement`] for tests.
+///
+/// Returns `Err` if validation fails (so callers can exercise error paths).
+fn tiny_prover_statement(
+    airs: Vec<TinyAir>,
+    traces: Vec<RowMajorMatrix<Felt>>,
+    air_inputs: Vec<Felt>,
+) -> Result<ProverStatement<Felt, QuadFelt, TinyMa>, InstanceError> {
+    let statement = Statement::new(TinyMa, airs, air_inputs, Vec::new())?;
+    ProverStatement::new(statement, traces)
 }
 
 fn trace_of_height(height: usize) -> RowMajorMatrix<Felt> {
@@ -192,20 +184,18 @@ fn single_trace() {
 #[test]
 fn malformed_transcript_is_rejected() {
     let config = test_config();
-    let air = TinyAir::new(vec![]);
+    let prover_statement = tiny_prover_statement(
+        vec![TinyAir::new(vec![])],
+        vec![trace_of_height(4)],
+        vec![Felt::from_u64(START)],
+    )
+    .expect("valid");
 
-    let trace = trace_of_height(4);
-    let air_inputs = vec![Felt::from_u64(START)];
-    let inputs = TinyInputs {
-        airs: vec![&air],
-        traces: vec![&trace],
-        air_inputs: &air_inputs,
-    };
-
-    let output = prove(&config, &inputs, test_challenger()).expect("proving should succeed");
+    let output =
+        prove(&config, &prover_statement, test_challenger()).expect("proving should succeed");
 
     // Baseline should verify
-    let _digest = verify(&config, &inputs, &output.proof, test_challenger())
+    let _digest = verify(&config, prover_statement.statement(), &output.proof, test_challenger())
         .expect("baseline proof should verify");
 
     // Extra field element should cause rejection
@@ -214,7 +204,7 @@ fn malformed_transcript_is_rejected() {
     fields.push(Felt::ONE);
     bad_proof.transcript = TranscriptData::new(fields, commitments);
 
-    let err = verify(&config, &inputs, &bad_proof, test_challenger())
+    let err = verify(&config, prover_statement.statement(), &bad_proof, test_challenger())
         .expect_err("extra transcript data should fail verification");
     assert!(matches!(err, VerifierError::Transcript(TranscriptError::TrailingData)));
 }
@@ -222,23 +212,22 @@ fn malformed_transcript_is_rejected() {
 #[test]
 fn malformed_log_trace_heights_is_rejected() {
     let config = test_config();
-    let air = TinyAir::new(vec![]);
+    let prover_statement = tiny_prover_statement(
+        vec![TinyAir::new(vec![])],
+        vec![trace_of_height(4)],
+        vec![Felt::from_u64(START)],
+    )
+    .expect("valid");
+    let statement = prover_statement.statement();
 
-    let trace = trace_of_height(4);
-    let air_inputs = vec![Felt::from_u64(START)];
-    let inputs = TinyInputs {
-        airs: vec![&air],
-        traces: vec![&trace],
-        air_inputs: &air_inputs,
-    };
-
-    let output = prove(&config, &inputs, test_challenger()).expect("proving should succeed");
+    let output =
+        prove(&config, &prover_statement, test_challenger()).expect("proving should succeed");
 
     // Push straight to the `pub(crate)` `log_trace_heights` field to bypass
     // shape construction and exercise the verifier-side trace-count check.
     let mut bad_proof = output.proof.clone();
     bad_proof.log_trace_heights.push(2);
-    let err = verify(&config, &inputs, &bad_proof, test_challenger())
+    let err = verify(&config, statement, &bad_proof, test_challenger())
         .expect_err("extra log trace height should fail verification");
     assert!(matches!(
         err,
@@ -249,7 +238,7 @@ fn malformed_log_trace_heights_is_rejected() {
     // `ShapeError::Empty` before the per-AIR check runs.
     let mut bad_proof = output.proof.clone();
     bad_proof.log_trace_heights.clear();
-    let err = verify(&config, &inputs, &bad_proof, test_challenger())
+    let err = verify(&config, statement, &bad_proof, test_challenger())
         .expect_err("empty log trace heights should fail verification");
     assert!(matches!(err, VerifierError::Shape(ShapeError::Empty)));
 
@@ -259,7 +248,7 @@ fn malformed_log_trace_heights_is_rejected() {
     // `TraceOrder::from_log_heights` before any domain construction.
     let mut bad_proof = output.proof.clone();
     bad_proof.log_trace_heights = vec![200];
-    let err = verify(&config, &inputs, &bad_proof, test_challenger())
+    let err = verify(&config, statement, &bad_proof, test_challenger())
         .expect_err("oversized log trace height should fail verification");
     assert!(matches!(
         err,
@@ -272,37 +261,24 @@ fn malformed_log_trace_heights_is_rejected() {
     // `two_adic_generator` call on the LDE domain.
     let mut bad_proof = output.proof;
     bad_proof.log_trace_heights = vec![30];
-    let err = verify(&config, &inputs, &bad_proof, test_challenger())
+    let err = verify(&config, statement, &bad_proof, test_challenger())
         .expect_err("log_h + log_blowup exceeding two-adicity should fail verification");
     assert!(matches!(err, VerifierError::Domain(DomainError::LdeOrderTooLarge { .. })));
 }
 
 #[test]
 fn prover_rejects_non_power_of_two_trace_height() {
-    // Use a non-power-of-two height directly — `TraceOrder::from_trace_heights`
-    // must reject it rather than panicking inside `log2_strict_u8`.
-    let config = test_config();
-    let air = TinyAir::new(vec![]);
-
+    // `ProverStatement::new` must reject non-power-of-two heights before any
+    // prover work runs.
     let trace =
         RowMajorMatrix::new(vec![Felt::from_u64(2), Felt::from_u64(16), Felt::from_u64(65536)], 1);
-    let air_inputs = vec![Felt::from_u64(2)];
-    let inputs = TinyInputs {
-        airs: vec![&air],
-        traces: vec![&trace],
-        air_inputs: &air_inputs,
-    };
-
-    let result = prove(&config, &inputs, test_challenger());
-    match result {
-        Err(ProverError::Instance(InstanceError::TraceHeightNotPowerOfTwo {
-            air: 0,
-            height: 3,
-        })) => {},
-        Err(other) => {
-            panic!("expected TraceHeightNotPowerOfTwo {{ air: 0, height: 3 }}, got {other:?}")
-        },
-        Ok(_) => panic!("non-power-of-two trace height should fail proving"),
+    let err =
+        tiny_prover_statement(vec![TinyAir::new(vec![])], vec![trace], vec![Felt::from_u64(2)])
+            .err()
+            .expect("non-power-of-two trace height should be rejected");
+    match err {
+        InstanceError::TraceHeightNotPowerOfTwo { air: 0, height: 3 } => {},
+        other => panic!("expected TraceHeightNotPowerOfTwo {{ air: 0, height: 3 }}, got {other:?}"),
     }
 }
 
@@ -394,19 +370,16 @@ fn periodic_columns_reversed_order() {
 #[test]
 fn air_order_reflects_caller_order() {
     let config = test_config();
-    let air = TinyAir::new(vec![]);
+    let prover_statement = tiny_prover_statement(
+        vec![TinyAir::new(vec![]), TinyAir::new(vec![])],
+        // Pass traces in reverse height order: [height=8, height=4].
+        vec![trace_of_height(8), trace_of_height(4)],
+        vec![Felt::from_u64(START)],
+    )
+    .expect("valid");
 
-    // Pass traces in reverse height order: [height=8, height=4].
-    let t0 = trace_of_height(8);
-    let t1 = trace_of_height(4);
-    let air_inputs = vec![Felt::from_u64(START)];
-    let inputs = TinyInputs {
-        airs: vec![&air, &air],
-        traces: vec![&t0, &t1],
-        air_inputs: &air_inputs,
-    };
-
-    let output = prove(&config, &inputs, test_challenger()).expect("proving should succeed");
+    let output =
+        prove(&config, &prover_statement, test_challenger()).expect("proving should succeed");
 
     // The proof carries heights in instance order: [height=8, height=4]
     // → [log_h=3, log_h=2]. The proof's AIR ordering itself is implicit

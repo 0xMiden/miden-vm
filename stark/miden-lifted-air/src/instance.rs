@@ -1,167 +1,141 @@
-//! [`Instance`] and [`ProverInstance`] — the air-side descriptions of a
-//! multi-AIR statement.
+//! Multi-AIR statement description.
 //!
-//! [`Instance`] is the data both prover and verifier consume: the AIRs in
-//! this proof (in instance order, via [`Instance::airs`]), the shared
-//! `air_inputs`, optional `aux_inputs` consumed only by `eval_external`,
-//! the cross-AIR `eval_external` check, and a Fiat-Shamir `observe` hook.
-//!
-//! [`ProverInstance`] is the prover-only companion that contains an
-//! [`Instance`] and adds per-AIR main traces plus a `build_aux_traces` hook.
-//!
-//! Ordering is not part of either trait's surface: every list is in
-//! **instance order** (the position returned by [`Instance::airs`]), and the
-//! stark crate derives the proof's wire-format AIR ordering internally (via
-//! `TraceOrder`).
+//! - [`MultiAir`]: trait carrying the protocol behavior — AIRs, the cross-AIR `eval_external`
+//!   reduction, the aux-trace builder, and the Fiat-Shamir `observe` hook. Stateless implementors
+//!   are typically ZSTs; stateful ones (closures, lookup tables, etc.) carry data on `&self`.
+//! - [`Statement`]: validated per-proof inputs over a `MultiAir` — the AIRs, `air_inputs`,
+//!   `aux_inputs`. Construction via [`Statement::new`] runs the inputs-class validation; the type
+//!   itself encodes the invariant.
+//! - [`ProverStatement`]: validated prover-side companion — a [`Statement`] plus per-AIR main
+//!   traces. Construction via [`ProverStatement::new`] runs the trace-shape validation.
 
 extern crate alloc;
 
 use alloc::{boxed::Box, vec::Vec};
+use core::marker::PhantomData;
 
 use p3_challenger::CanObserve;
 use p3_field::{ExtensionField, Field};
 use p3_matrix::dense::RowMajorMatrix;
 
-use crate::LiftedAir;
+use crate::{
+    LiftedAir,
+    validate::{InstanceError, validate_inputs, validate_prover_traces},
+};
 
-/// Boxed error returned by [`Instance::eval_external`].
-///
-/// Each `Instance` impl defines its own concrete error type and boxes it
-/// into this alias.
+/// Boxed error returned by [`MultiAir::eval_external`].
 pub type ReductionError = Box<dyn core::error::Error + Send + Sync>;
 
-/// Description of a multi-AIR statement.
+// ============================================================================
+// MultiAir trait
+// ============================================================================
+
+/// Protocol behavior for a multi-AIR statement.
 ///
-/// A single `Instance` impl is passed to both the prover and the verifier.
-/// It carries:
+/// Methods take `&self` so a `MultiAir` impl can carry protocol-level state
+/// (closures, lookup tables, shared parameters). Most impls are ZSTs.
 ///
-/// - [`Self::airs`]: the AIRs in this proof, in instance order. Heterogeneous AIRs are expressed
-///   via caller-defined enum wrappers (see `miden-bench`'s `LiftedBenchAir`).
-/// - [`Self::air_inputs`]: the public values seen by every AIR. Each AIR's
-///   [`num_public_values`](crate::BaseAir::num_public_values) must equal `air_inputs().len()`.
-/// - [`Self::aux_inputs`]: extra public data consumed only by [`Self::eval_external`].
-/// - [`Self::max_aux_inputs`]: upper bound on `aux_inputs().len()`, validated at runtime before any
-///   cryptographic work. Default 0 — overriders that consume `aux_inputs` must declare a budget.
-/// - [`Self::eval_external`]: cross-AIR external assertions (bus protocols, multiset equalities,
-///   …). The default emits no assertions and refuses to be called with non-empty
-///   [`Self::aux_inputs`].
-/// - [`Self::observe`]: Fiat-Shamir absorption. The default observes `air_inputs`, then
-///   `aux_inputs`, then each AIR's log trace height in instance order.
-pub trait Instance<F, EF>
+/// The framework defines instance order as the position of an AIR within the
+/// `airs` slice passed to these methods. Every per-AIR slice elsewhere on
+/// [`Statement`] / [`ProverStatement`] uses the same ordering.
+pub trait MultiAir<F, EF>
 where
     F: Field,
     EF: ExtensionField<F>,
 {
-    /// AIR type for this instance. Heterogeneous AIRs are expressed via
-    /// caller-defined enum wrappers — see `miden-bench`'s `LiftedBenchAir`
-    /// for the template.
+    /// AIR type. Heterogeneous AIRs are expressed via caller-defined enum
+    /// wrappers, exactly as before.
     type Air: LiftedAir<F, EF>;
 
-    /// AIRs in the proof. This method *defines* what the rest of the trait
-    /// (and the stark crate) calls **instance order**: every other slice
-    /// indexed by AIR — `aux_values`, `log_trace_heights`, the prover's
-    /// traces — uses this position. The slice length is the number of AIR
-    /// instances in the proof.
-    fn airs(&self) -> &[&Self::Air];
-
-    /// Public values shared by every AIR in the proof.
-    fn air_inputs(&self) -> &[F];
-
-    /// Auxiliary public inputs consumed only by [`Self::eval_external`].
+    /// Upper bound on `aux_inputs().len()` accepted by [`Self::eval_external`].
     ///
-    /// The framework imposes no schema on this slice — overrides of
-    /// [`Self::eval_external`] decode it however they like and report
-    /// malformed inputs via [`ReductionError`].
-    ///
-    /// Default: empty. The default [`Self::eval_external`] rejects any
-    /// proof whose `aux_inputs` is non-empty, since it would otherwise
-    /// silently ignore caller-supplied data.
-    fn aux_inputs(&self) -> &[F] {
-        &[]
-    }
-
-    /// Upper bound on the length of [`Self::aux_inputs`] this instance will
-    /// accept.
-    ///
-    /// The framework rejects any proof whose `aux_inputs().len()` exceeds
-    /// this bound at validation time, before any cryptographic work runs.
-    ///
-    /// Default: 0. This pairs with the default [`Self::eval_external`],
-    /// which rejects any non-empty `aux_inputs`. Implementations that
-    /// consume `aux_inputs` **must** override this so the budget reflects
-    /// the schema their `eval_external` decodes.
-    fn max_aux_inputs(&self) -> usize {
+    /// Validated by [`Statement::new`] before any cryptographic work. Default
+    /// `0`; implementations that consume `aux_inputs` must override so the
+    /// budget matches the schema their `eval_external` decodes.
+    fn max_aux_inputs(&self, airs: &[Self::Air]) -> usize {
+        let _ = airs;
         0
     }
 
-    /// Evaluate cross-AIR external assertions.
+    /// Cross-AIR external assertions.
     ///
     /// Returns a flat vector of extension-field values, each of which must
-    /// equal zero for the proof to be accepted. This method only produces
-    /// the values; the caller decides how to check them — either entry by
-    /// entry (precise non-zero index reporting) or by random linear
-    /// combination (one check covers all entries).
-    ///
-    /// The caller (verifier) is responsible for ensuring the supplied
-    /// `aux_values` and `log_trace_heights` describe the same statement as
-    /// the AIR list returned by [`Self::airs`]. The framework enforces only
-    /// `aux_values.len() == self.airs().len()` and the per-AIR contract
-    /// checks (public values length, periodic columns); semantic agreement
-    /// between this method and the AIR bodies is the implementer's
-    /// responsibility.
+    /// equal zero for the proof to be accepted.
     ///
     /// # Arguments
-    /// - `challenges`: shared extension-field challenge pool. Each AIR uses a prefix of length
-    ///   `air.num_randomness()`.
-    /// - `aux_values`: per-AIR aux values, in instance order. `aux_values[i]` is the aux values for
-    ///   `self.airs()[i]`.
-    /// - `log_trace_heights`: per-AIR log₂ trace heights, in instance order. Already absorbed into
-    ///   Fiat-Shamir before this method runs.
+    /// - `airs`: AIRs in instance order, matching the slice owned by the [`Statement`].
+    /// - `challenges`: shared extension-field challenge pool; each AIR consumes the prefix of
+    ///   length `air.num_randomness()`.
+    /// - `air_inputs`, `aux_inputs`: the inputs from the [`Statement`].
+    /// - `aux_values`: per-AIR aux values in instance order. `aux_values[i]` belongs to `airs[i]`.
+    /// - `log_trace_heights`: per-AIR log₂ trace heights in instance order.
     ///
-    /// # Errors
-    ///
-    /// Use [`ReductionError`] to report malformed inputs (e.g. an
-    /// [`Self::aux_inputs`] slice shorter than expected) rather than
-    /// panicking on out-of-bounds indexing.
-    ///
-    /// Default: rejects non-empty [`Self::aux_inputs`] (likely a bug — caller
-    /// supplied data that nothing consumes); otherwise emits no assertions.
+    /// Default: refuses to be called with non-empty `aux_inputs`; otherwise
+    /// emits no assertions.
     fn eval_external(
         &self,
-        _challenges: &[EF],
-        _aux_values: &[&[EF]],
-        _log_trace_heights: &[u8],
+        airs: &[Self::Air],
+        challenges: &[EF],
+        air_inputs: &[F],
+        aux_inputs: &[F],
+        aux_values: &[&[EF]],
+        log_trace_heights: &[u8],
     ) -> Result<Vec<EF>, ReductionError> {
-        if !self.aux_inputs().is_empty() {
+        if !aux_inputs.is_empty() {
             return Err("default `eval_external` received non-empty `aux_inputs` — override \
                  `eval_external` to consume them"
                 .into());
         }
+        let _ = (airs, challenges, air_inputs, aux_values, log_trace_heights);
         Ok(Vec::new())
     }
 
-    /// Absorb the instance into the Fiat-Shamir challenger.
+    /// Build every AIR's auxiliary trace and aux values.
     ///
-    /// Default order: `air_inputs`, then `aux_inputs`, then each AIR's log
-    /// trace height in instance order. Overrides must preserve this ordering
-    /// unless they account for the change on both prover and verifier.
+    /// # Arguments
+    /// - `airs`, `traces`, `air_inputs`, `aux_inputs`: instance-order slices owned by the
+    ///   [`ProverStatement`] / [`Statement`].
+    /// - `challenges`: sized to the maximum `num_randomness()` across AIRs; each AIR consumes the
+    ///   prefix matching its own `num_randomness()`.
+    ///
+    /// # Returns
+    /// `(aux_traces, aux_values)` in instance order — one entry per AIR.
+    /// `aux_traces[i]` has width `airs[i].aux_width()` and height matching
+    /// `traces[i]`; `aux_values[i]` has length `airs[i].num_aux_values()`.
+    fn build_aux_traces(
+        &self,
+        airs: &[Self::Air],
+        traces: &[&RowMajorMatrix<F>],
+        air_inputs: &[F],
+        aux_inputs: &[F],
+        challenges: &[EF],
+    ) -> (Vec<RowMajorMatrix<EF>>, Vec<Vec<EF>>);
+
+    /// Absorb per-proof state into the Fiat-Shamir challenger.
+    ///
+    /// Default order: `air_inputs`, then `aux_inputs`, then each log trace
+    /// height in instance order. Overrides must preserve this ordering unless
+    /// they account for the change on both prover and verifier.
     ///
     /// # Soundness gap (TODO)
     ///
     /// The default binds inputs and trace heights but does NOT canonically
-    /// bind [`Self::airs`] or [`Self::eval_external`] into Fiat-Shamir.
-    /// Until the symbolic-graph binding lands (tracked in
-    /// <https://github.com/0xMiden/crypto/issues/970>), callers MUST still
-    /// manually observe AIR
-    /// configurations and `eval_external` identity into the challenger
-    /// before calling the prover or verifier. A caller who changes an AIR's
-    /// `eval` body or `eval_external` body without changing the inputs
-    /// produces a proof the verifier cannot distinguish from the old logic.
-    fn observe<C: CanObserve<F>>(&self, challenger: &mut C, log_trace_heights: &[u8]) {
-        for &v in self.air_inputs() {
+    /// bind the AIR collection or `eval_external` into Fiat-Shamir. Until the
+    /// symbolic-graph binding lands (tracked in
+    /// <https://github.com/0xMiden/crypto/issues/970>), callers MUST observe
+    /// AIR configurations into the challenger before calling the prover or
+    /// verifier.
+    fn observe<C: CanObserve<F>>(
+        &self,
+        challenger: &mut C,
+        air_inputs: &[F],
+        aux_inputs: &[F],
+        log_trace_heights: &[u8],
+    ) {
+        for &v in air_inputs {
             challenger.observe(v);
         }
-        for &v in self.aux_inputs() {
+        for &v in aux_inputs {
             challenger.observe(v);
         }
         for &h in log_trace_heights {
@@ -171,52 +145,163 @@ where
 }
 
 // ============================================================================
-// ProverInstance trait
+// Statement
 // ============================================================================
 
-/// Prover-side companion to [`Instance`] adding per-AIR traces and aux-trace
-/// construction.
+/// Validated per-proof inputs over a [`MultiAir`].
 ///
-/// `ProverInstance` *contains* an [`Instance`] (via the
-/// [`Self::Instance`](ProverInstance::Instance) associated type and the
-/// [`instance`](ProverInstance::instance) accessor) rather than inheriting
-/// from it. That lets a prover wrapper reuse an existing verifier-side
-/// [`Instance`] without re-implementing every method. The trait surface
-/// carries no ordering information: traces are returned in instance order and
-/// the stark prover derives the proof's AIR ordering internally via
-/// `TraceOrder`.
-///
-/// # Future
-///
-/// This trait will gain `preprocessed_traces` and `preprocessed_ldes` methods
-/// to support preprocessed (fixed) data and its low-degree extension.
-pub trait ProverInstance<F, EF>
+/// Holding a `Statement` is a type-level guarantee that the inputs-class
+/// validation passed: per-AIR `num_public_values == air_inputs.len()` and
+/// `aux_inputs.len() <= MultiAir::max_aux_inputs`.
+pub struct Statement<F, EF, MA>
 where
     F: Field,
     EF: ExtensionField<F>,
+    MA: MultiAir<F, EF>,
 {
-    /// The verifier-side [`Instance`] this prover wraps.
-    type Instance: Instance<F, EF>;
+    multi_air: MA,
+    airs: Vec<MA::Air>,
+    air_inputs: Vec<F>,
+    aux_inputs: Vec<F>,
+    _ef: PhantomData<EF>,
+}
 
-    /// Borrow the wrapped verifier-side instance. Both prover and verifier
-    /// must observe the same data, which is what this accessor returns.
-    fn instance(&self) -> &Self::Instance;
+impl<F, EF, MA> Statement<F, EF, MA>
+where
+    F: Field,
+    EF: ExtensionField<F>,
+    MA: MultiAir<F, EF>,
+{
+    /// Construct a [`Statement`] after validating the inputs against `multi_air`.
+    ///
+    /// Returns [`InstanceError::PublicValuesLengthMismatch`] if any AIR's
+    /// `num_public_values()` does not match `air_inputs.len()`, or
+    /// [`InstanceError::AuxInputsTooLong`] if `aux_inputs.len()` exceeds
+    /// `multi_air.max_aux_inputs(&airs)`.
+    pub fn new(
+        multi_air: MA,
+        airs: Vec<MA::Air>,
+        air_inputs: Vec<F>,
+        aux_inputs: Vec<F>,
+    ) -> Result<Self, InstanceError> {
+        validate_inputs::<F, EF, MA>(&multi_air, &airs, &air_inputs, &aux_inputs)?;
+        Ok(Self::new_unchecked(multi_air, airs, air_inputs, aux_inputs))
+    }
 
-    /// Per-AIR main traces, in instance order. Must match
-    /// [`Instance::airs`] in length and order.
-    fn traces(&self) -> &[&RowMajorMatrix<F>];
+    /// Construct without validating. Use only when the inputs are already known to be valid
+    /// (replay, deserialization of trusted state).
+    pub fn new_unchecked(
+        multi_air: MA,
+        airs: Vec<MA::Air>,
+        air_inputs: Vec<F>,
+        aux_inputs: Vec<F>,
+    ) -> Self {
+        Self {
+            multi_air,
+            airs,
+            air_inputs,
+            aux_inputs,
+            _ef: PhantomData,
+        }
+    }
 
-    /// Build every AIR's auxiliary trace and aux values in a single call.
-    ///
-    /// `challenges` is sized to the maximum `num_randomness()` across all
-    /// AIRs in the proof; implementors should consume the prefix matching
-    /// each AIR's `num_randomness()`.
-    ///
-    /// # Returns
-    ///
-    /// `(aux_traces, aux_values)` with one entry per AIR in instance order:
-    /// - `aux_traces[i]` has width `airs[i].aux_width()` and height matching the main trace
-    /// - `aux_values[i]` has length `airs[i].num_aux_values()`; committed to the Fiat-Shamir
-    ///   transcript and consumed by [`Instance::eval_external`].
-    fn build_aux_traces(&self, challenges: &[EF]) -> (Vec<RowMajorMatrix<EF>>, Vec<Vec<EF>>);
+    pub fn multi_air(&self) -> &MA {
+        &self.multi_air
+    }
+
+    pub fn airs(&self) -> &[MA::Air] {
+        &self.airs
+    }
+
+    pub fn air_inputs(&self) -> &[F] {
+        &self.air_inputs
+    }
+
+    pub fn aux_inputs(&self) -> &[F] {
+        &self.aux_inputs
+    }
+
+    /// Evaluate the cross-AIR external assertions via [`MultiAir::eval_external`].
+    pub fn eval_external(
+        &self,
+        challenges: &[EF],
+        aux_values: &[&[EF]],
+        log_trace_heights: &[u8],
+    ) -> Result<Vec<EF>, ReductionError> {
+        self.multi_air.eval_external(
+            &self.airs,
+            challenges,
+            &self.air_inputs,
+            &self.aux_inputs,
+            aux_values,
+            log_trace_heights,
+        )
+    }
+
+    /// Absorb this statement into the Fiat-Shamir challenger via [`MultiAir::observe`].
+    pub fn observe<C: CanObserve<F>>(&self, challenger: &mut C, log_trace_heights: &[u8]) {
+        self.multi_air
+            .observe(challenger, &self.air_inputs, &self.aux_inputs, log_trace_heights);
+    }
+}
+
+// ============================================================================
+// ProverStatement
+// ============================================================================
+
+/// Validated prover-side companion: a [`Statement`] plus per-AIR main traces.
+///
+/// Holding a `ProverStatement` is a type-level guarantee that the
+/// trace-shape validation passed: counts match, heights are powers of two
+/// (and ≤ `u8::MAX + 1` instances), widths match each AIR, and per-AIR
+/// height ≥ the AIR's max periodic column length.
+pub struct ProverStatement<F, EF, MA>
+where
+    F: Field,
+    EF: ExtensionField<F>,
+    MA: MultiAir<F, EF>,
+{
+    statement: Statement<F, EF, MA>,
+    traces: Vec<RowMajorMatrix<F>>,
+}
+
+impl<F, EF, MA> ProverStatement<F, EF, MA>
+where
+    F: Field,
+    EF: ExtensionField<F>,
+    MA: MultiAir<F, EF>,
+{
+    /// Construct after validating the trace shape against `statement`.
+    pub fn new(
+        statement: Statement<F, EF, MA>,
+        traces: Vec<RowMajorMatrix<F>>,
+    ) -> Result<Self, InstanceError> {
+        validate_prover_traces::<F, EF, MA>(&statement, &traces)?;
+        Ok(Self::new_unchecked(statement, traces))
+    }
+
+    /// Construct without validating.
+    pub fn new_unchecked(statement: Statement<F, EF, MA>, traces: Vec<RowMajorMatrix<F>>) -> Self {
+        Self { statement, traces }
+    }
+
+    pub fn statement(&self) -> &Statement<F, EF, MA> {
+        &self.statement
+    }
+
+    pub fn traces(&self) -> &[RowMajorMatrix<F>] {
+        &self.traces
+    }
+
+    /// Build every AIR's aux trace + aux values via [`MultiAir::build_aux_traces`].
+    pub fn build_aux_traces(&self, challenges: &[EF]) -> (Vec<RowMajorMatrix<EF>>, Vec<Vec<EF>>) {
+        let trace_refs: Vec<&RowMajorMatrix<F>> = self.traces.iter().collect();
+        self.statement.multi_air.build_aux_traces(
+            &self.statement.airs,
+            &trace_refs,
+            &self.statement.air_inputs,
+            &self.statement.aux_inputs,
+            challenges,
+        )
+    }
 }

@@ -30,7 +30,7 @@ use miden_lifted_air::{
     AirBuilder, BaseAir, ConstraintDegrees, LiftedAir, LiftedAirBuilder, WindowAccess,
 };
 use miden_lifted_stark::{
-    GenericStarkConfig, Instance, PcsParams, ProverInstance, prove,
+    GenericStarkConfig, MultiAir, PcsParams, ProverStatement, Statement, prove,
     testing::configs::goldilocks_poseidon2::{Dft, Felt, QuadFelt, test_challenger, test_lmcs},
 };
 use p3_field::PrimeCharacteristicRing;
@@ -179,44 +179,25 @@ impl<A: LiftedAir<Felt, QuadFelt>> LiftedAir<Felt, QuadFelt> for OverrideConstra
 }
 
 // -----------------------------------------------------------------------------
-// Inputs (trivial: constant-challenge aux column for each trace)
+// MultiAir (trivial: constant-challenge aux column for each trace)
 // -----------------------------------------------------------------------------
 
-struct BenchInputs<'a> {
-    airs: Vec<&'a OverrideConstraintDegree<BenchAir>>,
-    traces: Vec<&'a RowMajorMatrix<Felt>>,
-}
+struct BenchMa;
 
-impl Instance<Felt, QuadFelt> for BenchInputs<'_> {
+impl MultiAir<Felt, QuadFelt> for BenchMa {
     type Air = OverrideConstraintDegree<BenchAir>;
-
-    fn airs(&self) -> &[&Self::Air] {
-        &self.airs
-    }
-
-    fn air_inputs(&self) -> &[Felt] {
-        &[]
-    }
-}
-
-impl<'a> ProverInstance<Felt, QuadFelt> for BenchInputs<'a> {
-    type Instance = Self;
-
-    fn instance(&self) -> &Self {
-        self
-    }
-
-    fn traces(&self) -> &[&RowMajorMatrix<Felt>] {
-        &self.traces
-    }
 
     fn build_aux_traces(
         &self,
+        _airs: &[Self::Air],
+        traces: &[&RowMajorMatrix<Felt>],
+        _air_inputs: &[Felt],
+        _aux_inputs: &[Felt],
         challenges: &[QuadFelt],
     ) -> (Vec<RowMajorMatrix<QuadFelt>>, Vec<Vec<QuadFelt>>) {
-        let mut traces_out = Vec::with_capacity(self.traces.len());
-        let mut values_out = Vec::with_capacity(self.traces.len());
-        for &t in &self.traces {
+        let mut traces_out = Vec::with_capacity(traces.len());
+        let mut values_out = Vec::with_capacity(traces.len());
+        for &t in traces {
             let height = t.height();
             let column = vec![challenges[0]; height];
             traces_out.push(RowMajorMatrix::new(column, 1));
@@ -290,10 +271,9 @@ fn run_prove(
     let core_trace = generate_trace(BenchAirKind::Core.recurrence_power(), core_height);
     let chip_trace = generate_trace(BenchAirKind::Chip.recurrence_power(), chip_height);
 
-    let inputs = BenchInputs {
-        airs: vec![&core_air, &chip_air],
-        traces: vec![&core_trace, &chip_trace],
-    };
+    let statement =
+        Statement::new(BenchMa, vec![core_air, chip_air], Vec::new(), Vec::new()).unwrap();
+    let prover_statement = ProverStatement::new(statement, vec![core_trace, chip_trace]).unwrap();
 
     eprintln!("\n{}", "=".repeat(70));
     eprintln!(
@@ -302,8 +282,8 @@ fn run_prove(
     eprintln!("{}\n", "=".repeat(70));
 
     let start = Instant::now();
-    let _output =
-        prove::<Felt, QuadFelt, _, _>(&config, &inputs, test_challenger()).expect("prove succeeds");
+    let _output = prove::<Felt, QuadFelt, _, _>(&config, &prover_statement, test_challenger())
+        .expect("prove succeeds");
     let elapsed = start.elapsed();
 
     eprintln!(">>> Total prove time: {elapsed:.3?}\n");

@@ -33,7 +33,7 @@ pub enum CompatError {
 /// clamping inside `log_quotient_degree` means degenerate (linear) AIRs
 /// land at `log_quotient_degree = 1`, which always fits a positive
 /// `log_blowup`.
-pub fn validate_compatible<F, EF, A>(airs: &[&A], params: &PcsParams) -> Result<(), CompatError>
+pub fn validate_compatible<F, EF, A>(airs: &[A], params: &PcsParams) -> Result<(), CompatError>
 where
     F: Field,
     EF: ExtensionField<F>,
@@ -41,7 +41,7 @@ where
 {
     let log_blowup = params.log_blowup();
     for (idx, air) in airs.iter().enumerate() {
-        let lq = log_quotient_degree::<F, EF, _>(*air);
+        let lq = log_quotient_degree::<F, EF, _>(air);
         if lq > log_blowup {
             return Err(CompatError::ConstraintDegreeTooHigh {
                 air: idx,
@@ -112,7 +112,7 @@ mod tests {
     fn validate_compatible_ok_for_linear_air() {
         // Linear constraint → log_quotient_degree clamps to 1 ≤ log_blowup.
         let air = HighDegreeAir { exponent: 1 };
-        let airs: Vec<&HighDegreeAir> = vec![&air];
+        let airs: Vec<HighDegreeAir> = vec![air];
         let config = test_config();
         validate_compatible::<Felt, QuadFelt, _>(&airs, config.pcs()).unwrap();
     }
@@ -121,7 +121,7 @@ mod tests {
     fn validate_compatible_rejects_overlarge_degree() {
         // log_blowup is 3 in test_config; a high-power AIR exceeds it.
         let air = HighDegreeAir { exponent: 1_000 };
-        let airs: Vec<&HighDegreeAir> = vec![&air];
+        let airs: Vec<HighDegreeAir> = vec![air];
         let config = test_config();
         let err = validate_compatible::<Felt, QuadFelt, _>(&airs, config.pcs()).unwrap_err();
         match err {

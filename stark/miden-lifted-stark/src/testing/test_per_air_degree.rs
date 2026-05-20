@@ -4,15 +4,18 @@
 //! `D_j` is strictly less than the global `D_max`, so the prover divides on the
 //! native domain and then `upsample_evals` lifts the resulting quotient evaluations.
 
+extern crate alloc;
+
 use alloc::{vec, vec::Vec};
+use core::marker::PhantomData;
 
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
 use crate::{
-    Instance, ProverInstance,
+    MultiAir, ProverStatement, Statement,
     air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder, WindowAccess},
-    testing::configs::goldilocks_poseidon2::{Felt, QuadFelt, prove_and_verify_instance},
+    testing::configs::goldilocks_poseidon2::{Felt, QuadFelt, prove_and_verify_statement},
 };
 
 // ---------------------------------------------------------------------------
@@ -127,50 +130,34 @@ impl LiftedAir<Felt, QuadFelt> for PeriodicPowerAir {
 }
 
 // ---------------------------------------------------------------------------
-// Inputs: trivial constant-challenge aux column for each trace.
+// MultiAir: trivial constant-challenge aux column for each trace.
 // ---------------------------------------------------------------------------
 
-struct TwoTraceInputs<'a, A> {
-    airs: Vec<&'a A>,
-    traces: Vec<&'a RowMajorMatrix<Felt>>,
+struct TwoTraceMa<A>(PhantomData<A>);
+
+impl<A> TwoTraceMa<A> {
+    fn new() -> Self {
+        Self(PhantomData)
+    }
 }
 
-impl<A> Instance<Felt, QuadFelt> for TwoTraceInputs<'_, A>
+impl<A> MultiAir<Felt, QuadFelt> for TwoTraceMa<A>
 where
     A: LiftedAir<Felt, QuadFelt>,
 {
     type Air = A;
 
-    fn airs(&self) -> &[&Self::Air] {
-        &self.airs
-    }
-
-    fn air_inputs(&self) -> &[Felt] {
-        &[]
-    }
-}
-
-impl<A> ProverInstance<Felt, QuadFelt> for TwoTraceInputs<'_, A>
-where
-    A: LiftedAir<Felt, QuadFelt>,
-{
-    type Instance = Self;
-
-    fn instance(&self) -> &Self {
-        self
-    }
-
-    fn traces(&self) -> &[&RowMajorMatrix<Felt>] {
-        &self.traces
-    }
-
     fn build_aux_traces(
         &self,
+        _airs: &[Self::Air],
+        traces: &[&RowMajorMatrix<Felt>],
+        _air_inputs: &[Felt],
+        _aux_inputs: &[Felt],
         challenges: &[QuadFelt],
     ) -> (Vec<RowMajorMatrix<QuadFelt>>, Vec<Vec<QuadFelt>>) {
-        let mut traces_out = Vec::with_capacity(self.traces.len());
-        let mut values_out = Vec::with_capacity(self.traces.len());
-        for &t in &self.traces {
+        let mut traces_out = Vec::with_capacity(traces.len());
+        let mut values_out = Vec::with_capacity(traces.len());
+        for &t in traces {
             let height = t.height();
             let column = vec![challenges[0]; height];
             traces_out.push(RowMajorMatrix::new(column, 1));
@@ -205,11 +192,10 @@ fn run_upsample_case(low_power: u64, low_height: usize, high_power: u64, high_he
     let t_low = generate_pow_trace(low_power, Felt::from_u64(7), low_height);
     let t_high = generate_pow_trace(high_power, Felt::from_u64(11), high_height);
 
-    let inputs = TwoTraceInputs {
-        airs: vec![&low, &high],
-        traces: vec![&t_low, &t_high],
-    };
-    prove_and_verify_instance(&inputs);
+    let statement =
+        Statement::new(TwoTraceMa::new(), vec![low, high], Vec::new(), Vec::new()).unwrap();
+    let prover_statement = ProverStatement::new(statement, vec![t_low, t_high]).unwrap();
+    prove_and_verify_statement(&prover_statement);
 }
 
 #[test]
@@ -235,9 +221,8 @@ fn upsample_fires_with_periodic_columns() {
     let t_low = generate_pow_trace(3, Felt::from_u64(7), 16);
     let t_high = generate_pow_trace(5, Felt::from_u64(11), 16);
 
-    let inputs = TwoTraceInputs {
-        airs: vec![&low, &high],
-        traces: vec![&t_low, &t_high],
-    };
-    prove_and_verify_instance(&inputs);
+    let statement =
+        Statement::new(TwoTraceMa::new(), vec![low, high], Vec::new(), Vec::new()).unwrap();
+    let prover_statement = ProverStatement::new(statement, vec![t_low, t_high]).unwrap();
+    prove_and_verify_statement(&prover_statement);
 }

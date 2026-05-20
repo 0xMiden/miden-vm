@@ -14,7 +14,7 @@ extern crate alloc;
 
 use alloc::{vec, vec::Vec};
 
-use miden_lifted_air::{BaseAir, Instance, LiftedAir, validate_instance, validate_with_heights};
+use miden_lifted_air::{BaseAir, LiftedAir, MultiAir, Statement, validate_log_heights};
 use miden_stark_transcript::{Channel, TranscriptData, VerifierChannel, VerifierTranscript};
 use p3_challenger::CanFinalizeDigest;
 use p3_field::{ExtensionField, Field, TwoAdicField};
@@ -195,30 +195,30 @@ where
     /// Does **not** verify constraints or check the quotient identity.
     /// Finalizes the transcript and returns the digest alongside the parsed view.
     #[allow(clippy::type_complexity)]
-    pub fn from_proof<I, SC>(
+    pub fn from_proof<MA, SC>(
         config: &SC,
-        instance: &I,
+        statement: &Statement<L::F, EF, MA>,
         proof: &StarkProof<L::F, EF, SC>,
         mut challenger: SC::Challenger,
     ) -> Result<(Self, StarkDigest<L::F, EF, SC>), VerifierError>
     where
-        I: Instance<L::F, EF>,
+        MA: MultiAir<L::F, EF>,
         SC: StarkConfig<L::F, EF, Lmcs = L>,
     {
         // Shape well-formedness first (catches malicious `log_h` > usize::BITS),
-        // then per-AIR contract.
+        // then per-AIR periodic-height feasibility.
         let trace_order = TraceOrder::from_log_heights(proof.log_trace_heights.clone())?;
-        validate_instance(instance)?;
-        validate_with_heights(instance, trace_order.log_heights_instance())?;
-        validate_compatible::<L::F, EF, _>(instance.airs(), config.pcs())?;
-        let proof_ordered_airs = trace_order.to_proof_order(instance.airs());
+        validate_log_heights::<L::F, EF, MA>(statement, trace_order.log_heights_instance())?;
+        validate_compatible::<L::F, EF, _>(statement.airs(), config.pcs())?;
+        let air_refs: Vec<&MA::Air> = statement.airs().iter().collect();
+        let proof_ordered_airs = trace_order.to_proof_order(&air_refs);
 
         let log_blowup = config.pcs().log_blowup();
         let log_max_trace_height = trace_order.max_log_height();
         let max_lde_domain = LiftedDomain::<L::F>::try_canonical(log_max_trace_height, log_blowup)?;
-        // Absorb the instance (the default observe also covers the proof's
+        // Absorb the statement (the default observe also covers the proof's
         // log trace heights). Mirrors prove/verify.
-        instance.observe(&mut challenger, trace_order.log_heights_instance());
+        statement.observe(&mut challenger, trace_order.log_heights_instance());
 
         let mut channel = VerifierTranscript::from_data(challenger, &proof.transcript);
 

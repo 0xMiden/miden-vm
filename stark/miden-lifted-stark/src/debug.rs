@@ -16,21 +16,21 @@ extern crate alloc;
 use alloc::vec::Vec;
 
 use miden_lifted_air::{
-    AirBuilder, BaseAir, EmptyWindow, ExtensionBuilder, Instance, LiftedAir, PeriodicAirBuilder,
-    PermutationAirBuilder, RowWindow,
+    AirBuilder, BaseAir, EmptyWindow, ExtensionBuilder, LiftedAir, MultiAir, PeriodicAirBuilder,
+    PermutationAirBuilder, ProverStatement, RowWindow, Statement,
 };
 use p3_challenger::{CanObserve, CanSample};
 use p3_field::{ExtensionField, Field};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
-use crate::{ProverInstance, pcs::params::PcsParams, setup::validate_compatible};
+use crate::{pcs::params::PcsParams, setup::validate_compatible};
 
 // ============================================================================
 // Structural assertions (thin wrappers over miden_lifted_air::debug + setup)
 // ============================================================================
 
 /// Assert every AIR in `airs` satisfies the structural contract.
-pub fn assert_airs_valid<F, EF, A>(airs: &[&A])
+pub fn assert_airs_valid<F, EF, A>(airs: &[A])
 where
     F: Field,
     EF: ExtensionField<F>,
@@ -39,29 +39,28 @@ where
     miden_lifted_air::debug::assert_airs_valid::<F, EF, A>(airs);
 }
 
-/// Assert `instance` is valid: runtime instance contract + AIR structural
-/// contract.
-pub fn assert_valid<F, EF, I>(instance: &I)
+/// Assert `statement` is valid: runtime inputs contract + AIR structural contract.
+pub fn assert_valid<F, EF, MA>(statement: &Statement<F, EF, MA>)
 where
     F: Field,
     EF: ExtensionField<F>,
-    I: Instance<F, EF>,
+    MA: MultiAir<F, EF>,
 {
-    miden_lifted_air::debug::assert_valid::<F, EF, I>(instance);
+    miden_lifted_air::debug::assert_valid::<F, EF, MA>(statement);
 }
 
 /// Prover-side analogue of [`assert_valid`]: validates trace shape too.
-pub fn assert_prover_valid<F, EF, P>(pi: &P)
+pub fn assert_prover_valid<F, EF, MA>(prover_statement: &ProverStatement<F, EF, MA>)
 where
     F: Field,
     EF: ExtensionField<F>,
-    P: ProverInstance<F, EF>,
+    MA: MultiAir<F, EF>,
 {
-    miden_lifted_air::debug::assert_prover_valid::<F, EF, P>(pi);
+    miden_lifted_air::debug::assert_prover_valid::<F, EF, MA>(prover_statement);
 }
 
 /// Assert per-AIR `log_quotient_degree <= params.log_blowup()`.
-pub fn assert_compatible<F, EF, A>(airs: &[&A], params: &PcsParams)
+pub fn assert_compatible<F, EF, A>(airs: &[A], params: &PcsParams)
 where
     F: Field,
     EF: ExtensionField<F>,
@@ -75,17 +74,19 @@ where
 ///
 /// TODO(adr1anh/preprocessed): also call `assert_preprocessed(pi)` once the
 /// preprocessed branch lands.
-pub fn assert_prover_setup<F, EF, P>(pi: &P, params: &PcsParams)
-where
+pub fn assert_prover_setup<F, EF, MA>(
+    prover_statement: &ProverStatement<F, EF, MA>,
+    params: &PcsParams,
+) where
     F: Field,
     EF: ExtensionField<F>,
-    P: ProverInstance<F, EF>,
+    MA: MultiAir<F, EF>,
 {
-    assert_prover_valid::<F, EF, P>(pi);
-    assert_compatible::<F, EF, <P::Instance as Instance<F, EF>>::Air>(pi.instance().airs(), params);
+    assert_prover_valid::<F, EF, MA>(prover_statement);
+    assert_compatible::<F, EF, MA::Air>(prover_statement.statement().airs(), params);
 }
 
-/// Drive [`ProverInstance::build_aux_traces`] and assert the returned
+/// Drive [`ProverStatement::build_aux_traces`] and assert the returned
 /// shapes match the AIR contract.
 ///
 /// This contract is **trusted** by [`crate::prover::prove`] — the prover
@@ -94,17 +95,19 @@ where
 /// tests to surface the contract violation up-front.
 ///
 /// Fiat-Shamir seeding mirrors [`check_constraints`] so the returned aux
-/// values match what `prove` would derive for the same instance.
-pub fn assert_aux_traces_shape<F, EF, P, Ch>(prover_instance: &P, mut challenger: Ch)
-where
+/// values match what `prove` would derive for the same statement.
+pub fn assert_aux_traces_shape<F, EF, MA, Ch>(
+    prover_statement: &ProverStatement<F, EF, MA>,
+    mut challenger: Ch,
+) where
     F: Field,
     EF: ExtensionField<F>,
-    P: ProverInstance<F, EF>,
+    MA: MultiAir<F, EF>,
     Ch: CanObserve<F> + CanSample<F>,
 {
-    let instance = prover_instance.instance();
-    let airs = instance.airs();
-    let traces = prover_instance.traces();
+    let statement = prover_statement.statement();
+    let airs = statement.airs();
+    let traces = prover_statement.traces();
     assert_eq!(
         airs.len(),
         traces.len(),
@@ -114,13 +117,13 @@ where
     );
 
     let log_heights: Vec<u8> = traces.iter().map(|t| log_height(t.height())).collect();
-    instance.observe(&mut challenger, &log_heights);
+    statement.observe(&mut challenger, &log_heights);
     let max_num_randomness = airs.iter().map(|a| a.num_randomness()).max().unwrap_or(0);
     let challenges: Vec<EF> = (0..max_num_randomness)
         .map(|_| EF::from_basis_coefficients_fn(|_| challenger.sample()))
         .collect();
 
-    let (aux_traces, aux_values) = prover_instance.build_aux_traces(&challenges);
+    let (aux_traces, aux_values) = prover_statement.build_aux_traces(&challenges);
     assert_eq!(
         aux_traces.len(),
         airs.len(),
@@ -138,8 +141,7 @@ where
 
     for (i, ((air, main), (aux_trace, aux_vals))) in airs
         .iter()
-        .copied()
-        .zip(traces.iter().copied())
+        .zip(traces.iter())
         .zip(aux_traces.iter().zip(aux_values.iter()))
         .enumerate()
     {
@@ -174,40 +176,42 @@ where
 /// Evaluate AIR constraints against concrete trace values and panic on failure.
 ///
 /// Constraints are checked row-by-row using the trace + aux trace built by
-/// [`ProverInstance`]. All AIRs see the same `air_inputs` from `instance`.
+/// [`ProverStatement`]. All AIRs see the same `air_inputs` from `statement`.
 ///
 /// Derives auxiliary-trace challenges from the supplied challenger by
-/// observing the instance first, mirroring how the prover's challenger is
+/// observing the statement first, mirroring how the prover's challenger is
 /// seeded — so tests don't need to keep a separate RNG handle in sync.
 ///
 /// # Panics
 ///
 /// - If trace dimensions don't match their AIR
 /// - If any constraint evaluates to nonzero on any row
-pub fn check_constraints<F, EF, P, Ch>(prover_instance: &P, mut challenger: Ch)
-where
+pub fn check_constraints<F, EF, MA, Ch>(
+    prover_statement: &ProverStatement<F, EF, MA>,
+    mut challenger: Ch,
+) where
     F: Field,
     EF: ExtensionField<F>,
-    P: ProverInstance<F, EF>,
+    MA: MultiAir<F, EF>,
     Ch: CanObserve<F> + CanSample<F>,
 {
-    let instance = prover_instance.instance();
-    let airs = instance.airs();
-    let traces = prover_instance.traces();
-    let air_inputs = instance.air_inputs();
+    let statement = prover_statement.statement();
+    let airs = statement.airs();
+    let traces = prover_statement.traces();
+    let air_inputs = statement.air_inputs();
     assert!(!airs.is_empty(), "no instances provided");
     assert_eq!(airs.len(), traces.len(), "airs and traces counts must match");
 
     // Mirror the prover's Fiat-Shamir seeding so challenges line up with what
-    // `prove` would produce for the same instance.
+    // `prove` would produce for the same statement.
     let log_heights: Vec<u8> = traces.iter().map(|t| log_height(t.height())).collect();
-    instance.observe(&mut challenger, &log_heights);
+    statement.observe(&mut challenger, &log_heights);
     let max_num_randomness = airs.iter().map(|a| a.num_randomness()).max().unwrap_or(0);
     let challenges: Vec<EF> = (0..max_num_randomness)
         .map(|_| EF::from_basis_coefficients_fn(|_| challenger.sample()))
         .collect();
 
-    let (aux_traces, aux_values_per_air) = prover_instance.build_aux_traces(&challenges);
+    let (aux_traces, aux_values_per_air) = prover_statement.build_aux_traces(&challenges);
     assert_eq!(aux_traces.len(), airs.len(), "build_aux_traces returned wrong number of traces");
     assert_eq!(
         aux_values_per_air.len(),
@@ -217,8 +221,7 @@ where
 
     for (i, ((air, main), (aux_trace, aux_values))) in airs
         .iter()
-        .copied()
-        .zip(traces.iter().copied())
+        .zip(traces.iter())
         .zip(aux_traces.iter().zip(aux_values_per_air.iter()))
         .enumerate()
     {

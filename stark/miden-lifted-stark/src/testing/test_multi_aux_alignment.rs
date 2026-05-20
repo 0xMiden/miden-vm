@@ -6,11 +6,11 @@ use p3_field::PrimeCharacteristicRing;
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
 use crate::{
-    Instance, Lmcs, ProverInstance, VerifierError,
+    Lmcs, MultiAir, ProverStatement, Statement, VerifierError,
     air::{AirBuilder, BaseAir, ExtensionBuilder, LiftedAir, LiftedAirBuilder, WindowAccess},
     prove,
     testing::configs::goldilocks_poseidon2::{
-        Felt, QuadFelt, prove_and_verify_instance, test_challenger, test_config,
+        Felt, QuadFelt, prove_and_verify_statement, test_challenger, test_config,
     },
     transcript::TranscriptData,
     verify,
@@ -70,51 +70,32 @@ impl LiftedAir<Felt, QuadFelt> for PaddingAir {
     }
 }
 
-struct PaddingInputs<'a> {
-    aux_width: usize,
-    airs: Vec<&'a PaddingAir>,
-    traces: Vec<&'a RowMajorMatrix<Felt>>,
-    air_inputs: &'a [Felt],
-}
+/// `MultiAir` that emits aux traces of the AIR's declared width.
+struct PaddingMa;
 
-impl Instance<Felt, QuadFelt> for PaddingInputs<'_> {
+impl MultiAir<Felt, QuadFelt> for PaddingMa {
     type Air = PaddingAir;
-
-    fn airs(&self) -> &[&Self::Air] {
-        &self.airs
-    }
-
-    fn air_inputs(&self) -> &[Felt] {
-        self.air_inputs
-    }
-}
-
-impl<'a> ProverInstance<Felt, QuadFelt> for PaddingInputs<'a> {
-    type Instance = Self;
-
-    fn instance(&self) -> &Self {
-        self
-    }
-
-    fn traces(&self) -> &[&RowMajorMatrix<Felt>] {
-        &self.traces
-    }
 
     fn build_aux_traces(
         &self,
+        airs: &[Self::Air],
+        traces: &[&RowMajorMatrix<Felt>],
+        _air_inputs: &[Felt],
+        _aux_inputs: &[Felt],
         challenges: &[QuadFelt],
     ) -> (Vec<RowMajorMatrix<QuadFelt>>, Vec<Vec<QuadFelt>>) {
         let challenge = challenges[0];
-        let mut traces_out = Vec::with_capacity(self.traces.len());
-        let mut values_out = Vec::with_capacity(self.traces.len());
-        for &t in &self.traces {
+        let mut traces_out = Vec::with_capacity(traces.len());
+        let mut values_out = Vec::with_capacity(traces.len());
+        for (&t, air) in traces.iter().zip(airs.iter()) {
+            let aux_width = air.aux_width;
             let height = t.height();
-            let mut values = Vec::with_capacity(height * self.aux_width);
+            let mut values = Vec::with_capacity(height * aux_width);
             for _ in 0..height {
                 values.push(challenge);
-                values.extend(core::iter::repeat_n(QuadFelt::ZERO, self.aux_width - 1));
+                values.extend(core::iter::repeat_n(QuadFelt::ZERO, aux_width - 1));
             }
-            traces_out.push(RowMajorMatrix::new(values, self.aux_width));
+            traces_out.push(RowMajorMatrix::new(values, aux_width));
             values_out.push(vec![]);
         }
         (traces_out, values_out)
@@ -130,6 +111,19 @@ fn generate_trace(start: Felt, height: usize, width: usize) -> RowMajorMatrix<Fe
     RowMajorMatrix::new(values, width)
 }
 
+fn padding_prover_statement(
+    width: usize,
+    aux_width: usize,
+    start: Felt,
+) -> ProverStatement<Felt, QuadFelt, PaddingMa> {
+    let air = PaddingAir::new(width, aux_width);
+    let t0 = generate_trace(start, 8, width);
+    let t1 = generate_trace(start, 16, width);
+    let statement =
+        Statement::new(PaddingMa, vec![air.clone(), air], vec![start], Vec::new()).unwrap();
+    ProverStatement::new(statement, vec![t0, t1]).unwrap()
+}
+
 #[test]
 fn multi_trace_with_aux_padding() {
     let config = test_config();
@@ -138,19 +132,9 @@ fn multi_trace_with_aux_padding() {
     let aux_width = alignment + 1;
     let start = Felt::from_u64(START);
 
-    let air = PaddingAir::new(width, aux_width);
-    let t0 = generate_trace(start, 8, width);
-    let t1 = generate_trace(start, 16, width);
-    let air_inputs = vec![start];
+    let prover_statement = padding_prover_statement(width, aux_width, start);
 
-    let inputs = PaddingInputs {
-        aux_width,
-        airs: vec![&air, &air],
-        traces: vec![&t0, &t1],
-        air_inputs: &air_inputs,
-    };
-
-    prove_and_verify_instance(&inputs);
+    prove_and_verify_statement(&prover_statement);
 }
 
 #[test]
@@ -161,26 +145,17 @@ fn multi_trace_rejects_trailing_transcript_data() {
     let aux_width = alignment + 1;
     let start = Felt::from_u64(START);
 
-    let air = PaddingAir::new(width, aux_width);
-    let t0 = generate_trace(start, 8, width);
-    let t1 = generate_trace(start, 16, width);
-    let air_inputs = vec![start];
+    let prover_statement = padding_prover_statement(width, aux_width, start);
 
-    let inputs = PaddingInputs {
-        aux_width,
-        airs: vec![&air, &air],
-        traces: vec![&t0, &t1],
-        air_inputs: &air_inputs,
-    };
-
-    let output = prove(&config, &inputs, test_challenger()).expect("proving should succeed");
+    let output =
+        prove(&config, &prover_statement, test_challenger()).expect("proving should succeed");
 
     let mut bad_proof = output.proof;
     let (mut fields, commitments) = bad_proof.transcript.into_parts();
     fields.push(Felt::ONE);
     bad_proof.transcript = TranscriptData::new(fields, commitments);
 
-    let err = verify(&config, &inputs, &bad_proof, test_challenger())
+    let err = verify(&config, prover_statement.statement(), &bad_proof, test_challenger())
         .expect_err("extra transcript data should fail verification");
     assert!(matches!(
         err,
