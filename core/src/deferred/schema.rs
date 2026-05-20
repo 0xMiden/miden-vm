@@ -23,6 +23,10 @@ use alloc::boxed::Box;
 ///
 /// Predicate-ness is *not* encoded here — it is a property of a `reduce` outcome
 /// ([`super::Node::is_true_node`] on the canonical), not of the tag's declared shape.
+///
+/// Returned by [`Precompile::decode`](super::Precompile::decode) for a precompile's own tags and
+/// by [`DeferredState::rehydrate`](super::DeferredState::rehydrate) for framework AND-nodes; the
+/// rehydrate path uses it to cross-check the wire body against the declared shape.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NodeType {
     /// 8 felts of raw payload data, no child digests. Self-evaluating value leaves (e.g.

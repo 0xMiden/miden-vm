@@ -11,7 +11,6 @@ use crate::{
     Felt, ZERO,
     deferred::{
         Node, NodeType, Payload, Precompile, PrecompileError, Tag, WitnessBuilder, precompile_id,
-        true_node,
     },
 };
 
@@ -125,7 +124,7 @@ impl Precompile for TestPrecompile {
                 if witness.resolve(lhs)? != witness.resolve(rhs)? {
                     return Err(PrecompileError::AssertionFailed);
                 }
-                Ok(true_node())
+                Ok(Node::TRUE)
             },
         }
     }

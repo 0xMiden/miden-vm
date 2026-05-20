@@ -215,8 +215,8 @@ pub enum IntegrityError {
     /// `prev_root` also strands entries); kept as a phase-2 backstop guarding the chain walk.
     #[error("AND-chain walk encountered a prev_root digest not present in the wire entries")]
     BrokenChain,
-    /// An AND-chain step does not have `tag == TRUE_TAG` (corrupt transcript).
-    #[error("AND-chain walk encountered a node whose tag is not TRUE_TAG")]
+    /// An AND-chain step does not have `tag == Tag::TRUE` (corrupt transcript).
+    #[error("AND-chain walk encountered a node whose tag is not Tag::TRUE")]
     NonAndNode,
     /// An AND-chain step's payload doesn't decode as a binary `(prev_root, stmt_digest)`.
     #[error("AND-chain walk encountered a node whose payload is not in binary-op shape")]
@@ -224,7 +224,7 @@ pub enum IntegrityError {
     /// A statement referenced by an AND-node is not in the wire.
     #[error("AND-chain walk references a statement digest that is not in the node set")]
     MissingStatement,
-    /// A statement does not reduce to `true_node` under the precompiles. Wraps the precompile
+    /// A statement does not reduce to `Node::TRUE` under the precompiles. Wraps the precompile
     /// error so the precise reduce-failure surfaces in test output.
     #[error("AND-chain statement failed re-evaluation: {0}")]
     PredicateFailed(#[from] super::PrecompileError),

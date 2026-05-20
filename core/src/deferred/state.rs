@@ -5,7 +5,7 @@ use alloc::{
 
 use super::{
     DeferredError, DeferredStateWire, Digest, IntegrityError, Node, NodeType, Payload,
-    PrecompileError, PrecompileRegistry, TRUE_DIGEST, TRUE_TAG, true_node,
+    PrecompileError, PrecompileRegistry, TRUE_DIGEST, Tag,
 };
 
 /// In-memory deferred-DAG state — the verifier's witness.
@@ -16,12 +16,12 @@ use super::{
 ///   (precompile-minted children, required for verifier-side resolution). Each entry is reachable
 ///   from `root`; `to_wire`'s DFS is therefore a closure walk, not a trim.
 /// - `root`: the transcript root pointer. Initial value [`super::TRUE_DIGEST`]; advanced by
-///   `log_precompile`, which interns an AND-node `{tag: TRUE_TAG, payload: prev_root || stmnt}` and
-///   updates the root pointer. Reducing root to TRUE is the verifier's single check.
+///   `log_precompile`, which interns an AND-node `{tag: Tag::TRUE, payload: prev_root || stmnt}`
+///   and updates the root pointer. Reducing root to TRUE is the verifier's single check.
 /// - `cache`: host-only `input_digest → canonical Node` memo, written exclusively by the
 ///   crate-internal `reduce_and_cache`. Lets [`WitnessBuilder::resolve`] skip recursive reduce on
 ///   shared sub-DAGs. Self-evaluating leaves cache as identity (the canonical equals the input).
-///   Seeded with `TRUE_DIGEST → true_node()` so the structural sentinel resolves like everything
+///   Seeded with `TRUE_DIGEST → Node::TRUE` so the structural sentinel resolves like everything
 ///   else.
 ///
 /// This in-memory form does **not** travel in the proof. [`Self::to_wire`] lowers it to the
@@ -39,7 +39,7 @@ pub struct DeferredState {
 impl Default for DeferredState {
     fn default() -> Self {
         let mut cache = BTreeMap::new();
-        cache.insert(TRUE_DIGEST, true_node());
+        cache.insert(TRUE_DIGEST, Node::TRUE);
         Self {
             nodes: BTreeMap::new(),
             root: TRUE_DIGEST,
@@ -103,7 +103,7 @@ impl DeferredState {
         stmt_digest: Digest,
         expected_new_root: Digest,
     ) -> Result<(), DeferredError> {
-        let and_node = Node::expression(TRUE_TAG, Payload::binary_op(self.root, stmt_digest));
+        let and_node = Node::expression(Tag::TRUE, Payload::binary_op(self.root, stmt_digest));
         let actual = and_node.digest();
         if actual != expected_new_root {
             return Err(DeferredError::InvalidPayload);
@@ -143,7 +143,7 @@ impl DeferredState {
     /// (and every transitively-resolved canonical) lands in `cache`, not `nodes`. The
     /// transcript only commits to what the user explicitly registered or logged.
     ///
-    /// For a predicate tag, success returns [`super::true_node`] (detectable via
+    /// For a predicate tag, success returns [`Node::TRUE`] (detectable via
     /// [`Node::is_true_node`]) and a mismatch surfaces as [`PrecompileError::AssertionFailed`].
     ///
     /// Transitively-referenced child digests must resolve through `nodes` (registered upstream)
@@ -262,7 +262,7 @@ impl DeferredState {
     ///   adversarial wire might smuggle in. Phase 2 writes only to `cache`, so the `nodes` set
     ///   checked here matches the post-rehydrate state exactly.
     /// - **Phase 2 (semantic):** walk the AND-chain from `wire.root` down to
-    ///   [`super::TRUE_DIGEST`], asserting each step has `tag == TRUE_TAG` and re-evaluating each
+    ///   [`super::TRUE_DIGEST`], asserting each step has `tag == Tag::TRUE` and re-evaluating each
     ///   predicate statement via [`Self::evaluate`]. The walk surfaces tampered AND-payloads,
     ///   missing statements, non-predicate statements, and failed equalities.
     pub fn rehydrate(
@@ -286,7 +286,7 @@ impl DeferredState {
                 },
             };
 
-            // Validate. `decode_node_type` handles AND-nodes (framework-owned `TRUE_TAG`)
+            // Validate. `decode_node_type` handles AND-nodes (framework-owned `Tag::TRUE`)
             // without invoking a precompile, then defers to `precompiles.decode` for everything
             // else. `payload_matches_type` enforces the Expression-vs-Chunk distinction (and
             // chunk count for Chunks tags).
@@ -312,14 +312,14 @@ impl DeferredState {
             return Err(IntegrityError::DanglingNode);
         }
 
-        // Phase 2 — chain walk + per-statement re-evaluation. AND-nodes share TRUE_TAG and a
-        // `(prev_root, stmt_digest)` payload; statements must reduce to `true_node` under the
+        // Phase 2 — chain walk + per-statement re-evaluation. AND-nodes share Tag::TRUE and a
+        // `(prev_root, stmt_digest)` payload; statements must reduce to `Node::TRUE` under the
         // precompiles. An interior AND-node whose `prev_root` doesn't resolve in `state.nodes` (and
         // isn't `TRUE_DIGEST`) surfaces as `BrokenChain` — a tampered or corrupt transcript.
         let mut cur = state.root;
         while cur != TRUE_DIGEST {
             let and_node = state.nodes.get(&cur).ok_or(IntegrityError::BrokenChain)?.clone();
-            if and_node.tag != TRUE_TAG {
+            if and_node.tag != Tag::TRUE {
                 return Err(IntegrityError::NonAndNode);
             }
             let (prev_root, stmt_digest) = and_node
@@ -355,8 +355,9 @@ impl DeferredState {
                 .get(&cur)
                 .expect("statements(): AND-chain references a node not in state");
             debug_assert_eq!(
-                and_node.tag, TRUE_TAG,
-                "statements(): AND-chain step is not tagged TRUE_TAG"
+                and_node.tag,
+                Tag::TRUE,
+                "statements(): AND-chain step is not tagged Tag::TRUE"
             );
             let (prev_root, stmt_digest) = and_node
                 .payload
@@ -391,14 +392,14 @@ fn resolve_index(idx: u32, current: usize, digests: &[Digest]) -> Result<Digest,
     Ok(digests[i])
 }
 
-/// Decode a node's [`NodeType`] for `rehydrate`. Framework-owned `TRUE_TAG` AND-nodes are
+/// Decode a node's [`NodeType`] for `rehydrate`. Framework-owned `Tag::TRUE` AND-nodes are
 /// classified as `Binary` directly (no precompile claims id `ZERO`); everything else routes
 /// through `precompiles.decode`.
 fn decode_node_type(
     precompiles: &PrecompileRegistry,
     node: &Node,
 ) -> Result<NodeType, IntegrityError> {
-    if node.tag == TRUE_TAG {
+    if node.tag == Tag::TRUE {
         return Ok(NodeType::Binary);
     }
     precompiles.decode(node.tag).map_err(|_| IntegrityError::UnknownTag)
@@ -575,14 +576,14 @@ mod tests {
         let a = state.register(&schema, test_leaf(7)).unwrap();
         let pred = Node::expression(TestPrecompile::eq_tag(), Payload::binary_op(a, a));
         let stmt = state.evaluate(&schema, pred).unwrap();
-        // The canonical of an `eq` predicate is `true_node()`. Use the predicate's *digest* —
+        // The canonical of an `eq` predicate is `Node::TRUE`. Use the predicate's *digest* —
         // which we recover from the original node — as `stmt_digest`.
         let _ = stmt; // canonical, discarded
         let stmt_digest =
             Node::expression(TestPrecompile::eq_tag(), Payload::binary_op(a, a)).digest();
 
         let expected =
-            Node::expression(TRUE_TAG, Payload::binary_op(TRUE_DIGEST, stmt_digest)).digest();
+            Node::expression(Tag::TRUE, Payload::binary_op(TRUE_DIGEST, stmt_digest)).digest();
         state.log(stmt_digest, expected).unwrap();
         assert_eq!(state.root(), expected);
         // The newly-minted AND-node must be in the map keyed by its digest.
@@ -806,7 +807,7 @@ mod tests {
 
     #[test]
     fn evaluate_populates_cache() {
-        // Predicate inputs cache to the `true_node()`; everything else caches to its canonical
+        // Predicate inputs cache to `Node::TRUE`; everything else caches to its canonical
         // Node. Self-evaluating leaves cache as identity (key digest == value.digest()).
         let mut state = DeferredState::new();
         let schema = precompiles();
@@ -888,7 +889,7 @@ mod tests {
         let stmt_digest = state.register(&schema, assertion.clone()).unwrap();
         state.evaluate(&schema, assertion).unwrap();
         let new_root =
-            Node::expression(TRUE_TAG, Payload::binary_op(state.root(), stmt_digest)).digest();
+            Node::expression(Tag::TRUE, Payload::binary_op(state.root(), stmt_digest)).digest();
         state.log(stmt_digest, new_root).unwrap();
         state
     }
@@ -953,7 +954,7 @@ mod tests {
         let stmt_digest = state.register(&schema, pred.clone()).unwrap();
         state.evaluate(&schema, pred).unwrap();
         let new_root =
-            Node::expression(TRUE_TAG, Payload::binary_op(state.root(), stmt_digest)).digest();
+            Node::expression(Tag::TRUE, Payload::binary_op(state.root(), stmt_digest)).digest();
         state.log(stmt_digest, new_root).unwrap();
 
         let wire = state.to_wire();
@@ -994,7 +995,7 @@ mod tests {
         let bad_pred = Node::expression(TestPrecompile::eq_tag(), Payload::binary_op(a, b));
         let bad_digest = bad_pred.digest();
         state.intern(bad_pred);
-        let and_node = Node::expression(TRUE_TAG, Payload::binary_op(TRUE_DIGEST, bad_digest));
+        let and_node = Node::expression(Tag::TRUE, Payload::binary_op(TRUE_DIGEST, bad_digest));
         let and_digest = and_node.digest();
         state.intern(and_node);
         state.root = and_digest;
@@ -1019,7 +1020,7 @@ mod tests {
         // Entries (DFS post-order):
         //   [0] leaf `a` = test_leaf(7)                              — Value
         //   [1] predicate eq(a, a)                                   — Binary (lhs=rhs=0)
-        //   [2] AND-node { TRUE_TAG, payload: (bogus_prev, pred) }   — Value (raw felts; the
+        //   [2] AND-node { Tag::TRUE, payload: (bogus_prev, pred) }   — Value (raw felts; the
         //       AND-node's `prev_root` can't be encoded as a wire index because it intentionally
         //       doesn't appear in the entries)
         let a = test_leaf(7);
@@ -1043,7 +1044,7 @@ mod tests {
                     body: crate::deferred::WireBody::Binary { lhs: 0, rhs: 0 },
                 },
                 crate::deferred::WireEntry {
-                    tag: TRUE_TAG,
+                    tag: Tag::TRUE,
                     body: crate::deferred::WireBody::Value(and_payload),
                 },
             ],
@@ -1065,7 +1066,7 @@ mod tests {
         //   [0] leaf a = test_leaf(7)            — Value
         //   [1] orphan = test_leaf(99)           — Value (dangling: unreferenced)
         //   [2] predicate eq(a, a)               — Binary { lhs: 0, rhs: 0 }
-        //   [3] AND { TRUE_TAG, (TRUE, pred) }   — Binary { lhs: TRUE_INDEX, rhs: 2 }
+        //   [3] AND { Tag::TRUE, (TRUE, pred) }   — Binary { lhs: TRUE_INDEX, rhs: 2 }
         let a = test_leaf(7);
         let a_payload = *a.payload.as_felts().expect("leaf is expression-bodied");
         let orphan = test_leaf(99);
@@ -1088,7 +1089,7 @@ mod tests {
                     body: crate::deferred::WireBody::Binary { lhs: 0, rhs: 0 },
                 },
                 crate::deferred::WireEntry {
-                    tag: TRUE_TAG,
+                    tag: Tag::TRUE,
                     body: crate::deferred::WireBody::Binary {
                         lhs: crate::deferred::TRUE_INDEX,
                         rhs: 2,

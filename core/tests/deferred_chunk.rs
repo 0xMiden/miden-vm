@@ -7,7 +7,7 @@
 //!   framework doesn't care, the precompile picks the function) and returns an expression
 //!   digest-leaf.
 //! - `reduce` for the assertion predicate compares the two operands canonically and returns
-//!   `true_node()` on match.
+//!   `Node::TRUE` on match.
 //!
 //! This is the canonical demonstration that `Precompile::decode + Precompile::reduce + ChunkNode`
 //! are sufficient to model "preimage hashes to digest" as a predicate in the deferred DAG.
@@ -16,7 +16,7 @@ use miden_core::{
     Felt, ZERO,
     deferred::{
         DeferredState, Node, NodeType, Payload, Precompile, PrecompileError, PrecompileRegistry,
-        Tag, WitnessBuilder, precompile_id, true_node,
+        Tag, WitnessBuilder, precompile_id,
     },
 };
 
@@ -108,7 +108,7 @@ impl Precompile for ChunkTestPrecompile {
             if witness.resolve(lhs)? != witness.resolve(rhs)? {
                 return Err(PrecompileError::AssertionFailed);
             }
-            return Ok(true_node());
+            return Ok(Node::TRUE);
         }
         match payload {
             // Preimage chunk reduces to its digest leaf.

@@ -72,10 +72,10 @@ pub trait Precompile: Send + Sync {
     ///   payload)`, optionally first validating the payload.
     /// - **Producing op**: resolve the children, combine, return a new node with the canonical tag
     ///   (minting compound-canonical children via `witness.intern`).
-    /// - **Predicate**: resolve the operands, check the predicate, return [`super::true_node`] on
-    ///   success or [`PrecompileError::AssertionFailed`] on mismatch. The framework detects a
-    ///   predicate result post-reduce via [`Node::is_true_node`](super::Node::is_true_node) and
-    ///   skips the advice-stack push for it.
+    /// - **Predicate**: resolve the operands, check the predicate, return [`Node::TRUE`] on success
+    ///   or [`PrecompileError::AssertionFailed`] on mismatch. The framework detects a predicate
+    ///   result post-reduce via [`Node::is_true_node`](super::Node::is_true_node) and skips the
+    ///   advice-stack push for it.
     /// - **Chunk body**: typically reduces to a digest-leaf expression.
     ///
     /// Payload-validity checks (e.g. "leaf limbs must be u32-canonical") live here — they fire

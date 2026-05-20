@@ -19,7 +19,7 @@ use miden_core::{
     Felt, ZERO,
     deferred::{
         DeferredError, Digest, Node, NodeType, Payload, Precompile, PrecompileError, Tag,
-        WitnessBuilder, precompile_id, true_node,
+        WitnessBuilder, precompile_id,
     },
 };
 
@@ -155,7 +155,7 @@ impl Precompile for Hash {
                 if witness.resolve(h_lhs)? != witness.resolve(h_rhs)? {
                     return Err(PrecompileError::AssertionFailed);
                 }
-                Ok(true_node())
+                Ok(Node::TRUE)
             },
         }
     }
