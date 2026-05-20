@@ -106,7 +106,6 @@ fn preimage_reduces_to_digest_leaf() {
     let node = Hash::preimage_node(64, data);
     let canonical = state.evaluate(&schema, node).unwrap();
     assert_eq!(canonical, expected);
-    assert!(state.contains(&expected.digest()));
 }
 
 #[test]

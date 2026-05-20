@@ -5,28 +5,47 @@ use alloc::{
 
 use super::{
     DeferredError, DeferredStateWire, Digest, IntegrityError, Node, NodeType, Payload,
-    PrecompileError, PrecompileRegistry, TRUE_DIGEST, TRUE_TAG,
+    PrecompileError, PrecompileRegistry, TRUE_DIGEST, TRUE_TAG, true_node,
 };
 
 /// In-memory deferred-DAG state — the verifier's witness.
 ///
 /// State fields:
-/// - `nodes`: expression and chunk nodes content-addressed by their Poseidon2 digest. Re-inserting
-///   an identical node is a no-op (digests are collision-resistant, so same-key inserts are
-///   same-value inserts in practice).
+/// - `nodes`: nodes the transcript *commits to* — exactly what ships in the wire. Written by
+///   `register`/`register_chunk`/`log` (user-declared) and by [`WitnessBuilder::intern`]
+///   (precompile-minted children, required for verifier-side resolution). Each entry is reachable
+///   from `root`; `to_wire`'s DFS is therefore a closure walk, not a trim.
 /// - `root`: the transcript root pointer. Initial value [`super::TRUE_DIGEST`]; advanced by
 ///   `log_precompile`, which interns an AND-node `{tag: TRUE_TAG, payload: prev_root || stmnt}` and
 ///   updates the root pointer. Reducing root to TRUE is the verifier's single check.
+/// - `cache`: host-only `input_digest → canonical Node` memo, written exclusively by the
+///   crate-internal `reduce_and_cache`. Lets [`WitnessBuilder::resolve`] skip recursive reduce on
+///   shared sub-DAGs. Self-evaluating leaves cache as identity (the canonical equals the input).
+///   Seeded with `TRUE_DIGEST → true_node()` so the structural sentinel resolves like everything
+///   else.
 ///
 /// This in-memory form does **not** travel in the proof. [`Self::to_wire`] lowers it to the
 /// passive [`DeferredStateWire`] (index-encoded, root derived from the last entry); that wire is
 /// what ships, and the verifier reconstructs a validated `DeferredState` from it via
 /// [`Self::rehydrate`]. Untrusted bytes therefore only ever become a state through the
 /// schema-checked, chain-walked rehydrate path.
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DeferredState {
     nodes: BTreeMap<Digest, Node>,
     root: Digest,
+    cache: BTreeMap<Digest, Node>,
+}
+
+impl Default for DeferredState {
+    fn default() -> Self {
+        let mut cache = BTreeMap::new();
+        cache.insert(TRUE_DIGEST, true_node());
+        Self {
+            nodes: BTreeMap::new(),
+            root: TRUE_DIGEST,
+            cache,
+        }
+    }
 }
 
 impl DeferredState {
@@ -45,39 +64,17 @@ impl DeferredState {
         self.nodes.contains_key(digest)
     }
 
-    /// Inserts `node` into the DAG keyed by its Poseidon2 digest. Returns the digest. Idempotent
-    /// on identical `(digest, node)` pairs. The depth-first driver in [`Self::evaluate`] uses
-    /// this to persist canonical intermediates reached during evaluation, so the eventual witness
-    /// contains the full reduction proof.
-    ///
-    /// `node.digest()` populates the memoisation cache as a side effect, so subsequent reads of
-    /// the interned node (and its clones, post-priming) skip Poseidon2.
+    /// Inserts `node` into the wire-committed DAG keyed by its Poseidon2 digest. Returns the
+    /// digest. Idempotent on identical `(digest, node)` pairs.
     ///
     /// Internal: external callers go through the schema-aware [`Self::register`] /
     /// [`Self::evaluate`] / [`Self::log`] entry points, which preserve the type invariants. Raw
-    /// `intern` bypasses tag-validation and root-shape checks.
+    /// `intern` bypasses tag-validation and root-shape checks. Reduce-time canonical caching
+    /// goes through `cache` instead — only nodes the transcript *commits to* land here.
     pub(crate) fn intern(&mut self, node: Node) -> Digest {
         let digest = node.digest();
         self.nodes.insert(digest, node);
         digest
-    }
-
-    /// Insert `node` under a caller-supplied `digest`, skipping the Poseidon2 hash. Useful on
-    /// the resolve-then-intern path where the digest is already known from
-    /// [`WitnessBuilder::resolve`]'s lookup. The hint is primed into the node's digest cache so
-    /// subsequent reads are O(1). A `debug_assert!` cross-checks the hint against the recomputed
-    /// digest in debug builds — release builds trust the caller.
-    ///
-    /// Internal: only the [`WitnessBuilder`] driver invokes this. The hint is trusted in release
-    /// builds, so it must not be exposed to external code.
-    pub(crate) fn intern_with_digest(&mut self, digest: Digest, node: Node) {
-        debug_assert_eq!(
-            digest,
-            node.compute_digest(),
-            "intern_with_digest: hint must match node.digest()"
-        );
-        node.prime_digest(digest);
-        self.nodes.insert(digest, node);
     }
 
     pub fn nodes(&self) -> &BTreeMap<Digest, Node> {
@@ -111,7 +108,6 @@ impl DeferredState {
         if actual != expected_new_root {
             return Err(DeferredError::InvalidPayload);
         }
-        // Side effect: primes the AND-node's digest cache via `node.digest()`.
         self.nodes.insert(actual, and_node);
         self.root = actual;
         Ok(())
@@ -143,24 +139,18 @@ impl DeferredState {
 
     /// Evaluate an opaque node via the precompile registry.
     ///
-    /// Reduces to canonical form per `PrecompileRegistry::reduce`. The input node and every
-    /// canonical intermediate produced during the walk are interned into `self.nodes`, so
-    /// callers may invoke `evaluate` on a fresh op node without pre-registering it.
+    /// Reduces to canonical form per `PrecompileRegistry::reduce`. Pure host-side: the result
+    /// (and every transitively-resolved canonical) lands in `cache`, not `nodes`. The
+    /// transcript only commits to what the user explicitly registered or logged.
     ///
     /// For a predicate tag, success returns [`super::true_node`] (detectable via
     /// [`Node::is_true_node`]) and a mismatch surfaces as [`PrecompileError::AssertionFailed`].
     ///
-    /// Transitively-referenced child digests must resolve through the DAG — an unknown child
-    /// digest surfaces as [`PrecompileError::MissingNode`]. The advice-stack contract is enforced
-    /// by the processor-side handler: for non-predicates the canonical 12 felts are pushed; for
+    /// Transitively-referenced child digests must resolve through `nodes` (registered upstream)
+    /// or `cache` (cached from an earlier resolve) — an unknown child digest surfaces as
+    /// [`PrecompileError::MissingNode`]. The advice-stack contract is enforced by the
+    /// processor-side handler: for non-predicates the canonical 12 felts are pushed; for
     /// predicates (whose canonical is the TRUE node), nothing is pushed.
-    ///
-    /// **Why intern aggressively:** the verifier checks neighbors against each other rather than
-    /// re-executing the DAG, so the witness must include the whole reduction proof — the input
-    /// op, every op visited during recursive reduction, and every canonical leaf produced — not
-    /// just the final answer. Missing any of these would leave a digest in the witness with no
-    /// node defining it. The TRUE node is the one exception: it's a structural sentinel that the
-    /// verifier accepts directly, so we don't waste DAG space on copies of it.
     pub fn evaluate(
         &mut self,
         precompiles: &PrecompileRegistry,
@@ -170,29 +160,25 @@ impl DeferredState {
         if !payload_matches_type(node_type, &node.payload) {
             return Err(PrecompileError::InvalidNode);
         }
-        // Compute the input digest once at the entry; the resolver threads it through so the
-        // post-reduce intern of the input doesn't hash it again.
         let digest = node.digest();
-        WitnessBuilder::new(self, precompiles).reduce_and_intern(node, digest)
+        WitnessBuilder::new(self, precompiles).reduce_and_cache(node, digest)
     }
 
     /// Serialize this state to its wire form. Walks reachable nodes from `root` in DFS
     /// post-order, assigning each visited node a `u32` index in emission order. `Binary`-shape
     /// entries encode their children as indices into the earlier wire entries (or
-    /// [`crate::deferred::TRUE_INDEX`] for the [`TRUE_DIGEST`] terminal).
-    /// `register`-then-never-referenced orphans plus
-    /// canonical intermediates that nothing references are trimmed at the wire boundary;
-    /// rehydrate's phase-2 reduce re-mints any canonical intermediates as a side effect of
-    /// re-evaluating each predicate.
+    /// [`crate::deferred::TRUE_INDEX`] for the [`TRUE_DIGEST`] terminal). Registered orphans
+    /// (nodes nothing in the AND-chain references) fall outside the closure and are dropped —
+    /// `evaluate` no longer adds anything to `nodes`, so this is the only trim case.
     ///
     /// Reachability is computed *structurally*, without consulting the schema: for any node
     /// with an `Expression` payload, interpret the 8 felts as `(lhs_digest, rhs_digest)`. If
     /// both digests resolve in `self.nodes` (or are [`TRUE_DIGEST`]), the encoder treats the
     /// node as Binary and emits indices; otherwise it falls back to `Value` (raw felts). Real
-    /// Binary children are always interned (registers and op-evaluates intern them
-    /// transitively), so the heuristic never misses one. False positives — a `Value` leaf whose
-    /// 8 payload felts happen to coincide with the digests of two interned nodes — round-trip
-    /// safely because the reconstructed payload bytes are byte-identical.
+    /// Binary children are always registered (the user pre-registers operands before logging),
+    /// so the heuristic never misses one. False positives — a `Value` leaf whose 8 payload felts
+    /// happen to coincide with the digests of two registered nodes — round-trip safely because
+    /// the reconstructed payload bytes are byte-identical.
     pub fn to_wire(&self) -> DeferredStateWire {
         let mut by_digest = BTreeMap::<Digest, u32>::new();
         let mut entries = Vec::<super::WireEntry>::new();
@@ -272,9 +258,9 @@ impl DeferredState {
     ///   shape.
     /// - **Reachability:** between the phases, reject any interned entry that is not in the
     ///   structural closure of the root ([`IntegrityError::DanglingNode`]). `to_wire` emits exactly
-    ///   that closure, so a faithful wire passes; this trims bloat / hidden-data entries an
-    ///   adversarial wire might smuggle in. Checked before phase 2 so it sees only the wire
-    ///   entries, not the canonical intermediates phase 2's re-evaluation re-mints.
+    ///   that closure, so a faithful wire passes; this rejects bloat / hidden-data entries an
+    ///   adversarial wire might smuggle in. Phase 2 writes only to `cache`, so the `nodes` set
+    ///   checked here matches the post-rehydrate state exactly.
     /// - **Phase 2 (semantic):** walk the AND-chain from `wire.root` down to
     ///   [`super::TRUE_DIGEST`], asserting each step has `tag == TRUE_TAG` and re-evaluating each
     ///   predicate statement via [`Self::evaluate`]. The walk surfaces tampered AND-payloads,
@@ -309,9 +295,8 @@ impl DeferredState {
                 return Err(IntegrityError::ShapeMismatch);
             }
 
-            let d = node.digest();
+            let d = state.intern(node);
             digests.push(d);
-            state.intern(node);
         }
 
         // Derive the deferred commitment from phase 1's last digest. DFS post-order from the
@@ -463,7 +448,7 @@ fn reachable_closure(nodes: &BTreeMap<Digest, Node>, root: Digest) -> BTreeSet<D
 // WITNESS BUILDER
 // ================================================================================================
 
-/// Assembles the verifier's reduction witness while a
+/// Drives the recursive reduce of a node while a
 /// [`Precompile::reduce`](crate::deferred::Precompile::reduce) runs.
 ///
 /// A precompile only supplies *per-node* semantics; it does not own the DAG. This handle is what
@@ -473,18 +458,19 @@ fn reachable_closure(nodes: &BTreeMap<Digest, Node>, root: Digest) -> BTreeSet<D
 /// aliasing-borrow problem. A precompile's `reduce` therefore reads as a depth-first recursive
 /// function: "resolve lhs, resolve rhs, combine."
 ///
-/// The two capabilities, and why every touched node is recorded:
+/// Two capabilities, with cleanly separated writers — `intern` writes only to `nodes`,
+/// `reduce_and_cache` (called from `resolve` and `evaluate`) writes only to `cache`:
 ///
-/// - [`resolve`](Self::resolve) walks a child digest to its canonical form, recursively reducing it
-///   and interning every node visited (the input op and its canonical) along the way.
-/// - [`intern`](Self::intern) deposits a freshly-minted canonical node directly into the DAG —
-///   needed for compound canonicals whose payload references just-computed child digests.
+/// - [`resolve`](Self::resolve) walks a child digest to its canonical form. Cache-first: a hit
+///   returns the cached canonical immediately. On miss, looks up the input in `state.nodes`,
+///   reduces, and writes the result to `cache`. Does **not** touch `nodes`.
+/// - [`intern`](Self::intern) writes a freshly-minted canonical child to `state.nodes` so the
+///   verifier can resolve it during rehydrate independent of evaluation order. Compound canonicals
+///   whose payload references just-computed child digests rely on this. The cache entry for the
+///   minted child fills lazily on first resolve.
 ///
-/// The interning is the point, not a side effect: the verifier checks neighbors against each
-/// other rather than re-executing the DAG, so the witness must contain the *whole* reduction
-/// proof — every op visited and every canonical produced, not just the final answer (see
-/// [`DeferredState::evaluate`]). The sole exception is the TRUE sentinel, a structural marker the
-/// verifier accepts directly.
+/// The verifier re-runs the same code path during [`DeferredState::rehydrate`]'s phase 2 —
+/// rebuilding the cache from scratch — so the cache itself never has to ship.
 ///
 /// There is exactly one of these: the prover builds the witness through it, and the verifier's
 /// [`DeferredState::rehydrate`] re-runs the identical path to re-establish it — so no trait
@@ -504,39 +490,49 @@ impl<'a> WitnessBuilder<'a> {
     }
 
     /// Walk `digest` to its canonical form, recursively reducing it via the precompile registry.
-    /// Errors with [`PrecompileError::MissingNode`] if the digest is not in the DAG. Every node
-    /// visited along the way is interned (the input and the canonical result) except the TRUE
-    /// sentinel.
-    pub fn resolve(&mut self, digest: Digest) -> Result<Node, PrecompileError> {
-        let child = self.state.get(&digest)?.clone();
-        // Pass the known digest through so the post-reduce intern of `child` skips Poseidon2.
-        self.reduce_and_intern(child, digest)
-    }
-
-    /// Intern `node` into the DAG and return its digest. `node` is assumed already canonical —
-    /// the framework does not re-reduce it. Idempotent: interning the same node twice is a
-    /// no-op. Required for compound canonicals whose payload references just-minted child digests.
-    pub fn intern(&mut self, node: Node) -> Digest {
-        self.state.intern(node)
-    }
-
-    /// Reduce `node` to canonical form, interning every node visited along the way — the input
-    /// (under the caller-supplied `input_digest`, no re-hash) and the canonical result — except
-    /// the TRUE sentinel (which is a structural marker, not a load-bearing DAG node).
+    /// Errors with [`PrecompileError::MissingNode`] if the digest is unknown to both
+    /// `cache` and `nodes`.
     ///
-    /// `node` is passed to `PrecompileRegistry::reduce` by reference so we can intern it by-move
-    /// afterwards, avoiding a chunk-sized clone on every reduction.
-    pub(crate) fn reduce_and_intern(
+    /// Cache-first: a hit in [`DeferredState::cache`](DeferredState) returns the canonical
+    /// directly. On miss, the input node is looked up in `state.nodes` (it must have been
+    /// registered upstream) and reduced; the result is cached for next time.
+    pub fn resolve(&mut self, digest: Digest) -> Result<Node, PrecompileError> {
+        if let Some(canonical) = self.state.cache.get(&digest) {
+            return Ok(canonical.clone());
+        }
+        let child = self.state.get(&digest)?.clone();
+        self.reduce_and_cache(child, digest)
+    }
+
+    /// Register a freshly-minted canonical child and return its digest. Used by compound
+    /// canonicals whose payload references just-computed child digests (e.g. `Group::Add`
+    /// minting coordinate leaves).
+    ///
+    /// Writes only to `state.nodes` — the `nodes` entry makes the child wire-committed so a
+    /// later registered node whose payload references this child's digest will resolve cleanly
+    /// on the verifier side, regardless of evaluation order across statements. The cache fills
+    /// lazily on first `resolve(digest)`.
+    pub fn intern(&mut self, node: Node) -> Digest {
+        let digest = node.digest();
+        self.state.nodes.insert(digest, node);
+        digest
+    }
+
+    /// Reduce `node` to canonical form and write `input_digest → canonical` into
+    /// [`DeferredState::cache`](DeferredState). The input node is *not* added to
+    /// `state.nodes` — only `register` / `register_chunk` / `log` and [`Self::intern`] do that.
+    ///
+    /// The `input_digest` is passed by the caller (rather than recomputed via `node.digest()`)
+    /// so the cache write skips a redundant Poseidon2 — `resolve` already has the digest as its
+    /// argument, and `evaluate` computes it once at the top of the call.
+    pub(crate) fn reduce_and_cache(
         &mut self,
         node: Node,
         input_digest: Digest,
     ) -> Result<Node, PrecompileError> {
         let precompiles = self.precompiles;
         let canonical = precompiles.reduce(&node, self)?;
-        self.state.intern_with_digest(input_digest, node);
-        if !canonical.is_true_node() {
-            self.state.intern(canonical.clone());
-        }
+        self.state.cache.insert(input_digest, canonical.clone());
         Ok(canonical)
     }
 }
@@ -738,11 +734,11 @@ mod tests {
     }
 
     #[test]
-    fn witness_includes_all_registered_nodes() {
-        // Build (a + b) * c, assert it equals leaf(35), evaluate to drive the canonical
-        // intermediates into the DAG, then snapshot the witness. The TRUE node is interned
-        // *during* reduce but the WitnessBuilder skips it (sentinel, not load-bearing), so it
-        // does not appear in the witness.
+    fn nodes_holds_only_registered_inputs() {
+        // Register the full op tree (a + b) * c == 35 plus an orphan leaf, evaluate the
+        // predicate, and assert `state.nodes` contains *exactly* the seven registered nodes —
+        // no canonical intermediates, no auto-interned assertion input. Canonicals live in
+        // `cache`.
         let mut state = DeferredState::new();
         let schema = precompiles();
         let a = state.register(&schema, test_leaf(3)).unwrap();
@@ -764,22 +760,23 @@ mod tests {
             .unwrap();
         let assertion =
             Node::expression(TestPrecompile::eq_tag(), Payload::binary_op(mul, expected));
+        let assertion_digest = assertion.digest();
         state.evaluate(&schema, assertion).unwrap();
 
-        // 7 registered + 1 interned intermediate (canonical(add) = leaf(7)) +
-        // 1 interned assertion-input (the ASSERT_EQ node, deposited by evaluate's
-        // reduce_and_intern).
-        assert_eq!(state.nodes().len(), 9);
-        let leaf_7_digest = test_leaf(7).digest();
-        assert!(state.contains(&leaf_7_digest), "canonical(add) must appear in the state");
+        assert_eq!(state.nodes().len(), 7);
+        assert!(!state.contains(&assertion_digest), "evaluate does not write to nodes");
+        // test_leaf(7) was never registered — its presence would mean evaluate auto-interned
+        // canonical(add). test_leaf(35) is *also* the canonical(mul), but checking its absence
+        // would be wrong since `expected` registered it directly.
+        assert!(!state.contains(&test_leaf(7).digest()), "canonical(add) lives in cache");
         assert_eq!(state.root(), TRUE_DIGEST, "no log_precompile called, root is still TRUE");
     }
 
     #[test]
-    fn evaluate_interns_canonical_intermediates() {
-        // Pre-register the op tree (a+b)*c. Evaluating `mul` should deposit canonical(add)=
-        // leaf(7) and canonical(mul)=leaf(35) into state.nodes so the witness covers the
-        // whole reduction proof, not just the final answer.
+    fn evaluate_does_not_intern_unregistered_input() {
+        // Build (a+b)*c, pre-register only the leaves and `add`. The outer `mul` is handed
+        // directly to `evaluate` — under the host-only model, it stays out of `nodes`. The
+        // canonical lives in `cache`, keyed by the input digest.
         let mut state = DeferredState::new();
         let schema = precompiles();
         let a = state.register(&schema, test_leaf(3)).unwrap();
@@ -788,22 +785,59 @@ mod tests {
         let add = Node::expression(TestPrecompile::add_tag(), Payload::binary_op(a, b));
         let add_digest = state.register(&schema, add).unwrap();
         let mul = Node::expression(TestPrecompile::mul_tag(), Payload::binary_op(add_digest, c));
-        state.register(&schema, mul.clone()).unwrap();
+        let mul_digest = mul.digest();
 
         let canonical = state.evaluate(&schema, mul).unwrap();
         assert_eq!(canonical, test_leaf(35));
-
-        let leaf_7_digest = test_leaf(7).digest();
-        let leaf_35_digest = test_leaf(35).digest();
-        assert!(state.contains(&leaf_7_digest), "canonical(add) = leaf(7) must be interned");
-        assert!(state.contains(&leaf_35_digest), "canonical(mul) = leaf(35) must be interned");
+        assert!(!state.contains(&mul_digest), "input op stays out of nodes");
+        assert_eq!(state.cache.get(&mul_digest), Some(&test_leaf(35)));
     }
 
     #[test]
-    fn evaluate_interns_unregistered_input_op() {
-        // Build (a+b)*c, but only pre-register the leaves and the inner `add` op. The outer `mul`
-        // is constructed on the fly and handed straight to `evaluate` — it must end up interned
-        // so the witness can link canonical(mul) back to its op-node parent.
+    fn resolve_of_true_digest_returns_true_node() {
+        // TRUE is never interned; the seeded cache entry is what lets `resolve` return it
+        // instead of erroring on `state.get(&TRUE_DIGEST)`.
+        let mut state = DeferredState::new();
+        let schema = precompiles();
+        let mut witness = WitnessBuilder::new(&mut state, &schema);
+        let resolved = witness.resolve(TRUE_DIGEST).unwrap();
+        assert!(resolved.is_true_node());
+    }
+
+    #[test]
+    fn evaluate_populates_cache() {
+        // Predicate inputs cache to the `true_node()`; everything else caches to its canonical
+        // Node. Self-evaluating leaves cache as identity (key digest == value.digest()).
+        let mut state = DeferredState::new();
+        let schema = precompiles();
+        let a = state.register(&schema, test_leaf(3)).unwrap();
+        let b = state.register(&schema, test_leaf(4)).unwrap();
+        let c = state.register(&schema, test_leaf(5)).unwrap();
+        let expected = state.register(&schema, test_leaf(35)).unwrap();
+        let add_node = Node::expression(TestPrecompile::add_tag(), Payload::binary_op(a, b));
+        let add_digest = add_node.digest();
+        let mul_node =
+            Node::expression(TestPrecompile::mul_tag(), Payload::binary_op(add_digest, c));
+        let mul_digest = mul_node.digest();
+        let assertion =
+            Node::expression(TestPrecompile::eq_tag(), Payload::binary_op(mul_digest, expected));
+        let assertion_digest = assertion.digest();
+        state.register(&schema, add_node).unwrap();
+        state.register(&schema, mul_node).unwrap();
+
+        state.evaluate(&schema, assertion).unwrap();
+
+        assert_eq!(state.cache.get(&add_digest), Some(&test_leaf(7)));
+        assert_eq!(state.cache.get(&mul_digest), Some(&test_leaf(35)));
+        assert!(state.cache.get(&assertion_digest).unwrap().is_true_node());
+        assert_eq!(state.cache.get(&a), Some(&test_leaf(3)));
+    }
+
+    #[test]
+    fn resolve_cache_hit_returns_canonical_without_re_reducing() {
+        // Remove the registered operand op-node after the first evaluate: a second evaluate
+        // succeeds only if the memo short-circuits before `resolve(add_digest)` would hit the
+        // now-missing `add` node.
         let mut state = DeferredState::new();
         let schema = precompiles();
         let a = state.register(&schema, test_leaf(3)).unwrap();
@@ -812,23 +846,22 @@ mod tests {
         let add = Node::expression(TestPrecompile::add_tag(), Payload::binary_op(a, b));
         let add_digest = state.register(&schema, add).unwrap();
         let mul = Node::expression(TestPrecompile::mul_tag(), Payload::binary_op(add_digest, c));
-
         let mul_digest = mul.digest();
-        assert!(!state.contains(&mul_digest), "mul must not be pre-registered for this test");
+        state.register(&schema, mul.clone()).unwrap();
+        state.evaluate(&schema, mul.clone()).unwrap();
+
+        state.nodes.remove(&add_digest);
 
         let canonical = state.evaluate(&schema, mul).unwrap();
         assert_eq!(canonical, test_leaf(35));
-
-        assert!(state.contains(&mul_digest), "input op node must be interned by evaluate");
-        assert!(state.contains(&test_leaf(7).digest()), "canonical(add) interned");
-        assert!(state.contains(&test_leaf(35).digest()), "canonical(mul) interned");
+        assert_eq!(state.cache.get(&mul_digest), Some(&test_leaf(35)));
     }
 
     // REHYDRATE TESTS
     // ============================================================================================
 
-    /// Build a fresh state that evaluates `(a+b)*c == 35` and then `log`s the assertion as a
-    /// transcript step. Returns the populated state for round-trip tests.
+    /// Build a fresh state that logs `(a+b)*c == 35` as a transcript step. Returns the populated
+    /// state for round-trip tests.
     fn built_state_with_logged_predicate() -> DeferredState {
         let mut state = DeferredState::new();
         let schema = precompiles();
@@ -850,7 +883,9 @@ mod tests {
             .unwrap();
         let assertion =
             Node::expression(TestPrecompile::eq_tag(), Payload::binary_op(mul, expected));
-        let stmt_digest = assertion.digest();
+        // `log` references the predicate node by digest; pre-register so the wire embeds it as
+        // a Binary entry rather than a bare-commitment Value.
+        let stmt_digest = state.register(&schema, assertion.clone()).unwrap();
         state.evaluate(&schema, assertion).unwrap();
         let new_root =
             Node::expression(TRUE_TAG, Payload::binary_op(state.root(), stmt_digest)).digest();
@@ -864,9 +899,6 @@ mod tests {
         let wire = original.to_wire();
         let rehydrated = DeferredState::rehydrate(&wire, &precompiles()).unwrap();
         assert_eq!(rehydrated.root(), original.root());
-        // After rehydrate phase 2, additional canonical intermediates from the predicate's
-        // re-evaluation may be present. So we only assert the root is preserved and the chain
-        // walks the same statements.
         assert_eq!(rehydrated.statements(), original.statements());
     }
 
@@ -918,7 +950,7 @@ mod tests {
         let _orphan = state.register(&schema, test_leaf(99)).unwrap();
         let a = state.register(&schema, test_leaf(7)).unwrap();
         let pred = Node::expression(TestPrecompile::eq_tag(), Payload::binary_op(a, a));
-        let stmt_digest = pred.digest();
+        let stmt_digest = state.register(&schema, pred.clone()).unwrap();
         state.evaluate(&schema, pred).unwrap();
         let new_root =
             Node::expression(TRUE_TAG, Payload::binary_op(state.root(), stmt_digest)).digest();
@@ -941,8 +973,7 @@ mod tests {
 
     #[test]
     fn to_wire_trimmed_round_trips_through_rehydrate() {
-        // Trimmed wire must still round-trip via rehydrate (phase 2's evaluate re-mints any
-        // canonical intermediates that the trim dropped).
+        // Orphans dropped by `to_wire` must still round-trip via rehydrate.
         let original = built_state_with_logged_predicate();
         let wire = original.to_wire();
         let rehydrated = DeferredState::rehydrate(&wire, &precompiles()).unwrap();
