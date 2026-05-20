@@ -11,11 +11,10 @@ use miden_core::{
     mast::{
         AsmOpId, BasicBlockNode, BasicBlockNodeBuilder, DecoratorFingerprint, DecoratorId,
         ExternalNodeBuilder, JoinNodeBuilder, MastForest, MastForestContributor, MastForestError,
-        MastForestRootMap, MastNode, MastNodeBuilder, MastNodeExt, MastNodeFingerprint, MastNodeId,
-        Remapping, SubtreeIterator,
+        MastNode, MastNodeBuilder, MastNodeExt, MastNodeFingerprint, MastNodeId, Remapping,
+        SubtreeIterator,
     },
     operations::{AssemblyOp, Decorator, DecoratorList, Operation},
-    serde::Serializable,
 };
 
 use super::{GlobalItemIndex, LinkerError, Procedure};
@@ -71,12 +70,6 @@ pub struct MastForestBuilder {
     /// A MastForest that contains the MAST of all statically-linked libraries, it's used to find
     /// precompiled procedures and copy their subtrees instead of inserting external nodes.
     statically_linked_mast: Arc<MastForest>,
-    /// Maps each statically linked source forest commitment to its position in the merged forest
-    /// root map.
-    statically_linked_forest_indices_by_commitment: BTreeMap<Word, usize>,
-    /// Maps procedure roots from each source static library to their new root ID in the merged
-    /// static forest.
-    statically_linked_root_map: MastForestRootMap,
     /// Keeps track of the new ids assigned to nodes that are copied from the MAST of
     /// statically-linked libraries.
     statically_linked_mast_remapping: Remapping,
@@ -97,10 +90,6 @@ pub struct MastForestBuilder {
     /// (which happens when `ensure_block` deduplicates a basic block and returns an
     /// already-existing `MastNodeId`).
     pending_debug_var_mappings: Vec<(MastNodeId, Vec<(usize, miden_core::mast::DebugVarId)>)>,
-    /// When false, asm ops and debug vars are not included in the dedup
-    /// fingerprint. This avoids keeping duplicate nodes in stripped builds
-    /// where the metadata that justified the split has been discarded.
-    emit_debug_info: bool,
 }
 
 impl MastForestBuilder {
@@ -114,18 +103,8 @@ impl MastForestBuilder {
         static_libraries: impl IntoIterator<Item = &'a MastForest>,
     ) -> Result<Self, Report> {
         // All statically-linked libraries are merged into a single MastForest.
-        let forests = static_libraries.into_iter().collect::<Vec<_>>();
-        // TODO(#3067): `MastForest::commitment()` only hashes procedure root digests, so two
-        // forests with identical roots but different debug metadata share the same commitment.
-        // Using that commitment as a lookup key can point provenance from one static library at
-        // another library's root map and still select the wrong diagnostics metadata.
-        let statically_linked_forest_indices_by_commitment = forests
-            .iter()
-            .enumerate()
-            .map(|(idx, forest)| (forest.commitment(), idx))
-            .collect();
-        let (statically_linked_mast, statically_linked_root_map) =
-            MastForest::merge(forests.iter().copied()).into_diagnostic()?;
+        let forests = static_libraries.into_iter();
+        let (statically_linked_mast, _remapping) = MastForest::merge(forests).into_diagnostic()?;
         // The AdviceMap of the statically-linked forest is copied to the forest being built.
         //
         // This might include excess advice map data in the built MastForest, but we currently do
@@ -136,30 +115,12 @@ impl MastForestBuilder {
         Ok(MastForestBuilder {
             mast_forest,
             statically_linked_mast: Arc::new(statically_linked_mast),
-            statically_linked_forest_indices_by_commitment,
-            statically_linked_root_map,
-            emit_debug_info: true,
             ..Self::default()
         })
     }
 
-    /// When set to true, asm ops and debug vars participate in the dedup
-    /// fingerprint so nodes with different source metadata stay distinct.
-    /// When false (release builds), only ops and decorators matter.
-    pub fn set_emit_debug_info(&mut self, emit: bool) {
-        self.emit_debug_info = emit;
-    }
-
-    /// Augments a fingerprint with metadata bytes only when debug info is
-    /// being emitted. In stripped builds this is a no-op so identical-ops
-    /// nodes collapse back to a single node.
-    fn maybe_augment(&self, fp: MastNodeFingerprint, data: &[u8]) -> MastNodeFingerprint {
-        if self.emit_debug_info {
-            fp.augment_with_data(data)
-        } else {
-            fp
-        }
-    }
+    /// The builder keeps node identity independent from debug metadata.
+    pub fn set_emit_debug_info(&mut self, _emit: bool) {}
 
     /// Returns a reference to the underlying [`MastForest`].
     pub fn mast_forest(&self) -> &MastForest {
@@ -193,8 +154,8 @@ impl MastForestBuilder {
 
         // Register all pending debug variable mappings in sorted node order.
         // The CSR structure requires sequential node registration.
-        // Debug vars are included in the augmented dedup fingerprint, so blocks with
-        // different debug vars are not deduplicated. The dedup here is only a safety measure.
+        // Debug vars do not affect node identity, so only the first metadata set for a
+        // deduplicated node is registered.
         let debug_var_mappings =
             deduplicate_debug_var_mappings(core::mem::take(&mut self.pending_debug_var_mappings));
 
@@ -248,133 +209,10 @@ fn deduplicate_asm_op_mappings(
         .collect()
 }
 
-fn append_serialized_asm_op(data: &mut Vec<u8>, op_idx: usize, asm_op: &AssemblyOp) {
-    data.extend_from_slice(&op_idx.to_le_bytes());
-    asm_op.context_name().write_into(data);
-    asm_op.op().write_into(data);
-    asm_op.num_cycles().write_into(data);
-    match asm_op.location() {
-        Some(location) => {
-            data.push(1);
-            location.uri.write_into(data);
-            data.extend_from_slice(&u32::from(location.start).to_le_bytes());
-            data.extend_from_slice(&u32::from(location.end).to_le_bytes());
-        },
-        None => data.push(0),
-    }
-}
-
-/// Serializes AssemblyOp content into bytes for fingerprint augmentation.
-///
-/// This uses the resolved [`AssemblyOp`] payload rather than raw `AsmOpId`s so dedup depends on
-/// source-mapping semantics, not allocation order.
-fn serialize_asm_ops(asm_ops: &[(usize, AssemblyOp)]) -> Vec<u8> {
-    let mut data = Vec::new();
-    for (op_idx, asm_op) in asm_ops {
-        append_serialized_asm_op(&mut data, *op_idx, asm_op);
-    }
-    data
-}
-
-/// Serializes AssemblyOp content referenced by `AsmOpId`s into bytes for fingerprint augmentation.
-fn serialize_asm_op_ids(forest: &MastForest, asm_op_ids: &[(usize, AsmOpId)]) -> Vec<u8> {
-    let mut data = Vec::new();
-    for (op_idx, asm_op_id) in asm_op_ids {
-        if let Some(asm_op) = forest.debug_info().asm_op(*asm_op_id) {
-            append_serialized_asm_op(&mut data, *op_idx, asm_op);
-        }
-    }
-    data
-}
-
-/// Looks up and serializes the asm ops for a given node from the pending mappings.
-fn serialize_asm_ops_for_node(
-    forest: &MastForest,
-    pending: &[(MastNodeId, Vec<(usize, AsmOpId)>)],
-    node_id: MastNodeId,
-) -> Vec<u8> {
-    for (id, asm_ops) in pending {
-        if *id == node_id {
-            return serialize_asm_op_ids(forest, asm_ops);
-        }
-    }
-    Vec::new()
-}
-
-/// Looks up and serializes the asm ops registered for a node in an existing forest.
-fn serialize_asm_ops_from_forest_node(forest: &MastForest, node_id: MastNodeId) -> Vec<u8> {
-    let mut entries = forest.debug_info().asm_ops_for_node(node_id);
-    if entries.is_empty() {
-        return Vec::new();
-    }
-
-    if let MastNode::Block(block) = &forest[node_id] {
-        entries = BasicBlockNode::unadjust_asm_op_indices(entries, block.op_batches());
-    }
-
-    let mut data = Vec::new();
-    for (op_idx, asm_op_id) in entries {
-        if let Some(asm_op) = forest.debug_info().asm_op(asm_op_id) {
-            append_serialized_asm_op(&mut data, op_idx, asm_op);
-        }
-    }
-    data
-}
-
-/// Serializes debug variable content into bytes for fingerprint augmentation.
-///
-/// This uses the resolved [`DebugVarInfo`] payload rather than raw `DebugVarId`s so
-/// dedup depends on variable semantics, not allocation order.
-fn serialize_debug_vars(
-    forest: &MastForest,
-    debug_vars: &[(usize, miden_core::mast::DebugVarId)],
-) -> Vec<u8> {
-    let mut data = Vec::new();
-    for (op_idx, var_id) in debug_vars {
-        data.extend_from_slice(&op_idx.to_le_bytes());
-        if let Some(debug_var) = forest.debug_info().debug_var(*var_id) {
-            debug_var.write_into(&mut data);
-        }
-    }
-    data
-}
-
-/// Looks up and serializes the debug vars for a given node from the pending mappings.
-fn serialize_debug_vars_for_node(
-    forest: &MastForest,
-    pending: &[(MastNodeId, Vec<(usize, miden_core::mast::DebugVarId)>)],
-    node_id: MastNodeId,
-) -> Vec<u8> {
-    for (id, vars) in pending {
-        if *id == node_id {
-            return serialize_debug_vars(forest, vars);
-        }
-    }
-    Vec::new()
-}
-
-/// Looks up and serializes the debug vars registered for a node in an existing forest.
-fn serialize_debug_vars_from_forest_node(forest: &MastForest, node_id: MastNodeId) -> Vec<u8> {
-    let entries = forest.debug_info().debug_vars_for_node(node_id);
-    if entries.is_empty() {
-        return Vec::new();
-    }
-
-    let mut data = Vec::new();
-    for (op_idx, var_id) in entries {
-        data.extend_from_slice(&op_idx.to_le_bytes());
-        if let Some(debug_var) = forest.debug_info().debug_var(var_id) {
-            debug_var.write_into(&mut data);
-        }
-    }
-    data
-}
-
 /// Deduplicates debug variable mappings by node_id (keeps first registration).
 ///
-/// Debug vars are included in the augmented dedup fingerprint, so blocks with different
-/// debug vars will not be deduplicated. This function is a safety measure to handle any
-/// remaining duplicate registrations (e.g. from control flow node deduplication).
+/// Debug vars do not affect node identity, so this keeps the first metadata set for a
+/// deduplicated node.
 fn deduplicate_debug_var_mappings(
     mut mappings: Vec<(MastNodeId, Vec<(usize, miden_core::mast::DebugVarId)>)>,
 ) -> Vec<(MastNodeId, Vec<(usize, miden_core::mast::DebugVarId)>)> {
@@ -750,30 +588,7 @@ impl MastForestBuilder {
             .with_before_enter(before_enter)
             .with_after_exit(after_exit);
 
-        let base_fingerprint = block
-            .fingerprint_for_node(&self.mast_forest, &self.hash_by_node_id)
-            .into_diagnostic()
-            .wrap_err("assembler failed to fingerprint basic block")?;
-        let dedup_fingerprint = self.maybe_augment(
-            self.maybe_augment(
-                base_fingerprint,
-                &serialize_asm_op_ids(&self.mast_forest, &asm_op_ids),
-            ),
-            &serialize_debug_vars(&self.mast_forest, &debug_vars),
-        );
-
-        let (node_id, is_new) =
-            if let Some(node_id) = self.node_id_by_fingerprint.get(&dedup_fingerprint) {
-                (*node_id, false)
-            } else {
-                let new_node_id = block
-                    .add_to_forest(&mut self.mast_forest)
-                    .into_diagnostic()
-                    .wrap_err("assembler failed to add new node")?;
-                self.node_id_by_fingerprint.insert(dedup_fingerprint, new_node_id);
-                self.hash_by_node_id.insert(new_node_id, dedup_fingerprint);
-                (new_node_id, true)
-            };
+        let (node_id, is_new) = self.ensure_node_exists(block)?;
 
         if is_new && !asm_op_ids.is_empty() {
             self.pending_asm_op_mappings.push((node_id, asm_op_ids));
@@ -836,77 +651,35 @@ impl MastForestBuilder {
         Ok(node_id)
     }
 
-    /// Like [`Self::ensure_node`], but includes an AssemblyOp in the dedup fingerprint and
-    /// registers it for the node if a new node is created.
+    /// Like [`Self::ensure_node`], but registers an AssemblyOp for the node if a new node is
+    /// created.
     pub(crate) fn ensure_node_with_asm_op(
         &mut self,
         builder: impl MastForestContributor,
         asm_op: AssemblyOp,
     ) -> Result<MastNodeId, Report> {
-        let base_fingerprint = builder
-            .fingerprint_for_node(&self.mast_forest, &self.hash_by_node_id)
-            .expect("hash_by_node_id should contain the fingerprints of all children of `node`");
-        let dedup_fingerprint =
-            self.maybe_augment(base_fingerprint, &serialize_asm_ops(&[(0, asm_op.clone())]));
-
-        if let Some(node_id) = self.node_id_by_fingerprint.get(&dedup_fingerprint) {
-            Ok(*node_id)
-        } else {
-            let new_node_id = builder
-                .add_to_forest(&mut self.mast_forest)
-                .into_diagnostic()
-                .wrap_err("assembler failed to add new node")?;
-            self.node_id_by_fingerprint.insert(dedup_fingerprint, new_node_id);
-            self.hash_by_node_id.insert(new_node_id, dedup_fingerprint);
-
+        let (node_id, is_new) = self.ensure_node_exists(builder)?;
+        if is_new {
             let asm_op_id = self
                 .mast_forest
                 .debug_info_mut()
                 .add_asm_op(asm_op)
                 .into_diagnostic()
                 .wrap_err("failed to add AssemblyOp for control flow node")?;
-            self.pending_asm_op_mappings.push((new_node_id, vec![(0, asm_op_id)]));
-
-            Ok(new_node_id)
+            self.pending_asm_op_mappings.push((node_id, vec![(0, asm_op_id)]));
         }
+        Ok(node_id)
     }
 
-    /// Like [`Self::ensure_node`], but includes external metadata from `source_node_id` in the
-    /// dedup fingerprint and copies it to the new node. Used when cloning a node (e.g. the
-    /// repeat path) so that the rebuilt node keeps the same dedup semantics as the original.
+    /// Like [`Self::ensure_node`], but copies external metadata from `source_node_id` when a new
+    /// node is created.
     pub(crate) fn ensure_node_preserving_debug_vars(
         &mut self,
         builder: impl MastForestContributor,
         source_node_id: MastNodeId,
     ) -> Result<MastNodeId, Report> {
-        let base_fingerprint = builder
-            .fingerprint_for_node(&self.mast_forest, &self.hash_by_node_id)
-            .expect("hash_by_node_id should contain the fingerprints of all children of `node`");
-
-        // Augment with the source node's external metadata, matching ensure_block() semantics.
-        let asm_ops_data = serialize_asm_ops_for_node(
-            &self.mast_forest,
-            &self.pending_asm_op_mappings,
-            source_node_id,
-        );
-        let debug_vars_data = serialize_debug_vars_for_node(
-            &self.mast_forest,
-            &self.pending_debug_var_mappings,
-            source_node_id,
-        );
-        let dedup_fingerprint = self
-            .maybe_augment(self.maybe_augment(base_fingerprint, &asm_ops_data), &debug_vars_data);
-
-        if let Some(node_id) = self.node_id_by_fingerprint.get(&dedup_fingerprint) {
-            Ok(*node_id)
-        } else {
-            let new_node_id = builder
-                .add_to_forest(&mut self.mast_forest)
-                .into_diagnostic()
-                .wrap_err("assembler failed to add new node")?;
-            self.node_id_by_fingerprint.insert(dedup_fingerprint, new_node_id);
-            self.hash_by_node_id.insert(new_node_id, dedup_fingerprint);
-
+        let (node_id, is_new) = self.ensure_node_exists(builder)?;
+        if is_new {
             // Carry over AssemblyOp registration from the source node.
             let asm_ops: Option<Vec<_>> = self
                 .pending_asm_op_mappings
@@ -916,7 +689,7 @@ impl MastForestBuilder {
             if let Some(asm_ops) = asm_ops
                 && !asm_ops.is_empty()
             {
-                self.pending_asm_op_mappings.push((new_node_id, asm_ops));
+                self.pending_asm_op_mappings.push((node_id, asm_ops));
             }
 
             // Carry over debug var registration from the source node.
@@ -928,40 +701,22 @@ impl MastForestBuilder {
             if let Some(vars) = debug_vars
                 && !vars.is_empty()
             {
-                self.pending_debug_var_mappings.push((new_node_id, vars));
+                self.pending_debug_var_mappings.push((node_id, vars));
             }
-
-            Ok(new_node_id)
         }
+        Ok(node_id)
     }
 
-    /// Copies a statically linked node into this builder while keeping source metadata in the
-    /// dedup fingerprint and remapping it into the target forest when a new node is created.
+    /// Copies a statically linked node into this builder.
     fn ensure_node_from_statically_linked_source(
         &mut self,
         builder: impl MastForestContributor,
         source_node_id: MastNodeId,
     ) -> Result<MastNodeId, Report> {
-        let base_fingerprint = builder
-            .fingerprint_for_node(&self.mast_forest, &self.hash_by_node_id)
-            .expect("hash_by_node_id should contain the fingerprints of all children of `node`");
-        let asm_ops_data =
-            serialize_asm_ops_from_forest_node(&self.statically_linked_mast, source_node_id);
-        let debug_vars_data =
-            serialize_debug_vars_from_forest_node(&self.statically_linked_mast, source_node_id);
-        let dedup_fingerprint = self
-            .maybe_augment(self.maybe_augment(base_fingerprint, &asm_ops_data), &debug_vars_data);
-
-        if let Some(node_id) = self.node_id_by_fingerprint.get(&dedup_fingerprint) {
-            return Ok(*node_id);
+        let (node_id, is_new) = self.ensure_node_exists(builder)?;
+        if !is_new {
+            return Ok(node_id);
         }
-
-        let new_node_id = builder
-            .add_to_forest(&mut self.mast_forest)
-            .into_diagnostic()
-            .wrap_err("assembler failed to add new statically linked node")?;
-        self.node_id_by_fingerprint.insert(dedup_fingerprint, new_node_id);
-        self.hash_by_node_id.insert(new_node_id, dedup_fingerprint);
 
         let mut asm_ops = self.statically_linked_mast.debug_info().asm_ops_for_node(source_node_id);
         if let MastNode::Block(block) = &self.statically_linked_mast[source_node_id] {
@@ -981,7 +736,7 @@ impl MastForestBuilder {
                 }
             }
             if !remapped_asm_ops.is_empty() {
-                self.pending_asm_op_mappings.push((new_node_id, remapped_asm_ops));
+                self.pending_asm_op_mappings.push((node_id, remapped_asm_ops));
             }
         }
 
@@ -1001,11 +756,11 @@ impl MastForestBuilder {
                 }
             }
             if !remapped_debug_vars.is_empty() {
-                self.pending_debug_var_mappings.push((new_node_id, remapped_debug_vars));
+                self.pending_debug_var_mappings.push((node_id, remapped_debug_vars));
             }
         }
 
-        Ok(new_node_id)
+        Ok(node_id)
     }
 
     /// Adds a node to the forest if it doesn't already exist.
@@ -1018,7 +773,8 @@ impl MastForestBuilder {
     ) -> Result<(MastNodeId, bool), Report> {
         let node_fingerprint = builder
             .fingerprint_for_node(&self.mast_forest, &self.hash_by_node_id)
-            .expect("hash_by_node_id should contain the fingerprints of all children of `node`");
+            .into_diagnostic()
+            .wrap_err("assembler failed to compute node fingerprint")?;
 
         if let Some(node_id) = self.node_id_by_fingerprint.get(&node_fingerprint) {
             // node already exists in the forest; return previously assigned id
@@ -1045,9 +801,8 @@ impl MastForestBuilder {
     /// Each entry is `(op_idx, DebugVarId)` where `op_idx` is the operation index the debug
     /// variable corresponds to.
     ///
-    /// Note: AssemblyOps and debug variables are kept external to the block builder but are
-    /// included in the dedup fingerprint so that blocks with identical operations but different
-    /// metadata are not deduplicated.
+    /// Note: AssemblyOps and debug variables are kept external to the block builder and do not
+    /// affect node identity.
     ///
     /// The actual registration of both AssemblyOp and debug variable mappings is deferred until
     /// `build()` is called, to ensure nodes are registered in sequential order as required by
@@ -1065,30 +820,7 @@ impl MastForestBuilder {
             .with_before_enter(before_enter)
             .with_after_exit(after_exit);
 
-        // Compute the base fingerprint from the builder, then augment with external metadata
-        // so the dedup key stays sensitive to source mappings without storing them on the
-        // builder itself.
-        let base_fingerprint = block
-            .fingerprint_for_node(&self.mast_forest, &self.hash_by_node_id)
-            .into_diagnostic()
-            .wrap_err("assembler failed to fingerprint basic block")?;
-        let dedup_fingerprint = self.maybe_augment(
-            self.maybe_augment(base_fingerprint, &serialize_asm_ops(&asm_ops)),
-            &serialize_debug_vars(&self.mast_forest, &debug_vars),
-        );
-
-        let (node_id, is_new) =
-            if let Some(node_id) = self.node_id_by_fingerprint.get(&dedup_fingerprint) {
-                (*node_id, false)
-            } else {
-                let new_node_id = block
-                    .add_to_forest(&mut self.mast_forest)
-                    .into_diagnostic()
-                    .wrap_err("assembler failed to add new node")?;
-                self.node_id_by_fingerprint.insert(dedup_fingerprint, new_node_id);
-                self.hash_by_node_id.insert(new_node_id, dedup_fingerprint);
-                (new_node_id, true)
-            };
+        let (node_id, is_new) = self.ensure_node_exists(block)?;
 
         // Only register AssemblyOps for newly created nodes.
         // Deduplicated nodes already have their asm_ops registered from when they were first added.
@@ -1107,9 +839,8 @@ impl MastForestBuilder {
             self.pending_asm_op_mappings.push((node_id, asm_op_mappings));
         }
 
-        // Only register debug variables for newly created nodes.
-        // Blocks with different debug vars have different augmented fingerprints,
-        // so deduplication only occurs when vars are truly identical.
+        // Only register debug variables for newly created nodes. If the block is deduplicated,
+        // the existing node keeps the metadata that was registered first.
         if is_new && !debug_vars.is_empty() {
             self.pending_debug_var_mappings.push((node_id, debug_vars));
         }
@@ -1190,47 +921,15 @@ impl MastForestBuilder {
     ///   the inserted subtree is returned.
     /// * If dynamically-linked, then an external node is inserted, and its MastNodeId is returned
     ///
-    /// Adds a node corresponding to the given MAST root, preferring an exact source root when
-    /// provenance from a statically-linked library is available.
-    pub fn ensure_external_link_with_source(
-        &mut self,
-        mast_root: Word,
-        source_library_commitment: Option<Word>,
-        source_root_id: Option<MastNodeId>,
-    ) -> Result<MastNodeId, Report> {
-        if let Some(root_id) =
-            self.find_statically_linked_root(source_library_commitment, source_root_id, mast_root)
-        {
-            return self.copy_statically_linked_subtree(root_id);
+    /// TODO(#2990): when multiple roots share the same digest but carry
+    /// different metadata, this always picks the first match. Needs a source
+    /// MastNodeId threaded from ProcedureInfo through the linker.
+    pub fn ensure_external_link(&mut self, mast_root: Word) -> Result<MastNodeId, Report> {
+        if let Some(root_id) = self.statically_linked_mast.find_procedure_root(mast_root) {
+            self.copy_statically_linked_subtree(root_id)
+        } else {
+            self.ensure_node(ExternalNodeBuilder::new(mast_root))
         }
-
-        self.ensure_node(ExternalNodeBuilder::new(mast_root))
-    }
-
-    fn find_statically_linked_root(
-        &self,
-        source_library_commitment: Option<Word>,
-        source_root_id: Option<MastNodeId>,
-        mast_root: Word,
-    ) -> Option<MastNodeId> {
-        if let (Some(source_library_commitment), Some(source_root_id)) =
-            (source_library_commitment, source_root_id)
-        {
-            let exact_root = self
-                .statically_linked_forest_indices_by_commitment
-                .get(&source_library_commitment)
-                .and_then(|forest_idx| {
-                    self.statically_linked_root_map.map_root(*forest_idx, &source_root_id)
-                });
-
-            if let Some(exact_root) = exact_root
-                .filter(|root_id| self.statically_linked_mast[*root_id].digest() == mast_root)
-            {
-                return Some(exact_root);
-            }
-        }
-
-        self.statically_linked_mast.find_procedure_root(mast_root)
     }
 
     /// Copies a subtree from the statically linked forest into the builder's forest.
@@ -1261,20 +960,8 @@ impl MastForestBuilder {
         // Extract the existing node and convert it to a builder
         let mut decorated_builder = self.mast_forest[node_id].clone().to_builder(&self.mast_forest);
         decorated_builder.append_before_enter(decorator_ids);
-        let base_fingerprint =
+        let new_node_fingerprint =
             decorated_builder.fingerprint_for_node(&self.mast_forest, &self.hash_by_node_id)?;
-
-        // Re-augment the fingerprint with this node's external metadata so the dedup key
-        // stays consistent with what ensure_block() originally computed.
-        let asm_ops_data =
-            serialize_asm_ops_for_node(&self.mast_forest, &self.pending_asm_op_mappings, node_id);
-        let debug_vars_data = serialize_debug_vars_for_node(
-            &self.mast_forest,
-            &self.pending_debug_var_mappings,
-            node_id,
-        );
-        let new_node_fingerprint = self
-            .maybe_augment(self.maybe_augment(base_fingerprint, &asm_ops_data), &debug_vars_data);
 
         self.mast_forest[node_id] = decorated_builder.build(&self.mast_forest)?;
 
@@ -1291,20 +978,8 @@ impl MastForestBuilder {
         // Extract the existing node and convert it to a builder
         let mut decorated_builder = self.mast_forest[node_id].clone().to_builder(&self.mast_forest);
         decorated_builder.append_after_exit(decorator_ids);
-        let base_fingerprint =
+        let new_node_fingerprint =
             decorated_builder.fingerprint_for_node(&self.mast_forest, &self.hash_by_node_id)?;
-
-        // Re-augment the fingerprint with this node's external metadata so the dedup key
-        // stays consistent with what ensure_block() originally computed.
-        let asm_ops_data =
-            serialize_asm_ops_for_node(&self.mast_forest, &self.pending_asm_op_mappings, node_id);
-        let debug_vars_data = serialize_debug_vars_for_node(
-            &self.mast_forest,
-            &self.pending_debug_var_mappings,
-            node_id,
-        );
-        let new_node_fingerprint = self
-            .maybe_augment(self.maybe_augment(base_fingerprint, &asm_ops_data), &debug_vars_data);
 
         self.mast_forest[node_id] = decorated_builder.build(&self.mast_forest)?;
 
@@ -1760,9 +1435,9 @@ mod tests {
         assert_eq!(original_vars[0].1, var_id);
     }
 
-    /// Same-ops blocks with different debug vars must not alias after clone + before_enter.
+    /// Same-ops blocks with different debug vars still alias. The first node's metadata wins.
     #[test]
-    fn test_ensure_node_preserving_debug_vars_prevents_aliasing() {
+    fn test_ensure_node_preserving_debug_vars_dedups_different_debug_vars() {
         use miden_core::operations::{DebugVarInfo, DebugVarLocation};
 
         let mut builder = MastForestBuilder::new(&[]).unwrap();
@@ -1774,7 +1449,7 @@ mod tests {
             .add_debug_var(DebugVarInfo::new("y", DebugVarLocation::Stack(1)))
             .unwrap();
 
-        // Same ops, different debug vars -- should not dedup.
+        // Same ops, different debug vars dedup to the first block.
         let block_a = builder
             .ensure_block(
                 vec![Operation::Add],
@@ -1796,7 +1471,7 @@ mod tests {
             )
             .unwrap();
 
-        assert_ne!(block_a, block_b);
+        assert_eq!(block_a, block_b);
 
         let decorator_id = builder.ensure_decorator(Decorator::Trace(1)).unwrap();
 
@@ -1812,16 +1487,16 @@ mod tests {
             .with_before_enter(vec![decorator_id]);
         let cloned_b = builder.ensure_node_preserving_debug_vars(rebuilt_b, block_b).unwrap();
 
-        assert_ne!(cloned_a, cloned_b, "different debug vars must prevent dedup");
+        assert_eq!(cloned_a, cloned_b, "debug vars must not prevent dedup");
 
         let (forest, _remapping) = builder.build();
         let vars_a = forest.debug_info().debug_vars_for_node(cloned_a);
         let vars_b = forest.debug_info().debug_vars_for_node(cloned_b);
 
         assert_eq!(vars_a.len(), 1);
-        assert_eq!(vars_a[0].1, var_x_id, "cloned_a should have var x");
+        assert_eq!(vars_a[0].1, var_x_id, "cloned node should keep first var");
         assert_eq!(vars_b.len(), 1);
-        assert_eq!(vars_b[0].1, var_y_id, "cloned_b should have var y");
+        assert_eq!(vars_b[0].1, var_x_id, "deduped node should keep first var");
     }
 
     /// Same-content debug vars should not prevent block dedup just because they
@@ -1866,9 +1541,9 @@ mod tests {
         );
     }
 
-    /// Same-ops blocks with different AssemblyOps must not alias during assembly.
+    /// Same-ops blocks with different AssemblyOps alias during assembly.
     #[test]
-    fn test_ensure_block_keeps_different_asm_ops_distinct() {
+    fn test_ensure_block_dedups_different_asm_ops() {
         let mut builder = MastForestBuilder::new(&[]).unwrap();
 
         let block_a = builder
@@ -1892,25 +1567,18 @@ mod tests {
             )
             .unwrap();
 
-        assert_ne!(
-            block_a, block_b,
-            "same op stream plus different AssemblyOp payload must not dedup"
-        );
+        assert_eq!(block_a, block_b, "same op stream plus different AssemblyOp payload must dedup");
 
         let (forest, _remapping) = builder.build();
         assert_eq!(
             forest.debug_info().first_asm_op_for_node(block_a).unwrap().context_name(),
             "ctx_a"
         );
-        assert_eq!(
-            forest.debug_info().first_asm_op_for_node(block_b).unwrap().context_name(),
-            "ctx_b"
-        );
     }
 
-    /// Non-block nodes with different AssemblyOps must not alias during assembly.
+    /// Non-block nodes with different AssemblyOps alias during assembly.
     #[test]
-    fn test_non_block_nodes_keep_different_asm_ops_distinct() {
+    fn test_non_block_nodes_dedup_different_asm_ops() {
         let mut builder = MastForestBuilder::new(&[]).unwrap();
 
         let callee = builder
@@ -1929,19 +1597,15 @@ mod tests {
             )
             .unwrap();
 
-        assert_ne!(
+        assert_eq!(
             call_a, call_b,
-            "same-structure non-block nodes with different AssemblyOps must not dedup"
+            "same-structure non-block nodes with different AssemblyOps must dedup"
         );
 
         let (forest, _remapping) = builder.build();
         assert_eq!(
             forest.debug_info().first_asm_op_for_node(call_a).unwrap().context_name(),
             "ctx_a"
-        );
-        assert_eq!(
-            forest.debug_info().first_asm_op_for_node(call_b).unwrap().context_name(),
-            "ctx_b"
         );
     }
 
@@ -1982,145 +1646,6 @@ mod tests {
         assert_eq!(
             forest.debug_info().first_asm_op_for_node(block_id).unwrap().context_name(),
             "ctx"
-        );
-    }
-
-    /// Statically linked nodes must keep source metadata in the dedup fingerprint so copied
-    /// nodes do not alias local nodes with different source mappings.
-    #[test]
-    fn test_statically_linked_nodes_preserve_metadata_in_dedup() {
-        use miden_core::operations::{DebugVarInfo, DebugVarLocation};
-
-        let mut static_forest = MastForest::new();
-        let static_asm_op_id = static_forest
-            .debug_info_mut()
-            .add_asm_op(AssemblyOp::new(None, "lib_ctx".into(), 1, "add".into()))
-            .unwrap();
-        let static_var_id = static_forest
-            .add_debug_var(DebugVarInfo::new("x", DebugVarLocation::Stack(0)))
-            .unwrap();
-        let static_block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
-            .add_to_forest(&mut static_forest)
-            .unwrap();
-        static_forest
-            .debug_info_mut()
-            .register_asm_ops(static_block_id, 1, vec![(0, static_asm_op_id)])
-            .unwrap();
-        static_forest
-            .debug_info_mut()
-            .register_op_indexed_debug_vars(static_block_id, vec![(0, static_var_id)])
-            .unwrap();
-        static_forest.make_root(static_block_id);
-
-        let mut builder = MastForestBuilder::new([&static_forest]).unwrap();
-        let copied_block_id = builder
-            .ensure_external_link_with_source(static_forest[static_block_id].digest(), None, None)
-            .unwrap();
-
-        let local_var_id = builder
-            .add_debug_var(DebugVarInfo::new("y", DebugVarLocation::Stack(1)))
-            .unwrap();
-        let local_block_id = builder
-            .ensure_block(
-                vec![Operation::Add],
-                Vec::new(),
-                vec![(0, AssemblyOp::new(None, "local_ctx".into(), 1, "add".into()))],
-                vec![(0, local_var_id)],
-                vec![],
-                vec![],
-            )
-            .unwrap();
-
-        assert_ne!(
-            copied_block_id, local_block_id,
-            "statically linked nodes must not alias local nodes with different metadata"
-        );
-
-        let (forest, _remapping) = builder.build();
-        assert_eq!(
-            forest
-                .debug_info()
-                .first_asm_op_for_node(copied_block_id)
-                .unwrap()
-                .context_name(),
-            "lib_ctx"
-        );
-        assert_eq!(
-            forest
-                .debug_info()
-                .first_asm_op_for_node(local_block_id)
-                .unwrap()
-                .context_name(),
-            "local_ctx"
-        );
-
-        let copied_vars = forest.debug_info().debug_vars_for_node(copied_block_id);
-        let local_vars = forest.debug_info().debug_vars_for_node(local_block_id);
-        assert_eq!(forest.debug_info().debug_var(copied_vars[0].1).unwrap().name(), "x");
-        assert_eq!(forest.debug_info().debug_var(local_vars[0].1).unwrap().name(), "y");
-    }
-
-    #[test]
-    fn test_statically_linked_padded_block_dedups_with_equivalent_local_block() {
-        let mut source_builder = MastForestBuilder::new(&[]).unwrap();
-        let ops = vec![
-            Operation::Push(Felt::from_u32(1)),
-            Operation::Drop,
-            Operation::Drop,
-            Operation::Drop,
-            Operation::Drop,
-            Operation::Drop,
-            Operation::Drop,
-            Operation::Push(Felt::from_u32(2)),
-            Operation::Push(Felt::from_u32(3)),
-        ];
-        let asm_op = AssemblyOp::new(None, "padded_ctx".into(), 1, "push.3".into());
-
-        let static_block = source_builder
-            .ensure_block(
-                ops.clone(),
-                Vec::new(),
-                vec![(8, asm_op.clone())],
-                vec![],
-                vec![],
-                vec![],
-            )
-            .unwrap();
-        source_builder.mast_forest.make_root(static_block);
-
-        let (static_forest, _) = source_builder.build();
-        let expected_padded_idx = static_forest.debug_info().asm_ops_for_node(static_block)[0].0;
-
-        let mut builder = MastForestBuilder::new([&static_forest]).unwrap();
-        let copied_block_id = builder
-            .ensure_external_link_with_source(static_forest[static_block].digest(), None, None)
-            .unwrap();
-        let local_block_id = builder
-            .ensure_block(ops, Vec::new(), vec![(8, asm_op)], vec![], vec![], vec![])
-            .unwrap();
-
-        assert_eq!(
-            copied_block_id, local_block_id,
-            "copied padded blocks should dedup with equivalent local blocks",
-        );
-
-        let (forest, remapping) = builder.build();
-        let final_block_id = remapping.get(&copied_block_id).copied().unwrap_or(copied_block_id);
-
-        assert!(
-            forest
-                .debug_info()
-                .asm_op_for_operation(final_block_id, expected_padded_idx - 1)
-                .is_none(),
-            "the asm op must not be attached before its padded operation index",
-        );
-        assert_eq!(
-            forest
-                .debug_info()
-                .asm_op_for_operation(final_block_id, expected_padded_idx)
-                .unwrap()
-                .context_name(),
-            "padded_ctx",
         );
     }
 
@@ -2176,174 +1701,5 @@ mod tests {
         // Root block must still have its asm op.
         let root_asm = forest.debug_info().first_asm_op_for_node(final_root_id);
         assert!(root_asm.is_some(), "root must keep its asm op after merge");
-    }
-
-    /// Two same-digest roots with different asm ops stay distinct when
-    /// linked by exact node ID.
-    #[test]
-    fn test_static_link_exact_node_preserves_alias_metadata() {
-        let mut source_builder = MastForestBuilder::new(&[]).unwrap();
-
-        let alias_a = source_builder
-            .ensure_block(
-                vec![Operation::Add],
-                Vec::new(),
-                vec![(0, AssemblyOp::new(None, "alias_a".into(), 1, "add".into()))],
-                vec![],
-                vec![],
-                vec![],
-            )
-            .unwrap();
-        let alias_b = source_builder
-            .ensure_block(
-                vec![Operation::Add],
-                Vec::new(),
-                vec![(0, AssemblyOp::new(None, "alias_b".into(), 1, "add".into()))],
-                vec![],
-                vec![],
-                vec![],
-            )
-            .unwrap();
-        source_builder.mast_forest.make_root(alias_a);
-        source_builder.mast_forest.make_root(alias_b);
-
-        let (static_forest, _remapping) = source_builder.build();
-        assert_eq!(static_forest[alias_a].digest(), static_forest[alias_b].digest());
-
-        // Exact path via internal API — gets alias_b's metadata.
-        let mut exact_builder = MastForestBuilder::new([&static_forest]).unwrap();
-        let exact_alias_b = {
-            let node = exact_builder.statically_linked_mast[alias_b].clone();
-            let builder = exact_builder.build_with_remapped_ids(alias_b, node).unwrap();
-            exact_builder
-                .ensure_node_from_statically_linked_source(builder, alias_b)
-                .unwrap()
-        };
-        let (exact_forest, _) = exact_builder.build();
-        assert_eq!(
-            exact_forest
-                .debug_info()
-                .first_asm_op_for_node(exact_alias_b)
-                .unwrap()
-                .context_name(),
-            "alias_b"
-        );
-    }
-
-    /// Digest-based linking imports only the selected alias, not all
-    /// same-digest roots. The unselected alias must not leak into the forest.
-    #[test]
-    fn test_static_link_by_digest_imports_only_selected_alias() {
-        let mut source_builder = MastForestBuilder::new(&[]).unwrap();
-
-        let alias_a = source_builder
-            .ensure_block(
-                vec![Operation::Add],
-                Vec::new(),
-                vec![(0, AssemblyOp::new(None, "alias_a".into(), 1, "add".into()))],
-                vec![],
-                vec![],
-                vec![],
-            )
-            .unwrap();
-        let alias_b = source_builder
-            .ensure_block(
-                vec![Operation::Add],
-                Vec::new(),
-                vec![(0, AssemblyOp::new(None, "alias_b".into(), 1, "add".into()))],
-                vec![],
-                vec![],
-                vec![],
-            )
-            .unwrap();
-        source_builder.mast_forest.make_root(alias_a);
-        source_builder.mast_forest.make_root(alias_b);
-
-        let (static_forest, _) = source_builder.build();
-
-        let mut builder = MastForestBuilder::new([&static_forest]).unwrap();
-        let linked = builder
-            .ensure_external_link_with_source(static_forest[alias_a].digest(), None, None)
-            .unwrap();
-        builder.mast_forest.make_root(linked);
-        let (forest, _) = builder.build();
-
-        // Only one node should be in the forest — the selected alias.
-        assert_eq!(forest.num_nodes(), 1, "only the selected alias should be imported");
-        assert_eq!(
-            forest.debug_info().first_asm_op_for_node(linked).unwrap().context_name(),
-            "alias_a",
-        );
-    }
-
-    /// Provenance-aware static linking can select the exact same-digest root instead of falling
-    /// back to the first digest match.
-    #[test]
-    fn test_static_link_with_source_root_preserves_selected_alias_metadata() {
-        let mut source_builder = MastForestBuilder::new(&[]).unwrap();
-
-        let alias_a = source_builder
-            .ensure_block(
-                vec![Operation::Add],
-                Vec::new(),
-                vec![(0, AssemblyOp::new(None, "alias_a".into(), 1, "add".into()))],
-                vec![],
-                vec![],
-                vec![],
-            )
-            .unwrap();
-        let alias_b = source_builder
-            .ensure_block(
-                vec![Operation::Add],
-                Vec::new(),
-                vec![(0, AssemblyOp::new(None, "alias_b".into(), 1, "add".into()))],
-                vec![],
-                vec![],
-                vec![],
-            )
-            .unwrap();
-        source_builder.mast_forest.make_root(alias_a);
-        source_builder.mast_forest.make_root(alias_b);
-
-        let (static_forest, _remapping) = source_builder.build();
-        assert_eq!(static_forest[alias_a].digest(), static_forest[alias_b].digest());
-
-        let mut exact_builder = MastForestBuilder::new([&static_forest]).unwrap();
-        let exact_alias_b = {
-            let node = exact_builder.statically_linked_mast[alias_b].clone();
-            let builder = exact_builder.build_with_remapped_ids(alias_b, node).unwrap();
-            exact_builder
-                .ensure_node_from_statically_linked_source(builder, alias_b)
-                .unwrap()
-        };
-        let (exact_forest, _) = exact_builder.build();
-
-        let mut provenance_builder = MastForestBuilder::new([&static_forest]).unwrap();
-        let linked_alias_b = provenance_builder
-            .ensure_external_link_with_source(
-                static_forest[alias_b].digest(),
-                Some(static_forest.commitment()),
-                Some(alias_b),
-            )
-            .unwrap();
-        let (linked_forest, _) = provenance_builder.build();
-
-        assert_eq!(
-            exact_forest
-                .debug_info()
-                .first_asm_op_for_node(exact_alias_b)
-                .unwrap()
-                .context_name(),
-            "alias_b"
-        );
-        assert_eq!(
-            linked_forest
-                .debug_info()
-                .first_asm_op_for_node(linked_alias_b)
-                .unwrap()
-                .context_name(),
-            "alias_b",
-            "provenance-aware linking should preserve the selected same-digest root metadata",
-        );
     }
 }
