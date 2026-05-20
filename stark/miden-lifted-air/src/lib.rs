@@ -25,9 +25,7 @@ mod instance;
 mod util;
 pub mod validate;
 
-pub use air::{
-    AirStructureError, ConstraintDegrees, LiftedAir, TracePart, validate_air, validate_airs,
-};
+pub use air::{ConstraintDegrees, LiftedAir};
 pub use builder::LiftedAirBuilder;
 pub use instance::{Instance, ProverInstance, ReductionError};
 pub use util::{log2_ceil_u8, log2_strict_u8};

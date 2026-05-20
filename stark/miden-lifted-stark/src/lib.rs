@@ -8,45 +8,49 @@
 //! The lifted STARK has three trust domains:
 //!
 //! 1. **AIR = trusted** — [`air::LiftedAir`] implementations are correct application code. It is
-//!    the AIR implementer's responsibility to satisfy the contract below.
-//!    [`miden_lifted_air::validate_air`] (single AIR) and [`miden_lifted_air::validate_airs`] (list
-//!    of AIRs) are debug/testing helpers that check the statically-verifiable subset; passing a
-//!    malformed AIR to the prover or verifier is undefined behaviour.
+//!    the AIR implementer's responsibility to satisfy the structural contract below.
+//!    [`miden_lifted_air::debug::assert_airs_valid`] / [`debug::assert_prover_setup`] are
+//!    panic-based helpers that check the statically-verifiable subset; passing a malformed AIR to
+//!    the prover or verifier is undefined behaviour.
 //!
 //! 2. **Instance = validated** — The prover validates that its witness matches the AIR spec. The
-//!    verifier validates the proof's shape metadata and the per-AIR contracts. Both return
-//!    structured errors.
+//!    verifier validates the proof's shape metadata and the per-AIR contracts. Both return typed
+//!    errors ([`ProverError`] / [`VerifierError`]) — see [`miden_lifted_air::validate`] for the
+//!    underlying check functions.
 //!
 //! 3. **Proof = untrusted** — Transcript data is verified cryptographically (PCS errors, constraint
 //!    mismatch, etc.).
 //!
-//! ## Validated properties
+//! ## Validated at runtime
 //!
-//! These are checked by [`instance::TraceOrder::from_log_heights`] (shape
-//! well-formedness) and [`instance::validate_instance`] (per-AIR contract),
-//! both run by prover and verifier before any cryptographic work begins:
+//! Checked by [`miden_lifted_air::validate_instance`] /
+//! [`miden_lifted_air::validate_with_heights`] /
+//! [`miden_lifted_air::validate_prover_instance`] plus
+//! [`setup::validate_compatible`] plus
+//! [`instance::TraceOrder::from_log_heights`], all run before any
+//! cryptographic work begins:
 //!
 //! - **Shape well-formedness** — non-empty, ≤ 256 instances, each log trace height within the
 //!   host's `usize` width.
-//! - **Constraint degree** — log quotient degree ≤ log_blowup.
+//! - **Compat** — `log_quotient_degree(air) ≤ log_blowup`, per AIR.
 //! - **Per-AIR instance dimensions** — public values length matches `num_public_values()`, trace
-//!   height ≥ max periodic column length, trace width matches `width()` (prover-only). Auxiliary
-//!   public inputs are a flat slice with no framework-imposed shape; [`Instance::eval_external`]
-//!   validates them itself.
+//!   height ≥ max periodic column length, trace width matches `width()` (prover-only), height is a
+//!   power of two (prover-only), `aux_inputs.len() ≤ max_aux_inputs`.
 //!
-//! ## Unchecked trust assumptions
+//! ## Trusted (NOT validated)
 //!
-//! These cannot be verified statically and are the AIR implementer's responsibility:
+//! These cannot be verified statically and are the AIR implementer's
+//! responsibility. Run [`debug::assert_prover_setup`] (or its components)
+//! from your test harness to enforce them in debug builds:
 //!
-//! 1. **AIR structural contract** — see [`miden_lifted_air::validate_air`] /
-//!    [`miden_lifted_air::validate_airs`]: no preprocessed trace, positive aux width, power-of-two
-//!    periodic column lengths.
-//! 2. **Window size** — Only transition window size 2.
+//! 1. **AIR structural contract** — no preprocessed trace, positive aux width, power-of-two
+//!    periodic column lengths. Checked by [`miden_lifted_air::debug::check_one_air`].
+//! 2. **Window size** — only transition window size 2.
 //! 3. **Deterministic constraints** — `eval()` emits the same number and types of constraints
 //!    regardless of builder implementation.
-//! 4. **Consistent prover inputs** — [`ProverInstance::build_aux_traces`] returns, per AIR, an aux
-//!    trace of width `aux_width()`, height matching the main trace, and exactly `num_aux_values()`
-//!    aux values. (The prover asserts these at runtime as a defense-in-depth sanity check.)
+//! 4. **`ProverInstance::build_aux_traces` output** — per AIR, an aux trace of width `aux_width()`,
+//!    height matching the main trace, and exactly `num_aux_values()` aux values. Surface contract
+//!    violations from tests via [`debug::assert_aux_traces_shape`].
 //! 5. **Sound [`Instance::eval_external`]** — Returns external assertions that are satisfied (equal
 //!    zero) iff the proof's cross-AIR interactions are well-formed for the given aux values and
 //!    public inputs.
@@ -78,7 +82,7 @@ pub use domain::{
     Coset, DomainError, EvaluationDomain, LiftedDomain, TwoAdicCoset, TwoAdicSubgroup,
     log_quotient_degree,
 };
-pub use instance::{InstanceValidationError, ShapeError, TraceOrder};
+pub use instance::{ShapeError, TraceOrder};
 pub use lmcs::{
     Lmcs, LmcsError, LmcsTree, OpenedRows,
     config::LmcsConfig,
@@ -131,14 +135,13 @@ pub mod air {
         Air,
         AirBuilder,
         AirBuilderWithContext,
-        // Lifted AIR types
-        AirStructureError,
         BaseAir,
         ConstraintDegrees,
         EmptyWindow,
         ExtensionBuilder,
         FilteredAirBuilder,
         Instance,
+        // Lifted AIR types
         LiftedAir,
         LiftedAirBuilder,
         PeriodicAirBuilder,
@@ -146,11 +149,11 @@ pub mod air {
         ProverInstance,
         ReductionError,
         RowWindow,
-        TracePart,
         WindowAccess,
+        // New surface (Commit 1):
+        debug,
         log2_strict_u8,
-        validate_air,
-        validate_airs,
+        validate,
     };
 
     pub use crate::instance::TraceOrder;

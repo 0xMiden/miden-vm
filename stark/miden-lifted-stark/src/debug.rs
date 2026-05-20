@@ -316,7 +316,8 @@ fn check_single_trace<F, EF, A>(
             row_index: row,
         };
 
-        debug_assert!(air.is_valid_builder(&builder).is_ok());
+        #[cfg(debug_assertions)]
+        miden_lifted_air::debug::check_builder_shape(instance_index, air, &builder);
 
         air.eval(&mut builder);
     }

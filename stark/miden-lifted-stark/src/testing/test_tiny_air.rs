@@ -7,8 +7,8 @@ use p3_field::PrimeCharacteristicRing;
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
 use crate::{
-    DomainError, Instance, InstanceValidationError, ProverError, ProverInstance, ShapeError,
-    TraceOrder, VerifierError,
+    DomainError, Instance, InstanceError, ProverError, ProverInstance, ShapeError, TraceOrder,
+    VerifierError,
     air::{AirBuilder, BaseAir, ExtensionBuilder, LiftedAir, LiftedAirBuilder, WindowAccess},
     prove,
     testing::configs::goldilocks_poseidon2::{
@@ -235,18 +235,14 @@ fn malformed_log_trace_heights_is_rejected() {
     let output = prove(&config, &inputs, test_challenger()).expect("proving should succeed");
 
     // Push straight to the `pub(crate)` `log_trace_heights` field to bypass
-    // shape construction and exercise the verifier-side `validate_instance`
-    // count check.
+    // shape construction and exercise the verifier-side trace-count check.
     let mut bad_proof = output.proof.clone();
     bad_proof.log_trace_heights.push(2);
     let err = verify(&config, &inputs, &bad_proof, test_challenger())
         .expect_err("extra log trace height should fail verification");
     assert!(matches!(
         err,
-        VerifierError::Instance(InstanceValidationError::AirTraceCountMismatch {
-            airs: 1,
-            traces: 2,
-        })
+        VerifierError::Instance(InstanceError::TraceCountMismatch { airs: 1, traces: 2 })
     ));
 
     // Empty heights → `TraceOrder::from_log_heights` rejects with
@@ -255,10 +251,7 @@ fn malformed_log_trace_heights_is_rejected() {
     bad_proof.log_trace_heights.clear();
     let err = verify(&config, &inputs, &bad_proof, test_challenger())
         .expect_err("empty log trace heights should fail verification");
-    assert!(matches!(
-        err,
-        VerifierError::Instance(InstanceValidationError::Shape(ShapeError::Empty))
-    ));
+    assert!(matches!(err, VerifierError::Shape(ShapeError::Empty)));
 
     // Out-of-range log height must surface as an error, not panic on
     // `1usize << log_h` or `two_adic_generator(log_h + log_blowup)`. log_h
@@ -270,9 +263,7 @@ fn malformed_log_trace_heights_is_rejected() {
         .expect_err("oversized log trace height should fail verification");
     assert!(matches!(
         err,
-        VerifierError::Instance(InstanceValidationError::Shape(
-            ShapeError::LogTraceHeightTooLarge { log_h: 200, .. }
-        ))
+        VerifierError::Shape(ShapeError::LogTraceHeightTooLarge { log_h: 200, .. })
     ));
 
     // The LDE domain `log_h + log_blowup` overflow case. With `log_blowup = 3`
@@ -304,10 +295,13 @@ fn prover_rejects_non_power_of_two_trace_height() {
 
     let result = prove(&config, &inputs, test_challenger());
     match result {
-        Err(ProverError::Instance(InstanceValidationError::Shape(
-            ShapeError::InvalidTraceHeight { height: 3 },
-        ))) => {},
-        Err(other) => panic!("expected InvalidTraceHeight {{ height: 3 }}, got {other:?}"),
+        Err(ProverError::Instance(InstanceError::TraceHeightNotPowerOfTwo {
+            air: 0,
+            height: 3,
+        })) => {},
+        Err(other) => {
+            panic!("expected TraceHeightNotPowerOfTwo {{ air: 0, height: 3 }}, got {other:?}")
+        },
         Ok(_) => panic!("non-power-of-two trace height should fail proving"),
     }
 }

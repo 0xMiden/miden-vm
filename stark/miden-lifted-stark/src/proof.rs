@@ -14,7 +14,7 @@ extern crate alloc;
 
 use alloc::{vec, vec::Vec};
 
-use miden_lifted_air::{BaseAir, Instance, LiftedAir};
+use miden_lifted_air::{BaseAir, Instance, LiftedAir, validate_instance, validate_with_heights};
 use miden_stark_transcript::{Channel, TranscriptData, VerifierChannel, VerifierTranscript};
 use p3_challenger::CanFinalizeDigest;
 use p3_field::{ExtensionField, Field, TwoAdicField};
@@ -23,9 +23,10 @@ use serde::{Deserialize, Serialize};
 use crate::{
     StarkConfig,
     domain::{Coset, LiftedDomain, log_quotient_degree},
-    instance::{InstanceValidationError, TraceOrder, validate_instance},
+    instance::TraceOrder,
     lmcs::Lmcs,
     pcs::proof::PcsTranscript,
+    setup::validate_compatible,
     util::align::aligned_len,
     verifier::VerifierError,
 };
@@ -206,9 +207,10 @@ where
     {
         // Shape well-formedness first (catches malicious `log_h` > usize::BITS),
         // then per-AIR contract.
-        let trace_order = TraceOrder::from_log_heights(proof.log_trace_heights.clone())
-            .map_err(InstanceValidationError::from)?;
-        validate_instance(instance, &trace_order)?;
+        let trace_order = TraceOrder::from_log_heights(proof.log_trace_heights.clone())?;
+        validate_instance(instance)?;
+        validate_with_heights(instance, trace_order.log_heights_instance())?;
+        validate_compatible::<L::F, EF, _>(instance.airs(), config.pcs())?;
         let proof_ordered_airs = trace_order.to_proof_order(instance.airs());
 
         let log_blowup = config.pcs().log_blowup();

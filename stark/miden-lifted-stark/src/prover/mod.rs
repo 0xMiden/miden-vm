@@ -70,7 +70,7 @@ use alloc::{vec, vec::Vec};
 
 use commit::commit_traces;
 use constraints::{evaluate_constraints_into, layout::get_constraint_layout};
-use miden_lifted_air::{BaseAir, Instance, LiftedAir};
+use miden_lifted_air::{Instance, InstanceError, LiftedAir, validate_prover_instance};
 use miden_stark_transcript::{Channel, ProverChannel, ProverTranscript};
 use p3_field::{BasedVectorSpace, ExtensionField, TwoAdicField};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
@@ -81,23 +81,26 @@ use tracing::{info_span, instrument};
 use crate::{
     ProverInstance, StarkConfig,
     domain::{Coset, LiftedDomain, log_quotient_degree},
-    instance::{InstanceValidationError, TraceOrder, validate_instance},
+    instance::TraceOrder,
     pcs::prover::open_with_channel,
     proof::{StarkOutput, StarkProof},
+    setup::{CompatError, validate_compatible},
 };
 
 /// Errors that can occur during proving.
+///
+/// Returned exclusively for *runtime* validation failures of caller-supplied
+/// data. AIR structural correctness, `build_aux_traces` output shape, and
+/// other implementer-side contracts are trusted — see
+/// [`crate::debug::assert_prover_setup`] for the debug-mode wrappers.
 #[derive(Debug, Error)]
 pub enum ProverError {
-    #[error("instance validation failed: {0}")]
-    Instance(#[from] InstanceValidationError),
-    #[error("domain construction failed: {0}")]
+    #[error(transparent)]
+    Instance(#[from] InstanceError),
+    #[error(transparent)]
+    Compat(#[from] CompatError),
+    #[error(transparent)]
     Domain(#[from] crate::domain::DomainError),
-    #[error(
-        "constraint degree exceeds blowup: \
-         log_quotient_degree {log_quotient_degree} > log_blowup {log_blowup}"
-    )]
-    ConstraintDegreeTooHigh { log_quotient_degree: u8, log_blowup: u8 },
 }
 
 /// Prove the statement described by `instance`.
@@ -107,10 +110,34 @@ pub enum ProverError {
 /// and `aux_inputs` are absorbed internally via [`Instance::observe`]; both
 /// prover and verifier must pass `instance` carrying the same data.
 ///
+/// # Trust contract
+///
+/// `prove` validates ONLY untrusted runtime inputs and returns typed
+/// [`ProverError`] on failure. AIR structural correctness is the
+/// implementer's contract — call [`crate::debug::assert_prover_setup`]
+/// from your test harness to enforce it in debug builds.
+///
+/// ## Validated
+/// - per AIR: `air.num_public_values() == instance.air_inputs().len()`
+/// - `instance.aux_inputs().len() <= instance.max_aux_inputs()`
+/// - `prover_instance.traces().len() == instance.airs().len()` and `<= u8::MAX + 1`
+/// - per AIR: `trace.width() == air.width()`
+/// - per AIR: `trace.height().is_power_of_two()`
+/// - per AIR: `trace.height() >= max periodic column length`
+/// - per AIR: `log_quotient_degree(air) <= config.pcs().log_blowup()`
+/// - LDE domain fits the field's two-adicity (via `LiftedDomain::try_canonical`)
+///
+/// ## Trusted (NOT validated)
+/// - AIR structural shape (positive `aux_width`, power-of-two periodic columns, no preprocessed
+///   trace, window size 2)
+/// - `ProverInstance::build_aux_traces` output dimensions — call
+///   [`crate::debug::assert_aux_traces_shape`] from tests to surface contract violations.
+/// - Preprocessed tree shape (TODO: adr1anh/preprocessed branch)
+///
 /// # Arguments
 /// - `config`: STARK configuration (PCS params, LMCS, DFT)
-/// - `instance`: Statement description — AIRs, shared `air_inputs`, per-AIR traces, and aux-trace
-///   construction (all in instance order)
+/// - `prover_instance`: Statement description — AIRs, shared `air_inputs`, per-AIR traces, and
+///   aux-trace construction (all in instance order)
 /// - `challenger`: Fiat-Shamir challenger (instance and heights are observed before use)
 ///
 /// # Returns
@@ -127,23 +154,17 @@ where
     SC: StarkConfig<F, EF>,
     P: ProverInstance<F, EF>,
 {
+    // --- Trust boundary (see doc-block above). -------------------------------
+    validate_prover_instance(prover_instance)?;
     let instance = prover_instance.instance();
     let airs = instance.airs();
-    let traces = prover_instance.traces();
-    if traces.len() != airs.len() {
-        return Err(InstanceValidationError::AirTraceCountMismatch {
-            airs: airs.len(),
-            traces: traces.len(),
-        }
-        .into());
-    }
+    validate_compatible::<F, EF, _>(airs, config.pcs())?;
 
+    let traces = prover_instance.traces();
     let air_inputs = instance.air_inputs();
     let trace_heights: Vec<usize> = traces.iter().map(|t| t.height()).collect();
-    let trace_order =
-        TraceOrder::from_trace_heights(&trace_heights).map_err(InstanceValidationError::from)?;
-
-    validate_instance(instance, &trace_order)?;
+    let trace_order = TraceOrder::from_trace_heights(&trace_heights)
+        .expect("BUG: validate_prover_instance should reject malformed heights");
 
     // Per-position views in the proof's ascending AIR ordering.
     let proof_ordered_airs = trace_order.to_proof_order(airs);
@@ -153,17 +174,6 @@ where
         .copied()
         .zip(proof_ordered_traces.iter().copied())
         .collect();
-
-    // Trace widths are a prover-only sanity check, not part of the instance contract.
-    for &(air, trace) in &proof_ordered {
-        if trace.width() != air.width() {
-            return Err(InstanceValidationError::WidthMismatch {
-                expected: air.width(),
-                actual: trace.width(),
-            }
-            .into());
-        }
-    }
 
     let log_blowup = config.pcs().log_blowup();
     let log_max_trace_height = trace_order.max_log_height();
@@ -192,9 +202,10 @@ where
         .collect();
     let log_quotient_degree = log_quotient_degrees.iter().copied().max().unwrap_or(1);
 
-    if log_quotient_degree > log_blowup {
-        return Err(ProverError::ConstraintDegreeTooHigh { log_quotient_degree, log_blowup });
-    }
+    debug_assert!(
+        log_quotient_degree <= log_blowup,
+        "BUG: validate_compatible should have caught this"
+    );
 
     // Pair the max LDE domain with the quotient degree. The `EvaluationDomain`
     // now flows through the constraint and quotient layers. Per-instance variants
@@ -236,35 +247,13 @@ where
 
     // Build all aux traces in one call (instance-ordered), then reorder in
     // place to the proof's AIR ordering to match the rest of the prover loop.
+    //
+    // The output shapes are trusted (see trust contract above). Tests can
+    // surface contract violations via `crate::debug::assert_aux_traces_shape`.
     let (mut aux_traces_ef, mut all_aux_values) =
         info_span!("build aux traces").in_scope(|| prover_instance.build_aux_traces(&randomness));
-    assert_eq!(
-        aux_traces_ef.len(),
-        airs.len(),
-        "build_aux_traces returned wrong number of traces"
-    );
-    assert_eq!(
-        all_aux_values.len(),
-        airs.len(),
-        "build_aux_traces returned wrong number of aux values"
-    );
     trace_order.reorder_to_proof_in_place(&mut aux_traces_ef);
     trace_order.reorder_to_proof_in_place(&mut all_aux_values);
-
-    for ((air, trace), (aux, aux_vals)) in
-        proof_ordered.iter().zip(aux_traces_ef.iter().zip(all_aux_values.iter()))
-    {
-        assert_eq!(aux.width(), air.aux_width(), "aux trace width mismatch");
-        assert_eq!(
-            aux_vals.len(),
-            air.num_aux_values(),
-            "aux values length mismatch: build_aux_traces returned {} values, \
-             but num_aux_values() is {}",
-            aux_vals.len(),
-            air.num_aux_values()
-        );
-        assert_eq!(aux.height(), trace.height());
-    }
 
     // Flatten EF -> F and commit aux traces
     let aux_traces: Vec<RowMajorMatrix<F>> = aux_traces_ef

@@ -203,7 +203,7 @@ pub fn evaluate_constraints_into<F, EF, A>(
                 };
 
             #[cfg(debug_assertions)]
-            air.is_valid_builder(&folder).expect("builder dimensions must match AIR");
+            miden_lifted_air::debug::check_builder_shape(0, air, &folder);
             air.eval(&mut folder);
             let folded = folder.finalize_constraints();
 

@@ -1,26 +1,21 @@
-//! Stark-side instance utilities: [`TraceOrder`] and [`validate_instance`].
+//! Stark-side instance utilities: [`TraceOrder`] and [`ShapeError`].
 //!
-//! The air crate's [`Instance`] trait is order-agnostic: every list it
+//! The air crate's [`Instance`](miden_lifted_air::Instance) trait is order-agnostic: every list it
 //! exposes is in **instance order** (the position returned by
-//! [`Instance::airs`]). The stark crate is the only place that needs the
-//! proof's wire-format AIR ordering (a deterministic stable sort of the
+//! [`Instance::airs`](miden_lifted_air::Instance::airs)). The stark crate is the only place that
+//! needs the proof's wire-format AIR ordering (a deterministic stable sort of the
 //! per-AIR heights). [`TraceOrder`] is the type that carries the
 //! permutation between **instance order** and **proof order**; nothing
 //! about it leaks into the air crate.
 //!
-//! - [`TraceOrder`]: built from instance-order trace heights. Owns the permutation between instance
-//!   order and proof order, plus the heights themselves. Both prover and verifier construct one and
-//!   pass it to [`validate_instance`].
-//! - [`validate_instance`]: instance-level checks against a [`TraceOrder`] (count match,
-//!   public-values length matches the shared declaration, trace height ≥ max periodic period). The
-//!   AIR list itself is assumed structurally valid via [`miden_lifted_air::validate_airs`].
+//! Runtime instance-level checks live in [`miden_lifted_air::validate`];
+//! the structural AIR contract lives in [`miden_lifted_air::debug`].
 
 extern crate alloc;
 
 use alloc::vec::Vec;
 
-use miden_lifted_air::{BaseAir, Instance, LiftedAir, log2_strict_u8};
-use p3_field::{ExtensionField, Field};
+use miden_lifted_air::log2_strict_u8;
 use thiserror::Error;
 
 // ============================================================================
@@ -41,34 +36,13 @@ pub enum ShapeError {
     TooManyInstances { count: usize },
 }
 
-/// Errors from validating an [`Instance`] against a [`TraceOrder`].
-///
-/// The AIR's structural contract (no preprocessed trace, positive aux
-/// width, power-of-two periodic columns) is the air-crate's domain — call
-/// [`miden_lifted_air::validate_airs`] for that. This enum only covers
-/// checks that depend on caller-supplied data the AIR trait cannot
-/// validate on its own.
-#[derive(Debug, Error)]
-pub enum InstanceValidationError {
-    #[error(transparent)]
-    Shape(#[from] ShapeError),
-    #[error("public values length mismatch: expected {expected}, got {actual}")]
-    PublicValuesMismatch { expected: usize, actual: usize },
-    #[error("trace height {trace_height} is less than max periodic column length {max_period}")]
-    TraceHeightBelowPeriod { trace_height: usize, max_period: usize },
-    #[error("prover input count mismatch: {airs} AIRs but {traces} traces")]
-    AirTraceCountMismatch { airs: usize, traces: usize },
-    #[error("trace width mismatch: expected {expected}, got {actual}")]
-    WidthMismatch { expected: usize, actual: usize },
-}
-
 // ============================================================================
 // TraceOrder
 // ============================================================================
 
 /// The permutation between **instance order** (the AIR positions as
-/// returned by [`Instance::airs`]) and **proof order** (the wire-format
-/// ordering used inside the prover/verifier), derived deterministically
+/// returned by [`Instance::airs`](miden_lifted_air::Instance::airs)) and **proof order** (the
+/// wire-format ordering used inside the prover/verifier), derived deterministically
 /// from per-AIR trace heights.
 ///
 /// Proof order is defined as the stable sort of instance indices by
@@ -76,9 +50,10 @@ pub enum InstanceValidationError {
 /// the same ordering from the same heights, so the proof commits to heights
 /// only and the ordering is reconstructed locally.
 ///
-/// Heights are stored in instance order (matching [`Instance::airs`]).
-/// Use [`Self::to_proof_order`] / [`Self::to_instance_order`] (or
-/// [`Self::reorder_to_proof_in_place`]) to move data between the two views.
+/// Heights are stored in instance order (matching
+/// [`Instance::airs`](miden_lifted_air::Instance::airs)). Use [`Self::to_proof_order`] /
+/// [`Self::to_instance_order`] (or [`Self::reorder_to_proof_in_place`]) to move data between the
+/// two views.
 #[derive(Clone, Debug)]
 pub struct TraceOrder {
     log_heights_instance: Vec<u8>,
@@ -147,7 +122,8 @@ impl TraceOrder {
         self.log_heights_instance.is_empty()
     }
 
-    /// Log trace heights in instance order. Matches [`Instance::airs`].
+    /// Log trace heights in instance order. Matches
+    /// [`Instance::airs`](miden_lifted_air::Instance::airs).
     pub fn log_heights_instance(&self) -> &[u8] {
         &self.log_heights_instance
     }
@@ -230,62 +206,6 @@ impl TraceOrder {
             .map(|o| o.expect("instance_indices is a permutation of 0..n"))
             .collect()
     }
-}
-
-// ============================================================================
-// Validation
-// ============================================================================
-
-/// Per-AIR contract checks driven by [`Instance::airs`] against a
-/// pre-built [`TraceOrder`].
-///
-/// Assumes the AIR list itself is structurally valid (the air-crate's
-/// [`validate_airs`](miden_lifted_air::validate_airs) is the right check
-/// for that). This function only validates instance-level data the AIR
-/// cannot check on its own:
-///
-/// - `airs.len() == trace_order.len()`
-/// - for each AIR: `num_public_values() == air_inputs().len()`
-/// - for each AIR: `trace_height ≥ max periodic column length`
-///
-/// Shape well-formedness (non-empty, `u8` instance count, `usize` bound on
-/// `log_h`) is already enforced by [`TraceOrder::from_log_heights`].
-pub fn validate_instance<F, EF, I>(
-    instance: &I,
-    trace_order: &TraceOrder,
-) -> Result<(), InstanceValidationError>
-where
-    F: Field,
-    EF: ExtensionField<F>,
-    I: Instance<F, EF>,
-{
-    let airs = instance.airs();
-    let log_heights_instance = trace_order.log_heights_instance();
-    if airs.len() != log_heights_instance.len() {
-        return Err(InstanceValidationError::AirTraceCountMismatch {
-            airs: airs.len(),
-            traces: log_heights_instance.len(),
-        });
-    }
-    let air_inputs = instance.air_inputs();
-    for (air, &log_h) in airs.iter().zip(log_heights_instance) {
-        let expected_pv = air.num_public_values();
-        if expected_pv != air_inputs.len() {
-            return Err(InstanceValidationError::PublicValuesMismatch {
-                expected: expected_pv,
-                actual: air_inputs.len(),
-            });
-        }
-        let trace_height = 1usize << log_h as usize;
-        let max_period = air.periodic_columns().iter().map(Vec::len).max().unwrap_or(0);
-        if trace_height < max_period {
-            return Err(InstanceValidationError::TraceHeightBelowPeriod {
-                trace_height,
-                max_period,
-            });
-        }
-    }
-    Ok(())
 }
 
 #[cfg(test)]

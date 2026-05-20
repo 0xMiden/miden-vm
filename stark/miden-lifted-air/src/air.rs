@@ -17,15 +17,14 @@
 //! the declared dimensions. Any concrete builder constructed with matching dimensions
 //! is therefore safe from out-of-bounds panics.
 //!
-//! Use [`LiftedAir::is_valid_builder`] to verify that a concrete builder's
+//! Use [`crate::debug::check_builder_shape`] to verify a concrete builder's
 //! dimensions match the AIR before calling `eval()`.
 
 use alloc::vec::Vec;
 
-use p3_air::{BaseAir, WindowAccess};
+use p3_air::BaseAir;
 use p3_field::Field;
 use p3_matrix::dense::RowMajorMatrix;
-use thiserror::Error;
 
 use crate::{
     LiftedAirBuilder,
@@ -133,65 +132,6 @@ pub trait LiftedAir<F: Field, EF>: Sync + BaseAir<F> {
     {
         raw_constraint_degree::<F, EF, Self>(self)
     }
-
-    /// Check that a builder's dimensions match this AIR.
-    ///
-    /// Verifies every data-carrying accessor on [`LiftedAirBuilder`]: main trace,
-    /// preprocessed trace, aux trace, public values, randomness, aux values, and
-    /// periodic values.
-    ///
-    /// This guards the invariant that makes [`eval`](Self::eval) panic-free: if
-    /// the symbolic evaluation in [`constraint_degree`](Self::constraint_degree)
-    /// succeeds and this check passes, then `eval()` cannot panic from
-    /// out-of-bounds access on the builder's accessors.
-    fn is_valid_builder<AB: LiftedAirBuilder<F = F>>(
-        &self,
-        builder: &AB,
-    ) -> Result<(), AirStructureError> {
-        let check =
-            |part: TracePart, expected: usize, actual: usize| -> Result<(), AirStructureError> {
-                if actual != expected {
-                    return Err(AirStructureError::BuilderMismatch { part, expected, actual });
-                }
-                Ok(())
-            };
-
-        let main = builder.main();
-        // Check current and next slices of the main trace.
-        check(TracePart::Main, self.width(), main.current_slice().len())?;
-        check(TracePart::Main, self.width(), main.next_slice().len())?;
-
-        // Check current and next slices of the aux trace.
-        let perm = builder.permutation();
-        check(TracePart::Aux, self.aux_width(), perm.current_slice().len())?;
-        check(TracePart::Aux, self.aux_width(), perm.next_slice().len())?;
-
-        check(TracePart::PublicValues, self.num_public_values(), builder.public_values().len())?;
-        check(
-            TracePart::Randomness,
-            self.num_randomness(),
-            builder.permutation_randomness().len(),
-        )?;
-        check(TracePart::AuxValues, self.num_aux_values(), builder.permutation_values().len())?;
-        check(
-            TracePart::PeriodicValues,
-            self.periodic_columns().len(),
-            builder.periodic_values().len(),
-        )?;
-
-        Ok(())
-    }
-}
-
-/// Which part of the trace a builder mismatch refers to.
-#[derive(Copy, Clone, Debug)]
-pub enum TracePart {
-    Main,
-    Aux,
-    PublicValues,
-    Randomness,
-    AuxValues,
-    PeriodicValues,
 }
 
 /// Symbolic constraint degree multiples, split by constraint kind.
@@ -235,109 +175,4 @@ where
         .max()
         .unwrap_or(0);
     ConstraintDegrees { base, ext }
-}
-
-/// Check that an AIR satisfies the structural contract assumed by the rest of
-/// the protocol.
-///
-/// This is a debug/testing helper. The prover and verifier hot paths assume
-/// the AIR is well-formed; passing a malformed AIR is undefined behaviour.
-/// Call this from tests or local sanity checks when authoring a new AIR.
-///
-/// # Checked properties
-///
-/// - **No preprocessed trace** — the lifted STARK protocol does not support preprocessed (fixed)
-///   columns; their presence is an error.
-/// - **Positive auxiliary width** — every lifted AIR must declare at least one auxiliary column
-///   (`aux_width() > 0`).
-/// - **Well-formed periodic columns** — each periodic column must be non-empty and have a
-///   power-of-two length.
-///
-/// A degenerate AIR whose constraints all vanish under `Z_H` (combined degree
-/// `< 2`) is *not* checked here — that is a concern for the prover/verifier, not
-/// a structural property of the air description.
-pub fn validate_air<F, EF, A>(air: &A) -> Result<(), AirStructureError>
-where
-    F: Field,
-    A: LiftedAir<F, EF>,
-{
-    if air.preprocessed_trace().is_some() {
-        return Err(AirStructureError::PreprocessedTrace);
-    }
-    if air.aux_width() == 0 {
-        return Err(AirStructureError::ZeroAuxWidth);
-    }
-    for (i, col) in air.periodic_columns().iter().enumerate() {
-        if col.is_empty() || !col.len().is_power_of_two() {
-            return Err(AirStructureError::InvalidPeriodicColumn { index: i, length: col.len() });
-        }
-    }
-    Ok(())
-}
-
-/// Validate every AIR in `airs` via [`validate_air`], plus the list-level
-/// invariant that every AIR declares the same
-/// [`num_public_values`](BaseAir::num_public_values).
-///
-/// The list of AIRs is the air-crate-level "statement": this is the right
-/// granularity for "is this set of AIRs structurally well-formed?". The
-/// stark crate assumes this check has passed and only validates
-/// instance-level data (the supplied public-input slice has the agreed
-/// length, trace heights are compatible with periodic columns, …).
-pub fn validate_airs<F, EF, A>(airs: &[&A]) -> Result<(), AirStructureError>
-where
-    F: Field,
-    A: LiftedAir<F, EF>,
-{
-    let mut expected_pv: Option<usize> = None;
-    for (idx, air) in airs.iter().enumerate() {
-        validate_air::<F, EF, _>(*air)?;
-        let pv = air.num_public_values();
-        match expected_pv {
-            None => expected_pv = Some(pv),
-            Some(prev) if prev != pv => {
-                return Err(AirStructureError::InconsistentPublicValues {
-                    first: prev,
-                    index: idx,
-                    found: pv,
-                });
-            },
-            _ => {},
-        }
-    }
-    Ok(())
-}
-
-/// Errors raised by the AIR-structure validators ([`validate_air`],
-/// [`validate_airs`]) and by [`LiftedAir::is_valid_builder`].
-///
-/// Most variants describe a single AIR; [`Self::InconsistentPublicValues`]
-/// describes a relation between two AIRs in a list passed to
-/// [`validate_airs`].
-#[derive(Debug, Error)]
-pub enum AirStructureError {
-    #[error("periodic column {index}: length must be positive power of two, got {length}")]
-    InvalidPeriodicColumn { index: usize, length: usize },
-    #[error("preprocessed traces are not supported")]
-    PreprocessedTrace,
-    #[error("{part:?} dimension mismatch: expected {expected}, got {actual}")]
-    BuilderMismatch {
-        part: TracePart,
-        expected: usize,
-        actual: usize,
-    },
-    #[error("aux width must be positive")]
-    ZeroAuxWidth,
-    #[error(
-        "num_public_values mismatch across AIRs: first AIR declares {first}, \
-         AIR {index} declares {found}"
-    )]
-    InconsistentPublicValues {
-        /// `num_public_values` declared by AIR 0 (the first in the list).
-        first: usize,
-        /// Position of the first AIR whose `num_public_values` disagrees.
-        index: usize,
-        /// `num_public_values` declared by that AIR.
-        found: usize,
-    },
 }

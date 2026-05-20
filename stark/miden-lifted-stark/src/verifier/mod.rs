@@ -45,7 +45,9 @@ use alloc::{vec, vec::Vec};
 use core::marker::PhantomData;
 
 use constraints::ConstraintFolder;
-use miden_lifted_air::{BaseAir, Instance, LiftedAir, ReductionError, RowWindow};
+use miden_lifted_air::{
+    BaseAir, Instance, InstanceError, LiftedAir, ReductionError, RowWindow, validate_with_heights,
+};
 use miden_stark_transcript::{Channel, TranscriptError, VerifierChannel, VerifierTranscript};
 use p3_field::{ExtensionField, TwoAdicField};
 use p3_matrix::Matrix;
@@ -55,40 +57,45 @@ use thiserror::Error;
 use crate::{
     StarkConfig,
     domain::{Coset, LiftedDomain, log_quotient_degree},
-    instance::{InstanceValidationError, TraceOrder, validate_instance},
+    instance::{ShapeError, TraceOrder},
     pcs::verifier::{PcsError, verify_aligned},
     proof::{StarkDigest, StarkProof},
+    setup::{CompatError, validate_compatible},
     util::packing::row_to_packed_ext,
 };
 
 /// Errors that can occur during verification.
+///
+/// Returned exclusively for runtime instance / proof-shape failures or
+/// cryptographic verification failures. AIR structural correctness is
+/// trusted — call [`crate::debug::assert_airs_valid`] from tests.
 #[derive(Debug, Error)]
 pub enum VerifierError {
-    #[error("instance validation failed: {0}")]
-    Instance(#[from] InstanceValidationError),
-    #[error("domain construction failed: {0}")]
+    #[error(transparent)]
+    Instance(#[from] InstanceError),
+    #[error(transparent)]
+    Compat(#[from] CompatError),
+    #[error(transparent)]
+    Shape(#[from] ShapeError),
+    #[error(transparent)]
     Domain(#[from] crate::domain::DomainError),
-    #[error("PCS verification failed: {0}")]
+    #[error(transparent)]
     Pcs(#[from] PcsError),
-    #[error("transcript error: {0}")]
+    #[error(transparent)]
     Transcript(#[from] TranscriptError),
-    #[error("invalid aux shape")]
-    InvalidAuxShape,
+    #[error("external assertion evaluation failed: {0}")]
+    Reduction(ReductionError),
+    /// Placeholder for the `adr1anh/preprocessed` child branch.
+    #[error("preprocessed commitment mismatch")]
+    PreprocessedCommitmentMismatch,
     #[error("constraint mismatch: quotient * vanishing != folded constraints")]
     ConstraintMismatch,
-    #[error(
-        "constraint degree exceeds blowup: \
-         log_quotient_degree {log_quotient_degree} > log_blowup {log_blowup}"
-    )]
-    ConstraintDegreeTooHigh { log_quotient_degree: u8, log_blowup: u8 },
     #[error("external assertion {assertion} is non-zero")]
     ExternalAssertionFailed {
         /// Index into the assertions vector returned by
         /// [`Instance::eval_external`].
         assertion: usize,
     },
-    #[error("external assertion evaluation failed: {0}")]
-    Reduction(ReductionError),
 }
 
 /// Verify the statement described by `instance`.
@@ -121,6 +128,24 @@ pub enum VerifierError {
 /// [`StarkTranscript::from_proof`](crate::proof::StarkTranscript::from_proof)
 /// and check `transcript.trace_order.log_heights_instance()` before calling
 /// this. See the module-level docs for the full contract.
+///
+/// # Trust contract
+///
+/// `verify` validates the runtime instance plus everything carried on the
+/// proof; the AIR list is **trusted** (run
+/// [`crate::debug::assert_airs_valid`] from tests).
+///
+/// ## Validated
+/// - Same instance checks as [`crate::prove`] minus trace shape (no traces here)
+/// - Same `validate_compatible` check
+/// - Proof shape via [`TraceOrder::from_log_heights`]
+/// - Proof byte parsing (transcript channel)
+/// - PCS / FRI / DEEP / LMCS / transcript / constraint identity
+/// - External assertions from [`Instance::eval_external`]
+/// - (Future) preprocessed commitment matches AIR declarations
+///
+/// ## Trusted (NOT validated)
+/// - AIR structural shape (same list as in [`crate::prove`])
 pub fn verify<F, EF, I, SC>(
     config: &SC,
     instance: &I,
@@ -133,13 +158,16 @@ where
     SC: StarkConfig<F, EF>,
     I: Instance<F, EF>,
 {
-    // `TraceOrder::from_log_heights` checks shape well-formedness (non-empty,
-    // u8 instance bound, `log_h` within host `usize`). Run it before
-    // `validate_instance`, which dereferences `1usize << log_h` and would
-    // otherwise overflow on a malicious proof.
-    let trace_order = TraceOrder::from_log_heights(proof.log_trace_heights.clone())
-        .map_err(InstanceValidationError::from)?;
-    validate_instance(instance, &trace_order)?;
+    // --- Trust boundary (see doc-block above). -------------------------------
+    //
+    // `TraceOrder::from_log_heights` runs first because it bounds `log_h`
+    // within the host's `usize` width; `validate_with_heights` later
+    // dereferences `1usize << log_h` and would otherwise overflow on a
+    // malicious proof.
+    let trace_order = TraceOrder::from_log_heights(proof.log_trace_heights.clone())?;
+    validate_with_heights(instance, trace_order.log_heights_instance())?;
+    validate_compatible::<F, EF, _>(instance.airs(), config.pcs())?;
+
     let proof_ordered_airs = trace_order.to_proof_order(instance.airs());
     let air_inputs = instance.air_inputs();
 
@@ -165,17 +193,18 @@ where
 
     // Infer constraint degree from symbolic AIR analysis (max across all AIRs).
     // NOTE: `log_quotient_degree` runs symbolic eval and may panic if the AIR is
-    // invalid. The AIR is trusted (see `miden_lifted_air::validate_air` for the
-    // debug-only structural check).
+    // invalid. The AIR is trusted (see `miden_lifted_air::debug::check_one_air`
+    // for the debug-only structural check).
     let log_quotient_degree = proof_ordered_airs
         .iter()
         .map(|&air| log_quotient_degree::<F, EF, _>(air))
         .max()
         .unwrap_or(1);
 
-    if log_quotient_degree > log_blowup {
-        return Err(VerifierError::ConstraintDegreeTooHigh { log_quotient_degree, log_blowup });
-    }
+    debug_assert!(
+        log_quotient_degree <= log_blowup,
+        "BUG: validate_compatible should have caught this"
+    );
 
     // Pair the max LDE domain with the constraint degree for the constraint layer.
     let max_eval_domain = max_lde_domain.evaluation_domain(log_quotient_degree);
@@ -267,11 +296,14 @@ where
         let main_window = RowWindow::from_view(&opened[main_g][j].as_view());
 
         // Extract aux trace opened values (reconstitute EF from base field components).
+        // Row widths were validated against `air.aux_width() * EF::DIMENSION`
+        // by `verify_aligned` upstream; reaching here with a mismatch would
+        // indicate a framework bug.
         let aux_mat = &opened[aux_g][j];
         let aux_local = row_to_packed_ext::<F, EF>(&aux_mat.row_slice(0).expect("aux row 0"))
-            .ok_or(VerifierError::InvalidAuxShape)?;
+            .expect("BUG: aux row width mismatch — PCS verify_aligned should have caught this");
         let aux_next = row_to_packed_ext::<F, EF>(&aux_mat.row_slice(1).expect("aux row 1"))
-            .ok_or(VerifierError::InvalidAuxShape)?;
+            .expect("BUG: aux row width mismatch — PCS verify_aligned should have caught this");
         let aux_window = RowWindow::from_two_rows(&aux_local, &aux_next);
 
         // Selectors at the lifted OOD point yⱼ = z^{rⱼ} (encapsulated in LiftedDomain).
@@ -299,10 +331,8 @@ where
             _phantom: PhantomData,
         };
 
-        debug_assert!(
-            air.is_valid_builder(&folder).is_ok(),
-            "verifier-built folder must match AIR dimensions (AIR is trusted)"
-        );
+        #[cfg(debug_assertions)]
+        miden_lifted_air::debug::check_builder_shape(j, *air, &folder);
         air.eval(&mut folder);
 
         // Accumulate: acc = acc * beta + folded_j
@@ -331,8 +361,8 @@ where
     // 12. Reconstruct Q(z) and check quotient identity Q(z) * Z_{H_max}(z)
     // Quotient group has a single matrix; row 0 is the evaluation at z.
     let quot_row = opened[quot_g][0].row_slice(0).expect("quotient row 0");
-    let quotient_chunks =
-        row_to_packed_ext::<F, EF>(&quot_row).ok_or(VerifierError::InvalidAuxShape)?;
+    let quotient_chunks = row_to_packed_ext::<F, EF>(&quot_row)
+        .expect("BUG: quotient row width mismatch — PCS verify_aligned should have caught this");
     let quotient_z = max_eval_domain.reconstruct_quotient::<EF>(z, &quotient_chunks);
 
     // `max_lde_domain` is the tallest (lift_ratio = 0), so lifted == unlifted here.

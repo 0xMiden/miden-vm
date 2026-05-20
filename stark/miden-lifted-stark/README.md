@@ -218,7 +218,9 @@ at `y_j`, and the opened trace values already correspond to `p_j(y_j)`.
 | `src/verifier/constraints.rs` | `ConstraintFolder` — OOD constraint evaluation, quotient reconstruction |
 | `src/verifier/periodic.rs` | `PeriodicPolys` — polynomial coefficients for OOD evaluation |
 | `src/proof.rs` | `StarkProof`, `StarkTranscript` — proof artifact and structured transcript view |
-| `src/instance.rs` | `TraceOrder`, `validate_instance`, `ShapeError`, `InstanceValidationError` — shape metadata and validation |
+| `src/instance.rs` | `TraceOrder`, `ShapeError` — shape metadata; runtime checks live in `miden_lifted_air::validate` |
+| `src/setup.rs` | `validate_compatible`, `CompatError` — AIR ↔ PCS-parameters compatibility check |
+| `src/debug.rs` | `check_constraints` (row-by-row), structural assertions (`assert_airs_valid`, `assert_prover_setup`, `assert_aux_traces_shape`, …) |
 
 ## Conventions & Assumptions
 

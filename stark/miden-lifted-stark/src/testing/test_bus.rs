@@ -168,6 +168,11 @@ impl Instance<Felt, QuadFelt> for BusInputs<'_> {
         &self.aux_inputs
     }
 
+    fn max_aux_inputs(&self) -> usize {
+        // `pi_0` and `pi_1`.
+        2
+    }
+
     fn eval_external(
         &self,
         challenges: &[QuadFelt],

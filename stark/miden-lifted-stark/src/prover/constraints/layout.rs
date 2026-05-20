@@ -31,7 +31,8 @@ where
     A: LiftedAir<F, EF>,
 {
     let mut builder = ConstraintLayoutBuilder::<F>::new(air.air_layout());
-    debug_assert!(air.is_valid_builder(&builder).is_ok());
+    #[cfg(debug_assertions)]
+    miden_lifted_air::debug::check_builder_shape(0, air, &builder);
     air.eval(&mut builder);
     builder.into_layout()
 }
