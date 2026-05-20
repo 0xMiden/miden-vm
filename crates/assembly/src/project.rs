@@ -221,7 +221,9 @@ where
                 )));
             }
 
-            assembler.link_package(dependency_package.package.clone(), edge.linkage)?;
+            if !dependency_package.package.is_kernel() {
+                assembler.link_package(dependency_package.package.clone(), edge.linkage)?;
+            }
             runtime_dependencies.merge_package(dependency_package, edge.linkage)?;
         }
 
@@ -231,11 +233,17 @@ where
             None => self.load_target_sources(project.as_ref(), target)?,
         };
 
+        if let Some(kernel_package) = runtime_dependencies.kernel.clone() {
+            if matches!(target.ty, TargetType::Kernel) {
+                return Err(Report::msg(format!(
+                    "kernel targets cannot depend on a kernel, dependency '{}' is a kernel",
+                    kernel_package.name
+                )));
+            }
+            assembler.link_package(kernel_package, Linkage::Dynamic)?;
+        }
         let mut product = match target.ty {
             TargetType::Executable => {
-                if let Some(kernel_package) = runtime_dependencies.kernel.clone() {
-                    assembler.link_package(kernel_package, Linkage::Dynamic)?;
-                }
                 assembler.assemble_executable_modules(package_id.clone(), root, support)?
             },
             TargetType::Kernel => {
