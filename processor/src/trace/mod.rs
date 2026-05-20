@@ -5,7 +5,7 @@ use core::ops::Range;
 use miden_air::{
     AirWitness, MidenAir, PublicInputs, debug,
     trace::{
-        DECODER_TRACE_OFFSET, MainTrace, TRACE_WIDTH,
+        DECODER_TRACE_OFFSET, MainTrace,
         decoder::{NUM_USER_OP_HELPERS, USER_OP_HELPERS_OFFSET},
     },
 };
@@ -373,7 +373,7 @@ impl ExecutionTrace {
     // --------------------------------------------------------------------------------------------
     #[cfg(feature = "std")]
     pub fn print(&self) {
-        let mut row = [ZERO; TRACE_WIDTH];
+        let mut row = [ZERO; miden_air::trace::TRACE_WIDTH];
         for i in 0..self.length() {
             self.main_trace.read_row_into(i, &mut row);
             std::println!("{:?}", row.map(|v| v.as_canonical_u64()));
