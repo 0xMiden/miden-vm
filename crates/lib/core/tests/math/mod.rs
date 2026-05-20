@@ -1,3 +1,9 @@
+mod f_k1;
+mod k1_point;
+mod k1_scalar;
+mod modmul_k1_hint_checker_comparison;
+mod sz_modmul_k1_codegen_pin;
 mod u128_mod;
 mod u256_mod;
+mod u256_modmul_k1_traps;
 mod u64_mod;

@@ -13,12 +13,19 @@ pub(crate) const BYTES_PER_U32: usize = size_of::<u32>();
 pub mod ecdsa;
 pub mod eddsa_ed25519;
 pub mod falcon_div;
+pub mod glv_split_k1;
+pub mod k1_point_decompress;
 pub mod keccak256;
+pub mod secp256k1_constants;
 pub mod sha512;
 pub mod smt_peek;
 pub mod sorted_array;
 pub mod u128_div;
 pub mod u256_div;
+pub mod u256_inv;
+pub mod u256_inv_k1;
+pub mod u256_modmul;
+pub mod u256_modmul_k1;
 pub mod u64_div;
 
 // HELPER FUNCTIONS

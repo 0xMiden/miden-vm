@@ -1,0 +1,214 @@
+#! Generated MASM module for the SZ modmul_k1_base verifier.
+#! DO NOT EDIT BY HAND. Regenerate via `cargo run -p miden-sz-codegen --bin regen`.
+
+pub type u256 = struct { lo: u128, hi: u128 }
+
+use miden::core::crypto::hashes::poseidon2
+
+const U256_MODMUL_K1_BASE_EVENT = event("miden::core::math::u256::u256_modmul_k1_base")
+
+#! Schwartz-Zippel-based modmul_k1_base modular-multiplication verifier.
+#! Main checked identity:
+#!   a(alpha) * b(alpha) - q(alpha) * p(alpha) - c(alpha) = (W - alpha) * (e_pos(alpha) - e_neg(alpha))
+#! at a Fiat-Shamir-derived alpha in the Miden base-field extension (W = 2^16).
+@locals(130)
+pub proc modmul_k1_base(b: u256, a: u256) -> u256
+    emit.U256_MODMUL_K1_BASE_EVENT
+    loc_storew_le.12 dropw
+    loc_storew_le.16 dropw
+    loc_storew_le.4 dropw
+    loc_storew_le.8 dropw
+    adv_push                              # alpha_1
+    adv_push                              # alpha_0 (top)
+    loc_store.0                           # mem[0] = alpha_0
+    loc_store.1                           # mem[1] = alpha_1
+    # ----- transcript absorb + polynomial evaluation setup -----
+    push.0 push.0                         # acc placeholders (depths 14, 15 once filled)
+    locaddr.0                             # alpha_addr
+    locaddr.4                             # ptr = first poly start
+    # ----- precomputed capacity from Poseidon(modulus); rate words are zero-
+    # initialized because the first `mem_stream` overwrites them before any permute.
+    push.12777242278417594148.18250870677972930361.12963408385698084413.3159600732757009237        # C = precomputed capacity
+    padw padw                              # R1, R0 zero-init (overwritten by first absorb)
+    repeat.2
+        mem_stream
+        exec.poseidon2::permute
+    end
+    # Witness coefficients are u32-bounded, not u16-bounded, by design.
+    repeat.2
+        adv_pipe
+        u32assertw
+        swapw u32assertw swapw
+        horner_eval_base
+        exec.poseidon2::permute
+    end
+    dup.14 loc_store.120
+    dup.15 loc_store.121
+    movup.14 drop push.0 movdn.14
+    movup.15 drop push.0 movdn.15
+    repeat.2
+        adv_pipe
+        u32assertw
+        swapw u32assertw swapw
+        horner_eval_base
+        exec.poseidon2::permute
+    end
+    dup.14 loc_store.122
+    dup.15 loc_store.123
+    movup.14 drop push.0 movdn.14
+    movup.15 drop push.0 movdn.15
+    repeat.4
+        adv_pipe
+        u32assertw
+        swapw u32assertw swapw
+        horner_eval_base
+        exec.poseidon2::permute
+    end
+    dup.14 loc_store.124
+    dup.15 loc_store.125
+    movup.14 drop push.0 movdn.14
+    movup.15 drop push.0 movdn.15
+    repeat.4
+        adv_pipe
+        u32assertw
+        swapw u32assertw swapw
+        horner_eval_base
+        exec.poseidon2::permute
+    end
+    dup.14 loc_store.126
+    dup.15 loc_store.127
+    loc_load.53 assertz.err="sz: e_pos_30 must be 0 (top carry coefficient)"
+    loc_load.52 assertz.err="sz: e_pos_31 must be 0 (top carry coefficient)"
+    loc_load.85 assertz.err="sz: e_neg_30 must be 0 (top carry coefficient)"
+    loc_load.84 assertz.err="sz: e_neg_31 must be 0 (top carry coefficient)"
+    # ----- Fiat-Shamir equality check -----
+    loc_load.0
+    assert_eq.err="sz: alpha_0 mismatch (Fiat-Shamir failure)"
+    loc_load.1
+    assert_eq.err="sz: alpha_1 mismatch (Fiat-Shamir failure)"
+    dropw dropw dropw drop drop           # drop residual state + ptr + alpha_addr + acc
+    # ----- a(alpha) horner eval -----
+    push.0 push.0
+    locaddr.0
+    push.0 push.0 push.0 push.0 push.0    # [pad x5, alpha_addr, acc_1, acc_0, ...]
+    padw loc_loadw_le.8                   # high u32 limbs
+    u32divmod.65536 swap
+    movup.2 u32divmod.65536 swap
+    movup.4 u32divmod.65536 swap
+    movup.6 u32divmod.65536 swap
+    horner_eval_base
+    dropw dropw
+    padw loc_loadw_le.4                   # low u32 limbs
+    u32divmod.65536 swap
+    movup.2 u32divmod.65536 swap
+    movup.4 u32divmod.65536 swap
+    movup.6 u32divmod.65536 swap
+    horner_eval_base
+    dropw dropw
+    dup.6 loc_store.116
+    dup.7 loc_store.117
+    dropw dropw
+    # ----- b(alpha) horner eval -----
+    push.0 push.0
+    locaddr.0
+    push.0 push.0 push.0 push.0 push.0    # [pad x5, alpha_addr, acc_1, acc_0, ...]
+    padw loc_loadw_le.16                   # high u32 limbs
+    u32divmod.65536 swap
+    movup.2 u32divmod.65536 swap
+    movup.4 u32divmod.65536 swap
+    movup.6 u32divmod.65536 swap
+    horner_eval_base
+    dropw dropw
+    padw loc_loadw_le.12                   # low u32 limbs
+    u32divmod.65536 swap
+    movup.2 u32divmod.65536 swap
+    movup.4 u32divmod.65536 swap
+    movup.6 u32divmod.65536 swap
+    horner_eval_base
+    dropw dropw
+    dup.6 loc_store.118
+    dup.7 loc_store.119
+    dropw dropw
+    # ----- p(alpha) horner eval (constant) -----
+    push.0 push.0
+    locaddr.0
+    push.0 push.0 push.0 push.0 push.0    # [pad x5, alpha_addr, acc_1, acc_0, ...]
+    push.65535        # p_u16[8]
+    push.65535        # p_u16[9]
+    push.65535        # p_u16[10]
+    push.65535        # p_u16[11]
+    push.65535        # p_u16[12]
+    push.65535        # p_u16[13]
+    push.65535        # p_u16[14]
+    push.65535        # p_u16[15]
+    horner_eval_base
+    dropw dropw
+    push.64559        # p_u16[0]
+    push.65535        # p_u16[1]
+    push.65534        # p_u16[2]
+    push.65535        # p_u16[3]
+    push.65535        # p_u16[4]
+    push.65535        # p_u16[5]
+    push.65535        # p_u16[6]
+    push.65535        # p_u16[7]
+    horner_eval_base
+    dropw dropw
+    dup.6 loc_store.128
+    dup.7 loc_store.129
+    dropw dropw
+    # ----- extension-field identity check -----
+    push.0 push.65536                     # W = (65536, 0)
+    loc_load.1
+    loc_load.0
+    ext2sub                               # (W - alpha)
+    loc_load.125
+    loc_load.124
+    loc_load.127
+    loc_load.126
+    ext2sub                               # pos_h - neg_h
+    ext2mul                               # (W - alpha) * (pos - neg)
+    loc_load.121
+    loc_load.120
+    loc_load.129
+    loc_load.128
+    ext2mul
+    ext2add                               # RHS += minus-product (sign-flipped)
+    loc_load.123
+    loc_load.122
+    ext2add                               # RHS += minus-linear (sign-flipped)
+    loc_load.117
+    loc_load.116
+    loc_load.119
+    loc_load.118
+    ext2mul                               # LHS = first positive product
+    movdn.3 movdn.3                       # reorder to [RHS_0, RHS_1, LHS_0, LHS_1, ...]
+    ext2sub                               # bottom - top = LHS - RHS
+    eq.0 assert.err="sz: identity check failed at basis coord 0"
+    eq.0 assert.err="sz: identity check failed at basis coord 1"
+    # ----- recombine c: 16 u16 limbs -> 8 u32 limbs -----
+    loc_load.36 push.65536 mul loc_load.37 add        # c_u32[7]
+    loc_load.38 push.65536 mul loc_load.39 add        # c_u32[6]
+    u32assert2
+    loc_load.40 push.65536 mul loc_load.41 add        # c_u32[5]
+    loc_load.42 push.65536 mul loc_load.43 add        # c_u32[4]
+    u32assert2
+    loc_load.44 push.65536 mul loc_load.45 add        # c_u32[3]
+    loc_load.46 push.65536 mul loc_load.47 add        # c_u32[2]
+    u32assert2
+    loc_load.48 push.65536 mul loc_load.49 add        # c_u32[1]
+    loc_load.50 push.65536 mul loc_load.51 add        # c_u32[0]
+    u32assert2
+    # ----- fused canonical check: c < p -----
+    dupw.1
+    dupw.1
+    push.4294967295        # p_u32[7]
+    push.4294967295        # p_u32[6]
+    push.4294967295        # p_u32[5]
+    push.4294967295        # p_u32[4]
+    push.4294967295        # p_u32[3]
+    push.4294967295        # p_u32[2]
+    push.4294967294        # p_u32[1]
+    push.4294966319        # p_u32[0]
+    exec.::miden::core::math::u256::lt
+    assert.err="sz: c < p violated"
+end

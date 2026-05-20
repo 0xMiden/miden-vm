@@ -1,5 +1,8 @@
 use miden::core::crypto::hashes::keccak256
 use miden::core::crypto::hashes::poseidon2
+use miden::core::math::f_k1
+use miden::core::math::k1_point
+use miden::core::math::k1_scalar
 use miden::core::sys
 use miden::core::word
 
@@ -16,6 +19,7 @@ use miden::core::word
 # ================================================================================================
 
 const ECDSA_VERIFY_EVENT = event("miden::core::crypto::dsa::ecdsa_k256_keccak::verify")
+const K1_POINT_DECOMPRESS_EVENT = event("miden::core::math::k1_point::decompress")
 
 const PK_LEN_FELTS = 9     # 33.div_ceil(4)
 const DIGEST_LEN_FELTS = 8 # 32.div_ceil(4)
@@ -193,4 +197,452 @@ proc verify_prehash_impl
     # Stack positions 4-7 should have [event_id, result, 0, 0] for get_stack_word(4)
     push.0.0 dup.6 push.ECDSA_VERIFY_EVENT swapw
     # => [COMM, TAG, result]
+end
+
+# NATIVE-PATH HELPERS
+# ================================================================================================
+# Calldata-parsing helpers for `verify_prehash_native`. The native and precompile entry
+# points accept identical calldata; these helpers translate it into the 8-u32-LE-limb form
+# `verify_prehash_native` consumes.
+#
+# Calldata is packed u32 LE felts (4 bytes per felt). For the 32-byte big-endian values
+# (digest, r, s, x): byte-reverse each packed felt, and read the felts in reverse order
+# (felt 0 -> limb 7) so the overall byte stream flips from BE to LE.
+
+#! Pushes the secp256k1 group order `n_k1` onto the operand stack as 8 u32 LE limbs (n[0] on
+#! top, n[7] deepest).
+#!
+#! Stack: [...]  ->  [n[0], n[1], ..., n[7], ...]
+proc _push_n_k1
+    push.0xffffffff.0xffffffff.0xffffffff.0xfffffffe
+    push.0xbaaedce6.0xaf48a03b.0xbfd25e8c.0xd0364141
+end
+
+#! Reverses the byte order of a u32. Maps `b0 + b1*256 + b2*2^16 + b3*2^24` to
+#! `b3 + b2*256 + b1*2^16 + b0*2^24`.
+#!
+#! Stack: [v, ...]  ->  [byte_rev(v), ...]
+proc _byte_rev_u32
+    dup u32shr.24                                        # [b3, v, ...]
+    dup.1 u32shr.16  push.0xff u32and  push.256 mul      # [b2 << 8, b3, v, ...]
+    add                                                  # [b3 | (b2 << 8), v, ...]
+    dup.1 u32shr.8  push.0xff u32and  push.0x10000 mul   # [b1 << 16, ..., v, ...]
+    add
+    dup.1 push.0xff u32and  push.0x1000000 mul           # [b0 << 24, ..., v, ...]
+    add
+    swap drop                                            # remove the original v
+end
+
+#! Parses 32 big-endian bytes packed as 8 u32-LE felts at `src_ptr` into 8 u32 integer
+#! limbs (low-to-high) at `dest_addr`. The integer encoded by the BE bytes equals
+#! `sum_{i in 0..8} limb[i] * 2^(32*i)`, where `limb[i] = byte_rev(felt at src_ptr + (7 - i))`:
+#! the lowest 4 bytes of the integer live in felt 7 (the last packed felt), and the
+#! byte-reverse converts that LE-packed felt into the corresponding integer u32.
+#!
+#! `src_ptr` and `dest_addr` must both be word-aligned (multiples of 4).
+#!
+#! Stack: [dest_addr, src_ptr, ...]  ->  [...]
+@locals(2)
+proc _parse_be_u256
+    loc_store.0                                          # mem[0] = dest_addr
+    loc_store.1                                          # mem[1] = src_ptr
+
+    # packed[4..8] -> limb[0..4]: load as a word (top = p[4]), byte-rev each while
+    # rotating to land [br(p[7]), br(p[6]), br(p[5]), br(p[4]), ...] on top, store as a word.
+    padw  loc_load.1 add.4  mem_loadw_le
+    exec._byte_rev_u32
+    swap     exec._byte_rev_u32
+    movup.2  exec._byte_rev_u32
+    movup.3  exec._byte_rev_u32
+    loc_load.0  mem_storew_le  dropw
+
+    # packed[0..4] -> limb[4..8]: same shape, source word at src_ptr+0, dest word at dest+4.
+    padw  loc_load.1  mem_loadw_le
+    exec._byte_rev_u32
+    swap     exec._byte_rev_u32
+    movup.2  exec._byte_rev_u32
+    movup.3  exec._byte_rev_u32
+    loc_load.0 add.4  mem_storew_le  dropw
+end
+
+#! Parses an ECDSA signature from the shared calldata format. The 65-byte signature
+#! occupies 17 packed-bytes felts at `sig_ptr`:
+#!   sig_ptr[0..8]  : r (32 BE bytes)
+#!   sig_ptr[8..16] : s (32 BE bytes)
+#!   sig_ptr[16]    : v (recovery id, low byte) || 3 padding bytes (must be zero)
+#!
+#! Writes r to `dest_r_addr` and s to `dest_s_addr` as 8 u32 LE integer limbs each.
+#! Pushes a validity flag: 1 if `sig_ptr[16] < 4` (i.e. v in {0, 1, 2, 3} and padding
+#! bytes are all zero), 0 otherwise. Validates the recovery-id byte and its padding as part
+#! of the shared calldata format; the recovery id is not used by the ECDSA verification
+#! equation.
+#!
+#! Stack: [dest_r_addr, dest_s_addr, sig_ptr, ...]  ->  [flag, ...]
+@locals(3)
+proc _parse_sig
+    loc_store.0                                          # mem[0] = dest_r_addr
+    loc_store.1                                          # mem[1] = dest_s_addr
+    loc_store.2                                          # mem[2] = sig_ptr
+
+    # Parse r from sig_ptr[0..8] into dest_r_addr.
+    loc_load.2  loc_load.0
+    exec._parse_be_u256
+
+    # Parse s from sig_ptr[8..16] into dest_s_addr.
+    loc_load.2 add.8  loc_load.1
+    exec._parse_be_u256
+
+    # Validate sig_ptr[16] = v || 3 zero padding bytes. The combined check `< 4` covers
+    # both: any non-zero in the upper 24 bits would make the felt >= 256 > 4, and v itself
+    # must be in {0, 1, 2, 3}.
+    loc_load.2  add.16  mem_load  u32lt.4
+end
+
+#! Parses a 33-byte compressed secp256k1 public key from the shared calldata format.
+#! Layout at `pk_ptr` (9 packed felts):
+#!   byte 0       : prefix (0x02 if y is even, 0x03 if y is odd)
+#!   bytes 1..33  : x as 32 BE bytes
+#!
+#! Writes x as 8 u32 LE integer limbs to `dest_x_addr` and the parity bit
+#! (= prefix - 0x02) to `dest_parity_addr`. Pushes a validity flag: 1 if the prefix is
+#! 0x02 or 0x03, 0 otherwise (in which case `dest_parity_addr` holds prefix - 0x02 which
+#! is *not* a valid bit).
+#!
+#! Stack: [dest_x_addr, dest_parity_addr, pk_ptr, ...]  ->  [flag, ...]
+#!
+#! Local memory (24 felts):
+#!   0..9    : raw packed felts loaded from pk_ptr
+#!   12..20  : x as 8 packed-byte felts after shifting the byte stream right by 1 byte to
+#!             absorb the prefix; `_parse_be_u256` then byte-reverses each into an integer limb
+#!   20..23  : address caches (dest_x, dest_parity, pk_ptr)
+@locals(24)
+proc _parse_compressed_pk
+    loc_store.20                                         # mem[20] = dest_x_addr
+    loc_store.21                                         # mem[21] = dest_parity_addr
+    loc_store.22                                         # mem[22] = pk_ptr
+
+    # Load 9 packed felts from pk_ptr to mem[0..9].
+    padw  loc_load.22         mem_loadw_le  loc_storew_le.0
+    loc_load.22 add.4         mem_loadw_le  loc_storew_le.4  dropw
+    loc_load.22 add.8         mem_load      loc_store.8
+
+    # Extract prefix (low byte of felt[0]) and compute candidate parity = prefix - 2.
+    loc_load.0  push.0xFF u32and  push.0x02 sub         # [parity_candidate, ...]
+
+    # Validity: parity_candidate in {0, 1}, i.e. parity_candidate * (parity_candidate - 1) == 0.
+    dup  dup  push.1 sub  mul  eq.0                     # [is_valid_prefix, parity_candidate, ...]
+
+    # Padding check: pk[8] holds [last_byte_of_x, 0, 0, 0] (LE). The upper 24 bits must be
+    # zero, i.e. pk[8] < 256. Without this, a felt with garbage upper bytes would parse
+    # successfully even though the shared byte stream would be malformed.
+    loc_load.8  u32lt.256                                # [is_valid_padding, is_valid_prefix, parity_candidate, ...]
+    mul                                                  # [is_valid, parity_candidate, ...]
+
+    # Write parity_candidate to dest_parity_addr.
+    swap                                                 # [parity_candidate, is_valid, ...]
+    loc_load.21 mem_store                                # mem[dest_parity_addr] = parity_candidate
+
+    # Build x's packed-bytes representation by shifting the 9 packed felts right by 1 byte.
+    # x_packed[k] = (mem[k] >> 8) | ((mem[k+1] & 0xFF) << 24) for k = 0..7. The shift "absorbs"
+    # the low byte of the next felt into the high byte of x_packed[k], stripping the prefix.
+    loc_load.0 u32shr.8  loc_load.1 push.0xFF u32and  push.0x1000000 mul  add  loc_store.12
+    loc_load.1 u32shr.8  loc_load.2 push.0xFF u32and  push.0x1000000 mul  add  loc_store.13
+    loc_load.2 u32shr.8  loc_load.3 push.0xFF u32and  push.0x1000000 mul  add  loc_store.14
+    loc_load.3 u32shr.8  loc_load.4 push.0xFF u32and  push.0x1000000 mul  add  loc_store.15
+    loc_load.4 u32shr.8  loc_load.5 push.0xFF u32and  push.0x1000000 mul  add  loc_store.16
+    loc_load.5 u32shr.8  loc_load.6 push.0xFF u32and  push.0x1000000 mul  add  loc_store.17
+    loc_load.6 u32shr.8  loc_load.7 push.0xFF u32and  push.0x1000000 mul  add  loc_store.18
+    loc_load.7 u32shr.8  loc_load.8 push.0xFF u32and  push.0x1000000 mul  add  loc_store.19
+
+    # Byte-reverse each x_packed[k] to get the integer u32 LE limbs of x at dest_x_addr.
+    locaddr.12  loc_load.20
+    exec._parse_be_u256
+
+    # Stack: [is_valid, ...] (the byte-shuffling above leaves the stack at this depth).
+end
+
+#! Non-trapping decompress: same logic as `k1_point::decompress` but every assert is replaced
+#! with a multiply-AND into a validity flag. On success the proc writes the affine point to
+#! `dest_pt_addr` (X, Y, is_infinity = 0) and pushes flag = 1. On any check failure the flag
+#! is 0 and the point at `dest_pt_addr` is whatever the math happened to write (the caller
+#! must check the flag before using the point).
+#!
+#! Stack: [dest_pt_addr, x_addr, parity_addr, ...]  ->  [flag, ...]
+#!
+#! Caller layout:
+#!   x_addr      : 8 u32 LE integer limbs (word-aligned read; 2 word loads).
+#!   parity_addr : 1 felt holding 0 or 1.
+#!   dest_pt_addr: 20 felts of point storage (5 words).
+#!
+#! Local memory (64 felts):
+#!   0..8    : X (loaded from x_addr)
+#!   8..16   : Y (hint from advice)
+#!   16      : parity (loaded from parity_addr)
+#!   20..28  : X^2
+#!   28..36  : X^3
+#!   36..44  : X^3 + 7
+#!   44..52  : Y^2
+#!   52      : validity flag (initialised to 1; ANDed with each check)
+#!   53..56  : address caches (dest_pt, x, parity)
+@locals(64)
+proc _decompress_no_trap
+    loc_store.53                                         # dest_pt_addr
+    loc_store.54                                         # x_addr
+    loc_store.55                                         # parity_addr
+
+    # Initialise validity flag to 1.
+    push.1 loc_store.52
+
+    # Load X from x_addr to mem[0..8] (assumes word-aligned x_addr).
+    padw  loc_load.54         mem_loadw_le  loc_storew_le.0
+    padw  loc_load.54 add.4   mem_loadw_le  loc_storew_le.4
+    swapw                                                # [X[0..4], X[4..8], ...]
+
+    # Load parity from parity_addr to mem[16].
+    loc_load.55  mem_load  loc_store.16
+
+    # Check X < p. If X is non-canonical, substitute X = 1 so the f_k1::mul calls below do
+    # not trap on quotient overflow. The flag is already 0 in that case so the proc returns
+    # 0 regardless of what the math computes.
+    push.0xffffffff.0xffffffff.0xffffffff.0xffffffff
+    push.0xffffffff.0xffffffff.0xfffffffe.0xfffffc2f
+    exec.::miden::core::math::u256::lt
+    dup  loc_load.52  mul  loc_store.52
+    not
+    if.true
+        padw  loc_storew_le.4  dropw
+        push.0.0.0.1  loc_storew_le.0  dropw
+    end
+
+    # Check parity in {0, 1}: parity * (parity - 1) == 0.
+    loc_load.16  dup  push.1 sub  mul  eq.0
+    loc_load.52  mul  loc_store.52
+
+    # Push (X, parity) onto operand stack and emit so the host can compute the Y hint.
+    loc_load.16
+    padw loc_loadw_le.4  padw loc_loadw_le.0
+    emit.K1_POINT_DECOMPRESS_EVENT
+    dropw  dropw  drop                                   # clean up X (8) + parity (1)
+
+    # Pull Y from advice into mem[8..16].
+    adv_pushw  loc_storew_le.8
+    adv_pushw  loc_storew_le.12
+    swapw                                                # [Y[0..4], Y[4..8], ...]
+
+    # Check Y < p. Substitute Y = 1 if non-canonical (same trap-safety reason as X above).
+    push.0xffffffff.0xffffffff.0xffffffff.0xffffffff
+    push.0xffffffff.0xffffffff.0xfffffffe.0xfffffc2f
+    exec.::miden::core::math::u256::lt
+    dup  loc_load.52  mul  loc_store.52
+    not
+    if.true
+        padw  loc_storew_le.12  dropw
+        push.0.0.0.1  loc_storew_le.8   dropw
+    end
+
+    # Check (Y mod 2) == parity.
+    loc_load.8  push.1 u32and  loc_load.16  eq
+    loc_load.52  mul  loc_store.52
+
+    # X^2 -> mem[20..28].
+    padw loc_loadw_le.4  padw loc_loadw_le.0
+    padw loc_loadw_le.4  padw loc_loadw_le.0
+    exec.f_k1::mul                                       # [X^2, ...]
+    loc_storew_le.20  swapw  loc_storew_le.24  swapw
+
+    # X^3 = X^2 * X -> mem[28..36].
+    padw loc_loadw_le.4   padw loc_loadw_le.0            # push X on top of X^2
+    exec.f_k1::mul                                       # [X^3, ...]
+    loc_storew_le.28  swapw  loc_storew_le.32  swapw
+
+    # X^3 + 7 -> mem[36..44].
+    padw  push.0.0.0.7
+    exec.f_k1::add                                       # [X^3+7, ...]
+    loc_storew_le.36 dropw  loc_storew_le.40 dropw
+
+    # Y^2 -> mem[44..52].
+    padw loc_loadw_le.12  padw loc_loadw_le.8
+    padw loc_loadw_le.12  padw loc_loadw_le.8
+    exec.f_k1::mul
+    loc_storew_le.44 dropw  loc_storew_le.48 dropw
+
+    # Check Y^2 == X^3 + 7.
+    padw loc_loadw_le.40  padw loc_loadw_le.36
+    padw loc_loadw_le.48  padw loc_loadw_le.44
+    exec.::miden::core::math::u256::eq
+    loc_load.52  mul  loc_store.52
+
+    # Write (X, Y, is_infinity = 1 - flag) to dest_pt_addr.
+    # When decompression succeeds (flag = 1), the result is (X, Y, 0) -- a finite point on
+    # the curve. When decompression fails (flag = 0), is_infinity is forced to 1, so any
+    # downstream point operation treats the slot as the identity. This keeps the MSM in
+    # `verify_glv_hinted` safe even when decompression failed (an off-curve `(X, Y)` could
+    # otherwise drive `point_double`'s `inv(2Y)` or `point_add`'s `inv(X2 - X1)` into a
+    # trap-prone state).
+    padw loc_loadw_le.0    loc_load.53         mem_storew_le
+    loc_loadw_le.4         loc_load.53 add.4   mem_storew_le
+    loc_loadw_le.8         loc_load.53 add.8   mem_storew_le
+    loc_loadw_le.12        loc_load.53 add.12  mem_storew_le  dropw
+    push.0.0.0  loc_load.52 not   loc_load.53 add.16  mem_storew_le dropw
+
+    # Push the accumulated flag.
+    loc_load.52
+end
+
+# NATIVE VERIFY ENTRY POINT
+# ================================================================================================
+
+#! Verifies an ECDSA secp256k1 signature in-VM. Same calldata format as `verify_prehash`:
+#! pk is 33 BE bytes, digest is 32 BE bytes, sig is 65 BE bytes (r || s || v), all packed
+#! as u32-LE felts.
+#!
+#! Stack: [pk_ptr, digest_ptr, sig_ptr, ...]  ->  [result, ...]
+#!
+#! Returns 1 if the signature is valid, 0 otherwise. No trap on failure: every check
+#! contributes to a multiplicative validity flag, and the math is run with safe-fallback
+#! values whenever an input would otherwise trap a sub-proc.
+#!
+#! Validation:
+#!   - pk parses (prefix in {0x02, 0x03}) and decompresses to an on-curve point Q.
+#!   - r in (0, n) and s in (0, n).
+#!   - R = u1*G + u2*Q is not the identity, where u1 = e * s^-1 mod n, u2 = r * s^-1 mod n.
+#!   - R.x mod n == r.
+#!
+#! Local memory (144 felts):
+#!   0..8     : x_pk
+#!   8        : parity
+#!   12..32   : Q (decompressed pk)
+#!   32..40   : r
+#!   40..48   : s
+#!   48..56   : e (digest as integer)
+#!   76..96   : R = u1*G + u2*Q
+#!   96..104  : s_inv
+#!   104..112 : u1
+#!   112..120 : u2
+#!   120..128 : R.x mod n
+#!   128      : validity flag (initialised to 1, multiplicatively ANDed with each check)
+#!   129..132 : pk_ptr / digest_ptr / sig_ptr caches
+@locals(144)
+pub proc verify_prehash_native
+    # Stack: [pk_ptr, digest_ptr, sig_ptr, ...]
+    loc_store.129
+    loc_store.130
+    loc_store.131
+
+    # Initialise validity flag = 1.
+    push.1 loc_store.128
+
+    # ----- Parse pk into x_pk (mem[0..8]) and parity (mem[8]) -----
+    loc_load.129  locaddr.8  locaddr.0   # [dest_x, dest_parity, pk_ptr]
+    exec._parse_compressed_pk                            # [pk_flag, ...]
+    loc_load.128  mul  loc_store.128
+
+    # ----- Parse signature into r (mem[32..40]) and s (mem[40..48]); validate v + padding -----
+    loc_load.131  locaddr.40  locaddr.32   # [dest_r, dest_s, sig_ptr]
+    exec._parse_sig                                      # [sig_flag, ...]
+    loc_load.128  mul  loc_store.128
+
+    # ----- Parse digest into e (mem[48..56]) -----
+    loc_load.130  locaddr.48
+    exec._parse_be_u256
+
+    # ----- Decompress pk into Q (mem[12..32]) -----
+    locaddr.8  locaddr.0  locaddr.12
+    exec._decompress_no_trap                             # [decompress_flag, ...]
+    loc_load.128  mul  loc_store.128
+
+    # ----- Validate r in (0, n_k1); substitute r = 1 if not -----
+    # r != 0
+    padw loc_loadw_le.36  padw loc_loadw_le.32
+    exec.::miden::core::math::u256::eqz  not             # [r_nonzero, ...]
+    # r < n
+    padw loc_loadw_le.36  padw loc_loadw_le.32
+    exec._push_n_k1
+    exec.::miden::core::math::u256::lt                   # [r_lt_n, r_nonzero, ...]
+    mul                                                  # [r_valid, ...]
+    dup  loc_load.128  mul  loc_store.128                # flag &= r_valid; r_valid stays
+    not
+    if.true
+        # r = 1 fallback prevents q-overflow in modmul below; flag is already 0.
+        padw  loc_storew_le.36  dropw
+        push.0.0.0.1  loc_storew_le.32  dropw
+    end
+
+    # ----- Validate s in (0, n_k1); substitute s = 1 if not (also keeps inv(s) from trapping) -----
+    padw loc_loadw_le.44  padw loc_loadw_le.40
+    exec.::miden::core::math::u256::eqz  not             # [s_nonzero, ...]
+    padw loc_loadw_le.44  padw loc_loadw_le.40
+    exec._push_n_k1
+    exec.::miden::core::math::u256::lt                   # [s_lt_n, s_nonzero, ...]
+    mul                                                  # [s_valid, ...]
+    dup  loc_load.128  mul  loc_store.128
+    not
+    if.true
+        padw  loc_storew_le.44  dropw
+        push.0.0.0.1  loc_storew_le.40  dropw
+    end
+
+    # ----- Reduce e mod n_k1 -----
+    # e is the digest as a u256. Since e < 2^256 < 2*n, a single conditional subtraction
+    # suffices. Required by `k1_scalar::mul`, which assumes inputs < n.
+    padw loc_loadw_le.52  padw loc_loadw_le.48
+    exec._push_n_k1
+    exec.::miden::core::math::u256::lt
+    not
+    if.true
+        # e >= n: e = e - n.
+        padw loc_loadw_le.52  padw loc_loadw_le.48
+        exec._push_n_k1
+        exec.::miden::core::math::u256::wrapping_sub
+        loc_storew_le.48  dropw  loc_storew_le.52  dropw
+    end
+
+    # ----- s_inv = inv(s) -----
+    padw loc_loadw_le.44  padw loc_loadw_le.40
+    exec.k1_scalar::inv                                  # [s_inv on stack, ...]
+    loc_storew_le.96   dropw  loc_storew_le.100  dropw
+
+    # ----- u1 = e * s_inv mod n_k1 -----
+    padw loc_loadw_le.52  padw loc_loadw_le.48           # e (a, deeper)
+    padw loc_loadw_le.100  padw loc_loadw_le.96          # s_inv (b, top)
+    exec.k1_scalar::mul
+    loc_storew_le.104  dropw  loc_storew_le.108  dropw
+
+    # ----- u2 = r * s_inv mod n_k1 -----
+    padw loc_loadw_le.36  padw loc_loadw_le.32           # r (a)
+    padw loc_loadw_le.100  padw loc_loadw_le.96          # s_inv (b)
+    exec.k1_scalar::mul
+    loc_storew_le.112  dropw  loc_storew_le.116  dropw
+
+    # ----- R = u1*G + u2*Q -----
+    # `verify_glv_hinted` hardcodes G; pass Q and the two scalar addresses.
+    # Stack: [out_addr, q_addr, u_2_addr, u_1_addr, ...] (out on top, u_1 deepest).
+    locaddr.104  locaddr.112  locaddr.12  locaddr.76
+    exec.k1_point::verify_glv_hinted
+
+    # ----- Validate R != identity -----
+    loc_load.92  not  loc_load.128  mul  loc_store.128   # flag &= !R.is_infinity (mem[76+16] = 92)
+
+    # ----- rx_mod = R.x mod n_k1 -----
+    # R.x is at mem[76..84]. If R.x < n_k1, rx_mod = R.x; else rx_mod = R.x - n_k1.
+    padw loc_loadw_le.80  padw loc_loadw_le.76           # R.x (a)
+    exec._push_n_k1                                       # n_k1 (b)
+    exec.::miden::core::math::u256::lt                   # [Rx<n, ...]
+    if.true
+        # R.x < n_k1: rx_mod = R.x.
+        padw loc_loadw_le.80  padw loc_loadw_le.76
+        loc_storew_le.120  dropw  loc_storew_le.124  dropw
+    else
+        # R.x >= n_k1: rx_mod = R.x - n_k1.
+        padw loc_loadw_le.80  padw loc_loadw_le.76
+        exec._push_n_k1
+        exec.::miden::core::math::u256::wrapping_sub
+        loc_storew_le.120  dropw  loc_storew_le.124  dropw
+    end
+
+    # ----- Validate rx_mod == r -----
+    padw loc_loadw_le.124  padw loc_loadw_le.120         # rx_mod (a)
+    padw loc_loadw_le.36   padw loc_loadw_le.32          # r (b)
+    exec.::miden::core::math::u256::eq
+    loc_load.128  mul                                    # final validity flag, returned on stack
 end

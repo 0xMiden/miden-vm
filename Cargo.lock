@@ -1478,6 +1478,7 @@ dependencies = [
  "miden-package-registry",
  "miden-processor",
  "miden-prover",
+ "miden-sz-codegen",
  "miden-test-utils",
  "miden-utils-sync",
  "miden-verifier",
@@ -1820,6 +1821,13 @@ checksum = "f0069bab01139a5660c7189589c95dfedf8449514d03641fd3f9d049e1b031f9"
 dependencies = [
  "p3-field",
  "p3-symmetric",
+]
+
+[[package]]
+name = "miden-sz-codegen"
+version = "0.24.0"
+dependencies = [
+ "miden-core",
 ]
 
 [[package]]

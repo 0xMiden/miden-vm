@@ -24,6 +24,8 @@ use crate::handlers::{
     ecdsa::{ECDSA_VERIFY_EVENT_NAME, EcdsaPrecompile},
     eddsa_ed25519::{EDDSA25519_VERIFY_EVENT_NAME, EddsaPrecompile},
     falcon_div::{FALCON_DIV_EVENT_NAME, handle_falcon_div},
+    glv_split_k1::{GLV_SPLIT_K1_EVENT_NAME, handle_glv_split_k1},
+    k1_point_decompress::{K1_POINT_DECOMPRESS_EVENT_NAME, handle_k1_point_decompress},
     keccak256::{KECCAK_HASH_BYTES_EVENT_NAME, KeccakPrecompile},
     sha512::{SHA512_HASH_BYTES_EVENT_NAME, Sha512Precompile},
     smt_peek::{SMT_PEEK_EVENT_NAME, handle_smt_peek},
@@ -34,6 +36,14 @@ use crate::handlers::{
     u64_div::{U64_DIV_EVENT_NAME, handle_u64_div},
     u128_div::{U128_DIV_EVENT_NAME, handle_u128_div},
     u256_div::{U256_DIV_EVENT_NAME, handle_u256_div},
+    u256_inv_k1::{
+        U256_INV_K1_BASE_EVENT_NAME, U256_INV_K1_SCALAR_EVENT_NAME, handle_u256_inv_k1_base,
+        handle_u256_inv_k1_scalar,
+    },
+    u256_modmul_k1::{
+        U256_MODMUL_K1_BASE_EVENT_NAME, U256_MODMUL_K1_SCALAR_EVENT_NAME,
+        handle_u256_modmul_k1_base, handle_u256_modmul_k1_scalar,
+    },
 };
 
 // CORE LIBRARY
@@ -145,6 +155,12 @@ impl CoreLibrary {
             (LOWERBOUND_ARRAY_EVENT_NAME, Arc::new(handle_lowerbound_array)),
             (LOWERBOUND_KEY_VALUE_EVENT_NAME, Arc::new(handle_lowerbound_key_value)),
             (AEAD_DECRYPT_EVENT_NAME, Arc::new(handle_aead_decrypt)),
+            (GLV_SPLIT_K1_EVENT_NAME, Arc::new(handle_glv_split_k1)),
+            (K1_POINT_DECOMPRESS_EVENT_NAME, Arc::new(handle_k1_point_decompress)),
+            (U256_INV_K1_BASE_EVENT_NAME, Arc::new(handle_u256_inv_k1_base)),
+            (U256_INV_K1_SCALAR_EVENT_NAME, Arc::new(handle_u256_inv_k1_scalar)),
+            (U256_MODMUL_K1_BASE_EVENT_NAME, Arc::new(handle_u256_modmul_k1_base)),
+            (U256_MODMUL_K1_SCALAR_EVENT_NAME, Arc::new(handle_u256_modmul_k1_scalar)),
         ]
     }
 

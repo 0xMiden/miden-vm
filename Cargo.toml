@@ -4,6 +4,7 @@ members = [
     "benches/synthetic-bench",
     "core",
     "crates/ace-codegen",
+    "crates/sz-codegen",
     "crates/assembly",
     "crates/assembly-syntax-cst",
     "crates/assembly-syntax",
@@ -53,6 +54,7 @@ overflow-checks = true
 [workspace.dependencies]
 # Workspace crates
 miden-ace-codegen       = { path = "./crates/ace-codegen", version = "0.24", default-features = false }
+miden-sz-codegen        = { path = "./crates/sz-codegen", version = "0.24", default-features = false }
 miden-air               = { path = "./air", version = "0.24", default-features = false }
 miden-assembly          = { path = "./crates/assembly", version = "0.24", default-features = false }
 miden-assembly-syntax   = { path = "./crates/assembly-syntax", version = "0.24", default-features = false }

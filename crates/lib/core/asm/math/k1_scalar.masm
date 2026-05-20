@@ -1,0 +1,284 @@
+use miden::core::math::u256_sz_modmul_k1_scalar
+
+# Scalar-field arithmetic over the secp256k1 group order
+# n = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141.
+#
+# All inputs and outputs are u256 values in canonical form (< n). Callers must reduce inputs at
+# the module boundary; internal field operations preserve canonicity.
+#
+# Built on `u256` wrapping/overflowing arithmetic for add/sub, `u256_sz_modmul_k1_scalar` for
+# multiplication, and a hint-and-verify pattern for inverse (the host computes `a^-1 mod n` and
+# the verifier checks `a * a^-1 = 1 mod n` with a single modmul).
+
+# Mirrors the canonical declaration in `u256.masm`; kept in sync by convention.
+pub type u256 = struct { lo: u128, hi: u128 }
+
+const U256_INV_K1_SCALAR_EVENT = event("miden::core::math::u256::u256_inv_k1_scalar")
+
+const GLV_SPLIT_K1_EVENT = event("miden::core::math::k1_scalar::glv_split")
+
+# ===== ADDITION =================================================================================
+
+#! Modular addition: c = (a + b) mod n, with a, b < n.
+#!
+#! Stack transition:
+#! [b0..b7, a0..a7, ...]  ->  [c0..c7, ...]
+#!
+#! n is close to 2^256 so the integer sum a + b can occupy 257 bits. We use `overflowing_add`
+#! to recover both the carry and the wrapped sum, then reduce in two cases:
+#!   - carry = 1: the integer sum is at least 2^256, which is greater than n. The canonical
+#!     residue is the wrapped sum plus delta = 2^256 - n. The result fits in u256 (it is
+#!     bounded above by n).
+#!   - carry = 0: the wrapped sum equals the integer sum. Subtract n when the sum is at least
+#!     n, keep it otherwise.
+@locals(8)
+pub proc add(b: u256, a: u256) -> u256
+    exec.::miden::core::math::u256::overflowing_add             # [carry, c0..c7, ...]
+
+    if.true
+        # carry = 1: c <- c + delta, where delta = 2^256 - n.
+        # delta as u32 LE limbs: [0x2fc9bebf, 0x402da173, 0x50b75fc4, 0x45512319, 1, 0, 0, 0].
+        push.0.0.0.0x1
+        push.0x45512319.0x50b75fc4.0x402da173.0x2fc9bebf
+        exec.::miden::core::math::u256::wrapping_add
+    else
+        # carry = 0: subtract n when c >= n, keep c otherwise.
+        loc_storew_le.0
+        swapw
+        loc_storew_le.4
+        swapw                                  # [c0..c7, ...]
+        # n as u32 LE limbs.
+        push.0xffffffff.0xffffffff.0xffffffff.0xfffffffe
+        push.0xbaaedce6.0xaf48a03b.0xbfd25e8c.0xd0364141
+        # => [n0..n7, c0..c7, ...]
+        exec.::miden::core::math::u256::overflowing_sub
+        # => [borrow, (c - n) wrap, ...]
+
+        if.true
+            # c < n: drop the wrapped subtraction and reload c.
+            dropw dropw
+            padw loc_loadw_le.4
+            padw loc_loadw_le.0
+        end
+        # else: c >= n, the (c - n) on top of the stack is the canonical answer.
+    end
+end
+
+# ===== SUBTRACTION ==============================================================================
+
+#! Modular subtraction: c = (a - b) mod n, with a, b < n.
+#!
+#! Stack transition:
+#! [b0..b7, a0..a7, ...]  ->  [c0..c7, ...]
+#!
+#! When a >= b, the result of `a - b` is already canonical. When a < b, the wrapping subtraction
+#! produces `2^256 + (a - b)`; adding n mod 2^256 yields `a - b + n`, which lies in (0, n).
+pub proc sub(b: u256, a: u256) -> u256
+    exec.::miden::core::math::u256::overflowing_sub             # [borrow, (a - b) wrap, ...]
+
+    if.true
+        # borrow = 1 (a < b): add n.
+        push.0xffffffff.0xffffffff.0xffffffff.0xfffffffe
+        push.0xbaaedce6.0xaf48a03b.0xbfd25e8c.0xd0364141
+        exec.::miden::core::math::u256::wrapping_add
+    end
+    # else: a - b already canonical.
+end
+
+# ===== NEGATION =================================================================================
+
+#! Modular negation: c = (-a) mod n, with a < n.
+#!
+#! Stack transition:
+#! [a0..a7, ...]  ->  [c0..c7, ...]
+#!
+#! Returns 0 when a = 0; otherwise n - a (which is in (0, n)).
+@locals(8)
+pub proc neg(a: u256) -> u256
+    # Save a so we can branch on whether it's zero without losing it.
+    loc_storew_le.0
+    swapw
+    loc_storew_le.4
+    swapw                                                        # [a0..a7, ...]
+
+    # is_zero = (a == 0)
+    exec.::miden::core::math::u256::eqz                          # [is_zero, ...]
+
+    if.true
+        # a = 0: push zero word.
+        padw padw
+    else
+        # a > 0: c = n - a (push n first so it lands at depth 8..15, then a on top).
+        push.0xffffffff.0xffffffff.0xffffffff.0xfffffffe
+        push.0xbaaedce6.0xaf48a03b.0xbfd25e8c.0xd0364141
+        padw loc_loadw_le.4
+        padw loc_loadw_le.0
+        exec.::miden::core::math::u256::wrapping_sub             # n - a
+    end
+end
+
+# ===== MULTIPLICATION ===========================================================================
+
+#! Modular multiplication: c = (a * b) mod n, with a, b < n.
+#!
+#! Stack transition:
+#! [b0..b7, a0..a7, ...]  ->  [c0..c7, ...]
+pub proc mul(b: u256, a: u256) -> u256
+    exec.u256_sz_modmul_k1_scalar::modmul_k1_scalar
+end
+
+# ===== INVERSE ==================================================================================
+
+#! Multiplicative inverse: c = a^(-1) mod n, with a in (0, n).
+#!
+#! Hint-and-verify: emits `U256_INV_K1_SCALAR_EVENT` to ask the host for `inv = a^(-1) mod n`,
+#! then checks the result with one `modmul_k1_scalar` call (asserting `a * inv == 1 mod n`).
+#! The MASM proc traps with "k1_scalar::inv: hint not a multiplicative inverse" if the host
+#! returns a non-inverse, including when called with `a = 0`.
+#!
+#! Stack transition:
+#! [a0..a7, ...]  ->  [c0..c7, ...]
+#!
+#! Local memory layout (mem[0..8]):
+#!   0..8:   inv (the hinted result, kept across the modmul check)
+@locals(8)
+pub proc inv(a: u256) -> u256
+    emit.U256_INV_K1_SCALAR_EVENT
+
+    # Pull inv from advice and save to mem[0..8]. Handler pushes inv[0..4] first, then inv[4..8].
+    # Stack on entry: [a0..a7, ...]; want [inv0..inv7, a0..a7, ...] for the modmul that follows.
+    adv_pushw  loc_storew_le.0
+    adv_pushw  loc_storew_le.4
+    swapw                                               # [inv0..inv7, a0..a7, ...]
+    exec.u256_sz_modmul_k1_scalar::modmul_k1_scalar    # [c0..c7, ...] with c = a*inv mod n
+
+    # Assert c == 1.
+    padw  push.0.0.0.1                          # u256(1) on top, low limb = 1
+    exec.::miden::core::math::u256::eq
+    assert.err="k1_scalar::inv: hint not a multiplicative inverse"
+
+    # Return inv on the operand stack.
+    padw  loc_loadw_le.4
+    padw  loc_loadw_le.0
+end
+
+# ===== GLV DECOMPOSITION ========================================================================
+
+#! Hint-and-verify GLV decomposition of a scalar `k`. Reads `k` from `mem[k_addr..k_addr+8]`
+#! (8 u32 LE limbs), asks the host to split it into signed `(k_a, k_b)` such that
+#! `k ≡ k_a + k_b·λ (mod n)` with both magnitudes strictly less than `2^128`, and writes
+#! the witness to `mem[out_addr..out_addr+18]`:
+#!   out_addr[0..8]:    |k_a| (8 u32 LE limbs)
+#!   out_addr[8..16]:   |k_b| (8 u32 LE limbs)
+#!   out_addr[16]:      sign_a (0 or 1; 1 iff k_a < 0)
+#!   out_addr[17]:      sign_b (0 or 1; 1 iff k_b < 0)
+#!
+#! Asserts:
+#!   - magnitudes fit in 128 bits (limbs 4..7 are zero)
+#!   - sign bits are boolean
+#!   - `(canonical_a + canonical_b·λ) mod n == k`, where `canonical_x = sign_x ? n - |k_x| : |k_x|`
+#!
+#! Stack transition:
+#!   [out_addr, k_addr, ...]  ->  [...]
+#!
+#! Local memory layout (mem[0..56]):
+#!   0..8     : |k_a|
+#!   8..16    : |k_b|
+#!   16       : sign_a
+#!   17       : sign_b
+#!   20..28   : canonical_a (= sign_a ? n - |k_a| : |k_a|), used by the relation check
+#!   28..36   : canonical_b
+#!   40..48   : k cached from k_addr
+#!   48       : out_addr cached
+#!   49       : k_addr cached
+@locals(56)
+pub proc verify_glv_split
+    # Cache out_addr and k_addr.
+    loc_store.48
+    loc_store.49
+
+    # Push k_addr on top so the handler can read it via `get_stack_item(1)`. The Rust event
+    # handler sees a synthesized event id at offset 0 and the actual operand stack at
+    # offsets 1..N. `emit` does not modify the operand stack, so we drop the placeholder
+    # k_addr explicitly after the emit.
+    loc_load.49
+    emit.GLV_SPLIT_K1_EVENT
+    drop
+
+    # Pull witness from advice. Push order from the handler:
+    #   |k_a|[0..8], sign_a, |k_b|[0..8], sign_b. Pop order matches.
+    adv_pushw  loc_storew_le.0   dropw
+    adv_pushw  loc_storew_le.4   dropw
+    adv_push   loc_store.16
+    adv_pushw  loc_storew_le.8   dropw
+    adv_pushw  loc_storew_le.12  dropw
+    adv_push   loc_store.17
+
+    # Bound check magnitudes: limbs 4..7 == 0 (so |k_*| < 2^128). Guards against a
+    # malicious host pushing a magnitude that would let the relation check pass with a
+    # different scalar — the relation alone has many solutions in F_n; the bound pins us
+    # to the unique GLV decomposition.
+    loc_load.4   assertz.err="glv: |k_a| limb 4 must be 0"
+    loc_load.5   assertz.err="glv: |k_a| limb 5 must be 0"
+    loc_load.6   assertz.err="glv: |k_a| limb 6 must be 0"
+    loc_load.7   assertz.err="glv: |k_a| limb 7 must be 0"
+    loc_load.12  assertz.err="glv: |k_b| limb 4 must be 0"
+    loc_load.13  assertz.err="glv: |k_b| limb 5 must be 0"
+    loc_load.14  assertz.err="glv: |k_b| limb 6 must be 0"
+    loc_load.15  assertz.err="glv: |k_b| limb 7 must be 0"
+
+    # Assert each sign bit is boolean: s * (s - 1) = 0.
+    loc_load.16  dup  mul  loc_load.16  sub  assertz.err="glv: sign_a not boolean"
+    loc_load.17  dup  mul  loc_load.17  sub  assertz.err="glv: sign_b not boolean"
+
+    # Cache k from absolute mem[k_addr..k_addr+8] into local mem[40..48] so the verification
+    # math can use the cheaper `loc_loadw_le` immediates.
+    padw  loc_load.49         mem_loadw_le  loc_storew_le.40
+    loc_load.49 add.4         mem_loadw_le  loc_storew_le.44  dropw
+
+    # Canonicalize: c_a = sign_a ? n - |k_a| : |k_a|, stored at mem[20..28].
+    padw  loc_loadw_le.4   padw  loc_loadw_le.0
+    loc_load.16
+    if.true
+        exec.neg
+    end
+    loc_storew_le.20 dropw
+    loc_storew_le.24 dropw
+
+    # Canonicalize c_b at mem[28..36].
+    padw  loc_loadw_le.12  padw  loc_loadw_le.8
+    loc_load.17
+    if.true
+        exec.neg
+    end
+    loc_storew_le.28 dropw
+    loc_storew_le.32 dropw
+
+    # Compute c_b * λ mod n. `mul` consumes [b0..b7, a0..a7, ...] and returns [c0..c7, ...]
+    # where c = a*b mod n. Push λ as b first (deeper), then c_b as a (top).
+    # λ = 0x5363ad4c c05c30e0 a5261c02 8812645a 122e22ea 20816678 df02967c 1b23bd72
+    push.0x5363ad4c.0xc05c30e0.0xa5261c02.0x8812645a
+    push.0x122e22ea.0x20816678.0xdf02967c.0x1b23bd72
+    padw  loc_loadw_le.32  padw  loc_loadw_le.28
+    exec.mul
+    # Stack: [(c_b·λ)0..7, ...]
+
+    # Add c_a mod n.
+    padw  loc_loadw_le.24  padw  loc_loadw_le.20
+    exec.add
+    # Stack: [sum0..sum7, ...]
+
+    # Compare sum to k. Load k0..k7 onto the stack (k0 on top, k7 deepest).
+    padw loc_loadw_le.44  padw loc_loadw_le.40
+    # Stack: [k0..k7, sum0..sum7, ...]
+    exec.::miden::core::math::u256::eq
+    assert.err="glv: k_a + k_b*lambda != k mod n"
+
+    # Copy witness to absolute mem[out_addr..out_addr+18].
+    padw  loc_loadw_le.0   loc_load.48           mem_storew_le
+    loc_loadw_le.4         loc_load.48 add.4     mem_storew_le
+    loc_loadw_le.8         loc_load.48 add.8     mem_storew_le
+    loc_loadw_le.12        loc_load.48 add.12    mem_storew_le  dropw
+    loc_load.16            loc_load.48 add.16    mem_store
+    loc_load.17            loc_load.48 add.17    mem_store
+end

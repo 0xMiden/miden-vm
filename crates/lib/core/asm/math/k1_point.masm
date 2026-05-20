@@ -1,0 +1,1145 @@
+use miden::core::math::f_k1
+use miden::core::math::k1_scalar
+
+const K1_POINT_DECOMPRESS_EVENT = event("miden::core::math::k1_point::decompress")
+
+# Affine secp256k1 point arithmetic.
+#
+# Each point is stored as 20 contiguous felts (5 words) at a memory address `addr`:
+#   addr+0..+8   : X (8 u32 LE limbs of the affine x-coordinate)
+#   addr+8..+16  : Y (8 u32 LE limbs of the affine y-coordinate)
+#   addr+16      : is_infinity flag (0 = finite affine point, 1 = identity / point at infinity)
+#   addr+17..+20 : reserved (must be zero on input; written as zero on output)
+#
+# When `is_infinity = 1`, the (X, Y) limbs are not interpreted; they are still copied through
+# but downstream procs must check the flag before reading X or Y. Procs that produce a finite
+# result write `is_infinity = 0` (and the reserved felts as zero).
+#
+# Procs take memory addresses on the operand stack and write results to memory. Per-proc
+# docstrings state whether the output may overlap any input (the common case is yes, because
+# inputs are copied to local memory before the output is written).
+
+# Mirrors the canonical declaration in `u256.masm`; kept in sync by convention.
+pub type u256 = struct { lo: u128, hi: u128 }
+
+# ===== POINT NEGATION ===========================================================================
+
+#! Negation: out = -P = (X, -Y, is_infinity).
+#!
+#! Stack:
+#!   [out_addr, p_addr, ...]  ->  [...]
+#!
+#! For a finite point (X, Y), produces (X, p - Y) via `f_k1::neg`. For the identity, X and Y
+#! are passed through unchanged -- the contract says they are not interpreted, so calling
+#! `f_k1::neg(Y)` on whatever bytes happen to live at the Y slot is unsafe (a non-canonical
+#! Y could trap modmul). The is_infinity branch protects against that.
+#!
+#! Supports in-place negation (`out_addr == p_addr`): each word is read before the corresponding
+#! output word is written. Other overlapping input/output ranges are not supported.
+pub proc point_negate
+    # Stack: [out_addr, p_addr, ...]
+
+    # Copy X (2 words at p..p+8 -> out..out+8). Always copied through, regardless of flag --
+    # the contract guarantees X is preserved, just not necessarily interpreted.
+    padw  dup.5         mem_loadw_le              # [X[0..3], out, p, ...]
+    dup.4         mem_storew_le  dropw
+    padw  dup.5 add.4   mem_loadw_le              # [X[4..7], out, p, ...]
+    dup.4 add.4   mem_storew_le  dropw
+
+    # Branch on is_infinity to decide whether to negate Y or copy it unchanged.
+    dup.1 add.16  mem_load                        # [is_infinity, out, p, ...]
+    if.true
+        # Identity: copy Y unchanged (2 words at p+8..p+16 -> out+8..out+16).
+        padw  dup.5 add.8   mem_loadw_le
+        dup.4 add.8   mem_storew_le  dropw
+        padw  dup.5 add.12  mem_loadw_le
+        dup.4 add.12  mem_storew_le  dropw
+    else
+        # Finite: load Y to stack as a u256, negate, write back to out+8..+16.
+        padw  dup.5 add.12  mem_loadw_le          # [Y[4..7], out, p, ...]
+        padw  dup.9 add.8   mem_loadw_le          # [Y[0..3], Y[4..7], out, p, ...]
+        exec.f_k1::neg                            # [-Y[0..7], out, p, ...]
+        dup.8 add.8   mem_storew_le  dropw
+        dup.4 add.12  mem_storew_le  dropw
+    end
+
+    # Copy is_infinity flag word (at p+16 -> out+16).
+    padw  dup.5 add.16  mem_loadw_le
+    dup.4 add.16  mem_storew_le  dropw
+
+    drop  drop                                    # drop out and p
+end
+
+# ===== POINT DOUBLING ===========================================================================
+
+#! Doubling: out = [2] * P.
+#!
+#! Stack:
+#!   [out_addr, p_addr, ...]  ->  [...]
+#!
+#! For a finite point (X, Y) with Y != 0:
+#!   m  = (3 * X^2) / (2 * Y) mod p
+#!   X3 = m^2 - 2*X
+#!   Y3 = m * (X - X3) - Y
+#! For the identity, the result is the identity. For an input with Y = 0 (no curve point on
+#! secp256k1 has Y = 0, so this is an invalid input), the call to `f_k1::inv(2Y)` traps.
+#!
+#! Cost: 4 modmuls + 1 inv + ~10 adds/subs.
+#!
+#! Local memory (96 felts):
+#!   0..8    : X (input)
+#!   8..16   : Y (input)
+#!   16..20  : flag word (input + output)
+#!   20      : out_addr cache
+#!   24..32  : 3 * X^2
+#!   32..40  : 2 * Y
+#!   40..48  : inv(2 * Y)
+#!   48..56  : m = (3 * X^2) * inv(2 * Y)
+#!   56..64  : m^2
+#!   64..72  : 2 * X
+#!   72..80  : X3 = m^2 - 2*X
+#!   80..88  : (X - X3)
+#!   88..96  : Y3 = m * (X - X3) - Y
+@locals(96)
+pub proc point_double
+    # Stack: [out_addr, p_addr, ...]
+    loc_store.20                                          # cache out_addr; [p_addr, ...]
+
+    # Copy P to local mem[0..20].
+    padw  dup.4              mem_loadw_le  loc_storew_le.0
+    dup.4 add.4              mem_loadw_le  loc_storew_le.4
+    dup.4 add.8              mem_loadw_le  loc_storew_le.8
+    dup.4 add.12             mem_loadw_le  loc_storew_le.12
+    dup.4 add.16             mem_loadw_le  loc_storew_le.16  dropw
+    drop                                                  # drop p_addr
+
+    loc_load.16
+    if.true
+        # P = identity: 2 * identity = identity. Write zeros for X, Y and flag = 1.
+        padw  loc_load.20         mem_storew_le dropw
+        padw  loc_load.20 add.4   mem_storew_le dropw
+        padw  loc_load.20 add.8   mem_storew_le dropw
+        padw  loc_load.20 add.12  mem_storew_le dropw
+        push.0.0.0.1  loc_load.20 add.16  mem_storew_le dropw
+    else
+        # ----- 3 * X^2 -> mem[24..32] -----
+        padw loc_loadw_le.4   padw loc_loadw_le.0          # X
+        padw loc_loadw_le.4   padw loc_loadw_le.0          # X
+        exec.f_k1::mul                                     # [X^2, ...]
+        loc_storew_le.24  swapw  loc_storew_le.28  swapw
+
+        padw loc_loadw_le.28  padw loc_loadw_le.24         # [X^2, X^2, ...]
+        exec.f_k1::add                                     # 2*X^2
+        padw loc_loadw_le.28  padw loc_loadw_le.24         # X^2
+        exec.f_k1::add                                     # 3*X^2
+        loc_storew_le.24 dropw  loc_storew_le.28 dropw
+
+        # ----- 2 * Y -> mem[32..40] -----
+        padw loc_loadw_le.12  padw loc_loadw_le.8          # Y
+        padw loc_loadw_le.12  padw loc_loadw_le.8          # Y
+        exec.f_k1::add                                     # [2*Y, ...]
+        loc_storew_le.32  swapw  loc_storew_le.36  swapw
+
+        # ----- inv(2 * Y) -> mem[40..48] -----
+        exec.f_k1::inv                                     # [inv(2*Y), ...]
+        loc_storew_le.40  swapw  loc_storew_le.44  swapw
+
+        # ----- m = (3*X^2) * inv(2*Y) -> mem[48..56] -----
+        padw loc_loadw_le.28  padw loc_loadw_le.24         # [3*X^2, inv(2*Y), ...]
+        exec.f_k1::mul                                     # [m, ...]
+        loc_storew_le.48  swapw  loc_storew_le.52  swapw
+
+        # ----- m^2 -> mem[56..64] -----
+        padw loc_loadw_le.52  padw loc_loadw_le.48         # [m, m, ...]
+        exec.f_k1::mul                                     # [m^2, ...]
+        loc_storew_le.56  swapw  loc_storew_le.60  swapw
+
+        # ----- 2 * X -> mem[64..72] -----
+        padw loc_loadw_le.4   padw loc_loadw_le.0          # [X, m^2, ...]
+        padw loc_loadw_le.4   padw loc_loadw_le.0          # [X, X, m^2, ...]
+        exec.f_k1::add                                     # [2*X, m^2, ...]
+        loc_storew_le.64  swapw  loc_storew_le.68  swapw
+
+        # ----- X3 = m^2 - 2*X -> mem[72..80] -----
+        exec.f_k1::sub                                     # [X3, ...]
+        loc_storew_le.72  swapw  loc_storew_le.76  swapw
+
+        # ----- (X - X3) -> mem[80..88] -----
+        padw loc_loadw_le.4   padw loc_loadw_le.0          # [X, X3, ...]
+        swapdw                                             # [X3, X, ...]
+        exec.f_k1::sub                                     # [X - X3, ...]
+        loc_storew_le.80  swapw  loc_storew_le.84  swapw
+
+        # ----- Y3 = m * (X - X3) - Y -> mem[88..96] -----
+        padw loc_loadw_le.52  padw loc_loadw_le.48         # [m, X - X3, ...]
+        exec.f_k1::mul                                     # [m*(X - X3), ...]
+        padw loc_loadw_le.12  padw loc_loadw_le.8          # [Y, m*(X - X3), ...]
+        exec.f_k1::sub                                     # [Y3, ...]
+        loc_storew_le.88 dropw  loc_storew_le.92 dropw
+
+        # ----- Write (X3, Y3, flag = 0) to out_addr -----
+        padw loc_loadw_le.72   loc_load.20         mem_storew_le
+        loc_loadw_le.76        loc_load.20 add.4   mem_storew_le
+        loc_loadw_le.88        loc_load.20 add.8   mem_storew_le
+        loc_loadw_le.92        loc_load.20 add.12  mem_storew_le  dropw
+        padw           loc_load.20 add.16  mem_storew_le dropw
+    end
+end
+
+# ===== POINT ADDITION ===========================================================================
+
+#! Addition: out = P1 + P2.
+#!
+#! Stack:
+#!   [out_addr, p1_addr, p2_addr, ...]  ->  [...]
+#!
+#! Branches on the four cases:
+#!   1. P1 = identity:                   out = P2 (copy through).
+#!   2. P2 = identity:                   out = P1.
+#!   3. X1 = X2 and Y1 = Y2 (P1 = P2):   delegate to `point_double` on P1.
+#!   4. X1 = X2 and Y1 != Y2 (P1 = -P2): out = identity.
+#!   5. Otherwise (generic affine add):
+#!         m  = (Y2 - Y1) / (X2 - X1)
+#!         X3 = m^2 - X1 - X2
+#!         Y3 = m * (X1 - X3) - Y1
+#!
+#! Cost (generic case): 2 modmul + 1 inv + 1 sq + ~6 adds/subs.
+#!
+#! Local memory (112 felts):
+#!   0..20    : P1 (input)
+#!   20..40   : P2 (input)
+#!   40       : out_addr cache
+#!   44..52   : Y2 - Y1 (numerator)
+#!   52..60   : X2 - X1 (denominator)
+#!   60..68   : inv(X2 - X1)
+#!   68..76   : m
+#!   76..84   : m^2
+#!   84..92   : X3
+#!   92..100  : (X1 - X3)
+#!   100..108 : Y3
+@locals(112)
+pub proc point_add
+    # Stack: [out_addr, p1_addr, p2_addr, ...]
+    loc_store.40                                          # cache out_addr; [p1_addr, p2_addr, ...]
+
+    # Load P1 to mem[0..20].
+    padw  dup.4              mem_loadw_le  loc_storew_le.0
+    dup.4 add.4              mem_loadw_le  loc_storew_le.4
+    dup.4 add.8              mem_loadw_le  loc_storew_le.8
+    dup.4 add.12             mem_loadw_le  loc_storew_le.12
+    dup.4 add.16             mem_loadw_le  loc_storew_le.16  dropw
+    drop                                                  # drop p1_addr; [p2_addr, ...]
+
+    # Load P2 to mem[20..40].
+    padw  dup.4              mem_loadw_le  loc_storew_le.20
+    dup.4 add.4              mem_loadw_le  loc_storew_le.24
+    dup.4 add.8              mem_loadw_le  loc_storew_le.28
+    dup.4 add.12             mem_loadw_le  loc_storew_le.32
+    dup.4 add.16             mem_loadw_le  loc_storew_le.36  dropw
+    drop                                                  # drop p2_addr; [...]
+
+    loc_load.16
+    if.true
+        # P1 = identity: out = P2.
+        padw loc_loadw_le.20   loc_load.40         mem_storew_le
+        loc_loadw_le.24        loc_load.40 add.4   mem_storew_le
+        loc_loadw_le.28        loc_load.40 add.8   mem_storew_le
+        loc_loadw_le.32        loc_load.40 add.12  mem_storew_le
+        loc_loadw_le.36        loc_load.40 add.16  mem_storew_le  dropw
+    else
+        loc_load.36
+        if.true
+            # P2 = identity: out = P1.
+            padw loc_loadw_le.0    loc_load.40         mem_storew_le
+            loc_loadw_le.4         loc_load.40 add.4   mem_storew_le
+            loc_loadw_le.8         loc_load.40 add.8   mem_storew_le
+            loc_loadw_le.12        loc_load.40 add.12  mem_storew_le
+            loc_loadw_le.16        loc_load.40 add.16  mem_storew_le  dropw
+        else
+            # Both finite. Test X1 == X2.
+            padw loc_loadw_le.4   padw loc_loadw_le.0     # X1
+            padw loc_loadw_le.24  padw loc_loadw_le.20    # X2
+            exec.::miden::core::math::u256::eq
+            if.true
+                # X1 == X2. Test Y1 == Y2.
+                padw loc_loadw_le.12  padw loc_loadw_le.8     # Y1
+                padw loc_loadw_le.32  padw loc_loadw_le.28    # Y2
+                exec.::miden::core::math::u256::eq
+                if.true
+                    # P1 == P2: out = [2] * P1.
+                    locaddr.0  loc_load.40
+                    exec.point_double
+                else
+                    # P1 == -P2: out = identity.
+                    padw  loc_load.40         mem_storew_le dropw
+                    padw  loc_load.40 add.4   mem_storew_le dropw
+                    padw  loc_load.40 add.8   mem_storew_le dropw
+                    padw  loc_load.40 add.12  mem_storew_le dropw
+                    push.0.0.0.1  loc_load.40 add.16  mem_storew_le dropw
+                end
+            else
+                # X1 != X2: generic affine addition.
+
+                # ----- Y2 - Y1 -> mem[44..52] -----
+                padw loc_loadw_le.32  padw loc_loadw_le.28    # Y2 (a)
+                padw loc_loadw_le.12  padw loc_loadw_le.8     # Y1 (b)
+                exec.f_k1::sub                                # Y2 - Y1
+                loc_storew_le.44 dropw  loc_storew_le.48 dropw
+
+                # ----- X2 - X1 -> mem[52..60] -----
+                padw loc_loadw_le.24  padw loc_loadw_le.20    # X2 (a)
+                padw loc_loadw_le.4   padw loc_loadw_le.0     # X1 (b)
+                exec.f_k1::sub                                # X2 - X1
+                loc_storew_le.52 dropw  loc_storew_le.56 dropw
+
+                # ----- inv(X2 - X1) -> mem[60..68] -----
+                padw loc_loadw_le.56  padw loc_loadw_le.52
+                exec.f_k1::inv                                # [inv, ...]
+                loc_storew_le.60  swapw  loc_storew_le.64  swapw
+
+                # ----- m = (Y2 - Y1) * inv(X2 - X1) -> mem[68..76] -----
+                padw loc_loadw_le.48  padw loc_loadw_le.44    # [Y2-Y1, inv, ...]
+                exec.f_k1::mul                                # [m, ...]
+                loc_storew_le.68  swapw  loc_storew_le.72  swapw
+
+                # ----- m^2 -> mem[76..84] -----
+                padw loc_loadw_le.72  padw loc_loadw_le.68    # [m, m, ...]
+                exec.f_k1::mul                                # [m^2, ...]
+                loc_storew_le.76  swapw  loc_storew_le.80  swapw
+
+                # ----- X3 = m^2 - X1 - X2 -> mem[84..92] -----
+                padw loc_loadw_le.4   padw loc_loadw_le.0     # [X1, m^2, ...]
+                exec.f_k1::sub                                # [m^2 - X1, ...]
+                padw loc_loadw_le.24  padw loc_loadw_le.20    # [X2, m^2-X1, ...]
+                exec.f_k1::sub                                # [X3, ...]
+                loc_storew_le.84  swapw  loc_storew_le.88  swapw
+
+                # ----- (X1 - X3) -> mem[92..100] -----
+                padw loc_loadw_le.4   padw loc_loadw_le.0     # [X1, X3, ...]
+                swapdw                                        # [X3, X1, ...]
+                exec.f_k1::sub                                # [X1 - X3, ...]
+                loc_storew_le.92  swapw  loc_storew_le.96  swapw
+
+                # ----- Y3 = m * (X1 - X3) - Y1 -> mem[100..108] -----
+                padw loc_loadw_le.72  padw loc_loadw_le.68    # [m, X1-X3, ...]
+                exec.f_k1::mul                                # [m*(X1-X3), ...]
+                padw loc_loadw_le.12  padw loc_loadw_le.8     # [Y1, m*(X1-X3), ...]
+                exec.f_k1::sub                                # [Y3, ...]
+                loc_storew_le.100 dropw  loc_storew_le.104 dropw
+
+                # ----- Write (X3, Y3, flag = 0) to out_addr -----
+                padw loc_loadw_le.84    loc_load.40         mem_storew_le
+                loc_loadw_le.88         loc_load.40 add.4   mem_storew_le
+                loc_loadw_le.100        loc_load.40 add.8   mem_storew_le
+                loc_loadw_le.104        loc_load.40 add.12  mem_storew_le  dropw
+                padw            loc_load.40 add.16  mem_storew_le dropw
+            end
+        end
+    end
+end
+
+# ===== POINT DECOMPRESSION ======================================================================
+
+#! Decompression: out = (X, Y, flag = 0) where Y is recovered from `Y^2 = X^3 + 7 mod p` using
+#! the requested parity.
+#!
+#! Stack:
+#!   [out_addr, encoded_addr, ...]  ->  [...]
+#!
+#! Encoded format at `encoded_addr` (9 felts):
+#!   +0..+8  : X as 8 u32 LE limbs
+#!   +8      : parity (0 or 1; the parity bit of the desired Y)
+#!
+#! Verifies in-VM:
+#!   1. X < p (canonical).
+#!   2. parity in {0, 1}.
+#!   3. Y < p (canonical), where Y is the host-supplied hint.
+#!   4. (Y mod 2) == parity.
+#!   5. Y^2 == X^3 + 7 mod p (i.e. (X, Y) lies on secp256k1).
+#! Traps if any check fails.
+#!
+#! Cost: 3 modmuls (X^2, X^3, Y^2) + canonical/parity checks + 1 add (X^3 + 7).
+#!
+#! Local memory (64 felts):
+#!   0..8   : X (loaded from encoded_addr)
+#!   8..16  : Y (hint)
+#!   16     : parity
+#!   20     : out_addr cache
+#!   24..32 : X^2
+#!   32..40 : X^3
+#!   40..48 : X^3 + 7
+#!   48..56 : Y^2
+@locals(64)
+pub proc decompress
+    # Stack: [out_addr, encoded_addr, ...]
+    loc_store.20                                          # cache out_addr; [encoded_addr, ...]
+
+    # Load X from encoded_addr+0..+8 to mem[0..8].
+    padw  dup.4              mem_loadw_le  loc_storew_le.0
+    dup.4 add.4              mem_loadw_le  loc_storew_le.4  dropw
+
+    # Load parity from encoded_addr+8 to mem[16].
+    dup add.8  mem_load  loc_store.16
+    drop                                                  # drop encoded_addr; [...]
+
+    # ----- Assert X < p -----
+    padw loc_loadw_le.4   padw loc_loadw_le.0             # X (a, deeper)
+    push.0xffffffff.0xffffffff.0xffffffff.0xffffffff
+    push.0xffffffff.0xffffffff.0xfffffffe.0xfffffc2f   # p (b, top)
+    exec.::miden::core::math::u256::lt
+    assert.err="k1_point::decompress: X not canonical"
+
+    # ----- Assert parity in {0, 1} -----
+    loc_load.16  dup  mul                                 # parity^2
+    loc_load.16  sub                                      # parity^2 - parity
+    assertz.err="k1_point::decompress: parity must be 0 or 1"
+
+    # ----- Push (X, parity) onto operand stack and emit so the host can read them -----
+    # The handler reads X at stack offsets [1..9] and parity at offset 9 (its offset 0 is
+    # the synthesized event id).
+    loc_load.16                                           # parity (deeper)
+    padw loc_loadw_le.4  padw loc_loadw_le.0              # X (X[0] on top)
+    emit.K1_POINT_DECOMPRESS_EVENT
+    # Drop the (X, parity) we put on the stack; the values are still in local memory.
+    dropw  dropw  drop
+
+    # ----- Pull Y hint from advice -----
+    adv_pushw  loc_storew_le.8                            # mem[8..12] = Y[0..4]
+    adv_pushw  loc_storew_le.12                           # mem[12..16] = Y[4..8]
+    swapw                                                 # [Y[0..4], Y[4..8], ...]
+
+    # ----- Assert Y < p -----
+    push.0xffffffff.0xffffffff.0xffffffff.0xffffffff
+    push.0xffffffff.0xffffffff.0xfffffffe.0xfffffc2f   # p (b)
+    exec.::miden::core::math::u256::lt
+    assert.err="k1_point::decompress: Y not canonical"
+
+    # ----- Assert (Y mod 2) == parity -----
+    loc_load.8                                            # Y[0] (low u32 limb)
+    push.1  u32and                                        # Y[0] & 1 = Y mod 2
+    loc_load.16                                           # parity
+    assert_eq.err="k1_point::decompress: Y parity mismatch"
+
+    # ----- X^2 -> mem[24..32] -----
+    padw loc_loadw_le.4  padw loc_loadw_le.0              # X
+    padw loc_loadw_le.4  padw loc_loadw_le.0              # X
+    exec.f_k1::mul                                        # X^2
+    loc_storew_le.24 dropw  loc_storew_le.28 dropw
+
+    # ----- X^3 = X^2 * X -> mem[32..40] -----
+    padw loc_loadw_le.28  padw loc_loadw_le.24            # X^2 (a)
+    padw loc_loadw_le.4   padw loc_loadw_le.0             # X (b)
+    exec.f_k1::mul                                        # X^3
+    loc_storew_le.32 dropw  loc_storew_le.36 dropw
+
+    # ----- rhs = X^3 + 7 -> mem[40..48] -----
+    padw loc_loadw_le.36  padw loc_loadw_le.32            # X^3 (a)
+    padw  push.0.0.0.7  # u256(7) (b, low limb on top)
+    exec.f_k1::add                                        # X^3 + 7
+    loc_storew_le.40 dropw  loc_storew_le.44 dropw
+
+    # ----- Y^2 -> mem[48..56] -----
+    padw loc_loadw_le.12  padw loc_loadw_le.8             # Y
+    padw loc_loadw_le.12  padw loc_loadw_le.8             # Y
+    exec.f_k1::mul                                        # Y^2
+    loc_storew_le.48 dropw  loc_storew_le.52 dropw
+
+    # ----- Assert Y^2 == X^3 + 7 -----
+    padw loc_loadw_le.44  padw loc_loadw_le.40            # rhs (a)
+    padw loc_loadw_le.52  padw loc_loadw_le.48            # Y^2 (b)
+    exec.::miden::core::math::u256::eq
+    assert.err="k1_point::decompress: curve equation failed"
+
+    # ----- Write (X, Y, flag = 0) to out_addr -----
+    padw loc_loadw_le.0    loc_load.20         mem_storew_le
+    loc_loadw_le.4         loc_load.20 add.4   mem_storew_le
+    loc_loadw_le.8         loc_load.20 add.8   mem_storew_le
+    loc_loadw_le.12        loc_load.20 add.12  mem_storew_le  dropw
+    padw           loc_load.20 add.16  mem_storew_le dropw
+end
+
+# ===== SCALAR MULTIPLICATION ====================================================================
+
+# Inner body of `scalar_mul`'s MSB-to-LSB scan: consumes one u32 limb of the scalar from the
+# top of the stack and runs the double-and-add 32 times against the (acc, P) addresses sitting
+# below.
+#
+# Stack at entry: [word, p_addr, acc_addr, ...]
+# Stack at exit:  [p_addr, acc_addr, ...]   (word is fully consumed by the left shifts)
+proc _scalar_mul_chunk
+    repeat.32
+        # acc = 2 * acc.   point_double((out=)acc, (p=)acc)
+        dup.2  dup.0  exec.point_double
+        # If high bit of word is set: acc = acc + P.   point_add((out=)acc, (p1=)acc, (p2=)P)
+        dup  u32shr.31
+        if.true
+            dup.2  dup.2  dup.4  exec.point_add
+        end
+        u32shl.1
+    end
+    drop
+end
+
+#! Scalar multiplication: out = [k] * P via naive left-to-right double-and-add (MSB-first).
+#!
+#! Stack:
+#!   [out_addr, scalar_addr, p_addr, ...]  ->  [...]
+#!
+#! Caller layout:
+#!   p_addr     : 20 felts, the affine point P (X[8], Y[8], is_infinity, [reserved x 3]).
+#!   scalar_addr: 8 felts, the scalar k as u32 LE limbs (k[0] at +0, k[7] at +7).
+#!   out_addr   : 20 felts, the output point [k] * P (overwritten).
+#!
+#! out_addr may equal p_addr or scalar_addr: inputs are copied to local memory before any
+#! output write.
+#!
+#! Cost: 256 doublings + ~128 conditional adds for a uniform-random scalar. When `acc` is the
+#! identity, both `point_double` and `point_add` short-circuit through the flag-check branch,
+#! so leading-zero bits of the scalar are effectively free; full cost begins at the highest
+#! set bit.
+#!
+#! Local memory (64 felts):
+#!   0..20  : P (input copy)
+#!   20..40 : acc (running result, in affine form)
+#!   40..48 : scalar (8 u32 LE limbs)
+#!   48     : out_addr cache
+@locals(64)
+pub proc scalar_mul
+    # Stack: [out_addr, scalar_addr, p_addr, ...]
+    loc_store.48                                          # cache out_addr; [scalar_addr, p_addr, ...]
+
+    # Load scalar from scalar_addr to mem[40..48].
+    padw  dup.4              mem_loadw_le  loc_storew_le.40
+    dup.4 add.4              mem_loadw_le  loc_storew_le.44  dropw
+    drop                                                  # drop scalar_addr; [p_addr, ...]
+
+    # Load P from p_addr to mem[0..20].
+    padw  dup.4              mem_loadw_le  loc_storew_le.0
+    dup.4 add.4              mem_loadw_le  loc_storew_le.4
+    dup.4 add.8              mem_loadw_le  loc_storew_le.8
+    dup.4 add.12             mem_loadw_le  loc_storew_le.12
+    dup.4 add.16             mem_loadw_le  loc_storew_le.16  dropw
+    drop                                                  # drop p_addr; [...]
+
+    # ----- Initialise acc = identity at mem[20..40] -----
+    padw  loc_storew_le.20  dropw                 # X = 0
+    padw  loc_storew_le.24  dropw
+    padw  loc_storew_le.28  dropw                 # Y = 0
+    padw  loc_storew_le.32  dropw
+    push.0.0.0.1  loc_storew_le.36  dropw                 # flag = 1, reserved = 0
+
+    # ----- Process scalar bit-by-bit, MSB to LSB -----
+    # `_scalar_mul_chunk` consumes one u32 limb of the scalar (top of stack) and runs the
+    # inner double-and-add 32 times against the (acc, P) addresses sitting below it. We push
+    # those addresses once before the first chunk and drop them after the last.
+    locaddr.20  locaddr.0
+    loc_load.47  exec._scalar_mul_chunk
+    loc_load.46  exec._scalar_mul_chunk
+    loc_load.45  exec._scalar_mul_chunk
+    loc_load.44  exec._scalar_mul_chunk
+    loc_load.43  exec._scalar_mul_chunk
+    loc_load.42  exec._scalar_mul_chunk
+    loc_load.41  exec._scalar_mul_chunk
+    loc_load.40  exec._scalar_mul_chunk
+    drop  drop
+
+    # ----- Copy acc from mem[20..40] to out_addr -----
+    padw loc_loadw_le.20   loc_load.48         mem_storew_le
+    loc_loadw_le.24        loc_load.48 add.4   mem_storew_le
+    loc_loadw_le.28        loc_load.48 add.8   mem_storew_le
+    loc_loadw_le.32        loc_load.48 add.12  mem_storew_le
+    loc_loadw_le.36        loc_load.48 add.16  mem_storew_le  dropw
+end
+
+# ===== DOUBLE SCALAR MULTIPLICATION (SHAMIR'S TRICK) ============================================
+
+# Inner body of `double_scalar_mul`'s joint MSB-to-LSB scan: consumes one limb-pair from the
+# top of the stack (k2 on top, k1 below) and runs the joint double-and-add 32 times against
+# the (acc, T-base) addresses sitting below. T_base is the address of T[0] = identity; the
+# per-iteration index is `bit_31(k1) + 2*bit_31(k2)`, so T_base + 20*idx points at T[idx].
+#
+# Stack at entry: [k2_word, k1_word, t_base_addr, acc_addr, ...]
+# Stack at exit:  [t_base_addr, acc_addr, ...]
+proc _dsm_chunk
+    repeat.32
+        # acc = 2 * acc.   point_double((out=)acc, (p=)acc)
+        dup.3  dup.0  exec.point_double
+        # idx = bit_31(k1) + 2 * bit_31(k2).
+        dup.1  u32shr.31  dup.1  u32shr.31  push.2 mul add
+        # t_addr = t_base + 20 * idx.
+        push.20 mul  dup.3 add
+        # acc = acc + T[idx].   point_add((out=)acc, (p1=)acc, (p2=)t_addr)
+        dup.4  dup.0  exec.point_add
+        # Shift both limb words left by 1.
+        u32shl.1  swap  u32shl.1  swap
+    end
+    drop  drop
+end
+
+#! Joint scalar multiplication: out = [k1] * P1 + [k2] * P2 via Shamir's trick.
+#!
+#! Stack:
+#!   [out_addr, k1_addr, k2_addr, p1_addr, p2_addr, ...]  ->  [...]
+#!
+#! Caller layout:
+#!   p1_addr, p2_addr  : 20 felts each, the affine input points.
+#!   k1_addr, k2_addr  : 8 felts each, the scalars as u32 LE limbs.
+#!   out_addr          : 20 felts, the output point [k1]*P1 + [k2]*P2 (overwritten).
+#!
+#! out_addr may equal any input addr: inputs are copied to local memory before any output
+#! write.
+#!
+#! Algorithm:
+#!   Precompute the 4-entry table T[0..3] = (identity, P1, P2, P1+P2).
+#!   Initialise acc = identity.
+#!   For i from 255 down to 0:
+#!       acc = 2 * acc
+#!       idx = bit_i(k1) + 2 * bit_i(k2)            # 0..3
+#!       acc = acc + T[idx]                          # T[0]=identity short-circuits
+#!
+#! Cost: 256 doublings + 192 real adds + 64 identity-add short-circuits per pair of uniform-
+#! random scalars.
+#!
+#! Local memory (128 felts):
+#!   0..20    : T[0] (identity, set once at proc start)
+#!   20..40   : T[1] (P1, copied from p1_addr)
+#!   40..60   : T[2] (P2, copied from p2_addr)
+#!   60..80   : T[3] (P1 + P2, computed)
+#!   80..100  : acc
+#!   100..108 : k1
+#!   108..116 : k2
+#!   116      : out_addr cache
+@locals(128)
+pub proc double_scalar_mul
+    # Stack: [out_addr, k1_addr, k2_addr, p1_addr, p2_addr, ...]
+    loc_store.116                                         # cache out_addr
+
+    # Load k1 to mem[100..108].
+    padw  dup.4              mem_loadw_le  loc_storew_le.100
+    dup.4 add.4              mem_loadw_le  loc_storew_le.104  dropw
+    drop                                                  # drop k1_addr
+
+    # Load k2 to mem[108..116].
+    padw  dup.4              mem_loadw_le  loc_storew_le.108
+    dup.4 add.4              mem_loadw_le  loc_storew_le.112  dropw
+    drop                                                  # drop k2_addr
+
+    # Load P1 to mem[20..40] (= T[1]).
+    padw  dup.4              mem_loadw_le  loc_storew_le.20
+    dup.4 add.4              mem_loadw_le  loc_storew_le.24
+    dup.4 add.8              mem_loadw_le  loc_storew_le.28
+    dup.4 add.12             mem_loadw_le  loc_storew_le.32
+    dup.4 add.16             mem_loadw_le  loc_storew_le.36  dropw
+    drop                                                  # drop p1_addr
+
+    # Load P2 to mem[40..60] (= T[2]).
+    padw  dup.4              mem_loadw_le  loc_storew_le.40
+    dup.4 add.4              mem_loadw_le  loc_storew_le.44
+    dup.4 add.8              mem_loadw_le  loc_storew_le.48
+    dup.4 add.12             mem_loadw_le  loc_storew_le.52
+    dup.4 add.16             mem_loadw_le  loc_storew_le.56  dropw
+    drop                                                  # drop p2_addr
+
+    # ----- T[0] = identity at mem[0..20] -----
+    padw  loc_storew_le.0   dropw
+    padw  loc_storew_le.4   dropw
+    padw  loc_storew_le.8   dropw
+    padw  loc_storew_le.12  dropw
+    push.0.0.0.1  loc_storew_le.16  dropw
+
+    # ----- T[3] = T[1] + T[2] = P1 + P2 at mem[60..80] -----
+    locaddr.40  locaddr.20  locaddr.60
+    exec.point_add
+
+    # ----- acc = identity at mem[80..100] -----
+    padw  loc_storew_le.80  dropw
+    padw  loc_storew_le.84  dropw
+    padw  loc_storew_le.88  dropw
+    padw  loc_storew_le.92  dropw
+    push.0.0.0.1  loc_storew_le.96  dropw
+
+    # ----- Joint MSB-to-LSB scan -----
+    # `_dsm_chunk` consumes one limb-pair (k2_word on top, k1_word below) and runs the joint
+    # double-and-add 32 times against (acc, T_base) sitting below. We push those once, then
+    # call the helper 8 times (one per limb pair) and drop the cached addresses at the end.
+    locaddr.80  locaddr.0
+    loc_load.107  loc_load.115  exec._dsm_chunk
+    loc_load.106  loc_load.114  exec._dsm_chunk
+    loc_load.105  loc_load.113  exec._dsm_chunk
+    loc_load.104  loc_load.112  exec._dsm_chunk
+    loc_load.103  loc_load.111  exec._dsm_chunk
+    loc_load.102  loc_load.110  exec._dsm_chunk
+    loc_load.101  loc_load.109  exec._dsm_chunk
+    loc_load.100  loc_load.108  exec._dsm_chunk
+    drop  drop
+
+    # ----- Copy acc from mem[80..100] to out_addr -----
+    padw loc_loadw_le.80   loc_load.116         mem_storew_le
+    loc_loadw_le.84        loc_load.116 add.4   mem_storew_le
+    loc_loadw_le.88        loc_load.116 add.8   mem_storew_le
+    loc_loadw_le.92        loc_load.116 add.12  mem_storew_le
+    loc_loadw_le.96        loc_load.116 add.16  mem_storew_le  dropw
+end
+
+# ===== 4-WAY MULTI-SCALAR MULTIPLICATION (MSM(4, 128)) ==========================================
+
+#! WARNING -- NOT A GENERIC MSM. SPECIALIZED FOR THE secp256k1 GLV VERIFIER.
+#!
+#! Computes `R = k_1·P_1 + k_2·P_2 + k_3·P_3 + k_4·P_4` via 4-way Shamir's trick at 128
+#! iterations, with `LUT[3] = P_1 + P_2` hardcoded to one of 4 constants. Calling this with
+#! `P_1` or `P_2` not in their permitted sets silently produces a WRONG result; the proc
+#! never checks the precondition.
+#!
+#! Pre-condition (callers MUST honor):
+#!   P_1 ∈ {G, -G},     P_2 ∈ {φ(G), -φ(G)},     P_3 ∈ {Q, -Q},     P_4 ∈ {φ(Q), -φ(Q)},
+#! where G is the secp256k1 generator and φ((x, y)) = (β·x mod p, y) is the endomorphism.
+#! The only intended caller is `verify_glv_hinted`.
+#!
+#! `sign_a_u1` and `sign_b_u1` are the u_1 sign bits from `k1_scalar::verify_glv_split`.
+#! Used to select the LUT[3] = P_1 + P_2 constant, since P_1 + P_2 = (±G) + (±φ(G)) takes
+#! one of 4 fixed values.
+#!
+#! Each scalar `k_i` must fit in 128 bits (4 u32 LE limbs at `k_i_addr..k_i_addr+4`).
+#! Each base point `P_i` follows the standard 20-felt affine layout (X, Y, is_infinity, 3
+#! reserved zeros). The result `R` is written in the same layout to `out_addr`.
+#!
+#! Stack transition:
+#!   [sign_a_u1, sign_b_u1, out_addr, k_4_addr, k_3_addr, k_2_addr, k_1_addr,
+#!    P_4_addr, P_3_addr, P_2_addr, P_1_addr, ...]  ->  [...]
+#!
+#! Local memory layout (mem[0..348]):
+#!   0..20    : LUT[1]  = P_1
+#!   20..40   : LUT[2]  = P_2
+#!   40..60   : LUT[3]  = P_1+P_2    (selected from 4 hardcoded constants)
+#!   60..80   : LUT[4]  = P_3
+#!   80..100  : LUT[5]  = P_1+P_3
+#!   100..120 : LUT[6]  = P_2+P_3
+#!   120..140 : LUT[7]  = P_1+P_2+P_3
+#!   140..160 : LUT[8]  = P_4
+#!   160..180 : LUT[9]  = P_1+P_4
+#!   180..200 : LUT[10] = P_2+P_4
+#!   200..220 : LUT[11] = P_1+P_2+P_4
+#!   220..240 : LUT[12] = P_3+P_4
+#!   240..260 : LUT[13] = P_1+P_3+P_4
+#!   260..280 : LUT[14] = P_2+P_3+P_4
+#!   280..300 : LUT[15] = P_1+P_2+P_3+P_4
+#!   300..320 : accum (running R)
+#!   320..324 : k_1 (4 u32 LE limbs)
+#!   324..328 : k_2
+#!   328..332 : k_3
+#!   332..336 : k_4
+#!   336      : out_addr
+#!   337..341 : P_1_addr through P_4_addr
+#!   341..345 : k_1_addr through k_4_addr
+#!   345      : sign_a_u1
+#!   346      : sign_b_u1
+@locals(348)
+pub proc msm_4_128_glv_k1
+    # Cache the 11 caller args to local memory so the inner loop can reach each by
+    # `loc_load.X` regardless of operand-stack churn.
+    loc_store.345                                       # sign_a_u1
+    loc_store.346                                       # sign_b_u1
+    loc_store.336                                       # out_addr
+    loc_store.344                                       # k_4_addr
+    loc_store.343                                       # k_3_addr
+    loc_store.342                                       # k_2_addr
+    loc_store.341                                       # k_1_addr
+    loc_store.340                                       # P_4_addr
+    loc_store.339                                       # P_3_addr
+    loc_store.338                                       # P_2_addr
+    loc_store.337                                       # P_1_addr
+
+    # ----- Copy P_1, P_2, P_3, P_4 into LUT[1], LUT[2], LUT[4], LUT[8] -----
+    # Each point is 20 felts = 5 words. Copy word-by-word from caller mem to local mem.
+    padw  loc_load.337            mem_loadw_le  loc_storew_le.0    dropw
+    padw  loc_load.337 add.4      mem_loadw_le  loc_storew_le.4    dropw
+    padw  loc_load.337 add.8      mem_loadw_le  loc_storew_le.8    dropw
+    padw  loc_load.337 add.12     mem_loadw_le  loc_storew_le.12   dropw
+    padw  loc_load.337 add.16     mem_loadw_le  loc_storew_le.16   dropw
+
+    padw  loc_load.338            mem_loadw_le  loc_storew_le.20   dropw
+    padw  loc_load.338 add.4      mem_loadw_le  loc_storew_le.24   dropw
+    padw  loc_load.338 add.8      mem_loadw_le  loc_storew_le.28   dropw
+    padw  loc_load.338 add.12     mem_loadw_le  loc_storew_le.32   dropw
+    padw  loc_load.338 add.16     mem_loadw_le  loc_storew_le.36   dropw
+
+    padw  loc_load.339            mem_loadw_le  loc_storew_le.60   dropw
+    padw  loc_load.339 add.4      mem_loadw_le  loc_storew_le.64   dropw
+    padw  loc_load.339 add.8      mem_loadw_le  loc_storew_le.68   dropw
+    padw  loc_load.339 add.12     mem_loadw_le  loc_storew_le.72   dropw
+    padw  loc_load.339 add.16     mem_loadw_le  loc_storew_le.76   dropw
+
+    padw  loc_load.340            mem_loadw_le  loc_storew_le.140  dropw
+    padw  loc_load.340 add.4      mem_loadw_le  loc_storew_le.144  dropw
+    padw  loc_load.340 add.8      mem_loadw_le  loc_storew_le.148  dropw
+    padw  loc_load.340 add.12     mem_loadw_le  loc_storew_le.152  dropw
+    padw  loc_load.340 add.16     mem_loadw_le  loc_storew_le.156  dropw
+
+    # ----- Copy k_1, k_2, k_3, k_4 (4 u32 limbs each) into mem[320..336] -----
+    padw  loc_load.341  mem_loadw_le  loc_storew_le.320  dropw
+    padw  loc_load.342  mem_loadw_le  loc_storew_le.324  dropw
+    padw  loc_load.343  mem_loadw_le  loc_storew_le.328  dropw
+    padw  loc_load.344  mem_loadw_le  loc_storew_le.332  dropw
+
+    # ----- Build the 11 derived LUT entries -----
+    # LUT[3] = P_1 + P_2 = (±G) + (±φ(G)). Selected from 4 precomputed constants:
+    #   A := G + φ(G)       B := G - φ(G)
+    #   (sa=0, sb=0) -> +A  (sa=0, sb=1) -> +B
+    #   (sa=1, sb=1) -> -A  (sa=1, sb=0) -> -B
+    # Constants pinned by `lut3_constants_match_runtime` in `tests/math/k1_point.rs`.
+    loc_load.346                                        # sign_b_u1
+    if.true
+        loc_load.345                                    # sign_a_u1
+        if.true
+            # (sa=1, sb=1) -> -A = -(G + φ(G))
+            push.0x763bbf1e.0x531bed98.0xfe51de5e.0xe84f50fb  loc_storew_le.40  dropw
+            push.0xc994b697.0x68832bcb.0xff5e9ab3.0x9ae8d1d3  loc_storew_le.44  dropw
+            push.0xfd17b448.0xa6855419.0x9c47d08f.0xfb10d4b8  loc_storew_le.48  dropw
+            push.0x483ada77.0x26a3c465.0x5da4fbfc.0x0e1108a8  loc_storew_le.52  dropw
+        else
+            # (sa=0, sb=1) -> +B = G - φ(G)
+            push.0xe5015022.0x596e21f2.0xea6eadae.0x415a87b0  loc_storew_le.40  dropw
+            push.0x93c4d65b.0x4cc437be.0x9f2b0aa7.0x2325ba6c  loc_storew_le.44  dropw
+            push.0x5d419b1b.0x625309ca.0x50730fbc.0x03706352  loc_storew_le.48  dropw
+            push.0xde87653b.0x1778d37f.0x77e94036.0x92bd956f  loc_storew_le.52  dropw
+        end
+    else
+        loc_load.345                                    # sign_a_u1
+        if.true
+            # (sa=1, sb=0) -> -B = -(G - φ(G))
+            push.0xe5015022.0x596e21f2.0xea6eadae.0x415a87b0  loc_storew_le.40  dropw
+            push.0x93c4d65b.0x4cc437be.0x9f2b0aa7.0x2325ba6c  loc_storew_le.44  dropw
+            push.0xa2be64e4.0x9dacf635.0xaf8cf042.0xfc8f98dd  loc_storew_le.48  dropw
+            push.0x21789ac4.0xe8872c80.0x8816bfc9.0x6d426a90  loc_storew_le.52  dropw
+        else
+            # (sa=0, sb=0) -> +A = G + φ(G)
+            push.0x763bbf1e.0x531bed98.0xfe51de5e.0xe84f50fb  loc_storew_le.40  dropw
+            push.0xc994b697.0x68832bcb.0xff5e9ab3.0x9ae8d1d3  loc_storew_le.44  dropw
+            push.0x02e84bb7.0x597aabe6.0x63b82f6f.0x04ef2777  loc_storew_le.48  dropw
+            push.0xb7c52588.0xd95c3b9a.0xa25b0403.0xf1eef757  loc_storew_le.52  dropw
+        end
+    end
+    # is_infinity = 0, reserved = 0,0,0.
+    padw  loc_storew_le.56  dropw
+
+    # LUT[5] = P_1 + P_3.
+    locaddr.0    locaddr.60   locaddr.80    exec.point_add
+    # LUT[6] = P_2 + P_3.
+    locaddr.20   locaddr.60   locaddr.100   exec.point_add
+    # LUT[7] = LUT[3] + P_3.
+    locaddr.40   locaddr.60   locaddr.120   exec.point_add
+    # LUT[9] = P_1 + P_4.
+    locaddr.0    locaddr.140  locaddr.160   exec.point_add
+    # LUT[10] = P_2 + P_4.
+    locaddr.20   locaddr.140  locaddr.180   exec.point_add
+    # LUT[11] = LUT[3] + P_4.
+    locaddr.40   locaddr.140  locaddr.200   exec.point_add
+    # LUT[12] = P_3 + P_4.
+    locaddr.60   locaddr.140  locaddr.220   exec.point_add
+    # LUT[13] = LUT[5] + P_4.
+    locaddr.80   locaddr.140  locaddr.240   exec.point_add
+    # LUT[14] = LUT[6] + P_4.
+    locaddr.100  locaddr.140  locaddr.260   exec.point_add
+    # LUT[15] = LUT[7] + P_4.
+    locaddr.120  locaddr.140  locaddr.280   exec.point_add
+
+    # ----- Initialize accum to identity at mem[300..320]: (X, Y, is_infinity=1, reserved=0) -----
+    # The X, Y limbs are not interpreted while is_infinity = 1, so we leave them as zeros.
+    padw
+    loc_storew_le.300                                   # X[0..3] = 0
+    loc_storew_le.304                                   # X[4..7] = 0
+    loc_storew_le.308                                   # Y[0..3] = 0
+    loc_storew_le.312 dropw                             # Y[4..7] = 0
+    push.0.0.0.1 loc_storew_le.316 dropw                # is_infinity = 1; reserved = 0,0,0
+
+    # ----- Main loop: 128 iterations MSB-first across the four scalars -----
+    # Per inner iter (stack [k4_limb, k3_limb, k2_limb, k1_limb, ...]):
+    #   1. Extract the MSB of each limb to form code = bit(k1) + 2*bit(k2) + 4*bit(k3) + 8*bit(k4).
+    #   2. Double accum.
+    #   3. If code != 0, add LUT[code] to accum. LUT[code]_addr = (code-1) * 20 + locaddr.0.
+    #   4. Shift each limb left by 1 (expose next bit at position 31).
+    # 128 iterations split as 4 limbs * 32 iters each. k_i's limb j is at mem[320 + 4*(i-1) + j].
+    #
+    # Stack convention has k4 on top (highest-numbered scalar) rather than k1: the
+    # highest-weighted bit (b4 with weight 8) ends up on top after extraction, so
+    # `push.8 mul` can act on it directly without an intervening movup.
+
+    # ----- Limb 3 (bits 127..96 of each scalar) -----
+    loc_load.323
+    loc_load.327
+    loc_load.331
+    loc_load.335
+    repeat.32
+        # Extract bit_k1, bit_k2, bit_k3, bit_k4; form code = b1 + 2*b2 + 4*b3 + 8*b4.
+        dup.3 u32shr.31                                 # bit_k1
+        dup.3 u32shr.31                                 # bit_k2
+        dup.3 u32shr.31                                 # bit_k3
+        dup.3 u32shr.31                                 # bit_k4
+        push.8 mul   swap   push.4 mul   add   swap   push.2 mul   add   add
+
+        # Double accum: point_double(out=accum, in=accum).
+        locaddr.300 dup
+        exec.point_double
+
+        # Conditional add LUT[code]. point_add(out=accum, p2=accum, p1=LUT[code]).
+        dup eq.0 not
+        if.true
+            sub.1 push.20 mul   locaddr.0 add           # LUT_addr = (code-1)*20 + base
+            locaddr.300                                  # P_2 = accum (deeper)
+            swap                                         # [LUT_addr, accum]
+            locaddr.300                                  # out = accum (top)
+            exec.point_add
+        else
+            drop
+        end
+
+        # Shift each limb left by 1.
+        # Rotate-and-shift: shift each limb in turn and rotate it to the bottom of the 4
+        # so that after 4 rotations the stack order is restored to [k4', k3', k2', k1', ...].
+        u32shl.1   movdn.3
+        u32shl.1   movdn.3
+        u32shl.1   movdn.3
+        u32shl.1   movdn.3
+    end
+    drop drop drop drop
+
+    # ----- Limb 2 (bits 95..64) -----
+    loc_load.322
+    loc_load.326
+    loc_load.330
+    loc_load.334
+    repeat.32
+        dup.3 u32shr.31
+        dup.3 u32shr.31
+        dup.3 u32shr.31
+        dup.3 u32shr.31
+        push.8 mul   swap   push.4 mul   add   swap   push.2 mul   add   add
+        locaddr.300 dup
+        exec.point_double
+        dup eq.0 not
+        if.true
+            sub.1 push.20 mul   locaddr.0 add
+            locaddr.300
+            swap
+            locaddr.300
+            exec.point_add
+        else
+            drop
+        end
+        # Rotate-and-shift: shift each limb in turn and rotate it to the bottom of the 4
+        # so that after 4 rotations the stack order is restored to [k4', k3', k2', k1', ...].
+        u32shl.1   movdn.3
+        u32shl.1   movdn.3
+        u32shl.1   movdn.3
+        u32shl.1   movdn.3
+    end
+    drop drop drop drop
+
+    # ----- Limb 1 (bits 63..32) -----
+    loc_load.321
+    loc_load.325
+    loc_load.329
+    loc_load.333
+    repeat.32
+        dup.3 u32shr.31
+        dup.3 u32shr.31
+        dup.3 u32shr.31
+        dup.3 u32shr.31
+        push.8 mul   swap   push.4 mul   add   swap   push.2 mul   add   add
+        locaddr.300 dup
+        exec.point_double
+        dup eq.0 not
+        if.true
+            sub.1 push.20 mul   locaddr.0 add
+            locaddr.300
+            swap
+            locaddr.300
+            exec.point_add
+        else
+            drop
+        end
+        # Rotate-and-shift: shift each limb in turn and rotate it to the bottom of the 4
+        # so that after 4 rotations the stack order is restored to [k4', k3', k2', k1', ...].
+        u32shl.1   movdn.3
+        u32shl.1   movdn.3
+        u32shl.1   movdn.3
+        u32shl.1   movdn.3
+    end
+    drop drop drop drop
+
+    # ----- Limb 0 (bits 31..0) -----
+    loc_load.320
+    loc_load.324
+    loc_load.328
+    loc_load.332
+    repeat.32
+        dup.3 u32shr.31
+        dup.3 u32shr.31
+        dup.3 u32shr.31
+        dup.3 u32shr.31
+        push.8 mul   swap   push.4 mul   add   swap   push.2 mul   add   add
+        locaddr.300 dup
+        exec.point_double
+        dup eq.0 not
+        if.true
+            sub.1 push.20 mul   locaddr.0 add
+            locaddr.300
+            swap
+            locaddr.300
+            exec.point_add
+        else
+            drop
+        end
+        # Rotate-and-shift: shift each limb in turn and rotate it to the bottom of the 4
+        # so that after 4 rotations the stack order is restored to [k4', k3', k2', k1', ...].
+        u32shl.1   movdn.3
+        u32shl.1   movdn.3
+        u32shl.1   movdn.3
+        u32shl.1   movdn.3
+    end
+    drop drop drop drop
+
+    # ----- Copy accum from mem[300..320] to caller mem[out_addr..out_addr+20] -----
+    padw  loc_loadw_le.300  loc_load.336           mem_storew_le
+    loc_loadw_le.304        loc_load.336 add.4     mem_storew_le
+    loc_loadw_le.308        loc_load.336 add.8     mem_storew_le
+    loc_loadw_le.312        loc_load.336 add.12    mem_storew_le
+    loc_loadw_le.316        loc_load.336 add.16    mem_storew_le  dropw
+end
+
+# ===== HINTED VERIFICATION DRIVER (GLV + 4-WAY MSM) =============================================
+
+#! Computes `R = u_1·G + u_2·Q` for the secp256k1 generator `G`, the public-key point `Q`,
+#! and two 256-bit scalars `(u_1, u_2)`. This is the inner relation an ECDSA verifier needs
+#! to check; the caller does the final `R.x mod n == r` comparison.
+#!
+#! Why this proc is faster than a straight 256-iter scalar mult. secp256k1 has an
+#! "endomorphism" `φ(x, y) = (β·x mod p, y)` — a cheap map (one base-field multiplication)
+#! that, when applied to any curve point `P`, has the effect of scalar multiplication by a
+#! specific 256-bit integer `λ`: that is, `φ(P) = [λ]P`. Using that, any 256-bit scalar `k`
+#! can be split into a pair of 128-bit signed integers `(k_a, k_b)` satisfying
+#! `k ≡ k_a + k_b·λ (mod n)`, so `[k]P = [k_a]P + [k_b]·φ(P)`. The host computes the split
+#! (`glv_split_k1` event handler) using Babai rounding on a precomputed lattice basis; the
+#! VM-side verifier (`k1_scalar::verify_glv_split`) checks the relation modulo `n` and the
+#! magnitude bounds. Splitting both `u_1` and `u_2` rewrites our equation as a
+#! 4-scalar 128-bit MSM:
+#!     R = k_a_u1·G + k_b_u1·φ(G) + k_a_u2·Q + k_b_u2·φ(Q)
+#! which `msm_4_128_glv_k1` evaluates in 128 doubling iterations rather than 256. Sign bits
+#! from the GLV decomposition are absorbed by negating the corresponding base point in place.
+#! The result is written to the caller's `out_addr` in the standard 20-felt affine layout.
+#!
+#! Stack transition:
+#!   [out_addr, q_addr, u_2_addr, u_1_addr, ...]  ->  [...]
+#!
+#! Local memory layout (mem[0..128]):
+#!   0..20    : G        (hardcoded constant; then in-place ±-negated -> P_1)
+#!   20..40   : φ(G)     (hardcoded constant: (β·G_x mod p, G_y); ±-negated -> P_2)
+#!   40..60   : Q        (copied from q_addr; then in-place ±-negated -> P_3)
+#!   60..80   : φ(Q)     (computed: β·Q_x, Q_y, Q.is_infinity; then in-place ±-negated -> P_4)
+#!   80..98   : verify_glv_split witness for u_1 (mag_a [8] + mag_b [8] + sign_a [1] + sign_b [1])
+#!   100..118 : same for u_2 (offset 100 keeps mag_a word-aligned)
+#!   120..124 : cached (out_addr, u_1_addr, u_2_addr, q_addr)
+@locals(128)
+pub proc verify_glv_hinted
+    # Cache caller addresses.
+    loc_store.120                                        # out_addr
+    loc_store.123                                        # q_addr
+    loc_store.122                                        # u_2_addr
+    loc_store.121                                        # u_1_addr
+
+    # ----- Load G into mem[0..20] -----
+    # G_x (LE u32 limbs): [0x16F81798, 0x59F2815B, 0x2DCE28D9, 0x029BFCDB,
+    #                      0xCE870B07, 0x55A06295, 0xF9DCBBAC, 0x79BE667E].
+    push.0x029BFCDB.0x2DCE28D9.0x59F2815B.0x16F81798
+    loc_storew_le.0 dropw
+    push.0x79BE667E.0xF9DCBBAC.0x55A06295.0xCE870B07
+    loc_storew_le.4 dropw
+    # G_y (LE u32 limbs): [0xFB10D4B8, 0x9C47D08F, 0xA6855419, 0xFD17B448,
+    #                      0x0E1108A8, 0x5DA4FBFC, 0x26A3C465, 0x483ADA77].
+    push.0xFD17B448.0xA6855419.0x9C47D08F.0xFB10D4B8
+    loc_storew_le.8 dropw
+    push.0x483ADA77.0x26A3C465.0x5DA4FBFC.0x0E1108A8
+    loc_storew_le.12 dropw
+    # is_infinity = 0; reserved zeros.
+    padw
+    loc_storew_le.16 dropw
+
+    # ----- φ(G) = (β·G_x mod p, G_y, 0) into mem[20..40] -----
+    # φ(G).x is the precomputed constant β·G_x mod p. Pinned by
+    # `crates/lib/core/tests/math/k1_point.rs::phi_g_x_constant_matches_runtime`.
+    push.0x87284406.0x7f15e98d.0xa7bba044.0x00b88fcb
+    loc_storew_le.20 dropw
+    push.0xbcace2e9.0x9da01887.0xab0102b6.0x96902325
+    loc_storew_le.24 dropw
+    # φ(G).y = G_y, φ(G).is_infinity = 0.
+    padw loc_loadw_le.8   loc_storew_le.28
+    loc_loadw_le.12       loc_storew_le.32  dropw
+    padw  loc_storew_le.36 dropw
+
+    # ----- Copy Q from caller mem[q_addr..q_addr+20] into mem[40..60] -----
+    padw  loc_load.123          mem_loadw_le  loc_storew_le.40
+    loc_load.123 add.4          mem_loadw_le  loc_storew_le.44
+    loc_load.123 add.8          mem_loadw_le  loc_storew_le.48
+    loc_load.123 add.12         mem_loadw_le  loc_storew_le.52
+    loc_load.123 add.16         mem_loadw_le  loc_storew_le.56  dropw
+
+    # ----- Compute φ(Q) into mem[60..80]. Same shape as φ(G) but Q_x is now in local mem. -----
+    push.0x7ae96a2b.0x657c0710.0x6e64479e.0xac3434e9
+    push.0x9cf04975.0x12f58995.0xc1396c28.0x719501ee
+    padw loc_loadw_le.44  padw loc_loadw_le.40
+    exec.f_k1::mul
+    loc_storew_le.60 dropw
+    loc_storew_le.64 dropw
+    padw loc_loadw_le.48  loc_storew_le.68
+    loc_loadw_le.52       loc_storew_le.72  dropw
+    # φ(Q).is_infinity inherits from Q.is_infinity (mem[56]). Reserved zeros at mem[77..80]
+    # come from zero-initialized local memory.
+    loc_load.56  loc_store.76
+
+    # ----- GLV-split u_1 into (|k_a|, sign_a, |k_b|, sign_b) at mem[80..98] -----
+    # verify_glv_split: [out_addr, k_addr, ...] -> [...]. Push k_addr first (deeper), then
+    # out_addr (top).
+    loc_load.121   locaddr.80    exec.k1_scalar::verify_glv_split
+
+    # ----- GLV-split u_2 at mem[100..118] -----
+    loc_load.122   locaddr.100   exec.k1_scalar::verify_glv_split
+
+    # ----- Maybe-negate the four base points in place based on sign bits -----
+    # Sign bits land at mem[96] (sign_a_u1), mem[97] (sign_b_u1), mem[116] (sign_a_u2),
+    # mem[117] (sign_b_u2). For each, if the sign bit is 1, in-place negate the
+    # corresponding base-point slot. point_negate is safe with out_addr == p_addr.
+
+    loc_load.96
+    if.true
+        locaddr.0  dup    exec.point_negate           # P_1 = -G
+    end
+
+    loc_load.97
+    if.true
+        locaddr.20  dup   exec.point_negate           # P_2 = -φ(G)
+    end
+
+    loc_load.116
+    if.true
+        locaddr.40  dup   exec.point_negate           # P_3 = -Q
+    end
+
+    loc_load.117
+    if.true
+        locaddr.60  dup   exec.point_negate           # P_4 = -φ(Q)
+    end
+
+    # ----- Run msm_4_128_glv_k1 -----
+    # Stack convention: [sign_a_u1, sign_b_u1, out_addr, k_4_addr, k_3_addr, k_2_addr,
+    #                    k_1_addr, P_4_addr, P_3_addr, P_2_addr, P_1_addr, ...].
+    # Push deepest first.
+    # k_1 = |k_a_u1| at mem[80..84]; k_2 = |k_b_u1| at mem[88..92] (skipping mag_a's high
+    # 4 limbs which verify_glv_split asserted to be zero); k_3 = |k_a_u2| at mem[100..104];
+    # k_4 = |k_b_u2| at mem[108..112].
+    locaddr.0    locaddr.20  locaddr.40  locaddr.60
+    locaddr.80   locaddr.88  locaddr.100 locaddr.108
+    loc_load.120
+    loc_load.97                                          # sign_b_u1
+    loc_load.96                                          # sign_a_u1
+    exec.msm_4_128_glv_k1
+end

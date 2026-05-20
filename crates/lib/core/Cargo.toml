@@ -41,11 +41,13 @@ miden-air = { workspace = true, optional = true }
 miden-ace-codegen = { workspace = true, optional = true }
 
 # External dependencies
+num = { version = "0.4", default-features = false, features = ["alloc"] }
 thiserror.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true
 miden-ace-codegen.workspace = true
+miden-sz-codegen.workspace = true
 miden-air.workspace = true
 miden-processor = { workspace = true, features = ["testing"] }
 miden-prover.workspace = true

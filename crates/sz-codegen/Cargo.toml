@@ -1,0 +1,20 @@
+[package]
+name = "miden-sz-codegen"
+version.workspace = true
+description = "Schwartz-Zippel MASM codegen for u16-limb modular-multiplication verifiers."
+license.workspace = true
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+edition.workspace = true
+
+[dependencies]
+miden-core = { workspace = true }
+
+[dev-dependencies]
+miden-core = { workspace = true, features = ["std"] }
+
+[[bin]]
+name = "regen"
+path = "src/bin/regen.rs"

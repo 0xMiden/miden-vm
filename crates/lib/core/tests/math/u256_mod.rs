@@ -1,6 +1,7 @@
 use core::ops::{BitAnd, BitOr, BitXor, Not};
 
 use miden_utils_testing::proptest::prelude::*;
+use num::bigint::BigUint;
 
 // MULTIPLICATION
 // ================================================================================================
@@ -1203,20 +1204,20 @@ proptest! {
 // ================================================================================================
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct U256 {
+pub(super) struct U256 {
     lo: u128,
     hi: u128,
 }
 
 impl U256 {
-    const ZERO: Self = Self { lo: 0, hi: 0 };
+    pub(super) const ZERO: Self = Self { lo: 0, hi: 0 };
     const MASK32: u128 = (1u128 << 32) - 1;
 
-    const fn new(lo: u128, hi: u128) -> Self {
+    pub(super) const fn new(lo: u128, hi: u128) -> Self {
         Self { lo, hi }
     }
 
-    fn from_bit(bit: u32) -> Self {
+    pub(super) fn from_bit(bit: u32) -> Self {
         match bit {
             0..=127 => Self::new(1u128 << bit, 0),
             128..=255 => Self::new(0, 1u128 << (bit - 128)),
@@ -1224,7 +1225,7 @@ impl U256 {
         }
     }
 
-    fn from_le_u32_limbs(limbs: [u32; 8]) -> Self {
+    pub(super) fn from_le_u32_limbs(limbs: [u32; 8]) -> Self {
         let lo = limbs[..4]
             .iter()
             .enumerate()
@@ -1236,7 +1237,7 @@ impl U256 {
         Self::new(lo, hi)
     }
 
-    fn to_le_u32_limbs(self) -> [u32; 8] {
+    pub(super) fn to_le_u32_limbs(self) -> [u32; 8] {
         [
             (self.lo & Self::MASK32) as u32,
             ((self.lo >> 32) & Self::MASK32) as u32,
@@ -1249,38 +1250,38 @@ impl U256 {
         ]
     }
 
-    fn to_le_limbs(self) -> Vec<u64> {
+    pub(super) fn to_le_limbs(self) -> Vec<u64> {
         self.to_le_u32_limbs().into_iter().map(u64::from).collect()
     }
 
-    fn overflowing_add(self, rhs: Self) -> (u64, Self) {
+    pub(super) fn overflowing_add(self, rhs: Self) -> (u64, Self) {
         let (lo, carry_lo) = self.lo.overflowing_add(rhs.lo);
         let (hi_partial, carry_hi0) = self.hi.overflowing_add(rhs.hi);
         let (hi, carry_hi1) = hi_partial.overflowing_add(carry_lo as u128);
         (u64::from(carry_hi0 || carry_hi1), Self::new(lo, hi))
     }
 
-    fn wrapping_add(self, rhs: Self) -> Self {
+    pub(super) fn wrapping_add(self, rhs: Self) -> Self {
         self.overflowing_add(rhs).1
     }
 
-    fn widening_add(self, rhs: Self) -> (Self, u64) {
+    pub(super) fn widening_add(self, rhs: Self) -> (Self, u64) {
         let (overflow, sum) = self.overflowing_add(rhs);
         (sum, overflow)
     }
 
-    fn overflowing_sub(self, rhs: Self) -> (u64, Self) {
+    pub(super) fn overflowing_sub(self, rhs: Self) -> (u64, Self) {
         let (lo, borrow_lo) = self.lo.overflowing_sub(rhs.lo);
         let (hi_partial, borrow_hi0) = self.hi.overflowing_sub(rhs.hi);
         let (hi, borrow_hi1) = hi_partial.overflowing_sub(borrow_lo as u128);
         (u64::from(borrow_hi0 || borrow_hi1), Self::new(lo, hi))
     }
 
-    fn wrapping_sub(self, rhs: Self) -> Self {
+    pub(super) fn wrapping_sub(self, rhs: Self) -> Self {
         self.overflowing_sub(rhs).1
     }
 
-    fn wrapping_mul(self, rhs: Self) -> Self {
+    pub(super) fn wrapping_mul(self, rhs: Self) -> Self {
         let lhs = self.to_le_u32_limbs().map(|limb| limb as u128);
         let rhs = rhs.to_le_u32_limbs().map(|limb| limb as u128);
         let mut result = [0u128; 8];
@@ -1504,7 +1505,7 @@ fn regression_pairs() -> Vec<(U256, U256)> {
 /// Strategy that mixes 32-bit boundary values with uniformly random ones. Each variant has equal
 /// probability of being sampled; the boundary cases stress carry/borrow handling and the sign-bit
 /// position within a limb.
-fn boundary_biased_u32() -> impl Strategy<Value = u32> {
+pub(super) fn boundary_biased_u32() -> impl Strategy<Value = u32> {
     prop_oneof![
         Just(0u32),
         Just(1u32),
@@ -1647,16 +1648,67 @@ fn assert_overflowing_mul(a: U256, b: U256) {
     build_test!(&source, &operands).execute().unwrap();
 }
 
-fn push_masm_values(values: &[u64]) -> String {
+pub(super) fn push_masm_values(values: &[u64]) -> String {
     values.iter().rev().map(u64::to_string).collect::<Vec<_>>().join(".")
 }
 
-fn assert_stack_words(values: &[u64]) -> String {
+pub(super) fn assert_stack_words(values: &[u64]) -> String {
     values
         .chunks(4)
         .map(|word| format!("push.{} assert_eqw", push_masm_values(word)))
         .collect::<Vec<_>>()
         .join("\n            ")
+}
+
+/// Render a sequence of `u64` values as a series of `push.{a.b.c.d}` lines suitable for
+/// in-line MASM. Chunked 4-at-a-time with the LAST chunk emitted FIRST (deepest) and the
+/// FIRST chunk LAST (top), and within each chunk values are reversed so the chunk's first
+/// element ends on top.
+pub(super) fn push_masm_felt_sequence(values: &[u64]) -> String {
+    values
+        .chunks(4)
+        .rev()
+        .map(|chunk| format!("push.{}", push_masm_values(chunk)))
+        .collect::<Vec<_>>()
+        .join("\n            ")
+}
+
+/// secp256k1 base-field prime `p_k1 = 2^256 - 2^32 - 977` as a U256.
+pub(super) fn secp256k1_base_prime() -> U256 {
+    U256::from_le_u32_limbs([
+        0xffff_fc2f,
+        0xffff_fffe,
+        0xffff_ffff,
+        0xffff_ffff,
+        0xffff_ffff,
+        0xffff_ffff,
+        0xffff_ffff,
+        0xffff_ffff,
+    ])
+}
+
+/// secp256k1 group order `n_k1` as a U256.
+pub(super) fn secp256k1_scalar_order() -> U256 {
+    U256::from_le_u32_limbs([
+        0xd036_4141,
+        0xbfd2_5e8c,
+        0xaf48_a03b,
+        0xbaae_dce6,
+        0xffff_fffe,
+        0xffff_ffff,
+        0xffff_ffff,
+        0xffff_ffff,
+    ])
+}
+
+pub(super) fn biguint_to_u256(v: &BigUint) -> U256 {
+    let digits = v.to_u32_digits();
+    assert!(digits.len() <= 8, "BigUint exceeds u256 (got {} u32 digits)", digits.len());
+    let mut limbs = [0u32; 8];
+    for (i, &d) in digits.iter().enumerate() {
+        limbs[i] = d;
+    }
+    U256::from_le_u32_limbs(limbs)
 }
 
 fn assert_unary_u256_op(op: &str, value: U256, expected: &[u64]) {
