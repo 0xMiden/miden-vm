@@ -104,7 +104,7 @@ impl Precompile for ChunkTestPrecompile {
     ) -> Result<Node, PrecompileError> {
         let [role, ..] = imm;
         if role == ASSERT_ROLE {
-            let (lhs, rhs) = payload.binary_op_children()?;
+            let (lhs, rhs) = payload.join_children()?;
             if witness.resolve(lhs)? != witness.resolve(rhs)? {
                 return Err(PrecompileError::AssertionFailed);
             }
@@ -181,7 +181,7 @@ fn predicate_preimage_equals_digest_succeeds() {
     // Predicate: preimage's digest == precomputed digest leaf. Reduce drives the chunk's hash
     // and compares against the precomputed leaf, returning the TRUE node on match.
     let assertion =
-        Node::expression(assert_tag(), Payload::binary_op(preimage_digest, digest_leaf_digest));
+        Node::expression(assert_tag(), Payload::join(preimage_digest, digest_leaf_digest));
     state.register(&schema, assertion.clone()).unwrap();
     let result = state.evaluate(&schema, assertion).unwrap();
     assert!(result.is_true_node());
@@ -201,7 +201,7 @@ fn predicate_preimage_mismatch_fails_on_evaluate() {
     let wrong_leaf_digest = state.register(&schema, wrong_leaf).unwrap();
 
     let assertion =
-        Node::expression(assert_tag(), Payload::binary_op(preimage_digest, wrong_leaf_digest));
+        Node::expression(assert_tag(), Payload::join(preimage_digest, wrong_leaf_digest));
     // Register is a pure hint — succeeds even when the predicate doesn't hold.
     state.register(&schema, assertion.clone()).unwrap();
     let err = state.evaluate(&schema, assertion);

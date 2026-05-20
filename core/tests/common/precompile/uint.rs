@@ -238,11 +238,11 @@ impl UintNode {
                 Self::Leaf
             },
             Discriminant::BinaryOp(op) => {
-                let (lhs, rhs) = payload.binary_op_children()?;
+                let (lhs, rhs) = payload.join_children()?;
                 Self::BinaryOp { op, lhs, rhs }
             },
             Discriminant::Eq => {
-                let (lhs, rhs) = payload.binary_op_children()?;
+                let (lhs, rhs) = payload.join_children()?;
                 Self::Eq { lhs, rhs }
             },
         })

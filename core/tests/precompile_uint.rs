@@ -32,17 +32,17 @@ fn end_to_end_register_evaluate_assert_extract() {
     let c = state.register(&schema, leaf(5)).unwrap();
     let expected = state.register(&schema, leaf(35)).unwrap();
     let add = state
-        .register(&schema, Node::expression(Uint::add_tag(), Payload::binary_op(a, b)))
+        .register(&schema, Node::expression(Uint::add_tag(), Payload::join(a, b)))
         .unwrap();
     let mul = state
-        .register(&schema, Node::expression(Uint::mul_tag(), Payload::binary_op(add, c)))
+        .register(&schema, Node::expression(Uint::mul_tag(), Payload::join(add, c)))
         .unwrap();
 
     let canonical = state.evaluate(&schema, state.get(&mul).unwrap().clone()).unwrap();
     assert_eq!(canonical, leaf(35));
 
     // Predicate verification: register interns the eq node; evaluate returns Node::TRUE.
-    let assertion = Node::expression(Uint::eq_tag(), Payload::binary_op(mul, expected));
+    let assertion = Node::expression(Uint::eq_tag(), Payload::join(mul, expected));
     state.register(&schema, assertion.clone()).unwrap();
     let result = state.evaluate(&schema, assertion).unwrap();
     assert!(result.is_true_node());
@@ -59,7 +59,7 @@ fn predicate_mismatch_surfaces_as_error_on_evaluate() {
     let mut state = DeferredState::new();
     let a = state.register(&schema, leaf(7)).unwrap();
     let b = state.register(&schema, leaf(8)).unwrap();
-    let assertion = Node::expression(Uint::eq_tag(), Payload::binary_op(a, b));
+    let assertion = Node::expression(Uint::eq_tag(), Payload::join(a, b));
     // Register is a pure hint — succeeds even when the predicate doesn't hold.
     state.register(&schema, assertion.clone()).unwrap();
     // The mismatch surfaces only when we explicitly verify.

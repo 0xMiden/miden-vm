@@ -247,7 +247,7 @@ impl Precompile for ArithTestPrecompile {
                 Ok(Node::expression(Tag::new(Self::id(), imm), Payload::new(*felts)))
             },
             d if d == Self::D_ADD || d == Self::D_MUL => {
-                let (lhs, rhs) = payload.binary_op_children()?;
+                let (lhs, rhs) = payload.join_children()?;
                 let a = Self::limbs_of(&witness.resolve(lhs)?)?;
                 let b = Self::limbs_of(&witness.resolve(rhs)?)?;
                 let out = if d == Self::D_ADD {
@@ -258,7 +258,7 @@ impl Precompile for ArithTestPrecompile {
                 Ok(Self::leaf_node(out))
             },
             d if d == Self::D_EQ => {
-                let (lhs, rhs) = payload.binary_op_children()?;
+                let (lhs, rhs) = payload.join_children()?;
                 if witness.resolve(lhs)? != witness.resolve(rhs)? {
                     return Err(PrecompileError::AssertionFailed);
                 }
@@ -291,16 +291,14 @@ fn deferred_end_to_end_register_eval_assert() {
     let b_digest = b.digest();
     let c_digest = c.digest();
     let d_digest = d.digest();
-    let add =
-        Node::expression(ArithTestPrecompile::add_tag(), Payload::binary_op(a_digest, b_digest));
+    let add = Node::expression(ArithTestPrecompile::add_tag(), Payload::join(a_digest, b_digest));
     let add_digest = add.digest();
-    let mul =
-        Node::expression(ArithTestPrecompile::mul_tag(), Payload::binary_op(add_digest, c_digest));
+    let mul = Node::expression(ArithTestPrecompile::mul_tag(), Payload::join(add_digest, c_digest));
     let mul_digest = mul.digest();
     // Predicate node: same shape as a binary op (expression body, two child digests), just with
     // ASSERT_EQ as the tag.
     let assertion =
-        Node::expression(ArithTestPrecompile::eq_tag(), Payload::binary_op(mul_digest, d_digest));
+        Node::expression(ArithTestPrecompile::eq_tag(), Payload::join(mul_digest, d_digest));
 
     // Build the program: register every node, then evaluate the predicate to verify it.
     let mut src = String::from("begin\n");
@@ -351,10 +349,8 @@ fn deferred_evaluate_pushes_canonical_form_to_advice() {
     // (a + b). Confirm the advice-pop yields a leaf node with payload limb0 = 7.
     let a = arith_leaf(3);
     let b = arith_leaf(4);
-    let add = Node::expression(
-        ArithTestPrecompile::add_tag(),
-        Payload::binary_op(a.digest(), b.digest()),
-    );
+    let add =
+        Node::expression(ArithTestPrecompile::add_tag(), Payload::join(a.digest(), b.digest()));
 
     let mut src = String::from("begin\n");
     emit_register(&mut src, a);
@@ -399,7 +395,7 @@ fn deferred_evaluate_on_predicate_pushes_nothing_to_advice() {
     // therefore underflows and fails execution.
     let a = arith_leaf(7);
     let a_eq_a =
-        Node::expression(ArithTestPrecompile::eq_tag(), Payload::binary_op(a.digest(), a.digest()));
+        Node::expression(ArithTestPrecompile::eq_tag(), Payload::join(a.digest(), a.digest()));
 
     let mut src = String::from("begin\n");
     emit_register(&mut src, a);
@@ -433,7 +429,7 @@ fn deferred_register_predicate_does_not_verify() {
     let a = arith_leaf(7);
     let b = arith_leaf(8);
     let mismatch =
-        Node::expression(ArithTestPrecompile::eq_tag(), Payload::binary_op(a.digest(), b.digest()));
+        Node::expression(ArithTestPrecompile::eq_tag(), Payload::join(a.digest(), b.digest()));
 
     // Just register — execution must succeed because register is a pure host hint.
     let mut src = String::from("begin\n");
@@ -455,7 +451,7 @@ fn deferred_evaluate_predicate_mismatch_fails_execution() {
     let a = arith_leaf(7);
     let b = arith_leaf(8);
     let mismatch =
-        Node::expression(ArithTestPrecompile::eq_tag(), Payload::binary_op(a.digest(), b.digest()));
+        Node::expression(ArithTestPrecompile::eq_tag(), Payload::join(a.digest(), b.digest()));
 
     let mut src = String::from("begin\n");
     emit_register(&mut src, a);
