@@ -115,10 +115,6 @@ const _: () = assert!(CORE_STORAGE_WIDTH == RANGE_CHECK_TRACE_OFFSET + RANGE_CHE
 // exactly at the end of the core matrix.
 const _: () = assert!(super::CHIPLETS_OFFSET == CORE_STORAGE_WIDTH);
 
-// TODO: Could be tailored more efficiently?
-#[cfg(feature = "concurrent")]
-const ROW_MAJOR_CHUNK_SIZE: usize = 512;
-
 impl MainTrace {
     pub fn from_parts(
         core_rm: Vec<Felt>,
@@ -216,44 +212,6 @@ impl MainTrace {
         } else {
             dst[NCC..NCC + CW].fill(ZERO);
         }
-    }
-
-    /// Row-major matrix of this trace.
-    pub fn to_row_major(&self) -> RowMajorMatrix<Felt> {
-        let h = self.num_rows();
-        let w = TRACE_WIDTH;
-
-        let total = h * w;
-        let mut data = Vec::with_capacity(total);
-        // SAFETY: the loop below writes exactly `h * w` elements.
-        #[allow(clippy::uninit_vec)]
-        unsafe {
-            data.set_len(total);
-        }
-
-        let fill_rows = |chunk: &mut [Felt], start_row: usize| {
-            let chunk_rows = chunk.len() / w;
-            for i in 0..chunk_rows {
-                let row = start_row + i;
-                self.project_row(row, &mut chunk[i * w..(i + 1) * w]);
-            }
-        };
-
-        #[cfg(not(feature = "concurrent"))]
-        fill_rows(&mut data, 0);
-
-        #[cfg(feature = "concurrent")]
-        {
-            use miden_crypto::parallel::*;
-            let rows_per_chunk = ROW_MAJOR_CHUNK_SIZE;
-            data.par_chunks_mut(rows_per_chunk * w)
-                .enumerate()
-                .for_each(|(chunk_idx, chunk)| {
-                    fill_rows(chunk, chunk_idx * rows_per_chunk);
-                });
-        }
-
-        RowMajorMatrix::new(data, w)
     }
 
     /// Splits the trace into the per-AIR `(Core, Chiplets)` matrix pair used by the multi-AIR
@@ -889,7 +847,7 @@ mod tests {
     use miden_core::utils::Matrix;
 
     use super::*;
-    use crate::{constraints::columns::NUM_CORE_COLS, trace::TRACE_WIDTH};
+    use crate::trace::TRACE_WIDTH;
 
     /// Builds a deterministic Parts-form `MainTrace` with `num_rows` rows where each cell
     /// holds `Felt::from_u32(row * TRACE_WIDTH + col)` for col positions matching the
@@ -912,31 +870,6 @@ mod tests {
         MainTrace::from_parts(core_rm, chiplets_rm, RowIndex::from(0))
     }
 
-    /// `to_core_chiplets_matrices` from a `Parts`-form trace produces the same data that the
-    /// equivalent unified-row-major projection would: Core matches `to_row_major()[..51]` and
-    /// Chiplets matches `to_row_major()[51..72]` row by row.
-    #[test]
-    fn split_matches_row_major_projection_parts() {
-        const NUM_ROWS: usize = 8;
-        let trace = deterministic_parts_trace(NUM_ROWS);
-        let unified = trace.to_row_major();
-        let (core, chiplets) = trace.to_core_chiplets_matrices();
-
-        assert_eq!(core.height(), NUM_ROWS);
-        assert_eq!(core.width(), NUM_CORE_COLS);
-        assert_eq!(chiplets.height(), NUM_ROWS);
-        assert_eq!(chiplets.width(), CHIPLETS_WIDTH);
-
-        for row in 0..NUM_ROWS {
-            let unified_row = unified.row_slice(row).expect("unified row in bounds");
-            let core_row = core.row_slice(row).expect("core row in bounds");
-            let chip_row = chiplets.row_slice(row).expect("chiplets row in bounds");
-
-            assert_eq!(&core_row[..], &unified_row[..NUM_CORE_COLS]);
-            assert_eq!(&chip_row[..], &unified_row[NUM_CORE_COLS..NUM_CORE_COLS + CHIPLETS_WIDTH]);
-        }
-    }
-
     #[test]
     fn into_split_matches_borrowed_split() {
         const NUM_ROWS: usize = 8;
@@ -948,70 +881,5 @@ mod tests {
         assert_eq!(ref_chip.width(), moved_chip.width());
         assert_eq!(ref_core.values, moved_core.values);
         assert_eq!(ref_chip.values, moved_chip.values);
-    }
-
-    /// Builds a Parts-form `MainTrace` with independent (power-of-two) Core and Chiplets
-    /// heights; every cell is a distinct non-zero value so the projection tail (zeros) is
-    /// distinguishable from real data.
-    fn parts_trace_with_heights(core_rows: usize, chip_rows: usize) -> MainTrace {
-        let mut core_rm = Vec::with_capacity(core_rows * CORE_STORAGE_WIDTH);
-        for row in 0..core_rows {
-            for col in 0..CORE_STORAGE_WIDTH {
-                core_rm.push(Felt::from_u32((row * CORE_STORAGE_WIDTH + col + 1) as u32));
-            }
-        }
-        let mut chiplets_rm = Vec::with_capacity(chip_rows * CHIPLETS_WIDTH);
-        for row in 0..chip_rows {
-            for c in 0..CHIPLETS_WIDTH {
-                chiplets_rm.push(Felt::from_u32((row * CHIPLETS_WIDTH + c + 1) as u32));
-            }
-        }
-        MainTrace::from_parts(core_rm, chiplets_rm, RowIndex::from(0))
-    }
-
-    /// Pins the documented `to_row_major` contract: it is a *projection* of the two
-    /// independently-sized per-AIR matrices, not a constraint-satisfying unified trace.
-    #[test]
-    fn to_row_major_is_a_projection_when_heights_differ() {
-        const NCC: usize = CORE_STORAGE_WIDTH;
-        const CW: usize = CHIPLETS_WIDTH;
-
-        // Core taller than Chiplets: Chiplets columns past the Chiplets height are ZERO,
-        // i.e. the projection does not satisfy the Chiplets `chip_clk`/padding rules.
-        {
-            let trace = parts_trace_with_heights(8, 4);
-            assert_eq!(trace.num_rows(), 8);
-            let unified = trace.to_row_major();
-            let (core, chiplets) = trace.to_core_chiplets_matrices();
-            for row in 0..8 {
-                let u = unified.row_slice(row).expect("row in bounds");
-                assert_eq!(&u[..NCC], &core.row_slice(row).unwrap()[..]);
-                if row < 4 {
-                    assert_eq!(&u[NCC..NCC + CW], &chiplets.row_slice(row).unwrap()[..]);
-                } else {
-                    assert!(u[NCC..NCC + CW].iter().all(|&v| v == ZERO));
-                }
-            }
-        }
-
-        // Chiplets taller than Core: Core tail replicates the last Core row, but `clk`
-        // stays strictly monotone across the projection.
-        {
-            let trace = parts_trace_with_heights(4, 8);
-            assert_eq!(trace.num_rows(), 8);
-            let unified = trace.to_row_major();
-            let (core, _chiplets) = trace.to_core_chiplets_matrices();
-            let last_core = core.row_slice(3).unwrap().to_vec();
-            for row in 4..8 {
-                let u = unified.row_slice(row).expect("row in bounds");
-                for (col, &cell) in u[..NCC].iter().enumerate() {
-                    if col == CLK_COL_IDX {
-                        assert_eq!(cell, Felt::from_u32(row as u32));
-                    } else {
-                        assert_eq!(cell, last_core[col]);
-                    }
-                }
-            }
-        }
     }
 }

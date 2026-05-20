@@ -364,15 +364,11 @@ mod fast_parallel {
         // Build trace using parallel trace generation
         let trace = build_trace(trace_inputs).unwrap();
 
-        // Convert trace to row-major format for proving
-        let trace_matrix = trace.to_row_major_matrix();
-
         // Build public inputs
         let (public_values, kernel_felts) = trace.public_inputs().to_air_inputs();
 
         // Multi-AIR splitting: derive Core + Chiplets matrices for prove_multi.
         let (core_matrix, chiplets_matrix) = trace.to_core_chiplets_matrices();
-        let _ = trace_matrix; // exercise unified row-major path for legacy callers.
 
         // Generate proof using Blake3_256
         let blake3_config = config::blake3_256_config(config::pcs_params());

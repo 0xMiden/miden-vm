@@ -16,7 +16,7 @@ use crate::{
     fast::ExecutionOutput,
     field::QuadFelt,
     precompile::{PrecompileRequest, PrecompileTranscript},
-    utils::{Matrix, RowMajorMatrix},
+    utils::RowMajorMatrix,
 };
 
 pub(crate) mod utils;
@@ -346,13 +346,6 @@ impl ExecutionTrace {
             ],
             &challenges,
         );
-    }
-
-    /// Returns the main trace as a row-major matrix for proving.
-    pub fn to_row_major_matrix(&self) -> RowMajorMatrix<Felt> {
-        let row_major = self.main_trace.to_row_major();
-        debug_assert_eq!(row_major.width(), TRACE_WIDTH);
-        row_major
     }
 
     /// Splits the trace into the per-AIR `(Core, Chiplets)` matrix pair consumed by the
