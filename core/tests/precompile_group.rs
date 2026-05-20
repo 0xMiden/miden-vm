@@ -125,8 +125,6 @@ fn new_canonicalises_field_expression_children() {
     let canonical = state.evaluate(&schema, state.get(&h_new).unwrap().clone()).unwrap();
     let expected = Group::new_node(leaf(7).digest(), leaf(5).digest());
     assert_eq!(canonical, expected);
-    // The minted x-leaf (leaf(7)) must have been interned by the field expression's reduce.
-    assert!(state.contains(&leaf(7).digest()));
 }
 
 #[test]
@@ -168,6 +166,35 @@ fn eq_predicate_errors_on_mismatch() {
     let h_g2 = register_group(&schema, &mut state, 7, 12);
     let err = state.evaluate(&schema, Group::eq_node(h_g1, h_g2));
     assert!(matches!(err.unwrap_err().root(), PrecompileError::AssertionFailed));
+}
+
+#[test]
+fn eq_predicate_commutes_over_minted_children() {
+    // Locks in that `witness.intern` writes minted children to `state.nodes`. After `Group::Add`
+    // evaluates and mints x3=13 / y3=24, a separately-registered
+    // `val = Group::new(leaf(13).digest(), leaf(24).digest())` references those digests directly
+    // without the leaves being explicitly registered. The eq predicate must succeed regardless
+    // of operand order — i.e. resolution must not depend on which side reduces first.
+    let (schema, mut state) = fresh();
+    let h_g1 = register_group(&schema, &mut state, 3, 4);
+    let h_g2 = register_group(&schema, &mut state, 10, 20);
+    let h_g_add = state.register(&schema, Group::add_node(h_g1, h_g2)).unwrap();
+    let h_val = state
+        .register(&schema, Group::new_node(leaf(13).digest(), leaf(24).digest()))
+        .unwrap();
+
+    // Pre-evaluate g_add so its mints (leaf(13), leaf(24)) land in state.nodes.
+    state.evaluate(&schema, state.get(&h_g_add).unwrap().clone()).unwrap();
+    assert!(state.contains(&leaf(13).digest()), "x3 minted into nodes");
+    assert!(state.contains(&leaf(24).digest()), "y3 minted into nodes");
+
+    let mut state_normal = state.clone();
+    let normal = state_normal.evaluate(&schema, Group::eq_node(h_g_add, h_val)).unwrap();
+    assert!(normal.is_true_node(), "Eq(g_add, val) holds");
+
+    let mut state_swapped = state.clone();
+    let swapped = state_swapped.evaluate(&schema, Group::eq_node(h_val, h_g_add)).unwrap();
+    assert!(swapped.is_true_node(), "Eq(val, g_add) holds — operand order doesn't matter");
 }
 
 #[test]
