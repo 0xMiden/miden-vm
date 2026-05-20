@@ -16,7 +16,7 @@ use miden_core::{
     Felt, ZERO,
     deferred::{
         DeferredState, Node, NodeType, Payload, Precompile, PrecompileError, PrecompileRegistry,
-        TRUE_TAG, Tag, TagInfo, WitnessBuilder, precompile_id, true_node,
+        Tag, WitnessBuilder, precompile_id, true_node,
     },
 };
 
@@ -83,24 +83,15 @@ impl Precompile for ChunkTestPrecompile {
         Self::id()
     }
 
-    fn decode(&self, imm: [Felt; 3]) -> Option<TagInfo> {
+    fn decode(&self, imm: [Felt; 3]) -> Option<NodeType> {
         let [role, n, _] = imm;
         match role {
             // Preimage chunk reduces to a digest leaf; `n` is the chunk count.
-            r if r == PREIMAGE_ROLE => Some(TagInfo {
-                node_type: NodeType::Chunks(n.as_canonical_u64() as u32),
-                evaluates_to: digest_tag(),
-            }),
+            r if r == PREIMAGE_ROLE => Some(NodeType::Chunks(n.as_canonical_u64() as u32)),
             // Digest leaf is self-evaluating with 8 raw felts.
-            r if r == DIGEST_ROLE && n == ZERO => Some(TagInfo {
-                node_type: NodeType::Value,
-                evaluates_to: digest_tag(),
-            }),
+            r if r == DIGEST_ROLE && n == ZERO => Some(NodeType::Value),
             // Assertion is a binary predicate (two child digests, evaluates to TRUE).
-            r if r == ASSERT_ROLE && n == ZERO => Some(TagInfo {
-                node_type: NodeType::Binary,
-                evaluates_to: TRUE_TAG,
-            }),
+            r if r == ASSERT_ROLE && n == ZERO => Some(NodeType::Binary),
             _ => None,
         }
     }

@@ -13,8 +13,8 @@ use std::sync::Arc;
 use miden_core::{
     Felt, ZERO,
     deferred::{
-        Node, NodeType, Payload, Precompile, PrecompileError, TRUE_TAG, Tag, TagInfo,
-        WitnessBuilder, precompile_id, true_node,
+        Node, NodeType, Payload, Precompile, PrecompileError, Tag, WitnessBuilder, precompile_id,
+        true_node,
     },
 };
 
@@ -60,12 +60,9 @@ impl Precompile for Sig {
         Self::id()
     }
 
-    fn decode(&self, imm: [Felt; 3]) -> Option<TagInfo> {
+    fn decode(&self, imm: [Felt; 3]) -> Option<NodeType> {
         match Discriminant::classify(imm[0])? {
-            Discriminant::Verify => Some(TagInfo {
-                node_type: NodeType::Chunks(Self::SIG_CHUNKS),
-                evaluates_to: TRUE_TAG,
-            }),
+            Discriminant::Verify => Some(NodeType::Chunks(Self::SIG_CHUNKS)),
         }
     }
 

@@ -10,8 +10,8 @@ use miden_assembly::Assembler;
 use miden_core::{
     ZERO,
     deferred::{
-        Node, NodeType, Payload, Precompile, PrecompileError, TRUE_DIGEST, Tag, TagInfo,
-        WitnessBuilder, precompile_id, true_node,
+        Node, NodeType, Payload, Precompile, PrecompileError, TRUE_DIGEST, Tag, WitnessBuilder,
+        precompile_id, true_node,
     },
 };
 use miden_processor::{
@@ -225,14 +225,13 @@ impl Precompile for ArithTestPrecompile {
         Self::id()
     }
 
-    fn decode(&self, imm: [Felt; 3]) -> Option<TagInfo> {
-        let (node_type, evaluates_to) = match imm[0] {
-            d if d == Self::D_LEAF => (NodeType::Value, Self::leaf_tag()),
-            d if d == Self::D_ADD || d == Self::D_MUL => (NodeType::Binary, Self::leaf_tag()),
-            d if d == Self::D_EQ => (NodeType::Binary, miden_core::deferred::TRUE_TAG),
-            _ => return None,
-        };
-        Some(TagInfo { node_type, evaluates_to })
+    fn decode(&self, imm: [Felt; 3]) -> Option<NodeType> {
+        match imm[0] {
+            d if d == Self::D_LEAF => Some(NodeType::Value),
+            d if d == Self::D_ADD || d == Self::D_MUL => Some(NodeType::Binary),
+            d if d == Self::D_EQ => Some(NodeType::Binary),
+            _ => None,
+        }
     }
 
     fn reduce(
@@ -642,17 +641,11 @@ impl Precompile for ChunkTestPrecompile {
         Self::id()
     }
 
-    fn decode(&self, imm: [Felt; 3]) -> Option<TagInfo> {
+    fn decode(&self, imm: [Felt; 3]) -> Option<NodeType> {
         let [role, n, _] = imm;
         match role {
-            r if r == PREIMAGE_ROLE => Some(TagInfo {
-                node_type: NodeType::Chunks(n.as_canonical_u64() as u32),
-                evaluates_to: digest_tag(),
-            }),
-            r if r == DIGEST_ROLE && n == ZERO => Some(TagInfo {
-                node_type: NodeType::Value,
-                evaluates_to: digest_tag(),
-            }),
+            r if r == PREIMAGE_ROLE => Some(NodeType::Chunks(n.as_canonical_u64() as u32)),
+            r if r == DIGEST_ROLE && n == ZERO => Some(NodeType::Value),
             _ => None,
         }
     }

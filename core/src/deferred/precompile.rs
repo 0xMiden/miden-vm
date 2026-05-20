@@ -15,7 +15,7 @@ use alloc::vec::Vec;
 
 use miden_crypto::hash::blake::Blake3_256;
 
-use super::{Node, Payload, PrecompileError, TagInfo, WitnessBuilder};
+use super::{Node, NodeType, Payload, PrecompileError, WitnessBuilder};
 use crate::Felt;
 
 // PRECOMPILE TRAIT
@@ -46,12 +46,12 @@ pub trait Precompile: Send + Sync {
         Vec::new()
     }
 
-    /// Decode the precompile-local immediate felts (`tag.imm`) to a [`TagInfo`]. Returning
-    /// `None` rejects the tag; the registry wraps that into the framework error, tagged with
-    /// this precompile's name. `tag.id` has already been matched to this precompile by the
-    /// registry, so `decode` only inspects the felts it cares about — there is no
+    /// Decode the precompile-local immediate felts (`tag.imm`) to the tag's [`NodeType`].
+    /// Returning `None` rejects the tag; the registry wraps that into the framework error,
+    /// tagged with this precompile's name. `tag.id` has already been matched to this precompile
+    /// by the registry, so `decode` only inspects the felts it cares about — there is no
     /// framework-mandated reserved felt.
-    fn decode(&self, imm: [Felt; 3]) -> Option<TagInfo>;
+    fn decode(&self, imm: [Felt; 3]) -> Option<NodeType>;
 
     /// Reduce a node owned by this precompile to its canonical form, given the node's immediate
     /// felts and body. The registry has already routed by `tag.id`, so an implementor never
@@ -66,14 +66,16 @@ pub trait Precompile: Send + Sync {
     /// child back, and `witness.intern(child)` to mint a freshly-computed child (compound
     /// canonicals).
     ///
-    /// Output must match `decode(imm).evaluates_to`:
-    /// - **Self-evaluating leaf** (`evaluates_to == own tag`): return the node rebuilt from
-    ///   `(Tag::new(self.id(), imm), payload)`, optionally first validating the payload.
+    /// Canonical-form conventions (per-precompile intent — not enforced by the framework, which
+    /// only requires the result to be a valid `Node`):
+    /// - **Self-evaluating leaf**: return the node rebuilt from `(Tag::new(self.id(), imm),
+    ///   payload)`, optionally first validating the payload.
     /// - **Producing op**: resolve the children, combine, return a new node with the canonical tag
     ///   (minting compound-canonical children via `witness.intern`).
-    /// - **Predicate** (`evaluates_to == TRUE_TAG`): resolve the operands, check the predicate,
-    ///   return [`super::true_node`] on success or [`PrecompileError::AssertionFailed`] on
-    ///   mismatch.
+    /// - **Predicate**: resolve the operands, check the predicate, return [`super::true_node`] on
+    ///   success or [`PrecompileError::AssertionFailed`] on mismatch. The framework detects a
+    ///   predicate result post-reduce via [`Node::is_true_node`](super::Node::is_true_node) and
+    ///   skips the advice-stack push for it.
     /// - **Chunk body**: typically reduces to a digest-leaf expression.
     ///
     /// Payload-validity checks (e.g. "leaf limbs must be u32-canonical") live here — they fire

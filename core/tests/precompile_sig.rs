@@ -6,9 +6,7 @@ mod common;
 use common::precompile::{hash::Hash, sig::Sig, uint::Uint};
 use miden_core::{
     Felt, ZERO,
-    deferred::{
-        DeferredState, Node, NodeType, Precompile, PrecompileError, PrecompileRegistry, TRUE_TAG,
-    },
+    deferred::{DeferredState, Node, NodeType, Precompile, PrecompileError, PrecompileRegistry},
 };
 use proptest::prelude::*;
 
@@ -48,16 +46,15 @@ fn verify_fails_for_zeroed_placeholder_sig() {
 // ================================================================================================
 
 #[test]
-fn decode_verify_is_chunk3_predicate() {
-    let info = Sig.decode([Felt::from_u32(Sig::VERIFY_TAG_ID), ZERO, ZERO]).unwrap();
-    assert!(matches!(info.node_type, NodeType::Chunks(3)));
-    assert_eq!(info.evaluates_to, TRUE_TAG);
+fn decode_verify_is_chunk3() {
+    let node_type = Sig.decode([Felt::from_u32(Sig::VERIFY_TAG_ID), ZERO, ZERO]).unwrap();
+    assert!(matches!(node_type, NodeType::Chunks(3)));
 }
 
 #[test]
 fn decode_unknown_discriminant_rejected() {
-    let info = Sig.decode([Felt::from_u32(1), ZERO, ZERO]);
-    assert!(info.is_none());
+    let node_type = Sig.decode([Felt::from_u32(1), ZERO, ZERO]);
+    assert!(node_type.is_none());
 }
 
 proptest! {
