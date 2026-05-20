@@ -34,7 +34,8 @@ latest_release_tag_on_head() {
     git -C "$repo_root" tag --merged HEAD --list 'v[0-9]*.[0-9]*.[0-9]*' \
         | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
         | sort -V \
-        | tail -n1
+        | tail -n1 \
+        || true
 }
 
 parse_version "$workspace_version" current
