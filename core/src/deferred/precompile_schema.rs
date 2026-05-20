@@ -6,7 +6,7 @@ use super::precompile::{Precompile, precompile_id};
 use crate::{
     Felt, ZERO,
     deferred::{
-        DeferredError, DeferredState, Digest, Node, PrecompileError, Tag, TagInfo, WitnessBuilder,
+        DeferredError, DeferredState, Digest, Node, NodeType, PrecompileError, Tag, WitnessBuilder,
     },
 };
 
@@ -87,10 +87,10 @@ impl PrecompileRegistry {
         Ok(())
     }
 
-    /// Decode `tag` to its [`TagInfo`] by routing [`Tag::imm`](crate::deferred::Tag) to the
+    /// Decode `tag` to its [`NodeType`] by routing [`Tag::imm`](crate::deferred::Tag) to the
     /// precompile owning [`Tag::id`](crate::deferred::Tag). An unknown id is rejected by the
     /// registry itself (not name-wrapped); a precompile's own rejection is name-wrapped.
-    pub fn decode(&self, tag: Tag) -> Result<TagInfo, PrecompileError> {
+    pub fn decode(&self, tag: Tag) -> Result<NodeType, PrecompileError> {
         let p = self.precompiles.get(&tag.id).ok_or(PrecompileError::InvalidNode)?;
         p.decode(tag.imm).ok_or_else(|| PrecompileError::Precompile {
             name: p.name(),
@@ -117,7 +117,7 @@ impl PrecompileRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::deferred::{NodeType, Payload};
+    use crate::deferred::Payload;
 
     /// An honest minimal precompile fixture — its `id()` *is* its `precompile_id`, so it always
     /// passes the builder validator. Distinct `name`s yield distinct ids; identical names
@@ -144,14 +144,11 @@ mod tests {
         fn id(&self) -> Felt {
             precompile_id(self)
         }
-        fn decode(&self, imm: [Felt; 3]) -> Option<TagInfo> {
+        fn decode(&self, imm: [Felt; 3]) -> Option<NodeType> {
             if imm != [ZERO; 3] {
                 return None;
             }
-            Some(TagInfo {
-                node_type: NodeType::Value,
-                evaluates_to: self.tag(),
-            })
+            Some(NodeType::Value)
         }
         fn reduce(
             &self,
@@ -172,8 +169,8 @@ mod tests {
         let tag_b = b.tag();
         let registry = PrecompileRegistry::default().with_precompile(a).with_precompile(b);
 
-        assert_eq!(registry.decode(tag_a).unwrap().evaluates_to, tag_a);
-        assert_eq!(registry.decode(tag_b).unwrap().evaluates_to, tag_b);
+        assert!(matches!(registry.decode(tag_a).unwrap(), NodeType::Value));
+        assert!(matches!(registry.decode(tag_b).unwrap(), NodeType::Value));
     }
 
     #[test]

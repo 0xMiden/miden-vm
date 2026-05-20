@@ -9,8 +9,8 @@
 use miden_core::{
     Felt, ZERO,
     deferred::{
-        DeferredError, Digest, Node, NodeType, Payload, Precompile, PrecompileError, TRUE_TAG, Tag,
-        TagInfo, WitnessBuilder, precompile_id, true_node,
+        DeferredError, Digest, Node, NodeType, Payload, Precompile, PrecompileError, Tag,
+        WitnessBuilder, precompile_id, true_node,
     },
 };
 
@@ -143,19 +143,13 @@ impl Precompile for Uint {
         vec![Self::leaf_node([0; 8]), Self::leaf_node(one), Self::leaf_node([u32::MAX; 8])]
     }
 
-    fn decode(&self, imm: [Felt; 3]) -> Option<TagInfo> {
-        let kind = Discriminant::classify(imm[0])?;
+    fn decode(&self, imm: [Felt; 3]) -> Option<NodeType> {
         // Leaf is a `Value` (8 raw u32 limbs); op-nodes and the eq predicate are `Binary`
         // (children encoded as `lhs_digest || rhs_digest`).
-        let node_type = match kind {
+        Some(match Discriminant::classify(imm[0])? {
             Discriminant::Leaf => NodeType::Value,
             Discriminant::BinaryOp(_) | Discriminant::Eq => NodeType::Binary,
-        };
-        let evaluates_to = match kind {
-            Discriminant::Leaf | Discriminant::BinaryOp(_) => Self::leaf_tag(),
-            Discriminant::Eq => TRUE_TAG,
-        };
-        Some(TagInfo { node_type, evaluates_to })
+        })
     }
 
     fn reduce(

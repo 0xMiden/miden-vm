@@ -10,8 +10,8 @@
 use miden_core::{
     Felt, ZERO,
     deferred::{
-        Digest, Node, NodeType, Payload, Precompile, PrecompileError, TRUE_TAG, Tag, TagInfo,
-        WitnessBuilder, precompile_id, true_node,
+        Digest, Node, NodeType, Payload, Precompile, PrecompileError, Tag, WitnessBuilder,
+        precompile_id, true_node,
     },
 };
 
@@ -90,18 +90,12 @@ impl Precompile for Group {
         Self::id()
     }
 
-    fn decode(&self, imm: [Felt; 3]) -> Option<TagInfo> {
+    fn decode(&self, imm: [Felt; 3]) -> Option<NodeType> {
         // All Group nodes pack two child digests in their payload — `new` references the
         // coordinate leaves, `add`/`sub` reference the group operands, `eq` references the two
         // compared group elements. So every tag is `NodeType::Binary`.
-        let evaluates_to = match Discriminant::classify(imm[0])? {
-            Discriminant::New | Discriminant::Add | Discriminant::Sub => Self::new_tag(),
-            Discriminant::Eq => TRUE_TAG,
-        };
-        Some(TagInfo {
-            node_type: NodeType::Binary,
-            evaluates_to,
-        })
+        Discriminant::classify(imm[0])?;
+        Some(NodeType::Binary)
     }
 
     fn reduce(

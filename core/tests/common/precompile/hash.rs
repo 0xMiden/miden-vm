@@ -18,8 +18,8 @@ use std::sync::Arc;
 use miden_core::{
     Felt, ZERO,
     deferred::{
-        DeferredError, Digest, Node, NodeType, Payload, Precompile, PrecompileError, TRUE_TAG, Tag,
-        TagInfo, WitnessBuilder, precompile_id, true_node,
+        DeferredError, Digest, Node, NodeType, Payload, Precompile, PrecompileError, Tag,
+        WitnessBuilder, precompile_id, true_node,
     },
 };
 
@@ -121,26 +121,17 @@ impl Precompile for Hash {
         Self::id()
     }
 
-    fn decode(&self, imm: [Felt; 3]) -> Option<TagInfo> {
+    fn decode(&self, imm: [Felt; 3]) -> Option<NodeType> {
         match Discriminant::classify(imm[0])? {
             Discriminant::Preimage => {
                 // `imm[1]` carries n_bytes; the chunk count is derived.
                 let n_bytes = u32::try_from(imm[1].as_canonical_u64()).ok()?;
-                Some(TagInfo {
-                    node_type: NodeType::Chunks(Self::n_chunks(n_bytes)),
-                    evaluates_to: Self::digest_tag(),
-                })
+                Some(NodeType::Chunks(Self::n_chunks(n_bytes)))
             },
             // Self-evaluating leaf carrying 8 raw felts of digest data.
-            Discriminant::Digest => Some(TagInfo {
-                node_type: NodeType::Value,
-                evaluates_to: Self::digest_tag(),
-            }),
+            Discriminant::Digest => Some(NodeType::Value),
             // Binary predicate over two child digests.
-            Discriminant::Eq => Some(TagInfo {
-                node_type: NodeType::Binary,
-                evaluates_to: TRUE_TAG,
-            }),
+            Discriminant::Eq => Some(NodeType::Binary),
         }
     }
 
