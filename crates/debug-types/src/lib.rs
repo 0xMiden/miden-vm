@@ -149,18 +149,15 @@ fn has_windows_drive_prefix(path: &str) -> bool {
 
 #[cfg(feature = "std")]
 fn has_restricted_scheme_prefix_without_slashes(uri: &str) -> bool {
-    match uri.split_once(':') {
+    matches!(
+        uri.split_once(':'),
         Some((prefix, rest))
             if !rest.starts_with("//")
                 && !prefix.is_empty()
                 && prefix
                     .chars()
-                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.')) =>
-        {
-            true
-        },
-        _ => false,
-    }
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
+    )
 }
 
 #[cfg(feature = "std")]

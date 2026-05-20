@@ -1522,7 +1522,7 @@ dependencies = [
  "thiserror",
  "toml",
  "walkdir",
- "windows-sys",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1652,7 +1652,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "toml",
- "windows-sys",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
