@@ -9,10 +9,11 @@ miden-assembly-syntax-current = { package = "miden-assembly-syntax", path = "../
 miden-mast-package-current = { package = "miden-mast-package", path = "../crates/mast-package" }
 miden-package-registry-current = { package = "miden-package-registry", path = "../crates/package-registry", features = ["resolver"] }
 
-miden-assembly-previous = { package = "miden-assembly", git = "https://github.com/0xMiden/miden-vm", tag = "v0.22.4" }
-miden-assembly-syntax-previous = { package = "miden-assembly-syntax", git = "https://github.com/0xMiden/miden-vm", tag = "v0.22.4" }
-miden-mast-package-previous = { package = "miden-mast-package", git = "https://github.com/0xMiden/miden-vm", tag = "v0.22.4" }
-miden-package-registry-previous = { package = "miden-package-registry", git = "https://github.com/0xMiden/miden-vm", tag = "v0.22.4", features = ["resolver"] }
+# The release wrapper rewrites these tags to the latest release tag on main.
+miden-assembly-previous = { package = "miden-assembly", git = "https://github.com/0xMiden/miden-vm", tag = "v0.23.0" }
+miden-assembly-syntax-previous = { package = "miden-assembly-syntax", git = "https://github.com/0xMiden/miden-vm", tag = "v0.23.0" }
+miden-mast-package-previous = { package = "miden-mast-package", git = "https://github.com/0xMiden/miden-vm", tag = "v0.23.0" }
+miden-package-registry-previous = { package = "miden-package-registry", git = "https://github.com/0xMiden/miden-vm", tag = "v0.23.0", features = ["resolver"] }
 ---
 
 use std::{
