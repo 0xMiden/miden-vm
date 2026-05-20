@@ -59,7 +59,7 @@ pub trait Precompile: Send + Sync {
     /// (`decode` having succeeded means that classification cannot fail here), then walks the
     /// `payload`. To emit a node, rebuild the tag as `Tag::new(self.id(), imm)`.
     ///
-    /// `payload` is a [`Payload`](super::Payload): use `payload.binary_op_children()?` to pull
+    /// `payload` is a [`Payload`](super::Payload): use `payload.join_children()?` to pull
     /// the two child digests of an op/predicate, `payload.as_felts()?` for a value leaf, or
     /// `payload.as_chunks()?` for bulk data (the `?` surfaces a wrong-shape body as a
     /// [`PrecompileError`]). Call `witness.resolve(d)` on each child digest to get the canonical

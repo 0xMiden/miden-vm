@@ -42,7 +42,7 @@ pub enum WireBody {
     Value([Felt; 8]),
     /// Two indices into earlier wire entries. Each is either a valid index `< current_idx` or
     /// [`TRUE_INDEX`] for the transcript terminal. Rehydration reconstructs the digest-form
-    /// payload as `Payload::binary_op(digests[lhs], digests[rhs])`.
+    /// payload as `Payload::join(digests[lhs], digests[rhs])`.
     Binary { lhs: u32, rhs: u32 },
     /// `n` chunks of bulk data. Self-describing on the wire (length-prefixed) so deserialization
     /// doesn't depend on the schema for chunk counts.
