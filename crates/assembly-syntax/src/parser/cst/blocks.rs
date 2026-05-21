@@ -73,8 +73,15 @@ fn lower_operation(
 
 /// Lowers an `if.true` / `if.false` operation.
 ///
-/// This preserves legacy semantics for empty branches: a missing `then` branch is only tolerated
-/// when an `else` branch exists, in which case the empty side is lowered as an explicit `nop`.
+/// The CST parser can represent empty branches directly, so lowering accepts these forms:
+///
+/// * `if.<cond> end`
+/// * `if.<cond> else end`
+/// * `if.<cond> else <ops> end`
+///
+/// When no source operations are present in either branch, both branches lower to empty blocks.
+/// For non-empty then-branches with omitted/empty else-branches, we preserve legacy behavior and
+/// synthesize a `nop` else-branch.
 fn lower_if_op(context: &mut LoweringContext<'_>, op: &CstIfOp) -> Result<ast::Op, ParsingError> {
     let span = context.parse().span_for_node(op.syntax());
     let cond = parse_if_condition(context, op)?;
@@ -84,30 +91,20 @@ fn lower_if_op(context: &mut LoweringContext<'_>, op: &CstIfOp) -> Result<ast::O
         message: "expected a block body for `if`".to_string(),
     })?;
     let else_node = op.else_block();
-
     let then_has_ops = has_source_operations(&then_node);
-    let else_has_ops = else_node.as_ref().is_some_and(has_source_operations);
 
     let then_blk = if then_has_ops {
         lower_block(context, &then_node)?
-    } else if else_node.is_some() {
-        nop_block(span)
     } else {
-        return Err(ParsingError::InvalidSyntax {
-            span: context.parse().span_for_node(then_node.syntax()),
-            message: "expected a non-empty `if` block".to_string(),
-        });
+        empty_block(context.parse().span_for_node(then_node.syntax()))
     };
 
     let else_blk = match else_node {
-        Some(else_node) => {
-            if !else_has_ops {
-                nop_block(span)
-            } else {
-                lower_block(context, &else_node)?
-            }
-        },
-        None => nop_block(span),
+        Some(else_node) if has_source_operations(&else_node) => lower_block(context, &else_node)?,
+        Some(_else_node) if then_has_ops => nop_block(span),
+        Some(else_node) => empty_block(context.parse().span_for_node(else_node.syntax())),
+        None if then_has_ops => nop_block(span),
+        None => empty_block(span),
     };
 
     if cond {
@@ -121,7 +118,7 @@ fn lower_if_op(context: &mut LoweringContext<'_>, op: &CstIfOp) -> Result<ast::O
     }
 }
 
-/// Lowers a `while.true` operation and enforces a non-empty body.
+/// Lowers a `while.true` operation.
 fn lower_while_op(
     context: &mut LoweringContext<'_>,
     op: &CstWhileOp,
@@ -132,7 +129,7 @@ fn lower_while_op(
         span,
         message: "expected a block body for `while`".to_string(),
     })?;
-    let body = lower_required_block(context, &body, "expected a non-empty `while` block")?;
+    let body = lower_block(context, &body)?;
     Ok(ast::Op::While { span, body })
 }
 
@@ -147,7 +144,7 @@ fn lower_repeat_op(
         span,
         message: "expected a block body for `repeat`".to_string(),
     })?;
-    let body = lower_required_block(context, &body, "expected a non-empty `repeat` block")?;
+    let body = lower_block(context, &body)?;
     Ok(ast::Op::Repeat { span, count, body })
 }
 
@@ -260,6 +257,11 @@ fn header_tokens_before_first_block(
 /// Returns true when the CST block contains at least one explicit source operation.
 fn has_source_operations(block: &CstBlock) -> bool {
     block.operations().next().is_some()
+}
+
+/// Constructs an empty block for source-level empty structured branches/bodies.
+fn empty_block(span: SourceSpan) -> ast::Block {
+    ast::Block::new(span, vec![])
 }
 
 /// Builds the legacy fallback diagnostic for malformed instruction spellings.
