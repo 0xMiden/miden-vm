@@ -18,8 +18,7 @@ use crate::{
     Felt, Word,
     mast::{
         DecoratorId, DecoratorStore, ExecutableMastForest, MastForest, MastForestError,
-        MastNodeFingerprint, MastNodeId,
-        digest,
+        MastNodeFingerprint, MastNodeId, digest,
     },
     operations::opcodes,
     utils::LookupByIdx,
