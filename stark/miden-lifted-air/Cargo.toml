@@ -21,8 +21,5 @@ p3-util.workspace       = true
 
 thiserror.workspace = true
 
-[dev-dependencies]
-p3-goldilocks.workspace = true
-
 [lints]
 workspace = true
