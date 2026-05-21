@@ -7,7 +7,7 @@
 use alloc::vec::Vec;
 
 use miden_core::{
-    Felt, Word, ZERO,
+    Felt, ZERO,
     deferred::{Digest, Node, NodeType, Payload, PrecompileError, Tag},
 };
 
@@ -49,31 +49,14 @@ const CHUNK_PTR_OFFSET: usize = 5;
 fn read_tag_and_payload(processor: &FastProcessor) -> (Tag, Payload) {
     let lo = processor.stack_get_word(DEFERRED_PAYLOAD_LO_OFFSET);
     let hi = processor.stack_get_word(DEFERRED_PAYLOAD_HI_OFFSET);
-    let tag_word = processor.stack_get_word(DEFERRED_TAG_OFFSET);
-    let tag = Tag::from_word([tag_word[0], tag_word[1], tag_word[2], tag_word[3]]);
+    let tag = Tag::from_word(processor.stack_get_word(DEFERRED_TAG_OFFSET).into());
     let payload = Payload::new([lo[0], lo[1], lo[2], lo[3], hi[0], hi[1], hi[2], hi[3]]);
     (tag, payload)
 }
 
-/// Builds an expression-bodied `Node` for the given `(tag, payload)`. Returns
-/// `PrecompileError::InvalidNode` if the tag decodes to a chunk body — chunks must be registered
-/// via `adv.register_deferred_chunk`, not `adv.register_deferred`.
-fn build_standard_node(
-    node_type: NodeType,
-    tag: Tag,
-    payload: Payload,
-) -> Result<Node, PrecompileError> {
-    match node_type {
-        // Both Value and Join live in `Payload::Expression` at the in-memory level — the
-        // 8-felt payload is the same; the precompile decides whether the bytes encode raw data
-        // (Value) or two child digests (Join) when it reduces.
-        NodeType::Value | NodeType::Join => Ok(Node::expression(tag, payload)),
-        NodeType::Chunks(_) => Err(PrecompileError::InvalidNode),
-    }
-}
-
-/// Handles `SystemEvent::DeferredRegister`. Reads `(tag, payload)` off the operand stack, asks
-/// the precompile registry to decode the tag, constructs the matching `Node`, and registers it.
+/// Handles `SystemEvent::DeferredRegister`. Reads `(tag, payload)` off the operand stack and
+/// registers an expression node; `register` validates the tag via the precompile registry and
+/// rejects chunk-bodied tags (those go through `adv.register_deferred_chunk`).
 ///
 /// Pushes the registered node's digest onto the advice stack so MASM can chain it into
 /// downstream nodes (e.g. as a child digest of a Join op) or into a transcript-logging step
@@ -83,9 +66,7 @@ pub(super) fn handle_deferred_register(
 ) -> Result<(), SystemEventError> {
     let (tag, payload) = read_tag_and_payload(processor);
     let (state, precompiles) = processor.deferred_view_mut();
-    let node_type = precompiles.decode(tag)?;
-    let node = build_standard_node(node_type, tag, payload)?;
-    let digest = state.register(precompiles, node)?;
+    let digest = state.register(precompiles, Node::expression(tag, payload))?;
     processor.advice.push_stack_word(&digest)?;
     Ok(())
 }
@@ -113,9 +94,7 @@ pub(super) fn handle_deferred_register(
 pub(super) fn handle_deferred_evaluate(
     processor: &mut FastProcessor,
 ) -> Result<(), SystemEventError> {
-    let digest_word = processor.stack_get_word(DEFERRED_NODE_DIGEST_OFFSET);
-    let digest: Digest =
-        Word::new([digest_word[0], digest_word[1], digest_word[2], digest_word[3]]);
+    let digest: Digest = processor.stack_get_word(DEFERRED_NODE_DIGEST_OFFSET);
 
     let (state, precompiles) = processor.deferred_view_mut();
     let canonical = state.evaluate_digest(precompiles, digest)?;
@@ -157,8 +136,7 @@ pub(super) fn handle_deferred_evaluate(
 pub(super) fn handle_deferred_register_chunk(
     processor: &mut FastProcessor,
 ) -> Result<(), SystemEventError> {
-    let tag_word = processor.stack_get_word(CHUNK_TAG_OFFSET);
-    let tag = Tag::from_word([tag_word[0], tag_word[1], tag_word[2], tag_word[3]]);
+    let tag = Tag::from_word(processor.stack_get_word(CHUNK_TAG_OFFSET).into());
     let ptr = processor.stack_get(CHUNK_PTR_OFFSET).as_canonical_u64();
 
     // Decode `n` from the tag before any memory reads — the precompile is the source of truth
