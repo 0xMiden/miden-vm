@@ -616,16 +616,11 @@ fn pad_core_row_major(core_trace_data: &mut Vec<Felt>, main_trace_len: usize) {
 
     // Safety: per our documented safety guarantees, we know that `total_program_rows > 0`,
     // and row `total_program_rows - 1` is initialized.
-    let (last_hasher_first_half, last_stack): ([Felt; 4], [Felt; STACK_TRACE_WIDTH]) = {
+    let (last_hasher_first_half, last_stack): ([Felt; 4], StackCols<Felt>) = {
         let last: &CoreCols<Felt> = core_trace_data[last_row_start..last_row_start + w].borrow();
         let hs = &last.decoder.hasher_state;
         let last_hasher: [Felt; 4] = [hs[0], hs[1], hs[2], hs[3]];
-        let mut last_stack = [ZERO; STACK_TRACE_WIDTH];
-        last_stack[..16].copy_from_slice(&last.stack.top);
-        last_stack[16] = last.stack.b0;
-        last_stack[17] = last.stack.b1;
-        last_stack[18] = last.stack.h0;
-        (last_hasher, last_stack)
+        (last_hasher, last.stack.clone())
     };
 
     let mut template_data = [ZERO; CORE_STORAGE_WIDTH];
@@ -654,10 +649,7 @@ fn pad_core_row_major(core_trace_data: &mut Vec<Felt>, main_trace_len: usize) {
         // ------------------------
 
         // Pad stack columns with the last value in each column (analogous to Stack::into_trace())
-        template.stack.top.copy_from_slice(&last_stack[..16]);
-        template.stack.b0 = last_stack[16];
-        template.stack.b1 = last_stack[17];
-        template.stack.h0 = last_stack[18];
+        template.stack = last_stack;
     }
 
     // System columns
