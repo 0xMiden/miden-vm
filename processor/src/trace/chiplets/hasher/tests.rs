@@ -781,11 +781,7 @@ fn init_leaf(value: u64) -> Digest {
 ///
 /// Checks selectors (s0, s1, s2), state columns (h0..h11), and node_index.
 /// Does NOT check mrupdate_id (which is overwritten by the hasher on copy).
-fn check_memoized_trace(
-    trace: &[Vec<Felt>],
-    original: core::ops::Range<usize>,
-    copied: core::ops::Range<usize>,
-) {
+fn check_memoized_trace(trace: &[Vec<Felt>], original: Range<usize>, copied: Range<usize>) {
     assert_eq!(
         original.len(),
         copied.len(),
