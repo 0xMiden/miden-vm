@@ -7,7 +7,7 @@ use miden_air::trace::chiplets::bitwise::{
 use miden_core::{ZERO, field::PrimeCharacteristicRing};
 use miden_utils_testing::rand::rand_value;
 
-use super::{Bitwise, Felt, TraceFragment};
+use super::{Bitwise, ChipletTraceFragment, Felt};
 
 #[test]
 fn bitwise_init() {
@@ -205,7 +205,7 @@ fn bitwise_multiple() {
 /// instance.
 fn build_trace(bitwise: Bitwise, num_rows: usize) -> Vec<Vec<Felt>> {
     let mut band = Felt::zero_vec(TRACE_WIDTH * num_rows);
-    let mut fragment = TraceFragment::row_major(&mut band, TRACE_WIDTH, 0, TRACE_WIDTH);
+    let mut fragment = ChipletTraceFragment::row_major(&mut band, TRACE_WIDTH, 0, TRACE_WIDTH);
     bitwise.fill_trace(&mut fragment);
 
     (0..TRACE_WIDTH)

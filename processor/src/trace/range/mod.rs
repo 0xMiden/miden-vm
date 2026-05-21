@@ -87,7 +87,6 @@ impl RangeChecker {
         v_off: usize,
         range_table_len: usize,
         core_height: usize,
-        main_trace_len: usize,
     ) {
         let num_padding_rows = core_height - range_table_len;
 
@@ -99,12 +98,6 @@ impl RangeChecker {
             self.emit_table_rows(&mut sink, num_padding_rows)
         };
         assert_eq!(end, core_height, "range checker table length mismatch vs core height");
-
-        // Unified-view extension rows: m stays 0 (already zero), v = u16::MAX.
-        let v_max = Felt::new_unchecked(u16::MAX as u64);
-        for row in core_height..main_trace_len {
-            core_data[row * stride + v_off] = v_max;
-        }
     }
 
     /// Emits the range-checker table rows (bridge rows + value rows + the trailing extra

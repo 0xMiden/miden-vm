@@ -45,7 +45,7 @@ pub fn borrow_chiplet<T, S>(slice: &[T]) -> &S {
 /// | w0, w1, w2   | h0..h3              | h4..h7   | h8..h11     | m  --  --  --   |
 /// ```
 #[repr(C)]
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct PermutationCols<T> {
     /// S-box witness columns (same physical columns as hasher selectors).
     pub witnesses: [T; NUM_SELECTORS],
@@ -127,7 +127,7 @@ impl<T: Copy> PermutationCols<T> {
 /// |          | h0..h3              | h4..h7   | h8..h11     | i  mr  bnd  dir |
 /// ```
 #[repr(C)]
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct ControllerCols<T> {
     /// Hasher-internal sub-selector: `s0 = 1` on controller input rows, 0 on output/padding.
     pub s0: T,
@@ -213,7 +213,7 @@ impl<T: Copy> ControllerCols<T> {
 /// Bit decomposition columns (`a_bits`, `b_bits`) are in **little-endian** order:
 /// `value = bits[0] + 2*bits[1] + 4*bits[2] + 8*bits[3]`.
 #[repr(C)]
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct BitwiseCols<T> {
     /// Operation flag: 0 = AND, 1 = XOR.
     pub op_flag: T,
@@ -239,7 +239,7 @@ pub struct BitwiseCols<T> {
 /// When reading from a new word address (first access to a context/addr pair), the
 /// `values` are initialized to zero.
 #[repr(C)]
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct MemoryCols<T> {
     /// Read/write flag (0 = write, 1 = read).
     pub is_read: T,
@@ -292,7 +292,7 @@ pub struct MemoryCols<T> {
 ///
 /// Use `ace.read()` / `ace.eval()` for typed overlays of the mode columns.
 #[repr(C)]
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct AceCols<T> {
     /// Start-of-circuit flag (1 on the first row of a new circuit evaluation).
     pub s_start: T,
@@ -358,7 +358,7 @@ impl<T: Copy> AceCols<T> {
 /// (`m_0`, `m_1`) track how many times each wire participates in circuit gates, used
 /// by the wiring bus to verify correct wire connections.
 #[repr(C)]
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct AceReadCols<T> {
     /// Number of EVAL rows that follow this READ block.
     pub num_eval: T,
@@ -376,7 +376,7 @@ pub struct AceReadCols<T> {
 /// (`id_1`, `id_2`) and one output (`id_0`). The third wire's ID and value occupy the
 /// same physical columns as `num_eval`/`unused`/`m_1` in READ mode.
 #[repr(C)]
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct AceEvalCols<T> {
     /// ID of the third wire (second input / right operand).
     pub id_2: T,
@@ -430,7 +430,7 @@ const _: () = {
 
 /// Kernel ROM chiplet columns (5 columns), viewed from `chiplets[5..10]`.
 #[repr(C)]
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct KernelRomCols<T> {
     /// Number of SYSCALLs to this procedure (CALL-label multiplicity).
     pub multiplicity: T,

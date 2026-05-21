@@ -5,7 +5,7 @@ use crate::trace::decoder::{
 
 /// Decoder columns in the main execution trace (24 columns).
 #[repr(C)]
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct DecoderCols<T> {
     /// Block address (hasher table row pointer).
     pub addr: T,
@@ -51,7 +51,7 @@ impl<T: Copy> DecoderCols<T> {
 
 /// Named end-block flag overlay for `hasher_state[4..8]`.
 #[repr(C)]
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct EndBlockFlags<T> {
     pub is_loop_body: T,
     pub is_loop: T,

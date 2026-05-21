@@ -7,8 +7,8 @@ use miden_air::trace::chiplets::hasher::{
 use miden_core::chiplets::hasher::apply_permutation;
 
 use super::{
-    Felt, HasherState, MerklePath, MerkleRootUpdate, ONE, OpBatch, TraceFragment, Word as Digest,
-    ZERO,
+    ChipletTraceFragment, Felt, HasherState, MerklePath, MerkleRootUpdate, ONE, OpBatch,
+    Word as Digest, ZERO,
 };
 
 mod trace;
@@ -309,7 +309,7 @@ impl Hasher {
     ///
     /// Finalization pads the controller region and appends one 16-row permutation cycle
     /// per unique input state. This is the only place where the perm segment is materialized.
-    pub(super) fn fill_trace(mut self, trace: &mut TraceFragment) {
+    pub(super) fn fill_trace(mut self, trace: &mut ChipletTraceFragment) {
         if !self.finalized {
             let estimated_len = self.estimate_trace_len();
             self.finalize_trace();

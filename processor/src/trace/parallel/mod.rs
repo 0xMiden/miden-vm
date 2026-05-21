@@ -202,7 +202,6 @@ pub fn build_trace_with_max_len(
         CORE_TRACE_WIDTH + 1,
         range_table_len,
         core_height,
-        core_height,
     );
 
     // Create the MainTrace

@@ -15,7 +15,7 @@ use miden_core::{mast::OpBatch, program::Kernel};
 use crate::{
     Felt, ONE, Word, ZERO,
     crypto::merkle::MerklePath,
-    trace::{RowIndex, TraceFragment, range::RangeChecker},
+    trace::{ChipletTraceFragment, RowIndex, range::RangeChecker},
 };
 
 mod bitwise;
@@ -283,12 +283,14 @@ impl Chiplets {
         let (ace_band, rest) = rest.split_at_mut(ace_len * W);
         let (kernel_band, _padding) = rest.split_at_mut(kernel_rom_len * W);
 
-        let mut hasher_fragment = TraceFragment::row_major(hasher_band, W, 1, HASHER_WIDTH);
-        let mut bitwise_fragment = TraceFragment::row_major(bitwise_band, W, 2, BITWISE_WIDTH);
-        let mut memory_fragment = TraceFragment::row_major(memory_band, W, 3, MEMORY_WIDTH);
-        let mut ace_fragment = TraceFragment::row_major(ace_band, W, 4, ACE_CHIPLET_NUM_COLS);
+        let mut hasher_fragment = ChipletTraceFragment::row_major(hasher_band, W, 1, HASHER_WIDTH);
+        let mut bitwise_fragment =
+            ChipletTraceFragment::row_major(bitwise_band, W, 2, BITWISE_WIDTH);
+        let mut memory_fragment = ChipletTraceFragment::row_major(memory_band, W, 3, MEMORY_WIDTH);
+        let mut ace_fragment =
+            ChipletTraceFragment::row_major(ace_band, W, 4, ACE_CHIPLET_NUM_COLS);
         let mut kernel_rom_fragment =
-            TraceFragment::row_major(kernel_band, W, 5, KERNEL_ROM_TRACE_WIDTH);
+            ChipletTraceFragment::row_major(kernel_band, W, 5, KERNEL_ROM_TRACE_WIDTH);
 
         rayon::scope(|s| {
             s.spawn(move |_| {

@@ -55,7 +55,7 @@ impl<'a, E: Copy> RowMajorTraceWriter<'a, E> {
 /// A chiplet occupies a contiguous band of rows and a contiguous band of columns
 /// `[col_start, col_start + num_cols)`, so chiplet-local column `c` maps to global column
 /// `col_start + c`. Writes land directly in that band of the shared row-major buffer.
-pub struct TraceFragment<'a> {
+pub struct ChipletTraceFragment<'a> {
     /// Contiguous `num_rows * stride` row-major slice (this chiplet's rows).
     band: &'a mut [Felt],
     stride: usize,
@@ -64,7 +64,7 @@ pub struct TraceFragment<'a> {
     num_cols: usize,
 }
 
-impl<'a> TraceFragment<'a> {
+impl<'a> ChipletTraceFragment<'a> {
     /// Creates a row-major fragment over `band` (a contiguous `num_rows * stride` slice)
     /// whose `num_cols` chiplet-local columns map to global columns
     /// `[col_start, col_start + num_cols)`.

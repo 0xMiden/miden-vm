@@ -33,7 +33,7 @@ use crate::trace::{CHIPLETS_WIDTH, TRACE_WIDTH};
 /// `[T; NUM_CORE_COLS]` slice or the prefix of a `[T; TRACE_WIDTH]` row via
 /// `Borrow<CoreCols<T>>`.
 #[repr(C)]
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct CoreCols<T> {
     pub system: SystemCols<T>,
     pub decoder: DecoderCols<T>,
@@ -73,7 +73,7 @@ impl<T> BorrowMut<CoreCols<T>> for [T] {
 /// `[T; NUM_CHIPLETS_COLS]` slice or the suffix of a `[T; TRACE_WIDTH]` row via
 /// `Borrow<ChipletCols<T>>`.
 #[repr(C)]
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct ChipletCols<T> {
     pub(crate) chiplets: [T; CHIPLETS_WIDTH - 2],
     /// Permutation segment selector: consumed by `build_chiplet_selectors`.

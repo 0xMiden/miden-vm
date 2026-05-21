@@ -14,8 +14,9 @@ use miden_core::{
 };
 
 use super::{
-    CLK_COL_IDX, CTX_COL_IDX, D_INV_COL_IDX, D0_COL_IDX, D1_COL_IDX, EMPTY_WORD, Felt, Memory,
-    TraceFragment, V_COL_RANGE, WORD_ADDR_HI_COL_IDX, WORD_ADDR_LO_COL_IDX, WORD_COL_IDX,
+    CLK_COL_IDX, CTX_COL_IDX, ChipletTraceFragment, D_INV_COL_IDX, D0_COL_IDX, D1_COL_IDX,
+    EMPTY_WORD, Felt, Memory, V_COL_RANGE, WORD_ADDR_HI_COL_IDX, WORD_ADDR_LO_COL_IDX,
+    WORD_COL_IDX,
     segment::{MemoryAccessType, MemoryOperation},
 };
 use crate::{ContextId, MemoryAddress, MemoryError, trace::range::RangeChecker};
@@ -511,7 +512,7 @@ impl MemoryAccess {
 fn build_trace(mem: Memory, num_rows: usize) -> Vec<Vec<Felt>> {
     let mut band = Felt::zero_vec(MEMORY_TRACE_WIDTH * num_rows);
     let mut fragment =
-        TraceFragment::row_major(&mut band, MEMORY_TRACE_WIDTH, 0, MEMORY_TRACE_WIDTH);
+        ChipletTraceFragment::row_major(&mut band, MEMORY_TRACE_WIDTH, 0, MEMORY_TRACE_WIDTH);
     mem.fill_trace(&mut fragment);
 
     (0..MEMORY_TRACE_WIDTH)

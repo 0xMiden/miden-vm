@@ -14,8 +14,8 @@ use miden_core::{
 use miden_utils_testing::rand::rand_array;
 
 use super::{
-    Digest, Felt, Hasher, HasherState, LINEAR_HASH, MP_VERIFY, MR_UPDATE_NEW, MR_UPDATE_OLD,
-    RETURN_HASH, RETURN_STATE, Selectors, TraceFragment, absorb_into_state, get_digest, init_state,
+    ChipletTraceFragment, Digest, Felt, Hasher, HasherState, LINEAR_HASH, MP_VERIFY, MR_UPDATE_NEW,
+    MR_UPDATE_OLD, RETURN_HASH, RETURN_STATE, Selectors, absorb_into_state, get_digest, init_state,
     init_state_from_words,
 };
 
@@ -538,7 +538,7 @@ fn hash_memoization_basic_blocks_check() {
 fn build_trace(hasher: Hasher) -> Vec<Vec<Felt>> {
     let trace_len = hasher.trace_len();
     let mut band = Felt::zero_vec(TRACE_WIDTH * trace_len);
-    let mut fragment = TraceFragment::row_major(&mut band, TRACE_WIDTH, 0, TRACE_WIDTH);
+    let mut fragment = ChipletTraceFragment::row_major(&mut band, TRACE_WIDTH, 0, TRACE_WIDTH);
     hasher.fill_trace(&mut fragment);
     (0..TRACE_WIDTH)
         .map(|c| (0..trace_len).map(|r| band[r * TRACE_WIDTH + c]).collect())

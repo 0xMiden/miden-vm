@@ -4,8 +4,9 @@ use miden_air::trace::chiplets::bitwise::{
     A_COL_IDX, A_COL_RANGE, B_COL_IDX, B_COL_RANGE, BITWISE_AND, BITWISE_XOR, OUTPUT_COL_IDX,
     PREV_OUTPUT_COL_IDX, TRACE_WIDTH,
 };
+use miden_core::utils::{Matrix, RowMajorMatrix};
 
-use crate::{Felt, ZERO, operation::OperationError, trace::TraceFragment};
+use crate::{Felt, ZERO, operation::OperationError, trace::ChipletTraceFragment};
 
 #[cfg(test)]
 mod tests;
@@ -50,8 +51,7 @@ const INIT_TRACE_CAPACITY: usize = 128;
 ///   contains the full result of the bitwise operation.
 #[derive(Debug)]
 pub struct Bitwise {
-    /// Row-major trace buffer: `TRACE_WIDTH` contiguous cells per row.
-    trace: Vec<Felt>,
+    trace: RowMajorMatrix<Felt>,
 }
 
 impl Bitwise {
@@ -60,7 +60,10 @@ impl Bitwise {
     /// Returns a new [Bitwise] initialized with an empty trace.
     pub fn new() -> Self {
         Self {
-            trace: Vec::with_capacity(INIT_TRACE_CAPACITY * TRACE_WIDTH),
+            trace: RowMajorMatrix::new(
+                Vec::with_capacity(INIT_TRACE_CAPACITY * TRACE_WIDTH),
+                TRACE_WIDTH,
+            ),
         }
     }
 
@@ -70,7 +73,7 @@ impl Bitwise {
     /// Returns length of execution trace required to describe bitwise operations executed on the
     /// VM.
     pub fn trace_len(&self) -> usize {
-        self.trace.len() / TRACE_WIDTH
+        self.trace.height()
     }
 
     // TRACE MUTATORS
@@ -136,12 +139,12 @@ impl Bitwise {
     // --------------------------------------------------------------------------------------------
 
     /// Fills the provided trace fragment with trace data from this bitwise helper instance.
-    pub fn fill_trace(self, trace: &mut TraceFragment) {
+    pub fn fill_trace(self, trace: &mut ChipletTraceFragment) {
         // make sure fragment dimensions are consistent with the dimensions of this trace
         debug_assert_eq!(self.trace_len(), trace.len(), "inconsistent trace lengths");
         debug_assert_eq!(TRACE_WIDTH, trace.width(), "inconsistent trace widths");
 
-        trace.copy_rows_from(&self.trace);
+        trace.copy_rows_from(&self.trace.values);
     }
 
     // HELPER METHODS
@@ -173,7 +176,7 @@ impl Bitwise {
         row[PREV_OUTPUT_COL_IDX] = Felt::new_unchecked(prev_output);
         row[OUTPUT_COL_IDX] = Felt::new_unchecked(output);
 
-        self.trace.extend_from_slice(&row);
+        self.trace.values.extend_from_slice(&row);
     }
 }
 

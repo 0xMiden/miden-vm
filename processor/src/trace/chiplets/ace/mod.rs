@@ -3,7 +3,7 @@ use alloc::collections::BTreeMap;
 use miden_air::trace::{RowIndex, chiplets::ace::ACE_CHIPLET_NUM_COLS};
 use miden_core::{Felt, field::PrimeCharacteristicRing};
 
-use crate::trace::TraceFragment;
+use crate::trace::ChipletTraceFragment;
 
 mod trace;
 pub use trace::CircuitEvaluation;
@@ -35,7 +35,7 @@ impl Ace {
     }
 
     /// Fills the portion of the main trace allocated to the ACE chiplet.
-    pub(crate) fn fill_trace(self, trace: &mut TraceFragment) {
+    pub(crate) fn fill_trace(self, trace: &mut ChipletTraceFragment) {
         // make sure fragment dimensions are consistent with the dimensions of this trace
         debug_assert_eq!(self.trace_len(), trace.len(), "inconsistent trace lengths");
         debug_assert_eq!(ACE_CHIPLET_NUM_COLS, trace.width(), "inconsistent trace widths");
