@@ -64,6 +64,10 @@ fn add_produces_minted_new_and_passes_eq_against_expected() {
     let h_add = state.register(&schema, Group::add_node(h_g1, h_g2)).unwrap();
     let eq_result = state.evaluate(&schema, Group::eq_node(h_add, h_expected)).unwrap();
     assert!(eq_result.is_true_node());
+
+    // Defense-in-depth: log the proven equality and round-trip the transcript — this re-runs
+    // the Group reduce (including its mid-`reduce` minting) through rehydrate.
+    common::log_and_verify(&schema, &mut state, Group::eq_node(h_add, h_expected));
 }
 
 #[test]
