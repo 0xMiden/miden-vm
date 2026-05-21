@@ -14,7 +14,10 @@ use p3_symmetric::{Hash, TruncatedPermutation};
 use rand::{SeedableRng, rngs::SmallRng};
 
 pub use super::{Felt, PackedFelt, QuadFelt};
-use crate::{MultiAir, ProverStatement, Statement, testing::TEST_SEED};
+use crate::{
+    air::{MultiAir, ProverStatement, Statement},
+    testing::TEST_SEED,
+};
 
 // =============================================================================
 // Base field/hash configuration
@@ -156,7 +159,7 @@ where
     assert_eq!(output.digest, verifier_digest);
 
     // Re-parse transcript from a fresh challenger and verify digest agreement.
-    let (_, reparse_digest) = crate::proof::StarkTranscript::from_proof(
+    let (_, reparse_digest) = crate::proof::StarkProof::from_data(
         &config,
         prover_statement.statement(),
         &output.proof,

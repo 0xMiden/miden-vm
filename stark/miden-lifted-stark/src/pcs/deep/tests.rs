@@ -3,7 +3,7 @@
 use alloc::vec;
 
 use p3_util::reverse_bits_len;
-use proof::DeepTranscript;
+use proof::DeepProof;
 use prover::DeepPoly;
 use rand::{RngExt, SeedableRng, distr::StandardUniform, prelude::SmallRng};
 use verifier::DeepOracle;
@@ -12,9 +12,12 @@ use super::*;
 use crate::{
     domain::LiftedDomain,
     lmcs::{Lmcs, LmcsTree, tree_indices::TreeIndices},
-    testing::configs::goldilocks_poseidon2::{
-        Felt, Lmcs as BaseLmcs, QuadFelt, prover_channel_with_commitment, test_lmcs,
-        verifier_channel_with_commitment,
+    testing::{
+        canonical_domain,
+        configs::goldilocks_poseidon2::{
+            Felt, Lmcs as BaseLmcs, QuadFelt, prover_channel_with_commitment, test_lmcs,
+            verifier_channel_with_commitment,
+        },
     },
 };
 
@@ -28,8 +31,7 @@ fn deep_quotient_end_to_end() {
     let log_blowup: u8 = 2;
     let log_lde_height: u8 = 10;
     let lde_height = 1 << log_lde_height as usize;
-    let max_domain: LiftedDomain<Felt> =
-        LiftedDomain::canonical(log_lde_height - log_blowup, log_blowup);
+    let max_domain: LiftedDomain<Felt> = canonical_domain(log_lde_height - log_blowup, log_blowup);
 
     let params = DeepParams { deep_pow_bits: 1 };
     // Two random opening points
@@ -98,14 +100,14 @@ fn deep_quotient_end_to_end() {
     let verifier_digest = verifier_channel.finalize().expect("transcript should finalize cleanly");
     assert_eq!(prover_digest, verifier_digest);
 
-    // Re-parse DeepTranscript (DEEP phase only) from a fresh channel.
+    // Re-parse DeepProof (DEEP phase only) from a fresh channel.
     let reparse_commitments = vec![(commitment, tree.aligned_widths())];
     let mut reparse_channel = verifier_channel_with_commitment(&transcript, &commitment);
-    DeepTranscript::<Felt, QuadFelt>::from_verifier_channel(
-        &params,
+    DeepProof::<Felt, QuadFelt>::read_from_channel(
+        params,
         &reparse_commitments,
         2, // num_eval_points
         &mut reparse_channel,
     )
-    .expect("DeepTranscript re-parse should succeed");
+    .expect("DeepProof re-parse should succeed");
 }

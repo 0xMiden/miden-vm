@@ -12,8 +12,9 @@
 //!    tests/setup with [`miden_lifted_air::debug::assert_multi_air_valid`] or
 //!    [`debug::assert_prover_setup`].
 //!
-//! 2. **Runtime inputs = validated** — [`Statement::new`], [`ProverStatement::new`], `TraceOrder`,
-//!    and domain checks validate caller/proof shape data and return typed [`ProverError`] /
+//! 2. **Runtime inputs = validated** — [`Statement::new`](air::Statement::new),
+//!    [`ProverStatement::new`](air::ProverStatement::new), internal trace-order reconstruction, and
+//!    domain checks validate caller/proof shape data and return typed [`ProverError`] /
 //!    [`VerifierError`] values.
 //!
 //! 3. **Proof = untrusted** — Transcript data is verified cryptographically (PCS errors, constraint
@@ -21,9 +22,10 @@
 //!
 //! ## Validated at runtime
 //!
-//! Checked before cryptographic work begins: [`Statement::new`] / [`ProverStatement::new`] for
-//! caller inputs and prover trace shape, `TraceOrder` for proof/caller heights, and domain checks
-//! for `log_quotient_degree(air) ≤ log_blowup`:
+//! Checked before cryptographic work begins: [`Statement::new`](air::Statement::new) /
+//! [`ProverStatement::new`](air::ProverStatement::new) for caller inputs and prover trace shape,
+//! internal trace-order reconstruction for proof/caller heights, and domain checks for
+//! `log_quotient_degree(air) ≤ log_blowup`:
 //!
 //! - **Shape well-formedness** — ≤ 256 instances, with the maximum LDE order `log_trace_height +
 //!   log_blowup` bounded by the field's two-adicity and the host's `usize` width.
@@ -44,13 +46,13 @@
 //! 2. **Window size** — only transition window size 2.
 //! 3. **Deterministic constraints** — `eval()` emits the same number and types of constraints
 //!    regardless of builder implementation.
-//! 4. **[`ProverStatement::build_aux_traces`] output** — per AIR, an aux trace of width
-//!    `aux_width()`, height matching the main trace, and exactly `num_aux_values()` aux values.
-//!    Debug builds assert these postconditions; release builds trust the AIR contract, and
-//!    malformed output may panic later or produce invalid proofs.
-//! 5. **Sound [`Statement::eval_external`]** — Returns external assertions that are satisfied
-//!    (equal zero) iff the proof's cross-AIR interactions are well-formed for the given aux values
-//!    and public inputs.
+//! 4. **[`ProverStatement::build_aux_traces`](air::ProverStatement::build_aux_traces) output** —
+//!    per AIR, an aux trace of width `aux_width()`, height matching the main trace, and exactly
+//!    `num_aux_values()` aux values. A malformed output is caught by the prover (LDE/commit panic)
+//!    or by verification, since the verifier re-derives these shapes from the AIR contract.
+//! 5. **Sound [`Statement::eval_external`](air::Statement::eval_external)** — Returns external
+//!    assertions that are satisfied (equal zero) iff the proof's cross-AIR interactions are
+//!    well-formed for the given aux values and public inputs.
 
 #![no_std]
 
@@ -62,10 +64,10 @@ extern crate alloc;
 
 mod config;
 pub mod debug;
-pub mod domain;
+pub(crate) mod domain;
 pub mod lmcs;
 mod order;
-mod pcs;
+pub mod pcs;
 pub mod proof;
 pub mod prover;
 mod selectors;
@@ -74,52 +76,18 @@ pub mod verifier;
 
 pub use config::{GenericStarkConfig, StarkConfig};
 pub use debug::check_constraints;
-pub use domain::{
-    Coset, DomainError, EvaluationDomain, LiftedDomain, TwoAdicCoset, TwoAdicSubgroup,
-    log_quotient_degree,
-};
-pub use lmcs::{
-    Lmcs, LmcsError, LmcsTree, OpenedRows,
-    config::LmcsConfig,
-    hiding_config::HidingLmcsConfig,
-    lifted_tree::LiftedMerkleTree,
-    merkle_witness::MerkleWitness,
-    node_id::NodeId,
-    proof::{
-        BatchProof as LmcsBatchProof, BatchProofView as LmcsBatchProofView,
-        LeafOpening as LmcsLeafOpening, Proof as LmcsProof,
-    },
-    row_list::RowList,
-    tree_indices::{MissingSiblingsIter, TreeIndices},
-};
-pub use miden_lifted_air::{
-    InstanceError, MultiAir, ProverStatement, ReductionError, Statement, log2_ceil_u8,
-    log2_strict_u8,
-};
+// `domain` and `order` are internal modules, but these error types surface through the public
+// `ProverError` / `VerifierError`, so they need a public path of their own.
+pub use domain::DomainError;
 pub use order::ShapeError;
-pub use pcs::{
-    deep::{
-        proof::{DeepTranscript, OpenedValues as PcsOpenedValues},
-        verifier::DeepError,
-    },
-    fri::{
-        proof::{FriRoundTranscript, FriTranscript},
-        verifier::FriError,
-    },
-    params::{PcsParams, PcsParamsError},
-    proof::PcsTranscript,
-    verifier::PcsError,
-};
-pub use proof::{StarkDigest, StarkOutput, StarkProof, StarkTranscript};
 pub use prover::{ProverError, prove};
-pub use util::bitrev::{BitReversibleMatrix, materialize_bitrev};
 pub use verifier::{VerifierError, verify};
 
 // ============================================================================
 // Namespaced re-exports from upstream crates
 // ============================================================================
 
-/// AIR traits, instance/witness types, and upstream `p3-air` re-exports.
+/// AIR traits, statement/witness types, and upstream `p3-air` re-exports.
 ///
 /// This module re-exports items from [`miden_lifted_air`], which in turn
 /// re-exports `p3-air` types. Consumers should never need to depend on `p3-air`
@@ -136,6 +104,7 @@ pub mod air {
         ExtensionBuilder,
         FilteredAirBuilder,
         // Lifted AIR types
+        InstanceError,
         LiftedAir,
         LiftedAirBuilder,
         MultiAir,
@@ -159,11 +128,6 @@ pub mod air {
     pub mod utils {
         pub use miden_lifted_air::utils::*;
     }
-}
-
-/// Fiat-Shamir transcript channels and data types.
-pub mod transcript {
-    pub use miden_stark_transcript::{TranscriptChallenger, TranscriptData, TranscriptError};
 }
 
 /// Stateful hasher primitives for LMCS construction.

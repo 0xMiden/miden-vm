@@ -30,8 +30,11 @@ use miden_lifted_air::{
     AirBuilder, BaseAir, ConstraintDegrees, LiftedAir, LiftedAirBuilder, WindowAccess,
 };
 use miden_lifted_stark::{
-    GenericStarkConfig, MultiAir, PcsParams, ProverStatement, Statement, prove,
-    testing::configs::goldilocks_poseidon2::{Dft, Felt, QuadFelt, test_challenger, test_lmcs},
+    GenericStarkConfig, prove,
+    testing::{
+        MultiAir, PcsParams, ProverStatement, Statement,
+        configs::goldilocks_poseidon2::{Dft, Felt, QuadFelt, test_challenger, test_lmcs},
+    },
 };
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::{Matrix, dense::RowMajorMatrix};

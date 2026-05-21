@@ -49,7 +49,7 @@ impl PcsParams {
     /// - [`PcsParamsError::ZeroQueries`] if `num_queries` is 0.
     ///
     /// Field-relative bound checking (`log_final_degree + log_blowup ≤ F::TWO_ADICITY`)
-    /// is deferred to [`crate::domain::TwoAdicSubgroup::new`] at the point a
+    /// is deferred to `TwoAdicSubgroup::new` at the point a
     /// concrete domain is constructed; `PcsParams` itself is field-agnostic.
     pub fn new(
         log_blowup: u8,

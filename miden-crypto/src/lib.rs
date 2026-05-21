@@ -46,11 +46,12 @@ pub mod stark {
     //! Lifted STARK proving system based on Plonky3.
     //!
     //! Sub-modules from `miden-lifted-stark`:
-    //! - [`proof`] — [`proof::StarkProof`], [`proof::StarkDigest`], [`proof::StarkOutput`],
-    //!   [`proof::StarkTranscript`]
+    //! - [`proof`] — [`proof::StarkProofData`] (wire artifact), [`proof::StarkProof`] (structured
+    //!   view), [`proof::StarkDigest`], [`proof::StarkOutput`], [`proof::TranscriptChallenger`],
+    //!   [`proof::TranscriptData`]
     //! - [`air`] — AIR traits, builders, symbolic types (includes all of `p3-air`)
+    //! - [`pcs`] — PCS parameters, DEEP + FRI sub-proofs
     //! - [`lmcs`] — Lifted Merkle commitment scheme
-    //! - [`transcript`] — Fiat-Shamir channels and transcript data
     //! - [`hasher`] — Stateful hasher primitives
     //! - [`prover`] — `prove`
     //! - [`verifier`] — `verify`
@@ -65,7 +66,7 @@ pub mod stark {
     // Top-level types from lifted-stark
     pub use miden_lifted_stark::{GenericStarkConfig, StarkConfig};
     // Lifted-stark sub-modules (re-exported as-is)
-    pub use miden_lifted_stark::{air, debug, hasher, lmcs, proof, prover, transcript, verifier};
+    pub use miden_lifted_stark::{air, debug, hasher, lmcs, pcs, proof, prover, verifier};
 
     // Upstream Plonky3: challenger
     pub mod challenger {

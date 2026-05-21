@@ -35,7 +35,7 @@ impl<T: Clone> MerkleWitness<T> {
     ///
     /// `fetch_sibling` is called with the [`NodeId`] of each missing sibling,
     /// level-by-level, left-to-right, bottom-to-top, matching transcript order.
-    pub fn build<E>(
+    pub(super) fn build<E>(
         leaves: impl IntoIterator<Item = (usize, T)>,
         tree_depth: usize,
         mut fetch_sibling: impl FnMut(NodeId) -> Result<T, E>,

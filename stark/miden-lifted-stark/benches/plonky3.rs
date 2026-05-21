@@ -15,17 +15,14 @@
 use std::hint::black_box;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-use miden_lifted_stark::{
-    Coset, LiftedDomain, Lmcs, LmcsTree, log2_strict_u8,
-    testing::{
-        BENCH_PCS_PARAMS, LOG_HEIGHTS, PARALLEL_STR, QC_CONSTRAINT_DEGREE, QC_PCS_PARAMS,
-        RELATIVE_SPECS, commit_quotient,
-        configs::{
-            goldilocks_blake3_192 as gl_blake3_192, goldilocks_keccak as gl_keccak,
-            goldilocks_poseidon2 as gl,
-        },
-        generate_matrices_from_specs, open_with_channel, total_elements,
+use miden_lifted_stark::testing::{
+    BENCH_PCS_PARAMS, Coset, LOG_HEIGHTS, Lmcs, LmcsTree, PARALLEL_STR, QC_CONSTRAINT_DEGREE,
+    QC_PCS_PARAMS, RELATIVE_SPECS, canonical_domain, commit_quotient,
+    configs::{
+        goldilocks_blake3_192 as gl_blake3_192, goldilocks_keccak as gl_keccak,
+        goldilocks_poseidon2 as gl,
     },
+    generate_matrices_from_specs, log2_strict_u8, open_with_channel, total_elements,
 };
 use miden_stark_transcript::ProverTranscript;
 use p3_blake3::Blake3;
@@ -174,7 +171,7 @@ fn bench_pcs_open(c: &mut Criterion) {
     let dft = Radix2DitParallel::<gl::Felt>::default();
 
     for &log_lde_height in LOG_HEIGHTS {
-        let domain = LiftedDomain::<gl::Felt>::canonical(log_lde_height, 0);
+        let domain = canonical_domain::<gl::Felt>(log_lde_height, 0);
         let shift = domain.lde_shift();
         let max_lde_size = 1usize << log_lde_height;
         let group_name = format!("PCS_Open/{max_lde_size}/goldilocks/poseidon2/{PARALLEL_STR}");
@@ -325,7 +322,7 @@ fn bench_quotient_commit(c: &mut Criterion) {
         // --- Lifted ---
         {
             let config = lifted_config();
-            let domain = LiftedDomain::<gl::Felt>::canonical(log_n, QC_PCS_PARAMS.log_blowup())
+            let domain = canonical_domain::<gl::Felt>(log_n, QC_PCS_PARAMS.log_blowup())
                 .evaluation_domain(log_d);
 
             group.bench_function(BenchmarkId::new("lifted", &label), |bench| {
@@ -342,8 +339,7 @@ fn bench_quotient_commit(c: &mut Criterion) {
         {
             let pcs = workspace_pcs(QC_PCS_PARAMS.log_blowup() as usize, 0, 1, 1);
             // Quotient evaluation domain (order N·D, sharing the LDE shift).
-            let q_domain =
-                LiftedDomain::<gl::Felt>::canonical(log_n, log_d).evaluation_domain(log_d);
+            let q_domain = canonical_domain::<gl::Felt>(log_n, log_d).evaluation_domain(log_d);
             let quotient_domain =
                 TwoAdicMultiplicativeCoset::new(q_domain.shift(), q_domain.log_size() as usize)
                     .unwrap();

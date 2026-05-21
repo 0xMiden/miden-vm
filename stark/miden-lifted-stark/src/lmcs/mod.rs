@@ -12,7 +12,7 @@
 //! - [`Lmcs`]: Trait for LMCS configurations, providing type-erased access to commitment
 //!   operations.
 //! - [`LmcsTree`]: Trait for built LMCS trees, providing opening operations.
-//! - [`lifted_tree::LiftedMerkleTree`]: The underlying Merkle tree data structure.
+//! - `lifted_tree::LiftedMerkleTree`: The underlying Merkle tree data structure.
 //! - [`proof::Proof`]: Single-opening proof with rows, optional salt, and authentication path.
 //! - [`proof::BatchProof`]: Batch opening data with Merkle witness for path extraction.
 //!
@@ -71,12 +71,12 @@
 
 pub mod config;
 pub mod hiding_config;
-pub mod lifted_tree;
+pub(crate) mod lifted_tree;
 pub mod merkle_witness;
-pub mod node_id;
+pub(crate) mod node_id;
 pub mod proof;
 pub mod row_list;
-pub mod tree_indices;
+pub(crate) mod tree_indices;
 
 #[cfg(test)]
 mod tests;
@@ -119,7 +119,7 @@ pub trait Lmcs: Clone {
     /// Build a tree from domain-ordered matrices with no transcript padding (alignment = 1).
     ///
     /// The LMCS extracts the inner bit-reversed matrices via
-    /// [`BitReversibleMatrix::bit_reverse_rows`] and stores them. The tree is indexed
+    /// `BitReversibleMatrix::bit_reverse_rows` and stores them. The tree is indexed
     /// by domain order; [`LmcsTree::leaves`] returns the stored bit-reversed matrices.
     ///
     /// This affects only transcript hint formatting; the commitment root is unchanged.

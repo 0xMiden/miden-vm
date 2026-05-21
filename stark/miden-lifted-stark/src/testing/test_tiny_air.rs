@@ -7,14 +7,18 @@ use p3_field::PrimeCharacteristicRing;
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
 use crate::{
-    DomainError, InstanceError, MultiAir, ProverStatement, ShapeError, Statement, VerifierError,
-    air::{AirBuilder, BaseAir, ExtensionBuilder, LiftedAir, LiftedAirBuilder, WindowAccess},
-    order::TraceOrder,
+    VerifierError,
+    air::{
+        AirBuilder, BaseAir, ExtensionBuilder, InstanceError, LiftedAir, LiftedAirBuilder,
+        MultiAir, ProverStatement, Statement, WindowAccess,
+    },
+    domain::DomainError,
+    order::{ShapeError, TraceOrder},
+    proof::{TranscriptData, TranscriptError},
     prove,
     testing::configs::goldilocks_poseidon2::{
         Felt, QuadFelt, generate_pow4_trace, prove_and_verify, test_challenger, test_config,
     },
-    transcript::{TranscriptData, TranscriptError},
     verify,
 };
 

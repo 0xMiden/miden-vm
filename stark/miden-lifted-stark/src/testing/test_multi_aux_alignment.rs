@@ -6,8 +6,11 @@ use p3_field::PrimeCharacteristicRing;
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
 use crate::{
-    Lmcs, MultiAir, ProverStatement, Statement,
-    air::{AirBuilder, BaseAir, ExtensionBuilder, LiftedAir, LiftedAirBuilder, WindowAccess},
+    air::{
+        AirBuilder, BaseAir, ExtensionBuilder, LiftedAir, LiftedAirBuilder, MultiAir,
+        ProverStatement, Statement, WindowAccess,
+    },
+    lmcs::Lmcs,
     testing::configs::goldilocks_poseidon2::{
         Felt, QuadFelt, prove_and_verify_statement, test_config,
     },

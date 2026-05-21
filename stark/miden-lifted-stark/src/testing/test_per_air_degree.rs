@@ -12,8 +12,10 @@ use p3_field::PrimeCharacteristicRing;
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
 use crate::{
-    MultiAir, ProverStatement, Statement,
-    air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder, WindowAccess},
+    air::{
+        AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder, MultiAir, ProverStatement, Statement,
+        WindowAccess,
+    },
     testing::configs::goldilocks_poseidon2::{Felt, QuadFelt, prove_and_verify_statement},
 };
 

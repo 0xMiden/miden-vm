@@ -8,7 +8,7 @@ use p3_field::{ExtensionField, Field, PackedFieldExtension, PackedValue};
 
 /// Extension trait for [`PackedFieldExtension`] adding `pack_ext_columns` and
 /// `to_ext_slice` methods for column-wise SIMD operations on extension field elements.
-pub trait PackedFieldExtensionExt<
+pub(crate) trait PackedFieldExtensionExt<
     BaseField: Field,
     ExtField: ExtensionField<BaseField, ExtensionPacking = Self>,
 >: PackedFieldExtension<BaseField, ExtField>
@@ -50,7 +50,7 @@ impl<
 /// Reconstruct each EF element: `vᵢ = Σⱼ basisⱼ·row[i·DIM + j]`.
 ///
 /// Returns `None` if `row.len()` is not a multiple of `EF::DIMENSION`.
-pub fn row_to_packed_ext<F, EF>(row: &[EF]) -> Option<Vec<EF>>
+pub(crate) fn row_to_packed_ext<F, EF>(row: &[EF]) -> Option<Vec<EF>>
 where
     F: Field,
     EF: ExtensionField<F>,

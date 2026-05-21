@@ -3,8 +3,8 @@
 use std::fmt;
 
 use miden_lifted_stark::{
-    MultiAir, ProverStatement, StarkConfig, Statement,
-    air::{BaseAir, LiftedAir, LiftedAirBuilder},
+    StarkConfig,
+    air::{BaseAir, LiftedAir, LiftedAirBuilder, MultiAir, ProverStatement, Statement},
     prove,
     testing::airs::{
         blake3::LiftedBlake3Air, keccak::LiftedKeccakAir, miden::DummyMidenAir,
@@ -118,7 +118,7 @@ pub(crate) fn run_lifted<SC>(
 ) -> RunResult
 where
     SC: StarkConfig<Felt, QuadFelt>,
-    miden_lifted_stark::StarkDigest<Felt, QuadFelt, SC>: PartialEq + fmt::Debug,
+    miden_lifted_stark::proof::StarkDigest<Felt, QuadFelt, SC>: PartialEq + fmt::Debug,
 {
     let airs: Vec<LiftedBenchAir> = specs
         .iter()

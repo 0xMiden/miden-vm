@@ -30,7 +30,7 @@ use crate::selectors::Selectors;
 /// `Σₖ α^{K−1−k}·Cₖ(z)`, but is cheaper for a single-point evaluation.
 /// The prover computes an equivalent fold over the whole quotient domain, optimized
 /// with base-field SIMD where possible.
-pub struct ConstraintFolder<'a, F, EF>
+pub(super) struct ConstraintFolder<'a, F, EF>
 where
     F: Field,
     EF: ExtensionField<F>,

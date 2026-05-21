@@ -12,7 +12,7 @@
 /// - `depth()` = `ilog2(id)`
 /// - `position()` = `id − 2^depth`
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct NodeId(usize);
+pub(super) struct NodeId(usize);
 
 impl NodeId {
     /// Create a node ID from a (depth, position) pair.
@@ -26,25 +26,25 @@ impl NodeId {
 
     /// The depth in the tree (0 = root).
     #[inline]
-    pub const fn depth(&self) -> usize {
+    pub const fn depth(self) -> usize {
         self.0.ilog2() as usize
     }
 
     /// The position within the depth level.
     #[inline]
-    pub const fn position(&self) -> usize {
+    pub const fn position(self) -> usize {
         self.0 - (1 << self.depth())
     }
 
     /// The sibling node (same depth, position XOR 1).
     #[inline]
-    pub const fn sibling(&self) -> Self {
+    pub const fn sibling(self) -> Self {
         Self(self.0 ^ 1)
     }
 
     /// The parent node (depth − 1, position >> 1).
     #[inline]
-    pub const fn parent(&self) -> Self {
+    pub const fn parent(self) -> Self {
         Self(self.0 >> 1)
     }
 }

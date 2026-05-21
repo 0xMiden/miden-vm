@@ -54,7 +54,7 @@ use crate::{
 /// # Returns
 /// `opened[group][matrix]` as a `RowMajorMatrix<EF>` with `N` rows
 /// (one per evaluation point), using the same widths that were passed in.
-pub fn verify<F, EF, L, Ch, const N: usize>(
+pub(crate) fn verify<F, EF, L, Ch, const N: usize>(
     params: &PcsParams,
     lmcs: &L,
     commitments: &[(L::Commitment, Vec<usize>)],
@@ -113,7 +113,7 @@ where
 /// 1. Aligns widths to `lmcs.alignment()`
 /// 2. Calls [`verify`] with aligned widths
 /// 3. Truncates returned evals back to original widths
-pub fn verify_aligned<F, EF, L, Ch, const N: usize>(
+pub(crate) fn verify_aligned<F, EF, L, Ch, const N: usize>(
     params: &PcsParams,
     lmcs: &L,
     commitments: &[(L::Commitment, Vec<usize>)],

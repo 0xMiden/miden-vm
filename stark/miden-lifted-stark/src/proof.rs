@@ -1,21 +1,24 @@
 //! STARK proof types and structured transcript.
 //!
 //! This module defines the proof artifact types shared by prover and verifier:
-//! - [`StarkProof`]: raw transcript data (field elements and commitments)
+//! - [`StarkProofData`]: raw transcript data (field elements and commitments)
 //! - [`StarkDigest`]: binding digest committing to the entire interaction
 //! - [`StarkOutput`]: combined prover output (proof + digest)
-//! - [`StarkTranscript`]: structured parse-only view of the full protocol interaction
+//! - [`StarkProof`]: structured parse-only view of the full protocol interaction
 //!
-//! [`StarkTranscript`] has a [`from_proof`](StarkTranscript::from_proof) constructor
+//! [`StarkProof`] has a [`from_data`](StarkProof::from_data) constructor
 //! that parses it from proof data and a challenger, following the same pattern as
-//! [`PcsTranscript`] alongside the PCS verifier.
+//! [`PcsProof`] alongside the PCS verifier.
 
 extern crate alloc;
 
 use alloc::{vec, vec::Vec};
 
 use miden_lifted_air::{BaseAir, LiftedAir, MultiAir, Statement};
-use miden_stark_transcript::{Channel, TranscriptData, VerifierChannel, VerifierTranscript};
+use miden_stark_transcript::{Channel, VerifierChannel, VerifierTranscript};
+// Re-exported here so the crate root does not need a dedicated `transcript` module: callers
+// reach these via `proof::` alongside the proof types they parameterize.
+pub use miden_stark_transcript::{TranscriptChallenger, TranscriptData, TranscriptError};
 use p3_challenger::CanFinalizeDigest;
 use p3_field::{ExtensionField, Field, TwoAdicField};
 use serde::{Deserialize, Serialize};
@@ -25,7 +28,7 @@ use crate::{
     domain::{Coset, DomainError, LiftedDomain, log_quotient_degree},
     lmcs::Lmcs,
     order::TraceOrder,
-    pcs::proof::PcsTranscript,
+    pcs::proof::PcsProof,
     util::align::aligned_len,
     verifier::VerifierError,
 };
@@ -36,22 +39,26 @@ type Commitment<F, EF, SC> = <<SC as StarkConfig<F, EF>>::Lmcs as Lmcs>::Commitm
 /// STARK proof: per-AIR log trace heights (instance order) plus the raw
 /// transcript data.
 ///
-/// The AIR ordering is not stored — both sides reconstruct it deterministically
-/// from the heights, so the proof commits to heights only. The heights are not a
-/// direct accessor either: read them via [`StarkTranscript::from_proof`] →
-/// [`StarkTranscript::log_trace_heights`].
+/// The proof's AIR ordering — used internally by the prover and verifier to
+/// fold multi-AIR constraints — is *not* stored. Both sides reconstruct it
+/// deterministically from the heights via the internal trace-order helper,
+/// so the proof commits to heights only.
+///
+/// The heights themselves are not exposed as a direct accessor: parse the
+/// proof through [`StarkProof::from_data`] and read them via
+/// [`StarkProof::log_trace_heights`].
 // Bounds target `Commitment` directly; `SC` itself isn't `Serialize`/`Debug`.
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(bound(serialize = "TranscriptData<F, Commitment<F, EF, SC>>: Serialize"))]
 #[serde(bound(deserialize = "TranscriptData<F, Commitment<F, EF, SC>>: Deserialize<'de>"))]
-pub struct StarkProof<F: TwoAdicField, EF: ExtensionField<F>, SC: StarkConfig<F, EF>> {
+pub struct StarkProofData<F: TwoAdicField, EF: ExtensionField<F>, SC: StarkConfig<F, EF>> {
     /// Per-AIR log₂ trace heights, in instance order. Matches
     /// [`Statement::airs`] position-for-position.
     pub(crate) log_trace_heights: Vec<u8>,
     pub(crate) transcript: TranscriptData<F, Commitment<F, EF, SC>>,
 }
 
-impl<F, EF, SC> core::fmt::Debug for StarkProof<F, EF, SC>
+impl<F, EF, SC> core::fmt::Debug for StarkProofData<F, EF, SC>
 where
     F: TwoAdicField + core::fmt::Debug,
     EF: ExtensionField<F>,
@@ -59,14 +66,14 @@ where
     Commitment<F, EF, SC>: core::fmt::Debug,
 {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("StarkProof")
+        f.debug_struct("StarkProofData")
             .field("log_trace_heights", &self.log_trace_heights)
             .field("transcript", &self.transcript)
             .finish()
     }
 }
 
-impl<F, EF, SC> StarkProof<F, EF, SC>
+impl<F, EF, SC> StarkProofData<F, EF, SC>
 where
     F: TwoAdicField,
     EF: ExtensionField<F>,
@@ -105,7 +112,7 @@ pub struct StarkOutput<F: TwoAdicField, EF: ExtensionField<F>, SC: StarkConfig<F
     /// Transcript digest committing to the entire prover–verifier interaction.
     pub digest: StarkDigest<F, EF, SC>,
     /// Proof data consumed by the verifier.
-    pub proof: StarkProof<F, EF, SC>,
+    pub proof: StarkProofData<F, EF, SC>,
 }
 
 impl<F, EF, SC> core::fmt::Debug for StarkOutput<F, EF, SC>
@@ -128,9 +135,9 @@ where
 ///
 /// Captures the reconstructed AIR ordering, commitments, sampled challenges,
 /// the OOD evaluation point, and the PCS sub-transcript. Constructed via
-/// [`from_proof`](Self::from_proof), which mirrors steps 0–9 of
+/// [`from_data`](Self::from_data), which mirrors steps 0–9 of
 /// [`verify`](crate::verifier::verify) but skips the constraint check.
-pub struct StarkTranscript<EF, L>
+pub struct StarkProof<EF, L>
 where
     L: Lmcs,
     L::F: Field,
@@ -138,7 +145,7 @@ where
 {
     /// AIR ordering reconstructed from the proof's log trace heights.
     /// Validated and observed into the challenger by
-    /// [`from_proof`](Self::from_proof). Read its data through
+    /// [`from_data`](Self::from_data). Read its data through
     /// [`log_trace_heights`](Self::log_trace_heights) and
     /// [`air_order`](Self::air_order).
     pub(crate) trace_order: TraceOrder,
@@ -158,11 +165,11 @@ where
     pub quotient_commit: L::Commitment,
     /// Out-of-domain evaluation point z.
     pub z: EF,
-    /// PCS sub-transcript (DEEP evals, FRI rounds, query openings).
-    pub pcs_transcript: PcsTranscript<EF, L>,
+    /// PCS sub-proof (DEEP evals, FRI rounds, query openings).
+    pub pcs_proof: PcsProof<EF, L>,
 }
 
-impl<EF, L> StarkTranscript<EF, L>
+impl<EF, L> StarkProof<EF, L>
 where
     L: Lmcs,
     L::F: TwoAdicField,
@@ -193,15 +200,15 @@ where
     /// 6. Receive quotient commitment
     /// 7. Sample OOD point z
     /// 8. Build commitment widths for PCS
-    /// 9. Parse PCS sub-transcript via [`PcsTranscript::from_verifier_channel`]
+    /// 9. Parse PCS sub-proof via `PcsProof::read_from_channel`
     ///
     /// Does **not** verify constraints or check the quotient identity.
     /// Finalizes the transcript and returns the digest alongside the parsed view.
     #[allow(clippy::type_complexity)]
-    pub fn from_proof<MA, SC>(
+    pub fn from_data<MA, SC>(
         config: &SC,
         statement: &Statement<L::F, EF, MA>,
-        proof: &StarkProof<L::F, EF, SC>,
+        data: &StarkProofData<L::F, EF, SC>,
         mut challenger: SC::Challenger,
     ) -> Result<(Self, StarkDigest<L::F, EF, SC>), VerifierError>
     where
@@ -213,7 +220,7 @@ where
         // `log_h` > usize::BITS and infeasible heights before any later use.
         let trace_order = TraceOrder::from_log_heights::<L::F, EF, _>(
             statement.airs(),
-            proof.log_trace_heights.clone(),
+            data.log_trace_heights.clone(),
         )?;
         let air_refs: Vec<&MA::Air> = statement.airs().iter().collect();
         let proof_ordered_airs = trace_order.to_proof_order(&air_refs);
@@ -226,7 +233,7 @@ where
         statement.observe(&mut challenger, trace_order.log_heights());
         trace_order.observe_shape::<L::F, _>(&mut challenger);
 
-        let mut channel = VerifierTranscript::from_data(challenger, &proof.transcript);
+        let mut channel = VerifierTranscript::from_data(challenger, &data.transcript);
 
         let alignment = config.lmcs().alignment();
 
@@ -306,8 +313,8 @@ where
             (quotient_commit.clone(), vec![quotient_width]),
         ];
 
-        // 9. Parse PCS sub-transcript
-        let pcs_transcript = PcsTranscript::from_verifier_channel::<_, 2>(
+        // 9. Parse PCS sub-proof
+        let pcs_proof = PcsProof::read_from_channel::<_, 2>(
             config.pcs(),
             config.lmcs(),
             &commitments,
@@ -330,7 +337,7 @@ where
                 beta,
                 quotient_commit,
                 z,
-                pcs_transcript,
+                pcs_proof,
             },
             digest,
         ))

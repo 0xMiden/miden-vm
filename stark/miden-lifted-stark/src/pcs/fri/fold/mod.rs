@@ -46,12 +46,12 @@ impl FriFold {
     }
 
     #[inline]
-    pub const fn arity(&self) -> usize {
+    pub const fn arity(self) -> usize {
         1 << self.log_arity as usize
     }
 
     #[inline]
-    pub const fn log_arity(&self) -> u8 {
+    pub const fn log_arity(self) -> u8 {
         self.log_arity
     }
 

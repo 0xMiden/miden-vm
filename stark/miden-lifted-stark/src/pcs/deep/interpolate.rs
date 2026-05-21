@@ -213,8 +213,11 @@ mod tests {
 
     use super::*;
     use crate::{
-        domain::{Coset, LiftedDomain},
-        testing::configs::goldilocks_poseidon2::{Felt, QuadFelt},
+        domain::Coset,
+        testing::{
+            canonical_domain,
+            configs::goldilocks_poseidon2::{Felt, QuadFelt},
+        },
     };
 
     /// Verify `batch_eval_lifted` matches `interpolate_coset` for various lift factors.
@@ -229,7 +232,7 @@ mod tests {
         let log_blowup = 2;
         let log_n = 8; // Full LDE domain size = 256
         let n = 1 << log_n;
-        let domain = LiftedDomain::<Felt>::canonical(log_n, 0);
+        let domain = canonical_domain::<Felt>(log_n, 0);
         let shift = domain.lde_shift();
 
         // Coset points in bit-reversed order for our barycentric evaluation
@@ -306,7 +309,7 @@ mod tests {
         let log_blowup = 2;
         let log_n = 8;
         let n = 1 << log_n;
-        let domain = LiftedDomain::<Felt>::canonical(log_n, 0);
+        let domain = canonical_domain::<Felt>(log_n, 0);
         let shift = domain.lde_shift();
 
         // Coset points in both orderings
@@ -373,7 +376,7 @@ mod tests {
         let log_blowup = 2;
         let log_n = 8;
         let n = 1 << log_n;
-        let domain = LiftedDomain::<Felt>::canonical(log_n, 0);
+        let domain = canonical_domain::<Felt>(log_n, 0);
         let shift = domain.lde_shift();
 
         // Coset points in bit-reversed order
@@ -457,7 +460,7 @@ mod tests {
         let log_blowup = 2;
         let log_n = 8;
         let n = 1 << log_n;
-        let domain = LiftedDomain::<Felt>::canonical(log_n, 0);
+        let domain = canonical_domain::<Felt>(log_n, 0);
         let shift = domain.lde_shift();
 
         let coset_points_br = domain.lde_coset().bit_reversed_points();

@@ -11,7 +11,7 @@ use core::ops::{Add, Mul};
 /// For polynomial evaluation `p(x) = Σᵢ cᵢ·xⁱ`, pass coefficients in
 /// descending degree order `[cₙ, ..., c₁, c₀]`.
 #[inline]
-pub fn horner_acc<Acc, Val, X, I>(acc: Acc, x: X, vals: I) -> Acc
+pub(crate) fn horner_acc<Acc, Val, X, I>(acc: Acc, x: X, vals: I) -> Acc
 where
     I: IntoIterator<Item = Val>,
     Acc: Mul<X, Output = Acc> + Add<Val, Output = Acc>,
@@ -24,7 +24,7 @@ where
 ///
 /// See [`horner_acc`] for the evaluation convention.
 #[inline]
-pub fn horner<Acc, Val, X, I>(x: X, vals: I) -> Acc
+pub(crate) fn horner<Acc, Val, X, I>(x: X, vals: I) -> Acc
 where
     I: IntoIterator<Item = Val>,
     Acc: Default + Mul<X, Output = Acc> + Add<Val, Output = Acc>,

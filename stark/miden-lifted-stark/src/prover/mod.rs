@@ -19,11 +19,11 @@
 //! 2. **AIR configurations** — The framework does not commit to the [`MultiAir::airs`] list. The
 //!    caller MUST bind every AIR configuration into the challenger before calling [`prove`] /
 //!    [`verify`](crate::verify). The AIR ordering on the wire is derived deterministically from the
-//!    trace heights (stable sort on `(log_trace_height, caller_index)`), so callers do not need to
-//!    commit to it separately as long as they commit to the AIR list and trace heights match.
+//!    trace heights (stable sort on `(log_trace_height, instance_index)`), so callers do not need
+//!    to commit to it separately as long as they commit to the AIR list and trace heights match.
 //!
 //! The proof's `air_inputs` and `aux_inputs` are absorbed automatically by
-//! [`Statement::observe`](crate::Statement::observe), followed by protocol-level
+//! [`Statement::observe`](crate::air::Statement::observe), followed by protocol-level
 //! absorption of the instance count and each AIR's log trace height in instance
 //! order. Callers do not bind these themselves.
 //!
@@ -62,10 +62,10 @@
 
 extern crate alloc;
 
-pub mod commit;
-pub mod constraints;
-pub mod periodic;
-pub mod quotient;
+pub(crate) mod commit;
+pub(crate) mod constraints;
+pub(crate) mod periodic;
+pub(crate) mod quotient;
 
 use alloc::{vec, vec::Vec};
 
@@ -84,7 +84,7 @@ use crate::{
     domain::{Coset, DomainError, LiftedDomain, log_quotient_degree},
     order::TraceOrder,
     pcs::prover::open_with_channel,
-    proof::{StarkOutput, StarkProof},
+    proof::{StarkOutput, StarkProofData},
 };
 
 /// Prove a [`ProverStatement`].
@@ -92,7 +92,7 @@ use crate::{
 /// The caller's challenger must already be bound to protocol parameters and
 /// AIR configurations — see the module-level docs. The statement's `air_inputs`
 /// and `aux_inputs` are absorbed internally via
-/// [`Statement::observe`](crate::Statement::observe); both prover and verifier
+/// [`Statement::observe`](crate::air::Statement::observe); both prover and verifier
 /// must carry the same statement.
 ///
 /// Validates only untrusted runtime inputs (returning [`ProverError`]); the AIR
@@ -382,7 +382,7 @@ where
     });
 
     let (digest, transcript) = channel.finalize();
-    let proof = StarkProof {
+    let proof = StarkProofData {
         log_trace_heights: trace_order.log_heights().to_vec(),
         transcript,
     };

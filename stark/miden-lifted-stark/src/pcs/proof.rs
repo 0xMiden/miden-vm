@@ -1,4 +1,4 @@
-//! PCS transcript data structures.
+//! PCS structured proof types — parsed view of the PCS sub-transcript.
 
 use alloc::vec::Vec;
 
@@ -8,22 +8,22 @@ use p3_field::{ExtensionField, Field, TwoAdicField};
 use crate::{
     domain::LiftedDomain,
     lmcs::{Lmcs, LmcsError, tree_indices::TreeIndices},
-    pcs::{deep::proof::DeepTranscript, fri::proof::FriTranscript, params::PcsParams},
+    pcs::{deep::proof::DeepProof, fri::proof::FriProof, params::PcsParams},
 };
 
-/// Structured transcript view for the full PCS interaction.
+/// Structured view of the full PCS sub-proof.
 ///
 /// Captures observed transcript data plus parsed LMCS batch openings for inspection.
-pub struct PcsTranscript<EF, L>
+pub struct PcsProof<EF, L>
 where
     L: Lmcs,
     L::F: Field,
     EF: ExtensionField<L::F>,
 {
-    /// DEEP transcript data (evals, PoW witness, challenges).
-    pub deep_transcript: DeepTranscript<L::F, EF>,
-    /// FRI transcript data (round commitments/challenges, final polynomial).
-    pub fri_transcript: FriTranscript<L::F, EF, L::Commitment>,
+    /// DEEP sub-proof (evals, PoW witness, challenges).
+    pub deep_proof: DeepProof<L::F, EF>,
+    /// FRI sub-proof (round commitments/challenges, final polynomial).
+    pub fri_proof: FriProof<L::F, EF, L::Commitment>,
     /// Proof-of-work witness for query sampling.
     pub query_pow_witness: L::F,
     /// Query indices in sampling order (domain indices, may contain duplicates).
@@ -34,20 +34,20 @@ where
     pub fri_witnesses: Vec<L::BatchProof>,
 }
 
-impl<EF, L> PcsTranscript<EF, L>
+impl<EF, L> PcsProof<EF, L>
 where
     L: Lmcs,
     L::F: TwoAdicField,
     EF: ExtensionField<L::F>,
 {
-    /// Parse a PCS transcript from a verifier channel without validation.
+    /// Parse a [`PcsProof`] from a verifier channel without validation.
     ///
-    /// Composes [`DeepTranscript`], [`FriTranscript`], and per-query LMCS batch proofs.
+    /// Composes [`DeepProof`], [`FriProof`], and per-query LMCS batch proofs.
     /// Does not verify any claims; validation happens in
     /// [`verify`](crate::verify).
     /// Commitment widths must match the committed rows (including any alignment padding),
     /// and all commitments are expected to be lifted to `coset.lde_height()`.
-    pub fn from_verifier_channel<Ch, const N: usize>(
+    pub(crate) fn read_from_channel<Ch, const N: usize>(
         params: &PcsParams,
         lmcs: &L,
         commitments: &[(L::Commitment, Vec<usize>)],
@@ -64,14 +64,14 @@ where
             return Err(TranscriptError::NoMoreFields);
         }
 
-        let deep_transcript = DeepTranscript::from_verifier_channel::<Ch>(
-            &params.deep,
+        let deep_proof = DeepProof::read_from_channel::<Ch>(
+            params.deep,
             commitments,
             eval_points.len(),
             channel,
         )?;
 
-        let fri_transcript = FriTranscript::from_verifier_channel(&params.fri, domain, channel)?;
+        let fri_proof = FriProof::read_from_channel(&params.fri, domain, channel)?;
 
         let query_pow_witness = channel.grind(params.query_pow_bits())?;
 
@@ -113,8 +113,8 @@ where
         }
 
         Ok(Self {
-            deep_transcript,
-            fri_transcript,
+            deep_proof,
+            fri_proof,
             query_pow_witness,
             query_indices,
             deep_witnesses,

@@ -14,7 +14,7 @@
 //! pattern.
 //!
 //! The proof's instance count and per-AIR log trace heights are carried on
-//! [`StarkProof`] (in instance order) and observed into the challenger by
+//! [`StarkProofData`] (in instance order) and observed into the challenger by
 //! [`verify`] at the protocol layer. Callers must not pre-observe them.
 //!
 //! # Statement-bound trace heights
@@ -23,8 +23,8 @@
 //! compares them against a caller-supplied expectation. If your statement
 //! fixes the trace size (e.g. a proof for a 2^16-row execution), parse it
 //! with
-//! [`StarkTranscript::from_proof`](crate::proof::StarkTranscript::from_proof)
-//! and check `transcript.log_trace_heights()` yourself.
+//! [`StarkProof::from_data`](crate::proof::StarkProof::from_data)
+//! and check `proof.log_trace_heights()` yourself.
 //!
 //! # Transcript boundaries (strict consumption)
 //!
@@ -38,8 +38,8 @@
 
 extern crate alloc;
 
-pub mod constraints;
-pub mod periodic;
+pub(crate) mod constraints;
+pub(crate) mod periodic;
 
 use alloc::{vec, vec::Vec};
 use core::marker::PhantomData;
@@ -55,11 +55,11 @@ use periodic::PeriodicPolys;
 use thiserror::Error;
 
 use crate::{
-    ShapeError, StarkConfig,
+    StarkConfig,
     domain::{Coset, DomainError, LiftedDomain, log_quotient_degree},
-    order::TraceOrder,
+    order::{ShapeError, TraceOrder},
     pcs::verifier::{PcsError, verify_aligned},
-    proof::{StarkDigest, StarkProof},
+    proof::{StarkDigest, StarkProofData},
     util::packing::row_to_packed_ext,
 };
 
@@ -121,7 +121,7 @@ pub enum VerifierError {
 pub fn verify<F, EF, MA, SC>(
     config: &SC,
     statement: &Statement<F, EF, MA>,
-    proof: &StarkProof<F, EF, SC>,
+    proof: &StarkProofData<F, EF, SC>,
     mut challenger: SC::Challenger,
 ) -> Result<StarkDigest<F, EF, SC>, VerifierError>
 where

@@ -17,7 +17,7 @@ use crate::util::horner::horner_acc;
 /// Stores polynomial coefficients computed from the AIR's periodic columns.
 /// Used to evaluate periodic values at the OOD point during verification.
 #[derive(Clone, Debug)]
-pub struct PeriodicPolys<F> {
+pub(super) struct PeriodicPolys<F> {
     /// Polynomial coefficients for each column.
     polys: Vec<Vec<F>>,
 }

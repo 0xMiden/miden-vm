@@ -1,6 +1,6 @@
 //! Crate-wide utility helpers shared across LMCS, PCS, prover, and verifier.
 
-pub mod align;
-pub mod bitrev;
-pub mod horner;
-pub mod packing;
+pub(crate) mod align;
+pub(crate) mod bitrev;
+pub(crate) mod horner;
+pub(crate) mod packing;

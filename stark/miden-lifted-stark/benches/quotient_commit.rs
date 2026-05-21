@@ -11,9 +11,10 @@ use std::hint::black_box;
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use miden_lifted_stark::{
-    GenericStarkConfig, LiftedDomain, log2_strict_u8,
+    GenericStarkConfig,
     testing::{
-        QC_CONSTRAINT_DEGREE, QC_PCS_PARAMS, commit_quotient, configs::goldilocks_poseidon2 as gl,
+        QC_CONSTRAINT_DEGREE, QC_PCS_PARAMS, canonical_domain, commit_quotient,
+        configs::goldilocks_poseidon2 as gl, log2_strict_u8,
     },
 };
 use p3_dft::Radix2DitParallel;
@@ -39,7 +40,7 @@ fn bench_quotient_commit(c: &mut Criterion) {
         let label = format!("N=2^{log_n}");
 
         let log_d = log2_strict_u8(QC_CONSTRAINT_DEGREE);
-        let domain = LiftedDomain::<gl::Felt>::canonical(log_n, QC_PCS_PARAMS.log_blowup())
+        let domain = canonical_domain::<gl::Felt>(log_n, QC_PCS_PARAMS.log_blowup())
             .evaluation_domain(log_d);
 
         group.bench_function(BenchmarkId::new("lifted", &label), |bench| {

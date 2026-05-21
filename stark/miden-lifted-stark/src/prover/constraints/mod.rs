@@ -80,7 +80,7 @@ type PackedExt<F, EF> = <EF as ExtensionField<F>>::ExtensionPacking;
 /// it. The committed LDE coset (size `n_j * B`, with `B >= D_j`) contains `gJ_j` as a
 /// subset, so the truncated view the caller passes in is zero-copy.
 #[allow(clippy::too_many_arguments)]
-pub fn evaluate_constraints_into<F, EF, A>(
+pub(super) fn evaluate_constraints_into<F, EF, A>(
     output: &mut [EF],
     air: &A,
     main_on_gj: &BitReversedMatrixView<RowMajorMatrixView<'_, F>>,

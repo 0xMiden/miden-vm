@@ -36,7 +36,8 @@ use std::{fmt, time::Instant};
 
 use clap::Parser;
 use miden_lifted_stark::{
-    GenericStarkConfig, PcsParams,
+    GenericStarkConfig,
+    pcs::PcsParams,
     testing::{
         airs::{
             blake3::generate_blake3_trace,

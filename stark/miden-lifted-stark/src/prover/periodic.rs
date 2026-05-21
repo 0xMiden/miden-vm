@@ -26,7 +26,7 @@ use crate::domain::{Coset, EvaluationDomain};
 /// we repeat each column up to `max_period` and LDE-extend once; columns with smaller periods
 /// are accessed via modular indexing.
 #[derive(Clone, Debug)]
-pub struct PeriodicLde<F: TwoAdicField> {
+pub(super) struct PeriodicLde<F: TwoAdicField> {
     /// LDE values in natural order (height = max_period * blowup).
     /// `None` when there are no periodic columns.
     ldes: Option<RowMajorMatrix<F>>,
@@ -108,7 +108,10 @@ mod tests {
     use p3_field::{PackedValue, PrimeCharacteristicRing};
 
     use super::*;
-    use crate::{domain::LiftedDomain, testing::configs::goldilocks_poseidon2 as gl};
+    use crate::{
+        domain::LiftedDomain,
+        testing::{canonical_domain, configs::goldilocks_poseidon2 as gl},
+    };
 
     /// Verify that periodic LDE values match the full LDE computation.
     fn assert_periodic_lde_matches_full(
@@ -121,7 +124,7 @@ mod tests {
 
         // Create an evaluation domain at max height (no lifting), with constraint
         // degree = log_blowup (the max-degree case for this test).
-        let lifted: LiftedDomain<gl::Felt> = LiftedDomain::canonical(log_trace_height, log_blowup);
+        let lifted: LiftedDomain<gl::Felt> = canonical_domain(log_trace_height, log_blowup);
         let domain = lifted.evaluation_domain(log_blowup);
 
         // Build the repeated matrix (same logic as periodic_columns_matrix)

@@ -23,10 +23,10 @@
 //! two-adic root and every multiplicative coset shift through these encapsulation types keeps
 //! `F::two_adic_generator` and `F::GENERATOR` confined to their single canonical sites.
 
-pub mod fold;
-pub mod proof;
-pub mod prover;
-pub mod verifier;
+pub(crate) mod fold;
+pub(crate) mod proof;
+pub(crate) mod prover;
+pub(crate) mod verifier;
 
 use fold::FriFold;
 use p3_field::TwoAdicField;
@@ -48,7 +48,7 @@ use crate::domain::LiftedDomain;
 /// [`FriPolys::new`](prover::FriPolys::new), and
 /// [`FriOracle::new`](verifier::FriOracle::new).
 #[derive(Clone, Copy, Debug)]
-pub struct FriParams {
+pub(crate) struct FriParams {
     /// The FRI folding strategy.
     ///
     /// Determines the folding arity (2, 4, or 8).
