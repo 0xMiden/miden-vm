@@ -6,7 +6,7 @@
 //! in the [`Precompile`](super::Precompile)s held by a
 //! [`PrecompileRegistry`](super::PrecompileRegistry). The processor itself does not interpret
 //! tag bytes; the registry dispatches on [`Tag::id`](super::Tag) and each precompile decodes
-//! its own [`Tag::imm`](super::Tag) and drives recursive evaluation.
+//! its own [`Tag::args`](super::Tag) and drives recursive evaluation.
 
 use alloc::boxed::Box;
 
@@ -18,25 +18,18 @@ use alloc::boxed::Box;
 ///
 /// Captures both the in-memory body shape (Expression vs Chunk) AND, for the Expression case,
 /// whether the 8 felts encode raw payload data or two child digests packed via
-/// [`super::Payload::join`]. This is the unit the wire format and rehydrate logic
-/// dispatch on.
+/// [`super::Payload::join`]. This is the unit the wire format and rehydrate logic dispatch on.
 ///
 /// Predicate-ness is *not* encoded here — it is a property of a `reduce` outcome
 /// ([`super::Node::is_true_node`] on the canonical), not of the tag's declared shape.
-///
-/// Returned by [`Precompile::decode`](super::Precompile::decode) for a precompile's own tags and
-/// by [`DeferredState::rehydrate`](super::DeferredState::rehydrate) for framework AND-nodes; the
-/// rehydrate path uses it to cross-check the wire body against the declared shape.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NodeType {
-    /// 8 felts of raw payload data, no child digests. Self-evaluating value leaves (e.g.
-    /// `Uint256` leaf, `MockHash` digest).
+    /// 8 felts of raw payload data, no child digests — a self-evaluating value leaf.
     Value,
     /// 8 felts encoding `lhs_digest || rhs_digest` — two child references. Covers binary ops,
-    /// binary predicates, AND-nodes, and compound-canonical `new`-style leaves.
-    Binary,
-    /// `n` 8-felt chunks of bulk data, no child digests. Chunk-bodied leaves (e.g.
-    /// `MockHash` preimage, `MockSig` verify).
+    /// binary predicates, AND-nodes, and compound-canonical `join`-style leaves.
+    Join,
+    /// `n` 8-felt chunks of bulk data, no child digests — a chunk-bodied leaf.
     Chunks(u32),
 }
 

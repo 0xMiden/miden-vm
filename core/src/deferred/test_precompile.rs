@@ -33,7 +33,7 @@ impl TestPrecompile {
     fn op_tag(disc: u32) -> Tag {
         Tag {
             id: Self::id(),
-            imm: [Felt::from_u32(disc), ZERO, ZERO],
+            args: [Felt::from_u32(disc), ZERO, ZERO],
         }
     }
 
@@ -95,22 +95,22 @@ impl Precompile for TestPrecompile {
         Self::id()
     }
 
-    fn decode(&self, imm: [Felt; 3]) -> Option<NodeType> {
-        Some(match Disc::classify(imm[0])? {
+    fn decode(&self, args: [Felt; 3]) -> Option<NodeType> {
+        Some(match Disc::classify(args[0])? {
             Disc::Leaf => NodeType::Value,
-            Disc::Add | Disc::Mul | Disc::Eq => NodeType::Binary,
+            Disc::Add | Disc::Mul | Disc::Eq => NodeType::Join,
         })
     }
 
     fn reduce(
         &self,
-        imm: [Felt; 3],
+        args: [Felt; 3],
         payload: &Payload,
         witness: &mut WitnessBuilder<'_>,
     ) -> Result<Node, PrecompileError> {
-        match Disc::classify(imm[0]).ok_or(PrecompileError::InvalidNode)? {
+        match Disc::classify(args[0]).ok_or(PrecompileError::InvalidNode)? {
             Disc::Leaf => {
-                Ok(Node::expression(Tag::new(Self::id(), imm), Payload::new(*payload.as_felts()?)))
+                Ok(Node::expression(Tag::new(Self::id(), args), Payload::new(*payload.as_felts()?)))
             },
             kind @ (Disc::Add | Disc::Mul) => {
                 let (lhs, rhs) = payload.join_children()?;

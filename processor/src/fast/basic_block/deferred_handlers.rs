@@ -64,10 +64,10 @@ fn build_standard_node(
     payload: Payload,
 ) -> Result<Node, PrecompileError> {
     match node_type {
-        // Both Value and Binary live in `Payload::Expression` at the in-memory level — the
+        // Both Value and Join live in `Payload::Expression` at the in-memory level — the
         // 8-felt payload is the same; the precompile decides whether the bytes encode raw data
-        // (Value) or two child digests (Binary) when it reduces.
-        NodeType::Value | NodeType::Binary => Ok(Node::expression(tag, payload)),
+        // (Value) or two child digests (Join) when it reduces.
+        NodeType::Value | NodeType::Join => Ok(Node::expression(tag, payload)),
         NodeType::Chunks(_) => Err(PrecompileError::InvalidNode),
     }
 }
@@ -76,7 +76,7 @@ fn build_standard_node(
 /// the precompile registry to decode the tag, constructs the matching `Node`, and registers it.
 ///
 /// Pushes the registered node's digest onto the advice stack so MASM can chain it into
-/// downstream nodes (e.g. as a child digest of a Binary op) or into `log_precompile` without
+/// downstream nodes (e.g. as a child digest of a Join op) or into `log_precompile` without
 /// having to recompute the digest in-circuit.
 pub(super) fn handle_deferred_register(
     processor: &mut FastProcessor,
@@ -172,7 +172,7 @@ pub(super) fn handle_deferred_register_chunk(
         let (_state, precompiles) = processor.deferred_view_mut();
         match precompiles.decode(tag)? {
             NodeType::Chunks(n) => n,
-            NodeType::Value | NodeType::Binary => {
+            NodeType::Value | NodeType::Join => {
                 return Err(PrecompileError::InvalidNode.into());
             },
         }

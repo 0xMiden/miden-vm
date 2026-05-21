@@ -93,7 +93,7 @@ fn decode_digest_is_value() {
 #[test]
 fn decode_eq_is_binary() {
     let node_type = Hash.decode([Felt::from_u32(Hash::EQ_TAG_ID), ZERO, ZERO]).unwrap();
-    assert!(matches!(node_type, NodeType::Binary));
+    assert!(matches!(node_type, NodeType::Join));
 }
 
 #[test]

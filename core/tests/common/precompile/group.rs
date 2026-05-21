@@ -41,25 +41,25 @@ impl Group {
     pub fn new_tag() -> Tag {
         Tag {
             id: Self::id(),
-            imm: [Felt::from_u32(Self::NEW_TAG_ID), ZERO, ZERO],
+            args: [Felt::from_u32(Self::NEW_TAG_ID), ZERO, ZERO],
         }
     }
     pub fn add_tag() -> Tag {
         Tag {
             id: Self::id(),
-            imm: [Felt::from_u32(Self::ADD_TAG_ID), ZERO, ZERO],
+            args: [Felt::from_u32(Self::ADD_TAG_ID), ZERO, ZERO],
         }
     }
     pub fn sub_tag() -> Tag {
         Tag {
             id: Self::id(),
-            imm: [Felt::from_u32(Self::SUB_TAG_ID), ZERO, ZERO],
+            args: [Felt::from_u32(Self::SUB_TAG_ID), ZERO, ZERO],
         }
     }
     pub fn eq_tag() -> Tag {
         Tag {
             id: Self::id(),
-            imm: [Felt::from_u32(Self::EQ_TAG_ID), ZERO, ZERO],
+            args: [Felt::from_u32(Self::EQ_TAG_ID), ZERO, ZERO],
         }
     }
 
@@ -90,21 +90,21 @@ impl Precompile for Group {
         Self::id()
     }
 
-    fn decode(&self, imm: [Felt; 3]) -> Option<NodeType> {
+    fn decode(&self, args: [Felt; 3]) -> Option<NodeType> {
         // All Group nodes pack two child digests in their payload — `new` references the
         // coordinate leaves, `add`/`sub` reference the group operands, `eq` references the two
-        // compared group elements. So every tag is `NodeType::Binary`.
-        Discriminant::classify(imm[0])?;
-        Some(NodeType::Binary)
+        // compared group elements. So every tag is `NodeType::Join`.
+        Discriminant::classify(args[0])?;
+        Some(NodeType::Join)
     }
 
     fn reduce(
         &self,
-        imm: [Felt; 3],
+        args: [Felt; 3],
         payload: &Payload,
         witness: &mut WitnessBuilder<'_>,
     ) -> Result<Node, PrecompileError> {
-        let kind = Discriminant::classify(imm[0]).ok_or(PrecompileError::InvalidNode)?;
+        let kind = Discriminant::classify(args[0]).ok_or(PrecompileError::InvalidNode)?;
         let (h_lhs, h_rhs) = payload.join_children()?;
 
         match kind {

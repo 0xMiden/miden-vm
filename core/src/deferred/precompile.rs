@@ -4,14 +4,14 @@
 //! precompile) that claims a slice of the tag space identified by a stable [`Felt`] id. The
 //! [`crate::deferred::PrecompileRegistry`] dispatches each [`Tag`](crate::deferred::Tag) to the
 //! right precompile by its [`Tag::id`](crate::deferred::Tag), hands the precompile-local
-//! [`Tag::imm`](crate::deferred::Tag) felts to it, and forwards `decode` / `reduce`.
+//! [`Tag::args`](crate::deferred::Tag) felts to it, and forwards `decode` / `reduce`.
 //!
-//! Tag layout: `Tag { id, imm: [Felt; 3] }`. Only `id` is framework-owned (validated against
+//! Tag layout: `Tag { id, args: [Felt; 3] }`. Only `id` is framework-owned (validated against
 //! [`precompile_id`]; `ZERO` is reserved for the framework's TRUE / AND nodes, so a precompile
-//! may not derive id `ZERO`). The three `imm` felts are *entirely* the precompile's to
+//! may not derive id `ZERO`). The three `args` felts are *entirely* the precompile's to
 //! interpret — the framework imposes no structure, no reserved felt, no zeroing convention.
 
-use alloc::vec::Vec;
+use alloc::{format, vec::Vec};
 
 use super::{Node, NodeType, Payload, PrecompileError, WitnessBuilder};
 use crate::{Felt, utils::hash_string_to_word};
@@ -44,18 +44,18 @@ pub trait Precompile: Send + Sync {
         Vec::new()
     }
 
-    /// Decode the precompile-local immediate felts (`tag.imm`) to the tag's [`NodeType`].
+    /// Decode the precompile-local immediate felts (`tag.args`) to the tag's [`NodeType`].
     /// Returning `None` rejects the tag; the registry wraps that into the framework error,
     /// tagged with this precompile's name. `tag.id` has already been matched to this precompile
     /// by the registry, so `decode` only inspects the felts it cares about — there is no
     /// framework-mandated reserved felt.
-    fn decode(&self, imm: [Felt; 3]) -> Option<NodeType>;
+    fn decode(&self, args: [Felt; 3]) -> Option<NodeType>;
 
     /// Reduce a node owned by this precompile to its canonical form, given the node's immediate
     /// felts and body. The registry has already routed by `tag.id`, so an implementor never
-    /// re-checks the id; it typically classifies `imm[0]` with the same helper `decode` uses
+    /// re-checks the id; it typically classifies `args[0]` with the same helper `decode` uses
     /// (`decode` having succeeded means that classification cannot fail here), then walks the
-    /// `payload`. To emit a node, rebuild the tag as `Tag::new(self.id(), imm)`.
+    /// `payload`. To emit a node, rebuild the tag as `Tag::new(self.id(), args)`.
     ///
     /// `payload` is a [`Payload`](super::Payload): use `payload.join_children()?` to pull
     /// the two child digests of an op/predicate, `payload.as_felts()?` for a value leaf, or
@@ -82,7 +82,7 @@ pub trait Precompile: Send + Sync {
     /// when the node is used, keeping `decode` to tag inspection only.
     fn reduce(
         &self,
-        imm: [Felt; 3],
+        args: [Felt; 3],
         payload: &Payload,
         witness: &mut WitnessBuilder<'_>,
     ) -> Result<Node, PrecompileError>;
@@ -91,11 +91,18 @@ pub trait Precompile: Send + Sync {
 // PRECOMPILE ID DERIVATION
 // ================================================================================================
 
+/// Domain separator pinned to the v1 framework hashing convention. Prefixed onto the name before
+/// hashing so precompile ids occupy a namespace disjoint from event ids (which hash the bare
+/// name): an event handler and a precompile that happen to share a name still derive different
+/// felts. Bump iff the *derivation* changes (different hash, different input layout).
+const PRECOMPILE_ID_DOMSEP: &str = "miden-deferred-precompile/v1";
+
 /// Derive a precompile's canonical id from its `name`.
 ///
-/// Mirrors [`EventId::from_name`](crate::events::EventId::from_name): the name is hashed with
-/// Blake3 and the first felt of the resulting [`Word`](crate::Word) becomes the id. Same
-/// derivation convention, distinct namespace from event handlers. Used by
+/// Hashes `"<domsep>:<name.len()>:<name>"` through [`hash_string_to_word`] — the same Blake3 →
+/// first-felt helper [`EventId::from_name`](crate::events::EventId::from_name) uses — so the id
+/// shares the event-id crypto while living in a separate namespace. The `name.len()` prefix keeps
+/// the `domsep`/`name` boundary unambiguous. Used by
 /// [`PrecompileRegistry::with_precompile`](crate::deferred::PrecompileRegistry::with_precompile)
 /// to validate each precompile's declared [`Precompile::id`].
 pub fn precompile_id(p: &dyn Precompile) -> Felt {
@@ -103,7 +110,8 @@ pub fn precompile_id(p: &dyn Precompile) -> Felt {
 }
 
 fn derive(name: &str) -> Felt {
-    hash_string_to_word(name)[0]
+    let domain_separated = format!("{PRECOMPILE_ID_DOMSEP}:{}:{name}", name.len());
+    hash_string_to_word(domain_separated.as_str())[0]
 }
 
 #[cfg(test)]
@@ -121,11 +129,11 @@ mod tests {
     }
 
     #[test]
-    fn matches_event_id_derivation() {
-        // The two id-derivation paths must agree byte-for-byte: precompile_id uses the
-        // first felt of hash_string_to_word(name); EventId::from_name pulls the same felt
-        // via the same helper. Renaming or reordering that helper must keep this in sync.
+    fn differs_from_event_id_derivation() {
+        // Precompile ids and event ids share the hash_string_to_word helper but live in separate
+        // namespaces: the precompile path domain-separates (domsep + length prefix), so the same
+        // name must derive a different felt on each path.
         let name = "my_precompile";
-        assert_eq!(derive(name), crate::events::EventId::from_name(name).as_felt());
+        assert_ne!(derive(name), crate::events::EventId::from_name(name).as_felt());
     }
 }
