@@ -20,8 +20,8 @@ use alloc::boxed::Box;
 /// whether the 8 felts encode raw payload data or two child digests packed via
 /// [`super::Payload::join`]. This is the unit the wire format and rehydrate logic dispatch on.
 ///
-/// Predicate-ness is *not* encoded here — it is a property of a `reduce` outcome
-/// ([`super::Node::is_true_node`] on the canonical), not of the tag's declared shape.
+/// Predicate-ness is a property of a `reduce` outcome ([`super::Node::is_true_node`] on the
+/// canonical), determined independently of the tag's declared shape.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NodeType {
     /// 8 felts of raw payload data, no child digests — a self-evaluating value leaf.

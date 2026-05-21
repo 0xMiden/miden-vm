@@ -15,10 +15,10 @@ use crate::{
 ///
 /// Precompiles are held in a `BTreeMap<id, Box<dyn Precompile>>`. Order is irrelevant — the id
 /// is the only thing that decides routing. This is the single concrete driver of the
-/// deferred-DAG semantic layer; there is no trait abstraction over it.
+/// deferred-DAG semantic layer.
 ///
 /// Build it with [`Default`] + [`with_precompile`](Self::with_precompile); the default empty
-/// registry rejects every tag (the processor's out-of-the-box state).
+/// registry rejects every tag.
 #[derive(Default)]
 pub struct PrecompileRegistry {
     precompiles: BTreeMap<Felt, Box<dyn Precompile>>,
@@ -42,7 +42,7 @@ impl PrecompileRegistry {
     /// Panics if the precompile is misconfigured: its declared [`Precompile::id`] is
     /// inconsistent with the [`precompile_id`] derivation, it derives the framework-reserved
     /// `ZERO` id, or its id is already present. These are setup-time programming errors, not
-    /// runtime conditions — there is intentionally no fallible constructor.
+    /// runtime conditions.
     pub fn with_precompile<P: Precompile + 'static>(mut self, precompile: P) -> Self {
         let p: Box<dyn Precompile> = Box::new(precompile);
         let id = p.id();

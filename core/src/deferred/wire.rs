@@ -3,9 +3,8 @@
 //! The wire form is the passive bytes-shape that travels in proofs: a topologically-ordered
 //! list of entries plus the transcript root. Join entries reference their children by *index*
 //! into earlier entries, not by digest — Poseidon2 digests are recomputed on the verifier side
-//! during rehydration. The wire deliberately carries no validated invariants; `Deserializable`
-//! just reads bytes, and the trusted bytes→state path runs through
-//! [`super::DeferredState::rehydrate`].
+//! during rehydration. `Deserializable` just reads bytes; the trusted bytes→state path runs
+//! through [`super::DeferredState::rehydrate`], which validates them.
 //!
 //! Compared to a flat `Vec<Node>` layout, the index encoding shrinks every Join entry from a
 //! 64-byte payload (two child digests as felts) to 8 bytes (two `u32` indices) — meaningful
@@ -141,8 +140,7 @@ impl Deserializable for WireBody {
 
 impl Serializable for WireEntry {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        // Wire layout is the 4-felt capacity `[id, arg0, arg1, arg2]` — byte-identical to the
-        // pre-`Tag`-struct format.
+        // Wire layout is the 4-felt capacity `[id, arg0, arg1, arg2]`.
         for felt in &self.tag.as_word() {
             felt.write_into(target);
         }

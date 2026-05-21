@@ -56,7 +56,7 @@ pub enum ExecutionError {
         #[source]
         error: EventError,
     },
-    /// Deferred-DAG system event (register/assert-eq) failed.
+    /// Deferred-DAG system event (register/evaluate/register-chunk) failed.
     #[error("{err}")]
     #[diagnostic()]
     DeferredError {
