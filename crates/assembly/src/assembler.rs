@@ -41,7 +41,10 @@ use crate::{
     ast::Path,
     basic_block_builder::BasicBlockBuilder,
     fmp::{fmp_end_frame_sequence, fmp_initialization_sequence, fmp_start_frame_sequence},
-    linker::{Import, LinkLibrary, Linker, LinkerError, SymbolItem, SymbolResolutionContext},
+    linker::{
+        Import, LinkLibrary, Linker, LinkerError, SymbolItem, SymbolResolutionContext,
+        SymbolResolver,
+    },
     mast_forest_builder::{
         MastForestBuilder, MastNodeRef, SourceDebugGraph, SourceNodeId, SourceNodeRef,
         StaticLibrary,
@@ -801,7 +804,147 @@ impl Assembler {
             TargetType::Kernel => self.linker.link_kernel(root, support)?,
             _ => self.linker.link([root], support)?,
         };
+        self.verify_exported_signature_type_visibility(&module_indices)?;
         self.assemble_library_product(name, &module_indices, kind)
+    }
+
+    fn verify_exported_signature_type_visibility(
+        &self,
+        module_indices: &[ModuleIndex],
+    ) -> Result<(), Report> {
+        let resolver = SymbolResolver::new(&self.linker);
+        for module_index in module_indices.iter().copied() {
+            let module = &self.linker[module_index];
+            for symbol in module.symbols() {
+                if !symbol.visibility().is_public() {
+                    continue;
+                }
+
+                let signature = match symbol.item() {
+                    SymbolItem::Procedure(proc) => {
+                        let proc = proc.borrow();
+                        proc.signature().cloned()
+                    },
+                    SymbolItem::Compiled(ItemInfo::Procedure(proc)) => proc.signature.clone(),
+                    SymbolItem::Constant(_)
+                    | SymbolItem::Type(_)
+                    | SymbolItem::Compiled(ItemInfo::Constant(_))
+                    | SymbolItem::Compiled(ItemInfo::Type(_)) => None,
+                };
+                let Some(signature) = signature else {
+                    continue;
+                };
+
+                for ty in signature.args.iter().chain(signature.results.iter()) {
+                    let mut visiting_types = BTreeSet::default();
+                    self.verify_exported_signature_type_expr(
+                        &resolver,
+                        module_index,
+                        ty,
+                        &mut visiting_types,
+                    )?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn verify_exported_signature_type_expr(
+        &self,
+        resolver: &SymbolResolver<'_>,
+        current_module: ModuleIndex,
+        ty: &ast::TypeExpr,
+        visiting_types: &mut BTreeSet<GlobalItemIndex>,
+    ) -> Result<(), Report> {
+        match ty {
+            ast::TypeExpr::Primitive(_) => Ok(()),
+            ast::TypeExpr::Ptr(ty) => self.verify_exported_signature_type_expr(
+                resolver,
+                current_module,
+                &ty.pointee,
+                visiting_types,
+            ),
+            ast::TypeExpr::Array(ty) => self.verify_exported_signature_type_expr(
+                resolver,
+                current_module,
+                &ty.elem,
+                visiting_types,
+            ),
+            ast::TypeExpr::Struct(ty) => {
+                for field in ty.fields.iter() {
+                    self.verify_exported_signature_type_expr(
+                        resolver,
+                        current_module,
+                        &field.ty,
+                        visiting_types,
+                    )?;
+                }
+
+                Ok(())
+            },
+            ast::TypeExpr::Ref(path) => {
+                let context = SymbolResolutionContext {
+                    span: path.span(),
+                    module: current_module,
+                    kind: None,
+                };
+                let resolution =
+                    resolver.resolve_path(&context, path.as_deref()).map_err(Report::from)?;
+
+                let gid = match resolution {
+                    SymbolResolution::Exact { gid, .. } => gid,
+                    SymbolResolution::Local(item) => current_module + item.into_inner(),
+                    SymbolResolution::External(_)
+                    | SymbolResolution::MastRoot(_)
+                    | SymbolResolution::Module { .. } => return Ok(()),
+                };
+
+                let symbol = &self.linker[gid];
+                let SymbolItem::Type(type_decl) = symbol.item() else {
+                    return Ok(());
+                };
+
+                if !symbol.visibility().is_public() {
+                    return Err(Report::new(
+                        SemanticAnalysisError::PrivateTypeInExportedSignature {
+                            span: path.span(),
+                            defined: type_decl.name().span(),
+                        },
+                    ));
+                }
+
+                if !visiting_types.insert(gid) {
+                    return Ok(());
+                }
+
+                match type_decl {
+                    ast::TypeDecl::Alias(alias) => {
+                        self.verify_exported_signature_type_expr(
+                            resolver,
+                            gid.module,
+                            &alias.ty,
+                            visiting_types,
+                        )?;
+                    },
+                    ast::TypeDecl::Enum(ty) => {
+                        for variant in ty.variants() {
+                            if let Some(payload_ty) = variant.value_ty.as_ref() {
+                                self.verify_exported_signature_type_expr(
+                                    resolver,
+                                    gid.module,
+                                    payload_ty,
+                                    visiting_types,
+                                )?;
+                            }
+                        }
+                    },
+                }
+
+                visiting_types.remove(&gid);
+                Ok(())
+            },
+        }
     }
 
     pub(crate) fn assemble_executable_modules(
