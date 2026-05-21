@@ -1838,7 +1838,6 @@ version = "0.24.0"
 dependencies = [
  "assert_cmd",
  "clap",
- "codspeed",
  "criterion",
  "escargot",
  "hex",

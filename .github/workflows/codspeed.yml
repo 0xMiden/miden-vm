@@ -21,7 +21,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      BLAKE3_ITERATIONS: "1"
       RAYON_NUM_THREADS: "8"
       SYNTH_BENCH_AXES: exec,trace_prep,prove,verify
       SYNTH_SCENARIO: create-single-p2id-note
@@ -51,7 +50,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cargo codspeed build --profile optimized -p miden-vm --bench blake3_1to1_codspeed --features concurrent
           cargo codspeed build --profile optimized -p miden-vm-synthetic-bench --bench synthetic_codspeed
 
       - name: Run benchmarks
