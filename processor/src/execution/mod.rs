@@ -194,8 +194,8 @@ where
                 split::finish_split_node(&mut state, node_id, current_forest)
                     .map_break(InternalBreakReason::from)?
             },
-            Continuation::FinishLoop { node_id, was_entered } => {
-                r#loop::finish_loop_node(&mut state, was_entered, node_id, current_forest)
+            Continuation::FinishLoop(node_id) => {
+                r#loop::finish_loop_node(&mut state, node_id, current_forest)
                     .map_break(InternalBreakReason::from)?
             },
             Continuation::FinishCall(node_id) => {

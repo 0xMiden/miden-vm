@@ -1,6 +1,5 @@
 ---
 source: processor/src/fast/tests/advice_provider.rs
-assertion_line: 171
 expression: fast_host.snapshots()
 ---
 {
@@ -2859,7 +2858,7 @@ expression: fast_host.snapshots()
     ],
     20: [
         ProcessorStateSnapshot {
-            clk: 354,
+            clk: 355,
             ctx: 0,
             stack_state: [
                 3,
@@ -3044,7 +3043,7 @@ expression: fast_host.snapshots()
             ],
         },
         ProcessorStateSnapshot {
-            clk: 366,
+            clk: 367,
             ctx: 0,
             stack_state: [
                 2,
@@ -3229,7 +3228,7 @@ expression: fast_host.snapshots()
             ],
         },
         ProcessorStateSnapshot {
-            clk: 378,
+            clk: 379,
             ctx: 0,
             stack_state: [
                 1,
@@ -3416,7 +3415,7 @@ expression: fast_host.snapshots()
     ],
     21: [
         ProcessorStateSnapshot {
-            clk: 391,
+            clk: 393,
             ctx: 0,
             stack_state: [
                 0,
@@ -3603,7 +3602,7 @@ expression: fast_host.snapshots()
     ],
     22: [
         ProcessorStateSnapshot {
-            clk: 471,
+            clk: 475,
             ctx: 0,
             stack_state: [
                 0,

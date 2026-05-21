@@ -1279,6 +1279,17 @@ impl Assembler {
                         }));
                     }
 
+                    // `while.true` desugars to `if.true { LOOP { body } } else { noop }`. The LOOP
+                    // itself has do-while semantics — the body executes unconditionally for the
+                    // first iteration — so the surrounding SPLIT performs the initial true-check.
+                    //
+                    // The `while.true` asm_op is attached to *both* the LOOP and the wrapping
+                    // SPLIT: both nodes belong to a single source-level `while.true` construct, and
+                    // diagnostics emitted from inside the body walk up the continuation stack to
+                    // the nearest control-flow parent (the LOOP), so it must carry the source
+                    // mapping too.
+                    let asm_op = self.create_asm_op(span, "while.true", proc_ctx);
+
                     let loop_body_node_id = self.compile_body(
                         body.iter(),
                         proc_ctx,
@@ -1286,14 +1297,24 @@ impl Assembler {
                         block_builder.mast_forest_builder_mut(),
                         next_depth,
                     )?;
-                    let loop_builder = LoopNodeBuilder::new(loop_body_node_id);
+                    let loop_node_id =
+                        block_builder.mast_forest_builder_mut().ensure_node_with_asm_op(
+                            LoopNodeBuilder::new(loop_body_node_id),
+                            asm_op.clone(),
+                        )?;
+                    let noop_block_id = block_builder.mast_forest_builder_mut().ensure_block(
+                        vec![Operation::Noop],
+                        vec![],
+                        vec![],
+                    )?;
 
-                    let asm_op = self.create_asm_op(span, "while.true", proc_ctx);
-                    let loop_node_id = block_builder
+                    let split_builder = SplitNodeBuilder::new([loop_node_id, noop_block_id]);
+
+                    let split_node_id = block_builder
                         .mast_forest_builder_mut()
-                        .ensure_node_with_asm_op(loop_builder, asm_op)?;
+                        .ensure_node_with_asm_op(split_builder, asm_op)?;
 
-                    body_node_ids.push(loop_node_id);
+                    body_node_ids.push(split_node_id);
                 },
             }
         }

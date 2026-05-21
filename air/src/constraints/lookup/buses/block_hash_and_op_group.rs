@@ -74,7 +74,9 @@ pub(in crate::constraints::lookup) fn emit_block_hash_and_op_group<LB>(
     // op flags, bound locally since each is consumed once inside its `.add(...)` call.
     let f_join = op_flags.join();
     let f_split = op_flags.split();
-    let f_loop_body = op_flags.loop_op() * s0 + op_flags.repeat();
+    // LOOP unconditionally enqueues the body (do-while semantics) and REPEAT enqueues each
+    // subsequent iteration.
+    let f_loop_body = op_flags.loop_op() + op_flags.repeat();
     let f_child = op_flags.dyn_op() + op_flags.dyncall() + op_flags.call() + op_flags.syscall();
     let f_end = op_flags.end();
     let f_push = op_flags.push();
@@ -153,7 +155,7 @@ pub(in crate::constraints::lookup) fn emit_block_hash_and_op_group<LB>(
                             let child_hash = h_0.map(LB::Expr::from);
                             BlockHashMsg::LoopBody { parent, child_hash }
                         },
-                        Deg { v: 6, u: 7 },
+                        Deg { v: 5, u: 6 },
                     );
 
                     // DYN/DYNCALL/CALL/SYSCALL: single child at `h_0`.

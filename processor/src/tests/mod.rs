@@ -1081,16 +1081,20 @@ fn test_diagnostic_not_binary_value_loop_node() {
 
     let build_test = build_test_by_mode!(true, source, &[2]);
     let err = build_test.execute().expect_err("expected error");
+    // The entry-check error originates from the SPLIT that the assembler wraps around the LOOP
+    // when desugaring `while.true`, so the message reads "if statement". The source pointer is
+    // still the `while.true` token because the SPLIT carries that asm_op. The iteration-check
+    // (REPEAT/END) still produces a `NotBinaryValueLoop` error — see masm_errors_consistency
+    // case_2 for that path.
     assert_diagnostic_lines!(
         err,
-        "  x loop condition must be a binary value, but got 2",
+        "  x if statement expected a binary value on top of the stack, but got 2",
         regex!(r#",-\[test[\d]+:3:13\]"#),
         " 2 |         begin",
         " 3 |             while.true swap dup end",
         "   :             ^^^^^^^^^^^^^^^^^^^^^^^",
         " 4 |         end",
-        "   `----",
-        "  help: this could happen either when first entering the loop, or any subsequent iteration"
+        "   `----"
     );
 }
 

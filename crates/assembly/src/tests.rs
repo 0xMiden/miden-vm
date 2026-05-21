@@ -4200,6 +4200,8 @@ fn nested_blocks() -> Result<(), Report> {
         .unwrap();
 
     let r#while = {
+        // The assembler desugars `while.true { body }` to `if.true { LOOP { body } } else { noop
+        // }`.
         let body_node_id = expected_mast_forest_builder
             .ensure_block(
                 vec![
@@ -4212,8 +4214,15 @@ fn nested_blocks() -> Result<(), Report> {
             )
             .unwrap();
 
-        expected_mast_forest_builder
+        let loop_node_id = expected_mast_forest_builder
             .ensure_node(LoopNodeBuilder::new(body_node_id))
+            .unwrap();
+        let noop_node_id = expected_mast_forest_builder
+            .ensure_block(vec![Operation::Noop], vec![], vec![])
+            .unwrap();
+
+        expected_mast_forest_builder
+            .ensure_node(SplitNodeBuilder::new([loop_node_id, noop_node_id]))
             .unwrap()
     };
     let push_13_basic_block_id = expected_mast_forest_builder
