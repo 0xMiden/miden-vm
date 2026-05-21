@@ -3,7 +3,7 @@ use alloc::collections::BTreeMap;
 use miden_air::trace::{RowIndex, chiplets::KERNEL_ROM_TRACE_WIDTH};
 use miden_core::field::PrimeCharacteristicRing;
 
-use super::{Felt, Kernel, TraceFragment, Word as Digest};
+use super::{ChipletTraceFragment, Felt, Kernel, Word as Digest};
 use crate::errors::OperationError;
 
 #[cfg(test)]
@@ -88,7 +88,7 @@ impl KernelRom {
     ///
     /// Emits one row per declared kernel procedure: column 0 is the CALL-label multiplicity
     /// (= number of SYSCALLs to this proc), columns 1..5 are the procedure digest.
-    pub fn fill_trace(self, trace: &mut TraceFragment) {
+    pub fn fill_trace(self, trace: &mut ChipletTraceFragment) {
         debug_assert_eq!(
             KERNEL_ROM_TRACE_WIDTH,
             trace.width(),

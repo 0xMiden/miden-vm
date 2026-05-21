@@ -122,7 +122,7 @@ impl MainTrace {
         assert!(r < self.num_rows(), "main trace row index in bounds");
         assert!(col < TRACE_WIDTH, "main trace column index in bounds");
 
-        let TraceStorage { core_rm, chiplets_rm, .. } = &self.storage;
+        let TraceStorage { core_rm, chiplets_rm } = &self.storage;
         if col < CORE_STORAGE_WIDTH {
             let core_h = core_rm.height();
             if r < core_h {
@@ -197,7 +197,7 @@ impl MainTrace {
     fn project_row(&self, row: usize, dst: &mut [Felt]) {
         const NCC: usize = CORE_STORAGE_WIDTH;
         const CW: usize = CHIPLETS_WIDTH;
-        let TraceStorage { core_rm, chiplets_rm, .. } = &self.storage;
+        let TraceStorage { core_rm, chiplets_rm } = &self.storage;
 
         let core_h = core_rm.height();
         if row < core_h {

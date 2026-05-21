@@ -82,7 +82,7 @@ impl<T> CoreCols<T> {
 /// `[T; NUM_CHIPLETS_COLS]` slice or the suffix of a `[T; TRACE_WIDTH]` row via
 /// `Borrow<ChipletCols<T>>`.
 #[repr(C)]
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct ChipletCols<T> {
     pub(crate) chiplets: [T; CHIPLETS_WIDTH - 2],
     /// Permutation segment selector: consumed by `build_chiplet_selectors`.

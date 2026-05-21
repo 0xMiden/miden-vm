@@ -14,10 +14,13 @@ use miden_core::{
 };
 
 use super::{
-    EMPTY_WORD, Felt, Memory, TraceFragment,
+    EMPTY_WORD, Felt, Memory,
     segment::{MemoryAccessType, MemoryOperation},
 };
-use crate::{ContextId, MemoryAddress, MemoryError, trace::range::RangeChecker};
+use crate::{
+    ContextId, MemoryAddress, MemoryError,
+    trace::{ChipletTraceFragment, range::RangeChecker},
+};
 
 // Chiplet-local column indices used by the memory trace tests.
 const IS_READ_COL_IDX: usize = 0;
@@ -526,7 +529,7 @@ impl MemoryAccess {
 fn build_trace(mem: Memory, num_rows: usize) -> Vec<Vec<Felt>> {
     let mut band = Felt::zero_vec(MEMORY_TRACE_WIDTH * num_rows);
     let mut fragment =
-        TraceFragment::row_major(&mut band, MEMORY_TRACE_WIDTH, 0, MEMORY_TRACE_WIDTH);
+        ChipletTraceFragment::row_major(&mut band, MEMORY_TRACE_WIDTH, 0, MEMORY_TRACE_WIDTH);
     mem.fill_trace(&mut fragment);
 
     (0..MEMORY_TRACE_WIDTH)

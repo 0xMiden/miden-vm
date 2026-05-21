@@ -17,7 +17,7 @@ use crate::{
 };
 
 pub(crate) mod utils;
-use utils::TraceFragment;
+use utils::ChipletTraceFragment;
 
 pub mod chiplets;
 pub(crate) mod execution_tracer;

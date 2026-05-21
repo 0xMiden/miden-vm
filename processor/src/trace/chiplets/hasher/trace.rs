@@ -5,9 +5,12 @@ use miden_air::{
     ControllerCols, PermutationCols, borrow_chiplet, borrow_chiplet_mut,
     trace::chiplets::hasher::{HASH_CYCLE_LEN, TRACE_WIDTH},
 };
-use miden_core::chiplets::hasher::Hasher;
+use miden_core::{
+    chiplets::hasher::Hasher,
+    utils::{Matrix, RowMajorMatrix},
+};
 
-use super::{Felt, HasherState, ONE, STATE_WIDTH, Selectors, TraceFragment, ZERO};
+use super::{ChipletTraceFragment, Felt, HasherState, ONE, STATE_WIDTH, Selectors, ZERO};
 
 // The unified hasher row is wider than the typed overlay by one column (s_perm).
 const S_PERM_OFFSET: usize = TRACE_WIDTH - 1;
@@ -30,10 +33,17 @@ const S_PERM_OFFSET: usize = TRACE_WIDTH - 1;
 /// The trace is divided into two regions:
 /// - Controller region (s_perm=0): pairs of (input, output) rows per permutation request.
 /// - Permutation segment (s_perm=1): one 16-row cycle per unique input state.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct HasherTrace {
-    /// Row-major trace buffer: `TRACE_WIDTH` contiguous cells per row.
-    trace: Vec<Felt>,
+    trace: RowMajorMatrix<Felt>,
+}
+
+impl Default for HasherTrace {
+    fn default() -> Self {
+        Self {
+            trace: RowMajorMatrix::new(Vec::new(), TRACE_WIDTH),
+        }
+    }
 }
 
 impl HasherTrace {
@@ -42,7 +52,7 @@ impl HasherTrace {
 
     /// Returns current length of this execution trace.
     pub fn trace_len(&self) -> usize {
-        self.trace.len() / TRACE_WIDTH
+        self.trace.height()
     }
 
     /// Returns the next row address. The address is equal to the current trace length + 1.
@@ -81,7 +91,7 @@ impl HasherTrace {
             cols.direction_bit = direction_bit;
             tail[0] = ZERO;
         }
-        self.trace.extend_from_slice(&row);
+        self.trace.values.extend_from_slice(&row);
     }
 
     // PERMUTATION SEGMENT METHODS
@@ -176,7 +186,7 @@ impl HasherTrace {
             cols.multiplicity = multiplicity;
             tail[0] = ONE;
         }
-        self.trace.extend_from_slice(&row);
+        self.trace.values.extend_from_slice(&row);
     }
 
     /// Appends padding rows to fill the controller region to a multiple of HASH_CYCLE_LEN.
@@ -219,9 +229,11 @@ impl HasherTrace {
         let mut states = Vec::new();
         for row in range {
             // Controller input row: s0 (column 0) = ONE and s_perm = ZERO
-            if self.trace[row * W] == ONE && self.trace[row * W + S_PERM_OFFSET] == ZERO {
+            if self.trace.values[row * W] == ONE
+                && self.trace.values[row * W + S_PERM_OFFSET] == ZERO
+            {
                 let cols: &ControllerCols<Felt> =
-                    borrow_chiplet(&self.trace[row * W..row * W + S_PERM_OFFSET]);
+                    borrow_chiplet(&self.trace.values[row * W..row * W + S_PERM_OFFSET]);
                 states.push(cols.state);
             }
         }
@@ -232,12 +244,12 @@ impl HasherTrace {
     /// Updates the provided state with the hasher state from the last row of the copied range.
     pub fn copy_trace(&mut self, state: &mut [Felt; STATE_WIDTH], range: Range<usize>) {
         const W: usize = TRACE_WIDTH;
-        self.trace.extend_from_within(range.start * W..range.end * W);
+        self.trace.values.extend_from_within(range.start * W..range.end * W);
 
         // copy the latest hasher state to the provided state slice
         let last = range.end - 1;
         let cols: &ControllerCols<Felt> =
-            borrow_chiplet(&self.trace[last * W..last * W + S_PERM_OFFSET]);
+            borrow_chiplet(&self.trace.values[last * W..last * W + S_PERM_OFFSET]);
         *state = cols.state;
     }
 
@@ -246,7 +258,7 @@ impl HasherTrace {
         const W: usize = TRACE_WIDTH;
         for row in range {
             let cols: &mut ControllerCols<Felt> =
-                borrow_chiplet_mut(&mut self.trace[row * W..row * W + S_PERM_OFFSET]);
+                borrow_chiplet_mut(&mut self.trace.values[row * W..row * W + S_PERM_OFFSET]);
             cols.mrupdate_id = mrupdate_id;
         }
     }
@@ -255,10 +267,10 @@ impl HasherTrace {
     // --------------------------------------------------------------------------------------------
 
     /// Fills the provided trace fragment with trace data from this hasher trace instance.
-    pub fn fill_trace(self, trace: &mut TraceFragment) {
+    pub fn fill_trace(self, trace: &mut ChipletTraceFragment) {
         debug_assert_eq!(self.trace_len(), trace.len(), "inconsistent trace lengths");
         debug_assert_eq!(TRACE_WIDTH, trace.width(), "inconsistent trace widths");
 
-        trace.copy_rows_from(&self.trace);
+        trace.copy_rows_from(&self.trace.values);
     }
 }

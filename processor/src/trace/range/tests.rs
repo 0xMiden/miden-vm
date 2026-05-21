@@ -11,7 +11,7 @@ use crate::{Felt, ZERO, utils::ToElements};
 fn range_columns(checker: RangeChecker, target_len: usize) -> [Vec<Felt>; 2] {
     let table_len = checker.get_number_range_checker_rows();
     let mut buf = Felt::zero_vec(2 * target_len);
-    checker.write_range_into_core(&mut buf, 2, 0, 1, table_len, target_len, target_len);
+    checker.write_range_into_core(&mut buf, 2, 0, 1, table_len, target_len);
     let m = (0..target_len).map(|r| buf[2 * r]).collect();
     let v = (0..target_len).map(|r| buf[2 * r + 1]).collect();
     [m, v]
@@ -86,7 +86,7 @@ fn write_range_into_core_panics_on_mismatched_len() {
     let mut buf = Felt::zero_vec(2 * target_len);
 
     // Pass an inconsistent table length on purpose; the production assert must fire.
-    checker.write_range_into_core(&mut buf, 2, 0, 1, table_len + 1, target_len, target_len);
+    checker.write_range_into_core(&mut buf, 2, 0, 1, table_len + 1, target_len);
 }
 
 // HELPER FUNCTIONS

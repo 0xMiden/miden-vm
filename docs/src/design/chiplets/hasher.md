@@ -254,15 +254,11 @@ columns as controller sub-selectors must first gate on `s_ctrl = 1`. The
 constraint code does this by gating on `s_ctrl = 1` via the precomputed chiplet
 selectors, while permutation rows access the same physical columns as witnesses.
 
-## Buses
-
-<a id="multiset-check-constraints"></a>
+## Buses {#multiset-check-constraints}
 
 The hasher participates in three different lookup constructions.
 
-<a id="chiplets-bus-constraints"></a>
-
-### 1. Chiplets bus (`b_chiplets`)
+### 1. Chiplets bus (`b_chiplets`) {#chiplets-bus-constraints}
 
 The controller region sends and receives the chiplets-bus messages used by:
 
@@ -298,9 +294,7 @@ bitwise rows, kernel-ROM rows, and trailing chiplet padding rows, the hasher-sid
 wiring relation contributes an `idle_flag * delta` term so those rows cannot let
 `v_wiring` drift before the final boundary.
 
-<a id="sibling-table-constraints"></a>
-
-### 3. Hash-kernel virtual table (`b_hash_kernel`)
+### 3. Hash-kernel virtual table (`b_hash_kernel`) {#sibling-table-constraints}
 
 During `MRUPDATE`, the chiplet inserts sibling entries on the old-path leg and
 removes them on the new-path leg. The running product must balance, ensuring

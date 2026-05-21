@@ -51,7 +51,7 @@ impl<T: Copy> DecoderCols<T> {
 
 /// Named end-block flag overlay for `hasher_state[4..8]`.
 #[repr(C)]
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct EndBlockFlags<T> {
     pub is_loop_body: T,
     pub is_loop: T,

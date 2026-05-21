@@ -14,7 +14,7 @@ use miden_air::{
 
 use super::{
     super::utils::{split_element_u32_into_u16, split_u32_into_u16},
-    RangeChecker, TraceFragment,
+    ChipletTraceFragment, RangeChecker,
 };
 use crate::{
     ContextId, EMPTY_WORD, Felt, MemoryAddress, MemoryError, ONE, WORD_SIZE, Word, ZERO,
@@ -305,7 +305,7 @@ impl Memory {
     }
 
     /// Fills the provided trace fragment with trace data from this memory instance.
-    pub fn fill_trace(self, trace: &mut TraceFragment) {
+    pub fn fill_trace(self, trace: &mut ChipletTraceFragment) {
         debug_assert_eq!(self.trace_len(), trace.len(), "inconsistent trace lengths");
 
         // set the previous address and clock cycle to the first address and clock cycle of the
