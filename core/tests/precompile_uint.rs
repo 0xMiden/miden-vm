@@ -51,6 +51,13 @@ fn end_to_end_register_evaluate_assert_extract() {
     // canonical_of cache, so canonical(add) = leaf(7) does not appear in `nodes`.
     assert_eq!(state.nodes().len(), 7);
     assert!(!state.contains(&leaf(7).digest()));
+
+    // Defense-in-depth: log the proven equality and round-trip the whole transcript.
+    common::log_and_verify(
+        &schema,
+        &mut state,
+        Node::expression(Uint::eq_tag(), Payload::join(mul, expected)),
+    );
 }
 
 #[test]
