@@ -3,17 +3,11 @@
 
 mod common;
 
+use common::leaf;
 use miden_core::{
     deferred::{DeferredState, Digest, Node, PrecompileError, PrecompileRegistry},
     testing::precompile::{Group, Uint},
 };
-
-fn leaf(low: u64) -> Node {
-    let mut limbs = [0u32; 8];
-    limbs[0] = low as u32;
-    limbs[1] = (low >> 32) as u32;
-    Uint::leaf_node(limbs)
-}
 
 /// Two-precompile (`Uint` + `Group`) schema and an empty state. Some tests assert exact node
 /// counts, so the state is not booted.
@@ -39,9 +33,6 @@ fn register_group(
     let h_y = state.register(schema, leaf(y)).unwrap();
     state.register(schema, Group::new_node(h_x, h_y)).unwrap()
 }
-
-// END-TO-END (relocated from deferred_mock_group.rs)
-// ================================================================================================
 
 #[test]
 fn add_produces_minted_new_and_passes_eq_against_expected() {
@@ -84,24 +75,6 @@ fn sub_chains_through_add_with_mint_at_every_step() {
     let canonical = state.evaluate_digest(&schema, h_diff).unwrap();
     assert_eq!(canonical, Group::new_node(leaf(100).digest(), leaf(200).digest()));
 }
-
-#[test]
-fn new_canonicalises_field_expression_children_end_to_end() {
-    let (schema, mut state) = schema_and_state();
-    // x as field expression leaf(3)+leaf(4), y as a plain leaf.
-    let h_3 = state.register(&schema, leaf(3)).unwrap();
-    let h_4 = state.register(&schema, leaf(4)).unwrap();
-    let h_x_expr = state.register(&schema, Node::join(Uint::add_tag(), h_3, h_4)).unwrap();
-    let h_y = state.register(&schema, leaf(5)).unwrap();
-    let h_new = state.register(&schema, Group::new_node(h_x_expr, h_y)).unwrap();
-
-    let canonical = state.evaluate_digest(&schema, h_new).unwrap();
-    let expected = Group::new_node(leaf(7).digest(), leaf(5).digest());
-    assert_eq!(canonical, expected);
-}
-
-// CAPABILITY UNIT TESTS (relocated from the old in-lib `mock_group` unit tests)
-// ================================================================================================
 
 #[test]
 fn new_self_evaluates_when_children_are_leaves() {

@@ -16,9 +16,6 @@ fn three_chunks(first_first_felt: Felt) -> Vec<[Felt; 8]> {
     vec![c0, [Felt::from_u32(0xbb); 8], [Felt::from_u32(0xcc); 8]]
 }
 
-// END-TO-END (relocated from deferred_mock_sig.rs)
-// ================================================================================================
-
 #[test]
 fn verify_passes_in_multi_precompile_schema() {
     let schema = PrecompileRegistry::default()
@@ -32,7 +29,7 @@ fn verify_passes_in_multi_precompile_schema() {
     let result = state.evaluate(&schema, node).unwrap();
     assert!(result.is_true_node());
 
-    // Defense-in-depth: log the proven signature predicate and round-trip the transcript.
+    // Log the proven signature predicate and round-trip the transcript.
     common::log_and_verify(&schema, &mut state, Sig::verify_node(three_chunks(Felt::from_u32(7))));
 }
 
@@ -44,9 +41,6 @@ fn verify_fails_for_zeroed_placeholder_sig() {
     let err = state.evaluate(&schema, node);
     assert!(matches!(err.unwrap_err().root(), PrecompileError::AssertionFailed));
 }
-
-// CAPABILITY UNIT TESTS (relocated from the old in-lib `mock_sig` unit tests)
-// ================================================================================================
 
 #[test]
 fn decode_verify_is_chunk3() {

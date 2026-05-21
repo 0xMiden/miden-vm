@@ -19,9 +19,6 @@ fn fresh() -> (PrecompileRegistry, DeferredState) {
     (PrecompileRegistry::default().with_precompile(Hash), DeferredState::new())
 }
 
-// END-TO-END (relocated from deferred_mock_hash.rs)
-// ================================================================================================
-
 #[test]
 fn preimage_reduces_to_known_digest_and_eq_predicate_passes() {
     let schema = PrecompileRegistry::default().with_precompile(Uint).with_precompile(Hash);
@@ -44,8 +41,7 @@ fn preimage_reduces_to_known_digest_and_eq_predicate_passes() {
     let result = state.evaluate(&schema, Hash::eq_node(h_preimage, h_expected)).unwrap();
     assert!(result.is_true_node());
 
-    // Defense-in-depth: log the proven equality and round-trip the transcript (chunk-bodied
-    // preimage included).
+    // Log the proven equality and round-trip the transcript (chunk-bodied preimage included).
     common::log_and_verify(&schema, &mut state, Hash::eq_node(h_preimage, h_expected));
 }
 
@@ -62,9 +58,6 @@ fn preimage_with_partial_last_chunk_is_handled_by_caller_padding() {
     assert_eq!(canonical, expected);
 }
 
-// CAPABILITY UNIT TESTS (relocated from the old in-lib `mock_hash` unit tests)
-// ================================================================================================
-
 #[test]
 fn n_chunks_rounds_up() {
     assert_eq!(Hash::n_chunks(0), 0);
@@ -77,29 +70,20 @@ fn n_chunks_rounds_up() {
 }
 
 #[test]
-fn decode_preimage_extracts_chunk_count_from_imm() {
-    let node_type = Hash
-        .decode([Felt::from_u32(Hash::PREIMAGE_TAG_ID), Felt::from_u32(65), ZERO])
-        .unwrap();
-    assert!(matches!(node_type, NodeType::Chunks(3)));
-}
-
-#[test]
-fn decode_digest_is_value() {
-    let node_type = Hash.decode([Felt::from_u32(Hash::DIGEST_TAG_ID), ZERO, ZERO]).unwrap();
-    assert!(matches!(node_type, NodeType::Value));
-}
-
-#[test]
-fn decode_eq_is_binary() {
-    let node_type = Hash.decode([Felt::from_u32(Hash::EQ_TAG_ID), ZERO, ZERO]).unwrap();
-    assert!(matches!(node_type, NodeType::Join));
-}
-
-#[test]
-fn decode_unknown_discriminant_rejected() {
-    let node_type = Hash.decode([Felt::from_u32(99), ZERO, ZERO]);
-    assert!(node_type.is_none());
+fn decode_classifies_each_discriminant() {
+    assert!(matches!(
+        Hash.decode([Felt::from_u32(Hash::PREIMAGE_TAG_ID), Felt::from_u32(65), ZERO]),
+        Some(NodeType::Chunks(3))
+    ));
+    assert!(matches!(
+        Hash.decode([Felt::from_u32(Hash::DIGEST_TAG_ID), ZERO, ZERO]),
+        Some(NodeType::Value)
+    ));
+    assert!(matches!(
+        Hash.decode([Felt::from_u32(Hash::EQ_TAG_ID), ZERO, ZERO]),
+        Some(NodeType::Join)
+    ));
+    assert!(Hash.decode([Felt::from_u32(99), ZERO, ZERO]).is_none());
 }
 
 #[test]
