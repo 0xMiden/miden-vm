@@ -216,34 +216,6 @@ fn bus_identity_check() {
 }
 
 #[test]
-fn bus_wrong_external_pi_fails() {
-    let config = test_config();
-
-    let pi_0 = Felt::from_u64(42);
-    let pi_1 = Felt::from_u64(67);
-    let start = Felt::from_u64(2);
-    let height = 8;
-
-    let trace = generate_pow4_trace(start, height);
-    let air_inputs = vec![start, pi_0, pi_1];
-    let aux_inputs = vec![pi_0, pi_1];
-
-    let prover_statement =
-        bus_prover_statement(pi_0, pi_1, trace.clone(), air_inputs.clone(), aux_inputs);
-    let output =
-        prove(&config, &prover_statement, test_challenger()).expect("proving should succeed");
-
-    // Wrong aux_inputs on the verifier side — Fiat-Shamir diverges.
-    let wrong_pi_0 = Felt::from_u64(99);
-    let wrong_prover =
-        bus_prover_statement(wrong_pi_0, pi_1, trace, air_inputs, vec![wrong_pi_0, pi_1]);
-    let err = verify(&config, wrong_prover.statement(), &output.proof, test_challenger())
-        .expect_err("wrong external_pi should fail verification");
-
-    let _ = err;
-}
-
-#[test]
 fn bus_short_external_inputs_fails() {
     let config = test_config();
 

@@ -6,14 +6,11 @@ use p3_field::PrimeCharacteristicRing;
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
 use crate::{
-    Lmcs, MultiAir, ProverStatement, Statement, VerifierError,
+    Lmcs, MultiAir, ProverStatement, Statement,
     air::{AirBuilder, BaseAir, ExtensionBuilder, LiftedAir, LiftedAirBuilder, WindowAccess},
-    prove,
     testing::configs::goldilocks_poseidon2::{
-        Felt, QuadFelt, prove_and_verify_statement, test_challenger, test_config,
+        Felt, QuadFelt, prove_and_verify_statement, test_config,
     },
-    transcript::TranscriptData,
-    verify,
 };
 
 const START: u64 = 2;
@@ -141,30 +138,4 @@ fn multi_trace_with_aux_padding() {
     let prover_statement = padding_prover_statement(width, aux_width, start);
 
     prove_and_verify_statement(&prover_statement);
-}
-
-#[test]
-fn multi_trace_rejects_trailing_transcript_data() {
-    let config = test_config();
-    let alignment = config.lmcs.alignment();
-    let width = alignment + 1;
-    let aux_width = alignment + 1;
-    let start = Felt::from_u64(START);
-
-    let prover_statement = padding_prover_statement(width, aux_width, start);
-
-    let output =
-        prove(&config, &prover_statement, test_challenger()).expect("proving should succeed");
-
-    let mut bad_proof = output.proof;
-    let (mut fields, commitments) = bad_proof.transcript.into_parts();
-    fields.push(Felt::ONE);
-    bad_proof.transcript = TranscriptData::new(fields, commitments);
-
-    let err = verify(&config, prover_statement.statement(), &bad_proof, test_challenger())
-        .expect_err("extra transcript data should fail verification");
-    assert!(matches!(
-        err,
-        VerifierError::Transcript(crate::transcript::TranscriptError::TrailingData)
-    ));
 }

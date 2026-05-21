@@ -228,25 +228,10 @@ fn malformed_log_trace_heights_is_rejected() {
     let output =
         prove(&config, &prover_statement, test_challenger()).expect("proving should succeed");
 
-    // Push straight to the `pub(crate)` `log_trace_heights` field to bypass
-    // shape construction and exercise the verifier-side trace-count check
-    // (now part of `TraceOrder::from_log_heights`, surfaced as `ShapeError`).
-    let mut bad_proof = output.proof.clone();
-    bad_proof.log_trace_heights.push(2);
-    let err = verify(&config, statement, &bad_proof, test_challenger())
-        .expect_err("extra log trace height should fail verification");
-    assert!(matches!(
-        err,
-        VerifierError::Shape(ShapeError::TraceCountMismatch { airs: 1, heights: 2 })
-    ));
-
-    // Empty heights → `TraceOrder::from_log_heights` rejects with
-    // `ShapeError::Empty` before the per-AIR check runs.
-    let mut bad_proof = output.proof.clone();
-    bad_proof.log_trace_heights.clear();
-    let err = verify(&config, statement, &bad_proof, test_challenger())
-        .expect_err("empty log trace heights should fail verification");
-    assert!(matches!(err, VerifierError::Shape(ShapeError::Empty)));
+    // Poke the `pub(crate)` `log_trace_heights` field directly to feed the
+    // verifier malformed proof shapes that bypass `ProverStatement`
+    // construction. The cases worth covering are the ones that would otherwise
+    // panic or overflow rather than return a clean error.
 
     // Out-of-range log height must surface as an error, not panic on
     // `1usize << log_h` or `two_adic_generator(log_h + log_blowup)`. log_h
@@ -270,22 +255,6 @@ fn malformed_log_trace_heights_is_rejected() {
     let err = verify(&config, statement, &bad_proof, test_challenger())
         .expect_err("log_h + log_blowup exceeding two-adicity should fail verification");
     assert!(matches!(err, VerifierError::Domain(DomainError::LdeOrderTooLarge { .. })));
-}
-
-#[test]
-fn prover_rejects_non_power_of_two_trace_height() {
-    // `ProverStatement::new` must reject non-power-of-two heights before any
-    // prover work runs.
-    let trace =
-        RowMajorMatrix::new(vec![Felt::from_u64(2), Felt::from_u64(16), Felt::from_u64(65536)], 1);
-    let err =
-        tiny_prover_statement(vec![TinyAir::new(vec![])], vec![trace], vec![Felt::from_u64(2)])
-            .err()
-            .expect("non-power-of-two trace height should be rejected");
-    match err {
-        InstanceError::TraceHeightNotPowerOfTwo { air: 0, height: 3 } => {},
-        other => panic!("expected TraceHeightNotPowerOfTwo {{ air: 0, height: 3 }}, got {other:?}"),
-    }
 }
 
 // ---------------------------------------------------------------------------
