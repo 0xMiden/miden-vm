@@ -467,6 +467,17 @@ fn build_chunk_processor() -> FastProcessor {
     .with_precompile(Hash)
 }
 
+/// Push `(ptr, TAG)` (tag deepest-first, so `TAG[0]` ends up on top under `event_id`) and invoke
+/// `adv.register_deferred_chunk`.
+fn emit_register_chunk(src: &mut String, tag: Tag, ptr: u32) {
+    use core::fmt::Write;
+    writeln!(src, "    push.{ptr}").unwrap();
+    for f in tag.as_word().iter().rev() {
+        writeln!(src, "    push.{}", f.as_canonical_u64()).unwrap();
+    }
+    src.push_str("    adv.register_deferred_chunk\n");
+}
+
 #[test]
 fn chunk_register_reads_bulk_data_from_memory_and_interns_node() {
     use core::fmt::Write;
@@ -481,20 +492,14 @@ fn chunk_register_reads_bulk_data_from_memory_and_interns_node() {
     let ptr: u32 = 0;
     let expected_digest = Node::chunk(tag, chunks.clone()).digest();
 
-    // MASM: write the 16 felts to memory at addresses 0..16, then push (ptr, TAG, deepest-first)
-    // and invoke `adv.register_deferred_chunk`. After the event, drop the 5 felts left on the
-    // operand stack.
+    // Write the 16 felts to memory at addresses 0..16, register the chunk, then drop the 5 felts
+    // left on the operand stack.
     let mut src = String::from("begin\n");
     for (i, felt) in chunks.iter().flatten().enumerate() {
         writeln!(&mut src, "    push.{}", felt.as_canonical_u64()).unwrap();
         writeln!(&mut src, "    mem_store.{}", ptr + i as u32).unwrap();
     }
-    // Push ptr, then tag (deepest first so tag[0] ends up on top under event_id).
-    writeln!(&mut src, "    push.{ptr}").unwrap();
-    for f in tag.as_word().iter().rev() {
-        writeln!(&mut src, "    push.{}", f.as_canonical_u64()).unwrap();
-    }
-    src.push_str("    adv.register_deferred_chunk\n");
+    emit_register_chunk(&mut src, tag, ptr);
     for _ in 0..5 {
         src.push_str("    drop\n");
     }
@@ -527,16 +532,11 @@ fn chunk_register_reads_bulk_data_from_memory_and_interns_node() {
 
 #[test]
 fn chunk_register_rejects_unaligned_pointer() {
-    use core::fmt::Write;
     let tag = preimage_tag(1);
     let ptr: u32 = 1; // not word-aligned
 
     let mut src = String::from("begin\n");
-    writeln!(&mut src, "    push.{ptr}").unwrap();
-    for f in tag.as_word().iter().rev() {
-        writeln!(&mut src, "    push.{}", f.as_canonical_u64()).unwrap();
-    }
-    src.push_str("    adv.register_deferred_chunk\n");
+    emit_register_chunk(&mut src, tag, ptr);
     src.push_str("end\n");
 
     let program = Assembler::default().assemble_program(&src).expect("program must assemble");
@@ -549,17 +549,12 @@ fn chunk_register_rejects_unaligned_pointer() {
 fn chunk_register_with_zero_chunks_still_interns_a_node() {
     // n=0 — no memory reads. The digest still depends on the tag (one permutation runs even
     // for empty chunks), so the resulting node lives in the state map.
-    use core::fmt::Write;
     let tag = preimage_tag(0);
     let ptr: u32 = 0;
     let expected_digest = Node::chunk(tag, vec![]).digest();
 
     let mut src = String::from("begin\n");
-    writeln!(&mut src, "    push.{ptr}").unwrap();
-    for f in tag.as_word().iter().rev() {
-        writeln!(&mut src, "    push.{}", f.as_canonical_u64()).unwrap();
-    }
-    src.push_str("    adv.register_deferred_chunk\n");
+    emit_register_chunk(&mut src, tag, ptr);
     for _ in 0..5 {
         src.push_str("    drop\n");
     }
