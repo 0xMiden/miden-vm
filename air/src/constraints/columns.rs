@@ -33,7 +33,7 @@ use crate::trace::{CHIPLETS_WIDTH, TRACE_WIDTH};
 /// `[T; NUM_CORE_COLS]` slice or the prefix of a `[T; TRACE_WIDTH]` row via
 /// `Borrow<CoreCols<T>>`.
 #[repr(C)]
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct CoreCols<T> {
     pub system: SystemCols<T>,
     pub decoder: DecoderCols<T>,

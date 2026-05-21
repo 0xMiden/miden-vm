@@ -477,11 +477,11 @@ impl<'a> CoreTraceGenerationTracer<'a> {
         decoder_row: DecoderRow,
     ) {
         let mut row = CoreCols::<Felt>::default();
-        if let Some(system) = self.system_cols {
-            row.system = system;
+        if let Some(system) = &self.system_cols {
+            row.system = system.clone();
         }
-        if let Some(stack) = self.stack_cols {
-            row.stack = stack;
+        if let Some(stack) = &self.stack_cols {
+            row.stack = stack.clone();
         }
         Self::write_decoder(&mut row.decoder, &decoder_row);
 

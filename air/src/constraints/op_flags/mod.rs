@@ -1078,7 +1078,7 @@ pub fn generate_test_row(opcode: usize) -> crate::constraints::columns::CoreCols
     }
 
     let row: &CoreCols<Felt> = row_data.as_slice().borrow();
-    *row
+    row.clone()
 }
 
 /// Returns a 7-bit array representation of an opcode.

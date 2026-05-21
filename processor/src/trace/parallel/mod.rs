@@ -363,8 +363,8 @@ fn fixup_stack_and_system_rows(
         let row_idx = frag_idx * fragment_size;
         let row_start = row_idx * w;
         let row: &mut CoreCols<Felt> = core_trace_data[row_start..row_start + w].borrow_mut();
-        row.system = system_rows[frag_idx - 1];
-        row.stack = stack_rows[frag_idx - 1];
+        row.system = system_rows[frag_idx - 1].clone();
+        row.stack = stack_rows[frag_idx - 1].clone();
     }
 }
 
@@ -395,8 +395,8 @@ fn push_halt_opcode_row(
     {
         let row: &mut CoreCols<Felt> = row_data.as_mut_slice().borrow_mut();
 
-        row.system = *last_system_state;
-        row.stack = *last_stack_state;
+        row.system = last_system_state.clone();
+        row.stack = last_stack_state.clone();
 
         // Pad op_bits columns with HALT opcode bits
         let halt_opcode = opcodes::HALT;
