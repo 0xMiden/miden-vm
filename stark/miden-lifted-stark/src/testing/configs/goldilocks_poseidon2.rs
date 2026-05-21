@@ -170,18 +170,18 @@ where
 ///
 /// `aux_fn` is called once per AIR with `(main_trace, challenges)` and returns
 /// `(aux_trace, aux_values)` for that AIR.
-pub struct TestMa<A, AuxFn> {
+pub struct TestMultiAir<A, AuxFn> {
     pub airs: Vec<A>,
     pub aux_fn: AuxFn,
 }
 
-impl<A, AuxFn> TestMa<A, AuxFn> {
+impl<A, AuxFn> TestMultiAir<A, AuxFn> {
     pub fn new(airs: Vec<A>, aux_fn: AuxFn) -> Self {
         Self { airs, aux_fn }
     }
 }
 
-impl<A, AuxFn> MultiAir<Felt, QuadFelt> for TestMa<A, AuxFn>
+impl<A, AuxFn> MultiAir<Felt, QuadFelt> for TestMultiAir<A, AuxFn>
 where
     A: crate::air::LiftedAir<Felt, QuadFelt>,
     AuxFn: Fn(&RowMajorMatrix<Felt>, &[QuadFelt]) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>),
@@ -223,8 +223,9 @@ pub fn prove_and_verify<A, AuxFn>(
 {
     let airs: Vec<A> = core::iter::repeat_n(air.clone(), traces.len()).collect();
     let traces_owned: Vec<RowMajorMatrix<Felt>> = traces.iter().cloned().collect();
-    let statement = Statement::new(TestMa::new(airs, aux_fn), air_inputs.to_vec(), Vec::new())
-        .expect("statement inputs valid");
+    let statement =
+        Statement::new(TestMultiAir::new(airs, aux_fn), air_inputs.to_vec(), Vec::new())
+            .expect("statement inputs valid");
     let prover_statement =
         ProverStatement::new(statement, traces_owned).expect("trace shape valid");
     prove_and_verify_statement(&prover_statement);

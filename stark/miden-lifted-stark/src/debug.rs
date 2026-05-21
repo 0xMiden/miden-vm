@@ -4,9 +4,9 @@
 //!
 //! - **Structural assertions** ([`assert_airs_valid`], [`assert_valid`], [`assert_prover_valid`],
 //!   [`assert_compatible`], [`assert_prover_setup`], [`assert_aux_traces_shape`]) — thin wrappers
-//!   over [`miden_lifted_air::debug`] and [`crate::setup::validate_compatible`] that panic with a
-//!   `BUG:` prefix on contract violation. Call them from tests / setup; the prover and verifier hot
-//!   paths trust their inputs.
+//!   over [`miden_lifted_air::debug`] and [`crate::setup::validate_compatible`] that panic on
+//!   contract violation. Call them from tests / setup; the prover and verifier hot paths trust
+//!   their inputs.
 //! - **Constraint checker** ([`check_constraints`]) — evaluates the AIR constraints row-by-row on
 //!   concrete trace values and panics on the first nonzero constraint. Avoids the full STARK
 //!   pipeline so failures surface immediately.
@@ -66,7 +66,8 @@ where
     EF: ExtensionField<F>,
     A: LiftedAir<F, EF>,
 {
-    validate_compatible::<F, EF, A>(airs, params).expect("BUG: AIR ↔ PCS compatibility");
+    validate_compatible::<F, EF, A>(airs, params)
+        .expect("AIRs should be compatible with the PCS parameters");
 }
 
 /// One-shot prover-setup check: bundles [`assert_prover_valid`] and
@@ -111,7 +112,7 @@ pub fn assert_aux_traces_shape<F, EF, MA, Ch>(
     assert_eq!(
         airs.len(),
         traces.len(),
-        "BUG: airs.len() = {} but traces.len() = {}",
+        "airs.len() = {} but traces.len() = {}",
         airs.len(),
         traces.len(),
     );
@@ -127,14 +128,14 @@ pub fn assert_aux_traces_shape<F, EF, MA, Ch>(
     assert_eq!(
         aux_traces.len(),
         airs.len(),
-        "BUG: build_aux_traces returned {} aux traces, expected {}",
+        "build_aux_traces returned {} aux traces, expected {}",
         aux_traces.len(),
         airs.len(),
     );
     assert_eq!(
         aux_values.len(),
         airs.len(),
-        "BUG: build_aux_traces returned {} aux value vectors, expected {}",
+        "build_aux_traces returned {} aux value vectors, expected {}",
         aux_values.len(),
         airs.len(),
     );
@@ -148,21 +149,21 @@ pub fn assert_aux_traces_shape<F, EF, MA, Ch>(
         assert_eq!(
             aux_trace.width(),
             air.aux_width(),
-            "BUG: AIR {i}: aux trace width = {}, but air.aux_width() = {}",
+            "AIR {i}: aux trace width = {}, but air.aux_width() = {}",
             aux_trace.width(),
             air.aux_width(),
         );
         assert_eq!(
             aux_trace.height(),
             main.height(),
-            "BUG: AIR {i}: aux trace height = {}, but main trace height = {}",
+            "AIR {i}: aux trace height = {}, but main trace height = {}",
             aux_trace.height(),
             main.height(),
         );
         assert_eq!(
             aux_vals.len(),
             air.num_aux_values(),
-            "BUG: AIR {i}: aux_values.len() = {}, but air.num_aux_values() = {}",
+            "AIR {i}: aux_values.len() = {}, but air.num_aux_values() = {}",
             aux_vals.len(),
             air.num_aux_values(),
         );

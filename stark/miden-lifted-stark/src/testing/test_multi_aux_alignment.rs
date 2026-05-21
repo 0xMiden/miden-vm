@@ -71,11 +71,11 @@ impl LiftedAir<Felt, QuadFelt> for PaddingAir {
 }
 
 /// `MultiAir` that emits aux traces of the AIR's declared width.
-struct PaddingMa {
+struct PaddingMultiAir {
     airs: Vec<PaddingAir>,
 }
 
-impl MultiAir<Felt, QuadFelt> for PaddingMa {
+impl MultiAir<Felt, QuadFelt> for PaddingMultiAir {
     type Air = PaddingAir;
 
     fn airs(&self) -> &[Self::Air] {
@@ -120,12 +120,12 @@ fn padding_prover_statement(
     width: usize,
     aux_width: usize,
     start: Felt,
-) -> ProverStatement<Felt, QuadFelt, PaddingMa> {
+) -> ProverStatement<Felt, QuadFelt, PaddingMultiAir> {
     let air = PaddingAir::new(width, aux_width);
     let t0 = generate_trace(start, 8, width);
     let t1 = generate_trace(start, 16, width);
     let statement =
-        Statement::new(PaddingMa { airs: vec![air.clone(), air] }, vec![start], Vec::new())
+        Statement::new(PaddingMultiAir { airs: vec![air.clone(), air] }, vec![start], Vec::new())
             .unwrap();
     ProverStatement::new(statement, vec![t0, t1]).unwrap()
 }

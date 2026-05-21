@@ -163,7 +163,7 @@ where
     let air_inputs = statement.air_inputs();
     let trace_heights: Vec<usize> = traces.iter().map(|t| t.height()).collect();
     let trace_order = TraceOrder::from_trace_heights(&trace_heights)
-        .expect("BUG: ProverStatement::new should reject malformed heights");
+        .expect("ProverStatement::new should reject malformed heights");
 
     // Borrow each AIR and trace, then reorder both into ascending-height (proof)
     // order. AIRs are passed as `&MA::Air` (the existing constraint code expects
@@ -205,10 +205,7 @@ where
         .collect();
     let log_quotient_degree = log_quotient_degrees.iter().copied().max().unwrap_or(1);
 
-    debug_assert!(
-        log_quotient_degree <= log_blowup,
-        "BUG: validate_compatible should have caught this"
-    );
+    debug_assert!(log_quotient_degree <= log_blowup, "validate_compatible should have caught this");
 
     // Pair the max LDE domain with the quotient degree. The `EvaluationDomain`
     // now flows through the constraint and quotient layers. Per-instance variants

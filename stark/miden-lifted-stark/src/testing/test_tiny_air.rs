@@ -131,11 +131,11 @@ fn tiny_aux(
 }
 
 /// `MultiAir` that runs [`tiny_aux`] per AIR.
-struct TinyMa {
+struct TinyMultiAir {
     airs: Vec<TinyAir>,
 }
 
-impl MultiAir<Felt, QuadFelt> for TinyMa {
+impl MultiAir<Felt, QuadFelt> for TinyMultiAir {
     type Air = TinyAir;
 
     fn airs(&self) -> &[Self::Air] {
@@ -167,8 +167,8 @@ fn tiny_prover_statement(
     airs: Vec<TinyAir>,
     traces: Vec<RowMajorMatrix<Felt>>,
     air_inputs: Vec<Felt>,
-) -> Result<ProverStatement<Felt, QuadFelt, TinyMa>, InstanceError> {
-    let statement = Statement::new(TinyMa { airs }, air_inputs, Vec::new())?;
+) -> Result<ProverStatement<Felt, QuadFelt, TinyMultiAir>, InstanceError> {
+    let statement = Statement::new(TinyMultiAir { airs }, air_inputs, Vec::new())?;
     ProverStatement::new(statement, traces)
 }
 

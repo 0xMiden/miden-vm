@@ -43,11 +43,11 @@ impl LiftedAir<Felt, QuadFelt> for BadAuxWidthAir {
 }
 
 /// `MultiAir` that returns 2 EF aux columns when `BadAuxWidthAir` declares 1.
-struct BadMa {
+struct BadMultiAir {
     airs: Vec<BadAuxWidthAir>,
 }
 
-impl MultiAir<Felt, QuadFelt> for BadMa {
+impl MultiAir<Felt, QuadFelt> for BadMultiAir {
     type Air = BadAuxWidthAir;
 
     fn airs(&self) -> &[Self::Air] {
@@ -75,11 +75,11 @@ impl MultiAir<Felt, QuadFelt> for BadMa {
 }
 
 #[test]
-#[should_panic(expected = "BUG: AIR 0: aux trace width = 2, but air.aux_width() = 1")]
+#[should_panic(expected = "AIR 0: aux trace width = 2, but air.aux_width() = 1")]
 fn aux_width_mismatch_panics_in_debug_check() {
     let trace = RowMajorMatrix::new(vec![Felt::ZERO, Felt::ONE, Felt::ONE, Felt::ZERO], 1);
     let statement =
-        Statement::new(BadMa { airs: vec![BadAuxWidthAir] }, Vec::new(), Vec::new()).unwrap();
+        Statement::new(BadMultiAir { airs: vec![BadAuxWidthAir] }, Vec::new(), Vec::new()).unwrap();
     let prover_statement = ProverStatement::new(statement, vec![trace]).unwrap();
 
     assert_aux_traces_shape(&prover_statement, test_challenger());

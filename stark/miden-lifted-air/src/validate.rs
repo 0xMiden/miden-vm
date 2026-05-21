@@ -257,12 +257,12 @@ mod tests {
     }
 
     /// `MultiAir` carrying its AIRs and a tunable aux-inputs budget for tests.
-    struct DummyMa {
+    struct DummyMultiAir {
         airs: Vec<DummyAir>,
         max_aux_inputs: usize,
     }
 
-    impl DummyMa {
+    impl DummyMultiAir {
         fn new(airs: Vec<DummyAir>) -> Self {
             Self { airs, max_aux_inputs: 0 }
         }
@@ -271,7 +271,7 @@ mod tests {
         }
     }
 
-    impl MultiAir<F, EF> for DummyMa {
+    impl MultiAir<F, EF> for DummyMultiAir {
         type Air = DummyAir;
 
         fn airs(&self) -> &[Self::Air] {
@@ -305,14 +305,14 @@ mod tests {
 
     #[test]
     fn validate_inputs_ok() {
-        let ma = DummyMa::new(vec![DummyAir::new(1, 1, 2)]);
-        validate_inputs::<F, EF, DummyMa>(&ma, &pv(2), &[]).unwrap();
+        let ma = DummyMultiAir::new(vec![DummyAir::new(1, 1, 2)]);
+        validate_inputs::<F, EF, DummyMultiAir>(&ma, &pv(2), &[]).unwrap();
     }
 
     #[test]
     fn validate_inputs_public_values_length_mismatch() {
-        let ma = DummyMa::new(vec![DummyAir::new(1, 1, 2), DummyAir::new(1, 1, 1)]);
-        let err = validate_inputs::<F, EF, DummyMa>(&ma, &pv(2), &[]).unwrap_err();
+        let ma = DummyMultiAir::new(vec![DummyAir::new(1, 1, 2), DummyAir::new(1, 1, 1)]);
+        let err = validate_inputs::<F, EF, DummyMultiAir>(&ma, &pv(2), &[]).unwrap_err();
         assert!(matches!(
             err,
             InstanceError::PublicValuesLengthMismatch { air: 1, expected: 1, actual: 2 }
@@ -321,8 +321,8 @@ mod tests {
 
     #[test]
     fn validate_inputs_aux_inputs_too_long() {
-        let ma = DummyMa::with_max_aux_inputs(vec![DummyAir::new(1, 1, 0)], 2);
-        let err = validate_inputs::<F, EF, DummyMa>(&ma, &[], &pv(3)).unwrap_err();
+        let ma = DummyMultiAir::with_max_aux_inputs(vec![DummyAir::new(1, 1, 0)], 2);
+        let err = validate_inputs::<F, EF, DummyMultiAir>(&ma, &[], &pv(3)).unwrap_err();
         assert!(matches!(err, InstanceError::AuxInputsTooLong { actual: 3, max: 2 }));
     }
 
@@ -330,8 +330,8 @@ mod tests {
 
     #[test]
     fn prover_statement_height_not_power_of_two() {
-        let statement = Statement::<F, EF, DummyMa>::new(
-            DummyMa::new(vec![DummyAir::new(1, 1, 0)]),
+        let statement = Statement::<F, EF, DummyMultiAir>::new(
+            DummyMultiAir::new(vec![DummyAir::new(1, 1, 0)]),
             vec![],
             vec![],
         )
@@ -342,8 +342,8 @@ mod tests {
 
     #[test]
     fn prover_statement_width_mismatch() {
-        let statement = Statement::<F, EF, DummyMa>::new(
-            DummyMa::new(vec![DummyAir::new(2, 1, 0)]),
+        let statement = Statement::<F, EF, DummyMultiAir>::new(
+            DummyMultiAir::new(vec![DummyAir::new(2, 1, 0)]),
             vec![],
             vec![],
         )
@@ -357,8 +357,8 @@ mod tests {
 
     #[test]
     fn prover_statement_trace_count_mismatch() {
-        let statement = Statement::<F, EF, DummyMa>::new(
-            DummyMa::new(vec![DummyAir::new(1, 1, 0), DummyAir::new(1, 1, 0)]),
+        let statement = Statement::<F, EF, DummyMultiAir>::new(
+            DummyMultiAir::new(vec![DummyAir::new(1, 1, 0), DummyAir::new(1, 1, 0)]),
             vec![],
             vec![],
         )
@@ -369,8 +369,8 @@ mod tests {
 
     #[test]
     fn prover_statement_trace_height_below_period() {
-        let statement = Statement::<F, EF, DummyMa>::new(
-            DummyMa::new(vec![DummyAir::new(1, 1, 0).with_periodic(8)]),
+        let statement = Statement::<F, EF, DummyMultiAir>::new(
+            DummyMultiAir::new(vec![DummyAir::new(1, 1, 0).with_periodic(8)]),
             vec![],
             vec![],
         )

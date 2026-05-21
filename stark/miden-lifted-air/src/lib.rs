@@ -20,13 +20,13 @@ extern crate alloc;
 mod air;
 mod builder;
 pub mod debug;
-mod instance;
+mod statement;
 mod util;
 pub mod validate;
 
-pub use air::{ConstraintDegrees, LiftedAir};
+pub use air::{ConstraintDegrees, LiftedAir, MultiAir, ReductionError};
 pub use builder::LiftedAirBuilder;
-pub use instance::{MultiAir, ProverStatement, ReductionError, Statement};
+pub use statement::{ProverStatement, Statement};
 pub use util::{log2_ceil_u8, log2_strict_u8};
 pub use validate::{InstanceError, validate_inputs, validate_log_heights, validate_prover_traces};
 

@@ -616,7 +616,7 @@ impl<F: TwoAdicField> LiftedDomain<F> {
 /// Let N be the trace height (so trace columns are polynomials of degree < N).
 /// Symbolic evaluation assigns each constraint a *degree multiple* M
 /// (the AIR's combined
-/// [`constraint_degree().base.max(ext)`](miden_lifted_air::LiftedAir::constraint_degree)),
+/// [`constraint_degree().max()`](miden_lifted_air::ConstraintDegrees::max)),
 /// so the numerator polynomial C(X) has degree bounded by roughly M·(N − 1).
 ///
 /// In a STARK, the constraint numerator is divisible by the trace vanishing
@@ -640,10 +640,8 @@ where
     F: Field,
     A: LiftedAir<F, EF>,
 {
-    let d = air.constraint_degree();
-    let combined = d.base.max(d.ext);
     // Clamp to D = 2^result ≥ 2 so degenerate/linear AIRs stay well-defined.
-    log2_ceil_u8(combined.saturating_sub(1).max(2))
+    log2_ceil_u8(air.constraint_degree().max().saturating_sub(1).max(2))
 }
 
 // ============================================================================

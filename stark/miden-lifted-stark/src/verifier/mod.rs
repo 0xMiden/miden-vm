@@ -104,9 +104,8 @@ pub enum VerifierError {
 /// order, matching [`Statement::airs`]) and reconstructs the proof's AIR
 /// ordering deterministically via [`TraceOrder`]. The caller's challenger
 /// must already be bound to protocol parameters and AIR configurations —
-/// see the prover module-level docs. The proof's `air_inputs` and
-/// `aux_inputs` are absorbed internally via [`Statement::observe`]; both
-/// prover and verifier must pass a `Statement` carrying the same data.
+/// see the prover module-level docs. The statement's inputs are absorbed
+/// internally via [`Statement::observe`].
 ///
 /// The verifier mirrors the prover's protocol:
 ///
@@ -207,10 +206,7 @@ where
         .max()
         .unwrap_or(1);
 
-    debug_assert!(
-        log_quotient_degree <= log_blowup,
-        "BUG: validate_compatible should have caught this"
-    );
+    debug_assert!(log_quotient_degree <= log_blowup, "validate_compatible should have caught this");
 
     // Pair the max LDE domain with the constraint degree for the constraint layer.
     let max_eval_domain = max_lde_domain.evaluation_domain(log_quotient_degree);
@@ -307,9 +303,9 @@ where
         // indicate a framework bug.
         let aux_mat = &opened[aux_g][j];
         let aux_local = row_to_packed_ext::<F, EF>(&aux_mat.row_slice(0).expect("aux row 0"))
-            .expect("BUG: aux row width mismatch — PCS verify_aligned should have caught this");
+            .expect("aux row width should match: PCS verify_aligned validates this upstream");
         let aux_next = row_to_packed_ext::<F, EF>(&aux_mat.row_slice(1).expect("aux row 1"))
-            .expect("BUG: aux row width mismatch — PCS verify_aligned should have caught this");
+            .expect("aux row width should match: PCS verify_aligned validates this upstream");
         let aux_window = RowWindow::from_two_rows(&aux_local, &aux_next);
 
         // Selectors at the lifted OOD point yⱼ = z^{rⱼ} (encapsulated in LiftedDomain).
@@ -368,7 +364,7 @@ where
     // Quotient group has a single matrix; row 0 is the evaluation at z.
     let quot_row = opened[quot_g][0].row_slice(0).expect("quotient row 0");
     let quotient_chunks = row_to_packed_ext::<F, EF>(&quot_row)
-        .expect("BUG: quotient row width mismatch — PCS verify_aligned should have caught this");
+        .expect("quotient row width should match: PCS verify_aligned validates this upstream");
     let quotient_z = max_eval_domain.reconstruct_quotient::<EF>(z, &quotient_chunks);
 
     // `max_lde_domain` is the tallest (lift_ratio = 0), so lifted == unlifted here.

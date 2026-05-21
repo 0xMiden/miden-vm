@@ -79,12 +79,12 @@ impl<EF: Field> LiftedAir<Felt, EF> for LiftedBenchAir {
 // MultiAir: per-AIR all-zero aux trace, empty public inputs.
 // ═══════════════════════════════════════════════════════════════════════════════
 
-struct BenchMa {
+struct BenchMultiAir {
     /// `(num_aux_cols, num_aux_values)` per AIR.
     aux_shape: Vec<(usize, usize)>,
 }
 
-impl MultiAir<Felt, QuadFelt> for BenchMa {
+impl MultiAir<Felt, QuadFelt> for BenchMultiAir {
     type Air = LiftedBenchAir;
 
     fn build_aux_traces(
@@ -147,8 +147,8 @@ where
         .collect();
 
     let traces_owned: Vec<RowMajorMatrix<Felt>> = traces.to_vec();
-    let statement =
-        Statement::new(BenchMa { aux_shape }, airs, Vec::new(), Vec::new()).expect("statement");
+    let statement = Statement::new(BenchMultiAir { aux_shape }, airs, Vec::new(), Vec::new())
+        .expect("statement");
     let prover_statement = ProverStatement::new(statement, traces_owned).expect("prover statement");
 
     let output = info_span!("prove").in_scope(|| {

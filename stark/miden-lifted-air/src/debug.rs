@@ -46,7 +46,7 @@ where
         statement.air_inputs(),
         statement.aux_inputs(),
     )
-    .expect("BUG: statement invalid (debug)");
+    .expect("statement inputs should be valid");
     check_air_structure::<F, EF, MA::Air>(statement.airs());
 }
 
@@ -64,9 +64,9 @@ where
         statement.air_inputs(),
         statement.aux_inputs(),
     )
-    .expect("BUG: statement invalid (debug)");
+    .expect("statement inputs should be valid");
     validate_prover_traces::<F, EF, MA>(statement, prover_statement.traces())
-        .expect("BUG: prover traces invalid (debug)");
+        .expect("prover traces should be valid");
     check_air_structure::<F, EF, MA::Air>(statement.airs());
 }
 
@@ -104,13 +104,13 @@ where
 {
     assert!(
         air.preprocessed_trace().is_none(),
-        "BUG: AIR {idx}: preprocessed traces are not supported"
+        "AIR {idx}: preprocessed traces are not supported"
     );
-    assert!(air.aux_width() > 0, "BUG: AIR {idx}: aux_width must be positive");
+    assert!(air.aux_width() > 0, "AIR {idx}: aux_width must be positive");
     for (i, col) in air.periodic_columns().iter().enumerate() {
         assert!(
             !col.is_empty() && col.len().is_power_of_two(),
-            "BUG: AIR {idx}: periodic column {i}: length must be positive power of two, \
+            "AIR {idx}: periodic column {i}: length must be a positive power of two, \
              got {len}",
             len = col.len(),
         );
@@ -134,7 +134,7 @@ where
     let check = |part: &str, expected: usize, actual: usize| {
         assert!(
             actual == expected,
-            "BUG: AIR {idx}: {part} dimension mismatch: expected {expected}, got {actual}"
+            "AIR {idx}: {part} dimension mismatch: expected {expected}, got {actual}"
         );
     };
 

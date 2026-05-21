@@ -26,7 +26,7 @@ use crate::{
 //   col 0: 1/(pi_0 + challenge[0])  — inverse for multiset bus
 //   col 1: pi_1 + challenge[1]      — accumulator for logup bus
 //
-// `BusMa::eval_external` (must all equal zero):
+// `BusMultiAir::eval_external` (must all equal zero):
 //   assert_0 (multiset): aux_values[0] * (c0 + pi_0) - 1 == 0
 //   assert_1 (logup):    (aux_values[1] - c1) - pi_1     == 0
 // ---------------------------------------------------------------------------
@@ -111,13 +111,13 @@ impl LiftedAir<Felt, QuadFelt> for BusTestAir {
 // aux-trace builder and the cross-AIR `eval_external` reduction.
 // ---------------------------------------------------------------------------
 
-struct BusMa {
+struct BusMultiAir {
     airs: Vec<BusTestAir>,
     pi_0: Felt,
     pi_1: Felt,
 }
 
-impl MultiAir<Felt, QuadFelt> for BusMa {
+impl MultiAir<Felt, QuadFelt> for BusMultiAir {
     type Air = BusTestAir;
 
     fn airs(&self) -> &[Self::Air] {
@@ -180,9 +180,9 @@ fn bus_prover_statement(
     trace: RowMajorMatrix<Felt>,
     air_inputs: Vec<Felt>,
     aux_inputs: Vec<Felt>,
-) -> ProverStatement<Felt, QuadFelt, BusMa> {
+) -> ProverStatement<Felt, QuadFelt, BusMultiAir> {
     let statement =
-        Statement::new(BusMa { airs: vec![BusTestAir], pi_0, pi_1 }, air_inputs, aux_inputs)
+        Statement::new(BusMultiAir { airs: vec![BusTestAir], pi_0, pi_1 }, air_inputs, aux_inputs)
             .expect("statement inputs valid");
     ProverStatement::new(statement, vec![trace]).expect("trace shape valid")
 }

@@ -84,11 +84,8 @@ See `docs/lifting.md` for a deeper discussion and sufficient conditions.
    `y_j = z^{r_j}`: compute selectors, evaluate periodic polynomials,
    fold constraints with alpha, accumulate with beta.
 6. **Evaluate external assertions** — Call `Statement::eval_external`
-   once with the global view (challenges, all aux values, log heights);
-   each returned EF value must equal zero. The `Statement` owns both the
-   shared `air_inputs` and the optional `aux_inputs`; prover and verifier
-   absorb both into Fiat-Shamir via `Statement::observe` before the
-   rest of the protocol.
+   once over the global view (challenges, aux values, log heights); each
+   returned EF value must equal zero.
 7. **Check identity** — `accumulated == Q(z) * Z_H(z)`.
 8. **Ensure transcript is fully consumed** — Canonicality enforcement.
 
@@ -225,12 +222,10 @@ at `y_j`, and the opened trace values already correspond to `p_j(y_j)`.
 
 ## Conventions & Assumptions
 
-- **AIR ordering** — The proof defines an ordering of AIR instances
-  derived deterministically from trace heights (stable sort on
-  `(log_trace_height, caller_index)`) — `TraceOrder` materialises this from
-  the caller-order heights stored on `StarkProof`. The caller must bind
-  the AIR list into the Fiat-Shamir challenger; the ordering itself is
-  implicit in the heights. See the prover module-level docs.
+- **AIR ordering** — The proof orders AIR instances deterministically by trace
+  height (stable sort on `(log_trace_height, caller_index)`), materialised by
+  `TraceOrder` from the heights stored on `StarkProof`. The caller must bind the
+  AIR list into the Fiat-Shamir challenger. See the prover module-level docs.
 - **Power-of-two heights** — All trace heights are powers of two.
 - **Bit-reversed storage** — All evaluation matrices are in bit-reversed order.
 - **Constraint degree** — Fixed at `D = 4` (`LOG_CONSTRAINT_DEGREE = 2`).

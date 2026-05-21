@@ -76,7 +76,7 @@ where
     }
 
     fn is_transition_window(&self, size: usize) -> Self::Expr {
-        debug_assert_eq!(size, 2, "BUG: AIR uses window size {size}; only 2 supported");
+        debug_assert_eq!(size, 2, "AIR uses window size {size}; only 2 supported");
         self.selectors.is_transition
     }
 
