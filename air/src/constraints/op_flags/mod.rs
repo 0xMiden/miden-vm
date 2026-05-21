@@ -1054,7 +1054,7 @@ fn accumulate_depth_deltas<const N: usize, E: PrimeCharacteristicRing>(
 /// - All other columns are zero
 #[cfg(test)]
 pub fn generate_test_row(opcode: usize) -> crate::constraints::columns::CoreCols<miden_core::Felt> {
-    use core::borrow::BorrowMut;
+    use core::borrow::{Borrow, BorrowMut};
 
     use miden_core::{Felt, ZERO};
 
@@ -1077,8 +1077,8 @@ pub fn generate_test_row(opcode: usize) -> crate::constraints::columns::CoreCols
         row.decoder.extra[1] = bit_6 * bit_5;
     }
 
-    // Safety: `CoreCols` is `#[repr(C)]` with the same layout as `[Felt; NUM_CORE_COLS]`.
-    unsafe { core::mem::transmute::<[Felt; NUM_CORE_COLS], CoreCols<Felt>>(row_data) }
+    let row: &CoreCols<Felt> = row_data.as_slice().borrow();
+    *row
 }
 
 /// Returns a 7-bit array representation of an opcode.

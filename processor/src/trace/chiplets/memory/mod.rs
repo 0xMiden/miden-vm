@@ -1,8 +1,8 @@
 use alloc::{collections::BTreeMap, vec::Vec};
-use core::fmt::Debug;
+use core::{borrow::BorrowMut, fmt::Debug};
 
 use miden_air::{
-    MemoryCols, borrow_chiplet_mut,
+    MemoryCols,
     trace::{
         RowIndex,
         chiplets::memory::{
@@ -334,7 +334,7 @@ impl Memory {
                     let row_slice =
                         &mut buffer[row * MEMORY_TRACE_WIDTH..(row + 1) * MEMORY_TRACE_WIDTH];
                     let (mem_slice, aux_slice) = row_slice.split_at_mut(MEMORY_TRACE_WIDTH - 2);
-                    let cols: &mut MemoryCols<Felt> = borrow_chiplet_mut(mem_slice);
+                    let cols: &mut MemoryCols<Felt> = mem_slice.borrow_mut();
 
                     cols.is_read = match memory_access.operation() {
                         MemoryOperation::Read => MEMORY_READ,
@@ -400,8 +400,7 @@ impl Memory {
         batch_inversion_allow_zeros(&mut deltas);
         for (r, &inv) in deltas.iter().enumerate() {
             let row_slice = &mut buffer[r * MEMORY_TRACE_WIDTH..(r + 1) * MEMORY_TRACE_WIDTH];
-            let cols: &mut MemoryCols<Felt> =
-                borrow_chiplet_mut(&mut row_slice[..MEMORY_TRACE_WIDTH - 2]);
+            let cols: &mut MemoryCols<Felt> = row_slice[..MEMORY_TRACE_WIDTH - 2].borrow_mut();
             cols.d_inv = inv;
         }
 

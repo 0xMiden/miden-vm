@@ -124,7 +124,7 @@ fn range_checker_table_emits_per_row_adds() {
     let mut exp = Expectations::new(&log);
     for row in 0..main.num_rows() {
         let idx = RowIndex::from(row);
-        let range = &main.core_row_projected(idx).range;
+        let range = &main.core_row_or_last(idx).range;
         let m = range.multiplicity;
         let v = range.value;
         exp.push(row, m, &RangeMsg { value: v });

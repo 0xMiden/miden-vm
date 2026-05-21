@@ -48,7 +48,7 @@ use constraints::lookup::{
 pub use constraints::{
     chiplets::columns::{
         AceCols, AceEvalCols, AceReadCols, BitwiseCols, ControllerCols, KernelRomCols, MemoryCols,
-        PermutationCols, borrow_chiplet, borrow_chiplet_mut,
+        PermutationCols,
     },
     columns::{ChipletCols, CoreCols},
     decoder::columns::DecoderCols,

@@ -13,7 +13,7 @@ use core::{
 use super::{
     chiplets::columns::{
         AceCols, AceEvalCols, AceReadCols, BitwiseCols, ControllerCols, KernelRomCols, MemoryCols,
-        PermutationCols, borrow_chiplet,
+        PermutationCols,
     },
     decoder::columns::DecoderCols,
     range::columns::RangeCols,
@@ -116,12 +116,12 @@ impl<T> ChipletCols<T> {
 
     /// Returns a typed borrow of the bitwise chiplet columns (chiplets\[2..15\]).
     pub fn bitwise(&self) -> &BitwiseCols<T> {
-        borrow_chiplet(&self.chiplets[2..15])
+        self.chiplets[2..15].borrow()
     }
 
     /// Returns a typed borrow of the memory chiplet columns (chiplets\[3..18\]).
     pub fn memory(&self) -> &MemoryCols<T> {
-        borrow_chiplet(&self.chiplets[3..18])
+        self.chiplets[3..18].borrow()
     }
 
     /// Returns the lower 16-bit limb of the memory word address (chiplets\[18\]).
@@ -149,22 +149,22 @@ impl<T> ChipletCols<T> {
 
     /// Returns a typed borrow of the ACE chiplet columns (chiplets\[4..20\]).
     pub fn ace(&self) -> &AceCols<T> {
-        borrow_chiplet(&self.chiplets[4..])
+        self.chiplets[4..].borrow()
     }
 
     /// Returns a typed borrow of the kernel ROM chiplet columns (chiplets\[5..10\]).
     pub fn kernel_rom(&self) -> &KernelRomCols<T> {
-        borrow_chiplet(&self.chiplets[5..10])
+        self.chiplets[5..10].borrow()
     }
 
     /// Returns a typed borrow of the permutation sub-chiplet columns (chiplets\[1..20\]).
     pub fn permutation(&self) -> &PermutationCols<T> {
-        borrow_chiplet(&self.chiplets[1..])
+        self.chiplets[1..].borrow()
     }
 
     /// Returns a typed borrow of the controller sub-chiplet columns (chiplets\[1..20\]).
     pub fn controller(&self) -> &ControllerCols<T> {
-        borrow_chiplet(&self.chiplets[1..])
+        self.chiplets[1..].borrow()
     }
 }
 

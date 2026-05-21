@@ -1,8 +1,11 @@
 use alloc::vec::Vec;
-use core::ops::Range;
+use core::{
+    borrow::{Borrow, BorrowMut},
+    ops::Range,
+};
 
 use miden_air::{
-    ControllerCols, PermutationCols, borrow_chiplet, borrow_chiplet_mut,
+    ControllerCols, PermutationCols,
     trace::chiplets::hasher::{HASH_CYCLE_LEN, TRACE_WIDTH},
 };
 use miden_core::{
@@ -80,7 +83,7 @@ impl HasherTrace {
         let mut row = [ZERO; TRACE_WIDTH];
         {
             let (overlay, tail) = row.split_at_mut(S_PERM_OFFSET);
-            let cols: &mut ControllerCols<Felt> = borrow_chiplet_mut(overlay);
+            let cols: &mut ControllerCols<Felt> = overlay.borrow_mut();
             cols.s0 = selectors[0];
             cols.s1 = selectors[1];
             cols.s2 = selectors[2];
@@ -180,7 +183,7 @@ impl HasherTrace {
         let mut row = [ZERO; TRACE_WIDTH];
         {
             let (overlay, tail) = row.split_at_mut(S_PERM_OFFSET);
-            let cols: &mut PermutationCols<Felt> = borrow_chiplet_mut(overlay);
+            let cols: &mut PermutationCols<Felt> = overlay.borrow_mut();
             cols.witnesses = witnesses;
             cols.state = *state;
             cols.multiplicity = multiplicity;
@@ -233,7 +236,7 @@ impl HasherTrace {
                 && self.trace.values[row * W + S_PERM_OFFSET] == ZERO
             {
                 let cols: &ControllerCols<Felt> =
-                    borrow_chiplet(&self.trace.values[row * W..row * W + S_PERM_OFFSET]);
+                    self.trace.values[row * W..row * W + S_PERM_OFFSET].borrow();
                 states.push(cols.state);
             }
         }
@@ -249,7 +252,7 @@ impl HasherTrace {
         // copy the latest hasher state to the provided state slice
         let last = range.end - 1;
         let cols: &ControllerCols<Felt> =
-            borrow_chiplet(&self.trace.values[last * W..last * W + S_PERM_OFFSET]);
+            self.trace.values[last * W..last * W + S_PERM_OFFSET].borrow();
         *state = cols.state;
     }
 
@@ -258,7 +261,7 @@ impl HasherTrace {
         const W: usize = TRACE_WIDTH;
         for row in range {
             let cols: &mut ControllerCols<Felt> =
-                borrow_chiplet_mut(&mut self.trace.values[row * W..row * W + S_PERM_OFFSET]);
+                self.trace.values[row * W..row * W + S_PERM_OFFSET].borrow_mut();
             cols.mrupdate_id = mrupdate_id;
         }
     }

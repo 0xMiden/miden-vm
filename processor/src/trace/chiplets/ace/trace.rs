@@ -1,7 +1,8 @@
 use alloc::vec::Vec;
+use core::borrow::BorrowMut;
 
 use miden_air::{
-    AceCols, QuadFeltExpr, borrow_chiplet_mut,
+    AceCols, QuadFeltExpr,
     trace::{RowIndex, chiplets::ace::ACE_CHIPLET_NUM_COLS},
 };
 use miden_core::{
@@ -166,7 +167,7 @@ impl CircuitEvaluation {
         // READ rows.
         for (i, node) in self.read_nodes.iter().enumerate() {
             let r = offset + i;
-            let cols: &mut AceCols<Felt> = borrow_chiplet_mut(&mut out[r * W..(r + 1) * W]);
+            let cols: &mut AceCols<Felt> = out[r * W..(r + 1) * W].borrow_mut();
             cols.s_start = if i == 0 { Felt::ONE } else { Felt::ZERO };
             cols.s_block = Felt::ZERO;
             cols.ctx = ctx_felt;
@@ -193,7 +194,7 @@ impl CircuitEvaluation {
         // EVAL rows.
         for (i, node) in self.eval_nodes.iter().enumerate() {
             let r = offset + num_read_rows + i;
-            let cols: &mut AceCols<Felt> = borrow_chiplet_mut(&mut out[r * W..(r + 1) * W]);
+            let cols: &mut AceCols<Felt> = out[r * W..(r + 1) * W].borrow_mut();
             cols.s_start = Felt::ZERO;
             cols.s_block = Felt::ONE;
             cols.ctx = ctx_felt;

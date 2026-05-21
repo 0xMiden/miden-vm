@@ -1,7 +1,8 @@
 use alloc::vec::Vec;
+use core::borrow::BorrowMut;
 
 use miden_air::{
-    BitwiseCols, borrow_chiplet_mut,
+    BitwiseCols,
     trace::chiplets::bitwise::{BITWISE_AND, BITWISE_XOR, TRACE_WIDTH},
 };
 use miden_core::utils::{Matrix, RowMajorMatrix};
@@ -154,7 +155,7 @@ impl Bitwise {
     fn push_bitwise_row(&mut self, selector: Felt, a: u64, b: u64, prev_output: u64, output: u64) {
         let mut row = [ZERO; TRACE_WIDTH];
         {
-            let cols: &mut BitwiseCols<Felt> = borrow_chiplet_mut(&mut row);
+            let cols: &mut BitwiseCols<Felt> = row.as_mut_slice().borrow_mut();
             cols.op_flag = selector;
             cols.a = Felt::new_unchecked(a);
             cols.b = Felt::new_unchecked(b);

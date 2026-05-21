@@ -149,10 +149,12 @@ impl MainTrace {
         TRACE_WIDTH
     }
 
-    /// Returns a typed view of the Core-AIR row at index `i`.
+    /// Returns the stored core trace row at index `i`.
     ///
     /// # Panics
-    /// Panics if `i` is past the Core height.
+    /// Panics if `i` is past the core trace height — callers needing access at unified-trace
+    /// row indices past the core height should use [`Self::core_row_or_last`] instead, which
+    /// applies the documented last-row-replicate projection.
     #[inline]
     pub fn core_row(&self, i: RowIndex) -> &CoreCols<Felt> {
         let r = i.as_usize();
@@ -160,12 +162,21 @@ impl MainTrace {
         row.borrow()
     }
 
-    /// Returns a typed view of the Core-AIR row at index `i`, clamping past the Core height
-    /// to the last Core row. Mirrors the last-row-replicate projection of [`Self::get`] for
-    /// indices past the Core height; **does not** apply the `CLK = r` bump.
+    /// Returns the stored core trace row for `i`, or the final core row if `i` is past the
+    /// core trace height.
+    ///
+    /// This is only for APIs that render the split per-AIR traces as one logical main trace;
+    /// the returned row is not modified, and callers must handle `clk` separately (since the
+    /// `CLK = r` bump applied by [`Self::get`] is *not* applied here — the underlying row's
+    /// `clk` value is returned unchanged).
+    ///
+    /// # Panics
+    /// Panics if `i` is past the unified trace height — i.e. past both the core and chiplets
+    /// heights. Callers iterating over `0..num_rows()` are within bounds by construction.
     #[inline]
-    pub fn core_row_projected(&self, i: RowIndex) -> &CoreCols<Felt> {
+    pub fn core_row_or_last(&self, i: RowIndex) -> &CoreCols<Felt> {
         let r = i.as_usize();
+        assert!(r < self.num_rows(), "row index past the unified trace height");
         let core_h = self.storage.core_rm.height();
         let row_idx = r.min(core_h - 1);
         let row =
@@ -173,11 +184,17 @@ impl MainTrace {
         row.borrow()
     }
 
-    /// Returns a typed view of the chiplets-AIR row at index `i`.
+    /// Returns the stored chiplets trace row at index `i`.
     ///
-    /// Use the chiplet-specific overlays on the returned `ChipletCols` (`.controller()`,
-    /// `.permutation()`, `.bitwise()`, `.memory()`, `.ace()`, `.kernel_rom()`) to name the
-    /// physical columns according to the active chiplet on that row.
+    /// The returned [`ChipletCols`] is the raw column layout shared across all chiplets;
+    /// use one of the per-chiplet overlays (`.controller()`, `.permutation()`, `.bitwise()`,
+    /// `.memory()`, `.ace()`, `.kernel_rom()`) to name the physical columns according to
+    /// the chiplet active on that row.
+    ///
+    /// # Panics
+    /// Panics if `i` is past the chiplets trace height. Unlike [`Self::core_row_or_last`],
+    /// this method does not project past the per-AIR height; callers iterating the unified
+    /// trace must guard against rows where the chiplets trace is shorter than the core.
     #[inline]
     pub fn chiplet_cols(&self, i: RowIndex) -> &ChipletCols<Felt> {
         let r = i.as_usize();
@@ -273,10 +290,16 @@ impl MainTrace {
     // --------------------------------------------------------------------------------------------
 
     /// Returns the value of the clk column at row i.
+    ///
+    /// Past the core trace height this returns `Felt::from_u32(i)` so that `clk` stays
+    /// strictly monotone across the unified-trace projection. This matches the past-core-h
+    /// behavior of [`Self::get`] for the `CLK` column and is the **only** column whose
+    /// past-core-h value differs from [`Self::core_row_or_last`]'s last-row replication.
+    /// All other system/decoder/stack/range accessors below replicate the last core row
+    /// directly via [`Self::core_row_or_last`].
     pub fn clk(&self, i: RowIndex) -> Felt {
         let r = i.as_usize();
         if r >= self.storage.core_rm.height() {
-            // `clk` stays strictly monotone across the past-core-h projection.
             return Felt::from_u32(r as u32);
         }
         self.core_row(i).system.clk
@@ -284,7 +307,7 @@ impl MainTrace {
 
     /// Returns the value of the ctx column at row i.
     pub fn ctx(&self, i: RowIndex) -> Felt {
-        self.core_row_projected(i).system.ctx
+        self.core_row_or_last(i).system.ctx
     }
 
     // DECODER COLUMNS
@@ -292,7 +315,7 @@ impl MainTrace {
 
     /// Returns the value in the block address column at the row i.
     pub fn addr(&self, i: RowIndex) -> Felt {
-        self.core_row_projected(i).decoder.addr
+        self.core_row_or_last(i).decoder.addr
     }
 
     /// Helper method to detect change of address.
@@ -302,66 +325,66 @@ impl MainTrace {
 
     /// The i-th decoder helper register at `row`.
     pub fn helper_register(&self, i: usize, row: RowIndex) -> Felt {
-        self.core_row_projected(row).decoder.user_op_helpers()[i]
+        self.core_row_or_last(row).decoder.user_op_helpers()[i]
     }
 
     /// Returns the hasher state at row i.
     pub fn decoder_hasher_state(&self, i: RowIndex) -> [Felt; NUM_HASHER_COLUMNS] {
-        self.core_row_projected(i).decoder.hasher_state
+        self.core_row_or_last(i).decoder.hasher_state
     }
 
     /// Returns the first half of the hasher state at row i.
     pub fn decoder_hasher_state_first_half(&self, i: RowIndex) -> Word {
-        let hs = &self.core_row_projected(i).decoder.hasher_state;
+        let hs = &self.core_row_or_last(i).decoder.hasher_state;
         Word::from([hs[0], hs[1], hs[2], hs[3]])
     }
 
     /// Returns the second half of the hasher state at row i.
     pub fn decoder_hasher_state_second_half(&self, i: RowIndex) -> Word {
-        let hs = &self.core_row_projected(i).decoder.hasher_state;
+        let hs = &self.core_row_or_last(i).decoder.hasher_state;
         Word::from([hs[4], hs[5], hs[6], hs[7]])
     }
 
     /// Returns a specific element from the hasher state at row i.
     pub fn decoder_hasher_state_element(&self, element: usize, i: RowIndex) -> Felt {
-        self.core_row_projected(i).decoder.hasher_state[element]
+        self.core_row_or_last(i).decoder.hasher_state[element]
     }
 
     /// Returns the current function hash (i.e., root) at row i.
     pub fn fn_hash(&self, i: RowIndex) -> [Felt; DIGEST_LEN] {
-        self.core_row_projected(i).system.fn_hash
+        self.core_row_or_last(i).system.fn_hash
     }
 
     /// Returns the `is_loop_body` flag at row i.
     pub fn is_loop_body_flag(&self, i: RowIndex) -> Felt {
-        self.core_row_projected(i).decoder.end_block_flags().is_loop_body
+        self.core_row_or_last(i).decoder.end_block_flags().is_loop_body
     }
 
     /// Returns the `is_loop` flag at row i.
     pub fn is_loop_flag(&self, i: RowIndex) -> Felt {
-        self.core_row_projected(i).decoder.end_block_flags().is_loop
+        self.core_row_or_last(i).decoder.end_block_flags().is_loop
     }
 
     /// Returns the `is_call` flag at row i.
     pub fn is_call_flag(&self, i: RowIndex) -> Felt {
-        self.core_row_projected(i).decoder.end_block_flags().is_call
+        self.core_row_or_last(i).decoder.end_block_flags().is_call
     }
 
     /// Returns the `is_syscall` flag at row i.
     pub fn is_syscall_flag(&self, i: RowIndex) -> Felt {
-        self.core_row_projected(i).decoder.end_block_flags().is_syscall
+        self.core_row_or_last(i).decoder.end_block_flags().is_syscall
     }
 
     /// Returns the operation batch flags at row i. This indicates the number of op groups in
     /// the current batch that is being processed.
     pub fn op_batch_flag(&self, i: RowIndex) -> [Felt; NUM_OP_BATCH_FLAGS] {
-        self.core_row_projected(i).decoder.batch_flags
+        self.core_row_or_last(i).decoder.batch_flags
     }
 
     /// Returns the operation group count. This indicates the number of operation that remain
     /// to be executed in the current span block.
     pub fn group_count(&self, i: RowIndex) -> Felt {
-        self.core_row_projected(i).decoder.group_count
+        self.core_row_or_last(i).decoder.group_count
     }
 
     /// Returns the delta between the current and next group counts.
@@ -371,12 +394,12 @@ impl MainTrace {
 
     /// Returns the `in_span` flag at row i.
     pub fn is_in_span(&self, i: RowIndex) -> Felt {
-        self.core_row_projected(i).decoder.in_span
+        self.core_row_or_last(i).decoder.in_span
     }
 
     /// Constructs the i-th op code value from its individual bits.
     pub fn get_op_code(&self, i: RowIndex) -> Felt {
-        let bits = &self.core_row_projected(i).decoder.op_bits;
+        let bits = &self.core_row_or_last(i).decoder.op_bits;
         bits[0]
             + bits[1] * Felt::from_u64(2)
             + bits[2] * Felt::from_u64(4)
@@ -394,7 +417,7 @@ impl MainTrace {
     /// Returns a flag indicating whether the current operation induces a left shift of the operand
     /// stack.
     pub fn is_left_shift(&self, i: RowIndex) -> bool {
-        let decoder = &self.core_row_projected(i).decoder;
+        let decoder = &self.core_row_or_last(i).decoder;
         let bits = &decoder.op_bits;
         let b0 = bits[0];
         let b1 = bits[1];
@@ -423,7 +446,7 @@ impl MainTrace {
     /// Returns a flag indicating whether the current operation induces a right shift of the operand
     /// stack.
     pub fn is_right_shift(&self, i: RowIndex) -> bool {
-        let bits = &self.core_row_projected(i).decoder.op_bits;
+        let bits = &self.core_row_or_last(i).decoder.op_bits;
         let b0 = bits[0];
         let b1 = bits[1];
         let b2 = bits[2];
@@ -445,12 +468,12 @@ impl MainTrace {
 
     /// Returns the value of the stack depth column at row i.
     pub fn stack_depth(&self, i: RowIndex) -> Felt {
-        self.core_row_projected(i).stack.b0
+        self.core_row_or_last(i).stack.b0
     }
 
     /// Returns the element at row i in a given stack trace column.
     pub fn stack_element(&self, column: usize, i: RowIndex) -> Felt {
-        self.core_row_projected(i).stack.get(column)
+        self.core_row_or_last(i).stack.get(column)
     }
 
     /// Returns a word from the stack starting at `start` index at row i, in LE order.
@@ -468,12 +491,12 @@ impl MainTrace {
 
     /// Returns the address of the top element in the stack overflow table at row i.
     pub fn parent_overflow_address(&self, i: RowIndex) -> Felt {
-        self.core_row_projected(i).stack.b1
+        self.core_row_or_last(i).stack.b1
     }
 
     /// Returns a flag indicating whether the overflow stack is non-empty.
     pub fn is_non_empty_overflow(&self, i: RowIndex) -> bool {
-        let stack = &self.core_row_projected(i).stack;
+        let stack = &self.core_row_or_last(i).stack;
         (stack.b0 - Felt::from_u64(16)) * stack.h0 == ONE
     }
 
