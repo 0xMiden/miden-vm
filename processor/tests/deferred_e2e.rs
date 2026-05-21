@@ -306,7 +306,7 @@ fn deferred_end_to_end_register_eval_assert() {
     }
     assert!(state.contains(&assertion.digest()), "predicate node must be interned");
 
-    // No `log_precompile` calls, so the transcript root is still the TRUE sentinel.
+    // The transcript root stays at the TRUE sentinel until `log` advances it.
     assert_eq!(state.root(), TRUE_DIGEST);
 
     // `state.nodes` stores registered nodes and canonicals computed during evaluation.

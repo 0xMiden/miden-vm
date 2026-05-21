@@ -298,8 +298,8 @@ pub enum SystemEvent {
     /// Registers an opaque node `(tag, payload)` in the deferred-computation DAG.
     ///
     /// The installed schema validates the node's tag and shape; the node is interned into the
-    /// DAG keyed by its Poseidon2 digest. Pure host hint — predicates are NOT eagerly verified
-    /// here.
+    /// DAG keyed by its Poseidon2 digest. Registration only interns the node; verification
+    /// happens via `DeferredEvaluate`.
     ///
     /// Inputs:
     ///   Operand stack: [event_id, PAYLOAD_LO, PAYLOAD_HI, TAG, ...]
@@ -316,8 +316,8 @@ pub enum SystemEvent {
     ///   DAG state:     {... node(TAG, PAYLOAD)}
     ///
     /// The advice-pushed digest lets MASM use the registered node as a child reference in a
-    /// downstream binary node, or feed it into `log_precompile`, without recomputing the digest
-    /// in-circuit.
+    /// downstream binary node, or feed it into a transcript-logging step, without recomputing the
+    /// digest in-circuit.
     DeferredRegister,
 
     /// Evaluates a node identified by its 4-felt digest via the installed schema, pushes the
@@ -334,7 +334,8 @@ pub enum SystemEvent {
     /// mismatch). Children referenced in the payload must already be registered in the DAG.
     ///
     /// The advice-map entry is uniform across every node shape — including predicates, whose
-    /// canonical is the TRUE node and so serializes to 12 zero-ish felts like any other expression.
+    /// canonical is the TRUE node and so serializes to the 12 felts of `Node::TRUE` like any other
+    /// expression.
     /// A recorded entry therefore means evaluation (and, for predicates, verification) succeeded.
     ///
     /// Inputs:
