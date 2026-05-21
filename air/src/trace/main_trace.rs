@@ -113,7 +113,7 @@ const CORE_STORAGE_WIDTH: usize = crate::constraints::columns::NUM_CORE_COLS;
 const _: () = assert!(CORE_STORAGE_WIDTH == RANGE_CHECK_TRACE_OFFSET + RANGE_CHECK_TRACE_WIDTH);
 // The unified row layout is `[core | range | chiplets]`, so the chiplets section starts
 // exactly at the end of the core matrix.
-const _: () = assert!(super::CHIPLETS_OFFSET == CORE_STORAGE_WIDTH);
+const _: () = assert!(CHIPLETS_OFFSET == CORE_STORAGE_WIDTH);
 
 impl MainTrace {
     pub fn from_parts(
@@ -157,7 +157,7 @@ impl MainTrace {
         assert!(r < self.num_rows(), "main trace row index in bounds");
         assert!(col < TRACE_WIDTH, "main trace column index in bounds");
 
-        let TraceStorage { core_rm, chiplets_rm, .. } = &self.storage;
+        let TraceStorage { core_rm, chiplets_rm } = &self.storage;
         if col < CORE_STORAGE_WIDTH {
             let core_h = core_rm.height();
             if r < core_h {
@@ -195,7 +195,7 @@ impl MainTrace {
     fn project_row(&self, row: usize, dst: &mut [Felt]) {
         const NCC: usize = CORE_STORAGE_WIDTH;
         const CW: usize = CHIPLETS_WIDTH;
-        let TraceStorage { core_rm, chiplets_rm, .. } = &self.storage;
+        let TraceStorage { core_rm, chiplets_rm } = &self.storage;
 
         let core_h = core_rm.height();
         if row < core_h {
