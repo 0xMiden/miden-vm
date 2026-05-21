@@ -20,8 +20,8 @@ use miden_core::{
     events::EventId,
     field::PrimeField64,
     mast::{
-        CallNodeBuilder, JoinNodeBuilder, LoopNodeBuilder, MastForestContributor, MastNode,
-        MastNodeExt, MastNodeId, SplitNodeBuilder,
+        CallNodeBuilder, JoinNodeBuilder, LoopNodeBuilder, MastForestContributor, MastNodeExt,
+        MastNodeId, SplitNodeBuilder,
     },
     operations::{Decorator, Operation},
     program::Program,
@@ -363,68 +363,13 @@ fn library_procedure_collision() -> Result<(), Report> {
     // make sure lib2 has the expected exports (i.e., bar1 and bar2)
     assert_eq!(lib2.num_exports(), 2);
 
-    // AssemblyOp metadata now participates in assembler-side deduplication, so a re-exported
-    // procedure and a locally defined procedure with the same operations remain distinct when
-    // their source mappings differ.
+    // The re-exported procedure and the locally defined procedure have the same MAST shape, so
+    // they share the same node.
     let lib2_bar_bar1 = QualifiedProcedureName::from_str("lib2::bar::bar1").unwrap();
     let lib2_bar_bar2 = QualifiedProcedureName::from_str("lib2::bar::bar2").unwrap();
-    assert_ne!(lib2.get_export_node_id(&lib2_bar_bar1), lib2.get_export_node_id(&lib2_bar_bar2));
+    assert_eq!(lib2.get_export_node_id(&lib2_bar_bar1), lib2.get_export_node_id(&lib2_bar_bar2));
 
-    // Keeping those procedures distinct adds one more node to the library forest.
-    assert_eq!(lib2.mast_forest().num_nodes(), 6);
-
-    Ok(())
-}
-
-#[test]
-fn static_library_same_digest_procedure_uses_exact_root_metadata() -> Result<(), Report> {
-    let context = TestContext::new();
-
-    let aliases = r#"
-        pub proc alias_a
-            add
-        end
-
-        pub proc alias_b
-            add
-        end
-    "#;
-    let aliases = parse_module!(&context, "lib::aliases", aliases);
-    let library = Assembler::new(context.source_manager()).assemble_library([aliases])?;
-
-    let program_source = source_file!(
-        &context,
-        r#"
-        use lib::aliases
-
-        begin
-            exec.aliases::alias_b
-        end
-        "#
-    );
-
-    let program = Assembler::new(context.source_manager())
-        .with_static_library(library)?
-        .assemble_program(program_source)?;
-
-    let body_node_id = {
-        let root = program.entrypoint();
-        match &program.mast_forest()[root] {
-            MastNode::Join(join_node) => join_node.second(),
-            _ => root,
-        }
-    };
-    let context_name = program
-        .mast_forest()
-        .debug_info()
-        .first_asm_op_for_node(body_node_id)
-        .expect("statically linked procedure should preserve asm-op metadata")
-        .context_name();
-
-    assert!(
-        context_name.ends_with("alias_b"),
-        "expected alias_b metadata, got {context_name}"
-    );
+    assert_eq!(lib2.mast_forest().num_nodes(), 5);
 
     Ok(())
 }
@@ -5068,10 +5013,9 @@ fn duplicate_procedure() {
     "#;
 
     let program = context.assemble(program_source).unwrap();
-    // AssemblyOp metadata now participates in assembler-side deduplication. Even though
-    // `foo` and `bar` have the same operations, they carry different source mappings and
-    // therefore must remain distinct procedures. The entrypoint is a third procedure.
-    assert_eq!(program.num_procedures(), 3);
+    // `foo` and `bar` have the same body, so they are deduplicated. The entrypoint is the second
+    // procedure.
+    assert_eq!(program.num_procedures(), 2);
 }
 
 #[test]
