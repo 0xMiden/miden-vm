@@ -95,16 +95,18 @@ pub proc register_chunk
 end
 
 #! Evaluates a previously-registered node identified by its digest. The schema's `reduce`
-#! pushes the canonical body (or nothing, for predicates) onto the advice stack; this helper
-#! just consumes the input digest.
+#! records the canonical in the advice map under the canonical's own digest and pushes that digest
+#! to advice; this helper pulls it onto the operand stack.
 #!
 #! Input:  `[NODE_DIGEST, ...]`
-#! Output: `[...]`
-#! Advice stack: depends on canonical (see `adv.evaluate_deferred` docs).
+#! Output: `[CANONICAL_DIGEST, ...]`
+#! Advice map: `CANONICAL_DIGEST |-> tag || payload` (use `adv.push_mapval` to read it back).
 pub proc evaluate
     adv.evaluate_deferred
-    # operand stack unchanged; advice stack now has the canonical body
+    # operand stack unchanged; advice stack now has [CANONICAL_DIGEST]
     dropw
+    adv_pushw
+    # => [CANONICAL_DIGEST, ...]
 end
 
 #! Folds a node digest into the rolling precompile-transcript via the `log_precompile` opcode.

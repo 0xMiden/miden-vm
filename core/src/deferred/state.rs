@@ -11,18 +11,16 @@ use super::{
 /// In-memory deferred-DAG state — the verifier's witness.
 ///
 /// State fields:
-/// - `nodes`: nodes the transcript *commits to* — exactly what ships in the wire. Written by
-///   `register`/`register_chunk`/`log` (user-declared) and by [`WitnessBuilder::intern`]
-///   (precompile-minted children, required for verifier-side resolution). Each entry is reachable
-///   from `root`; `to_wire`'s DFS is therefore a closure walk, not a trim.
+/// - `nodes`: in-memory node store, written by `register`/`register_chunk`/`log` (user-declared),
+///   by [`WitnessBuilder::intern`] (precompile-minted children), and by evaluation (computed
+///   canonicals). Not every node is necessarily reachable from `root`. [`Self::to_wire`] emits only
+///   the root-reachable closure.
+/// - `evals`: host-side evaluation memo mapping `input_digest -> canonical`. Seeded with
+///   `TRUE_DIGEST -> Node::TRUE` (terminal sentinel) and reused across evaluate calls. Not
+///   serialized to wire.
 /// - `root`: the transcript root pointer. Initial value [`super::TRUE_DIGEST`]; advanced by
 ///   `log_precompile`, which interns an AND-node `{tag: Tag::TRUE, payload: prev_root || stmnt}`
 ///   and updates the root pointer. Reducing root to TRUE is the verifier's single check.
-/// - `cache`: host-only `input_digest → canonical Node` memo, written exclusively by the
-///   crate-internal `reduce_and_cache`. Lets [`WitnessBuilder::resolve`] skip recursive reduce on
-///   shared sub-DAGs. Self-evaluating leaves cache as identity (the canonical equals the input).
-///   Seeded with `TRUE_DIGEST → Node::TRUE` so the structural sentinel resolves like everything
-///   else.
 ///
 /// This in-memory form does **not** travel in the proof. [`Self::to_wire`] lowers it to the
 /// passive [`DeferredStateWire`] (index-encoded, root derived from the last entry); that wire is
@@ -33,17 +31,17 @@ use super::{
 pub struct DeferredState {
     nodes: BTreeMap<Digest, Node>,
     root: Digest,
-    cache: BTreeMap<Digest, Node>,
+    evals: BTreeMap<Digest, Node>,
 }
 
 impl Default for DeferredState {
     fn default() -> Self {
-        let mut cache = BTreeMap::new();
-        cache.insert(TRUE_DIGEST, Node::TRUE);
+        let mut evals = BTreeMap::new();
+        evals.insert(TRUE_DIGEST, Node::TRUE);
         Self {
             nodes: BTreeMap::new(),
             root: TRUE_DIGEST,
-            cache,
+            evals,
         }
     }
 }
@@ -61,8 +59,6 @@ impl DeferredState {
     }
 
     /// Returns whether `digest` names a wire-committed node — i.e. one that ships in `to_wire`.
-    /// Cache hits are *not* counted: the cache is a host-only evaluation memo, never on the wire,
-    /// and a digest known only through the cache is not part of the verifier's witness.
     /// [`TRUE_DIGEST`] is the framework sentinel and is never materialized in `nodes`, so this
     /// returns `false` for it; call sites that need to treat TRUE as a virtual member explicitly
     /// short-circuit on `d == TRUE_DIGEST` first.
@@ -75,8 +71,7 @@ impl DeferredState {
     ///
     /// Internal: external callers go through the schema-aware [`Self::register`] /
     /// [`Self::evaluate`] / [`Self::log`] entry points, which preserve the type invariants. Raw
-    /// `intern` bypasses tag-validation and root-shape checks. Reduce-time canonical caching
-    /// goes through `cache` instead — only nodes the transcript *commits to* land here.
+    /// `intern` bypasses tag-validation and root-shape checks.
     pub(crate) fn intern(&mut self, node: Node) -> Digest {
         let digest = node.digest();
         self.nodes.insert(digest, node);
@@ -85,6 +80,17 @@ impl DeferredState {
 
     pub fn nodes(&self) -> &BTreeMap<Digest, Node> {
         &self.nodes
+    }
+
+    fn get_eval(&self, digest: &Digest) -> Option<&Node> {
+        self.evals.get(digest)
+    }
+
+    /// Memoize `input_digest -> canonical` in `evals` and intern the canonical into `nodes` so it
+    /// is addressable as a child. Orphan canonicals are trimmed by [`Self::to_wire`].
+    fn record_eval(&mut self, input_digest: Digest, canonical: Node) {
+        self.evals.insert(input_digest, canonical.clone());
+        self.intern(canonical);
     }
 
     /// Returns the current transcript root pointer. Initial value is [`super::TRUE_DIGEST`].
@@ -109,7 +115,7 @@ impl DeferredState {
         stmt_digest: Digest,
         expected_new_root: Digest,
     ) -> Result<(), DeferredError> {
-        let and_node = Node::expression(Tag::TRUE, Payload::join(self.root, stmt_digest));
+        let and_node = Node::and(self.root, stmt_digest);
         let actual = and_node.digest();
         if actual != expected_new_root {
             return Err(DeferredError::InvalidPayload);
@@ -152,18 +158,17 @@ impl DeferredState {
 
     /// Evaluate an opaque node via the precompile registry.
     ///
-    /// Reduces to canonical form per `PrecompileRegistry::reduce`. Pure host-side: the result
-    /// (and every transitively-resolved canonical) lands in `cache`, not `nodes`. The
-    /// transcript only commits to what the user explicitly registered or logged.
+    /// Reduces to canonical form per `PrecompileRegistry::reduce`. Computed canonicals are
+    /// memoized in `evals` and interned into `nodes` (see `record_eval`).
     ///
     /// For a predicate tag, success returns [`Node::TRUE`] (detectable via
     /// [`Node::is_true_node`]) and a mismatch surfaces as [`PrecompileError::AssertionFailed`].
     ///
     /// Transitively-referenced child digests must resolve through `nodes` (registered upstream)
-    /// or `cache` (cached from an earlier resolve) — an unknown child digest surfaces as
-    /// [`PrecompileError::MissingNode`]. The advice-stack contract is enforced by the
-    /// processor-side handler: for non-predicates the canonical 12 felts are pushed; for
-    /// predicates (whose canonical is the TRUE node), nothing is pushed.
+    /// or the state `evals` memo (cached from this or earlier evaluate calls) — an unknown
+    /// child digest surfaces as [`PrecompileError::MissingNode`]. The processor-side handler
+    /// enforces the fused advice contract: push the canonical digest to the advice stack and
+    /// record `advice_map[canonical_digest] = tag || payload`.
     pub fn evaluate(
         &mut self,
         precompiles: &PrecompileRegistry,
@@ -173,16 +178,33 @@ impl DeferredState {
         if !payload_matches_type(node_type, &node.payload) {
             return Err(PrecompileError::InvalidNode);
         }
-        let digest = node.digest();
-        WitnessBuilder::new(self, precompiles).reduce_and_cache(node, digest)
+        WitnessBuilder::new(self, precompiles).eval(node)
+    }
+
+    /// Evaluate a node addressed by digest.
+    ///
+    /// Lookup order is `evals` first, then `nodes`:
+    /// - if `digest` exists in `evals`, returns the cached canonical directly;
+    /// - otherwise, loads the input node from `nodes` and reduces it via [`Self::evaluate`].
+    ///
+    /// Returns [`PrecompileError::MissingNode`] when the digest is unknown to both stores.
+    pub fn evaluate_digest(
+        &mut self,
+        precompiles: &PrecompileRegistry,
+        digest: Digest,
+    ) -> Result<Node, PrecompileError> {
+        if let Some(canonical) = self.get_eval(&digest) {
+            return Ok(canonical.clone());
+        }
+        let node = self.get(&digest)?.clone();
+        self.evaluate(precompiles, node)
     }
 
     /// Serialize this state to its wire form. Walks reachable nodes from `root` in DFS
     /// post-order, assigning each visited node a `u32` index in emission order. `Join`-shape
     /// entries encode their children as indices into the earlier wire entries (or
-    /// [`crate::deferred::TRUE_INDEX`] for the [`TRUE_DIGEST`] terminal). Registered orphans
-    /// (nodes nothing in the AND-chain references) fall outside the closure and are dropped —
-    /// `evaluate` no longer adds anything to `nodes`, so this is the only trim case.
+    /// [`crate::deferred::TRUE_INDEX`] for the [`TRUE_DIGEST`] terminal). Any nodes outside the
+    /// root-reachable closure (e.g. registered or evaluation-interned orphans) are dropped.
     ///
     /// Reachability is computed *structurally*, without consulting the schema: for any node
     /// with an `Expression` payload, interpret the 8 felts as `(lhs_digest, rhs_digest)`. If
@@ -272,8 +294,8 @@ impl DeferredState {
     /// - **Reachability:** between the phases, reject any interned entry that is not in the
     ///   structural closure of the root ([`IntegrityError::DanglingNode`]). `to_wire` emits exactly
     ///   that closure, so a faithful wire passes; this rejects bloat / hidden-data entries an
-    ///   adversarial wire might smuggle in. Phase 2 writes only to `cache`, so the `nodes` set
-    ///   checked here matches the post-rehydrate state exactly.
+    ///   adversarial wire might smuggle in. Phase 2 may extend state `evals` only, so the `nodes`
+    ///   set checked here matches the post-rehydrate state exactly.
     /// - **Phase 2 (semantic):** walk the AND-chain from `wire.root` down to
     ///   [`super::TRUE_DIGEST`], asserting each step has `tag == Tag::TRUE` and re-evaluating each
     ///   predicate statement via [`Self::evaluate`]. The walk surfaces tampered AND-payloads,
@@ -290,12 +312,12 @@ impl DeferredState {
 
         for (i, entry) in wire.entries.iter().enumerate() {
             let node = match &entry.body {
-                super::WireBody::Value(felts) => Node::expression(entry.tag, Payload::new(*felts)),
+                super::WireBody::Value(felts) => Node::leaf(entry.tag, *felts),
                 super::WireBody::Chunks(chunks) => Node::chunk(entry.tag, chunks.clone()),
                 super::WireBody::Join { lhs, rhs } => {
                     let lhs_d = resolve_index(*lhs, i, &digests)?;
                     let rhs_d = resolve_index(*rhs, i, &digests)?;
-                    Node::expression(entry.tag, Payload::join(lhs_d, rhs_d))
+                    Node::join(entry.tag, lhs_d, rhs_d)
                 },
             };
 
@@ -474,19 +496,18 @@ fn reachable_closure(nodes: &BTreeMap<Digest, Node>, root: Digest) -> BTreeSet<D
 /// aliasing-borrow problem. A precompile's `reduce` therefore reads as a depth-first recursive
 /// function: "resolve lhs, resolve rhs, combine."
 ///
-/// Two capabilities, with cleanly separated writers — `intern` writes only to `nodes`,
-/// `reduce_and_cache` (called from `resolve` and `evaluate`) writes only to `cache`:
+/// Three capabilities:
 ///
-/// - [`resolve`](Self::resolve) walks a child digest to its canonical form. Cache-first: a hit
-///   returns the cached canonical immediately. On miss, looks up the input in `state.nodes`,
-///   reduces, and writes the result to `cache`. Does **not** touch `nodes`.
-/// - [`intern`](Self::intern) writes a freshly-minted canonical child to `state.nodes` so the
-///   verifier can resolve it during rehydrate independent of evaluation order. Compound canonicals
-///   whose payload references just-computed child digests rely on this. The cache entry for the
-///   minted child fills lazily on first resolve.
+/// - [`eval`](Self::eval) reduces a concrete input node (top-level entrypoint).
+/// - [`resolve`](Self::resolve) reduces a child by digest, memo-first via `state.evals`.
+/// - [`intern`](Self::intern) writes a node straight to `state.nodes`.
 ///
-/// The verifier re-runs the same code path during [`DeferredState::rehydrate`]'s phase 2 —
-/// rebuilding the cache from scratch — so the cache itself never has to ship.
+/// `eval` and `resolve` go through `record_eval`, which both memoizes in
+/// `evals` and interns the canonical into `nodes`. `intern` is the nodes-only primitive
+/// precompiles use to mint canonical children.
+///
+/// The verifier re-runs the same code path during [`DeferredState::rehydrate`]'s phase 2.
+/// `evals` is host-side only and never serialized.
 ///
 /// There is exactly one of these: the prover builds the witness through it, and the verifier's
 /// [`DeferredState::rehydrate`] re-runs the identical path to re-establish it — so no trait
@@ -505,19 +526,27 @@ impl<'a> WitnessBuilder<'a> {
         Self { state, precompiles }
     }
 
-    /// Walk `digest` to its canonical form, recursively reducing it via the precompile registry.
-    /// Errors with [`PrecompileError::MissingNode`] if the digest is unknown to both
-    /// `cache` and `nodes`.
+    /// Top-level evaluation path for a concrete input node.
     ///
-    /// Cache-first: a hit in [`DeferredState::cache`](DeferredState) returns the canonical
-    /// directly. On miss, the input node is looked up in `state.nodes` (it must have been
-    /// registered upstream) and reduced; the result is cached for next time.
+    /// Reduces `node` to canonical form via the precompile registry and records
+    /// `input_digest -> canonical` in state `evals` for cross-call reuse.
+    pub fn eval(&mut self, node: Node) -> Result<Node, PrecompileError> {
+        let input_digest = node.digest();
+        self.reduce_and_record_eval(node, input_digest)
+    }
+
+    /// Walk `digest` to its canonical form, recursively reducing it via the precompile registry.
+    /// Errors with [`PrecompileError::MissingNode`] if the digest is unknown to both state `evals`
+    /// and `nodes`.
+    ///
+    /// Memo-first: a hit in `state.evals` returns the canonical directly. On miss, looks up the
+    /// input in `state.nodes`, reduces it, and records the result (see `record_eval`).
     pub fn resolve(&mut self, digest: Digest) -> Result<Node, PrecompileError> {
-        if let Some(canonical) = self.state.cache.get(&digest) {
+        if let Some(canonical) = self.state.get_eval(&digest) {
             return Ok(canonical.clone());
         }
         let child = self.state.get(&digest)?.clone();
-        self.reduce_and_cache(child, digest)
+        self.reduce_and_record_eval(child, digest)
     }
 
     /// Register a freshly-minted canonical child and return its digest. Used by compound
@@ -526,7 +555,7 @@ impl<'a> WitnessBuilder<'a> {
     ///
     /// Writes only to `state.nodes` — the `nodes` entry makes the child wire-committed so a
     /// later registered node whose payload references this child's digest will resolve cleanly
-    /// on the verifier side, regardless of evaluation order across statements. The cache fills
+    /// on the verifier side, regardless of evaluation order across statements. The memo fills
     /// lazily on first `resolve(digest)`.
     pub fn intern(&mut self, node: Node) -> Digest {
         let digest = node.digest();
@@ -534,21 +563,20 @@ impl<'a> WitnessBuilder<'a> {
         digest
     }
 
-    /// Reduce `node` to canonical form and write `input_digest → canonical` into
-    /// [`DeferredState::cache`](DeferredState). The input node is *not* added to
-    /// `state.nodes` — only `register` / `register_chunk` / `log` and [`Self::intern`] do that.
+    /// Reduce `node` to canonical form, write `input_digest → canonical` into state `evals`,
+    /// and intern the canonical node into `state.nodes`.
     ///
     /// The `input_digest` is passed by the caller (rather than recomputed via `node.digest()`)
-    /// so the cache write skips a redundant Poseidon2 — `resolve` already has the digest as its
+    /// so the memo write skips a redundant Poseidon2 — `resolve` already has the digest as its
     /// argument, and `evaluate` computes it once at the top of the call.
-    pub(crate) fn reduce_and_cache(
+    pub(crate) fn reduce_and_record_eval(
         &mut self,
         node: Node,
         input_digest: Digest,
     ) -> Result<Node, PrecompileError> {
         let precompiles = self.precompiles;
         let canonical = precompiles.reduce(&node, self)?;
-        self.state.cache.insert(input_digest, canonical.clone());
+        self.state.record_eval(input_digest, canonical.clone());
         Ok(canonical)
     }
 }
@@ -589,15 +617,14 @@ mod tests {
         let mut state = DeferredState::new();
         let schema = precompiles();
         let a = state.register(&schema, test_leaf(7)).unwrap();
-        let pred = Node::expression(TestPrecompile::eq_tag(), Payload::join(a, a));
+        let pred = Node::join(TestPrecompile::eq_tag(), a, a);
         let stmt = state.evaluate(&schema, pred).unwrap();
         // The canonical of an `eq` predicate is `Node::TRUE`. Use the predicate's *digest* —
         // which we recover from the original node — as `stmt_digest`.
         let _ = stmt; // canonical, discarded
-        let stmt_digest = Node::expression(TestPrecompile::eq_tag(), Payload::join(a, a)).digest();
+        let stmt_digest = Node::join(TestPrecompile::eq_tag(), a, a).digest();
 
-        let expected =
-            Node::expression(Tag::TRUE, Payload::join(TRUE_DIGEST, stmt_digest)).digest();
+        let expected = Node::and(TRUE_DIGEST, stmt_digest).digest();
         state.log(stmt_digest, expected).unwrap();
         assert_eq!(state.root(), expected);
         // The newly-minted AND-node must be in the map keyed by its digest.
@@ -655,7 +682,7 @@ mod tests {
             id: TestPrecompile::id(),
             args: [Felt::from_u32(99), ZERO, ZERO],
         };
-        let bad = Node::expression(bad_tag, Payload::new([Felt::from_u32(0); 8]));
+        let bad = Node::leaf(bad_tag, [Felt::from_u32(0); 8]);
         let err = state.register(&schema, bad);
         assert!(matches!(err.unwrap_err().root(), PrecompileError::InvalidNode));
     }
@@ -666,7 +693,7 @@ mod tests {
         let schema = precompiles();
         let a = state.register(&schema, test_leaf(3)).unwrap();
         let b = state.register(&schema, test_leaf(4)).unwrap();
-        let op = Node::expression(TestPrecompile::add_tag(), Payload::join(a, b));
+        let op = Node::join(TestPrecompile::add_tag(), a, b);
         let digest = state.register(&schema, op).unwrap();
         assert!(state.contains(&digest));
     }
@@ -681,7 +708,7 @@ mod tests {
         let a = state.register(&schema, test_leaf(3)).unwrap();
         let b = state.register(&schema, test_leaf(4)).unwrap();
         // A mismatched predicate — would fail if eagerly verified.
-        let bad = Node::expression(TestPrecompile::eq_tag(), Payload::join(a, b));
+        let bad = Node::join(TestPrecompile::eq_tag(), a, b);
         let bad_digest = state.register(&schema, bad.clone()).unwrap();
         assert!(state.contains(&bad_digest), "predicate interned even when it doesn't hold");
         // Verification surfaces the mismatch only when explicitly invoked.
@@ -694,7 +721,7 @@ mod tests {
         let mut state = DeferredState::new();
         let schema = precompiles();
         let a = state.register(&schema, test_leaf(7)).unwrap();
-        let assertion = Node::expression(TestPrecompile::eq_tag(), Payload::join(a, a));
+        let assertion = Node::join(TestPrecompile::eq_tag(), a, a);
         let result = state.evaluate(&schema, assertion).unwrap();
         assert!(result.is_true_node(), "predicate success returns the canonical TRUE node");
     }
@@ -705,7 +732,7 @@ mod tests {
         let schema = precompiles();
         let a = state.register(&schema, test_leaf(3)).unwrap();
         let b = state.register(&schema, test_leaf(4)).unwrap();
-        let mismatch = Node::expression(TestPrecompile::eq_tag(), Payload::join(a, b));
+        let mismatch = Node::join(TestPrecompile::eq_tag(), a, b);
         let err = state.evaluate(&schema, mismatch);
         assert!(matches!(err.unwrap_err().root(), PrecompileError::AssertionFailed));
     }
@@ -716,7 +743,7 @@ mod tests {
         let schema = precompiles();
         let a = state.register(&schema, test_leaf(1)).unwrap();
         let dangling = Word::new([Felt::from_u32(0xdead); 4]);
-        let assertion = Node::expression(TestPrecompile::eq_tag(), Payload::join(a, dangling));
+        let assertion = Node::join(TestPrecompile::eq_tag(), a, dangling);
         let err = state.evaluate(&schema, assertion);
         assert!(matches!(err.unwrap_err().root(), PrecompileError::MissingNode));
     }
@@ -730,23 +757,17 @@ mod tests {
         let b = state.register(&schema, test_leaf(4)).unwrap();
         let c = state.register(&schema, test_leaf(5)).unwrap();
         let expected = state.register(&schema, test_leaf(35)).unwrap();
-        let add = state
-            .register(&schema, Node::expression(TestPrecompile::add_tag(), Payload::join(a, b)))
-            .unwrap();
-        let mul = state
-            .register(&schema, Node::expression(TestPrecompile::mul_tag(), Payload::join(add, c)))
-            .unwrap();
-        let assertion = Node::expression(TestPrecompile::eq_tag(), Payload::join(mul, expected));
+        let add = state.register(&schema, Node::join(TestPrecompile::add_tag(), a, b)).unwrap();
+        let mul = state.register(&schema, Node::join(TestPrecompile::mul_tag(), add, c)).unwrap();
+        let assertion = Node::join(TestPrecompile::eq_tag(), mul, expected);
         let result = state.evaluate(&schema, assertion).unwrap();
         assert!(result.is_true_node());
     }
 
     #[test]
-    fn nodes_holds_only_registered_inputs() {
+    fn evaluate_interns_canonicals_into_nodes() {
         // Register the full op tree (a + b) * c == 35 plus an orphan leaf, evaluate the
-        // predicate, and assert `state.nodes` contains *exactly* the seven registered nodes —
-        // no canonical intermediates, no auto-interned assertion input. Canonicals live in
-        // `cache`.
+        // predicate, and assert evaluate interns computed canonicals into `state.nodes`.
         let mut state = DeferredState::new();
         let schema = precompiles();
         let a = state.register(&schema, test_leaf(3)).unwrap();
@@ -754,107 +775,50 @@ mod tests {
         let c = state.register(&schema, test_leaf(5)).unwrap();
         let expected = state.register(&schema, test_leaf(35)).unwrap();
         let _orphan = state.register(&schema, test_leaf(99)).unwrap();
-        let add = state
-            .register(&schema, Node::expression(TestPrecompile::add_tag(), Payload::join(a, b)))
-            .unwrap();
-        let mul = state
-            .register(&schema, Node::expression(TestPrecompile::mul_tag(), Payload::join(add, c)))
-            .unwrap();
-        let assertion = Node::expression(TestPrecompile::eq_tag(), Payload::join(mul, expected));
+        let add = state.register(&schema, Node::join(TestPrecompile::add_tag(), a, b)).unwrap();
+        let mul = state.register(&schema, Node::join(TestPrecompile::mul_tag(), add, c)).unwrap();
+        let assertion = Node::join(TestPrecompile::eq_tag(), mul, expected);
         let assertion_digest = assertion.digest();
         state.evaluate(&schema, assertion).unwrap();
 
-        assert_eq!(state.nodes().len(), 7);
-        assert!(!state.contains(&assertion_digest), "evaluate does not write to nodes");
-        // test_leaf(7) was never registered — its presence would mean evaluate auto-interned
-        // canonical(add). test_leaf(35) is *also* the canonical(mul), but checking its absence
-        // would be wrong since `expected` registered it directly.
-        assert!(!state.contains(&test_leaf(7).digest()), "canonical(add) lives in cache");
+        // Newly interned canonicals: leaf(7) for add, and TRUE for the predicate result.
+        assert_eq!(state.nodes().len(), 9);
+        assert!(!state.contains(&assertion_digest), "evaluate does not auto-register input node");
+        assert!(state.contains(&test_leaf(7).digest()), "canonical(add) is interned into nodes");
+        assert!(state.contains(&Node::TRUE.digest()), "canonical(TRUE) is interned into nodes");
         assert_eq!(state.root(), TRUE_DIGEST, "no log_precompile called, root is still TRUE");
     }
 
     #[test]
     fn evaluate_does_not_intern_unregistered_input() {
         // Build (a+b)*c, pre-register only the leaves and `add`. The outer `mul` is handed
-        // directly to `evaluate` — under the host-only model, it stays out of `nodes`. The
-        // canonical lives in `cache`, keyed by the input digest.
+        // directly to `evaluate` — input stays out of `nodes`, but computed canonicals are
+        // interned.
         let mut state = DeferredState::new();
         let schema = precompiles();
         let a = state.register(&schema, test_leaf(3)).unwrap();
         let b = state.register(&schema, test_leaf(4)).unwrap();
         let c = state.register(&schema, test_leaf(5)).unwrap();
-        let add = Node::expression(TestPrecompile::add_tag(), Payload::join(a, b));
+        let add = Node::join(TestPrecompile::add_tag(), a, b);
         let add_digest = state.register(&schema, add).unwrap();
-        let mul = Node::expression(TestPrecompile::mul_tag(), Payload::join(add_digest, c));
+        let mul = Node::join(TestPrecompile::mul_tag(), add_digest, c);
         let mul_digest = mul.digest();
 
         let canonical = state.evaluate(&schema, mul).unwrap();
         assert_eq!(canonical, test_leaf(35));
         assert!(!state.contains(&mul_digest), "input op stays out of nodes");
-        assert_eq!(state.cache.get(&mul_digest), Some(&test_leaf(35)));
+        assert!(state.contains(&test_leaf(35).digest()), "computed canonical is interned");
     }
 
     #[test]
     fn resolve_of_true_digest_returns_true_node() {
-        // TRUE is never interned; the seeded cache entry is what lets `resolve` return it
+        // TRUE is never interned; the seeded `evals` entry is what lets `resolve` return it
         // instead of erroring on `state.get(&TRUE_DIGEST)`.
         let mut state = DeferredState::new();
         let schema = precompiles();
         let mut witness = WitnessBuilder::new(&mut state, &schema);
         let resolved = witness.resolve(TRUE_DIGEST).unwrap();
         assert!(resolved.is_true_node());
-    }
-
-    #[test]
-    fn evaluate_populates_cache() {
-        // Predicate inputs cache to `Node::TRUE`; everything else caches to its canonical
-        // Node. Self-evaluating leaves cache as identity (key digest == value.digest()).
-        let mut state = DeferredState::new();
-        let schema = precompiles();
-        let a = state.register(&schema, test_leaf(3)).unwrap();
-        let b = state.register(&schema, test_leaf(4)).unwrap();
-        let c = state.register(&schema, test_leaf(5)).unwrap();
-        let expected = state.register(&schema, test_leaf(35)).unwrap();
-        let add_node = Node::expression(TestPrecompile::add_tag(), Payload::join(a, b));
-        let add_digest = add_node.digest();
-        let mul_node = Node::expression(TestPrecompile::mul_tag(), Payload::join(add_digest, c));
-        let mul_digest = mul_node.digest();
-        let assertion =
-            Node::expression(TestPrecompile::eq_tag(), Payload::join(mul_digest, expected));
-        let assertion_digest = assertion.digest();
-        state.register(&schema, add_node).unwrap();
-        state.register(&schema, mul_node).unwrap();
-
-        state.evaluate(&schema, assertion).unwrap();
-
-        assert_eq!(state.cache.get(&add_digest), Some(&test_leaf(7)));
-        assert_eq!(state.cache.get(&mul_digest), Some(&test_leaf(35)));
-        assert!(state.cache.get(&assertion_digest).unwrap().is_true_node());
-        assert_eq!(state.cache.get(&a), Some(&test_leaf(3)));
-    }
-
-    #[test]
-    fn resolve_cache_hit_returns_canonical_without_re_reducing() {
-        // Remove the registered operand op-node after the first evaluate: a second evaluate
-        // succeeds only if the memo short-circuits before `resolve(add_digest)` would hit the
-        // now-missing `add` node.
-        let mut state = DeferredState::new();
-        let schema = precompiles();
-        let a = state.register(&schema, test_leaf(3)).unwrap();
-        let b = state.register(&schema, test_leaf(4)).unwrap();
-        let c = state.register(&schema, test_leaf(5)).unwrap();
-        let add = Node::expression(TestPrecompile::add_tag(), Payload::join(a, b));
-        let add_digest = state.register(&schema, add).unwrap();
-        let mul = Node::expression(TestPrecompile::mul_tag(), Payload::join(add_digest, c));
-        let mul_digest = mul.digest();
-        state.register(&schema, mul.clone()).unwrap();
-        state.evaluate(&schema, mul.clone()).unwrap();
-
-        state.nodes.remove(&add_digest);
-
-        let canonical = state.evaluate(&schema, mul).unwrap();
-        assert_eq!(canonical, test_leaf(35));
-        assert_eq!(state.cache.get(&mul_digest), Some(&test_leaf(35)));
     }
 
     // REHYDRATE TESTS
@@ -883,19 +847,14 @@ mod tests {
         let b = state.register(&schema, test_leaf(4)).unwrap();
         let c = state.register(&schema, test_leaf(5)).unwrap();
         let expected = state.register(&schema, test_leaf(35)).unwrap();
-        let add = state
-            .register(&schema, Node::expression(TestPrecompile::add_tag(), Payload::join(a, b)))
-            .unwrap();
-        let mul = state
-            .register(&schema, Node::expression(TestPrecompile::mul_tag(), Payload::join(add, c)))
-            .unwrap();
-        let assertion = Node::expression(TestPrecompile::eq_tag(), Payload::join(mul, expected));
+        let add = state.register(&schema, Node::join(TestPrecompile::add_tag(), a, b)).unwrap();
+        let mul = state.register(&schema, Node::join(TestPrecompile::mul_tag(), add, c)).unwrap();
+        let assertion = Node::join(TestPrecompile::eq_tag(), mul, expected);
         // `log` references the predicate node by digest; pre-register so the wire embeds it as
         // a Join entry rather than a bare-commitment Value.
         let stmt_digest = state.register(&schema, assertion.clone()).unwrap();
         state.evaluate(&schema, assertion).unwrap();
-        let new_root =
-            Node::expression(Tag::TRUE, Payload::join(state.root(), stmt_digest)).digest();
+        let new_root = Node::and(state.root(), stmt_digest).digest();
         state.log(stmt_digest, new_root).unwrap();
         // Defense-in-depth: every fixture consumer inherits a wire round-trip self-check, so any
         // future change that breaks `to_wire`/`rehydrate` consistency fails loudly here.
@@ -959,11 +918,10 @@ mod tests {
         let schema = precompiles();
         let _orphan = state.register(&schema, test_leaf(99)).unwrap();
         let a = state.register(&schema, test_leaf(7)).unwrap();
-        let pred = Node::expression(TestPrecompile::eq_tag(), Payload::join(a, a));
+        let pred = Node::join(TestPrecompile::eq_tag(), a, a);
         let stmt_digest = state.register(&schema, pred.clone()).unwrap();
         state.evaluate(&schema, pred).unwrap();
-        let new_root =
-            Node::expression(Tag::TRUE, Payload::join(state.root(), stmt_digest)).digest();
+        let new_root = Node::and(state.root(), stmt_digest).digest();
         state.log(stmt_digest, new_root).unwrap();
         // Defense-in-depth: orphan-trimmed wire must still round-trip cleanly.
         assert_round_trips(&state, &schema);
@@ -1003,10 +961,10 @@ mod tests {
         let b = state.register(&schema, test_leaf(4)).unwrap();
         // Hand-roll a chain that points to a failing predicate without going through `log`'s
         // schema gate (which evaluate-rejects ahead of time).
-        let bad_pred = Node::expression(TestPrecompile::eq_tag(), Payload::join(a, b));
+        let bad_pred = Node::join(TestPrecompile::eq_tag(), a, b);
         let bad_digest = bad_pred.digest();
         state.intern(bad_pred);
-        let and_node = Node::expression(Tag::TRUE, Payload::join(TRUE_DIGEST, bad_digest));
+        let and_node = Node::and(TRUE_DIGEST, bad_digest);
         let and_digest = and_node.digest();
         state.intern(and_node);
         state.root = and_digest;
@@ -1036,8 +994,7 @@ mod tests {
         //       doesn't appear in the entries)
         let a = test_leaf(7);
         let a_payload = *a.payload.as_felts().expect("leaf is expression-bodied");
-        let pred =
-            Node::expression(TestPrecompile::eq_tag(), Payload::join(a.digest(), a.digest()));
+        let pred = Node::join(TestPrecompile::eq_tag(), a.digest(), a.digest());
         let pred_digest = pred.digest();
         let bogus_prev = dummy_digest(42);
         let and_payload = *Payload::join(bogus_prev, pred_digest)
@@ -1082,8 +1039,7 @@ mod tests {
         let a_payload = *a.payload.as_felts().expect("leaf is expression-bodied");
         let orphan = test_leaf(99);
         let orphan_payload = *orphan.payload.as_felts().expect("leaf is expression-bodied");
-        let pred =
-            Node::expression(TestPrecompile::eq_tag(), Payload::join(a.digest(), a.digest()));
+        let pred = Node::join(TestPrecompile::eq_tag(), a.digest(), a.digest());
 
         let wire = DeferredStateWire {
             entries: alloc::vec![

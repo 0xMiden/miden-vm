@@ -24,7 +24,7 @@ pub fn log_and_verify(schema: &PrecompileRegistry, state: &mut DeferredState, pr
         state.evaluate(schema, predicate).unwrap().is_true_node(),
         "log_and_verify expects a predicate that reduces to the TRUE node",
     );
-    let new_root = Node::expression(Tag::TRUE, Payload::join(state.root(), stmt_digest)).digest();
+    let new_root = Node::and(state.root(), stmt_digest).digest();
     state.log(stmt_digest, new_root).unwrap();
     assert_round_trips(state, schema);
 }

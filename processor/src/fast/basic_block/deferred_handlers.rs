@@ -29,7 +29,8 @@ const DEFERRED_TAG_OFFSET: usize = 9;
 // STACK LAYOUT — `DeferredEvaluate`
 // ================================================================================================
 // `[event_id, NODE_DIGEST, ...]` — the node must already be registered in `DeferredState`; the
-// handler looks it up by digest and reduces it via the precompile registry.
+// handler looks it up by digest, reduces it via the precompile registry, records the canonical in
+// the advice map keyed by `CANONICAL_DIGEST`, and pushes `CANONICAL_DIGEST` to advice.
 
 /// Stack offset of the node digest (4-felt word at positions 1..5).
 const DEFERRED_NODE_DIGEST_OFFSET: usize = 1;
@@ -91,22 +92,25 @@ pub(super) fn handle_deferred_register(
 }
 
 /// Handles `SystemEvent::DeferredEvaluate`. Reads a node digest off the operand stack, looks
-/// the node up in `DeferredState`, reduces it via the precompile registry, and pushes the
-/// canonical onto the advice stack.
+/// the node up in `DeferredState`, reduces it via the precompile registry, records the canonical
+/// in the advice map keyed by the canonical's own digest, then pushes that digest to the advice
+/// stack.
 ///
-/// The referenced node must already be interned — programs typically call
-/// `adv.register_deferred` / `adv.register_deferred_chunk` first to register the node and
-/// obtain its digest from the advice stack.
+/// The referenced digest must resolve in deferred state (registered node or memoized prior
+/// evaluation input). Programs typically call `adv.register_deferred` /
+/// `adv.register_deferred_chunk` first and obtain the digest from the advice stack.
 ///
-/// Advice-stack contract, driven by the canonical's shape:
-/// - **Predicate result** (canonical is the TRUE node, detected via [`Node::is_true_node`]):
-///   nothing is pushed. A failed predicate surfaces as `PrecompileError::AssertionFailed` before
-///   this point.
-/// - **Expression canonicals**: the 12 felts of the canonical `(payload, tag)` are pushed in
-///   `[PAYLOAD_LO, PAYLOAD_HI, TAG]` order (top-down). MASM recovers each word with `adv_pushw`.
-/// - **Chunk canonicals** (e.g. self-evaluating chunk leaves like a 16-felt digest): all `n` chunks
-///   are pushed in `[chunk[0]_LO, chunk[0]_HI, chunk[1]_LO, ..., TAG]` order (top-down) so MASM
-///   recovers each word in natural sequence.
+/// Advice contract — uniform across every node shape:
+/// - **Advice stack**: pushes `CANONICAL_DIGEST` (the reduced node's own digest).
+/// - **Advice map key**: `CANONICAL_DIGEST`.
+/// - **Advice map value**: the canonical serialized as `tag || payload`, in natural (felt-index)
+///   order:
+///   - **Expression canonicals**: 4 tag felts followed by the 8 payload felts (12 total).
+///   - **Chunk canonicals**: 4 tag felts followed by every chunk's 8 felts (`8n + 4` total).
+/// - **Predicates** are not special-cased: the canonical is the TRUE node, which serializes to the
+///   12 felts of `Node::TRUE` like any other expression. A failed predicate has already surfaced as
+///   `PrecompileError::AssertionFailed` before this point, so a recorded entry means the predicate
+///   verified.
 pub(super) fn handle_deferred_evaluate(
     processor: &mut FastProcessor,
 ) -> Result<(), SystemEventError> {
@@ -115,33 +119,25 @@ pub(super) fn handle_deferred_evaluate(
         Word::new([digest_word[0], digest_word[1], digest_word[2], digest_word[3]]);
 
     let (state, precompiles) = processor.deferred_view_mut();
-    let node = state.get(&digest)?.clone();
-    let canonical = state.evaluate(precompiles, node)?;
+    let canonical = state.evaluate_digest(precompiles, digest)?;
 
-    // Predicates reduce to the TRUE node — by contract the advice stack is untouched.
-    if canonical.is_true_node() {
-        return Ok(());
-    }
+    let canonical_digest = canonical.digest();
 
-    // Push canonical body: TAG deepest, then payload words so the natural-order word is on top.
-    processor.advice.push_stack_word(&Word::new(canonical.tag.as_word()))?;
+    // Serialize the canonical as `tag || payload` and record it in the advice map under the
+    // canonical's own digest. `insert_into_map` is idempotent for an identical re-evaluation and
+    // rejects a conflicting prior entry.
+    let mut value: Vec<Felt> = Vec::new();
+    value.extend_from_slice(&canonical.tag.as_word());
     match &canonical.payload {
-        Payload::Expression(f) => {
-            let hi = Word::new([f[4], f[5], f[6], f[7]]);
-            let lo = Word::new([f[0], f[1], f[2], f[3]]);
-            processor.advice.push_stack_word(&hi)?;
-            processor.advice.push_stack_word(&lo)?;
-        },
+        Payload::Expression(f) => value.extend_from_slice(f),
         Payload::Chunk(chunks) => {
-            // Push chunks deepest-last so chunk[0]_LO ends up on top of the advice stack.
-            for chunk in chunks.iter().rev() {
-                let hi = Word::new([chunk[4], chunk[5], chunk[6], chunk[7]]);
-                let lo = Word::new([chunk[0], chunk[1], chunk[2], chunk[3]]);
-                processor.advice.push_stack_word(&hi)?;
-                processor.advice.push_stack_word(&lo)?;
+            for chunk in chunks.iter() {
+                value.extend_from_slice(chunk);
             }
         },
     }
+    processor.advice.insert_into_map(canonical_digest, value)?;
+    processor.advice.push_stack_word(&canonical_digest)?;
     Ok(())
 }
 

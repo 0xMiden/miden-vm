@@ -157,7 +157,7 @@ mod tests {
             _witness: &mut WitnessBuilder<'_>,
         ) -> Result<Node, PrecompileError> {
             let felts = payload.as_felts()?;
-            Ok(Node::expression(Tag::new(self.id(), args), Payload::new(*felts)))
+            Ok(Node::leaf(Tag::new(self.id(), args), *felts))
         }
     }
 
@@ -208,7 +208,7 @@ mod tests {
         let f = Fixture::new("r");
         let tag = f.tag();
         let registry = PrecompileRegistry::default().with_precompile(f);
-        let node = Node::expression(tag, Payload::new([ZERO; 8]));
+        let node = Node::leaf(tag, [ZERO; 8]);
         let mut state = DeferredState::new();
         // Use the framework's evaluate path so we exercise dispatch end-to-end.
         let canonical = state.evaluate(&registry, node.clone()).unwrap();

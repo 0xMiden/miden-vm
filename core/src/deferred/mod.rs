@@ -200,6 +200,21 @@ impl Node {
         Self { tag, payload }
     }
 
+    /// Build an expression-bodied leaf node from raw 8-felt payload data.
+    pub fn leaf(tag: Tag, felts: [Felt; 8]) -> Self {
+        Self::expression(tag, Payload::new(felts))
+    }
+
+    /// Build an expression-bodied binary node with joined child digests.
+    pub fn join(tag: Tag, lhs: Digest, rhs: Digest) -> Self {
+        Self::expression(tag, Payload::join(lhs, rhs))
+    }
+
+    /// Build an AND-chain step node `{ tag: TRUE, payload: lhs || rhs }`.
+    pub fn and(lhs: Digest, rhs: Digest) -> Self {
+        Self::join(Tag::TRUE, lhs, rhs)
+    }
+
     /// Build a chunk node from `n = chunks.len()` rate-sized blocks of bulk data. Accepts
     /// anything that converts into `Arc<[Chunk]>` — typically a `Vec<Chunk>` from the processor
     /// handler, or a slice literal in tests.
@@ -315,7 +330,7 @@ mod tests {
 
     #[test]
     fn digest_is_deterministic() {
-        let n = Node::expression(TAG_A, payload(42));
+        let n = Node::leaf(TAG_A, *payload(42).as_felts().unwrap());
         assert_eq!(n.digest(), n.digest());
     }
 
@@ -323,16 +338,16 @@ mod tests {
     fn tag_changes_digest() {
         let p = payload(7);
         assert_ne!(
-            Node::expression(TAG_A, p.clone()).digest(),
-            Node::expression(TAG_B, p).digest()
+            Node::leaf(TAG_A, *p.as_felts().unwrap()).digest(),
+            Node::leaf(TAG_B, *p.as_felts().unwrap()).digest()
         );
     }
 
     #[test]
     fn payload_changes_digest() {
         assert_ne!(
-            Node::expression(TAG_A, payload(0)).digest(),
-            Node::expression(TAG_A, payload(1)).digest(),
+            Node::leaf(TAG_A, *payload(0).as_felts().unwrap()).digest(),
+            Node::leaf(TAG_A, *payload(1).as_felts().unwrap()).digest(),
         );
     }
 
@@ -342,7 +357,7 @@ mod tests {
         // one permutation, take state[0..4].
         let p = payload(123);
         let felts = *p.as_felts().unwrap();
-        let expr = Node::expression(TAG_A, p);
+        let expr = Node::leaf(TAG_A, felts);
         let chunk = Node::chunk(TAG_A, vec![felts]);
         assert_eq!(expr.digest(), chunk.digest());
     }
@@ -418,14 +433,14 @@ mod tests {
         // (both run the same Poseidon2 permutation). This is logically consistent (AND of two
         // TRUEs IS TRUE) and load-bearing for the recursive-proof use case where the program
         // logs a sub-proof's transcript whose root happens to be TRUE_DIGEST.
-        let and_true_true = Node::expression(Tag::TRUE, Payload::join(TRUE_DIGEST, TRUE_DIGEST));
+        let and_true_true = Node::and(TRUE_DIGEST, TRUE_DIGEST);
         assert_eq!(and_true_true.digest(), Node::TRUE.digest());
     }
 
     #[test]
     fn clone_yields_consistent_digest() {
         // A clone's digest matches the source's — `Clone` is a structural copy.
-        let n = Node::expression(TAG_A, payload(33));
+        let n = Node::leaf(TAG_A, *payload(33).as_felts().unwrap());
         let d1 = n.digest();
         let cloned = n;
         let d2 = cloned.digest();

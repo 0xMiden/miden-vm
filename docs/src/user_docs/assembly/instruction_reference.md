@@ -201,6 +201,9 @@ _Push to Advice Stack:_
 | `adv.push_mapval_count` | `[K, ... ]`       | `[K, ... ]`       | Pushes number of elements in `advice_map[K]` to advice stack.                                   |
 | `adv.push_mapvaln`      | `[K, ... ]`       | `[K, ... ]`       | Pushes `[n, ele1, ele2, ...]` from `advice_map[K]` to advice stack, where `n` is element count. |
 | `adv.push_mtnode`       | `[d, i, R, ... ]` | `[d, i, R, ... ]` | Pushes Merkle tree node (root `R`, depth `d`, index `i`) from Merkle store to advice stack.     |
+| `adv.register_deferred` | `[PAYLOAD_LO, PAYLOAD_HI, TAG, ...]` | `[PAYLOAD_LO, PAYLOAD_HI, TAG, ...]` | Registers expression node in deferred DAG; pushes `NODE_DIGEST` to advice stack. |
+| `adv.register_deferred_chunk` | `[TAG, ptr, ...]` | `[TAG, ptr, ...]` | Registers chunk node (length decoded from `TAG`, data read from memory at `ptr`); pushes `NODE_DIGEST` to advice stack. |
+| `adv.evaluate_deferred` | `[NODE_DIGEST, ...]` | `[NODE_DIGEST, ...]` | Evaluates node, pushes `CANONICAL_DIGEST` to advice stack, and records `advice_map[CANONICAL_DIGEST] = tag \|\| payload`. |
 
 _Insert into Advice Map:_
 

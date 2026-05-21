@@ -54,7 +54,7 @@ impl TestPrecompile {
     pub(crate) fn leaf_node(value: Felt) -> Node {
         let mut felts = [ZERO; 8];
         felts[0] = value;
-        Node::expression(Self::leaf_tag(), Payload::new(felts))
+        Node::leaf(Self::leaf_tag(), felts)
     }
 
     /// Extract the scalar value from a resolved leaf, rejecting non-leaf nodes.
@@ -109,9 +109,7 @@ impl Precompile for TestPrecompile {
         witness: &mut WitnessBuilder<'_>,
     ) -> Result<Node, PrecompileError> {
         match Disc::classify(args[0]).ok_or(PrecompileError::InvalidNode)? {
-            Disc::Leaf => {
-                Ok(Node::expression(Tag::new(Self::id(), args), Payload::new(*payload.as_felts()?)))
-            },
+            Disc::Leaf => Ok(Node::leaf(Tag::new(Self::id(), args), *payload.as_felts()?)),
             kind @ (Disc::Add | Disc::Mul) => {
                 let (lhs, rhs) = payload.join_children()?;
                 let a = Self::value_of(&witness.resolve(lhs)?)?;

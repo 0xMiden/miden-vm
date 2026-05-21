@@ -42,14 +42,14 @@ impl ChunkTestPrecompile {
 
     /// "Hash" `chunks` by summing every felt limb-wise into an 8-felt accumulator. Replace with
     /// a real non-native hash in production precompiles — the framework doesn't constrain this.
-    fn fake_hash(chunks: &[[Felt; 8]]) -> Payload {
+    fn fake_hash(chunks: &[[Felt; 8]]) -> [Felt; 8] {
         let mut acc = [ZERO; 8];
         for c in chunks {
             for (a, x) in acc.iter_mut().zip(c.iter()) {
                 *a += *x;
             }
         }
-        Payload::new(acc)
+        acc
     }
 }
 
@@ -112,11 +112,9 @@ impl Precompile for ChunkTestPrecompile {
         }
         match payload {
             // Preimage chunk reduces to its digest leaf.
-            Payload::Chunk(chunks) => Ok(Node::expression(digest_tag(), Self::fake_hash(chunks))),
+            Payload::Chunk(chunks) => Ok(Node::leaf(digest_tag(), Self::fake_hash(chunks))),
             // Digest leaf is self-evaluating.
-            Payload::Expression(f) => {
-                Ok(Node::expression(Tag::new(Self::id(), args), Payload::new(*f)))
-            },
+            Payload::Expression(f) => Ok(Node::leaf(Tag::new(Self::id(), args), *f)),
         }
     }
 }
@@ -141,7 +139,7 @@ fn chunk_digest_for_n1_matches_equivalent_expression() {
     let tag = preimage_tag(1);
     let data = chunk_data(1);
     let chunk = Node::chunk(tag, data.clone());
-    let expr = Node::expression(tag, Payload::new(data[0]));
+    let expr = Node::leaf(tag, data[0]);
     assert_eq!(chunk.digest(), expr.digest());
 }
 
@@ -175,13 +173,12 @@ fn predicate_preimage_equals_digest_succeeds() {
     let preimage_digest = state.register(&schema, preimage).unwrap();
 
     // Pre-compute and register the matching digest leaf.
-    let digest_leaf = Node::expression(digest_tag(), ChunkTestPrecompile::fake_hash(&chunks));
+    let digest_leaf = Node::leaf(digest_tag(), ChunkTestPrecompile::fake_hash(&chunks));
     let digest_leaf_digest = state.register(&schema, digest_leaf).unwrap();
 
     // Predicate: preimage's digest == precomputed digest leaf. Reduce drives the chunk's hash
     // and compares against the precomputed leaf, returning the TRUE node on match.
-    let assertion =
-        Node::expression(assert_tag(), Payload::join(preimage_digest, digest_leaf_digest));
+    let assertion = Node::join(assert_tag(), preimage_digest, digest_leaf_digest);
     state.register(&schema, assertion.clone()).unwrap();
     let result = state.evaluate(&schema, assertion).unwrap();
     assert!(result.is_true_node());
@@ -197,11 +194,10 @@ fn predicate_preimage_mismatch_fails_on_evaluate() {
     let preimage_digest = state.register(&schema, preimage).unwrap();
 
     // A digest leaf with the wrong content — predicate must fail when verified.
-    let wrong_leaf = Node::expression(digest_tag(), Payload::new([Felt::from_u32(99); 8]));
+    let wrong_leaf = Node::leaf(digest_tag(), [Felt::from_u32(99); 8]);
     let wrong_leaf_digest = state.register(&schema, wrong_leaf).unwrap();
 
-    let assertion =
-        Node::expression(assert_tag(), Payload::join(preimage_digest, wrong_leaf_digest));
+    let assertion = Node::join(assert_tag(), preimage_digest, wrong_leaf_digest);
     // Register is a pure hint — succeeds even when the predicate doesn't hold.
     state.register(&schema, assertion.clone()).unwrap();
     let err = state.evaluate(&schema, assertion);

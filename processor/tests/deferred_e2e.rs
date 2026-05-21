@@ -56,30 +56,11 @@ fn emit_register(src: &mut String, node: Node) {
     src.push_str("    dropw\n");
 }
 
-/// Build a MASM block that pushes the node's digest (4 felts), invokes `adv.evaluate_deferred`,
-/// drops the 4 input felts, and pulls the canonical 12 felts off the advice stack into memory
-/// starting at `out_base` so the test can inspect them via `output.memory`.
-///
-/// The node MUST already be interned in `DeferredState` — call `emit_register` first.
-fn emit_evaluate_into_mem(src: &mut String, node: Node, out_base: u32) {
-    use core::fmt::Write;
-    push_digest(src, node.digest());
-    src.push_str("    adv.evaluate_deferred\n");
-    for _ in 0..4 {
-        src.push_str("    drop\n");
-    }
-    // Advice stack top-to-bottom: PAYLOAD_LO || PAYLOAD_HI || TAG (matching the operand-stack
-    // input layout). Pull each word and write to memory in order.
-    for word_idx in 0..3u32 {
-        src.push_str("    adv_pushw\n");
-        writeln!(src, "    mem_storew_le.{}", out_base + word_idx * 4).unwrap();
-        src.push_str("    dropw\n");
-    }
-}
-
-/// Build a MASM block that pushes the node's digest and invokes `adv.evaluate_deferred` without
-/// consuming any advice output — used for predicates whose canonical form is the TRUE node (no
-/// advice push) or for cases where we just want to surface the verification error.
+/// Build a MASM block that pushes the node's digest and invokes `adv.evaluate_deferred`, then
+/// drops the input digest. `evaluate_deferred` pushes the canonical digest to advice and records
+/// the canonical in the advice map keyed by that canonical digest; this helper just drives the
+/// evaluation for its side effects (verifying a predicate / surfacing an error). Tests inspect the
+/// recorded entry via `output.advice`.
 ///
 /// The node MUST already be interned in `DeferredState`.
 fn emit_evaluate_for_side_effect(src: &mut String, node: Node) {
@@ -169,7 +150,7 @@ impl ArithTestPrecompile {
     }
 
     fn leaf_node(limbs: [u32; 8]) -> Node {
-        Node::expression(Self::leaf_tag(), Payload::new(limbs.map(Felt::from_u32)))
+        Node::leaf(Self::leaf_tag(), limbs.map(Felt::from_u32))
     }
 
     fn decode_limbs(felts: &[Felt; 8]) -> Result<[u32; 8], PrecompileError> {
@@ -244,7 +225,7 @@ impl Precompile for ArithTestPrecompile {
             d if d == Self::D_LEAF => {
                 let felts = payload.as_felts()?;
                 Self::decode_limbs(felts)?;
-                Ok(Node::expression(Tag::new(Self::id(), args), Payload::new(*felts)))
+                Ok(Node::leaf(Tag::new(Self::id(), args), *felts))
             },
             d if d == Self::D_ADD || d == Self::D_MUL => {
                 let (lhs, rhs) = payload.join_children()?;
@@ -291,14 +272,13 @@ fn deferred_end_to_end_register_eval_assert() {
     let b_digest = b.digest();
     let c_digest = c.digest();
     let d_digest = d.digest();
-    let add = Node::expression(ArithTestPrecompile::add_tag(), Payload::join(a_digest, b_digest));
+    let add = Node::join(ArithTestPrecompile::add_tag(), a_digest, b_digest);
     let add_digest = add.digest();
-    let mul = Node::expression(ArithTestPrecompile::mul_tag(), Payload::join(add_digest, c_digest));
+    let mul = Node::join(ArithTestPrecompile::mul_tag(), add_digest, c_digest);
     let mul_digest = mul.digest();
     // Predicate node: same shape as a binary op (expression body, two child digests), just with
     // ASSERT_EQ as the tag.
-    let assertion =
-        Node::expression(ArithTestPrecompile::eq_tag(), Payload::join(mul_digest, d_digest));
+    let assertion = Node::join(ArithTestPrecompile::eq_tag(), mul_digest, d_digest);
 
     // Build the program: register every node, then evaluate the predicate to verify it.
     let mut src = String::from("begin\n");
@@ -329,10 +309,10 @@ fn deferred_end_to_end_register_eval_assert() {
     // No `log_precompile` calls, so the transcript root is still the TRUE sentinel.
     assert_eq!(state.root(), TRUE_DIGEST);
 
-    // `state.nodes` is host-side committed storage: exactly what `register` / `register_chunk` /
-    // `log` wrote. `evaluate` populates only the cache, so canonical(add) = leaf(7) does NOT
-    // appear here — leaf(35) is in `nodes` solely because the program pre-registered it as `d`.
-    assert_eq!(state.nodes().len(), 7);
+    // `state.nodes` stores registered nodes and canonicals computed during evaluation.
+    // This run evaluates one predicate over (a+b)*c and interns canonical(add)=leaf(7)
+    // plus canonical(predicate)=TRUE in addition to the 7 registered nodes.
+    assert_eq!(state.nodes().len(), 9);
     for d in expected_digests {
         assert!(state.contains(&d));
     }
@@ -340,23 +320,23 @@ fn deferred_end_to_end_register_eval_assert() {
     assert_eq!(state.root(), TRUE_DIGEST);
 }
 
-// E2E: adv.evaluate_deferred pushes the canonical (tag, payload) onto the advice stack.
+// E2E: adv.evaluate_deferred records the canonical (tag || payload) in the advice map.
 // ================================================================================================
 
 #[test]
-fn deferred_evaluate_pushes_canonical_form_to_advice() {
+fn deferred_evaluate_records_canonical_in_advice_map() {
     // Register two leaves a=3 and b=4, then ask `adv.evaluate_deferred` for the canonical form of
-    // (a + b). Confirm the advice-pop yields a leaf node with payload limb0 = 7.
+    // (a + b). The canonical (leaf 7) must be recorded in the advice map under the canonical
+    // digest, serialized as `tag || payload`.
     let a = arith_leaf(3);
     let b = arith_leaf(4);
-    let add =
-        Node::expression(ArithTestPrecompile::add_tag(), Payload::join(a.digest(), b.digest()));
+    let add = Node::join(ArithTestPrecompile::add_tag(), a.digest(), b.digest());
 
     let mut src = String::from("begin\n");
     emit_register(&mut src, a);
     emit_register(&mut src, b);
     emit_register(&mut src, add.clone());
-    emit_evaluate_into_mem(&mut src, add, 0);
+    emit_evaluate_for_side_effect(&mut src, add);
     src.push_str("end\n");
 
     let program = Assembler::default().assemble_program(&src).expect("program must assemble");
@@ -366,58 +346,52 @@ fn deferred_evaluate_pushes_canonical_form_to_advice() {
         .execute_sync(&program, &mut host)
         .expect("execution must succeed");
 
-    // Memory layout: addresses 0..8 hold the canonical payload (a 256-bit u32-limbed integer of
-    // value 7), 8..12 hold the canonical tag (ArithTestPrecompile::leaf_tag()).
-    let ctx = 0u32.into();
-    let mut mem = [Felt::from_u32(0); 12];
-    for i in 0..12u32 {
-        mem[i as usize] = output.memory.read_element(ctx, Felt::from_u32(i)).expect("memory read");
-    }
-    let canonical_tag = [mem[8], mem[9], mem[10], mem[11]];
-    assert_eq!(
-        canonical_tag,
-        ArithTestPrecompile::leaf_tag().as_word(),
-        "evaluate returns canonical leaf tag"
-    );
-    assert_eq!(mem[0].as_canonical_u64(), 7, "limb 0 of (3+4)");
-    for (limb_idx, felt) in mem[..8].iter().enumerate().skip(1) {
-        assert_eq!(felt.as_canonical_u64(), 0, "limb {limb_idx} of (3+4) must be zero");
-    }
+    // The canonical of (3 + 4) is leaf 7. Its advice-map value is `tag || payload`.
+    let canonical = arith_leaf(7);
+    let canonical_digest = canonical.digest();
+    let mut expected: Vec<Felt> = canonical.tag.as_word().to_vec();
+    expected.extend_from_slice(canonical.payload.as_felts().unwrap());
+
+    let recorded = output
+        .advice
+        .get_mapped_values(&canonical_digest)
+        .expect("evaluate must record the canonical under canonical digest");
+    assert_eq!(recorded, expected.as_slice(), "advice map must hold canonical `tag || payload`");
 }
 
-// E2E: evaluating a predicate is a pure verify — nothing is pushed onto the advice stack.
+// E2E: evaluating a predicate records the TRUE node — no special-casing of predicates.
 // ================================================================================================
 
 #[test]
-fn deferred_evaluate_on_predicate_pushes_nothing_to_advice() {
+fn deferred_evaluate_records_true_node_for_predicate() {
     // Register one leaf, build a self-equal predicate (a == a), evaluate it. The predicate must
-    // verify successfully but nothing is pushed onto the advice stack — a trailing `adv_push`
-    // therefore underflows and fails execution.
+    // verify successfully, and its canonical (the TRUE node) is recorded in the advice map under
+    // the TRUE node's digest — uniform with every other node shape.
     let a = arith_leaf(7);
-    let a_eq_a =
-        Node::expression(ArithTestPrecompile::eq_tag(), Payload::join(a.digest(), a.digest()));
+    let a_eq_a = Node::join(ArithTestPrecompile::eq_tag(), a.digest(), a.digest());
 
     let mut src = String::from("begin\n");
     emit_register(&mut src, a);
     emit_register(&mut src, a_eq_a.clone());
-    push_digest(&mut src, a_eq_a.digest());
-    src.push_str("    adv.evaluate_deferred\n");
-    for _ in 0..4 {
-        src.push_str("    drop\n");
-    }
-    // Try to pop a single felt off the advice stack — must underflow because evaluate(predicate)
-    // pushed nothing.
-    src.push_str("    adv_push\n");
+    emit_evaluate_for_side_effect(&mut src, a_eq_a);
     src.push_str("end\n");
 
     let program = Assembler::default().assemble_program(&src).expect("program must assemble");
 
     let mut host = DefaultHost::default();
-    let result = build_processor().execute_sync(&program, &mut host);
-    assert!(
-        result.is_err(),
-        "adv_push.1 after evaluate(predicate) must underflow because nothing was pushed"
-    );
+    let output = build_processor()
+        .execute_sync(&program, &mut host)
+        .expect("execution must succeed");
+
+    // The TRUE node serializes to its 12 felts (zero tag || zero payload) like any expression.
+    let mut expected: Vec<Felt> = Node::TRUE.tag.as_word().to_vec();
+    expected.extend_from_slice(Node::TRUE.payload.as_felts().unwrap());
+
+    let recorded = output
+        .advice
+        .get_mapped_values(&Node::TRUE.digest())
+        .expect("evaluate must record the TRUE node under the TRUE digest");
+    assert_eq!(recorded, expected.as_slice(), "predicate canonical must be the TRUE node felts");
 }
 
 // E2E: a predicate is just a host hint — `adv.register_deferred` does NOT verify it. The
@@ -428,8 +402,7 @@ fn deferred_evaluate_on_predicate_pushes_nothing_to_advice() {
 fn deferred_register_predicate_does_not_verify() {
     let a = arith_leaf(7);
     let b = arith_leaf(8);
-    let mismatch =
-        Node::expression(ArithTestPrecompile::eq_tag(), Payload::join(a.digest(), b.digest()));
+    let mismatch = Node::join(ArithTestPrecompile::eq_tag(), a.digest(), b.digest());
 
     // Just register — execution must succeed because register is a pure host hint.
     let mut src = String::from("begin\n");
@@ -450,8 +423,7 @@ fn deferred_register_predicate_does_not_verify() {
 fn deferred_evaluate_predicate_mismatch_fails_execution() {
     let a = arith_leaf(7);
     let b = arith_leaf(8);
-    let mismatch =
-        Node::expression(ArithTestPrecompile::eq_tag(), Payload::join(a.digest(), b.digest()));
+    let mismatch = Node::join(ArithTestPrecompile::eq_tag(), a.digest(), b.digest());
 
     let mut src = String::from("begin\n");
     emit_register(&mut src, a);
@@ -500,6 +472,41 @@ fn deferred_register_pushes_node_digest_to_advice() {
         output.memory.read_element(ctx, Felt::from_u32(i as u32)).expect("memory read")
     });
     assert_eq!(observed, *expected.as_elements(), "register must push the node's digest");
+}
+
+#[test]
+fn deferred_evaluate_pushes_canonical_digest_to_operand() {
+    // Register a=3, b=4 and add=(a+b). Evaluate add, then move the advice-pushed
+    // CANONICAL_DIGEST to the operand stack (`adv.evaluate_deferred; dropw; adv_pushw`) and
+    // store it in memory to assert it equals digest(leaf 7).
+    let a = arith_leaf(3);
+    let b = arith_leaf(4);
+    let add = Node::join(ArithTestPrecompile::add_tag(), a.digest(), b.digest());
+    let expected = arith_leaf(7).digest();
+
+    let mut src = String::from("begin\n");
+    emit_register(&mut src, a);
+    emit_register(&mut src, b);
+    emit_register(&mut src, add.clone());
+    push_digest(&mut src, add.digest());
+    src.push_str("    adv.evaluate_deferred\n");
+    src.push_str("    dropw\n");
+    src.push_str("    adv_pushw\n");
+    src.push_str("    mem_storew_le.0\n");
+    src.push_str("    dropw\n");
+    src.push_str("end\n");
+
+    let program = Assembler::default().assemble_program(&src).expect("program must assemble");
+    let mut host = DefaultHost::default();
+    let output = build_processor()
+        .execute_sync(&program, &mut host)
+        .expect("execution must succeed");
+
+    let ctx = 0u32.into();
+    let observed: [Felt; 4] = core::array::from_fn(|i| {
+        output.memory.read_element(ctx, Felt::from_u32(i as u32)).expect("memory read")
+    });
+    assert_eq!(observed, *expected.as_elements(), "evaluate must push canonical digest");
 }
 
 #[test]
@@ -658,11 +665,9 @@ impl Precompile for ChunkTestPrecompile {
                         *a += *x;
                     }
                 }
-                Ok(Node::expression(digest_tag(), Payload::new(acc)))
+                Ok(Node::leaf(digest_tag(), acc))
             },
-            Payload::Expression(f) => {
-                Ok(Node::expression(Tag::new(Self::id(), args), Payload::new(*f)))
-            },
+            Payload::Expression(f) => Ok(Node::leaf(Tag::new(Self::id(), args), *f)),
         }
     }
 }
