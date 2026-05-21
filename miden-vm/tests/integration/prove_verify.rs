@@ -181,6 +181,80 @@ fn test_equal_heights_recursive() {
     assert_prove_verify(source, HashFunction::Poseidon2, "Poseidon2", false, true);
 }
 
+/// Recursive-verify coverage for a proof carrying a **non-empty** deferred-DAG root.
+///
+/// Every other `assert_recursive_verify` caller proves a precompile-free program, so its
+/// `pc_transcript_state` public input is `Word::empty()`. This proves a program that invokes the
+/// keccak256 precompile — producing a non-trivial deferred root — and checks the MASM recursive
+/// verifier accepts the proof against that public input. `prove_sync` builds its processor
+/// without precompiles, so the test drives the manual `execute_trace_inputs_sync` +
+/// `prove_from_trace_sync` path with the schema installed.
+///
+/// IGNORED: end-to-end *proving* of a deferred-DAG precompile program is not yet wired. The
+/// deferred wire round-trips (rehydration yields a non-empty commitment), but the generated
+/// STARK proof fails its own host verification with `Verifier(InvalidReducedAux)` — the precompile
+/// bus does not balance in the multi-AIR proof. No crypto precompile currently has a passing
+/// prove+verify test (only Falcon, via the event-handler path, proves). Re-enable once the
+/// precompile proving path lands (the "D2" work the surrounding NOTE refers to).
+#[ignore = "precompile prove+verify not yet wired (D2); proof fails host verify (InvalidReducedAux)"]
+#[test]
+fn test_poseidon2_recursive_verify_with_deferred_root() {
+    use miden_processor::FastProcessor;
+    use miden_prover::{TraceProvingInputs, prove_from_trace_sync};
+
+    let source = "
+        use miden::core::sys
+        use miden::core::crypto::hashes::keccak256
+        begin
+            push.0.0                # => [ptr=0, len_bytes=0]
+            exec.keccak256::hash_bytes
+            exec.sys::truncate_stack
+        end
+    ";
+    let core_lib = CoreLibrary::default();
+    let program = Assembler::default()
+        .with_dynamic_library(&core_lib)
+        .expect("load core library")
+        .assemble_program(source)
+        .expect("assemble keccak program");
+
+    let stack_inputs = StackInputs::default();
+    let mut host = DefaultHost::default();
+    host.load_library(&core_lib).expect("load core mast forest");
+
+    let trace_inputs = FastProcessor::new_with_options(
+        stack_inputs,
+        AdviceInputs::default(),
+        ExecutionOptions::default(),
+    )
+    .expect("processor construction")
+    .with_precompiles(Arc::new(core_lib.precompile_schema()))
+    .execute_trace_inputs_sync(&program, &mut host)
+    .expect("keccak execution");
+
+    let (stack_outputs, proof) = prove_from_trace_sync(TraceProvingInputs::new(
+        trace_inputs,
+        ProvingOptions::with_96_bit_security(HashFunction::Poseidon2),
+    ))
+    .expect("prove_from_trace_sync failed");
+
+    // Host-verify to obtain the deferred commitment, and assert it is non-empty so the recursive
+    // check below genuinely exercises a non-trivial `pc_transcript_state`.
+    let schema = core_lib.precompile_schema();
+    let (_security_level, deferred_commitment) =
+        verify(program.to_info(), stack_inputs, stack_outputs, &schema, proof.clone())
+            .expect("host verification failed");
+    assert_ne!(deferred_commitment, Word::empty(), "keccak program must yield a deferred root");
+
+    assert_recursive_verify(
+        program.to_info(),
+        stack_inputs,
+        stack_outputs,
+        deferred_commitment,
+        &proof,
+    );
+}
+
 /// Soundness regression: a proof whose deferred-DAG wire fails rehydration must be rejected by
 /// `miden_verifier::verify` BEFORE any STARK work happens. Tampers a valid proof's wire to
 /// include an entry with an unrecognized tag, then asserts the verifier surfaces
@@ -477,11 +551,13 @@ mod fast_parallel {
             .expect("Verification failed");
     }
 
-    // NOTE: precompile-fixture tests (test_prove_from_trace_sync_preserves_precompile_requests,
-    // test_poseidon2_recursive_verify_with_precompile_requests, LoggedPrecompileFixture, dummy
-    // handlers / verifiers) were removed alongside the deletion of sys::log_precompile_request.
-    // The per-precompile end-to-end coverage now lives in crates/lib/core/tests/crypto/*, and
-    // recursive-verify coverage with precompiles returns once the PrecompileVerifierRegistry
-    // framework is fully retired in D2 and the deferred-DAG transcript is the sole verification
-    // path.
+    // NOTE: the legacy precompile-fixture tests (LoggedPrecompileFixture, dummy handlers /
+    // verifiers) were removed alongside the deletion of sys::log_precompile_request and the
+    // PrecompileVerifierRegistry framework. Their coverage is now split across:
+    //   - per-precompile MASM behaviour:        crates/lib/core/tests/crypto/* (execution-level)
+    //   - deferred-state fragment determinism:  processor::trace::parallel::tests (single vs
+    //     multi-fragment `deferred_state` equality)
+    // End-to-end *prove + verify* of a non-empty deferred root is NOT yet covered: precompile
+    // proving is unfinished (the "D2" work). The placeholder
+    // `test_poseidon2_recursive_verify_with_deferred_root` above is `#[ignore]`d until that lands.
 }
