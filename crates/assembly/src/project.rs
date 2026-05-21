@@ -21,15 +21,18 @@ use crate::{Assembler, ast::Module};
 
 mod build_provenance;
 mod dependency_graph;
-mod package_ext;
+mod providers;
 mod runtime_dependencies;
 mod target_selector;
 
-use build_provenance::PackageBuildProvenance;
-use dependency_graph::DependencyGraph;
-use package_ext::ProjectPackageExt;
-use runtime_dependencies::RuntimeDependencies;
-pub use target_selector::ProjectTargetSelector;
+use self::{
+    build_provenance::PackageBuildProvenance, dependency_graph::DependencyGraph,
+    runtime_dependencies::RuntimeDependencies,
+};
+pub use self::{
+    providers::{MasmSourceProvider, ProjectSourceProvider, TargetAssemblyContext},
+    target_selector::ProjectTargetSelector,
+};
 
 #[cfg(test)]
 mod tests;
@@ -47,6 +50,20 @@ impl Assembler {
     where
         S: PackageCache + ?Sized,
     {
+        let masm_provider = Box::new(MasmSourceProvider) as Box<_>;
+        self.for_project_at_path_with_providers(manifest_path, store, [masm_provider])
+    }
+
+    /// Get a [ProjectAssembler] configured for the project whose manifest is at `manifest_path`.
+    pub fn for_project_at_path_with_providers<'a, S>(
+        self,
+        manifest_path: impl AsRef<FsPath>,
+        store: &'a mut S,
+        providers: impl IntoIterator<Item = Box<dyn ProjectSourceProvider>>,
+    ) -> Result<ProjectAssembler<'a, S>, Report>
+    where
+        S: PackageCache + ?Sized,
+    {
         let manifest_path = manifest_path.as_ref();
         let source_manager = self.source_manager();
         let project = miden_project::Project::load(manifest_path, &source_manager)?;
@@ -57,6 +74,7 @@ impl Assembler {
         Ok(ProjectAssembler {
             assembler: self,
             project: package,
+            source_provider: SourceProvider::new(providers),
             dependency_graph,
             store,
         })
@@ -71,12 +89,27 @@ impl Assembler {
     where
         S: PackageCache + ?Sized,
     {
+        let masm_provider = Box::new(MasmSourceProvider) as Box<_>;
+        self.for_project_with_providers(project, store, [masm_provider])
+    }
+
+    /// Get a [ProjectAssembler] configured for `project`
+    pub fn for_project_with_providers<'a, S>(
+        self,
+        project: Arc<ProjectPackage>,
+        store: &'a mut S,
+        providers: impl IntoIterator<Item = Box<dyn ProjectSourceProvider>>,
+    ) -> Result<ProjectAssembler<'a, S>, Report>
+    where
+        S: PackageCache + ?Sized,
+    {
         let source_manager = self.source_manager();
         let dependency_graph =
             DependencyGraph::from_project(project.clone(), store, source_manager)?;
         Ok(ProjectAssembler {
             assembler: self,
             project,
+            source_provider: SourceProvider::new(providers),
             dependency_graph,
             store,
         })
@@ -91,10 +124,79 @@ pub struct ProjectSourceInputs {
     pub support: Vec<Box<Module>>,
 }
 
+pub struct ProjectSourceProvenanceInputs {
+    pub root: SourceFileProvenance,
+    pub support: Vec<SourceFileProvenance>,
+}
+
+pub struct SourceFileProvenance {
+    pub path: Box<std::path::Path>,
+    pub content: Box<str>,
+}
+
+impl SourceFileProvenance {
+    pub fn from_path(path: PathBuf) -> Result<Self, Report> {
+        let content = fs::read_to_string(&path).map_err(|err| {
+            Report::msg(format!("unable to read source file '{}': {err}", path.display()))
+        })?;
+        Ok(Self {
+            path: path.into_boxed_path(),
+            content: content.into_boxed_str(),
+        })
+    }
+}
+
+pub struct SourceProvider {
+    registered: BTreeMap<&'static str, Box<dyn ProjectSourceProvider>>,
+}
+
+impl Default for SourceProvider {
+    fn default() -> Self {
+        Self {
+            registered: BTreeMap::from_iter([(
+                "masm",
+                Box::new(MasmSourceProvider) as Box<dyn ProjectSourceProvider>,
+            )]),
+        }
+    }
+}
+
+impl SourceProvider {
+    pub fn new(providers: impl IntoIterator<Item = Box<dyn ProjectSourceProvider>>) -> Self {
+        let mut this = Self {
+            registered: providers.into_iter().map(|p| (p.file_type(), p)).collect(),
+        };
+
+        if !this.registered.contains_key("masm") {
+            this.registered.insert("masm", Box::new(MasmSourceProvider));
+        }
+
+        this
+    }
+
+    pub fn with_source_provider(
+        &mut self,
+        provider: impl ProjectSourceProvider + 'static,
+    ) -> &mut Self {
+        let file_type = provider.file_type();
+        let provider = Box::new(provider) as Box<dyn ProjectSourceProvider>;
+
+        self.registered.insert(file_type, provider);
+
+        self
+    }
+
+    #[inline]
+    pub fn get_provider(&self, file_type: &str) -> Option<&dyn ProjectSourceProvider> {
+        self.registered.get(file_type).map(AsRef::as_ref)
+    }
+}
+
 pub struct ProjectAssembler<'a, S: PackageCache + ?Sized> {
     assembler: Assembler,
     project: Arc<ProjectPackage>,
     dependency_graph: DependencyGraph,
+    source_provider: SourceProvider,
     store: &'a mut S,
 }
 
@@ -102,6 +204,14 @@ impl<'a, S> ProjectAssembler<'a, S>
 where
     S: PackageCache + ?Sized,
 {
+    pub fn with_source_provider(
+        &mut self,
+        provider: impl ProjectSourceProvider + 'static,
+    ) -> &mut Self {
+        self.source_provider.with_source_provider(provider);
+        self
+    }
+
     pub fn project(&self) -> &ProjectPackage {
         self.project.as_ref()
     }
@@ -228,10 +338,26 @@ where
         }
 
         let has_provided_sources = sources.is_some();
-        let LoadedTargetSources { root, support } = match sources {
+        let sources = match sources {
             Some(sources) => self.normalize_provided_sources(target, sources)?,
-            None => self.load_target_sources(project.as_ref(), target)?,
+            None => self.load_target_sources(project.as_ref(), target, profile)?,
         };
+
+        // Collect specific well-known custom sections produced by the project assembler
+        let mut sections = Vec::new();
+
+        // Section: build provenance
+        //
+        // This is produced before actual assembly, while we still have the sources on hand
+        if let Some(provenance) = self.dependency_graph.build_source_provenance(
+            &package_id,
+            project.as_ref(),
+            target,
+            profile_name,
+            &self.source_provider,
+        )? {
+            sections.push(provenance.to_section());
+        }
 
         if let Some(kernel_package) = runtime_dependencies.kernel.clone() {
             if matches!(target.ty, TargetType::Kernel) {
@@ -242,6 +368,8 @@ where
             }
             assembler.link_package(kernel_package, Linkage::Dynamic)?;
         }
+
+        let ProjectSourceInputs { root, support } = sources;
         let mut product = match target.ty {
             TargetType::Executable => {
                 assembler.assemble_executable_modules(package_id.clone(), root, support)?
@@ -264,20 +392,6 @@ where
         product
             .extend_dependencies(runtime_dependencies.deps.into_values())
             .expect("assembled package manifest should have unique runtime dependencies");
-
-        // Emit custom sections
-        let mut sections = Vec::new();
-
-        // Section: build provenance
-        if let Some(provenance) = self.dependency_graph.build_source_provenance(
-            &package_id,
-            project.as_ref(),
-            target,
-            profile_name,
-            has_provided_sources,
-        )? {
-            sections.push(provenance.to_section());
-        }
 
         let mut package = product.into_artifact()?;
         package.name = project.target_package_name(target);
@@ -323,11 +437,12 @@ where
                 workspace_root,
                 ..
             }) => {
-                let project = ProjectPackage::load_package(
-                    self.assembler.source_manager(),
+                let project = miden_project::Project::load_project_reference(
                     package_id,
                     manifest_path,
-                )?;
+                    &self.assembler.source_manager(),
+                )
+                .map(|project| project.package())?;
                 let target = project
                     .library_target()
                     .map(|target| target.inner().clone())
@@ -527,6 +642,7 @@ where
             origin,
             manifest_path,
             workspace_root,
+            &self.source_provider,
         )?;
 
         match PackageBuildProvenance::from_package(&package)? {
@@ -594,7 +710,7 @@ where
         &self,
         target: &Target,
         sources: ProjectSourceInputs,
-    ) -> Result<LoadedTargetSources, Report> {
+    ) -> Result<ProjectSourceInputs, Report> {
         let mut root = sources.root;
         root.set_kind(target_root_module_kind(target.ty));
         root.set_path(target.namespace.inner().as_ref());
@@ -608,47 +724,55 @@ where
             })
             .collect::<Result<Vec<_>, Report>>()?;
 
-        Ok(LoadedTargetSources { root, support })
+        Ok(ProjectSourceInputs { root, support })
     }
 
     fn load_target_sources(
         &self,
         project: &ProjectPackage,
         target: &Target,
-    ) -> Result<LoadedTargetSources, Report> {
-        let source_paths = project.resolve_target_source_paths(target)?;
-        let root = self.parse_module_file(
-            &source_paths.root,
-            target_root_module_kind(target.ty),
-            target.namespace.inner().as_ref(),
-        )?;
-        let support = source_paths
-            .support
-            .iter()
-            .map(|path| {
-                let relative = path.strip_prefix(&source_paths.root_dir).map_err(|error| {
-                    Report::msg(format!(
-                        "failed to derive module path for '{}': {error}",
-                        path.display()
-                    ))
-                })?;
-                let module_path = module_path_from_relative(target.namespace.inner(), relative)?;
-                self.parse_module_file(path, ModuleKind::Library, module_path.as_ref())
-            })
-            .collect::<Result<Vec<_>, Report>>()?;
+        profile: &Profile,
+    ) -> Result<ProjectSourceInputs, Report> {
+        let manifest_path = project.expect_manifest_path()?;
+        let project_root = manifest_path.parent().ok_or_else(|| {
+            Report::msg(format!("manifest '{}' has no parent directory", manifest_path.display()))
+        })?;
+        let target_path = target.path.to_path().ok_or_else(|| {
+            Report::msg(format!(
+                "invalid target '{}': '{}' is not a valid file path",
+                target.name.inner(),
+                target.path
+            ))
+        })?;
+        let root_path = project_root.join(&target_path);
+        let root_path = root_path.canonicalize().map_err(|error| {
+            Report::msg(format!(
+                "failed to resolve target source '{}': {error}",
+                root_path.display()
+            ))
+        })?;
+        let extension = root_path.extension().ok_or_else(|| {
+            Report::msg(format!(
+                "invalid target 'path' {}: path must have an extension",
+                root_path.display()
+            ))
+        })?;
+        let extension = extension.to_string_lossy();
 
-        Ok(LoadedTargetSources { root, support })
-    }
+        let context = TargetAssemblyContext {
+            package: project,
+            manifest_path,
+            project_root,
+            resolved_target_root: root_path.as_path(),
+            target,
+            profile,
+            dependency_graph: self.dependency_graph.as_ref(),
+            source_manager: self.assembler.source_manager(),
+            warnings_as_errors: self.assembler.warnings_as_errors(),
+        };
 
-    fn parse_module_file(
-        &self,
-        path: &FsPath,
-        kind: ModuleKind,
-        module_path: &MasmPath,
-    ) -> Result<Box<Module>, Report> {
-        let mut parser = ModuleParser::new(kind);
-        parser.set_warnings_as_errors(self.assembler.warnings_as_errors());
-        parser.parse_file(module_path, path, self.assembler.source_manager())
+        let provider = self.source_provider.get_provider(extension.as_ref()).ok_or_else(|| Report::msg(format!("unsupported target file type '{extension}': no provider has been registered for that file type")))?;
+        provider.provide_sources(&context)
     }
 }
 
@@ -664,22 +788,6 @@ enum RegisteredSourcePackage {
     Missing,
     Loaded(Arc<MastPackage>),
     IndexedButUnreadable(PackageVersion),
-}
-
-struct LoadedTargetSources {
-    root: Box<Module>,
-    #[expect(
-        clippy::vec_box,
-        reason = "support modules are parsed and consumed as boxed AST modules by assembler APIs"
-    )]
-    support: Vec<Box<Module>>,
-}
-
-#[derive(Debug)]
-struct TargetSourcePaths {
-    root: PathBuf,
-    root_dir: PathBuf,
-    support: Vec<PathBuf>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

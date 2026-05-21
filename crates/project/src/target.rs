@@ -5,7 +5,7 @@ use miden_assembly_syntax::Path;
 use crate::*;
 
 /// Represents build target configuration
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Target {
     pub ty: TargetType,
     /// The effective name of this target
@@ -18,43 +18,38 @@ pub struct Target {
     pub namespace: Span<Arc<Path>>,
     /// The path from the project manifest to the root source file for this target
     ///
-    /// If not provided, it is expected that source modules will be provided to the assembler
-    /// through other means. For example, `midenc` will compile Rust code to MASM, and then provide
-    /// the MASM modules to an instantiated assembler when assembling this project.
-    pub path: Option<Span<Uri>>,
+    /// The path can be to a source file written in any language, e.g. for MASM it might refer to
+    /// `mod.masm`, while for Rust it might refer to `src/lib.rs` - as long as an appropriate
+    /// source provider is registered with the assembler.
+    pub path: Span<Uri>,
 }
 
 impl Target {
-    /// Construct a new virtual executable target named `name`
-    pub fn executable(name: impl Into<Arc<str>>) -> Self {
-        Self::r#virtual(TargetType::Executable, name.into(), Path::exec_path())
+    /// Construct a new executable target named `name` and given source `uri`
+    pub fn executable(name: impl Into<Arc<str>>, uri: Uri) -> Self {
+        Self::new(TargetType::Executable, name.into(), Path::exec_path(), uri)
     }
 
-    /// Construct a new virtual library target named `name` with namespace `namespace`
-    pub fn library(namespace: impl Into<Arc<Path>>) -> Self {
+    /// Construct a new library target named `name` with the given `namespace` and source `uri`
+    pub fn library(namespace: impl Into<Arc<Path>>, uri: Uri) -> Self {
         let namespace = namespace.into();
         let name: Arc<str> = namespace.as_str().into();
-        Self::r#virtual(TargetType::Library, name, namespace)
+        Self::new(TargetType::Library, name, namespace, uri)
     }
 
-    /// Construct a new virtual target of type `ty`, with the given `name` and `namespace`
-    pub fn r#virtual(
+    /// Construct a new target of type `ty`, with the given `name`, `namespace` and source `uri`
+    pub fn new(
         ty: TargetType,
         name: impl Into<Arc<str>>,
         namespace: impl Into<Arc<Path>>,
+        uri: Uri,
     ) -> Self {
         Self {
             ty,
             name: Span::unknown(name.into()),
             namespace: Span::unknown(namespace.into()),
-            path: None,
+            path: Span::unknown(uri),
         }
-    }
-
-    /// Construct this [Target] with the given root module [Uri].
-    pub fn with_path(mut self, path: impl Into<Uri>) -> Self {
-        self.path = Some(Span::unknown(path.into()));
-        self
     }
 
     /// Returns true if this target is an executable target
@@ -86,10 +81,7 @@ impl Target {
         out.push_str(namespace.inner().as_str());
         out.push('\n');
         out.push_str("target:path:");
-        match path.as_ref() {
-            Some(path) => out.push_str(path.inner().path()),
-            None => out.push_str("<virtual>"),
-        }
+        out.push_str(path.inner().as_str());
         out.push('\n');
     }
 }

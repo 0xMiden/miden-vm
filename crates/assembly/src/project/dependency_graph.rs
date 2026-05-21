@@ -3,6 +3,7 @@ use alloc::{
     format,
     string::{String, ToString},
     sync::Arc,
+    vec::Vec,
 };
 use std::path::Path as FsPath;
 
@@ -15,7 +16,10 @@ use miden_project::{
     Target,
 };
 
-use super::{PackageBuildProvenance, PackageBuildSettings, ProjectPackageExt};
+use super::{
+    PackageBuildProvenance, PackageBuildSettings, ProjectSourceProvenanceInputs, SourceProvider,
+    providers::TargetAssemblyContext,
+};
 use crate::SourceManager;
 
 // DEPENDENCY GRAPH
@@ -24,6 +28,13 @@ use crate::SourceManager;
 pub(super) struct DependencyGraph {
     dependency_graph: ProjectDependencyGraph,
     source_manager: Arc<dyn SourceManager>,
+}
+
+impl AsRef<ProjectDependencyGraph> for DependencyGraph {
+    #[inline(always)]
+    fn as_ref(&self) -> &ProjectDependencyGraph {
+        &self.dependency_graph
+    }
 }
 
 impl DependencyGraph {
@@ -80,12 +91,8 @@ impl DependencyGraph {
         project: &ProjectPackage,
         target: &Target,
         profile_name: &str,
-        has_provided_sources: bool,
+        source_provider: &SourceProvider,
     ) -> Result<Option<PackageBuildProvenance>, Report> {
-        if has_provided_sources {
-            return Ok(None);
-        }
-
         let Some(node) = self.dependency_graph.get(package_id) else {
             return Ok(None);
         };
@@ -97,14 +104,8 @@ impl DependencyGraph {
             ProjectSource::Virtual { .. } => Ok(None),
             ProjectSource::Real {
                 origin, manifest_path, workspace_root, ..
-            } => {
-                if matches!(origin, ProjectSourceOrigin::Path | ProjectSourceOrigin::Root)
-                    && target.path.is_none()
-                {
-                    return Ok(None);
-                }
-
-                self.expected_source_provenance(
+            } => self
+                .expected_source_provenance(
                     package_id,
                     project,
                     target,
@@ -112,9 +113,9 @@ impl DependencyGraph {
                     origin,
                     manifest_path,
                     workspace_root.as_deref(),
+                    source_provider,
                 )
-                .map(Some)
-            },
+                .map(Some),
         }
     }
 
@@ -127,6 +128,7 @@ impl DependencyGraph {
         origin: &ProjectSourceOrigin,
         manifest_path: &FsPath,
         workspace_root: Option<&FsPath>,
+        source_provider: &SourceProvider,
     ) -> Result<PackageBuildProvenance, Report> {
         self.expected_source_provenance_with_visited(
             package_id,
@@ -136,6 +138,7 @@ impl DependencyGraph {
             origin,
             manifest_path,
             workspace_root,
+            source_provider,
             &mut BTreeSet::new(),
         )
     }
@@ -152,10 +155,15 @@ impl DependencyGraph {
         origin: &ProjectSourceOrigin,
         manifest_path: &FsPath,
         _workspace_root: Option<&FsPath>,
+        source_provider: &SourceProvider,
         visiting: &mut BTreeSet<PackageId>,
     ) -> Result<PackageBuildProvenance, Report> {
-        let dependency_hash =
-            self.compute_dependency_closure_hash(package_id, profile_name, visiting)?;
+        let dependency_hash = self.compute_dependency_closure_hash(
+            package_id,
+            profile_name,
+            source_provider,
+            visiting,
+        )?;
         let profile = project.resolve_profile(profile_name)?;
         let build_settings = PackageBuildSettings::from_profile(profile);
 
@@ -169,12 +177,40 @@ impl DependencyGraph {
                 })
             },
             ProjectSourceOrigin::Path | ProjectSourceOrigin::Root => {
+                let source_manager = self.source_manager.clone();
+                let project_root = manifest_path.parent().ok_or_else(|| {
+                    Report::msg(format!(
+                        "manifest '{}' has no parent directory",
+                        manifest_path.display()
+                    ))
+                })?;
+
+                let Some(target_path) = target.path.to_path() else {
+                    return Err(Report::msg(format!(
+                        "invalid target path '{}': not a valid file path",
+                        target.path
+                    )));
+                };
+                let root_path = project_root.join(&target_path);
+                let root_path = root_path.canonicalize().map_err(|error| {
+                    Report::msg(format!(
+                        "failed to resolve target source '{}': {error}",
+                        root_path.display()
+                    ))
+                })?;
+                let context = TargetAssemblyContext {
+                    package: project,
+                    manifest_path,
+                    project_root,
+                    resolved_target_root: root_path.as_path(),
+                    target,
+                    profile,
+                    dependency_graph: &self.dependency_graph,
+                    source_manager,
+                    warnings_as_errors: false,
+                };
                 Ok(PackageBuildProvenance::Path {
-                    source_hash: project.compute_path_source_hash(
-                        target,
-                        profile,
-                        manifest_path,
-                    )?,
+                    source_hash: self.compute_path_source_hash(&context, source_provider)?,
                     dependency_hash,
                     build_settings,
                 })
@@ -186,6 +222,7 @@ impl DependencyGraph {
         &self,
         package_id: &PackageId,
         profile_name: &str,
+        source_provider: &SourceProvider,
         visiting: &mut BTreeSet<PackageId>,
     ) -> Result<Word, Report> {
         if !visiting.insert(package_id.clone()) {
@@ -219,6 +256,7 @@ impl DependencyGraph {
                 material.push_str(&self.dependency_resolution_hash_input(
                     &edge.dependency,
                     profile_name,
+                    source_provider,
                     visiting,
                 )?);
             }
@@ -234,6 +272,7 @@ impl DependencyGraph {
         &self,
         package_id: &PackageId,
         profile_name: &str,
+        source_provider: &SourceProvider,
         visiting: &mut BTreeSet<PackageId>,
     ) -> Result<String, Report> {
         let node = self.dependency_graph.get(package_id).ok_or_else(|| {
@@ -254,11 +293,12 @@ impl DependencyGraph {
                 library_path: Some(_),
                 ..
             }) => {
-                let project = ProjectPackage::load_package(
-                    self.source_manager.clone(),
+                let project = miden_project::Project::load_project_reference(
                     package_id,
                     manifest_path,
-                )?;
+                    &self.source_manager,
+                )
+                .map(|project| project.package())?;
                 let target = project
                     .library_target()
                     .map(|target| target.inner().clone())
@@ -275,6 +315,7 @@ impl DependencyGraph {
                     origin,
                     manifest_path,
                     workspace_root.as_deref(),
+                    source_provider,
                     visiting,
                 )?;
                 Ok(format!("source:{package_id}:{}\n", provenance.describe()))
@@ -283,5 +324,53 @@ impl DependencyGraph {
                 Ok(format!("canonical:{package_id}@{}\n", node.version))
             },
         }
+    }
+
+    fn compute_path_source_hash(
+        &self,
+        context: &TargetAssemblyContext<'_>,
+        source_provider: &SourceProvider,
+    ) -> Result<Word, Report> {
+        let Some(extension) = context.resolved_target_root.extension().and_then(|ext| ext.to_str())
+        else {
+            return Err(Report::msg(format!(
+                "invalid target path '{}': file must have an extension",
+                context.target.path
+            )));
+        };
+
+        let Some(source_provider) = source_provider.get_provider(extension) else {
+            return Err(Report::msg(format!(
+                "unsupported file type '{extension}': no source provider registered for that type"
+            )));
+        };
+        let ProjectSourceProvenanceInputs { root, support } =
+            source_provider.provide_source_provenance(context)?;
+
+        let mut inputs = Vec::with_capacity(1 + support.len());
+        let root_label = match root.path.strip_prefix(context.project_root) {
+            Ok(stripped) => stripped.display().to_string(),
+            Err(_) => root.path.display().to_string(),
+        };
+        inputs.push((format!("root:{root_label}"), root));
+        for support_file in support {
+            let label = match support_file.path.strip_prefix(context.project_root) {
+                Ok(stripped) => stripped.display().to_string(),
+                Err(_) => support_file.path.display().to_string(),
+            };
+            inputs.push((format!("support:{label}"), support_file));
+        }
+        inputs.sort_by(|a, b| a.0.cmp(&b.0));
+
+        let mut material =
+            context.package.build_provenance_projection(context.target, context.profile);
+        for (label, source_file) in inputs {
+            material.push_str(&label);
+            material.push('\n');
+            material.push_str(&source_file.content);
+            material.push('\n');
+        }
+
+        Ok(hash_string_to_word(material.as_str()))
     }
 }

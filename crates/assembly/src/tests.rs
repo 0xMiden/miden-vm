@@ -541,8 +541,10 @@ fn simple_main_call() -> TestResult {
 fn call_without_path() -> TestResult {
     let mut context = TestContext::default();
 
-    let project =
-        miden_project::Package::new("call_without_path", miden_project::Target::executable("main"));
+    let project = miden_project::Package::new(
+        "call_without_path",
+        miden_project::Target::executable("main", "mod.masm".into()),
+    );
 
     let account_code1_src = source_file!(
         &context,

@@ -200,6 +200,27 @@ impl Package {
         self.profiles().iter().find(|profile| profile.name().as_ref() == name)
     }
 
+    /// Returns a profile with the specified name, or an error if such a profile does not exist in
+    /// this package.
+    pub fn resolve_profile(&self, name: &str) -> Result<&Profile, Report> {
+        self.get_profile(name).ok_or_else(|| {
+            Report::msg(format!(
+                "project '{}' does not define a '{}' build profile",
+                self.name().inner(),
+                name
+            ))
+        })
+    }
+
+    /// Compute the [PackageId] that will be produced for `target` if derived from this package
+    pub fn target_package_name(&self, target: &Target) -> PackageId {
+        if target.ty.is_executable() {
+            format!("{}:{}", self.name().inner(), target.name.inner()).into()
+        } else {
+            self.name().inner().clone()
+        }
+    }
+
     /// Get a reference to the library build target provided by this package
     pub fn library_target(&self) -> Option<&Span<Target>> {
         self.lib.as_ref()
@@ -214,6 +235,15 @@ impl Package {
     #[cfg(feature = "std")]
     pub fn manifest_path(&self) -> Option<&Path> {
         self.manifest_path.as_deref()
+    }
+
+    /// Get the location of the manifest this package was loaded from, or return an error if not
+    /// available.
+    #[cfg(feature = "std")]
+    pub fn expect_manifest_path(&self) -> Result<&Path, Report> {
+        self.manifest_path().ok_or_else(|| {
+            Report::msg(format!("project '{}' is missing its manifest path", self.name().inner()))
+        })
     }
 
     /// Return the package model projection that affects artifact reuse for `target` under
