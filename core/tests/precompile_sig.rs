@@ -3,10 +3,10 @@
 
 mod common;
 
-use common::precompile::{hash::Hash, sig::Sig, uint::Uint};
 use miden_core::{
     Felt, ZERO,
     deferred::{DeferredState, Node, NodeType, Precompile, PrecompileError, PrecompileRegistry},
+    testing::precompile::{Hash, Sig, Uint},
 };
 use proptest::prelude::*;
 

@@ -3,10 +3,10 @@
 
 mod common;
 
-use common::precompile::{hash::Hash, uint::Uint};
 use miden_core::{
     Felt, ZERO,
     deferred::{DeferredState, NodeType, Precompile, PrecompileError, PrecompileRegistry},
+    testing::precompile::{Hash, Uint},
 };
 
 fn chunks(n: u32) -> Vec<[Felt; 8]> {

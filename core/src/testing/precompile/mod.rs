@@ -1,4 +1,4 @@
-//! Reference precompile implementations used by the `precompile_*` integration tests.
+//! Reference precompile implementations exercising the [`crate::deferred`] public surface.
 //!
 //! - [`uint`] — `Uint`: 256-bit wrapping integer arithmetic.
 //! - [`group`] — `Group`: compound-canonical mock group over `Uint` (mid-`reduce` minting).

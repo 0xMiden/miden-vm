@@ -4,9 +4,11 @@
 //! [`PrecompileRegistry`] by id; a `sub` op joins `add`/`mul`, and the precompile pre-registers
 //! `ZERO` / `ONE` / `P_MINUS_1` (`[u32::MAX; 8]`) leaves via [`Precompile::init`].
 //!
-//! [`PrecompileRegistry`]: miden_core::deferred::PrecompileRegistry
+//! [`PrecompileRegistry`]: crate::deferred::PrecompileRegistry
 
-use miden_core::{
+use alloc::{vec, vec::Vec};
+
+use crate::{
     Felt, ZERO,
     deferred::{
         DeferredError, Digest, Node, NodeType, Payload, Precompile, PrecompileError, Tag,
@@ -22,7 +24,7 @@ use miden_core::{
 pub struct Uint;
 
 impl Uint {
-    /// Precompile name — hashed into the id. Renaming breaks the schema for existing programs.
+    /// Precompile name — hashed into the id.
     pub const NAME: &'static str = "uint256";
 
     /// Discriminant indices.
@@ -159,8 +161,8 @@ impl Precompile for Uint {
         witness: &mut WitnessBuilder<'_>,
     ) -> Result<Node, PrecompileError> {
         match UintNode::parse(args, payload)? {
-            // Leaf canonicality is checked at parse-time, deferred from register-time so that
-            // malformed leaves are interned silently and only error out when used.
+            // Leaf canonicality is validated at reduce-time, so a malformed leaf only errors when
+            // used.
             UintNode::Leaf => Ok(Node::leaf(Tag::new(Self::id(), args), *payload.as_felts()?)),
             UintNode::BinaryOp { op, lhs, rhs } => {
                 let a = leaf_limbs(&witness.resolve(lhs)?)?;
@@ -267,8 +269,4 @@ fn decode_limbs(felts: &[Felt; 8]) -> Result<[u32; 8], DeferredError> {
         limbs[i] = v as u32;
     }
     Ok(limbs)
-}
-
-fn encode_limbs(limbs: [u32; 8]) -> Payload {
-    Payload::new(limbs.map(Felt::from_u32))
 }
