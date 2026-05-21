@@ -6,8 +6,7 @@ use crate::{
     crypto::hash::Blake3_256,
     mast::{
         DecoratedLinksIter, DecoratedOpLink, DecoratorId, DecoratorStore, ExecutableMastForest,
-        MastForest, MastForestError, MastNodeFingerprint, MastNodeId,
-        digest,
+        MastForest, MastForestError, MastNodeFingerprint, MastNodeId, digest,
     },
     operations::{DecoratorList, Operation},
     prettier::PrettyPrint,
