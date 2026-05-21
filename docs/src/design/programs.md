@@ -38,6 +38,10 @@ A **dyn** block is used to describe a node whose target is specified dynamically
 
 A *dyn* block must always have one (dynamically-specified) child. Thus, it cannot be a leaf node in the tree.
 
+### Dyncall block
+
+A **dyncall** block is used to describe a function call whose target is specified dynamically via the stack. It behaves like a dynamic target combined with a call: the target is not hardcoded, and execution enters a new user context before returning to the caller.
+
 ### Call block
 
 A **call** block is used to describe a function call which is executed in a [user context](../user_docs/assembly/execution_contexts.md). When the VM encounters a *call* block, it creates a new user context, then executes a program which hashes to the target specified by the *call* block in the new context. Thus, in order to execute a *call* block, the VM must be aware of a program with the specified hash. Otherwise, the execution fails. At the end of the *call* block, execution returns to the previous context.
