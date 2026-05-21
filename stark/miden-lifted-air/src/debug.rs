@@ -43,7 +43,6 @@ where
 {
     validate_inputs::<F, EF, MA>(
         statement.multi_air(),
-        statement.airs(),
         statement.air_inputs(),
         statement.aux_inputs(),
     )
@@ -62,7 +61,6 @@ where
     let statement = prover_statement.statement();
     validate_inputs::<F, EF, MA>(
         statement.multi_air(),
-        statement.airs(),
         statement.air_inputs(),
         statement.aux_inputs(),
     )

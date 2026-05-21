@@ -4,7 +4,6 @@
 //! LMCS, PCS, and full STARK with Goldilocks field and Poseidon2 hashing.
 
 use alloc::vec::Vec;
-use core::marker::PhantomData;
 
 use p3_challenger::DuplexChallenger;
 use p3_dft::Radix2DitParallel;
@@ -172,13 +171,13 @@ where
 /// `aux_fn` is called once per AIR with `(main_trace, challenges)` and returns
 /// `(aux_trace, aux_values)` for that AIR.
 pub struct TestMa<A, AuxFn> {
+    pub airs: Vec<A>,
     pub aux_fn: AuxFn,
-    _air: PhantomData<A>,
 }
 
 impl<A, AuxFn> TestMa<A, AuxFn> {
-    pub fn new(aux_fn: AuxFn) -> Self {
-        Self { aux_fn, _air: PhantomData }
+    pub fn new(airs: Vec<A>, aux_fn: AuxFn) -> Self {
+        Self { airs, aux_fn }
     }
 }
 
@@ -189,15 +188,18 @@ where
 {
     type Air = A;
 
+    fn airs(&self) -> &[Self::Air] {
+        &self.airs
+    }
+
     fn build_aux_traces(
         &self,
-        airs: &[Self::Air],
         traces: &[&RowMajorMatrix<Felt>],
         _air_inputs: &[Felt],
         _aux_inputs: &[Felt],
         challenges: &[QuadFelt],
     ) -> (Vec<RowMajorMatrix<QuadFelt>>, Vec<Vec<QuadFelt>>) {
-        debug_assert_eq!(airs.len(), traces.len());
+        debug_assert_eq!(self.airs.len(), traces.len());
         let mut traces_out = Vec::with_capacity(traces.len());
         let mut values_out = Vec::with_capacity(traces.len());
         for &trace in traces {
@@ -221,7 +223,7 @@ pub fn prove_and_verify<A, AuxFn>(
 {
     let airs: Vec<A> = core::iter::repeat_n(air.clone(), traces.len()).collect();
     let traces_owned: Vec<RowMajorMatrix<Felt>> = traces.iter().cloned().collect();
-    let statement = Statement::new(TestMa::new(aux_fn), airs, air_inputs.to_vec(), Vec::new())
+    let statement = Statement::new(TestMa::new(airs, aux_fn), air_inputs.to_vec(), Vec::new())
         .expect("statement inputs valid");
     let prover_statement =
         ProverStatement::new(statement, traces_owned).expect("trace shape valid");

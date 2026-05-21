@@ -4,8 +4,8 @@
 //! - [`LiftedAir`]: super-trait for AIR definitions (inherits upstream + adds aux trace support and
 //!   periodic column data)
 //! - [`LiftedAirBuilder`]: super-trait for constraint builders
-//! - [`MultiAir`]: protocol-behavior trait — AIR type, `eval_external`, `build_aux_traces`,
-//!   `observe`, and the `max_aux_inputs` budget
+//! - [`MultiAir`]: the circuit — the AIR collection (`airs`) plus `eval_external`,
+//!   `build_aux_traces`, `observe`, and the `max_aux_inputs` budget
 //! - [`Statement`]: validated per-proof inputs over a `MultiAir`
 //! - [`ProverStatement`]: validated prover-side companion — a `Statement` plus per-AIR main traces
 //! - [`validate`]: runtime checks returned as typed [`validate::InstanceError`] from

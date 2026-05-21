@@ -1,8 +1,8 @@
 //! Stark-side instance utilities: [`TraceOrder`] and [`ShapeError`].
 //!
-//! The air crate's [`Instance`](miden_lifted_air::Instance) trait is order-agnostic: every list it
+//! The air crate's [`MultiAir`](miden_lifted_air::MultiAir) trait is order-agnostic: every list it
 //! exposes is in **instance order** (the position returned by
-//! [`Instance::airs`](miden_lifted_air::Instance::airs)). The stark crate is the only place that
+//! [`MultiAir::airs`](miden_lifted_air::MultiAir::airs)). The stark crate is the only place that
 //! needs the proof's wire-format AIR ordering (a deterministic stable sort of the
 //! per-AIR heights). [`TraceOrder`] is the type that carries the
 //! permutation between **instance order** and **proof order**; nothing
@@ -41,7 +41,7 @@ pub enum ShapeError {
 // ============================================================================
 
 /// The permutation between **instance order** (the AIR positions as
-/// returned by [`Instance::airs`](miden_lifted_air::Instance::airs)) and **proof order** (the
+/// returned by [`MultiAir::airs`](miden_lifted_air::MultiAir::airs)) and **proof order** (the
 /// wire-format ordering used inside the prover/verifier), derived deterministically
 /// from per-AIR trace heights.
 ///
@@ -51,7 +51,7 @@ pub enum ShapeError {
 /// only and the ordering is reconstructed locally.
 ///
 /// Heights are stored in instance order (matching
-/// [`Instance::airs`](miden_lifted_air::Instance::airs)). Use [`Self::to_proof_order`] /
+/// [`MultiAir::airs`](miden_lifted_air::MultiAir::airs)). Use [`Self::to_proof_order`] /
 /// [`Self::to_instance_order`] (or [`Self::reorder_to_proof_in_place`]) to move data between the
 /// two views.
 #[derive(Clone, Debug)]
@@ -123,7 +123,7 @@ impl TraceOrder {
     }
 
     /// Log trace heights in instance order. Matches
-    /// [`Instance::airs`](miden_lifted_air::Instance::airs).
+    /// [`MultiAir::airs`](miden_lifted_air::MultiAir::airs).
     pub fn log_heights_instance(&self) -> &[u8] {
         &self.log_heights_instance
     }

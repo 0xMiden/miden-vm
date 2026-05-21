@@ -83,11 +83,11 @@ See `docs/lifting.md` for a deeper discussion and sufficient conditions.
 5. **Evaluate constraints at OOD** — For each AIR at the lifted OOD point
    `y_j = z^{r_j}`: compute selectors, evaluate periodic polynomials,
    fold constraints with alpha, accumulate with beta.
-6. **Evaluate external assertions** — Call `Instance::eval_external`
+6. **Evaluate external assertions** — Call `Statement::eval_external`
    once with the global view (challenges, all aux values, log heights);
-   each returned EF value must equal zero. `Instance` owns both the
+   each returned EF value must equal zero. The `Statement` owns both the
    shared `air_inputs` and the optional `aux_inputs`; prover and verifier
-   absorb both into Fiat-Shamir via `Instance::observe` before the
+   absorb both into Fiat-Shamir via `Statement::observe` before the
    rest of the protocol.
 7. **Check identity** — `accumulated == Q(z) * Z_H(z)`.
 8. **Ensure transcript is fully consumed** — Canonicality enforcement.
@@ -191,11 +191,12 @@ at `y_j`, and the opened trace values already correspond to `p_j(y_j)`.
 | Item | Purpose |
 |------|---------|
 | `prover::prove` | Prove one or more AIR instances |
-| `ProverInstance` | Prover-side trait wrapping an `Instance` with per-AIR traces and aux construction |
-| `Instance` | Statement description — AIRs (`type Air`/`fn airs`), shared `air_inputs`, optional `aux_inputs`, `eval_external`, `observe` |
+| `ProverStatement` | A `Statement` plus per-AIR traces and aux construction |
+| `Statement` | A `MultiAir` plus the per-proof inputs (`air_inputs`, optional `aux_inputs`) |
+| `MultiAir` | The circuit — AIRs (`type Air`/`fn airs`), `eval_external`, the aux-trace builder, `observe` |
 | `verifier::verify` | Verify a multi-trace proof |
-| `Instance::eval_external` | Cross-AIR external-assertions hook on `Instance` (default: no assertions) |
-| `Instance::aux_inputs` | Auxiliary public inputs consumed only by `eval_external` (default: empty) |
+| `MultiAir::eval_external` | Cross-AIR external-assertions hook (default: no assertions) |
+| `Statement::aux_inputs` | Auxiliary public inputs consumed only by `eval_external` (empty unless provided) |
 | `Transcript` | Structured transcript view (alias for `proof::StarkTranscript`) |
 | `StarkConfig` | PCS params + LMCS + DFT configuration |
 | `domain::LiftedDomain` | Domain operations: selectors, vanishing, coset shifts |

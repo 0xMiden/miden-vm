@@ -13,7 +13,7 @@
 //!    panic-based helpers that check the statically-verifiable subset; passing a malformed AIR to
 //!    the prover or verifier is undefined behaviour.
 //!
-//! 2. **Instance = validated** — The prover validates that its witness matches the AIR spec. The
+//! 2. **Statement = validated** — The prover validates that its witness matches the AIR spec. The
 //!    verifier validates the proof's shape metadata and the per-AIR contracts. Both return typed
 //!    errors ([`ProverError`] / [`VerifierError`]) — see [`miden_lifted_air::validate`] for the
 //!    underlying check functions.
@@ -23,9 +23,9 @@
 //!
 //! ## Validated at runtime
 //!
-//! Checked by [`miden_lifted_air::validate_instance`] /
-//! [`miden_lifted_air::validate_with_heights`] /
-//! [`miden_lifted_air::validate_prover_instance`] plus
+//! Checked by [`miden_lifted_air::validate_inputs`] /
+//! [`miden_lifted_air::validate_log_heights`] /
+//! [`miden_lifted_air::validate_prover_traces`] plus
 //! [`setup::validate_compatible`] plus
 //! [`instance::TraceOrder::from_log_heights`], all run before any
 //! cryptographic work begins:
@@ -48,12 +48,12 @@
 //! 2. **Window size** — only transition window size 2.
 //! 3. **Deterministic constraints** — `eval()` emits the same number and types of constraints
 //!    regardless of builder implementation.
-//! 4. **`ProverInstance::build_aux_traces` output** — per AIR, an aux trace of width `aux_width()`,
-//!    height matching the main trace, and exactly `num_aux_values()` aux values. Surface contract
-//!    violations from tests via [`debug::assert_aux_traces_shape`].
-//! 5. **Sound [`Instance::eval_external`]** — Returns external assertions that are satisfied (equal
-//!    zero) iff the proof's cross-AIR interactions are well-formed for the given aux values and
-//!    public inputs.
+//! 4. **[`ProverStatement::build_aux_traces`] output** — per AIR, an aux trace of width
+//!    `aux_width()`, height matching the main trace, and exactly `num_aux_values()` aux values.
+//!    Surface contract violations from tests via [`debug::assert_aux_traces_shape`].
+//! 5. **Sound [`Statement::eval_external`]** — Returns external assertions that are satisfied
+//!    (equal zero) iff the proof's cross-AIR interactions are well-formed for the given aux values
+//!    and public inputs.
 
 #![no_std]
 

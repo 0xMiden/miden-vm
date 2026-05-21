@@ -7,7 +7,6 @@
 extern crate alloc;
 
 use alloc::{vec, vec::Vec};
-use core::marker::PhantomData;
 
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
@@ -133,11 +132,13 @@ impl LiftedAir<Felt, QuadFelt> for PeriodicPowerAir {
 // MultiAir: trivial constant-challenge aux column for each trace.
 // ---------------------------------------------------------------------------
 
-struct TwoTraceMa<A>(PhantomData<A>);
+struct TwoTraceMa<A> {
+    airs: Vec<A>,
+}
 
 impl<A> TwoTraceMa<A> {
-    fn new() -> Self {
-        Self(PhantomData)
+    fn new(airs: Vec<A>) -> Self {
+        Self { airs }
     }
 }
 
@@ -147,9 +148,12 @@ where
 {
     type Air = A;
 
+    fn airs(&self) -> &[Self::Air] {
+        &self.airs
+    }
+
     fn build_aux_traces(
         &self,
-        _airs: &[Self::Air],
         traces: &[&RowMajorMatrix<Felt>],
         _air_inputs: &[Felt],
         _aux_inputs: &[Felt],
@@ -193,7 +197,7 @@ fn run_upsample_case(low_power: u64, low_height: usize, high_power: u64, high_he
     let t_high = generate_pow_trace(high_power, Felt::from_u64(11), high_height);
 
     let statement =
-        Statement::new(TwoTraceMa::new(), vec![low, high], Vec::new(), Vec::new()).unwrap();
+        Statement::new(TwoTraceMa::new(vec![low, high]), Vec::new(), Vec::new()).unwrap();
     let prover_statement = ProverStatement::new(statement, vec![t_low, t_high]).unwrap();
     prove_and_verify_statement(&prover_statement);
 }
@@ -222,7 +226,7 @@ fn upsample_fires_with_periodic_columns() {
     let t_high = generate_pow_trace(5, Felt::from_u64(11), 16);
 
     let statement =
-        Statement::new(TwoTraceMa::new(), vec![low, high], Vec::new(), Vec::new()).unwrap();
+        Statement::new(TwoTraceMa::new(vec![low, high]), Vec::new(), Vec::new()).unwrap();
     let prover_statement = ProverStatement::new(statement, vec![t_low, t_high]).unwrap();
     prove_and_verify_statement(&prover_statement);
 }

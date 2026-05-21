@@ -10,19 +10,20 @@ Protocol-level overview lives in `miden-lifted-stark/README.md`.
 
 | Item | Purpose |
 |------|---------|
-| `verify` | Verify the statement described by an `Instance` |
-| `Instance` | Statement description — AIRs (`type Air`/`fn airs`), shared `air_inputs`, optional `aux_inputs`, `eval_external`, `observe` |
+| `verify` | Verify a `Statement` |
+| `Statement` | A `MultiAir` plus the per-proof inputs (`air_inputs`, optional `aux_inputs`) |
+| `MultiAir` | The circuit — AIRs (`type Air`/`fn airs`), the cross-AIR `eval_external`, the aux-trace builder, and a Fiat-Shamir `observe` hook |
 | `StarkProof` | Log trace heights + raw transcript data |
 
 ```text
-verify(config, &instance, proof, challenger)
+verify(config, &statement, proof, challenger)
 ```
 
-The `instance` impl carries the AIRs, the proof's `air_inputs` and (if any)
-`aux_inputs`, and defines the cross-AIR `eval_external` check. The
-framework absorbs both `air_inputs` and `aux_inputs` into Fiat-Shamir
-automatically via `Instance::observe` — callers must pass `instance`
-carrying the same data on prover and verifier sides.
+The `statement` carries its `MultiAir` (the AIRs and the cross-AIR
+`eval_external` check) plus the proof's `air_inputs` and (if any)
+`aux_inputs`. The framework absorbs both `air_inputs` and `aux_inputs` into
+Fiat-Shamir automatically via `Statement::observe` — callers must pass a
+`Statement` carrying the same data on prover and verifier sides.
 
 The proof is read from the provided transcript channel. This crate does not
 prescribe the *initial* challenger state used for Fiat-Shamir.
@@ -40,7 +41,7 @@ bundle extra data in the same transcript, you must manage boundaries yourself.
 ## Protocol flow
 
 0. Reconstruct `TraceOrder` from the proof's log trace heights and reorder caller AIRs into the proof's ascending-height ordering.
-1. Absorb the caller-supplied instance via `Instance::observe` (which itself absorbs the heights) into the challenger.
+1. Absorb the caller-supplied statement via `Statement::observe` (which itself absorbs the heights) into the challenger.
 2. Receive main trace commitment.
 3. Sample aux randomness.
 4. Receive aux trace commitment.
@@ -51,7 +52,7 @@ bundle extra data in the same transcript, you must manage boundaries yourself.
 9. Reconstruct `Q(z)` from the opened quotient chunks.
 10. For each trace instance j, set `y_j = z^{r_j}` and evaluate folded constraints at `y_j`.
 11. Accumulate across traces with `beta`.
-12. Call `instance.eval_external(...)` once with the global view (challenges, all aux values in instance order, log heights in instance order) and check each returned EF value is zero.
+12. Call `statement.eval_external(...)` once with the global view (challenges, all aux values in instance order, log heights in instance order) and check each returned EF value is zero.
 13. Check quotient identity: `accumulated == Q(z) * (z^N - 1)`.
 14. Ensure transcript is fully consumed.
 

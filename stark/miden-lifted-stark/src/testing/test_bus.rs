@@ -112,6 +112,7 @@ impl LiftedAir<Felt, QuadFelt> for BusTestAir {
 // ---------------------------------------------------------------------------
 
 struct BusMa {
+    airs: Vec<BusTestAir>,
     pi_0: Felt,
     pi_1: Felt,
 }
@@ -119,14 +120,17 @@ struct BusMa {
 impl MultiAir<Felt, QuadFelt> for BusMa {
     type Air = BusTestAir;
 
-    fn max_aux_inputs(&self, _airs: &[Self::Air]) -> usize {
+    fn airs(&self) -> &[Self::Air] {
+        &self.airs
+    }
+
+    fn max_aux_inputs(&self) -> usize {
         // `pi_0` and `pi_1`.
         2
     }
 
     fn build_aux_traces(
         &self,
-        _airs: &[Self::Air],
         traces: &[&RowMajorMatrix<Felt>],
         _air_inputs: &[Felt],
         _aux_inputs: &[Felt],
@@ -150,7 +154,6 @@ impl MultiAir<Felt, QuadFelt> for BusMa {
 
     fn eval_external(
         &self,
-        _airs: &[Self::Air],
         challenges: &[QuadFelt],
         _air_inputs: &[Felt],
         aux_inputs: &[Felt],
@@ -178,8 +181,9 @@ fn bus_prover_statement(
     air_inputs: Vec<Felt>,
     aux_inputs: Vec<Felt>,
 ) -> ProverStatement<Felt, QuadFelt, BusMa> {
-    let statement = Statement::new(BusMa { pi_0, pi_1 }, vec![BusTestAir], air_inputs, aux_inputs)
-        .expect("statement inputs valid");
+    let statement =
+        Statement::new(BusMa { airs: vec![BusTestAir], pi_0, pi_1 }, air_inputs, aux_inputs)
+            .expect("statement inputs valid");
     ProverStatement::new(statement, vec![trace]).expect("trace shape valid")
 }
 

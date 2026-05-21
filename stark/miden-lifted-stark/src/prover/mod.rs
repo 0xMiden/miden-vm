@@ -16,15 +16,15 @@
 //! 1. **Protocol parameters** — e.g. the STARK configuration, blowup factor, and any
 //!    application-level domain separator.
 //!
-//! 2. **AIR configurations** — The framework does not commit to the [`Instance::airs`] list. The
+//! 2. **AIR configurations** — The framework does not commit to the [`MultiAir::airs`] list. The
 //!    caller MUST bind every AIR configuration into the challenger before calling [`prove`] /
 //!    [`verify`](crate::verify). The AIR ordering on the wire is derived deterministically from the
 //!    trace heights (stable sort on `(log_trace_height, caller_index)`), so callers do not need to
 //!    commit to it separately as long as they commit to the AIR list and trace heights match.
 //!
 //! The proof's `air_inputs` and `aux_inputs` are absorbed automatically by
-//! [`Instance::observe`], followed by each AIR's log trace height in instance
-//! order. Callers do not bind these themselves.
+//! [`Statement::observe`](crate::Statement::observe), followed by each AIR's
+//! log trace height in instance order. Callers do not bind these themselves.
 //!
 //! ## Recommended pattern
 //!
@@ -38,13 +38,13 @@
 //! // ... bind AIR configurations + air ordering (see below) ...
 //!
 //! // --- Prove ---
-//! let output = prove(&config, &instance, ch)?;
+//! let output = prove(&config, &prover_statement, ch)?;
 //!
-//! // --- Verify (identical binding + same instance data) ---
+//! // --- Verify (identical binding + the same statement) ---
 //! let mut ch = Challenger::new(perm);
 //! ch.observe_slice(&b"MY_APP_V1".map(|b| F::from_u8(b)));
 //! ch.observe(F::from_u8(config.pcs().log_blowup()));
-//! let verifier_digest = verify(&config, &instance, &output.proof, ch)?;
+//! let verifier_digest = verify(&config, prover_statement.statement(), &output.proof, ch)?;
 //! assert_eq!(output.digest, verifier_digest);
 //! ```
 //!
@@ -54,7 +54,7 @@
 //! // Commit to AIRs in instance order — the proof's wire-format ordering is
 //! // derived from the heights inside the framework, so binding the instance
 //! // order is enough.
-//! for air in instance.airs() {
+//! for air in statement.airs() {
 //!     challenger.observe(air.commitment());
 //! }
 //! ```
@@ -103,12 +103,12 @@ pub enum ProverError {
     Domain(#[from] crate::domain::DomainError),
 }
 
-/// Prove the statement described by `instance`.
+/// Prove a [`ProverStatement`].
 ///
 /// The caller's challenger must already be bound to protocol parameters and
 /// AIR configurations — see the module-level docs. The proof's `air_inputs`
-/// and `aux_inputs` are absorbed internally via [`Instance::observe`]; both
-/// prover and verifier must pass `instance` carrying the same data.
+/// and `aux_inputs` are absorbed internally via [`Statement::observe`](crate::Statement::observe);
+/// both prover and verifier must carry the same statement data.
 ///
 /// # Trust contract
 ///
@@ -118,9 +118,9 @@ pub enum ProverError {
 /// from your test harness to enforce it in debug builds.
 ///
 /// ## Validated
-/// - per AIR: `air.num_public_values() == instance.air_inputs().len()`
-/// - `instance.aux_inputs().len() <= instance.max_aux_inputs()`
-/// - `prover_instance.traces().len() == instance.airs().len()` and `<= u8::MAX + 1`
+/// - per AIR: `air.num_public_values() == statement.air_inputs().len()`
+/// - `statement.aux_inputs().len() <= multi_air.max_aux_inputs()`
+/// - `prover_statement.traces().len() == statement.airs().len()` and `<= u8::MAX + 1`
 /// - per AIR: `trace.width() == air.width()`
 /// - per AIR: `trace.height().is_power_of_two()`
 /// - per AIR: `trace.height() >= max periodic column length`
@@ -130,15 +130,15 @@ pub enum ProverError {
 /// ## Trusted (NOT validated)
 /// - AIR structural shape (positive `aux_width`, power-of-two periodic columns, no preprocessed
 ///   trace, window size 2)
-/// - `ProverInstance::build_aux_traces` output dimensions — call
+/// - [`ProverStatement::build_aux_traces`] output dimensions — call
 ///   [`crate::debug::assert_aux_traces_shape`] from tests to surface contract violations.
 /// - Preprocessed tree shape (TODO: adr1anh/preprocessed branch)
 ///
 /// # Arguments
 /// - `config`: STARK configuration (PCS params, LMCS, DFT)
-/// - `prover_instance`: Statement description — AIRs, shared `air_inputs`, per-AIR traces, and
-///   aux-trace construction (all in instance order)
-/// - `challenger`: Fiat-Shamir challenger (instance and heights are observed before use)
+/// - `prover_statement`: validated statement plus per-AIR traces — the AIRs, shared `air_inputs`,
+///   and aux-trace construction (all in instance order)
+/// - `challenger`: Fiat-Shamir challenger (statement and heights are observed before use)
 ///
 /// # Returns
 /// `Ok(StarkOutput { digest, proof })` on success, or a `ProverError` if validation fails.

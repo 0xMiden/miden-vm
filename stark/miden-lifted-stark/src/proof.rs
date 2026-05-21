@@ -51,7 +51,7 @@ type Commitment<F, EF, SC> = <<SC as StarkConfig<F, EF>>::Lmcs as Lmcs>::Commitm
 #[serde(bound(deserialize = "TranscriptData<F, Commitment<F, EF, SC>>: Deserialize<'de>"))]
 pub struct StarkProof<F: TwoAdicField, EF: ExtensionField<F>, SC: StarkConfig<F, EF>> {
     /// Per-AIR log₂ trace heights, in instance order. Matches
-    /// [`Instance::airs`] position-for-position.
+    /// [`Statement::airs`] position-for-position.
     pub(crate) log_trace_heights: Vec<u8>,
     pub(crate) transcript: TranscriptData<F, Commitment<F, EF, SC>>,
 }
@@ -179,8 +179,8 @@ where
     ///
     /// Mirrors steps 0–9 of [`verify`](crate::verifier::verify):
     /// 0. Reconstruct the [`TraceOrder`] from the proof's log trace heights, validate per-AIR
-    ///    contracts via [`validate_instance`], absorb the caller-supplied instance via
-    ///    [`Instance::observe`] (which itself absorbs the heights), then squeeze a throwaway
+    ///    contracts via [`validate_log_heights`], absorb the caller-supplied statement via
+    ///    [`Statement::observe`] (which itself absorbs the heights), then squeeze a throwaway
     ///    `instance_challenge` to clear the absorb buffer
     /// 1. Receive main trace commitment
     /// 2. Sample randomness for auxiliary traces

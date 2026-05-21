@@ -85,7 +85,7 @@ pub trait LiftedAir<F: Field, EF>: Sync + BaseAir<F> {
     /// Number of extension-field aux values committed to the Fiat-Shamir transcript.
     ///
     /// These are the values returned by
-    /// [`ProverInstance::build_aux_traces`](crate::ProverInstance::build_aux_traces)
+    /// [`MultiAir::build_aux_traces`](crate::MultiAir::build_aux_traces)
     /// alongside the aux trace matrix. Their count may differ from
     /// [`aux_width`](Self::aux_width) (the number of aux trace columns).
     ///

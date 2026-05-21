@@ -1,7 +1,7 @@
 //! Lifted STARK verifier.
 //!
 //! This module provides:
-//! - [`verify`]: Verify the statement described by an [`Instance`].
+//! - [`verify`]: Verify a [`Statement`].
 //!
 //! Takes a challenger (consumed by value) and proof data, constructs the
 //! verifier transcript internally, and returns a [`StarkDigest`] on success.
@@ -93,20 +93,20 @@ pub enum VerifierError {
     #[error("external assertion {assertion} is non-zero")]
     ExternalAssertionFailed {
         /// Index into the assertions vector returned by
-        /// [`Instance::eval_external`].
+        /// [`Statement::eval_external`].
         assertion: usize,
     },
 }
 
-/// Verify the statement described by `instance`.
+/// Verify a [`Statement`].
 ///
 /// The verifier reads per-AIR log trace heights from the proof (in caller
-/// order, matching [`Instance::airs`]) and reconstructs the proof's AIR
+/// order, matching [`Statement::airs`]) and reconstructs the proof's AIR
 /// ordering deterministically via [`TraceOrder`]. The caller's challenger
 /// must already be bound to protocol parameters and AIR configurations —
 /// see the prover module-level docs. The proof's `air_inputs` and
-/// `aux_inputs` are absorbed internally via [`Instance::observe`]; both
-/// prover and verifier must pass `instance` carrying the same data.
+/// `aux_inputs` are absorbed internally via [`Statement::observe`]; both
+/// prover and verifier must pass a `Statement` carrying the same data.
 ///
 /// The verifier mirrors the prover's protocol:
 ///
@@ -116,7 +116,7 @@ pub enum VerifierError {
 /// 3. For each AIR (in proof order), evaluate constraints at the lifted OOD point yⱼ = z^{rⱼ}
 /// 4. Accumulate folded constraints with β: acc = acc·β + foldedⱼ
 /// 5. Check quotient identity: `acc == Q(z) * Z_{H_max}(z)`
-/// 6. Evaluate [`Instance::eval_external`] with aux values reordered back to instance order
+/// 6. Evaluate [`Statement::eval_external`] with aux values reordered back to instance order
 ///
 /// Lifting: for a trace of height nⱼ lifted by factor rⱼ, the committed
 /// codeword encodes `p_lift(X) = p(X^{rⱼ})`; opening at `[z, z · h_max]`
@@ -131,17 +131,17 @@ pub enum VerifierError {
 ///
 /// # Trust contract
 ///
-/// `verify` validates the runtime instance plus everything carried on the
+/// `verify` validates the runtime statement plus everything carried on the
 /// proof; the AIR list is **trusted** (run
 /// [`crate::debug::assert_airs_valid`] from tests).
 ///
 /// ## Validated
-/// - Same instance checks as [`crate::prove`] minus trace shape (no traces here)
+/// - Same statement checks as [`crate::prove`] minus trace shape (no traces here)
 /// - Same `validate_compatible` check
 /// - Proof shape via [`TraceOrder::from_log_heights`]
 /// - Proof byte parsing (transcript channel)
 /// - PCS / FRI / DEEP / LMCS / transcript / constraint identity
-/// - External assertions from [`Instance::eval_external`]
+/// - External assertions from [`Statement::eval_external`]
 /// - (Future) preprocessed commitment matches AIR declarations
 ///
 /// ## Trusted (NOT validated)
