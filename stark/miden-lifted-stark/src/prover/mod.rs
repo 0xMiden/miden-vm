@@ -81,7 +81,7 @@ use tracing::{info_span, instrument};
 use crate::{
     StarkConfig,
     domain::{Coset, LiftedDomain, log_quotient_degree},
-    instance::TraceOrder,
+    order::TraceOrder,
     pcs::prover::open_with_channel,
     proof::{StarkOutput, StarkProof},
     setup::{CompatError, validate_compatible},

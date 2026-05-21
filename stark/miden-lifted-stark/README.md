@@ -216,16 +216,17 @@ at `y_j`, and the opened trace values already correspond to `p_j(y_j)`.
 | `src/verifier/constraints.rs` | `ConstraintFolder` — OOD constraint evaluation, quotient reconstruction |
 | `src/verifier/periodic.rs` | `PeriodicPolys` — polynomial coefficients for OOD evaluation |
 | `src/proof.rs` | `StarkProof`, `StarkTranscript` — proof artifact and structured transcript view |
-| `src/instance.rs` | `TraceOrder`, `ShapeError` — shape metadata; runtime checks live in `miden_lifted_air::validate` |
+| `src/order.rs` | public `ShapeError` plus the crate-internal instance↔proof ordering helper; runtime checks live in `miden_lifted_air::validate` |
 | `src/setup.rs` | `validate_compatible`, `CompatError` — AIR ↔ PCS-parameters compatibility check |
 | `src/debug.rs` | `check_constraints` (row-by-row), structural assertions (`assert_airs_valid`, `assert_prover_setup`, `assert_aux_traces_shape`, …) |
 
 ## Conventions & Assumptions
 
 - **AIR ordering** — The proof orders AIR instances deterministically by trace
-  height (stable sort on `(log_trace_height, caller_index)`), materialised by
-  `TraceOrder` from the heights stored on `StarkProof`. The caller must bind the
-  AIR list into the Fiat-Shamir challenger. See the prover module-level docs.
+  height (stable sort on `(log_trace_height, instance_index)`), materialised
+  internally from the heights stored on `StarkProof`; the ordering type is
+  crate-private. The caller must bind the AIR list into the Fiat-Shamir
+  challenger. See the prover module-level docs.
 - **Power-of-two heights** — All trace heights are powers of two.
 - **Bit-reversed storage** — All evaluation matrices are in bit-reversed order.
 - **Constraint degree** — Fixed at `D = 4` (`LOG_CONSTRAINT_DEGREE = 2`).

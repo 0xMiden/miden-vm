@@ -55,9 +55,9 @@ use periodic::PeriodicPolys;
 use thiserror::Error;
 
 use crate::{
-    StarkConfig,
+    ShapeError, StarkConfig,
     domain::{Coset, LiftedDomain, log_quotient_degree},
-    instance::{ShapeError, TraceOrder},
+    order::TraceOrder,
     pcs::verifier::{PcsError, verify_aligned},
     proof::{StarkDigest, StarkProof},
     setup::{CompatError, validate_compatible},
@@ -102,7 +102,7 @@ pub enum VerifierError {
 ///
 /// The verifier reads per-AIR log trace heights from the proof (in caller
 /// order, matching [`Statement::airs`]) and reconstructs the proof's AIR
-/// ordering deterministically via [`TraceOrder`]. The caller's challenger
+/// ordering deterministically from those heights. The caller's challenger
 /// must already be bound to protocol parameters and AIR configurations —
 /// see the prover module-level docs. The statement's inputs are absorbed
 /// internally via [`Statement::observe`].
@@ -125,8 +125,9 @@ pub enum VerifierError {
 /// declared heights against any caller expectation. If your statement fixes
 /// trace dimensions, parse via
 /// [`StarkTranscript::from_proof`](crate::proof::StarkTranscript::from_proof)
-/// and check `transcript.trace_order.log_heights_instance()` before calling
-/// this. See the module-level docs for the full contract.
+/// and check
+/// [`transcript.log_trace_heights()`](crate::proof::StarkTranscript::log_trace_heights)
+/// before calling this. See the module-level docs for the full contract.
 ///
 /// # Trust contract
 ///
@@ -137,7 +138,7 @@ pub enum VerifierError {
 /// ## Validated
 /// - Same statement checks as [`crate::prove`] minus trace shape (no traces here)
 /// - Same `validate_compatible` check
-/// - Proof shape via [`TraceOrder::from_log_heights`]
+/// - Proof shape via the internal trace-order reconstruction from log heights
 /// - Proof byte parsing (transcript channel)
 /// - PCS / FRI / DEEP / LMCS / transcript / constraint identity
 /// - External assertions from [`Statement::eval_external`]

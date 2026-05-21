@@ -1,12 +1,13 @@
-//! Stark-side instance utilities: [`TraceOrder`] and [`ShapeError`].
+//! Internal instance↔proof ordering helper: the crate-internal [`TraceOrder`]
+//! plus the public [`ShapeError`].
 //!
 //! The air crate's [`MultiAir`](miden_lifted_air::MultiAir) trait is order-agnostic: every list it
 //! exposes is in **instance order** (the position returned by
 //! [`MultiAir::airs`](miden_lifted_air::MultiAir::airs)). The stark crate is the only place that
 //! needs the proof's wire-format AIR ordering (a deterministic stable sort of the
-//! per-AIR heights). [`TraceOrder`] is the type that carries the
+//! per-AIR heights). [`TraceOrder`] is the crate-internal type that carries the
 //! permutation between **instance order** and **proof order**; nothing
-//! about it leaks into the air crate.
+//! about it leaks into the air crate or out of this crate's public surface.
 //!
 //! Runtime instance-level checks live in [`miden_lifted_air::validate`];
 //! the structural AIR contract lives in [`miden_lifted_air::debug`].
@@ -55,7 +56,7 @@ pub enum ShapeError {
 /// [`Self::to_instance_order`] (or [`Self::reorder_to_proof_in_place`]) to move data between the
 /// two views.
 #[derive(Clone, Debug)]
-pub struct TraceOrder {
+pub(crate) struct TraceOrder {
     log_heights_instance: Vec<u8>,
     /// `instance_indices[j]` = instance index at proof position `j`. Length
     /// matches `log_heights_instance`.
@@ -68,7 +69,7 @@ impl TraceOrder {
     /// Validates that every height is a non-zero power of two, that the
     /// log-height fits in `u8` and within the host's `usize` width, and that
     /// the number of instances fits in `u8`.
-    pub fn from_trace_heights(trace_heights: &[usize]) -> Result<Self, ShapeError> {
+    pub(crate) fn from_trace_heights(trace_heights: &[usize]) -> Result<Self, ShapeError> {
         if trace_heights.is_empty() {
             return Err(ShapeError::Empty);
         }
@@ -93,7 +94,7 @@ impl TraceOrder {
     /// proof as `u8`s. Power-of-two-ness is automatic (heights are stored
     /// as log₂); the only checks are non-emptiness, host-`usize` bound, and
     /// the u8 instance-count limit.
-    pub fn from_log_heights(log_heights_instance: Vec<u8>) -> Result<Self, ShapeError> {
+    pub(crate) fn from_log_heights(log_heights_instance: Vec<u8>) -> Result<Self, ShapeError> {
         if log_heights_instance.is_empty() {
             return Err(ShapeError::Empty);
         }
@@ -113,29 +114,32 @@ impl TraceOrder {
     }
 
     /// Number of AIR instances.
-    pub fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.log_heights_instance.len()
     }
 
-    /// Whether the order contains any instances.
-    pub fn is_empty(&self) -> bool {
+    /// Whether the order contains any instances. The conventional companion to
+    /// [`Self::len`]; constructors reject empty input, so it always returns
+    /// `false` in practice.
+    #[allow(dead_code)]
+    pub(crate) fn is_empty(&self) -> bool {
         self.log_heights_instance.is_empty()
     }
 
     /// Log trace heights in instance order. Matches
     /// [`MultiAir::airs`](miden_lifted_air::MultiAir::airs).
-    pub fn log_heights_instance(&self) -> &[u8] {
+    pub(crate) fn log_heights_instance(&self) -> &[u8] {
         &self.log_heights_instance
     }
 
     /// Instance indices in proof order: `instance_indices()[j]` is the
     /// instance index of the AIR at proof position `j`.
-    pub fn instance_indices(&self) -> &[u8] {
+    pub(crate) fn instance_indices(&self) -> &[u8] {
         &self.instance_indices
     }
 
     /// Log trace heights in proof order (ascending by construction).
-    pub fn log_heights_proof(&self) -> Vec<u8> {
+    pub(crate) fn log_heights_proof(&self) -> Vec<u8> {
         self.instance_indices
             .iter()
             .map(|&i| self.log_heights_instance[i as usize])
@@ -143,7 +147,7 @@ impl TraceOrder {
     }
 
     /// The largest log trace height (= last entry of [`Self::log_heights_proof`]).
-    pub fn max_log_height(&self) -> u8 {
+    pub(crate) fn max_log_height(&self) -> u8 {
         // `instance_indices` is non-empty (constructor rejects empty input).
         let last = *self.instance_indices.last().expect("TraceOrder is non-empty");
         self.log_heights_instance[last as usize]
@@ -153,7 +157,7 @@ impl TraceOrder {
     ///
     /// Returns a `Vec` of length [`Self::len`] where position `j` holds
     /// `instance_data[instance_indices()[j]]`.
-    pub fn to_proof_order<T: Clone>(&self, instance_data: &[T]) -> Vec<T> {
+    pub(crate) fn to_proof_order<T: Clone>(&self, instance_data: &[T]) -> Vec<T> {
         debug_assert_eq!(instance_data.len(), self.len());
         self.instance_indices
             .iter()
@@ -166,7 +170,7 @@ impl TraceOrder {
     /// After the call, `data[j] == data_original[instance_indices()[j]]`.
     /// Avoids the clone in [`Self::to_proof_order`] for owned data like
     /// `RowMajorMatrix`.
-    pub fn reorder_to_proof_in_place<T>(&self, data: &mut [T]) {
+    pub(crate) fn reorder_to_proof_in_place<T>(&self, data: &mut [T]) {
         assert_eq!(data.len(), self.len());
         let n = self.len();
         let perm = &self.instance_indices;
@@ -195,7 +199,7 @@ impl TraceOrder {
     ///
     /// Returns a `Vec` of length [`Self::len`] where position `i` holds the
     /// element at the proof position whose instance index is `i`.
-    pub fn to_instance_order<T: Clone>(&self, proof_data: &[T]) -> Vec<T> {
+    pub(crate) fn to_instance_order<T: Clone>(&self, proof_data: &[T]) -> Vec<T> {
         debug_assert_eq!(proof_data.len(), self.len());
         let n = self.len();
         let mut out: Vec<Option<T>> = (0..n).map(|_| None).collect();

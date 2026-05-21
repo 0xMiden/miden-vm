@@ -23,8 +23,8 @@ use serde::{Deserialize, Serialize};
 use crate::{
     StarkConfig,
     domain::{Coset, LiftedDomain, log_quotient_degree},
-    instance::TraceOrder,
     lmcs::Lmcs,
+    order::TraceOrder,
     pcs::proof::PcsTranscript,
     setup::validate_compatible,
     util::align::aligned_len,
@@ -39,12 +39,12 @@ type Commitment<F, EF, SC> = <<SC as StarkConfig<F, EF>>::Lmcs as Lmcs>::Commitm
 ///
 /// The proof's AIR ordering — used internally by the prover and verifier to
 /// fold multi-AIR constraints — is *not* stored. Both sides reconstruct it
-/// deterministically from the heights via [`TraceOrder`], so the proof
-/// commits to heights only.
+/// deterministically from the heights via the internal trace-order helper,
+/// so the proof commits to heights only.
 ///
 /// The heights themselves are not exposed as a direct accessor: parse the
-/// proof through [`StarkTranscript::from_proof`] to read them as part of a
-/// validated `TraceOrder`.
+/// proof through [`StarkTranscript::from_proof`] and read them via
+/// [`StarkTranscript::log_trace_heights`].
 // Bounds target `Commitment` directly; `SC` itself isn't `Serialize`/`Debug`.
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(bound(serialize = "TranscriptData<F, Commitment<F, EF, SC>>: Serialize"))]
@@ -131,7 +131,7 @@ where
 
 /// Structured transcript view for the full lifted STARK protocol.
 ///
-/// Captures the reconstructed [`TraceOrder`], commitments, sampled challenges,
+/// Captures the reconstructed AIR ordering, commitments, sampled challenges,
 /// the OOD evaluation point, and the PCS sub-transcript. Constructed via
 /// [`from_proof`](Self::from_proof), which mirrors steps 0–9 of
 /// [`verify`](crate::verifier::verify) but skips the constraint check.
@@ -143,8 +143,10 @@ where
 {
     /// AIR ordering reconstructed from the proof's log trace heights.
     /// Validated and observed into the challenger by
-    /// [`from_proof`](Self::from_proof).
-    pub trace_order: TraceOrder,
+    /// [`from_proof`](Self::from_proof). Read its data through
+    /// [`log_trace_heights`](Self::log_trace_heights) and
+    /// [`air_order`](Self::air_order).
+    pub(crate) trace_order: TraceOrder,
     /// Throwaway challenge squeezed right after observing the instance metadata,
     /// used to clear the challenger's absorb buffer so that later sampled
     /// challenges depend on the full shape metadata regardless of sponge state.
@@ -175,10 +177,22 @@ where
     L::F: TwoAdicField,
     EF: ExtensionField<L::F>,
 {
+    /// Per-AIR log₂ trace heights in instance order (matches
+    /// [`Statement::airs`] position-for-position).
+    pub fn log_trace_heights(&self) -> &[u8] {
+        self.trace_order.log_heights_instance()
+    }
+
+    /// The proof's AIR ordering: position `j` holds the instance index of the
+    /// AIR at proof position `j`. Derived deterministically from the heights.
+    pub fn air_order(&self) -> Vec<u8> {
+        self.trace_order.instance_indices().to_vec()
+    }
+
     /// Parse a STARK transcript from proof data and a challenger.
     ///
     /// Mirrors steps 0–9 of [`verify`](crate::verifier::verify):
-    /// 0. Reconstruct the [`TraceOrder`] from the proof's log trace heights, validate per-AIR
+    /// 0. Reconstruct the AIR ordering from the proof's log trace heights, validate per-AIR
     ///    contracts via [`validate_log_heights`], absorb the caller-supplied statement via
     ///    [`Statement::observe`] (which itself absorbs the heights), then squeeze a throwaway
     ///    `instance_challenge` to clear the absorb buffer

@@ -26,8 +26,8 @@
 //! Checked by [`miden_lifted_air::validate_inputs`] /
 //! [`miden_lifted_air::validate_log_heights`] /
 //! [`miden_lifted_air::validate_prover_traces`] plus
-//! [`setup::validate_compatible`] plus
-//! [`instance::TraceOrder::from_log_heights`], all run before any
+//! [`setup::validate_compatible`] plus the internal trace-order
+//! reconstruction from the proof's log heights, all run before any
 //! cryptographic work begins:
 //!
 //! - **Shape well-formedness** — non-empty, ≤ 256 instances, each log trace height within the
@@ -66,8 +66,8 @@ extern crate alloc;
 mod config;
 pub mod debug;
 pub mod domain;
-pub mod instance;
 pub mod lmcs;
+mod order;
 mod pcs;
 pub mod proof;
 pub mod prover;
@@ -82,7 +82,6 @@ pub use domain::{
     Coset, DomainError, EvaluationDomain, LiftedDomain, TwoAdicCoset, TwoAdicSubgroup,
     log_quotient_degree,
 };
-pub use instance::{ShapeError, TraceOrder};
 pub use lmcs::{
     Lmcs, LmcsError, LmcsTree, OpenedRows,
     config::LmcsConfig,
@@ -101,6 +100,7 @@ pub use miden_lifted_air::{
     InstanceError, MultiAir, ProverStatement, ReductionError, Statement, log2_ceil_u8,
     log2_strict_u8, validate_inputs, validate_log_heights, validate_prover_traces,
 };
+pub use order::ShapeError;
 pub use pcs::{
     deep::{
         proof::{DeepTranscript, OpenedValues as PcsOpenedValues},
@@ -156,8 +156,6 @@ pub mod air {
         log2_strict_u8,
         validate,
     };
-
-    pub use crate::instance::TraceOrder;
 
     /// Symbolic constraint analysis types from upstream p3-air.
     pub mod symbolic {

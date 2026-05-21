@@ -7,9 +7,9 @@ use p3_field::PrimeCharacteristicRing;
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
 use crate::{
-    DomainError, InstanceError, MultiAir, ProverStatement, ShapeError, Statement, TraceOrder,
-    VerifierError,
+    DomainError, InstanceError, MultiAir, ProverStatement, ShapeError, Statement, VerifierError,
     air::{AirBuilder, BaseAir, ExtensionBuilder, LiftedAir, LiftedAirBuilder, WindowAccess},
+    order::TraceOrder,
     prove,
     testing::configs::goldilocks_poseidon2::{
         Felt, QuadFelt, generate_pow4_trace, prove_and_verify, test_challenger, test_config,
