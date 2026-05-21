@@ -8,3 +8,37 @@
 #![allow(dead_code, unused_imports)]
 
 pub mod precompile;
+
+use miden_core::deferred::{DeferredState, Node, Payload, PrecompileRegistry, Tag};
+
+/// Defense-in-depth round-trip for the `precompile_*` suites.
+///
+/// Drives the realistic precompile lifecycle — register `predicate`, evaluate it (it must reduce
+/// to the TRUE sentinel), and log it as a transcript step — then [`assert_round_trips`] that the
+/// accumulated state survives `to_wire` + `rehydrate`. `rehydrate` re-evaluates the predicate
+/// through the precompile's own `reduce`, so any reduce/intern logic that yields a
+/// non-round-trippable transcript fails loudly here rather than silently shipping a broken witness.
+pub fn log_and_verify(schema: &PrecompileRegistry, state: &mut DeferredState, predicate: Node) {
+    let stmt_digest = state.register(schema, predicate.clone()).unwrap();
+    assert!(
+        state.evaluate(schema, predicate).unwrap().is_true_node(),
+        "log_and_verify expects a predicate that reduces to the TRUE node",
+    );
+    let new_root = Node::expression(Tag::TRUE, Payload::join(state.root(), stmt_digest)).digest();
+    state.log(stmt_digest, new_root).unwrap();
+    assert_round_trips(state, schema);
+}
+
+/// Assert that `state` survives a `to_wire` → `rehydrate` round-trip: the root matches and every
+/// reproduced node agrees with the source. `rehydrate` already rejects danglers and re-evaluates
+/// each predicate, so a dropped reachable node fails inside it before we compare. (Duplicated as
+/// `assert_round_trips` in `core/src/deferred/state.rs`'s unit tests — the round-trip check is a
+/// test concern, deliberately kept out of `DeferredState`'s public API.)
+pub fn assert_round_trips(state: &DeferredState, schema: &PrecompileRegistry) {
+    let rehydrated = DeferredState::rehydrate(&state.to_wire(), schema).unwrap();
+    assert_eq!(rehydrated.root(), state.root());
+    assert!(
+        rehydrated.nodes().iter().all(|(d, n)| state.nodes().get(d) == Some(n)),
+        "wire round-trip changed a reachable node",
+    );
+}

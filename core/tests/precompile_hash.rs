@@ -43,6 +43,10 @@ fn preimage_reduces_to_known_digest_and_eq_predicate_passes() {
     // eq predicate ties the preimage's hash to the pre-registered expected digest.
     let result = state.evaluate(&schema, Hash::eq_node(h_preimage, h_expected)).unwrap();
     assert!(result.is_true_node());
+
+    // Defense-in-depth: log the proven equality and round-trip the transcript (chunk-bodied
+    // preimage included).
+    common::log_and_verify(&schema, &mut state, Hash::eq_node(h_preimage, h_expected));
 }
 
 #[test]

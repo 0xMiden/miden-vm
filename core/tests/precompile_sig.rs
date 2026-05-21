@@ -31,6 +31,9 @@ fn verify_passes_in_multi_precompile_schema() {
     let node = Sig::verify_node(three_chunks(Felt::from_u32(7)));
     let result = state.evaluate(&schema, node).unwrap();
     assert!(result.is_true_node());
+
+    // Defense-in-depth: log the proven signature predicate and round-trip the transcript.
+    common::log_and_verify(&schema, &mut state, Sig::verify_node(three_chunks(Felt::from_u32(7))));
 }
 
 #[test]

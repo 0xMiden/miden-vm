@@ -860,6 +860,20 @@ mod tests {
     // REHYDRATE TESTS
     // ============================================================================================
 
+    /// Assert that `state` survives a `to_wire` → `rehydrate` round-trip: the root matches and
+    /// every reproduced node agrees with the source. `rehydrate` already rejects danglers and
+    /// re-evaluates each predicate, so a dropped reachable node fails inside it before we compare.
+    /// (Duplicated as `common::assert_round_trips` in the precompile integration suites — the
+    /// round-trip check is a test concern, deliberately kept out of `DeferredState`'s public API.)
+    fn assert_round_trips(state: &DeferredState, precompiles: &PrecompileRegistry) {
+        let rehydrated = DeferredState::rehydrate(&state.to_wire(), precompiles).unwrap();
+        assert_eq!(rehydrated.root(), state.root());
+        assert!(
+            rehydrated.nodes().iter().all(|(d, n)| state.nodes().get(d) == Some(n)),
+            "wire round-trip changed a reachable node",
+        );
+    }
+
     /// Build a fresh state that logs `(a+b)*c == 35` as a transcript step. Returns the populated
     /// state for round-trip tests.
     fn built_state_with_logged_predicate() -> DeferredState {
@@ -883,6 +897,9 @@ mod tests {
         let new_root =
             Node::expression(Tag::TRUE, Payload::join(state.root(), stmt_digest)).digest();
         state.log(stmt_digest, new_root).unwrap();
+        // Defense-in-depth: every fixture consumer inherits a wire round-trip self-check, so any
+        // future change that breaks `to_wire`/`rehydrate` consistency fails loudly here.
+        assert_round_trips(&state, &precompiles());
         state
     }
 
@@ -948,6 +965,8 @@ mod tests {
         let new_root =
             Node::expression(Tag::TRUE, Payload::join(state.root(), stmt_digest)).digest();
         state.log(stmt_digest, new_root).unwrap();
+        // Defense-in-depth: orphan-trimmed wire must still round-trip cleanly.
+        assert_round_trips(&state, &schema);
 
         let wire = state.to_wire();
         // Rehydrate and read back the digest set — the wire's bytes don't carry digests, but
