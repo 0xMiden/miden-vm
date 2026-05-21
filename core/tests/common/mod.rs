@@ -5,7 +5,18 @@
 //! `core/tests/precompile_*.rs` test pulls in via `mod common;`.
 #![allow(dead_code, unused_imports)]
 
-use miden_core::deferred::{DeferredState, Node, Payload, PrecompileRegistry, Tag};
+use miden_core::{
+    deferred::{DeferredState, Node, Payload, PrecompileRegistry, Tag},
+    testing::precompile::Uint,
+};
+
+/// A `Uint` value leaf carrying `low` in its bottom two 32-bit limbs.
+pub fn leaf(low: u64) -> Node {
+    let mut limbs = [0u32; 8];
+    limbs[0] = low as u32;
+    limbs[1] = (low >> 32) as u32;
+    Uint::leaf_node(limbs)
+}
 
 /// Round-trip helper for the `precompile_*` suites.
 ///
