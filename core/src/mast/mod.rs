@@ -109,6 +109,9 @@ pub use node_fingerprint::{DecoratorFingerprint, MastNodeFingerprint};
 mod node_builder_utils;
 pub use node_builder_utils::build_node_with_remapped_ids;
 
+mod sparse;
+pub use sparse::{MastForestId, SparseMastForest, SparseMastForestBuilder, VisitKind};
+
 #[cfg(test)]
 mod tests;
 
@@ -997,6 +1000,206 @@ impl IndexMut<DecoratorId> for MastForest {
     #[inline(always)]
     fn index_mut(&mut self, decorator_id: DecoratorId) -> &mut Self::Output {
         self.debug_info.decorator_mut(decorator_id).expect("DecoratorId out of bounds")
+    }
+}
+
+// EXECUTABLE MAST FOREST
+// ================================================================================================
+
+/// A MAST forest that can be used as the source of nodes during program execution.
+///
+/// Implemented by both [`MastForest`] (a dense forest containing all nodes) and
+/// [`SparseMastForest`] (a sparse subset of a forest containing only the nodes visited during
+/// some prior execution). The latter preserves the original [`MastNodeId`]s of its source forest,
+/// which allows it to stand in for the dense forest during re-execution.
+pub trait ExecutableMastForest: Index<DecoratorId, Output = Decorator> {
+    /// Returns the [`MastNode`] associated with the provided [`MastNodeId`] if present, or else
+    /// `None`.
+    fn get_node_by_id(&self, node_id: MastNodeId) -> Option<&MastNode>;
+
+    /// Returns the digest of the node associated with the provided [`MastNodeId`] if present, or
+    /// else `None`.
+    ///
+    /// For dense forests this is equivalent to `get_node_by_id(id).map(|n| n.digest())`. For
+    /// [`SparseMastForest`], it additionally consults the digest-only entries — nodes that were
+    /// referenced (but not entered) during execution and which were therefore stored as digest
+    /// only. Use this method whenever only the digest of a referenced node is needed (e.g. when
+    /// populating the hasher state of a parent's trace row).
+    fn get_digest_by_id(&self, node_id: MastNodeId) -> Option<Word>;
+
+    /// Returns the [`MastNodeId`] of the procedure associated with a given digest, if any.
+    fn find_procedure_root(&self, digest: Word) -> Option<MastNodeId>;
+
+    /// Returns the [`Decorator`] associated with the provided [`DecoratorId`] if present, or else
+    /// `None`.
+    fn decorator_by_id(&self, decorator_id: DecoratorId) -> Option<&Decorator>;
+
+    /// Returns the advice map associated with this forest.
+    fn advice_map(&self) -> &AdviceMap;
+
+    /// Returns the decorators that should be executed before entering the node with the provided
+    /// id, looked up via the forest's debug info (used for nodes whose decorator store is in the
+    /// `Linked` form).
+    fn linked_before_enter_decorators(&self, node_id: MastNodeId) -> &[DecoratorId];
+
+    /// Returns the decorators that should be executed after exiting the node with the provided
+    /// id, looked up via the forest's debug info (used for nodes whose decorator store is in the
+    /// `Linked` form).
+    fn linked_after_exit_decorators(&self, node_id: MastNodeId) -> &[DecoratorId];
+
+    /// Returns decorator indices for a specific operation within a basic block node.
+    fn decorator_indices_for_op(&self, node_id: MastNodeId, local_op_idx: usize) -> &[DecoratorId];
+
+    /// Returns the [`AssemblyOp`] associated with a node (and optionally an operation index inside
+    /// a basic block), if any.
+    ///
+    /// This is used by the error-reporting machinery to produce source locations.
+    fn get_assembly_op(
+        &self,
+        node_id: MastNodeId,
+        target_op_idx: Option<usize>,
+    ) -> Option<&AssemblyOp>;
+
+    /// Resolves an error code to its corresponding error message, if any.
+    fn resolve_error_message(&self, code: Felt) -> Option<Arc<str>>;
+}
+
+impl ExecutableMastForest for MastForest {
+    #[inline(always)]
+    fn get_node_by_id(&self, node_id: MastNodeId) -> Option<&MastNode> {
+        MastForest::get_node_by_id(self, node_id)
+    }
+
+    #[inline(always)]
+    fn get_digest_by_id(&self, node_id: MastNodeId) -> Option<Word> {
+        MastForest::get_node_by_id(self, node_id).map(MastNodeExt::digest)
+    }
+
+    #[inline(always)]
+    fn find_procedure_root(&self, digest: Word) -> Option<MastNodeId> {
+        MastForest::find_procedure_root(self, digest)
+    }
+
+    #[inline(always)]
+    fn decorator_by_id(&self, decorator_id: DecoratorId) -> Option<&Decorator> {
+        MastForest::decorator_by_id(self, decorator_id)
+    }
+
+    #[inline(always)]
+    fn advice_map(&self) -> &AdviceMap {
+        MastForest::advice_map(self)
+    }
+
+    #[inline(always)]
+    fn linked_before_enter_decorators(&self, node_id: MastNodeId) -> &[DecoratorId] {
+        MastForest::before_enter_decorators(self, node_id)
+    }
+
+    #[inline(always)]
+    fn linked_after_exit_decorators(&self, node_id: MastNodeId) -> &[DecoratorId] {
+        MastForest::after_exit_decorators(self, node_id)
+    }
+
+    #[inline(always)]
+    fn decorator_indices_for_op(&self, node_id: MastNodeId, local_op_idx: usize) -> &[DecoratorId] {
+        MastForest::decorator_indices_for_op(self, node_id, local_op_idx)
+    }
+
+    #[inline(always)]
+    fn get_assembly_op(
+        &self,
+        node_id: MastNodeId,
+        target_op_idx: Option<usize>,
+    ) -> Option<&AssemblyOp> {
+        MastForest::get_assembly_op(self, node_id, target_op_idx)
+    }
+
+    #[inline(always)]
+    fn resolve_error_message(&self, code: Felt) -> Option<Arc<str>> {
+        MastForest::resolve_error_message(self, code)
+    }
+}
+
+// Blanket impl: an `Arc<T>` is an `ExecutableMastForest` whenever the underlying `T` is, which
+// allows the executor and tracer plumbing to be generic over a forest type while the live
+// (`Arc<MastForest>`) and replay (`Arc<SparseMastForest>`) paths each pick a concrete instance.
+impl<T> Index<MastNodeId> for Arc<T>
+where
+    T: Index<MastNodeId, Output = MastNode> + ?Sized,
+{
+    type Output = MastNode;
+
+    #[inline(always)]
+    fn index(&self, node_id: MastNodeId) -> &Self::Output {
+        &(**self)[node_id]
+    }
+}
+
+impl<T> Index<DecoratorId> for Arc<T>
+where
+    T: Index<DecoratorId, Output = Decorator> + ?Sized,
+{
+    type Output = Decorator;
+
+    #[inline(always)]
+    fn index(&self, decorator_id: DecoratorId) -> &Self::Output {
+        &(**self)[decorator_id]
+    }
+}
+
+impl<T: ExecutableMastForest + ?Sized> ExecutableMastForest for Arc<T> {
+    #[inline(always)]
+    fn get_node_by_id(&self, node_id: MastNodeId) -> Option<&MastNode> {
+        T::get_node_by_id(self, node_id)
+    }
+
+    #[inline(always)]
+    fn get_digest_by_id(&self, node_id: MastNodeId) -> Option<Word> {
+        T::get_digest_by_id(self, node_id)
+    }
+
+    #[inline(always)]
+    fn find_procedure_root(&self, digest: Word) -> Option<MastNodeId> {
+        T::find_procedure_root(self, digest)
+    }
+
+    #[inline(always)]
+    fn decorator_by_id(&self, decorator_id: DecoratorId) -> Option<&Decorator> {
+        T::decorator_by_id(self, decorator_id)
+    }
+
+    #[inline(always)]
+    fn advice_map(&self) -> &AdviceMap {
+        T::advice_map(self)
+    }
+
+    #[inline(always)]
+    fn linked_before_enter_decorators(&self, node_id: MastNodeId) -> &[DecoratorId] {
+        T::linked_before_enter_decorators(self, node_id)
+    }
+
+    #[inline(always)]
+    fn linked_after_exit_decorators(&self, node_id: MastNodeId) -> &[DecoratorId] {
+        T::linked_after_exit_decorators(self, node_id)
+    }
+
+    #[inline(always)]
+    fn decorator_indices_for_op(&self, node_id: MastNodeId, local_op_idx: usize) -> &[DecoratorId] {
+        T::decorator_indices_for_op(self, node_id, local_op_idx)
+    }
+
+    #[inline(always)]
+    fn get_assembly_op(
+        &self,
+        node_id: MastNodeId,
+        target_op_idx: Option<usize>,
+    ) -> Option<&AssemblyOp> {
+        T::get_assembly_op(self, node_id, target_op_idx)
+    }
+
+    #[inline(always)]
+    fn resolve_error_message(&self, code: Felt) -> Option<Arc<str>> {
+        T::resolve_error_message(self, code)
     }
 }
 

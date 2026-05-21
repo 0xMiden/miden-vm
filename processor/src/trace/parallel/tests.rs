@@ -15,8 +15,8 @@ use miden_core::{
     field::QuadFelt,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, DynNodeBuilder, ExternalNodeBuilder,
-        JoinNodeBuilder, LoopNodeBuilder, MastForest, MastForestContributor, MastNodeExt,
-        SplitNodeBuilder,
+        JoinNodeBuilder, LoopNodeBuilder, MastForest, MastForestContributor, MastForestId,
+        MastNodeExt, MastNodeId, SplitNodeBuilder,
     },
     operations::{Operation, opcodes},
     precompile::PrecompileRequest,
@@ -990,23 +990,109 @@ fn test_build_trace_returns_err_on_bad_node_id_in_hasher_replay() {
     let mut host = DefaultHost::default();
     let mut trace_inputs = processor.execute_trace_inputs_sync(&program, &mut host).unwrap();
 
-    // Inject a HashBasicBlock entry with a node ID that points to a non-existent node in an empty
-    // forest.
-    let empty_forest = Arc::new(MastForest::new());
-    // Build a small forest just to get a valid MastNodeId, then pair it with the empty forest.
-    let mut temp_forest = MastForest::new();
-    let valid_id = BasicBlockNodeBuilder::new(vec![Operation::Noop], Vec::new())
-        .add_to_forest(&mut temp_forest)
-        .unwrap();
+    // Inject a HashBasicBlock entry that references the executed program's forest (id 0 in the
+    // store, which the tracer always populates with the entrypoint's forest) with a node ID that
+    // is well past any node actually in the sparse forest.
+    let bogus_node_id = MastNodeId::new_unchecked(u32::MAX);
+    let forest_id = MastForestId::from(0u32);
     trace_inputs
         .trace_generation_context_mut()
         .hasher_for_chiplet
-        .record_hash_basic_block(empty_forest, valid_id, [ZERO; 4].into());
+        .record_hash_basic_block(forest_id, bogus_node_id, [ZERO; 4].into());
 
     let result = build_trace(trace_inputs);
     assert!(
         result.is_err(),
         "build_trace should return Err when hasher replay has bad node ID"
+    );
+}
+
+/// Where to tamper with a [`miden_core::mast::MastForestId`] in a [`TraceBuildInputs`].
+#[derive(Debug, Clone, Copy)]
+enum BadForestIdLocation {
+    /// Replace the first fragment's `initial_mast_forest_id`.
+    InitialForestId,
+    /// Replace the forest id of the first entry in the first fragment's `mast_forest_resolution`
+    /// replay (DYN/External resolution path).
+    ResolutionReplay,
+}
+
+/// Verifies that `build_trace` returns `Err` (instead of panicking) when a fragment carries a
+/// [`miden_core::mast::MastForestId`] that does not exist in `mast_forest_store`.
+///
+/// `CoreTraceFragmentContext` can come from outside this process (e.g. when serialized and
+/// rebuilt), and so its [`miden_core::mast::MastForestId`]s must be treated as
+/// untrusted/attacker-controlled. Both the up-front ids (`initial_mast_forest_id`, continuation
+/// stack) and the per-resolution ids in `mast_forest_resolution` (the DYN/External path that is
+/// most likely to be hit when libraries are involved) must be validated rather than indexed
+/// into, and the error must propagate up through `build_trace`.
+#[rstest]
+#[case::initial_forest_id(
+    basic_block_program_small(),
+    DEFAULT_STACK,
+    false,
+    BadForestIdLocation::InitialForestId
+)]
+#[case::dyn_resolution(
+    dyn_program(),
+    external_lib_proc_hash_for_stack(),
+    true,
+    BadForestIdLocation::ResolutionReplay
+)]
+#[case::external_resolution(
+    external_program(),
+    DEFAULT_STACK,
+    true,
+    BadForestIdLocation::ResolutionReplay
+)]
+fn test_build_trace_returns_err_on_invalid_mast_forest_id(
+    #[case] program: Program,
+    #[case] stack_inputs: &[Felt],
+    #[case] load_library: bool,
+    #[case] tamper_at: BadForestIdLocation,
+) {
+    const MAX_FRAGMENT_SIZE: usize = 1 << 20;
+
+    let processor = FastProcessor::new_with_options(
+        StackInputs::new(stack_inputs).unwrap(),
+        AdviceInputs::default(),
+        ExecutionOptions::default()
+            .with_core_trace_fragment_size(MAX_FRAGMENT_SIZE)
+            .unwrap(),
+    )
+    .expect("processor advice inputs should fit advice map limits");
+    let mut host = DefaultHost::default();
+    if load_library {
+        host.load_library(create_simple_library()).unwrap();
+    }
+    let mut trace_inputs = processor.execute_trace_inputs_sync(&program, &mut host).unwrap();
+
+    let store_len = trace_inputs.trace_generation_context().mast_forest_store.len();
+    let bogus_forest_id = MastForestId::from(store_len as u32);
+    let ctx = &mut trace_inputs.trace_generation_context_mut().core_trace_contexts[0];
+    match tamper_at {
+        BadForestIdLocation::InitialForestId => {
+            ctx.initial_mast_forest_id = bogus_forest_id;
+        },
+        BadForestIdLocation::ResolutionReplay => {
+            let resolution = &mut ctx.replay.mast_forest_resolution;
+            let mut entries = Vec::new();
+            while let Ok(entry) = resolution.replay_resolution() {
+                entries.push(entry);
+            }
+            assert!(!entries.is_empty(), "expected at least one resolution to tamper with");
+            entries[0].1 = bogus_forest_id;
+            for (node_id, forest_id) in entries {
+                resolution.record_resolution(node_id, forest_id);
+            }
+        },
+    }
+
+    let result = build_trace(trace_inputs);
+    assert!(
+        result.is_err(),
+        "build_trace should return Err when a fragment carries a MastForestId out of range of \
+         the mast_forest_store"
     );
 }
 
