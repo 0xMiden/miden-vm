@@ -71,6 +71,9 @@ pub mod program;
 pub mod proof;
 pub mod utils;
 
+#[cfg(any(test, feature = "testing"))]
+pub mod testing;
+
 pub mod field {
     pub use miden_crypto::field::*;
 

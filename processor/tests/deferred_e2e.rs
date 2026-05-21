@@ -8,11 +8,8 @@ use std::sync::Arc;
 
 use miden_assembly::Assembler;
 use miden_core::{
-    ZERO,
-    deferred::{
-        Node, NodeType, Payload, Precompile, PrecompileError, TRUE_DIGEST, Tag, WitnessBuilder,
-        precompile_id,
-    },
+    deferred::{Node, Payload, TRUE_DIGEST, Tag},
+    testing::precompile::{Hash, Uint},
 };
 use miden_processor::{
     DefaultHost, ExecutionOptions, FastProcessor, Felt, ProcessorState, StackInputs,
@@ -25,8 +22,8 @@ extern crate alloc;
 // PROCESSOR FACTORY
 // ================================================================================================
 
-/// Builds a `FastProcessor` configured for the deferred-DAG tests with [`ArithTestPrecompile`]
-/// installed. The processor consumes itself when running the program.
+/// Builds a `FastProcessor` configured for the deferred-DAG tests with [`Uint`] installed. The
+/// processor consumes itself when running the program.
 fn build_processor() -> FastProcessor {
     FastProcessor::new_with_options(
         StackInputs::default(),
@@ -34,7 +31,7 @@ fn build_processor() -> FastProcessor {
         ExecutionOptions::default(),
     )
     .expect("processor construction")
-    .with_precompile(ArithTestPrecompile)
+    .with_precompile(Uint)
 }
 
 // MASM BUILDERS
@@ -102,159 +99,11 @@ impl FeltExt for Felt {
     }
 }
 
-// ARITH TEST PRECOMPILE
-// ================================================================================================
-//
-// In-file fixture precompile for the processor sys-event tests: an 8×u32 little-endian value
-// leaf plus `add` / `mul` wrapping binary ops and an `eq` predicate. Self-contained (mirrors the
-// `ChunkTestPrecompile` idiom) so the processor crate's tests need no reference impl from
-// `miden-core`'s surface.
-
-#[derive(Debug, Default, Clone, Copy)]
-struct ArithTestPrecompile;
-
-impl ArithTestPrecompile {
-    const NAME: &'static str = "arith_test";
-    const D_LEAF: Felt = Felt::new_unchecked(0);
-    const D_ADD: Felt = Felt::new_unchecked(1);
-    const D_MUL: Felt = Felt::new_unchecked(2);
-    const D_EQ: Felt = Felt::new_unchecked(3);
-
-    fn id() -> Felt {
-        precompile_id(&ArithTestPrecompile)
-    }
-
-    fn leaf_tag() -> Tag {
-        Tag {
-            id: Self::id(),
-            args: [Self::D_LEAF, ZERO, ZERO],
-        }
-    }
-    fn add_tag() -> Tag {
-        Tag {
-            id: Self::id(),
-            args: [Self::D_ADD, ZERO, ZERO],
-        }
-    }
-    fn mul_tag() -> Tag {
-        Tag {
-            id: Self::id(),
-            args: [Self::D_MUL, ZERO, ZERO],
-        }
-    }
-    fn eq_tag() -> Tag {
-        Tag {
-            id: Self::id(),
-            args: [Self::D_EQ, ZERO, ZERO],
-        }
-    }
-
-    fn leaf_node(limbs: [u32; 8]) -> Node {
-        Node::leaf(Self::leaf_tag(), limbs.map(Felt::from_u32))
-    }
-
-    fn decode_limbs(felts: &[Felt; 8]) -> Result<[u32; 8], PrecompileError> {
-        let mut limbs = [0u32; 8];
-        for (i, felt) in felts.iter().enumerate() {
-            let v = felt.as_canonical_u64();
-            if v > u32::MAX as u64 {
-                return Err(PrecompileError::InvalidNode);
-            }
-            limbs[i] = v as u32;
-        }
-        Ok(limbs)
-    }
-
-    fn limbs_of(node: &Node) -> Result<[u32; 8], PrecompileError> {
-        if node.tag != Self::leaf_tag() {
-            return Err(PrecompileError::InvalidNode);
-        }
-        Self::decode_limbs(node.payload.as_felts()?)
-    }
-
-    fn wrap_add(a: [u32; 8], b: [u32; 8]) -> [u32; 8] {
-        let mut out = [0u32; 8];
-        let mut carry: u64 = 0;
-        for i in 0..8 {
-            let s = a[i] as u64 + b[i] as u64 + carry;
-            out[i] = s as u32;
-            carry = s >> 32;
-        }
-        out
-    }
-
-    fn wrap_mul(a: [u32; 8], b: [u32; 8]) -> [u32; 8] {
-        let mut out = [0u32; 8];
-        for i in 0..8 {
-            let mut carry: u64 = 0;
-            for j in 0..(8 - i) {
-                let cur = out[i + j] as u64 + a[i] as u64 * b[j] as u64 + carry;
-                out[i + j] = cur as u32;
-                carry = cur >> 32;
-            }
-        }
-        out
-    }
-}
-
-impl Precompile for ArithTestPrecompile {
-    fn name(&self) -> &'static str {
-        Self::NAME
-    }
-
-    fn id(&self) -> Felt {
-        Self::id()
-    }
-
-    fn decode(&self, args: [Felt; 3]) -> Option<NodeType> {
-        match args[0] {
-            d if d == Self::D_LEAF => Some(NodeType::Value),
-            d if d == Self::D_ADD || d == Self::D_MUL => Some(NodeType::Join),
-            d if d == Self::D_EQ => Some(NodeType::Join),
-            _ => None,
-        }
-    }
-
-    fn reduce(
-        &self,
-        args: [Felt; 3],
-        payload: &Payload,
-        witness: &mut WitnessBuilder<'_>,
-    ) -> Result<Node, PrecompileError> {
-        match args[0] {
-            d if d == Self::D_LEAF => {
-                let felts = payload.as_felts()?;
-                Self::decode_limbs(felts)?;
-                Ok(Node::leaf(Tag::new(Self::id(), args), *felts))
-            },
-            d if d == Self::D_ADD || d == Self::D_MUL => {
-                let (lhs, rhs) = payload.join_children()?;
-                let a = Self::limbs_of(&witness.resolve(lhs)?)?;
-                let b = Self::limbs_of(&witness.resolve(rhs)?)?;
-                let out = if d == Self::D_ADD {
-                    Self::wrap_add(a, b)
-                } else {
-                    Self::wrap_mul(a, b)
-                };
-                Ok(Self::leaf_node(out))
-            },
-            d if d == Self::D_EQ => {
-                let (lhs, rhs) = payload.join_children()?;
-                if witness.resolve(lhs)? != witness.resolve(rhs)? {
-                    return Err(PrecompileError::AssertionFailed);
-                }
-                Ok(Node::TRUE)
-            },
-            _ => Err(PrecompileError::InvalidNode),
-        }
-    }
-}
-
 fn arith_leaf(low: u64) -> Node {
     let mut limbs = [0u32; 8];
     limbs[0] = low as u32;
     limbs[1] = (low >> 32) as u32;
-    ArithTestPrecompile::leaf_node(limbs)
+    Uint::leaf_node(limbs)
 }
 
 // END-TO-END: (a + b) * c == 35  (with a=3, b=4, c=5)
@@ -272,13 +121,13 @@ fn deferred_end_to_end_register_eval_assert() {
     let b_digest = b.digest();
     let c_digest = c.digest();
     let d_digest = d.digest();
-    let add = Node::join(ArithTestPrecompile::add_tag(), a_digest, b_digest);
+    let add = Node::join(Uint::add_tag(), a_digest, b_digest);
     let add_digest = add.digest();
-    let mul = Node::join(ArithTestPrecompile::mul_tag(), add_digest, c_digest);
+    let mul = Node::join(Uint::mul_tag(), add_digest, c_digest);
     let mul_digest = mul.digest();
     // Predicate node: same shape as a binary op (expression body, two child digests), just with
     // ASSERT_EQ as the tag.
-    let assertion = Node::join(ArithTestPrecompile::eq_tag(), mul_digest, d_digest);
+    let assertion = Node::join(Uint::eq_tag(), mul_digest, d_digest);
 
     // Build the program: register every node, then evaluate the predicate to verify it.
     let mut src = String::from("begin\n");
@@ -330,7 +179,7 @@ fn deferred_evaluate_records_canonical_in_advice_map() {
     // digest, serialized as `tag || payload`.
     let a = arith_leaf(3);
     let b = arith_leaf(4);
-    let add = Node::join(ArithTestPrecompile::add_tag(), a.digest(), b.digest());
+    let add = Node::join(Uint::add_tag(), a.digest(), b.digest());
 
     let mut src = String::from("begin\n");
     emit_register(&mut src, a);
@@ -368,7 +217,7 @@ fn deferred_evaluate_records_true_node_for_predicate() {
     // verify successfully, and its canonical (the TRUE node) is recorded in the advice map under
     // the TRUE node's digest — uniform with every other node shape.
     let a = arith_leaf(7);
-    let a_eq_a = Node::join(ArithTestPrecompile::eq_tag(), a.digest(), a.digest());
+    let a_eq_a = Node::join(Uint::eq_tag(), a.digest(), a.digest());
 
     let mut src = String::from("begin\n");
     emit_register(&mut src, a);
@@ -402,7 +251,7 @@ fn deferred_evaluate_records_true_node_for_predicate() {
 fn deferred_register_predicate_does_not_verify() {
     let a = arith_leaf(7);
     let b = arith_leaf(8);
-    let mismatch = Node::join(ArithTestPrecompile::eq_tag(), a.digest(), b.digest());
+    let mismatch = Node::join(Uint::eq_tag(), a.digest(), b.digest());
 
     // Just register — execution must succeed because register is a pure host hint.
     let mut src = String::from("begin\n");
@@ -423,7 +272,7 @@ fn deferred_register_predicate_does_not_verify() {
 fn deferred_evaluate_predicate_mismatch_fails_execution() {
     let a = arith_leaf(7);
     let b = arith_leaf(8);
-    let mismatch = Node::join(ArithTestPrecompile::eq_tag(), a.digest(), b.digest());
+    let mismatch = Node::join(Uint::eq_tag(), a.digest(), b.digest());
 
     let mut src = String::from("begin\n");
     emit_register(&mut src, a);
@@ -481,7 +330,7 @@ fn deferred_evaluate_pushes_canonical_digest_to_operand() {
     // store it in memory to assert it equals digest(leaf 7).
     let a = arith_leaf(3);
     let b = arith_leaf(4);
-    let add = Node::join(ArithTestPrecompile::add_tag(), a.digest(), b.digest());
+    let add = Node::join(Uint::add_tag(), a.digest(), b.digest());
     let expected = arith_leaf(7).digest();
 
     let mut src = String::from("begin\n");
@@ -600,76 +449,12 @@ fn legacy_event_handler_still_works_with_deferred_infrastructure() {
 // CHUNK REGISTER E2E
 // ================================================================================================
 //
-// A minimal chunk-aware test precompile, mirroring
-// `core/tests/deferred_chunk.rs::ChunkTestPrecompile`: `decode` reads the role from `args[0]` and
-// (for chunks) `n` from `args[1]`; `reduce` for a chunk returns an expression digest-leaf via a
-// fake limb-sum hash.
+// Drives `adv.register_deferred_chunk` against the [`Hash`] chunk precompile.
 
-const PREIMAGE_ROLE: Felt = Felt::new_unchecked(0);
-const DIGEST_ROLE: Felt = Felt::new_unchecked(1);
-
-#[derive(Debug, Default, Clone, Copy)]
-struct ChunkTestPrecompile;
-
-impl ChunkTestPrecompile {
-    const NAME: &'static str = "chunk_test";
-
-    fn id() -> Felt {
-        precompile_id(&ChunkTestPrecompile)
-    }
-}
-
+/// Tag for an `n`-chunk `Hash` preimage. `Hash` derives the chunk count from a byte length, so a
+/// chunk count of `n` is requested as `n * BYTES_PER_CHUNK` bytes.
 fn preimage_tag(n: u32) -> Tag {
-    Tag {
-        id: ChunkTestPrecompile::id(),
-        args: [PREIMAGE_ROLE, Felt::from_u32(n), ZERO],
-    }
-}
-
-fn digest_tag() -> Tag {
-    Tag {
-        id: ChunkTestPrecompile::id(),
-        args: [DIGEST_ROLE, ZERO, ZERO],
-    }
-}
-
-impl Precompile for ChunkTestPrecompile {
-    fn name(&self) -> &'static str {
-        Self::NAME
-    }
-
-    fn id(&self) -> Felt {
-        Self::id()
-    }
-
-    fn decode(&self, args: [Felt; 3]) -> Option<NodeType> {
-        let [role, n, _] = args;
-        match role {
-            r if r == PREIMAGE_ROLE => Some(NodeType::Chunks(n.as_canonical_u64() as u32)),
-            r if r == DIGEST_ROLE && n == ZERO => Some(NodeType::Value),
-            _ => None,
-        }
-    }
-
-    fn reduce(
-        &self,
-        args: [Felt; 3],
-        payload: &Payload,
-        _witness: &mut WitnessBuilder<'_>,
-    ) -> Result<Node, PrecompileError> {
-        match payload {
-            Payload::Chunk(chunks) => {
-                let mut acc = [ZERO; 8];
-                for c in chunks.iter() {
-                    for (a, x) in acc.iter_mut().zip(c.iter()) {
-                        *a += *x;
-                    }
-                }
-                Ok(Node::leaf(digest_tag(), acc))
-            },
-            Payload::Expression(f) => Ok(Node::leaf(Tag::new(Self::id(), args), *f)),
-        }
-    }
+    Hash::preimage_tag(n * Hash::BYTES_PER_CHUNK)
 }
 
 fn build_chunk_processor() -> FastProcessor {
@@ -679,7 +464,7 @@ fn build_chunk_processor() -> FastProcessor {
         ExecutionOptions::default(),
     )
     .expect("processor construction")
-    .with_precompile(ChunkTestPrecompile)
+    .with_precompile(Hash)
 }
 
 #[test]

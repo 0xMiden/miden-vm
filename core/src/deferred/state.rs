@@ -586,18 +586,19 @@ mod tests {
     use super::*;
     use crate::{
         Felt, Word, ZERO,
-        deferred::{
-            Payload, PrecompileRegistry, TRUE_DIGEST, Tag, test_precompile::TestPrecompile,
-        },
+        deferred::{Payload, PrecompileRegistry, TRUE_DIGEST, Tag},
+        testing::precompile::Uint,
     };
 
     /// The single-precompile registry every engine test runs against.
     fn precompiles() -> PrecompileRegistry {
-        PrecompileRegistry::default().with_precompile(TestPrecompile)
+        PrecompileRegistry::default().with_precompile(Uint)
     }
 
     fn test_leaf(value: u32) -> Node {
-        TestPrecompile::leaf_node(Felt::from_u32(value))
+        let mut limbs = [0u32; 8];
+        limbs[0] = value;
+        Uint::leaf_node(limbs)
     }
 
     fn dummy_digest(seed: u64) -> Word {
@@ -617,12 +618,12 @@ mod tests {
         let mut state = DeferredState::new();
         let schema = precompiles();
         let a = state.register(&schema, test_leaf(7)).unwrap();
-        let pred = Node::join(TestPrecompile::eq_tag(), a, a);
+        let pred = Node::join(Uint::eq_tag(), a, a);
         let stmt = state.evaluate(&schema, pred).unwrap();
         // The canonical of an `eq` predicate is `Node::TRUE`. Use the predicate's *digest* —
         // which we recover from the original node — as `stmt_digest`.
         let _ = stmt; // canonical, discarded
-        let stmt_digest = Node::join(TestPrecompile::eq_tag(), a, a).digest();
+        let stmt_digest = Node::join(Uint::eq_tag(), a, a).digest();
 
         let expected = Node::and(TRUE_DIGEST, stmt_digest).digest();
         state.log(stmt_digest, expected).unwrap();
@@ -677,9 +678,9 @@ mod tests {
     fn register_with_unhandled_tag_errors() {
         let mut state = DeferredState::new();
         let schema = precompiles();
-        // TestPrecompile id + unknown discriminant: schema decode returns Err.
+        // Uint id + unknown discriminant: schema decode returns Err.
         let bad_tag = Tag {
-            id: TestPrecompile::id(),
+            id: Uint::id(),
             args: [Felt::from_u32(99), ZERO, ZERO],
         };
         let bad = Node::leaf(bad_tag, [Felt::from_u32(0); 8]);
@@ -693,7 +694,7 @@ mod tests {
         let schema = precompiles();
         let a = state.register(&schema, test_leaf(3)).unwrap();
         let b = state.register(&schema, test_leaf(4)).unwrap();
-        let op = Node::join(TestPrecompile::add_tag(), a, b);
+        let op = Node::join(Uint::add_tag(), a, b);
         let digest = state.register(&schema, op).unwrap();
         assert!(state.contains(&digest));
     }
@@ -708,7 +709,7 @@ mod tests {
         let a = state.register(&schema, test_leaf(3)).unwrap();
         let b = state.register(&schema, test_leaf(4)).unwrap();
         // A mismatched predicate — would fail if eagerly verified.
-        let bad = Node::join(TestPrecompile::eq_tag(), a, b);
+        let bad = Node::join(Uint::eq_tag(), a, b);
         let bad_digest = state.register(&schema, bad.clone()).unwrap();
         assert!(state.contains(&bad_digest), "predicate interned even when it doesn't hold");
         // Verification surfaces the mismatch only when explicitly invoked.
@@ -721,7 +722,7 @@ mod tests {
         let mut state = DeferredState::new();
         let schema = precompiles();
         let a = state.register(&schema, test_leaf(7)).unwrap();
-        let assertion = Node::join(TestPrecompile::eq_tag(), a, a);
+        let assertion = Node::join(Uint::eq_tag(), a, a);
         let result = state.evaluate(&schema, assertion).unwrap();
         assert!(result.is_true_node(), "predicate success returns the canonical TRUE node");
     }
@@ -732,7 +733,7 @@ mod tests {
         let schema = precompiles();
         let a = state.register(&schema, test_leaf(3)).unwrap();
         let b = state.register(&schema, test_leaf(4)).unwrap();
-        let mismatch = Node::join(TestPrecompile::eq_tag(), a, b);
+        let mismatch = Node::join(Uint::eq_tag(), a, b);
         let err = state.evaluate(&schema, mismatch);
         assert!(matches!(err.unwrap_err().root(), PrecompileError::AssertionFailed));
     }
@@ -743,7 +744,7 @@ mod tests {
         let schema = precompiles();
         let a = state.register(&schema, test_leaf(1)).unwrap();
         let dangling = Word::new([Felt::from_u32(0xdead); 4]);
-        let assertion = Node::join(TestPrecompile::eq_tag(), a, dangling);
+        let assertion = Node::join(Uint::eq_tag(), a, dangling);
         let err = state.evaluate(&schema, assertion);
         assert!(matches!(err.unwrap_err().root(), PrecompileError::MissingNode));
     }
@@ -757,9 +758,9 @@ mod tests {
         let b = state.register(&schema, test_leaf(4)).unwrap();
         let c = state.register(&schema, test_leaf(5)).unwrap();
         let expected = state.register(&schema, test_leaf(35)).unwrap();
-        let add = state.register(&schema, Node::join(TestPrecompile::add_tag(), a, b)).unwrap();
-        let mul = state.register(&schema, Node::join(TestPrecompile::mul_tag(), add, c)).unwrap();
-        let assertion = Node::join(TestPrecompile::eq_tag(), mul, expected);
+        let add = state.register(&schema, Node::join(Uint::add_tag(), a, b)).unwrap();
+        let mul = state.register(&schema, Node::join(Uint::mul_tag(), add, c)).unwrap();
+        let assertion = Node::join(Uint::eq_tag(), mul, expected);
         let result = state.evaluate(&schema, assertion).unwrap();
         assert!(result.is_true_node());
     }
@@ -775,9 +776,9 @@ mod tests {
         let c = state.register(&schema, test_leaf(5)).unwrap();
         let expected = state.register(&schema, test_leaf(35)).unwrap();
         let _orphan = state.register(&schema, test_leaf(99)).unwrap();
-        let add = state.register(&schema, Node::join(TestPrecompile::add_tag(), a, b)).unwrap();
-        let mul = state.register(&schema, Node::join(TestPrecompile::mul_tag(), add, c)).unwrap();
-        let assertion = Node::join(TestPrecompile::eq_tag(), mul, expected);
+        let add = state.register(&schema, Node::join(Uint::add_tag(), a, b)).unwrap();
+        let mul = state.register(&schema, Node::join(Uint::mul_tag(), add, c)).unwrap();
+        let assertion = Node::join(Uint::eq_tag(), mul, expected);
         let assertion_digest = assertion.digest();
         state.evaluate(&schema, assertion).unwrap();
 
@@ -799,9 +800,9 @@ mod tests {
         let a = state.register(&schema, test_leaf(3)).unwrap();
         let b = state.register(&schema, test_leaf(4)).unwrap();
         let c = state.register(&schema, test_leaf(5)).unwrap();
-        let add = Node::join(TestPrecompile::add_tag(), a, b);
+        let add = Node::join(Uint::add_tag(), a, b);
         let add_digest = state.register(&schema, add).unwrap();
-        let mul = Node::join(TestPrecompile::mul_tag(), add_digest, c);
+        let mul = Node::join(Uint::mul_tag(), add_digest, c);
         let mul_digest = mul.digest();
 
         let canonical = state.evaluate(&schema, mul).unwrap();
@@ -845,9 +846,9 @@ mod tests {
         let b = state.register(&schema, test_leaf(4)).unwrap();
         let c = state.register(&schema, test_leaf(5)).unwrap();
         let expected = state.register(&schema, test_leaf(35)).unwrap();
-        let add = state.register(&schema, Node::join(TestPrecompile::add_tag(), a, b)).unwrap();
-        let mul = state.register(&schema, Node::join(TestPrecompile::mul_tag(), add, c)).unwrap();
-        let assertion = Node::join(TestPrecompile::eq_tag(), mul, expected);
+        let add = state.register(&schema, Node::join(Uint::add_tag(), a, b)).unwrap();
+        let mul = state.register(&schema, Node::join(Uint::mul_tag(), add, c)).unwrap();
+        let assertion = Node::join(Uint::eq_tag(), mul, expected);
         // `log` references the predicate node by digest; pre-register so the wire embeds it as
         // a Join entry rather than a bare-commitment Value.
         let stmt_digest = state.register(&schema, assertion.clone()).unwrap();
@@ -883,7 +884,7 @@ mod tests {
         // < its own position 0 → BadIndex.
         let wire = DeferredStateWire {
             entries: alloc::vec![crate::deferred::WireEntry {
-                tag: TestPrecompile::add_tag(),
+                tag: Uint::add_tag(),
                 body: crate::deferred::WireBody::Join { lhs: 0, rhs: 0 },
             }],
         };
@@ -893,7 +894,7 @@ mod tests {
 
     #[test]
     fn rehydrate_rejects_unknown_tag() {
-        // A tag the schema rejects — its id doesn't match TestPrecompile.
+        // A tag the schema rejects — its id doesn't match Uint.
         let bogus_tag = Tag {
             id: Felt::new_unchecked(0xdead),
             args: [ZERO; 3],
@@ -916,7 +917,7 @@ mod tests {
         let schema = precompiles();
         let _orphan = state.register(&schema, test_leaf(99)).unwrap();
         let a = state.register(&schema, test_leaf(7)).unwrap();
-        let pred = Node::join(TestPrecompile::eq_tag(), a, a);
+        let pred = Node::join(Uint::eq_tag(), a, a);
         let stmt_digest = state.register(&schema, pred.clone()).unwrap();
         state.evaluate(&schema, pred).unwrap();
         let new_root = Node::and(state.root(), stmt_digest).digest();
@@ -959,7 +960,7 @@ mod tests {
         let b = state.register(&schema, test_leaf(4)).unwrap();
         // Hand-roll a chain that points to a failing predicate without going through `log`'s
         // schema gate (which evaluate-rejects ahead of time).
-        let bad_pred = Node::join(TestPrecompile::eq_tag(), a, b);
+        let bad_pred = Node::join(Uint::eq_tag(), a, b);
         let bad_digest = bad_pred.digest();
         state.intern(bad_pred);
         let and_node = Node::and(TRUE_DIGEST, bad_digest);
@@ -992,7 +993,7 @@ mod tests {
         //       doesn't appear in the entries)
         let a = test_leaf(7);
         let a_payload = *a.payload.as_felts().expect("leaf is expression-bodied");
-        let pred = Node::join(TestPrecompile::eq_tag(), a.digest(), a.digest());
+        let pred = Node::join(Uint::eq_tag(), a.digest(), a.digest());
         let pred_digest = pred.digest();
         let bogus_prev = dummy_digest(42);
         let and_payload = *Payload::join(bogus_prev, pred_digest)
@@ -1037,7 +1038,7 @@ mod tests {
         let a_payload = *a.payload.as_felts().expect("leaf is expression-bodied");
         let orphan = test_leaf(99);
         let orphan_payload = *orphan.payload.as_felts().expect("leaf is expression-bodied");
-        let pred = Node::join(TestPrecompile::eq_tag(), a.digest(), a.digest());
+        let pred = Node::join(Uint::eq_tag(), a.digest(), a.digest());
 
         let wire = DeferredStateWire {
             entries: alloc::vec![
