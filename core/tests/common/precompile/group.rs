@@ -65,19 +65,19 @@ impl Group {
 
     /// Build a `new` node referencing two field-leaf digests.
     pub fn new_node(h_x: Digest, h_y: Digest) -> Node {
-        Node::expression(Self::new_tag(), Payload::join(h_x, h_y))
+        Node::join(Self::new_tag(), h_x, h_y)
     }
     /// Build an `add` op node referencing two group-element digests.
     pub fn add_node(h_g1: Digest, h_g2: Digest) -> Node {
-        Node::expression(Self::add_tag(), Payload::join(h_g1, h_g2))
+        Node::join(Self::add_tag(), h_g1, h_g2)
     }
     /// Build a `sub` op node referencing two group-element digests.
     pub fn sub_node(h_g1: Digest, h_g2: Digest) -> Node {
-        Node::expression(Self::sub_tag(), Payload::join(h_g1, h_g2))
+        Node::join(Self::sub_tag(), h_g1, h_g2)
     }
     /// Build an `eq` predicate referencing two group-element digests.
     pub fn eq_node(h_g1: Digest, h_g2: Digest) -> Node {
-        Node::expression(Self::eq_tag(), Payload::join(h_g1, h_g2))
+        Node::join(Self::eq_tag(), h_g1, h_g2)
     }
 }
 

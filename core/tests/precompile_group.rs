@@ -4,9 +4,7 @@
 mod common;
 
 use common::precompile::{group::Group, uint::Uint};
-use miden_core::deferred::{
-    DeferredState, Digest, Node, Payload, PrecompileError, PrecompileRegistry,
-};
+use miden_core::deferred::{DeferredState, Digest, Node, PrecompileError, PrecompileRegistry};
 
 fn leaf(low: u64) -> Node {
     let mut limbs = [0u32; 8];
@@ -81,7 +79,7 @@ fn sub_chains_through_add_with_mint_at_every_step() {
     let h_sum = state.register(&schema, Group::add_node(h_g1, h_g2)).unwrap();
     let h_diff = state.register(&schema, Group::sub_node(h_sum, h_g1)).unwrap();
 
-    let canonical = state.evaluate(&schema, state.get(&h_diff).unwrap().clone()).unwrap();
+    let canonical = state.evaluate_digest(&schema, h_diff).unwrap();
     assert_eq!(canonical, Group::new_node(leaf(100).digest(), leaf(200).digest()));
 }
 
@@ -91,13 +89,11 @@ fn new_canonicalises_field_expression_children_end_to_end() {
     // x as field expression leaf(3)+leaf(4), y as a plain leaf.
     let h_3 = state.register(&schema, leaf(3)).unwrap();
     let h_4 = state.register(&schema, leaf(4)).unwrap();
-    let h_x_expr = state
-        .register(&schema, Node::expression(Uint::add_tag(), Payload::join(h_3, h_4)))
-        .unwrap();
+    let h_x_expr = state.register(&schema, Node::join(Uint::add_tag(), h_3, h_4)).unwrap();
     let h_y = state.register(&schema, leaf(5)).unwrap();
     let h_new = state.register(&schema, Group::new_node(h_x_expr, h_y)).unwrap();
 
-    let canonical = state.evaluate(&schema, state.get(&h_new).unwrap().clone()).unwrap();
+    let canonical = state.evaluate_digest(&schema, h_new).unwrap();
     let expected = Group::new_node(leaf(7).digest(), leaf(5).digest());
     assert_eq!(canonical, expected);
 }
@@ -119,14 +115,12 @@ fn new_canonicalises_field_expression_children() {
     let (schema, mut state) = fresh();
     let h_3 = state.register(&schema, leaf(3)).unwrap();
     let h_4 = state.register(&schema, leaf(4)).unwrap();
-    let h_x_expr = state
-        .register(&schema, Node::expression(Uint::add_tag(), Payload::join(h_3, h_4)))
-        .unwrap();
+    let h_x_expr = state.register(&schema, Node::join(Uint::add_tag(), h_3, h_4)).unwrap();
     let h_y = state.register(&schema, leaf(5)).unwrap();
     let new_over_expr = Group::new_node(h_x_expr, h_y);
     let h_new = state.register(&schema, new_over_expr).unwrap();
 
-    let canonical = state.evaluate(&schema, state.get(&h_new).unwrap().clone()).unwrap();
+    let canonical = state.evaluate_digest(&schema, h_new).unwrap();
     let expected = Group::new_node(leaf(7).digest(), leaf(5).digest());
     assert_eq!(canonical, expected);
 }
@@ -188,7 +182,7 @@ fn eq_predicate_commutes_over_minted_children() {
         .unwrap();
 
     // Pre-evaluate g_add so its mints (leaf(13), leaf(24)) land in state.nodes.
-    state.evaluate(&schema, state.get(&h_g_add).unwrap().clone()).unwrap();
+    state.evaluate_digest(&schema, h_g_add).unwrap();
     assert!(state.contains(&leaf(13).digest()), "x3 minted into nodes");
     assert!(state.contains(&leaf(24).digest()), "y3 minted into nodes");
 

@@ -9,7 +9,7 @@ mod common;
 
 use common::precompile::uint::Uint;
 use miden_core::deferred::{
-    DeferredError, DeferredState, Node, Payload, PrecompileError, PrecompileRegistry,
+    DeferredError, DeferredState, Node, PrecompileError, PrecompileRegistry,
 };
 
 fn leaf(low: u64) -> Node {
@@ -31,33 +31,25 @@ fn end_to_end_register_evaluate_assert_extract() {
     let b = state.register(&schema, leaf(4)).unwrap();
     let c = state.register(&schema, leaf(5)).unwrap();
     let expected = state.register(&schema, leaf(35)).unwrap();
-    let add = state
-        .register(&schema, Node::expression(Uint::add_tag(), Payload::join(a, b)))
-        .unwrap();
-    let mul = state
-        .register(&schema, Node::expression(Uint::mul_tag(), Payload::join(add, c)))
-        .unwrap();
+    let add = state.register(&schema, Node::join(Uint::add_tag(), a, b)).unwrap();
+    let mul = state.register(&schema, Node::join(Uint::mul_tag(), add, c)).unwrap();
 
-    let canonical = state.evaluate(&schema, state.get(&mul).unwrap().clone()).unwrap();
+    let canonical = state.evaluate_digest(&schema, mul).unwrap();
     assert_eq!(canonical, leaf(35));
 
     // Predicate verification: register interns the eq node; evaluate returns Node::TRUE.
-    let assertion = Node::expression(Uint::eq_tag(), Payload::join(mul, expected));
+    let assertion = Node::join(Uint::eq_tag(), mul, expected);
     state.register(&schema, assertion.clone()).unwrap();
     let result = state.evaluate(&schema, assertion).unwrap();
     assert!(result.is_true_node());
 
-    // 6 registered expression nodes + 1 registered eq predicate. evaluate writes only to the
-    // canonical_of cache, so canonical(add) = leaf(7) does not appear in `nodes`.
-    assert_eq!(state.nodes().len(), 7);
-    assert!(!state.contains(&leaf(7).digest()));
+    // 6 registered expression nodes + 1 registered eq predicate, plus canonicals interned by
+    // evaluate: canonical(add)=leaf(7) and canonical(assertion)=TRUE.
+    assert_eq!(state.nodes().len(), 9);
+    assert!(state.contains(&leaf(7).digest()));
 
     // Defense-in-depth: log the proven equality and round-trip the whole transcript.
-    common::log_and_verify(
-        &schema,
-        &mut state,
-        Node::expression(Uint::eq_tag(), Payload::join(mul, expected)),
-    );
+    common::log_and_verify(&schema, &mut state, Node::join(Uint::eq_tag(), mul, expected));
 }
 
 #[test]
@@ -66,7 +58,7 @@ fn predicate_mismatch_surfaces_as_error_on_evaluate() {
     let mut state = DeferredState::new();
     let a = state.register(&schema, leaf(7)).unwrap();
     let b = state.register(&schema, leaf(8)).unwrap();
-    let assertion = Node::expression(Uint::eq_tag(), Payload::join(a, b));
+    let assertion = Node::join(Uint::eq_tag(), a, b);
     // Register is a pure hint — succeeds even when the predicate doesn't hold.
     state.register(&schema, assertion.clone()).unwrap();
     // The mismatch surfaces only when we explicitly verify.
@@ -204,9 +196,9 @@ fn mul_truncates_overflow_above_2_to_256() {
 
 #[test]
 fn non_canonical_limb_errors() {
-    let bad = Node::expression(
+    let bad = Node::leaf(
         Uint::leaf_tag(),
-        Payload::new([
+        [
             miden_core::Felt::new_unchecked(1u64 << 32),
             miden_core::Felt::from_u32(0),
             miden_core::Felt::from_u32(0),
@@ -215,7 +207,7 @@ fn non_canonical_limb_errors() {
             miden_core::Felt::from_u32(0),
             miden_core::Felt::from_u32(0),
             miden_core::Felt::from_u32(0),
-        ]),
+        ],
     );
     let ok = leaf_from_low_u64(1);
     let err = eval(Uint::wrap_add, bad, ok);
@@ -224,7 +216,7 @@ fn non_canonical_limb_errors() {
 
 #[test]
 fn non_leaf_operand_errors() {
-    let a = Node::expression(Uint::add_tag(), Payload::new([miden_core::Felt::from_u32(0); 8]));
+    let a = Node::leaf(Uint::add_tag(), [miden_core::Felt::from_u32(0); 8]);
     let b = leaf_from_low_u64(1);
     let err = eval(Uint::wrap_add, a, b);
     assert!(matches!(err, Err(DeferredError::InvalidPayload)));

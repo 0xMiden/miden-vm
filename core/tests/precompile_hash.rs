@@ -37,7 +37,7 @@ fn preimage_reduces_to_known_digest_and_eq_predicate_passes() {
     let h_preimage = state.register(&schema, Hash::preimage_node(64, preimage_chunks)).unwrap();
 
     // Evaluating the preimage produces the digest leaf.
-    let canonical = state.evaluate(&schema, state.get(&h_preimage).unwrap().clone()).unwrap();
+    let canonical = state.evaluate_digest(&schema, h_preimage).unwrap();
     assert_eq!(canonical, expected_digest);
 
     // eq predicate ties the preimage's hash to the pre-registered expected digest.
@@ -117,7 +117,7 @@ fn digest_leaf_is_self_evaluating() {
     let (schema, mut state) = fresh();
     let leaf = Hash::digest_node([Felt::from_u32(7); 8]);
     let h = state.register(&schema, leaf.clone()).unwrap();
-    let canonical = state.evaluate(&schema, state.get(&h).unwrap().clone()).unwrap();
+    let canonical = state.evaluate_digest(&schema, h).unwrap();
     assert_eq!(canonical, leaf);
 }
 
