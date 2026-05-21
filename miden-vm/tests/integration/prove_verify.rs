@@ -10,6 +10,7 @@ use miden_processor::ExecutionOptions;
 use miden_prover::{
     AdviceInputs, ProgramInfo, ProvingOptions, PublicInputs, StackInputs, StackOutputs, prove_sync,
 };
+use miden_recursive_verifier_test_utils::generate_advice_inputs;
 use miden_verifier::verify;
 use miden_vm::{DefaultHost, HashFunction};
 use serde_wincode::SerdeCompat;
@@ -72,11 +73,8 @@ fn assert_recursive_verify(
 
     let pub_inputs =
         PublicInputs::new(program_info, stack_inputs, stack_outputs, pc_transcript_state);
-    let verifier_inputs = miden_utils_testing::recursive_verifier::generate_advice_inputs(
-        proof.stark_proof(),
-        pub_inputs,
-    )
-    .expect("recursive verifier advice construction failed");
+    let verifier_inputs = generate_advice_inputs(proof.stark_proof(), pub_inputs)
+        .expect("recursive verifier advice construction failed");
 
     let source = "
         use miden::core::sys::vm
@@ -139,7 +137,7 @@ fn test_rpo_prove_verify() {
 }
 
 #[test]
-fn test_poseidon2_prove_verify() {
+fn test_poseidon2_recursive_prove_verify() {
     // Compute 150th Fibonacci number to generate a longer trace
     let source = "
         begin

@@ -168,8 +168,6 @@ pub fn memory_max_iters() -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use miden_vm::Assembler;
-
     use super::*;
 
     #[test]
@@ -184,18 +182,6 @@ mod tests {
         for target in targets {
             let count = SNIPPETS.iter().filter(|s| s.dominant == target).count();
             assert_eq!(count, 1, "expected exactly one snippet for {target:?}");
-        }
-    }
-
-    #[test]
-    fn each_snippet_assembles_as_a_standalone_program() {
-        // Fail fast: if a snippet has malformed MASM, the calibrator will blow up at bench time.
-        // Catch it in unit tests instead.
-        for snippet in SNIPPETS {
-            let source = wrap_program(&render(snippet, 4));
-            Assembler::default()
-                .assemble_program(&source)
-                .unwrap_or_else(|e| panic!("snippet {:?} failed to assemble: {e}", snippet.name));
         }
     }
 

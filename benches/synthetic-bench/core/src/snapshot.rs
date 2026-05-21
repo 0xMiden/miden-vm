@@ -335,7 +335,8 @@ mod tests {
     fn committed_snapshots_load() {
         use std::collections::BTreeSet;
 
-        let snapshots_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("snapshots");
+        let snapshots_dir =
+            Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().join("snapshots");
         let entries = std::fs::read_dir(&snapshots_dir)
             .unwrap_or_else(|e| panic!("read {}: {e}", snapshots_dir.display()));
 

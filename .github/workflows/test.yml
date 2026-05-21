@@ -31,6 +31,8 @@ jobs:
           save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/next' }}
       - name: Install rust
         run: rustup update --no-self-update
+      - name: Check synthetic benchmark targets
+        run: make check-synthetic-bench
       - name: Build tests
         run: make test-build
       - name: test

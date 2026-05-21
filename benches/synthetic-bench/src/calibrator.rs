@@ -4,14 +4,12 @@
 //! converted into per-iteration row costs. Calibration happens on every bench run so the synthetic
 //! adapts to the current VM's row accounting.
 
-use std::collections::BTreeMap;
-
 use miden_processor::{DefaultHost, FastProcessor, StackInputs, trace::build_trace};
 use miden_vm::Assembler;
-
-use crate::{
+pub use miden_vm_synthetic_bench_core::solver::{Calibration, IterCost};
+use miden_vm_synthetic_bench_core::{
     snapshot::{TraceBreakdown, TraceShape, TraceTotals},
-    snippets::{self, Component, SNIPPETS},
+    snippets::{self, SNIPPETS},
 };
 
 pub const CALIBRATION_ITERS: u64 = 1000;
@@ -95,32 +93,6 @@ pub enum MeasurementError {
 
 // CALIBRATION
 // ------------------------------------------------------------------------
-
-/// Per-iteration row rates, kept as `f64` and rounded by the solver.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct IterCost {
-    pub core: f64,
-    pub hasher: f64,
-    pub bitwise: f64,
-    pub memory: f64,
-    pub range: f64,
-}
-
-impl IterCost {
-    pub fn get(&self, component: Component) -> f64 {
-        match component {
-            Component::Core => self.core,
-            Component::Hasher => self.hasher,
-            Component::Bitwise => self.bitwise,
-            Component::Memory => self.memory,
-            Component::Range => self.range,
-        }
-    }
-}
-
-/// Per-snippet rows-per-iter across every tracked component. Cross-terms (e.g. a non-zero hasher
-/// rate on the `decoder_pad` snippet) are measured so the solver can subtract them.
-pub type Calibration = BTreeMap<&'static str, IterCost>;
 
 /// Run every snippet through a single-point calibration at [`CALIBRATION_ITERS`] and record
 /// per-iter cost in each component.

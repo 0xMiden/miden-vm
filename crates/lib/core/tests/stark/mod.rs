@@ -9,10 +9,8 @@ use miden_core::{
     proof::HashFunction,
 };
 use miden_processor::{DefaultHost, ExecutionOptions, Program, ProgramInfo};
-use miden_utils_testing::{
-    AdviceInputs, ProvingOptions, StackInputs, prove_sync,
-    recursive_verifier::{VerifierData, generate_advice_inputs},
-};
+use miden_recursive_verifier_test_utils::{VerifierData, generate_advice_inputs};
+use miden_utils_testing::{AdviceInputs, ProvingOptions, StackInputs, prove_sync};
 use rand::{Rng, RngCore, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use rstest::rstest;
@@ -25,21 +23,21 @@ mod batch_query_gen;
 // ================================================================================================
 
 #[test]
-fn stark_verifier_e2f4_small() {
+fn recursive_stark_verifier_e2f4_small() {
     let inputs = fib_stack_inputs();
     let data = generate_recursive_verifier_data(EXAMPLE_FIB_SMALL, inputs, None);
     run_recursive_verifier(&data);
 }
 
 #[test]
-fn stark_verifier_e2f4_large() {
+fn recursive_stark_verifier_e2f4_large() {
     let inputs = fib_stack_inputs();
     let data = generate_recursive_verifier_data(EXAMPLE_FIB_LARGE, inputs, None);
     run_recursive_verifier(&data);
 }
 
 #[test]
-fn stark_verifier_e2f4_with_kernel_even() {
+fn recursive_stark_verifier_e2f4_with_kernel_even() {
     let inputs = fib_stack_inputs();
     let data = generate_recursive_verifier_data(
         EXAMPLE_FIB_KERNEL_SMALL,
@@ -50,7 +48,7 @@ fn stark_verifier_e2f4_with_kernel_even() {
 }
 
 #[test]
-fn stark_verifier_e2f4_with_kernel_odd() {
+fn recursive_stark_verifier_e2f4_with_kernel_odd() {
     let inputs = fib_stack_inputs();
     let data = generate_recursive_verifier_data(
         EXAMPLE_FIB_KERNEL_SMALL,
@@ -61,7 +59,7 @@ fn stark_verifier_e2f4_with_kernel_odd() {
 }
 
 #[test]
-fn stark_verifier_e2f4_with_kernel_single() {
+fn recursive_stark_verifier_e2f4_with_kernel_single() {
     let inputs = fib_stack_inputs();
     let data = generate_recursive_verifier_data(
         EXAMPLE_FIB_KERNEL_SMALL,

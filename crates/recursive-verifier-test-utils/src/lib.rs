@@ -16,6 +16,10 @@
 //!
 //! See `build_advice` for the authoritative layout.
 
+#![no_std]
+
+extern crate alloc;
+
 use alloc::{
     string::{String, ToString},
     vec,
@@ -23,7 +27,11 @@ use alloc::{
 };
 
 use miden_air::{AirInstance, MidenAir, PublicInputs, config};
-use miden_core::{Felt, WORD_SIZE, Word, field::QuadFelt};
+use miden_core::{
+    Felt, WORD_SIZE, Word,
+    crypto::merkle::{MerklePath, MerkleStore, PartialMerkleTree},
+    field::QuadFelt,
+};
 use miden_crypto::{
     field::BasedVectorSpace,
     stark::{
@@ -35,8 +43,6 @@ use miden_crypto::{
         verifier::VerifierError as CryptoVerifierError,
     },
 };
-
-use crate::crypto::{MerklePath, MerkleStore, PartialMerkleTree};
 
 // TYPES
 // ================================================================================================

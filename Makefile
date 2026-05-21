@@ -23,7 +23,8 @@ help:
 	@printf "  make regenerate-constraints      # Regenerate core-lib constraint artifacts\n"
 	@printf "\nExamples:\n"
 	@printf "  make test-air test=\"some_test\" # Test specific function\n"
-	@printf "  make test-fast                   # Fast tests (no proptests/CLI)\n"
+	@printf "  make test-fast                   # Fast tests (no proptests/CLI/recursive verifier)\n"
+	@printf "  make test-recursive-verifier     # Recursive verifier tests only\n"
 	@printf "  make test-skip-proptests         # All tests except proptests\n"
 	@printf "  make check-features              # Check all feature combinations with cargo-hack\n\n"
 
@@ -39,6 +40,7 @@ ALL_FEATURES             := --all-features
 # Workspace-wide test features
 WORKSPACE_TEST_FEATURES  := concurrent,testing,executable
 FAST_TEST_FEATURES       := concurrent,testing
+RECURSIVE_VERIFIER_TEST_EXPR := (package(miden-core-lib) and test(recursive_stark_verifier)) or (package(miden-vm) and (test(test_poseidon2_recursive_prove_verify) or test(test_equal_heights_recursive) or test(test_poseidon2_recursive_verify_with_precompile_requests)))
 
 # Feature sets for executable builds
 FEATURES_CONCURRENT_EXEC := --features concurrent,executable
@@ -169,10 +171,16 @@ test-docs: ## Run documentation tests (cargo test - nextest doesn't support doct
 # -- filtered test runs ---------------------------------------------------------------------------
 
 .PHONY: test-fast
-test-fast: ## Runs fast tests (excludes all CLI tests and proptests)
+test-fast: ## Runs fast tests (excludes CLI tests, proptests, and recursive verifier tests)
 	$(MAKE) core-test \
 		FEATURES="$(FAST_TEST_FEATURES)" \
-		EXPR="-E 'not test(#*proptest) and not test(cli_)'"
+		EXPR="-E 'not test(#*proptest) and not test(cli_) and not ($(RECURSIVE_VERIFIER_TEST_EXPR))'"
+
+.PHONY: test-recursive-verifier
+test-recursive-verifier: ## Runs the recursive verifier tests
+	$(MAKE) core-test \
+		FEATURES="$(WORKSPACE_TEST_FEATURES)" \
+		EXPR="-E '$(RECURSIVE_VERIFIER_TEST_EXPR)'"
 
 .PHONY: test-skip-proptests
 test-skip-proptests: ## Runs all tests, except property-based tests
@@ -263,9 +271,22 @@ run-examples: exec ## Runs all masm examples to verify they execute correctly
 check-bench: ## Builds all benchmarks
 	cargo check --benches --features internal
 
+.PHONY: check-synthetic-bench
+check-synthetic-bench: ## Builds synthetic benchmark core, harness tests, and benchmark targets
+	cargo check -p miden-vm-synthetic-bench-core --all-targets
+	cargo check -p miden-vm-synthetic-bench --all-targets
+
 .PHONY: bench
 bench: ## Runs benchmarks
 	cargo bench --profile optimized --features internal
+
+.PHONY: bench-recursive-verifier-compile
+bench-recursive-verifier-compile: ## Builds recursive verifier tests with Cargo timing output
+	CARGO_TARGET_DIR=target/recursive-verifier-timings $(MAKE) core-test \
+		FEATURES="$(WORKSPACE_TEST_FEATURES)" \
+		EXTRA="--no-run --timings" \
+		EXPR="-E '$(RECURSIVE_VERIFIER_TEST_EXPR)'"
+	@echo "Cargo timing reports are under target/recursive-verifier-timings/cargo-timings"
 
 # ============================================================
 # Fuzzing targets

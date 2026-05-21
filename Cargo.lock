@@ -1402,6 +1402,7 @@ dependencies = [
  "miden-package-registry",
  "miden-processor",
  "miden-prover",
+ "miden-recursive-verifier-test-utils",
  "miden-test-utils",
  "miden-utils-sync",
  "miden-verifier",
@@ -1705,6 +1706,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "miden-recursive-verifier-test-utils"
+version = "0.1.0"
+dependencies = [
+ "miden-air",
+ "miden-core",
+ "miden-crypto",
+ "serde-wincode",
+ "thiserror",
+ "wincode",
+]
+
+[[package]]
 name = "miden-rowan"
 version = "0.16.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1772,10 +1785,7 @@ dependencies = [
  "miden-verifier",
  "pretty_assertions",
  "proptest",
- "serde-wincode",
  "test-case",
- "thiserror",
- "wincode",
 ]
 
 [[package]]
@@ -1850,6 +1860,7 @@ dependencies = [
  "miden-mast-package",
  "miden-processor",
  "miden-prover",
+ "miden-recursive-verifier-test-utils",
  "miden-test-serde-macros",
  "miden-test-utils",
  "miden-verifier",
@@ -1874,6 +1885,14 @@ dependencies = [
  "criterion",
  "miden-processor",
  "miden-vm",
+ "miden-vm-synthetic-bench-core",
+ "thiserror",
+]
+
+[[package]]
+name = "miden-vm-synthetic-bench-core"
+version = "0.24.0"
+dependencies = [
  "serde",
  "serde_json",
  "thiserror",

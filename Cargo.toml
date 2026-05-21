@@ -2,6 +2,7 @@
 members = [
     "air",
     "benches/synthetic-bench",
+    "benches/synthetic-bench/core",
     "core",
     "crates/ace-codegen",
     "crates/assembly",
@@ -14,6 +15,7 @@ members = [
     "crates/package-registry-local",
     "crates/miden-format",
     "crates/project",
+    "crates/recursive-verifier-test-utils",
     "crates/test-serde-macros",
     "crates/test-utils",
     "crates/utils-core-derive",
@@ -63,8 +65,10 @@ miden-mast-package      = { path = "./crates/mast-package", version = "0.24", de
 miden-package-registry  = { path = "./crates/package-registry", version = "0.24", default-features = false }
 miden-processor         = { path = "./processor", version = "0.24", default-features = false }
 miden-test-serde-macros = { path = "./crates/test-serde-macros", default-features = false }
+miden-vm-synthetic-bench-core = { path = "./benches/synthetic-bench/core" }
 miden-project           = { path = "./crates/project", version = "0.24", default-features = false }
 miden-prover            = { path = "./prover", version = "0.24", default-features = false }
+miden-recursive-verifier-test-utils = { path = "./crates/recursive-verifier-test-utils", package = "miden-recursive-verifier-test-utils" }
 miden-core-lib          = { path = "./crates/lib/core", version = "0.24", default-features = false }
 miden-utils-core-derive = { path = "./crates/utils-core-derive", version = "0.24", default-features = false }
 miden-utils-diagnostics = { path = "./crates/utils-diagnostics", version = "0.24", default-features = false }

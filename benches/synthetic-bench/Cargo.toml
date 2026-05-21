@@ -12,10 +12,9 @@ publish = false
 workspace = true
 
 [dependencies]
+miden-vm-synthetic-bench-core.workspace = true
 miden-processor = { workspace = true, features = ["concurrent"] }
 miden-vm        = { path = "../../miden-vm", features = ["concurrent"] }
-serde           = { workspace = true, features = ["std"] }
-serde_json      = { workspace = true, features = ["std"] }
 thiserror       = { workspace = true, features = ["std"] }
 
 [dev-dependencies]
