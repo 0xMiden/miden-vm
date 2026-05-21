@@ -78,7 +78,7 @@ pub struct Package {
     /// The project target type which produced this package
     pub kind: TargetType,
     /// The underlying [MastForest] of this package
-    pub mast: Arc<MastForest>,
+    mast: Arc<MastForest>,
     /// The package manifest, containing the set of exported procedures and their signatures,
     /// if known.
     pub manifest: PackageManifest,

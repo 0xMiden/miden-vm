@@ -25,8 +25,8 @@ fn merge_programs(
 
     let mut assembler = Assembler::new(context.source_manager());
     assembler.link_package(Arc::clone(&lib_a), Linkage::Dynamic)?;
-    let lib_b = assembler.assemble_library("lib-b", [program_b])?.mast.as_ref().clone();
-    let lib_a = lib_a.mast.as_ref().clone();
+    let lib_b = assembler.assemble_library("lib-b", [program_b])?.mast_forest().as_ref().clone();
+    let lib_a = lib_a.mast_forest().as_ref().clone();
 
     let (merged, root_maps) = MastForest::merge([&lib_a, &lib_b]).into_diagnostic()?;
 

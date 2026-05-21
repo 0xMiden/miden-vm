@@ -294,7 +294,7 @@ fn library_exports() -> Result<(), Report> {
     assert_eq!(lib2.get_export_node_id(foo2), lib2.get_export_node_id(bar3));
 
     // make sure there are 6 roots in the MAST (foo1, foo2, foo3, bar1, bar4, and bar5)
-    assert_eq!(lib2.mast.num_procedures(), 6);
+    assert_eq!(lib2.mast_forest().num_procedures(), 6);
 
     // bar1 should be the only re-export (i.e. the only procedure re-exported from a dependency)
     assert!(!lib2.is_reexport(foo2));
@@ -353,9 +353,9 @@ fn library_procedure_collision() -> Result<(), Report> {
     let lib2_bar_bar1 = QualifiedProcedureName::from_str("lib2::bar::bar1").unwrap();
     let lib2_bar_bar2 = QualifiedProcedureName::from_str("lib2::bar::bar2").unwrap();
     let export_id_bar1 = lib2.get_export_node_id(&lib2_bar_bar1);
-    assert!(lib2.mast[export_id_bar1].is_external());
+    assert!(lib2.mast_forest()[export_id_bar1].is_external());
     let export_id_bar2 = lib2.get_export_node_id(&lib2_bar_bar2);
-    assert!(!lib2.mast[export_id_bar2].is_external());
+    assert!(!lib2.mast_forest()[export_id_bar2].is_external());
     assert_ne!(export_id_bar1, export_id_bar2);
 
     // Keeping those procedures distinct adds one more node to the library forest.

@@ -49,12 +49,12 @@ end
     assert_eq!(dev.version.to_string(), "1.2.3");
     assert_eq!(dev.description.as_deref(), Some("sample library"));
     assert_eq!(dev.kind, TargetType::Library);
-    assert!(dev.mast.debug_info().num_asm_ops() > 0);
+    assert!(dev.mast_forest().debug_info().num_asm_ops() > 0);
 
     let release = context
         .assemble_library_package(&manifest_path, Some("release"))
         .expect("failed to assemble under release profile");
-    assert_eq!(release.mast.debug_info().num_asm_ops(), 0);
+    assert_eq!(release.mast_forest().debug_info().num_asm_ops(), 0);
 }
 
 #[test]
@@ -300,7 +300,7 @@ end
     let tempdir_prefix = tempdir.path().display().to_string();
 
     let asm_op_path = package
-        .mast
+        .mast_forest()
         .debug_info()
         .asm_ops()
         .iter()
@@ -2602,7 +2602,7 @@ fn preassembled_dependency_must_match_graph_selected_runtime_dependencies() {
         "dep".into(),
         "1.0.0".parse().unwrap(),
         TargetType::Library,
-        runtime_v1.mast.clone(),
+        runtime_v1.mast_forest().clone(),
         runtime_v1.manifest.exports().cloned(),
         [miden_mast_package::Dependency {
             name: PackageId::from("runtime"),
@@ -2644,7 +2644,7 @@ end
         "dep".into(),
         "1.0.0".parse().unwrap(),
         TargetType::Library,
-        runtime_v1.mast.clone(),
+        runtime_v1.mast_forest().clone(),
         runtime_v1.manifest.exports().cloned(),
         [miden_mast_package::Dependency {
             name: PackageId::from("runtime"),
@@ -2680,7 +2680,7 @@ fn preassembled_dependency_must_match_graph_selected_dependency_kinds() {
         "dep".into(),
         "1.0.0".parse().unwrap(),
         TargetType::Library,
-        runtime.mast.clone(),
+        runtime.mast_forest().clone(),
         runtime.manifest.exports().cloned(),
         [miden_mast_package::Dependency {
             name: PackageId::from("runtime"),
@@ -2722,7 +2722,7 @@ end
         "dep".into(),
         "1.0.0".parse().unwrap(),
         TargetType::Library,
-        runtime.mast.clone(),
+        runtime.mast_forest().clone(),
         runtime.manifest.exports().cloned(),
         [miden_mast_package::Dependency {
             name: PackageId::from("runtime"),
@@ -2758,7 +2758,7 @@ fn preassembled_package_must_match_graph_selected_target_kind() {
         "dep".into(),
         "1.0.0".parse().unwrap(),
         TargetType::Library,
-        runtime.mast.clone(),
+        runtime.mast_forest().clone(),
         runtime.manifest.exports().cloned(),
         [miden_mast_package::Dependency {
             name: PackageId::from("runtime"),
@@ -2800,7 +2800,7 @@ end
         "dep".into(),
         "1.0.0".parse().unwrap(),
         TargetType::Kernel,
-        runtime.mast.clone(),
+        runtime.mast_forest().clone(),
         runtime.manifest.exports().cloned(),
         [miden_mast_package::Dependency {
             name: PackageId::from("runtime"),

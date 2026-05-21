@@ -25,9 +25,9 @@ impl LinkLibrary {
         self
     }
 
-    #[inline]
+    #[inline(always)]
     pub fn mast(&self) -> &Arc<MastForest> {
-        &self.package.mast
+        self.package.mast_forest()
     }
 
     #[inline]
