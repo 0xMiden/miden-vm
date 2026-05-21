@@ -51,7 +51,11 @@ pub use constraints::{
         PermutationCols, borrow_chiplet, borrow_chiplet_mut,
     },
     columns::{ChipletCols, CoreCols},
+    decoder::columns::DecoderCols,
     ext_field::QuadFeltExpr,
+    range::columns::RangeCols,
+    stack::columns::StackCols,
+    system::columns::SystemCols,
 };
 use logup::{BusId, MIDEN_MAX_MESSAGE_WIDTH};
 use lookup::{

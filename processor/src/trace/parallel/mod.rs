@@ -3,7 +3,7 @@ use core::borrow::{Borrow, BorrowMut};
 
 use itertools::Itertools;
 use miden_air::{
-    CoreCols, Felt,
+    CoreCols, Felt, StackCols, SystemCols,
     trace::{
         DECODER_TRACE_WIDTH, MIN_TRACE_LEN, MainTrace, RANGE_CHECK_TRACE_WIDTH, RowIndex,
         STACK_TRACE_WIDTH, SYS_TRACE_WIDTH, decoder::NUM_OP_BITS,
@@ -337,8 +337,8 @@ fn generate_core_trace_row_major(
 fn fixup_stack_and_system_rows(
     core_trace_data: &mut [Felt],
     fragment_size: usize,
-    stack_rows: &[[Felt; STACK_TRACE_WIDTH]],
-    system_rows: &[[Felt; SYS_TRACE_WIDTH]],
+    stack_rows: &[StackCols<Felt>],
+    system_rows: &[SystemCols<Felt>],
     first_stack_top: &[Felt],
 ) {
     const MIN_STACK_DEPTH_FELT: Felt = Felt::new_unchecked(MIN_STACK_DEPTH as u64);
@@ -363,13 +363,9 @@ fn fixup_stack_and_system_rows(
     for frag_idx in 1..num_fragments {
         let row_idx = frag_idx * fragment_size;
         let row_start = row_idx * w;
-        let system_row = &system_rows[frag_idx - 1];
-        let stack_row = &stack_rows[frag_idx - 1];
-
-        core_trace_data[row_start..row_start + SYS_TRACE_WIDTH].copy_from_slice(system_row);
-
-        let stack_start = row_start + (SYS_TRACE_WIDTH + DECODER_TRACE_WIDTH);
-        core_trace_data[stack_start..stack_start + STACK_TRACE_WIDTH].copy_from_slice(stack_row);
+        let row: &mut CoreCols<Felt> = core_trace_data[row_start..row_start + w].borrow_mut();
+        row.system = system_rows[frag_idx - 1];
+        row.stack = stack_rows[frag_idx - 1];
     }
 }
 
@@ -380,20 +376,11 @@ fn fixup_stack_and_system_rows(
 fn push_halt_opcode_row(
     core_trace_data: &mut Vec<Felt>,
     num_rows_before: usize,
-    last_system_state: &[Felt; SYS_TRACE_WIDTH],
-    last_stack_state: &[Felt; STACK_TRACE_WIDTH],
+    last_system_state: &SystemCols<Felt>,
+    last_stack_state: &StackCols<Felt>,
 ) {
     let w = CORE_STORAGE_WIDTH;
     let mut row_data = [ZERO; CORE_STORAGE_WIDTH];
-    let stack_offset = SYS_TRACE_WIDTH + DECODER_TRACE_WIDTH;
-
-    // system columns
-    // ---------------------------------------------------------------------------------------
-    row_data[..SYS_TRACE_WIDTH].copy_from_slice(last_system_state);
-
-    // stack columns
-    // ---------------------------------------------------------------------------------------
-    row_data[stack_offset..stack_offset + STACK_TRACE_WIDTH].copy_from_slice(last_stack_state);
 
     // Read the previous row's hasher state first half before we take a mutable borrow on
     // `row_data` (propagates the program hash into the HALT padding).
@@ -408,6 +395,9 @@ fn push_halt_opcode_row(
 
     {
         let row: &mut CoreCols<Felt> = row_data.as_mut_slice().borrow_mut();
+
+        row.system = *last_system_state;
+        row.stack = *last_stack_state;
 
         // Pad op_bits columns with HALT opcode bits
         let halt_opcode = opcodes::HALT;

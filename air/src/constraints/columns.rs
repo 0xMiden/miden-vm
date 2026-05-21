@@ -33,7 +33,7 @@ use crate::trace::{CHIPLETS_WIDTH, TRACE_WIDTH};
 /// `[T; NUM_CORE_COLS]` slice or the prefix of a `[T; TRACE_WIDTH]` row via
 /// `Borrow<CoreCols<T>>`.
 #[repr(C)]
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct CoreCols<T> {
     pub system: SystemCols<T>,
     pub decoder: DecoderCols<T>,
@@ -59,6 +59,15 @@ impl<T> BorrowMut<CoreCols<T>> for [T] {
         let (prefix, shorts, suffix) = unsafe { self.align_to_mut::<CoreCols<T>>() };
         debug_assert!(prefix.is_empty() && suffix.is_empty() && shorts.len() == 1);
         &mut shorts[0]
+    }
+}
+
+impl<T> CoreCols<T> {
+    /// Returns the column layout as a flat slice of length NUM_CORE_COLS, in column-index
+    /// order. Useful for column-index → field lookups (e.g. a `CoreCols<&str>` name table).
+    pub fn as_slice(&self) -> &[T] {
+        let ptr = self as *const Self as *const T;
+        unsafe { core::slice::from_raw_parts(ptr, NUM_CORE_COLS) }
     }
 }
 

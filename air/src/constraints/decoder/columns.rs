@@ -5,7 +5,7 @@ use crate::trace::decoder::{
 
 /// Decoder columns in the main execution trace (24 columns).
 #[repr(C)]
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct DecoderCols<T> {
     /// Block address (hasher table row pointer).
     pub addr: T,

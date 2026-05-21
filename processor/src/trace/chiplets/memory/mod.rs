@@ -18,7 +18,7 @@ use super::{
 };
 use crate::{
     ContextId, EMPTY_WORD, Felt, MemoryAddress, MemoryError, ONE, WORD_SIZE, Word, ZERO,
-    field::Field,
+    field::batch_inversion_allow_zeros,
 };
 
 mod segment;
@@ -318,6 +318,7 @@ impl Memory {
 
         let num_rows = self.trace_len();
         let mut buffer = vec![ZERO; num_rows * MEMORY_TRACE_WIDTH];
+        let mut deltas: Vec<Felt> = Vec::with_capacity(num_rows);
         let mut row: usize = 0;
 
         for (ctx, segment) in self.trace {
@@ -374,7 +375,8 @@ impl Memory {
                     let (delta_hi, delta_lo) = split_element_u32_into_u16(delta);
                     cols.d0 = delta_lo;
                     cols.d1 = delta_hi;
-                    cols.d_inv = delta.try_inverse().unwrap_or(ZERO);
+                    // `cols.d_inv` is filled in the batched-inversion pass below; defer.
+                    deltas.push(delta);
                     cols.is_same_ctx_and_addr = if prev_ctx == ctx && prev_addr == felt_addr {
                         ONE
                     } else {
@@ -393,6 +395,14 @@ impl Memory {
                     row += 1;
                 }
             }
+        }
+
+        batch_inversion_allow_zeros(&mut deltas);
+        for (r, &inv) in deltas.iter().enumerate() {
+            let row_slice = &mut buffer[r * MEMORY_TRACE_WIDTH..(r + 1) * MEMORY_TRACE_WIDTH];
+            let cols: &mut MemoryCols<Felt> =
+                borrow_chiplet_mut(&mut row_slice[..MEMORY_TRACE_WIDTH - 2]);
+            cols.d_inv = inv;
         }
 
         trace.copy_rows_from(&buffer);
