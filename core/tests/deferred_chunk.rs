@@ -56,21 +56,21 @@ impl ChunkTestPrecompile {
 fn preimage_tag(n: u32) -> Tag {
     Tag {
         id: ChunkTestPrecompile::id(),
-        imm: [PREIMAGE_ROLE, Felt::from_u32(n), ZERO],
+        args: [PREIMAGE_ROLE, Felt::from_u32(n), ZERO],
     }
 }
 
 fn digest_tag() -> Tag {
     Tag {
         id: ChunkTestPrecompile::id(),
-        imm: [DIGEST_ROLE, ZERO, ZERO],
+        args: [DIGEST_ROLE, ZERO, ZERO],
     }
 }
 
 fn assert_tag() -> Tag {
     Tag {
         id: ChunkTestPrecompile::id(),
-        imm: [ASSERT_ROLE, ZERO, ZERO],
+        args: [ASSERT_ROLE, ZERO, ZERO],
     }
 }
 
@@ -83,26 +83,26 @@ impl Precompile for ChunkTestPrecompile {
         Self::id()
     }
 
-    fn decode(&self, imm: [Felt; 3]) -> Option<NodeType> {
-        let [role, n, _] = imm;
+    fn decode(&self, args: [Felt; 3]) -> Option<NodeType> {
+        let [role, n, _] = args;
         match role {
             // Preimage chunk reduces to a digest leaf; `n` is the chunk count.
             r if r == PREIMAGE_ROLE => Some(NodeType::Chunks(n.as_canonical_u64() as u32)),
             // Digest leaf is self-evaluating with 8 raw felts.
             r if r == DIGEST_ROLE && n == ZERO => Some(NodeType::Value),
             // Assertion is a binary predicate (two child digests, evaluates to TRUE).
-            r if r == ASSERT_ROLE && n == ZERO => Some(NodeType::Binary),
+            r if r == ASSERT_ROLE && n == ZERO => Some(NodeType::Join),
             _ => None,
         }
     }
 
     fn reduce(
         &self,
-        imm: [Felt; 3],
+        args: [Felt; 3],
         payload: &Payload,
         witness: &mut WitnessBuilder<'_>,
     ) -> Result<Node, PrecompileError> {
-        let [role, ..] = imm;
+        let [role, ..] = args;
         if role == ASSERT_ROLE {
             let (lhs, rhs) = payload.join_children()?;
             if witness.resolve(lhs)? != witness.resolve(rhs)? {
@@ -115,7 +115,7 @@ impl Precompile for ChunkTestPrecompile {
             Payload::Chunk(chunks) => Ok(Node::expression(digest_tag(), Self::fake_hash(chunks))),
             // Digest leaf is self-evaluating.
             Payload::Expression(f) => {
-                Ok(Node::expression(Tag::new(Self::id(), imm), Payload::new(*f)))
+                Ok(Node::expression(Tag::new(Self::id(), args), Payload::new(*f)))
             },
         }
     }

@@ -146,25 +146,25 @@ impl ArithTestPrecompile {
     fn leaf_tag() -> Tag {
         Tag {
             id: Self::id(),
-            imm: [Self::D_LEAF, ZERO, ZERO],
+            args: [Self::D_LEAF, ZERO, ZERO],
         }
     }
     fn add_tag() -> Tag {
         Tag {
             id: Self::id(),
-            imm: [Self::D_ADD, ZERO, ZERO],
+            args: [Self::D_ADD, ZERO, ZERO],
         }
     }
     fn mul_tag() -> Tag {
         Tag {
             id: Self::id(),
-            imm: [Self::D_MUL, ZERO, ZERO],
+            args: [Self::D_MUL, ZERO, ZERO],
         }
     }
     fn eq_tag() -> Tag {
         Tag {
             id: Self::id(),
-            imm: [Self::D_EQ, ZERO, ZERO],
+            args: [Self::D_EQ, ZERO, ZERO],
         }
     }
 
@@ -225,26 +225,26 @@ impl Precompile for ArithTestPrecompile {
         Self::id()
     }
 
-    fn decode(&self, imm: [Felt; 3]) -> Option<NodeType> {
-        match imm[0] {
+    fn decode(&self, args: [Felt; 3]) -> Option<NodeType> {
+        match args[0] {
             d if d == Self::D_LEAF => Some(NodeType::Value),
-            d if d == Self::D_ADD || d == Self::D_MUL => Some(NodeType::Binary),
-            d if d == Self::D_EQ => Some(NodeType::Binary),
+            d if d == Self::D_ADD || d == Self::D_MUL => Some(NodeType::Join),
+            d if d == Self::D_EQ => Some(NodeType::Join),
             _ => None,
         }
     }
 
     fn reduce(
         &self,
-        imm: [Felt; 3],
+        args: [Felt; 3],
         payload: &Payload,
         witness: &mut WitnessBuilder<'_>,
     ) -> Result<Node, PrecompileError> {
-        match imm[0] {
+        match args[0] {
             d if d == Self::D_LEAF => {
                 let felts = payload.as_felts()?;
                 Self::decode_limbs(felts)?;
-                Ok(Node::expression(Tag::new(Self::id(), imm), Payload::new(*felts)))
+                Ok(Node::expression(Tag::new(Self::id(), args), Payload::new(*felts)))
             },
             d if d == Self::D_ADD || d == Self::D_MUL => {
                 let (lhs, rhs) = payload.join_children()?;
@@ -594,8 +594,8 @@ fn legacy_event_handler_still_works_with_deferred_infrastructure() {
 // ================================================================================================
 //
 // A minimal chunk-aware test precompile, mirroring
-// `core/tests/deferred_chunk.rs::ChunkTestPrecompile`: `decode` reads the role from `imm[0]` and
-// (for chunks) `n` from `imm[1]`; `reduce` for a chunk returns an expression digest-leaf via a
+// `core/tests/deferred_chunk.rs::ChunkTestPrecompile`: `decode` reads the role from `args[0]` and
+// (for chunks) `n` from `args[1]`; `reduce` for a chunk returns an expression digest-leaf via a
 // fake limb-sum hash.
 
 const PREIMAGE_ROLE: Felt = Felt::new_unchecked(0);
@@ -615,14 +615,14 @@ impl ChunkTestPrecompile {
 fn preimage_tag(n: u32) -> Tag {
     Tag {
         id: ChunkTestPrecompile::id(),
-        imm: [PREIMAGE_ROLE, Felt::from_u32(n), ZERO],
+        args: [PREIMAGE_ROLE, Felt::from_u32(n), ZERO],
     }
 }
 
 fn digest_tag() -> Tag {
     Tag {
         id: ChunkTestPrecompile::id(),
-        imm: [DIGEST_ROLE, ZERO, ZERO],
+        args: [DIGEST_ROLE, ZERO, ZERO],
     }
 }
 
@@ -635,8 +635,8 @@ impl Precompile for ChunkTestPrecompile {
         Self::id()
     }
 
-    fn decode(&self, imm: [Felt; 3]) -> Option<NodeType> {
-        let [role, n, _] = imm;
+    fn decode(&self, args: [Felt; 3]) -> Option<NodeType> {
+        let [role, n, _] = args;
         match role {
             r if r == PREIMAGE_ROLE => Some(NodeType::Chunks(n.as_canonical_u64() as u32)),
             r if r == DIGEST_ROLE && n == ZERO => Some(NodeType::Value),
@@ -646,7 +646,7 @@ impl Precompile for ChunkTestPrecompile {
 
     fn reduce(
         &self,
-        imm: [Felt; 3],
+        args: [Felt; 3],
         payload: &Payload,
         _witness: &mut WitnessBuilder<'_>,
     ) -> Result<Node, PrecompileError> {
@@ -661,7 +661,7 @@ impl Precompile for ChunkTestPrecompile {
                 Ok(Node::expression(digest_tag(), Payload::new(acc)))
             },
             Payload::Expression(f) => {
-                Ok(Node::expression(Tag::new(Self::id(), imm), Payload::new(*f)))
+                Ok(Node::expression(Tag::new(Self::id(), args), Payload::new(*f)))
             },
         }
     }

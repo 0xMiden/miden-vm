@@ -41,35 +41,35 @@ impl Uint {
     pub fn leaf_tag() -> Tag {
         Tag {
             id: Self::id(),
-            imm: [Felt::from_u32(Self::LEAF_TAG_ID), ZERO, ZERO],
+            args: [Felt::from_u32(Self::LEAF_TAG_ID), ZERO, ZERO],
         }
     }
     /// Tag for an `add` op node.
     pub fn add_tag() -> Tag {
         Tag {
             id: Self::id(),
-            imm: [Felt::from_u32(Self::ADD_TAG_ID), ZERO, ZERO],
+            args: [Felt::from_u32(Self::ADD_TAG_ID), ZERO, ZERO],
         }
     }
     /// Tag for a `sub` op node.
     pub fn sub_tag() -> Tag {
         Tag {
             id: Self::id(),
-            imm: [Felt::from_u32(Self::SUB_TAG_ID), ZERO, ZERO],
+            args: [Felt::from_u32(Self::SUB_TAG_ID), ZERO, ZERO],
         }
     }
     /// Tag for a `mul` op node.
     pub fn mul_tag() -> Tag {
         Tag {
             id: Self::id(),
-            imm: [Felt::from_u32(Self::MUL_TAG_ID), ZERO, ZERO],
+            args: [Felt::from_u32(Self::MUL_TAG_ID), ZERO, ZERO],
         }
     }
     /// Tag for an equality predicate.
     pub fn eq_tag() -> Tag {
         Tag {
             id: Self::id(),
-            imm: [Felt::from_u32(Self::EQ_TAG_ID), ZERO, ZERO],
+            args: [Felt::from_u32(Self::EQ_TAG_ID), ZERO, ZERO],
         }
     }
 
@@ -143,26 +143,26 @@ impl Precompile for Uint {
         vec![Self::leaf_node([0; 8]), Self::leaf_node(one), Self::leaf_node([u32::MAX; 8])]
     }
 
-    fn decode(&self, imm: [Felt; 3]) -> Option<NodeType> {
-        // Leaf is a `Value` (8 raw u32 limbs); op-nodes and the eq predicate are `Binary`
+    fn decode(&self, args: [Felt; 3]) -> Option<NodeType> {
+        // Leaf is a `Value` (8 raw u32 limbs); op-nodes and the eq predicate are `Join`
         // (children encoded as `lhs_digest || rhs_digest`).
-        Some(match Discriminant::classify(imm[0])? {
+        Some(match Discriminant::classify(args[0])? {
             Discriminant::Leaf => NodeType::Value,
-            Discriminant::BinaryOp(_) | Discriminant::Eq => NodeType::Binary,
+            Discriminant::BinaryOp(_) | Discriminant::Eq => NodeType::Join,
         })
     }
 
     fn reduce(
         &self,
-        imm: [Felt; 3],
+        args: [Felt; 3],
         payload: &Payload,
         witness: &mut WitnessBuilder<'_>,
     ) -> Result<Node, PrecompileError> {
-        match UintNode::parse(imm, payload)? {
+        match UintNode::parse(args, payload)? {
             // Leaf canonicality is checked at parse-time, deferred from register-time so that
             // malformed leaves are interned silently and only error out when used.
             UintNode::Leaf => {
-                Ok(Node::expression(Tag::new(Self::id(), imm), Payload::new(*payload.as_felts()?)))
+                Ok(Node::expression(Tag::new(Self::id(), args), Payload::new(*payload.as_felts()?)))
             },
             UintNode::BinaryOp { op, lhs, rhs } => {
                 let a = leaf_limbs(&witness.resolve(lhs)?)?;
@@ -228,10 +228,10 @@ enum UintNode {
 }
 
 impl UintNode {
-    /// `imm[0]` is the discriminant; the registry already matched `Uint`'s id, and `Uint`
-    /// ignores `imm[1..3]`.
-    fn parse(imm: [Felt; 3], payload: &Payload) -> Result<Self, PrecompileError> {
-        let kind = Discriminant::classify(imm[0]).ok_or(PrecompileError::InvalidNode)?;
+    /// `args[0]` is the discriminant; the registry already matched `Uint`'s id, and `Uint`
+    /// ignores `args[1..3]`.
+    fn parse(args: [Felt; 3], payload: &Payload) -> Result<Self, PrecompileError> {
+        let kind = Discriminant::classify(args[0]).ok_or(PrecompileError::InvalidNode)?;
         Ok(match kind {
             Discriminant::Leaf => {
                 decode_limbs(payload.as_felts()?)?;
