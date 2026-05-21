@@ -1,13 +1,13 @@
 //! Wire format for [`DeferredState`].
 //!
 //! The wire form is the passive bytes-shape that travels in proofs: a topologically-ordered
-//! list of entries plus the transcript root. Binary entries reference their children by *index*
+//! list of entries plus the transcript root. Join entries reference their children by *index*
 //! into earlier entries, not by digest — Poseidon2 digests are recomputed on the verifier side
 //! during rehydration. The wire deliberately carries no validated invariants; `Deserializable`
 //! just reads bytes, and the trusted bytes→state path runs through
 //! [`super::DeferredState::rehydrate`].
 //!
-//! Compared to a flat `Vec<Node>` layout, the index encoding shrinks every Binary entry from a
+//! Compared to a flat `Vec<Node>` layout, the index encoding shrinks every Join entry from a
 //! 64-byte payload (two child digests as felts) to 8 bytes (two `u32` indices) — meaningful
 //! savings for op-heavy programs and AND-chain–heavy proofs.
 
@@ -35,15 +35,14 @@ pub const TRUE_INDEX: u32 = u32::MAX;
 /// [`super::NodeType`] for the entry's tag happens during rehydration, not at the bytes layer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WireBody {
-    /// 8 raw felts as the payload. Used for self-evaluating value leaves (Uint256 leaf,
-    /// MockHash digest, ...) and, per the structural heuristic in
-    /// [`super::DeferredState::to_wire`], any Expression-bodied node whose two would-be child
-    /// digests don't both resolve.
+    /// 8 raw felts as the payload. Used for self-evaluating value leaves and, per the structural
+    /// heuristic in [`super::DeferredState::to_wire`], any Expression-bodied node whose two
+    /// would-be child digests don't both resolve.
     Value([Felt; 8]),
     /// Two indices into earlier wire entries. Each is either a valid index `< current_idx` or
     /// [`TRUE_INDEX`] for the transcript terminal. Rehydration reconstructs the digest-form
     /// payload as `Payload::join(digests[lhs], digests[rhs])`.
-    Binary { lhs: u32, rhs: u32 },
+    Join { lhs: u32, rhs: u32 },
     /// `n` chunks of bulk data. Self-describing on the wire (length-prefixed) so deserialization
     /// doesn't depend on the schema for chunk counts.
     Chunks(Arc<[Chunk]>),
@@ -65,7 +64,7 @@ pub struct WireEntry {
 
 /// Wire-format representation of a [`super::DeferredState`].
 ///
-/// `entries` are topologically ordered: each `Binary` entry's child indices are strictly less
+/// `entries` are topologically ordered: each `Join` entry's child indices are strictly less
 /// than its own index (or equal to [`TRUE_INDEX`]). [`super::DeferredState::to_wire`] produces
 /// such an ordering via DFS post-order from `root`. The deferred commitment is *derived* from
 /// the wire — specifically, the digest of the last entry (which is structurally the topmost
@@ -88,7 +87,7 @@ impl Serializable for WireBody {
                     felt.write_into(target);
                 }
             },
-            WireBody::Binary { lhs, rhs } => {
+            WireBody::Join { lhs, rhs } => {
                 target.write_u8(1);
                 target.write_u32(*lhs);
                 target.write_u32(*rhs);
@@ -119,7 +118,7 @@ impl Deserializable for WireBody {
             1 => {
                 let lhs = source.read_u32()?;
                 let rhs = source.read_u32()?;
-                Ok(WireBody::Binary { lhs, rhs })
+                Ok(WireBody::Join { lhs, rhs })
             },
             2 => {
                 let n = source.read_usize()?;
@@ -142,7 +141,7 @@ impl Deserializable for WireBody {
 
 impl Serializable for WireEntry {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        // Wire layout is the 4-felt capacity `[id, imm0, imm1, imm2]` — byte-identical to the
+        // Wire layout is the 4-felt capacity `[id, arg0, arg1, arg2]` — byte-identical to the
         // pre-`Tag`-struct format.
         for felt in &self.tag.as_word() {
             felt.write_into(target);
@@ -197,16 +196,16 @@ impl Deserializable for DeferredStateWire {
 /// (wraps `DeferredError`). Tests should `matches!` on variants, not `assert_eq!` whole values.
 #[derive(Debug, thiserror::Error)]
 pub enum IntegrityError {
-    /// A `Binary`-body entry's child index is out of range (≥ its own position and not
+    /// A `Join`-body entry's child index is out of range (≥ its own position and not
     /// [`TRUE_INDEX`]).
-    #[error("wire Binary entry references an out-of-range child index")]
+    #[error("wire Join entry references an out-of-range child index")]
     BadIndex,
     /// A node's tag is not claimed by the installed schema.
     #[error("wire contains a node with a tag the installed schema does not recognise")]
     UnknownTag,
     /// A node's reconstructed payload shape disagrees with `schema.decode(tag).node_type`. In
     /// practice this fires when a `Chunks` entry's chunk count doesn't match the schema-declared
-    /// arity, or when a tag declared `NodeType::Chunks(n)` is encoded as `Value`/`Binary`.
+    /// arity, or when a tag declared `NodeType::Chunks(n)` is encoded as `Value`/`Join`.
     #[error("wire contains a node whose payload shape disagrees with its tag's declared NodeType")]
     ShapeMismatch,
     /// An AND-chain step's `prev_root` references a digest not present in the wire entries —
@@ -218,8 +217,8 @@ pub enum IntegrityError {
     /// An AND-chain step does not have `tag == Tag::TRUE` (corrupt transcript).
     #[error("AND-chain walk encountered a node whose tag is not Tag::TRUE")]
     NonAndNode,
-    /// An AND-chain step's payload doesn't decode as a binary `(prev_root, stmt_digest)`.
-    #[error("AND-chain walk encountered a node whose payload is not in binary-op shape")]
+    /// An AND-chain step's payload doesn't decode as a join `(prev_root, stmt_digest)`.
+    #[error("AND-chain walk encountered a node whose payload is not in join shape")]
     BadAndPayload,
     /// A statement referenced by an AND-node is not in the wire.
     #[error("AND-chain walk references a statement digest that is not in the node set")]
@@ -264,7 +263,7 @@ mod tests {
                 },
                 WireEntry {
                     tag: Tag::from_word(felts(3)[..4].try_into().unwrap()),
-                    body: WireBody::Binary { lhs: 0, rhs: TRUE_INDEX },
+                    body: WireBody::Join { lhs: 0, rhs: TRUE_INDEX },
                 },
             ],
         };

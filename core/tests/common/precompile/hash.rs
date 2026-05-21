@@ -5,10 +5,10 @@
 //! chunks into an 8-felt accumulator — deterministic, trivially testable, definitely not
 //! collision-resistant. A real `Keccak` / `Sha512` precompile would slot in by swapping the kernel.
 //!
-//! Tag layout (`Hash`-specific, opaque to the framework) — `Tag { id, imm: [node_disc, imm,
+//! Tag layout (`Hash`-specific, opaque to the framework) — `Tag { id, args: [node_disc, n_bytes,
 //! ZERO] }`:
 //!
-//! - `preimage` (disc 0) — chunk-bodied; `imm = n_bytes`; body is `Chunk(ceil(n_bytes / 32))`.
+//! - `preimage` (disc 0) — chunk-bodied; `args[1] = n_bytes`; body is `Chunk(ceil(n_bytes / 32))`.
 //!   Reduces to a `digest` leaf.
 //! - `digest`   (disc 1) — expression-bodied (8-felt digest); self-evaluating.
 //! - `eq`       (disc 2) — expression-bodied predicate over two child digests.
@@ -48,7 +48,7 @@ impl Hash {
     pub fn preimage_tag(n_bytes: u32) -> Tag {
         Tag {
             id: Self::id(),
-            imm: [Felt::from_u32(Self::PREIMAGE_TAG_ID), Felt::from_u32(n_bytes), ZERO],
+            args: [Felt::from_u32(Self::PREIMAGE_TAG_ID), Felt::from_u32(n_bytes), ZERO],
         }
     }
 
@@ -56,7 +56,7 @@ impl Hash {
     pub fn digest_tag() -> Tag {
         Tag {
             id: Self::id(),
-            imm: [Felt::from_u32(Self::DIGEST_TAG_ID), ZERO, ZERO],
+            args: [Felt::from_u32(Self::DIGEST_TAG_ID), ZERO, ZERO],
         }
     }
 
@@ -64,7 +64,7 @@ impl Hash {
     pub fn eq_tag() -> Tag {
         Tag {
             id: Self::id(),
-            imm: [Felt::from_u32(Self::EQ_TAG_ID), ZERO, ZERO],
+            args: [Felt::from_u32(Self::EQ_TAG_ID), ZERO, ZERO],
         }
     }
 
@@ -121,34 +121,34 @@ impl Precompile for Hash {
         Self::id()
     }
 
-    fn decode(&self, imm: [Felt; 3]) -> Option<NodeType> {
-        match Discriminant::classify(imm[0])? {
+    fn decode(&self, args: [Felt; 3]) -> Option<NodeType> {
+        match Discriminant::classify(args[0])? {
             Discriminant::Preimage => {
-                // `imm[1]` carries n_bytes; the chunk count is derived.
-                let n_bytes = u32::try_from(imm[1].as_canonical_u64()).ok()?;
+                // `args[1]` carries n_bytes; the chunk count is derived.
+                let n_bytes = u32::try_from(args[1].as_canonical_u64()).ok()?;
                 Some(NodeType::Chunks(Self::n_chunks(n_bytes)))
             },
             // Self-evaluating leaf carrying 8 raw felts of digest data.
             Discriminant::Digest => Some(NodeType::Value),
             // Binary predicate over two child digests.
-            Discriminant::Eq => Some(NodeType::Binary),
+            Discriminant::Eq => Some(NodeType::Join),
         }
     }
 
     fn reduce(
         &self,
-        imm: [Felt; 3],
+        args: [Felt; 3],
         payload: &Payload,
         witness: &mut WitnessBuilder<'_>,
     ) -> Result<Node, PrecompileError> {
-        match Discriminant::classify(imm[0]).ok_or(PrecompileError::InvalidNode)? {
+        match Discriminant::classify(args[0]).ok_or(PrecompileError::InvalidNode)? {
             Discriminant::Preimage => {
                 // Inline hash → canonical digest leaf. No minting needed: the digest IS the
                 // canonical payload.
                 Ok(Self::digest_node(Self::hash(payload.as_chunks()?)))
             },
             Discriminant::Digest => {
-                Ok(Node::expression(Tag::new(Self::id(), imm), Payload::new(*payload.as_felts()?)))
+                Ok(Node::expression(Tag::new(Self::id(), args), Payload::new(*payload.as_felts()?)))
             },
             Discriminant::Eq => {
                 let (h_lhs, h_rhs) = payload.join_children()?;

@@ -44,16 +44,16 @@ pub type Digest = Word;
 ///
 /// `id == ZERO` is reserved for the framework — it tags the canonical TRUE node and the AND
 /// (transcript-step) nodes. No [`Precompile`] may derive id `ZERO`;
-/// [`PrecompileRegistry::with_precompile`] rejects one that does. The `imm` felts are opaque to
-/// `miden-core` and the processor: each
+/// [`PrecompileRegistry::with_precompile`] rejects one that does. The [`Tag::args`] felts are
+/// opaque to `miden-core` and the processor: each
 /// precompile decodes whatever structure (discriminant, chunk length, …) it needs out of them.
 ///
-/// Laid out as `[id, imm0, imm1, imm2]` in the Poseidon2 capacity and on the wire — see
+/// Laid out as `[id, arg0, arg1, arg2]` in the Poseidon2 capacity and on the wire — see
 /// [`Tag::as_word`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Tag {
     pub id: Felt,
-    pub imm: [Felt; 3],
+    pub args: [Felt; 3],
 }
 
 impl Tag {
@@ -61,23 +61,23 @@ impl Tag {
     /// (transcript-step nodes). No precompile may claim id `ZERO` — the framework owns it.
     ///
     /// Paired with [`TRUE_DIGEST`].
-    pub const TRUE: Tag = Tag { id: ZERO, imm: [ZERO; 3] };
+    pub const TRUE: Tag = Tag { id: ZERO, args: [ZERO; 3] };
 
     /// Build a tag from a precompile id and its three immediate felts.
-    pub const fn new(id: Felt, imm: [Felt; 3]) -> Self {
-        Self { id, imm }
+    pub const fn new(id: Felt, args: [Felt; 3]) -> Self {
+        Self { id, args }
     }
 
-    /// The 4-felt word `[id, imm0, imm1, imm2]` — the layout fed to the Poseidon2 capacity and
+    /// The 4-felt word `[id, arg0, arg1, arg2]` — the layout fed to the Poseidon2 capacity and
     /// written to the wire.
     pub const fn as_word(&self) -> [Felt; 4] {
-        [self.id, self.imm[0], self.imm[1], self.imm[2]]
+        [self.id, self.args[0], self.args[1], self.args[2]]
     }
 
-    /// Inverse of [`Self::as_word`]: split a 4-felt word into `id` and `imm`. Used by the
+    /// Inverse of [`Self::as_word`]: split a 4-felt word into `id` and `args`. Used by the
     /// processor (operand-stack reads) and the wire decoder.
     pub const fn from_word(w: [Felt; 4]) -> Self {
-        Self { id: w[0], imm: [w[1], w[2], w[3]] }
+        Self { id: w[0], args: [w[1], w[2], w[3]] }
     }
 }
 
@@ -293,11 +293,11 @@ mod tests {
 
     const TAG_A: Tag = Tag {
         id: Felt::new_unchecked(1),
-        imm: [Felt::new_unchecked(0); 3],
+        args: [Felt::new_unchecked(0); 3],
     };
     const TAG_B: Tag = Tag {
         id: Felt::new_unchecked(1),
-        imm: [Felt::new_unchecked(0), Felt::new_unchecked(1), Felt::new_unchecked(0)],
+        args: [Felt::new_unchecked(0), Felt::new_unchecked(1), Felt::new_unchecked(0)],
     };
 
     fn payload(seed: u64) -> Payload {
@@ -374,7 +374,7 @@ mod tests {
 
     #[test]
     fn true_tag_and_digest_are_zero_word() {
-        assert_eq!(Tag::TRUE, Tag { id: ZERO, imm: [ZERO; 3] });
+        assert_eq!(Tag::TRUE, Tag { id: ZERO, args: [ZERO; 3] });
         assert_eq!(TRUE_DIGEST, Word::new([ZERO; 4]));
     }
 

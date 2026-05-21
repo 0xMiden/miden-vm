@@ -129,7 +129,7 @@ impl DeferredState {
     /// Paired with [`Self::evaluate`] — together they back the `DeferredRegister` and
     /// `DeferredEvaluate` system events. `register` is the cheap "commit this node to the wire"
     /// step that returns a digest the caller can chain into downstream nodes (as an operand of
-    /// a Binary op, or as a statement passed to `log_precompile`); `evaluate` is the recursive
+    /// a Join op, or as a statement passed to `log_precompile`); `evaluate` is the recursive
     /// reduce on an already-registered node. Splitting them lets the caller declare children
     /// without forcing a reduce, and lets the verifier re-run identical paths during rehydrate.
     ///
@@ -178,7 +178,7 @@ impl DeferredState {
     }
 
     /// Serialize this state to its wire form. Walks reachable nodes from `root` in DFS
-    /// post-order, assigning each visited node a `u32` index in emission order. `Binary`-shape
+    /// post-order, assigning each visited node a `u32` index in emission order. `Join`-shape
     /// entries encode their children as indices into the earlier wire entries (or
     /// [`crate::deferred::TRUE_INDEX`] for the [`TRUE_DIGEST`] terminal). Registered orphans
     /// (nodes nothing in the AND-chain references) fall outside the closure and are dropped —
@@ -187,8 +187,8 @@ impl DeferredState {
     /// Reachability is computed *structurally*, without consulting the schema: for any node
     /// with an `Expression` payload, interpret the 8 felts as `(lhs_digest, rhs_digest)`. If
     /// both digests resolve in `self.nodes` (or are [`TRUE_DIGEST`]), the encoder treats the
-    /// node as Binary and emits indices; otherwise it falls back to `Value` (raw felts). Real
-    /// Binary children are always registered (the user pre-registers operands before logging),
+    /// node as Join and emits indices; otherwise it falls back to `Value` (raw felts). Real
+    /// Join children are always registered (the user pre-registers operands before logging),
     /// so the heuristic never misses one. False positives — a `Value` leaf whose 8 payload felts
     /// happen to coincide with the digests of two registered nodes — round-trip safely because
     /// the reconstructed payload bytes are byte-identical.
@@ -221,7 +221,7 @@ impl DeferredState {
             return;
         };
 
-        // Determine whether this is a real Binary node (children resolve) or a Value-shaped
+        // Determine whether this is a real Join node (children resolve) or a Value-shaped
         // node. For Chunk bodies, no children to recurse into.
         let mut binary_indices: Option<(Digest, Digest)> = None;
         if let Ok((lhs, rhs)) = node.payload.join_children() {
@@ -252,7 +252,7 @@ impl DeferredState {
                 } else {
                     by_digest[&rhs]
                 };
-                super::WireBody::Binary { lhs: lhs_idx, rhs: rhs_idx }
+                super::WireBody::Join { lhs: lhs_idx, rhs: rhs_idx }
             },
         };
         entries.push(super::WireEntry { tag: node.tag, body });
@@ -265,7 +265,7 @@ impl DeferredState {
     ///
     /// The two phases:
     /// - **Phase 1 (structural):** read each wire entry in order, reconstruct the digest-form
-    ///   [`Node`] (translating `Binary` indices to the digests of earlier entries),
+    ///   [`Node`] (translating `Join` indices to the digests of earlier entries),
     ///   `precompiles.decode` the tag, and intern. Index bounds and chunk arities are validated;
     ///   `payload_matches_type` confirms the decoded [`NodeType`] is compatible with the in-memory
     ///   shape.
@@ -283,7 +283,7 @@ impl DeferredState {
         precompiles: &PrecompileRegistry,
     ) -> Result<Self, IntegrityError> {
         let mut state = Self::new();
-        // Parallel to `wire.entries`: the recomputed digest at each index. `Binary` entries at
+        // Parallel to `wire.entries`: the recomputed digest at each index. `Join` entries at
         // position `i` reconstruct their payload by reading earlier `digests[lhs/rhs]` (or
         // `TRUE_DIGEST` when the index is `TRUE_INDEX`).
         let mut digests: Vec<Digest> = Vec::with_capacity(wire.entries.len());
@@ -292,7 +292,7 @@ impl DeferredState {
             let node = match &entry.body {
                 super::WireBody::Value(felts) => Node::expression(entry.tag, Payload::new(*felts)),
                 super::WireBody::Chunks(chunks) => Node::chunk(entry.tag, chunks.clone()),
-                super::WireBody::Binary { lhs, rhs } => {
+                super::WireBody::Join { lhs, rhs } => {
                     let lhs_d = resolve_index(*lhs, i, &digests)?;
                     let rhs_d = resolve_index(*rhs, i, &digests)?;
                     Node::expression(entry.tag, Payload::join(lhs_d, rhs_d))
@@ -389,7 +389,7 @@ impl DeferredState {
 // `DeferredState::rehydrate(&wire, schema)`. This keeps the only path from untrusted bytes to
 // an in-memory state through the schema-validated, chain-walked rehydrate constructor.
 
-/// Resolve a wire `Binary` child index against the digest table built so far during phase 1 of
+/// Resolve a wire `Join` child index against the digest table built so far during phase 1 of
 /// rehydrate. [`super::TRUE_INDEX`] maps to [`TRUE_DIGEST`]; any other value must be a valid
 /// position strictly less than the current entry (topological invariant).
 fn resolve_index(idx: u32, current: usize, digests: &[Digest]) -> Result<Digest, IntegrityError> {
@@ -404,14 +404,14 @@ fn resolve_index(idx: u32, current: usize, digests: &[Digest]) -> Result<Digest,
 }
 
 /// Decode a node's [`NodeType`] for `rehydrate`. Framework-owned `Tag::TRUE` AND-nodes are
-/// classified as `Binary` directly (no precompile claims id `ZERO`); everything else routes
+/// classified as `Join` directly (no precompile claims id `ZERO`); everything else routes
 /// through `precompiles.decode`.
 fn decode_node_type(
     precompiles: &PrecompileRegistry,
     node: &Node,
 ) -> Result<NodeType, IntegrityError> {
     if node.tag == Tag::TRUE {
-        return Ok(NodeType::Binary);
+        return Ok(NodeType::Join);
     }
     precompiles.decode(node.tag).map_err(|_| IntegrityError::UnknownTag)
 }
@@ -420,12 +420,12 @@ fn decode_node_type(
 /// for the node's tag. Construction-time invariant — handlers always build the matching variant,
 /// but a hand-constructed `Node` may disagree.
 ///
-/// `Value` and `Binary` both map to `Payload::Expression` at the in-memory level — the tag is
+/// `Value` and `Join` both map to `Payload::Expression` at the in-memory level — the tag is
 /// the source of truth for whether the 8 felts encode raw data or two child digests, and the
 /// precompile rejects payload-semantic violations inside `reduce`.
 fn payload_matches_type(nt: NodeType, payload: &Payload) -> bool {
     match (nt, payload) {
-        (NodeType::Value | NodeType::Binary, Payload::Expression(_)) => true,
+        (NodeType::Value | NodeType::Join, Payload::Expression(_)) => true,
         (NodeType::Chunks(n), Payload::Chunk(chunks)) => chunks.len() == n as usize,
         _ => false,
     }
@@ -653,7 +653,7 @@ mod tests {
         // TestPrecompile id + unknown discriminant: schema decode returns Err.
         let bad_tag = Tag {
             id: TestPrecompile::id(),
-            imm: [Felt::from_u32(99), ZERO, ZERO],
+            args: [Felt::from_u32(99), ZERO, ZERO],
         };
         let bad = Node::expression(bad_tag, Payload::new([Felt::from_u32(0); 8]));
         let err = state.register(&schema, bad);
@@ -891,7 +891,7 @@ mod tests {
             .unwrap();
         let assertion = Node::expression(TestPrecompile::eq_tag(), Payload::join(mul, expected));
         // `log` references the predicate node by digest; pre-register so the wire embeds it as
-        // a Binary entry rather than a bare-commitment Value.
+        // a Join entry rather than a bare-commitment Value.
         let stmt_digest = state.register(&schema, assertion.clone()).unwrap();
         state.evaluate(&schema, assertion).unwrap();
         let new_root =
@@ -922,12 +922,12 @@ mod tests {
 
     #[test]
     fn rehydrate_rejects_bad_index() {
-        // A Binary entry whose lhs index points past the (empty) digest table: index 0 is not
+        // A Join entry whose lhs index points past the (empty) digest table: index 0 is not
         // < its own position 0 → BadIndex.
         let wire = DeferredStateWire {
             entries: alloc::vec![crate::deferred::WireEntry {
                 tag: TestPrecompile::add_tag(),
-                body: crate::deferred::WireBody::Binary { lhs: 0, rhs: 0 },
+                body: crate::deferred::WireBody::Join { lhs: 0, rhs: 0 },
             }],
         };
         let err = DeferredState::rehydrate(&wire, &precompiles());
@@ -939,7 +939,7 @@ mod tests {
         // A tag the schema rejects — its id doesn't match TestPrecompile.
         let bogus_tag = Tag {
             id: Felt::new_unchecked(0xdead),
-            imm: [ZERO; 3],
+            args: [ZERO; 3],
         };
         let wire = DeferredStateWire {
             entries: alloc::vec![crate::deferred::WireEntry {
@@ -1030,7 +1030,7 @@ mod tests {
         //
         // Entries (DFS post-order):
         //   [0] leaf `a` = test_leaf(7)                              — Value
-        //   [1] predicate eq(a, a)                                   — Binary (lhs=rhs=0)
+        //   [1] predicate eq(a, a)                                   — Join (lhs=rhs=0)
         //   [2] AND-node { Tag::TRUE, payload: (bogus_prev, pred) }   — Value (raw felts; the
         //       AND-node's `prev_root` can't be encoded as a wire index because it intentionally
         //       doesn't appear in the entries)
@@ -1052,7 +1052,7 @@ mod tests {
                 },
                 crate::deferred::WireEntry {
                     tag: pred.tag,
-                    body: crate::deferred::WireBody::Binary { lhs: 0, rhs: 0 },
+                    body: crate::deferred::WireBody::Join { lhs: 0, rhs: 0 },
                 },
                 crate::deferred::WireEntry {
                     tag: Tag::TRUE,
@@ -1076,8 +1076,8 @@ mod tests {
         // Entries:
         //   [0] leaf a = test_leaf(7)            — Value
         //   [1] orphan = test_leaf(99)           — Value (dangling: unreferenced)
-        //   [2] predicate eq(a, a)               — Binary { lhs: 0, rhs: 0 }
-        //   [3] AND { Tag::TRUE, (TRUE, pred) }   — Binary { lhs: TRUE_INDEX, rhs: 2 }
+        //   [2] predicate eq(a, a)               — Join { lhs: 0, rhs: 0 }
+        //   [3] AND { Tag::TRUE, (TRUE, pred) }   — Join { lhs: TRUE_INDEX, rhs: 2 }
         let a = test_leaf(7);
         let a_payload = *a.payload.as_felts().expect("leaf is expression-bodied");
         let orphan = test_leaf(99);
@@ -1097,11 +1097,11 @@ mod tests {
                 },
                 crate::deferred::WireEntry {
                     tag: pred.tag,
-                    body: crate::deferred::WireBody::Binary { lhs: 0, rhs: 0 },
+                    body: crate::deferred::WireBody::Join { lhs: 0, rhs: 0 },
                 },
                 crate::deferred::WireEntry {
                     tag: Tag::TRUE,
-                    body: crate::deferred::WireBody::Binary {
+                    body: crate::deferred::WireBody::Join {
                         lhs: crate::deferred::TRUE_INDEX,
                         rhs: 2,
                     },

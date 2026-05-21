@@ -87,19 +87,19 @@ impl PrecompileRegistry {
         Ok(())
     }
 
-    /// Decode `tag` to its [`NodeType`] by routing [`Tag::imm`](crate::deferred::Tag) to the
+    /// Decode `tag` to its [`NodeType`] by routing [`Tag::args`](crate::deferred::Tag) to the
     /// precompile owning [`Tag::id`](crate::deferred::Tag). An unknown id is rejected by the
     /// registry itself (not name-wrapped); a precompile's own rejection is name-wrapped.
     pub fn decode(&self, tag: Tag) -> Result<NodeType, PrecompileError> {
         let p = self.precompiles.get(&tag.id).ok_or(PrecompileError::InvalidNode)?;
-        p.decode(tag.imm).ok_or_else(|| PrecompileError::Precompile {
+        p.decode(tag.args).ok_or_else(|| PrecompileError::Precompile {
             name: p.name(),
             source: Box::new(PrecompileError::InvalidNode),
         })
     }
 
     /// Reduce `node` via the precompile owning its [`Tag::id`](crate::deferred::Tag). The
-    /// registry is the adapter: it hands the precompile only `node.tag.imm` and `node.payload`
+    /// registry is the adapter: it hands the precompile only `node.tag.args` and `node.payload`
     /// (the precompile never re-checks the id), and name-wraps the precompile's failure so
     /// dispatch errors are attributable. See [`Precompile::reduce`] for the per-kind contract.
     pub fn reduce(
@@ -108,7 +108,7 @@ impl PrecompileRegistry {
         witness: &mut WitnessBuilder<'_>,
     ) -> Result<Node, PrecompileError> {
         let p = self.precompiles.get(&node.tag.id).ok_or(PrecompileError::InvalidNode)?;
-        p.reduce(node.tag.imm, &node.payload, witness).map_err(|source| {
+        p.reduce(node.tag.args, &node.payload, witness).map_err(|source| {
             PrecompileError::Precompile { name: p.name(), source: Box::new(source) }
         })
     }
@@ -133,7 +133,7 @@ mod tests {
             Self { name }
         }
         fn tag(&self) -> Tag {
-            Tag { id: self.id(), imm: [ZERO; 3] }
+            Tag { id: self.id(), args: [ZERO; 3] }
         }
     }
 
@@ -144,20 +144,20 @@ mod tests {
         fn id(&self) -> Felt {
             precompile_id(self)
         }
-        fn decode(&self, imm: [Felt; 3]) -> Option<NodeType> {
-            if imm != [ZERO; 3] {
+        fn decode(&self, args: [Felt; 3]) -> Option<NodeType> {
+            if args != [ZERO; 3] {
                 return None;
             }
             Some(NodeType::Value)
         }
         fn reduce(
             &self,
-            imm: [Felt; 3],
+            args: [Felt; 3],
             payload: &Payload,
             _witness: &mut WitnessBuilder<'_>,
         ) -> Result<Node, PrecompileError> {
             let felts = payload.as_felts()?;
-            Ok(Node::expression(Tag::new(self.id(), imm), Payload::new(*felts)))
+            Ok(Node::expression(Tag::new(self.id(), args), Payload::new(*felts)))
         }
     }
 
@@ -178,7 +178,7 @@ mod tests {
         let registry = PrecompileRegistry::default().with_precompile(Fixture::new("known"));
         let bogus = Tag {
             id: Felt::new_unchecked(9999),
-            imm: [ZERO; 3],
+            args: [ZERO; 3],
         };
         // Unknown id is rejected by the registry itself (not a precompile), so it is *not*
         // name-wrapped.
@@ -189,7 +189,7 @@ mod tests {
     fn fixture_rejects_nonzero_immediate() {
         let f = Fixture::new("f");
         let mut tag = f.tag();
-        tag.imm[2] = Felt::new_unchecked(1);
+        tag.args[2] = Felt::new_unchecked(1);
         let registry = PrecompileRegistry::default().with_precompile(f);
         // The fixture chose to reject the immediate, so the registry name-wraps the cause.
         assert!(matches!(registry.decode(tag).unwrap_err().root(), PrecompileError::InvalidNode));
