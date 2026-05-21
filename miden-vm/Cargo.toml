@@ -44,10 +44,6 @@ harness = false
 name = "deserialize_core_lib"
 harness = false
 
-[[bench]]
-name = "blake3_1to1_codspeed"
-harness = false
-
 [[test]]
 name = "miden-cli"
 path = "tests/integration/main.rs"
@@ -95,7 +91,6 @@ tracing-forest = { version = "0.2", optional = true, features = ["ansi", "smallv
 
 [dev-dependencies]
 assert_cmd = { version = "2.1" }
-codspeed = { workspace = true }
 criterion = { workspace = true, features = ["async_tokio"] }
 escargot = { version = "0.5" }
 miden-processor = { workspace = true, features = ["testing"] }
