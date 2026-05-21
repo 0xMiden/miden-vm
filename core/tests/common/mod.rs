@@ -11,13 +11,12 @@ pub mod precompile;
 
 use miden_core::deferred::{DeferredState, Node, Payload, PrecompileRegistry, Tag};
 
-/// Defense-in-depth round-trip for the `precompile_*` suites.
+/// Round-trip helper for the `precompile_*` suites.
 ///
-/// Drives the realistic precompile lifecycle — register `predicate`, evaluate it (it must reduce
-/// to the TRUE sentinel), and log it as a transcript step — then [`assert_round_trips`] that the
-/// accumulated state survives `to_wire` + `rehydrate`. `rehydrate` re-evaluates the predicate
-/// through the precompile's own `reduce`, so any reduce/intern logic that yields a
-/// non-round-trippable transcript fails loudly here rather than silently shipping a broken witness.
+/// Drives the precompile lifecycle — register `predicate`, evaluate it (it must reduce to the TRUE
+/// sentinel), and log it as a transcript step — then asserts via [`assert_round_trips`] that the
+/// accumulated state survives `to_wire` + `rehydrate` (which re-evaluates the predicate through
+/// the precompile's own `reduce`).
 pub fn log_and_verify(schema: &PrecompileRegistry, state: &mut DeferredState, predicate: Node) {
     let stmt_digest = state.register(schema, predicate.clone()).unwrap();
     assert!(
@@ -31,9 +30,7 @@ pub fn log_and_verify(schema: &PrecompileRegistry, state: &mut DeferredState, pr
 
 /// Assert that `state` survives a `to_wire` → `rehydrate` round-trip: the root matches and every
 /// reproduced node agrees with the source. `rehydrate` already rejects danglers and re-evaluates
-/// each predicate, so a dropped reachable node fails inside it before we compare. (Duplicated as
-/// `assert_round_trips` in `core/src/deferred/state.rs`'s unit tests — the round-trip check is a
-/// test concern, deliberately kept out of `DeferredState`'s public API.)
+/// each predicate, so a dropped reachable node fails inside it before we compare.
 pub fn assert_round_trips(state: &DeferredState, schema: &PrecompileRegistry) {
     let rehydrated = DeferredState::rehydrate(&state.to_wire(), schema).unwrap();
     assert_eq!(rehydrated.root(), state.root());

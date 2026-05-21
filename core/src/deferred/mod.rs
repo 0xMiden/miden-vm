@@ -5,7 +5,7 @@
 //! `DeferredRegisterChunk` / `DeferredEvaluate` system events to build a DAG of [`Node`]s, each
 //! addressed by its 4-felt Poseidon2 digest. The [`PrecompileRegistry`] dispatches every
 //! [`Tag::id`] to the right precompile, which decodes the immediate felts and reduces the node
-//! to its canonical form. `log_precompile` extends a rolling AND-chain whose head — the
+//! to its canonical form. [`DeferredState::log`] extends a rolling AND-chain whose head — the
 //! transcript root — is the verifier's single fixed point: reduce the root to TRUE and every
 //! logged statement holds.
 //!
@@ -243,8 +243,8 @@ impl Node {
     /// expression and assertion nodes, the 8-felt payload fills the rate and a single permutation
     /// produces the digest. For chunk nodes, each 8-felt chunk overwrites the rate and the
     /// permutation iterates `n` times (linear hash); the empty `n == 0` case still applies one
-    /// permutation so the digest binds the tag. The in-circuit chunk verifier (when added) must
-    /// mirror this — including the one-permutation rule for `n == 0`, which is unusual for a
+    /// permutation so the digest binds the tag. The in-circuit chunk verifier must mirror this —
+    /// including the one-permutation rule for `n == 0`, which is unusual for a
     /// "linear hash of zero elements" but matches what `Node::digest` computes here.
     ///
     /// For `n == 1` the chunk digest is byte-identical to the equivalent Expression digest with
@@ -254,7 +254,7 @@ impl Node {
     /// digest is *not* [`TRUE_DIGEST`]. That sentinel is purely a verifier-side handle for the
     /// "trivial transcript" / "empty AND" terminal; it is never the `.digest()` of any concrete
     /// `Node`. This keeps `Node::digest` honest to the in-circuit hasher, so AND-nodes interned
-    /// after `log_precompile` (whose digest is computed by the in-circuit permute) match what
+    /// by [`DeferredState::log`] (whose digest is computed by the in-circuit permute) match what
     /// callers compute here.
     pub fn digest(&self) -> Digest {
         let mut state = [ZERO; 12];
@@ -421,7 +421,7 @@ mod tests {
     fn true_node_hashes_normally_via_poseidon2() {
         // TRUE-node is not digest-special-cased: it hashes through Poseidon2 like any other
         // node, producing a specific non-zero word. This keeps `Node::digest()` honest to the
-        // in-circuit hasher — critical for AND-nodes interned by `log_precompile` (where the
+        // in-circuit hasher — critical for AND-nodes interned by `DeferredState::log` (where the
         // in-circuit hasher computes the same `merge(0, 0)` value).
         assert_ne!(Node::TRUE.digest(), TRUE_DIGEST);
     }

@@ -8,8 +8,8 @@
 //!
 //! Tag layout: `Tag { id, args: [Felt; 3] }`. Only `id` is framework-owned (validated against
 //! [`precompile_id`]; `ZERO` is reserved for the framework's TRUE / AND nodes, so a precompile
-//! may not derive id `ZERO`). The three `args` felts are *entirely* the precompile's to
-//! interpret — the framework imposes no structure, no reserved felt, no zeroing convention.
+//! may not derive id `ZERO`). The three `args` felts are entirely the precompile's to interpret:
+//! each precompile decides which of them are meaningful and what they mean.
 
 use alloc::{format, vec::Vec};
 
@@ -21,9 +21,8 @@ use crate::{Felt, utils::hash_string_to_word};
 
 /// A single semantic module of a [`PrecompileRegistry`](crate::deferred::PrecompileRegistry).
 ///
-/// A precompile owns a slice of the tag space identified by its [`Tag::id`](crate::deferred::Tag).
-/// The framework imposes *nothing* on the three immediate felts: each precompile decides which
-/// of them are meaningful and what they mean.
+/// A precompile owns a slice of the tag space identified by its [`Tag::id`](crate::deferred::Tag),
+/// and interprets its three immediate felts however it likes.
 pub trait Precompile: Send + Sync {
     /// Hashed into the precompile id. Renaming breaks decoding for existing programs.
     fn name(&self) -> &'static str;
@@ -47,8 +46,7 @@ pub trait Precompile: Send + Sync {
     /// Decode the precompile-local immediate felts (`tag.args`) to the tag's [`NodeType`].
     /// Returning `None` rejects the tag; the registry wraps that into the framework error,
     /// tagged with this precompile's name. `tag.id` has already been matched to this precompile
-    /// by the registry, so `decode` only inspects the felts it cares about — there is no
-    /// framework-mandated reserved felt.
+    /// by the registry, so `decode` only inspects the felts it cares about.
     fn decode(&self, args: [Felt; 3]) -> Option<NodeType>;
 
     /// Reduce a node owned by this precompile to its canonical form, given the node's immediate

@@ -45,8 +45,7 @@ const CHUNK_TAG_OFFSET: usize = 1;
 /// Stack offset of the chunk pointer (single felt at position 5).
 const CHUNK_PTR_OFFSET: usize = 5;
 
-/// Reads `(tag, payload)` from the operand stack at the `DeferredRegister` / `DeferredEvaluate`
-/// layout.
+/// Reads `(tag, payload)` from the operand stack at the `DeferredRegister` layout.
 fn read_tag_and_payload(processor: &FastProcessor) -> (Tag, Payload) {
     let lo = processor.stack_get_word(DEFERRED_PAYLOAD_LO_OFFSET);
     let hi = processor.stack_get_word(DEFERRED_PAYLOAD_HI_OFFSET);
@@ -77,8 +76,8 @@ fn build_standard_node(
 /// the precompile registry to decode the tag, constructs the matching `Node`, and registers it.
 ///
 /// Pushes the registered node's digest onto the advice stack so MASM can chain it into
-/// downstream nodes (e.g. as a child digest of a Join op) or into `log_precompile` without
-/// having to recompute the digest in-circuit.
+/// downstream nodes (e.g. as a child digest of a Join op) or into a transcript-logging step
+/// without having to recompute the digest in-circuit.
 pub(super) fn handle_deferred_register(
     processor: &mut FastProcessor,
 ) -> Result<(), SystemEventError> {
@@ -146,15 +145,15 @@ pub(super) fn handle_deferred_evaluate(
 /// and registers a chunk node carrying that bulk data.
 ///
 /// Pushes the registered node's digest onto the advice stack so MASM can chain it into
-/// downstream nodes or into `log_precompile` without having to recompute the chunk-linear-hash
-/// digest in-circuit (which would be `n` Poseidon2 permutations).
+/// downstream nodes or into a transcript-logging step without having to recompute the
+/// chunk-linear-hash digest in-circuit (which would be `n` Poseidon2 permutations).
 ///
 /// Validation:
 /// - `ptr` must fit in `u32`.
 /// - `ptr` must be word-aligned (`ptr % 4 == 0`).
 /// - `ptr + 8n` must not overflow `u32`.
-/// - `8n` must not exceed the processor's `max_adv_map_value_size` (re-used as the bulk-data cap
-///   for now; sized for the same "do not let a single event explode memory" concern).
+/// - `8n` must not exceed the processor's `max_adv_map_value_size` (re-used as the bulk-data cap,
+///   sized for the same "do not let a single event explode memory" concern).
 pub(super) fn handle_deferred_register_chunk(
     processor: &mut FastProcessor,
 ) -> Result<(), SystemEventError> {

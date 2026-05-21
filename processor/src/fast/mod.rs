@@ -142,15 +142,15 @@ pub struct FastProcessor {
     pc_transcript: PrecompileTranscript,
 
     /// The deferred-DAG state accumulated during execution. Nodes are interned by the
-    /// `SystemEvent::DeferredRegister{,Chunk}` handlers and by the `log_precompile` opcode (which
-    /// interns AND-nodes). Threaded out through [`ExecutionOutput`] for the verifier to walk.
+    /// `SystemEvent::DeferredRegister{,Chunk}` handlers; AND-chain steps are interned by
+    /// `DeferredState::log`. Threaded out through [`ExecutionOutput`] for the verifier to walk.
     deferred_state: DeferredState,
 
     /// The deferred-DAG precompile registry installed at processor construction. Owns the
     /// entire semantic layer (tag recognition, validation, recursive evaluation, equality).
     /// Defaults to an empty [`PrecompileRegistry`] — any precompile tag is rejected. Callers
-    /// running programs that emit precompile tags add the precompiles they need (typically
-    /// `miden_core_lib::CoreLibrary::precompiles()`) via [`Self::with_precompile`].
+    /// running programs that emit precompile tags install the precompiles they need via
+    /// [`Self::with_precompile`].
     deferred_precompiles: Arc<PrecompileRegistry>,
 }
 
@@ -251,10 +251,8 @@ impl FastProcessor {
     /// Installs a [`Precompile`] for the deferred-DAG system events, chainable
     /// (`FastProcessor::new(...).with_precompile(a).with_precompile(b)`).
     ///
-    /// The default registry is empty — any precompile tag is rejected. To run programs that use
-    /// the core library's precompile MASM wrappers, add the relevant precompiles (typically
-    /// `miden_core_lib::CoreLibrary::precompiles()`, covering keccak256 / sha512 /
-    /// ecdsa_k256_keccak / eddsa_ed25519).
+    /// The default registry is empty — any precompile tag is rejected. Install the precompiles a
+    /// program needs before running it.
     ///
     /// Panics if the precompile is misconfigured (an id inconsistent with its name derivation,
     /// the framework-reserved `ZERO` id, or a duplicate id) — a setup-time programming error.

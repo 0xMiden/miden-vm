@@ -19,8 +19,8 @@ use super::{
 ///   `TRUE_DIGEST -> Node::TRUE` (terminal sentinel) and reused across evaluate calls. Not
 ///   serialized to wire.
 /// - `root`: the transcript root pointer. Initial value [`super::TRUE_DIGEST`]; advanced by
-///   `log_precompile`, which interns an AND-node `{tag: Tag::TRUE, payload: prev_root || stmnt}`
-///   and updates the root pointer. Reducing root to TRUE is the verifier's single check.
+///   [`Self::log`], which interns an AND-node `{tag: Tag::TRUE, payload: prev_root || stmnt}` and
+///   updates the root pointer. Reducing root to TRUE is the verifier's single check.
 ///
 /// This in-memory form does **not** travel in the proof. [`Self::to_wire`] lowers it to the
 /// passive [`DeferredStateWire`] (index-encoded, root derived from the last entry); that wire is
@@ -135,13 +135,13 @@ impl DeferredState {
     /// Paired with [`Self::evaluate`] — together they back the `DeferredRegister` and
     /// `DeferredEvaluate` system events. `register` is the cheap "commit this node to the wire"
     /// step that returns a digest the caller can chain into downstream nodes (as an operand of
-    /// a Join op, or as a statement passed to `log_precompile`); `evaluate` is the recursive
+    /// a Join op, or as a statement passed to [`Self::log`]); `evaluate` is the recursive
     /// reduce on an already-registered node. Splitting them lets the caller declare children
     /// without forcing a reduce, and lets the verifier re-run identical paths during rehydrate.
     ///
     /// Predicate tags are *not* verified at registration — register is a pure host hint that
     /// only populates the DAG. Verification is explicit: either host-side via [`Self::evaluate`],
-    /// or constrained via `log_precompile`.
+    /// or constrained via [`Self::log`].
     pub fn register(
         &mut self,
         precompiles: &PrecompileRegistry,
@@ -700,9 +700,9 @@ mod tests {
 
     #[test]
     fn register_predicate_does_not_verify_eagerly() {
-        // Under the unified design, `register` is a pure host hint — it interns the predicate
-        // node but does NOT drive reduce. Programs that want host-side verification call
-        // `evaluate`; programs that want constrained verification call `log_precompile`.
+        // `register` is a pure host hint — it interns the predicate node without driving reduce.
+        // Programs that want host-side verification call `evaluate`; programs that want
+        // constrained verification call `log`.
         let mut state = DeferredState::new();
         let schema = precompiles();
         let a = state.register(&schema, test_leaf(3)).unwrap();
@@ -786,7 +786,7 @@ mod tests {
         assert!(!state.contains(&assertion_digest), "evaluate does not auto-register input node");
         assert!(state.contains(&test_leaf(7).digest()), "canonical(add) is interned into nodes");
         assert!(state.contains(&Node::TRUE.digest()), "canonical(TRUE) is interned into nodes");
-        assert_eq!(state.root(), TRUE_DIGEST, "no log_precompile called, root is still TRUE");
+        assert_eq!(state.root(), TRUE_DIGEST, "no log called, root is still TRUE");
     }
 
     #[test]
@@ -827,8 +827,6 @@ mod tests {
     /// Assert that `state` survives a `to_wire` → `rehydrate` round-trip: the root matches and
     /// every reproduced node agrees with the source. `rehydrate` already rejects danglers and
     /// re-evaluates each predicate, so a dropped reachable node fails inside it before we compare.
-    /// (Duplicated as `common::assert_round_trips` in the precompile integration suites — the
-    /// round-trip check is a test concern, deliberately kept out of `DeferredState`'s public API.)
     fn assert_round_trips(state: &DeferredState, precompiles: &PrecompileRegistry) {
         let rehydrated = DeferredState::rehydrate(&state.to_wire(), precompiles).unwrap();
         assert_eq!(rehydrated.root(), state.root());
