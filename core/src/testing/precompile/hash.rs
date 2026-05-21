@@ -1,9 +1,7 @@
 //! `Hash` — chunk-bodied preimage → expression-bodied digest leaf reference precompile.
 //!
-//! Exercises chunk-bodied inputs and the chunk-to-expression reduction shape without
-//! introducing a real hash implementation. The "hash" is a coordinate-wise sum of all preimage
-//! chunks into an 8-felt accumulator — deterministic, trivially testable, definitely not
-//! collision-resistant. A real `Keccak` / `Sha512` precompile would slot in by swapping the kernel.
+//! Exercises chunk-bodied inputs and the chunk-to-expression reduction shape. The "hash" is a
+//! coordinate-wise sum of all preimage chunks into an 8-felt accumulator.
 //!
 //! Tag layout (`Hash`-specific, opaque to the framework) — `Tag { id, args: [node_disc, n_bytes,
 //! ZERO] }`:
@@ -13,9 +11,9 @@
 //! - `digest`   (disc 1) — expression-bodied (8-felt digest); self-evaluating.
 //! - `eq`       (disc 2) — expression-bodied predicate over two child digests.
 
-use std::sync::Arc;
+use alloc::sync::Arc;
 
-use miden_core::{
+use crate::{
     Felt, ZERO,
     deferred::{
         DeferredError, Digest, Node, NodeType, Payload, Precompile, PrecompileError, Tag,
@@ -94,8 +92,7 @@ impl Hash {
         Ok(*node.payload.as_felts()?)
     }
 
-    /// Mock hash kernel: coordinate-wise sum of all chunks. Not collision-resistant; placeholder
-    /// for a real non-native hash.
+    /// Mock hash kernel: coordinate-wise sum of all chunks.
     pub fn hash(chunks: &[[Felt; 8]]) -> [Felt; 8] {
         let mut acc = [ZERO; 8];
         for c in chunks {

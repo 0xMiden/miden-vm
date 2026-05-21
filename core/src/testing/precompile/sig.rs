@@ -3,14 +3,12 @@
 //!
 //! A `verify` node is a chunk-bodied predicate carrying a fixed-size opaque payload
 //! (`SIG_CHUNKS = 3` chunks, conceptually `sig || pk || msg`). The chunk count is hardcoded per
-//! discriminant — no immediate. Reduce performs a stub check: succeeds iff the very first felt
-//! of the first chunk is non-zero, mirroring the shape of "this signature isn't an all-zero
-//! placeholder." Real `Ecdsa`/`Eddsa` precompiles would slot in by swapping the stub for a
-//! non-native verification kernel.
+//! discriminant. Reduce performs a stub check: succeeds iff the first felt of the first chunk is
+//! non-zero.
 
-use std::sync::Arc;
+use alloc::sync::Arc;
 
-use miden_core::{
+use crate::{
     Felt, ZERO,
     deferred::{
         Node, NodeType, Payload, Precompile, PrecompileError, Tag, WitnessBuilder, precompile_id,

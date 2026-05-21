@@ -7,9 +7,9 @@
 
 mod common;
 
-use common::precompile::uint::Uint;
-use miden_core::deferred::{
-    DeferredError, DeferredState, Node, PrecompileError, PrecompileRegistry,
+use miden_core::{
+    deferred::{DeferredError, DeferredState, Node, PrecompileError, PrecompileRegistry},
+    testing::precompile::Uint,
 };
 
 fn leaf(low: u64) -> Node {

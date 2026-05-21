@@ -11,7 +11,7 @@
 //!
 //! The framework data model + [`DeferredState`] + [`PrecompileRegistry`] live here in
 //! `miden-core`; the processor only contributes the system-event glue. Reference precompiles
-//! that exercise the public surface live in `core/tests/common/precompile/`.
+//! that exercise the public surface live in `crate::testing::precompile`.
 
 mod node;
 mod precompile;
@@ -19,20 +19,14 @@ mod precompile_schema;
 mod state;
 mod wire;
 
+use alloc::sync::Arc;
+
+use miden_crypto::{ZERO, hash::poseidon2::Poseidon2};
 pub use node::{NodeType, PrecompileError};
 pub use precompile::{Precompile, precompile_id};
 pub use precompile_schema::PrecompileRegistry;
 pub use state::{DeferredState, WitnessBuilder};
 pub use wire::{DeferredStateWire, IntegrityError, TRUE_INDEX, WireBody, WireEntry};
-
-// Minimal `#[cfg(test)]` precompile fixture for the engine's own unit tests (state.rs et al.).
-// Not exported, not on the `testing` surface — scaffolding only.
-#[cfg(test)]
-pub(crate) mod test_precompile;
-
-use alloc::sync::Arc;
-
-use miden_crypto::{ZERO, hash::poseidon2::Poseidon2};
 
 use crate::{Felt, Word};
 

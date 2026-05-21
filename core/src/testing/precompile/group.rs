@@ -1,21 +1,20 @@
 //! `Group` — compound-canonical reference precompile, demonstrating mid-`reduce` minting.
 //!
-//! A mock group over [`Uint`] (NOT a real curve). A group element is a self-evaluating
+//! A mock group over [`Uint`]. A group element is a self-evaluating
 //! `new` bin-op node whose payload is two `Uint` field-leaf digests `(h_x, h_y)`. The two
 //! **producing** ops (`add`, `sub`) reduce by pulling limbs from both operands' coordinates,
 //! performing coordinate-wise wrapping arithmetic, minting new field leaves for the resulting
 //! `(x3, y3)` via [`WitnessBuilder::intern`], and returning a `new` leaf referencing those
 //! minted digests.
 
-use miden_core::{
+use super::uint::Uint;
+use crate::{
     Felt, ZERO,
     deferred::{
         Digest, Node, NodeType, Payload, Precompile, PrecompileError, Tag, WitnessBuilder,
         precompile_id,
     },
 };
-
-use super::uint::Uint;
 
 // PUBLIC PRECOMPILE TYPE
 // ================================================================================================
@@ -135,7 +134,7 @@ impl Precompile for Group {
                     BinaryOp::Add => (Uint::wrap_add(x1, x2), Uint::wrap_add(y1, y2)),
                     BinaryOp::Sub => (Uint::wrap_sub(x1, x2), Uint::wrap_sub(y1, y2)),
                 };
-                // *** MINT ***  new field leaves for the result coordinates.
+                // Mint new field leaves for the result coordinates.
                 let h_x3 = witness.intern(Uint::leaf_node(x3));
                 let h_y3 = witness.intern(Uint::leaf_node(y3));
                 Ok(Self::new_node(h_x3, h_y3))

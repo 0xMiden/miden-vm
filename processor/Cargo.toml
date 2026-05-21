@@ -51,6 +51,7 @@ thiserror.workspace = true
 
 [dev-dependencies]
 miden-assembly = { workspace = true, features = ["testing"] }
+miden-core = { workspace = true, features = ["testing"] }
 miden-utils-testing.workspace = true
 insta.workspace = true
 pretty_assertions = { workspace = true, features = ["std"] }

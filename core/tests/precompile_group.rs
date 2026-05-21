@@ -3,8 +3,10 @@
 
 mod common;
 
-use common::precompile::{group::Group, uint::Uint};
-use miden_core::deferred::{DeferredState, Digest, Node, PrecompileError, PrecompileRegistry};
+use miden_core::{
+    deferred::{DeferredState, Digest, Node, PrecompileError, PrecompileRegistry},
+    testing::precompile::{Group, Uint},
+};
 
 fn leaf(low: u64) -> Node {
     let mut limbs = [0u32; 8];
@@ -13,18 +15,18 @@ fn leaf(low: u64) -> Node {
     Uint::leaf_node(limbs)
 }
 
-/// Two-precompile schema with `Uint`'s constants pre-registered.
-fn schema_and_state() -> (PrecompileRegistry, DeferredState) {
-    let schema = PrecompileRegistry::default().with_precompile(Uint).with_precompile(Group);
-    let mut state = DeferredState::new();
-    schema.init(&mut state).unwrap();
-    (schema, state)
-}
-
-/// Two-precompile schema without booting (some tests assert exact node counts).
+/// Two-precompile (`Uint` + `Group`) schema and an empty state. Some tests assert exact node
+/// counts, so the state is not booted.
 fn fresh() -> (PrecompileRegistry, DeferredState) {
     let schema = PrecompileRegistry::default().with_precompile(Uint).with_precompile(Group);
     (schema, DeferredState::new())
+}
+
+/// [`fresh`] with `Uint`'s constants pre-registered.
+fn schema_and_state() -> (PrecompileRegistry, DeferredState) {
+    let (schema, mut state) = fresh();
+    schema.init(&mut state).unwrap();
+    (schema, state)
 }
 
 fn register_group(
