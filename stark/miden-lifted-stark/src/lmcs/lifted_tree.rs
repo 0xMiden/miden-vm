@@ -12,7 +12,7 @@ use tracing::info_span;
 
 use crate::lmcs::{
     LmcsTree, bitrev::BitReversibleMatrix, proof::LeafOpening, row_list::RowList,
-    tree_indices::TreeIndices, utils::PackedValueExt,
+    tree_indices::TreeIndices,
 };
 
 /// A uniform binary Merkle tree whose leaves are constructed from matrices with power-of-two
@@ -443,7 +443,8 @@ fn absorb_matrix<PF, PD, M, H, const WIDTH: usize, const DIGEST_ELEMS: usize>(
             .par_chunks_mut(PF::WIDTH)
             .enumerate()
             .for_each(|(packed_idx, states_chunk)| {
-                let mut packed_state: [PD; WIDTH] = PD::pack_columns(states_chunk);
+                let mut packed_state: [PD; WIDTH] =
+                    array::from_fn(|col| PD::from_fn(|lane| states_chunk[lane][col]));
                 let row_idx = packed_idx * PF::WIDTH;
                 let row = matrix.vertically_packed_row::<PF>(row_idx);
                 sponge.absorb_into(&mut packed_state, row);
