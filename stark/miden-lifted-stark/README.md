@@ -205,7 +205,7 @@ at `y_j`, and the opened trace values already correspond to `p_j(y_j)`.
 | Path | Purpose |
 |------|---------|
 | `src/config.rs` | `StarkConfig` — wraps `PcsParams`, LMCS, and DFT |
-| `src/domain.rs` | `TwoAdicSubgroup`, `TwoAdicCoset`, `LiftedDomain` — the domain hierarchy |
+| `src/domain.rs` | `TwoAdicSubgroup`, `TwoAdicCoset`, `LiftedDomain` — the domain hierarchy; `log_quotient_degree`, `DomainError` (incl. the `log_quotient_degree ≤ log_blowup` compat bound) |
 | `src/selectors.rs` | `Selectors<T>` — generic container for row selectors |
 | `src/prover/mod.rs` | `prove` — orchestration and protocol flow |
 | `src/prover/commit.rs` | `Committed` — LDE, bit-reverse, LMCS tree construction |
@@ -216,9 +216,8 @@ at `y_j`, and the opened trace values already correspond to `p_j(y_j)`.
 | `src/verifier/constraints.rs` | `ConstraintFolder` — OOD constraint evaluation, quotient reconstruction |
 | `src/verifier/periodic.rs` | `PeriodicPolys` — polynomial coefficients for OOD evaluation |
 | `src/proof.rs` | `StarkProof`, `StarkTranscript` — proof artifact and structured transcript view |
-| `src/order.rs` | public `ShapeError` plus the crate-internal instance↔proof ordering helper; runtime checks live in `miden_lifted_air::validate` |
-| `src/setup.rs` | `validate_compatible`, `CompatError` — AIR ↔ PCS-parameters compatibility check |
-| `src/debug.rs` | `check_constraints` (row-by-row), structural assertions (`assert_airs_valid`, `assert_prover_setup`, `assert_aux_traces_shape`, …) |
+| `src/order.rs` | public `ShapeError` plus the crate-internal instance↔proof ordering helper; `TraceOrder` construction validates the proof's log heights against the AIRs |
+| `src/debug.rs` | `check_constraints` (row-by-row), structural assertion (`assert_prover_setup`) over `miden_lifted_air::debug::assert_multi_air_valid` |
 
 ## Conventions & Assumptions
 

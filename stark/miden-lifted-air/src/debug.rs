@@ -6,98 +6,69 @@
 //!
 //! # When to use what
 //!
-//! - [`assert_airs_valid`] / [`check_air_structure`] / [`check_one_air`]: verify an AIR (or AIR
-//!   list) satisfies the structural contract assumed by the rest of the protocol — no preprocessed
-//!   trace, positive auxiliary width, power-of-two periodic columns.
-//! - [`assert_valid`] / [`assert_prover_valid`]: structural contract plus the runtime contract
-//!   baked into [`Statement`] / [`ProverStatement`].
+//! - [`assert_multi_air_valid`]: verify a [`MultiAir`] satisfies the structural contract assumed by
+//!   the rest of the protocol — per AIR no preprocessed trace, positive auxiliary width,
+//!   power-of-two periodic columns; across AIRs a shared `num_public_values`. This also
+//!   cross-checks the overridable [`MultiAir::num_air_inputs`] / [`LiftedAir::max_periodic_length`]
+//!   against the raw AIR data, so an override that lies about either is caught here.
 //! - [`check_builder_shape`]: verify a concrete builder's accessor dimensions match an AIR before
 //!   calling [`LiftedAir::eval`]. Used as a `cfg(debug_assertions)` belt-and-suspenders inside the
 //!   prover and verifier loops.
+//!
+//! Runtime checks on caller-supplied data live on the constructors
+//! [`Statement::new`](crate::Statement::new) /
+//! [`ProverStatement::new`](crate::ProverStatement::new), which return
+//! [`InstanceError`](crate::InstanceError).
 
 use p3_field::{ExtensionField, Field};
 
-use crate::{
-    LiftedAir, LiftedAirBuilder, MultiAir, ProverStatement, Statement, WindowAccess,
-    validate::{validate_inputs, validate_prover_traces},
-};
+use crate::{BaseAir, LiftedAir, LiftedAirBuilder, MultiAir, WindowAccess};
 
-/// Assert every AIR in `airs` satisfies the structural contract.
+/// Assert a [`MultiAir`] is structurally well-formed.
 ///
-/// Convenience entry point: equivalent to [`check_air_structure`].
-pub fn assert_airs_valid<F, EF, A>(airs: &[A])
-where
-    F: Field,
-    A: LiftedAir<F, EF>,
-{
-    check_air_structure::<F, EF, A>(airs);
-}
-
-/// Assert a statement is fully valid: the runtime inputs contract plus the
-/// AIR structural contract.
-pub fn assert_valid<F, EF, MA>(statement: &Statement<F, EF, MA>)
+/// Per AIR: no preprocessed trace, positive auxiliary width, and periodic
+/// columns whose lengths are positive powers of two. Across AIRs: every AIR
+/// declares the same `num_public_values` (via [`MultiAir::num_air_inputs`]).
+///
+/// The overridable [`MultiAir::num_air_inputs`] and
+/// [`LiftedAir::max_periodic_length`] are cross-checked against the raw AIR
+/// data here, so an override that disagrees with `periodic_columns` /
+/// `num_public_values` is caught rather than trusted.
+///
+/// Panics on an empty `airs()` (a meaningless statement) and on any violation.
+/// A degenerate AIR whose constraints all vanish under `Z_H` (combined degree
+/// `< 2`) is *supported*, not rejected: the prover and verifier clamp the
+/// quotient degree to `D = 2` and proceed normally.
+pub fn assert_multi_air_valid<F, EF, MA>(multi_air: &MA)
 where
     F: Field,
     EF: ExtensionField<F>,
     MA: MultiAir<F, EF>,
 {
-    validate_inputs::<F, EF, MA>(
-        statement.multi_air(),
-        statement.air_inputs(),
-        statement.aux_inputs(),
-    )
-    .expect("statement inputs should be valid");
-    check_air_structure::<F, EF, MA::Air>(statement.airs());
-}
+    let airs = multi_air.airs();
 
-/// Prover-side analogue of [`assert_valid`]: validates trace shape too via
-/// [`validate_prover_traces`].
-pub fn assert_prover_valid<F, EF, MA>(prover_statement: &ProverStatement<F, EF, MA>)
-where
-    F: Field,
-    EF: ExtensionField<F>,
-    MA: MultiAir<F, EF>,
-{
-    let statement = prover_statement.statement();
-    validate_inputs::<F, EF, MA>(
-        statement.multi_air(),
-        statement.air_inputs(),
-        statement.aux_inputs(),
-    )
-    .expect("statement inputs should be valid");
-    validate_prover_traces::<F, EF, MA>(statement, prover_statement.traces())
-        .expect("prover traces should be valid");
-    check_air_structure::<F, EF, MA::Air>(statement.airs());
-}
+    // Independently derive the shared public-input count from the raw AIRs
+    // (panics on empty `airs()`), assert agreement, then confirm the
+    // overridable `num_air_inputs` matches — so an override that lies is caught
+    // rather than trusted.
+    let num_air_inputs = airs[0].num_public_values();
+    assert!(
+        airs.iter().all(|air| air.num_public_values() == num_air_inputs),
+        "AIRs disagree on num_public_values",
+    );
+    assert!(
+        multi_air.num_air_inputs() == num_air_inputs,
+        "num_air_inputs() = {} disagrees with per-AIR num_public_values() = {num_air_inputs}",
+        multi_air.num_air_inputs(),
+    );
 
-/// Assert every AIR in `airs` is structurally well-formed.
-///
-/// Loops [`check_one_air`] over the list. The list-level invariant that
-/// every AIR declares the same `num_public_values` is *not* checked here;
-/// the runtime [`validate_inputs`](crate::validate::validate_inputs)
-/// enforces the stronger per-AIR equality
-/// `num_public_values == air_inputs.len()`.
-pub fn check_air_structure<F, EF, A>(airs: &[A])
-where
-    F: Field,
-    A: LiftedAir<F, EF>,
-{
     for (idx, air) in airs.iter().enumerate() {
         check_one_air::<F, EF, _>(idx, air);
     }
 }
 
 /// Assert one AIR satisfies the structural contract.
-///
-/// Checked properties:
-/// - **No preprocessed trace** — lifted AIRs forbid preprocessed columns.
-/// - **Positive auxiliary width** — `aux_width() > 0`.
-/// - **Well-formed periodic columns** — each column non-empty and a power of two in length.
-///
-/// A degenerate AIR whose constraints all vanish under `Z_H` (combined
-/// degree `< 2`) is *supported*, not rejected: the prover and verifier
-/// clamp the quotient degree to `D = 2` and proceed normally.
-pub fn check_one_air<F, EF, A>(idx: usize, air: &A)
+fn check_one_air<F, EF, A>(idx: usize, air: &A)
 where
     F: Field,
     A: LiftedAir<F, EF>,
@@ -107,6 +78,12 @@ where
         "AIR {idx}: preprocessed traces are not supported"
     );
     assert!(air.aux_width() > 0, "AIR {idx}: aux_width must be positive");
+
+    // Independently derive the max period from the raw columns — asserting the
+    // positive-power-of-two contract — then confirm the (overridable)
+    // `max_periodic_length` agrees. This holds even if an AIR overrides
+    // `max_periodic_length` to skip the default's own checks.
+    let mut max_period = 0;
     for (i, col) in air.periodic_columns().iter().enumerate() {
         assert!(
             !col.is_empty() && col.len().is_power_of_two(),
@@ -114,7 +91,13 @@ where
              got {len}",
             len = col.len(),
         );
+        max_period = max_period.max(col.len());
     }
+    assert!(
+        air.max_periodic_length() == max_period,
+        "AIR {idx}: max_periodic_length() = {} disagrees with periodic_columns() max = {max_period}",
+        air.max_periodic_length(),
+    );
 }
 
 /// Assert a concrete builder's accessor dimensions match `air`.

@@ -11,11 +11,12 @@ use core::marker::PhantomData;
 
 use p3_challenger::CanObserve;
 use p3_field::{ExtensionField, Field};
-use p3_matrix::dense::RowMajorMatrix;
+use p3_matrix::{Matrix, dense::RowMajorMatrix};
+use thiserror::Error;
 
 use crate::{
+    BaseAir, LiftedAir,
     air::{MultiAir, ReductionError},
-    validate::{InstanceError, validate_inputs, validate_prover_traces},
 };
 
 // ============================================================================
@@ -47,16 +48,27 @@ where
 {
     /// Construct a [`Statement`] after validating the inputs against `multi_air`.
     ///
-    /// Returns [`InstanceError::PublicValuesLengthMismatch`] if any AIR's
-    /// `num_public_values()` does not match `air_inputs.len()`, or
-    /// [`InstanceError::AuxInputsTooLong`] if `aux_inputs.len()` exceeds
-    /// `multi_air.max_aux_inputs()`.
+    /// Checks, in order:
+    /// - `multi_air.num_air_inputs() == air_inputs.len()` —
+    ///   [`InstanceError::PublicValuesLengthMismatch`] otherwise.
+    /// - `aux_inputs.len() <= multi_air.max_aux_inputs()` — [`InstanceError::AuxInputsTooLong`]
+    ///   otherwise.
     pub fn new(
         multi_air: MA,
         air_inputs: Vec<F>,
         aux_inputs: Vec<F>,
     ) -> Result<Self, InstanceError> {
-        validate_inputs::<F, EF, MA>(&multi_air, &air_inputs, &aux_inputs)?;
+        let expected = multi_air.num_air_inputs();
+        if expected != air_inputs.len() {
+            return Err(InstanceError::PublicValuesLengthMismatch {
+                expected,
+                actual: air_inputs.len(),
+            });
+        }
+        let max = multi_air.max_aux_inputs();
+        if aux_inputs.len() > max {
+            return Err(InstanceError::AuxInputsTooLong { actual: aux_inputs.len(), max });
+        }
         Ok(Self::new_unchecked(multi_air, air_inputs, aux_inputs))
     }
 
@@ -137,11 +149,49 @@ where
     MA: MultiAir<F, EF>,
 {
     /// Construct after validating the trace shape against `statement`.
+    ///
+    /// Verifies, in order: `traces.len() <= u8::MAX + 1`, `traces.len() ==
+    /// airs.len()`, power-of-two heights, per-AIR `height >=
+    /// air.max_periodic_length()`, and per-AIR `width == air.width()`.
     pub fn new(
         statement: Statement<F, EF, MA>,
         traces: Vec<RowMajorMatrix<F>>,
     ) -> Result<Self, InstanceError> {
-        validate_prover_traces::<F, EF, MA>(&statement, &traces)?;
+        let max_instances = u8::MAX as usize + 1;
+        if traces.len() > max_instances {
+            return Err(InstanceError::TooManyInstances { count: traces.len() });
+        }
+        let airs = statement.airs();
+        if airs.len() != traces.len() {
+            return Err(InstanceError::TraceCountMismatch {
+                airs: airs.len(),
+                traces: traces.len(),
+            });
+        }
+        for (idx, trace) in traces.iter().enumerate() {
+            let h = trace.height();
+            if !h.is_power_of_two() {
+                return Err(InstanceError::TraceHeightNotPowerOfTwo { air: idx, height: h });
+            }
+        }
+        for (idx, (air, trace)) in airs.iter().zip(traces.iter()).enumerate() {
+            let trace_height = trace.height();
+            let max_period = air.max_periodic_length();
+            if trace_height < max_period {
+                return Err(InstanceError::TraceHeightBelowPeriod {
+                    air: idx,
+                    trace_height,
+                    max_period,
+                });
+            }
+            if trace.width() != air.width() {
+                return Err(InstanceError::TraceWidthMismatch {
+                    air: idx,
+                    expected: air.width(),
+                    actual: trace.width(),
+                });
+            }
+        }
         Ok(Self::new_unchecked(statement, traces))
     }
 
@@ -168,4 +218,51 @@ where
             challenges,
         )
     }
+}
+
+// ============================================================================
+// InstanceError
+// ============================================================================
+
+/// Errors returned when constructing a [`Statement`] or [`ProverStatement`]
+/// from caller-supplied data.
+///
+/// Holding either type is a type-level guarantee that none of these apply:
+/// construction is the runtime trust boundary.
+#[derive(Debug, Error)]
+pub enum InstanceError {
+    #[error("num_air_inputs() = {expected}, but air_inputs().len() = {actual}")]
+    PublicValuesLengthMismatch { expected: usize, actual: usize },
+
+    #[error("aux_inputs().len() = {actual} exceeds max_aux_inputs() = {max}")]
+    AuxInputsTooLong { actual: usize, max: usize },
+
+    #[error("airs().len() = {airs} does not match traces().len() = {traces}")]
+    TraceCountMismatch { airs: usize, traces: usize },
+
+    #[error(
+        "too many instances ({count}); the per-proof limit is {max} = u8::MAX + 1",
+        max = u8::MAX as usize + 1
+    )]
+    TooManyInstances { count: usize },
+
+    #[error("AIR {air}: trace width = {actual}, but air.width() = {expected}")]
+    TraceWidthMismatch {
+        air: usize,
+        expected: usize,
+        actual: usize,
+    },
+
+    #[error("AIR {air}: trace height = {height} is not a power of two")]
+    TraceHeightNotPowerOfTwo { air: usize, height: usize },
+
+    #[error(
+        "AIR {air}: trace height = {trace_height} is less than max periodic column \
+         length {max_period}"
+    )]
+    TraceHeightBelowPeriod {
+        air: usize,
+        trace_height: usize,
+        max_period: usize,
+    },
 }

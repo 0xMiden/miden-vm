@@ -9,33 +9,19 @@
 //! permutation between **instance order** and **proof order**; nothing
 //! about it leaks into the air crate or out of this crate's public surface.
 //!
-//! Runtime instance-level checks live in [`miden_lifted_air::validate`];
-//! the structural AIR contract lives in [`miden_lifted_air::debug`].
+//! Runtime instance-level checks on caller-supplied inputs/traces live on the
+//! [`Statement`](miden_lifted_air::Statement) /
+//! [`ProverStatement`](miden_lifted_air::ProverStatement) constructors; the
+//! structural AIR contract lives in [`miden_lifted_air::debug`]. [`TraceOrder`]
+//! validates the proof-supplied log heights against the AIRs at construction.
 
 extern crate alloc;
 
 use alloc::vec::Vec;
 
-use miden_lifted_air::log2_strict_u8;
+use miden_lifted_air::{LiftedAir, log2_strict_u8};
+use p3_field::Field;
 use thiserror::Error;
-
-// ============================================================================
-// Errors
-// ============================================================================
-
-/// Errors from parsing or validating proof shape metadata (the
-/// caller-order `&[u8]` of log trace heights carried on the proof).
-#[derive(Debug, Error)]
-pub enum ShapeError {
-    #[error("no instances provided")]
-    Empty,
-    #[error("trace height {height} is not a power of two")]
-    InvalidTraceHeight { height: usize },
-    #[error("log trace height {log_h} exceeds {max} (would overflow usize on this target)")]
-    LogTraceHeightTooLarge { log_h: u8, max: u8 },
-    #[error("more than 256 instances ({count}) — exceeds the u8 caller-index limit")]
-    TooManyInstances { count: usize },
-}
 
 // ============================================================================
 // TraceOrder
@@ -64,12 +50,21 @@ pub(crate) struct TraceOrder {
 }
 
 impl TraceOrder {
-    /// Build from raw (non-log) trace heights in instance order.
+    /// Build from raw (non-log) trace heights in instance order, validated
+    /// against `airs`.
     ///
     /// Validates that every height is a non-zero power of two, that the
-    /// log-height fits in `u8` and within the host's `usize` width, and that
-    /// the number of instances fits in `u8`.
-    pub(crate) fn from_trace_heights(trace_heights: &[usize]) -> Result<Self, ShapeError> {
+    /// log-height fits in `u8` and within the host's `usize` width, that the
+    /// number of instances fits in `u8`, and (via [`Self::from_log_heights`])
+    /// that the heights match the AIRs.
+    pub(crate) fn from_trace_heights<F, EF, A>(
+        airs: &[A],
+        trace_heights: &[usize],
+    ) -> Result<Self, ShapeError>
+    where
+        F: Field,
+        A: LiftedAir<F, EF>,
+    {
         if trace_heights.is_empty() {
             return Err(ShapeError::Empty);
         }
@@ -85,16 +80,25 @@ impl TraceOrder {
                 Ok(log2_strict_u8(h))
             })
             .collect::<Result<_, _>>()?;
-        Self::from_log_heights(log_heights)
+        Self::from_log_heights::<F, EF, A>(airs, log_heights)
     }
 
-    /// Build from instance-order log trace heights.
+    /// Build from instance-order log trace heights, validated against `airs`.
     ///
     /// Used on the verifier side, where heights are read straight off the
-    /// proof as `u8`s. Power-of-two-ness is automatic (heights are stored
-    /// as log₂); the only checks are non-emptiness, host-`usize` bound, and
-    /// the u8 instance-count limit.
-    pub(crate) fn from_log_heights(log_heights_instance: Vec<u8>) -> Result<Self, ShapeError> {
+    /// (untrusted) proof as `u8`s. Power-of-two-ness is automatic (heights are
+    /// stored as log₂). Checks: non-emptiness, host-`usize` bound, the u8
+    /// instance-count limit, `airs.len()` matches the height count, and per AIR
+    /// `(1 << log_h) >= air.max_periodic_length()`. Holding a `TraceOrder` thus
+    /// guarantees the proof's heights are feasible for the AIRs.
+    pub(crate) fn from_log_heights<F, EF, A>(
+        airs: &[A],
+        log_heights_instance: Vec<u8>,
+    ) -> Result<Self, ShapeError>
+    where
+        F: Field,
+        A: LiftedAir<F, EF>,
+    {
         if log_heights_instance.is_empty() {
             return Err(ShapeError::Empty);
         }
@@ -107,8 +111,27 @@ impl TraceOrder {
                 return Err(ShapeError::LogTraceHeightTooLarge { log_h: h, max: max_log });
             }
         }
+        if airs.len() != log_heights_instance.len() {
+            return Err(ShapeError::TraceCountMismatch {
+                airs: airs.len(),
+                heights: log_heights_instance.len(),
+            });
+        }
+        for (idx, (air, &log_h)) in airs.iter().zip(log_heights_instance.iter()).enumerate() {
+            let trace_height = 1usize << log_h as usize;
+            let max_period = air.max_periodic_length();
+            if trace_height < max_period {
+                return Err(ShapeError::TraceHeightBelowPeriod {
+                    air: idx,
+                    trace_height,
+                    max_period,
+                });
+            }
+        }
         let n = log_heights_instance.len();
-        let mut instance_indices: Vec<u8> = (0..n as u8).collect();
+        // `0..n as u8` would wrap to an empty range at the boundary n == 256
+        // (`256 as u8 == 0`), which the `TooManyInstances` guard above permits.
+        let mut instance_indices: Vec<u8> = (0..n).map(|i| i as u8).collect();
         instance_indices.sort_by_key(|&i| (log_heights_instance[i as usize], i));
         Ok(Self { log_heights_instance, instance_indices })
     }
@@ -212,17 +235,79 @@ impl TraceOrder {
     }
 }
 
+// ============================================================================
+// Errors
+// ============================================================================
+
+/// Errors from parsing or validating proof shape metadata (the
+/// caller-order `&[u8]` of log trace heights carried on the proof).
+#[derive(Debug, Error)]
+pub enum ShapeError {
+    #[error("no instances provided")]
+    Empty,
+    #[error("trace height {height} is not a power of two")]
+    InvalidTraceHeight { height: usize },
+    #[error("log trace height {log_h} exceeds {max} (would overflow usize on this target)")]
+    LogTraceHeightTooLarge { log_h: u8, max: u8 },
+    #[error("more than 256 instances ({count}) — exceeds the u8 caller-index limit")]
+    TooManyInstances { count: usize },
+    #[error("airs().len() = {airs} does not match log trace heights length {heights}")]
+    TraceCountMismatch { airs: usize, heights: usize },
+    #[error(
+        "AIR {air}: trace height = {trace_height} is less than max periodic column \
+         length {max_period}"
+    )]
+    TraceHeightBelowPeriod {
+        air: usize,
+        trace_height: usize,
+        max_period: usize,
+    },
+}
+
 #[cfg(test)]
 mod tests {
     use alloc::vec;
 
+    use miden_lifted_air::{BaseAir, LiftedAirBuilder};
+    use p3_goldilocks::Goldilocks;
+
     use super::*;
+
+    type TF = Goldilocks;
+
+    /// Minimal AIR with no periodic columns, for the ordering tests (which only
+    /// exercise the height permutation, not the periodic-feasibility check).
+    #[derive(Clone)]
+    struct OrderTestAir;
+
+    impl BaseAir<TF> for OrderTestAir {
+        fn width(&self) -> usize {
+            1
+        }
+    }
+
+    impl LiftedAir<TF, TF> for OrderTestAir {
+        fn num_randomness(&self) -> usize {
+            0
+        }
+        fn aux_width(&self) -> usize {
+            1
+        }
+        fn num_aux_values(&self) -> usize {
+            0
+        }
+        fn eval<AB: LiftedAirBuilder<F = TF>>(&self, _builder: &mut AB) {}
+    }
+
+    fn airs(n: usize) -> Vec<OrderTestAir> {
+        vec![OrderTestAir; n]
+    }
 
     #[test]
     fn trace_order_canonical_ordering() {
         // Instance order: heights [8, 2, 8, 4]. Sort by (log_h, idx) →
         // [1 (log=1), 3 (log=2), 0 (log=3), 2 (log=3)].
-        let order = TraceOrder::from_trace_heights(&[8, 2, 8, 4]).unwrap();
+        let order = TraceOrder::from_trace_heights::<TF, TF, _>(&airs(4), &[8, 2, 8, 4]).unwrap();
         assert_eq!(order.instance_indices(), &[1, 3, 0, 2]);
         assert_eq!(order.log_heights_instance(), &[3, 1, 3, 2]);
         assert_eq!(order.log_heights_proof(), vec![1, 2, 3, 3]);
@@ -231,7 +316,7 @@ mod tests {
 
     #[test]
     fn trace_order_roundtrip() {
-        let order = TraceOrder::from_trace_heights(&[8, 2, 8, 4]).unwrap();
+        let order = TraceOrder::from_trace_heights::<TF, TF, _>(&airs(4), &[8, 2, 8, 4]).unwrap();
         let instance_data = vec!["a", "b", "c", "d"];
         let proof_data = order.to_proof_order(&instance_data);
         assert_eq!(proof_data, vec!["b", "d", "a", "c"]);
@@ -251,7 +336,8 @@ mod tests {
             &[8, 2, 4, 16, 4], // mixed
         ];
         for &heights in cases {
-            let order = TraceOrder::from_trace_heights(heights).unwrap();
+            let order =
+                TraceOrder::from_trace_heights::<TF, TF, _>(&airs(heights.len()), heights).unwrap();
             let instance_data: Vec<usize> = (0..heights.len()).collect();
             let expected = order.to_proof_order(&instance_data);
             let mut data = instance_data;
@@ -261,20 +347,14 @@ mod tests {
     }
 
     #[test]
-    fn trace_order_rejects_non_pow2() {
-        let err = TraceOrder::from_trace_heights(&[3]).unwrap_err();
-        assert!(matches!(err, ShapeError::InvalidTraceHeight { height: 3 }));
-    }
-
-    #[test]
-    fn trace_order_rejects_empty() {
-        let err = TraceOrder::from_trace_heights(&[]).unwrap_err();
-        assert!(matches!(err, ShapeError::Empty));
-    }
-
-    #[test]
-    fn trace_order_rejects_oversized_log_h() {
-        let err = TraceOrder::from_log_heights(vec![200]).unwrap_err();
-        assert!(matches!(err, ShapeError::LogTraceHeightTooLarge { log_h: 200, .. }));
+    fn trace_order_accepts_max_instances() {
+        // The boundary n == 256 (= u8::MAX + 1) is the largest accepted count;
+        // index construction must not wrap `256 as u8` to an empty range.
+        let n = 256;
+        let order = TraceOrder::from_log_heights::<TF, TF, _>(&airs(n), vec![0; n]).unwrap();
+        assert_eq!(order.instance_indices().len(), n);
+        let mut seen = order.instance_indices().to_vec();
+        seen.sort_unstable();
+        assert!(seen.iter().copied().eq(0..=u8::MAX), "indices must be a permutation of 0..=255");
     }
 }

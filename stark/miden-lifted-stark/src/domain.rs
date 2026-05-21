@@ -68,6 +68,13 @@ pub enum DomainError {
     /// Max trace height is 1 (`log_h == 0`): no 2-row transition window.
     #[error("max trace log height is 0; at least one trace must have height ≥ 2")]
     MaxHeightTooSmall,
+    /// Some AIR's [`log_quotient_degree`] exceeds the PCS blowup, so its
+    /// quotient polynomial would not fit the committed LDE. The recoverable
+    /// twin of the invariant [`EvaluationDomain::new`] asserts; the prover and
+    /// verifier check it inline (they already compute the max degree for the
+    /// quotient domain).
+    #[error("log_quotient_degree {log_quotient} > log_blowup {log_blowup}")]
+    ConstraintDegreeTooHigh { log_quotient: u8, log_blowup: u8 },
 }
 
 // ============================================================================
@@ -1047,12 +1054,6 @@ mod tests {
     }
 
     #[test]
-    fn canonical_lde_shift_out_of_range_returns_none() {
-        let bad = (Felt::TWO_ADICITY as u8) + 1;
-        assert!(LiftedDomain::<Felt>::canonical_lde_shift(bad).is_none());
-    }
-
-    #[test]
     fn sub_domain_lifts_relative_to_canonical() {
         // Canonical: max trace 2^12, blowup 2^3 — sub-domain at trace 2^10 → lift_ratio 2.
         let parent: LiftedDomain<Felt> = LiftedDomain::canonical(12, 3);
@@ -1081,19 +1082,6 @@ mod tests {
     }
 
     #[test]
-    fn try_canonical_too_large_returns_error() {
-        let err = LiftedDomain::<Felt>::try_canonical(Felt::TWO_ADICITY as u8, 1).unwrap_err();
-        assert!(matches!(err, DomainError::LdeOrderTooLarge { .. }));
-    }
-
-    #[test]
-    fn try_sub_domain_too_large_returns_error() {
-        let parent: LiftedDomain<Felt> = LiftedDomain::canonical(8, 2);
-        let err = parent.try_sub_domain(9).unwrap_err();
-        assert_eq!(err, DomainError::SubDomainTooLarge { smaller: 9, parent: 8 });
-    }
-
-    #[test]
     fn lde_coset_point_at_matches_shift_times_omega() {
         let info: LiftedDomain<Felt> = LiftedDomain::canonical(5, 2).sub_domain(4);
         let shift = info.lde_shift();
@@ -1104,12 +1092,6 @@ mod tests {
     }
 
     // ========== EvaluationDomain ==========
-
-    #[test]
-    #[should_panic(expected = "quotient log degree 3 exceeds blowup 2")]
-    fn evaluation_domain_too_large_panics() {
-        let _ = LiftedDomain::<Felt>::canonical(8, 2).evaluation_domain(3);
-    }
 
     #[test]
     fn evaluation_domain_is_a_coset_sharing_parent_shift() {

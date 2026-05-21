@@ -30,7 +30,8 @@ impl<F: TwoAdicField> PeriodicPolys<F> {
     /// # Panics
     /// Panics if any column length is zero or not a power of two.
     /// This is a trusted path — the AIR is assumed structurally valid (see
-    /// [`check_one_air`](miden_lifted_air::debug::check_one_air) for the debug-only check).
+    /// [`assert_multi_air_valid`](miden_lifted_air::debug::assert_multi_air_valid) for the
+    /// debug-only check).
     pub fn new(column_evals: &[Vec<F>]) -> Self {
         let dft = NaiveDft;
         let mut polys = Vec::with_capacity(column_evals.len());

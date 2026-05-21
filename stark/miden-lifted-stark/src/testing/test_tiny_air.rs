@@ -229,14 +229,15 @@ fn malformed_log_trace_heights_is_rejected() {
         prove(&config, &prover_statement, test_challenger()).expect("proving should succeed");
 
     // Push straight to the `pub(crate)` `log_trace_heights` field to bypass
-    // shape construction and exercise the verifier-side trace-count check.
+    // shape construction and exercise the verifier-side trace-count check
+    // (now part of `TraceOrder::from_log_heights`, surfaced as `ShapeError`).
     let mut bad_proof = output.proof.clone();
     bad_proof.log_trace_heights.push(2);
     let err = verify(&config, statement, &bad_proof, test_challenger())
         .expect_err("extra log trace height should fail verification");
     assert!(matches!(
         err,
-        VerifierError::Instance(InstanceError::TraceCountMismatch { airs: 1, traces: 2 })
+        VerifierError::Shape(ShapeError::TraceCountMismatch { airs: 1, heights: 2 })
     ));
 
     // Empty heights → `TraceOrder::from_log_heights` rejects with
@@ -398,8 +399,11 @@ fn air_order_reflects_caller_order() {
     // The derived proof ordering is ascending height: instance index 1
     // (log_h=2) ends up at proof position 0, instance index 0 (log_h=3) at
     // position 1.
-    let trace_order =
-        TraceOrder::from_log_heights(output.proof.log_trace_heights).expect("valid heights");
+    let trace_order = TraceOrder::from_log_heights::<Felt, QuadFelt, _>(
+        prover_statement.statement().airs(),
+        output.proof.log_trace_heights,
+    )
+    .expect("valid heights");
     assert_eq!(
         trace_order.instance_indices(),
         &[1, 0],

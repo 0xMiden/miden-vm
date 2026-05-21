@@ -2,11 +2,9 @@
 //!
 //! Two flavours of helpers live here:
 //!
-//! - **Structural assertions** ([`assert_airs_valid`], [`assert_valid`], [`assert_prover_valid`],
-//!   [`assert_compatible`], [`assert_prover_setup`], [`assert_aux_traces_shape`]) — thin wrappers
-//!   over [`miden_lifted_air::debug`] and [`crate::setup::validate_compatible`] that panic on
-//!   contract violation. Call them from tests / setup; the prover and verifier hot paths trust
-//!   their inputs.
+//! - **Structural assertion** ([`assert_prover_setup`]) — a panic-based check over
+//!   [`miden_lifted_air::debug::assert_multi_air_valid`]. Call it from tests / setup; the prover
+//!   and verifier hot paths trust the AIR's structural contract.
 //! - **Constraint checker** ([`check_constraints`]) — evaluates the AIR constraints row-by-row on
 //!   concrete trace values and panics on the first nonzero constraint. Avoids the full STARK
 //!   pipeline so failures surface immediately.
@@ -16,158 +14,36 @@ extern crate alloc;
 use alloc::vec::Vec;
 
 use miden_lifted_air::{
-    AirBuilder, BaseAir, EmptyWindow, ExtensionBuilder, LiftedAir, MultiAir, PeriodicAirBuilder,
-    PermutationAirBuilder, ProverStatement, RowWindow, Statement,
+    AirBuilder, EmptyWindow, ExtensionBuilder, LiftedAir, MultiAir, PeriodicAirBuilder,
+    PermutationAirBuilder, ProverStatement, RowWindow, debug::assert_multi_air_valid,
+    log2_strict_u8,
 };
 use p3_challenger::{CanObserve, CanSample};
 use p3_field::{ExtensionField, Field};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
-use crate::{pcs::params::PcsParams, setup::validate_compatible};
-
 // ============================================================================
-// Structural assertions (thin wrappers over miden_lifted_air::debug + setup)
+// Structural assertions (over miden_lifted_air::debug)
 // ============================================================================
 
-/// Assert every AIR in `airs` satisfies the structural contract.
-pub fn assert_airs_valid<F, EF, A>(airs: &[A])
-where
-    F: Field,
-    EF: ExtensionField<F>,
-    A: LiftedAir<F, EF>,
-{
-    miden_lifted_air::debug::assert_airs_valid::<F, EF, A>(airs);
-}
-
-/// Assert `statement` is valid: runtime inputs contract + AIR structural contract.
-pub fn assert_valid<F, EF, MA>(statement: &Statement<F, EF, MA>)
-where
-    F: Field,
-    EF: ExtensionField<F>,
-    MA: MultiAir<F, EF>,
-{
-    miden_lifted_air::debug::assert_valid::<F, EF, MA>(statement);
-}
-
-/// Prover-side analogue of [`assert_valid`]: validates trace shape too.
-pub fn assert_prover_valid<F, EF, MA>(prover_statement: &ProverStatement<F, EF, MA>)
-where
-    F: Field,
-    EF: ExtensionField<F>,
-    MA: MultiAir<F, EF>,
-{
-    miden_lifted_air::debug::assert_prover_valid::<F, EF, MA>(prover_statement);
-}
-
-/// Assert per-AIR `log_quotient_degree <= params.log_blowup()`.
-pub fn assert_compatible<F, EF, A>(airs: &[A], params: &PcsParams)
-where
-    F: Field,
-    EF: ExtensionField<F>,
-    A: LiftedAir<F, EF>,
-{
-    validate_compatible::<F, EF, A>(airs, params)
-        .expect("AIRs should be compatible with the PCS parameters");
-}
-
-/// One-shot prover-setup check: bundles [`assert_prover_valid`] and
-/// [`assert_compatible`].
+/// Prover-setup check: assert the AIR's structural contract via
+/// [`assert_multi_air_valid`].
+///
+/// Only the *trusted* structural contract is asserted here. The AIR ↔ PCS
+/// compatibility bound (`log_quotient_degree <= log_blowup`) is a *validated*
+/// input — the prover and verifier return
+/// [`DomainError::ConstraintDegreeTooHigh`](crate::DomainError) for it — so it
+/// is not re-checked here.
 ///
 /// TODO(adr1anh/preprocessed): also call `assert_preprocessed(pi)` once the
 /// preprocessed branch lands.
-pub fn assert_prover_setup<F, EF, MA>(
-    prover_statement: &ProverStatement<F, EF, MA>,
-    params: &PcsParams,
-) where
+pub fn assert_prover_setup<F, EF, MA>(prover_statement: &ProverStatement<F, EF, MA>)
+where
     F: Field,
     EF: ExtensionField<F>,
     MA: MultiAir<F, EF>,
 {
-    assert_prover_valid::<F, EF, MA>(prover_statement);
-    assert_compatible::<F, EF, MA::Air>(prover_statement.statement().airs(), params);
-}
-
-/// Drive [`ProverStatement::build_aux_traces`] and assert the returned
-/// shapes match the AIR contract.
-///
-/// This contract is **trusted** by [`crate::prover::prove`] — the prover
-/// will silently consume malformed aux traces and panic deep inside the
-/// LDE pipeline (or produce an unsound proof). Call this helper from
-/// tests to surface the contract violation up-front.
-///
-/// Fiat-Shamir seeding mirrors [`check_constraints`] so the returned aux
-/// values match what `prove` would derive for the same statement.
-pub fn assert_aux_traces_shape<F, EF, MA, Ch>(
-    prover_statement: &ProverStatement<F, EF, MA>,
-    mut challenger: Ch,
-) where
-    F: Field,
-    EF: ExtensionField<F>,
-    MA: MultiAir<F, EF>,
-    Ch: CanObserve<F> + CanSample<F>,
-{
-    let statement = prover_statement.statement();
-    let airs = statement.airs();
-    let traces = prover_statement.traces();
-    assert_eq!(
-        airs.len(),
-        traces.len(),
-        "airs.len() = {} but traces.len() = {}",
-        airs.len(),
-        traces.len(),
-    );
-
-    let log_heights: Vec<u8> = traces.iter().map(|t| log_height(t.height())).collect();
-    statement.observe(&mut challenger, &log_heights);
-    let max_num_randomness = airs.iter().map(|a| a.num_randomness()).max().unwrap_or(0);
-    let challenges: Vec<EF> = (0..max_num_randomness)
-        .map(|_| EF::from_basis_coefficients_fn(|_| challenger.sample()))
-        .collect();
-
-    let (aux_traces, aux_values) = prover_statement.build_aux_traces(&challenges);
-    assert_eq!(
-        aux_traces.len(),
-        airs.len(),
-        "build_aux_traces returned {} aux traces, expected {}",
-        aux_traces.len(),
-        airs.len(),
-    );
-    assert_eq!(
-        aux_values.len(),
-        airs.len(),
-        "build_aux_traces returned {} aux value vectors, expected {}",
-        aux_values.len(),
-        airs.len(),
-    );
-
-    for (i, ((air, main), (aux_trace, aux_vals))) in airs
-        .iter()
-        .zip(traces.iter())
-        .zip(aux_traces.iter().zip(aux_values.iter()))
-        .enumerate()
-    {
-        assert_eq!(
-            aux_trace.width(),
-            air.aux_width(),
-            "AIR {i}: aux trace width = {}, but air.aux_width() = {}",
-            aux_trace.width(),
-            air.aux_width(),
-        );
-        assert_eq!(
-            aux_trace.height(),
-            main.height(),
-            "AIR {i}: aux trace height = {}, but main trace height = {}",
-            aux_trace.height(),
-            main.height(),
-        );
-        assert_eq!(
-            aux_vals.len(),
-            air.num_aux_values(),
-            "AIR {i}: aux_values.len() = {}, but air.num_aux_values() = {}",
-            aux_vals.len(),
-            air.num_aux_values(),
-        );
-    }
+    assert_multi_air_valid::<F, EF, MA>(prover_statement.statement().multi_air());
 }
 
 // ============================================================================
@@ -205,9 +81,9 @@ pub fn check_constraints<F, EF, MA, Ch>(
 
     // Mirror the prover's Fiat-Shamir seeding so challenges line up with what
     // `prove` would produce for the same statement.
-    let log_heights: Vec<u8> = traces.iter().map(|t| log_height(t.height())).collect();
+    let log_heights: Vec<u8> = traces.iter().map(|t| log2_strict_u8(t.height())).collect();
     statement.observe(&mut challenger, &log_heights);
-    let max_num_randomness = airs.iter().map(|a| a.num_randomness()).max().unwrap_or(0);
+    let max_num_randomness = airs.iter().map(LiftedAir::num_randomness).max().unwrap_or(0);
     let challenges: Vec<EF> = (0..max_num_randomness)
         .map(|_| EF::from_basis_coefficients_fn(|_| challenger.sample()))
         .collect();
@@ -226,53 +102,21 @@ pub fn check_constraints<F, EF, MA, Ch>(
         .zip(aux_traces.iter().zip(aux_values_per_air.iter()))
         .enumerate()
     {
-        let height = main.height();
-        assert!(
-            height.is_power_of_two(),
-            "instance {i}: trace height {height} is not a power of two"
-        );
-        assert_eq!(
-            main.width,
-            air.width(),
-            "instance {i}: main trace width mismatch: expected {}, got {}",
-            air.width(),
-            main.width
-        );
-        assert_eq!(
-            air_inputs.len(),
-            air.num_public_values(),
-            "instance {i}: public values length mismatch: expected {}, got {}",
-            air.num_public_values(),
-            air_inputs.len()
-        );
+        // Row-window widths and counts (main/aux width, public values, aux values)
+        // are validated per row by `check_builder_shape` inside `check_single_trace`.
+        // The aux trace height is the one shape invariant invisible to a single row
+        // window, so check it here; otherwise a short aux trace surfaces as an opaque
+        // row-slice panic.
         assert_eq!(
             aux_trace.height(),
-            height,
-            "instance {i}: aux trace height mismatch: expected {height}, got {}",
+            main.height(),
+            "instance {i}: aux trace height mismatch: expected {}, got {}",
+            main.height(),
             aux_trace.height()
-        );
-        assert_eq!(
-            aux_trace.width,
-            air.aux_width(),
-            "instance {i}: aux trace width mismatch: expected {}, got {}",
-            air.aux_width(),
-            aux_trace.width
-        );
-        assert_eq!(
-            aux_values.len(),
-            air.num_aux_values(),
-            "instance {i}: aux values count mismatch: expected {}, got {}",
-            air.num_aux_values(),
-            aux_values.len()
         );
 
         check_single_trace(air, main, aux_trace, aux_values, air_inputs, &challenges, i);
     }
-}
-
-fn log_height(h: usize) -> u8 {
-    assert!(h.is_power_of_two(), "trace height {h} is not a power of two");
-    h.trailing_zeros() as u8
 }
 
 /// Check constraints for one instance's traces row by row.

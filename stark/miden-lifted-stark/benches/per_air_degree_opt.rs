@@ -182,14 +182,19 @@ impl<A: LiftedAir<Felt, QuadFelt>> LiftedAir<Felt, QuadFelt> for OverrideConstra
 // MultiAir (trivial: constant-challenge aux column for each trace)
 // -----------------------------------------------------------------------------
 
-struct BenchMultiAir;
+struct BenchMultiAir {
+    airs: Vec<OverrideConstraintDegree<BenchAir>>,
+}
 
 impl MultiAir<Felt, QuadFelt> for BenchMultiAir {
     type Air = OverrideConstraintDegree<BenchAir>;
 
+    fn airs(&self) -> &[Self::Air] {
+        &self.airs
+    }
+
     fn build_aux_traces(
         &self,
-        _airs: &[Self::Air],
         traces: &[&RowMajorMatrix<Felt>],
         _air_inputs: &[Felt],
         _aux_inputs: &[Felt],
@@ -272,7 +277,8 @@ fn run_prove(
     let chip_trace = generate_trace(BenchAirKind::Chip.recurrence_power(), chip_height);
 
     let statement =
-        Statement::new(BenchMultiAir, vec![core_air, chip_air], Vec::new(), Vec::new()).unwrap();
+        Statement::new(BenchMultiAir { airs: vec![core_air, chip_air] }, Vec::new(), Vec::new())
+            .unwrap();
     let prover_statement = ProverStatement::new(statement, vec![core_trace, chip_trace]).unwrap();
 
     eprintln!("\n{}", "=".repeat(70));

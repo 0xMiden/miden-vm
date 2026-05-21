@@ -14,7 +14,7 @@ extern crate alloc;
 
 use alloc::{vec, vec::Vec};
 
-use miden_lifted_air::{BaseAir, LiftedAir, MultiAir, Statement, validate_log_heights};
+use miden_lifted_air::{BaseAir, LiftedAir, MultiAir, Statement};
 use miden_stark_transcript::{Channel, TranscriptData, VerifierChannel, VerifierTranscript};
 use p3_challenger::CanFinalizeDigest;
 use p3_field::{ExtensionField, Field, TwoAdicField};
@@ -22,11 +22,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     StarkConfig,
-    domain::{Coset, LiftedDomain, log_quotient_degree},
+    domain::{Coset, DomainError, LiftedDomain, log_quotient_degree},
     lmcs::Lmcs,
     order::TraceOrder,
     pcs::proof::PcsTranscript,
-    setup::validate_compatible,
     util::align::aligned_len,
     verifier::VerifierError,
 };
@@ -192,10 +191,10 @@ where
     /// Parse a STARK transcript from proof data and a challenger.
     ///
     /// Mirrors steps 0–9 of [`verify`](crate::verifier::verify):
-    /// 0. Reconstruct the AIR ordering from the proof's log trace heights, validate per-AIR
-    ///    contracts via [`validate_log_heights`], absorb the caller-supplied statement via
-    ///    [`Statement::observe`] (which itself absorbs the heights), then squeeze a throwaway
-    ///    `instance_challenge` to clear the absorb buffer
+    /// 0. Reconstruct the AIR ordering from the proof's log trace heights via
+    ///    `TraceOrder::from_log_heights`, which validates the per-AIR contracts, absorb the
+    ///    caller-supplied statement via [`Statement::observe`] (which itself absorbs the heights),
+    ///    then squeeze a throwaway `instance_challenge` to clear the absorb buffer
     /// 1. Receive main trace commitment
     /// 2. Sample randomness for auxiliary traces
     /// 3. Receive auxiliary trace commitment
@@ -219,11 +218,13 @@ where
         MA: MultiAir<L::F, EF>,
         SC: StarkConfig<L::F, EF, Lmcs = L>,
     {
-        // Shape well-formedness first (catches malicious `log_h` > usize::BITS),
-        // then per-AIR periodic-height feasibility.
-        let trace_order = TraceOrder::from_log_heights(proof.log_trace_heights.clone())?;
-        validate_log_heights::<L::F, EF, MA>(statement, trace_order.log_heights_instance())?;
-        validate_compatible::<L::F, EF, _>(statement.airs(), config.pcs())?;
+        // Shape well-formedness and per-AIR periodic-height feasibility, both
+        // against the (untrusted) proof heights — catches malicious
+        // `log_h` > usize::BITS and infeasible heights before any later use.
+        let trace_order = TraceOrder::from_log_heights::<L::F, EF, _>(
+            statement.airs(),
+            proof.log_trace_heights.clone(),
+        )?;
         let air_refs: Vec<&MA::Air> = statement.airs().iter().collect();
         let proof_ordered_airs = trace_order.to_proof_order(&air_refs);
 
@@ -243,12 +244,20 @@ where
         let alignment = config.lmcs().alignment();
 
         // Infer quotient degree from symbolic AIR analysis (max across all AIRs)
-        let log_quotient_degree = proof_ordered_airs
+        let log_blowup = config.pcs().log_blowup();
+        let max_log_quotient_degree = proof_ordered_airs
             .iter()
             .map(|&air| log_quotient_degree::<L::F, EF, _>(air))
             .max()
             .unwrap_or(1);
-        let quotient_degree = 1usize << log_quotient_degree as usize;
+        if max_log_quotient_degree > log_blowup {
+            return Err(DomainError::ConstraintDegreeTooHigh {
+                log_quotient: max_log_quotient_degree,
+                log_blowup,
+            }
+            .into());
+        }
+        let quotient_degree = 1usize << max_log_quotient_degree as usize;
 
         // 1. Receive main trace commitment
         let main_commit = channel.receive_commitment()?.clone();

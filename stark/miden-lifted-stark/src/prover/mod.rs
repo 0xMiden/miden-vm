@@ -80,28 +80,11 @@ use tracing::{info_span, instrument};
 
 use crate::{
     StarkConfig,
-    domain::{Coset, LiftedDomain, log_quotient_degree},
+    domain::{Coset, DomainError, LiftedDomain, log_quotient_degree},
     order::TraceOrder,
     pcs::prover::open_with_channel,
     proof::{StarkOutput, StarkProof},
-    setup::{CompatError, validate_compatible},
 };
-
-/// Errors that can occur during proving.
-///
-/// Returned exclusively for *runtime* validation failures of caller-supplied
-/// data. AIR structural correctness, `build_aux_traces` output shape, and
-/// other implementer-side contracts are trusted — see
-/// [`crate::debug::assert_prover_setup`] for the debug-mode wrappers.
-#[derive(Debug, Error)]
-pub enum ProverError {
-    #[error(transparent)]
-    Instance(#[from] InstanceError),
-    #[error(transparent)]
-    Compat(#[from] CompatError),
-    #[error(transparent)]
-    Domain(#[from] crate::domain::DomainError),
-}
 
 /// Prove a [`ProverStatement`].
 ///
@@ -130,8 +113,8 @@ pub enum ProverError {
 /// ## Trusted (NOT validated)
 /// - AIR structural shape (positive `aux_width`, power-of-two periodic columns, no preprocessed
 ///   trace, window size 2)
-/// - [`ProverStatement::build_aux_traces`] output dimensions — call
-///   [`crate::debug::assert_aux_traces_shape`] from tests to surface contract violations.
+/// - [`ProverStatement::build_aux_traces`] output dimensions — a malformed output is caught by the
+///   LDE/commit (panic) or by verification, since the verifier re-derives these shapes.
 /// - Preprocessed tree shape (TODO: adr1anh/preprocessed branch)
 ///
 /// # Arguments
@@ -157,12 +140,11 @@ where
     // --- Trust boundary (see doc-block above). -------------------------------
     let statement = prover_statement.statement();
     let airs = statement.airs();
-    validate_compatible::<F, EF, _>(airs, config.pcs())?;
 
     let traces = prover_statement.traces();
     let air_inputs = statement.air_inputs();
-    let trace_heights: Vec<usize> = traces.iter().map(|t| t.height()).collect();
-    let trace_order = TraceOrder::from_trace_heights(&trace_heights)
+    let trace_heights: Vec<usize> = traces.iter().map(Matrix::height).collect();
+    let trace_order = TraceOrder::from_trace_heights::<F, EF, _>(airs, &trace_heights)
         .expect("ProverStatement::new should reject malformed heights");
 
     // Borrow each AIR and trace, then reorder both into ascending-height (proof)
@@ -204,8 +186,13 @@ where
         .map(|&(air, _)| log_quotient_degree::<F, EF, _>(air))
         .collect();
     let log_quotient_degree = log_quotient_degrees.iter().copied().max().unwrap_or(1);
-
-    debug_assert!(log_quotient_degree <= log_blowup, "validate_compatible should have caught this");
+    if log_quotient_degree > log_blowup {
+        return Err(DomainError::ConstraintDegreeTooHigh {
+            log_quotient: log_quotient_degree,
+            log_blowup,
+        }
+        .into());
+    }
 
     // Pair the max LDE domain with the quotient degree. The `EvaluationDomain`
     // now flows through the constraint and quotient layers. Per-instance variants
@@ -248,8 +235,8 @@ where
     // Build all aux traces in one call (instance-ordered), then reorder in
     // place to the proof's AIR ordering to match the rest of the prover loop.
     //
-    // The output shapes are trusted (see trust contract above). Tests can
-    // surface contract violations via `crate::debug::assert_aux_traces_shape`.
+    // The output shapes are trusted (see trust contract above); a malformed
+    // output is caught downstream by the LDE/commit or by verification.
     let (mut aux_traces_ef, mut all_aux_values) =
         info_span!("build aux traces").in_scope(|| prover_statement.build_aux_traces(&randomness));
     trace_order.reorder_to_proof_in_place(&mut aux_traces_ef);
@@ -408,4 +395,18 @@ where
         transcript,
     };
     Ok(StarkOutput { digest, proof })
+}
+
+/// Errors that can occur during proving.
+///
+/// Returned exclusively for *runtime* validation failures of caller-supplied
+/// data. AIR structural correctness, `build_aux_traces` output shape, and
+/// other implementer-side contracts are trusted — see
+/// [`crate::debug::assert_prover_setup`] for the debug-mode wrappers.
+#[derive(Debug, Error)]
+pub enum ProverError {
+    #[error(transparent)]
+    Instance(#[from] InstanceError),
+    #[error(transparent)]
+    Domain(#[from] DomainError),
 }

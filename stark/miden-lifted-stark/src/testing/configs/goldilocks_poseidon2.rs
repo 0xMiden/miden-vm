@@ -222,7 +222,7 @@ pub fn prove_and_verify<A, AuxFn>(
     AuxFn: Fn(&RowMajorMatrix<Felt>, &[QuadFelt]) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>),
 {
     let airs: Vec<A> = core::iter::repeat_n(air.clone(), traces.len()).collect();
-    let traces_owned: Vec<RowMajorMatrix<Felt>> = traces.iter().cloned().collect();
+    let traces_owned: Vec<RowMajorMatrix<Felt>> = traces.to_vec();
     let statement =
         Statement::new(TestMultiAir::new(airs, aux_fn), air_inputs.to_vec(), Vec::new())
             .expect("statement inputs valid");

@@ -56,11 +56,10 @@ use thiserror::Error;
 
 use crate::{
     ShapeError, StarkConfig,
-    domain::{Coset, LiftedDomain, log_quotient_degree},
+    domain::{Coset, DomainError, LiftedDomain, log_quotient_degree},
     order::TraceOrder,
     pcs::verifier::{PcsError, verify_aligned},
     proof::{StarkDigest, StarkProof},
-    setup::{CompatError, validate_compatible},
     util::packing::row_to_packed_ext,
 };
 
@@ -68,17 +67,16 @@ use crate::{
 ///
 /// Returned exclusively for runtime instance / proof-shape failures or
 /// cryptographic verification failures. AIR structural correctness is
-/// trusted — call [`crate::debug::assert_airs_valid`] from tests.
+/// trusted — call [`crate::debug::assert_prover_setup`] (or
+/// [`miden_lifted_air::debug::assert_multi_air_valid`]) from tests.
 #[derive(Debug, Error)]
 pub enum VerifierError {
     #[error(transparent)]
     Instance(#[from] InstanceError),
     #[error(transparent)]
-    Compat(#[from] CompatError),
-    #[error(transparent)]
     Shape(#[from] ShapeError),
     #[error(transparent)]
-    Domain(#[from] crate::domain::DomainError),
+    Domain(#[from] DomainError),
     #[error(transparent)]
     Pcs(#[from] PcsError),
     #[error(transparent)]
@@ -133,11 +131,11 @@ pub enum VerifierError {
 ///
 /// `verify` validates the runtime statement plus everything carried on the
 /// proof; the AIR list is **trusted** (run
-/// [`crate::debug::assert_airs_valid`] from tests).
+/// [`miden_lifted_air::debug::assert_multi_air_valid`] from tests).
 ///
 /// ## Validated
 /// - Same statement checks as [`crate::prove`] minus trace shape (no traces here)
-/// - Same `validate_compatible` check
+/// - Same `log_quotient_degree <= log_blowup` compat check
 /// - Proof shape via the internal trace-order reconstruction from log heights
 /// - Proof byte parsing (transcript channel)
 /// - PCS / FRI / DEEP / LMCS / transcript / constraint identity
@@ -160,18 +158,15 @@ where
 {
     // --- Trust boundary (see doc-block above). -------------------------------
     //
-    // `TraceOrder::from_log_heights` runs first because it bounds `log_h`
-    // within the host's `usize` width; later code dereferences
-    // `1usize << log_h` and would otherwise overflow on a malicious proof.
-    // Per-AIR periodic-height feasibility is checked here on the heights
-    // carried by the (untrusted) proof; Statement::new already enforced the
-    // input-side contracts before construction.
-    let trace_order = TraceOrder::from_log_heights(proof.log_trace_heights.clone())?;
-    miden_lifted_air::validate_log_heights::<F, EF, MA>(
-        statement,
-        trace_order.log_heights_instance(),
+    // `TraceOrder::from_log_heights` validates the (untrusted) proof heights
+    // against the AIRs: it bounds `log_h` within the host's `usize` width
+    // (later code dereferences `1usize << log_h` and would otherwise overflow on
+    // a malicious proof) and checks per-AIR periodic-height feasibility.
+    // Statement::new already enforced the input-side contracts before construction.
+    let trace_order = TraceOrder::from_log_heights::<F, EF, _>(
+        statement.airs(),
+        proof.log_trace_heights.clone(),
     )?;
-    validate_compatible::<F, EF, _>(statement.airs(), config.pcs())?;
 
     let air_refs: Vec<&MA::Air> = statement.airs().iter().collect();
     let proof_ordered_airs = trace_order.to_proof_order(&air_refs);
@@ -199,20 +194,25 @@ where
 
     // Infer constraint degree from symbolic AIR analysis (max across all AIRs).
     // NOTE: `log_quotient_degree` runs symbolic eval and may panic if the AIR is
-    // invalid. The AIR is trusted (see `miden_lifted_air::debug::check_one_air`
+    // invalid. The AIR is trusted (see `miden_lifted_air::debug::assert_multi_air_valid`
     // for the debug-only structural check).
-    let log_quotient_degree = proof_ordered_airs
+    let max_log_quotient_degree = proof_ordered_airs
         .iter()
         .map(|&air| log_quotient_degree::<F, EF, _>(air))
         .max()
         .unwrap_or(1);
-
-    debug_assert!(log_quotient_degree <= log_blowup, "validate_compatible should have caught this");
+    if max_log_quotient_degree > log_blowup {
+        return Err(DomainError::ConstraintDegreeTooHigh {
+            log_quotient: max_log_quotient_degree,
+            log_blowup,
+        }
+        .into());
+    }
 
     // Pair the max LDE domain with the constraint degree for the constraint layer.
-    let max_eval_domain = max_lde_domain.evaluation_domain(log_quotient_degree);
+    let max_eval_domain = max_lde_domain.evaluation_domain(max_log_quotient_degree);
 
-    let quotient_degree = 1 << log_quotient_degree as usize;
+    let quotient_degree = 1 << max_log_quotient_degree as usize;
 
     let max_trace_height = max_lde_domain.trace_height();
 

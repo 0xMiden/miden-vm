@@ -78,6 +78,32 @@ pub trait LiftedAir<F: Field, EF>: Sync + BaseAir<F> {
         Some(RowMajorMatrix::new(values, num_cols))
     }
 
+    /// Maximum periodic-column length, or `0` if there are no periodic columns.
+    ///
+    /// A trace's height must be at least this value, so the prover and verifier
+    /// use it as the per-AIR lower bound on trace height.
+    ///
+    /// The default derives the value from [`periodic_columns`](Self::periodic_columns),
+    /// asserting along the way that every column is a non-empty power of two — the
+    /// structural contract on periodic tables. Override to return the value
+    /// directly when it is known statically; the override is treated as a perf
+    /// shortcut and is cross-checked against `periodic_columns` by
+    /// [`crate::debug::assert_multi_air_valid`].
+    fn max_periodic_length(&self) -> usize {
+        self.periodic_columns()
+            .iter()
+            .map(|col| {
+                assert!(
+                    !col.is_empty() && col.len().is_power_of_two(),
+                    "periodic column length must be a positive power of two, got {}",
+                    col.len(),
+                );
+                col.len()
+            })
+            .max()
+            .unwrap_or(0)
+    }
+
     /// Number of extension-field challenges required for the auxiliary trace.
     fn num_randomness(&self) -> usize;
 
@@ -218,6 +244,30 @@ where
 
     /// The AIRs in instance order — the single source of that ordering.
     fn airs(&self) -> &[Self::Air];
+
+    /// Number of public inputs shared by every AIR.
+    ///
+    /// All AIRs in a multi-AIR statement read the same `air_inputs`, so they must
+    /// agree on [`num_public_values`](p3_air::BaseAir::num_public_values). The
+    /// default returns that shared count, asserting the agreement holds (a
+    /// structural contract; an empty `airs()` panics — a multi-AIR statement
+    /// must carry at least one AIR). Override to return the count directly; the
+    /// override is cross-checked by [`crate::debug::assert_multi_air_valid`].
+    ///
+    /// [`Statement::new`](crate::Statement::new) checks `air_inputs.len()` against
+    /// this value.
+    fn num_air_inputs(&self) -> usize {
+        let airs = self.airs();
+        let n = airs
+            .first()
+            .expect("a MultiAir must carry at least one AIR")
+            .num_public_values();
+        assert!(
+            airs.iter().all(|air| air.num_public_values() == n),
+            "AIRs disagree on num_public_values",
+        );
+        n
+    }
 
     /// Upper bound on `aux_inputs().len()` accepted by [`Self::eval_external`].
     ///

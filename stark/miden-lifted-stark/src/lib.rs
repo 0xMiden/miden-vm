@@ -9,26 +9,23 @@
 //!
 //! 1. **AIR = trusted** — [`air::LiftedAir`] implementations are correct application code. It is
 //!    the AIR implementer's responsibility to satisfy the structural contract below.
-//!    [`miden_lifted_air::debug::assert_airs_valid`] / [`debug::assert_prover_setup`] are
+//!    [`miden_lifted_air::debug::assert_multi_air_valid`] / [`debug::assert_prover_setup`] are
 //!    panic-based helpers that check the statically-verifiable subset; passing a malformed AIR to
 //!    the prover or verifier is undefined behaviour.
 //!
 //! 2. **Statement = validated** — The prover validates that its witness matches the AIR spec. The
 //!    verifier validates the proof's shape metadata and the per-AIR contracts. Both return typed
-//!    errors ([`ProverError`] / [`VerifierError`]) — see [`miden_lifted_air::validate`] for the
-//!    underlying check functions.
+//!    errors ([`ProverError`] / [`VerifierError`]) — the underlying checks run on the [`Statement`]
+//!    / [`ProverStatement`] constructors and on `TraceOrder`.
 //!
 //! 3. **Proof = untrusted** — Transcript data is verified cryptographically (PCS errors, constraint
 //!    mismatch, etc.).
 //!
 //! ## Validated at runtime
 //!
-//! Checked by [`miden_lifted_air::validate_inputs`] /
-//! [`miden_lifted_air::validate_log_heights`] /
-//! [`miden_lifted_air::validate_prover_traces`] plus
-//! [`setup::validate_compatible`] plus the internal trace-order
-//! reconstruction from the proof's log heights, all run before any
-//! cryptographic work begins:
+//! Checked by [`Statement::new`] / [`ProverStatement::new`] (caller inputs and trace shape), the
+//! inline `log_quotient_degree(air) ≤ log_blowup` compat check, plus the internal trace-order
+//! reconstruction from the proof's log heights, all run before any cryptographic work begins:
 //!
 //! - **Shape well-formedness** — non-empty, ≤ 256 instances, each log trace height within the
 //!   host's `usize` width.
@@ -44,13 +41,14 @@
 //! from your test harness to enforce them in debug builds:
 //!
 //! 1. **AIR structural contract** — no preprocessed trace, positive aux width, power-of-two
-//!    periodic column lengths. Checked by [`miden_lifted_air::debug::check_one_air`].
+//!    periodic column lengths. Checked by [`miden_lifted_air::debug::assert_multi_air_valid`].
 //! 2. **Window size** — only transition window size 2.
 //! 3. **Deterministic constraints** — `eval()` emits the same number and types of constraints
 //!    regardless of builder implementation.
 //! 4. **[`ProverStatement::build_aux_traces`] output** — per AIR, an aux trace of width
-//!    `aux_width()`, height matching the main trace, and exactly `num_aux_values()` aux values.
-//!    Surface contract violations from tests via [`debug::assert_aux_traces_shape`].
+//!    `aux_width()`, height matching the main trace, and exactly `num_aux_values()` aux values. A
+//!    malformed output is caught by the prover (LDE/commit panic) or by verification, since the
+//!    verifier re-derives these shapes from the AIR contract.
 //! 5. **Sound [`Statement::eval_external`]** — Returns external assertions that are satisfied
 //!    (equal zero) iff the proof's cross-AIR interactions are well-formed for the given aux values
 //!    and public inputs.
@@ -72,7 +70,6 @@ mod pcs;
 pub mod proof;
 pub mod prover;
 mod selectors;
-pub mod setup;
 pub(crate) mod util;
 pub mod verifier;
 
@@ -98,7 +95,7 @@ pub use lmcs::{
 };
 pub use miden_lifted_air::{
     InstanceError, MultiAir, ProverStatement, ReductionError, Statement, log2_ceil_u8,
-    log2_strict_u8, validate_inputs, validate_log_heights, validate_prover_traces,
+    log2_strict_u8,
 };
 pub use order::ShapeError;
 pub use pcs::{
@@ -116,7 +113,6 @@ pub use pcs::{
 };
 pub use proof::{StarkDigest, StarkOutput, StarkProof, StarkTranscript};
 pub use prover::{ProverError, prove};
-pub use setup::{CompatError, validate_compatible};
 pub use util::bitrev::{BitReversibleMatrix, materialize_bitrev};
 pub use verifier::{VerifierError, verify};
 
@@ -151,10 +147,8 @@ pub mod air {
         RowWindow,
         Statement,
         WindowAccess,
-        // New surface (Commit 1):
         debug,
         log2_strict_u8,
-        validate,
     };
 
     /// Symbolic constraint analysis types from upstream p3-air.

@@ -6,12 +6,12 @@
 //! - [`LiftedAirBuilder`]: super-trait for constraint builders
 //! - [`MultiAir`]: the circuit — the AIR collection (`airs`) plus `eval_external`,
 //!   `build_aux_traces`, `observe`, and the `max_aux_inputs` budget
-//! - [`Statement`]: validated per-proof inputs over a `MultiAir`
-//! - [`ProverStatement`]: validated prover-side companion — a `Statement` plus per-AIR main traces
-//! - [`validate`]: runtime checks returned as typed [`validate::InstanceError`] from
-//!   [`Statement::new`] and [`ProverStatement::new`]
-//! - [`debug`]: panic-based structural checks for tests / setup ([`debug::assert_airs_valid`],
-//!   [`debug::check_builder_shape`], …)
+//! - [`Statement`]: validated per-proof inputs over a `MultiAir` — [`Statement::new`] rejects bad
+//!   inputs at construction with a typed [`InstanceError`]
+//! - [`ProverStatement`]: validated prover-side companion — a `Statement` plus per-AIR main traces,
+//!   trace shape checked by [`ProverStatement::new`]
+//! - [`debug`]: panic-based structural checks for tests / setup ([`debug::assert_multi_air_valid`],
+//!   [`debug::check_builder_shape`])
 
 #![no_std]
 
@@ -22,13 +22,11 @@ mod builder;
 pub mod debug;
 mod statement;
 mod util;
-pub mod validate;
 
 pub use air::{ConstraintDegrees, LiftedAir, MultiAir, ReductionError};
 pub use builder::LiftedAirBuilder;
-pub use statement::{ProverStatement, Statement};
+pub use statement::{InstanceError, ProverStatement, Statement};
 pub use util::{log2_ceil_u8, log2_strict_u8};
-pub use validate::{InstanceError, validate_inputs, validate_log_heights, validate_prover_traces};
 
 mod empty_window;
 

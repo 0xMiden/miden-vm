@@ -80,6 +80,7 @@ impl<EF: Field> LiftedAir<Felt, EF> for LiftedBenchAir {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 struct BenchMultiAir {
+    airs: Vec<LiftedBenchAir>,
     /// `(num_aux_cols, num_aux_values)` per AIR.
     aux_shape: Vec<(usize, usize)>,
 }
@@ -87,9 +88,12 @@ struct BenchMultiAir {
 impl MultiAir<Felt, QuadFelt> for BenchMultiAir {
     type Air = LiftedBenchAir;
 
+    fn airs(&self) -> &[Self::Air] {
+        &self.airs
+    }
+
     fn build_aux_traces(
         &self,
-        _airs: &[Self::Air],
         traces: &[&RowMajorMatrix<Felt>],
         _air_inputs: &[Felt],
         _aux_inputs: &[Felt],
@@ -147,7 +151,7 @@ where
         .collect();
 
     let traces_owned: Vec<RowMajorMatrix<Felt>> = traces.to_vec();
-    let statement = Statement::new(BenchMultiAir { aux_shape }, airs, Vec::new(), Vec::new())
+    let statement = Statement::new(BenchMultiAir { airs, aux_shape }, Vec::new(), Vec::new())
         .expect("statement");
     let prover_statement = ProverStatement::new(statement, traces_owned).expect("prover statement");
 
