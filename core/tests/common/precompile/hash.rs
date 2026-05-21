@@ -77,12 +77,12 @@ impl Hash {
 
     /// Build a canonical `digest` leaf from 8 felts.
     pub fn digest_node(felts: [Felt; 8]) -> Node {
-        Node::expression(Self::digest_tag(), Payload::new(felts))
+        Node::leaf(Self::digest_tag(), felts)
     }
 
     /// Build an `eq` predicate over two child digests.
     pub fn eq_node(h_lhs: Digest, h_rhs: Digest) -> Node {
-        Node::expression(Self::eq_tag(), Payload::join(h_lhs, h_rhs))
+        Node::join(Self::eq_tag(), h_lhs, h_rhs)
     }
 
     /// Decode `[Felt; 8]` digest contents from a canonical `digest` leaf. Errors if `node`
@@ -148,7 +148,7 @@ impl Precompile for Hash {
                 Ok(Self::digest_node(Self::hash(payload.as_chunks()?)))
             },
             Discriminant::Digest => {
-                Ok(Node::expression(Tag::new(Self::id(), args), Payload::new(*payload.as_felts()?)))
+                Ok(Node::leaf(Tag::new(Self::id(), args), *payload.as_felts()?))
             },
             Discriminant::Eq => {
                 let (h_lhs, h_rhs) = payload.join_children()?;

@@ -320,18 +320,22 @@ pub enum SystemEvent {
     /// in-circuit.
     DeferredRegister,
 
-    /// Evaluates a node identified by its 4-felt digest via the installed schema and pushes the
-    /// canonical's body (`payload || tag` or `chunks || tag`) onto the advice stack.
+    /// Evaluates a node identified by its 4-felt digest via the installed schema, pushes the
+    /// canonical digest to the advice stack, and records the canonical in the advice map.
     ///
-    /// The node must already be interned in `DeferredState` — programs typically obtain the
-    /// digest from `adv.register_deferred` / `adv.register_deferred_chunk` (which push it to
-    /// advice as their output) immediately before calling this event.
+    /// The node digest must resolve in deferred state — either as a previously registered node
+    /// or as a previously memoized evaluation input. Programs typically obtain the digest from
+    /// `adv.register_deferred` / `adv.register_deferred_chunk` immediately before calling this
+    /// event.
     ///
     /// For expression nodes the canonical is the reduced form; for predicate tags whose
     /// `reduce` returns [`crate::deferred::Node::TRUE`] on success, the precompile verifies
     /// the assertion (returning [`crate::deferred::PrecompileError::AssertionFailed`] on
-    /// mismatch) and pushes nothing. Children referenced in the payload must already be
-    /// registered in the DAG.
+    /// mismatch). Children referenced in the payload must already be registered in the DAG.
+    ///
+    /// The advice-map entry is uniform across every node shape — including predicates, whose
+    /// canonical is the TRUE node and so serializes to 12 zero-ish felts like any other expression.
+    /// A recorded entry therefore means evaluation (and, for predicates, verification) succeeded.
     ///
     /// Inputs:
     ///   Operand stack: [event_id, NODE_DIGEST, ...]
@@ -339,12 +343,11 @@ pub enum SystemEvent {
     ///
     /// Outputs:
     ///   Operand stack: [event_id, NODE_DIGEST, ...] (unchanged)
-    ///   Advice stack:  depends on canonical:
-    ///     - expression: [CANONICAL_PAYLOAD_LO, CANONICAL_PAYLOAD_HI, CANONICAL_TAG, ...] (top is
-    ///       `CANONICAL_PAYLOAD_LO`)
-    ///     - chunk:      `[chunk[0]_LO, chunk[0]_HI, chunk[1]_LO, ..., CANONICAL_TAG, ...]` (top is
-    ///       `chunk[0]_LO`; `n` chunks ⇒ `2n + 1` advice words)
-    ///     - predicate:  nothing pushed (assertion fires or errors)
+    ///   Advice stack:  [CANONICAL_DIGEST, ...]
+    ///   Advice map:    CANONICAL_DIGEST |-> CANONICAL_VALUE, where CANONICAL_VALUE is the
+    ///     canonical serialized in natural (felt-index) order as `tag || payload`:
+    ///     - expression: the 4 tag felts followed by the 8 payload felts (12 felts)
+    ///     - chunk:      the 4 tag felts followed by every chunk's 8 felts (8n + 4)
     DeferredEvaluate,
 
     /// Registers a chunk node in the deferred-computation DAG.

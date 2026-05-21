@@ -99,9 +99,9 @@ default registry is empty and rejects every tag; a host installs precompiles via
 `FastProcessor::with_precompile`.
 
 During reduction the framework hands the precompile a `WitnessBuilder`, through which it can
-`resolve` a child digest to its canonical (memoized) or `intern` a freshly-minted child into the
-DAG. The precompile never touches the data model or the commitment directly — it supplies only
-per-node meaning, and the framework drives the depth-first recursion.
+`resolve` a child digest to its canonical or `intern` a freshly-minted child into the DAG. The
+precompile never touches the data model or the commitment directly — it supplies only per-node
+meaning, and the framework drives the depth-first recursion.
 
 ## Building the DAG from a program
 
@@ -114,16 +114,20 @@ helper.
 | -------------------------- | ---------------- | -------------------------------- | ------ |
 | `register_deferred`        | `register_expr`  | `[PAYLOAD_LO, PAYLOAD_HI, TAG, …]` | Decodes the tag, builds the expression node, registers it; pushes `NODE_DIGEST` to advice. |
 | `register_deferred_chunk`  | `register_chunk` | `[TAG, ptr, …]`                  | Decodes `n` from the tag, reads `8n` felts from memory at `ptr`, registers the chunk node; pushes `NODE_DIGEST` to advice. |
-| `evaluate_deferred`        | `evaluate`       | `[NODE_DIGEST, …]`               | Looks the node up, reduces it, and pushes the **canonical body** to advice. |
+| `evaluate_deferred`        | `evaluate`       | `[NODE_DIGEST, …]`               | Looks the node up, reduces it, pushes `CANONICAL_DIGEST` to advice, and records the canonical (`tag || payload`) in the advice map under `CANONICAL_DIGEST`. |
 
 `register_*` validate the tag's shape and intern the node, but do not reduce it — they are pure
-host hints that populate the DAG. `evaluate_deferred` is where meaning is checked; its advice-stack
-output depends on the canonical:
+host hints that populate the DAG. `evaluate_deferred` is where meaning is checked and where the
+fused advice outputs are recorded:
 
-- **predicate** (the canonical is the `TRUE` node): nothing is pushed — a failed predicate has
-  already surfaced as an error;
-- **expression canonical**: the 12 felts `[PAYLOAD_LO, PAYLOAD_HI, TAG]`;
-- **chunk canonical**: every chunk block, followed by the tag.
+- **advice stack**: `CANONICAL_DIGEST` (the reduced node's own digest);
+- **advice map key**: `CANONICAL_DIGEST`;
+- **advice map value**: the canonical serialized as `tag || payload` in natural order — the 4 tag
+  felts followed by the 8 payload felts (or every chunk block's felts, for a chunk canonical).
+
+Predicates are **not** special-cased: their canonical is the `TRUE` node, which serializes to its
+12 felts like any other expression. A recorded entry therefore means evaluation succeeded — a
+failed predicate has already surfaced as an error before the entry is written.
 
 ## The deferred commitment
 

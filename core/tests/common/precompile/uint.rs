@@ -75,7 +75,7 @@ impl Uint {
 
     /// Build a canonical leaf node from u32 limbs (little-endian).
     pub fn leaf_node(limbs: [u32; 8]) -> Node {
-        Node::expression(Self::leaf_tag(), encode_limbs(limbs))
+        Node::leaf(Self::leaf_tag(), limbs.map(Felt::from_u32))
     }
 
     /// Extract `[u32; 8]` limbs from a canonical leaf node, erroring if it isn't a `Uint` leaf
@@ -161,9 +161,7 @@ impl Precompile for Uint {
         match UintNode::parse(args, payload)? {
             // Leaf canonicality is checked at parse-time, deferred from register-time so that
             // malformed leaves are interned silently and only error out when used.
-            UintNode::Leaf => {
-                Ok(Node::expression(Tag::new(Self::id(), args), Payload::new(*payload.as_felts()?)))
-            },
+            UintNode::Leaf => Ok(Node::leaf(Tag::new(Self::id(), args), *payload.as_felts()?)),
             UintNode::BinaryOp { op, lhs, rhs } => {
                 let a = leaf_limbs(&witness.resolve(lhs)?)?;
                 let b = leaf_limbs(&witness.resolve(rhs)?)?;
