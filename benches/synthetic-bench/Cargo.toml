@@ -19,13 +19,9 @@ serde_json      = { workspace = true, features = ["std"] }
 thiserror       = { workspace = true, features = ["std"] }
 
 [dev-dependencies]
-codspeed = { workspace = true }
+codspeed-criterion-compat = { workspace = true }
 criterion = { workspace = true }
 
 [[bench]]
 name = "synthetic_bench"
-harness = false
-
-[[bench]]
-name = "synthetic_codspeed"
 harness = false

@@ -7,10 +7,6 @@ on:
       - next
   workflow_dispatch:
 
-permissions:
-  contents: read
-  id-token: write
-
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -18,11 +14,17 @@ concurrency:
 jobs:
   codspeed:
     name: Run CodSpeed benchmarks
-    runs-on: ubuntu-latest
+    runs-on: codspeed-macro
     timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
     env:
       RAYON_NUM_THREADS: "8"
       SYNTH_BENCH_AXES: exec,trace_prep,prove,verify
+      SYNTH_MEASUREMENT_TIME_SECS: "1"
+      SYNTH_SAMPLE_SIZE: "10"
+      SYNTH_WARM_UP_TIME_SECS: "1"
       SYNTH_SCENARIO: create-single-p2id-note
     steps:
       - name: Check out repository
@@ -50,10 +52,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cargo codspeed build --profile optimized -p miden-vm-synthetic-bench --bench synthetic_codspeed
+          cargo codspeed build --measurement-mode walltime --profile optimized -p miden-vm-synthetic-bench --bench synthetic_bench
 
       - name: Run benchmarks
         uses: CodSpeedHQ/action@3194d9a39c4d46684cb44bf7207fc56626aad8fd # v4.15.1
         with:
-          mode: simulation
-          run: cargo codspeed run
+          mode: walltime
+          run: cargo codspeed run --measurement-mode walltime -p miden-vm-synthetic-bench --bench synthetic_bench
