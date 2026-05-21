@@ -263,7 +263,8 @@ impl MastNodeExt for JoinNode {
         let id = self.decorator_store.linked_id();
         // Verify that this node is the one stored at the given ID in the forest
         let self_ptr = self as *const Self;
-        let forest_node = forest.get_node_by_id(id).expect("linked node id must be present in forest");
+        let forest_node =
+            forest.get_node_by_id(id).expect("linked node id must be present in forest");
         let forest_node_ptr = match forest_node {
             MastNode::Join(join_node) => join_node as *const JoinNode as *const (),
             _ => panic!("Node type mismatch at {id:?}"),

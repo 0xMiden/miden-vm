@@ -207,7 +207,8 @@ impl MastNodeExt for ExternalNode {
         let id = self.decorator_store.linked_id();
         // Verify that this node is the one stored at the given ID in the forest
         let self_ptr = self as *const Self;
-        let forest_node = forest.get_node_by_id(id).expect("linked node id must be present in forest");
+        let forest_node =
+            forest.get_node_by_id(id).expect("linked node id must be present in forest");
         let forest_node_ptr = match forest_node {
             crate::mast::MastNode::External(external) => {
                 external as *const ExternalNode as *const ()

@@ -731,7 +731,8 @@ impl MastNodeExt for BasicBlockNode {
         let id = self.decorators.linked_id();
         // Verify that this node is the one stored at the given ID in the forest
         let self_ptr = self as *const Self;
-        let forest_node = forest.get_node_by_id(id).expect("linked node id must be present in forest");
+        let forest_node =
+            forest.get_node_by_id(id).expect("linked node id must be present in forest");
         let forest_node_ptr = match forest_node {
             crate::mast::MastNode::Block(block_node) => {
                 block_node as *const BasicBlockNode as *const ()
