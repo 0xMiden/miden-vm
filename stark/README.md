@@ -28,8 +28,8 @@ miden-lifted-stark               (prover, verifier, PCS, LMCS, shared types)
 
 ## Docs
 
-- `docs/faq.md` (architecture Q&A)
-- `docs/lifting.md` (math background for lifting)
+- `miden-lifted-stark/README.md` (protocol-level overview)
+- `miden-lifted-stark/src/prover/README.md`, `src/verifier/README.md` (per-side detail + lifting math)
 - `SECURITY.md` (audit/review guide; transcript and composition notes)
 
 ## Where To Start (Code)
@@ -37,7 +37,7 @@ miden-lifted-stark               (prover, verifier, PCS, LMCS, shared types)
 - Protocol flow: `miden-lifted-stark/src/prover/mod.rs` and `miden-lifted-stark/src/verifier/mod.rs`
 - PCS layer: `miden-lifted-stark/src/pcs/prover.rs` and `miden-lifted-stark/src/pcs/verifier.rs`
 - Commitment layer: `miden-lifted-stark/src/lmcs/mod.rs` and `miden-lifted-stark/src/lmcs/lifted_tree.rs`
-- Math background: `docs/lifting.md`
+- Math background: the "Mathematical background" in `miden-lifted-stark/src/prover/README.md` and `miden-lifted-stark/src/verifier/README.md`
 
 ## Build / Test
 

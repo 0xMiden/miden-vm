@@ -64,7 +64,8 @@ These are requirements on *applications* composing these crates.
 - You MUST ensure evaluation points used by DEEP/PCS lie outside the trace
   subgroup `H` and outside the LDE coset `gK`.
 - You MUST only use LMCS lifting with AIRs that are compatible with the lifted
-  view (see `docs/lifting.md`).
+  view (see the "Mathematical background" in
+  `miden-lifted-stark/src/prover/README.md` and `src/verifier/README.md`).
 
 Concrete examples of statement data that the application must treat explicitly:
 
@@ -224,8 +225,8 @@ If the AIR is *liftable* (roughly: it does not depend on wrap-around "next row"
 semantics unless explicitly constrained), then proving the lifted identity is as
 sound as proving the non-lifted identity.
 
-For more detail on liftable AIR conditions and periodicity constraints, see
-`docs/lifting.md`.
+For more detail on liftable AIR conditions and periodicity constraints, see the
+"Mathematical background" in `miden-lifted-stark/src/{prover,verifier}/README.md`.
 
 ## Parameter Guidance (Non-Normative)
 

@@ -24,7 +24,7 @@
 //! fixes the trace size (e.g. a proof for a 2^16-row execution), parse it
 //! with
 //! [`StarkTranscript::from_proof`](crate::proof::StarkTranscript::from_proof)
-//! and check `transcript.trace_order.log_heights_instance()` yourself.
+//! and check `transcript.log_trace_heights()` yourself.
 //!
 //! # Transcript boundaries (strict consumption)
 //!

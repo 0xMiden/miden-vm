@@ -48,7 +48,8 @@ view.
 
 Informally, an AIR is "liftable" if transition constraints do not rely on the
 wrap-around row (last -> first) unless that behavior is explicitly constrained.
-See `docs/lifting.md` for a deeper discussion and sufficient conditions.
+See the "Mathematical background" in `src/prover/README.md` and
+`src/verifier/README.md` for a deeper discussion and sufficient conditions.
 
 ## Protocol Summary
 
