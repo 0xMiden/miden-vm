@@ -1,8 +1,8 @@
 //! Tests for the Keccak256 precompile MASM wrappers.
 //!
 //! The MASM wrappers in `crypto/hashes/keccak256.masm` drive the deferred-DAG sys events
-//! directly, and the installed `Keccak256Precompile` schema's `reduce` runs `Keccak256::hash`
-//! at evaluation time.
+//! directly, and the installed `Keccak256Precompile` registry entry's `reduce` runs
+//! `Keccak256::hash` at evaluation time.
 //!
 //! These tests cover the public surface:
 //! - `keccak256::hash_bytes` returns the correct digest for various input sizes (incl. empty,
@@ -13,6 +13,7 @@
 use core::array;
 
 use miden_core::{Felt, crypto::hash::Keccak256, utils::bytes_to_packed_u32_elements};
+use miden_processor::ExecutionError;
 
 use crate::helpers::{masm_push_felts, masm_store_felts};
 
@@ -186,4 +187,82 @@ fn test_keccak_merge_preserves_caller_stack() {
     );
 
     build_debug_test!(source, &sentinels).expect_stack(&sentinels);
+}
+
+// DEFERRED-STATE BUDGET
+// ================================================================================================
+// The deferred-DAG analogue of the old per-invocation `max_hash_len_bytes` cap: a keccak256
+// preimage is registered as a chunk node and reduced, so a large input grows the deferred state.
+// `ExecutionOptions::max_deferred_elements` bounds that growth and is enforced in the deferred
+// sys-event handlers (not the precompile), so one end-to-end keccak run exercises the shared cap.
+
+/// A preimage that comfortably fits the budget hashes successfully.
+#[test]
+fn test_keccak_under_deferred_budget_succeeds() {
+    let input: Vec<u8> = (0..70).collect();
+    run_keccak_with_deferred_budget(&input, 1024).unwrap();
+}
+
+/// A preimage whose chunk node alone would push the deferred state past the budget is rejected —
+/// caught by the pre-read budget check before the chunk is materialized.
+#[test]
+fn test_keccak_over_deferred_budget_is_rejected() {
+    // 70 bytes → 3 chunks → a `4 + 8*3 = 28`-element preimage node, well over a budget of 8.
+    let input: Vec<u8> = (0..70).collect();
+    let err = run_keccak_with_deferred_budget(&input, 8).unwrap_err();
+    assert!(
+        matches!(err, ExecutionError::DeferredStateTooLarge { max: 8, .. }),
+        "expected DeferredStateTooLarge, got: {err:?}"
+    );
+}
+
+// HELPERS
+// ================================================================================================
+
+/// Assembles and runs `keccak256::hash_bytes` over `input` with a custom
+/// `max_deferred_elements` budget, returning the execution result.
+fn run_keccak_with_deferred_budget(
+    input: &[u8],
+    max_deferred_elements: usize,
+) -> Result<(), ExecutionError> {
+    use miden_assembly::Assembler;
+    use miden_processor::{
+        DefaultHost, ExecutionOptions, FastProcessor, StackInputs, advice::AdviceInputs,
+    };
+
+    let len_bytes = input.len();
+    let input_felts = bytes_to_packed_u32_elements(input);
+    let memory_stores = masm_store_felts(&input_felts, INPUT_MEMORY_ADDR);
+
+    let source = format!(
+        r#"
+        use miden::core::sys
+        use miden::core::crypto::hashes::keccak256
+
+        begin
+            {memory_stores}
+            push.{len_bytes}.{INPUT_MEMORY_ADDR}
+            exec.keccak256::hash_bytes
+            exec.sys::truncate_stack
+        end
+        "#,
+    );
+
+    let core_lib = miden_core_lib::CoreLibrary::default();
+    let program = Assembler::default()
+        .with_static_library(core_lib.library())
+        .unwrap()
+        .assemble_program(&source)
+        .unwrap();
+
+    let mut host = DefaultHost::default();
+    host.load_library(&core_lib)?;
+
+    let options = ExecutionOptions::default().with_max_deferred_elements(max_deferred_elements);
+    let processor =
+        FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options)
+            .map_err(ExecutionError::advice_error_no_context)?;
+
+    processor.execute_sync(&program, &mut host)?;
+    Ok(())
 }

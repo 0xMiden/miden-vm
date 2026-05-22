@@ -48,9 +48,7 @@ criterion.workspace = true
 miden-ace-codegen.workspace = true
 miden-air.workspace = true
 miden-processor = { workspace = true, features = ["testing"] }
-miden-prover.workspace = true
 miden-utils-testing.workspace = true
-miden-verifier.workspace = true
 num = { version = "0.4" }
 rand = { version = "0.9", default-features = false }
 rand_chacha = { workspace = true }
