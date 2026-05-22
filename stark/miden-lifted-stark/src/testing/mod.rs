@@ -14,7 +14,7 @@ pub mod configs;
 pub mod params;
 
 #[cfg(test)]
-mod test_bus;
+mod test_external_assertions;
 #[cfg(test)]
 mod test_multi_aux_alignment;
 #[cfg(test)]
