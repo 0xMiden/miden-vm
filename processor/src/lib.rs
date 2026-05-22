@@ -24,6 +24,8 @@ mod host;
 mod processor;
 mod tracer;
 
+use miden_core::mast::ExecutableMastForest;
+
 use crate::{
     advice::{AdviceInputs, AdviceProvider},
     continuation_stack::ContinuationStack,
@@ -264,6 +266,11 @@ impl<'a> ProcessorState<'a> {
 pub trait Stopper {
     type Processor;
 
+    /// The forest representation used by the executor this stopper is paired with.
+    ///
+    /// For live execution this is `Arc<MastForest>`; for replay it is `Arc<SparseMastForest>`.
+    type Forest: ExecutableMastForest + Clone;
+
     /// Determines whether execution should be stopped at the end of each clock cycle.
     ///
     /// This method is guaranteed to be called at the end of each clock cycle, *after* the processor
@@ -281,9 +288,9 @@ pub trait Stopper {
     fn should_stop(
         &self,
         processor: &Self::Processor,
-        continuation_stack: &ContinuationStack,
-        continuation_after_stop: impl FnOnce() -> Option<Continuation>,
-    ) -> ControlFlow<BreakReason>;
+        continuation_stack: &ContinuationStack<Self::Forest>,
+        continuation_after_stop: impl FnOnce() -> Option<Continuation<Self::Forest>>,
+    ) -> ControlFlow<BreakReason<Self::Forest>>;
 }
 
 // EXECUTION CONTEXT
@@ -384,5 +391,27 @@ impl core::ops::Add<u32> for MemoryAddress {
 
     fn add(self, rhs: u32) -> Self::Output {
         MemoryAddress(self.0 + rhs)
+    }
+}
+
+// HELPERS
+// ===============================================================================================
+
+/// Lifts an [`Option<T>`] into a [`ControlFlow`] suitable for the execution loop, mapping `None`
+/// to a break carrying an [`ExecutionError::Internal`] with `err_msg`.
+///
+/// Intended for use with `?` at sites where a `None` represents a violated internal invariant —
+/// most commonly a missing node returned by
+/// [`ExecutableMastForest::get_node_by_id`](miden_core::mast::ExecutableMastForest::get_node_by_id).
+/// For functions returning `ControlFlow<InternalBreakReason<F>>`, chain
+/// `.map_break(InternalBreakReason::from)` before `?`.
+#[track_caller]
+fn option_map_break_reason<F, T>(
+    opt: Option<T>,
+    err_msg: &'static str,
+) -> ControlFlow<BreakReason<F>, T> {
+    match opt {
+        Some(value) => ControlFlow::Continue(value),
+        None => ControlFlow::Break(BreakReason::Err(ExecutionError::Internal(err_msg))),
     }
 }

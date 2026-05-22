@@ -10,7 +10,7 @@ These procedures are always executed in the root context and can only be accesse
 The chiplet tracks and enforces correctness of all kernel procedure calls as well as maintaining a list of all the procedures defined for the kernel, whether they are executed or not.
 More background about Miden VM execution contexts can be found [here](../../user_docs/assembly/execution_contexts.md).
 
-## Kernel ROM trace
+## Kernel ROM trace {#constraints}
 
 The kernel ROM table consists of five columns, with exactly one row per declared kernel procedure.
 The following example table shows the execution trace for three procedures with digests $a, b, c$, called 1, 2, and 0 times respectively.

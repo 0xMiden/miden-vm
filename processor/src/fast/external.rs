@@ -1,4 +1,4 @@
-use miden_core::mast::MastForest;
+use miden_core::mast::ExecutableMastForest;
 
 use crate::{
     BaseHost, ExecutionError,
@@ -31,12 +31,15 @@ use crate::{
 ///
 /// The carets and line numbers point to the `call` instruction that triggered the error because of
 /// the remapping we do in this function.
-pub(super) fn maybe_use_caller_error_context(
+pub(super) fn maybe_use_caller_error_context<F>(
     original_err: ExecutionError,
-    current_forest: &MastForest,
-    continuation_stack: &ContinuationStack,
+    current_forest: &F,
+    continuation_stack: &ContinuationStack<F>,
     host: &mut impl BaseHost,
-) -> ExecutionError {
+) -> ExecutionError
+where
+    F: ExecutableMastForest,
+{
     // We only care about procedure-not-found errors or malformed MAST forest errors.
     let root_digest = match &original_err {
         ExecutionError::ProcedureNotFound { root_digest, .. } => *root_digest,

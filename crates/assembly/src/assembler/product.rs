@@ -49,15 +49,15 @@ impl AssemblyProduct {
     }
 
     // TODO(pauls): This can be removed when we remove Library/KernelLibrary/Program
-    pub fn into_program(self) -> Result<Program, Report> {
+    pub fn into_program(self) -> Program {
         assert_eq!(self.kind, TargetType::Executable);
         let entry = Path::exec_path().join(ast::ProcedureName::MAIN_PROC_NAME);
         let entrypoint = self.artifact.get_export_node_id(&entry);
-        Ok(if let Some(kernel) = self.kernel {
+        if let Some(kernel) = self.kernel {
             Program::with_kernel(self.artifact.mast_forest().clone(), entrypoint, kernel)
         } else {
             Program::new(self.artifact.mast_forest().clone(), entrypoint)
-        })
+        }
     }
 
     // TODO(pauls): This can be removed when we remove Library/KernelLibrary/Program

@@ -112,21 +112,19 @@ fn empty_program() -> TestResult {
 }
 
 #[test]
-fn empty_if() -> TestResult {
+fn empty_if() {
     let context = TestContext::default();
     let source = source_file!(&context, "begin if.true end end");
     assert_assembler_diagnostic!(
         context,
         source,
-        "invalid syntax",
+        "invalid syntax: expected a non-empty `if` block",
         regex!(r#",-\[test[\d]+:1:15\]"#),
         "1 | begin if.true end end",
-        "  :               ^|^",
-        "  :                `-- found a end here",
-        "  `----",
-        " help: expected primitive opcode (e.g. \"add\"), or \"else\", or control flow opcode (e.g. \"if.true\")"
+        "  :               ^",
+        "  :               `-- expected a non-empty `if` block",
+        "  `----"
     );
-    Ok(())
 }
 
 #[test]
@@ -713,7 +711,7 @@ end
 }
 
 #[test]
-fn get_module_by_path() -> Result<(), Report> {
+fn get_module_by_path() {
     let context = TestContext::new();
     // declare foo module
     let foo_source = r#"
@@ -734,8 +732,6 @@ fn get_module_by_path() -> Result<(), Report> {
 
     let (_, foo_proc) = foo_module_info.procedures().next().unwrap();
     assert_eq!(foo_proc.name, ProcedureName::new("foo").unwrap());
-
-    Ok(())
 }
 
 #[test]
@@ -1105,7 +1101,7 @@ end
 }
 
 #[test]
-fn enum_felt_discriminant_negative_is_rejected() -> TestResult {
+fn enum_felt_discriminant_negative_is_rejected() {
     let context = TestContext::default();
     let source = source_file!(
         &context,
@@ -1123,11 +1119,10 @@ end
         .assemble(source)
         .expect_err("expected negative discriminant to be rejected");
     assert_diagnostic!(err, "invalid constant expression: value is larger than expected range");
-    Ok(())
 }
 
 #[test]
-fn enum_felt_discriminant_too_large_is_rejected() -> TestResult {
+fn enum_felt_discriminant_too_large_is_rejected() {
     let context = TestContext::default();
     let modulus = Felt::ORDER_U64;
     let source = source_file!(
@@ -1148,11 +1143,10 @@ end
         .assemble(source)
         .expect_err("expected out-of-range felt discriminant to be rejected");
     assert_diagnostic!(err, "invalid literal: value overflowed the field modulus");
-    Ok(())
 }
 
 #[test]
-fn constant_expression_overflow_is_rejected() -> TestResult {
+fn constant_expression_overflow_is_rejected() {
     let context = TestContext::default();
     let modulus_minus_one = Felt::ORDER_U64 - 1;
     let source = source_file!(
@@ -1165,7 +1159,6 @@ fn constant_expression_overflow_is_rejected() -> TestResult {
         .assemble(source)
         .expect_err("expected constant expression overflow to be rejected");
     assert_diagnostic!(err, "invalid constant expression: value is larger than expected range");
-    Ok(())
 }
 
 #[test]
@@ -1251,7 +1244,7 @@ fn constant_field_division() -> TestResult {
 }
 
 #[test]
-fn constant_err_const_not_initialized() -> TestResult {
+fn constant_err_const_not_initialized() {
     let context = TestContext::default();
     let source = source_file!(
         &context,
@@ -1273,11 +1266,10 @@ fn constant_err_const_not_initialized() -> TestResult {
         "  `----",
         " help: are you missing an import?"
     );
-    Ok(())
 }
 
 #[test]
-fn constant_err_div_by_zero() -> TestResult {
+fn constant_err_div_by_zero() {
     let context = TestContext::default();
     let source = source_file!(
         &context,
@@ -1312,11 +1304,10 @@ fn constant_err_div_by_zero() -> TestResult {
         "  :                       ^^^^",
         "  `----"
     );
-    Ok(())
 }
 
 #[test]
-fn constant_err_div_by_zero_indirect() -> TestResult {
+fn constant_err_div_by_zero_indirect() {
     let context = TestContext::default();
 
     let source = source_file!(
@@ -1343,8 +1334,6 @@ fn constant_err_div_by_zero_indirect() -> TestResult {
         "4 |",
         "  `----"
     );
-
-    Ok(())
 }
 
 #[test]
@@ -1387,7 +1376,7 @@ fn constant_err_div_by_zero_link_time() -> TestResult {
 }
 
 #[test]
-fn constants_must_be_uppercase() -> TestResult {
+fn constants_must_be_uppercase() {
     let context = TestContext::default();
     let source = source_file!(
         &context,
@@ -1400,20 +1389,18 @@ fn constants_must_be_uppercase() -> TestResult {
     assert_assembler_diagnostic!(
         context,
         source,
-        "invalid syntax",
+        "invalid identifier: only uppercase characters or underscores are allowed, and must start with an alphabetic character",
+        "invalid identifier: only uppercase characters or underscores are allowed, and must start with an alphabetic character",
         regex!(r#",-\[test[\d]+:1:7\]"#),
         "1 | const constant_1 = 12 begin push.constant_1 end",
-        "  :       ^^^^^|^^^^",
-        "  :            `-- found a identifier here",
+        "  :       ^^^^^^^^^^",
         "  `----",
-        "        help: expected constant identifier"
+        "help: bare identifiers must be lowercase alphanumeric with '_', quoted identifiers can include any graphical character"
     );
-
-    Ok(())
 }
 
 #[test]
-fn duplicate_constant_name() -> TestResult {
+fn duplicate_constant_name() {
     let context = TestContext::default();
     let source = source_file!(
         &context,
@@ -1432,16 +1419,15 @@ fn duplicate_constant_name() -> TestResult {
         "symbol conflict: found duplicate definitions of the same name",
         regex!(r#",-\[test[\d]+:1:1\]"#),
         "1 | const CONSTANT = 12 const CONSTANT = 14 begin push.CONSTANT end",
-        "  : ^^^^^^^^^|^^^^^^^^^ ^^^^^^^^^|^^^^^^^^^",
-        "  :          |                   `-- conflict occurs here",
-        "  :          `-- previously defined here",
+        "  : ^^^^^^^^^^|^^^^^^^^^^^^^^^^^^^|^^^^^^^^^",
+        "  :           |                   `-- conflict occurs here",
+        "  :           `-- previously defined here",
         "  `----"
     );
-    Ok(())
 }
 
 #[test]
-fn constant_must_be_valid_felt() -> TestResult {
+fn constant_must_be_valid_felt() {
     let context = TestContext::default();
     let source = source_file!(
         &context,
@@ -1454,20 +1440,17 @@ fn constant_must_be_valid_felt() -> TestResult {
     assert_assembler_diagnostic!(
         context,
         source,
-        "invalid syntax",
+        "invalid syntax: unexpected trailing tokens in expression",
         regex!(r#",-\[test[\d]+:1:22\]"#),
         "1 | const CONSTANT = 1122INVALID begin push.CONSTANT end",
         "  :                      ^^^|^^^",
-        "  :                         `-- found a constant identifier here",
-        "  `----",
-        " help: expected \"*\", or \"+\", or \"-\", or \"/\", or \"//\", or \"@\", or \"adv_map\", or \"begin\", or \"const\", or \"enum\", \
-or \"proc\", or \"pub\", or \"type\", or \"use\", or end of file, or doc comment"
+        "  :                         `-- unexpected trailing tokens in expression",
+        "  `----"
     );
-    Ok(())
 }
 
 #[test]
-fn constant_must_be_within_valid_felt_range() -> TestResult {
+fn constant_must_be_within_valid_felt_range() {
     let context = TestContext::default();
 
     // test the u64::MAX value
@@ -1526,12 +1509,10 @@ fn constant_must_be_within_valid_felt_range() -> TestResult {
         "  :                  ^^^^^^^^^^^^^^^^^^",
         "  `----"
     );
-
-    Ok(())
 }
 
 #[test]
-fn constants_defined_in_global_scope() -> TestResult {
+fn constants_defined_in_global_scope() {
     let context = TestContext::default();
     let source = source_file!(
         &context,
@@ -1545,21 +1526,19 @@ fn constants_defined_in_global_scope() -> TestResult {
     assert_assembler_diagnostic!(
         context,
         source,
-        "invalid syntax",
+        "syntax error",
         regex!(r#",-\[test[\d]+:2:11\]"#),
         "1 |",
         "2 |     begin const CONSTANT = 12",
         "  :           ^^|^^",
-        "  :             `-- found a const here",
+        "  :             `-- expected `end` to close `begin` block before top-level item",
         "3 |     push.CONSTANT end",
-        "  `----",
-        r#" help: expected primitive opcode (e.g. "add"), or control flow opcode (e.g. "if.true")"#
+        "  `----"
     );
-    Ok(())
 }
 
 #[test]
-fn constant_not_found() -> TestResult {
+fn constant_not_found() {
     let context = TestContext::new();
     let source = source_file!(
         &context,
@@ -1583,7 +1562,6 @@ fn constant_not_found() -> TestResult {
         "  `----",
         "help: are you missing an import?"
     );
-    Ok(())
 }
 
 #[test]
@@ -1700,7 +1678,7 @@ fn mem_operations_with_constants() -> TestResult {
 }
 
 #[test]
-fn const_conversion_failed_to_u16() -> TestResult {
+fn const_conversion_failed_to_u16() {
     // Define constant value greater than u16::MAX
     let constant_value: u64 = u16::MAX as u64 + 1;
 
@@ -1736,11 +1714,10 @@ fn const_conversion_failed_to_u16() -> TestResult {
         "6 |     end",
         "  `----"
     );
-    Ok(())
 }
 
 #[test]
-fn const_conversion_failed_to_u32() -> TestResult {
+fn const_conversion_failed_to_u32() {
     let context = TestContext::default();
     // Define constant value greater than u16::MAX
     let constant_value: u64 = u32::MAX as u64 + 1;
@@ -1771,11 +1748,10 @@ fn const_conversion_failed_to_u32() -> TestResult {
         "5 |     end",
         "  `----"
     );
-    Ok(())
 }
 
 #[test]
-fn deprecated_mem_loadw_instruction() -> TestResult {
+fn deprecated_mem_loadw_instruction() {
     let context = TestContext::default();
 
     let source = source_file!(
@@ -1800,11 +1776,10 @@ fn deprecated_mem_loadw_instruction() -> TestResult {
         "  `----",
         regex!(r#"help:.*use.*mem_loadw_be.*instead"#)
     );
-    Ok(())
 }
 
 #[test]
-fn deprecated_loc_loadw_instruction() -> TestResult {
+fn deprecated_loc_loadw_instruction() {
     let context = TestContext::default();
 
     let source = source_file!(
@@ -1833,11 +1808,10 @@ fn deprecated_loc_loadw_instruction() -> TestResult {
         "  `----",
         regex!(r#"help:.*use.*loc_loadw_be.*instead"#)
     );
-    Ok(())
 }
 
 #[test]
-fn deprecated_loc_storew_instruction() -> TestResult {
+fn deprecated_loc_storew_instruction() {
     let context = TestContext::default();
 
     let source = source_file!(
@@ -1866,7 +1840,6 @@ fn deprecated_loc_storew_instruction() -> TestResult {
         "  `----",
         regex!(r#"help:.*use.*loc_storew_be.*instead"#)
     );
-    Ok(())
 }
 
 #[test]
@@ -1957,7 +1930,7 @@ fn test_push_word_slice() -> TestResult {
 }
 
 #[test]
-fn test_push_word_slice_invalid() -> TestResult {
+fn test_push_word_slice_invalid() {
     let context = TestContext::default();
     let source_invalid_range = source_file!(
         &context,
@@ -2011,8 +1984,6 @@ fn test_push_word_slice_invalid() -> TestResult {
         )
     );
     assert!(context.assemble(source_invalid_constant_type).is_err());
-
-    Ok(())
 }
 
 #[test]
@@ -2119,15 +2090,15 @@ fn link_time_const_evaluation_invalid_constant() -> TestResult {
 
     assert_diagnostic_lines!(
         error,
-        "invalid syntax",
+        "invalid identifier: only uppercase characters or underscores are allowed, and must start with an alphabetic character",
+        "invalid identifier: only uppercase characters or underscores are allowed, and must start with an alphabetic character",
         regex!(r#",-\[test[\d]+:3:14\]"#),
         "2 |     begin",
         "3 |         push.f",
-        "  :              |",
-        "  :              `-- found a identifier here",
+        "  :              ^",
         "4 |     end",
         "  `----",
-        "help: expected \"[\", or constant identifier, or hex-encoded literal, or hex_word, or integer literal"
+        "help: bare identifiers must be lowercase alphanumeric with '_', quoted identifiers can include any graphical character"
     );
 
     Ok(())
@@ -2691,7 +2662,7 @@ fn control_flow_nesting_depth_boundary() -> TestResult {
 }
 
 #[test]
-fn control_flow_nesting_depth_exceeded() -> TestResult {
+fn control_flow_nesting_depth_exceeded() {
     let context = TestContext::default();
     let source = nested_if_source(MAX_CONTROL_FLOW_NESTING + 1);
     let source = source_file!(&context, source.as_str());
@@ -2699,7 +2670,6 @@ fn control_flow_nesting_depth_exceeded() -> TestResult {
         .assemble(source)
         .expect_err("expected diagnostic to be raised, but compilation succeeded");
     assert_diagnostic!(&error, "control-flow nesting depth exceeded");
-    Ok(())
 }
 
 // PROGRAMS WITH PROCEDURES
@@ -2811,7 +2781,7 @@ fn program_with_proc_locals() -> TestResult {
 }
 
 #[test]
-fn program_with_proc_locals_fail() -> TestResult {
+fn program_with_proc_locals_fail() {
     let context = TestContext::default();
     let source = source_file!(
         &context,
@@ -2844,12 +2814,10 @@ end"
         "7 |     begin",
         "  `----"
     );
-
-    Ok(())
 }
 
 #[test]
-fn program_with_exported_procedure() -> TestResult {
+fn program_with_exported_procedure() {
     let context = TestContext::default();
     let source = source_file!(
         &context,
@@ -2868,7 +2836,6 @@ fn program_with_exported_procedure() -> TestResult {
         "  `----",
         "        help: perhaps you meant to use `proc` instead of `export`?"
     );
-    Ok(())
 }
 
 // PROGRAMS WITH DYNAMIC CODE BLOCKS
@@ -2896,7 +2863,7 @@ fn program_with_dynamic_code_execution_in_new_context() -> TestResult {
 // ================================================================================================
 
 #[test]
-fn program_with_incorrect_mast_root_length() -> TestResult {
+fn program_with_incorrect_mast_root_length() {
     let context = TestContext::default();
     let source = source_file!(&context, "begin call.0x1234 end");
 
@@ -2909,7 +2876,6 @@ fn program_with_incorrect_mast_root_length() -> TestResult {
         "  :            ^^^^^^",
         "  `----"
     );
-    Ok(())
 }
 
 #[test]
@@ -3347,15 +3313,14 @@ fn module_alias() -> TestResult {
     assert_assembler_diagnostic!(
         context,
         source,
-        "invalid syntax",
+        "syntax error",
         regex!(r#",-\[test[\d]+:2:37\]"#),
         "1 |",
         "2 |         use dummy::math::u64->bigint->invalidname",
         "  :                                     ^|",
-        "  :                                      `-- found a -> here",
+        "  :                                      `-- unexpected top-level token",
         "3 |",
-        "  `----",
-        r#" help: expected "@", or "adv_map", or "begin", or "const", or "enum", or "proc", or "pub", or "type", or "use", or end of file, or doc comment"#
+        "  `----"
     );
 
     Ok(())
@@ -3413,7 +3378,7 @@ fn module_alias_unused_import() -> TestResult {
         "  :             ^^^^^^^^^^^^^^^^",
         "3 |         use dummy::math::u64->bigint",
         "  `----",
-        " help: this import is never used and can be safely removed"
+        "help: this import is never used and can be safely removed"
     );
 
     // --- duplicate module imports with different aliases --------------------
@@ -3615,19 +3580,19 @@ fn invalid_empty_program() {
     assert_assembler_diagnostic!(
         context,
         source_file!(&context, ""),
-        "unexpected end of file",
-        regex!(r#",-\[test[\d]+:1:1\]"#),
-        "`----",
-        r#" help: expected "@", or "adv_map", or "begin", or "const", or "enum", or "proc", or "pub", or "type", or "use", or doc comment"#
+        "syntax error",
+        "help: see emitted diagnostics for details",
+        "invalid program: no entrypoint defined",
+        "help: ensure you define an entrypoint somewhere in the body with `begin`..`end`"
     );
 
     assert_assembler_diagnostic!(
         context,
         source_file!(&context, ""),
-        "unexpected end of file",
-        regex!(r#",-\[test[\d]+:1:1\]"#),
-        "  `----",
-        r#" help: expected "@", or "adv_map", or "begin", or "const", or "enum", or "proc", or "pub", or "type", or "use", or doc comment"#
+        "syntax error",
+        "help: see emitted diagnostics for details",
+        "invalid program: no entrypoint defined",
+        "help: ensure you define an entrypoint somewhere in the body with `begin`..`end`"
     );
 }
 
@@ -3637,13 +3602,12 @@ fn invalid_program_unrecognized_token() {
     assert_assembler_diagnostic!(
         context,
         source_file!(&context, "none"),
-        "invalid syntax",
+        "syntax error",
         regex!(r#",-\[test[\d]+:1:1\]"#),
         "1 | none",
         "  : ^^|^",
-        "  :   `-- found a identifier here",
-        "  `----",
-        r#" help: expected "@", or "adv_map", or "begin", or "const", or "enum", or "proc", or "pub", or "type", or "use", or doc comment"#
+        "  :   `-- unexpected top-level token",
+        "  `----"
     );
 }
 
@@ -3653,11 +3617,12 @@ fn invalid_program_unmatched_begin() {
     assert_assembler_diagnostic!(
         context,
         source_file!(&context, "begin add"),
-        "unexpected end of file",
-        regex!(r#",-\[test[\d]+:1:10\]"#),
+        "syntax error",
+        regex!(r#",-\[test[\d]+:1:9\]"#),
         "1 | begin add",
-        "  `----",
-        r#" help: expected ".", or primitive opcode (e.g. "add"), or "end", or control flow opcode (e.g. "if.true")"#
+        "  :         ^",
+        "  :         `-- expected `end` to close `begin` block",
+        "  `----"
     );
 }
 
@@ -3667,13 +3632,12 @@ fn invalid_program_invalid_top_level_token() {
     assert_assembler_diagnostic!(
         context,
         source_file!(&context, "begin add end mul"),
-        "invalid syntax",
+        "syntax error",
         regex!(r#",-\[test[\d]+:1:15\]"#),
         "1 | begin add end mul",
         "  :               ^|^",
-        "  :                `-- found a mul here",
-        "  `----",
-        r#" help: expected "@", or "adv_map", or "begin", or "const", or "enum", or "proc", or "pub", or "type", or "use", or end of file, or doc comment"#
+        "  :                `-- unexpected top-level token",
+        "  `----"
     );
 }
 
@@ -3684,13 +3648,12 @@ fn invalid_proc_missing_end_unexpected_begin() {
     assert_assembler_diagnostic!(
         context,
         source,
-        "invalid syntax",
+        "syntax error",
         regex!(r#",-\[test[\d]+:1:18\]"#),
         "1 | proc foo add mul begin push.1 end",
         "  :                  ^^|^^",
-        "  :                    `-- found a begin here",
-        "  `----",
-        r#" help: expected ".", or primitive opcode (e.g. "add"), or "end", or control flow opcode (e.g. "if.true")"#
+        "  :                    `-- expected `end` to close procedure before top-level item",
+        "  `----"
     );
 }
 
@@ -3701,13 +3664,12 @@ fn invalid_proc_missing_end_unexpected_proc() {
     assert_assembler_diagnostic!(
         context,
         source,
-        "invalid syntax",
+        "syntax error",
         regex!(r#",-\[test[\d]+:1:18\]"#),
         "1 | proc foo add mul proc bar push.3 end begin push.1 end",
         "  :                  ^^|^",
-        "  :                    `-- found a proc here",
-        "  `----",
-        r#" help: expected ".", or primitive opcode (e.g. "add"), or "end", or control flow opcode (e.g. "if.true")"#
+        "  :                    `-- expected `end` to close procedure before top-level item",
+        "  `----"
     );
 }
 
@@ -3763,14 +3725,12 @@ fn invalid_proc_invalid_numeric_name() {
     assert_assembler_diagnostic!(
         context,
         source,
-        "invalid syntax",
+        "syntax error",
         regex!(r#",-\[test[\d]+:1:6\]"#),
         "1 | proc 123 add mul end begin push.1 exec.123 end",
         "  :      ^|^",
-        "  :       `-- found a integer here",
-        "  `----",
-        " help: expected primitive opcode",
-        "      identifier"
+        "  :       `-- expected a procedure name",
+        "  `----"
     );
 }
 
@@ -3801,11 +3761,12 @@ fn invalid_if_missing_end_no_else() {
     assert_assembler_diagnostic!(
         context,
         source,
-        "unexpected end of file",
-        regex!(r#",-\[test[\d]+:1:29\]"#),
+        "syntax error",
+        regex!(r#",-\[test[\d]+:1:28\]"#),
         "1 | begin push.1 add if.true mul",
-        "  `----",
-        r#" help: expected ".", or primitive opcode (e.g. "add"), or "else", or "end", or control flow opcode (e.g. "if.true")"#
+        "  :                            ^",
+        "  :                            `-- expected `end` to close `if`",
+        "  `----"
     );
 }
 
@@ -3816,26 +3777,24 @@ fn invalid_else_with_no_if() {
     assert_assembler_diagnostic!(
         context,
         source,
-        "invalid syntax",
+        "syntax error",
         regex!(r#",-\[test[\d]+:1:18\]"#),
         "1 | begin push.1 add else mul end",
         "  :                  ^^|^",
-        "  :                    `-- found a else here",
-        "  `----",
-        r#" help: expected primitive opcode (e.g. "add"), or "end", or control flow opcode (e.g. "if.true")"#
+        "  :                    `-- expected `end` to close `begin` block before `else`",
+        "  `----"
     );
 
     let source = source_file!(&context, "begin push.1 while.true add else mul end end");
     assert_assembler_diagnostic!(
         context,
         source,
-        "invalid syntax",
+        "syntax error",
         regex!(r#",-\[test[\d]+:1:29\]"#),
         "1 | begin push.1 while.true add else mul end end",
         "  :                             ^^|^",
-        "  :                               `-- found a else here",
-        "  `----",
-        r#" help: expected "end""#
+        "  :                               `-- expected `end` to close `while` before `else`",
+        "  `----"
     );
 }
 
@@ -3848,13 +3807,12 @@ fn invalid_unmatched_else_within_if_else() {
     assert_assembler_diagnostic!(
         context,
         source,
-        "invalid syntax",
+        "syntax error",
         regex!(r#",-\[test[\d]+:1:35\]"#),
         "1 | begin push.1 if.true add else mul else push.1 end end end",
         "  :                                   ^^|^",
-        "  :                                     `-- found a else here",
-        "  `----",
-        r#" help: expected "end""#
+        "  :                                     `-- expected `end` to close `if` before `else`",
+        "  `----"
     );
 }
 
@@ -3866,16 +3824,17 @@ fn invalid_if_else_no_matching_end() {
     assert_assembler_diagnostic!(
         context,
         source,
-        "unexpected end of file",
-        regex!(r#",-\[test[\d]+:1:38\]"#),
+        "syntax error",
+        regex!(r#",-\[test[\d]+:1:37\]"#),
         "1 | begin push.1 add if.true mul else add",
-        "  `----",
-        r#" help: expected ".", or primitive opcode (e.g. "add"), or "end", or control flow opcode (e.g. "if.true")"#
+        "  :                                     ^",
+        "  :                                     `-- expected `end` to close `if`",
+        "  `----"
     );
 }
 
 #[test]
-fn invalid_repeat() -> TestResult {
+fn invalid_repeat() {
     let context = TestContext::default();
 
     // unmatched repeat
@@ -3883,11 +3842,12 @@ fn invalid_repeat() -> TestResult {
     assert_assembler_diagnostic!(
         context,
         source,
-        "unexpected end of file",
-        regex!(r#",-\[test[\d]+:1:31\]"#),
+        "syntax error",
+        regex!(r#",-\[test[\d]+:1:30\]"#),
         "1 | begin push.1 add repeat.10 mul",
-        "  `----",
-        r#" help: expected ".", or primitive opcode (e.g. "add"), or "end", or control flow opcode (e.g. "if.true")"#
+        "  :                              ^",
+        "  :                              `-- expected `end` to close `repeat`",
+        "  `----"
     );
 
     // invalid iter count
@@ -3895,13 +3855,12 @@ fn invalid_repeat() -> TestResult {
     assert_assembler_diagnostic!(
         context,
         source,
-        "invalid syntax",
+        "invalid syntax: invalid instruction `x3` or malformed operands",
         regex!(r#",-\[test[\d]+:1:27\]"#),
         "1 | begin push.1 add repeat.23x3 mul end end",
         "  :                           ^|",
-        "  :                            `-- found a identifier here",
-        "  `----",
-        r#" help: expected primitive opcode (e.g. "add"), or control flow opcode (e.g. "if.true")"#
+        "  :                            `-- invalid instruction `x3` or malformed operands",
+        "  `----"
     );
 
     // Overflow iter count
@@ -3932,22 +3891,20 @@ fn invalid_repeat() -> TestResult {
         "4 |                     add",
         "  `----"
     );
-    Ok(())
 }
 
 #[test]
-fn invalid_repeat_count_zero() -> TestResult {
+fn invalid_repeat_count_zero() {
     let context = TestContext::default();
     let source = source_file!(&context, "begin repeat.0 nop end end");
     let error = context.assemble(source).expect_err("expected repeat.0 to be rejected");
     let rendered =
         format!("{}", crate::diagnostics::reporting::PrintDiagnostic::new_without_color(&error));
     assert!(rendered.contains("invalid repeat count"));
-    Ok(())
 }
 
 #[test]
-fn invalid_repeat_count_zero_with_decorator() -> TestResult {
+fn invalid_repeat_count_zero_with_decorator() {
     let context = TestContext::default();
     let source = source_file!(
         &context,
@@ -3969,11 +3926,10 @@ end"
     let rendered =
         format!("{}", crate::diagnostics::reporting::PrintDiagnostic::new_without_color(&error));
     assert!(rendered.contains("invalid repeat count"));
-    Ok(())
 }
 
 #[test]
-fn invalid_repeat_count_too_large() -> TestResult {
+fn invalid_repeat_count_too_large() {
     let context = TestContext::default();
     let repeat_count = MAX_REPEAT_COUNT + 1;
     let source = source_file!(&context, format!("begin repeat.{repeat_count} nop end end"));
@@ -3983,11 +3939,10 @@ fn invalid_repeat_count_too_large() -> TestResult {
     let rendered =
         format!("{}", crate::diagnostics::reporting::PrintDiagnostic::new_without_color(&error));
     assert!(rendered.contains("invalid repeat count"));
-    Ok(())
 }
 
 #[test]
-fn invalid_repeat_count_constant_zero() -> TestResult {
+fn invalid_repeat_count_constant_zero() {
     let context = TestContext::default();
     let source =
         source_file!(&context, "const REPEAT_COUNT = 0\nbegin repeat.REPEAT_COUNT nop end end");
@@ -3997,11 +3952,10 @@ fn invalid_repeat_count_constant_zero() -> TestResult {
     let rendered =
         format!("{}", crate::diagnostics::reporting::PrintDiagnostic::new_without_color(&error));
     assert!(rendered.contains("invalid repeat count"));
-    Ok(())
 }
 
 #[test]
-fn invalid_repeat_count_constant_too_large() -> TestResult {
+fn invalid_repeat_count_constant_too_large() {
     let context = TestContext::default();
     let repeat_count = MAX_REPEAT_COUNT + 1;
     let source = source_file!(
@@ -4014,11 +3968,10 @@ fn invalid_repeat_count_constant_too_large() -> TestResult {
     let rendered =
         format!("{}", crate::diagnostics::reporting::PrintDiagnostic::new_without_color(&error));
     assert!(rendered.contains("invalid repeat count"));
-    Ok(())
 }
 
 #[test]
-fn repeat_count_constant_at_limit_allowed() -> TestResult {
+fn repeat_count_constant_at_limit_allowed() {
     let context = TestContext::default();
     let source = source_file!(
         &context,
@@ -4027,7 +3980,6 @@ fn repeat_count_constant_at_limit_allowed() -> TestResult {
     context
         .assemble(source)
         .expect("expected repeat count at limit from constant to be accepted");
-    Ok(())
 }
 
 #[test]
@@ -4240,46 +4192,44 @@ end
 }
 
 #[test]
-fn invalid_while() -> TestResult {
+fn invalid_while() {
     let context = TestContext::default();
 
     let source = source_file!(&context, "begin push.1 add while mul end end");
     assert_assembler_diagnostic!(
         context,
         source,
-        "invalid syntax",
-        regex!(r#",-\[test[\d]+:1:24\]"#),
+        "invalid syntax: expected `while.true`",
+        regex!(r#",-\[test[\d]+:1:18\]"#),
         "1 | begin push.1 add while mul end end",
-        "  :                        ^|^",
-        "  :                         `-- found a mul here",
-        "  `----",
-        r#" help: expected ".""#
+        "  :                  ^^^^^^|^^^^^^",
+        "  :                        `-- expected `while.true`",
+        "  `----"
     );
 
     let source = source_file!(&context, "begin push.1 add while.abc mul end end");
     assert_assembler_diagnostic!(
         context,
         source,
-        "invalid syntax",
-        regex!(r#",-\[test[\d]+:1:24\]"#),
+        "invalid syntax: expected `while.true`",
+        regex!(r#",-\[test[\d]+:1:18\]"#),
         "1 | begin push.1 add while.abc mul end end",
-        "  :                        ^|^",
-        "  :                         `-- found a identifier here",
-        "  `----",
-        r#" help: expected "true""#
+        "  :                  ^^^^^^^^|^^^^^^^^",
+        "  :                          `-- expected `while.true`",
+        "  `----"
     );
 
     let source = source_file!(&context, "begin push.1 add while.true mul");
     assert_assembler_diagnostic!(
         context,
         source,
-        "unexpected end of file",
-        regex!(r#",-\[test[\d]+:1:32\]"#),
+        "syntax error",
+        regex!(r#",-\[test[\d]+:1:31\]"#),
         "1 | begin push.1 add while.true mul",
-        "  `----",
-        r#" help: expected ".", or primitive opcode (e.g. "add"), or "end", or control flow opcode (e.g. "if.true")"#
+        "  :                               ^",
+        "  :                               `-- expected `end` to close `while`",
+        "  `----"
     );
-    Ok(())
 }
 
 // COMPILED LIBRARIES

@@ -1,4 +1,4 @@
-use alloc::{collections::VecDeque, string::ToString, sync::Arc};
+use alloc::{collections::VecDeque, string::ToString};
 
 use miden_air::trace::{
     RowIndex,
@@ -11,7 +11,7 @@ use crate::{
     continuation_stack::ContinuationStack,
     crypto::merkle::MerklePath,
     errors::OperationError,
-    mast::{MastForest, MastNodeId},
+    mast::{MastForestId, MastNodeId},
     precompile::PrecompileTranscriptState,
     processor::{
         AdviceProviderInterface, HasherInterface, MemoryInterface, Processor, SystemInterface,
@@ -43,8 +43,11 @@ use crate::{
 pub struct CoreTraceFragmentContext {
     pub state: CoreTraceState,
     pub replay: ExecutionReplay,
-    pub continuation: ContinuationStack,
-    pub initial_mast_forest: Arc<MastForest>,
+    /// Continuation stack with forest references encoded as [`MastForestId`]s into the
+    /// `mast_forest_store` of the owning [`crate::TraceGenerationContext`].
+    pub continuation: ContinuationStack<MastForestId>,
+    /// MAST forest active at the start of this fragment.
+    pub initial_mast_forest_id: MastForestId,
 }
 
 // CORE TRACE STATE
@@ -80,7 +83,7 @@ pub struct SystemState {
     /// - For SYSCALL contexts: hash remains from the calling function
     pub fn_hash: Word,
 
-    /// Precompile transcript state (sponge capacity) used for recording `log_precompile` calls
+    /// Precompile-transcript state (rolling digest) used for recording `log_precompile` calls
     /// - Initially [ZERO; 4]
     /// - Updated with each `log_precompile` invocation
     pub pc_transcript_state: PrecompileTranscriptState,
@@ -453,20 +456,26 @@ pub struct ExecutionContextSystemInfo {
 /// These calls are made when encountering an [`miden_core::mast::ExternalNode`], or when
 /// encountering a [`miden_core::mast::DynNode`] where the procedure hash on the stack refers to
 /// a procedure not present in the current forest.
+///
+/// The forest reference is stored as a [`MastForestId`] into the `mast_forest_store` of the
+/// [`crate::TraceGenerationContext`] that owns this replay. This avoids holding a strong
+/// `Arc<MastForest>` reference per resolution, allowing the trace generation context to deduplicate
+/// forests across fragments.
 #[derive(Debug, Default)]
 pub struct MastForestResolutionReplay {
-    mast_forest_resolutions: VecDeque<(MastNodeId, Arc<MastForest>)>,
+    mast_forest_resolutions: VecDeque<(MastNodeId, MastForestId)>,
 }
 
 impl MastForestResolutionReplay {
-    /// Records a resolution of a MastNodeId with its associated MastForest when encountering an
-    /// External node, or `DYN`/`DYNCALL` node with an external procedure hash on the stack.
-    pub fn record_resolution(&mut self, node_id: MastNodeId, forest: Arc<MastForest>) {
-        self.mast_forest_resolutions.push_back((node_id, forest));
+    /// Records a resolution of a MastNodeId with the id of its associated MAST forest in the
+    /// trace generation context's `mast_forest_store`.
+    pub fn record_resolution(&mut self, node_id: MastNodeId, forest_id: MastForestId) {
+        self.mast_forest_resolutions.push_back((node_id, forest_id));
     }
 
-    /// Replays the next recorded MastForest resolution, returning both the node ID and forest
-    pub fn replay_resolution(&mut self) -> Result<(MastNodeId, Arc<MastForest>), ExecutionError> {
+    /// Replays the next recorded MastForest resolution, returning both the node ID and the forest
+    /// id.
+    pub fn replay_resolution(&mut self) -> Result<(MastNodeId, MastForestId), ExecutionError> {
         self.mast_forest_resolutions
             .pop_front()
             .ok_or(ExecutionError::Internal("no MastForest resolutions recorded"))
@@ -1000,7 +1009,9 @@ impl HasherInterface for HasherResponseReplay {
 pub enum HasherOp {
     Permute([Felt; STATE_WIDTH]),
     HashControlBlock((Word, Word, Felt, Word)),
-    HashBasicBlock((Arc<MastForest>, MastNodeId, Word)),
+    /// `(forest_id, node_id, expected_hash)` — `forest_id` is an id into the
+    /// `mast_forest_store` of the [`crate::TraceGenerationContext`] that owns this replay.
+    HashBasicBlock((MastForestId, MastNodeId, Word)),
     BuildMerkleRoot((Word, MerklePath, Felt)),
     UpdateMerkleRoot((Word, Word, MerklePath, Felt)),
 }
@@ -1036,12 +1047,12 @@ impl HasherRequestReplay {
     /// Records a `Hasher::hash_basic_block()` request.
     pub fn record_hash_basic_block(
         &mut self,
-        forest: Arc<MastForest>,
+        forest_id: MastForestId,
         node_id: MastNodeId,
         expected_hash: Word,
     ) {
         self.hasher_ops
-            .push_back(HasherOp::HashBasicBlock((forest, node_id, expected_hash)));
+            .push_back(HasherOp::HashBasicBlock((forest_id, node_id, expected_hash)));
     }
 
     /// Records a `Hasher::build_merkle_root()` request.

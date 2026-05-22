@@ -3,7 +3,7 @@ use alloc::vec::Vec;
 use core::ops::Range;
 
 use miden_air::{
-    AirWitness, ProcessorAir, PublicInputs, debug,
+    AirWitness, MidenAir, PublicInputs, debug,
     trace::{
         DECODER_TRACE_OFFSET, MainTrace, TRACE_WIDTH,
         decoder::{NUM_USER_OP_HELPERS, USER_OP_HELPERS_OFFSET},
@@ -15,7 +15,7 @@ use crate::{
     Felt, MIN_STACK_DEPTH, Program, ProgramInfo, StackInputs, StackOutputs, Word, ZERO,
     fast::ExecutionOutput,
     field::QuadFelt,
-    precompile::{PrecompileRequest, PrecompileTranscript, PrecompileTranscriptDigest},
+    precompile::{PrecompileRequest, PrecompileTranscript},
     utils::{Matrix, RowMajorMatrix},
 };
 
@@ -117,11 +117,6 @@ impl TraceBuildInputs {
     /// Returns the final precompile transcript observed during execution.
     pub fn final_precompile_transcript(&self) -> &PrecompileTranscript {
         &self.trace_output.final_precompile_transcript
-    }
-
-    /// Returns the digest of the final precompile transcript observed during execution.
-    pub fn precompile_transcript_digest(&self) -> PrecompileTranscriptDigest {
-        self.final_precompile_transcript().finalize()
     }
 
     /// Returns the program info captured for the execution being replayed.
@@ -264,11 +259,6 @@ impl ExecutionTrace {
         self.final_precompile_transcript
     }
 
-    /// Returns the digest of the final precompile transcript observed during execution.
-    pub fn precompile_transcript_digest(&self) -> PrecompileTranscriptDigest {
-        self.final_precompile_transcript().finalize()
-    }
-
     /// Returns the owned execution outputs required for proof packaging.
     pub fn into_outputs(self) -> (StackOutputs, Vec<PrecompileRequest>, PrecompileTranscript) {
         (self.stack_outputs, self.precompile_requests, self.final_precompile_transcript)
@@ -334,10 +324,10 @@ impl ExecutionTrace {
     /// Panics if any AIR constraint evaluates to nonzero.
     pub fn check_constraints(&self) {
         let public_inputs = self.public_inputs();
-        let trace_matrix = self.to_row_major_matrix();
+        let (core_matrix, chiplets_matrix) = self.main_trace.to_core_chiplets_matrices();
 
         let (public_values, kernel_felts) = public_inputs.to_air_inputs();
-        let var_len_public_inputs: &[&[Felt]] = &[&kernel_felts];
+        let chiplets_var_len: &[&[Felt]] = &[&kernel_felts];
 
         // Derive deterministic challenges by hashing public values with Poseidon2.
         // The 4-element digest maps directly to 2 QuadFelt challenges.
@@ -345,8 +335,17 @@ impl ExecutionTrace {
         let challenges =
             [QuadFelt::new([digest[0], digest[1]]), QuadFelt::new([digest[2], digest[3]])];
 
-        let witness = AirWitness::new(&trace_matrix, &public_values, var_len_public_inputs);
-        debug::check_constraints(&ProcessorAir, witness, &ProcessorAir, &challenges);
+        let core_witness = AirWitness::new(&core_matrix, &public_values, &[]);
+        let chiplets_witness = AirWitness::new(&chiplets_matrix, &public_values, chiplets_var_len);
+        let core_air = MidenAir::CORE;
+        let chiplets_air = MidenAir::CHIPLETS;
+        debug::check_constraints_multi(
+            &[
+                (&core_air, core_witness, &core_air),
+                (&chiplets_air, chiplets_witness, &chiplets_air),
+            ],
+            &challenges,
+        );
     }
 
     /// Returns the main trace as a row-major matrix for proving.
@@ -354,6 +353,19 @@ impl ExecutionTrace {
         let row_major = self.main_trace.to_row_major();
         debug_assert_eq!(row_major.width(), TRACE_WIDTH);
         row_major
+    }
+
+    /// Splits the trace into the per-AIR `(Core, Chiplets)` matrix pair consumed by the
+    /// multi-AIR `prove_multi` path. Strips the Poseidon2 rate-alignment padding columns
+    /// before returning.
+    pub fn to_core_chiplets_matrices(&self) -> (RowMajorMatrix<Felt>, RowMajorMatrix<Felt>) {
+        self.main_trace.to_core_chiplets_matrices()
+    }
+
+    /// Consuming variant for the proving hot path: moves the chiplets row-major buffer
+    /// instead of copying it. See [`MainTrace::into_core_chiplets_matrices`].
+    pub fn into_core_chiplets_matrices(self) -> (RowMajorMatrix<Felt>, RowMajorMatrix<Felt>) {
+        self.main_trace.into_core_chiplets_matrices()
     }
 
     // HELPER METHODS

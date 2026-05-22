@@ -22,13 +22,22 @@
 //! - `SYNTH_MASM_WRITE`: if set, write the emitted MASM to
 //!   `target/synthetic_bench_<producer-stem>__<scenario-slug>.masm`.
 
-use std::{collections::BTreeSet, hint::black_box, path::PathBuf, time::Duration};
+use std::{
+    cell::RefCell, collections::BTreeSet, hint::black_box, path::PathBuf, rc::Rc, time::Duration,
+};
 
-use criterion::{BatchSize, Criterion, SamplingMode, criterion_group, criterion_main};
+#[cfg(codspeed)]
+use codspeed_criterion_compat as criterion_backend;
+#[cfg(not(codspeed))]
+use criterion as criterion_backend;
+use criterion_backend::{BatchSize, Criterion, SamplingMode, criterion_group, criterion_main};
 use miden_processor::{
     DefaultHost, ExecutionOptions, FastProcessor, StackInputs, advice::AdviceInputs,
 };
-use miden_vm::{Assembler, HashFunction, Program, ProgramInfo, ProvingOptions, prove_sync};
+use miden_vm::{
+    Assembler, ExecutionProof, HashFunction, Program, ProgramInfo, ProvingOptions, StackOutputs,
+    prove_sync,
+};
 use miden_vm_synthetic_bench::{
     calibrator::{Calibration, calibrate, measure_program},
     snapshot::{TraceShape, TraceSnapshot},
@@ -40,6 +49,7 @@ use miden_vm_synthetic_bench::{
 /// Hash function used for STARK `prove` and `verify` axes.
 const BENCH_HASH: HashFunction = HashFunction::Poseidon2;
 const ALL_AXES: [&str; 4] = ["exec", "trace_prep", "prove", "verify"];
+type ProofFixture = (StackOutputs, ExecutionProof);
 
 fn resolve_bench_axes() -> BTreeSet<&'static str> {
     let Some(raw) = std::env::var("SYNTH_BENCH_AXES").ok().filter(|s| !s.trim().is_empty()) else {
@@ -309,7 +319,9 @@ fn bench_one_scenario(
         });
     }
 
+    let cached_proof: Rc<RefCell<Option<ProofFixture>>> = Rc::default();
     if axes.contains("prove") {
+        let cached_proof = Rc::clone(&cached_proof);
         group.bench_function("prove", |b| {
             b.iter_batched(
                 || {
@@ -319,17 +331,20 @@ fn bench_one_scenario(
                     (host, program.clone(), stack, advice)
                 },
                 |(mut host, program, stack, advice)| {
-                    black_box(
-                        prove_sync(
-                            &program,
-                            stack,
-                            advice,
-                            &mut host,
-                            ExecutionOptions::default(),
-                            ProvingOptions::new(BENCH_HASH),
-                        )
-                        .expect("prove"),
-                    );
+                    let proof = prove_sync(
+                        &program,
+                        stack,
+                        advice,
+                        &mut host,
+                        ExecutionOptions::default(),
+                        ProvingOptions::new(BENCH_HASH),
+                    )
+                    .expect("prove");
+                    let mut cached = cached_proof.borrow_mut();
+                    if cached.is_none() {
+                        *cached = Some(proof.clone());
+                    }
+                    black_box(proof);
                 },
                 BatchSize::SmallInput,
             );
@@ -337,9 +352,10 @@ fn bench_one_scenario(
     }
 
     if axes.contains("verify") {
-        // Generate one proof outside the timed loop so prove_sync time isn't counted toward verify.
+        // Reuse a proof from the `prove` axis when it ran for this scenario. This keeps prove time
+        // out of the verify measurement without forcing an extra proof in all-axes runs.
         let program_info = ProgramInfo::from(program.clone());
-        let (stack_outputs, proof) = {
+        let (stack_outputs, proof) = cached_proof.borrow().clone().unwrap_or_else(|| {
             let mut host = DefaultHost::default();
             prove_sync(
                 &program,
@@ -350,7 +366,7 @@ fn bench_one_scenario(
                 ProvingOptions::new(BENCH_HASH),
             )
             .expect("prove for verify setup")
-        };
+        });
         group.bench_function("verify", |b| {
             b.iter_batched(
                 || (program_info.clone(), StackInputs::default(), stack_outputs, proof.clone()),

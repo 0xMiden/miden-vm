@@ -137,14 +137,20 @@ fn generate_method_impl_for_trait_method(
             }
         },
         "before_enter" => quote! {
-            fn before_enter<'a>(&'a self, forest: &'a crate::mast::MastForest) -> &'a [crate::mast::DecoratorId] {
+            fn before_enter<'a, F>(&'a self, forest: &'a F) -> &'a [crate::mast::DecoratorId]
+            where
+                F: crate::mast::ExecutableMastForest + ?Sized,
+            {
                 match self {
                     #(#enum_name::#variant_names(field) => field.before_enter(forest)),*
                 }
             }
         },
         "after_exit" => quote! {
-            fn after_exit<'a>(&'a self, forest: &'a crate::mast::MastForest) -> &'a [crate::mast::DecoratorId] {
+            fn after_exit<'a, F>(&'a self, forest: &'a F) -> &'a [crate::mast::DecoratorId]
+            where
+                F: crate::mast::ExecutableMastForest + ?Sized,
+            {
                 match self {
                     #(#enum_name::#variant_names(field) => field.after_exit(forest)),*
                 }
@@ -194,7 +200,10 @@ fn generate_method_impl_for_trait_method(
         },
         "verify_node_in_forest" => quote! {
             #[cfg(debug_assertions)]
-            fn verify_node_in_forest(&self, forest: &crate::mast::MastForest) {
+            fn verify_node_in_forest<F>(&self, forest: &F)
+            where
+                F: crate::mast::ExecutableMastForest + ?Sized,
+            {
                 match self {
                     #(#enum_name::#variant_names(field) => field.verify_node_in_forest(forest)),*
                 }
@@ -265,7 +274,7 @@ pub fn derive_mast_forest_contributor(input: TokenStream) -> TokenStream {
     // Parse the data to ensure it's an enum
     let enum_data = match &input.data {
         Data::Enum(data) => data,
-        _ => panic!("EnumThispatch can only be derived for enums"),
+        _ => panic!("MastForestContributor can only be derived for enums"),
     };
 
     // Extract variant information

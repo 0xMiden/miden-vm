@@ -631,7 +631,7 @@ impl MastForestView for MastForest {
 
 #[cfg(test)]
 impl SerializedMastForest<'_> {
-    fn advice_map_offset(&self) -> Result<usize, DeserializationError> {
+    fn advice_map_offset(&self) -> usize {
         self.layout.advice_map_offset()
     }
 

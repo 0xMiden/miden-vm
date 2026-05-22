@@ -80,6 +80,11 @@ where
 {
     let _span = tracing::info_span!("build_aux_trace_logup").entered();
 
+    debug_assert!(
+        challenges.len() >= 2,
+        "build_logup_aux_trace expects at least 2 challenges (alpha, beta), got {}",
+        challenges.len(),
+    );
     let alpha = challenges[0];
     let beta = challenges[1];
     let lookup_challenges =

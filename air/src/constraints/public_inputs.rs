@@ -6,7 +6,7 @@
 
 use miden_crypto::stark::air::AirBuilder;
 
-use crate::{MainCols, MidenAirBuilder};
+use crate::{CoreCols, MidenAirBuilder};
 
 // CONSTANTS
 // ================================================================================================
@@ -24,7 +24,7 @@ const TAIL_LEN: usize = STACK_DEPTH + STACK_DEPTH + 4;
 ///
 /// - First row: `stack[i] == stack_inputs[i]` for i in 0..16
 /// - Last row:  `stack[i] == stack_outputs[i]` for i in 0..16
-pub fn enforce_main<AB>(builder: &mut AB, local: &MainCols<AB::Var>)
+pub fn enforce_main<AB>(builder: &mut AB, local: &CoreCols<AB::Var>)
 where
     AB: MidenAirBuilder,
 {

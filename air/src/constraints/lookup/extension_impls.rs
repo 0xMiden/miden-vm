@@ -21,7 +21,7 @@ use miden_crypto::stark::air::LiftedAirBuilder;
 
 use super::{buses::LookupOpFlags, chiplet_air::ChipletLookupBuilder, main_air::MainLookupBuilder};
 use crate::{
-    Felt, MainCols,
+    CoreCols, Felt,
     lookup::{ConstraintLookupBuilder, ProverLookupBuilder},
 };
 
@@ -54,8 +54,8 @@ where
     /// surfaces divergences immediately.
     fn build_op_flags(
         &self,
-        local: &MainCols<Self::Var>,
-        next: &MainCols<Self::Var>,
+        local: &CoreCols<Self::Var>,
+        next: &CoreCols<Self::Var>,
     ) -> LookupOpFlags<Self::Expr> {
         LookupOpFlags::from_boolean_row(&local.decoder, &local.stack, &next.decoder)
     }

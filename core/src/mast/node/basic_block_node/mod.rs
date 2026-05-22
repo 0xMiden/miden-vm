@@ -6,8 +6,8 @@ use crate::{
     chiplets::hasher,
     crypto::hash::Blake3_256,
     mast::{
-        DecoratedLinksIter, DecoratedOpLink, DecoratorId, DecoratorStore, MastForest,
-        MastForestError, MastNode, MastNodeFingerprint, MastNodeId,
+        DecoratedLinksIter, DecoratedOpLink, DecoratorId, DecoratorStore, ExecutableMastForest,
+        MastForest, MastForestError, MastNode, MastNodeFingerprint, MastNodeId,
     },
     operations::{DecoratorList, Operation},
     prettier::PrettyPrint,
@@ -730,26 +730,32 @@ impl MastNodeExt for BasicBlockNode {
         self.digest
     }
 
-    fn before_enter<'a>(&'a self, forest: &'a MastForest) -> &'a [DecoratorId] {
+    fn before_enter<'a, F>(&'a self, forest: &'a F) -> &'a [DecoratorId]
+    where
+        F: ExecutableMastForest + ?Sized,
+    {
         match &self.decorators {
             DecoratorStore::Owned { before_enter, .. } => before_enter,
             DecoratorStore::Linked { id } => {
                 // For linked nodes, get the decorators from the forest's NodeToDecoratorIds
                 #[cfg(debug_assertions)]
                 self.verify_node_in_forest(forest);
-                forest.before_enter_decorators(*id)
+                forest.linked_before_enter_decorators(*id)
             },
         }
     }
 
-    fn after_exit<'a>(&'a self, forest: &'a MastForest) -> &'a [DecoratorId] {
+    fn after_exit<'a, F>(&'a self, forest: &'a F) -> &'a [DecoratorId]
+    where
+        F: ExecutableMastForest + ?Sized,
+    {
         match &self.decorators {
             DecoratorStore::Owned { after_exit, .. } => after_exit,
             DecoratorStore::Linked { id } => {
                 // For linked nodes, get the decorators from the forest's NodeToDecoratorIds
                 #[cfg(debug_assertions)]
                 self.verify_node_in_forest(forest);
-                forest.after_exit_decorators(*id)
+                forest.linked_after_exit_decorators(*id)
             },
         }
     }
@@ -812,11 +818,15 @@ impl MastNodeExt for BasicBlockNode {
     }
 
     #[cfg(debug_assertions)]
-    fn verify_node_in_forest(&self, forest: &MastForest) {
+    fn verify_node_in_forest<F>(&self, forest: &F)
+    where
+        F: ExecutableMastForest + ?Sized,
+    {
         if let DecoratorStore::Linked { id } = &self.decorators {
             // Verify that this node is the one stored at the given ID in the forest
             let self_ptr = self as *const Self;
-            let forest_node = &forest.nodes[*id];
+            let forest_node =
+                forest.get_node_by_id(*id).expect("linked node id must be present in forest");
             let forest_node_ptr = match forest_node {
                 MastNode::Block(block_node) => block_node as *const BasicBlockNode as *const (),
                 _ => panic!("Node type mismatch at {id:?}"),

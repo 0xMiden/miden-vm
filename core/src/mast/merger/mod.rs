@@ -144,7 +144,7 @@ impl MastForestMerger {
             self.merge_decorators(other_forest)?;
         }
         for other_forest in forests.iter() {
-            self.merge_error_codes(other_forest)?;
+            self.merge_error_codes(other_forest);
         }
 
         let iterator = MultiMastForestNodeIter::new(forests.clone());
@@ -189,7 +189,7 @@ impl MastForestMerger {
         self.register_asm_op_mappings()?;
 
         for (forest_idx, forest) in forests.iter().enumerate() {
-            self.merge_roots(forest_idx, forest)?;
+            self.merge_roots(forest_idx, forest);
         }
 
         self.merge_debug_metadata(&forests)?;
@@ -231,11 +231,10 @@ impl MastForestMerger {
             .map_err(|((key, _prev), _new)| MastForestError::AdviceMapKeyCollisionOnMerge(key))
     }
 
-    fn merge_error_codes(&mut self, other_forest: &MastForest) -> Result<(), MastForestError> {
+    fn merge_error_codes(&mut self, other_forest: &MastForest) {
         self.mast_forest.debug_info.extend_error_codes(
             other_forest.debug_info.error_codes().map(|(k, v)| (*k, v.clone())),
         );
-        Ok(())
     }
 
     fn merge_node(
@@ -314,11 +313,7 @@ impl MastForestMerger {
         Ok(())
     }
 
-    fn merge_roots(
-        &mut self,
-        forest_idx: usize,
-        other_forest: &MastForest,
-    ) -> Result<(), MastForestError> {
+    fn merge_roots(&mut self, forest_idx: usize, other_forest: &MastForest) {
         for root_id in other_forest.roots.iter() {
             // Map the previous root to its possibly new id.
             let new_root = self.node_id_mappings[forest_idx]
@@ -329,8 +324,6 @@ impl MastForestMerger {
             // this should be okay.
             self.mast_forest.make_root(new_root);
         }
-
-        Ok(())
     }
 
     /// Transfers procedure names and debug vars from the source forests into the merged forest,

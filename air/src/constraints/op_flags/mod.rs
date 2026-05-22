@@ -1046,22 +1046,22 @@ fn accumulate_depth_deltas<const N: usize, E: PrimeCharacteristicRing>(
 // TEST HELPERS
 // ================================================================================================
 
-/// Generates a test trace row with the op bits set for a given opcode.
+/// Generates a test Core trace row with the op bits set for a given opcode.
 ///
-/// This creates a minimal trace row where:
+/// This creates a minimal Core row where:
 /// - Op bits are set according to the opcode's binary representation
 /// - Op bits extra columns are computed for degree reduction
 /// - All other columns are zero
 #[cfg(test)]
-pub fn generate_test_row(opcode: usize) -> crate::MainCols<miden_core::Felt> {
+pub fn generate_test_row(opcode: usize) -> crate::constraints::columns::CoreCols<miden_core::Felt> {
     use miden_core::{Felt, ZERO};
 
-    use crate::trace::{TRACE_WIDTH, decoder::OP_BITS_EXTRA_COLS_RANGE};
+    use crate::{constraints::columns::NUM_CORE_COLS, trace::decoder::OP_BITS_EXTRA_COLS_RANGE};
 
     let op_bits = get_op_bits(opcode);
 
-    // Build a flat zeroed row, then set the decoder op bits via the col map.
-    let mut row = [ZERO; TRACE_WIDTH];
+    // Build a flat zeroed Core row, then set the decoder op bits via the col map.
+    let mut row = [ZERO; NUM_CORE_COLS];
     for (i, &bit) in op_bits.iter().enumerate() {
         row[OP_BITS_RANGE.start + crate::trace::DECODER_TRACE_OFFSET + i] = bit;
     }
@@ -1074,8 +1074,12 @@ pub fn generate_test_row(opcode: usize) -> crate::MainCols<miden_core::Felt> {
         bit_6 * (Felt::ONE - bit_5) * bit_4;
     row[OP_BITS_EXTRA_COLS_RANGE.start + 1 + crate::trace::DECODER_TRACE_OFFSET] = bit_6 * bit_5;
 
-    // Safety: MainCols is #[repr(C)] with the same layout as [Felt; TRACE_WIDTH].
-    unsafe { core::mem::transmute::<[Felt; TRACE_WIDTH], crate::MainCols<Felt>>(row) }
+    // Safety: `CoreCols` is `#[repr(C)]` with the same layout as `[Felt; NUM_CORE_COLS]`.
+    unsafe {
+        core::mem::transmute::<[Felt; NUM_CORE_COLS], crate::constraints::columns::CoreCols<Felt>>(
+            row,
+        )
+    }
 }
 
 /// Returns a 7-bit array representation of an opcode.

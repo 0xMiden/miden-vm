@@ -22,10 +22,7 @@ use miden_air::{
     trace::{
         MainTrace,
         chiplets::hasher::CONTROLLER_ROWS_PER_PERM_FELT,
-        log_precompile::{
-            HELPER_ADDR_IDX, HELPER_CAP_PREV_RANGE, STACK_CAP_NEXT_RANGE, STACK_COMM_RANGE,
-            STACK_R0_RANGE, STACK_R1_RANGE, STACK_TAG_RANGE,
-        },
+        log_precompile::{HELPER_ADDR_IDX, HELPER_STATE_PREV_RANGE, STACK_STMNT_RANGE},
     },
 };
 use miden_core::{
@@ -339,27 +336,19 @@ fn logprecompile_hasher_bus() {
         let log_addr = main.helper_register(HELPER_ADDR_IDX, idx);
         logprecompile_addr = Some(log_addr);
 
-        // Input: [COMM, TAG, CAP_PREV] — 8 stack lanes + 4 helper registers.
+        // Input: [STATE_PREV, STMNT, ZERO] — 4 helpers + 4 stack lanes + 4 ZEROs.
         let input_state: [Felt; 12] = core::array::from_fn(|i| {
             if i < 4 {
-                main.stack_element(STACK_COMM_RANGE.start + i, idx)
+                main.helper_register(HELPER_STATE_PREV_RANGE.start + i, idx)
             } else if i < 8 {
-                main.stack_element(STACK_TAG_RANGE.start + (i - 4), idx)
+                main.stack_element(STACK_STMNT_RANGE.start + (i - 4), idx)
             } else {
-                main.helper_register(HELPER_CAP_PREV_RANGE.start + (i - 8), idx)
+                ZERO
             }
         });
 
-        // Output (next row): [R0, R1, CAP_NEXT] — all 12 lanes from stack.
-        let output_state: [Felt; 12] = core::array::from_fn(|i| {
-            if i < 4 {
-                main.stack_element(STACK_R0_RANGE.start + i, next)
-            } else if i < 8 {
-                main.stack_element(STACK_R1_RANGE.start + (i - 4), next)
-            } else {
-                main.stack_element(STACK_CAP_NEXT_RANGE.start + (i - 8), next)
-            }
-        });
+        // Output (next row): [STATE_NEW, OUT_RATE1, OUT_CAP] identity-mapped to stack[0..12].
+        let output_state: [Felt; 12] = core::array::from_fn(|i| main.stack_element(i, next));
 
         exp.remove(row, &HasherMsg::linear_hash_init(log_addr, input_state));
         exp.remove(
