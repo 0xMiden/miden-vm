@@ -114,6 +114,164 @@ pub proc num_peaks_to_message_size
   # => [even_count_min, ...]
 end
 
+#! Computes the raw rooted frontier root of the given MMR.
+#!
+#! This root does not bind the MMR length by itself. When exposed across trust boundaries,
+#! it must be authenticated together with the MMR length stored at `mmr_ptr`.
+#!
+#! The root folds the path to `num_leaves`: each set bit consumes a peak on the left, while each
+#! unset bit folds in an empty subtree on the right. Empty-subtree roots are derived on the fly by
+#! squaring (`merge(empty, empty)`), starting from the empty leaf `ZERO`.
+#!
+#! The accumulator and current empty-subtree root are kept on the operand stack as two words
+#! `[ACC, EMPTY]`, with the remaining length bits in `loc.0` and the peak cursor in `loc.1`, so the
+#! fold avoids per-iteration memory traffic. Two folding shortcuts keep the hash count minimal:
+#!  - leading unset bits are folded once instead of twice, since `ACC` and `EMPTY` coincide until
+#!    the first peak is consumed;
+#!  - `EMPTY` is squared only while an unset bit still remains, skipping a trailing all-ones run.
+#!
+#! Input: [mmr_ptr, ...]
+#! Output: [ROOT, ...]
+@locals(2)
+pub proc root
+  # load num_leaves
+  dup mem_load
+  # => [num_leaves, mmr_ptr, ...]
+
+  # empty MMR root is the empty leaf root.
+  dup eq.0
+  if.true
+    drop drop padw
+    # => [ZERO, ...]
+  else
+    # cursor = mmr_ptr + 4 + 4 * num_peaks, the address just past the last peak (loc.1).
+    dup u32assert u32popcnt mul.4 movup.2 add add.4 loc_store.1
+    # => [num_leaves, ...]
+
+    # remaining length bits (loc.0)
+    loc_store.0
+    # => [...]
+
+    # ACC = EMPTY = empty_subtree_root(0) = ZERO, kept on the stack as [ACC, EMPTY].
+    padw padw
+    # => [ACC, EMPTY, ...]
+
+    # Phase 1: fold the leading unset bits. While the lowest remaining bit is unset, ACC and EMPTY
+    # both equal empty_subtree_root(level), so a single squaring advances them together.
+    loc_load.0 is_odd not
+    while.true
+      dupw hmerge
+      loc_load.0 u32shr.1 dup loc_store.0 is_odd not
+    end
+
+    # The lowest remaining bit is now set, so ACC = empty_subtree_root(level). Seed EMPTY with it.
+    swapw dropw dupw
+    # => [ACC, EMPTY, ...]
+
+    # Phase 2: fold the remaining bits, now that ACC and EMPTY have diverged.
+    push.1
+    while.true
+      loc_load.0 is_odd
+      if.true
+        # set bit: ACC = merge(peak, ACC), consuming the next peak.
+        loc_load.1 sub.4 dup loc_store.1
+        padw movup.4 mem_loadw_le
+        # => [PEAK, ACC, EMPTY, ...]
+        hmerge
+      else
+        # unset bit: ACC = merge(ACC, EMPTY), preserving EMPTY for higher levels.
+        dupw.1 swapw hmerge
+      end
+      # => [ACC, EMPTY, ...]
+
+      # advance bits
+      loc_load.0 u32shr.1 dup loc_store.0
+      # => [bits, ACC, EMPTY, ...]
+
+      # square EMPTY only while an unset bit still remains (bits & (bits + 1) != 0), skipping the
+      # squaring for a trailing all-ones run where EMPTY is never used again.
+      dup u32wrapping_add.1 u32and neq.0
+      if.true
+        swapw dupw hmerge swapw
+        # => [ACC, EMPTY, ...]
+      end
+
+      loc_load.0 neq.0
+    end
+
+    # ACC holds the root.
+    swapw dropw
+    # => [ROOT, ...]
+  end
+end
+
+#! Computes the authenticated rooted frontier pair for the given MMR.
+#!
+#! The returned root is the raw frontier root from `root`; the MMR length is returned alongside it
+#! so callers can authenticate `(num_leaves, root)`.
+#!
+#! Input: [mmr_ptr, ...]
+#! Output: [ROOT, num_leaves, ...]
+pub proc root_with_len
+  dup mem_load
+  # => [num_leaves, mmr_ptr, ...]
+
+  swap exec.root
+  # => [ROOT, num_leaves, ...]
+end
+
+#! Authenticates a rooted frontier `(num_leaves, ROOT)` and loads its peaks into memory.
+#!
+#! The peaks are provided via the advice map keyed by `ROOT`, encoded as `[num_leaves, 0, 0, 0]`
+#! followed by the peaks (the same value layout `pack`/`unpack` use). The peaks are loaded into
+#! memory at `mmr_ptr` and the frontier root is recomputed over them and asserted equal to `ROOT`.
+#!
+#! `num_leaves` is taken from the operand stack as a *trusted* input (committed alongside `ROOT`)
+#! and is what the recomputed root is folded over, so the pair `(num_leaves, ROOT)` is bound
+#! together: a longer frontier padded with empty leaves shares the raw root but is rejected here.
+#!
+#! On success the MMR is laid out at `mmr_ptr` exactly as `unpack` leaves it, so `get`/`add` can be
+#! used against the authenticated peaks.
+#!
+#! Input: [ROOT, num_leaves, mmr_ptr, ...]
+#! Output: [...]
+@locals(2)
+pub proc unpack_frontier
+  # store the trusted num_leaves at mmr_ptr; `root` reads the length from there
+  dup.4 dup.6 mem_store
+  # => [ROOT, num_leaves, mmr_ptr, ...]
+
+  # loc.0 = write cursor (first peak slot)
+  dup.5 add.4 loc_store.0
+  # loc.1 = number of padded peak words to load
+  dup.4 u32assert exec.num_leaves_to_num_peaks exec.num_peaks_to_message_size u32div.4
+  loc_store.1
+  # => [ROOT, num_leaves, mmr_ptr, ...]
+
+  # Pull `[num_leaves, 0, 0, 0] || peaks` to the advice stack and assert the header length matches
+  # the trusted length from the operand stack.
+  adv.push_mapval
+  adv_pushw
+  dup.8 assert_eq
+  drop drop drop
+
+  # Load the padded peak words into memory without hashing.
+  loc_load.1 neq.0
+  while.true
+    padw adv_loadw
+    loc_load.0 mem_storew_le dropw
+    loc_load.0 add.4 loc_store.0
+    loc_load.1 sub.1 dup loc_store.1 neq.0
+  end
+
+  # recompute the frontier root over the trusted length and assert it matches the commitment
+  dup.5 exec.root
+  # => [COMPUTED_ROOT, ROOT, num_leaves, mmr_ptr, ...]
+  assert_eqw
+  # => [num_leaves, mmr_ptr, ...]
+  drop drop
+end
+
 #! Writes the MMR who's peaks hash to `HASH` to the memory location pointed to by `mmr_ptr`.
 #!
 #! Input: [HASH, mmr_ptr, ...]
