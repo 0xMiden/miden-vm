@@ -306,37 +306,32 @@ pub enum SystemEvent {
     ///     where PAYLOAD_LO || PAYLOAD_HI is an 8-felt payload at positions 1..9,
     ///     and TAG is a 4-felt tag at positions 9..13.
     ///
-    /// This layout matches the `[rate_lo, rate_hi, capacity]` Poseidon2 sponge state, so a MASM
-    /// caller can feed the 12 felts under `event_id` directly into one `hperm` instruction to
-    /// recover the node's digest without any rearrangement.
+    /// This layout matches the `[rate_lo, rate_hi, capacity]` Poseidon2 sponge state, so the
+    /// `sys::register_expr` wrapper feeds the 12 felts under `event_id` directly into one `hperm`
+    /// to derive the node's digest *in-circuit* — binding it to the operand-stack payload rather
+    /// than trusting an advice value.
     ///
     /// Outputs:
     ///   Operand stack: [event_id, PAYLOAD_LO, PAYLOAD_HI, TAG, ...] (unchanged)
-    ///   Advice stack:  [NODE_DIGEST, ...] (pushed; top of advice is `NODE_DIGEST[0]`)
+    ///   Advice stack:  unchanged (the event produces no advice output)
     ///   DAG state:     {... node(TAG, PAYLOAD)}
-    ///
-    /// The advice-pushed digest lets MASM use the registered node as a child reference in a
-    /// downstream binary node, or feed it into a transcript-logging step, without recomputing the
-    /// digest in-circuit.
     DeferredRegister,
 
-    /// Evaluates a node identified by its 4-felt digest via the installed schema, pushes the
-    /// canonical digest to the advice stack, and records the canonical in the advice map.
+    /// Evaluates a node identified by its 4-felt digest via the installed schema, interns the
+    /// canonical, and returns the canonical's `tag || payload` felts on the advice stack.
     ///
     /// The node digest must resolve in deferred state — either as a previously registered node
-    /// or as a previously memoized evaluation input. Programs typically obtain the digest from
-    /// `adv.register_deferred` / `adv.register_deferred_chunk` immediately before calling this
-    /// event.
+    /// or as a previously memoized evaluation input.
     ///
     /// For expression nodes the canonical is the reduced form; for predicate tags whose
     /// `reduce` returns [`crate::deferred::Node::TRUE`] on success, the precompile verifies
     /// the assertion (returning [`crate::deferred::PrecompileError::AssertionFailed`] on
     /// mismatch). Children referenced in the payload must already be registered in the DAG.
     ///
-    /// The advice-map entry is uniform across every node shape — including predicates, whose
-    /// canonical is the TRUE node and so serializes to the 12 felts of `Node::TRUE` like any other
-    /// expression.
-    /// A recorded entry therefore means evaluation (and, for predicates, verification) succeeded.
+    /// The advice-stack output is an *unbound host hint*: a caller that consumes it must re-hash
+    /// the felts in-circuit and log a predicate the verifier re-checks. The output is uniform
+    /// across every node shape — including predicates, whose canonical is the TRUE node and so
+    /// serializes to the 12 felts of `Node::TRUE` like any other expression.
     ///
     /// Inputs:
     ///   Operand stack: [event_id, NODE_DIGEST, ...]
@@ -344,9 +339,8 @@ pub enum SystemEvent {
     ///
     /// Outputs:
     ///   Operand stack: [event_id, NODE_DIGEST, ...] (unchanged)
-    ///   Advice stack:  [CANONICAL_DIGEST, ...]
-    ///   Advice map:    CANONICAL_DIGEST |-> CANONICAL_VALUE, where CANONICAL_VALUE is the
-    ///     canonical serialized in natural (felt-index) order as `tag || payload`:
+    ///   Advice stack:  the canonical serialized in natural (felt-index) order as `tag || payload`,
+    ///     laid out so successive `adv_pushw` reads yield `TAG`, then the payload words:
     ///     - expression: the 4 tag felts followed by the 8 payload felts (12 felts)
     ///     - chunk:      the 4 tag felts followed by every chunk's 8 felts (8n + 4)
     DeferredEvaluate,
@@ -365,11 +359,12 @@ pub enum SystemEvent {
     ///
     /// Outputs:
     ///   Operand stack: [event_id, TAG, ptr, ...] (unchanged)
-    ///   Advice stack:  [NODE_DIGEST, ...] (pushed; top of advice is `NODE_DIGEST[0]`)
+    ///   Advice stack:  unchanged (the event produces no advice output)
     ///   DAG state:     {... chunk(TAG, [data[ptr..ptr+8n]])}
     ///
-    /// The advice-pushed digest spares MASM the cost of computing the chunk's linear-hash
-    /// digest in-circuit (which would be `n` Poseidon2 permutations).
+    /// The chunk's digest is derived *in-circuit* by the `sys::register_chunk` wrapper — a
+    /// `mem_stream` linear hash over the same `8n` felts — so it is bound to memory rather than
+    /// trusting an advice value.
     DeferredRegisterChunk,
 }
 

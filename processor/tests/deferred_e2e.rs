@@ -38,26 +38,22 @@ fn build_processor() -> FastProcessor {
 // ================================================================================================
 
 /// Build a MASM block that pushes the 4-felt tag then the 8-felt payload, invokes the
-/// `adv.register_deferred` keyword, and cleans up the 12 felts left on the operand stack.
-/// Also discards the NODE_DIGEST that `adv.register_deferred` pushes onto the advice stack —
-/// tests that want to consume the digest should build their MASM inline rather than going
-/// through this helper.
+/// `adv.register_deferred` keyword, and cleans up the 12 felts left on the operand stack. The
+/// event interns the node host-side and produces no advice output (the digest is derived
+/// in-circuit by `sys::register_expr`); tests that want the digest build their MASM inline.
 fn emit_register(src: &mut String, node: Node) {
     push_node(src, node);
     src.push_str("    adv.register_deferred\n");
     for _ in 0..12 {
         src.push_str("    drop\n");
     }
-    // Pop the advice-pushed NODE_DIGEST so subsequent advice consumers see a clean stack.
-    src.push_str("    adv_pushw\n");
-    src.push_str("    dropw\n");
 }
 
 /// Build a MASM block that pushes the node's digest and invokes `adv.evaluate_deferred`, then
-/// drops the input digest. `evaluate_deferred` pushes the canonical digest to advice and records
-/// the canonical in the advice map keyed by that canonical digest; this helper just drives the
-/// evaluation for its side effects (verifying a predicate / surfacing an error). Tests inspect the
-/// recorded entry via `output.advice`.
+/// drops the input digest. `evaluate_deferred` interns the canonical and pushes its
+/// `tag || payload` felts onto the advice stack; this helper just drives the evaluation for its
+/// side effects (verifying a predicate / surfacing an error) and leaves those felts unconsumed on
+/// the advice stack, which is harmless.
 ///
 /// The node MUST already be interned in `DeferredState`.
 fn emit_evaluate_for_side_effect(src: &mut String, node: Node) {
@@ -169,14 +165,31 @@ fn deferred_end_to_end_register_eval_assert() {
     assert_eq!(state.root(), TRUE_DIGEST);
 }
 
-// E2E: adv.evaluate_deferred records the canonical (tag || payload) in the advice map.
+// E2E: adv.evaluate_deferred returns the canonical (tag || payload) on the advice stack.
 // ================================================================================================
 
+/// Append MASM that, immediately after `adv.evaluate_deferred` has run and the input digest sits
+/// on top of the operand stack, drops that digest and stashes the canonical's three advice words
+/// (`TAG`, `PAYLOAD_LO`, `PAYLOAD_HI`, read TAG-first) into `memory[0..12]`.
+fn emit_capture_canonical_value(src: &mut String) {
+    src.push_str("    dropw\n"); // drop the input NODE_DIGEST
+    src.push_str("    adv_pushw mem_storew_le.0 dropw\n"); // TAG       -> mem[0..4]
+    src.push_str("    adv_pushw mem_storew_le.4 dropw\n"); // PAYLOAD_LO -> mem[4..8]
+    src.push_str("    adv_pushw mem_storew_le.8 dropw\n"); // PAYLOAD_HI -> mem[8..12]
+}
+
+/// Read `memory[0..12]` back as the captured `tag || payload` felts.
+fn read_canonical_value(output: &miden_processor::ExecutionOutput) -> Vec<Felt> {
+    let ctx = 0u32.into();
+    (0..12)
+        .map(|i| output.memory.read_element(ctx, Felt::from_u32(i)).expect("memory read"))
+        .collect()
+}
+
 #[test]
-fn deferred_evaluate_records_canonical_in_advice_map() {
+fn deferred_evaluate_returns_canonical_value_on_advice() {
     // Register two leaves a=3 and b=4, then ask `adv.evaluate_deferred` for the canonical form of
-    // (a + b). The canonical (leaf 7) must be recorded in the advice map under the canonical
-    // digest, serialized as `tag || payload`.
+    // (a + b). The canonical (leaf 7) is returned on the advice stack as `tag || payload`.
     let a = arith_leaf(3);
     let b = arith_leaf(4);
     let add = Node::join(Uint::add_tag(), a.digest(), b.digest());
@@ -185,7 +198,9 @@ fn deferred_evaluate_records_canonical_in_advice_map() {
     emit_register(&mut src, a);
     emit_register(&mut src, b);
     emit_register(&mut src, add.clone());
-    emit_evaluate_for_side_effect(&mut src, add);
+    push_digest(&mut src, add.digest());
+    src.push_str("    adv.evaluate_deferred\n");
+    emit_capture_canonical_value(&mut src);
     src.push_str("end\n");
 
     let program = Assembler::default().assemble_program(&src).expect("program must assemble");
@@ -195,34 +210,34 @@ fn deferred_evaluate_records_canonical_in_advice_map() {
         .execute_sync(&program, &mut host)
         .expect("execution must succeed");
 
-    // The canonical of (3 + 4) is leaf 7. Its advice-map value is `tag || payload`.
     let canonical = arith_leaf(7);
-    let canonical_digest = canonical.digest();
     let mut expected: Vec<Felt> = canonical.tag.as_word().to_vec();
     expected.extend_from_slice(canonical.payload.as_felts().unwrap());
 
-    let recorded = output
-        .advice
-        .get_mapped_values(&canonical_digest)
-        .expect("evaluate must record the canonical under canonical digest");
-    assert_eq!(recorded, expected.as_slice(), "advice map must hold canonical `tag || payload`");
+    assert_eq!(
+        read_canonical_value(&output),
+        expected,
+        "evaluate must return the canonical `tag || payload` on the advice stack"
+    );
 }
 
-// E2E: evaluating a predicate records the TRUE node — no special-casing of predicates.
+// E2E: evaluating a predicate returns the TRUE node — no special-casing of predicates.
 // ================================================================================================
 
 #[test]
-fn deferred_evaluate_records_true_node_for_predicate() {
+fn deferred_evaluate_returns_true_node_for_predicate() {
     // Register one leaf, build a self-equal predicate (a == a), evaluate it. The predicate must
-    // verify successfully, and its canonical (the TRUE node) is recorded in the advice map under
-    // the TRUE node's digest — uniform with every other node shape.
+    // verify successfully, and its canonical (the TRUE node) is returned on the advice stack as 12
+    // zero felts — uniform with every other node shape.
     let a = arith_leaf(7);
     let a_eq_a = Node::join(Uint::eq_tag(), a.digest(), a.digest());
 
     let mut src = String::from("begin\n");
     emit_register(&mut src, a);
     emit_register(&mut src, a_eq_a.clone());
-    emit_evaluate_for_side_effect(&mut src, a_eq_a);
+    push_digest(&mut src, a_eq_a.digest());
+    src.push_str("    adv.evaluate_deferred\n");
+    emit_capture_canonical_value(&mut src);
     src.push_str("end\n");
 
     let program = Assembler::default().assemble_program(&src).expect("program must assemble");
@@ -232,15 +247,14 @@ fn deferred_evaluate_records_true_node_for_predicate() {
         .execute_sync(&program, &mut host)
         .expect("execution must succeed");
 
-    // The TRUE node serializes to its 12 felts (zero tag || zero payload) like any expression.
     let mut expected: Vec<Felt> = Node::TRUE.tag.as_word().to_vec();
     expected.extend_from_slice(Node::TRUE.payload.as_felts().unwrap());
 
-    let recorded = output
-        .advice
-        .get_mapped_values(&Node::TRUE.digest())
-        .expect("evaluate must record the TRUE node under the TRUE digest");
-    assert_eq!(recorded, expected.as_slice(), "predicate canonical must be the TRUE node felts");
+    assert_eq!(
+        read_canonical_value(&output),
+        expected,
+        "predicate canonical must be returned as the TRUE node felts"
+    );
 }
 
 // E2E: a predicate is just a host hint — `adv.register_deferred` does NOT verify it. The
@@ -288,26 +302,27 @@ fn deferred_evaluate_predicate_mismatch_fails_execution() {
     assert!(result.is_err(), "evaluating a mismatched predicate must fail execution");
 }
 
-// E2E: adv.register_deferred pushes the registered node's digest onto the advice stack.
+// EQUIVALENCE: the in-circuit digest derivation reproduces `Node::digest` bit-for-bit.
 // ================================================================================================
+//
+// The register events no longer hand back the digest via advice; the `sys` wrappers compute it
+// in-circuit (`hperm` for expressions, a `mem_stream` linear hash for chunks). These tests inline
+// the exact wrapper bodies and assert the result equals `Node::digest`, which is the verifier's
+// reference. They are the source of truth for the rate/capacity layout and the chunk loop now that
+// the digest is recomputed in MASM.
 
 #[test]
-fn deferred_register_pushes_node_digest_to_advice() {
-    // Register a leaf, then pull the advice-pushed digest into memory and assert it matches the
-    // node's content-addressed digest.
+fn deferred_register_expr_digest_matches_node_digest() {
+    // `sys::register_expr` body: intern, then `hperm` over `[PAYLOAD_LO, PAYLOAD_HI, TAG]` and
+    // squeeze rate0. Assert the operand-stack result equals `Node::digest`.
     let leaf = arith_leaf(42);
     let expected = leaf.digest();
 
     let mut src = String::from("begin\n");
     push_node(&mut src, leaf);
     src.push_str("    adv.register_deferred\n");
-    for _ in 0..12 {
-        src.push_str("    drop\n");
-    }
-    // Pull the NODE_DIGEST off advice and stash to memory[0..4].
-    src.push_str("    adv_pushw\n");
-    src.push_str("    mem_storew_le.0\n");
-    src.push_str("    dropw\n");
+    src.push_str("    hperm swapw.2 dropw dropw\n"); // digest = rate0 of permuted state
+    src.push_str("    mem_storew_le.0 dropw\n");
     src.push_str("end\n");
 
     let program = Assembler::default().assemble_program(&src).expect("program must assemble");
@@ -320,14 +335,14 @@ fn deferred_register_pushes_node_digest_to_advice() {
     let observed: [Felt; 4] = core::array::from_fn(|i| {
         output.memory.read_element(ctx, Felt::from_u32(i as u32)).expect("memory read")
     });
-    assert_eq!(observed, *expected.as_elements(), "register must push the node's digest");
+    assert_eq!(observed, *expected.as_elements(), "in-circuit hperm must match Node::digest");
 }
 
 #[test]
-fn deferred_evaluate_pushes_canonical_digest_to_operand() {
-    // Register a=3, b=4 and add=(a+b). Evaluate add, then move the advice-pushed
-    // CANONICAL_DIGEST to the operand stack (`adv.evaluate_deferred; dropw; adv_pushw`) and
-    // store it in memory to assert it equals digest(leaf 7).
+fn deferred_evaluate_value_rehashes_to_canonical_digest() {
+    // Register a=3, b=4 and add=(a+b). Evaluate add to pull the canonical `tag || payload` off the
+    // advice stack, re-hash it in-circuit (the binding step), and assert the digest equals
+    // digest(leaf 7) — i.e. a caller can recover a *bound* canonical digest from the evaluate hint.
     let a = arith_leaf(3);
     let b = arith_leaf(4);
     let add = Node::join(Uint::add_tag(), a.digest(), b.digest());
@@ -339,10 +354,12 @@ fn deferred_evaluate_pushes_canonical_digest_to_operand() {
     emit_register(&mut src, add.clone());
     push_digest(&mut src, add.digest());
     src.push_str("    adv.evaluate_deferred\n");
-    src.push_str("    dropw\n");
-    src.push_str("    adv_pushw\n");
-    src.push_str("    mem_storew_le.0\n");
-    src.push_str("    dropw\n");
+    src.push_str("    dropw\n"); // drop the input NODE_DIGEST
+    // Pull TAG, PAYLOAD_LO, PAYLOAD_HI (TAG-first) onto the operand stack: [PHI, PLO, TAG].
+    src.push_str("    adv_pushw adv_pushw adv_pushw\n");
+    // Reorder to the sponge layout [PAYLOAD_LO, PAYLOAD_HI, TAG] = [R0, R1, C], then hash.
+    src.push_str("    swapw hperm swapw.2 dropw dropw\n");
+    src.push_str("    mem_storew_le.0 dropw\n");
     src.push_str("end\n");
 
     let program = Assembler::default().assemble_program(&src).expect("program must assemble");
@@ -355,34 +372,44 @@ fn deferred_evaluate_pushes_canonical_digest_to_operand() {
     let observed: [Felt; 4] = core::array::from_fn(|i| {
         output.memory.read_element(ctx, Felt::from_u32(i as u32)).expect("memory read")
     });
-    assert_eq!(observed, *expected.as_elements(), "evaluate must push canonical digest");
+    assert_eq!(observed, *expected.as_elements(), "re-hashed canonical must match its digest");
 }
 
 #[test]
-fn deferred_register_chunk_pushes_node_digest_to_advice() {
+fn deferred_register_chunk_digest_matches_node_digest() {
     use core::fmt::Write;
-    // Lay out one 8-felt chunk in memory at addresses 0..8, register the chunk node, then pull
-    // the advice-pushed digest into memory[8..12] and assert it equals the chunk node's digest.
-    let chunk: [Felt; 8] = core::array::from_fn(|i| Felt::from_u32(101 + i as u32));
-    let tag = preimage_tag(1);
-    let expected = Node::chunk(tag, vec![chunk]).digest();
+    // `sys::register_chunk` body over two 8-felt chunks in memory at 0..16: intern, derive
+    // end_addr = ptr + 8*n_chunks, then `mem_stream`/`hperm` once per block. Assert the result
+    // equals the chunk node's `Node::digest`.
+    let chunks: Vec<[Felt; 8]> = (0..2u32)
+        .map(|i| core::array::from_fn(|j| Felt::from_u32(101 + i * 8 + j as u32)))
+        .collect();
+    let tag = preimage_tag(2);
+    let expected = Node::chunk(tag, chunks.clone()).digest();
 
     let mut src = String::from("begin\n");
-    for (i, felt) in chunk.iter().enumerate() {
+    for (i, felt) in chunks.iter().flatten().enumerate() {
         writeln!(&mut src, "    push.{}", felt.as_canonical_u64()).unwrap();
         writeln!(&mut src, "    mem_store.{}", i as u32).unwrap();
     }
+    // Stack: [TAG, ptr=0, n_chunks=2].
+    writeln!(&mut src, "    push.{}", 2u32).unwrap(); // n_chunks
     writeln!(&mut src, "    push.{}", 0u32).unwrap(); // ptr
     for f in tag.as_word().iter().rev() {
         writeln!(&mut src, "    push.{}", f.as_canonical_u64()).unwrap();
     }
     src.push_str("    adv.register_deferred_chunk\n");
-    for _ in 0..5 {
-        src.push_str("    drop\n");
-    }
-    src.push_str("    adv_pushw\n");
-    src.push_str("    mem_storew_le.8\n");
-    src.push_str("    dropw\n");
+    // Inline the register_chunk hashing body.
+    src.push_str("    movup.5 mul.8 dup.5 add movdn.5\n"); // -> [TAG, ptr, end_addr]
+    src.push_str("    padw padw\n"); // -> [R0=0w, R1=0w, C=TAG, start, end]
+    src.push_str("    dup.13 dup.13 neq\n");
+    src.push_str("    while.true\n");
+    src.push_str("        mem_stream hperm\n");
+    src.push_str("        dup.13 dup.13 neq\n");
+    src.push_str("    end\n");
+    src.push_str("    swapw.2 dropw dropw\n"); // digest = rate0
+    src.push_str("    movup.4 drop movup.4 drop\n"); // drop the two end_addr felts
+    src.push_str("    mem_storew_le.16 dropw\n");
     src.push_str("end\n");
 
     let program = Assembler::default().assemble_program(&src).expect("program must assemble");
@@ -395,10 +422,14 @@ fn deferred_register_chunk_pushes_node_digest_to_advice() {
     let observed: [Felt; 4] = core::array::from_fn(|i| {
         output
             .memory
-            .read_element(ctx, Felt::from_u32(8 + i as u32))
+            .read_element(ctx, Felt::from_u32(16 + i as u32))
             .expect("memory read")
     });
-    assert_eq!(observed, *expected.as_elements(), "register_chunk must push the node's digest");
+    assert_eq!(
+        observed,
+        *expected.as_elements(),
+        "in-circuit mem_stream must match Node::digest"
+    );
 }
 
 // LEGACY SMOKE: registered EventHandler still works alongside the deferred infrastructure.
@@ -503,9 +534,6 @@ fn chunk_register_reads_bulk_data_from_memory_and_interns_node() {
     for _ in 0..5 {
         src.push_str("    drop\n");
     }
-    // Discard the advice-pushed NODE_DIGEST so any later advice consumer sees a clean stack.
-    src.push_str("    adv_pushw\n");
-    src.push_str("    dropw\n");
     src.push_str("end\n");
 
     let program = Assembler::default().assemble_program(&src).expect("program must assemble");
@@ -558,9 +586,6 @@ fn chunk_register_with_zero_chunks_still_interns_a_node() {
     for _ in 0..5 {
         src.push_str("    drop\n");
     }
-    // Discard the advice-pushed NODE_DIGEST.
-    src.push_str("    adv_pushw\n");
-    src.push_str("    dropw\n");
     src.push_str("end\n");
 
     let program = Assembler::default().assemble_program(&src).expect("program must assemble");
