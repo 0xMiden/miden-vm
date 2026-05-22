@@ -104,7 +104,7 @@ impl FastProcessor {
         tracer: &mut T,
     ) -> Result<ExecutionOutput, ExecutionError>
     where
-        T: Tracer<Processor = Self>,
+        T: Tracer<Processor = Self, Forest = Arc<MastForest>>,
     {
         let mut continuation_stack = ContinuationStack::new(program);
         let mut current_forest = program.mast_forest().clone();
@@ -131,7 +131,7 @@ impl FastProcessor {
         tracer: &mut T,
     ) -> Result<ExecutionOutput, ExecutionError>
     where
-        T: Tracer<Processor = Self>,
+        T: Tracer<Processor = Self, Forest = Arc<MastForest>>,
     {
         let mut continuation_stack = ContinuationStack::new(program);
         let mut current_forest = program.mast_forest().clone();
@@ -214,8 +214,8 @@ impl FastProcessor {
     /// Converts a step-wise execution result into the next resume context, if execution stopped.
     #[inline(always)]
     fn resume_context_from_flow(
-        flow: ControlFlow<BreakReason, StackOutputs>,
-        mut continuation_stack: ContinuationStack,
+        flow: ControlFlow<BreakReason<Arc<MastForest>>, StackOutputs>,
+        mut continuation_stack: ContinuationStack<Arc<MastForest>>,
         current_forest: Arc<MastForest>,
         kernel: Kernel,
     ) -> Result<Option<ResumeContext>, ExecutionError> {
@@ -258,16 +258,16 @@ impl FastProcessor {
     /// processor for a second program is incorrect. This is mainly meant to be used in tests.
     fn execute_impl<S, T>(
         &mut self,
-        continuation_stack: &mut ContinuationStack,
+        continuation_stack: &mut ContinuationStack<Arc<MastForest>>,
         current_forest: &mut Arc<MastForest>,
         kernel: &Kernel,
         host: &mut impl SyncHost,
         tracer: &mut T,
         stopper: &S,
-    ) -> ControlFlow<BreakReason, StackOutputs>
+    ) -> ControlFlow<BreakReason<Arc<MastForest>>, StackOutputs>
     where
-        S: Stopper<Processor = Self>,
-        T: Tracer<Processor = Self>,
+        S: Stopper<Processor = Self, Forest = Arc<MastForest>>,
+        T: Tracer<Processor = Self, Forest = Arc<MastForest>>,
     {
         while let ControlFlow::Break(internal_break_reason) =
             execute_impl(self, continuation_stack, current_forest, kernel, host, tracer, stopper)
@@ -363,16 +363,16 @@ impl FastProcessor {
 
     async fn execute_impl_async<S, T>(
         &mut self,
-        continuation_stack: &mut ContinuationStack,
+        continuation_stack: &mut ContinuationStack<Arc<MastForest>>,
         current_forest: &mut Arc<MastForest>,
         kernel: &Kernel,
         host: &mut impl Host,
         tracer: &mut T,
         stopper: &S,
-    ) -> ControlFlow<BreakReason, StackOutputs>
+    ) -> ControlFlow<BreakReason<Arc<MastForest>>, StackOutputs>
     where
-        S: Stopper<Processor = Self>,
-        T: Tracer<Processor = Self>,
+        S: Stopper<Processor = Self, Forest = Arc<MastForest>>,
+        T: Tracer<Processor = Self, Forest = Arc<MastForest>>,
     {
         while let ControlFlow::Break(internal_break_reason) =
             execute_impl(self, continuation_stack, current_forest, kernel, host, tracer, stopper)

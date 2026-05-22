@@ -15,7 +15,8 @@ use crate::{
     Felt, Word,
     chiplets::hasher,
     mast::{
-        DecoratorId, DecoratorStore, MastForest, MastForestError, MastNodeFingerprint, MastNodeId,
+        DecoratorId, DecoratorStore, ExecutableMastForest, MastForest, MastForestError,
+        MastNodeFingerprint, MastNodeId,
     },
     operations::opcodes,
     utils::{Idx, LookupByIdx},
@@ -199,14 +200,20 @@ impl MastNodeExt for CallNode {
     }
 
     /// Returns the decorators to be executed before this node is executed.
-    fn before_enter<'a>(&'a self, forest: &'a MastForest) -> &'a [DecoratorId] {
+    fn before_enter<'a, F>(&'a self, forest: &'a F) -> &'a [DecoratorId]
+    where
+        F: ExecutableMastForest + ?Sized,
+    {
         #[cfg(debug_assertions)]
         self.verify_node_in_forest(forest);
         self.decorator_store.before_enter(forest)
     }
 
     /// Returns the decorators to be executed after this node is executed.
-    fn after_exit<'a>(&'a self, forest: &'a MastForest) -> &'a [DecoratorId] {
+    fn after_exit<'a, F>(&'a self, forest: &'a F) -> &'a [DecoratorId]
+    where
+        F: ExecutableMastForest + ?Sized,
+    {
         #[cfg(debug_assertions)]
         self.verify_node_in_forest(forest);
         self.decorator_store.after_exit(forest)
@@ -269,11 +276,15 @@ impl MastNodeExt for CallNode {
     }
 
     #[cfg(debug_assertions)]
-    fn verify_node_in_forest(&self, forest: &MastForest) {
+    fn verify_node_in_forest<F>(&self, forest: &F)
+    where
+        F: ExecutableMastForest + ?Sized,
+    {
         if let Some(id) = self.decorator_store.linked_id() {
             // Verify that this node is the one stored at the given ID in the forest
             let self_ptr = self as *const Self;
-            let forest_node = &forest.nodes[id];
+            let forest_node =
+                forest.get_node_by_id(id).expect("linked node id must be present in forest");
             let forest_node_ptr = match forest_node {
                 MastNode::Call(call_node) => call_node as *const CallNode as *const (),
                 _ => panic!("Node type mismatch at {id:?}"),

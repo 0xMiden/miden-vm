@@ -1,11 +1,10 @@
-use alloc::sync::Arc;
 use core::ops::ControlFlow;
 
 use crate::{
     BaseHost, BreakReason, Stopper,
     continuation_stack::Continuation,
     execution::{ExecutionState, finalize_clock_cycle, finalize_clock_cycle_with_continuation},
-    mast::{JoinNode, MastForest, MastNodeId},
+    mast::{ExecutableMastForest, JoinNode, MastNodeId},
     processor::Processor,
     tracer::Tracer,
 };
@@ -15,17 +14,18 @@ use crate::{
 
 /// Executes a Join node from the start.
 #[inline(always)]
-pub(super) fn start_join_node<P, H, S, T>(
-    state: &mut ExecutionState<'_, P, H, S, T>,
+pub(super) fn start_join_node<P, H, S, T, F>(
+    state: &mut ExecutionState<'_, P, H, S, T, F>,
     join_node: &JoinNode,
     node_id: MastNodeId,
-    current_forest: &Arc<MastForest>,
-) -> ControlFlow<BreakReason>
+    current_forest: &F,
+) -> ControlFlow<BreakReason<F>>
 where
     P: Processor,
     H: BaseHost,
-    S: Stopper<Processor = P>,
-    T: Tracer<Processor = P>,
+    S: Stopper<Processor = P, Forest = F>,
+    T: Tracer<Processor = P, Forest = F>,
+    F: ExecutableMastForest + Clone,
 {
     state.tracer.start_clock_cycle(
         state.processor,
@@ -55,16 +55,17 @@ where
 
 /// Executes the finish phase of a Join node.
 #[inline(always)]
-pub(super) fn finish_join_node<P, H, S, T>(
-    state: &mut ExecutionState<'_, P, H, S, T>,
+pub(super) fn finish_join_node<P, H, S, T, F>(
+    state: &mut ExecutionState<'_, P, H, S, T, F>,
     node_id: MastNodeId,
-    current_forest: &Arc<MastForest>,
-) -> ControlFlow<BreakReason>
+    current_forest: &F,
+) -> ControlFlow<BreakReason<F>>
 where
     P: Processor,
     H: BaseHost,
-    S: Stopper<Processor = P>,
-    T: Tracer<Processor = P>,
+    S: Stopper<Processor = P, Forest = F>,
+    T: Tracer<Processor = P, Forest = F>,
+    F: ExecutableMastForest + Clone,
 {
     state.tracer.start_clock_cycle(
         state.processor,

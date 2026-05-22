@@ -8,7 +8,7 @@ use core::{cmp::min, ops::ControlFlow};
 use miden_air::{Felt, trace::RowIndex};
 use miden_core::{
     EMPTY_WORD, WORD_SIZE, Word, ZERO,
-    mast::{MastForest, MastNodeExt, MastNodeId},
+    mast::{ExecutableMastForest, MastForest, MastNodeExt, MastNodeId},
     operations::Decorator,
     precompile::PrecompileTranscript,
     program::{MIN_STACK_DEPTH, Program, StackInputs, StackOutputs},
@@ -162,7 +162,7 @@ impl FastProcessor {
     /// Converts the terminal result of a full execution run into [`ExecutionOutput`].
     #[inline(always)]
     fn execution_result_from_flow(
-        flow: ControlFlow<BreakReason, StackOutputs>,
+        flow: ControlFlow<BreakReason<Arc<MastForest>>, StackOutputs>,
         processor: Self,
     ) -> Result<ExecutionOutput, ExecutionError> {
         match flow {
@@ -182,7 +182,7 @@ impl FastProcessor {
     #[cfg(any(test, feature = "testing"))]
     #[inline(always)]
     fn stack_result_from_flow(
-        flow: ControlFlow<BreakReason, StackOutputs>,
+        flow: ControlFlow<BreakReason<Arc<MastForest>>, StackOutputs>,
     ) -> Result<StackOutputs, ExecutionError> {
         match flow {
             ControlFlow::Continue(stack_outputs) => Ok(stack_outputs),
@@ -523,12 +523,15 @@ impl FastProcessor {
     // --------------------------------------------------------------------------------------------
 
     /// Executes the decorators that should be executed before entering a node.
-    fn execute_before_enter_decorators(
+    fn execute_before_enter_decorators<F>(
         &self,
         node_id: MastNodeId,
-        current_forest: &MastForest,
+        current_forest: &F,
         host: &mut impl BaseHost,
-    ) -> ControlFlow<BreakReason> {
+    ) -> ControlFlow<BreakReason<F>>
+    where
+        F: ExecutableMastForest,
+    {
         if !self.should_execute_decorators() {
             return ControlFlow::Continue(());
         }
@@ -548,12 +551,15 @@ impl FastProcessor {
     }
 
     /// Executes the decorators that should be executed after exiting a node.
-    fn execute_after_exit_decorators(
+    fn execute_after_exit_decorators<F>(
         &self,
         node_id: MastNodeId,
-        current_forest: &MastForest,
+        current_forest: &F,
         host: &mut impl BaseHost,
-    ) -> ControlFlow<BreakReason> {
+    ) -> ControlFlow<BreakReason<F>>
+    where
+        F: ExecutableMastForest,
+    {
         if !self.should_execute_decorators() {
             return ControlFlow::Continue(());
         }
@@ -573,11 +579,11 @@ impl FastProcessor {
     }
 
     /// Executes the specified decorator
-    fn execute_decorator(
+    fn execute_decorator<F>(
         &self,
         decorator: &Decorator,
         host: &mut impl BaseHost,
-    ) -> ControlFlow<BreakReason> {
+    ) -> ControlFlow<BreakReason<F>> {
         match decorator {
             Decorator::Debug(options) => {
                 if self.in_debug_mode() {
@@ -766,13 +772,14 @@ pub struct NoopTracer;
 
 impl Tracer for NoopTracer {
     type Processor = FastProcessor;
+    type Forest = Arc<MastForest>;
 
     #[inline(always)]
     fn start_clock_cycle(
         &mut self,
         _processor: &FastProcessor,
-        _continuation: Continuation,
-        _continuation_stack: &ContinuationStack,
+        _continuation: Continuation<Arc<MastForest>>,
+        _continuation_stack: &ContinuationStack<Arc<MastForest>>,
         _current_forest: &Arc<MastForest>,
     ) {
         // do nothing
