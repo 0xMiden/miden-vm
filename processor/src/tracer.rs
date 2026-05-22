@@ -1,11 +1,9 @@
-use alloc::sync::Arc;
-
 use miden_air::trace::{RowIndex, chiplets::hasher::STATE_WIDTH, decoder::NUM_USER_OP_HELPERS};
 use miden_core::{
     Felt, Word, ZERO,
     crypto::merkle::MerklePath,
     field::{BasedVectorSpace, Field, QuadFelt},
-    mast::{MastForest, MastNodeId},
+    mast::{ExecutableMastForest, MastNodeId},
 };
 
 use crate::{
@@ -60,6 +58,14 @@ use crate::{
 pub trait Tracer {
     type Processor;
 
+    /// The forest representation passed to this tracer's [`start_clock_cycle`] /
+    /// [`finalize_clock_cycle`] / [`record_mast_forest_resolution`] hooks.
+    ///
+    /// For live execution this is `Arc<MastForest>`; for the replay path it is
+    /// `Arc<SparseMastForest>`. Continuation stacks and continuations carrying forest references
+    /// (e.g. `Continuation::EnterForest`) use the same type.
+    type Forest: ExecutableMastForest + Clone;
+
     /// Signals the start of a new clock cycle, guaranteed to be called at the start of the clock
     /// cycle, before any mutations to the processor state is made. For example, it is safe to
     /// access the processor's stack and memory state as they are before executing the operation at
@@ -81,9 +87,9 @@ pub trait Tracer {
     fn start_clock_cycle(
         &mut self,
         processor: &Self::Processor,
-        continuation: Continuation,
-        continuation_stack: &ContinuationStack,
-        current_forest: &Arc<MastForest>,
+        continuation: Continuation<Self::Forest>,
+        continuation_stack: &ContinuationStack<Self::Forest>,
+        current_forest: &Self::Forest,
     );
 
     /// Signals the end of a clock cycle, guaranteed to be called before incrementing the system
@@ -98,7 +104,7 @@ pub trait Tracer {
         &mut self,
         processor: &Self::Processor,
         op_helper_registers: OperationHelperRegisters,
-        current_forest: &Arc<MastForest>,
+        current_forest: &Self::Forest,
     );
 
     // MAST FOREST RESOLUTION
@@ -115,7 +121,20 @@ pub trait Tracer {
     /// [Tracer::start_clock_cycle] is called on the resolved node (i.e. *not* the external node).
     /// This method is called on the external node before it is resolved, and hence is guaranteed to
     /// be called before [Tracer::start_clock_cycle] for clock cycles involving an external node.
-    fn record_mast_forest_resolution(&mut self, _node_id: MastNodeId, _forest: &Arc<MastForest>) {}
+    fn record_mast_forest_resolution(&mut self, _node_id: MastNodeId, _forest: &Self::Forest) {}
+
+    /// Records that the [miden_core::mast::ExternalNode] with the given id is being entered in
+    /// `forest`. Because external nodes are resolved before [Tracer::start_clock_cycle], they are
+    /// otherwise invisible to the tracer; this hook is provided so that implementations that
+    /// accumulate visited nodes (for building a sparse forest, for example) can include them.
+    ///
+    /// Default: no-op.
+    fn record_external_node_entered(
+        &mut self,
+        _external_node_id: MastNodeId,
+        _forest: &Self::Forest,
+    ) {
+    }
 
     // IN-CYCLE METHODS
     // --------------------------------------------------------------------------------------------

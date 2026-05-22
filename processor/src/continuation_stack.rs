@@ -1,9 +1,6 @@
-use alloc::{sync::Arc, vec::Vec};
+use alloc::vec::Vec;
 
-use miden_core::{
-    mast::{MastForest, MastNodeId},
-    program::Program,
-};
+use miden_core::{mast::MastNodeId, program::Program};
 
 /// A hint for the initial size of the continuation stack.
 const CONTINUATION_STACK_SIZE_HINT: usize = 64;
@@ -15,8 +12,13 @@ const CONTINUATION_STACK_SIZE_HINT: usize = 64;
 ///
 /// This enum defines the different types of continuations that can be performed on MAST nodes
 /// during program execution.
+///
+/// The type parameter `F` is the representation of a MAST forest carried by the
+/// [`Continuation::EnterForest`] variant. For live execution this is `Arc<MastForest>`; for the
+/// snapshotted continuation stack inside a trace fragment it is a `usize` index into the
+/// `mast_forest_store` of the trace generation context.
 #[derive(Debug, Clone)]
-pub enum Continuation {
+pub enum Continuation<F> {
     /// Start processing a node in the MAST forest.
     StartNode(MastNodeId),
     /// Process the finish phase of a Join node.
@@ -53,12 +55,12 @@ pub enum Continuation {
     ///
     /// When we encounter an `ExternalNode`, we enter the corresponding MAST forest directly, and
     /// push an `EnterForest` continuation to restore the previous forest when done.
-    EnterForest(Arc<MastForest>),
+    EnterForest(F),
     /// Process the `after_exit` decorators of the given node.
     AfterExitDecorators(MastNodeId),
 }
 
-impl Continuation {
+impl<F> Continuation<F> {
     /// Returns true if executing this continuation increments the processor clock, and false
     /// otherwise.
     pub fn increments_clk(&self) -> bool {
@@ -96,12 +98,18 @@ impl Continuation {
 /// This allows the processor to execute a program iteratively in a loop rather than recursively
 /// traversing the nodes. It also allows the processor to pass the state of execution to another
 /// processor for further processing, which is useful for parallel execution of MAST forests.
-#[derive(Debug, Default, Clone)]
-pub struct ContinuationStack {
-    stack: Vec<Continuation>,
+#[derive(Debug, Clone)]
+pub struct ContinuationStack<F> {
+    stack: Vec<Continuation<F>>,
 }
 
-impl ContinuationStack {
+impl<F> Default for ContinuationStack<F> {
+    fn default() -> Self {
+        Self { stack: Vec::new() }
+    }
+}
+
+impl<F> ContinuationStack<F> {
     /// Creates a new continuation stack for a program.
     ///
     /// # Arguments
@@ -117,7 +125,7 @@ impl ContinuationStack {
     // --------------------------------------------------------------------------------------------
 
     /// Pushes a continuation onto the continuation stack.
-    pub fn push_continuation(&mut self, continuation: Continuation) {
+    pub fn push_continuation(&mut self, continuation: Continuation<F>) {
         self.stack.push(continuation);
     }
 
@@ -125,7 +133,7 @@ impl ContinuationStack {
     ///
     /// # Arguments
     /// * `forest` - The MAST forest to enter
-    pub fn push_enter_forest(&mut self, forest: Arc<MastForest>) {
+    pub fn push_enter_forest(&mut self, forest: F) {
         self.stack.push(Continuation::EnterForest(forest));
     }
 
@@ -169,8 +177,14 @@ impl ContinuationStack {
 
     /// Pops the next continuation from the continuation stack, and returns it along with its
     /// associated MAST forest.
-    pub fn pop_continuation(&mut self) -> Option<Continuation> {
+    pub fn pop_continuation(&mut self) -> Option<Continuation<F>> {
         self.stack.pop()
+    }
+
+    /// Consumes this stack and returns its continuations in bottom-to-top order (i.e. the order in
+    /// which they were originally pushed).
+    pub fn into_inner(self) -> Vec<Continuation<F>> {
+        self.stack
     }
 
     // PUBLIC ACCESSORS
@@ -186,7 +200,7 @@ impl ContinuationStack {
     /// Note that more than one continuation may execute in the same clock cycle. To get all
     /// continuations that will execute in the next clock cycle, use
     /// [`Self::iter_continuations_for_next_clock`].
-    pub fn peek_continuation(&self) -> Option<&Continuation> {
+    pub fn peek_continuation(&self) -> Option<&Continuation<F>> {
         self.stack.last()
     }
 
@@ -201,7 +215,7 @@ impl ContinuationStack {
     /// stack. This is currently the case, and is a reasonable invariant to maintain, as
     /// continuations that don't increment the clock can be expected to be simple (e.g. run some
     /// decorators, or enter a new mast forest).
-    pub fn iter_continuations_for_next_clock(&self) -> impl Iterator<Item = &Continuation> {
+    pub fn iter_continuations_for_next_clock(&self) -> impl Iterator<Item = &Continuation<F>> {
         let mut found_incrementing_cont = false;
 
         self.stack.iter().rev().take_while(move |continuation| {
@@ -225,17 +239,21 @@ impl ContinuationStack {
 
 #[cfg(test)]
 mod tests {
+    use alloc::sync::Arc;
+
+    use miden_core::mast::MastForest;
+
     use super::*;
 
     #[test]
     fn get_next_clock_cycle_increment_empty_stack() {
-        let stack = ContinuationStack::default();
+        let stack: ContinuationStack<Arc<MastForest>> = ContinuationStack::default();
         assert!(stack.iter_continuations_for_next_clock().next().is_none());
     }
 
     #[test]
     fn get_next_clock_cycle_increment_ends_with_incrementing() {
-        let mut stack = ContinuationStack::default();
+        let mut stack: ContinuationStack<Arc<MastForest>> = ContinuationStack::default();
         // Push a continuation that increments the clock
         stack.push_continuation(Continuation::StartNode(MastNodeId::new_unchecked(0)));
 
@@ -246,7 +264,7 @@ mod tests {
 
     #[test]
     fn get_next_clock_cycle_increment_non_incrementing_after_incrementing() {
-        let mut stack = ContinuationStack::default();
+        let mut stack: ContinuationStack<Arc<MastForest>> = ContinuationStack::default();
         // Push an incrementing continuation first (bottom of stack)
         stack.push_continuation(Continuation::StartNode(MastNodeId::new_unchecked(0)));
         // Push a non-incrementing continuation on top
@@ -262,7 +280,7 @@ mod tests {
 
     #[test]
     fn get_next_clock_cycle_increment_two_non_incrementing_after_incrementing() {
-        let mut stack = ContinuationStack::default();
+        let mut stack: ContinuationStack<Arc<MastForest>> = ContinuationStack::default();
         // Push an incrementing continuation first (bottom of stack)
         stack.push_continuation(Continuation::StartNode(MastNodeId::new_unchecked(0)));
         // Push two non-incrementing continuations on top

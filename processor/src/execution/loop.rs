@@ -1,12 +1,12 @@
-use alloc::sync::Arc;
 use core::ops::ControlFlow;
 
 use crate::{
     BaseHost, BreakReason, MapExecErr, ONE, Stopper, ZERO,
     continuation_stack::Continuation,
     execution::{ExecutionState, finalize_clock_cycle, finalize_clock_cycle_with_continuation},
-    mast::{LoopNode, MastForest, MastNodeId},
+    mast::{ExecutableMastForest, LoopNode, MastNodeId},
     operation::OperationError,
+    option_map_break_reason,
     processor::{Processor, StackInterface},
     tracer::Tracer,
 };
@@ -16,17 +16,18 @@ use crate::{
 
 /// Executes a Loop node from the start.
 #[inline(always)]
-pub(super) fn start_loop_node<P, H, S, T>(
-    state: &mut ExecutionState<'_, P, H, S, T>,
+pub(super) fn start_loop_node<P, H, S, T, F>(
+    state: &mut ExecutionState<'_, P, H, S, T, F>,
     loop_node: &LoopNode,
     current_node_id: MastNodeId,
-    current_forest: &Arc<MastForest>,
-) -> ControlFlow<BreakReason>
+    current_forest: &F,
+) -> ControlFlow<BreakReason<F>>
 where
     P: Processor,
     H: BaseHost,
-    S: Stopper<Processor = P>,
-    T: Tracer<Processor = P>,
+    S: Stopper<Processor = P, Forest = F>,
+    T: Tracer<Processor = P, Forest = F>,
+    F: ExecutableMastForest + Clone,
 {
     state.tracer.start_clock_cycle(
         state.processor,
@@ -106,17 +107,18 @@ where
 /// `loop_was_entered` is true), or when the loop condition was found to be ZERO at the start of
 /// the loop (in which case `loop_was_entered` is false).
 #[inline(always)]
-pub(super) fn finish_loop_node<P, H, S, T>(
-    state: &mut ExecutionState<'_, P, H, S, T>,
+pub(super) fn finish_loop_node<P, H, S, T, F>(
+    state: &mut ExecutionState<'_, P, H, S, T, F>,
     loop_was_entered: bool,
     current_node_id: MastNodeId,
-    current_forest: &Arc<MastForest>,
-) -> ControlFlow<BreakReason>
+    current_forest: &F,
+) -> ControlFlow<BreakReason<F>>
 where
     P: Processor,
     H: BaseHost,
-    S: Stopper<Processor = P>,
-    T: Tracer<Processor = P>,
+    S: Stopper<Processor = P, Forest = F>,
+    T: Tracer<Processor = P, Forest = F>,
+    F: ExecutableMastForest + Clone,
 {
     // This happens after loop body execution or when the loop condition was ZERO at the start.
     // Check condition again to see if we should continue looping. If the loop was never entered, we
@@ -126,7 +128,11 @@ where
     } else {
         ZERO
     };
-    let loop_node = current_forest[current_node_id].unwrap_loop();
+    let loop_node = option_map_break_reason(
+        current_forest.get_node_by_id(current_node_id),
+        "loop node not found in current forest",
+    )?
+    .unwrap_loop();
 
     if condition == ONE {
         // Start the clock cycle corresponding to the REPEAT operation, before re-entering the loop

@@ -4,7 +4,7 @@ use alloc::vec::Vec;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    mast::{DecoratorId, MastNodeId},
+    mast::{DecoratorId, ExecutableMastForest, MastNodeId},
     operations::DecoratorList,
 };
 
@@ -53,18 +53,24 @@ impl DecoratorStore {
     }
 
     /// Get the before_enter decorators, borrowing from the forest if linked
-    pub fn before_enter<'a>(&'a self, forest: &'a crate::mast::MastForest) -> &'a [DecoratorId] {
+    pub fn before_enter<'a, F>(&'a self, forest: &'a F) -> &'a [DecoratorId]
+    where
+        F: ExecutableMastForest + ?Sized,
+    {
         match self {
             DecoratorStore::Owned { before_enter, .. } => before_enter,
-            DecoratorStore::Linked { id } => forest.before_enter_decorators(*id),
+            DecoratorStore::Linked { id } => forest.linked_before_enter_decorators(*id),
         }
     }
 
     /// Get the after_exit decorators, borrowing from the forest if linked
-    pub fn after_exit<'a>(&'a self, forest: &'a crate::mast::MastForest) -> &'a [DecoratorId] {
+    pub fn after_exit<'a, F>(&'a self, forest: &'a F) -> &'a [DecoratorId]
+    where
+        F: ExecutableMastForest + ?Sized,
+    {
         match self {
             DecoratorStore::Owned { after_exit, .. } => after_exit,
-            DecoratorStore::Linked { id } => forest.after_exit_decorators(*id),
+            DecoratorStore::Linked { id } => forest.linked_after_exit_decorators(*id),
         }
     }
 
