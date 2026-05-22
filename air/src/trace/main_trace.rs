@@ -157,9 +157,8 @@ impl MainTrace {
     /// applies the documented last-row-replicate projection.
     #[inline]
     pub fn core_row(&self, i: RowIndex) -> &CoreCols<Felt> {
-        let r = i.as_usize();
-        let row = &self.storage.core_rm.values[r * NUM_CORE_COLS..(r + 1) * NUM_CORE_COLS];
-        row.borrow()
+        let (rows, _) = self.storage.core_rm.values.as_chunks::<NUM_CORE_COLS>();
+        rows[i.as_usize()].as_slice().borrow()
     }
 
     /// Returns the stored core trace row for `i`, or the final core row if `i` is past the
@@ -179,9 +178,8 @@ impl MainTrace {
         assert!(r < self.num_rows(), "row index past the unified trace height");
         let core_h = self.storage.core_rm.height();
         let row_idx = r.min(core_h - 1);
-        let row =
-            &self.storage.core_rm.values[row_idx * NUM_CORE_COLS..(row_idx + 1) * NUM_CORE_COLS];
-        row.borrow()
+        let (rows, _) = self.storage.core_rm.values.as_chunks::<NUM_CORE_COLS>();
+        rows[row_idx].as_slice().borrow()
     }
 
     /// Returns the stored chiplets trace row at index `i`.
@@ -197,10 +195,8 @@ impl MainTrace {
     /// trace must guard against rows where the chiplets trace is shorter than the core.
     #[inline]
     pub fn chiplet_cols(&self, i: RowIndex) -> &ChipletCols<Felt> {
-        let r = i.as_usize();
-        let row =
-            &self.storage.chiplets_rm.values[r * NUM_CHIPLETS_COLS..(r + 1) * NUM_CHIPLETS_COLS];
-        row.borrow()
+        let (rows, _) = self.storage.chiplets_rm.values.as_chunks::<NUM_CHIPLETS_COLS>();
+        rows[i.as_usize()].as_slice().borrow()
     }
 
     /// Writes the unified row `row` into `dst` (`dst.len()` must be [`TRACE_WIDTH`]).
@@ -217,18 +213,20 @@ impl MainTrace {
         let TraceStorage { core_rm, chiplets_rm } = &self.storage;
 
         let core_h = core_rm.height();
+        let (core_rows, _) = core_rm.values.as_chunks::<NCC>();
         if row < core_h {
-            dst[..NCC].copy_from_slice(&core_rm.values[row * NCC..(row + 1) * NCC]);
+            dst[..NCC].copy_from_slice(&core_rows[row]);
         } else {
             let last = core_h - 1;
-            dst[..NCC].copy_from_slice(&core_rm.values[last * NCC..(last + 1) * NCC]);
+            dst[..NCC].copy_from_slice(&core_rows[last]);
             // `clk` (column 0) stays strictly monotone across the projection.
             dst[0] = Felt::from_u32(row as u32);
         }
 
         let chip_h = chiplets_rm.height();
         if row < chip_h {
-            dst[NCC..NCC + CW].copy_from_slice(&chiplets_rm.values[row * CW..(row + 1) * CW]);
+            let (chip_rows, _) = chiplets_rm.values.as_chunks::<CW>();
+            dst[NCC..NCC + CW].copy_from_slice(&chip_rows[row]);
         } else {
             dst[NCC..NCC + CW].fill(ZERO);
         }
