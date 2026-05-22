@@ -830,7 +830,6 @@ dependencies = [
 name = "miden-core"
 version = "0.24.0"
 dependencies = [
- "blake3",
  "derive_more",
  "log",
  "miden-crypto",
