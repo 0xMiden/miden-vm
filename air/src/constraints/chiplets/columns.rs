@@ -1,7 +1,10 @@
 //! Column structs for all chiplet sub-components and periodic columns.
 
 use alloc::{vec, vec::Vec};
-use core::{borrow::Borrow, mem::size_of};
+use core::{
+    borrow::{Borrow, BorrowMut},
+    mem::size_of,
+};
 
 use miden_core::{Felt, WORD_SIZE, chiplets::hasher::Hasher, field::PrimeCharacteristicRing};
 
@@ -14,11 +17,27 @@ use crate::trace::chiplets::{
 // HELPERS
 // ================================================================================================
 
-/// Zero-copy cast from a slice to a `#[repr(C)]` chiplet column struct.
-pub fn borrow_chiplet<T, S>(slice: &[T]) -> &S {
-    let (prefix, cols, suffix) = unsafe { slice.align_to::<S>() };
-    debug_assert!(prefix.is_empty() && suffix.is_empty() && cols.len() == 1);
-    &cols[0]
+/// Generates `Borrow<$cols<T>> for [T]` and the mutable counterpart for a chiplet column
+/// struct. The slice length must equal `size_of::<$cols<u8>>()` cells.
+macro_rules! impl_borrow_for_chiplet_cols {
+    ($cols:ident) => {
+        impl<T> Borrow<$cols<T>> for [T] {
+            fn borrow(&self) -> &$cols<T> {
+                debug_assert_eq!(self.len(), size_of::<$cols<u8>>());
+                let (prefix, cols, suffix) = unsafe { self.align_to::<$cols<T>>() };
+                debug_assert!(prefix.is_empty() && suffix.is_empty() && cols.len() == 1);
+                &cols[0]
+            }
+        }
+        impl<T> BorrowMut<$cols<T>> for [T] {
+            fn borrow_mut(&mut self) -> &mut $cols<T> {
+                debug_assert_eq!(self.len(), size_of::<$cols<u8>>());
+                let (prefix, cols, suffix) = unsafe { self.align_to_mut::<$cols<T>>() };
+                debug_assert!(prefix.is_empty() && suffix.is_empty() && cols.len() == 1);
+                &mut cols[0]
+            }
+        }
+    };
 }
 
 // PERMUTATION COLUMNS
@@ -321,12 +340,22 @@ pub struct AceCols<T> {
 impl<T> AceCols<T> {
     /// Returns a READ-mode overlay of the mode-dependent columns.
     pub fn read(&self) -> &AceReadCols<T> {
-        borrow_chiplet(&self.mode)
+        self.mode.as_slice().borrow()
     }
 
     /// Returns an EVAL-mode overlay of the mode-dependent columns.
     pub fn eval(&self) -> &AceEvalCols<T> {
-        borrow_chiplet(&self.mode)
+        self.mode.as_slice().borrow()
+    }
+
+    /// Returns a mutable READ-mode overlay of the mode-dependent columns.
+    pub fn read_mut(&mut self) -> &mut AceReadCols<T> {
+        self.mode.as_mut_slice().borrow_mut()
+    }
+
+    /// Returns a mutable EVAL-mode overlay of the mode-dependent columns.
+    pub fn eval_mut(&mut self) -> &mut AceEvalCols<T> {
+        self.mode.as_mut_slice().borrow_mut()
     }
 }
 
@@ -677,6 +706,22 @@ const _: () = {
     assert!(size_of::<PermutationCols<u8>>() == 19);
     assert!(size_of::<ControllerCols<u8>>() == 19);
 };
+
+// BORROW IMPLS
+// ================================================================================================
+//
+// Each chiplet column struct can be borrowed zero-copy from a `[T]` slice of the matching
+// length. Mirrors the `Borrow<CoreCols<T>>` / `Borrow<ChipletCols<T>>` impls on the parent
+// `crate::constraints::columns` module.
+
+impl_borrow_for_chiplet_cols!(PermutationCols);
+impl_borrow_for_chiplet_cols!(ControllerCols);
+impl_borrow_for_chiplet_cols!(BitwiseCols);
+impl_borrow_for_chiplet_cols!(MemoryCols);
+impl_borrow_for_chiplet_cols!(AceCols);
+impl_borrow_for_chiplet_cols!(AceReadCols);
+impl_borrow_for_chiplet_cols!(AceEvalCols);
+impl_borrow_for_chiplet_cols!(KernelRomCols);
 
 #[cfg(test)]
 mod tests {

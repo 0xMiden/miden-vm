@@ -1,16 +1,12 @@
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
+use core::borrow::{Borrow, BorrowMut};
 
 use itertools::Itertools;
 use miden_air::{
-    Felt,
+    CoreCols, Felt, StackCols, SystemCols,
     trace::{
-        CLK_COL_IDX, DECODER_TRACE_OFFSET, DECODER_TRACE_WIDTH, MIN_TRACE_LEN, MainTrace,
-        RANGE_CHECK_TRACE_WIDTH, RowIndex, STACK_TRACE_OFFSET, STACK_TRACE_WIDTH, SYS_TRACE_WIDTH,
-        decoder::{
-            HASHER_STATE_OFFSET, NUM_HASHER_COLUMNS, NUM_OP_BITS, OP_BITS_EXTRA_COLS_OFFSET,
-            OP_BITS_OFFSET,
-        },
-        stack::{B0_COL_IDX, B1_COL_IDX, H0_COL_IDX, STACK_TOP_OFFSET},
+        DECODER_TRACE_WIDTH, MIN_TRACE_LEN, MainTrace, RANGE_CHECK_TRACE_WIDTH, RowIndex,
+        STACK_TRACE_WIDTH, SYS_TRACE_WIDTH, decoder::NUM_OP_BITS,
     },
 };
 use miden_core::{
@@ -252,7 +248,9 @@ fn generate_core_trace_row_major(
 
     let writers: Vec<RowMajorTraceWriter<'_, Felt>> = core_trace_data
         .chunks_exact_mut(fragment_size * CORE_STORAGE_WIDTH)
-        .map(|chunk| RowMajorTraceWriter::with_stride(chunk, CORE_TRACE_WIDTH, CORE_STORAGE_WIDTH))
+        .map(|chunk| {
+            RowMajorTraceWriter::with_stride(chunk, CORE_STORAGE_WIDTH, CORE_STORAGE_WIDTH)
+        })
         .collect();
 
     // Build the core trace fragments in parallel
@@ -304,17 +302,21 @@ fn generate_core_trace_row_major(
     // This must be done after fixup_stack_and_system_rows since that function overwrites the first
     // row of each fragment with non-inverted values.
     {
-        let h0_col_offset = STACK_TRACE_OFFSET + H0_COL_IDX;
         let w = CORE_STORAGE_WIDTH;
         core_trace_data[..total_core_trace_rows * w]
             .par_chunks_mut(fragment_size * w)
             .for_each(|fragment_chunk| {
                 let num_rows = fragment_chunk.len() / w;
-                let mut h0_vals: Vec<Felt> =
-                    (0..num_rows).map(|r| fragment_chunk[r * w + h0_col_offset]).collect();
+                let mut h0_vals: Vec<Felt> = (0..num_rows)
+                    .map(|r| {
+                        let row: &CoreCols<Felt> = fragment_chunk[r * w..(r + 1) * w].borrow();
+                        row.stack.h0
+                    })
+                    .collect();
                 batch_inversion_allow_zeros(&mut h0_vals);
                 for (r, &val) in h0_vals.iter().enumerate() {
-                    fragment_chunk[r * w + h0_col_offset] = val;
+                    let row: &mut CoreCols<Felt> = fragment_chunk[r * w..(r + 1) * w].borrow_mut();
+                    row.stack.h0 = val;
                 }
             });
     }
@@ -345,24 +347,24 @@ fn generate_core_trace_row_major(
 fn fixup_stack_and_system_rows(
     core_trace_data: &mut [Felt],
     fragment_size: usize,
-    stack_rows: &[[Felt; STACK_TRACE_WIDTH]],
-    system_rows: &[[Felt; SYS_TRACE_WIDTH]],
+    stack_rows: &[StackCols<Felt>],
+    system_rows: &[SystemCols<Felt>],
     first_stack_top: &[Felt],
 ) {
     const MIN_STACK_DEPTH_FELT: Felt = Felt::new_unchecked(MIN_STACK_DEPTH as u64);
     let w = CORE_STORAGE_WIDTH;
 
     {
-        let row = &mut core_trace_data[..w];
+        let row: &mut CoreCols<Felt> = core_trace_data[..w].borrow_mut();
 
         // Stack order in the trace is reversed vs `first_stack_top`.
         for (stack_col_idx, &value) in first_stack_top.iter().rev().enumerate() {
-            row[STACK_TRACE_OFFSET + STACK_TOP_OFFSET + stack_col_idx] = value;
+            row.stack.top[stack_col_idx] = value;
         }
 
-        row[STACK_TRACE_OFFSET + B0_COL_IDX] = MIN_STACK_DEPTH_FELT;
-        row[STACK_TRACE_OFFSET + B1_COL_IDX] = ZERO;
-        row[STACK_TRACE_OFFSET + H0_COL_IDX] = ZERO;
+        row.stack.b0 = MIN_STACK_DEPTH_FELT;
+        row.stack.b1 = ZERO;
+        row.stack.h0 = ZERO;
     }
 
     let total_rows = core_trace_data.len() / w;
@@ -371,13 +373,9 @@ fn fixup_stack_and_system_rows(
     for frag_idx in 1..num_fragments {
         let row_idx = frag_idx * fragment_size;
         let row_start = row_idx * w;
-        let system_row = &system_rows[frag_idx - 1];
-        let stack_row = &stack_rows[frag_idx - 1];
-
-        core_trace_data[row_start..row_start + SYS_TRACE_WIDTH].copy_from_slice(system_row);
-
-        let stack_start = row_start + STACK_TRACE_OFFSET;
-        core_trace_data[stack_start..stack_start + STACK_TRACE_WIDTH].copy_from_slice(stack_row);
+        let row: &mut CoreCols<Felt> = core_trace_data[row_start..row_start + w].borrow_mut();
+        row.system = system_rows[frag_idx - 1].clone();
+        row.stack = stack_rows[frag_idx - 1].clone();
     }
 }
 
@@ -388,46 +386,47 @@ fn fixup_stack_and_system_rows(
 fn push_halt_opcode_row(
     core_trace_data: &mut Vec<Felt>,
     num_rows_before: usize,
-    last_system_state: &[Felt; SYS_TRACE_WIDTH],
-    last_stack_state: &[Felt; STACK_TRACE_WIDTH],
+    last_system_state: &SystemCols<Felt>,
+    last_stack_state: &StackCols<Felt>,
 ) {
     let w = CORE_STORAGE_WIDTH;
-    let mut row = [ZERO; CORE_STORAGE_WIDTH];
+    let mut row_data = [ZERO; CORE_STORAGE_WIDTH];
 
-    // system columns
-    // ---------------------------------------------------------------------------------------
-    row[..SYS_TRACE_WIDTH].copy_from_slice(last_system_state);
-
-    // stack columns
-    // ---------------------------------------------------------------------------------------
-    row[STACK_TRACE_OFFSET..STACK_TRACE_OFFSET + STACK_TRACE_WIDTH]
-        .copy_from_slice(last_stack_state);
-
-    // Pad op_bits columns with HALT opcode bits
-    let halt_opcode = opcodes::HALT;
-    for bit_idx in 0..NUM_OP_BITS {
-        row[DECODER_TRACE_OFFSET + OP_BITS_OFFSET + bit_idx] =
-            Felt::from_u8((halt_opcode >> bit_idx) & 1);
-    }
-
-    // Pad hasher state columns (8 columns)
-    // - First 4 columns: copy the last value (to propagate program hash)
-    // - Remaining 4 columns: fill with ZEROs
-    if num_rows_before > 0 {
+    // Read the previous row's hasher state first half before we take a mutable borrow on
+    // `row_data` (propagates the program hash into the HALT padding).
+    let prev_hasher_state_first_half: [Felt; 4] = if num_rows_before > 0 {
         let last_row_start = (num_rows_before - 1) * w;
-        // For first 4 hasher columns, copy the last value to propagate program hash
-        for hasher_col_idx in 0..4 {
-            let col_idx = DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + hasher_col_idx;
-            row[col_idx] = core_trace_data[last_row_start + col_idx];
+        let prev: &CoreCols<Felt> = core_trace_data[last_row_start..last_row_start + w].borrow();
+        let hs = &prev.decoder.hasher_state;
+        [hs[0], hs[1], hs[2], hs[3]]
+    } else {
+        [ZERO; 4]
+    };
+
+    {
+        let row: &mut CoreCols<Felt> = row_data.as_mut_slice().borrow_mut();
+
+        row.system = last_system_state.clone();
+        row.stack = last_stack_state.clone();
+
+        // Pad op_bits columns with HALT opcode bits
+        let halt_opcode = opcodes::HALT;
+        for bit_idx in 0..NUM_OP_BITS {
+            row.decoder.op_bits[bit_idx] = Felt::from_u8((halt_opcode >> bit_idx) & 1);
         }
+
+        // Pad hasher state columns (8 columns)
+        // - First 4 columns: copy the last value (to propagate program hash)
+        // - Remaining 4 columns: fill with ZEROs
+        row.decoder.hasher_state[..4].copy_from_slice(&prev_hasher_state_first_half);
+
+        // Pad op_bit_extra columns (2 columns)
+        // - First column: do nothing (pre-filled with ZEROs, HALT doesn't use this)
+        // - Second column: fill with ONEs (product of two most significant HALT bits, both are 1)
+        row.decoder.extra[1] = ONE;
     }
 
-    // Pad op_bit_extra columns (2 columns)
-    // - First column: do nothing (pre-filled with ZEROs, HALT doesn't use this)
-    // - Second column: fill with ONEs (product of two most significant HALT bits, both are 1)
-    row[DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET + 1] = ONE;
-
-    core_trace_data.extend_from_slice(&row);
+    core_trace_data.extend_from_slice(&row_data);
 }
 
 /// Initializes the ranger checker from the recorded range checks during execution and returns it.
@@ -631,45 +630,42 @@ fn pad_core_row_major(core_trace_data: &mut Vec<Felt>, main_trace_len: usize) {
     }
     let last_row_start = (total_program_rows - 1) * w;
 
-    // Decoder columns
-    // ------------------------
+    // Safety: per our documented safety guarantees, we know that `total_program_rows > 0`,
+    // and row `total_program_rows - 1` is initialized.
+    let (last_hasher_first_half, last_stack): ([Felt; 4], StackCols<Felt>) = {
+        let last: &CoreCols<Felt> = core_trace_data[last_row_start..last_row_start + w].borrow();
+        let hs = &last.decoder.hasher_state;
+        let last_hasher: [Felt; 4] = [hs[0], hs[1], hs[2], hs[3]];
+        (last_hasher, last.stack.clone())
+    };
 
-    let mut template = [ZERO; CORE_STORAGE_WIDTH];
-    // Pad op_bits columns with HALT opcode bits
-    let halt_opcode = opcodes::HALT;
-    for i in 0..NUM_OP_BITS {
-        let bit_value = Felt::from_u8((halt_opcode >> i) & 1);
-        template[DECODER_TRACE_OFFSET + OP_BITS_OFFSET + i] = bit_value;
-    }
-    // Pad hasher state columns (8 columns)
-    // - First 4 columns: copy the last value (to propagate program hash)
-    // - Remaining 4 columns: fill with ZEROs
-    for i in 0..NUM_HASHER_COLUMNS {
-        let col_idx = DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + i;
-        template[col_idx] = if i < 4 {
-            // For first 4 hasher columns, copy the last value to propagate program hash
-            // Safety: per our documented safety guarantees, we know that `total_program_rows > 0`,
-            // and row `total_program_rows - 1` is initialized.
-            core_trace_data[last_row_start + col_idx]
-        } else {
-            ZERO
-        };
-    }
+    let mut template_data = [ZERO; CORE_STORAGE_WIDTH];
+    {
+        let template: &mut CoreCols<Felt> = template_data.as_mut_slice().borrow_mut();
 
-    // Pad op_bit_extra columns (2 columns)
-    // - First column: do nothing (filled with ZEROs, HALT doesn't use this)
-    // - Second column: fill with ONEs (product of two most significant HALT bits, both are 1)
-    template[DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET + 1] = ONE;
+        // Decoder columns
+        // ------------------------
 
-    // Stack columns
-    // ------------------------
+        // Pad op_bits columns with HALT opcode bits
+        let halt_opcode = opcodes::HALT;
+        for i in 0..NUM_OP_BITS {
+            template.decoder.op_bits[i] = Felt::from_u8((halt_opcode >> i) & 1);
+        }
+        // Pad hasher state columns (8 columns)
+        // - First 4 columns: copy the last value (to propagate program hash)
+        // - Remaining 4 columns: fill with ZEROs
+        template.decoder.hasher_state[..4].copy_from_slice(&last_hasher_first_half);
 
-    // Pad stack columns with the last value in each column (analogous to Stack::into_trace())
-    for i in 0..STACK_TRACE_WIDTH {
-        let col_idx = STACK_TRACE_OFFSET + i;
-        // Safety: per our documented safety guarantees, we know that `total_program_rows > 0`,
-        // and row `total_program_rows - 1` is initialized.
-        template[col_idx] = core_trace_data[last_row_start + col_idx];
+        // Pad op_bit_extra columns (2 columns)
+        // - First column: do nothing (filled with ZEROs, HALT doesn't use this)
+        // - Second column: fill with ONEs (product of two most significant HALT bits, both are 1)
+        template.decoder.extra[1] = ONE;
+
+        // Stack columns
+        // ------------------------
+
+        // Pad stack columns with the last value in each column (analogous to Stack::into_trace())
+        template.stack = last_stack;
     }
 
     // System columns
@@ -682,9 +678,10 @@ fn pad_core_row_major(core_trace_data: &mut Vec<Felt>, main_trace_len: usize) {
     core_trace_data[pad_start..]
         .par_chunks_mut(w)
         .enumerate()
-        .for_each(|(idx, row)| {
-            row.copy_from_slice(&template);
-            row[CLK_COL_IDX] = Felt::from_u32((total_program_rows + idx) as u32);
+        .for_each(|(idx, row_buf)| {
+            row_buf.copy_from_slice(&template_data);
+            let row: &mut CoreCols<Felt> = row_buf.borrow_mut();
+            row.system.clk = Felt::from_u32((total_program_rows + idx) as u32);
         });
 }
 

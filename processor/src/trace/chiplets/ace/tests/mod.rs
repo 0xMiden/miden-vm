@@ -2,14 +2,23 @@ use alloc::vec::Vec;
 use std::collections::HashMap;
 
 use encoder::EncodedCircuit;
-use miden_air::trace::{
-    RowIndex,
-    chiplets::ace::{
-        ACE_CHIPLET_NUM_COLS, EVAL_OP_IDX, ID_0_IDX, ID_1_IDX, ID_2_IDX, M_0_IDX, M_1_IDX,
-        SELECTOR_BLOCK_IDX, SELECTOR_START_IDX, V_0_0_IDX, V_0_1_IDX, V_1_0_IDX, V_1_1_IDX,
-        V_2_0_IDX, V_2_1_IDX,
-    },
-};
+use miden_air::trace::{RowIndex, chiplets::ace::ACE_CHIPLET_NUM_COLS};
+
+// Chiplet-local column indices used by the ACE trace tests.
+const SELECTOR_START_IDX: usize = 0;
+const SELECTOR_BLOCK_IDX: usize = 1;
+const EVAL_OP_IDX: usize = 5;
+const ID_0_IDX: usize = 6;
+const V_0_0_IDX: usize = 7;
+const V_0_1_IDX: usize = 8;
+const ID_1_IDX: usize = 9;
+const V_1_0_IDX: usize = 10;
+const V_1_1_IDX: usize = 11;
+const ID_2_IDX: usize = 12;
+const V_2_0_IDX: usize = 13;
+const V_2_1_IDX: usize = 14;
+const M_1_IDX: usize = 14;
+const M_0_IDX: usize = 15;
 use miden_core::{
     Felt, WORD_SIZE, Word, ZERO,
     field::{PrimeCharacteristicRing, QuadFelt},
