@@ -332,8 +332,7 @@ impl Memory {
                     let clk = memory_access.clk();
                     let value = memory_access.word();
 
-                    let (mem_slice, aux_slice) =
-                        out_rows[row].split_at_mut(MEMORY_TRACE_WIDTH - 2);
+                    let (mem_slice, aux_slice) = out_rows[row].split_at_mut(MEMORY_TRACE_WIDTH - 2);
                     let cols: &mut MemoryCols<Felt> = mem_slice.borrow_mut();
 
                     cols.is_read = match memory_access.operation() {
@@ -399,8 +398,7 @@ impl Memory {
 
         batch_inversion_allow_zeros(&mut deltas);
         for (r, &inv) in deltas.iter().enumerate() {
-            let cols: &mut MemoryCols<Felt> =
-                out_rows[r][..MEMORY_TRACE_WIDTH - 2].borrow_mut();
+            let cols: &mut MemoryCols<Felt> = out_rows[r][..MEMORY_TRACE_WIDTH - 2].borrow_mut();
             cols.d_inv = inv;
         }
 

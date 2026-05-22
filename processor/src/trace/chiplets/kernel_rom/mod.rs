@@ -1,9 +1,9 @@
-use alloc::collections::BTreeMap;
+use alloc::{collections::BTreeMap, vec};
 
-use miden_air::trace::{RowIndex, chiplets::KERNEL_ROM_TRACE_WIDTH};
+use miden_air::trace::chiplets::KERNEL_ROM_TRACE_WIDTH;
 use miden_core::field::PrimeCharacteristicRing;
 
-use super::{ChipletTraceFragment, Felt, Kernel, Word as Digest};
+use super::{ChipletTraceFragment, Felt, Kernel, Word as Digest, ZERO};
 use crate::errors::OperationError;
 
 #[cfg(test)]
@@ -94,16 +94,17 @@ impl KernelRom {
             trace.width(),
             "inconsistent trace fragment width"
         );
-        let mut row = RowIndex::from(0);
-        for access_info in self.access_map.values() {
-            let multiplicity = Felt::from_u64(access_info.num_accesses as u64);
-            trace.set(row, 0, multiplicity);
-            trace.set(row, 1, access_info.proc_hash[0]);
-            trace.set(row, 2, access_info.proc_hash[1]);
-            trace.set(row, 3, access_info.proc_hash[2]);
-            trace.set(row, 4, access_info.proc_hash[3]);
-            row += 1_u32;
+
+        let mut values = vec![ZERO; self.access_map.len() * KERNEL_ROM_TRACE_WIDTH];
+        let (rows, _) = values.as_chunks_mut::<KERNEL_ROM_TRACE_WIDTH>();
+        for (row, access_info) in rows.iter_mut().zip(self.access_map.values()) {
+            row[0] = Felt::from_u64(access_info.num_accesses as u64);
+            row[1] = access_info.proc_hash[0];
+            row[2] = access_info.proc_hash[1];
+            row[3] = access_info.proc_hash[2];
+            row[4] = access_info.proc_hash[3];
         }
+        trace.copy_rows_from(&values);
     }
 
     // PUBLIC ACCESSORS

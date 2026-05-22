@@ -4,7 +4,7 @@ use alloc::vec::Vec;
 use miden_air::trace::MIN_TRACE_LEN;
 
 use super::chiplets::Chiplets;
-use crate::{Felt, RowIndex};
+use crate::{Felt, ONE};
 #[cfg(test)]
 use crate::{operation::Operation, utils::ToElements};
 
@@ -53,8 +53,8 @@ impl<'a, E: Copy> RowMajorTraceWriter<'a, E> {
 /// A writable, row-major view over one chiplet's region of the chiplets trace.
 ///
 /// A chiplet occupies a contiguous band of rows and a contiguous band of columns
-/// `[col_start, col_start + num_cols)`, so chiplet-local column `c` maps to global column
-/// `col_start + c`. Writes land directly in that band of the shared row-major buffer.
+/// `[col_start, col_start + num_cols)`. [`Self::copy_rows_from`] also writes the per-row
+/// `prefix_one_cols` selectors and (when there's room) the trailing `chip_clk` column.
 pub struct ChipletTraceFragment<'a> {
     /// Contiguous `num_rows * stride` row-major slice (this chiplet's rows).
     band: &'a mut [Felt],
@@ -62,20 +62,39 @@ pub struct ChipletTraceFragment<'a> {
     col_start: usize,
     num_rows: usize,
     num_cols: usize,
+    /// Global row offset of `band[0]` in the chiplets trace; used to compute `chip_clk`.
+    row_offset: usize,
+    /// Columns `< col_start` to set to ONE on every row in this band.
+    prefix_one_cols: &'static [usize],
 }
 
 impl<'a> ChipletTraceFragment<'a> {
-    /// Creates a row-major fragment over `band` (a contiguous `num_rows * stride` slice)
-    /// whose `num_cols` chiplet-local columns map to global columns
-    /// `[col_start, col_start + num_cols)`.
+    /// Bare fragment with no prefix selectors or `chip_clk`. For chiplet-level unit tests.
     pub fn row_major(
         band: &'a mut [Felt],
         stride: usize,
         col_start: usize,
         num_cols: usize,
     ) -> Self {
+        Self::with_overheads(band, stride, col_start, num_cols, 0, &[])
+    }
+
+    /// Adds the chiplets-trace overheads: per-row ONEs at `prefix_one_cols` and `chip_clk` at
+    /// column `stride - 1` (when there's room), using `row_offset` as `band[0]`'s global row.
+    pub fn with_overheads(
+        band: &'a mut [Felt],
+        stride: usize,
+        col_start: usize,
+        num_cols: usize,
+        row_offset: usize,
+        prefix_one_cols: &'static [usize],
+    ) -> Self {
         debug_assert_eq!(band.len() % stride, 0, "band length must be a multiple of stride");
         debug_assert!(col_start + num_cols <= stride, "column band overruns the row stride");
+        debug_assert!(
+            prefix_one_cols.iter().all(|&c| c < col_start),
+            "prefix_one_cols must lie before col_start",
+        );
         let num_rows = band.len() / stride;
         Self {
             band,
@@ -83,6 +102,8 @@ impl<'a> ChipletTraceFragment<'a> {
             col_start,
             num_rows,
             num_cols,
+            row_offset,
+            prefix_one_cols,
         }
     }
 
@@ -99,25 +120,33 @@ impl<'a> ChipletTraceFragment<'a> {
         self.num_rows
     }
 
+    /// Mutable access to columns `[0..col_start)` of `row`, for chiplets whose prefix
+    /// selectors vary per row (e.g. the hasher's `s_ctrl`).
+    pub fn prefix_mut(&mut self, row: usize) -> &mut [Felt] {
+        let row_start = row * self.stride;
+        &mut self.band[row_start..row_start + self.col_start]
+    }
+
     // DATA MUTATORS
     // --------------------------------------------------------------------------------------------
 
-    /// Updates a single cell in this fragment with provided value.
-    #[inline(always)]
-    pub fn set(&mut self, row_idx: RowIndex, col_idx: usize, value: Felt) {
-        assert!(col_idx < self.num_cols, "fragment column index out of bounds");
-        let row = row_idx.as_usize();
-        self.band[row * self.stride + self.col_start + col_idx] = value;
-    }
-
-    /// Copies a chiplet's row-major buffer (`num_cols` contiguous cells per row) into this
-    /// fragment's band, one contiguous row segment at a time.
+    /// Copies a chiplet's row-major buffer (`num_cols` cells per row) into this fragment's
+    /// band, fusing the per-row prefix-selector ONEs and trailing `chip_clk` when configured.
     pub fn copy_rows_from(&mut self, src: &[Felt]) {
         debug_assert_eq!(src.len(), self.num_rows * self.num_cols, "source buffer size mismatch");
+        let write_chip_clk = self.stride > self.col_start + self.num_cols;
+        let clk_col = self.stride - 1;
         for r in 0..self.num_rows {
-            let dst = r * self.stride + self.col_start;
-            self.band[dst..dst + self.num_cols]
+            let row_start = r * self.stride;
+            let row = &mut self.band[row_start..row_start + self.stride];
+            for &col in self.prefix_one_cols {
+                row[col] = ONE;
+            }
+            row[self.col_start..self.col_start + self.num_cols]
                 .copy_from_slice(&src[r * self.num_cols..(r + 1) * self.num_cols]);
+            if write_chip_clk {
+                row[clk_col] = Felt::from_u32((self.row_offset + r + 1) as u32);
+            }
         }
     }
 }

@@ -250,6 +250,22 @@ impl HasherTrace {
         debug_assert_eq!(row_idx, self.row_count);
 
         trace.copy_rows_from(&values);
+
+        // Write `s_ctrl = ONE` on controller/padding rows; perm rows stay ZERO.
+        // Skipped when the fragment has no prefix space.
+        let mut row_idx = 0usize;
+        for op in &self.ops {
+            let n = op.row_count();
+            if matches!(op, HasherOp::Controller { .. } | HasherOp::Padding { .. }) {
+                for i in 0..n {
+                    let prefix = trace.prefix_mut(row_idx + i);
+                    if let Some(s_ctrl) = prefix.first_mut() {
+                        *s_ctrl = ONE;
+                    }
+                }
+            }
+            row_idx += n;
+        }
     }
 }
 
@@ -303,8 +319,8 @@ fn write_permutation_cycle(
     Hasher::apply_matmul_external(&mut state);
 
     // Rows 1-3: ext2, ext3, ext4
-    for r in 1..=3 {
-        write_perm_row(&mut rows[r], &state, multiplicity, [ZERO; 3]);
+    for (r, row) in rows.iter_mut().enumerate().take(3 + 1).skip(1) {
+        write_perm_row(row, &state, multiplicity, [ZERO; 3]);
         Hasher::add_rc(&mut state, &Hasher::ARK_EXT_INITIAL[r]);
         Hasher::apply_sbox(&mut state);
         Hasher::apply_matmul_external(&mut state);
