@@ -133,3 +133,22 @@ fn bitwise_chiplet_bus_emits_per_request_row() {
 
     log.assert_contains(&exp);
 }
+
+/// Regression test for huitseeker's
+/// <https://github.com/0xMiden/miden-vm/pull/3177#discussion_r3284561750>: in the split-trace
+/// model the bitwise classifier must return `false` past the chiplets-AIR height. The bitwise
+/// active pattern is all-zero selectors (`s_ctrl=0, s_perm=0, s1=0`), which used to alias
+/// rows past the chiplets height under the unified-projection semantics.
+#[test]
+fn rows_past_chiplets_height_are_not_classified_as_bitwise() {
+    let trace = build_trace_from_ops(vec![Operation::Noop; 128], &[]);
+    let main = trace.main_trace();
+
+    for row in main.chiplets_height()..main.num_rows() {
+        let idx = RowIndex::from(row);
+        assert!(
+            !main.is_bitwise_row(idx),
+            "row {row} (past chiplets height) classified as bitwise",
+        );
+    }
+}

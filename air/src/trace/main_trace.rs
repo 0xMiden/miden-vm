@@ -246,7 +246,19 @@ impl MainTrace {
 
     /// Unified trace length: the max of the per-AIR Core and Chiplets heights.
     pub fn num_rows(&self) -> usize {
-        self.storage.core_rm.height().max(self.storage.chiplets_rm.height())
+        self.core_height().max(self.chiplets_height())
+    }
+
+    /// Returns the Core-AIR trace height.
+    #[inline]
+    pub fn core_height(&self) -> usize {
+        self.storage.core_rm.height()
+    }
+
+    /// Returns the Chiplets-AIR trace height.
+    #[inline]
+    pub fn chiplets_height(&self) -> usize {
+        self.storage.chiplets_rm.height()
     }
 
     pub fn last_program_row(&self) -> RowIndex {
@@ -501,49 +513,50 @@ impl MainTrace {
     // CHIPLETS COLUMNS
     // --------------------------------------------------------------------------------------------
 
-    /// Returns `ZERO` past the chiplets-AIR height to match the unified-projection
-    /// semantics of `MainTrace::get` — `is_*_row` accessors iterate the full
-    /// `num_rows()` and rely on chiplet columns reading `ZERO` outside the chiplets matrix.
-    #[inline]
-    fn chiplet_col_or_zero(&self, i: RowIndex, col: usize) -> Felt {
-        if i.as_usize() >= self.storage.chiplets_rm.height() {
-            return ZERO;
-        }
-        self.chiplet_cols(i).chiplets[col]
-    }
-
     /// Returns chiplet column number 0 at row i.
+    ///
+    /// # Panics
+    /// Panics if `i` is past the chiplets-AIR height. Callers iterating the unified trace
+    /// must guard via [`Self::chiplets_height`] or filter via [`Self::is_hash_row`] /
+    /// [`Self::is_bitwise_row`] / [`Self::is_memory_row`] / [`Self::is_ace_row`], which
+    /// short-circuit past the chiplets height.
     pub fn chiplet_selector_0(&self, i: RowIndex) -> Felt {
-        self.chiplet_col_or_zero(i, 0)
+        self.chiplet_cols(i).chiplets[0]
     }
 
-    /// Returns chiplet column number 1 at row i.
+    /// Returns chiplet column number 1 at row i. See [`Self::chiplet_selector_0`] for bounds.
     pub fn chiplet_selector_1(&self, i: RowIndex) -> Felt {
-        self.chiplet_col_or_zero(i, 1)
+        self.chiplet_cols(i).chiplets[1]
     }
 
-    /// Returns chiplet column number 2 at row i.
+    /// Returns chiplet column number 2 at row i. See [`Self::chiplet_selector_0`] for bounds.
     pub fn chiplet_selector_2(&self, i: RowIndex) -> Felt {
-        self.chiplet_col_or_zero(i, 2)
+        self.chiplet_cols(i).chiplets[2]
     }
 
-    /// Returns chiplet column number 3 at row i.
+    /// Returns chiplet column number 3 at row i. See [`Self::chiplet_selector_0`] for bounds.
     pub fn chiplet_selector_3(&self, i: RowIndex) -> Felt {
-        self.chiplet_col_or_zero(i, 3)
+        self.chiplet_cols(i).chiplets[3]
     }
 
-    /// Returns chiplet column number 4 at row i.
+    /// Returns chiplet column number 4 at row i. See [`Self::chiplet_selector_0`] for bounds.
     pub fn chiplet_selector_4(&self, i: RowIndex) -> Felt {
-        self.chiplet_col_or_zero(i, 4)
+        self.chiplet_cols(i).chiplets[4]
     }
 
-    /// Returns chiplet column number 5 at row i.
+    /// Returns chiplet column number 5 at row i. See [`Self::chiplet_selector_0`] for bounds.
     pub fn chiplet_selector_5(&self, i: RowIndex) -> Felt {
-        self.chiplet_col_or_zero(i, 5)
+        self.chiplet_cols(i).chiplets[5]
     }
 
     /// Returns `true` if a row is part of the hash chiplet (controller or permutation).
+    ///
+    /// Short-circuits to `false` past the chiplets-AIR height — rows past `chiplets_height()`
+    /// are not part of any chiplet by definition in the split-trace model.
     pub fn is_hash_row(&self, i: RowIndex) -> bool {
+        if i.as_usize() >= self.chiplets_height() {
+            return false;
+        }
         self.chiplet_selector_0(i) == ONE || self.chiplet_s_perm(i) == ONE
     }
 
@@ -576,13 +589,11 @@ impl MainTrace {
 
     /// Returns the hasher's s_perm column at row i (0=controller, 1=permutation segment).
     ///
-    /// Returns `ZERO` past the chiplets-AIR height to match the unified-projection
-    /// semantics of `MainTrace::get` — callers like `is_*_row` iterate the full
-    /// `num_rows()` and rely on selector columns reading `ZERO` outside the chiplets matrix.
+    /// # Panics
+    /// Panics if `i` is past the chiplets-AIR height. See [`Self::chiplet_selector_0`] for
+    /// the contract that the four `is_*_row` classifiers short-circuit past the chiplets
+    /// height, so they can be used as bound-aware filters.
     pub fn chiplet_s_perm(&self, i: RowIndex) -> Felt {
-        if i.as_usize() >= self.storage.chiplets_rm.height() {
-            return ZERO;
-        }
         self.chiplet_cols(i).s_perm
     }
 
@@ -598,7 +609,15 @@ impl MainTrace {
 
     /// Returns `true` if a row is part of the bitwise chiplet.
     /// Active when virtual s0=1 (s_ctrl=0, s_perm=0) and s1=0.
+    ///
+    /// Short-circuits to `false` past the chiplets-AIR height. Without this guard the
+    /// underlying selectors would still read past the chiplets matrix (in the previous
+    /// projection-based design), and the bitwise pattern (`s0=0, s_perm=0, s1=0`) would
+    /// collide with the all-zero projection — see [`Self::chiplet_selector_0`].
     pub fn is_bitwise_row(&self, i: RowIndex) -> bool {
+        if i.as_usize() >= self.chiplets_height() {
+            return false;
+        }
         self.chiplet_selector_0(i) == ZERO
             && self.chiplet_s_perm(i) == ZERO
             && self.chiplet_selector_1(i) == ZERO
@@ -621,7 +640,12 @@ impl MainTrace {
 
     /// Returns `true` if a row is part of the memory chiplet.
     /// Active when virtual s0=1 (s_ctrl=0, s_perm=0) and s1=1, s2=0.
+    ///
+    /// Short-circuits to `false` past the chiplets-AIR height; see [`Self::is_bitwise_row`].
     pub fn is_memory_row(&self, i: RowIndex) -> bool {
+        if i.as_usize() >= self.chiplets_height() {
+            return false;
+        }
         self.chiplet_selector_0(i) == ZERO
             && self.chiplet_s_perm(i) == ZERO
             && self.chiplet_selector_1(i) == ONE
@@ -675,7 +699,12 @@ impl MainTrace {
 
     /// Returns `true` if a row is part of the ACE chiplet.
     /// Active when virtual s0=1 (s_ctrl=0, s_perm=0) and s1=1, s2=1, s3=0.
+    ///
+    /// Short-circuits to `false` past the chiplets-AIR height; see [`Self::is_bitwise_row`].
     pub fn is_ace_row(&self, i: RowIndex) -> bool {
+        if i.as_usize() >= self.chiplets_height() {
+            return false;
+        }
         self.chiplet_selector_0(i) == ZERO
             && self.chiplet_s_perm(i) == ZERO
             && self.chiplet_selector_1(i) == ONE
