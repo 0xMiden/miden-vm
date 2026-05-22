@@ -105,29 +105,48 @@ meaning, and the framework drives the depth-first recursion.
 
 ## Building the DAG from a program
 
-A program grows the DAG through three system events. Each leaves the operand stack untouched and
-returns the new node's digest on the **advice stack**, so the program can chain it into later nodes
-without recomputing the digest in-circuit. The `sys` core-library module wraps each event in a thin
-helper.
+A program grows the DAG through three system events. Each event mutates only the *host-side*
+`DeferredState`; the digest a program uses is **derived in-circuit**, never handed back through
+advice. The `sys` core-library module wraps the two register events in a thin helper.
 
 | Event (`adv.*`)            | `sys` helper     | Operand stack in                 | Effect |
 | -------------------------- | ---------------- | -------------------------------- | ------ |
-| `register_deferred`        | `register_expr`  | `[PAYLOAD_LO, PAYLOAD_HI, TAG, …]` | Decodes the tag, builds the expression node, registers it; pushes `NODE_DIGEST` to advice. |
-| `register_deferred_chunk`  | `register_chunk` | `[TAG, ptr, …]`                  | Decodes `n` from the tag, reads `8n` felts from memory at `ptr`, registers the chunk node; pushes `NODE_DIGEST` to advice. |
-| `evaluate_deferred`        | `evaluate`       | `[NODE_DIGEST, …]`               | Looks the node up, reduces it, pushes `CANONICAL_DIGEST` to advice, and records the canonical (`tag || payload`) in the advice map under `CANONICAL_DIGEST`. |
+| `register_deferred`        | `register_expr`  | `[PAYLOAD_LO, PAYLOAD_HI, TAG, …]` | Decodes the tag and interns the expression node. No advice/stack output; the helper then computes `NODE_DIGEST` with one `hperm` over `[PAYLOAD, TAG]`. |
+| `register_deferred_chunk`  | `register_chunk` | `[TAG, ptr, n_chunks, …]`        | Decodes `n` from the tag, reads `8n` felts from memory at `ptr`, interns the chunk node. No advice/stack output; the helper then computes `NODE_DIGEST` with a `mem_stream` linear hash over the same `8n` felts. |
+| `evaluate_deferred`        | *(none)*         | `[NODE_DIGEST, …]`               | Looks the node up, reduces it, interns the canonical, and pushes the canonical's `tag || payload` felts onto the **advice stack** (`TAG` first, then payload words in hash order). |
 
 `register_*` validate the tag's shape and intern the node, but do not reduce it — they are pure
-host hints that populate the DAG. `evaluate_deferred` is where meaning is checked and where the
-fused advice outputs are recorded:
+host hints that populate the DAG.
 
-- **advice stack**: `CANONICAL_DIGEST` (the reduced node's own digest);
-- **advice map key**: `CANONICAL_DIGEST`;
-- **advice map value**: the canonical serialized as `tag || payload` in natural order — the 4 tag
-  felts followed by the 8 payload felts (or every chunk block's felts, for a chunk canonical).
+### Why the digest is computed in-circuit
 
-Predicates are **not** special-cased: their canonical is the `TRUE` node, which serializes to its
-12 felts like any other expression. A recorded entry therefore means evaluation succeeded — a
-failed predicate has already surfaced as an error before the entry is written.
+A system event is an unconstrained advice hook: the honest handler can compute a digest, but the
+AIR has no constraint tying an advice-supplied digest to the operand-stack payload or to memory at
+`ptr`. If the digest folded into the transcript came from advice, a prover could attest a node over
+data the circuit never held. Deriving it in-circuit (`hperm` / `mem_stream`) closes the gap, and it
+composes with the verifier:
+
+- the **in-circuit hash** binds the digest to the circuit's own operand stack / memory;
+- **transcript root-match** (a public input) binds that digest to the wire the verifier rehydrates;
+- `DeferredState::rehydrate` then re-reduces every logged statement from wire data.
+
+Together these bind the wire — and therefore every reduction the verifier re-checks — to the data
+the circuit actually committed to.
+
+### Why `evaluate_deferred` is a bare event
+
+`evaluate_deferred`'s output is a *deferred reduction* the circuit cannot perform, so it must come
+through advice — but that makes it an **unbound host hint**. Using it soundly requires re-hashing
+the returned `tag || payload` in-circuit and logging a predicate that `rehydrate` re-checks; an
+in-circuit `eq`/`assert` over two raw evaluate results proves nothing. Because that obligation is
+precompile-specific (which predicate to log is the precompile's business), `evaluate_deferred` is
+intentionally *not* wrapped as a safe `sys` proc: each precompile wraps the raw event itself. The
+register helpers, by contrast, return an already-bound digest, so they are safe by default — the
+worst a misuse can do is make the verifier reject.
+
+Predicates are **not** special-cased on evaluation: their canonical is the `TRUE` node, which
+serializes to its 12 felts like any other expression. A failed predicate has already surfaced as an
+error before any felts are pushed.
 
 ## The deferred commitment
 

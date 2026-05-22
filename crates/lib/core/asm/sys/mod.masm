@@ -57,56 +57,74 @@ pub proc log_precompile_request
 end
 
 # ===== DEFERRED-DAG HELPERS =======================================================================
+#
+# `register_expr` / `register_chunk` are safe by default: they derive the node digest in-circuit,
+# so the worst a misuse can do is make the verifier reject. There is intentionally no `evaluate`
+# proc here — `adv.evaluate_deferred` returns an *unbound* host hint (the canonical `tag || payload`
+# on the advice stack), and using it soundly requires re-hashing in-circuit and logging a predicate
+# the verifier re-checks. That discipline is precompile-specific, so each precompile wraps the raw
+# event itself rather than calling a deceptively "safe" shared helper.
 
 #! Registers an expression-bodied node `(tag, payload)` in the deferred-computation DAG and
 #! returns its content-addressed digest on top of the operand stack.
 #!
-#! Thin wrapper around `adv.register_deferred`: invokes the sys event (which leaves the operand
-#! stack unchanged and pushes NODE_DIGEST onto the advice stack), drops the 12 input felts, and
-#! pulls NODE_DIGEST back onto the operand stack.
+#! `adv.register_deferred` interns the node host-side (no stack or advice output); the digest is
+#! then derived *in-circuit* so it is constrained to the operand-stack payload rather than supplied
+#! by advice. The input is already in Poseidon2 sponge layout — `[R0=PAYLOAD_LO, R1=PAYLOAD_HI,
+#! C=TAG]` — so one `hperm` produces the permuted state and the digest is its rate0 word
+#! (`state[0..4]`), matching `Node::digest`.
 #!
 #! Input:  `[PAYLOAD_LO, PAYLOAD_HI, TAG, ...]`
 #! Output: `[NODE_DIGEST, ...]`
 pub proc register_expr
     adv.register_deferred
-    # operand stack unchanged; advice stack now has [NODE_DIGEST]
-    dropw dropw dropw
-    # => [...]
-    adv_pushw
-    # => [NODE_DIGEST, ...]
+    # => [PAYLOAD_LO, PAYLOAD_HI, TAG, ...]  (rate = payload, capacity = tag)
+    hperm
+    # => [R0', R1', C', ...]
+    swapw.2 dropw dropw
+    # => [NODE_DIGEST, ...]  (digest = rate0 = state[0..4])
 end
 
-#! Registers a chunk-bodied node in the deferred-computation DAG and returns its
-#! content-addressed digest on top of the operand stack.
+#! Registers a chunk-bodied node (`n` rate-sized blocks of bulk data at `ptr`) in the
+#! deferred-computation DAG and returns its content-addressed digest on top of the operand stack.
 #!
-#! Thin wrapper around `adv.register_deferred_chunk`: invokes the sys event (which reads `8n`
-#! felts from memory at `ptr`, leaves the operand stack unchanged, and pushes NODE_DIGEST onto
-#! the advice stack), drops the 5 input felts, and pulls NODE_DIGEST back onto the operand stack.
+#! `adv.register_deferred_chunk` interns the node host-side (reading `8n` felts from memory at
+#! `ptr`; `n` derived from the tag); it produces no stack or advice output. The digest is then
+#! derived *in-circuit* by a Poseidon2 linear hash over the same `8n` felts — capacity = `TAG`,
+#! one `hperm` per 8-felt block via `mem_stream` — so it is constrained to memory rather than
+#! supplied by advice, and the rate0 word matches `Node::digest`. The chunk count `n` is taken as
+#! an operand (the caller knows it); the event ignores it.
 #!
-#! Input:  `[TAG, ptr, ...]`
+#! NOTE: the `n == 0` case is not yet handled — the loop performs zero permutations, whereas
+#! `Node::digest` applies one. No caller registers an empty chunk today; revisit before one does.
+#!
+#! Input:  `[TAG, ptr, n_chunks, ...]`
 #! Output: `[NODE_DIGEST, ...]`
 pub proc register_chunk
     adv.register_deferred_chunk
-    # operand stack unchanged; advice stack now has [NODE_DIGEST]
-    dropw drop
-    # => [...]
-    adv_pushw
-    # => [NODE_DIGEST, ...]
-end
+    # => [TAG, ptr, n_chunks, ...]
 
-#! Evaluates a previously-registered node identified by its digest. The schema's `reduce`
-#! records the canonical in the advice map under the canonical's own digest and pushes that digest
-#! to advice; this helper pulls it onto the operand stack.
-#!
-#! Input:  `[NODE_DIGEST, ...]`
-#! Output: `[CANONICAL_DIGEST, ...]`
-#! Advice map: `CANONICAL_DIGEST |-> tag || payload` (use `adv.push_mapval` to read it back).
-pub proc evaluate
-    adv.evaluate_deferred
-    # operand stack unchanged; advice stack now has [CANONICAL_DIGEST]
-    dropw
-    adv_pushw
-    # => [CANONICAL_DIGEST, ...]
+    # Replace n_chunks with end_addr = ptr + 8 * n_chunks, leaving [TAG, ptr, end_addr, ...].
+    movup.5 mul.8 dup.5 add movdn.5
+    # => [TAG, ptr, end_addr, ...]
+
+    # Build the sponge state: rate = 0, capacity = TAG, with [start_addr, end_addr] beneath it.
+    padw padw
+    # => [R0=0w, R1=0w, C=TAG, start_addr=ptr, end_addr, ...]
+
+    # Linear hash: absorb one 8-felt block per iteration until start_addr reaches end_addr.
+    # (Mirrors poseidon2::absorb_double_words_from_memory, inlined to keep `sys` dependency-free.)
+    dup.13 dup.13 neq
+    while.true
+        mem_stream hperm
+        dup.13 dup.13 neq
+    end
+    # => [R0', R1', C', end_addr, end_addr, ...]
+
+    swapw.2 dropw dropw
+    # => [NODE_DIGEST, end_addr, end_addr, ...]  (digest = rate0)
+    movup.4 drop movup.4 drop
+    # => [NODE_DIGEST, ...]
 end
 
 #! Folds a node digest into the rolling precompile-transcript via the `log_precompile` opcode.

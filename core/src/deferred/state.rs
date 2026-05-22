@@ -167,8 +167,8 @@ impl DeferredState {
     /// Transitively-referenced child digests must resolve through `nodes` (registered upstream)
     /// or the state `evals` memo (cached from this or earlier evaluate calls) — an unknown
     /// child digest surfaces as [`PrecompileError::MissingNode`]. The processor-side handler
-    /// enforces the fused advice contract: push the canonical digest to the advice stack and
-    /// record `advice_map[canonical_digest] = tag || payload`.
+    /// returns the canonical's `tag || payload` felts on the advice stack for the caller to
+    /// re-hash in-circuit.
     pub fn evaluate(
         &mut self,
         precompiles: &PrecompileRegistry,
