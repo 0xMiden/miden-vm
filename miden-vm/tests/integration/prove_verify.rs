@@ -189,14 +189,6 @@ fn test_equal_heights_recursive() {
 /// verifier accepts the proof against that public input. `prove_sync` builds its processor
 /// without precompiles, so the test drives the manual `execute_trace_inputs_sync` +
 /// `prove_from_trace_sync` path with the schema installed.
-///
-/// IGNORED: end-to-end *proving* of a deferred-DAG precompile program is not yet wired. The
-/// deferred wire round-trips (rehydration yields a non-empty commitment), but the generated
-/// STARK proof fails its own host verification with `Verifier(InvalidReducedAux)` — the precompile
-/// bus does not balance in the multi-AIR proof. No crypto precompile currently has a passing
-/// prove+verify test (only Falcon, via the event-handler path, proves). Re-enable once the
-/// precompile proving path lands (the "D2" work the surrounding NOTE refers to).
-#[ignore = "precompile prove+verify not yet wired (D2); proof fails host verify (InvalidReducedAux)"]
 #[test]
 fn test_poseidon2_recursive_verify_with_deferred_root() {
     use miden_processor::FastProcessor;
@@ -557,7 +549,6 @@ mod fast_parallel {
     //   - per-precompile MASM behaviour:        crates/lib/core/tests/crypto/* (execution-level)
     //   - deferred-state fragment determinism:  processor::trace::parallel::tests (single vs
     //     multi-fragment `deferred_state` equality)
-    // End-to-end *prove + verify* of a non-empty deferred root is NOT yet covered: precompile
-    // proving is unfinished (the "D2" work). The placeholder
-    // `test_poseidon2_recursive_verify_with_deferred_root` above is `#[ignore]`d until that lands.
+    //   - end-to-end prove + verify of a non-empty deferred root:
+    //     `test_poseidon2_recursive_verify_with_deferred_root` above.
 }
