@@ -21,7 +21,9 @@ const PRINT_ADV_MAP_EVENT = event("miden::core::debug::print_adv_map")
 # PROCEDURES
 # ================================================================================================
 
-#! Prints the top 16 elements of the operand stack.
+#! Prints the entire operand stack.
+#!
+#! This is a drop-in replacement for the `debug.stack` decorator.
 #!
 #! Inputs:  [...]
 #! Outputs: [...]

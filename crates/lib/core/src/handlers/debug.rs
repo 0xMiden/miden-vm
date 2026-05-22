@@ -24,7 +24,7 @@ use miden_utils_sync::RwLock;
 // EVENT NAMES
 // ================================================================================================
 
-/// Prints the top 16 elements of the operand stack.
+/// Prints the entire operand stack (drop-in replacement for the `debug.stack` decorator).
 pub const PRINT_STACK_EVENT_NAME: EventName = EventName::new("miden::core::debug::print_stack");
 /// Prints memory in the range `[start, end)` of the current context.
 pub const PRINT_MEM_EVENT_NAME: EventName = EventName::new("miden::core::debug::print_mem");
@@ -38,9 +38,6 @@ pub const PRINT_ADV_STACK_ALL_EVENT_NAME: EventName =
     EventName::new("miden::core::debug::print_adv_stack_all");
 /// Looks up a WORD key in the advice map and prints the associated values.
 pub const PRINT_ADV_MAP_EVENT_NAME: EventName = EventName::new("miden::core::debug::print_adv_map");
-
-/// Number of operand-stack elements printed by `print_stack`.
-const STACK_PRINT_DEPTH: usize = 16;
 
 /// Returns the `(EventName, handler)` pairs that back the `miden::core::debug` module.
 ///
@@ -91,10 +88,11 @@ impl<W: fmt::Write + Send + Sync + 'static> EventHandler for DebugPrinter<W> {
         let w: &mut W = &mut writer;
 
         if id == PRINT_STACK_EVENT_NAME.to_event_id() {
-            // Skip position 0 (the event id) so only the user's operand stack is shown.
+            // Skip position 0 (the event id) so only the user's operand stack is shown. Print the
+            // entire stack (no cap) to mirror the `debug.stack` decorator (`DebugOptions::StackAll`).
             let stack = process.get_stack_state();
             let operand_stack = stack.get(1..).unwrap_or(&[]);
-            write_stack(w, operand_stack, Some(STACK_PRINT_DEPTH), "Stack", process.clock())?;
+            write_stack(w, operand_stack, None, "Stack", process.clock())?;
         } else if id == PRINT_MEM_EVENT_NAME.to_event_id() {
             let range = process.get_mem_addr_range(1, 2)?;
             write_mem_range(w, process, range)?;
