@@ -1,19 +1,12 @@
 //! Internal instance↔proof ordering helper: the crate-internal [`TraceOrder`]
 //! plus the public [`ShapeError`].
 //!
-//! The air crate's [`MultiAir`](miden_lifted_air::MultiAir) trait is order-agnostic: every list it
+//! The air crate's [`MultiAir`](miden_lifted_air::MultiAir) trait is order-agnostic — every list it
 //! exposes is in **instance order** (the position returned by
-//! [`MultiAir::airs`](miden_lifted_air::MultiAir::airs)). The stark crate is the only place that
-//! needs the proof's wire-format AIR ordering (a deterministic stable sort of the
-//! per-AIR heights). [`TraceOrder`] is the crate-internal type that carries the
-//! permutation between **instance order** and **proof order**; nothing
-//! about it leaks into the air crate or out of this crate's public surface.
-//!
-//! Runtime instance-level checks on caller-supplied inputs/traces live on the
-//! [`Statement`](miden_lifted_air::Statement) /
-//! [`ProverStatement`](miden_lifted_air::ProverStatement) constructors; the
-//! structural AIR contract lives in [`miden_lifted_air::debug`]. [`TraceOrder`]
-//! validates the proof-supplied log heights against the AIRs at construction.
+//! [`MultiAir::airs`](miden_lifted_air::MultiAir::airs)). [`TraceOrder`] carries the permutation
+//! between instance order and the proof's wire-format **proof order** (a deterministic stable sort
+//! of the per-AIR heights), and validates the proof-supplied log heights against the AIRs at
+//! construction.
 
 extern crate alloc;
 
@@ -27,20 +20,14 @@ use thiserror::Error;
 // TraceOrder
 // ============================================================================
 
-/// The permutation between **instance order** (the AIR positions as
-/// returned by [`MultiAir::airs`](miden_lifted_air::MultiAir::airs)) and **proof order** (the
-/// wire-format ordering used inside the prover/verifier), derived deterministically
-/// from per-AIR trace heights.
+/// The permutation between **instance order** (AIR positions from
+/// [`MultiAir::airs`](miden_lifted_air::MultiAir::airs)) and **proof order**, the wire-format
+/// ordering used inside the prover/verifier.
 ///
-/// Proof order is defined as the stable sort of instance indices by
-/// `(log_trace_height, instance_index)`. Both prover and verifier compute
-/// the same ordering from the same heights, so the proof commits to heights
-/// only and the ordering is reconstructed locally.
-///
-/// Heights are stored in instance order (matching
-/// [`MultiAir::airs`](miden_lifted_air::MultiAir::airs)). Use [`Self::to_proof_order`] /
-/// [`Self::to_instance_order`] (or [`Self::reorder_to_proof_in_place`]) to move data between the
-/// two views.
+/// Proof order is the stable sort of instance indices by `(log_trace_height,
+/// instance_index)`. Both sides recompute it from the heights, so the proof commits
+/// to heights only. Use [`Self::to_proof_order`] / [`Self::to_instance_order`] (or
+/// [`Self::reorder_to_proof_in_place`]) to move data between the two views.
 #[derive(Clone, Debug)]
 pub(crate) struct TraceOrder {
     log_heights_instance: Vec<u8>,
@@ -139,14 +126,6 @@ impl TraceOrder {
     /// Number of AIR instances.
     pub(crate) fn len(&self) -> usize {
         self.log_heights_instance.len()
-    }
-
-    /// Whether the order contains any instances. The conventional companion to
-    /// [`Self::len`]; constructors reject empty input, so it always returns
-    /// `false` in practice.
-    #[allow(dead_code)]
-    pub(crate) fn is_empty(&self) -> bool {
-        self.log_heights_instance.is_empty()
     }
 
     /// Log trace heights in instance order. Matches

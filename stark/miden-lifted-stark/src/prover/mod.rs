@@ -89,42 +89,22 @@ use crate::{
 /// Prove a [`ProverStatement`].
 ///
 /// The caller's challenger must already be bound to protocol parameters and
-/// AIR configurations — see the module-level docs. The proof's `air_inputs`
-/// and `aux_inputs` are absorbed internally via [`Statement::observe`](crate::Statement::observe);
-/// both prover and verifier must carry the same statement data.
+/// AIR configurations — see the module-level docs. The statement's `air_inputs`
+/// and `aux_inputs` are absorbed internally via
+/// [`Statement::observe`](crate::Statement::observe); both prover and verifier
+/// must carry the same statement.
 ///
-/// # Trust contract
-///
-/// `prove` validates ONLY untrusted runtime inputs and returns typed
-/// [`ProverError`] on failure. AIR structural correctness is the
-/// implementer's contract — call [`crate::debug::assert_prover_setup`]
-/// from your test harness to enforce it in debug builds.
-///
-/// ## Validated
-/// - per AIR: `air.num_public_values() == statement.air_inputs().len()`
-/// - `statement.aux_inputs().len() <= multi_air.max_aux_inputs()`
-/// - `prover_statement.traces().len() == statement.airs().len()` and `<= u8::MAX + 1`
-/// - per AIR: `trace.width() == air.width()`
-/// - per AIR: `trace.height().is_power_of_two()`
-/// - per AIR: `trace.height() >= max periodic column length`
-/// - per AIR: `log_quotient_degree(air) <= config.pcs().log_blowup()`
-/// - LDE domain fits the field's two-adicity (via `LiftedDomain::try_canonical`)
-///
-/// ## Trusted (NOT validated)
-/// - AIR structural shape (positive `aux_width`, power-of-two periodic columns, no preprocessed
-///   trace, window size 2)
-/// - [`ProverStatement::build_aux_traces`] output dimensions — a malformed output is caught by the
-///   LDE/commit (panic) or by verification, since the verifier re-derives these shapes.
-/// - Preprocessed tree shape (TODO: adr1anh/preprocessed branch)
+/// Validates only untrusted runtime inputs (returning [`ProverError`]); the AIR
+/// structural contract is trusted — see the crate-level trust model and
+/// [`crate::debug::assert_prover_setup`].
 ///
 /// # Arguments
 /// - `config`: STARK configuration (PCS params, LMCS, DFT)
-/// - `prover_statement`: validated statement plus per-AIR traces — the AIRs, shared `air_inputs`,
-///   and aux-trace construction (all in instance order)
-/// - `challenger`: Fiat-Shamir challenger (statement and heights are observed before use)
+/// - `prover_statement`: validated statement plus per-AIR traces (instance order)
+/// - `challenger`: Fiat-Shamir challenger (statement and heights observed before use)
 ///
 /// # Returns
-/// `Ok(StarkOutput { digest, proof })` on success, or a `ProverError` if validation fails.
+/// `Ok(StarkOutput { digest, proof })`, or a [`ProverError`] if validation fails.
 #[instrument(name = "prove", skip_all)]
 pub fn prove<F, EF, MA, SC>(
     config: &SC,
@@ -397,12 +377,8 @@ where
     Ok(StarkOutput { digest, proof })
 }
 
-/// Errors that can occur during proving.
-///
-/// Returned exclusively for *runtime* validation failures of caller-supplied
-/// data. AIR structural correctness, `build_aux_traces` output shape, and
-/// other implementer-side contracts are trusted — see
-/// [`crate::debug::assert_prover_setup`] for the debug-mode wrappers.
+/// Errors from proving — runtime validation failures of caller-supplied data.
+/// The AIR's structural contract is trusted (see the crate-level trust model).
 #[derive(Debug, Error)]
 pub enum ProverError {
     #[error(transparent)]

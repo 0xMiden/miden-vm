@@ -228,15 +228,12 @@ fn malformed_log_trace_heights_is_rejected() {
     let output =
         prove(&config, &prover_statement, test_challenger()).expect("proving should succeed");
 
-    // Poke the `pub(crate)` `log_trace_heights` field directly to feed the
-    // verifier malformed proof shapes that bypass `ProverStatement`
-    // construction. The cases worth covering are the ones that would otherwise
-    // panic or overflow rather than return a clean error.
+    // Poke the `pub(crate)` `log_trace_heights` directly to feed the verifier
+    // malformed shapes that bypass `ProverStatement` construction — the cases
+    // that would otherwise panic or overflow rather than return a clean error.
 
-    // Out-of-range log height must surface as an error, not panic on
-    // `1usize << log_h` or `two_adic_generator(log_h + log_blowup)`. log_h
-    // = 200 trips the `usize` overflow guard inside
-    // `TraceOrder::from_log_heights` before any domain construction.
+    // log_h = 200 trips the `usize` overflow guard in `TraceOrder::from_log_heights`,
+    // before `1usize << log_h` could overflow.
     let mut bad_proof = output.proof.clone();
     bad_proof.log_trace_heights = vec![200];
     let err = verify(&config, statement, &bad_proof, test_challenger())
@@ -246,10 +243,8 @@ fn malformed_log_trace_heights_is_rejected() {
         VerifierError::Shape(ShapeError::LogTraceHeightTooLarge { log_h: 200, .. })
     ));
 
-    // The LDE domain `log_h + log_blowup` overflow case. With `log_blowup = 3`
-    // from `TEST_PCS_PARAMS` and `Felt::TWO_ADICITY = 32`, `30 + 3 = 33 > 32`
-    // must be rejected by `LiftedDomain::canonical` before any
-    // `two_adic_generator` call on the LDE domain.
+    // log_h = 30 with log_blowup = 3 and Felt::TWO_ADICITY = 32 overflows the LDE
+    // domain (33 > 32), rejected by `try_canonical` before any generator lookup.
     let mut bad_proof = output.proof;
     bad_proof.log_trace_heights = vec![30];
     let err = verify(&config, statement, &bad_proof, test_challenger())

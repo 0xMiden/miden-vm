@@ -78,16 +78,12 @@ pub trait LiftedAir<F: Field, EF>: Sync + BaseAir<F> {
         Some(RowMajorMatrix::new(values, num_cols))
     }
 
-    /// Maximum periodic-column length, or `0` if there are no periodic columns.
+    /// Maximum periodic-column length, or `0` if there are none. A trace's height
+    /// must be at least this, so it is the per-AIR lower bound on trace height.
     ///
-    /// A trace's height must be at least this value, so the prover and verifier
-    /// use it as the per-AIR lower bound on trace height.
-    ///
-    /// The default derives the value from [`periodic_columns`](Self::periodic_columns),
-    /// asserting along the way that every column is a non-empty power of two — the
-    /// structural contract on periodic tables. Override to return the value
-    /// directly when it is known statically; the override is treated as a perf
-    /// shortcut and is cross-checked against `periodic_columns` by
+    /// The default derives it from [`periodic_columns`](Self::periodic_columns),
+    /// asserting each column is a non-empty power of two. Override to return it
+    /// directly when known statically; the override is cross-checked by
     /// [`crate::debug::assert_multi_air_valid`].
     fn max_periodic_length(&self) -> usize {
         self.periodic_columns()
@@ -112,15 +108,10 @@ pub trait LiftedAir<F: Field, EF>: Sync + BaseAir<F> {
 
     /// Number of extension-field aux values committed to the Fiat-Shamir transcript.
     ///
-    /// These are the values returned by
-    /// [`MultiAir::build_aux_traces`](crate::MultiAir::build_aux_traces)
-    /// alongside the aux trace matrix. Their count is independent of
-    /// [`aux_width`](Self::aux_width) (the number of aux trace columns): aux
-    /// columns carry per-row witness data, whereas aux values are a fixed set
-    /// of scalars (e.g. a logup running-sum total) bound once into the
-    /// transcript.
-    ///
-    /// These values are exposed to AIR constraints as *permutation values* via
+    /// Returned by [`MultiAir::build_aux_traces`](crate::MultiAir::build_aux_traces)
+    /// alongside the aux trace matrix; the count is independent of
+    /// [`aux_width`](Self::aux_width) (the number of aux trace columns). Exposed to
+    /// constraints as *permutation values* via
     /// [`PermutationAirBuilder::permutation_values`](crate::PermutationAirBuilder::permutation_values).
     fn num_aux_values(&self) -> usize;
 
@@ -238,8 +229,7 @@ where
     F: Field,
     EF: ExtensionField<F>,
 {
-    /// AIR type. Heterogeneous AIRs are expressed via caller-defined enum
-    /// wrappers, exactly as before.
+    /// AIR type. Heterogeneous AIRs are expressed via caller-defined enum wrappers.
     type Air: LiftedAir<F, EF>;
 
     /// The AIRs in instance order — the single source of that ordering.
@@ -247,15 +237,11 @@ where
 
     /// Number of public inputs shared by every AIR.
     ///
-    /// All AIRs in a multi-AIR statement read the same `air_inputs`, so they must
-    /// agree on [`num_public_values`](p3_air::BaseAir::num_public_values). The
-    /// default returns that shared count, asserting the agreement holds (a
-    /// structural contract; an empty `airs()` panics — a multi-AIR statement
-    /// must carry at least one AIR). Override to return the count directly; the
-    /// override is cross-checked by [`crate::debug::assert_multi_air_valid`].
-    ///
-    /// [`Statement::new`](crate::Statement::new) checks `air_inputs.len()` against
-    /// this value.
+    /// All AIRs read the same `air_inputs`, so they must agree on
+    /// [`num_public_values`](p3_air::BaseAir::num_public_values). The default
+    /// returns that shared count (panicking on an empty `airs()`); override to
+    /// return it directly, cross-checked by [`crate::debug::assert_multi_air_valid`].
+    /// [`Statement::new`](crate::Statement::new) checks `air_inputs.len()` against it.
     fn num_air_inputs(&self) -> usize {
         let airs = self.airs();
         let n = airs

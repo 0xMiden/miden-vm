@@ -1,10 +1,6 @@
-//! Validated multi-AIR statements.
-//!
-//! - [`Statement`]: validated per-proof inputs over a [`MultiAir`] — `air_inputs`, `aux_inputs`.
-//!   Construction via [`Statement::new`] runs the inputs-class validation; the type itself encodes
-//!   the invariant.
-//! - [`ProverStatement`]: validated prover-side companion — a [`Statement`] plus per-AIR main
-//!   traces. Construction via [`ProverStatement::new`] runs the trace-shape validation.
+//! Validated multi-AIR statements: [`Statement`] (per-proof inputs over a
+//! [`MultiAir`]) and [`ProverStatement`] (a `Statement` plus per-AIR main
+//! traces). Both validate their inputs on construction.
 
 use alloc::vec::Vec;
 use core::marker::PhantomData;
@@ -23,11 +19,9 @@ use crate::{
 // Statement
 // ============================================================================
 
-/// Validated per-proof inputs over a [`MultiAir`].
+/// Validated per-proof inputs over a [`MultiAir`]: `air_inputs` and `aux_inputs`.
 ///
-/// Holding a `Statement` is a type-level guarantee that the inputs-class
-/// validation passed: per-AIR `num_public_values == air_inputs.len()` and
-/// `aux_inputs.len() <= MultiAir::max_aux_inputs`.
+/// Holding one guarantees the input-length checks in [`Statement::new`] passed.
 pub struct Statement<F, EF, MA>
 where
     F: Field,
@@ -46,13 +40,8 @@ where
     EF: ExtensionField<F>,
     MA: MultiAir<F, EF>,
 {
-    /// Construct a [`Statement`] after validating the inputs against `multi_air`.
-    ///
-    /// Checks, in order:
-    /// - `multi_air.num_air_inputs() == air_inputs.len()` —
-    ///   [`InstanceError::PublicValuesLengthMismatch`] otherwise.
-    /// - `aux_inputs.len() <= multi_air.max_aux_inputs()` — [`InstanceError::AuxInputsTooLong`]
-    ///   otherwise.
+    /// Construct a [`Statement`], validating `air_inputs` and `aux_inputs` lengths
+    /// against `multi_air`.
     pub fn new(
         multi_air: MA,
         air_inputs: Vec<F>,
@@ -126,12 +115,9 @@ where
 // ProverStatement
 // ============================================================================
 
-/// Validated prover-side companion: a [`Statement`] plus per-AIR main traces.
+/// A [`Statement`] plus per-AIR main traces.
 ///
-/// Holding a `ProverStatement` is a type-level guarantee that the
-/// trace-shape validation passed: counts match, heights are powers of two
-/// (and ≤ `u8::MAX + 1` instances), widths match each AIR, and per-AIR
-/// height ≥ the AIR's max periodic column length.
+/// Holding one guarantees the trace-shape checks in [`ProverStatement::new`] passed.
 pub struct ProverStatement<F, EF, MA>
 where
     F: Field,
@@ -148,11 +134,8 @@ where
     EF: ExtensionField<F>,
     MA: MultiAir<F, EF>,
 {
-    /// Construct after validating the trace shape against `statement`.
-    ///
-    /// Verifies, in order: `traces.len() <= u8::MAX + 1`, `traces.len() ==
-    /// airs.len()`, power-of-two heights, per-AIR `height >=
-    /// air.max_periodic_length()`, and per-AIR `width == air.width()`.
+    /// Construct a [`ProverStatement`], validating each trace's count, height, and
+    /// width against its AIR.
     pub fn new(
         statement: Statement<F, EF, MA>,
         traces: Vec<RowMajorMatrix<F>>,
@@ -224,11 +207,8 @@ where
 // InstanceError
 // ============================================================================
 
-/// Errors returned when constructing a [`Statement`] or [`ProverStatement`]
-/// from caller-supplied data.
-///
-/// Holding either type is a type-level guarantee that none of these apply:
-/// construction is the runtime trust boundary.
+/// Errors from constructing a [`Statement`] / [`ProverStatement`] — the runtime
+/// trust boundary on caller-supplied inputs.
 #[derive(Debug, Error)]
 pub enum InstanceError {
     #[error("num_air_inputs() = {expected}, but air_inputs().len() = {actual}")]

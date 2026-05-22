@@ -26,17 +26,13 @@ use p3_matrix::{Matrix, dense::RowMajorMatrix};
 // Structural assertions (over miden_lifted_air::debug)
 // ============================================================================
 
-/// Prover-setup check: assert the AIR's structural contract via
-/// [`assert_multi_air_valid`].
+/// Assert the AIR's structural contract via [`assert_multi_air_valid`].
 ///
-/// Only the *trusted* structural contract is asserted here. The AIR ↔ PCS
-/// compatibility bound (`log_quotient_degree <= log_blowup`) is a *validated*
-/// input — the prover and verifier return
-/// [`DomainError::ConstraintDegreeTooHigh`](crate::DomainError) for it — so it
-/// is not re-checked here.
-///
-/// TODO(adr1anh/preprocessed): also call `assert_preprocessed(pi)` once the
-/// preprocessed branch lands.
+/// Only the *trusted* structural contract is asserted. The AIR ↔ PCS
+/// compatibility bound (`log_quotient_degree <= log_blowup`) is a validated
+/// runtime input — prover and verifier surface it as
+/// [`DomainError::ConstraintDegreeTooHigh`](crate::DomainError) — so it is not
+/// re-checked here.
 pub fn assert_prover_setup<F, EF, MA>(prover_statement: &ProverStatement<F, EF, MA>)
 where
     F: Field,
@@ -102,11 +98,9 @@ pub fn check_constraints<F, EF, MA, Ch>(
         .zip(aux_traces.iter().zip(aux_values_per_air.iter()))
         .enumerate()
     {
-        // Row-window widths and counts (main/aux width, public values, aux values)
-        // are validated per row by `check_builder_shape` inside `check_single_trace`.
-        // The aux trace height is the one shape invariant invisible to a single row
-        // window, so check it here; otherwise a short aux trace surfaces as an opaque
-        // row-slice panic.
+        // `check_builder_shape` validates row-window widths per row, but aux trace
+        // height is invisible to a single row window — check it here so a short aux
+        // trace fails cleanly rather than via an opaque row-slice panic.
         assert_eq!(
             aux_trace.height(),
             main.height(),

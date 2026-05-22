@@ -63,12 +63,9 @@ use crate::{
     util::packing::row_to_packed_ext,
 };
 
-/// Errors that can occur during verification.
-///
-/// Returned exclusively for runtime instance / proof-shape failures or
-/// cryptographic verification failures. AIR structural correctness is
-/// trusted — call [`crate::debug::assert_prover_setup`] (or
-/// [`miden_lifted_air::debug::assert_multi_air_valid`]) from tests.
+/// Errors from verification — runtime instance / proof-shape failures or
+/// cryptographic verification failures. The AIR's structural contract is
+/// trusted (see the crate-level trust model).
 #[derive(Debug, Error)]
 pub enum VerifierError {
     #[error(transparent)]
@@ -83,9 +80,6 @@ pub enum VerifierError {
     Transcript(#[from] TranscriptError),
     #[error("external assertion evaluation failed: {0}")]
     Reduction(ReductionError),
-    /// Placeholder for the `adr1anh/preprocessed` child branch.
-    #[error("preprocessed commitment mismatch")]
-    PreprocessedCommitmentMismatch,
     #[error("constraint mismatch: quotient * vanishing != folded constraints")]
     ConstraintMismatch,
     #[error("external assertion {assertion} is non-zero")]
@@ -119,31 +113,10 @@ pub enum VerifierError {
 /// codeword encodes `p_lift(X) = p(X^{rⱼ})`; opening at `[z, z · h_max]`
 /// yields the local/next row pair for the original trace domain.
 ///
-/// **Statement-bound heights:** this function does not compare the proof's
-/// declared heights against any caller expectation. If your statement fixes
-/// trace dimensions, parse via
-/// [`StarkTranscript::from_proof`](crate::proof::StarkTranscript::from_proof)
-/// and check
-/// [`transcript.log_trace_heights()`](crate::proof::StarkTranscript::log_trace_heights)
-/// before calling this. See the module-level docs for the full contract.
-///
-/// # Trust contract
-///
-/// `verify` validates the runtime statement plus everything carried on the
-/// proof; the AIR list is **trusted** (run
-/// [`miden_lifted_air::debug::assert_multi_air_valid`] from tests).
-///
-/// ## Validated
-/// - Same statement checks as [`crate::prove`] minus trace shape (no traces here)
-/// - Same `log_quotient_degree <= log_blowup` compat check
-/// - Proof shape via the internal trace-order reconstruction from log heights
-/// - Proof byte parsing (transcript channel)
-/// - PCS / FRI / DEEP / LMCS / transcript / constraint identity
-/// - External assertions from [`Statement::eval_external`]
-/// - (Future) preprocessed commitment matches AIR declarations
-///
-/// ## Trusted (NOT validated)
-/// - AIR structural shape (same list as in [`crate::prove`])
+/// As with [`crate::prove`], only runtime statement/proof data is validated; the
+/// AIR structural contract is trusted (see the crate-level trust model). The
+/// proof's declared heights are not compared against any caller expectation —
+/// see the module-level docs to bind them yourself.
 pub fn verify<F, EF, MA, SC>(
     config: &SC,
     statement: &Statement<F, EF, MA>,

@@ -33,16 +33,12 @@ use crate::{
 /// Commitment type alias for convenience.
 type Commitment<F, EF, SC> = <<SC as StarkConfig<F, EF>>::Lmcs as Lmcs>::Commitment;
 
-/// STARK proof: per-AIR log trace heights (in instance order) plus the raw
+/// STARK proof: per-AIR log trace heights (instance order) plus the raw
 /// transcript data.
 ///
-/// The proof's AIR ordering — used internally by the prover and verifier to
-/// fold multi-AIR constraints — is *not* stored. Both sides reconstruct it
-/// deterministically from the heights via the internal trace-order helper,
-/// so the proof commits to heights only.
-///
-/// The heights themselves are not exposed as a direct accessor: parse the
-/// proof through [`StarkTranscript::from_proof`] and read them via
+/// The AIR ordering is not stored — both sides reconstruct it deterministically
+/// from the heights, so the proof commits to heights only. The heights are not a
+/// direct accessor either: read them via [`StarkTranscript::from_proof`] →
 /// [`StarkTranscript::log_trace_heights`].
 // Bounds target `Commitment` directly; `SC` itself isn't `Serialize`/`Debug`.
 #[derive(Clone, Serialize, Deserialize)]
@@ -146,9 +142,8 @@ where
     /// [`log_trace_heights`](Self::log_trace_heights) and
     /// [`air_order`](Self::air_order).
     pub(crate) trace_order: TraceOrder,
-    /// Throwaway challenge squeezed right after observing the instance metadata,
-    /// used to clear the challenger's absorb buffer so that later sampled
-    /// challenges depend on the full shape metadata regardless of sponge state.
+    /// Throwaway challenge squeezed after observing instance metadata, clearing the
+    /// challenger's absorb buffer so later challenges depend on the full shape.
     pub instance_challenge: EF,
     /// Main trace commitment.
     pub main_commit: L::Commitment,
@@ -191,10 +186,8 @@ where
     /// Parse a STARK transcript from proof data and a challenger.
     ///
     /// Mirrors steps 0–9 of [`verify`](crate::verifier::verify):
-    /// 0. Reconstruct the AIR ordering from the proof's log trace heights via
-    ///    `TraceOrder::from_log_heights`, which validates the per-AIR contracts, absorb the
-    ///    caller-supplied statement via [`Statement::observe`] (which itself absorbs the heights),
-    ///    then squeeze a throwaway `instance_challenge` to clear the absorb buffer
+    /// 0. Reconstruct + validate the AIR ordering from the heights, observe the statement, and
+    ///    squeeze a throwaway `instance_challenge` to clear the absorb buffer
     /// 1. Receive main trace commitment
     /// 2. Sample randomness for auxiliary traces
     /// 3. Receive auxiliary trace commitment
