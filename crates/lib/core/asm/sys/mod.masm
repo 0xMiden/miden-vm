@@ -93,10 +93,8 @@ end
 #! derived *in-circuit* by a Poseidon2 linear hash over the same `8n` felts — capacity = `TAG`,
 #! one `hperm` per 8-felt block via `mem_stream` — so it is constrained to memory rather than
 #! supplied by advice, and the rate0 word matches `Node::digest`. The chunk count `n` is taken as
-#! an operand (the caller knows it); the event ignores it.
-#!
-#! NOTE: the `n == 0` case is not yet handled — the loop performs zero permutations, whereas
-#! `Node::digest` applies one. No caller registers an empty chunk today; revisit before one does.
+#! an operand (the caller knows it); the event ignores it. Empty chunk bodies are forbidden, so
+#! `n ≥ 1` and the linear-hash loop always runs at least one permutation.
 #!
 #! Input:  `[TAG, ptr, n_chunks, ...]`
 #! Output: `[NODE_DIGEST, ...]`

@@ -45,7 +45,7 @@ fn verify_fails_for_zeroed_placeholder_sig() {
 #[test]
 fn decode_verify_is_chunk3() {
     let node_type = Sig.decode([Felt::from_u32(Sig::VERIFY_TAG_ID), ZERO, ZERO]).unwrap();
-    assert!(matches!(node_type, NodeType::Chunks(3)));
+    assert!(matches!(node_type, NodeType::Chunks(n) if n.get() == 3));
 }
 
 #[test]
@@ -83,11 +83,12 @@ proptest! {
         }
     }
 
-    /// Any chunk count other than the fixed `SIG_CHUNKS = 3` is rejected at register-time by
-    /// the framework's `payload_matches_type` gate, before reduce runs.
+    /// Any non-empty chunk count other than the fixed `SIG_CHUNKS = 3` is rejected at
+    /// register-time by the framework's `payload_matches_type` gate, before reduce runs. (The
+    /// empty body, `n == 0`, is forbidden outright and unconstructible — covered separately.)
     #[test]
     fn verify_rejects_wrong_chunk_count(
-        n in (0usize..=8).prop_filter("must differ from SIG_CHUNKS", |n| *n != 3),
+        n in (1usize..=8).prop_filter("must differ from SIG_CHUNKS", |n| *n != 3),
     ) {
         let chunks: Vec<[Felt; 8]> = vec![[Felt::from_u32(1); 8]; n];
         let schema = PrecompileRegistry::default().with_precompile(Sig);

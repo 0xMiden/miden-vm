@@ -203,7 +203,8 @@ pub enum IntegrityError {
     UnknownTag,
     /// A node's reconstructed payload shape disagrees with `schema.decode(tag).node_type`. In
     /// practice this fires when a `Chunks` entry's chunk count doesn't match the schema-declared
-    /// arity, or when a tag declared `NodeType::Chunks(n)` is encoded as `Value`/`Join`.
+    /// arity (including an empty chunk body, which is forbidden and matches no `Chunks(n)`), or
+    /// when a tag declared `NodeType::Chunks(n)` is encoded as `Value`/`Join`.
     #[error("wire contains a node whose payload shape disagrees with its tag's declared NodeType")]
     ShapeMismatch,
     /// An AND-chain step's `prev_root` references a digest not present in the wire entries —
