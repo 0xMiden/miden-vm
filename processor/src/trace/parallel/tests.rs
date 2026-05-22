@@ -1335,7 +1335,7 @@ fn build_trace_for_program(
 fn collect_end_flags(trace: &ExecutionTrace) -> Vec<Word> {
     let main_trace = trace.main_trace();
 
-    (0..main_trace.num_rows())
+    (0..main_trace.core_height())
         .filter_map(|row_idx| {
             let idx = RowIndex::from(row_idx);
             if read_opcode(main_trace, idx) == opcodes::END {

@@ -361,20 +361,9 @@ impl ExecutionTrace {
     // HELPER METHODS
     // --------------------------------------------------------------------------------------------
 
-    /// Returns the index of the last row in the trace.
+    /// Returns the index of the last row in the Core trace.
     fn last_step(&self) -> usize {
-        self.length() - 1
-    }
-
-    // TEST HELPERS
-    // --------------------------------------------------------------------------------------------
-    #[cfg(feature = "std")]
-    pub fn print(&self) {
-        let mut row = [ZERO; miden_air::trace::TRACE_WIDTH];
-        for i in 0..self.length() {
-            self.main_trace.read_row_into(i, &mut row);
-            std::println!("{:?}", row.map(|v| v.as_canonical_u64()));
-        }
+        self.main_trace.core_height() - 1
     }
 
     #[cfg(any(test, feature = "testing"))]

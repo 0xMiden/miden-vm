@@ -54,8 +54,8 @@ where
     F: FnMut(usize, Felt),
 {
     let main = trace.main_trace();
-    let num_rows = main.num_rows();
-    for row in 0..num_rows - 1 {
+    let core_h = main.core_height();
+    for row in 0..core_h - 1 {
         let idx = RowIndex::from(row);
         f(row, main.get_op_code(idx));
     }

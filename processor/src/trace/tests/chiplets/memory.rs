@@ -73,7 +73,7 @@ fn memory_chiplet_bus_request_response_pairs() {
     // the request-opcode loop iterates the trace, so no memory rows → no expectations →
     // trivial subset match.
     let mut request_exps_added = 0usize;
-    for row in 0..main.num_rows() {
+    for row in 0..main.core_height() {
         let idx = RowIndex::from(row);
         let ctx = main.ctx(idx);
         let clk = main.clk(idx);
@@ -118,7 +118,7 @@ fn memory_chiplet_bus_request_response_pairs() {
 
     // ---- Response side: every memory chiplet row emits `+1 × MemoryResponseMsg`.
     let mut mem_rows_seen = 0usize;
-    for row in 0..main.num_rows() {
+    for row in 0..main.chiplets_height() {
         let idx = RowIndex::from(row);
         if !main.is_memory_row(idx) {
             continue;

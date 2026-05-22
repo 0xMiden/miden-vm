@@ -68,7 +68,7 @@ enum HasherResponseKind {
 fn hasher_response_rows(
     main: &MainTrace,
 ) -> impl Iterator<Item = (RowIndex, HasherResponseKind)> + '_ {
-    (0..main.num_rows()).filter_map(move |row| {
+    (0..main.chiplets_height()).filter_map(move |row| {
         let idx = RowIndex::from(row);
         if !is_hasher_controller_row(main, idx) {
             return None;
@@ -106,7 +106,7 @@ fn span_end_hasher_bus() {
     let mut exp = Expectations::new(&log);
     let mut request_count = 0usize;
 
-    for row in 0..main.num_rows() {
+    for row in 0..main.core_height() {
         let idx = RowIndex::from(row);
         let op = main.get_op_code(idx).as_canonical_u64();
 
@@ -159,7 +159,7 @@ fn respan_hasher_bus() {
     let mut exp = Expectations::new(&log);
     let mut respan_request_count = 0usize;
 
-    for row in 0..main.num_rows() {
+    for row in 0..main.core_height() {
         let idx = RowIndex::from(row);
         let op = main.get_op_code(idx).as_canonical_u64();
         if op != opcodes::RESPAN as u64 {
@@ -216,7 +216,7 @@ fn merge_hasher_bus() {
     let mut exp = Expectations::new(&log);
     let mut split_request_count = 0usize;
 
-    for row in 0..main.num_rows() {
+    for row in 0..main.core_height() {
         let idx = RowIndex::from(row);
         let op = main.get_op_code(idx).as_canonical_u64();
         if op != opcodes::SPLIT as u64 {
@@ -262,7 +262,7 @@ fn hperm_hasher_bus() {
     let mut exp = Expectations::new(&log);
     let mut request_count = 0usize;
     let mut hperm_helper0: Option<Felt> = None;
-    for row in 0..main.num_rows() {
+    for row in 0..main.core_height() {
         let idx = RowIndex::from(row);
         let op = main.get_op_code(idx).as_canonical_u64();
         if op != opcodes::HPERM as u64 {
@@ -325,7 +325,7 @@ fn logprecompile_hasher_bus() {
     let mut exp = Expectations::new(&log);
     let mut request_count = 0usize;
     let mut logprecompile_addr: Option<Felt> = None;
-    for row in 0..main.num_rows() {
+    for row in 0..main.core_height() {
         let idx = RowIndex::from(row);
         let op = main.get_op_code(idx).as_canonical_u64();
         if op != opcodes::LOGPRECOMPILE as u64 {
@@ -417,7 +417,7 @@ fn mpverify_hasher_bus() {
     let mut exp = Expectations::new(&log);
     let mut request_count = 0usize;
 
-    for row in 0..main.num_rows() {
+    for row in 0..main.core_height() {
         let idx = RowIndex::from(row);
         let op = main.get_op_code(idx).as_canonical_u64();
         if op != opcodes::MPVERIFY as u64 {
@@ -496,7 +496,7 @@ fn mrupdate_hasher_bus() {
     let mut exp = Expectations::new(&log);
     let mut request_count = 0usize;
 
-    for row in 0..main.num_rows() {
+    for row in 0..main.core_height() {
         let idx = RowIndex::from(row);
         let op = main.get_op_code(idx).as_canonical_u64();
         if op != opcodes::MRUPDATE as u64 {
@@ -585,6 +585,9 @@ fn rate_from_hasher_state(main: &MainTrace, row: RowIndex) -> [Felt; 8] {
 }
 
 fn is_hasher_controller_row(main: &MainTrace, row: RowIndex) -> bool {
+    if usize::from(row) >= main.chiplets_height() {
+        return false;
+    }
     main.chiplet_selector_0(row) == ONE && main.chiplet_s_perm(row) == ZERO
 }
 
@@ -653,7 +656,7 @@ fn mrupdate_emits_sibling_add_and_remove_per_level(#[case] index: u64) {
     // (`s0·s1·s2`) pattern. See `air/src/constraints/lookup/buses/hash_kernel.rs`.
     let mut mv_rows: Vec<RowIndex> = Vec::new();
     let mut mu_rows: Vec<RowIndex> = Vec::new();
-    for row in 0..main.num_rows() {
+    for row in 0..main.chiplets_height() {
         let idx = RowIndex::from(row);
         if main.chiplet_selector_0(idx) != ONE || main.chiplet_s_perm(idx) != ZERO {
             continue;

@@ -72,7 +72,7 @@ fn memory_chiplet_row_emits_range_check_removes() {
 
     // Collect every memory chiplet row — we expect exactly two for the two memory ops.
     let mut mem_rows: Vec<RowIndex> = Vec::new();
-    for row in 0..main.num_rows() {
+    for row in 0..main.chiplets_height() {
         let idx = RowIndex::from(row);
         if main.is_memory_row(idx) {
             mem_rows.push(idx);
@@ -122,9 +122,9 @@ fn range_checker_table_emits_per_row_adds() {
 
     let mut nonzero_mult_rows = 0usize;
     let mut exp = Expectations::new(&log);
-    for row in 0..main.num_rows() {
+    for row in 0..main.core_height() {
         let idx = RowIndex::from(row);
-        let range = &main.core_row_or_last(idx).range;
+        let range = &main.core_row(idx).range;
         let m = range.multiplicity;
         let v = range.value;
         exp.push(row, m, &RangeMsg { value: v });
@@ -138,7 +138,7 @@ fn range_checker_table_emits_per_row_adds() {
 }
 
 fn find_op_row(main: &MainTrace, opcode: u8) -> RowIndex {
-    for row in 0..main.num_rows() {
+    for row in 0..main.core_height() {
         let idx = RowIndex::from(row);
         if main.get_op_code(idx) == Felt::from_u8(opcode) {
             return idx;

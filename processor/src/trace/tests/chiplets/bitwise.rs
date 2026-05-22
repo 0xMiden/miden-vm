@@ -68,7 +68,7 @@ fn bitwise_chiplet_bus_emits_per_request_row() {
 
     let mut and_rows: Vec<RowIndex> = Vec::new();
     let mut xor_rows: Vec<RowIndex> = Vec::new();
-    for row in 0..main.num_rows() {
+    for row in 0..main.core_height() {
         let idx = RowIndex::from(row);
         let op = main.get_op_code(idx).as_canonical_u64();
         if op == opcodes::U32AND as u64 {
@@ -108,7 +108,7 @@ fn bitwise_chiplet_bus_emits_per_request_row() {
     // chiplet segment starts at a multiple of `HASH_CYCLE_LEN = 16`, which is a multiple of 8,
     // so this alignment condition holds across the whole trace.
     let mut response_rows_seen = 0usize;
-    for row in 0..main.num_rows() {
+    for row in 0..main.chiplets_height() {
         let idx = RowIndex::from(row);
         if !main.is_bitwise_row(idx) {
             continue;
