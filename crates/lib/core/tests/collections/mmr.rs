@@ -550,6 +550,260 @@ fn test_mmr_pack() {
 }
 
 #[test]
+fn test_mmr_root_empty() {
+    let source = "
+        use miden::core::collections::mmr
+
+        begin
+            push.0.1000 mem_store drop
+            push.1000 exec.mmr::root
+            swapw dropw
+        end
+    ";
+
+    build_test!(source).expect_stack(&word_to_ints(&Word::default()));
+}
+
+#[test]
+fn test_mmr_root_matches_frontier_fold() {
+    let cases = [
+        // single leaf: no leading zeros, single peak
+        (1_u64, vec![word_from_u64(1)]),
+        // single leading zero before the first (and only) set bit, exercising the phase 1 -> 2 seam
+        (2, vec![word_from_u64(1)]),
+        // raw-root empty-padding collision shape: len 3 with an empty right leaf
+        (3, vec![Poseidon2::merge(&[Word::default(), Word::default()]), Word::default()]),
+        // mixed bits with a trailing all-ones run (skips the empty-square shortcut)
+        (13, vec![word_from_u64(8), word_from_u64(4), word_from_u64(1)]),
+        // leading zeros, then a set bit, then a gap of unset bits (exercises empty squaring after
+        // acc and empty have diverged): 0b101000
+        (0b10_1000, vec![word_from_u64(2), word_from_u64(1)]),
+        // all ones: phase 1 is skipped and empty is never squared
+        (0b1111_1111_1111_1111_u64, (1..=16).map(word_from_u64).collect::<Vec<_>>()),
+        // power of two: phase 1 folds every leading zero, single peak at the top
+        (0b1_0000_0000_0000_0000_u64, vec![word_from_u64(17)]),
+    ];
+
+    for (num_leaves, peaks) in cases {
+        let mmr_ptr = 1000_u32;
+        let mut source = format!(
+            "
+            use miden::core::collections::mmr
+
+            begin
+                push.{num_leaves} push.{mmr_ptr} mem_store drop
+        "
+        );
+
+        for (idx, peak) in peaks.iter().enumerate() {
+            let stack = word_to_ints(peak);
+            source.push_str(&format!(
+                "
+                push.{}.{}.{}.{} push.{} mem_storew_le dropw
+                ",
+                stack[3],
+                stack[2],
+                stack[1],
+                stack[0],
+                mmr_ptr + 4 + idx as u32 * 4,
+            ));
+        }
+
+        source.push_str(&format!(
+            "
+                push.{mmr_ptr} exec.mmr::root
+                swapw dropw
+            end
+            "
+        ));
+
+        let expected_root = mmr_frontier_root(num_leaves as usize, &peaks);
+        build_test!(&source).expect_stack(&word_to_ints(&expected_root));
+    }
+}
+
+#[test]
+fn test_mmr_root_with_len_returns_authenticated_pair() {
+    let num_leaves = 13_u64;
+    let peaks = vec![word_from_u64(8), word_from_u64(4), word_from_u64(1)];
+    let mmr_ptr = 1000_u32;
+    let mut source = format!(
+        "
+        use miden::core::collections::mmr
+
+        begin
+            push.{num_leaves} push.{mmr_ptr} mem_store drop
+    "
+    );
+
+    for (idx, peak) in peaks.iter().enumerate() {
+        let stack = word_to_ints(peak);
+        source.push_str(&format!(
+            "
+            push.{}.{}.{}.{} push.{} mem_storew_le dropw
+            ",
+            stack[3],
+            stack[2],
+            stack[1],
+            stack[0],
+            mmr_ptr + 4 + idx as u32 * 4,
+        ));
+    }
+
+    source.push_str(&format!(
+        "
+            push.{mmr_ptr} exec.mmr::root_with_len
+            dup.4 push.{num_leaves} assert_eq
+            movup.4 drop
+            swapw dropw
+        end
+        "
+    ));
+
+    let expected_root = mmr_frontier_root(num_leaves as usize, &peaks);
+    build_test!(&source).expect_stack(&word_to_ints(&expected_root));
+}
+
+#[test]
+fn test_mmr_root_with_len_disambiguates_empty_padding_collision() {
+    let empty_leaf = Word::default();
+    let empty_pair = Poseidon2::merge(&[empty_leaf, empty_leaf]);
+    let peaks_len2 = vec![empty_pair];
+    let peaks_len3 = vec![empty_pair, empty_leaf];
+
+    let root_len2 = mmr_frontier_root(2, &peaks_len2);
+    let root_len3 = mmr_frontier_root(3, &peaks_len3);
+    assert_eq!(root_len2, root_len3);
+
+    let mmr_len2_ptr = 1000_u32;
+    let mmr_len3_ptr = 2000_u32;
+    let empty_pair = word_to_ints(&empty_pair);
+    let empty_leaf = word_to_ints(&empty_leaf);
+    let raw_root = word_to_ints(&root_len2);
+
+    let source = format!(
+        "
+        use miden::core::collections::mmr
+
+        begin
+            push.2 push.{mmr_len2_ptr} mem_store drop
+            push.{}.{}.{}.{} push.{} mem_storew_le dropw
+
+            push.3 push.{mmr_len3_ptr} mem_store drop
+            push.{}.{}.{}.{} push.{} mem_storew_le dropw
+            push.{}.{}.{}.{} push.{} mem_storew_le dropw
+
+            push.{mmr_len2_ptr} exec.mmr::root_with_len
+            dup.4 push.2 assert_eq
+            movup.4 drop
+            push.{}.{}.{}.{} assert_eqw
+
+            push.{mmr_len3_ptr} exec.mmr::root_with_len
+            dup.4 push.3 assert_eq
+            movup.4 drop
+            push.{}.{}.{}.{} assert_eqw
+        end
+        ",
+        empty_pair[3],
+        empty_pair[2],
+        empty_pair[1],
+        empty_pair[0],
+        mmr_len2_ptr + 4,
+        empty_pair[3],
+        empty_pair[2],
+        empty_pair[1],
+        empty_pair[0],
+        mmr_len3_ptr + 4,
+        empty_leaf[3],
+        empty_leaf[2],
+        empty_leaf[1],
+        empty_leaf[0],
+        mmr_len3_ptr + 8,
+        raw_root[3],
+        raw_root[2],
+        raw_root[1],
+        raw_root[0],
+        raw_root[3],
+        raw_root[2],
+        raw_root[1],
+        raw_root[0],
+    );
+
+    build_test!(&source).expect_stack(&[]);
+}
+
+#[test]
+fn test_mmr_unpack_frontier_authenticates_pair() {
+    let num_leaves = 13_u64;
+    let peaks = [word_from_u64(8), word_from_u64(4), word_from_u64(1)];
+    let root = mmr_frontier_root(num_leaves as usize, &peaks);
+    let mmr_ptr = 1000_u32;
+
+    // advice map value: [num_leaves, 0, 0, 0] || peaks (same layout as `unpack`), keyed by ROOT
+    let mut value = vec![Felt::new_unchecked(num_leaves), ZERO, ZERO, ZERO];
+    let mut padded_peaks = peaks.to_vec();
+    padded_peaks.resize(16, Word::default());
+    for peak in &padded_peaks {
+        value.extend_from_slice(&Into::<[Felt; WORD_SIZE]>::into(*peak));
+    }
+    let advice_map: &[(Word, Vec<Felt>)] = &[(root, value)];
+
+    // operand stack: [ROOT, num_leaves, mmr_ptr]
+    let mut stack = word_to_ints(&root);
+    stack.push(num_leaves);
+    stack.push(mmr_ptr as u64);
+
+    let source = format!(
+        "
+        use miden::core::collections::mmr
+        begin
+            push.9.9.9.9 push.{} mem_storew_le dropw
+            exec.mmr::unpack_frontier
+        end
+    ",
+        mmr_ptr + 16
+    );
+    let test = build_test!(&source, &stack, &[], MerkleStore::new(), advice_map.iter().cloned());
+
+    // peaks must be loaded into memory exactly as `unpack` would leave them
+    let mut expected_memory = vec![num_leaves, 0, 0, 0];
+    expected_memory.extend(digests_to_ints(&padded_peaks));
+    test.expect_stack_and_memory(&[], mmr_ptr, &expected_memory);
+}
+
+#[test]
+fn test_mmr_unpack_frontier_rejects_wrong_len() {
+    // Same raw root, but a longer (empty-padded) length must be rejected: this is huitseeker's
+    // empty-padding ambiguity. We commit to `num_leaves + 1` against the root of `num_leaves`.
+    let num_leaves = 13_u64;
+    let peaks = [word_from_u64(8), word_from_u64(4), word_from_u64(1)];
+    let root = mmr_frontier_root(num_leaves as usize, &peaks);
+    let mmr_ptr = 1000_u32;
+
+    let tampered_len = num_leaves + 1;
+    let mut value = vec![Felt::new_unchecked(tampered_len), ZERO, ZERO, ZERO];
+    let mut padded_peaks = peaks.to_vec();
+    padded_peaks.resize(16, Word::default());
+    for peak in &padded_peaks {
+        value.extend_from_slice(&Into::<[Felt; WORD_SIZE]>::into(*peak));
+    }
+    let advice_map: &[(Word, Vec<Felt>)] = &[(root, value)];
+
+    // commit to a tampered length while presenting the genuine root
+    let mut stack = word_to_ints(&root);
+    stack.push(tampered_len);
+    stack.push(mmr_ptr as u64);
+
+    let source = "
+        use miden::core::collections::mmr
+        begin exec.mmr::unpack_frontier end
+    ";
+    build_test!(source, &stack, &[], MerkleStore::new(), advice_map.iter().cloned())
+        .execute()
+        .expect_err("frontier root must not authenticate a tampered length");
+}
+
+#[test]
 fn test_mmr_add_single() {
     let mmr_ptr = 1000;
     let source = format!(
@@ -853,4 +1107,35 @@ fn digests_to_ints(digests: &[Word]) -> Vec<u64> {
 fn word_to_ints(word: &Word) -> Vec<u64> {
     let arr: [Felt; WORD_SIZE] = (*word).into();
     arr.iter().map(Felt::as_canonical_u64).collect()
+}
+
+fn word_from_u64(value: u64) -> Word {
+    [ZERO, ZERO, ZERO, Felt::new_unchecked(value)].into()
+}
+
+fn mmr_frontier_root(num_leaves: usize, peaks: &[Word]) -> Word {
+    if num_leaves == 0 {
+        return Word::default();
+    }
+
+    let mut bits = num_leaves;
+    let mut peak_idx = peaks.len();
+    let mut acc = Word::default();
+    let mut empty = Word::default();
+
+    while bits != 0 {
+        if bits & 1 == 1 {
+            peak_idx -= 1;
+            acc = Poseidon2::merge(&[peaks[peak_idx], acc]);
+        } else {
+            acc = Poseidon2::merge(&[acc, empty]);
+        }
+
+        bits >>= 1;
+        if bits != 0 {
+            empty = Poseidon2::merge(&[empty, empty]);
+        }
+    }
+
+    acc
 }
