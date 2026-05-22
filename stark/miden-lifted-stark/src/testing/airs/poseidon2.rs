@@ -8,7 +8,7 @@ use alloc::vec::Vec;
 use miden_lifted_air::{Air, BaseAir, LiftedAir, LiftedAirBuilder};
 use p3_field::Field;
 use p3_goldilocks::{GenericPoseidon2LinearLayersGoldilocks, Goldilocks};
-use p3_matrix::dense::RowMajorMatrix;
+use p3_matrix::{Matrix, dense::RowMajorMatrix};
 use p3_poseidon2_air::{Poseidon2Air, RoundConstants, num_cols};
 
 /// Goldilocks Poseidon2 configuration constants.
@@ -65,6 +65,17 @@ impl<EF: Field> LiftedAir<Goldilocks, EF> for LiftedPoseidon2Air {
 
     fn num_aux_values(&self) -> usize {
         0
+    }
+
+    fn build_aux_trace(
+        &self,
+        main: &RowMajorMatrix<Goldilocks>,
+        _air_inputs: &[Goldilocks],
+        _aux_inputs: &[Goldilocks],
+        _challenges: &[EF],
+    ) -> (RowMajorMatrix<EF>, Vec<EF>) {
+        // Main-trace-only AIR: a single all-zero aux column.
+        (RowMajorMatrix::new(EF::zero_vec(main.height()), 1), Vec::new())
     }
 
     fn eval<AB: LiftedAirBuilder<F = Goldilocks>>(&self, builder: &mut AB) {

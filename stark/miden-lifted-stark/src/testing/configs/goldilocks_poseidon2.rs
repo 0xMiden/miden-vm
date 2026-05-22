@@ -166,66 +166,38 @@ where
     assert_eq!(output.digest, reparse_digest);
 }
 
-/// Closure-driven [`MultiAir`] for tests.
-///
-/// `aux_fn` is called once per AIR with `(main_trace, challenges)` and returns
-/// `(aux_trace, aux_values)` for that AIR.
-pub struct TestMultiAir<A, AuxFn> {
+/// Minimal [`MultiAir`] wrapper for tests: a list of AIRs, each building its own
+/// aux trace via [`LiftedAir::build_aux_trace`](crate::air::LiftedAir::build_aux_trace).
+pub struct TestMultiAir<A> {
     pub airs: Vec<A>,
-    pub aux_fn: AuxFn,
 }
 
-impl<A, AuxFn> TestMultiAir<A, AuxFn> {
-    pub fn new(airs: Vec<A>, aux_fn: AuxFn) -> Self {
-        Self { airs, aux_fn }
+impl<A> TestMultiAir<A> {
+    pub fn new(airs: Vec<A>) -> Self {
+        Self { airs }
     }
 }
 
-impl<A, AuxFn> MultiAir<Felt, QuadFelt> for TestMultiAir<A, AuxFn>
+impl<A> MultiAir<Felt, QuadFelt> for TestMultiAir<A>
 where
     A: crate::air::LiftedAir<Felt, QuadFelt>,
-    AuxFn: Fn(&RowMajorMatrix<Felt>, &[QuadFelt]) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>),
 {
     type Air = A;
 
     fn airs(&self) -> &[Self::Air] {
         &self.airs
     }
-
-    fn build_aux_traces(
-        &self,
-        traces: &[&RowMajorMatrix<Felt>],
-        _air_inputs: &[Felt],
-        _aux_inputs: &[Felt],
-        challenges: &[QuadFelt],
-    ) -> (Vec<RowMajorMatrix<QuadFelt>>, Vec<Vec<QuadFelt>>) {
-        debug_assert_eq!(self.airs.len(), traces.len());
-        let mut traces_out = Vec::with_capacity(traces.len());
-        let mut values_out = Vec::with_capacity(traces.len());
-        for &trace in traces {
-            let (aux, vals) = (self.aux_fn)(trace, challenges);
-            traces_out.push(aux);
-            values_out.push(vals);
-        }
-        (traces_out, values_out)
-    }
 }
 
-/// Prove and verify multiple traces sharing one AIR and one aux-build closure.
-pub fn prove_and_verify<A, AuxFn>(
-    air: &A,
-    aux_fn: AuxFn,
-    air_inputs: &[Felt],
-    traces: &[RowMajorMatrix<Felt>],
-) where
+/// Prove and verify multiple traces sharing one AIR.
+pub fn prove_and_verify<A>(air: &A, air_inputs: &[Felt], traces: &[RowMajorMatrix<Felt>])
+where
     A: crate::air::LiftedAir<Felt, QuadFelt> + Clone,
-    AuxFn: Fn(&RowMajorMatrix<Felt>, &[QuadFelt]) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>),
 {
     let airs: Vec<A> = core::iter::repeat_n(air.clone(), traces.len()).collect();
     let traces_owned: Vec<RowMajorMatrix<Felt>> = traces.to_vec();
-    let statement =
-        Statement::new(TestMultiAir::new(airs, aux_fn), air_inputs.to_vec(), Vec::new())
-            .expect("statement inputs valid");
+    let statement = Statement::new(TestMultiAir::new(airs), air_inputs.to_vec(), Vec::new())
+        .expect("statement inputs valid");
     let prover_statement =
         ProverStatement::new(statement, traces_owned).expect("trace shape valid");
     prove_and_verify_statement(&prover_statement);

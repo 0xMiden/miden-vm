@@ -45,6 +45,17 @@ impl LiftedAir<Felt, QuadFelt> for PowerAir {
         0
     }
 
+    fn build_aux_trace(
+        &self,
+        main: &RowMajorMatrix<Felt>,
+        _air_inputs: &[Felt],
+        _aux_inputs: &[Felt],
+        challenges: &[QuadFelt],
+    ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
+        // Trivial aux: a single constant-challenge column.
+        (RowMajorMatrix::new(vec![challenges[0]; main.height()], 1), vec![])
+    }
+
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
         let main = builder.main();
         let (local, next) = (main.current_slice().to_vec(), main.next_slice().to_vec());
@@ -101,6 +112,17 @@ impl LiftedAir<Felt, QuadFelt> for PeriodicPowerAir {
         0
     }
 
+    fn build_aux_trace(
+        &self,
+        main: &RowMajorMatrix<Felt>,
+        _air_inputs: &[Felt],
+        _aux_inputs: &[Felt],
+        challenges: &[QuadFelt],
+    ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
+        // Trivial aux: a single constant-challenge column.
+        (RowMajorMatrix::new(vec![challenges[0]; main.height()], 1), vec![])
+    }
+
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
         let main = builder.main();
         let (local, next) = (main.current_slice().to_vec(), main.next_slice().to_vec());
@@ -150,24 +172,6 @@ where
 
     fn airs(&self) -> &[Self::Air] {
         &self.airs
-    }
-
-    fn build_aux_traces(
-        &self,
-        traces: &[&RowMajorMatrix<Felt>],
-        _air_inputs: &[Felt],
-        _aux_inputs: &[Felt],
-        challenges: &[QuadFelt],
-    ) -> (Vec<RowMajorMatrix<QuadFelt>>, Vec<Vec<QuadFelt>>) {
-        let mut traces_out = Vec::with_capacity(traces.len());
-        let mut values_out = Vec::with_capacity(traces.len());
-        for &t in traces {
-            let height = t.height();
-            let column = vec![challenges[0]; height];
-            traces_out.push(RowMajorMatrix::new(column, 1));
-            values_out.push(vec![]);
-        }
-        (traces_out, values_out)
     }
 }
 

@@ -19,12 +19,12 @@ Protocol-level overview lives in `miden-lifted-stark/README.md`.
 prove(config, &prover_statement, challenger)
 ```
 
-A `MultiAir` impl exposes its AIRs via `type Air` + `fn airs() -> &[Self::Air]`,
-the required `build_aux_traces(traces, air_inputs, aux_inputs, challenges)`
-(returns `(Vec<aux_trace>, Vec<aux_values>)` in instance order), and optionally
-overrides `max_aux_inputs()`, `eval_external(...)`, and `observe(challenger, ...)`
-(defaults: zero `aux_inputs` budget, no assertions, observe `air_inputs` then
-`aux_inputs` then `log_heights`). A `Statement` wraps a `MultiAir` with the
+A `MultiAir` impl exposes its AIRs via `type Air` + `fn airs() -> &[Self::Air]`
+and optionally overrides `max_aux_inputs()`, `eval_external(...)`, and
+`observe(challenger, ...)` (defaults: zero `aux_inputs` budget, no assertions,
+observe `air_inputs` then `aux_inputs` then `log_heights`). Each AIR builds its
+own auxiliary trace via `LiftedAir::build_aux_trace(main, air_inputs, aux_inputs,
+challenges)`. A `Statement` wraps a `MultiAir` with the
 `air_inputs` shared by every AIR and the optional `aux_inputs`; `Statement::new`
 validates the inputs against the AIRs. A `ProverStatement` wraps a `Statement`
 with `traces()` (per-AIR main traces in instance order); `ProverStatement::new`

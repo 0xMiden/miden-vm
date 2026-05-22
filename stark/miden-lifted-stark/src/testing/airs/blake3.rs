@@ -5,7 +5,7 @@ use alloc::vec::Vec;
 use miden_lifted_air::{Air, BaseAir, LiftedAir, LiftedAirBuilder};
 pub use p3_blake3_air::{Blake3Air, NUM_BLAKE3_COLS};
 use p3_field::{Field, PrimeField64};
-use p3_matrix::dense::RowMajorMatrix;
+use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
 /// [`Blake3Air`] adapted for the lifted STARK prover.
 ///
@@ -36,6 +36,17 @@ impl<F: PrimeField64, EF: Field> LiftedAir<F, EF> for LiftedBlake3Air {
 
     fn num_aux_values(&self) -> usize {
         0
+    }
+
+    fn build_aux_trace(
+        &self,
+        main: &RowMajorMatrix<F>,
+        _air_inputs: &[F],
+        _aux_inputs: &[F],
+        _challenges: &[EF],
+    ) -> (RowMajorMatrix<EF>, Vec<EF>) {
+        // Main-trace-only AIR: a single all-zero aux column.
+        (RowMajorMatrix::new(EF::zero_vec(main.height()), 1), Vec::new())
     }
 
     fn eval<AB: LiftedAirBuilder<F = F>>(&self, builder: &mut AB) {

@@ -12,7 +12,7 @@ use miden_lifted_stark::{
     },
     verify,
 };
-use p3_field::{Field, PrimeCharacteristicRing};
+use p3_field::Field;
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 use tracing::info_span;
 
@@ -65,6 +65,20 @@ impl<EF: Field> LiftedAir<Felt, EF> for LiftedBenchAir {
         }
     }
 
+    fn build_aux_trace(
+        &self,
+        main: &RowMajorMatrix<Felt>,
+        _air_inputs: &[Felt],
+        _aux_inputs: &[Felt],
+        _challenges: &[EF],
+    ) -> (RowMajorMatrix<EF>, Vec<EF>) {
+        // All-zero aux trace of the AIR's declared width.
+        let aux_width = LiftedAir::<Felt, EF>::aux_width(self);
+        let num_aux_values = LiftedAir::<Felt, EF>::num_aux_values(self);
+        let aux = RowMajorMatrix::new(EF::zero_vec(main.height() * aux_width), aux_width);
+        (aux, EF::zero_vec(num_aux_values))
+    }
+
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
         match self {
             Self::Keccak(a) => LiftedAir::<Felt, EF>::eval(a, builder),
@@ -76,13 +90,11 @@ impl<EF: Field> LiftedAir<Felt, EF> for LiftedBenchAir {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// MultiAir: per-AIR all-zero aux trace, empty public inputs.
+// MultiAir: empty public inputs; each AIR builds its own all-zero aux trace.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 struct BenchMultiAir {
     airs: Vec<LiftedBenchAir>,
-    /// `(num_aux_cols, num_aux_values)` per AIR.
-    aux_shape: Vec<(usize, usize)>,
 }
 
 impl MultiAir<Felt, QuadFelt> for BenchMultiAir {
@@ -90,25 +102,6 @@ impl MultiAir<Felt, QuadFelt> for BenchMultiAir {
 
     fn airs(&self) -> &[Self::Air] {
         &self.airs
-    }
-
-    fn build_aux_traces(
-        &self,
-        traces: &[&RowMajorMatrix<Felt>],
-        _air_inputs: &[Felt],
-        _aux_inputs: &[Felt],
-        _challenges: &[QuadFelt],
-    ) -> (Vec<RowMajorMatrix<QuadFelt>>, Vec<Vec<QuadFelt>>) {
-        let mut traces_out = Vec::with_capacity(traces.len());
-        let mut values_out = Vec::with_capacity(traces.len());
-        for (i, &t) in traces.iter().enumerate() {
-            let height = t.height();
-            let (num_aux_cols, num_aux_values) = self.aux_shape[i];
-            let values = QuadFelt::zero_vec(height * num_aux_cols);
-            traces_out.push(RowMajorMatrix::new(values, num_aux_cols));
-            values_out.push(vec![QuadFelt::ZERO; num_aux_values]);
-        }
-        (traces_out, values_out)
     }
 }
 
@@ -142,17 +135,9 @@ where
         })
         .collect();
 
-    let aux_shape: Vec<(usize, usize)> = specs
-        .iter()
-        .map(|spec| match spec.air_type {
-            AirType::Miden => (spec.num_aux_cols, spec.num_aux_cols),
-            _ => (1, 0),
-        })
-        .collect();
-
     let traces_owned: Vec<RowMajorMatrix<Felt>> = traces.to_vec();
-    let statement = Statement::new(BenchMultiAir { airs, aux_shape }, Vec::new(), Vec::new())
-        .expect("statement");
+    let statement =
+        Statement::new(BenchMultiAir { airs }, Vec::new(), Vec::new()).expect("statement");
     let prover_statement = ProverStatement::new(statement, traces_owned).expect("prover statement");
 
     let output = info_span!("prove").in_scope(|| {

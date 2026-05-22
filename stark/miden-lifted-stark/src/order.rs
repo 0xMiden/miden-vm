@@ -245,10 +245,11 @@ pub enum ShapeError {
 
 #[cfg(test)]
 mod tests {
-    use alloc::vec;
+    use alloc::{vec, vec::Vec};
 
     use miden_lifted_air::{BaseAir, LiftedAirBuilder};
     use p3_goldilocks::Goldilocks;
+    use p3_matrix::dense::RowMajorMatrix;
 
     use super::*;
 
@@ -274,6 +275,16 @@ mod tests {
         }
         fn num_aux_values(&self) -> usize {
             0
+        }
+        fn build_aux_trace(
+            &self,
+            _main: &RowMajorMatrix<TF>,
+            _air_inputs: &[TF],
+            _aux_inputs: &[TF],
+            _challenges: &[TF],
+        ) -> (RowMajorMatrix<TF>, Vec<TF>) {
+            // Unused: these tests only exercise the height permutation.
+            (RowMajorMatrix::new(Vec::new(), 1), Vec::new())
         }
         fn eval<AB: LiftedAirBuilder<F = TF>>(&self, _builder: &mut AB) {}
     }

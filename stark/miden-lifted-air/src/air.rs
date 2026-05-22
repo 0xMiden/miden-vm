@@ -108,12 +108,25 @@ pub trait LiftedAir<F: Field, EF>: Sync + BaseAir<F> {
 
     /// Number of extension-field aux values committed to the Fiat-Shamir transcript.
     ///
-    /// Returned by [`MultiAir::build_aux_traces`](crate::MultiAir::build_aux_traces)
-    /// alongside the aux trace matrix; the count is independent of
-    /// [`aux_width`](Self::aux_width) (the number of aux trace columns). Exposed to
-    /// constraints as *permutation values* via
+    /// Returned by [`build_aux_trace`](Self::build_aux_trace) alongside the aux trace
+    /// matrix; the count is independent of [`aux_width`](Self::aux_width) (the number
+    /// of aux trace columns). Exposed to constraints as *permutation values* via
     /// [`PermutationAirBuilder::permutation_values`](crate::PermutationAirBuilder::permutation_values).
     fn num_aux_values(&self) -> usize;
+
+    /// Build this AIR's auxiliary trace and aux values.
+    ///
+    /// `challenges` is the shared challenge pool; consume the prefix matching
+    /// [`num_randomness`](Self::num_randomness). The returned `aux_trace` has width
+    /// [`aux_width`](Self::aux_width) and the same height as `main`; `aux_values` has
+    /// length [`num_aux_values`](Self::num_aux_values).
+    fn build_aux_trace(
+        &self,
+        main: &RowMajorMatrix<F>,
+        air_inputs: &[F],
+        aux_inputs: &[F],
+        challenges: &[EF],
+    ) -> (RowMajorMatrix<EF>, Vec<EF>);
 
     /// Return the [`AirLayout`] describing this AIR's dimensions.
     ///
@@ -299,26 +312,6 @@ where
         let _ = (challenges, air_inputs, aux_values, log_trace_heights);
         Ok(Vec::new())
     }
-
-    /// Build every AIR's auxiliary trace and aux values.
-    ///
-    /// # Arguments
-    /// - `traces`, `air_inputs`, `aux_inputs`: instance-order slices owned by the
-    ///   [`ProverStatement`](crate::ProverStatement) / [`Statement`](crate::Statement).
-    /// - `challenges`: sized to the maximum `num_randomness()` across AIRs; each AIR consumes the
-    ///   prefix matching its own `num_randomness()`.
-    ///
-    /// # Returns
-    /// `(aux_traces, aux_values)` in instance order — one entry per AIR.
-    /// `aux_traces[i]` has width `self.airs()[i].aux_width()` and height matching
-    /// `traces[i]`; `aux_values[i]` has length `self.airs()[i].num_aux_values()`.
-    fn build_aux_traces(
-        &self,
-        traces: &[&RowMajorMatrix<F>],
-        air_inputs: &[F],
-        aux_inputs: &[F],
-        challenges: &[EF],
-    ) -> (Vec<RowMajorMatrix<EF>>, Vec<Vec<EF>>);
 
     /// Absorb per-proof state into the Fiat-Shamir challenger.
     ///

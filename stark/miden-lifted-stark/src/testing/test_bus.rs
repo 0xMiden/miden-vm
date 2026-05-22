@@ -32,7 +32,10 @@ use crate::{
 // ---------------------------------------------------------------------------
 
 #[derive(Clone, Debug)]
-struct BusTestAir;
+struct BusTestAir {
+    pi_0: Felt,
+    pi_1: Felt,
+}
 
 impl BaseAir<Felt> for BusTestAir {
     fn width(&self) -> usize {
@@ -55,6 +58,27 @@ impl LiftedAir<Felt, QuadFelt> for BusTestAir {
 
     fn num_aux_values(&self) -> usize {
         2
+    }
+
+    fn build_aux_trace(
+        &self,
+        main: &RowMajorMatrix<Felt>,
+        _air_inputs: &[Felt],
+        _aux_inputs: &[Felt],
+        challenges: &[QuadFelt],
+    ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
+        // Two constant columns: col0 = 1/(pi_0 + c0) (multiset), col1 = pi_1 + c1 (logup).
+        let c0 = challenges[0];
+        let c1 = challenges[1];
+        let col0 = (QuadFelt::from(self.pi_0) + c0).inverse();
+        let col1 = QuadFelt::from(self.pi_1) + c1;
+
+        let mut values = Vec::with_capacity(main.height() * 2);
+        for _ in 0..main.height() {
+            values.push(col0);
+            values.push(col1);
+        }
+        (RowMajorMatrix::new(values, 2), vec![col0, col1])
     }
 
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
@@ -107,14 +131,11 @@ impl LiftedAir<Felt, QuadFelt> for BusTestAir {
 }
 
 // ---------------------------------------------------------------------------
-// MultiAir: carries the bus parameters (pi_0, pi_1) used by both the
-// aux-trace builder and the cross-AIR `eval_external` reduction.
+// MultiAir: the cross-AIR `eval_external` reduction over `aux_inputs`.
 // ---------------------------------------------------------------------------
 
 struct BusMultiAir {
     airs: Vec<BusTestAir>,
-    pi_0: Felt,
-    pi_1: Felt,
 }
 
 impl MultiAir<Felt, QuadFelt> for BusMultiAir {
@@ -127,29 +148,6 @@ impl MultiAir<Felt, QuadFelt> for BusMultiAir {
     fn max_aux_inputs(&self) -> usize {
         // `pi_0` and `pi_1`.
         2
-    }
-
-    fn build_aux_traces(
-        &self,
-        traces: &[&RowMajorMatrix<Felt>],
-        _air_inputs: &[Felt],
-        _aux_inputs: &[Felt],
-        challenges: &[QuadFelt],
-    ) -> (Vec<RowMajorMatrix<QuadFelt>>, Vec<Vec<QuadFelt>>) {
-        let height = traces[0].height();
-        let c0 = challenges[0];
-        let c1 = challenges[1];
-
-        let col0_val = (QuadFelt::from(self.pi_0) + c0).inverse();
-        let col1_val = QuadFelt::from(self.pi_1) + c1;
-
-        let mut values = Vec::with_capacity(height * 2);
-        for _ in 0..height {
-            values.push(col0_val);
-            values.push(col1_val);
-        }
-
-        (vec![RowMajorMatrix::new(values, 2)], vec![vec![col0_val, col1_val]])
     }
 
     fn eval_external(
@@ -181,9 +179,12 @@ fn bus_prover_statement(
     air_inputs: Vec<Felt>,
     aux_inputs: Vec<Felt>,
 ) -> ProverStatement<Felt, QuadFelt, BusMultiAir> {
-    let statement =
-        Statement::new(BusMultiAir { airs: vec![BusTestAir], pi_0, pi_1 }, air_inputs, aux_inputs)
-            .expect("statement inputs valid");
+    let statement = Statement::new(
+        BusMultiAir { airs: vec![BusTestAir { pi_0, pi_1 }] },
+        air_inputs,
+        aux_inputs,
+    )
+    .expect("statement inputs valid");
     ProverStatement::new(statement, vec![trace]).expect("trace shape valid")
 }
 

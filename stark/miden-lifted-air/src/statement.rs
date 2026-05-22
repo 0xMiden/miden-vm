@@ -191,15 +191,22 @@ where
         &self.traces
     }
 
-    /// Build every AIR's aux trace + aux values via [`MultiAir::build_aux_traces`].
+    /// Build every AIR's aux trace + aux values via [`LiftedAir::build_aux_trace`].
     pub fn build_aux_traces(&self, challenges: &[EF]) -> (Vec<RowMajorMatrix<EF>>, Vec<Vec<EF>>) {
-        let trace_refs: Vec<&RowMajorMatrix<F>> = self.traces.iter().collect();
-        self.statement.multi_air.build_aux_traces(
-            &trace_refs,
-            &self.statement.air_inputs,
-            &self.statement.aux_inputs,
-            challenges,
-        )
+        let airs = self.statement.airs();
+        let mut aux_traces = Vec::with_capacity(airs.len());
+        let mut aux_values = Vec::with_capacity(airs.len());
+        for (air, main) in airs.iter().zip(self.traces.iter()) {
+            let (trace, values) = air.build_aux_trace(
+                main,
+                &self.statement.air_inputs,
+                &self.statement.aux_inputs,
+                challenges,
+            );
+            aux_traces.push(trace);
+            aux_values.push(values);
+        }
+        (aux_traces, aux_values)
     }
 }
 

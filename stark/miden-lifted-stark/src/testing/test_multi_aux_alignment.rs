@@ -50,6 +50,23 @@ impl LiftedAir<Felt, QuadFelt> for PaddingAir {
         0
     }
 
+    fn build_aux_trace(
+        &self,
+        main: &RowMajorMatrix<Felt>,
+        _air_inputs: &[Felt],
+        _aux_inputs: &[Felt],
+        challenges: &[QuadFelt],
+    ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
+        // Column 0 holds the challenge; the rest pad with zeros up to `aux_width`.
+        let challenge = challenges[0];
+        let mut values = Vec::with_capacity(main.height() * self.aux_width);
+        for _ in 0..main.height() {
+            values.push(challenge);
+            values.extend(core::iter::repeat_n(QuadFelt::ZERO, self.aux_width - 1));
+        }
+        (RowMajorMatrix::new(values, self.aux_width), vec![])
+    }
+
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
         let main = builder.main();
         let start = builder.public_values()[0];
@@ -67,7 +84,6 @@ impl LiftedAir<Felt, QuadFelt> for PaddingAir {
     }
 }
 
-/// `MultiAir` that emits aux traces of the AIR's declared width.
 struct PaddingMultiAir {
     airs: Vec<PaddingAir>,
 }
@@ -77,30 +93,6 @@ impl MultiAir<Felt, QuadFelt> for PaddingMultiAir {
 
     fn airs(&self) -> &[Self::Air] {
         &self.airs
-    }
-
-    fn build_aux_traces(
-        &self,
-        traces: &[&RowMajorMatrix<Felt>],
-        _air_inputs: &[Felt],
-        _aux_inputs: &[Felt],
-        challenges: &[QuadFelt],
-    ) -> (Vec<RowMajorMatrix<QuadFelt>>, Vec<Vec<QuadFelt>>) {
-        let challenge = challenges[0];
-        let mut traces_out = Vec::with_capacity(traces.len());
-        let mut values_out = Vec::with_capacity(traces.len());
-        for (&t, air) in traces.iter().zip(self.airs.iter()) {
-            let aux_width = air.aux_width;
-            let height = t.height();
-            let mut values = Vec::with_capacity(height * aux_width);
-            for _ in 0..height {
-                values.push(challenge);
-                values.extend(core::iter::repeat_n(QuadFelt::ZERO, aux_width - 1));
-            }
-            traces_out.push(RowMajorMatrix::new(values, aux_width));
-            values_out.push(vec![]);
-        }
-        (traces_out, values_out)
     }
 }
 

@@ -76,6 +76,16 @@ impl LiftedAir<Felt, QuadFelt> for TinyAir {
         1
     }
 
+    fn build_aux_trace(
+        &self,
+        main: &RowMajorMatrix<Felt>,
+        _air_inputs: &[Felt],
+        _aux_inputs: &[Felt],
+        challenges: &[QuadFelt],
+    ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
+        tiny_aux(main, challenges)
+    }
+
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
         let main = builder.main();
         let start = builder.public_values()[0];
@@ -130,7 +140,6 @@ fn tiny_aux(
     (aux_trace, aux_values)
 }
 
-/// `MultiAir` that runs [`tiny_aux`] per AIR.
 struct TinyMultiAir {
     airs: Vec<TinyAir>,
 }
@@ -140,23 +149,6 @@ impl MultiAir<Felt, QuadFelt> for TinyMultiAir {
 
     fn airs(&self) -> &[Self::Air] {
         &self.airs
-    }
-
-    fn build_aux_traces(
-        &self,
-        traces: &[&RowMajorMatrix<Felt>],
-        _air_inputs: &[Felt],
-        _aux_inputs: &[Felt],
-        challenges: &[QuadFelt],
-    ) -> (Vec<RowMajorMatrix<QuadFelt>>, Vec<Vec<QuadFelt>>) {
-        let mut traces_out = Vec::with_capacity(traces.len());
-        let mut values_out = Vec::with_capacity(traces.len());
-        for &t in traces {
-            let (a, v) = tiny_aux(t, challenges);
-            traces_out.push(a);
-            values_out.push(v);
-        }
-        (traces_out, values_out)
     }
 }
 
@@ -183,7 +175,7 @@ fn trace_of_height(height: usize) -> RowMajorMatrix<Felt> {
 #[test]
 fn single_trace() {
     let pv = vec![Felt::from_u64(START)];
-    prove_and_verify(&TinyAir::new(vec![]), tiny_aux, &pv, &[trace_of_height(8)]);
+    prove_and_verify(&TinyAir::new(vec![]), &pv, &[trace_of_height(8)]);
 }
 
 #[test]
@@ -259,23 +251,13 @@ fn malformed_log_trace_heights_is_rejected() {
 #[test]
 fn two_traces_same_height() {
     let pv = vec![Felt::from_u64(START)];
-    prove_and_verify(
-        &TinyAir::new(vec![]),
-        tiny_aux,
-        &pv,
-        &[trace_of_height(8), trace_of_height(8)],
-    );
+    prove_and_verify(&TinyAir::new(vec![]), &pv, &[trace_of_height(8), trace_of_height(8)]);
 }
 
 #[test]
 fn two_traces_different_heights() {
     let pv = vec![Felt::from_u64(START)];
-    prove_and_verify(
-        &TinyAir::new(vec![]),
-        tiny_aux,
-        &pv,
-        &[trace_of_height(4), trace_of_height(8)],
-    );
+    prove_and_verify(&TinyAir::new(vec![]), &pv, &[trace_of_height(4), trace_of_height(8)]);
 }
 
 #[test]
@@ -283,7 +265,6 @@ fn three_traces_ascending_heights() {
     let pv = vec![Felt::from_u64(START)];
     prove_and_verify(
         &TinyAir::new(vec![]),
-        tiny_aux,
         &pv,
         &[trace_of_height(4), trace_of_height(8), trace_of_height(16)],
     );
@@ -296,12 +277,7 @@ fn three_traces_ascending_heights() {
 #[test]
 fn two_traces_reversed_order() {
     let pv = vec![Felt::from_u64(START)];
-    prove_and_verify(
-        &TinyAir::new(vec![]),
-        tiny_aux,
-        &pv,
-        &[trace_of_height(8), trace_of_height(4)],
-    );
+    prove_and_verify(&TinyAir::new(vec![]), &pv, &[trace_of_height(8), trace_of_height(4)]);
 }
 
 #[test]
@@ -309,7 +285,6 @@ fn three_traces_descending_heights() {
     let pv = vec![Felt::from_u64(START)];
     prove_and_verify(
         &TinyAir::new(vec![]),
-        tiny_aux,
         &pv,
         &[trace_of_height(16), trace_of_height(8), trace_of_height(4)],
     );
@@ -320,7 +295,6 @@ fn three_traces_shuffled_order() {
     let pv = vec![Felt::from_u64(START)];
     prove_and_verify(
         &TinyAir::new(vec![]),
-        tiny_aux,
         &pv,
         &[trace_of_height(8), trace_of_height(16), trace_of_height(4)],
     );
@@ -329,12 +303,7 @@ fn three_traces_shuffled_order() {
 #[test]
 fn periodic_columns_reversed_order() {
     let pv = vec![Felt::from_u64(START)];
-    prove_and_verify(
-        &TinyAir::new(vec![2, 4]),
-        tiny_aux,
-        &pv,
-        &[trace_of_height(8), trace_of_height(4)],
-    );
+    prove_and_verify(&TinyAir::new(vec![2, 4]), &pv, &[trace_of_height(8), trace_of_height(4)]);
 }
 
 #[test]
@@ -382,41 +351,31 @@ fn air_order_reflects_caller_order() {
 #[test]
 fn single_periodic_column() {
     let pv = vec![Felt::from_u64(START)];
-    prove_and_verify(&TinyAir::new(vec![2]), tiny_aux, &pv, &[trace_of_height(8)]);
+    prove_and_verify(&TinyAir::new(vec![2]), &pv, &[trace_of_height(8)]);
 }
 
 #[test]
 fn periodic_column_period_4() {
     let pv = vec![Felt::from_u64(START)];
-    prove_and_verify(&TinyAir::new(vec![4]), tiny_aux, &pv, &[trace_of_height(8)]);
+    prove_and_verify(&TinyAir::new(vec![4]), &pv, &[trace_of_height(8)]);
 }
 
 #[test]
 fn multiple_periodic_columns() {
     let pv = vec![Felt::from_u64(START)];
-    prove_and_verify(&TinyAir::new(vec![2, 4]), tiny_aux, &pv, &[trace_of_height(8)]);
+    prove_and_verify(&TinyAir::new(vec![2, 4]), &pv, &[trace_of_height(8)]);
 }
 
 #[test]
 fn periodic_columns_multi_trace_same_height() {
     let pv = vec![Felt::from_u64(START)];
-    prove_and_verify(
-        &TinyAir::new(vec![2]),
-        tiny_aux,
-        &pv,
-        &[trace_of_height(8), trace_of_height(8)],
-    );
+    prove_and_verify(&TinyAir::new(vec![2]), &pv, &[trace_of_height(8), trace_of_height(8)]);
 }
 
 #[test]
 fn periodic_columns_multi_trace_different_heights() {
     let pv = vec![Felt::from_u64(START)];
-    prove_and_verify(
-        &TinyAir::new(vec![2, 4]),
-        tiny_aux,
-        &pv,
-        &[trace_of_height(4), trace_of_height(8)],
-    );
+    prove_and_verify(&TinyAir::new(vec![2, 4]), &pv, &[trace_of_height(4), trace_of_height(8)]);
 }
 
 #[test]
@@ -424,7 +383,6 @@ fn periodic_columns_three_traces() {
     let pv = vec![Felt::from_u64(START)];
     prove_and_verify(
         &TinyAir::new(vec![2, 4]),
-        tiny_aux,
         &pv,
         &[trace_of_height(4), trace_of_height(8), trace_of_height(16)],
     );

@@ -5,7 +5,7 @@ use alloc::vec::Vec;
 use miden_lifted_air::{Air, BaseAir, LiftedAir, LiftedAirBuilder};
 use p3_field::{Field, PrimeField64};
 use p3_keccak_air::{KeccakAir, NUM_KECCAK_COLS, NUM_ROUNDS};
-use p3_matrix::dense::RowMajorMatrix;
+use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
 /// [`KeccakAir`] adapted for the lifted STARK prover.
 ///
@@ -35,6 +35,17 @@ impl<F: PrimeField64, EF: Field> LiftedAir<F, EF> for LiftedKeccakAir {
 
     fn num_aux_values(&self) -> usize {
         0
+    }
+
+    fn build_aux_trace(
+        &self,
+        main: &RowMajorMatrix<F>,
+        _air_inputs: &[F],
+        _aux_inputs: &[F],
+        _challenges: &[EF],
+    ) -> (RowMajorMatrix<EF>, Vec<EF>) {
+        // Main-trace-only AIR: a single all-zero aux column.
+        (RowMajorMatrix::new(EF::zero_vec(main.height()), 1), Vec::new())
     }
 
     fn eval<AB: LiftedAirBuilder<F = F>>(&self, builder: &mut AB) {
