@@ -318,6 +318,7 @@ impl Memory {
 
         let num_rows = self.trace_len();
         let mut buffer = vec![ZERO; num_rows * MEMORY_TRACE_WIDTH];
+        let (out_rows, _) = buffer.as_chunks_mut::<MEMORY_TRACE_WIDTH>();
         let mut deltas: Vec<Felt> = Vec::with_capacity(num_rows);
         let mut row: usize = 0;
 
@@ -331,9 +332,8 @@ impl Memory {
                     let clk = memory_access.clk();
                     let value = memory_access.word();
 
-                    let row_slice =
-                        &mut buffer[row * MEMORY_TRACE_WIDTH..(row + 1) * MEMORY_TRACE_WIDTH];
-                    let (mem_slice, aux_slice) = row_slice.split_at_mut(MEMORY_TRACE_WIDTH - 2);
+                    let (mem_slice, aux_slice) =
+                        out_rows[row].split_at_mut(MEMORY_TRACE_WIDTH - 2);
                     let cols: &mut MemoryCols<Felt> = mem_slice.borrow_mut();
 
                     cols.is_read = match memory_access.operation() {
@@ -399,8 +399,8 @@ impl Memory {
 
         batch_inversion_allow_zeros(&mut deltas);
         for (r, &inv) in deltas.iter().enumerate() {
-            let row_slice = &mut buffer[r * MEMORY_TRACE_WIDTH..(r + 1) * MEMORY_TRACE_WIDTH];
-            let cols: &mut MemoryCols<Felt> = row_slice[..MEMORY_TRACE_WIDTH - 2].borrow_mut();
+            let cols: &mut MemoryCols<Felt> =
+                out_rows[r][..MEMORY_TRACE_WIDTH - 2].borrow_mut();
             cols.d_inv = inv;
         }
 

@@ -156,6 +156,7 @@ impl CircuitEvaluation {
     /// is assumed zero-initialized, so columns that are zero on a row are left untouched.
     pub fn fill(&self, offset: usize, out: &mut [Felt]) {
         const W: usize = ACE_CHIPLET_NUM_COLS;
+        let (out_rows, _) = out.as_chunks_mut::<W>();
         let num_read_rows = self.read_nodes.len();
         let num_eval_rows = self.eval_nodes.len();
 
@@ -166,8 +167,7 @@ impl CircuitEvaluation {
 
         // READ rows.
         for (i, node) in self.read_nodes.iter().enumerate() {
-            let r = offset + i;
-            let cols: &mut AceCols<Felt> = out[r * W..(r + 1) * W].borrow_mut();
+            let cols: &mut AceCols<Felt> = out_rows[offset + i].as_mut_slice().borrow_mut();
             cols.s_start = if i == 0 { Felt::ONE } else { Felt::ZERO };
             cols.s_block = Felt::ZERO;
             cols.ctx = ctx_felt;
@@ -193,8 +193,8 @@ impl CircuitEvaluation {
 
         // EVAL rows.
         for (i, node) in self.eval_nodes.iter().enumerate() {
-            let r = offset + num_read_rows + i;
-            let cols: &mut AceCols<Felt> = out[r * W..(r + 1) * W].borrow_mut();
+            let cols: &mut AceCols<Felt> =
+                out_rows[offset + num_read_rows + i].as_mut_slice().borrow_mut();
             cols.s_start = Felt::ZERO;
             cols.s_block = Felt::ONE;
             cols.ctx = ctx_felt;

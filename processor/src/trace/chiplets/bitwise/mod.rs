@@ -3,9 +3,8 @@ use core::borrow::BorrowMut;
 
 use miden_air::{
     BitwiseCols,
-    trace::chiplets::bitwise::{BITWISE_AND, BITWISE_XOR, TRACE_WIDTH},
+    trace::chiplets::bitwise::{BITWISE_AND, BITWISE_XOR, OP_CYCLE_LEN, TRACE_WIDTH},
 };
-use miden_core::utils::{Matrix, RowMajorMatrix};
 
 use crate::{Felt, ZERO, operation::OperationError, trace::ChipletTraceFragment};
 
@@ -15,8 +14,42 @@ mod tests;
 // CONSTANTS
 // ================================================================================================
 
-/// Initial capacity of each column.
-const INIT_TRACE_CAPACITY: usize = 128;
+/// Initial capacity, in ops.
+const INIT_OPS_CAPACITY: usize = 128;
+
+// BITWISE OPERATION
+// ================================================================================================
+
+/// Which bitwise operation a row encodes.
+#[derive(Debug, Clone, Copy)]
+enum Op {
+    And,
+    Xor,
+}
+
+impl Op {
+    fn selector(self) -> Felt {
+        match self {
+            Self::And => BITWISE_AND,
+            Self::Xor => BITWISE_XOR,
+        }
+    }
+
+    fn apply(self, a: u32, b: u32) -> u32 {
+        match self {
+            Self::And => a & b,
+            Self::Xor => a ^ b,
+        }
+    }
+}
+
+/// A single bitwise operation recorded for later trace materialization.
+#[derive(Debug, Clone, Copy)]
+struct BitwiseOp {
+    op: Op,
+    a: u32,
+    b: u32,
+}
 
 // BITWISE
 // ================================================================================================
@@ -52,19 +85,16 @@ const INIT_TRACE_CAPACITY: usize = 128;
 ///   contains the full result of the bitwise operation.
 #[derive(Debug)]
 pub struct Bitwise {
-    trace: RowMajorMatrix<Felt>,
+    ops: Vec<BitwiseOp>,
 }
 
 impl Bitwise {
     // CONSTRUCTOR
     // --------------------------------------------------------------------------------------------
-    /// Returns a new [Bitwise] initialized with an empty trace.
+    /// Returns a new [Bitwise] initialized with an empty op log.
     pub fn new() -> Self {
         Self {
-            trace: RowMajorMatrix::new(
-                Vec::with_capacity(INIT_TRACE_CAPACITY * TRACE_WIDTH),
-                TRACE_WIDTH,
-            ),
+            ops: Vec::with_capacity(INIT_OPS_CAPACITY),
         }
     }
 
@@ -74,7 +104,7 @@ impl Bitwise {
     /// Returns length of execution trace required to describe bitwise operations executed on the
     /// VM.
     pub fn trace_len(&self) -> usize {
-        self.trace.height()
+        self.ops.len() * OP_CYCLE_LEN
     }
 
     // TRACE MUTATORS
@@ -83,98 +113,79 @@ impl Bitwise {
     /// Computes a bitwise AND of `a` and `b` and returns the result. We assume that `a` and `b`
     /// are 32-bit values. If that's not the case, the result of the computation is undefined.
     ///
-    /// This also adds 8 rows to the internal execution trace table required for computing the
-    /// operation.
+    /// Records the op for later trace generation in [`Self::fill_trace`].
     pub fn u32and(&mut self, a: Felt, b: Felt) -> Result<Felt, OperationError> {
-        let a = assert_u32(a)? as u64;
-        let b = assert_u32(b)? as u64;
-        let mut result = 0u64;
-
-        // append 8 rows to the trace, each row computing bitwise AND in 4 bit limbs starting with
-        // the most significant limb.
-        for bit_offset in (0..32).step_by(4).rev() {
-            let prev_output = result;
-            // shift a and b so that the next 4-bit limb is in the least significant position
-            let a = a >> bit_offset;
-            let b = b >> bit_offset;
-
-            // compute bitwise AND of the 4 least significant bits of a and b
-            let result_4_bit = (a & b) & 0xf;
-            result = (result << 4) | result_4_bit;
-
-            self.push_bitwise_row(BITWISE_AND, a, b, prev_output, result);
-        }
-
-        Ok(Felt::new_unchecked(result))
+        self.record(Op::And, a, b)
     }
 
     /// Computes a bitwise XOR of `a` and `b` and returns the result. We assume that `a` and `b`
     /// are 32-bit values. If that's not the case, the result of the computation is undefined.
     ///
-    /// This also adds 8 rows to the internal execution trace table required for computing the
-    /// operation.
+    /// Records the op for later trace generation in [`Self::fill_trace`].
     pub fn u32xor(&mut self, a: Felt, b: Felt) -> Result<Felt, OperationError> {
-        let a = assert_u32(a)? as u64;
-        let b = assert_u32(b)? as u64;
-        let mut result = 0u64;
+        self.record(Op::Xor, a, b)
+    }
 
-        // append 8 rows to the trace, each row computing bitwise XOR in 4 bit limbs starting with
-        // the most significant limb.
-        for bit_offset in (0..32).step_by(4).rev() {
-            let prev_output = result;
-            // shift a and b so that the next 4-bit limb is in the least significant position
-            let a = a >> bit_offset;
-            let b = b >> bit_offset;
-
-            // compute bitwise XOR of the 4 least significant bits of a and b
-            let result_4_bit = (a ^ b) & 0xf;
-            result = (result << 4) | result_4_bit;
-
-            self.push_bitwise_row(BITWISE_XOR, a, b, prev_output, result);
-        }
-
-        Ok(Felt::new_unchecked(result))
+    fn record(&mut self, op: Op, a: Felt, b: Felt) -> Result<Felt, OperationError> {
+        let a = assert_u32(a)?;
+        let b = assert_u32(b)?;
+        self.ops.push(BitwiseOp { op, a, b });
+        Ok(Felt::from_u32(op.apply(a, b)))
     }
 
     // EXECUTION TRACE GENERATION
     // --------------------------------------------------------------------------------------------
 
-    /// Fills the provided trace fragment with trace data from this bitwise helper instance.
+    /// Fills the provided trace fragment with the row-major trace materialized from the recorded
+    /// op log: 8 rows per op, 4-bit limbs accumulated MSB first.
     pub fn fill_trace(self, trace: &mut ChipletTraceFragment) {
-        // make sure fragment dimensions are consistent with the dimensions of this trace
         debug_assert_eq!(self.trace_len(), trace.len(), "inconsistent trace lengths");
         debug_assert_eq!(TRACE_WIDTH, trace.width(), "inconsistent trace widths");
 
-        trace.copy_rows_from(&self.trace.values);
-    }
+        let mut values = vec![ZERO; self.trace_len() * TRACE_WIDTH];
+        let (out_rows, _) = values.as_chunks_mut::<TRACE_WIDTH>();
 
-    // HELPER METHODS
-    // --------------------------------------------------------------------------------------------
+        for (op_idx, &BitwiseOp { op, a, b }) in self.ops.iter().enumerate() {
+            let a = a as u64;
+            let b = b as u64;
+            let selector = op.selector();
 
-    /// Appends one full row (in column order) to the row-major trace buffer.
-    fn push_bitwise_row(&mut self, selector: Felt, a: u64, b: u64, prev_output: u64, output: u64) {
-        let mut row = [ZERO; TRACE_WIDTH];
-        {
-            let cols: &mut BitwiseCols<Felt> = row.as_mut_slice().borrow_mut();
-            cols.op_flag = selector;
-            cols.a = Felt::new_unchecked(a);
-            cols.b = Felt::new_unchecked(b);
-            cols.a_bits = [
-                Felt::new_unchecked(a & 1),
-                Felt::new_unchecked((a >> 1) & 1),
-                Felt::new_unchecked((a >> 2) & 1),
-                Felt::new_unchecked((a >> 3) & 1),
-            ];
-            cols.b_bits = [
-                Felt::new_unchecked(b & 1),
-                Felt::new_unchecked((b >> 1) & 1),
-                Felt::new_unchecked((b >> 2) & 1),
-                Felt::new_unchecked((b >> 3) & 1),
-            ];
-            cols.prev_output = Felt::new_unchecked(prev_output);
-            cols.output = Felt::new_unchecked(output);
+            // 8 rows per op, MSB-limb first. Each row contains the cumulative `a`, `b`, and
+            // result after appending one more 4-bit limb to the accumulators.
+            let mut result: u64 = 0;
+            for (i, bit_offset) in (0..32).step_by(4).rev().enumerate() {
+                let prev_output = result;
+                let a_acc = a >> bit_offset;
+                let b_acc = b >> bit_offset;
+                let result_4_bit = match op {
+                    Op::And => (a_acc & b_acc) & 0xf,
+                    Op::Xor => (a_acc ^ b_acc) & 0xf,
+                };
+                result = (result << 4) | result_4_bit;
+
+                let cols: &mut BitwiseCols<Felt> =
+                    out_rows[op_idx * OP_CYCLE_LEN + i].as_mut_slice().borrow_mut();
+                cols.op_flag = selector;
+                cols.a = Felt::new_unchecked(a_acc);
+                cols.b = Felt::new_unchecked(b_acc);
+                cols.a_bits = [
+                    Felt::new_unchecked(a_acc & 1),
+                    Felt::new_unchecked((a_acc >> 1) & 1),
+                    Felt::new_unchecked((a_acc >> 2) & 1),
+                    Felt::new_unchecked((a_acc >> 3) & 1),
+                ];
+                cols.b_bits = [
+                    Felt::new_unchecked(b_acc & 1),
+                    Felt::new_unchecked((b_acc >> 1) & 1),
+                    Felt::new_unchecked((b_acc >> 2) & 1),
+                    Felt::new_unchecked((b_acc >> 3) & 1),
+                ];
+                cols.prev_output = Felt::new_unchecked(prev_output);
+                cols.output = Felt::new_unchecked(result);
+            }
         }
-        self.trace.values.extend_from_slice(&row);
+
+        trace.copy_rows_from(&values);
     }
 }
 
