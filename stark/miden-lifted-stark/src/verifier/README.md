@@ -35,7 +35,7 @@ prover module-level docs for the full binding contract.
 
 ## Transcript boundaries
 
-`verify` rejects trailing transcript data (`TranscriptNotConsumed`). If you
+`verify` rejects trailing transcript data (`TranscriptError::TrailingData`). If you
 bundle extra data in the same transcript, you must manage boundaries yourself.
 
 ## Protocol flow

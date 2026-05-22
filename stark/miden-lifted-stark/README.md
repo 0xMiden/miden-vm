@@ -32,7 +32,7 @@ so the PCS and verifier operate on a single uniform view.
 - `r_j = N / n_j`: lift ratio (a power of two).
 - `H`: two-adic subgroup of size `N` with generator `omega_H`.
 - `g`: multiplicative coset shift (`F::GENERATOR` by convention).
-- `D`: constraint degree blowup (here fixed at `D = 4`).
+- `D`: quotient-domain blowup, derived per AIR from its constraint degree; the batch value is the max over AIRs.
 - `gJ`: quotient-domain coset (size `N * D`).
 - `gK`: PCS/LDE coset (size `N * B`, where `B` is the FRI blowup).
 - `z`: global out-of-domain point sampled once.
@@ -194,7 +194,7 @@ at `y_j`, and the opened trace values already correspond to `p_j(y_j)`.
 | `verifier::verify` | Verify a multi-trace proof |
 | `MultiAir::eval_external` | Cross-AIR external-assertions hook (default: no assertions) |
 | `Statement::aux_inputs` | Auxiliary public inputs consumed only by `eval_external` (empty unless provided) |
-| `Transcript` | Structured transcript view (alias for `proof::StarkTranscript`) |
+| `StarkTranscript` | Structured parse-only transcript view; `log_trace_heights()` / `air_order()` expose the proof's heights and derived order |
 | `StarkConfig` | PCS params + LMCS + DFT configuration |
 | `domain::LiftedDomain` | Domain operations: selectors, vanishing, coset shifts |
 | `domain::TwoAdicSubgroup` | Two-adic subgroup with generator, vanishing, membership |
@@ -228,8 +228,9 @@ at `y_j`, and the opened trace values already correspond to `p_j(y_j)`.
   challenger. See the prover module-level docs.
 - **Power-of-two heights** — All trace heights are powers of two.
 - **Bit-reversed storage** — All evaluation matrices are in bit-reversed order.
-- **Constraint degree** — Fixed at `D = 4` (`LOG_CONSTRAINT_DEGREE = 2`).
-  Both prover and verifier must agree on this constant.
+- **Constraint degree** — Derived per AIR from symbolic analysis
+  (`log_quotient_degree`); the proof uses the max over AIRs. Each AIR must
+  satisfy `log_quotient_degree(air) ≤ log_blowup`.
 - **Transcript ordering** — The Fiat-Shamir transcript follows a strict
   observe/squeeze protocol. Prover and verifier must process commitments and
   challenges in identical order. This is security-critical.
@@ -241,17 +242,18 @@ at `y_j`, and the opened trace values already correspond to `p_j(y_j)`.
 
 ## Tests
 
-The end-to-end test suite lives in `tests/`:
+The end-to-end test suite lives in `src/testing/`, behind the `testing` feature:
 
-- **`tiny_air.rs`** — `TinyAir` exercising single-trace, multi-trace
+- **`test_tiny_air.rs`** — `TinyAir` exercising single-trace, multi-trace
   (same and different heights), periodic columns, and malformed transcript
   rejection.
-- **`aux_shape.rs`** — Validates that mismatched auxiliary trace dimensions
-  are caught.
+- **`test_external_assertions.rs`** — `MultiAir::eval_external` and `aux_inputs`.
+- **`test_multi_aux_alignment.rs`** — aux-trace alignment across multiple AIRs.
+- **`test_per_air_degree.rs`** — per-AIR quotient degrees.
 
 Run with:
 ```bash
-cargo test -p miden-lifted-stark
+cargo test -p miden-lifted-stark --features testing
 ```
 
 ## Security
