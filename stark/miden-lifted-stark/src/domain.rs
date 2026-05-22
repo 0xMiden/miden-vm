@@ -39,9 +39,9 @@ use crate::selectors::Selectors;
 // Errors
 // ============================================================================
 
-/// Errors from validated [`LiftedDomain`] construction (the `try_*` family).
+/// Errors from validated `LiftedDomain` construction (the `try_*` family).
 ///
-/// [`LiftedDomain::try_canonical`] and [`LiftedDomain::try_sub_domain`] read
+/// `LiftedDomain::try_canonical` and `LiftedDomain::try_sub_domain` read
 /// parameters that may come from untrusted inputs (proofs, instance metadata)
 /// and surface a recoverable error rather than panic. Test and benchmark
 /// fixtures pick statically valid sizes and use the panicking

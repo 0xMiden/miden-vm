@@ -201,11 +201,9 @@ at `y_j`, and the opened trace values already correspond to `p_j(y_j)`.
 | `verifier::verify` | Verify a multi-trace proof |
 | `MultiAir::eval_external` | Cross-AIR external-assertions hook (default: no assertions) |
 | `Statement::aux_inputs` | Auxiliary public inputs consumed only by `eval_external` (empty unless provided) |
-| `StarkTranscript` | Structured parse-only transcript view; `log_trace_heights()` / `air_order()` expose the proof's heights and derived order |
+| `StarkProof` | Structured parse-only view of the proof; `log_trace_heights()` / `air_order()` expose the proof's heights and derived order |
 | `StarkConfig` | PCS params + LMCS + DFT configuration |
-| `domain::LiftedDomain` | Domain operations: selectors, vanishing, coset shifts |
-| `domain::TwoAdicSubgroup` | Two-adic subgroup with generator, vanishing, membership |
-| `domain::TwoAdicCoset` | Coset of a two-adic subgroup, with shift |
+| `pcs` | Structured PCS sub-proof types (DEEP / FRI) for inspection and error matching |
 
 ## Modules
 
@@ -222,7 +220,7 @@ at `y_j`, and the opened trace values already correspond to `p_j(y_j)`.
 | `src/verifier/mod.rs` | `verify` — orchestration and identity check |
 | `src/verifier/constraints.rs` | `ConstraintFolder` — OOD constraint evaluation, quotient reconstruction |
 | `src/verifier/periodic.rs` | `PeriodicPolys` — polynomial coefficients for OOD evaluation |
-| `src/proof.rs` | `StarkProof`, `StarkTranscript` — proof artifact and structured transcript view |
+| `src/proof.rs` | `StarkProofData`, `StarkProof` — wire artifact and structured parse-only view |
 | `src/order.rs` | public `ShapeError` plus the crate-internal instance↔proof ordering helper; `TraceOrder` construction validates the proof's log heights against the AIRs |
 | `src/debug.rs` | `check_constraints` (row-by-row), structural assertion (`assert_prover_setup`) over `miden_lifted_air::debug::assert_multi_air_valid` |
 
