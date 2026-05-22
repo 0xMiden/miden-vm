@@ -6,12 +6,14 @@
 //! Tag layout (`Hash`-specific, opaque to the framework) — `Tag { id, args: [node_disc, n_bytes,
 //! ZERO] }`:
 //!
-//! - `preimage` (disc 0) — chunk-bodied; `args[1] = n_bytes`; body is `Chunk(ceil(n_bytes / 32))`.
+//! - `preimage` (disc 0) — chunk-bodied; `args[1] = n_bytes` (must be `≥ 1`); body is
+//!   `Chunk(ceil(n_bytes / 32))`. A zero-byte preimage decodes to zero chunks and is rejected.
 //!   Reduces to a `digest` leaf.
 //! - `digest`   (disc 1) — expression-bodied (8-felt digest); self-evaluating.
 //! - `eq`       (disc 2) — expression-bodied predicate over two child digests.
 
 use alloc::sync::Arc;
+use core::num::NonZeroU32;
 
 use crate::{
     Felt, ZERO,
@@ -121,9 +123,10 @@ impl Precompile for Hash {
     fn decode(&self, args: [Felt; 3]) -> Option<NodeType> {
         match Discriminant::classify(args[0])? {
             Discriminant::Preimage => {
-                // `args[1]` carries n_bytes; the chunk count is derived.
+                // `args[1]` carries n_bytes; the chunk count is derived. A zero-byte preimage
+                // derives zero chunks, which `NonZeroU32::new` rejects via `?`.
                 let n_bytes = u32::try_from(args[1].as_canonical_u64()).ok()?;
-                Some(NodeType::Chunks(Self::n_chunks(n_bytes)))
+                Some(NodeType::Chunks(NonZeroU32::new(Self::n_chunks(n_bytes))?))
             },
             // Self-evaluating leaf carrying 8 raw felts of digest data.
             Discriminant::Digest => Some(NodeType::Value),
