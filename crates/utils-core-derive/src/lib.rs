@@ -274,7 +274,7 @@ pub fn derive_mast_forest_contributor(input: TokenStream) -> TokenStream {
     // Parse the data to ensure it's an enum
     let enum_data = match &input.data {
         Data::Enum(data) => data,
-        _ => panic!("EnumThispatch can only be derived for enums"),
+        _ => panic!("MastForestContributor can only be derived for enums"),
     };
 
     // Extract variant information

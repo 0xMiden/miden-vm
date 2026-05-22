@@ -85,7 +85,6 @@ wincode       = { version = "0.4.2", default-features = false, features = ["allo
 
 # Third-party crates
 clap            = { version = "4.5", features = ["derive"] }
-codspeed        = { version = "4.6.0" }
 criterion       = { version = "0.7" }
 derive_more     = { version = "2.0", features = ["from"] }
 env_logger      = { version = "0.11" }
