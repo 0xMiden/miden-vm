@@ -55,8 +55,8 @@ the draft specification in GitHub discussion #3005.
 A **node** is a `(tag, payload)` pair, addressed by its 4-felt Poseidon2 **digest**. Identical
 content yields an identical digest, so equal subterms are shared automatically (hash-consing).
 
-- A **tag** is a node's identity and constructor: `Tag { id, imm: [Felt; 3] }`. The `id` selects
-  the owning precompile; the three immediate felts (`imm`) are entirely the precompile's to
+- A **tag** is a node's identity and constructor: `Tag { id, args: [Felt; 3] }`. The `id` selects
+  the owning precompile; the three immediate felts (`args`) are entirely the precompile's to
   interpret (a discriminant, a chunk length, a small constant, …). The framework reserves
   `id == ZERO` for itself — it tags the canonical `TRUE` node and the AND nodes of the commitment;
   no precompile may claim it.
@@ -80,9 +80,9 @@ fields.
 
 A precompile supplies three things:
 
-- `decode(imm) -> Option<NodeType>` — *type-checks* a tag: which constructor is this, and what
+- `decode(args) -> Option<NodeType>` — *type-checks* a tag: which constructor is this, and what
   structural shape does it carry (`Value`, `Binary`, or `Chunks(n)`)? Tag inspection only.
-- `reduce(imm, payload, …) -> Result<Node>` — *normalizes* a node to its **canonical form**. The
+- `reduce(args, payload, …) -> Result<Node>` — *normalizes* a node to its **canonical form**. The
   common roles are: validate a value leaf (its canonical is itself), evaluate an operation (resolve
   the child canonicals, then combine), or check a predicate (resolve operands, return the `TRUE`
   node on success or fail otherwise). These roles are conventions, not a fixed taxonomy — a
@@ -93,10 +93,11 @@ A precompile supplies three things:
 
 Precompiles are collected in a **`PrecompileRegistry`**, the framework's dispatcher: it routes each
 `Tag::id` to its owning precompile and is otherwise indifferent to how the precompile behaves. A
-precompile's `id` is derived from its name (the first felt of the name's Blake3 hash, matching
-`EventId` derivation), and the registry rejects misconfigured or duplicate ids at construction. The
-default registry is empty and rejects every tag; a host installs precompiles via
-`FastProcessor::with_precompile`.
+precompile's `id` is derived the same way event IDs are — the name hashed with Blake3 and folded
+into a single field element — but in its own domain-separated namespace, so a precompile and an
+event of the same name get different ids by construction. The registry rejects misconfigured or
+duplicate ids at construction. The default registry is empty and rejects every tag; a host installs
+precompiles via `FastProcessor::with_precompile`.
 
 During reduction the framework hands the precompile a `WitnessBuilder`, through which it can
 `resolve` a child digest to its canonical or `intern` a freshly-minted child into the DAG. The
