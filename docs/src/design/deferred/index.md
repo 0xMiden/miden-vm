@@ -64,8 +64,8 @@ content yields an identical digest, so equal subterms are shared automatically (
   - an **expression** — exactly 8 felts (one Poseidon2 rate block): raw value data for a leaf, or
     two packed child digests (`lhs || rhs`) for anything referential (an operation, a predicate,
     an AND step);
-  - a **chunk** body — `n` 8-felt blocks of bulk data (a hash preimage, a message), whose digest
-    is the linear hash of the `8n` felts under the tag.
+  - a **chunk** body — `n ≥ 1` 8-felt blocks of bulk data (a hash preimage, a message), whose
+    digest is the linear hash of the `8n` felts under the tag. An empty chunk body is forbidden.
 
 The digest binds the tag in the Poseidon2 capacity, so a node's address commits to *both* its
 identity and its body.

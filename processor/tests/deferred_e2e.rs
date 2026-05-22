@@ -574,24 +574,18 @@ fn chunk_register_rejects_unaligned_pointer() {
 }
 
 #[test]
-fn chunk_register_with_zero_chunks_still_interns_a_node() {
-    // n=0 — no memory reads. The digest still depends on the tag (one permutation runs even
-    // for empty chunks), so the resulting node lives in the state map.
+fn chunk_register_with_zero_byte_tag_is_rejected() {
+    // A 0-byte preimage derives zero chunks, which the framework forbids: `decode` rejects the
+    // tag, so `adv.register_deferred_chunk` surfaces an execution error before any memory read.
     let tag = preimage_tag(0);
     let ptr: u32 = 0;
-    let expected_digest = Node::chunk(tag, vec![]).digest();
 
     let mut src = String::from("begin\n");
     emit_register_chunk(&mut src, tag, ptr);
-    for _ in 0..5 {
-        src.push_str("    drop\n");
-    }
     src.push_str("end\n");
 
     let program = Assembler::default().assemble_program(&src).expect("program must assemble");
     let mut host = DefaultHost::default();
-    let output = build_chunk_processor()
-        .execute_sync(&program, &mut host)
-        .expect("execution must succeed");
-    assert!(output.deferred_state.contains(&expected_digest));
+    let result = build_chunk_processor().execute_sync(&program, &mut host);
+    assert!(result.is_err(), "a zero-chunk tag must surface as an execution error");
 }

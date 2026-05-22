@@ -146,7 +146,8 @@ pub(super) fn handle_deferred_register_chunk(
     let n = {
         let (_state, precompiles) = processor.deferred_view_mut();
         match precompiles.decode(tag)? {
-            NodeType::Chunks(n) => n,
+            // `Chunks` is `NonZeroU32`, so a 0-chunk tag has already been rejected by `decode`.
+            NodeType::Chunks(n) => n.get(),
             NodeType::Value | NodeType::Join => {
                 return Err(PrecompileError::InvalidNode.into());
             },

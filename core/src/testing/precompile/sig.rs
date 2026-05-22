@@ -7,6 +7,7 @@
 //! non-zero.
 
 use alloc::sync::Arc;
+use core::num::NonZeroU32;
 
 use crate::{
     Felt, ZERO,
@@ -59,7 +60,9 @@ impl Precompile for Sig {
 
     fn decode(&self, args: [Felt; 3]) -> Option<NodeType> {
         match Discriminant::classify(args[0])? {
-            Discriminant::Verify => Some(NodeType::Chunks(Self::SIG_CHUNKS)),
+            Discriminant::Verify => Some(NodeType::Chunks(
+                NonZeroU32::new(Self::SIG_CHUNKS).expect("SIG_CHUNKS is nonzero"),
+            )),
         }
     }
 

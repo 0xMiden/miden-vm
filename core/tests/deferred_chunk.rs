@@ -104,12 +104,16 @@ fn predicate_preimage_mismatch_fails_on_evaluate() {
 }
 
 #[test]
-fn empty_chunk_digest_binds_tag() {
-    // n=0 is allowed. The empty digest must still depend on the tag (one permutation runs even
-    // for n=0). Two distinct tags should produce distinct empty-chunk digests.
-    let a = Node::chunk(preimage_tag(0), vec![]);
-    let b = Node::chunk(preimage_tag(1), vec![]);
-    assert_ne!(a.digest(), b.digest());
+fn zero_byte_preimage_tag_is_rejected() {
+    // A 0-byte preimage derives zero chunks, which the framework forbids: `Hash::decode` returns
+    // None for the tag, so registering any node under it fails before the body is even inspected.
+    let schema = PrecompileRegistry::default().with_precompile(Hash);
+    let mut state = DeferredState::new();
+    let node = Node::chunk(preimage_tag(0), chunk_data(1));
+    assert!(matches!(
+        state.register(&schema, node).unwrap_err().root(),
+        PrecompileError::InvalidNode
+    ));
 }
 
 #[test]

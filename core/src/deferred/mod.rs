@@ -76,7 +76,7 @@ impl Tag {
 }
 
 /// An 8-felt block — the Poseidon2 rate, and the bulk-data unit of a chunk node. A `ChunkNode`
-/// carries `n` chunks; its digest is the linear hash of those `8n` felts with the tag as the
+/// carries `n ≥ 1` chunks; its digest is the linear hash of those `8n` felts with the tag as the
 /// IV (capacity).
 pub type Chunk = [Felt; 8];
 
@@ -98,9 +98,10 @@ pub const TRUE_DIGEST: Digest = Word::new([ZERO; 4]);
 /// - [`Expression`](Payload::Expression) — exactly 8 felts (one Poseidon2 rate block): value
 ///   leaves, binary ops, predicates, AND-nodes. For a leaf the 8 felts are raw value data; for a
 ///   binary op / assertion they are `lhs_digest || rhs_digest` (see [`Payload::join`]).
-/// - [`Chunk`](Payload::Chunk) — bulk-data leaves: `n` 8-felt blocks. `n = chunks.len()` is also
-///   encoded in the tag, so the digest binds it. `Arc`-shared so cloning a chunk node (when
-///   interning or resolving children) is a ref-count bump, not a deep copy.
+/// - [`Chunk`](Payload::Chunk) — bulk-data leaves: `n ≥ 1` 8-felt blocks. `n = chunks.len()` is
+///   also encoded in the tag, so the digest binds it. An empty chunk body is forbidden.
+///   `Arc`-shared so cloning a chunk node (when interning or resolving children) is a ref-count
+///   bump, not a deep copy.
 ///
 /// Accessors that only make sense for one shape return [`DeferredError::InvalidPayload`] when
 /// called on the other.
@@ -125,9 +126,17 @@ impl Payload {
         Self::Expression(felts)
     }
 
-    /// A [`Chunk`](Payload::Chunk) payload from `n` rate-sized blocks of bulk data.
+    /// A [`Chunk`](Payload::Chunk) payload from `n ≥ 1` rate-sized blocks of bulk data.
+    ///
+    /// # Panics
+    /// In debug builds, if `chunks` is empty — an empty chunk body is forbidden (its digest would
+    /// not bind the tag). Callers reconstructing nodes from untrusted bytes
+    /// ([`DeferredState::rehydrate`](DeferredState::rehydrate)) reject the empty case before
+    /// reaching this constructor; in-VM construction derives the non-zero count from the tag.
     pub fn chunks(chunks: impl Into<Arc<[Chunk]>>) -> Self {
-        Self::Chunk(chunks.into())
+        let chunks = chunks.into();
+        debug_assert!(!chunks.is_empty(), "chunk node must carry at least one chunk");
+        Self::Chunk(chunks)
     }
 
     /// The 8 felts of an [`Expression`](Payload::Expression) payload. Errors with
@@ -209,14 +218,20 @@ impl Node {
         Self::join(Tag::TRUE, lhs, rhs)
     }
 
-    /// Build a chunk node from `n = chunks.len()` rate-sized blocks of bulk data. Accepts
+    /// Build a chunk node from `n = chunks.len() ≥ 1` rate-sized blocks of bulk data. Accepts
     /// anything that converts into `Arc<[Chunk]>` — typically a `Vec<Chunk>` from the processor
     /// handler, or a slice literal in tests.
+    ///
+    /// # Panics
+    /// In debug builds, if `chunks` is empty — an empty chunk body is forbidden (its digest would
+    /// not bind the tag). The processor handler derives the non-zero count from the tag, and
+    /// [`DeferredState::rehydrate`](DeferredState::rehydrate) rejects an empty wire chunk body
+    /// before reaching this constructor, so neither in-VM execution nor untrusted bytes can trip
+    /// it; only a direct caller passing an empty slice can.
     pub fn chunk(tag: Tag, chunks: impl Into<Arc<[Chunk]>>) -> Self {
-        Self {
-            tag,
-            payload: Payload::Chunk(chunks.into()),
-        }
+        let chunks = chunks.into();
+        debug_assert!(!chunks.is_empty(), "chunk node must carry at least one chunk");
+        Self { tag, payload: Payload::Chunk(chunks) }
     }
 
     /// Returns `true` iff this node has the structural shape of [`Node::TRUE`]: zero tag and zero
@@ -235,11 +250,10 @@ impl Node {
     ///
     /// Sponge state is laid out as `[rate || tag]` — the tag occupies the 4-felt capacity. For
     /// expression and assertion nodes, the 8-felt payload fills the rate and a single permutation
-    /// produces the digest. For chunk nodes, each 8-felt chunk overwrites the rate and the
-    /// permutation iterates `n` times (linear hash); the empty `n == 0` case still applies one
-    /// permutation so the digest binds the tag. The in-circuit chunk verifier must mirror this —
-    /// including the one-permutation rule for `n == 0`, which is unusual for a
-    /// "linear hash of zero elements" but matches what `Node::digest` computes here.
+    /// produces the digest. For chunk nodes, each of the `n ≥ 1` 8-felt chunks overwrites the rate
+    /// and the permutation iterates `n` times (linear hash). Empty chunk bodies are forbidden
+    /// (see [`NodeType::Chunks`]), so the loop always runs at least one permutation — no `n == 0`
+    /// carve-out, and the in-circuit chunk hasher needs none either.
     ///
     /// For `n == 1` the chunk digest is byte-identical to the equivalent Expression digest with
     /// the same tag and payload.
@@ -256,10 +270,6 @@ impl Node {
         match &self.payload {
             Payload::Expression(f) => {
                 state[0..8].copy_from_slice(f);
-                Poseidon2::apply_permutation(&mut state);
-            },
-            Payload::Chunk(chunks) if chunks.is_empty() => {
-                // n=0: one permutation so the empty digest still binds to the tag.
                 Poseidon2::apply_permutation(&mut state);
             },
             Payload::Chunk(chunks) => {
@@ -354,14 +364,6 @@ mod tests {
         let expr = Node::leaf(TAG_A, felts);
         let chunk = Node::chunk(TAG_A, vec![felts]);
         assert_eq!(expr.digest(), chunk.digest());
-    }
-
-    #[test]
-    fn chunk_n0_binds_tag() {
-        // Empty chunk still applies one permutation, so different tags produce different digests.
-        let chunk_a = Node::chunk(TAG_A, vec![]);
-        let chunk_b = Node::chunk(TAG_B, vec![]);
-        assert_ne!(chunk_a.digest(), chunk_b.digest());
     }
 
     #[test]

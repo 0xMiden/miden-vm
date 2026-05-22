@@ -60,6 +60,7 @@ fn preimage_with_partial_last_chunk_is_handled_by_caller_padding() {
 
 #[test]
 fn n_chunks_rounds_up() {
+    // `n_chunks` is the raw `div_ceil` helper; a 0 result is what `decode` rejects downstream.
     assert_eq!(Hash::n_chunks(0), 0);
     assert_eq!(Hash::n_chunks(1), 1);
     assert_eq!(Hash::n_chunks(31), 1);
@@ -73,7 +74,7 @@ fn n_chunks_rounds_up() {
 fn decode_classifies_each_discriminant() {
     assert!(matches!(
         Hash.decode([Felt::from_u32(Hash::PREIMAGE_TAG_ID), Felt::from_u32(65), ZERO]),
-        Some(NodeType::Chunks(3))
+        Some(NodeType::Chunks(n)) if n.get() == 3
     ));
     assert!(matches!(
         Hash.decode([Felt::from_u32(Hash::DIGEST_TAG_ID), ZERO, ZERO]),
@@ -128,12 +129,10 @@ fn eq_predicate_errors_on_mismatch() {
 }
 
 #[test]
-fn empty_preimage_reduces_to_zero_digest() {
-    // n_bytes=0 means n_chunks=0; mock-hash of zero chunks is the zero accumulator.
-    let (schema, mut state) = fresh();
-    let node = Hash::preimage_node(0, Vec::new());
-    let canonical = state.evaluate(&schema, node).unwrap();
-    assert_eq!(canonical, Hash::digest_node([ZERO; 8]));
+fn zero_byte_preimage_decodes_to_none() {
+    // n_bytes=0 derives zero chunks; `NonZeroU32` makes that unrepresentable, so decode rejects
+    // the tag rather than producing a `Chunks(0)`. An empty preimage can never be registered.
+    assert!(Hash.decode([Felt::from_u32(Hash::PREIMAGE_TAG_ID), ZERO, ZERO]).is_none());
 }
 
 #[test]

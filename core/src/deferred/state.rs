@@ -313,7 +313,17 @@ impl DeferredState {
         for (i, entry) in wire.entries.iter().enumerate() {
             let node = match &entry.body {
                 super::WireBody::Value(felts) => Node::leaf(entry.tag, *felts),
-                super::WireBody::Chunks(chunks) => Node::chunk(entry.tag, chunks.clone()),
+                super::WireBody::Chunks(chunks) => {
+                    // The wire is untrusted: the deserializer accepts a zero-length chunk body,
+                    // but empty chunk bodies are forbidden. Reject here, before `Node::chunk`
+                    // (whose non-empty precondition would otherwise panic in debug builds);
+                    // `payload_matches_type` below would also reject it, but only after
+                    // construction.
+                    if chunks.is_empty() {
+                        return Err(IntegrityError::ShapeMismatch);
+                    }
+                    Node::chunk(entry.tag, chunks.clone())
+                },
                 super::WireBody::Join { lhs, rhs } => {
                     let lhs_d = resolve_index(*lhs, i, &digests)?;
                     let rhs_d = resolve_index(*rhs, i, &digests)?;
@@ -323,8 +333,8 @@ impl DeferredState {
 
             // Validate. `decode_node_type` handles AND-nodes (framework-owned `Tag::TRUE`)
             // without invoking a precompile, then defers to `precompiles.decode` for everything
-            // else. `payload_matches_type` enforces the Expression-vs-Chunk distinction (and
-            // chunk count for Chunks tags).
+            // else. `payload_matches_type` enforces the Expression-vs-Chunk distinction (and the
+            // exact chunk count for Chunks tags, which is ≥ 1 — empty chunk bodies are rejected).
             let node_type = decode_node_type(precompiles, &node)?;
             if !payload_matches_type(node_type, &node.payload) {
                 return Err(IntegrityError::ShapeMismatch);
@@ -448,7 +458,7 @@ fn decode_node_type(
 fn payload_matches_type(nt: NodeType, payload: &Payload) -> bool {
     match (nt, payload) {
         (NodeType::Value | NodeType::Join, Payload::Expression(_)) => true,
-        (NodeType::Chunks(n), Payload::Chunk(chunks)) => chunks.len() == n as usize,
+        (NodeType::Chunks(n), Payload::Chunk(chunks)) => chunks.len() == n.get() as usize,
         _ => false,
     }
 }
@@ -907,6 +917,24 @@ mod tests {
         };
         let err = DeferredState::rehydrate(&wire, &precompiles());
         assert!(matches!(err, Err(IntegrityError::UnknownTag)));
+    }
+
+    #[test]
+    fn rehydrate_rejects_empty_chunk_body() {
+        // The deserializer accepts a zero-length chunk body, but empty chunk bodies are forbidden.
+        // Rehydrate must reject one with `ShapeMismatch`, not panic in `Node::chunk`'s non-empty
+        // precondition — the wire is untrusted. The guard fires before tag decode, so the tag is
+        // irrelevant.
+        let wire = DeferredStateWire {
+            entries: alloc::vec![crate::deferred::WireEntry {
+                tag: test_leaf(0).tag,
+                body: crate::deferred::WireBody::Chunks(alloc::sync::Arc::from(
+                    alloc::vec![[ZERO; 8]; 0]
+                )),
+            }],
+        };
+        let err = DeferredState::rehydrate(&wire, &precompiles());
+        assert!(matches!(err, Err(IntegrityError::ShapeMismatch)));
     }
 
     #[test]

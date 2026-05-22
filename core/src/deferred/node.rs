@@ -9,6 +9,7 @@
 //! its own [`Tag::args`](super::Tag) and drives recursive evaluation.
 
 use alloc::boxed::Box;
+use core::num::NonZeroU32;
 
 // NODE TYPE
 // ================================================================================================
@@ -29,8 +30,10 @@ pub enum NodeType {
     /// 8 felts encoding `lhs_digest || rhs_digest` — two child references. Covers binary ops,
     /// binary predicates, AND-nodes, and compound-canonical `join`-style leaves.
     Join,
-    /// `n` 8-felt chunks of bulk data, no child digests — a chunk-bodied leaf.
-    Chunks(u32),
+    /// `n ≥ 1` 8-felt chunks of bulk data, no child digests — a chunk-bodied leaf. The count is
+    /// [`NonZeroU32`]: an empty chunk body is forbidden, so a precompile cannot decode a tag to
+    /// `Chunks(0)`.
+    Chunks(NonZeroU32),
 }
 
 // PRECOMPILE ERROR
