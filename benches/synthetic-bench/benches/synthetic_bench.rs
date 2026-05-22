@@ -26,11 +26,7 @@ use std::{
     cell::RefCell, collections::BTreeSet, hint::black_box, path::PathBuf, rc::Rc, time::Duration,
 };
 
-#[cfg(codspeed)]
-use codspeed_criterion_compat as criterion_backend;
-#[cfg(not(codspeed))]
-use criterion as criterion_backend;
-use criterion_backend::{BatchSize, Criterion, SamplingMode, criterion_group, criterion_main};
+use criterion::{BatchSize, Criterion, SamplingMode, criterion_group, criterion_main};
 use miden_processor::{
     DefaultHost, ExecutionOptions, FastProcessor, StackInputs, advice::AdviceInputs,
 };
