@@ -22,6 +22,7 @@ use miden_utils_sync::LazyLock;
 
 use crate::handlers::{
     aead_decrypt::{AEAD_DECRYPT_EVENT_NAME, handle_aead_decrypt},
+    debug::debug_handlers,
     ecdsa::{ECDSA_VERIFY_EVENT_NAME, EcdsaPrecompile},
     eddsa_ed25519::{EDDSA25519_VERIFY_EVENT_NAME, EddsaPrecompile},
     falcon_div::{FALCON_DIV_EVENT_NAME, handle_falcon_div},
@@ -127,7 +128,7 @@ impl CoreLibrary {
 
     /// List of all `EventHandlers` required to run all of the core library.
     pub fn handlers(&self) -> Vec<(EventName, Arc<dyn EventHandler>)> {
-        vec![
+        let mut handlers: Vec<(EventName, Arc<dyn EventHandler>)> = vec![
             (KECCAK_HASH_BYTES_EVENT_NAME, Arc::new(KeccakPrecompile)),
             (SHA512_HASH_BYTES_EVENT_NAME, Arc::new(Sha512Precompile)),
             (ECDSA_VERIFY_EVENT_NAME, Arc::new(EcdsaPrecompile)),
@@ -140,7 +141,13 @@ impl CoreLibrary {
             (LOWERBOUND_ARRAY_EVENT_NAME, Arc::new(handle_lowerbound_array)),
             (LOWERBOUND_KEY_VALUE_EVENT_NAME, Arc::new(handle_lowerbound_key_value)),
             (AEAD_DECRYPT_EVENT_NAME, Arc::new(handle_aead_decrypt)),
-        ]
+        ];
+
+        // Print-style debugging handlers backing the `miden::core::debug` module. These print VM
+        // state to stdout whenever the corresponding `print_*` procedure is executed.
+        handlers.extend(debug_handlers());
+
+        handlers
     }
 
     /// Returns a [`PrecompileVerifierRegistry`] containing all verifiers required to validate
