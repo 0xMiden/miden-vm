@@ -1332,13 +1332,13 @@ fn mast_forest_merge_preserves_explicit_adjacent_asm_op_transitions() {
 }
 
 #[test]
-fn mast_forest_merge_keeps_same_blocks_with_different_asm_ops_distinct() {
+fn mast_forest_merge_deduplicates_same_blocks_with_different_asm_ops() {
     let mut forest_lhs = MastForest::new();
     let lhs_block_id = block_foo().add_to_forest(&mut forest_lhs).unwrap();
     forest_lhs.make_root(lhs_block_id);
 
     let lhs_asm_op = AssemblyOp::new(None, "proc::foo".into(), 1, "lhs-op".into());
-    register_asm_ops_for_node(&mut forest_lhs, lhs_block_id, 2, &[(0, lhs_asm_op.clone())]);
+    register_asm_ops_for_node(&mut forest_lhs, lhs_block_id, 2, &[(0, lhs_asm_op)]);
 
     let mut forest_rhs = MastForest::new();
     let rhs_block_id = block_foo().add_to_forest(&mut forest_rhs).unwrap();
@@ -1351,12 +1351,11 @@ fn mast_forest_merge_keeps_same_blocks_with_different_asm_ops_distinct() {
     let mapped_lhs_block = root_maps.map_root(0, &lhs_block_id).unwrap();
     let mapped_rhs_block = root_maps.map_root(1, &rhs_block_id).unwrap();
 
-    assert_ne!(
+    assert_eq!(
         mapped_lhs_block, mapped_rhs_block,
-        "identical blocks with different asm-op content must not collapse"
+        "identical blocks must collapse even with different asm-op metadata"
     );
-    assert_eq!(merged.get_assembly_op(mapped_lhs_block, Some(0)), Some(&lhs_asm_op));
-    assert_eq!(merged.get_assembly_op(mapped_rhs_block, Some(0)), Some(&rhs_asm_op));
+    assert_eq!(merged.get_assembly_op(mapped_lhs_block, Some(0)), Some(&rhs_asm_op));
 }
 
 #[test]
@@ -1568,10 +1567,9 @@ fn compact_preserves_debug_metadata() {
     assert_eq!(vars.len(), 1, "compacted node must keep debug var");
 }
 
-/// Two basic blocks with the same ops but different debug vars must stay
-/// distinct after MastForest::merge (the merger must not collapse them).
+/// Two basic blocks with the same ops but different debug vars have the same MAST shape.
 #[test]
-fn merge_keeps_blocks_with_different_debug_vars_distinct() {
+fn merge_deduplicates_blocks_with_different_debug_vars() {
     // Forest A: block [Mul, Add] with debug var "x" at stack 0.
     let mut forest_a = MastForest::new();
     let dvar_a = forest_a
@@ -1601,26 +1599,19 @@ fn merge_keeps_blocks_with_different_debug_vars_distinct() {
     let new_a = root_map.map_root(0, &block_a).unwrap();
     let new_b = root_map.map_root(1, &block_b).unwrap();
 
-    // The blocks must be distinct -- different debug vars must prevent dedup.
-    assert_ne!(new_a, new_b, "same-ops blocks with different debug vars must not be collapsed");
+    assert_eq!(new_a, new_b, "debug vars must not affect MAST shape");
 
-    // Each must have its own debug var.
     let vars_a = merged.debug_info().debug_vars_for_node(new_a);
-    let vars_b = merged.debug_info().debug_vars_for_node(new_b);
     assert_eq!(vars_a.len(), 1);
-    assert_eq!(vars_b.len(), 1);
 
     let info_a = merged.debug_info().debug_var(vars_a[0].1).unwrap();
-    let info_b = merged.debug_info().debug_var(vars_b[0].1).unwrap();
     assert_eq!(info_a.name(), "x");
-    assert_eq!(info_b.name(), "y");
 }
 
-/// Two blocks with identical structure and debug vars but different asm-op
-/// metadata must stay distinct after merge so diagnostics keep the right source
-/// mapping.
+/// Two blocks with identical structure and debug vars but different asm-op metadata have the same
+/// MAST shape.
 #[test]
-fn merge_keeps_blocks_with_different_asm_ops_distinct() {
+fn merge_deduplicates_blocks_with_different_asm_ops() {
     let mut forest_a = MastForest::new();
     let asm_id_a = forest_a
         .debug_info_mut()
@@ -1666,16 +1657,9 @@ fn merge_keeps_blocks_with_different_asm_ops_distinct() {
     let new_a = root_map.map_root(0, &block_a).unwrap();
     let new_b = root_map.map_root(1, &block_b).unwrap();
 
-    assert_ne!(
-        new_a, new_b,
-        "same-structure blocks with different AssemblyOps must not collapse"
-    );
+    assert_eq!(new_a, new_b, "AssemblyOp metadata must not affect MAST shape");
     assert_eq!(
         merged.debug_info().first_asm_op_for_node(new_a).unwrap().context_name(),
-        "ctx_a"
-    );
-    assert_eq!(
-        merged.debug_info().first_asm_op_for_node(new_b).unwrap().context_name(),
         "ctx_b"
     );
 }
@@ -1759,9 +1743,9 @@ fn merge_deduplicates_blocks_with_same_debug_vars() {
     assert_eq!(merged.debug_info().debug_vars_for_node(new_a).len(), 1);
 }
 
-/// Different debug vars prevent compact from collapsing same-ops blocks.
+/// Different debug vars do not prevent compact from collapsing same-ops blocks.
 #[test]
-fn compact_keeps_blocks_with_different_debug_vars_distinct() {
+fn compact_deduplicates_blocks_with_different_debug_vars() {
     let mut forest = MastForest::new();
     let var_x = forest
         .add_debug_var(DebugVarInfo::new("x", DebugVarLocation::Stack(0)))
@@ -1788,18 +1772,13 @@ fn compact_keeps_blocks_with_different_debug_vars_distinct() {
     let new_a = root_map.map_root(0, &block_a).unwrap();
     let new_b = root_map.map_root(0, &block_b).unwrap();
 
-    assert_ne!(new_a, new_b, "different debug vars must survive compact");
+    assert_eq!(new_a, new_b, "different debug vars must not affect compacted MAST shape");
 
     let info_a = compacted
         .debug_info()
         .debug_var(compacted.debug_info().debug_vars_for_node(new_a)[0].1)
         .unwrap();
-    let info_b = compacted
-        .debug_info()
-        .debug_var(compacted.debug_info().debug_vars_for_node(new_b)[0].1)
-        .unwrap();
     assert_eq!(info_a.name(), "x");
-    assert_eq!(info_b.name(), "y");
 }
 
 /// Procedure names survive compact.

@@ -666,8 +666,6 @@ impl Assembler {
                             InvokeKind::ProcRef,
                             SourceSpan::UNKNOWN,
                             item.digest,
-                            item.source_library_commitment(),
-                            item.source_root_id(),
                             mast_forest_builder,
                         )?;
                         ResolvedProcedure { node, signature: item.signature.clone() }
@@ -1468,16 +1466,10 @@ impl Assembler {
         let resolved = self.linker.resolve_invoke_target(&caller, target)?;
         match resolved {
             SymbolResolution::MastRoot(mast_root) => {
-                // Literal MAST-root references in MASM do not carry any source-level provenance,
-                // so there is no exact source root or source package commitment to thread through
-                // here. We could try to guess based on linked libraries, but any such heuristic
-                // would be ambiguous when multiple procedures share the same digest.
                 let node = self.ensure_valid_procedure_mast_root(
                     kind,
                     target.span(),
                     mast_root.into_inner(),
-                    None,
-                    None,
                     mast_forest_builder,
                 )?;
                 Ok(Some(ResolvedProcedure { node, signature: None }))
@@ -1496,8 +1488,6 @@ impl Assembler {
                                 kind,
                                 target.span(),
                                 p.digest,
-                                p.source_library_commitment(),
-                                p.source_root_id(),
                                 mast_forest_builder,
                             )?;
                             Ok(Some(ResolvedProcedure { node, signature: p.signature.clone() }))
@@ -1529,8 +1519,6 @@ impl Assembler {
         kind: InvokeKind,
         span: SourceSpan,
         mast_root: Word,
-        source_library_commitment: Option<Word>,
-        source_root_id: Option<MastNodeId>,
         mast_forest_builder: &mut MastForestBuilder,
     ) -> Result<MastNodeId, Report> {
         // Get the procedure from the assembler
@@ -1556,11 +1544,7 @@ impl Assembler {
             }
         }
 
-        mast_forest_builder.ensure_external_link_with_source(
-            mast_root,
-            source_library_commitment,
-            source_root_id,
-        )
+        mast_forest_builder.ensure_external_link(mast_root)
     }
 }
 

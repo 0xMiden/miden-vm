@@ -10,12 +10,15 @@
 
 #### Fixes
 
-- Preserved `AssemblyOp` source mappings when merging `MastForest`s, preventing source-location loss after node deduplication.
 - Replaced `bincode` proof serialization with `wincode` and bounded verifier-side STARK proof deserialization to 64 MiB ([#3148](https://github.com/0xMiden/miden-vm/pull/3148)).
 - [BREAKING] Replaced the Poseidon2 sponge precompile transcript with a 2-to-1 hash folding scheme; the rolling state is itself a complete digest at every step, removing `finalize()` and `PrecompileTranscriptDigest`. The `log_precompile` opcode is reshaped accordingly (helper/stack rename, STMNT placed at stack[4..8]) and the MASM `log_precompile_request` wrapper now computes STMNT via `hmerge`. RELATION_DIGEST bumped ([#3100](https://github.com/0xMiden/miden-vm/pull/3100)).
 - Preserved `AssemblyOp` source mappings when merging `MastForest`s, preventing source-location loss after node deduplication ([#2958](https://github.com/0xMiden/miden-vm/pull/2958)).
 - Made AEAD decrypt verify the input ciphertext as well as the tag ([#3147](https://github.com/0xMiden/miden-vm/pull/3147)).
 - Removed overly aggressive validation check that prevented defining virtual executable targets in Miden projects
+
+## v0.23.1 (2026-05-20)
+
+- Restored metadata-neutral MAST node identity so public procedure roots do not depend on debug/decorator metadata shape; this reopens debug metadata precision issues from #2955 and #3054.
 
 ## v0.23.0 (2026-05-07)
 
@@ -137,7 +140,6 @@
 
 - Implemented project assembly ([#2877](https://github.com/0xMiden/miden-vm/pull/2877)).
 - Added `FastProcessor::into_parts()` to extract advice provider, memory, and precompile transcript after step-based execution ([#2901](https://github.com/0xMiden/miden-vm/pull/2901)).
-- Added `FrameBase` variant to `DebugVarLocation` and `set_value_location` to `DebugVarInfo` for frame-pointer-relative debug variable locations ([#2955](https://github.com/0xMiden/miden-vm/pull/2955)).
 
 ## 0.22.0 (2026-03-18)
 
