@@ -15,7 +15,7 @@ resulting `ExecutionOutput`:
 * `options: ExecutionOptions` - a set of options for executing the specified program (e.g., max allowed number of cycles).
 
 The (async) function returns a `Result<ExecutionOutput, ExecutionError>` which will contain the
-final stack state, advice provider, memory, and precompile transcript if the execution was
+final stack state, advice provider, memory, and deferred state if the execution was
 successful, or an error if the execution failed.
 
 If you also need an `ExecutionTrace`, use `FastProcessor::execute_trace_inputs()` /

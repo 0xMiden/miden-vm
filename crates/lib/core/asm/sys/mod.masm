@@ -114,7 +114,7 @@ end
 #! capacity `[1, 0, 0, 0]`, then this helper drops the three words it writes to stack[0..12].
 #!
 #! Input:  `[NODE_DIGEST, ...]`
-#! Output: `[...]` (the rolling transcript root advances; node is folded in)
+#! Output: `[...]` (the deferred commitment root advances; node is folded in)
 pub proc log_node_digest
     padw padw movdnw.2
     # => [_, NODE_DIGEST, _, ...]

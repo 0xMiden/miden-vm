@@ -385,21 +385,20 @@ $$
 ## LOG_PRECOMPILE
 
 The `log_precompile` operation folds a precomputed per-call statement word `STMNT` into the
-rolling commitment state shared by legacy precompile requests and deferred commitments. The fold is
-a framework-AND chain over Poseidon2:
+rolling **deferred-commitment** state. The fold is a framework-AND chain over Poseidon2:
 `STATE_NEW = Node::and(STATE_PREV, STMNT).digest()`, i.e. a permutation over
 `[STATE_PREV, STMNT, Tag::AND]` with capacity `[1, 0, 0, 0]`. Initialization and boundary
-enforcement are handled via variable‑length public inputs; see [Precompile flow](./precompiles.md)
-for a high‑level overview. This section concentrates on the stack interaction and bus messages.
+enforcement are handled via variable‑length public inputs; see
+[Deferred computation](../deferred/index.md) for the model. This section concentrates on the stack
+interaction and bus messages.
 
 ### Operation Overview
 
 The stack is expected to be arranged as `[_, STMNT, _, ...]`, where `STMNT` sits at offsets
 4..8 (the HPERM rate1 slots). Stack slots 0..4 and 8..12 are unreferenced by any constraint on
-opcode entry. Callers normally produce `STMNT` via the `sys::log_precompile_request` helper,
-which computes `STMNT = Poseidon2::merge(COMM, TAG)` from the user-provided commitment halves
-and seats it at stack[4..8] before invoking the opcode (see
-[Precompiles](./precompiles.md#core-data) for the commitment model).
+opcode entry. Callers normally produce `STMNT` — a statement node's digest — via the
+`sys::log_node_digest` helper, which seats it at stack[4..8] before invoking the opcode (see
+[Deferred computation](../deferred/index.md) for the commitment model).
 
 Additionally, the processor maintains a persistent rolling commitment state word that is updated
 with each `LOG_PRECOMPILE` invocation. The previous state is provided non‑deterministically via
@@ -482,7 +481,6 @@ in the trace of the hash chiplet. In the controller/permutation split design the
 rows are consecutive, so their addresses differ by exactly 1.
 
 
-
 ### Commitment-state Initialization
 
 Inside the VM, the commitment state is tracked via the virtual-table bus: each update removes the
@@ -526,5 +524,5 @@ v_{rem,last} = \alpha_0 + \alpha_1 \cdot op_{log\_precompile} + \sum_{j=0}^{3} \
 $$
 
 Because the fold is the digest of a structural AND node (`Node::and(STATE_PREV, STMNT)`), the
-state is itself a complete digest at every step. The deferred commitment / legacy transcript digest
-is just the final state — no extra finalization step is required.
+state is itself a complete digest at every step. The deferred commitment digest is just the final
+state — no extra finalization step is required.

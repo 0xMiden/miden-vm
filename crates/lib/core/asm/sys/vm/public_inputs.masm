@@ -32,7 +32,7 @@ use miden::core::crypto::hashes::poseidon2
 
 # Number of fixed length public inputs (in field elements).
 # This is composed of the input/output operand stacks (16 * 2), the program digest (4), and the
-# precompile transcript state (4). Note that the fixed length public inputs are stored as extension
+# deferred commitment state (4). Note that the fixed length public inputs are stored as extension
 # field elements and are double-word aligned.
 const NUM_FIXED_LEN_PUBLIC_INPUTS = 40
 
