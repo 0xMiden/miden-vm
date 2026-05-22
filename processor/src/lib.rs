@@ -51,7 +51,7 @@ pub use execution_options::{ExecutionOptions, ExecutionOptionsError};
 pub use fast::{BreakReason, ExecutionOutput, FastProcessor, ResumeContext};
 pub use host::{
     BaseHost, FutureMaybeSend, Host, MastForestStore, MemMastForestStore, SyncHost,
-    debug::DefaultDebugHandler,
+    debug::{DefaultDebugHandler, StdoutWriter, format_value, write_interval, write_stack},
     default::{DefaultHost, HostLibrary},
     handlers::{DebugError, DebugHandler, TraceError},
 };
