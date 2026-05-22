@@ -76,6 +76,9 @@ fn run(source: &str, advice: AdviceInputs) -> (String, ExecutionOutput) {
     .expect("execution failed");
 
     let captured = buf.lock().unwrap().clone();
+    // Echo to stdout so the debug output is visible when running with `cargo test -- --nocapture`
+    // (cargo hides stdout for passing tests otherwise).
+    print!("{captured}");
     (captured, output)
 }
 
