@@ -1,6 +1,6 @@
 //! U256_DIV system event handler for the Miden VM.
 //!
-//! This handler implements the U256_DIV operation that pushes the result of [u256] division
+//! This handler implements the U256_DIV operation that pushes the result of u256 division
 //! (both the quotient and the remainder) onto the advice stack.
 
 use alloc::{vec, vec::Vec};
@@ -17,7 +17,7 @@ pub const U256_DIV_EVENT_NAME: EventName = EventName::new("miden::core::math::u2
 
 /// U256_DIV system event handler.
 ///
-/// Pushes the result of [u256] division (both the quotient and the remainder) onto the advice
+/// Pushes the result of u256 division (both the quotient and the remainder) onto the advice
 /// stack.
 ///
 /// Inputs:
