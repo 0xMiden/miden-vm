@@ -127,6 +127,7 @@
 - [BREAKING] Split the execution AIR into Core + Chiplets AIRs ([#3115](https://github.com/0xMiden/miden-vm/pull/3115)).
 - [BREAKING] Removed `Continuation::AfterExitDecoratorsBasicBlock`. New MAST merges operation-indexed decorators at the post-last-op sentinel index into `after_exit` at build time; execution uses `AfterExitDecorators` only, with legacy forests still supported ([#2633](https://github.com/0xMiden/miden-vm/issues/2633)).
 - Drop dead `clk` argument from u32 range-check ([#3135](https://github.com/0xMiden/miden-vm/issues/3135)).
+- Added binary artifact compilation to CI to aid `midenup`'s installation speed ([#3029](https://github.com/0xMiden/miden-vm/pull/3029)).
 
 ## 0.22.3 (2026-05-01)
 
