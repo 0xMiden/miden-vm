@@ -16,12 +16,12 @@ const SECP256K1_BASE_PRIME: &[u16] = &[
     0xffff, 0xffff, 0xffff, 0xffff,
 ];
 
-/// secp256k1 scalar-field (group order) prime
+/// secp256k1 scalar-field modulus (group order)
 /// `n_k1 = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141`
 /// as 16 u16 limbs in little-endian order. Must encode the same integer as
 /// `SECP256K1_SCALAR_PRIME_U16` in the matching witness handler
 /// (`crates/lib/core/src/handlers/u256_modmul_k1.rs`).
-const SECP256K1_SCALAR_PRIME: &[u16] = &[
+const SECP256K1_SCALAR_MODULUS: &[u16] = &[
     0x4141, 0xd036, 0x5e8c, 0xbfd2, 0xa03b, 0xaf48, 0xdce6, 0xbaae, 0xfffe, 0xffff, 0xffff, 0xffff,
     0xffff, 0xffff, 0xffff, 0xffff,
 ];
@@ -29,8 +29,7 @@ const SECP256K1_SCALAR_PRIME: &[u16] = &[
 /// `modmul_k1_base(b: u256, a: u256) -> u256` computing `a * b mod (2^256 - 2^32 - 977)`.
 ///
 /// Identity: `a(alpha) * b(alpha) - q(alpha) * p(alpha) - c(alpha) - (W - alpha) * (e_pos(alpha)
-/// - e_neg(alpha)) = 0` over u16 limbs, where `p` is the secp256k1 base prime baked in as a
-/// constant polynomial.
+/// - e_neg(alpha)) = 0` over u16 limbs, where `p` is the fixed secp256k1 base-field modulus.
 /// - `a`, `b`: 16 u16 coefficients each (input, 8 u32 limbs). Caller must provide reduced inputs
 ///   (a, b < p); the proc does not check this.
 /// - `q`, `c`: 16 coefficients each (witness). Honest witnesses use u16 coefficients; the VM
@@ -38,8 +37,8 @@ const SECP256K1_SCALAR_PRIME: &[u16] = &[
 ///   valid identity `q(W) = floor(a*b / p) < p` follows from `a, b < p`.
 /// - `e_pos`, `e_neg`: 32 u32 carry coefficients each; the top two coefficients (`[30]` and `[31]`)
 ///   are zero.
-/// - `p`: 16 u16 coefficients hardcoded for `p(alpha)`; the modulus is also part of the Fiat-Shamir
-///   statement through the precomputed `Poseidon(p)` capacity seed.
+/// - `p`: 16 u16 coefficients for the fixed modulus. The verifier advice-loads these coefficients
+///   to evaluate `p(alpha)`, but first checks them against a hardcoded Poseidon2 commitment.
 ///
 /// Soundness: with `a, b < p`, the SZ identity implies `a(W) * b(W) = q(W) * p(W) + c(W)`
 /// up to the Schwartz-Zippel failure probability. The `c(W) < p` check pins c as the
@@ -138,8 +137,8 @@ pub static MODMUL_K1_BASE: LinearRelation = LinearRelation {
 /// `modmul_k1_scalar(b: u256, a: u256) -> u256` computing `a * b mod n_k1` where `n_k1` is the
 /// secp256k1 group order.
 ///
-/// Same identity and witness shape as [`MODMUL_K1_BASE`]; only the constant prime polynomial
-/// differs.
+/// Same identity and witness shape as [`MODMUL_K1_BASE`]; the fixed modulus is the group order
+/// polynomial `n`.
 pub static MODMUL_K1_SCALAR: LinearRelation = LinearRelation {
     name: "modmul_k1_scalar",
     signature: "(b: u256, a: u256) -> u256",
@@ -181,8 +180,8 @@ pub static MODMUL_K1_SCALAR: LinearRelation = LinearRelation {
             storage: Storage::PerU16,
         },
         Poly {
-            name: "p",
-            role: PolyRole::Constant { u16_limbs: SECP256K1_SCALAR_PRIME },
+            name: "n",
+            role: PolyRole::Constant { u16_limbs: SECP256K1_SCALAR_MODULUS },
             u16_coeff_count: 16,
             storage: Storage::PerU16,
         },
@@ -197,7 +196,7 @@ pub static MODMUL_K1_SCALAR: LinearRelation = LinearRelation {
             Product {
                 sign: Sign::Minus,
                 lhs: PolyRef("q"),
-                rhs: PolyRef("p"),
+                rhs: PolyRef("n"),
             },
         ],
         linears: &[Linear { sign: Sign::Minus, poly: PolyRef("c") }],
@@ -212,7 +211,7 @@ pub static MODMUL_K1_SCALAR: LinearRelation = LinearRelation {
         AuxCheck::LimbIsZero { poly: PolyRef("e_pos"), index: 31 },
         AuxCheck::LimbIsZero { poly: PolyRef("e_neg"), index: 30 },
         AuxCheck::LimbIsZero { poly: PolyRef("e_neg"), index: 31 },
-        AuxCheck::LessThan { lhs: PolyRef("c"), rhs: PolyRef("p") },
+        AuxCheck::LessThan { lhs: PolyRef("c"), rhs: PolyRef("n") },
     ],
     expose: &[Output {
         poly: PolyRef("c"),

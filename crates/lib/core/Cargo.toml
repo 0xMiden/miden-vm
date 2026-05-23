@@ -41,7 +41,7 @@ miden-air = { workspace = true, optional = true }
 miden-ace-codegen = { workspace = true, optional = true }
 
 # External dependencies
-num = { version = "0.4", default-features = false, features = ["alloc"] }
+num.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
@@ -53,7 +53,7 @@ miden-processor = { workspace = true, features = ["testing"] }
 miden-prover.workspace = true
 miden-utils-testing.workspace = true
 miden-verifier.workspace = true
-num = { version = "0.4" }
+num = { workspace = true, default-features = true }
 rand = { version = "0.9", default-features = false }
 rand_chacha = { workspace = true }
 rstest = { workspace = true }

@@ -28,7 +28,6 @@ pub type u256 = struct { lo: u128, hi: u128 }
 #!     (it is bounded above by p).
 #!   - carry = 0: the wrapped sum equals the integer sum. Subtract p when the sum is at least p,
 #!     keep it otherwise.
-@locals(8)
 pub proc add(b: u256, a: u256) -> u256
     exec.::miden::core::math::u256::overflowing_add             # [carry, c0..c7, ...]
 
@@ -39,25 +38,21 @@ pub proc add(b: u256, a: u256) -> u256
         push.0.0.0x1.0x3d1
         exec.::miden::core::math::u256::wrapping_add
     else
-        # carry = 0: subtract p when c >= p, keep c otherwise.
-        loc_storew_le.0
-        swapw
-        loc_storew_le.4
-        swapw                                  # [c0..c7, ...]
-        # p as u32 LE limbs.
-        push.0xffffffff.0xffffffff.0xffffffff.0xffffffff
-        push.0xffffffff.0xffffffff.0xfffffffe.0xfffffc2f
-        # => [p0..p7, c0..c7, ...]
+        # carry = 0: test c - p while keeping the original c for the borrow case.
+        dupw.1 dupw.1                          # [c, c, ...]
+        push.0xffffffff dup dup dup
+        push.0xffffffff dup
+        push.0xfffffffe.0xfffffc2f             # [p0..p7, c, c, ...]
         exec.::miden::core::math::u256::overflowing_sub
-        # => [borrow, (c - p) wrap, ...]
+        # => [borrow, (c - p) wrap, c, ...]
 
         if.true
-            # c < p: drop the wrapped subtraction and reload c.
+            # c < p: drop the (c - p) wrap, leaving the original c on top.
             dropw dropw
-            padw loc_loadw_le.4
-            padw loc_loadw_le.0
+        else
+            # c >= p: bring c to top via swapdw, drop it, leaving (c - p) as the result.
+            swapdw dropw dropw
         end
-        # else: c >= p, the (c - p) on top of the stack is the canonical answer.
     end
 end
 
@@ -75,8 +70,9 @@ pub proc sub(b: u256, a: u256) -> u256
 
     if.true
         # borrow = 1 (a < b): add p.
-        push.0xffffffff.0xffffffff.0xffffffff.0xffffffff
-        push.0xffffffff.0xffffffff.0xfffffffe.0xfffffc2f
+        push.0xffffffff dup dup dup
+        push.0xffffffff dup
+        push.0xfffffffe.0xfffffc2f
         exec.::miden::core::math::u256::wrapping_add
     end
     # else: a - b already canonical.
@@ -90,26 +86,20 @@ end
 #! [a0..a7, ...]  ->  [c0..c7, ...]
 #!
 #! Returns 0 when a = 0; otherwise p - a (which is in (0, p)).
-@locals(8)
 pub proc neg(a: u256) -> u256
-    # Save a so we can branch on whether it's zero without losing it.
-    loc_storew_le.0
-    swapw
-    loc_storew_le.4
-    swapw                                                        # [a0..a7, ...]
-
-    # is_zero = (a == 0)
-    exec.::miden::core::math::u256::eqz                          # [is_zero, ...]
+    # eqz consumes one copy of a; keep another for the p - a branch.
+    dupw.1 dupw.1                                                # [a, a, ...]
+    exec.::miden::core::math::u256::eqz                          # [is_zero, a, ...]
 
     if.true
-        # a = 0: push zero word.
-        padw padw
+        # a = 0: drop original a, push zero word as the result.
+        dropw dropw padw padw
     else
-        # a > 0: c = p - a (push p first so it lands at depth 8..15, then a on top).
-        push.0xffffffff.0xffffffff.0xffffffff.0xffffffff
-        push.0xffffffff.0xffffffff.0xfffffffe.0xfffffc2f
-        padw loc_loadw_le.4
-        padw loc_loadw_le.0
+        # a > 0: c = p - a.
+        push.0xffffffff dup dup dup
+        push.0xffffffff dup
+        push.0xfffffffe.0xfffffc2f
+        swapdw
         exec.::miden::core::math::u256::wrapping_sub             # p - a
     end
 end
@@ -135,26 +125,19 @@ end
 #!
 #! Stack transition:
 #! [a0..a7, ...]  ->  [c0..c7, ...]
-#!
-#! Local memory layout (mem[0..8]):
-#!   0..8:   inv (the hinted result, kept across the modmul check)
-@locals(8)
 pub proc inv(a: u256) -> u256
     emit.U256_INV_K1_BASE_EVENT
 
-    # Pull inv from advice and save to mem[0..8]. Handler pushes inv[0..4] first, then inv[4..8].
-    # Stack on entry: [a0..a7, ...]; want [inv0..inv7, a0..a7, ...] for the modmul that follows.
-    adv_pushw  loc_storew_le.0
-    adv_pushw  loc_storew_le.4
-    swapw                                               # [inv0..inv7, a0..a7, ...]
-    exec.u256_sz_modmul_k1_base::modmul_k1_base        # [c0..c7, ...] with c = a*inv mod p
+    # Advice order is inv[0..4], inv[4..8]; swapw puts inv[0] at depth 0.
+    adv_pushw  adv_pushw  swapw                          # [inv, a, ...]
+
+    # Check a * inv = 1 while leaving inv as the return value.
+    swapdw                                               # [a, inv, ...]
+    dupw.3  dupw.3                                       # [inv_copy, a, inv_orig, ...]
+    exec.u256_sz_modmul_k1_base::modmul_k1_base          # [c, inv_orig, ...] with c = a*inv mod p
 
     # Assert c == 1.
-    padw  push.0.0.0.1                          # u256(1) on top, low limb = 1
+    padw  push.0.0.0.1                                   # u256(1) on top
     exec.::miden::core::math::u256::eq
     assert.err="f_k1::inv: hint not a multiplicative inverse"
-
-    # Return inv on the operand stack.
-    padw  loc_loadw_le.4
-    padw  loc_loadw_le.0
 end

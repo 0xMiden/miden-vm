@@ -404,8 +404,9 @@ proc _decompress_no_trap
     # Check X < p. If X is non-canonical, substitute X = 1 so the f_k1::mul calls below do
     # not trap on quotient overflow. The flag is already 0 in that case so the proc returns
     # 0 regardless of what the math computes.
-    push.0xffffffff.0xffffffff.0xffffffff.0xffffffff
-    push.0xffffffff.0xffffffff.0xfffffffe.0xfffffc2f
+    push.0xffffffff dup dup dup
+    push.0xffffffff dup
+    push.0xfffffffe.0xfffffc2f
     exec.::miden::core::math::u256::lt
     dup  loc_load.52  mul  loc_store.52
     not
@@ -422,16 +423,18 @@ proc _decompress_no_trap
     loc_load.16
     padw loc_loadw_le.4  padw loc_loadw_le.0
     emit.K1_POINT_DECOMPRESS_EVENT
-    dropw  dropw  drop                                   # clean up X (8) + parity (1)
+    drop                                                 # drop parity
 
     # Pull Y from advice into mem[8..16].
-    adv_pushw  loc_storew_le.8
-    adv_pushw  loc_storew_le.12
-    swapw                                                # [Y[0..4], Y[4..8], ...]
+    adv_loadw  loc_storew_le.8                           # Y[0..4] -> mem[8..12]
+    swapw
+    adv_loadw  loc_storew_le.12                          # Y[4..8] -> mem[12..16]
+    swapw                                                # => [Y[0..4], Y[4..8], ...]
 
     # Check Y < p. Substitute Y = 1 if non-canonical (same trap-safety reason as X above).
-    push.0xffffffff.0xffffffff.0xffffffff.0xffffffff
-    push.0xffffffff.0xffffffff.0xfffffffe.0xfffffc2f
+    push.0xffffffff dup dup dup
+    push.0xffffffff dup
+    push.0xfffffffe.0xfffffc2f
     exec.::miden::core::math::u256::lt
     dup  loc_load.52  mul  loc_store.52
     not
@@ -446,7 +449,7 @@ proc _decompress_no_trap
 
     # X^2 -> mem[20..28].
     padw loc_loadw_le.4  padw loc_loadw_le.0
-    padw loc_loadw_le.4  padw loc_loadw_le.0
+    dupw.1 dupw.1                                        # [X, X, ...]
     exec.f_k1::mul                                       # [X^2, ...]
     loc_storew_le.20  swapw  loc_storew_le.24  swapw
 
@@ -458,17 +461,16 @@ proc _decompress_no_trap
     # X^3 + 7 -> mem[36..44].
     padw  push.0.0.0.7
     exec.f_k1::add                                       # [X^3+7, ...]
-    loc_storew_le.36 dropw  loc_storew_le.40 dropw
+    loc_storew_le.36 swapw  loc_storew_le.40             # mem[36..44] = X^3+7
 
     # Y^2 -> mem[44..52].
-    padw loc_loadw_le.12  padw loc_loadw_le.8
-    padw loc_loadw_le.12  padw loc_loadw_le.8
+    loc_loadw_le.12  swapw  loc_loadw_le.8
+    dupw.1 dupw.1                                        # [Y, Y, ...]
     exec.f_k1::mul
-    loc_storew_le.44 dropw  loc_storew_le.48 dropw
+    loc_storew_le.44 swapw  loc_storew_le.48  swapw      # mem[44..52] = Y^2
 
     # Check Y^2 == X^3 + 7.
     padw loc_loadw_le.40  padw loc_loadw_le.36
-    padw loc_loadw_le.48  padw loc_loadw_le.44
     exec.::miden::core::math::u256::eq
     loc_load.52  mul  loc_store.52
 

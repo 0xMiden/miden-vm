@@ -6,7 +6,8 @@
 //!    how they are stored,
 //!  - the polynomial identity that the verifier checks at a Fiat-Shamir-derived extension-field
 //!    point,
-//!  - any auxiliary checks beyond the identity (e.g., `c < p`, top carry coefficients are zero),
+//!  - any auxiliary checks beyond the identity (e.g., `c < modulus`, top carry coefficients are
+//!    zero),
 //!  - which polynomials the proc exposes back on the operand stack as the result.
 //!
 //! Realized instances: u256 `modmul_k1_base` and `modmul_k1_scalar`. The data model is generic
@@ -14,9 +15,9 @@
 //! family, but the emitter intentionally assumes the modmul verifier shape rather than trying
 //! to be a general-purpose polynomial-identity compiler.
 
-/// A polynomial appearing in the identity. The identity is always evaluated over u16 limbs
-/// (W = 2^16); that is the only limb size for which the convolution stays inside the felt
-/// field. Storage and operand-stack form may differ from u16 (see [`Storage`]).
+/// A polynomial appearing in the identity. The current specs use u16 limbs (`W = 2^16`);
+/// this keeps the convolution bounds below the felt modulus while preserving a compact
+/// representation. Storage and operand-stack form may differ from u16 (see [`Storage`]).
 #[derive(Clone, Copy, Debug)]
 pub struct Poly {
     /// Identifier used in the identity equation and the emitted MASM (e.g. `"a"`, `"c"`,
@@ -45,8 +46,8 @@ pub enum PolyRole {
     /// Provided by the host on the advice stack, then absorbed into memory + the FS hash via
     /// `adv_pipe`. Each landed felt is range-checked as u32.
     Witness,
-    /// Compile-time constant baked into the emitted MASM as immediate `push.<u16>` sequences;
-    /// no advice traffic.
+    /// Fixed modulus supplied by the spec. The emitter expects exactly one `Constant`; it is
+    /// advice-loaded and checked against a hardcoded Poseidon2 digest before use.
     Constant {
         /// u16 limbs in little-endian order (limb 0 = least-significant).
         u16_limbs: &'static [u16],
@@ -57,10 +58,8 @@ pub enum PolyRole {
 #[derive(Clone, Copy, Debug)]
 pub enum Storage {
     /// One felt per u16 coefficient. For advice-backed witness polynomials, each landed felt
-    /// is range-checked as u32 by `adv_pipe`. Constant polynomials of this storage are baked
-    /// into the emitted MASM as u16 immediates and need no runtime check. Per-witness
-    /// soundness arguments (e.g., why non-canonical u32 coefficients are accepted) live with
-    /// the concrete modmul specs, not here.
+    /// is range-checked as u32 by `adv_pipe`. Per-witness soundness arguments (e.g., why
+    /// non-canonical u32 coefficients are accepted) live with the concrete modmul specs, not here.
     PerU16,
     /// One felt per u32 limb, packing two adjacent u16 limbs per felt. The emitter inserts a
     /// `u32divmod.65536` split when the polynomial is evaluated at alpha via `horner_eval_base`.
@@ -72,7 +71,7 @@ pub enum Storage {
 /// (carry.pos(alpha) - carry.neg(alpha)) = 0`.
 #[derive(Clone, Copy, Debug)]
 pub struct Identity {
-    /// Quadratic terms: `sign * Pa(alpha) * Pb(alpha)`. Modmul has `[+ a*b, - q*p]`.
+    /// Quadratic terms: `sign * Pa(alpha) * Pb(alpha)`. Modmul has `[+ a*b, - q*modulus]`.
     pub products: &'static [Product],
     /// Linear terms: `sign * P(alpha)`. Modmul has `[- c]`.
     pub linears: &'static [Linear],

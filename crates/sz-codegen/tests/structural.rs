@@ -18,14 +18,8 @@ use miden_sz_codegen::{
 #[test]
 fn modmul_k1_base_emits_signed_carry() {
     let s = emit_masm(&specs::MODMUL_K1_BASE);
-    assert!(
-        s.contains("ext2sub                               # pos_h - neg_h"),
-        "expected pos - neg subtraction in carry term"
-    );
-    assert!(
-        s.contains("ext2mul                               # (W - alpha) * (pos - neg)"),
-        "expected signed-carry ext2mul"
-    );
+    // Aux-check error messages name the limb being asserted; these are user-visible at trap
+    // time, so they get explicit coverage beyond the byte-for-byte snapshot.
     assert!(s.contains("e_pos_30 must be 0"));
     assert!(s.contains("e_pos_31 must be 0"));
     assert!(s.contains("e_neg_30 must be 0"));
@@ -35,12 +29,22 @@ fn modmul_k1_base_emits_signed_carry() {
 #[test]
 fn modmul_k1_base_emits_fused_canonical_check() {
     let s = emit_masm(&specs::MODMUL_K1_BASE);
+    // First-limb delta for k1 base: 2^256 - p with p = 2^256 - 2^32 - 977 gives delta_0 = 977.
     assert!(
-        s.contains("# ----- fused canonical check: c < p -----"),
-        "expected fused canonical-check block"
+        s.contains("dup.0 push.0x3d1 u32widening_add drop"),
+        "expected first-limb add of delta_0 = 0x3d1"
     );
-    assert!(s.contains("dupw.1\n    dupw.1"), "expected dupw.1 dupw.1 to preserve c");
-    assert!(s.contains("c < p violated"));
+    assert!(
+        s.contains("c < p violated"),
+        "expected user-visible canonical-check error message"
+    );
+}
+
+#[test]
+fn modmul_k1_scalar_names_group_order_in_generated_masm() {
+    let s = emit_masm(&specs::MODMUL_K1_SCALAR);
+    assert!(s.contains("q(alpha) * n(alpha)"), "expected scalar identity to use n(alpha)");
+    assert!(s.contains("c < n violated"), "expected scalar canonical-check error to use n");
 }
 
 #[test]
@@ -61,6 +65,7 @@ fn modmul_spec_without_canonical_check_is_rejected() {
 #[test]
 fn modmul_k1_base_emits_fs_check() {
     let s = emit_masm(&specs::MODMUL_K1_BASE);
+    assert!(s.contains("fixed modulus commitment mismatch"));
     assert!(s.contains("alpha_0 mismatch (Fiat-Shamir failure)"));
     assert!(s.contains("alpha_1 mismatch (Fiat-Shamir failure)"));
 }

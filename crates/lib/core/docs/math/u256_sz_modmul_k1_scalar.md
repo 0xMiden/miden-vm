@@ -4,4 +4,4 @@ Generated MASM module for the SZ modmul_k1_scalar verifier.<br />DO NOT EDIT BY 
 ## miden::core::math::u256_sz_modmul_k1_scalar
 | Procedure | Description |
 | ----------- | ------------- |
-| modmul_k1_scalar | Schwartz-Zippel-based modmul_k1_scalar modular-multiplication verifier.<br />Main checked identity:<br />a(alpha) * b(alpha) - q(alpha) * p(alpha) - c(alpha) = (W - alpha) * (e_pos(alpha) - e_neg(alpha))<br />at a Fiat-Shamir-derived alpha in the Miden base-field extension (W = 2^16).<br /> |
+| modmul_k1_scalar | Schwartz-Zippel-based modmul_k1_scalar modular-multiplication verifier.<br />Main checked identity:<br />a(alpha) * b(alpha) - q(alpha) * n(alpha) - c(alpha) = (W - alpha) * (e_pos(alpha) - e_neg(alpha))<br />at a Fiat-Shamir-derived alpha in the Miden base-field extension (W = 2^16).<br /> |

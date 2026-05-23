@@ -388,6 +388,54 @@ fn k1_point_double_infinity() {
     assert_point_double(&inf, &inf);
 }
 
+/// Pre-fills the output point's reserved-padding felts (mem[+17..+20] of the flag word) with
+/// non-zero sentinels before calling `point_double`, then asserts the full flag word reads back
+/// as `[0, 0, 0, 0]`. Guards the point-representation contract documented at the top of
+/// `k1_point.masm`: procs that produce a finite result must write the reserved felts as zero.
+#[test]
+fn k1_point_double_finite_overwrites_reserved_padding() {
+    let g = AffinePoint::generator();
+    let two_g = AffinePoint::two_g();
+    let source = format!(
+        "
+        use miden::core::math::k1_point
+
+        @locals(40)
+        proc test_wrapper_double_reserved_taint
+            loc_storew_le.0  dropw
+            loc_storew_le.4  dropw
+            loc_storew_le.8  dropw
+            loc_storew_le.12 dropw
+            loc_store.16
+
+            # Taint the output's reserved padding (mem[37..40]) with non-zero sentinels so we
+            # can verify that point_double overwrites them.
+            push.0xdeadbeef loc_store.37
+            push.0xcafebabe loc_store.38
+            push.0xfeedface loc_store.39
+
+            locaddr.0  locaddr.20
+            exec.k1_point::point_double
+
+            # Load in reverse address order so that mem[20..24] (X[0..4]) ends up on top.
+            padw loc_loadw_le.36
+            padw loc_loadw_le.32
+            padw loc_loadw_le.28
+            padw loc_loadw_le.24
+            padw loc_loadw_le.20
+        end
+
+        begin
+            {pushes}
+            exec.test_wrapper_double_reserved_taint
+            {asserts}
+        end",
+        pushes = point_pushes(&g),
+        asserts = expected_point_assertions(&two_g),
+    );
+    build_test!(&source, &[]).execute().unwrap();
+}
+
 fn assert_point_double(input: &AffinePoint, expected: &AffinePoint) {
     let source = format!(
         "
@@ -790,6 +838,7 @@ fn k1_msm_4_128_all_zero_scalars_yields_identity() {
         &two_g,
         0,
         0,
+        0,
         &BigUint::zero(),
         &BigUint::zero(),
         &BigUint::zero(),
@@ -804,6 +853,7 @@ fn k1_msm_4_128_sign_pair_00_recovers_g_plus_phi_g() {
     let g = AffinePoint::generator();
     let phi_g = phi(&g, &p);
     let expected = affine_add(&g, &phi_g, &p);
+    // LUT[3] dispatch test. k3 = k4 = 0, so LUT[12] is built but not selected.
     assert_msm_4_128_glv(
         &g,
         &phi_g,
@@ -811,6 +861,7 @@ fn k1_msm_4_128_sign_pair_00_recovers_g_plus_phi_g() {
         &phi_g,
         0,
         0,
+        1,
         &BigUint::from(1u32),
         &BigUint::from(1u32),
         &BigUint::zero(),
@@ -826,6 +877,7 @@ fn k1_msm_4_128_sign_pair_01_recovers_g_minus_phi_g() {
     let phi_g = phi(&g, &p);
     let neg_phi_g = phi_g.negate(&p);
     let expected = affine_add(&g, &neg_phi_g, &p);
+    // LUT[3] dispatch test. lut12_endo = 0 (general point_add for LUT[12]).
     assert_msm_4_128_glv(
         &g,
         &neg_phi_g,
@@ -833,6 +885,7 @@ fn k1_msm_4_128_sign_pair_01_recovers_g_minus_phi_g() {
         &phi_g,
         0,
         1,
+        0,
         &BigUint::from(1u32),
         &BigUint::from(1u32),
         &BigUint::zero(),
@@ -848,12 +901,14 @@ fn k1_msm_4_128_sign_pair_10_recovers_neg_g_plus_phi_g() {
     let phi_g = phi(&g, &p);
     let neg_g = g.negate(&p);
     let expected = affine_add(&neg_g, &phi_g, &p);
+    // LUT[3] dispatch test. lut12_endo = 0 (general point_add for LUT[12]).
     assert_msm_4_128_glv(
         &neg_g,
         &phi_g,
         &g,
         &phi_g,
         1,
+        0,
         0,
         &BigUint::from(1u32),
         &BigUint::from(1u32),
@@ -871,6 +926,7 @@ fn k1_msm_4_128_sign_pair_11_recovers_neg_g_minus_phi_g() {
     let neg_g = g.negate(&p);
     let neg_phi_g = phi_g.negate(&p);
     let expected = affine_add(&neg_g, &neg_phi_g, &p);
+    // LUT[3] dispatch test. k3 = k4 = 0, so LUT[12] is built but not selected.
     assert_msm_4_128_glv(
         &neg_g,
         &neg_phi_g,
@@ -878,10 +934,64 @@ fn k1_msm_4_128_sign_pair_11_recovers_neg_g_minus_phi_g() {
         &phi_g,
         1,
         1,
+        1,
         &BigUint::from(1u32),
         &BigUint::from(1u32),
         &BigUint::zero(),
         &BigUint::zero(),
+        &expected,
+    );
+}
+
+#[test]
+fn k1_msm_4_128_lut12_endo_recovers_q_plus_phi_q() {
+    // Selects LUT[12] in the final iteration: k3 = k4 = 1 and k1 = k2 = 0.
+    // Q = 7G keeps this independent of the hardcoded G + φ(G) constants.
+    let p = bn_p();
+    let g = AffinePoint::generator();
+    let phi_g = phi(&g, &p);
+    let q = scalar_mul_reference(&g, &BigUint::from(7u32), &p);
+    let phi_q = phi(&q, &p);
+    let expected = affine_add(&q, &phi_q, &p);
+    assert_msm_4_128_glv(
+        &g,
+        &phi_g,
+        &q,
+        &phi_q,
+        0,
+        0,
+        1,
+        &BigUint::zero(),
+        &BigUint::zero(),
+        &BigUint::from(1u32),
+        &BigUint::from(1u32),
+        &expected,
+    );
+}
+
+#[test]
+fn k1_msm_4_128_lut12_endo_recovers_neg_q_minus_phi_q() {
+    // Same LUT[12] check for the negative same-sign case.
+    let p = bn_p();
+    let g = AffinePoint::generator();
+    let phi_g = phi(&g, &p);
+    let q = scalar_mul_reference(&g, &BigUint::from(7u32), &p);
+    let phi_q = phi(&q, &p);
+    let neg_q = q.negate(&p);
+    let neg_phi_q = phi_q.negate(&p);
+    let expected = affine_add(&neg_q, &neg_phi_q, &p);
+    assert_msm_4_128_glv(
+        &g,
+        &phi_g,
+        &neg_q,
+        &neg_phi_q,
+        0,
+        0,
+        1,
+        &BigUint::zero(),
+        &BigUint::zero(),
+        &BigUint::from(1u32),
+        &BigUint::from(1u32),
         &expected,
     );
 }
@@ -902,7 +1012,8 @@ fn k1_msm_4_128_full_128_bit_scalars() {
     let r3 = scalar_mul_reference(&three_g, &k3, &p);
     let r4 = scalar_mul_reference(&four_g, &k4, &p);
     let expected = affine_add(&affine_add(&r1, &r2, &p), &affine_add(&r3, &r4, &p), &p);
-    assert_msm_4_128_glv(&g, &phi_g, &three_g, &four_g, 0, 0, &k1, &k2, &k3, &k4, &expected);
+    // P_3, P_4 not endo-related → lut12_endo = 0.
+    assert_msm_4_128_glv(&g, &phi_g, &three_g, &four_g, 0, 0, 0, &k1, &k2, &k3, &k4, &expected);
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -913,6 +1024,7 @@ fn assert_msm_4_128_glv(
     p4: &AffinePoint,
     sign_a_u1: u8,
     sign_b_u1: u8,
+    lut12_endo: u8,
     k1: &BigUint,
     k2: &BigUint,
     k3: &BigUint,
@@ -923,6 +1035,7 @@ fn assert_msm_4_128_glv(
     for (label, k) in [("k1", k1), ("k2", k2), ("k3", k3), ("k4", k4)] {
         assert!(k.bits() <= 128, "{label} must fit in 128 bits, got {} bits", k.bits());
     }
+    assert!(lut12_endo <= 1, "lut12_endo is a u1; got {lut12_endo}");
 
     // Stack at wrapper entry (top to deep, 84 felts):
     //   [P1 (17), P2 (17), P3 (17), P4 (17), k1 (4), k2 (4), k3 (4), k4 (4), ...]
@@ -980,8 +1093,9 @@ fn assert_msm_4_128_glv(
             loc_storew_le.92 dropw
 
             # Stack convention: [sign_a_u1, sign_b_u1, out_addr, k4_addr, k3_addr, k2_addr,
-            #                    k1_addr, P4_addr, P3_addr, P2_addr, P1_addr, ...].
-            # Push deepest (P1) first.
+            #                    k1_addr, P4_addr, P3_addr, P2_addr, P1_addr, lut12_endo, ...].
+            # Push deepest (lut12_endo) first.
+            push.{lut12_endo}
             locaddr.0   locaddr.20  locaddr.40  locaddr.60
             locaddr.80  locaddr.84  locaddr.88  locaddr.92
             locaddr.96
@@ -1417,7 +1531,8 @@ fn msm_4_128_glv_k1_cycles() {
 
             clk
             # Stack: [sign_a_u1, sign_b_u1, out_addr, k_4_addr, k_3_addr, k_2_addr,
-            #         k_1_addr, P_4_addr, P_3_addr, P_2_addr, P_1_addr, ...] (top to deep).
+            #         k_1_addr, P_4_addr, P_3_addr, P_2_addr, P_1_addr, lut12_endo, ...].
+            push.0  # lut12_endo (P_3 = G, P_4 = 2G — no endo relation; force point_add path)
             locaddr.0   locaddr.20  locaddr.40  locaddr.60
             locaddr.80  locaddr.84  locaddr.88  locaddr.92
             locaddr.96

@@ -14,27 +14,69 @@ const U256_MODMUL_K1_BASE_EVENT = event("miden::core::math::u256::u256_modmul_k1
 @locals(130)
 pub proc modmul_k1_base(b: u256, a: u256) -> u256
     emit.U256_MODMUL_K1_BASE_EVENT
+    # Store inputs to local memory; leave the last one (a) on stack as the
+    # initial rate for the first modulus absorb.
     loc_storew_le.12 dropw
     loc_storew_le.16 dropw
-    loc_storew_le.4 dropw
-    loc_storew_le.8 dropw
-    adv_push                              # alpha_1
-    adv_push                              # alpha_0 (top)
-    loc_store.0                           # mem[0] = alpha_0
-    loc_store.1                           # mem[1] = alpha_1
+    loc_storew_le.4
+    swapw
+    loc_storew_le.8
+    # => [a_hi(4), a_lo(4), ...]
+    # Store the advice-supplied FS alpha into mem[0..2].
+    adv_push
+    adv_push
+    loc_store.0
+    loc_store.1
+
     # ----- transcript absorb + polynomial evaluation setup -----
-    push.0 push.0                         # acc placeholders (depths 14, 15 once filled)
-    locaddr.0                             # alpha_addr
-    locaddr.4                             # ptr = first poly start
-    # ----- precomputed capacity from Poseidon(modulus); rate words are zero-
-    # initialized because the first `mem_stream` overwrites them before any permute.
-    push.12777242278417594148.18250870677972930361.12963408385698084413.3159600732757009237        # C = precomputed capacity
-    padw padw                              # R1, R0 zero-init (overwritten by first absorb)
+    # Build the [R(8), C(4), ptr, alpha_addr, acc(2), ...] frame that
+    # adv_pipe / horner_eval_base / permute expect.
+    push.0 push.0
+    locaddr.0
+    locaddr.20
+    padw
+    swapdw
+    # => [a_hi(4), a_lo(4), R_pad(4), ptr, alpha_addr, acc(2), ...]
+
+    # ----- fixed modulus: advice load + commitment check + p(alpha) -----
+    # adv_pipe streams 8 p u16 limbs into the rate, mirrors them to mem[ptr..ptr+8],
+    # and advances ptr. horner_eval_base accumulates p(alpha) into acc at depths 14/15.
+    # permute mixes the state(12) at depths 0-11 for the FS commitment.
+    repeat.2
+        adv_pipe
+        horner_eval_base
+        exec.poseidon2::permute
+    end
+    # => [state(12), ptr, alpha_addr, p(alpha), ...]
+
+    # Assert the post-absorb state[0..4] equals the pinned digest of p.
+    push.15949518956405573539.14257695485857212672.14517505069177664293.9881852670871024242
+    assert_eqw.err="sz: fixed modulus commitment mismatch"
+    # => [state[4..12], ptr, alpha_addr, p(alpha), ...]  (popped 8: pinned + state[0..4])
+
+    # Snapshot p(alpha) to mem (now at depths 10/11 after assert_eqw's shift),
+    # reset depths 10/11, retarget ptr to the first input, and restore four zero rate
+    # lanes for the next absorb.
+    movup.10 loc_store.128 push.0 movdn.10
+    movup.11 loc_store.129 push.0 movdn.11
+    movup.8 drop locaddr.4 movdn.8
+    padw
+    # => [0(4), state[4..12], locaddr.4, alpha_addr, 0, 0, ...]
+
+    # ----- absorb inputs (a, b) via mem_stream -----
+    # mem_stream overwrites the rate with mem[ptr..ptr+8] and advances ptr by 8.
+    # No horner here; input alpha-evaluation happens in the per-input Horner blocks below.
     repeat.2
         mem_stream
         exec.poseidon2::permute
     end
-    # Witness coefficients are u32-bounded, not u16-bounded, by design.
+    # => [state(12), ptr, alpha_addr, acc(2), ...]
+
+    # ----- absorb witness q via adv_pipe -----
+    # adv_pipe streams 8 q coefficients into the rate, mirrors them to
+    # mem[ptr..ptr+8], and advances ptr. Coefficients are u32-bounded (not u16);
+    # u32assertw range-checks both halves of the rate. horner_eval_base
+    # accumulates q(alpha) into acc at depths 14/15.
     repeat.2
         adv_pipe
         u32assertw
@@ -42,10 +84,18 @@ pub proc modmul_k1_base(b: u256, a: u256) -> u256
         horner_eval_base
         exec.poseidon2::permute
     end
-    dup.14 loc_store.120
-    dup.15 loc_store.121
-    movup.14 drop push.0 movdn.14
-    movup.15 drop push.0 movdn.15
+    # => [state(12), ptr, alpha_addr, q(alpha), ...]
+
+    # Snapshot q(alpha) and reset depths 14/15 for c.
+    movup.14 loc_store.120 push.0 movdn.14
+    movup.15 loc_store.121 push.0 movdn.15
+    # => [state(12), ptr, alpha_addr, 0, 0, ...]
+
+    # ----- absorb witness c via adv_pipe -----
+    # adv_pipe streams 8 c coefficients into the rate, mirrors them to
+    # mem[ptr..ptr+8], and advances ptr. Coefficients are u32-bounded (not u16);
+    # u32assertw range-checks both halves of the rate. horner_eval_base
+    # accumulates c(alpha) into acc at depths 14/15.
     repeat.2
         adv_pipe
         u32assertw
@@ -53,10 +103,18 @@ pub proc modmul_k1_base(b: u256, a: u256) -> u256
         horner_eval_base
         exec.poseidon2::permute
     end
-    dup.14 loc_store.122
-    dup.15 loc_store.123
-    movup.14 drop push.0 movdn.14
-    movup.15 drop push.0 movdn.15
+    # => [state(12), ptr, alpha_addr, c(alpha), ...]
+
+    # Snapshot c(alpha) and reset depths 14/15 for e_pos.
+    movup.14 loc_store.122 push.0 movdn.14
+    movup.15 loc_store.123 push.0 movdn.15
+    # => [state(12), ptr, alpha_addr, 0, 0, ...]
+
+    # ----- absorb witness e_pos via adv_pipe -----
+    # adv_pipe streams 8 e_pos coefficients into the rate, mirrors them to
+    # mem[ptr..ptr+8], and advances ptr. Coefficients are u32-bounded (not u16);
+    # u32assertw range-checks both halves of the rate. horner_eval_base
+    # accumulates e_pos(alpha) into acc at depths 14/15.
     repeat.4
         adv_pipe
         u32assertw
@@ -64,10 +122,18 @@ pub proc modmul_k1_base(b: u256, a: u256) -> u256
         horner_eval_base
         exec.poseidon2::permute
     end
-    dup.14 loc_store.124
-    dup.15 loc_store.125
-    movup.14 drop push.0 movdn.14
-    movup.15 drop push.0 movdn.15
+    # => [state(12), ptr, alpha_addr, e_pos(alpha), ...]
+
+    # Snapshot e_pos(alpha) and reset depths 14/15 for e_neg.
+    movup.14 loc_store.124 push.0 movdn.14
+    movup.15 loc_store.125 push.0 movdn.15
+    # => [state(12), ptr, alpha_addr, 0, 0, ...]
+
+    # ----- absorb witness e_neg via adv_pipe -----
+    # adv_pipe streams 8 e_neg coefficients into the rate, mirrors them to
+    # mem[ptr..ptr+8], and advances ptr. Coefficients are u32-bounded (not u16);
+    # u32assertw range-checks both halves of the rate. horner_eval_base
+    # accumulates e_neg(alpha) into acc at depths 14/15.
     repeat.4
         adv_pipe
         u32assertw
@@ -75,140 +141,144 @@ pub proc modmul_k1_base(b: u256, a: u256) -> u256
         horner_eval_base
         exec.poseidon2::permute
     end
+    # => [state(12), ptr, alpha_addr, e_neg(alpha), ...]
+
+    # Snapshot e_neg(alpha) via dup; acc stays in place (discarded by the FS-check teardown).
     dup.14 loc_store.126
     dup.15 loc_store.127
+
+    # ----- top-carry zero checks (each line is net-zero on the stack) -----
     loc_load.53 assertz.err="sz: e_pos_30 must be 0 (top carry coefficient)"
     loc_load.52 assertz.err="sz: e_pos_31 must be 0 (top carry coefficient)"
     loc_load.85 assertz.err="sz: e_neg_30 must be 0 (top carry coefficient)"
     loc_load.84 assertz.err="sz: e_neg_31 must be 0 (top carry coefficient)"
+
     # ----- Fiat-Shamir equality check -----
     loc_load.0
     assert_eq.err="sz: alpha_0 mismatch (Fiat-Shamir failure)"
     loc_load.1
     assert_eq.err="sz: alpha_1 mismatch (Fiat-Shamir failure)"
-    dropw dropw dropw drop drop           # drop residual state + ptr + alpha_addr + acc
+    dropw dropw dropw drop drop
+    # Transcript frame cleared.
+
     # ----- a(alpha) horner eval -----
     push.0 push.0
     locaddr.0
-    push.0 push.0 push.0 push.0 push.0    # [pad x5, alpha_addr, acc_1, acc_0, ...]
-    padw loc_loadw_le.8                   # high u32 limbs
+    padw push.0
+    # => [pad(5), alpha_addr, acc_0=0, acc_1=0, ...]
+    padw loc_loadw_le.8
     u32divmod.65536 swap
     movup.2 u32divmod.65536 swap
     movup.4 u32divmod.65536 swap
     movup.6 u32divmod.65536 swap
+    # => [a_u16[15..8], pad(5), alpha_addr, acc(2), ...]
     horner_eval_base
-    dropw dropw
-    padw loc_loadw_le.4                   # low u32 limbs
+    dropw
+    # => [a_u16[11..8], pad(5), alpha_addr, partial-a(alpha) for high u16s, ...]
+    loc_loadw_le.4
     u32divmod.65536 swap
     movup.2 u32divmod.65536 swap
     movup.4 u32divmod.65536 swap
     movup.6 u32divmod.65536 swap
+    # => [a_u16[7..0], pad(5), alpha_addr, acc(2), ...]
     horner_eval_base
     dropw dropw
-    dup.6 loc_store.116
-    dup.7 loc_store.117
-    dropw dropw
+    # => [pad(5), alpha_addr, a(alpha), ...]
+
+    # Snapshot a(alpha) and reset depths 6/7 for b.
+    movup.6 loc_store.116 push.0 movdn.6
+    movup.7 loc_store.117 push.0 movdn.7
+    # => [pad(5), alpha_addr, 0, 0, ...]
+
     # ----- b(alpha) horner eval -----
-    push.0 push.0
-    locaddr.0
-    push.0 push.0 push.0 push.0 push.0    # [pad x5, alpha_addr, acc_1, acc_0, ...]
-    padw loc_loadw_le.16                   # high u32 limbs
+    # Frame layout is identical to the first horner eval above; acc was zeroed by the snapshot.
+    padw loc_loadw_le.16
     u32divmod.65536 swap
     movup.2 u32divmod.65536 swap
     movup.4 u32divmod.65536 swap
     movup.6 u32divmod.65536 swap
+    # => [b_u16[15..8], pad(5), alpha_addr, acc(2), ...]
     horner_eval_base
-    dropw dropw
-    padw loc_loadw_le.12                   # low u32 limbs
+    dropw
+    # => [b_u16[11..8], pad(5), alpha_addr, partial-b(alpha) for high u16s, ...]
+    loc_loadw_le.12
     u32divmod.65536 swap
     movup.2 u32divmod.65536 swap
     movup.4 u32divmod.65536 swap
     movup.6 u32divmod.65536 swap
+    # => [b_u16[7..0], pad(5), alpha_addr, acc(2), ...]
     horner_eval_base
     dropw dropw
+    # => [pad(5), alpha_addr, b(alpha), ...]
+
+    # Snapshot b(alpha) via dup; acc stays in place.
     dup.6 loc_store.118
     dup.7 loc_store.119
-    dropw dropw
-    # ----- p(alpha) horner eval (constant) -----
-    push.0 push.0
-    locaddr.0
-    push.0 push.0 push.0 push.0 push.0    # [pad x5, alpha_addr, acc_1, acc_0, ...]
-    push.65535        # p_u16[8]
-    push.65535        # p_u16[9]
-    push.65535        # p_u16[10]
-    push.65535        # p_u16[11]
-    push.65535        # p_u16[12]
-    push.65535        # p_u16[13]
-    push.65535        # p_u16[14]
-    push.65535        # p_u16[15]
-    horner_eval_base
-    dropw dropw
-    push.64559        # p_u16[0]
-    push.65535        # p_u16[1]
-    push.65534        # p_u16[2]
-    push.65535        # p_u16[3]
-    push.65535        # p_u16[4]
-    push.65535        # p_u16[5]
-    push.65535        # p_u16[6]
-    push.65535        # p_u16[7]
-    horner_eval_base
-    dropw dropw
-    dup.6 loc_store.128
-    dup.7 loc_store.129
-    dropw dropw
+
     # ----- extension-field identity check -----
-    push.0 push.65536                     # W = (65536, 0)
-    loc_load.1
-    loc_load.0
-    ext2sub                               # (W - alpha)
-    loc_load.125
-    loc_load.124
-    loc_load.127
-    loc_load.126
-    ext2sub                               # pos_h - neg_h
-    ext2mul                               # (W - alpha) * (pos - neg)
-    loc_load.121
-    loc_load.120
+    loc_loadw_le.120
+    # => [q, c, residual(4), ...]
+
+    # q*p first: this puts T1 directly above q*p (no movup needed for T2 = T1 + q*p).
     loc_load.129
     loc_load.128
     ext2mul
-    ext2add                               # RHS += minus-product (sign-flipped)
-    loc_load.123
-    loc_load.122
-    ext2add                               # RHS += minus-linear (sign-flipped)
-    loc_load.117
-    loc_load.116
-    loc_load.119
-    loc_load.118
-    ext2mul                               # LHS = first positive product
-    movdn.3 movdn.3                       # reorder to [RHS_0, RHS_1, LHS_0, LHS_1, ...]
-    ext2sub                               # bottom - top = LHS - RHS
-    eq.0 assert.err="sz: identity check failed at basis coord 0"
-    eq.0 assert.err="sz: identity check failed at basis coord 1"
+    # => [q*p, c, residual(4), ...]
+
+    # T1 = (alpha - W) * (e_neg - e_pos).
+    padw loc_loadw_le.124
+    ext2sub
+    loc_load.1
+    loc_load.0 sub.65536
+    ext2mul
+    # => [T1, q*p, c, residual(4), ...]
+
+    ext2add
+    ext2add
+    # => [T3 = T1 + q*p + c, residual(4), ...]
+
+    # LHS = a*b; identity is T3 - LHS == 0.
+    padw loc_loadw_le.116
+    ext2mul
+    ext2sub
+    assertz.err="sz: identity check failed at basis coord 0"
+    assertz.err="sz: identity check failed at basis coord 1"
+    # => [residual(4), ...]  (absorbed by the next loadw)
+
     # ----- recombine c: 16 u16 limbs -> 8 u32 limbs -----
-    loc_load.36 push.65536 mul loc_load.37 add        # c_u32[7]
-    loc_load.38 push.65536 mul loc_load.39 add        # c_u32[6]
+    loc_loadw_le.36
+    mul.65536 add
+    movdn.2 mul.65536 add
     u32assert2
-    loc_load.40 push.65536 mul loc_load.41 add        # c_u32[5]
-    loc_load.42 push.65536 mul loc_load.43 add        # c_u32[4]
+    # => [c_u32[6], c_u32[7], ...]
+    padw loc_loadw_le.40
+    mul.65536 add
+    movdn.2 mul.65536 add
     u32assert2
-    loc_load.44 push.65536 mul loc_load.45 add        # c_u32[3]
-    loc_load.46 push.65536 mul loc_load.47 add        # c_u32[2]
+    # => [c_u32[4], c_u32[5], c_u32[6], c_u32[7], ...]
+    padw loc_loadw_le.44
+    mul.65536 add
+    movdn.2 mul.65536 add
     u32assert2
-    loc_load.48 push.65536 mul loc_load.49 add        # c_u32[1]
-    loc_load.50 push.65536 mul loc_load.51 add        # c_u32[0]
+    # => [c_u32[2], c_u32[3], c_u32[4], c_u32[5], c_u32[6], c_u32[7], ...]
+    padw loc_loadw_le.48
+    mul.65536 add
+    movdn.2 mul.65536 add
     u32assert2
-    # ----- fused canonical check: c < p -----
-    dupw.1
-    dupw.1
-    push.4294967295        # p_u32[7]
-    push.4294967295        # p_u32[6]
-    push.4294967295        # p_u32[5]
-    push.4294967295        # p_u32[4]
-    push.4294967295        # p_u32[3]
-    push.4294967295        # p_u32[2]
-    push.4294967294        # p_u32[1]
-    push.4294966319        # p_u32[0]
-    exec.::miden::core::math::u256::lt
-    assert.err="sz: c < p violated"
+    # => [c_u32[0], c_u32[1], c_u32[2], c_u32[3], c_u32[4], c_u32[5], c_u32[6], c_u32[7], ...]
+
+    # ----- canonical check: c < p -----
+    # c < p iff (c + delta) does not overflow 2^256; delta = 2^256 - p.
+    # Carry chain: dup each c_u32 limb (preserving c on stack as the proc return) and
+    # add it to delta[i] + prior carry; assertz the final carry.
+    dup.0 push.0x3d1 u32widening_add drop
+    dup.2 push.0x1 u32widening_add3 drop
+    dup.3 u32widening_add drop
+    dup.4 u32widening_add drop
+    dup.5 u32widening_add drop
+    dup.6 u32widening_add drop
+    dup.7 u32widening_add drop
+    dup.8 u32widening_add drop
+    assertz.err="sz: c < p violated"
+    # => [c_u32(8), ...]
 end

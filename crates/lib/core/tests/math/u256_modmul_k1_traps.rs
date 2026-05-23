@@ -7,16 +7,17 @@
 //! advice payload before returning it, or synthesizes a self-consistent malicious witness
 //! (for the `c >= p` case) and re-derives alpha from it.
 //!
-//! Advice payload layout (98 felts) for the generated SZ verifier:
+//! Advice payload layout (114 felts) for the generated SZ verifier:
 //!
 //! | index range | meaning                                                |
 //! |-------------|--------------------------------------------------------|
 //! | 0           | `alpha[1]`                                             |
 //! | 1           | `alpha[0]`                                             |
-//! | 2..18       | `q` reversed: `q[15]` at 2, `q[0]` at 17               |
-//! | 18..34      | `c` reversed: `c[15]` at 18, `c[0]` at 33              |
-//! | 34..66      | `e_pos` reversed: `e_pos[31]` at 34, `e_pos[30]` at 35 |
-//! | 66..98      | `e_neg` reversed: `e_neg[31]` at 66, `e_neg[30]` at 67 |
+//! | 2..18       | `p` reversed: `p[15]` at 2, `p[0]` at 17               |
+//! | 18..34      | `q` reversed: `q[15]` at 18, `q[0]` at 33              |
+//! | 34..50      | `c` reversed: `c[15]` at 34, `c[0]` at 49              |
+//! | 50..82      | `e_pos` reversed: `e_pos[31]` at 50, `e_pos[30]` at 51 |
+//! | 82..114     | `e_neg` reversed: `e_neg[31]` at 82, `e_neg[30]` at 83 |
 
 use alloc::vec::Vec;
 
@@ -106,54 +107,63 @@ fn honest_advice_succeeds() {
 }
 
 #[test]
+fn tampered_p_limb_traps_at_commitment_mismatch() {
+    // Index 17 is p[0] (lowest-degree limb). The fixed modulus is advice-loaded for batching,
+    // but it is checked against a hardcoded Poseidon commitment before the transcript continues.
+    let test = build_tampered_test(17, Tamper::BumpModU16);
+    test.execute()
+        .expect_err("tampered fixed p limb must trap at commitment mismatch");
+}
+
+#[test]
 fn tampered_q_limb_traps_at_alpha_mismatch() {
-    // Index 17 is q[0] (lowest-degree limb). Bumping by 1 mod 2^16 keeps the felt u16-valid
+    // Index 33 is q[0] (lowest-degree limb). Bumping by 1 mod 2^16 keeps the felt u16-valid
     // (so u32assertw passes) but changes the witness, so the FS hash disagrees with the
     // claimed alpha.
-    let test = build_tampered_test(17, Tamper::BumpModU16);
+    let test = build_tampered_test(33, Tamper::BumpModU16);
     test.execute().expect_err("tampered q limb must trap at FS alpha mismatch");
 }
 
 #[test]
 fn tampered_c_limb_traps_at_alpha_mismatch() {
-    // Index 33 is c[0] (lowest-degree limb).
-    let test = build_tampered_test(33, Tamper::BumpModU16);
+    // Index 49 is c[0] (lowest-degree limb).
+    let test = build_tampered_test(49, Tamper::BumpModU16);
     test.execute().expect_err("tampered c limb must trap at FS alpha mismatch");
 }
 
 #[test]
 fn non_u32_witness_felt_traps() {
-    // Index 33 is c[0]. Setting it to 2^32 (just past u32::MAX) must trip the `u32assertw`
+    // Index 49 is c[0]. Setting it to 2^32 (just past u32::MAX) must trip the `u32assertw`
     // batch range-check that runs over every adv_pipe chunk before Horner evaluation.
-    let test = build_tampered_test(33, Tamper::Set(1u64 << 32));
+    let test = build_tampered_test(49, Tamper::Set(1u64 << 32));
     test.execute().expect_err("non-u32 witness felt must trap at u32assertw");
 }
 
 #[test]
 fn nonzero_e_pos_31_traps() {
-    // Index 34 is e_pos[31] (first element after the q/c reversed blocks; e_pos starts here).
-    let test = build_tampered_test(34, Tamper::Set(1));
+    // Index 50 is e_pos[31] (first element after the p/q/c reversed blocks; e_pos starts here).
+    let test = build_tampered_test(50, Tamper::Set(1));
     test.execute().expect_err("nonzero e_pos[31] must trap at top-carry assertion");
 }
 
 #[test]
 fn nonzero_e_pos_30_traps() {
-    // Index 35 is e_pos[30].
-    let test = build_tampered_test(35, Tamper::Set(1));
+    // Index 51 is e_pos[30].
+    let test = build_tampered_test(51, Tamper::Set(1));
     test.execute().expect_err("nonzero e_pos[30] must trap at top-carry assertion");
 }
 
 #[test]
 fn nonzero_e_neg_31_traps() {
-    // Index 66 is e_neg[31].
-    let test = build_tampered_test(66, Tamper::Set(1));
+    // Index 82 is e_neg[31].
+    let test = build_tampered_test(82, Tamper::Set(1));
     test.execute().expect_err("nonzero e_neg[31] must trap at top-carry assertion");
 }
 
 #[test]
 fn nonzero_e_neg_30_traps() {
-    // Index 67 is e_neg[30].
-    let test = build_tampered_test(67, Tamper::Set(1));
+    // Index 83 is e_neg[30].
+    let test = build_tampered_test(83, Tamper::Set(1));
     test.execute().expect_err("nonzero e_neg[30] must trap at top-carry assertion");
 }
 
@@ -207,10 +217,11 @@ impl EventHandler for CGePHandler {
         );
 
         // Push the synthetic advice in the same shape as handle_modmul.
-        let capacity = 2 + 16 + 16 + 32 + 32;
+        let capacity = 2 + 16 + 16 + 16 + 32 + 32;
         let mut advice: Vec<Felt> = Vec::with_capacity(capacity);
         advice.push(alpha_new[1]);
         advice.push(alpha_new[0]);
+        advice.extend(SECP256K1_BASE_PRIME_U16.iter().rev().map(|&v| Felt::from_u32(v as u32)));
         advice.extend(q_new.iter().rev().map(|&v| Felt::from_u32(v as u32)));
         advice.extend(c_new.iter().rev().map(|&v| Felt::from_u32(v as u32)));
         advice.extend(e_pos_new.iter().rev().map(|&v| Felt::from_u32(v)));

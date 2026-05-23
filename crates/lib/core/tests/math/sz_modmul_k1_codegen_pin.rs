@@ -1,11 +1,11 @@
-//! Cross-crate parity pins for the SZ-Horner k1 verifier's Fiat-Shamir initial sponge state.
+//! Cross-crate parity pins for the SZ-Horner k1 verifier's fixed-modulus sponge state.
 //!
 //! The Rust handler (`derive_alpha` in `u256_modmul.rs`) and the MASM emitter
-//! (`miden-sz-codegen`) both compute `Poseidon(modulus)` and use the capacity lanes as the
-//! seed of the FS transcript. They must agree exactly; otherwise alpha would mismatch in
-//! production. The MASM-side codegen-vs-checked-in artifact drift is covered by
+//! (`miden-sz-codegen`) both compute the Poseidon2 state after absorbing the fixed modulus
+//! coefficient stream. They must agree exactly; otherwise alpha would mismatch in production.
+//! The MASM-side codegen-vs-checked-in artifact drift is covered by
 //! `crates/sz-codegen/tests/structural.rs`; this file only covers the host/codegen agreement
-//! on the seed itself.
+//! on the state itself.
 
 use miden_core_lib::handlers::{
     secp256k1_constants::{SECP256K1_BASE_PRIME_U16, SECP256K1_SCALAR_PRIME_U16},
@@ -20,7 +20,7 @@ fn k1_base_precomputed_initial_state_pin() {
     assert_eq!(
         core_lib, codegen,
         "core-lib `derive_alpha` and sz-codegen emit divergent initial sponge states for the \
-         secp256k1 base prime; alpha would mismatch in production."
+         secp256k1 base-field modulus; alpha would mismatch in production."
     );
 }
 
@@ -31,6 +31,6 @@ fn k1_scalar_precomputed_initial_state_pin() {
     assert_eq!(
         core_lib, codegen,
         "core-lib `derive_alpha` and sz-codegen emit divergent initial sponge states for the \
-         secp256k1 scalar prime; alpha would mismatch in production."
+         secp256k1 scalar modulus; alpha would mismatch in production."
     );
 }

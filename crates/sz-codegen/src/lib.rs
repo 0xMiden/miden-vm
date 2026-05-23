@@ -2,9 +2,9 @@
 //! Schwartz-Zippel identity at a Fiat-Shamir-derived point in the quadratic extension of the
 //! Miden base field.
 //!
-//! The current checked-in verifiers prove identities of the form
+//! The checked-in verifiers prove identities of the form
 //!
-//!   `a(x) * b(x) - q(x) * p(x) - c(x)
+//!   `a(x) * b(x) - q(x) * m(x) - c(x)
 //!       - (W - x) * (e_pos(x) - e_neg(x))  =  0`
 //!
 //! where the signed carry polynomial `e = e_pos - e_neg` is provided as two non-negative
@@ -16,7 +16,7 @@
 //! The `regen` binary regenerates them; CI runs it in `--check` mode and fails if the working
 //! tree drifts from the spec.
 //!
-//! The emitter is straight-line by design: per-prime differences produce per-spec differences
+//! The emitter is straight-line by design: per-modulus differences produce per-spec differences
 //! in the emitted MASM, and optimization happens by enriching the spec rather than branching
 //! inside the emitter.
 

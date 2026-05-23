@@ -31,7 +31,6 @@ const GLV_SPLIT_K1_EVENT = event("miden::core::math::k1_scalar::glv_split")
 #!     bounded above by n).
 #!   - carry = 0: the wrapped sum equals the integer sum. Subtract n when the sum is at least
 #!     n, keep it otherwise.
-@locals(8)
 pub proc add(b: u256, a: u256) -> u256
     exec.::miden::core::math::u256::overflowing_add             # [carry, c0..c7, ...]
 
@@ -42,25 +41,21 @@ pub proc add(b: u256, a: u256) -> u256
         push.0x45512319.0x50b75fc4.0x402da173.0x2fc9bebf
         exec.::miden::core::math::u256::wrapping_add
     else
-        # carry = 0: subtract n when c >= n, keep c otherwise.
-        loc_storew_le.0
-        swapw
-        loc_storew_le.4
-        swapw                                  # [c0..c7, ...]
-        # n as u32 LE limbs.
+        # carry = 0: test c - n while keeping the original c for the borrow case.
+        dupw.1 dupw.1                          # [c, c, ...]
         push.0xffffffff.0xffffffff.0xffffffff.0xfffffffe
         push.0xbaaedce6.0xaf48a03b.0xbfd25e8c.0xd0364141
-        # => [n0..n7, c0..c7, ...]
+        # => [n0..n7, c, c, ...]
         exec.::miden::core::math::u256::overflowing_sub
-        # => [borrow, (c - n) wrap, ...]
+        # => [borrow, (c - n) wrap, c, ...]
 
         if.true
-            # c < n: drop the wrapped subtraction and reload c.
+            # c < n: drop the (c - n) wrap, leaving the original c on top.
             dropw dropw
-            padw loc_loadw_le.4
-            padw loc_loadw_le.0
+        else
+            # c >= n: bring c to top via swapdw, drop it, leaving (c - n) as the result.
+            swapdw dropw dropw
         end
-        # else: c >= n, the (c - n) on top of the stack is the canonical answer.
     end
 end
 
@@ -93,26 +88,19 @@ end
 #! [a0..a7, ...]  ->  [c0..c7, ...]
 #!
 #! Returns 0 when a = 0; otherwise n - a (which is in (0, n)).
-@locals(8)
 pub proc neg(a: u256) -> u256
-    # Save a so we can branch on whether it's zero without losing it.
-    loc_storew_le.0
-    swapw
-    loc_storew_le.4
-    swapw                                                        # [a0..a7, ...]
-
-    # is_zero = (a == 0)
-    exec.::miden::core::math::u256::eqz                          # [is_zero, ...]
+    # eqz consumes one copy of a; keep another for the n - a branch.
+    dupw.1 dupw.1                                                # [a, a, ...]
+    exec.::miden::core::math::u256::eqz                          # [is_zero, a, ...]
 
     if.true
-        # a = 0: push zero word.
-        padw padw
+        # a = 0: drop original a, push zero word as the result.
+        dropw dropw padw padw
     else
-        # a > 0: c = n - a (push n first so it lands at depth 8..15, then a on top).
+        # a > 0: c = n - a.
         push.0xffffffff.0xffffffff.0xffffffff.0xfffffffe
         push.0xbaaedce6.0xaf48a03b.0xbfd25e8c.0xd0364141
-        padw loc_loadw_le.4
-        padw loc_loadw_le.0
+        swapdw
         exec.::miden::core::math::u256::wrapping_sub             # n - a
     end
 end
@@ -138,28 +126,21 @@ end
 #!
 #! Stack transition:
 #! [a0..a7, ...]  ->  [c0..c7, ...]
-#!
-#! Local memory layout (mem[0..8]):
-#!   0..8:   inv (the hinted result, kept across the modmul check)
-@locals(8)
 pub proc inv(a: u256) -> u256
     emit.U256_INV_K1_SCALAR_EVENT
 
-    # Pull inv from advice and save to mem[0..8]. Handler pushes inv[0..4] first, then inv[4..8].
-    # Stack on entry: [a0..a7, ...]; want [inv0..inv7, a0..a7, ...] for the modmul that follows.
-    adv_pushw  loc_storew_le.0
-    adv_pushw  loc_storew_le.4
-    swapw                                               # [inv0..inv7, a0..a7, ...]
-    exec.u256_sz_modmul_k1_scalar::modmul_k1_scalar    # [c0..c7, ...] with c = a*inv mod n
+    # Advice order is inv[0..4], inv[4..8]; swapw puts inv[0] at depth 0.
+    adv_pushw  adv_pushw  swapw                          # [inv, a, ...]
+
+    # Check a * inv = 1 while leaving inv as the return value.
+    swapdw                                               # [a, inv, ...]
+    dupw.3  dupw.3                                       # [inv_copy, a, inv_orig, ...]
+    exec.u256_sz_modmul_k1_scalar::modmul_k1_scalar     # [c, inv_orig, ...] with c = a*inv mod n
 
     # Assert c == 1.
     padw  push.0.0.0.1                          # u256(1) on top, low limb = 1
     exec.::miden::core::math::u256::eq
     assert.err="k1_scalar::inv: hint not a multiplicative inverse"
-
-    # Return inv on the operand stack.
-    padw  loc_loadw_le.4
-    padw  loc_loadw_le.0
 end
 
 # ===== GLV DECOMPOSITION ========================================================================
@@ -234,37 +215,34 @@ pub proc verify_glv_split
     # Cache k from absolute mem[k_addr..k_addr+8] into local mem[40..48] so the verification
     # math can use the cheaper `loc_loadw_le` immediates.
     padw  loc_load.49         mem_loadw_le  loc_storew_le.40
-    loc_load.49 add.4         mem_loadw_le  loc_storew_le.44  dropw
+    loc_load.49 add.4         mem_loadw_le  loc_storew_le.44
 
-    # Canonicalize: c_a = sign_a ? n - |k_a| : |k_a|, stored at mem[20..28].
-    padw  loc_loadw_le.4   padw  loc_loadw_le.0
+    # Canonicalize: c_a = sign_a ? n - |k_a| : |k_a|, stored at mem[20..28]. c_a is also
+    # left on stack (consumed below by the final `add`).
+    loc_loadw_le.4         padw  loc_loadw_le.0
     loc_load.16
     if.true
         exec.neg
     end
-    loc_storew_le.20 dropw
-    loc_storew_le.24 dropw
+    loc_storew_le.20 swapw  loc_storew_le.24  swapw
 
-    # Canonicalize c_b at mem[28..36].
+    # Canonicalize c_b at mem[28..36]. c_b is also left on stack (consumed below by
+    # `mul` as the second operand after λ is pushed on top).
     padw  loc_loadw_le.12  padw  loc_loadw_le.8
     loc_load.17
     if.true
         exec.neg
     end
-    loc_storew_le.28 dropw
-    loc_storew_le.32 dropw
+    loc_storew_le.28 swapw  loc_storew_le.32  swapw
 
-    # Compute c_b * λ mod n. `mul` consumes [b0..b7, a0..a7, ...] and returns [c0..c7, ...]
-    # where c = a*b mod n. Push λ as b first (deeper), then c_b as a (top).
+    # Compute c_b * λ mod n. `mul` consumes [b0..b7, a0..a7, ...] and returns [a*b mod n].
     # λ = 0x5363ad4c c05c30e0 a5261c02 8812645a 122e22ea 20816678 df02967c 1b23bd72
     push.0x5363ad4c.0xc05c30e0.0xa5261c02.0x8812645a
     push.0x122e22ea.0x20816678.0xdf02967c.0x1b23bd72
-    padw  loc_loadw_le.32  padw  loc_loadw_le.28
     exec.mul
-    # Stack: [(c_b·λ)0..7, ...]
+    # Stack: [(λ·c_b)0..7, c_a0..c_a7, ...]
 
     # Add c_a mod n.
-    padw  loc_loadw_le.24  padw  loc_loadw_le.20
     exec.add
     # Stack: [sum0..sum7, ...]
 
