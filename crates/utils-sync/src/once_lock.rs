@@ -1,81 +1,109 @@
-#[cfg(not(feature = "std"))]
-use core::fmt;
 #[cfg(feature = "std")]
 use std::sync::OnceLock;
-
 #[cfg(not(feature = "std"))]
 use once_cell::race::OnceBox;
 
-/// A wrapper around `once_cell::race::OnceBox` that adds a `take()` method for cache invalidation.
+use core::fmt;
+
+/// A cache-invalidation wrapper with consistent semantics across std and no_std.
 ///
-/// `OnceBox` is designed to be write-once, but we need to be able to invalidate the cache
-/// when the MAST forest is mutated. Since `take()` is only called with `&mut self`, we can
-/// safely replace the entire `OnceBox` with a new empty one.
-#[cfg(not(feature = "std"))]
+/// | Feature | Backing type |
+/// |---------|-------------|
+/// | `std`   | `std::sync::OnceLock<T>` |
+/// | no_std  | `once_cell::race::OnceBox<T>` |
+///
+/// # Why not `Clone`?
+///
+/// Under `std`, `OnceLock::clone` copies the initialized value.
+/// Under no_std, `OnceBox` does not support value extraction, so a "clone"
+/// would silently produce an empty instance — a violation of the `Clone`
+/// contract. `Clone` is therefore not implemented on either configuration.
+/// If you need a fresh instance, call `OnceLockCompat::new()` explicitly.
 pub struct OnceLockCompat<T> {
+    #[cfg(feature = "std")]
+    inner: OnceLock<T>,
+    #[cfg(not(feature = "std"))]
     inner: OnceBox<T>,
 }
 
-#[cfg(not(feature = "std"))]
 impl<T> OnceLockCompat<T> {
-    /// Creates a new empty `OnceLockCompat`.
+    /// Creates a new, empty `OnceLockCompat`.
     pub const fn new() -> Self {
-        Self { inner: OnceBox::new() }
+        #[cfg(feature = "std")]
+        {
+            Self {
+                inner: OnceLock::new(),
+            }
+        }
+        #[cfg(not(feature = "std"))]
+        {
+            Self {
+                inner: OnceBox::new(),
+            }
+        }
     }
 
-    /// Gets the value if initialized, or initializes it with the provided closure.
+    /// Returns the value if already initialized, otherwise `None`.
+    pub fn get(&self) -> Option<&T> {
+        #[cfg(feature = "std")]
+        {
+            self.inner.get()
+        }
+        #[cfg(not(feature = "std"))]
+        {
+            // OnceBox::get() returns Option<&Box<T>>
+            self.inner.get().map(|b| -> &T { b })
+        }
+    }
+
+    /// Returns the value if initialized, or initializes it with `f`.
     ///
-    /// If multiple threads call this simultaneously, they may both execute the closure,
-    /// but only one value will be stored. The losing thread's value will be immediately dropped.
+    /// If multiple threads race, each may execute `f`, but only one value is
+    /// stored; the losers' values are dropped immediately.
     pub fn get_or_init<F>(&self, f: F) -> &T
     where
         F: FnOnce() -> T,
     {
-        self.inner.get_or_init(|| alloc::boxed::Box::new(f()))
+        #[cfg(feature = "std")]
+        {
+            self.inner.get_or_init(f)
+        }
+        #[cfg(not(feature = "std"))]
+        {
+            // OnceBox::get_or_init() returns &Box<T>
+            let b: &T = self.inner.get_or_init(|| alloc::boxed::Box::new(f()));
+            b
+        }
     }
 
-    /// Takes the value out of the `OnceLockCompat`, leaving it empty.
+    /// Invalidates the cache so the next [`get_or_init`](OnceLockCompat::get_or_init)
+    /// recomputes the value.
     ///
-    /// Returns `Some(T)` if the value was present, or `None` if it was not initialized.
+    /// # no_std limitation
     ///
-    /// Note: For the no-std implementation, we can't extract the value from `OnceBox`,
-    /// so we just replace it with a new empty one and return `None`.
-    pub fn take(&mut self) -> Option<T> {
-        // Replace the inner OnceBox with a new empty one.
-        // This invalidates the cache by making the next `get_or_init` recompute.
-        // We can't extract the value from OnceBox, so we just discard it.
-        self.inner = OnceBox::new();
-        None
+    /// Under no_std the backing `OnceBox` does not support extracting its value,
+    /// so the stored value is **dropped** on reset and cannot be recovered.
+    /// If you need the value before invalidating, call [`get`](OnceLockCompat::get) first.
+    pub fn reset(&mut self) {
+        #[cfg(feature = "std")]
+        {
+            self.inner = OnceLock::new();
+        }
+        #[cfg(not(feature = "std"))]
+        {
+            self.inner = OnceBox::new();
+        }
     }
 }
 
-#[cfg(not(feature = "std"))]
 impl<T> Default for OnceLockCompat<T> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-#[cfg(not(feature = "std"))]
-impl<T> Clone for OnceLockCompat<T> {
-    /// Cloning an `OnceLockCompat` creates a new empty `OnceLockCompat`.
-    ///
-    /// The cached value is not cloned because it's derived data that can be
-    /// recomputed. This matches the semantics expected for cached/memoized values
-    /// where the cache is an optimization detail, not part of the logical state.
-    fn clone(&self) -> Self {
-        Self::new()
-    }
-}
-
-#[cfg(not(feature = "std"))]
 impl<T: fmt::Debug> fmt::Debug for OnceLockCompat<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // Delegate to OnceBox's Debug implementation
         self.inner.fmt(f)
     }
 }
-
-/// Type alias for std builds - uses `std::sync::OnceLock` directly
-#[cfg(feature = "std")]
-pub type OnceLockCompat<T> = OnceLock<T>;
