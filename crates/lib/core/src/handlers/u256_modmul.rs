@@ -165,7 +165,7 @@ fn read_u32_limbs(
     name: &'static str,
 ) -> Result<[u32; 8], EventError> {
     let mut out = [0u32; 8];
-    for i in 0..8 {
+    for (i, slot) in out.iter_mut().enumerate() {
         let limb = process.get_stack_item(start + i).as_canonical_u64();
         if limb > u32::MAX as u64 {
             return Err(ModMulError::NotU32Value {
@@ -175,7 +175,7 @@ fn read_u32_limbs(
             }
             .into());
         }
-        out[i] = limb as u32;
+        *slot = limb as u32;
     }
     Ok(out)
 }

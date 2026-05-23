@@ -278,8 +278,8 @@ fn u32_to_u16_limbs(v: &[u32; 8]) -> [u16; 16] {
 
 fn read_a_b_as_u32(process: &ProcessorState, depth_start: usize) -> [u32; 8] {
     let mut out = [0u32; 8];
-    for i in 0..8 {
-        out[i] = process.get_stack_item(depth_start + i).as_canonical_u64() as u32;
+    for (i, slot) in out.iter_mut().enumerate() {
+        *slot = process.get_stack_item(depth_start + i).as_canonical_u64() as u32;
     }
     out
 }

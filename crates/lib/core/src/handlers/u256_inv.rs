@@ -22,8 +22,8 @@ pub fn handle_inv(
     prime_u32: &[u32; 8],
 ) -> Result<Vec<AdviceMutation>, EventError> {
     let mut a_u32 = [0u32; 8];
-    for i in 0..8 {
-        a_u32[i] = process.get_stack_item(1 + i).as_canonical_u64() as u32;
+    for (i, limb) in a_u32.iter_mut().enumerate() {
+        *limb = process.get_stack_item(1 + i).as_canonical_u64() as u32;
     }
 
     let bn_a = BigUint::from_slice(&a_u32);
