@@ -8,6 +8,7 @@
 - Aligned replay stack word access bounds with `StackInterface`, allowing the maximum valid start index for word reads and writes ([#3014](https://github.com/0xMiden/miden-vm/pull/3014)).
 - [BREAKING] Enabled `clippy::unnecessary_wraps` lint and removed all unnecessary `Option`/`Result` wrappings across the workspace ([#3143](https://github.com/0xMiden/miden-vm/pull/3143)).
 - Brought the core-lib `u256` module to full parity with the `u64` and `u128` modules ([#3167](https://github.com/0xMiden/miden-vm/pull/3167)).
+- Added in-VM `secp256k1` ECDSA verification (`miden::core::crypto::dsa::ecdsa_k256_keccak::verify_prehash_native`), built on a Schwartz-Zippel modmul verifier, GLV scalar decomposition, and a 4-way Shamir's-trick MSM at 128 iterations ([#3176](https://github.com/0xMiden/miden-vm/pull/3176)).
 
 #### Fixes
 

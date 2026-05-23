@@ -687,8 +687,10 @@ end
 
 #! WARNING -- NOT A GENERIC MSM. SPECIALIZED FOR THE secp256k1 GLV VERIFIER.
 #!
-#! Computes `R = k_1·P_1 + k_2·P_2 + k_3·P_3 + k_4·P_4` via 4-way Shamir's trick at 128
-#! iterations, with `LUT[3] = P_1 + P_2` hardcoded to one of 4 constants. Calling this with
+#! Computes `R = k_1·P_1 + k_2·P_2 + k_3·P_3 + k_4·P_4` using the Straus/Shamir simultaneous
+#! multiple-scalar multiplication method (Hankerson--Menezes--Vanstone, Guide to Elliptic
+#! Curve Cryptography, Algorithm 3.48), specialized to four 128-bit scalars. The scan uses a
+#! 16-entry LUT, with `LUT[3] = P_1 + P_2` hardcoded to one of 4 constants. Calling this with
 #! `P_1` or `P_2` not in their permitted sets silently produces a WRONG result; the proc
 #! never checks the precondition.
 #!
