@@ -134,10 +134,23 @@ impl<'a> ChipletTraceFragment<'a> {
     /// band, fusing the per-row prefix-selector ONEs and trailing `chip_clk` when configured.
     pub fn copy_rows_from(&mut self, src: &[Felt]) {
         debug_assert_eq!(src.len(), self.num_rows * self.num_cols, "source buffer size mismatch");
+        self.copy_rows_into(0, src);
+    }
+
+    /// Copies `src.len() / num_cols` rows starting at `row_offset` into this fragment's band,
+    /// fusing the per-row prefix-selector ONEs and trailing `chip_clk` when configured.
+    pub fn copy_rows_into(&mut self, row_offset: usize, src: &[Felt]) {
+        debug_assert_eq!(src.len() % self.num_cols, 0, "source buffer size not row-aligned");
+        let chunk_rows = src.len() / self.num_cols;
+        debug_assert!(
+            row_offset + chunk_rows <= self.num_rows,
+            "chunk overruns fragment row range",
+        );
         let write_chip_clk = self.stride > self.col_start + self.num_cols;
         let clk_col = self.stride - 1;
-        for r in 0..self.num_rows {
-            let row_start = r * self.stride;
+        for r in 0..chunk_rows {
+            let dst_row = row_offset + r;
+            let row_start = dst_row * self.stride;
             let row = &mut self.band[row_start..row_start + self.stride];
             for &col in self.prefix_one_cols {
                 row[col] = ONE;
@@ -145,7 +158,7 @@ impl<'a> ChipletTraceFragment<'a> {
             row[self.col_start..self.col_start + self.num_cols]
                 .copy_from_slice(&src[r * self.num_cols..(r + 1) * self.num_cols]);
             if write_chip_clk {
-                row[clk_col] = Felt::from_u32((self.row_offset + r + 1) as u32);
+                row[clk_col] = Felt::from_u32((self.row_offset + dst_row + 1) as u32);
             }
         }
     }

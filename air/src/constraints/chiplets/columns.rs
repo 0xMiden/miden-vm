@@ -117,6 +117,11 @@ impl<T: Copy> PermutationCols<T> {
     pub fn unused_padding(&self) -> [T; 3] {
         self._unused
     }
+
+    /// Sets the 3 padding columns (mrupdate_id, is_boundary, direction_bit) to the given value.
+    pub fn set_unused_padding(&mut self, value: T) {
+        self._unused.fill(value);
+    }
 }
 
 // CONTROLLER COLUMNS

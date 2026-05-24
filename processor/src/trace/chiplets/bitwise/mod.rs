@@ -142,10 +142,10 @@ impl Bitwise {
         debug_assert_eq!(self.trace_len(), trace.len(), "inconsistent trace lengths");
         debug_assert_eq!(TRACE_WIDTH, trace.width(), "inconsistent trace widths");
 
-        let mut values = vec![ZERO; self.trace_len() * TRACE_WIDTH];
-        let (out_rows, _) = values.as_chunks_mut::<TRACE_WIDTH>();
+        let mut chunk = [ZERO; TRACE_WIDTH * OP_CYCLE_LEN];
 
         for (op_idx, &BitwiseOp { op, a, b }) in self.ops.iter().enumerate() {
+            let (chunk_rows, _) = chunk.as_mut_slice().as_chunks_mut::<TRACE_WIDTH>();
             let a = a as u64;
             let b = b as u64;
             let selector = op.selector();
@@ -163,8 +163,7 @@ impl Bitwise {
                 };
                 result = (result << 4) | result_4_bit;
 
-                let cols: &mut BitwiseCols<Felt> =
-                    out_rows[op_idx * OP_CYCLE_LEN + i].as_mut_slice().borrow_mut();
+                let cols: &mut BitwiseCols<Felt> = chunk_rows[i].as_mut_slice().borrow_mut();
                 cols.op_flag = selector;
                 cols.a = Felt::new_unchecked(a_acc);
                 cols.b = Felt::new_unchecked(b_acc);
@@ -183,9 +182,9 @@ impl Bitwise {
                 cols.prev_output = Felt::new_unchecked(prev_output);
                 cols.output = Felt::new_unchecked(result);
             }
-        }
 
-        trace.copy_rows_from(&values);
+            trace.copy_rows_into(op_idx * OP_CYCLE_LEN, &chunk);
+        }
     }
 }
 

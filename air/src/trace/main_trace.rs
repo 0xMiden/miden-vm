@@ -710,7 +710,12 @@ impl MainTrace {
 
     /// Returns `true` if a row is part of the kernel chiplet.
     /// Active when virtual s0=1 (s_ctrl=0, s_perm=0) and s1=1, s2=1, s3=1, s4=0.
+    ///
+    /// Short-circuits to `false` past the chiplets-AIR height; see [`Self::is_bitwise_row`].
     pub fn is_kernel_row(&self, i: RowIndex) -> bool {
+        if i.as_usize() >= self.chiplets_height() {
+            return false;
+        }
         self.chiplet_selector_0(i) == ZERO
             && self.chiplet_s_perm(i) == ZERO
             && self.chiplet_selector_1(i) == ONE
@@ -762,7 +767,12 @@ impl MainTrace {
     ///
     /// These rows appear during the old-path leg of a Merkle root update (MRUPDATE). Each
     /// MV input row inserts a sibling into the virtual sibling table via the hash_kernel bus.
+    ///
+    /// Short-circuits to `false` past the chiplets-AIR height; see [`Self::is_bitwise_row`].
     pub fn f_mv(&self, i: RowIndex) -> bool {
+        if i.as_usize() >= self.chiplets_height() {
+            return false;
+        }
         self.chiplet_selector_0(i) == ONE         // s_ctrl=1 (controller row)
             && self.chiplet_s_perm(i) == ZERO   // controller region
             && self.chiplet_selector_1(i) == ONE  // s0=1 (input row)
@@ -775,7 +785,12 @@ impl MainTrace {
     /// These rows appear during the new-path leg of a Merkle root update (MRUPDATE). Each
     /// MU input row removes a sibling from the virtual sibling table via the hash_kernel bus.
     /// The sibling table balance ensures the old and new paths use the same siblings.
+    ///
+    /// Short-circuits to `false` past the chiplets-AIR height; see [`Self::is_bitwise_row`].
     pub fn f_mu(&self, i: RowIndex) -> bool {
+        if i.as_usize() >= self.chiplets_height() {
+            return false;
+        }
         self.chiplet_selector_0(i) == ONE         // s_ctrl=1 (controller row)
             && self.chiplet_s_perm(i) == ZERO   // controller region
             && self.chiplet_selector_1(i) == ONE  // s0=1 (input row)

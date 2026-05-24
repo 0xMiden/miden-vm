@@ -193,11 +193,14 @@ impl HasherTrace {
         debug_assert_eq!(self.trace_len(), trace.len(), "inconsistent trace lengths");
         debug_assert_eq!(TRACE_WIDTH, trace.width(), "inconsistent trace widths");
 
-        let mut values = vec![ZERO; self.row_count * TRACE_WIDTH];
-        let (out_rows, _) = values.as_chunks_mut::<TRACE_WIDTH>();
+        let mut chunk = [ZERO; TRACE_WIDTH * HASH_CYCLE_LEN];
 
         let mut row_idx = 0usize;
         for op in &self.ops {
+            let n = op.row_count();
+            debug_assert!(n <= HASH_CYCLE_LEN);
+            let is_ctrl = matches!(op, HasherOp::Controller { .. } | HasherOp::Padding { .. });
+            let (chunk_rows, _) = chunk.as_mut_slice().as_chunks_mut::<TRACE_WIDTH>();
             match op {
                 HasherOp::Controller {
                     selectors,
@@ -208,7 +211,7 @@ impl HasherTrace {
                     direction_bit,
                 } => {
                     write_controller_row(
-                        &mut out_rows[row_idx],
+                        &mut chunk_rows[0],
                         *selectors,
                         state,
                         *node_index,
@@ -216,15 +219,13 @@ impl HasherTrace {
                         *is_boundary,
                         *direction_bit,
                     );
-                    row_idx += 1;
                 },
                 HasherOp::Permutation { init_state, multiplicity } => {
                     write_permutation_cycle(
-                        &mut out_rows[row_idx..row_idx + HASH_CYCLE_LEN],
+                        &mut chunk_rows[..HASH_CYCLE_LEN],
                         init_state,
                         *multiplicity,
                     );
-                    row_idx += HASH_CYCLE_LEN;
                 },
                 HasherOp::Padding { count, mrupdate_id } => {
                     // Padding selectors: [0, 1, 0]. This combination is unused in the controller
@@ -232,7 +233,7 @@ impl HasherTrace {
                     // Using it prevents padding rows from being mistaken for HOUT output rows
                     // ([0,0,0]) by the bus response builder.
                     let padding_selectors = [ZERO, ONE, ZERO];
-                    for row in &mut out_rows[row_idx..row_idx + count] {
+                    for row in &mut chunk_rows[..*count] {
                         write_controller_row(
                             row,
                             padding_selectors,
@@ -243,20 +244,14 @@ impl HasherTrace {
                             ZERO,
                         );
                     }
-                    row_idx += count;
                 },
             }
-        }
-        debug_assert_eq!(row_idx, self.row_count);
 
-        trace.copy_rows_from(&values);
+            trace.copy_rows_into(row_idx, &chunk[..n * TRACE_WIDTH]);
 
-        // Write `s_ctrl = ONE` on controller/padding rows; perm rows stay ZERO.
-        // Skipped when the fragment has no prefix space.
-        let mut row_idx = 0usize;
-        for op in &self.ops {
-            let n = op.row_count();
-            if matches!(op, HasherOp::Controller { .. } | HasherOp::Padding { .. }) {
+            // Write `s_ctrl = ONE` on controller/padding rows; perm rows stay ZERO.
+            // Skipped when the fragment has no prefix space.
+            if is_ctrl {
                 for i in 0..n {
                     let prefix = trace.prefix_mut(row_idx + i);
                     if let Some(s_ctrl) = prefix.first_mut() {
@@ -264,8 +259,10 @@ impl HasherTrace {
                     }
                 }
             }
+
             row_idx += n;
         }
+        debug_assert_eq!(row_idx, self.row_count);
     }
 }
 
@@ -379,5 +376,8 @@ fn write_perm_row(
     cols.witnesses = witnesses;
     cols.state = *state;
     cols.multiplicity = multiplicity;
+    // Physical slots for controller's mrupdate_id, is_boundary, direction_bit must be
+    // zero on perm rows (PermutationCols::_unused).
+    cols.set_unused_padding(ZERO);
     tail[0] = ONE;
 }
