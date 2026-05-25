@@ -16,7 +16,6 @@ use crate::{
         MastNodeFingerprint, MastNodeId, MultiMastForestIteratorItem, MultiMastForestNodeIter,
     },
     operations::AssemblyOp,
-    serde::Serializable,
     utils::{DenseIdMap, Idx, IndexVec},
 };
 
@@ -290,19 +289,8 @@ impl MastForestMerger {
             .decorator_lookup_forest
             .as_ref()
             .expect("decorator lookup forest should be initialized before merging nodes");
-        let base_fingerprint = remapped_builder
+        let node_fingerprint = remapped_builder
             .fingerprint_for_node(decorator_lookup_forest, &self.hash_by_node_id)?;
-
-        // Augment with the source node's debug vars so same-ops/different-vars
-        // blocks from different forests are not collapsed.
-        let debug_var_data =
-            serialize_debug_var_content_for_node(original_forests[forest_idx], merging_id);
-        let asm_op_data =
-            serialize_asm_op_content_for_node(original_forests[forest_idx], merging_id);
-        let node_fingerprint =
-            augment_fingerprint_with_metadata(base_fingerprint, b"debug-vars", &debug_var_data);
-        let node_fingerprint =
-            augment_fingerprint_with_metadata(node_fingerprint, b"asm-ops", &asm_op_data);
 
         let mapped_node_id = match self.lookup_node_by_fingerprint(&node_fingerprint) {
             Some(matching_node_id) => {
@@ -717,92 +705,6 @@ impl MastForestMerger {
         dmap: &DenseIdMap<DecoratorId, DecoratorId>,
     ) -> Result<MastNodeBuilder, MastForestError> {
         super::build_node_with_remapped_ids(merging_id, src, original_forest, nmap, dmap)
-    }
-}
-
-// HELPERS
-// ================================================================================================
-
-/// Serializes the actual debug var *content* (name, location, etc.) for a node,
-/// producing a stable byte sequence suitable for fingerprint augmentation.
-///
-/// Unlike the assembler's `serialize_debug_vars` (which serializes `(op_idx, DebugVarId)` pairs),
-/// this serializes the resolved DebugVarInfo so that two forests assigning different DebugVarIds
-/// to identical variables still produce the same fingerprint contribution.
-fn serialize_debug_var_content_for_node(forest: &MastForest, node_id: MastNodeId) -> Vec<u8> {
-    let entries = forest.debug_info().debug_vars_for_node(node_id);
-    if entries.is_empty() {
-        return Vec::new();
-    }
-
-    let mut data = Vec::new();
-    for (op_idx, var_id) in entries {
-        data.extend_from_slice(&op_idx.to_le_bytes());
-        if let Some(info) = forest.debug_info().debug_var(var_id) {
-            info.write_into(&mut data);
-        }
-    }
-    data
-}
-
-fn augment_fingerprint_with_metadata(
-    fingerprint: MastNodeFingerprint,
-    tag: &[u8],
-    payload: &[u8],
-) -> MastNodeFingerprint {
-    if payload.is_empty() {
-        return fingerprint;
-    }
-
-    let mut data = Vec::new();
-    data.extend_from_slice(&(tag.len() as u32).to_le_bytes());
-    data.extend_from_slice(tag);
-    data.extend_from_slice(&(payload.len() as u64).to_le_bytes());
-    data.extend_from_slice(payload);
-
-    fingerprint.augment_with_data(&data)
-}
-
-/// Serializes the actual asm-op content for a node, producing a stable byte sequence suitable for
-/// fingerprint augmentation.
-///
-/// This ensures that nodes with identical structure but different source-mapping metadata do not
-/// collapse during merge.
-fn serialize_asm_op_content_for_node(forest: &MastForest, node_id: MastNodeId) -> Vec<u8> {
-    let entries = forest.debug_info().asm_ops_for_node(node_id);
-    if entries.is_empty() {
-        return Vec::new();
-    }
-
-    let mut data = Vec::new();
-
-    if !matches!(forest[node_id], MastNode::Block(_)) {
-        let num_operations = entries.last().map(|(op_idx, _)| op_idx + 1).unwrap_or(0);
-        data.extend_from_slice(&num_operations.to_le_bytes());
-    }
-
-    for (op_idx, asm_op_id) in entries {
-        data.extend_from_slice(&op_idx.to_le_bytes());
-        if let Some(asm_op) = forest.debug_info().asm_op(asm_op_id) {
-            serialize_asm_op_content(asm_op, &mut data);
-        }
-    }
-
-    data
-}
-
-fn serialize_asm_op_content(asm_op: &AssemblyOp, data: &mut Vec<u8>) {
-    asm_op.context_name().write_into(data);
-    asm_op.op().write_into(data);
-    asm_op.num_cycles().write_into(data);
-    match asm_op.location() {
-        Some(location) => {
-            data.push(1);
-            location.uri.write_into(data);
-            data.extend_from_slice(&u32::from(location.start).to_le_bytes());
-            data.extend_from_slice(&u32::from(location.end).to_le_bytes());
-        },
-        None => data.push(0),
     }
 }
 

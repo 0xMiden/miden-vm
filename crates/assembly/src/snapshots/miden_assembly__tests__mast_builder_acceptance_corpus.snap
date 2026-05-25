@@ -1,5 +1,6 @@
 ---
 source: crates/assembly/src/tests.rs
+assertion_line: 4485
 expression: summary
 ---
 === straight_line_decorators ===
@@ -38,20 +39,19 @@ node[Word([2933291673919984664, 3348009166983646574, 16247704426383957713, 11854
 node[Word([4968704082279006519, 3949511070711308391, 6068709747718701089, 8808754193800980700])]=before:[] after:[] indexed:[] asm:[(0, "::$exec::$main:begin:0:loc=true")] debug:[]
 === procedure_calls_and_repeated_subtrees ===
 program_hash=Word([10122689917000098280, 7196569954007518103, 10396919458708245107, 827920990814307390])
-entrypoint=3
-num_procedures=4
-num_nodes=4
-forest_commitment=Word([15592574692995069925, 544934006462602997, 16295196120605067710, 18243051393746141796])
-roots=[0, 1, 2, 3]
-procedure_digests=[Word([7424024061355791961, 4572036390784359401, 16223121653116785824, 11597307264882780443]), Word([7424024061355791961, 4572036390784359401, 16223121653116785824, 11597307264882780443]), Word([16362180982079134587, 16601100057639640520, 5521682503008444658, 3792208660074152519]), Word([10122689917000098280, 7196569954007518103, 10396919458708245107, 827920990814307390])]
-node_digest_multiset=[Word([10122689917000098280, 7196569954007518103, 10396919458708245107, 827920990814307390]), Word([16362180982079134587, 16601100057639640520, 5521682503008444658, 3792208660074152519]), Word([7424024061355791961, 4572036390784359401, 16223121653116785824, 11597307264882780443]), Word([7424024061355791961, 4572036390784359401, 16223121653116785824, 11597307264882780443])]
-debug_counts=decorators:2 asm_ops:8 debug_vars:0 procedure_names:0
+entrypoint=2
+num_procedures=3
+num_nodes=3
+forest_commitment=Word([13251000466048354085, 3458855398185891890, 9882965451801700615, 14299250997935243500])
+roots=[0, 1, 2]
+procedure_digests=[Word([7424024061355791961, 4572036390784359401, 16223121653116785824, 11597307264882780443]), Word([16362180982079134587, 16601100057639640520, 5521682503008444658, 3792208660074152519]), Word([10122689917000098280, 7196569954007518103, 10396919458708245107, 827920990814307390])]
+node_digest_multiset=[Word([10122689917000098280, 7196569954007518103, 10396919458708245107, 827920990814307390]), Word([16362180982079134587, 16601100057639640520, 5521682503008444658, 3792208660074152519]), Word([7424024061355791961, 4572036390784359401, 16223121653116785824, 11597307264882780443])]
+debug_counts=decorators:2 asm_ops:5 debug_vars:0 procedure_names:0
 decorators=["Debug(StackTop(8))", "Trace(44)"]
-asm_ops=["::$exec::decorated:drop:1:loc=true", "::$exec::decorated:push.0:1:loc=true", "::$exec::repeated_a:add:1:loc=true", "::$exec::repeated_a:push.3:1:loc=true", "::$exec::repeated_a:push.9:1:loc=true", "::$exec::repeated_b:add:1:loc=true", "::$exec::repeated_b:push.3:1:loc=true", "::$exec::repeated_b:push.9:1:loc=true"]
+asm_ops=["::$exec::decorated:drop:1:loc=true", "::$exec::decorated:push.0:1:loc=true", "::$exec::repeated_b:add:1:loc=true", "::$exec::repeated_b:push.3:1:loc=true", "::$exec::repeated_b:push.9:1:loc=true"]
 debug_vars=[]
-node[Word([10122689917000098280, 7196569954007518103, 10396919458708245107, 827920990814307390])]=before:[] after:[] indexed:[(11, "Debug(StackTop(8))"), (11, "Trace(44)")] asm:[(4, "::$exec::repeated_a:push.9:1:loc=true"), (5, "::$exec::repeated_a:push.3:1:loc=true"), (6, "::$exec::repeated_a:add:1:loc=true"), (7, "::$exec::repeated_b:push.9:1:loc=true"), (9, "::$exec::repeated_b:push.3:1:loc=true"), (10, "::$exec::repeated_b:add:1:loc=true"), (11, "::$exec::decorated:push.0:1:loc=true"), (12, "::$exec::decorated:drop:1:loc=true")] debug:[]
+node[Word([10122689917000098280, 7196569954007518103, 10396919458708245107, 827920990814307390])]=before:[] after:[] indexed:[(11, "Debug(StackTop(8))"), (11, "Trace(44)")] asm:[(4, "::$exec::repeated_b:push.9:1:loc=true"), (5, "::$exec::repeated_b:push.3:1:loc=true"), (6, "::$exec::repeated_b:add:1:loc=true"), (7, "::$exec::repeated_b:push.9:1:loc=true"), (9, "::$exec::repeated_b:push.3:1:loc=true"), (10, "::$exec::repeated_b:add:1:loc=true"), (11, "::$exec::decorated:push.0:1:loc=true"), (12, "::$exec::decorated:drop:1:loc=true")] debug:[]
 node[Word([16362180982079134587, 16601100057639640520, 5521682503008444658, 3792208660074152519])]=before:[] after:[] indexed:[(0, "Debug(StackTop(8))"), (0, "Trace(44)")] asm:[(0, "::$exec::decorated:push.0:1:loc=true"), (1, "::$exec::decorated:drop:1:loc=true")] debug:[]
-node[Word([7424024061355791961, 4572036390784359401, 16223121653116785824, 11597307264882780443])]=before:[] after:[] indexed:[] asm:[(0, "::$exec::repeated_a:push.9:1:loc=true"), (1, "::$exec::repeated_a:push.3:1:loc=true"), (2, "::$exec::repeated_a:add:1:loc=true")] debug:[]
 node[Word([7424024061355791961, 4572036390784359401, 16223121653116785824, 11597307264882780443])]=before:[] after:[] indexed:[] asm:[(0, "::$exec::repeated_b:push.9:1:loc=true"), (1, "::$exec::repeated_b:push.3:1:loc=true"), (2, "::$exec::repeated_b:add:1:loc=true")] debug:[]
 === static_imports ===
 program_hash=Word([17565955300197998510, 14618024376583146199, 2287264015840565529, 10863887175078525870])

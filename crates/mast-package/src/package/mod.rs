@@ -228,7 +228,9 @@ impl Package {
             )));
         }
         let main_path = MasmPath::exec_path().join(ast::ProcedureName::MAIN_PROC_NAME);
-        if let Some(entrypoint) = self.mast.get_procedure_node_by_path(&main_path) {
+        if let Some(digest) = self.mast.get_procedure_root_by_path(&main_path)
+            && let Some(entrypoint) = self.mast.mast_forest().find_procedure_root(digest)
+        {
             let mast_forest = self.mast.mast_forest().clone();
             let kernel_dependency = self.kernel_runtime_dependency()?.cloned();
             match (self.try_embedded_kernel_library()?, kernel_dependency) {
@@ -401,18 +403,14 @@ impl Package {
                     entrypoint.namespace()
                 ))
             })?;
-        if let Some(procedure) = module.get_procedure_by_name(entrypoint.name()) {
+        if let Some(digest) = module.get_procedure_digest_by_name(entrypoint.name()) {
             let mast_forest = self.mast.mast_forest().clone();
-            let digest = procedure.digest;
-            let node_id = procedure
-                .source_root_id()
-                .or_else(|| mast_forest.find_procedure_root(digest))
-                .ok_or_else(|| {
-                    Report::msg(
-                        "invalid entrypoint: malformed library - procedure exported, but digest \
-                         has no node in the forest",
-                    )
-                })?;
+            let node_id = mast_forest.find_procedure_root(digest).ok_or_else(|| {
+                Report::msg(
+                    "invalid entrypoint: malformed library - procedure exported, but digest has \
+                     no node in the forest",
+                )
+            })?;
 
             let exec_path: Arc<MasmPath> =
                 MasmPath::exec_path().join(masm::ProcedureName::MAIN_PROC_NAME).into();
@@ -703,7 +701,7 @@ mod tests {
     }
 
     #[test]
-    fn make_executable_preserves_selected_same_digest_root_metadata() {
+    fn make_executable_keeps_same_digest_roots_metadata_neutral() {
         let library =
             build_same_digest_library(&[("app::alias_a", "alias_a"), ("app::alias_b", "alias_b")]);
         let package = *Package::from_library(
@@ -719,7 +717,9 @@ mod tests {
 
         let main_path =
             miden_assembly_syntax::Path::exec_path().join(ProcedureName::MAIN_PROC_NAME);
-        let entrypoint_node = executable.mast.get_procedure_node_by_path(&main_path).unwrap();
+        let entrypoint_digest = executable.mast.get_procedure_root_by_path(&main_path).unwrap();
+        let entrypoint_node =
+            executable.mast.mast_forest().find_procedure_root(entrypoint_digest).unwrap();
         assert_eq!(
             executable
                 .mast
@@ -728,7 +728,7 @@ mod tests {
                 .first_asm_op_for_node(entrypoint_node)
                 .unwrap()
                 .context_name(),
-            "alias_b"
+            "alias_a"
         );
 
         let program = executable.try_into_program().unwrap();
@@ -739,7 +739,7 @@ mod tests {
                 .first_asm_op_for_node(program.entrypoint())
                 .unwrap()
                 .context_name(),
-            "alias_b"
+            "alias_a"
         );
     }
 }
