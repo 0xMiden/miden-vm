@@ -767,7 +767,7 @@ end
 #! Stack transition looks as follows:
 #! [a0, a1, a2, a3, a4, a5, a6, a7, ...] -> [count, ...], where count is the number of leading
 #! zero bits in a (0..=256).
-pub proc clz(a: u256) -> u8
+pub proc clz(a: u256) -> u16
     # Walk down from the most significant limb (a7) to the least (a0). For each limb, if it's
     # zero, drop it and continue; otherwise apply u32clz to it and add 32 * (limb index from low).
     movup.7
@@ -833,7 +833,7 @@ end
 #! Stack transition looks as follows:
 #! [a0, a1, a2, a3, a4, a5, a6, a7, ...] -> [count, ...], where count is the number of trailing
 #! zero bits in a (0..=256).
-pub proc ctz(a: u256) -> u8
+pub proc ctz(a: u256) -> u16
     # Walk up from a0 to a7. The non-zero limb (or a7 if all zero, since u32ctz(0) = 32) gives the
     # count contribution; preceding zero limbs each contribute 32.
     dup.0 eq.0
@@ -892,7 +892,7 @@ end
 #! Stack transition looks as follows:
 #! [a0, a1, a2, a3, a4, a5, a6, a7, ...] -> [count, ...], where count is the number of leading
 #! one bits in a (0..=256).
-pub proc clo(a: u256) -> u8
+pub proc clo(a: u256) -> u16
     # Mirror of clz: scan from a7 down, treating 0xFFFFFFFF as the "skip" value.
     movup.7
     dup.0 eq.U32_MAX
@@ -957,7 +957,7 @@ end
 #! Stack transition looks as follows:
 #! [a0, a1, a2, a3, a4, a5, a6, a7, ...] -> [count, ...], where count is the number of trailing
 #! one bits in a (0..=256).
-pub proc cto(a: u256) -> u8
+pub proc cto(a: u256) -> u16
     # Mirror of ctz scanning low-to-high; uses u32cto on the first non-all-ones limb.
     dup.0 eq.U32_MAX
     if.true
