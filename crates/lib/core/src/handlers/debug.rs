@@ -1,18 +1,27 @@
 //! Event handlers backing the `miden::core::debug` print-debugging module.
 //!
-//! Each `miden::core::debug::print_*` procedure emits a distinct well-known event. This module
-//! registers a single [`DebugPrinter`] handler for all of those events; when one fires, the
-//! handler reads the requested piece of VM state (operand stack, memory, advice stack, or advice
-//! map) and prints it using the VM's tree-style debug formatting (shared with the `debug.*`
-//! decorators via [`miden_processor::write_stack`] / [`miden_processor::write_interval`]).
+//! Each `miden::core::debug::print_*` procedure emits a well-known event. This module registers a
+//! single [`DebugPrinter`] handler for all of those events; when one fires, the handler reads the
+//! requested piece of VM state (operand stack, memory, advice stack, or advice map) and prints it
+//! using the VM's tree-style debug formatting (shared with the `debug.*` decorators via
+//! [`miden_processor::write_stack`] / [`miden_processor::write_interval`]). Range-based procedures
+//! may share events with their full-state variants when the full-state behavior can be represented
+//! as an unbounded range.
 //!
 //! Unlike the `debug.*` decorators, these are ordinary `emit` events: they carry no MAST/decorator
 //! cost and print whenever the procedure is executed, regardless of whether the program was
 //! assembled in debug mode.
 
-use alloc::{format, string::ToString, sync::Arc, vec, vec::Vec};
+use alloc::{
+    format,
+    string::{String, ToString},
+    sync::Arc,
+    vec,
+    vec::Vec,
+};
 use core::fmt;
 
+use miden_core::{Felt, Word};
 use miden_processor::{
     ProcessorState, StdoutWriter,
     advice::AdviceMutation,
@@ -28,20 +37,29 @@ use miden_utils_sync::RwLock;
 pub const PRINT_STACK_EVENT_NAME: EventName = EventName::new("miden::core::debug::print_stack");
 /// Prints memory in the range `[start, end)` of the current context.
 pub const PRINT_MEM_EVENT_NAME: EventName = EventName::new("miden::core::debug::print_mem");
-/// Prints the full memory of the current context.
+/// Prints the entire memory of the current context.
 pub const PRINT_MEM_ALL_EVENT_NAME: EventName = EventName::new("miden::core::debug::print_mem_all");
 /// Prints the advice stack in the range `[start, end)`.
 pub const PRINT_ADV_STACK_EVENT_NAME: EventName =
     EventName::new("miden::core::debug::print_adv_stack");
-/// Prints the full advice stack.
+/// Prints the entire advice stack.
+///
+/// This legacy event name is kept as a host-side alias for already-assembled programs. The MASM
+/// `print_adv_stack_all` procedure emits [`PRINT_ADV_STACK_EVENT_NAME`] with an unbounded range.
 pub const PRINT_ADV_STACK_ALL_EVENT_NAME: EventName =
     EventName::new("miden::core::debug::print_adv_stack_all");
 /// Looks up a WORD key in the advice map and prints the associated values.
 pub const PRINT_ADV_MAP_EVENT_NAME: EventName = EventName::new("miden::core::debug::print_adv_map");
+/// Prints the full advice map.
+pub const PRINT_ADV_MAP_ALL_EVENT_NAME: EventName =
+    EventName::new("miden::core::debug::print_adv_map_all");
+/// Looks up a WORD key in the advice map and prints the associated values.
+pub const PRINT_ADV_MAP_ITEM_EVENT_NAME: EventName =
+    EventName::new("miden::core::debug::print_adv_map_item");
 
 /// Returns the `(EventName, handler)` pairs that back the `miden::core::debug` module.
 ///
-/// All six events share a single [`DebugPrinter`] instance writing to stdout.
+/// All events share a single [`DebugPrinter`] instance writing to stdout.
 pub fn debug_handlers() -> Vec<(EventName, Arc<dyn EventHandler>)> {
     let printer: Arc<dyn EventHandler> = Arc::new(DebugPrinter::default());
     vec![
@@ -50,7 +68,9 @@ pub fn debug_handlers() -> Vec<(EventName, Arc<dyn EventHandler>)> {
         (PRINT_MEM_ALL_EVENT_NAME, printer.clone()),
         (PRINT_ADV_STACK_EVENT_NAME, printer.clone()),
         (PRINT_ADV_STACK_ALL_EVENT_NAME, printer.clone()),
-        (PRINT_ADV_MAP_EVENT_NAME, printer),
+        (PRINT_ADV_MAP_EVENT_NAME, printer.clone()),
+        (PRINT_ADV_MAP_ALL_EVENT_NAME, printer.clone()),
+        (PRINT_ADV_MAP_ITEM_EVENT_NAME, printer),
     ]
 }
 
@@ -108,7 +128,11 @@ impl<W: fmt::Write + Send + Sync + 'static> EventHandler for DebugPrinter<W> {
         } else if id == PRINT_ADV_STACK_ALL_EVENT_NAME.to_event_id() {
             let adv_stack = process.advice_provider().stack();
             write_stack(w, &adv_stack, None, "Advice stack", process.clock())?;
-        } else if id == PRINT_ADV_MAP_EVENT_NAME.to_event_id() {
+        } else if id == PRINT_ADV_MAP_ALL_EVENT_NAME.to_event_id() {
+            write_adv_map(w, process)?;
+        } else if id == PRINT_ADV_MAP_EVENT_NAME.to_event_id()
+            || id == PRINT_ADV_MAP_ITEM_EVENT_NAME.to_event_id()
+        {
             write_adv_map_entry(w, process)?;
         }
         // Unknown ids are ignored: the handler is only registered for the events above.
@@ -126,7 +150,7 @@ fn stack_item_as_usize(process: &ProcessorState, pos: usize) -> usize {
 }
 
 /// Returns `slice[start..end]`, clamped to the bounds of `slice` and to `start <= end`.
-fn slice_range(slice: &[miden_core::Felt], start: usize, end: usize) -> &[miden_core::Felt] {
+fn slice_range(slice: &[Felt], start: usize, end: usize) -> &[Felt] {
     let len = slice.len();
     let start = start.min(len);
     let end = end.clamp(start, len);
@@ -173,10 +197,26 @@ fn write_mem_all<W: fmt::Write>(w: &mut W, process: &ProcessorState) -> fmt::Res
     write_interval(w, items, None)
 }
 
+/// Prints the full advice map.
+fn write_adv_map<W: fmt::Write>(w: &mut W, process: &ProcessorState) -> fmt::Result {
+    let clk = process.clock();
+    let map = process.advice_provider().map();
+    if map.is_empty() {
+        return writeln!(w, "Advice map before step {clk}: empty.");
+    }
+
+    writeln!(w, "Advice map before step {clk}:")?;
+    let items: Vec<_> = map
+        .iter()
+        .map(|(key, values)| (format_word(key), Some(format_felt_slice(values))))
+        .collect();
+    write_interval(w, items, None)
+}
+
 /// Looks up the WORD key (at stack positions 1..5) in the advice map and prints its values.
 fn write_adv_map_entry<W: fmt::Write>(w: &mut W, process: &ProcessorState) -> fmt::Result {
     let key = process.get_stack_word(1);
-    let key_str = format!("[{}, {}, {}, {}]", key[0], key[1], key[2], key[3]);
+    let key_str = format_word(&key);
     let clk = process.clock();
     match process.advice_provider().get_mapped_values(&key) {
         Some(values) => {
@@ -190,4 +230,20 @@ fn write_adv_map_entry<W: fmt::Write>(w: &mut W, process: &ProcessorState) -> fm
         },
         None => writeln!(w, "No advice map entry for key {key_str} before step {clk}."),
     }
+}
+
+fn format_word(word: &Word) -> String {
+    format!("[{}, {}, {}, {}]", word[0], word[1], word[2], word[3])
+}
+
+fn format_felt_slice(values: &[Felt]) -> String {
+    let mut out = String::from("[");
+    for (idx, value) in values.iter().enumerate() {
+        if idx > 0 {
+            out.push_str(", ");
+        }
+        out.push_str(&value.to_string());
+    }
+    out.push(']');
+    out
 }

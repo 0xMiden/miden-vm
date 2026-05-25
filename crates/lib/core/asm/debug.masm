@@ -4,9 +4,11 @@
 #! Event-based print debugging for MASM.
 #!
 #! Each procedure emits a well-known event which the host handles by printing the requested piece
-#! of VM state (operand stack, memory, advice stack, or advice map). Unlike the `debug.*`
-#! decorators, these are ordinary `emit` events and carry no MAST/decorator cost, and they print
-#! whenever invoked regardless of whether the program was assembled in debug mode.
+#! of VM state (operand stack, memory, advice stack, or advice map). Range-based procedures share
+#! events with their full-state variants when the full-state behavior can be represented as an
+#! unbounded range. Unlike the `debug.*` decorators, these are ordinary `emit` events and carry no
+#! MAST/decorator cost, and they print whenever invoked regardless of whether the program was
+#! assembled in debug mode.
 
 # CONSTANTS
 # ================================================================================================
@@ -15,8 +17,10 @@ const PRINT_STACK_EVENT = event("miden::core::debug::print_stack")
 const PRINT_MEM_EVENT = event("miden::core::debug::print_mem")
 const PRINT_MEM_ALL_EVENT = event("miden::core::debug::print_mem_all")
 const PRINT_ADV_STACK_EVENT = event("miden::core::debug::print_adv_stack")
-const PRINT_ADV_STACK_ALL_EVENT = event("miden::core::debug::print_adv_stack_all")
 const PRINT_ADV_MAP_EVENT = event("miden::core::debug::print_adv_map")
+const PRINT_ADV_MAP_ALL_EVENT = event("miden::core::debug::print_adv_map_all")
+const PRINT_ADV_MAP_ITEM_EVENT = event("miden::core::debug::print_adv_map_item")
+const MAX_FELT_VALUE = 18446744069414584320
 
 # PROCEDURES
 # ================================================================================================
@@ -81,9 +85,40 @@ end
 #! Inputs:  [...]
 #! Outputs: [...]
 #!
-#! Cycles: 3
+#! Cycles: 7
 pub proc print_adv_stack_all
-    emit.PRINT_ADV_STACK_ALL_EVENT
+    push.MAX_FELT_VALUE push.0
+    emit.PRINT_ADV_STACK_EVENT
+    # => [0, MAX_FELT_VALUE, ...]
+    drop drop
+end
+
+#! Prints the full advice map.
+#!
+#! Inputs:  [...]
+#! Outputs: [...]
+#!
+#! Cycles: 3
+pub proc print_adv_map_all
+    emit.PRINT_ADV_MAP_ALL_EVENT
+end
+
+#! Looks up the WORD key in the advice map and prints the associated list of field elements,
+#! consuming the key.
+#!
+#! This is an alias for `print_adv_map_item`.
+#!
+#! Inputs:  [KEY, ...]
+#! Outputs: [...]
+#!
+#! Where:
+#! - KEY is the word used as the advice map key.
+#!
+#! Cycles: 7
+pub proc print_adv_map
+    emit.PRINT_ADV_MAP_EVENT
+    # => [KEY, ...]
+    dropw
 end
 
 #! Looks up the WORD key in the advice map and prints the associated list of field elements,
@@ -96,8 +131,8 @@ end
 #! - KEY is the word used as the advice map key.
 #!
 #! Cycles: 7
-pub proc print_adv_map
-    emit.PRINT_ADV_MAP_EVENT
+pub proc print_adv_map_item
+    emit.PRINT_ADV_MAP_ITEM_EVENT
     # => [KEY, ...]
     dropw
 end

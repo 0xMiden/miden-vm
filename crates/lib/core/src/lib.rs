@@ -22,7 +22,6 @@ use miden_utils_sync::LazyLock;
 
 use crate::handlers::{
     aead_decrypt::{AEAD_DECRYPT_EVENT_NAME, handle_aead_decrypt},
-    debug::debug_handlers,
     ecdsa::{ECDSA_VERIFY_EVENT_NAME, EcdsaPrecompile},
     eddsa_ed25519::{EDDSA25519_VERIFY_EVENT_NAME, EddsaPrecompile},
     falcon_div::{FALCON_DIV_EVENT_NAME, handle_falcon_div},
@@ -89,6 +88,9 @@ use crate::handlers::{
 /// // Register handlers with your host...
 /// ```
 ///
+/// The print-style debug handlers in [`handlers::debug`] are not registered by default because
+/// hosts often need to route their output to a UI, log, or other sink instead of stdout.
+///
 /// For proof verification, use [`verifier_registry()`](Self::verifier_registry) to get the
 /// precompile verifiers required to validate core library precompile requests.
 ///
@@ -126,9 +128,13 @@ impl CoreLibrary {
         self.0.clone()
     }
 
-    /// List of all `EventHandlers` required to run all of the core library.
+    /// Returns the default non-debug event handlers required by the core library.
+    ///
+    /// Print-style debug handlers are intentionally excluded. Hosts that execute
+    /// `miden::core::debug` procedures should register [`handlers::debug::debug_handlers()`] or
+    /// their own handlers for the debug event names.
     pub fn handlers(&self) -> Vec<(EventName, Arc<dyn EventHandler>)> {
-        let mut handlers: Vec<(EventName, Arc<dyn EventHandler>)> = vec![
+        vec![
             (KECCAK_HASH_BYTES_EVENT_NAME, Arc::new(KeccakPrecompile)),
             (SHA512_HASH_BYTES_EVENT_NAME, Arc::new(Sha512Precompile)),
             (ECDSA_VERIFY_EVENT_NAME, Arc::new(EcdsaPrecompile)),
@@ -141,13 +147,7 @@ impl CoreLibrary {
             (LOWERBOUND_ARRAY_EVENT_NAME, Arc::new(handle_lowerbound_array)),
             (LOWERBOUND_KEY_VALUE_EVENT_NAME, Arc::new(handle_lowerbound_key_value)),
             (AEAD_DECRYPT_EVENT_NAME, Arc::new(handle_aead_decrypt)),
-        ];
-
-        // Print-style debugging handlers backing the `miden::core::debug` module. These print VM
-        // state to stdout whenever the corresponding `print_*` procedure is executed.
-        handlers.extend(debug_handlers());
-
-        handlers
+        ]
     }
 
     /// Returns a [`PrecompileVerifierRegistry`] containing all verifiers required to validate
