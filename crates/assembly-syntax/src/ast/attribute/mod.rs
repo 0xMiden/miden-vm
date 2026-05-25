@@ -171,7 +171,7 @@ impl fmt::Display for Attribute {
 impl prettier::PrettyPrint for Attribute {
     fn render(&self) -> prettier::Document {
         use prettier::*;
-        let doc = text(format!("@{}", &self.name()));
+        let doc = text(format!("@{}", self.name()));
         match self {
             Self::Marker(_) => doc,
             Self::List(meta) => {

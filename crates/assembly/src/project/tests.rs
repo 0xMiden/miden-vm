@@ -1183,7 +1183,7 @@ end
         package
             .manifest
             .dependencies()
-            .map(|dep| format!("{}@{}#{}", &dep.name, dep.version, dep.digest))
+            .map(|dep| format!("{}@{}#{}", dep.name, dep.version, dep.digest))
             .collect::<Vec<_>>(),
         vec![format!("runtime@1.0.0#{runtime_digest}")]
     );
@@ -1274,7 +1274,7 @@ dep.workspace = true
         package
             .manifest
             .dependencies()
-            .map(|dep| format!("{}@{}#{}", &dep.name, dep.version, dep.digest))
+            .map(|dep| format!("{}@{}#{}", dep.name, dep.version, dep.digest))
             .collect::<Vec<_>>(),
         vec![format!("dep@0.2.0#{}", dep010.digest())]
     );
@@ -1339,7 +1339,7 @@ end
     let expected_dependency = first
         .manifest
         .dependencies()
-        .map(|dep| format!("{}@{}#{}", &dep.name, dep.version, dep.digest))
+        .map(|dep| format!("{}@{}#{}", dep.name, dep.version, dep.digest))
         .collect::<Vec<_>>();
     context.registry().clear_loaded_packages();
 
@@ -1359,7 +1359,7 @@ end
         second
             .manifest
             .dependencies()
-            .map(|dep| format!("{}@{}#{}", &dep.name, dep.version, dep.digest))
+            .map(|dep| format!("{}@{}#{}", dep.name, dep.version, dep.digest))
             .collect::<Vec<_>>(),
         expected_dependency
     );
@@ -1781,7 +1781,7 @@ end
     let expected_dependency = first
         .manifest
         .dependencies()
-        .map(|dep| format!("{}@{}#{}", &dep.name, dep.version, dep.digest))
+        .map(|dep| format!("{}@{}#{}", dep.name, dep.version, dep.digest))
         .collect::<Vec<_>>();
     context.registry().clear_loaded_packages();
 
@@ -1814,7 +1814,7 @@ dep = { path = "dep" }
         second
             .manifest
             .dependencies()
-            .map(|dep| format!("{}@{}#{}", &dep.name, dep.version, dep.digest))
+            .map(|dep| format!("{}@{}#{}", dep.name, dep.version, dep.digest))
             .collect::<Vec<_>>(),
         expected_dependency
     );
@@ -2056,7 +2056,7 @@ end
         package
             .manifest
             .dependencies()
-            .map(|dep| format!("{}@{}#{}", &dep.name, dep.version, dep.digest))
+            .map(|dep| format!("{}@{}#{}", dep.name, dep.version, dep.digest))
             .collect::<Vec<_>>(),
         vec![format!("dep@1.0.0#{dep_digest}")]
     );
