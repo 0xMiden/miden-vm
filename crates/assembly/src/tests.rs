@@ -6388,6 +6388,37 @@ fn exported_procedure_signature_with_cross_module_private_alias_dependency_is_re
 }
 
 #[test]
+fn exported_procedure_alias_signature_with_private_local_type_is_rejected() -> TestResult {
+    let context = TestContext::default();
+
+    let module = context.parse_module_with_path(
+        "cycle::module_a",
+        source_file!(
+            &context,
+            r#"
+            type PrivateType = felt
+
+            proc hidden(value: PrivateType)
+                nop
+            end
+
+            pub use ::cycle::module_a::hidden->exposed
+        "#
+        ),
+    )?;
+
+    let err = Assembler::new(context.source_manager())
+        .assemble_library("library", module, [])
+        .expect_err(
+            "expected exported procedure alias with private local type in signature to be rejected",
+        );
+    assert_diagnostic!(&err, "private type in exported procedure signature");
+    assert_diagnostic!(&err, "exported procedure signatures may only reference public types");
+
+    Ok(())
+}
+
+#[test]
 fn test_cross_module_constant_reexport_chain_in_procedure_scope() -> TestResult {
     let context = TestContext::new();
 
