@@ -1,13 +1,12 @@
 //! Tests for the Rust reference implementation in `keccak256_native`.
 //!
 //! Two layers of coverage:
-//! - **NIST KAT vectors**: a handful of well-known Keccak-256 outputs from
-//!   the public test vector sets (Ethereum reference values + the standard
-//!   `200 bytes of 0xa3` long-message KAT). Locks down the absolute correctness
-//!   of the reference, independent of any other implementation in the workspace.
-//! - **Proptest against `miden_core::crypto::hash::Keccak256`**: a fast
-//!   differential check across random byte slices (length and content),
-//!   catching any deviation from the production reference.
+//! - **NIST KAT vectors**: a handful of well-known Keccak-256 outputs from the public test vector
+//!   sets (Ethereum reference values + the standard `200 bytes of 0xa3` long-message KAT). Locks
+//!   down the absolute correctness of the reference, independent of any other implementation in the
+//!   workspace.
+//! - **Proptest against `miden_core::crypto::hash::Keccak256`**: a fast differential check across
+//!   random byte slices (length and content), catching any deviation from the production reference.
 //!
 //! Together these guarantee that the reference impl is a trustworthy oracle
 //! for the eventual MASM differential test harness.
@@ -29,7 +28,8 @@ use miden_utils_testing::proptest::prelude::*;
 /// `RATE_BYTES + 1`) are exercised stochastically by the proptest below
 /// against `miden_core::crypto::hash::Keccak256`.
 const KAT_VECTORS: &[(&str, &str)] = &[
-    // Empty input. Ethereum: keccak256("") = c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470.
+    // Empty input. Ethereum: keccak256("") =
+    // c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470.
     ("", "c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"),
     // Single byte 0xCC -- NIST short-message KAT.
     ("cc", "eead6dbfc7340a56caedc044696a168870549a6a7f6f56961e84a54bd9970b8a"),
@@ -82,7 +82,7 @@ proptest! {
 // ================================================================================================
 
 fn hex_decode(s: &str) -> Vec<u8> {
-    assert!(s.len() % 2 == 0, "odd-length hex string");
+    assert!(s.len().is_multiple_of(2), "odd-length hex string");
     (0..s.len())
         .step_by(2)
         .map(|i| u8::from_str_radix(&s[i..i + 2], 16).expect("valid hex byte"))

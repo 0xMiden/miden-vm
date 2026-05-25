@@ -1055,15 +1055,15 @@ fn decompress_pk_to_xy(pk_bytes: &[u8]) -> (num::BigUint, num::BigUint) {
 /// Witness bundle for `verify_prehash_native_precomp` under the Merkle-committed table
 /// design. Holds:
 ///   - `pk_aug`: 4-felt augmented public-key commitment (the trusted on-chain value).
-///   - `pk_aug_value`: 16-felt advice-map value at key `pk_aug`, defined as
-///     `compressed_PK_9 || zeros_3 || merkle_root_4`.
+///   - `pk_aug_value`: 16-felt advice-map value at key `pk_aug`, defined as `compressed_PK_9 ||
+///     zeros_3 || merkle_root_4`.
 ///   - `entries`: 176,128-entry joint comb table as 24-felt padded entries.
 ///   - `merkle_inner_nodes`: the minimal set of inner-node triples needed to populate the
-///     verifier's `MerkleStore`. Produced by `build_left_aligned_padded_tree`, which skips
-///     the all-empty subtrees in the right-side padding. The tree's root matches the
-///     `merkle_root_4` portion of `pk_aug_value`.
-///   - `u_1`, `u_2`: ECDSA scalars derived from `(digest, sig)`; the host needs them to
-///     pre-push the per-window entries the verifier will look up, in window order.
+///     verifier's `MerkleStore`. Produced by `build_left_aligned_padded_tree`, which skips the
+///     all-empty subtrees in the right-side padding. The tree's root matches the `merkle_root_4`
+///     portion of `pk_aug_value`.
+///   - `u_1`, `u_2`: ECDSA scalars derived from `(digest, sig)`; the host needs them to pre-push
+///     the per-window entries the verifier will look up, in window order.
 struct PrecompWitness {
     pk_aug: [Felt; 4],
     pk_aug_value: Vec<Felt>,
@@ -1100,7 +1100,7 @@ fn precomp_witness(request: &EcdsaRequest) -> PrecompWitness {
     let empty_leaf = Poseidon2::hash_elements(&[Felt::ZERO; FELTS_PER_MERKLE_ENTRY]);
     let (root_word, merkle_inner_nodes) =
         build_left_aligned_padded_tree(&leaves, MERKLE_TREE_DEPTH, empty_leaf);
-    let merkle_root: [Felt; 4] = (*root_word).into();
+    let merkle_root: [Felt; 4] = *root_word;
 
     let pk_felts = bytes_to_packed_u32_elements(&pk_bytes);
     assert_eq!(pk_felts.len(), 9);
@@ -1108,7 +1108,7 @@ fn precomp_witness(request: &EcdsaRequest) -> PrecompWitness {
     pk_aug_value.extend_from_slice(&pk_felts);
     pk_aug_value.extend([Felt::ZERO, Felt::ZERO, Felt::ZERO]);
     pk_aug_value.extend_from_slice(&merkle_root);
-    let pk_aug: [Felt; 4] = (*Poseidon2::hash_elements(&pk_aug_value)).into();
+    let pk_aug: [Felt; 4] = *Poseidon2::hash_elements(&pk_aug_value);
 
     let (u_1, u_2) = derive_u1_u2(request);
     PrecompWitness {
@@ -1143,14 +1143,14 @@ fn derive_u1_u2(request: &EcdsaRequest) -> (num::BigUint, num::BigUint) {
 /// `_push_n_k1` constant in the MASM-side ECDSA proc.
 fn secp256k1_scalar_order() -> [u32; 8] {
     [
-        0xD036_4141,
-        0xBFD2_5E8C,
-        0xAF48_A03B,
-        0xBAAE_DCE6,
-        0xFFFF_FFFE,
-        0xFFFF_FFFF,
-        0xFFFF_FFFF,
-        0xFFFF_FFFF,
+        0xd036_4141,
+        0xbfd2_5e8c,
+        0xaf48_a03b,
+        0xbaae_dce6,
+        0xffff_fffe,
+        0xffff_ffff,
+        0xffff_ffff,
+        0xffff_ffff,
     ]
 }
 
@@ -1352,6 +1352,50 @@ fn ecdsa_verify_prehash_native_precomp_rejects_tampered_pk_aug() {
     assert_eq!(result, Felt::ZERO, "tampered pk_aug must be rejected (returned {:?})", result);
 }
 
+/// A caller-supplied `pk_aug` that is missing from the advice map must return 0 without
+/// letting `_parse_compressed_pk` read uninitialized local scratch.
+#[test]
+fn ecdsa_verify_prehash_native_precomp_missing_pk_aug_advice_returns_zero() {
+    let request = generate_valid_signature();
+    let memory_stores = generate_memory_store_masm(&request);
+    // Honest witness for digest + sig, but pass a pk_aug key that is not inserted into
+    // the advice map. This forces the `adv.has_mapkey == 0` branch.
+    let unregistered_pk_aug = [
+        Felt::new_unchecked(0xdeadbeef),
+        Felt::new_unchecked(0xcafebabe),
+        Felt::new_unchecked(0xfeedface),
+        Felt::new_unchecked(0x12345678),
+    ];
+    let pk_aug_push = push_word_inline(&unregistered_pk_aug);
+    let witness = precomp_witness(&request);
+
+    let source = format!(
+        "
+            use miden::core::crypto::dsa::ecdsa_k256_keccak
+            use miden::core::sys
+
+            begin
+                {memory_stores}
+
+                push.{SIG_ADDR}.{DIGEST_ADDR}  {pk_aug_push}
+                exec.ecdsa_k256_keccak::verify_prehash_native_precomp
+                exec.sys::truncate_stack
+            end
+        ",
+    );
+
+    let mut test = build_debug_test!(&source, &[]);
+    test.advice_inputs = precomp_advice_inputs(&witness);
+    let (output, _) = test.execute_for_output().unwrap();
+    let result = output.stack.get_element(0).unwrap();
+    assert_eq!(
+        result,
+        Felt::ZERO,
+        "missing pk_aug map key must return 0 without trapping (got {:?})",
+        result
+    );
+}
+
 /// A host that publishes a tampered `pk_aug` advice-map entry (one whose stored values
 /// don't hash to the caller-supplied `pk_aug`) must cause verification to return 0
 /// without trapping. Same gating as the previous test, but the inconsistency is on the
@@ -1410,7 +1454,7 @@ fn ecdsa_verify_prehash_native_precomp_rejects_nonzero_preimage_pad() {
     // Flip one pad felt; recompute pk_aug from the modified preimage so the hash binding
     // check still passes. Only the new pad-zero check should reject this.
     witness.pk_aug_value[9] = Felt::ONE;
-    witness.pk_aug = (*Poseidon2::hash_elements(&witness.pk_aug_value)).into();
+    witness.pk_aug = *Poseidon2::hash_elements(&witness.pk_aug_value);
     let pk_aug_push = push_word_inline(&witness.pk_aug);
 
     let source = format!(
@@ -1505,7 +1549,7 @@ fn ecdsa_verify_prehash_native_precomp_invalid_v_returns_zero() {
     // memory, the same shape as the native-path counterpart.
     let request = generate_valid_signature();
     let mut sig_bytes = request.sig().to_bytes();
-    sig_bytes[64] = 0x1B;
+    sig_bytes[64] = 0x1b;
     let memory_stores =
         generate_memory_store_masm_raw(&request.pk().to_bytes(), request.digest(), &sig_bytes);
     let witness = precomp_witness(&request);
@@ -1652,14 +1696,14 @@ fn ecdsa_verify_prehash_native_precomp_accepts_self_consistent_wrong_root() {
     let empty_leaf = Poseidon2::hash_elements(&[Felt::ZERO; FELTS_PER_MERKLE_ENTRY]);
     let (root_word, merkle_inner_nodes) =
         build_left_aligned_padded_tree(&leaves, MERKLE_TREE_DEPTH, empty_leaf);
-    let merkle_root: [Felt; 4] = (*root_word).into();
+    let merkle_root: [Felt; 4] = *root_word;
 
     let decoy_pk_felts = bytes_to_packed_u32_elements(&decoy.pk().to_bytes());
     let mut pk_aug_value: Vec<Felt> = Vec::with_capacity(16);
     pk_aug_value.extend_from_slice(&decoy_pk_felts);
     pk_aug_value.extend([Felt::ZERO, Felt::ZERO, Felt::ZERO]);
     pk_aug_value.extend_from_slice(&merkle_root);
-    let pk_aug: [Felt; 4] = (*Poseidon2::hash_elements(&pk_aug_value)).into();
+    let pk_aug: [Felt; 4] = *Poseidon2::hash_elements(&pk_aug_value);
     let (u_1, u_2) = derive_u1_u2(&actual);
 
     let witness = PrecompWitness {

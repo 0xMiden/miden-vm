@@ -17,7 +17,7 @@ use super::spec::{
     DIGEST_BYTES, DOMAIN_BYTE, IOTA, NUM_LANES, NUM_ROUNDS, RATE_BYTES, RATE_LANES, RHO, lane_idx,
 };
 
-/// The 25-lane state for Keccak-f[1600]. Lane `(x, y)` lives at index `lane_idx(x, y)`.
+/// The 25-lane state for `Keccak-f[1600]`. Lane `(x, y)` lives at index `lane_idx(x, y)`.
 pub type State = [u64; NUM_LANES];
 
 // PERMUTATION STEPS
@@ -106,7 +106,7 @@ pub fn iota(s: &mut State, round: usize) {
     s[lane_idx(0, 0)] ^= IOTA[round];
 }
 
-/// One Keccak-f[1600] round (FIPS 202, sec. 3.3, Algorithm 7).
+/// One `Keccak-f[1600]` round (FIPS 202, sec. 3.3, Algorithm 7).
 pub fn round(s: &mut State, r: usize) {
     theta(s);
     rho(s);
@@ -115,7 +115,7 @@ pub fn round(s: &mut State, r: usize) {
     iota(s, r);
 }
 
-/// Full Keccak-f[1600] permutation: [`NUM_ROUNDS`] rounds applied in sequence.
+/// Full `Keccak-f[1600]` permutation: [`NUM_ROUNDS`] rounds applied in sequence.
 pub fn permute(s: &mut State) {
     for r in 0..NUM_ROUNDS {
         round(s, r);

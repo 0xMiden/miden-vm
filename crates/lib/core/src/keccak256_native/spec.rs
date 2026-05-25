@@ -1,4 +1,4 @@
-//! FIPS 202 constants for Keccak-f[1600] and Keccak-256.
+//! FIPS 202 constants for `Keccak-f[1600]` and Keccak-256.
 //!
 //! Source of truth for the Rust reference implementation in
 //! [`super::reference`]. Auditing this file is sufficient to verify constant
@@ -13,11 +13,11 @@
 // STATE LAYOUT
 // ================================================================================================
 
-/// Number of lanes in the Keccak-f[1600] state. Layout is a 5x5 grid of
+/// Number of lanes in the `Keccak-f[1600]` state. Layout is a 5x5 grid of
 /// 64-bit lanes (FIPS 202, sec. 3.1).
 pub const NUM_LANES: usize = 25;
 
-/// Number of rounds in Keccak-f[1600] (FIPS 202, sec. 3.4):
+/// Number of rounds in `Keccak-f[1600]` (FIPS 202, sec. 3.4):
 /// `n_r = 12 + 2*l` where `l = log2(w/25) = 6` for `w = 1600/25 = 64`,
 /// giving `n_r = 24`.
 pub const NUM_ROUNDS: usize = 24;

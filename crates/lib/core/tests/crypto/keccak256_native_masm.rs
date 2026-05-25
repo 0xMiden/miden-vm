@@ -3,18 +3,16 @@
 //! standard published NIST / Ethereum KATs.
 //!
 //! Coverage:
-//! - **Boundary lengths**: every length that exercises a distinct padding or
-//!   block-loop path (empty, 1, 2, 31, 32, 60, 135, 136, 137, 270, 271, 272).
-//! - **Published KATs**: a handful of NIST short-message vectors plus the
-//!   canonical "abc" / "quick brown fox" Ethereum sanity values, hashed via
-//!   the MASM proc and checked against externally-published digests. Catches
-//!   any bug that the MASM-vs-reference diff would miss because both share it.
-//! - **Random inputs**: a low-case-count proptest of MASM vs reference for
-//!   random byte slices in `0..=300`, hitting interior lengths the fixtures
-//!   don't cover.
+//! - **Boundary lengths**: every length that exercises a distinct padding or block-loop path
+//!   (empty, 1, 2, 31, 32, 60, 135, 136, 137, 270, 271, 272).
+//! - **Published KATs**: a handful of NIST short-message vectors plus the canonical "abc" / "quick
+//!   brown fox" Ethereum sanity values, hashed via the MASM proc and checked against
+//!   externally-published digests. Catches any bug that the MASM-vs-reference diff would miss
+//!   because both share it.
+//! - **Random inputs**: a low-case-count proptest of MASM vs reference for random byte slices in
+//!   `0..=300`, hitting interior lengths the fixtures don't cover.
 
-use miden_core::Felt;
-use miden_core::advice::AdviceInputs;
+use miden_core::{Felt, advice::AdviceInputs};
 use miden_core_lib::keccak256_native::reference::keccak256;
 use miden_utils_testing::proptest::prelude::*;
 
@@ -110,7 +108,7 @@ fn hex_str(bytes: &[u8]) -> String {
 }
 
 fn hex_decode(s: &str) -> Vec<u8> {
-    assert!(s.len() % 2 == 0, "odd-length hex string");
+    assert!(s.len().is_multiple_of(2), "odd-length hex string");
     (0..s.len())
         .step_by(2)
         .map(|i| u8::from_str_radix(&s[i..i + 2], 16).expect("valid hex byte"))

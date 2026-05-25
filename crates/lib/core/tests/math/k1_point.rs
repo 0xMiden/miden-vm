@@ -1416,9 +1416,6 @@ proptest! {
     }
 }
 
-/// Reference scalar multiplication using the off-host affine doubling/addition, used to
-/// generate test vectors. NOT wired through MASM — this is purely for test-vector generation.
-
 // STREAMING-HASH SANITY CHECK
 // ================================================================================================
 
@@ -1428,8 +1425,7 @@ proptest! {
 /// caught at this layer rather than as an opaque digest mismatch in the full driver.
 #[test]
 fn k1_streaming_hash_sanity_16_felts() {
-    use miden_core::Felt;
-    use miden_core::crypto::hash::Poseidon2;
+    use miden_core::{Felt, crypto::hash::Poseidon2};
 
     let elements: Vec<Felt> = (1u64..=16).map(Felt::new_unchecked).collect();
     let expected = *Poseidon2::hash_elements(&elements);
@@ -1544,11 +1540,11 @@ fn assert_verify_precomp(q: &AffinePoint, u1: &BigUint, u2: &BigUint, expected: 
     let empty_leaf = Poseidon2::hash_elements(&[Felt::from_u32(0); FELTS_PER_MERKLE_ENTRY]);
     let (root_word, inner_nodes) =
         build_left_aligned_padded_tree(&leaves, MERKLE_TREE_DEPTH, empty_leaf);
-    let root: [Felt; 4] = (*root_word).into();
+    let root: [Felt; 4] = *root_word;
     let entry_advice = entries_in_window_order(&entries, u1, u2);
 
     let mut store = MerkleStore::new();
-    store.extend(inner_nodes.into_iter());
+    store.extend(inner_nodes);
 
     // Stack at wrapper entry (top to deep, 20 felts):
     //   [u_1 (8), u_2 (8), merkle_root (4), ...]

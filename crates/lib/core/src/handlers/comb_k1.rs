@@ -33,10 +33,11 @@
 //!
 //! Worked example (toy). With `w = 2` and two 4-bit scalars `k_1 = 0b1011 = 11`,
 //! `k_2 = 0b0110 = 6`, the comb has `ceil(4/2) = 2` windows:
-//!   - Window `b = 0` (bits 0..2): `k_1` digit = `0b11 = 3`, `k_2` digit = `0b10 = 2`.
-//!     Look up `T[0][3][2] = 3*P_1 + 2*P_2`.
-//!   - Window `b = 1` (bits 2..4): `k_1` digit = `0b10 = 2`, `k_2` digit = `0b01 = 1`.
-//!     Look up `T[1][2][1] = (2*4)*P_1 + (1*4)*P_2 = 8*P_1 + 4*P_2`.
+//!   - Window `b = 0` (bits 0..2): `k_1` digit = `0b11 = 3`, `k_2` digit = `0b10 = 2`. Look up
+//!     `T[0][3][2] = 3*P_1 + 2*P_2`.
+//!   - Window `b = 1` (bits 2..4): `k_1` digit = `0b10 = 2`, `k_2` digit = `0b01 = 1`. Look up
+//!     `T[1][2][1] = (2*4)*P_1 + (1*4)*P_2 = 8*P_1 + 4*P_2`.
+//!
 //! Sum: `11*P_1 + 6*P_2 = k_1*P_1 + k_2*P_2`. 2 lookups + 2 adds, no doublings. The same
 //! mechanic at the actual `w = 6` over 256-bit scalars gives 43 lookups + 43 adds with the
 //! doubling chain absorbed entirely into the precomputed table.
@@ -44,15 +45,18 @@
 //! Layout. The table holds `JOINT_WINDOW_POSITIONS = 43` blocks at width `w = 6`. Block
 //! `b` covers windows that select bits `[w*b, w*(b+1))` of the two 256-bit scalars; within
 //! block `b`, the entry at index `(i, j)` for `i, j` in `0..2^w` stores
-//!     entry[b][i][j] = [i * 64^b] * P_1 + [j * 64^b] * P_2
-//! Each entry occupies 20 felts (X[8] + Y[8] + is_infinity[1] + 3 reserved zero felts). The
+//!     `entry[b][i][j] = [i * 64^b] * P_1 + [j * 64^b] * P_2`
+//! Each entry occupies 20 felts (`X[8]` + `Y[8]` + `is_infinity[1]` + 3 reserved zero felts). The
 //! high block (`b = 42`) covers bits 252..258; for any canonical scalar `< 2^256` only the
 //! low 4 bits of that block's index are reachable, so the unreachable 75% of block 42 is
 //! materialized but never queried.
 
 use alloc::{vec, vec::Vec};
 
-use miden_core::{Felt, Word, crypto::hash::Poseidon2, crypto::merkle::InnerNodeInfo};
+use miden_core::{
+    Felt, Word,
+    crypto::{hash::Poseidon2, merkle::InnerNodeInfo},
+};
 use num::{Zero, bigint::BigUint};
 
 use crate::handlers::secp256k1_constants::SECP256K1_BASE_PRIME_U32;
@@ -245,7 +249,7 @@ pub fn build_left_aligned_padded_tree(
     // adjacent live nodes; if the live count is odd, pair the rightmost one with the
     // empty subtree of the same height (the boundary case).
     let mut current: Vec<Word> = real_leaves.to_vec();
-    for level in 0..depth as usize {
+    for level_filler in empty_subtree.iter().take(depth as usize) {
         let n = current.len();
         let mut parents = Vec::with_capacity(n.div_ceil(2));
         let mut i = 0;
@@ -259,7 +263,7 @@ pub fn build_left_aligned_padded_tree(
         }
         if i < n {
             let left = current[i];
-            let right = empty_subtree[level];
+            let right = *level_filler;
             let value = Poseidon2::merge(&[left, right]);
             inner_nodes.push(InnerNodeInfo { value, left, right });
             parents.push(value);
@@ -671,7 +675,7 @@ mod tests {
             // value of every leaf in the real range under the produced root.
             let mut store = MerkleStore::new();
             store.extend(nodes.into_iter());
-            for leaf_idx in 0..real_count {
+            for (leaf_idx, &expected) in real_leaves.iter().enumerate().take(real_count) {
                 let value = store
                     .get_node(root, NodeIndex::new(depth, leaf_idx as u64).expect("valid index"))
                     .unwrap_or_else(|err| {
@@ -681,7 +685,7 @@ mod tests {
                         )
                     });
                 assert_eq!(
-                    value, real_leaves[leaf_idx],
+                    value, expected,
                     "wrong leaf value for depth={depth}, real_count={real_count}, \
                      leaf_idx={leaf_idx}"
                 );
@@ -728,7 +732,7 @@ mod tests {
 
         let g = generator();
         let prime = base_prime();
-        let q = scalar_mul(&g, &BigUint::from(0x9F2815B1u32), &prime);
+        let q = scalar_mul(&g, &BigUint::from(0x9f2815b1u32), &prime);
 
         let t0 = Instant::now();
         let entries = joint_comb_padded_entries(&g, &q);

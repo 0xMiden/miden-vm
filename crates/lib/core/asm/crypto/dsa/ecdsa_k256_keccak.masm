@@ -711,8 +711,8 @@ end
 #!      check.
 #!   3. Fewer than 1,032 entry felts on the advice stack traps `adv_pipe` mid-stream.
 #!   4. The `pk_aug` map value must be exactly 16 well-formed felts: a shorter value traps
-#!      `adv_pushw`; non-u32 felts in the compressed-PK region trap `_parse_compressed_pk`;
-#!      a longer value perturbs subsequent advice-stack consumption.
+#!      `adv_pipe` mid-stream; non-u32 felts in the compressed-PK region trap
+#!      `_parse_compressed_pk`; a longer value perturbs subsequent advice-stack consumption.
 #! All four are host bugs (the prover failed to set up its own witness consistently); they
 #! are not reachable by any caller-controlled input alone.
 #!
@@ -769,6 +769,12 @@ pub proc verify_prehash_native_precomp
         loc_load.128  mul  loc_store.128
     else
         dropw                                             # drop pk_aug
+        # Validity is already 0. Write u32 zero limbs so `_parse_compressed_pk` cannot
+        # read garbage from local memory.
+        padw
+        loc_storew_le.136
+        loc_storew_le.140  dropw
+        push.0  loc_store.144
     end
 
     # ----- Parse pk into x_pk (mem[0..8]) and parity (mem[8]) -----
