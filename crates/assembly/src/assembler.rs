@@ -830,30 +830,65 @@ impl Assembler {
                     continue;
                 }
 
-                let signature = match symbol.item() {
+                let (signature_module, signature) = match symbol.item() {
                     SymbolItem::Procedure(proc) => {
                         let proc = proc.borrow();
-                        proc.signature().cloned()
+                        (module_index, proc.signature().cloned())
                     },
-                    SymbolItem::Alias { .. }
-                    | SymbolItem::Constant(_)
-                    | SymbolItem::Type(_)
-                    | SymbolItem::Compiled(_) => None,
-                };
-                let Some(signature) = signature else {
-                    continue;
+                    SymbolItem::Alias { alias, .. } => {
+                        let context = SymbolResolutionContext {
+                            span: alias.target().span(),
+                            module: module_index,
+                            kind: Some(InvokeKind::ProcRef),
+                        };
+                        let resolution =
+                            resolver.resolve_alias_target(&context, alias).map_err(Report::from)?;
+
+                        let Some(target_gid) = resolution.into_global_id() else {
+                            continue;
+                        };
+                        let signature = match self.linker[target_gid].item() {
+                            SymbolItem::Procedure(proc) => {
+                                let proc = proc.borrow();
+                                proc.signature().cloned()
+                            },
+                            SymbolItem::Alias { .. }
+                            | SymbolItem::Constant(_)
+                            | SymbolItem::Type(_)
+                            | SymbolItem::Compiled(_) => None,
+                        };
+                        (target_gid.module, signature)
+                    },
+                    SymbolItem::Constant(_) | SymbolItem::Type(_) | SymbolItem::Compiled(_) => {
+                        continue;
+                    },
                 };
 
-                for ty in signature.args.iter().chain(signature.results.iter()) {
-                    let mut visiting_types = BTreeSet::default();
-                    self.verify_exported_signature_type_expr(
-                        &resolver,
-                        module_index,
-                        ty,
-                        &mut visiting_types,
-                    )?;
-                }
+                self.verify_exported_signature(&resolver, signature_module, signature.as_ref())?;
             }
+        }
+
+        Ok(())
+    }
+
+    fn verify_exported_signature(
+        &self,
+        resolver: &SymbolResolver<'_>,
+        current_module: ModuleIndex,
+        signature: Option<&ast::FunctionType>,
+    ) -> Result<(), Report> {
+        let Some(signature) = signature else {
+            return Ok(());
+        };
+
+        for ty in signature.args.iter().chain(signature.results.iter()) {
+            let mut visiting_types = BTreeSet::default();
+            self.verify_exported_signature_type_expr(
+                resolver,
+                current_module,
+                ty,
+                &mut visiting_types,
+            )?;
         }
 
         Ok(())
