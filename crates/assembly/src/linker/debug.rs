@@ -65,7 +65,7 @@ struct DisplayModuleGraphNode<'a> {
 impl fmt::Debug for DisplayModuleGraphNode<'_> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_struct("Node")
-            .field("id", &format_args!("{}", &self.id))
+            .field("id", &format_args!("{}", self.id))
             .field("module", &self.path)
             .field("name", &self.name)
             .field("source", &self.source)

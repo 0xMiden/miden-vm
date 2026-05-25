@@ -385,7 +385,7 @@ impl Assembler {
                 if !self.kernel().is_empty() {
                     return Err(Report::msg(format!(
                         "duplicate kernels present in the dependency graph: '{}@{}' conflicts with another kernel we've already linked",
-                        &package.name, &package.version
+                        package.name, package.version
                     )));
                 }
 
@@ -616,7 +616,7 @@ impl Assembler {
         };
 
         let (mast_forest, id_remappings) = mast_forest_builder.build();
-        for (_proc_name, export) in exports.iter_mut() {
+        for export in exports.values_mut() {
             match export {
                 LibraryExport::Procedure(export) => {
                     if let Some(&new_node_id) = id_remappings.get(&export.node) {
