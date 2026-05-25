@@ -14,16 +14,16 @@
 //!
 //! [`UntrustedMastForest::read_from_bytes`] applies default parsing and validation budgets derived
 //! from the input size. Use [`UntrustedMastForest::read_from_bytes_with_options`] with
-//! [`UntrustedMastForestReadOptions`] to tune either budget: the wire byte budget limits
-//! allocations driven directly by wire counts while reading the payload, and the validation budget
-//! limits later helper allocations needed to materialize and check stripped or hashless payloads.
+//! [`UntrustedMastForestReadOptions`] to tune the wire byte budget. This limits allocations driven
+//! directly by wire counts while reading the payload. A separate validation helper budget is
+//! derived from it for later allocations needed to materialize and check stripped or hashless
+//! payloads.
 //!
 //! ```ignore
 //! use miden_core::mast::{UntrustedMastForest, UntrustedMastForestReadOptions};
 //!
 //! let options = UntrustedMastForestReadOptions::new()
-//!     .with_wire_byte_budget(bytes.len())
-//!     .with_validation_allocation_budget(bytes.len() * 7);
+//!     .with_wire_byte_budget(bytes.len());
 //! let forest = UntrustedMastForest::read_from_bytes_with_options(&bytes, options)?
 //!     .validate()?;
 //! ```

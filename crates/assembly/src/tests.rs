@@ -20,8 +20,8 @@ use miden_core::{
     events::EventId,
     field::PrimeField64,
     mast::{
-        CallNodeBuilder, JoinNodeBuilder, LoopNodeBuilder, MastForestContributor, MastNodeExt,
-        MastNode, MastNodeId, SplitNodeBuilder,
+        CallNodeBuilder, JoinNodeBuilder, LoopNodeBuilder, MastForestContributor, MastNode,
+        MastNodeExt, MastNodeId, SplitNodeBuilder,
     },
     operations::{Decorator, Operation},
     program::Program,

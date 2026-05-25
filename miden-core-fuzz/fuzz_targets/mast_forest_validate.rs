@@ -3,7 +3,7 @@
 //! This target tests the full untrusted deserialization pipeline:
 //! 1. UntrustedMastForest::read_from_bytes (budgeted deserialization)
 //! 2. UntrustedMastForest::validate() (structural + hash validation)
-//! 3. Explicit option-based parsing and validation budgets
+//! 3. Option-based wire budgets
 //!
 //! The validation path should never panic on any input.
 //!
@@ -26,8 +26,7 @@ fuzz_target!(|data: &[u8]| {
     let small_budget_options =
         UntrustedMastForestReadOptions::new().with_wire_byte_budget(64);
     let explicit_budget_options = UntrustedMastForestReadOptions::new()
-        .with_wire_byte_budget(data.len())
-        .with_validation_allocation_budget(data.len());
+        .with_wire_byte_budget(data.len());
 
     // Test the full untrusted deserialization + validation pipeline.
     validate_untrusted(UntrustedMastForest::read_from_bytes(data));

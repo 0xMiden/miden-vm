@@ -1832,9 +1832,7 @@ fn assert_untrusted_overspec_logging(
 
     let budgeted = UntrustedMastForest::read_from_bytes_with_options(
         bytes,
-        UntrustedMastForestReadOptions::new()
-            .with_wire_byte_budget(bytes.len())
-            .with_validation_allocation_budget(default_untrusted_allocation_budget(bytes.len())),
+        UntrustedMastForestReadOptions::new().with_wire_byte_budget(bytes.len()),
     )
     .unwrap();
     assert_eq!(budgeted.validate().unwrap().num_nodes(), expected_nodes);

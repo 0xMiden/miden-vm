@@ -11,11 +11,11 @@
 //! non-external digests before use. If a non-hashless payload is sent down the untrusted path,
 //! validation recomputes those digests and requires them to match the serialized values.
 //! Budgeted untrusted reads always bound wire counts during layout scanning via
-//! [`ByteReader::max_alloc`]. Callers that opt into validation budgeting also get a second check:
-//! - later stripped/hashless helper allocations are charged against an explicit validation budget
-//!   before the corresponding `Vec` or CSR scaffolding is created
-//! - the default convenience path uses a coarse validation budget derived from the input size; this
-//!   is intentionally a simple bound for common callers, not an exact peak-memory formula
+//! [`ByteReader::max_alloc`]. Validation also gets a second check:
+//! - later stripped/hashless helper allocations are charged against a validation budget before the
+//!   corresponding `Vec` or CSR scaffolding is created
+//! - that budget is derived from the wire budget by a coarse multiplier; this is intentionally a
+//!   simple bound for common callers, not an exact peak-memory formula
 //!
 //! The main layers fit together like this:
 //!
@@ -172,8 +172,8 @@ type StringIndex = usize;
 /// It is deliberately conservative and exists to make the default
 /// [`crate::mast::UntrustedMastForest::read_from_bytes`] path usable without forcing callers to
 /// size each helper allocation themselves. Callers with stricter limits should use
-/// [`crate::mast::UntrustedMastForest::read_from_bytes_with_options`] and choose explicit parsing
-/// and validation budgets.
+/// [`crate::mast::UntrustedMastForest::read_from_bytes_with_options`] and choose an explicit wire
+/// budget; the validation helper budget is derived from it.
 const DEFAULT_UNTRUSTED_ALLOCATION_BUDGET_MULTIPLIER: usize = 7;
 
 /// Byte-read budget multiplier for trusted full deserialization from a byte slice.
