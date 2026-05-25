@@ -89,7 +89,8 @@ impl<W: fmt::Write + Send + Sync + 'static> EventHandler for DebugPrinter<W> {
 
         if id == PRINT_STACK_EVENT_NAME.to_event_id() {
             // Skip position 0 (the event id) so only the user's operand stack is shown. Print the
-            // entire stack (no cap) to mirror the `debug.stack` decorator (`DebugOptions::StackAll`).
+            // entire stack (no cap) to mirror the `debug.stack` decorator
+            // (`DebugOptions::StackAll`).
             let stack = process.get_stack_state();
             let operand_stack = stack.get(1..).unwrap_or(&[]);
             write_stack(w, operand_stack, None, "Stack", process.clock())?;
@@ -121,7 +122,7 @@ impl<W: fmt::Write + Send + Sync + 'static> EventHandler for DebugPrinter<W> {
 
 /// Reads the element at `pos` on the operand stack as a `usize` (saturating).
 fn stack_item_as_usize(process: &ProcessorState, pos: usize) -> usize {
-    process.get_stack_item(pos).as_canonical_u64() as usize
+    usize::try_from(process.get_stack_item(pos).as_canonical_u64()).unwrap_or(usize::MAX)
 }
 
 /// Returns `slice[start..end]`, clamped to the bounds of `slice` and to `start <= end`.
