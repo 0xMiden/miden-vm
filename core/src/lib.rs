@@ -116,21 +116,6 @@ pub mod crypto {
 
 pub mod prettier {
     pub use miden_formatting::{prettier::*, pretty_via_display, pretty_via_to_string};
-
-    /// Pretty-print a list of [PrettyPrint] values as comma-separated items.
-    pub fn pretty_print_csv<'a, T>(items: impl IntoIterator<Item = &'a T>) -> Document
-    where
-        T: PrettyPrint + 'a,
-    {
-        let mut doc = Document::Empty;
-        for (i, item) in items.into_iter().enumerate() {
-            if i > 0 {
-                doc += const_text(", ");
-            }
-            doc += item.render();
-        }
-        doc
-    }
 }
 
 // CONSTANTS
