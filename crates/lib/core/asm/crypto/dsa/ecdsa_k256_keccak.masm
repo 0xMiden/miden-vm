@@ -605,17 +605,17 @@ pub proc verify_prehash_native
     # ----- s_inv = inv(s) -----
     padw loc_loadw_le.44  padw loc_loadw_le.40
     exec.k1_scalar::inv                                  # [s_inv on stack, ...]
-    loc_storew_le.96   dropw  loc_storew_le.100  dropw
+    loc_storew_le.96  swapw  loc_storew_le.100  swapw
 
     # ----- u1 = e * s_inv mod n_k1 -----
-    padw loc_loadw_le.52  padw loc_loadw_le.48           # e (a, deeper)
-    padw loc_loadw_le.100  padw loc_loadw_le.96          # s_inv (b, top)
-    exec.k1_scalar::mul
-    loc_storew_le.104  dropw  loc_storew_le.108  dropw
+    # Keep one s_inv copy below u1 so u2 can use it without a reload.
+    padw loc_loadw_le.52  padw loc_loadw_le.48           # [e, s_inv, ...]
+    dupw.3  dupw.3                                       # [s_inv_copy, e, s_inv, ...]
+    exec.k1_scalar::mul                                  # [u1, s_inv, ...]
+    loc_storew_le.104  dropw  loc_storew_le.108  dropw   # [s_inv, ...]
 
     # ----- u2 = r * s_inv mod n_k1 -----
-    padw loc_loadw_le.36  padw loc_loadw_le.32           # r (a)
-    padw loc_loadw_le.100  padw loc_loadw_le.96          # s_inv (b)
+    padw loc_loadw_le.36  padw loc_loadw_le.32           # [r, s_inv, ...]
     exec.k1_scalar::mul
     loc_storew_le.112  dropw  loc_storew_le.116  dropw
 
@@ -632,14 +632,14 @@ pub proc verify_prehash_native
     # R.x is at mem[76..84]. If R.x < n_k1, rx_mod = R.x; else rx_mod = R.x - n_k1.
     # Leave rx_mod on stack for the downstream eq check (no need to write to mem).
     padw loc_loadw_le.80  padw loc_loadw_le.76           # R.x (a)
+    # Keep a copy of R.x under the comparison result; the branch consumes it directly.
+    dupw.1  dupw.1
     exec._push_n_k1                                       # n_k1 (b)
-    exec.::miden::core::math::u256::lt                   # [Rx<n, ...]
+    exec.::miden::core::math::u256::lt                   # [Rx<n, R.x, ...]
     if.true
-        # rx_mod = R.x.
-        padw loc_loadw_le.80  padw loc_loadw_le.76
+        # R.x is already on stack.
     else
         # rx_mod = R.x - n_k1.
-        padw loc_loadw_le.80  padw loc_loadw_le.76
         exec._push_n_k1
         exec.::miden::core::math::u256::wrapping_sub
     end
@@ -846,13 +846,14 @@ pub proc verify_prehash_native_precomp
     loc_storew_le.96  swapw  loc_storew_le.100  swapw
 
     # ----- u1 = e * s_inv mod n_k1 -----
+    # Keep one s_inv copy below u1 so u2 can use it without a reload.
     padw loc_loadw_le.52  padw loc_loadw_le.48                # [e, s_inv, ...]
-    exec.k1_scalar::mul
-    loc_storew_le.104  dropw  loc_storew_le.108  dropw
+    dupw.3  dupw.3                                             # [s_inv_copy, e, s_inv, ...]
+    exec.k1_scalar::mul                                        # [u1, s_inv, ...]
+    loc_storew_le.104  dropw  loc_storew_le.108  dropw         # [s_inv, ...]
 
     # ----- u2 = r * s_inv mod n_k1 -----
-    padw loc_loadw_le.36  padw loc_loadw_le.32
-    padw loc_loadw_le.100  padw loc_loadw_le.96
+    padw loc_loadw_le.36  padw loc_loadw_le.32                 # [r, s_inv, ...]
     exec.k1_scalar::mul
     loc_storew_le.112  dropw  loc_storew_le.116  dropw
 
@@ -887,14 +888,14 @@ pub proc verify_prehash_native_precomp
     # ----- rx_mod = R.x mod n_k1 -----
     # Leave rx_mod on stack for the downstream eq check (no need to write to mem).
     padw loc_loadw_le.80  padw loc_loadw_le.76
+    # Keep a copy of R.x under the comparison result; the branch consumes it directly.
+    dupw.1  dupw.1
     exec._push_n_k1
     exec.::miden::core::math::u256::lt
     if.true
-        # rx_mod = R.x.
-        padw loc_loadw_le.80  padw loc_loadw_le.76
+        # R.x is already on stack.
     else
         # rx_mod = R.x - n_k1.
-        padw loc_loadw_le.80  padw loc_loadw_le.76
         exec._push_n_k1
         exec.::miden::core::math::u256::wrapping_sub
     end
