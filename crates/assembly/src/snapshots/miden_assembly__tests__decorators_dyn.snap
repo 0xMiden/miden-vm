@@ -10,9 +10,9 @@ begin
             mstore
             drop
             noop
-            trace(0)
+            debug(stack.0)
         end
         dyn
     end
-    trace(1)
+    debug(stack.1)
 end

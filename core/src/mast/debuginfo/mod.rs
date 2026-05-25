@@ -3,31 +3,22 @@
 //! This module provides the [`DebugInfo`] struct which consolidates all debug-related metadata for
 //! a MAST forest in a single location. This includes:
 //!
-//! - Trace decorators
+//! - An empty decorator table retained for wire-format structure
 //! - Operation-indexed decorator mappings for efficient lookup
 //! - Node-level decorator storage (before_enter/after_exit)
 //! - Error code mappings for descriptive error messages
 //!
 //! The debug info is always available at the `MastForest` level (as per issue 1821), but may be
-//! conditionally included during assembly to maintain backward compatibility. Trace decorators are
-//! only executed when tracing is enabled. Assembly operation metadata remains available for
-//! debugging and error reporting.
+//! conditionally included during assembly to maintain backward compatibility. Executable
+//! decorators have been removed. Assembly operation metadata remains available for debugging and
+//! error reporting.
 //!
-//! # Trace Decorator Semantics
+//! # Decorator Semantics
 //!
-//! Trace decorator execution is controlled via
-//! [`ExecutionOptions`](air::options::ExecutionOptions):
-//! - `with_tracing(true)` enables trace decorators
-//! - By default, tracing is disabled
+//! Debug and trace decorators are no longer accepted by the assembler, no longer deserialize from
+//! MAST, and are never executed by the processor.
 //!
-//! When tracing is disabled:
-//! - Trace decorators are not executed
-//! - before_enter/after_exit trace decorators are not executed
-//!
-//! When tracing is enabled:
-//! - Trace decorators trigger host callbacks
-//! - before_enter/after_exit trace decorators execute around node execution
-//! - Assembly operation metadata provides source mapping information
+//! Assembly operation metadata still provides source mapping information.
 //!
 //! # Production Builds
 //!
@@ -76,11 +67,11 @@ pub use node_decorator_storage::NodeToDecoratorIds;
 // DEBUG INFO
 // ================================================================================================
 
-/// Debug information for a MAST forest, containing decorators and error messages.
+/// Debug information for a MAST forest, containing source metadata and error messages.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct DebugInfo {
-    /// All trace decorators in the MAST forest (no AsmOp).
+    /// Decorator table for the MAST forest. This is empty for newly assembled programs.
     decorators: IndexVec<DecoratorId, Decorator>,
 
     /// Efficient access to decorators per operation per node.

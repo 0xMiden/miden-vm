@@ -201,7 +201,7 @@ impl FastProcessor {
     /// Creates a new `FastProcessor` instance with the given stack inputs.
     ///
     /// By default, advice inputs are empty and execution options use their defaults
-    /// (debugging and tracing disabled).
+    /// (debugging disabled).
     ///
     /// # Example
     /// ```ignore
@@ -210,8 +210,7 @@ impl FastProcessor {
     /// let processor = FastProcessor::new(stack_inputs)
     ///     .with_advice(advice_inputs)
     ///     .expect("advice inputs should fit advice map limits")
-    ///     .with_debugging(true)
-    ///     .with_tracing(true);
+    ///     .with_debugging(true);
     /// ```
     ///
     /// When using non-default advice map limits, prefer [`Self::new_with_options`] so the advice
@@ -234,7 +233,7 @@ impl FastProcessor {
 
     /// Sets the execution options for the processor.
     ///
-    /// This will override any previously set debugging or tracing settings.
+    /// This will override any previously set debugging settings.
     ///
     /// Existing advice inputs are revalidated against the new options before they are applied. To
     /// load advice inputs that require non-default advice map limits, call this before
@@ -251,14 +250,6 @@ impl FastProcessor {
     /// since the `Decorator::Debug` variant has been removed.
     pub fn with_debugging(mut self, enabled: bool) -> Self {
         self.options = self.options.with_debugging(enabled);
-        self
-    }
-
-    /// Enables or disables tracing mode.
-    ///
-    /// When tracing is enabled, trace decorators will be executed during program execution.
-    pub fn with_tracing(mut self, enabled: bool) -> Self {
-        self.options = self.options.with_tracing(enabled);
         self
     }
 
@@ -328,13 +319,11 @@ impl FastProcessor {
 
     /// Returns true if decorators should be executed.
     ///
-    /// This corresponds to having tracing enabled (for trace decorators).
-    ///
-    /// Note: `enable_debugging()` is no longer used for decorator execution
-    /// because the `Decorator::Debug` variant has been removed.
+    /// All executable decorators have been removed, so decorator lists are never retrieved during
+    /// execution.
     #[inline(always)]
     fn should_execute_decorators(&self) -> bool {
-        self.options.enable_tracing()
+        false
     }
 
     #[cfg(test)]
@@ -587,20 +576,8 @@ impl FastProcessor {
         decorator: &Decorator,
         host: &mut impl BaseHost,
     ) -> ControlFlow<BreakReason<F>> {
-        match decorator {
-            Decorator::Trace(id) => {
-                if self.options.enable_tracing() {
-                    let processor_state = self.state();
-                    if let Err(err) = host.on_trace(&processor_state, *id) {
-                        return ControlFlow::Break(BreakReason::Err(
-                            crate::errors::HostError::TraceHandlerError { trace_id: *id, err }
-                                .into(),
-                        ));
-                    }
-                }
-            },
-        };
-        ControlFlow::Continue(())
+        let _ = host;
+        match decorator {}
     }
 
     /// Increments the stack top pointer by 1.

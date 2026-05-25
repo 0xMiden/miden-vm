@@ -8,11 +8,11 @@ begin
         push(4294967294)
         mstore
         drop
-        trace(0)
+        debug(stack.0)
         add
-        trace(1)
+        debug(stack.1)
         mul
         noop
-        trace(2)
+        debug(stack.2)
     end
 end

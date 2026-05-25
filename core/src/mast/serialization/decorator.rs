@@ -53,12 +53,22 @@ impl DecoratorInfo {
                 decorator_data.len()
             )));
         }
-        let mut data_reader = SliceReader::new(&decorator_data[offset..]);
+        let _data_reader = SliceReader::new(&decorator_data[offset..]);
         match self.variant {
-            EncodedDecoratorVariant::Trace => {
-                let value = data_reader.read_u32()?;
-
-                Ok(Decorator::Trace(value))
+            EncodedDecoratorVariant::UnsupportedDebugOptionsStackAll
+            | EncodedDecoratorVariant::UnsupportedDebugOptionsStackTop
+            | EncodedDecoratorVariant::UnsupportedDebugOptionsMemAll
+            | EncodedDecoratorVariant::UnsupportedDebugOptionsMemInterval
+            | EncodedDecoratorVariant::UnsupportedDebugOptionsLocalInterval
+            | EncodedDecoratorVariant::UnsupportedDebugOptionsAdvStackTop => {
+                Err(DeserializationError::InvalidValue(
+                    "debug decorators are no longer supported".into(),
+                ))
+            },
+            EncodedDecoratorVariant::UnsupportedTraceDecorator => {
+                Err(DeserializationError::InvalidValue(
+                    "trace decorators are no longer supported".into(),
+                ))
             },
         }
     }
@@ -103,7 +113,15 @@ impl Deserializable for DecoratorInfo {
 #[repr(u8)]
 pub enum EncodedDecoratorVariant {
     // Note: AssemblyOp removed in version [0, 0, 2] - now stored separately in DebugInfo
-    Trace = 6,
+    // Reserved: these used to encode the removed `debug` decorators.
+    UnsupportedDebugOptionsStackAll = 0,
+    UnsupportedDebugOptionsStackTop = 1,
+    UnsupportedDebugOptionsMemAll = 2,
+    UnsupportedDebugOptionsMemInterval = 3,
+    UnsupportedDebugOptionsLocalInterval = 4,
+    UnsupportedDebugOptionsAdvStackTop = 5,
+    // Reserved: this used to encode the removed `trace` decorator.
+    UnsupportedTraceDecorator = 6,
 }
 
 impl EncodedDecoratorVariant {
@@ -123,9 +141,7 @@ impl EncodedDecoratorVariant {
 
 impl From<&Decorator> for EncodedDecoratorVariant {
     fn from(decorator: &Decorator) -> Self {
-        match decorator {
-            Decorator::Trace(_) => Self::Trace,
-        }
+        match *decorator {}
     }
 }
 
@@ -183,13 +199,9 @@ impl DecoratorDataBuilder {
     pub fn encode_decorator_data(&mut self, decorator: &Decorator) -> DecoratorDataOffset {
         let data_offset = self.decorator_data.len() as DecoratorDataOffset;
 
-        match decorator {
-            Decorator::Trace(value) => {
-                self.decorator_data.extend(value.to_le_bytes());
+        match *decorator {}
 
-                data_offset
-            },
-        }
+        data_offset
     }
 
     /// Returns the serialized [`crate::mast::MastForest`] decorator data field.
@@ -216,5 +228,21 @@ mod tests {
         let string_table = StringTable::new(vec![], vec![]);
         let result = info.try_into_decorator(&string_table, &data);
         assert!(matches!(result, Err(DeserializationError::InvalidValue(_))));
+    }
+
+    #[test]
+    fn removed_trace_decorator_discriminant_is_rejected_explicitly() {
+        let info = DecoratorInfo {
+            variant: EncodedDecoratorVariant::UnsupportedTraceDecorator,
+            decorator_data_offset: 0,
+        };
+        let string_table = StringTable::new(vec![], vec![]);
+        let result = info.try_into_decorator(&string_table, &[]);
+
+        assert!(matches!(
+            result,
+            Err(DeserializationError::InvalidValue(message))
+                if message.contains("trace decorators are no longer supported")
+        ));
     }
 }

@@ -311,7 +311,7 @@ impl Arbitrary for MastForest {
     fn arbitrary_with(params: Self::Parameters) -> Self::Strategy {
         // BasicBlockNode generation must reference decorator IDs in [0, decorators)
         let bb_params = BasicBlockNodeParams {
-            max_decorator_id_u32: params.decorators,
+            max_decorator_id_u32: 0,
             ..Default::default()
         };
 
@@ -320,10 +320,7 @@ impl Arbitrary for MastForest {
             // Generate basic blocks first (they have no dependencies)
             prop::collection::vec(any_with::<BasicBlockNode>(bb_params), 1..=*params.blocks.end()),
             // Generate decorators
-            prop::collection::vec(
-                any::<Decorator>(),
-                params.decorators as usize..=params.decorators as usize,
-            ),
+            Just(Vec::<Decorator>::new()),
             // Generate control flow node counts within the specified limits
             (
                 // Generate number of join nodes (0 to max_joins)
@@ -461,10 +458,7 @@ impl Arbitrary for MastForest {
                 )| {
                     let mut forest = MastForest::new();
 
-                    // 1) Add all decorators first
-                    for decorator in decorators {
-                        forest.add_decorator(decorator).expect("Failed to add decorator");
-                    }
+                    let _ = decorators;
 
                     // 2) Add basic blocks and collect their IDs
                     let mut basic_block_ids = Vec::new();
@@ -605,15 +599,6 @@ impl Arbitrary for AssemblyOp {
     }
 }
 
-impl Arbitrary for Decorator {
-    type Parameters = ();
-    type Strategy = BoxedStrategy<Self>;
-
-    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        any::<u32>().prop_map(Decorator::Trace).boxed()
-    }
-}
-
 impl Arbitrary for AdviceMap {
     type Parameters = ();
     type Strategy = BoxedStrategy<Self>;
@@ -660,18 +645,12 @@ impl Arbitrary for Program {
         // Create a simple strategy that generates a basic block and creates a program from it
         any_with::<BasicBlockNode>(BasicBlockNodeParams {
             max_ops_len: 4, // Keep it small
-            max_pairs: 1,   // Fewer decorators
-            max_decorator_id_u32: 2,
+            max_pairs: 0,
+            max_decorator_id_u32: 0,
         })
         .prop_map(|node| {
             // Create a new MastForest
             let mut forest = MastForest::new();
-
-            // Add some basic decorators
-            for i in 0..2 {
-                let decorator = Decorator::Trace(i as u32);
-                forest.add_decorator(decorator).expect("Failed to add decorator");
-            }
 
             // Add the node to the forest using builder
             let builder = node.to_builder(&forest);

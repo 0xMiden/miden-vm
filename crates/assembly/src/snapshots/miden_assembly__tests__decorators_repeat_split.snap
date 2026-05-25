@@ -11,21 +11,21 @@ begin
                 mstore
                 drop
                 noop
-                trace(0)
+                debug(stack.0)
             end
             if.true
-                basic_block trace(1) push(42) noop trace(2) end
+                basic_block debug(stack.1) push(42) noop debug(stack.2) end
             else
-                basic_block trace(3) push(22) noop trace(3) end
+                basic_block debug(stack.3) push(22) noop debug(stack.3) end
             end
-            trace(4)
+            debug(stack.4)
         end
         if.true
-            basic_block trace(1) push(42) noop trace(2) end
+            basic_block debug(stack.1) push(42) noop debug(stack.2) end
         else
-            basic_block trace(3) push(22) noop trace(3) end
+            basic_block debug(stack.3) push(22) noop debug(stack.3) end
         end
-        trace(4)
+        debug(stack.4)
     end
-    trace(5)
+    debug(stack.5)
 end

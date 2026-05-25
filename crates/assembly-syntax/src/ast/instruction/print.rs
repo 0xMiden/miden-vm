@@ -336,7 +336,6 @@ impl PrettyPrint for Instruction {
             // ----- event decorators -------------------------------------------------------------
             Self::Emit => const_text("emit"),
             Self::EmitImm(value) => inst_with_felt_imm("emit", value),
-            Self::Trace(value) => inst_with_imm("trace", value),
 
             // Handled by the early return for !has_textual_representation()
             Self::DebugVar(_) => unreachable!(),

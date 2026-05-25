@@ -10,9 +10,9 @@ begin
             mstore
             drop
             noop
-            trace(0)
+            debug(stack.0)
         end
         external.0xf9805a40a530fbd7512bf1d5fe408fccf67b6943ff321bc9abc70268efb6c9e2
     end
-    trace(1)
+    debug(stack.1)
 end

@@ -1,4 +1,4 @@
-use alloc::{collections::BTreeMap, string::String, sync::Arc, vec::Vec};
+use alloc::{sync::Arc, vec::Vec};
 
 use miden_core::Felt;
 use miden_debug_types::{
@@ -6,8 +6,8 @@ use miden_debug_types::{
 };
 
 use crate::{
-    BaseHost, MastForestStore, MemMastForestStore, ProcessorState, SyncHost, TraceError,
-    TraceHandler, Word, advice::AdviceMutation, event::EventError, mast::MastForest,
+    BaseHost, MastForestStore, MemMastForestStore, ProcessorState, SyncHost, Word,
+    advice::AdviceMutation, event::EventError, mast::MastForest,
 };
 
 /// A snapshot of the processor state for consistency checking between processors.
@@ -37,59 +37,12 @@ impl From<&ProcessorState<'_>> for ProcessorStateSnapshot {
     }
 }
 
-/// A trace handler that collects and counts trace events from decorators.
-#[derive(Default, Debug, Clone)]
-pub struct TraceCollector {
-    /// Counts of each trace ID that has been emitted
-    trace_counts: BTreeMap<u32, u32>,
-    /// Execution order of trace events with their clock cycles
-    execution_order: Vec<(u32, u64)>,
-}
-
-impl TraceCollector {
-    /// Creates a new empty trace collector.
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Gets the count of executions for a specific trace ID.
-    pub fn get_trace_count(&self, trace_id: u32) -> u32 {
-        self.trace_counts.get(&trace_id).copied().unwrap_or(0)
-    }
-
-    /// Gets the execution order as a reference.
-    pub fn get_execution_order(&self) -> &[(u32, u64)] {
-        &self.execution_order
-    }
-}
-
-impl TraceHandler for TraceCollector {
-    fn on_trace(&mut self, process: &ProcessorState, trace_id: u32) -> Result<(), TraceError> {
-        // Count the trace event
-        *self.trace_counts.entry(trace_id).or_insert(0) += 1;
-
-        // Record the execution order with clock cycle
-        self.execution_order.push((trace_id, process.clock().into()));
-
-        Ok(())
-    }
-}
-
-/// A unified testing host that combines trace collection, event handling,
-/// trace handling, and process state consistency checking.
+/// A unified testing host that combines event handling, debug handling, and external node
+/// resolution.
 #[derive(Debug, Clone)]
 pub struct TestHost<S: SourceManager = DefaultSourceManager> {
-    /// Trace collection functionality (counts and execution order)
-    trace_collector: TraceCollector,
-
     /// List of event IDs that have been received
     pub event_handler: Vec<u32>,
-
-    /// List of trace command strings that have been received
-    pub trace_handler: Vec<String>,
-
-    /// Process state snapshots for consistency checking
-    snapshots: BTreeMap<u32, Vec<ProcessorStateSnapshot>>,
 
     /// MAST forest store for external node resolution
     store: MemMastForestStore,
@@ -102,10 +55,7 @@ impl TestHost {
     /// Creates a new TestHost with minimal functionality for basic testing.
     pub fn new() -> Self {
         Self {
-            trace_collector: TraceCollector::new(),
             event_handler: Vec::new(),
-            trace_handler: Vec::new(),
-            snapshots: BTreeMap::new(),
             store: MemMastForestStore::default(),
             source_manager: Arc::new(DefaultSourceManager::default()),
         }
@@ -116,28 +66,10 @@ impl TestHost {
         let mut store = MemMastForestStore::default();
         store.insert(kernel_forest);
         Self {
-            trace_collector: TraceCollector::new(),
             event_handler: Vec::new(),
-            trace_handler: Vec::new(),
-            snapshots: BTreeMap::new(),
             store,
             source_manager: Arc::new(DefaultSourceManager::default()),
         }
-    }
-
-    /// Gets the count of executions for a specific trace ID.
-    pub fn get_trace_count(&self, trace_id: u32) -> u32 {
-        self.trace_collector.get_trace_count(trace_id)
-    }
-
-    /// Gets the execution order as a reference (with clock cycles).
-    pub fn get_execution_order(&self) -> &[(u32, u64)] {
-        self.trace_collector.get_execution_order()
-    }
-
-    /// Gets mutable access to all snapshots.
-    pub fn snapshots(&self) -> &BTreeMap<u32, Vec<ProcessorStateSnapshot>> {
-        &self.snapshots
     }
 }
 
@@ -160,16 +92,6 @@ where
         (span, maybe_file)
     }
 
-    fn on_trace(&mut self, process: &ProcessorState, trace_id: u32) -> Result<(), TraceError> {
-        // Forward to trace collector for counting and execution order tracking
-        self.trace_collector.on_trace(process, trace_id)?;
-
-        // Also collect process state snapshot for consistency checking
-        let snapshot = ProcessorStateSnapshot::from(process);
-        self.snapshots.entry(trace_id).or_default().push(snapshot);
-
-        Ok(())
-    }
 }
 
 impl<S> SyncHost for TestHost<S>

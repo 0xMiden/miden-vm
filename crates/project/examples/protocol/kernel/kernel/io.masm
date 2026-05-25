@@ -1,7 +1,7 @@
-const PRINTLN = 0
-
-#! Prints the given null-terminated byte string to stdout, if debug tracing is enabled
+#! Consumes a null-terminated byte string pointer.
+#!
+#! This example syscall used to emit a trace decorator when debug tracing was enabled. Trace
+#! decorators have been removed, so the default example behavior is now a no-op.
 pub proc println(message: ptr<u8, addrspace(byte)>)
-    trace.PRINTLN
     drop
 end

@@ -611,11 +611,6 @@ impl Assembler {
                 let event_id_value = event_id.expect_value();
                 block_builder.push_ops([Push(event_id_value), Emit, Drop]);
             },
-
-            // ----- trace instruction ------------------------------------------------------------
-            Instruction::Trace(trace_id) => {
-                block_builder.push_decorator(Decorator::Trace(trace_id.expect_value()))?;
-            },
         }
 
         Ok(None)

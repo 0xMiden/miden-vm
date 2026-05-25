@@ -607,7 +607,6 @@ pub enum Token<'input> {
     Swapw,
     Swapdw,
     Syscall,
-    Trace,
     True,
     Type,
     Use,
@@ -835,7 +834,6 @@ impl fmt::Display for Token<'_> {
             Token::Swapw => write!(f, "swapw"),
             Token::Swapdw => write!(f, "swapdw"),
             Token::Syscall => write!(f, "syscall"),
-            Token::Trace => write!(f, "trace"),
             Token::True => write!(f, "true"),
             Token::Type => write!(f, "type"),
             Token::Use => write!(f, "use"),
@@ -1047,7 +1045,6 @@ impl<'input> Token<'input> {
                 | Token::Swapw
                 | Token::Swapdw
                 | Token::Syscall
-                | Token::Trace
                 | Token::U32And
                 | Token::U32Assert
                 | Token::U32Assert2
@@ -1255,7 +1252,6 @@ impl<'input> Token<'input> {
         ("swapw", Token::Swapw),
         ("swapdw", Token::Swapdw),
         ("syscall", Token::Syscall),
-        ("trace", Token::Trace),
         ("true", Token::True),
         ("type", Token::Type),
         ("use", Token::Use),

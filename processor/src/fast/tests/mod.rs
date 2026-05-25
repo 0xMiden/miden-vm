@@ -5,10 +5,7 @@ use miden_assembly::{Assembler, DefaultSourceManager};
 use miden_core::{
     ONE, assert_matches,
     events::SystemEvent,
-    mast::{
-        BasicBlockNodeBuilder, CallNodeBuilder, ExternalNodeBuilder, JoinNodeBuilder,
-        MastForestContributor,
-    },
+    mast::{BasicBlockNodeBuilder, CallNodeBuilder, JoinNodeBuilder, MastForestContributor},
     operations::Operation,
     program::StackInputs,
 };
@@ -20,7 +17,6 @@ use crate::{AdviceInputs, DefaultHost, operation::OperationError};
 
 mod advice_provider;
 mod all_ops;
-mod fast_decorator_execution_tests;
 mod masm_consistency;
 mod memory;
 
@@ -224,7 +220,6 @@ fn test_cycle_limit_exceeded() {
         MIN_TRACE_LEN as u32,
         ExecutionOptions::DEFAULT_CORE_TRACE_FRAGMENT_SIZE,
         false,
-        false,
     )
     .unwrap();
 
@@ -261,7 +256,6 @@ fn test_cycle_limit_exactly_max_cycles_succeeds() {
         Some(2048),
         MIN_TRACE_LEN as u32,
         ExecutionOptions::DEFAULT_CORE_TRACE_FRAGMENT_SIZE,
-        false,
         false,
     )
     .unwrap();
@@ -504,76 +498,6 @@ fn test_call_node_preserves_stack_overflow_table() {
             Felt::from_u32(15),
             Felt::from_u32(16),
         ]
-    );
-}
-
-// EXTERNAL NODE TESTS
-// -----------------------------------------------------------------------------------------------
-
-#[test]
-fn test_external_node_decorator_sequencing() {
-    let mut lib_forest = MastForest::new();
-
-    // Add a decorator to the lib forest to track execution inside the external node
-    let lib_decorator = Decorator::Trace(2);
-    let lib_decorator_id = lib_forest.add_decorator(lib_decorator).unwrap();
-
-    let lib_operations = [Operation::Push(Felt::from_u32(1)), Operation::Add];
-    // Attach the decorator to the first operation (index 0)
-    let lib_block_id =
-        BasicBlockNodeBuilder::new(lib_operations.to_vec(), vec![(0, lib_decorator_id)])
-            .add_to_forest(&mut lib_forest)
-            .unwrap();
-    lib_forest.make_root(lib_block_id);
-
-    let mut main_forest = MastForest::new();
-    let before_decorator = Decorator::Trace(1);
-    let after_decorator = Decorator::Trace(3);
-    let before_id = main_forest.add_decorator(before_decorator).unwrap();
-    let after_id = main_forest.add_decorator(after_decorator).unwrap();
-
-    let external_id = ExternalNodeBuilder::new(lib_forest[lib_block_id].digest())
-        .with_before_enter([before_id])
-        .with_after_exit([after_id])
-        .add_to_forest(&mut main_forest)
-        .unwrap();
-    main_forest.make_root(external_id);
-
-    let program = Program::new(main_forest.into(), external_id);
-    let mut host = crate::test_utils::TestHost::with_kernel_forest(Arc::new(lib_forest));
-    let processor = FastProcessor::new(StackInputs::default())
-        .with_advice(AdviceInputs::default())
-        .expect("advice inputs should fit advice map limits")
-        .with_debugging(true)
-        .with_tracing(true);
-
-    let result = processor.execute_sync(&program, &mut host);
-    assert!(result.is_ok(), "Execution failed: {result:?}");
-
-    // Verify all decorators executed
-    assert_eq!(host.get_trace_count(1), 1, "before_enter decorator should execute exactly once");
-    assert_eq!(
-        host.get_trace_count(2),
-        1,
-        "external node decorator should execute exactly once"
-    );
-    assert_eq!(host.get_trace_count(3), 1, "after_exit decorator should execute exactly once");
-
-    // More importantly, verify the complete execution order
-    let execution_order = host.get_execution_order();
-    assert_eq!(execution_order.len(), 3, "Should have exactly 3 trace events");
-    assert_eq!(execution_order[0].0, 1, "before_enter should execute first");
-    assert_eq!(execution_order[1].0, 2, "external node decorator should execute second");
-    assert_eq!(execution_order[2].0, 3, "after_exit should execute last");
-
-    // Verify that clock cycles are in strictly increasing order
-    assert!(
-        execution_order[1].1 > execution_order[0].1,
-        "external node should execute after before_enter"
-    );
-    assert!(
-        execution_order[2].1 > execution_order[1].1,
-        "after_exit should execute after external node operations"
     );
 }
 

@@ -10,10 +10,10 @@ begin
             mstore
             drop
             noop
-            trace(0)
-            trace(1)
+            debug(stack.0)
+            debug(stack.1)
         end
         call.0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef
     end
-    trace(2)
+    debug(stack.2)
 end

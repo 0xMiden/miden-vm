@@ -1,8 +1,6 @@
 use alloc::vec::Vec;
 use core::fmt;
 
-use miden_crypto::hash::blake::Blake3_256;
-use num_traits::ToBytes;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -17,26 +15,18 @@ use crate::mast::{DecoratedOpLink, DecoratorFingerprint};
 // DECORATORS
 // ================================================================================================
 
-/// A set of decorators which can be executed by the VM.
+/// A set of decorators which can be attached to MAST nodes.
 ///
-/// Executing a decorator does not affect the state of the main VM components such as operand stack
-/// and memory.
-///
-/// Executing decorators does not advance the VM clock. As such, many decorators can be executed in
-/// a single VM cycle.
+/// All executable decorators have been removed. The type remains so existing MAST debug-info
+/// storage can represent an empty decorator table and reject old serialized decorator variants.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
-pub enum Decorator {
-    /// Emits a trace to the host.
-    Trace(u32),
-}
+pub enum Decorator {}
 
 impl Decorator {
     pub fn fingerprint(&self) -> DecoratorFingerprint {
-        match self {
-            Self::Trace(trace) => Blake3_256::hash(&trace.to_le_bytes()),
-        }
+        match *self {}
     }
 }
 
@@ -48,9 +38,7 @@ impl crate::prettier::PrettyPrint for Decorator {
 
 impl fmt::Display for Decorator {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Trace(trace_id) => write!(f, "trace({trace_id})"),
-        }
+        match *self {}
     }
 }
 
