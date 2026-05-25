@@ -243,6 +243,11 @@ pub fn write_stack<W: fmt::Write>(
     let num_items = n.unwrap_or(stack.len());
 
     // Write header
+    if num_items == 0 {
+        writeln!(writer, "{label} state in interval [0, 0) before step {clk}:")?;
+        return Ok(());
+    }
+
     let is_partial = num_items < stack.len();
     if is_partial {
         writeln!(writer, "{label} state in interval [0, {}] before step {clk}:", num_items - 1)?
@@ -348,6 +353,14 @@ mod tests {
             out,
             "Stack state in interval [0, 1] before step 4:\n├── 0: 9\n├── 1: 8\n└── (1 more items)\n"
         );
+    }
+
+    #[test]
+    fn write_stack_zero_count_does_not_underflow() {
+        let mut out = String::new();
+        let stack = [Felt::new_unchecked(9), Felt::new_unchecked(8), Felt::new_unchecked(7)];
+        write_stack(&mut out, &stack, Some(0), "Stack", 4u32).unwrap();
+        assert_eq!(out, "Stack state in interval [0, 0) before step 4:\n");
     }
 
     #[test]

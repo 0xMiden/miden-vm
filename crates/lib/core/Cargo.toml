@@ -27,7 +27,7 @@ path = "tests/main.rs"
 
 [features]
 default = ["std"]
-std = ["miden-assembly/std", "miden-utils-sync/std"]
+std = ["miden-assembly/std", "miden-processor/std", "miden-utils-sync/std"]
 constraints-tools = ["std", "dep:miden-air", "dep:miden-ace-codegen"]
 
 [dependencies]

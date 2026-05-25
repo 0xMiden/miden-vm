@@ -87,6 +87,22 @@ fn run_and_capture(source: &str, advice: AdviceInputs) -> String {
     run(source, advice).0
 }
 
+/// Executes `source` against the core library's default host-library conversion. This exercises
+/// the production handler registration path, while capture tests use a custom in-memory printer.
+fn run_with_default_core_handlers(source: &str, advice: AdviceInputs) -> ExecutionOutput {
+    let core_lib = CoreLibrary::default();
+    let assembler = Assembler::default()
+        .with_dynamic_library(&core_lib)
+        .expect("failed to load core library");
+    let program = assembler.assemble_program(source).expect("failed to assemble program");
+    let mut host = DefaultHost::default()
+        .with_library(&core_lib)
+        .expect("failed to load core library handlers");
+
+    execute_sync(&program, StackInputs::default(), advice, &mut host, ExecutionOptions::default())
+        .expect("execution failed")
+}
+
 // CAPTURE TESTS
 // ================================================================================================
 
@@ -161,6 +177,29 @@ fn print_adv_stack_all_outputs_advice_stack() {
 }
 
 #[test]
+fn print_adv_stack_outputs_range() {
+    let advice = AdviceInputs::default().with_stack([
+        Felt::new_unchecked(7),
+        Felt::new_unchecked(8),
+        Felt::new_unchecked(9),
+        Felt::new_unchecked(10),
+    ]);
+    let source = "
+    use miden::core::debug
+    begin
+        push.3 push.1   # [start=1, end=3]
+        exec.debug::print_adv_stack
+    end
+    ";
+    let out = run_and_capture(source, advice);
+    assert!(out.contains("Advice stack state"), "missing header; got:\n{out}");
+    assert!(
+        out.contains(": 8") && out.contains(": 9") && !out.contains(": 7") && !out.contains(": 10"),
+        "unexpected advice stack range; got:\n{out}"
+    );
+}
+
+#[test]
 fn print_adv_map_outputs_values() {
     let key = Word::new([
         Felt::new_unchecked(1),
@@ -216,6 +255,20 @@ fn print_stack_is_stack_neutral() {
     end
     ";
     let (_, output) = run(source, AdviceInputs::default());
+    assert_eq!(output.stack.get_element(0), Some(Felt::new_unchecked(0)));
+}
+
+#[test]
+fn default_core_handlers_run_print_stack() {
+    let source = "
+    use miden::core::debug
+    begin
+        push.1 push.2 push.3
+        exec.debug::print_stack
+        drop drop drop
+    end
+    ";
+    let output = run_with_default_core_handlers(source, AdviceInputs::default());
     assert_eq!(output.stack.get_element(0), Some(Felt::new_unchecked(0)));
 }
 
