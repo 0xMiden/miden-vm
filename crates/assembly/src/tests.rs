@@ -3,7 +3,7 @@ use alloc::{
     string::{String, ToString},
     vec::Vec,
 };
-use core::str::FromStr;
+use core::{fmt::Write, str::FromStr};
 use std::{
     eprintln,
     sync::{Arc, LazyLock},
@@ -20,8 +20,8 @@ use miden_core::{
     events::EventId,
     field::PrimeField64,
     mast::{
-        CallNodeBuilder, JoinNodeBuilder, LoopNodeBuilder, MastForestContributor, MastNodeExt,
-        MastNodeId, SplitNodeBuilder,
+        CallNodeBuilder, JoinNodeBuilder, LoopNodeBuilder, MastForestContributor, MastNode,
+        MastNodeExt, MastNodeId, SplitNodeBuilder,
     },
     operations::{Decorator, Operation},
     program::Program,
@@ -4374,6 +4374,226 @@ fn test_program_serde_with_decorators() {
     let deserialized_program = Program::read_from_bytes(&target).unwrap();
 
     assert_eq!(original_program, deserialized_program);
+}
+
+// MAST BUILDER ACCEPTANCE CORPUS
+// ================================================================================================
+
+#[test]
+fn mast_builder_acceptance_corpus() -> TestResult {
+    let context = TestContext::default();
+    let mut summary = String::new();
+
+    let cases = [
+        (
+            "straight_line_decorators",
+            source_file!(
+                &context,
+                r#"
+                const EVT = event("acceptance::straight_line")
+
+                begin
+                    push.1 push.2 add
+                    debug.stack.4
+                    emit.EVT
+                    trace.7
+                end
+                "#
+            ),
+        ),
+        (
+            "nested_control_flow",
+            source_file!(
+                &context,
+                r#"
+                begin
+                    push.1
+                    if.true
+                        push.2 trace.1
+                    else
+                        push.3 trace.2
+                    end
+
+                    repeat.3
+                        push.1 add
+                    end
+                end
+                "#
+            ),
+        ),
+        (
+            "procedure_calls_and_repeated_subtrees",
+            source_file!(
+                &context,
+                r#"
+                proc repeated_a
+                    push.9 push.3 add
+                end
+
+                proc repeated_b
+                    push.9 push.3 add
+                end
+
+                proc decorated
+                    debug.stack.8
+                    trace.44
+                    push.0 drop
+                end
+
+                begin
+                    exec.repeated_a
+                    exec.repeated_b
+                    exec.decorated
+                end
+                "#
+            ),
+        ),
+    ];
+
+    for (case_name, source) in cases {
+        let program = context.assemble(source)?;
+        append_program_acceptance_summary(&mut summary, case_name, &program);
+    }
+
+    let mut static_context = TestContext::default();
+    static_context.add_module_from_source(
+        "acceptance::helpers",
+        source_file!(
+            &static_context,
+            r#"
+            pub proc inc
+                push.1 add
+                trace.11
+            end
+
+            pub proc inspect
+                debug.stack.4
+                push.0 drop
+            end
+            "#
+        ),
+    )?;
+    let static_program = static_context.assemble(source_file!(
+        &static_context,
+        r#"
+        use acceptance::helpers
+
+        begin
+            push.41
+            exec.helpers::inc
+            exec.helpers::inspect
+        end
+        "#
+    ))?;
+    append_program_acceptance_summary(&mut summary, "static_imports", &static_program);
+
+    insta::assert_snapshot!("mast_builder_acceptance_corpus", summary);
+
+    Ok(())
+}
+
+fn append_program_acceptance_summary(output: &mut String, case_name: &str, program: &Program) {
+    let forest = program.mast_forest();
+    let debug_info = forest.debug_info();
+    let serialized_program_len = program.to_bytes().len();
+    let serialized_forest_len = forest.to_bytes().len();
+
+    writeln!(output, "=== {case_name} ===").unwrap();
+    writeln!(output, "program_hash={:?}", program.hash()).unwrap();
+    writeln!(output, "entrypoint={}", u32::from(program.entrypoint())).unwrap();
+    writeln!(output, "num_procedures={}", program.num_procedures()).unwrap();
+    writeln!(output, "num_nodes={}", forest.num_nodes()).unwrap();
+    writeln!(output, "forest_commitment={:?}", forest.commitment()).unwrap();
+    writeln!(output, "serialized_program_len={serialized_program_len}").unwrap();
+    writeln!(output, "serialized_forest_len={serialized_forest_len}").unwrap();
+
+    let roots = forest
+        .procedure_roots()
+        .iter()
+        .map(|&node_id| u32::from(node_id))
+        .collect::<Vec<_>>();
+    let procedure_digests = forest.procedure_digests().collect::<Vec<_>>();
+    let node_digests = forest.nodes().iter().map(MastNodeExt::digest).collect::<Vec<_>>();
+    writeln!(output, "roots={roots:?}").unwrap();
+    writeln!(output, "procedure_digests={procedure_digests:?}").unwrap();
+    writeln!(output, "node_digests={node_digests:?}").unwrap();
+
+    writeln!(
+        output,
+        "debug_counts=decorators:{} asm_ops:{} debug_vars:{} procedure_names:{}",
+        debug_info.num_decorators(),
+        debug_info.num_asm_ops(),
+        debug_info.num_debug_vars(),
+        debug_info.num_procedure_names(),
+    )
+    .unwrap();
+
+    let decorators = debug_info
+        .decorators()
+        .iter()
+        .map(|decorator| format!("{decorator:?}"))
+        .collect::<Vec<_>>();
+    let asm_ops = debug_info
+        .asm_ops()
+        .iter()
+        .map(|asm_op| {
+            format!(
+                "{}:{}:{}:loc={}",
+                asm_op.context_name(),
+                asm_op.op(),
+                asm_op.num_cycles(),
+                asm_op.location().is_some(),
+            )
+        })
+        .collect::<Vec<_>>();
+    let debug_vars = debug_info.debug_vars().iter().map(ToString::to_string).collect::<Vec<_>>();
+    writeln!(output, "decorators={decorators:?}").unwrap();
+    writeln!(output, "asm_ops={asm_ops:?}").unwrap();
+    writeln!(output, "debug_vars={debug_vars:?}").unwrap();
+
+    for node_idx in 0..forest.num_nodes() {
+        let node_id = MastNodeId::new_unchecked(node_idx);
+        let before_enter = forest
+            .before_enter_decorators(node_id)
+            .iter()
+            .map(|&decorator_id| u32::from(decorator_id))
+            .collect::<Vec<_>>();
+        let after_exit = forest
+            .after_exit_decorators(node_id)
+            .iter()
+            .map(|&decorator_id| u32::from(decorator_id))
+            .collect::<Vec<_>>();
+        let indexed_decorators = match &forest[node_id] {
+            MastNode::Block(block) => block
+                .indexed_decorator_iter(forest)
+                .map(|(op_idx, decorator_id)| (op_idx, u32::from(decorator_id)))
+                .collect::<Vec<_>>(),
+            _ => Vec::new(),
+        };
+        let asm_op_links = debug_info
+            .asm_ops_for_node(node_id)
+            .into_iter()
+            .map(|(op_idx, asm_op_id)| (op_idx, u32::from(asm_op_id)))
+            .collect::<Vec<_>>();
+        let debug_var_links = debug_info
+            .debug_vars_for_node(node_id)
+            .into_iter()
+            .map(|(op_idx, debug_var_id)| (op_idx, u32::from(debug_var_id)))
+            .collect::<Vec<_>>();
+
+        if !before_enter.is_empty()
+            || !after_exit.is_empty()
+            || !indexed_decorators.is_empty()
+            || !asm_op_links.is_empty()
+            || !debug_var_links.is_empty()
+        {
+            writeln!(
+                output,
+                "node[{node_idx}]=before:{before_enter:?} after:{after_exit:?} indexed:{indexed_decorators:?} asm:{asm_op_links:?} debug:{debug_var_links:?}",
+            )
+            .unwrap();
+        }
+    }
 }
 
 #[test]

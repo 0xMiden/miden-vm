@@ -29,13 +29,32 @@ pub(crate) struct ForestLayout {
     pub(super) internal_node_count: usize,
     pub(super) external_node_count: usize,
     pub(super) roots_count: usize,
-    pub(super) roots_offset: usize,
-    pub(super) basic_block_offset: usize,
-    pub(super) basic_block_len: usize,
-    pub(super) node_entry_offset: usize,
-    pub(super) external_digest_offset: usize,
-    pub(super) node_hash_offset: Option<usize>,
-    pub(super) advice_map_offset: usize,
+    roots_offset: usize,
+    basic_block_offset: usize,
+    basic_block_len: usize,
+    node_entry_offset: usize,
+    external_digest_offset: usize,
+    node_hash_offset: Option<usize>,
+    advice_map_offset: usize,
+}
+
+/// Parsed fixed wire facts needed before structural offsets are derived.
+///
+/// This is not a separate on-wire section: it is an internal typed boundary between reading counts
+/// and constructing absolute offsets. The derived lengths let the scanner check the aggregate
+/// structural payload size before exposing a [`ForestLayout`].
+#[derive(Debug, Clone, Copy)]
+pub(super) struct MastForestHeader {
+    flags: WireFlags,
+    node_count: usize,
+    internal_node_count: usize,
+    external_node_count: usize,
+    roots_count: usize,
+    roots_offset: usize,
+    basic_block_len: usize,
+    external_digests_len: usize,
+    node_entries_len: usize,
+    core_tail_len: usize,
 }
 
 /// Raw wire flags from the MAST header.
@@ -95,9 +114,38 @@ impl ForestLayout {
         MastNodeEntry::read_from(&mut reader)
     }
 
-    #[cfg(test)]
     pub(super) fn advice_map_offset(&self) -> usize {
         self.advice_map_offset
+    }
+
+    // OFFSET ACCESSORS
+    //
+    // These expose the structural section offsets for consumers that need random access
+    // into the serialized wire format.
+    #[allow(dead_code)]
+    pub(super) fn roots_offset(&self) -> usize {
+        self.roots_offset
+    }
+
+    pub(super) fn basic_block_offset(&self) -> usize {
+        self.basic_block_offset
+    }
+
+    pub(super) fn basic_block_len(&self) -> usize {
+        self.basic_block_len
+    }
+
+    #[allow(dead_code)]
+    pub(super) fn node_entry_offset(&self) -> usize {
+        self.node_entry_offset
+    }
+
+    pub(super) fn external_digest_offset(&self) -> usize {
+        self.external_digest_offset
+    }
+
+    pub(super) fn node_hash_offset(&self) -> Option<usize> {
+        self.node_hash_offset
     }
 }
 
@@ -146,9 +194,101 @@ pub(super) fn read_header_and_scan_layout<R: OffsetTrackingReader>(
             "HASHLESS flag is set; use UntrustedMastForest for untrusted input".to_string(),
         ));
     }
-    let layout = scan_layout_sections(source, flags.is_hashless())?;
+    let header = MastForestHeader::read_from(source, flags)?;
+    let layout = scan_layout_sections(source, header)?;
 
     Ok((flags, layout))
+}
+
+impl MastForestHeader {
+    fn read_from<R: OffsetTrackingReader>(
+        source: &mut R,
+        flags: WireFlags,
+    ) -> Result<Self, DeserializationError> {
+        let internal_node_count = source.read_usize()?;
+        let external_node_count = source.read_usize()?;
+        let node_count = internal_node_count
+            .checked_add(external_node_count)
+            .ok_or_else(|| DeserializationError::InvalidValue("node count overflow".to_string()))?;
+        if node_count > MastForest::MAX_NODES {
+            return Err(DeserializationError::InvalidValue(format!(
+                "node count {} exceeds maximum allowed {}",
+                node_count,
+                MastForest::MAX_NODES
+            )));
+        }
+        validate_budgeted_count(source, node_count, MastNodeEntry::SERIALIZED_SIZE, "node count")?;
+        validate_budgeted_count(
+            source,
+            external_node_count,
+            crate::Word::min_serialized_size(),
+            "external node count",
+        )?;
+        if !flags.is_hashless() {
+            validate_budgeted_count(
+                source,
+                internal_node_count,
+                crate::Word::min_serialized_size(),
+                "internal node count",
+            )?;
+        }
+
+        let roots_count = source.read_usize()?;
+        validate_budgeted_count(source, roots_count, size_of::<u32>(), "root count")?;
+        let roots_len_bytes = roots_count.checked_mul(size_of::<u32>()).ok_or_else(|| {
+            DeserializationError::InvalidValue("roots length overflow".to_string())
+        })?;
+
+        let external_digests_len = external_node_count
+            .checked_mul(crate::Word::min_serialized_size())
+            .ok_or_else(|| {
+                DeserializationError::InvalidValue("external digest length overflow".to_string())
+            })?;
+        let node_entries_len =
+            node_count.checked_mul(MastNodeEntry::SERIALIZED_SIZE).ok_or_else(|| {
+                DeserializationError::InvalidValue("node entry length overflow".to_string())
+            })?;
+        let node_hash_len = if flags.is_hashless() {
+            0
+        } else {
+            internal_node_count.checked_mul(crate::Word::min_serialized_size()).ok_or_else(
+                || DeserializationError::InvalidValue("node hash length overflow".to_string()),
+            )?
+        };
+        let node_digest_len = external_digests_len.checked_add(node_hash_len).ok_or_else(|| {
+            DeserializationError::InvalidValue("node digest length overflow".to_string())
+        })?;
+
+        // The basic-block section length is encoded after the roots section on the wire.
+        let roots_offset = source.offset();
+        let _roots_data = source.read_slice(roots_len_bytes)?;
+        let basic_block_len = source.read_usize()?;
+
+        let core_tail_len = basic_block_len
+            .checked_add(node_digest_len)
+            .and_then(|len| len.checked_add(node_entries_len))
+            .ok_or_else(|| {
+                DeserializationError::InvalidValue("core payload length overflow".to_string())
+            })?;
+        validate_budgeted_count(source, core_tail_len, 1, "core payload length")?;
+
+        Ok(Self {
+            flags,
+            node_count,
+            internal_node_count,
+            external_node_count,
+            roots_count,
+            roots_offset,
+            basic_block_len,
+            external_digests_len,
+            node_entries_len,
+            core_tail_len,
+        })
+    }
+
+    fn is_hashless(self) -> bool {
+        self.flags.is_hashless()
+    }
 }
 
 pub(super) trait OffsetTrackingReader: ByteReader {
@@ -245,101 +385,47 @@ impl<R: ByteReader> OffsetTrackingReader for TrackingReader<'_, R> {
 
 fn scan_layout_sections<R: OffsetTrackingReader>(
     source: &mut R,
-    is_hashless: bool,
+    header: MastForestHeader,
 ) -> Result<ForestLayout, DeserializationError> {
-    let internal_node_count = source.read_usize()?;
-    let external_node_count = source.read_usize()?;
-    let node_count = internal_node_count
-        .checked_add(external_node_count)
-        .ok_or_else(|| DeserializationError::InvalidValue("node count overflow".to_string()))?;
-    if node_count > MastForest::MAX_NODES {
-        return Err(DeserializationError::InvalidValue(format!(
-            "node count {} exceeds maximum allowed {}",
-            node_count,
-            MastForest::MAX_NODES
-        )));
-    }
-    validate_budgeted_count(source, node_count, MastNodeEntry::SERIALIZED_SIZE, "node count")?;
-    validate_budgeted_count(
-        source,
-        external_node_count,
-        crate::Word::min_serialized_size(),
-        "external node count",
-    )?;
-    if !is_hashless {
-        validate_budgeted_count(
-            source,
-            internal_node_count,
-            crate::Word::min_serialized_size(),
-            "internal node count",
-        )?;
-    }
-
-    let roots_count = source.read_usize()?;
-    validate_budgeted_count(source, roots_count, size_of::<u32>(), "root count")?;
-    let roots_offset = source.offset();
-    let roots_len_bytes = roots_count
-        .checked_mul(size_of::<u32>())
-        .ok_or_else(|| DeserializationError::InvalidValue("roots length overflow".to_string()))?;
-    let _roots_data = source.read_slice(roots_len_bytes)?;
-
-    let basic_block_len = source.read_usize()?;
     let basic_block_offset = source.offset();
-    let external_digests_len = external_node_count
-        .checked_mul(crate::Word::min_serialized_size())
-        .ok_or_else(|| {
-            DeserializationError::InvalidValue("external digest length overflow".to_string())
-        })?;
-    let node_entries_len =
-        node_count.checked_mul(MastNodeEntry::SERIALIZED_SIZE).ok_or_else(|| {
-            DeserializationError::InvalidValue("node entry length overflow".to_string())
-        })?;
-    let node_hash_len =
-        if is_hashless {
-            0
-        } else {
-            internal_node_count.checked_mul(crate::Word::min_serialized_size()).ok_or_else(
-                || DeserializationError::InvalidValue("node hash length overflow".to_string()),
-            )?
-        };
-    let core_tail_len = basic_block_len
-        .checked_add(node_entries_len)
-        .and_then(|len| len.checked_add(external_digests_len))
-        .and_then(|len| len.checked_add(node_hash_len))
-        .ok_or_else(|| {
-            DeserializationError::InvalidValue("core payload length overflow".to_string())
-        })?;
-    let core_tail = source.read_slice(core_tail_len)?;
+    let core_tail = source.read_slice(header.core_tail_len)?;
 
-    let node_entry_offset = basic_block_offset.checked_add(basic_block_len).ok_or_else(|| {
-        DeserializationError::InvalidValue("node entry offset overflow".to_string())
-    })?;
+    let node_entry_offset =
+        basic_block_offset.checked_add(header.basic_block_len).ok_or_else(|| {
+            DeserializationError::InvalidValue("node entry offset overflow".to_string())
+        })?;
     let external_digest_offset =
-        node_entry_offset.checked_add(node_entries_len).ok_or_else(|| {
+        node_entry_offset.checked_add(header.node_entries_len).ok_or_else(|| {
             DeserializationError::InvalidValue("external digest offset overflow".to_string())
         })?;
-    let node_hash_offset = if is_hashless {
+    let node_hash_offset = if header.is_hashless() {
         None
     } else {
-        Some(external_digest_offset.checked_add(external_digests_len).ok_or_else(|| {
+        Some(external_digest_offset.checked_add(header.external_digests_len).ok_or_else(|| {
             DeserializationError::InvalidValue("node hash offset overflow".to_string())
         })?)
     };
-    let advice_map_offset = basic_block_offset.checked_add(core_tail_len).ok_or_else(|| {
-        DeserializationError::InvalidValue("advice map offset overflow".to_string())
-    })?;
+    let advice_map_offset =
+        basic_block_offset.checked_add(header.core_tail_len).ok_or_else(|| {
+            DeserializationError::InvalidValue("advice map offset overflow".to_string())
+        })?;
 
-    let node_entries_slice = &core_tail[basic_block_len..basic_block_len + node_entries_len];
-    validate_node_entries(node_entries_slice, node_count, external_node_count)?;
+    let node_entries_start = header.basic_block_len;
+    let node_entries_end =
+        node_entries_start.checked_add(header.node_entries_len).ok_or_else(|| {
+            DeserializationError::InvalidValue("node entries slice offset overflow".to_string())
+        })?;
+    let node_entries_slice = &core_tail[node_entries_start..node_entries_end];
+    validate_node_entries(node_entries_slice, header.node_count, header.external_node_count)?;
 
     Ok(ForestLayout {
-        node_count,
-        internal_node_count,
-        external_node_count,
-        roots_count,
-        roots_offset,
+        node_count: header.node_count,
+        internal_node_count: header.internal_node_count,
+        external_node_count: header.external_node_count,
+        roots_count: header.roots_count,
+        roots_offset: header.roots_offset,
         basic_block_offset,
-        basic_block_len,
+        basic_block_len: header.basic_block_len,
         node_entry_offset,
         external_digest_offset,
         node_hash_offset,
