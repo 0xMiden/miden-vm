@@ -47,7 +47,6 @@ use alloc::{collections::BTreeMap, string::String, sync::Arc, vec::Vec};
 use core::{fmt, ops::Index};
 
 use miden_debug_types::{FileLineCol, Location};
-use miden_utils_sync::OnceLockCompat;
 #[cfg(any(test, feature = "arbitrary"))]
 use proptest::prelude::*;
 #[cfg(feature = "serde")]
@@ -139,9 +138,8 @@ pub struct MastForest {
     /// Always present (as per issue #1821), but can be empty for stripped builds.
     debug_info: DebugInfo,
 
-    /// Cached commitment to this MAST forest (commitment to all roots).
-    /// This is computed lazily on first access and invalidated on any mutation.
-    commitment_cache: OnceLockCompat<Word>,
+    /// Commitment to this MAST forest (commitment to all roots).
+    commitment: Word,
 }
 
 /// Complete parts needed to construct a finalized [`MastForest`].
@@ -159,6 +157,10 @@ pub(crate) struct MastForestParts {
 /// Constructors
 impl MastForest {
     /// Creates a new empty [`MastForest`].
+    ///
+    /// This exists for legacy builder-style tests and helper code. Final assembly paths should
+    /// normally construct forests through the assembly MAST forest builder or
+    /// `MastForest::from_parts`.
     pub fn new() -> Self {
         Self::from_parts(MastForestParts {
             nodes: IndexVec::new(),
@@ -169,6 +171,11 @@ impl MastForest {
         .expect("empty MastForest parts should be valid")
     }
 
+    /// Builds a [`MastForest`] from raw parts and validates local structure.
+    ///
+    /// This path recomputes all reconstructible node hashes and rejects inconsistent stored hashes.
+    /// External node hashes are accepted as-is because they are references to code outside this
+    /// forest.
     #[doc(hidden)]
     pub fn from_raw_parts(
         nodes: IndexVec<MastNodeId, MastNode>,
@@ -179,7 +186,15 @@ impl MastForest {
         Self::from_parts(MastForestParts { nodes, roots, advice_map, debug_info })
     }
 
+    /// Builds a [`MastForest`] from completed parts.
+    ///
+    /// This is the normal trusted in-memory construction path for builders and mergers. It performs
+    /// cheap pre-construction checks needed for safe indexing, validates forest/debug-info
+    /// invariants, and recomputes all reconstructible node hashes before accepting the forest.
     pub(crate) fn from_parts(parts: MastForestParts) -> Result<Self, MastForestError> {
+        // These checks live before `validate()` because `validate()` operates on an assembled
+        // forest and may index by root/node ids. Keep bounds and link checks here, and keep
+        // cross-field semantic checks on the constructed forest.
         if parts.nodes.len() > Self::MAX_NODES {
             return Err(MastForestError::TooManyNodes);
         }
@@ -198,19 +213,25 @@ impl MastForest {
         }
         parts.debug_info.validate().map_err(MastForestError::InvalidDebugInfo)?;
 
-        let forest = Self {
+        let mut forest = Self {
             nodes: parts.nodes,
             roots: parts.roots,
             advice_map: parts.advice_map,
             debug_info: parts.debug_info,
-            commitment_cache: OnceLockCompat::new(),
+            commitment: Word::default(),
         };
 
         forest.validate()?;
         forest.validate_node_hashes()?;
+        forest.commitment = forest.compute_nodes_commitment(&forest.roots);
         Ok(forest)
     }
 
+    /// Builds a [`MastForest`] from trusted serialized parts.
+    ///
+    /// This path trusts serialized node hashes as authoritative and therefore does not recompute
+    /// them. It still performs cheap shape checks for counts and root bounds so that later indexing
+    /// remains safe.
     pub(in crate::mast) fn from_trusted_deserialization_parts(
         parts: MastForestParts,
     ) -> Result<Self, MastForestError> {
@@ -232,13 +253,16 @@ impl MastForest {
             }
         }
 
-        Ok(Self {
+        let mut forest = Self {
             nodes: parts.nodes,
             roots,
             advice_map: parts.advice_map,
             debug_info: parts.debug_info,
-            commitment_cache: OnceLockCompat::new(),
-        })
+            commitment: Word::default(),
+        };
+        forest.commitment = forest.compute_nodes_commitment(&forest.roots);
+
+        Ok(forest)
     }
 }
 
@@ -246,7 +270,7 @@ impl MastForest {
 /// Equality implementations
 impl PartialEq for MastForest {
     fn eq(&self, other: &Self) -> bool {
-        // Compare all fields except commitment_cache, which is derived data
+        // Compare all fields except commitment, which is derived data.
         self.nodes == other.nodes
             && self.roots == other.roots
             && self.advice_map == other.advice_map
@@ -269,8 +293,7 @@ impl MastForest {
 
         if !self.roots.contains(&new_root_id) {
             self.roots.push(new_root_id);
-            // Invalidate the cached commitment since we modified the roots
-            self.commitment_cache.take();
+            self.commitment = self.compute_nodes_commitment(&self.roots);
         }
     }
 
@@ -460,14 +483,13 @@ impl MastForest {
     /// Returns the commitment to this MAST forest.
     ///
     /// The commitment is computed as the sequential hash of all procedure roots in the forest.
-    /// This value is cached after the first computation and reused for subsequent calls,
-    /// unless the forest is mutated (in which case the cache is invalidated).
+    /// This value is computed once when the forest is constructed.
     ///
     /// The commitment uniquely identifies the forest's structure, as each root's digest
     /// transitively includes all of its descendants. Therefore, a commitment to all roots
     /// is a commitment to the entire forest.
     pub fn commitment(&self) -> Word {
-        *self.commitment_cache.get_or_init(|| self.compute_nodes_commitment(&self.roots))
+        self.commitment
     }
 
     /// Returns the number of nodes in this MAST forest.
