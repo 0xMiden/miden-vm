@@ -27,7 +27,7 @@ path = "tests/main.rs"
 
 [features]
 default = ["std"]
-std = ["miden-assembly/std", "miden-utils-sync/std"]
+std = ["miden-assembly/std", "miden-utils-sync/std", "dep:k256", "dep:rayon"]
 constraints-tools = ["std", "dep:miden-air", "dep:miden-ace-codegen"]
 
 [dependencies]
@@ -41,7 +41,9 @@ miden-air = { workspace = true, optional = true }
 miden-ace-codegen = { workspace = true, optional = true }
 
 # External dependencies
+k256 = { workspace = true, optional = true }
 num.workspace = true
+rayon = { workspace = true, optional = true }
 thiserror.workspace = true
 
 [dev-dependencies]

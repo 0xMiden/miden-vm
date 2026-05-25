@@ -494,7 +494,7 @@ end
 # NATIVE VERIFY ENTRY POINT
 # ================================================================================================
 
-#! Verifies an ECDSA secp256k1 signature in-VM. Same calldata format as `verify_prehash`:
+#! Verifies an ECDSA secp256k1 signature in the VM. Same calldata format as `verify_prehash`:
 #! pk is 33 BE bytes, digest is 32 BE bytes, sig is 65 BE bytes (r || s || v), all packed
 #! as u32-LE felts.
 #!
@@ -656,7 +656,7 @@ end
 
 #! Same contract as `verify_prehash_native`, except `R = u1*G + u2*Q` is computed via
 #! `k1_point::verify_precomp` against a Merkle-committed joint comb table fetched per-window
-#! from the advice stack. The caller passes only the trusted `pk_aug` commitment; the
+#! from the advice stack. The caller passes only the `pk_aug` commitment; the
 #! compressed PK, the Merkle root over the table, and the per-window entries are all
 #! witness data fetched from the advice provider.
 #!
@@ -669,14 +669,13 @@ end
 #!
 #! Advice preconditions (host responsibility):
 #!   - Advice map: `pk_aug -> [compressed_PK_9, zeros_3, merkle_root_4]` (16 felts).
-#!   - Advice stack: 43 padded entries (24 felts each = 1,032 felts total), in window
+#!   - Advice stack: 32 padded entries (24 felts each = 768 felts total), in window
 #!     order (LSB-first), selected by the verifier's per-window indices into the joint
-#!     comb table for `(G, Q)` at width `w = 6`.
-#!   - Merkle store: populated with the depth-18 tree (262,144 leaves: 176,128 real
-#!     Poseidon2 entry hashes followed by 86,016 fixed empty-leaf digests) whose root
-#!     matches `merkle_root`; each real leaf is `Poseidon2::hash_elements(padded_entry_24)`.
+#!     comb table for `(G, Q)` at width `w = 8`.
+#!   - Merkle store: contains authentication paths for those 32 entries in the depth-21
+#!     table tree. Each leaf is `Poseidon2::hash_elements(padded_entry_24)`.
 #!
-#! Soundness boundary. The on-VM proc binds `pk_aug` to `(compressed_PK, merkle_root)` via
+#! Soundness boundary. The VM proc binds `pk_aug` to `(compressed_PK, merkle_root)` via
 #! the augmented-PK hash check, but it does NOT prove that `merkle_root` is the comb table
 #! for `decompress(compressed_PK)`. A caller that can choose `pk_aug` freely could commit a
 #! root for a different point and still pass verification against that other point.
@@ -702,17 +701,18 @@ end
 #! `_parse_be_u256`, `_parse_sig`, and `_parse_compressed_pk` will trap.
 #!
 #! The proc IS NOT no-trap against host-misconfigured witness:
-#!   1. A pre-pushed advice entry whose hash doesn't match the leaf at the corresponding
+#!   1. A pushed advice entry whose hash doesn't match the leaf at the corresponding
 #!      tree index traps `verify_precomp`'s `mtree_verify`. Avoiding the trap would require
 #!      a Poseidon2 second-preimage on the committed leaf (the honest entry that hashes to
 #!      that leaf is fixed by the published `merkle_root`, so the attacker must find a
 #!      different 24-felt entry that hashes to the same value).
 #!   2. `point_add` traps on entries with non-canonical X/Y limbs that survive the leaf
 #!      check.
-#!   3. Fewer than 1,032 entry felts on the advice stack traps `adv_pipe` mid-stream.
-#!   4. The `pk_aug` map value must be exactly 16 well-formed felts: a shorter value traps
-#!      `adv_pipe` mid-stream; non-u32 felts in the compressed-PK region trap
-#!      `_parse_compressed_pk`; a longer value perturbs subsequent advice-stack consumption.
+#!   3. Fewer than 768 entry felts on the advice stack traps `adv_pipe` mid-stream.
+#!   4. After `adv.push_mapval`, the next 16 advice felts must be the augmented-PK
+#!      preimage. The helper supplies this as a 16-felt map value. A different map length
+#!      changes how that 16-felt prefix is sourced and can shift subsequent comb-table
+#!      advice; non-u32 felts in the compressed-PK region trap `_parse_compressed_pk`.
 #! All four are host bugs (the prover failed to set up its own witness consistently); they
 #! are not reachable by any caller-controlled input alone.
 #!
@@ -859,20 +859,20 @@ pub proc verify_prehash_native_precomp
 
     # ----- R = u1*G + u2*Q via verify_precomp (gated for no-trap behavior) -----
     # If the validity flag is 1, every preceding check passed (incl. augmented-PK binding),
-    # so we can run verify_precomp safely. The host has pre-pushed 43 padded entries
-    # (1,032 felts) onto the advice stack in window order; verify_precomp consumes them
+    # so we can run verify_precomp safely. The host has pushed 32 padded entries
+    # (768 felts) onto the advice stack in window order; verify_precomp consumes them
     # one per window and Merkle-verifies each against `merkle_root`. Otherwise skip the
     # call, emit R = identity, and let the downstream rx_mod check reject.
-    #
-    # TODO: investigate how this witness-dependent branch interacts with zero-knowledge.
+    # The branch is the no-trap boundary: invalid calldata or a missing pk_aug map entry
+    # returns 0 without consuming comb-table advice.
     loc_load.128
     if.true
         locaddr.148  locaddr.104  locaddr.112  locaddr.76
         # Stack: [out_addr=76, u_2_addr=112, u_1_addr=104, merkle_root_addr=148, ...]
         exec.k1_point::verify_precomp
     else
-        # 4 zero-word writes share a single padw (storew leaves the word; just push the
-        # next dest addr each time).
+        # 4 zero-word writes share a single padw; storew leaves the word for the next
+        # destination address.
         padw
         locaddr.76  mem_storew_le             # X = 0
         locaddr.80  mem_storew_le

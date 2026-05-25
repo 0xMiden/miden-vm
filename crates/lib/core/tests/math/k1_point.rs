@@ -1382,9 +1382,9 @@ fn bn_p() -> BigUint {
 // VERIFY_PRECOMP PROPTESTS
 // ================================================================================================
 //
-// Each case builds the 176,128-entry precomputed-key cache and runs `verify_precomp` through
+// Each case builds the precomputed-key cache and runs `verify_precomp` through
 // the MASM proc, so cases are deliberately few. The intent is to give random coverage over
-// the bit-buffer + leaf-index path -- the four hand-picked
+// the byte-peel + leaf-index path -- the four hand-picked
 // boundary cases above (zero/identity scalars, small combinations, full 256-bit) cover the
 // algebraic edges; this proptest covers everything in between.
 

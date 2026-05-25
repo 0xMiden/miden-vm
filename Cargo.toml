@@ -92,6 +92,7 @@ derive_more     = { version = "2.0", features = ["from"] }
 env_logger      = { version = "0.11" }
 insta           = { version = "1.43", default-features = false, features = ["colors"] }
 itertools       = { version = "0.14", default-features = false, features = ["use_alloc"] }
+k256            = { version = "0.13", default-features = false, features = ["alloc", "arithmetic"] }
 log             = { version = "0.4", default-features = false }
 num             = { version = "0.4", default-features = false, features = ["alloc"] }
 paste           = { version = "1.0", default-features = false }
@@ -113,6 +114,7 @@ pretty_assertions = { version = "1.4", default-features = false }
 proc-macro2 = "1.0"
 quote = "1.0"
 rand_chacha = { version = "0.9", default-features = false }
+rayon = "1.12"
 rstest = "0.26"
 toml = { version = "1.0", default-features = false }
 walkdir = "2.5"

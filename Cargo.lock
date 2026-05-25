@@ -1470,6 +1470,7 @@ dependencies = [
  "criterion",
  "env_logger",
  "fs-err",
+ "k256",
  "miden-ace-codegen",
  "miden-air",
  "miden-assembly",
@@ -1485,6 +1486,7 @@ dependencies = [
  "num",
  "rand 0.9.4",
  "rand_chacha",
+ "rayon",
  "rstest",
  "thiserror",
 ]
