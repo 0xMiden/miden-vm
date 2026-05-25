@@ -1,17 +1,12 @@
-//! Off-VM precomputation of the joint 2D comb-style scalar-mult lookup table for a pair of
-//! secp256k1 points. Produces the data the host needs to populate `AdviceInputs` for the
+//! Precomputes the joint 2D comb-style scalar-mult lookup table for a pair of secp256k1
+//! points. Produces the data needed to populate `AdviceInputs` for the
 //! precomputation-based ECDSA verifier (`ecdsa_k256_keccak::verify_prehash_native_precomp`):
-//! the table itself, the per-leaf Poseidon2 hashes, the Merkle tree's `InnerNodeInfo`
-//! records for the `MerkleStore`, and a per-signature selector that returns the 43 window
-//! entries the verifier consumes off the advice stack.
+//! a reusable per-public-key cache, selected entries for the advice stack, and the sparse
+//! Merkle store needed to open those entries.
 //!
-//! Intended lifecycle. The table and Merkle tree are expensive to build (~176K Poseidon2
-//! hashes for the leaves plus the same order again for the internal nodes) but depend
-//! only on the base points `(G, Q)`. They are meant to be built once per public key `Q`
-//! and cached across every signature verified under that PK. Per signature, the only host
-//! work is `entries_in_window_order` (43 indexed lookups into the cached padded-entries
-//! vector) plus pushing the result onto the advice stack; the cached `MerkleStore` is
-//! supplied as-is.
+//! The cache depends only on `(G, Q)`, so it can be reused across signatures for the same
+//! public key. It stores compact entries and internal Merkle levels; per signature, it selects
+//! 43 entries and constructs a sparse `MerkleStore` for those openings.
 //!
 //! Background: comb tables. A comb table is a precomputed lookup that lets a verifier
 //! compute a scalar multiplication `k * P` without running the textbook 256-step double-
@@ -55,7 +50,10 @@ use alloc::{vec, vec::Vec};
 
 use miden_core::{
     Felt, Word,
-    crypto::{hash::Poseidon2, merkle::InnerNodeInfo},
+    crypto::{
+        hash::Poseidon2,
+        merkle::{InnerNodeInfo, MerklePath, MerkleStore},
+    },
 };
 use num::{Zero, bigint::BigUint};
 
@@ -86,6 +84,10 @@ pub const JOINT_TABLE_FELTS: usize = JOINT_WINDOW_POSITIONS * ENTRIES_PER_BLOCK 
 /// Felt count for one Merkle-tree leaf entry: the 20-felt point representation padded with
 /// 4 zeros to align to 24 felts.
 pub const FELTS_PER_MERKLE_ENTRY: usize = 24;
+
+// Number of non-padding u32 values in one compact table entry:
+// X[8], Y[8], and the is-infinity flag.
+const U32S_PER_COMPACT_ENTRY: usize = 17;
 
 /// Number of leaves in the Merkle tree commitment over the joint comb table. One leaf per
 /// table entry: 43 blocks * 4,096 entries = 176,128. Not a power of two; the host's tree
@@ -119,17 +121,159 @@ impl AffinePoint {
     }
 }
 
-/// Builds a 2D comb table for a pair of secp256k1 base points `(p1, p2)`, suitable for the
-/// joint scalar mult `[u_1] * p1 + [u_2] * p2` over 256-bit scalars `u_1`, `u_2`. Layout:
-/// 43 contiguous blocks of 4,096 entries * 20 felts; entry `(i, j)` in block `b` is
-/// `[i * 64^b] * p1 + [j * 64^b] * p2`.
+/// Compact representation of one comb-table entry.
 ///
-/// The per-block cross-product step (4,096 affine additions) is computed with a single
-/// Montgomery-batched modular inversion in place of 4,096 Fermat inversions.
-pub fn joint_comb_table(p1: &AffinePoint, p2: &AffinePoint) -> Vec<Felt> {
-    let prime = base_prime();
+/// The committed entry layout is `X[8] || Y[8] || is_infinity || zeros_7`. The cache stores
+/// only the 17 non-padding u32 values and synthesizes the padding when hashing or building
+/// advice.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct CompactCombEntry {
+    limbs: [u32; U32S_PER_COMPACT_ENTRY],
+}
 
-    let mut out = Vec::with_capacity(JOINT_TABLE_FELTS);
+impl CompactCombEntry {
+    fn from_point(point: &AffinePoint) -> Self {
+        let mut limbs = [0u32; U32S_PER_COMPACT_ENTRY];
+        limbs[..8].copy_from_slice(&u256_to_u32_array(&point.x));
+        limbs[8..16].copy_from_slice(&u256_to_u32_array(&point.y));
+        limbs[16] = u32::from(point.is_infinity);
+        Self { limbs }
+    }
+
+    fn padded_felts(&self) -> [Felt; FELTS_PER_MERKLE_ENTRY] {
+        let mut out = [Felt::ZERO; FELTS_PER_MERKLE_ENTRY];
+        for (dst, &src) in out.iter_mut().zip(self.limbs.iter()) {
+            *dst = Felt::from_u32(src);
+        }
+        out
+    }
+
+    fn extend_padded_felts(&self, out: &mut Vec<Felt>) {
+        out.extend(self.padded_felts());
+    }
+
+    fn extend_point_felts(&self, out: &mut Vec<Felt>) {
+        for &value in &self.limbs {
+            out.push(Felt::from_u32(value));
+        }
+        for _ in U32S_PER_COMPACT_ENTRY..FELTS_PER_ENTRY {
+            out.push(Felt::ZERO);
+        }
+    }
+
+    fn leaf_hash(&self) -> Word {
+        Poseidon2::hash_elements(&self.padded_felts())
+    }
+}
+
+/// Reusable comb-table cache for one `(G, Q)` pair.
+///
+/// [`PrecomputedK1PubKey::advice_for_windows`] returns the selected entries and sparse
+/// `MerkleStore` for one scalar pair.
+#[derive(Clone, Debug)]
+pub struct PrecomputedK1PubKey {
+    entries: Vec<CompactCombEntry>,
+    merkle_internal_levels: Vec<Vec<Word>>,
+}
+
+impl PrecomputedK1PubKey {
+    /// Builds the joint comb-table cache for `(p1, p2)`.
+    ///
+    /// The cache depends only on the two base points, not on a signature.
+    pub fn new(p1: &AffinePoint, p2: &AffinePoint) -> Self {
+        let mut entries = Vec::with_capacity(MERKLE_LEAF_COUNT);
+        let mut leaves = Vec::with_capacity(MERKLE_LEAF_COUNT);
+
+        for_each_joint_comb_entry(p1, p2, |entry| {
+            let compact = CompactCombEntry::from_point(entry);
+            leaves.push(compact.leaf_hash());
+            entries.push(compact);
+        });
+
+        debug_assert_eq!(entries.len(), MERKLE_LEAF_COUNT);
+        debug_assert_eq!(leaves.len(), MERKLE_LEAF_COUNT);
+
+        let merkle_internal_levels =
+            build_left_aligned_padded_internal_levels(leaves, MERKLE_TREE_DEPTH, empty_leaf_hash());
+
+        Self { entries, merkle_internal_levels }
+    }
+
+    /// Returns the Merkle root of the cached joint comb table.
+    pub fn merkle_root(&self) -> [Felt; 4] {
+        **self
+            .merkle_internal_levels
+            .last()
+            .and_then(|level| level.first())
+            .expect("merkle tree has a root")
+    }
+
+    /// Returns the selected table entries and sparse `MerkleStore` for `(u_1, u_2)`.
+    pub fn advice_for_windows(&self, u_1: &BigUint, u_2: &BigUint) -> (Vec<Felt>, MerkleStore) {
+        let indices = selected_leaf_indices(u_1, u_2);
+        (self.entries_for_indices(&indices), self.merkle_store_for_indices(&indices))
+    }
+
+    /// Returns only the selected table entries, in verifier window order.
+    pub fn entries_in_window_order(&self, u_1: &BigUint, u_2: &BigUint) -> Vec<Felt> {
+        self.entries_for_indices(&selected_leaf_indices(u_1, u_2))
+    }
+
+    /// Returns only the sparse `MerkleStore` for the selected table entries.
+    pub fn merkle_store_for_windows(&self, u_1: &BigUint, u_2: &BigUint) -> MerkleStore {
+        self.merkle_store_for_indices(&selected_leaf_indices(u_1, u_2))
+    }
+
+    fn entries_for_indices(&self, indices: &[usize]) -> Vec<Felt> {
+        let mut out = Vec::with_capacity(JOINT_WINDOW_POSITIONS * FELTS_PER_MERKLE_ENTRY);
+        for &leaf_idx in indices {
+            self.entries[leaf_idx].extend_padded_felts(&mut out);
+        }
+        debug_assert_eq!(out.len(), JOINT_WINDOW_POSITIONS * FELTS_PER_MERKLE_ENTRY);
+        out
+    }
+
+    fn merkle_store_for_indices(&self, indices: &[usize]) -> MerkleStore {
+        let paths = indices.iter().copied().map(|leaf_idx| {
+            (leaf_idx as u64, self.leaf_hash(leaf_idx), self.authentication_path(leaf_idx))
+        });
+
+        let mut store = MerkleStore::new();
+        store
+            .add_merkle_paths(paths)
+            .expect("cached Merkle levels are internally consistent");
+        store
+    }
+
+    fn authentication_path(&self, leaf_idx: usize) -> MerklePath {
+        let mut idx = leaf_idx;
+        let mut path = Vec::with_capacity(MERKLE_TREE_DEPTH as usize);
+
+        path.push(self.leaf_hash(idx ^ 1));
+        idx >>= 1;
+
+        for level in self.merkle_internal_levels.iter().take(MERKLE_TREE_DEPTH as usize - 1) {
+            path.push(level[idx ^ 1]);
+            idx >>= 1;
+        }
+        MerklePath::new(path)
+    }
+
+    fn leaf_hash(&self, leaf_idx: usize) -> Word {
+        if leaf_idx < self.entries.len() {
+            self.entries[leaf_idx].leaf_hash()
+        } else {
+            empty_leaf_hash()
+        }
+    }
+}
+
+fn for_each_joint_comb_entry(
+    p1: &AffinePoint,
+    p2: &AffinePoint,
+    mut visit: impl FnMut(&AffinePoint),
+) {
+    let prime = base_prime();
 
     let mut shift_p1 = p1.clone();
     let mut shift_p2 = p2.clone();
@@ -145,7 +289,7 @@ pub fn joint_comb_table(p1: &AffinePoint, p2: &AffinePoint) -> Vec<Felt> {
         }
 
         for entry in batch_affine_add_pairs(&small_p1, &small_p2, &prime) {
-            push_point_as_felts(&mut out, &entry);
+            visit(&entry);
         }
 
         for _ in 0..WINDOW_WIDTH {
@@ -153,7 +297,20 @@ pub fn joint_comb_table(p1: &AffinePoint, p2: &AffinePoint) -> Vec<Felt> {
             shift_p2 = affine_double(&shift_p2, &prime);
         }
     }
+}
 
+/// Builds a 2D comb table for a pair of secp256k1 base points `(p1, p2)`, suitable for the
+/// joint scalar mult `[u_1] * p1 + [u_2] * p2` over 256-bit scalars `u_1`, `u_2`. Layout:
+/// 43 contiguous blocks of 4,096 entries * 20 felts; entry `(i, j)` in block `b` is
+/// `[i * 64^b] * p1 + [j * 64^b] * p2`.
+///
+/// The per-block cross-product step (4,096 affine additions) is computed with a single
+/// Montgomery-batched modular inversion in place of 4,096 Fermat inversions.
+pub fn joint_comb_table(p1: &AffinePoint, p2: &AffinePoint) -> Vec<Felt> {
+    let mut out = Vec::with_capacity(JOINT_TABLE_FELTS);
+    for_each_joint_comb_entry(p1, p2, |entry| {
+        CompactCombEntry::from_point(entry).extend_point_felts(&mut out);
+    });
     debug_assert_eq!(out.len(), JOINT_TABLE_FELTS);
     out
 }
@@ -166,15 +323,10 @@ pub fn joint_comb_table(p1: &AffinePoint, p2: &AffinePoint) -> Vec<Felt> {
 /// `(block * ENTRIES_PER_BLOCK + i * ENTRIES_PER_AXIS + j) * FELTS_PER_MERKLE_ENTRY` in the
 /// returned vector.
 pub fn joint_comb_padded_entries(p1: &AffinePoint, p2: &AffinePoint) -> Vec<Felt> {
-    let table = joint_comb_table(p1, p2);
     let mut out = Vec::with_capacity(MERKLE_LEAF_COUNT * FELTS_PER_MERKLE_ENTRY);
-    for entry_idx in 0..MERKLE_LEAF_COUNT {
-        let base = entry_idx * FELTS_PER_ENTRY;
-        out.extend_from_slice(&table[base..base + FELTS_PER_ENTRY]);
-        for _ in FELTS_PER_ENTRY..FELTS_PER_MERKLE_ENTRY {
-            out.push(Felt::from_u32(0));
-        }
-    }
+    for_each_joint_comb_entry(p1, p2, |entry| {
+        CompactCombEntry::from_point(entry).extend_padded_felts(&mut out);
+    });
     debug_assert_eq!(out.len(), MERKLE_LEAF_COUNT * FELTS_PER_MERKLE_ENTRY);
     out
 }
@@ -281,14 +433,61 @@ pub fn build_left_aligned_padded_tree(
     (root, inner_nodes)
 }
 
+/// Builds compact internal Merkle levels for a left-aligned padded tree.
+///
+/// Level 0 contains parents of leaves, and the final level contains the root. Leaf hashes are
+/// omitted; callers can recompute leaf siblings from compact entries.
+fn build_left_aligned_padded_internal_levels(
+    mut real_leaves: Vec<Word>,
+    depth: u8,
+    empty_leaf: Word,
+) -> Vec<Vec<Word>> {
+    assert!(depth > 0, "depth must be non-zero");
+    assert!(depth < 64, "depth = {} must be < 64 to fit tree capacity in u64", depth);
+    let total = 1u64 << depth;
+    assert!(
+        real_leaves.len() as u64 <= total,
+        "real_leaves.len() = {} exceeds tree capacity 2^{} = {}",
+        real_leaves.len(),
+        depth,
+        total
+    );
+
+    real_leaves.resize(total as usize, empty_leaf);
+    let mut levels = Vec::with_capacity(depth as usize);
+
+    let current = real_leaves;
+    let mut parents = Vec::with_capacity(current.len() / 2);
+    for pair in current.chunks_exact(2) {
+        parents.push(Poseidon2::merge(&[pair[0], pair[1]]));
+    }
+    levels.push(parents);
+
+    for level in 0..depth as usize - 1 {
+        let current = &levels[level];
+        let mut parents = Vec::with_capacity(current.len() / 2);
+        for pair in current.chunks_exact(2) {
+            parents.push(Poseidon2::merge(&[pair[0], pair[1]]));
+        }
+        levels.push(parents);
+    }
+
+    debug_assert_eq!(levels.last().expect("root level").len(), 1);
+    levels
+}
+
+fn empty_leaf_hash() -> Word {
+    Poseidon2::hash_elements(&[Felt::ZERO; FELTS_PER_MERKLE_ENTRY])
+}
+
 /// Selects the `JOINT_WINDOW_POSITIONS` entries the verifier will look up given the scalars
 /// `(u_1, u_2)`, in window order, and concatenates them into a flat `Vec<Felt>` of
 /// `JOINT_WINDOW_POSITIONS * FELTS_PER_MERKLE_ENTRY = 43 * 24 = 1,032` felts ready to be
 /// pushed onto the advice stack.
 ///
-/// Both scalars must satisfy `u_x < 2^256` (canonical scalar bound). The on-VM driver
+/// Both scalars must satisfy `u_x < 2^256` (canonical scalar bound). The VM driver
 /// substitutes a synthetic zero limb when its next-limb index reaches 8, so non-canonical
-/// scalars would desynchronise the host-side window selection from the verifier's. The
+/// scalars would desynchronise window selection from the verifier's. The
 /// verifier processes windows from the LSB end of each scalar; the host must mirror that
 /// order so each `adv_pushw` in the driver pulls the entry for the correct window.
 pub fn entries_in_window_order(padded_entries: &[Felt], u_1: &BigUint, u_2: &BigUint) -> Vec<Felt> {
@@ -296,17 +495,27 @@ pub fn entries_in_window_order(padded_entries: &[Felt], u_1: &BigUint, u_2: &Big
     assert!(u_1.bits() <= 256, "u_1 must satisfy u_1 < 2^256, got {} bits", u_1.bits());
     assert!(u_2.bits() <= 256, "u_2 must satisfy u_2 < 2^256, got {} bits", u_2.bits());
     let mut out = Vec::with_capacity(JOINT_WINDOW_POSITIONS * FELTS_PER_MERKLE_ENTRY);
-    let mask = BigUint::from((ENTRIES_PER_AXIS - 1) as u32);
-    for p in 0..JOINT_WINDOW_POSITIONS {
-        let shift = WINDOW_WIDTH * p;
-        let i = window_digit(u_1, shift, &mask);
-        let j = window_digit(u_2, shift, &mask);
-        let leaf_idx = p * ENTRIES_PER_BLOCK + i * ENTRIES_PER_AXIS + j;
+    for leaf_idx in selected_leaf_indices(u_1, u_2) {
         let base = leaf_idx * FELTS_PER_MERKLE_ENTRY;
         out.extend_from_slice(&padded_entries[base..base + FELTS_PER_MERKLE_ENTRY]);
     }
     debug_assert_eq!(out.len(), JOINT_WINDOW_POSITIONS * FELTS_PER_MERKLE_ENTRY);
     out
+}
+
+fn selected_leaf_indices(u_1: &BigUint, u_2: &BigUint) -> Vec<usize> {
+    assert!(u_1.bits() <= 256, "u_1 must satisfy u_1 < 2^256, got {} bits", u_1.bits());
+    assert!(u_2.bits() <= 256, "u_2 must satisfy u_2 < 2^256, got {} bits", u_2.bits());
+
+    let mut indices = Vec::with_capacity(JOINT_WINDOW_POSITIONS);
+    let mask = BigUint::from((ENTRIES_PER_AXIS - 1) as u32);
+    for p in 0..JOINT_WINDOW_POSITIONS {
+        let shift = WINDOW_WIDTH * p;
+        let i = window_digit(u_1, shift, &mask);
+        let j = window_digit(u_2, shift, &mask);
+        indices.push(p * ENTRIES_PER_BLOCK + i * ENTRIES_PER_AXIS + j);
+    }
+    indices
 }
 
 fn window_digit(scalar: &BigUint, shift: usize, mask: &BigUint) -> usize {
@@ -484,27 +693,11 @@ fn batch_affine_add_pairs(
 // SERIALIZATION
 // ================================================================================================
 
-fn push_point_as_felts(out: &mut Vec<Felt>, p: &AffinePoint) {
-    push_u256_as_felts(out, &p.x);
-    push_u256_as_felts(out, &p.y);
-    out.push(if p.is_infinity {
-        Felt::from_u32(1)
-    } else {
-        Felt::from_u32(0)
-    });
-    // Three reserved zero felts to round to a 5-word boundary.
-    out.push(Felt::from_u32(0));
-    out.push(Felt::from_u32(0));
-    out.push(Felt::from_u32(0));
-}
-
-fn push_u256_as_felts(out: &mut Vec<Felt>, value: &BigUint) {
+fn u256_to_u32_array(value: &BigUint) -> [u32; 8] {
     assert!(value.bits() <= 256, "value must fit in 256 bits, got {} bits", value.bits());
     let mut digits = value.to_u32_digits();
     digits.resize(8, 0);
-    for d in digits {
-        out.push(Felt::from_u32(d));
-    }
+    digits.try_into().expect("resized to 8 limbs")
 }
 
 // CONSTANT BIGNUMS
@@ -722,8 +915,46 @@ mod tests {
         }
     }
 
-    /// Times the one-time per-PK build pipeline: comb table -> padded entries -> per-leaf
-    /// Poseidon2 hashes -> left-aligned padded tree. Run with
+    #[test]
+    fn precomputed_cache_matches_legacy_padded_entries() {
+        use miden_core::crypto::merkle::{MerkleStore, NodeIndex};
+
+        let g = generator();
+        let prime = base_prime();
+        let q = scalar_mul(&g, &BigUint::from(7u32), &prime);
+
+        let cache = PrecomputedK1PubKey::new(&g, &q);
+
+        let legacy_entries = joint_comb_padded_entries(&g, &q);
+        let legacy_leaves = merkle_leaf_hashes(&legacy_entries);
+        let empty_leaf = Poseidon2::hash_elements(&[Felt::ZERO; FELTS_PER_MERKLE_ENTRY]);
+        let (legacy_root, _) =
+            build_left_aligned_padded_tree(&legacy_leaves, MERKLE_TREE_DEPTH, empty_leaf);
+        assert_eq!(Word::new(cache.merkle_root()), legacy_root);
+
+        let u_1 = BigUint::parse_bytes(b"123456789abcdef123456789abcdef", 16).unwrap();
+        let u_2 = BigUint::parse_bytes(b"fedcba9876543210fedcba9876543210", 16).unwrap();
+        assert_eq!(
+            cache.entries_in_window_order(&u_1, &u_2),
+            entries_in_window_order(&legacy_entries, &u_1, &u_2)
+        );
+
+        let sparse_store = cache.merkle_store_for_windows(&u_1, &u_2);
+        let full_store: MerkleStore =
+            build_left_aligned_padded_tree(&legacy_leaves, MERKLE_TREE_DEPTH, empty_leaf)
+                .1
+                .into_iter()
+                .collect();
+
+        for leaf_idx in selected_leaf_indices(&u_1, &u_2) {
+            let index = NodeIndex::new(MERKLE_TREE_DEPTH, leaf_idx as u64).expect("valid index");
+            let sparse_leaf = sparse_store.get_node(legacy_root, index).expect("sparse path opens");
+            let full_leaf = full_store.get_node(legacy_root, index).expect("full store opens");
+            assert_eq!(sparse_leaf, full_leaf);
+        }
+    }
+
+    /// Times the one-time per-PK cache build. Run with
     /// `cargo test --release ... full_per_pk_build_timing -- --ignored --nocapture`.
     #[test]
     #[ignore = "benchmark; run with --ignored to print timings"]
@@ -735,28 +966,24 @@ mod tests {
         let q = scalar_mul(&g, &BigUint::from(0x9f2815b1u32), &prime);
 
         let t0 = Instant::now();
-        let entries = joint_comb_padded_entries(&g, &q);
-        let t_entries = t0.elapsed();
-
-        let t1 = Instant::now();
-        let leaves = merkle_leaf_hashes(&entries);
-        let t_leaves = t1.elapsed();
-
-        let t2 = Instant::now();
-        let empty_leaf = Poseidon2::hash_elements(&[Felt::ZERO; FELTS_PER_MERKLE_ENTRY]);
-        let (_root, _inner) =
-            build_left_aligned_padded_tree(&leaves, MERKLE_TREE_DEPTH, empty_leaf);
-        let t_tree = t2.elapsed();
+        let cache = PrecomputedK1PubKey::new(&g, &q);
+        let t_cache = t0.elapsed();
 
         let total = t0.elapsed();
         eprintln!("per-PK build timing (release mode):");
-        eprintln!("  joint_comb_padded_entries : {:?}", t_entries);
-        eprintln!("  merkle_leaf_hashes        : {:?}", t_leaves);
-        eprintln!("  build_left_aligned_tree   : {:?}", t_tree);
-        eprintln!("  total                     : {:?}", total);
+        eprintln!("  PrecomputedK1PubKey::new : {:?}", t_cache);
+        eprintln!("  total                    : {:?}", total);
         eprintln!(
-            "  padded-entries size (bytes)   : {}",
-            entries.len() * core::mem::size_of::<Felt>()
+            "  compact entries (bytes) : {}",
+            cache.entries.len() * U32S_PER_COMPACT_ENTRY * core::mem::size_of::<u32>()
+        );
+        eprintln!(
+            "  internal levels (bytes): {}",
+            cache
+                .merkle_internal_levels
+                .iter()
+                .map(|level| level.len() * core::mem::size_of::<Word>())
+                .sum::<usize>()
         );
     }
 }

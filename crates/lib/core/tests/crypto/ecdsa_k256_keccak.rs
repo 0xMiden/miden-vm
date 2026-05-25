@@ -1017,7 +1017,7 @@ fn parse_compressed_pk_invalid_prefix_yields_zero_flag() {
     let asserts = "
         # We only check the flag here; x and parity values for an invalid prefix are
         # whatever the proc happens to write (the caller should ignore them when flag = 0).
-        # Drop x[0..7] and parity to leave just the flag on top.
+        # Drop x[0..7] and parity to leave only the flag on top.
         dropw  dropw  drop
         push.0  assert_eq.err=\"flag should be 0\"
     ";
@@ -1054,34 +1054,27 @@ fn decompress_pk_to_xy(pk_bytes: &[u8]) -> (num::BigUint, num::BigUint) {
 
 /// Witness bundle for `verify_prehash_native_precomp` under the Merkle-committed table
 /// design. Holds:
-///   - `pk_aug`: 4-felt augmented public-key commitment (the trusted on-chain value).
+///   - `pk_aug`: 4-felt augmented public-key commitment.
 ///   - `pk_aug_value`: 16-felt advice-map value at key `pk_aug`, defined as `compressed_PK_9 ||
 ///     zeros_3 || merkle_root_4`.
-///   - `entries`: 176,128-entry joint comb table as 24-felt padded entries.
-///   - `merkle_inner_nodes`: the minimal set of inner-node triples needed to populate the
-///     verifier's `MerkleStore`. Produced by `build_left_aligned_padded_tree`, which skips the
-///     all-empty subtrees in the right-side padding. The tree's root matches the `merkle_root_4`
-///     portion of `pk_aug_value`.
-///   - `u_1`, `u_2`: ECDSA scalars derived from `(digest, sig)`; the host needs them to pre-push
-///     the per-window entries the verifier will look up, in window order.
+///   - `precomputed_pk`: reusable per-key comb-table cache; per-signature advice and Merkle paths
+///     are selected from it.
+///   - `u_1`, `u_2`: ECDSA scalars derived from `(digest, sig)`, used to select the per-window
+///     table entries.
 struct PrecompWitness {
     pk_aug: [Felt; 4],
     pk_aug_value: Vec<Felt>,
-    entries: Vec<Felt>,
-    merkle_inner_nodes: Vec<miden_core::crypto::merkle::InnerNodeInfo>,
+    precomputed_pk: miden_core_lib::handlers::comb_k1::PrecomputedK1PubKey,
     u_1: num::BigUint,
     u_2: num::BigUint,
 }
 
 /// Compute `pk_aug` (= `Poseidon2::hash_elements(compressed_PK || zeros || merkle_root)`),
-/// the joint comb table as 24-felt padded entries, the Merkle tree over the per-entry
-/// hashes, and the scalars `(u_1, u_2)` the verifier will derive from this signature.
+/// the per-public-key comb-table cache, and the scalars `(u_1, u_2)` the verifier derives
+/// from this signature.
 fn precomp_witness(request: &EcdsaRequest) -> PrecompWitness {
     use miden_core::crypto::hash::Poseidon2;
-    use miden_core_lib::handlers::comb_k1::{
-        AffinePoint, FELTS_PER_MERKLE_ENTRY, MERKLE_TREE_DEPTH, build_left_aligned_padded_tree,
-        joint_comb_padded_entries, merkle_leaf_hashes,
-    };
+    use miden_core_lib::handlers::comb_k1::{AffinePoint, PrecomputedK1PubKey};
     use num::BigUint;
 
     let pk_bytes = request.pk().to_bytes();
@@ -1092,15 +1085,8 @@ fn precomp_witness(request: &EcdsaRequest) -> PrecompWitness {
         is_infinity: false,
     };
     let q = AffinePoint { x: q_x, y: q_y, is_infinity: false };
-    let entries = joint_comb_padded_entries(&g, &q);
-    let leaves = merkle_leaf_hashes(&entries);
-    // Build the depth-18 tree without redundantly hashing the 86,016-leaf empty padding:
-    // `build_left_aligned_padded_tree` reuses the per-height empty-subtree digest (built by
-    // self-merging `Poseidon2([0; 24])`) for the all-empty right side.
-    let empty_leaf = Poseidon2::hash_elements(&[Felt::ZERO; FELTS_PER_MERKLE_ENTRY]);
-    let (root_word, merkle_inner_nodes) =
-        build_left_aligned_padded_tree(&leaves, MERKLE_TREE_DEPTH, empty_leaf);
-    let merkle_root: [Felt; 4] = *root_word;
+    let precomputed_pk = PrecomputedK1PubKey::new(&g, &q);
+    let merkle_root = precomputed_pk.merkle_root();
 
     let pk_felts = bytes_to_packed_u32_elements(&pk_bytes);
     assert_eq!(pk_felts.len(), 9);
@@ -1114,14 +1100,13 @@ fn precomp_witness(request: &EcdsaRequest) -> PrecompWitness {
     PrecompWitness {
         pk_aug,
         pk_aug_value,
-        entries,
-        merkle_inner_nodes,
+        precomputed_pk,
         u_1,
         u_2,
     }
 }
 
-/// Off-host derivation of `(u_1, u_2)` from the signed request, mirroring the on-VM
+/// Rust derivation of `(u_1, u_2)` from the signed request, mirroring the VM
 /// computation in `ecdsa_k256_keccak::verify_prehash_native_precomp`:
 ///     e      = digest mod n
 ///     s_inv  = s^-1 mod n
@@ -1154,17 +1139,12 @@ fn secp256k1_scalar_order() -> [u32; 8] {
     ]
 }
 
-/// Build a populated `AdviceInputs` for the precomp-path tests: inserts the `pk_aug ->
-/// [compressed_PK || zeros || merkle_root]` advice-map entry, the 43 padded entries the
-/// verifier will look up (in window order) onto the advice stack, and the Merkle tree into
-/// the `MerkleStore`.
+/// Build a populated `AdviceInputs` for the precomp-path tests.
 fn precomp_advice_inputs(witness: &PrecompWitness) -> miden_core::advice::AdviceInputs {
-    use miden_core::{Word, advice::AdviceInputs, crypto::merkle::MerkleStore};
-    use miden_core_lib::handlers::comb_k1::entries_in_window_order;
+    use miden_core::{Word, advice::AdviceInputs};
 
-    let entry_advice = entries_in_window_order(&witness.entries, &witness.u_1, &witness.u_2);
-    let mut store = MerkleStore::new();
-    store.extend(witness.merkle_inner_nodes.iter().cloned());
+    let (entry_advice, store) =
+        witness.precomputed_pk.advice_for_windows(&witness.u_1, &witness.u_2);
 
     AdviceInputs::default()
         .with_map([(Word::new(witness.pk_aug), witness.pk_aug_value.clone())])
@@ -1187,10 +1167,7 @@ fn push_word_inline(word: &[Felt; 4]) -> String {
 // PRECOMP-PATH HAPPY PATH
 // ================================================================================================
 
-/// Baseline acceptance: an unmodified honest witness produced by `precomp_witness` must
-/// verify to 1. The trust-boundary positive test (`_accepts_self_consistent_wrong_root`)
-/// covers a deliberately-decoupled `(compressed_PK, merkle_root)` pair, so this is the
-/// only non-ignored test that pins the "everything consistent" happy path.
+/// An unmodified witness produced by `precomp_witness` must verify to 1.
 #[test]
 fn ecdsa_verify_prehash_native_precomp_valid_signature_returns_one() {
     let request = generate_valid_signature();
@@ -1407,7 +1384,7 @@ fn ecdsa_verify_prehash_native_precomp_rejects_tampered_advice_witness() {
     let mut witness = precomp_witness(&request);
 
     // Flip one bit in compressed_PK in the advice-map value. The caller still supplies the
-    // honest pk_aug, so the on-VM hash check catches the mismatch.
+    // honest pk_aug, so the VM hash check catches the mismatch.
     witness.pk_aug_value[0] = Felt::new_unchecked(witness.pk_aug_value[0].as_canonical_u64() ^ 1);
     let pk_aug_push = push_word_inline(&witness.pk_aug);
 
@@ -1484,16 +1461,11 @@ fn ecdsa_verify_prehash_native_precomp_rejects_nonzero_preimage_pad() {
     );
 }
 
-/// A host that pushes a Merkle-inconsistent entry onto the advice stack must cause
-/// `mtree_verify` inside `verify_precomp` to trap. (Unlike `pk_aug` mismatch, an
-/// individual entry mismatch is not no-trap: catching it would require either an extra
-/// non-trapping path verifier or a Poseidon2 second-preimage on the committed leaf to
-/// evade. The augmented-PK commitment ensures this trap is not reachable by caller-
-/// controlled inputs alone -- only by a malicious or buggy host.)
+/// A selected table entry must match its Merkle opening. Tampering the advice-stack entry
+/// while keeping the root and path unchanged must trap in `mtree_verify`.
 #[test]
 fn ecdsa_verify_prehash_native_precomp_traps_on_tampered_merkle_entry() {
-    use miden_core::{Word, advice::AdviceInputs, crypto::merkle::MerkleStore};
-    use miden_core_lib::handlers::comb_k1::entries_in_window_order;
+    use miden_core::{Word, advice::AdviceInputs};
 
     let request = generate_valid_signature();
     let memory_stores = generate_memory_store_masm(&request);
@@ -1503,12 +1475,12 @@ fn ecdsa_verify_prehash_native_precomp_traps_on_tampered_merkle_entry() {
     // Build the honest entry advice, then flip one bit in the very first felt of the
     // first window's entry. `mtree_verify` at window 0 will see a hash that doesn't
     // match the leaf at that window's `(u_1, u_2)`-derived index under the bound root.
-    let mut entry_advice = entries_in_window_order(&witness.entries, &witness.u_1, &witness.u_2);
+    let mut entry_advice =
+        witness.precomputed_pk.entries_in_window_order(&witness.u_1, &witness.u_2);
     let original = entry_advice[0].as_canonical_u64();
     entry_advice[0] = Felt::new_unchecked(original ^ 1);
 
-    let mut store = MerkleStore::new();
-    store.extend(witness.merkle_inner_nodes.iter().cloned());
+    let store = witness.precomputed_pk.merkle_store_for_windows(&witness.u_1, &witness.u_2);
     let advice = AdviceInputs::default()
         .with_map([(Word::new(witness.pk_aug), witness.pk_aug_value.clone())])
         .with_stack(entry_advice)
@@ -1644,28 +1616,18 @@ fn generate_memory_store_masm_raw(pk_bytes: &[u8], digest: &[u8], sig_bytes: &[u
 
 /// Documents the trust boundary of `verify_prehash_native_precomp`.
 ///
-/// The proc binds `pk_aug` to `(compressed_PK, merkle_root)` via the augmented-PK hash check
-/// but does NOT prove that `merkle_root` was built for `decompress(compressed_PK)`. A caller
-/// that controls `pk_aug` can publish a self-consistent commitment whose root is for a
-/// different public key Q' than the one the caller claims is the signer. In that case the
-/// proc accepts the signature (it verifies the ECDSA equation for Q', the true signer),
-/// even though the claimed PK is Q.
-///
-/// This test asserts the proc returns 1 in that scenario, documenting that this path is
-/// sound only when `pk_aug` originates from a trusted setup or authoritative state (e.g.
-/// an account-bound commitment). The proc's docstring carries the full trust-model
-/// statement.
+/// The proc checks that `pk_aug` opens to `(compressed_PK, merkle_root)`, but it does not
+/// recompute the table root from `compressed_PK`. If `pk_aug` itself is chosen for
+/// `(Q, root(Q'))`, the proc verifies against `Q'`: `pk_aug` is the trusted statement for
+/// this path.
 #[test]
 fn ecdsa_verify_prehash_native_precomp_accepts_self_consistent_wrong_root() {
     use miden_core::crypto::hash::Poseidon2;
-    use miden_core_lib::handlers::comb_k1::{
-        AffinePoint, FELTS_PER_MERKLE_ENTRY, MERKLE_TREE_DEPTH, build_left_aligned_padded_tree,
-        joint_comb_padded_entries, merkle_leaf_hashes,
-    };
+    use miden_core_lib::handlers::comb_k1::{AffinePoint, PrecomputedK1PubKey};
     use num::BigUint;
 
     // Honest signer Q'. The sig + digest must verify against Q', which is what the table
-    // is built for, so the on-VM ECDSA equation check passes.
+    // is built for, so the VM ECDSA equation check passes.
     let actual = generate_valid_signature();
 
     // Decoy public key Q (different seed). `compressed_PK` in pk_aug binds Q, but the
@@ -1691,12 +1653,8 @@ fn ecdsa_verify_prehash_native_precomp_accepts_self_consistent_wrong_root() {
         y: q_actual_y,
         is_infinity: false,
     };
-    let entries = joint_comb_padded_entries(&g, &q_actual);
-    let leaves = merkle_leaf_hashes(&entries);
-    let empty_leaf = Poseidon2::hash_elements(&[Felt::ZERO; FELTS_PER_MERKLE_ENTRY]);
-    let (root_word, merkle_inner_nodes) =
-        build_left_aligned_padded_tree(&leaves, MERKLE_TREE_DEPTH, empty_leaf);
-    let merkle_root: [Felt; 4] = *root_word;
+    let precomputed_pk = PrecomputedK1PubKey::new(&g, &q_actual);
+    let merkle_root = precomputed_pk.merkle_root();
 
     let decoy_pk_felts = bytes_to_packed_u32_elements(&decoy.pk().to_bytes());
     let mut pk_aug_value: Vec<Felt> = Vec::with_capacity(16);
@@ -1709,8 +1667,7 @@ fn ecdsa_verify_prehash_native_precomp_accepts_self_consistent_wrong_root() {
     let witness = PrecompWitness {
         pk_aug,
         pk_aug_value,
-        entries,
-        merkle_inner_nodes,
+        precomputed_pk,
         u_1,
         u_2,
     };

@@ -152,7 +152,7 @@ fn expected_point_assertions(expected: &AffinePoint) -> String {
 #[test]
 fn phi_g_x_constant_matches_runtime() {
     // verify_glv_hinted hardcodes φ(G).x = β·G_x mod p as a constant pushed onto the stack.
-    // This test recomputes that value off-VM and asserts the limbs match what's in the .masm.
+    // This test recomputes that value in Rust and asserts the limbs match what's in the .masm.
     let p = bn_p();
     let g_x_limbs: [u32; 8] = [
         0x16f81798, 0x59f2815b, 0x2dce28d9, 0x029bfcdb, 0xce870b07, 0x55a06295, 0xf9dcbbac,
@@ -1243,7 +1243,7 @@ fn assert_verify_glv_hinted(q: &AffinePoint, u1: &BigUint, u2: &BigUint, expecte
 // ================================================================================================
 
 proptest! {
-    /// Random scalar k -> compute P = k*G off-host (using the affine reference doubling +
+    /// Random scalar k -> compute P = k*G with the affine reference doubling +
     /// addition), then test that MASM's point_double matches the reference doubling on P.
     #[test]
     fn k1_point_double_proptest(k_lo in 1u64..1_000_000) {
@@ -1253,7 +1253,7 @@ proptest! {
         assert_point_double(&pt, &expected);
     }
 
-    /// Random small scalars k1, k2 -> P1 = k1*G, P2 = k2*G via off-host scalar mul. Test that
+    /// Random small scalars k1, k2 -> P1 = k1*G, P2 = k2*G via reference scalar mul. Test that
     /// MASM's point_add(P1, P2) matches the reference addition. Covers many input shapes;
     /// the smaller k1 and k2 ranges keep test runtime down (each MASM execution is ~1 inv +
     /// a few muls, all routed through SZ Horner modmul which is the slow part).
@@ -1270,7 +1270,7 @@ proptest! {
         assert_point_add(&p1, &p2, &expected);
     }
 
-    /// Small scalar k. We compute k*G off-host and check that MASM's scalar_mul matches.
+    /// Small scalar k. We compute k*G in Rust and check that MASM's scalar_mul matches.
     /// Range is tight (k <= 1000) because the full 256-bit scalar mul scans all 256 bits
     /// even for small k; keeping k small means most leading bits are zero so the
     /// short-circuiting fast paths dominate.
@@ -1332,8 +1332,8 @@ proptest! {
     }
 }
 
-/// Reference scalar multiplication using the off-host affine doubling/addition, used to
-/// generate test vectors. NOT wired through MASM — this is purely for test-vector generation.
+/// Reference scalar multiplication using affine doubling/addition. NOT wired through MASM; this
+/// is purely for test-vector generation.
 fn scalar_mul_reference(p_pt: &AffinePoint, k: &BigUint, p: &BigUint) -> AffinePoint {
     let mut acc = AffinePoint::infinity();
     let bits = k.bits();
@@ -1382,9 +1382,9 @@ fn bn_p() -> BigUint {
 // VERIFY_PRECOMP PROPTESTS
 // ================================================================================================
 //
-// Each case builds the full 176,128-entry joint comb table off-host (~1s + ~16MB Merkle store)
-// and runs `verify_precomp` through the MASM proc, so cases are deliberately few. The intent
-// is to give random coverage over the bit-buffer + leaf-index path -- the four hand-picked
+// Each case builds the 176,128-entry precomputed-key cache and runs `verify_precomp` through
+// the MASM proc, so cases are deliberately few. The intent is to give random coverage over
+// the bit-buffer + leaf-index path -- the four hand-picked
 // boundary cases above (zero/identity scalars, small combinations, full 256-bit) cover the
 // algebraic edges; this proptest covers everything in between.
 
@@ -1420,9 +1420,9 @@ proptest! {
 // ================================================================================================
 
 /// Streaming N felts from the advice stack via `adv_pipe + hperm` must produce the same
-/// digest as off-host `Poseidon2::hash_elements`. Pins the digest-extraction tail used by
+/// digest as Rust-side `Poseidon2::hash_elements`. Pins the digest-extraction tail used by
 /// `verify_precomp` so a subtle stack-shuffle change (e.g. wrong drop ordering) gets
-/// caught at this layer rather than as an opaque digest mismatch in the full driver.
+/// caught directly.
 #[test]
 fn k1_streaming_hash_sanity_16_felts() {
     use miden_core::{Felt, crypto::hash::Poseidon2};
@@ -1504,27 +1504,13 @@ fn k1_verify_precomp_full_256_bit_scalars() {
 }
 
 fn assert_verify_precomp(q: &AffinePoint, u1: &BigUint, u2: &BigUint, expected: &AffinePoint) {
-    use miden_core::{
-        Felt,
-        advice::AdviceInputs,
-        crypto::{hash::Poseidon2, merkle::MerkleStore},
-    };
-    use miden_core_lib::handlers::comb_k1::{
-        AffinePoint as HandlerPoint, FELTS_PER_MERKLE_ENTRY, MERKLE_TREE_DEPTH,
-        build_left_aligned_padded_tree, entries_in_window_order, joint_comb_padded_entries,
-        merkle_leaf_hashes,
-    };
+    use miden_core::advice::AdviceInputs;
+    use miden_core_lib::handlers::comb_k1::{AffinePoint as HandlerPoint, PrecomputedK1PubKey};
 
     let n = BigUint::from_slice(&secp256k1_scalar_order().to_le_u32_limbs());
     assert!(u1 < &n, "u1 must be < n");
     assert!(u2 < &n, "u2 must be < n");
 
-    // Off-host: build the joint comb table as 24-felt padded entries, hash each entry to
-    // form Merkle leaves, build the depth-18 tree (left-aligned with the 86,016-leaf empty
-    // padding handled via `build_left_aligned_padded_tree`'s precomputed empty subtrees),
-    // and select the per-window entries the verifier will look up (in window order) onto
-    // the advice stack. The Merkle root is passed via the wrapper stack as the trusted
-    // commitment.
     let g_handler = HandlerPoint {
         x: AffinePoint::generator().x,
         y: AffinePoint::generator().y,
@@ -1535,16 +1521,9 @@ fn assert_verify_precomp(q: &AffinePoint, u1: &BigUint, u2: &BigUint, expected: 
         y: q.y.clone(),
         is_infinity: q.is_infinity,
     };
-    let entries = joint_comb_padded_entries(&g_handler, &q_handler);
-    let leaves = merkle_leaf_hashes(&entries);
-    let empty_leaf = Poseidon2::hash_elements(&[Felt::from_u32(0); FELTS_PER_MERKLE_ENTRY]);
-    let (root_word, inner_nodes) =
-        build_left_aligned_padded_tree(&leaves, MERKLE_TREE_DEPTH, empty_leaf);
-    let root: [Felt; 4] = *root_word;
-    let entry_advice = entries_in_window_order(&entries, u1, u2);
-
-    let mut store = MerkleStore::new();
-    store.extend(inner_nodes);
+    let precomputed_pk = PrecomputedK1PubKey::new(&g_handler, &q_handler);
+    let root = precomputed_pk.merkle_root();
+    let (entry_advice, store) = precomputed_pk.advice_for_windows(u1, u2);
 
     // Stack at wrapper entry (top to deep, 20 felts):
     //   [u_1 (8), u_2 (8), merkle_root (4), ...]
@@ -1668,7 +1647,7 @@ fn point_add_cycles() {
             push.0x483ADA77.0x26A3C465.0x5DA4FBFC.0x0E1108A8  loc_storew_le.12 dropw
             padw  loc_storew_le.16 dropw
 
-            # P2 = 2G at mem[20..40] (precomputed off-VM affine doubling of G).
+            # P2 = 2G at mem[20..40] (precomputed affine doubling of G).
             push.0x9075b4ee.0x5c75a31f.0x7ce670b4.0xc6047f94  loc_storew_le.20 dropw
             push.0x6cb91068.0xe51b3f87.0x95c707a6.0x1ae168fe  loc_storew_le.24 dropw
             push.0xf9dcbbac.0x55a06295.0xce870b07.0x029bfcdb  loc_storew_le.28 dropw
