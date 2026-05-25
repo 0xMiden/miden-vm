@@ -1,7 +1,7 @@
 use crate::{
     ExecutionError, Felt, ONE,
     errors::OperationError,
-    mast::MastForest,
+    mast::ExecutableMastForest,
     processor::{Processor, StackInterface, SystemInterface},
     tracer::OperationHelperRegisters,
 };
@@ -17,13 +17,14 @@ mod tests;
 /// # Errors
 /// Returns an error if the popped value is not ONE.
 #[inline(always)]
-pub(super) fn op_assert<P>(
+pub(super) fn op_assert<P, F>(
     processor: &mut P,
     err_code: Felt,
-    program: &MastForest,
+    program: &F,
 ) -> Result<OperationHelperRegisters, OperationError>
 where
     P: Processor,
+    F: ExecutableMastForest,
 {
     if processor.stack().get(0) != ONE {
         let err_msg = program.resolve_error_message(err_code);
@@ -49,6 +50,8 @@ where
 /// Overwrites the top four stack items with the value of the CALLER_HASH register, which is the
 /// hash of the procedure that initiated the most recent SYSCALL, or ZERO if not in a syscall
 /// context.
+// Uniform return type with sibling `op_*` handlers dispatched in `execute_op`.
+#[allow(clippy::unnecessary_wraps)]
 #[inline(always)]
 pub(super) fn op_caller<P: Processor>(
     processor: &mut P,

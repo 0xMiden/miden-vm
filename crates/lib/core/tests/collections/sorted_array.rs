@@ -567,6 +567,8 @@ fn build_lib_test(source: &str, op_stack: &[u64]) -> miden_utils_testing::Test {
         .with_library(core_lib.library().clone())
 }
 
+// Signatures match the event-handler callback type required by `with_event_handler`.
+#[allow(clippy::unnecessary_wraps)]
 /// Returns `(was_found = false, maybe_value_ptr = 204)` regardless of the actual array. 204 is
 /// past the array's `end_ptr = 112`, so the bounds check must fire.
 fn malicious_lowerbound_oob_above(
@@ -575,6 +577,7 @@ fn malicious_lowerbound_oob_above(
     Ok(vec![AdviceMutation::extend_stack(vec![Felt::new_unchecked(204), Felt::ZERO])])
 }
 
+#[allow(clippy::unnecessary_wraps)]
 /// Returns `(was_found = false, maybe_value_ptr = 40)` which is below `start_ptr = 100`.
 fn malicious_lowerbound_oob_below(
     _process: &ProcessorState,

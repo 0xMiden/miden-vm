@@ -15,7 +15,6 @@ use crate::{
         MultiMastForestNodeIter,
     },
     operations::AssemblyOp,
-    serde::Serializable,
     utils::{DenseIdMap, IndexVec},
 };
 
@@ -144,7 +143,7 @@ impl MastForestMerger {
             self.merge_decorators(other_forest)?;
         }
         for other_forest in forests.iter() {
-            self.merge_error_codes(other_forest)?;
+            self.merge_error_codes(other_forest);
         }
 
         let iterator = MultiMastForestNodeIter::new(forests.clone());
@@ -189,7 +188,7 @@ impl MastForestMerger {
         self.register_asm_op_mappings()?;
 
         for (forest_idx, forest) in forests.iter().enumerate() {
-            self.merge_roots(forest_idx, forest)?;
+            self.merge_roots(forest_idx, forest);
         }
 
         self.merge_debug_metadata(&forests)?;
@@ -231,11 +230,10 @@ impl MastForestMerger {
             .map_err(|((key, _prev), _new)| MastForestError::AdviceMapKeyCollisionOnMerge(key))
     }
 
-    fn merge_error_codes(&mut self, other_forest: &MastForest) -> Result<(), MastForestError> {
+    fn merge_error_codes(&mut self, other_forest: &MastForest) {
         self.mast_forest.debug_info.extend_error_codes(
             other_forest.debug_info.error_codes().map(|(k, v)| (*k, v.clone())),
         );
-        Ok(())
     }
 
     fn merge_node(
@@ -264,19 +262,8 @@ impl MastForestMerger {
             &self.decorator_id_mappings[forest_idx],
         )?;
 
-        let base_fingerprint =
+        let node_fingerprint =
             remapped_builder.fingerprint_for_node(&self.mast_forest, &self.hash_by_node_id)?;
-
-        // Augment with the source node's debug vars so same-ops/different-vars
-        // blocks from different forests are not collapsed.
-        let debug_var_data =
-            serialize_debug_var_content_for_node(original_forests[forest_idx], merging_id);
-        let asm_op_data =
-            serialize_asm_op_content_for_node(original_forests[forest_idx], merging_id);
-        let node_fingerprint =
-            augment_fingerprint_with_metadata(base_fingerprint, b"debug-vars", &debug_var_data);
-        let node_fingerprint =
-            augment_fingerprint_with_metadata(node_fingerprint, b"asm-ops", &asm_op_data);
 
         let mapped_node_id = match self.lookup_node_by_fingerprint(&node_fingerprint) {
             Some(matching_node_id) => {
@@ -314,11 +301,7 @@ impl MastForestMerger {
         Ok(())
     }
 
-    fn merge_roots(
-        &mut self,
-        forest_idx: usize,
-        other_forest: &MastForest,
-    ) -> Result<(), MastForestError> {
+    fn merge_roots(&mut self, forest_idx: usize, other_forest: &MastForest) {
         for root_id in other_forest.roots.iter() {
             // Map the previous root to its possibly new id.
             let new_root = self.node_id_mappings[forest_idx]
@@ -329,8 +312,6 @@ impl MastForestMerger {
             // this should be okay.
             self.mast_forest.make_root(new_root);
         }
-
-        Ok(())
     }
 
     /// Transfers procedure names and debug vars from the source forests into the merged forest,
@@ -646,92 +627,6 @@ impl MastForestMerger {
         dmap: &DenseIdMap<DecoratorId, DecoratorId>,
     ) -> Result<MastNodeBuilder, MastForestError> {
         super::build_node_with_remapped_ids(merging_id, src, original_forest, nmap, dmap)
-    }
-}
-
-// HELPERS
-// ================================================================================================
-
-/// Serializes the actual debug var *content* (name, location, etc.) for a node,
-/// producing a stable byte sequence suitable for fingerprint augmentation.
-///
-/// Unlike the assembler's `serialize_debug_vars` (which serializes `(op_idx, DebugVarId)` pairs),
-/// this serializes the resolved DebugVarInfo so that two forests assigning different DebugVarIds
-/// to identical variables still produce the same fingerprint contribution.
-fn serialize_debug_var_content_for_node(forest: &MastForest, node_id: MastNodeId) -> Vec<u8> {
-    let entries = forest.debug_info().debug_vars_for_node(node_id);
-    if entries.is_empty() {
-        return Vec::new();
-    }
-
-    let mut data = Vec::new();
-    for (op_idx, var_id) in entries {
-        data.extend_from_slice(&op_idx.to_le_bytes());
-        if let Some(info) = forest.debug_info().debug_var(var_id) {
-            info.write_into(&mut data);
-        }
-    }
-    data
-}
-
-fn augment_fingerprint_with_metadata(
-    fingerprint: MastNodeFingerprint,
-    tag: &[u8],
-    payload: &[u8],
-) -> MastNodeFingerprint {
-    if payload.is_empty() {
-        return fingerprint;
-    }
-
-    let mut data = Vec::new();
-    data.extend_from_slice(&(tag.len() as u32).to_le_bytes());
-    data.extend_from_slice(tag);
-    data.extend_from_slice(&(payload.len() as u64).to_le_bytes());
-    data.extend_from_slice(payload);
-
-    fingerprint.augment_with_data(&data)
-}
-
-/// Serializes the actual asm-op content for a node, producing a stable byte sequence suitable for
-/// fingerprint augmentation.
-///
-/// This ensures that nodes with identical structure but different source-mapping metadata do not
-/// collapse during merge.
-fn serialize_asm_op_content_for_node(forest: &MastForest, node_id: MastNodeId) -> Vec<u8> {
-    let entries = forest.debug_info().asm_ops_for_node(node_id);
-    if entries.is_empty() {
-        return Vec::new();
-    }
-
-    let mut data = Vec::new();
-
-    if !matches!(forest[node_id], MastNode::Block(_)) {
-        let num_operations = entries.last().map(|(op_idx, _)| op_idx + 1).unwrap_or(0);
-        data.extend_from_slice(&num_operations.to_le_bytes());
-    }
-
-    for (op_idx, asm_op_id) in entries {
-        data.extend_from_slice(&op_idx.to_le_bytes());
-        if let Some(asm_op) = forest.debug_info().asm_op(asm_op_id) {
-            serialize_asm_op_content(asm_op, &mut data);
-        }
-    }
-
-    data
-}
-
-fn serialize_asm_op_content(asm_op: &AssemblyOp, data: &mut Vec<u8>) {
-    asm_op.context_name().write_into(data);
-    asm_op.op().write_into(data);
-    asm_op.num_cycles().write_into(data);
-    match asm_op.location() {
-        Some(location) => {
-            data.push(1);
-            location.uri.write_into(data);
-            data.extend_from_slice(&u32::from(location.start).to_le_bytes());
-            data.extend_from_slice(&u32::from(location.end).to_le_bytes());
-        },
-        None => data.push(0),
     }
 }
 

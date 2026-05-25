@@ -7,12 +7,12 @@
 //! - **Main trace constraints** are evaluated by [`enforce_main`] and cover system / range / stack
 //!   / decoder / chiplets transitions.
 //! - **LogUp lookup-argument constraints** are evaluated separately through the closure-based
-//!   `LookupAir` impl on [`crate::ProcessorAir`], wired in from `ProcessorAir::eval` via
-//!   [`crate::lookup::ConstraintLookupBuilder`].
+//!   `LookupAir` impls on [`crate::CoreAir`] and [`crate::ChipletsAir`], wired in from each AIR's
+//!   `eval` via [`crate::lookup::ConstraintLookupBuilder`].
 
 use chiplets::selectors::ChipletSelectors;
 
-use crate::{MainCols, MidenAirBuilder};
+use crate::{ChipletCols, CoreCols, MidenAirBuilder};
 
 pub mod chiplets;
 pub mod columns;
@@ -29,13 +29,19 @@ pub mod utils;
 
 // ENTRY POINTS
 // ================================================================================================
+//
+// Main trace constraints are partitioned by AIR: `enforce_core` runs the Core half (system,
+// range, stack, decoder) and `enforce_chiplets` runs the Chiplets half. The per-AIR
+// `LiftedAir` impls (`CoreAir`, `ChipletsAir`) each call only their share.
 
-/// Enforces all main trace constraints.
-pub fn enforce_main<AB>(
+/// Enforces the Core-trace main constraints: system, range, stack, decoder.
+///
+/// Public-input boundary constraints ([`public_inputs::enforce_main`]) are owned by Core too
+/// but live on a separate entry point because they don't read `next` or `op_flags`.
+pub fn enforce_core<AB>(
     builder: &mut AB,
-    local: &MainCols<AB::Var>,
-    next: &MainCols<AB::Var>,
-    selectors: &ChipletSelectors<AB::Expr>,
+    local: &CoreCols<AB::Var>,
+    next: &CoreCols<AB::Var>,
     op_flags: &op_flags::OpFlags<AB::Expr>,
 ) where
     AB: MidenAirBuilder,
@@ -44,5 +50,18 @@ pub fn enforce_main<AB>(
     range::enforce_main(builder, local, next);
     stack::enforce_main(builder, local, next, op_flags);
     decoder::enforce_main(builder, local, next, op_flags);
+}
+
+/// Enforces the Chiplets-trace main constraints (hasher permutation/controller, bitwise,
+/// memory, ACE). Selector validity is enforced separately via
+/// [`chiplets::selectors::build_chiplet_selectors`].
+pub fn enforce_chiplets<AB>(
+    builder: &mut AB,
+    local: &ChipletCols<AB::Var>,
+    next: &ChipletCols<AB::Var>,
+    selectors: &ChipletSelectors<AB::Expr>,
+) where
+    AB: MidenAirBuilder,
+{
     chiplets::enforce_main(builder, local, next, selectors);
 }

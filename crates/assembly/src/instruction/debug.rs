@@ -19,7 +19,8 @@ pub fn compile_options(
 
     // NOTE: these `ast::Immediate::expect_value()` calls *should* be safe, because by the time
     // we're compiling debug options all immediate-constant arguments should be resolved.
-    let compiled = match options {
+
+    match options {
         Ast::StackAll => Vm::StackAll,
         Ast::StackTop(n) => Vm::StackTop(n.expect_value()),
         Ast::MemAll => Vm::MemAll,
@@ -37,7 +38,5 @@ pub fn compile_options(
             Vm::LocalInterval(0, end_exclusive - 1, aligned_num_locals)
         },
         Ast::AdvStackTop(n) => Vm::AdvStackTop(n.expect_value()),
-    };
-
-    compiled
+    }
 }

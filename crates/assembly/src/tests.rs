@@ -20,8 +20,8 @@ use miden_core::{
     events::EventId,
     field::PrimeField64,
     mast::{
-        CallNodeBuilder, JoinNodeBuilder, LoopNodeBuilder, MastForestContributor, MastNode,
-        MastNodeExt, MastNodeId, SplitNodeBuilder,
+        CallNodeBuilder, JoinNodeBuilder, LoopNodeBuilder, MastForestContributor, MastNodeExt,
+        MastNodeId, SplitNodeBuilder,
     },
     operations::{Decorator, Operation},
     program::Program,
@@ -112,7 +112,7 @@ fn empty_program() -> TestResult {
 }
 
 #[test]
-fn empty_if() -> TestResult {
+fn empty_if() {
     let context = TestContext::default();
     let source = source_file!(&context, "begin if.true end end");
     assert_assembler_diagnostic!(
@@ -125,7 +125,6 @@ fn empty_if() -> TestResult {
         "  :               `-- expected a non-empty `if` block",
         "  `----"
     );
-    Ok(())
 }
 
 #[test]
@@ -364,68 +363,13 @@ fn library_procedure_collision() -> Result<(), Report> {
     // make sure lib2 has the expected exports (i.e., bar1 and bar2)
     assert_eq!(lib2.num_exports(), 2);
 
-    // AssemblyOp metadata now participates in assembler-side deduplication, so a re-exported
-    // procedure and a locally defined procedure with the same operations remain distinct when
-    // their source mappings differ.
+    // The re-exported procedure and the locally defined procedure have the same MAST shape, so
+    // they share the same node.
     let lib2_bar_bar1 = QualifiedProcedureName::from_str("lib2::bar::bar1").unwrap();
     let lib2_bar_bar2 = QualifiedProcedureName::from_str("lib2::bar::bar2").unwrap();
-    assert_ne!(lib2.get_export_node_id(&lib2_bar_bar1), lib2.get_export_node_id(&lib2_bar_bar2));
+    assert_eq!(lib2.get_export_node_id(&lib2_bar_bar1), lib2.get_export_node_id(&lib2_bar_bar2));
 
-    // Keeping those procedures distinct adds one more node to the library forest.
-    assert_eq!(lib2.mast_forest().num_nodes(), 6);
-
-    Ok(())
-}
-
-#[test]
-fn static_library_same_digest_procedure_uses_exact_root_metadata() -> Result<(), Report> {
-    let context = TestContext::new();
-
-    let aliases = r#"
-        pub proc alias_a
-            add
-        end
-
-        pub proc alias_b
-            add
-        end
-    "#;
-    let aliases = parse_module!(&context, "lib::aliases", aliases);
-    let library = Assembler::new(context.source_manager()).assemble_library([aliases])?;
-
-    let program_source = source_file!(
-        &context,
-        r#"
-        use lib::aliases
-
-        begin
-            exec.aliases::alias_b
-        end
-        "#
-    );
-
-    let program = Assembler::new(context.source_manager())
-        .with_static_library(library)?
-        .assemble_program(program_source)?;
-
-    let body_node_id = {
-        let root = program.entrypoint();
-        match &program.mast_forest()[root] {
-            MastNode::Join(join_node) => join_node.second(),
-            _ => root,
-        }
-    };
-    let context_name = program
-        .mast_forest()
-        .debug_info()
-        .first_asm_op_for_node(body_node_id)
-        .expect("statically linked procedure should preserve asm-op metadata")
-        .context_name();
-
-    assert!(
-        context_name.ends_with("alias_b"),
-        "expected alias_b metadata, got {context_name}"
-    );
+    assert_eq!(lib2.mast_forest().num_nodes(), 5);
 
     Ok(())
 }
@@ -712,7 +656,7 @@ end
 }
 
 #[test]
-fn get_module_by_path() -> Result<(), Report> {
+fn get_module_by_path() {
     let context = TestContext::new();
     // declare foo module
     let foo_source = r#"
@@ -733,8 +677,6 @@ fn get_module_by_path() -> Result<(), Report> {
 
     let (_, foo_proc) = foo_module_info.procedures().next().unwrap();
     assert_eq!(foo_proc.name, ProcedureName::new("foo").unwrap());
-
-    Ok(())
 }
 
 #[test]
@@ -1104,7 +1046,7 @@ end
 }
 
 #[test]
-fn enum_felt_discriminant_negative_is_rejected() -> TestResult {
+fn enum_felt_discriminant_negative_is_rejected() {
     let context = TestContext::default();
     let source = source_file!(
         &context,
@@ -1122,11 +1064,10 @@ end
         .assemble(source)
         .expect_err("expected negative discriminant to be rejected");
     assert_diagnostic!(err, "invalid constant expression: value is larger than expected range");
-    Ok(())
 }
 
 #[test]
-fn enum_felt_discriminant_too_large_is_rejected() -> TestResult {
+fn enum_felt_discriminant_too_large_is_rejected() {
     let context = TestContext::default();
     let modulus = Felt::ORDER_U64;
     let source = source_file!(
@@ -1147,11 +1088,10 @@ end
         .assemble(source)
         .expect_err("expected out-of-range felt discriminant to be rejected");
     assert_diagnostic!(err, "invalid literal: value overflowed the field modulus");
-    Ok(())
 }
 
 #[test]
-fn constant_expression_overflow_is_rejected() -> TestResult {
+fn constant_expression_overflow_is_rejected() {
     let context = TestContext::default();
     let modulus_minus_one = Felt::ORDER_U64 - 1;
     let source = source_file!(
@@ -1164,7 +1104,6 @@ fn constant_expression_overflow_is_rejected() -> TestResult {
         .assemble(source)
         .expect_err("expected constant expression overflow to be rejected");
     assert_diagnostic!(err, "invalid constant expression: value is larger than expected range");
-    Ok(())
 }
 
 #[test]
@@ -1250,7 +1189,7 @@ fn constant_field_division() -> TestResult {
 }
 
 #[test]
-fn constant_err_const_not_initialized() -> TestResult {
+fn constant_err_const_not_initialized() {
     let context = TestContext::default();
     let source = source_file!(
         &context,
@@ -1272,11 +1211,10 @@ fn constant_err_const_not_initialized() -> TestResult {
         "  `----",
         " help: are you missing an import?"
     );
-    Ok(())
 }
 
 #[test]
-fn constant_err_div_by_zero() -> TestResult {
+fn constant_err_div_by_zero() {
     let context = TestContext::default();
     let source = source_file!(
         &context,
@@ -1311,11 +1249,10 @@ fn constant_err_div_by_zero() -> TestResult {
         "  :                       ^^^^",
         "  `----"
     );
-    Ok(())
 }
 
 #[test]
-fn constant_err_div_by_zero_indirect() -> TestResult {
+fn constant_err_div_by_zero_indirect() {
     let context = TestContext::default();
 
     let source = source_file!(
@@ -1342,8 +1279,6 @@ fn constant_err_div_by_zero_indirect() -> TestResult {
         "4 |",
         "  `----"
     );
-
-    Ok(())
 }
 
 #[test]
@@ -1386,7 +1321,7 @@ fn constant_err_div_by_zero_link_time() -> TestResult {
 }
 
 #[test]
-fn constants_must_be_uppercase() -> TestResult {
+fn constants_must_be_uppercase() {
     let context = TestContext::default();
     let source = source_file!(
         &context,
@@ -1407,12 +1342,10 @@ fn constants_must_be_uppercase() -> TestResult {
         "  `----",
         "help: bare identifiers must be lowercase alphanumeric with '_', quoted identifiers can include any graphical character"
     );
-
-    Ok(())
 }
 
 #[test]
-fn duplicate_constant_name() -> TestResult {
+fn duplicate_constant_name() {
     let context = TestContext::default();
     let source = source_file!(
         &context,
@@ -1436,11 +1369,10 @@ fn duplicate_constant_name() -> TestResult {
         "  :           `-- previously defined here",
         "  `----"
     );
-    Ok(())
 }
 
 #[test]
-fn constant_must_be_valid_felt() -> TestResult {
+fn constant_must_be_valid_felt() {
     let context = TestContext::default();
     let source = source_file!(
         &context,
@@ -1460,11 +1392,10 @@ fn constant_must_be_valid_felt() -> TestResult {
         "  :                         `-- unexpected trailing tokens in expression",
         "  `----"
     );
-    Ok(())
 }
 
 #[test]
-fn constant_must_be_within_valid_felt_range() -> TestResult {
+fn constant_must_be_within_valid_felt_range() {
     let context = TestContext::default();
 
     // test the u64::MAX value
@@ -1523,12 +1454,10 @@ fn constant_must_be_within_valid_felt_range() -> TestResult {
         "  :                  ^^^^^^^^^^^^^^^^^^",
         "  `----"
     );
-
-    Ok(())
 }
 
 #[test]
-fn constants_defined_in_global_scope() -> TestResult {
+fn constants_defined_in_global_scope() {
     let context = TestContext::default();
     let source = source_file!(
         &context,
@@ -1551,11 +1480,10 @@ fn constants_defined_in_global_scope() -> TestResult {
         "3 |     push.CONSTANT end",
         "  `----"
     );
-    Ok(())
 }
 
 #[test]
-fn constant_not_found() -> TestResult {
+fn constant_not_found() {
     let context = TestContext::new();
     let source = source_file!(
         &context,
@@ -1579,7 +1507,6 @@ fn constant_not_found() -> TestResult {
         "  `----",
         "help: are you missing an import?"
     );
-    Ok(())
 }
 
 #[test]
@@ -1696,7 +1623,7 @@ fn mem_operations_with_constants() -> TestResult {
 }
 
 #[test]
-fn const_conversion_failed_to_u16() -> TestResult {
+fn const_conversion_failed_to_u16() {
     // Define constant value greater than u16::MAX
     let constant_value: u64 = u16::MAX as u64 + 1;
 
@@ -1732,11 +1659,10 @@ fn const_conversion_failed_to_u16() -> TestResult {
         "6 |     end",
         "  `----"
     );
-    Ok(())
 }
 
 #[test]
-fn const_conversion_failed_to_u32() -> TestResult {
+fn const_conversion_failed_to_u32() {
     let context = TestContext::default();
     // Define constant value greater than u16::MAX
     let constant_value: u64 = u32::MAX as u64 + 1;
@@ -1767,11 +1693,10 @@ fn const_conversion_failed_to_u32() -> TestResult {
         "5 |     end",
         "  `----"
     );
-    Ok(())
 }
 
 #[test]
-fn deprecated_mem_loadw_instruction() -> TestResult {
+fn deprecated_mem_loadw_instruction() {
     let context = TestContext::default();
 
     let source = source_file!(
@@ -1796,11 +1721,10 @@ fn deprecated_mem_loadw_instruction() -> TestResult {
         "  `----",
         regex!(r#"help:.*use.*mem_loadw_be.*instead"#)
     );
-    Ok(())
 }
 
 #[test]
-fn deprecated_loc_loadw_instruction() -> TestResult {
+fn deprecated_loc_loadw_instruction() {
     let context = TestContext::default();
 
     let source = source_file!(
@@ -1829,11 +1753,10 @@ fn deprecated_loc_loadw_instruction() -> TestResult {
         "  `----",
         regex!(r#"help:.*use.*loc_loadw_be.*instead"#)
     );
-    Ok(())
 }
 
 #[test]
-fn deprecated_loc_storew_instruction() -> TestResult {
+fn deprecated_loc_storew_instruction() {
     let context = TestContext::default();
 
     let source = source_file!(
@@ -1862,7 +1785,6 @@ fn deprecated_loc_storew_instruction() -> TestResult {
         "  `----",
         regex!(r#"help:.*use.*loc_storew_be.*instead"#)
     );
-    Ok(())
 }
 
 #[test]
@@ -1953,7 +1875,7 @@ fn test_push_word_slice() -> TestResult {
 }
 
 #[test]
-fn test_push_word_slice_invalid() -> TestResult {
+fn test_push_word_slice_invalid() {
     let context = TestContext::default();
     let source_invalid_range = source_file!(
         &context,
@@ -2007,8 +1929,6 @@ fn test_push_word_slice_invalid() -> TestResult {
         )
     );
     assert!(context.assemble(source_invalid_constant_type).is_err());
-
-    Ok(())
 }
 
 #[test]
@@ -2687,7 +2607,7 @@ fn control_flow_nesting_depth_boundary() -> TestResult {
 }
 
 #[test]
-fn control_flow_nesting_depth_exceeded() -> TestResult {
+fn control_flow_nesting_depth_exceeded() {
     let context = TestContext::default();
     let source = nested_if_source(MAX_CONTROL_FLOW_NESTING + 1);
     let source = source_file!(&context, source.as_str());
@@ -2695,7 +2615,6 @@ fn control_flow_nesting_depth_exceeded() -> TestResult {
         .assemble(source)
         .expect_err("expected diagnostic to be raised, but compilation succeeded");
     assert_diagnostic!(&error, "control-flow nesting depth exceeded");
-    Ok(())
 }
 
 // PROGRAMS WITH PROCEDURES
@@ -2807,7 +2726,7 @@ fn program_with_proc_locals() -> TestResult {
 }
 
 #[test]
-fn program_with_proc_locals_fail() -> TestResult {
+fn program_with_proc_locals_fail() {
     let context = TestContext::default();
     let source = source_file!(
         &context,
@@ -2840,12 +2759,10 @@ end"
         "7 |     begin",
         "  `----"
     );
-
-    Ok(())
 }
 
 #[test]
-fn program_with_exported_procedure() -> TestResult {
+fn program_with_exported_procedure() {
     let context = TestContext::default();
     let source = source_file!(
         &context,
@@ -2864,7 +2781,6 @@ fn program_with_exported_procedure() -> TestResult {
         "  `----",
         "        help: perhaps you meant to use `proc` instead of `export`?"
     );
-    Ok(())
 }
 
 // PROGRAMS WITH DYNAMIC CODE BLOCKS
@@ -2892,7 +2808,7 @@ fn program_with_dynamic_code_execution_in_new_context() -> TestResult {
 // ================================================================================================
 
 #[test]
-fn program_with_incorrect_mast_root_length() -> TestResult {
+fn program_with_incorrect_mast_root_length() {
     let context = TestContext::default();
     let source = source_file!(&context, "begin call.0x1234 end");
 
@@ -2905,7 +2821,6 @@ fn program_with_incorrect_mast_root_length() -> TestResult {
         "  :            ^^^^^^",
         "  `----"
     );
-    Ok(())
 }
 
 #[test]
@@ -3864,7 +3779,7 @@ fn invalid_if_else_no_matching_end() {
 }
 
 #[test]
-fn invalid_repeat() -> TestResult {
+fn invalid_repeat() {
     let context = TestContext::default();
 
     // unmatched repeat
@@ -3921,22 +3836,20 @@ fn invalid_repeat() -> TestResult {
         "4 |                     add",
         "  `----"
     );
-    Ok(())
 }
 
 #[test]
-fn invalid_repeat_count_zero() -> TestResult {
+fn invalid_repeat_count_zero() {
     let context = TestContext::default();
     let source = source_file!(&context, "begin repeat.0 nop end end");
     let error = context.assemble(source).expect_err("expected repeat.0 to be rejected");
     let rendered =
         format!("{}", crate::diagnostics::reporting::PrintDiagnostic::new_without_color(&error));
     assert!(rendered.contains("invalid repeat count"));
-    Ok(())
 }
 
 #[test]
-fn invalid_repeat_count_zero_with_decorator() -> TestResult {
+fn invalid_repeat_count_zero_with_decorator() {
     let context = TestContext::default();
     let source = source_file!(
         &context,
@@ -3958,11 +3871,10 @@ end"
     let rendered =
         format!("{}", crate::diagnostics::reporting::PrintDiagnostic::new_without_color(&error));
     assert!(rendered.contains("invalid repeat count"));
-    Ok(())
 }
 
 #[test]
-fn invalid_repeat_count_too_large() -> TestResult {
+fn invalid_repeat_count_too_large() {
     let context = TestContext::default();
     let repeat_count = MAX_REPEAT_COUNT + 1;
     let source = source_file!(&context, format!("begin repeat.{repeat_count} nop end end"));
@@ -3972,11 +3884,10 @@ fn invalid_repeat_count_too_large() -> TestResult {
     let rendered =
         format!("{}", crate::diagnostics::reporting::PrintDiagnostic::new_without_color(&error));
     assert!(rendered.contains("invalid repeat count"));
-    Ok(())
 }
 
 #[test]
-fn invalid_repeat_count_constant_zero() -> TestResult {
+fn invalid_repeat_count_constant_zero() {
     let context = TestContext::default();
     let source =
         source_file!(&context, "const REPEAT_COUNT = 0\nbegin repeat.REPEAT_COUNT nop end end");
@@ -3986,11 +3897,10 @@ fn invalid_repeat_count_constant_zero() -> TestResult {
     let rendered =
         format!("{}", crate::diagnostics::reporting::PrintDiagnostic::new_without_color(&error));
     assert!(rendered.contains("invalid repeat count"));
-    Ok(())
 }
 
 #[test]
-fn invalid_repeat_count_constant_too_large() -> TestResult {
+fn invalid_repeat_count_constant_too_large() {
     let context = TestContext::default();
     let repeat_count = MAX_REPEAT_COUNT + 1;
     let source = source_file!(
@@ -4003,11 +3913,10 @@ fn invalid_repeat_count_constant_too_large() -> TestResult {
     let rendered =
         format!("{}", crate::diagnostics::reporting::PrintDiagnostic::new_without_color(&error));
     assert!(rendered.contains("invalid repeat count"));
-    Ok(())
 }
 
 #[test]
-fn repeat_count_constant_at_limit_allowed() -> TestResult {
+fn repeat_count_constant_at_limit_allowed() {
     let context = TestContext::default();
     let source = source_file!(
         &context,
@@ -4016,7 +3925,6 @@ fn repeat_count_constant_at_limit_allowed() -> TestResult {
     context
         .assemble(source)
         .expect("expected repeat count at limit from constant to be accepted");
-    Ok(())
 }
 
 #[test]
@@ -4229,7 +4137,7 @@ end
 }
 
 #[test]
-fn invalid_while() -> TestResult {
+fn invalid_while() {
     let context = TestContext::default();
 
     let source = source_file!(&context, "begin push.1 add while mul end end");
@@ -4267,7 +4175,6 @@ fn invalid_while() -> TestResult {
         "  :                               `-- expected `end` to close `while`",
         "  `----"
     );
-    Ok(())
 }
 
 // COMPILED LIBRARIES
@@ -5106,10 +5013,9 @@ fn duplicate_procedure() {
     "#;
 
     let program = context.assemble(program_source).unwrap();
-    // AssemblyOp metadata now participates in assembler-side deduplication. Even though
-    // `foo` and `bar` have the same operations, they carry different source mappings and
-    // therefore must remain distinct procedures. The entrypoint is a third procedure.
-    assert_eq!(program.num_procedures(), 3);
+    // `foo` and `bar` have the same body, so they are deduplicated. The entrypoint is the second
+    // procedure.
+    assert_eq!(program.num_procedures(), 2);
 }
 
 #[test]

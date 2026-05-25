@@ -99,6 +99,20 @@ pub(crate) struct StarkVarIndices {
     pub f: usize,
     /// `s0 = offset^N` (first chunk shift).
     pub s0: usize,
+
+    // -- Multi-AIR additions (only present when `AceConfig::is_multi_air`) --
+    /// β coefficient for Core in `combined = mab_core · core_acc + mab_chip · chip_acc`.
+    /// The verifier sets `(mab_core, mab_chip) = (β, 1)` or `(1, β)` per proof_order.
+    pub multi_air_beta_core: Option<usize>,
+    pub multi_air_beta_chip: Option<usize>,
+    /// Per-AIR lifted selectors for Core (at `z^{r_core}`).
+    pub is_first_core: Option<usize>,
+    pub is_last_core: Option<usize>,
+    pub is_transition_core: Option<usize>,
+    /// Per-AIR lifted selectors for Chiplets (at `z^{r_chip}`).
+    pub is_first_chip: Option<usize>,
+    pub is_last_chip: Option<usize>,
+    pub is_transition_chip: Option<usize>,
 }
 
 /// ACE input layout for Plonky3-based verifier logic.
@@ -189,6 +203,30 @@ impl InputLayout {
         check("weight0", self.stark.weight0);
         check("f", self.stark.f);
         check("s0", self.stark.s0);
+        if let Some(idx) = self.stark.multi_air_beta_core {
+            check("multi_air_beta_core", idx);
+        }
+        if let Some(idx) = self.stark.multi_air_beta_chip {
+            check("multi_air_beta_chip", idx);
+        }
+        if let Some(idx) = self.stark.is_first_core {
+            check("is_first_core", idx);
+        }
+        if let Some(idx) = self.stark.is_last_core {
+            check("is_last_core", idx);
+        }
+        if let Some(idx) = self.stark.is_transition_core {
+            check("is_transition_core", idx);
+        }
+        if let Some(idx) = self.stark.is_first_chip {
+            check("is_first_chip", idx);
+        }
+        if let Some(idx) = self.stark.is_last_chip {
+            check("is_last_chip", idx);
+        }
+        if let Some(idx) = self.stark.is_transition_chip {
+            check("is_transition_chip", idx);
+        }
 
         let rand_start = self.regions.randomness.offset;
         let rand_end = rand_start + self.regions.randomness.width;

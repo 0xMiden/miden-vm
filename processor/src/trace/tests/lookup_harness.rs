@@ -17,7 +17,7 @@
 use alloc::vec::Vec;
 
 use miden_air::{
-    LiftedAir, ProcessorAir,
+    LiftedAir, MidenAir,
     logup::{BusId, MIDEN_MAX_MESSAGE_WIDTH},
     lookup::{Challenges, LookupFractions, LookupMessage, build_lookup_fractions},
 };
@@ -49,8 +49,9 @@ impl InteractionLog {
     /// Drive the prover-path pipeline on `trace` with fresh random challenges and slice the
     /// resulting [`LookupFractions`] buffer into per-row bags.
     pub fn new(trace: &ExecutionTrace) -> Self {
-        let main_trace = trace.main_trace().to_row_major();
-        let periodic = LiftedAir::<Felt, QuadFelt>::periodic_columns(&ProcessorAir);
+        let (core_matrix, chip_matrix) = trace.main_trace().to_core_chiplets_matrices();
+        // Core has no periodic columns; the hasher/bitwise periodics belong to Chiplets.
+        let chip_periodic = LiftedAir::<Felt, QuadFelt>::periodic_columns(&MidenAir::CHIPLETS);
 
         // `QuadFelt` itself isn't `Randomizable`, so draw 4 base-field elements and pair them.
         let raw = rand_array::<Felt, 4>();
@@ -59,9 +60,13 @@ impl InteractionLog {
         let challenges =
             Challenges::<QuadFelt>::new(alpha, beta, MIDEN_MAX_MESSAGE_WIDTH, BusId::COUNT);
 
-        let fractions = build_lookup_fractions(&ProcessorAir, &main_trace, &periodic, &challenges);
+        let core_fractions =
+            build_lookup_fractions(&MidenAir::CORE, &core_matrix, &[], &challenges);
+        let chip_fractions =
+            build_lookup_fractions(&MidenAir::CHIPLETS, &chip_matrix, &chip_periodic, &challenges);
+        let rows = merge_rows(split_rows(&core_fractions), split_rows(&chip_fractions));
 
-        Self { challenges, rows: split_rows(&fractions) }
+        Self { challenges, rows }
     }
 
     /// Verify that each row's expected bag is a multiset-subset of that row's actual bag of
@@ -167,4 +172,22 @@ fn split_rows(fractions: &LookupFractions<Felt, QuadFelt>) -> Vec<Vec<(Felt, Qua
         cursor += total;
     }
     rows
+}
+
+/// Row-wise union of the Core and Chiplets per-row bags, padding the shorter side (the
+/// per-AIR matrices can have different padded heights) with empty rows.
+fn merge_rows(
+    core: Vec<Vec<(Felt, QuadFelt)>>,
+    chip: Vec<Vec<(Felt, QuadFelt)>>,
+) -> Vec<Vec<(Felt, QuadFelt)>> {
+    let num_rows = core.len().max(chip.len());
+    let mut core = core.into_iter();
+    let mut chip = chip.into_iter();
+    (0..num_rows)
+        .map(|_| {
+            let mut bag = core.next().unwrap_or_default();
+            bag.extend(chip.next().unwrap_or_default());
+            bag
+        })
+        .collect()
 }

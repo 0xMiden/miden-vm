@@ -1,7 +1,7 @@
 use crate::{
     BaseHost, ExecutionError, Felt,
     errors::MapExecErrWithOpIdx,
-    mast::{MastForest, MastNodeId},
+    mast::{ExecutableMastForest, MastNodeId},
     operation::Operation,
     processor::{Processor, StackInterface},
     tracer::{OperationHelperRegisters, Tracer},
@@ -39,11 +39,11 @@ const DOUBLE_WORD_SIZE: Felt = Felt::new_unchecked(8);
 /// - If a control flow operation is provided.
 /// - If an `Emit` operation is provided.
 #[inline(always)]
-pub(crate) fn execute_op<P, T>(
+pub(crate) fn execute_op<P, T, F>(
     processor: &mut P,
     op: &Operation,
     op_idx: usize,
-    current_forest: &MastForest,
+    current_forest: &F,
     node_id: MastNodeId,
     host: &mut impl BaseHost,
     tracer: &mut T,
@@ -51,6 +51,7 @@ pub(crate) fn execute_op<P, T>(
 where
     P: Processor,
     T: Tracer<Processor = P>,
+    F: ExecutableMastForest,
 {
     let user_op_helpers = match op {
         // ----- system operations ------------------------------------------------------------

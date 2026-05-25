@@ -481,6 +481,8 @@ impl<'input> Lexer<'input> {
         }
     }
 
+    // Uniform return type with other `lex_*` helpers so they can be dispatched the same way.
+    #[allow(clippy::unnecessary_wraps)]
     fn lex_identifier(&mut self) -> Result<Token<'input>, ParsingError> {
         let c = self.pop();
         debug_assert!(c.is_ascii_alphabetic() || c == '_');

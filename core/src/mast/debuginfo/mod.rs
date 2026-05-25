@@ -424,14 +424,6 @@ impl DebugInfo {
         self.asm_op_storage = self.asm_op_storage.remap_nodes(remapping);
     }
 
-    /// Remaps the debug var storage to use new node IDs after nodes have been removed/reordered.
-    ///
-    /// This should be called after nodes are removed from the MastForest to ensure the debug
-    /// var storage still references valid node IDs.
-    pub(super) fn remap_debug_var_storage(&mut self, remapping: &BTreeMap<MastNodeId, MastNodeId>) {
-        self.op_debug_var_storage = self.op_debug_var_storage.remap_nodes(remapping);
-    }
-
     // DEBUG VARIABLE MUTATORS
     // --------------------------------------------------------------------------------------------
 

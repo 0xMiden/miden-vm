@@ -565,10 +565,7 @@ where
             return false;
         }
 
-        match self.store.load_package(package_id, selected) {
-            Ok(_) => false,
-            Err(_) => true,
-        }
+        self.store.load_package(package_id, selected).is_err()
     }
 
     fn cache_resolved_package(&mut self, package: &ResolvedPackage) -> Result<(), Report> {
@@ -590,10 +587,7 @@ where
             return false;
         }
 
-        match self.store.load_package(&package.name, &version) {
-            Ok(_) => false,
-            Err(_) => true,
-        }
+        self.store.load_package(&package.name, &version).is_err()
     }
 
     fn cache_package(&mut self, package: Arc<MastPackage>) -> Result<(), Report> {

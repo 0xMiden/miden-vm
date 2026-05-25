@@ -74,8 +74,8 @@ where
             MastNodeBuilder::Call(builder)
         },
         MastNode::Block(basic_block_node) => {
-            // Preserve the stored batches so copied blocks fingerprint the same way as raw-built
-            // equivalents, even when padding NOOPs shifted stored metadata indices.
+            // Preserve stored batches so copied blocks do not turn padding operations into raw
+            // operations.
             let builder = BasicBlockNodeBuilder::from_op_batches(
                 basic_block_node.op_batches().to_vec(),
                 basic_block_node

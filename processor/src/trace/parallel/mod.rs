@@ -16,16 +16,17 @@ use miden_air::{
 use miden_core::{
     ONE, Word, ZERO,
     field::batch_inversion_allow_zeros,
-    mast::{MastForest, MastNode},
+    mast::{ExecutableMastForest, MastForestId, MastNode, SparseMastForest},
     operations::opcodes,
     program::{Kernel, MIN_STACK_DEPTH},
+    utils::Idx,
 };
 use rayon::prelude::*;
 use tracing::instrument;
 
 use crate::{
     ContextId, ExecutionError,
-    continuation_stack::ContinuationStack,
+    continuation_stack::{Continuation, ContinuationStack},
     errors::MapExecErrNoCtx,
     trace::{
         ChipletsLengths, ExecutionTrace, TraceBuildInputs, TraceLenSummary,
@@ -108,6 +109,7 @@ pub fn build_trace_with_max_len(
 
     let TraceGenerationContext {
         core_trace_contexts,
+        mast_forest_store,
         range_checker_replay,
         memory_writes,
         bitwise_replay: bitwise,
@@ -147,6 +149,7 @@ pub fn build_trace_with_max_len(
         kernel_replay,
         hasher_for_chiplet,
         ace_replay,
+        &mast_forest_store,
         max_trace_len,
     )?;
 
@@ -156,6 +159,7 @@ pub fn build_trace_with_max_len(
         core_trace_contexts,
         program_info.kernel().clone(),
         fragment_size,
+        &mast_forest_store,
         max_stack_depth,
     )?;
 
@@ -164,17 +168,36 @@ pub fn build_trace_with_max_len(
     // Get the number of rows for the range checker
     let range_table_len = range_checker.get_number_range_checker_rows();
 
-    let trace_len_summary =
-        TraceLenSummary::new(core_trace_len, range_table_len, ChipletsLengths::new(&chiplets));
+    let core_height = pad_to_trace_length(core_trace_len.max(range_table_len));
+    let chiplets_height = pad_to_trace_length(chiplets.trace_len());
+    let main_trace_len = core_height.max(chiplets_height);
 
-    // Compute the final main trace length
-    let main_trace_len =
-        compute_main_trace_length(core_trace_len, range_table_len, chiplets.trace_len());
+    // Cap check against the padded height: pad-up can push over MAX_TRACE_LEN even
+    // when the unpadded check above passed.
+    if main_trace_len > max_trace_len {
+        return Err(ExecutionError::TraceLenExceeded(max_trace_len));
+    }
+
+    let trace_len_summary = TraceLenSummary::new_with_padded(
+        core_trace_len,
+        range_table_len,
+        ChipletsLengths::new(&chiplets),
+        main_trace_len,
+    );
 
     let ((range_checker_trace, chiplets_trace), ()) = rayon::join(
         || {
             rayon::join(
-                || range_checker.into_trace_with_table(range_table_len, main_trace_len),
+                || {
+                    let mut rc = range_checker.into_trace_with_table(range_table_len, core_height);
+                    // Extend (M=0, V=65535) so the legacy unified view also satisfies
+                    // `V[last] = 65535` and `V_next - V` ∈ {0, 1, 3, …, 2187}.
+                    if core_height < main_trace_len {
+                        rc.trace[0].resize(main_trace_len, ZERO);
+                        rc.trace[1].resize(main_trace_len, Felt::new_unchecked(u16::MAX as u64));
+                    }
+                    rc
+                },
                 || chiplets.into_trace(main_trace_len),
             )
         },
@@ -188,7 +211,8 @@ pub fn build_trace_with_max_len(
             core_trace_data,
             chiplets_trace.trace,
             range_checker_trace.trace,
-            main_trace_len,
+            core_height,
+            chiplets_height,
             last_program_row,
         )
     };
@@ -204,17 +228,9 @@ pub fn build_trace_with_max_len(
 // HELPERS
 // ================================================================================================
 
-fn compute_main_trace_length(
-    core_trace_len: usize,
-    range_table_len: usize,
-    chiplets_trace_len: usize,
-) -> usize {
-    // Get the trace length required to hold all execution trace steps
-    let max_len = range_table_len.max(core_trace_len).max(chiplets_trace_len);
-
-    // Pad the trace length to the next power of two
-    let trace_len = max_len.next_power_of_two();
-    core::cmp::max(trace_len, MIN_TRACE_LEN)
+/// Pad a logical row count to a valid trace length: next power of two, clamped to `MIN_TRACE_LEN`.
+fn pad_to_trace_length(logical_len: usize) -> usize {
+    logical_len.next_power_of_two().max(MIN_TRACE_LEN)
 }
 
 /// Generates row-major core trace in parallel from the provided trace fragment contexts.
@@ -222,6 +238,7 @@ fn generate_core_trace_row_major(
     core_trace_contexts: Vec<CoreTraceFragmentContext>,
     kernel: Kernel,
     fragment_size: usize,
+    mast_forest_store: &[Arc<SparseMastForest>],
     max_stack_depth: usize,
 ) -> Result<Vec<Felt>, ExecutionError> {
     let num_fragments = core_trace_contexts.len();
@@ -247,7 +264,13 @@ fn generate_core_trace_row_major(
         .zip(writers.into_par_iter())
         .map(|(trace_state, writer)| {
             let (mut processor, mut tracer, mut continuation_stack, mut current_forest) =
-                split_trace_fragment_context(trace_state, writer, fragment_size, max_stack_depth);
+                split_trace_fragment_context(
+                    trace_state,
+                    writer,
+                    fragment_size,
+                    mast_forest_store,
+                    max_stack_depth,
+                )?;
 
             processor.execute(
                 &mut continuation_stack,
@@ -442,6 +465,7 @@ fn initialize_chiplets(
     kernel_replay: KernelReplay,
     hasher_for_chiplet: HasherRequestReplay,
     ace_replay: AceReplay,
+    mast_forest_store: &[Arc<SparseMastForest>],
     max_trace_len: usize,
 ) -> Result<Chiplets, ExecutionError> {
     let check_chiplets_trace_len = |chiplets: &Chiplets| -> Result<(), ExecutionError> {
@@ -464,7 +488,11 @@ fn initialize_chiplets(
                 let _ = chiplets.hasher.hash_control_block(h1, h2, domain, expected_hash);
                 check_chiplets_trace_len(&chiplets)?;
             },
-            HasherOp::HashBasicBlock((forest, node_id, expected_hash)) => {
+            HasherOp::HashBasicBlock((forest_id, node_id, expected_hash)) => {
+                let forest =
+                    mast_forest_store.get(forest_id.to_usize()).ok_or(ExecutionError::Internal(
+                        "MAST forest id in hasher replay out of range of mast_forest_store",
+                    ))?;
                 let node = forest
                     .get_node_by_id(node_id)
                     .ok_or(ExecutionError::Internal("invalid node ID in hasher replay"))?;
@@ -663,19 +691,32 @@ fn pad_core_row_major(core_trace_data: &mut Vec<Felt>, main_trace_len: usize) {
         });
 }
 
+type SplitFragmentContext<'a> = (
+    ReplayProcessor,
+    CoreTraceGenerationTracer<'a>,
+    ContinuationStack<Arc<SparseMastForest>>,
+    Arc<SparseMastForest>,
+);
+
 /// Uses the provided `CoreTraceFragmentContext` to build and return a `ReplayProcessor` and
 /// `CoreTraceGenerationTracer` that can be used to execute the fragment.
+///
+/// `mast_forest_store` provides the [`SparseMastForest`]s that the indices stored in the fragment
+/// (the initial forest index and the `EnterForest` continuations) refer to.
+///
+/// # Errors
+///
+/// Returns [`ExecutionError::Internal`] if any [`MastForestId`] referenced by the fragment
+/// (either `initial_mast_forest_id` or an `EnterForest` continuation) is out of range of
+/// `mast_forest_store`. Because [`CoreTraceFragmentContext`] is attacker-controllable when fed in
+/// from outside, we validate these indices rather than indexing-and-panicking.
 fn split_trace_fragment_context<'a>(
     fragment_context: CoreTraceFragmentContext,
     writer: RowMajorTraceWriter<'a, Felt>,
     fragment_size: usize,
+    mast_forest_store: &[Arc<SparseMastForest>],
     max_stack_depth: usize,
-) -> (
-    ReplayProcessor,
-    CoreTraceGenerationTracer<'a>,
-    ContinuationStack,
-    Arc<MastForest>,
-) {
+) -> Result<SplitFragmentContext<'a>, ExecutionError> {
     let CoreTraceFragmentContext {
         state: CoreTraceState { system, decoder, stack },
         replay:
@@ -690,8 +731,14 @@ fn split_trace_fragment_context<'a>(
                 mast_forest_resolution: mast_forest_resolution_replay,
             },
         continuation,
-        initial_mast_forest,
+        initial_mast_forest_id,
     } = fragment_context;
+
+    let translated_continuation =
+        translate_snapshot_continuation_stack(continuation, mast_forest_store)?;
+
+    let initial_mast_forest =
+        lookup_mast_forest(mast_forest_store, initial_mast_forest_id)?.clone();
 
     let processor = ReplayProcessor::new(
         system,
@@ -702,11 +749,61 @@ fn split_trace_fragment_context<'a>(
         memory_reads_replay,
         hasher_response_replay,
         mast_forest_resolution_replay,
+        mast_forest_store.to_vec(),
         max_stack_depth,
         fragment_size.into(),
     );
     let tracer =
         CoreTraceGenerationTracer::new(writer, decoder, block_address_replay, block_stack_replay);
 
-    (processor, tracer, continuation, initial_mast_forest)
+    Ok((processor, tracer, translated_continuation, initial_mast_forest))
+}
+
+/// Translates a snapshotted `ContinuationStack<MastForestId>` into one carrying actual
+/// [`Arc<SparseMastForest>`] handles, ready to drive `execute_impl`.
+///
+/// Returns [`ExecutionError::Internal`] if any `EnterForest` continuation carries a
+/// [`MastForestId`] that is out of range of `mast_forest_store`.
+fn translate_snapshot_continuation_stack(
+    snapshot: ContinuationStack<MastForestId>,
+    mast_forest_store: &[Arc<SparseMastForest>],
+) -> Result<ContinuationStack<Arc<SparseMastForest>>, ExecutionError> {
+    let mut out: ContinuationStack<Arc<SparseMastForest>> = ContinuationStack::default();
+    for cont in snapshot.into_inner() {
+        let translated = match cont {
+            Continuation::EnterForest(id) => {
+                Continuation::EnterForest(lookup_mast_forest(mast_forest_store, id)?.clone())
+            },
+            Continuation::StartNode(id) => Continuation::StartNode(id),
+            Continuation::FinishJoin(id) => Continuation::FinishJoin(id),
+            Continuation::FinishSplit(id) => Continuation::FinishSplit(id),
+            Continuation::FinishLoop { node_id, was_entered } => {
+                Continuation::FinishLoop { node_id, was_entered }
+            },
+            Continuation::FinishCall(id) => Continuation::FinishCall(id),
+            Continuation::FinishDyn(id) => Continuation::FinishDyn(id),
+            Continuation::FinishExternal(id) => Continuation::FinishExternal(id),
+            Continuation::ResumeBasicBlock { node_id, batch_index, op_idx_in_batch } => {
+                Continuation::ResumeBasicBlock { node_id, batch_index, op_idx_in_batch }
+            },
+            Continuation::Respan { node_id, batch_index } => {
+                Continuation::Respan { node_id, batch_index }
+            },
+            Continuation::FinishBasicBlock(id) => Continuation::FinishBasicBlock(id),
+            Continuation::AfterExitDecorators(id) => Continuation::AfterExitDecorators(id),
+        };
+        out.push_continuation(translated);
+    }
+    Ok(out)
+}
+
+/// Looks up `id` in `mast_forest_store`, returning [`ExecutionError::Internal`] if it is out of
+/// range.
+pub(super) fn lookup_mast_forest(
+    mast_forest_store: &[Arc<SparseMastForest>],
+    id: MastForestId,
+) -> Result<&Arc<SparseMastForest>, ExecutionError> {
+    mast_forest_store
+        .get(id.to_usize())
+        .ok_or(ExecutionError::Internal("MastForestId out of range of mast_forest_store"))
 }

@@ -71,7 +71,7 @@ pub mod columns;
 use miden_crypto::stark::air::AirBuilder;
 
 use crate::{
-    Felt, MainCols, MidenAirBuilder,
+    CoreCols, Felt, MidenAirBuilder,
     constraints::{
         constants::{F_1, F_128},
         decoder::columns::DecoderCols,
@@ -87,8 +87,8 @@ use crate::{
 /// Enforces decoder main-trace constraints (entry point).
 pub fn enforce_main<AB>(
     builder: &mut AB,
-    local: &MainCols<AB::Var>,
-    next: &MainCols<AB::Var>,
+    local: &CoreCols<AB::Var>,
+    next: &CoreCols<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
 ) where
     AB: MidenAirBuilder,

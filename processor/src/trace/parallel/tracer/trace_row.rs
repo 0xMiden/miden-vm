@@ -1,5 +1,7 @@
 //! Module which concerns itself with all the trace row building logic.
 
+use alloc::sync::Arc;
+
 use miden_air::trace::{
     CLK_COL_IDX, CTX_COL_IDX, DECODER_TRACE_OFFSET, FN_HASH_OFFSET, STACK_TRACE_OFFSET,
     STACK_TRACE_WIDTH, SYS_TRACE_WIDTH,
@@ -14,12 +16,13 @@ use miden_air::trace::{
 use miden_core::{
     Felt, ONE, Word, ZERO,
     mast::{
-        BasicBlockNode, CallNode, JoinNode, LoopNode, MastForest, MastNodeExt, OpBatch, SplitNode,
+        BasicBlockNode, CallNode, JoinNode, LoopNode, MastNodeExt, OpBatch, SparseMastForest,
+        SplitNode,
     },
     operations::{Operation, opcodes},
 };
 
-use super::{ExecutionContextInfo, StackState, SystemState, get_node_in_forest};
+use super::{ExecutionContextInfo, StackState, SystemState, get_digest_in_forest};
 use crate::{
     ExecutionError,
     trace::parallel::{
@@ -270,12 +273,12 @@ impl<'a> CoreTraceGenerationTracer<'a> {
         system: &SystemState,
         stack: &StackState,
         call_node: &CallNode,
-        current_forest: &MastForest,
+        current_forest: &Arc<SparseMastForest>,
     ) -> Result<(), ExecutionError> {
         // For CALL/SYSCALL operations, the hasher state in start operations contains the callee
         // hash in the first half, and zeros in the second half (since CALL only has one
         // child)
-        let callee_hash: Word = get_node_in_forest(current_forest, call_node.callee())?.digest();
+        let callee_hash: Word = get_digest_in_forest(current_forest, call_node.callee())?;
         let zero_hash = Word::default();
 
         let decoder_row = DecoderRow::new_control_flow(
@@ -349,11 +352,11 @@ impl<'a> CoreTraceGenerationTracer<'a> {
         system: &SystemState,
         stack: &StackState,
         join_node: &JoinNode,
-        current_forest: &MastForest,
+        current_forest: &Arc<SparseMastForest>,
     ) -> Result<(), ExecutionError> {
         // Get the child hashes for the hasher state
-        let child1_hash: Word = get_node_in_forest(current_forest, join_node.first())?.digest();
-        let child2_hash: Word = get_node_in_forest(current_forest, join_node.second())?.digest();
+        let child1_hash: Word = get_digest_in_forest(current_forest, join_node.first())?;
+        let child2_hash: Word = get_digest_in_forest(current_forest, join_node.second())?;
 
         let decoder_row = DecoderRow::new_control_flow(
             opcodes::JOIN,
@@ -374,11 +377,11 @@ impl<'a> CoreTraceGenerationTracer<'a> {
         system: &SystemState,
         stack: &StackState,
         loop_node: &LoopNode,
-        current_forest: &MastForest,
+        current_forest: &Arc<SparseMastForest>,
     ) -> Result<(), ExecutionError> {
         // For LOOP operations, the hasher state in start operations contains the loop body hash in
         // the first half.
-        let body_hash: Word = get_node_in_forest(current_forest, loop_node.body())?.digest();
+        let body_hash: Word = get_digest_in_forest(current_forest, loop_node.body())?;
         let zero_hash = Word::default();
 
         let decoder_row = DecoderRow::new_control_flow(
@@ -397,12 +400,12 @@ impl<'a> CoreTraceGenerationTracer<'a> {
         system: &SystemState,
         stack: &StackState,
         loop_node: &LoopNode,
-        current_forest: &MastForest,
+        current_forest: &Arc<SparseMastForest>,
         current_addr: Felt,
     ) -> Result<(), ExecutionError> {
         // For REPEAT operations, the hasher state in start operations contains the loop body hash
         // in the first half.
-        let body_hash: Word = get_node_in_forest(current_forest, loop_node.body())?.digest();
+        let body_hash: Word = get_digest_in_forest(current_forest, loop_node.body())?;
 
         let decoder_row = DecoderRow::new_control_flow(
             opcodes::REPEAT,
@@ -424,12 +427,11 @@ impl<'a> CoreTraceGenerationTracer<'a> {
         system: &SystemState,
         stack: &StackState,
         split_node: &SplitNode,
-        current_forest: &MastForest,
+        current_forest: &Arc<SparseMastForest>,
     ) -> Result<(), ExecutionError> {
         // Get the child hashes for the hasher state
-        let on_true_hash: Word = get_node_in_forest(current_forest, split_node.on_true())?.digest();
-        let on_false_hash: Word =
-            get_node_in_forest(current_forest, split_node.on_false())?.digest();
+        let on_true_hash: Word = get_digest_in_forest(current_forest, split_node.on_true())?;
+        let on_false_hash: Word = get_digest_in_forest(current_forest, split_node.on_false())?;
 
         let decoder_row = DecoderRow::new_control_flow(
             opcodes::SPLIT,
