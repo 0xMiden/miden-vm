@@ -16,9 +16,9 @@ pub enum Op {
     /// Can be either `if`..`end`, or `if`..`else`..`end`.
     If {
         span: SourceSpan,
-        /// This block is always present and non-empty
+        /// This block is always present, but may be empty.
         then_blk: Block,
-        /// This block will be empty if no `else` branch was present
+        /// This block is empty when no `else` branch was present.
         else_blk: Block,
     } = 0,
     /// Represents a condition-controlled loop
