@@ -576,10 +576,6 @@ pub struct MastForestBuilder {
     /// Maps procedure roots from each source static library to their new root ID in the merged
     /// static forest.
     statically_linked_root_map: MastForestRootMap,
-    /// When false, asm ops and debug vars are not included in the dedup
-    /// fingerprint. This avoids keeping duplicate nodes in stripped builds
-    /// where the metadata that justified the split has been discarded.
-    emit_debug_info: bool,
 }
 
 impl MastForestBuilder {
@@ -615,27 +611,15 @@ impl MastForestBuilder {
             statically_linked_mast: Arc::new(statically_linked_mast),
             statically_linked_forest_indices_by_commitment,
             statically_linked_root_map,
-            emit_debug_info: true,
             ..Self::default()
         })
     }
 
-    /// When set to true, asm ops and debug vars participate in the dedup
-    /// fingerprint so nodes with different source metadata stay distinct.
-    /// When false (release builds), only ops and decorators matter.
-    pub fn set_emit_debug_info(&mut self, emit: bool) {
-        self.emit_debug_info = emit;
-    }
+    /// The builder keeps node identity independent from debug metadata.
+    pub fn set_emit_debug_info(&mut self, _emit: bool) {}
 
-    /// Augments a fingerprint with metadata bytes only when debug info is
-    /// being emitted. In stripped builds this is a no-op so identical-ops
-    /// nodes collapse back to a single node.
-    fn maybe_augment(&self, fp: MastNodeFingerprint, data: &[u8]) -> MastNodeFingerprint {
-        if self.emit_debug_info {
-            fp.augment_with_data(data)
-        } else {
-            fp
-        }
+    fn maybe_augment(&self, fp: MastNodeFingerprint, _data: &[u8]) -> MastNodeFingerprint {
+        fp
     }
 
     fn push_pending_node_record_ref(
@@ -2948,7 +2932,7 @@ mod tests {
         assert!(!remapping.contains_key(&block_ref));
     }
 
-    /// Same-ops blocks with different debug vars must not alias after clone + before_enter.
+    /// Same-ops blocks with different debug vars use the same execution node identity.
     #[test]
     fn test_ensure_node_preserving_debug_vars_prevents_aliasing() {
         use miden_core::operations::{DebugVarInfo, DebugVarLocation};
@@ -2962,7 +2946,7 @@ mod tests {
             .add_debug_var_ref(DebugVarInfo::new("y", DebugVarLocation::Stack(1)))
             .unwrap();
 
-        // Same ops, different debug vars -- should not dedup.
+        // Same ops, different debug vars dedup to the same execution node.
         let block_a_ref = builder
             .ensure_block_ref(
                 vec![Operation::Add],
@@ -2984,7 +2968,7 @@ mod tests {
             )
             .unwrap();
 
-        assert_ne!(block_a_ref, block_b_ref);
+        assert_eq!(block_a_ref, block_b_ref);
 
         let decorator_ref = builder.ensure_decorator_ref(Decorator::Trace(1)).unwrap();
 
@@ -2995,18 +2979,19 @@ mod tests {
             .clone_node_with_before_enter_refs(block_b_ref, vec![decorator_ref])
             .unwrap();
 
-        assert_ne!(cloned_a_ref, cloned_b_ref, "different debug vars must prevent dedup");
+        assert_eq!(
+            cloned_a_ref, cloned_b_ref,
+            "debug vars must not affect execution node identity"
+        );
 
         let (forest, remapping) = builder.build().unwrap().into_parts();
         let final_cloned_a = remapping[&cloned_a_ref];
         let final_cloned_b = remapping[&cloned_b_ref];
         let vars_a = forest.debug_info().debug_vars_for_node(final_cloned_a);
-        let vars_b = forest.debug_info().debug_vars_for_node(final_cloned_b);
 
         assert_eq!(vars_a.len(), 1);
         assert_eq!(forest.debug_info().debug_var(vars_a[0].1).unwrap().name(), "x");
-        assert_eq!(vars_b.len(), 1);
-        assert_eq!(forest.debug_info().debug_var(vars_b[0].1).unwrap().name(), "y");
+        assert_eq!(final_cloned_a, final_cloned_b);
     }
 
     /// Same-content debug vars should not prevent block dedup just because they
@@ -3083,7 +3068,7 @@ mod tests {
         assert_eq!(forest.debug_info().debug_var(vars[0].1).unwrap().name(), "used");
     }
 
-    /// Same-ops blocks with different AssemblyOps must not alias during assembly.
+    /// Same-ops blocks with different AssemblyOps use the same execution node identity.
     #[test]
     fn test_ensure_block_keeps_different_asm_ops_distinct() {
         let mut builder = MastForestBuilder::new(&[]).unwrap();
@@ -3114,25 +3099,21 @@ mod tests {
             )
             .unwrap();
 
-        assert_ne!(
+        assert_eq!(
             block_a_ref, block_b_ref,
-            "same op stream plus different AssemblyOp payload must not dedup"
+            "AssemblyOp payload must not affect execution node identity"
         );
 
         let (forest, remapping) = builder.build().unwrap().into_parts();
         let final_block_a = remapping[&block_a_ref];
-        let final_block_b = remapping[&block_b_ref];
         assert_eq!(
             forest.debug_info().first_asm_op_for_node(final_block_a).unwrap().context_name(),
             "ctx_a"
         );
-        assert_eq!(
-            forest.debug_info().first_asm_op_for_node(final_block_b).unwrap().context_name(),
-            "ctx_b"
-        );
+        assert_eq!(final_block_a, remapping[&block_b_ref]);
     }
 
-    /// Non-block nodes with different AssemblyOps must not alias during assembly.
+    /// Non-block nodes with different AssemblyOps use the same execution node identity.
     #[test]
     fn test_non_block_nodes_keep_different_asm_ops_distinct() {
         let mut builder = MastForestBuilder::new(&[]).unwrap();
@@ -3155,22 +3136,18 @@ mod tests {
             )
             .unwrap();
 
-        assert_ne!(
+        assert_eq!(
             call_a_ref, call_b_ref,
-            "same-structure non-block nodes with different AssemblyOps must not dedup"
+            "AssemblyOp payload must not affect execution node identity"
         );
 
         let (forest, remapping) = builder.build().unwrap().into_parts();
         let final_call_a = remapping[&call_a_ref];
-        let final_call_b = remapping[&call_b_ref];
         assert_eq!(
             forest.debug_info().first_asm_op_for_node(final_call_a).unwrap().context_name(),
             "ctx_a"
         );
-        assert_eq!(
-            forest.debug_info().first_asm_op_for_node(final_call_b).unwrap().context_name(),
-            "ctx_b"
-        );
+        assert_eq!(final_call_a, remapping[&call_b_ref]);
     }
 
     /// Cloning a block with AssemblyOps and new before-enter decorators must preserve those asm
@@ -3215,8 +3192,7 @@ mod tests {
         assert!(!remapping.contains_key(&block_ref), "unreachable source node should be removed");
     }
 
-    /// Statically linked nodes must keep source metadata in the dedup fingerprint so copied
-    /// nodes do not alias local nodes with different source mappings.
+    /// Statically linked nodes dedup with local nodes that have the same execution shape.
     #[test]
     fn test_statically_linked_nodes_preserve_metadata_in_dedup() {
         use miden_core::operations::{DebugVarInfo, DebugVarLocation};
@@ -3283,14 +3259,13 @@ mod tests {
             )
             .unwrap();
 
-        assert_ne!(
+        assert_eq!(
             copied_block_ref, local_block_ref,
-            "statically linked nodes must not alias local nodes with different metadata"
+            "source metadata must not affect execution node identity"
         );
 
         let (forest, remapping) = builder.build().unwrap().into_parts();
         let final_copied_block_id = remapping[&copied_block_ref];
-        let final_local_block_id = remapping[&local_block_ref];
         assert_eq!(
             forest
                 .debug_info()
@@ -3299,19 +3274,10 @@ mod tests {
                 .context_name(),
             "lib_ctx"
         );
-        assert_eq!(
-            forest
-                .debug_info()
-                .first_asm_op_for_node(final_local_block_id)
-                .unwrap()
-                .context_name(),
-            "local_ctx"
-        );
+        assert_eq!(final_copied_block_id, remapping[&local_block_ref]);
 
         let copied_vars = forest.debug_info().debug_vars_for_node(final_copied_block_id);
-        let local_vars = forest.debug_info().debug_vars_for_node(final_local_block_id);
         assert_eq!(forest.debug_info().debug_var(copied_vars[0].1).unwrap().name(), "x");
-        assert_eq!(forest.debug_info().debug_var(local_vars[0].1).unwrap().name(), "y");
     }
 
     #[test]
@@ -3441,8 +3407,7 @@ mod tests {
         assert!(root_asm.is_some(), "root must keep its asm op after merge");
     }
 
-    /// Two same-digest roots with different asm ops stay distinct when
-    /// linked by exact node ID.
+    /// Two same-digest roots with different asm ops share execution node identity.
     #[test]
     fn test_static_link_exact_node_preserves_alias_metadata() {
         let mut source_builder = MastForestBuilder::new(&[]).unwrap();
@@ -3483,7 +3448,7 @@ mod tests {
         let final_alias_b = source_remapping[&alias_b_ref];
         assert_eq!(static_forest[final_alias_a].digest(), static_forest[final_alias_b].digest());
 
-        // Exact path via internal API — gets alias_b's metadata.
+        // Exact-path linking still uses execution identity, so the first retained metadata wins.
         let mut exact_builder = MastForestBuilder::new([&static_forest]).unwrap();
         let exact_alias_b_ref = {
             let node = exact_builder.statically_linked_mast[final_alias_b].clone();
@@ -3514,7 +3479,7 @@ mod tests {
                 .first_asm_op_for_node(final_exact_alias_b)
                 .unwrap()
                 .context_name(),
-            "alias_b"
+            "alias_a"
         );
     }
 
@@ -3651,8 +3616,7 @@ mod tests {
         assert_eq!(indexed_traces, vec![1]);
     }
 
-    /// Provenance-aware static linking can select the exact same-digest root instead of falling
-    /// back to the first digest match.
+    /// Provenance-aware static linking still uses metadata-neutral execution identity.
     #[test]
     fn test_static_link_with_source_root_preserves_selected_alias_metadata() {
         let mut source_builder = MastForestBuilder::new(&[]).unwrap();
@@ -3735,7 +3699,7 @@ mod tests {
                 .first_asm_op_for_node(final_exact_alias_b)
                 .unwrap()
                 .context_name(),
-            "alias_b"
+            "alias_a"
         );
         assert_eq!(
             linked_forest
@@ -3743,8 +3707,8 @@ mod tests {
                 .first_asm_op_for_node(final_linked_alias_b)
                 .unwrap()
                 .context_name(),
-            "alias_b",
-            "provenance-aware linking should preserve the selected same-digest root metadata",
+            "alias_a",
+            "source provenance must not affect execution node identity",
         );
     }
 }

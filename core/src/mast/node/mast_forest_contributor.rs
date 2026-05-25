@@ -442,6 +442,7 @@ mod round_trip_tests {
 
     use crate::{
         Word,
+        crypto::hash::Blake3_256,
         mast::{
             BasicBlockNodeBuilder, CallNodeBuilder, DecoratorId, JoinNodeBuilder, LoopNodeBuilder,
             MastForest, MastForestError, MastNode, MastNodeBuilder, MastNodeExt,
@@ -668,7 +669,10 @@ mod round_trip_tests {
         child_fingerprints.insert(first, MastNodeFingerprint::new(test_word(101)));
         child_fingerprints.insert(
             second,
-            MastNodeFingerprint::new(test_word(201)).augment_with_data(b"child-decorator-a"),
+            MastNodeFingerprint::with_decorator_root(
+                test_word(201),
+                Blake3_256::hash(b"child-decorator-a"),
+            ),
         );
 
         let baseline = JoinNodeBuilder::new([first, second])
@@ -678,7 +682,10 @@ mod round_trip_tests {
 
         child_fingerprints.insert(
             second,
-            MastNodeFingerprint::new(test_word(201)).augment_with_data(b"child-decorator-b"),
+            MastNodeFingerprint::with_decorator_root(
+                test_word(201),
+                Blake3_256::hash(b"child-decorator-b"),
+            ),
         );
         let changed_child = JoinNodeBuilder::new([first, second])
             .with_digest(forced_digest)
