@@ -1621,8 +1621,8 @@ fn build_trace_helper(stack_inputs: &[u64], program: &Program) -> (DecoderTrace,
     let trace_inputs = processor.execute_trace_inputs_sync(program, &mut host).unwrap();
     let trace = build_trace(trace_inputs).unwrap();
 
-    // The trace_len_summary().main_trace_len() is the actual program row count (before padding)
-    let trace_len = trace.trace_len_summary().main_trace_len();
+    // The trace_len_summary().core_trace_len() is the actual program row count (before padding)
+    let trace_len = trace.trace_len_summary().core_trace_len();
 
     // Extract decoder trace columns
     let decoder_trace = extract_decoder_trace(&trace);
@@ -1651,8 +1651,8 @@ fn build_call_trace_helper(program: &Program) -> (SystemTrace, DecoderTrace, usi
     let trace_inputs = processor.execute_trace_inputs_sync(program, &mut host).unwrap();
     let trace = build_trace(trace_inputs).unwrap();
 
-    // The trace_len_summary().main_trace_len() is the actual program row count (before padding)
-    let trace_len = trace.trace_len_summary().main_trace_len();
+    // The trace_len_summary().core_trace_len() is the actual program row count (before padding)
+    let trace_len = trace.trace_len_summary().core_trace_len();
 
     let sys_trace = extract_system_trace(&trace);
     let decoder_trace = extract_decoder_trace(&trace);

@@ -548,7 +548,7 @@ fn test_partial_last_fragment_exists_for_h0_inversion_path() {
     );
 
     let trace = build_trace(trace_inputs).unwrap();
-    let total_rows_without_halt = trace.main_trace().num_rows() - 1;
+    let total_rows_without_halt = trace.main_trace().core_height() - 1;
 
     assert_ne!(
         total_rows_without_halt % FRAGMENT_SIZE,

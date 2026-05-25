@@ -313,11 +313,6 @@ impl MainTrace {
             + bits[6] * Felt::from_u64(64)
     }
 
-    /// Returns an iterator of [`RowIndex`] values over the row indices of this trace.
-    pub fn row_iter(&self) -> impl Iterator<Item = RowIndex> {
-        (0..self.num_rows()).map(RowIndex::from)
-    }
-
     /// Returns a flag indicating whether the current operation induces a left shift of the operand
     /// stack.
     pub fn is_left_shift(&self, i: RowIndex) -> bool {

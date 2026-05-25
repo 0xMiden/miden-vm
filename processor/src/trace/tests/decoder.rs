@@ -812,8 +812,8 @@ fn decoder_dyncall_at_min_stack_depth_records_post_drop_ctx_info() {
 
     // Locate the DYNCALL row.
     let dyncall_opcode = Felt::from_u8(opcodes::DYNCALL);
-    let row = main
-        .row_iter()
+    let row = (0..main.core_height())
+        .map(RowIndex::from)
         .find(|&i| main.get_op_code(i) == dyncall_opcode)
         .expect("DYNCALL row not found in trace");
 
@@ -898,8 +898,8 @@ fn decoder_dyncall_with_multiple_overflow_entries_records_correct_overflow_addr(
 
     // Locate the DYNCALL row.
     let dyncall_opcode = Felt::from_u8(opcodes::DYNCALL);
-    let dyncall_row = main
-        .row_iter()
+    let dyncall_row = (0..main.core_height())
+        .map(RowIndex::from)
         .find(|&i| main.get_op_code(i) == dyncall_opcode)
         .expect("DYNCALL row not found in trace");
 
@@ -915,8 +915,8 @@ fn decoder_dyncall_with_multiple_overflow_entries_records_correct_overflow_addr(
 
     // Independently determine T1 (clock of push(0)) by scanning for all PUSH rows before DYNCALL.
     let push_opcode = Felt::from_u8(opcodes::PUSH);
-    let push_rows_before_dyncall: Vec<_> = main
-        .row_iter()
+    let push_rows_before_dyncall: Vec<_> = (0..main.core_height())
+        .map(RowIndex::from)
         .filter(|&i| i < dyncall_row && main.get_op_code(i) == push_opcode)
         .collect();
     let n = push_rows_before_dyncall.len();

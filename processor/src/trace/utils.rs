@@ -169,13 +169,13 @@ impl<'a> ChipletTraceFragment<'a> {
 
 /// Contains the data about lengths of the trace parts.
 ///
-/// - `main_trace_len` contains the length of the main trace.
+/// - `core_trace_len` contains the length of the core trace (system + decoder + stack).
 /// - `range_trace_len` contains the length of the range checker trace.
 /// - `chiplets_trace_len` contains the trace lengths of the all chiplets (hash, bitwise, memory,
 ///   kernel ROM)
 #[derive(Debug, Default, Eq, PartialEq, Clone, Copy)]
 pub struct TraceLenSummary {
-    main_trace_len: usize,
+    core_trace_len: usize,
     range_trace_len: usize,
     chiplets_trace_len: ChipletsLengths,
     /// Set by the trace builder when known. `None` falls back to deriving from the
@@ -185,12 +185,12 @@ pub struct TraceLenSummary {
 
 impl TraceLenSummary {
     pub fn new(
-        main_trace_len: usize,
+        core_trace_len: usize,
         range_trace_len: usize,
         chiplets_trace_len: ChipletsLengths,
     ) -> Self {
         TraceLenSummary {
-            main_trace_len,
+            core_trace_len,
             range_trace_len,
             chiplets_trace_len,
             padded_trace_len: None,
@@ -201,22 +201,22 @@ impl TraceLenSummary {
     /// (under per-AIR heights this is `max(core_height, chiplets_height)`, not a
     /// single `next_power_of_two(max(...))`).
     pub fn new_with_padded(
-        main_trace_len: usize,
+        core_trace_len: usize,
         range_trace_len: usize,
         chiplets_trace_len: ChipletsLengths,
         padded_trace_len: usize,
     ) -> Self {
         TraceLenSummary {
-            main_trace_len,
+            core_trace_len,
             range_trace_len,
             chiplets_trace_len,
             padded_trace_len: Some(padded_trace_len),
         }
     }
 
-    /// Returns length of the main trace.
-    pub fn main_trace_len(&self) -> usize {
-        self.main_trace_len
+    /// Returns length of the core trace (system + decoder + stack).
+    pub fn core_trace_len(&self) -> usize {
+        self.core_trace_len
     }
 
     /// Returns length of the range checker trace.
@@ -232,7 +232,7 @@ impl TraceLenSummary {
     /// Returns the maximum of all component lengths.
     pub fn trace_len(&self) -> usize {
         self.range_trace_len
-            .max(self.main_trace_len)
+            .max(self.core_trace_len)
             .max(self.chiplets_trace_len.trace_len())
     }
 

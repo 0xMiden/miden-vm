@@ -114,7 +114,7 @@ impl RunCmd {
             trace.trace_len_summary().trace_len(),
             trace.trace_len_summary().padded_trace_len(),
             padding_percentage,
-            trace.trace_len_summary().main_trace_len(),
+            trace.trace_len_summary().core_trace_len(),
             trace.trace_len_summary().range_trace_len(),
             trace.trace_len_summary().chiplets_trace_len().trace_len(),
             trace.trace_len_summary().chiplets_trace_len().hash_chiplet_len(),

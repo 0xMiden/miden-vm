@@ -173,11 +173,11 @@ pub fn build_trace_with_max_len(
 
     let core_height = pad_to_trace_length(core_trace_len.max(range_table_len));
     let chiplets_height = pad_to_trace_length(chiplets.trace_len());
-    let main_trace_len = core_height.max(chiplets_height);
+    let padded_trace_len = core_height.max(chiplets_height);
 
     // Cap check against the padded height: pad-up can push over MAX_TRACE_LEN even
     // when the unpadded check above passed.
-    if main_trace_len > max_trace_len {
+    if padded_trace_len > max_trace_len {
         return Err(ExecutionError::TraceLenExceeded(max_trace_len));
     }
 
@@ -185,7 +185,7 @@ pub fn build_trace_with_max_len(
         core_trace_len,
         range_table_len,
         ChipletsLengths::new(&chiplets),
-        main_trace_len,
+        padded_trace_len,
     );
 
     // Each segment is built at its own per-AIR height (no cross-padding to the unified max).
@@ -617,14 +617,14 @@ fn initialize_chiplets(
     Ok(chiplets)
 }
 
-/// Pads the core trace to `main_trace_len` rows (HALT template, CLK incremented per row).
-fn pad_core_row_major(core_trace_data: &mut Vec<Felt>, main_trace_len: usize) {
+/// Pads the core trace to `core_height` rows (HALT template, CLK incremented per row).
+fn pad_core_row_major(core_trace_data: &mut Vec<Felt>, core_height: usize) {
     let w = CORE_STORAGE_WIDTH;
     let total_program_rows = core_trace_data.len() / w;
-    assert!(total_program_rows <= main_trace_len);
+    assert!(total_program_rows <= core_height);
     assert!(total_program_rows > 0);
 
-    let num_padding_rows = main_trace_len - total_program_rows;
+    let num_padding_rows = core_height - total_program_rows;
     if num_padding_rows == 0 {
         return;
     }
