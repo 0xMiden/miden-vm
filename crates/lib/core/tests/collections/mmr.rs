@@ -569,7 +569,8 @@ fn test_mmr_root_matches_frontier_fold() {
     let cases = [
         // single leaf: no leading zeros, single peak
         (1_u64, vec![word_from_u64(1)]),
-        // single leading zero before the first (and only) set bit, exercising the phase 1 -> 2 seam
+        // single leading zero before the first (and only) set bit, exercising the phase 1 -> 2
+        // seam
         (2, vec![word_from_u64(1)]),
         // raw-root empty-padding collision shape: len 3 with an empty right leaf
         (3, vec![Poseidon2::merge(&[Word::default(), Word::default()]), Word::default()]),

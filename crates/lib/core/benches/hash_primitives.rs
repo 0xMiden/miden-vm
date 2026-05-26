@@ -3,9 +3,10 @@ use std::hint::black_box;
 use criterion::{
     BatchSize, BenchmarkId, Criterion, SamplingMode, Throughput, criterion_group, criterion_main,
 };
-use miden_assembly::Assembler;
 use miden_core_lib::CoreLibrary;
-use miden_processor::{DefaultHost, FastProcessor, Felt, Program, StackInputs, Word, ZERO};
+
+mod common;
+use common::{compile, processor_inputs, push_word, word_from_u64};
 
 const HASH_COUNTS: &[usize] = &[1, 8, 64, 256];
 const MEM_PTR: u32 = 1000;
@@ -100,20 +101,6 @@ fn hash_primitives(c: &mut Criterion) {
     group.finish();
 }
 
-fn compile(core_lib: &CoreLibrary, source: &str) -> Program {
-    Assembler::default()
-        .with_static_library(core_lib.library())
-        .expect("link core library")
-        .assemble_program(source)
-        .expect("assemble benchmark program")
-}
-
-fn processor_inputs(core_lib: &CoreLibrary) -> (DefaultHost, FastProcessor) {
-    let mut host = DefaultHost::default();
-    host.load_library(core_lib).expect("load core library host data");
-    (host, FastProcessor::new(StackInputs::default()))
-}
-
 #[derive(Clone, Copy)]
 enum MergeKind {
     Hmerge,
@@ -193,21 +180,6 @@ fn hash_double_words_source(double_word_count: usize) -> String {
         "
     ));
     source
-}
-
-fn push_word(word: Word) -> String {
-    let [a, b, c, d]: [Felt; 4] = word.into();
-    format!(
-        "push.{}.{}.{}.{}",
-        d.as_canonical_u64(),
-        c.as_canonical_u64(),
-        b.as_canonical_u64(),
-        a.as_canonical_u64(),
-    )
-}
-
-fn word_from_u64(value: u64) -> Word {
-    [ZERO, ZERO, ZERO, Felt::new_unchecked(value)].into()
 }
 
 criterion_group!(hash_group, hash_primitives);

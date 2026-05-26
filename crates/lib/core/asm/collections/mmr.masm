@@ -114,6 +114,20 @@ pub proc num_peaks_to_message_size
   # => [even_count_min, ...]
 end
 
+#! Given the num_peaks of a MMR, returns the number of padded peak words.
+#!
+#! Input: [num_peaks, ...]
+#! Output: [num_words, ...]
+proc num_peaks_to_padded_words
+  # the peaks are padded to a minimum length of 16.
+  push.16 u32max
+  # => [count_min, ...]
+
+  # when the number of peaks is greater than 16, then they are padded to an even number.
+  dup is_odd add
+  # => [even_count_min, ...]
+end
+
 #! Computes the raw rooted frontier root of the given MMR.
 #!
 #! This root does not bind the MMR length by itself. When exposed across trust boundaries,
@@ -132,20 +146,33 @@ end
 #!
 #! Input: [mmr_ptr, ...]
 #! Output: [ROOT, ...]
-@locals(2)
 pub proc root
   # load num_leaves
   dup mem_load
   # => [num_leaves, mmr_ptr, ...]
 
+  # peak_end = mmr_ptr + 4 + 4 * num_peaks, the address just past the last peak.
+  dup u32assert u32popcnt mul.4 movup.2 add add.4
+  # => [peak_end, num_leaves, ...]
+
+  swap exec.root_from_peak_end
+  # => [ROOT, ...]
+end
+
+#! Computes the raw rooted frontier root from a trusted length and peak-end cursor.
+#!
+#! Input: [num_leaves, peak_end, ...]
+#! Output: [ROOT, ...]
+@locals(2)
+proc root_from_peak_end
   # empty MMR root is the empty leaf root.
   dup eq.0
   if.true
     drop drop padw
     # => [ZERO, ...]
   else
-    # cursor = mmr_ptr + 4 + 4 * num_peaks, the address just past the last peak (loc.1).
-    dup u32assert u32popcnt mul.4 movup.2 add add.4 loc_store.1
+    # cursor = peak_end (loc.1).
+    swap loc_store.1
     # => [num_leaves, ...]
 
     # remaining length bits (loc.0)
@@ -237,35 +264,55 @@ end
 #! Output: [...]
 @locals(2)
 pub proc unpack_frontier
-  # store the trusted num_leaves at mmr_ptr; `root` reads the length from there
+  # store the trusted num_leaves at mmr_ptr; `root_from_peak_end` reads it from there.
   dup.4 dup.6 mem_store
   # => [ROOT, num_leaves, mmr_ptr, ...]
 
-  # loc.0 = write cursor (first peak slot)
-  dup.5 add.4 loc_store.0
-  # loc.1 = number of padded peak words to load
-  dup.4 u32assert exec.num_leaves_to_num_peaks exec.num_peaks_to_message_size u32div.4
-  loc_store.1
+  # compute num_peaks once; reuse it for peak_end and the padded-word load count.
+  dup.4 u32assert exec.num_leaves_to_num_peaks
+  # => [num_peaks, ROOT, num_leaves, mmr_ptr, ...]
+
+  # loc.1 = peak_end = mmr_ptr + 4 + 4 * num_peaks.
+  dup mul.4 dup.7 add add.4 loc_store.1
+  # => [num_peaks, ROOT, num_leaves, mmr_ptr, ...]
+
+  # loc.0 = remaining padded-peak pairs beyond the 16-word fast path
+  # (= (padded_words - 16) / 2; zero whenever num_peaks <= 16).
+  exec.num_peaks_to_padded_words sub.16 u32shr.1 loc_store.0
   # => [ROOT, num_leaves, mmr_ptr, ...]
 
-  # Pull `[num_leaves, 0, 0, 0] || peaks` to the advice stack and assert the header length matches
-  # the trusted length from the operand stack.
+  # Pull `[num_leaves, 0, 0, 0] || padded_peaks` to the advice stack and assert the header length
+  # matches the trusted length from the operand stack.
   adv.push_mapval
   adv_pushw
   dup.8 assert_eq
   drop drop drop
+  # => [ROOT, num_leaves, mmr_ptr, ...]
 
-  # Load the padded peak words into memory without hashing.
-  loc_load.1 neq.0
+  # Set up adv_pipe state with cursor = mmr_ptr + 4 at depth 12.
+  dup.5 add.4 padw padw padw
+  # => [PAD, PAD, PAD, peak_start, ROOT, num_leaves, mmr_ptr, ...]
+
+  # Load the first 16 padded peak words via 8 unrolled adv_pipes. `adv_pipe` is 1 cycle and writes
+  # 2 words to memory while leaving the sponge capacity unchanged, so this load is free of
+  # hash-chiplet rows.
+  adv_pipe adv_pipe adv_pipe adv_pipe adv_pipe adv_pipe adv_pipe adv_pipe
+  # => [R0, R1, C, peak_start+64, ROOT, num_leaves, mmr_ptr, ...]
+
+  # Load any extras (padded peaks beyond 16) two at a time. The body never runs when
+  # num_peaks <= 16, which is the common case.
+  loc_load.0 neq.0
   while.true
-    padw adv_loadw
-    loc_load.0 mem_storew_le dropw
-    loc_load.0 add.4 loc_store.0
-    loc_load.1 sub.1 dup loc_store.1 neq.0
+    adv_pipe
+    loc_load.0 sub.1 dup loc_store.0 neq.0
   end
 
-  # recompute the frontier root over the trusted length and assert it matches the commitment
-  dup.5 exec.root
+  # Drop the leftover sponge state and the advanced cursor.
+  dropw dropw dropw drop
+  # => [ROOT, num_leaves, mmr_ptr, ...]
+
+  # Recompute the frontier root over the trusted length and assert it matches the commitment.
+  dup.4 loc_load.1 swap exec.root_from_peak_end
   # => [COMPUTED_ROOT, ROOT, num_leaves, mmr_ptr, ...]
   assert_eqw
   # => [num_leaves, mmr_ptr, ...]
