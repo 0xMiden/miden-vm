@@ -10,6 +10,6 @@
 
 - on the [Actions page](https://github.com/0xMiden/miden-vm/actions), click the
   "Publish workspace to crates.io" tab. There, click the `"Run workflow"` button
-  - wait for the action to run
-
+  - when prompted for a release version, make sure to provide the same version as the one present on the `Cargo.toml` file
+  - wait for the action to finish running
 - publish the newly added draft release found on the [releases page](https://github.com/0xMiden/miden-vm/releases).
