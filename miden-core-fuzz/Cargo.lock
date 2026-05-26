@@ -781,7 +781,7 @@ checksum = "f8ca58f447f06ed17d5fc4043ce1b10dd205e060fb3ce5b979b8ed8e59ff3f79"
 
 [[package]]
 name = "miden-assembly"
-version = "0.23.2"
+version = "0.23.3"
 dependencies = [
  "log",
  "miden-assembly-syntax",
@@ -796,7 +796,7 @@ dependencies = [
 
 [[package]]
 name = "miden-assembly-syntax"
-version = "0.23.2"
+version = "0.23.3"
 dependencies = [
  "aho-corasick",
  "lalrpop",
@@ -817,7 +817,7 @@ dependencies = [
 
 [[package]]
 name = "miden-core"
-version = "0.23.2"
+version = "0.23.3"
 dependencies = [
  "derive_more",
  "log",
@@ -903,7 +903,7 @@ dependencies = [
 
 [[package]]
 name = "miden-debug-types"
-version = "0.23.2"
+version = "0.23.3"
 dependencies = [
  "memchr",
  "miden-crypto",
@@ -984,7 +984,7 @@ dependencies = [
 
 [[package]]
 name = "miden-mast-package"
-version = "0.23.2"
+version = "0.23.3"
 dependencies = [
  "miden-assembly-syntax",
  "miden-core",
@@ -1031,7 +1031,7 @@ dependencies = [
 
 [[package]]
 name = "miden-package-registry"
-version = "0.23.2"
+version = "0.23.3"
 dependencies = [
  "miden-assembly-syntax",
  "miden-core",
@@ -1045,7 +1045,7 @@ dependencies = [
 
 [[package]]
 name = "miden-project"
-version = "0.23.2"
+version = "0.23.3"
 dependencies = [
  "miden-assembly-syntax",
  "miden-core",
@@ -1092,7 +1092,7 @@ dependencies = [
 
 [[package]]
 name = "miden-utils-core-derive"
-version = "0.23.2"
+version = "0.23.3"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1101,7 +1101,7 @@ dependencies = [
 
 [[package]]
 name = "miden-utils-diagnostics"
-version = "0.23.2"
+version = "0.23.3"
 dependencies = [
  "miden-crypto",
  "miden-debug-types",
@@ -1111,7 +1111,7 @@ dependencies = [
 
 [[package]]
 name = "miden-utils-indexing"
-version = "0.23.2"
+version = "0.23.3"
 dependencies = [
  "miden-crypto",
  "proptest",
@@ -1121,7 +1121,7 @@ dependencies = [
 
 [[package]]
 name = "miden-utils-sync"
-version = "0.23.2"
+version = "0.23.3"
 dependencies = [
  "lock_api",
  "loom",
