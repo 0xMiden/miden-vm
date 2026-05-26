@@ -4,8 +4,8 @@
 //!
 //! The handler runs the honest witness computation via [`compute_modmul_witness`] (so the
 //! tests aren't sensitive to the exact arithmetic), then either tampers one felt of the
-//! advice payload before returning it, or synthesizes a self-consistent malicious witness
-//! (for the `c >= p` case) and re-derives alpha from it.
+//! advice payload before returning it, or synthesizes an alternate witness whose transcript
+//! and alpha match the modified payload (for the `c >= p` case).
 //!
 //! Advice payload layout (114 felts) for the generated SZ verifier:
 //!
@@ -164,7 +164,7 @@ fn tampered_e_shifted_30_traps_at_top_felt_check() {
 }
 
 /// Synthetic-malicious-witness handler for the `c >= p` test. Computes the honest witness for
-/// the inputs on the operand stack, then constructs a self-consistent alternate witness with
+/// the inputs on the operand stack, then constructs an alternate transcript-matching witness with
 /// `c' = c + p` and `q' = q - 1`. This shift preserves the polynomial identity
 /// `a*b - q'*p - c' = a*b - (q-1)*p - (c+p) = a*b - q*p - c`, so the rebuilt witness passes
 /// the FS check and the SZ identity check; only the final canonical reduction `c < p` should
@@ -272,7 +272,7 @@ impl EventHandler for TamperedEShiftedIdentityHandler {
             compute_modmul_witness(process, &SECP256K1_BASE_PRIME_U16, &SECP256K1_BASE_PRIME_U32)?;
 
         // Mutate e_shifted[0] by +1. The honest value is near 2^31, so checked_add(1) cannot
-        // overflow u32; the explicit check makes the safety property obvious.
+        // overflow u32; keep the checked form to document the assumption.
         let mut e_shifted_new = w.e_shifted;
         e_shifted_new[0] =
             e_shifted_new[0].checked_add(1).expect("e_shifted[0] + 1 must fit in u32");

@@ -1200,31 +1200,26 @@ end
 #! The driver processes one u32 limb from each scalar at a time. Each limb supplies four
 #! byte windows; each byte is peeled with `u32divmod.256`.
 #!
-#! Caller responsibility:
+#! Preconditions:
 #! - The advice stack must hold the 32 selected entries for `(u_1, u_2)` in window order
 #!   (768 felts total), derived from the cached precomputed public key and pushed via
 #!   `AdviceInputs::with_stack`.
-#! - `merkle_root_addr` must point at the 4-felt root, and that root must already be bound to
-#!   `Q` via an outer commitment (e.g., the augmented-PK design used by
-#!   `ecdsa_k256_keccak::verify_prehash_native_precomp`).
+#! - `merkle_root_addr` must point at the root of the width-8 joint comb table for the
+#!   intended point `Q`. Outer wrappers that derive `Q` must bind this root to the same
+#!   point.
 #! - The host's Merkle store must contain authentication paths for the 32 selected entries
 #!   under the depth-21 root at `merkle_root_addr`.
 #!
-#! Trap profile: this proc is NOT no-trap.
-#!   1. `mtree_verify` traps when the pushed entry doesn't hash to the leaf at the
-#!      computed index under the given root -- i.e., when the pushed entries don't
-#!      match the committed tree. An honest host always satisfies this; avoiding the trap
-#!      would require a Poseidon2 second-preimage on the committed leaf (the honest entry
-#!      that hashes to that leaf is fixed by the published `merkle_root`, so the attacker
-#!      must find a different 24-felt entry that hashes to the same value).
+#! Trap profile: this proc can trap.
+#!   1. `mtree_verify` traps when the pushed entry doesn't hash to the leaf at the computed
+#!      index under the given root.
 #!   2. `point_add` traps on entries with non-canonical X/Y limbs (`f_k1::mul` rejects
-#!      quotient overflow). Same second-preimage argument applies (the malformed entry
-#!      would have to hash to the same value as the honest one).
+#!      quotient overflow). The Merkle check only proves that the entry belongs to the
+#!      supplied tree; it does not prove that the tree was built from canonical curve points.
 #!   3. `adv_pipe` traps if fewer than 768 felts are queued on the advice stack.
-#! A no-trap wrapper (one that returns 0 instead of trapping on bad operand-stack inputs)
-#! must validate those inputs first and only call this when validation passes. See
-#! `verify_prehash_native_precomp` for the canonical pattern: it multiplicatively ANDs
-#! per-input validity flags and gates `exec.verify_precomp` on the combined flag.
+#! Wrappers that need no-trap behavior must validate operand-stack inputs before calling this
+#! proc. `verify_prehash_native_precomp` accumulates validity flags and calls this proc only
+#! when the combined flag is nonzero.
 #!
 #! The scalar pointers must reference eight u32 little-endian limbs each. Non-u32 limbs trap
 #! during byte peeling; the ECDSA wrapper supplies reduced scalar-field values.

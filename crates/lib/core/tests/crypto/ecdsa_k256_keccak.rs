@@ -1016,7 +1016,7 @@ fn parse_compressed_pk_invalid_prefix_yields_zero_flag() {
     // felt[0] = u32_le(0x04, 0x79, 0xBE, 0x66) = 0x66BE7904. Expected flag = 0.
     let asserts = "
         # We only check the flag here; x and parity values for an invalid prefix are
-        # whatever the proc happens to write (the caller should ignore them when flag = 0).
+        # unspecified and must be ignored when flag = 0.
         # Drop x[0..7] and parity to leave only the flag on top.
         dropw  dropw  drop
         push.0  assert_eq.err=\"flag should be 0\"
@@ -1295,8 +1295,7 @@ fn ecdsa_verify_prehash_native_precomp_trace_lengths() {
 
 /// A tampered `pk_aug` -- one that doesn't match the honest `Poseidon2(compressed_PK ||
 /// zeros || h_T)` -- must cause verification to return 0 without trapping. The advice-map
-/// entries are honest; the caller-supplied commitment is not. This exercises the gating
-/// that closes the augmented-PK soundness gap.
+/// entries are honest; the caller-supplied commitment is not.
 #[test]
 fn ecdsa_verify_prehash_native_precomp_rejects_tampered_pk_aug() {
     let request = generate_valid_signature();
@@ -1614,14 +1613,13 @@ fn generate_memory_store_masm_raw(pk_bytes: &[u8], digest: &[u8], sig_bytes: &[u
     .join(" ")
 }
 
-/// Documents the trust boundary of `verify_prehash_native_precomp`.
+/// Documents the table-root precondition of `verify_prehash_native_precomp`.
 ///
 /// The proc checks that `pk_aug` opens to `(compressed_PK, merkle_root)`, but it does not
 /// recompute the table root from `compressed_PK`. If `pk_aug` itself is chosen for
-/// `(Q, root(Q'))`, the proc verifies against `Q'`: `pk_aug` is the trusted statement for
-/// this path.
+/// `(Q, root(Q'))`, the proc verifies against the table committed by `root(Q')`.
 #[test]
-fn ecdsa_verify_prehash_native_precomp_accepts_self_consistent_wrong_root() {
+fn ecdsa_verify_prehash_native_precomp_does_not_rebuild_comb_root() {
     use miden_core::crypto::hash::Poseidon2;
     use miden_core_lib::handlers::comb_k1::{AffinePoint, PrecomputedK1PubKey};
     use num::BigUint;
@@ -1631,7 +1629,7 @@ fn ecdsa_verify_prehash_native_precomp_accepts_self_consistent_wrong_root() {
     let actual = generate_valid_signature();
 
     // Decoy public key Q (different seed). `compressed_PK` in pk_aug binds Q, but the
-    // table root binds Q'. A trusted-setup pk_aug would never have this shape.
+    // table root binds Q'.
     let decoy = {
         let mut rng = StdRng::seed_from_u64(123);
         let sk = SecretKey::with_rng(&mut rng);
@@ -1702,7 +1700,7 @@ fn ecdsa_verify_prehash_native_precomp_accepts_self_consistent_wrong_root() {
     assert_eq!(
         result,
         Felt::ONE,
-        "self-consistent wrong-root pk_aug is accepted under current trust model (got {:?})",
+        "expected valid result because the proc does not rebuild the comb root (got {:?})",
         result
     );
 }

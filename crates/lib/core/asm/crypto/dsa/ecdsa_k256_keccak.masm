@@ -666,9 +666,9 @@ end
 #! `pk_aug` is the 4-felt augmented public-key commitment, defined as
 #!   pk_aug = Poseidon2::hash_elements(compressed_PK_9 || zeros_3 || merkle_root_4)
 #! The 3 zero felts pad the 9-felt compressed PK to a 12-felt boundary so the hash input is
-#! aligned to 16 felts. See "Soundness boundary" below for where `pk_aug` must come from.
+#! aligned to 16 felts. See "Soundness boundary" below for the table-root precondition.
 #!
-#! Advice preconditions (host responsibility):
+#! Advice preconditions:
 #!   - Advice map: `pk_aug -> [compressed_PK_9, zeros_3, merkle_root_4]` (16 felts).
 #!   - Advice stack: 32 padded entries (24 felts each = 768 felts total), in window
 #!     order (LSB-first), selected by the verifier's per-window indices into the joint
@@ -676,22 +676,10 @@ end
 #!   - Merkle store: contains authentication paths for those 32 entries in the depth-21
 #!     table tree. Each leaf is `Poseidon2::hash_elements(padded_entry_24)`.
 #!
-#! Soundness boundary. The VM proc binds `pk_aug` to `(compressed_PK, merkle_root)` via
-#! the augmented-PK hash check, but it does NOT prove that `merkle_root` is the comb table
-#! for `decompress(compressed_PK)`. A caller that can choose `pk_aug` freely could commit a
-#! root for a different point and still pass verification against that other point.
-#!
-#! Account-bound `pk_aug` (sound). In the protocol's account model, `pk_aug` lives in
-#! account storage and is transitively bound to the AccountId via the storage commitment.
-#! The account creator's commitment is the trust anchor -- the same trust assumption the
-#! protocol already operates under for `Poseidon2(PK)`. Self-custody, multi-sig, delegated
-#! keys, cross-account verification, and recursive composition all fall in this category.
-#!
-#! Caller-supplied `pk_aug` (NOT sufficient alone). For open-recovery flows (e.g. verify a
-#! MetaMask sig from an arbitrary address) no pre-registered `pk_aug` exists, and a
-#! validity bit alone is meaningless. Such flows must additionally check the recovered
-#! point against an out-of-band identifier (e.g. an Eth address derived from the recovered
-#! PK), which this proc does not return. Use a separate entry point for that case.
+#! Soundness boundary. The proc checks that `pk_aug` opens to `(compressed_PK, merkle_root)`
+#! and verifies opened entries under `merkle_root`. It assumes, but does not prove, that
+#! `merkle_root` is the root of the width-8 joint comb table for `decompress(compressed_PK)`.
+#! Establishing that relation is a precondition of using this proc.
 #!
 #! No-trap behavior. Within the packed-u32 calldata contract (i.e. all calldata felts are
 #! valid u32 values), semantically invalid inputs return 0 without trapping: a wrong
@@ -701,21 +689,16 @@ end
 #! a caller that writes non-u32 felts into the calldata memory regions -- the u32* ops in
 #! `_parse_be_u256`, `_parse_sig`, and `_parse_compressed_pk` will trap.
 #!
-#! The proc IS NOT no-trap against host-misconfigured witness:
+#! This proc can still trap on malformed witness data:
 #!   1. A pushed advice entry whose hash doesn't match the leaf at the corresponding
-#!      tree index traps `verify_precomp`'s `mtree_verify`. Avoiding the trap would require
-#!      a Poseidon2 second-preimage on the committed leaf (the honest entry that hashes to
-#!      that leaf is fixed by the published `merkle_root`, so the attacker must find a
-#!      different 24-felt entry that hashes to the same value).
-#!   2. `point_add` traps on entries with non-canonical X/Y limbs that survive the leaf
-#!      check.
+#!      tree index traps `verify_precomp`'s `mtree_verify`.
+#!   2. A Merkle-consistent entry with non-canonical X/Y limbs can trap inside `point_add`.
 #!   3. Fewer than 768 entry felts on the advice stack traps `adv_pipe` mid-stream.
 #!   4. After `adv.push_mapval`, the next 16 advice felts must be the augmented-PK
 #!      preimage. The helper supplies this as a 16-felt map value. A different map length
 #!      changes how that 16-felt prefix is sourced and can shift subsequent comb-table
 #!      advice; non-u32 felts in the compressed-PK region trap `_parse_compressed_pk`.
-#! All four are host bugs (the prover failed to set up its own witness consistently); they
-#! are not reachable by any caller-controlled input alone.
+#! These failures are prover-witness errors, not semantically invalid calldata.
 #!
 #! Local memory layout matches `verify_prehash_native`. Additional slots:
 #!   136..145 : compressed_PK scratch (9 felts, streamed from advice map by adv_pipe)
@@ -927,7 +910,7 @@ end
 #!   yielding the 32-byte Keccak input at `mem[0..8]`.
 #! - `PK_AUG`: 4-felt augmented public-key commitment
 #!   `Poseidon2(compressed_PK_9 || 0, 0, 0 || merkle_root)`. See
-#!   `verify_prehash_native_precomp` for the trust boundary.
+#!   `verify_prehash_native_precomp` for the table-root precondition.
 #! - `SIG[17]`: 65-byte signature `(r, s, v)` packed as 17 little-endian u32 felts on advice.
 #! - `precomp_witness`: the per-call witness consumed by `verify_prehash_native_precomp`
 #!   (advice-map entry at key `pk_aug` plus the comb-window entries on the advice stack).
