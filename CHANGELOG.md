@@ -20,6 +20,10 @@
 #### Enhancements
 - Added a `RELEASE_PROCEDURE` file ([#3199](https://github.com/0xMiden/miden-vm/pull/3199)).
 
+## v0.23.2 (2026-05-26)
+
+- Restored `DebugVarInfo::set_value_location` and `DebugVarLocation::FrameBase` for debug metadata compatibility ([#3189](https://github.com/0xMiden/miden-vm/pull/3189)).
+
 ## v0.23.1 (2026-05-20)
 
 - Restored metadata-neutral MAST node identity so public procedure roots do not depend on debug/decorator metadata shape; this reopens debug metadata precision issues from #2955 and #3054.
