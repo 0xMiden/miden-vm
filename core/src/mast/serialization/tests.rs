@@ -1122,6 +1122,49 @@ fn test_deserialization_rejects_mismatched_header_counts() {
 
 /// Test that stripping and hashless serialization reduce wire size monotonically.
 #[test]
+fn test_serialization_sizes_shrink_from_full_to_stripped_to_hashless() {
+    let mut forest = MastForest::new();
+
+    let operations = vec![Operation::Add, Operation::Mul, Operation::Drop];
+    let block_id = BasicBlockNodeBuilder::new(operations, Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(block_id);
+
+    let digest = forest[block_id].digest();
+    forest.insert_procedure_name(digest, "test_proc".into());
+
+    let full_bytes = forest.to_bytes();
+
+    let mut stripped_bytes = Vec::new();
+    forest.write_stripped(&mut stripped_bytes);
+
+    let mut hashless_bytes = Vec::new();
+    forest.write_hashless(&mut hashless_bytes);
+
+    let full_view = MastForestWireView::new(&full_bytes).unwrap();
+    assert!(!full_view.is_stripped());
+    assert_eq!(full_view.node_count(), forest.num_nodes() as usize);
+    assert_eq!(full_view.procedure_root_count(), 1);
+    assert!(full_view.node_info_at(0).is_ok());
+
+    assert!(stripped_bytes.len() < full_bytes.len());
+    assert!(hashless_bytes.len() < stripped_bytes.len());
+
+    let stripped_view = MastForestWireView::new(&stripped_bytes).unwrap();
+    let hashless_view = MastForestWireView::new(&hashless_bytes);
+    assert!(stripped_view.node_hash_offset().is_some());
+    assert_matches!(hashless_view, Err(DeserializationError::InvalidValue(msg)) if msg.contains("HASHLESS flag is set"));
+}
+
+fn assert_stripped_size_hint_matches_serialized_len(forest: &MastForest) {
+    let mut bytes = Vec::new();
+    forest.write_stripped(&mut bytes);
+    assert_eq!(forest.stripped_size_hint(), bytes.len());
+}
+
+/// Test that stripped size hints stay exact for both compact and large forests.
+#[test]
 fn test_stripped_size_hint_matches_serialized_len() {
     let mut small_forest = MastForest::new();
 
