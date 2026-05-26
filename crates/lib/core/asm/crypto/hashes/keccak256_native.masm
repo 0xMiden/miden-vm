@@ -689,18 +689,23 @@ proc rho_pi
 
     # ----- Copy scratch state back to caller's mem[state_ptr..state_ptr+50] -----
     # 12 word transfers (slots 4..52 = 48 felts) plus 2 individual felts at the tail.
-    padw  loc_loadw_le.4    loc_load.0  add.0    mem_storew_le  dropw
-    padw  loc_loadw_le.8    loc_load.0  add.4    mem_storew_le  dropw
-    padw  loc_loadw_le.12   loc_load.0  add.8    mem_storew_le  dropw
-    padw  loc_loadw_le.16   loc_load.0  add.12   mem_storew_le  dropw
-    padw  loc_loadw_le.20   loc_load.0  add.16   mem_storew_le  dropw
-    padw  loc_loadw_le.24   loc_load.0  add.20   mem_storew_le  dropw
-    padw  loc_loadw_le.28   loc_load.0  add.24   mem_storew_le  dropw
-    padw  loc_loadw_le.32   loc_load.0  add.28   mem_storew_le  dropw
-    padw  loc_loadw_le.36   loc_load.0  add.32   mem_storew_le  dropw
-    padw  loc_loadw_le.40   loc_load.0  add.36   mem_storew_le  dropw
-    padw  loc_loadw_le.44   loc_load.0  add.40   mem_storew_le  dropw
-    padw  loc_loadw_le.48   loc_load.0  add.44   mem_storew_le  dropw
+    # `mem_storew_le` leaves the stored word on the stack, so the next iteration's
+    # `loc_loadw_le.X` overwrites it in place; only one initial `padw` and one final
+    # `dropw` are needed to bracket the loop.
+    padw
+    loc_loadw_le.4    loc_load.0  add.0    mem_storew_le
+    loc_loadw_le.8    loc_load.0  add.4    mem_storew_le
+    loc_loadw_le.12   loc_load.0  add.8    mem_storew_le
+    loc_loadw_le.16   loc_load.0  add.12   mem_storew_le
+    loc_loadw_le.20   loc_load.0  add.16   mem_storew_le
+    loc_loadw_le.24   loc_load.0  add.20   mem_storew_le
+    loc_loadw_le.28   loc_load.0  add.24   mem_storew_le
+    loc_loadw_le.32   loc_load.0  add.28   mem_storew_le
+    loc_loadw_le.36   loc_load.0  add.32   mem_storew_le
+    loc_loadw_le.40   loc_load.0  add.36   mem_storew_le
+    loc_loadw_le.44   loc_load.0  add.40   mem_storew_le
+    loc_loadw_le.48   loc_load.0  add.44   mem_storew_le
+    dropw
     loc_load.52  loc_load.0  add.48   mem_store
     loc_load.53  loc_load.0  add.49   mem_store
 end
