@@ -1,10 +1,12 @@
 # miden-vm release procedure - how to do a release
 
+Releases are made against the `main` branch. Make sure all the following changes
+are present on the said branch at the time of release.
+
 ## in the source code repo
 
 - in `CHANGELOG.md`, update the `(TBD)` next to the upcoming version with today's date
 - bump the workspace version in `Cargo.toml`
-- make sure these changes are present on the `main` branch at the time of release
 
 ## on GitHub
 
