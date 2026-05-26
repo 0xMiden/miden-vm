@@ -18,6 +18,7 @@ pub mod sha512;
 pub mod smt_peek;
 pub mod sorted_array;
 pub mod u128_div;
+pub mod u256_div;
 pub mod u64_div;
 
 // HELPER FUNCTIONS

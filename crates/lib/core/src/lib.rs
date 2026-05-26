@@ -33,6 +33,7 @@ use crate::handlers::{
     },
     u64_div::{U64_DIV_EVENT_NAME, handle_u64_div},
     u128_div::{U128_DIV_EVENT_NAME, handle_u128_div},
+    u256_div::{U256_DIV_EVENT_NAME, handle_u256_div},
 };
 
 // CORE LIBRARY
@@ -139,6 +140,7 @@ impl CoreLibrary {
             (SMT_PEEK_EVENT_NAME, Arc::new(handle_smt_peek)),
             (U64_DIV_EVENT_NAME, Arc::new(handle_u64_div)),
             (U128_DIV_EVENT_NAME, Arc::new(handle_u128_div)),
+            (U256_DIV_EVENT_NAME, Arc::new(handle_u256_div)),
             (FALCON_DIV_EVENT_NAME, Arc::new(handle_falcon_div)),
             (LOWERBOUND_ARRAY_EVENT_NAME, Arc::new(handle_lowerbound_array)),
             (LOWERBOUND_KEY_VALUE_EVENT_NAME, Arc::new(handle_lowerbound_key_value)),
