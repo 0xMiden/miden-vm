@@ -1,4 +1,5 @@
 use miden::core::crypto::hashes::keccak256
+use miden::core::crypto::hashes::keccak256_native
 use miden::core::crypto::hashes::poseidon2
 use miden::core::math::f_k1
 use miden::core::math::k1_point
@@ -905,4 +906,61 @@ pub proc verify_prehash_native_precomp
     padw loc_loadw_le.36   padw loc_loadw_le.32        # [r, rx_mod, ...]
     exec.::miden::core::math::u256::eq
     loc_load.128  mul                                  # final validity flag on stack
+end
+
+#! Verifies an ECDSA signature after hashing a 32-byte message word with Keccak-256,
+#! using an augmented public key that commits to the precomputed comb table.
+#!
+#! This is the precomputed-comb counterpart to `verify`: the message word is first
+#! hashed with `keccak256_native::keccak256_bytes`, then
+#! `verify_prehash_native_precomp` checks the signature against the augmented public-key
+#! commitment.
+#!
+#! Inputs:
+#!   Operand stack: [MSG, PK_AUG, ...]
+#!   Advice stack:  [SIG[17] | precomp_witness | ...]
+#! Outputs:
+#!   Operand stack: [valid, ...]
+#!
+#! Where:
+#! - `MSG`: single word (4 felts). Each felt is split into two little-endian u32 limbs,
+#!   yielding the 32-byte Keccak input at `mem[0..8]`.
+#! - `PK_AUG`: 4-felt augmented public-key commitment
+#!   `Poseidon2(compressed_PK_9 || 0, 0, 0 || merkle_root)`. See
+#!   `verify_prehash_native_precomp` for the trust boundary.
+#! - `SIG[17]`: 65-byte signature `(r, s, v)` packed as 17 little-endian u32 felts on advice.
+#! - `precomp_witness`: the per-call witness consumed by `verify_prehash_native_precomp`
+#!   (advice-map entry at key `pk_aug` plus the comb-window entries on the advice stack).
+#! - `valid`: 1 if the signature is valid under `pk_aug` against `Keccak-256(MSG)`; else 0.
+@locals(36)
+pub proc verify_keccak_native_precomp
+    # Materialize the message bytes at mem[0..8] (4 felts written as 8 u32 LE limbs).
+    locaddr.0  movdn.4  exec.word::store_word_u32s_le
+    # => [PK_AUG, ...]
+
+    # Keccak-256 the 32 message bytes; digest lands on the stack as 8 u32 felts.
+    push.32  locaddr.0  exec.keccak256_native::keccak256_bytes
+    # => [DIGEST[0..8], PK_AUG, ...]
+
+    # Store the digest at mem[8..16].
+    loc_storew_le.8   dropw
+    loc_storew_le.12  dropw
+    # => [PK_AUG, ...]
+
+    # Read the 17-felt signature from advice into mem[16..33]. `adv_pushw` grows the stack by 4
+    # (leaving PK_AUG below); subsequent `adv_loadw` overwrites those four advice-felts in
+    # place; the final `dropw` restores the original stack height.
+    adv_pushw  loc_storew_le.16
+    adv_loadw  loc_storew_le.20
+    adv_loadw  loc_storew_le.24
+    adv_loadw  loc_storew_le.28  dropw
+    adv_push   loc_store.32
+    # => [PK_AUG, ...]
+
+    # Set up the inner call: want [pk_aug, digest_ptr, sig_ptr, ...]. Push sig_ptr then
+    # digest_ptr above PK_AUG, then movdn each by 5 to slide them under the word.
+    locaddr.16   locaddr.8                              # => [digest_ptr, sig_ptr, PK_AUG, ...]
+    movdn.5      movdn.5                                # => [PK_AUG, digest_ptr, sig_ptr, ...]
+    exec.verify_prehash_native_precomp
+    # => [valid, ...]
 end

@@ -11,7 +11,7 @@ use miden_core::{
     field::PrimeCharacteristicRing,
     precompile::{PrecompileCommitment, PrecompileVerifier},
     serde::{Deserializable, Serializable},
-    utils::bytes_to_packed_u32_elements,
+    utils::{IntoBytes, bytes_to_packed_u32_elements},
 };
 use miden_core_lib::{
     dsa::ecdsa_k256_keccak::sign as ecdsa_sign,
@@ -1705,4 +1705,286 @@ fn ecdsa_verify_prehash_native_precomp_accepts_self_consistent_wrong_root() {
         "self-consistent wrong-root pk_aug is accepted under current trust model (got {:?})",
         result
     );
+}
+
+// VERIFY_KECCAK_NATIVE_PRECOMP (wrapper that adds the Keccak-256 prologue)
+// ================================================================================================
+
+/// Generate a valid request whose digest is `Keccak-256(msg_word.into_bytes())`. The 32-byte
+/// encoding matches the `word::store_word_u32s_le` layout the wrapper produces in memory.
+fn generate_valid_keccak_signature(msg_word: &[Felt; 4]) -> EcdsaRequest {
+    let mut rng = StdRng::seed_from_u64(42);
+    let secret_key = SecretKey::with_rng(&mut rng);
+    let pk = secret_key.public_key();
+
+    let msg_bytes = msg_word.into_bytes();
+    let digest = miden_core_lib::keccak256_native::reference::keccak256(&msg_bytes);
+    let sig = secret_key.sign_prehash(digest);
+
+    EcdsaRequest::new(pk, digest, sig)
+}
+
+/// Build the combined advice stack for the wrapper test: 17 SIG felts (consumed by the wrapper)
+/// followed by the comb-window entries (consumed by the inner `verify_prehash_native_precomp`).
+fn keccak_precomp_advice_inputs(
+    witness: &PrecompWitness,
+    sig_felts: &[Felt],
+) -> miden_core::advice::AdviceInputs {
+    use miden_core::advice::AdviceInputs;
+
+    let (entry_advice, store) =
+        witness.precomputed_pk.advice_for_windows(&witness.u_1, &witness.u_2);
+    let mut combined = Vec::with_capacity(sig_felts.len() + entry_advice.len());
+    combined.extend_from_slice(sig_felts);
+    combined.extend(entry_advice);
+
+    AdviceInputs::default()
+        .with_map([(Word::new(witness.pk_aug), witness.pk_aug_value.clone())])
+        .with_stack(combined)
+        .with_merkle_store(store)
+}
+
+#[test]
+fn ecdsa_verify_keccak_native_precomp_valid_signature_returns_one() {
+    let msg_word = [
+        Felt::new_unchecked(0x0123_4567_89ab_cdef),
+        Felt::new_unchecked(0x7edc_ba98_7654_3210),
+        Felt::new_unchecked(0x0ead_beef_cafe_babe),
+        Felt::new_unchecked(0x0000_1111_2222_3333),
+    ];
+    let request = generate_valid_keccak_signature(&msg_word);
+    let witness = precomp_witness(&request);
+    let sig_felts = bytes_to_packed_u32_elements(&request.sig().to_bytes());
+
+    let pk_aug_push = push_word_inline(&witness.pk_aug);
+    let msg_push = push_word_inline(&msg_word);
+
+    let source = format!(
+        "
+            use miden::core::crypto::dsa::ecdsa_k256_keccak
+            use miden::core::sys
+
+            begin
+                {pk_aug_push}
+                {msg_push}
+                exec.ecdsa_k256_keccak::verify_keccak_native_precomp
+                exec.sys::truncate_stack
+            end
+        ",
+    );
+
+    let mut test = build_debug_test!(&source, &[]);
+    test.advice_inputs = keccak_precomp_advice_inputs(&witness, &sig_felts);
+    let (output, _) = test.execute_for_output().unwrap();
+    let result = output.stack.get_element(0).unwrap();
+    assert_eq!(
+        result,
+        Felt::ONE,
+        "verify_keccak_native_precomp should accept the valid signature (got {:?})",
+        result,
+    );
+}
+
+#[test]
+fn ecdsa_verify_keccak_native_precomp_wrong_message_returns_zero() {
+    let signed_msg_word = [
+        Felt::new_unchecked(0x0123_4567_89ab_cdef),
+        Felt::new_unchecked(0x7edc_ba98_7654_3210),
+        Felt::new_unchecked(0x0ead_beef_cafe_babe),
+        Felt::new_unchecked(0x0000_1111_2222_3333),
+    ];
+    let wrong_msg_word = [
+        Felt::new_unchecked(0x0123_4567_89ab_cdef),
+        Felt::new_unchecked(0x7edc_ba98_7654_3210),
+        Felt::new_unchecked(0x0ead_beef_cafe_babe),
+        Felt::new_unchecked(0x0000_1111_2222_3334),
+    ];
+
+    let signed_request = generate_valid_keccak_signature(&signed_msg_word);
+    let wrong_digest =
+        miden_core_lib::keccak256_native::reference::keccak256(&wrong_msg_word.into_bytes());
+    let wrong_request =
+        EcdsaRequest::new(signed_request.pk().clone(), wrong_digest, signed_request.sig().clone());
+    let witness = precomp_witness(&wrong_request);
+    let sig_felts = bytes_to_packed_u32_elements(&signed_request.sig().to_bytes());
+
+    let pk_aug_push = push_word_inline(&witness.pk_aug);
+    let msg_push = push_word_inline(&wrong_msg_word);
+
+    let source = format!(
+        "
+            use miden::core::crypto::dsa::ecdsa_k256_keccak
+            use miden::core::sys
+
+            begin
+                {pk_aug_push}
+                {msg_push}
+                exec.ecdsa_k256_keccak::verify_keccak_native_precomp
+                exec.sys::truncate_stack
+            end
+        ",
+    );
+
+    let mut test = build_debug_test!(&source, &[]);
+    test.advice_inputs = keccak_precomp_advice_inputs(&witness, &sig_felts);
+    let (output, _) = test.execute_for_output().unwrap();
+    let result = output.stack.get_element(0).unwrap();
+    assert_eq!(
+        result,
+        Felt::ZERO,
+        "signature for a different Keccak message must be rejected (got {:?})",
+        result,
+    );
+}
+
+// Deterministic KAT for `verify_keccak_native_precomp`. The private key is the EIP-155 example
+// key (`0x46..46`). The message, compressed public key, digest, and signature are pinned as hex
+// constants so changes in encoding, Keccak, or deterministic signing trip before the wrapper is
+// called.
+const KAT_PRIVKEY_HEX: &str = "4646464646464646464646464646464646464646464646464646464646464646";
+const KAT_PK_COMPRESSED_HEX: &str =
+    "024bc2a31265153f07e70e0bab08724e6b85e217f8cd628ceb62974247bb493382";
+const KAT_MSG_BYTES_HEX: &str = "0123456789abcdef7edcba98765432100eadbeefcafebabe0000111122223333";
+const KAT_DIGEST_HEX: &str = "63ea3777a99f01e8ad5b8941ba675e860028b01012667548d8fad93a6a0a9568";
+const KAT_SIG_HEX: &str = "f19dd943619c26f8db980d29e724009921eec38065c099b6056ca0c79cf33ef7\
+     260255db93eb1ab4ac06f008cb6b0cc21f56e07542dea7dcffb8ade3bf1f2c5c\
+     01";
+
+fn hex_decode(s: &str) -> Vec<u8> {
+    assert!(s.len().is_multiple_of(2), "odd-length hex string");
+    (0..s.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&s[i..i + 2], 16).expect("valid hex byte"))
+        .collect()
+}
+
+#[test]
+fn ecdsa_verify_keccak_native_precomp_kat() {
+    let privkey_bytes = hex_decode(KAT_PRIVKEY_HEX);
+    let secret_key =
+        SecretKey::read_from_bytes(&privkey_bytes).expect("KAT privkey must deserialize");
+
+    let pk = secret_key.public_key();
+    assert_eq!(
+        hex_encode(&pk.to_bytes()),
+        KAT_PK_COMPRESSED_HEX,
+        "KAT public key mismatch -- update KAT_PK_COMPRESSED_HEX",
+    );
+
+    let msg_bytes: [u8; 32] =
+        hex_decode(KAT_MSG_BYTES_HEX).try_into().expect("KAT message must be 32 bytes");
+    let digest = miden_core_lib::keccak256_native::reference::keccak256(&msg_bytes);
+    assert_eq!(
+        hex_encode(&digest),
+        KAT_DIGEST_HEX,
+        "KAT digest mismatch -- update KAT_DIGEST_HEX",
+    );
+
+    let sig = secret_key.sign_prehash(digest);
+    assert_eq!(
+        hex_encode(&sig.to_bytes()),
+        KAT_SIG_HEX,
+        "KAT signature mismatch -- update KAT_SIG_HEX",
+    );
+
+    let msg_word = bytes_to_msg_word(&msg_bytes);
+    let request = EcdsaRequest::new(pk, digest, sig);
+    let witness = precomp_witness(&request);
+    let sig_felts = bytes_to_packed_u32_elements(&request.sig().to_bytes());
+
+    let pk_aug_push = push_word_inline(&witness.pk_aug);
+    let msg_push = push_word_inline(&msg_word);
+
+    let source = format!(
+        "
+            use miden::core::crypto::dsa::ecdsa_k256_keccak
+            use miden::core::sys
+
+            begin
+                {pk_aug_push}
+                {msg_push}
+                exec.ecdsa_k256_keccak::verify_keccak_native_precomp
+                exec.sys::truncate_stack
+            end
+        ",
+    );
+
+    let mut test = build_debug_test!(&source, &[]);
+    test.advice_inputs = keccak_precomp_advice_inputs(&witness, &sig_felts);
+    let (output, _) = test.execute_for_output().unwrap();
+    let result = output.stack.get_element(0).unwrap();
+    assert_eq!(result, Felt::ONE, "KAT signature must verify (got {:?})", result);
+}
+
+/// Inverse of `[Felt; 4]::into_bytes()`: read 4 felts back from a 32-byte little-endian encoding.
+fn bytes_to_msg_word(bytes: &[u8; 32]) -> [Felt; 4] {
+    let mut word = [Felt::ZERO; 4];
+    for (i, felt) in word.iter_mut().enumerate() {
+        let v = u64::from_le_bytes(bytes[i * 8..i * 8 + 8].try_into().unwrap());
+        *felt = Felt::new_unchecked(v);
+    }
+    word
+}
+
+fn hex_encode(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        out.push_str(&format!("{:02x}", b));
+    }
+    out
+}
+
+#[test]
+#[ignore = "benchmark; run with --ignored to print cycle count"]
+fn ecdsa_verify_keccak_native_precomp_cycles() {
+    use miden_processor::ContextId;
+
+    let msg_word = [
+        Felt::new_unchecked(0x0123_4567_89ab_cdef),
+        Felt::new_unchecked(0x7edc_ba98_7654_3210),
+        Felt::new_unchecked(0x0ead_beef_cafe_babe),
+        Felt::new_unchecked(0x0000_1111_2222_3333),
+    ];
+    let request = generate_valid_keccak_signature(&msg_word);
+    let witness = precomp_witness(&request);
+    let sig_felts = bytes_to_packed_u32_elements(&request.sig().to_bytes());
+
+    let pk_aug_push = push_word_inline(&witness.pk_aug);
+    let msg_push = push_word_inline(&msg_word);
+
+    let source = format!(
+        "
+            use miden::core::crypto::dsa::ecdsa_k256_keccak
+            use miden::core::sys
+
+            begin
+                clk
+                {pk_aug_push}
+                {msg_push}
+                exec.ecdsa_k256_keccak::verify_keccak_native_precomp
+                # => [result, t0, ...]
+                clk                                          # [t1, result, t0, ...]
+                movup.2 sub                                  # [t1 - t0, result, ...]
+                push.5000 mem_store                          # mem[5000] = cycle delta
+                push.5001 mem_store                          # mem[5001] = result
+                exec.sys::truncate_stack
+            end
+        ",
+    );
+
+    let mut test = build_debug_test!(&source, &[]);
+    test.advice_inputs = keccak_precomp_advice_inputs(&witness, &sig_felts);
+    let (output, _) = test.execute_for_output().unwrap();
+    let cycles = output
+        .memory
+        .read_element(ContextId::root(), Felt::from_u32(5000))
+        .unwrap()
+        .as_canonical_u64();
+    let result = output
+        .memory
+        .read_element(ContextId::root(), Felt::from_u32(5001))
+        .unwrap()
+        .as_canonical_u64();
+    assert_eq!(result, 1, "verify_keccak_native_precomp should accept the valid signature");
+    eprintln!("verify_keccak_native_precomp cycles (valid sig): {cycles}");
 }
