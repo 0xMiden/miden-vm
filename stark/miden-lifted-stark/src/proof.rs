@@ -237,7 +237,6 @@ where
         let alignment = config.lmcs().alignment();
 
         // Infer quotient degree from symbolic AIR analysis (max across all AIRs)
-        let log_blowup = config.pcs().log_blowup();
         let max_log_quotient_degree = proof_ordered_airs
             .iter()
             .map(|&air| log_quotient_degree::<L::F, EF, _>(air))

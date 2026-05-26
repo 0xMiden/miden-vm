@@ -647,8 +647,14 @@ where
     F: Field,
     A: LiftedAir<F, EF>,
 {
-    // Clamp to D = 2^result ≥ 2 so degenerate/linear AIRs stay well-defined.
-    log2_ceil_u8(air.constraint_degree().max().saturating_sub(1).max(2))
+    // Maximum degree over base and extension field constraints.
+    let constraint_degree = air.constraint_degree().max();
+    // Subtract one quotient chunk for division by the vanishing polynomial.
+    let quotient_chunks = constraint_degree.saturating_sub(1);
+    // Clamp to the protocol minimum of two quotient chunks.
+    let quotient_chunks = quotient_chunks.max(2);
+    // Return the log₂ quotient chunk count.
+    log2_ceil_u8(quotient_chunks)
 }
 
 // ============================================================================
