@@ -1364,14 +1364,7 @@ impl DecoratorId {
         value: u32,
         mast_forest: &MastForest,
     ) -> Result<Self, DeserializationError> {
-        Self::from_u32_bounded(value, mast_forest.debug_info.num_decorators())
-    }
-
-    /// Returns a new `DecoratorId` with the provided inner value, or an error if the provided
-    /// `value` is greater than or equal to `bound`.
-    ///
-    /// For use in deserialization when the bound is known without needing the full MastForest.
-    pub fn from_u32_bounded(value: u32, bound: usize) -> Result<Self, DeserializationError> {
+        let bound = mast_forest.debug_info.num_decorators();
         if (value as usize) < bound {
             Ok(Self(value))
         } else {
