@@ -57,7 +57,38 @@ pub const PRINT_ADV_MAP_ALL_EVENT_NAME: EventName =
 pub const PRINT_ADV_MAP_ITEM_EVENT_NAME: EventName =
     EventName::new("miden::core::debug::print_adv_map_item");
 
-/// Returns the `(EventName, handler)` pairs that back the `miden::core::debug` module.
+/// Returns the default `(EventName, handler)` pairs for print-style debugging.
+///
+/// The default set prints operand-stack and memory state to stdout. Advice-stack and advice-map
+/// printers are excluded because they may expose witness data.
+pub fn default_debug_handlers() -> Vec<(EventName, Arc<dyn EventHandler>)> {
+    let printer: Arc<dyn EventHandler> = Arc::new(DebugPrinter::default());
+    vec![
+        (PRINT_STACK_EVENT_NAME, printer.clone()),
+        (PRINT_MEM_EVENT_NAME, printer.clone()),
+        (PRINT_MEM_ALL_EVENT_NAME, printer),
+    ]
+}
+
+/// Returns no-op handlers for every `miden::core::debug` print event.
+///
+/// Privacy-sensitive hosts can use these to replace the default stdout handlers while still
+/// allowing programs that emit debug events to execute.
+pub fn noop_debug_handlers() -> Vec<(EventName, Arc<dyn EventHandler>)> {
+    let handler: Arc<dyn EventHandler> = Arc::new(NoopDebugHandler);
+    vec![
+        (PRINT_STACK_EVENT_NAME, handler.clone()),
+        (PRINT_MEM_EVENT_NAME, handler.clone()),
+        (PRINT_MEM_ALL_EVENT_NAME, handler.clone()),
+        (PRINT_ADV_STACK_EVENT_NAME, handler.clone()),
+        (PRINT_ADV_STACK_ALL_EVENT_NAME, handler.clone()),
+        (PRINT_ADV_MAP_EVENT_NAME, handler.clone()),
+        (PRINT_ADV_MAP_ALL_EVENT_NAME, handler.clone()),
+        (PRINT_ADV_MAP_ITEM_EVENT_NAME, handler),
+    ]
+}
+
+/// Returns the `(EventName, handler)` pairs that back the full `miden::core::debug` module.
 ///
 /// All events share a single [`DebugPrinter`] instance writing to stdout.
 pub fn debug_handlers() -> Vec<(EventName, Arc<dyn EventHandler>)> {
@@ -137,6 +168,14 @@ impl<W: fmt::Write + Send + Sync + 'static> EventHandler for DebugPrinter<W> {
         }
         // Unknown ids are ignored: the handler is only registered for the events above.
 
+        Ok(Vec::new())
+    }
+}
+
+struct NoopDebugHandler;
+
+impl EventHandler for NoopDebugHandler {
+    fn on_event(&self, _process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
         Ok(Vec::new())
     }
 }

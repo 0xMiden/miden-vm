@@ -17,6 +17,7 @@ use miden_core_lib::{
         DebugPrinter, PRINT_ADV_MAP_ALL_EVENT_NAME, PRINT_ADV_MAP_EVENT_NAME,
         PRINT_ADV_MAP_ITEM_EVENT_NAME, PRINT_ADV_STACK_ALL_EVENT_NAME, PRINT_ADV_STACK_EVENT_NAME,
         PRINT_MEM_ALL_EVENT_NAME, PRINT_MEM_EVENT_NAME, PRINT_STACK_EVENT_NAME,
+        noop_debug_handlers,
     },
 };
 use miden_processor::{
@@ -91,6 +92,22 @@ fn run(source: &str, advice: AdviceInputs) -> (String, ExecutionOutput) {
 /// Convenience wrapper returning only the captured text.
 fn run_and_capture(source: &str, advice: AdviceInputs) -> String {
     run(source, advice).0
+}
+
+/// Executes `source` against the core library's default host-library conversion. This exercises
+/// the production handler registration path, while capture tests use a custom in-memory printer.
+fn run_with_default_core_handlers(source: &str, advice: AdviceInputs) -> ExecutionOutput {
+    let core_lib = CoreLibrary::default();
+    let assembler = Assembler::default()
+        .with_dynamic_library(&core_lib)
+        .expect("failed to load core library");
+    let program = assembler.assemble_program(source).expect("failed to assemble program");
+    let mut host = DefaultHost::default()
+        .with_library(&core_lib)
+        .expect("failed to load core library handlers");
+
+    execute_sync(&program, StackInputs::default(), advice, &mut host, ExecutionOptions::default())
+        .expect("execution failed")
 }
 
 // CAPTURE TESTS
@@ -342,14 +359,18 @@ fn print_stack_is_stack_neutral() {
 }
 
 #[test]
-fn default_core_handlers_do_not_include_debug_printers() {
+fn default_core_handlers_include_debug_printers() {
     let core_lib = CoreLibrary::default();
     let handlers = core_lib.handlers();
 
+    for debug_event in [PRINT_STACK_EVENT_NAME, PRINT_MEM_EVENT_NAME, PRINT_MEM_ALL_EVENT_NAME] {
+        assert!(
+            handlers.iter().any(|(event, _)| event == &debug_event),
+            "{debug_event:?} should be registered by default"
+        );
+    }
+
     for debug_event in [
-        PRINT_STACK_EVENT_NAME,
-        PRINT_MEM_EVENT_NAME,
-        PRINT_MEM_ALL_EVENT_NAME,
         PRINT_ADV_STACK_EVENT_NAME,
         PRINT_ADV_STACK_ALL_EVENT_NAME,
         PRINT_ADV_MAP_EVENT_NAME,
@@ -361,6 +382,54 @@ fn default_core_handlers_do_not_include_debug_printers() {
             "{debug_event:?} should be registered explicitly by the host"
         );
     }
+}
+
+#[test]
+fn default_core_handlers_run_print_stack() {
+    let source = "
+    use miden::core::debug
+    begin
+        push.1 push.2 push.3
+        exec.debug::print_stack
+        drop drop drop
+    end
+    ";
+    let output = run_with_default_core_handlers(source, AdviceInputs::default());
+    assert_eq!(output.stack.get_element(0), Some(Felt::new_unchecked(0)));
+}
+
+#[test]
+fn noop_debug_handlers_run_print_stack_without_output() {
+    let source = "
+    use miden::core::debug
+    begin
+        push.1 push.2 push.3
+        exec.debug::print_stack
+        drop drop drop
+    end
+    ";
+
+    let core_lib = CoreLibrary::default();
+    let assembler = Assembler::default()
+        .with_dynamic_library(&core_lib)
+        .expect("failed to load core library");
+    let program = assembler.assemble_program(source).expect("failed to assemble program");
+    let host_lib = HostLibrary {
+        mast_forest: core_lib.mast_forest().clone(),
+        handlers: noop_debug_handlers(),
+    };
+    let mut host = DefaultHost::default().with_library(host_lib).expect("failed to load host lib");
+
+    let output = execute_sync(
+        &program,
+        StackInputs::default(),
+        AdviceInputs::default(),
+        &mut host,
+        ExecutionOptions::default(),
+    )
+    .expect("execution failed");
+
+    assert_eq!(output.stack.get_element(0), Some(Felt::new_unchecked(0)));
 }
 
 #[test]
